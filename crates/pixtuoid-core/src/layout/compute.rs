@@ -834,7 +834,11 @@ pub(super) fn compute_waypoints(
                 y: couch_y,
             },
             kind: WaypointKind::Couch,
-            facing: Facing::South,
+            // SEATED facing: the sitter looks NORTH at the window (→ back_couch
+            // sprite). The APPROACH side is decoupled (Furniture::Couch uses
+            // ApproachSides::ALL — the agent walks up from the south/lounge,
+            // whose front is the window WALL); see decor.rs Couch row.
+            facing: Facing::North,
             room_id: None,
         })
         .collect();

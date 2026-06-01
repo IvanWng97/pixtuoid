@@ -1,6 +1,5 @@
 ---
 source: crates/pixtuoid/tests/layout_golden.rs
-assertion_line: 86
 expression: l.waypoints
 ---
 [
@@ -10,7 +9,7 @@ expression: l.waypoints
             y: 39,
         },
         kind: Couch,
-        facing: South,
+        facing: North,
         room_id: None,
     },
     Waypoint {
@@ -19,7 +18,7 @@ expression: l.waypoints
             y: 39,
         },
         kind: Couch,
-        facing: South,
+        facing: North,
         room_id: None,
     },
     Waypoint {
@@ -28,7 +27,7 @@ expression: l.waypoints
             y: 39,
         },
         kind: Couch,
-        facing: South,
+        facing: North,
         room_id: None,
     },
     Waypoint {

@@ -327,7 +327,14 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             occupies_pos: true,
             occludes_behind: None, // sitter occluded by the couch's own y-sort
             dwell: (20_000, 20_000),
-            approach: SEAT_APPROACH,
+            // ALL, NOT SEAT_APPROACH: the lounge couch's FRONT is the window
+            // WALL (not walkable, unlike the meeting sofa's table), so its open
+            // approach is the south/lounge — the side SEAT_APPROACH would exclude
+            // as the "back". Decoupling approach from the seated facing: the
+            // Waypoint's `facing` is the SEATED facing (North = looks at the
+            // window → back_couch sprite); the agent approaches from whatever
+            // reachable side is nearest its (always-south) desk.
+            approach: ApproachSides::ALL,
         },
         Furniture::Pantry => FurnitureDef {
             footprint: None, // runtime-sized — see obstacle_footprint

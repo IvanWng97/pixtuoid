@@ -9,7 +9,7 @@ expression: l.waypoints
             y: 24,
         },
         kind: Couch,
-        facing: South,
+        facing: North,
         room_id: None,
     },
     Waypoint {
@@ -18,7 +18,7 @@ expression: l.waypoints
             y: 24,
         },
         kind: Couch,
-        facing: South,
+        facing: North,
         room_id: None,
     },
     Waypoint {
@@ -27,7 +27,7 @@ expression: l.waypoints
             y: 24,
         },
         kind: Couch,
-        facing: South,
+        facing: North,
         room_id: None,
     },
     Waypoint {
