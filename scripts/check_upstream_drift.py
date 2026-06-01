@@ -1,0 +1,160 @@
+#!/usr/bin/env python3
+"""Upstream wire-format drift watch.
+
+pixtuoid decodes the CC and Codex CLI wire formats (hook event names, the
+subagent-dispatch tool name). Those names change upstream WITHOUT notice — the
+`Task` -> `Agent` rename shipped undocumented and silently disabled subagent
+suppression. This script verifies that the names we depend on still exist at the
+canonical upstream sources, so CI can flag a break before it reaches a user.
+
+It reads what we depend on directly from our own source (no snapshot file to rot)
+and compares against the live upstream:
+
+  * Codex hook events  -> `CODEX_EVENTS` in crates/pixtuoid/src/install/codex.rs
+                          vs the `HookEventName` enum in openai/codex protocol.rs
+  * CC dispatch tool   -> the known names in `make_tool_detail`
+                          vs the tool list in code.claude.com tools-reference
+
+Exit codes:
+  0  no drift
+  1  actionable drift (a name we depend on vanished, or a new upstream Codex
+     hook we neither register nor intentionally omit) -> open a tracking issue
+  2  could not check (network/HTTP error) -> transient, do NOT alarm
+
+See crates/pixtuoid-core/CLAUDE.md "Keeping the decode mapping current".
+"""
+
+from __future__ import annotations
+
+import pathlib
+import re
+import sys
+import urllib.request
+
+REPO = pathlib.Path(__file__).resolve().parent.parent
+
+CODEX_PROTOCOL_URL = (
+    "https://raw.githubusercontent.com/openai/codex/main/"
+    "codex-rs/protocol/src/protocol.rs"
+)
+CC_TOOLS_URL = "https://code.claude.com/docs/en/tools-reference.md"
+
+# Codex hook events we DELIBERATELY do not register — they are not agent
+# activity a visualizer cares about. A new upstream hook NOT in this set is
+# surfaced for review (it might be a lifecycle signal worth handling).
+CODEX_KNOWN_OMITTED = {"PreCompact", "PostCompact"}
+
+
+def fetch(url: str) -> str:
+    req = urllib.request.Request(url, headers={"User-Agent": "pixtuoid-drift-watch"})
+    with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310 (trusted hosts)
+        return resp.read().decode("utf-8", "replace")
+
+
+def read_codex_events() -> set[str]:
+    src = (REPO / "crates/pixtuoid/src/install/codex.rs").read_text()
+    m = re.search(r"const CODEX_EVENTS[^=]*=\s*&\[(.*?)\];", src, re.S)
+    if not m:
+        raise RuntimeError("could not locate CODEX_EVENTS in install/codex.rs")
+    return set(re.findall(r'"(\w+)"', m.group(1)))
+
+
+def read_dispatch_names() -> set[str]:
+    src = (REPO / "crates/pixtuoid-core/src/source/decoder.rs").read_text()
+    m = re.search(r"known_name\s*=\s*([^;]+);", src)
+    if not m:
+        raise RuntimeError("could not locate the dispatch known_name check in decoder.rs")
+    return set(re.findall(r'"(\w+)"', m.group(1)))
+
+
+def upstream_codex_hooks(text: str) -> set[str] | None:
+    m = re.search(r"enum HookEventName\s*\{(.*?)\}", text, re.S)
+    if not m:
+        return None
+    # variant identifiers (drop comments/attrs by keeping CamelCase words)
+    return set(re.findall(r"\b([A-Z][A-Za-z]+)\b", m.group(1)))
+
+
+def main() -> int:
+    breaking: list[str] = []
+    review: list[str] = []
+    errors: list[str] = []
+
+    # --- Codex hook events -------------------------------------------------
+    try:
+        ours = read_codex_events()
+        text = fetch(CODEX_PROTOCOL_URL)
+        upstream = upstream_codex_hooks(text)
+        if upstream is None:
+            breaking.append(
+                "Codex `HookEventName` enum not found at the pinned path "
+                "(codex-rs/protocol/src/protocol.rs) — upstream moved it; "
+                "update CODEX_PROTOCOL_URL / the parser."
+            )
+        else:
+            for ev in sorted(ours):
+                if ev not in upstream:
+                    breaking.append(
+                        f"Codex hook `{ev}` (registered in CODEX_EVENTS) is GONE "
+                        f"from upstream HookEventName — likely renamed; the decoder "
+                        f"will silently drop it."
+                    )
+            for ev in sorted(upstream - ours - CODEX_KNOWN_OMITTED):
+                review.append(
+                    f"new Codex hook `{ev}` upstream — we neither register nor "
+                    f"intentionally omit it (add a decoder arm + CODEX_EVENTS, or "
+                    f"add it to CODEX_KNOWN_OMITTED)."
+                )
+    except urllib.error.URLError as e:
+        errors.append(f"Codex source fetch failed (transient?): {e}")
+    except Exception as e:  # noqa: BLE001 — report any unexpected failure
+        errors.append(f"Codex check error: {e}")
+
+    # --- CC subagent-dispatch tool -----------------------------------------
+    try:
+        dispatch = read_dispatch_names()  # e.g. {"Task", "Agent"}
+        tools = fetch(CC_TOOLS_URL)
+        # The current dispatch tool must still appear in the tools reference.
+        # We don't require legacy names — only that at least one name we'd
+        # detect by-name is still the documented dispatch tool.
+        present = [n for n in dispatch if re.search(rf"`{re.escape(n)}`", tools)]
+        if not present:
+            breaking.append(
+                f"None of our known dispatch tool names {sorted(dispatch)} appear "
+                f"in CC tools-reference — the subagent tool was likely renamed "
+                f"again. Update make_tool_detail's known names. (Semantic "
+                f"subagent_type detection still works, but the breadcrumb/name "
+                f"fallback is stale.)"
+            )
+    except urllib.error.URLError as e:
+        errors.append(f"CC tools-reference fetch failed (transient?): {e}")
+    except Exception as e:  # noqa: BLE001
+        errors.append(f"CC check error: {e}")
+
+    # --- report ------------------------------------------------------------
+    out = ["# pixtuoid upstream wire-format drift report", ""]
+    if breaking:
+        out.append("## ⛔ Breaking drift — decoder will silently drop events")
+        out += [f"- {b}" for b in breaking]
+        out.append("")
+    if review:
+        out.append("## 🔎 New upstream events to review")
+        out += [f"- {r}" for r in review]
+        out.append("")
+    if errors:
+        out.append("## ⚠️ Could not verify (transient network/HTTP — not drift)")
+        out += [f"- {e}" for e in errors]
+        out.append("")
+    if not (breaking or review or errors):
+        out.append("✅ No drift. Every name we depend on is present upstream.")
+    print("\n".join(out))
+
+    if breaking or review:
+        return 1
+    if errors:
+        return 2
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,58 @@
+name: upstream-drift
+
+# Weekly watch for upstream CC/Codex wire-format renames (hook event names, the
+# subagent-dispatch tool). The Task -> Agent rename shipped undocumented and
+# silently disabled subagent suppression; this surfaces the next one before a
+# user hits it. See scripts/check_upstream_drift.py and the "Keeping the decode
+# mapping current" section in crates/pixtuoid-core/CLAUDE.md.
+
+on:
+  schedule:
+    - cron: "0 9 * * 1" # Mondays 09:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  drift:
+    name: upstream wire-format drift
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Check upstream drift
+        id: check
+        shell: bash
+        run: |
+          set +e
+          python3 scripts/check_upstream_drift.py | tee drift-report.md
+          echo "exit=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+
+      - name: Open or update tracking issue
+        if: steps.check.outputs.exit == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh label create upstream-drift --color FBCA04 \
+            --description "Upstream CLI wire-format drift" 2>/dev/null || true
+          num=$(gh issue list --label upstream-drift --state open \
+            --json number --jq '.[0].number // empty')
+          if [ -n "$num" ]; then
+            gh issue comment "$num" --body-file drift-report.md
+          else
+            gh issue create \
+              --title "Upstream CLI wire-format drift detected" \
+              --label upstream-drift \
+              --body-file drift-report.md
+          fi
+
+      - name: Note transient check failure
+        if: steps.check.outputs.exit == '2'
+        run: echo "::warning::upstream-drift could not verify (transient network/HTTP); see report above."
+
+      - name: Fail the run on confirmed drift
+        if: steps.check.outputs.exit == '1'
+        run: exit 1

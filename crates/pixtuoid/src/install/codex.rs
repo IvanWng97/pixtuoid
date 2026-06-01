@@ -358,4 +358,31 @@ command = "/old/pixtuoid-hook"
             "PIXTUOID_SOURCE=codex '/Users/Jane Doe/bin/pixtuoid-hook'"
         );
     }
+
+    // Internal-consistency guard: every hook event we REGISTER with Codex must
+    // have a decoder arm — otherwise it arrives at the shared socket and
+    // `decode_hook_payload` bails ("unsupported hook_event_name"), silently
+    // dropping it. This is exactly the class the SubagentStop bug fell into
+    // (registered but not decoded). The external drift-watch covers upstream
+    // renames; this covers our own registered-vs-decoded drift.
+    #[test]
+    fn every_registered_codex_event_decodes() {
+        use pixtuoid_core::source::decoder::decode_hook_payload;
+        for ev in CODEX_EVENTS {
+            // A complete-enough payload: `agent_id` satisfies SubagentStart/Stop;
+            // the rest is ignored by events that don't need it.
+            let payload = serde_json::json!({
+                "hook_event_name": ev,
+                "session_id": "sess",
+                "agent_id": "child",
+                "cwd": "/repo",
+                "_pixtuoid_source": "codex",
+            });
+            assert!(
+                decode_hook_payload(payload).is_ok(),
+                "registered Codex hook {ev:?} has no decoder arm — it would bail \
+                 as unsupported. Add an arm in pixtuoid-core source/decoder.rs."
+            );
+        }
+    }
 }

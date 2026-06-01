@@ -36,7 +36,8 @@ crates/
 └── pixtuoid-hook/      tiny shim CC invokes — stdin JSON → Unix socket, 200ms write timeout
 scripts/                preflight.sh (CI mirror), crop-snapshot.py (visual verification),
                         replay-fixture.sh (replay a captured source rollout fixture into a
-                        headless run via --codex-sessions-root, for eyeballing lifecycle)
+                        headless run via --codex-sessions-root, for eyeballing lifecycle),
+                        check_upstream_drift.py (weekly CI: CC/Codex wire-format rename watch)
 ```
 
 > Note: the `sprites/` directory (default / robot / skeleton character packs) lives under

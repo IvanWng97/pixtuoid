@@ -74,13 +74,14 @@ src/
 
 ## Keeping the decode mapping current (upstream drift)
 
-Tool names, hook-event names and transcript types are upstream wire contracts that change **without notice** (the `Task`→`Agent` rename shipped undocumented). Three defenses, in order of reliability:
+Tool names, hook-event names and transcript types are upstream wire contracts that change **without notice** (the `Task`→`Agent` rename shipped undocumented). Four defenses, in order of reliability:
 
 1. **Resilient detection (in code).** Prefer a *semantic* signal over a hardcoded name where one exists — e.g. `make_tool_detail` keys subagent dispatch on the stable `subagent_type` input field, not the tool name. This survives a rename by construction.
 2. **Self-monitoring from the real stream (in code).** The decoders already see ground truth. An unrecognized `hook_event_name` `bail!`s + `warn!`s; a dispatch under an unknown name logs a `debug!` breadcrumb. These surface drift the moment it appears in a user's own usage — no network, no upstream-layout dependency.
-3. **Upstream watch (CI follow-up, not yet built).** Pin + diff the machine-readable sources on a schedule:
-   - **Codex** (open Rust): `codex-rs/protocol/src/protocol.rs` — the `HookEventName` enum (hook names) and `EventMsg`/`RolloutItem` enums (transcript `type`s). Raw: `raw.githubusercontent.com/openai/codex/main/codex-rs/protocol/src/protocol.rs`. Releases are frequent; tags are `rust-vX.Y.Z`.
-   - **CC** (closed binary — no source to grep): diff the docs markdown `code.claude.com/docs/en/hooks.md` (hook names) and `…/tools-reference.md` (authoritative tool-name list), plus `raw.githubusercontent.com/anthropics/claude-code/main/CHANGELOG.md` / `releases.atom`. Tool names like `Agent` are NOT schematized upstream, so defense #2 is the real backstop for CC.
+3. **Internal consistency test.** `every_registered_codex_event_decodes` / `every_registered_cc_event_decodes` (in `install/{codex,claude}.rs`) assert that every hook event we *register* has a decoder arm — catching the *registered-but-not-decoded* class (the original SubagentStop bug) at `cargo test` time.
+4. **Upstream watch (CI).** `scripts/check_upstream_drift.py` + `.github/workflows/upstream-drift.yml` (weekly) read the names we depend on directly from our source and compare to live upstream; on a vanished name or a new unhandled Codex hook it opens a deduped `upstream-drift` issue. Sources:
+   - **Codex** (open Rust): `codex-rs/protocol/src/protocol.rs` `HookEventName` enum (raw on `main`). `PreCompact`/`PostCompact` are intentionally omitted (`CODEX_KNOWN_OMITTED` in the script) — not agent activity.
+   - **CC** (closed binary — no source to grep): the docs markdown `code.claude.com/docs/en/tools-reference.md` (authoritative tool-name list). Tool names like `Agent` are NOT schematized upstream, so defense #2 is the real backstop for CC.
 
 ## When refactoring
 

@@ -311,4 +311,25 @@ mod tests {
         let out = merge_uninstall(user).unwrap();
         assert!(!out.changed, "no managed entries → semantic no-op");
     }
+
+    // Internal-consistency guard (mirror of the Codex one): every hook event we
+    // REGISTER with Claude Code must have a decoder arm, else it bails at the
+    // shared socket and is silently dropped.
+    #[test]
+    fn every_registered_cc_event_decodes() {
+        use pixtuoid_core::source::decoder::decode_hook_payload;
+        for ev in EVENTS {
+            let payload = serde_json::json!({
+                "hook_event_name": ev,
+                "session_id": "sess",
+                "transcript_path": "/p/sess.jsonl",
+                "cwd": "/repo",
+            });
+            assert!(
+                decode_hook_payload(payload).is_ok(),
+                "registered CC hook {ev:?} has no decoder arm — it would bail as \
+                 unsupported. Add an arm in pixtuoid-core source/decoder.rs."
+            );
+        }
+    }
 }

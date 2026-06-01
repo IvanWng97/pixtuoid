@@ -10,3 +10,5 @@ Cargo.lock.bak
 docs/superpowers/
 .claude/worktrees/
 docs/superpowers/
+drift-report.md
+__pycache__/
