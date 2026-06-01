@@ -2144,6 +2144,43 @@ mod tests {
     }
 
     #[test]
+    fn seated_foot_cell_settles_exactly_on_the_render_anchor() {
+        // The seat analog of the desk identity: for every occupies_pos furniture,
+        // the WALKING sprite anchor at seated_foot_cell(S) must equal the SEATED
+        // render anchor at pos — so the post-A* settle ends with zero pop on
+        // EVERY arrival side (back_couch render for couch/sofa, waypoint render
+        // for stand). This is the correctness lock for the whole convergence.
+        use pixtuoid_core::layout::{seated_foot_cell, WaypointKind};
+        for pos in [
+            Point { x: 40, y: 30 },
+            Point { x: 100, y: 60 },
+            Point { x: 6, y: 8 }, // near-origin: saturating_sub edge
+        ] {
+            for w in [CHARACTER_SPRITE_W, 10] {
+                for kind in [WaypointKind::Couch, WaypointKind::MeetingSofa] {
+                    let s = seated_foot_cell(kind, pos).expect("occupies_pos seat");
+                    assert_eq!(
+                        walking_anchor(s, w),
+                        back_couch_anchor(pos, w),
+                        "{kind:?}: walking_anchor(S={s:?}) must equal back_couch_anchor(pos={pos:?}) w={w}",
+                    );
+                }
+                let s =
+                    seated_foot_cell(WaypointKind::MeetingStand, pos).expect("occupies_pos seat");
+                assert_eq!(
+                    walking_anchor(s, w),
+                    waypoint_anchor(pos, w),
+                    "MeetingStand: walking_anchor(S={s:?}) must equal waypoint_anchor(pos={pos:?}) w={w}",
+                );
+            }
+            // Obstacles have no fixed seat — their sprite renders AT the approach
+            // cell, so seated_foot_cell is None.
+            assert_eq!(seated_foot_cell(WaypointKind::Pantry, pos), None);
+            assert_eq!(seated_foot_cell(WaypointKind::VendingMachine, pos), None);
+        }
+    }
+
+    #[test]
     fn desk_z_key_is_footprint_front_plus_overhang() {
         // The DeskCubicle z-sort baseline is `desk.y + footprint.h +
         // DESK_FRONT_OVERHANG` — footprint-front-derived (consistent with the

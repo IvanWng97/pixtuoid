@@ -565,6 +565,39 @@ pub fn desk_walk_anchor(desk: Point) -> Point {
     }
 }
 
+/// The cell where a seated agent's WALK visually ends so the seated sprite
+/// renders with no arrival jump — the inverse of the render anchor under
+/// [`WALKING_Y_OFF`], solving `walking_anchor(S) == render_anchor(pos)`.
+///
+/// `Some` only for `occupies_pos` furniture (the agent sits/stands ON `pos`);
+/// `None` for obstacles, whose sprite renders AT the approach cell, not at a
+/// fixed seat. The home desk's analog is [`desk_walk_anchor`] (its render is
+/// `seated_anchor`, not a `WaypointKind`), so the unified post-A\* settle reads
+/// `S` from here for waypoints and from `desk_walk_anchor` for the desk — same
+/// mechanism, two S sources. The settle walks `approach_point → S`; when `S` is
+/// blocked (meeting sofa, desk) that final segment is the "sit down" motion, not
+/// pathfinding.
+pub fn seated_foot_cell(kind: WaypointKind, pos: Point) -> Option<Point> {
+    if !furniture_def(kind.furniture()).occupies_pos {
+        return None;
+    }
+    Some(match kind {
+        // back_couch render (`pos.y − SEAT_RENDER_Y_OFF`): S is
+        // `WALKING_Y_OFF − SEAT_RENDER_Y_OFF` px south of `pos`, the one cell
+        // where `walking_anchor` lands exactly on `back_couch_anchor`.
+        WaypointKind::Couch | WaypointKind::MeetingSofa => Point {
+            x: pos.x,
+            y: pos.y + (WALKING_Y_OFF - SEAT_RENDER_Y_OFF),
+        },
+        // waypoint render (`== walking_anchor`): S == pos.
+        WaypointKind::MeetingStand => pos,
+        // `occupies_pos` is exactly {Couch, MeetingSofa, MeetingStand} (guarded
+        // by `occupies_pos_is_exactly_the_seat_kinds`); the early return above
+        // already handled every obstacle kind.
+        _ => pos,
+    })
+}
+
 /// Which way a waypoint occupant faces. Drives sprite choice (back vs
 /// front view) and horizontal mirroring at render time. Most waypoints
 /// are `South` (facing the viewer / facing-neutral); meeting-room slots
