@@ -92,4 +92,17 @@ pub static CYBERPUNK: Theme = Theme {
         neon_star: Rgb(0, 255, 200),
         neon_ticker: Rgb(120, 60, 255),
     },
+    appliance: ApplianceColors {
+        vending_body: Rgb(45, 35, 60),
+        vending_panel: Rgb(255, 0, 200),
+        vending_drinks: [Rgb(60, 120, 255), Rgb(255, 60, 180), Rgb(255, 140, 0), Rgb(0, 255, 140)],
+        vending_trim: Rgb(180, 140, 80),
+        vending_dark: Rgb(15, 12, 25),
+        printer_body: Rgb(200, 190, 230),
+        printer_top: Rgb(50, 40, 75),
+        printer_glass: Rgb(100, 180, 220),
+        printer_paper: Rgb(250, 245, 255),
+        printer_tray: Rgb(160, 150, 190),
+        coats: [Rgb(60, 120, 255), Rgb(255, 60, 180), Rgb(0, 255, 140)],
+    },
 };

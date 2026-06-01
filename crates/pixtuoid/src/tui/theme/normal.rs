@@ -92,4 +92,17 @@ pub static NORMAL: Theme = Theme {
         neon_star: Rgb(255, 100, 200),
         neon_ticker: Rgb(180, 220, 255),
     },
+    appliance: ApplianceColors {
+        vending_body: Rgb(50, 55, 65),
+        vending_panel: Rgb(180, 60, 60),
+        vending_drinks: [Rgb(220, 50, 50), Rgb(50, 160, 50), Rgb(50, 80, 200), Rgb(220, 180, 40)],
+        vending_trim: Rgb(180, 170, 100),
+        vending_dark: Rgb(40, 42, 48),
+        printer_body: Rgb(220, 220, 225),
+        printer_top: Rgb(60, 60, 68),
+        printer_glass: Rgb(130, 180, 200),
+        printer_paper: Rgb(245, 245, 240),
+        printer_tray: Rgb(180, 180, 185),
+        coats: [Rgb(200, 60, 60), Rgb(80, 120, 200), Rgb(240, 240, 240)],
+    },
 };

@@ -92,4 +92,17 @@ pub static DRACULA: Theme = Theme {
         neon_star: Rgb(255, 121, 198),
         neon_ticker: Rgb(139, 233, 253),
     },
+    appliance: ApplianceColors {
+        vending_body: Rgb(45, 47, 62),
+        vending_panel: Rgb(189, 147, 249),
+        vending_drinks: [Rgb(139, 233, 253), Rgb(255, 121, 198), Rgb(255, 184, 108), Rgb(80, 250, 123)],
+        vending_trim: Rgb(200, 150, 80),
+        vending_dark: Rgb(25, 26, 35),
+        printer_body: Rgb(230, 228, 240),
+        printer_top: Rgb(65, 67, 85),
+        printer_glass: Rgb(98, 114, 164),
+        printer_paper: Rgb(240, 238, 248),
+        printer_tray: Rgb(140, 138, 160),
+        coats: [Rgb(255, 121, 198), Rgb(139, 233, 253), Rgb(248, 248, 242)],
+    },
 };

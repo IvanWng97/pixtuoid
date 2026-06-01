@@ -528,14 +528,9 @@ pub(super) fn paint_drawable(
             }
         }
         DrawableKind::VendingMachine { pos } => {
-            let body = Rgb(50, 55, 65);
-            let panel = Rgb(180, 60, 60);
-            let drinks = [
-                Rgb(220, 50, 50),
-                Rgb(50, 160, 50),
-                Rgb(50, 80, 200),
-                Rgb(220, 180, 40),
-            ];
+            let body = theme.appliance.vending_body;
+            let panel = theme.appliance.vending_panel;
+            let drinks = theme.appliance.vending_drinks;
             let vx = pos.x.saturating_sub(2);
             let vy = pos.y.saturating_sub(3);
             for dy in 0..6u16 {
@@ -553,9 +548,9 @@ pub(super) fn paint_drawable(
                                 body
                             }
                         } else if dy == 4 && dx == 2 {
-                            Rgb(180, 170, 100)
+                            theme.appliance.vending_trim
                         } else if dy == 5 {
-                            Rgb(40, 42, 48)
+                            theme.appliance.vending_dark
                         } else {
                             body
                         };
@@ -565,11 +560,11 @@ pub(super) fn paint_drawable(
             }
         }
         DrawableKind::Printer { pos } => {
-            let body_white = Rgb(220, 220, 225);
-            let top_dark = Rgb(60, 60, 68);
-            let glass = Rgb(130, 180, 200);
-            let paper = Rgb(245, 245, 240);
-            let tray = Rgb(180, 180, 185);
+            let body_white = theme.appliance.printer_body;
+            let top_dark = theme.appliance.printer_top;
+            let glass = theme.appliance.printer_glass;
+            let paper = theme.appliance.printer_paper;
+            let tray = theme.appliance.printer_tray;
             let px0 = pos.x.saturating_sub(2);
             let py0 = pos.y.saturating_sub(2);
             for dy in 0..4u16 {
@@ -634,7 +629,7 @@ pub(super) fn paint_drawable(
             let (cx, cy) = (*cx, *cy);
             let pole = theme.furniture.wood_trim;
             let base = theme.furniture.wood_top;
-            let coats = [Rgb(200, 60, 60), Rgb(80, 120, 200), Rgb(240, 240, 240)];
+            let coats = theme.appliance.coats;
             // Pole (1px wide, 8 tall).
             for dy in 0..8u16 {
                 let py = cy + dy;

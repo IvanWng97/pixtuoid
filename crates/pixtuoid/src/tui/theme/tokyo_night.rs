@@ -92,4 +92,17 @@ pub static TOKYO_NIGHT: Theme = Theme {
         neon_star: Rgb(247, 118, 142),
         neon_ticker: Rgb(125, 207, 255),
     },
+    appliance: ApplianceColors {
+        vending_body: Rgb(36, 40, 59),
+        vending_panel: Rgb(122, 162, 247),
+        vending_drinks: [Rgb(122, 162, 247), Rgb(125, 207, 255), Rgb(158, 206, 106), Rgb(224, 175, 104)],
+        vending_trim: Rgb(127, 115, 80),
+        vending_dark: Rgb(18, 18, 28),
+        printer_body: Rgb(192, 202, 230),
+        printer_top: Rgb(36, 40, 59),
+        printer_glass: Rgb(125, 207, 255),
+        printer_paper: Rgb(245, 245, 240),
+        printer_tray: Rgb(110, 120, 150),
+        coats: [Rgb(122, 162, 247), Rgb(247, 118, 142), Rgb(220, 220, 225)],
+    },
 };

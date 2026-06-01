@@ -100,4 +100,17 @@ pub static CATPPUCCIN: Theme = Theme {
         neon_star: Rgb(245, 194, 231),
         neon_ticker: Rgb(137, 220, 235),
     },
+    appliance: ApplianceColors {
+        vending_body: Rgb(55, 56, 74),
+        vending_panel: Rgb(137, 180, 250),
+        vending_drinks: [Rgb(250, 179, 135), Rgb(116, 199, 236), Rgb(166, 227, 161), Rgb(203, 166, 247)],
+        vending_trim: Rgb(210, 180, 160),
+        vending_dark: Rgb(24, 24, 37),
+        printer_body: Rgb(205, 214, 244),
+        printer_top: Rgb(69, 71, 90),
+        printer_glass: Rgb(148, 226, 213),
+        printer_paper: Rgb(245, 240, 235),
+        printer_tray: Rgb(137, 140, 165),
+        coats: [Rgb(250, 179, 135), Rgb(137, 180, 250), Rgb(203, 166, 247)],
+    },
 };

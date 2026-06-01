@@ -34,6 +34,7 @@ pub struct Theme {
     pub effects: EffectColors,
     pub ui: UiColors,
     pub tool_glow: ToolGlowColors,
+    pub appliance: ApplianceColors,
 }
 
 #[derive(Debug, Clone)]
@@ -137,6 +138,36 @@ pub struct UiColors {
     pub neon_ticker: Rgb,
 }
 
+/// Corridor appliance colors (vending machine, printer, coat rack). These were
+/// hardcoded RGB literals in `pixel_painter/drawable.rs`, so the appliances
+/// rendered with the NORMAL theme's palette on every theme — clashing on the
+/// dark/neon/pastel ones. Each theme now supplies its own harmonized set.
+#[derive(Debug, Clone)]
+pub struct ApplianceColors {
+    /// Vending machine chassis (the dark box body).
+    pub vending_body: Rgb,
+    /// Vending front sign / accent strip — the theme's signature accent.
+    pub vending_panel: Rgb,
+    /// Four distinct drink-bottle colors behind the glass.
+    pub vending_drinks: [Rgb; 4],
+    /// Warm small detail (coin-slot trim).
+    pub vending_trim: Rgb,
+    /// Darkest recess / slot.
+    pub vending_dark: Rgb,
+    /// Printer chassis — a light neutral.
+    pub printer_body: Rgb,
+    /// Printer lid / top — darker.
+    pub printer_top: Rgb,
+    /// Scanner glass — a cool tint.
+    pub printer_glass: Rgb,
+    /// Paper stack — near-white.
+    pub printer_paper: Rgb,
+    /// Output tray — mid neutral.
+    pub printer_tray: Rgb,
+    /// Three hanging coats on the coat rack.
+    pub coats: [Rgb; 3],
+}
+
 pub static ALL_THEMES: &[&Theme] = &[
     &NORMAL,
     &CYBERPUNK,
@@ -182,5 +213,40 @@ mod tests {
     #[test]
     fn light_themes_marked_light() {
         assert_eq!(NORMAL.kind, ThemeKind::Light);
+    }
+
+    // Every theme's appliance palette must keep the appliances LEGIBLE — the
+    // bug was a hardcoded normal-theme set on all themes, so this guards both
+    // that each theme supplies its own AND that the supplied set reads right.
+    #[test]
+    fn appliance_palette_is_legible_for_every_theme() {
+        fn lum(c: Rgb) -> u32 {
+            c.0 as u32 + c.1 as u32 + c.2 as u32
+        }
+        for t in ALL_THEMES {
+            let a = &t.appliance;
+            // Printer: paper is the lightest, the lid/top the darkest — so the
+            // scanner + paper read against the chassis in every theme.
+            assert!(
+                lum(a.printer_paper) > lum(a.printer_body)
+                    && lum(a.printer_body) > lum(a.printer_top),
+                "{}: printer must layer paper > body > top by luminance",
+                t.name
+            );
+            // Vending: the accent panel + each drink must be visible against the
+            // dark chassis (not collapse into it).
+            assert_ne!(a.vending_panel, a.vending_body, "{}: vending panel invisible", t.name);
+            for (i, d) in a.vending_drinks.iter().enumerate() {
+                assert_ne!(*d, a.vending_body, "{}: drink {i} invisible on body", t.name);
+            }
+            // The chassis is darker than its brightest drink (the box reads as a
+            // box, the bottles pop).
+            let brightest_drink = a.vending_drinks.iter().map(|c| lum(*c)).max().unwrap();
+            assert!(
+                lum(a.vending_body) < brightest_drink,
+                "{}: vending body should be darker than its drinks",
+                t.name
+            );
+        }
     }
 }
