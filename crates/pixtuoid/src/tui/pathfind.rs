@@ -482,6 +482,42 @@ mod tests {
     }
 
     #[test]
+    fn every_wander_waypoint_is_routable_on_the_coarse_grid() {
+        // Teleport guard (#22): a waypoint A* can't reach on the coarse 4×4 grid
+        // makes an idle agent SNAP/teleport there — find_path returns None and
+        // route() falls back to a straight [from,to] line. The core connectivity
+        // sweep only checks full-PIXEL BFS from the door; this checks COARSE-grid
+        // reachability of EVERY emitted wander destination (meeting seats, pantry,
+        // couch, AND the pod-aisle decor — phone booth / standing desk / vending /
+        // printer, which also pins the INTER_POD_AISLE_X width: narrow the aisle
+        // and the decor disconnects the grid here). Across seeds × sizes incl. the
+        // 96×70 floor. It caught the narrow-meeting-room teleport (now gated).
+        use crate::tui::layout::MAX_VISIBLE_DESKS;
+        let overlay = OccupancyOverlay::new();
+        let sizes = [(96u16, 70u16), (128, 80), (160, 120), (192, 160), (240, 160)];
+        for (w, h) in sizes {
+            for seed in 0..5u64 {
+                let Some(l) = Layout::compute_with_seed(w, h, MAX_VISIBLE_DESKS, seed) else {
+                    continue;
+                };
+                let Some(origin) = l.door_threshold else {
+                    continue;
+                };
+                for wp in &l.waypoints {
+                    assert!(
+                        find_path(&l.walkable, &overlay, None, origin, wp.pos).is_some(),
+                        "seed {seed} {w}x{h}: {:?} at ({},{}) is unreachable on the coarse \
+                         routing grid — an idle agent sent there would teleport",
+                        wp.kind,
+                        wp.pos.x,
+                        wp.pos.y
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn router_caches_until_overlay_changes() {
         let l = make_layout();
         let mut router = AStarRouter::new();

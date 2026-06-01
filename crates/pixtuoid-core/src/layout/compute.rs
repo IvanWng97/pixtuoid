@@ -177,7 +177,18 @@ pub(super) fn compute_with_seed(
     );
 
     const SOFA_H: u16 = 7;
-    let mut meeting_sofas = if let Some(mr) = meeting_room {
+    // A meeting room narrower than this can't host the 16-px-wide sofa body
+    // (+ its 2-px pad) with enough walkable margin for the coarse 4×4 router to
+    // reach the seats buried in the sofa — find_path returns None and an idle
+    // agent sent there TELEPORTS (route() falls back to a straight line). Below
+    // it the room degrades to bare floor (no sofa/table/seats), the same
+    // graceful degradation the dense floor uses when too short. The threshold
+    // is validated by the routability sweep
+    // `meeting_and_pantry_waypoints_are_routable_on_the_coarse_grid`.
+    const MEETING_FURNITURE_MIN_W: u16 = 30;
+    let room_fits_furniture =
+        |mr: &Bounds| mr.width >= MEETING_FURNITURE_MIN_W && mr.height >= SOFA_H * 2;
+    let mut meeting_sofas = if let Some(mr) = meeting_room.filter(&room_fits_furniture) {
         let cx = mr.x + mr.width / 2;
         let south_y = (mr.y + pct(mr.height, 80)).min(mr.y + mr.height.saturating_sub(SOFA_H));
         vec![
@@ -191,6 +202,7 @@ pub(super) fn compute_with_seed(
         vec![]
     };
     let mut meeting_table_vec: Vec<Point> = meeting_room
+        .filter(&room_fits_furniture)
         .map(|mr| Point {
             x: mr.x + mr.width / 2,
             y: mr.y + mr.height / 2,
@@ -198,7 +210,7 @@ pub(super) fn compute_with_seed(
         .into_iter()
         .collect();
     // Second meeting room furniture (dense layout).
-    if let Some(mr2) = meeting_room_2 {
+    if let Some(mr2) = meeting_room_2.filter(&room_fits_furniture) {
         let cx2 = mr2.x + mr2.width / 2;
         let south2 = (mr2.y + pct(mr2.height, 80)).min(mr2.y + mr2.height.saturating_sub(SOFA_H));
         meeting_sofas.push(Point {
