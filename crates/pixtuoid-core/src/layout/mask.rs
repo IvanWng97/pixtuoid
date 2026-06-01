@@ -69,13 +69,43 @@ pub(super) fn build_walkable_mask(
     //   • vertical walls (N-S) are seen EDGE-ON — WALL_THICK_V px thin footprint
     //     (the renderer draws it 3 px wide; visual-wider-than-footprint per the
     //     top-down ground-projection rule).
+    // Wall padding is ASYMMETRIC by orientation — driven by the coarse 4×4
+    // router grid (`pathfind::cell_walkable`: a cell is walkable when ≥8 of its
+    // 16 px are open), NOT by clearance:
+    //   • HORIZONTAL (E-W) walls are WALL_THICK_H=6 px tall. 6 contiguous blocked
+    //     px already fill a routing cell, so the wall is impassable with pad=0 —
+    //     and you stand FLUSH against its south face, so any pad is pure red bloat
+    //     (a 6px wall read as 10px). pad=0.
+    //   • VERTICAL (N-S) walls are WALL_THICK_V=1 px edge-on (top-down ground
+    //     projection, invariant #6). A 1px-wide blocked strip is INVISIBLE to the
+    //     coarse grid — every straddling cell keeps ≥12/16 px walkable, so A*
+    //     routes STRAIGHT THROUGH the wall. It needs OBSTACLE_PAD_PX (→5px blocked)
+    //     to drive the wall's whole cell-column under the threshold. This is the
+    //     original design: DOOR_GAP_V=14 is sized for "≥10px effective gap after
+    //     [this] padding" (see compute_room_walls). The 1px FOOTPRINT is unchanged
+    //     (characters still stand right next to the 3px visual); the pad is a
+    //     routing-only clearance band, not a wider wall.
     for (start, end) in room_walls {
         if start.x == end.x {
+            let seg_top = start.y.min(end.y);
+            let seg_bot = start.y.max(end.y);
+            // Mirror the renderer's stitch_vertical_wall: a segment whose top
+            // is at top_margin plugs into the north window band — but the band
+            // mask now ends WALL_BAND_TO_TOP_MARGIN px higher (the freed carpet
+            // apron). Raise the wall's top to meet it, or a walkable slot opens
+            // at the wall's top and A* threads between the rooms there (the wall
+            // is DRAWN connecting to the band but the mask wouldn't block it).
+            // Regression: vertical_wall_is_impassable_except_through_the_door.
+            let seg_top = if seg_top == top_margin {
+                top_margin.saturating_sub(WALL_BAND_TO_TOP_MARGIN)
+            } else {
+                seg_top
+            };
             mask.mark_blocked(
                 start.x,
-                start.y.min(end.y),
+                seg_top,
                 WALL_THICK_V,
-                start.y.abs_diff(end.y) + 1,
+                seg_bot - seg_top + 1,
                 OBSTACLE_PAD_PX,
             );
         } else {
@@ -84,7 +114,7 @@ pub(super) fn build_walkable_mask(
                 start.y,
                 start.x.abs_diff(end.x) + 1,
                 WALL_THICK_H,
-                OBSTACLE_PAD_PX,
+                0,
             );
         }
     }
@@ -222,8 +252,13 @@ pub(super) fn build_walkable_mask(
     // the furniture table are obstacles (the whiteboard); the rest are flush
     // against the wall (footprint None) and stamp nothing.
     for (kind, pos) in wall_decor {
+        // pad=1 (not OBSTACLE_PAD_PX=2): the only WallDecor with a footprint is
+        // the rolling whiteboard — an elevated board whose 10px wheel-base
+        // overhangs nothing solid, so a 2px clearance band on every side just
+        // inflated the blocked rect back to the 14px board width (hiding the
+        // footprint shrink). Matches the pod-decor whiteboard's pad.
         if let Some((w, h)) = furniture_def(kind.furniture()).footprint {
-            mask.mark_blocked(pos.x, pos.y, w, h, OBSTACLE_PAD_PX);
+            mask.mark_blocked(pos.x, pos.y, w, h, 1);
         }
     }
 

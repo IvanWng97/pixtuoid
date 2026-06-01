@@ -441,6 +441,47 @@ mod tests {
     }
 
     #[test]
+    fn vertical_wall_is_impassable_except_through_the_door() {
+        // Regression: a vertical (N-S) room divider has a 1px walkable
+        // footprint (WALL_THICK_V, edge-on top-down rule). With NO clearance
+        // pad that 1px strip is invisible to the coarse 4×4 router — only
+        // 1 of a cell's 4 columns is blocked, so the cell keeps ≥12/16 px
+        // walkable and stays "walkable", letting A* route STRAIGHT THROUGH
+        // the wall. OBSTACLE_PAD_PX drives the wall's whole cell-column under
+        // the threshold; this test pins that the wall is a real barrier.
+        let l = make_layout();
+        let overlay = OccupancyOverlay::new();
+        let (start, end) = l
+            .room_walls
+            .iter()
+            .copied()
+            .find(|(s, e)| s.x == e.x)
+            .expect("layout has a vertical wall");
+        let wall_x = start.x;
+        // A y inside the wall body, near its top — clear of the mid door gap.
+        let y = start.y.min(end.y) + 3;
+        let from = Point {
+            x: wall_x.saturating_sub(12),
+            y,
+        };
+        let to = Point { x: wall_x + 12, y };
+        let path = find_path(&l.walkable, &overlay, None, from, to)
+            .expect("rooms stay connected through the door gap");
+        let direct = crate::tui::pose::octile_distance(from, to);
+        let routed: u32 = path
+            .windows(2)
+            .map(|w| crate::tui::pose::octile_distance(w[0], w[1]))
+            .sum();
+        // A straight crossing is ~24px; detouring through the mid door is far
+        // longer. A passable wall would yield a near-straight path (≈ direct).
+        assert!(
+            routed > direct * 2,
+            "expected a detour around the wall (routed {routed} vs direct {direct}); \
+             a near-direct path means A* crossed the wall. path={path:?}"
+        );
+    }
+
+    #[test]
     fn router_caches_until_overlay_changes() {
         let l = make_layout();
         let mut router = AStarRouter::new();
