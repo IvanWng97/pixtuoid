@@ -42,8 +42,12 @@ src/
 │                       mask.rs (build_walkable_mask — stamps each obstacle via stamp_anchored/anchored_top_left
 │                         [no inline origin math]; WALL_THICK_H/V wall footprints; pantry south-strip +
 │                         meeting-furniture-too-narrow gate are the documented exceptions),
-│                       approach.rs (stand_point + walk_target — the walkable cell an agent stands/approaches at,
-│                         on the side nearest its desk, filtered by FurnitureDef.approach (ApproachSides))
+│                       approach.rs (stand_point [obstacle render anchor] + approach_point [A*'s goal] +
+│                         seated_foot_cell [the seat's render-anchor inverse] — the walkable cell an agent
+│                         stands/approaches at, on the reachable allowed side nearest its desk, filtered by
+│                         FurnitureDef.approach (ApproachSides) AND ReachSet),
+│                       reach.rs (ReachSet — coarse-cell BFS over the WalkableMask mirroring the tui A* grid
+│                         coarsening; reaches(p) ⇒ A* routable, so approach_point never targets a walled-off cell)
 ├── physics.rs          pure walk-pace physics (no terminal/router deps): WalkIntent, WalkProfile,
 │                       walk_profile (trapezoidal/triangular kinematics), walk_progress (t_x1000),
 │                       walk_arrived, speed_mult, pause_ms_for; constants: V_CRUISE_COMMUTE=0.36,
