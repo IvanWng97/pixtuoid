@@ -215,6 +215,7 @@ fn main() -> Result<()> {
             theme,
             args.floor_seed,
             anim_skip_ms,
+            args.debug_walkable,
         )?;
         println!("wrote {}", args.out.display());
         return Ok(());
@@ -752,6 +753,7 @@ fn save_as_gif(
     theme: &pixtuoid::tui::theme::Theme,
     floor_seed: u64,
     skip_ms: u64,
+    debug_walkable: bool,
 ) -> Result<()> {
     let frame_count = (duration_secs * fps) as usize;
     let frame_ms = 1000 / fps.max(1);
@@ -786,7 +788,7 @@ fn save_as_gif(
             light: &mut light,
             mouse_pos: None,
             pinned_agent: None,
-            debug_walkable: false,
+            debug_walkable,
             ticker: &ticker,
             theme,
             theme_picker: None,
