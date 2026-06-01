@@ -15,30 +15,39 @@ use crate::tui::motion::MotionState;
 use crate::tui::pathfind::Router;
 use crate::tui::pose::{self, Pose};
 
-pub(super) fn seated_anchor(desk: Point) -> Point {
+/// Default character sprite width (the bundled pack is 8×12). Used to anchor
+/// LABELS (`character_anchor`), where a custom pack's true width isn't threaded
+/// and ±1px doesn't matter; the sprite BLIT sites pass the real `frame.width`.
+pub(super) const CHARACTER_SPRITE_W: u16 = 8;
+
+// All anchor fns center the sprite horizontally on `sprite_w` — the pack's
+// character width (8 for the bundled pack, 10 for the robot pack). The vertical
+// pose offsets (8/12/7) are NOT sprite height: both packs are 12px tall, so they
+// stay fixed. Passing the real width keeps a non-8-wide pack centered.
+pub(super) fn seated_anchor(desk: Point, sprite_w: u16) -> Point {
     Point {
-        x: desk.x + DESK_W.saturating_sub(8) / 2,
+        x: desk.x + DESK_W.saturating_sub(sprite_w) / 2,
         y: desk.y.saturating_sub(8),
     }
 }
 
-pub(super) fn standing_at_desk_anchor(desk: Point) -> Point {
+pub(super) fn standing_at_desk_anchor(desk: Point, sprite_w: u16) -> Point {
     Point {
-        x: desk.x + DESK_W.saturating_sub(8) / 2,
+        x: desk.x + DESK_W.saturating_sub(sprite_w) / 2,
         y: desk.y.saturating_sub(12),
     }
 }
 
-pub(super) fn walking_anchor(p: Point) -> Point {
+pub(super) fn walking_anchor(p: Point, sprite_w: u16) -> Point {
     Point {
-        x: p.x.saturating_sub(4),
+        x: p.x.saturating_sub(sprite_w / 2),
         y: p.y.saturating_sub(12),
     }
 }
 
-pub(super) fn waypoint_anchor(wp: Point) -> Point {
+pub(super) fn waypoint_anchor(wp: Point, sprite_w: u16) -> Point {
     Point {
-        x: wp.x.saturating_sub(4),
+        x: wp.x.saturating_sub(sprite_w / 2),
         y: wp.y.saturating_sub(12),
     }
 }
@@ -79,9 +88,9 @@ pub(super) fn with_breath(
 /// because back_couch.sprite has no transparent head/face area — its hair
 /// extends across all top rows, so positioning it lower would put the
 /// character's "head" overlapping the couch back row.
-pub(super) fn back_couch_anchor(wp: Point) -> Point {
+pub(super) fn back_couch_anchor(wp: Point, sprite_w: u16) -> Point {
     Point {
-        x: wp.x.saturating_sub(4),
+        x: wp.x.saturating_sub(sprite_w / 2),
         y: wp.y.saturating_sub(7),
     }
 }
@@ -134,9 +143,14 @@ pub(in crate::tui) fn character_anchor(
 ) -> Option<Point> {
     let desk = *layout.home_desks.get(agent.desk_index)?;
     let pose = pose::derive_with_routing(agent, now, layout, router, overlay, history, motion)?;
+    // Labels anchor off the DEFAULT character width — a custom pack's true
+    // width isn't threaded here and ±1px doesn't matter for a text label.
+    let w = CHARACTER_SPRITE_W;
     let anchor = match pose {
-        Pose::SeatedIdle | Pose::SeatedThinking | Pose::SeatedTyping { .. } => seated_anchor(desk),
-        Pose::StandingAtDesk => standing_at_desk_anchor(desk),
+        Pose::SeatedIdle | Pose::SeatedThinking | Pose::SeatedTyping { .. } => {
+            seated_anchor(desk, w)
+        }
+        Pose::StandingAtDesk => standing_at_desk_anchor(desk, w),
         Pose::AtWaypoint { wp, kind } => {
             let wp_obj = layout.waypoints.get(wp)?;
             // Anchor off the resolved stand cell (same `desk` origin as the
@@ -151,14 +165,14 @@ pub(in crate::tui) fn character_anchor(
                 wp_obj.facing,
             );
             match kind {
-                WaypointKind::Couch | WaypointKind::MeetingSofa => back_couch_anchor(stand),
-                _ => waypoint_anchor(stand),
+                WaypointKind::Couch | WaypointKind::MeetingSofa => back_couch_anchor(stand, w),
+                _ => waypoint_anchor(stand, w),
             }
         }
-        Pose::AimlessAt { dest } => waypoint_anchor(dest),
+        Pose::AimlessAt { dest } => waypoint_anchor(dest, w),
         Pose::Walking {
             from, to, t_x1000, ..
-        } => walking_anchor(walking_position(from, to, t_x1000)),
+        } => walking_anchor(walking_position(from, to, t_x1000), w),
     };
     Some(anchor)
 }
