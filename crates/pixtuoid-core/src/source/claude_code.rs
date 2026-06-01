@@ -89,7 +89,14 @@ pub fn decode_cc_line(transcript_path: &str, source: &str, v: Value) -> Result<V
     let mut out = Vec::new();
     let ty = obj.get("type").and_then(|s| s.as_str()).unwrap_or("");
 
-    if let Some(name) = obj.get("attributionAgent").and_then(|v| v.as_str()) {
+    // `.filter(non-empty)`: an empty `attributionAgent` would emit `Rename {
+    // label: "" }`, blanking a good hook-derived label with no recovery until the
+    // next Rename — same empty-string guard as the decoder's id fields.
+    if let Some(name) = obj
+        .get("attributionAgent")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+    {
         let label = name.rsplit(':').next().unwrap_or(name).to_string();
         out.push(AgentEvent::Rename { agent_id, label });
     }
@@ -211,11 +218,11 @@ pub fn cc_session_ended(tail: &[u8]) -> bool {
 /// last segment is the project basename. Without this, an empty-cwd Rename
 /// silently degrades a good hook-derived `cc·dotfiles` back to `cc`.
 pub fn cc_derive_label(path: &Path, _source: &str, cwd: &Path) -> String {
-    // Slash-bounded, matching `jsonl::detect_parent_id` — a loose `"subagents"`
-    // substring false-positives on a parent project whose dir name merely
-    // contains it (e.g. a repo `subagents-paper`), mislabeling it "subagent"
-    // while detect_parent_id correctly leaves parent_id=None (inconsistent slot).
-    if path.to_string_lossy().contains("/subagents/") {
+    // ONE shared predicate with `detect_parent_id` (both via `SUBAGENTS_SEGMENT`)
+    // so the two can't diverge — a loose `"subagents"` substring once mislabeled a
+    // `subagents-paper` repo's parent transcript "subagent" with parent_id=None
+    // (bug_004); the slash-bounded predicate fixes that at a single source.
+    if crate::source::jsonl::is_subagent_path(path) {
         return "subagent".to_string();
     }
     if cwd != Path::new("") && cwd != Path::new("/") {

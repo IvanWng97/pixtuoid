@@ -460,12 +460,27 @@ async fn check_session_ended(path: &Path, checker: SessionEndChecker) -> bool {
     checker(&buf)
 }
 
-/// Detect if this transcript is a subagent by checking for a "subagents"
-/// component in the path. If found, derive the parent's AgentId from the
-/// grandparent directory (the parent session's transcript directory).
+/// The path segment a CC subagent transcript carries: `<parent>/subagents/
+/// agent-*.jsonl`. Slash-bounded so a project dir merely *containing* the word
+/// (e.g. `subagents-paper`) is not mistaken for one — single source of truth for
+/// both `is_subagent_path` and `detect_parent_id` so they cannot diverge (they
+/// did once: see the `bug_004` fix in `cc_derive_label`).
+const SUBAGENTS_SEGMENT: &str = "/subagents/";
+
+/// Whether a transcript path is a CC subagent transcript (vs a top-level
+/// session). Codex subagents are FLAT (no such segment) — they're linked via the
+/// `SubagentStart` hook instead, so this predicate is CC-layout-specific.
+pub(crate) fn is_subagent_path(path: &Path) -> bool {
+    path.to_string_lossy().contains(SUBAGENTS_SEGMENT)
+}
+
+/// Detect if this transcript is a CC subagent by checking for the `/subagents/`
+/// path segment. If found, derive the parent's AgentId from the grandparent
+/// directory (the parent session's transcript directory). CC-layout-specific —
+/// Codex subagent parent links come from the `SubagentStart` hook, not the path.
 fn detect_parent_id(path: &Path, source: &str) -> Option<AgentId> {
     let path_str = path.to_string_lossy();
-    let idx = path_str.find("/subagents/")?;
+    let idx = path_str.find(SUBAGENTS_SEGMENT)?;
     let parent_dir = &path_str[..idx];
     let parent_jsonl = format!("{parent_dir}.jsonl");
     Some(AgentId::from_parts(source, &parent_jsonl))

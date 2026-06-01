@@ -16,10 +16,15 @@ pub fn decode_hook_payload(v: Value) -> Result<AgentEvent> {
         .and_then(|s| s.as_str())
         .ok_or_else(|| anyhow!("missing hook_event_name"))?;
 
+    // `.filter(non-empty)`: an empty session_id passes `as_str` but, for Codex
+    // (which keys the AgentId on session_id), would mint a phantom agent that
+    // never coalesces with any rollout — reject it as malformed (same idiom as
+    // the SubagentStart agent_id guard).
     let session_id = obj
         .get("session_id")
         .and_then(|s| s.as_str())
-        .ok_or_else(|| anyhow!("missing session_id"))?
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| anyhow!("missing/empty session_id"))?
         .to_string();
     // CLI attribution comes ONLY from the shim-owned `_pixtuoid_source` (the
     // shim stamps it from `PIXTUOID_SOURCE`). We must NOT read the public

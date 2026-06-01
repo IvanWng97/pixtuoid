@@ -310,6 +310,28 @@ mod tests {
         );
     }
 
+    // Coalescing guard: `codex_id_from_path` is invoked in THREE places that must
+    // agree — the per-line decode (here), the watcher's `with_id_deriver`
+    // (CodexSource::run), and the fixture test above. If the per-line decode ever
+    // keys differently from the deriver, one Codex session splits into two
+    // sprites. Pin the per-line AgentId to the deriver's output directly.
+    #[test]
+    fn decode_line_keys_agent_id_on_codex_id_from_path() {
+        let path = "/x/rollout-1-019e7762-9ded-7e33-be41-946ecf105bf4.jsonl";
+        let events = decode_codex_line(
+            path,
+            SOURCE_NAME,
+            json!({"type":"event_msg","payload":{"type":"task_started","turn_id":"t"}}),
+        )
+        .unwrap();
+        let expected = AgentId::from_parts(SOURCE_NAME, &codex_id_from_path(Path::new(path)));
+        assert_eq!(
+            events[0].agent_id(),
+            expected,
+            "decode_codex_line must key its AgentId on codex_id_from_path (the deriver)"
+        );
+    }
+
     #[test]
     fn id_falls_back_to_stem_without_uuid() {
         let p = Path::new("/tmp/notarollout.jsonl");

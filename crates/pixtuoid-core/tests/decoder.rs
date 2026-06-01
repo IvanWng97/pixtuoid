@@ -89,6 +89,40 @@ fn decode_unknown_event_returns_err() {
     assert!(decode_hook_payload(bad).is_err());
 }
 
+// An empty session_id passes `as_str` but (for Codex, keyed on session_id) would
+// mint a phantom agent that never coalesces — reject it as malformed.
+#[test]
+fn empty_session_id_is_rejected() {
+    assert!(
+        decode_hook_payload(json!({
+            "hook_event_name": "SessionStart",
+            "session_id": "",
+            "transcript_path": "/p/a.jsonl",
+            "cwd": "/repo"
+        }))
+        .is_err(),
+        "empty session_id must Err, not mint AgentId(source, \"\")"
+    );
+}
+
+// An empty attributionAgent must NOT emit a Rename — that would blank a good
+// hook-derived label with no recovery until the next Rename.
+#[test]
+fn cc_empty_attribution_agent_emits_no_rename() {
+    let events = decode_cc_line(
+        "/p/parent.jsonl",
+        "claude-code",
+        json!({"type": "assistant", "attributionAgent": "", "message": {"content": []}}),
+    )
+    .unwrap();
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, AgentEvent::Rename { .. })),
+        "empty attributionAgent must not emit a (label-blanking) Rename, got {events:?}"
+    );
+}
+
 // Codex subagents (`spawn_agent`) signal their lifecycle ONLY via the
 // SubagentStart/SubagentStop hooks: the subagent's own rollout renders the
 // sprite but is keyed flat (no `/subagents/` path), so it can't learn its

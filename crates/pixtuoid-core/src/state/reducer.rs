@@ -639,4 +639,92 @@ mod tests {
             );
         }
     }
+
+    // White-box: `gated_before_waiting` is reclaimed in TWO places — `tick`'s
+    // retain and `sweep_exited`'s explicit remove (the apply path, where tick's
+    // retain never runs). All existing reducer tests go through `tick`; this
+    // pins the apply-path eviction so a future refactor can't silently drop it
+    // and leak a swept Waiting slot's gated tool_use_id.
+    #[test]
+    fn gated_before_waiting_evicted_on_apply_path_sweep() {
+        use crate::source::{Activity, AgentEvent, ToolDetail, Transport};
+        use crate::state::SceneState;
+        use crate::AgentId;
+        use std::path::PathBuf;
+        use std::time::{Duration, SystemTime};
+
+        let mut r = super::Reducer::new();
+        let mut scene = SceneState::uniform(4);
+        let id = AgentId::from_transcript_path("/p/a.jsonl");
+        let t0 = SystemTime::now();
+        r.apply(
+            &mut scene,
+            AgentEvent::SessionStart {
+                agent_id: id,
+                source: "claude-code".into(),
+                session_id: "s".into(),
+                cwd: PathBuf::from("/repo"),
+                parent_id: None,
+            },
+            t0,
+            Transport::Hook,
+        );
+        // Active mid-tool, then a permission Waiting → gate records the tool id.
+        r.apply(
+            &mut scene,
+            AgentEvent::ActivityStart {
+                agent_id: id,
+                activity: Activity::Typing,
+                tool_use_id: Some("toolT".into()),
+                detail: Some(ToolDetail::from("Bash")),
+            },
+            t0,
+            Transport::Hook,
+        );
+        r.apply(
+            &mut scene,
+            AgentEvent::Waiting {
+                agent_id: id,
+                reason: "perm".into(),
+            },
+            t0,
+            Transport::Hook,
+        );
+        assert!(
+            r.gated_before_waiting.contains_key(&id),
+            "gate recorded while Waiting mid-tool"
+        );
+
+        // End it; advance past the grace window; apply an UNRELATED event so
+        // sweep_exited runs on the APPLY path (not tick).
+        r.apply(
+            &mut scene,
+            AgentEvent::SessionEnd { agent_id: id },
+            t0,
+            Transport::Hook,
+        );
+        let later = t0 + super::EXIT_GRACE_WINDOW + Duration::from_secs(1);
+        let other = AgentId::from_transcript_path("/p/other.jsonl");
+        r.apply(
+            &mut scene,
+            AgentEvent::SessionStart {
+                agent_id: other,
+                source: "claude-code".into(),
+                session_id: "s2".into(),
+                cwd: PathBuf::from("/repo"),
+                parent_id: None,
+            },
+            later,
+            Transport::Hook,
+        );
+
+        assert!(
+            !scene.agents.contains_key(&id),
+            "exited slot swept on the apply path"
+        );
+        assert!(
+            !r.gated_before_waiting.contains_key(&id),
+            "apply-path sweep_exited must evict the gated entry (not only tick's retain)"
+        );
+    }
 }
