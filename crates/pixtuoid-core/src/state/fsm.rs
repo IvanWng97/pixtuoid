@@ -237,6 +237,28 @@ mod tests {
     }
 
     #[test]
+    fn settle_to_idle_resolves_a_waiting_slot_without_accumulating() {
+        // A Waiting slot only carries pending_idle_at after its gated permission
+        // tool resolved; settling goes Idle and folds NO active_ms (Waiting time
+        // isn't work). Mirror of the Active branch test above.
+        let t0 = SystemTime::now();
+        let pending = t0 + Duration::from_secs(1);
+        let now = t0 + Duration::from_secs(3);
+        let mut s = slot_at(
+            ActivityState::Waiting {
+                reason: Arc::from("perm"),
+            },
+            t0,
+        );
+        s.pending_idle_at = Some(pending);
+        settle_to_idle(&mut s, pending, now);
+        assert!(matches!(s.state, ActivityState::Idle));
+        assert_eq!(s.active_ms, 0, "Waiting time is not folded into active_ms");
+        assert_eq!(s.state_started_at, now);
+        assert_eq!(s.pending_idle_at, None);
+    }
+
+    #[test]
     fn settle_to_idle_on_idle_is_a_noop_but_clears_mark() {
         let t0 = SystemTime::now();
         let mut s = slot_at(ActivityState::Idle, t0);
@@ -266,5 +288,6 @@ mod tests {
         assert_eq!(s.last_event_at, t0 + Duration::from_secs(1));
         rename(&mut s, "code-explorer", t0 + Duration::from_secs(2));
         assert_eq!(&*s.label, "code-explorer");
+        assert_eq!(s.last_event_at, t0 + Duration::from_secs(2));
     }
 }
