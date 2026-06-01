@@ -126,6 +126,15 @@ struct SnapshotArgs {
     /// Force the version popup fully visible (for screenshots).
     #[arg(long)]
     popup: bool,
+
+    /// Animation-verification mode: render ONE agent walking to + settling at a
+    /// chosen furniture, so the approach→settle reads correctly (no pop, no
+    /// teleport) BEFORE human verify. One of: couch | sofa | stand | pantry |
+    /// desk. Forces `--gif`; the agent is back-dated so its walk-out starts at
+    /// frame 0. Pair with `--gif-duration`/`--gif-fps`. The target furniture's
+    /// buffer position is printed so you can crop to it.
+    #[arg(long)]
+    anim: Option<String>,
 }
 
 fn default_projects_root() -> String {
@@ -151,7 +160,18 @@ fn main() -> Result<()> {
         }
         None => SystemTime::now(),
     };
-    let scene = if args.empty {
+    let mut anim_skip_ms = 0u64;
+    let scene = if let Some(target) = args.anim.as_deref() {
+        let (s, skip) = anim_scene(
+            now,
+            target,
+            args.cols.unwrap_or(COLS),
+            args.rows.unwrap_or(ROWS),
+            args.floor_seed,
+        );
+        anim_skip_ms = skip;
+        s
+    } else if args.empty {
         SceneState::uniform(args.max_desks)
     } else if args.live {
         let rt = tokio::runtime::Builder::new_multi_thread()
@@ -176,7 +196,7 @@ fn main() -> Result<()> {
         pixtuoid::tui::theme::theme_by_name(&args.theme).unwrap_or(&pixtuoid::tui::theme::NORMAL);
     let ticker = TickerQueue::new();
 
-    if args.gif {
+    if args.gif || args.anim.is_some() {
         save_as_gif(
             &mut term,
             &scene,
@@ -194,6 +214,7 @@ fn main() -> Result<()> {
             args.gif_duration,
             theme,
             args.floor_seed,
+            anim_skip_ms,
         )?;
         println!("wrote {}", args.out.display());
         return Ok(());
@@ -590,6 +611,113 @@ fn sample_scene(now: SystemTime, max_desks: usize) -> SceneState {
     s
 }
 
+/// Build a ONE-agent scene whose wander targets `target` furniture, back-dated so
+/// the walk-OUT starts at frame 0 — for `--anim` visual verification of the
+/// approach→settle (no pop, no teleport). Prints the furniture's buffer position
+/// so the caller can crop the GIF to it. `target` ∈ {couch, sofa, stand, pantry,
+/// desk}; "desk" captures the always-present return-to-desk leg.
+fn anim_scene(
+    now: SystemTime,
+    target: &str,
+    cols: u16,
+    rows: u16,
+    floor_seed: u64,
+) -> (SceneState, u64) {
+    use pixtuoid_core::layout::{SceneLayout, WaypointKind, MAX_VISIBLE_DESKS};
+    use pixtuoid_core::pose::{
+        is_aimless_cycle, seated_dwell_ms, takes_trip, waypoint_index_for_cycle,
+    };
+
+    // Match the renderer EXACTLY: it draws into scene_rect = terminal minus the
+    // 1-row footer, then buf_h = scene_rect.height*2 (half-block). A 2px mismatch
+    // shifts the waypoint set and the agent targets the wrong furniture.
+    let (buf_w, buf_h) = (cols, rows.saturating_sub(1).saturating_mul(2));
+    let l = SceneLayout::compute_with_seed(buf_w, buf_h, MAX_VISIBLE_DESKS, floor_seed)
+        .expect("anim layout computes");
+    let n = l.waypoints.len();
+
+    let target_kind = match target {
+        "couch" => Some(WaypointKind::Couch),
+        "sofa" => Some(WaypointKind::MeetingSofa),
+        "stand" => Some(WaypointKind::MeetingStand),
+        "pantry" => Some(WaypointKind::Pantry),
+        _ => None, // "desk": always visited (return-to-desk), not a waypoint
+    };
+    let target_idxs: Vec<usize> = l
+        .waypoints
+        .iter()
+        .enumerate()
+        .filter(|(_, w)| Some(w.kind) == target_kind)
+        .map(|(i, _)| i)
+        .collect();
+
+    if target == "desk" {
+        if let Some(d) = l.home_desks.first() {
+            eprintln!("ANIM target=desk buf_pos≈({}, {}) [home desk 0]", d.x, d.y);
+        }
+    } else if let Some(&i) = target_idxs.first() {
+        let p = l.waypoints[i].pos;
+        eprintln!(
+            "ANIM target={target} buf_pos=({}, {}) [{} matching waypoints, {n} total]",
+            p.x,
+            p.y,
+            target_idxs.len()
+        );
+    } else {
+        eprintln!(
+            "ANIM target={target}: no matching waypoint at {buf_w}x{buf_h} seed {floor_seed}"
+        );
+    }
+
+    // Brute-force an agent whose cycle-0 trip lands on the target (any tripping,
+    // non-aimless agent for "desk").
+    let path = (0u64..40_000)
+        .map(|i| format!("/anim/{target}_{i}.jsonl"))
+        .find(|p| {
+            let id = AgentId::from_transcript_path(p);
+            takes_trip(id, 0)
+                && !is_aimless_cycle(id, 0)
+                && (target == "desk"
+                    || (n > 0 && target_idxs.contains(&waypoint_index_for_cycle(id, 0, n))))
+        })
+        .unwrap_or_else(|| format!("/anim/{target}_fallback.jsonl"));
+
+    let id = AgentId::from_transcript_path(&path);
+    // Fresh agent at `now` (clean Seated start — the TUI re-anchors fresh agents
+    // there regardless of created_at). The GIF PRE-ROLLS `skip_ms` past the
+    // seated dwell so capture begins right as it walks out (see save_as_gif).
+    let skip_ms = seated_dwell_ms(id).saturating_sub(1_000);
+    eprintln!(
+        "ANIM agent seated_dwell={}ms → pre-roll skip={skip_ms}ms",
+        seated_dwell_ms(id)
+    );
+
+    let mut s = SceneState::uniform(MAX_VISIBLE_DESKS);
+    s.agents.insert(
+        id,
+        AgentSlot {
+            agent_id: id,
+            source: std::sync::Arc::from("claude-code"),
+            session_id: std::sync::Arc::from("anim"),
+            cwd: std::sync::Arc::from(PathBuf::from("/anim").as_path()),
+            label: std::sync::Arc::from(target),
+            state: ActivityState::Idle,
+            state_started_at: now,
+            created_at: now,
+            last_event_at: now,
+            exiting_at: None,
+            pending_idle_at: None,
+            desk_index: 0,
+            floor_idx: 0,
+            tool_call_count: 0,
+            active_ms: 0,
+            unknown_cwd: false,
+            parent_id: None,
+        },
+    );
+    (s, skip_ms)
+}
+
 fn save_backend_as_png(
     term: &Terminal<TestBackend>,
     path: &PathBuf,
@@ -659,9 +787,14 @@ fn save_as_gif(
     duration_secs: u64,
     theme: &pixtuoid::tui::theme::Theme,
     floor_seed: u64,
+    skip_ms: u64,
 ) -> Result<()> {
     let frame_count = (duration_secs * fps) as usize;
     let frame_ms = 1000 / fps.max(1);
+    // Pre-roll: render (advancing the persistent motion state) WITHOUT encoding
+    // for `skip_ms`, so an `--anim` capture starts at the agent's walk-out
+    // instead of its long seated dwell. 0 for normal GIFs.
+    let skip_frames = (skip_ms / frame_ms.max(1)) as usize;
     let img_w = cols as u32 * CELL_W;
     let img_h = rows as u32 * CELL_H;
     let ticker = TickerQueue::new();
@@ -676,7 +809,7 @@ fn save_as_gif(
         pixtuoid_core::AgentId,
         pixtuoid::tui::motion::MotionState,
     > = std::collections::HashMap::new();
-    for i in 0..frame_count {
+    for i in 0..(skip_frames + frame_count) {
         let now = start_now + Duration::from_millis(i as u64 * frame_ms);
         let mut draw_ctx = DrawCtx {
             buf,
@@ -711,6 +844,9 @@ fn save_as_gif(
             help_open: false,
         };
         draw_scene(term, scene, pack, now, &mut draw_ctx)?;
+        if i < skip_frames {
+            continue; // pre-roll: advance the motion state, don't encode
+        }
 
         let term_buf = term.backend().buffer();
         let mut rgba = RgbaImage::new(img_w, img_h);
@@ -745,12 +881,9 @@ fn save_as_gif(
         let delay = Delay::from_numer_denom_ms(frame_ms as u32, 1);
         let frame = GifFrame::from_parts(rgba, 0, 0, delay);
         encoder.encode_frame(frame)?;
-        if (i + 1) % (fps as usize) == 0 {
-            eprint!(
-                "\r  encoding: {}/{}s",
-                (i + 1) / fps as usize,
-                duration_secs
-            );
+        let cap = i + 1 - skip_frames;
+        if cap % (fps as usize) == 0 {
+            eprint!("\r  encoding: {}/{}s", cap / fps as usize, duration_secs);
         }
     }
     eprintln!("\r  encoded {frame_count} frames @ {fps}fps");
