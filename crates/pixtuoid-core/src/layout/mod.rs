@@ -14,6 +14,7 @@ mod approach;
 mod compute;
 mod decor;
 mod mask;
+mod placement;
 
 pub use approach::{stand_point, walk_target};
 pub use decor::{
@@ -21,6 +22,7 @@ pub use decor::{
     FurnitureDef, PlantKind, PodDecor, WallDecor, WaypointKind, DESK_APPROACH,
 };
 pub use mask::{WALL_THICK_H, WALL_THICK_V};
+pub use placement::{anchored_top_left, z_sort_row, Anchor};
 
 use crate::walkable::WalkableMask;
 
