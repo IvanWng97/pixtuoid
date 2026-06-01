@@ -162,7 +162,9 @@ fn skyline_haze(w: Weather) -> Option<(Rgb, f32)> {
 /// guard in `paint_floor_and_walls`. Used by `paint_dust_motes` so the
 /// motes drift through the same warm spill the floor pass paints.
 pub(in crate::tui::pixel_painter) fn window_spill_columns(layout: &Layout) -> Vec<SunbeamColumn> {
-    let top_wall_h = layout.top_margin.saturating_sub(4);
+    let top_wall_h = layout
+        .top_margin
+        .saturating_sub(pixtuoid_core::layout::WALL_BAND_TO_TOP_MARGIN);
     let skip = layout.door.map(|d| (d.x, d.x + DOOR_SPRITE_WIDTH));
     let mut out = Vec::new();
     let mut x = 3u16;
@@ -386,7 +388,11 @@ fn paint_floor_to_ceiling_window(
     let cw = theme.office.city_lit_windows;
     let dark_window = theme.office.city_dark_window;
 
-    let lit_strength = look.darkness.max(0.5).clamp(0.0, 1.0);
+    // Floor at 0.12 (not 0.5): keeps a faint window structure visible by day
+    // but lets the city windows fade toward dark in full daylight and only glow
+    // toward dusk/night — tracking `darkness` like the rest of the light model
+    // (the old 0.5 floor kept buildings ~50% lit even at noon).
+    let lit_strength = look.darkness.max(0.12).clamp(0.0, 1.0);
     let lit_colors: [Rgb; 3] = [
         lerp_rgb(dark_window, cw[0], lit_strength),
         lerp_rgb(dark_window, cw[1], lit_strength),

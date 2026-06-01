@@ -405,13 +405,29 @@ pub(super) fn paint_drawable(
             if let Some(f) = pack.animation(anim_name).and_then(|a| a.frames.first()) {
                 let cx = pos.x.saturating_sub(f.width / 2);
                 let cy = pos.y.saturating_sub(f.height / 2);
-                // NB: no `paint_furniture_back` here. The counter is a wide
-                // (32px) multi-material bank; extruding each column's top pixel
-                // north smears its decorative elements (steam wand, chip-bag,
-                // dividers) into the floor as color streaks. The short counter
-                // also stands ~2px clear below a north-approaching agent, so a
-                // back cap buys almost no real occlusion. Back caps are for
-                // tall, narrow, single-silhouette objects (pods / glass wall).
+                // Couch-style occlusion: a character standing behind (north of)
+                // the counter would otherwise float fully visible just above it
+                // (no depth). The drawable y-sorts at the counter's south base,
+                // so it paints AFTER a north-stander — extrude a back face north
+                // to composite over their feet/legs, exactly as the sofa back
+                // occludes its sitter. UNIFORM tint (not per-column): the 32px
+                // top row alternates white fridge + brown counter, which the
+                // per-column form would streak vertically; one receding
+                // counter-back shade reads as a single surface. Depth (how many
+                // px of a north-stander to hide) comes from the table.
+                if let Some(rows) =
+                    crate::tui::layout::furniture_def(crate::tui::layout::Furniture::Pantry)
+                        .occludes_behind
+                {
+                    super::paint_furniture_back_uniform(
+                        buf,
+                        f,
+                        cx,
+                        cy,
+                        super::COUNTER_BACK_TINT,
+                        rows,
+                    );
+                }
                 blit_frame(f, cx, cy, buf);
             }
             // Large sprite: coffee machine at sprite cols 11-18 of
@@ -476,6 +492,13 @@ pub(super) fn paint_drawable(
             if let Some(f) = pack.animation(anim_name).and_then(|a| a.frames.first()) {
                 let px = pos.x.saturating_sub(f.width / 2);
                 let py = pos.y.saturating_sub(f.height / 2);
+                // Behind-occlusion depth from the table (free-standing plants get
+                // a faint cap; the pod-decor PlantTall path handles its own).
+                if let Some(rows) =
+                    crate::tui::layout::furniture_def(kind.furniture()).occludes_behind
+                {
+                    super::paint_furniture_back(buf, f, px, py, rows);
+                }
                 blit_frame(f, px, py, buf);
             }
         }
@@ -491,10 +514,12 @@ pub(super) fn paint_drawable(
             if let Some(f) = pack.animation(anim_name).and_then(|a| a.frames.first()) {
                 let px = pos.x.saturating_sub(f.width / 2);
                 let py = pos.y.saturating_sub(f.height / 2);
-                // Back-cap policy (which pods occlude a north-stander) lives in
-                // one place: super::back_cap. See paint_furniture_back.
-                if super::back_cap(*kind) {
-                    super::paint_furniture_back(buf, f, px, py);
+                // Behind-occlusion (whether + DEPTH) is the FurnitureDef table's
+                // `occludes_behind` — one source of truth, not a render allowlist.
+                if let Some(rows) =
+                    crate::tui::layout::furniture_def(kind.furniture()).occludes_behind
+                {
+                    super::paint_furniture_back(buf, f, px, py, rows);
                 }
                 blit_frame(f, px, py, buf);
             }
@@ -524,6 +549,14 @@ pub(super) fn paint_drawable(
                 WallDecor::MeetingScreen => "meeting_screen",
             };
             if let Some(f) = pack.animation(anim_name).and_then(|a| a.frames.first()) {
+                // Free-standing board (the only WallDecor with a footprint) gets
+                // a behind-occlusion cap; wall-hung decor is None. Top-left
+                // anchored like the blit.
+                if let Some(rows) =
+                    crate::tui::layout::furniture_def(kind.furniture()).occludes_behind
+                {
+                    super::paint_furniture_back(buf, f, pos.x, pos.y, rows);
+                }
                 blit_frame(f, pos.x, pos.y, buf);
             }
         }
@@ -538,6 +571,14 @@ pub(super) fn paint_drawable(
             ];
             let vx = pos.x.saturating_sub(2);
             let vy = pos.y.saturating_sub(3);
+            // Behind-occlusion back face (procedural box → rect variant); depth
+            // from the FurnitureDef table.
+            if let Some(rows) =
+                crate::tui::layout::furniture_def(crate::tui::layout::Furniture::VendingMachine)
+                    .occludes_behind
+            {
+                super::paint_furniture_back_rect(buf, vx, 4, vy, body, rows);
+            }
             for dy in 0..6u16 {
                 for dx in 0..4u16 {
                     let px = vx + dx;
@@ -572,6 +613,14 @@ pub(super) fn paint_drawable(
             let tray = Rgb(180, 180, 185);
             let px0 = pos.x.saturating_sub(2);
             let py0 = pos.y.saturating_sub(2);
+            // Behind-occlusion back face (procedural box → rect variant); depth
+            // from the FurnitureDef table.
+            if let Some(rows) =
+                crate::tui::layout::furniture_def(crate::tui::layout::Furniture::Printer)
+                    .occludes_behind
+            {
+                super::paint_furniture_back_rect(buf, px0, 5, py0, top_dark, rows);
+            }
             for dy in 0..4u16 {
                 for dx in 0..5u16 {
                     let px = px0 + dx;

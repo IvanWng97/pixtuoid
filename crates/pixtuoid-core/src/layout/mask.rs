@@ -4,7 +4,10 @@
 //! clearance band around each obstacle so walkers don't scrape along
 //! edges.
 
-use super::{furniture_def, Furniture, PodDecor, Point, WallDecor, Waypoint, OBSTACLE_PAD_PX};
+use super::{
+    furniture_def, Furniture, PodDecor, Point, WallDecor, Waypoint, OBSTACLE_PAD_PX,
+    WALL_BAND_TO_TOP_MARGIN,
+};
 use crate::walkable::WalkableMask;
 
 /// Walkable footprint (and render face height) of a horizontal (E-W) interior
@@ -39,7 +42,17 @@ pub(super) fn build_walkable_mask(
 ) -> WalkableMask {
     let mut mask = WalkableMask::new_open(buf_w, buf_h);
 
-    mask.mark_blocked(0, 0, buf_w, top_margin, 0);
+    // Block the north wall band down to the WALL VISUAL bottom (top_wall_h),
+    // not the full top_margin — the rows between are carpet apron under the
+    // windows, so blocking them put the walkable boundary ~4px south of the
+    // visible wall base. Mask = ground projection (invariant #6).
+    mask.mark_blocked(
+        0,
+        0,
+        buf_w,
+        top_margin.saturating_sub(WALL_BAND_TO_TOP_MARGIN),
+        0,
+    );
     if let Some(d) = door {
         let cut_x = d.x.saturating_sub(2);
         let cut_h = top_margin.saturating_add(OBSTACLE_PAD_PX);
@@ -131,12 +144,13 @@ pub(super) fn build_walkable_mask(
         }
     }
     for chair in pantry_chairs {
-        // Stool footprint is small; stamped left-biased (offset 2, not w/2) to
-        // sit snug against the bistro table — kept as-is for the look.
+        // Small stool, stamped CENTERED on its pos (x - w/2) like the other
+        // centered furniture — was left/top-biased (offset 2), which blocked
+        // floor 1px north & west of the 2×2 the painter actually draws.
         if let Some((w, h)) = furniture_def(Furniture::PantryChair).footprint {
             mask.mark_blocked(
-                chair.x.saturating_sub(2),
-                chair.y.saturating_sub(2),
+                chair.x.saturating_sub(w / 2),
+                chair.y.saturating_sub(h / 2),
                 w,
                 h,
                 1,

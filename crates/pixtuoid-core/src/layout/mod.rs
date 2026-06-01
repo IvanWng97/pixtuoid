@@ -105,6 +105,17 @@ pub struct SceneLayout {
 /// furniture rather than scraping along its edge.
 pub const OBSTACLE_PAD_PX: u16 = 2;
 
+/// The north wall+window band's visual bottom sits this many px ABOVE
+/// `top_margin`; the rows in between (`[top_margin - this, top_margin)`) render
+/// as carpet apron, not wall. The mask therefore blocks only down to the band
+/// bottom (`top_margin - this`), NOT the full `top_margin`, so the walkable area
+/// hugs the visible wall base instead of eating a strip of carpet (invariant #6,
+/// the same ground-projection rule furniture footprints follow). The renderer
+/// derives `top_wall_h = top_margin - this` for the wall/window/trim paint, so
+/// the two MUST agree — one source here prevents the mask and the visual from
+/// drifting (the relationship was a `- 4` literal duplicated across both).
+pub const WALL_BAND_TO_TOP_MARGIN: u16 = 4;
+
 pub const DESK_W: u16 = 12;
 pub const DESK_H: u16 = 6;
 /// Hard cap on how many cubicles get painted regardless of how high
@@ -127,9 +138,9 @@ pub const POD_SIDE: u16 = 2;
 pub const INTRA_POD_GAP_X: u16 = 12;
 pub const INTRA_POD_GAP_Y: u16 = 12;
 /// Gap between adjacent pods — comfortably wider than the intra-pod
-/// gap so the pod boundary is visually obvious. 28 px also fits the
-/// rolling whiteboard (14 wide) with ~7 px of walking clearance on
-/// each side after the 1-px obstacle pad.
+/// gap so the pod boundary is visually obvious. 28 px fits the rolling
+/// whiteboard's 10-px GROUND footprint (the 14-px board panel overhangs
+/// it, invariant #6) with comfortable clearance after the 1-px pad.
 pub const INTER_POD_AISLE_X: u16 = 28;
 pub const INTER_POD_AISLE_Y: u16 = 28;
 

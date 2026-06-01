@@ -270,27 +270,27 @@ pub(super) fn paint_sun_spot(buf: &mut RgbBuffer, theme: &Theme, layout: &Layout
         blend(warm.2, 255, cool * 0.6),
     );
 
-    let base_w = 8u16;
-    let base_h = 3u16;
-    let w = ((base_w as f32) * effective_intensity).round() as u16;
-    let h = ((base_h as f32) * effective_intensity).round() as u16;
-    let w = w.max(4);
-    let h = h.max(2);
+    // A visible sun rectangle, not a 4px speck: keep a generous floor size so
+    // the radial falloff doesn't collapse the spot to nothing on the dark wall.
+    let base_w = 10u16;
+    let base_h = 4u16;
+    let w = (((base_w as f32) * effective_intensity).round() as u16).max(7);
+    let h = (((base_h as f32) * effective_intensity).round() as u16).max(3);
 
     // The top wall band is the visible window wall; East/West sun spots
     // project onto the outer 1-px column at the left/right edge of that band.
-    let wall_band_h = layout.top_margin.saturating_sub(4);
+    let wall_band_h = layout
+        .top_margin
+        .saturating_sub(pixtuoid_core::layout::WALL_BAND_TO_TOP_MARGIN);
     if wall_band_h == 0 {
         return;
     }
 
-    // When the wall band is shorter than the spot, fall back to projecting
-    // along across `wall_band_h` itself so the East/West spot still slides
-    // with the hour-of-day on tiny terminals (pre-fix saturating_sub gave
-    // 0 and pinned the spot to the top of the band).
-    let along_range = wall_band_h
-        .saturating_sub(h)
-        .max(wall_band_h.saturating_sub(1)) as f32;
+    // Slide range keeps the spot WITHIN the wall band: along_px ∈ [0, band-h].
+    // (The old `.max(band-1)` let ry reach band-1, so the spot bled `h` px below
+    // the wall band onto the room floor.) On a band shorter than the spot this
+    // is 0 → the spot pins to the band top, correct (it fills the band).
+    let along_range = wall_band_h.saturating_sub(h) as f32;
     let (rx, ry) = match spot.wall {
         WallSide::East => {
             let along_px = along_range * spot.along.min(1.0);
@@ -304,7 +304,10 @@ pub(super) fn paint_sun_spot(buf: &mut RgbBuffer, theme: &Theme, layout: &Layout
         WallSide::South => unreachable!("guarded above"),
     };
 
-    let tint_strength = 0.35 * effective_intensity;
+    // Visible warm lift on the dark wall: a strong base so the (small, radially
+    // falling-off) spot actually reads, gently scaled by how direct the light is.
+    // The old `0.35 * effective_intensity` (~0.10) blended sub-1-RGB → invisible.
+    let tint_strength = (0.45 + 0.35 * effective_intensity).min(0.7);
     let max_x = (rx + w).min(buf.width);
     let max_y = (ry + h).min(buf.height);
     // Centre at (rx + (w-1)/2, ry + (h-1)/2) so the ellipse spans the

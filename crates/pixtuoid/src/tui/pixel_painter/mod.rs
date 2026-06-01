@@ -226,19 +226,6 @@ fn paint_glass_wall_v(
     }
 }
 
-/// Rows the opaque "back face" of a tall free-standing object (phone booth,
-/// standing desk, pantry counter) rises NORTH of its sprite. These objects are
-/// reachable from any open side incl. the north (`approach::stand_point` — a
-/// desk to the north yields a north stand cell), and a feet-anchored character
-/// extends UP/north, so a walker standing behind one would otherwise float
-/// above it with a gap and never be occluded. Extruding the sprite's top edge
-/// north by this many px gives the object ¾-view depth and composites over the
-/// walker's feet + lower legs (the object's drawable is y-sorted at its south
-/// base, so the band paints after — on top of — anyone standing behind it).
-/// Same rationale as the glass wall's `GLASS_CAP_PX`; 5 ≈ pad(1) + 1 feet row +
-/// ~3 leg rows for the northmost reachable stand cell.
-pub(super) const FURNITURE_BACK_PX: u16 = 5;
-
 /// The home desk sprite's front lip extends this many px past its blocked
 /// footprint (the top-down 3/4 bevel), so the desk's z-sort baseline is the
 /// footprint front edge + this overhang — the same "footprint front + sprite
@@ -267,25 +254,73 @@ fn floor_lamp_south_offset() -> u16 {
     )
 }
 
-/// Extrude `frame`'s top edge north of its blit origin `(sx, sy)` into an
-/// opaque back face (see [`FURNITURE_BACK_PX`]). Each column repeats its
-/// topmost opaque sprite color, darkened with distance so the band reads as the
-/// object's top/back receding into shadow; transparent-top columns are skipped,
-/// preserving the silhouette. Render-only — emit inside the object's drawable
-/// so y-sort composites it over a character standing behind (north of) it.
-pub(super) fn paint_furniture_back(buf: &mut RgbBuffer, frame: &Frame, sx: u16, sy: u16) {
+/// Uniform back-face shade for wide multi-material objects (the pantry
+/// counter). A warm dark "counter back receding into shadow" — used by
+/// [`paint_furniture_back_uniform`] instead of the per-column top pixel, whose
+/// alternating white-fridge / brown-counter top row would streak vertically.
+pub(super) const COUNTER_BACK_TINT: Rgb = Rgb(0x5a, 0x38, 0x18);
+
+/// Extrude `frame`'s top edge `rows` px NORTH of its blit origin `(sx, sy)` into
+/// an opaque back face. Tall free-standing objects are reachable from the north
+/// and a feet-anchored character extends UP/north, so a walker standing behind
+/// one would otherwise float above it with a gap. The object's drawable y-sorts
+/// at its south base, so this band paints AFTER — on top of — anyone behind it,
+/// giving ¾-view depth (same idea as the glass wall's `GLASS_CAP_PX`). `rows` is
+/// the per-object back-cap DEPTH from `FurnitureDef::occludes_behind`, so a short
+/// printer hides less than a tall booth. Each column repeats its topmost opaque
+/// sprite color, darkened with distance; transparent-top columns are skipped,
+/// preserving the silhouette. Render-only — emit inside the object's drawable.
+pub(super) fn paint_furniture_back(
+    buf: &mut RgbBuffer,
+    frame: &Frame,
+    sx: u16,
+    sy: u16,
+    rows: u16,
+) {
+    paint_furniture_back_impl(buf, frame, sx, sy, rows, None);
+}
+
+/// Like [`paint_furniture_back`] but paints a single uniform `tint` (still
+/// darkened with distance) for every opaque column rather than repeating each
+/// column's own top pixel. Wide multi-material objects — the pantry counter —
+/// have a top row that alternates materials (white fridge + brown counter), so
+/// the per-column form smears it into vertical streaks; one receding shade
+/// reads as a single back surface. Gives the same clean over-the-body occlusion
+/// the couch gives its sitter, for an object a character stands *behind*.
+pub(super) fn paint_furniture_back_uniform(
+    buf: &mut RgbBuffer,
+    frame: &Frame,
+    sx: u16,
+    sy: u16,
+    tint: Rgb,
+    rows: u16,
+) {
+    paint_furniture_back_impl(buf, frame, sx, sy, rows, Some(tint));
+}
+
+fn paint_furniture_back_impl(
+    buf: &mut RgbBuffer,
+    frame: &Frame,
+    sx: u16,
+    sy: u16,
+    requested_rows: u16,
+    uniform: Option<Rgb>,
+) {
     if sy == 0 {
         return;
     }
-    let rows = FURNITURE_BACK_PX.min(sy);
+    let rows = requested_rows.min(sy);
     let w = frame.width as usize;
     let denom = (rows.max(2) - 1) as f32;
     for fx in 0..frame.width {
-        let Some(top) =
+        // A fully-transparent column has no back face — preserves the
+        // silhouette (and the counter's inter-appliance gaps).
+        let Some(col_top) =
             (0..frame.height).find_map(|fy| frame.pixels[(fy as usize) * w + fx as usize])
         else {
-            continue; // column is fully transparent — keep the silhouette
+            continue;
         };
+        let top = uniform.unwrap_or(col_top);
         let x = sx.saturating_add(fx);
         if x >= buf.width {
             continue;
@@ -308,16 +343,44 @@ pub(super) fn paint_furniture_back(buf: &mut RgbBuffer, frame: &Frame, sx: u16, 
     }
 }
 
-/// Render policy: does this aisle pod get a north back-cap ([`paint_furniture_back`])?
-/// True only for tall, narrow, free-standing pods an agent can approach from
-/// the north (phone booth, standing desk) — so a walker standing behind reads
-/// as occluded. Plant / TV / whiteboard are wall-flanking decor (left flat).
-/// Wide multi-material counters (pantry) and wall-flush appliances
-/// (vending/printer) are intentionally excluded — see `paint_furniture_back`.
-/// One place to decide back-cap-ness per pod kind.
-pub(super) fn back_cap(kind: crate::tui::layout::PodDecor) -> bool {
-    use crate::tui::layout::PodDecor;
-    matches!(kind, PodDecor::PhoneBooth | PodDecor::StandingDesk)
+/// Solid-rect variant of [`paint_furniture_back`] for procedurally-drawn boxes
+/// (vending machine, printer) that have no `Frame` to read a silhouette from.
+/// Fills `width` columns from `sx`, `rows` px north of `sy`, with `tint`
+/// darkened by distance — the same receding back face. `rows` (the per-object
+/// back-cap DEPTH) and whether to call this at all both come from the
+/// FurnitureDef table's `occludes_behind` — one source of truth, no allowlist.
+pub(super) fn paint_furniture_back_rect(
+    buf: &mut RgbBuffer,
+    sx: u16,
+    width: u16,
+    sy: u16,
+    tint: Rgb,
+    rows: u16,
+) {
+    if sy == 0 {
+        return;
+    }
+    let rows = rows.min(sy);
+    let denom = (rows.max(2) - 1) as f32;
+    for fx in 0..width {
+        let x = sx.saturating_add(fx);
+        if x >= buf.width {
+            continue;
+        }
+        for i in 0..rows {
+            let y = sy - rows + i;
+            let f = 0.55 + 0.45 * (i as f32 / denom);
+            buf.put(
+                x,
+                y,
+                Rgb(
+                    (tint.0 as f32 * f) as u8,
+                    (tint.1 as f32 * f) as u8,
+                    (tint.2 as f32 * f) as u8,
+                ),
+            );
+        }
+    }
 }
 
 /// Bundled input for the pixel-painting pass. Constructed from `DrawCtx`
@@ -430,7 +493,10 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
     let look = time_of_day_look(ctx.now, ctx.theme);
     // Wall band height tracks layout.top_margin (which is buf_h/4 with
     // a floor) — leaves a 4-px buffer between wall trim and cubicles.
-    let top_wall_h = ctx.layout.top_margin.saturating_sub(4);
+    let top_wall_h = ctx
+        .layout
+        .top_margin
+        .saturating_sub(pixtuoid_core::layout::WALL_BAND_TO_TOP_MARGIN);
     // The elevator door replaces the rightmost window — pass its x-range
     // so `paint_floor_and_walls` skips drawing a window that would
     // otherwise bleed through behind the elevator frame.
@@ -1626,8 +1692,8 @@ mod tests {
 
     #[test]
     fn furniture_back_occludes_a_character_behind_it() {
-        // A tall pod's back face rises FURNITURE_BACK_PX rows north of its
-        // sprite top, in a darkened shade of the column's top color — so a
+        // A tall pod's back face rises `rows` (its occludes_behind depth) north
+        // of its sprite top, in a darkened shade of the column's top color — so a
         // character standing just north (drawn earlier) is painted over.
         let blue = Rgb(40, 60, 200);
         let frame = solid_frame(6, 8, blue);
@@ -1637,7 +1703,7 @@ mod tests {
         // Stand-in pixel one row north of the sprite top — inside the band.
         let row = sy - 1;
         buf.put(sx + 2, row, character);
-        paint_furniture_back(&mut buf, &frame, sx, sy);
+        paint_furniture_back(&mut buf, &frame, sx, sy, 5);
         let after = buf.get(sx + 2, row);
         assert_ne!(after, character, "back face must paint over the character");
         // Shade of the (blue) sprite top, not the warm character/floor: blue
@@ -1660,7 +1726,7 @@ mod tests {
         let floor = Rgb(150, 110, 72);
         let (sx, sy) = (10u16, 20u16);
         let mut buf = RgbBuffer::filled(48, 48, floor);
-        paint_furniture_back(&mut buf, &frame, sx, sy);
+        paint_furniture_back(&mut buf, &frame, sx, sy, 5);
         assert_eq!(
             buf.get(sx, sy - 1),
             floor,
@@ -2033,11 +2099,13 @@ mod tests {
     }
 
     #[test]
-    fn back_cap_covers_exactly_the_freestanding_pods() {
-        // Per-kind occlusion policy: the north back-cap (occlude a walker
-        // standing behind) applies to EXACTLY the tall free-standing aisle pods
-        // — not the wall-flanking decor. Exhaustive over PodDecor::ALL so a new
-        // pod kind must make a deliberate back-cap choice.
+    fn every_pod_declares_behind_occlusion() {
+        // Per-kind occlusion policy now lives in the FurnitureDef table
+        // (`occludes_behind`), not a render-local allowlist. Every aisle pod is a
+        // solid object a walker can pass behind, so every one carries a back-cap
+        // depth (the exact px per kind is pinned in core's furniture_def
+        // invariant test). Exhaustive over PodDecor::ALL so a new pod kind must
+        // declare its occlusion in the table.
         use crate::tui::layout::{furniture_def, PodDecor};
         assert_eq!(
             PodDecor::ALL.len(),
@@ -2045,17 +2113,16 @@ mod tests {
             "PodDecor variant added/removed — update ALL (and this count)"
         );
         for &kind in PodDecor::ALL {
-            let expected = matches!(kind, PodDecor::PhoneBooth | PodDecor::StandingDesk);
-            assert_eq!(
-                back_cap(kind),
-                expected,
-                "{kind:?}: back-cap policy mismatch (only free-standing pods get one)"
+            let def = furniture_def(kind.furniture());
+            assert!(
+                def.occludes_behind.is_some(),
+                "{kind:?}: every aisle pod should declare a behind-occlusion depth"
             );
             // z-sort precondition: the pod-decor loop anchors at
             // `center_pin_south_offset(visual.1)`, so a 0-height visual would
             // sort the sprite at its own center. Every pod must have visible h.
             assert!(
-                furniture_def(kind.furniture()).visual.1 > 0,
+                def.visual.1 > 0,
                 "{kind:?}: pod decor needs a non-zero visual height for the z-sort"
             );
         }
