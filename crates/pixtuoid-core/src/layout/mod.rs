@@ -357,7 +357,10 @@ mod tests {
         // 20px sprite. The lounge keeps room_id = None — its group-chat
         // grouping happens at the chitchat venue-key layer, not via the
         // meeting-only room_id field.
-        let l = SceneLayout::compute(96, 72, 4).expect("fits"); // seed 0 → has_meeting
+        // 120 wide so the meeting room clears MEETING_FURNITURE_MIN_W (a 96-wide
+        // room is too narrow to route to the sofa seats and is intentionally
+        // left bare — see the gate in compute.rs). seed 0 → has_meeting.
+        let l = SceneLayout::compute(120, 80, 4).expect("fits");
 
         let couch: Vec<_> = l
             .waypoints
