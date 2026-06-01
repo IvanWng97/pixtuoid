@@ -530,6 +530,53 @@ mod tests {
     }
 
     #[test]
+    fn every_approach_point_is_routable_from_its_home_desk() {
+        // STRONGER routability guard for the approach model: the cell A* actually
+        // targets — `approach_point` on a reachable allowed side — must be
+        // find_path-routable from the agent's OWN home desk, for EVERY
+        // desk × waypoint × size × seed. The test above uses the DOOR origin + the
+        // blocked furniture CENTER, so it can pass while a specific desk's chosen
+        // approach side is unroutable (a teleport). `reaches ⇒ routable` (the
+        // ReachSet contract) makes this hold unless a seat has no reachable
+        // allowed side at all (the degraded fallback to `pos`, which this catches).
+        use crate::tui::layout::MAX_VISIBLE_DESKS;
+        use pixtuoid_core::layout::approach_point;
+        let overlay = OccupancyOverlay::new();
+        for (w, h) in [
+            (96u16, 70u16),
+            (128, 80),
+            (160, 120),
+            (192, 160),
+            (240, 160),
+        ] {
+            for seed in 0..5u64 {
+                let Some(l) = Layout::compute_with_seed(w, h, MAX_VISIBLE_DESKS, seed) else {
+                    continue;
+                };
+                for &desk in &l.home_desks {
+                    for wp in &l.waypoints {
+                        let a = approach_point(
+                            wp.kind.furniture(),
+                            wp.pos,
+                            wp.facing,
+                            l.pantry_counter_size,
+                            &l.walkable,
+                            desk,
+                            &l.reachable,
+                        );
+                        assert!(
+                            find_path(&l.walkable, &overlay, None, desk, a).is_some(),
+                            "{w}x{h} seed {seed}: {:?} approach_point {a:?} unroutable from \
+                             desk {desk:?} — the agent would teleport",
+                            wp.kind,
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn reachset_never_claims_an_unroutable_cell() {
         // The core ReachSet must never be a FALSE POSITIVE vs the real router:
         // every cell it reports reachable MUST be find_path-routable from the

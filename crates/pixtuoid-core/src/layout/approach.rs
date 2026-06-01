@@ -152,12 +152,17 @@ pub fn approach_point(
     const DIRS: [(i32, i32); 4] = [(0, -1), (0, 1), (-1, 0), (1, 0)];
     let mut best: Option<(u64, Point)> = None;
     if def.occupies_pos {
-        // Seat/desk: scan outward from the seat cell on each allowed side. The
-        // sprite renders on its fixed seat; the agent settles from this cell.
+        // SEAT/desk: the sprite renders on the fixed seat foot cell; the agent
+        // walks IN from a side and the post-A* settle bridges approach → seat.
+        // Pick the SIDE = the ApproachSides-allowed side with a reachable cell
+        // NEAREST the home desk (couch facing=North ⇒ {N,E,W}; the south backrest
+        // is excluded) — so the agent comes from its NATURAL side, not a hardcoded
+        // one. Degrade to ANY reachable side (incl. the backrest) only when every
+        // allowed side is walled in (rare — avoids a teleport, vs the blocked
+        // center).
+        let mut allowed: Option<(u64, Point)> = None;
+        let mut any: Option<(u64, Point)> = None;
         for (dx, dy) in DIRS {
-            if !def.approach.allows(facing, (dx, dy)) {
-                continue;
-            }
             for dist in 1..=SEAT_APPROACH_SCAN {
                 let cx = pos.x as i32 + dx * dist;
                 let cy = pos.y as i32 + dy * dist;
@@ -169,20 +174,26 @@ pub fn approach_point(
                     y: cy as u16,
                 };
                 if mask.is_walkable(c.x, c.y) {
-                    // First walkable cell on this side decides the side; keep it
-                    // only if A* can actually reach it.
+                    // First walkable cell on this side decides the side; keep only
+                    // if A* can reach it.
                     if reachable.reaches(c) {
                         let ex = c.x as i64 - origin.x as i64;
                         let ey = c.y as i64 - origin.y as i64;
                         let d2 = (ex * ex + ey * ey) as u64;
-                        if best.map_or(true, |(bd, _)| d2 < bd) {
-                            best = Some((d2, c));
+                        if any.map_or(true, |(b, _)| d2 < b) {
+                            any = Some((d2, c));
+                        }
+                        if def.approach.allows(facing, (dx, dy))
+                            && allowed.map_or(true, |(b, _)| d2 < b)
+                        {
+                            allowed = Some((d2, c));
                         }
                     }
                     break;
                 }
             }
         }
+        return allowed.or(any).map(|(_, p)| p).unwrap_or(pos);
     } else if let Some((fw, fh)) = approach_footprint(kind, pantry_counter_size) {
         // Obstacle: stand just off the footprint, on the reachable allowed side
         // nearest the home desk (== stand_point, plus the reachability filter).
