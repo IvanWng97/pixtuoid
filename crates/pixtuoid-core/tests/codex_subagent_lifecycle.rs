@@ -124,3 +124,43 @@ fn codex_subagent_jsonl_first_orphan_is_enriched_by_subagent_start() {
         "SubagentStart hook must enrich the JSONL-first orphan with its parent link"
     );
 }
+
+#[test]
+fn codex_subagent_stop_before_start_is_a_safe_noop() {
+    // The hooks are best-effort and unordered: a SubagentStop can win the race
+    // against the child's slot creation. SessionEnd for a not-yet-existing child
+    // must be harmless — no panic, no phantom slot, no spurious parent cascade.
+    let parent = AgentId::from_parts("codex", PARENT);
+    let child = AgentId::from_parts("codex", CHILD);
+    let mut scene = SceneState::uniform(8);
+    let mut r = Reducer::new();
+    let now = SystemTime::now();
+
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: parent,
+            source: "codex".into(),
+            session_id: PARENT.into(),
+            cwd: PathBuf::from("/home/user/demo-project"),
+            parent_id: None,
+        },
+        now,
+        Transport::Hook,
+    );
+    // SubagentStop decodes to SessionEnd{child}; apply with no child present.
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionEnd { agent_id: child },
+        now,
+        Transport::Hook,
+    );
+    assert!(
+        !scene.agents.contains_key(&child),
+        "a SessionEnd for an absent child must not create a phantom slot"
+    );
+    assert!(
+        scene.agents.get(&parent).unwrap().exiting_at.is_none(),
+        "an orphan SubagentStop must not cascade the unrelated parent"
+    );
+}

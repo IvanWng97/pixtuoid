@@ -62,8 +62,6 @@ pub fn decode_hook_payload(v: Value) -> Result<AgentEvent> {
         }
         "PreToolUse" => {
             let tool_name = obj.get("tool_name").and_then(|s| s.as_str()).unwrap_or("?");
-            let tool_input = obj.get("tool_input");
-            let target = describe_tool_target(tool_name, tool_input);
             let tool_use_id = obj
                 .get("tool_use_id")
                 .and_then(|s| s.as_str())
@@ -72,7 +70,7 @@ pub fn decode_hook_payload(v: Value) -> Result<AgentEvent> {
                 agent_id,
                 activity: Activity::Typing,
                 tool_use_id,
-                detail: Some(make_tool_detail(tool_name, target, tool_input)),
+                detail: Some(make_tool_detail(tool_name, obj.get("tool_input"))),
             })
         }
         "PostToolUse" => {
@@ -134,10 +132,14 @@ pub fn decode_hook_payload(v: Value) -> Result<AgentEvent> {
         // (cascade / liveness / readiness) as a CC subagent — source-agnostic.
         // Wire format captured live (Codex 0.135, gpt-5.5).
         "SubagentStart" => {
+            // `.filter(non-empty)`: an empty `agent_id` string passes `as_str`
+            // but would key a phantom child that never coalesces with the real
+            // rollout — reject it as malformed instead.
             let child = obj
                 .get("agent_id")
                 .and_then(|s| s.as_str())
-                .ok_or_else(|| anyhow!("SubagentStart missing agent_id"))?;
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow!("SubagentStart missing/empty agent_id"))?;
             let cwd = obj.get("cwd").and_then(|s| s.as_str()).unwrap_or("").into();
             Ok(AgentEvent::SessionStart {
                 agent_id: AgentId::from_parts(source, child),
@@ -149,11 +151,16 @@ pub fn decode_hook_payload(v: Value) -> Result<AgentEvent> {
         }
         // Subagent done — end the CHILD promptly (else its rollout lingers to
         // the 30-min stale-sweep). Keyed on `agent_id`; the parent keeps running.
+        // Best-effort: if this hook wins the race against the child's own slot
+        // creation, the `SessionEnd` is a harmless no-op (no slot yet) and the
+        // later-created orphan falls back to the stale-sweep — Codex has no
+        // durable subagent-stop marker, so "prompt" is not guaranteed.
         "SubagentStop" => {
             let child = obj
                 .get("agent_id")
                 .and_then(|s| s.as_str())
-                .ok_or_else(|| anyhow!("SubagentStop missing agent_id"))?;
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow!("SubagentStop missing/empty agent_id"))?;
             Ok(AgentEvent::SessionEnd {
                 agent_id: AgentId::from_parts(source, child),
             })
@@ -162,26 +169,22 @@ pub fn decode_hook_payload(v: Value) -> Result<AgentEvent> {
     }
 }
 
-pub(crate) fn make_tool_detail(
-    tool_name: &str,
-    target: String,
-    input: Option<&Value>,
-) -> ToolDetail {
-    // Detect the subagent-dispatch tool SEMANTICALLY, not just by name. The
-    // dispatch tool was renamed `Task` → `Agent` (CC v2.1.63, undocumented), and
-    // upstream can rename it again. Its input always carries `subagent_type`
-    // (stable across that rename), so key on that first; fall back to the known
-    // names for the rare input-less call. The reducer keys subagent-leak
-    // suppression (`active_tasks`) and b1 Task-drain completion on `is_task()`,
-    // so a missed dispatch silently disables both for real subagents.
-    let has_subagent_type = input
-        .and_then(|v| v.get("subagent_type"))
-        .is_some_and(|v| !v.is_null());
+pub(crate) fn make_tool_detail(tool_name: &str, input: Option<&Value>) -> ToolDetail {
+    // Detect the subagent-dispatch tool SEMANTICALLY, by the PRESENCE of a
+    // `subagent_type` input field. The dispatch tool was renamed `Task` →
+    // `Agent` (CC v2.1.63, undocumented) and upstream can rename it again, but
+    // the field is stable. Key on presence (not value): a renamed tool emitting
+    // `subagent_type: null` is still caught AND surfaces the drift breadcrumb —
+    // the one drift we most need to see. Known names are the fallback for the
+    // rare input-less call. The reducer keys subagent-leak suppression
+    // (`active_tasks`) and b1 Task-drain completion on `is_task()`, so a missed
+    // dispatch silently disables both for real subagents.
+    let has_subagent_type = input.and_then(|v| v.get("subagent_type")).is_some();
     let known_name = tool_name == "Task" || tool_name == "Agent";
     if has_subagent_type || known_name {
         // Drift breadcrumb: a dispatch under a name we don't recognise means
         // upstream renamed the tool again. Semantic detection keeps us working;
-        // this debug line surfaces the new name so the known set can be updated.
+        // this surfaces the new name so the known set / docs can be updated.
         if has_subagent_type && !known_name {
             tracing::debug!(
                 tool = %tool_name,
@@ -190,8 +193,12 @@ pub(crate) fn make_tool_detail(
         }
         ToolDetail::Task
     } else {
+        // `target` (the file/cmd descriptor) is only meaningful on the Generic
+        // branch, so derive it here lazily — no wasted alloc on the dispatch
+        // path, and callers can't pass a `target` computed from a different
+        // `input` than the one used for detection.
         ToolDetail::Generic {
-            display: format!("{tool_name}{target}"),
+            display: format!("{tool_name}{}", describe_tool_target(tool_name, input)),
         }
     }
 }

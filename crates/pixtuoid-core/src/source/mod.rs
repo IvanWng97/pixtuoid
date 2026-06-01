@@ -64,14 +64,16 @@ impl ToolDetail {
     }
 }
 
-/// Test-ergonomic conversion. `"Task"` maps to `Task`; everything else
-/// maps to `Generic`. Production code should call `decoder::make_tool_detail`
-/// directly so it sees `tool_name` and `target` as separate inputs, but
-/// tests that build `AgentEvent::ActivityStart` manually benefit from
-/// `Some("Task".into())` working as expected.
+/// Test-ergonomic conversion by tool NAME. Both subagent-dispatch names map to
+/// `Task` — `"Agent"` (current CC) and legacy `"Task"` — so a test written as
+/// `Some("Agent".into())` exercises the real `is_task()` path (suppression /
+/// Delegating / b1) instead of silently falling to `Generic`. Production code
+/// calls `decoder::make_tool_detail`, which additionally detects a dispatch
+/// SEMANTICALLY via the `subagent_type` input field (the rename-resilient path);
+/// this name-only helper can't see the input, so it keys on the known names.
 impl From<&str> for ToolDetail {
     fn from(s: &str) -> Self {
-        if s == "Task" {
+        if s == "Task" || s == "Agent" {
             ToolDetail::Task
         } else {
             ToolDetail::Generic {

@@ -4,7 +4,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use serde_json::Value;
 
-use crate::source::decoder::{describe_tool_target, make_tool_detail};
+use crate::source::decoder::make_tool_detail;
 use crate::source::hook::HookSocketListener;
 use crate::source::jsonl::JsonlWatcher;
 use crate::source::{Activity, AgentEvent, Source, TaggedSender};
@@ -110,13 +110,11 @@ pub fn decode_cc_line(transcript_path: &str, source: &str, v: Value) -> Result<V
                 }
                 let id = bobj.get("id").and_then(|s| s.as_str()).map(String::from);
                 let name = bobj.get("name").and_then(|s| s.as_str()).unwrap_or("?");
-                let input = bobj.get("input");
-                let target = describe_tool_target(name, input);
                 out.push(AgentEvent::ActivityStart {
                     agent_id,
                     activity: Activity::Typing,
                     tool_use_id: id,
-                    detail: Some(make_tool_detail(name, target, input)),
+                    detail: Some(make_tool_detail(name, bobj.get("input"))),
                 });
             }
         }
@@ -213,7 +211,11 @@ pub fn cc_session_ended(tail: &[u8]) -> bool {
 /// last segment is the project basename. Without this, an empty-cwd Rename
 /// silently degrades a good hook-derived `cc·dotfiles` back to `cc`.
 pub fn cc_derive_label(path: &Path, _source: &str, cwd: &Path) -> String {
-    if path.to_string_lossy().contains("subagents") {
+    // Slash-bounded, matching `jsonl::detect_parent_id` — a loose `"subagents"`
+    // substring false-positives on a parent project whose dir name merely
+    // contains it (e.g. a repo `subagents-paper`), mislabeling it "subagent"
+    // while detect_parent_id correctly leaves parent_id=None (inconsistent slot).
+    if path.to_string_lossy().contains("/subagents/") {
         return "subagent".to_string();
     }
     if cwd != Path::new("") && cwd != Path::new("/") {
@@ -261,6 +263,18 @@ mod tests {
         assert_eq!(
             cc_derive_label(path, "claude-code", Path::new("/repo")),
             "subagent"
+        );
+    }
+
+    #[test]
+    fn label_does_not_false_positive_on_subagents_in_project_name() {
+        // A parent transcript for a repo named `subagents-paper` encodes to a
+        // project dir containing the substring "subagents" but no `/subagents/`
+        // segment — it must NOT be mislabeled "subagent".
+        let path = Path::new("/Users/me/.claude/projects/-Users-me-subagents-paper/abc.jsonl");
+        assert_eq!(
+            cc_derive_label(path, "claude-code", Path::new("/Users/me/subagents-paper")),
+            "cc·subagents-paper"
         );
     }
 }

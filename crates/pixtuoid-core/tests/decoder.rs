@@ -155,6 +155,36 @@ fn codex_subagent_stop_ends_child_not_parent() {
     }
 }
 
+// A Subagent hook with an absent OR empty agent_id must be rejected (Err →
+// logged + skipped by the listener), never default to "" and key a phantom
+// child that would never coalesce with the real rollout.
+#[test]
+fn codex_subagent_hooks_reject_missing_or_empty_agent_id() {
+    for event in ["SubagentStart", "SubagentStop"] {
+        // absent
+        assert!(
+            decode_hook_payload(json!({
+                "hook_event_name": event,
+                "session_id": "parent-sess",
+                "_pixtuoid_source": "codex"
+            }))
+            .is_err(),
+            "{event} without agent_id must Err"
+        );
+        // present-but-empty
+        assert!(
+            decode_hook_payload(json!({
+                "hook_event_name": event,
+                "session_id": "parent-sess",
+                "agent_id": "",
+                "_pixtuoid_source": "codex"
+            }))
+            .is_err(),
+            "{event} with empty agent_id must Err"
+        );
+    }
+}
+
 #[test]
 fn cc_jsonl_assistant_tool_use_is_activity_start() {
     let transcript = "/Users/me/.claude/projects/x/ses-abc.jsonl";
