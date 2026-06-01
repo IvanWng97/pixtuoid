@@ -29,6 +29,7 @@ from __future__ import annotations
 import pathlib
 import re
 import sys
+import urllib.error
 import urllib.request
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
@@ -80,56 +81,71 @@ def main() -> int:
     review: list[str] = []
     errors: list[str] = []
 
-    # --- Codex hook events -------------------------------------------------
+    # Read what WE depend on from our OWN source first. A failure here means the
+    # monitor itself is broken (decoder.rs / install/codex.rs refactored away from
+    # what the parsers expect) — that is a LOUD breaking signal, never a transient
+    # one, or drift monitoring would silently stop with zero alarm.
+    codex_ours = None
+    dispatch_names = None
     try:
-        ours = read_codex_events()
-        text = fetch(CODEX_PROTOCOL_URL)
-        upstream = upstream_codex_hooks(text)
-        if upstream is None:
-            breaking.append(
-                "Codex `HookEventName` enum not found at the pinned path "
-                "(codex-rs/protocol/src/protocol.rs) — upstream moved it; "
-                "update CODEX_PROTOCOL_URL / the parser."
-            )
-        else:
-            for ev in sorted(ours):
-                if ev not in upstream:
-                    breaking.append(
-                        f"Codex hook `{ev}` (registered in CODEX_EVENTS) is GONE "
-                        f"from upstream HookEventName — likely renamed; the decoder "
-                        f"will silently drop it."
-                    )
-            for ev in sorted(upstream - ours - CODEX_KNOWN_OMITTED):
-                review.append(
-                    f"new Codex hook `{ev}` upstream — we neither register nor "
-                    f"intentionally omit it (add a decoder arm + CODEX_EVENTS, or "
-                    f"add it to CODEX_KNOWN_OMITTED)."
-                )
-    except urllib.error.URLError as e:
-        errors.append(f"Codex source fetch failed (transient?): {e}")
-    except Exception as e:  # noqa: BLE001 — report any unexpected failure
-        errors.append(f"Codex check error: {e}")
-
-    # --- CC subagent-dispatch tool -----------------------------------------
-    try:
-        dispatch = read_dispatch_names()  # e.g. {"Task", "Agent"}
-        tools = fetch(CC_TOOLS_URL)
-        # The current dispatch tool must still appear in the tools reference.
-        # We don't require legacy names — only that at least one name we'd
-        # detect by-name is still the documented dispatch tool.
-        present = [n for n in dispatch if re.search(rf"`{re.escape(n)}`", tools)]
-        if not present:
-            breaking.append(
-                f"None of our known dispatch tool names {sorted(dispatch)} appear "
-                f"in CC tools-reference — the subagent tool was likely renamed "
-                f"again. Update make_tool_detail's known names. (Semantic "
-                f"subagent_type detection still works, but the breadcrumb/name "
-                f"fallback is stale.)"
-            )
-    except urllib.error.URLError as e:
-        errors.append(f"CC tools-reference fetch failed (transient?): {e}")
+        codex_ours = read_codex_events()
+        dispatch_names = read_dispatch_names()
     except Exception as e:  # noqa: BLE001
-        errors.append(f"CC check error: {e}")
+        breaking.append(
+            f"drift-watch cannot read our own source ({e}) — the parsers in "
+            f"check_upstream_drift.py are stale (decoder.rs / install refactored?). "
+            f"The monitor is blind until the script is fixed."
+        )
+
+    # --- Codex hook events (only the FETCH is transient) -------------------
+    if codex_ours is not None:
+        try:
+            text = fetch(CODEX_PROTOCOL_URL)
+        except urllib.error.URLError as e:
+            errors.append(f"Codex source fetch failed (transient?): {e}")
+            text = None
+        if text is not None:
+            upstream = upstream_codex_hooks(text)
+            if upstream is None:
+                breaking.append(
+                    "Codex `HookEventName` enum not found at the pinned path "
+                    "(codex-rs/protocol/src/protocol.rs) — upstream moved it; "
+                    "update CODEX_PROTOCOL_URL / the parser."
+                )
+            else:
+                for ev in sorted(codex_ours):
+                    if ev not in upstream:
+                        breaking.append(
+                            f"Codex hook `{ev}` (registered in CODEX_EVENTS) is GONE "
+                            f"from upstream HookEventName — likely renamed; the "
+                            f"decoder will silently drop it."
+                        )
+                for ev in sorted(upstream - codex_ours - CODEX_KNOWN_OMITTED):
+                    review.append(
+                        f"new Codex hook `{ev}` upstream — we neither register nor "
+                        f"intentionally omit it (add a decoder arm + CODEX_EVENTS, "
+                        f"or add it to CODEX_KNOWN_OMITTED)."
+                    )
+
+    # --- CC subagent-dispatch tool (only the FETCH is transient) -----------
+    if dispatch_names is not None:
+        try:
+            tools = fetch(CC_TOOLS_URL)
+        except urllib.error.URLError as e:
+            errors.append(f"CC tools-reference fetch failed (transient?): {e}")
+            tools = None
+        if tools is not None:
+            # At least one name we'd detect by-name must still be the documented
+            # dispatch tool. (Losing a legacy name like `Task` is fine.)
+            present = [n for n in dispatch_names if re.search(rf"`{re.escape(n)}`", tools)]
+            if not present:
+                breaking.append(
+                    f"None of our known dispatch tool names {sorted(dispatch_names)} "
+                    f"appear in CC tools-reference — the subagent tool was likely "
+                    f"renamed again. Update make_tool_detail's known names. (Semantic "
+                    f"subagent_type detection still works, but the name fallback is "
+                    f"stale.)"
+                )
 
     # --- report ------------------------------------------------------------
     out = ["# pixtuoid upstream wire-format drift report", ""]
