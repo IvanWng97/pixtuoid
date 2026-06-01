@@ -53,8 +53,14 @@ tui/
                     time_of_day.rs, lighting.rs), ambient.rs (sun spot + dust motes + ceiling halos),
                     drawable.rs (y-sort Drawable enum + dispatch), effects.rs (glow/z's/dots/steam/dust/bubble),
                     palette.rs (agent palette + recolor + tool_glow_tint), anchors.rs (breath, walk position,
-                    character_anchor), furniture.rs (coffee table, area rug, side table, pantry table/chair)
+                    character_anchor; the per-pose anchor fns take `sprite_w` — the pack's character width,
+                    resolved ONCE per frame [8 bundled / 10 robot] — so a non-8-wide pack centers correctly),
+                    furniture.rs (coffee table, area rug, side table, pantry table/chair)
 ```
+
+> Furniture drawables y-sort via `core::layout::z_sort_row` (the south base row, tied to the mask's
+> `anchored_top_left` so the sprite and its blocked ground can't drift); `center_pin_south_offset` remains
+> only as the offset primitive for shadow/halo placement. See `core::layout::placement`.
 
 ## Known sharp edges (don't be surprised by these)
 

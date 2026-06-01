@@ -33,8 +33,15 @@ src/
 │                         [MeetingSofaBody/MeetingTable/PantryTable/PantryChair/FloorLamp/LoungeSideTable].
 │                         Only PLANT_FOOTPRINT [shared by the 4 plant rows] + DESK_APPROACH/desk_walk_anchor
 │                         live alongside; walls use the linear WALL_THICK_H/V),
-│                       mask.rs (build_walkable_mask — stamps each obstacle's footprint [from the consts above,
-│                         no inline literals]; WALL_THICK_H/V wall footprints),
+│                       placement.rs (Anchor {Center,TopLeft} + anchored_top_left + z_sort_row — the ONE
+│                         convention for WHERE a box sits relative to its `pos` [footprint origin = sprite
+│                         origin] and its y-sort row; shared by mask.rs AND the tui renderer so the blocked
+│                         ground, the blitted sprite, and the z-key can't drift. Anchor is passed per
+│                         PLACEMENT SITE, not stored on FurnitureDef — Whiteboard is Center as pod decor but
+│                         TopLeft as wall decor),
+│                       mask.rs (build_walkable_mask — stamps each obstacle via stamp_anchored/anchored_top_left
+│                         [no inline origin math]; WALL_THICK_H/V wall footprints; pantry south-strip +
+│                         meeting-furniture-too-narrow gate are the documented exceptions),
 │                       approach.rs (stand_point + walk_target — the walkable cell an agent stands/approaches at,
 │                         on the side nearest its desk, filtered by FurnitureDef.approach (ApproachSides))
 ├── physics.rs          pure walk-pace physics (no terminal/router deps): WalkIntent, WalkProfile,
@@ -64,6 +71,8 @@ src/
 - **`AgentSlot.state_started_at` is `std::time::SystemTime`** — process-local in practice (no wall-clock anchoring), but the type is already serializable, so the v2 daemon split won't need a type swap. The pose system computes elapsed time relative to it for animation timing.
 - **`ActivityState::Active` ≠ "tool is currently executing".** CC fires PreToolUse → PostToolUse around every individual tool call, so without debouncing the slot flickers Active/Idle on every tool. The reducer treats `ActivityEnd` as "arm pending idle" (`AgentSlot.pending_idle_at`) instead of an immediate flip; the actual transition to `Idle` is realized by `reducer::tick` after `ACTIVE_GRACE_WINDOW = 1500 ms`. Any `ActivityStart` inside the window cancels the pending idle. Net: the slot reads as continuously Active for chained tool work, and visible Idle lags real Idle by up to 1.5 s + the 1 s sweep interval (≈ 2.5 s worst case). Don't add code that depends on `Active → Idle` being instant.
 - **The reducer's permission `Waiting` resolves on the gated tool's PostToolUse.** A `PermissionRequest`/decision sets `Waiting`; the matching tool's `ActivityEnd` (PostToolUse) clears it (`gated_before_waiting` tracking). It is also cleared by `SessionEnd` + retained-eviction; `gated_before_waiting` is evicted at BOTH sites — `tick`'s `retain` and `sweep_exited`'s explicit `remove` (the apply-path eviction, pinned by `gated_before_waiting_evicted_on_apply_path_sweep`). Keep the two sites in sync if you touch eviction.
+- **A meeting room narrower than `MEETING_FURNITURE_MIN_W` (compute.rs) has NO sofa/table/seats — bare floor, BY DESIGN.** Below it the 16px sofa body leaves too little margin for the coarse 4×4 router to reach the seats, so an idle agent sent to sit would TELEPORT (find_path None → straight-line fallback). The room Bounds/walls/door still exist; only the unroutable furniture is dropped (same degradation the dense floor uses when too short). So "meeting room exists" no longer implies "meeting slots exist" — don't "fix" the missing sofa at small sizes. Guarded by `pathfind::tests::every_wander_waypoint_is_routable_on_the_coarse_grid` (coarse-grid reachability across seeds × sizes — stronger than the pixel-BFS connectivity sweep).
+- **Pantry counter blocks only a shallow `PANTRY_FOOTPRINT_DEPTH` south strip, not its full sprite height.** The counter is a ¾-view sprite centered on `pos`; only its south base contacts the floor (the receding cabinet tops overhang, invariant #6). `mask.rs` south-anchors a 3px strip; a character behind it is occluded by the back-cap (`occludes_behind`), couch-style. `obstacle_footprint` still returns the FULL size for `stand_point` (the agent parks clear of the whole visual) — the mask footprint and approach footprint are intentionally decoupled for this one runtime-sized kind.
 
 ## Where to look
 
