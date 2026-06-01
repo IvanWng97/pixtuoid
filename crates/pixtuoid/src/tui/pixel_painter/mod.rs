@@ -54,7 +54,7 @@ pub(in crate::tui) use anchors::character_anchor;
 pub(in crate::tui) use anchors::walking_position;
 use anchors::{
     back_couch_anchor, compute_door_frame_idx, seated_anchor, standing_at_desk_anchor,
-    walking_anchor, waypoint_anchor, waypoint_rank_offset_x, with_breath,
+    walking_anchor, waypoint_anchor, waypoint_rank_offset_x, with_breath, CHARACTER_SPRITE_W,
 };
 use background::{
     dim_floor_overlay, paint_ceiling_pool, paint_clock, paint_corridor_runner,
@@ -1304,6 +1304,16 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
         .waypoints
         .iter()
         .position(|w| w.kind == crate::tui::layout::WaypointKind::Couch);
+    // The pack's character sprite width (8 for the bundled pack, 10 for the
+    // robot pack). All character poses share one width, so resolve it ONCE from
+    // a reference pose and center every anchor on it — a non-8-wide pack would
+    // otherwise blit ~1px off (the anchors hardcoded 8). Fallback to the bundled
+    // default if the pack lacks the reference anim.
+    let char_w = ctx
+        .pack
+        .animation("standing")
+        .and_then(|a| a.frames.first())
+        .map_or(CHARACTER_SPRITE_W, |f| f.width);
     for agent in &agents {
         let Some(desk) = ctx.layout.home_desks.get(agent.desk_index).copied() else {
             continue;
@@ -1321,7 +1331,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
         };
         match p {
             Pose::SeatedIdle => {
-                let anchor_no_breath = seated_anchor(desk);
+                let anchor_no_breath = seated_anchor(desk, char_w);
                 let anchor = with_breath(anchor_no_breath, agent.agent_id, ctx.now);
                 let sleep_variant = if agent.agent_id.raw() % 2 == 0 {
                     "seated_sleeping"
@@ -1348,7 +1358,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
                 });
             }
             Pose::SeatedThinking => {
-                let anchor_no_breath = seated_anchor(desk);
+                let anchor_no_breath = seated_anchor(desk, char_w);
                 let anchor = with_breath(anchor_no_breath, agent.agent_id, ctx.now);
                 drawables.push(Drawable {
                     // Breath-independent z-key (matches AtWaypoint/AimlessAt):
@@ -1370,7 +1380,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
                 });
             }
             Pose::SeatedTyping { frame } => {
-                let anchor_no_breath = seated_anchor(desk);
+                let anchor_no_breath = seated_anchor(desk, char_w);
                 let anchor = with_breath(anchor_no_breath, agent.agent_id, ctx.now);
                 drawables.push(Drawable {
                     // Breath-independent z-key (matches AtWaypoint/AimlessAt):
@@ -1392,7 +1402,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
                 });
             }
             Pose::StandingAtDesk => {
-                let anchor_no_breath = standing_at_desk_anchor(desk);
+                let anchor_no_breath = standing_at_desk_anchor(desk, char_w);
                 let anchor = with_breath(anchor_no_breath, agent.agent_id, ctx.now);
                 let is_waiting = matches!(agent.state, ActivityState::Waiting { .. });
                 drawables.push(Drawable {
@@ -1434,10 +1444,10 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
                     );
                     let (anim_name, anchor_base, sprite_h, flip_x) = match kind {
                         WaypointKind::Couch => {
-                            ("back_couch", back_couch_anchor(stand), 9u16, false)
+                            ("back_couch", back_couch_anchor(stand, char_w), 9u16, false)
                         }
                         WaypointKind::Pantry => {
-                            ("holding_coffee", waypoint_anchor(stand), 12u16, false)
+                            ("holding_coffee", waypoint_anchor(stand, char_w), 12u16, false)
                         }
                         // Meeting sofa: the north-side seat faces the viewer
                         // across the table (front "seated"); the south-side seat
@@ -1445,12 +1455,12 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
                         // facing each other. Both reuse the 16×7-sofa anchor.
                         WaypointKind::MeetingSofa => {
                             let (anim, flip) = meeting_sprite(kind, wp_obj.facing);
-                            (anim, back_couch_anchor(stand), 9u16, flip)
+                            (anim, back_couch_anchor(stand, char_w), 9u16, flip)
                         }
                         // Meeting stand: beside the table, facing inward.
                         WaypointKind::MeetingStand => {
                             let (anim, flip) = meeting_sprite(kind, wp_obj.facing);
-                            (anim, waypoint_anchor(stand), 12u16, flip)
+                            (anim, waypoint_anchor(stand, char_w), 12u16, flip)
                         }
                         // PhoneBooth + StandingDesk → agent just stands at the
                         // decor. waypoint_anchor positions them directly above
@@ -1460,7 +1470,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
                         | WaypointKind::StandingDesk
                         | WaypointKind::VendingMachine
                         | WaypointKind::Printer => {
-                            ("standing", waypoint_anchor(stand), 12u16, false)
+                            ("standing", waypoint_anchor(stand, char_w), 12u16, false)
                         }
                     };
                     let anchor_no_breath = Point {
@@ -1515,7 +1525,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
             Pose::AimlessAt { dest } => {
                 // Breath-independent sort key (like the AtWaypoint arm): the
                 // ±1px breath bob must not flicker the z-order frame to frame.
-                let anchor_no_breath = waypoint_anchor(dest);
+                let anchor_no_breath = waypoint_anchor(dest, char_w);
                 let anchor = with_breath(anchor_no_breath, agent.agent_id, ctx.now);
                 drawables.push(Drawable {
                     anchor_y: anchor_no_breath.y + 12,
@@ -1549,7 +1559,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
                     new_coffee_carriers.push(agent.agent_id);
                 }
                 let pos = walking_position(from, to, t_x1000);
-                let walker_anchor = walking_anchor(pos);
+                let walker_anchor = walking_anchor(pos, char_w);
                 let dx = to.x as i32 - from.x as i32;
                 let dy = to.y as i32 - from.y as i32;
                 let going_back = dy.unsigned_abs() > dx.unsigned_abs() && dy < 0;
@@ -2130,11 +2140,16 @@ mod tests {
             Point { x: 100, y: 60 },
             Point { x: 7, y: 5 }, // near-origin: saturating_sub edge
         ] {
-            assert_eq!(
-                walking_anchor(desk_walk_anchor(desk)),
-                seated_anchor(desk),
-                "walking_anchor(desk_walk_anchor({desk:?})) must equal seated_anchor",
-            );
+            // The identity must hold for ANY pack character width — the bundled
+            // 8-wide AND the robot 10-wide — because desk_walk_anchor's +4 / -8
+            // cancel against the width-centering for every w.
+            for w in [CHARACTER_SPRITE_W, 10] {
+                assert_eq!(
+                    walking_anchor(desk_walk_anchor(desk), w),
+                    seated_anchor(desk, w),
+                    "walking_anchor(desk_walk_anchor({desk:?}), {w}) must equal seated_anchor",
+                );
+            }
         }
     }
 
@@ -2222,7 +2237,7 @@ mod tests {
         // under the desktop). They must sort BEFORE the desk so the
         // desk occludes their lower body in top-down view.
         let desk_y: u16 = 20;
-        let seated_anchor = seated_anchor(Point { x: 0, y: desk_y });
+        let seated_anchor = seated_anchor(Point { x: 0, y: desk_y }, CHARACTER_SPRITE_W);
         let char_feet_anchor = seated_anchor.y + 12;
         let desk_anchor_y = desk_y + 8;
         assert!(
