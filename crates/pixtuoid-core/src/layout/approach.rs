@@ -453,6 +453,35 @@ mod tests {
     }
 
     #[test]
+    fn approach_point_seat_degrades_to_the_back_when_all_allowed_sides_are_walled_in() {
+        // A North-facing sofa boxed in on N/E/W (its three ALLOWED sides), with
+        // ONLY the south backrest side opening onto a reachable corridor. The
+        // allowed-side selector finds nothing, so it must DEGRADE to the nearest
+        // reachable ANY side (the back) rather than returning the blocked `pos`
+        // (which would teleport the agent onto the seat with no walk).
+        let pos = Point { x: 50, y: 50 };
+        let mut m = WalkableMask::new_open(100, 100);
+        m.mark_blocked(0, 0, 100, 100, 0); // block everything…
+        m.mark_walkable(48, 54, 5, 44); // …then carve a corridor SOUTH of the seat
+        let reach = ReachSet::from_mask(&m, Point { x: 50, y: 90 });
+        let s = approach_point(
+            Furniture::MeetingSofa,
+            pos,
+            Facing::North,
+            (0, 0),
+            &m,
+            Point { x: 50, y: 95 }, // origin in the corridor (south)
+            &reach,
+        );
+        assert_ne!(s, pos, "must not fall back to the blocked seat (teleport)");
+        assert!(reach.reaches(s), "degraded approach must still be routable");
+        assert!(
+            s.x == pos.x && s.y > pos.y,
+            "only the south back is reachable → degrade to it, got {s:?}"
+        );
+    }
+
+    #[test]
     fn approach_point_for_obstacle_matches_stand_point_when_reachable() {
         // For an obstacle on an open-enough field, the approach point is exactly
         // the stand cell (the reachability filter drops nothing). This pins the
