@@ -79,8 +79,35 @@ fn paint_approach(buf: &mut RgbBuffer, layout: &Layout) {
     for wp in &layout.waypoints {
         let def = furniture_def(wp.kind.furniture());
         if def.occupies_pos {
-            // Seat / stand-on cell — the sprite sits ON `pos`, no side approach.
+            // Seat / stand-on cell — the sprite SETTLES ON `pos` (magenta).
             blob(buf, wp.pos.x as i32, wp.pos.y as i32, SEAT, 0.7);
+            // ...but A* routes to an APPROACH POINT off an allowed side (green),
+            // then a post-A* settle bridges approach → seat. Mark the first
+            // walkable + reachable cell on each ALLOWED side (facing-rotated) so
+            // the approach point reads DISTINCT from the seat — the viewer can
+            // confirm the agent enters from its natural side, not the backrest.
+            for (dx, dy) in DIRS {
+                if !def.approach.allows(wp.facing, (dx, dy)) {
+                    continue;
+                }
+                for dist in 1..=SEAT_APPROACH_SCAN {
+                    let cx = wp.pos.x as i32 + dx * dist;
+                    let cy = wp.pos.y as i32 + dy * dist;
+                    if cx < 0 || cy < 0 {
+                        break;
+                    }
+                    let c = Point {
+                        x: cx as u16,
+                        y: cy as u16,
+                    };
+                    if layout.is_walkable(c.x, c.y) {
+                        if layout.reachable.reaches(c) {
+                            blob(buf, cx, cy, APPROACH, 0.7);
+                        }
+                        break; // first walkable cell on this side wins
+                    }
+                }
+            }
             continue;
         }
         // Obstacle: mark the cell just off each ALLOWED side (facing-rotated).
@@ -128,6 +155,10 @@ fn paint_routes(buf: &mut RgbBuffer, scene: &SceneState, motion: &HashMap<AgentI
     }
 }
 
+/// Scan this far from a seat centre to clear the (wide) furniture body and land
+/// on the first floor cell — mirrors `approach.rs::SEAT_APPROACH_SCAN`.
+const SEAT_APPROACH_SCAN: i32 = 14;
+
 /// Integer Bresenham line between two pixel points.
 fn line(buf: &mut RgbBuffer, a: Point, b: Point, c: Rgb) {
     let (mut x0, mut y0) = (a.x as i32, a.y as i32);
@@ -151,5 +182,70 @@ fn line(buf: &mut RgbBuffer, a: Point, b: Point, c: Rgb) {
             err += dx;
             y0 += sy;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tui::layout::SceneLayout;
+
+    fn greenish(c: Rgb) -> bool {
+        c.1 > c.0 && c.1 > c.2
+    }
+    fn magentaish(c: Rgb) -> bool {
+        c.0 > c.1 && c.2 > c.1
+    }
+
+    /// The `w` overlay must show a seat's APPROACH POINT (green, where A* routes)
+    /// distinct from the SEAT cell (magenta, where the sprite settles) — so a
+    /// viewer can confirm the agent enters from its natural side, not the seat.
+    #[test]
+    fn overlay_marks_seat_approach_sides_distinct_from_the_seat_cell() {
+        let l = SceneLayout::compute_with_seed(200, 130, 8, 0).unwrap();
+        let couch = l
+            .waypoints
+            .iter()
+            .find(|w| w.kind == WaypointKind::Couch)
+            .expect("a lounge couch seat");
+        let mut buf = RgbBuffer::filled(l.buf_w, l.buf_h, Rgb(0, 0, 0));
+        paint_approach(&mut buf, &l);
+
+        assert!(
+            magentaish(buf.get(couch.pos.x, couch.pos.y)),
+            "seat cell must be tinted toward SEAT (magenta), got {:?}",
+            buf.get(couch.pos.x, couch.pos.y)
+        );
+
+        let def = furniture_def(couch.kind.furniture());
+        let mut found_green_approach = false;
+        for (dx, dy) in DIRS {
+            if !def.approach.allows(couch.facing, (dx, dy)) {
+                continue;
+            }
+            for dist in 1..=SEAT_APPROACH_SCAN {
+                let (cx, cy) = (
+                    couch.pos.x as i32 + dx * dist,
+                    couch.pos.y as i32 + dy * dist,
+                );
+                if cx < 0 || cy < 0 {
+                    break;
+                }
+                let c = Point {
+                    x: cx as u16,
+                    y: cy as u16,
+                };
+                if l.is_walkable(c.x, c.y) {
+                    if l.reachable.reaches(c) && greenish(buf.get(c.x, c.y)) {
+                        found_green_approach = true;
+                    }
+                    break;
+                }
+            }
+        }
+        assert!(
+            found_green_approach,
+            "at least one allowed, reachable approach cell must be tinted toward APPROACH (green)"
+        );
     }
 }

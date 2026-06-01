@@ -242,9 +242,10 @@ fn main() -> Result<()> {
         light: &mut light,
         mouse_pos: None,
         pinned_agent: None,
-        // The snapshot keeps its own cell-level --debug-walkable overlay + BFS
-        // report below; the live pixel overlay is the `w` toggle's job.
-        debug_walkable: false,
+        // `--debug-walkable` drives BOTH the live `w` pixel overlay (mask +
+        // approach-point/seat markers + A* routes, painted into the RgbBuffer
+        // here) AND the cell-level red wash + BFS connectivity report below.
+        debug_walkable: args.debug_walkable,
         ticker: &ticker,
         theme,
         theme_picker: args.theme_picker,
@@ -372,48 +373,11 @@ fn debug_paint_walkable_overlay(
         }
     }
 
-    // (reach_mask was computed above for the report.)
-
-    term.draw(|f| {
-        let term_buf = f.buffer_mut();
-        for cy in 0..scene_h {
-            for cx in 0..scene_w {
-                let py_top = cy * 2;
-                let py_bot = cy * 2 + 1;
-                let top_walk = layout.is_walkable(cx, py_top);
-                let bot_walk = layout.is_walkable(cx, py_bot);
-                let top_reach = top_walk && is_reachable(&reach_mask, &layout, cx, py_top);
-                let bot_reach = bot_walk && is_reachable(&reach_mask, &layout, cx, py_bot);
-
-                let top_color = if !top_walk {
-                    Some(Color::Rgb(230, 70, 70)) // obstacle = red
-                } else if !top_reach {
-                    Some(Color::Rgb(80, 120, 240)) // isolated = blue
-                } else {
-                    None
-                };
-                let bot_color = if !bot_walk {
-                    Some(Color::Rgb(230, 70, 70))
-                } else if !bot_reach {
-                    Some(Color::Rgb(80, 120, 240))
-                } else {
-                    None
-                };
-
-                if top_color.is_none() && bot_color.is_none() {
-                    continue;
-                }
-                let cell = &mut term_buf[(cx, cy)];
-                if let Some(c) = top_color {
-                    cell.fg = c;
-                }
-                if let Some(c) = bot_color {
-                    cell.bg = c;
-                }
-                cell.set_symbol("▀");
-            }
-        }
-    })?;
+    // No cell-level redraw: the live `w` pixel overlay (painted into the
+    // RgbBuffer in draw_scene) already visualizes the mask + approach/seat
+    // markers + routes at pixel resolution. A crude full-cell wash here would
+    // just overwrite it. The text report above is the unique value this pass
+    // adds (the BFS isolated-region "闪现" detector), so keep that and stop.
     Ok(())
 }
 
