@@ -101,6 +101,12 @@ pub struct MotionState {
     /// Index into `layout.waypoints` for the current wander destination,
     /// if it is a named waypoint.
     pub wander_dest_wp_idx: Option<usize>,
+    /// Seat foot cell `S` for the current wander waypoint (where the seated
+    /// sprite renders), when it's an occupied seat. `Some` ⇒ the walk SETTLES
+    /// from the approach point `wander_dest` onto `S` (and rises from `S` on the
+    /// way back), so the arrival/departure don't pop; `None` for obstacles /
+    /// aimless (the agent stands AT `wander_dest`).
+    pub wander_seat: Option<Point>,
     /// Last `now` at which `advance_wander` performed a transition. Used for
     /// idempotency: when `now <= last_advanced_at`, the call is a no-op on
     /// mutable state (computes pose from existing phase state only).
@@ -134,6 +140,7 @@ impl MotionState {
             wander_dest: Point { x: 0, y: 0 },
             wander_dest_kind: None,
             wander_dest_wp_idx: None,
+            wander_seat: None,
             last_advanced_at: SystemTime::UNIX_EPOCH,
             walk_path: None,
         }
@@ -265,11 +272,12 @@ pub fn advance_wander(
                     // stateless/stateful destinations stay in lockstep).
                     let desk_pt = layout.home_desks.get(slot.desk_index).copied();
                     let origin = desk_pt.unwrap_or(Point { x: 0, y: 0 });
-                    let (dest, dest_kind, wp_idx) =
+                    let (dest, dest_kind, wp_idx, seat) =
                         pick_wander_dest(id, ms.wander_cycle_n, layout, origin);
                     ms.wander_dest = dest;
                     ms.wander_dest_kind = dest_kind;
                     ms.wander_dest_wp_idx = wp_idx;
+                    ms.wander_seat = seat;
 
                     let desk = desk_pt.unwrap_or(dest);
                     // Route from desk+(6,4) (the seated anchor) so the walk-out
@@ -279,7 +287,9 @@ pub fn advance_wander(
                     // and the walk-back already uses the same +(6,4) offset.
                     let from = desk_walk_anchor(desk);
                     let path = router.route(&layout.walkable, overlay, from, dest);
-                    let len = octile_path_len(&path).max(1);
+                    // Include the settle (approach → seat) so the profile duration
+                    // covers the full walk, not just the route to the approach.
+                    let len = (octile_path_len(&path) + settle_len(dest, seat)).max(1);
                     ms.wander_profile = Some(walk_profile(len, WalkIntent::WanderOut, id));
 
                     ms.wander_phase = WanderPhase::WalkingOut;
@@ -322,7 +332,9 @@ pub fn advance_wander(
                     .unwrap_or(ms.wander_dest);
                 let snap_to = desk_walk_anchor(desk);
                 let back_path = router.route(&layout.walkable, overlay, ms.wander_dest, snap_to);
-                let back_len = octile_path_len(&back_path).max(1);
+                let back_len = (octile_path_len(&back_path)
+                    + settle_len(ms.wander_dest, ms.wander_seat))
+                .max(1);
 
                 ms.wander_phase = WanderPhase::AtWaypoint;
                 ms.wander_phase_started_at = ms
@@ -351,7 +363,9 @@ pub fn advance_wander(
                     let snap_to = desk_walk_anchor(desk);
                     let back_path =
                         router.route(&layout.walkable, overlay, ms.wander_dest, snap_to);
-                    let back_len = octile_path_len(&back_path).max(1);
+                    let back_len = (octile_path_len(&back_path)
+                        + settle_len(ms.wander_dest, ms.wander_seat))
+                    .max(1);
                     ms.wander_profile = Some(walk_profile(back_len, WalkIntent::WanderBack, id));
                 }
 
@@ -420,12 +434,12 @@ fn pick_wander_dest(
     cycle_n: u64,
     layout: &Layout,
     origin: Point,
-) -> (Point, Option<WaypointKind>, Option<usize>) {
+) -> (Point, Option<WaypointKind>, Option<usize>, Option<Point>) {
     if is_aimless_cycle(id, cycle_n) {
         // Shared seed helper so this can never drift from core::pose::idle_pose.
         let seed = aimless_wander_seed(id, cycle_n);
         let p = pick_aimless_dest(layout, seed);
-        (p, None, None)
+        (p, None, None, None)
     } else {
         let wp_idx = waypoint_index_for_cycle(id, cycle_n, layout.waypoints.len());
         let wp = layout.waypoints[wp_idx];
@@ -442,7 +456,10 @@ fn pick_wander_dest(
             origin,
             &layout.reachable,
         );
-        (dest, Some(wp.kind), Some(wp_idx))
+        // Seat foot cell `S`: the walk SETTLES from `dest` onto it (the sprite
+        // renders here). `None` for obstacles — the agent stands AT `dest`.
+        let seat = pixtuoid_core::layout::seated_foot_cell(wp.kind.furniture(), wp.pos);
+        (dest, Some(wp.kind), Some(wp_idx), seat)
     }
 }
 
@@ -457,6 +474,13 @@ pub fn octile_path_len(path: &[Point]) -> u32 {
         return 0;
     }
     path.windows(2).map(|w| octile_distance(w[0], w[1])).sum()
+}
+
+/// Octile length of the settle segment `approach → seat`, or 0 when there is no
+/// seat (obstacle/aimless). Added to a wander leg's profile length so its
+/// DURATION covers the full walk including the short sit-down/stand-up settle.
+fn settle_len(approach: Point, seat: Option<Point>) -> u32 {
+    seat.map_or(0, |s| octile_distance(approach, s))
 }
 
 #[cfg(test)]

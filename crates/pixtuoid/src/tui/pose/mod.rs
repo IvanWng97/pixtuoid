@@ -113,9 +113,17 @@ pub fn derive_with_routing(
             // handled this gracefully too.
             let raw = derive_state_only(slot, now, layout)?;
             return match raw {
-                Pose::Walking { .. } => {
-                    route_walking_pose(slot, now, layout, router, overlay, history, motion, raw)
-                }
+                Pose::Walking { .. } => route_walking_pose(
+                    slot,
+                    now,
+                    layout,
+                    router,
+                    overlay,
+                    history,
+                    motion,
+                    raw,
+                    Settle::None,
+                ),
                 other => Some(other),
             };
         };
@@ -196,6 +204,7 @@ pub fn derive_with_routing(
                 frame,
                 carrying_coffee: false,
             },
+            Settle::None,
         );
     }
 
@@ -253,6 +262,7 @@ pub fn derive_with_routing(
                         frame,
                         carrying_coffee: false,
                     },
+                    Settle::None,
                 );
             }
             // walk_arrived — fall through to state-driven pose (Correction C).
@@ -292,6 +302,7 @@ pub fn derive_with_routing(
                 let ms = motion.get(&slot.agent_id)?;
                 let desk_point = *layout.home_desks.get(slot.desk_index)?;
                 let dest = ms.wander_dest;
+                let seat = ms.wander_seat;
                 // Walk-out starts at desk+(6,4) (the seated anchor) so there's
                 // no stand-up jump; symmetric with walk-back's snap_target.
                 // This intentionally differs from core::idle_pose's raw
@@ -318,6 +329,8 @@ pub fn derive_with_routing(
                         frame,
                         carrying_coffee: false,
                     },
+                    // Settle from the approach point onto the seat (sit down).
+                    seat.map_or(Settle::None, Settle::End),
                 );
             }
             WanderPhase::AtWaypoint => {
@@ -344,6 +357,7 @@ pub fn derive_with_routing(
                 let wander_dest = ms.wander_dest;
                 let wander_phase_started_at = ms.wander_phase_started_at;
                 let carrying_coffee = ms.wander_dest_kind == Some(WaypointKind::Pantry);
+                let seat = ms.wander_seat;
                 // Endpoint is desk+(6,4) to match seated_anchor so there's no
                 // jump on arrival; this intentionally differs from
                 // core::idle_pose's raw `to: desk` (only the routed TUI path is
@@ -369,6 +383,8 @@ pub fn derive_with_routing(
                         frame,
                         carrying_coffee,
                     },
+                    // Rise off the seat before walking back (stand up).
+                    seat.map_or(Settle::None, Settle::Start),
                 );
             }
             WanderPhase::Seated => {
@@ -505,7 +521,17 @@ pub fn derive_with_routing(
         raw
     };
 
-    route_walking_pose(slot, now, layout, router, overlay, history, motion, pose)
+    route_walking_pose(
+        slot,
+        now,
+        layout,
+        router,
+        overlay,
+        history,
+        motion,
+        pose,
+        Settle::None,
+    )
 }
 
 /// Apply A*-based polyline routing to a `Pose::Walking`, recording
@@ -516,6 +542,18 @@ pub fn derive_with_routing(
 /// state-driven walks (Correction B). Records history with `now` (not
 /// `slot.last_event_at`) so snap-back lookups are fresh.
 #[allow(clippy::too_many_arguments)]
+/// How a walk leg extends its polyline onto a seat — a short terminal motion the
+/// A* router never plans (the seat cell may be blocked). `End` = sit down on
+/// arrival (append the seat); `Start` = stand up on departure (prepend it).
+/// Makes walk-end ≡ render-feet so seat arrival/departure don't pop.
+#[derive(Clone, Copy)]
+enum Settle {
+    None,
+    End(Point),
+    Start(Point),
+}
+
+#[allow(clippy::too_many_arguments)]
 fn route_walking_pose(
     slot: &AgentSlot,
     now: SystemTime,
@@ -525,6 +563,7 @@ fn route_walking_pose(
     history: &mut PoseHistory,
     motion: &mut HashMap<AgentId, MotionState>,
     pose: Pose,
+    settle: Settle,
 ) -> Option<Pose> {
     let Pose::Walking {
         from,
@@ -582,6 +621,13 @@ fn route_walking_pose(
                 let mut p = router.route(&layout.walkable, overlay, from, to_jittered);
                 if let Some(last) = p.last_mut() {
                     *last = to;
+                }
+                // Settle: extend the polyline onto/off the seat (terminal "sit
+                // down" / "stand up" the router never plans). walk-end ≡ render.
+                match settle {
+                    Settle::End(s) if p.last() != Some(&s) => p.push(s),
+                    Settle::Start(s) if p.first() != Some(&s) => p.insert(0, s),
+                    _ => {}
                 }
                 // Only freeze genuinely CORNERED routes (>2 points). A straight
                 // 2-point walk has no interior corners to remap `t` onto, so it
