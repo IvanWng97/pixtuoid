@@ -19,7 +19,8 @@ mod placement;
 pub use approach::{stand_point, walk_target};
 pub use decor::{
     desk_furniture_def, desk_walk_anchor, furniture_def, ApproachSides, Facing, Furniture,
-    FurnitureDef, PlantKind, PodDecor, WallDecor, WaypointKind, DESK_APPROACH,
+    FurnitureDef, PlantKind, PodDecor, WallDecor, WaypointKind, DESK_APPROACH, SEAT_RENDER_Y_OFF,
+    WALKING_Y_OFF,
 };
 pub use mask::{WALL_THICK_H, WALL_THICK_V};
 pub use placement::{anchored_top_left, z_sort_row, Anchor};

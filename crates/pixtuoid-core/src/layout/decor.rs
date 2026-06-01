@@ -533,6 +533,18 @@ pub const fn desk_furniture_def() -> FurnitureDef {
     }
 }
 
+/// Vertical offset baked into the TUI walking / waypoint sprite anchor
+/// (`p.y - WALKING_Y_OFF`) — the 12-px standing/walking sprite height. Owned
+/// here in core (not just as a tui literal) so `seated_foot_cell` and the tui
+/// anchor reference ONE value: the "invert the render anchor to the settle
+/// cell" identity then holds by construction, not by two crates keeping a
+/// literal in sync. See [`seated_foot_cell`].
+pub const WALKING_Y_OFF: u16 = 12;
+/// Vertical offset of the back-view seat sprite anchor (`pos.y - SEAT_RENDER_Y_OFF`).
+/// The seat's settle cell is `WALKING_Y_OFF - SEAT_RENDER_Y_OFF = 5` px south of
+/// `pos` (where `walking_anchor` lands exactly on `back_couch_anchor`).
+pub const SEAT_RENDER_Y_OFF: u16 = 7;
+
 /// Offsets from a home desk's top-left to the agent's WALK anchor (the cell the
 /// agent walks to/from for its desk). Chosen so the TUI `walking_anchor` of this
 /// point equals the TUI `seated_anchor` of the desk — the agent settles exactly

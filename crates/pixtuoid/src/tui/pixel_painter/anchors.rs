@@ -7,6 +7,7 @@
 
 use std::time::SystemTime;
 
+use pixtuoid_core::layout::{SEAT_RENDER_Y_OFF, WALKING_Y_OFF};
 use pixtuoid_core::walkable::OccupancyOverlay;
 use pixtuoid_core::AgentSlot;
 
@@ -41,14 +42,14 @@ pub(super) fn standing_at_desk_anchor(desk: Point, sprite_w: u16) -> Point {
 pub(super) fn walking_anchor(p: Point, sprite_w: u16) -> Point {
     Point {
         x: p.x.saturating_sub(sprite_w / 2),
-        y: p.y.saturating_sub(12),
+        y: p.y.saturating_sub(WALKING_Y_OFF),
     }
 }
 
 pub(super) fn waypoint_anchor(wp: Point, sprite_w: u16) -> Point {
     Point {
         x: wp.x.saturating_sub(sprite_w / 2),
-        y: wp.y.saturating_sub(12),
+        y: wp.y.saturating_sub(WALKING_Y_OFF),
     }
 }
 
@@ -91,7 +92,7 @@ pub(super) fn with_breath(
 pub(super) fn back_couch_anchor(wp: Point, sprite_w: u16) -> Point {
     Point {
         x: wp.x.saturating_sub(sprite_w / 2),
-        y: wp.y.saturating_sub(7),
+        y: wp.y.saturating_sub(SEAT_RENDER_Y_OFF),
     }
 }
 
