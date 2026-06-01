@@ -2145,38 +2145,48 @@ mod tests {
 
     #[test]
     fn seated_foot_cell_settles_exactly_on_the_render_anchor() {
-        // The seat analog of the desk identity: for every occupies_pos furniture,
-        // the WALKING sprite anchor at seated_foot_cell(S) must equal the SEATED
-        // render anchor at pos — so the post-A* settle ends with zero pop on
-        // EVERY arrival side (back_couch render for couch/sofa, waypoint render
-        // for stand). This is the correctness lock for the whole convergence.
-        use pixtuoid_core::layout::{seated_foot_cell, WaypointKind};
+        // The UNIFIED zero-pop identity: for every occupies_pos Furniture (the
+        // seat kinds AND the home desk), the WALKING sprite anchor at
+        // seated_foot_cell(S) must equal the SEATED render anchor at pos — so the
+        // post-A* settle ends with zero pop on every arrival side. back_couch
+        // render for couch/sofa, waypoint render for stand, seated_anchor for the
+        // desk: ONE fn, the correctness lock for the whole convergence.
+        use pixtuoid_core::layout::{seated_foot_cell, Furniture};
         for pos in [
             Point { x: 40, y: 30 },
             Point { x: 100, y: 60 },
             Point { x: 6, y: 8 }, // near-origin: saturating_sub edge
         ] {
             for w in [CHARACTER_SPRITE_W, 10] {
-                for kind in [WaypointKind::Couch, WaypointKind::MeetingSofa] {
-                    let s = seated_foot_cell(kind, pos).expect("occupies_pos seat");
+                for f in [Furniture::Couch, Furniture::MeetingSofa] {
+                    let s = seated_foot_cell(f, pos).expect("occupies_pos seat");
                     assert_eq!(
                         walking_anchor(s, w),
                         back_couch_anchor(pos, w),
-                        "{kind:?}: walking_anchor(S={s:?}) must equal back_couch_anchor(pos={pos:?}) w={w}",
+                        "{f:?}: walking_anchor(S={s:?}) must equal back_couch_anchor(pos={pos:?}) w={w}",
                     );
                 }
-                let s =
-                    seated_foot_cell(WaypointKind::MeetingStand, pos).expect("occupies_pos seat");
+                let s = seated_foot_cell(Furniture::MeetingStand, pos).expect("occupies_pos seat");
                 assert_eq!(
                     walking_anchor(s, w),
                     waypoint_anchor(pos, w),
                     "MeetingStand: walking_anchor(S={s:?}) must equal waypoint_anchor(pos={pos:?}) w={w}",
                 );
+                // The home desk flows through the SAME fn — its S is
+                // desk_walk_anchor, its render seated_anchor. Same identity,
+                // proving the desk genuinely converged into Furniture.
+                let sd = seated_foot_cell(Furniture::Desk, pos).expect("desk is occupies_pos");
+                assert_eq!(
+                    walking_anchor(sd, w),
+                    seated_anchor(pos, w),
+                    "Desk: walking_anchor(seated_foot_cell)={:?} must equal seated_anchor",
+                    walking_anchor(sd, w),
+                );
             }
             // Obstacles have no fixed seat — their sprite renders AT the approach
             // cell, so seated_foot_cell is None.
-            assert_eq!(seated_foot_cell(WaypointKind::Pantry, pos), None);
-            assert_eq!(seated_foot_cell(WaypointKind::VendingMachine, pos), None);
+            assert_eq!(seated_foot_cell(Furniture::Pantry, pos), None);
+            assert_eq!(seated_foot_cell(Furniture::VendingMachine, pos), None);
         }
     }
 

@@ -261,6 +261,12 @@ pub enum Furniture {
     PantryChair,
     FloorLamp,
     LoungeSideTable,
+    /// The agent's OWNED home workstation. Not a [`WaypointKind`] (N per-agent
+    /// desks, forced-seat when Active, never a wander destination) — but a
+    /// first-class geometry row so desk and couch share ONE table and the same
+    /// `seated_foot_cell` + approach/settle path. Replaces the old standalone
+    /// `desk_furniture_def` literal (now a shim over this row).
+    Desk,
 }
 
 impl Furniture {
@@ -293,6 +299,7 @@ impl Furniture {
         Furniture::PantryChair,
         Furniture::FloorLamp,
         Furniture::LoungeSideTable,
+        Furniture::Desk,
     ];
 }
 
@@ -496,41 +503,31 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             visual: (7, 4),
             ..DECOR
         },
+        // The home desk — the agent's OWNED workstation, now a first-class row
+        // (was the standalone `desk_furniture_def` literal). `occupies_pos` = the
+        // agent renders ON it (`seated_anchor`); its seat cell is
+        // [`desk_walk_anchor`] (= `seated_foot_cell(Desk)`). `footprint = DESK_W+4`
+        // (the solid 16px sprite, no overhang) is stamped TOP-LEFT in `mask.rs`,
+        // not centered. `dwell` is the SEATED window (`pose::seated_dwell_ms`).
+        // `approach = DESK_APPROACH` (no south front — sit behind the monitor).
+        // Not a `WaypointKind`, so `stand_point`/`walk_target` never run on it; it
+        // reaches its seat via the unified `seated_foot_cell` + settle.
+        Furniture::Desk => FurnitureDef {
+            footprint: Some((DESK_W + 4, DESK_H)),
+            visual: (DESK_W + 4, DESK_H + 2),
+            occupies_pos: true,
+            occludes_behind: None,
+            dwell: (15_000, 15_000),
+            approach: DESK_APPROACH,
+        },
     }
 }
 
-/// The **home desk** — the agent's OWNED workstation — as a [`FurnitureDef`],
-/// the SAME descriptor visited furniture uses. The desk is not a
-/// [`WaypointKind`] (there are N per-agent desks, not a fixed kind set), so it
-/// gets this free-function accessor instead of a `furniture_def` table row —
-/// but it shares the one footprint + occupancy + dwell + approach model. The
-/// only attribute distinguishing it from a couch is ownership: the agent is
-/// *forced* here when Active (the existing Seated behavior), vs a couch it only
-/// drifts to when Idle.
-///
-/// How the shared fields apply to the desk:
-/// - `footprint = (DESK_W + 4, DESK_H)` — DESK_W+4 = the solid 16px sprite width
-///   (the desk has no overhang; the old +2 under-blocked it, letting a walker
-///   clip the edge). Stamped TOP-LEFT at the desk Point (`mask.rs`), unlike
-///   visited furniture which stamps CENTERED on `pos`; the origin is the stamp
-///   call's choice, not a property of the descriptor.
-/// - `occupies_pos = false` — the agent's seat is NORTH of the footprint
-///   (`seated_anchor`), reached via the bespoke [`desk_walk_anchor`]; the desk's
-///   fixed seat is not a generic `stand_point` side-probe, so the furniture
-///   walk machinery (`stand_point`/`walk_target`/`dwell_ms`) is never run on it.
-/// - `dwell` is the seated dwell window — `pose::seated_dwell_ms` reads it
-///   (single source; the desk's personality jitter is applied there).
-/// - `approach = DESK_APPROACH` — no south front (sit behind the monitor); the
-///   editable entry-side knob (drop a side by flipping one bool).
+/// The **home desk** descriptor — sugar over the [`Furniture::Desk`] table row
+/// (kept because the desk is per-agent, not a `WaypointKind`, and ~10 call sites
+/// read it). The geometry now lives in ONE place: `furniture_def(Furniture::Desk)`.
 pub const fn desk_furniture_def() -> FurnitureDef {
-    FurnitureDef {
-        footprint: Some((DESK_W + 4, DESK_H)), // DESK_W+4 = the solid 16px sprite width
-        visual: (DESK_W + 4, DESK_H + 2),      // the real 16×8 desk sprite (was a stale 14×6)
-        occupies_pos: false,
-        occludes_behind: None, // seated agent occluded by the desk's own y-sort
-        dwell: (15_000, 15_000),
-        approach: DESK_APPROACH,
-    }
+    furniture_def(Furniture::Desk)
 }
 
 /// Vertical offset baked into the TUI walking / waypoint sprite anchor
@@ -569,31 +566,33 @@ pub fn desk_walk_anchor(desk: Point) -> Point {
 /// renders with no arrival jump — the inverse of the render anchor under
 /// [`WALKING_Y_OFF`], solving `walking_anchor(S) == render_anchor(pos)`.
 ///
-/// `Some` only for `occupies_pos` furniture (the agent sits/stands ON `pos`);
-/// `None` for obstacles, whose sprite renders AT the approach cell, not at a
-/// fixed seat. The home desk's analog is [`desk_walk_anchor`] (its render is
-/// `seated_anchor`, not a `WaypointKind`), so the unified post-A\* settle reads
-/// `S` from here for waypoints and from `desk_walk_anchor` for the desk — same
-/// mechanism, two S sources. The settle walks `approach_point → S`; when `S` is
-/// blocked (meeting sofa, desk) that final segment is the "sit down" motion, not
-/// pathfinding.
-pub fn seated_foot_cell(kind: WaypointKind, pos: Point) -> Option<Point> {
-    if !furniture_def(kind.furniture()).occupies_pos {
+/// `Some` for every `occupies_pos` furniture (desk + the seat kinds — the agent
+/// sits/stands ON `pos`); `None` for obstacles, whose sprite renders AT the
+/// approach cell, not at a fixed seat. Keyed on [`Furniture`] so the home desk
+/// flows through the SAME fn as the couch (the desk's `S` is [`desk_walk_anchor`],
+/// its render `seated_anchor`). The post-A\* settle walks `approach_point → S`;
+/// when `S` is blocked (meeting sofa, desk) that final segment is the "sit down"
+/// motion, not pathfinding.
+pub fn seated_foot_cell(kind: Furniture, pos: Point) -> Option<Point> {
+    if !furniture_def(kind).occupies_pos {
         return None;
     }
     Some(match kind {
         // back_couch render (`pos.y − SEAT_RENDER_Y_OFF`): S is
         // `WALKING_Y_OFF − SEAT_RENDER_Y_OFF` px south of `pos`, the one cell
         // where `walking_anchor` lands exactly on `back_couch_anchor`.
-        WaypointKind::Couch | WaypointKind::MeetingSofa => Point {
+        Furniture::Couch | Furniture::MeetingSofa => Point {
             x: pos.x,
             y: pos.y + (WALKING_Y_OFF - SEAT_RENDER_Y_OFF),
         },
         // waypoint render (`== walking_anchor`): S == pos.
-        WaypointKind::MeetingStand => pos,
-        // `occupies_pos` is exactly {Couch, MeetingSofa, MeetingStand} (guarded
-        // by `occupies_pos_is_exactly_the_seat_kinds`); the early return above
-        // already handled every obstacle kind.
+        Furniture::MeetingStand => pos,
+        // desk render is `seated_anchor`; its inverse is the bespoke
+        // `desk_walk_anchor` (pinned by DESK_WALK_X/Y_OFF). ONE source.
+        Furniture::Desk => desk_walk_anchor(pos),
+        // `occupies_pos` is exactly {Couch, MeetingSofa, MeetingStand, Desk}
+        // (guarded by `furniture_def_invariants_hold_for_every_row`); the early
+        // return handled every obstacle kind.
         _ => pos,
     })
 }
@@ -774,11 +773,16 @@ mod tests {
 
     #[test]
     fn desk_is_a_furniture_def_with_desk_geometry() {
-        // The home desk is the SAME FurnitureDef type as visited furniture —
-        // no separate struct, no inheritance. Its footprint + approach live in
-        // the one model; occupies_pos=false because the agent's seat is north
-        // of the footprint (reached via desk_walk_anchor, not stand_point).
+        // The home desk is now a first-class Furniture::Desk row; this accessor
+        // is sugar over furniture_def(Furniture::Desk). occupies_pos=true — the
+        // agent renders ON it (seated_anchor); its seat cell is desk_walk_anchor
+        // = seated_foot_cell(Furniture::Desk), reached by the unified settle.
         let d = desk_furniture_def();
+        assert_eq!(
+            d,
+            furniture_def(Furniture::Desk),
+            "desk_furniture_def must be sugar over the Furniture::Desk row"
+        );
         // Footprint matches the solid 16px sprite (DESK_W+4), not the old +2
         // under-block; footprint never exceeds the 16×8 visual.
         assert_eq!(d.footprint, Some((DESK_W + 4, DESK_H)), "desk footprint");
@@ -788,8 +792,8 @@ mod tests {
             "desk footprint must not exceed its visual"
         );
         assert!(
-            !d.occupies_pos,
-            "agent approaches the desk; its seat is north of the footprint"
+            d.occupies_pos,
+            "agent renders ON the desk (seated_anchor); seat = seated_foot_cell(Desk)"
         );
         assert_eq!(
             d.approach, DESK_APPROACH,
@@ -801,12 +805,12 @@ mod tests {
     #[test]
     fn furniture_def_invariants_hold_for_every_row() {
         // The singleton/decor rows have no other test (unlike WaypointKind::ALL),
-        // so a typo in any of the 24 rows — wrong dwell sentinel, an accidental
+        // so a typo in any of the 25 rows — wrong dwell sentinel, an accidental
         // occupies_pos, a wrong plant footprint — is caught HERE rather than as a
         // silent wrong-mask/wrong-render at runtime.
         assert_eq!(
             Furniture::ALL.len(),
-            24,
+            25,
             "Furniture variant added/removed — update ALL (and this count)"
         );
         for &f in Furniture::ALL {
@@ -818,10 +822,14 @@ mod tests {
                 "{f:?}: half-broken dwell {:?}",
                 d.dwell
             );
-            // occupies_pos is EXACTLY the on-furniture seat/stand kinds.
+            // occupies_pos is EXACTLY the on-furniture seat/stand kinds (incl.
+            // the home Desk — agent renders ON it via seated_anchor).
             let expect_occupies = matches!(
                 f,
-                Furniture::Couch | Furniture::MeetingSofa | Furniture::MeetingStand
+                Furniture::Couch
+                    | Furniture::MeetingSofa
+                    | Furniture::MeetingStand
+                    | Furniture::Desk
             );
             assert_eq!(d.occupies_pos, expect_occupies, "{f:?}: occupies_pos");
             // Meeting SEAT rows add no obstacle (3 seats sit on the 1 body row).
