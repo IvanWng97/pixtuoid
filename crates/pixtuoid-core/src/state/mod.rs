@@ -6,6 +6,7 @@ use std::time::SystemTime;
 use crate::id::AgentId;
 use crate::source::Activity;
 
+mod fsm;
 pub mod reducer;
 mod scope;
 

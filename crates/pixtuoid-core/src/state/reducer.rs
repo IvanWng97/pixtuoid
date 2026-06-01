@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use crate::source::{AgentEvent, Transport};
-use crate::state::{scope, ActivityState, AgentSlot, SceneState};
+use crate::state::{fsm, scope, ActivityState, AgentSlot, SceneState};
 use crate::AgentId;
 
 /// Window in which a Hook event suppresses a later Jsonl event with the same tool_use_id.
@@ -166,13 +166,7 @@ impl Reducer {
                     .map(|t| Arc::<str>::from(t.as_str()));
                 if let Some(slot) = scene.agents.get_mut(&id) {
                     if matches!(slot.state, ActivityState::Waiting { .. }) {
-                        slot.state = ActivityState::Active {
-                            activity: crate::source::Activity::Typing,
-                            tool_use_id: task_tuid,
-                            detail: Some(Arc::<str>::from("Delegating")),
-                        };
-                        slot.state_started_at = now;
-                        slot.pending_idle_at = None;
+                        fsm::enter_delegating(slot, task_tuid, now);
                         self.gated_before_waiting.remove(&id);
                     }
                 }
@@ -230,20 +224,7 @@ impl Reducer {
                     .or_default()
                     .insert(tuid.clone());
                 if let Some(slot) = scene.agents.get_mut(agent_id) {
-                    if matches!(slot.state, ActivityState::Active { .. }) {
-                        let elapsed = now
-                            .duration_since(slot.state_started_at)
-                            .unwrap_or_default()
-                            .as_millis() as u64;
-                        slot.active_ms += elapsed;
-                    }
-                    slot.state = ActivityState::Active {
-                        activity: crate::source::Activity::Typing,
-                        tool_use_id: Some(Arc::<str>::from(tuid.as_str())),
-                        detail: Some(Arc::<str>::from("Delegating")),
-                    };
-                    slot.state_started_at = now;
-                    slot.pending_idle_at = None;
+                    fsm::enter_delegating(slot, Some(Arc::<str>::from(tuid.as_str())), now);
                 }
             }
             AgentEvent::ActivityEnd {
@@ -268,7 +249,7 @@ impl Reducer {
                                 // match (b1).
                                 completed_subtree_root = Some(*agent_id);
                                 if matches!(slot.state, ActivityState::Active { .. }) {
-                                    slot.pending_idle_at = Some(now);
+                                    fsm::arm_pending_idle(slot, now);
                                 }
                             }
                         }
@@ -372,21 +353,13 @@ impl Reducer {
                         if !detail.as_ref().is_some_and(|d| d.is_task()) {
                             slot.tool_call_count += 1;
                         }
-                        if matches!(slot.state, ActivityState::Active { .. }) {
-                            let elapsed = now
-                                .duration_since(slot.state_started_at)
-                                .unwrap_or_default()
-                                .as_millis() as u64;
-                            slot.active_ms += elapsed;
-                        }
-                        slot.state = ActivityState::Active {
+                        fsm::enter_active(
+                            slot,
                             activity,
-                            tool_use_id: tool_use_id.map(|s| Arc::<str>::from(s.as_str())),
-                            detail: detail.map(|d| Arc::<str>::from(d.display())),
-                        };
-                        slot.state_started_at = now;
-                        slot.last_event_at = now;
-                        slot.pending_idle_at = None;
+                            tool_use_id.map(|s| Arc::<str>::from(s.as_str())),
+                            detail.map(|d| Arc::<str>::from(d.display())),
+                            now,
+                        );
                     }
                 }
             }
@@ -416,7 +389,7 @@ impl Reducer {
                         // stale ActivityEnd while Idle, or a parallel tool ending
                         // while Waiting, leaves the timer alone.
                         if matches!(slot.state, ActivityState::Active { .. }) || resolves_wait {
-                            slot.pending_idle_at = Some(now);
+                            fsm::arm_pending_idle(slot, now);
                         }
                         slot.last_event_at = now;
                     }
@@ -435,34 +408,17 @@ impl Reducer {
                     } else {
                         self.gated_before_waiting.remove(&agent_id);
                     }
-                    if matches!(slot.state, ActivityState::Active { .. }) {
-                        let elapsed = now
-                            .duration_since(slot.state_started_at)
-                            .unwrap_or_default()
-                            .as_millis() as u64;
-                        slot.active_ms += elapsed;
-                    }
-                    slot.state = ActivityState::Waiting {
-                        reason: Arc::<str>::from(reason.as_str()),
-                    };
-                    slot.state_started_at = now;
-                    slot.last_event_at = now;
-                    slot.pending_idle_at = None;
+                    fsm::enter_waiting(slot, Arc::<str>::from(reason.as_str()), now);
                 }
             }
             AgentEvent::Rename { agent_id, label } => {
                 if let Some(slot) = scene.agents.get_mut(&agent_id) {
-                    if &*slot.label != label.as_str() {
-                        slot.label = Arc::<str>::from(label.as_str());
-                    }
-                    slot.last_event_at = now;
+                    fsm::rename(slot, &label, now);
                 }
             }
             AgentEvent::SessionEnd { agent_id } => {
                 if let Some(slot) = scene.agents.get_mut(&agent_id) {
-                    if slot.exiting_at.is_none() {
-                        slot.exiting_at = Some(now);
-                    }
+                    fsm::mark_exiting(slot, now);
                 }
                 scope::cascade_exit(scene, agent_id, now);
             }
@@ -494,28 +450,10 @@ impl Reducer {
                 .duration_since(pending)
                 .is_ok_and(|d| d >= ACTIVE_GRACE_WINDOW)
             {
-                match &slot.state {
-                    ActivityState::Active { .. } => {
-                        let elapsed = pending
-                            .duration_since(slot.state_started_at)
-                            .unwrap_or_default()
-                            .as_millis() as u64;
-                        slot.active_ms += elapsed;
-                        slot.state = ActivityState::Idle;
-                        slot.state_started_at = now;
-                    }
-                    // A Waiting slot only carries `pending_idle_at` when its
-                    // gated permission tool resolved (ActivityEnd arm). Settle it
-                    // to Idle — it renders as seated-thinking via the recent
-                    // `last_event_at`. A *parallel*-prompt Waiting never gets the
-                    // timer armed, so it is untouched here.
-                    ActivityState::Waiting { .. } => {
-                        slot.state = ActivityState::Idle;
-                        slot.state_started_at = now;
-                    }
-                    ActivityState::Idle => {}
-                }
-                slot.pending_idle_at = None;
+                // A Waiting slot only carries `pending_idle_at` when its gated
+                // permission tool resolved (ActivityEnd arm); a *parallel*-prompt
+                // Waiting never gets the timer armed, so it isn't reached here.
+                fsm::settle_to_idle(slot, pending, now);
             }
         }
     }
