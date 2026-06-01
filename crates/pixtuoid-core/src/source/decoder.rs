@@ -62,7 +62,8 @@ pub fn decode_hook_payload(v: Value) -> Result<AgentEvent> {
         }
         "PreToolUse" => {
             let tool_name = obj.get("tool_name").and_then(|s| s.as_str()).unwrap_or("?");
-            let target = describe_tool_target(tool_name, obj.get("tool_input"));
+            let tool_input = obj.get("tool_input");
+            let target = describe_tool_target(tool_name, tool_input);
             let tool_use_id = obj
                 .get("tool_use_id")
                 .and_then(|s| s.as_str())
@@ -71,7 +72,7 @@ pub fn decode_hook_payload(v: Value) -> Result<AgentEvent> {
                 agent_id,
                 activity: Activity::Typing,
                 tool_use_id,
-                detail: Some(make_tool_detail(tool_name, target)),
+                detail: Some(make_tool_detail(tool_name, target, tool_input)),
             })
         }
         "PostToolUse" => {
@@ -123,12 +124,70 @@ pub fn decode_hook_payload(v: Value) -> Result<AgentEvent> {
             tool_use_id: None,
         }),
         "SessionEnd" => Ok(AgentEvent::SessionEnd { agent_id }),
+        // Codex subagents (`spawn_agent`): these two hooks are the ONLY carrier
+        // of the parent<->child link. The subagent owns a SEPARATE rollout file
+        // (filename UUID == this payload's `agent_id`), so the JSONL watcher
+        // already renders it — but orphaned: a flat `~/.codex/sessions/.../
+        // rollout-*.jsonl` path has no `/subagents/` for `detect_parent_id`. So
+        // key the CHILD on `agent_id` (coalesces with that rollout) and link it
+        // to the parent `session_id`. It then joins the same scope tree
+        // (cascade / liveness / readiness) as a CC subagent — source-agnostic.
+        // Wire format captured live (Codex 0.135, gpt-5.5).
+        "SubagentStart" => {
+            let child = obj
+                .get("agent_id")
+                .and_then(|s| s.as_str())
+                .ok_or_else(|| anyhow!("SubagentStart missing agent_id"))?;
+            let cwd = obj.get("cwd").and_then(|s| s.as_str()).unwrap_or("").into();
+            Ok(AgentEvent::SessionStart {
+                agent_id: AgentId::from_parts(source, child),
+                source: source.to_string(),
+                session_id: child.to_string(),
+                cwd,
+                parent_id: Some(AgentId::from_parts(source, session_id.as_str())),
+            })
+        }
+        // Subagent done — end the CHILD promptly (else its rollout lingers to
+        // the 30-min stale-sweep). Keyed on `agent_id`; the parent keeps running.
+        "SubagentStop" => {
+            let child = obj
+                .get("agent_id")
+                .and_then(|s| s.as_str())
+                .ok_or_else(|| anyhow!("SubagentStop missing agent_id"))?;
+            Ok(AgentEvent::SessionEnd {
+                agent_id: AgentId::from_parts(source, child),
+            })
+        }
         other => bail!("unsupported hook_event_name: {other}"),
     }
 }
 
-pub(crate) fn make_tool_detail(tool_name: &str, target: String) -> ToolDetail {
-    if tool_name == "Task" {
+pub(crate) fn make_tool_detail(
+    tool_name: &str,
+    target: String,
+    input: Option<&Value>,
+) -> ToolDetail {
+    // Detect the subagent-dispatch tool SEMANTICALLY, not just by name. The
+    // dispatch tool was renamed `Task` → `Agent` (CC v2.1.63, undocumented), and
+    // upstream can rename it again. Its input always carries `subagent_type`
+    // (stable across that rename), so key on that first; fall back to the known
+    // names for the rare input-less call. The reducer keys subagent-leak
+    // suppression (`active_tasks`) and b1 Task-drain completion on `is_task()`,
+    // so a missed dispatch silently disables both for real subagents.
+    let has_subagent_type = input
+        .and_then(|v| v.get("subagent_type"))
+        .is_some_and(|v| !v.is_null());
+    let known_name = tool_name == "Task" || tool_name == "Agent";
+    if has_subagent_type || known_name {
+        // Drift breadcrumb: a dispatch under a name we don't recognise means
+        // upstream renamed the tool again. Semantic detection keeps us working;
+        // this debug line surfaces the new name so the known set can be updated.
+        if has_subagent_type && !known_name {
+            tracing::debug!(
+                tool = %tool_name,
+                "subagent-dispatch tool has an unrecognized name (handled via subagent_type); upstream may have renamed it"
+            );
+        }
         ToolDetail::Task
     } else {
         ToolDetail::Generic {

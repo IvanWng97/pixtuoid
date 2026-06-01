@@ -3,6 +3,7 @@ use pixtuoid_core::source::claude_code::decode_cc_line;
 use pixtuoid_core::source::decoder::decode_hook_payload;
 use pixtuoid_core::source::{Activity, AgentEvent};
 use pixtuoid_core::AgentId;
+use serde_json::json;
 
 fn load(name: &str) -> serde_json::Value {
     let s = std::fs::read_to_string(format!("tests/fixtures/hooks/{name}.json")).unwrap();
@@ -88,6 +89,72 @@ fn decode_unknown_event_returns_err() {
     assert!(decode_hook_payload(bad).is_err());
 }
 
+// Codex subagents (`spawn_agent`) signal their lifecycle ONLY via the
+// SubagentStart/SubagentStop hooks: the subagent's own rollout renders the
+// sprite but is keyed flat (no `/subagents/` path), so it can't learn its
+// parent. The hooks carry a distinct `agent_id` (the subagent, == its
+// rollout-filename UUID) plus the parent `session_id`. SubagentStart keys the
+// CHILD on `agent_id` and links it to the parent — wiring it into the scope
+// tree. Captured live (Codex 0.135, gpt-5.5): the payload carries
+// agent_id/agent_type/turn_id beside the common session_id/cwd/transcript_path.
+#[test]
+fn codex_subagent_start_links_child_to_parent() {
+    let ev = decode_hook_payload(json!({
+        "hook_event_name": "SubagentStart",
+        "session_id": "parent-sess",
+        "agent_id": "child-agent",
+        "agent_type": "default",
+        "turn_id": "turn-1",
+        "cwd": "/home/user/demo-project",
+        "_pixtuoid_source": "codex"
+    }))
+    .expect("SubagentStart decodes");
+    match ev {
+        AgentEvent::SessionStart {
+            agent_id,
+            source,
+            cwd,
+            parent_id,
+            ..
+        } => {
+            assert_eq!(source, "codex");
+            assert_eq!(
+                agent_id,
+                AgentId::from_parts("codex", "child-agent"),
+                "child keyed on agent_id (coalesces with the subagent rollout UUID)"
+            );
+            assert_eq!(
+                parent_id,
+                Some(AgentId::from_parts("codex", "parent-sess")),
+                "linked to the parent session"
+            );
+            assert_eq!(cwd, std::path::PathBuf::from("/home/user/demo-project"));
+        }
+        other => panic!("expected SessionStart, got {other:?}"),
+    }
+}
+
+#[test]
+fn codex_subagent_stop_ends_child_not_parent() {
+    let ev = decode_hook_payload(json!({
+        "hook_event_name": "SubagentStop",
+        "session_id": "parent-sess",
+        "agent_id": "child-agent",
+        "agent_type": "default",
+        "stop_hook_active": false,
+        "_pixtuoid_source": "codex"
+    }))
+    .expect("SubagentStop decodes");
+    match ev {
+        AgentEvent::SessionEnd { agent_id } => assert_eq!(
+            agent_id,
+            AgentId::from_parts("codex", "child-agent"),
+            "ends the CHILD (keyed on agent_id), never the parent session"
+        ),
+        other => panic!("expected SessionEnd, got {other:?}"),
+    }
+}
+
 #[test]
 fn cc_jsonl_assistant_tool_use_is_activity_start() {
     let transcript = "/Users/me/.claude/projects/x/ses-abc.jsonl";
@@ -167,6 +234,96 @@ fn decode_pre_tool_use_carries_tool_use_id_from_payload() {
         }
         other => panic!("got {other:?}"),
     }
+}
+
+// Real CC (verified across ~/.claude/projects: 26K messages, "Agent" 47× and
+// "Task" 0×) dispatches subagents via a tool named "Agent" — NOT "Task". Its
+// input carries {description, prompt, subagent_type}. Task-detection must
+// recognise it, else `active_tasks` subagent-leak suppression and b1 Task-drain
+// completion never fire for real subagents (the parent shows the subagent's
+// tools — observed live). Both names map to `ToolDetail::Task`.
+#[test]
+fn decode_pre_tool_use_agent_tool_is_task() {
+    for tool in ["Agent", "Task"] {
+        let payload = serde_json::json!({
+            "hook_event_name": "PreToolUse",
+            "session_id": "ses-abc",
+            "transcript_path": "/p/ses-abc.jsonl",
+            "cwd": "/repo",
+            "tool_name": tool,
+            "tool_use_id": "toolu_01ABC",
+            "tool_input": { "description": "go", "subagent_type": "Explore" }
+        });
+        match decode_hook_payload(payload).unwrap() {
+            AgentEvent::ActivityStart { detail, .. } => assert!(
+                detail.expect("detail set").is_task(),
+                "{tool} must be Task-detected"
+            ),
+            other => panic!("got {other:?}"),
+        }
+    }
+}
+
+// Resilience: detect a dispatch by its `subagent_type` input, so the NEXT
+// rename (Task→Agent→…?) doesn't silently break suppression/completion. A tool
+// under a name we've never seen, but carrying subagent_type, is still a Task.
+#[test]
+fn subagent_dispatch_detected_by_subagent_type_under_novel_name() {
+    let payload = serde_json::json!({
+        "hook_event_name": "PreToolUse",
+        "session_id": "ses-abc",
+        "transcript_path": "/p/ses-abc.jsonl",
+        "cwd": "/repo",
+        "tool_name": "Delegate2027",
+        "tool_use_id": "toolu_01ZZ",
+        "tool_input": { "description": "go", "subagent_type": "Explore" }
+    });
+    match decode_hook_payload(payload).unwrap() {
+        AgentEvent::ActivityStart { detail, .. } => assert!(
+            detail.expect("detail").is_task(),
+            "a tool carrying subagent_type is a dispatch regardless of its name"
+        ),
+        other => panic!("got {other:?}"),
+    }
+}
+
+#[test]
+fn non_dispatch_tool_is_not_task() {
+    let payload = serde_json::json!({
+        "hook_event_name": "PreToolUse",
+        "session_id": "s",
+        "transcript_path": "/p/s.jsonl",
+        "cwd": "/repo",
+        "tool_name": "Read",
+        "tool_use_id": "t",
+        "tool_input": { "file_path": "/x" }
+    });
+    match decode_hook_payload(payload).unwrap() {
+        AgentEvent::ActivityStart { detail, .. } => {
+            assert!(!detail.expect("detail").is_task(), "Read is not a dispatch")
+        }
+        other => panic!("got {other:?}"),
+    }
+}
+
+#[test]
+fn cc_jsonl_agent_tool_use_is_task() {
+    let line = serde_json::json!({
+        "type": "assistant",
+        "message": {"content": [
+            {"type": "tool_use", "id": "t1", "name": "Agent",
+             "input": {"description": "x", "subagent_type": "general-purpose"}}
+        ]}
+    });
+    let events = decode_cc_line("/p/parent.jsonl", "claude-code", line).unwrap();
+    let task = events.iter().find_map(|e| match e {
+        AgentEvent::ActivityStart { detail, .. } => detail.as_ref(),
+        _ => None,
+    });
+    assert!(
+        task.expect("ActivityStart present").is_task(),
+        "the JSONL 'Agent' tool_use must be Task-detected too"
+    );
 }
 
 #[test]

@@ -2425,3 +2425,101 @@ fn codex_permission_then_jsonl_output_resumes_to_active() {
         "resume must return to Active"
     );
 }
+
+// --- Codex subagent: parent_id enrichment (JSONL-first race) ---------------
+//
+// A Codex subagent owns a separate rollout file, so the JSONL watcher renders
+// it as a sprite — but keyed flat, with parent_id=None (orphan). The
+// SubagentStart hook is the only carrier of the parent link. Because the two
+// transports race, the link must apply whichever order they arrive in: a later
+// SessionStart{parent_id=Some} must ENRICH an existing orphan, not no-op.
+
+fn codex_session_start(
+    r: &mut Reducer,
+    scene: &mut SceneState,
+    id: AgentId,
+    parent: Option<AgentId>,
+    transport: Transport,
+) {
+    r.apply(
+        scene,
+        AgentEvent::SessionStart {
+            agent_id: id,
+            source: "codex".into(),
+            session_id: "sid".into(),
+            cwd: PathBuf::from("/repo"),
+            parent_id: parent,
+        },
+        SystemTime::now(),
+        transport,
+    );
+}
+
+#[test]
+fn session_start_enriches_parent_id_on_existing_orphan() {
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let parent = AgentId::from_parts("codex", "parent-sess");
+    let child = AgentId::from_parts("codex", "child-agent");
+
+    // JSONL creates the orphan subagent first.
+    codex_session_start(&mut r, &mut scene, child, None, Transport::Jsonl);
+    assert!(
+        scene.agents.get(&child).unwrap().parent_id.is_none(),
+        "JSONL-created subagent starts orphaned"
+    );
+
+    // SubagentStart hook arrives with the parent link → must enrich, not no-op.
+    codex_session_start(&mut r, &mut scene, child, Some(parent), Transport::Hook);
+    assert_eq!(
+        scene.agents.get(&child).unwrap().parent_id,
+        Some(parent),
+        "existing orphan must be enriched with the parent link"
+    );
+}
+
+#[test]
+fn session_start_does_not_reparent_when_parent_already_set() {
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let child = AgentId::from_parts("codex", "child");
+    let p1 = AgentId::from_parts("codex", "p1");
+    let p2 = AgentId::from_parts("codex", "p2");
+
+    codex_session_start(&mut r, &mut scene, child, Some(p1), Transport::Hook);
+    codex_session_start(&mut r, &mut scene, child, Some(p2), Transport::Hook);
+    assert_eq!(
+        scene.agents.get(&child).unwrap().parent_id,
+        Some(p1),
+        "an established parent link is never overwritten"
+    );
+}
+
+#[test]
+fn codex_subagent_cascades_with_parent_on_session_end() {
+    // The payoff: once enriched, a Codex subagent rides the existing scope
+    // cascade — ending the parent takes the subagent with it.
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let parent = AgentId::from_parts("codex", "parent-sess");
+    let child = AgentId::from_parts("codex", "child-agent");
+    let now = SystemTime::now();
+
+    codex_session_start(&mut r, &mut scene, parent, None, Transport::Hook);
+    codex_session_start(&mut r, &mut scene, child, Some(parent), Transport::Hook);
+
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionEnd { agent_id: parent },
+        now,
+        Transport::Hook,
+    );
+    assert!(
+        scene.agents.get(&parent).unwrap().exiting_at.is_some(),
+        "parent should be exiting"
+    );
+    assert!(
+        scene.agents.get(&child).unwrap().exiting_at.is_some(),
+        "subagent should cascade out with its parent"
+    );
+}

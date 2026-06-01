@@ -125,6 +125,8 @@ Don't be surprised by these. **Full explanation (the WHY) lives in the nested `C
 - JSONL watcher skips historical transcripts on startup (1-hour mtime window + session-end tail scan).
 - Agent removal needs a `SessionEnd`; abrupt exits (Ctrl-C / Codex) have none → fall back to the slow stale-sweep, which cascade-exits the parent's whole subagent subtree — but only once the subtree is genuinely silent (liveness-vs-readiness guards: `refresh_lineage` up-propagation + `has_waiting_ancestor` exemption for permission-blocked subagents).
 - Subagent display names come from `attributionAgent` in JSONL.
+- The subagent-dispatch tool is **`Agent`** in current CC (not `Task`); `make_tool_detail` maps both → `ToolDetail::Task`. Missing the name silently disables subagent-leak suppression + b1 completion.
+- Codex subagents (`spawn_agent`) wire into the scope tree via the `SubagentStart`/`SubagentStop` HOOKS (distinct `agent_id` + parent `session_id`), since their rollout is flat (no `/subagents/` path); the reducer's `SessionStart` arm enriches a JSONL-first orphan's `parent_id`. Regression: `tests/codex_subagent_lifecycle.rs`.
 - `AgentSlot.state_started_at` is `SystemTime` (process-local; v2-daemon-ready type).
 - `ActivityState::Active` ≠ "tool currently executing" — Active→Idle is debounced (`ACTIVE_GRACE_WINDOW`).
 

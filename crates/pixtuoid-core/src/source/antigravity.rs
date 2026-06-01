@@ -96,12 +96,13 @@ pub fn decode_ag_line(transcript_path: &str, source: &str, v: Value) -> Result<V
                                 .insert(key.to_string(), Value::String(clean.to_string()));
                         }
                     }
-                    let target = describe_tool_target(name, Some(&Value::Object(normalized_input)));
+                    let normalized = Value::Object(normalized_input);
+                    let target = describe_tool_target(name, Some(&normalized));
                     out.push(AgentEvent::ActivityStart {
                         agent_id,
                         activity: Activity::Typing,
                         tool_use_id: Some(format!("ag-{step_index}-{i}")),
-                        detail: Some(make_tool_detail(name, target)),
+                        detail: Some(make_tool_detail(name, target, Some(&normalized))),
                     });
                 }
             }

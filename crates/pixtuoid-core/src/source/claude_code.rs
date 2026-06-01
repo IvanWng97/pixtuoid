@@ -116,7 +116,7 @@ pub fn decode_cc_line(transcript_path: &str, source: &str, v: Value) -> Result<V
                     agent_id,
                     activity: Activity::Typing,
                     tool_use_id: id,
-                    detail: Some(make_tool_detail(name, target)),
+                    detail: Some(make_tool_detail(name, target, input)),
                 });
             }
         }
@@ -206,14 +206,61 @@ pub fn cc_session_ended(tail: &[u8]) -> bool {
 }
 
 /// CC label: subagent paths → "subagent", otherwise "cc·" + cwd basename.
+///
+/// When `cwd` is unknown (a seed line that carries no `cwd` — the JSONL Rename
+/// can fire on such a line), fall back to the CC **project dir** instead of a
+/// bare "cc": the project dir name encodes the cwd path with '/'→'-', so its
+/// last segment is the project basename. Without this, an empty-cwd Rename
+/// silently degrades a good hook-derived `cc·dotfiles` back to `cc`.
 pub fn cc_derive_label(path: &Path, _source: &str, cwd: &Path) -> String {
-    let is_subagent = path.to_string_lossy().contains("subagents");
-    if is_subagent {
-        "subagent".to_string()
-    } else if cwd != Path::new("") && cwd != Path::new("/") {
-        let base = cwd.file_name().and_then(|n| n.to_str()).unwrap_or("cc");
-        format!("cc·{base}")
-    } else {
-        "cc".to_string()
+    if path.to_string_lossy().contains("subagents") {
+        return "subagent".to_string();
+    }
+    if cwd != Path::new("") && cwd != Path::new("/") {
+        if let Some(base) = cwd.file_name().and_then(|n| n.to_str()) {
+            return format!("cc·{base}");
+        }
+    }
+    if let Some(base) = path
+        .parent()
+        .and_then(|p| p.file_name())
+        .and_then(|n| n.to_str())
+        .and_then(|proj| proj.rsplit('-').find(|s| !s.is_empty()))
+    {
+        return format!("cc·{base}");
+    }
+    "cc".to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn label_prefers_cwd_basename_when_present() {
+        let path = Path::new("/x/.claude/projects/-Users-me-repo/abc.jsonl");
+        assert_eq!(
+            cc_derive_label(path, "claude-code", Path::new("/Users/me/work/myrepo")),
+            "cc·myrepo"
+        );
+    }
+
+    #[test]
+    fn label_falls_back_to_project_dir_when_cwd_empty() {
+        // Regression: an empty-cwd Rename must not degrade `cc·dotfiles` to `cc`.
+        let path = Path::new("/Users/me/.claude/projects/-Users-me-dotfiles/abc.jsonl");
+        assert_eq!(
+            cc_derive_label(path, "claude-code", Path::new("")),
+            "cc·dotfiles"
+        );
+    }
+
+    #[test]
+    fn label_marks_subagent_paths() {
+        let path = Path::new("/x/projects/proj/subagents/agent-1.jsonl");
+        assert_eq!(
+            cc_derive_label(path, "claude-code", Path::new("/repo")),
+            "subagent"
+        );
     }
 }

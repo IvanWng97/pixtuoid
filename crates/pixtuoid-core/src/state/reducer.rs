@@ -296,7 +296,18 @@ impl Reducer {
                 cwd,
                 parent_id,
             } => {
-                if scene.agents.contains_key(&agent_id) {
+                if let Some(slot) = scene.agents.get_mut(&agent_id) {
+                    // Already created — usually a harmless duplicate from the
+                    // other transport. But a Codex subagent's own rollout
+                    // (JSONL) can create the slot ORPHANED before its
+                    // SubagentStart hook arrives with the parent link; enrich it
+                    // so the subagent joins the scope tree regardless of arrival
+                    // order. Never re-parent an agent that already has a parent.
+                    if slot.parent_id.is_none() {
+                        if let Some(p) = parent_id {
+                            slot.parent_id = Some(p);
+                        }
+                    }
                     return;
                 }
                 let Some(desk_index) = scene.next_free_desk() else {

@@ -132,7 +132,9 @@ fn codex_tool_start(agent_id: AgentId, payload: Option<&Map<String, Value>>) -> 
         agent_id,
         activity: Activity::Typing,
         tool_use_id: None,
-        detail: Some(make_tool_detail(name, String::new())),
+        // Codex tool calls are function_calls, never subagent dispatches (those
+        // arrive as the SubagentStart hook), so no `subagent_type` to pass.
+        detail: Some(make_tool_detail(name, String::new(), None)),
     }
 }
 
