@@ -170,6 +170,30 @@ fn load_embedded_pack() -> Result<Pack> {
 mod tests {
     use super::*;
 
+    // The recolor invariant applies to EVERY palette key, not just the 4
+    // recolor targets: recolor_frame matches by RGB equality, so two keys
+    // sharing a color are indistinguishable (a recolor — or any future
+    // per-key logic — swaps both). Transparent (None) keys are exempt. Caught
+    // the e/q = #1a1a1a dup that the B/H/S/P-only check below missed.
+    #[test]
+    fn embedded_pack_all_palette_keys_are_distinct_rgbs() {
+        let pack = load_sprite_pack(None).expect("embedded pack loads");
+        let entries: Vec<(char, pixtuoid_core::sprite::Rgb)> = pack
+            .palette
+            .iter()
+            .filter_map(|(k, p)| p.map(|rgb| (k, rgb)))
+            .collect();
+        for i in 0..entries.len() {
+            for j in (i + 1)..entries.len() {
+                assert_ne!(
+                    entries[i].1, entries[j].1,
+                    "palette keys {:?} and {:?} share an RGB — recolor_frame can't distinguish them",
+                    entries[i].0, entries[j].0
+                );
+            }
+        }
+    }
+
     // recolor_frame (pixel_painter/palette.rs) substitutes agent colors by RGB
     // equality against the base pack's B/H/S/P entries. If any two share an RGB,
     // the recolor pass swaps both and produces artifacts. No validate-pack check
