@@ -414,16 +414,18 @@ fn idle_pose(slot: &AgentSlot, desk: Point, layout: &SceneLayout, elapsed_ms: u6
     } else {
         let wp_idx = waypoint_index_for_cycle(slot.agent_id, cycle_n, layout.waypoints.len());
         let wp = layout.waypoints[wp_idx];
-        // Walk DESTINATION (not the render anchor): for seats this is an
-        // allowed-side approach cell so the agent never paths through the back;
-        // the AtWaypoint sprite still renders on `wp.pos` (see pixel_painter).
-        let dest = crate::layout::walk_target(
-            wp.kind,
+        // Walk DESTINATION (not the render anchor): the A*-reachable approach
+        // point on an allowed side — for seats an allowed-side cell so the agent
+        // never paths in through the back; the AtWaypoint sprite still renders on
+        // the seat (see pixel_painter). Same `&layout.reachable` as tui::motion.
+        let dest = crate::layout::approach_point(
+            wp.kind.furniture(),
             wp.pos,
+            wp.facing,
             layout.pantry_counter_size,
             &layout.walkable,
             desk,
-            wp.facing,
+            &layout.reachable,
         );
         (
             dest,

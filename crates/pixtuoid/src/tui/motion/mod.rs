@@ -429,17 +429,18 @@ fn pick_wander_dest(
     } else {
         let wp_idx = waypoint_index_for_cycle(id, cycle_n, layout.waypoints.len());
         let wp = layout.waypoints[wp_idx];
-        // Walk destination on the side nearest the desk — NOT the raw `wp.pos`
-        // (the blocked furniture center), which made A* detour around it and
-        // the sprite pop on arrival. For seats this is an allowed-side approach
-        // cell (never through the back); the sprite still renders on `wp.pos`.
-        let dest = pixtuoid_core::layout::walk_target(
-            wp.kind,
+        // Walk destination = the A*-reachable approach point on an allowed side
+        // (NOT the raw blocked `wp.pos`, which made A* detour + the sprite pop).
+        // Same `&layout.reachable` + origin as core::pose::idle_pose so the
+        // stateless overlay and this routed dest stay in lockstep.
+        let dest = pixtuoid_core::layout::approach_point(
+            wp.kind.furniture(),
             wp.pos,
+            wp.facing,
             layout.pantry_counter_size,
             &layout.walkable,
             origin,
-            wp.facing,
+            &layout.reachable,
         );
         (dest, Some(wp.kind), Some(wp_idx))
     }

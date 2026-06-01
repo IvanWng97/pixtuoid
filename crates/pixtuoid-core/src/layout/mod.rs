@@ -17,7 +17,7 @@ mod mask;
 mod placement;
 mod reach;
 
-pub use approach::{stand_point, walk_target};
+pub use approach::{approach_point, stand_point};
 pub use decor::{
     desk_furniture_def, desk_walk_anchor, furniture_def, seated_foot_cell, ApproachSides, Facing,
     Furniture, FurnitureDef, PlantKind, PodDecor, WallDecor, WaypointKind, DESK_APPROACH,
