@@ -22,7 +22,7 @@ use pixtuoid_core::{AgentSlot, SceneState};
 use crate::tui::chitchat::{self, ActiveChitchat, ChitchatBubble};
 use crate::tui::floor::LightingState;
 use crate::tui::frame_cache::FrameCache;
-use crate::tui::layout::{Layout, Point, DESK_H, DESK_W};
+use crate::tui::layout::{z_sort_row, Anchor, Layout, Point, DESK_H, DESK_W};
 use crate::tui::motion::MotionState;
 use crate::tui::pathfind::Router;
 use crate::tui::pet::PetKind;
@@ -1013,28 +1013,41 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
         drawables.push(Drawable {
             // z-key = sprite south row, derived from the table (== +2 for the
             // 11×5 coffee-table sprite) so it can't drift from a visual edit.
-            anchor_y: table.y
-                + center_pin_south_offset(
-                    crate::tui::layout::furniture_def(crate::tui::layout::Furniture::MeetingTable)
-                        .visual
-                        .1,
-                ),
+            anchor_y: z_sort_row(
+                Anchor::Center,
+                table,
+                crate::tui::layout::furniture_def(crate::tui::layout::Furniture::MeetingTable)
+                    .visual
+                    .1,
+            ),
             kind: DrawableKind::MeetingTable { pos: table },
         });
     }
 
-    // Pantry bistro table (7×4 centered) — z-key = sprite south row (h=4 →
-    // center + h/2 - 1 = table.y + 1; was +2, one row past).
+    // Pantry bistro table — z-key = sprite south row, derived from the table's
+    // own visual height (was a hand-rolled `table.y + 1`).
     if let Some(table) = ctx.layout.pantry_table {
         drawables.push(Drawable {
-            anchor_y: table.y + 1,
+            anchor_y: z_sort_row(
+                Anchor::Center,
+                table,
+                crate::tui::layout::furniture_def(crate::tui::layout::Furniture::PantryTable)
+                    .visual
+                    .1,
+            ),
             kind: DrawableKind::PantryTable { pos: table },
         });
     }
-    // Pantry stools (2×2 anchored at center → bottom = pos.y).
+    // Pantry stools (centered) — z-key derived from the stool visual height.
     for chair in &ctx.layout.pantry_chairs {
         drawables.push(Drawable {
-            anchor_y: chair.y,
+            anchor_y: z_sort_row(
+                Anchor::Center,
+                *chair,
+                crate::tui::layout::furniture_def(crate::tui::layout::Furniture::PantryChair)
+                    .visual
+                    .1,
+            ),
             kind: DrawableKind::PantryChair { pos: *chair },
         });
     }
@@ -1058,12 +1071,26 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
             },
         });
         drawables.push(Drawable {
-            anchor_y: center.y + 3,
+            anchor_y: z_sort_row(
+                Anchor::Center,
+                center,
+                crate::tui::layout::furniture_def(crate::tui::layout::Furniture::Couch)
+                    .visual
+                    .1,
+            ),
             kind: DrawableKind::WaypointCouch { pos: center },
         });
         if let Some(table) = ctx.layout.lounge_side_table {
             drawables.push(Drawable {
-                anchor_y: table.y + 1,
+                anchor_y: z_sort_row(
+                    Anchor::Center,
+                    table,
+                    crate::tui::layout::furniture_def(
+                        crate::tui::layout::Furniture::LoungeSideTable,
+                    )
+                    .visual
+                    .1,
+                ),
                 kind: DrawableKind::LoungeSideTable { pos: table },
             });
         }
@@ -1088,7 +1115,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
             WaypointKind::Pantry => {
                 let (cw, ch) = ctx.layout.pantry_counter_size; // runtime-sized
                 drawables.push(Drawable {
-                    anchor_y: wp.pos.y + center_pin_south_offset(ch),
+                    anchor_y: z_sort_row(Anchor::Center, wp.pos, ch),
                     kind: DrawableKind::WaypointPantry {
                         pos: wp.pos,
                         use_large: cw >= 32,
@@ -1099,13 +1126,13 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
             WaypointKind::PhoneBooth | WaypointKind::StandingDesk => {}
             WaypointKind::VendingMachine => {
                 drawables.push(Drawable {
-                    anchor_y: wp.pos.y + center_pin_south_offset(footprint_h),
+                    anchor_y: z_sort_row(Anchor::Center, wp.pos, footprint_h),
                     kind: DrawableKind::VendingMachine { pos: wp.pos },
                 });
             }
             WaypointKind::Printer => {
                 drawables.push(Drawable {
-                    anchor_y: wp.pos.y + center_pin_south_offset(footprint_h),
+                    anchor_y: z_sort_row(Anchor::Center, wp.pos, footprint_h),
                     kind: DrawableKind::Printer { pos: wp.pos },
                 });
             }
@@ -1125,7 +1152,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
         // sort correctly without blocking the aisle).
         let (_, h) = crate::tui::layout::furniture_def(kind.furniture()).visual;
         drawables.push(Drawable {
-            anchor_y: pos.y + center_pin_south_offset(h),
+            anchor_y: z_sort_row(Anchor::Center, *pos, h),
             kind: DrawableKind::PodDecorItem {
                 kind: *kind,
                 pos: *pos,
@@ -1140,10 +1167,11 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
     // the same height, so the two can't diverge.
     for (kind, p) in &ctx.layout.plants {
         drawables.push(Drawable {
-            anchor_y: p.y
-                + center_pin_south_offset(
-                    crate::tui::layout::furniture_def(kind.furniture()).visual.1,
-                ),
+            anchor_y: z_sort_row(
+                Anchor::Center,
+                *p,
+                crate::tui::layout::furniture_def(kind.furniture()).visual.1,
+            ),
             kind: DrawableKind::Plant {
                 kind: *kind,
                 pos: *p,
@@ -1192,11 +1220,14 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
         });
     }
 
-    // Wall decor — hung on walls (top-left anchored), bottom = pos.y + h.
+    // Wall decor — hung on walls, TOP-LEFT anchored at `pos`, so its y-sort
+    // row is its south base (`pos.y + h - 1`), same helper the mask + every
+    // other drawable use. (Was a hand-rolled `pos.y + h`, one row past the
+    // sprite's actual bottom.)
     for (kind, pos) in &ctx.layout.wall_decor {
         let (_, h) = crate::tui::layout::furniture_def(kind.furniture()).visual;
         drawables.push(Drawable {
-            anchor_y: pos.y + h,
+            anchor_y: z_sort_row(Anchor::TopLeft, *pos, h),
             kind: DrawableKind::WallDecor {
                 kind: *kind,
                 pos: *pos,
@@ -1648,6 +1679,29 @@ mod tests {
         );
         let (yt4, yb4) = stitch_vertical_wall(60, 80, top_margin, top_wall_h, &[]);
         assert_eq!((yt4, yb4), (60, 80), "no joints → unchanged");
+    }
+
+    // The vertical-wall top raise lives in TWO crates — the renderer
+    // (stitch_vertical_wall, here) and the mask (build_walkable_mask, core).
+    // The mask raises a top_margin-rooted segment to
+    // `top_margin - WALL_BAND_TO_TOP_MARGIN`; the renderer raises it to
+    // `top_wall_h`, which the binary derives from the SAME const. If they ever
+    // disagree a walkable slot opens at the wall top (the regression
+    // `vertical_wall_is_impassable_except_through_the_door` guards). Extracting
+    // the rule into core would drag tui wall constants across the crate
+    // boundary (invariant #1); this test pins the agreement instead.
+    #[test]
+    fn vertical_wall_top_raise_agrees_between_renderer_and_mask() {
+        let top_margin = 48u16;
+        let tbm = pixtuoid_core::layout::WALL_BAND_TO_TOP_MARGIN;
+        let top_wall_h = top_margin - tbm; // what the binary passes the renderer
+        let mask_raise = top_margin.saturating_sub(tbm); // what mask.rs computes
+        let (renderer_raise, _) =
+            stitch_vertical_wall(top_margin, 90, top_margin, top_wall_h, &[]);
+        assert_eq!(
+            renderer_raise, mask_raise,
+            "renderer + mask must raise the vertical wall top to the same row"
+        );
     }
 
     #[test]
