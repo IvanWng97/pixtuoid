@@ -30,6 +30,12 @@ pub const CELL_SIZE: u16 = 4;
 /// 4 = 25%) lets paths graze furniture edges. 50% is the sweet spot.
 const CELL_WALKABLE_MIN: u16 = 8;
 
+// The core-side `ReachSet` MUST coarsen identically to this router, or
+// "reachable" in `approach_point` would diverge from what A* actually routes.
+// Locked at compile time so a CELL_SIZE / threshold edit can't silently desync.
+const _: () = assert!(CELL_SIZE == pixtuoid_core::layout::REACH_CELL_SIZE);
+const _: () = assert!(CELL_WALKABLE_MIN == pixtuoid_core::layout::REACH_CELL_WALKABLE_MIN);
+
 /// Abstract pathfinder — implementations route from `from` to `to` over
 /// the supplied mask + overlay, returning a polyline (first = `from`,
 /// last = `to`, intermediate = corners). Renderer + pose layer use this
@@ -518,6 +524,44 @@ mod tests {
                         wp.pos.x,
                         wp.pos.y
                     );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn reachset_never_claims_an_unroutable_cell() {
+        // The core ReachSet must never be a FALSE POSITIVE vs the real router:
+        // every cell it reports reachable MUST be find_path-routable from the
+        // door. (Conservative false negatives at coarse boundaries are fine —
+        // approach_point simply won't pick those.) Pins the core↔router
+        // coarsening agreement on REAL layouts, not just synthetic masks, so
+        // approach_point can never select an unroutable approach side.
+        use crate::tui::layout::MAX_VISIBLE_DESKS;
+        let overlay = OccupancyOverlay::new();
+        for (w, h) in [(160u16, 120u16), (200, 80), (96, 70)] {
+            for seed in 0..3u64 {
+                let Some(l) = Layout::compute_with_seed(w, h, MAX_VISIBLE_DESKS, seed) else {
+                    continue;
+                };
+                let Some(door) = l.door_threshold else {
+                    continue;
+                };
+                let mut y = 0;
+                while y < l.buf_h {
+                    let mut x = 0;
+                    while x < l.buf_w {
+                        let p = Point { x, y };
+                        if l.reachable.reaches(p) {
+                            assert!(
+                                find_path(&l.walkable, &overlay, None, door, p).is_some(),
+                                "{w}x{h} seed {seed}: ReachSet claims {p:?} reachable but \
+                                 find_path can't route there from the door {door:?}",
+                            );
+                        }
+                        x += 8;
+                    }
+                    y += 8;
                 }
             }
         }

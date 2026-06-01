@@ -487,6 +487,19 @@ pub(super) fn compute_with_seed(
         pantry_counter_size,
     );
 
+    // Coarse reachable component, seeded from the door (where agents enter, so
+    // always in the main component); fall back to a home desk, then buffer
+    // centre. `snap_seed` pulls a blocked seed into the adjacent component.
+    let reachable = ReachSet::from_mask(
+        &walkable,
+        door_threshold
+            .or_else(|| home_desks.first().copied())
+            .unwrap_or(Point {
+                x: buf_w / 2,
+                y: buf_h / 2,
+            }),
+    );
+
     Some(SceneLayout {
         buf_w,
         buf_h,
@@ -513,6 +526,7 @@ pub(super) fn compute_with_seed(
         corridor,
         couch_sprite_center,
         walkable,
+        reachable,
     })
 }
 

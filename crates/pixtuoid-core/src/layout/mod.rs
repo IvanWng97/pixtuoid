@@ -15,6 +15,7 @@ mod compute;
 mod decor;
 mod mask;
 mod placement;
+mod reach;
 
 pub use approach::{stand_point, walk_target};
 pub use decor::{
@@ -24,6 +25,7 @@ pub use decor::{
 };
 pub use mask::{WALL_THICK_H, WALL_THICK_V};
 pub use placement::{anchored_top_left, z_sort_row, Anchor};
+pub use reach::{ReachSet, REACH_CELL_SIZE, REACH_CELL_WALKABLE_MIN};
 
 use crate::walkable::WalkableMask;
 
@@ -101,6 +103,11 @@ pub struct SceneLayout {
     /// paint once, centred here. `None` when no couch fits.
     pub couch_sprite_center: Option<Point>,
     pub walkable: WalkableMask,
+    /// Coarse-cell reachable component (the walkable area an agent can A\*-route
+    /// to). Computed once from a known in-component seed; consumed by
+    /// `approach_point` to prefer a *reachable* approach side over a merely-
+    /// walkable-but-walled-off one. Mirrors the tui router's coarsening.
+    pub reachable: ReachSet,
 }
 
 /// Padding (in pixels) added around every obstacle when building the
