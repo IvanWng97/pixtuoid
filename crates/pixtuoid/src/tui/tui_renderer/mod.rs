@@ -335,6 +335,12 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             .unwrap_or(&[])
     }
 
+    /// Whether an agent is a recorded coffee carrier (test harness only).
+    #[cfg(test)]
+    pub fn coffee_holders_contains(&self, id: AgentId) -> bool {
+        self.coffee_holders.contains(&id)
+    }
+
     /// Invalidate all floors' router path caches. Call when the static
     /// walkable mask changes (terminal resize, floor capacity change).
     pub fn invalidate_routes(&mut self) {
@@ -500,7 +506,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> Renderer for TuiRenderer<B> {
             let to_pet_kind =
                 crate::tui::pet::select_pet_for_floor(to_meta.floor_seed, &self.enabled_pets);
 
-            render_transition_floor(
+            let from_carriers = render_transition_floor(
                 &from_scene,
                 from_ctx,
                 from_buf,
@@ -518,7 +524,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> Renderer for TuiRenderer<B> {
                 now,
                 self.debug_walkable,
             );
-            render_transition_floor(
+            let to_carriers = render_transition_floor(
                 &to_scene,
                 to_ctx,
                 to_buf,
@@ -611,6 +617,18 @@ impl<B: Backend<Error: Send + Sync + 'static>> Renderer for TuiRenderer<B> {
             // clear the stale position so the mouse handler can't "pet" a ghost at
             // last frame's location during the transition.
             self.last_pet_pos = None;
+            // Persist coffee carriers detected on EITHER floor during the slide,
+            // same EDGE logic as the normal path (insert returns true once per
+            // pantry trip → stain accrues once). Without this a coffee run that
+            // completes mid-transition loses its cup. Processed here, after the
+            // split_at_mut borrows of floor_bufs/floor_ctxs have ended, so the
+            // &mut self note_coffee_stain call is free of them.
+            for id in from_carriers.into_iter().chain(to_carriers) {
+                if self.coffee_holders.insert(id) {
+                    self.coffee_fetched_at.insert(id, now);
+                    self.note_coffee_stain(id, now);
+                }
+            }
             return Ok(());
         }
 
@@ -718,14 +736,14 @@ fn render_transition_floor(
     pack: &Pack,
     now: SystemTime,
     debug_walkable: bool,
-) {
+) -> Vec<pixtuoid_core::AgentId> {
     let Some(layout) =
         Layout::compute_with_seed(buf_w, buf_h, MAX_VISIBLE_DESKS, floor_meta.floor_seed)
     else {
-        return;
+        return Vec::new();
     };
     fctx.router.set_preferred_zone(layout.corridor);
-    let _ = render_to_rgb_buffer(&mut PixelCtx {
+    let pixel_result = render_to_rgb_buffer(&mut PixelCtx {
         scene,
         layout: &layout,
         pack,
@@ -752,6 +770,12 @@ fn render_transition_floor(
     // snapshotted new entry/exit profiles into fctx.motion during the
     // ≤900ms slide, so refresh door_anim_max_ms for the next frame.
     fctx.recompute_door_anim_max_ms(now);
+    // Return the coffee carriers detected this frame so the caller can
+    // persist them — the normal path does this via DrawCtx.new_coffee_carriers
+    // (renderer.rs); a transition bypasses draw_scene, so without threading
+    // this back a pantry trip completed mid-slide is silently dropped (the cup
+    // never lands on the desk).
+    pixel_result.new_coffee_carriers
 }
 
 /// Test-only access to the rendered ratatui frame. This is rendered OUTPUT
