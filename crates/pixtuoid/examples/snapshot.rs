@@ -115,12 +115,6 @@ struct SnapshotArgs {
     #[arg(long, default_value_t = 1)]
     now_day: u32,
 
-    /// Seed N coffee stains onto each agent's desk for screenshot demos.
-    /// Stains accumulate naturally over a live session via pantry trips;
-    /// this skips that warmup.
-    #[arg(long)]
-    demo_stains: Option<usize>,
-
     /// Force the `?` keyboard help overlay open (for screenshots).
     #[arg(long)]
     help_open: bool,
@@ -216,32 +210,6 @@ fn main() -> Result<()> {
     if args.empty {
         light.snap_to_empty();
     }
-    let demo_stains_map: std::collections::HashMap<
-        pixtuoid_core::AgentId,
-        Vec<pixtuoid::tui::tui_renderer::StainPos>,
-    > = match args.demo_stains {
-        Some(n) if n > 0 => scene
-            .agents
-            .keys()
-            .map(|id| {
-                let stains = (0..n)
-                    .map(|i| {
-                        let seed = id
-                            .raw()
-                            .wrapping_mul(0x9E37_79B9_7F4A_7C15)
-                            .wrapping_add(i as u64);
-                        pixtuoid::tui::tui_renderer::StainPos {
-                            offset_x: ((seed & 0x7) as i8) - 3,
-                            offset_y: (((seed >> 3) & 0x3) as i8) - 1,
-                            painted_at: now - std::time::Duration::from_secs(i as u64 * 60),
-                        }
-                    })
-                    .collect();
-                (*id, stains)
-            })
-            .collect(),
-        _ => std::collections::HashMap::new(),
-    };
     let mut draw_ctx = DrawCtx {
         buf: &mut buf,
         cache: &mut cache,
@@ -272,7 +240,6 @@ fn main() -> Result<()> {
         chitchat_bubbles: Vec::new(),
         coffee_holders: &std::collections::HashSet::new(),
         coffee_fetched_at: &std::collections::HashMap::new(),
-        coffee_stains: &demo_stains_map,
         new_coffee_carriers: Vec::new(),
         popup_scale: if args.popup { 1.0 } else { 0.0 },
         help_open: args.help_open,
@@ -739,7 +706,6 @@ fn save_as_gif(
             chitchat_bubbles: Vec::new(),
             coffee_holders: &std::collections::HashSet::new(),
             coffee_fetched_at: &std::collections::HashMap::new(),
-            coffee_stains: &std::collections::HashMap::new(),
             new_coffee_carriers: Vec::new(),
             popup_scale: 0.0,
             help_open: false,

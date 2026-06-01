@@ -105,10 +105,6 @@ pub struct DrawCtx<'a> {
     pub coffee_holders: &'a std::collections::HashSet<pixtuoid_core::AgentId>,
     pub coffee_fetched_at:
         &'a std::collections::HashMap<pixtuoid_core::AgentId, std::time::SystemTime>,
-    pub coffee_stains: &'a std::collections::HashMap<
-        pixtuoid_core::AgentId,
-        Vec<crate::tui::tui_renderer::StainPos>,
-    >,
     /// New coffee carriers detected this frame — caller uses these to
     /// update the persistent `coffee_holders` set.
     pub new_coffee_carriers: Vec<pixtuoid_core::AgentId>,
@@ -247,7 +243,6 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         chitchat_state: ctx.chitchat_state,
         coffee_holders: ctx.coffee_holders,
         coffee_fetched_at: ctx.coffee_fetched_at,
-        coffee_stains: ctx.coffee_stains,
         light: ctx.light,
         door_anim_max_ms: ctx.door_anim_max_ms,
         debug_walkable: ctx.debug_walkable,

@@ -79,7 +79,11 @@ mod tests {
     fn center_matches_legacy_center_pin_offset() {
         let pos = Point { x: 30, y: 25 };
         for h in 1u16..24 {
-            assert_eq!(z_sort_row(Anchor::Center, pos, h), pos.y + (h - 1) / 2, "h={h}");
+            assert_eq!(
+                z_sort_row(Anchor::Center, pos, h),
+                pos.y + (h - 1) / 2,
+                "h={h}"
+            );
         }
     }
 

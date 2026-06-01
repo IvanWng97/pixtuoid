@@ -235,9 +235,17 @@ mod tests {
             );
             // Vending: the accent panel + each drink must be visible against the
             // dark chassis (not collapse into it).
-            assert_ne!(a.vending_panel, a.vending_body, "{}: vending panel invisible", t.name);
+            assert_ne!(
+                a.vending_panel, a.vending_body,
+                "{}: vending panel invisible",
+                t.name
+            );
             for (i, d) in a.vending_drinks.iter().enumerate() {
-                assert_ne!(*d, a.vending_body, "{}: drink {i} invisible on body", t.name);
+                assert_ne!(
+                    *d, a.vending_body,
+                    "{}: drink {i} invisible on body",
+                    t.name
+                );
             }
             // The chassis is darker than its brightest drink (the box reads as a
             // box, the bottles pop).

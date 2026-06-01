@@ -531,34 +531,19 @@ fn floor_transition_clears_stale_pet_position() {
 // ===================================================================
 
 #[test]
-fn coffee_stains_cap_at_four_fifo() {
-    let mut r = build(100, 40, vec![]);
-    let id = AgentId::from_transcript_path("/cof/0.jsonl");
-    for i in 0..6 {
-        r.note_coffee_stain(id, t0() + Duration::from_secs(i));
-    }
-    assert_eq!(
-        r.coffee_stains_for(id).len(),
-        MAX_STAINS_PER_DESK,
-        "stains capped at {MAX_STAINS_PER_DESK} (FIFO)"
-    );
-}
-
-#[test]
 fn coffee_state_evicted_when_agent_leaves_scene() {
     let id = AgentId::from_transcript_path("/cof/leave.jsonl");
     let scene = scene_with(vec![slot(id, 0, 0, t0())], 16);
     let mut r = build(100, 40, vec![]);
-    r.note_coffee_stain(id, t0());
     r.inject_coffee(id, t0());
     r.render(&scene, &pack(), t0()).unwrap();
-    assert!(!r.coffee_stains_for(id).is_empty());
+    assert!(r.coffee_holders_contains(id));
     // Agent gone from the scene ⇒ next render evicts its coffee state.
     let empty = SceneState::uniform(16);
     r.render(&empty, &pack(), t0() + Duration::from_millis(33))
         .unwrap();
     assert!(
-        r.coffee_stains_for(id).is_empty(),
+        !r.coffee_holders_contains(id),
         "coffee state must be evicted when the agent leaves (no leak)"
     );
 }
@@ -578,7 +563,13 @@ fn coffee_persists_through_floor_transition() {
     // occupant so navigate_floor(1) has a destination.
     let n_f0 = 10usize;
     let mut agents: Vec<_> = (0..n_f0)
-        .map(|i| idle(&format!("/cof/f0_{i}.jsonl"), i, t0() - Duration::from_secs(120)))
+        .map(|i| {
+            idle(
+                &format!("/cof/f0_{i}.jsonl"),
+                i,
+                t0() - Duration::from_secs(120),
+            )
+        })
         .collect();
     agents.push(slot(
         AgentId::from_transcript_path("/cof/f1.jsonl"),

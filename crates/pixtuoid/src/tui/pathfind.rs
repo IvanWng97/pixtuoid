@@ -494,7 +494,13 @@ mod tests {
         // 96×70 floor. It caught the narrow-meeting-room teleport (now gated).
         use crate::tui::layout::MAX_VISIBLE_DESKS;
         let overlay = OccupancyOverlay::new();
-        let sizes = [(96u16, 70u16), (128, 80), (160, 120), (192, 160), (240, 160)];
+        let sizes = [
+            (96u16, 70u16),
+            (128, 80),
+            (160, 120),
+            (192, 160),
+            (240, 160),
+        ];
         for (w, h) in sizes {
             for seed in 0..5u64 {
                 let Some(l) = Layout::compute_with_seed(w, h, MAX_VISIBLE_DESKS, seed) else {

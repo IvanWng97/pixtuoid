@@ -254,12 +254,6 @@ fn floor_lamp_south_offset() -> u16 {
     )
 }
 
-/// Uniform back-face shade for wide multi-material objects (the pantry
-/// counter). A warm dark "counter back receding into shadow" — used by
-/// [`paint_furniture_back_uniform`] instead of the per-column top pixel, whose
-/// alternating white-fridge / brown-counter top row would streak vertically.
-pub(super) const COUNTER_BACK_TINT: Rgb = Rgb(0x5a, 0x38, 0x18);
-
 /// Extrude `frame`'s top edge `rows` px NORTH of its blit origin `(sx, sy)` into
 /// an opaque back face. Tall free-standing objects are reachable from the north
 /// and a feet-anchored character extends UP/north, so a walker standing behind
@@ -409,7 +403,6 @@ pub struct PixelCtx<'a> {
     pub chitchat_state: &'a mut HashMap<crate::tui::chitchat::VenueKey, ActiveChitchat>,
     pub coffee_holders: &'a std::collections::HashSet<pixtuoid_core::AgentId>,
     pub coffee_fetched_at: &'a HashMap<pixtuoid_core::AgentId, SystemTime>,
-    pub coffee_stains: &'a HashMap<pixtuoid_core::AgentId, Vec<crate::tui::tui_renderer::StainPos>>,
     pub light: &'a mut crate::tui::floor::LightingState,
     /// When set, composite the walkable / approach / route debug layer over the
     /// finished scene (the live `w` toggle). Off by default; transient.
@@ -931,10 +924,6 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
                     .and_then(|t| ctx.now.duration_since(*t).ok())
                     .is_some_and(|d| d.as_secs() < COFFEE_STEAM_WINDOW_SECS)
             });
-        let stains: &[crate::tui::tui_renderer::StainPos] = occupant
-            .and_then(|a| ctx.coffee_stains.get(&a.agent_id))
-            .map(|v| v.as_slice())
-            .unwrap_or(&[]);
         drawables.push(Drawable {
             // z-sort baseline = the footprint's south/front edge + the desk
             // sprite's front-lip overhang, mirroring every other drawable's
@@ -950,7 +939,6 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
                 session_age_secs,
                 has_coffee,
                 coffee_steam,
-                stains,
             },
         });
     }
@@ -1446,9 +1434,12 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
                         WaypointKind::Couch => {
                             ("back_couch", back_couch_anchor(stand, char_w), 9u16, false)
                         }
-                        WaypointKind::Pantry => {
-                            ("holding_coffee", waypoint_anchor(stand, char_w), 12u16, false)
-                        }
+                        WaypointKind::Pantry => (
+                            "holding_coffee",
+                            waypoint_anchor(stand, char_w),
+                            12u16,
+                            false,
+                        ),
                         // Meeting sofa: the north-side seat faces the viewer
                         // across the table (front "seated"); the south-side seat
                         // faces away (back view) — the pair reads as two people
@@ -1706,8 +1697,7 @@ mod tests {
         let tbm = pixtuoid_core::layout::WALL_BAND_TO_TOP_MARGIN;
         let top_wall_h = top_margin - tbm; // what the binary passes the renderer
         let mask_raise = top_margin.saturating_sub(tbm); // what mask.rs computes
-        let (renderer_raise, _) =
-            stitch_vertical_wall(top_margin, 90, top_margin, top_wall_h, &[]);
+        let (renderer_raise, _) = stitch_vertical_wall(top_margin, 90, top_margin, top_wall_h, &[]);
         assert_eq!(
             renderer_raise, mask_raise,
             "renderer + mask must raise the vertical wall top to the same row"

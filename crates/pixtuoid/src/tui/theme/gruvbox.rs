@@ -101,7 +101,12 @@ pub static GRUVBOX: Theme = Theme {
     appliance: ApplianceColors {
         vending_body: Rgb(45, 42, 38),
         vending_panel: Rgb(250, 189, 47),
-        vending_drinks: [Rgb(254, 128, 25), Rgb(142, 192, 124), Rgb(184, 187, 38), Rgb(211, 134, 155)],
+        vending_drinks: [
+            Rgb(254, 128, 25),
+            Rgb(142, 192, 124),
+            Rgb(184, 187, 38),
+            Rgb(211, 134, 155),
+        ],
         vending_trim: Rgb(180, 135, 85),
         vending_dark: Rgb(29, 32, 33),
         printer_body: Rgb(220, 210, 195),

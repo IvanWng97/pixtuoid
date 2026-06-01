@@ -95,7 +95,12 @@ pub static NORMAL: Theme = Theme {
     appliance: ApplianceColors {
         vending_body: Rgb(50, 55, 65),
         vending_panel: Rgb(180, 60, 60),
-        vending_drinks: [Rgb(220, 50, 50), Rgb(50, 160, 50), Rgb(50, 80, 200), Rgb(220, 180, 40)],
+        vending_drinks: [
+            Rgb(220, 50, 50),
+            Rgb(50, 160, 50),
+            Rgb(50, 80, 200),
+            Rgb(220, 180, 40),
+        ],
         vending_trim: Rgb(180, 170, 100),
         vending_dark: Rgb(40, 42, 48),
         printer_body: Rgb(220, 220, 225),

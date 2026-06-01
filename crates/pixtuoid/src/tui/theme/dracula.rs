@@ -95,7 +95,12 @@ pub static DRACULA: Theme = Theme {
     appliance: ApplianceColors {
         vending_body: Rgb(45, 47, 62),
         vending_panel: Rgb(189, 147, 249),
-        vending_drinks: [Rgb(139, 233, 253), Rgb(255, 121, 198), Rgb(255, 184, 108), Rgb(80, 250, 123)],
+        vending_drinks: [
+            Rgb(139, 233, 253),
+            Rgb(255, 121, 198),
+            Rgb(255, 184, 108),
+            Rgb(80, 250, 123),
+        ],
         vending_trim: Rgb(200, 150, 80),
         vending_dark: Rgb(25, 26, 35),
         printer_body: Rgb(230, 228, 240),

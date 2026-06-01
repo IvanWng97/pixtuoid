@@ -52,10 +52,6 @@ pub(super) enum DrawableKind<'a> {
         session_age_secs: u64,
         has_coffee: bool,
         coffee_steam: bool,
-        /// Accumulated coffee-ring stains for the occupant (FIFO,
-        /// capped at `MAX_STAINS_PER_DESK`). Empty slice for unoccupied
-        /// desks or agents that haven't visited the pantry yet.
-        stains: &'a [crate::tui::tui_renderer::StainPos],
     },
     Character {
         agent: &'a AgentSlot,
@@ -306,7 +302,6 @@ pub(super) fn paint_drawable(
             session_age_secs,
             has_coffee,
             coffee_steam,
-            stains,
         } => {
             let divider = theme.office.cubicle_divider;
             if !is_last_col {
@@ -346,7 +341,6 @@ pub(super) fn paint_drawable(
                 *session_age_secs,
                 *has_coffee,
                 *coffee_steam,
-                stains,
                 now,
                 theme,
             );
@@ -419,12 +413,15 @@ pub(super) fn paint_drawable(
                     crate::tui::layout::furniture_def(crate::tui::layout::Furniture::Pantry)
                         .occludes_behind
                 {
+                    // Counter-back recede shade = the theme's desk-wood shadow,
+                    // so it harmonizes per theme (was a hardcoded warm brown
+                    // that clashed on the cool/dark themes).
                     super::paint_furniture_back_uniform(
                         buf,
                         f,
                         cx,
                         cy,
-                        super::COUNTER_BACK_TINT,
+                        theme.furniture.wood_trim,
                         rows,
                     );
                 }
@@ -713,18 +710,16 @@ pub(super) fn paint_drawable(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn paint_desk_personalization(
     buf: &mut RgbBuffer,
     desk: Point,
     age_secs: u64,
     has_coffee: bool,
     coffee_steam: bool,
-    stains: &[crate::tui::tui_renderer::StainPos],
     now: SystemTime,
     theme: &crate::tui::theme::Theme,
 ) {
-    if age_secs == 0 && !has_coffee && stains.is_empty() {
+    if age_secs == 0 && !has_coffee {
         return;
     }
     let put = |buf: &mut RgbBuffer, x: u16, y: u16, c: Rgb| {
@@ -732,9 +727,6 @@ fn paint_desk_personalization(
             buf.put(x, y, c);
         }
     };
-    // Stains paint UNDER the coffee cup / plant / photo so the
-    // foreground items remain readable.
-    paint_coffee_stains(buf, desk, stains, now);
     if has_coffee {
         let cx = desk.x + 2;
         let cy = desk.y + 2;
@@ -763,55 +755,5 @@ fn paint_desk_personalization(
         put(buf, fx + 1, fy, theme.furniture.photo_frame);
         put(buf, fx, fy + 1, theme.furniture.photo_bg);
         put(buf, fx + 1, fy + 1, theme.furniture.photo_bg);
-    }
-}
-
-/// Tint a faint brown stain at each recorded position. Anchored at the
-/// desk centre; per-stain offsets land it inside the desk footprint
-/// (and a hair outside for character variation). Alpha decays linearly
-/// over `STAIN_DECAY_SECS` and floors at `MIN_STAIN_ALPHA` so stains
-/// remain subtly visible for the rest of the session.
-fn paint_coffee_stains(
-    buf: &mut RgbBuffer,
-    desk: Point,
-    stains: &[crate::tui::tui_renderer::StainPos],
-    now: SystemTime,
-) {
-    use super::palette::blend;
-
-    const STAIN_DECAY_SECS: f32 = 1800.0;
-    const MIN_STAIN_ALPHA: f32 = 0.2;
-    const STAIN_RGB: Rgb = Rgb(98, 60, 38);
-    const STAIN_STRENGTH: f32 = 0.5;
-
-    let anchor_x = desk.x as i32 + (DESK_W as i32) / 2;
-    let anchor_y = desk.y as i32 + (DESK_H as i32) / 2;
-
-    for stain in stains {
-        let age_secs = now
-            .duration_since(stain.painted_at)
-            .map(|d| d.as_secs_f32())
-            .unwrap_or(0.0);
-        let alpha = (1.0 - age_secs / STAIN_DECAY_SECS).clamp(MIN_STAIN_ALPHA, 1.0);
-        let x = anchor_x + stain.offset_x as i32;
-        let y = anchor_y + stain.offset_y as i32;
-        if x < 0 || y < 0 {
-            continue;
-        }
-        let (ux, uy) = (x as u16, y as u16);
-        if ux >= buf.width || uy >= buf.height {
-            continue;
-        }
-        let cur = buf.get(ux, uy);
-        let t = alpha * STAIN_STRENGTH;
-        buf.put(
-            ux,
-            uy,
-            Rgb(
-                blend(cur.0, STAIN_RGB.0, t),
-                blend(cur.1, STAIN_RGB.1, t),
-                blend(cur.2, STAIN_RGB.2, t),
-            ),
-        );
     }
 }

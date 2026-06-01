@@ -103,7 +103,12 @@ pub static CATPPUCCIN: Theme = Theme {
     appliance: ApplianceColors {
         vending_body: Rgb(55, 56, 74),
         vending_panel: Rgb(137, 180, 250),
-        vending_drinks: [Rgb(250, 179, 135), Rgb(116, 199, 236), Rgb(166, 227, 161), Rgb(203, 166, 247)],
+        vending_drinks: [
+            Rgb(250, 179, 135),
+            Rgb(116, 199, 236),
+            Rgb(166, 227, 161),
+            Rgb(203, 166, 247),
+        ],
         vending_trim: Rgb(210, 180, 160),
         vending_dark: Rgb(24, 24, 37),
         printer_body: Rgb(205, 214, 244),
