@@ -135,6 +135,22 @@ struct SnapshotArgs {
     /// buffer position is printed so you can crop to it.
     #[arg(long)]
     anim: Option<String>,
+
+    /// Override the `--anim` pre-roll skip (ms). The default skips to the
+    /// walk-out (settle/sit follow); set a LARGER value to start the capture at
+    /// a later phase — e.g. desk_dwell + walk + sit_dwell to capture the LEAVE
+    /// (walk-back). Lets the harness verify the full walk→settle→sit→leave cycle
+    /// in short clips instead of one huge GIF.
+    #[arg(long)]
+    anim_skip_ms: Option<u64>,
+
+    /// Restrict `--anim sofa`/`couch`/`stand` to a seat with a given SEATED
+    /// facing: `north` (back-view, `back_couch` sprite — sofa occludes the lower
+    /// body) or `south` (front-view, `seated` sprite). Lets a single meeting room
+    /// be captured from BOTH its sofas (north-of-table faces south, south-of-table
+    /// faces north). Ignored for non-seat targets.
+    #[arg(long)]
+    anim_facing: Option<String>,
 }
 
 fn default_projects_root() -> String {
@@ -168,8 +184,10 @@ fn main() -> Result<()> {
             args.cols.unwrap_or(COLS),
             args.rows.unwrap_or(ROWS),
             args.floor_seed,
+            args.anim_facing.as_deref(),
         );
-        anim_skip_ms = skip;
+        anim_skip_ms = args.anim_skip_ms.unwrap_or(skip);
+        eprintln!("ANIM pre-roll skip = {anim_skip_ms}ms (default {skip}ms)");
         s
     } else if args.empty {
         SceneState::uniform(args.max_desks)
@@ -587,8 +605,9 @@ fn anim_scene(
     cols: u16,
     rows: u16,
     floor_seed: u64,
+    facing: Option<&str>,
 ) -> (SceneState, u64) {
-    use pixtuoid_core::layout::{SceneLayout, WaypointKind, MAX_VISIBLE_DESKS};
+    use pixtuoid_core::layout::{Facing, SceneLayout, WaypointKind, MAX_VISIBLE_DESKS};
     use pixtuoid_core::pose::{
         is_aimless_cycle, seated_dwell_ms, takes_trip, waypoint_index_for_cycle,
     };
@@ -608,11 +627,19 @@ fn anim_scene(
         "pantry" => Some(WaypointKind::Pantry),
         _ => None, // "desk": always visited (return-to-desk), not a waypoint
     };
+    let want_facing = match facing {
+        Some("north") => Some(Facing::North),
+        Some("south") => Some(Facing::South),
+        Some("east") => Some(Facing::East),
+        Some("west") => Some(Facing::West),
+        _ => None,
+    };
     let target_idxs: Vec<usize> = l
         .waypoints
         .iter()
         .enumerate()
         .filter(|(_, w)| Some(w.kind) == target_kind)
+        .filter(|(_, w)| want_facing.map_or(true, |f| w.facing == f))
         .map(|(i, _)| i)
         .collect();
 
@@ -648,6 +675,18 @@ fn anim_scene(
         .unwrap_or_else(|| format!("/anim/{target}_fallback.jsonl"));
 
     let id = AgentId::from_transcript_path(&path);
+    // Print the agent's ACTUAL cycle-0 target — NOT the first matching waypoint
+    // above (which is misleading when several seats match: the agent may sit on
+    // a different one, so cropping to the printed pos shows an empty seat). This
+    // is the buffer position to crop to for verification.
+    if target != "desk" && n > 0 {
+        let wi = waypoint_index_for_cycle(id, 0, n);
+        let wp = l.waypoints[wi];
+        eprintln!(
+            "ANIM agent ACTUAL target = waypoint[{wi}] {:?} facing {:?} at buf_pos=({}, {})",
+            wp.kind, wp.facing, wp.pos.x, wp.pos.y
+        );
+    }
     // Fresh agent at `now` (clean Seated start — the TUI re-anchors fresh agents
     // there regardless of created_at). The GIF PRE-ROLLS `skip_ms` past the
     // seated dwell so capture begins right as it walks out (see save_as_gif).

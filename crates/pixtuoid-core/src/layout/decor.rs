@@ -330,9 +330,12 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             // SEAT_APPROACH rotated by the SEATED facing (North = looks at the
             // window → back_couch sprite) resolves to {N, E, W} — the natural
             // sides, EXCLUDING the south backrest. The agent comes from whichever
-            // of those is reachable + nearest its (always-south) desk; the couch
-            // seat that's walled in on N/E/W at small sizes falls back to the
-            // south via approach_point's degraded `any`-side path (not a teleport).
+            // of those is reachable + nearest its (always-south) desk. A couch
+            // seat walled in on ALL of N/E/W is un-sittable — approach_point
+            // returns the `pos` sentinel and the wander SKIPS it (no fallback,
+            // never the backrest). Near the window the N side is normally open,
+            // so the couch is reachable; that N approach is the FAR side in
+            // 2.5D, so the walk-in passes behind the couch until it settles.
             approach: SEAT_APPROACH,
         },
         Furniture::Pantry => FurnitureDef {
