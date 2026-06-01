@@ -332,12 +332,12 @@ pub(super) fn compute_with_seed(
     // floor-to-ceiling windows so both sit on the same wall plane.
     // Windows span y=1 to y=top_wall_h-3 inside the wall band; the
     // elevator's bottom row lands at that same y. (`top_wall_h =
-    // top_margin - 4` per the renderer's pre-pass; replicated here
-    // so the layout owns the geometry.) Requires ≥ 20 px of width
-    // to even fit the sprite + margin.
+    // top_margin - WALL_BAND_TO_TOP_MARGIN`, the one const the renderer's
+    // pre-pass and the mask both read so they can't drift.) Requires ≥ 20 px
+    // of width to even fit the sprite + margin.
     const ELEVATOR_W: u16 = 16;
     const ELEVATOR_H: u16 = 14;
-    let top_wall_h = top_margin.saturating_sub(4);
+    let top_wall_h = top_margin.saturating_sub(super::WALL_BAND_TO_TOP_MARGIN);
     let window_bottom_y = top_wall_h.saturating_sub(3); // matches paint_floor_and_walls' window_h
     let door = if buf_w >= ELEVATOR_W + 4 && window_bottom_y + 1 >= ELEVATOR_H {
         Some(Point {
