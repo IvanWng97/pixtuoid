@@ -277,4 +277,35 @@ mod tests {
             "cc·subagents-paper"
         );
     }
+
+    #[test]
+    fn label_uses_project_dir_when_cwd_is_root() {
+        // cwd = "/" fails the non-empty/non-root guard → falls to the project-dir
+        // branch rather than the cwd basename.
+        let path = Path::new("/Users/me/.claude/projects/-Users-me-dotfiles/abc.jsonl");
+        assert_eq!(
+            cc_derive_label(path, "claude-code", Path::new("/")),
+            "cc·dotfiles"
+        );
+    }
+
+    #[test]
+    fn label_uses_project_dir_when_cwd_has_no_basename() {
+        // A non-empty, non-root cwd whose file_name() is None (e.g. "..") enters
+        // the cwd block but can't return → falls through to the project-dir branch.
+        let path = Path::new("/Users/me/.claude/projects/-Users-me-dotfiles/abc.jsonl");
+        assert_eq!(
+            cc_derive_label(path, "claude-code", Path::new("..")),
+            "cc·dotfiles"
+        );
+    }
+
+    #[test]
+    fn label_final_fallback_to_cc_when_no_project_dir() {
+        // Degenerate path with no parent dir to decode AND empty cwd → bare "cc".
+        assert_eq!(
+            cc_derive_label(Path::new("abc.jsonl"), "claude-code", Path::new("")),
+            "cc"
+        );
+    }
 }
