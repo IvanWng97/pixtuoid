@@ -116,6 +116,18 @@ pub const OBSTACLE_PAD_PX: u16 = 2;
 /// drifting (the relationship was a `- 4` literal duplicated across both).
 pub const WALL_BAND_TO_TOP_MARGIN: u16 = 4;
 
+/// How many pixels of the pantry counter actually sit on the floor. The
+/// counter is a 3/4-perspective sprite (10 px tall in the large variant)
+/// centered on its waypoint `pos`, but only the southern base contacts the
+/// ground — the receding cabinet tops + backsplash are elevation that
+/// overhangs (invariant #6). The mask blocks only this shallow strip,
+/// anchored to the sprite's SOUTH base, so the non-walkable area hugs the
+/// counter's foot instead of the full sprite height. A character routed
+/// behind (north of) the counter is occluded by the back-cap
+/// (`FurnitureDef.occludes_behind`), exactly like the couch — see
+/// `mask::build_walkable_mask`.
+pub const PANTRY_FOOTPRINT_DEPTH: u16 = 3;
+
 pub const DESK_W: u16 = 12;
 pub const DESK_H: u16 = 6;
 /// Hard cap on how many cubicles get painted regardless of how high

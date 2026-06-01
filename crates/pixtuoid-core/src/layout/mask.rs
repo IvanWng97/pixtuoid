@@ -5,8 +5,8 @@
 //! edges.
 
 use super::{
-    furniture_def, Furniture, PodDecor, Point, WallDecor, Waypoint, OBSTACLE_PAD_PX,
-    WALL_BAND_TO_TOP_MARGIN,
+    furniture_def, Furniture, PodDecor, Point, WallDecor, Waypoint, WaypointKind, OBSTACLE_PAD_PX,
+    PANTRY_FOOTPRINT_DEPTH, WALL_BAND_TO_TOP_MARGIN,
 };
 use crate::walkable::WalkableMask;
 
@@ -199,6 +199,27 @@ pub(super) fn build_walkable_mask(
         // Pass 1.5 (after characters) so a visitor's body is occluded
         // by the sprite. We don't need extra clearance around the
         // sprite footprint; the render order handles overlap correctly.
+        if matches!(wp.kind, WaypointKind::Pantry) {
+            // The counter sprite (h px tall) is centered on pos, but only its
+            // SOUTH base sits on the floor — the receding cabinet tops +
+            // backsplash are elevation that overhangs (invariant #6). Block a
+            // shallow PANTRY_FOOTPRINT_DEPTH-tall strip anchored to that base
+            // (sprite bottom = pos.y + h/2 - 1) instead of the full height, so
+            // the non-walkable area hugs the counter foot. A character routed
+            // behind it is occluded by the back-cap (occludes_behind),
+            // couch-style. `stand_point` still uses the FULL (w,h) so the agent
+            // parks clear of the whole visual, not inside the upper sprite.
+            let depth = PANTRY_FOOTPRINT_DEPTH.min(h);
+            let south = wp.pos.y + h / 2;
+            mask.mark_blocked(
+                wp.pos.x.saturating_sub(w / 2),
+                south.saturating_sub(depth),
+                w,
+                depth,
+                1,
+            );
+            continue;
+        }
         mask.mark_blocked(
             wp.pos.x.saturating_sub(w / 2),
             wp.pos.y.saturating_sub(h / 2),
