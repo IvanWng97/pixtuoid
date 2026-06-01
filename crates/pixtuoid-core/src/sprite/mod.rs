@@ -28,6 +28,14 @@ impl Palette {
         self.map.get(&key).copied()
     }
 
+    /// Iterate `(key, pixel)` pairs. Lets callers assert palette invariants —
+    /// notably that every key maps to a DISTINCT RGB, since `recolor_frame`
+    /// substitutes by RGB equality and two keys sharing a color would be
+    /// indistinguishable.
+    pub fn iter(&self) -> impl Iterator<Item = (char, Pixel)> + '_ {
+        self.map.iter().map(|(&k, &p)| (k, p))
+    }
+
     /// Replace one palette key's color — used for per-agent recoloring.
     pub fn with_override(&self, key: char, pixel: Pixel) -> Self {
         let mut out = self.clone();
