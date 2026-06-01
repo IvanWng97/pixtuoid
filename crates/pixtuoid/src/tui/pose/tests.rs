@@ -1785,7 +1785,12 @@ fn exit_while_wandering_does_not_teleport_to_desk() {
     use crate::tui::pixel_painter::character_anchor;
 
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
-    let l = layout();
+    // Real-sized floor (not the tiny 120×96 `layout()`): in the tiny room the
+    // meeting sofas are boxed in to only their backrest, so with the no-back-
+    // fallback rule a trip agent correctly skips them and never wanders far. A
+    // real floor has reachable waypoints, so the agent genuinely walks out —
+    // which is what this exit-while-wandering test needs.
+    let l = Layout::compute(160, 120, 4).expect("fits");
     let trip_id = (0u64..1000)
         .map(|i| AgentId::from_transcript_path(&format!("/exitw/{i}.jsonl")))
         .find(|id| takes_trip(*id, 0))

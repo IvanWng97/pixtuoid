@@ -458,6 +458,17 @@ fn pick_wander_dest(
         );
         // Seat foot cell `S`: the walk SETTLES from `dest` onto it (the sprite
         // renders here). `None` for obstacles — the agent stands AT `dest`.
+        // NO approach-side fallback: when no allowed+reachable side exists,
+        // approach_point returns the blocked `wp.pos` sentinel (a seat boxed in to
+        // only its backrest, or an obstacle with no open reachable side). Never
+        // route there — A* would snap onto the furniture (the backrest, for a
+        // seat). Amble aimlessly this cycle instead, matching idle_pose.
+        if dest == wp.pos {
+            let seed = aimless_wander_seed(id, cycle_n);
+            return (pick_aimless_dest(layout, seed), None, None, None);
+        }
+        // Seat foot cell `S`: the walk SETTLES from `dest` onto it (the sprite
+        // renders here). `None` for obstacles — the agent stands AT `dest`.
         let seat = pixtuoid_core::layout::seated_foot_cell(wp.kind.furniture(), wp.pos);
         (dest, Some(wp.kind), Some(wp_idx), seat)
     }

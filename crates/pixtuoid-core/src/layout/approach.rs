@@ -133,12 +133,16 @@ fn approach_footprint(kind: Furniture, pantry_counter_size: (u16, u16)) -> Optio
 ///
 /// - **`occupies_pos` seat/desk:** an allowed-side walkable+reachable cell
 ///   adjacent to the seat, nearest `origin`. The sprite renders on its fixed
-///   [`seated_foot_cell`]; the post-A\* settle bridges approach → seat.
+///   [`seated_foot_cell`]; the post-A\* settle bridges approach → seat. The back
+///   (excluded) side is never scanned — **a seat approach is never a back-side
+///   cell** (you can't sit by climbing over the backrest).
 /// - **obstacle:** the first reachable cell past the footprint on the allowed
 ///   side nearest `origin` — the agent stands there (render == approach point).
 ///
-/// Falls back to `pos` when no allowed reachable side exists (the router then
-/// snaps; the routability guard asserts this stays rare).
+/// Returns the blocked `pos` as a **"no valid approach" sentinel** when no allowed
+/// reachable side exists (a seat boxed in to only its back, or a fully-blocked
+/// obstacle). Callers MUST treat `== pos` as "skip this furniture this cycle"
+/// rather than routing to it — routing to `pos` would let A\* snap onto the back.
 pub fn approach_point(
     kind: Furniture,
     pos: Point,
@@ -153,16 +157,20 @@ pub fn approach_point(
     let mut best: Option<(u64, Point)> = None;
     if def.occupies_pos {
         // SEAT/desk: the sprite renders on the fixed seat foot cell; the agent
-        // walks IN from a side and the post-A* settle bridges approach → seat.
-        // Pick the SIDE = the ApproachSides-allowed side with a reachable cell
-        // NEAREST the home desk (couch facing=North ⇒ {N,E,W}; the south backrest
-        // is excluded) — so the agent comes from its NATURAL side, not a hardcoded
-        // one. Degrade to ANY reachable side (incl. the backrest) only when every
-        // allowed side is walled in (rare — avoids a teleport, vs the blocked
-        // center).
+        // walks IN from an ALLOWED side and the post-A* settle bridges approach →
+        // seat. Pick the ApproachSides-allowed side (facing-rotated: a North couch
+        // ⇒ {N,E,W}, the south backrest EXCLUDED) with a reachable cell NEAREST the
+        // home desk — the agent's natural side. The back side is never even scanned:
+        // a seat reachable ONLY from behind is un-sittable (you'd clip through the
+        // backrest), so there is NO back-side fallback — we return the blocked `pos`
+        // as the "no valid approach" sentinel and the caller skips the seat rather
+        // than letting A* snap onto the backrest. INVARIANT: a seat approach is
+        // never a back-side cell.
         let mut allowed: Option<(u64, Point)> = None;
-        let mut any: Option<(u64, Point)> = None;
         for (dx, dy) in DIRS {
+            if !def.approach.allows(facing, (dx, dy)) {
+                continue; // never approach across an excluded side (the back)
+            }
             for dist in 1..=SEAT_APPROACH_SCAN {
                 let cx = pos.x as i32 + dx * dist;
                 let cy = pos.y as i32 + dy * dist;
@@ -174,18 +182,13 @@ pub fn approach_point(
                     y: cy as u16,
                 };
                 if mask.is_walkable(c.x, c.y) {
-                    // First walkable cell on this side decides the side; keep only
-                    // if A* can reach it.
+                    // First walkable cell on this side decides it; keep only if A*
+                    // can actually reach it.
                     if reachable.reaches(c) {
                         let ex = c.x as i64 - origin.x as i64;
                         let ey = c.y as i64 - origin.y as i64;
                         let d2 = (ex * ex + ey * ey) as u64;
-                        if any.map_or(true, |(b, _)| d2 < b) {
-                            any = Some((d2, c));
-                        }
-                        if def.approach.allows(facing, (dx, dy))
-                            && allowed.map_or(true, |(b, _)| d2 < b)
-                        {
+                        if allowed.map_or(true, |(b, _)| d2 < b) {
                             allowed = Some((d2, c));
                         }
                     }
@@ -193,7 +196,7 @@ pub fn approach_point(
                 }
             }
         }
-        return allowed.or(any).map(|(_, p)| p).unwrap_or(pos);
+        return allowed.map(|(_, p)| p).unwrap_or(pos);
     } else if let Some((fw, fh)) = approach_footprint(kind, pantry_counter_size) {
         // Obstacle: stand just off the footprint, on the reachable allowed side
         // nearest the home desk (== stand_point, plus the reachability filter).
@@ -453,16 +456,70 @@ mod tests {
     }
 
     #[test]
-    fn approach_point_seat_degrades_to_the_back_when_all_allowed_sides_are_walled_in() {
+    fn seat_approach_is_never_behind_the_backrest_on_real_layouts() {
+        // The physics invariant on REAL layouts: for every seat, across
+        // sizes × seeds × desks, approach_point is EITHER the `pos` skip-sentinel
+        // OR a cell on an ALLOWED side — NEVER a cell behind the backrest (the
+        // excluded side). With no fallback, a back-approach can never be chosen.
+        use crate::layout::{furniture_def, SceneLayout};
+        for (w, h) in [(120u16, 96u16), (160, 120), (192, 160), (240, 160)] {
+            for seed in 0..4u64 {
+                let Some(l) = SceneLayout::compute_with_seed(w, h, 4, seed) else {
+                    continue;
+                };
+                for &desk in &l.home_desks {
+                    for wp in &l.waypoints {
+                        let def = furniture_def(wp.kind.furniture());
+                        if !def.occupies_pos {
+                            continue;
+                        }
+                        let a = approach_point(
+                            wp.kind.furniture(),
+                            wp.pos,
+                            wp.facing,
+                            l.pantry_counter_size,
+                            &l.walkable,
+                            desk,
+                            &l.reachable,
+                        );
+                        if a == wp.pos {
+                            continue; // skip sentinel — the wander avoids it, fine
+                        }
+                        // The approach is a pure single-axis offset from pos; its
+                        // direction MUST be an allowed (non-back) side.
+                        let dx = a.x as i32 - wp.pos.x as i32;
+                        let dy = a.y as i32 - wp.pos.y as i32;
+                        let dir = if dx.abs() >= dy.abs() {
+                            (dx.signum(), 0)
+                        } else {
+                            (0, dy.signum())
+                        };
+                        assert!(
+                            def.approach.allows(wp.facing, dir),
+                            "{w}x{h} seed{seed}: {:?} at {:?} (facing {:?}) approach {a:?} is on \
+                             a FORBIDDEN side {dir:?} — a back-approach was chosen",
+                            wp.kind,
+                            wp.pos,
+                            wp.facing,
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn approach_point_seat_never_approaches_from_the_back_even_when_walled_in() {
         // A North-facing sofa boxed in on N/E/W (its three ALLOWED sides), with
-        // ONLY the south backrest side opening onto a reachable corridor. The
-        // allowed-side selector finds nothing, so it must DEGRADE to the nearest
-        // reachable ANY side (the back) rather than returning the blocked `pos`
-        // (which would teleport the agent onto the seat with no walk).
+        // ONLY the south backrest side opening onto a reachable corridor. Physics:
+        // you cannot sit by climbing over the backrest, so there is NO valid
+        // approach. approach_point must return the blocked `pos` (the "no valid
+        // side" sentinel for the caller to skip), NOT a back-side cell — a settle
+        // must never cross the backrest line, not even as a last resort.
         let pos = Point { x: 50, y: 50 };
         let mut m = WalkableMask::new_open(100, 100);
         m.mark_blocked(0, 0, 100, 100, 0); // block everything…
-        m.mark_walkable(48, 54, 5, 44); // …then carve a corridor SOUTH of the seat
+        m.mark_walkable(48, 54, 5, 44); // …then carve a corridor SOUTH (behind the back)
         let reach = ReachSet::from_mask(&m, Point { x: 50, y: 90 });
         let s = approach_point(
             Furniture::MeetingSofa,
@@ -470,14 +527,12 @@ mod tests {
             Facing::North,
             (0, 0),
             &m,
-            Point { x: 50, y: 95 }, // origin in the corridor (south)
+            Point { x: 50, y: 95 }, // origin in the south corridor (behind the back)
             &reach,
         );
-        assert_ne!(s, pos, "must not fall back to the blocked seat (teleport)");
-        assert!(reach.reaches(s), "degraded approach must still be routable");
-        assert!(
-            s.x == pos.x && s.y > pos.y,
-            "only the south back is reachable → degrade to it, got {s:?}"
+        assert_eq!(
+            s, pos,
+            "only the backrest side is reachable → no valid approach → return pos (skip), got {s:?}"
         );
     }
 

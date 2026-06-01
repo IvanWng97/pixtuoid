@@ -537,8 +537,10 @@ mod tests {
         // desk × waypoint × size × seed. The test above uses the DOOR origin + the
         // blocked furniture CENTER, so it can pass while a specific desk's chosen
         // approach side is unroutable (a teleport). `reaches ⇒ routable` (the
-        // ReachSet contract) makes this hold unless a seat has no reachable
-        // allowed side at all (the degraded fallback to `pos`, which this catches).
+        // ReachSet contract) makes this hold. When NO allowed+reachable side
+        // exists, approach_point returns the `wp.pos` sentinel (NO fallback — the
+        // wander skips the furniture), which isn't a real destination, so we
+        // exclude it below.
         use crate::tui::layout::MAX_VISIBLE_DESKS;
         use pixtuoid_core::layout::approach_point;
         let overlay = OccupancyOverlay::new();
@@ -564,6 +566,9 @@ mod tests {
                             desk,
                             &l.reachable,
                         );
+                        if a == wp.pos {
+                            continue; // "no valid approach" sentinel — skipped, not routed to
+                        }
                         assert!(
                             find_path(&l.walkable, &overlay, None, desk, a).is_some(),
                             "{w}x{h} seed {seed}: {:?} approach_point {a:?} unroutable from \

@@ -427,13 +427,24 @@ fn idle_pose(slot: &AgentSlot, desk: Point, layout: &SceneLayout, elapsed_ms: u6
             desk,
             &layout.reachable,
         );
-        (
-            dest,
-            Pose::AtWaypoint {
-                wp: wp_idx,
-                kind: wp.kind,
-            },
-        )
+        // NO approach-side fallback (mirrors tui::motion::pick_wander_dest so the
+        // overlay + render stay in lockstep): when no allowed+reachable side
+        // exists, approach_point returns the blocked `wp.pos` sentinel (a seat
+        // boxed in to only its backrest, or an obstacle with no open reachable
+        // side). Amble aimlessly this cycle instead of routing into the furniture.
+        if dest == wp.pos {
+            let seed = aimless_wander_seed(slot.agent_id, cycle_n);
+            let p = pick_aimless_dest(layout, seed);
+            (p, Pose::AimlessAt { dest: p })
+        } else {
+            (
+                dest,
+                Pose::AtWaypoint {
+                    wp: wp_idx,
+                    kind: wp.kind,
+                },
+            )
+        }
     };
 
     if phase_t < seated_end {
