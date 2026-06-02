@@ -465,6 +465,36 @@ mod tests {
     }
 
     #[test]
+    fn meeting_table_is_centered_between_its_two_sofas() {
+        // The two sofas face each other across the table, so the table must sit
+        // vertically EQUIDISTANT from both — each sofa's front (toward the table)
+        // then gets equal, routable approach clearance. Room-CENTER placement
+        // packed the north sofa's front against the table (a sub-coarse-grid seam
+        // that cost its seats their front approach) while the south sofa had room
+        // — an asymmetry users spotted as "the south-facing sofa is missing entry
+        // points." Sofa/table positions are window-height-driven, so this relative
+        // invariant is swept across sizes × seeds, NOT a fixed pixel offset.
+        for (w, h) in [(128u16, 80u16), (160, 120), (192, 160), (240, 160)] {
+            for seed in 0..8u64 {
+                let Some(l) = SceneLayout::compute_with_seed(w, h, 8, seed) else {
+                    continue;
+                };
+                for (room_id, table) in l.meeting_tables.iter().enumerate() {
+                    let north = l.meeting_sofas[2 * room_id];
+                    let south = l.meeting_sofas[2 * room_id + 1];
+                    let gap_n = table.y.abs_diff(north.y);
+                    let gap_s = south.y.abs_diff(table.y);
+                    assert!(
+                        gap_n.abs_diff(gap_s) <= 1,
+                        "{w}x{h} seed {seed} room {room_id}: table not centered \
+                         between sofas (north gap {gap_n}px, south gap {gap_s}px)"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn meeting_slots_face_the_table() {
         // Sofa seats face the table across the room (north seat faces South,
         // south seat faces North); standing slots face inward toward the table

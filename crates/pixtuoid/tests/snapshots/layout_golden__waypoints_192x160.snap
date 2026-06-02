@@ -60,7 +60,7 @@ expression: l.waypoints
     Waypoint {
         pos: Point {
             x: 20,
-            y: 64,
+            y: 59,
         },
         kind: MeetingSofa,
         facing: South,
@@ -71,7 +71,7 @@ expression: l.waypoints
     Waypoint {
         pos: Point {
             x: 26,
-            y: 64,
+            y: 59,
         },
         kind: MeetingSofa,
         facing: South,
@@ -82,7 +82,7 @@ expression: l.waypoints
     Waypoint {
         pos: Point {
             x: 32,
-            y: 64,
+            y: 59,
         },
         kind: MeetingSofa,
         facing: South,
@@ -126,7 +126,7 @@ expression: l.waypoints
     Waypoint {
         pos: Point {
             x: 17,
-            y: 76,
+            y: 75,
         },
         kind: MeetingStand,
         facing: East,
@@ -137,7 +137,7 @@ expression: l.waypoints
     Waypoint {
         pos: Point {
             x: 34,
-            y: 76,
+            y: 75,
         },
         kind: MeetingStand,
         facing: West,

@@ -188,40 +188,42 @@ pub(super) fn compute_with_seed(
     const MEETING_FURNITURE_MIN_W: u16 = 30;
     let room_fits_furniture =
         |mr: &Bounds| mr.width >= MEETING_FURNITURE_MIN_W && mr.height >= SOFA_H * 2;
-    let mut meeting_sofas = if let Some(mr) = meeting_room.filter(&room_fits_furniture) {
+    // One source for a meeting room's furniture trio: two facing sofas and the
+    // table CENTERED BETWEEN THEM. The table used to sit at the room centre while
+    // the sofas sat at 30%/80% of the room height — asymmetric, so the north
+    // sofa's front was packed against the table (a sub-coarse-grid seam that cost
+    // its seats their front approach) while the south sofa had clearance. Placing
+    // the table at the sofa midpoint gives both fronts equal, routable clearance.
+    // The sofas keep their 30%/80% bias (backrest clearance from the room's top/
+    // bottom walls); only the table follows them. All positions are
+    // window-height-driven, so the approach points the agents path to derive from
+    // the resulting mask at every size — nothing here is a fixed pixel offset.
+    let room_furniture = |mr: &Bounds| -> ([Point; 2], Point) {
         let cx = mr.x + mr.width / 2;
+        // Sofas sit SYMMETRICALLY about the room mid-line (20%/80%, was 30%/80%)
+        // so each gets equal front clearance to the centred table — the old 30%
+        // packed the north sofa's front against the table. Clamps mirror each
+        // other: north ≥ SOFA_H from the top wall, south ≤ SOFA_H from the bottom,
+        // so neither backrest clips its wall in a short room.
+        let north_y = (mr.y + pct(mr.height, 20)).max(mr.y + SOFA_H);
         let south_y = (mr.y + pct(mr.height, 80)).min(mr.y + mr.height.saturating_sub(SOFA_H));
-        vec![
-            Point {
-                x: cx,
-                y: mr.y + pct(mr.height, 30),
-            },
-            Point { x: cx, y: south_y },
-        ]
-    } else {
-        vec![]
+        let sofas = [Point { x: cx, y: north_y }, Point { x: cx, y: south_y }];
+        let table = Point {
+            x: cx,
+            y: (north_y + south_y) / 2,
+        };
+        (sofas, table)
     };
-    let mut meeting_table_vec: Vec<Point> = meeting_room
-        .filter(&room_fits_furniture)
-        .map(|mr| Point {
-            x: mr.x + mr.width / 2,
-            y: mr.y + mr.height / 2,
-        })
-        .into_iter()
-        .collect();
-    // Second meeting room furniture (dense layout).
-    if let Some(mr2) = meeting_room_2.filter(&room_fits_furniture) {
-        let cx2 = mr2.x + mr2.width / 2;
-        let south2 = (mr2.y + pct(mr2.height, 80)).min(mr2.y + mr2.height.saturating_sub(SOFA_H));
-        meeting_sofas.push(Point {
-            x: cx2,
-            y: mr2.y + pct(mr2.height, 30),
-        });
-        meeting_sofas.push(Point { x: cx2, y: south2 });
-        meeting_table_vec.push(Point {
-            x: mr2.x + mr2.width / 2,
-            y: mr2.y + mr2.height / 2,
-        });
+    let mut meeting_sofas: Vec<Point> = Vec::new();
+    let mut meeting_table_vec: Vec<Point> = Vec::new();
+    // Order is load-bearing: room 0 = `meeting_room`, room 1 = `meeting_room_2`
+    // (dense layout). `compute_waypoints` keys seats to a table by this index.
+    for room in [meeting_room, meeting_room_2] {
+        if let Some(mr) = room.filter(&room_fits_furniture) {
+            let (sofas, table) = room_furniture(&mr);
+            meeting_sofas.extend(sofas);
+            meeting_table_vec.push(table);
+        }
     }
     let meeting_tables = meeting_table_vec;
 
