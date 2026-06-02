@@ -1771,6 +1771,69 @@ fn exit_walk_coordinates_are_continuous() {
 }
 
 #[test]
+fn exit_from_desk_rises_off_the_chair_via_the_approach_cell() {
+    // The exit DEPARTURE is a desk leg too (the case the user caught: the door
+    // is NE, not south). An agent leaving its seated chair must rise off it via
+    // the N/E/W approach cell — NOT dip south first. Aiming A* from the blocked
+    // chair snaps the goal to the nearest (south) cell, sending the agent the
+    // wrong way around the desk before doubling back to the door. The frozen
+    // exit polyline must therefore START [chair, approach, …], mirroring entry.
+    use pixtuoid_core::layout::desk_walk_anchor;
+    let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let l = layout();
+    let desk_index = (0..l.home_desks.len())
+        .find(|&i| desk_approach_cell(l.home_desks[i], &l).is_some())
+        .expect("a desk with a valid approach cell");
+    let desk = l.home_desks[desk_index];
+    let chair = desk_walk_anchor(desk);
+    let approach = desk_approach_cell(desk, &l).expect("approach cell");
+
+    let mut slot = exiting_slot(now, now - Duration::from_secs(300));
+    slot.desk_index = desk_index;
+    slot.agent_id = AgentId::from_transcript_path("/exitdesk/slot.jsonl");
+
+    let overlay = pixtuoid_core::walkable::OccupancyOverlay::new();
+    let mut motion: HashMap<AgentId, MotionState> = HashMap::new();
+    // Empty history ⇒ the agent is exiting from the seated state (not mid-wander),
+    // so the stored exit origin is the chair and the desk-departure path applies.
+    let mut history = PoseHistory::new();
+    let mut router = StubRouter::straight();
+
+    let pose = derive_with_routing(
+        &slot,
+        now,
+        &l,
+        &mut router,
+        &overlay,
+        &mut history,
+        &mut motion,
+    )
+    .expect("exiting agent renders a pose");
+    assert!(
+        matches!(pose, Pose::Walking { .. }),
+        "a fresh exit must be Walking, got {pose:?}"
+    );
+
+    let snap = motion[&slot.agent_id]
+        .walk_path
+        .as_ref()
+        .expect("the cornered exit leg is frozen (chair → approach → door, len > 2)");
+    assert_eq!(
+        snap.path.first(),
+        Some(&chair),
+        "exit must START at the chair (Settle::Start glides off it); got {:?}",
+        snap.path
+    );
+    assert_eq!(
+        snap.path.get(1),
+        Some(&approach),
+        "exit must rise off the chair via the N/E/W approach cell, not dip south; \
+         got {:?}",
+        snap.path
+    );
+}
+
+#[test]
 fn wander_coffee_run_coordinates_continuous_under_churn() {
     // The user-reported case: an idle agent's wander trip (desk→waypoint→
     // desk) must never teleport, even as the occupancy overlay churns every
