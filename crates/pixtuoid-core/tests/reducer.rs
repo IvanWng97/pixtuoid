@@ -765,6 +765,57 @@ fn stale_active_agent_uses_shorter_timeout_than_idle() {
 }
 
 #[test]
+fn codex_idle_agent_reaps_faster_than_claude_idle() {
+    use pixtuoid_core::state::reducer::{STALE_CODEX_IDLE_TIMEOUT, STALE_IDLE_TIMEOUT};
+    // Codex exposes no SessionEnd of any kind (no hook, no PID, no durable rollout
+    // marker), so a closed Codex session can ONLY be reaped by the stale-sweep —
+    // hence a much shorter idle window than CC, which has real SessionEnd signals
+    // and keeps the long lunch-break-safe timeout.
+    assert!(
+        STALE_CODEX_IDLE_TIMEOUT < STALE_IDLE_TIMEOUT,
+        "codex idle timeout must be shorter than the generic idle timeout"
+    );
+
+    let mut scene = SceneState::uniform(4);
+    let mut reducer = Reducer::new();
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+
+    // One Codex agent and one Claude-Code agent, both idle since t0. The source
+    // is carried by the SessionStart event (the AgentId is just the slot key).
+    let cx = AgentId::from_transcript_path("/p/codex-sess.jsonl");
+    let cc = AgentId::from_transcript_path("/p/cc-sess.jsonl");
+    for (id, source) in [(cx, "codex"), (cc, "claude-code")] {
+        reducer.apply(
+            &mut scene,
+            AgentEvent::SessionStart {
+                agent_id: id,
+                source: source.into(),
+                session_id: "s".into(),
+                cwd: PathBuf::from("/repo"),
+                parent_id: None,
+            },
+            t0,
+            Transport::Hook,
+        );
+    }
+
+    // Just past the Codex idle window (but far under CC's 30 min): the Codex
+    // sprite is reaped; the CC one is spared.
+    reducer.tick(
+        &mut scene,
+        t0 + STALE_CODEX_IDLE_TIMEOUT + Duration::from_secs(1),
+    );
+    assert!(
+        scene.agents.get(&cx).unwrap().exiting_at.is_some(),
+        "codex idle agent should reap after STALE_CODEX_IDLE_TIMEOUT"
+    );
+    assert!(
+        scene.agents.get(&cc).unwrap().exiting_at.is_none(),
+        "claude-code idle agent must NOT reap on the codex-fast window"
+    );
+}
+
+#[test]
 fn fresh_event_resets_stale_timer() {
     use pixtuoid_core::state::reducer::STALE_IDLE_TIMEOUT;
     let mut scene = SceneState::uniform(4);

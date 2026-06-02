@@ -40,6 +40,25 @@ pub const STALE_IDLE_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 pub const STALE_WAITING_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 pub const STALE_UNKNOWN_CWD_TIMEOUT: Duration = Duration::from_secs(3 * 60);
 
+/// Idle timeout for **Codex** agents — much shorter than the generic
+/// [`STALE_IDLE_TIMEOUT`] because Codex exposes **no session-end signal of any
+/// kind**: it has no `SessionEnd` hook (its `HookEventName` enum has none — only
+/// `Stop`, which is *turn* end), its payloads carry no PID, and its internal
+/// `ShutdownComplete` event is not persisted to the rollout (so there is no
+/// durable marker to tail-scan). All three were verified against upstream
+/// `openai/codex`. The stale-sweep is therefore the ONLY reaper a closed Codex
+/// session ever gets — at the 30-min generic timeout it lingers as a ghost long
+/// after the process is gone.
+///
+/// The shorter window is safe specifically for Codex: the only false-positive is
+/// a *live* Codex session that sits idle between turns past the threshold, and
+/// that is **self-healing** — its next `UserPromptSubmit` re-emits `SessionStart`
+/// and the sprite walks back in. CC keeps the long [`STALE_IDLE_TIMEOUT`]: it has
+/// real `SessionEnd` signals (best-effort hook + durable `/exit` marker) for the
+/// common clean exit, so a short reaper there would only evict genuinely
+/// live-but-idle sessions (lunch-break idle) with no upside.
+pub const STALE_CODEX_IDLE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+
 /// Display prefix for a source's labels (`cc·`, `ag·`, `cx·`). Single source of
 /// truth applied at `SessionStart`. The JSONL `LabelDeriver` Renames (e.g.
 /// `cc_derive_label`/`derive_ag_label`) produce the same prefixed string and so
@@ -490,6 +509,17 @@ impl Reducer {
                 } else {
                     match &slot.state {
                         ActivityState::Active { .. } => STALE_ACTIVE_TIMEOUT,
+                        // Codex has no exit signal at all (no SessionEnd hook / PID
+                        // / durable rollout marker), so the sweep is its only
+                        // reaper — give an idle Codex slot a much shorter window so
+                        // a closed session doesn't ghost for 30 min. Self-healing:
+                        // a paused-but-live one re-enters on its next prompt. CC
+                        // keeps the long window (it has real SessionEnd signals).
+                        ActivityState::Idle
+                            if slot.source.as_ref() == crate::source::codex::SOURCE_NAME =>
+                        {
+                            STALE_CODEX_IDLE_TIMEOUT
+                        }
                         ActivityState::Idle => STALE_IDLE_TIMEOUT,
                         ActivityState::Waiting { .. } => STALE_WAITING_TIMEOUT,
                     }
