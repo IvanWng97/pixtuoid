@@ -2622,11 +2622,12 @@ mod tests {
     #[test]
     fn every_pod_declares_behind_occlusion() {
         // Per-kind occlusion policy now lives in the FurnitureDef table
-        // (`occludes_behind`), not a render-local allowlist. Every aisle pod is a
-        // solid object a walker can pass behind, so every one carries a back-cap
-        // depth (the exact px per kind is pinned in core's furniture_def
-        // invariant test). Exhaustive over PodDecor::ALL so a new pod kind must
-        // declare its occlusion in the table.
+        // (`occludes_behind`), not a render-local allowlist. Every SOLID aisle pod
+        // is something a walker can pass behind, so it carries a back-cap depth (the
+        // exact px per kind is pinned in core's furniture_def invariant test). The
+        // ONE exception is the plant: its thin foliage's 1px back-cap rendered as an
+        // ugly dark line across the top, so PlantTall carries none. Exhaustive over
+        // PodDecor::ALL so a new pod kind must declare its policy in the table.
         use crate::tui::layout::{furniture_def, PodDecor};
         assert_eq!(
             PodDecor::ALL.len(),
@@ -2635,9 +2636,11 @@ mod tests {
         );
         for &kind in PodDecor::ALL {
             let def = furniture_def(kind.furniture());
-            assert!(
+            let expect_occlusion = !matches!(kind, PodDecor::PlantTall);
+            assert_eq!(
                 def.occludes_behind.is_some(),
-                "{kind:?}: every aisle pod should declare a behind-occlusion depth"
+                expect_occlusion,
+                "{kind:?}: aisle-pod behind-occlusion policy (plants are the exception)"
             );
             // z-sort precondition: the pod-decor loop anchors at
             // `center_pin_south_offset(visual.1)`, so a 0-height visual would

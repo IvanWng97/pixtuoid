@@ -402,13 +402,13 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
         Furniture::PlantFicus => FurnitureDef {
             footprint: Some(PLANT_FOOTPRINT),
             visual: (6, 7),
-            occludes_behind: Some(1), // faint depth cue for a walker passing behind
+            occludes_behind: None, // no back-cap: the 1px cap rendered as an ugly dark line across the foliage top; plants are thin decor, nothing meaningful sits behind them
             ..DECOR
         },
         Furniture::PlantTall => FurnitureDef {
             footprint: Some(PLANT_FOOTPRINT),
             visual: (6, 10),
-            occludes_behind: Some(1), // faint depth cue for a walker passing behind
+            occludes_behind: None, // no back-cap: the 1px cap rendered as an ugly dark line across the foliage top; plants are thin decor, nothing meaningful sits behind them
             ..DECOR
         },
         // De-shared from PLANT_FOOTPRINT: the bloom overhangs a 2px pot, so the
@@ -417,7 +417,7 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
         Furniture::PlantFlower => FurnitureDef {
             footprint: Some((2, 6)),
             visual: (6, 6),
-            occludes_behind: Some(1), // faint depth cue for a walker passing behind
+            occludes_behind: None, // no back-cap: the 1px cap rendered as an ugly dark line across the foliage top; plants are thin decor, nothing meaningful sits behind them
             ..DECOR
         },
         // Pot is 3px wide; the leaf cluster overhangs it. Width-only ground
@@ -425,7 +425,7 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
         Furniture::PlantSucculent => FurnitureDef {
             footprint: Some((3, 4)),
             visual: (5, 4),
-            occludes_behind: Some(1), // faint depth cue for a walker passing behind
+            occludes_behind: None, // no back-cap: the 1px cap rendered as an ugly dark line across the foliage top; plants are thin decor, nothing meaningful sits behind them
             ..DECOR
         },
         // The rolling whiteboard is an ELEVATED obstacle: only its wheels/stand
@@ -927,10 +927,8 @@ mod tests {
                 Furniture::StandingDesk => Some(4),
                 // VendingMachine/Printer = None: corridor north-edge, no cell behind.
                 Furniture::Whiteboard | Furniture::Tv => Some(2),
-                Furniture::PlantFicus
-                | Furniture::PlantTall
-                | Furniture::PlantFlower
-                | Furniture::PlantSucculent => Some(1),
+                // Plants = None: the 1px back-cap rendered an ugly dark line across
+                // the foliage top; they're thin decor with nothing behind them.
                 _ => None,
             };
             assert_eq!(
