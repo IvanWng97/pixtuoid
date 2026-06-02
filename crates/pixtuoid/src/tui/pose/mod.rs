@@ -112,8 +112,8 @@ pub(in crate::tui) fn desk_approach_cell(desk: Point, layout: &Layout) -> Option
 /// The desk-side endpoint of a desk-bound walk leg, resolved the ONE unified way
 /// so no leg can regress to aiming A\* at the blocked chair. Used by EVERY leg
 /// that arrives at or departs from the chair — entry, wander-out, wander-back,
-/// and snap-back — so "approach via an allowed side, then settle onto the chair"
-/// is defined exactly once.
+/// and the exit DEPARTURE — so "approach via an allowed side, then settle onto
+/// the chair" is defined exactly once.
 ///
 /// Returns `(routing_endpoint, chair_settle)`:
 ///   * `routing_endpoint` — the cell to hand A\* as the leg's desk-side `from`/`to`
@@ -126,9 +126,11 @@ pub(in crate::tui) fn desk_approach_cell(desk: Point, layout: &Layout) -> Option
 ///     boxed-in layout where every allowed side is walled off and the leg reverts
 ///     to the direct chair target (resolved by `find_path`'s `snap_to_walkable`).
 ///
-/// NOTE: the EXIT leg is deliberately NOT a caller — it targets the *door*
-/// (south), not the chair, so it walks out toward the door rather than onto the
-/// seat; there is no desk front to cross.
+/// NOTE: the SNAP-BACK leg is deliberately NOT a caller — it stays a direct chair
+/// target: a brief 900ms time-compressed correction whose tuned compression +
+/// K-call idempotency gate the approach detour destabilises. (A mid-wander exit
+/// also skips this — the agent departs from its live wander position, not the
+/// chair.)
 pub(in crate::tui) fn desk_leg_endpoint(desk: Point, layout: &Layout) -> (Point, Option<Point>) {
     let chair = pixtuoid_core::layout::desk_walk_anchor(desk);
     match desk_approach_cell(desk, layout) {

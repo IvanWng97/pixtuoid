@@ -1563,7 +1563,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
                     // Render anchor: the cell the agent occupies. For obstacles
                     // this is the side stand cell (side-aware); for seats it is
                     // `wp.pos` (the sprite sits ON the furniture) — the walk-in
-                    // approach cell is resolved separately by `walk_target`.
+                    // approach cell is resolved separately by `approach_point`.
                     let stand = pixtuoid_core::layout::stand_point(
                         wp_obj.kind,
                         wp_obj.pos,

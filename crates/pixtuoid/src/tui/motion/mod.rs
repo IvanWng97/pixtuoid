@@ -405,6 +405,11 @@ pub fn advance_wander(
                 ms.wander_profile = None;
                 ms.wander_dest_kind = None;
                 ms.wander_dest_wp_idx = None;
+                // Clear the seat too (symmetry with the sibling dest fields):
+                // the Seated arm never reads it and the next WalkingOut overwrites
+                // it, but leaving it stale invites a future Seated-phase reader to
+                // mistake it for "currently on a seat".
+                ms.wander_seat = None;
                 ms.wander_phase = WanderPhase::Seated;
                 ms.wander_phase_started_at = ms
                     .wander_phase_started_at

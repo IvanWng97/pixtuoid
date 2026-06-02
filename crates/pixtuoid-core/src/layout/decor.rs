@@ -522,8 +522,9 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
         // (the solid 16px sprite, no overhang) is stamped TOP-LEFT in `mask.rs`,
         // not centered. `dwell` is the SEATED window (`pose::seated_dwell_ms`).
         // `approach = DESK_APPROACH` (no south front — sit behind the monitor).
-        // Not a `WaypointKind`, so `stand_point`/`walk_target` never run on it; it
-        // reaches its seat via the unified `seated_foot_cell` + settle.
+        // Not a `WaypointKind`, so `stand_point` never runs on it; entry/wander/
+        // exit reach its seat via `approach_point(Furniture::Desk)` (the N/E/W
+        // `desk_approach_cell`) + the unified `seated_foot_cell` settle.
         Furniture::Desk => FurnitureDef {
             footprint: Some((DESK_W + 4, DESK_H)),
             visual: (DESK_W + 4, DESK_H + 2),

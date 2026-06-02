@@ -40,7 +40,13 @@ fn stamp_south_strip(
     let left = anchored_top_left(anchor, pos, w, sprite_h).x;
     let south = z_sort_row(anchor, pos, sprite_h);
     let depth = depth.min(sprite_h);
-    mask.mark_blocked(left, south + 1 - depth, w, depth, pad);
+    // Saturating to match the inline pantry stamp's style: `south + 1` can't
+    // realistically overflow (sprite_h is small, pos.y a fraction of buf_h) and
+    // `south + 1 >= sprite_h >= depth` so the sub can't underflow — but keep the
+    // arithmetic robust so a future large-sprite call site near the bottom edge
+    // of a huge buffer can't wrap.
+    let top = south.saturating_add(1).saturating_sub(depth);
+    mask.mark_blocked(left, top, w, depth, pad);
 }
 
 /// Walkable footprint (and render face height) of a horizontal (E-W) interior

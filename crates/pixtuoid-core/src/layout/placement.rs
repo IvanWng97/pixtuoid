@@ -48,7 +48,9 @@ pub fn anchored_top_left(anchor: Anchor, pos: Point, w: u16, h: u16) -> Point {
 /// from where the sprite actually blits (`origin.y + h - 1`). For `Center` this
 /// equals the legacy `pos.y + center_pin_south_offset(h)` (i.e. `(h-1)/2`).
 pub fn z_sort_row(anchor: Anchor, pos: Point, h: u16) -> u16 {
-    anchored_top_left(anchor, pos, 0, h).y + h.saturating_sub(1)
+    anchored_top_left(anchor, pos, 0, h)
+        .y
+        .saturating_add(h.saturating_sub(1))
 }
 
 #[cfg(test)]
