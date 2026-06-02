@@ -14,6 +14,24 @@ fn pct(v: u16, n: u16) -> u16 {
     ((v as u32 * n as u32) / 100) as u16
 }
 
+/// Counter width that marks the LARGE (detailed kitchen) pantry sprite. The size
+/// producer emits this width when the pantry room is wide enough; consumers test
+/// `>= PANTRY_COUNTER_LARGE_W` rather than the bare `32` literal.
+const PANTRY_COUNTER_LARGE_W: u16 = 32;
+
+/// Y-position percentage of the pantry counter within its room — lower (65%) for
+/// the large counter, a touch higher (60%) for the small one. SINGLE SOURCE: the
+/// bistro-table clamp (which keeps that cluster clear of the counter) and the
+/// counter's own waypoint placement both read it, so they cannot disagree — were
+/// they to drift, the clamp would guard a phantom counter position.
+fn pantry_counter_y_pct(counter_w: u16) -> u16 {
+    if counter_w >= PANTRY_COUNTER_LARGE_W {
+        65
+    } else {
+        60
+    }
+}
+
 pub(super) fn compute_with_seed(
     buf_w: u16,
     buf_h: u16,
@@ -243,7 +261,7 @@ pub(super) fn compute_with_seed(
     // ones. The threshold (36 = 32 sprite + 4 px margins) keeps the
     // walkable strip around the counter wide enough for routing.
     let pantry_counter_size: (u16, u16) = match pantry_room {
-        Some(pr) if pr.width >= 36 => (32, 10),
+        Some(pr) if pr.width >= 36 => (PANTRY_COUNTER_LARGE_W, 10),
         _ => (20, 8),
     };
 
@@ -435,7 +453,7 @@ pub(super) fn compute_with_seed(
         // padded south edge above the counter's padded north so the two
         // footprints don't merge into a band that closes the east routing strip
         // in a short pantry (was unreachable at 120×80, outside the old matrix).
-        let counter_y = pr.y + pct(pr.height, if pantry_counter_size.0 >= 32 { 65 } else { 60 });
+        let counter_y = pr.y + pct(pr.height, pantry_counter_y_pct(pantry_counter_size.0));
         let counter_north =
             counter_y.saturating_sub(pantry_counter_size.1 / 2 + super::OBSTACLE_PAD_PX);
         let max_y = (pr.y + pr.height)
@@ -850,13 +868,13 @@ pub(super) fn compute_waypoints(
         // into the cubicle band at small buffer widths.
         let half_cw = pantry_counter_size.0 / 2;
         let max_cx = pr.x + pr.width.saturating_sub(half_cw + 1);
-        let (wx, wy) = if pantry_counter_size.0 >= 32 {
-            ((pr.x + pr.width / 2).min(max_cx), pr.y + pct(pr.height, 65))
+        // y is single-sourced with the bistro-table clamp; only x is size-shaped
+        // (large counter is room-centred, small one sits at 60% width).
+        let wy = pr.y + pct(pr.height, pantry_counter_y_pct(pantry_counter_size.0));
+        let wx = if pantry_counter_size.0 >= PANTRY_COUNTER_LARGE_W {
+            (pr.x + pr.width / 2).min(max_cx)
         } else {
-            (
-                (pr.x + pct(pr.width, 60)).min(max_cx),
-                pr.y + pct(pr.height, 60),
-            )
+            (pr.x + pct(pr.width, 60)).min(max_cx)
         };
         waypoints.push(Waypoint {
             pos: Point { x: wx, y: wy },

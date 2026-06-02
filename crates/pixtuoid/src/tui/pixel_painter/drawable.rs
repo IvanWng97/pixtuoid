@@ -479,13 +479,7 @@ pub(super) fn paint_drawable(
             paint_pantry_chair(buf, pos.x, pos.y, theme);
         }
         DrawableKind::Plant { kind, pos } => {
-            use crate::tui::layout::PlantKind;
-            let anim_name = match kind {
-                PlantKind::Ficus => "plant",
-                PlantKind::Tall => "plant_tall",
-                PlantKind::Flower => "plant_flower",
-                PlantKind::Succulent => "plant_succulent",
-            };
+            let anim_name = kind.sprite_name();
             if let Some(f) = pack.animation(anim_name).and_then(|a| a.frames.first()) {
                 let px = pos.x.saturating_sub(f.width / 2);
                 let py = pos.y.saturating_sub(f.height / 2);
@@ -500,14 +494,7 @@ pub(super) fn paint_drawable(
             }
         }
         DrawableKind::PodDecorItem { kind, pos } => {
-            use crate::tui::layout::PodDecor;
-            let anim_name = match kind {
-                PodDecor::PlantTall => "plant_tall",
-                PodDecor::Whiteboard => "whiteboard",
-                PodDecor::Tv => "tv_stand",
-                PodDecor::PhoneBooth => "phone_booth",
-                PodDecor::StandingDesk => "standing_desk",
-            };
+            let anim_name = kind.sprite_name();
             if let Some(f) = pack.animation(anim_name).and_then(|a| a.frames.first()) {
                 let px = pos.x.saturating_sub(f.width / 2);
                 let py = pos.y.saturating_sub(f.height / 2);
@@ -537,14 +524,7 @@ pub(super) fn paint_drawable(
             }
         }
         DrawableKind::WallDecor { kind, pos } => {
-            use crate::tui::layout::WallDecor;
-            let anim_name = match kind {
-                WallDecor::Bookshelf => "bookshelf",
-                WallDecor::BulletinBoard => "bulletin_board",
-                WallDecor::ExitSign => "exit_sign",
-                WallDecor::Whiteboard => "whiteboard",
-                WallDecor::MeetingScreen => "meeting_screen",
-            };
+            let anim_name = kind.sprite_name();
             if let Some(f) = pack.animation(anim_name).and_then(|a| a.frames.first()) {
                 // Free-standing board (the only WallDecor with a footprint) gets
                 // a behind-occlusion cap; wall-hung decor is None. Top-left

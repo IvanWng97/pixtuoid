@@ -647,6 +647,21 @@ impl WallDecor {
             WallDecor::MeetingScreen => Furniture::MeetingScreen,
         }
     }
+
+    /// Pack-animation key for this decor's sprite. The blit lives in the tui crate
+    /// (`drawable.rs`); the NAME lives on the enum so a new variant is a compile
+    /// error HERE, not a forgotten call-site match arm (same data-in-core pattern
+    /// as `occludes_behind`). Every value is in `OPTIONAL_FURNITURE_ANIMATIONS`,
+    /// pinned by `role_enum_sprite_names_resolve_in_the_animation_registry`.
+    pub const fn sprite_name(self) -> &'static str {
+        match self {
+            WallDecor::Bookshelf => "bookshelf",
+            WallDecor::Whiteboard => "whiteboard",
+            WallDecor::BulletinBoard => "bulletin_board",
+            WallDecor::ExitSign => "exit_sign",
+            WallDecor::MeetingScreen => "meeting_screen",
+        }
+    }
 }
 
 /// Variety of potted plants — each renders a different sprite. Spread
@@ -669,6 +684,16 @@ impl PlantKind {
             PlantKind::Tall => Furniture::PlantTall,
             PlantKind::Flower => Furniture::PlantFlower,
             PlantKind::Succulent => Furniture::PlantSucculent,
+        }
+    }
+
+    /// Pack-animation key for this plant's sprite (blit in `drawable.rs`).
+    pub const fn sprite_name(self) -> &'static str {
+        match self {
+            PlantKind::Ficus => "plant",
+            PlantKind::Tall => "plant_tall",
+            PlantKind::Flower => "plant_flower",
+            PlantKind::Succulent => "plant_succulent",
         }
     }
 }
@@ -711,6 +736,17 @@ impl PodDecor {
             PodDecor::Tv => Furniture::Tv,
             PodDecor::PhoneBooth => Furniture::PhoneBooth,
             PodDecor::StandingDesk => Furniture::StandingDesk,
+        }
+    }
+
+    /// Pack-animation key for this pod-decor's sprite (blit in `drawable.rs`).
+    pub const fn sprite_name(self) -> &'static str {
+        match self {
+            PodDecor::PlantTall => "plant_tall",
+            PodDecor::Whiteboard => "whiteboard",
+            PodDecor::Tv => "tv_stand",
+            PodDecor::PhoneBooth => "phone_booth",
+            PodDecor::StandingDesk => "standing_desk",
         }
     }
 }
@@ -905,6 +941,35 @@ mod tests {
             assert!(
                 !(d.occludes_behind.is_some() && d.occupies_pos),
                 "{f:?}: occludes_behind + occupies_pos are mutually exclusive"
+            );
+        }
+    }
+
+    #[test]
+    fn role_enum_sprite_names_resolve_in_the_animation_registry() {
+        // The role enums own their pack-animation key via `sprite_name()` (the
+        // blit lives in tui `drawable.rs`). Adding a variant without a name is a
+        // compile error (exhaustive match); a TYPO'd name would draw nothing —
+        // this catches it by checking every value is a real registered animation.
+        use crate::sprite::format::OPTIONAL_FURNITURE_ANIMATIONS;
+        let names: Vec<&str> = [
+            WallDecor::Bookshelf.sprite_name(),
+            WallDecor::Whiteboard.sprite_name(),
+            WallDecor::BulletinBoard.sprite_name(),
+            WallDecor::ExitSign.sprite_name(),
+            WallDecor::MeetingScreen.sprite_name(),
+            PlantKind::Ficus.sprite_name(),
+            PlantKind::Tall.sprite_name(),
+            PlantKind::Flower.sprite_name(),
+            PlantKind::Succulent.sprite_name(),
+        ]
+        .into_iter()
+        .chain(PodDecor::ALL.iter().map(|p| p.sprite_name()))
+        .collect();
+        for n in names {
+            assert!(
+                OPTIONAL_FURNITURE_ANIMATIONS.contains(&n),
+                "sprite_name {n:?} is not a registered OPTIONAL_FURNITURE_ANIMATIONS key"
             );
         }
     }

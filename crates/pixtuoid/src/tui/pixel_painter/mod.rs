@@ -512,8 +512,16 @@ impl SeatView {
             WaypointKind::MeetingStand => SeatView::Side {
                 flip: matches!(facing, Facing::East),
             },
-            // Not a seat slot — caller dispatches these directly; default upright.
-            _ => SeatView::Side { flip: false },
+            // Not seat slots — the caller dispatches these directly (they never
+            // reach a seated render through SeatView); upright is the safe default.
+            // Listed EXPLICITLY (no `_`) so a new WaypointKind is a compile error
+            // HERE, forcing a deliberate decision instead of silently rendering as
+            // a stander. The totality-guard test still pins the seat-kind set.
+            WaypointKind::Pantry
+            | WaypointKind::PhoneBooth
+            | WaypointKind::StandingDesk
+            | WaypointKind::VendingMachine
+            | WaypointKind::Printer => SeatView::Side { flip: false },
         }
     }
 

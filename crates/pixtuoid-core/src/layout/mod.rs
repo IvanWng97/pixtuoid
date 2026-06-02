@@ -359,6 +359,50 @@ mod tests {
     }
 
     #[test]
+    fn every_waypoint_kind_is_placed_in_some_layout() {
+        // Placement conformance: a `WaypointKind` defined in `decor.rs` but never
+        // pushed by `compute_waypoints` compiles green and passes every existing
+        // test while being SILENTLY INVISIBLE in the office (the most forgettable
+        // failure mode when adding furniture — there is no compile guard that a
+        // declared kind actually gets a placement site). This sweep is that guard.
+        //
+        // The sizes MUST span small→large: `VendingMachine`/`Printer` are
+        // corridor-height-gated (`walkway.height >= …` in `compute_waypoints`), so
+        // they only appear at large terminals; a single 192×80 seed would falsely
+        // "fail" for them.
+        use std::collections::HashSet;
+        let mut seen: HashSet<WaypointKind> = HashSet::new();
+        for seed in 0..40u64 {
+            for (w, h) in [
+                (160u16, 100u16),
+                (192, 80),
+                (240, 120),
+                (300, 140),
+                (400, 200),
+                (500, 250),
+            ] {
+                if let Some(l) = SceneLayout::compute_with_seed(w, h, 24, seed) {
+                    seen.extend(l.waypoints.iter().map(|wp| wp.kind));
+                }
+            }
+        }
+        // Kinds deliberately NOT a wander destination (none today). A new
+        // WaypointKind that is intentionally never placed goes here WITH a reason.
+        const ALLOWLIST: &[WaypointKind] = &[];
+        let missing: Vec<_> = WaypointKind::ALL
+            .iter()
+            .copied()
+            .filter(|k| !seen.contains(k) && !ALLOWLIST.contains(k))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "WaypointKind(s) declared in ::ALL but never pushed by compute_waypoints \
+             in any swept layout: {missing:?}. Add a placement site in \
+             compute_waypoints, or add to ALLOWLIST with a reason."
+        );
+    }
+
+    #[test]
     fn every_home_desk_has_a_reachable_north_approach() {
         // Back-row pod desks face the front row across the thin INTRA_POD_GAP_Y;
         // the first walkable cell scanning north sits at the gap's south EDGE,

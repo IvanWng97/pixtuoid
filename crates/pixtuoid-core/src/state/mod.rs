@@ -59,6 +59,11 @@ pub struct AgentSlot {
     /// state to Idle. Hides the per-tool-call Active flicker that rapid
     /// PreToolUse → PostToolUse chains produce in CC.
     pub pending_idle_at: Option<SystemTime>,
+    /// GLOBAL flat desk index across all floors (assigned once at `SessionStart`,
+    /// never mutated). NOT a floor-local index: `build_floor_scene` (tui/floor.rs)
+    /// remaps it to a floor-local index before any `layout.home_desks` lookup —
+    /// indexing `home_desks` with this raw value is a bug. `floor_idx` derives
+    /// from it via `floor_of()`.
     pub desk_index: usize,
     /// Floor assigned at desk allocation time. Immutable for the agent's
     /// lifetime so capacity growth never silently migrates agents between
