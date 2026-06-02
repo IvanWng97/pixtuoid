@@ -57,8 +57,9 @@ use anchors::{
     walking_anchor, waypoint_anchor, waypoint_rank_offset_x, with_breath, CHARACTER_SPRITE_W,
 };
 use background::{
-    dim_floor_overlay, paint_ceiling_pool, paint_clock, paint_corridor_runner,
-    paint_floor_and_walls, paint_floor_lamp_halo, paint_neon_panel, paint_shadow, time_of_day_look,
+    daylight_floor_overlay, dim_floor_overlay, paint_ceiling_pool, paint_clock,
+    paint_corridor_runner, paint_floor_and_walls, paint_floor_lamp_halo, paint_neon_panel,
+    paint_shadow, time_of_day_look,
 };
 use drawable::{paint_drawable, pet_position, Drawable, DrawableKind};
 use palette::{agent_palette, blend, recolor_frame};
@@ -667,6 +668,18 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
         buf_h,
         look.darkness * dim_strength * empty_floor_boost,
         ctx.theme,
+    );
+    // Daytime warm light-lift — the positive mirror of the night dim above.
+    // Brightens/warms the floor in proportion to effective daylight
+    // (`spill_strength` = `day_eff`), so sunny days read sunlit instead of flat
+    // carpet. Independent of occupancy (sun enters an empty office too) and a
+    // no-op at night where `day_eff` is 0. `DAYLIGHT_FLOOR_LIFT` is the dial.
+    const DAYLIGHT_FLOOR_LIFT: f32 = 0.22;
+    daylight_floor_overlay(
+        ctx.buf,
+        top_wall_h,
+        buf_h,
+        look.spill_strength * DAYLIGHT_FLOOR_LIFT,
     );
     let pool_strength = (0.15 + 0.30 * look.darkness) * indoor_scale;
     for desk in &ctx.layout.home_desks {

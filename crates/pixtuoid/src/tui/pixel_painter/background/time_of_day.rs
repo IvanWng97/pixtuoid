@@ -65,30 +65,37 @@ pub(in crate::tui::pixel_painter) struct WeatherLight {
 
 pub(in crate::tui::pixel_painter) fn weather_light(w: Weather) -> WeatherLight {
     // (intensity, beam_strength, night_sky)
+    //
+    // `night_sky` was dialed down ~35% from its original tuning (Clear 0.55→0.35,
+    // Snow 0.60→0.40, …): the moonlit nights read too bright — the interior
+    // barely darkened after sunset. The *relative* ordering is unchanged (snow ≥
+    // clear > … > rain > storm), so the weather-night character is preserved;
+    // only the absolute moonlight strength drops. Guarded by
+    // `night_sky_brightness_varies_by_weather`.
     let (intensity, beam_strength, night_sky) = match w {
-        // Full sun, hard beam, bright moonlit/starry night.
-        Weather::Clear => (1.0, 1.0, 0.55),
+        // Full sun, hard beam, faintly moonlit/starry night.
+        Weather::Clear => (1.0, 1.0, 0.35),
         // Clear but blustery — near-full sun, beam softened slightly by haze/cloud scud.
-        Weather::Windy => (1.0, 0.9, 0.50),
+        Weather::Windy => (1.0, 0.9, 0.32),
         // Bright grey glare (high snow albedo) + a faint beam through thin cloud;
         // brightest night of all — city light bounces off the snow.
-        Weather::Snow => (0.75, 0.25, 0.60),
+        Weather::Snow => (0.75, 0.25, 0.40),
         // Hazy: sun reduced to a dim disc (small beam), warm sodium-lit night.
-        Weather::Smog => (0.55, 0.30, 0.35),
+        Weather::Smog => (0.55, 0.30, 0.22),
         // Luminous white-out: bright + near-shadowless (tiny beam), hazy dim night.
-        // (Was 0.30 — wrongly the 2nd-darkest; real fog is a bright veil.)
-        Weather::Fog => (0.55, 0.05, 0.30),
+        // (Daytime `intensity` was 0.30 — wrongly the 2nd-darkest; real fog is a bright veil.)
+        Weather::Fog => (0.55, 0.05, 0.20),
         // Thick cloud: diffuse only, dull night.
-        Weather::Overcast => (0.45, 0.0, 0.22),
+        Weather::Overcast => (0.45, 0.0, 0.14),
         // Daytime storm lifted from 0.25 (read as dusk) to a gloomy-but-clearly-
         // daytime 0.42 (just under Overcast). Deliberately a hair ABOVE plain
         // Rain (0.40): the lightning flash repeatedly lifts a storm's perceived
         // average brightness above uniformly-gloomy steady rain. Fully diffuse
         // (no beam); darkest night of all (no moon) — lightning is the only punch.
         // The Storm>Rain ordering is guarded by `atmo_storm_brighter_than_rain_by_design`.
-        Weather::Storm => (0.42, 0.0, 0.12),
+        Weather::Storm => (0.42, 0.0, 0.08),
         // Steady rain: dark diffuse, dark night.
-        Weather::Rain => (0.40, 0.0, 0.18),
+        Weather::Rain => (0.40, 0.0, 0.12),
     };
     // All three channels are 0..1 multipliers/weights — enforce it at the one
     // place values are minted so a future tuning typo (e.g. pushing `night_sky`
@@ -306,6 +313,43 @@ pub(in crate::tui::pixel_painter) fn dim_floor_overlay(
                     blend(cur.0, night_tint.0, s),
                     blend(cur.1, night_tint.1, s),
                     blend(cur.2, night_tint.2, s),
+                ),
+            );
+        }
+    }
+}
+
+/// Warm sunlight LIFT on the floor — the daytime mirror of [`dim_floor_overlay`].
+/// Blends floor pixels toward a warm midday tint so a sunny day reads bright and
+/// warm instead of flat carpet. Needed because the model otherwise has only a
+/// night *dim* and no positive day term: `intensity` maxes at 1.0, so at clear
+/// noon `darkness` is 0 and the floor sat at its plain (brownish) base color.
+/// `strength` is `day_eff`-driven (0 at night / full-dark weather, full at clear
+/// noon), so cloudy days lift proportionally less. Sun enters regardless of
+/// occupancy, so — unlike the dim — this is NOT scaled by the empty-floor boost.
+pub(in crate::tui::pixel_painter) fn daylight_floor_overlay(
+    buf: &mut RgbBuffer,
+    top_y: u16,
+    bottom_y: u16,
+    strength: f32,
+) {
+    // Pale warm midday sunlight. Theme-agnostic (daylight is daylight); applied
+    // at low strength so it warms/brightens the floor without washing it out.
+    const SUN_TINT: Rgb = Rgb(255, 246, 224);
+    let s = strength.clamp(0.0, 0.40);
+    if s <= 0.0 {
+        return;
+    }
+    for y in top_y..bottom_y.min(buf.height) {
+        for x in 0..buf.width {
+            let cur = buf.get(x, y);
+            buf.put(
+                x,
+                y,
+                Rgb(
+                    blend(cur.0, SUN_TINT.0, s),
+                    blend(cur.1, SUN_TINT.1, s),
+                    blend(cur.2, SUN_TINT.2, s),
                 ),
             );
         }

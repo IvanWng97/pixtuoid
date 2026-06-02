@@ -15,8 +15,8 @@ pub(super) use lighting::{
     paint_neon_panel, paint_shadow,
 };
 pub(super) use time_of_day::{
-    dim_floor_overlay, sun_on_wall, sunset_strength, time_of_day_look, weather_light,
-    weather_state, TimeOfDayLook, WallSide, Weather,
+    daylight_floor_overlay, dim_floor_overlay, sun_on_wall, sunset_strength, time_of_day_look,
+    weather_light, weather_state, TimeOfDayLook, WallSide, Weather,
 };
 
 use std::time::SystemTime;
