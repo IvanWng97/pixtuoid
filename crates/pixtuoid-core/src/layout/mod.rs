@@ -159,12 +159,15 @@ pub const POD_SIDE: u16 = 2;
 /// pod-mates.
 pub const INTRA_POD_GAP_X: u16 = 12;
 pub const INTRA_POD_GAP_Y: u16 = 12;
-/// Gap between adjacent pods — comfortably wider than the intra-pod
-/// gap so the pod boundary is visually obvious. 28 px fits the rolling
-/// whiteboard's 10-px GROUND footprint (the 14-px board panel overhangs
-/// it, invariant #6) with comfortable clearance after the 1-px pad.
-pub const INTER_POD_AISLE_X: u16 = 28;
-pub const INTER_POD_AISLE_Y: u16 = 28;
+/// Gap between adjacent pods — wider than the intra-pod gap so the pod
+/// boundary stays visually distinct, while still hosting the rolling
+/// whiteboard's 10-px GROUND footprint (the 14-px board panel overhangs it,
+/// invariant #6) in the aisle. Tightened 28 → 22 to pack the 4-desk pods
+/// denser (the office read too sparse — big empty aisles between clusters);
+/// 22 px still clears the 10-px board + its 1-px pad. The walkable-connectivity
+/// + decor-overlap + approach tests guard that the tighter aisle stays routable.
+pub const INTER_POD_AISLE_X: u16 = 22;
+pub const INTER_POD_AISLE_Y: u16 = 22;
 
 impl SceneLayout {
     /// Returns `None` if the buffer is too small for even one cubicle and the

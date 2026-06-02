@@ -379,7 +379,16 @@ mod tests {
     #[test]
     fn furniture_hit_test_returns_none_for_empty_space() {
         let layout = Layout::compute(160, 200, 4).expect("layout");
-        assert_eq!(hit_test_furniture(&layout, 80, 50), None);
+        // Open floor must report no furniture. Scan for an empty cell rather
+        // than hardcoding one — which mid-floor cells are open shifts when the
+        // pod aisle spacing is retuned (a hardcoded point goes stale and lands
+        // on a reflowed desk). If hit_test_furniture wrongly matched
+        // everywhere, no empty cell would be found and `.expect` would panic.
+        let empty = (0..(layout.buf_h / 2))
+            .flat_map(|cy| (0..layout.buf_w).map(move |cx| (cx, cy)))
+            .find(|&(cx, cy)| hit_test_furniture(&layout, cx, cy).is_none())
+            .expect("some open-floor cell must report no furniture");
+        assert_eq!(hit_test_furniture(&layout, empty.0, empty.1), None);
     }
 
     #[test]

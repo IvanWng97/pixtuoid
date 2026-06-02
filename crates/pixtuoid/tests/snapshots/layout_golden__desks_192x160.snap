@@ -1,39 +1,38 @@
 ---
 source: crates/pixtuoid/tests/layout_golden.rs
-assertion_line: 48
 expression: l.home_desks
 ---
 [
     Point {
-        x: 68,
-        y: 67,
+        x: 65,
+        y: 64,
     },
     Point {
-        x: 92,
-        y: 67,
+        x: 89,
+        y: 64,
     },
     Point {
-        x: 68,
-        y: 85,
+        x: 65,
+        y: 82,
     },
     Point {
-        x: 92,
-        y: 85,
+        x: 89,
+        y: 82,
     },
     Point {
-        x: 68,
-        y: 119,
+        x: 123,
+        y: 64,
     },
     Point {
-        x: 92,
-        y: 119,
+        x: 147,
+        y: 64,
     },
     Point {
-        x: 68,
-        y: 137,
+        x: 123,
+        y: 82,
     },
     Point {
-        x: 92,
-        y: 137,
+        x: 147,
+        y: 82,
     },
 ]
