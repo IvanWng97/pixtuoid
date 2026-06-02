@@ -25,7 +25,8 @@ pub enum WalkIntent {
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-/// Cruise speed for Entry / Exit / SnapBack walks (octile/ms).
+/// Cruise speed for Entry / Exit walks (octile/ms). SnapBack has its own faster
+/// [`V_CRUISE_SNAPBACK`].
 ///
 /// Calibrated against measured door→desk octile distances in the real office
 /// geometry (916–1436 octile on an 8-desk floor, 206–1436 on a 16-desk floor).
