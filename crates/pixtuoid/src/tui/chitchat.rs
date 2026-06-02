@@ -21,7 +21,11 @@ const TURN_MS: u64 = 1_500;
 /// Number of speaking turns before the silent gap.
 const TURNS: u64 = 4;
 
-/// Pool of dev-humor one-liners for speech bubbles.
+/// Pool of short speech-bubble quips — mostly dev humor, with a few
+/// office/watercooler lines that fit the social venues (pantry, couch, meeting
+/// room) where these conversations happen. Order doesn't matter: `current_bubble`
+/// indexes `% CHITCHAT_LINES.len()`, so the pool can grow freely. Keep each line
+/// short (≤ ~12 chars) so it fits the bubble at half-block scale.
 pub const CHITCHAT_LINES: &[&str] = &[
     "git push -f",
     "// TODO",
@@ -47,6 +51,32 @@ pub const CHITCHAT_LINES: &[&str] = &[
     "WONTFIX",
     "type: any",
     "blame git",
+    "it's DNS",
+    "flaky test",
+    "force push",
+    "cherry-pick",
+    "off by one",
+    "heisenbug",
+    "rubber duck",
+    "stash pop",
+    "bisect bad",
+    "hotfix!",
+    "revert?",
+    "memory leak",
+    "cache miss",
+    "deadlock",
+    "panic!()",
+    "unwrap()",
+    "borrow chk",
+    "CI is red",
+    "rollback!",
+    "vibe coding",
+    "needs rebase",
+    // Watercooler — fit the pantry/couch/meeting venues.
+    "more coffee?",
+    "standup?",
+    "lunch?",
+    "ship friday",
 ];
 
 /// A social venue that hosts at most one conversation at a time. Meeting-room
