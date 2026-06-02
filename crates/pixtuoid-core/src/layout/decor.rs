@@ -428,15 +428,18 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             occludes_behind: Some(1), // faint depth cue for a walker passing behind
             ..DECOR
         },
-        // Whiteboard/TV are rolling floor obstacles. GROUND footprint = only what
-        // touches the floor — the board's wheels span ~10px, the TV stand's foot
-        // 6px — NOT the elevated panel/monitor that overhangs (invariant #6, the
-        // canopy rule). Width is the load-bearing aisle axis; HEIGHT stays the
-        // full sprite so the CENTERED mask stamp still covers the bottom base
-        // (a height shrink would lift the block off the wheels/foot). Stamped via
-        // PodDecor (aisle) or WallDecor (the free-standing board in the room).
+        // The rolling whiteboard is an ELEVATED obstacle: only its wheels/stand
+        // (the bottom 3 sprite rows — legs at rows 8-9, wheels at row 10) touch
+        // the floor; the 8-px board panel above them overhangs (invariant #6, the
+        // canopy rule). GROUND footprint = the 10-px wheel span × the 3-px base
+        // ONLY. `mask.rs` SOUTH-anchors this strip to the sprite's base (the
+        // `Center`/`TopLeft` stamp would otherwise center the short strip on the
+        // panel, lifting the block off the wheels), so a walker can pass BEHIND
+        // the panel and is occluded by it (the 8-px overhang via z-sort + the
+        // `occludes_behind` back-cap). Stamped via PodDecor (aisle) or WallDecor
+        // (the free-standing board in the room).
         Furniture::Whiteboard => FurnitureDef {
-            footprint: Some((10, 11)),
+            footprint: Some((10, 3)),
             visual: (14, 11),
             occludes_behind: Some(2), // board panel occludes a walker behind it
             ..DECOR

@@ -576,6 +576,31 @@ mod tests {
     }
 
     #[test]
+    fn whiteboard_blocks_only_its_wheel_base_not_the_elevated_panel() {
+        // The rolling whiteboard's 8-px board panel overhangs its 3-px wheel base
+        // (invariant #6): the mask must block ONLY the south wheel strip so a
+        // walker can pass BEHIND the panel (occluded by it), not the full 11-px
+        // sprite. Was the full height — a walker couldn't get above the board.
+        let l = SceneLayout::compute(120, 96, 1).expect("fits");
+        let (_, pos) = *l
+            .wall_decor
+            .iter()
+            .find(|(k, _)| *k == WallDecor::Whiteboard)
+            .expect("a free-standing whiteboard");
+        // Wall board is TopLeft-anchored; the 14×11 sprite's wheels sit at rows
+        // 8-10. A panel-surface cell well north of the wheels must be WALKABLE.
+        assert!(
+            l.is_walkable(pos.x + 5, pos.y + 2),
+            "the elevated whiteboard panel must NOT block the floor (invariant #6)"
+        );
+        // A wheel-base cell (the sprite's south rows) must stay BLOCKED.
+        assert!(
+            !l.is_walkable(pos.x + 5, pos.y + 9),
+            "the whiteboard wheel base must block the floor"
+        );
+    }
+
+    #[test]
     fn compute_places_plants_in_lounge_and_walkway() {
         let l = SceneLayout::compute(120, 96, 1).expect("fits");
         assert!(!l.plants.is_empty());

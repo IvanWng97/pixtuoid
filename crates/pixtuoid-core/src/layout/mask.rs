@@ -5,8 +5,8 @@
 //! edges.
 
 use super::{
-    anchored_top_left, furniture_def, Anchor, Furniture, PodDecor, Point, WallDecor, Waypoint,
-    WaypointKind, OBSTACLE_PAD_PX, PANTRY_FOOTPRINT_DEPTH, WALL_BAND_TO_TOP_MARGIN,
+    anchored_top_left, furniture_def, z_sort_row, Anchor, Furniture, PodDecor, Point, WallDecor,
+    Waypoint, WaypointKind, OBSTACLE_PAD_PX, PANTRY_FOOTPRINT_DEPTH, WALL_BAND_TO_TOP_MARGIN,
 };
 use crate::walkable::WalkableMask;
 
@@ -17,6 +17,30 @@ use crate::walkable::WalkableMask;
 fn stamp_anchored(mask: &mut WalkableMask, anchor: Anchor, pos: Point, w: u16, h: u16, pad: u16) {
     let tl = anchored_top_left(anchor, pos, w, h);
     mask.mark_blocked(tl.x, tl.y, w, h, pad);
+}
+
+/// Stamp ONLY the south (ground-contact) `depth` rows of an ELEVATED furniture
+/// whose `sprite_h`-tall sprite overhangs its floor base — the rolling
+/// whiteboard's wheels under its panel (invariant #6). The strip's south edge is
+/// the sprite's south base (`z_sort_row`, the same row the renderer y-sorts by),
+/// so the block hugs the floor: a walker can pass BEHIND the panel and is
+/// occluded by it (the overhang via z-sort + the `occludes_behind` back-cap). `w`
+/// is the GROUND width, positioned by `anchor` like the full sprite — a plain
+/// short footprint stamped `Center`/`TopLeft` would center on the panel instead,
+/// lifting the block off the wheels.
+fn stamp_south_strip(
+    mask: &mut WalkableMask,
+    anchor: Anchor,
+    pos: Point,
+    w: u16,
+    sprite_h: u16,
+    depth: u16,
+    pad: u16,
+) {
+    let left = anchored_top_left(anchor, pos, w, sprite_h).x;
+    let south = z_sort_row(anchor, pos, sprite_h);
+    let depth = depth.min(sprite_h);
+    mask.mark_blocked(left, south + 1 - depth, w, depth, pad);
 }
 
 /// Walkable footprint (and render face height) of a horizontal (E-W) interior
@@ -240,9 +264,11 @@ pub(super) fn build_walkable_mask(
         // the rolling whiteboard — an elevated board whose 10px wheel-base
         // overhangs nothing solid, so a 2px clearance band on every side just
         // inflated the blocked rect back to the 14px board width (hiding the
-        // footprint shrink). Matches the pod-decor whiteboard's pad.
-        if let Some((w, h)) = furniture_def(kind.furniture()).footprint {
-            stamp_anchored(&mut mask, Anchor::TopLeft, *pos, w, h, 1);
+        // footprint shrink). Matches the pod-decor whiteboard's pad. The wheel
+        // strip is SOUTH-anchored to the sprite base (the panel overhangs north).
+        if let Some((w, depth)) = furniture_def(kind.furniture()).footprint {
+            let sprite_h = furniture_def(kind.furniture()).visual.1;
+            stamp_south_strip(&mut mask, Anchor::TopLeft, *pos, w, sprite_h, depth, 1);
         }
     }
 
@@ -258,7 +284,15 @@ pub(super) fn build_walkable_mask(
         let Some((w, h)) = furniture_def(kind.furniture()).footprint else {
             continue;
         };
-        stamp_anchored(&mut mask, Anchor::Center, *pos, w, h, 1);
+        if matches!(kind, PodDecor::Whiteboard) {
+            // Rolling board: the 8-px panel overhangs its 3-px wheel base, so
+            // south-anchor the strip to the sprite base (a walker passes behind
+            // the panel, occluded by it) instead of centering it on the panel.
+            let sprite_h = furniture_def(kind.furniture()).visual.1;
+            stamp_south_strip(&mut mask, Anchor::Center, *pos, w, sprite_h, h, 1);
+        } else {
+            stamp_anchored(&mut mask, Anchor::Center, *pos, w, h, 1);
+        }
     }
 
     mask
