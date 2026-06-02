@@ -1564,6 +1564,101 @@ fn entry_walk_coordinates_are_continuous() {
 }
 
 #[test]
+fn desk_approach_cell_is_never_inside_the_blocked_desk() {
+    // The desk's ARRIVAL target must be a real walkable cell off an allowed
+    // (N/E/W) side — never the chair (blocked, inside the footprint) and never
+    // any other blocked cell. Aiming A* at the blocked chair directly is exactly
+    // what made it fall back to a straight door→chair line THROUGH the desk body
+    // (the "walk through the table" bug). A walkable result is, by construction,
+    // outside every blocked cell.
+    use pixtuoid_core::layout::desk_walk_anchor;
+    let l = layout();
+    let mut any_some = false;
+    for &desk in &l.home_desks {
+        let chair = desk_walk_anchor(desk);
+        // The chair is inside the blocked footprint — that is WHY we can't aim
+        // A* at it and must settle onto it instead.
+        assert!(
+            !l.is_walkable(chair.x, chair.y),
+            "the desk chair {chair:?} must be blocked (inside the footprint)"
+        );
+        // None = degenerate layout (every N/E/W side walled off); the entry then
+        // falls back to the direct chair target. Acceptable, so not asserted.
+        if let Some(cell) = desk_approach_cell(desk, &l) {
+            any_some = true;
+            assert!(
+                l.is_walkable(cell.x, cell.y),
+                "approach cell {cell:?} for desk {desk:?} must be walkable \
+                 (so it is neither inside the footprint nor the blocked chair)"
+            );
+            assert_ne!(cell, chair, "approach cell must differ from the chair");
+        }
+    }
+    assert!(
+        any_some,
+        "at least one desk in an open layout must have a valid approach cell"
+    );
+}
+
+#[test]
+fn desk_entry_routes_around_the_desk_then_settles_onto_the_chair() {
+    // The arrival-bug fix: an entering agent walks to a walkable approach cell
+    // (off an allowed side) and only THEN settles onto the chair — it must NOT
+    // straight-line door→chair through the desk body. With the chair appended as
+    // the settle endpoint, the frozen leg polyline is [door, approach, chair].
+    use pixtuoid_core::layout::desk_walk_anchor;
+    let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let l = layout();
+    let door = l.door_threshold.expect("door");
+
+    // Pick the first desk that has a real (non-degenerate) approach cell.
+    let desk_index = (0..l.home_desks.len())
+        .find(|&i| desk_approach_cell(l.home_desks[i], &l).is_some())
+        .expect("a desk with a valid approach cell");
+    let desk = l.home_desks[desk_index];
+    let chair = desk_walk_anchor(desk);
+    let approach = desk_approach_cell(desk, &l).expect("approach cell");
+
+    let slot = entry_slot_far(now, desk_index);
+    let overlay = pixtuoid_core::walkable::OccupancyOverlay::new();
+    let mut motion: HashMap<AgentId, MotionState> = HashMap::new();
+    let mut history = PoseHistory::new();
+    let mut router = StubRouter::straight();
+
+    let pose = derive_with_routing(
+        &slot,
+        now,
+        &l,
+        &mut router,
+        &overlay,
+        &mut history,
+        &mut motion,
+    )
+    .expect("entering agent renders a pose");
+    assert!(
+        matches!(pose, Pose::Walking { .. }),
+        "a fresh entry must be Walking, got {pose:?}"
+    );
+
+    let snap = motion[&slot.agent_id]
+        .walk_path
+        .as_ref()
+        .expect("the cornered entry+settle leg is frozen (len > 2)");
+    assert_eq!(
+        snap.path,
+        vec![door, approach, chair],
+        "the leg must go door→approach→chair, settling onto the chair"
+    );
+    // The regression guard, stated directly: the agent never targets the blocked
+    // chair as its A* goal (that is what straight-lined through the desk).
+    assert_ne!(
+        snap.path,
+        vec![door, chair],
+        "entry must not straight-line door→chair through the desk body"
+    );
+}
+
+#[test]
 fn exit_walk_coordinates_are_continuous() {
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let l = layout();

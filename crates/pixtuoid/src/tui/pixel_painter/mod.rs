@@ -563,24 +563,49 @@ impl SeatView {
     }
 }
 
-/// The [`SeatView`] + waypoint centre for the seat whose settle foot-cell is
-/// `cell`, or `None` if `cell` is not a seat foot-cell. The caller passes the
-/// glide's `to` (sit-down: the agent is settling ONTO the seat) and/or `from`
-/// (stand-up: the agent is rising OFF it) — either endpoint landing on a
-/// foot-cell means the agent is on the sit arc and must render in the seat's
-/// view (facing) and at the seat's stable z-key, not the travel-direction /
+/// The seated [`SeatView`] (for the glide facing) and the seat's stable z-key
+/// for the seat whose settle foot-cell is `cell`, or `None` if `cell` is not a
+/// seat foot-cell. The caller passes the glide's `to` (sit-down: settling ONTO
+/// the seat) and/or `from` (stand-up: rising OFF it) — either endpoint landing
+/// on a foot-cell means the agent is on the sit arc and must render in the
+/// seat's view and at the seat's stable z-key, not the travel-direction /
 /// foot-position values.
 ///
-/// Matched GENERICALLY: any waypoint whose furniture is sittable has a
-/// `seated_foot_cell`, so a future seat is covered with no edit here — the only
-/// per-seat knowledge lives in [`SeatView::of`]. The home desk is NOT a waypoint,
-/// so its entry walk never matches (and the desk has no glide flicker anyway).
-fn settle_seat_view(cell: Point, layout: &Layout) -> Option<(SeatView, Point)> {
-    layout.waypoints.iter().find_map(|w| {
-        (pixtuoid_core::layout::seated_foot_cell(w.kind.furniture(), w.pos) == Some(cell))
-            .then(|| (SeatView::of(w.kind, w.facing), w.pos))
-    })
+/// Covers ALL seatables:
+/// - Wander seats — any `layout.waypoints` entry whose furniture has a
+///   `seated_foot_cell`; the view comes from [`SeatView::of`], the z-key from
+///   [`SeatView::z_key_for_seat`].
+/// - The home desk — `layout.home_desks` are NOT waypoints, but the chair
+///   (`seated_foot_cell(Desk)` = `desk_walk_anchor`) is a settle target too once
+///   the desk's arrival glides onto it (see `pose::desk_approach_cell`). The desk
+///   sitter faces the camera (front) and renders at the desk's seated z-key
+///   (`seated_anchor.y + 12 = desk.y + 4`, below the desk furniture's `desk.y+8`),
+///   so the glide stays behind the desk — no front-cross.
+fn settle_seat_view(cell: Point, layout: &Layout) -> Option<(SeatView, u16)> {
+    use pixtuoid_core::layout::{seated_foot_cell, Furniture};
+    layout
+        .waypoints
+        .iter()
+        .find_map(|w| {
+            (seated_foot_cell(w.kind.furniture(), w.pos) == Some(cell)).then(|| {
+                let view = SeatView::of(w.kind, w.facing);
+                (view, view.z_key_for_seat(w.pos))
+            })
+        })
+        .or_else(|| {
+            layout.home_desks.iter().find_map(|&desk| {
+                (seated_foot_cell(Furniture::Desk, desk) == Some(cell))
+                    // == the seated arms' `anchor_no_breath.y + 12` (= desk.y+4);
+                    // pinned by `desk_settle_z_key_matches_the_seated_arm`.
+                    .then_some((SeatView::Front, desk.y + DESK_SEAT_Z_OFF))
+            })
+        })
 }
+
+/// The home-desk sitter's z-key offset south of `desk`: `seated_anchor.y(=desk.y
+/// − 8) + sprite_h(12) = desk.y + 4`. Below the desk furniture key (`desk.y + 8`)
+/// so the sitter and its sit-down glide always sort behind the desk monitor.
+const DESK_SEAT_Z_OFF: u16 = 4;
 
 pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
     let agents: Vec<_> = ctx.scene.agents.values().cloned().collect();
@@ -1696,7 +1721,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
                 };
                 drawables.push(Drawable {
                     anchor_y: match settle {
-                        Some((view, wp_pos)) => view.z_key_for_seat(wp_pos),
+                        Some((_, z_key)) => z_key,
                         None => walker_anchor.y + 12,
                     },
                     kind: DrawableKind::Character {
@@ -2357,14 +2382,26 @@ mod tests {
             let foot = pixtuoid_core::layout::seated_foot_cell(w.kind.furniture(), w.pos)
                 .expect("seat occupies_pos → has a settle foot cell");
             let view = SeatView::of(w.kind, w.facing);
-            // The sit-down glide onto this seat renders in the seat's view, and
-            // carries the seat's waypoint centre (for the seat z-key).
+            // The sit-down glide onto this seat renders in the seat's view, at the
+            // seat's stable z-key.
             assert_eq!(
                 settle_seat_view(foot, &l),
-                Some((view, w.pos)),
+                Some((view, view.z_key_for_seat(w.pos))),
                 "settle onto {:?}@{:?} must use the seat view {view:?}",
                 w.kind,
                 w.pos
+            );
+            // Totality guard (review finding): a seat detected generically by its
+            // foot-cell must NOT fall through `SeatView::of`'s upright catch-all —
+            // every real seat maps to an explicitly-handled view, so a future seat
+            // added to the Furniture table without a `SeatView::of` arm fails HERE
+            // rather than silently rendering as an upright stander.
+            assert!(
+                matches!(w.kind, WaypointKind::Couch | WaypointKind::MeetingSofa)
+                    || matches!(w.kind, WaypointKind::MeetingStand),
+                "seat kind {:?} has a settle foot-cell but is not explicitly handled \
+                 in SeatView::of — add an arm there",
+                w.kind
             );
             // Single-source invariant: the seated sprite and the sit-down settle
             // agree on orientation (both back-view, or neither) — they cannot
@@ -2384,6 +2421,61 @@ mod tests {
                     None,
                     "seat centre {:?} is not a settle foot cell",
                     w.pos
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn settle_seat_view_recognizes_the_home_desk() {
+        // The home desk joins the unified settle: its chair (seated_foot_cell(Desk)
+        // = desk_walk_anchor) is a settle target, so the arrival glide onto it goes
+        // through SeatView::Front (front-facing, stable z-key) — same path as the
+        // sofas, no front-cross.
+        use crate::tui::layout::MAX_VISIBLE_DESKS;
+        use pixtuoid_core::layout::{desk_walk_anchor, Furniture};
+        let l = Layout::compute(192, 158, MAX_VISIBLE_DESKS).expect("fits");
+        let desk = *l.home_desks.first().expect("at least one home desk");
+        let chair = desk_walk_anchor(desk);
+        assert_eq!(
+            settle_seat_view(chair, &l),
+            Some((SeatView::Front, desk.y + DESK_SEAT_Z_OFF)),
+            "the desk chair {chair:?} must settle as SeatView::Front at the desk z-key"
+        );
+        // seated_foot_cell(Desk) is exactly desk_walk_anchor — the hook keys off it.
+        assert_eq!(
+            pixtuoid_core::layout::seated_foot_cell(Furniture::Desk, desk),
+            Some(chair)
+        );
+        // A non-chair cell near the desk is ordinary travel.
+        assert_eq!(
+            settle_seat_view(desk, &l),
+            None,
+            "the desk corner is not the chair"
+        );
+    }
+
+    #[test]
+    fn desk_settle_z_key_matches_the_seated_arm() {
+        // The desk's settle z-key (desk.y + DESK_SEAT_Z_OFF) must equal the z-key
+        // the seated desk arms use (anchor_no_breath.y + 12 with anchor =
+        // seated_anchor) so the glide and the settled render sort identically —
+        // and both stay below the desk furniture z-key (desk.y + 8).
+        for desk in [Point { x: 40, y: 30 }, Point { x: 100, y: 60 }] {
+            for w in [CHARACTER_SPRITE_W, 10] {
+                let seated_arm_z = seated_anchor(desk, w).y + 12;
+                assert_eq!(
+                    desk.y + DESK_SEAT_Z_OFF,
+                    seated_arm_z,
+                    "desk settle z-key must equal the SeatedIdle/Typing arm z-key"
+                );
+                let fp_h = crate::tui::layout::desk_furniture_def()
+                    .footprint
+                    .expect("desk footprint")
+                    .1;
+                assert!(
+                    desk.y + DESK_SEAT_Z_OFF < desk.y + fp_h + DESK_FRONT_OVERHANG,
+                    "desk sitter must sort behind the desk furniture"
                 );
             }
         }

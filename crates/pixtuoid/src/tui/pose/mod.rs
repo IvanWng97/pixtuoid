@@ -74,6 +74,41 @@ const SNAP_BACK_MS: u64 = 900;
 /// teleport is invisible and animating wastes a frame.
 const SNAP_BACK_MIN_DIST: i32 = 8;
 
+/// The home desk's ARRIVAL target: a reachable cell on an ALLOWED side
+/// (`DESK_APPROACH` = N/E/W, excluding the south front) via the SAME
+/// `approach_point` the wander seats use — so an arriving agent walks AROUND to
+/// sit behind the desk instead of straight through its front. The chair
+/// (`desk_walk_anchor`) is inside the blocked desk footprint, so targeting it
+/// directly made A\* fall back to a straight `door→chair` line THROUGH the desk
+/// body (the "walk through the table" bug). `None` only in a degenerate layout
+/// where every allowed side is walled off — the caller then falls back to the
+/// old direct target. The chair is the SETTLE endpoint, appended after this.
+///
+/// Scans from the CHAIR, not the desk's top-left origin: the footprint is
+/// anchored top-left, so a scan from the corner is lopsided and can't clear the
+/// 16px-wide body to the EAST (the east side would read as walled-off). From the
+/// chair (≈ footprint centre) all three allowed sides are within reach, so the
+/// approach cell sits directly off the seat and the settle glide is a short
+/// straight hop onto the chair.
+fn desk_approach_cell(desk: Point, layout: &Layout) -> Option<Point> {
+    use pixtuoid_core::layout::{approach_point, desk_walk_anchor, Facing, Furniture};
+    let chair = desk_walk_anchor(desk);
+    let cell = approach_point(
+        Furniture::Desk,
+        chair,
+        // The desk sitter faces the camera (South); DESK_APPROACH then allows
+        // N/E/W (the south front is excluded — that is the bug-prone side).
+        Facing::South,
+        layout.pantry_counter_size,
+        &layout.walkable,
+        chair,
+        &layout.reachable,
+    );
+    // approach_point returns the scanned `pos` (== chair) as the "no valid
+    // approach" sentinel when no allowed+reachable side exists.
+    (cell != chair).then_some(cell)
+}
+
 /// Routed variant of `derive`. For Walking poses, asks `router` for an
 /// A*-routed polyline (composed against the layout's static mask + the
 /// per-frame `overlay`) and converts the global t (0..1000) into a
@@ -217,22 +252,39 @@ pub fn derive_with_routing(
         .as_millis() as u64;
 
     if let Some(door) = layout.door_threshold {
+        // Unified ARRIVAL: walk to a reachable allowed-side cell (approach_point),
+        // then Settle::End glides onto the chair — the SAME path the wander seats
+        // use. Degenerate (every N/E/W side walled off): fall back to the old
+        // direct target with no settle.
+        let chair = desk_walk_anchor(desk);
+        let approach = desk_approach_cell(desk, layout).unwrap_or(chair);
+        let settle = if approach == chair {
+            Settle::None
+        } else {
+            Settle::End(chair)
+        };
+        let settle_px = if approach == chair {
+            0
+        } else {
+            octile_distance(approach, chair)
+        };
+
         let mstate = motion
             .entry(slot.agent_id)
             .or_insert_with(|| MotionState::new(slot.agent_id));
 
         // Snapshot on first sighting if we're within the spawn window.
         if mstate.entry.is_none() && since_spawn < ENTRY_ANIMATION_MS {
-            let to_desk = desk_walk_anchor(desk);
             let h = slot.agent_id.raw();
             let jx = ((h % 9) as i32 - 4) as i16;
             let jy = (((h >> 16) % 9) as i32 - 4) as i16;
             let to_jittered = Point {
-                x: to_desk.x.saturating_add_signed(jx),
-                y: to_desk.y.saturating_add_signed(jy),
+                x: approach.x.saturating_add_signed(jx),
+                y: approach.y.saturating_add_signed(jy),
             };
             let path = router.route(&layout.walkable, overlay, door, to_jittered);
-            let path_len = octile_path_len(&path).max(1);
+            // Profile covers door→approach PLUS the short settle glide onto the chair.
+            let path_len = (octile_path_len(&path) + settle_px).max(1);
             let profile = walk_profile(path_len, WalkIntent::Entry, slot.agent_id);
             mstate.entry = Some((slot.created_at, profile));
         }
@@ -246,7 +298,6 @@ pub fn derive_with_routing(
             if !walk_arrived(profile, elapsed_ms) {
                 let t_x1000 = walk_progress(profile, elapsed_ms);
                 let frame = ((elapsed_ms / WALKING_FRAME_MS) as usize) % WALKING_FRAMES;
-                let to_desk = desk_walk_anchor(desk);
                 return route_walking_pose(
                     slot,
                     now,
@@ -257,12 +308,12 @@ pub fn derive_with_routing(
                     motion,
                     Pose::Walking {
                         from: door,
-                        to: to_desk,
+                        to: approach,
                         t_x1000,
                         frame,
                         carrying_coffee: false,
                     },
-                    Settle::None,
+                    settle,
                 );
             }
             // walk_arrived — fall through to state-driven pose (Correction C).
@@ -431,6 +482,12 @@ pub fn derive_with_routing(
                 // pose flips from Walking → SeatedTyping. The agent ends
                 // visually AT the desk (anchor-equivalent), so there's no
                 // perceivable transition flash.
+                //
+                // The snap-back keeps the DIRECT target (unlike the unified
+                // entry): it's a quick 900ms time-compressed CORRECTION for an
+                // agent ≥8px from the desk after a state flip, not a deliberate
+                // arrival — its blocked target is resolved by route_walking_pose's
+                // snap_to_walkable, so it doesn't straight-line through the desk.
                 let snap_target = desk_walk_anchor(desk);
                 // Retrieve or snapshot the physics profile for this snap-back.
                 // Re-arm when EITHER there's no profile yet OR a NEW state
