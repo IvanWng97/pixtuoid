@@ -1,7 +1,13 @@
-# 16x8 top-down desk with monitor (dark idle screen), keyboard, mouse.
+# 16x9 top-down desk — the monitor's top bezel RISES 1px above the desk back so
+# the screen reads as a standing display, not flush with the desktop. Row 0 is
+# the raised bezel (sides transparent so only the monitor pokes up); the desk is
+# blitted at desk.y-1 (see DeskCubicle in drawable.rs) so this row sits ABOVE the
+# desk while the frame/screen/surface/keyboard keep their original desk.y-relative
+# rows — which is why paint_screen_glow (anchored at desk.y) still lines up.
 # Screen uses `j` (dark) so the bright lime screen-glow overlay reads as
 # "monitor lit up — workstation is active" by contrast.
 @frame 0
+. . . M M M M M M M M . . . . .
 D D D M M M M M M M M D D D D D
 D D D M j j j j j j M D D D D D
 D D D M j j j j j j M D D D D D

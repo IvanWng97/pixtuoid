@@ -326,7 +326,10 @@ pub(super) fn paint_drawable(
                 }
             }
             if let Some(frame) = pack.animation("desk").and_then(|a| a.frames.first()) {
-                blit_frame(frame, desk.x, desk.y, buf);
+                // The desk sprite's top row is the monitor's raised bezel (1px
+                // above the desk back), so blit 1px higher — the surface/keyboard
+                // rows still land at their original desk.y-relative positions.
+                blit_frame(frame, desk.x, desk.y.saturating_sub(1), buf);
             }
             if let Some(bin) = pack.animation("trash_bin").and_then(|a| a.frames.first()) {
                 let bin_x = desk.x + DESK_W;
