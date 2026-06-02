@@ -16,13 +16,13 @@ use pixtuoid_core::state::AgentSlot;
 use pixtuoid_core::walkable::OccupancyOverlay;
 use pixtuoid_core::AgentId;
 
-use crate::tui::layout::{desk_walk_anchor, Layout, Point, WaypointKind};
+use crate::tui::layout::{Layout, Point, WaypointKind};
 use crate::tui::pathfind::Router;
-use crate::tui::pose::octile_distance;
 use crate::tui::pose::{
     aimless_wander_seed, cycle_ms_for, dwell_ms, est_wander_cycle_ms, is_aimless_cycle,
     pick_aimless_dest, seated_dwell_ms, takes_trip, waypoint_index_for_cycle, WANDER_DWELL_EST_MS,
 };
+use crate::tui::pose::{desk_leg_endpoint, octile_distance};
 
 /// Frozen A* polyline for one in-flight walk leg.
 ///
@@ -280,16 +280,14 @@ pub fn advance_wander(
                     ms.wander_seat = seat;
 
                     let desk = desk_pt.unwrap_or(dest);
-                    // Route from desk+(6,4) (the seated anchor) so the walk-out
-                    // start matches where the seated sprite was — no stand-up
-                    // jump. This intentionally differs from core::idle_pose's
-                    // raw `from: desk`; only the routed TUI path is user-visible
-                    // and the walk-back already uses the same +(6,4) offset.
-                    let from = desk_walk_anchor(desk);
+                    // Leave via the desk approach cell (rise off the chair),
+                    // mirroring pose's WalkingOut leg. The profile duration must
+                    // cover the FULL polyline: chair-glide + route + seat settle —
+                    // else t reaches 1000 before the sprite arrives and it pops.
+                    let (from, chair_settle) = desk_leg_endpoint(desk, layout);
                     let path = router.route(&layout.walkable, overlay, from, dest);
-                    // Include the settle (approach → seat) so the profile duration
-                    // covers the full walk, not just the route to the approach.
-                    let len = (octile_path_len(&path) + settle_len(dest, seat)).max(1);
+                    let desk_glide = chair_settle.map_or(0, |c| octile_distance(c, from));
+                    let len = (octile_path_len(&path) + desk_glide + settle_len(dest, seat)).max(1);
                     ms.wander_profile = Some(walk_profile(len, WalkIntent::WanderOut, id));
 
                     ms.wander_phase = WanderPhase::WalkingOut;
@@ -330,11 +328,16 @@ pub fn advance_wander(
                     .get(slot.desk_index)
                     .copied()
                     .unwrap_or(ms.wander_dest);
-                let snap_to = desk_walk_anchor(desk);
+                // Arrive via the desk approach cell (glide onto the chair),
+                // mirroring pose's WalkingBack leg; add the chair-glide so the
+                // profile covers the full polyline (no pop on arrival).
+                let (snap_to, chair_settle) = desk_leg_endpoint(desk, layout);
                 let back_path = router.route(&layout.walkable, overlay, ms.wander_dest, snap_to);
+                let desk_glide = chair_settle.map_or(0, |c| octile_distance(snap_to, c));
                 let back_len = (octile_path_len(&back_path)
-                    + settle_len(ms.wander_dest, ms.wander_seat))
-                .max(1);
+                    + settle_len(ms.wander_dest, ms.wander_seat)
+                    + desk_glide)
+                    .max(1);
 
                 ms.wander_phase = WanderPhase::AtWaypoint;
                 ms.wander_phase_started_at = ms
@@ -360,12 +363,14 @@ pub fn advance_wander(
                         .get(slot.desk_index)
                         .copied()
                         .unwrap_or(ms.wander_dest);
-                    let snap_to = desk_walk_anchor(desk);
+                    let (snap_to, chair_settle) = desk_leg_endpoint(desk, layout);
                     let back_path =
                         router.route(&layout.walkable, overlay, ms.wander_dest, snap_to);
+                    let desk_glide = chair_settle.map_or(0, |c| octile_distance(snap_to, c));
                     let back_len = (octile_path_len(&back_path)
-                        + settle_len(ms.wander_dest, ms.wander_seat))
-                    .max(1);
+                        + settle_len(ms.wander_dest, ms.wander_seat)
+                        + desk_glide)
+                        .max(1);
                     ms.wander_profile = Some(walk_profile(back_len, WalkIntent::WanderBack, id));
                 }
 

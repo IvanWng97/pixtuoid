@@ -1659,6 +1659,104 @@ fn desk_entry_routes_around_the_desk_then_settles_onto_the_chair() {
 }
 
 #[test]
+fn wander_legs_approach_the_desk_via_an_allowed_side_not_through_the_front() {
+    // Regression for the bug the user spotted: the desk-arrival unification
+    // fixed the ENTRY leg but the WANDER out/back legs still aimed A* at
+    // `desk_walk_anchor` (the blocked chair). `find_path` snaps a blocked goal
+    // to the NEAREST walkable coarse cell — which for the south-facing chair is
+    // the SOUTH (corridor) side — so the agent walked up THROUGH the desk front
+    // on every wander cycle. Every desk-touching leg must instead route via
+    // `desk_leg_endpoint` (a reachable N/E/W approach cell) and SETTLE onto the
+    // chair, exactly like entry. This pins both legs.
+    use crate::tui::pathfind::AStarRouter;
+    use pixtuoid_core::layout::desk_walk_anchor;
+    let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let l = layout();
+
+    // A desk with a real (non-degenerate) approach cell.
+    let desk_index = (0..l.home_desks.len())
+        .find(|&i| desk_approach_cell(l.home_desks[i], &l).is_some())
+        .expect("a desk with a valid approach cell");
+    let desk = l.home_desks[desk_index];
+    let chair = desk_walk_anchor(desk);
+    let approach = desk_approach_cell(desk, &l).expect("approach cell");
+
+    // A trip-taking agent seated at that desk, long past its entry walk.
+    let trip_id = (0u64..3000)
+        .map(|i| AgentId::from_transcript_path(&format!("/deskleg/{i}.jsonl")))
+        .find(|id| takes_trip(*id, 0))
+        .expect("a trip agent");
+    let old = now - Duration::from_secs(120);
+    let mut slot = entry_slot(old);
+    slot.agent_id = trip_id;
+    slot.desk_index = desk_index;
+    slot.last_event_at = old;
+
+    let mut router = AStarRouter::new();
+    router.set_preferred_zone(l.corridor);
+    let overlay = pixtuoid_core::walkable::OccupancyOverlay::new();
+    let mut history = PoseHistory::new();
+    let mut motion: HashMap<AgentId, MotionState> = HashMap::new();
+
+    let (mut saw_out, mut saw_back) = (false, false);
+    let mut seen_ends: Vec<(Point, Point)> = Vec::new();
+    for i in 0..6000u64 {
+        let t = now + Duration::from_millis(i * 33);
+        let _ = derive_with_routing(
+            &slot,
+            t,
+            &l,
+            &mut router,
+            &overlay,
+            &mut history,
+            &mut motion,
+        );
+        let Some(snap) = motion.get(&trip_id).and_then(|m| m.walk_path.as_ref()) else {
+            continue;
+        };
+        if let (Some(&f), Some(&la)) = (snap.path.first(), snap.path.last()) {
+            if !seen_ends.contains(&(f, la)) {
+                seen_ends.push((f, la));
+            }
+        }
+        // Walk-OUT begins by rising off the chair (prepended), so its 2nd point
+        // is the approach cell — never a cell on the blocked south front.
+        if snap.path.first() == Some(&chair) {
+            saw_out = true;
+            assert_eq!(
+                snap.path.get(1),
+                Some(&approach),
+                "walk-out must leave the desk via the N/E/W approach cell, not \
+                 straight through the south front; got {:?}",
+                snap.path
+            );
+        }
+        // Walk-BACK ends by gliding onto the chair (appended), so its
+        // penultimate point is the approach cell.
+        if snap.path.last() == Some(&chair) && snap.path.len() >= 2 {
+            saw_back = true;
+            assert_eq!(
+                snap.path[snap.path.len() - 2],
+                approach,
+                "walk-back must arrive at the desk via the N/E/W approach cell, \
+                 not the south front; got {:?}",
+                snap.path
+            );
+        }
+    }
+    assert!(
+        saw_out,
+        "expected to observe a walk-out leg; chair={chair:?} approach={approach:?} \
+         ends seen={seen_ends:?}"
+    );
+    assert!(
+        saw_back,
+        "expected to observe a walk-back leg; chair={chair:?} approach={approach:?} \
+         ends seen={seen_ends:?}"
+    );
+}
+
+#[test]
 fn exit_walk_coordinates_are_continuous() {
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let l = layout();
