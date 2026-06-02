@@ -39,11 +39,27 @@ pub const V_CRUISE_COMMUTE: f32 = 0.36;
 /// Ambling speed, slower than commute.  Calibrated in proportion to
 /// `V_CRUISE_COMMUTE` to preserve the commute-vs-wander pace contrast.
 pub const V_CRUISE_WANDER: f32 = 0.25;
+/// Cruise speed for SnapBack walks (octile/ms) — faster than commute.
+///
+/// A snap-back is an URGENT return to the desk after an interruption (Idle→Active
+/// mid-wander): the agent visibly *hurries* back. Paired with the higher
+/// [`WALK_ACCEL_SNAPBACK`] so that BOTH short snap-backs (accel-limited) and far
+/// ones (cruise-limited) stay brisk under pure physics — replacing the old
+/// fixed-time compression (`eff_elapsed = elapsed · duration / SNAP_BACK_MS`).
+/// Net: near snap-backs ≈ 0.4 s, far ones ≈ 1.3 s (a real, fast walk — not a
+/// hard-compressed 900 ms dash).
+pub const V_CRUISE_SNAPBACK: f32 = 0.65;
 /// Shared acceleration/deceleration constant (octile/ms²).
 ///
 /// Gives a ~0.55 s accel ramp (`t_a = v/a`).  Critical lengths:
 /// `L_crit = v²/a ≈ 199` octile (commute), `≈ 96` octile (wander).
 pub const WALK_ACCEL: f32 = 6.5e-4;
+/// Acceleration for SnapBack walks (octile/ms²) — ~3× [`WALK_ACCEL`].
+///
+/// Short snap-backs are acceleration-limited (triangular: `T = 2·√(L/a)`,
+/// cruise-independent), so the urgent return *accelerates harder* to stay snappy.
+/// Paired with [`V_CRUISE_SNAPBACK`] for the far (cruise-limited) case.
+pub const WALK_ACCEL_SNAPBACK: f32 = 2.0e-3;
 
 /// Minimum per-agent speed multiplier.
 pub const SPEED_MULT_MIN: f32 = 0.85;
@@ -121,11 +137,18 @@ pub fn pause_ms_for(agent_id: AgentId) -> u64 {
 /// Zero-length paths: duration_ms = 0 so walk_progress returns 1000 immediately.
 pub fn walk_profile(path_len_octile: u32, intent: WalkIntent, agent_id: AgentId) -> WalkProfile {
     let v_base = match intent {
-        WalkIntent::Entry | WalkIntent::Exit | WalkIntent::SnapBack => V_CRUISE_COMMUTE,
+        WalkIntent::SnapBack => V_CRUISE_SNAPBACK,
+        WalkIntent::Entry | WalkIntent::Exit => V_CRUISE_COMMUTE,
         WalkIntent::WanderOut | WalkIntent::WanderBack => V_CRUISE_WANDER,
     };
     let v = v_base * speed_mult(agent_id);
-    let a = WALK_ACCEL;
+    // SnapBack rushes back (urgent return) — a higher accel + cruise keep BOTH
+    // short (accel-limited) and far (cruise-limited) snap-backs brisk under pure
+    // physics (no fixed-time compression).
+    let a = match intent {
+        WalkIntent::SnapBack => WALK_ACCEL_SNAPBACK,
+        _ => WALK_ACCEL,
+    };
     let l = path_len_octile as f32;
 
     let duration_ms = if path_len_octile == 0 {

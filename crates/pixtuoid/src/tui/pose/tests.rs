@@ -407,15 +407,17 @@ fn snap_back_derive_is_idempotent_within_a_frame() {
     let l = layout();
     let slot = active_slot(now0, now0 - Duration::from_secs(60));
     let desk = l.home_desks[0];
-    // Short snap (octile ~24): it arms (>= SNAP_BACK_MIN_DIST), and its physics
-    // profile is short enough (< SNAP_BACK_MS, so NO time-compression) that
-    // walk_arrived fires well inside the 900ms window — clearing snap_back, after
-    // which a same-`now` call re-arms it. That clear -> re-arm is the path most
-    // at risk of a within-frame split (the window-expiry else branch can't
-    // re-arm), so we steer the leg through it and assert below that we did.
+    // A snap-back far enough from the CHAIR to arm (≥ SNAP_BACK_MIN_DIST), stepped
+    // through its full lifecycle: arm → physics walk → walk_arrived clear → seated.
+    // The chair-distance arm gate means it does NOT re-arm once the walk reaches the
+    // chair (dist 0 < MIN), so it settles cleanly. We derive 4× per frame at the SAME
+    // `now` and assert the pose + history are stable every frame (the K-call
+    // idempotency invariant): this holds because the override arms ONCE per state
+    // transition and renders from the FROZEN origin, never re-reading the advancing
+    // history position as a per-frame gate.
     let prev0 = Point {
-        x: desk.x + 8,
-        y: desk.y + 5,
+        x: desk.x + 16,
+        y: desk.y + 12,
     };
     let overlay = pixtuoid_core::walkable::OccupancyOverlay::new();
     let mut router = StubRouter::straight();
@@ -424,7 +426,7 @@ fn snap_back_derive_is_idempotent_within_a_frame() {
     let mut motion: HashMap<AgentId, MotionState> = HashMap::new();
 
     let mut arrived_frame: Option<u64> = None;
-    for i in 0..30u64 {
+    for i in 0..60u64 {
         let t = now0 + Duration::from_millis(i * 33);
         let p0 = derive_with_routing(
             &slot,
@@ -465,16 +467,12 @@ fn snap_back_derive_is_idempotent_within_a_frame() {
             );
         }
     }
-    // Confirm the leg reached the desk via the walk_arrived clear BEFORE the
-    // 900ms window-expiry clear — i.e. the clear -> re-arm path really was
-    // exercised above (not just the window-expiry else branch, which can't
-    // re-arm). Else the comment would overstate what this test covers.
-    let arrived = arrived_frame.expect("snap-back should reach the desk within the run");
+    // The leg must complete (settle to seated) within the run — proving we stepped a
+    // full arm → walk → arrive lifecycle (not just a no-op gate), and that the
+    // chair-distance gate stopped it re-arming once it reached the seat.
     assert!(
-        arrived * 33 < SNAP_BACK_MS,
-        "snap-back should arrive via walk_arrived (< {SNAP_BACK_MS}ms), not window-expiry; \
-         arrived at frame {arrived} ({}ms)",
-        arrived * 33
+        arrived_frame.is_some(),
+        "snap-back should reach the desk (settle to seated) within the run"
     );
 }
 
@@ -536,32 +534,94 @@ fn wander_derive_is_idempotent_within_a_frame() {
 }
 
 #[test]
-fn snap_back_long_distance_completes_by_window_no_teleport() {
-    // Regression: a snap-back over a distance whose physics duration exceeds
-    // SNAP_BACK_MS (the common case — agents snap back from far waypoints)
-    // must be time-compressed so it REACHES the desk by the 900ms window
-    // edge. Before the fix it capped elapsed at 900ms → progress stuck mid-
-    // path → the sprite teleported the remaining distance when the window
-    // guard flipped it to seated.
-    let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+fn snap_back_long_distance_renders_past_window_by_physics() {
+    // A far snap-back's physics walk exceeds the SNAP_BACK_MS arm window. The OLD
+    // design time-compressed it to finish by 900ms; the NEW design renders it to
+    // completion by PHYSICS — no time-compression, no render cap — kept brisk by
+    // the snap-back's higher accel + cruise. So PAST the 900ms window it KEEPS
+    // WALKING (no window-cut teleport), then settles to the seated pose. We step
+    // the leg with persistent motion/history and assert: still Walking after the
+    // window, and it eventually arrives.
+    let now0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let l = layout();
-    // State flipped 880ms ago — just inside the 900ms window.
-    let slot = active_slot(
-        now - Duration::from_millis(880),
-        now - Duration::from_secs(60),
-    );
+    let slot = active_slot(now0, now0 - Duration::from_secs(60)); // flip at now0
     let desk = l.home_desks[0];
-    // Far prev (octile ~544) → SnapBack physics duration ~1.9s >> 900ms.
+    // Far prev → SnapBack physics duration well over the 900ms arm window.
     let prev = Point {
         x: desk.x + 50,
         y: desk.y + 30,
     };
-    let mut history = PoseHistory::new();
-    history.record(slot.agent_id, prev, now - Duration::from_millis(50));
     let overlay = pixtuoid_core::walkable::OccupancyOverlay::new();
     let mut router = StubRouter::straight();
+    let mut history = PoseHistory::new();
+    history.record(slot.agent_id, prev, now0 - Duration::from_millis(50));
     let mut motion: HashMap<AgentId, MotionState> = HashMap::new();
-    match derive_with_routing(
+
+    let (mut walking_after_window, mut arrived) = (false, false);
+    for i in 0..90u64 {
+        let t = now0 + Duration::from_millis(i * 33);
+        match derive_with_routing(
+            &slot,
+            t,
+            &l,
+            &mut router,
+            &overlay,
+            &mut history,
+            &mut motion,
+        ) {
+            Some(Pose::Walking { .. }) if i * 33 > SNAP_BACK_MS => walking_after_window = true,
+            Some(Pose::Walking { .. }) => {}
+            // Only counts as "arrived" once we've actually been walking.
+            Some(Pose::SeatedTyping { .. } | Pose::SeatedIdle | Pose::SeatedThinking)
+                if walking_after_window =>
+            {
+                arrived = true;
+                break;
+            }
+            _ => {}
+        }
+    }
+    assert!(
+        walking_after_window,
+        "far snap-back must keep WALKING past the {SNAP_BACK_MS}ms arm window — not compressed or window-capped"
+    );
+    assert!(
+        arrived,
+        "far snap-back must eventually settle to the seated pose by physics"
+    );
+}
+
+#[test]
+fn snap_back_routes_via_the_approach_cell_then_settles_onto_the_chair() {
+    // Snap-back is unified with the other desk legs: it routes to a reachable N/E/W
+    // approach cell and SETTLES onto the chair, instead of aiming A* at the blocked
+    // chair (which find_path snaps to the nearest — south — cell). The frozen
+    // polyline therefore ends [..., approach, chair].
+    use pixtuoid_core::layout::desk_walk_anchor;
+    let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let l = layout();
+    let desk_index = (0..l.home_desks.len())
+        .find(|&i| desk_approach_cell(l.home_desks[i], &l).is_some())
+        .expect("a desk with a valid approach cell");
+    let desk = l.home_desks[desk_index];
+    let chair = desk_walk_anchor(desk);
+    let approach = desk_approach_cell(desk, &l).expect("approach cell");
+
+    let mut slot = active_slot(now, now - Duration::from_secs(60));
+    slot.desk_index = desk_index;
+    slot.agent_id = AgentId::from_transcript_path("/snapapproach/slot.jsonl");
+    // Far from the chair (≥ SNAP_BACK_MIN_DIST) so the snap-back arms.
+    let prev = Point {
+        x: chair.x + 40,
+        y: chair.y + 25,
+    };
+    let overlay = pixtuoid_core::walkable::OccupancyOverlay::new();
+    let mut router = StubRouter::straight();
+    let mut history = PoseHistory::new();
+    history.record(slot.agent_id, prev, now - Duration::from_millis(50));
+    let mut motion: HashMap<AgentId, MotionState> = HashMap::new();
+
+    let pose = derive_with_routing(
         &slot,
         now,
         &l,
@@ -569,15 +629,28 @@ fn snap_back_long_distance_completes_by_window_no_teleport() {
         &overlay,
         &mut history,
         &mut motion,
-    ) {
-        Some(Pose::Walking { t_x1000, .. }) => {
-            assert!(
-                    t_x1000 >= 950,
-                    "long snap-back must be ~complete by the window edge (no teleport), got t_x1000={t_x1000}"
-                );
-        }
-        other => panic!("expected near-complete Walking pose, got {other:?}"),
-    }
+    )
+    .expect("snap-back renders a pose");
+    assert!(
+        matches!(pose, Pose::Walking { .. }),
+        "snap-back must be Walking, got {pose:?}"
+    );
+    let snap = motion[&slot.agent_id]
+        .walk_path
+        .as_ref()
+        .expect("the cornered snap-back leg is frozen (… approach, chair, len > 2)");
+    assert_eq!(
+        snap.path.last(),
+        Some(&chair),
+        "snap-back must settle onto the chair; got {:?}",
+        snap.path
+    );
+    assert_eq!(
+        snap.path[snap.path.len() - 2],
+        approach,
+        "snap-back must arrive via the N/E/W approach cell, not straight at the chair; got {:?}",
+        snap.path
+    );
 }
 
 #[test]
@@ -830,10 +903,11 @@ fn snap_back_progress_is_physics_eased_not_linear() {
     let l = layout();
     let slot = active_slot(now, now - Duration::from_secs(60));
     let desk = l.home_desks[0];
-    // Short-but-qualifying distance (manhattan 15 ≥ SNAP_BACK_MIN_DIST=8).
+    // Qualifying distance from the CHAIR (manhattan 28 ≥ SNAP_BACK_MIN_DIST=8) so
+    // the snap-back actually arms.
     let prev = Point {
-        x: desk.x + 10,
-        y: desk.y + 5,
+        x: desk.x + 20,
+        y: desk.y + 18,
     };
 
     let mut history = PoseHistory::new();
@@ -884,13 +958,15 @@ fn snap_back_progress_is_physics_eased_not_linear() {
 
     match p {
         Some(Pose::Walking { t_x1000, .. }) => {
-            // Triangular profile: s(T/4) = (1/2)*a*(T/4)² = L/16
-            // → t_x1000 ≈ 1000*L/16/L = 62. Linear would be 250.
-            // We assert strictly < 250 (generous threshold).
+            // Physics ease-in: the accel ramp at the start keeps progress SUB-LINEAR
+            // through the first quarter of the walk — triangular gives s(T/4)=L/16
+            // (t≈62); even a trapezoidal snap (the higher snap-back accel can push a
+            // moderate distance past L_crit) is still < linear's 250 at T/4 because
+            // the ramp dominates the opening. A linear walk would read exactly 250.
             assert!(
-                    t_x1000 < 250,
-                    "physics ease-in: expected t_x1000 < 250 at 25% of duration (triangular), got {t_x1000}"
-                );
+                t_x1000 < 250,
+                "physics ease-in: expected t_x1000 < 250 at 25% of duration, got {t_x1000}"
+            );
         }
         other => panic!("expected Walking pose at 25% of snap-back duration, got {other:?}"),
     }

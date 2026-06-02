@@ -64,10 +64,11 @@ impl PoseHistory {
     }
 }
 
-/// Duration of the snap-back walk used when state-driven pose would
-/// instantly place the agent back at their desk. 600ms is short enough
-/// to feel responsive (the user wants to see the tool fire) but long
-/// enough to read as motion, not a pop.
+/// Snap-back ARM window (ms): only trigger a snap-back walk if the desk-bound
+/// state flip happened within this long. It is NOT a render cap — the walk runs
+/// to completion by physics (`walk_arrived`), kept brisk by the snap-back's
+/// higher accel (`physics::WALK_ACCEL_SNAPBACK`). Past this window we just show
+/// the seated pose directly (too late to bother animating a return).
 const SNAP_BACK_MS: u64 = 900;
 /// Minimum manhattan distance (px) from current rendered position to
 /// the desk before we bother animating the snap-back. Below this the
@@ -112,8 +113,8 @@ pub(in crate::tui) fn desk_approach_cell(desk: Point, layout: &Layout) -> Option
 /// The desk-side endpoint of a desk-bound walk leg, resolved the ONE unified way
 /// so no leg can regress to aiming A\* at the blocked chair. Used by EVERY leg
 /// that arrives at or departs from the chair — entry, wander-out, wander-back,
-/// and the exit DEPARTURE — so "approach via an allowed side, then settle onto
-/// the chair" is defined exactly once.
+/// the exit DEPARTURE, AND snap-back — so "approach via an allowed side, then
+/// settle onto the chair" is defined exactly once.
 ///
 /// Returns `(routing_endpoint, chair_settle)`:
 ///   * `routing_endpoint` — the cell to hand A\* as the leg's desk-side `from`/`to`
@@ -126,11 +127,10 @@ pub(in crate::tui) fn desk_approach_cell(desk: Point, layout: &Layout) -> Option
 ///     boxed-in layout where every allowed side is walled off and the leg reverts
 ///     to the direct chair target (resolved by `find_path`'s `snap_to_walkable`).
 ///
-/// NOTE: the SNAP-BACK leg is deliberately NOT a caller — it stays a direct chair
-/// target: a brief 900ms time-compressed correction whose tuned compression +
-/// K-call idempotency gate the approach detour destabilises. (A mid-wander exit
-/// also skips this — the agent departs from its live wander position, not the
-/// chair.)
+/// NOTE: snap-back is now a caller too (the urgent Idle→Active return routes via
+/// the approach cell + settle like the rest, run by pure physics with a brisk
+/// profile — no fixed-time compression). The ONLY non-caller is a mid-wander EXIT:
+/// there the agent departs from its live wander position, not the chair.
 pub(in crate::tui) fn desk_leg_endpoint(desk: Point, layout: &Layout) -> (Point, Option<Point>) {
     let chair = pixtuoid_core::layout::desk_walk_anchor(desk);
     match desk_approach_cell(desk, layout) {
@@ -534,109 +534,104 @@ pub fn derive_with_routing(
         .duration_since(slot.state_started_at)
         .unwrap_or(Duration::ZERO)
         .as_millis() as u64;
-    let pose = if desk_pose && since_state < SNAP_BACK_MS {
-        if let Some(prev) = history.recent(slot.agent_id, 300, now) {
-            let dist =
-                (prev.x as i32 - desk.x as i32).abs() + (prev.y as i32 - desk.y as i32).abs();
-            if dist >= SNAP_BACK_MIN_DIST {
-                // Walk-end target is offset (+6, +4) from the desk pixel so
-                // walking_anchor(target) lands on the SAME sprite anchor
-                // that seated_anchor(desk) would. Without this offset the
-                // sprite jumps ~6 px right + 4 px down at the moment the
-                // pose flips from Walking → SeatedTyping. The agent ends
-                // visually AT the desk (anchor-equivalent), so there's no
-                // perceivable transition flash.
-                //
-                // The snap-back keeps the DIRECT target (unlike the unified entry/
-                // wander/exit legs): it's a quick 900ms time-compressed CORRECTION
-                // for an agent ≥8px from the desk after a state flip, not a
-                // deliberate arrival. Routing it via the approach cell perturbs
-                // its tuned time-compression + the K-call idempotency gate (the
-                // `dist` gate reads the per-frame walker pos), so it stays direct;
-                // the agent is usually near the desk when interrupted, so the brief
-                // find_path snap to the nearest cell is acceptable here.
-                let snap_target = desk_walk_anchor(desk);
-                // Retrieve or snapshot the physics profile for this snap-back.
-                // Re-arm when EITHER there's no profile yet OR a NEW state
-                // transition began (stored `started_at != slot.state_started_at`):
-                // a second desk-bound transition within the 900ms window would
-                // otherwise reuse the stale T0 clock and jump mid-progress. The
-                // stored key is `slot.state_started_at` (not `now`) so the elapsed
-                // clock and the re-arm key agree. A fresh HashMap each call (tests)
-                // still snapshots on first sight — `snap_back` is None.
-                let ms_entry = motion
-                    .entry(slot.agent_id)
-                    .or_insert_with(|| MotionState::new(slot.agent_id));
-                let needs_arm = match &ms_entry.snap_back {
-                    Some((started_at, _, _)) => *started_at != slot.state_started_at,
-                    None => true,
-                };
-                if needs_arm {
-                    let path = [prev, snap_target];
-                    let len = octile_path_len(&path);
-                    let p = walk_profile(len, WalkIntent::SnapBack, slot.agent_id);
-                    ms_entry.snap_back = Some((slot.state_started_at, p, prev));
-                }
-                // Clone out (releases the borrow) so we can clear snap_back below.
-                // No `unwrap`: `needs_arm` set Some above, or the match at line
-                // ~408 witnessed Some — a None here is unreachable, but fall back
-                // to the seated pose gracefully rather than panic (CLAUDE.md: no
-                // unwrap in non-test code).
-                match ms_entry.snap_back.clone() {
-                    None => raw,
-                    Some((started_at, profile, snap_prev)) => {
-                        let elapsed_ms = now
-                            .duration_since(started_at)
-                            .unwrap_or(Duration::ZERO)
-                            .as_millis() as u64;
-                        // Time-compress so the eased walk COMPLETES by the 900ms
-                        // responsive window. Snap-back distances routinely exceed
-                        // the ~13px the physics finishes within 900ms; without this
-                        // the walk is cut off mid-path by the window guard and the
-                        // sprite teleports the remaining distance to the desk.
-                        let eff_elapsed = if profile.duration_ms > SNAP_BACK_MS {
-                            (elapsed_ms.saturating_mul(profile.duration_ms) / SNAP_BACK_MS)
-                                .max(elapsed_ms)
-                        } else {
-                            elapsed_ms
-                        };
-                        if walk_arrived(&profile, eff_elapsed) {
-                            // Short snaps complete + pause before the window edge —
-                            // clear so the next state transition re-snapshots fresh.
-                            ms_entry.snap_back = None;
-                            raw
-                        } else {
-                            let t_x1000 = walk_progress(&profile, eff_elapsed);
-                            let frame =
-                                ((eff_elapsed / WALKING_FRAME_MS) as usize) % WALKING_FRAMES;
-                            // Walk from the FROZEN origin captured when the leg
-                            // armed, not the per-frame `prev`. route_walking_pose
-                            // re-records the advancing walker position into the
-                            // single-slot history every frame, so reading it back
-                            // as the origin would creep `from` toward the desk
-                            // (a contraction that finishes ahead of the frozen
-                            // physics profile and breaks the walk_path freeze's
-                            // `wp.from == from` reuse guard). Mirrors the exit
-                            // branch, which likewise freezes its origin Point.
-                            Pose::Walking {
-                                from: snap_prev,
-                                to: snap_target,
-                                t_x1000,
-                                frame,
-                                carrying_coffee: false,
-                            }
-                        }
+    let mut final_settle = Settle::None;
+    let pose = if desk_pose {
+        let ms_entry = motion
+            .entry(slot.agent_id)
+            .or_insert_with(|| MotionState::new(slot.agent_id));
+        // ARM ONCE per state transition. The distance gate is checked ONLY when not
+        // already armed for this `state_started_at`; once armed, the leg renders to
+        // completion (by physics — `walk_arrived`) from the FROZEN origin. This is
+        // what makes the override idempotent within a frame: `route_walking_pose`
+        // records the advancing walker position into history every call, so a second
+        // `derive` in the same frame sees a CLOSER `prev` — re-checking the distance
+        // gate there would drop the agent back to Seated mid-walk (the K-call
+        // desync). Keying the arm on `slot.state_started_at` (not `now`) lets a NEW
+        // desk-bound transition re-arm with a fresh clock. `SNAP_BACK_MS` is now just
+        // the ARM window (only snap-back for a RECENT flip) — NOT a render cap; the
+        // render runs until the physics walk arrives, so it never teleports.
+        let already_armed =
+            matches!(&ms_entry.snap_back, Some((s, _, _)) if *s == slot.state_started_at);
+        if !already_armed {
+            // A snap_back here is STALE (a previous transition) — clear it, then arm
+            // a fresh leg, but only for a recent flip (the arm window).
+            ms_entry.snap_back = None;
+            if since_state < SNAP_BACK_MS {
+                if let Some(prev) = history.recent(slot.agent_id, 300, now) {
+                    // Distance to the CHAIR (where the agent actually sits), NOT the
+                    // desk origin: the chair is offset (+6,+4) from the origin, so a
+                    // desk-origin gate would re-fire forever once the agent settles ON
+                    // the chair (10px from the origin ≥ MIN). Gating on the seat makes
+                    // the snap-back stop the instant the walk reaches it.
+                    let chair = desk_walk_anchor(desk);
+                    let dist = (prev.x as i32 - chair.x as i32).abs()
+                        + (prev.y as i32 - chair.y as i32).abs();
+                    if dist >= SNAP_BACK_MIN_DIST {
+                        // Snap-back joins the unified desk-leg path: route to the N/E/W
+                        // approach cell and SETTLE onto the chair, so the correction
+                        // arrives from an allowed side instead of the south front
+                        // (aiming A* at the blocked chair would snap the goal to the
+                        // nearest — south — cell). The profile covers the chair-glide
+                        // so its duration matches the settled polyline; its higher
+                        // accel (WalkIntent::SnapBack → WALK_ACCEL_SNAPBACK) keeps the
+                        // urgent return brisk under pure physics.
+                        let (snap_target, chair_settle) = desk_leg_endpoint(desk, layout);
+                        let len = octile_path_len(&[prev, snap_target])
+                            + chair_settle.map_or(0, |c| octile_distance(snap_target, c));
+                        let p = walk_profile(len, WalkIntent::SnapBack, slot.agent_id);
+                        ms_entry.snap_back = Some((slot.state_started_at, p, prev));
                     }
                 }
-            } else {
-                raw
             }
-        } else {
-            raw
+        }
+        // Render the armed leg (idempotent — NO per-frame gate). A stale snap_back
+        // (different `started_at`) fails the guard → `raw`; it is re-armed or cleared
+        // on a later frame.
+        match ms_entry.snap_back.clone() {
+            Some((started_at, profile, snap_prev)) if started_at == slot.state_started_at => {
+                let elapsed_ms = now
+                    .duration_since(started_at)
+                    .unwrap_or(Duration::ZERO)
+                    .as_millis() as u64;
+                // PURE physics — no time-compression. Snap-back's higher accel
+                // (WALK_ACCEL_SNAPBACK) keeps the urgent return brisk on its own, so
+                // we render the eased walk to completion by `walk_arrived` rather than
+                // compressing it into a fixed 900ms window. It never teleports because
+                // physics drives the whole walk (a far snap-back is a real ~1s walk,
+                // not a hard-compressed dash).
+                if walk_arrived(&profile, elapsed_ms) {
+                    // Completed + paused — clear so the next transition re-snapshots.
+                    ms_entry.snap_back = None;
+                    raw
+                } else {
+                    let t_x1000 = walk_progress(&profile, elapsed_ms);
+                    let frame = ((elapsed_ms / WALKING_FRAME_MS) as usize) % WALKING_FRAMES;
+                    // Recompute the desk endpoint (deterministic) so the rendered leg
+                    // matches the armed profile: route to the approach cell and SETTLE
+                    // onto the chair (`desk_walk_anchor`, == seated_foot_cell(Desk), so
+                    // the walk ends on the exact seated anchor — no transition flash),
+                    // like every other desk leg. Degenerate (no approach) → direct.
+                    let (snap_target, chair_settle) = desk_leg_endpoint(desk, layout);
+                    final_settle = chair_settle.map_or(Settle::None, Settle::End);
+                    // Walk from the FROZEN origin captured when the leg armed, not the
+                    // per-frame `prev`: route_walking_pose re-records the advancing
+                    // walker position into history every frame, so reading it back as
+                    // the origin would creep `from` toward the desk and break the
+                    // walk_path freeze's `wp.from == from` reuse guard. Mirrors exit.
+                    Pose::Walking {
+                        from: snap_prev,
+                        to: snap_target,
+                        t_x1000,
+                        frame,
+                        carrying_coffee: false,
+                    }
+                }
+            }
+            _ => raw,
         }
     } else {
-        // Hard wall: clear any stale snap-back profile so the next state
-        // transition gets a fresh snapshot rather than replaying a previous one.
+        // Hard wall: clear any stale snap-back profile so the next state transition
+        // gets a fresh snapshot rather than replaying a previous one.
         if let Some(ms) = motion.get_mut(&slot.agent_id) {
             if ms.snap_back.is_some() {
                 ms.snap_back = None;
@@ -654,7 +649,7 @@ pub fn derive_with_routing(
         history,
         motion,
         pose,
-        Settle::None,
+        final_settle,
     )
 }
 
