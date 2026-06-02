@@ -350,7 +350,7 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             footprint: Some(PHONE_BOOTH_FOOTPRINT),
             visual: PHONE_BOOTH_FOOTPRINT,
             occupies_pos: false,
-            occludes_behind: Some(6), // tall booth; hides most of a north-stander
+            occludes_behind: Some(3), // booth body already covers a stander; a short cap avoids a dark pit on the bright floor
             dwell: (8_000, 22_000),
             approach: ApproachSides::ALL,
         },
@@ -358,7 +358,7 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             footprint: Some(STANDING_DESK_FOOTPRINT),
             visual: STANDING_DESK_FOOTPRINT,
             occupies_pos: false,
-            occludes_behind: Some(4), // desktop back; hides a north-stander's legs
+            occludes_behind: Some(2), // small desk; a 2px cap hides feet directly behind without a dark band
             dwell: (8_000, 22_000),
             approach: ApproachSides::ALL,
         },
@@ -923,8 +923,11 @@ mod tests {
             // above forces the row; this forces both its on/off AND its depth).
             let expect_occludes = match f {
                 Furniture::Pantry => Some(3),
-                Furniture::PhoneBooth => Some(6),
-                Furniture::StandingDesk => Some(4),
+                // Reduced from 6/4: the booth/desk sprite already covers a
+                // stander, and the tall caps read as dark pits on the bright
+                // daylight floor. Short caps keep minimal feet-occlusion.
+                Furniture::PhoneBooth => Some(3),
+                Furniture::StandingDesk => Some(2),
                 // VendingMachine/Printer = None: corridor north-edge, no cell behind.
                 Furniture::Whiteboard | Furniture::Tv => Some(2),
                 // Plants = None: the 1px back-cap rendered an ugly dark line across
