@@ -77,6 +77,37 @@ fn paint_mask(buf: &mut RgbBuffer, layout: &Layout) {
     }
 }
 
+/// First A*-REACHABLE walkable cell scanning `(dx, dy)` from `origin`, stepping
+/// DEEPER through the contiguous walkable run past any coarse-rejected EDGE cell
+/// (e.g. a back-row desk's gap edge). Mirrors `core::approach_point`'s seat scan
+/// so the green dots land exactly where the agent actually routes; the `entered`
+/// guard stops at the first blocked pixel so it never hops a second obstacle.
+/// `None` if the side has no reachable cell. ONE scan for both the waypoint seats
+/// and the home desks below.
+fn first_reachable_on_side(layout: &Layout, origin: Point, dx: i32, dy: i32) -> Option<Point> {
+    let mut entered = false;
+    for dist in 1..=SEAT_APPROACH_SCAN {
+        let cx = origin.x as i32 + dx * dist;
+        let cy = origin.y as i32 + dy * dist;
+        if cx < 0 || cy < 0 {
+            break;
+        }
+        let c = Point {
+            x: cx as u16,
+            y: cy as u16,
+        };
+        if layout.is_walkable(c.x, c.y) {
+            entered = true;
+            if layout.reachable.reaches(c) {
+                return Some(c);
+            }
+        } else if entered {
+            break;
+        }
+    }
+    None
+}
+
 fn paint_approach(buf: &mut RgbBuffer, layout: &Layout) {
     for wp in &layout.waypoints {
         let def = furniture_def(wp.kind.furniture());
@@ -92,22 +123,8 @@ fn paint_approach(buf: &mut RgbBuffer, layout: &Layout) {
                 if !def.approach.allows(wp.facing, (dx, dy)) {
                     continue;
                 }
-                for dist in 1..=SEAT_APPROACH_SCAN {
-                    let cx = wp.pos.x as i32 + dx * dist;
-                    let cy = wp.pos.y as i32 + dy * dist;
-                    if cx < 0 || cy < 0 {
-                        break;
-                    }
-                    let c = Point {
-                        x: cx as u16,
-                        y: cy as u16,
-                    };
-                    if layout.is_walkable(c.x, c.y) {
-                        if layout.reachable.reaches(c) {
-                            blob(buf, cx, cy, APPROACH, 0.7);
-                        }
-                        break; // first walkable cell on this side wins
-                    }
+                if let Some(c) = first_reachable_on_side(layout, wp.pos, dx, dy) {
+                    blob(buf, c.x as i32, c.y as i32, APPROACH, 0.7);
                 }
             }
             continue;
@@ -149,22 +166,8 @@ fn paint_approach(buf: &mut RgbBuffer, layout: &Layout) {
             if !desk_def.approach.allows(Facing::South, (dx, dy)) {
                 continue;
             }
-            for dist in 1..=SEAT_APPROACH_SCAN {
-                let cx = chair.x as i32 + dx * dist;
-                let cy = chair.y as i32 + dy * dist;
-                if cx < 0 || cy < 0 {
-                    break;
-                }
-                let c = Point {
-                    x: cx as u16,
-                    y: cy as u16,
-                };
-                if layout.is_walkable(c.x, c.y) {
-                    if layout.reachable.reaches(c) {
-                        blob(buf, cx, cy, APPROACH, 0.7);
-                    }
-                    break; // first walkable cell on this side wins
-                }
+            if let Some(c) = first_reachable_on_side(layout, chair, dx, dy) {
+                blob(buf, c.x as i32, c.y as i32, APPROACH, 0.7);
             }
         }
     }

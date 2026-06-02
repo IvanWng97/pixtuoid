@@ -359,6 +359,47 @@ mod tests {
     }
 
     #[test]
+    fn every_home_desk_has_a_reachable_north_approach() {
+        // Back-row pod desks face the front row across the thin INTRA_POD_GAP_Y;
+        // the first walkable cell scanning north sits at the gap's south EDGE,
+        // whose coarse routing cell straddles the desk → ReachSet-rejected. The
+        // reachable-aware deeper scan steps past that edge into the gap interior
+        // (which always holds a reachable coarse cell), so EVERY desk — front and
+        // back row — gets a north approach. Was ~50% (front row only). Pushing the
+        // origin far north makes `approach_point` prefer the north side whenever it
+        // has a reachable cell, so a north return proves the scan reached it.
+        use crate::layout::{approach_point, desk_walk_anchor, Facing, Furniture};
+        for (w, h) in [(192u16, 158u16), (160, 120), (240, 160)] {
+            let l = SceneLayout::compute(w, h, 64).expect("fits");
+            for &desk in &l.home_desks {
+                let chair = desk_walk_anchor(desk);
+                let north_origin = Point {
+                    x: chair.x,
+                    y: chair.y.saturating_sub(40),
+                };
+                let a = approach_point(
+                    Furniture::Desk,
+                    chair,
+                    Facing::South,
+                    l.pantry_counter_size,
+                    &l.walkable,
+                    north_origin,
+                    &l.reachable,
+                );
+                assert_ne!(a, chair, "desk {desk:?}: no reachable approach (sentinel)");
+                assert!(
+                    a.y < chair.y,
+                    "desk {desk:?}: approach {a:?} should be NORTH of the chair {chair:?}"
+                );
+                assert!(
+                    l.reachable.reaches(a),
+                    "desk {desk:?}: approach {a:?} must be A*-reachable"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn sofas_seat_three_people() {
         // Both venues seat 3: each meeting sofa (3 seats per sofa) and the
         // lounge couch (was 1 seat → 3). Seats are dx ∈ {-6, 0, +6} on the

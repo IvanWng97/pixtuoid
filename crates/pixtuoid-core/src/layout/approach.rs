@@ -171,6 +171,17 @@ pub fn approach_point(
             if !def.approach.allows(facing, (dx, dy)) {
                 continue; // never approach across an excluded side (the back)
             }
+            // The FIRST walkable cell off this side can be a thin EDGE whose coarse
+            // routing cell straddles the furniture (the back-row desk's gap edge
+            // between pod rows): walkable, yet ReachSet-rejected. Step DEEPER
+            // through the CONTIGUOUS walkable run for the first cell A* can actually
+            // reach, instead of dropping the whole side at that edge. The seat's own
+            // footprint is skipped while `entered` is still false; once we've
+            // entered the run, the first blocked pixel STOPS the scan (`entered`
+            // guard) so we never hop a SECOND obstacle to a far strip — that would
+            // resurrect a cross-furniture / back-side approach (Session-3 invariant
+            // `seat_approach_is_never_behind_the_backrest_on_real_layouts`).
+            let mut entered = false;
             for dist in 1..=SEAT_APPROACH_SCAN {
                 let cx = pos.x as i32 + dx * dist;
                 let cy = pos.y as i32 + dy * dist;
@@ -182,8 +193,7 @@ pub fn approach_point(
                     y: cy as u16,
                 };
                 if mask.is_walkable(c.x, c.y) {
-                    // First walkable cell on this side decides it; keep only if A*
-                    // can actually reach it.
+                    entered = true;
                     if reachable.reaches(c) {
                         let ex = c.x as i64 - origin.x as i64;
                         let ey = c.y as i64 - origin.y as i64;
@@ -191,7 +201,10 @@ pub fn approach_point(
                         if allowed.map_or(true, |(b, _)| d2 < b) {
                             allowed = Some((d2, c));
                         }
+                        break;
                     }
+                    // walkable but coarse-unreachable → keep scanning this run.
+                } else if entered {
                     break;
                 }
             }
