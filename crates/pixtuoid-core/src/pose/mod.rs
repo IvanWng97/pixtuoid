@@ -70,16 +70,14 @@ pub fn cycle_ms_for(agent_id: AgentId) -> u64 {
     WANDER_CYCLE_BASE_MS + (agent_id.raw() >> 16) % WANDER_CYCLE_RANGE_MS
 }
 
-/// splitmix64 of the whole agent id with a per-purpose `tag`, for deterministic
-/// per-agent dwell jitter. The `tag` is NOT a cryptographic salt — it just
-/// disambiguates the two callers (`dwell_ms` vs `seated_dwell_ms`) so their
-/// jitter is decorrelated from each other and from `speed_mult` / `pause_ms` /
-/// `cycle_ms` (which slice raw id bits). No security relevance.
-fn dwell_mix(agent_id: AgentId, tag: u64) -> u64 {
-    let mut z = agent_id.raw() ^ tag;
-    z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
-    z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
-    z ^ (z >> 31)
+/// Base dwell plus deterministic per-agent jitter within `window`. The `tag` is
+/// NOT a cryptographic salt — it just disambiguates the two callers (`dwell_ms`
+/// vs `seated_dwell_ms`) so their jitter is decorrelated from each other and
+/// from `speed_mult` / `pause_ms` / `cycle_ms` (which slice raw id bits). No
+/// security relevance.
+fn jittered_dwell(window: DwellWindow, agent_id: AgentId, tag: u64) -> u64 {
+    let DwellWindow { base_ms, range_ms } = window;
+    base_ms + crate::id::splitmix64(agent_id.raw() ^ tag) % range_ms.max(1)
 }
 
 /// Absolute dwell (ms) an agent lingers at a waypoint, per spot kind, with
@@ -87,21 +85,17 @@ fn dwell_mix(agent_id: AgentId, tag: u64) -> u64 {
 /// is quick. The render authority (`tui::motion::advance_wander`) uses this
 /// for the AtWaypoint beat.
 pub fn dwell_ms(kind: WaypointKind, agent_id: AgentId) -> u64 {
-    let DwellWindow {
-        base_ms: base,
-        range_ms: range,
-    } = furniture_def(kind.furniture()).dwell;
-    base + dwell_mix(agent_id, 0xd1b5_4a32_d192_ed03) % range.max(1)
+    jittered_dwell(
+        furniture_def(kind.furniture()).dwell,
+        agent_id,
+        0xd1b5_4a32_d192_ed03,
+    )
 }
 
 /// Absolute dwell (ms) an agent sits at its desk between wander trips.
 pub fn seated_dwell_ms(agent_id: AgentId) -> u64 {
     // Single source: the desk's own FurnitureDef.dwell (no separate constant).
-    let DwellWindow {
-        base_ms: base,
-        range_ms: range,
-    } = desk_furniture_def().dwell;
-    base + dwell_mix(agent_id, 0x9e37_79b9_7f4a_7c15) % range.max(1)
+    jittered_dwell(desk_furniture_def().dwell, agent_id, 0x9e37_79b9_7f4a_7c15)
 }
 
 /// Estimated full wander-cycle wall-time for an agent (desk dwell + two walk
@@ -219,15 +213,7 @@ pub fn derive(slot: &AgentSlot, now: SystemTime, layout: &SceneLayout) -> Option
             .unwrap_or(Duration::ZERO)
             .as_millis() as u64;
         if since_exit < ENTRY_ANIMATION_MS {
-            let t = (since_exit * 1000 / ENTRY_ANIMATION_MS).min(1000) as u16;
-            let frame = ((since_exit / WALKING_FRAME_MS) as usize) % WALKING_FRAMES;
-            return Some(Pose::Walking {
-                from: desk_walk_anchor(desk),
-                to: target,
-                t_x1000: t,
-                frame,
-                carrying_coffee: false,
-            });
+            return Some(linear_walk_pose(since_exit, desk_walk_anchor(desk), target));
         }
         // Past exit window: nothing to render, slot will be GC'd shortly.
         return None;
@@ -244,19 +230,27 @@ pub fn derive(slot: &AgentSlot, now: SystemTime, layout: &SceneLayout) -> Option
             .unwrap_or(Duration::ZERO)
             .as_millis() as u64;
         if since_spawn < ENTRY_ANIMATION_MS {
-            let t = (since_spawn * 1000 / ENTRY_ANIMATION_MS).min(1000) as u16;
-            let frame = ((since_spawn / WALKING_FRAME_MS) as usize) % WALKING_FRAMES;
-            return Some(Pose::Walking {
-                from,
-                to: desk_walk_anchor(desk),
-                t_x1000: t,
-                frame,
-                carrying_coffee: false,
-            });
+            return Some(linear_walk_pose(since_spawn, from, desk_walk_anchor(desk)));
         }
     }
 
     state_driven_pose(slot, desk, layout, now)
+}
+
+/// The shared `Walking` pose for the stateless entry/exit overrides: a
+/// LINEAR (not physics-timed) interpolation over `ENTRY_ANIMATION_MS`. This
+/// is deliberately distinct from the tui motion path's kinematic profiles —
+/// the overlay/snapshot path stays linear so it has no per-frame history.
+fn linear_walk_pose(since_ms: u64, from: Point, to: Point) -> Pose {
+    let t = (since_ms * 1000 / ENTRY_ANIMATION_MS).min(1000) as u16;
+    let frame = ((since_ms / WALKING_FRAME_MS) as usize) % WALKING_FRAMES;
+    Pose::Walking {
+        from,
+        to,
+        t_x1000: t,
+        frame,
+        carrying_coffee: false,
+    }
 }
 
 /// The state→pose tail shared by `derive` and `derive_state_only`: maps
@@ -404,20 +398,24 @@ fn idle_pose(slot: &AgentSlot, desk: Point, layout: &SceneLayout, elapsed_ms: u6
     let walk_out_end = seated_end + WANDER_WALK_EST_MS;
     let at_wp_end = walk_out_end + WANDER_DWELL_EST_MS;
 
-    // Destination: lounge waypoint OR aimless point.
-    let (dest, at_dest_pose): (Point, Pose) = if aimless {
-        // Weighted-zone aimless wander. Instead of uniformly sampling
-        // anywhere in the buffer (which clusters at the fallback
-        // because most cubicle pixels are obstacles), pick a ZONE by
-        // weight first — window-viewing strip, pantry, corridor,
-        // meeting room — then rejection-sample within that zone.
-        // Weights tune the "vibe" of where agents drift: window
-        // strip and pantry get the highest weight so the office
-        // feels alive (people stretching at windows, grabbing
-        // coffee), corridor/cubicle/meeting are more incidental.
+    // Weighted-zone aimless wander. Instead of uniformly sampling
+    // anywhere in the buffer (which clusters at the fallback because most
+    // cubicle pixels are obstacles), pick a ZONE by weight first — window-
+    // viewing strip, pantry, corridor, meeting room — then rejection-sample
+    // within that zone. Weights tune the "vibe" of where agents drift:
+    // window strip and pantry get the highest weight so the office feels
+    // alive (people stretching at windows, grabbing coffee), corridor/
+    // cubicle/meeting are more incidental. Shared between the explicit
+    // aimless branch and the no-reachable-side waypoint fallback below.
+    let amble = || {
         let seed = aimless_wander_seed(slot.agent_id, cycle_n);
         let p = pick_aimless_dest(layout, seed);
         (p, Pose::AimlessAt { dest: p })
+    };
+
+    // Destination: lounge waypoint OR aimless point.
+    let (dest, at_dest_pose): (Point, Pose) = if aimless {
+        amble()
     } else {
         let wp_idx = waypoint_index_for_cycle(slot.agent_id, cycle_n, layout.waypoints.len());
         let wp = layout.waypoints[wp_idx];
@@ -440,9 +438,7 @@ fn idle_pose(slot: &AgentSlot, desk: Point, layout: &SceneLayout, elapsed_ms: u6
         // boxed in to only its backrest, or an obstacle with no open reachable
         // side). Amble aimlessly this cycle instead of routing into the furniture.
         if dest == wp.pos {
-            let seed = aimless_wander_seed(slot.agent_id, cycle_n);
-            let p = pick_aimless_dest(layout, seed);
-            (p, Pose::AimlessAt { dest: p })
+            amble()
         } else {
             (
                 dest,

@@ -5,7 +5,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 
-use super::to_color;
+use super::{centered_in, to_color};
 use crate::tui::theme::Theme;
 
 const SHORTCUTS: &[(&str, &str)] = &[
@@ -22,19 +22,10 @@ const SHORTCUTS: &[(&str, &str)] = &[
 ];
 
 pub(in crate::tui) fn paint_help_overlay(f: &mut ratatui::Frame<'_>, bounds: Rect, theme: &Theme) {
-    let w = 36u16.min(bounds.width);
-    let h = (SHORTCUTS.len() as u16 + 4).min(bounds.height);
-    if w < 4 || h < 3 {
+    let area = centered_in(bounds, 36, SHORTCUTS.len() as u16 + 4);
+    if area.width < 4 || area.height < 3 {
         return;
     }
-    let x = bounds.x + bounds.width.saturating_sub(w) / 2;
-    let y = bounds.y + bounds.height.saturating_sub(h) / 2;
-    let area = Rect {
-        x,
-        y,
-        width: w,
-        height: h,
-    };
     f.render_widget(Clear, area);
 
     let mut lines: Vec<Line> = Vec::with_capacity(SHORTCUTS.len() + 1);

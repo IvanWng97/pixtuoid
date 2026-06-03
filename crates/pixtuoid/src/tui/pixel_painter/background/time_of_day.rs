@@ -5,7 +5,7 @@ use std::time::SystemTime;
 
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
-use crate::tui::pixel_painter::palette::{blend, lerp_rgb};
+use crate::tui::pixel_painter::palette::{blend_rgb, lerp_rgb};
 use crate::tui::theme::Theme;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -115,12 +115,7 @@ pub(in crate::tui::pixel_painter) fn weather_light(w: Weather) -> WeatherLight {
 }
 
 pub(in crate::tui::pixel_painter) fn sunset_strength(now: SystemTime) -> f32 {
-    use chrono::Timelike;
-    let unix_now = now
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
-    let local = chrono::DateTime::<chrono::Local>::from(std::time::UNIX_EPOCH + unix_now);
-    let h = local.hour() as f32 + local.minute() as f32 / 60.0;
+    let h = super::local_hour_frac(now);
     crate::tui::pixel_painter::palette::bell(h, 18.0, 1.5)
         .max(crate::tui::pixel_painter::palette::bell(h, 6.5, 1.0))
 }
@@ -135,18 +130,17 @@ pub(in crate::tui::pixel_painter) struct TimeOfDayLook {
     pub(in crate::tui::pixel_painter) spill_strength: f32,
     pub(in crate::tui::pixel_painter) spill_slant: f32,
     pub(in crate::tui::pixel_painter) darkness: f32,
+    /// Raw twilight bell (dawn ~6.5 / dusk ~18.5), pre-atmosphere. Exposed so
+    /// the window painter reads it instead of re-decoding the local hour and
+    /// recomputing the identical expression per window per frame.
+    pub(in crate::tui::pixel_painter) twilight: f32,
 }
 
 pub(in crate::tui::pixel_painter) fn time_of_day_look(
     now: SystemTime,
     theme: &Theme,
 ) -> TimeOfDayLook {
-    use chrono::Timelike;
-    let unix_now = now
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
-    let local = chrono::DateTime::<chrono::Local>::from(std::time::UNIX_EPOCH + unix_now);
-    let h = local.hour() as f32 + local.minute() as f32 / 60.0;
+    let h = super::local_hour_frac(now);
 
     // Daylight intensity: full from 8 to 17, smooth ramp 5..8 and 17..20.
     let day = if !(5.0..20.0).contains(&h) {
@@ -224,6 +218,7 @@ pub(in crate::tui::pixel_painter) fn time_of_day_look(
         // light, so they ride weather at night too (dark storm night → more
         // dim + brighter pools; bright clear night → less dim).
         darkness: 1.0 - exterior,
+        twilight,
     }
 }
 
@@ -306,15 +301,7 @@ pub(in crate::tui::pixel_painter) fn dim_floor_overlay(
     for y in top_y..bottom_y.min(buf.height) {
         for x in 0..buf.width {
             let cur = buf.get(x, y);
-            buf.put(
-                x,
-                y,
-                Rgb {
-                    r: blend(cur.r, night_tint.r, s),
-                    g: blend(cur.g, night_tint.g, s),
-                    b: blend(cur.b, night_tint.b, s),
-                },
-            );
+            buf.put(x, y, blend_rgb(cur, night_tint, s));
         }
     }
 }
@@ -347,15 +334,7 @@ pub(in crate::tui::pixel_painter) fn daylight_floor_overlay(
     for y in top_y..bottom_y.min(buf.height) {
         for x in 0..buf.width {
             let cur = buf.get(x, y);
-            buf.put(
-                x,
-                y,
-                Rgb {
-                    r: blend(cur.r, SUN_TINT.r, s),
-                    g: blend(cur.g, SUN_TINT.g, s),
-                    b: blend(cur.b, SUN_TINT.b, s),
-                },
-            );
+            buf.put(x, y, blend_rgb(cur, SUN_TINT, s));
         }
     }
 }

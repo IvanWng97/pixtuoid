@@ -1,11 +1,26 @@
 //! Shared decoder utilities used by per-source decoders (CC, Antigravity).
 //! Hook payload decoding lives here because the hook socket is shared.
 
+use std::path::Path;
+
 use anyhow::{anyhow, bail, Result};
 use serde_json::Value;
 
 use crate::source::{Activity, AgentEvent, ToolDetail};
 use crate::AgentId;
+
+/// `"{prefix}·{basename}"` from a working directory, or `None` when `cwd` is
+/// empty / the filesystem root / has no final component. The cwd-basename label
+/// rule, shared by the per-source derivers (cc / cx / ag) so it lives once; each
+/// source supplies its 2-char prefix and its own fallback for the `None` case
+/// (CC falls back to its project dir, codex/antigravity to a bare prefix).
+pub(crate) fn cwd_basename_label(prefix: &str, cwd: &Path) -> Option<String> {
+    if cwd == Path::new("") || cwd == Path::new("/") {
+        return None;
+    }
+    let base = cwd.file_name().and_then(|n| n.to_str())?;
+    Some(format!("{prefix}·{base}"))
+}
 
 pub fn decode_hook_payload(v: Value) -> Result<AgentEvent> {
     let obj = v

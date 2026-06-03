@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde_json::{json, Map, Value};
 
+use crate::install::io;
 use crate::install::target::MergeOutcome;
 
 const SENTINEL_KEY: &str = "_pixtuoid";
@@ -21,8 +22,7 @@ const EVENTS: &[&str] = &[
 ];
 
 pub fn default_config_path() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-    PathBuf::from(format!("{home}/.claude/settings.json"))
+    io::home_relative(".claude/settings.json")
 }
 
 /// Claude writes the bare name for portability (CC spawns hooks via PATH).

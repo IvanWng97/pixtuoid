@@ -97,13 +97,9 @@ pub struct WalkProfile {
 /// linearly to [0.85, 1.20]. Disjoint from `personality_for` (bits 0..14) and
 /// from the low-16 bits used by `cycle_ms_for`.
 pub fn speed_mult(agent_id: AgentId) -> f32 {
-    // FNV-1a does not avalanche mid/high bits for short, similar AgentId
-    // inputs (desk-adjacent ids collide to ~2 buckets). Finalize with
-    // splitmix64 before slicing so distinct agents get distinct speeds.
-    let h = agent_id.raw();
-    let z = (h ^ (h >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
-    let z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
-    let z = z ^ (z >> 31);
+    // Finalize with splitmix64 before slicing so distinct agents get distinct
+    // speeds (raw FNV-1a doesn't avalanche the high bits — see `splitmix64`).
+    let z = crate::id::splitmix64(agent_id.raw());
     let bits = (z >> 24) & 0x3FF; // 0..=1023
     let t = bits as f32 / 1023.0; // [0.0, 1.0]
     SPEED_MULT_MIN + t * (SPEED_MULT_MAX - SPEED_MULT_MIN)
@@ -116,10 +112,7 @@ pub fn speed_mult(agent_id: AgentId) -> f32 {
 pub fn pause_ms_for(agent_id: AgentId) -> u64 {
     // Same splitmix64 finalize as speed_mult, but a disjoint bit window so
     // pause is independent of speed (a fast walker is not always a brief pauser).
-    let h = agent_id.raw();
-    let z = (h ^ (h >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
-    let z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
-    let z = z ^ (z >> 31);
+    let z = crate::id::splitmix64(agent_id.raw());
     let bits = (z >> 40) & 0xFFF; // 0..=4095
                                   // f64 (not f32 like speed_mult): the output is a u64 ms count, so f64 keeps
                                   // the bits→[0,1]→ms integer round-trip exact across the full 200..=400 range.

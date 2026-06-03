@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_core::{AgentId, SceneState};
 
-use super::palette::blend;
+use super::palette::blend_over;
 use crate::tui::layout::{
     desk_walk_anchor, furniture_def, Facing, Furniture, Layout, Point, Size, WaypointKind,
 };
@@ -62,16 +62,8 @@ fn tint(buf: &mut RgbBuffer, x: i32, y: i32, c: Rgb, t: f32) {
     if x >= buf.width || y >= buf.height {
         return;
     }
-    let bg = buf.get(x, y);
-    buf.put(
-        x,
-        y,
-        Rgb {
-            r: blend(bg.r, c.r, t),
-            g: blend(bg.g, c.g, t),
-            b: blend(bg.b, c.b, t),
-        },
-    );
+    let color = blend_over(buf, x, y, c, t);
+    buf.put(x, y, color);
 }
 
 /// 3×3 marker centred on `(cx, cy)`.

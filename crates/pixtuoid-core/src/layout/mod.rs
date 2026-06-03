@@ -7,8 +7,14 @@
 //! waypoints, decor positions, and a per-pixel walkability mask.
 //!
 //! Submodules:
-//!   * `decor` — the four furniture/decor enums (vocabulary).
-//!   * `mask`  — `build_walkable_mask`: stamps obstacles for routing.
+//!   * `decor` — the furniture/decor vocabulary: the role enums
+//!     (`WaypointKind`/`PodDecor`/`PlantKind`/`WallDecor`) plus the unified
+//!     `Furniture` geometry table they map onto.
+//!   * `compute` — `compute_with_seed`: desk/decor/wall/waypoint placement.
+//!   * `placement` — the `Anchor` convention (where a box sits vs its `pos`).
+//!   * `mask` — `build_walkable_mask`: stamps obstacle footprints for routing.
+//!   * `approach` — `stand_point`/`approach_point`: where an agent stands to use a piece.
+//!   * `reach` — `ReachSet`: coarse-cell BFS mirroring the tui A* grid.
 
 mod approach;
 mod compute;

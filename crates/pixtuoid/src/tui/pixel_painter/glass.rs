@@ -4,7 +4,7 @@
 
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
-use super::palette::blend;
+use super::palette::blend_over;
 
 // Room-divider frosted-glass partitions. The E-W (horizontal) wall shows its
 // face — 6 px tall, kept in sync with `mask.rs` WALL_THICK_H — while the N-S
@@ -91,15 +91,6 @@ pub(super) fn stitch_vertical_wall(
     (y_top, y_bot)
 }
 
-fn glass_over(buf: &RgbBuffer, x: u16, y: u16, g: Rgb, a: f32) -> Rgb {
-    let b = buf.get(x, y);
-    Rgb {
-        r: blend(b.r, g.r, a),
-        g: blend(b.g, g.g, a),
-        b: blend(b.b, g.b, a),
-    }
-}
-
 /// Paint a horizontal (E-W) frosted-glass wall strip: lit top edge → body →
 /// soft bottom edge, seam glints every `GLASS_SEAM_STRIDE` px.
 pub(super) fn paint_glass_wall_h(
@@ -131,7 +122,7 @@ pub(super) fn paint_glass_wall_h(
             } else {
                 (mid, 0.58)
             };
-            let color = glass_over(buf, x, y, g, a);
+            let color = blend_over(buf, x, y, g, a);
             buf.put(x, y, color);
         }
     }
@@ -164,7 +155,7 @@ pub(super) fn paint_glass_wall_v(
             } else {
                 (mid, 0.6)
             };
-            let color = glass_over(buf, x, y, g, a);
+            let color = blend_over(buf, x, y, g, a);
             buf.put(x, y, color);
         }
     }

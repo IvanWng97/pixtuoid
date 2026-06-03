@@ -233,6 +233,18 @@ fn cell_center(cx: u16, cy: u16) -> Point {
     }
 }
 
+/// Coarse-grid dimensions (`mask` pixel size ÷ `CELL_SIZE`), or `None` when
+/// either axis is 0 — a degenerate grid the A* loop can't index. Callers pick
+/// their own degenerate return (straight `[from,to]`, `None`, `false`).
+fn grid_dims(mask: &WalkableMask) -> Option<(u16, u16)> {
+    let cell_w = mask.width / CELL_SIZE;
+    let cell_h = mask.height / CELL_SIZE;
+    if cell_w == 0 || cell_h == 0 {
+        return None;
+    }
+    Some((cell_w, cell_h))
+}
+
 const MAX_SNAP_RADIUS: u16 = 12;
 
 fn snap_to_walkable(
@@ -282,11 +294,9 @@ pub fn find_path(
     from: Point,
     to: Point,
 ) -> Option<Vec<Point>> {
-    let cell_w = mask.width / CELL_SIZE;
-    let cell_h = mask.height / CELL_SIZE;
-    if cell_w == 0 || cell_h == 0 {
+    let Some((cell_w, cell_h)) = grid_dims(mask) else {
         return Some(vec![from, to]);
-    }
+    };
 
     let start = snap_to_walkable(mask, overlay, cell_of(from), cell_w, cell_h)?;
     let goal = snap_to_walkable(mask, overlay, cell_of(to), cell_w, cell_h)?;
@@ -353,11 +363,9 @@ pub fn find_path(
 /// still be in a walkable routing cell — exactly like every agent sprite, which
 /// rides the same coarse grid. Test/diagnostic helper.
 pub fn point_in_walkable_cell(mask: &WalkableMask, p: Point) -> bool {
-    let cell_w = mask.width / CELL_SIZE;
-    let cell_h = mask.height / CELL_SIZE;
-    if cell_w == 0 || cell_h == 0 {
+    let Some((cell_w, cell_h)) = grid_dims(mask) else {
         return false;
-    }
+    };
     let (cx, cy) = cell_of(p);
     cx < cell_w && cy < cell_h && cell_walkable(mask, &OccupancyOverlay::new(), cx, cy)
 }
@@ -372,11 +380,7 @@ pub fn point_in_walkable_cell(mask: &WalkableMask, p: Point) -> bool {
 /// the RAW `from`/`to` — so callers that need a guaranteed-walkable endpoint must
 /// re-anchor with this.
 pub fn snap_point_to_walkable(mask: &WalkableMask, p: Point) -> Option<Point> {
-    let cell_w = mask.width / CELL_SIZE;
-    let cell_h = mask.height / CELL_SIZE;
-    if cell_w == 0 || cell_h == 0 {
-        return None;
-    }
+    let (cell_w, cell_h) = grid_dims(mask)?;
     let empty = OccupancyOverlay::new();
     let (cx, cy) = snap_to_walkable(mask, &empty, cell_of(p), cell_w, cell_h)?;
     Some(cell_center(cx, cy))

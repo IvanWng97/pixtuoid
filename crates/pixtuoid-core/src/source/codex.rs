@@ -15,7 +15,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use serde_json::{Map, Value};
 
-use crate::source::decoder::make_tool_detail;
+use crate::source::decoder::{cwd_basename_label, make_tool_detail};
 use crate::source::jsonl::JsonlWatcher;
 use crate::source::{Activity, AgentEvent, Source, TaggedSender};
 use crate::AgentId;
@@ -139,12 +139,7 @@ fn codex_tool_start(agent_id: AgentId, payload: Option<&Map<String, Value>>) -> 
 }
 
 pub fn derive_codex_label(_path: &Path, _source: &str, cwd: &Path) -> String {
-    if cwd != Path::new("") && cwd != Path::new("/") {
-        if let Some(name) = cwd.file_name().and_then(|n| n.to_str()) {
-            return format!("cx·{name}");
-        }
-    }
-    "cx".to_string()
+    cwd_basename_label("cx", cwd).unwrap_or_else(|| "cx".to_string())
 }
 
 /// Codex writes no session-end marker; the reducer's stale-sweep reaps dead

@@ -9,7 +9,7 @@ use ratatui::style::{Color, Style};
 use ratatui::text::Span;
 use ratatui::widgets::Paragraph;
 
-use super::{to_color, TickerQueue};
+use super::{centered_in, compact_hms, to_color, TickerQueue};
 use crate::tui::renderer::clip_widget_rect;
 
 /// The two colors that characterize a theme in the picker swatch: its
@@ -47,23 +47,12 @@ pub(in crate::tui) fn paint_theme_picker(
     use ratatui::text::{Line, Span as TSpan};
     use ratatui::widgets::{Block, Borders, Clear};
 
-    // Clamp to bounds.width: `Clear::render` (unlike Block/Paragraph) does
-    // not intersect with the buffer area, so an over-wide `area` panics on
-    // narrow terminals. The floor-transition paint path has no layout gate,
-    // so this is reachable at widths the normal path rejects.
-    let w = 28u16.min(bounds.width);
-    let h = (theme::ALL_THEMES.len() as u16 + 2).min(bounds.height);
-    // Center within `bounds`, anchoring off its origin (not 0,0) so a
-    // non-zero-origin rect positions correctly — matches paint_help_overlay
-    // and paint_version_popup.
-    let x = bounds.x + bounds.width.saturating_sub(w) / 2;
-    let y = bounds.y + bounds.height.saturating_sub(h) / 2;
-    let area = Rect {
-        x,
-        y,
-        width: w,
-        height: h,
-    };
+    // `centered_in` clamps to bounds.width: `Clear::render` (unlike
+    // Block/Paragraph) does not intersect with the buffer area, so an
+    // over-wide `area` panics on narrow terminals. The floor-transition paint
+    // path has no layout gate, so this is reachable at widths the normal path
+    // rejects.
+    let area = centered_in(bounds, 28, theme::ALL_THEMES.len() as u16 + 2);
     f.render_widget(Clear, area);
     let items: Vec<Line> = theme::ALL_THEMES
         .iter()
@@ -340,17 +329,7 @@ pub(in crate::tui) fn paint_wall_display(
         .max()
         .unwrap_or_default();
     let uptime_secs = oldest.as_secs();
-    let uptime_str = if uptime_secs >= 3600 {
-        format!(
-            "\u{2191}{}h{}m",
-            uptime_secs / 3600,
-            (uptime_secs % 3600) / 60
-        )
-    } else if uptime_secs >= 60 {
-        format!("\u{2191}{}m", uptime_secs / 60)
-    } else {
-        "\u{2191}<1m".to_string()
-    };
+    let uptime_str = format!("\u{2191}{}", compact_hms(uptime_secs));
 
     let bot_line = Line::from(vec![
         Span::styled(
@@ -397,6 +376,27 @@ pub(in crate::tui) const VERSION_POPUP_URL: &str = "https://github.com/IvanWng97
 /// `version_popup_url_rect` consistent by using this constant.
 const URL_PREFIX: &str = "  More details: ";
 
+/// The scaled, bounds-clamped, centered envelope Rect of the version popup.
+/// Single source of truth for `paint_version_popup` (which paints into it) and
+/// `version_popup_url_rect` (which derives the URL click-rect off it): clamp
+/// w_full/h_full to `bounds` BEFORE scaling, then floor the scaled dims at 2.
+/// `scale` must already be clamped to `0.0..=1.0` by the caller.
+fn version_popup_envelope(bounds: Rect, notes_len: usize, scale: f32) -> Rect {
+    let needed_w = 2 + URL_PREFIX.len() as u16 + VERSION_POPUP_URL.len() as u16 + 2;
+    let w_full = needed_w.min(bounds.width);
+    let h_full = (notes_len as u16 + 6).min(bounds.height);
+    let w = ((w_full as f32 * scale).round() as u16).max(2);
+    let h = ((h_full as f32 * scale).round() as u16).max(2);
+    let x = bounds.x + bounds.width.saturating_sub(w) / 2;
+    let y = bounds.y + bounds.height.saturating_sub(h) / 2;
+    Rect {
+        x,
+        y,
+        width: w,
+        height: h,
+    }
+}
+
 pub(in crate::tui) fn paint_version_popup(
     f: &mut ratatui::Frame<'_>,
     version: &str,
@@ -410,23 +410,11 @@ pub(in crate::tui) fn paint_version_popup(
     use ratatui::text::{Line, Span as TSpan};
     use ratatui::widgets::{Block, Borders, Clear};
 
-    let needed_w = 2 + URL_PREFIX.len() as u16 + VERSION_POPUP_URL.len() as u16 + 2;
     let scale = scale.clamp(0.0, 1.0);
     if scale <= 0.01 {
         return; // fully dismissed, skip render
     }
-    let w_full = needed_w.min(bounds.width);
-    let h_full = (notes.len() as u16 + 6).min(bounds.height);
-    let w = ((w_full as f32 * scale).round() as u16).max(2);
-    let h = ((h_full as f32 * scale).round() as u16).max(2);
-    let x = bounds.x + bounds.width.saturating_sub(w) / 2;
-    let y = bounds.y + bounds.height.saturating_sub(h) / 2;
-    let area = Rect {
-        x,
-        y,
-        width: w,
-        height: h,
-    };
+    let area = version_popup_envelope(bounds, notes.len(), scale);
     f.render_widget(Clear, area);
 
     let mut items: Vec<Line> = Vec::with_capacity(notes.len() + 3);
@@ -483,20 +471,19 @@ pub(in crate::tui) fn version_popup_url_rect(
     if scale < 0.7 {
         return None; // URL not clickable until popup reaches 70% scale
     }
-    let needed_w = 2 + URL_PREFIX.len() as u16 + VERSION_POPUP_URL.len() as u16 + 2;
-    // Mirror paint_version_popup's geometry exactly: clamp to bounds first,
-    // then scale, then derive popup_x/popup_y from the SCALED w/h. Centering
-    // off the unscaled w/h leaves the click rect offset from the painted
-    // popup at any scale < 1.0.
-    let w_full = needed_w.min(bounds.width);
-    let h_full = (notes_len as u16 + 6).min(bounds.height);
-    let w = ((w_full as f32 * scale).round() as u16).max(2);
-    let h = ((h_full as f32 * scale).round() as u16).max(2);
+    // Mirror paint_version_popup's geometry exactly by deriving from the same
+    // shared envelope (clamp-to-bounds-then-scale, centered off the SCALED
+    // w/h). Centering off the unscaled w/h leaves the click rect offset from
+    // the painted popup at any scale < 1.0.
+    let Rect {
+        x: popup_x,
+        y: popup_y,
+        width: w,
+        height: h,
+    } = version_popup_envelope(bounds, notes_len, scale);
     if w < 4 || h < 3 {
         return None;
     }
-    let popup_x = bounds.x + bounds.width.saturating_sub(w) / 2;
-    let popup_y = bounds.y + bounds.height.saturating_sub(h) / 2;
     // URL line layout inside popup (Block with Borders::ALL has 1-cell border):
     //   y = popup_y + 1 (border) + 1 (blank) + notes_len (notes) + 1 (blank)
     //   x = popup_x + 1 (border) + URL_PREFIX.len()

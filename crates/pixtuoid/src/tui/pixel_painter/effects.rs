@@ -3,7 +3,8 @@ use std::time::SystemTime;
 use pixtuoid_core::layout::WALKING_Y_OFF;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
-use super::palette::blend;
+use super::epoch_ms;
+use super::palette::blend_rgb;
 use crate::tui::layout::Point;
 use crate::tui::theme::Theme;
 
@@ -17,16 +18,13 @@ pub(super) fn paint_screen_glow(
 ) {
     let frame_lit = theme.effects.monitor_frame_lit;
     let glow = tint;
-    let glow_bright = Rgb {
-        r: blend(tint.r, 255, 0.4),
-        g: blend(tint.g, 255, 0.4),
-        b: blend(tint.b, 255, 0.4),
+    let white = Rgb {
+        r: 255,
+        g: 255,
+        b: 255,
     };
-    let scanline = Rgb {
-        r: blend(tint.r, 255, 0.7),
-        g: blend(tint.g, 255, 0.7),
-        b: blend(tint.b, 255, 0.7),
-    };
+    let glow_bright = blend_rgb(tint, white, 0.4);
+    let scanline = blend_rgb(tint, white, 0.7);
     let put = |buf: &mut RgbBuffer, dx: u16, dy: u16, c: Rgb| {
         let px = desk_x + dx;
         let py = desk_y + dy;
@@ -44,10 +42,7 @@ pub(super) fn paint_screen_glow(
     for dx in 4..=9 {
         put(buf, dx, 3, frame_lit);
     }
-    let elapsed_ms = now
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0);
+    let elapsed_ms = epoch_ms(now);
     let phase = (elapsed_ms / 120) as u16 + desk_x;
     let scan_col = 4 + (phase % 6);
     put(buf, scan_col, 1, scanline);
@@ -63,10 +58,7 @@ pub(super) fn paint_sleep_z(
 ) {
     let z_color = theme.effects.sleep_z;
     const CYCLE_MS: u64 = 2400;
-    let elapsed_ms = now
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0);
+    let elapsed_ms = epoch_ms(now);
     let phase_ms = elapsed_ms.wrapping_add(seed % CYCLE_MS) % CYCLE_MS;
     if phase_ms >= CYCLE_MS - 400 {
         return;
@@ -86,10 +78,7 @@ pub(super) fn paint_sleep_z(
 
 pub(super) fn paint_coffee_steam(buf: &mut RgbBuffer, base: Point, now: SystemTime, theme: &Theme) {
     let steam = theme.effects.coffee_steam;
-    let elapsed_ms = now
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0);
+    let elapsed_ms = epoch_ms(now);
     for offset in 0..3u64 {
         let phase = (elapsed_ms + offset * 600) % 1800;
         let rise = (phase / 140) as u16;
@@ -102,15 +91,7 @@ pub(super) fn paint_coffee_steam(buf: &mut RgbBuffer, base: Point, now: SystemTi
         let py = base.y.saturating_sub(rise + 2);
         if px < buf.width && py < buf.height {
             let cur = buf.get(px, py);
-            buf.put(
-                px,
-                py,
-                Rgb {
-                    r: blend(cur.r, steam.r, alpha * 0.55),
-                    g: blend(cur.g, steam.g, alpha * 0.55),
-                    b: blend(cur.b, steam.b, alpha * 0.55),
-                },
-            );
+            buf.put(px, py, blend_rgb(cur, steam, alpha * 0.55));
         }
     }
 }
@@ -126,15 +107,7 @@ pub(super) fn paint_walking_dust(
     let foot_x = walker_anchor.x + if frame_idx == 0 { 6 } else { 1 };
     if foot_x < buf.width && foot_y < buf.height {
         let cur = buf.get(foot_x, foot_y);
-        buf.put(
-            foot_x,
-            foot_y,
-            Rgb {
-                r: blend(cur.r, dust.r, 0.45),
-                g: blend(cur.g, dust.g, 0.45),
-                b: blend(cur.b, dust.b, 0.45),
-            },
-        );
+        buf.put(foot_x, foot_y, blend_rgb(cur, dust, 0.45));
     }
 }
 
@@ -145,10 +118,7 @@ pub(super) fn paint_thinking_dots(
     theme: &Theme,
 ) {
     let fg = theme.ui.label_active;
-    let elapsed_ms = now
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0);
+    let elapsed_ms = epoch_ms(now);
     let phase = (elapsed_ms / 800) % 4;
     let bx = anchor.x + 2;
     let by = anchor.y.saturating_sub(3);
@@ -198,15 +168,7 @@ pub(super) fn paint_pet_hearts(buf: &mut RgbBuffer, cat_pos: Point, elapsed_ms: 
                 let py = hy + dy;
                 if px < buf.width && py < buf.height {
                     let cur = buf.get(px, py);
-                    buf.put(
-                        px,
-                        py,
-                        Rgb {
-                            r: blend(cur.r, heart_color.r, alpha * 0.8),
-                            g: blend(cur.g, heart_color.g, alpha * 0.8),
-                            b: blend(cur.b, heart_color.b, alpha * 0.8),
-                        },
-                    );
+                    buf.put(px, py, blend_rgb(cur, heart_color, alpha * 0.8));
                 }
             }
         }

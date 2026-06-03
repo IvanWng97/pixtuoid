@@ -28,6 +28,11 @@ const STAND_CLEARANCE: u16 = 2;
 /// cell before giving up on a side.
 const STAND_SCAN: i32 = 4;
 
+/// The four cardinal unit axes (N, S, W, E) both `stand_point` and
+/// `approach_point` scan over. `debug_overlay`'s DIRS is a different order and
+/// stays separate.
+const CARDINAL_DIRS: [(i32, i32); 4] = [(0, -1), (0, 1), (-1, 0), (1, 0)];
+
 /// Ground-footprint `(w, h)` the walkable mask stamps for a waypoint, or
 /// `None` for slots that add no obstacle (meeting sofa/stand sit on the
 /// sofa/table furniture, already stamped elsewhere). Reads [`furniture_def`]
@@ -85,10 +90,8 @@ pub fn stand_point(
     };
     let approach = furniture_def(kind.furniture()).approach;
 
-    // N, S, W, E unit axes.
-    const DIRS: [(i32, i32); 4] = [(0, -1), (0, 1), (-1, 0), (1, 0)];
     let mut best: Option<(u64, Point)> = None;
-    for (dx, dy) in DIRS {
+    for (dx, dy) in CARDINAL_DIRS {
         // Honor the per-furniture approach allowlist (rotated to facing).
         // All obstacle furniture is `ALL` today, so this is a no-op for them;
         // editing a kind's `approach` constrains both walk + render here.
@@ -165,7 +168,6 @@ pub fn approach_point(
     reachable: &ReachSet,
 ) -> Point {
     let def = furniture_def(kind);
-    const DIRS: [(i32, i32); 4] = [(0, -1), (0, 1), (-1, 0), (1, 0)];
     let mut best: Option<(u64, Point)> = None;
     if def.occupies_pos {
         // SEAT/desk: the sprite renders on the fixed seat foot cell; the agent
@@ -179,7 +181,7 @@ pub fn approach_point(
         // than letting A* snap onto the backrest. INVARIANT: a seat approach is
         // never a back-side cell.
         let mut allowed: Option<(u64, Point)> = None;
-        for (dx, dy) in DIRS {
+        for (dx, dy) in CARDINAL_DIRS {
             if !def.approach.allows(facing, (dx, dy)) {
                 continue; // never approach across an excluded side (the back)
             }
@@ -226,7 +228,7 @@ pub fn approach_point(
         // Obstacle: stand just off the footprint, on the reachable allowed side
         // nearest the home desk (== stand_point, plus the reachability filter).
         let (hx, hy) = (fw as i32 / 2, fh as i32 / 2);
-        for (dx, dy) in DIRS {
+        for (dx, dy) in CARDINAL_DIRS {
             if !def.approach.allows(facing, (dx, dy)) {
                 continue;
             }

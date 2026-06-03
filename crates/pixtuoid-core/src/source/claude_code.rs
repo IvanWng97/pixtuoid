@@ -4,7 +4,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use serde_json::Value;
 
-use crate::source::decoder::make_tool_detail;
+use crate::source::decoder::{cwd_basename_label, make_tool_detail};
 use crate::source::hook::HookSocketListener;
 use crate::source::jsonl::JsonlWatcher;
 use crate::source::{Activity, AgentEvent, Source, TaggedSender};
@@ -42,7 +42,7 @@ impl ClaudeCodeSource {
 #[async_trait]
 impl Source for ClaudeCodeSource {
     fn name(&self) -> &str {
-        "claude-code"
+        SOURCE_NAME
     }
 
     async fn run(self: Box<Self>, tx: TaggedSender) -> Result<()> {
@@ -225,10 +225,8 @@ pub fn cc_derive_label(path: &Path, _source: &str, cwd: &Path) -> String {
     if crate::source::jsonl::is_subagent_path(path) {
         return "subagent".to_string();
     }
-    if cwd != Path::new("") && cwd != Path::new("/") {
-        if let Some(base) = cwd.file_name().and_then(|n| n.to_str()) {
-            return format!("cc·{base}");
-        }
+    if let Some(label) = cwd_basename_label("cc", cwd) {
+        return label;
     }
     if let Some(base) = path
         .parent()

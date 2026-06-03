@@ -32,6 +32,15 @@ use crate::tui::pathfind::Router;
 use crate::tui::pet::PetFrame;
 use crate::tui::pose::{self, Pose};
 
+/// Milliseconds since the Unix epoch for `now` (0 if the clock is before it).
+/// The wall-clock decode the pixel-pass animation timers share — was hand-rolled
+/// identically at the top of half a dozen paint helpers.
+pub(super) fn epoch_ms(now: SystemTime) -> u64 {
+    now.duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
 /// Result of the pure-pixel pass — carries the resolved cat position
 /// (for hit-testing), active chitchat bubbles (for widget rendering),
 /// and agent ids that were seen carrying coffee this frame (so the
@@ -317,126 +326,18 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
     // Ground footprint rule: walkable mask is NOT affected by these (they're
     // small items characters can walk around or over).
     if let Some(mr) = ctx.layout.meeting_room {
-        let wall_color = ctx.theme.office.room_wall_trim_dark;
-        let accent = ctx.theme.furniture.rug_accent;
-
-        // Notice board on the south wall (8×5)
-        if mr.height > 20 && mr.width > 15 {
-            let bx = mr.x + 4;
-            let by = mr.y + mr.height - 8;
-            for dy in 0..5u16 {
-                for dx in 0..8u16 {
-                    let px = bx + dx;
-                    let py = by + dy;
-                    if px < buf_w && py < buf_h {
-                        let on_edge = dx == 0 || dx == 7 || dy == 0 || dy == 4;
-                        ctx.buf
-                            .put(px, py, if on_edge { wall_color } else { accent });
-                    }
-                }
-            }
-        }
+        furniture::paint_notice_board(ctx.buf, mr, ctx.theme);
 
         // Coat rack is now a y-sorted DrawableKind::CoatRack (pushed in the
         // drawable pass) so characters in front occlude it / behind it are
         // occluded — was painted here in the background pass, always under
         // every character.
 
-        // Small doormat at the meeting room entrance (on the cubicle side)
-        if mr.width > 10 {
-            let mat_x = mr.x + mr.width;
-            let mat_y = mr.y + mr.height / 2 - 2;
-            let mat_color = ctx.theme.furniture.rug_trim;
-            let mat_accent = ctx.theme.furniture.rug_field;
-            for dy in 0..5u16 {
-                for dx in 0..4u16 {
-                    let px = mat_x + dx + 1;
-                    let py = mat_y + dy;
-                    if px < buf_w && py < buf_h {
-                        let on_border = dx == 0 || dx == 3 || dy == 0 || dy == 4;
-                        ctx.buf
-                            .put(px, py, if on_border { mat_color } else { mat_accent });
-                    }
-                }
-            }
-        }
+        furniture::paint_doormat(ctx.buf, mr, ctx.theme);
     }
     if let Some(pr) = ctx.layout.pantry_room {
-        let cooler_body = ctx.theme.office.building_light;
-        let cooler_water = Rgb {
-            r: 100,
-            g: 180,
-            b: 230,
-        };
-
-        // Water cooler near the pantry wall (3×6)
-        if pr.height > 25 && pr.width > 12 {
-            let wx = pr.x + pr.width - 6;
-            let wy = pr.y + 8;
-            for dy in 0..6u16 {
-                for dx in 0..3u16 {
-                    let px = wx + dx;
-                    let py = wy + dy;
-                    if px < buf_w && py < buf_h {
-                        let color = if dy < 2 { cooler_water } else { cooler_body };
-                        ctx.buf.put(px, py, color);
-                    }
-                }
-            }
-        }
-
-        // Trash bin near the pantry counter (4×5 with visible bag liner)
-        if pr.height > 20 {
-            let tx = pr.x + 3;
-            let ty = pr.y + pr.height - 14;
-            let bin_outer = Rgb {
-                r: 70,
-                g: 70,
-                b: 78,
-            };
-            let bin_rim = Rgb {
-                r: 100,
-                g: 100,
-                b: 108,
-            };
-            let bag_liner = Rgb {
-                r: 200,
-                g: 200,
-                b: 210,
-            };
-            let bag_fill = Rgb {
-                r: 160,
-                g: 160,
-                b: 170,
-            };
-            for dy in 0..5u16 {
-                for dx in 0..4u16 {
-                    let px = tx + dx;
-                    let py = ty + dy;
-                    if px < buf_w && py < buf_h {
-                        let color = if dy == 0 {
-                            // Rim row — lighter metal rim with bag liner peek
-                            if dx == 0 || dx == 3 {
-                                bin_rim
-                            } else {
-                                bag_liner
-                            }
-                        } else if dy == 1 {
-                            // Bag liner visible
-                            if dx == 0 || dx == 3 {
-                                bin_outer
-                            } else {
-                                bag_fill
-                            }
-                        } else {
-                            // Bin body
-                            bin_outer
-                        };
-                        ctx.buf.put(px, py, color);
-                    }
-                }
-            }
-        }
+        furniture::paint_water_cooler(ctx.buf, pr, ctx.theme);
+        furniture::paint_trash_bin(ctx.buf, pr);
     }
 
     // Shadow pass — soft floor shadows under desks + lounge furniture

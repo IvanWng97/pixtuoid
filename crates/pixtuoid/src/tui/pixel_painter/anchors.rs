@@ -10,6 +10,7 @@ use std::time::SystemTime;
 use pixtuoid_core::layout::{SEAT_RENDER_Y_OFF, WALKING_Y_OFF};
 use pixtuoid_core::AgentSlot;
 
+use super::epoch_ms;
 use crate::tui::layout::{Point, WaypointKind, DESK_W};
 use crate::tui::pose::{self, Pose};
 
@@ -54,10 +55,7 @@ pub(super) fn waypoint_anchor(wp: Point, sprite_w: u16) -> Point {
 /// so static (seated / standing) characters look alive instead of frozen.
 /// Walking + waypoint-trip poses already animate, so we skip those.
 fn breath_offset_y(agent_id: pixtuoid_core::AgentId, now: SystemTime) -> u16 {
-    let elapsed_ms = now
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0);
+    let elapsed_ms = epoch_ms(now);
     const CYCLE_MS: u64 = 4500;
     let offset_ms = agent_id.raw() % CYCLE_MS;
     let phase = elapsed_ms.wrapping_add(offset_ms) % CYCLE_MS;

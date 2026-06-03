@@ -59,6 +59,28 @@ pub const STALE_UNKNOWN_CWD_TIMEOUT: Duration = Duration::from_secs(3 * 60);
 /// live-but-idle sessions (lunch-break idle) with no upside.
 pub const STALE_CODEX_IDLE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
+/// The state-adaptive stale timeout for one slot. Unknown-cwd ghosts reap on the
+/// shortest window (almost always startup-seeding artifacts). Otherwise the
+/// timeout follows the activity state — with one carve-out: an idle **Codex**
+/// slot uses [`STALE_CODEX_IDLE_TIMEOUT`] (not the long [`STALE_IDLE_TIMEOUT`])
+/// because Codex exposes no exit signal of any kind, so the sweep is its only
+/// reaper; the lone false positive (a live-but-idle Codex past the window)
+/// self-heals on its next `UserPromptSubmit`. CC keeps the long window — its
+/// real `SessionEnd` signals make a short reaper all cost, no benefit.
+fn stale_threshold(slot: &AgentSlot) -> Duration {
+    if slot.unknown_cwd {
+        return STALE_UNKNOWN_CWD_TIMEOUT;
+    }
+    match &slot.state {
+        ActivityState::Active { .. } => STALE_ACTIVE_TIMEOUT,
+        ActivityState::Idle if slot.source.as_ref() == crate::source::codex::SOURCE_NAME => {
+            STALE_CODEX_IDLE_TIMEOUT
+        }
+        ActivityState::Idle => STALE_IDLE_TIMEOUT,
+        ActivityState::Waiting { .. } => STALE_WAITING_TIMEOUT,
+    }
+}
+
 /// Display prefix for a source's labels (`cc·`, `ag·`, `cx·`). Single source of
 /// truth applied at `SessionStart`. The JSONL `LabelDeriver` Renames (e.g.
 /// `cc_derive_label`/`derive_ag_label`) produce the same prefixed string and so
@@ -67,7 +89,7 @@ pub const STALE_CODEX_IDLE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 fn source_label_prefix(source: &str) -> &str {
     match source {
         crate::source::claude_code::SOURCE_NAME => "cc",
-        "antigravity" => "ag",
+        crate::source::antigravity::SOURCE_NAME => "ag",
         crate::source::codex::SOURCE_NAME => "cx",
         other => other,
     }
@@ -504,26 +526,7 @@ impl Reducer {
                 let age = now
                     .duration_since(slot.last_event_at)
                     .unwrap_or(Duration::ZERO);
-                let threshold = if slot.unknown_cwd {
-                    STALE_UNKNOWN_CWD_TIMEOUT
-                } else {
-                    match &slot.state {
-                        ActivityState::Active { .. } => STALE_ACTIVE_TIMEOUT,
-                        // Codex has no exit signal at all (no SessionEnd hook / PID
-                        // / durable rollout marker), so the sweep is its only
-                        // reaper — give an idle Codex slot a much shorter window so
-                        // a closed session doesn't ghost for 30 min. Self-healing:
-                        // a paused-but-live one re-enters on its next prompt. CC
-                        // keeps the long window (it has real SessionEnd signals).
-                        ActivityState::Idle
-                            if slot.source.as_ref() == crate::source::codex::SOURCE_NAME =>
-                        {
-                            STALE_CODEX_IDLE_TIMEOUT
-                        }
-                        ActivityState::Idle => STALE_IDLE_TIMEOUT,
-                        ActivityState::Waiting { .. } => STALE_WAITING_TIMEOUT,
-                    }
-                };
+                let threshold = stale_threshold(slot);
                 (age > threshold).then_some((slot.agent_id, age, threshold))
             })
             .collect();

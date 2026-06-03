@@ -32,6 +32,23 @@ fn pantry_counter_y_pct(counter_w: u16) -> u16 {
     }
 }
 
+/// Horizontal seat offsets for a 3-across sofa, relative to the middle-seat
+/// anchor — shared by the 20px lounge couch and the meeting sofas so the two
+/// can't drift.
+const SEAT_DX: [i16; 3] = [-6, 0, 6];
+
+/// Lounge-couch sprite origin (the middle-seat anchor). Single-sourced because
+/// `compute_with_seed` (floor-lamp placement) and `compute_waypoints` (seat
+/// waypoints + `couch_sprite_center`) both derive from it and must agree
+/// byte-for-byte — recomputed via this fn rather than threaded as an `Option`
+/// (no unwrap on a read-back).
+fn couch_pos(cubicle_band: &Bounds, top_margin: u16) -> Point {
+    Point {
+        x: cubicle_band.x + pct(cubicle_band.width, 35),
+        y: top_margin + 3,
+    }
+}
+
 pub(super) fn compute_with_seed(
     buf_w: u16,
     buf_h: u16,
@@ -259,8 +276,10 @@ pub(super) fn compute_with_seed(
         _ => Size { w: 20, h: 8 },
     };
 
-    let couch_y = top_margin + 3;
-    let couch_x = cubicle_band.x + pct(cubicle_band.width, 35);
+    let Point {
+        x: couch_x,
+        y: couch_y,
+    } = couch_pos(&cubicle_band, top_margin);
 
     let (waypoints, couch_sprite_center) = compute_waypoints(
         &cubicle_band,
@@ -555,6 +574,20 @@ pub(super) struct PodGrid {
     couch_to_desk_extra: u16,
 }
 
+impl PodGrid {
+    /// NW origin (top-left of the first desk) of pod `(pod_c, pod_r)` within the
+    /// cubicle band. The single formula the desk-placement and aisle-decor passes
+    /// both step from — golden snapshots pin its byte-exact output.
+    fn pod_origin(self, cubicle_band: &Bounds, pod_c: u16, pod_r: u16) -> (u16, u16) {
+        let x = cubicle_band.x + INTER_POD_AISLE_X / 2 + pod_c * self.stride_x;
+        let y = cubicle_band.y
+            + INTER_POD_AISLE_Y / 2
+            + self.couch_to_desk_extra
+            + pod_r * self.stride_y;
+        (x, y)
+    }
+}
+
 /// Which rooms the floor has — drives [`compute_room_walls`]'s segment set.
 #[derive(Clone, Copy)]
 pub(super) struct RoomPresence {
@@ -607,9 +640,7 @@ pub(super) fn compute_pod_desks(
     // Full pods (row-major fill).
     'outer: for pod_r in 0..pod_rows {
         for pod_c in 0..pod_cols {
-            let pod_origin_x = right_x + INTER_POD_AISLE_X / 2 + pod_c * pod_stride_x;
-            let pod_origin_y =
-                cubicle_band.y + INTER_POD_AISLE_Y / 2 + couch_to_desk_extra + pod_r * pod_stride_y;
+            let (pod_origin_x, pod_origin_y) = grid.pod_origin(cubicle_band, pod_c, pod_r);
             for r in 0..POD_SIDE {
                 for c in 0..POD_SIDE {
                     let full = push_desk(
@@ -641,8 +672,7 @@ pub(super) fn compute_pod_desks(
     };
     if partial_col_at_right {
         'partial_x: for pod_r in 0..pod_rows {
-            let pod_origin_y =
-                cubicle_band.y + INTER_POD_AISLE_Y / 2 + couch_to_desk_extra + pod_r * pod_stride_y;
+            let (_, pod_origin_y) = grid.pod_origin(cubicle_band, 0, pod_r);
             for r in 0..POD_SIDE {
                 for i in 0..partial_col_count {
                     let full = push_desk(
@@ -667,7 +697,7 @@ pub(super) fn compute_pod_desks(
     if partial_row_at_bottom {
         let partial_y = cubicle_band.y + main_pod_used_h + INTER_POD_AISLE_Y / 2;
         'partial_y: for pod_c in 0..pod_cols {
-            let pod_origin_x = right_x + INTER_POD_AISLE_X / 2 + pod_c * pod_stride_x;
+            let (pod_origin_x, _) = grid.pod_origin(cubicle_band, pod_c, 0);
             for c in 0..POD_SIDE {
                 let full = push_desk(
                     &mut home_desks,
@@ -696,13 +726,12 @@ pub(super) fn compute_pod_decor(
     grid: PodGrid,
     floor_seed: u64,
 ) -> Vec<PodDecorItem> {
-    let right_x = cubicle_band.x;
     let PodGrid {
         cols: pod_cols,
         rows: pod_rows,
         stride_x: pod_stride_x,
         stride_y: pod_stride_y,
-        couch_to_desk_extra,
+        ..
     } = grid;
     let pod_w = pod_stride_x - INTER_POD_AISLE_X;
     let pod_h = pod_stride_y - INTER_POD_AISLE_Y;
@@ -725,9 +754,7 @@ pub(super) fn compute_pod_decor(
     // per pod row).
     for pod_r in 0..pod_rows {
         for pod_c in 0..pod_cols.saturating_sub(1) {
-            let pod_origin_x = right_x + INTER_POD_AISLE_X / 2 + pod_c * pod_stride_x;
-            let pod_origin_y =
-                cubicle_band.y + INTER_POD_AISLE_Y / 2 + couch_to_desk_extra + pod_r * pod_stride_y;
+            let (pod_origin_x, pod_origin_y) = grid.pod_origin(cubicle_band, pod_c, pod_r);
             let aisle_cx = pod_origin_x + pod_w + INTER_POD_AISLE_X / 2;
             let aisle_cy = pod_origin_y + pod_h / 2;
             push_slot(&mut pod_decor, aisle_cx, aisle_cy);
@@ -737,9 +764,7 @@ pub(super) fn compute_pod_decor(
     // per pod column).
     for pod_r in 0..pod_rows.saturating_sub(1) {
         for pod_c in 0..pod_cols {
-            let pod_origin_x = right_x + INTER_POD_AISLE_X / 2 + pod_c * pod_stride_x;
-            let pod_origin_y =
-                cubicle_band.y + INTER_POD_AISLE_Y / 2 + couch_to_desk_extra + pod_r * pod_stride_y;
+            let (pod_origin_x, pod_origin_y) = grid.pod_origin(cubicle_band, pod_c, pod_r);
             let aisle_cx = pod_origin_x + pod_w / 2;
             let aisle_cy = pod_origin_y + pod_h + INTER_POD_AISLE_Y / 2;
             push_slot(&mut pod_decor, aisle_cx, aisle_cy);
@@ -871,14 +896,16 @@ pub(super) fn compute_waypoints(
         sofas: meeting_sofas,
         tables: meeting_tables,
     } = meeting;
-    let couch_y = top_margin + 3;
-    let couch_x = cubicle_band.x + pct(cubicle_band.width, 35);
+    let Point {
+        x: couch_x,
+        y: couch_y,
+    } = couch_pos(cubicle_band, top_margin);
     // Lounge couch: 3 seats across the 20px sofa (dx ∈ {-6, 0, +6}), matching
     // the meeting sofa. room_id stays None — the lounge's group-chat grouping
     // is keyed at the chitchat venue layer (all couch seats share one venue),
     // NOT via the meeting-only room_id field. The sprite paints once, centred
     // on couch_x (the middle seat); see `couch_sprite_center`.
-    let mut waypoints: Vec<Waypoint> = [-6i16, 0, 6]
+    let mut waypoints: Vec<Waypoint> = SEAT_DX
         .into_iter()
         .map(|dx| Waypoint {
             pos: Point {
@@ -991,7 +1018,7 @@ pub(super) fn compute_waypoints(
         } else {
             Facing::North
         };
-        for dx in [-6i16, 0, 6] {
+        for dx in SEAT_DX {
             waypoints.push(Waypoint {
                 pos: Point {
                     x: sofa.x.saturating_add_signed(dx),

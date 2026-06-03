@@ -5,6 +5,12 @@ use std::path::{Path, PathBuf};
 use anyhow::{anyhow, Context, Result};
 use fs2::FileExt;
 
+/// Resolve a `$HOME`-relative path, falling back to the CWD when `HOME` is unset.
+pub fn home_relative(rel: &str) -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+    PathBuf::from(home).join(rel)
+}
+
 pub fn default_hook_binary() -> Result<PathBuf> {
     if let Ok(p) = std::env::var("PIXTUOID_HOOK") {
         return Ok(PathBuf::from(p));

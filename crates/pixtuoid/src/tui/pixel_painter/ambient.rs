@@ -13,7 +13,7 @@ use crate::tui::layout::Layout;
 use crate::tui::pixel_painter::background::{
     sun_on_wall, time_of_day_look, weather_light, weather_state, window_spill_columns, WallSide,
 };
-use crate::tui::pixel_painter::palette::blend;
+use crate::tui::pixel_painter::palette::blend_rgb;
 use crate::tui::pixel_painter::PixelCtx;
 use crate::tui::theme::Theme;
 
@@ -127,15 +127,7 @@ pub(super) fn paint_ceiling_halos(buf: &mut RgbBuffer, theme: &Theme, halos: &[C
                 let dist = ((dx as i32 - 2).abs() as f32 + dy as f32) / 3.0;
                 let strength = (halo.intensity * (1.0 - dist).max(0.0) * 0.4).clamp(0.0, 1.0);
                 let cur = buf.get(x, y);
-                buf.put(
-                    x,
-                    y,
-                    Rgb {
-                        r: blend(cur.r, halo.color.r, strength),
-                        g: blend(cur.g, halo.color.g, strength),
-                        b: blend(cur.b, halo.color.b, strength),
-                    },
-                );
+                buf.put(x, y, blend_rgb(cur, halo.color, strength));
             }
         }
     }
@@ -231,15 +223,7 @@ pub(super) fn paint_dust_motes(
             }
             let cur = buf.get(x, y);
             let strength = alpha * 0.7 * visibility;
-            buf.put(
-                x,
-                y,
-                Rgb {
-                    r: blend(cur.r, warm.r, strength),
-                    g: blend(cur.g, warm.g, strength),
-                    b: blend(cur.b, warm.b, strength),
-                },
-            );
+            buf.put(x, y, blend_rgb(cur, warm, strength));
         }
     }
 }
@@ -271,11 +255,12 @@ pub(super) fn paint_sun_spot(buf: &mut RgbBuffer, theme: &Theme, layout: &Layout
     let warm = theme.lighting.sun_spill;
     // Blend warm toward white as the sun climbs (warmth → 0 at noon).
     let cool = 1.0 - spot.warmth;
-    let color = Rgb {
-        r: blend(warm.r, 255, cool * 0.6),
-        g: blend(warm.g, 255, cool * 0.6),
-        b: blend(warm.b, 255, cool * 0.6),
+    let white = Rgb {
+        r: 255,
+        g: 255,
+        b: 255,
     };
+    let color = blend_rgb(warm, white, cool * 0.6);
 
     // A visible sun rectangle, not a 4px speck: keep a generous floor size so
     // the radial falloff doesn't collapse the spot to nothing on the dark wall.
@@ -336,15 +321,7 @@ pub(super) fn paint_sun_spot(buf: &mut RgbBuffer, theme: &Theme, layout: &Layout
             }
             let t = (1.0 - r2) * tint_strength;
             let cur = buf.get(x, y);
-            buf.put(
-                x,
-                y,
-                Rgb {
-                    r: blend(cur.r, color.r, t),
-                    g: blend(cur.g, color.g, t),
-                    b: blend(cur.b, color.b, t),
-                },
-            );
+            buf.put(x, y, blend_rgb(cur, color, t));
         }
     }
 }

@@ -5,7 +5,8 @@ use std::time::SystemTime;
 
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
-use crate::tui::pixel_painter::palette::blend;
+use crate::tui::pixel_painter::epoch_ms;
+use crate::tui::pixel_painter::palette::blend_rgb;
 use crate::tui::theme::Theme;
 
 /// An axis-aligned ellipse for the radial floor pools (light + shadow).
@@ -39,15 +40,7 @@ fn paint_ellipse_blend(buf: &mut RgbBuffer, e: Ellipse, strength: f32, color: Rg
             }
             let t = (1.0 - r2) * strength;
             let cur = buf.get(x, y);
-            buf.put(
-                x,
-                y,
-                Rgb {
-                    r: blend(cur.r, color.r, t),
-                    g: blend(cur.g, color.g, t),
-                    b: blend(cur.b, color.b, t),
-                },
-            );
+            buf.put(x, y, blend_rgb(cur, color, t));
         }
     }
 }
@@ -90,15 +83,7 @@ pub(in crate::tui::pixel_painter) fn paint_floor_lamp_halo(
             }
             let t = (1.0 - (r2 / r2max).sqrt()) * strength;
             let cur = buf.get(x, y);
-            buf.put(
-                x,
-                y,
-                Rgb {
-                    r: blend(cur.r, warm.r, t),
-                    g: blend(cur.g, warm.g, t),
-                    b: blend(cur.b, warm.b, t),
-                },
-            );
+            buf.put(x, y, blend_rgb(cur, warm, t));
         }
     }
 }
@@ -114,10 +99,7 @@ pub(in crate::tui::pixel_painter) fn paint_neon_panel(
     now: SystemTime,
     theme: &Theme,
 ) {
-    let elapsed_ms = now
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0);
+    let elapsed_ms = epoch_ms(now);
     let pulse = 0.7 + 0.3 * ((elapsed_ms as f32 / 1200.0).sin() * 0.5 + 0.5);
 
     let panel_bg = theme.office.neon_panel_bg;

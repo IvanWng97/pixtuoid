@@ -8,7 +8,7 @@ use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
 
-use super::to_color;
+use super::{compact_hms, to_color};
 use crate::tui::layout::{Layout, DESK_W};
 use crate::tui::pet::PetKind;
 use crate::tui::pixel_painter::character_anchor;
@@ -27,6 +27,19 @@ pub(super) fn framed_tooltip<'a>(lines: Vec<Line<'a>>, theme: &Theme) -> Paragra
         .border_style(Style::default().fg(to_color(theme.ui.label_idle)))
         .style(Style::default().bg(to_color(theme.ui.tooltip_bg)));
     Paragraph::new(lines).block(block)
+}
+
+/// Horizontal anchor for a tooltip of width `tip_w`: place it just right of the
+/// cursor, but flip to the left side if that would overflow the scene's right
+/// edge. Shared by the hover and simple tooltips (their Y logic diverges and
+/// stays inline).
+fn flip_x_anchor(mx: u16, tip_w: u16, scene_rect: Rect) -> u16 {
+    let tx = mx.saturating_add(2);
+    if tx.saturating_add(tip_w) > scene_rect.x + scene_rect.width {
+        mx.saturating_sub(tip_w + 1)
+    } else {
+        tx
+    }
 }
 
 /// Labels above each character — uses `character_anchor` to follow the
@@ -142,13 +155,7 @@ pub(crate) fn paint_hover_tooltip(
         .duration_since(agent.created_at)
         .unwrap_or_default()
         .as_secs();
-    let duration_str = if session_secs >= 3600 {
-        format!("{}h{}m", session_secs / 3600, (session_secs % 3600) / 60)
-    } else if session_secs >= 60 {
-        format!("{}m", session_secs / 60)
-    } else {
-        "<1m".to_string()
-    };
+    let duration_str = compact_hms(session_secs);
     let active_str = if session_secs >= 5 {
         let pct = (agent.active_ms / 1000)
             .checked_mul(100)
@@ -196,10 +203,7 @@ pub(crate) fn paint_hover_tooltip(
     let tip_w = (content_w + 2).min(scene_rect.width).max(20);
     let tip_h = (content_h + 2).min(scene_rect.height);
 
-    let mut tx = mx.saturating_add(2);
-    if tx.saturating_add(tip_w) > scene_rect.x + scene_rect.width {
-        tx = mx.saturating_sub(tip_w + 1);
-    }
+    let tx = flip_x_anchor(mx, tip_w, scene_rect);
     let mut ty = my.saturating_add(1);
     if ty.saturating_add(tip_h) > scene_rect.y + scene_rect.height {
         ty = my.saturating_sub(tip_h).max(scene_rect.y);
@@ -238,10 +242,7 @@ fn paint_simple_tooltip(
     // the trailing content. Matches paint_hover_tooltip's `l.width()`.
     let tip_w = (line.width() as u16 + 2).min(scene_rect.width);
     let tip_h = 3u16.min(scene_rect.height);
-    let mut tx = mx.saturating_add(2);
-    if tx.saturating_add(tip_w) > scene_rect.x + scene_rect.width {
-        tx = mx.saturating_sub(tip_w + 1);
-    }
+    let tx = flip_x_anchor(mx, tip_w, scene_rect);
     // Float above the cursor; flip below if there isn't room for the framed
     // tooltip above. Guard on geometry (cursor within tip_h of the top) rather
     // than the post-saturation `ty`, which can't detect overflow when

@@ -10,6 +10,13 @@ use anyhow::{bail, Context, Result};
 
 use target::{Target, BACKUP_SUFFIX};
 
+const NO_CLIS_MSG: &str = "no supported CLIs detected; pass --target claude|codex|all";
+
+/// Filter a detection table to the targets that are present, dropping the flag.
+fn present_targets(rows: &[(&'static Target, bool)]) -> Vec<&'static Target> {
+    rows.iter().filter(|(_, p)| *p).map(|(t, _)| *t).collect()
+}
+
 pub struct InstallArgs {
     pub hook_path: Option<PathBuf>,
     pub config: Option<PathBuf>,
@@ -45,11 +52,7 @@ pub fn plan_targets(
                     "--config applies to a single target; use --target claude|codex".into(),
                 );
             }
-            let chosen: Vec<_> = present
-                .iter()
-                .filter(|(_, p)| *p)
-                .map(|(t, _)| *t)
-                .collect();
+            let chosen = present_targets(present);
             if chosen.is_empty() {
                 Plan::NothingDetected
             } else {
@@ -71,11 +74,7 @@ pub fn plan_targets(
                     None => Plan::Conflict("claude target not registered".into()),
                 };
             }
-            let detected: Vec<_> = present
-                .iter()
-                .filter(|(_, p)| *p)
-                .map(|(t, _)| *t)
-                .collect();
+            let detected = present_targets(present);
             match detected.len() {
                 0 => Plan::NothingDetected,
                 1 => Plan::Targets(detected), // TTY or not: a single detected target is safe
@@ -201,14 +200,10 @@ pub fn install(args: InstallArgs) -> Result<()> {
     // user installs into a subset instead of always all. Explicit `--target` /
     // `--config` / `--yes` / non-interactive take the flag-driven path below.
     if interactive_pick(&args.target, &args.config, args.yes, is_tty) {
-        let detected: Vec<&'static Target> = detection()
-            .into_iter()
-            .filter(|(_, p)| *p)
-            .map(|(t, _)| t)
-            .collect();
+        let detected = present_targets(&detection());
         return run_interactive(
             detected,
-            "no supported CLIs detected; pass --target claude|codex|all",
+            NO_CLIS_MSG,
             "Install pixtuoid hooks into",
             "install",
             |t| run_install(t, None, args.hook_path.clone()),
@@ -273,7 +268,7 @@ fn resolve_plan(plan: Plan) -> Result<Vec<&'static Target>> {
     match plan {
         Plan::Targets(t) => Ok(t),
         Plan::NothingDetected => {
-            println!("no supported CLIs detected; pass --target claude|codex|all");
+            println!("{NO_CLIS_MSG}");
             Ok(vec![])
         }
         Plan::Conflict(msg) => bail!(msg),

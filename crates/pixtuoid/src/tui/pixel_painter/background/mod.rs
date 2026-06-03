@@ -24,7 +24,21 @@ use std::time::SystemTime;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
 use super::ambient::SunbeamColumn;
-use super::palette::{blend, lerp_rgb};
+use super::epoch_ms;
+use super::palette::{blend, blend_rgb, lerp_rgb};
+
+/// Fractional local hour (`hour + minute/60`, in `0.0..24.0`) for `now`, decoded
+/// via chrono. Shared by the day-ramp / sunset / window-look timers. NB:
+/// `sun_on_wall` keeps its own fallible `.ok()?` decode because it returns an
+/// `Option`; this infallible form (`unwrap_or_default`) suits the rest.
+fn local_hour_frac(now: std::time::SystemTime) -> f32 {
+    use chrono::Timelike;
+    let unix_now = now
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    let local = chrono::DateTime::<chrono::Local>::from(std::time::UNIX_EPOCH + unix_now);
+    local.hour() as f32 + local.minute() as f32 / 60.0
+}
 
 use crate::tui::layout::{Layout, ELEVATOR_W};
 use crate::tui::theme::Theme;
@@ -38,9 +52,9 @@ const WINDOW_GAP: u16 = 3;
 /// `DEPTH` constant inside `paint_window_light_spill`.
 const SPILL_DEPTH: u16 = 12;
 
-/// Lightning strike cadence (Storm only): a flash fires every
-/// `LIGHTNING_PERIOD_MS` (~15 s — a 6 s cadence read as a hyperactive storm),
-/// lasting `LIGHTNING_FLASH_MS`. The flash shape is a two-pulse flicker
+/// Lightning strike cadence (Storm only): a flash fires on average every
+/// `LIGHTNING_PERIOD_MS` (~15 s; a much faster cadence would read as a
+/// hyperactive storm), lasting `LIGHTNING_FLASH_MS`. The flash shape is a two-pulse flicker
 /// (`lightning_envelope`) shared by the bright on-glass bolt
 /// (`paint_floor_to_ceiling_window`) and the softer room-wide ambient bounce
 /// (`paint_lightning_flash`), so both stay in lockstep.
@@ -76,10 +90,7 @@ fn strike_offset(bucket: u64) -> u64 {
 /// Shared by the window bolt and the room bounce so they fire together, and
 /// jittered per `strike_offset` so the cadence reads organic, not clockwork.
 fn lightning_flash_level(now: SystemTime) -> f32 {
-    let elapsed_ms = now
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0);
+    let elapsed_ms = epoch_ms(now);
     let bucket = elapsed_ms / LIGHTNING_PERIOD_MS;
     let phase = elapsed_ms % LIGHTNING_PERIOD_MS;
     match phase.checked_sub(strike_offset(bucket)) {
@@ -108,11 +119,15 @@ pub(super) fn paint_lightning_flash(buf: &mut RgbBuffer, now: SystemTime, weathe
             buf.put(
                 x,
                 y,
-                Rgb {
-                    r: blend(cur.r, 255, alpha),
-                    g: blend(cur.g, 255, alpha),
-                    b: blend(cur.b, 255, alpha),
-                },
+                blend_rgb(
+                    cur,
+                    Rgb {
+                        r: 255,
+                        g: 255,
+                        b: 255,
+                    },
+                    alpha,
+                ),
             );
         }
     }
@@ -278,12 +293,7 @@ pub(super) fn paint_floor_and_walls(
                 2 | 3 => carpet_dark,
                 _ => carpet_base,
             };
-            let tinted = Rgb {
-                r: blend(color.r, tint.r, 0.15),
-                g: blend(color.g, tint.g, 0.15),
-                b: blend(color.b, tint.b, 0.15),
-            };
-            buf.put(x, y, tinted);
+            buf.put(x, y, blend_rgb(color, tint, 0.15));
         }
     }
     for y in 0..top_wall_h.min(buf_h) {
@@ -367,10 +377,7 @@ fn city_dot_lit(window_idx: u16, dx: u16, dy: u16) -> bool {
 /// each cycle rerolls on/off via a deterministic hash. Bias toward "on" so
 /// the skyline is mostly lit with the occasional dot blinking off.
 fn city_dot_twinkle(window_idx: u16, dx: u16, dy: u16, now: SystemTime) -> bool {
-    let now_ms = now
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0);
+    let now_ms = epoch_ms(now);
     let dot_seed = (window_idx as u64).wrapping_mul(31)
         ^ (dx as u64).wrapping_mul(131)
         ^ (dy as u64).wrapping_mul(521);
@@ -413,15 +420,7 @@ fn paint_window_light_spill(
         let strength = fade_start * (1.0 - dy as f32 / SPILL_DEPTH as f32);
         for x in start_x..end_x {
             let cur = buf.get(x, y);
-            buf.put(
-                x,
-                y,
-                Rgb {
-                    r: blend(cur.r, warm.r, strength),
-                    g: blend(cur.g, warm.g, strength),
-                    b: blend(cur.b, warm.b, strength),
-                },
-            );
+            buf.put(x, y, blend_rgb(cur, warm, strength));
         }
     }
 }
@@ -540,24 +539,13 @@ fn paint_floor_to_ceiling_window(
                 let py = y + dy;
                 if px < buf.width && py < buf.height {
                     let cur = buf.get(px, py);
-                    buf.put(
-                        px,
-                        py,
-                        Rgb {
-                            r: blend(cur.r, haze.r, alpha),
-                            g: blend(cur.g, haze.g, alpha),
-                            b: blend(cur.b, haze.b, alpha),
-                        },
-                    );
+                    buf.put(px, py, blend_rgb(cur, haze, alpha));
                 }
             }
         }
     }
 
-    let elapsed_ms = now
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0);
+    let elapsed_ms = epoch_ms(now);
 
     match weather {
         Weather::Rain => {
@@ -581,11 +569,15 @@ fn paint_floor_to_ceiling_window(
                         buf.put(
                             px,
                             py,
-                            Rgb {
-                                r: blend(cur.r, 210, alpha),
-                                g: blend(cur.g, 220, alpha),
-                                b: blend(cur.b, 240, alpha),
-                            },
+                            blend_rgb(
+                                cur,
+                                Rgb {
+                                    r: 210,
+                                    g: 220,
+                                    b: 240,
+                                },
+                                alpha,
+                            ),
                         );
                     }
                 }
@@ -635,11 +627,15 @@ fn paint_floor_to_ceiling_window(
                             buf.put(
                                 px,
                                 py,
-                                Rgb {
-                                    r: blend(cur.r, 255, alpha),
-                                    g: blend(cur.g, 255, alpha),
-                                    b: blend(cur.b, 255, alpha),
-                                },
+                                blend_rgb(
+                                    cur,
+                                    Rgb {
+                                        r: 255,
+                                        g: 255,
+                                        b: 255,
+                                    },
+                                    alpha,
+                                ),
                             );
                         }
                     }
@@ -687,11 +683,15 @@ fn paint_floor_to_ceiling_window(
                         buf.put(
                             px,
                             py,
-                            Rgb {
-                                r: blend(cur.r, 160, 0.25),
-                                g: blend(cur.g, 165, 0.25),
-                                b: blend(cur.b, 175, 0.25),
-                            },
+                            blend_rgb(
+                                cur,
+                                Rgb {
+                                    r: 160,
+                                    g: 165,
+                                    b: 175,
+                                },
+                                0.25,
+                            ),
                         );
                     }
                 }
@@ -707,11 +707,15 @@ fn paint_floor_to_ceiling_window(
                         buf.put(
                             px,
                             py,
-                            Rgb {
-                                r: blend(cur.r, 100, 0.2),
-                                g: blend(cur.g, 105, 0.2),
-                                b: blend(cur.b, 110, 0.2),
-                            },
+                            blend_rgb(
+                                cur,
+                                Rgb {
+                                    r: 100,
+                                    g: 105,
+                                    b: 110,
+                                },
+                                0.2,
+                            ),
                         );
                     }
                 }
@@ -739,11 +743,15 @@ fn paint_floor_to_ceiling_window(
                         buf.put(
                             px,
                             py,
-                            Rgb {
-                                r: blend(cur.r, 210, alpha),
-                                g: blend(cur.g, 220, alpha),
-                                b: blend(cur.b, 240, alpha),
-                            },
+                            blend_rgb(
+                                cur,
+                                Rgb {
+                                    r: 210,
+                                    g: 220,
+                                    b: 240,
+                                },
+                                alpha,
+                            ),
                         );
                     }
                 }
@@ -762,11 +770,15 @@ fn paint_floor_to_ceiling_window(
                         buf.put(
                             px,
                             py,
-                            Rgb {
-                                r: blend(cur.r, 180, 0.30),
-                                g: blend(cur.g, 160, 0.30),
-                                b: blend(cur.b, 110, 0.30),
-                            },
+                            blend_rgb(
+                                cur,
+                                Rgb {
+                                    r: 180,
+                                    g: 160,
+                                    b: 110,
+                                },
+                                0.30,
+                            ),
                         );
                     }
                 }
@@ -776,15 +788,7 @@ fn paint_floor_to_ceiling_window(
     }
 
     let raw_sunset = sunset_strength(now);
-    let twilight_now = {
-        use chrono::Timelike;
-        let unix_now = now
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default();
-        let local = chrono::DateTime::<chrono::Local>::from(std::time::UNIX_EPOCH + unix_now);
-        let hf = local.hour() as f32 + local.minute() as f32 / 60.0;
-        super::palette::bell(hf, 6.5, 1.5).max(super::palette::bell(hf, 18.5, 1.5))
-    };
+    let twilight_now = look.twilight;
     // Golden-hour blaze on the city silhouette is attenuated by atmo —
     // clouds scatter the direct warm light away (Storm at sunset reaches
     // only ~25% of Clear's strength), Smog amplifies the warm cast by 1.4×

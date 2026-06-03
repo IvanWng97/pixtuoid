@@ -1,10 +1,13 @@
 //! Standalone furniture paint helpers — coffee table, area rug,
-//! side table, pantry bistro table, pantry chair.
+//! side table, pantry bistro table, pantry chair, and the procedural
+//! room-fill decor (notice board, doormat, water cooler, trash bin).
 //!
 //! Extracted from `mod.rs` to keep the orchestrator focused on
 //! the render pipeline rather than individual furniture geometry.
 
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
+
+use crate::tui::layout::Bounds;
 
 /// Low coffee table in front of the lounge couch. Wood top with darker
 /// trim along the front edge so it reads as a real piece of furniture,
@@ -165,4 +168,138 @@ pub(super) fn paint_pantry_chair(
     put(buf, 0, -1, seat);
     put(buf, -1, 0, trim);
     put(buf, 0, 0, trim);
+}
+
+/// Notice board on the meeting room's south wall (8×5 framed rectangle).
+/// Painted in the background-fill pass; no-op for rooms too small to host it.
+pub(super) fn paint_notice_board(
+    buf: &mut RgbBuffer,
+    mr: Bounds,
+    theme: &crate::tui::theme::Theme,
+) {
+    if !(mr.height > 20 && mr.width > 15) {
+        return;
+    }
+    let wall_color = theme.office.room_wall_trim_dark;
+    let accent = theme.furniture.rug_accent;
+    let bx = mr.x + 4;
+    let by = mr.y + mr.height - 8;
+    for dy in 0..5u16 {
+        for dx in 0..8u16 {
+            let px = bx + dx;
+            let py = by + dy;
+            if px < buf.width && py < buf.height {
+                let on_edge = dx == 0 || dx == 7 || dy == 0 || dy == 4;
+                buf.put(px, py, if on_edge { wall_color } else { accent });
+            }
+        }
+    }
+}
+
+/// Small doormat at the meeting-room entrance (4×5 bordered rug, cubicle side).
+pub(super) fn paint_doormat(buf: &mut RgbBuffer, mr: Bounds, theme: &crate::tui::theme::Theme) {
+    if mr.width <= 10 {
+        return;
+    }
+    let mat_x = mr.x + mr.width;
+    let mat_y = mr.y + mr.height / 2 - 2;
+    let mat_color = theme.furniture.rug_trim;
+    let mat_accent = theme.furniture.rug_field;
+    for dy in 0..5u16 {
+        for dx in 0..4u16 {
+            let px = mat_x + dx + 1;
+            let py = mat_y + dy;
+            if px < buf.width && py < buf.height {
+                let on_border = dx == 0 || dx == 3 || dy == 0 || dy == 4;
+                buf.put(px, py, if on_border { mat_color } else { mat_accent });
+            }
+        }
+    }
+}
+
+/// Water cooler near the pantry wall (3×6: blue bottle over a light body).
+pub(super) fn paint_water_cooler(
+    buf: &mut RgbBuffer,
+    pr: Bounds,
+    theme: &crate::tui::theme::Theme,
+) {
+    if !(pr.height > 25 && pr.width > 12) {
+        return;
+    }
+    let cooler_body = theme.office.building_light;
+    let cooler_water = Rgb {
+        r: 100,
+        g: 180,
+        b: 230,
+    };
+    let wx = pr.x + pr.width - 6;
+    let wy = pr.y + 8;
+    for dy in 0..6u16 {
+        for dx in 0..3u16 {
+            let px = wx + dx;
+            let py = wy + dy;
+            if px < buf.width && py < buf.height {
+                let color = if dy < 2 { cooler_water } else { cooler_body };
+                buf.put(px, py, color);
+            }
+        }
+    }
+}
+
+/// Trash bin near the pantry counter (4×5 with a visible bag-liner peek). Its
+/// colours are intentionally un-themed neutral greys (a semantic object, like
+/// the water bottle's blue), so it takes no theme.
+pub(super) fn paint_trash_bin(buf: &mut RgbBuffer, pr: Bounds) {
+    if pr.height <= 20 {
+        return;
+    }
+    let tx = pr.x + 3;
+    let ty = pr.y + pr.height - 14;
+    let bin_outer = Rgb {
+        r: 70,
+        g: 70,
+        b: 78,
+    };
+    let bin_rim = Rgb {
+        r: 100,
+        g: 100,
+        b: 108,
+    };
+    let bag_liner = Rgb {
+        r: 200,
+        g: 200,
+        b: 210,
+    };
+    let bag_fill = Rgb {
+        r: 160,
+        g: 160,
+        b: 170,
+    };
+    for dy in 0..5u16 {
+        for dx in 0..4u16 {
+            let px = tx + dx;
+            let py = ty + dy;
+            if px < buf.width && py < buf.height {
+                let color = if dy == 0 {
+                    // Rim row — lighter metal rim with bag liner peek
+                    if dx == 0 || dx == 3 {
+                        bin_rim
+                    } else {
+                        bag_liner
+                    }
+                } else if dy == 1 {
+                    // Bag liner visible
+                    if dx == 0 || dx == 3 {
+                        bin_outer
+                    } else {
+                        bag_fill
+                    }
+                } else {
+                    // Bin body
+                    bin_outer
+                };
+                buf.put(px, py, color);
+            }
+        }
+    }
 }

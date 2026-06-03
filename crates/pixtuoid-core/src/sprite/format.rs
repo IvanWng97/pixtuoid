@@ -145,40 +145,22 @@ impl Pack {
     }
 }
 
-pub fn load_pack(dir: &Path) -> Result<Pack> {
-    let toml_path = dir.join("pack.toml");
-    let toml_src = std::fs::read_to_string(&toml_path)
-        .with_context(|| format!("reading {}", toml_path.display()))?;
-    let parsed: PackToml =
-        toml::from_str(&toml_src).with_context(|| format!("parsing {}", toml_path.display()))?;
-
+/// Assemble a `Pack` from parsed TOML, resolving each frame's source text via
+/// `get_src(frame_name)`. The two public loaders differ ONLY in how a frame's
+/// text is fetched — filesystem IO (with the path-traversal guard) for
+/// [`load_pack`] vs an in-memory lookup for [`load_pack_from_strings`] — so that
+/// closure is the one thing they don't share. The traversal guard MUST stay
+/// inside `load_pack`'s closure: `load_pack_from_strings` has no filesystem and
+/// no untrusted paths to escape.
+fn build_pack(parsed: PackToml, mut get_src: impl FnMut(&str) -> Result<String>) -> Result<Pack> {
     let palette = build_palette(&parsed.palette)?;
-
-    let canon_dir = dir
-        .canonicalize()
-        .with_context(|| format!("canonicalizing {}", dir.display()))?;
-
     let mut animations = HashMap::new();
     for (anim_name, anim) in parsed.animations {
         let mut frames = Vec::new();
         for fname in &anim.frames {
-            if Path::new(fname)
-                .components()
-                .any(|c| c == std::path::Component::ParentDir)
-            {
-                bail!("frame path {:?} contains '..' and is not allowed", fname);
-            }
-            let path = dir.join(fname);
-            let canon_path = path
-                .canonicalize()
-                .with_context(|| format!("resolving {}", path.display()))?;
-            if !canon_path.starts_with(&canon_dir) {
-                bail!("frame path {:?} escapes the pack directory", fname);
-            }
-            let src = std::fs::read_to_string(&canon_path)
-                .with_context(|| format!("reading {}", canon_path.display()))?;
-            let mut decoded = parse_sprite_file(&src, &palette)
-                .with_context(|| format!("decoding {}", path.display()))?;
+            let src = get_src(fname)?;
+            let mut decoded =
+                parse_sprite_file(&src, &palette).with_context(|| format!("decoding {fname}"))?;
             frames.append(&mut decoded);
         }
         animations.insert(
@@ -198,38 +180,48 @@ pub fn load_pack(dir: &Path) -> Result<Pack> {
     })
 }
 
+pub fn load_pack(dir: &Path) -> Result<Pack> {
+    let toml_path = dir.join("pack.toml");
+    let toml_src = std::fs::read_to_string(&toml_path)
+        .with_context(|| format!("reading {}", toml_path.display()))?;
+    let parsed: PackToml =
+        toml::from_str(&toml_src).with_context(|| format!("parsing {}", toml_path.display()))?;
+
+    let canon_dir = dir
+        .canonicalize()
+        .with_context(|| format!("canonicalizing {}", dir.display()))?;
+
+    build_pack(parsed, |fname| {
+        // Path-traversal guard — load from disk only within the pack dir.
+        if Path::new(fname)
+            .components()
+            .any(|c| c == std::path::Component::ParentDir)
+        {
+            bail!("frame path {:?} contains '..' and is not allowed", fname);
+        }
+        let path = dir.join(fname);
+        let canon_path = path
+            .canonicalize()
+            .with_context(|| format!("resolving {}", path.display()))?;
+        if !canon_path.starts_with(&canon_dir) {
+            bail!("frame path {:?} escapes the pack directory", fname);
+        }
+        std::fs::read_to_string(&canon_path)
+            .with_context(|| format!("reading {}", canon_path.display()))
+    })
+}
+
 /// Same as `load_pack` but takes in-memory strings — used by binaries that
 /// `include_str!` their assets at compile time.
 pub fn load_pack_from_strings(pack_toml: &str, frames: &[(&str, &str)]) -> Result<Pack> {
     let parsed: PackToml = toml::from_str(pack_toml).context("parsing pack.toml")?;
-    let palette = build_palette(&parsed.palette)?;
-
     let frame_lookup: HashMap<&str, &str> = frames.iter().copied().collect();
-    let mut animations = HashMap::new();
-    for (anim_name, anim) in parsed.animations {
-        let mut frames_vec = Vec::new();
-        for fname in &anim.frames {
-            let src = frame_lookup
-                .get(fname.as_str())
-                .ok_or_else(|| anyhow!("missing embedded frame {fname}"))?;
-            let mut decoded =
-                parse_sprite_file(src, &palette).with_context(|| format!("decoding {fname}"))?;
-            frames_vec.append(&mut decoded);
-        }
-        animations.insert(
-            anim_name,
-            Sprite {
-                frames: frames_vec,
-                frame_ms: anim.frame_ms,
-            },
-        );
-    }
 
-    Ok(Pack {
-        name: parsed.pack.name,
-        version: parsed.pack.version,
-        palette,
-        animations,
+    build_pack(parsed, |fname| {
+        frame_lookup
+            .get(fname)
+            .map(|s| s.to_string())
+            .ok_or_else(|| anyhow!("missing embedded frame {fname}"))
     })
 }
 

@@ -278,6 +278,18 @@ pub fn build_floor_scene(scene: &SceneState, floor_idx: usize) -> Vec<AgentSlot>
         .collect()
 }
 
+/// Build a self-contained `SceneState` for one floor: a `uniform(cap)` scene
+/// (so floor arithmetic stays self-consistent with the remapped desk indices
+/// in `[0..cap)`) populated with just that floor's agents. The normal and
+/// floor-transition render paths both project the global scene this way.
+pub fn project_floor_scene(scene: &SceneState, floor_idx: usize) -> SceneState {
+    let mut s = SceneState::uniform(scene.floor_capacities[floor_idx]);
+    for a in build_floor_scene(scene, floor_idx) {
+        s.agents.insert(a.agent_id, a);
+    }
+    s
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

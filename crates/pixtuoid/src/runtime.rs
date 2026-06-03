@@ -26,7 +26,7 @@ pub type SceneRx = watch::Receiver<Arc<SceneState>>;
 
 /// Fallback desk capacity when the terminal cannot be queried (e.g.
 /// headless mode). The real capacity is computed from terminal size in
-/// `compute_boot_capacity` before the first TUI frame.
+/// `compute_boot_capacities` before the first TUI frame.
 const FALLBACK_DESKS: usize = 16;
 
 /// The startup inputs shared by `run` + `run_async` (everything but the theme,

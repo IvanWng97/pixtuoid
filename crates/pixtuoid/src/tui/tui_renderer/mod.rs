@@ -23,7 +23,7 @@ use ratatui::Terminal;
 
 use ratatui::layout::Rect;
 
-use crate::tui::floor::{build_floor_scene, num_floors, FloorCtx, FloorMeta, FloorTransition};
+use crate::tui::floor::{num_floors, project_floor_scene, FloorCtx, FloorMeta, FloorTransition};
 use crate::tui::layout::{Layout, MAX_VISIBLE_DESKS};
 use crate::tui::pathfind::Router;
 use crate::tui::pet::PetFrame;
@@ -300,6 +300,232 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             ctx.router.invalidate();
         }
     }
+    /// Composite two floors sliding in/out during a `FloorTransition` — the
+    /// self-contained early-return arm split out of [`render`]. The transition's
+    /// Copy fields are re-read up front (the caller only dispatches here when it
+    /// is `Some`; a `None` slips through as a no-op `Ok`) so the rest of the body
+    /// can borrow `&mut self` freely. `nf` is the live floor count from `render`.
+    fn render_transition(
+        &mut self,
+        scene: &SceneState,
+        pack: &Pack,
+        now: SystemTime,
+        nf: usize,
+    ) -> Result<()> {
+        let Some((from_floor, to_floor, t, going_down)) = self.transition.as_ref().map(|tr| {
+            (
+                tr.from_floor,
+                tr.to_floor,
+                tr.t(now),
+                tr.to_floor > tr.from_floor,
+            )
+        }) else {
+            return Ok(());
+        };
+        let make_floor_info = |current_idx: usize| {
+            if nf > 1 {
+                Some(crate::tui::renderer::FloorInfo {
+                    current: current_idx + 1,
+                    total_floors: nf,
+                    total_agents: scene.agents.len(),
+                })
+            } else {
+                None
+            }
+        };
+
+        // Build floor-scoped scenes for both floors.
+        let from_scene = project_floor_scene(scene, from_floor);
+        let to_scene = project_floor_scene(scene, to_floor);
+
+        let term_size = self.terminal.size()?;
+        let full_rect = Rect {
+            x: 0,
+            y: 0,
+            width: term_size.width,
+            height: term_size.height,
+        };
+        let scene_rect = crate::tui::renderer::scene_rect(full_rect);
+
+        if scene_rect.width < 20 || scene_rect.height < 12 {
+            // Too small to render this frame: clear the interaction state the
+            // mouse handler reads, so a click doesn't hit-test against a stale
+            // layout / pet / popup left over from a larger prior frame.
+            self.cached_layout = None;
+            self.last_pet_pos = None;
+            self.last_popup_scale = 0.0;
+            return Ok(());
+        }
+
+        let buf_w = scene_rect.width;
+        let buf_h = scene_rect.height.saturating_mul(2);
+        // Compute popup scale before the split_at_mut borrows.
+        let popup_scale = self.version_popup_scale(now);
+
+        // Render both floors into their respective buffers.
+        // Use split_at_mut to get mutable access to two different indices.
+        let (lo, hi) = if from_floor < to_floor {
+            (from_floor, to_floor)
+        } else {
+            (to_floor, from_floor)
+        };
+
+        let (bufs_lo, bufs_hi) = self.floor_bufs.split_at_mut(hi);
+        let lo_buf = &mut bufs_lo[lo];
+        let hi_buf = &mut bufs_hi[0];
+        let (from_buf, to_buf) = if from_floor < to_floor {
+            (lo_buf, hi_buf)
+        } else {
+            (hi_buf, lo_buf)
+        };
+
+        let (ctxs_lo, ctxs_hi) = self.floor_ctxs.split_at_mut(hi);
+        let lo_ctx = &mut ctxs_lo[lo];
+        let hi_ctx = &mut ctxs_hi[0];
+        let (from_ctx, to_ctx) = if from_floor < to_floor {
+            (lo_ctx, hi_ctx)
+        } else {
+            (hi_ctx, lo_ctx)
+        };
+
+        from_buf.ensure_size(buf_w, buf_h, self.theme.surface.bg_fallback);
+        to_buf.ensure_size(buf_w, buf_h, self.theme.surface.bg_fallback);
+
+        let from_meta = FloorMeta::for_floor(from_floor, nf);
+        let to_meta = FloorMeta::for_floor(to_floor, nf);
+
+        // Transitions hide *text* overlays (tooltips, chitchat bubbles,
+        // labels) but keep all pixel-level visuals — including pets,
+        // coffee cups, and steam — so the slide reads as a continuous
+        // scene rather than two stripped-down stand-ins.
+        let mut transition_chitchat = std::collections::HashMap::new();
+
+        let from_active_pet = self
+            .active_pet
+            .as_ref()
+            .filter(|p| p.floor_idx == from_floor && p.is_active(now));
+        let to_active_pet = self
+            .active_pet
+            .as_ref()
+            .filter(|p| p.floor_idx == to_floor && p.is_active(now));
+        let from_pet = crate::tui::pet::select_pet_for_floor(from_meta.floor_seed, &self.pets);
+        let to_pet = crate::tui::pet::select_pet_for_floor(to_meta.floor_seed, &self.pets);
+
+        let from_carriers = render_transition_floor(
+            &from_scene,
+            from_ctx,
+            from_buf,
+            from_meta,
+            buf_w,
+            buf_h,
+            from_active_pet,
+            from_pet,
+            self.theme,
+            &self.coffee_holders,
+            &self.coffee_fetched_at,
+            &mut transition_chitchat,
+            pack,
+            now,
+            self.debug_walkable,
+        );
+        let to_carriers = render_transition_floor(
+            &to_scene,
+            to_ctx,
+            to_buf,
+            to_meta,
+            buf_w,
+            buf_h,
+            to_active_pet,
+            to_pet,
+            self.theme,
+            &self.coffee_holders,
+            &self.coffee_fetched_at,
+            &mut transition_chitchat,
+            pack,
+            now,
+            self.debug_walkable,
+        );
+
+        // Compute y-offsets for vertical slide with divider gap.
+        // t applies to total travel = screen_height + divider_height
+        // so the easing covers the full distance including the gap.
+        let h = scene_rect.height as f32;
+        let divider_h = (scene_rect.height as f32) / 5.0;
+        let total = h + divider_h;
+        let (from_offset, to_offset) = if going_down {
+            // Higher floor: current slides DOWN, new enters from TOP
+            let from_y = (t * total) as i32;
+            let to_y = -(total - t * total) as i32;
+            (from_y, to_y)
+        } else {
+            // Lower floor: current slides UP, new enters from BOTTOM
+            let from_y = -(t * total) as i32;
+            let to_y = (total - t * total) as i32;
+            (from_y, to_y)
+        };
+
+        let theme = self.theme;
+        let theme_picker = self.theme_picker;
+        let help_open = self.help_open;
+        // Floor label tracks the destination floor for the duration of the
+        // slide so the per-floor agent count in the footer matches the
+        // label (otherwise users see "F1/3 ... 5 agents" with floor 2's
+        // count for ~400 ms).
+        let transition_floor_info = make_floor_info(to_floor);
+
+        self.terminal.draw(|f| {
+            let actual_full = f.area();
+            let actual_scene = crate::tui::renderer::scene_rect(actual_full);
+            crate::tui::renderer::paint_footer(
+                f,
+                &to_scene,
+                actual_full,
+                theme,
+                transition_floor_info,
+            );
+            flush_buffer_to_term_at_offset(f, from_buf, actual_scene, from_offset);
+            flush_buffer_to_term_at_offset(f, to_buf, actual_scene, to_offset);
+
+            if let Some(idx) = theme_picker {
+                crate::tui::renderer::paint_theme_picker(f, idx, actual_full, theme);
+            }
+            if popup_scale > 0.0 {
+                if let Some(notes) = crate::version::release_notes(env!("CARGO_PKG_VERSION")) {
+                    crate::tui::renderer::paint_version_popup(
+                        f,
+                        env!("CARGO_PKG_VERSION"),
+                        notes,
+                        actual_full,
+                        theme,
+                        popup_scale,
+                        now,
+                    );
+                }
+            }
+            if help_open {
+                // actual_full (not actual_scene) to match the theme
+                // picker / version popup centering on this path too.
+                crate::tui::renderer::paint_help_overlay(f, actual_full, theme);
+            }
+        })?;
+
+        self.last_popup_scale = popup_scale;
+        self.cached_layout = None;
+        // The pet isn't rendered to a single interactable position mid-slide;
+        // clear the stale position so the mouse handler can't "pet" a ghost at
+        // last frame's location during the transition.
+        self.last_pet_pos = None;
+        // Persist coffee carriers detected on EITHER floor during the slide,
+        // same EDGE logic as the normal path (insert returns true once per
+        // pantry trip). Without this a coffee run that completes
+        // mid-transition loses its cup.
+        for id in from_carriers.into_iter().chain(to_carriers) {
+            if self.coffee_holders.insert(id) {
+                self.coffee_fetched_at.insert(id, now);
+            }
+        }
+        Ok(())
+    }
 }
 
 impl<B: Backend<Error: Send + Sync + 'static>> Renderer for TuiRenderer<B> {
@@ -358,232 +584,12 @@ impl<B: Backend<Error: Send + Sync + 'static>> Renderer for TuiRenderer<B> {
         let floor_info = make_floor_info(self.current_floor);
 
         // --- Transition path: composite two floors sliding in/out ----------
-        if let Some(ref tr) = self.transition {
-            let from_floor = tr.from_floor;
-            let to_floor = tr.to_floor;
-            let t = tr.t(now);
-            let going_down = to_floor > from_floor;
-
-            // Build floor-scoped scenes for both floors. Each sub-scene
-            // uses uniform(cap) so floor arithmetic stays self-consistent
-            // with the remapped desk indices in [0..cap).
-            let from_agents = build_floor_scene(scene, from_floor);
-            let mut from_scene = SceneState::uniform(scene.floor_capacities[from_floor]);
-            for a in from_agents {
-                from_scene.agents.insert(a.agent_id, a);
-            }
-
-            let to_agents = build_floor_scene(scene, to_floor);
-            let mut to_scene = SceneState::uniform(scene.floor_capacities[to_floor]);
-            for a in to_agents {
-                to_scene.agents.insert(a.agent_id, a);
-            }
-
-            let term_size = self.terminal.size()?;
-            let full_rect = Rect {
-                x: 0,
-                y: 0,
-                width: term_size.width,
-                height: term_size.height,
-            };
-            let scene_rect = Rect {
-                x: 0,
-                y: 0,
-                width: full_rect.width,
-                height: full_rect.height.saturating_sub(1),
-            };
-
-            if scene_rect.width < 20 || scene_rect.height < 12 {
-                // Too small to render this frame: clear the interaction state the
-                // mouse handler reads, so a click doesn't hit-test against a stale
-                // layout / pet / popup left over from a larger prior frame.
-                self.cached_layout = None;
-                self.last_pet_pos = None;
-                self.last_popup_scale = 0.0;
-                return Ok(());
-            }
-
-            let buf_w = scene_rect.width;
-            let buf_h = scene_rect.height.saturating_mul(2);
-            // Compute popup scale before the split_at_mut borrows.
-            let popup_scale = self.version_popup_scale(now);
-
-            // Render both floors into their respective buffers.
-            // Use split_at_mut to get mutable access to two different indices.
-            let (lo, hi) = if from_floor < to_floor {
-                (from_floor, to_floor)
-            } else {
-                (to_floor, from_floor)
-            };
-
-            let (bufs_lo, bufs_hi) = self.floor_bufs.split_at_mut(hi);
-            let lo_buf = &mut bufs_lo[lo];
-            let hi_buf = &mut bufs_hi[0];
-            let (from_buf, to_buf) = if from_floor < to_floor {
-                (lo_buf, hi_buf)
-            } else {
-                (hi_buf, lo_buf)
-            };
-
-            let (ctxs_lo, ctxs_hi) = self.floor_ctxs.split_at_mut(hi);
-            let lo_ctx = &mut ctxs_lo[lo];
-            let hi_ctx = &mut ctxs_hi[0];
-            let (from_ctx, to_ctx) = if from_floor < to_floor {
-                (lo_ctx, hi_ctx)
-            } else {
-                (hi_ctx, lo_ctx)
-            };
-
-            from_buf.ensure_size(buf_w, buf_h, self.theme.surface.bg_fallback);
-            to_buf.ensure_size(buf_w, buf_h, self.theme.surface.bg_fallback);
-
-            let from_meta = FloorMeta::for_floor(from_floor, nf);
-            let to_meta = FloorMeta::for_floor(to_floor, nf);
-
-            // Transitions hide *text* overlays (tooltips, chitchat bubbles,
-            // labels) but keep all pixel-level visuals — including pets,
-            // coffee cups, and steam — so the slide reads as a continuous
-            // scene rather than two stripped-down stand-ins.
-            let mut transition_chitchat = std::collections::HashMap::new();
-
-            let from_active_pet = self
-                .active_pet
-                .as_ref()
-                .filter(|p| p.floor_idx == from_floor && p.is_active(now));
-            let to_active_pet = self
-                .active_pet
-                .as_ref()
-                .filter(|p| p.floor_idx == to_floor && p.is_active(now));
-            let from_pet = crate::tui::pet::select_pet_for_floor(from_meta.floor_seed, &self.pets);
-            let to_pet = crate::tui::pet::select_pet_for_floor(to_meta.floor_seed, &self.pets);
-
-            let from_carriers = render_transition_floor(
-                &from_scene,
-                from_ctx,
-                from_buf,
-                from_meta,
-                buf_w,
-                buf_h,
-                from_active_pet,
-                from_pet,
-                self.theme,
-                &self.coffee_holders,
-                &self.coffee_fetched_at,
-                &mut transition_chitchat,
-                pack,
-                now,
-                self.debug_walkable,
-            );
-            let to_carriers = render_transition_floor(
-                &to_scene,
-                to_ctx,
-                to_buf,
-                to_meta,
-                buf_w,
-                buf_h,
-                to_active_pet,
-                to_pet,
-                self.theme,
-                &self.coffee_holders,
-                &self.coffee_fetched_at,
-                &mut transition_chitchat,
-                pack,
-                now,
-                self.debug_walkable,
-            );
-
-            // Compute y-offsets for vertical slide with divider gap.
-            // t applies to total travel = screen_height + divider_height
-            // so the easing covers the full distance including the gap.
-            let h = scene_rect.height as f32;
-            let divider_h = (scene_rect.height as f32) / 5.0;
-            let total = h + divider_h;
-            let (from_offset, to_offset) = if going_down {
-                // Higher floor: current slides DOWN, new enters from TOP
-                let from_y = (t * total) as i32;
-                let to_y = -(total - t * total) as i32;
-                (from_y, to_y)
-            } else {
-                // Lower floor: current slides UP, new enters from BOTTOM
-                let from_y = -(t * total) as i32;
-                let to_y = (total - t * total) as i32;
-                (from_y, to_y)
-            };
-
-            let theme = self.theme;
-            let theme_picker = self.theme_picker;
-            let help_open = self.help_open;
-            // Floor label tracks the destination floor for the duration of the
-            // slide so the per-floor agent count in the footer matches the
-            // label (otherwise users see "F1/3 ... 5 agents" with floor 2's
-            // count for ~400 ms).
-            let transition_floor_info = make_floor_info(to_floor);
-
-            self.terminal.draw(|f| {
-                let actual_full = f.area();
-                let actual_scene = Rect {
-                    x: 0,
-                    y: 0,
-                    width: actual_full.width,
-                    height: actual_full.height.saturating_sub(1),
-                };
-                crate::tui::renderer::paint_footer(
-                    f,
-                    &to_scene,
-                    actual_full,
-                    theme,
-                    transition_floor_info,
-                );
-                flush_buffer_to_term_at_offset(f, from_buf, actual_scene, from_offset);
-                flush_buffer_to_term_at_offset(f, to_buf, actual_scene, to_offset);
-
-                if let Some(idx) = theme_picker {
-                    crate::tui::renderer::paint_theme_picker(f, idx, actual_full, theme);
-                }
-                if popup_scale > 0.0 {
-                    if let Some(notes) = crate::version::release_notes(env!("CARGO_PKG_VERSION")) {
-                        crate::tui::renderer::paint_version_popup(
-                            f,
-                            env!("CARGO_PKG_VERSION"),
-                            notes,
-                            actual_full,
-                            theme,
-                            popup_scale,
-                            now,
-                        );
-                    }
-                }
-                if help_open {
-                    // actual_full (not actual_scene) to match the theme
-                    // picker / version popup centering on this path too.
-                    crate::tui::renderer::paint_help_overlay(f, actual_full, theme);
-                }
-            })?;
-
-            self.last_popup_scale = popup_scale;
-            self.cached_layout = None;
-            // The pet isn't rendered to a single interactable position mid-slide;
-            // clear the stale position so the mouse handler can't "pet" a ghost at
-            // last frame's location during the transition.
-            self.last_pet_pos = None;
-            // Persist coffee carriers detected on EITHER floor during the slide,
-            // same EDGE logic as the normal path (insert returns true once per
-            // pantry trip). Without this a coffee run that completes
-            // mid-transition loses its cup.
-            for id in from_carriers.into_iter().chain(to_carriers) {
-                if self.coffee_holders.insert(id) {
-                    self.coffee_fetched_at.insert(id, now);
-                }
-            }
-            return Ok(());
+        if self.transition.is_some() {
+            return self.render_transition(scene, pack, now, nf);
         }
 
         // --- Normal path: single floor ------------------------------------
-        let floor_agents = build_floor_scene(scene, self.current_floor);
-        let mut floor_scene = SceneState::uniform(scene.floor_capacities[self.current_floor]);
-        for agent in floor_agents {
-            floor_scene.agents.insert(agent.agent_id, agent);
-        }
+        let floor_scene = project_floor_scene(scene, self.current_floor);
 
         // Evict coffee state for agents no longer in the scene.
         self.coffee_holders

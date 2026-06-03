@@ -16,7 +16,7 @@
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use crate::source::Activity;
+use crate::source::{Activity, ToolDetail};
 use crate::state::{ActivityState, AgentSlot};
 
 /// Fold the time the slot has spent Active into `active_ms`, then it's safe to
@@ -69,7 +69,9 @@ pub(crate) fn enter_delegating(
     slot.state = ActivityState::Active {
         activity: Activity::Typing,
         tool_use_id,
-        detail: Some(Arc::<str>::from("Delegating")),
+        // Single source of truth: the tui palette string-matches this against
+        // `ToolDetail::Task.display()`, so don't re-spell the literal here.
+        detail: Some(Arc::<str>::from(ToolDetail::Task.display())),
     };
     slot.state_started_at = now;
     slot.pending_idle_at = None;

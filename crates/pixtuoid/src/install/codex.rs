@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{anyhow, Context, Result};
 use toml::value::Table;
 
+use crate::install::io;
 use crate::install::target::MergeOutcome;
 
 const SENTINEL_KEY: &str = "_pixtuoid";
@@ -19,8 +20,7 @@ const CODEX_EVENTS: &[&str] = &[
 ];
 
 pub fn default_config_path() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-    PathBuf::from(format!("{home}/.codex/config.toml"))
+    io::home_relative(".codex/config.toml")
 }
 
 /// POSIX single-quote a string so a shell treats it as one literal token —

@@ -21,7 +21,8 @@ use pixtuoid_core::walkable::OccupancyOverlay;
 use pixtuoid_core::AgentId;
 
 use crate::tui::motion::{
-    advance_wander, octile_path_len, MotionState, WalkLeg, WalkPathSnapshot, WanderPhase,
+    advance_wander, octile_path_len, settle_len, MotionState, WalkLeg, WalkPathSnapshot,
+    WanderPhase,
 };
 
 pub use pixtuoid_core::pose::{
@@ -233,15 +234,9 @@ pub fn derive_with_routing(
             } else {
                 (from, None)
             };
-            let h = slot.agent_id.raw();
-            let jx = ((h % 9) as i32 - 4) as i16;
-            let jy = (((h >> 16) % 9) as i32 - 4) as i16;
-            let to_jittered = Point {
-                x: door_target.x.saturating_add_signed(jx),
-                y: door_target.y.saturating_add_signed(jy),
-            };
+            let to_jittered = jitter_dest(slot.agent_id, door_target);
             let path = router.route(&layout.walkable, overlay, route_from, to_jittered);
-            let glide = chair_rise.map_or(0, |c| octile_distance(c, route_from));
+            let glide = settle_len(route_from, chair_rise);
             let path_len = (octile_path_len(&path) + glide).max(1);
             let profile = walk_profile(path_len, WalkIntent::Exit, slot.agent_id);
             // Store the ORIGIN (chair when a desk exit) so the render can detect
@@ -332,7 +327,7 @@ pub fn derive_with_routing(
         // direct target with no settle.
         let (approach, chair_settle) = desk_leg_endpoint(desk, layout);
         let settle = chair_settle.map_or(Settle::None, Settle::End);
-        let settle_px = chair_settle.map_or(0, |chair| octile_distance(approach, chair));
+        let settle_px = settle_len(approach, chair_settle);
 
         let mstate = motion
             .entry(slot.agent_id)
@@ -340,13 +335,7 @@ pub fn derive_with_routing(
 
         // Snapshot on first sighting if we're within the spawn window.
         if mstate.entry.is_none() && since_spawn < ENTRY_ANIMATION_MS {
-            let h = slot.agent_id.raw();
-            let jx = ((h % 9) as i32 - 4) as i16;
-            let jy = (((h >> 16) % 9) as i32 - 4) as i16;
-            let to_jittered = Point {
-                x: approach.x.saturating_add_signed(jx),
-                y: approach.y.saturating_add_signed(jy),
-            };
+            let to_jittered = jitter_dest(slot.agent_id, approach);
             let path = router.route(&layout.walkable, overlay, door, to_jittered);
             // Profile covers door→approach PLUS the short settle glide onto the chair.
             let path_len = (octile_path_len(&path) + settle_px).max(1);
@@ -603,7 +592,7 @@ pub fn derive_with_routing(
                         // urgent return brisk under pure physics.
                         let (snap_target, chair_settle) = desk_leg_endpoint(desk, layout);
                         let len = octile_path_len(&[prev, snap_target])
-                            + chair_settle.map_or(0, |c| octile_distance(snap_target, c));
+                            + settle_len(snap_target, chair_settle);
                         let p = walk_profile(len, WalkIntent::SnapBack, slot.agent_id);
                         ms_entry.snap_back = Some(WalkLeg {
                             started_at: slot.state_started_at,
@@ -769,13 +758,7 @@ fn route_walking_pose(
         match &ms.walk_path {
             Some(wp) if wp.from == from && wp.to == to => wp.path.clone(),
             _ => {
-                let h = slot.agent_id.raw();
-                let jx = ((h % 9) as i32 - 4) as i16;
-                let jy = (((h >> 16) % 9) as i32 - 4) as i16;
-                let to_jittered = Point {
-                    x: to.x.saturating_add_signed(jx),
-                    y: to.y.saturating_add_signed(jy),
-                };
+                let to_jittered = jitter_dest(slot.agent_id, to);
                 let mut p = router.route(&layout.walkable, overlay, from, to_jittered);
                 if let Some(last) = p.last_mut() {
                     *last = to;
@@ -884,6 +867,21 @@ pub(in crate::tui) fn octile_distance(a: Point, b: Point) -> u32 {
     let dx = (a.x as i32 - b.x as i32).unsigned_abs();
     let dy = (a.y as i32 - b.y as i32).unsigned_abs();
     14 * dx.min(dy) + 10 * (dx.max(dy) - dx.min(dy))
+}
+
+/// Per-agent ±4px routing-destination jitter, hashed from the agent_id, so
+/// converging agents take visibly different polylines (breaks the "ant trail")
+/// — the entry/exit walk targets and the wander walk-path freeze all perturb
+/// the GOAL the same way. Output must stay bit-identical across the three call
+/// sites (same hash, same `saturating_add_signed`).
+fn jitter_dest(id: AgentId, p: Point) -> Point {
+    let h = id.raw();
+    let jx = ((h % 9) as i32 - 4) as i16;
+    let jy = (((h >> 16) % 9) as i32 - 4) as i16;
+    Point {
+        x: p.x.saturating_add_signed(jx),
+        y: p.y.saturating_add_signed(jy),
+    }
 }
 
 #[cfg(test)]

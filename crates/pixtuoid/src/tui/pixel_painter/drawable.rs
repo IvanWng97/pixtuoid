@@ -26,6 +26,7 @@ use super::effects::{
     paint_coffee_steam, paint_pet_hearts, paint_screen_glow, paint_sleep_z, paint_thinking_dots,
     paint_waiting_bubble, paint_walking_dust,
 };
+use super::epoch_ms;
 use super::furniture::{
     paint_area_rug, paint_coffee_table, paint_pantry_chair, paint_pantry_table, paint_side_table,
 };
@@ -183,10 +184,7 @@ pub(super) fn pet_position(
     pack.animation(kind.walk_anim())?;
     layout.corridor?;
 
-    let elapsed_ms = now
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0);
+    let elapsed_ms = epoch_ms(now);
 
     const CYCLE_MS: u64 = 40_000;
     let cycle_n = (elapsed_ms / CYCLE_MS).wrapping_add(pet_seed);

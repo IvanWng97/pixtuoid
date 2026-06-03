@@ -104,7 +104,7 @@ pub fn hit_test_coffee_machine(layout: &Layout, mx: u16, my: u16) -> bool {
 pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static str> {
     use crate::tui::layout::{
         furniture_def, Furniture, PlantItem, PlantKind, PodDecor, PodDecorItem, WallDecor,
-        WallDecorItem, WaypointKind, DESK_H, DESK_W,
+        WallDecorItem, WaypointKind, DESK_H, DESK_W, ELEVATOR_H, ELEVATOR_W,
     };
     // Hover boxes derive from the one furniture table — `.visual` (the visible
     // sprite) for what the user points at, `.footprint` where the obstacle is
@@ -310,9 +310,9 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
         }
     }
 
-    // Door / elevator (16×14 sprite)
+    // Door / elevator
     if let Some(d) = layout.door {
-        if hit(d.x, d.y, 16, 14) {
+        if hit(d.x, d.y, ELEVATOR_W, ELEVATOR_H) {
             return Some("Elevator");
         }
     }

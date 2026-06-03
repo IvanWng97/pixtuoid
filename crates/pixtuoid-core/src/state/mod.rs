@@ -115,9 +115,8 @@ impl SceneState {
         offsets
     }
 
-    /// Which floor does `desk_index` belong to?
-    pub fn floor_of(&self, desk_index: usize) -> usize {
-        let offsets = self.cumulative_offsets();
+    /// Which floor does `desk_index` belong to, given precomputed `offsets`?
+    fn floor_of_with_offsets(&self, desk_index: usize, offsets: &[usize; MAX_FLOORS]) -> usize {
         for i in (0..MAX_FLOORS).rev() {
             if self.floor_capacities[i] > 0 && desk_index >= offsets[i] {
                 return i;
@@ -126,10 +125,15 @@ impl SceneState {
         0
     }
 
+    /// Which floor does `desk_index` belong to?
+    pub fn floor_of(&self, desk_index: usize) -> usize {
+        self.floor_of_with_offsets(desk_index, &self.cumulative_offsets())
+    }
+
     /// Local desk offset within the floor.
     pub fn floor_local_desk(&self, desk_index: usize) -> usize {
         let offsets = self.cumulative_offsets();
-        let floor = self.floor_of(desk_index);
+        let floor = self.floor_of_with_offsets(desk_index, &offsets);
         desk_index - offsets[floor]
     }
 

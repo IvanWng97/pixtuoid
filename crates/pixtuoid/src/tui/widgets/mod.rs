@@ -19,10 +19,40 @@ use std::time::SystemTime;
 use pixtuoid_core::sprite::Rgb;
 use pixtuoid_core::state::ActivityState;
 use pixtuoid_core::SceneState;
+use ratatui::layout::Rect;
 use ratatui::style::Color;
 
 fn to_color(c: Rgb) -> Color {
     Color::Rgb(c.r, c.g, c.b)
+}
+
+/// A `desired_w × desired_h` rect clamped to `bounds` and centered within it,
+/// anchored off `bounds`'s origin (not 0,0) so a non-zero-origin bounds rect
+/// positions correctly. Shared by the keyboard-help and theme-picker overlays.
+/// The width-clamp also keeps `Clear::render` (which does not intersect the
+/// buffer area) from panicking on a too-narrow terminal.
+fn centered_in(bounds: Rect, desired_w: u16, desired_h: u16) -> Rect {
+    let w = desired_w.min(bounds.width);
+    let h = desired_h.min(bounds.height);
+    Rect {
+        x: bounds.x + bounds.width.saturating_sub(w) / 2,
+        y: bounds.y + bounds.height.saturating_sub(h) / 2,
+        width: w,
+        height: h,
+    }
+}
+
+/// Format a duration in seconds as a compact `"{h}h{m}m"` / `"{m}m"` / `"<1m"`
+/// string (no prefix). The HUD uptime badge prepends "↑"; the tooltip uses the
+/// bare form. Bucket thresholds: ≥1h shows hours+minutes, ≥1m shows minutes.
+fn compact_hms(secs: u64) -> String {
+    if secs >= 3600 {
+        format!("{}h{}m", secs / 3600, (secs % 3600) / 60)
+    } else if secs >= 60 {
+        format!("{}m", secs / 60)
+    } else {
+        "<1m".to_string()
+    }
 }
 
 /// Persistent scrolling ticker queue. Messages append to the end and scroll

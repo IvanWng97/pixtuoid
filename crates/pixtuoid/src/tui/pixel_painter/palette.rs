@@ -7,7 +7,7 @@
 //! because the palette tint code uses them directly and they're widely
 //! shared with background/effects.
 
-use pixtuoid_core::sprite::{Frame, Palette, Pixel, Rgb};
+use pixtuoid_core::sprite::{Frame, Palette, Pixel, Rgb, RgbBuffer};
 use pixtuoid_core::AgentSlot;
 
 use crate::tui::pose;
@@ -337,11 +337,7 @@ pub(super) fn agent_palette(base: &Palette, agent: &AgentSlot, glow_tint: Option
     let hair = HAIR_PRESETS[(seed / 7) % HAIR_PRESETS.len()];
     let skin = SKIN_PRESETS[(seed / 13) % SKIN_PRESETS.len()];
     let final_skin = if let Some(tint) = glow_tint {
-        Rgb {
-            r: blend(skin.r, tint.r, 0.18),
-            g: blend(skin.g, tint.g, 0.18),
-            b: blend(skin.b, tint.b, 0.18),
-        }
+        blend_rgb(skin, tint, 0.18)
     } else {
         skin
     };
@@ -421,6 +417,23 @@ pub(super) fn blend(a: u8, b: u8, t: f32) -> u8 {
     ((a as f32) * (1.0 - t) + (b as f32) * t)
         .round()
         .clamp(0.0, 255.0) as u8
+}
+
+/// Per-channel sRGB blend toward `b` by `t` — the `Rgb { r, g, b }` triple
+/// (`blend` on each channel, one shared `t`) written once. Cheap; use `mix_lab`
+/// where the perceptual difference is visible.
+pub(super) fn blend_rgb(a: Rgb, b: Rgb, t: f32) -> Rgb {
+    Rgb {
+        r: blend(a.r, b.r, t),
+        g: blend(a.g, b.g, t),
+        b: blend(a.b, b.b, t),
+    }
+}
+
+/// Composite `tint` over the existing buffer pixel at `(x, y)` by `t`. The
+/// frosted-glass / haze / overlay primitive (was glass.rs's private `glass_over`).
+pub(super) fn blend_over(buf: &RgbBuffer, x: u16, y: u16, tint: Rgb, t: f32) -> Rgb {
+    blend_rgb(buf.get(x, y), tint, t)
 }
 
 /// Perceptually-correct Lab-space mix between two sRGB colors. Twilight

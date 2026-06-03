@@ -145,6 +145,18 @@ pub(crate) fn clip_widget_rect(rect: Rect, bounds: Rect) -> Option<Rect> {
     })
 }
 
+/// The drawable scene rect: the full terminal area minus the 1-row footer.
+/// Single source of truth for the "everything but the footer" geometry that
+/// both `draw_scene` and the floor-transition path re-derive each frame.
+pub(crate) fn scene_rect(full: Rect) -> Rect {
+    Rect {
+        x: 0,
+        y: 0,
+        width: full.width,
+        height: full.height.saturating_sub(1),
+    }
+}
+
 pub type Term = Terminal<CrosstermBackend<Stdout>>;
 
 // --- Terminal lifecycle ---------------------------------------------------
@@ -195,12 +207,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         width: term_size.width,
         height: term_size.height,
     };
-    let scene_rect = Rect {
-        x: 0,
-        y: 0,
-        width: full_rect.width,
-        height: full_rect.height.saturating_sub(1),
-    };
+    let scene_rect = scene_rect(full_rect);
     let theme = ctx.theme;
     let floor_info = ctx.floor_info;
     let floor = ctx.floor;
@@ -281,12 +288,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         // Re-derive rects from the actual frame buffer to guard against
         // terminal resize between term.size() and term.draw().
         let actual_full = f.area();
-        let actual_scene = Rect {
-            x: 0,
-            y: 0,
-            width: actual_full.width,
-            height: actual_full.height.saturating_sub(1),
-        };
+        let actual_scene = crate::tui::renderer::scene_rect(actual_full);
         paint_footer(f, scene, actual_full, theme, floor_info);
         flush_buffer_to_term(f, buf, actual_scene);
         paint_label_widgets(
@@ -327,38 +329,36 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         }
         if tooltip_agent.is_none() && pinned_agent.is_none() {
             if let Some((mx, my)) = mouse_pos {
+                // Priority chain: coffee machine > pet (only when the cursor is
+                // over it) > furniture. `.filter` keeps the pet arm a single
+                // branch so a present-but-not-hit pet falls through to the ONE
+                // furniture fallthrough below (no per-branch duplication).
+                let pet_hit = ctx
+                    .last_pet_pos
+                    .filter(|f| hit_test_pet(f.kind, f.pos, f.anim, mx, my));
                 if hit_test_coffee_machine(&layout, mx, my) {
                     paint_coffee_tooltip(f, mx, my, actual_scene, theme);
-                } else if let Some(PetFrame {
-                    pos: pet_pos,
-                    anim,
-                    kind,
-                }) = ctx.last_pet_pos
-                {
-                    if hit_test_pet(kind, pet_pos, anim, mx, my) {
-                        let on_cooldown = ctx.active_pet.is_some_and(|p| p.is_active(now));
-                        // `last_pet_pos` is only Some on the normal render path,
-                        // where it was written from `floor_pet` — so their kinds
-                        // agree and `floor_pet.name` is the right label. The
-                        // `default_name` arm is defense-in-depth, not a live path.
-                        let display_name = ctx
-                            .floor_pet
-                            .map(|p| p.name.as_str())
-                            .unwrap_or_else(|| kind.default_name());
-                        paint_pet_tooltip(
-                            f,
-                            kind,
-                            anim,
-                            on_cooldown,
-                            display_name,
-                            mx,
-                            my,
-                            actual_scene,
-                            theme,
-                        );
-                    } else if let Some(label) = hit_test_furniture(&layout, mx, my) {
-                        paint_furniture_tooltip(f, label, mx, my, actual_scene, theme);
-                    }
+                } else if let Some(PetFrame { anim, kind, .. }) = pet_hit {
+                    let on_cooldown = ctx.active_pet.is_some_and(|p| p.is_active(now));
+                    // `last_pet_pos` is only Some on the normal render path,
+                    // where it was written from `floor_pet` — so their kinds
+                    // agree and `floor_pet.name` is the right label. The
+                    // `default_name` arm is defense-in-depth, not a live path.
+                    let display_name = ctx
+                        .floor_pet
+                        .map(|p| p.name.as_str())
+                        .unwrap_or_else(|| kind.default_name());
+                    paint_pet_tooltip(
+                        f,
+                        kind,
+                        anim,
+                        on_cooldown,
+                        display_name,
+                        mx,
+                        my,
+                        actual_scene,
+                        theme,
+                    );
                 } else if let Some(label) = hit_test_furniture(&layout, mx, my) {
                     paint_furniture_tooltip(f, label, mx, my, actual_scene, theme);
                 }

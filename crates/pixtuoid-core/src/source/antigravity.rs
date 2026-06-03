@@ -4,10 +4,12 @@ use anyhow::Result;
 use async_trait::async_trait;
 use serde_json::Value;
 
-use crate::source::decoder::make_tool_detail;
+use crate::source::decoder::{cwd_basename_label, make_tool_detail};
 use crate::source::jsonl::JsonlWatcher;
 use crate::source::{Activity, AgentEvent, Source, TaggedSender};
 use crate::AgentId;
+
+pub const SOURCE_NAME: &str = "antigravity";
 
 /// Source that watches Antigravity CLI conversation log directories.
 /// Uses JsonlWatcher with a custom decoder for the Antigravity JSONL
@@ -28,13 +30,13 @@ impl AntigravitySource {
 #[async_trait]
 impl Source for AntigravitySource {
     fn name(&self) -> &str {
-        "antigravity"
+        SOURCE_NAME
     }
 
     async fn run(self: Box<Self>, tx: TaggedSender) -> Result<()> {
         let watcher = JsonlWatcher::new(
             self.brain_root.clone(),
-            "antigravity".to_string(),
+            SOURCE_NAME.to_string(),
             decode_ag_line,
             derive_ag_label,
             ag_session_ended,
@@ -66,44 +68,7 @@ pub fn decode_ag_line(transcript_path: &str, source: &str, v: Value) -> Result<V
                 };
                 let name = tc_obj.get("name").and_then(|s| s.as_str()).unwrap_or("?");
                 let args = tc_obj.get("args");
-                if name == "ask_permission" || name == "ask_question" {
-                    out.push(AgentEvent::Waiting {
-                        agent_id,
-                        reason: "asking permission".to_string(),
-                    });
-                } else {
-                    let mut normalized_input = serde_json::Map::new();
-                    if let Some(args_obj) = args.and_then(|v| v.as_object()) {
-                        let raw_val = args_obj
-                            .get("DirectoryPath")
-                            .or_else(|| args_obj.get("AbsolutePath"))
-                            .or_else(|| args_obj.get("TargetFile"))
-                            .or_else(|| args_obj.get("CommandLine"))
-                            .or_else(|| args_obj.get("SearchPath"))
-                            .or_else(|| args_obj.get("query"))
-                            .and_then(|v| v.as_str());
-                        if let Some(s) = raw_val {
-                            let clean = s
-                                .strip_prefix('"')
-                                .and_then(|s| s.strip_suffix('"'))
-                                .unwrap_or(s);
-                            let key = match name {
-                                "run_command" => "command",
-                                "grep_search" => "pattern",
-                                _ => "file_path",
-                            };
-                            normalized_input
-                                .insert(key.to_string(), Value::String(clean.to_string()));
-                        }
-                    }
-                    let normalized = Value::Object(normalized_input);
-                    out.push(AgentEvent::ActivityStart {
-                        agent_id,
-                        activity: Activity::Typing,
-                        tool_use_id: Some(format!("ag-{step_index}-{i}")),
-                        detail: Some(make_tool_detail(name, Some(&normalized))),
-                    });
-                }
+                out.push(decode_ag_tool_call(agent_id, name, args, step_index, i));
             }
         }
     } else if step_type != "USER_INPUT" && step_type != "CONVERSATION_HISTORY" && step_index > 0 {
@@ -123,12 +88,91 @@ fn ag_session_ended(_tail: &[u8]) -> bool {
     false
 }
 
-fn derive_ag_label(_path: &Path, _source: &str, cwd: &Path) -> String {
-    if cwd != Path::new("") && cwd != Path::new("/") {
-        if let Some(name) = cwd.file_name().and_then(|n| n.to_str()) {
-            return format!("ag·{name}");
+/// Decode one tool call within a `PLANNER_RESPONSE` step. A permission/question
+/// prompt becomes `Waiting`; anything else becomes an `ActivityStart` keyed
+/// `ag-{step_index}-{i}`. That id is load-bearing: the reducer ages out the
+/// non-primary (`i > 0`) starts via its pending_idle debounce, and the NEXT
+/// step ends the primary with `ag-{step_index-1}-0`, so the `i == 0` start must
+/// carry exactly this id to be matched.
+fn decode_ag_tool_call(
+    agent_id: AgentId,
+    name: &str,
+    args: Option<&Value>,
+    step_index: i64,
+    i: usize,
+) -> AgentEvent {
+    if name == "ask_permission" || name == "ask_question" {
+        return AgentEvent::Waiting {
+            agent_id,
+            reason: "asking permission".to_string(),
+        };
+    }
+    let normalized = normalize_ag_tool_input(name, args);
+    AgentEvent::ActivityStart {
+        agent_id,
+        activity: Activity::Typing,
+        tool_use_id: Some(format!("ag-{step_index}-{i}")),
+        detail: Some(make_tool_detail(name, Some(&normalized))),
+    }
+}
+
+/// Normalize an Antigravity tool call's `args` to the `{key: value}` shape
+/// `make_tool_detail` reads: pick the first present path/command field, strip
+/// surrounding quotes, and key it by the tool's category. Returns an empty
+/// object when no recognized field is present.
+fn normalize_ag_tool_input(name: &str, args: Option<&Value>) -> Value {
+    let mut normalized = serde_json::Map::new();
+    if let Some(args_obj) = args.and_then(|v| v.as_object()) {
+        let raw_val = args_obj
+            .get("DirectoryPath")
+            .or_else(|| args_obj.get("AbsolutePath"))
+            .or_else(|| args_obj.get("TargetFile"))
+            .or_else(|| args_obj.get("CommandLine"))
+            .or_else(|| args_obj.get("SearchPath"))
+            .or_else(|| args_obj.get("query"))
+            .and_then(|v| v.as_str());
+        if let Some(s) = raw_val {
+            let clean = s
+                .strip_prefix('"')
+                .and_then(|s| s.strip_suffix('"'))
+                .unwrap_or(s);
+            let key = match name {
+                "run_command" => "command",
+                "grep_search" => "pattern",
+                _ => "file_path",
+            };
+            normalized.insert(key.to_string(), Value::String(clean.to_string()));
         }
     }
+    Value::Object(normalized)
+}
 
-    "ag".to_string()
+fn derive_ag_label(_path: &Path, _source: &str, cwd: &Path) -> String {
+    cwd_basename_label("ag", cwd).unwrap_or_else(|| "ag".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn label_is_ag_basename_or_bare_prefix() {
+        assert_eq!(
+            derive_ag_label(
+                Path::new("/x"),
+                SOURCE_NAME,
+                Path::new("/Users/me/dotfiles")
+            ),
+            "ag·dotfiles"
+        );
+        // Empty / root cwd fall back to the bare prefix.
+        assert_eq!(
+            derive_ag_label(Path::new("/x"), SOURCE_NAME, Path::new("")),
+            "ag"
+        );
+        assert_eq!(
+            derive_ag_label(Path::new("/x"), SOURCE_NAME, Path::new("/")),
+            "ag"
+        );
+    }
 }

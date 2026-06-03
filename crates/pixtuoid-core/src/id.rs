@@ -4,9 +4,22 @@ use std::fmt;
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct AgentId(u64);
 
+/// splitmix64 finalizer. FNV-1a (used by [`AgentId::from_parts`]) doesn't
+/// avalanche the mid/high bits for short, similar inputs — desk-adjacent ids
+/// collide to a couple of buckets — so the personality slicers (`speed_mult`,
+/// `pause_ms_for`, dwell jitter) finalize the raw id (xor a per-purpose tag)
+/// through this before taking a bit window. Not cryptographic.
+pub(crate) fn splitmix64(z: u64) -> u64 {
+    let z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    let z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    z ^ (z >> 31)
+}
+
 impl AgentId {
-    /// CC-specific shortcut — same as `from_parts("claude-code", path)`. Kept
-    /// for backwards compatibility with the existing CC decoder.
+    /// CC-specific shortcut — same as `from_parts("claude-code", path)`. A
+    /// test/example ergonomics shim only: production code calls `from_parts`
+    /// with an explicit source. Kept because the test + snapshot suites lean on
+    /// it heavily.
     pub fn from_transcript_path(path: &str) -> Self {
         Self::from_parts("claude-code", path)
     }

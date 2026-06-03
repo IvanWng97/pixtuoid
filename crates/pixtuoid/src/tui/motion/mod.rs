@@ -54,9 +54,6 @@ pub enum WanderPhase {
     WalkingBack,
 }
 
-/// Per-agent walk-timing state owned by the TUI layer.
-///
-/// One `MotionState` exists per live agent (per floor). Fields are
 /// A one-shot walk leg (exit / snap-back): the wall-clock instant the leg
 /// armed, its frozen physics profile, and the FROZEN origin recorded at
 /// arm-time (reused every frame so the leg doesn't drift). Names the fields
@@ -68,8 +65,11 @@ pub struct WalkLeg {
     pub from: Point,
 }
 
-/// `Option` so the struct can be default-initialised for new agents
-/// and populated lazily on the first relevant walk-start frame.
+/// Per-agent walk-timing state owned by the TUI layer.
+///
+/// One `MotionState` exists per live agent (per floor). Fields are `Option`
+/// so the struct can be default-initialised for new agents and populated
+/// lazily on the first relevant walk-start frame.
 #[derive(Debug, Clone)]
 pub struct MotionState {
     pub agent_id: AgentId,
@@ -297,7 +297,7 @@ pub fn advance_wander(
                     // else t reaches 1000 before the sprite arrives and it pops.
                     let (from, chair_settle) = desk_leg_endpoint(desk, layout);
                     let path = router.route(&layout.walkable, overlay, from, dest);
-                    let desk_glide = chair_settle.map_or(0, |c| octile_distance(c, from));
+                    let desk_glide = settle_len(from, chair_settle);
                     let len = (octile_path_len(&path) + desk_glide + settle_len(dest, seat)).max(1);
                     ms.wander_profile = Some(walk_profile(len, WalkIntent::WanderOut, id));
 
@@ -330,25 +330,7 @@ pub fn advance_wander(
             if may_transition && walk_arrived(profile, elapsed_phase) {
                 let walk_total = profile.duration_ms + profile.pause_ms;
                 // Snapshot the walk-back profile (overlay may differ now).
-                // Endpoint is desk+(6,4) to match seated_anchor so there's no
-                // jump on arrival; this intentionally differs from
-                // core::idle_pose's raw `to: desk` (only the routed TUI path is
-                // user-visible).
-                let desk = layout
-                    .home_desks
-                    .get(slot.desk_index)
-                    .copied()
-                    .unwrap_or(ms.wander_dest);
-                // Arrive via the desk approach cell (glide onto the chair),
-                // mirroring pose's WalkingBack leg; add the chair-glide so the
-                // profile covers the full polyline (no pop on arrival).
-                let (snap_to, chair_settle) = desk_leg_endpoint(desk, layout);
-                let back_path = router.route(&layout.walkable, overlay, ms.wander_dest, snap_to);
-                let desk_glide = chair_settle.map_or(0, |c| octile_distance(snap_to, c));
-                let back_len = (octile_path_len(&back_path)
-                    + settle_len(ms.wander_dest, ms.wander_seat)
-                    + desk_glide)
-                    .max(1);
+                let back = snapshot_back_profile(slot, ms, layout, router, overlay);
 
                 ms.wander_phase = WanderPhase::AtWaypoint;
                 ms.wander_phase_started_at = ms
@@ -356,7 +338,7 @@ pub fn advance_wander(
                     .checked_add(Duration::from_millis(walk_total))
                     .unwrap_or(now);
                 // Store back profile for use at AtWaypoint → WalkingBack transition.
-                ms.wander_profile = Some(walk_profile(back_len, WalkIntent::WanderBack, id));
+                ms.wander_profile = Some(back);
 
                 (WanderPhase::AtWaypoint, 1000)
             } else {
@@ -369,20 +351,8 @@ pub fn advance_wander(
                 // Use the back-leg profile already snapshotted at WalkingOut arrival.
                 // If somehow missing (shouldn't happen), re-snapshot now.
                 if ms.wander_profile.is_none() {
-                    let desk = layout
-                        .home_desks
-                        .get(slot.desk_index)
-                        .copied()
-                        .unwrap_or(ms.wander_dest);
-                    let (snap_to, chair_settle) = desk_leg_endpoint(desk, layout);
-                    let back_path =
-                        router.route(&layout.walkable, overlay, ms.wander_dest, snap_to);
-                    let desk_glide = chair_settle.map_or(0, |c| octile_distance(snap_to, c));
-                    let back_len = (octile_path_len(&back_path)
-                        + settle_len(ms.wander_dest, ms.wander_seat)
-                        + desk_glide)
-                        .max(1);
-                    ms.wander_profile = Some(walk_profile(back_len, WalkIntent::WanderBack, id));
+                    let back = snapshot_back_profile(slot, ms, layout, router, overlay);
+                    ms.wander_profile = Some(back);
                 }
 
                 ms.wander_phase = WanderPhase::WalkingBack;
@@ -497,6 +467,40 @@ fn pick_wander_dest(
 
 /// Sum of octile distances along a routed polyline.
 ///
+/// Snapshot the WanderBack `WalkProfile`: route `wander_dest → desk approach
+/// cell`, add the seat-rise (`settle_len(wander_dest, wander_seat)`) and the
+/// chair-glide settle, then freeze a `WanderBack` profile over that full
+/// polyline length (no pop on arrival).
+///
+/// Endpoint is the desk approach cell (matching `seated_anchor` via the
+/// chair-glide) so there's no jump on arrival; this intentionally differs from
+/// `core::idle_pose`'s raw `to: desk` (only the routed TUI path is
+/// user-visible). Shared by the WalkingOut-arrival snapshot and the AtWaypoint
+/// "shouldn't happen" fallback so the two can't drift.
+fn snapshot_back_profile(
+    slot: &AgentSlot,
+    ms: &MotionState,
+    layout: &Layout,
+    router: &mut dyn Router,
+    overlay: &OccupancyOverlay,
+) -> WalkProfile {
+    let desk = layout
+        .home_desks
+        .get(slot.desk_index)
+        .copied()
+        .unwrap_or(ms.wander_dest);
+    // Arrive via the desk approach cell (glide onto the chair), mirroring pose's
+    // WalkingBack leg; add the chair-glide so the profile covers the full
+    // polyline (no pop on arrival).
+    let (snap_to, chair_settle) = desk_leg_endpoint(desk, layout);
+    let back_path = router.route(&layout.walkable, overlay, ms.wander_dest, snap_to);
+    let desk_glide = settle_len(snap_to, chair_settle);
+    let back_len =
+        (octile_path_len(&back_path) + settle_len(ms.wander_dest, ms.wander_seat) + desk_glide)
+            .max(1);
+    walk_profile(back_len, WalkIntent::WanderBack, slot.agent_id)
+}
+
 /// Reuses `pose::octile_distance` (the same metric A* uses) so the
 /// snapshotted path length is consistent with per-segment timing.
 ///
@@ -511,7 +515,7 @@ pub fn octile_path_len(path: &[Point]) -> u32 {
 /// Octile length of the settle segment `approach → seat`, or 0 when there is no
 /// seat (obstacle/aimless). Added to a wander leg's profile length so its
 /// DURATION covers the full walk including the short sit-down/stand-up settle.
-fn settle_len(approach: Point, seat: Option<Point>) -> u32 {
+pub(in crate::tui) fn settle_len(approach: Point, seat: Option<Point>) -> u32 {
     seat.map_or(0, |s| octile_distance(approach, s))
 }
 

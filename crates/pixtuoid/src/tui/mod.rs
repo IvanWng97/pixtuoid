@@ -66,6 +66,27 @@ enum KeyAction {
     ToggleWalkableDebug,
 }
 
+/// Left-click pin toggle: if an agent is pinned, clear it; otherwise hit-test
+/// the click against the desk layout and pin whatever it lands on. Identical
+/// in both the pet-present and pet-absent click branches, so it lives here.
+fn toggle_pin<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
+    renderer: &mut TuiRenderer<B>,
+    scene_rx: &SceneRx,
+    col: u16,
+    row: u16,
+) {
+    let pinned = renderer.pinned_agent();
+    if pinned.is_some() {
+        renderer.set_pinned_agent(None);
+    } else {
+        let snap = scene_rx.borrow().clone();
+        let hit = renderer
+            .cached_layout()
+            .and_then(|layout| renderer::hit_test_from_tui(&snap, layout, col, row));
+        renderer.set_pinned_agent(hit);
+    }
+}
+
 fn is_quit_chord(code: KeyCode, mods: KeyModifiers) -> bool {
     matches!(
         (code, mods),
@@ -346,30 +367,10 @@ pub async fn run_tui(
                                         floor_idx: renderer.current_floor(),
                                     }));
                                 } else {
-                                    let pinned = renderer.pinned_agent();
-                                    if pinned.is_some() {
-                                        renderer.set_pinned_agent(None);
-                                    } else {
-                                        let snap = scene_rx.borrow().clone();
-                                        let hit = renderer.cached_layout().and_then(|layout| {
-                                            renderer::hit_test_from_tui(
-                                                &snap, layout, m.column, m.row,
-                                            )
-                                        });
-                                        renderer.set_pinned_agent(hit);
-                                    }
+                                    toggle_pin(&mut renderer, &scene_rx, m.column, m.row);
                                 }
                             } else {
-                                let pinned = renderer.pinned_agent();
-                                if pinned.is_some() {
-                                    renderer.set_pinned_agent(None);
-                                } else {
-                                    let snap = scene_rx.borrow().clone();
-                                    let hit = renderer.cached_layout().and_then(|layout| {
-                                        renderer::hit_test_from_tui(&snap, layout, m.column, m.row)
-                                    });
-                                    renderer.set_pinned_agent(hit);
-                                }
+                                toggle_pin(&mut renderer, &scene_rx, m.column, m.row);
                             }
                         }
                         _ => {}

@@ -15,11 +15,13 @@ use crate::id::AgentId;
 ///   - an explicit 2-char label prefix arm in `state::reducer::source_label_prefix`
 ///     — the inline `every_registered_source_has_two_char_label_prefix` test.
 ///
-/// Antigravity has no `SOURCE_NAME` const (its `name()` returns this literal),
-/// so it is spelled out; the others are keyed off their module const so a
-/// rename is a compile error.
-pub const REGISTERED_SOURCES: &[&str] =
-    &[claude_code::SOURCE_NAME, codex::SOURCE_NAME, "antigravity"];
+/// Each entry is keyed off its module's `SOURCE_NAME` const so a rename is a
+/// compile error, not a silent two-sprite-ghost.
+pub const REGISTERED_SOURCES: &[&str] = &[
+    claude_code::SOURCE_NAME,
+    codex::SOURCE_NAME,
+    antigravity::SOURCE_NAME,
+];
 
 /// Which transport produced an event — used by the reducer for hook-wins
 /// dedup. Lives on the source side because every `Source` implementor must
