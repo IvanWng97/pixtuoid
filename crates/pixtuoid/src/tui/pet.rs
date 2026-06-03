@@ -30,6 +30,15 @@ impl PetState {
     }
 }
 
+/// The pet's resolved render frame for one tick (position + anim + kind),
+/// produced by the pixel pass and consumed by the renderer/tooltip/hit-test.
+#[derive(Clone, Copy)]
+pub struct PetFrame {
+    pub pos: Point,
+    pub anim: &'static str,
+    pub kind: PetKind,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PetKind {
     Cat,

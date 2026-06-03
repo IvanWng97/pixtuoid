@@ -57,6 +57,17 @@ pub enum WanderPhase {
 /// Per-agent walk-timing state owned by the TUI layer.
 ///
 /// One `MotionState` exists per live agent (per floor). Fields are
+/// A one-shot walk leg (exit / snap-back): the wall-clock instant the leg
+/// armed, its frozen physics profile, and the FROZEN origin recorded at
+/// arm-time (reused every frame so the leg doesn't drift). Names the fields
+/// of what was a `(SystemTime, WalkProfile, Point)` tuple.
+#[derive(Debug, Clone)]
+pub struct WalkLeg {
+    pub started_at: SystemTime,
+    pub profile: WalkProfile,
+    pub from: Point,
+}
+
 /// `Option` so the struct can be default-initialised for new agents
 /// and populated lazily on the first relevant walk-start frame.
 #[derive(Debug, Clone)]
@@ -70,13 +81,13 @@ pub struct MotionState {
     /// fires. `from` is the agent's position at that moment — its current
     /// wander position if it was out, else the desk anchor — so the exit walk
     /// starts where the sprite actually is instead of teleporting to the desk.
-    pub exit: Option<(SystemTime, WalkProfile, Point)>,
+    pub exit: Option<WalkLeg>,
     /// `(walk_started_at, profile, from)` for the state-transition snap-back
     /// walk (replaces the old `since_state < SNAP_BACK_MS` guard). `from` is
     /// the FROZEN walk origin — the position recorded when the leg armed —
     /// reused every frame so the walk doesn't drift toward the desk (mirrors
     /// `exit`).
-    pub snap_back: Option<(SystemTime, WalkProfile, Point)>,
+    pub snap_back: Option<WalkLeg>,
 
     // --- cyclic wander state ---
     /// Monotonically increasing wander cycle counter. Incremented each time

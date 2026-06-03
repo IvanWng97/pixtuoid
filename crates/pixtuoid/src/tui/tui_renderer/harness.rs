@@ -4,6 +4,8 @@
 //! that the unit-level `advance_wander` tests can't reach — and asserts an
 //! off-screen floor freezes while hidden and resyncs (no replay) on return.
 use super::*;
+use crate::tui::layout::Point;
+use crate::tui::pet::PetKind;
 use pixtuoid_core::state::{ActivityState, AgentSlot, SceneState};
 use pixtuoid_core::AgentId;
 use ratatui::backend::TestBackend;
@@ -702,7 +704,7 @@ fn pet_position_varies_over_its_cycle() {
     for i in 0..5 {
         let now = t0() + Duration::from_secs(i * 10);
         r.render(&scene, &pack(), now).unwrap();
-        if let Some((pos, anim, _)) = r.cached_pet_pos() {
+        if let Some(PetFrame { pos, anim, .. }) = r.cached_pet_pos() {
             seen.insert((pos.x, pos.y, anim));
         }
     }
@@ -718,7 +720,7 @@ fn petting_freezes_pet_position() {
     let scene = scene_with(vec![active("/pet/0.jsonl", 0, "Edit", t0())], 16);
     let mut r = build(100, 40, vec![PetKind::Cat]);
     r.render(&scene, &pack(), t0()).unwrap();
-    let (pos, _, kind) = r.cached_pet_pos().expect("pet placed");
+    let PetFrame { pos, kind, .. } = r.cached_pet_pos().expect("pet placed");
     r.set_active_pet(Some(PetState {
         petted_at: t0(),
         pet_pos: pos,
@@ -727,7 +729,7 @@ fn petting_freezes_pet_position() {
     }));
     r.render(&scene, &pack(), t0() + Duration::from_millis(500))
         .unwrap();
-    let (pos2, _, _) = r.cached_pet_pos().expect("pet still placed");
+    let PetFrame { pos: pos2, .. } = r.cached_pet_pos().expect("pet still placed");
     assert_eq!(pos, pos2, "a petted pet holds its position");
 }
 
@@ -743,8 +745,8 @@ fn pet_walk_is_frame_stable() {
     r1.render(&scene, &pack(), now).unwrap();
     r2.render(&scene, &pack(), now).unwrap();
     assert_eq!(
-        r1.cached_pet_pos().map(|(p, _, _)| (p.x, p.y)),
-        r2.cached_pet_pos().map(|(p, _, _)| (p.x, p.y)),
+        r1.cached_pet_pos().map(|f| (f.pos.x, f.pos.y)),
+        r2.cached_pet_pos().map(|f| (f.pos.x, f.pos.y)),
         "identical `now` must give identical pet position (no flash)"
     );
 }
@@ -761,7 +763,7 @@ fn pet_walk_never_clips_through_furniture() {
         for step in 0..35u64 {
             let now = t0() + Duration::from_millis(cycle * 40_000 + step * 400);
             r.render(&scene, &pack(), now).unwrap();
-            if let Some((pos, anim, _)) = r.cached_pet_pos() {
+            if let Some(PetFrame { pos, anim, .. }) = r.cached_pet_pos() {
                 if anim == PetKind::Cat.walk_anim() {
                     // Coarse-cell walkable = the predicate A* itself guarantees
                     // (same grid every agent sprite rides). Per-pixel is_walkable
@@ -790,7 +792,7 @@ fn pet_rest_pos_is_walkable() {
         for step in 0..10u64 {
             let now = t0() + Duration::from_millis(cycle * 40_000 + 14_200 + step * 2_600);
             r.render(&scene, &pack(), now).unwrap();
-            if let Some((pos, anim, _)) = r.cached_pet_pos() {
+            if let Some(PetFrame { pos, anim, .. }) = r.cached_pet_pos() {
                 if anim != PetKind::Cat.walk_anim() {
                     // Rest pose is a snapped cell center, so it should satisfy the
                     // stronger per-pixel check — assert that directly.
@@ -814,10 +816,10 @@ fn pet_leg_boundary_no_pop() {
     let mut r = build(160, 80, vec![PetKind::Cat]);
     r.render(&scene, &pack(), t0() + Duration::from_millis(39_600))
         .unwrap();
-    let before = r.cached_pet_pos().map(|(p, _, _)| (p.x, p.y));
+    let before = r.cached_pet_pos().map(|f| (f.pos.x, f.pos.y));
     r.render(&scene, &pack(), t0() + Duration::from_millis(40_040))
         .unwrap();
-    let after = r.cached_pet_pos().map(|(p, _, _)| (p.x, p.y));
+    let after = r.cached_pet_pos().map(|f| (f.pos.x, f.pos.y));
     if let (Some((x0, y0)), Some((x1, y1))) = (before, after) {
         let gap = (x0 as i32 - x1 as i32).unsigned_abs() + (y0 as i32 - y1 as i32).unsigned_abs();
         assert!(
@@ -954,7 +956,7 @@ fn pet_hit_test_resolves_at_pet_position() {
     let scene = scene_with(vec![active("/ph/0.jsonl", 0, "Edit", t0())], 16);
     let mut r = build(120, 44, vec![PetKind::Cat]);
     r.render(&scene, &pack(), t0()).unwrap();
-    let (pos, anim, kind) = r.cached_pet_pos().expect("pet placed");
+    let PetFrame { pos, anim, kind } = r.cached_pet_pos().expect("pet placed");
     assert!(
         crate::tui::hit_test::hit_test_pet(kind, pos, anim, pos.x, pos.y / 2),
         "clicking the pet's own position should hit it"
@@ -1151,7 +1153,7 @@ fn pet_tooltip_on_hover() {
     let scene = scene_with(vec![active("/tt/p.jsonl", 0, "Edit", t0())], 16);
     let mut r = build(140, 48, vec![PetKind::Cat]);
     r.render(&scene, &pack(), t0()).unwrap();
-    let (pos, _, _) = r.cached_pet_pos().expect("cat placed");
+    let PetFrame { pos, .. } = r.cached_pet_pos().expect("cat placed");
     r.set_mouse_pos(Some((pos.x, pos.y / 2)));
     r.render(&scene, &pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
@@ -1170,7 +1172,7 @@ fn pet_tooltip_shows_custom_name() {
     };
     let mut r = build_pets(140, 48, vec![cat]);
     r.render(&scene, &pack(), t0()).unwrap();
-    let (pos, _, _) = r.cached_pet_pos().expect("cat placed");
+    let PetFrame { pos, .. } = r.cached_pet_pos().expect("cat placed");
     r.set_mouse_pos(Some((pos.x, pos.y / 2)));
     r.render(&scene, &pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
@@ -1190,7 +1192,7 @@ fn pet_tooltip_falls_back_to_default_name_when_not_configured() {
     // No custom name → default ("Office Cat"). `build` defaults the name.
     let mut r = build(140, 48, vec![PetKind::Cat]);
     r.render(&scene, &pack(), t0()).unwrap();
-    let (pos, _, _) = r.cached_pet_pos().expect("cat placed");
+    let PetFrame { pos, .. } = r.cached_pet_pos().expect("cat placed");
     r.set_mouse_pos(Some((pos.x, pos.y / 2)));
     r.render(&scene, &pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
@@ -1453,14 +1455,14 @@ fn meeting_glass_partition_connects_at_window_and_corner() {
     let v_x = layout
         .room_walls
         .iter()
-        .find(|(s, e)| s.x == e.x)
-        .map(|(s, _)| s.x)
+        .find(|w| w.start.x == w.end.x)
+        .map(|w| w.start.x)
         .expect("standard floor has a vertical divider");
     let h_y = layout
         .room_walls
         .iter()
-        .find(|(s, e)| s.y == e.y)
-        .map(|(s, _)| s.y)
+        .find(|w| w.start.y == w.end.y)
+        .map(|w| w.start.y)
         .expect("standard floor has a horizontal divider");
     let top_wall_h = layout.top_margin - 4;
 

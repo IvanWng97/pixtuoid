@@ -22,10 +22,10 @@ use pixtuoid_core::{AgentSlot, SceneState};
 use crate::tui::chitchat::{self, ActiveChitchat, ChitchatBubble};
 use crate::tui::floor::LightingState;
 use crate::tui::frame_cache::FrameCache;
-use crate::tui::layout::{z_sort_row, Anchor, Layout, Point, DESK_H, DESK_W};
+use crate::tui::layout::{z_sort_row, Anchor, Layout, Point, Size, WallSegment, DESK_H, DESK_W};
 use crate::tui::motion::MotionState;
 use crate::tui::pathfind::Router;
-use crate::tui::pet::PetKind;
+use crate::tui::pet::PetFrame;
 use crate::tui::pose::{self, Pose};
 
 /// Result of the pure-pixel pass — carries the resolved cat position
@@ -33,7 +33,7 @@ use crate::tui::pose::{self, Pose};
 /// and agent ids that were seen carrying coffee this frame (so the
 /// caller can persist them into `coffee_holders`).
 pub struct PixelPassResult {
-    pub pet_pos: Option<(Point, &'static str, PetKind)>,
+    pub pet_pos: Option<PetFrame>,
     pub chitchat_bubbles: Vec<ChitchatBubble>,
     /// Agent ids observed in `Walking { carrying_coffee: true }` this
     /// frame. The caller inserts them into the persistent
@@ -95,7 +95,7 @@ fn floor_lamp_south_offset() -> u16 {
     center_pin_south_offset(
         crate::tui::layout::furniture_def(crate::tui::layout::Furniture::FloorLamp)
             .visual
-            .1,
+            .h,
     )
 }
 
@@ -137,7 +137,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
     let agents: Vec<_> = ctx.scene.agents.values().cloned().collect();
     let buf_w = ctx.layout.buf_w;
     let buf_h = ctx.layout.buf_h;
-    let mut resolved_pet_pos: Option<(Point, &'static str, PetKind)> = None;
+    let mut resolved_pet_pos: Option<PetFrame> = None;
     let mut new_coffee_carriers: Vec<pixtuoid_core::AgentId> = Vec::new();
 
     // Compute time-of-day once per frame and pass to every paint
@@ -286,10 +286,10 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
         .layout
         .room_walls
         .iter()
-        .filter(|(s, e)| s.y == e.y)
-        .map(|(s, _)| s.y)
+        .filter(|w| w.start.y == w.end.y)
+        .map(|w| w.start.y)
         .collect();
-    for (start, end) in &ctx.layout.room_walls {
+    for &WallSegment { start, end } in &ctx.layout.room_walls {
         if start.x != end.x {
             continue; // horizontal walls paint in the drawable pass
         }
@@ -492,7 +492,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
         // uses, off the same height (Succulent/Flower were floating at a fixed
         // +3 that only suited the taller Ficus/Tall).
         let cy = p.y
-            + center_pin_south_offset(crate::tui::layout::furniture_def(kind.furniture()).visual.1);
+            + center_pin_south_offset(crate::tui::layout::furniture_def(kind.furniture()).visual.h);
         paint_shadow(
             ctx.buf,
             Ellipse {
@@ -601,9 +601,15 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
     // the seated worker visually behind the desk like it always was.
     // (`seated_agents` was built once above, before the ambient pass.)
     for (i, &desk) in ctx.layout.home_desks.iter().enumerate() {
-        let (desk_fp_w, desk_fp_h) = crate::tui::layout::desk_furniture_def()
+        let Size {
+            w: desk_fp_w,
+            h: desk_fp_h,
+        } = crate::tui::layout::desk_furniture_def()
             .footprint
-            .unwrap_or((DESK_W, DESK_H));
+            .unwrap_or(Size {
+                w: DESK_W,
+                h: DESK_H,
+            });
         let is_last_col = desk.x + desk_fp_w + DESK_W
             >= ctx.layout.cubicle_band.x + ctx.layout.cubicle_band.width;
         let occupant = agents
@@ -706,7 +712,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
                 table,
                 crate::tui::layout::furniture_def(crate::tui::layout::Furniture::MeetingTable)
                     .visual
-                    .1,
+                    .h,
             ),
             kind: DrawableKind::MeetingTable { pos: table },
         });
@@ -721,7 +727,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
                 table,
                 crate::tui::layout::furniture_def(crate::tui::layout::Furniture::PantryTable)
                     .visual
-                    .1,
+                    .h,
             ),
             kind: DrawableKind::PantryTable { pos: table },
         });
@@ -734,7 +740,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
                 *chair,
                 crate::tui::layout::furniture_def(crate::tui::layout::Furniture::PantryChair)
                     .visual
-                    .1,
+                    .h,
             ),
             kind: DrawableKind::PantryChair { pos: *chair },
         });
@@ -764,7 +770,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
                 center,
                 crate::tui::layout::furniture_def(crate::tui::layout::Furniture::Couch)
                     .visual
-                    .1,
+                    .h,
             ),
             kind: DrawableKind::WaypointCouch { pos: center },
         });
@@ -777,7 +783,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
                         crate::tui::layout::Furniture::LoungeSideTable,
                     )
                     .visual
-                    .1,
+                    .h,
                 ),
                 kind: DrawableKind::LoungeSideTable { pos: table },
             });
@@ -795,12 +801,12 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
         // `pos`). Read the VISUAL height — the drawn sprite's south, NOT the
         // (now shallow) footprint: if an appliance ever grows an overhang the
         // z-key must still track what's painted. Equal for today's flat boxes.
-        let visual_h = furniture_def(wp.kind.furniture()).visual.1;
+        let visual_h = furniture_def(wp.kind.furniture()).visual.h;
         match wp.kind {
             // Rendered once via `couch_sprite_center` above (3 seats, 1 sprite).
             WaypointKind::Couch => {}
             WaypointKind::Pantry => {
-                let (cw, ch) = ctx.layout.pantry_counter_size; // runtime-sized
+                let Size { w: cw, h: ch } = ctx.layout.pantry_counter_size; // runtime-sized
                 drawables.push(Drawable {
                     anchor_y: z_sort_row(Anchor::Center, wp.pos, ch),
                     kind: DrawableKind::WaypointPantry {
@@ -837,7 +843,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
         // Visual sprite height from the one furniture table (the mask reads the
         // separate `footprint` off the same row — so a tall plant's canopy can
         // sort correctly without blocking the aisle).
-        let (_, h) = crate::tui::layout::furniture_def(kind.furniture()).visual;
+        let Size { h, .. } = crate::tui::layout::furniture_def(kind.furniture()).visual;
         drawables.push(Drawable {
             anchor_y: z_sort_row(Anchor::Center, *pos, h),
             kind: DrawableKind::PodDecorItem {
@@ -857,7 +863,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
             anchor_y: z_sort_row(
                 Anchor::Center,
                 *p,
-                crate::tui::layout::furniture_def(kind.furniture()).visual.1,
+                crate::tui::layout::furniture_def(kind.furniture()).visual.h,
             ),
             kind: DrawableKind::Plant {
                 kind: *kind,
@@ -914,7 +920,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
     // other drawable use. (Was a hand-rolled `pos.y + h`, one row past the
     // sprite's actual bottom.)
     for (kind, pos) in &ctx.layout.wall_decor {
-        let (_, h) = crate::tui::layout::furniture_def(kind.furniture()).visual;
+        let Size { h, .. } = crate::tui::layout::furniture_def(kind.furniture()).visual;
         drawables.push(Drawable {
             anchor_y: z_sort_row(Anchor::TopLeft, *pos, h),
             kind: DrawableKind::WallDecor {
@@ -962,7 +968,11 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
             .map(|(pos, flip, anim, frame)| (pos, flip, anim, frame, None))
         };
         if let Some((pos, flip, anim_name, frame_idx, pet_elapsed)) = pet_data {
-            resolved_pet_pos = Some((pos, anim_name, kind));
+            resolved_pet_pos = Some(PetFrame {
+                pos,
+                anim: anim_name,
+                kind,
+            });
             // South row derived from the CHOSEN anim's sprite height, not a
             // literal: the h=4 sleep sprite sorts at pos.y+1, the h=6 walk/sit
             // sprites at pos.y+2. A hardcoded +2 rendered a sleeping pet OVER a
@@ -1321,7 +1331,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
     // (front) edge, so a character standing behind (north of) the wall is
     // composited over by the frosted glass instead of painting on top of it.
     // The vertical (edge-on) dividers already painted in the background pass.
-    for (start, end) in &ctx.layout.room_walls {
+    for &WallSegment { start, end } in &ctx.layout.room_walls {
         if start.y == end.y {
             drawables.push(Drawable {
                 anchor_y: start.y + (WALL_THICK_H_PX - 1),

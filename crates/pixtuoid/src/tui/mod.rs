@@ -328,7 +328,12 @@ pub async fn run_tui(
                                 renderer::hit_test_coffee_machine(layout, m.column, m.row)
                             }) {
                                 let _ = open::that("https://buymeacoffee.com/IvanWng97");
-                            } else if let Some((pet_pos, anim, kind)) = renderer.cached_pet_pos() {
+                            } else if let Some(crate::tui::pet::PetFrame {
+                                pos: pet_pos,
+                                anim,
+                                kind,
+                            }) = renderer.cached_pet_pos()
+                            {
                                 if renderer
                                     .active_pet_ref()
                                     .map_or(true, |p| !p.is_active(now))

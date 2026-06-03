@@ -183,7 +183,7 @@ pub(super) fn compute_with_seed(
     // hardcoded literal would silently let 1px-too-short rooms pass the gate
     // below if the sprite ever grows → MeetingSofa seat teleport on the coarse
     // grid. furniture_def is a const fn returning Copy.
-    let sofa_h = furniture_def(Furniture::MeetingSofaBody).visual.1;
+    let sofa_h = furniture_def(Furniture::MeetingSofaBody).visual.h;
     // A meeting room narrower than this can't host the 16-px-wide sofa body
     // (+ its 2-px pad) with enough walkable margin for the coarse 4×4 router to
     // reach the seats buried in the sofa — find_path returns None and an idle
@@ -251,9 +251,12 @@ pub(super) fn compute_with_seed(
     // kitchen on default terminals, 20×8 compact fallback for narrow
     // ones. The threshold (36 = 32 sprite + 4 px margins) keeps the
     // walkable strip around the counter wide enough for routing.
-    let pantry_counter_size: (u16, u16) = match pantry_room {
-        Some(pr) if pr.width >= 36 => (PANTRY_COUNTER_LARGE_W, 10),
-        _ => (20, 8),
+    let pantry_counter_size: Size = match pantry_room {
+        Some(pr) if pr.width >= 36 => Size {
+            w: PANTRY_COUNTER_LARGE_W,
+            h: 10,
+        },
+        _ => Size { w: 20, h: 8 },
     };
 
     let couch_y = top_margin + 3;
@@ -344,7 +347,7 @@ pub(super) fn compute_with_seed(
     // would otherwise drop the 7-wide footprint onto the wall column.
     let side_half_w = furniture_def(Furniture::LoungeSideTable)
         .footprint
-        .map_or(0, |(w, _)| w / 2);
+        .map_or(0, |s| s.w / 2);
     let lounge_side_table = Some(Point {
         x: couch_x.saturating_sub(10).max(right_x + side_half_w + 1),
         y: couch_y + 2,
@@ -444,9 +447,9 @@ pub(super) fn compute_with_seed(
         // padded south edge above the counter's padded north so the two
         // footprints don't merge into a band that closes the east routing strip
         // in a short pantry (was unreachable at 120×80, outside the old matrix).
-        let counter_y = pr.y + pct(pr.height, pantry_counter_y_pct(pantry_counter_size.0));
+        let counter_y = pr.y + pct(pr.height, pantry_counter_y_pct(pantry_counter_size.w));
         let counter_north =
-            counter_y.saturating_sub(pantry_counter_size.1 / 2 + super::OBSTACLE_PAD_PX);
+            counter_y.saturating_sub(pantry_counter_size.h / 2 + super::OBSTACLE_PAD_PX);
         let max_y = (pr.y + pr.height)
             .saturating_sub(clr + half_h)
             .min(counter_north.saturating_sub(half_h));
@@ -750,7 +753,7 @@ pub(super) fn compute_room_walls(
     mid_y_split: u16,
     top_margin: u16,
     usable_h: u16,
-) -> Vec<(Point, Point)> {
+) -> Vec<WallSegment> {
     let RoomPresence {
         has_vertical_wall,
         has_dual_meeting,
@@ -782,20 +785,20 @@ pub(super) fn compute_room_walls(
         let v_door_center = top_margin + (v_bot - v_top) / 2;
         let v_door_top = v_door_center.saturating_sub(DOOR_GAP_V / 2);
         let v_door_bot = (v_door_center + DOOR_GAP_V / 2).min(v_bot);
-        room_walls.push((
-            Point { x: v_x, y: v_top },
-            Point {
+        room_walls.push(WallSegment {
+            start: Point { x: v_x, y: v_top },
+            end: Point {
                 x: v_x,
                 y: v_door_top,
             },
-        ));
-        room_walls.push((
-            Point {
+        });
+        room_walls.push(WallSegment {
+            start: Point {
                 x: v_x,
                 y: v_door_bot,
             },
-            Point { x: v_x, y: v_bot },
-        ));
+            end: Point { x: v_x, y: v_bot },
+        });
         // Second meeting room or pantry below: extend wall with
         // its own door gap.
         if has_dual_meeting {
@@ -809,20 +812,20 @@ pub(super) fn compute_room_walls(
             let v2_center = v2_top + (v2_bot - v2_top) / 2;
             let v2_door_top = v2_center.saturating_sub(DOOR_GAP_V / 2);
             let v2_door_bot = (v2_center + DOOR_GAP_V / 2).min(v2_bot);
-            room_walls.push((
-                Point { x: v_x, y: v2_top },
-                Point {
+            room_walls.push(WallSegment {
+                start: Point { x: v_x, y: v2_top },
+                end: Point {
                     x: v_x,
                     y: v2_door_top,
                 },
-            ));
-            room_walls.push((
-                Point {
+            });
+            room_walls.push(WallSegment {
+                start: Point {
                     x: v_x,
                     y: v2_door_bot,
                 },
-                Point { x: v_x, y: v2_bot },
-            ));
+                end: Point { x: v_x, y: v2_bot },
+            });
         }
     }
     // Horizontal wall: separates meeting from pantry, or two meetings.
@@ -831,20 +834,20 @@ pub(super) fn compute_room_walls(
     let h_door_left = h_door_center.saturating_sub(DOOR_GAP_H / 2);
     let h_door_right = (h_door_center + DOOR_GAP_H / 2).min(mid_x);
     if (has_meeting && has_pantry) || has_dual_meeting {
-        room_walls.push((
-            Point { x: 0, y: h_y },
-            Point {
+        room_walls.push(WallSegment {
+            start: Point { x: 0, y: h_y },
+            end: Point {
                 x: h_door_left,
                 y: h_y,
             },
-        ));
-        room_walls.push((
-            Point {
+        });
+        room_walls.push(WallSegment {
+            start: Point {
                 x: h_door_right,
                 y: h_y,
             },
-            Point { x: mid_x, y: h_y },
-        ));
+            end: Point { x: mid_x, y: h_y },
+        });
     }
     room_walls
 }
@@ -855,7 +858,7 @@ pub(super) fn compute_waypoints(
     cubicle_band: &Bounds,
     top_margin: u16,
     pantry_room: Option<Bounds>,
-    pantry_counter_size: (u16, u16),
+    pantry_counter_size: Size,
     pod_decor: &[(PodDecor, Point)],
     walkway: &Bounds,
     meeting: MeetingFurniture<'_>,
@@ -893,12 +896,12 @@ pub(super) fn compute_waypoints(
         // Clamp x so the counter fits within pantry_room. Without this
         // the counter (32px or 20px wide) extends past the east wall
         // into the cubicle band at small buffer widths.
-        let half_cw = pantry_counter_size.0 / 2;
+        let half_cw = pantry_counter_size.w / 2;
         let max_cx = pr.x + pr.width.saturating_sub(half_cw + 1);
         // y is single-sourced with the bistro-table clamp; only x is size-shaped
         // (large counter is room-centred, small one sits at 60% width).
-        let wy = pr.y + pct(pr.height, pantry_counter_y_pct(pantry_counter_size.0));
-        let wx = if pantry_counter_size.0 >= PANTRY_COUNTER_LARGE_W {
+        let wy = pr.y + pct(pr.height, pantry_counter_y_pct(pantry_counter_size.w));
+        let wx = if pantry_counter_size.w >= PANTRY_COUNTER_LARGE_W {
             (pr.x + pr.width / 2).min(max_cx)
         } else {
             (pr.x + pct(pr.width, 60)).min(max_cx)

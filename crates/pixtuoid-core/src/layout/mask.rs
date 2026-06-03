@@ -5,8 +5,9 @@
 //! edges.
 
 use super::{
-    anchored_top_left, furniture_def, z_sort_row, Anchor, Furniture, PodDecor, Point, WallDecor,
-    Waypoint, WaypointKind, OBSTACLE_PAD_PX, PANTRY_FOOTPRINT_DEPTH, WALL_BAND_TO_TOP_MARGIN,
+    anchored_top_left, furniture_def, z_sort_row, Anchor, Furniture, PodDecor, Point, Size,
+    WallDecor, WallSegment, Waypoint, WaypointKind, OBSTACLE_PAD_PX, PANTRY_FOOTPRINT_DEPTH,
+    WALL_BAND_TO_TOP_MARGIN,
 };
 use crate::walkable::WalkableMask;
 
@@ -102,8 +103,8 @@ pub(super) fn build_walkable_mask(
     lounge_side_table: Option<Point>,
     wall_decor: &[(WallDecor, Point)],
     pod_decor: &[(PodDecor, Point)],
-    room_walls: &[(Point, Point)],
-    pantry_counter_size: (u16, u16),
+    room_walls: &[WallSegment],
+    pantry_counter_size: Size,
 ) -> WalkableMask {
     let mut mask = WalkableMask::new_open(buf_w, buf_h);
 
@@ -150,7 +151,7 @@ pub(super) fn build_walkable_mask(
     //     [this] padding" (see compute_room_walls). The 1px FOOTPRINT is unchanged
     //     (characters still stand right next to the 3px visual); the pad is a
     //     routing-only clearance band, not a wider wall.
-    for (start, end) in room_walls {
+    for &WallSegment { start, end } in room_walls {
         if start.x == end.x {
             let seg_top = start.y.min(end.y);
             let seg_bot = start.y.max(end.y);
@@ -197,7 +198,7 @@ pub(super) fn build_walkable_mask(
         // visited furniture).
         // Stamped TOP-LEFT at the desk Point (not centred like visited
         // furniture); the desk pos IS its NW corner.
-        if let Some((w, h)) = super::decor::desk_furniture_def().footprint {
+        if let Some(Size { w, h }) = super::decor::desk_furniture_def().footprint {
             stamp_anchored(&mut mask, Anchor::TopLeft, *desk, w, h, OBSTACLE_PAD_PX);
         }
     }
@@ -206,19 +207,19 @@ pub(super) fn build_walkable_mask(
         // Sofa BODY footprint from the table (16 ON PURPOSE: 16 + 2·pad = the
         // 20px sprite X footprint, with the pad giving vertical sit clearance —
         // see the furniture_def row). Top-down rule: walk up to its sides.
-        if let Some((w, h)) = furniture_def(Furniture::MeetingSofaBody).footprint {
+        if let Some(Size { w, h }) = furniture_def(Furniture::MeetingSofaBody).footprint {
             stamp_anchored(&mut mask, Anchor::Center, *sofa, w, h, OBSTACLE_PAD_PX);
         }
     }
 
     for t in meeting_tables {
-        if let Some((w, h)) = furniture_def(Furniture::MeetingTable).footprint {
+        if let Some(Size { w, h }) = furniture_def(Furniture::MeetingTable).footprint {
             stamp_anchored(&mut mask, Anchor::Center, *t, w, h, OBSTACLE_PAD_PX);
         }
     }
 
     if let Some(t) = pantry_table {
-        if let Some((w, h)) = furniture_def(Furniture::PantryTable).footprint {
+        if let Some(Size { w, h }) = furniture_def(Furniture::PantryTable).footprint {
             stamp_anchored(&mut mask, Anchor::Center, t, w, h, OBSTACLE_PAD_PX);
         }
     }
@@ -226,7 +227,7 @@ pub(super) fn build_walkable_mask(
         // Small stool, stamped CENTERED on its pos like the other centered
         // furniture — was left/top-biased (offset 2), which blocked floor 1px
         // north & west of the 2×2 the painter actually draws.
-        if let Some((w, h)) = furniture_def(Furniture::PantryChair).footprint {
+        if let Some(Size { w, h }) = furniture_def(Furniture::PantryChair).footprint {
             stamp_anchored(&mut mask, Anchor::Center, *chair, w, h, 1);
         }
     }
@@ -235,7 +236,8 @@ pub(super) fn build_walkable_mask(
         // Footprint sizes live in `approach::obstacle_footprint` (single source
         // of truth shared with `stand_point`). `None` = meeting slots, which
         // sit/stand on sofa/table furniture already stamped above — no obstacle.
-        let Some((w, h)) = super::approach::obstacle_footprint(wp.kind, pantry_counter_size) else {
+        let Some(Size { w, h }) = super::approach::obstacle_footprint(wp.kind, pantry_counter_size)
+        else {
             continue;
         };
         // Pad=1 (not OBSTACLE_PAD_PX=2) — waypoint furniture paints in
@@ -266,7 +268,7 @@ pub(super) fn build_walkable_mask(
         // Booth/standing-desk are elevated (sprite overhangs their base) → the
         // helper south-anchors their shallow strip; vending/printer/couch are
         // flat → plain centered stamp.
-        let vh = furniture_def(wp.kind.furniture()).visual.1;
+        let vh = furniture_def(wp.kind.furniture()).visual.h;
         stamp_overhang_aware(&mut mask, Anchor::Center, wp.pos, w, h, vh, 1);
     }
 
@@ -275,8 +277,8 @@ pub(super) fn build_walkable_mask(
         // south-anchor it to the sprite base (the leaves then occlude a walker
         // parked north of the pot via their own y-sort; invariant #6).
         let def = furniture_def(kind.furniture());
-        if let Some((w, h)) = def.footprint {
-            stamp_overhang_aware(&mut mask, Anchor::Center, *p, w, h, def.visual.1, 1);
+        if let Some(Size { w, h }) = def.footprint {
+            stamp_overhang_aware(&mut mask, Anchor::Center, *p, w, h, def.visual.h, 1);
         }
     }
 
@@ -287,7 +289,7 @@ pub(super) fn build_walkable_mask(
         // FloorLamp row in decor.rs); south-anchoring a short strip would lift the
         // block off the disc. The lamp sits in the open lounge, not a corridor, so
         // "walker behind it" occlusion isn't needed.
-        if let Some((w, h)) = furniture_def(Furniture::FloorLamp).footprint {
+        if let Some(Size { w, h }) = furniture_def(Furniture::FloorLamp).footprint {
             stamp_anchored(&mut mask, Anchor::Center, lamp, w, h, 1);
         }
     }
@@ -295,7 +297,7 @@ pub(super) fn build_walkable_mask(
     if let Some(t) = lounge_side_table {
         // Small footprint, pad=1: sits in the wide open lounge floor with
         // plenty of clearance.
-        if let Some((w, h)) = furniture_def(Furniture::LoungeSideTable).footprint {
+        if let Some(Size { w, h }) = furniture_def(Furniture::LoungeSideTable).footprint {
             stamp_anchored(&mut mask, Anchor::Center, t, w, h, 1);
         }
     }
@@ -313,8 +315,8 @@ pub(super) fn build_walkable_mask(
         // nothing solid, so a 2px clearance band on every side just inflated the
         // blocked rect back to the full sprite width (hiding the footprint
         // shrink). Matches the pod-decor whiteboard's pad.
-        if let Some((w, depth)) = furniture_def(kind.furniture()).footprint {
-            let sprite_h = furniture_def(kind.furniture()).visual.1;
+        if let Some(Size { w, h: depth }) = furniture_def(kind.furniture()).footprint {
+            let sprite_h = furniture_def(kind.furniture()).visual.h;
             stamp_south_strip(&mut mask, Anchor::TopLeft, *pos, w, sprite_h, depth, 1);
         }
     }
@@ -332,10 +334,10 @@ pub(super) fn build_walkable_mask(
         // base, so the overhang occludes a walker behind it (invariant #6); flat
         // boxes fall through to a plain centered stamp.
         let def = furniture_def(kind.furniture());
-        let Some((w, h)) = def.footprint else {
+        let Some(Size { w, h }) = def.footprint else {
             continue;
         };
-        stamp_overhang_aware(&mut mask, Anchor::Center, *pos, w, h, def.visual.1, 1);
+        stamp_overhang_aware(&mut mask, Anchor::Center, *pos, w, h, def.visual.h, 1);
     }
 
     mask

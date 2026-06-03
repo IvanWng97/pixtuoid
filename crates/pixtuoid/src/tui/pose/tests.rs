@@ -967,7 +967,11 @@ fn snap_back_progress_is_physics_eased_not_linear() {
     let ms = motion
         .get(&slot.agent_id)
         .expect("MotionState created on frame 0");
-    let (_, ref profile, _) = *ms.snap_back.as_ref().expect("snap_back profile stored");
+    let profile = &ms
+        .snap_back
+        .as_ref()
+        .expect("snap_back profile stored")
+        .profile;
     let dur_ms = profile.duration_ms;
     assert!(
         dur_ms > 0,
@@ -1046,7 +1050,7 @@ fn snap_back_profile_stored_in_motion_state() {
     let dur1 = motion
         .get(&slot.agent_id)
         .and_then(|ms| ms.snap_back.as_ref())
-        .map(|(_, p, _)| p.duration_ms)
+        .map(|leg| leg.profile.duration_ms)
         .expect("snap_back profile created on frame 1");
 
     // Frame 2: 100ms later with fresh history but SAME persistent motion map.
@@ -1067,7 +1071,7 @@ fn snap_back_profile_stored_in_motion_state() {
     let dur2 = motion
         .get(&slot2.agent_id)
         .and_then(|ms| ms.snap_back.as_ref())
-        .map(|(_, p, _)| p.duration_ms)
+        .map(|leg| leg.profile.duration_ms)
         .expect("snap_back profile still present on frame 2");
 
     assert_eq!(
@@ -1112,7 +1116,7 @@ fn snap_back_rearms_on_new_state_transition() {
     let stored0 = motion
         .get(&slot0.agent_id)
         .and_then(|ms| ms.snap_back.as_ref())
-        .map(|(s, _, _)| *s)
+        .map(|leg| leg.started_at)
         .expect("snap_back armed at T0");
     assert_eq!(stored0, t0, "first arm should key on T0 state_started_at");
 
@@ -1141,7 +1145,7 @@ fn snap_back_rearms_on_new_state_transition() {
     let stored1 = motion
         .get(&slot1.agent_id)
         .and_then(|ms| ms.snap_back.as_ref())
-        .map(|(s, _, _)| *s)
+        .map(|leg| leg.started_at)
         .expect("snap_back still present after new transition");
     assert_eq!(
         stored1, t1_state,
@@ -1448,11 +1452,11 @@ fn exit_profile_snapshotted_once_not_on_subsequent_calls() {
             motion: &mut motion,
         },
     );
-    let (started_at_1, _, _) = motion[&slot.agent_id]
+    let started_at_1 = motion[&slot.agent_id]
         .exit
         .as_ref()
         .expect("exit profile set on first call")
-        .clone();
+        .started_at;
 
     // Second call 100 ms later: must not re-snapshot.
     let t1 = now + Duration::from_millis(100);
@@ -1467,11 +1471,11 @@ fn exit_profile_snapshotted_once_not_on_subsequent_calls() {
             motion: &mut motion,
         },
     );
-    let (started_at_2, _, _) = motion[&slot.agent_id]
+    let started_at_2 = motion[&slot.agent_id]
         .exit
         .as_ref()
         .expect("exit profile still present")
-        .clone();
+        .started_at;
 
     assert_eq!(
         started_at_1, started_at_2,
@@ -1528,7 +1532,7 @@ fn exit_far_completes_before_grace_window_no_vanish() {
         .exit
         .as_ref()
         .expect("exit profile snapshotted")
-        .1
+        .profile
         .duration_ms;
     assert!(
         dur > 4200,
@@ -1563,7 +1567,7 @@ fn exit_uses_commute_speed_faster_than_wander() {
         .exit
         .as_ref()
         .expect("exit profile set")
-        .1;
+        .profile;
     // v_cruise stored in WalkProfile is v_base * speed_mult — it must be
     // derived from V_CRUISE_COMMUTE (0.36), NOT V_CRUISE_WANDER (0.25).
     // The minimum possible commute v_cruise = 0.36 * 0.85 ≈ 0.306,

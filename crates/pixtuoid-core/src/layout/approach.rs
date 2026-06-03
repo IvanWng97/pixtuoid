@@ -17,7 +17,7 @@
 
 use super::decor::{furniture_def, Facing, Furniture, WaypointKind};
 use super::reach::ReachSet;
-use super::Point;
+use super::{Point, Size};
 use crate::walkable::WalkableMask;
 
 /// First clear pixel beyond a footprint half-extent. `mask.rs` stamps
@@ -35,10 +35,7 @@ const STAND_SCAN: i32 = 4;
 /// one runtime-sized kind (`Pantry`, whose counter scales with terminal width
 /// and so isn't a static table row). Consumed by `mask::build_walkable_mask`
 /// and [`stand_point`], so the footprint can't drift between them.
-pub(super) fn obstacle_footprint(
-    kind: WaypointKind,
-    pantry_counter_size: (u16, u16),
-) -> Option<(u16, u16)> {
+pub(super) fn obstacle_footprint(kind: WaypointKind, pantry_counter_size: Size) -> Option<Size> {
     if matches!(kind, WaypointKind::Pantry) {
         return Some(pantry_counter_size);
     }
@@ -50,7 +47,7 @@ pub(super) fn obstacle_footprint(
 /// the agent occupies ON the furniture — those pass through `pos` unchanged,
 /// no stand resolution. Gated on [`furniture_def`]`.occupies_pos`, a superset
 /// of `footprint.is_none()`: the couch HAS a footprint yet occupies its `pos`.
-fn half_extents(kind: WaypointKind, pantry_counter_size: (u16, u16)) -> Option<(u16, u16)> {
+fn half_extents(kind: WaypointKind, pantry_counter_size: Size) -> Option<(u16, u16)> {
     let def = furniture_def(kind.furniture());
     if def.occupies_pos {
         return None;
@@ -61,7 +58,7 @@ fn half_extents(kind: WaypointKind, pantry_counter_size: (u16, u16)) -> Option<(
     // sprite. Pantry is runtime-sized (visual (0,0)), so its counter size IS the
     // clearance. Assumes CENTER-anchored placement (pos = sprite center, so
     // visual/2 reaches the edges) — true for every obstacle kind today.
-    let (w, h) = if matches!(kind, WaypointKind::Pantry) {
+    let Size { w, h } = if matches!(kind, WaypointKind::Pantry) {
         pantry_counter_size
     } else {
         def.visual
@@ -78,7 +75,7 @@ fn half_extents(kind: WaypointKind, pantry_counter_size: (u16, u16)) -> Option<(
 pub fn stand_point(
     kind: WaypointKind,
     pos: Point,
-    pantry_counter_size: (u16, u16),
+    pantry_counter_size: Size,
     mask: &WalkableMask,
     origin: Point,
     facing: Facing,
@@ -131,7 +128,7 @@ const SEAT_APPROACH_SCAN: i32 = 14;
 /// [`half_extents`]. (NOT the mask footprint, now a shallow south strip.) `None`
 /// for kinds with no ground footprint (seats / wall decor) — those never reach
 /// the obstacle branch. The runtime-sized `Pantry` counter is its own clearance.
-fn approach_footprint(kind: Furniture, pantry_counter_size: (u16, u16)) -> Option<(u16, u16)> {
+fn approach_footprint(kind: Furniture, pantry_counter_size: Size) -> Option<Size> {
     if matches!(kind, Furniture::Pantry) {
         return Some(pantry_counter_size);
     }
@@ -162,7 +159,7 @@ pub fn approach_point(
     kind: Furniture,
     pos: Point,
     facing: Facing,
-    pantry_counter_size: (u16, u16),
+    pantry_counter_size: Size,
     mask: &WalkableMask,
     origin: Point,
     reachable: &ReachSet,
@@ -225,7 +222,7 @@ pub fn approach_point(
             }
         }
         return allowed.map(|(_, p)| p).unwrap_or(pos);
-    } else if let Some((fw, fh)) = approach_footprint(kind, pantry_counter_size) {
+    } else if let Some(Size { w: fw, h: fh }) = approach_footprint(kind, pantry_counter_size) {
         // Obstacle: stand just off the footprint, on the reachable allowed side
         // nearest the home desk (== stand_point, plus the reachability filter).
         let (hx, hy) = (fw as i32 / 2, fh as i32 / 2);
@@ -274,21 +271,21 @@ mod tests {
         // the magnitude so the regression can't ship green.
         // PhoneBooth: footprint (6,3) but visual (6,12) → half-extent must be 6.
         let booth = furniture_def(Furniture::PhoneBooth);
-        let (_, hy) = half_extents(WaypointKind::PhoneBooth, (0, 0))
+        let (_, hy) = half_extents(WaypointKind::PhoneBooth, Size { w: 0, h: 0 })
             .expect("booth is an approachable obstacle");
         assert_eq!(
             hy,
-            booth.visual.1 / 2,
+            booth.visual.h / 2,
             "stand clearance must use the visual height, not the footprint"
         );
         assert!(
-            hy > booth.footprint.unwrap().1 / 2,
+            hy > booth.footprint.unwrap().h / 2,
             "visual half-extent ({hy}) must exceed the shallow footprint's ({})",
-            booth.footprint.unwrap().1 / 2
+            booth.footprint.unwrap().h / 2
         );
         // StandingDesk too (visual (8,8) vs footprint (8,3)).
-        let (_, hy) = half_extents(WaypointKind::StandingDesk, (0, 0)).unwrap();
-        assert_eq!(hy, furniture_def(Furniture::StandingDesk).visual.1 / 2);
+        let (_, hy) = half_extents(WaypointKind::StandingDesk, Size { w: 0, h: 0 }).unwrap();
+        assert_eq!(hy, furniture_def(Furniture::StandingDesk).visual.h / 2);
     }
 
     /// Build an open mask with a centred obstacle stamped exactly like
@@ -307,7 +304,7 @@ mod tests {
         let s = stand_point(
             WaypointKind::Pantry,
             pos,
-            (32, 10),
+            Size { w: 32, h: 10 },
             &m,
             Point { x: 50, y: 8 },
             Facing::South,
@@ -324,7 +321,7 @@ mod tests {
         let south = stand_point(
             WaypointKind::Pantry,
             pos,
-            (32, 10),
+            Size { w: 32, h: 10 },
             &m,
             Point { x: 50, y: 95 },
             Facing::South,
@@ -333,7 +330,7 @@ mod tests {
         let east = stand_point(
             WaypointKind::Pantry,
             pos,
-            (32, 10),
+            Size { w: 32, h: 10 },
             &m,
             Point { x: 98, y: 50 },
             Facing::South,
@@ -351,7 +348,14 @@ mod tests {
             WaypointKind::MeetingStand,
         ] {
             assert_eq!(
-                stand_point(kind, pos, (0, 0), &m, Point { x: 10, y: 10 }, Facing::South),
+                stand_point(
+                    kind,
+                    pos,
+                    Size { w: 0, h: 0 },
+                    &m,
+                    Point { x: 10, y: 10 },
+                    Facing::South
+                ),
                 pos,
                 "{kind:?} pos is already the seat cell"
             );
@@ -457,7 +461,7 @@ mod tests {
         let s = stand_point(
             WaypointKind::VendingMachine,
             pos,
-            (0, 0),
+            Size { w: 0, h: 0 },
             &m,
             Point { x: 50, y: 5 },
             Facing::South,
@@ -480,7 +484,7 @@ mod tests {
             Furniture::MeetingSofa,
             pos,
             Facing::South,
-            (0, 0),
+            Size { w: 0, h: 0 },
             &m,
             Point { x: 50, y: 5 },
             &reach,
@@ -496,7 +500,7 @@ mod tests {
             Furniture::MeetingSofa,
             pos,
             Facing::North,
-            (0, 0),
+            Size { w: 0, h: 0 },
             &m,
             Point { x: 50, y: 95 },
             &reach,
@@ -578,7 +582,7 @@ mod tests {
             Furniture::MeetingSofa,
             pos,
             Facing::North,
-            (0, 0),
+            Size { w: 0, h: 0 },
             &m,
             Point { x: 50, y: 95 }, // origin in the south corridor (behind the back)
             &reach,
@@ -601,7 +605,7 @@ mod tests {
         let sp = stand_point(
             WaypointKind::Pantry,
             pos,
-            (32, 10),
+            Size { w: 32, h: 10 },
             &m,
             origin,
             Facing::South,
@@ -615,7 +619,7 @@ mod tests {
                 Furniture::Pantry,
                 pos,
                 Facing::South,
-                (32, 10),
+                Size { w: 32, h: 10 },
                 &m,
                 origin,
                 &reach,
@@ -633,7 +637,7 @@ mod tests {
     fn def_footprint_matches_obstacle_footprint() {
         // furniture_def is the SoT; obstacle_footprint must agree for every
         // non-Pantry kind (Pantry is runtime-sized → special-cased).
-        let dummy = (32u16, 10u16);
+        let dummy = Size { w: 32, h: 10 };
         for &kind in WaypointKind::ALL {
             if kind == WaypointKind::Pantry {
                 continue;
@@ -663,7 +667,7 @@ mod tests {
 
     #[test]
     fn approachable_obstacle_resolves_half_extents() {
-        let dummy = (32u16, 10u16);
+        let dummy = Size { w: 32, h: 10 };
         for &kind in WaypointKind::ALL {
             let def = furniture_def(kind.furniture());
             let has_footprint = def.footprint.is_some() || kind == WaypointKind::Pantry;

@@ -2,7 +2,7 @@
 //! piece of furniture and waypoint kind in the office. Kept separate from
 //! geometry so adding a new sprite kind doesn't churn the layout math.
 
-use super::{Point, DESK_H, DESK_W};
+use super::{Point, Size, DESK_H, DESK_W};
 
 /// Wander destinations the Idle state machine can pick. Each kind controls
 /// the pose + sprite an arriving agent takes. Plants/lamps are decor, not
@@ -38,7 +38,7 @@ pub enum WaypointKind {
 /// (top-down rule, invariant #6) and a walker parking north of the pot is
 /// occluded by that canopy's own y-sort — no synthetic cap. Read only THROUGH
 /// the table (`furniture_def(_).footprint`), never directly.
-pub(crate) const PLANT_FOOTPRINT: (u16, u16) = (6, 3);
+pub(crate) const PLANT_FOOTPRINT: Size = Size { w: 6, h: 3 };
 
 /// Which sides an agent may approach a piece of furniture from, in the
 /// CANONICAL frame (furniture facing South, toward the viewer). [`Self::allows`]
@@ -132,7 +132,7 @@ pub struct FurnitureDef {
     /// elsewhere). NB: `Pantry` is also `None` here because its footprint is
     /// runtime-sized (`pantry_counter_size`); `obstacle_footprint`
     /// special-cases it — the one kind whose shape isn't a static literal.
-    pub footprint: Option<(u16, u16)>,
+    pub footprint: Option<Size>,
     /// Visual sprite size `(w, h)` in buffer px — the SECOND geometry axis,
     /// kept distinct from `footprint` (the top-down ground rule, invariant #6):
     /// a sprite legitimately overhangs its ground base (a tall plant's leaves, a
@@ -141,7 +141,7 @@ pub struct FurnitureDef {
     /// canopy-over-aisle bug this split prevents. For furniture rendered
     /// procedurally with its own anchors (couch / pantry counter / meeting sofa)
     /// this is unused — set to the footprint or `(0, 0)`.
-    pub visual: (u16, u16),
+    pub visual: Size,
     /// The agent occupies `pos` DIRECTLY (sprite renders ON the furniture),
     /// so `stand_point` passes `pos` through unchanged instead of resolving a
     /// walkable cell beside the furniture (A* then snaps the walk adjacent).
@@ -296,15 +296,15 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
     // anywhere (unused — decor never runs stand_point). Spelled once.
     const DECOR: FurnitureDef = FurnitureDef {
         footprint: None,
-        visual: (0, 0),
+        visual: Size { w: 0, h: 0 },
         occupies_pos: false,
         dwell: (0, 0),
         approach: ApproachSides::ALL,
     };
     match kind {
         Furniture::Couch => FurnitureDef {
-            footprint: Some((8, 7)),
-            visual: (8, 7), // procedural render; visual unused
+            footprint: Some(Size { w: 8, h: 7 }),
+            visual: Size { w: 8, h: 7 }, // procedural render; visual unused
             occupies_pos: true,
             dwell: (20_000, 20_000),
             // SEAT_APPROACH rotated by the SEATED facing (North = looks at the
@@ -319,8 +319,8 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             approach: SEAT_APPROACH,
         },
         Furniture::Pantry => FurnitureDef {
-            footprint: None, // runtime-sized — see obstacle_footprint
-            visual: (0, 0),  // runtime-sized; procedural render
+            footprint: None,             // runtime-sized — see obstacle_footprint
+            visual: Size { w: 0, h: 0 }, // runtime-sized; procedural render
             occupies_pos: false,
             dwell: (10_000, 8_000),
             approach: ApproachSides::ALL,
@@ -330,8 +330,8 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             // column overhangs north (invariant #6). A walker behind it is hidden
             // by the booth's own y-sorted sprite — no cap. stand_point parks the
             // USER clear of the full `visual`, not this shallow strip.
-            footprint: Some((6, 3)),
-            visual: (6, 12),
+            footprint: Some(Size { w: 6, h: 3 }),
+            visual: Size { w: 6, h: 12 },
             occupies_pos: false,
             dwell: (8_000, 22_000),
             approach: ApproachSides::ALL,
@@ -339,36 +339,36 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
         Furniture::StandingDesk => FurnitureDef {
             // Ground contact = the legs/base (bottom ~3 rows); the desktop
             // overhangs north and occludes a walker behind it (its own y-sort).
-            footprint: Some((8, 3)),
-            visual: (8, 8),
+            footprint: Some(Size { w: 8, h: 3 }),
+            visual: Size { w: 8, h: 8 },
             occupies_pos: false,
             dwell: (8_000, 22_000),
             approach: ApproachSides::ALL,
         },
         Furniture::VendingMachine => FurnitureDef {
-            footprint: Some((4, 6)),
-            visual: (4, 6),
+            footprint: Some(Size { w: 4, h: 6 }),
+            visual: Size { w: 4, h: 6 },
             occupies_pos: false,
             dwell: (4_000, 4_000),
             approach: ApproachSides::ALL,
         },
         Furniture::Printer => FurnitureDef {
-            footprint: Some((5, 4)),
-            visual: (5, 4),
+            footprint: Some(Size { w: 5, h: 4 }),
+            visual: Size { w: 5, h: 4 },
             occupies_pos: false,
             dwell: (4_000, 4_000),
             approach: ApproachSides::ALL,
         },
         Furniture::MeetingSofa => FurnitureDef {
             footprint: None,
-            visual: (0, 0), // procedural render
+            visual: Size { w: 0, h: 0 }, // procedural render
             occupies_pos: true,
             dwell: (20_000, 20_000),
             approach: SEAT_APPROACH,
         },
         Furniture::MeetingStand => FurnitureDef {
             footprint: None,
-            visual: (0, 0), // procedural render
+            visual: Size { w: 0, h: 0 }, // procedural render
             occupies_pos: true,
             dwell: (20_000, 20_000),
             approach: SEAT_APPROACH,
@@ -377,27 +377,27 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
         // invariant #6) but each has a distinct sprite height.
         Furniture::PlantFicus => FurnitureDef {
             footprint: Some(PLANT_FOOTPRINT),
-            visual: (6, 7),
+            visual: Size { w: 6, h: 7 },
             ..DECOR
         },
         Furniture::PlantTall => FurnitureDef {
             footprint: Some(PLANT_FOOTPRINT),
-            visual: (6, 10),
+            visual: Size { w: 6, h: 10 },
             ..DECOR
         },
         // De-shared: a 2px terracotta pot at the sprite's south; the bloom
         // overhangs it. The mask south-anchors this shallow pot strip (invariant
         // #6); the bloom's own y-sort occludes a walker behind it.
         Furniture::PlantFlower => FurnitureDef {
-            footprint: Some((2, 2)),
-            visual: (6, 6),
+            footprint: Some(Size { w: 2, h: 2 }),
+            visual: Size { w: 6, h: 6 },
             ..DECOR
         },
         // 3px pot at the sprite's south; the leaf cluster overhangs it. The mask
         // south-anchors this shallow pot strip (invariant #6).
         Furniture::PlantSucculent => FurnitureDef {
-            footprint: Some((3, 2)),
-            visual: (5, 4),
+            footprint: Some(Size { w: 3, h: 2 }),
+            visual: Size { w: 5, h: 4 },
             ..DECOR
         },
         // The rolling whiteboard is an ELEVATED obstacle: only its wheels/stand
@@ -411,15 +411,15 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
         // them via its own y-sort, no cap. Stamped via PodDecor (aisle) or
         // WallDecor (the free-standing board in the room).
         Furniture::Whiteboard => FurnitureDef {
-            footprint: Some((10, 3)),
-            visual: (14, 11),
+            footprint: Some(Size { w: 10, h: 3 }),
+            visual: Size { w: 14, h: 11 },
             ..DECOR
         },
         Furniture::Tv => FurnitureDef {
             // Ground contact = the wide base (bottom 2 rows); the monitor + mount
             // column overhang north and occlude a walker behind the stand.
-            footprint: Some((6, 2)),
-            visual: (10, 10),
+            footprint: Some(Size { w: 6, h: 2 }),
+            visual: Size { w: 10, h: 10 },
             ..DECOR
         },
         // Bookshelf stands ON the floor against the back wall (its base dips
@@ -429,18 +429,18 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
         // to the sprite bottom (`stamp_south_strip`, the wall-decor loop) — the
         // upper shelves sit in the already-blocked window band.
         Furniture::Bookshelf => FurnitureDef {
-            footprint: Some((8, 3)),
-            visual: (8, 12),
+            footprint: Some(Size { w: 8, h: 3 }),
+            visual: Size { w: 8, h: 12 },
             ..DECOR
         },
         // Truly wall-HUNG decor — flush against the wall up in the band, no part
         // touches the floor, so footprint stays None and only `.visual` matters.
         Furniture::BulletinBoard => FurnitureDef {
-            visual: (10, 6),
+            visual: Size { w: 10, h: 6 },
             ..DECOR
         },
         Furniture::ExitSign => FurnitureDef {
-            visual: (5, 3),
+            visual: Size { w: 5, h: 3 },
             ..DECOR
         },
         // The big meeting "TV"/presentation screen stands on a soundbar base on
@@ -449,8 +449,8 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
         // bottom); the monitor panel above overhangs it and sits in the blocked
         // window band.
         Furniture::MeetingScreen => FurnitureDef {
-            footprint: Some((14, 3)),
-            visual: (14, 12),
+            footprint: Some(Size { w: 14, h: 3 }),
+            visual: Size { w: 14, h: 12 },
             ..DECOR
         },
         // Singleton / per-room furniture (rendered procedurally, so `visual` is
@@ -463,21 +463,21 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
         // walkable floor off the sofa's front and back; 3 tightens the blocked
         // rect to the sprite so the red debug footprint hugs the sofa.
         Furniture::MeetingSofaBody => FurnitureDef {
-            footprint: Some((16, 3)),
-            visual: (20, 7), // == the real meeting_sofa.sprite (20w × 7 data rows)
+            footprint: Some(Size { w: 16, h: 3 }),
+            visual: Size { w: 20, h: 7 }, // == the real meeting_sofa.sprite (20w × 7 data rows)
             ..DECOR
         },
         // 11×5 = the real coffee-table sprite (paint_coffee_table). footprint ==
         // visual so the mask blocks exactly what's drawn; the MeetingStand west
         // offset (compute.rs, t.x-9) still clears (padded west edge = cx-7).
         Furniture::MeetingTable => FurnitureDef {
-            footprint: Some((11, 5)),
-            visual: (11, 5),
+            footprint: Some(Size { w: 11, h: 5 }),
+            visual: Size { w: 11, h: 5 },
             ..DECOR
         },
         Furniture::PantryTable => FurnitureDef {
-            footprint: Some((7, 4)),
-            visual: (7, 4),
+            footprint: Some(Size { w: 7, h: 4 }),
+            visual: Size { w: 7, h: 4 },
             ..DECOR
         },
         // 2×2 = exactly the four pixels the painter draws (no back / legs). Both
@@ -485,8 +485,8 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
         // sits on the visible stool, not 1px north/west of it (the old 3×3 +
         // left/top-biased stamp blocked floor where nothing was drawn).
         Furniture::PantryChair => FurnitureDef {
-            footprint: Some((2, 2)),
-            visual: (2, 2),
+            footprint: Some(Size { w: 2, h: 2 }),
+            visual: Size { w: 2, h: 2 },
             ..DECOR
         },
         // Width 2 = the 2px base disc (was 4, over-blocking the 1px pole + empty
@@ -494,13 +494,13 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
         // the sprite SOUTH, so the centered stamp + pad must REACH down to
         // lamp.y+4 — a height shrink would lift the block off the disc entirely.
         Furniture::FloorLamp => FurnitureDef {
-            footprint: Some((2, 7)),
-            visual: (4, 10),
+            footprint: Some(Size { w: 2, h: 7 }),
+            visual: Size { w: 4, h: 10 },
             ..DECOR
         },
         Furniture::LoungeSideTable => FurnitureDef {
-            footprint: Some((7, 4)),
-            visual: (7, 4),
+            footprint: Some(Size { w: 7, h: 4 }),
+            visual: Size { w: 7, h: 4 },
             ..DECOR
         },
         // The home desk — the agent's OWNED workstation, now a first-class row
@@ -514,8 +514,14 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
         // exit reach its seat via `approach_point(Furniture::Desk)` (the N/E/W
         // `desk_approach_cell`) + the unified `seated_foot_cell` settle.
         Furniture::Desk => FurnitureDef {
-            footprint: Some((DESK_W + 4, DESK_H)),
-            visual: (DESK_W + 4, DESK_H + 2),
+            footprint: Some(Size {
+                w: DESK_W + 4,
+                h: DESK_H,
+            }),
+            visual: Size {
+                w: DESK_W + 4,
+                h: DESK_H + 2,
+            },
             occupies_pos: true,
             dwell: (15_000, 15_000),
             approach: DESK_APPROACH,
@@ -823,10 +829,17 @@ mod tests {
         );
         // Footprint matches the solid 16px sprite (DESK_W+4), not the old +2
         // under-block; footprint never exceeds the 16×8 visual.
-        assert_eq!(d.footprint, Some((DESK_W + 4, DESK_H)), "desk footprint");
-        let (fw, fh) = d.footprint.unwrap();
+        assert_eq!(
+            d.footprint,
+            Some(Size {
+                w: DESK_W + 4,
+                h: DESK_H
+            }),
+            "desk footprint"
+        );
+        let Size { w: fw, h: fh } = d.footprint.unwrap();
         assert!(
-            fw <= d.visual.0 && fh <= d.visual.1,
+            fw <= d.visual.w && fh <= d.visual.h,
             "desk footprint must not exceed its visual"
         );
         assert!(
@@ -889,7 +902,7 @@ mod tests {
             }
             if matches!(f, Furniture::PlantFlower | Furniture::PlantSucculent) {
                 assert!(
-                    d.footprint.is_some_and(|(w, _)| w < PLANT_FOOTPRINT.0),
+                    d.footprint.is_some_and(|s| s.w < PLANT_FOOTPRINT.w),
                     "{f:?}: de-shared plant must be narrower than PLANT_FOOTPRINT"
                 );
             }
@@ -897,9 +910,9 @@ mod tests {
             // ground projection, never more than is drawn (invariant #6). The
             // succulent inversion (6×6 footprint under a 5×4 sprite) is the bug
             // this guards against recurring.
-            if let Some((fw, fh)) = d.footprint {
+            if let Some(Size { w: fw, h: fh }) = d.footprint {
                 assert!(
-                    fw <= d.visual.0 && fh <= d.visual.1,
+                    fw <= d.visual.w && fh <= d.visual.h,
                     "{f:?}: footprint {:?} exceeds visual {:?} (invariant #6)",
                     d.footprint,
                     d.visual
@@ -919,11 +932,11 @@ mod tests {
                     | Furniture::PlantFlower
                     | Furniture::PlantSucculent
             ) {
-                let (_, fh) = d.footprint.expect("plant has a pot footprint");
+                let Size { h: fh, .. } = d.footprint.expect("plant has a pot footprint");
                 assert!(
-                    d.visual.1 > fh,
+                    d.visual.h > fh,
                     "{f:?}: plant must overhang its pot to occlude (visual.h {} > footprint.h {fh})",
-                    d.visual.1
+                    d.visual.h
                 );
             }
         }

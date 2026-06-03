@@ -21,7 +21,7 @@ use pixtuoid_core::walkable::OccupancyOverlay;
 use pixtuoid_core::AgentId;
 
 use crate::tui::motion::{
-    advance_wander, octile_path_len, MotionState, WalkPathSnapshot, WanderPhase,
+    advance_wander, octile_path_len, MotionState, WalkLeg, WalkPathSnapshot, WanderPhase,
 };
 
 pub use pixtuoid_core::pose::{
@@ -246,14 +246,18 @@ pub fn derive_with_routing(
             let profile = walk_profile(path_len, WalkIntent::Exit, slot.agent_id);
             // Store the ORIGIN (chair when a desk exit) so the render can detect
             // the desk-departure and re-derive the approach+settle.
-            mstate.exit = Some((exit_time, profile, from));
+            mstate.exit = Some(WalkLeg {
+                started_at: exit_time,
+                profile,
+                from,
+            });
         }
 
         // Destructure without moving the non-Copy profile (Correction L).
         let e = mstate.exit.as_ref()?;
-        let started_at = e.0;
-        let profile = &e.1;
-        let stored_from = e.2;
+        let started_at = e.started_at;
+        let profile = &e.profile;
+        let stored_from = e.from;
 
         let elapsed_ms = now
             .duration_since(started_at)
@@ -573,7 +577,7 @@ pub fn derive_with_routing(
         // the ARM window (only snap-back for a RECENT flip) — NOT a render cap; the
         // render runs until the physics walk arrives, so it never teleports.
         let already_armed =
-            matches!(&ms_entry.snap_back, Some((s, _, _)) if *s == slot.state_started_at);
+            matches!(&ms_entry.snap_back, Some(leg) if leg.started_at == slot.state_started_at);
         if !already_armed {
             // A snap_back here is STALE (a previous transition) — clear it, then arm
             // a fresh leg, but only for a recent flip (the arm window).
@@ -601,7 +605,11 @@ pub fn derive_with_routing(
                         let len = octile_path_len(&[prev, snap_target])
                             + chair_settle.map_or(0, |c| octile_distance(snap_target, c));
                         let p = walk_profile(len, WalkIntent::SnapBack, slot.agent_id);
-                        ms_entry.snap_back = Some((slot.state_started_at, p, prev));
+                        ms_entry.snap_back = Some(WalkLeg {
+                            started_at: slot.state_started_at,
+                            profile: p,
+                            from: prev,
+                        });
                     }
                 }
             }
@@ -610,7 +618,11 @@ pub fn derive_with_routing(
         // (different `started_at`) fails the guard → `raw`; it is re-armed or cleared
         // on a later frame.
         match ms_entry.snap_back.clone() {
-            Some((started_at, profile, snap_prev)) if started_at == slot.state_started_at => {
+            Some(WalkLeg {
+                started_at,
+                profile,
+                from: snap_prev,
+            }) if started_at == slot.state_started_at => {
                 let elapsed_ms = now
                     .duration_since(started_at)
                     .unwrap_or(Duration::ZERO)

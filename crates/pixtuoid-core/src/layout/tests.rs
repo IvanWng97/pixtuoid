@@ -59,21 +59,21 @@ fn freestanding_decor_does_not_overlap_room_walls() {
             };
             let mut items: Vec<(&str, Rect)> = Vec::new();
             if let Some(t) = l.pantry_table {
-                let (w, h) = furniture_def(Furniture::PantryTable).footprint.unwrap();
+                let Size { w, h } = furniture_def(Furniture::PantryTable).footprint.unwrap();
                 items.push((
                     "pantry_table",
                     (t.x.saturating_sub(w / 2), t.y.saturating_sub(h / 2), w, h),
                 ));
             }
             if let Some(t) = l.lounge_side_table {
-                let (w, h) = furniture_def(Furniture::LoungeSideTable).footprint.unwrap();
+                let Size { w, h } = furniture_def(Furniture::LoungeSideTable).footprint.unwrap();
                 items.push((
                     "lounge_side_table",
                     (t.x.saturating_sub(w / 2), t.y.saturating_sub(h / 2), w, h),
                 ));
             }
             for (item, rect) in &items {
-                for &(s, e) in &l.room_walls {
+                for &WallSegment { start: s, end: e } in &l.room_walls {
                     let wr = wall_rect(s, e);
                     assert!(
                         !rects_overlap(*rect, wr),

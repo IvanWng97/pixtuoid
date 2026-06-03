@@ -23,7 +23,7 @@ src/
 ├── sprite/             .sprite parser, pack.toml loader, half-block blitter, animator, Pack::merge_from
 ├── render/             Renderer trait + TestRenderer (feature = "test-renderer")
 ├── layout/             zone-based office geometry (terminal-agnostic):
-│                       mod.rs (SceneLayout struct, Bounds, Point, constants, accessors) + tests.rs sibling,
+│                       mod.rs (SceneLayout struct, Bounds, Point, Size, WallSegment, constants, accessors) + tests.rs sibling,
 │                       compute.rs (compute_with_seed + 4 private helpers),
 │                       decor.rs (role enums WaypointKind/PodDecor/PlantKind/WallDecor + Facing — carry NO
 │                         dimensions, each .furniture()-maps to the unified Furniture geometry enum; the ONE

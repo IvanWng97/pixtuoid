@@ -453,7 +453,7 @@ fn waypoint_depth_baseline_is_center_pinned_sprite_south() {
         furniture_def(k.furniture())
             .footprint
             .expect("has footprint")
-            .1
+            .h
             / 2
             - 1
     };
@@ -649,7 +649,7 @@ fn desk_settle_z_key_matches_the_seated_arm() {
             let fp_h = crate::tui::layout::desk_furniture_def()
                 .footprint
                 .expect("desk footprint")
-                .1;
+                .h;
             assert!(
                 desk.y + DESK_SEAT_Z_OFF < desk.y + fp_h + DESK_FRONT_OVERHANG,
                 "desk sitter must sort behind the desk furniture"
@@ -701,7 +701,7 @@ fn sit_arc_z_key_is_stable_and_on_the_right_side_of_its_furniture() {
                 let couch_z = z_sort_row(
                     Anchor::Center,
                     w.pos,
-                    furniture_def(Furniture::Couch).visual.1,
+                    furniture_def(Furniture::Couch).visual.h,
                 );
                 assert!(
                     z < couch_z,
@@ -754,7 +754,7 @@ fn desk_occupant_always_sorts_behind_its_desk() {
     let fp_h = crate::tui::layout::desk_furniture_def()
         .footprint
         .expect("desk has a footprint")
-        .1;
+        .h;
     for desk in [Point { x: 40, y: 30 }, Point { x: 100, y: 60 }] {
         for w in [CHARACTER_SPRITE_W, 10] {
             let desk_furniture_z = desk.y + fp_h + DESK_FRONT_OVERHANG;
@@ -784,7 +784,7 @@ fn desk_z_key_is_footprint_front_plus_overhang() {
     let fp_h = crate::tui::layout::desk_furniture_def()
         .footprint
         .expect("desk has a footprint")
-        .1;
+        .h;
     assert_eq!(fp_h + DESK_FRONT_OVERHANG, 8, "desk z-key offset (was +8)");
 }
 
@@ -794,7 +794,7 @@ fn every_pod_occludes_via_overhang() {
     // sprite is TALLER than its shallow south-anchored ground footprint, so a
     // walker parks deep behind it and the overhang's own y-sort hides them.
     // Exhaustive over PodDecor::ALL so a new pod kind is forced through this.
-    use crate::tui::layout::{furniture_def, PodDecor};
+    use crate::tui::layout::{furniture_def, PodDecor, Size};
     assert_eq!(
         PodDecor::ALL.len(),
         5,
@@ -806,16 +806,16 @@ fn every_pod_occludes_via_overhang() {
         // `center_pin_south_offset(visual.1)`, so a 0-height visual would
         // sort the sprite at its own center. Every pod must have visible h.
         assert!(
-            def.visual.1 > 0,
+            def.visual.h > 0,
             "{kind:?}: pod decor needs a non-zero visual height for the z-sort"
         );
         // The overhang IS the occlusion: the sprite must rise above its
         // ground base, else a walker behind it wouldn't be hidden.
-        let (_, fh) = def.footprint.expect("aisle pod has a ground footprint");
+        let Size { h: fh, .. } = def.footprint.expect("aisle pod has a ground footprint");
         assert!(
-            def.visual.1 > fh,
+            def.visual.h > fh,
             "{kind:?}: aisle pod must overhang its footprint to occlude (visual.h {} > footprint.h {fh})",
-            def.visual.1
+            def.visual.h
         );
     }
 }

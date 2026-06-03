@@ -1,47 +1,46 @@
 ---
 source: crates/pixtuoid/tests/layout_golden.rs
-assertion_line: 93
 expression: l.room_walls
 ---
 [
-    (
-        Point {
+    WallSegment {
+        start: Point {
             x: 56,
             y: 36,
         },
-        Point {
+        end: Point {
             x: 56,
             y: 50,
         },
-    ),
-    (
-        Point {
+    },
+    WallSegment {
+        start: Point {
             x: 56,
             y: 64,
         },
-        Point {
+        end: Point {
             x: 56,
             y: 78,
         },
-    ),
-    (
-        Point {
+    },
+    WallSegment {
+        start: Point {
             x: 0,
             y: 78,
         },
-        Point {
+        end: Point {
             x: 26,
             y: 78,
         },
-    ),
-    (
-        Point {
+    },
+    WallSegment {
+        start: Point {
             x: 40,
             y: 78,
         },
-        Point {
+        end: Point {
             x: 56,
             y: 78,
         },
-    ),
+    },
 ]

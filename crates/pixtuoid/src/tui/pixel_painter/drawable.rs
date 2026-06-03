@@ -31,7 +31,7 @@ use super::furniture::{
 };
 use super::paint_character_at;
 use crate::tui::frame_cache::FrameCache;
-use crate::tui::layout::{Layout, Point, DESK_H, DESK_W};
+use crate::tui::layout::{Layout, Point, Size, DESK_H, DESK_W};
 use crate::tui::pathfind::{find_path, snap_point_to_walkable};
 use crate::tui::pet::PetKind;
 use pixtuoid_core::walkable::OccupancyOverlay;
@@ -519,7 +519,7 @@ pub(super) fn paint_drawable(
         DrawableKind::MeetingTable { pos } => {
             // Sprite size from the table (== footprint for the meeting table) so
             // the painted coffee table can't drift from the masked obstacle.
-            let (w, h) =
+            let Size { w, h } =
                 crate::tui::layout::furniture_def(crate::tui::layout::Furniture::MeetingTable)
                     .visual;
             paint_coffee_table(buf, pos.x, pos.y, w, h, theme);

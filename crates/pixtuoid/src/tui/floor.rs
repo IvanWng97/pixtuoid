@@ -120,7 +120,10 @@ impl FloorCtx {
         };
         self.door_anim_max_ms = self.motion.values().fold(0u64, |acc, ms| {
             let entry = ms.entry.as_ref().map_or(0, |(s, p)| in_flight(*s, p));
-            let exit = ms.exit.as_ref().map_or(0, |(s, p, _)| in_flight(*s, p));
+            let exit = ms
+                .exit
+                .as_ref()
+                .map_or(0, |leg| in_flight(leg.started_at, &leg.profile));
             acc.max(entry).max(exit)
         });
     }

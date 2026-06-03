@@ -24,9 +24,9 @@ use ratatui::Terminal;
 use ratatui::layout::Rect;
 
 use crate::tui::floor::{build_floor_scene, num_floors, FloorCtx, FloorMeta, FloorTransition};
-use crate::tui::layout::{Layout, Point, MAX_VISIBLE_DESKS};
+use crate::tui::layout::{Layout, MAX_VISIBLE_DESKS};
 use crate::tui::pathfind::Router;
-use crate::tui::pet::PetKind;
+use crate::tui::pet::PetFrame;
 use crate::tui::pixel_painter::{render_to_rgb_buffer, PixelCtx};
 use crate::tui::renderer::{draw_scene, flush_buffer_to_term_at_offset, DrawCtx, PetState};
 
@@ -43,7 +43,7 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     theme_picker: Option<usize>,
     cached_layout: Option<Layout>,
     active_pet: Option<PetState>,
-    last_pet_pos: Option<(Point, &'static str, PetKind)>,
+    last_pet_pos: Option<PetFrame>,
     /// Configured pets (kind + resolved display name), in order. Resolved once
     /// at startup by `config::resolve_pets`. `select_pet_for_floor` picks one
     /// per floor; the picked `&Pet` flows into `DrawCtx.floor_pet`. Replaces the
@@ -275,7 +275,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         self.active_pet.as_ref()
     }
 
-    pub fn cached_pet_pos(&self) -> Option<(Point, &'static str, PetKind)> {
+    pub fn cached_pet_pos(&self) -> Option<PetFrame> {
         self.last_pet_pos
     }
 

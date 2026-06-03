@@ -5,7 +5,7 @@ use std::time::SystemTime;
 
 use pixtuoid_core::{AgentId, SceneState};
 
-use crate::tui::layout::Layout;
+use crate::tui::layout::{Layout, Size};
 use crate::tui::pet::PetKind;
 use crate::tui::pixel_painter::character_anchor;
 use crate::tui::pose;
@@ -83,7 +83,7 @@ pub fn hit_test_coffee_machine(layout: &Layout, mx: u16, my: u16) -> bool {
     let Some(wp) = pantry_wp else {
         return false;
     };
-    let (cw, ch) = layout.pantry_counter_size;
+    let Size { w: cw, h: ch } = layout.pantry_counter_size;
     let sprite_x = wp.pos.x.saturating_sub(cw / 2);
     let sprite_y = wp.pos.y.saturating_sub(ch / 2);
     let (coffee_x0, coffee_x1) = if cw >= 32 {
@@ -109,7 +109,7 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
     // sprite) for what the user points at, `.footprint` where the obstacle is
     // the thing — so a geometry edit can't leave a stale hit box behind.
     let visual = |f| furniture_def(f).visual;
-    let footprint = |f| furniture_def(f).footprint.unwrap_or((0, 0));
+    let footprint = |f| furniture_def(f).footprint.unwrap_or(Size { w: 0, h: 0 });
     let px = mx;
     let py = my * 2;
 
@@ -135,7 +135,7 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
 
     // Waypoints
     for wp in &layout.waypoints {
-        let (w, h) = match wp.kind {
+        let Size { w, h } = match wp.kind {
             // Couch hovers via the one-time region above (3 seat waypoints).
             WaypointKind::Couch => continue,
             WaypointKind::Pantry => layout.pantry_counter_size,
@@ -167,7 +167,7 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
 
     // Meeting sofas (20px sprite, centred on the sofa point).
     for sofa in &layout.meeting_sofas {
-        let (w, h) = visual(Furniture::MeetingSofaBody); // full 20px sprite, not the 16px footprint
+        let Size { w, h } = visual(Furniture::MeetingSofaBody); // full 20px sprite, not the 16px footprint
         if hit(
             sofa.x.saturating_sub(w / 2),
             sofa.y.saturating_sub(h / 2),
@@ -180,7 +180,7 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
 
     // Meeting tables
     for t in &layout.meeting_tables {
-        let (w, h) = visual(Furniture::MeetingTable);
+        let Size { w, h } = visual(Furniture::MeetingTable);
         if hit(t.x.saturating_sub(w / 2), t.y.saturating_sub(h / 2), w, h) {
             return Some("Meeting Table");
         }
@@ -188,7 +188,7 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
 
     // Pantry table
     if let Some(t) = layout.pantry_table {
-        let (w, h) = footprint(Furniture::PantryTable);
+        let Size { w, h } = footprint(Furniture::PantryTable);
         if hit(t.x.saturating_sub(w / 2), t.y.saturating_sub(h / 2), w, h) {
             return Some("Pantry Table");
         }
@@ -196,7 +196,7 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
 
     // Pantry chairs
     for chair in &layout.pantry_chairs {
-        let (w, h) = footprint(Furniture::PantryChair); // left-biased offset 2 matches the mask stamp
+        let Size { w, h } = footprint(Furniture::PantryChair); // left-biased offset 2 matches the mask stamp
         if hit(chair.x.saturating_sub(2), chair.y.saturating_sub(2), w, h) {
             return Some("Chair");
         }
@@ -204,7 +204,7 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
 
     // Plants
     for (kind, p) in &layout.plants {
-        let (w, h) = visual(kind.furniture()); // hover the whole visible plant, not just its ground base
+        let Size { w, h } = visual(kind.furniture()); // hover the whole visible plant, not just its ground base
         if hit(p.x.saturating_sub(w / 2), p.y.saturating_sub(h / 2), w, h) {
             return Some(match kind {
                 PlantKind::Ficus => "Ficus",
@@ -217,7 +217,7 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
 
     // Floor lamp
     if let Some(lamp) = layout.floor_lamp {
-        let (w, h) = visual(Furniture::FloorLamp); // full 4×10 lamp sprite
+        let Size { w, h } = visual(Furniture::FloorLamp); // full 4×10 lamp sprite
         if hit(
             lamp.x.saturating_sub(w / 2),
             lamp.y.saturating_sub(h / 2),
@@ -230,7 +230,7 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
 
     // Wall decor
     for (kind, pos) in &layout.wall_decor {
-        let (w, h) = furniture_def(kind.furniture()).visual;
+        let Size { w, h } = furniture_def(kind.furniture()).visual;
         if hit(pos.x, pos.y, w, h) {
             return Some(match kind {
                 WallDecor::Whiteboard => "Whiteboard",
@@ -244,7 +244,7 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
 
     // Pod decor (aisle items)
     for (kind, pos) in &layout.pod_decor {
-        let (w, h) = furniture_def(kind.furniture()).visual;
+        let Size { w, h } = furniture_def(kind.furniture()).visual;
         if hit(
             pos.x.saturating_sub(w / 2),
             pos.y.saturating_sub(h / 2),
@@ -353,7 +353,7 @@ mod tests {
             .iter()
             .find(|w| w.kind == crate::tui::layout::WaypointKind::Pantry)
             .expect("pantry");
-        let (cw, ch) = layout.pantry_counter_size;
+        let Size { w: cw, h: ch } = layout.pantry_counter_size;
         let sprite_x = pantry_wp.pos.x.saturating_sub(cw / 2);
         let sprite_y = pantry_wp.pos.y.saturating_sub(ch / 2);
         let mid_x = if cw >= 32 {

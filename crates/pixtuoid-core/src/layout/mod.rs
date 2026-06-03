@@ -46,6 +46,23 @@ pub struct Point {
     pub y: u16,
 }
 
+/// A width×height extent in pixels. Names the axes so a (w,h) tuple can't be
+/// silently transposed. Distinct from Point (a position).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Size {
+    pub w: u16,
+    pub h: u16,
+}
+
+/// An interior room-wall segment — the two endpoints of a straight (horizontal
+/// or vertical) wall run. Names the endpoints of what was a `(Point, Point)`
+/// tuple.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct WallSegment {
+    pub start: Point,
+    pub end: Point,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Waypoint {
     pub pos: Point,
@@ -87,7 +104,7 @@ pub struct SceneLayout {
     pub pantry_room: Option<Bounds>,
     pub meeting_sofas: Vec<Point>,
     pub meeting_tables: Vec<Point>,
-    pub room_walls: Vec<(Point, Point)>,
+    pub room_walls: Vec<WallSegment>,
     pub top_margin: u16,
     pub pantry_table: Option<Point>,
     pub pantry_chairs: Vec<Point>,
@@ -96,7 +113,7 @@ pub struct SceneLayout {
     /// (20, 8) fallback for narrow terminals where the wide sprite
     /// wouldn't fit. The renderer reads this to pick which sprite to
     /// paint (`pantry` vs `pantry_small`).
-    pub pantry_counter_size: (u16, u16),
+    pub pantry_counter_size: Size,
     pub corridor: Option<Bounds>,
     /// Centre point of the lounge couch sprite (the middle of its 3 seats).
     /// The couch is 3 separate seat waypoints; the sprite + rug + side table

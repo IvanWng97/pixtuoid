@@ -432,7 +432,7 @@ fn simplify_polyline(pts: Vec<Point>) -> Vec<Point> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tui::layout::Layout;
+    use crate::tui::layout::{Layout, WallSegment};
 
     fn make_layout() -> Layout {
         Layout::compute(160, 200, 4).expect("layout fits")
@@ -495,11 +495,11 @@ mod tests {
         // the threshold; this test pins that the wall is a real barrier.
         let l = make_layout();
         let overlay = OccupancyOverlay::new();
-        let (start, end) = l
+        let WallSegment { start, end } = l
             .room_walls
             .iter()
             .copied()
-            .find(|(s, e)| s.x == e.x)
+            .find(|w| w.start.x == w.end.x)
             .expect("layout has a vertical wall");
         let wall_x = start.x;
         // A y inside the wall body, near its top — clear of the mid door gap.

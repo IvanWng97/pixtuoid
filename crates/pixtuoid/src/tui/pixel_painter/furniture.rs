@@ -86,7 +86,7 @@ pub(super) fn paint_side_table(
     // the side table) so the painted block can't drift from the blocked ground.
     let (w, h) = crate::tui::layout::furniture_def(crate::tui::layout::Furniture::LoungeSideTable)
         .footprint
-        .map_or((7, 4), |(w, h)| (w as i32, h as i32));
+        .map_or((7, 4), |s| (s.w as i32, s.h as i32));
     for dy in 0..h {
         for dx in 0..w {
             let px = cx as i32 - w / 2 + dx;
@@ -128,7 +128,7 @@ pub(super) fn paint_pantry_table(
     let trim = theme.furniture.wood_trim;
     let (w, h) = crate::tui::layout::furniture_def(crate::tui::layout::Furniture::PantryTable)
         .footprint
-        .map_or((7, 4), |(w, h)| (w as i32, h as i32));
+        .map_or((7, 4), |s| (s.w as i32, s.h as i32));
     for dy in 0..h {
         for dx in 0..w {
             let on_corner = (dx == 0 || dx == w - 1) && (dy == 0 || dy == h - 1);

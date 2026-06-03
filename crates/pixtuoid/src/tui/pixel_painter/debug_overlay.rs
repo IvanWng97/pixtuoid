@@ -15,7 +15,7 @@ use pixtuoid_core::{AgentId, SceneState};
 
 use super::palette::blend;
 use crate::tui::layout::{
-    desk_walk_anchor, furniture_def, Facing, Furniture, Layout, Point, WaypointKind,
+    desk_walk_anchor, furniture_def, Facing, Furniture, Layout, Point, Size, WaypointKind,
 };
 use crate::tui::motion::MotionState;
 
@@ -136,7 +136,7 @@ fn paint_approach(buf: &mut RgbBuffer, layout: &Layout) {
         } else {
             def.footprint
         };
-        let Some((w, h)) = fp else {
+        let Some(Size { w, h }) = fp else {
             continue;
         };
         let (hx, hy) = ((w / 2) as i32, (h / 2) as i32);
