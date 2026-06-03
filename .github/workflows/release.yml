@@ -64,7 +64,7 @@ jobs:
 
       - name: Install cross
         if: matrix.cross
-        run: cargo install cross --git https://github.com/cross-rs/cross
+        uses: taiki-e/install-action@cross
 
       - name: Install musl-tools
         if: contains(matrix.target, 'musl')
@@ -118,10 +118,10 @@ jobs:
 
       - name: Install cross
         if: matrix.cross
-        run: cargo install cross --git https://github.com/cross-rs/cross
+        uses: taiki-e/install-action@cross
 
       - name: Install cargo-deb
-        run: cargo install cargo-deb
+        uses: taiki-e/install-action@cargo-deb
 
       - name: Build
         run: |
@@ -198,8 +198,22 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
+          set -euo pipefail
+          # Swallow ONLY the "this version is already on crates.io" case (idempotent
+          # re-run of a partially-published tag). Any other failure — network, auth,
+          # validation, dependency-not-yet-live — must fail the job, not be hidden.
           for crate in pixtuoid-core pixtuoid-hook pixtuoid; do
-            cargo publish -p "$crate" || echo "::warning::$crate already published, skipping"
+            if out=$(cargo publish -p "$crate" 2>&1); then
+              printf '%s\n' "$out"
+              echo "::notice::$crate published"
+            elif printf '%s\n' "$out" | grep -qiE 'already (exists|uploaded)|crate version .* is already'; then
+              printf '%s\n' "$out"
+              echo "::warning::$crate already on crates.io at this version, skipping"
+            else
+              printf '%s\n' "$out"
+              echo "::error::$crate publish failed"
+              exit 1
+            fi
           done
 
   homebrew:
