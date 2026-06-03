@@ -97,6 +97,10 @@ pub struct DrawCtx<'a> {
     pub active_pet: Option<&'a PetState>,
     pub last_pet_pos: Option<(Point, &'static str, PetKind)>,
     pub floor_pet_kind: Option<PetKind>,
+    /// User-defined pet display names (`[pet-names]` config). Looked up by kind
+    /// in the hover tooltip; an absent kind falls back to `default_name`.
+    /// Borrowed from `TuiRenderer`-owned state.
+    pub pet_names: &'a std::collections::HashMap<PetKind, String>,
     pub chitchat_state: &'a mut std::collections::HashMap<
         crate::tui::chitchat::VenueKey,
         crate::tui::chitchat::ActiveChitchat,
@@ -324,7 +328,22 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
                 } else if let Some((pet_pos, anim, kind)) = ctx.last_pet_pos {
                     if hit_test_pet(kind, pet_pos, anim, mx, my) {
                         let on_cooldown = ctx.active_pet.is_some_and(|p| p.is_active(now));
-                        paint_pet_tooltip(f, kind, anim, on_cooldown, mx, my, actual_scene, theme);
+                        let display_name = ctx
+                            .pet_names
+                            .get(&kind)
+                            .map(String::as_str)
+                            .unwrap_or_else(|| kind.default_name());
+                        paint_pet_tooltip(
+                            f,
+                            kind,
+                            anim,
+                            on_cooldown,
+                            display_name,
+                            mx,
+                            my,
+                            actual_scene,
+                            theme,
+                        );
                     } else if let Some(label) = hit_test_furniture(&layout, mx, my) {
                         paint_furniture_tooltip(f, label, mx, my, actual_scene, theme);
                     }

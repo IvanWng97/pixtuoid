@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
@@ -25,6 +26,15 @@ pub struct AppConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub last_seen_version: Option<String>,
+    /// Optional per-kind custom display names for pets, e.g.
+    /// `[pet-names]\ncat = "Whiskers"\ndog = "Rex"`. Keys are pet config
+    /// names (`cat`/`dog`); an unset kind falls back to its default name.
+    /// MUST stay LAST in the struct: a `HashMap` serializes as a TOML
+    /// `[pet-names]` table, which `toml::to_string_pretty` requires after all
+    /// scalar keys (declaration order) — a scalar field below it would emit
+    /// invalid TOML.
+    #[serde(rename = "pet-names", default, skip_serializing_if = "Option::is_none")]
+    pub pet_names: Option<HashMap<String, String>>,
 }
 
 pub fn resolve_pack_dir(config: &AppConfig, cli_pack_dir: Option<PathBuf>) -> Option<PathBuf> {
@@ -158,6 +168,31 @@ pub fn resolve_pets(config: &AppConfig) -> Vec<crate::tui::pet::PetKind> {
             pets
         }
     }
+}
+
+/// Resolve the `[pet-names]` table to a `PetKind`-keyed map of custom display
+/// names. Unknown keys are warned + skipped; values are trimmed and an
+/// empty/whitespace-only value is dropped (the kind then falls back to its
+/// default name). Absent table → empty map (all kinds use defaults). Mirrors
+/// [`resolve_pets`].
+pub fn resolve_pet_names(config: &AppConfig) -> HashMap<crate::tui::pet::PetKind, String> {
+    let mut out = HashMap::new();
+    let Some(names) = &config.pet_names else {
+        return out;
+    };
+    for (key, value) in names {
+        let Some(kind) = crate::tui::pet::PetKind::from_config_name(key) else {
+            tracing::warn!(pet = %key, "unknown pet in [pet-names] — skipping");
+            continue;
+        };
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            tracing::warn!(pet = %key, "empty pet name in [pet-names] — using default");
+            continue;
+        }
+        out.insert(kind, trimmed.to_string());
+    }
+    out
 }
 
 #[cfg(test)]
@@ -444,6 +479,146 @@ mod tests {
         };
         let pets = resolve_pets(&cfg);
         assert!(pets.is_empty());
+    }
+
+    // --- pet-names ----------------------------------------------------------
+
+    #[test]
+    fn resolve_pet_names_none_returns_empty() {
+        let cfg = AppConfig::default();
+        assert!(resolve_pet_names(&cfg).is_empty());
+    }
+
+    #[test]
+    fn resolve_pet_names_cat_and_dog_set() {
+        let mut m = HashMap::new();
+        m.insert("cat".to_string(), "Whiskers".to_string());
+        m.insert("dog".to_string(), "Rex".to_string());
+        let cfg = AppConfig {
+            pet_names: Some(m),
+            ..AppConfig::default()
+        };
+        let names = resolve_pet_names(&cfg);
+        assert_eq!(
+            names
+                .get(&crate::tui::pet::PetKind::Cat)
+                .map(String::as_str),
+            Some("Whiskers")
+        );
+        assert_eq!(
+            names
+                .get(&crate::tui::pet::PetKind::Dog)
+                .map(String::as_str),
+            Some("Rex")
+        );
+    }
+
+    #[test]
+    fn resolve_pet_names_trims_whitespace() {
+        let mut m = HashMap::new();
+        m.insert("cat".to_string(), "  Mittens  ".to_string());
+        let cfg = AppConfig {
+            pet_names: Some(m),
+            ..AppConfig::default()
+        };
+        let names = resolve_pet_names(&cfg);
+        assert_eq!(
+            names
+                .get(&crate::tui::pet::PetKind::Cat)
+                .map(String::as_str),
+            Some("Mittens")
+        );
+    }
+
+    #[test]
+    fn resolve_pet_names_skips_empty_value() {
+        let mut m = HashMap::new();
+        m.insert("cat".to_string(), "   ".to_string());
+        m.insert("dog".to_string(), "Rex".to_string());
+        let cfg = AppConfig {
+            pet_names: Some(m),
+            ..AppConfig::default()
+        };
+        let names = resolve_pet_names(&cfg);
+        assert!(!names.contains_key(&crate::tui::pet::PetKind::Cat));
+        assert_eq!(
+            names
+                .get(&crate::tui::pet::PetKind::Dog)
+                .map(String::as_str),
+            Some("Rex")
+        );
+    }
+
+    #[test]
+    fn resolve_pet_names_skips_unknown_key() {
+        let mut m = HashMap::new();
+        m.insert("hamster".to_string(), "Nibbles".to_string());
+        m.insert("cat".to_string(), "Luna".to_string());
+        let cfg = AppConfig {
+            pet_names: Some(m),
+            ..AppConfig::default()
+        };
+        let names = resolve_pet_names(&cfg);
+        assert_eq!(names.len(), 1);
+        assert_eq!(
+            names
+                .get(&crate::tui::pet::PetKind::Cat)
+                .map(String::as_str),
+            Some("Luna")
+        );
+    }
+
+    #[test]
+    fn pet_names_loaded_from_toml() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "[pet-names]\ncat = \"Luna\"\n").unwrap();
+        let cfg = load(&path);
+        assert_eq!(
+            cfg.pet_names
+                .as_ref()
+                .and_then(|m| m.get("cat"))
+                .map(String::as_str),
+            Some("Luna")
+        );
+    }
+
+    #[test]
+    fn resolve_pet_names_from_toml() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "[pet-names]\ncat = \"Luna\"\ndog = \"Rex\"\n").unwrap();
+        let cfg = load(&path);
+        let names = resolve_pet_names(&cfg);
+        assert_eq!(
+            names
+                .get(&crate::tui::pet::PetKind::Cat)
+                .map(String::as_str),
+            Some("Luna")
+        );
+        assert_eq!(
+            names
+                .get(&crate::tui::pet::PetKind::Dog)
+                .map(String::as_str),
+            Some("Rex")
+        );
+    }
+
+    #[test]
+    fn save_preserves_pet_names() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "theme = \"normal\"\n[pet-names]\ncat = \"Luna\"\n").unwrap();
+        save(&path, "cyberpunk").unwrap();
+        let cfg = load(&path);
+        assert_eq!(cfg.theme.as_deref(), Some("cyberpunk"));
+        assert_eq!(
+            cfg.pet_names
+                .as_ref()
+                .and_then(|m| m.get("cat"))
+                .map(String::as_str),
+            Some("Luna")
+        );
     }
 
     // --- save_version ---------------------------------------------------------

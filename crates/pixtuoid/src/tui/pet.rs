@@ -75,6 +75,16 @@ impl PetKind {
         }
     }
 
+    /// Default display name shown in the hover tooltip when the user hasn't
+    /// set a custom one in `[pet-names]`. Single source for these strings
+    /// (the tooltip reads this rather than hardcoding them).
+    pub fn default_name(self) -> &'static str {
+        match self {
+            PetKind::Cat => "Office Cat",
+            PetKind::Dog => "Office Dog",
+        }
+    }
+
     pub fn sleeps_near_idle(self) -> bool {
         match self {
             PetKind::Cat => true,
@@ -103,6 +113,19 @@ pub fn select_pet_for_floor(floor_seed: u64, enabled_pets: &[PetKind]) -> Option
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_name_cat_and_dog() {
+        assert_eq!(PetKind::Cat.default_name(), "Office Cat");
+        assert_eq!(PetKind::Dog.default_name(), "Office Dog");
+    }
+
+    #[test]
+    fn default_name_all_nonempty() {
+        for &k in PetKind::ALL {
+            assert!(!k.default_name().is_empty(), "{k:?} default_name empty");
+        }
+    }
 
     #[test]
     fn config_name_roundtrip() {

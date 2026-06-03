@@ -301,12 +301,17 @@ pub(crate) fn paint_pet_tooltip(
     kind: PetKind,
     anim_name: &str,
     is_on_cooldown: bool,
+    display_name: &str,
     mx: u16,
     my: u16,
     scene_rect: Rect,
     theme: &crate::tui::theme::Theme,
 ) {
-    let text = if is_on_cooldown {
+    // The state strings (cooldown reaction / sleeping / pet-me) are NOT user-
+    // configurable; only the idle/walk label is the pet's NAME, which the caller
+    // resolves (custom from `[pet-names]`, else `PetKind::default_name`).
+    let idle = format!(" {display_name} ");
+    let text: &str = if is_on_cooldown {
         match kind {
             PetKind::Cat => " purr... ",
             PetKind::Dog => " woof! ",
@@ -316,10 +321,7 @@ pub(crate) fn paint_pet_tooltip(
     } else if anim_name == kind.sit_anim() {
         " Pet me! "
     } else {
-        match kind {
-            PetKind::Cat => " Office Cat ",
-            PetKind::Dog => " Office Dog ",
-        }
+        &idle
     };
     paint_simple_tooltip(f, text, mx, my, scene_rect, theme);
 }

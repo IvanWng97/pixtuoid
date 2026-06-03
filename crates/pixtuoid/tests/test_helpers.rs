@@ -50,6 +50,7 @@ macro_rules! make_draw_ctx {
             active_pet: None,
             last_pet_pos: None,
             floor_pet_kind: None,
+            pet_names: &std::collections::HashMap::new(),
             chitchat_state: &mut _chitchat_state,
             chitchat_bubbles: Vec::new(),
             coffee_holders: &std::collections::HashSet::new(),

@@ -67,10 +67,19 @@ fn dark_theme() -> &'static crate::tui::theme::Theme {
     crate::tui::theme::theme_by_name("cyberpunk").expect("cyberpunk theme")
 }
 fn build(cols: u16, rows: u16, pets: Vec<PetKind>) -> TuiRenderer<TestBackend> {
+    build_with_names(cols, rows, pets, std::collections::HashMap::new())
+}
+fn build_with_names(
+    cols: u16,
+    rows: u16,
+    pets: Vec<PetKind>,
+    pet_names: std::collections::HashMap<PetKind, String>,
+) -> TuiRenderer<TestBackend> {
     TuiRenderer::new(
         Terminal::new(TestBackend::new(cols, rows)).expect("test backend"),
         normal_theme(),
         pets,
+        pet_names,
     )
 }
 /// Idle agent on floor 0 at desk `desk`.
@@ -162,7 +171,7 @@ fn offscreen_floor_freezes_and_resyncs_on_return() {
     scene.agents.insert(b, slot(b, 1, cap, t0));
 
     let term = Terminal::new(TestBackend::new(100, 40)).expect("test backend");
-    let mut r = TuiRenderer::new(term, theme, vec![]);
+    let mut r = TuiRenderer::new(term, theme, vec![], std::collections::HashMap::new());
 
     // Warm up floor 0 so agent A's MotionState initialises and wanders.
     let mut now = t0;
@@ -1050,6 +1059,48 @@ fn pet_tooltip_on_hover() {
     assert!(
         text.contains("Cat") || text.contains("purr"),
         "hovering the cat shows its tooltip"
+    );
+}
+
+#[test]
+fn pet_tooltip_shows_custom_name() {
+    let scene = scene_with(vec![active("/tt/cn.jsonl", 0, "Edit", t0())], 16);
+    let mut names = std::collections::HashMap::new();
+    names.insert(PetKind::Cat, "Luna".to_string());
+    let mut r = build_with_names(140, 48, vec![PetKind::Cat], names);
+    r.render(&scene, &pack(), t0()).unwrap();
+    let (pos, _, _) = r.cached_pet_pos().expect("cat placed");
+    r.set_mouse_pos(Some((pos.x, pos.y / 2)));
+    r.render(&scene, &pack(), t0()).unwrap();
+    let text = frame_text(r.frame_buffer());
+    assert!(
+        text.contains("Luna"),
+        "hovering the cat shows its custom name; got:\n{text}"
+    );
+    assert!(
+        !text.contains("Office Cat"),
+        "custom name replaces the default, not appended"
+    );
+}
+
+#[test]
+fn pet_tooltip_falls_back_to_default_name_when_not_configured() {
+    let scene = scene_with(vec![active("/tt/fb.jsonl", 0, "Edit", t0())], 16);
+    // Empty names map → default name.
+    let mut r = build_with_names(
+        140,
+        48,
+        vec![PetKind::Cat],
+        std::collections::HashMap::new(),
+    );
+    r.render(&scene, &pack(), t0()).unwrap();
+    let (pos, _, _) = r.cached_pet_pos().expect("cat placed");
+    r.set_mouse_pos(Some((pos.x, pos.y / 2)));
+    r.render(&scene, &pack(), t0()).unwrap();
+    let text = frame_text(r.frame_buffer());
+    assert!(
+        text.contains("Office Cat"),
+        "an unconfigured cat falls back to the default name; got:\n{text}"
     );
 }
 

@@ -45,6 +45,9 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     active_pet: Option<PetState>,
     last_pet_pos: Option<(Point, &'static str, PetKind)>,
     enabled_pets: Vec<PetKind>,
+    /// User-defined pet display names from `[pet-names]` config (resolved once
+    /// at startup like `enabled_pets`). Borrowed into `DrawCtx` per frame.
+    pet_names: std::collections::HashMap<PetKind, String>,
     chitchat_state: std::collections::HashMap<
         crate::tui::chitchat::VenueKey,
         crate::tui::chitchat::ActiveChitchat,
@@ -76,6 +79,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         terminal: Terminal<B>,
         theme: &'static crate::tui::theme::Theme,
         enabled_pets: Vec<PetKind>,
+        pet_names: std::collections::HashMap<PetKind, String>,
     ) -> Self {
         Self {
             terminal,
@@ -92,6 +96,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             active_pet: None,
             last_pet_pos: None,
             enabled_pets,
+            pet_names,
             chitchat_state: std::collections::HashMap::new(),
             coffee_holders: std::collections::HashSet::new(),
             coffee_fetched_at: std::collections::HashMap::new(),
@@ -621,6 +626,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> Renderer for TuiRenderer<B> {
                 floor_meta.floor_seed,
                 &self.enabled_pets,
             ),
+            pet_names: &self.pet_names,
             chitchat_state: &mut self.chitchat_state,
             chitchat_bubbles: Vec::new(),
             coffee_holders: &self.coffee_holders,

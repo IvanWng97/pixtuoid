@@ -40,6 +40,7 @@ pub fn run(
     theme_name: String,
     config_path: PathBuf,
     enabled_pets: Vec<crate::tui::pet::PetKind>,
+    pet_names: std::collections::HashMap<crate::tui::pet::PetKind, String>,
 ) -> Result<()> {
     let theme = crate::tui::theme::theme_by_name(&theme_name).ok_or_else(|| {
         let valid: Vec<&str> = crate::tui::theme::ALL_THEMES
@@ -62,6 +63,7 @@ pub fn run(
             theme,
             config_path,
             enabled_pets,
+            pet_names,
         )
         .await
     })
@@ -78,6 +80,7 @@ async fn run_async(
     theme: &'static crate::tui::theme::Theme,
     config_path: PathBuf,
     enabled_pets: Vec<crate::tui::pet::PetKind>,
+    pet_names: std::collections::HashMap<crate::tui::pet::PetKind, String>,
 ) -> Result<()> {
     let mut cc_src = ClaudeCodeSource::default_paths();
     if let Some(s) = socket {
@@ -129,6 +132,7 @@ async fn run_async(
             config_path,
             desk_cap,
             enabled_pets,
+            pet_names,
         )
         .await
     }

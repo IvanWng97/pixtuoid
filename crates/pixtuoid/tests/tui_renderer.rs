@@ -53,6 +53,7 @@ fn tui_renderer_render_paints_a_full_frame() {
         terminal,
         &pixtuoid::tui::theme::NORMAL,
         pixtuoid::tui::pet::PetKind::ALL.to_vec(),
+        std::collections::HashMap::new(),
     );
     let pack = load_sprite_pack(None).expect("pack");
 
@@ -128,6 +129,7 @@ fn tui_renderer_transition_paints_pets_and_coffee() {
         terminal,
         &pixtuoid::tui::theme::NORMAL,
         pixtuoid::tui::pet::PetKind::ALL.to_vec(),
+        std::collections::HashMap::new(),
     );
     let pack = load_sprite_pack(None).expect("pack");
 
@@ -190,6 +192,7 @@ fn set_version_popup_records_timestamp_on_edge() {
         terminal,
         &pixtuoid::tui::theme::NORMAL,
         pixtuoid::tui::pet::PetKind::ALL.to_vec(),
+        std::collections::HashMap::new(),
     );
 
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
@@ -236,6 +239,7 @@ fn version_popup_animation_starts_small_then_grows() {
         terminal,
         &pixtuoid::tui::theme::NORMAL,
         pixtuoid::tui::pet::PetKind::ALL.to_vec(),
+        std::collections::HashMap::new(),
     );
 
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
@@ -288,6 +292,7 @@ fn dismiss_mid_entrance_does_not_snap_to_full() {
         terminal,
         &pixtuoid::tui::theme::NORMAL,
         pixtuoid::tui::pet::PetKind::ALL.to_vec(),
+        std::collections::HashMap::new(),
     );
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
 
@@ -355,6 +360,7 @@ fn cancel_transition_lands_on_destination_floor() {
         terminal,
         &pixtuoid::tui::theme::NORMAL,
         pixtuoid::tui::pet::PetKind::ALL.to_vec(),
+        std::collections::HashMap::new(),
     );
     let pack = load_sprite_pack(None).expect("pack");
 
@@ -385,6 +391,7 @@ fn make_renderer() -> TuiRenderer<TestBackend> {
         terminal,
         &pixtuoid::tui::theme::NORMAL,
         pixtuoid::tui::pet::PetKind::ALL.to_vec(),
+        std::collections::HashMap::new(),
     )
 }
 
