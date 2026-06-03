@@ -1,7 +1,7 @@
 <!--
 Thanks for contributing to pixtuoid! Before you open this PR:
 - Read CLAUDE.md (root) — architecture invariants & conventions are load-bearing.
-- Run scripts/preflight.sh locally (it mirrors CI: fmt + machete + deny + clippy -D warnings + tests).
+- Run `just preflight` locally (it IS what CI runs: fmt + machete + deny + clippy -D warnings + tests).
 Delete sections that don't apply. Keep it short — the diff speaks for itself.
 -->
 
@@ -26,7 +26,7 @@ Delete sections that don't apply. Keep it short — the diff speaks for itself.
 
 <!--
 - `cargo test --workspace --features pixtuoid-core/test-renderer`
-- ./scripts/preflight.sh (full CI mirror)
+- just preflight (full CI gate)
 - Live: ./target/release/pixtuoid run --headless --projects-root ~/.claude/projects
 -->
 
@@ -49,7 +49,7 @@ pixel painter, attach a cropped snapshot and self-critique:
 - [ ] No `unwrap()` in non-test code; errors propagate via `anyhow`/`thiserror`.
 - [ ] No new `println!`/`eprintln!` on a production path (use `tracing`).
 - [ ] Docs updated in the same commit if I changed module structure, architecture, or public API (`CLAUDE.md` / `README.md`).
-- [ ] `scripts/preflight.sh` passes locally.
+- [ ] `just preflight` passes locally.
 
 ## AI assistance
 

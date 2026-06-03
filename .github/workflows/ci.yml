@@ -25,7 +25,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
-      - run: cargo fmt --all --check
+      - uses: extractions/setup-just@v4
+      - run: just fmt-check
 
   clippy:
     name: clippy
@@ -36,7 +37,8 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
-      - run: cargo clippy --workspace --all-targets --features pixtuoid-core/test-renderer -- -D warnings
+      - uses: extractions/setup-just@v4
+      - run: just clippy
 
   deny:
     name: cargo-deny
@@ -51,10 +53,9 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Install cargo-machete
-        run: cargo install cargo-machete
-      - run: cargo machete
+      - uses: taiki-e/install-action@cargo-machete
+      - uses: extractions/setup-just@v4
+      - run: just machete
 
   coverage:
     name: coverage
@@ -92,7 +93,7 @@ jobs:
 
   smoke:
     name: smoke
-    needs: [fmt, clippy, coverage]
+    needs: [fmt, clippy]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

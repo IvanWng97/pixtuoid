@@ -13,12 +13,17 @@ if [[ "${SKIP_PREFLIGHT:-0}" == "1" ]]; then
     exit 0
 fi
 
-REPO_ROOT="$(git rev-parse --show-toplevel)"
-cd "$REPO_ROOT"
+cd "$(git rev-parse --show-toplevel)"
 
-printf '\033[36m[pre-commit] cargo fmt --all --check\033[0m\n' >&2
-# shellcheck disable=SC2016
-cargo fmt --all --check || {
-    printf '\033[31m[pre-commit] FAILED: run `cargo fmt --all` and recommit\033[0m\n' >&2
+if ! command -v just &>/dev/null; then
+    # shellcheck disable=SC2016  # backticks are literal text, not expansion
+    printf '\033[31m[pre-commit] `just` not found — install it (brew install just)\033[0m\n' >&2
+    exit 1
+fi
+
+printf '\033[36m[pre-commit] just fmt-check\033[0m\n' >&2
+just fmt-check || {
+    # shellcheck disable=SC2016  # backticks are literal text, not expansion
+    printf '\033[31m[pre-commit] FAILED: run `just fmt` and recommit\033[0m\n' >&2
     exit 1
 }

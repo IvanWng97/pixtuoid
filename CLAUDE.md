@@ -34,7 +34,7 @@ crates/
 │                       cli.rs config.rs runtime.rs install/ tui/ sprites/ (default/robot/skeleton packs)
 │                       → see crates/pixtuoid/CLAUDE.md and crates/pixtuoid/src/tui/CLAUDE.md
 └── pixtuoid-hook/      tiny shim CC invokes — stdin JSON → Unix socket, 200ms write timeout
-scripts/                preflight.sh (CI mirror), crop-snapshot.py (visual verification),
+scripts/                crop-snapshot.py (visual verification),
                         replay-fixture.sh (replay a captured source rollout fixture into a
                         headless run via --codex-sessions-root, for eyeballing lifecycle),
                         check_upstream_drift.py (weekly CI: CC/Codex wire-format rename watch)
@@ -78,12 +78,21 @@ See `.claude/skills/beautify-decoration/SKILL.md` for the full iteration loop, s
 
 ### Pre-commit / pre-push preflight
 
-`scripts/preflight.sh` mirrors `.github/workflows/ci.yml` (rustfmt + cargo-machete +
-cargo-deny + clippy with `-D warnings` + workspace tests). Run it locally to avoid
-the round-trip of "push → wait for CI → red → fix → push again."
+The `justfile` is the **single source of truth** for what each check runs —
+`.github/workflows/ci.yml` and the git hooks call the same recipes, so there's
+no CI-vs-local drift to maintain. Requires `just` (`brew install just`).
 
-`.githooks/pre-commit` runs `cargo fmt --all --check` only (sub-second).
-`.githooks/pre-push` runs the full preflight before pushing.
+```
+just              # list recipes
+just preflight    # full pre-push gate: lint (fmt+machete+deny, parallel) → clippy → test
+just fmt          # auto-format
+```
+
+Run `just preflight` locally to avoid the round-trip of "push → wait for CI →
+red → fix → push again."
+
+`.githooks/pre-commit` runs `just fmt-check` only (sub-second).
+`.githooks/pre-push` runs `just preflight` before pushing (honors `SKIP_PREFLIGHT=1`).
 
 Activate hooks **once per clone**:
 

@@ -1,10 +1,24 @@
 #!/usr/bin/env bash
-# Pre-push hook: runs the full preflight (mirrors CI) before pushing.
+# Pre-push hook: runs `just preflight` (the full CI gate) before pushing.
 # Pre-commit only checks formatting; this is the gate for everything else.
 #
 # Set up once per clone with:
 #   git config core.hooksPath .githooks
 #
-# Bypass with `--no-verify` or `SKIP_PREFLIGHT=1`.
+# Bypass with `--no-verify` or `SKIP_PREFLIGHT=1 git push`.
 set -euo pipefail
-exec "$(git rev-parse --show-toplevel)/scripts/preflight.sh"
+
+if [[ "${SKIP_PREFLIGHT:-0}" == "1" ]]; then
+    printf '\033[33m[pre-push] SKIP_PREFLIGHT=1 — skipping preflight\033[0m\n' >&2
+    exit 0
+fi
+
+cd "$(git rev-parse --show-toplevel)"
+
+if ! command -v just &>/dev/null; then
+    # shellcheck disable=SC2016  # backticks are literal text, not expansion
+    printf '\033[31m[pre-push] `just` not found — install it (brew install just)\033[0m\n' >&2
+    exit 1
+fi
+
+exec just preflight
