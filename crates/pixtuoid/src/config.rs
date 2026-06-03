@@ -1,7 +1,19 @@
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
+
+/// One `[[pets]]` stanza. `kind` is kept as a raw `String` (NOT a serde-derived
+/// `PetKind`) on purpose: a typo like `kind = "hamster"` is then validated +
+/// warn-skipped in [`resolve_pets`], rather than failing the whole
+/// `toml::from_str` and tripping `load`'s all-or-nothing malformed arm — which
+/// would silently revert EVERY user setting (theme, etc.) to defaults. `name`
+/// is optional; omit it for the pet's default display name.
+#[derive(Debug, Default, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct PetEntry {
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+}
 
 #[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct AppConfig {
@@ -15,26 +27,22 @@ pub struct AppConfig {
     #[serde(rename = "pack-dir")]
     pub pack_dir: Option<String>,
     #[serde(
-        rename = "enabled-pets",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub enabled_pets: Option<Vec<String>>,
-    #[serde(
         rename = "last-seen-version",
         default,
         skip_serializing_if = "Option::is_none"
     )]
     pub last_seen_version: Option<String>,
-    /// Optional per-kind custom display names for pets, e.g.
-    /// `[pet-names]\ncat = "Whiskers"\ndog = "Rex"`. Keys are pet config
-    /// names (`cat`/`dog`); an unset kind falls back to its default name.
-    /// MUST stay LAST in the struct: a `HashMap` serializes as a TOML
-    /// `[pet-names]` table, which `toml::to_string_pretty` requires after all
-    /// scalar keys (declaration order) — a scalar field below it would emit
-    /// invalid TOML.
-    #[serde(rename = "pet-names", default, skip_serializing_if = "Option::is_none")]
-    pub pet_names: Option<HashMap<String, String>>,
+    /// The office's pets — one `[[pets]]` stanza each (`kind` + optional
+    /// `name`). Absent = all kinds with default names; `pets = []` = no pets;
+    /// an unknown `kind` is warn-skipped (non-fatal). Resolved into the runtime
+    /// `Vec<Pet>` by [`resolve_pets`].
+    ///
+    /// Keep `pets` LAST in the struct by convention: an array-of-tables
+    /// serializes cleanest after all scalar keys (matching where `pet_names`
+    /// used to sit). `toml` does not *require* it — it tolerates a scalar after
+    /// an AoT — but don't rely on its key/table interleaving; just keep it last.
+    #[serde(rename = "pets", default, skip_serializing_if = "Option::is_none")]
+    pub pets: Option<Vec<PetEntry>>,
 }
 
 pub fn resolve_pack_dir(config: &AppConfig, cli_pack_dir: Option<PathBuf>) -> Option<PathBuf> {
@@ -148,47 +156,42 @@ pub fn resolve_theme(config: &AppConfig, cli_theme: Option<String>) -> String {
         .unwrap_or_else(|| "normal".to_string())
 }
 
-/// Resolve config into the office's [`Pet`]s — one per enabled kind, each
-/// carrying its display name (custom from `[pet-names]`, else
-/// [`PetKind::default_name`]). `enabled-pets` absent → all kinds; unknown
-/// enabled names are warned + skipped. A `[pet-names]` value is trimmed and an
-/// empty/whitespace-only one falls back to the default. Resolving the name HERE
+/// Resolve config into the office's [`Pet`]s. `[[pets]]` absent → all kinds
+/// with default names. `pets = []` → no pets. An unknown `kind` is warn-skipped
+/// (non-fatal; the rest of the config and the remaining stanzas survive). A
+/// `name` is trimmed; empty/absent → [`PetKind::default_name`]. Resolving HERE
 /// (once, at startup) means the render path reads `pet.name` directly — no
 /// per-frame lookup, no parallel kind→name map to keep in sync.
 pub fn resolve_pets(config: &AppConfig) -> Vec<crate::tui::pet::Pet> {
     use crate::tui::pet::{Pet, PetKind};
-    let kinds: Vec<PetKind> = match &config.enabled_pets {
-        None => PetKind::ALL.to_vec(),
-        Some(names) => {
-            let kinds: Vec<_> = names
-                .iter()
-                .filter_map(|n| {
-                    let kind = PetKind::from_config_name(n);
-                    if kind.is_none() {
-                        tracing::warn!(pet = %n, "unknown pet in config — skipping");
-                    }
-                    kind
-                })
-                .collect();
-            if kinds.is_empty() && !names.is_empty() {
-                tracing::warn!("all enabled-pets names were unknown — no pets will appear");
+
+    match &config.pets {
+        None => PetKind::ALL.iter().map(|&k| Pet::defaulted(k)).collect(),
+        Some(entries) => {
+            let mut out = Vec::with_capacity(entries.len());
+            for entry in entries {
+                let Some(kind) = PetKind::from_config_name(&entry.kind) else {
+                    tracing::warn!(
+                        pet = %entry.kind,
+                        "unknown pet kind in [[pets]] config — skipping"
+                    );
+                    continue;
+                };
+                let name = entry
+                    .name
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string)
+                    .unwrap_or_else(|| kind.default_name().to_string());
+                out.push(Pet { kind, name });
             }
-            kinds
+            if out.is_empty() && !entries.is_empty() {
+                tracing::warn!("all [[pets]] entries had unknown kinds — no pets will appear");
+            }
+            out
         }
-    };
-    let overrides = config.pet_names.as_ref();
-    kinds
-        .into_iter()
-        .map(|kind| {
-            let name = overrides
-                .and_then(|m| m.get(kind.config_name()))
-                .map(|s| s.trim())
-                .filter(|s| !s.is_empty())
-                .map(str::to_string)
-                .unwrap_or_else(|| kind.default_name().to_string());
-            Pet { kind, name }
-        })
-        .collect()
+    }
 }
 
 #[cfg(test)]
@@ -411,87 +414,79 @@ mod tests {
         assert_eq!(cfg.pack_dir.as_deref(), Some("/custom/sprites"));
     }
 
-    // --- enabled-pets -------------------------------------------------------
+    // --- [[pets]] config ----------------------------------------------------
 
     #[test]
-    fn enabled_pets_none_returns_all() {
+    fn pets_absent_returns_all_with_default_names() {
         let cfg = AppConfig::default();
         let pets = resolve_pets(&cfg);
         assert_eq!(pets.len(), crate::tui::pet::PetKind::ALL.len());
+        for pet in &pets {
+            assert_eq!(pet.name, pet.kind.default_name());
+        }
     }
 
     #[test]
-    fn enabled_pets_empty_returns_none() {
+    fn pets_empty_vec_returns_none() {
         let cfg = AppConfig {
-            enabled_pets: Some(vec![]),
+            pets: Some(vec![]),
+            ..AppConfig::default()
+        };
+        assert!(resolve_pets(&cfg).is_empty());
+    }
+
+    #[test]
+    fn pets_unknown_kind_warns_and_skips() {
+        let cfg = AppConfig {
+            pets: Some(vec![
+                PetEntry {
+                    kind: "cat".into(),
+                    name: None,
+                },
+                PetEntry {
+                    kind: "hamster".into(),
+                    name: None,
+                },
+            ]),
             ..AppConfig::default()
         };
         let pets = resolve_pets(&cfg);
-        assert!(pets.is_empty());
+        assert_eq!(pets.len(), 1);
+        assert_eq!(pets[0].kind, crate::tui::pet::PetKind::Cat);
+        assert_eq!(pets[0].name, "Office Cat");
     }
 
     #[test]
-    fn enabled_pets_filters_unknown() {
+    fn pets_all_unknown_returns_empty() {
         let cfg = AppConfig {
-            enabled_pets: Some(vec!["cat".into(), "hamster".into()]),
+            pets: Some(vec![
+                PetEntry {
+                    kind: "hamster".into(),
+                    name: None,
+                },
+                PetEntry {
+                    kind: "parrot".into(),
+                    name: None,
+                },
+            ]),
             ..AppConfig::default()
         };
-        let pets = resolve_pets(&cfg);
-        assert_eq!(
-            pets,
-            vec![crate::tui::pet::Pet::defaulted(
-                crate::tui::pet::PetKind::Cat
-            )]
-        );
+        assert!(resolve_pets(&cfg).is_empty());
     }
 
     #[test]
-    fn enabled_pets_loaded_from_toml() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("config.toml");
-        std::fs::write(&path, "enabled-pets = [\"dog\"]\n").unwrap();
-        let cfg = load(&path);
-        assert_eq!(cfg.enabled_pets, Some(vec!["dog".to_string()]));
-    }
-
-    #[test]
-    fn save_preserves_enabled_pets() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("config.toml");
-        std::fs::write(
-            &path,
-            "theme = \"normal\"\nenabled-pets = [\"cat\", \"dog\"]\n",
-        )
-        .unwrap();
-        save(&path, "cyberpunk").unwrap();
-        let cfg = load(&path);
-        assert_eq!(cfg.theme.as_deref(), Some("cyberpunk"));
-        assert_eq!(
-            cfg.enabled_pets,
-            Some(vec!["cat".to_string(), "dog".to_string()])
-        );
-    }
-
-    #[test]
-    fn enabled_pets_all_unknown_returns_empty() {
+    fn pets_entry_custom_name_attached() {
         let cfg = AppConfig {
-            enabled_pets: Some(vec!["hamster".into(), "parrot".into()]),
-            ..AppConfig::default()
-        };
-        let pets = resolve_pets(&cfg);
-        assert!(pets.is_empty());
-    }
-
-    // --- pet-names (resolved into Pet.name) ---------------------------------
-
-    #[test]
-    fn resolve_pets_attaches_custom_name() {
-        let mut m = HashMap::new();
-        m.insert("cat".to_string(), "Whiskers".to_string());
-        m.insert("dog".to_string(), "Rex".to_string());
-        let cfg = AppConfig {
-            enabled_pets: Some(vec!["cat".into(), "dog".into()]),
-            pet_names: Some(m),
+            pets: Some(vec![
+                PetEntry {
+                    kind: "cat".into(),
+                    name: Some("Whiskers".into()),
+                },
+                PetEntry {
+                    kind: "dog".into(),
+                    name: Some("Rex".into()),
+                },
+            ]),
             ..AppConfig::default()
         };
         let pets = resolve_pets(&cfg);
@@ -501,23 +496,30 @@ mod tests {
     }
 
     #[test]
-    fn resolve_pets_falls_back_to_default_name() {
+    fn pets_entry_absent_name_falls_back_to_default() {
         let cfg = AppConfig {
-            enabled_pets: Some(vec!["dog".into()]),
+            pets: Some(vec![PetEntry {
+                kind: "dog".into(),
+                name: None,
+            }]),
             ..AppConfig::default()
         };
-        let pets = resolve_pets(&cfg);
-        assert_eq!(pets[0].name, "Office Dog");
+        assert_eq!(resolve_pets(&cfg)[0].name, "Office Dog");
     }
 
     #[test]
-    fn resolve_pets_trims_and_skips_empty_name() {
-        let mut m = HashMap::new();
-        m.insert("cat".to_string(), "  Mittens  ".to_string());
-        m.insert("dog".to_string(), "   ".to_string()); // whitespace-only → default
+    fn pets_entry_name_trimmed_empty_falls_back() {
         let cfg = AppConfig {
-            enabled_pets: Some(vec!["cat".into(), "dog".into()]),
-            pet_names: Some(m),
+            pets: Some(vec![
+                PetEntry {
+                    kind: "cat".into(),
+                    name: Some("  Mittens  ".into()),
+                },
+                PetEntry {
+                    kind: "dog".into(),
+                    name: Some("   ".into()), // whitespace-only → default
+                },
+            ]),
             ..AppConfig::default()
         };
         let pets = resolve_pets(&cfg);
@@ -527,78 +529,86 @@ mod tests {
     }
 
     #[test]
-    fn resolve_pets_unknown_pet_names_key_is_ignored() {
-        // A name for a kind that isn't enabled is simply never attached.
-        let mut m = HashMap::new();
-        m.insert("hamster".to_string(), "Nibbles".to_string());
-        m.insert("cat".to_string(), "Luna".to_string());
-        let cfg = AppConfig {
-            enabled_pets: Some(vec!["cat".into()]),
-            pet_names: Some(m),
-            ..AppConfig::default()
-        };
-        let pets = resolve_pets(&cfg);
-        assert_eq!(pets.len(), 1);
-        assert_eq!(pets[0].kind, crate::tui::pet::PetKind::Cat);
-        assert_eq!(pets[0].name, "Luna");
-    }
-
-    #[test]
-    fn resolve_pets_none_config_uses_default_names() {
-        let cfg = AppConfig::default(); // enabled_pets = None → all kinds
-        let pets = resolve_pets(&cfg);
-        assert_eq!(pets.len(), crate::tui::pet::PetKind::ALL.len());
-        for pet in &pets {
-            assert_eq!(pet.name, pet.kind.default_name());
-        }
-    }
-
-    #[test]
-    fn pet_names_loaded_from_toml() {
+    fn pets_loaded_from_toml() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.toml");
-        std::fs::write(&path, "[pet-names]\ncat = \"Luna\"\n").unwrap();
+        std::fs::write(&path, "[[pets]]\nkind = \"dog\"\n").unwrap();
         let cfg = load(&path);
         assert_eq!(
-            cfg.pet_names
-                .as_ref()
-                .and_then(|m| m.get("cat"))
-                .map(String::as_str),
-            Some("Luna")
+            cfg.pets,
+            Some(vec![PetEntry {
+                kind: "dog".into(),
+                name: None
+            }])
         );
     }
 
     #[test]
-    fn resolve_pets_from_toml_attaches_names() {
+    fn pets_full_toml_resolves_names() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.toml");
         std::fs::write(
             &path,
-            "enabled-pets = [\"cat\", \"dog\"]\n[pet-names]\ncat = \"Luna\"\ndog = \"Rex\"\n",
+            "[[pets]]\nkind = \"cat\"\nname = \"Luna\"\n\n[[pets]]\nkind = \"dog\"\n",
         )
         .unwrap();
         let cfg = load(&path);
         let pets = resolve_pets(&cfg);
+        assert_eq!(pets.len(), 2);
         let name = |k| pets.iter().find(|p| p.kind == k).map(|p| p.name.as_str());
         assert_eq!(name(crate::tui::pet::PetKind::Cat), Some("Luna"));
-        assert_eq!(name(crate::tui::pet::PetKind::Dog), Some("Rex"));
+        assert_eq!(name(crate::tui::pet::PetKind::Dog), Some("Office Dog"));
     }
 
     #[test]
-    fn save_preserves_pet_names() {
+    fn save_preserves_pets() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.toml");
-        std::fs::write(&path, "theme = \"normal\"\n[pet-names]\ncat = \"Luna\"\n").unwrap();
+        std::fs::write(
+            &path,
+            "theme = \"normal\"\n[[pets]]\nkind = \"cat\"\nname = \"Luna\"\n",
+        )
+        .unwrap();
         save(&path, "cyberpunk").unwrap();
         let cfg = load(&path);
         assert_eq!(cfg.theme.as_deref(), Some("cyberpunk"));
         assert_eq!(
-            cfg.pet_names
-                .as_ref()
-                .and_then(|m| m.get("cat"))
-                .map(String::as_str),
-            Some("Luna")
+            cfg.pets,
+            Some(vec![PetEntry {
+                kind: "cat".into(),
+                name: Some("Luna".into())
+            }])
         );
+    }
+
+    #[test]
+    fn pets_empty_vec_serializes_as_inline_empty_array() {
+        let cfg = AppConfig {
+            pets: Some(vec![]),
+            ..AppConfig::default()
+        };
+        let s = toml::to_string_pretty(&cfg).unwrap();
+        assert!(s.contains("pets = []"), "expected 'pets = []' in:\n{s}");
+        let reloaded: AppConfig = toml::from_str(&s).unwrap();
+        assert_eq!(reloaded.pets, Some(vec![]));
+    }
+
+    #[test]
+    fn pets_section_is_last_in_serialized_toml() {
+        // The AoT must serialize after the scalar keys (the must-be-last
+        // convention); a scalar after `[[pets]]` would be invalid TOML.
+        let cfg = AppConfig {
+            theme: Some("normal".into()),
+            pets: Some(vec![PetEntry {
+                kind: "cat".into(),
+                name: None,
+            }]),
+            ..AppConfig::default()
+        };
+        let s = toml::to_string_pretty(&cfg).unwrap();
+        let theme_pos = s.find("theme").expect("theme not in output");
+        let pets_pos = s.find("[[pets]]").expect("[[pets]] not in output");
+        assert!(theme_pos < pets_pos, "theme must precede [[pets]]:\n{s}");
     }
 
     // --- save_version ---------------------------------------------------------

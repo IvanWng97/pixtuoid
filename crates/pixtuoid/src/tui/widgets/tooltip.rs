@@ -309,7 +309,7 @@ pub(crate) fn paint_pet_tooltip(
 ) {
     // The state strings (cooldown reaction / sleeping / pet-me) are NOT user-
     // configurable; only the idle/walk label is the pet's NAME, which the caller
-    // resolves (custom from `[pet-names]`, else `PetKind::default_name`).
+    // resolves (custom from the `[[pets]]` stanza, else `PetKind::default_name`).
     let idle = format!(" {display_name} ");
     let text: &str = if is_on_cooldown {
         match kind {

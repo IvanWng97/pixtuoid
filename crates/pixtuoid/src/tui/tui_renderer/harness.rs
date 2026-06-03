@@ -681,7 +681,7 @@ fn injected_coffee_changes_desk_render() {
 #[test]
 fn no_pet_when_pets_disabled() {
     let scene = scene_with(vec![active("/pet/0.jsonl", 0, "Edit", t0())], 16);
-    let mut r = build(100, 40, vec![]); // empty enabled_pets
+    let mut r = build(100, 40, vec![]); // no pets
     r.render(&scene, &pack(), t0()).unwrap();
     assert!(r.cached_pet_pos().is_none(), "no pet when none enabled");
 }
