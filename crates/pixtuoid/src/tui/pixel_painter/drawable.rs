@@ -161,10 +161,9 @@ pub(super) enum DrawableKind<'a> {
     /// Meeting-room coat rack (pole + base + coat blobs), y-sorted at its base
     /// row so a character walking in front of it occludes it (and one behind
     /// is occluded BY it) — was painted in the background pass, always under
-    /// every character. `cy` is the pole top; the base sits at `cy + 7`.
+    /// every character. `pos` is the pole top; the base sits at `pos.y + 7`.
     CoatRack {
-        cx: u16,
-        cy: u16,
+        pos: Point,
     },
 }
 
@@ -679,8 +678,8 @@ pub(super) fn paint_drawable(
         DrawableKind::RoomWallH { x0, x1, y_top } => {
             super::paint_glass_wall_h(buf, theme, *x0, *x1, *y_top);
         }
-        DrawableKind::CoatRack { cx, cy } => {
-            let (cx, cy) = (*cx, *cy);
+        DrawableKind::CoatRack { pos } => {
+            let (cx, cy) = (pos.x, pos.y);
             let pole = theme.furniture.wood_trim;
             let base = theme.furniture.wood_top;
             let coats = theme.appliance.coats;

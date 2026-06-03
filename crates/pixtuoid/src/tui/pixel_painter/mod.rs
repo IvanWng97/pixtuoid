@@ -1218,7 +1218,9 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
             let cy = mr.y + mr.height / 2 - 4;
             drawables.push(Drawable {
                 anchor_y: cy + 7,
-                kind: DrawableKind::CoatRack { cx, cy },
+                kind: DrawableKind::CoatRack {
+                    pos: Point { x: cx, y: cy },
+                },
             });
         }
     }
@@ -1295,10 +1297,17 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
         };
         if let Some((pos, flip, anim_name, frame_idx, pet_elapsed)) = pet_data {
             resolved_pet_pos = Some((pos, anim_name, kind));
+            // South row derived from the CHOSEN anim's sprite height, not a
+            // literal: the h=4 sleep sprite sorts at pos.y+1, the h=6 walk/sit
+            // sprites at pos.y+2. A hardcoded +2 rendered a sleeping pet OVER a
+            // character whose feet land on pos.y+1 (one row too far south).
+            let pet_h = ctx
+                .pack
+                .animation(anim_name)
+                .and_then(|a| a.frames.first())
+                .map_or(6, |f| f.height);
             drawables.push(Drawable {
-                // center-pinned pet sprite (walk/sit 8×6, 6×6) south row =
-                // pos.y + h/2 - 1 = pos.y + 2 (was +3, one row past).
-                anchor_y: pos.y + 2,
+                anchor_y: z_sort_row(Anchor::Center, pos, pet_h),
                 kind: DrawableKind::Pet {
                     kind,
                     pos,
@@ -2095,6 +2104,39 @@ mod tests {
                 center_pin_south_offset(h),
                 expected_south,
                 "h={h}: z-key must land on the sprite south row, not one past it",
+            );
+        }
+    }
+
+    #[test]
+    fn pet_z_anchor_tracks_the_selected_anim_sprite_height() {
+        // Regression: the pet south-row z-key derives from the CHOSEN anim's
+        // sprite height (not a hardcoded +2). The shorter sleep sprite must sort
+        // one row NORTH of the walk/sit sprites — a literal +2 painted a sleeping
+        // pet OVER a character whose feet land on pos.y+1. Reads the REAL embedded
+        // heights so a pet-sprite resize surfaces HERE, not as a z-order bug.
+        let pack = crate::tui::embedded_pack::load_sprite_pack(None).expect("embedded pack");
+        let pos = Point { x: 40, y: 30 };
+        let anim_h = |name: &str| {
+            pack.animation(name)
+                .and_then(|a| a.frames.first())
+                .map(|f| f.height)
+                .unwrap_or_else(|| panic!("missing pet anim {name}"))
+        };
+        for &kind in crate::tui::pet::PetKind::ALL {
+            let sleep_h = anim_h(kind.sleep_anim());
+            let sleep = z_sort_row(Anchor::Center, pos, sleep_h);
+            let walk = z_sort_row(Anchor::Center, pos, anim_h(kind.walk_anim()));
+            let sit = z_sort_row(Anchor::Center, pos, anim_h(kind.sit_anim()));
+            assert!(
+                sleep <= walk && sleep <= sit,
+                "{kind:?}: shorter sleep sprite must not sort south of walk/sit \
+                 (sleep={sleep}, walk={walk}, sit={sit})",
+            );
+            assert_eq!(
+                sleep,
+                pos.y + center_pin_south_offset(sleep_h),
+                "{kind:?}: sleep pet must land on its sprite's south row",
             );
         }
     }

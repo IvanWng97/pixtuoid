@@ -194,7 +194,11 @@ pub(super) fn compute_with_seed(
         floor_seed,
     );
 
-    const SOFA_H: u16 = 7;
+    // One source of truth: the meeting-sofa SPRITE height (was a bare `7`). A
+    // hardcoded literal would silently let 1px-too-short rooms pass the gate
+    // below if the sprite ever grows → MeetingSofa seat teleport on the coarse
+    // grid. furniture_def is a const fn returning Copy.
+    let sofa_h = furniture_def(Furniture::MeetingSofaBody).visual.1;
     // A meeting room narrower than this can't host the 16-px-wide sofa body
     // (+ its 2-px pad) with enough walkable margin for the coarse 4×4 router to
     // reach the seats buried in the sofa — find_path returns None and an idle
@@ -205,7 +209,7 @@ pub(super) fn compute_with_seed(
     // `meeting_and_pantry_waypoints_are_routable_on_the_coarse_grid`.
     const MEETING_FURNITURE_MIN_W: u16 = 30;
     let room_fits_furniture =
-        |mr: &Bounds| mr.width >= MEETING_FURNITURE_MIN_W && mr.height >= SOFA_H * 2;
+        |mr: &Bounds| mr.width >= MEETING_FURNITURE_MIN_W && mr.height >= sofa_h * 2;
     // One source for a meeting room's furniture trio: two facing sofas and the
     // table CENTERED BETWEEN THEM. The table used to sit at the room centre while
     // the sofas sat at 30%/80% of the room height — asymmetric, so the north
@@ -221,10 +225,10 @@ pub(super) fn compute_with_seed(
         // Sofas sit SYMMETRICALLY about the room mid-line (20%/80%, was 30%/80%)
         // so each gets equal front clearance to the centred table — the old 30%
         // packed the north sofa's front against the table. Clamps mirror each
-        // other: north ≥ SOFA_H from the top wall, south ≤ SOFA_H from the bottom,
+        // other: north ≥ sofa_h from the top wall, south ≤ sofa_h from the bottom,
         // so neither backrest clips its wall in a short room.
-        let north_y = (mr.y + pct(mr.height, 20)).max(mr.y + SOFA_H);
-        let south_y = (mr.y + pct(mr.height, 80)).min(mr.y + mr.height.saturating_sub(SOFA_H));
+        let north_y = (mr.y + pct(mr.height, 20)).max(mr.y + sofa_h);
+        let south_y = (mr.y + pct(mr.height, 80)).min(mr.y + mr.height.saturating_sub(sofa_h));
         let sofas = [Point { x: cx, y: north_y }, Point { x: cx, y: south_y }];
         let table = Point {
             x: cx,

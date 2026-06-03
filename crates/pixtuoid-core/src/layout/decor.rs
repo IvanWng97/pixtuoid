@@ -592,8 +592,10 @@ pub fn seated_foot_cell(kind: Furniture, pos: Point) -> Option<Point> {
         Furniture::Desk => desk_walk_anchor(pos),
         // `occupies_pos` is exactly {Couch, MeetingSofa, MeetingStand, Desk}
         // (guarded by `furniture_def_invariants_hold_for_every_row`); the early
-        // return handled every obstacle kind.
-        _ => pos,
+        // return handled every obstacle kind. A FUTURE occupies_pos seat that
+        // forgets its arm here must fail loud, not silently settle the occupant
+        // on the blocked furniture centre (the walk-through-desk class of bug).
+        _ => unreachable!("{kind:?} sets occupies_pos but lacks a seated_foot_cell arm"),
     })
 }
 
