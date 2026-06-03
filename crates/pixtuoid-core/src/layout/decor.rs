@@ -464,7 +464,7 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
         // rect to the sprite so the red debug footprint hugs the sofa.
         Furniture::MeetingSofaBody => FurnitureDef {
             footprint: Some((16, 3)),
-            visual: (20, 8),
+            visual: (20, 7), // == the real meeting_sofa.sprite (20w × 7 data rows)
             ..DECOR
         },
         // 11×5 = the real coffee-table sprite (paint_coffee_table). footprint ==
