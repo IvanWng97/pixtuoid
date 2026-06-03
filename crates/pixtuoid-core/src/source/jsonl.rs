@@ -26,6 +26,25 @@ fn default_id_from_path(p: &Path) -> String {
     p.to_string_lossy().into_owned()
 }
 
+/// The per-source decode/label/end/id fn-pointers (the invariant-#3 seam)
+/// bundled so the seed/scan/walk helpers thread ONE Copy value, not four.
+#[derive(Clone, Copy)]
+struct SourceDecoders {
+    decode_line: LineDecoder,
+    derive_label: LabelDeriver,
+    check_ended: SessionEndChecker,
+    id_derive: IdDeriver,
+}
+
+/// Shared per-run watch state, borrowed by the seed/scan/walk helpers.
+#[derive(Clone, Copy)]
+struct WatchCtx<'a> {
+    source: &'a Arc<str>,
+    cursors: &'a Arc<Mutex<HashMap<PathBuf, u64>>>,
+    seen: &'a Arc<Mutex<HashMap<PathBuf, bool>>>,
+    tx: &'a TaggedSender,
+}
+
 pub struct JsonlWatcher {
     root: PathBuf,
     initial_window: Duration,
@@ -87,22 +106,23 @@ impl JsonlWatcher {
         watcher.watch(&self.root, RecursiveMode::Recursive)?;
 
         let source_arc: Arc<str> = Arc::from(self.source_name.as_str());
-        let decode_line = self.decode_line;
-        let derive_label = self.derive_label;
-        let check_ended = self.check_session_ended;
-        let id_derive = self.id_derive;
+        let decoders = SourceDecoders {
+            decode_line: self.decode_line,
+            derive_label: self.derive_label,
+            check_ended: self.check_session_ended,
+            id_derive: self.id_derive,
+        };
 
         initial_seed_root(
             &self.root,
             self.initial_window,
-            &source_arc,
-            decode_line,
-            derive_label,
-            check_ended,
-            &cursors,
-            &seen_sessions,
-            &tx,
-            id_derive,
+            decoders,
+            &WatchCtx {
+                source: &source_arc,
+                cursors: &cursors,
+                seen: &seen_sessions,
+                tx: &tx,
+            },
         )
         .await;
 
@@ -115,67 +135,49 @@ impl JsonlWatcher {
 
         loop {
             let source_arc = source_arc.clone();
+            let ctx = WatchCtx {
+                source: &source_arc,
+                cursors: &cursors,
+                seen: &seen_sessions,
+                tx: &tx,
+            };
             tokio::select! {
                 Some(path) = notify_rx.recv() => {
-                    walk_jsonl(&path, &source_arc, decode_line, derive_label, &cursors, &seen_sessions, &tx, id_derive).await;
+                    walk_jsonl(&path, decoders, &ctx).await;
                 }
                 _ = &mut rescan_delay, if !rescan_done => {
                     rescan_done = true;
-                    scan_root(&self.root, &source_arc, decode_line, derive_label, &cursors, &seen_sessions, &tx, id_derive).await;
+                    scan_root(&self.root, decoders, &ctx).await;
                 }
                 _ = tokio::time::sleep(Duration::from_secs(60)) => {
-                    scan_root(&self.root, &source_arc, decode_line, derive_label, &cursors, &seen_sessions, &tx, id_derive).await;
+                    scan_root(&self.root, decoders, &ctx).await;
                 }
             }
         }
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn initial_seed_root(
     root: &Path,
     window: Duration,
-    source: &Arc<str>,
-    decode_line: LineDecoder,
-    derive_label: LabelDeriver,
-    check_ended: SessionEndChecker,
-    cursors: &Arc<Mutex<HashMap<PathBuf, u64>>>,
-    seen: &Arc<Mutex<HashMap<PathBuf, bool>>>,
-    tx: &TaggedSender,
-    id_derive: IdDeriver,
+    decoders: SourceDecoders,
+    ctx: &WatchCtx<'_>,
 ) {
     if let Ok(mut read) = tokio::fs::read_dir(root).await {
         while let Ok(Some(entry)) = read.next_entry().await {
-            initial_seed_walk(
-                &entry.path(),
-                window,
-                source,
-                decode_line,
-                derive_label,
-                check_ended,
-                cursors,
-                seen,
-                tx,
-                id_derive,
-            )
-            .await;
+            initial_seed_walk(&entry.path(), window, decoders, ctx).await;
         }
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn initial_seed_walk(
     path: &Path,
     window: Duration,
-    source: &Arc<str>,
-    decode_line: LineDecoder,
-    derive_label: LabelDeriver,
-    check_ended: SessionEndChecker,
-    cursors: &Arc<Mutex<HashMap<PathBuf, u64>>>,
-    seen: &Arc<Mutex<HashMap<PathBuf, bool>>>,
-    tx: &TaggedSender,
-    id_derive: IdDeriver,
+    decoders: SourceDecoders,
+    ctx: &WatchCtx<'_>,
 ) {
+    let WatchCtx { cursors, .. } = *ctx;
+    let SourceDecoders { check_ended, .. } = decoders;
     let meta = match tokio::fs::metadata(path).await {
         Ok(m) => m,
         Err(_) => return,
@@ -183,19 +185,7 @@ async fn initial_seed_walk(
     if meta.is_dir() {
         if let Ok(mut read) = tokio::fs::read_dir(path).await {
             while let Ok(Some(entry)) = read.next_entry().await {
-                Box::pin(initial_seed_walk(
-                    &entry.path(),
-                    window,
-                    source,
-                    decode_line,
-                    derive_label,
-                    check_ended,
-                    cursors,
-                    seen,
-                    tx,
-                    id_derive,
-                ))
-                .await;
+                Box::pin(initial_seed_walk(&entry.path(), window, decoders, ctx)).await;
             }
         }
         return;
@@ -221,62 +211,34 @@ async fn initial_seed_walk(
         if ended {
             cursors.lock().await.insert(path.to_path_buf(), meta.len());
         } else {
-            walk_jsonl(
-                path,
-                source,
-                decode_line,
-                derive_label,
-                cursors,
-                seen,
-                tx,
-                id_derive,
-            )
-            .await;
+            walk_jsonl(path, decoders, ctx).await;
         }
     } else {
         cursors.lock().await.insert(path.to_path_buf(), meta.len());
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn scan_root(
-    root: &Path,
-    source: &Arc<str>,
-    decode_line: LineDecoder,
-    derive_label: LabelDeriver,
-    cursors: &Arc<Mutex<HashMap<PathBuf, u64>>>,
-    seen: &Arc<Mutex<HashMap<PathBuf, bool>>>,
-    tx: &TaggedSender,
-    id_derive: IdDeriver,
-) {
+async fn scan_root(root: &Path, decoders: SourceDecoders, ctx: &WatchCtx<'_>) {
     if let Ok(mut read) = tokio::fs::read_dir(root).await {
         while let Ok(Some(entry)) = read.next_entry().await {
-            walk_jsonl(
-                &entry.path(),
-                source,
-                decode_line,
-                derive_label,
-                cursors,
-                seen,
-                tx,
-                id_derive,
-            )
-            .await;
+            walk_jsonl(&entry.path(), decoders, ctx).await;
         }
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn walk_jsonl(
-    path: &Path,
-    source: &Arc<str>,
-    decode_line: LineDecoder,
-    derive_label: LabelDeriver,
-    cursors: &Arc<Mutex<HashMap<PathBuf, u64>>>,
-    seen: &Arc<Mutex<HashMap<PathBuf, bool>>>,
-    tx: &TaggedSender,
-    id_derive: IdDeriver,
-) {
+async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &WatchCtx<'_>) {
+    let WatchCtx {
+        source,
+        cursors,
+        seen,
+        tx,
+    } = *ctx;
+    let SourceDecoders {
+        decode_line,
+        derive_label,
+        id_derive,
+        ..
+    } = decoders;
     let meta = match tokio::fs::metadata(path).await {
         Ok(m) => m,
         Err(_) => return,
@@ -284,17 +246,7 @@ async fn walk_jsonl(
     if meta.is_dir() {
         if let Ok(mut read) = tokio::fs::read_dir(path).await {
             while let Ok(Some(entry)) = read.next_entry().await {
-                Box::pin(walk_jsonl(
-                    &entry.path(),
-                    source,
-                    decode_line,
-                    derive_label,
-                    cursors,
-                    seen,
-                    tx,
-                    id_derive,
-                ))
-                .await;
+                Box::pin(walk_jsonl(&entry.path(), decoders, ctx)).await;
             }
         }
         return;
