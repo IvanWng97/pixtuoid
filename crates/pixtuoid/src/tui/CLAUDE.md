@@ -30,8 +30,10 @@ tui/
 │                   mod.rs (struct defs + ALL_THEMES registry), normal.rs, cyberpunk.rs,
 │                   dracula.rs, tokyo_night.rs, catppuccin.rs, gruvbox.rs
 ├── motion/         per-agent walk-timing state, split production vs tests:
-│                   mod.rs (MotionState: entry/exit/snap_back/wander_*/walk_path fields — exit is a
-│                   3-tuple carrying the from-Point; walk_path = frozen per-leg A* polyline via
+│                   mod.rs (MotionState: entry/exit/snap_back/wander_*/walk_path fields — exit and
+│                   snap_back are WalkLeg{started_at,profile,from} structs (named fields, was a
+│                   3-tuple carrying the from-Point); entry stays a 2-tuple (SystemTime, WalkProfile);
+│                   walk_path = frozen per-leg A* polyline via
 │                   WalkPathSnapshot; WanderPhase enum Seated/WalkingOut/AtWaypoint/WalkingBack;
 │                   octile_path_len; advance_wander drives the elastic wander timeline, idempotent
 │                   per now via last_advanced_at; owned as HashMap<AgentId, MotionState> on FloorCtx.motion),
