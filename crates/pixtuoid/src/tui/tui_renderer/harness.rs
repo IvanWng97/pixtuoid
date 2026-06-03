@@ -731,6 +731,102 @@ fn petting_freezes_pet_position() {
     assert_eq!(pos, pos2, "a petted pet holds its position");
 }
 
+#[test]
+fn pet_walk_is_frame_stable() {
+    // Same `now` rendered by two independent renderers must yield the same pet
+    // position — proves A* on (static mask + empty overlay) is deterministic
+    // (no per-frame flash).
+    let scene = scene_with(vec![active("/pstab/0.jsonl", 0, "Edit", t0())], 16);
+    let now = t0() + Duration::from_millis(5_000); // mid walk-phase of cycle 0
+    let mut r1 = build(160, 80, vec![PetKind::Cat]);
+    let mut r2 = build(160, 80, vec![PetKind::Cat]);
+    r1.render(&scene, &pack(), now).unwrap();
+    r2.render(&scene, &pack(), now).unwrap();
+    assert_eq!(
+        r1.cached_pet_pos().map(|(p, _, _)| (p.x, p.y)),
+        r2.cached_pet_pos().map(|(p, _, _)| (p.x, p.y)),
+        "identical `now` must give identical pet position (no flash)"
+    );
+}
+
+#[test]
+fn pet_walk_never_clips_through_furniture() {
+    // Across 4 cycles (many prev/dest pairs) × the whole 35% walk phase, every
+    // walking frame must land on a walkable cell — i.e. routed around furniture.
+    let scene = scene_with(vec![active("/pwalk/0.jsonl", 0, "Edit", t0())], 16);
+    let mut r = build(160, 80, vec![PetKind::Cat]);
+    r.render(&scene, &pack(), t0()).unwrap();
+    let layout = r.cached_layout().expect("layout after prime").clone();
+    for cycle in 0u64..4 {
+        for step in 0..35u64 {
+            let now = t0() + Duration::from_millis(cycle * 40_000 + step * 400);
+            r.render(&scene, &pack(), now).unwrap();
+            if let Some((pos, anim, _)) = r.cached_pet_pos() {
+                if anim == PetKind::Cat.walk_anim() {
+                    // Coarse-cell walkable = the predicate A* itself guarantees
+                    // (same grid every agent sprite rides). Per-pixel is_walkable
+                    // is stricter than the router delivers (pad band / diagonal
+                    // corner-graze) and would hold the pet to a higher bar than
+                    // the agents.
+                    assert!(
+                        crate::tui::pathfind::point_in_walkable_cell(&layout.walkable, pos),
+                        "walking pet at ({},{}) is in a blocked routing cell (cycle={cycle} step={step})",
+                        pos.x,
+                        pos.y
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn pet_rest_pos_is_walkable() {
+    let scene = scene_with(vec![active("/prest/0.jsonl", 0, "Edit", t0())], 16);
+    let mut r = build(160, 80, vec![PetKind::Cat]);
+    r.render(&scene, &pack(), t0()).unwrap();
+    let layout = r.cached_layout().expect("layout after prime").clone();
+    for cycle in 0u64..4 {
+        for step in 0..10u64 {
+            let now = t0() + Duration::from_millis(cycle * 40_000 + 14_200 + step * 2_600);
+            r.render(&scene, &pack(), now).unwrap();
+            if let Some((pos, anim, _)) = r.cached_pet_pos() {
+                if anim != PetKind::Cat.walk_anim() {
+                    // Rest pose is a snapped cell center, so it should satisfy the
+                    // stronger per-pixel check — assert that directly.
+                    assert!(
+                        layout.walkable.is_walkable(pos.x, pos.y),
+                        "resting pet at ({},{}) is on a blocked cell (cycle={cycle} step={step})",
+                        pos.x,
+                        pos.y
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn pet_leg_boundary_no_pop() {
+    // The snapped rest anchor == the next leg's snapped walk-start anchor, so
+    // the pet must not teleport across the 40s leg boundary.
+    let scene = scene_with(vec![active("/pbnd/0.jsonl", 0, "Edit", t0())], 16);
+    let mut r = build(160, 80, vec![PetKind::Cat]);
+    r.render(&scene, &pack(), t0() + Duration::from_millis(39_600))
+        .unwrap();
+    let before = r.cached_pet_pos().map(|(p, _, _)| (p.x, p.y));
+    r.render(&scene, &pack(), t0() + Duration::from_millis(40_040))
+        .unwrap();
+    let after = r.cached_pet_pos().map(|(p, _, _)| (p.x, p.y));
+    if let (Some((x0, y0)), Some((x1, y1))) = (before, after) {
+        let gap = (x0 as i32 - x1 as i32).unsigned_abs() + (y0 as i32 - y1 as i32).unsigned_abs();
+        assert!(
+            gap <= 16,
+            "pet leg boundary teleports (gap={gap}px, ({x0},{y0})→({x1},{y1}))"
+        );
+    }
+}
+
 // ===================================================================
 // Version popup
 // ===================================================================

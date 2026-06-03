@@ -32,7 +32,9 @@ use super::furniture::{
 use super::paint_character_at;
 use crate::tui::frame_cache::FrameCache;
 use crate::tui::layout::{Layout, Point, DESK_H, DESK_W};
+use crate::tui::pathfind::{find_path, snap_point_to_walkable};
 use crate::tui::pet::PetKind;
+use pixtuoid_core::walkable::OccupancyOverlay;
 
 pub(super) struct Drawable<'a> {
     pub(super) anchor_y: u16,
@@ -260,27 +262,103 @@ pub(super) fn pet_position(
     let frame_idx = (elapsed_ms / 220) as usize % 2;
 
     if frac < 0.35 {
-        let t = frac / 0.35;
-        let x = prev.x as f32 + (dest.x as f32 - prev.x as f32) * t;
-        let y = prev.y as f32 + (dest.y as f32 - prev.y as f32) * t;
+        let t = (frac / 0.35).clamp(0.0, 1.0);
+        // Facing follows the raw destination intent, independent of where the
+        // snapped anchors land.
         let flip = dest.x < prev.x;
-        return Some((
+        // Pre-snap both endpoints to walkable cells so the leg starts AND ends
+        // on floor — the raw furniture-adjacent spots are often blocked.
+        let src_anchor = snap_point_to_walkable(&layout.walkable, prev).unwrap_or(prev);
+        let dst_anchor = snap_point_to_walkable(&layout.walkable, dest).unwrap_or(dest);
+
+        // A* on the STATIC mask with a throwaway EMPTY overlay: identical inputs
+        // every frame of the leg (static mask + empty overlay + deterministic
+        // prev/dest) ⇒ identical polyline ⇒ no flash, no per-frame state. The
+        // empty overlay is deliberate — the pet ignores live-agent occupancy
+        // (occasional sprite overlap is fine; a per-frame reroute flash is not).
+        let empty_overlay = OccupancyOverlay::new();
+        let pos = if let Some(mut pts) = find_path(
+            &layout.walkable,
+            &empty_overlay,
+            layout.corridor,
+            prev,
+            dest,
+        ) {
+            // `reconstruct` writes the RAW prev/dest as the polyline ends, which
+            // may be blocked — overwrite them with the snapped walkable anchors
+            // so every sample (incl. t=0 and t=1) is on floor.
+            if let Some(first) = pts.first_mut() {
+                *first = src_anchor;
+            }
+            if let Some(last) = pts.last_mut() {
+                *last = dst_anchor;
+            }
+            sample_polyline(&pts, t, dst_anchor)
+        } else {
+            // Degenerate layout (no route): straight lerp between snapped anchors
+            // — still strictly better than lerping between the raw blocked spots.
             Point {
-                x: x as u16,
-                y: y as u16,
-            },
-            flip,
-            kind.walk_anim(),
-            frame_idx,
-        ));
+                x: (src_anchor.x as f32 + (dst_anchor.x as f32 - src_anchor.x as f32) * t) as u16,
+                y: (src_anchor.y as f32 + (dst_anchor.y as f32 - src_anchor.y as f32) * t) as u16,
+            }
+        };
+        return Some((pos, flip, kind.walk_anim(), frame_idx));
     }
 
+    // Rest phase: snap to a walkable cell so the sit/sleep pose isn't on
+    // furniture. Same snapped anchor as the leg END ⇒ no pop at the boundary.
+    let rest_pos = snap_point_to_walkable(&layout.walkable, dest).unwrap_or(dest);
     let anim = if all_idle || (kind.sleeps_near_idle() && is_idle_spot) {
         kind.sleep_anim()
     } else {
         kind.sit_anim()
     };
-    Some((dest, false, anim, 0))
+    Some((rest_pos, false, anim, 0))
+}
+
+/// Sample a polyline at arc-length fraction `t ∈ [0, 1]`, using octile segment
+/// length so a diagonal leg doesn't move faster than a cardinal one. `t >= 1`
+/// returns `fallback` (the caller's snapped goal) exactly — no float overshoot
+/// onto a non-last cell. Precondition: `pts` non-empty (find_path guarantees it).
+fn sample_polyline(pts: &[Point], t: f32, fallback: Point) -> Point {
+    let Some(&last_pt) = pts.last() else {
+        return fallback;
+    };
+    if pts.len() == 1 || t >= 1.0 {
+        return last_pt;
+    }
+    let mut seg_lens: Vec<f32> = Vec::with_capacity(pts.len() - 1);
+    let mut total = 0.0_f32;
+    for w in pts.windows(2) {
+        let dx = (w[1].x as i32 - w[0].x as i32).unsigned_abs() as f32;
+        let dy = (w[1].y as i32 - w[0].y as i32).unsigned_abs() as f32;
+        let len = dx.max(dy) + dx.min(dy) * (std::f32::consts::SQRT_2 - 1.0);
+        seg_lens.push(len);
+        total += len;
+    }
+    if total < 1e-3 {
+        return last_pt;
+    }
+    let target = (t * total).min(total);
+    let mut cumul = 0.0_f32;
+    for (i, &slen) in seg_lens.iter().enumerate() {
+        let is_last_seg = i == seg_lens.len() - 1;
+        if cumul + slen >= target || is_last_seg {
+            let local_t = if slen < 1e-3 {
+                0.0
+            } else {
+                ((target - cumul) / slen).clamp(0.0, 1.0)
+            };
+            let a = pts[i];
+            let b = pts[i + 1];
+            return Point {
+                x: (a.x as f32 + (b.x as f32 - a.x as f32) * local_t) as u16,
+                y: (a.y as f32 + (b.y as f32 - a.y as f32) * local_t) as u16,
+            };
+        }
+        cumul += slen;
+    }
+    last_pt
 }
 
 /// Dispatch one Drawable's paint. Effects attached to characters paint

@@ -346,6 +346,42 @@ pub fn find_path(
     None
 }
 
+/// Snap a pixel-space `Point` to the nearest walkable coarse-cell *center* on
+/// the STATIC mask (no dynamic overlay). Returns `None` only when the grid is
+/// degenerate or no walkable cell exists within `MAX_SNAP_RADIUS`.
+///
+/// This is the pet's rest/leg anchor: pass a raw furniture-adjacent spot to get
+/// the nearest floor pixel it can actually stand on. Distinct from `find_path`'s
+/// internal snapping, whose `reconstruct` overwrites the polyline endpoints with
+/// the RAW `from`/`to` — so callers that need a guaranteed-walkable endpoint must
+/// re-anchor with this.
+/// Is the coarse routing cell containing `p` walkable (the SAME predicate A*
+/// expands on — ≥`CELL_WALKABLE_MIN`/16 px open)? This is the granularity the
+/// router actually guarantees: a position can fail a per-pixel `is_walkable`
+/// (it's in the obstacle PAD band, or a transient diagonal corner-graze) yet
+/// still be in a walkable routing cell — exactly like every agent sprite, which
+/// rides the same coarse grid. Test/diagnostic helper.
+pub fn point_in_walkable_cell(mask: &WalkableMask, p: Point) -> bool {
+    let cell_w = mask.width / CELL_SIZE;
+    let cell_h = mask.height / CELL_SIZE;
+    if cell_w == 0 || cell_h == 0 {
+        return false;
+    }
+    let (cx, cy) = cell_of(p);
+    cx < cell_w && cy < cell_h && cell_walkable(mask, &OccupancyOverlay::new(), cx, cy)
+}
+
+pub fn snap_point_to_walkable(mask: &WalkableMask, p: Point) -> Option<Point> {
+    let cell_w = mask.width / CELL_SIZE;
+    let cell_h = mask.height / CELL_SIZE;
+    if cell_w == 0 || cell_h == 0 {
+        return None;
+    }
+    let empty = OccupancyOverlay::new();
+    let (cx, cy) = snap_to_walkable(mask, &empty, cell_of(p), cell_w, cell_h)?;
+    Some(cell_center(cx, cy))
+}
+
 fn reconstruct(
     came_from: &HashMap<(u16, u16), (u16, u16)>,
     end: (u16, u16),
@@ -817,6 +853,36 @@ mod tests {
             path,
             vec![from, to],
             "router should fall back to [from, to] when find_path returns None"
+        );
+    }
+
+    #[test]
+    fn snap_point_to_walkable_returns_walkable_cell() {
+        let l = make_layout();
+        // A point inside a desk footprint (blocked, with obstacle pad).
+        let desk = l.home_desks[0];
+        let blocked_p = Point {
+            x: desk.x + 4,
+            y: desk.y + 2,
+        };
+        let snapped = snap_point_to_walkable(&l.walkable, blocked_p)
+            .expect("blocked desk should snap nearby");
+        assert!(
+            l.walkable.is_walkable(snapped.x, snapped.y),
+            "snapped point ({},{}) must be walkable",
+            snapped.x,
+            snapped.y
+        );
+        // An already-open corridor point must also resolve to a walkable cell.
+        let c = l.corridor.unwrap();
+        let open_p = Point {
+            x: c.x + c.width / 2,
+            y: c.y + c.height / 2,
+        };
+        let open = snap_point_to_walkable(&l.walkable, open_p).expect("corridor center snaps");
+        assert!(
+            l.walkable.is_walkable(open.x, open.y),
+            "open-floor snap walkable"
         );
     }
 }
