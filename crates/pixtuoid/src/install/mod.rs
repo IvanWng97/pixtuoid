@@ -445,15 +445,17 @@ mod tests {
         post_install_note: None,
     };
 
-    // A fixed config path under the system temp dir, used by FAKE2/FAKE_DIR so
-    // their fn-pointer `default_config_path` can point at a test-controlled file
-    // (the fn signature `fn() -> PathBuf` can't capture a TempDir).
+    // A per-process config path under the system temp dir, used by FAKE2/FAKE_DIR
+    // so their fn-pointer `default_config_path` can point at a test-controlled
+    // file (the `fn() -> PathBuf` signature can't capture a TempDir). The PID
+    // suffix keeps two concurrent `cargo test` invocations of this binary from
+    // racing on the same fixed path.
     fn fake2_config_path() -> std::path::PathBuf {
-        std::env::temp_dir().join("pixtuoid-test-fake2-config.toml")
+        std::env::temp_dir().join(format!("pixtuoid-test-fake2-{}.toml", std::process::id()))
     }
 
     fn fake_dir_config_path() -> std::path::PathBuf {
-        std::env::temp_dir().join("pixtuoid-test-fake-dir-config")
+        std::env::temp_dir().join(format!("pixtuoid-test-fake-dir-{}", std::process::id()))
     }
 
     // FAKE2: default_config_path points at a test-writable file, and its

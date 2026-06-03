@@ -208,10 +208,14 @@ mod tests {
     }
 
     // config_path reads process-global env, so save+restore both vars and drive
-    // the three branches in one test (avoids cross-test env races; the repo has
-    // no serial_test dep and CI runs tests process-isolated via nextest).
+    // the three branches in one test. The TEST_ENV_LOCK serializes against the
+    // other env-mutating test in this binary (embedded_pack's XDG test) so they
+    // can't race under plain `cargo test`.
     #[test]
     fn config_path_xdg_home_and_relative_branches() {
+        let _env = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let saved_xdg = std::env::var_os("XDG_CONFIG_HOME");
         let saved_home = std::env::var_os("HOME");
 

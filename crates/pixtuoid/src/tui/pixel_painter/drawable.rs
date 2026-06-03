@@ -881,21 +881,58 @@ mod tests {
         layout.reachable = reachable;
         let pack = test_pack();
 
-        // Walk phase (frac < 0.35): pick a pet_seed where consecutive picks land
-        // in different pockets so the leg actually crosses the wall (None route).
-        let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(5_000); // frac=0.125
-        let seed = (0u64..256)
-            .find(|&s| {
-                let r = pet_position(PetKind::Cat, &layout, &pack, now, &[], false, s);
-                // Walk phase always returns the walk anim; we only need it not to panic.
-                r.is_some()
-            })
-            .expect("a pet position exists");
+        // The two spots pet_position gathers, in its order: the home desk
+        // (left pocket) then the corridor centre (right pocket).
+        let spots = [
+            Point {
+                x: 20 + DESK_W + 1,
+                y: 30 + DESK_H + 2,
+            },
+            Point { x: 160, y: 50 },
+        ];
+        // Walk phase: elapsed 5s → frac 0.125 (<0.35); cycle_n == pet_seed
+        // (elapsed/40000 == 0). Replicate pet_position's pick so we KNOW the leg
+        // crosses the wall (prev ≠ dest), guaranteeing find_path → None — the
+        // fallback branch is then the ONLY way a position is produced (a broken
+        // fallback would panic here, not pass silently).
+        let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(5_000);
+        let seed = 0u64;
+        let pick = |n: u64| spots[(n.wrapping_mul(0x9e37_79b9_7f4a_7c15) as usize) % spots.len()];
+        let dest = pick(seed);
+        let prev = pick(seed.wrapping_sub(1));
+        assert_ne!(prev, dest, "seed must make the leg cross the wall");
+
+        // Precondition: the two snapped anchors are genuinely unroutable.
+        let src_anchor = snap_point_to_walkable(&layout.walkable, prev).expect("prev snaps");
+        let dst_anchor = snap_point_to_walkable(&layout.walkable, dest).expect("dest snaps");
+        assert!(
+            find_path(
+                &layout.walkable,
+                &OccupancyOverlay::new(),
+                layout.corridor,
+                prev,
+                dest
+            )
+            .is_none(),
+            "the two pockets must be disconnected so the straight-lerp fallback is the only path"
+        );
+
+        // The fallback is the EXACT straight lerp between the snapped anchors at
+        // t = frac/0.35 — pin the math so a regression in 297-300 fails the test.
+        let t = (0.125_f32 / 0.35).clamp(0.0, 1.0);
+        let lerp = |a: u16, b: u16| (a as f32 + (b as f32 - a as f32) * t) as u16;
+        let expected = Point {
+            x: lerp(src_anchor.x, dst_anchor.x),
+            y: lerp(src_anchor.y, dst_anchor.y),
+        };
+
         let (pos, _, anim, _) =
-            pet_position(PetKind::Cat, &layout, &pack, now, &[], false, seed).expect("pos");
+            pet_position(PetKind::Cat, &layout, &pack, now, &[], false, seed).expect("walk pos");
         assert_eq!(anim, PetKind::Cat.walk_anim(), "walk phase");
-        // The lerp result must lie within the buffer bounds (no panic, no wrap).
-        assert!(pos.x < w && pos.y < h, "lerped pos in bounds: {pos:?}");
+        assert_eq!(
+            pos, expected,
+            "no-route leg must be the straight lerp between snapped anchors"
+        );
     }
 
     fn theme() -> &'static crate::tui::theme::Theme {

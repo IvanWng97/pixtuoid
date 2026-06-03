@@ -215,11 +215,15 @@ mod tests {
         );
     }
 
-    // The XDG path mutates a process-global env var, so all of its assertions
-    // run inside ONE test (sequential) — no other test in the crate touches
-    // XDG_CONFIG_HOME, so this is race-free without serial_test.
+    // The XDG path mutates a process-global env var. The TEST_ENV_LOCK
+    // serializes this against the crate's other env-mutating test
+    // (config::config_path_xdg_home_and_relative_branches, which also sets
+    // XDG_CONFIG_HOME) so the two can't race under plain `cargo test`.
     #[test]
     fn load_sprite_pack_resolves_then_falls_back_via_xdg() {
+        let _env = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let saved = std::env::var_os("XDG_CONFIG_HOME");
 
         // (a) Valid XDG pack at $XDG/pixtuoid/sprites/ → loaded.

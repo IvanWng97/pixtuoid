@@ -319,6 +319,9 @@ mod tests {
     // splitting across tests would race under the default multi-thread runner.
     #[test]
     fn default_socket_path_env_precedence_and_default_paths() {
+        let saved_socket = std::env::var_os("PIXTUOID_SOCKET");
+        let saved_xdg = std::env::var_os("XDG_RUNTIME_DIR");
+
         // PIXTUOID_SOCKET takes precedence (checked first).
         std::env::set_var("PIXTUOID_SOCKET", "/tmp/explicit.sock");
         std::env::set_var("XDG_RUNTIME_DIR", "/run/user/1000");
@@ -350,5 +353,16 @@ mod tests {
             "projects_root must end with .claude/projects, got {:?}",
             paths.projects_root
         );
+
+        // Restore prior env so a later env-reading test in this binary isn't
+        // poisoned by the cleared state.
+        match saved_socket {
+            Some(v) => std::env::set_var("PIXTUOID_SOCKET", v),
+            None => std::env::remove_var("PIXTUOID_SOCKET"),
+        }
+        match saved_xdg {
+            Some(v) => std::env::set_var("XDG_RUNTIME_DIR", v),
+            None => std::env::remove_var("XDG_RUNTIME_DIR"),
+        }
     }
 }
