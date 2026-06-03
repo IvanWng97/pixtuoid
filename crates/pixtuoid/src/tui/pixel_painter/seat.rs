@@ -29,11 +29,13 @@ pub(super) fn paint_character_at(
         return;
     };
     let cached = cache.get_or_make(
-        agent.agent_id,
-        anim_name,
-        frame_idx,
-        flip_x,
-        glow_tint,
+        crate::tui::frame_cache::FrameKey {
+            agent_id: agent.agent_id,
+            anim_name,
+            frame_idx,
+            flip_x,
+            glow_tint,
+        },
         || {
             let pal = agent_palette(&pack.palette, agent, glow_tint);
             let recolored = recolor_frame(frame, &pal, &pack.palette);

@@ -60,15 +60,17 @@ fn main() -> Result<()> {
             let pack_dir = config::resolve_pack_dir(&cfg, pack_dir);
             let pets = config::resolve_pets(&cfg);
             runtime::run(
-                socket,
-                projects_root,
-                codex_sessions_root,
-                pack_dir,
-                desk_cap,
-                headless,
+                runtime::RunConfig {
+                    socket,
+                    projects_root,
+                    codex_sessions_root,
+                    pack_dir,
+                    desk_cap,
+                    headless,
+                    config_path: cfg_path,
+                    pets,
+                },
                 theme_name,
-                cfg_path,
-                pets,
             )
         }
         Cmd::InstallHooks {

@@ -61,7 +61,7 @@ use anchors::{
 use background::{
     daylight_floor_overlay, dim_floor_overlay, paint_ceiling_pool, paint_clock,
     paint_corridor_runner, paint_floor_and_walls, paint_floor_lamp_halo, paint_neon_panel,
-    paint_shadow, time_of_day_look,
+    paint_shadow, time_of_day_look, Ellipse,
 };
 use drawable::{paint_drawable, pet_position, Drawable, DrawableKind};
 use glass::{paint_glass_wall_h, paint_glass_wall_v, stitch_vertical_wall, WALL_THICK_H_PX};
@@ -202,10 +202,12 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
     for desk in &ctx.layout.home_desks {
         paint_ceiling_pool(
             ctx.buf,
-            desk.x + DESK_W / 2,
-            desk.y.saturating_sub(2),
-            10,
-            5,
+            Ellipse {
+                cx: desk.x + DESK_W / 2,
+                cy: desk.y.saturating_sub(2),
+                half_w: 10,
+                half_h: 5,
+            },
             pool_strength,
             ctx.theme,
         );
@@ -215,10 +217,12 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
     if let Some(pr) = ctx.layout.pantry_room {
         paint_ceiling_pool(
             ctx.buf,
-            pr.x + pr.width / 2,
-            pr.y + pr.height / 2,
-            12,
-            6,
+            Ellipse {
+                cx: pr.x + pr.width / 2,
+                cy: pr.y + pr.height / 2,
+                half_w: 12,
+                half_h: 6,
+            },
             pool_strength,
             ctx.theme,
         );
@@ -226,10 +230,12 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
     if let Some(corridor) = ctx.layout.corridor {
         paint_ceiling_pool(
             ctx.buf,
-            corridor.x + corridor.width / 2,
-            corridor.y + corridor.height / 2,
-            14,
-            5,
+            Ellipse {
+                cx: corridor.x + corridor.width / 2,
+                cy: corridor.y + corridor.height / 2,
+                half_w: 14,
+                half_h: 5,
+            },
             pool_strength,
             ctx.theme,
         );
@@ -419,10 +425,12 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
     for desk in &ctx.layout.home_desks {
         paint_shadow(
             ctx.buf,
-            desk.x + DESK_W / 2,
-            desk.y + 7,
-            DESK_W / 2 + 1,
-            3,
+            Ellipse {
+                cx: desk.x + DESK_W / 2,
+                cy: desk.y + 7,
+                half_w: DESK_W / 2 + 1,
+                half_h: 3,
+            },
             shadow_strength,
             ctx.theme,
         );
@@ -437,10 +445,12 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
         }
         paint_shadow(
             ctx.buf,
-            wp.pos.x,
-            wp.pos.y + 2,
-            7,
-            2,
+            Ellipse {
+                cx: wp.pos.x,
+                cy: wp.pos.y + 2,
+                half_w: 7,
+                half_h: 2,
+            },
             shadow_strength,
             ctx.theme,
         );
@@ -454,10 +464,12 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
         // Flush against the printer's sprite south (pos.y+1).
         paint_shadow(
             ctx.buf,
-            wp.pos.x,
-            wp.pos.y + 1,
-            5,
-            1,
+            Ellipse {
+                cx: wp.pos.x,
+                cy: wp.pos.y + 1,
+                half_w: 5,
+                half_h: 1,
+            },
             shadow_strength,
             ctx.theme,
         );
@@ -465,10 +477,12 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
     if let Some(center) = ctx.layout.couch_sprite_center {
         paint_shadow(
             ctx.buf,
-            center.x,
-            center.y + 2,
-            7,
-            2,
+            Ellipse {
+                cx: center.x,
+                cy: center.y + 2,
+                half_w: 7,
+                half_h: 2,
+            },
             shadow_strength,
             ctx.theme,
         );
@@ -479,15 +493,27 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
         // +3 that only suited the taller Ficus/Tall).
         let cy = p.y
             + center_pin_south_offset(crate::tui::layout::furniture_def(kind.furniture()).visual.1);
-        paint_shadow(ctx.buf, p.x, cy, 3, 1, shadow_strength, ctx.theme);
+        paint_shadow(
+            ctx.buf,
+            Ellipse {
+                cx: p.x,
+                cy,
+                half_w: 3,
+                half_h: 1,
+            },
+            shadow_strength,
+            ctx.theme,
+        );
     }
     if let Some(lamp) = ctx.layout.floor_lamp {
         paint_shadow(
             ctx.buf,
-            lamp.x,
-            lamp.y + floor_lamp_south_offset(), // flush with the lamp base (sprite south)
-            2,
-            1,
+            Ellipse {
+                cx: lamp.x,
+                cy: lamp.y + floor_lamp_south_offset(), // flush with the lamp base (sprite south)
+                half_w: 2,
+                half_h: 1,
+            },
             shadow_strength,
             ctx.theme,
         );

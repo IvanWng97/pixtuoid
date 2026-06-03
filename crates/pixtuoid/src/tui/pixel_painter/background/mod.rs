@@ -12,7 +12,7 @@ mod time_of_day;
 // Re-export everything the parent pixel_painter/mod.rs imports.
 pub(super) use lighting::{
     paint_ceiling_pool, paint_clock, paint_corridor_runner, paint_floor_lamp_halo,
-    paint_neon_panel, paint_shadow,
+    paint_neon_panel, paint_shadow, Ellipse,
 };
 pub(super) use time_of_day::{
     daylight_floor_overlay, dim_floor_overlay, sun_on_wall, sunset_strength, time_of_day_look,

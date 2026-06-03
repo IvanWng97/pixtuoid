@@ -8,31 +8,31 @@ use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use crate::tui::pixel_painter::palette::blend;
 use crate::tui::theme::Theme;
 
-/// Elliptical "ceiling fluorescent" pool of pale warm light on the floor.
-/// Blended additively (toward pool color) with a quadratic falloff from
-/// center to edge so it reads as a soft round patch, not a stamped oval.
-#[allow(clippy::too_many_arguments)]
-pub(in crate::tui::pixel_painter) fn paint_ceiling_pool(
-    buf: &mut RgbBuffer,
-    cx: u16,
-    cy: u16,
-    half_w: u16,
-    half_h: u16,
-    strength: f32,
-    theme: &Theme,
-) {
-    let pool = theme.lighting.ceiling_pool;
-    if half_w == 0 || half_h == 0 || strength <= 0.0 {
+/// An axis-aligned ellipse for the radial floor pools (light + shadow).
+#[derive(Clone, Copy)]
+pub(in crate::tui::pixel_painter) struct Ellipse {
+    pub cx: u16,
+    pub cy: u16,
+    pub half_w: u16,
+    pub half_h: u16,
+}
+
+/// Blend `color` over an elliptical region with a quadratic falloff from the
+/// center (full `strength`) to the edge (0), so it reads as a soft round patch
+/// rather than a stamped oval. Shared by the ceiling light pool and the
+/// furniture shadow — same math, different tint.
+fn paint_ellipse_blend(buf: &mut RgbBuffer, e: Ellipse, strength: f32, color: Rgb) {
+    if e.half_w == 0 || e.half_h == 0 || strength <= 0.0 {
         return;
     }
-    let min_x = cx.saturating_sub(half_w);
-    let max_x = (cx + half_w).min(buf.width);
-    let min_y = cy.saturating_sub(half_h);
-    let max_y = (cy + half_h).min(buf.height);
+    let min_x = e.cx.saturating_sub(e.half_w);
+    let max_x = (e.cx + e.half_w).min(buf.width);
+    let min_y = e.cy.saturating_sub(e.half_h);
+    let max_y = (e.cy + e.half_h).min(buf.height);
     for y in min_y..max_y {
         for x in min_x..max_x {
-            let nx = (x as f32 - cx as f32) / half_w as f32;
-            let ny = (y as f32 - cy as f32) / half_h as f32;
+            let nx = (x as f32 - e.cx as f32) / e.half_w as f32;
+            let ny = (y as f32 - e.cy as f32) / e.half_h as f32;
             let r2 = nx * nx + ny * ny;
             if r2 > 1.0 {
                 continue;
@@ -43,13 +43,23 @@ pub(in crate::tui::pixel_painter) fn paint_ceiling_pool(
                 x,
                 y,
                 Rgb(
-                    blend(cur.0, pool.0, t),
-                    blend(cur.1, pool.1, t),
-                    blend(cur.2, pool.2, t),
+                    blend(cur.0, color.0, t),
+                    blend(cur.1, color.1, t),
+                    blend(cur.2, color.2, t),
                 ),
             );
         }
     }
+}
+
+/// Elliptical "ceiling fluorescent" pool of pale warm light on the floor.
+pub(in crate::tui::pixel_painter) fn paint_ceiling_pool(
+    buf: &mut RgbBuffer,
+    ellipse: Ellipse,
+    strength: f32,
+    theme: &Theme,
+) {
+    paint_ellipse_blend(buf, ellipse, strength, theme.lighting.ceiling_pool);
 }
 
 /// Warm radial halo around the floor lamp — only visible at night.
@@ -265,43 +275,12 @@ pub(in crate::tui::pixel_painter) fn paint_corridor_runner(
 /// Grounds floating sprites so they look like they're standing/sitting
 /// on the floor instead of hovering in mid-air. `strength` 0..1 controls
 /// the darken amount at the center; falls off quadratically to 0 at edge.
-#[allow(clippy::too_many_arguments)]
+/// Soft elliptical contact shadow under furniture / characters.
 pub(in crate::tui::pixel_painter) fn paint_shadow(
     buf: &mut RgbBuffer,
-    cx: u16,
-    cy: u16,
-    half_w: u16,
-    half_h: u16,
+    ellipse: Ellipse,
     strength: f32,
     theme: &Theme,
 ) {
-    let shadow = theme.office.shadow;
-    if half_w == 0 || half_h == 0 || strength <= 0.0 {
-        return;
-    }
-    let min_x = cx.saturating_sub(half_w);
-    let max_x = (cx + half_w).min(buf.width);
-    let min_y = cy.saturating_sub(half_h);
-    let max_y = (cy + half_h).min(buf.height);
-    for y in min_y..max_y {
-        for x in min_x..max_x {
-            let nx = (x as f32 - cx as f32) / half_w as f32;
-            let ny = (y as f32 - cy as f32) / half_h as f32;
-            let r2 = nx * nx + ny * ny;
-            if r2 > 1.0 {
-                continue;
-            }
-            let t = (1.0 - r2) * strength;
-            let cur = buf.get(x, y);
-            buf.put(
-                x,
-                y,
-                Rgb(
-                    blend(cur.0, shadow.0, t),
-                    blend(cur.1, shadow.1, t),
-                    blend(cur.2, shadow.2, t),
-                ),
-            );
-        }
-    }
+    paint_ellipse_blend(buf, ellipse, strength, theme.office.shadow);
 }

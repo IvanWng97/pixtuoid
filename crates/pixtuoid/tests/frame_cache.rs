@@ -8,10 +8,21 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use pixtuoid::tui::frame_cache::FrameCache;
+use pixtuoid::tui::frame_cache::{FrameCache, FrameKey};
 use pixtuoid_core::sprite::{Frame, Rgb};
 use pixtuoid_core::state::ActivityState;
 use pixtuoid_core::{AgentId, AgentSlot, SceneState};
+
+/// Build a glow-less frame key (no test here varies glow_tint).
+fn key(id: AgentId, anim_name: &'static str, frame_idx: usize, flip_x: bool) -> FrameKey {
+    FrameKey {
+        agent_id: id,
+        anim_name,
+        frame_idx,
+        flip_x,
+        glow_tint: None,
+    }
+}
 
 fn dummy_frame(seed: u8) -> Frame {
     Frame {
@@ -54,7 +65,7 @@ fn get_or_make_caches_by_full_key() {
     let compute_calls = Cell::new(0u32);
 
     let f1 = cache
-        .get_or_make(id, "walking", 0, false, None, || {
+        .get_or_make(key(id, "walking", 0, false), || {
             compute_calls.set(compute_calls.get() + 1);
             dummy_frame(1)
         })
@@ -64,7 +75,7 @@ fn get_or_make_caches_by_full_key() {
 
     // Same key — must hit.
     let f2 = cache
-        .get_or_make(id, "walking", 0, false, None, || {
+        .get_or_make(key(id, "walking", 0, false), || {
             compute_calls.set(compute_calls.get() + 1);
             dummy_frame(99)
         })
@@ -77,21 +88,21 @@ fn get_or_make_caches_by_full_key() {
     assert_eq!(f2.pixels[0], Some(Rgb(1, 1, 1)));
 
     // Different frame_idx — distinct entry.
-    cache.get_or_make(id, "walking", 1, false, None, || {
+    cache.get_or_make(key(id, "walking", 1, false), || {
         compute_calls.set(compute_calls.get() + 1);
         dummy_frame(2)
     });
     assert_eq!(compute_calls.get(), 2);
 
     // Different flip_x — distinct entry (mirrored walker caches separately).
-    cache.get_or_make(id, "walking", 0, true, None, || {
+    cache.get_or_make(key(id, "walking", 0, true), || {
         compute_calls.set(compute_calls.get() + 1);
         dummy_frame(3)
     });
     assert_eq!(compute_calls.get(), 3);
 
     // Different anim_name — distinct entry.
-    cache.get_or_make(id, "seated", 0, false, None, || {
+    cache.get_or_make(key(id, "seated", 0, false), || {
         compute_calls.set(compute_calls.get() + 1);
         dummy_frame(4)
     });
@@ -106,9 +117,9 @@ fn evict_missing_drops_entries_for_absent_agents() {
     let kept = AgentId::from_transcript_path("/kept.jsonl");
     let gone = AgentId::from_transcript_path("/gone.jsonl");
 
-    cache.get_or_make(kept, "walking", 0, false, None, || dummy_frame(1));
-    cache.get_or_make(gone, "walking", 0, false, None, || dummy_frame(2));
-    cache.get_or_make(gone, "seated", 0, false, None, || dummy_frame(3));
+    cache.get_or_make(key(kept, "walking", 0, false), || dummy_frame(1));
+    cache.get_or_make(key(gone, "walking", 0, false), || dummy_frame(2));
+    cache.get_or_make(key(gone, "seated", 0, false), || dummy_frame(3));
     assert_eq!(cache.len(), 3);
 
     // Scene now contains only `kept`.
@@ -123,7 +134,7 @@ fn evict_missing_drops_entries_for_absent_agents() {
         "two entries for the absent agent should be dropped"
     );
     // Surviving entry must be the kept one — exercise it.
-    let _ = cache.get_or_make(kept, "walking", 0, false, None, || {
+    let _ = cache.get_or_make(key(kept, "walking", 0, false), || {
         panic!("evict must not have dropped the kept agent's entry")
     });
 }

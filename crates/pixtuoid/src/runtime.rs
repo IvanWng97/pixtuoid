@@ -29,18 +29,22 @@ pub type SceneRx = watch::Receiver<Arc<SceneState>>;
 /// `compute_boot_capacity` before the first TUI frame.
 const FALLBACK_DESKS: usize = 16;
 
-#[allow(clippy::too_many_arguments)]
-pub fn run(
-    socket: Option<PathBuf>,
-    projects_root: Option<PathBuf>,
-    codex_sessions_root: Option<PathBuf>,
-    pack_dir: Option<PathBuf>,
-    desk_cap: Option<usize>,
-    headless: bool,
-    theme_name: String,
-    config_path: PathBuf,
-    pets: Vec<crate::tui::pet::Pet>,
-) -> Result<()> {
+/// The startup inputs shared by `run` + `run_async` (everything but the theme,
+/// which `run` resolves from a name and `run_async` receives already-resolved).
+/// Bundled so a new boot flag is one struct field, not a fourth copy of the
+/// arg list to thread through both signatures + the main.rs call.
+pub struct RunConfig {
+    pub socket: Option<PathBuf>,
+    pub projects_root: Option<PathBuf>,
+    pub codex_sessions_root: Option<PathBuf>,
+    pub pack_dir: Option<PathBuf>,
+    pub desk_cap: Option<usize>,
+    pub headless: bool,
+    pub config_path: PathBuf,
+    pub pets: Vec<crate::tui::pet::Pet>,
+}
+
+pub fn run(cfg: RunConfig, theme_name: String) -> Result<()> {
     let theme = crate::tui::theme::theme_by_name(&theme_name).ok_or_else(|| {
         let valid: Vec<&str> = crate::tui::theme::ALL_THEMES
             .iter()
@@ -51,34 +55,20 @@ pub fn run(
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
-    rt.block_on(async move {
-        run_async(
-            socket,
-            projects_root,
-            codex_sessions_root,
-            pack_dir,
-            desk_cap,
-            headless,
-            theme,
-            config_path,
-            pets,
-        )
-        .await
-    })
+    rt.block_on(async move { run_async(cfg, theme).await })
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn run_async(
-    socket: Option<PathBuf>,
-    projects_root: Option<PathBuf>,
-    codex_sessions_root: Option<PathBuf>,
-    pack_dir: Option<PathBuf>,
-    desk_cap: Option<usize>,
-    headless: bool,
-    theme: &'static crate::tui::theme::Theme,
-    config_path: PathBuf,
-    pets: Vec<crate::tui::pet::Pet>,
-) -> Result<()> {
+async fn run_async(cfg: RunConfig, theme: &'static crate::tui::theme::Theme) -> Result<()> {
+    let RunConfig {
+        socket,
+        projects_root,
+        codex_sessions_root,
+        pack_dir,
+        desk_cap,
+        headless,
+        config_path,
+        pets,
+    } = cfg;
     let mut cc_src = ClaudeCodeSource::default_paths();
     if let Some(s) = socket {
         cc_src.socket_path = s;
