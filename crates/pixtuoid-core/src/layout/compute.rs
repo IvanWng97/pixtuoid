@@ -167,32 +167,17 @@ pub(super) fn compute_with_seed(
         let total_pods = (pod_cols * raw).min(max_pods);
         total_pods.div_ceil(pod_cols).min(raw)
     };
-
-    let home_desks = compute_pod_desks(
-        num_agents,
-        &cubicle_band,
-        right_x,
-        right_w,
-        cubicle_h,
-        pod_cols,
-        pod_rows,
-        pod_stride_x,
-        pod_stride_y,
+    let pod_grid = PodGrid {
+        cols: pod_cols,
+        rows: pod_rows,
+        stride_x: pod_stride_x,
+        stride_y: pod_stride_y,
         couch_to_desk_extra,
-    );
+    };
 
-    let pod_decor = compute_pod_decor(
-        &cubicle_band,
-        right_x,
-        pod_w,
-        pod_h,
-        pod_cols,
-        pod_rows,
-        pod_stride_x,
-        pod_stride_y,
-        couch_to_desk_extra,
-        floor_seed,
-    );
+    let home_desks = compute_pod_desks(num_agents, &cubicle_band, pod_grid);
+
+    let pod_decor = compute_pod_decor(&cubicle_band, pod_grid, floor_seed);
 
     // One source of truth: the meeting-sofa SPRITE height (was a bare `7`). A
     // hardcoded literal would silently let 1px-too-short rooms pass the gate
@@ -250,10 +235,12 @@ pub(super) fn compute_with_seed(
     let meeting_tables = meeting_table_vec;
 
     let room_walls = compute_room_walls(
-        has_vertical_wall,
-        has_dual_meeting,
-        has_meeting,
-        has_pantry,
+        RoomPresence {
+            has_vertical_wall,
+            has_dual_meeting,
+            has_meeting,
+            has_pantry,
+        },
         mid_x,
         mid_y_split,
         top_margin,
@@ -279,10 +266,10 @@ pub(super) fn compute_with_seed(
         pantry_counter_size,
         &pod_decor,
         &walkway,
-        right_x,
-        right_w,
-        &meeting_sofas,
-        &meeting_tables,
+        MeetingFurniture {
+            sofas: &meeting_sofas,
+            tables: &meeting_tables,
+        },
     );
 
     // Plants scatter through the cubicle corridor edges + pantry.
@@ -554,21 +541,51 @@ pub(super) fn compute_with_seed(
     })
 }
 
+/// 2×2-pod grid geometry shared by [`compute_pod_desks`] + [`compute_pod_decor`].
+/// `right_x`/`right_w`/`cubicle_h` are NOT carried — they equal the cubicle
+/// band's `.x`/`.width`/`.height` and are derived in-body from the `&Bounds`.
+#[derive(Clone, Copy)]
+pub(super) struct PodGrid {
+    cols: u16,
+    rows: u16,
+    stride_x: u16,
+    stride_y: u16,
+    couch_to_desk_extra: u16,
+}
+
+/// Which rooms the floor has — drives [`compute_room_walls`]'s segment set.
+#[derive(Clone, Copy)]
+pub(super) struct RoomPresence {
+    has_vertical_wall: bool,
+    has_dual_meeting: bool,
+    has_meeting: bool,
+    has_pantry: bool,
+}
+
+/// A meeting room's furniture in lockstep (2 sofas + 1 table per room).
+#[derive(Clone, Copy)]
+pub(super) struct MeetingFurniture<'a> {
+    sofas: &'a [Point],
+    tables: &'a [Point],
+}
+
 /// Pod-grid desk placement: full pods, partial columns at right edge,
 /// partial row at bottom edge.
-#[allow(clippy::too_many_arguments)]
 pub(super) fn compute_pod_desks(
     num_agents: usize,
     cubicle_band: &Bounds,
-    right_x: u16,
-    right_w: u16,
-    cubicle_h: u16,
-    pod_cols: u16,
-    pod_rows: u16,
-    pod_stride_x: u16,
-    pod_stride_y: u16,
-    couch_to_desk_extra: u16,
+    grid: PodGrid,
 ) -> Vec<Point> {
+    let right_x = cubicle_band.x;
+    let right_w = cubicle_band.width;
+    let cubicle_h = cubicle_band.height;
+    let PodGrid {
+        cols: pod_cols,
+        rows: pod_rows,
+        stride_x: pod_stride_x,
+        stride_y: pod_stride_y,
+        couch_to_desk_extra,
+    } = grid;
     let n = num_agents.min(MAX_VISIBLE_DESKS);
     let mut home_desks = Vec::with_capacity(n);
     // Clamp: a desk must fit entirely inside the cubicle band.
@@ -672,19 +689,21 @@ pub(super) fn compute_pod_desks(
 }
 
 /// Decor items placed in aisles between 2x2 desk pods.
-#[allow(clippy::too_many_arguments)]
 pub(super) fn compute_pod_decor(
     cubicle_band: &Bounds,
-    right_x: u16,
-    pod_w: u16,
-    pod_h: u16,
-    pod_cols: u16,
-    pod_rows: u16,
-    pod_stride_x: u16,
-    pod_stride_y: u16,
-    couch_to_desk_extra: u16,
+    grid: PodGrid,
     floor_seed: u64,
 ) -> Vec<(PodDecor, Point)> {
+    let right_x = cubicle_band.x;
+    let PodGrid {
+        cols: pod_cols,
+        rows: pod_rows,
+        stride_x: pod_stride_x,
+        stride_y: pod_stride_y,
+        couch_to_desk_extra,
+    } = grid;
+    let pod_w = pod_stride_x - INTER_POD_AISLE_X;
+    let pod_h = pod_stride_y - INTER_POD_AISLE_Y;
     let mut pod_decor: Vec<(PodDecor, Point)> = Vec::new();
     // Cycle through ALL with a per-slot counter so every decor type
     // appears at least once before any repeats. Beats the prior
@@ -725,17 +744,19 @@ pub(super) fn compute_pod_decor(
 }
 
 /// Wall segments with door gaps for meeting/pantry rooms.
-#[allow(clippy::too_many_arguments)]
 pub(super) fn compute_room_walls(
-    has_vertical_wall: bool,
-    has_dual_meeting: bool,
-    has_meeting: bool,
-    has_pantry: bool,
+    rooms: RoomPresence,
     mid_x: u16,
     mid_y_split: u16,
     top_margin: u16,
     usable_h: u16,
 ) -> Vec<(Point, Point)> {
+    let RoomPresence {
+        has_vertical_wall,
+        has_dual_meeting,
+        has_meeting,
+        has_pantry,
+    } = rooms;
     // Doorway widths are ABSOLUTE pixels — using percentages here makes
     // the gap shrink to zero on smaller terminals, which after the
     // 2-px wall obstacle padding leaves no walkable cell for A* and
@@ -830,7 +851,6 @@ pub(super) fn compute_room_walls(
 
 /// Waypoints: couch, pantry, pod-decor-promoted (PhoneBooth/StandingDesk),
 /// corridor appliances (VendingMachine/Printer).
-#[allow(clippy::too_many_arguments)]
 pub(super) fn compute_waypoints(
     cubicle_band: &Bounds,
     top_margin: u16,
@@ -838,11 +858,14 @@ pub(super) fn compute_waypoints(
     pantry_counter_size: (u16, u16),
     pod_decor: &[(PodDecor, Point)],
     walkway: &Bounds,
-    right_x: u16,
-    right_w: u16,
-    meeting_sofas: &[Point],
-    meeting_tables: &[Point],
+    meeting: MeetingFurniture<'_>,
 ) -> (Vec<Waypoint>, Option<Point>) {
+    let right_x = cubicle_band.x;
+    let right_w = cubicle_band.width;
+    let MeetingFurniture {
+        sofas: meeting_sofas,
+        tables: meeting_tables,
+    } = meeting;
     let couch_y = top_margin + 3;
     let couch_x = cubicle_band.x + pct(cubicle_band.width, 35);
     // Lounge couch: 3 seats across the 20px sofa (dx ∈ {-6, 0, +6}), matching
