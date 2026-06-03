@@ -276,7 +276,7 @@ async fn watcher_emits_session_start_for_recent_files_on_startup() {
     let fresh_path = fresh.clone();
     let handle = tokio::spawn(async move { watcher.run(tx).await });
 
-    // Give the watcher task a chance to complete initial_seed_walk, then
+    // Give the watcher task a chance to complete the initial seed scan, then
     // append a no-op newline to trigger FSEvents as a fallback path in case
     // the initial seed missed the file under heavy I/O contention.
     tokio::time::sleep(Duration::from_millis(500)).await;
