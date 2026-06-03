@@ -1124,11 +1124,10 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
         use crate::tui::layout::{furniture_def, WaypointKind};
         // Depth (y-sort) baseline = the sprite's south row, via
         // `center_pin_south_offset` (these appliances are center-pinned at
-        // `pos`). h is the footprint height (= sprite height for these), from
-        // furniture_def — no drift.
-        let footprint_h = furniture_def(wp.kind.furniture())
-            .footprint
-            .map_or(0, |(_, h)| h);
+        // `pos`). Read the VISUAL height — the drawn sprite's south, NOT the
+        // (now shallow) footprint: if an appliance ever grows an overhang the
+        // z-key must still track what's painted. Equal for today's flat boxes.
+        let visual_h = furniture_def(wp.kind.furniture()).visual.1;
         match wp.kind {
             // Rendered once via `couch_sprite_center` above (3 seats, 1 sprite).
             WaypointKind::Couch => {}
@@ -1146,13 +1145,13 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
             WaypointKind::PhoneBooth | WaypointKind::StandingDesk => {}
             WaypointKind::VendingMachine => {
                 drawables.push(Drawable {
-                    anchor_y: z_sort_row(Anchor::Center, wp.pos, footprint_h),
+                    anchor_y: z_sort_row(Anchor::Center, wp.pos, visual_h),
                     kind: DrawableKind::VendingMachine { pos: wp.pos },
                 });
             }
             WaypointKind::Printer => {
                 drawables.push(Drawable {
-                    anchor_y: z_sort_row(Anchor::Center, wp.pos, footprint_h),
+                    anchor_y: z_sort_row(Anchor::Center, wp.pos, visual_h),
                     kind: DrawableKind::Printer { pos: wp.pos },
                 });
             }

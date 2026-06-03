@@ -59,7 +59,8 @@ fn half_extents(kind: WaypointKind, pantry_counter_size: (u16, u16)) -> Option<(
     // NOT the mask footprint — which is now a shallow south strip for occlusion,
     // so deriving the stand distance from it would pull the user INSIDE the
     // sprite. Pantry is runtime-sized (visual (0,0)), so its counter size IS the
-    // clearance.
+    // clearance. Assumes CENTER-anchored placement (pos = sprite center, so
+    // visual/2 reaches the edges) — true for every obstacle kind today.
     let (w, h) = if matches!(kind, WaypointKind::Pantry) {
         pantry_counter_size
     } else {
@@ -264,6 +265,31 @@ pub fn approach_point(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn overhanging_obstacle_stand_clearance_uses_visual_not_footprint() {
+        // The decouple: stand/approach clearance is the FULL `visual` (a USER
+        // parks clear of the whole sprite), NOT the shallow mask footprint. If
+        // this regressed to footprint, a user would stand INSIDE the sprite. Pin
+        // the magnitude so the regression can't ship green.
+        // PhoneBooth: footprint (6,3) but visual (6,12) → half-extent must be 6.
+        let booth = furniture_def(Furniture::PhoneBooth);
+        let (_, hy) = half_extents(WaypointKind::PhoneBooth, (0, 0))
+            .expect("booth is an approachable obstacle");
+        assert_eq!(
+            hy,
+            booth.visual.1 / 2,
+            "stand clearance must use the visual height, not the footprint"
+        );
+        assert!(
+            hy > booth.footprint.unwrap().1 / 2,
+            "visual half-extent ({hy}) must exceed the shallow footprint's ({})",
+            booth.footprint.unwrap().1 / 2
+        );
+        // StandingDesk too (visual (8,8) vs footprint (8,3)).
+        let (_, hy) = half_extents(WaypointKind::StandingDesk, (0, 0)).unwrap();
+        assert_eq!(hy, furniture_def(Furniture::StandingDesk).visual.1 / 2);
+    }
 
     /// Build an open mask with a centred obstacle stamped exactly like
     /// `mask.rs` does for a waypoint (pad = 1).

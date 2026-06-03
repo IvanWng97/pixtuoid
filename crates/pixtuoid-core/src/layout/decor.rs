@@ -888,10 +888,26 @@ mod tests {
                 );
             }
             // Occlusion is emergent now (no `occludes_behind` field): an
-            // overhanging obstacle (visual taller than its shallow footprint) is
-            // south-anchored by the mask so its own sprite y-sorts over a walker
-            // behind it. The footprint ≤ visual check above is what guarantees the
-            // overhang exists; there's no separate cap value to pin.
+            // overhanging obstacle is south-anchored by the mask so its own sprite
+            // y-sorts over a walker behind it. The plants (incl. the de-shared
+            // flower/succulent NOT in `PodDecor::ALL`, so `every_pod_occludes_via_
+            // overhang` misses them) must STRICTLY overhang their pot — visual
+            // taller than the shallow footprint — else a walker behind them isn't
+            // hidden. `≤` above isn't enough for these; assert strict `<`.
+            if matches!(
+                f,
+                Furniture::PlantFicus
+                    | Furniture::PlantTall
+                    | Furniture::PlantFlower
+                    | Furniture::PlantSucculent
+            ) {
+                let (_, fh) = d.footprint.expect("plant has a pot footprint");
+                assert!(
+                    d.visual.1 > fh,
+                    "{f:?}: plant must overhang its pot to occlude (visual.h {} > footprint.h {fh})",
+                    d.visual.1
+                );
+            }
         }
     }
 

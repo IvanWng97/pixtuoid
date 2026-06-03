@@ -55,7 +55,10 @@ fn stamp_south_strip(
 /// panel): south-anchor the shallow ground strip to the sprite base so a walker
 /// parks DEEP behind it and the sprite's own y-sort occludes them (invariant #6,
 /// the back-cap's replacement). `visual_h == footprint_h` ⇒ a flat box (vending,
-/// printer, tables, couch): a plain anchored stamp is correct.
+/// printer, tables, couch): a plain anchored stamp is correct. Only the H axis is
+/// modeled — a piece that overhangs SIDEWAYS (`visual.w > footprint.w` while
+/// `visual.h == footprint.h`) would fall through to the centered stamp and occlude
+/// nothing; none exists today, but stamp such a kind explicitly if added.
 fn stamp_overhang_aware(
     mask: &mut WalkableMask,
     anchor: Anchor,
@@ -278,6 +281,12 @@ pub(super) fn build_walkable_mask(
     }
 
     if let Some(lamp) = floor_lamp {
+        // EXCEPTION: the lamp has visual.h > footprint.h yet stamps plain-centered
+        // (NOT via `stamp_overhang_aware`). Its 7px footprint is already sized so a
+        // CENTERED stamp + pad reaches the disc at the sprite south (see the
+        // FloorLamp row in decor.rs); south-anchoring a short strip would lift the
+        // block off the disc. The lamp sits in the open lounge, not a corridor, so
+        // "walker behind it" occlusion isn't needed.
         if let Some((w, h)) = furniture_def(Furniture::FloorLamp).footprint {
             stamp_anchored(&mut mask, Anchor::Center, lamp, w, h, 1);
         }
@@ -327,4 +336,55 @@ pub(super) fn build_walkable_mask(
     }
 
     mask
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn overhang_footprint_south_anchored_leaves_the_overhang_walkable() {
+        // A 6-wide piece whose sprite is 12 tall but whose ground base is only 3
+        // (a phone booth): `stamp_overhang_aware` must block ONLY the 3-row south
+        // strip at the sprite base, leaving the tall overhang north of it walkable
+        // — that's where a walker parks deep so the sprite's y-sort occludes them.
+        // This is the core invariant the cap-deletion relies on; pin it directly.
+        let mut mask = WalkableMask::new_open(40, 40);
+        let pos = Point { x: 20, y: 20 };
+        stamp_overhang_aware(&mut mask, Anchor::Center, pos, 6, 3, 12, 0);
+        let south = z_sort_row(Anchor::Center, pos, 12); // sprite base row
+        for dy in 0..3 {
+            assert!(
+                !mask.is_walkable(pos.x, south - dy),
+                "base row {} must be blocked",
+                south - dy
+            );
+        }
+        assert!(
+            mask.is_walkable(pos.x, south - 4),
+            "overhang region north of the base must stay walkable (walker parks here)"
+        );
+        assert!(
+            mask.is_walkable(pos.x, pos.y.saturating_sub(5)),
+            "sprite-top region must stay walkable"
+        );
+    }
+
+    #[test]
+    fn flat_box_footprint_is_centered_not_south_anchored() {
+        // visual.h == footprint.h ⇒ flat box (vending/printer/table): a centered
+        // stamp, NOT a south strip — the block straddles `pos`, so the row NORTH
+        // of center is blocked (a south strip would leave it open).
+        let mut mask = WalkableMask::new_open(40, 40);
+        let pos = Point { x: 20, y: 20 };
+        stamp_overhang_aware(&mut mask, Anchor::Center, pos, 4, 6, 6, 0);
+        assert!(
+            !mask.is_walkable(pos.x, pos.y),
+            "centered block: center blocked"
+        );
+        assert!(
+            !mask.is_walkable(pos.x, pos.y - 2),
+            "centered block: north-of-center blocked (not a south strip)"
+        );
+    }
 }
