@@ -765,3 +765,64 @@ fn paint_desk_personalization(
         put(buf, fx + 1, fy + 1, theme.furniture.photo_bg);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn p(x: u16, y: u16) -> Point {
+        Point { x, y }
+    }
+
+    #[test]
+    fn sample_polyline_empty_returns_fallback() {
+        assert_eq!(sample_polyline(&[], 0.5, p(9, 9)), p(9, 9));
+    }
+
+    #[test]
+    fn sample_polyline_single_point_returns_it() {
+        assert_eq!(sample_polyline(&[p(3, 4)], 0.5, p(9, 9)), p(3, 4));
+    }
+
+    #[test]
+    fn sample_polyline_t_at_or_past_one_returns_last() {
+        let pts = [p(0, 0), p(10, 0)];
+        assert_eq!(sample_polyline(&pts, 1.0, p(9, 9)), p(10, 0));
+        assert_eq!(sample_polyline(&pts, 2.5, p(9, 9)), p(10, 0));
+    }
+
+    #[test]
+    fn sample_polyline_t_zero_returns_first() {
+        assert_eq!(sample_polyline(&[p(0, 0), p(10, 0)], 0.0, p(9, 9)), p(0, 0));
+    }
+
+    #[test]
+    fn sample_polyline_midpoint_on_straight_segment() {
+        assert_eq!(sample_polyline(&[p(0, 0), p(10, 0)], 0.5, p(9, 9)), p(5, 0));
+    }
+
+    #[test]
+    fn sample_polyline_arc_length_hits_corner_of_l() {
+        // L: (0,0)->(10,0) len 10, ->(10,10) len 10; total 20. t=0.5 → arc 10 →
+        // exactly the corner.
+        let pts = [p(0, 0), p(10, 0), p(10, 10)];
+        assert_eq!(sample_polyline(&pts, 0.5, p(9, 9)), p(10, 0));
+    }
+
+    #[test]
+    fn sample_polyline_octile_weights_diagonal() {
+        // Cardinal leg len 10, diagonal leg octile len ≈14.14; total ≈24.14.
+        // Sampling at arc-distance 10/total lands exactly on the corner — proves
+        // the diagonal is weighted by octile length, not raw point count.
+        let pts = [p(0, 0), p(10, 0), p(20, 10)];
+        let total = 10.0 + 10.0 * std::f32::consts::SQRT_2;
+        assert_eq!(sample_polyline(&pts, 10.0 / total, p(9, 9)), p(10, 0));
+    }
+
+    #[test]
+    fn sample_polyline_zero_length_leading_segment_no_div_by_zero() {
+        // Duplicate first point (zero-length segment) must not panic.
+        let pts = [p(5, 5), p(5, 5), p(15, 5)];
+        assert_eq!(sample_polyline(&pts, 0.5, p(0, 0)), p(10, 5));
+    }
+}

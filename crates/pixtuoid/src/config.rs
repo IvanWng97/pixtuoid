@@ -2,15 +2,18 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
-/// One `[[pets]]` stanza. `kind` is kept as a raw `String` (NOT a serde-derived
-/// `PetKind`) on purpose: a typo like `kind = "hamster"` is then validated +
-/// warn-skipped in [`resolve_pets`], rather than failing the whole
-/// `toml::from_str` and tripping `load`'s all-or-nothing malformed arm — which
-/// would silently revert EVERY user setting (theme, etc.) to defaults. `name`
-/// is optional; omit it for the pet's default display name.
+/// One `[[pets]]` stanza. `kind` is an OPTIONAL raw `String` (NOT a required
+/// field, NOT a serde-derived `PetKind`) on purpose: an unknown value (`kind =
+/// "hamster"`) OR a missing/typo'd key (`knid = "cat"` → `kind` defaults to
+/// `None`) is validated + warn-skipped in [`resolve_pets`], rather than failing
+/// the whole `toml::from_str` and tripping `load`'s all-or-nothing malformed arm
+/// — which would silently revert EVERY user setting (theme, etc.) to defaults.
+/// (A wrong-TYPE value like `kind = 5` still fails the parse; not worth a custom
+/// deserializer.) `name` is optional; omit it for the pet's default name.
 #[derive(Debug, Default, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PetEntry {
-    pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
 }
@@ -170,10 +173,10 @@ pub fn resolve_pets(config: &AppConfig) -> Vec<crate::tui::pet::Pet> {
         Some(entries) => {
             let mut out = Vec::with_capacity(entries.len());
             for entry in entries {
-                let Some(kind) = PetKind::from_config_name(&entry.kind) else {
+                let Some(kind) = entry.kind.as_deref().and_then(PetKind::from_config_name) else {
                     tracing::warn!(
-                        pet = %entry.kind,
-                        "unknown pet kind in [[pets]] config — skipping"
+                        pet = ?entry.kind,
+                        "missing or unknown pet `kind` in [[pets]] config — skipping"
                     );
                     continue;
                 };
@@ -440,11 +443,11 @@ mod tests {
         let cfg = AppConfig {
             pets: Some(vec![
                 PetEntry {
-                    kind: "cat".into(),
+                    kind: Some("cat".into()),
                     name: None,
                 },
                 PetEntry {
-                    kind: "hamster".into(),
+                    kind: Some("hamster".into()),
                     name: None,
                 },
             ]),
@@ -461,11 +464,11 @@ mod tests {
         let cfg = AppConfig {
             pets: Some(vec![
                 PetEntry {
-                    kind: "hamster".into(),
+                    kind: Some("hamster".into()),
                     name: None,
                 },
                 PetEntry {
-                    kind: "parrot".into(),
+                    kind: Some("parrot".into()),
                     name: None,
                 },
             ]),
@@ -479,11 +482,11 @@ mod tests {
         let cfg = AppConfig {
             pets: Some(vec![
                 PetEntry {
-                    kind: "cat".into(),
+                    kind: Some("cat".into()),
                     name: Some("Whiskers".into()),
                 },
                 PetEntry {
-                    kind: "dog".into(),
+                    kind: Some("dog".into()),
                     name: Some("Rex".into()),
                 },
             ]),
@@ -499,7 +502,7 @@ mod tests {
     fn pets_entry_absent_name_falls_back_to_default() {
         let cfg = AppConfig {
             pets: Some(vec![PetEntry {
-                kind: "dog".into(),
+                kind: Some("dog".into()),
                 name: None,
             }]),
             ..AppConfig::default()
@@ -512,11 +515,11 @@ mod tests {
         let cfg = AppConfig {
             pets: Some(vec![
                 PetEntry {
-                    kind: "cat".into(),
+                    kind: Some("cat".into()),
                     name: Some("  Mittens  ".into()),
                 },
                 PetEntry {
-                    kind: "dog".into(),
+                    kind: Some("dog".into()),
                     name: Some("   ".into()), // whitespace-only → default
                 },
             ]),
@@ -537,7 +540,7 @@ mod tests {
         assert_eq!(
             cfg.pets,
             Some(vec![PetEntry {
-                kind: "dog".into(),
+                kind: Some("dog".into()),
                 name: None
             }])
         );
@@ -575,7 +578,7 @@ mod tests {
         assert_eq!(
             cfg.pets,
             Some(vec![PetEntry {
-                kind: "cat".into(),
+                kind: Some("cat".into()),
                 name: Some("Luna".into())
             }])
         );
@@ -600,7 +603,7 @@ mod tests {
         let cfg = AppConfig {
             theme: Some("normal".into()),
             pets: Some(vec![PetEntry {
-                kind: "cat".into(),
+                kind: Some("cat".into()),
                 name: None,
             }]),
             ..AppConfig::default()
@@ -609,6 +612,33 @@ mod tests {
         let theme_pos = s.find("theme").expect("theme not in output");
         let pets_pos = s.find("[[pets]]").expect("[[pets]] not in output");
         assert!(theme_pos < pets_pos, "theme must precede [[pets]]:\n{s}");
+    }
+
+    #[test]
+    fn pets_missing_kind_is_non_fatal() {
+        // A `[[pets]]` stanza with no `kind` (user typo) must NOT trip load()'s
+        // all-or-nothing malformed arm — the rest of the config survives and the
+        // bad stanza is warn-skipped. Regression for the `kind: String` footgun.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "theme = \"cyberpunk\"\n[[pets]]\nname = \"Ghost\"\n\n[[pets]]\nkind = \"cat\"\n",
+        )
+        .unwrap();
+        let cfg = load(&path);
+        assert_eq!(
+            cfg.theme.as_deref(),
+            Some("cyberpunk"),
+            "theme must survive a kindless [[pets]] stanza (config not reset)"
+        );
+        let pets = resolve_pets(&cfg);
+        assert_eq!(
+            pets.len(),
+            1,
+            "the kindless stanza is skipped, the cat kept"
+        );
+        assert_eq!(pets[0].kind, crate::tui::pet::PetKind::Cat);
     }
 
     // --- save_version ---------------------------------------------------------

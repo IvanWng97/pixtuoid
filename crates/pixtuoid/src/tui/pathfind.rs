@@ -346,15 +346,6 @@ pub fn find_path(
     None
 }
 
-/// Snap a pixel-space `Point` to the nearest walkable coarse-cell *center* on
-/// the STATIC mask (no dynamic overlay). Returns `None` only when the grid is
-/// degenerate or no walkable cell exists within `MAX_SNAP_RADIUS`.
-///
-/// This is the pet's rest/leg anchor: pass a raw furniture-adjacent spot to get
-/// the nearest floor pixel it can actually stand on. Distinct from `find_path`'s
-/// internal snapping, whose `reconstruct` overwrites the polyline endpoints with
-/// the RAW `from`/`to` — so callers that need a guaranteed-walkable endpoint must
-/// re-anchor with this.
 /// Is the coarse routing cell containing `p` walkable (the SAME predicate A*
 /// expands on — ≥`CELL_WALKABLE_MIN`/16 px open)? This is the granularity the
 /// router actually guarantees: a position can fail a per-pixel `is_walkable`
@@ -371,6 +362,15 @@ pub fn point_in_walkable_cell(mask: &WalkableMask, p: Point) -> bool {
     cx < cell_w && cy < cell_h && cell_walkable(mask, &OccupancyOverlay::new(), cx, cy)
 }
 
+/// Snap a pixel-space `Point` to the nearest walkable coarse-cell *center* on
+/// the STATIC mask (no dynamic overlay). Returns `None` only when the grid is
+/// degenerate or no walkable cell exists within `MAX_SNAP_RADIUS`.
+///
+/// This is the pet's rest/leg anchor: pass a raw furniture-adjacent spot to get
+/// the nearest floor pixel it can actually stand on. Distinct from `find_path`'s
+/// internal snapping, whose `reconstruct` overwrites the polyline endpoints with
+/// the RAW `from`/`to` — so callers that need a guaranteed-walkable endpoint must
+/// re-anchor with this.
 pub fn snap_point_to_walkable(mask: &WalkableMask, p: Point) -> Option<Point> {
     let cell_w = mask.width / CELL_SIZE;
     let cell_h = mask.height / CELL_SIZE;
@@ -412,7 +412,8 @@ fn simplify_polyline(pts: Vec<Point>) -> Vec<Point> {
     let mut out: Vec<Point> = Vec::with_capacity(pts.len());
     out.push(pts[0]);
     for i in 1..pts.len() - 1 {
-        let prev = *out.last().expect("just pushed start point");
+        // `out` is non-empty (pushed pts[0] above); index instead of unwrap.
+        let prev = out[out.len() - 1];
         let here = pts[i];
         let next = pts[i + 1];
         let dx_in = here.x as i32 - prev.x as i32;
@@ -423,7 +424,8 @@ fn simplify_polyline(pts: Vec<Point>) -> Vec<Point> {
             out.push(here);
         }
     }
-    out.push(*pts.last().expect("non-empty"));
+    // `pts.len() >= 3` here (early-returned otherwise), so indexing is safe.
+    out.push(pts[pts.len() - 1]);
     out
 }
 
