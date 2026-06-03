@@ -20,14 +20,14 @@ fn stamp_anchored(mask: &mut WalkableMask, anchor: Anchor, pos: Point, w: u16, h
 }
 
 /// Stamp ONLY the south (ground-contact) `depth` rows of an ELEVATED furniture
-/// whose `sprite_h`-tall sprite overhangs its floor base — the rolling
-/// whiteboard's wheels under its panel (invariant #6). The strip's south edge is
-/// the sprite's south base (`z_sort_row`, the same row the renderer y-sorts by),
-/// so the block hugs the floor: a walker can pass BEHIND the panel and is
-/// occluded by it (the overhang via z-sort + the `occludes_behind` back-cap). `w`
-/// is the GROUND width, positioned by `anchor` like the full sprite — a plain
-/// short footprint stamped `Center`/`TopLeft` would center on the panel instead,
-/// lifting the block off the wheels.
+/// whose `sprite_h`-tall sprite overhangs its floor base — a plant canopy over
+/// its pot, a booth column over its door, the whiteboard panel over its wheels
+/// (invariant #6). The strip's south edge is the sprite's south base
+/// (`z_sort_row`, the same row the renderer y-sorts by), so the block hugs the
+/// floor: a walker parks DEEP behind the piece and is occluded by the overhang's
+/// own y-sort (no synthetic cap). `w` is the GROUND width, positioned by `anchor`
+/// like the full sprite — a plain short footprint stamped `Center`/`TopLeft`
+/// would center on the panel instead, lifting the block off the base.
 fn stamp_south_strip(
     mask: &mut WalkableMask,
     anchor: Anchor,
@@ -47,6 +47,29 @@ fn stamp_south_strip(
     // of a huge buffer can't wrap.
     let top = south.saturating_add(1).saturating_sub(depth);
     mask.mark_blocked(left, top, w, depth, pad);
+}
+
+/// Stamp a furniture footprint, picking the anchoring by whether the sprite
+/// OVERHANGS its ground base. `visual_h > footprint_h` ⇒ the sprite is taller
+/// than its floor contact (plant canopy, booth column, TV monitor, whiteboard
+/// panel): south-anchor the shallow ground strip to the sprite base so a walker
+/// parks DEEP behind it and the sprite's own y-sort occludes them (invariant #6,
+/// the back-cap's replacement). `visual_h == footprint_h` ⇒ a flat box (vending,
+/// printer, tables, couch): a plain anchored stamp is correct.
+fn stamp_overhang_aware(
+    mask: &mut WalkableMask,
+    anchor: Anchor,
+    pos: Point,
+    w: u16,
+    footprint_h: u16,
+    visual_h: u16,
+    pad: u16,
+) {
+    if visual_h > footprint_h {
+        stamp_south_strip(mask, anchor, pos, w, visual_h, footprint_h, pad);
+    } else {
+        stamp_anchored(mask, anchor, pos, w, footprint_h, pad);
+    }
 }
 
 /// Walkable footprint (and render face height) of a horizontal (E-W) interior
@@ -223,9 +246,9 @@ pub(super) fn build_walkable_mask(
             // shallow PANTRY_FOOTPRINT_DEPTH-tall strip anchored to that base
             // (sprite bottom = pos.y + h/2 - 1) instead of the full height, so
             // the non-walkable area hugs the counter foot. A character routed
-            // behind it is occluded by the back-cap (occludes_behind),
-            // couch-style. `stand_point` still uses the FULL (w,h) so the agent
-            // parks clear of the whole visual, not inside the upper sprite.
+            // behind it is occluded by the counter's own y-sorted sprite,
+            // couch-style. `stand_point` uses the FULL `visual` so the USER parks
+            // clear of the whole counter, not inside the upper sprite.
             let depth = PANTRY_FOOTPRINT_DEPTH.min(h);
             let south = wp.pos.y + h / 2;
             mask.mark_blocked(
@@ -237,14 +260,20 @@ pub(super) fn build_walkable_mask(
             );
             continue;
         }
-        stamp_anchored(&mut mask, Anchor::Center, wp.pos, w, h, 1);
+        // Booth/standing-desk are elevated (sprite overhangs their base) → the
+        // helper south-anchors their shallow strip; vending/printer/couch are
+        // flat → plain centered stamp.
+        let vh = furniture_def(wp.kind.furniture()).visual.1;
+        stamp_overhang_aware(&mut mask, Anchor::Center, wp.pos, w, h, vh, 1);
     }
 
     for (kind, p) in plants {
-        // GROUND footprint from the table — tighter than the taller visual
-        // sprite (top-down rule lets the leaves overhang).
-        if let Some((w, h)) = furniture_def(kind.furniture()).footprint {
-            stamp_anchored(&mut mask, Anchor::Center, *p, w, h, 1);
+        // GROUND footprint = a shallow pot strip; the canopy overhangs it, so
+        // south-anchor it to the sprite base (the leaves then occlude a walker
+        // parked north of the pot via their own y-sort; invariant #6).
+        let def = furniture_def(kind.furniture());
+        if let Some((w, h)) = def.footprint {
+            stamp_overhang_aware(&mut mask, Anchor::Center, *p, w, h, def.visual.1, 1);
         }
     }
 
@@ -285,20 +314,16 @@ pub(super) fn build_walkable_mask(
     // because aisles are tight (14×16) and an extra pixel of pad on
     // each side disconnects the routing grid through the aisle.
     for (kind, pos) in pod_decor {
-        // GROUND footprint (not the sprite size) — a tall plant's canopy
-        // overhangs its 6×6 pot base and must not block the aisle (invariant #6).
-        let Some((w, h)) = furniture_def(kind.furniture()).footprint else {
+        // GROUND footprint (not the sprite size). Every overhanging aisle piece
+        // (plant canopy, booth column, TV monitor, whiteboard panel) has a
+        // shallow base that `stamp_overhang_aware` south-anchors to the sprite
+        // base, so the overhang occludes a walker behind it (invariant #6); flat
+        // boxes fall through to a plain centered stamp.
+        let def = furniture_def(kind.furniture());
+        let Some((w, h)) = def.footprint else {
             continue;
         };
-        if matches!(kind, PodDecor::Whiteboard) {
-            // Rolling board: the 8-px panel overhangs its 3-px wheel base, so
-            // south-anchor the strip to the sprite base (a walker passes behind
-            // the panel, occluded by it) instead of centering it on the panel.
-            let sprite_h = furniture_def(kind.furniture()).visual.1;
-            stamp_south_strip(&mut mask, Anchor::Center, *pos, w, sprite_h, h, 1);
-        } else {
-            stamp_anchored(&mut mask, Anchor::Center, *pos, w, h, 1);
-        }
+        stamp_overhang_aware(&mut mask, Anchor::Center, *pos, w, h, def.visual.1, 1);
     }
 
     mask

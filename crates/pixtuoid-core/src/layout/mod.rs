@@ -133,8 +133,8 @@ pub const WALL_BAND_TO_TOP_MARGIN: u16 = 4;
 /// overhangs (invariant #6). The mask blocks only this shallow strip,
 /// anchored to the sprite's SOUTH base, so the non-walkable area hugs the
 /// counter's foot instead of the full sprite height. A character routed
-/// behind (north of) the counter is occluded by the back-cap
-/// (`FurnitureDef.occludes_behind`), exactly like the couch — see
+/// behind (north of) the counter is occluded by the counter's own y-sorted
+/// sprite (the overhang paints over them), exactly like the couch — see
 /// `mask::build_walkable_mask`.
 pub const PANTRY_FOOTPRINT_DEPTH: u16 = 3;
 

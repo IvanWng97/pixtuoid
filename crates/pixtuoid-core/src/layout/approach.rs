@@ -51,10 +51,21 @@ pub(super) fn obstacle_footprint(
 /// no stand resolution. Gated on [`furniture_def`]`.occupies_pos`, a superset
 /// of `footprint.is_none()`: the couch HAS a footprint yet occupies its `pos`.
 fn half_extents(kind: WaypointKind, pantry_counter_size: (u16, u16)) -> Option<(u16, u16)> {
-    if furniture_def(kind.furniture()).occupies_pos {
+    let def = furniture_def(kind.furniture());
+    if def.occupies_pos {
         return None;
     }
-    obstacle_footprint(kind, pantry_counter_size).map(|(w, h)| (w / 2, h / 2))
+    // Stand-clearance is the VISUAL (the whole sprite the USER parks clear of),
+    // NOT the mask footprint — which is now a shallow south strip for occlusion,
+    // so deriving the stand distance from it would pull the user INSIDE the
+    // sprite. Pantry is runtime-sized (visual (0,0)), so its counter size IS the
+    // clearance.
+    let (w, h) = if matches!(kind, WaypointKind::Pantry) {
+        pantry_counter_size
+    } else {
+        def.visual
+    };
+    Some((w / 2, h / 2))
 }
 
 /// The walkable cell where an agent should stand to use the furniture of
@@ -114,14 +125,17 @@ pub fn stand_point(
 /// far from the seat centre to clear the furniture and land on the floor.
 const SEAT_APPROACH_SCAN: i32 = 14;
 
-/// Ground footprint [`approach_point`] scans past for obstacle furniture —
-/// [`furniture_def`]'s, except the runtime-sized `Pantry` counter. The
-/// `Furniture`-keyed analog of [`obstacle_footprint`].
+/// Extent [`approach_point`] scans past for obstacle furniture — the VISUAL
+/// (whole sprite), so the approach cell lands clear of everything drawn, matching
+/// [`half_extents`]. (NOT the mask footprint, now a shallow south strip.) `None`
+/// for kinds with no ground footprint (seats / wall decor) — those never reach
+/// the obstacle branch. The runtime-sized `Pantry` counter is its own clearance.
 fn approach_footprint(kind: Furniture, pantry_counter_size: (u16, u16)) -> Option<(u16, u16)> {
     if matches!(kind, Furniture::Pantry) {
         return Some(pantry_counter_size);
     }
-    furniture_def(kind).footprint
+    let def = furniture_def(kind);
+    def.footprint.map(|_| def.visual)
 }
 
 /// The walkable, A\*-REACHABLE cell A\* routes to when an agent visits furniture
