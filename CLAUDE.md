@@ -28,7 +28,7 @@ versioned — see `.gitignore`.)
 ```
 crates/
 ├── pixtuoid-core/      headless lib — no terminal deps (ratatui/crossterm forbidden here)
-│                       source/ state/ sprite/ render/ layout/ physics.rs pose.rs walkable.rs
+│                       source/ state/ sprite/ render/ layout/ physics.rs pose/ walkable.rs
 │                       → see crates/pixtuoid-core/CLAUDE.md for module-level detail
 ├── pixtuoid/           binary — ratatui + crossterm + tokio + clap
 │                       cli.rs config.rs runtime.rs install/ tui/ sprites/ (default/robot/skeleton packs)
@@ -58,7 +58,7 @@ The `test-renderer` feature is needed for the `e2e.rs` integration test. The dev
 
 ### Test organization (three tiers)
 
-- **Unit tests** — `#[cfg(test)] mod tests` next to the code. For large modules this is a *sibling file* declared `#[cfg(test)] mod tests;` (e.g. `motion/tests.rs`, `pose/tests.rs`) so production stays readable; it keeps `use super::*` and full crate-internal access (no API widening).
+- **Unit tests** — `#[cfg(test)] mod tests` next to the code. For large modules this is a *sibling file* declared `#[cfg(test)] mod tests;` (e.g. `motion/tests.rs`, `pose/tests.rs`, `layout/tests.rs`, `pixel_painter/tests.rs`) so production stays readable; it keeps `use super::*` and full crate-internal access (no API widening).
 - **Integration / public-contract** — `crates/<crate>/tests/*.rs` (separate crate, only `pub` API): `reducer.rs`, `e2e.rs`, `hook_socket.rs`, `jsonl_watcher.rs`.
 - **Headless render harness** — `tui_renderer/harness.rs` (`#[cfg(test)] mod harness;`). Drives the *real* `TuiRenderer` through `render()` / `navigate_floor()` via ratatui `TestBackend` (no terminal). Output-first assertions: `buf()` (RgbBuffer pixels) + the `#[cfg(test)] frame_buffer()` ratatui-cell inspector; white-box seams (`floor_motion`, `floor_buf`, `inject_coffee`) only where an invariant isn't observable from output. NOT coverable headlessly (excluded in `codecov.yml`): the crossterm event loop (`tui/mod.rs`, reads the real TTY) and `main.rs`.
 

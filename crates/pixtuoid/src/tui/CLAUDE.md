@@ -55,7 +55,8 @@ tui/
                     palette.rs (agent palette + recolor + tool_glow_tint), anchors.rs (breath, walk position,
                     character_anchor; the per-pose anchor fns take `sprite_w` — the pack's character width,
                     resolved ONCE per frame [8 bundled / 10 robot] — so a non-8-wide pack centers correctly),
-                    furniture.rs (coffee table, area rug, side table, pantry table/chair)
+                    furniture.rs (coffee table, area rug, side table, pantry table/chair),
+                    tests.rs (sibling unit suite, extracted from mod.rs)
 ```
 
 > Furniture drawables y-sort via `core::layout::z_sort_row` (the south base row, tied to the mask's

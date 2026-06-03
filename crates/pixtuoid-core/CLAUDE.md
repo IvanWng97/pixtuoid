@@ -23,7 +23,7 @@ src/
 ├── sprite/             .sprite parser, pack.toml loader, half-block blitter, animator, Pack::merge_from
 ├── render/             Renderer trait + TestRenderer (feature = "test-renderer")
 ├── layout/             zone-based office geometry (terminal-agnostic):
-│                       mod.rs (SceneLayout struct, Bounds, Point, constants, accessors),
+│                       mod.rs (SceneLayout struct, Bounds, Point, constants, accessors) + tests.rs sibling,
 │                       compute.rs (compute_with_seed + 4 private helpers),
 │                       decor.rs (role enums WaypointKind/PodDecor/PlantKind/WallDecor + Facing — carry NO
 │                         dimensions, each .furniture()-maps to the unified Furniture geometry enum; the ONE
@@ -53,7 +53,8 @@ src/
 │                       walk_arrived, speed_mult, pause_ms_for; constants: V_CRUISE_COMMUTE=0.36,
 │                       V_CRUISE_SNAPBACK=0.65, V_CRUISE_WANDER=0.25, WALK_ACCEL=6.5e-4,
 │                       WALK_ACCEL_SNAPBACK=2.0e-3, SPEED_MULT_MIN/MAX, PAUSE_MS_MIN/MAX
-├── pose.rs             pure state→pose derivation + wander state machine (no terminal deps).
+├── pose/               pure state→pose derivation + wander state machine (no terminal deps);
+│                       mod.rs (production) + tests.rs sibling.
 │                       ENTRY_ANIMATION_MS is demoted: not a duration knob, only the spawn-window
 │                       upper bound for tui entry-routing and door-cosmetic gating. Exports
 │                       derive_state_only, aimless_wander_seed, pick_aimless_dest, and the
