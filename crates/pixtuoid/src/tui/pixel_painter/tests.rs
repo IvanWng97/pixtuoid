@@ -1,3 +1,4 @@
+use super::seat::DESK_SEAT_Z_OFF;
 use super::*;
 use pixtuoid_core::sprite::{Frame, Palette};
 use std::path::PathBuf;
