@@ -361,6 +361,38 @@ mod tests {
     use super::*;
     use chrono::TimeZone;
 
+    #[test]
+    fn daylight_floor_overlay_brightens_at_positive_strength() {
+        // The warm SUN_TINT (255,246,224) blended in at positive strength lifts a
+        // dark floor on every channel (it only ever warms/brightens).
+        let mut buf = RgbBuffer::filled(4, 10, Rgb(50, 50, 50));
+        daylight_floor_overlay(&mut buf, 2, 10, 0.30);
+        for y in 2..10u16 {
+            for x in 0..4u16 {
+                assert!(
+                    buf.get(x, y).0 > 50,
+                    "floor pixel ({x},{y}) should brighten"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn daylight_floor_overlay_is_noop_at_zero_strength() {
+        // strength 0 short-circuits before any blend — pixels untouched.
+        let mut buf = RgbBuffer::filled(4, 10, Rgb(80, 90, 100));
+        daylight_floor_overlay(&mut buf, 2, 10, 0.0);
+        for y in 2..10u16 {
+            for x in 0..4u16 {
+                assert_eq!(
+                    buf.get(x, y),
+                    Rgb(80, 90, 100),
+                    "zero strength must not mutate pixels"
+                );
+            }
+        }
+    }
+
     /// Build a `SystemTime` that corresponds to local hour `h`, minute `m`
     /// on a fixed date — keeps the tests TZ-independent because
     /// `sun_on_wall` decodes the input back into `chrono::Local`.
