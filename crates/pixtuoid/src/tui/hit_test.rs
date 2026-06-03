@@ -103,7 +103,8 @@ pub fn hit_test_coffee_machine(layout: &Layout, mx: u16, my: u16) -> bool {
 /// behavior — this function covers the remaining decorations.
 pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static str> {
     use crate::tui::layout::{
-        furniture_def, Furniture, PlantKind, PodDecor, WallDecor, WaypointKind, DESK_H, DESK_W,
+        furniture_def, Furniture, PlantItem, PlantKind, PodDecor, PodDecorItem, WallDecor,
+        WallDecorItem, WaypointKind, DESK_H, DESK_W,
     };
     // Hover boxes derive from the one furniture table — `.visual` (the visible
     // sprite) for what the user points at, `.footprint` where the obstacle is
@@ -203,9 +204,14 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
     }
 
     // Plants
-    for (kind, p) in &layout.plants {
+    for &PlantItem { kind, pos } in &layout.plants {
         let Size { w, h } = visual(kind.furniture()); // hover the whole visible plant, not just its ground base
-        if hit(p.x.saturating_sub(w / 2), p.y.saturating_sub(h / 2), w, h) {
+        if hit(
+            pos.x.saturating_sub(w / 2),
+            pos.y.saturating_sub(h / 2),
+            w,
+            h,
+        ) {
             return Some(match kind {
                 PlantKind::Ficus => "Ficus",
                 PlantKind::Tall => "Tall Plant",
@@ -229,7 +235,7 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
     }
 
     // Wall decor
-    for (kind, pos) in &layout.wall_decor {
+    for &WallDecorItem { kind, pos } in &layout.wall_decor {
         let Size { w, h } = furniture_def(kind.furniture()).visual;
         if hit(pos.x, pos.y, w, h) {
             return Some(match kind {
@@ -243,7 +249,7 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
     }
 
     // Pod decor (aisle items)
-    for (kind, pos) in &layout.pod_decor {
+    for &PodDecorItem { kind, pos } in &layout.pod_decor {
         let Size { w, h } = furniture_def(kind.furniture()).visual;
         if hit(
             pos.x.saturating_sub(w / 2),
@@ -328,7 +334,7 @@ pub fn hit_test_pet(
     mx: u16,
     my: u16,
 ) -> bool {
-    let (w, h) = kind.hitbox(anim_name);
+    let Size { w, h } = kind.hitbox(anim_name);
     let tl_x = pet_pos.x.saturating_sub(w / 2);
     let tl_y = pet_pos.y.saturating_sub(h / 2);
     let cell_y = my * 2;

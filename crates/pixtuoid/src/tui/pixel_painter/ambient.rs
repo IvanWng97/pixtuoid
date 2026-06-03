@@ -23,6 +23,13 @@ pub(super) struct SunbeamColumn {
     pub depth: u16,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct DustMote {
+    pub x: u16,
+    pub y: u16,
+    pub alpha: f32,
+}
+
 const MOTES_PER_COLUMN: usize = 3;
 
 /// Deterministic per `(floor_seed, particle_id, now)`. Returns up to
@@ -33,7 +40,7 @@ pub(super) fn dust_mote_positions(
     floor_seed: u64,
     now: SystemTime,
     col: &SunbeamColumn,
-) -> Vec<(u16, u16, f32)> {
+) -> Vec<DustMote> {
     let t_ms = now
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap_or(Duration::ZERO)
@@ -71,7 +78,7 @@ pub(super) fn dust_mote_positions(
         } else {
             1.0
         };
-        out.push((x, y, alpha));
+        out.push(DustMote { x, y, alpha });
     }
     out
 }
@@ -218,7 +225,7 @@ pub(super) fn paint_dust_motes(
     }
     let warm = theme.lighting.sun_spill;
     for col in window_spill_columns(layout) {
-        for (x, y, alpha) in dust_mote_positions(floor_seed, now, &col) {
+        for DustMote { x, y, alpha } in dust_mote_positions(floor_seed, now, &col) {
             if x >= buf.width || y >= buf.height {
                 continue;
             }
@@ -422,7 +429,7 @@ mod tests {
         let mut saw_partial = false;
         'outer: for ms in 0..5000u64 {
             let now = SystemTime::UNIX_EPOCH + Duration::from_millis(ms * 50);
-            for (_, _, alpha) in dust_mote_positions(123, now, &col) {
+            for DustMote { alpha, .. } in dust_mote_positions(123, now, &col) {
                 if alpha < 0.5 {
                     saw_partial = true;
                     break 'outer;

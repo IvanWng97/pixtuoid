@@ -16,7 +16,8 @@
 use std::time::{Duration, SystemTime};
 
 use crate::layout::{
-    desk_furniture_def, desk_walk_anchor, furniture_def, Bounds, Point, SceneLayout, WaypointKind,
+    desk_furniture_def, desk_walk_anchor, furniture_def, Bounds, DwellWindow, Point, SceneLayout,
+    WaypointKind,
 };
 use crate::state::{ActivityState, AgentSlot};
 use crate::AgentId;
@@ -86,14 +87,20 @@ fn dwell_mix(agent_id: AgentId, tag: u64) -> u64 {
 /// is quick. The render authority (`tui::motion::advance_wander`) uses this
 /// for the AtWaypoint beat.
 pub fn dwell_ms(kind: WaypointKind, agent_id: AgentId) -> u64 {
-    let (base, range) = furniture_def(kind.furniture()).dwell;
+    let DwellWindow {
+        base_ms: base,
+        range_ms: range,
+    } = furniture_def(kind.furniture()).dwell;
     base + dwell_mix(agent_id, 0xd1b5_4a32_d192_ed03) % range.max(1)
 }
 
 /// Absolute dwell (ms) an agent sits at its desk between wander trips.
 pub fn seated_dwell_ms(agent_id: AgentId) -> u64 {
     // Single source: the desk's own FurnitureDef.dwell (no separate constant).
-    let (base, range) = desk_furniture_def().dwell;
+    let DwellWindow {
+        base_ms: base,
+        range_ms: range,
+    } = desk_furniture_def().dwell;
     base + dwell_mix(agent_id, 0x9e37_79b9_7f4a_7c15) % range.max(1)
 }
 

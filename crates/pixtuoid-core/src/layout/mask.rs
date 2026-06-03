@@ -5,9 +5,9 @@
 //! edges.
 
 use super::{
-    anchored_top_left, furniture_def, z_sort_row, Anchor, Furniture, PodDecor, Point, Size,
-    WallDecor, WallSegment, Waypoint, WaypointKind, OBSTACLE_PAD_PX, PANTRY_FOOTPRINT_DEPTH,
-    WALL_BAND_TO_TOP_MARGIN,
+    anchored_top_left, furniture_def, z_sort_row, Anchor, Furniture, PlantItem, PodDecorItem,
+    Point, Size, WallDecorItem, WallSegment, Waypoint, WaypointKind, OBSTACLE_PAD_PX,
+    PANTRY_FOOTPRINT_DEPTH, WALL_BAND_TO_TOP_MARGIN,
 };
 use crate::walkable::WalkableMask;
 
@@ -98,11 +98,11 @@ pub(super) fn build_walkable_mask(
     pantry_table: Option<Point>,
     pantry_chairs: &[Point],
     waypoints: &[Waypoint],
-    plants: &[(super::PlantKind, Point)],
+    plants: &[PlantItem],
     floor_lamp: Option<Point>,
     lounge_side_table: Option<Point>,
-    wall_decor: &[(WallDecor, Point)],
-    pod_decor: &[(PodDecor, Point)],
+    wall_decor: &[WallDecorItem],
+    pod_decor: &[PodDecorItem],
     room_walls: &[WallSegment],
     pantry_counter_size: Size,
 ) -> WalkableMask {
@@ -272,13 +272,13 @@ pub(super) fn build_walkable_mask(
         stamp_overhang_aware(&mut mask, Anchor::Center, wp.pos, w, h, vh, 1);
     }
 
-    for (kind, p) in plants {
+    for &PlantItem { kind, pos } in plants {
         // GROUND footprint = a shallow pot strip; the canopy overhangs it, so
         // south-anchor it to the sprite base (the leaves then occlude a walker
         // parked north of the pot via their own y-sort; invariant #6).
         let def = furniture_def(kind.furniture());
         if let Some(Size { w, h }) = def.footprint {
-            stamp_overhang_aware(&mut mask, Anchor::Center, *p, w, h, def.visual.h, 1);
+            stamp_overhang_aware(&mut mask, Anchor::Center, pos, w, h, def.visual.h, 1);
         }
     }
 
@@ -310,14 +310,14 @@ pub(super) fn build_walkable_mask(
     // overhangs north (whiteboard panel / bookshelf shelves / TV monitor), so
     // the strip is SOUTH-anchored to the sprite base and the overhang occludes
     // a walker behind it (invariant #6).
-    for (kind, pos) in wall_decor {
+    for &WallDecorItem { kind, pos } in wall_decor {
         // pad=1 (not OBSTACLE_PAD_PX=2): these elevated boards/cabinets overhang
         // nothing solid, so a 2px clearance band on every side just inflated the
         // blocked rect back to the full sprite width (hiding the footprint
         // shrink). Matches the pod-decor whiteboard's pad.
         if let Some(Size { w, h: depth }) = furniture_def(kind.furniture()).footprint {
             let sprite_h = furniture_def(kind.furniture()).visual.h;
-            stamp_south_strip(&mut mask, Anchor::TopLeft, *pos, w, sprite_h, depth, 1);
+            stamp_south_strip(&mut mask, Anchor::TopLeft, pos, w, sprite_h, depth, 1);
         }
     }
 
@@ -327,7 +327,7 @@ pub(super) fn build_walkable_mask(
     // mark_blocked is idempotent. Use pad=1 (not OBSTACLE_PAD_PX=2)
     // because aisles are tight (14×16) and an extra pixel of pad on
     // each side disconnects the routing grid through the aisle.
-    for (kind, pos) in pod_decor {
+    for &PodDecorItem { kind, pos } in pod_decor {
         // GROUND footprint (not the sprite size). Every overhanging aisle piece
         // (plant canopy, booth column, TV monitor, whiteboard panel) has a
         // shallow base that `stamp_overhang_aware` south-anchors to the sprite
@@ -337,7 +337,7 @@ pub(super) fn build_walkable_mask(
         let Some(Size { w, h }) = def.footprint else {
             continue;
         };
-        stamp_overhang_aware(&mut mask, Anchor::Center, *pos, w, h, def.visual.h, 1);
+        stamp_overhang_aware(&mut mask, Anchor::Center, pos, w, h, def.visual.h, 1);
     }
 
     mask

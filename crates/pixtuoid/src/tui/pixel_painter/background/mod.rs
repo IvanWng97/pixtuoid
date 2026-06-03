@@ -26,7 +26,7 @@ use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use super::ambient::SunbeamColumn;
 use super::palette::{blend, lerp_rgb};
 
-use crate::tui::layout::Layout;
+use crate::tui::layout::{Layout, ELEVATOR_W};
 use crate::tui::theme::Theme;
 
 /// Floor-to-ceiling window stride. Mirrors `paint_floor_and_walls` —
@@ -37,10 +37,6 @@ const WINDOW_GAP: u16 = 3;
 /// Vertical depth of the warm spill band below each window. Mirrors the
 /// `DEPTH` constant inside `paint_window_light_spill`.
 const SPILL_DEPTH: u16 = 12;
-/// Width of the elevator door sprite (same value as
-/// `pixel_painter::DOOR_SPRITE_WIDTH`). Local copy so `window_spill_columns`
-/// can derive the skip range from `layout.door` without crossing modules.
-const DOOR_SPRITE_WIDTH: u16 = 16;
 
 /// Lightning strike cadence (Storm only): a flash fires every
 /// `LIGHTNING_PERIOD_MS` (~15 s — a 6 s cadence read as a hyperactive storm),
@@ -232,7 +228,7 @@ pub(in crate::tui::pixel_painter) fn window_spill_columns(layout: &Layout) -> Ve
     let top_wall_h = layout
         .top_margin
         .saturating_sub(pixtuoid_core::layout::WALL_BAND_TO_TOP_MARGIN);
-    let skip = layout.door.map(|d| (d.x, d.x + DOOR_SPRITE_WIDTH));
+    let skip = layout.door.map(|d| (d.x, d.x + ELEVATOR_W));
     let mut out = Vec::new();
     let mut x = 3u16;
     while x + WINDOW_W + 2 <= layout.buf_w {

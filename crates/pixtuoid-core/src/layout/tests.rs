@@ -455,18 +455,15 @@ fn meeting_stand_points_are_walkable() {
 #[test]
 fn compute_places_bookshelf_on_wall_and_whiteboard_in_walkway() {
     let l = SceneLayout::compute(120, 96, 1).expect("fits");
-    let bookshelf = l
-        .wall_decor
-        .iter()
-        .find(|(k, _)| *k == WallDecor::Bookshelf);
+    let bookshelf = l.wall_decor.iter().find(|i| i.kind == WallDecor::Bookshelf);
     let whiteboard = l
         .wall_decor
         .iter()
-        .find(|(k, _)| *k == WallDecor::Whiteboard);
+        .find(|i| i.kind == WallDecor::Whiteboard);
     assert!(bookshelf.is_some());
     assert!(whiteboard.is_some());
-    assert!(bookshelf.unwrap().1.y < l.cubicle_band.y);
-    assert!(whiteboard.unwrap().1.y > l.cubicle_band.y);
+    assert!(bookshelf.unwrap().pos.y < l.cubicle_band.y);
+    assert!(whiteboard.unwrap().pos.y > l.cubicle_band.y);
 }
 
 #[test]
@@ -476,11 +473,12 @@ fn whiteboard_blocks_only_its_wheel_base_not_the_elevated_panel() {
     // walker can pass BEHIND the panel (occluded by it), not the full 11-px
     // sprite. Was the full height — a walker couldn't get above the board.
     let l = SceneLayout::compute(120, 96, 1).expect("fits");
-    let (_, pos) = *l
+    let pos = l
         .wall_decor
         .iter()
-        .find(|(k, _)| *k == WallDecor::Whiteboard)
-        .expect("a free-standing whiteboard");
+        .find(|i| i.kind == WallDecor::Whiteboard)
+        .expect("a free-standing whiteboard")
+        .pos;
     // Wall board is TopLeft-anchored; the 14×11 sprite's wheels sit at rows
     // 8-10. A panel-surface cell well north of the wheels must be WALKABLE.
     assert!(
@@ -498,9 +496,9 @@ fn whiteboard_blocks_only_its_wheel_base_not_the_elevated_panel() {
 fn compute_places_plants_in_lounge_and_walkway() {
     let l = SceneLayout::compute(120, 96, 1).expect("fits");
     assert!(!l.plants.is_empty());
-    for (_, p) in &l.plants {
-        assert!(p.x < l.buf_w);
-        assert!(p.y < l.buf_h);
+    for p in &l.plants {
+        assert!(p.pos.x < l.buf_w);
+        assert!(p.pos.y < l.buf_h);
     }
 }
 

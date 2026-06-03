@@ -686,7 +686,7 @@ mod tests {
         // collapse the jitter. Keep every row's range positive.
         for &kind in WaypointKind::ALL {
             assert!(
-                furniture_def(kind.furniture()).dwell.1 > 0,
+                furniture_def(kind.furniture()).dwell.range_ms > 0,
                 "{kind:?}: dwell range must be > 0",
             );
         }

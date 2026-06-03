@@ -19,9 +19,9 @@ mod reach;
 
 pub use approach::{approach_point, stand_point};
 pub use decor::{
-    desk_furniture_def, desk_walk_anchor, furniture_def, seated_foot_cell, ApproachSides, Facing,
-    Furniture, FurnitureDef, PlantKind, PodDecor, WallDecor, WaypointKind, DESK_APPROACH,
-    SEAT_RENDER_Y_OFF, WALKING_Y_OFF,
+    desk_furniture_def, desk_walk_anchor, furniture_def, seated_foot_cell, ApproachSides,
+    DwellWindow, Facing, Furniture, FurnitureDef, PlantKind, PodDecor, WallDecor, WaypointKind,
+    DESK_APPROACH, SEAT_RENDER_Y_OFF, WALKING_Y_OFF,
 };
 pub use mask::{WALL_THICK_H, WALL_THICK_V};
 pub use placement::{anchored_top_left, z_sort_row, Anchor};
@@ -63,6 +63,30 @@ pub struct WallSegment {
     pub end: Point,
 }
 
+/// A placed plant: its kind paired with its centre position. Names what was a
+/// `(PlantKind, Point)` tuple in `SceneLayout::plants`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PlantItem {
+    pub kind: PlantKind,
+    pub pos: Point,
+}
+
+/// A placed wall decoration: its kind paired with its position. Names what was a
+/// `(WallDecor, Point)` tuple in `SceneLayout::wall_decor`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WallDecorItem {
+    pub kind: WallDecor,
+    pub pos: Point,
+}
+
+/// A placed aisle/pod decoration: its kind paired with its centre position.
+/// Names what was a `(PodDecor, Point)` tuple in `SceneLayout::pod_decor`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PodDecorItem {
+    pub kind: PodDecor,
+    pub pos: Point,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Waypoint {
     pub pos: Point,
@@ -88,12 +112,12 @@ pub struct SceneLayout {
     pub walkway: Bounds,
     pub home_desks: Vec<Point>,
     pub waypoints: Vec<Waypoint>,
-    pub plants: Vec<(PlantKind, Point)>,
-    pub wall_decor: Vec<(WallDecor, Point)>,
+    pub plants: Vec<PlantItem>,
+    pub wall_decor: Vec<WallDecorItem>,
     /// Decor items placed in the aisles between 2×2 desk pods. Each
-    /// (kind, centre-position) tuple paints its sprite centred on the
-    /// point and marks it as an obstacle in the walkable mask.
-    pub pod_decor: Vec<(PodDecor, Point)>,
+    /// item paints its sprite centred on `pos` and marks it as an obstacle
+    /// in the walkable mask.
+    pub pod_decor: Vec<PodDecorItem>,
     pub floor_lamp: Option<Point>,
     /// Lounge side table (7×4 wood + magazine) placed next to the
     /// viewing couch on the side opposite the floor lamp.
@@ -157,6 +181,13 @@ pub const PANTRY_FOOTPRINT_DEPTH: u16 = 3;
 
 pub const DESK_W: u16 = 12;
 pub const DESK_H: u16 = 6;
+/// Elevator-door sprite size in buffer px — the single source for the door's
+/// width (the layout slots the sprite into the back wall and the renderer skips
+/// the window glass it covers) and height (the z-sort anchor row). Both the
+/// layout (`compute`) and the renderer (`pixel_painter` / `background`) read
+/// these so the door footprint can't drift between them.
+pub const ELEVATOR_W: u16 = 16;
+pub const ELEVATOR_H: u16 = 14;
 /// Hard cap on how many cubicles get painted regardless of how high
 /// `max_desks` is set. Bumped from 8 → 16 after the lounge_band quadrant
 /// was retired and the cubicle band absorbed its vertical space — more

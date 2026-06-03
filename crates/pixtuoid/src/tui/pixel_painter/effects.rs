@@ -1,5 +1,6 @@
 use std::time::SystemTime;
 
+use pixtuoid_core::layout::WALKING_Y_OFF;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
 use super::palette::blend;
@@ -121,7 +122,7 @@ pub(super) fn paint_walking_dust(
     theme: &Theme,
 ) {
     let dust = theme.effects.walking_dust;
-    let foot_y = walker_anchor.y + 12;
+    let foot_y = walker_anchor.y + WALKING_Y_OFF;
     let foot_x = walker_anchor.x + if frame_idx == 0 { 6 } else { 1 };
     if foot_x < buf.width && foot_y < buf.height {
         let cur = buf.get(foot_x, foot_y);

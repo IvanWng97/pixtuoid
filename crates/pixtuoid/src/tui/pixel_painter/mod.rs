@@ -12,6 +12,7 @@
 use std::collections::HashMap;
 use std::time::SystemTime;
 
+use pixtuoid_core::layout::WALKING_Y_OFF;
 use pixtuoid_core::sprite::blit::blit_frame;
 use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
@@ -22,7 +23,10 @@ use pixtuoid_core::{AgentSlot, SceneState};
 use crate::tui::chitchat::{self, ActiveChitchat, ChitchatBubble};
 use crate::tui::floor::LightingState;
 use crate::tui::frame_cache::FrameCache;
-use crate::tui::layout::{z_sort_row, Anchor, Layout, Point, Size, WallSegment, DESK_H, DESK_W};
+use crate::tui::layout::{
+    z_sort_row, Anchor, Layout, PlantItem, PodDecorItem, Point, Size, WallDecorItem, WallSegment,
+    DESK_H, DESK_W, ELEVATOR_H, ELEVATOR_W,
+};
 use crate::tui::motion::MotionState;
 use crate::tui::pathfind::Router;
 use crate::tui::pet::PetFrame;
@@ -69,7 +73,6 @@ use palette::{agent_palette, recolor_frame};
 use seat::{paint_character_at, seat_sprite, settle_seat_view, SeatView};
 
 const COFFEE_STEAM_WINDOW_SECS: u64 = 120;
-const DOOR_SPRITE_WIDTH: u16 = 16;
 
 /// The home desk sprite's front lip extends this many px past its blocked
 /// footprint (the top-down 3/4 bevel), so the desk's z-sort baseline is the
@@ -153,7 +156,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
     // The elevator door replaces the rightmost window — pass its x-range
     // so `paint_floor_and_walls` skips drawing a window that would
     // otherwise bleed through behind the elevator frame.
-    let door_x_range = ctx.layout.door.map(|d| (d.x, d.x + DOOR_SPRITE_WIDTH));
+    let door_x_range = ctx.layout.door.map(|d| (d.x, d.x + ELEVATOR_W));
     paint_floor_and_walls(
         ctx.buf,
         buf_w,
@@ -507,16 +510,16 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
             ctx.theme,
         );
     }
-    for (kind, p) in &ctx.layout.plants {
+    for &PlantItem { kind, pos } in &ctx.layout.plants {
         // Shadow sits under the sprite's south row — same offset the z-anchor
         // uses, off the same height (Succulent/Flower were floating at a fixed
         // +3 that only suited the taller Ficus/Tall).
-        let cy = p.y
+        let cy = pos.y
             + center_pin_south_offset(crate::tui::layout::furniture_def(kind.furniture()).visual.h);
         paint_shadow(
             ctx.buf,
             Ellipse {
-                cx: p.x,
+                cx: pos.x,
                 cy,
                 half_w: 3,
                 half_h: 1,
@@ -859,17 +862,14 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
     // standing desk). All centered at `pos`; anchor at the bottom of
     // the sprite footprint so y-sort places them correctly against
     // walkers and characters in the aisles.
-    for (kind, pos) in &ctx.layout.pod_decor {
+    for &PodDecorItem { kind, pos } in &ctx.layout.pod_decor {
         // Visual sprite height from the one furniture table (the mask reads the
         // separate `footprint` off the same row — so a tall plant's canopy can
         // sort correctly without blocking the aisle).
         let Size { h, .. } = crate::tui::layout::furniture_def(kind.furniture()).visual;
         drawables.push(Drawable {
-            anchor_y: z_sort_row(Anchor::Center, *pos, h),
-            kind: DrawableKind::PodDecorItem {
-                kind: *kind,
-                pos: *pos,
-            },
+            anchor_y: z_sort_row(Anchor::Center, pos, h),
+            kind: DrawableKind::PodDecorItem { kind, pos },
         });
     }
 
@@ -878,17 +878,14 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
     // match that drifted: it over-shot Flower/Succulent by one and faked Tall
     // via `9` instead of `(10-1)/2`). The drop-shadow uses the same offset off
     // the same height, so the two can't diverge.
-    for (kind, p) in &ctx.layout.plants {
+    for &PlantItem { kind, pos } in &ctx.layout.plants {
         drawables.push(Drawable {
             anchor_y: z_sort_row(
                 Anchor::Center,
-                *p,
+                pos,
                 crate::tui::layout::furniture_def(kind.furniture()).visual.h,
             ),
-            kind: DrawableKind::Plant {
-                kind: *kind,
-                pos: *p,
-            },
+            kind: DrawableKind::Plant { kind, pos },
         });
     }
 
@@ -927,7 +924,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
     if let Some(door_pos) = ctx.layout.door {
         let frame_idx = compute_door_frame_idx(&agents, ctx.now, ctx.door_anim_max_ms);
         drawables.push(Drawable {
-            anchor_y: door_pos.y + 14,
+            anchor_y: door_pos.y + ELEVATOR_H,
             kind: DrawableKind::Door {
                 pos: door_pos,
                 frame_idx,
@@ -939,14 +936,11 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
     // row is its south base (`pos.y + h - 1`), same helper the mask + every
     // other drawable use. (Was a hand-rolled `pos.y + h`, one row past the
     // sprite's actual bottom.)
-    for (kind, pos) in &ctx.layout.wall_decor {
+    for &WallDecorItem { kind, pos } in &ctx.layout.wall_decor {
         let Size { h, .. } = crate::tui::layout::furniture_def(kind.furniture()).visual;
         drawables.push(Drawable {
-            anchor_y: z_sort_row(Anchor::TopLeft, *pos, h),
-            kind: DrawableKind::WallDecor {
-                kind: *kind,
-                pos: *pos,
-            },
+            anchor_y: z_sort_row(Anchor::TopLeft, pos, h),
+            kind: DrawableKind::WallDecor { kind, pos },
         });
     }
 
@@ -1070,7 +1064,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
                     // Breath-independent z-key (matches AtWaypoint/AimlessAt):
                     // the ±1px breath must not flip sort order against nearby
                     // desk decor frame-to-frame.
-                    anchor_y: anchor_no_breath.y + 12,
+                    anchor_y: anchor_no_breath.y + WALKING_Y_OFF,
                     kind: DrawableKind::Character {
                         agent,
                         anim_name: sleep_variant,
@@ -1092,7 +1086,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
                     // Breath-independent z-key (matches AtWaypoint/AimlessAt):
                     // the ±1px breath must not flip sort order against nearby
                     // desk decor frame-to-frame.
-                    anchor_y: anchor_no_breath.y + 12,
+                    anchor_y: anchor_no_breath.y + WALKING_Y_OFF,
                     kind: DrawableKind::Character {
                         agent,
                         anim_name: "seated",
@@ -1114,7 +1108,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
                     // Breath-independent z-key (matches AtWaypoint/AimlessAt):
                     // the ±1px breath must not flip sort order against nearby
                     // desk decor frame-to-frame.
-                    anchor_y: anchor_no_breath.y + 12,
+                    anchor_y: anchor_no_breath.y + WALKING_Y_OFF,
                     kind: DrawableKind::Character {
                         agent,
                         anim_name: "typing",
@@ -1137,7 +1131,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
                     // Breath-independent z-key (matches AtWaypoint/AimlessAt):
                     // the ±1px breath must not flip sort order against nearby
                     // desk decor frame-to-frame.
-                    anchor_y: anchor_no_breath.y + 12,
+                    anchor_y: anchor_no_breath.y + WALKING_Y_OFF,
                     kind: DrawableKind::Character {
                         agent,
                         anim_name: "standing",
@@ -1258,7 +1252,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
                 let anchor_no_breath = waypoint_anchor(dest, char_w);
                 let anchor = with_breath(anchor_no_breath, agent.agent_id, ctx.now);
                 drawables.push(Drawable {
-                    anchor_y: anchor_no_breath.y + 12,
+                    anchor_y: anchor_no_breath.y + WALKING_Y_OFF,
                     kind: DrawableKind::Character {
                         agent,
                         anim_name: "standing",
@@ -1328,7 +1322,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
                 drawables.push(Drawable {
                     anchor_y: match settle {
                         Some((_, z_key)) => z_key,
-                        None => walker_anchor.y + 12,
+                        None => walker_anchor.y + WALKING_Y_OFF,
                     },
                     kind: DrawableKind::Character {
                         agent,

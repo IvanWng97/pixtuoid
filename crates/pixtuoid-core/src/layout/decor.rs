@@ -32,6 +32,23 @@ pub enum WaypointKind {
     MeetingStand,
 }
 
+/// Per-spot idle dwell window. range_ms == 0 is the DECOR sentinel (not a wander
+/// destination); use is_decor() rather than comparing the raw tuple.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DwellWindow {
+    pub base_ms: u64,
+    pub range_ms: u64,
+}
+impl DwellWindow {
+    pub const DECOR: DwellWindow = DwellWindow {
+        base_ms: 0,
+        range_ms: 0,
+    };
+    pub fn is_decor(self) -> bool {
+        self.range_ms == 0
+    }
+}
+
 /// Plant GROUND footprint — the one geometry VALUE shared by the ficus + tall
 /// plant rows in [`furniture_def`]: a shallow 6×3 POT strip the mask
 /// south-anchors to the sprite's base. The 7-10px leafy canopy overhangs it
@@ -151,13 +168,13 @@ pub struct FurnitureDef {
     /// CENTER, approached from a side. True set: {Couch, MeetingSofa,
     /// MeetingStand}. (Desks are NOT rows here — home workstation is separate.)
     pub occupies_pos: bool,
-    /// Per-spot idle dwell window `(base_ms, range_ms)`. `range == 0` (the
-    /// `DECOR` rows) marks a kind that is NOT a wander destination and is never
-    /// fed to `pose::dwell_ms`; `range > 0` marks a destination. `dwell_ms`
-    /// guards with `% range.max(1)`, so a zero range is safe — it IS the decor
-    /// sentinel, not a bug. Do not "fix" a decor row to a non-zero range (that
-    /// silently turns it into a wander destination).
-    pub dwell: (u64, u64),
+    /// Per-spot idle dwell window. `range_ms == 0` (the `DECOR` rows, via
+    /// [`DwellWindow::is_decor`]) marks a kind that is NOT a wander destination
+    /// and is never fed to `pose::dwell_ms`; `range_ms > 0` marks a destination.
+    /// `dwell_ms` guards with `% range_ms.max(1)`, so a zero range is safe — it
+    /// IS the decor sentinel, not a bug. Do not "fix" a decor row to a non-zero
+    /// range (that silently turns it into a wander destination).
+    pub dwell: DwellWindow,
     /// Canonical (facing-South) sides an agent may approach from. Obstacle
     /// furniture against walls keeps `ALL` (walls already constrain the open
     /// side); seats use "front + sides, no back" so a walker never paths in
@@ -298,7 +315,7 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
         footprint: None,
         visual: Size { w: 0, h: 0 },
         occupies_pos: false,
-        dwell: (0, 0),
+        dwell: DwellWindow::DECOR,
         approach: ApproachSides::ALL,
     };
     match kind {
@@ -306,7 +323,10 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             footprint: Some(Size { w: 8, h: 7 }),
             visual: Size { w: 8, h: 7 }, // procedural render; visual unused
             occupies_pos: true,
-            dwell: (20_000, 20_000),
+            dwell: DwellWindow {
+                base_ms: 20_000,
+                range_ms: 20_000,
+            },
             // SEAT_APPROACH rotated by the SEATED facing (North = looks at the
             // window → back_couch sprite) resolves to {N, E, W} — the natural
             // sides, EXCLUDING the south backrest. The agent comes from whichever
@@ -322,7 +342,10 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             footprint: None,             // runtime-sized — see obstacle_footprint
             visual: Size { w: 0, h: 0 }, // runtime-sized; procedural render
             occupies_pos: false,
-            dwell: (10_000, 8_000),
+            dwell: DwellWindow {
+                base_ms: 10_000,
+                range_ms: 8_000,
+            },
             approach: ApproachSides::ALL,
         },
         Furniture::PhoneBooth => FurnitureDef {
@@ -333,7 +356,10 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             footprint: Some(Size { w: 6, h: 3 }),
             visual: Size { w: 6, h: 12 },
             occupies_pos: false,
-            dwell: (8_000, 22_000),
+            dwell: DwellWindow {
+                base_ms: 8_000,
+                range_ms: 22_000,
+            },
             approach: ApproachSides::ALL,
         },
         Furniture::StandingDesk => FurnitureDef {
@@ -342,35 +368,50 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             footprint: Some(Size { w: 8, h: 3 }),
             visual: Size { w: 8, h: 8 },
             occupies_pos: false,
-            dwell: (8_000, 22_000),
+            dwell: DwellWindow {
+                base_ms: 8_000,
+                range_ms: 22_000,
+            },
             approach: ApproachSides::ALL,
         },
         Furniture::VendingMachine => FurnitureDef {
             footprint: Some(Size { w: 4, h: 6 }),
             visual: Size { w: 4, h: 6 },
             occupies_pos: false,
-            dwell: (4_000, 4_000),
+            dwell: DwellWindow {
+                base_ms: 4_000,
+                range_ms: 4_000,
+            },
             approach: ApproachSides::ALL,
         },
         Furniture::Printer => FurnitureDef {
             footprint: Some(Size { w: 5, h: 4 }),
             visual: Size { w: 5, h: 4 },
             occupies_pos: false,
-            dwell: (4_000, 4_000),
+            dwell: DwellWindow {
+                base_ms: 4_000,
+                range_ms: 4_000,
+            },
             approach: ApproachSides::ALL,
         },
         Furniture::MeetingSofa => FurnitureDef {
             footprint: None,
             visual: Size { w: 0, h: 0 }, // procedural render
             occupies_pos: true,
-            dwell: (20_000, 20_000),
+            dwell: DwellWindow {
+                base_ms: 20_000,
+                range_ms: 20_000,
+            },
             approach: SEAT_APPROACH,
         },
         Furniture::MeetingStand => FurnitureDef {
             footprint: None,
             visual: Size { w: 0, h: 0 }, // procedural render
             occupies_pos: true,
-            dwell: (20_000, 20_000),
+            dwell: DwellWindow {
+                base_ms: 20_000,
+                range_ms: 20_000,
+            },
             approach: SEAT_APPROACH,
         },
         // Plants: all share the tight PLANT_FOOTPRINT ground (leaves overhang,
@@ -523,7 +564,10 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
                 h: DESK_H + 2,
             },
             occupies_pos: true,
-            dwell: (15_000, 15_000),
+            dwell: DwellWindow {
+                base_ms: 15_000,
+                range_ms: 15_000,
+            },
             approach: DESK_APPROACH,
         },
     }
@@ -850,7 +894,7 @@ mod tests {
             d.approach, DESK_APPROACH,
             "desk uses the editable DESK_APPROACH policy"
         );
-        assert!(d.dwell.1 > 0, "seated dwell range must be positive");
+        assert!(d.dwell.range_ms > 0, "seated dwell range must be positive");
     }
 
     #[test]
@@ -866,10 +910,10 @@ mod tests {
         );
         for &f in Furniture::ALL {
             let d = furniture_def(f);
-            // dwell is either the decor sentinel (0,0) or a real window (range>0);
-            // never half-broken like (n, 0) — see the FurnitureDef::dwell doc.
+            // dwell is either the decor sentinel (range_ms 0) or a real window
+            // (range>0); never half-broken like (n, 0) — see FurnitureDef::dwell.
             assert!(
-                d.dwell == (0, 0) || d.dwell.1 > 0,
+                d.dwell == DwellWindow::DECOR || d.dwell.range_ms > 0,
                 "{f:?}: half-broken dwell {:?}",
                 d.dwell
             );

@@ -282,29 +282,29 @@ pub(super) fn compute_with_seed(
     // walkability paths). No plants in the meeting room interior
     // either: sofas + table already fill most of the room, and any
     // plant inside its walkable strips disconnects the door gap.
-    let plants: Vec<(PlantKind, Point)> = vec![
+    let plants: Vec<PlantItem> = vec![
         // Corridor edges — far from any door or room exit.
-        (
-            PlantKind::Flower,
-            Point {
+        PlantItem {
+            kind: PlantKind::Flower,
+            pos: Point {
                 x: cubicle_band.x + 4,
                 y: walkway.y.saturating_sub(4),
             },
-        ),
-        (
-            PlantKind::Succulent,
-            Point {
+        },
+        PlantItem {
+            kind: PlantKind::Succulent,
+            pos: Point {
                 x: cubicle_band.x + cubicle_band.width.saturating_sub(4),
                 y: walkway.y.saturating_sub(4),
             },
-        ),
+        },
     ]
     .into_iter()
     // No pantry plants — the room is small (≤ 26 px wide), and the
     // plant + 1-px pad blocks the only horizontal bridge between the
     // pantry interior and the cubicle area's bottom row. Leaving the
     // pantry plant-free keeps the mask fully connected.
-    .chain(std::iter::empty::<(PlantKind, Point)>())
+    .chain(std::iter::empty::<PlantItem>())
     // Two meeting-room corner plants on the west wall, well clear of
     // the door (which is on the east wall) and the central
     // sofa/table column. Only added when the meeting room is large
@@ -315,20 +315,20 @@ pub(super) fn compute_with_seed(
             Vec::new()
         } else {
             vec![
-                (
-                    PlantKind::Tall,
-                    Point {
+                PlantItem {
+                    kind: PlantKind::Tall,
+                    pos: Point {
                         x: mr.x + 5,
                         y: mr.y + 6,
                     },
-                ),
-                (
-                    PlantKind::Flower,
-                    Point {
+                },
+                PlantItem {
+                    kind: PlantKind::Flower,
+                    pos: Point {
                         x: mr.x + 5,
                         y: mr.y + mr.height.saturating_sub(7),
                     },
-                ),
+                },
             ]
         }
     }))
@@ -360,9 +360,8 @@ pub(super) fn compute_with_seed(
     // elevator's bottom row lands at that same y. (`top_wall_h =
     // top_margin - WALL_BAND_TO_TOP_MARGIN`, the one const the renderer's
     // pre-pass and the mask both read so they can't drift.) Requires ≥ 20 px
-    // of width to even fit the sprite + margin.
-    const ELEVATOR_W: u16 = 16;
-    const ELEVATOR_H: u16 = 14;
+    // of width to even fit the sprite + margin. ELEVATOR_W / ELEVATOR_H are the
+    // shared core consts (read by the renderer too — see layout/mod.rs).
     let top_wall_h = top_margin.saturating_sub(super::WALL_BAND_TO_TOP_MARGIN);
     let window_bottom_y = top_wall_h.saturating_sub(3); // matches paint_floor_and_walls' window_h
     let door = if buf_w >= ELEVATOR_W + 4 && window_bottom_y + 1 >= ELEVATOR_H {
@@ -398,38 +397,38 @@ pub(super) fn compute_with_seed(
     // We position the TOP-LEFT corner of each sprite so its bottom
     // row lands exactly at `top_margin - 1` (last wall band row).
     let mut wall_decor = vec![
-        (
-            WallDecor::Bookshelf,
-            Point {
+        WallDecorItem {
+            kind: WallDecor::Bookshelf,
+            pos: Point {
                 x: pct(buf_w, 18),
                 y: top_margin.saturating_sub(12),
             },
-        ),
-        (
-            WallDecor::ExitSign,
-            Point {
+        },
+        WallDecorItem {
+            kind: WallDecor::ExitSign,
+            pos: Point {
                 x: buf_w.saturating_sub(9),
                 y: top_margin.saturating_sub(13),
             },
-        ),
+        },
     ];
     if has_meeting || has_pantry {
-        wall_decor.push((
-            WallDecor::Whiteboard,
-            Point {
+        wall_decor.push(WallDecorItem {
+            kind: WallDecor::Whiteboard,
+            pos: Point {
                 x: mid_x + 3,
                 y: top_margin + usable_h / 3,
             },
-        ));
+        });
     }
     if let Some(mr) = meeting_room {
-        wall_decor.push((
-            WallDecor::MeetingScreen,
-            Point {
+        wall_decor.push(WallDecorItem {
+            kind: WallDecor::MeetingScreen,
+            pos: Point {
                 x: mr.x + (mr.width / 2).saturating_sub(7),
                 y: top_margin.saturating_sub(12),
             },
-        ));
+        });
     }
 
     let (pantry_table, pantry_chairs) = if let Some(pr) = pantry_room {
@@ -696,7 +695,7 @@ pub(super) fn compute_pod_decor(
     cubicle_band: &Bounds,
     grid: PodGrid,
     floor_seed: u64,
-) -> Vec<(PodDecor, Point)> {
+) -> Vec<PodDecorItem> {
     let right_x = cubicle_band.x;
     let PodGrid {
         cols: pod_cols,
@@ -707,17 +706,20 @@ pub(super) fn compute_pod_decor(
     } = grid;
     let pod_w = pod_stride_x - INTER_POD_AISLE_X;
     let pod_h = pod_stride_y - INTER_POD_AISLE_Y;
-    let mut pod_decor: Vec<(PodDecor, Point)> = Vec::new();
+    let mut pod_decor: Vec<PodDecorItem> = Vec::new();
     // Cycle through ALL with a per-slot counter so every decor type
     // appears at least once before any repeats. Beats the prior
     // golden-ratio hash which (empirically) never picked Tv or
     // PhoneBooth at common buffer sizes — slots were stuck on
     // PlantTall / Whiteboard / StandingDesk.
     let mut slot_idx: usize = (floor_seed % 7) as usize;
-    let mut push_slot = |pod_decor: &mut Vec<(PodDecor, Point)>, x: u16, y: u16| {
+    let mut push_slot = |pod_decor: &mut Vec<PodDecorItem>, x: u16, y: u16| {
         let kind = PodDecor::ALL[slot_idx % PodDecor::ALL.len()];
         slot_idx += 1;
-        pod_decor.push((kind, Point { x, y }));
+        pod_decor.push(PodDecorItem {
+            kind,
+            pos: Point { x, y },
+        });
     };
     // Vertical-aisle slots (between column pod_c and pod_c+1, one
     // per pod row).
@@ -859,7 +861,7 @@ pub(super) fn compute_waypoints(
     top_margin: u16,
     pantry_room: Option<Bounds>,
     pantry_counter_size: Size,
-    pod_decor: &[(PodDecor, Point)],
+    pod_decor: &[PodDecorItem],
     walkway: &Bounds,
     meeting: MeetingFurniture<'_>,
 ) -> (Vec<Waypoint>, Option<Point>) {
@@ -917,7 +919,7 @@ pub(super) fn compute_waypoints(
     // StandingDesk are workstation-like destinations agents can
     // wander to during Idle cycles. Plant/Whiteboard/TV are pure
     // decor (already obstacles via pod_decor).
-    for (kind, pos) in pod_decor {
+    for &PodDecorItem { kind, pos } in pod_decor {
         // Exhaustive (no `_`): a NEW PodDecor must make a deliberate
         // wander-destination decision here — `None` = pure decor (aisle
         // obstacle only), `Some(kind)` = also a walkable destination. A `_`
@@ -929,7 +931,7 @@ pub(super) fn compute_waypoints(
         };
         if let Some(wp_kind) = wp_kind {
             waypoints.push(Waypoint {
-                pos: *pos,
+                pos,
                 kind: wp_kind,
                 facing: Facing::South,
                 room_id: None,
