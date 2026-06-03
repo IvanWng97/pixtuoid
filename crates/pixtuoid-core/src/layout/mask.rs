@@ -301,15 +301,18 @@ pub(super) fn build_walkable_mask(
     }
 
     // Wall decor is top-left anchored. Only kinds with a ground footprint in
-    // the furniture table are obstacles (the whiteboard); the rest are flush
-    // against the wall (footprint None) and stamp nothing.
+    // the furniture table are obstacles (the rolling whiteboard + the floor-
+    // standing bookshelf / meeting screen); the truly wall-HUNG kinds (bulletin
+    // board, exit sign) are flush against the wall (footprint None) and stamp
+    // nothing. Each footprint is the SHALLOW floor base of a sprite that
+    // overhangs north (whiteboard panel / bookshelf shelves / TV monitor), so
+    // the strip is SOUTH-anchored to the sprite base and the overhang occludes
+    // a walker behind it (invariant #6).
     for (kind, pos) in wall_decor {
-        // pad=1 (not OBSTACLE_PAD_PX=2): the only WallDecor with a footprint is
-        // the rolling whiteboard — an elevated board whose 10px wheel-base
-        // overhangs nothing solid, so a 2px clearance band on every side just
-        // inflated the blocked rect back to the 14px board width (hiding the
-        // footprint shrink). Matches the pod-decor whiteboard's pad. The wheel
-        // strip is SOUTH-anchored to the sprite base (the panel overhangs north).
+        // pad=1 (not OBSTACLE_PAD_PX=2): these elevated boards/cabinets overhang
+        // nothing solid, so a 2px clearance band on every side just inflated the
+        // blocked rect back to the full sprite width (hiding the footprint
+        // shrink). Matches the pod-decor whiteboard's pad.
         if let Some((w, depth)) = furniture_def(kind.furniture()).footprint {
             let sprite_h = furniture_def(kind.furniture()).visual.1;
             stamp_south_strip(&mut mask, Anchor::TopLeft, *pos, w, sprite_h, depth, 1);

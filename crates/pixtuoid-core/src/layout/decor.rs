@@ -422,12 +422,19 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             visual: (10, 10),
             ..DECOR
         },
-        // Wall-mounted decor — hung in the wall band, never stamped into the
-        // mask, so footprint stays None and only `.visual` matters.
+        // Bookshelf stands ON the floor against the back wall (its base dips
+        // below the window band into the room). It needs a ground footprint or
+        // a walker clips through its base. The shelves above overhang that base
+        // (invariant #6), so the mask south-anchors the shallow 3px base strip
+        // to the sprite bottom (`stamp_south_strip`, the wall-decor loop) — the
+        // upper shelves sit in the already-blocked window band.
         Furniture::Bookshelf => FurnitureDef {
+            footprint: Some((8, 3)),
             visual: (8, 12),
             ..DECOR
         },
+        // Truly wall-HUNG decor — flush against the wall up in the band, no part
+        // touches the floor, so footprint stays None and only `.visual` matters.
         Furniture::BulletinBoard => FurnitureDef {
             visual: (10, 6),
             ..DECOR
@@ -436,18 +443,27 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             visual: (5, 3),
             ..DECOR
         },
+        // The big meeting "TV"/presentation screen stands on a soundbar base on
+        // the floor (same as the bookshelf — its base dips below the window band
+        // into the room). Block the 3px floor base (south-anchored to the sprite
+        // bottom); the monitor panel above overhangs it and sits in the blocked
+        // window band.
         Furniture::MeetingScreen => FurnitureDef {
+            footprint: Some((14, 3)),
             visual: (14, 12),
             ..DECOR
         },
         // Singleton / per-room furniture (rendered procedurally, so `visual` is
-        // mostly informational; the mask stamps `footprint`). The meeting sofa
-        // body's width is 16 ON PURPOSE: `16 + 2·OBSTACLE_PAD = 20` reproduces
-        // the 20px sprite's X footprint while the pad gives the vertical sit-
-        // access clearance — a literal 20-wide block disconnects the narrowest
-        // meeting room (caught by the connectivity test).
+        // mostly informational; the mask stamps `footprint`). Both axes are
+        // sized so `footprint + 2·OBSTACLE_PAD` lands exactly on the 20×7 sprite:
+        // width `16 + 4 = 20`, height `3 + 4 = 7`. The width is 16 (not 20) ON
+        // PURPOSE — a literal 20-wide footprint becomes 24 with pad and
+        // disconnects the narrowest meeting room (caught by the connectivity
+        // test). The height was 7 (→ 11 blocked with pad), over-blocking 2px of
+        // walkable floor off the sofa's front and back; 3 tightens the blocked
+        // rect to the sprite so the red debug footprint hugs the sofa.
         Furniture::MeetingSofaBody => FurnitureDef {
-            footprint: Some((16, 7)),
+            footprint: Some((16, 3)),
             visual: (20, 8),
             ..DECOR
         },
