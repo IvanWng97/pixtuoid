@@ -173,6 +173,8 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
+          # Mark v*-rc/-beta/-alpha tags as pre-releases so they don't surface as "latest".
+          prerelease: ${{ contains(github.ref_name, '-') }}
           body: ${{ steps.changelog.outputs.content }}
           files: |
             artifacts/*.tar.gz
@@ -219,6 +221,8 @@ jobs:
   homebrew:
     name: update homebrew tap
     needs: release
+    # Never let a pre-release (v*-rc/-beta/-alpha) clobber the stable formula.
+    if: ${{ !contains(github.ref_name, '-') }}
     runs-on: ubuntu-latest
     steps:
       - name: Download artifacts
