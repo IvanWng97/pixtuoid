@@ -173,6 +173,11 @@ fn collect_ceiling_halos(
         let Some(desk) = ctx.layout.home_desks.get(agent.desk_index) else {
             continue;
         };
+        // `tool_glow_tint` only returns None for a non-Active state, but the
+        // `Active { detail: Some(_) }` guard above has already filtered to
+        // Active-with-detail agents — so this else arm is unreachable here
+        // (the `_ => glow.default` fallback always yields Some). Kept as a
+        // total binding; not a missing-coverage target.
         let Some(color) =
             crate::tui::pixel_painter::palette::tool_glow_tint(agent, &ctx.theme.tool_glow)
         else {
@@ -477,5 +482,149 @@ mod tests {
             "snow still throws a faint spot ({snow} vs {base})"
         );
         assert_eq!(rain, base, "rain has no direct beam → no sun spot");
+    }
+
+    // At the exact sun-up boundary (~05:30 / ~19:30 local) `sun_on_wall` returns
+    // an East/West spot whose `boundary_fade` is 0, so `spot.intensity == 0` and
+    // `effective_intensity` collapses to 0 even with a positive beam — the
+    // `effective_intensity <= 0.0` early-return must fire (NOT the earlier beam
+    // gate). Search days for a beam-bearing weather at that 10-min bucket, same
+    // pattern as the beam-strength test above.
+    #[test]
+    fn sun_spot_zero_intensity_at_hour_edge_leaves_buffer_untouched() {
+        use crate::tui::pixel_painter::background::Weather;
+        use chrono::TimeZone;
+        let theme = &crate::tui::theme::NORMAL;
+        let layout = crate::tui::layout::Layout::compute(192, 80, 4).expect("layout fits");
+        // 19:30 local → West-wall spot at the upper boundary (boundary_fade=0).
+        let dusk_edge = |day: u32| -> SystemTime {
+            chrono::Local
+                .with_ymd_and_hms(2026, 1, day, 19, 30, 0)
+                .single()
+                .unwrap()
+                .into()
+        };
+        // A beam-bearing weather (Clear/Windy/Snow/Smog/Fog) so the earlier
+        // `beam <= 0.0` gate is NOT what returns — it must be the intensity gate.
+        let beam_bearing = |w: Weather| {
+            matches!(
+                w,
+                Weather::Clear | Weather::Windy | Weather::Snow | Weather::Smog | Weather::Fog
+            )
+        };
+        let now = (1..=120u32)
+            .map(dusk_edge)
+            .find(|t| beam_bearing(weather_state(*t)))
+            .expect("a beam-bearing dusk-edge bucket exists");
+        // Precondition: the spot exists and its intensity is zero at this edge.
+        let spot = sun_on_wall(now).expect("sun is up at the boundary");
+        assert!(
+            !matches!(spot.wall, WallSide::South),
+            "19:30 must be a West-wall spot, not the South window"
+        );
+        assert_eq!(spot.intensity, 0.0, "boundary_fade=0 → zero intensity");
+
+        let fill = Rgb {
+            r: 20,
+            g: 20,
+            b: 24,
+        };
+        let mut buf = RgbBuffer::filled(192, 80, fill);
+        paint_sun_spot(&mut buf, theme, &layout, now);
+        for y in 0..buf.height {
+            for x in 0..buf.width {
+                assert_eq!(
+                    buf.get(x, y),
+                    fill,
+                    "zero-intensity sun spot must paint nothing"
+                );
+            }
+        }
+    }
+
+    // Dust motes and ceiling halos clamp per-pixel writes against the buffer
+    // bounds. A mote/halo positioned at the far edge of a tight buffer must hit
+    // the `>= buf.width || >= buf.height` continue without panicking (RgbBuffer
+    // has no internal bounds guard).
+    #[test]
+    fn ceiling_halo_near_edge_does_not_panic() {
+        let mut buf = RgbBuffer::filled(6, 4, Rgb { r: 0, g: 0, b: 0 });
+        let theme = &crate::tui::theme::CYBERPUNK; // Dark theme so halos paint.
+                                                   // Halo centred at the bottom-right corner: the 5×2 stamp runs off both
+                                                   // edges, exercising the clamp.
+        let halos = vec![CeilingHalo {
+            x: 5,
+            y: 0,
+            color: Rgb {
+                r: 0,
+                g: 200,
+                b: 255,
+            },
+            intensity: 0.8,
+        }];
+        paint_ceiling_halos(&mut buf, theme, &halos);
+    }
+
+    // Dust motes anchored to the layout's spill columns can land outside a
+    // buffer narrower/shorter than the layout, exercising the bounds `continue`.
+    // Render into a 1×1 buffer with a daytime beam-bearing `now` so the mote
+    // loop runs but every put is clamped.
+    #[test]
+    fn dust_motes_clamp_to_a_tiny_buffer() {
+        use chrono::TimeZone;
+        let theme = &crate::tui::theme::NORMAL;
+        let layout = crate::tui::layout::Layout::compute(192, 80, 4).expect("layout fits");
+        // 07:00 Clear morning → sun up + full beam.
+        let now = (1..=60u32)
+            .map(|day| -> SystemTime {
+                chrono::Local
+                    .with_ymd_and_hms(2026, 1, day, 7, 0, 0)
+                    .single()
+                    .unwrap()
+                    .into()
+            })
+            .find(|t| weather_state(*t) == crate::tui::pixel_painter::background::Weather::Clear)
+            .expect("a clear morning");
+        // Buffer far smaller than the layout's spill columns → every mote put is
+        // out of bounds and clamped. The assertion is simply "no panic".
+        let fill = Rgb { r: 0, g: 0, b: 0 };
+        let mut buf = RgbBuffer::filled(1, 1, fill);
+        paint_dust_motes(&mut buf, theme, &layout, 7, now);
+    }
+
+    // wall_band_h == 0 (a degenerate tiny top margin) makes paint_sun_spot
+    // early-return before any wall projection — must not panic / paint.
+    #[test]
+    fn sun_spot_zero_wall_band_returns_early() {
+        use chrono::TimeZone;
+        let theme = &crate::tui::theme::NORMAL;
+        // top_margin == WALL_BAND_TO_TOP_MARGIN → wall_band_h saturating_sub to 0.
+        let mut layout = crate::tui::layout::Layout::compute(192, 80, 4).expect("layout fits");
+        layout.top_margin = pixtuoid_core::layout::WALL_BAND_TO_TOP_MARGIN;
+        // 07:00 → East wall spot with a real beam under Clear, so execution
+        // reaches the wall_band_h==0 guard rather than an earlier return.
+        let clear_morning = (1..=60u32)
+            .map(|day| -> SystemTime {
+                chrono::Local
+                    .with_ymd_and_hms(2026, 1, day, 7, 0, 0)
+                    .single()
+                    .unwrap()
+                    .into()
+            })
+            .find(|t| weather_state(*t) == crate::tui::pixel_painter::background::Weather::Clear)
+            .expect("a clear morning");
+        let fill = Rgb {
+            r: 20,
+            g: 20,
+            b: 24,
+        };
+        let mut buf = RgbBuffer::filled(layout.buf_w, layout.buf_h, fill);
+        paint_sun_spot(&mut buf, theme, &layout, clear_morning);
+        // wall_band_h == 0 → nothing painted.
+        for y in 0..buf.height {
+            for x in 0..buf.width {
+                assert_eq!(buf.get(x, y), fill, "zero wall band → no sun spot");
+            }
+        }
     }
 }

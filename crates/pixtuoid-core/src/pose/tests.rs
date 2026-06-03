@@ -378,6 +378,68 @@ fn derive_returns_none_when_desk_index_out_of_range() {
 }
 
 #[test]
+fn exit_override_walks_desk_to_door_within_window() {
+    // exiting_at set < ENTRY_ANIMATION_MS ago → Walking from the desk anchor
+    // to the door threshold (the inverse of the entry walk).
+    let (mut s, now) = slot(ActivityState::Idle, 0);
+    s.exiting_at = Some(now - Duration::from_secs(1));
+    let l = layout();
+    let desk = l.home_desks[s.desk_index];
+    match derive(&s, now, &l).expect("pose") {
+        Pose::Walking { from, to, .. } => {
+            assert_eq!(
+                from,
+                desk_walk_anchor(desk),
+                "exit walk starts at desk anchor"
+            );
+            assert_eq!(
+                Some(to),
+                l.door_threshold,
+                "exit walk targets the door threshold"
+            );
+        }
+        other => panic!("expected exit Walking, got {other:?}"),
+    }
+}
+
+#[test]
+fn exit_override_returns_none_past_window() {
+    // exiting_at older than ENTRY_ANIMATION_MS → nothing to render (slot GC'd).
+    let (mut s, now) = slot(ActivityState::Idle, 0);
+    s.exiting_at = Some(now - Duration::from_millis(ENTRY_ANIMATION_MS + 1000));
+    assert!(derive(&s, now, &layout()).is_none());
+}
+
+#[test]
+fn waypoint_index_is_zero_when_no_waypoints() {
+    let id = AgentId::from_transcript_path("/p/wp.jsonl");
+    assert_eq!(waypoint_index_for_cycle(id, 3, 0), 0);
+}
+
+#[test]
+fn entry_window_fall_through_uses_state_driven_pose() {
+    // door_threshold is Some but since_spawn >= ENTRY_ANIMATION_MS, so the
+    // entry override's inner `if` is false and derive falls through to
+    // state_driven_pose. A Waiting slot must yield StandingAtDesk (not Walking).
+    let (mut s, now) = slot(
+        ActivityState::Waiting {
+            reason: "perm".into(),
+        },
+        ENTRY_ANIMATION_MS + 5_000,
+    );
+    // created_at is 60s before `started`, and probe is well past the entry
+    // window, so the entry override does not fire.
+    let l = layout();
+    assert!(
+        l.door_threshold.is_some(),
+        "layout must populate door_threshold"
+    );
+    // Push created_at far enough back to be unambiguously past the window.
+    s.created_at = now - Duration::from_millis(ENTRY_ANIMATION_MS + 10_000);
+    assert_eq!(derive(&s, now, &l), Some(Pose::StandingAtDesk));
+}
+
+#[test]
 fn cycle_ms_for_varies_across_agents() {
     // Sanity: a handful of different agent ids should not all map to the
     // same cycle length.

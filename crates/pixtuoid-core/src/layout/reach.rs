@@ -194,4 +194,68 @@ mod tests {
             "a blocked seed must snap into SOME component, not vanish"
         );
     }
+
+    #[test]
+    fn seed_in_fully_blocked_pocket_snaps_to_nothing() {
+        // Seed buried in a region with NO walkable coarse cell within the
+        // SEED_SNAP_CELLS=3 ring radius → snap_seed returns None and the BFS
+        // never runs, yielding an all-unreachable set (covers the None return
+        // and the skipped `if let Some(start)` BFS guard). The blocked pocket
+        // must extend ≥ (3 rings + 1) coarse cells (≈ 4*4 = 16px) past the seed
+        // cell in every direction so all three snap rings land on blocked cells.
+        let mut m = WalkableMask::new_open(64, 64);
+        // Block a generous square around the seed cell at (8,8)px → cell (2,2);
+        // 3 rings out reaches cell (5,5), spanning px [20,24). Block [0,40) so
+        // every cell the snap scan probes (incl. its ring-interior skips) is
+        // blocked.
+        m.mark_blocked(0, 0, 40, 40, 0);
+        let r = ReachSet::from_mask(&m, Point { x: 8, y: 8 });
+        // Nothing is reachable — the seed could not snap into any component.
+        assert!(!r.reaches(Point { x: 8, y: 8 }), "seed cell is blocked");
+        assert!(!r.reaches(Point { x: 50, y: 50 }), "open area never seeded");
+        assert!(
+            r.reachable.iter().all(|&b| !b),
+            "no-snap seed must yield an all-unreachable set"
+        );
+    }
+
+    #[test]
+    fn corner_seed_ring_scan_handles_negative_coords() {
+        // Seed at the top-left corner cell (0,0) sitting on a blocked patch: the
+        // snap ring scan walks to negative cell coords (covered by the
+        // nx<0||ny<0 guard) and skips ring-INTERIOR cells (the `dx!=r && dy!=r`
+        // continue) before finding a walkable cell a couple rings out. Snap must
+        // still pull it into the open component.
+        let mut m = WalkableMask::new_open(64, 64);
+        // Block the top-left 8×8px patch so cells (0,0) and (1,1) are blocked;
+        // the rest of the field is open, so a walkable cell sits within range.
+        m.mark_blocked(0, 0, 8, 8, 0);
+        let r = ReachSet::from_mask(&m, Point { x: 1, y: 1 }); // → cell (0,0)
+        assert!(
+            r.reaches(Point { x: 40, y: 40 }),
+            "a corner-blocked seed must snap into the open field"
+        );
+    }
+
+    #[test]
+    fn sub_cell_mask_yields_empty_reachset() {
+        // A mask narrower than REACH_CELL_SIZE (4) gives cell_w = 3/4 = 0, so
+        // from_mask hits the degenerate early-return (an all-unreachable set with
+        // an empty reachable grid) instead of indexing into a 0-width grid.
+        let r = ReachSet::from_mask(&WalkableMask::new_open(3, 64), Point { x: 0, y: 0 });
+        assert!(!r.reaches(Point { x: 0, y: 0 }));
+        assert_eq!(r.cell_w, 0, "width < cell size collapses cell_w to 0");
+        assert!(r.reachable.is_empty(), "degenerate mask has no cells");
+    }
+
+    #[test]
+    fn reaches_is_false_out_of_bounds() {
+        // Querying a point whose coarse cell is past the grid hits the OOB guard.
+        let m = WalkableMask::new_open(64, 64);
+        let r = ReachSet::from_mask(&m, Point { x: 4, y: 4 });
+        assert!(
+            !r.reaches(Point { x: 9999, y: 9999 }),
+            "OOB cell → unreachable"
+        );
+    }
 }

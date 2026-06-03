@@ -951,3 +951,184 @@ fn wander_dest_for_pantry_is_the_home_desk_stand_point() {
         "motion dest must equal the home-desk approach_point (core↔tui mirror)"
     );
 }
+
+// -----------------------------------------------------------------------
+// Missing-profile recover: a WalkingOut / WalkingBack phase with a
+// `wander_profile == None` is "shouldn't happen", but the convention is to
+// warn + recover (never freeze silently). Drive that arm directly by
+// pre-inserting a corrupt MotionState and asserting advance_wander returns
+// `(phase, 0)` without panicking.
+// -----------------------------------------------------------------------
+
+/// Insert a MotionState already in `phase` with NO walk profile, anchored so
+/// the bootstrap/stale-resume re-seed does NOT fire (phase clock at `now`,
+/// last_advanced just before `now`, slot Idle well before that).
+fn corrupt_walking_state(
+    motion: &mut HashMap<AgentId, MotionState>,
+    id: AgentId,
+    now: SystemTime,
+    phase: WanderPhase,
+) {
+    let mut ms = MotionState::new(id);
+    ms.wander_phase = phase;
+    ms.wander_profile = None;
+    ms.wander_phase_started_at = now;
+    ms.last_advanced_at = now - Duration::from_millis(33);
+    motion.insert(id, ms);
+}
+
+#[test]
+fn walking_out_missing_profile_recovers_without_panic() {
+    let now = t0();
+    let slot = idle_slot("/p/recover_out.jsonl", now - Duration::from_secs(90));
+    let l = layout();
+    let overlay = OccupancyOverlay::new();
+    let mut router = Straight;
+    let mut motion: HashMap<AgentId, MotionState> = HashMap::new();
+    corrupt_walking_state(&mut motion, slot.agent_id, now, WanderPhase::WalkingOut);
+
+    let (phase, t) = advance_wander(&slot, now, &l, &mut router, &overlay, &mut motion);
+
+    assert_eq!(
+        phase,
+        WanderPhase::WalkingOut,
+        "must recover, staying WalkingOut"
+    );
+    assert_eq!(t, 0, "missing-profile recover returns t_x1000 == 0");
+}
+
+#[test]
+fn walking_back_missing_profile_recovers_without_panic() {
+    let now = t0();
+    let slot = idle_slot("/p/recover_back.jsonl", now - Duration::from_secs(90));
+    let l = layout();
+    let overlay = OccupancyOverlay::new();
+    let mut router = Straight;
+    let mut motion: HashMap<AgentId, MotionState> = HashMap::new();
+    corrupt_walking_state(&mut motion, slot.agent_id, now, WanderPhase::WalkingBack);
+
+    let (phase, t) = advance_wander(&slot, now, &l, &mut router, &overlay, &mut motion);
+
+    assert_eq!(
+        phase,
+        WanderPhase::WalkingBack,
+        "must recover, staying WalkingBack"
+    );
+    assert_eq!(t, 0, "missing-profile recover returns t_x1000 == 0");
+}
+
+// -----------------------------------------------------------------------
+// AtWaypoint re-snapshot fallback: the back profile is normally snapshotted
+// at WalkingOut arrival, but if it goes missing during the dwell the
+// AtWaypoint→WalkingBack transition re-snapshots it. Drive an agent to
+// AtWaypoint normally, NULL its profile, then advance past the dwell and
+// assert it transitions to WalkingBack with a fresh profile.
+// -----------------------------------------------------------------------
+#[test]
+fn at_waypoint_resnapshots_back_profile_when_missing() {
+    let trip_id = trip_agent("resnap");
+    let now = t0();
+    let slot = AgentSlot {
+        agent_id: trip_id,
+        ..idle_slot("/dummy", now)
+    };
+
+    let short_len: u32 = 200;
+    let l = layout();
+    let overlay = OccupancyOverlay::new();
+    let mut router = FixedLen {
+        octile_len: short_len,
+    };
+    let mut motion: HashMap<AgentId, MotionState> = HashMap::new();
+
+    advance_wander(&slot, now, &l, &mut router, &overlay, &mut motion);
+    let t1 = advance_until_leaves(
+        &slot,
+        &l,
+        &mut router,
+        &overlay,
+        &mut motion,
+        now,
+        WanderPhase::Seated,
+        60_000,
+    );
+    let t2 = advance_until_leaves(
+        &slot,
+        &l,
+        &mut router,
+        &overlay,
+        &mut motion,
+        t1,
+        WanderPhase::WalkingOut,
+        20_000,
+    );
+    assert!(matches!(
+        motion.get(&trip_id).unwrap().wander_phase,
+        WanderPhase::AtWaypoint
+    ));
+
+    // Simulate the back profile going missing during the dwell.
+    motion.get_mut(&trip_id).unwrap().wander_profile = None;
+
+    // Cross the per-spot dwell — the AtWaypoint arm must re-snapshot the back
+    // profile rather than freeze.
+    advance_until_leaves(
+        &slot,
+        &l,
+        &mut router,
+        &overlay,
+        &mut motion,
+        t2,
+        WanderPhase::AtWaypoint,
+        60_000,
+    );
+
+    let ms = motion.get(&trip_id).expect("state");
+    assert_eq!(
+        ms.wander_phase,
+        WanderPhase::WalkingBack,
+        "must transition to WalkingBack after the dwell"
+    );
+    assert!(
+        ms.wander_profile.is_some(),
+        "the back profile must be freshly re-snapshotted, not left None"
+    );
+}
+
+// -----------------------------------------------------------------------
+// pick_wander_dest aimless fallback: when approach_point returns the blocked
+// `wp.pos` "no valid approach" sentinel (no allowed+reachable side), the
+// directed-waypoint branch falls back to an aimless dest (kind None). Recipe:
+// take a real layout, block the ENTIRE walkable mask so NO approach side is
+// reachable for any waypoint, rebuild `reachable`, and drive a NON-aimless
+// cycle. `pick_wander_dest` (private; sibling has access) must return kind None.
+// -----------------------------------------------------------------------
+#[test]
+fn pick_wander_dest_falls_back_to_aimless_when_boxed_in() {
+    use pixtuoid_core::layout::ReachSet;
+
+    let mut l = layout();
+    assert!(!l.waypoints.is_empty(), "layout must have waypoints");
+    // Box EVERY waypoint in: block the whole mask so approach_point finds no
+    // allowed+reachable side for any waypoint and returns the `pos` sentinel.
+    l.walkable
+        .mark_blocked(0, 0, l.walkable.width, l.walkable.height, 0);
+    l.reachable = ReachSet::from_mask(&l.walkable, Point { x: 0, y: 0 });
+
+    // Find an agent whose cycle 0 is a directed (non-aimless) trip so we reach
+    // the `else` branch where approach_point is consulted.
+    let id = (0u64..2000)
+        .map(|i| AgentId::from_transcript_path(&format!("/p/boxed_{i}.jsonl")))
+        .find(|id| takes_trip(*id, 0) && !is_aimless_cycle(*id, 0))
+        .expect("should find a directed-trip agent");
+
+    let origin = l.home_desks[0];
+    let (_dest, kind, wp_idx, seat) = pick_wander_dest(id, 0, &l, origin);
+
+    assert_eq!(
+        kind, None,
+        "a boxed-in waypoint (no reachable approach side) must amble aimlessly"
+    );
+    assert_eq!(wp_idx, None, "aimless fallback carries no waypoint index");
+    assert_eq!(seat, None, "aimless fallback carries no seat cell");
+}

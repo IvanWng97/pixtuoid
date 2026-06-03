@@ -107,15 +107,21 @@ pub(super) fn compute_with_seed(
     let mid_y_split = top_margin + usable_h / 2;
 
     let meeting_room = if has_meeting {
+        // A meeting always shares the left column with either the pantry or a
+        // second meeting room (variant table: meeting-bearing variants 0/3 set
+        // has_pantry, and variant 2 degrades to has_pantry when not dual) — so
+        // the room takes the top HALF unconditionally. The else-arm (full
+        // usable_h) was dead; assert the invariant so a future variant-table
+        // edit fails loud instead of silently picking a full-height room.
+        debug_assert!(
+            has_pantry || has_dual_meeting,
+            "meeting implies pantry-or-dual per the variant table"
+        );
         Some(Bounds {
             x: 0,
             y: top_margin,
             width: mid_x,
-            height: if has_pantry || has_dual_meeting {
-                usable_h / 2
-            } else {
-                usable_h
-            },
+            height: usable_h / 2,
         })
     } else {
         None
@@ -802,13 +808,19 @@ pub(super) fn compute_room_walls(
     // meeting+pantry). Open-plan/lounge pantry-only floors skip it
     // — the counter is the visual boundary.
     if has_vertical_wall {
+        // has_vertical_wall == has_meeting (compute_with_seed), and a meeting
+        // always shares the left column with the pantry or a second meeting room
+        // per the variant table — so the vertical wall always stops at the
+        // mid-height split. The else-arm (full usable_h) was dead; assert the
+        // invariant (mirrors the meeting_room height assert) so a future
+        // variant-table edit fails loud instead of silently picking a full wall.
+        debug_assert!(
+            has_pantry || has_dual_meeting,
+            "meeting implies pantry-or-dual per the variant table"
+        );
         let v_x = mid_x;
         let v_top = top_margin;
-        let v_bot = if has_pantry || has_dual_meeting {
-            mid_y_split
-        } else {
-            top_margin + usable_h
-        };
+        let v_bot = mid_y_split;
         let v_door_center = top_margin + (v_bot - v_top) / 2;
         let v_door_top = v_door_center.saturating_sub(DOOR_GAP_V / 2);
         let v_door_bot = (v_door_center + DOOR_GAP_V / 2).min(v_bot);

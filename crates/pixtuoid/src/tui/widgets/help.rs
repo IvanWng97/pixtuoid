@@ -78,7 +78,9 @@ mod tests {
 
     #[test]
     fn help_overlay_renders_without_panic_across_sizes() {
-        for (w, h) in [(200, 60), (40, 20), (24, 30), (10, 4), (4, 3)] {
+        // (2,2): centered_in clamps the area to 2×2, tripping the width<4
+        // early return — must still render Clear-less without panic.
+        for (w, h) in [(200, 60), (40, 20), (24, 30), (10, 4), (4, 3), (2, 2)] {
             render_at(w, h);
         }
     }

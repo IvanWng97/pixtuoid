@@ -93,15 +93,26 @@ fn parse_confirm(answer: &str) -> bool {
     a.is_empty() || a == "y" || a == "yes"
 }
 
+/// Interpret a `read_line` result on the destructive confirm prompt.
+/// `read` is `Ok(bytes)` from `read_line` or `Err(())` for a read error.
+/// EOF (`Ok(0)`, e.g. Ctrl-D) and a read error both CANCEL (false) — only a
+/// genuinely-entered line (`Ok(n>0)`, including a bare Enter) takes
+/// `parse_confirm`'s default-yes. Pure so the EOF→cancel rule is unit-testable
+/// without injecting stdin.
+fn interpret_confirm_read(read: Result<usize, ()>, line: &str) -> bool {
+    match read {
+        Ok(0) | Err(()) => false,
+        Ok(_) => parse_confirm(line),
+    }
+}
+
 fn confirm(prompt: &str) -> bool {
     use std::io::Write;
     print!("{prompt} [Y/n] ");
     let _ = std::io::stdout().flush();
     let mut line = String::new();
-    if std::io::stdin().read_line(&mut line).is_err() {
-        return false;
-    }
-    parse_confirm(&line)
+    let read = std::io::stdin().read_line(&mut line).map_err(|_| ());
+    interpret_confirm_read(read, &line)
 }
 
 fn detection() -> Vec<(&'static Target, bool)> {
@@ -434,6 +445,70 @@ mod tests {
         post_install_note: None,
     };
 
+    // A fixed config path under the system temp dir, used by FAKE2/FAKE_DIR so
+    // their fn-pointer `default_config_path` can point at a test-controlled file
+    // (the fn signature `fn() -> PathBuf` can't capture a TempDir).
+    fn fake2_config_path() -> std::path::PathBuf {
+        std::env::temp_dir().join("pixtuoid-test-fake2-config.toml")
+    }
+
+    fn fake_dir_config_path() -> std::path::PathBuf {
+        std::env::temp_dir().join("pixtuoid-test-fake-dir-config")
+    }
+
+    // FAKE2: default_config_path points at a test-writable file, and its
+    // merge_uninstall reports `changed` iff the content is non-empty — so
+    // has_hooks can be driven through both the changed (true) and unchanged
+    // (false) arms by controlling the on-disk content.
+    static FAKE2: Target = Target {
+        name: "fake2",
+        display_name: "Fake2",
+        restart_noun: "Fake2",
+        default_config_path: fake2_config_path,
+        hook_command: |_| Ok("x".into()),
+        merge_install: |c, _| {
+            Ok(MergeOutcome {
+                content: c.to_string(),
+                changed: false,
+            })
+        },
+        merge_uninstall: |c| {
+            Ok(MergeOutcome {
+                content: c.to_string(),
+                changed: !c.trim().is_empty(),
+            })
+        },
+        needs_path_warning: false,
+        needs_resolved_binary: false,
+        post_install_note: None,
+    };
+
+    // FAKE_DIR: default_config_path points at a path the test creates as a
+    // DIRECTORY, so read_config's File::open(dir).read_to_string errors → the
+    // has_hooks Err(_) => true arm.
+    static FAKE_DIR: Target = Target {
+        name: "fakedir",
+        display_name: "FakeDir",
+        restart_noun: "FakeDir",
+        default_config_path: fake_dir_config_path,
+        hook_command: |_| Ok("x".into()),
+        merge_install: |c, _| {
+            Ok(MergeOutcome {
+                content: c.to_string(),
+                changed: false,
+            })
+        },
+        merge_uninstall: |c| {
+            Ok(MergeOutcome {
+                content: c.to_string(),
+                changed: false,
+            })
+        },
+        needs_path_warning: false,
+        needs_resolved_binary: false,
+        post_install_note: None,
+    };
+
     fn present(claude: bool, fake: bool) -> Vec<(&'static Target, bool)> {
         vec![(&CLAUDE, claude), (&FAKE, fake)]
     }
@@ -532,5 +607,236 @@ mod tests {
             false,
             true
         ));
+    }
+
+    // --- confirm EOF/cancel (CR: Ctrl-D must abort the destructive uninstall) --
+
+    #[test]
+    fn confirm_read_eof_and_error_cancel_but_entered_line_decides() {
+        // EOF (Ctrl-D → Ok(0)) and a read error (Err) must CANCEL, even though
+        // the buffered line is empty (which parse_confirm would treat as yes).
+        assert!(!interpret_confirm_read(Ok(0), ""));
+        assert!(!interpret_confirm_read(Err(()), ""));
+        // A genuinely-entered empty line (bare Enter, Ok(1) for the newline)
+        // still takes the default-yes; an entered "n" is a no.
+        assert!(interpret_confirm_read(Ok(1), "\n"));
+        assert!(interpret_confirm_read(Ok(2), "y\n"));
+        assert!(!interpret_confirm_read(Ok(2), "n\n"));
+    }
+
+    // --- plan_targets branch coverage -----------------------------------------
+
+    #[test]
+    fn all_with_nothing_present_is_nothing_detected() {
+        let p = plan_targets(Some("all"), false, &present(false, false), false);
+        assert!(matches!(p, Plan::NothingDetected));
+    }
+
+    #[test]
+    fn all_with_both_present_returns_both() {
+        let p = plan_targets(Some("all"), false, &present(true, true), false);
+        assert!(matches!(p, Plan::Targets(ref t) if t.len() == 2));
+    }
+
+    #[test]
+    fn unknown_explicit_target_is_conflict() {
+        let p = plan_targets(Some("bogus"), false, &present(true, true), false);
+        assert!(matches!(p, Plan::Conflict(_)));
+    }
+
+    // --- resolve_plan ----------------------------------------------------------
+
+    // `Target` isn't Debug, so unwrap/unwrap_err on Result<Vec<&Target>> won't
+    // compile — match explicitly instead.
+    #[test]
+    fn resolve_plan_targets_passes_through() {
+        match resolve_plan(Plan::Targets(vec![&CLAUDE])) {
+            Ok(got) => {
+                assert_eq!(got.len(), 1);
+                assert_eq!(got[0].name, "claude");
+            }
+            Err(e) => panic!("expected Ok, got {e}"),
+        }
+    }
+
+    #[test]
+    fn resolve_plan_nothing_detected_is_ok_empty() {
+        match resolve_plan(Plan::NothingDetected) {
+            Ok(got) => assert!(got.is_empty()),
+            Err(e) => panic!("expected Ok(empty), got {e}"),
+        }
+    }
+
+    #[test]
+    fn resolve_plan_conflict_is_err() {
+        match resolve_plan(Plan::Conflict("boom".into())) {
+            Ok(_) => panic!("expected a Conflict to be an Err"),
+            Err(e) => assert!(e.to_string().contains("boom")),
+        }
+    }
+
+    // --- run_each --------------------------------------------------------------
+
+    #[test]
+    fn run_each_all_ok_returns_ok() {
+        let n = std::cell::Cell::new(0);
+        run_each(&[&FAKE, &FAKE2], "install", |_| {
+            n.set(n.get() + 1);
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(n.get(), 2, "op ran for each target");
+    }
+
+    #[test]
+    fn run_each_reports_failed_count_and_bails() {
+        let err = run_each(&[&FAKE, &FAKE2], "install", |_| anyhow::bail!("kaboom")).unwrap_err();
+        assert!(
+            err.to_string().contains("2 of 2 target(s) failed"),
+            "got: {err}"
+        );
+    }
+
+    // --- needs_confirm / confirm_targets format -------------------------------
+
+    #[test]
+    fn needs_confirm_only_multi_target_interactive_no_yes() {
+        assert!(needs_confirm(2, false, true));
+        assert!(!needs_confirm(1, false, true)); // single target
+        assert!(!needs_confirm(2, true, true)); // --yes
+        assert!(!needs_confirm(2, false, false)); // non-tty
+    }
+
+    // --- has_hooks arms --------------------------------------------------------
+
+    #[test]
+    fn has_hooks_empty_config_is_false() {
+        // FAKE's default_config_path is /nonexistent/fake → read_config returns
+        // Ok("") (the missing-file early return), hitting the empty arm → false.
+        assert!(!has_hooks(&FAKE));
+    }
+
+    #[test]
+    fn has_hooks_unreadable_config_is_true() {
+        // FAKE_DIR points at a path we create as a DIRECTORY: it exists, so
+        // read_config tries File::open + read_to_string which errors → Err arm.
+        let dir = fake_dir_config_path();
+        let _ = std::fs::remove_file(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(has_hooks(&FAKE_DIR));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn has_hooks_changed_vs_unchanged_arms() {
+        let path = fake2_config_path();
+        // Non-empty content → FAKE2.merge_uninstall reports changed=true → true.
+        std::fs::write(&path, "model = \"x\"\n").unwrap();
+        assert!(has_hooks(&FAKE2));
+        // Whitespace-only content → read_config returns it, but it trims to empty
+        // → the `c.trim().is_empty()` empty arm → false (changed arm not reached).
+        std::fs::write(&path, "   \n").unwrap();
+        assert!(!has_hooks(&FAKE2));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    // --- run_interactive 0/1-candidate arms (no TTY needed) -------------------
+
+    #[test]
+    fn run_interactive_zero_candidates_prints_and_skips_op() {
+        let ran = std::cell::Cell::new(false);
+        run_interactive(vec![], "nothing here", "prompt", "install", |_| {
+            ran.set(true);
+            Ok(())
+        })
+        .unwrap();
+        assert!(!ran.get(), "op must NOT run when there are no candidates");
+    }
+
+    #[test]
+    fn run_interactive_single_candidate_runs_op_once() {
+        let count = std::cell::Cell::new(0);
+        run_interactive(vec![&FAKE], "nothing here", "prompt", "install", |_| {
+            count.set(count.get() + 1);
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(
+            count.get(),
+            1,
+            "single candidate acts directly, no checklist"
+        );
+    }
+
+    // --- run_install: FAKE up-to-date + CLAUDE sentinel write + backup --------
+
+    #[test]
+    fn run_install_fake_target_is_up_to_date_noop() {
+        // FAKE.merge_install reports changed=false → the up-to-date branch (no
+        // write, no backup). needs_path_warning=false avoids any PATH coupling.
+        run_install(&FAKE, Some(PathBuf::from("/nonexistent/fake")), None).unwrap();
+    }
+
+    #[test]
+    fn run_install_claude_writes_sentinel_and_backs_up() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cfg = tmp.path().join("settings.json");
+        std::fs::write(&cfg, "{}\n").unwrap(); // existing content → triggers a backup
+
+        // Explicit hook_path short-circuits resolution (no host PATH dependency).
+        run_install(
+            &CLAUDE,
+            Some(cfg.clone()),
+            Some(PathBuf::from("/fake/pixtuoid-hook")),
+        )
+        .unwrap();
+
+        let v: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&cfg).unwrap()).unwrap();
+        assert!(v["hooks"]["PreToolUse"][0]["_pixtuoid"].as_bool().unwrap());
+        assert!(
+            tmp.path().join("settings.json.pixtuoid.bak").exists(),
+            "a backup of the prior content was written"
+        );
+
+        // Second install is a semantic no-op → already-up-to-date branch.
+        run_install(
+            &CLAUDE,
+            Some(cfg.clone()),
+            Some(PathBuf::from("/fake/pixtuoid-hook")),
+        )
+        .unwrap();
+    }
+
+    // --- run_uninstall: FAKE2 changed-path write + remove-backup --------------
+
+    #[test]
+    fn run_uninstall_fake2_changed_writes_and_removes_backup() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cfg = tmp.path().join("config.toml");
+        std::fs::write(&cfg, "model = \"x\"\n").unwrap(); // non-empty → changed=true
+        let bak = tmp.path().join("config.toml.pixtuoid.bak");
+        std::fs::write(&bak, "backup").unwrap();
+
+        run_uninstall(&FAKE2, Some(cfg.clone())).unwrap();
+
+        assert!(
+            !bak.exists(),
+            "the backup is removed on a changing uninstall"
+        );
+    }
+
+    #[test]
+    fn run_uninstall_fake_unchanged_is_noop() {
+        // FAKE.merge_uninstall reports changed=false → the semantic no-op branch.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cfg = tmp.path().join("config.toml");
+        std::fs::write(&cfg, "anything\n").unwrap();
+        let bak = tmp.path().join("config.toml.pixtuoid.bak");
+        std::fs::write(&bak, "backup").unwrap();
+
+        run_uninstall(&FAKE, Some(cfg.clone())).unwrap();
+
+        assert!(bak.exists(), "a no-op uninstall must NOT delete the backup");
     }
 }

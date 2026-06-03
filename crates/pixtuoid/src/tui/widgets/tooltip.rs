@@ -354,7 +354,11 @@ pub fn paint_chitchat_bubbles(
 ) {
     for bubble in bubbles {
         let text = format!(" {} ", bubble.text);
-        let tip_w = text.len() as u16;
+        // Size by DISPLAY width, not byte length: a wide-glyph quip (the line
+        // pool can grow) would otherwise over-size + mis-center the bubble.
+        // Matches the rest of this file (paint_simple_tooltip uses `.width()`).
+        let line = Line::from(text.clone());
+        let tip_w = line.width() as u16;
         let tip_h = 1u16;
 
         let cell_x = scene_rect.x + bubble.anchor.x;

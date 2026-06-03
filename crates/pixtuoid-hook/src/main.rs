@@ -111,4 +111,40 @@ mod tests {
         enrich_payload(map, Some(String::new()), 1);
         assert!(map.get("_pixtuoid_source").is_none());
     }
+
+    // Env vars are process-global. This is the ONLY env-touching test in this
+    // crate (the integration suite in tests/shim.rs runs in a separate binary
+    // and sets PIXTUOID_SOCKET in the spawned child, not in-process), so it can
+    // save/restore both vars and drive all three branches without serial_test.
+    #[test]
+    fn default_socket_path_branches() {
+        let prior_socket = std::env::var("PIXTUOID_SOCKET").ok();
+        let prior_xdg = std::env::var("XDG_RUNTIME_DIR").ok();
+
+        // Arm 1: PIXTUOID_SOCKET set -> returned verbatim, wins over XDG.
+        std::env::set_var("PIXTUOID_SOCKET", "/explicit/path.sock");
+        std::env::set_var("XDG_RUNTIME_DIR", "/run/user/0");
+        assert_eq!(default_socket_path(), "/explicit/path.sock");
+
+        // Arm 2: no PIXTUOID_SOCKET, XDG_RUNTIME_DIR set -> "{dir}/pixtuoid.sock".
+        std::env::remove_var("PIXTUOID_SOCKET");
+        std::env::set_var("XDG_RUNTIME_DIR", "/run/user/1000");
+        assert_eq!(default_socket_path(), "/run/user/1000/pixtuoid.sock");
+
+        // Arm 3: neither set -> "/tmp/pixtuoid-{uid}.sock".
+        std::env::remove_var("PIXTUOID_SOCKET");
+        std::env::remove_var("XDG_RUNTIME_DIR");
+        // Safety: getuid is always safe on Unix.
+        let uid = unsafe { libc::getuid() };
+        assert_eq!(default_socket_path(), format!("/tmp/pixtuoid-{uid}.sock"));
+
+        match prior_socket {
+            Some(v) => std::env::set_var("PIXTUOID_SOCKET", v),
+            None => std::env::remove_var("PIXTUOID_SOCKET"),
+        }
+        match prior_xdg {
+            Some(v) => std::env::set_var("XDG_RUNTIME_DIR", v),
+            None => std::env::remove_var("XDG_RUNTIME_DIR"),
+        }
+    }
 }

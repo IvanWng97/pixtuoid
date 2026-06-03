@@ -116,6 +116,13 @@ mod tests {
     use super::*;
 
     #[test]
+    fn target_name_as_str_covers_all_arms() {
+        assert_eq!(TargetName::Claude.as_str(), "claude");
+        assert_eq!(TargetName::Codex.as_str(), "codex");
+        assert_eq!(TargetName::All.as_str(), "all");
+    }
+
+    #[test]
     fn cmd_or_default_returns_run_when_no_subcommand() {
         let cli = Cli {
             cmd: None,

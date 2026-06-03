@@ -13,14 +13,3 @@ pub use pixtuoid_core::layout::{
 
 /// Backwards-compat alias — existing call sites construct `Layout::compute()`.
 pub type Layout = SceneLayout;
-
-/// Convert a core `Bounds` to a ratatui `Rect` for widget rendering. Same
-/// shape, just a different type to keep the core crate free of ratatui.
-pub fn bounds_to_rect(b: Bounds) -> ratatui::layout::Rect {
-    ratatui::layout::Rect {
-        x: b.x,
-        y: b.y,
-        width: b.width,
-        height: b.height,
-    }
-}

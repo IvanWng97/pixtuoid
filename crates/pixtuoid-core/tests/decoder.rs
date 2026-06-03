@@ -735,6 +735,158 @@ fn decode_hook_payload_missing_transcript_path_falls_back_to_session_id() {
     );
 }
 
+// `describe_tool_target` truncates a tool target longer than 40 chars and
+// appends an ellipsis. The existing multibyte test uses a 39-char command, so
+// the `> 40` branch was never exercised.
+#[test]
+fn decode_pre_tool_use_long_command_is_ellipsis_truncated() {
+    let long_cmd = "echo ".to_string() + &"a".repeat(60); // > 40 chars
+    let payload = serde_json::json!({
+        "hook_event_name": "PreToolUse",
+        "session_id": "ses-trunc",
+        "transcript_path": "/tmp/t.jsonl",
+        "cwd": "/repo",
+        "tool_name": "Bash",
+        "tool_input": { "command": long_cmd }
+    });
+    match decode_hook_payload(payload).unwrap() {
+        AgentEvent::ActivityStart { detail, .. } => {
+            let d = detail.expect("detail set");
+            assert!(
+                d.display().ends_with('…'),
+                "a >40-char Bash command must be ellipsis-truncated, got {}",
+                d.display()
+            );
+        }
+        other => panic!("expected ActivityStart, got {other:?}"),
+    }
+}
+
+// `describe_tool_target` early-returns an empty string when the keyed input
+// field is absent. A Bash tool with an empty `tool_input` (no `command`) yields
+// a display of just the tool name — no `": <target>"` suffix.
+#[test]
+fn decode_pre_tool_use_missing_target_field_has_no_suffix() {
+    let payload = serde_json::json!({
+        "hook_event_name": "PreToolUse",
+        "session_id": "ses-nocmd",
+        "transcript_path": "/tmp/t.jsonl",
+        "cwd": "/repo",
+        "tool_name": "Bash",
+        "tool_input": {}
+    });
+    match decode_hook_payload(payload).unwrap() {
+        AgentEvent::ActivityStart { detail, .. } => {
+            let d = detail.expect("detail set");
+            assert_eq!(
+                d.display(),
+                "Bash",
+                "absent target field must produce no `: <target>` suffix"
+            );
+        }
+        other => panic!("expected ActivityStart, got {other:?}"),
+    }
+}
+
+// `decode_ag_line` early edge branches: a non-object line and an object with no
+// `step_index` both decode to zero events.
+#[test]
+fn ag_non_object_and_missing_step_index_emit_nothing() {
+    let transcript = "/Users/me/.gemini/antigravity-cli/brain/sess/transcript.jsonl";
+    // Non-object value (bare string).
+    assert!(
+        antigravity::decode_ag_line(transcript, "antigravity", json!("x"))
+            .unwrap()
+            .is_empty()
+    );
+    // Object without `step_index`.
+    assert!(
+        antigravity::decode_ag_line(transcript, "antigravity", json!({ "foo": 1 }))
+            .unwrap()
+            .is_empty()
+    );
+}
+
+// A non-integer `step_index` must fail safe-and-visible: skip the line rather
+// than coerce to 0 (which would corrupt the ag-{step}-{i} tool_use_id pairing).
+#[test]
+fn ag_non_integer_step_index_is_skipped() {
+    let transcript = "/Users/me/.gemini/antigravity-cli/brain/sess/transcript.jsonl";
+    let v = json!({
+        "step_index": "not-a-number",
+        "type": "PLANNER_RESPONSE",
+        "tool_calls": [ { "name": "run_command", "args": { "CommandLine": "ls" } } ]
+    });
+    assert!(
+        antigravity::decode_ag_line(transcript, "antigravity", v)
+            .unwrap()
+            .is_empty(),
+        "a present-but-non-integer step_index must be skipped, not coerced to 0"
+    );
+}
+
+// A `tool_calls` entry that isn't an object is skipped (`continue`), and the
+// run_command/grep_search normalize key-arms are exercised. The display text
+// itself reflects only the tool name (describe_tool_target has no antigravity
+// arm), so assert on the event shape + the load-bearing tool_use_id instead.
+#[test]
+fn ag_skips_non_object_tool_call_and_keys_run_command() {
+    let transcript = "/Users/me/.gemini/antigravity-cli/brain/sess/transcript.jsonl";
+    let v = json!({
+        "step_index": 3,
+        "type": "PLANNER_RESPONSE",
+        "tool_calls": [
+            42,
+            { "name": "run_command", "args": { "CommandLine": "\"git status\"" } }
+        ]
+    });
+    let events = antigravity::decode_ag_line(transcript, "antigravity", v).unwrap();
+    // The integer entry (index 0) is skipped; only the run_command start emits,
+    // and it carries the index-1 id (not index-0 — the skip does not renumber).
+    assert_eq!(
+        events.len(),
+        1,
+        "non-object tool_call must be skipped: {events:?}"
+    );
+    match &events[0] {
+        AgentEvent::ActivityStart { tool_use_id, .. } => {
+            assert_eq!(tool_use_id.as_deref(), Some("ag-3-1"));
+        }
+        other => panic!("expected ActivityStart, got {other:?}"),
+    }
+}
+
+// A PLANNER_RESPONSE with no `tool_calls` key (the `if let Some(Value::Array)`
+// fails to match) decodes to zero events — distinct from an empty array.
+#[test]
+fn ag_planner_response_without_tool_calls_emits_nothing() {
+    let transcript = "/Users/me/.gemini/antigravity-cli/brain/sess/transcript.jsonl";
+    let v = json!({ "step_index": 2, "type": "PLANNER_RESPONSE" });
+    assert!(antigravity::decode_ag_line(transcript, "antigravity", v)
+        .unwrap()
+        .is_empty());
+}
+
+#[test]
+fn ag_grep_search_decodes_to_activity_start() {
+    let transcript = "/Users/me/.gemini/antigravity-cli/brain/sess/transcript.jsonl";
+    let v = json!({
+        "step_index": 4,
+        "type": "PLANNER_RESPONSE",
+        "tool_calls": [
+            { "name": "grep_search", "args": { "SearchPath": "/repo", "query": "TODO" } }
+        ]
+    });
+    let events = antigravity::decode_ag_line(transcript, "antigravity", v).unwrap();
+    assert_eq!(events.len(), 1);
+    match &events[0] {
+        AgentEvent::ActivityStart { tool_use_id, .. } => {
+            assert_eq!(tool_use_id.as_deref(), Some("ag-4-0"));
+        }
+        other => panic!("expected ActivityStart, got {other:?}"),
+    }
+}
+
 #[test]
 fn decode_hook_payload_missing_tool_name_still_succeeds() {
     let payload = serde_json::json!({

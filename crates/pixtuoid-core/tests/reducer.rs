@@ -1482,6 +1482,65 @@ fn stale_sweep_cascades_to_children() {
     );
 }
 
+// When BOTH parent and child are independently stale, both enter sweep_stale's
+// pass-1 `stale` vec. The parent's pass-2 cascade marks the child exiting; the
+// child's own pass-2 iteration then hits the `exiting_at.is_some() -> continue`
+// write-once guard (reducer.rs) instead of re-stamping / re-logging it. The
+// existing cascade tests heartbeat the descendant so it is NEVER in `stale`, so
+// they don't exercise this branch — this test drops the heartbeat.
+#[test]
+fn stale_sweep_already_cascaded_child_is_skipped_in_pass_two() {
+    use pixtuoid_core::state::reducer::STALE_IDLE_TIMEOUT;
+    let mut scene = SceneState::uniform(8);
+    let mut r = Reducer::new();
+    let parent = AgentId::from_transcript_path("/p/double-stale.jsonl");
+    let child = AgentId::from_parts("claude-code", "/p/double-stale/subagents/agent-1.jsonl");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: parent,
+            source: "claude-code".into(),
+            session_id: "parent".into(),
+            cwd: PathBuf::from("/repo"),
+            parent_id: None,
+        },
+        t0,
+        Transport::Hook,
+    );
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: child,
+            source: "claude-code".into(),
+            session_id: "child".into(),
+            cwd: PathBuf::from("/repo"),
+            parent_id: Some(parent),
+        },
+        t0 + Duration::from_millis(100),
+        Transport::Jsonl,
+    );
+
+    // No heartbeat for either: both cross STALE_IDLE_TIMEOUT, so both enter the
+    // pass-1 `stale` vec. The id is set once, on whichever pass-2 iteration runs
+    // first; the other iteration must hit the write-once skip.
+    let now = t0 + STALE_IDLE_TIMEOUT + Duration::from_secs(1);
+    r.tick(&mut scene, now);
+
+    let parent_exit = scene.agents.get(&parent).unwrap().exiting_at;
+    let child_exit = scene.agents.get(&child).unwrap().exiting_at;
+    assert!(parent_exit.is_some(), "stale parent marked exiting");
+    assert!(
+        child_exit.is_some(),
+        "independently-stale child also marked exiting (write-once, no double-stamp)"
+    );
+    // Both stamped at the same sweep `now`: the pass-2 skip preserved the first
+    // write rather than overwriting it on the second iteration.
+    assert_eq!(parent_exit, Some(now));
+    assert_eq!(child_exit, Some(now));
+}
+
 #[test]
 fn stale_sweep_cascades_to_grandchildren() {
     use pixtuoid_core::state::reducer::STALE_IDLE_TIMEOUT;

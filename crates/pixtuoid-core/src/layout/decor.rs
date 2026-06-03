@@ -32,8 +32,8 @@ pub enum WaypointKind {
     MeetingStand,
 }
 
-/// Per-spot idle dwell window. range_ms == 0 is the DECOR sentinel (not a wander
-/// destination); use is_decor() rather than comparing the raw tuple.
+/// Per-spot idle dwell window. `range_ms == 0` is the DECOR sentinel (not a
+/// wander destination).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DwellWindow {
     pub base_ms: u64,
@@ -44,9 +44,6 @@ impl DwellWindow {
         base_ms: 0,
         range_ms: 0,
     };
-    pub fn is_decor(self) -> bool {
-        self.range_ms == 0
-    }
 }
 
 /// Plant GROUND footprint — the one geometry VALUE shared by the ficus + tall
@@ -168,9 +165,9 @@ pub struct FurnitureDef {
     /// CENTER, approached from a side. True set: {Couch, MeetingSofa,
     /// MeetingStand}. (Desks are NOT rows here — home workstation is separate.)
     pub occupies_pos: bool,
-    /// Per-spot idle dwell window. `range_ms == 0` (the `DECOR` rows, via
-    /// [`DwellWindow::is_decor`]) marks a kind that is NOT a wander destination
-    /// and is never fed to `pose::dwell_ms`; `range_ms > 0` marks a destination.
+    /// Per-spot idle dwell window. `range_ms == 0` (the `DECOR` rows) marks a
+    /// kind that is NOT a wander destination and is never fed to
+    /// `pose::dwell_ms`; `range_ms > 0` marks a destination.
     /// `dwell_ms` guards with `% range_ms.max(1)`, so a zero range is safe — it
     /// IS the decor sentinel, not a bug. Do not "fix" a decor row to a non-zero
     /// range (that silently turns it into a wander destination).

@@ -61,8 +61,20 @@ fn half_extents(kind: WaypointKind, pantry_counter_size: Size) -> Option<(u16, u
     // NOT the mask footprint — which is now a shallow south strip for occlusion,
     // so deriving the stand distance from it would pull the user INSIDE the
     // sprite. Pantry is runtime-sized (visual (0,0)), so its counter size IS the
-    // clearance. Assumes CENTER-anchored placement (pos = sprite center, so
-    // visual/2 reaches the edges) — true for every obstacle kind today.
+    // clearance.
+    //
+    // INVARIANT: this `visual/2` clearance assumes `Anchor::Center` placement
+    // (pos = sprite center, so visual/2 reaches the edges) — true for every
+    // obstacle WAYPOINT today (Pantry/PhoneBooth/StandingDesk/VendingMachine/
+    // Printer all stamp `Anchor::Center` in `mask.rs`). The anchor is a
+    // per-placement-site property (see `placement::Anchor` — Whiteboard is Center
+    // as pod decor but TopLeft as wall decor), and `stand_point`/`approach_point`
+    // receive no `Anchor`: if a future obstacle waypoint were placed `TopLeft`,
+    // this would compute the stand cell off a wrong center. The one TopLeft piece
+    // that reaches the approach machinery (the home Desk) sidesteps this by being
+    // `occupies_pos` (seat branch, no half-extent) and by `desk_walk_anchor`
+    // scanning from the CHAIR, not the desk's TopLeft origin. New TopLeft obstacle
+    // waypoints must pass a center, not the raw origin.
     let Size { w, h } = if matches!(kind, WaypointKind::Pantry) {
         pantry_counter_size
     } else {
@@ -449,6 +461,33 @@ mod tests {
         assert!(
             north.y <= south.y,
             "north-desk stand {north:?} should be no lower than south-desk stand {south:?}"
+        );
+    }
+
+    #[test]
+    fn stand_point_breaks_on_negative_coords_near_the_origin_corner() {
+        // An obstacle pressed into the top-left corner: scanning N or W from a
+        // `pos` this close to (0,0) drives the probe cell below 0 BEFORE any
+        // walkable cell is found, so the `cx < 0 || cy < 0` break ends those
+        // sides. E/S stay positive and one of them wins. Covers the negative-
+        // coordinate break in stand_point's outward scan.
+        let pos = Point { x: 2, y: 2 };
+        let counter = Size { w: 4, h: 4 };
+        let m = mask_with_obstacle(100, 100, pos, counter.w, counter.h);
+        // Origin to the NW (off-buffer-ish corner) so the nearest sides (N/W) are
+        // preferred — but they break on negative coords, forcing an E/S result.
+        let s = stand_point(
+            WaypointKind::Pantry,
+            pos,
+            counter,
+            &m,
+            Point { x: 0, y: 0 },
+            Facing::South,
+        );
+        assert!(m.is_walkable(s.x, s.y), "stand cell must be walkable");
+        assert!(
+            s.x > pos.x || s.y > pos.y,
+            "N/W scans go negative and break → an E or S cell wins, got {s:?}"
         );
     }
 

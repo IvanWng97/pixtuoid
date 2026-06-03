@@ -158,9 +158,12 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
                 WaypointKind::StandingDesk => "Standing Desk",
                 WaypointKind::VendingMachine => "Vending Machine",
                 WaypointKind::Printer => "Printer",
-                // Unreachable: couch + meeting slots `continue` above.
+                // Proven unreachable today (couch + meeting slots `continue`
+                // above), but this is a per-frame mouse path: skip an unexpected
+                // kind rather than panic the whole TUI if a future refactor adds
+                // a WaypointKind or drops one of those earlier `continue`s.
                 WaypointKind::Couch | WaypointKind::MeetingSofa | WaypointKind::MeetingStand => {
-                    unreachable!()
+                    continue
                 }
             });
         }
@@ -454,6 +457,101 @@ mod tests {
         let pos = Point { x: 50, y: 80 };
         // Way outside the 6x6 sprite.
         assert!(!hit_test_pet(PetKind::Cat, pos, "cat_sit", 10, 10));
+    }
+
+    // --- hit_test_from_tui (click-to-pin, home-desk-only) -----------------
+
+    fn scene_with_agent_at_desk(desk_index: usize) -> (SceneState, AgentId) {
+        use pixtuoid_core::state::{ActivityState, AgentSlot};
+        use std::path::Path;
+        use std::sync::Arc;
+        let id = AgentId::from_transcript_path("/pin/0.jsonl");
+        let slot = AgentSlot {
+            agent_id: id,
+            source: Arc::from("cc"),
+            session_id: Arc::from("s"),
+            cwd: Arc::from(Path::new("/repo")),
+            label: Arc::from("a"),
+            state: ActivityState::Idle,
+            state_started_at: SystemTime::UNIX_EPOCH,
+            created_at: SystemTime::UNIX_EPOCH,
+            last_event_at: SystemTime::UNIX_EPOCH,
+            exiting_at: None,
+            pending_idle_at: None,
+            desk_index,
+            floor_idx: 0,
+            tool_call_count: 0,
+            active_ms: 0,
+            unknown_cwd: false,
+            parent_id: None,
+        };
+        let mut scene = SceneState::uniform(16);
+        scene.agents.insert(id, slot);
+        (scene, id)
+    }
+
+    #[test]
+    fn from_tui_hits_agent_at_its_desk_anchor() {
+        let layout = Layout::compute(160, 200, 4).expect("layout");
+        let (scene, id) = scene_with_agent_at_desk(0);
+        let d = layout.home_desks[0];
+        // Mirror hit_test_from_tui's own anchor geometry.
+        let cx = d.x + 1;
+        let cy = d.y.saturating_sub(4) / 2;
+        assert_eq!(hit_test_from_tui(&scene, &layout, cx, cy), Some(id));
+    }
+
+    #[test]
+    fn from_tui_misses_empty_space() {
+        let layout = Layout::compute(160, 200, 4).expect("layout");
+        let (scene, _id) = scene_with_agent_at_desk(0);
+        assert_eq!(hit_test_from_tui(&scene, &layout, 0, 0), None);
+    }
+
+    #[test]
+    fn from_tui_skips_agent_with_out_of_range_desk() {
+        let layout = Layout::compute(160, 200, 4).expect("layout");
+        // desk_index past the layout's home-desk count ⇒ `continue` arm.
+        let (scene, _id) = scene_with_agent_at_desk(layout.home_desks.len() + 100);
+        // No agent occupies any cell — scan a few and confirm None everywhere.
+        for &(mx, my) in &[(0u16, 0u16), (40, 20), (80, 40)] {
+            assert_eq!(hit_test_from_tui(&scene, &layout, mx, my), None);
+        }
+    }
+
+    // --- hit_test_furniture: kinds the compute path never emits -------------
+    // compute_with_seed never produces PlantKind::Ficus or WallDecor::Bulletin
+    // Board, so the harness real-layout loop can't reach those two return arms.
+    // Push them into the pub Vecs of a computed layout and hit their centers.
+
+    #[test]
+    fn furniture_hit_test_ficus_via_synthetic_plant() {
+        use crate::tui::layout::Point;
+        let mut layout = Layout::compute(160, 200, 4).expect("layout");
+        let pos = Point { x: 40, y: 40 };
+        layout.plants.push(crate::tui::layout::PlantItem {
+            kind: crate::tui::layout::PlantKind::Ficus,
+            pos,
+        });
+        // Plants are center-anchored on `pos`; hover the center cell.
+        assert_eq!(hit_test_furniture(&layout, pos.x, pos.y / 2), Some("Ficus"));
+    }
+
+    #[test]
+    fn furniture_hit_test_bulletin_board_via_synthetic_wall_decor() {
+        use crate::tui::layout::Point;
+        let mut layout = Layout::compute(160, 200, 4).expect("layout");
+        // Wall decor is TOP-LEFT anchored at `pos` (not centered). Place it in
+        // open space so no earlier furniture arm shadows it.
+        let pos = Point { x: 60, y: 30 };
+        layout.wall_decor.push(crate::tui::layout::WallDecorItem {
+            kind: crate::tui::layout::WallDecor::BulletinBoard,
+            pos,
+        });
+        assert_eq!(
+            hit_test_furniture(&layout, pos.x, pos.y / 2),
+            Some("Bulletin Board")
+        );
     }
 
     #[test]

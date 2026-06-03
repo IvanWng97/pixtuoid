@@ -318,40 +318,42 @@ async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &WatchCtx<'_>) {
     let new_bytes = &new_chunk[..safe_end_relative];
     let transcript_path_str = path.to_string_lossy().into_owned();
 
-    {
-        let mut seen = seen.lock().await;
-        if seen.insert(path.to_path_buf(), true).is_none() {
-            let id = AgentId::from_parts(source, &id_derive(path));
-            let session_id = path
-                .file_stem()
-                .map(|s| s.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            let cwd = extract_cwd(new_bytes).unwrap_or_default();
-            let parent_id = detect_parent_id(path, source);
-            let _ = tx
-                .send((
-                    Transport::Jsonl,
-                    AgentEvent::SessionStart {
-                        agent_id: id,
-                        source: source.to_string(),
-                        session_id: session_id.clone(),
-                        cwd: cwd.clone(),
-                        parent_id,
-                    },
-                ))
-                .await;
+    // Take the `seen` lock ONLY to claim first-sight, then drop it before the
+    // awaited sends — holding it across `tx.send` would block on a slow consumer
+    // for no reason (the flag flip is the entire critical section). Mirrors the
+    // narrow `cursors` locking above.
+    let is_first = seen.lock().await.insert(path.to_path_buf(), true).is_none();
+    if is_first {
+        let id = AgentId::from_parts(source, &id_derive(path));
+        let session_id = path
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let cwd = extract_cwd(new_bytes).unwrap_or_default();
+        let parent_id = detect_parent_id(path, source);
+        let _ = tx
+            .send((
+                Transport::Jsonl,
+                AgentEvent::SessionStart {
+                    agent_id: id,
+                    source: source.to_string(),
+                    session_id: session_id.clone(),
+                    cwd: cwd.clone(),
+                    parent_id,
+                },
+            ))
+            .await;
 
-            let label = derive_label(path, source, &cwd);
-            let _ = tx
-                .send((
-                    Transport::Jsonl,
-                    AgentEvent::Rename {
-                        agent_id: id,
-                        label,
-                    },
-                ))
-                .await;
-        }
+        let label = derive_label(path, source, &cwd);
+        let _ = tx
+            .send((
+                Transport::Jsonl,
+                AgentEvent::Rename {
+                    agent_id: id,
+                    label,
+                },
+            ))
+            .await;
     }
 
     for line in new_bytes.split(|b| *b == b'\n') {

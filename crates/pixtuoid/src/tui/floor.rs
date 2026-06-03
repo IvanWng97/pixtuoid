@@ -335,6 +335,36 @@ mod tests {
         );
     }
 
+    #[test]
+    fn floor_ctx_default_equals_new() {
+        // Both Default impls delegate to new(); pin the equivalence so a future
+        // field addition can't make `default()` diverge silently.
+        let d = FloorCtx::default();
+        assert_eq!(
+            d.door_anim_max_ms, 0,
+            "FloorCtx::default() must match new() (door_anim_max_ms == 0)"
+        );
+        assert!(
+            d.motion.is_empty(),
+            "default FloorCtx has no in-flight motion"
+        );
+    }
+
+    #[test]
+    fn lighting_state_default_equals_new() {
+        // LightingState::default() delegates to new() — both start fully lit.
+        assert_eq!(
+            LightingState::default().level(),
+            LightingState::new().level(),
+            "LightingState::default() must equal new()"
+        );
+        assert_eq!(
+            LightingState::default().level(),
+            1.0,
+            "a fresh LightingState is fully lit"
+        );
+    }
+
     fn make_scene(n: usize, max_desks: usize) -> SceneState {
         let mut s = SceneState::uniform(max_desks);
         let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);

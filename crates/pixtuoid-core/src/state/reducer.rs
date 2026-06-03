@@ -160,6 +160,12 @@ impl Reducer {
         // cascaded out) while a subagent is still working — even if the parent's
         // own hooks dropped or a subagent's hook was misattributed to it. The
         // mirror of `cascade_exit` (which pushes EXIT down): liveness flows UP.
+        // refresh_lineage stamps `last_event_at = now` on the ACTOR too (it walks
+        // from `id` upward, not just the ancestors). The per-arm `last_event_at =
+        // now` writes in enter_active/enter_waiting and the ActivityEnd arms below
+        // therefore re-stamp the same `now` for these three events — harmless. They
+        // are load-bearing only for the event paths NOT matched here (Rename and the
+        // SessionStart-enrich path don't call refresh_lineage), so don't drop them.
         if matches!(
             &event,
             AgentEvent::ActivityStart { .. }
@@ -537,6 +543,11 @@ impl Reducer {
         // same sweep already marked (keeps the log + `exiting_at` write-once).
         for (id, age, threshold) in stale {
             {
+                // Defensive: `id` was just collected from `scene.agents` in pass 1
+                // and nothing removes a slot between the passes (a prior cascade only
+                // SETS `exiting_at`), so this `continue` is unreachable today —
+                // single-threaded `&mut SceneState`. Kept to harden against a future
+                // refactor that mutates membership mid-sweep.
                 let Some(slot) = scene.agents.get_mut(&id) else {
                     continue;
                 };
@@ -559,6 +570,14 @@ impl Reducer {
     /// Remove agents whose exit animation has finished. Called at the top
     /// of every event apply, so any subsequent event naturally triggers
     /// the cleanup of expired slots.
+    ///
+    /// Removing a parent does NOT null any surviving child's `parent_id` — that
+    /// pointer is left dangling intentionally. The scope walks tolerate it (the
+    /// `None => break` guards in `scope::{refresh_lineage, has_waiting_ancestor}`),
+    /// so it never crashes; in practice `cascade_exit` reaps the subtree alongside
+    /// the parent, so a lingering dangle is only observable for a true orphan
+    /// (JSONL-first child of a never-created parent). Scanning every child on each
+    /// parent removal to null the pointer would add cost with no behavioral benefit.
     fn sweep_exited(&mut self, scene: &mut SceneState, now: SystemTime) {
         let expired: Vec<AgentId> = scene
             .agents

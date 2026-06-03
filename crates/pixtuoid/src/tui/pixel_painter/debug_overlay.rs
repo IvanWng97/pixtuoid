@@ -340,4 +340,84 @@ mod tests {
             "at least one allowed, reachable desk approach cell must be tinted green"
         );
     }
+
+    fn slot(id: AgentId) -> pixtuoid_core::AgentSlot {
+        use pixtuoid_core::state::ActivityState;
+        use std::path::PathBuf;
+        use std::sync::Arc;
+        use std::time::SystemTime;
+        let now = SystemTime::UNIX_EPOCH;
+        pixtuoid_core::AgentSlot {
+            agent_id: id,
+            source: Arc::from("claude-code"),
+            session_id: Arc::from("s"),
+            cwd: Arc::from(PathBuf::from("/x").as_path()),
+            label: Arc::from("x"),
+            state: ActivityState::Idle,
+            state_started_at: now,
+            created_at: now,
+            last_event_at: now,
+            exiting_at: None,
+            pending_idle_at: None,
+            desk_index: 0,
+            floor_idx: 0,
+            tool_call_count: 0,
+            active_ms: 0,
+            unknown_cwd: false,
+            parent_id: None,
+        }
+    }
+
+    // paint_routes skips an agent absent from the motion map (187) and one whose
+    // MotionState has no frozen walk_path (190); it draws the route polyline for
+    // an agent with a frozen walk_path. A path endpoint at/past the buffer edge
+    // also exercises tint's out-of-bounds guard (63).
+    #[test]
+    fn paint_routes_draws_frozen_paths_and_skips_the_rest() {
+        use crate::tui::motion::{MotionState, WalkPathSnapshot};
+        use std::collections::HashMap;
+
+        let mut scene = SceneState::uniform(8);
+        let id_path = AgentId::from_transcript_path("/with_path.jsonl");
+        let id_nopath = AgentId::from_transcript_path("/no_path.jsonl");
+        let id_absent = AgentId::from_transcript_path("/absent.jsonl");
+        for id in [id_path, id_nopath, id_absent] {
+            scene.agents.insert(id, slot(id));
+        }
+        let mut motion: HashMap<AgentId, MotionState> = HashMap::new();
+        let mut ms_path = MotionState::new(id_path);
+        ms_path.walk_path = Some(WalkPathSnapshot {
+            from: Point { x: 5, y: 5 },
+            to: Point { x: 80, y: 80 },
+            path: vec![Point { x: 5, y: 5 }, Point { x: 80, y: 80 }],
+        });
+        motion.insert(id_path, ms_path);
+        motion.insert(id_nopath, MotionState::new(id_nopath)); // walk_path: None
+                                                               // id_absent intentionally NOT inserted into the motion map.
+
+        let bg = Rgb { r: 0, g: 0, b: 0 };
+        let mut buf = RgbBuffer::filled(50, 50, bg);
+        paint_routes(&mut buf, &scene, &motion);
+        let painted = (0..50u16)
+            .flat_map(|y| (0..50u16).map(move |x| (x, y)))
+            .any(|(x, y)| buf.get(x, y) != bg);
+        assert!(painted, "the frozen walk_path must draw a route polyline");
+    }
+
+    // first_reachable_on_side breaks the moment the scan steps to a negative
+    // coordinate (cx < 0 || cy < 0), returning None — the line-101 break.
+    #[test]
+    fn first_reachable_on_side_breaks_on_negative_coords() {
+        let l = SceneLayout::compute_with_seed(200, 130, 8, 0).unwrap();
+        assert_eq!(
+            first_reachable_on_side(&l, Point { x: 0, y: 0 }, -1, 0),
+            None,
+            "scanning into negative x must break and return None"
+        );
+        assert_eq!(
+            first_reachable_on_side(&l, Point { x: 0, y: 0 }, 0, -1),
+            None,
+            "scanning into negative y must break and return None"
+        );
+    }
 }

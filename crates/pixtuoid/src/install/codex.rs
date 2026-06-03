@@ -359,6 +359,47 @@ command = "/old/pixtuoid-hook"
         );
     }
 
+    // Defensive coercion (install side): a non-table `hooks` value is replaced
+    // with a fresh table, then re-emits a valid hooks table for all events.
+    #[test]
+    fn install_coerces_non_table_hooks_to_table() {
+        let out = merge_install("hooks = 5", "/x/pixtuoid-hook").unwrap();
+        let v = parse(&out.content);
+        let hooks = v["hooks"].as_table().unwrap();
+        for ev in CODEX_EVENTS {
+            assert_eq!(
+                hooks.get(*ev).and_then(|e| e.as_array()).unwrap().len(),
+                1,
+                "event {ev} populated after coercion"
+            );
+        }
+    }
+
+    // Defensive coercion (install side): a non-array event value becomes a
+    // 1-element array carrying the managed group.
+    #[test]
+    fn install_coerces_non_array_event_to_array() {
+        let out = merge_install("[hooks]\nPreToolUse = 5", "/x/pixtuoid-hook").unwrap();
+        let v = parse(&out.content);
+        let arr = v["hooks"]["PreToolUse"].as_array().unwrap();
+        assert_eq!(arr.len(), 1);
+        assert!(arr[0]["hooks"][0]["_pixtuoid"].as_bool().unwrap());
+    }
+
+    // Uninstall early-return: a top-level non-table document is returned as-is.
+    #[test]
+    fn uninstall_non_table_doc_returns_unchanged() {
+        let input = toml::Value::Integer(3);
+        assert_eq!(toml_merge_uninstall(input.clone()), input);
+    }
+
+    // Uninstall early-return: a document with no [hooks] table is unchanged.
+    #[test]
+    fn uninstall_doc_without_hooks_returns_unchanged() {
+        let out = merge_uninstall("model = \"o1\"\n").unwrap();
+        assert!(!out.changed, "no [hooks] → nothing to remove");
+    }
+
     // Internal-consistency guard: every hook event we REGISTER with Codex must
     // have a decoder arm — otherwise it arrives at the shared socket and
     // `decode_hook_payload` bails ("unsupported hook_event_name"), silently

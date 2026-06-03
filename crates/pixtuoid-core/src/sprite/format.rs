@@ -228,13 +228,13 @@ pub fn load_pack_from_strings(pack_toml: &str, frames: &[(&str, &str)]) -> Resul
 fn build_palette(map: &HashMap<String, String>) -> Result<Palette> {
     let mut palette = Palette::new();
     for (k, v) in map {
-        if k.chars().count() != 1 {
+        let mut it = k.chars();
+        let key = it.next();
+        // Validate-and-extract in one fallible step so the single-char invariant
+        // and the bail can't drift apart in a refactor (no positional expect).
+        let (Some(key), None) = (key, it.next()) else {
             bail!("palette key {k:?} must be exactly one character");
-        }
-        let key = k
-            .chars()
-            .next()
-            .expect("palette key validated as single char");
+        };
         let pixel = parse_palette_value(v).with_context(|| format!("palette key '{k}'"))?;
         palette.insert(key, pixel);
     }

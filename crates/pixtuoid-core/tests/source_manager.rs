@@ -25,6 +25,64 @@ impl Source for StaticSource {
     }
 }
 
+/// A source whose `run` returns Err immediately — exercises the manager's
+/// log-and-isolate Err arm.
+struct FailingSource;
+
+#[async_trait]
+impl Source for FailingSource {
+    fn name(&self) -> &str {
+        "failing"
+    }
+    async fn run(self: Box<Self>, _tx: TaggedSender) -> anyhow::Result<()> {
+        anyhow::bail!("boom")
+    }
+}
+
+// A source returning Err must be logged and isolated — it must NOT abort its
+// siblings. Register a FailingSource beside a good one and assert the good
+// source's event still arrives.
+#[tokio::test]
+async fn manager_isolates_a_failing_source_from_siblings() {
+    let good_id = AgentId::from_parts("good", "1");
+    let good = StaticSource {
+        name: "good",
+        events: vec![(
+            Transport::Hook,
+            AgentEvent::SessionStart {
+                agent_id: good_id,
+                source: "good".into(),
+                session_id: "1".into(),
+                cwd: PathBuf::from("/g"),
+                parent_id: None,
+            },
+        )],
+    };
+
+    let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(8);
+    let mgr = SourceManager::new()
+        .with_source(Box::new(FailingSource))
+        .with_source(Box::new(good));
+    mgr.spawn(tx);
+
+    let mut got_good = false;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    while tokio::time::Instant::now() < deadline {
+        if let Ok(Some((_, AgentEvent::SessionStart { agent_id, .. }))) =
+            tokio::time::timeout(Duration::from_millis(50), rx.recv()).await
+        {
+            if agent_id == good_id {
+                got_good = true;
+                break;
+            }
+        }
+    }
+    assert!(
+        got_good,
+        "a failing sibling must be logged-and-isolated, not abort the good source"
+    );
+}
+
 #[tokio::test]
 async fn manager_runs_multiple_sources_concurrently() {
     let id_a = AgentId::from_parts("src-a", "1");

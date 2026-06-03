@@ -351,6 +351,89 @@ mod tests {
     // fetch_max only, so an over-seed (the old `[cap; MAX_FLOORS]` path) strands
     // agents on non-existent desks on small terminals until the terminal grows.
     #[test]
+    fn summarize_reports_each_activity_state() {
+        use pixtuoid_core::source::{Activity, AgentEvent};
+        use pixtuoid_core::AgentId;
+
+        let mut scene = SceneState::new([8; MAX_FLOORS]);
+        let mut reducer = Reducer::new();
+        let now = SystemTime::now();
+
+        let seat = |reducer: &mut Reducer, scene: &mut SceneState, id: AgentId| {
+            reducer.apply(
+                scene,
+                AgentEvent::SessionStart {
+                    agent_id: id,
+                    source: "claude-code".into(),
+                    session_id: "s".into(),
+                    cwd: std::path::PathBuf::from("/repo"),
+                    parent_id: None,
+                },
+                now,
+                Transport::Hook,
+            );
+        };
+
+        // Agent A: active with a detail.
+        let a = AgentId::from_transcript_path("/p/a.jsonl");
+        seat(&mut reducer, &mut scene, a);
+        reducer.apply(
+            &mut scene,
+            AgentEvent::ActivityStart {
+                agent_id: a,
+                activity: Activity::Typing,
+                tool_use_id: Some("t1".into()),
+                detail: Some("Edit: foo.rs".into()),
+            },
+            now,
+            Transport::Hook,
+        );
+
+        // Agent B: waiting on a permission prompt.
+        let b = AgentId::from_transcript_path("/p/b.jsonl");
+        seat(&mut reducer, &mut scene, b);
+        reducer.apply(
+            &mut scene,
+            AgentEvent::Waiting {
+                agent_id: b,
+                reason: "permission".into(),
+            },
+            now,
+            Transport::Hook,
+        );
+
+        // Agent C: bare SessionStart → idle.
+        let c = AgentId::from_transcript_path("/p/c.jsonl");
+        seat(&mut reducer, &mut scene, c);
+
+        let summary = summarize(&scene);
+        assert!(summary.starts_with("agents=["), "got: {summary}");
+        assert!(summary.contains("active(Edit: foo.rs)"), "got: {summary}");
+        assert!(summary.contains("waiting(permission)"), "got: {summary}");
+        assert!(summary.contains(":idle"), "got: {summary}");
+        // The "@desk_index" format is present for each agent.
+        assert!(summary.contains('@'), "got: {summary}");
+    }
+
+    #[test]
+    fn run_with_unknown_theme_errors_before_runtime() {
+        // The theme is resolved synchronously before any tokio runtime / socket is
+        // built, so an unknown name returns Err without touching async machinery.
+        let cfg = RunConfig {
+            socket: None,
+            projects_root: None,
+            codex_sessions_root: None,
+            pack_dir: None,
+            desk_cap: None,
+            headless: true,
+            config_path: std::path::PathBuf::from("/tmp/pixtuoid-test-config.toml"),
+            pets: vec![],
+        };
+        let err = run(cfg, "definitely-not-a-theme".into()).unwrap_err();
+        assert!(err.to_string().contains("unknown theme"), "got: {err}");
+    }
+
+    #[test]
     fn explicit_cap_clamps_to_layout_capacity_not_above() {
         let base = boot_capacities_for(192, 48);
         let layout_max = *base.iter().max().unwrap();

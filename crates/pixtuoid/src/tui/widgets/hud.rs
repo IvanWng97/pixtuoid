@@ -678,4 +678,90 @@ mod hud_tests {
             "expected None when URL row falls on the clipped popup's bottom border: got {rect:?}"
         );
     }
+
+    // The URL is not clickable until the popup reaches 70% entrance scale.
+    #[test]
+    fn url_rect_none_below_seventy_percent_scale() {
+        assert!(version_popup_url_rect(4, full_bounds(200, 60), 0.5).is_none());
+        assert!(version_popup_url_rect(4, full_bounds(200, 60), 0.0).is_none());
+    }
+
+    // A popup envelope clamped to a tiny bounds (w<4 || h<3) yields no rect.
+    #[test]
+    fn url_rect_none_when_envelope_too_small() {
+        // 3-col bounds → envelope width clamps to 3 (<4) → None.
+        assert!(version_popup_url_rect(4, full_bounds(3, 60), 1.0).is_none());
+    }
+
+    // paint_version_popup's fully-dismissed early return (scale ≤ 0.01): a
+    // near-zero scale paints nothing, so the buffer stays blank.
+    #[test]
+    fn version_popup_skips_render_when_fully_dismissed() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+        let mut term = Terminal::new(TestBackend::new(80, 30)).unwrap();
+        term.draw(|f| {
+            paint_version_popup(
+                f,
+                "1.2.3",
+                &["note a", "note b"],
+                Rect::new(0, 0, 80, 30),
+                &crate::tui::theme::NORMAL,
+                0.0, // fully dismissed
+                std::time::UNIX_EPOCH,
+            );
+        })
+        .unwrap();
+        // Nothing painted ⇒ every cell is still the default blank space.
+        let buf = term.backend().buffer();
+        let any_glyph = buf.content().iter().any(|c| !c.symbol().trim().is_empty());
+        assert!(!any_glyph, "dismissed popup must paint nothing");
+    }
+
+    // status_segments' tool-token guard: a detail whose first split token is
+    // empty (leading non-alphanumeric) must be SKIPPED, not counted as a tool.
+    #[test]
+    fn status_segments_skips_empty_leading_token() {
+        use pixtuoid_core::source::Activity;
+        use pixtuoid_core::{AgentId, AgentSlot};
+        use std::path::PathBuf;
+        use std::sync::Arc;
+        let slot = AgentSlot {
+            agent_id: AgentId::from_transcript_path("/p/lead.jsonl"),
+            source: Arc::from("cc"),
+            session_id: Arc::from("s"),
+            cwd: Arc::from(PathBuf::from("/p").as_path()),
+            label: Arc::from("lead"),
+            // Leading '/' ⇒ first token after split-on-non-alphanumeric is "".
+            state: ActivityState::Active {
+                activity: Activity::Typing,
+                tool_use_id: Some(Arc::from("t")),
+                detail: Some(Arc::from("/usr/bin/thing")),
+            },
+            state_started_at: SystemTime::UNIX_EPOCH,
+            created_at: SystemTime::UNIX_EPOCH,
+            last_event_at: SystemTime::UNIX_EPOCH,
+            exiting_at: None,
+            pending_idle_at: None,
+            desk_index: 0,
+            floor_idx: 0,
+            tool_call_count: 0,
+            active_ms: 0,
+            unknown_cwd: false,
+            parent_id: None,
+        };
+        let mut scene = SceneState::uniform(16);
+        scene.agents.insert(slot.agent_id, slot);
+        // No '×' tool breakdown token survives — the empty leading token was
+        // skipped, so the active agent contributes no tool count.
+        let line = build_status_summary(&scene, 200, None);
+        assert!(
+            !line.contains('\u{00d7}'),
+            "empty leading token must not produce a tool count: {line}"
+        );
+        assert!(
+            line.contains("1 active"),
+            "active count still shows: {line}"
+        );
+    }
 }

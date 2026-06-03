@@ -1,6 +1,8 @@
 use std::path::Path;
 
-use pixtuoid_core::sprite::format::{load_pack, parse_sprite_file, validate_pack_animations};
+use pixtuoid_core::sprite::format::{
+    load_pack, load_pack_from_strings, parse_sprite_file, validate_pack_animations,
+};
 use pixtuoid_core::sprite::{Palette, Rgb};
 
 fn palette() -> Palette {
@@ -42,6 +44,82 @@ fn rejects_inconsistent_row_widths() {
     let src = "@frame 0\nA . B .\nA . B";
     let err = parse_sprite_file(src, &palette).unwrap_err();
     assert!(err.to_string().contains("row width"), "got: {err}");
+}
+
+// ---- malformed-input error bails (the guards the parser exists to enforce) --
+
+#[test]
+fn rejects_empty_source_with_no_frames() {
+    let err = parse_sprite_file("", &palette()).unwrap_err();
+    assert!(
+        err.to_string().contains("contains no frames"),
+        "empty source must bail with 'contains no frames'; got: {err}"
+    );
+}
+
+#[test]
+fn rejects_multi_char_pixel_token() {
+    // "AB" is two characters in one whitespace-delimited token.
+    let err = parse_sprite_file("@frame 0\nAB . .", &palette()).unwrap_err();
+    assert!(
+        err.to_string().contains("single character"),
+        "a multi-char pixel token must bail; got: {err}"
+    );
+}
+
+#[test]
+fn rejects_frame_block_with_no_rows() {
+    // Back-to-back @frame headers: the first block has zero rows, so the
+    // header-handling `rows_to_frame(vec![])` path bails with 'no rows'.
+    let err = parse_sprite_file("@frame 0\n@frame 1\nA", &palette()).unwrap_err();
+    assert!(
+        err.to_string().contains("no rows"),
+        "an empty frame block must bail with 'frame has no rows'; got: {err}"
+    );
+}
+
+#[test]
+fn rejects_palette_key_longer_than_one_char() {
+    // build_palette is reached via load_pack_from_strings; key "AB" is 2 chars.
+    let pack_toml = "[pack]\nname=\"x\"\nversion=\"1\"\n\
+         [palette]\n\"AB\"=\"#010203\"\n\
+         [animations.idle]\nframes=[\"i.sprite\"]\nframe_ms=100\n";
+    let err = load_pack_from_strings(pack_toml, &[("i.sprite", "@frame 0\nA")]).unwrap_err();
+    assert!(
+        format!("{err:#}").contains("exactly one character"),
+        "a >1-char palette key must bail; got: {err:#}"
+    );
+}
+
+#[test]
+fn rejects_palette_value_not_six_hex_digits() {
+    let pack_toml = "[pack]\nname=\"x\"\nversion=\"1\"\n\
+         [palette]\n\"A\"=\"#12345\"\n\
+         [animations.idle]\nframes=[\"i.sprite\"]\nframe_ms=100\n";
+    let err = load_pack_from_strings(pack_toml, &[("i.sprite", "@frame 0\nA")]).unwrap_err();
+    assert!(
+        format!("{err:#}").contains("6 hex digits"),
+        "a non-6-hex-digit color must bail; got: {err:#}"
+    );
+}
+
+#[test]
+fn validate_reports_insufficient_frames_for_single_frame_typing() {
+    // `typing` requires >= 2 frames (MULTI_FRAME_REQUIREMENTS). A 1-frame
+    // typing animation must populate insufficient_frames and set has_errors().
+    let pack_toml = "[pack]\nname=\"x\"\nversion=\"1\"\n\
+         [palette]\n\"A\"=\"#010203\"\n\
+         [animations.typing]\nframes=[\"t.sprite\"]\nframe_ms=100\n";
+    let pack = load_pack_from_strings(pack_toml, &[("t.sprite", "@frame 0\nA")]).unwrap();
+    let report = validate_pack_animations(&pack);
+    assert!(
+        report
+            .insufficient_frames
+            .contains(&("typing".to_string(), 2, 1)),
+        "single-frame typing must report (typing, 2, 1); got: {:?}",
+        report.insufficient_frames
+    );
+    assert!(report.has_errors());
 }
 
 #[test]

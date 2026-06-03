@@ -2587,3 +2587,256 @@ fn multiple_agents_share_overlay_without_teleport() {
         "agents sharing a churning overlay must not teleport (max frame jump {max_step}px)"
     );
 }
+
+// ====================================================================
+// No-door exit-fallback arm: on a layout with NO door_threshold, an
+// exiting agent whose state-driven pose is a Walking (it was mid-wander
+// walk-out when the session ended) routes that walk via route_walking_pose
+// with Settle::None instead of vanishing. Covers mod.rs:194-205.
+// ====================================================================
+#[test]
+fn no_door_exiting_walking_pose_routes_via_settle_none() {
+    let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let mut l = layout();
+    l.door_threshold = None;
+
+    // An agent whose cycle-0 is a trip, so idle_pose yields a Walking pose in
+    // the walk-out band. takes_trip(id, 0) drives the directed walk.
+    let trip_id = (0u64..2000)
+        .map(|i| AgentId::from_transcript_path(&format!("/nodoor/{i}.jsonl")))
+        .find(|id| takes_trip(*id, 0))
+        .expect("find a trip agent");
+
+    // Place state_started_at so elapsed lands in the walk-out band:
+    // [seated_dwell, seated_dwell + WANDER_WALK_EST_MS). Idle, was_active=false
+    // (last_event_at == created_at) so derive_state_only routes through idle_pose,
+    // not SeatedThinking.
+    let seated = seated_dwell_ms(trip_id);
+    let into_walk = WANDER_WALK_EST_MS / 2;
+    let created = now - Duration::from_secs(300);
+    let mut slot = entry_slot(created);
+    slot.agent_id = trip_id;
+    slot.last_event_at = created;
+    slot.state_started_at = now - Duration::from_millis(seated + into_walk);
+    slot.exiting_at = Some(now);
+
+    // Sanity: derive_state_only must indeed produce a Walking pose here.
+    assert!(
+        matches!(
+            derive_state_only(&slot, now, &l),
+            Some(Pose::Walking { .. })
+        ),
+        "test setup: the exiting agent must be mid walk-out for the no-door arm"
+    );
+
+    let overlay = pixtuoid_core::walkable::OccupancyOverlay::new();
+    let mut history = PoseHistory::new();
+    let mut router = StubRouter::straight();
+    let mut motion: HashMap<AgentId, MotionState> = HashMap::new();
+
+    let p = derive_with_routing(
+        &slot,
+        now,
+        &l,
+        &mut crate::tui::pose::RouteCtx {
+            router: &mut router,
+            overlay: &overlay,
+            history: &mut history,
+            motion: &mut motion,
+        },
+    );
+    assert!(
+        matches!(p, Some(Pose::Walking { .. })),
+        "no-door exiting Walking pose must route to a Walking pose (not vanish), got {p:?}"
+    );
+    // No exit profile was snapshotted — we took the no-door fallback arm, not the
+    // physics exit branch.
+    assert!(
+        motion
+            .get(&slot.agent_id)
+            .is_none_or(|ms| ms.exit.is_none()),
+        "the no-door arm must not snapshot a physics exit profile"
+    );
+}
+
+// ====================================================================
+// route_walking_pose DIRECT unit tests (it's module-private; the sibling
+// `mod tests` has `use super::*`). These hit branches the orchestration
+// tests can't reach precisely.
+// ====================================================================
+
+fn unit_slot(now: SystemTime) -> AgentSlot {
+    active_slot(now, now - Duration::from_secs(60))
+}
+
+#[test]
+fn route_walking_pose_straight_leg_records_lerp_and_clears_walk_path() {
+    // Settle::None straight 2-point leg at t_x1000=500: the returned Walking
+    // keeps the original (from,to), walk_path is set to None (straight legs are
+    // never frozen), and the lerped midpoint is recorded to history.
+    // Covers mod.rs:796-797 + 805-812.
+    let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let l = layout();
+    let slot = unit_slot(now);
+    let from = Point { x: 10, y: 20 };
+    let to = Point { x: 30, y: 20 };
+
+    let overlay = pixtuoid_core::walkable::OccupancyOverlay::new();
+    let mut history = PoseHistory::new();
+    let mut router = StubRouter::straight();
+    let mut motion: HashMap<AgentId, MotionState> = HashMap::new();
+
+    let p = route_walking_pose(
+        &slot,
+        now,
+        &l,
+        &mut crate::tui::pose::RouteCtx {
+            router: &mut router,
+            overlay: &overlay,
+            history: &mut history,
+            motion: &mut motion,
+        },
+        Pose::Walking {
+            from,
+            to,
+            t_x1000: 500,
+            frame: 0,
+            carrying_coffee: false,
+        },
+        Settle::None,
+    );
+
+    match p {
+        Some(Pose::Walking {
+            from: f,
+            to: t,
+            t_x1000,
+            ..
+        }) => {
+            assert_eq!((f, t), (from, to), "straight leg keeps original endpoints");
+            assert_eq!(t_x1000, 500, "straight leg passes t_x1000 through");
+        }
+        other => panic!("expected straight Walking, got {other:?}"),
+    }
+    // A 2-point leg is never frozen.
+    assert!(
+        motion
+            .get(&slot.agent_id)
+            .is_some_and(|ms| ms.walk_path.is_none()),
+        "straight 2-point walk must clear walk_path"
+    );
+    // History records the lerped midpoint of from→to at t=500.
+    let recorded = history.recent(slot.agent_id, 1_000, now).expect("history");
+    assert_eq!(
+        recorded,
+        walking_position(from, to, 500),
+        "straight leg records the lerped position"
+    );
+}
+
+#[test]
+fn route_walking_pose_coincident_path_returns_input_pose() {
+    // A coincident corners path [p,p,p] has total octile length 0; the
+    // `total == 0` guard returns the input pose unchanged. Covers mod.rs:823.
+    let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let l = layout();
+    let slot = unit_slot(now);
+    let p = Point { x: 40, y: 40 };
+
+    let overlay = pixtuoid_core::walkable::OccupancyOverlay::new();
+    let mut history = PoseHistory::new();
+    // 3 coincident points → len > 2 (so it isn't the straight branch) but total
+    // segment length is 0.
+    let mut router = StubRouter::corners(vec![p, p, p]);
+    let mut motion: HashMap<AgentId, MotionState> = HashMap::new();
+
+    let input = Pose::Walking {
+        from: p,
+        to: p,
+        t_x1000: 500,
+        frame: 2,
+        carrying_coffee: false,
+    };
+    let out = route_walking_pose(
+        &slot,
+        now,
+        &l,
+        &mut crate::tui::pose::RouteCtx {
+            router: &mut router,
+            overlay: &overlay,
+            history: &mut history,
+            motion: &mut motion,
+        },
+        input,
+        Settle::None,
+    );
+    assert_eq!(
+        out,
+        Some(input),
+        "a zero-length (coincident) polyline returns the input pose unchanged"
+    );
+}
+
+#[test]
+fn route_walking_pose_records_at_waypoint_and_aimless_history() {
+    // The non-Walking arm records the AtWaypoint waypoint pos (mod.rs:731) and
+    // the AimlessAt dest (mod.rs:732) into history (mod.rs:736) so a subsequent
+    // snap-back has a valid "previous position".
+    let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let l = layout();
+    assert!(!l.waypoints.is_empty(), "layout must have waypoints");
+    let slot = unit_slot(now);
+
+    let overlay = pixtuoid_core::walkable::OccupancyOverlay::new();
+    let mut history = PoseHistory::new();
+    let mut router = StubRouter::straight();
+    let mut motion: HashMap<AgentId, MotionState> = HashMap::new();
+
+    // AtWaypoint → records layout.waypoints[0].pos.
+    let wp0 = l.waypoints[0];
+    let out = route_walking_pose(
+        &slot,
+        now,
+        &l,
+        &mut crate::tui::pose::RouteCtx {
+            router: &mut router,
+            overlay: &overlay,
+            history: &mut history,
+            motion: &mut motion,
+        },
+        Pose::AtWaypoint {
+            wp: 0,
+            kind: wp0.kind,
+        },
+        Settle::None,
+    );
+    assert!(matches!(out, Some(Pose::AtWaypoint { wp: 0, .. })));
+    assert_eq!(
+        history.recent(slot.agent_id, 1_000, now),
+        Some(wp0.pos),
+        "AtWaypoint must record the waypoint pos to history"
+    );
+
+    // AimlessAt → records its dest.
+    let dest = Point { x: 55, y: 60 };
+    let later = now + Duration::from_millis(10);
+    let out2 = route_walking_pose(
+        &slot,
+        later,
+        &l,
+        &mut crate::tui::pose::RouteCtx {
+            router: &mut router,
+            overlay: &overlay,
+            history: &mut history,
+            motion: &mut motion,
+        },
+        Pose::AimlessAt { dest },
+        Settle::None,
+    );
+    assert!(matches!(out2, Some(Pose::AimlessAt { .. })));
+    assert_eq!(
+        history.recent(slot.agent_id, 1_000, later),
+        Some(dest),
+        "AimlessAt must record its dest to history"
+    );
+}

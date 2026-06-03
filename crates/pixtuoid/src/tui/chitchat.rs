@@ -363,6 +363,15 @@ mod tests {
     }
 
     #[test]
+    fn empty_participants_yields_no_bubble() {
+        // The participants.is_empty() short-circuit in current_bubble: a venue
+        // with no attendees never speaks even at turn 0.
+        let start = base_time();
+        let chat = ActiveChitchat::new(vk(0), vec![], start);
+        assert!(chat.current_bubble(start).is_none());
+    }
+
+    #[test]
     fn no_bubble_after_four_turns() {
         let start = base_time();
         let chat = ActiveChitchat::new(vk(0), vec![aid("/a"), aid("/b")], start);

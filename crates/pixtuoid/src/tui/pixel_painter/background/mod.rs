@@ -600,14 +600,21 @@ fn paint_floor_to_ceiling_window(
                     let py = glass_y0 + ((phase as u16 + dy) % gh);
                     if px < buf.width && py < buf.height {
                         let alpha = 0.6 - (dy as f32 / len as f32) * 0.3;
+                        let cur = buf.get(px, py);
+                        // Storm streak keeps its distinct cool-blue target (b:245)
+                        // vs Rain's b:240; one buf.get, same idiom as the Rain arm.
                         buf.put(
                             px,
                             py,
-                            Rgb {
-                                r: blend(buf.get(px, py).r, 210, alpha),
-                                g: blend(buf.get(px, py).g, 220, alpha),
-                                b: blend(buf.get(px, py).b, 245, alpha),
-                            },
+                            blend_rgb(
+                                cur,
+                                Rgb {
+                                    r: 210,
+                                    g: 220,
+                                    b: 245,
+                                },
+                                alpha,
+                            ),
                         );
                     }
                 }
@@ -968,5 +975,104 @@ mod tests {
         assert!(offsets
             .iter()
             .all(|&o| o < LIGHTNING_PERIOD_MS - LIGHTNING_FLASH_MS));
+    }
+
+    // The Storm window arm paints rain streaks plus a bright on-glass bolt that
+    // fires only inside the ~90 ms lightning flash. Drive the painter directly
+    // with Weather::Storm at a `now` inside a low-offset strike window (same
+    // technique as lightning_flash_storm_only) and assert the glass interior is
+    // markedly brighter than the same window painted one second later (no flash).
+    #[test]
+    fn storm_window_bolt_brightens_glass_during_the_flash() {
+        use std::time::{Duration, UNIX_EPOCH};
+        let bucket = (0u64..)
+            .find(|&b| strike_offset(b) < 500)
+            .expect("a low-offset bucket exists");
+        let off = strike_offset(bucket);
+        let at = |ms: u64| UNIX_EPOCH + Duration::from_millis(bucket * LIGHTNING_PERIOD_MS + ms);
+        // Sanity: the chosen instant has a positive flash level, the next-second
+        // probe does not — so the only difference between the two renders is the
+        // bolt block.
+        assert!(
+            lightning_flash_level(at(off)) > 0.0,
+            "flash at strike offset"
+        );
+        assert_eq!(
+            lightning_flash_level(at(off + 1000)),
+            0.0,
+            "quiet 1 s later"
+        );
+
+        let theme = crate::tui::theme::theme_by_name("normal").expect("theme");
+        let render_lum = |now: SystemTime| -> u64 {
+            let look = time_of_day_look(now, theme);
+            let mut buf = RgbBuffer::filled(40, 40, Rgb { r: 8, g: 8, b: 10 });
+            paint_floor_to_ceiling_window(
+                &mut buf,
+                0,
+                0,
+                WINDOW_W,
+                30,
+                theme.surface.window_frame,
+                &look,
+                0,
+                now,
+                theme,
+                Weather::Storm,
+                0.0,
+            );
+            // Sum luminance over the glass interior (inside the 1px frame).
+            let mut sum = 0u64;
+            for y in 1..29u16 {
+                for x in 1..(WINDOW_W - 1) {
+                    let p = buf.get(x, y);
+                    sum += p.r as u64 + p.g as u64 + p.b as u64;
+                }
+            }
+            sum
+        };
+        let flashing = render_lum(at(off));
+        let quiet = render_lum(at(off + 1000));
+        assert!(
+            flashing > quiet,
+            "the on-glass bolt must brighten the storm glass during the flash \
+             (flash={flashing}, quiet={quiet})"
+        );
+    }
+
+    // The spill/window bounds clamps: a buffer barely taller than the wall band
+    // forces the window-light spill trapezoid AND the floor-to-ceiling window to
+    // run off the bottom edge, exercising the `break` / `continue` guards. The
+    // render must not panic and the in-bounds rows must still paint.
+    #[test]
+    fn short_buffer_clamps_spill_and_window_without_panic() {
+        let theme = crate::tui::theme::theme_by_name("normal").expect("theme");
+        let top_wall_h = 18u16;
+        // buf_h sits just above top_wall_h so the spill (SPILL_DEPTH rows below
+        // the wall band) and the window glass both straddle the bottom edge.
+        let buf_h = top_wall_h + 2;
+        let buf_w = 60u16;
+        let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(12 * 3600);
+        // Construct the look directly with a positive spill so the spill path
+        // runs regardless of the local clock.
+        let look = TimeOfDayLook {
+            glass_a: theme.office.building_light,
+            glass_b: theme.office.building_dark,
+            spill_strength: 0.8,
+            spill_slant: 0.0,
+            darkness: 0.2,
+            twilight: 0.0,
+        };
+        let mut buf = RgbBuffer::filled(buf_w, buf_h, Rgb { r: 5, g: 5, b: 5 });
+        paint_floor_and_walls(
+            &mut buf, buf_w, buf_h, now, &look, top_wall_h, None, theme, 0.0,
+        );
+        // No panic reaching here is the primary assertion (RgbBuffer::put has no
+        // bounds guard). The wall band's in-bounds rows must still be painted.
+        assert_ne!(
+            buf.get(0, 0),
+            Rgb { r: 5, g: 5, b: 5 },
+            "the wall band should still paint in the in-bounds rows"
+        );
     }
 }

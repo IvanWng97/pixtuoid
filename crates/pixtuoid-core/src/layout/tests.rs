@@ -1,8 +1,113 @@
 use super::*;
 
 #[test]
+fn partial_bottom_row_caps_mid_fill_when_agents_run_out() {
+    // Covers the partial-BOTTOM-ROW capacity break in `compute_pod_desks`
+    // (compute.rs `'partial_y` loop): a layout whose fill needs the partial
+    // bottom row to reach `cap`, fed `num_agents` that runs out PART-WAY through
+    // that row. The break must fire after the first partial-row desk, leaving
+    // `home_desks.len() == num_agents` (NOT the full row). The earlier full-pod
+    // `break 'outer` (small num_agents) caps before this phase, so it never
+    // exercises these lines — `num_agents` must be tuned to the grid (here
+    // `cap - 1`, one short of filling the 2-desk partial row).
+    //
+    // Sizes chosen empirically (each has a 2-desk partial bottom row whose first
+    // desk appears at num_agents = cap-1 and second at cap, so cap-1 breaks the
+    // 'partial_y loop mid-row). Driven through the public compute path (the
+    // private PodGrid has no constructor — see the cov verdict).
+    for (w, h, cap) in [(90u16, 110u16, 4usize), (100, 200, 10), (120, 150, 8)] {
+        // Total capacity at this size is exactly `cap`.
+        let full = SceneLayout::compute_with_seed(w, h, MAX_VISIBLE_DESKS, 0).expect("fits");
+        assert_eq!(
+            full.home_desks.len(),
+            cap,
+            "{w}x{h}: expected total desk capacity {cap}"
+        );
+        let max_y = full.home_desks.iter().map(|d| d.y).max().unwrap();
+        let band_at = |n: usize| {
+            SceneLayout::compute_with_seed(w, h, n, 0)
+                .expect("fits")
+                .home_desks
+                .iter()
+                .filter(|d| d.y == max_y)
+                .count()
+        };
+        // Exact truncation: asking for n agents (n ≤ cap) yields exactly n desks,
+        // so the cap break fires in whichever phase the count lands in.
+        for n in 1..=cap {
+            assert_eq!(
+                SceneLayout::compute_with_seed(w, h, n, 0)
+                    .expect("fits")
+                    .home_desks
+                    .len(),
+                n,
+                "{w}x{h}: num_agents {n} must truncate to exactly {n} desks"
+            );
+        }
+        // The partial bottom row fills incrementally: empty at cap-2, one desk at
+        // cap-1 (the 'partial_y push ran, then the break fired), full at cap. This
+        // is the proof the break executed INSIDE the partial-row loop.
+        assert_eq!(
+            band_at(cap),
+            2,
+            "{w}x{h}: partial bottom row seats 2 at cap"
+        );
+        assert_eq!(
+            band_at(cap - 1),
+            1,
+            "{w}x{h}: cap-1 leaves the partial row half-filled (break mid-row)"
+        );
+    }
+}
+
+#[test]
 fn compute_returns_none_when_buf_too_small() {
     assert!(SceneLayout::compute(20, 20, 4).is_none());
+}
+
+#[test]
+fn every_role_enum_variant_maps_to_a_furniture_row() {
+    // Each role enum (WallDecor, PlantKind) maps onto exactly one Furniture
+    // geometry row via `.furniture()`. The golden seeds never place
+    // WallDecor::BulletinBoard or PlantKind::Ficus, so their `.furniture()` arms
+    // are otherwise uncovered; this exhaustive sweep (mirrors the
+    // `sprite_name()` registry test) maps every variant and confirms each
+    // resolves a real Furniture row, doubling as a guard that a new variant
+    // can't ship without a mapping.
+    for wd in [
+        WallDecor::Bookshelf,
+        WallDecor::Whiteboard,
+        WallDecor::BulletinBoard,
+        WallDecor::ExitSign,
+        WallDecor::MeetingScreen,
+    ] {
+        let f = wd.furniture();
+        // The mapped row must exist in the unified table (visual non-degenerate).
+        assert!(
+            furniture_def(f).visual.w > 0 && furniture_def(f).visual.h > 0,
+            "{wd:?} → {f:?} must resolve a sized Furniture row"
+        );
+    }
+    for pk in [
+        PlantKind::Ficus,
+        PlantKind::Tall,
+        PlantKind::Flower,
+        PlantKind::Succulent,
+    ] {
+        let f = pk.furniture();
+        // Every plant resolves a Furniture row with a (shallow, overhung)
+        // ground footprint and a sized canopy visual. Ficus/Tall share the
+        // PLANT_FOOTPRINT; Flower/Succulent are de-shared (smaller pot strips).
+        let def = furniture_def(f);
+        assert!(
+            def.footprint.is_some(),
+            "{pk:?} → {f:?} must have a ground footprint"
+        );
+        assert!(
+            def.visual.w > 0 && def.visual.h > 0,
+            "{pk:?} → {f:?} must have a sized visual"
+        );
+    }
 }
 
 // Regression: the percentage math (`buf_h * 30`, `buf_w * 35`, …) used bare

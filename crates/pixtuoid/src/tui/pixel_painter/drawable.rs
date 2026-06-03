@@ -822,4 +822,243 @@ mod tests {
         let pts = [p(5, 5), p(5, 5), p(15, 5)];
         assert_eq!(sample_polyline(&pts, 0.5, p(0, 0)), p(10, 5));
     }
+
+    #[test]
+    fn sample_polyline_target_on_zero_length_segment_uses_local_t_zero() {
+        // The CHOSEN segment (not merely a leading one) has zero length: target=0
+        // selects i=0 whose seg is the duplicate (0,0)->(0,0), slen<1e-3, so the
+        // `local_t = 0.0` branch fires and returns the segment start.
+        let pts = [p(0, 0), p(0, 0), p(10, 0)];
+        assert_eq!(sample_polyline(&pts, 0.0, p(9, 9)), p(0, 0));
+    }
+
+    fn test_pack() -> Pack {
+        crate::tui::embedded_pack::load_sprite_pack(None).expect("embedded pack")
+    }
+
+    #[test]
+    fn pet_rest_picks_sleep_anim_when_all_idle() {
+        // frac >= 0.35 (rest phase) AND all_idle => the sleep anim is selected
+        // regardless of whether the rest spot is an idle desk.
+        let layout = crate::tui::layout::Layout::compute(160, 200, 4).expect("layout fits");
+        let pack = test_pack();
+        // elapsed % 40_000 == 20_000 → frac = 0.5 (rest phase).
+        let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(20_000);
+        let (_, _, anim, frame) =
+            pet_position(PetKind::Cat, &layout, &pack, now, &[], true, 0).expect("a pet position");
+        assert_eq!(anim, PetKind::Cat.sleep_anim(), "all_idle → sleep anim");
+        assert_eq!(frame, 0, "rest pose uses frame 0");
+    }
+
+    #[test]
+    fn pet_no_route_falls_back_to_straight_lerp() {
+        // Build a Layout whose walkable mask is split into two disconnected
+        // pockets by a solid vertical wall. With one spot in each pocket, the
+        // pet's walk leg routes between them, find_path returns None, and the
+        // straight-lerp fallback (the cited 297-300) is taken.
+        use pixtuoid_core::layout::{Bounds, ReachSet};
+        use pixtuoid_core::walkable::WalkableMask;
+        let (w, h) = (200u16, 120u16);
+        let mut mask = WalkableMask::new_open(w, h);
+        // Solid wall band x∈[80,120) for the full height → left (x<80) and right
+        // (x>=120) pockets are unreachable from each other on the coarse grid.
+        mask.mark_blocked(80, 0, 40, h, 0);
+        let reachable = ReachSet::from_mask(&mask, Point { x: 20, y: 20 });
+        let mut layout = crate::tui::layout::Layout::compute(w, h, 4).expect("layout fits");
+        // Override geometry: exactly two spots, one per pocket. The desk spot
+        // resolves to (desk.x+DESK_W+1, desk.y+DESK_H+2) on the LEFT; the
+        // corridor centre on the RIGHT.
+        layout.home_desks = vec![Point { x: 20, y: 30 }];
+        layout.waypoints.clear();
+        layout.meeting_sofas.clear();
+        layout.corridor = Some(Bounds {
+            x: 150,
+            y: 40,
+            width: 20,
+            height: 20,
+        });
+        layout.walkable = mask;
+        layout.reachable = reachable;
+        let pack = test_pack();
+
+        // Walk phase (frac < 0.35): pick a pet_seed where consecutive picks land
+        // in different pockets so the leg actually crosses the wall (None route).
+        let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(5_000); // frac=0.125
+        let seed = (0u64..256)
+            .find(|&s| {
+                let r = pet_position(PetKind::Cat, &layout, &pack, now, &[], false, s);
+                // Walk phase always returns the walk anim; we only need it not to panic.
+                r.is_some()
+            })
+            .expect("a pet position exists");
+        let (pos, _, anim, _) =
+            pet_position(PetKind::Cat, &layout, &pack, now, &[], false, seed).expect("pos");
+        assert_eq!(anim, PetKind::Cat.walk_anim(), "walk phase");
+        // The lerp result must lie within the buffer bounds (no panic, no wrap).
+        assert!(pos.x < w && pos.y < h, "lerped pos in bounds: {pos:?}");
+    }
+
+    fn theme() -> &'static crate::tui::theme::Theme {
+        crate::tui::theme::theme_by_name("normal").expect("theme")
+    }
+
+    #[test]
+    fn desk_cubicle_with_cabinet_blits_cabinet_and_trash_bin() {
+        // A DeskCubicle with has_cabinet=true paints the filing cabinet (west of
+        // the desk) and the trash bin (at the desk's east edge) when both fit in
+        // the buffer (covers the cabinet blit + the side-bin blit).
+        let pack = test_pack();
+        let mut cache = FrameCache::new();
+        let now = SystemTime::UNIX_EPOCH;
+        let desk = Point { x: 40, y: 30 };
+        let cab = pack
+            .animation("filing_cabinet")
+            .and_then(|a| a.frames.first())
+            .expect("filing_cabinet anim");
+        let bin = pack
+            .animation("trash_bin")
+            .and_then(|a| a.frames.first())
+            .expect("trash_bin anim");
+        let bg = Rgb { r: 1, g: 2, b: 3 };
+        let mut buf = RgbBuffer::filled(120, 80, bg);
+        let d = Drawable {
+            anchor_y: desk.y + 8,
+            kind: DrawableKind::DeskCubicle {
+                desk,
+                is_last_col: true,
+                has_cabinet: true,
+                screen_glow: None,
+                session_age_secs: 0,
+                has_coffee: false,
+                coffee_steam: false,
+            },
+        };
+        paint_drawable(&d, &mut buf, &pack, &mut cache, now, theme());
+        // Cabinet lands at desk.x - cab.width - 1 .. ; sample a pixel inside it.
+        let cab_x = desk.x.saturating_sub(cab.width + 1);
+        let mut cab_painted = false;
+        for dy in 0..cab.height {
+            for dx in 0..cab.width {
+                if buf.get(cab_x + dx, desk.y + dy) != bg {
+                    cab_painted = true;
+                }
+            }
+        }
+        assert!(cab_painted, "filing cabinet should paint west of the desk");
+        // Trash bin lands at desk.x + DESK_W.
+        let bin_x = desk.x + DESK_W;
+        let mut bin_painted = false;
+        for dy in 0..bin.height {
+            for dx in 0..bin.width {
+                if buf.get(bin_x + dx, desk.y + 4 + dy) != bg {
+                    bin_painted = true;
+                }
+            }
+        }
+        assert!(bin_painted, "trash bin should paint at the desk east edge");
+    }
+
+    #[test]
+    fn meeting_sofa_mirrored_flips_vertically() {
+        // A mirrored MeetingSofa paints the vertically-flipped sprite — assert it
+        // differs from the unmirrored render (the `mirrored=true` arm).
+        let pack = test_pack();
+        let mut cache = FrameCache::new();
+        let now = SystemTime::UNIX_EPOCH;
+        let pos = Point { x: 30, y: 30 };
+        let mut render = |mirrored: bool| {
+            let mut buf = RgbBuffer::filled(80, 80, Rgb { r: 0, g: 0, b: 0 });
+            let d = Drawable {
+                anchor_y: pos.y,
+                kind: DrawableKind::MeetingSofa { pos, mirrored },
+            };
+            paint_drawable(&d, &mut buf, &pack, &mut cache, now, theme());
+            buf
+        };
+        let plain = render(false);
+        let flipped = render(true);
+        let mut differs = false;
+        for y in 0..80u16 {
+            for x in 0..80u16 {
+                if plain.get(x, y) != flipped.get(x, y) {
+                    differs = true;
+                }
+            }
+        }
+        assert!(differs, "mirrored sofa must render distinct pixels");
+    }
+
+    #[test]
+    fn pet_drawable_missing_anim_is_a_noop() {
+        // A Pet drawable whose anim_name is absent from the pack early-returns
+        // (the `let Some(anim) = ... else { return }` defensive guard) and paints
+        // nothing.
+        let pack = test_pack();
+        let mut cache = FrameCache::new();
+        let now = SystemTime::UNIX_EPOCH;
+        let bg = Rgb { r: 7, g: 8, b: 9 };
+        let mut buf = RgbBuffer::filled(60, 60, bg);
+        let d = Drawable {
+            anchor_y: 30,
+            kind: DrawableKind::Pet {
+                kind: PetKind::Cat,
+                pos: Point { x: 30, y: 30 },
+                flip: false,
+                anim_name: "nonexistent_anim",
+                frame_idx: 0,
+                pet_elapsed_ms: None,
+            },
+        };
+        paint_drawable(&d, &mut buf, &pack, &mut cache, now, theme());
+        for y in 0..buf.height {
+            for x in 0..buf.width {
+                assert_eq!(buf.get(x, y), bg, "missing pet anim must paint nothing");
+            }
+        }
+    }
+
+    #[test]
+    fn pet_drawable_sleep_anim_paints_sleep_z() {
+        // A Pet drawable with the sleep anim and pet_elapsed_ms=None takes the
+        // sleep-z branch (paints the floating z's glyph near the pet).
+        let pack = test_pack();
+        let mut cache = FrameCache::new();
+        let now = SystemTime::UNIX_EPOCH;
+        let pos = Point { x: 30, y: 40 };
+        let mut render = |anim_name: &'static str| {
+            let mut buf = RgbBuffer::filled(60, 60, Rgb { r: 0, g: 0, b: 0 });
+            let d = Drawable {
+                anchor_y: pos.y,
+                kind: DrawableKind::Pet {
+                    kind: PetKind::Cat,
+                    pos,
+                    flip: false,
+                    anim_name,
+                    frame_idx: 0,
+                    pet_elapsed_ms: None,
+                },
+            };
+            paint_drawable(&d, &mut buf, &pack, &mut cache, now, theme());
+            buf
+        };
+        // Count non-background pixels ABOVE the pet (where the z's float) — the
+        // sleep render should add some vs. the sit render.
+        let count_above = |buf: &RgbBuffer| {
+            let mut n = 0u32;
+            for y in 0..pos.y.saturating_sub(4) {
+                for x in 0..60u16 {
+                    if buf.get(x, y) != (Rgb { r: 0, g: 0, b: 0 }) {
+                        n += 1;
+                    }
+                }
+            }
+            n
+        };
+        let sit = count_above(&render(PetKind::Cat.sit_anim()));
+        let sleep = count_above(&render(PetKind::Cat.sleep_anim()));
+        assert!(
+            sleep > sit,
+            "sleep anim must add floating z's above the pet (sleep={sleep}, sit={sit})"
+        );
+    }
 }

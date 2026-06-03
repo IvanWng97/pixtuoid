@@ -266,3 +266,99 @@ pub(in crate::tui::pixel_painter) fn paint_shadow(
 ) {
     paint_ellipse_blend(buf, ellipse, strength, theme.office.shadow);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // A degenerate ellipse (half_w == 0) or zero strength must early-return and
+    // leave the buffer untouched — the guard at the top of paint_ellipse_blend.
+    #[test]
+    fn ellipse_blend_degenerate_is_a_noop() {
+        let theme = &crate::tui::theme::NORMAL;
+        let fill = Rgb {
+            r: 30,
+            g: 30,
+            b: 30,
+        };
+        // half_w == 0.
+        let mut buf = RgbBuffer::filled(20, 20, fill);
+        paint_ellipse_blend(
+            &mut buf,
+            Ellipse {
+                cx: 10,
+                cy: 10,
+                half_w: 0,
+                half_h: 5,
+            },
+            0.8,
+            theme.lighting.ceiling_pool,
+        );
+        for y in 0..buf.height {
+            for x in 0..buf.width {
+                assert_eq!(buf.get(x, y), fill, "half_w==0 must paint nothing");
+            }
+        }
+        // strength <= 0.
+        let mut buf = RgbBuffer::filled(20, 20, fill);
+        paint_ellipse_blend(
+            &mut buf,
+            Ellipse {
+                cx: 10,
+                cy: 10,
+                half_w: 5,
+                half_h: 5,
+            },
+            0.0,
+            theme.lighting.ceiling_pool,
+        );
+        for y in 0..buf.height {
+            for x in 0..buf.width {
+                assert_eq!(buf.get(x, y), fill, "strength<=0 must paint nothing");
+            }
+        }
+    }
+
+    // A non-degenerate ellipse fully inside the buffer DOES paint, so the
+    // degenerate test above isn't passing vacuously.
+    #[test]
+    fn ellipse_blend_paints_when_valid() {
+        let theme = &crate::tui::theme::NORMAL;
+        let fill = Rgb {
+            r: 30,
+            g: 30,
+            b: 30,
+        };
+        let mut buf = RgbBuffer::filled(20, 20, fill);
+        paint_ellipse_blend(
+            &mut buf,
+            Ellipse {
+                cx: 10,
+                cy: 10,
+                half_w: 5,
+                half_h: 5,
+            },
+            0.9,
+            theme.lighting.ceiling_pool,
+        );
+        assert_ne!(buf.get(10, 10), fill, "the ellipse centre must be tinted");
+    }
+
+    // paint_neon_panel clamps per-pixel writes against the buffer edge — a panel
+    // positioned so its width runs off the right edge must hit the `continue`
+    // without panicking (RgbBuffer::put has no internal bounds guard).
+    #[test]
+    fn neon_panel_off_edge_does_not_panic() {
+        let theme = &crate::tui::theme::NORMAL;
+        let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(5);
+        let mut buf = RgbBuffer::filled(10, 10, Rgb { r: 0, g: 0, b: 0 });
+        // x=8, w=6 → px reaches 13 (>= width 10); y=8, h=5 → py reaches 12.
+        paint_neon_panel(&mut buf, 8, 8, 6, 5, now, theme);
+        // In-bounds border pixel still painted (panel frame at the origin corner).
+        assert_ne!(
+            buf.get(8, 8),
+            Rgb { r: 0, g: 0, b: 0 },
+            "in-bounds frame paints"
+        );
+    }
+}

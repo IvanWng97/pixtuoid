@@ -891,4 +891,138 @@ mod tests {
             "open-floor snap walkable"
         );
     }
+
+    // ── Router accessor / trait-default coverage ───────────────────────────
+
+    /// A Router that does NOT override `set_preferred_zone`, so calling it hits
+    /// the trait DEFAULT no-op body (pathfind.rs:63-65).
+    struct NoZoneRouter;
+    impl Router for NoZoneRouter {
+        fn route(
+            &mut self,
+            _: &WalkableMask,
+            _: &OccupancyOverlay,
+            from: Point,
+            to: Point,
+        ) -> Vec<Point> {
+            vec![from, to]
+        }
+        fn invalidate(&mut self) {}
+        // set_preferred_zone intentionally NOT overridden.
+    }
+
+    #[test]
+    fn router_default_set_preferred_zone_is_a_noop() {
+        let mut r = NoZoneRouter;
+        // The default impl just drops the argument — calling it must not panic
+        // and must leave routing unchanged.
+        r.set_preferred_zone(Some(Bounds {
+            x: 0,
+            y: 0,
+            width: 8,
+            height: 8,
+        }));
+        r.set_preferred_zone(None);
+        assert_eq!(
+            r.route(
+                &WalkableMask::new_open(40, 40),
+                &OccupancyOverlay::new(),
+                Point { x: 0, y: 0 },
+                Point { x: 10, y: 0 },
+            ),
+            vec![Point { x: 0, y: 0 }, Point { x: 10, y: 0 }]
+        );
+    }
+
+    #[test]
+    fn astar_is_empty_then_invalidate_clears_cache() {
+        let mask = WalkableMask::new_open(80, 80);
+        let overlay = OccupancyOverlay::new();
+        let mut router = AStarRouter::new();
+        // Fresh router has an empty cache.
+        assert!(router.is_empty(), "fresh router cache must be empty");
+        assert_eq!(router.len(), 0);
+
+        // One route populates the cache.
+        let _ = router.route(
+            &mask,
+            &overlay,
+            Point { x: 4, y: 4 },
+            Point { x: 60, y: 60 },
+        );
+        assert!(!router.is_empty(), "cache must be non-empty after a route");
+        assert_ne!(router.len(), 0);
+
+        // invalidate() drops every cached path.
+        router.invalidate();
+        assert!(router.is_empty(), "invalidate must clear the cache");
+        assert_eq!(router.len(), 0);
+    }
+
+    // ── Degenerate sub-CELL_SIZE grid ──────────────────────────────────────
+
+    #[test]
+    fn degenerate_grid_returns_fallbacks() {
+        // A 3×3 mask: 3 / CELL_SIZE(4) == 0 on both axes ⇒ grid_dims None.
+        let mask = WalkableMask::new_open(3, 3);
+        let overlay = OccupancyOverlay::new();
+        let a = Point { x: 0, y: 0 };
+        let b = Point { x: 2, y: 2 };
+        // find_path hits the grid_dims-None early return ⇒ straight [a,b].
+        assert_eq!(
+            find_path(&mask, &overlay, None, a, b),
+            Some(vec![a, b]),
+            "degenerate grid must fall back to the straight [from,to]"
+        );
+        // point_in_walkable_cell hits its grid_dims-None branch ⇒ false.
+        assert!(
+            !point_in_walkable_cell(&mask, a),
+            "degenerate grid: no point is in a walkable cell"
+        );
+    }
+
+    #[test]
+    fn snap_to_walkable_skips_out_of_bounds_corner_neighbours() {
+        // Block the bottom-right CORNER cell so the expanding ring at r>=1 pokes
+        // PAST the grid's far edge (nx>=cell_w / ny>=cell_h), forcing the
+        // out-of-range `continue` (pathfind.rs:274) before it lands on an
+        // interior walkable cell. Must still return Some.
+        let mut mask = WalkableMask::new_open(40, 40); // 10×10 cells
+        let overlay = OccupancyOverlay::new();
+        let (cell_w, cell_h) = grid_dims(&mask).expect("non-degenerate");
+        // Block the corner cell (cell_w-1, cell_h-1) at the pixel level.
+        let corner_px = ((cell_w - 1) * CELL_SIZE, (cell_h - 1) * CELL_SIZE);
+        mask.mark_blocked(corner_px.0, corner_px.1, CELL_SIZE, CELL_SIZE, 0);
+
+        let result = snap_to_walkable(&mask, &overlay, (cell_w - 1, cell_h - 1), cell_w, cell_h);
+        assert!(
+            result.is_some(),
+            "snap from the corner must still find an interior walkable cell"
+        );
+    }
+
+    #[test]
+    fn find_path_none_when_two_regions_split_by_a_full_wall() {
+        // Two open regions split by a full-height blocked strip with NO door gap.
+        // `from`/`to` are each in open cells (snap succeeds) but the search
+        // exhausts the open set without reaching the goal ⇒ None AFTER the loop
+        // (pathfind.rs:356) — distinct from the goal-snap-fails None at 302.
+        let mut mask = WalkableMask::new_open(80, 40);
+        let overlay = OccupancyOverlay::new();
+        // Block x ∈ [36, 44) across the full height: 2 fully-blocked cell
+        // columns (cells 9,10) — impassable to the coarse diagonal stepper.
+        mask.mark_blocked(36, 0, 8, 40, 0);
+
+        let from = Point { x: 10, y: 20 }; // left region
+        let to = Point { x: 70, y: 20 }; // right region
+                                         // Sanity: both endpoints are in walkable cells, so snapping succeeds and
+                                         // the A* loop actually runs (start != goal).
+        assert!(point_in_walkable_cell(&mask, from));
+        assert!(point_in_walkable_cell(&mask, to));
+
+        assert!(
+            find_path(&mask, &overlay, None, from, to).is_none(),
+            "a wall with no gap must leave the two regions unconnected (loop exhausts → None)"
+        );
+    }
 }

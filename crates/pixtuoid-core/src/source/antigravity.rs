@@ -51,11 +51,15 @@ pub fn decode_ag_line(transcript_path: &str, source: &str, v: Value) -> Result<V
         return Ok(vec![]);
     };
 
-    if !obj.contains_key("step_index") {
+    // A present-but-non-integer `step_index` (format drift / a renamed field)
+    // must fail SAFE-AND-VISIBLE: skip the line rather than coerce to 0, which
+    // would silently corrupt the `ag-{step}-{i}` tool_use_id pairing — the
+    // `> 0` guard below would then drop the prev-step ActivityEnd, leaving the
+    // slot stuck Active until the reducer's debounce/stale-sweep. (The
+    // `contains_key` guard only checks presence, not type.)
+    let Some(step_index) = obj.get("step_index").and_then(|v| v.as_i64()) else {
         return Ok(vec![]);
-    }
-
-    let step_index = obj.get("step_index").and_then(|v| v.as_i64()).unwrap_or(0);
+    };
     let step_type = obj.get("type").and_then(|s| s.as_str()).unwrap_or("");
 
     let mut out = Vec::new();
@@ -174,5 +178,12 @@ mod tests {
             derive_ag_label(Path::new("/x"), SOURCE_NAME, Path::new("/")),
             "ag"
         );
+    }
+
+    #[test]
+    fn ag_session_ended_is_always_false() {
+        // Antigravity writes no end marker — defer to mtime + stale-sweep.
+        assert!(!ag_session_ended(b"x"));
+        assert!(!ag_session_ended(b""));
     }
 }

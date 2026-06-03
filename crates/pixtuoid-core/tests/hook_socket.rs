@@ -111,6 +111,56 @@ async fn listener_drops_slow_connection_via_timeout() {
 }
 
 #[tokio::test]
+async fn listener_path_accessor_returns_bound_path() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("pixtuoid.sock");
+    let listener = HookSocketListener::bind(path.clone()).await.unwrap();
+    assert_eq!(listener.path(), path.as_path());
+}
+
+// The read-error arm in handle_conn: tokio's Lines::next_line() returns an
+// io::Error (InvalidData) on invalid UTF-8, which the listener warns-and-returns
+// for that connection WITHOUT killing the accept loop. A second valid connection
+// must still produce its event. (The existing malformed-line test sends valid
+// UTF-8 that's just bad JSON, hitting the serde warn instead.)
+#[tokio::test]
+async fn listener_survives_non_utf8_read_error() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("pixtuoid.sock");
+    let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(16);
+    let listener = HookSocketListener::bind(path.clone()).await.unwrap();
+    let handle = tokio::spawn(async move { listener.run(tx).await });
+    sleep(Duration::from_millis(20)).await;
+
+    // First connection: invalid UTF-8 bytes → next_line() Err arm fires.
+    let mut bad = UnixStream::connect(&path).await.unwrap();
+    bad.write_all(&[0xFF, 0xFE, b'\n']).await.unwrap();
+    bad.shutdown().await.unwrap();
+
+    // Second connection: a valid payload must still be delivered, proving the
+    // accept loop survived the read error.
+    let mut s = UnixStream::connect(&path).await.unwrap();
+    let payload = serde_json::json!({
+        "hook_event_name": "SessionStart",
+        "session_id": "after-bad-read",
+        "transcript_path": "/p/c.jsonl",
+        "cwd": "/repo"
+    });
+    let mut line = serde_json::to_vec(&payload).unwrap();
+    line.push(b'\n');
+    s.write_all(&line).await.unwrap();
+    s.shutdown().await.unwrap();
+
+    let (transport, ev) = tokio::time::timeout(Duration::from_millis(500), rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(transport, Transport::Hook);
+    assert!(matches!(ev, AgentEvent::SessionStart { .. }));
+    handle.abort();
+}
+
+#[tokio::test]
 async fn listener_handles_concurrent_connections() {
     let dir = TempDir::new().unwrap();
     let path = dir.path().join("pixtuoid.sock");

@@ -53,3 +53,46 @@ impl FrameCache {
         self.entries.is_empty()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dummy_frame() -> Frame {
+        Frame {
+            width: 1,
+            height: 1,
+            pixels: vec![None],
+        }
+    }
+
+    fn key() -> FrameKey {
+        FrameKey {
+            agent_id: AgentId::from_transcript_path("/fc/a.jsonl"),
+            anim_name: "standing",
+            frame_idx: 0,
+            flip_x: false,
+            glow_tint: None,
+        }
+    }
+
+    #[test]
+    fn new_cache_is_empty_then_populated_after_get_or_make() {
+        let mut cache = FrameCache::new();
+        assert!(cache.is_empty(), "fresh cache must be empty");
+        assert_eq!(cache.len(), 0);
+
+        let _ = cache.get_or_make(key(), dummy_frame);
+        assert!(!cache.is_empty(), "cache must be non-empty after a make");
+        assert_eq!(cache.len(), 1);
+
+        // A second get_or_make for the SAME key must reuse, not grow the cache.
+        let mut computed_again = false;
+        let _ = cache.get_or_make(key(), || {
+            computed_again = true;
+            dummy_frame()
+        });
+        assert!(!computed_again, "cached key must not recompute");
+        assert_eq!(cache.len(), 1);
+    }
+}

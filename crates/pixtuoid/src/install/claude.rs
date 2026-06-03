@@ -273,6 +273,38 @@ mod tests {
         assert_eq!(hooks["PostToolUse"], json!(42));
     }
 
+    // Defensive coercion (install side): a non-object `hooks` value is replaced
+    // with a fresh object, then all events are populated.
+    #[test]
+    fn install_coerces_non_object_hooks_to_object() {
+        let doc = json_merge_install(json!({ "hooks": "garbage-string" }), "/x");
+        let hooks = doc.get("hooks").and_then(|v| v.as_object()).unwrap();
+        for ev in EVENTS {
+            assert_eq!(
+                hooks.get(*ev).and_then(|v| v.as_array()).unwrap().len(),
+                1,
+                "event {ev} populated after coercion"
+            );
+        }
+    }
+
+    // Defensive coercion (install side): a non-array event value becomes a
+    // 1-element array carrying the managed sentinel.
+    #[test]
+    fn install_coerces_non_array_event_to_array() {
+        let doc = json_merge_install(json!({ "hooks": { "PreToolUse": 42 } }), "/x");
+        let arr = doc["hooks"]["PreToolUse"].as_array().unwrap();
+        assert_eq!(arr.len(), 1);
+        assert!(arr[0][SENTINEL_KEY].as_bool().unwrap());
+    }
+
+    // Uninstall early-return: a top-level non-object document is returned as-is.
+    #[test]
+    fn uninstall_non_object_doc_returns_unchanged() {
+        let input = json!([1, 2, 3]);
+        assert_eq!(json_merge_uninstall(input.clone()), input);
+    }
+
     #[test]
     fn merge_install_on_empty_string_produces_valid_populated_config() {
         let out = merge_install("", "pixtuoid-hook").unwrap();

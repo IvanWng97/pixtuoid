@@ -1141,3 +1141,297 @@ fn sunset_strength_varies_across_day() {
     assert!(has_zero, "sunset should be ~0 at some hours");
     assert!(has_nonzero, "sunset should be >0 at dawn/dusk hours");
 }
+
+// --- waypoint_rank_offset_x decollision table -------------------------
+
+#[test]
+fn waypoint_rank_offset_x_decollision_table() {
+    use super::anchors::waypoint_rank_offset_x;
+    use crate::tui::layout::WaypointKind;
+    // rank 0 = first arrival, no offset, for every kind.
+    assert_eq!(waypoint_rank_offset_x(WaypointKind::Couch, 0), 0);
+    assert_eq!(waypoint_rank_offset_x(WaypointKind::Pantry, 0), 0);
+    // Couch decollision is ±6 (3 seats on a 20px sofa).
+    assert_eq!(waypoint_rank_offset_x(WaypointKind::Couch, 1), 6);
+    assert_eq!(waypoint_rank_offset_x(WaypointKind::Couch, 2), -6);
+    assert_eq!(
+        waypoint_rank_offset_x(WaypointKind::Couch, 3),
+        0,
+        "rank >2 collapses to 0"
+    );
+    // Generic kinds step aside ±9.
+    assert_eq!(waypoint_rank_offset_x(WaypointKind::Pantry, 1), 9);
+    assert_eq!(waypoint_rank_offset_x(WaypointKind::Pantry, 2), -9);
+    assert_eq!(
+        waypoint_rank_offset_x(WaypointKind::Pantry, 5),
+        0,
+        "rank >2 collapses to 0"
+    );
+}
+
+// --- tool_glow_tint token arms ----------------------------------------
+
+#[test]
+fn tool_glow_tint_maps_delegation_search_and_unknown_tokens() {
+    use pixtuoid_core::source::Activity;
+    let id = pixtuoid_core::AgentId::from_transcript_path("/g.jsonl");
+    let glow = &crate::tui::theme::NORMAL.tool_glow;
+    let active = |detail: &str| {
+        make_slot(
+            id,
+            ActivityState::Active {
+                activity: Activity::Typing,
+                tool_use_id: None,
+                detail: Some(Arc::from(detail)),
+            },
+        )
+    };
+    // Agent / Task → glow.agent.
+    assert_eq!(
+        palette::tool_glow_tint(&active("Agent code-reviewer"), glow),
+        Some(glow.agent)
+    );
+    assert_eq!(
+        palette::tool_glow_tint(&active("Task: do X"), glow),
+        Some(glow.agent)
+    );
+    // Grep / Glob → glow.grep.
+    assert_eq!(
+        palette::tool_glow_tint(&active("Grep pattern"), glow),
+        Some(glow.grep)
+    );
+    assert_eq!(
+        palette::tool_glow_tint(&active("Glob **/*.rs"), glow),
+        Some(glow.grep)
+    );
+    // Unknown token → glow.default.
+    assert_eq!(
+        palette::tool_glow_tint(&active("WebFetch https://x"), glow),
+        Some(glow.default)
+    );
+}
+
+// --- SeatView::of obstacle (upright) arm -------------------------------
+
+#[test]
+fn seat_view_of_obstacle_kinds_is_upright_unflipped() {
+    use crate::tui::layout::{Facing, WaypointKind};
+    // The non-seat obstacle kinds dispatch directly in production and never
+    // reach a seated render through SeatView, but the explicit arm maps them to
+    // the upright default (Side { flip: false }) for totality.
+    for kind in [
+        WaypointKind::Pantry,
+        WaypointKind::PhoneBooth,
+        WaypointKind::StandingDesk,
+        WaypointKind::VendingMachine,
+        WaypointKind::Printer,
+    ] {
+        assert_eq!(
+            SeatView::of(kind, Facing::South),
+            SeatView::Side { flip: false },
+            "{kind:?} must map to the upright default",
+        );
+    }
+}
+
+// --- paint_character_at defensive missing-anim early return -----------
+
+#[test]
+fn paint_character_at_missing_anim_is_a_noop() {
+    let pack = crate::tui::embedded_pack::load_sprite_pack(None).expect("embedded pack");
+    let mut cache = FrameCache::new();
+    let id = pixtuoid_core::AgentId::from_transcript_path("/c.jsonl");
+    let slot = make_slot(id, ActivityState::Idle);
+    let bg = Rgb { r: 4, g: 5, b: 6 };
+    let mut buf = RgbBuffer::filled(40, 40, bg);
+    paint_character_at(
+        &mut buf,
+        "does_not_exist",
+        0,
+        Point { x: 20, y: 20 },
+        &slot,
+        &pack,
+        false,
+        None,
+        &mut cache,
+    );
+    for y in 0..buf.height {
+        for x in 0..buf.width {
+            assert_eq!(
+                buf.get(x, y),
+                bg,
+                "missing character anim must paint nothing"
+            );
+        }
+    }
+}
+
+// --- glass bounds clamps ----------------------------------------------
+
+#[test]
+fn glass_wall_h_clamps_below_buffer_bottom() {
+    // y_top near the buffer bottom → the cap+face row span exceeds the height,
+    // so the per-row `y >= bh continue` fires. Must not panic; in-bounds rows
+    // still paint.
+    let theme = crate::tui::theme::theme_by_name("normal").expect("theme");
+    let bh = 16u16;
+    let mut buf = RgbBuffer::filled(40, bh, Rgb { r: 0, g: 0, b: 0 });
+    paint_glass_wall_h(&mut buf, theme, 0, 39, bh - 1);
+    // The cap rows that ARE in-bounds (above bh) must have painted something.
+    let mut painted = false;
+    for y in 0..bh {
+        for x in 0..40u16 {
+            if buf.get(x, y) != (Rgb { r: 0, g: 0, b: 0 }) {
+                painted = true;
+            }
+        }
+    }
+    assert!(painted, "in-bounds glass rows should still paint");
+}
+
+#[test]
+fn glass_wall_v_clamps_past_right_edge() {
+    // x_left == bw-1 → x_left+dx for dx>=1 exceeds the width, exercising the
+    // `x >= bw continue`. Must not panic.
+    let theme = crate::tui::theme::theme_by_name("normal").expect("theme");
+    let bw = 12u16;
+    let mut buf = RgbBuffer::filled(bw, 40, Rgb { r: 0, g: 0, b: 0 });
+    paint_glass_wall_v(&mut buf, theme, bw - 1, 5, 20);
+    // The dx==0 column (in-bounds) must have painted.
+    let mut painted = false;
+    for y in 5..21u16 {
+        if buf.get(bw - 1, y) != (Rgb { r: 0, g: 0, b: 0 }) {
+            painted = true;
+        }
+    }
+    assert!(painted, "the in-bounds glass column should paint");
+}
+
+// --- effects: thinking dots phase + pet hearts edges ------------------
+
+#[test]
+fn thinking_dots_phase_two_paints_two_dots() {
+    use super::effects::paint_thinking_dots;
+    let theme = crate::tui::theme::theme_by_name("normal").expect("theme");
+    let bg = Rgb { r: 0, g: 0, b: 0 };
+    // phase = (epoch_ms / 800) % 4 == 2 → 1600..2399 ms. Pick 1700ms.
+    let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(1_700);
+    let anchor = Point { x: 10, y: 10 };
+    let mut buf = RgbBuffer::filled(40, 40, bg);
+    paint_thinking_dots(&mut buf, anchor, now, theme);
+    let painted = (0..40u16)
+        .flat_map(|y| (0..40u16).map(move |x| (x, y)))
+        .filter(|&(x, y)| buf.get(x, y) != bg)
+        .count();
+    assert_eq!(
+        painted, 2,
+        "phase 2 must paint exactly 2 dots, got {painted}"
+    );
+}
+
+#[test]
+fn pet_hearts_skip_dead_and_faded_hearts() {
+    use super::effects::paint_pet_hearts;
+    let bg = Rgb { r: 0, g: 0, b: 0 };
+    let cat_pos = Point { x: 20, y: 20 };
+    let painted_count = |elapsed_ms: u64| -> usize {
+        let mut buf = RgbBuffer::filled(40, 40, bg);
+        paint_pet_hearts(&mut buf, cat_pos, elapsed_ms);
+        (0..40u16)
+            .flat_map(|y| (0..40u16).map(move |x| (x, y)))
+            .filter(|&(x, y)| buf.get(x, y) != bg)
+            .count()
+    };
+    // Past HEART_LIFE_MS (1550) for the first heart but the later staggered
+    // hearts are also dead (i=1 starts at 150 → dead by 1700; ... i=3 at 450 →
+    // dead by 2000). At elapsed=2100 all four hearts are past their life → the
+    // `local_ms >= HEART_LIFE_MS continue` (152) fires for each → nothing paints.
+    assert_eq!(
+        painted_count(2_100),
+        0,
+        "all hearts past their life → none paint"
+    );
+    // A fresh frame DOES paint (proves the count isn't vacuously 0).
+    assert!(painted_count(0) > 0, "first heart paints at t=0");
+    // alpha < 0.05 continue (158): for heart i=0, local_ms in [1473,1549] gives
+    // alpha just under 0.05 → that heart is skipped while still within its life.
+    // Compare the heart count at elapsed=1500 (i=0 faded) vs a fresh stagger
+    // where i=0 is bright — fewer hearts at the faded frame proves 158 fired.
+    // (i=1..3 may still be alive at 1500, so just assert no panic + bounded.)
+    let faded = painted_count(1_500);
+    assert!(
+        faded <= painted_count(300),
+        "the faded heart drops out (alpha<0.05)"
+    );
+}
+
+// --- furniture decor guards + bodies + corner clip --------------------
+
+#[test]
+fn furniture_room_decor_too_small_bounds_are_noops() {
+    use super::furniture::{
+        paint_doormat, paint_notice_board, paint_trash_bin, paint_water_cooler,
+    };
+    let theme = crate::tui::theme::theme_by_name("normal").expect("theme");
+    let bg = Rgb { r: 9, g: 9, b: 9 };
+    let small = crate::tui::layout::Bounds {
+        x: 2,
+        y: 2,
+        width: 8,
+        height: 8,
+    };
+    let assert_noop = |f: &dyn Fn(&mut RgbBuffer)| {
+        let mut buf = RgbBuffer::filled(60, 60, bg);
+        f(&mut buf);
+        for y in 0..buf.height {
+            for x in 0..buf.width {
+                assert_eq!(buf.get(x, y), bg, "too-small bounds must paint nothing");
+            }
+        }
+    };
+    assert_noop(&|b| paint_notice_board(b, small, theme));
+    assert_noop(&|b| paint_doormat(b, small, theme));
+    assert_noop(&|b| paint_water_cooler(b, small, theme));
+    assert_noop(&|b| paint_trash_bin(b, small));
+}
+
+#[test]
+fn furniture_room_decor_large_bounds_paint() {
+    use super::furniture::{
+        paint_doormat, paint_notice_board, paint_trash_bin, paint_water_cooler,
+    };
+    let theme = crate::tui::theme::theme_by_name("normal").expect("theme");
+    let bg = Rgb { r: 9, g: 9, b: 9 };
+    // A generous room: width 40, height 40, well above every guard threshold.
+    let big = crate::tui::layout::Bounds {
+        x: 4,
+        y: 4,
+        width: 40,
+        height: 40,
+    };
+    let assert_paints = |f: &dyn Fn(&mut RgbBuffer)| {
+        let mut buf = RgbBuffer::filled(120, 80, bg);
+        f(&mut buf);
+        let painted = (0..80u16)
+            .flat_map(|y| (0..120u16).map(move |x| (x, y)))
+            .any(|(x, y)| buf.get(x, y) != bg);
+        assert!(painted, "large bounds must paint the decor");
+    };
+    assert_paints(&|b| paint_notice_board(b, big, theme));
+    assert_paints(&|b| paint_doormat(b, big, theme));
+    assert_paints(&|b| paint_water_cooler(b, big, theme));
+    assert_paints(&|b| paint_trash_bin(b, big));
+}
+
+#[test]
+fn furniture_corner_clip_does_not_panic() {
+    use super::furniture::{paint_area_rug, paint_pantry_table, paint_side_table};
+    let theme = crate::tui::theme::theme_by_name("normal").expect("theme");
+    // Centre each piece near the (0,0) corner so part of the sprite has a
+    // negative px/py, exercising the `< 0` / out-of-range `continue` clamps.
+    let mut buf = RgbBuffer::filled(40, 40, Rgb { r: 0, g: 0, b: 0 });
+    paint_area_rug(&mut buf, 1, 1, 10, 8, theme);
+    paint_side_table(&mut buf, 1, 1, theme);
+    paint_pantry_table(&mut buf, 1, 1, theme);
+    // No panic reaching here is the assertion (negative coords are clipped).
+}

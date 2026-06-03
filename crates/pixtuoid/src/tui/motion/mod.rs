@@ -447,8 +447,6 @@ fn pick_wander_dest(
             origin,
             &layout.reachable,
         );
-        // Seat foot cell `S`: the walk SETTLES from `dest` onto it (the sprite
-        // renders here). `None` for obstacles — the agent stands AT `dest`.
         // NO approach-side fallback: when no allowed+reachable side exists,
         // approach_point returns the blocked `wp.pos` sentinel (a seat boxed in to
         // only its backrest, or an obstacle with no open reachable side). Never
@@ -465,8 +463,6 @@ fn pick_wander_dest(
     }
 }
 
-/// Sum of octile distances along a routed polyline.
-///
 /// Snapshot the WanderBack `WalkProfile`: route `wander_dest → desk approach
 /// cell`, add the seat-rise (`settle_len(wander_dest, wander_seat)`) and the
 /// chair-glide settle, then freeze a `WanderBack` profile over that full

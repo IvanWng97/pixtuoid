@@ -1,4 +1,4 @@
-//! Shared decoder utilities used by per-source decoders (CC, Antigravity).
+//! Shared decoder utilities used by per-source decoders (CC, Codex, Antigravity).
 //! Hook payload decoding lives here because the hook socket is shared.
 
 use std::path::Path;

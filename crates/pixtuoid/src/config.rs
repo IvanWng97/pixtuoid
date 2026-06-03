@@ -207,6 +207,54 @@ mod tests {
         assert!(cfg.theme.is_none());
     }
 
+    // config_path reads process-global env, so save+restore both vars and drive
+    // the three branches in one test (avoids cross-test env races; the repo has
+    // no serial_test dep and CI runs tests process-isolated via nextest).
+    #[test]
+    fn config_path_xdg_home_and_relative_branches() {
+        let saved_xdg = std::env::var_os("XDG_CONFIG_HOME");
+        let saved_home = std::env::var_os("HOME");
+
+        // XDG_CONFIG_HOME wins when set.
+        std::env::set_var("XDG_CONFIG_HOME", "/xdg/base");
+        std::env::set_var("HOME", "/home/u");
+        assert_eq!(
+            config_path(),
+            PathBuf::from("/xdg/base/pixtuoid/config.toml")
+        );
+
+        // No XDG → fall back to $HOME/.config.
+        std::env::remove_var("XDG_CONFIG_HOME");
+        assert_eq!(
+            config_path(),
+            PathBuf::from("/home/u/.config/pixtuoid/config.toml")
+        );
+
+        // Neither → relative fallback.
+        std::env::remove_var("HOME");
+        assert_eq!(config_path(), PathBuf::from(".config/pixtuoid/config.toml"));
+
+        // Restore.
+        match saved_xdg {
+            Some(v) => std::env::set_var("XDG_CONFIG_HOME", v),
+            None => std::env::remove_var("XDG_CONFIG_HOME"),
+        }
+        match saved_home {
+            Some(v) => std::env::set_var("HOME", v),
+            None => std::env::remove_var("HOME"),
+        }
+    }
+
+    // load()'s non-NotFound read-error arm: pointing at a DIRECTORY makes
+    // read_to_string error (IsADirectory) → warn + return defaults (never crash).
+    #[test]
+    fn load_unreadable_path_returns_defaults() {
+        let dir = tempfile::tempdir().unwrap();
+        // The directory itself is an existing, non-NotFound, unreadable "file".
+        let cfg = load(dir.path());
+        assert!(cfg.theme.is_none());
+    }
+
     #[test]
     fn expand_tilde_only_expands_leading_current_user_home() {
         let home = Some("/Users/x");

@@ -435,6 +435,36 @@ mod tests {
     }
 
     #[test]
+    fn progress_in_triangular_decel_arm() {
+        // The triangular DECEL arm (s = L - 0.5·a·dt²) fires only when
+        // L < L_crit AND elapsed > t_half. Existing triangular tests probe
+        // t=0, t=t_half (claimed by the `t <= t_half` accel branch) or
+        // t>=duration (early return), so this arm is otherwise uncovered.
+        // SnapBack / short wander legs hit it live.
+        let v_min = V_CRUISE_COMMUTE * SPEED_MULT_MIN;
+        let l_crit_min = l_crit(v_min);
+        let l = (l_crit_min / 4.0) as u32; // guaranteed triangular for all agents
+        let profile = walk_profile(l, WalkIntent::Entry, id(0));
+
+        // Sample at ~0.75·T: well past t_half (= T/2) → in the decel arm.
+        let t75 = profile.duration_ms * 3 / 4;
+        let p75 = walk_progress(&profile, t75);
+        // s(0.75T) = L - 0.125·L = 0.875·L → p ≈ 875, strictly in (500, 1000).
+        assert!(
+            (500..1000).contains(&p75),
+            "triangular decel p(0.75T) should be in (500,1000), got {p75}"
+        );
+
+        // Decel is still advancing: p(0.75T) > p(0.6T) (both in the decel arm).
+        let t60 = profile.duration_ms * 3 / 5;
+        let p60 = walk_progress(&profile, t60);
+        assert!(
+            p75 > p60,
+            "decel must keep advancing: p(0.75T)={p75} should exceed p(0.6T)={p60}"
+        );
+    }
+
+    #[test]
     fn progress_at_half_duration_trapezoidal() {
         // In the trapezoidal regime, T/2 falls somewhere in the cruise band
         // (for long paths). p should be > 400 and < 600 (symmetry; doesn't

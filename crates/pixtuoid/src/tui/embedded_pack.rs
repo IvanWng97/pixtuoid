@@ -169,6 +169,91 @@ fn load_embedded_pack() -> Result<Pack> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::path::Path;
+
+    /// Copy the skeleton pack (a valid, loadable character pack) into `dst`.
+    fn copy_skeleton_pack(dst: &Path) {
+        fs::create_dir_all(dst).expect("mkdir pack dir");
+        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("sprites/skeleton");
+        for entry in fs::read_dir(&src).expect("read skeleton dir") {
+            let entry = entry.expect("dir entry");
+            let path = entry.path();
+            if path.is_file() {
+                let name = path.file_name().expect("file name");
+                fs::copy(&path, dst.join(name)).expect("copy pack file");
+            }
+        }
+    }
+
+    #[test]
+    fn load_sprite_pack_from_custom_dir_merges_with_embedded() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let pack_dir = tmp.path().join("custom");
+        copy_skeleton_pack(&pack_dir);
+
+        let pack = load_sprite_pack(Some(pack_dir)).expect("custom pack loads");
+        // The custom pack supplies character poses; furniture is merged from the
+        // embedded default, so both must be present.
+        assert!(
+            pack.animation("seated").is_some(),
+            "custom pack must carry the seated character pose"
+        );
+        assert!(
+            pack.animation("desk").is_some(),
+            "furniture merged from the embedded default"
+        );
+    }
+
+    #[test]
+    fn load_sprite_pack_from_missing_custom_dir_errors() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let missing = tmp.path().join("does-not-exist");
+        assert!(
+            load_sprite_pack(Some(missing)).is_err(),
+            "a nonexistent --pack-dir must surface a load error"
+        );
+    }
+
+    // The XDG path mutates a process-global env var, so all of its assertions
+    // run inside ONE test (sequential) — no other test in the crate touches
+    // XDG_CONFIG_HOME, so this is race-free without serial_test.
+    #[test]
+    fn load_sprite_pack_resolves_then_falls_back_via_xdg() {
+        let saved = std::env::var_os("XDG_CONFIG_HOME");
+
+        // (a) Valid XDG pack at $XDG/pixtuoid/sprites/ → loaded.
+        let good = tempfile::TempDir::new().expect("tempdir");
+        let good_sprites = good.path().join("pixtuoid").join("sprites");
+        copy_skeleton_pack(&good_sprites);
+        std::env::set_var("XDG_CONFIG_HOME", good.path());
+        let pack = load_sprite_pack(None).expect("xdg pack loads");
+        assert!(
+            pack.animation("seated").is_some(),
+            "the valid XDG pack must be loaded (xdg Ok arm)"
+        );
+
+        // (b) Malformed pack.toml at the XDG path → warn + fall back to embedded.
+        let bad = tempfile::TempDir::new().expect("tempdir");
+        let bad_sprites = bad.path().join("pixtuoid").join("sprites");
+        fs::create_dir_all(&bad_sprites).expect("mkdir bad sprites");
+        fs::write(bad_sprites.join("pack.toml"), b"this is not valid toml {{{")
+            .expect("write malformed pack.toml");
+        std::env::set_var("XDG_CONFIG_HOME", bad.path());
+        // The malformed pack triggers the Err arm → falls back to embedded (Ok),
+        // which still carries the embedded character poses.
+        let fallback = load_sprite_pack(None).expect("malformed pack falls back, never errors");
+        assert!(
+            fallback.animation("seated").is_some(),
+            "fallback to the embedded default after a malformed user pack"
+        );
+
+        // Restore env for the rest of the suite.
+        match saved {
+            Some(v) => std::env::set_var("XDG_CONFIG_HOME", v),
+            None => std::env::remove_var("XDG_CONFIG_HOME"),
+        }
+    }
 
     // The recolor invariant applies to EVERY palette key, not just the 4
     // recolor targets: recolor_frame matches by RGB equality, so two keys

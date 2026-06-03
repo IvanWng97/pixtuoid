@@ -18,7 +18,9 @@ pub fn default_hook_binary() -> Result<PathBuf> {
     if let Ok(p) = which::which("pixtuoid-hook") {
         return Ok(p);
     }
-    let exe = std::env::current_exe().context("current_exe")?;
+    let exe = std::env::current_exe().context(
+        "could not determine the running executable's path while locating pixtuoid-hook",
+    )?;
     let dir = exe.parent().ok_or_else(|| anyhow!("exe has no parent"))?;
     let candidate = dir.join("pixtuoid-hook");
     if candidate.exists() {
@@ -195,6 +197,22 @@ mod tests {
             std::fs::canonicalize(&resolved).unwrap(),
             std::fs::canonicalize(&target).unwrap()
         );
+    }
+
+    #[test]
+    fn resolve_symlink_cycle_terminates_after_budget() {
+        // A 2-node cycle a→b→a: symlink_metadata (lstat) + read_link (readlink)
+        // both succeed on every hop without following, so the 32-hop budget is
+        // exhausted and the loop falls through to `cur` (line 131) instead of
+        // looping forever. The assertion is simply that it TERMINATES (and
+        // returns one of the two cycle nodes).
+        let dir = TempDir::new().unwrap();
+        let a = dir.path().join("a.link");
+        let b = dir.path().join("b.link");
+        std::os::unix::fs::symlink(&b, &a).unwrap();
+        std::os::unix::fs::symlink(&a, &b).unwrap();
+        let resolved = resolve_symlink(&a);
+        assert!(resolved == a || resolved == b, "got {resolved:?}");
     }
 
     #[test]

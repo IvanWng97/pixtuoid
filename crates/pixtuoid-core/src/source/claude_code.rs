@@ -313,4 +313,42 @@ mod tests {
             "cc"
         );
     }
+
+    // The socket-path and default-paths env precedence. All three socket
+    // branches are checked in ONE test because the env vars are process-global —
+    // splitting across tests would race under the default multi-thread runner.
+    #[test]
+    fn default_socket_path_env_precedence_and_default_paths() {
+        // PIXTUOID_SOCKET takes precedence (checked first).
+        std::env::set_var("PIXTUOID_SOCKET", "/tmp/explicit.sock");
+        std::env::set_var("XDG_RUNTIME_DIR", "/run/user/1000");
+        assert_eq!(
+            ClaudeCodeSource::default_socket_path(),
+            PathBuf::from("/tmp/explicit.sock")
+        );
+
+        // Without PIXTUOID_SOCKET, XDG_RUNTIME_DIR drives the path.
+        std::env::remove_var("PIXTUOID_SOCKET");
+        assert_eq!(
+            ClaudeCodeSource::default_socket_path(),
+            PathBuf::from("/run/user/1000/pixtuoid.sock")
+        );
+
+        // With neither set, fall back to the uid-suffixed /tmp socket.
+        std::env::remove_var("XDG_RUNTIME_DIR");
+        // SAFETY: getuid() is a trivial argless syscall.
+        let uid = unsafe { libc::getuid() };
+        assert_eq!(
+            ClaudeCodeSource::default_socket_path(),
+            PathBuf::from(format!("/tmp/pixtuoid-{uid}.sock"))
+        );
+
+        // default_paths derives projects_root from HOME.
+        let paths = ClaudeCodeSource::default_paths();
+        assert!(
+            paths.projects_root.ends_with(".claude/projects"),
+            "projects_root must end with .claude/projects, got {:?}",
+            paths.projects_root
+        );
+    }
 }

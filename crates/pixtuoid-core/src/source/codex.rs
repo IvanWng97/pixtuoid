@@ -340,4 +340,36 @@ mod tests {
         let p = Path::new("/tmp/rollout-日本語のとてもながいファイルめい.jsonl");
         let _ = codex_id_from_path(p);
     }
+
+    #[test]
+    fn non_object_line_emits_nothing() {
+        // A bare string / number / array transcript line is not an object →
+        // decode early-returns empty (the `v.as_object()` else-guard).
+        assert!(ev(json!("just a string")).is_empty());
+        assert!(ev(json!(42)).is_empty());
+        assert!(ev(json!([1, 2, 3])).is_empty());
+    }
+
+    #[test]
+    fn function_call_without_arguments_starts_work_not_waiting() {
+        // No `arguments` field → `function_call_needs_approval` hits its
+        // None-arm (false) → falls to codex_tool_start → ActivityStart, never
+        // Waiting (the absence of escalation args is not a permission gate).
+        let out = ev(json!({
+            "type": "response_item",
+            "payload": { "type": "function_call", "name": "x" }
+        }));
+        assert!(
+            matches!(out.as_slice(), [AgentEvent::ActivityStart { .. }]),
+            "{out:?}"
+        );
+    }
+
+    #[test]
+    fn codex_session_ended_is_always_false() {
+        // Codex writes no end marker — the checker always defers to the
+        // mtime window + stale-sweep.
+        assert!(!codex_session_ended(b"anything"));
+        assert!(!codex_session_ended(b""));
+    }
 }

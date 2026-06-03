@@ -5,9 +5,14 @@ use tempfile::TempDir;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc;
 
-use pixtuoid_core::source::claude_code::{cc_derive_label, cc_session_ended, decode_cc_line};
+use pixtuoid_core::source::antigravity::AntigravitySource;
+use pixtuoid_core::source::claude_code::{
+    cc_derive_label, cc_session_ended, decode_cc_line, ClaudeCodeSource,
+};
+use pixtuoid_core::source::codex::CodexSource;
 use pixtuoid_core::source::jsonl::JsonlWatcher;
 use pixtuoid_core::source::AgentEvent;
+use pixtuoid_core::source::Source;
 use pixtuoid_core::source::Transport;
 use pixtuoid_core::AgentId;
 
@@ -651,5 +656,461 @@ async fn default_id_deriver_stays_path_keyed() {
         }
     }
     assert!(ok, "expected a path-keyed SessionStart");
+    handle.abort();
+}
+
+// CodexSource::run is just `JsonlWatcher::new(...).run(tx)` — drive the real
+// Source impl against a TempDir sessions_root so its run()-glue is exercised
+// (not only the watcher internals). A rollout file with a task_started line must
+// surface an ActivityStart through the source.
+#[tokio::test]
+async fn codex_source_run_emits_events_from_rollout() {
+    let dir = TempDir::new().unwrap();
+    let sessions_root = dir.path().to_path_buf();
+    let uuid = "019e7762-9ded-7e33-be41-946ecf105bf4";
+    let transcript = sessions_root.join(format!("rollout-2026-05-29T22-36-52-{uuid}.jsonl"));
+
+    let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(32);
+    let src = CodexSource { sessions_root };
+    let handle = tokio::spawn(async move { Box::new(src).run(tx).await });
+
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let meta = serde_json::json!({
+        "type": "session_meta",
+        "payload": { "id": uuid, "cwd": "/repo" }
+    });
+    let task_started = serde_json::json!({
+        "type": "event_msg",
+        "payload": { "type": "task_started", "turn_id": "t" }
+    });
+    let mut f = tokio::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&transcript)
+        .await
+        .unwrap();
+    f.write_all(format!("{meta}\n{task_started}\n").as_bytes())
+        .await
+        .unwrap();
+    f.flush().await.unwrap();
+    drop(f);
+
+    let mut got_activity = false;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    while tokio::time::Instant::now() < deadline {
+        if let Ok(Some((_, AgentEvent::ActivityStart { .. }))) =
+            tokio::time::timeout(Duration::from_millis(200), rx.recv()).await
+        {
+            got_activity = true;
+            break;
+        }
+    }
+    assert!(
+        got_activity,
+        "CodexSource::run should surface ActivityStart"
+    );
+    handle.abort();
+}
+
+// AntigravitySource::run mirrors CodexSource::run — drive the real Source impl
+// against a TempDir brain_root.
+#[tokio::test]
+async fn antigravity_source_run_emits_events_from_transcript() {
+    let dir = TempDir::new().unwrap();
+    let brain_root = dir.path().to_path_buf();
+    let project_dir = brain_root.join("sess");
+    tokio::fs::create_dir_all(&project_dir).await.unwrap();
+    let transcript = project_dir.join("transcript.jsonl");
+
+    let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(32);
+    let src = AntigravitySource { brain_root };
+    let handle = tokio::spawn(async move { Box::new(src).run(tx).await });
+
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let planner = serde_json::json!({
+        "step_index": 1,
+        "cwd": "/repo",
+        "type": "PLANNER_RESPONSE",
+        "tool_calls": [ { "name": "list_dir", "args": { "DirectoryPath": "\"/repo/src\"" } } ]
+    });
+    let mut f = tokio::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&transcript)
+        .await
+        .unwrap();
+    f.write_all(format!("{planner}\n").as_bytes())
+        .await
+        .unwrap();
+    f.flush().await.unwrap();
+    drop(f);
+
+    let mut got_activity = false;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    while tokio::time::Instant::now() < deadline {
+        if let Ok(Some((_, AgentEvent::ActivityStart { .. }))) =
+            tokio::time::timeout(Duration::from_millis(200), rx.recv()).await
+        {
+            got_activity = true;
+            break;
+        }
+    }
+    assert!(
+        got_activity,
+        "AntigravitySource::run should surface ActivityStart"
+    );
+    handle.abort();
+}
+
+// ClaudeCodeSource::run binds the hook socket, spawns the watcher, and enters
+// the select! — drive the real Source impl so the bind + spawn + select-entry
+// glue is exercised (only the select abort/warn arms stay structurally
+// unreachable: both inner tasks loop forever). A CC transcript written under
+// the projects_root must surface a SessionStart through the JSONL leg.
+#[tokio::test]
+async fn claude_code_source_run_binds_socket_and_emits_events() {
+    let dir = TempDir::new().unwrap();
+    let socket_path = dir.path().join("pixtuoid-test.sock");
+    let projects_root = dir.path().join("projects");
+    let project_dir = projects_root.join("proj-cc");
+    tokio::fs::create_dir_all(&project_dir).await.unwrap();
+    let transcript = project_dir.join("ses-cc.jsonl");
+
+    let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(32);
+    let src = ClaudeCodeSource {
+        socket_path,
+        projects_root,
+    };
+    let handle = tokio::spawn(async move { Box::new(src).run(tx).await });
+
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let line = serde_json::json!({
+        "type": "assistant",
+        "sessionId": "ses-cc",
+        "cwd": "/repo",
+        "message": {
+            "role": "assistant",
+            "content": [
+                { "type": "tool_use", "id": "tu_1", "name": "Bash", "input": { "command": "ls" } }
+            ]
+        }
+    });
+    let mut f = tokio::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&transcript)
+        .await
+        .unwrap();
+    f.write_all(format!("{line}\n").as_bytes()).await.unwrap();
+    f.flush().await.unwrap();
+    drop(f);
+
+    let mut got_start = false;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    while tokio::time::Instant::now() < deadline {
+        if let Ok(Some((_, AgentEvent::SessionStart { .. }))) =
+            tokio::time::timeout(Duration::from_millis(200), rx.recv()).await
+        {
+            got_start = true;
+            break;
+        }
+    }
+    assert!(
+        got_start,
+        "ClaudeCodeSource::run should surface SessionStart from the JSONL leg"
+    );
+    handle.abort();
+}
+
+// Cursor-safety guard: a transcript truncated below the watcher's stored cursor
+// must reset the cursor (not stay stuck) so newly-appended content re-decodes.
+#[tokio::test]
+async fn watcher_resets_cursor_on_truncation_below_cursor() {
+    let dir = TempDir::new().unwrap();
+    let projects_root = dir.path().to_path_buf();
+    let project_dir = projects_root.join("proj-trunc");
+    tokio::fs::create_dir_all(&project_dir).await.unwrap();
+    let transcript = project_dir.join("trunc.jsonl");
+
+    let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(64);
+    let watcher = cc_watcher(projects_root.clone());
+    let handle = tokio::spawn(async move { watcher.run(tx).await });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let tool_line = |id: &str| {
+        serde_json::json!({
+            "type": "assistant",
+            "sessionId": "trunc",
+            "cwd": "/repo",
+            "message": {
+                "role": "assistant",
+                "content": [
+                    { "type": "tool_use", "id": id, "name": "Bash", "input": { "command": "ls" } }
+                ]
+            }
+        })
+        .to_string()
+    };
+
+    // Write a long first line so the cursor advances well past a later short one.
+    let long = tool_line("tu_long") + &" ".repeat(400);
+    tokio::fs::write(&transcript, format!("{long}\n"))
+        .await
+        .unwrap();
+
+    // Let the watcher advance its cursor to EOF.
+    let mut saw_long = false;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while tokio::time::Instant::now() < deadline {
+        if let Ok(Some((_, AgentEvent::ActivityStart { tool_use_id, .. }))) =
+            tokio::time::timeout(Duration::from_millis(200), rx.recv()).await
+        {
+            if tool_use_id.as_deref() == Some("tu_long") {
+                saw_long = true;
+                break;
+            }
+        }
+    }
+    assert!(saw_long, "expected the first long line to decode");
+
+    // Truncate the file far below the stored cursor, then append a fresh line.
+    let fresh = tool_line("tu_fresh");
+    tokio::fs::write(&transcript, format!("{fresh}\n"))
+        .await
+        .unwrap();
+
+    // The cursor (set past the long line) now exceeds file_len → reset to 0 →
+    // the fresh line re-decodes on the next scan.
+    let mut saw_fresh = false;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    while tokio::time::Instant::now() < deadline {
+        if let Ok(Some((_, AgentEvent::ActivityStart { tool_use_id, .. }))) =
+            tokio::time::timeout(Duration::from_millis(200), rx.recv()).await
+        {
+            if tool_use_id.as_deref() == Some("tu_fresh") {
+                saw_fresh = true;
+                break;
+            }
+        }
+    }
+    assert!(
+        saw_fresh,
+        "after truncation the cursor must reset so the fresh line decodes"
+    );
+    handle.abort();
+}
+
+// Cursor-safety guard: a > 1 MiB pending tail with no newline must be skipped to
+// EOF (not buffered), and a later newline-terminated valid line still decodes.
+#[tokio::test]
+async fn watcher_skips_oversized_pending_tail() {
+    let dir = TempDir::new().unwrap();
+    let projects_root = dir.path().to_path_buf();
+    let project_dir = projects_root.join("proj-big");
+    tokio::fs::create_dir_all(&project_dir).await.unwrap();
+    let transcript = project_dir.join("big.jsonl");
+
+    let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(64);
+    let watcher = cc_watcher(projects_root.clone());
+    let handle = tokio::spawn(async move { watcher.run(tx).await });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    // Write > 1 MiB of junk with NO newline — file_len - cursor exceeds
+    // MAX_PENDING_BYTES, so the watcher seeks the cursor to EOF and skips it.
+    let junk = vec![b'x'; (1 << 20) + 1024];
+    let mut f = tokio::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&transcript)
+        .await
+        .unwrap();
+    f.write_all(&junk).await.unwrap();
+    f.flush().await.unwrap();
+    drop(f);
+
+    // Give the watcher a scan to skip the junk.
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    while tokio::time::timeout(Duration::from_millis(20), rx.recv())
+        .await
+        .is_ok()
+    {}
+
+    // Append a newline (closing the junk line) plus a valid line. The junk line
+    // is past the EOF-seeked cursor, so only the valid line decodes.
+    let valid = serde_json::json!({
+        "type": "assistant",
+        "sessionId": "big",
+        "cwd": "/repo",
+        "message": {
+            "role": "assistant",
+            "content": [
+                { "type": "tool_use", "id": "tu_after_junk", "name": "Bash", "input": { "command": "ls" } }
+            ]
+        }
+    });
+    let mut f = tokio::fs::OpenOptions::new()
+        .append(true)
+        .open(&transcript)
+        .await
+        .unwrap();
+    f.write_all(format!("\n{valid}\n").as_bytes())
+        .await
+        .unwrap();
+    f.flush().await.unwrap();
+    drop(f);
+
+    let mut got_after = false;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    while tokio::time::Instant::now() < deadline {
+        if let Ok(Some((_, AgentEvent::ActivityStart { tool_use_id, .. }))) =
+            tokio::time::timeout(Duration::from_millis(200), rx.recv()).await
+        {
+            if tool_use_id.as_deref() == Some("tu_after_junk") {
+                got_after = true;
+                break;
+            }
+        }
+    }
+    assert!(
+        got_after,
+        "the post-skip valid line must decode after the oversized tail is skipped"
+    );
+    handle.abort();
+}
+
+// The per-line non-UTF8 guard in walk_jsonl: a raw invalid-UTF8 byte line is
+// warn-and-skipped, and a following valid JSON line still decodes (the bad line
+// is not fatal to the rest of the read).
+#[tokio::test]
+async fn watcher_skips_non_utf8_line_and_keeps_going() {
+    let dir = TempDir::new().unwrap();
+    let projects_root = dir.path().to_path_buf();
+    let project_dir = projects_root.join("proj-nonutf8");
+    tokio::fs::create_dir_all(&project_dir).await.unwrap();
+    let transcript = project_dir.join("nonutf8.jsonl");
+
+    let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(32);
+    let watcher = cc_watcher(projects_root.clone());
+    let handle = tokio::spawn(async move { watcher.run(tx).await });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let valid = serde_json::json!({
+        "type": "assistant",
+        "sessionId": "nonutf8",
+        "cwd": "/repo",
+        "message": {
+            "role": "assistant",
+            "content": [
+                { "type": "tool_use", "id": "tu_valid", "name": "Bash", "input": { "command": "ls" } }
+            ]
+        }
+    });
+    // Invalid-UTF8 bytes + newline, then a valid JSON line + newline. The bytes
+    // can't go through serde_json (JSON is UTF-8) — write them raw.
+    let mut bytes: Vec<u8> = vec![0xff, 0xfe, b'\n'];
+    bytes.extend_from_slice(format!("{valid}\n").as_bytes());
+    let mut f = tokio::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&transcript)
+        .await
+        .unwrap();
+    f.write_all(&bytes).await.unwrap();
+    f.flush().await.unwrap();
+    drop(f);
+
+    let mut got_valid = false;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    while tokio::time::Instant::now() < deadline {
+        if let Ok(Some((_, AgentEvent::ActivityStart { tool_use_id, .. }))) =
+            tokio::time::timeout(Duration::from_millis(200), rx.recv()).await
+        {
+            if tool_use_id.as_deref() == Some("tu_valid") {
+                got_valid = true;
+                break;
+            }
+        }
+    }
+    assert!(
+        got_valid,
+        "a non-UTF8 line must be skipped, not block the following valid line"
+    );
+    handle.abort();
+}
+
+// Drives detect_parent_id through the REAL watcher recursion: a subagent
+// transcript at <root>/proj/parent/subagents/agent-1.jsonl must emit a
+// SessionStart whose parent_id derives the parent from the grandparent dir.
+#[tokio::test]
+async fn watcher_derives_parent_id_for_subagent_path() {
+    let dir = TempDir::new().unwrap();
+    let projects_root = dir.path().to_path_buf();
+    let subagent_dir = projects_root.join("proj").join("parent").join("subagents");
+    tokio::fs::create_dir_all(&subagent_dir).await.unwrap();
+    let transcript = subagent_dir.join("agent-1.jsonl");
+
+    let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(32);
+    let watcher = cc_watcher(projects_root.clone());
+    let handle = tokio::spawn(async move { watcher.run(tx).await });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let line = serde_json::json!({
+        "type": "assistant",
+        "sessionId": "agent-1",
+        "cwd": "/repo",
+        "attributionAgent": "feature-dev:code-explorer",
+        "message": {
+            "role": "assistant",
+            "content": [
+                { "type": "tool_use", "id": "tu_1", "name": "Read", "input": { "file_path": "/x" } }
+            ]
+        }
+    });
+    let mut f = tokio::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&transcript)
+        .await
+        .unwrap();
+    f.write_all(format!("{line}\n").as_bytes()).await.unwrap();
+    f.flush().await.unwrap();
+    drop(f);
+
+    // The watcher reports either the raw or canonicalized root (macOS /var →
+    // /private/var), so accept either parent key.
+    let parent_path = projects_root.join("proj").join("parent.jsonl");
+    let raw = AgentId::from_parts("claude-code", &parent_path.to_string_lossy());
+    let canon_root = std::fs::canonicalize(&projects_root).unwrap_or(projects_root.clone());
+    let canon = AgentId::from_parts(
+        "claude-code",
+        &canon_root
+            .join("proj")
+            .join("parent.jsonl")
+            .to_string_lossy(),
+    );
+
+    let mut found_parent = None;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    while tokio::time::Instant::now() < deadline {
+        if let Ok(Some((
+            _,
+            AgentEvent::SessionStart {
+                parent_id: Some(pid),
+                ..
+            },
+        ))) = tokio::time::timeout(Duration::from_millis(200), rx.recv()).await
+        {
+            found_parent = Some(pid);
+            break;
+        }
+    }
+    let found = found_parent.expect("expected a SessionStart carrying parent_id");
+    assert!(
+        found == raw || found == canon,
+        "parent_id must derive the parent transcript from the grandparent dir; got {found:?}"
+    );
     handle.abort();
 }

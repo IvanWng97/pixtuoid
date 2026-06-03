@@ -288,6 +288,39 @@ fn dotted_hline_alternates() {
 }
 
 #[test]
+fn dotted_hline_breaks_when_dash_overruns_x1() {
+    // dash=3, gap=1 → period 4. Span [0,9] is NOT a multiple of the period,
+    // so the final dash (starting at x=8) wants to paint 8,9,10 but 10 > x1=9
+    // fires the line-94 break. Painted set: [0,1,2, 4,5,6, 8,9].
+    let mut buf = RgbBuffer::filled(12, 1, Rgb { r: 0, g: 0, b: 0 });
+    let red = Rgb { r: 255, g: 0, b: 0 };
+    draw_dotted_hline(&mut buf, 0, 0, 9, red, 3, 1);
+    // x1 itself is painted (the dash reaches it before the break).
+    assert_eq!(buf.get(9, 0), red, "x1 should be painted");
+    // x1+1 is NOT painted — the break stopped the overrunning dash.
+    assert_eq!(
+        buf.get(10, 0),
+        Rgb { r: 0, g: 0, b: 0 },
+        "x1+1 must be unpainted"
+    );
+    // No panic; sanity-check the rest of the expected pattern.
+    for x in [0, 1, 2, 4, 5, 6, 8] {
+        assert_eq!(buf.get(x, 0), red, "x={x} should be painted");
+    }
+    assert_eq!(buf.get(3, 0), Rgb { r: 0, g: 0, b: 0 }, "x=3 is a gap");
+    assert_eq!(buf.get(7, 0), Rgb { r: 0, g: 0, b: 0 }, "x=7 is a gap");
+}
+
+#[test]
+fn half_block_cells_on_empty_buffers_returns_empty_grid() {
+    let rgb = Rgb { r: 1, g: 2, b: 3 };
+    // w == 0 arm of the degenerate guard.
+    assert!(half_block_cells(&RgbBuffer::filled(0, 4, rgb)).is_empty());
+    // h == 0 arm.
+    assert!(half_block_cells(&RgbBuffer::filled(4, 0, rgb)).is_empty());
+}
+
+#[test]
 fn half_block_cells_pads_odd_height_with_repeated_row() {
     let buf = RgbBuffer {
         width: 1,

@@ -177,10 +177,15 @@ mod tests {
     #[test]
     fn overlay_blocks_inside_rects() {
         let mut o = OccupancyOverlay::new();
+        assert_eq!(o.len(), 0);
         o.add(10, 10, 5, 5);
+        o.add(20, 20, 3, 3);
+        assert_eq!(o.len(), 2);
         assert!(o.blocks(12, 12));
         assert!(!o.blocks(9, 10));
         assert!(!o.blocks(15, 10));
+        o.clear();
+        assert_eq!(o.len(), 0);
     }
 
     #[test]

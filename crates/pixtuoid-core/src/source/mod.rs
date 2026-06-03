@@ -85,12 +85,6 @@ impl From<&str> for ToolDetail {
     }
 }
 
-impl From<String> for ToolDetail {
-    fn from(s: String) -> Self {
-        Self::from(s.as_str())
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AgentEvent {
     SessionStart {

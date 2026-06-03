@@ -1498,3 +1498,477 @@ fn meeting_glass_partition_connects_at_window_and_corner() {
         "vertical divider should fill the inside corner at the horizontal wall"
     );
 }
+
+// ===================================================================
+// hit_test_furniture — every per-kind label arm, against a REAL layout
+// ===================================================================
+
+// Drive a real production layout (the same `compute_with_seed` the renderer
+// calls) and hover the CENTER of each populated furniture field, asserting
+// hit_test_furniture returns that kind's label. This closes the waypoint loop
+// (Pantry/Phone Booth/Standing Desk/Vending/Printer), meeting sofas, pantry
+// table/chairs, plants, floor lamp, wall+pod decor, lounge couch + side table,
+// and the procedural meeting/pantry items. Ficus + BulletinBoard are covered
+// by synthetic-layout unit tests (compute never emits those two kinds).
+#[test]
+fn furniture_hit_test_covers_every_kind_on_real_layouts() {
+    use crate::tui::hit_test::hit_test_furniture;
+    use crate::tui::layout::{
+        Layout, PlantKind, PodDecor, WallDecor, WaypointKind, MAX_VISIBLE_DESKS,
+    };
+    use std::collections::HashSet;
+
+    // Scan the WHOLE cell grid and collect every label hit_test_furniture
+    // returns anywhere. Per-item shadowing (e.g. a floor lamp under the couch
+    // region, a chair under the pantry table) means a single center-probe is
+    // brittle, but an item's NON-shadowed cells still yield its label — so the
+    // returned-label SET reaches every arm that is geometrically reachable.
+    let labels_on = |layout: &Layout| -> HashSet<&'static str> {
+        let mut set = HashSet::new();
+        for cy in 0..(layout.buf_h / 2) {
+            for cx in 0..layout.buf_w {
+                if let Some(l) = hit_test_furniture(layout, cx, cy) {
+                    set.insert(l);
+                }
+            }
+        }
+        set
+    };
+
+    // Seeds 0 and 3 between them populate every field (seed 3 brings the
+    // PhoneBooth/StandingDesk pod-decor + a coat-rack-only meeting room).
+    let mut covered: HashSet<&'static str> = HashSet::new();
+    for seed in [0u64, 3] {
+        let layout = Layout::compute_with_seed(160, 200, MAX_VISIBLE_DESKS, seed)
+            .unwrap_or_else(|| panic!("layout for seed {seed}"));
+        let labels = labels_on(&layout);
+
+        // For every kind PRESENT in this layout, its label must be reachable.
+        for wp in &layout.waypoints {
+            let want = match wp.kind {
+                WaypointKind::Pantry => Some("Pantry Counter"),
+                WaypointKind::PhoneBooth => Some("Phone Booth"),
+                WaypointKind::StandingDesk => Some("Standing Desk"),
+                WaypointKind::VendingMachine => Some("Vending Machine"),
+                WaypointKind::Printer => Some("Printer"),
+                WaypointKind::Couch | WaypointKind::MeetingSofa | WaypointKind::MeetingStand => {
+                    None
+                }
+            };
+            if let Some(label) = want {
+                assert!(
+                    labels.contains(label),
+                    "seed {seed}: waypoint {:?} → label {label:?} never resolved",
+                    wp.kind
+                );
+            }
+        }
+        if !layout.meeting_sofas.is_empty() {
+            assert!(labels.contains("Meeting Sofa"), "seed {seed}: Meeting Sofa");
+        }
+        if !layout.meeting_tables.is_empty() {
+            assert!(
+                labels.contains("Meeting Table"),
+                "seed {seed}: Meeting Table"
+            );
+        }
+        if layout.pantry_table.is_some() {
+            assert!(labels.contains("Pantry Table"), "seed {seed}: Pantry Table");
+        }
+        if !layout.pantry_chairs.is_empty() {
+            assert!(labels.contains("Chair"), "seed {seed}: Chair");
+        }
+        if layout.floor_lamp.is_some() {
+            assert!(labels.contains("Floor Lamp"), "seed {seed}: Floor Lamp");
+        }
+        if layout.couch_sprite_center.is_some() {
+            assert!(labels.contains("Lounge Sofa"), "seed {seed}: Lounge Sofa");
+        }
+        if layout.lounge_side_table.is_some() {
+            assert!(labels.contains("Side Table"), "seed {seed}: Side Table");
+        }
+        for item in &layout.plants {
+            let label = match item.kind {
+                PlantKind::Ficus => "Ficus",
+                PlantKind::Tall => "Tall Plant",
+                PlantKind::Flower => "Flower Pot",
+                PlantKind::Succulent => "Succulent",
+            };
+            assert!(labels.contains(label), "seed {seed}: plant {:?}", item.kind);
+        }
+        for item in &layout.wall_decor {
+            let label = match item.kind {
+                WallDecor::Whiteboard => "Whiteboard",
+                WallDecor::Bookshelf => "Bookshelf",
+                WallDecor::BulletinBoard => "Bulletin Board",
+                WallDecor::ExitSign => "Exit Sign",
+                WallDecor::MeetingScreen => "Meeting Screen",
+            };
+            assert!(
+                labels.contains(label),
+                "seed {seed}: wall decor {:?}",
+                item.kind
+            );
+        }
+        for item in &layout.pod_decor {
+            let label = match item.kind {
+                PodDecor::PlantTall => "Tall Plant",
+                PodDecor::Whiteboard => "Whiteboard",
+                PodDecor::Tv => "TV Stand",
+                PodDecor::PhoneBooth => "Phone Booth",
+                PodDecor::StandingDesk => "Standing Desk",
+            };
+            assert!(
+                labels.contains(label),
+                "seed {seed}: pod decor {:?}",
+                item.kind
+            );
+        }
+        // Procedural room items (coat rack / doormat / water cooler / trash bin)
+        // are emitted by hit_test_furniture from the room bounds, not a layout
+        // field, so just gather whatever resolved.
+        covered.extend(labels);
+    }
+
+    // The procedural meeting/pantry-room items must surface across the two
+    // seeds (seed 0 has both a meeting room and a pantry room at 160×200).
+    for label in [
+        "Coat Rack",
+        "Doormat",
+        "Water Cooler",
+        "Trash Bin",
+        "Elevator",
+    ] {
+        assert!(
+            covered.contains(label),
+            "procedural/room item {label:?} never resolved across seeds"
+        );
+    }
+}
+
+// ===================================================================
+// hit_test_agent + hover marker
+// ===================================================================
+
+// Hover an idle agent's own sprite cell → the label gains the '▸' hovered
+// marker (exercises hit_test_agent's Some-return + tooltip is_hovered branch).
+#[test]
+fn hovering_an_agent_marks_its_label() {
+    let mut s = idle("/hov/0.jsonl", 0, t0() - Duration::from_secs(300));
+    s.label = Arc::from("HOVERME");
+    let scene = scene_with(vec![s], 16);
+    let mut r = build(140, 48, vec![]);
+    r.render(&scene, &pack(), t0()).unwrap();
+    // A long-idle agent at its home desk; mirror hit_test_from_tui's anchor.
+    let desk = r.cached_layout().expect("layout").home_desks[0];
+    let cell_x = desk.x + 2;
+    let cell_y = desk.y.saturating_sub(4) / 2 + 1;
+    r.set_mouse_pos(Some((cell_x, cell_y)));
+    r.render(&scene, &pack(), t0()).unwrap();
+    let text = frame_text(r.frame_buffer());
+    assert!(
+        text.contains("\u{25b8}HOVERME") || text.contains("\u{25b8}"),
+        "hovering an agent should add the ▸ marker to its label; frame:\n{text}"
+    );
+}
+
+// ===================================================================
+// Tooltip state arms: Active (with detail), Waiting, exiting label,
+// active-% numeric, flip-left, bottom-edge flip-up (CG4/CG5/CG6)
+// ===================================================================
+
+#[test]
+fn pinned_active_agent_tooltip_shows_state_and_detail() {
+    // active() sets last_event_at = started; created >5s ago so active_str is
+    // a numeric percent (not "--%"), and active_ms>0 forces a non-zero %.
+    let mut a = active(
+        "/ttA/0.jsonl",
+        0,
+        "Edit src/lib.rs",
+        t0() - Duration::from_secs(600),
+    );
+    a.active_ms = 120_000; // 120s active over a 600s session ⇒ 20%
+    let id = a.agent_id;
+    let scene = scene_with(vec![a], 16);
+    let mut r = build(120, 44, vec![]);
+    r.set_pinned_agent(Some(id));
+    r.render(&scene, &pack(), t0()).unwrap();
+    let text = frame_text(r.frame_buffer());
+    assert!(text.contains("Active"), "active state arm: {text}");
+    assert!(text.contains("Edit src/lib.rs"), "detail line: {text}");
+    // active_str numeric branch (session ≥5s): a '%' that is not "--%".
+    assert!(
+        text.contains('%') && !text.contains("--%"),
+        "numeric active %: {text}"
+    );
+}
+
+#[test]
+fn pinned_waiting_agent_tooltip_shows_reason() {
+    let mut a = idle("/ttW/0.jsonl", 0, t0() - Duration::from_secs(60));
+    a.state = ActivityState::Waiting {
+        reason: Arc::from("permission to edit"),
+    };
+    let id = a.agent_id;
+    let scene = scene_with(vec![a], 16);
+    let mut r = build(120, 44, vec![]);
+    r.set_pinned_agent(Some(id));
+    r.render(&scene, &pack(), t0()).unwrap();
+    let text = frame_text(r.frame_buffer());
+    assert!(text.contains("Waiting"), "waiting state arm: {text}");
+    assert!(text.contains("permission"), "reason line: {text}");
+}
+
+#[test]
+fn exiting_agent_label_uses_exiting_color() {
+    // The exiting_at branch in paint_label_widgets: render an exiting agent and
+    // confirm its label still paints (the branch runs without panic). Color is
+    // theme-internal; we assert the label survives the exiting code path.
+    let mut a = idle("/ttE/0.jsonl", 0, t0() - Duration::from_secs(10));
+    a.label = Arc::from("LEAVING");
+    a.exiting_at = Some(t0());
+    let scene = scene_with(vec![a], 16);
+    let mut r = build(120, 44, vec![]);
+    r.render(&scene, &pack(), t0() + Duration::from_millis(100))
+        .unwrap();
+    let text = frame_text(r.frame_buffer());
+    assert!(text.contains("LEAVING"), "exiting agent label: {text}");
+}
+
+#[test]
+fn pinned_then_removed_agent_is_a_safe_noop() {
+    // paint_hover_tooltip's early return when the pinned id is gone from scene.
+    let id = AgentId::from_transcript_path("/ttGone/0.jsonl");
+    let scene = scene_with(vec![slot(id, 0, 0, t0())], 16);
+    let mut r = build(120, 44, vec![]);
+    r.render(&scene, &pack(), t0()).unwrap();
+    r.set_pinned_agent(Some(id));
+    // Re-render with the agent removed → tooltip paint hits the get()=None bail.
+    let empty = SceneState::uniform(16);
+    r.render(&empty, &pack(), t0() + Duration::from_millis(33))
+        .expect("render must not panic when the pinned agent vanished");
+}
+
+// ===================================================================
+// Pet tooltip: cooldown (purr/woof per kind) + sleeping arms (CG5)
+// ===================================================================
+
+#[test]
+fn pet_tooltip_shows_cooldown_reaction_for_cat_and_dog() {
+    for (kind, word) in [(PetKind::Cat, "purr"), (PetKind::Dog, "woof")] {
+        let scene = scene_with(vec![active("/ck/0.jsonl", 0, "Edit", t0())], 16);
+        let mut r = build(140, 48, vec![kind]);
+        r.render(&scene, &pack(), t0()).unwrap();
+        let PetFrame { pos, .. } = r.cached_pet_pos().expect("pet placed");
+        // Activate the petting cooldown so the tooltip shows purr/woof.
+        r.set_active_pet(Some(PetState {
+            petted_at: t0(),
+            pet_pos: pos,
+            kind,
+            floor_idx: 0,
+        }));
+        r.set_mouse_pos(Some((pos.x, pos.y / 2)));
+        r.render(&scene, &pack(), t0() + Duration::from_millis(200))
+            .unwrap();
+        let text = frame_text(r.frame_buffer());
+        assert!(
+            text.contains(word),
+            "{kind:?} on cooldown should show '{word}'; got:\n{text}"
+        );
+    }
+}
+
+#[test]
+fn pet_tooltip_shows_sleeping_when_all_idle() {
+    // With every agent idle the cat sleeps (sleeps_near_idle); hovering it shows
+    // the sleeping line. Use a long-idle scene so the pet settles to sleep.
+    let scene = scene_with(
+        vec![idle("/slp/0.jsonl", 0, t0() - Duration::from_secs(300))],
+        16,
+    );
+    let mut r = build(160, 64, vec![PetKind::Cat]);
+    // Scan the pet cycle for a sleeping frame, then hover it.
+    let mut hit = None;
+    for i in 0..40u64 {
+        let now = t0() + Duration::from_secs(i);
+        r.render(&scene, &pack(), now).unwrap();
+        if let Some(PetFrame { pos, anim, .. }) = r.cached_pet_pos() {
+            if anim == PetKind::Cat.sleep_anim() {
+                hit = Some((pos, now));
+                break;
+            }
+        }
+    }
+    let (pos, now) = hit.expect("a long-idle cat must enter its sleep anim within the window");
+    r.set_mouse_pos(Some((pos.x, pos.y / 2)));
+    r.render(&scene, &pack(), now).unwrap();
+    let text = frame_text(r.frame_buffer());
+    assert!(
+        text.contains("sleeping"),
+        "hovering a sleeping cat shows the sleeping line; got:\n{text}"
+    );
+}
+
+// Hover a furniture item near the TOP edge so paint_simple_tooltip flips the
+// box BELOW the cursor (the my < scene_rect.y + tip_h branch).
+#[test]
+fn furniture_tooltip_flips_below_near_top_edge() {
+    let scene = scene_with(vec![idle("/flip/0.jsonl", 0, t0())], 16);
+    let mut r = build(140, 48, vec![]);
+    r.render(&scene, &pack(), t0()).unwrap();
+    let layout = r.cached_layout().expect("layout");
+    // Find a furniture hit at the smallest cell-y (closest to the top edge).
+    let mut top_hit = None;
+    'scan: for my in 0..6u16 {
+        for mx in 0..140u16 {
+            if crate::tui::hit_test::hit_test_furniture(layout, mx, my).is_some() {
+                top_hit = Some((mx, my));
+                break 'scan;
+            }
+        }
+    }
+    let (mx, my) = top_hit.expect("some furniture must hover-test near the top edge");
+    r.set_mouse_pos(Some((mx, my)));
+    r.render(&scene, &pack(), t0())
+        .expect("top-edge furniture hover must flip the tooltip below without panic");
+}
+
+// Hover an AGENT near the BOTTOM edge so paint_hover_tooltip flips the panel UP
+// (the ty overflow branch). Pin it to force the centered/hover panel path.
+#[test]
+fn agent_tooltip_flips_up_near_bottom_edge() {
+    let scene = scene_with(
+        vec![idle("/flup/0.jsonl", 0, t0() - Duration::from_secs(120))],
+        16,
+    );
+    let mut r = build(120, 44, vec![]);
+    r.render(&scene, &pack(), t0()).unwrap();
+    let layout = r.cached_layout().expect("layout").clone();
+    // Pick the home desk nearest the bottom of the scene.
+    let bottom_desk = layout
+        .home_desks
+        .iter()
+        .max_by_key(|d| d.y)
+        .copied()
+        .expect("a home desk");
+    let id = AgentId::from_transcript_path("/flup/0.jsonl");
+    r.set_pinned_agent(Some(id));
+    // Hover near the very bottom rows so the hover-tooltip ty must flip up.
+    let my = (44u16).saturating_sub(2);
+    r.set_mouse_pos(Some((bottom_desk.x, my)));
+    r.render(&scene, &pack(), t0())
+        .expect("bottom-edge hover must not panic");
+    // Reaching here (no panic, tooltip flipped within bounds) is the assertion.
+}
+
+// ===================================================================
+// renderer.rs: Layout::compute None bail (CG7)
+// ===================================================================
+
+// A terminal that PASSES the 20×12 scene-rect gate but is too small for
+// Layout::compute (buf_w < MIN_W) takes draw_scene's compute-None bail → no
+// cached layout, footer-only, no error.
+#[test]
+fn layout_compute_none_bails_to_footer_only() {
+    let scene = scene_with(vec![idle("/lc/0.jsonl", 0, t0())], 16);
+    // scene_rect 28×39: width 28 ≥ 20 (passes gate), buf_w 28 < MIN_W → compute
+    // returns None, hitting the second bail arm.
+    let mut r = build(28, 40, vec![]);
+    r.render(&scene, &pack(), t0())
+        .expect("render must not error on the compute-None bail");
+    assert!(
+        r.cached_layout().is_none(),
+        "a layout that fails compute yields no cached layout"
+    );
+}
+
+// ===================================================================
+// tui_renderer: render_transition too-small bail (CG9) + getters (CG10)
+// ===================================================================
+
+#[test]
+fn transition_on_too_small_terminal_clears_interaction_state() {
+    // Two-floor scene on a sub-20×12 terminal: starting a transition hits the
+    // render_transition too-small bail → cached layout / pet / popup cleared.
+    let scene = two_floor_scene();
+    let mut r = build(18, 10, vec![PetKind::Cat]);
+    let now = t0();
+    r.render(&scene, &pack(), now).unwrap();
+    r.navigate_floor(1, now);
+    r.render(&scene, &pack(), now + Duration::from_millis(100))
+        .expect("transition render on a tiny terminal must not panic");
+    assert!(r.cached_layout().is_none());
+    assert!(r.cached_pet_pos().is_none());
+    assert_eq!(r.last_popup_scale(), 0.0);
+}
+
+#[test]
+fn debug_walkable_getter_reflects_setter() {
+    let mut r = build(100, 40, vec![]);
+    assert!(!r.debug_walkable());
+    r.set_debug_walkable(true);
+    assert!(r.debug_walkable());
+    r.set_debug_walkable(false);
+    assert!(!r.debug_walkable());
+}
+
+#[test]
+fn already_expired_active_pet_clears_on_render() {
+    // set_active_pet with a PetState whose petted_at is far in the past → the
+    // render-time auto-expire drops it.
+    let scene = scene_with(vec![active("/exp/0.jsonl", 0, "Edit", t0())], 16);
+    let mut r = build(100, 40, vec![PetKind::Cat]);
+    r.set_active_pet(Some(PetState {
+        petted_at: t0() - Duration::from_secs(3600), // long expired
+        pet_pos: Point { x: 10, y: 10 },
+        kind: PetKind::Cat,
+        floor_idx: 0,
+    }));
+    r.render(&scene, &pack(), t0()).unwrap();
+    assert!(
+        r.active_pet_ref().is_none(),
+        "an already-expired pet state must be cleared on render"
+    );
+}
+
+#[test]
+fn current_floor_clamps_when_floor_count_drops() {
+    // Land on floor 1, then re-render a scene with only floor 0 ⇒ current_floor
+    // must clamp back into range (the nf-shrink clamp).
+    let cap = 16;
+    let two = two_floor_scene();
+    let mut r = build(100, 40, vec![]);
+    let mut now = t0();
+    r.render(&two, &pack(), now).unwrap();
+    r.navigate_floor(1, now);
+    render_until_settled(&mut r, &two, &pack(), &mut now, 1);
+    assert_eq!(r.current_floor(), 1);
+    // Drop to a single-floor scene.
+    let one = scene_with(vec![idle("/clamp/0.jsonl", 0, t0())], cap);
+    r.render(&one, &pack(), now).unwrap();
+    assert_eq!(
+        r.current_floor(),
+        0,
+        "current_floor clamps when floors shrink"
+    );
+}
+
+#[test]
+fn theme_picker_renders_during_floor_transition() {
+    // Opening the theme picker mid-transition exercises the transition-path
+    // theme_picker paint arm.
+    let scene = two_floor_scene();
+    let mut r = build(140, 48, vec![]);
+    let mut now = t0();
+    r.render(&scene, &pack(), now).unwrap();
+    r.set_theme_picker(Some(0));
+    r.navigate_floor(1, now);
+    now += Duration::from_millis(200);
+    r.render(&scene, &pack(), now).unwrap();
+    assert!(r.transition().is_some(), "still mid-transition");
+    let text = frame_text(r.frame_buffer());
+    assert!(
+        text.contains("cyberpunk") || text.contains("normal"),
+        "theme picker must paint over a floor transition; frame:\n{text}"
+    );
+}

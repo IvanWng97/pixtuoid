@@ -157,6 +157,21 @@ mod tests {
     }
 
     #[test]
+    fn eased_progress_zero_duration_is_complete() {
+        // A zero-length animation reads as instantly complete (raw = 1.0),
+        // never divides by zero — covers the `duration_ms == 0` guard.
+        let start = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+        assert!(approx_eq(
+            eased_progress(start, 0, Easing::Linear, start),
+            1.0
+        ));
+        assert!(approx_eq(
+            eased_progress(start, 0, Easing::EaseOutCubic, start),
+            1.0
+        ));
+    }
+
+    #[test]
     fn eased_progress_applies_curve() {
         let start = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
         let now = start + Duration::from_millis(100);

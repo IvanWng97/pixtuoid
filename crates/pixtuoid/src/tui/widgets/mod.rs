@@ -154,6 +154,56 @@ mod tests {
         assert_eq!(out, "a-very-l");
     }
 
+    #[test]
+    fn truncate_label_plain_take_when_suffix_exceeds_budget() {
+        // The disambig suffix ("·abcdefgh") is longer than budget=4, so the
+        // suffix-preserving branch can't fit and it falls through to a plain
+        // budget-char take from the front.
+        let out = truncate_label("x\u{00b7}abcdefgh", 4);
+        assert_eq!(out.chars().count(), 4);
+        assert_eq!(out, "x\u{00b7}ab");
+    }
+
+    // --- TickerQueue -------------------------------------------------------
+
+    #[test]
+    fn ticker_default_is_empty() {
+        let q = TickerQueue::default();
+        assert_eq!(q.visible(40, SystemTime::UNIX_EPOCH), "");
+    }
+
+    #[test]
+    fn ticker_includes_waiting_reason() {
+        let mut q = TickerQueue::new();
+        let s = scene_of(vec![waiting("perm-agent")]);
+        q.update(&s);
+        // The Waiting arm formats "{label}: ?{reason}".
+        let text = q.visible(200, SystemTime::UNIX_EPOCH);
+        assert!(text.contains("perm-agent"), "got: {text}");
+        assert!(text.contains('?'), "waiting marker missing: {text}");
+    }
+
+    #[test]
+    fn ticker_trims_buffer_past_max() {
+        let mut q = TickerQueue::new();
+        // Push many distinct snapshots so the buffer grows past MAX_CHARS=512
+        // and the drain path runs. Each update with a NEW snapshot appends.
+        for i in 0..200 {
+            let label = format!("agent-with-a-fairly-long-name-{i:04}");
+            let s = scene_of(vec![active_with("Edit some/long/path.rs", &label)]);
+            q.update(&s);
+        }
+        // Buffer must have been trimmed: visible() still works and the kept
+        // text stays bounded near MAX_CHARS rather than growing unbounded.
+        let text = q.visible(40, SystemTime::UNIX_EPOCH);
+        assert_eq!(text.chars().count(), 40, "visible window must fill");
+        assert!(
+            q.buffer.chars().count() <= 512,
+            "buffer must be trimmed to MAX_CHARS, got {}",
+            q.buffer.chars().count()
+        );
+    }
+
     // --- build_status_summary ---------------------------------------------
 
     fn slot_with(state: ActivityState, label: &str) -> AgentSlot {

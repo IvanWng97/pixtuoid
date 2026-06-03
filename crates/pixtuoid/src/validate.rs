@@ -9,11 +9,14 @@ pub fn validate_pack(dir: &Path) -> Result<()> {
 
     let report = validate_pack_animations(&pack);
 
+    // ERROR diagnostics and the final tally go to stderr so stdout stays the
+    // parseable channel (the OK line, WARN/INFO advisories) even when a caller
+    // redirects stdout — errors also drive a non-zero exit via the bail! below.
     for name in &report.missing_required {
-        println!("ERROR: missing required animation \"{name}\"");
+        eprintln!("ERROR: missing required animation \"{name}\"");
     }
     for (name, need, got) in &report.insufficient_frames {
-        println!("ERROR: \"{name}\" needs at least {need} frames, has {got}");
+        eprintln!("ERROR: \"{name}\" needs at least {need} frames, has {got}");
     }
     for name in &report.missing_optional {
         println!("WARN:  missing optional animation \"{name}\" (will not render)");
@@ -24,7 +27,7 @@ pub fn validate_pack(dir: &Path) -> Result<()> {
 
     let errors = report.missing_required.len() + report.insufficient_frames.len();
     let warnings = report.missing_optional.len();
-    println!("\n{} error(s), {} warning(s)", errors, warnings);
+    eprintln!("\n{} error(s), {} warning(s)", errors, warnings);
 
     if report.has_errors() {
         bail!("pack validation failed with {errors} error(s)");
