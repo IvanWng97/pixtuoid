@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::time::SystemTime;
 
 use pixtuoid_core::state::ActivityState;
-use pixtuoid_core::walkable::OccupancyOverlay;
 use pixtuoid_core::{AgentId, SceneState};
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
@@ -11,8 +10,6 @@ use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
 
 use super::to_color;
 use crate::tui::layout::{Layout, DESK_W};
-use crate::tui::motion::MotionState;
-use crate::tui::pathfind::Router;
 use crate::tui::pet::PetKind;
 use crate::tui::pixel_painter::character_anchor;
 use crate::tui::pose;
@@ -44,10 +41,7 @@ pub(crate) fn paint_label_widgets(
     scene: &SceneState,
     layout: &Layout,
     now: SystemTime,
-    router: &mut dyn Router,
-    overlay: &OccupancyOverlay,
-    history: &mut pose::PoseHistory,
-    motion: &mut std::collections::HashMap<AgentId, MotionState>,
+    rctx: &mut pose::RouteCtx<'_>,
     scene_rect: Rect,
     hovered: Option<AgentId>,
     theme: &crate::tui::theme::Theme,
@@ -58,8 +52,7 @@ pub(crate) fn paint_label_widgets(
         *label_counts.entry(&*agent.label).or_insert(0) += 1;
     }
     for agent in &agents {
-        let Some(anchor) = character_anchor(agent, layout, now, router, overlay, history, motion)
-        else {
+        let Some(anchor) = character_anchor(agent, layout, now, rctx) else {
             continue;
         };
         let lx = scene_rect.x + anchor.x.saturating_sub(2);

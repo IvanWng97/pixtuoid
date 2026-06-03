@@ -116,10 +116,12 @@ fn walk_leg_freezes_path_against_midleg_reroute() {
         &slot1,
         now,
         &l,
-        &mut router,
-        &overlay,
-        &mut history,
-        &mut motion,
+        &mut crate::tui::pose::RouteCtx {
+            router: &mut router,
+            overlay: &overlay,
+            history: &mut history,
+            motion: &mut motion,
+        },
     );
     let calls_after_frame1 = router.calls;
 
@@ -130,10 +132,12 @@ fn walk_leg_freezes_path_against_midleg_reroute() {
         &slot2,
         later,
         &l,
-        &mut router,
-        &overlay,
-        &mut history,
-        &mut motion,
+        &mut crate::tui::pose::RouteCtx {
+            router: &mut router,
+            overlay: &overlay,
+            history: &mut history,
+            motion: &mut motion,
+        },
     );
 
     // The freeze means frame 2 re-routes nothing.
@@ -213,10 +217,12 @@ fn snap_back_walks_from_history_when_state_just_flipped() {
         &slot,
         now,
         &l,
-        &mut router,
-        &overlay,
-        &mut history,
-        &mut motion,
+        &mut crate::tui::pose::RouteCtx {
+            router: &mut router,
+            overlay: &overlay,
+            history: &mut history,
+            motion: &mut motion,
+        },
     ) {
         Some(Pose::Walking { from, .. }) => {
             assert_eq!(from, prev, "snap-back walk should start from recorded prev");
@@ -271,10 +277,12 @@ fn snap_back_origin_is_frozen_across_frames() {
             &slot,
             t,
             &l,
-            &mut router,
-            &overlay,
-            &mut history,
-            &mut motion,
+            &mut crate::tui::pose::RouteCtx {
+                router: &mut router,
+                overlay: &overlay,
+                history: &mut history,
+                motion: &mut motion,
+            },
         ) {
             Some(Pose::Walking { from, .. }) => origins.push((i, from)),
             other => panic!("frame {i}: expected Walking pose mid snap-back, got {other:?}"),
@@ -343,10 +351,12 @@ fn snap_back_cornered_leg_freezes_path_no_reroute() {
         &slot,
         now,
         &l,
-        &mut router,
-        &overlay,
-        &mut history,
-        &mut motion,
+        &mut crate::tui::pose::RouteCtx {
+            router: &mut router,
+            overlay: &overlay,
+            history: &mut history,
+            motion: &mut motion,
+        },
     );
     let calls_after_frame1 = router.calls;
     assert!(
@@ -360,10 +370,12 @@ fn snap_back_cornered_leg_freezes_path_no_reroute() {
         &slot,
         later,
         &l,
-        &mut router,
-        &overlay,
-        &mut history,
-        &mut motion,
+        &mut crate::tui::pose::RouteCtx {
+            router: &mut router,
+            overlay: &overlay,
+            history: &mut history,
+            motion: &mut motion,
+        },
     );
 
     // The frozen origin keeps `wp.from == from` matching, so frame 2 re-routes
@@ -432,10 +444,12 @@ fn snap_back_derive_is_idempotent_within_a_frame() {
             &slot,
             t,
             &l,
-            &mut router,
-            &overlay,
-            &mut history,
-            &mut motion,
+            &mut crate::tui::pose::RouteCtx {
+                router: &mut router,
+                overlay: &overlay,
+                history: &mut history,
+                motion: &mut motion,
+            },
         );
         let h0 = history.recent(slot.agent_id, 300, t);
         if arrived_frame.is_none()
@@ -451,10 +465,12 @@ fn snap_back_derive_is_idempotent_within_a_frame() {
                 &slot,
                 t,
                 &l,
-                &mut router,
-                &overlay,
-                &mut history,
-                &mut motion,
+                &mut crate::tui::pose::RouteCtx {
+                    router: &mut router,
+                    overlay: &overlay,
+                    history: &mut history,
+                    motion: &mut motion,
+                },
             );
             let hk = history.recent(slot.agent_id, 300, t);
             assert_eq!(
@@ -510,20 +526,24 @@ fn wander_derive_is_idempotent_within_a_frame() {
             &slot,
             &l,
             t,
-            &mut router,
-            &overlay,
-            &mut history,
-            &mut motion,
+            &mut crate::tui::pose::RouteCtx {
+                router: &mut router,
+                overlay: &overlay,
+                history: &mut history,
+                motion: &mut motion,
+            },
         );
         for k in 1..4 {
             let ak = character_anchor(
                 &slot,
                 &l,
                 t,
-                &mut router,
-                &overlay,
-                &mut history,
-                &mut motion,
+                &mut crate::tui::pose::RouteCtx {
+                    router: &mut router,
+                    overlay: &overlay,
+                    history: &mut history,
+                    motion: &mut motion,
+                },
             );
             assert_eq!(
                 a0, ak,
@@ -564,10 +584,12 @@ fn snap_back_long_distance_renders_past_window_by_physics() {
             &slot,
             t,
             &l,
-            &mut router,
-            &overlay,
-            &mut history,
-            &mut motion,
+            &mut crate::tui::pose::RouteCtx {
+                router: &mut router,
+                overlay: &overlay,
+                history: &mut history,
+                motion: &mut motion,
+            },
         ) {
             Some(Pose::Walking { .. }) if i * 33 > SNAP_BACK_MS => walking_after_window = true,
             Some(Pose::Walking { .. }) => {}
@@ -625,10 +647,12 @@ fn snap_back_routes_via_the_approach_cell_then_settles_onto_the_chair() {
         &slot,
         now,
         &l,
-        &mut router,
-        &overlay,
-        &mut history,
-        &mut motion,
+        &mut crate::tui::pose::RouteCtx {
+            router: &mut router,
+            overlay: &overlay,
+            history: &mut history,
+            motion: &mut motion,
+        },
     )
     .expect("snap-back renders a pose");
     assert!(
@@ -673,10 +697,12 @@ fn snap_back_skipped_when_prev_within_min_distance() {
         &slot,
         now,
         &l,
-        &mut router,
-        &overlay,
-        &mut history,
-        &mut motion,
+        &mut crate::tui::pose::RouteCtx {
+            router: &mut router,
+            overlay: &overlay,
+            history: &mut history,
+            motion: &mut motion,
+        },
     );
     assert!(
         matches!(p, Some(Pose::SeatedTyping { .. })),
@@ -707,10 +733,12 @@ fn snap_back_skipped_after_900ms_window() {
         &slot,
         now,
         &l,
-        &mut router,
-        &overlay,
-        &mut history,
-        &mut motion,
+        &mut crate::tui::pose::RouteCtx {
+            router: &mut router,
+            overlay: &overlay,
+            history: &mut history,
+            motion: &mut motion,
+        },
     );
     assert!(
         matches!(p, Some(Pose::SeatedTyping { .. })),
@@ -731,10 +759,12 @@ fn snap_back_skipped_without_recent_history() {
         &slot,
         now,
         &l,
-        &mut router,
-        &overlay,
-        &mut history,
-        &mut motion,
+        &mut crate::tui::pose::RouteCtx {
+            router: &mut router,
+            overlay: &overlay,
+            history: &mut history,
+            motion: &mut motion,
+        },
     );
     assert!(
         matches!(p, Some(Pose::SeatedTyping { .. })),
@@ -766,10 +796,12 @@ fn multi_segment_path_maps_t_to_segment_via_octile_distance() {
         &slot,
         now,
         &l,
-        &mut router,
-        &overlay,
-        &mut history,
-        &mut motion,
+        &mut crate::tui::pose::RouteCtx {
+            router: &mut router,
+            overlay: &overlay,
+            history: &mut history,
+            motion: &mut motion,
+        },
     );
     match p {
         Some(Pose::Walking {
@@ -830,10 +862,12 @@ fn at_waypoint_pose_records_position_to_history() {
         &slot,
         now,
         &l,
-        &mut router,
-        &overlay,
-        &mut history,
-        &mut motion,
+        &mut crate::tui::pose::RouteCtx {
+            router: &mut router,
+            overlay: &overlay,
+            history: &mut history,
+            motion: &mut motion,
+        },
     );
     // SeatedIdle isn't recorded — that's the contract.
     assert!(
@@ -856,10 +890,12 @@ fn delegates_to_derive_for_oob_desk() {
         &slot,
         now,
         &l,
-        &mut router,
-        &overlay,
-        &mut history,
-        &mut motion
+        &mut crate::tui::pose::RouteCtx {
+            router: &mut router,
+            overlay: &overlay,
+            history: &mut history,
+            motion: &mut motion
+        }
     )
     .is_none());
 }
@@ -921,10 +957,12 @@ fn snap_back_progress_is_physics_eased_not_linear() {
         &slot,
         now,
         &l,
-        &mut router,
-        &overlay,
-        &mut history,
-        &mut motion,
+        &mut crate::tui::pose::RouteCtx {
+            router: &mut router,
+            overlay: &overlay,
+            history: &mut history,
+            motion: &mut motion,
+        },
     );
     let ms = motion
         .get(&slot.agent_id)
@@ -950,10 +988,12 @@ fn snap_back_progress_is_physics_eased_not_linear() {
         &slot_q,
         quarter_now,
         &l,
-        &mut router,
-        &overlay,
-        &mut history2,
-        &mut motion,
+        &mut crate::tui::pose::RouteCtx {
+            router: &mut router,
+            overlay: &overlay,
+            history: &mut history2,
+            motion: &mut motion,
+        },
     );
 
     match p {
@@ -996,10 +1036,12 @@ fn snap_back_profile_stored_in_motion_state() {
         &slot,
         now,
         &l,
-        &mut router,
-        &overlay,
-        &mut history,
-        &mut motion,
+        &mut crate::tui::pose::RouteCtx {
+            router: &mut router,
+            overlay: &overlay,
+            history: &mut history,
+            motion: &mut motion,
+        },
     );
     let dur1 = motion
         .get(&slot.agent_id)
@@ -1015,10 +1057,12 @@ fn snap_back_profile_stored_in_motion_state() {
         &slot2,
         t2,
         &l,
-        &mut router,
-        &overlay,
-        &mut history,
-        &mut motion,
+        &mut crate::tui::pose::RouteCtx {
+            router: &mut router,
+            overlay: &overlay,
+            history: &mut history,
+            motion: &mut motion,
+        },
     );
     let dur2 = motion
         .get(&slot2.agent_id)
@@ -1058,10 +1102,12 @@ fn snap_back_rearms_on_new_state_transition() {
         &slot0,
         t0,
         &l,
-        &mut router,
-        &overlay,
-        &mut history,
-        &mut motion,
+        &mut crate::tui::pose::RouteCtx {
+            router: &mut router,
+            overlay: &overlay,
+            history: &mut history,
+            motion: &mut motion,
+        },
     );
     let stored0 = motion
         .get(&slot0.agent_id)
@@ -1085,10 +1131,12 @@ fn snap_back_rearms_on_new_state_transition() {
         &slot1,
         now1,
         &l,
-        &mut router,
-        &overlay,
-        &mut history,
-        &mut motion,
+        &mut crate::tui::pose::RouteCtx {
+            router: &mut router,
+            overlay: &overlay,
+            history: &mut history,
+            motion: &mut motion,
+        },
     );
     let stored1 = motion
         .get(&slot1.agent_id)
@@ -1201,19 +1249,23 @@ fn entry_duration_scales_with_path_longer_desk_takes_longer() {
         &near,
         now,
         &l,
-        &mut router_n,
-        &overlay,
-        &mut hist_near,
-        &mut motion_near,
+        &mut crate::tui::pose::RouteCtx {
+            router: &mut router_n,
+            overlay: &overlay,
+            history: &mut hist_near,
+            motion: &mut motion_near,
+        },
     );
     let _pf = derive_with_routing(
         &far,
         now,
         &l,
-        &mut router_f,
-        &overlay,
-        &mut hist_far,
-        &mut motion_far,
+        &mut crate::tui::pose::RouteCtx {
+            router: &mut router_f,
+            overlay: &overlay,
+            history: &mut hist_far,
+            motion: &mut motion_far,
+        },
     );
 
     let dur_near = motion_near[&near.agent_id]
@@ -1261,19 +1313,23 @@ fn nearer_desk_arrives_before_farther_desk() {
         &near,
         now,
         &l,
-        &mut router_n,
-        &overlay,
-        &mut hist_near,
-        &mut motion_near,
+        &mut crate::tui::pose::RouteCtx {
+            router: &mut router_n,
+            overlay: &overlay,
+            history: &mut hist_near,
+            motion: &mut motion_near,
+        },
     );
     let _ = derive_with_routing(
         &far,
         now,
         &l,
-        &mut router_f,
-        &overlay,
-        &mut hist_far,
-        &mut motion_far,
+        &mut crate::tui::pose::RouteCtx {
+            router: &mut router_f,
+            overlay: &overlay,
+            history: &mut hist_far,
+            motion: &mut motion_far,
+        },
     );
 
     // Advance time past the near desk's duration+pause but stay within
@@ -1292,19 +1348,23 @@ fn nearer_desk_arrives_before_farther_desk() {
         &near,
         t1,
         &l,
-        &mut router_n,
-        &overlay,
-        &mut hist_near,
-        &mut motion_near,
+        &mut crate::tui::pose::RouteCtx {
+            router: &mut router_n,
+            overlay: &overlay,
+            history: &mut hist_near,
+            motion: &mut motion_near,
+        },
     );
     let p_far = derive_with_routing(
         &far,
         t1,
         &l,
-        &mut router_f,
-        &overlay,
-        &mut hist_far,
-        &mut motion_far,
+        &mut crate::tui::pose::RouteCtx {
+            router: &mut router_f,
+            overlay: &overlay,
+            history: &mut hist_far,
+            motion: &mut motion_far,
+        },
     );
 
     assert!(
@@ -1341,10 +1401,12 @@ fn five_same_created_at_agents_have_distinct_entry_durations() {
             &slot,
             now,
             &l,
-            &mut router,
-            &overlay,
-            &mut hist,
-            &mut motion,
+            &mut crate::tui::pose::RouteCtx {
+                router: &mut router,
+                overlay: &overlay,
+                history: &mut hist,
+                motion: &mut motion,
+            },
         );
         let dur = motion[&id]
             .entry
@@ -1379,10 +1441,12 @@ fn exit_profile_snapshotted_once_not_on_subsequent_calls() {
         &slot,
         now,
         &l,
-        &mut router,
-        &overlay,
-        &mut hist,
-        &mut motion,
+        &mut crate::tui::pose::RouteCtx {
+            router: &mut router,
+            overlay: &overlay,
+            history: &mut hist,
+            motion: &mut motion,
+        },
     );
     let (started_at_1, _, _) = motion[&slot.agent_id]
         .exit
@@ -1392,7 +1456,17 @@ fn exit_profile_snapshotted_once_not_on_subsequent_calls() {
 
     // Second call 100 ms later: must not re-snapshot.
     let t1 = now + Duration::from_millis(100);
-    let _ = derive_with_routing(&slot, t1, &l, &mut router, &overlay, &mut hist, &mut motion);
+    let _ = derive_with_routing(
+        &slot,
+        t1,
+        &l,
+        &mut crate::tui::pose::RouteCtx {
+            router: &mut router,
+            overlay: &overlay,
+            history: &mut hist,
+            motion: &mut motion,
+        },
+    );
     let (started_at_2, _, _) = motion[&slot.agent_id]
         .exit
         .as_ref()
@@ -1438,7 +1512,7 @@ fn exit_far_completes_before_grace_window_no_vanish() {
     let overlay = pixtuoid_core::walkable::OccupancyOverlay::new();
     let mut hist = PoseHistory::new();
     let mut motion = HashMap::new();
-    match derive_with_routing(&slot, now, &l, &mut router, &overlay, &mut hist, &mut motion) {
+    match derive_with_routing(&slot, now, &l, &mut crate::tui::pose::RouteCtx { router: &mut router, overlay: &overlay, history: &mut hist, motion: &mut motion }) {
             // Reached the door (Walking at the end of the path) or already
             // arrived (None, GC imminent). Either way: NOT stuck mid-corridor.
             Some(Pose::Walking { t_x1000, .. }) => assert!(
@@ -1478,10 +1552,12 @@ fn exit_uses_commute_speed_faster_than_wander() {
         &slot,
         now,
         &l,
-        &mut router,
-        &overlay,
-        &mut hist,
-        &mut motion,
+        &mut crate::tui::pose::RouteCtx {
+            router: &mut router,
+            overlay: &overlay,
+            history: &mut hist,
+            motion: &mut motion,
+        },
     );
     let profile = &motion[&slot.agent_id]
         .exit
@@ -1528,10 +1604,12 @@ fn exit_with_no_door_does_not_vanish() {
         &slot,
         now,
         &l,
-        &mut router,
-        &overlay,
-        &mut hist,
-        &mut motion,
+        &mut crate::tui::pose::RouteCtx {
+            router: &mut router,
+            overlay: &overlay,
+            history: &mut hist,
+            motion: &mut motion,
+        },
     );
     assert!(
         p.is_some(),
@@ -1607,10 +1685,12 @@ fn max_anchor_step(
             slot,
             l,
             now,
-            &mut router,
-            &overlay,
-            &mut history,
-            &mut motion,
+            &mut crate::tui::pose::RouteCtx {
+                router: &mut router,
+                overlay: &overlay,
+                history: &mut history,
+                motion: &mut motion,
+            },
         ) {
             if let Some(p) = prev {
                 let step = (a.x as i32 - p.x as i32)
@@ -1705,10 +1785,12 @@ fn desk_entry_routes_around_the_desk_then_settles_onto_the_chair() {
         &slot,
         now,
         &l,
-        &mut router,
-        &overlay,
-        &mut history,
-        &mut motion,
+        &mut crate::tui::pose::RouteCtx {
+            router: &mut router,
+            overlay: &overlay,
+            history: &mut history,
+            motion: &mut motion,
+        },
     )
     .expect("entering agent renders a pose");
     assert!(
@@ -1782,10 +1864,12 @@ fn wander_legs_approach_the_desk_via_an_allowed_side_not_through_the_front() {
             &slot,
             t,
             &l,
-            &mut router,
-            &overlay,
-            &mut history,
-            &mut motion,
+            &mut crate::tui::pose::RouteCtx {
+                router: &mut router,
+                overlay: &overlay,
+                history: &mut history,
+                motion: &mut motion,
+            },
         );
         let Some(snap) = motion.get(&trip_id).and_then(|m| m.walk_path.as_ref()) else {
             continue;
@@ -1879,10 +1963,12 @@ fn exit_from_desk_rises_off_the_chair_via_the_approach_cell() {
         &slot,
         now,
         &l,
-        &mut router,
-        &overlay,
-        &mut history,
-        &mut motion,
+        &mut crate::tui::pose::RouteCtx {
+            router: &mut router,
+            overlay: &overlay,
+            history: &mut history,
+            motion: &mut motion,
+        },
     )
     .expect("exiting agent renders a pose");
     assert!(
@@ -1969,7 +2055,18 @@ fn wander_interrupted_by_active_does_not_teleport() {
         let o2 = pixtuoid_core::walkable::OccupancyOverlay::new();
         let mut h2 = PoseHistory::new();
         let mut m2: HashMap<AgentId, MotionState> = HashMap::new();
-        ca(&idle, &l, now, &mut r2, &o2, &mut h2, &mut m2).expect("anchor")
+        ca(
+            &idle,
+            &l,
+            now,
+            &mut crate::tui::pose::RouteCtx {
+                router: &mut r2,
+                overlay: &o2,
+                history: &mut h2,
+                motion: &mut m2,
+            },
+        )
+        .expect("anchor")
     };
 
     // Step the idle wander until the agent is clearly mid-walk (anchor far
@@ -1982,10 +2079,12 @@ fn wander_interrupted_by_active_does_not_teleport() {
             &idle,
             &l,
             t,
-            &mut router,
-            &overlay,
-            &mut history,
-            &mut motion,
+            &mut crate::tui::pose::RouteCtx {
+                router: &mut router,
+                overlay: &overlay,
+                history: &mut history,
+                motion: &mut motion,
+            },
         ) {
             let d = (a.x as i32 - seated.x as i32)
                 .abs()
@@ -2017,10 +2116,12 @@ fn wander_interrupted_by_active_does_not_teleport() {
             &active,
             &l,
             t,
-            &mut router,
-            &overlay,
-            &mut history,
-            &mut motion,
+            &mut crate::tui::pose::RouteCtx {
+                router: &mut router,
+                overlay: &overlay,
+                history: &mut history,
+                motion: &mut motion,
+            },
         ) {
             let step = (a.x as i32 - prev.x as i32)
                 .abs()
@@ -2071,10 +2172,12 @@ fn floor_offscreen_then_resume_does_not_replay() {
             &slot,
             &l,
             t,
-            &mut router,
-            &overlay,
-            &mut history,
-            &mut motion,
+            &mut crate::tui::pose::RouteCtx {
+                router: &mut router,
+                overlay: &overlay,
+                history: &mut history,
+                motion: &mut motion,
+            },
         );
     }
 
@@ -2088,10 +2191,12 @@ fn floor_offscreen_then_resume_does_not_replay() {
             &slot,
             &l,
             t,
-            &mut router,
-            &overlay,
-            &mut history,
-            &mut motion,
+            &mut crate::tui::pose::RouteCtx {
+                router: &mut router,
+                overlay: &overlay,
+                history: &mut history,
+                motion: &mut motion,
+            },
         ) {
             if let Some(p) = prev {
                 let step = (a.x as i32 - p.x as i32)
@@ -2143,7 +2248,18 @@ fn exit_while_wandering_does_not_teleport_to_desk() {
         let o2 = pixtuoid_core::walkable::OccupancyOverlay::new();
         let mut h2 = PoseHistory::new();
         let mut m2: HashMap<AgentId, MotionState> = HashMap::new();
-        character_anchor(&idle, &l, now, &mut r2, &o2, &mut h2, &mut m2).expect("anchor")
+        character_anchor(
+            &idle,
+            &l,
+            now,
+            &mut crate::tui::pose::RouteCtx {
+                router: &mut r2,
+                overlay: &o2,
+                history: &mut h2,
+                motion: &mut m2,
+            },
+        )
+        .expect("anchor")
     };
 
     // Step until the agent is clearly away from its desk.
@@ -2155,10 +2271,12 @@ fn exit_while_wandering_does_not_teleport_to_desk() {
             &idle,
             &l,
             t,
-            &mut router,
-            &overlay,
-            &mut history,
-            &mut motion,
+            &mut crate::tui::pose::RouteCtx {
+                router: &mut router,
+                overlay: &overlay,
+                history: &mut history,
+                motion: &mut motion,
+            },
         ) {
             last = a;
             let d = (a.x as i32 - seat.x as i32)
@@ -2184,10 +2302,12 @@ fn exit_while_wandering_does_not_teleport_to_desk() {
         &exiting,
         &l,
         t_next,
-        &mut router,
-        &overlay,
-        &mut history,
-        &mut motion,
+        &mut crate::tui::pose::RouteCtx {
+            router: &mut router,
+            overlay: &overlay,
+            history: &mut history,
+            motion: &mut motion,
+        },
     )
     .expect("exit pose");
     let jump = (first_exit.x as i32 - last.x as i32)
@@ -2207,10 +2327,12 @@ fn exit_while_wandering_does_not_teleport_to_desk() {
             &exiting,
             &l,
             t,
-            &mut router,
-            &overlay,
-            &mut history,
-            &mut motion,
+            &mut crate::tui::pose::RouteCtx {
+                router: &mut router,
+                overlay: &overlay,
+                history: &mut history,
+                motion: &mut motion,
+            },
         ) {
             Some(a) => {
                 let step = (a.x as i32 - prev.x as i32)
@@ -2364,10 +2486,12 @@ fn frozen_leg_anchor_continuous_across_router_shape_change() {
             &slot,
             t,
             &l,
-            &mut router,
-            &overlay,
-            &mut history,
-            &mut motion,
+            &mut crate::tui::pose::RouteCtx {
+                router: &mut router,
+                overlay: &overlay,
+                history: &mut history,
+                motion: &mut motion,
+            },
         ) {
             let pos = walking_position(from, to, t_x1000);
             if let Some(p) = prev {
@@ -2433,9 +2557,17 @@ fn multiple_agents_share_overlay_without_teleport() {
             }
         }
         for s in &slots {
-            if let Some(a) =
-                character_anchor(s, &l, t, &mut router, &overlay, &mut history, &mut motion)
-            {
+            if let Some(a) = character_anchor(
+                s,
+                &l,
+                t,
+                &mut crate::tui::pose::RouteCtx {
+                    router: &mut router,
+                    overlay: &overlay,
+                    history: &mut history,
+                    motion: &mut motion,
+                },
+            ) {
                 if let Some(p) = prev.get(&s.agent_id) {
                     let step = (a.x as i32 - p.x as i32)
                         .abs()

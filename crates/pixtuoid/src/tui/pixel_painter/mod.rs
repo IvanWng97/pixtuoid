@@ -532,10 +532,12 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
                 a,
                 ctx.now,
                 ctx.layout,
-                ctx.router,
-                ctx.overlay,
-                ctx.history,
-                ctx.motion,
+                &mut crate::tui::pose::RouteCtx {
+                    router: &mut *ctx.router,
+                    overlay: &*ctx.overlay,
+                    history: &mut *ctx.history,
+                    motion: &mut *ctx.motion,
+                },
             );
             let seated = matches!(p, Some(Pose::SeatedTyping { .. } | Pose::SeatedThinking));
             (a.desk_index, seated)
@@ -1016,10 +1018,12 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
             agent,
             ctx.now,
             ctx.layout,
-            ctx.router,
-            ctx.overlay,
-            ctx.history,
-            ctx.motion,
+            &mut crate::tui::pose::RouteCtx {
+                router: &mut *ctx.router,
+                overlay: &*ctx.overlay,
+                history: &mut *ctx.history,
+                motion: &mut *ctx.motion,
+            },
         ) else {
             continue;
         };

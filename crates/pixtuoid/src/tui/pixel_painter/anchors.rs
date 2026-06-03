@@ -8,12 +8,9 @@
 use std::time::SystemTime;
 
 use pixtuoid_core::layout::{SEAT_RENDER_Y_OFF, WALKING_Y_OFF};
-use pixtuoid_core::walkable::OccupancyOverlay;
 use pixtuoid_core::AgentSlot;
 
 use crate::tui::layout::{Point, WaypointKind, DESK_W};
-use crate::tui::motion::MotionState;
-use crate::tui::pathfind::Router;
 use crate::tui::pose::{self, Pose};
 
 /// Default character sprite width (the bundled pack is 8×12). Used to anchor
@@ -132,18 +129,14 @@ pub(in crate::tui) fn walking_position(from: Point, to: Point, t_x1000: u16) -> 
 /// desk. Returns the top-left anchor of the character sprite. Uses
 /// `derive_with_routing` so labels track agents along their A* path
 /// instead of jumping the straight-line midpoint.
-#[allow(clippy::too_many_arguments)]
 pub(in crate::tui) fn character_anchor(
     agent: &AgentSlot,
     layout: &crate::tui::layout::Layout,
     now: SystemTime,
-    router: &mut dyn Router,
-    overlay: &OccupancyOverlay,
-    history: &mut pose::PoseHistory,
-    motion: &mut std::collections::HashMap<pixtuoid_core::AgentId, MotionState>,
+    rctx: &mut pose::RouteCtx<'_>,
 ) -> Option<Point> {
     let desk = *layout.home_desks.get(agent.desk_index)?;
-    let pose = pose::derive_with_routing(agent, now, layout, router, overlay, history, motion)?;
+    let pose = pose::derive_with_routing(agent, now, layout, rctx)?;
     // Labels anchor off the DEFAULT character width — a custom pack's true
     // width isn't threaded here and ±1px doesn't matter for a text label.
     let w = CHARACTER_SPRITE_W;

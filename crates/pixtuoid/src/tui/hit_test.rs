@@ -3,12 +3,9 @@
 
 use std::time::SystemTime;
 
-use pixtuoid_core::walkable::OccupancyOverlay;
 use pixtuoid_core::{AgentId, SceneState};
 
 use crate::tui::layout::Layout;
-use crate::tui::motion::MotionState;
-use crate::tui::pathfind::Router;
 use crate::tui::pet::PetKind;
 use crate::tui::pixel_painter::character_anchor;
 use crate::tui::pose;
@@ -20,15 +17,11 @@ use crate::tui::pose;
 /// The character sprite is 8×12 pixels, which in cell space is 8 cells
 /// wide × 6 cells tall (one cell = 2 vertical pixels). We test against
 /// that exact bounding box anchored on the agent's `character_anchor`.
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn hit_test_agent(
     scene: &SceneState,
     layout: &Layout,
     now: SystemTime,
-    router: &mut dyn Router,
-    overlay: &OccupancyOverlay,
-    history: &mut pose::PoseHistory,
-    motion: &mut std::collections::HashMap<AgentId, MotionState>,
+    rctx: &mut pose::RouteCtx<'_>,
     mx: u16,
     my: u16,
 ) -> Option<AgentId> {
@@ -38,8 +31,7 @@ pub(crate) fn hit_test_agent(
     // Height-in-cells: sprite is 12 px tall = 6 cells.
     const SPRITE_H_CELLS: u16 = 6;
     for agent in scene.agents.values() {
-        let Some(anchor) = character_anchor(agent, layout, now, router, overlay, history, motion)
-        else {
+        let Some(anchor) = character_anchor(agent, layout, now, rctx) else {
             continue;
         };
         let cell_x = anchor.x;
