@@ -56,6 +56,7 @@ tui/
                     character_anchor; the per-pose anchor fns take `sprite_w` — the pack's character width,
                     resolved ONCE per frame [8 bundled / 10 robot] — so a non-8-wide pack centers correctly),
                     furniture.rs (coffee table, area rug, side table, pantry table/chair),
+                    glass.rs (frosted-glass room-divider walls: consts + stitch + paint_glass_wall_h/v),
                     tests.rs (sibling unit suite, extracted from mod.rs)
 ```
 
