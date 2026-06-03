@@ -79,7 +79,8 @@ setup-tools:
         cargo install "${tools[@]}"
     fi
 
-# Full pre-push gate: the core checks CI runs, in the same order.
+# Full pre-push gate: the checks worth running locally before a push.
+# (semver, coverage, and smoke are CI-only — network baseline / heavy builds.)
 preflight: lint clippy hack test
 
 # Regenerate every docs/images screenshot + demo.gif from a release build.

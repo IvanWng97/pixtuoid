@@ -90,13 +90,19 @@ See `.claude/skills/beautify-decoration/SKILL.md` for the full iteration loop, s
 
 The `justfile` is the **single source of truth** for what each check runs —
 `.github/workflows/ci.yml` and the git hooks call the same recipes, so there's
-no CI-vs-local drift to maintain. Requires `just` (`brew install just`).
+no CI-vs-local drift to maintain. Requires `just` (`brew install just`); the
+checks also need a handful of cargo tools — `just setup-tools` installs them
+(cargo-hack, cargo-nextest, cargo-machete, cargo-deny, cargo-semver-checks).
 
 ```
 just              # list recipes
-just preflight    # full pre-push gate: lint (fmt+machete+deny, parallel) → clippy → test
+just setup-tools  # install the dev tools the checks need (run once per clone)
+just preflight    # full pre-push gate: lint (fmt+machete+deny, parallel) → clippy → hack → test
 just fmt          # auto-format
 ```
+
+(`hack` is `cargo hack --feature-powerset` — it catches code that only builds
+with `test-renderer` on. `semver` and `coverage`/`smoke` are CI-only.)
 
 Run `just preflight` locally to avoid the round-trip of "push → wait for CI →
 red → fix → push again."
