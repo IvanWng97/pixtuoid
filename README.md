@@ -133,6 +133,13 @@ theme = "cyberpunk"
 max-desks = 8
 pack-dir = "~/.config/pixtuoid/packs/robot"
 enabled-pets = ["cat", "dog"]
+
+# Custom pet names (shown in the pet's hover tooltip). Omit a kind to keep
+# its default ("Office Cat" / "Office Dog"). Must be the LAST section — it's
+# a TOML table, so it goes below all the plain keys above.
+[pet-names]
+cat = "Whiskers"
+dog = "Rex"
 ```
 
 **User settings** (safe to edit):
@@ -143,6 +150,7 @@ enabled-pets = ["cat", "dog"]
 | `max-desks` | auto | Cap desks per floor. If unset, auto-computed from terminal size. Excess agents overflow to additional floors. |
 | `pack-dir` | — | Custom sprite pack directory. Supports `~` expansion. |
 | `enabled-pets` | `["cat", "dog"]` | Which pets appear in the office. Omit or list a subset (`["cat"]`) to disable some. |
+| `[pet-names]` | default names | Custom display name per pet kind, shown in the pet's hover tooltip (`cat = "Whiskers"`). Omit a kind to keep its default (`Office Cat` / `Office Dog`). A `[table]`, so place it last. |
 
 **System-managed** (don't edit — pixtuoid writes these for you):
 
