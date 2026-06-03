@@ -44,13 +44,14 @@ lint:
     [[ $fail -eq 0 ]]
 
 # Workspace tests — nextest if available (parallel + JUnit), else cargo test.
-test:
+# Extra args are forwarded: `just test reducer::` filters; preflight passes none.
+test *args:
     #!/usr/bin/env bash
     set -euo pipefail
     if command -v cargo-nextest &>/dev/null; then
-        cargo nextest run --workspace --features {{ features }}
+        cargo nextest run --workspace --features {{ features }} {{ args }}
     else
-        cargo test --workspace --features {{ features }}
+        cargo test --workspace --features {{ features }} {{ args }}
     fi
 
 # Feature-combination check — every feature subset must compile. Catches code
@@ -63,6 +64,20 @@ hack:
 # (the headless lib others depend on); the binary crates' libs aren't public API.
 semver:
     cargo semver-checks --package pixtuoid-core
+
+# Install the dev tools every check relies on (idempotent). Prefers
+# cargo-binstall (prebuilt) and falls back to cargo install (compiles).
+setup-tools:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    tools=(cargo-nextest cargo-machete cargo-deny cargo-hack cargo-semver-checks)
+    if command -v cargo-binstall &>/dev/null; then
+        cargo binstall -y "${tools[@]}"
+    else
+        echo "cargo-binstall not found — compiling from source (slow)." >&2
+        echo "brew install cargo-binstall (or cargo install cargo-binstall) to grab prebuilt binaries instead." >&2
+        cargo install "${tools[@]}"
+    fi
 
 # Full pre-push gate: the core checks CI runs, in the same order.
 preflight: lint clippy hack test
