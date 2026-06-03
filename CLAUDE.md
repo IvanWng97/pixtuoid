@@ -133,7 +133,7 @@ Don't be surprised by these. **Full explanation (the WHY) lives in the nested `C
 **`pixtuoid-core`** (see [`crates/pixtuoid-core/CLAUDE.md`](crates/pixtuoid-core/CLAUDE.md)):
 - CC hook payloads DO include `tool_use_id` (hook-wins dedup fires).
 - CC hook `transcript_path` always points to the PARENT transcript → `active_tasks` suppresses subagent-leak; **liveness flows UP** (`refresh_lineage`) so a working subagent keeps its ancestors fresh and a long delegation isn't stale-swept.
-- JSONL watcher skips historical transcripts on startup (1-hour mtime window + session-end tail scan).
+- JSONL watcher gates historical/ended transcripts on EVERY first-sight path (initial seed, 250ms rescan, 60s poll, notify) — not just startup: `should_seed_at_eof` in `walk_jsonl` (1-hour mtime window + session-end tail scan → seed cursor at EOF, no `SessionStart`). Unifying this gate was the #85 fix.
 - Agent removal needs a `SessionEnd`; abrupt exits (Ctrl-C / Codex) have none → fall back to the slow stale-sweep, which cascade-exits the parent's whole subagent subtree — but only once the subtree is genuinely silent (liveness-vs-readiness guards: `refresh_lineage` up-propagation + `has_waiting_ancestor` exemption for permission-blocked subagents).
 - Subagent display names come from `attributionAgent` in JSONL.
 - The subagent-dispatch tool is **`Agent`** in current CC (not `Task`); `make_tool_detail` maps both → `ToolDetail::Task`. Missing the name silently disables subagent-leak suppression + b1 completion.
