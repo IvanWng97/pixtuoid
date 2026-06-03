@@ -37,21 +37,21 @@ const GLASS_CAP_PX: u16 = WALL_THICK_H_PX;
 fn glass_tones(theme: &crate::tui::theme::Theme) -> (Rgb, Rgb, Rgb) {
     let tl = theme.office.room_wall_trim_light;
     (
-        Rgb(
-            tl.0.saturating_add(125),
-            tl.1.saturating_add(135),
-            tl.2.saturating_add(124),
-        ),
-        Rgb(
-            tl.0.saturating_add(70),
-            tl.1.saturating_add(100),
-            tl.2.saturating_add(116),
-        ),
-        Rgb(
-            tl.0.saturating_add(18),
-            tl.1.saturating_add(52),
-            tl.2.saturating_add(86),
-        ),
+        Rgb {
+            r: tl.r.saturating_add(125),
+            g: tl.g.saturating_add(135),
+            b: tl.b.saturating_add(124),
+        },
+        Rgb {
+            r: tl.r.saturating_add(70),
+            g: tl.g.saturating_add(100),
+            b: tl.b.saturating_add(116),
+        },
+        Rgb {
+            r: tl.r.saturating_add(18),
+            g: tl.g.saturating_add(52),
+            b: tl.b.saturating_add(86),
+        },
     )
 }
 
@@ -93,7 +93,11 @@ pub(super) fn stitch_vertical_wall(
 
 fn glass_over(buf: &RgbBuffer, x: u16, y: u16, g: Rgb, a: f32) -> Rgb {
     let b = buf.get(x, y);
-    Rgb(blend(b.0, g.0, a), blend(b.1, g.1, a), blend(b.2, g.2, a))
+    Rgb {
+        r: blend(b.r, g.r, a),
+        g: blend(b.g, g.g, a),
+        b: blend(b.b, g.b, a),
+    }
 }
 
 /// Paint a horizontal (E-W) frosted-glass wall strip: lit top edge → body →

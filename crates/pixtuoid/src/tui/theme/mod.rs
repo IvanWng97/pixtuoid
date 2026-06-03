@@ -221,7 +221,7 @@ mod tests {
     #[test]
     fn appliance_palette_is_legible_for_every_theme() {
         fn lum(c: Rgb) -> u32 {
-            c.0 as u32 + c.1 as u32 + c.2 as u32
+            c.r as u32 + c.g as u32 + c.b as u32
         }
         for t in ALL_THEMES {
             let a = &t.appliance;

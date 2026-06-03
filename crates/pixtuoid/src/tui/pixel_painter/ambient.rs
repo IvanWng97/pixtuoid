@@ -123,11 +123,11 @@ pub(super) fn paint_ceiling_halos(buf: &mut RgbBuffer, theme: &Theme, halos: &[C
                 buf.put(
                     x,
                     y,
-                    Rgb(
-                        blend(cur.0, halo.color.0, strength),
-                        blend(cur.1, halo.color.1, strength),
-                        blend(cur.2, halo.color.2, strength),
-                    ),
+                    Rgb {
+                        r: blend(cur.r, halo.color.r, strength),
+                        g: blend(cur.g, halo.color.g, strength),
+                        b: blend(cur.b, halo.color.b, strength),
+                    },
                 );
             }
         }
@@ -227,11 +227,11 @@ pub(super) fn paint_dust_motes(
             buf.put(
                 x,
                 y,
-                Rgb(
-                    blend(cur.0, warm.0, strength),
-                    blend(cur.1, warm.1, strength),
-                    blend(cur.2, warm.2, strength),
-                ),
+                Rgb {
+                    r: blend(cur.r, warm.r, strength),
+                    g: blend(cur.g, warm.g, strength),
+                    b: blend(cur.b, warm.b, strength),
+                },
             );
         }
     }
@@ -264,11 +264,11 @@ pub(super) fn paint_sun_spot(buf: &mut RgbBuffer, theme: &Theme, layout: &Layout
     let warm = theme.lighting.sun_spill;
     // Blend warm toward white as the sun climbs (warmth → 0 at noon).
     let cool = 1.0 - spot.warmth;
-    let color = Rgb(
-        blend(warm.0, 255, cool * 0.6),
-        blend(warm.1, 255, cool * 0.6),
-        blend(warm.2, 255, cool * 0.6),
-    );
+    let color = Rgb {
+        r: blend(warm.r, 255, cool * 0.6),
+        g: blend(warm.g, 255, cool * 0.6),
+        b: blend(warm.b, 255, cool * 0.6),
+    };
 
     // A visible sun rectangle, not a 4px speck: keep a generous floor size so
     // the radial falloff doesn't collapse the spot to nothing on the dark wall.
@@ -332,11 +332,11 @@ pub(super) fn paint_sun_spot(buf: &mut RgbBuffer, theme: &Theme, layout: &Layout
             buf.put(
                 x,
                 y,
-                Rgb(
-                    blend(cur.0, color.0, t),
-                    blend(cur.1, color.1, t),
-                    blend(cur.2, color.2, t),
-                ),
+                Rgb {
+                    r: blend(cur.r, color.r, t),
+                    g: blend(cur.g, color.g, t),
+                    b: blend(cur.b, color.b, t),
+                },
             );
         }
     }
@@ -376,12 +376,16 @@ mod tests {
 
     #[test]
     fn ceiling_halo_painted_on_dark_theme() {
-        let mut buf = RgbBuffer::filled(160, 90, Rgb(0, 0, 0));
+        let mut buf = RgbBuffer::filled(160, 90, Rgb { r: 0, g: 0, b: 0 });
         let theme = &crate::tui::theme::CYBERPUNK;
         let halos = vec![CeilingHalo {
             x: 50,
             y: 10,
-            color: Rgb(0, 200, 255),
+            color: Rgb {
+                r: 0,
+                g: 200,
+                b: 255,
+            },
             intensity: 0.8,
         }];
         let baseline = buf.get(50, 10);
@@ -391,12 +395,16 @@ mod tests {
 
     #[test]
     fn ceiling_halo_skipped_on_light_theme() {
-        let mut buf = RgbBuffer::filled(160, 90, Rgb(0, 0, 0));
+        let mut buf = RgbBuffer::filled(160, 90, Rgb { r: 0, g: 0, b: 0 });
         let theme = &crate::tui::theme::NORMAL;
         let halos = vec![CeilingHalo {
             x: 50,
             y: 10,
-            color: Rgb(0, 200, 255),
+            color: Rgb {
+                r: 0,
+                g: 200,
+                b: 255,
+            },
             intensity: 0.8,
         }];
         let baseline = buf.get(50, 10);
@@ -452,13 +460,21 @@ mod tests {
         let rain_t = find(Weather::Rain).expect("a rain morning");
 
         let brightness = |now: SystemTime| -> u64 {
-            let mut buf = RgbBuffer::filled(192, 80, Rgb(20, 20, 24));
+            let mut buf = RgbBuffer::filled(
+                192,
+                80,
+                Rgb {
+                    r: 20,
+                    g: 20,
+                    b: 24,
+                },
+            );
             paint_sun_spot(&mut buf, theme, &layout, now);
             let mut sum = 0u64;
             for y in 0..buf.height {
                 for x in 0..buf.width {
                     let p = buf.get(x, y);
-                    sum += p.0 as u64 + p.1 as u64 + p.2 as u64;
+                    sum += p.r as u64 + p.g as u64 + p.b as u64;
                 }
             }
             sum

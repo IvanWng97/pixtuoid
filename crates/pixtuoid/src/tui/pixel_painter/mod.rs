@@ -360,7 +360,11 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
     }
     if let Some(pr) = ctx.layout.pantry_room {
         let cooler_body = ctx.theme.office.building_light;
-        let cooler_water = Rgb(100, 180, 230);
+        let cooler_water = Rgb {
+            r: 100,
+            g: 180,
+            b: 230,
+        };
 
         // Water cooler near the pantry wall (3×6)
         if pr.height > 25 && pr.width > 12 {
@@ -382,10 +386,26 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
         if pr.height > 20 {
             let tx = pr.x + 3;
             let ty = pr.y + pr.height - 14;
-            let bin_outer = Rgb(70, 70, 78);
-            let bin_rim = Rgb(100, 100, 108);
-            let bag_liner = Rgb(200, 200, 210);
-            let bag_fill = Rgb(160, 160, 170);
+            let bin_outer = Rgb {
+                r: 70,
+                g: 70,
+                b: 78,
+            };
+            let bin_rim = Rgb {
+                r: 100,
+                g: 100,
+                b: 108,
+            };
+            let bag_liner = Rgb {
+                r: 200,
+                g: 200,
+                b: 210,
+            };
+            let bag_fill = Rgb {
+                r: 160,
+                g: 160,
+                b: 170,
+            };
             for dy in 0..5u16 {
                 for dx in 0..4u16 {
                     let px = tx + dx;

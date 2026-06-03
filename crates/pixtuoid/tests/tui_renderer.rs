@@ -74,7 +74,7 @@ fn tui_renderer_render_paints_a_full_frame() {
     // the trait method actually triggered the paint pipeline.
     let mut colors = std::collections::HashSet::new();
     for px in &buf.pixels {
-        colors.insert((px.0, px.1, px.2));
+        colors.insert((px.r, px.g, px.b));
     }
     assert!(
         colors.len() > 32,
@@ -178,7 +178,7 @@ fn tui_renderer_transition_paints_pets_and_coffee() {
     let nonzero = buf
         .pixels
         .iter()
-        .filter(|p| p.0 != 0 || p.1 != 0 || p.2 != 0)
+        .filter(|p| p.r != 0 || p.g != 0 || p.b != 0)
         .count();
     assert!(
         nonzero > 100,

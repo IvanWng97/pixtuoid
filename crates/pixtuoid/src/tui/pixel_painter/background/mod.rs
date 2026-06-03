@@ -112,11 +112,11 @@ pub(super) fn paint_lightning_flash(buf: &mut RgbBuffer, now: SystemTime, weathe
             buf.put(
                 x,
                 y,
-                Rgb(
-                    blend(cur.0, 255, alpha),
-                    blend(cur.1, 255, alpha),
-                    blend(cur.2, 255, alpha),
-                ),
+                Rgb {
+                    r: blend(cur.r, 255, alpha),
+                    g: blend(cur.g, 255, alpha),
+                    b: blend(cur.b, 255, alpha),
+                },
             );
         }
     }
@@ -127,16 +127,48 @@ pub(super) fn paint_lightning_flash(buf: &mut RgbBuffer, now: SystemTime, weathe
 /// shifts the indoor mood without overpowering the theme palette.
 pub(super) fn weather_floor_tint(w: Weather) -> Rgb {
     match w {
-        Weather::Clear => Rgb(255, 252, 240),
-        Weather::Rain => Rgb(190, 200, 220),
-        Weather::Storm => Rgb(140, 145, 165),
-        Weather::Snow => Rgb(220, 230, 250),
+        Weather::Clear => Rgb {
+            r: 255,
+            g: 252,
+            b: 240,
+        },
+        Weather::Rain => Rgb {
+            r: 190,
+            g: 200,
+            b: 220,
+        },
+        Weather::Storm => Rgb {
+            r: 140,
+            g: 145,
+            b: 165,
+        },
+        Weather::Snow => Rgb {
+            r: 220,
+            g: 230,
+            b: 250,
+        },
         // Fog is a luminous white-out — its floor tint must be brighter than
         // overcast's, not darker (the old 200,200,205 read as dark mist).
-        Weather::Fog => Rgb(228, 229, 233),
-        Weather::Overcast => Rgb(210, 210, 215),
-        Weather::Windy => Rgb(248, 248, 245),
-        Weather::Smog => Rgb(215, 200, 165),
+        Weather::Fog => Rgb {
+            r: 228,
+            g: 229,
+            b: 233,
+        },
+        Weather::Overcast => Rgb {
+            r: 210,
+            g: 210,
+            b: 215,
+        },
+        Weather::Windy => Rgb {
+            r: 248,
+            g: 248,
+            b: 245,
+        },
+        Weather::Smog => Rgb {
+            r: 215,
+            g: 200,
+            b: 165,
+        },
     }
 }
 
@@ -147,11 +179,46 @@ pub(super) fn weather_floor_tint(w: Weather) -> Rgb {
 /// those still read on top of the murk.
 fn skyline_haze(w: Weather) -> Option<(Rgb, f32)> {
     match w {
-        Weather::Fog => Some((Rgb(226, 228, 233), 0.55)),
-        Weather::Storm => Some((Rgb(120, 126, 142), 0.38)),
-        Weather::Rain => Some((Rgb(168, 178, 198), 0.20)),
-        Weather::Smog => Some((Rgb(150, 138, 110), 0.22)),
-        Weather::Overcast => Some((Rgb(196, 199, 206), 0.12)),
+        Weather::Fog => Some((
+            Rgb {
+                r: 226,
+                g: 228,
+                b: 233,
+            },
+            0.55,
+        )),
+        Weather::Storm => Some((
+            Rgb {
+                r: 120,
+                g: 126,
+                b: 142,
+            },
+            0.38,
+        )),
+        Weather::Rain => Some((
+            Rgb {
+                r: 168,
+                g: 178,
+                b: 198,
+            },
+            0.20,
+        )),
+        Weather::Smog => Some((
+            Rgb {
+                r: 150,
+                g: 138,
+                b: 110,
+            },
+            0.22,
+        )),
+        Weather::Overcast => Some((
+            Rgb {
+                r: 196,
+                g: 199,
+                b: 206,
+            },
+            0.12,
+        )),
         _ => None,
     }
 }
@@ -215,11 +282,11 @@ pub(super) fn paint_floor_and_walls(
                 2 | 3 => carpet_dark,
                 _ => carpet_base,
             };
-            let tinted = Rgb(
-                blend(color.0, tint.0, 0.15),
-                blend(color.1, tint.1, 0.15),
-                blend(color.2, tint.2, 0.15),
-            );
+            let tinted = Rgb {
+                r: blend(color.r, tint.r, 0.15),
+                g: blend(color.g, tint.g, 0.15),
+                b: blend(color.b, tint.b, 0.15),
+            };
             buf.put(x, y, tinted);
         }
     }
@@ -353,11 +420,11 @@ fn paint_window_light_spill(
             buf.put(
                 x,
                 y,
-                Rgb(
-                    blend(cur.0, warm.0, strength),
-                    blend(cur.1, warm.1, strength),
-                    blend(cur.2, warm.2, strength),
-                ),
+                Rgb {
+                    r: blend(cur.r, warm.r, strength),
+                    g: blend(cur.g, warm.g, strength),
+                    b: blend(cur.b, warm.b, strength),
+                },
             );
         }
     }
@@ -480,11 +547,11 @@ fn paint_floor_to_ceiling_window(
                     buf.put(
                         px,
                         py,
-                        Rgb(
-                            blend(cur.0, haze.0, alpha),
-                            blend(cur.1, haze.1, alpha),
-                            blend(cur.2, haze.2, alpha),
-                        ),
+                        Rgb {
+                            r: blend(cur.r, haze.r, alpha),
+                            g: blend(cur.g, haze.g, alpha),
+                            b: blend(cur.b, haze.b, alpha),
+                        },
                     );
                 }
             }
@@ -518,11 +585,11 @@ fn paint_floor_to_ceiling_window(
                         buf.put(
                             px,
                             py,
-                            Rgb(
-                                blend(cur.0, 210, alpha),
-                                blend(cur.1, 220, alpha),
-                                blend(cur.2, 240, alpha),
-                            ),
+                            Rgb {
+                                r: blend(cur.r, 210, alpha),
+                                g: blend(cur.g, 220, alpha),
+                                b: blend(cur.b, 240, alpha),
+                            },
                         );
                     }
                 }
@@ -548,11 +615,11 @@ fn paint_floor_to_ceiling_window(
                         buf.put(
                             px,
                             py,
-                            Rgb(
-                                blend(buf.get(px, py).0, 210, alpha),
-                                blend(buf.get(px, py).1, 220, alpha),
-                                blend(buf.get(px, py).2, 245, alpha),
-                            ),
+                            Rgb {
+                                r: blend(buf.get(px, py).r, 210, alpha),
+                                g: blend(buf.get(px, py).g, 220, alpha),
+                                b: blend(buf.get(px, py).b, 245, alpha),
+                            },
                         );
                     }
                 }
@@ -572,11 +639,11 @@ fn paint_floor_to_ceiling_window(
                             buf.put(
                                 px,
                                 py,
-                                Rgb(
-                                    blend(cur.0, 255, alpha),
-                                    blend(cur.1, 255, alpha),
-                                    blend(cur.2, 255, alpha),
-                                ),
+                                Rgb {
+                                    r: blend(cur.r, 255, alpha),
+                                    g: blend(cur.g, 255, alpha),
+                                    b: blend(cur.b, 255, alpha),
+                                },
                             );
                         }
                     }
@@ -602,7 +669,15 @@ fn paint_floor_to_ceiling_window(
                 let px = glass_x0 + (sx + wiggle) % gw;
                 let py = glass_y0 + phase as u16;
                 if px < buf.width && py < buf.height {
-                    buf.put(px, py, Rgb(240, 240, 250));
+                    buf.put(
+                        px,
+                        py,
+                        Rgb {
+                            r: 240,
+                            g: 240,
+                            b: 250,
+                        },
+                    );
                 }
             }
         }
@@ -616,11 +691,11 @@ fn paint_floor_to_ceiling_window(
                         buf.put(
                             px,
                             py,
-                            Rgb(
-                                blend(cur.0, 160, 0.25),
-                                blend(cur.1, 165, 0.25),
-                                blend(cur.2, 175, 0.25),
-                            ),
+                            Rgb {
+                                r: blend(cur.r, 160, 0.25),
+                                g: blend(cur.g, 165, 0.25),
+                                b: blend(cur.b, 175, 0.25),
+                            },
                         );
                     }
                 }
@@ -636,11 +711,11 @@ fn paint_floor_to_ceiling_window(
                         buf.put(
                             px,
                             py,
-                            Rgb(
-                                blend(cur.0, 100, 0.2),
-                                blend(cur.1, 105, 0.2),
-                                blend(cur.2, 110, 0.2),
-                            ),
+                            Rgb {
+                                r: blend(cur.r, 100, 0.2),
+                                g: blend(cur.g, 105, 0.2),
+                                b: blend(cur.b, 110, 0.2),
+                            },
                         );
                     }
                 }
@@ -668,11 +743,11 @@ fn paint_floor_to_ceiling_window(
                         buf.put(
                             px,
                             py,
-                            Rgb(
-                                blend(cur.0, 210, alpha),
-                                blend(cur.1, 220, alpha),
-                                blend(cur.2, 240, alpha),
-                            ),
+                            Rgb {
+                                r: blend(cur.r, 210, alpha),
+                                g: blend(cur.g, 220, alpha),
+                                b: blend(cur.b, 240, alpha),
+                            },
                         );
                     }
                 }
@@ -691,11 +766,11 @@ fn paint_floor_to_ceiling_window(
                         buf.put(
                             px,
                             py,
-                            Rgb(
-                                blend(cur.0, 180, 0.30),
-                                blend(cur.1, 160, 0.30),
-                                blend(cur.2, 110, 0.30),
-                            ),
+                            Rgb {
+                                r: blend(cur.r, 180, 0.30),
+                                g: blend(cur.g, 160, 0.30),
+                                b: blend(cur.b, 110, 0.30),
+                            },
                         );
                     }
                 }
@@ -742,11 +817,11 @@ fn paint_floor_to_ceiling_window(
                     buf.put(
                         px,
                         py,
-                        Rgb(
-                            blend(cur.0, 255, s * 0.4),
-                            blend(cur.1, 160, s * 0.25),
-                            blend(cur.2, 60, s * 0.1),
-                        ),
+                        Rgb {
+                            r: blend(cur.r, 255, s * 0.4),
+                            g: blend(cur.g, 160, s * 0.25),
+                            b: blend(cur.b, 60, s * 0.1),
+                        },
                     );
                 }
             }
@@ -766,7 +841,7 @@ mod tests {
         assert_ne!(clear, rain, "rain biases floor cooler");
         assert_ne!(clear, fog, "fog desaturates");
         assert!(
-            rain.2 >= rain.0,
+            rain.b >= rain.r,
             "rain tint should be cool (blue >= red), got {:?}",
             rain
         );
@@ -776,7 +851,7 @@ mod tests {
     fn weather_floor_tint_clear_is_near_neutral() {
         let clear = weather_floor_tint(Weather::Clear);
         assert!(
-            clear.0 > 200 && clear.1 > 200 && clear.2 > 200,
+            clear.r > 200 && clear.g > 200 && clear.b > 200,
             "clear should be a near-white slight-warm tint, got {:?}",
             clear
         );
@@ -788,7 +863,7 @@ mod tests {
         // brighter (luminous white-out) of the two.
         let fog = weather_floor_tint(Weather::Fog);
         let oc = weather_floor_tint(Weather::Overcast);
-        let lum = |c: Rgb| c.0 as u16 + c.1 as u16 + c.2 as u16;
+        let lum = |c: Rgb| c.r as u16 + c.g as u16 + c.b as u16;
         assert!(
             lum(fog) > lum(oc),
             "fog {fog:?} should outshine overcast {oc:?}"
@@ -837,19 +912,45 @@ mod tests {
             .expect("a low-offset bucket exists");
         let off = strike_offset(bucket);
         let at = |ms: u64| UNIX_EPOCH + Duration::from_millis(bucket * LIGHTNING_PERIOD_MS + ms);
-        let mk = || RgbBuffer::filled(8, 4, Rgb(10, 10, 12));
+        let mk = || {
+            RgbBuffer::filled(
+                8,
+                4,
+                Rgb {
+                    r: 10,
+                    g: 10,
+                    b: 12,
+                },
+            )
+        };
 
         let mut b = mk();
         paint_lightning_flash(&mut b, at(off), Weather::Storm);
-        assert!(b.get(0, 0).0 > 10, "storm strike should brighten the room");
+        assert!(b.get(0, 0).r > 10, "storm strike should brighten the room");
 
         let mut b = mk();
         paint_lightning_flash(&mut b, at(off + 1000), Weather::Storm);
-        assert_eq!(b.get(0, 0), Rgb(10, 10, 12), "no flash between strikes");
+        assert_eq!(
+            b.get(0, 0),
+            Rgb {
+                r: 10,
+                g: 10,
+                b: 12
+            },
+            "no flash between strikes"
+        );
 
         let mut b = mk();
         paint_lightning_flash(&mut b, at(off), Weather::Clear);
-        assert_eq!(b.get(0, 0), Rgb(10, 10, 12), "flash is storm-only");
+        assert_eq!(
+            b.get(0, 0),
+            Rgb {
+                r: 10,
+                g: 10,
+                b: 12
+            },
+            "flash is storm-only"
+        );
     }
 
     #[test]

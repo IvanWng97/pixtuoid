@@ -16,16 +16,16 @@ pub(super) fn paint_screen_glow(
 ) {
     let frame_lit = theme.effects.monitor_frame_lit;
     let glow = tint;
-    let glow_bright = Rgb(
-        blend(tint.0, 255, 0.4),
-        blend(tint.1, 255, 0.4),
-        blend(tint.2, 255, 0.4),
-    );
-    let scanline = Rgb(
-        blend(tint.0, 255, 0.7),
-        blend(tint.1, 255, 0.7),
-        blend(tint.2, 255, 0.7),
-    );
+    let glow_bright = Rgb {
+        r: blend(tint.r, 255, 0.4),
+        g: blend(tint.g, 255, 0.4),
+        b: blend(tint.b, 255, 0.4),
+    };
+    let scanline = Rgb {
+        r: blend(tint.r, 255, 0.7),
+        g: blend(tint.g, 255, 0.7),
+        b: blend(tint.b, 255, 0.7),
+    };
     let put = |buf: &mut RgbBuffer, dx: u16, dy: u16, c: Rgb| {
         let px = desk_x + dx;
         let py = desk_y + dy;
@@ -104,11 +104,11 @@ pub(super) fn paint_coffee_steam(buf: &mut RgbBuffer, base: Point, now: SystemTi
             buf.put(
                 px,
                 py,
-                Rgb(
-                    blend(cur.0, steam.0, alpha * 0.55),
-                    blend(cur.1, steam.1, alpha * 0.55),
-                    blend(cur.2, steam.2, alpha * 0.55),
-                ),
+                Rgb {
+                    r: blend(cur.r, steam.r, alpha * 0.55),
+                    g: blend(cur.g, steam.g, alpha * 0.55),
+                    b: blend(cur.b, steam.b, alpha * 0.55),
+                },
             );
         }
     }
@@ -128,11 +128,11 @@ pub(super) fn paint_walking_dust(
         buf.put(
             foot_x,
             foot_y,
-            Rgb(
-                blend(cur.0, dust.0, 0.45),
-                blend(cur.1, dust.1, 0.45),
-                blend(cur.2, dust.2, 0.45),
-            ),
+            Rgb {
+                r: blend(cur.r, dust.r, 0.45),
+                g: blend(cur.g, dust.g, 0.45),
+                b: blend(cur.b, dust.b, 0.45),
+            },
         );
     }
 }
@@ -166,7 +166,11 @@ pub(super) fn paint_thinking_dots(
 pub(super) fn paint_pet_hearts(buf: &mut RgbBuffer, cat_pos: Point, elapsed_ms: u64) {
     const STAGGER_MS: u64 = 150;
     const HEART_LIFE_MS: u64 = 1550;
-    let heart_color = Rgb(255, 100, 100);
+    let heart_color = Rgb {
+        r: 255,
+        g: 100,
+        b: 100,
+    };
     for i in 0..4u64 {
         let stagger = i * STAGGER_MS;
         if elapsed_ms < stagger {
@@ -196,11 +200,11 @@ pub(super) fn paint_pet_hearts(buf: &mut RgbBuffer, cat_pos: Point, elapsed_ms: 
                     buf.put(
                         px,
                         py,
-                        Rgb(
-                            blend(cur.0, heart_color.0, alpha * 0.8),
-                            blend(cur.1, heart_color.1, alpha * 0.8),
-                            blend(cur.2, heart_color.2, alpha * 0.8),
-                        ),
+                        Rgb {
+                            r: blend(cur.r, heart_color.r, alpha * 0.8),
+                            g: blend(cur.g, heart_color.g, alpha * 0.8),
+                            b: blend(cur.b, heart_color.b, alpha * 0.8),
+                        },
                     );
                 }
             }

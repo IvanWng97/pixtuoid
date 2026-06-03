@@ -84,8 +84,20 @@ fn glass_wall_h_back_cap_composites_over_a_character_behind_it() {
     // composite behind the glass. (The old test used y_top-2, a row inside
     // the blocked footprint+pad band that no walker ever occupies.)
     let cap_row = y_top - 3;
-    let character = Rgb(220, 40, 40);
-    let mut buf = RgbBuffer::filled(48, 48, Rgb(150, 110, 72)); // carpet
+    let character = Rgb {
+        r: 220,
+        g: 40,
+        b: 40,
+    };
+    let mut buf = RgbBuffer::filled(
+        48,
+        48,
+        Rgb {
+            r: 150,
+            g: 110,
+            b: 72,
+        },
+    ); // carpet
     for x in 4..20 {
         buf.put(x, cap_row, character);
     }
@@ -93,7 +105,7 @@ fn glass_wall_h_back_cap_composites_over_a_character_behind_it() {
     let after = buf.get(8, cap_row);
     assert_ne!(after, character, "glass must composite over the character");
     assert!(
-        after.0 < character.0 && after.2 > character.2,
+        after.r < character.r && after.b > character.b,
         "frosted glass should cool the occluded pixel (red↓ blue↑): {after:?}"
     );
 }
@@ -155,10 +167,38 @@ fn make_slot(id: pixtuoid_core::AgentId, state: ActivityState) -> AgentSlot {
 
 fn base_palette() -> Palette {
     let mut p = Palette::new();
-    p.insert('B', Some(Rgb(10, 20, 30))); // shirt
-    p.insert('H', Some(Rgb(40, 50, 60))); // hair
-    p.insert('S', Some(Rgb(70, 80, 90))); // skin
-    p.insert('X', Some(Rgb(99, 99, 99))); // unrelated key
+    p.insert(
+        'B',
+        Some(Rgb {
+            r: 10,
+            g: 20,
+            b: 30,
+        }),
+    ); // shirt
+    p.insert(
+        'H',
+        Some(Rgb {
+            r: 40,
+            g: 50,
+            b: 60,
+        }),
+    ); // hair
+    p.insert(
+        'S',
+        Some(Rgb {
+            r: 70,
+            g: 80,
+            b: 90,
+        }),
+    ); // skin
+    p.insert(
+        'X',
+        Some(Rgb {
+            r: 99,
+            g: 99,
+            b: 99,
+        }),
+    ); // unrelated key
     p
 }
 
@@ -179,12 +219,40 @@ fn agent_palette_overrides_only_bhs_keys() {
     let base = base_palette();
     let p = agent_palette(&base, &make_slot(id, ActivityState::Idle), None);
     // X is not a recolor target — must pass through unchanged.
-    assert_eq!(p.get('X'), Some(Some(Rgb(99, 99, 99))));
+    assert_eq!(
+        p.get('X'),
+        Some(Some(Rgb {
+            r: 99,
+            g: 99,
+            b: 99
+        }))
+    );
     // B/H/S must be replaced — the base RGBs (10/20/30 etc.) are
     // unlikely to be in any preset, so they should differ.
-    assert_ne!(p.get('B'), Some(Some(Rgb(10, 20, 30))));
-    assert_ne!(p.get('H'), Some(Some(Rgb(40, 50, 60))));
-    assert_ne!(p.get('S'), Some(Some(Rgb(70, 80, 90))));
+    assert_ne!(
+        p.get('B'),
+        Some(Some(Rgb {
+            r: 10,
+            g: 20,
+            b: 30
+        }))
+    );
+    assert_ne!(
+        p.get('H'),
+        Some(Some(Rgb {
+            r: 40,
+            g: 50,
+            b: 60
+        }))
+    );
+    assert_ne!(
+        p.get('S'),
+        Some(Some(Rgb {
+            r: 70,
+            g: 80,
+            b: 90
+        }))
+    );
 }
 
 #[test]
@@ -193,14 +261,30 @@ fn agent_palette_glow_tint_shifts_skin_toward_given_color() {
     let base = base_palette();
     let slot = make_slot(id, ActivityState::Idle);
     let unlit = agent_palette(&base, &slot, None);
-    let green_glow = agent_palette(&base, &slot, Some(Rgb(140, 240, 170)));
-    let blue_glow = agent_palette(&base, &slot, Some(Rgb(100, 160, 255)));
+    let green_glow = agent_palette(
+        &base,
+        &slot,
+        Some(Rgb {
+            r: 140,
+            g: 240,
+            b: 170,
+        }),
+    );
+    let blue_glow = agent_palette(
+        &base,
+        &slot,
+        Some(Rgb {
+            r: 100,
+            g: 160,
+            b: 255,
+        }),
+    );
     // Shirt / hair / pants are unaffected by glow.
     assert_eq!(unlit.get('B'), green_glow.get('B'));
     assert_eq!(unlit.get('H'), green_glow.get('H'));
     assert_eq!(unlit.get('P'), green_glow.get('P'));
     // Green glow pushes skin's green channel up.
-    let (Some(Some(Rgb(_, ug, _))), Some(Some(Rgb(_, gg, _)))) =
+    let (Some(Some(Rgb { r: _, g: ug, b: _ })), Some(Some(Rgb { r: _, g: gg, b: _ }))) =
         (unlit.get('S'), green_glow.get('S'))
     else {
         panic!("S key missing")
@@ -210,7 +294,7 @@ fn agent_palette_glow_tint_shifts_skin_toward_given_color() {
         "green glow should push skin green (lit={gg}, unlit={ug})"
     );
     // Blue glow pushes skin's blue channel up.
-    let (Some(Some(Rgb(_, _, ub))), Some(Some(Rgb(_, _, bb)))) =
+    let (Some(Some(Rgb { r: _, g: _, b: ub })), Some(Some(Rgb { r: _, g: _, b: bb }))) =
         (unlit.get('S'), blue_glow.get('S'))
     else {
         panic!("S key missing")
@@ -258,30 +342,53 @@ fn recolor_frame_substitutes_bhs_pixels() {
     let base = base_palette();
     // Build an agent palette where B/H/S are clearly distinguishable.
     let mut agent_pal = base.clone();
-    agent_pal.insert('B', Some(Rgb(200, 0, 0))); // red shirt
-    agent_pal.insert('H', Some(Rgb(0, 200, 0))); // green hair
-    agent_pal.insert('S', Some(Rgb(0, 0, 200))); // blue skin
+    agent_pal.insert('B', Some(Rgb { r: 200, g: 0, b: 0 })); // red shirt
+    agent_pal.insert('H', Some(Rgb { r: 0, g: 200, b: 0 })); // green hair
+    agent_pal.insert('S', Some(Rgb { r: 0, g: 0, b: 200 })); // blue skin
 
     // Frame: 1 pixel per palette key + 1 unrelated pixel + 1 transparent.
     let frame = Frame {
         width: 5,
         height: 1,
         pixels: vec![
-            Some(Rgb(10, 20, 30)),  // matches base B → should become red
-            Some(Rgb(40, 50, 60)),  // matches base H → should become green
-            Some(Rgb(70, 80, 90)),  // matches base S → should become blue
-            Some(Rgb(123, 45, 67)), // unrelated     → unchanged
-            None,                   // transparent   → unchanged
+            Some(Rgb {
+                r: 10,
+                g: 20,
+                b: 30,
+            }), // matches base B → should become red
+            Some(Rgb {
+                r: 40,
+                g: 50,
+                b: 60,
+            }), // matches base H → should become green
+            Some(Rgb {
+                r: 70,
+                g: 80,
+                b: 90,
+            }), // matches base S → should become blue
+            Some(Rgb {
+                r: 123,
+                g: 45,
+                b: 67,
+            }), // unrelated     → unchanged
+            None, // transparent   → unchanged
         ],
     };
 
     let out = recolor_frame(&frame, &agent_pal, &base);
     assert_eq!(out.width, 5);
     assert_eq!(out.height, 1);
-    assert_eq!(out.pixels[0], Some(Rgb(200, 0, 0)));
-    assert_eq!(out.pixels[1], Some(Rgb(0, 200, 0)));
-    assert_eq!(out.pixels[2], Some(Rgb(0, 0, 200)));
-    assert_eq!(out.pixels[3], Some(Rgb(123, 45, 67)));
+    assert_eq!(out.pixels[0], Some(Rgb { r: 200, g: 0, b: 0 }));
+    assert_eq!(out.pixels[1], Some(Rgb { r: 0, g: 200, b: 0 }));
+    assert_eq!(out.pixels[2], Some(Rgb { r: 0, g: 0, b: 200 }));
+    assert_eq!(
+        out.pixels[3],
+        Some(Rgb {
+            r: 123,
+            g: 45,
+            b: 67
+        })
+    );
     assert_eq!(out.pixels[4], None);
 }
 
@@ -293,9 +400,21 @@ fn recolor_frame_handles_palette_with_no_overrides() {
         width: 3,
         height: 1,
         pixels: vec![
-            Some(Rgb(10, 20, 30)),
-            Some(Rgb(40, 50, 60)),
-            Some(Rgb(70, 80, 90)),
+            Some(Rgb {
+                r: 10,
+                g: 20,
+                b: 30,
+            }),
+            Some(Rgb {
+                r: 40,
+                g: 50,
+                b: 60,
+            }),
+            Some(Rgb {
+                r: 70,
+                g: 80,
+                b: 90,
+            }),
         ],
     };
     let out = recolor_frame(&frame, &base, &base);

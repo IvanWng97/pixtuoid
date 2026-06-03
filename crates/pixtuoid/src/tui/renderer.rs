@@ -420,8 +420,8 @@ pub(super) fn flush_buffer_to_term_at_offset(
             let bg = buf.pixels[py_bot * w + cx];
             let cell = &mut term_buf[(x, y)];
             cell.set_symbol("\u{2580}");
-            cell.fg = Color::Rgb(fg.0, fg.1, fg.2);
-            cell.bg = Color::Rgb(bg.0, bg.1, bg.2);
+            cell.fg = Color::Rgb(fg.r, fg.g, fg.b);
+            cell.bg = Color::Rgb(bg.r, bg.g, bg.b);
         }
     }
 }

@@ -5,7 +5,11 @@ pub mod blit;
 pub mod format;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Rgb(pub u8, pub u8, pub u8);
+pub struct Rgb {
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
+}
 
 /// A single pixel: `Some(rgb)` or `None` (transparent).
 pub type Pixel = Option<Rgb>;
@@ -150,11 +154,11 @@ mod tests {
     #[test]
     fn palette_get_and_override() {
         let mut p = Palette::new();
-        p.insert('B', Some(Rgb(0, 0, 255)));
-        assert_eq!(p.get('B'), Some(Some(Rgb(0, 0, 255))));
-        let p2 = p.with_override('B', Some(Rgb(255, 0, 0)));
-        assert_eq!(p2.get('B'), Some(Some(Rgb(255, 0, 0))));
-        assert_eq!(p.get('B'), Some(Some(Rgb(0, 0, 255))));
+        p.insert('B', Some(Rgb { r: 0, g: 0, b: 255 }));
+        assert_eq!(p.get('B'), Some(Some(Rgb { r: 0, g: 0, b: 255 })));
+        let p2 = p.with_override('B', Some(Rgb { r: 255, g: 0, b: 0 }));
+        assert_eq!(p2.get('B'), Some(Some(Rgb { r: 255, g: 0, b: 0 })));
+        assert_eq!(p.get('B'), Some(Some(Rgb { r: 0, g: 0, b: 255 })));
     }
 
     #[test]
@@ -163,11 +167,11 @@ mod tests {
             width: 3,
             height: 2,
             pixels: vec![
-                Some(Rgb(1, 0, 0)),
+                Some(Rgb { r: 1, g: 0, b: 0 }),
                 None,
-                Some(Rgb(2, 0, 0)),
-                Some(Rgb(3, 0, 0)),
-                Some(Rgb(4, 0, 0)),
+                Some(Rgb { r: 2, g: 0, b: 0 }),
+                Some(Rgb { r: 3, g: 0, b: 0 }),
+                Some(Rgb { r: 4, g: 0, b: 0 }),
                 None,
             ],
         };
@@ -177,21 +181,36 @@ mod tests {
         assert_eq!(
             m.pixels,
             vec![
-                Some(Rgb(2, 0, 0)),
+                Some(Rgb { r: 2, g: 0, b: 0 }),
                 None,
-                Some(Rgb(1, 0, 0)),
+                Some(Rgb { r: 1, g: 0, b: 0 }),
                 None,
-                Some(Rgb(4, 0, 0)),
-                Some(Rgb(3, 0, 0)),
+                Some(Rgb { r: 4, g: 0, b: 0 }),
+                Some(Rgb { r: 3, g: 0, b: 0 }),
             ]
         );
     }
 
     #[test]
     fn rgb_buffer_put_get_roundtrip() {
-        let mut b = RgbBuffer::filled(3, 2, Rgb(0, 0, 0));
-        b.put(1, 1, Rgb(10, 20, 30));
-        assert_eq!(b.get(1, 1), Rgb(10, 20, 30));
-        assert_eq!(b.get(0, 0), Rgb(0, 0, 0));
+        let mut b = RgbBuffer::filled(3, 2, Rgb { r: 0, g: 0, b: 0 });
+        b.put(
+            1,
+            1,
+            Rgb {
+                r: 10,
+                g: 20,
+                b: 30,
+            },
+        );
+        assert_eq!(
+            b.get(1, 1),
+            Rgb {
+                r: 10,
+                g: 20,
+                b: 30
+            }
+        );
+        assert_eq!(b.get(0, 0), Rgb { r: 0, g: 0, b: 0 });
     }
 }

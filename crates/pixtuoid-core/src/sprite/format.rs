@@ -376,5 +376,5 @@ fn parse_palette_value(v: &str) -> Result<Pixel> {
     let r = u8::from_str_radix(&hex[0..2], 16)?;
     let g = u8::from_str_radix(&hex[2..4], 16)?;
     let b = u8::from_str_radix(&hex[4..6], 16)?;
-    Ok(Some(Rgb(r, g, b)))
+    Ok(Some(Rgb { r, g, b }))
 }

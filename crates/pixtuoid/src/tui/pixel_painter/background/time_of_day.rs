@@ -309,11 +309,11 @@ pub(in crate::tui::pixel_painter) fn dim_floor_overlay(
             buf.put(
                 x,
                 y,
-                Rgb(
-                    blend(cur.0, night_tint.0, s),
-                    blend(cur.1, night_tint.1, s),
-                    blend(cur.2, night_tint.2, s),
-                ),
+                Rgb {
+                    r: blend(cur.r, night_tint.r, s),
+                    g: blend(cur.g, night_tint.g, s),
+                    b: blend(cur.b, night_tint.b, s),
+                },
             );
         }
     }
@@ -335,7 +335,11 @@ pub(in crate::tui::pixel_painter) fn daylight_floor_overlay(
 ) {
     // Pale warm midday sunlight. Theme-agnostic (daylight is daylight); applied
     // at low strength so it warms/brightens the floor without washing it out.
-    const SUN_TINT: Rgb = Rgb(255, 246, 224);
+    const SUN_TINT: Rgb = Rgb {
+        r: 255,
+        g: 246,
+        b: 224,
+    };
     let s = strength.clamp(0.0, 0.40);
     if s <= 0.0 {
         return;
@@ -346,11 +350,11 @@ pub(in crate::tui::pixel_painter) fn daylight_floor_overlay(
             buf.put(
                 x,
                 y,
-                Rgb(
-                    blend(cur.0, SUN_TINT.0, s),
-                    blend(cur.1, SUN_TINT.1, s),
-                    blend(cur.2, SUN_TINT.2, s),
-                ),
+                Rgb {
+                    r: blend(cur.r, SUN_TINT.r, s),
+                    g: blend(cur.g, SUN_TINT.g, s),
+                    b: blend(cur.b, SUN_TINT.b, s),
+                },
             );
         }
     }
@@ -365,12 +369,20 @@ mod tests {
     fn daylight_floor_overlay_brightens_at_positive_strength() {
         // The warm SUN_TINT (255,246,224) blended in at positive strength lifts a
         // dark floor on every channel (it only ever warms/brightens).
-        let mut buf = RgbBuffer::filled(4, 10, Rgb(50, 50, 50));
+        let mut buf = RgbBuffer::filled(
+            4,
+            10,
+            Rgb {
+                r: 50,
+                g: 50,
+                b: 50,
+            },
+        );
         daylight_floor_overlay(&mut buf, 2, 10, 0.30);
         for y in 2..10u16 {
             for x in 0..4u16 {
                 assert!(
-                    buf.get(x, y).0 > 50,
+                    buf.get(x, y).r > 50,
                     "floor pixel ({x},{y}) should brighten"
                 );
             }
@@ -380,13 +392,25 @@ mod tests {
     #[test]
     fn daylight_floor_overlay_is_noop_at_zero_strength() {
         // strength 0 short-circuits before any blend — pixels untouched.
-        let mut buf = RgbBuffer::filled(4, 10, Rgb(80, 90, 100));
+        let mut buf = RgbBuffer::filled(
+            4,
+            10,
+            Rgb {
+                r: 80,
+                g: 90,
+                b: 100,
+            },
+        );
         daylight_floor_overlay(&mut buf, 2, 10, 0.0);
         for y in 2..10u16 {
             for x in 0..4u16 {
                 assert_eq!(
                     buf.get(x, y),
-                    Rgb(80, 90, 100),
+                    Rgb {
+                        r: 80,
+                        g: 90,
+                        b: 100
+                    },
                     "zero strength must not mutate pixels"
                 );
             }

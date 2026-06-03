@@ -87,9 +87,9 @@ fn render_pixel_hash(now: SystemTime) -> u64 {
 
     let mut hasher = DefaultHasher::new();
     for px in &draw_ctx.buf.pixels {
-        px.0.hash(&mut hasher);
-        px.1.hash(&mut hasher);
-        px.2.hash(&mut hasher);
+        px.r.hash(&mut hasher);
+        px.g.hash(&mut hasher);
+        px.b.hash(&mut hasher);
     }
     hasher.finish()
 }
@@ -141,7 +141,7 @@ fn render_produces_distinct_wall_band_and_floor_regions() {
     // a paint pass that collapsed every pixel to one color.
     let mut colors = std::collections::HashSet::new();
     for px in &buf.pixels {
-        colors.insert((px.0, px.1, px.2));
+        colors.insert((px.r, px.g, px.b));
     }
     assert!(
         colors.len() > 32,
@@ -166,9 +166,9 @@ fn render_produces_distinct_wall_band_and_floor_regions() {
         for y in y0..y1 {
             for x in 0..w {
                 let p = buf.pixels[y * w + x];
-                r += p.0 as u64;
-                g += p.1 as u64;
-                b += p.2 as u64;
+                r += p.r as u64;
+                g += p.g as u64;
+                b += p.b as u64;
                 n += 1;
             }
         }
@@ -203,9 +203,9 @@ fn render_changes_when_an_agent_state_changes() {
     draw_scene(&mut term, &scene_idle, &pack, now, &mut draw_ctx).expect("render");
     let mut hasher = DefaultHasher::new();
     for px in &draw_ctx.buf.pixels {
-        px.0.hash(&mut hasher);
-        px.1.hash(&mut hasher);
-        px.2.hash(&mut hasher);
+        px.r.hash(&mut hasher);
+        px.g.hash(&mut hasher);
+        px.b.hash(&mut hasher);
     }
     let idle_hash = hasher.finish();
 

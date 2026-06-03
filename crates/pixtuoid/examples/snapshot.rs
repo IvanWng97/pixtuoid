@@ -204,7 +204,7 @@ fn main() -> Result<()> {
     let rows = args.rows.unwrap_or(ROWS);
     let backend = TestBackend::new(cols, rows);
     let mut term = Terminal::new(backend)?;
-    let mut buf = RgbBuffer::filled(0, 0, Rgb(0, 0, 0));
+    let mut buf = RgbBuffer::filled(0, 0, Rgb { r: 0, g: 0, b: 0 });
     let pack = load_sprite_pack(args.pack_dir)?;
     let mut cache = FrameCache::new();
     let mut router = pixtuoid::tui::pathfind::AStarRouter::new();

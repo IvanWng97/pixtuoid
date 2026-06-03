@@ -83,7 +83,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     ) -> Self {
         Self {
             terminal,
-            floor_bufs: vec![RgbBuffer::filled(0, 0, Rgb(0, 0, 0))],
+            floor_bufs: vec![RgbBuffer::filled(0, 0, Rgb { r: 0, g: 0, b: 0 })],
             floor_ctxs: vec![FloorCtx::new()],
             current_floor: 0,
             transition: None,
@@ -316,7 +316,8 @@ impl<B: Backend<Error: Send + Sync + 'static>> Renderer for TuiRenderer<B> {
 
         // Grow vectors if needed.
         while self.floor_bufs.len() < nf {
-            self.floor_bufs.push(RgbBuffer::filled(0, 0, Rgb(0, 0, 0)));
+            self.floor_bufs
+                .push(RgbBuffer::filled(0, 0, Rgb { r: 0, g: 0, b: 0 }));
         }
         while self.floor_ctxs.len() < nf {
             self.floor_ctxs.push(FloorCtx::new());

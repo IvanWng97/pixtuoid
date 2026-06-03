@@ -10,7 +10,7 @@
 #[macro_export]
 macro_rules! make_draw_ctx {
     ($name:ident $(, $key:ident : $val:expr)* ) => {
-        let mut _buf = pixtuoid_core::sprite::RgbBuffer::filled(0, 0, pixtuoid_core::sprite::Rgb(0, 0, 0));
+        let mut _buf = pixtuoid_core::sprite::RgbBuffer::filled(0, 0, pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 });
         let mut _cache = pixtuoid::tui::frame_cache::FrameCache::new();
         let mut _router = pixtuoid::tui::pathfind::AStarRouter::new();
         let mut _overlay = pixtuoid_core::walkable::OccupancyOverlay::new();

@@ -19,10 +19,26 @@ use crate::tui::layout::{
 };
 use crate::tui::motion::MotionState;
 
-const BLOCKED: Rgb = Rgb(220, 60, 60); // walkable mask — blocked ground
-const APPROACH: Rgb = Rgb(70, 220, 110); // allowed approach cell (off a side)
-const SEAT: Rgb = Rgb(235, 80, 215); // occupies_pos cell (sprite sits ON it)
-const ROUTE: Rgb = Rgb(70, 210, 235); // live A* route polyline
+const BLOCKED: Rgb = Rgb {
+    r: 220,
+    g: 60,
+    b: 60,
+}; // walkable mask — blocked ground
+const APPROACH: Rgb = Rgb {
+    r: 70,
+    g: 220,
+    b: 110,
+}; // allowed approach cell (off a side)
+const SEAT: Rgb = Rgb {
+    r: 235,
+    g: 80,
+    b: 215,
+}; // occupies_pos cell (sprite sits ON it)
+const ROUTE: Rgb = Rgb {
+    r: 70,
+    g: 210,
+    b: 235,
+}; // live A* route polyline
 
 /// N, S, E, W unit dirs (same axes `ApproachSides::allows` expects).
 const DIRS: [(i32, i32); 4] = [(0, -1), (0, 1), (1, 0), (-1, 0)];
@@ -50,11 +66,11 @@ fn tint(buf: &mut RgbBuffer, x: i32, y: i32, c: Rgb, t: f32) {
     buf.put(
         x,
         y,
-        Rgb(
-            blend(bg.0, c.0, t),
-            blend(bg.1, c.1, t),
-            blend(bg.2, c.2, t),
-        ),
+        Rgb {
+            r: blend(bg.r, c.r, t),
+            g: blend(bg.g, c.g, t),
+            b: blend(bg.b, c.b, t),
+        },
     );
 }
 
@@ -223,10 +239,10 @@ mod tests {
     use crate::tui::layout::SceneLayout;
 
     fn greenish(c: Rgb) -> bool {
-        c.1 > c.0 && c.1 > c.2
+        c.g > c.r && c.g > c.b
     }
     fn magentaish(c: Rgb) -> bool {
-        c.0 > c.1 && c.2 > c.1
+        c.r > c.g && c.b > c.g
     }
 
     /// The `w` overlay must show a seat's APPROACH POINT (green, where A* routes)
@@ -240,7 +256,7 @@ mod tests {
             .iter()
             .find(|w| w.kind == WaypointKind::Couch)
             .expect("a lounge couch seat");
-        let mut buf = RgbBuffer::filled(l.buf_w, l.buf_h, Rgb(0, 0, 0));
+        let mut buf = RgbBuffer::filled(l.buf_w, l.buf_h, Rgb { r: 0, g: 0, b: 0 });
         paint_approach(&mut buf, &l);
 
         assert!(
@@ -293,7 +309,7 @@ mod tests {
         let l = SceneLayout::compute_with_seed(200, 130, 8, 0).unwrap();
         let desk = *l.home_desks.first().expect("a home desk");
         let chair = desk_walk_anchor(desk);
-        let mut buf = RgbBuffer::filled(l.buf_w, l.buf_h, Rgb(0, 0, 0));
+        let mut buf = RgbBuffer::filled(l.buf_w, l.buf_h, Rgb { r: 0, g: 0, b: 0 });
         paint_approach(&mut buf, &l);
 
         assert!(

@@ -22,7 +22,7 @@ use pixtuoid_core::SceneState;
 use ratatui::style::Color;
 
 fn to_color(c: Rgb) -> Color {
-    Color::Rgb(c.0, c.1, c.2)
+    Color::Rgb(c.r, c.g, c.b)
 }
 
 /// Persistent scrolling ticker queue. Messages append to the end and scroll

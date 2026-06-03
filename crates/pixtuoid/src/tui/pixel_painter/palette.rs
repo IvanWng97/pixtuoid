@@ -28,43 +28,107 @@ struct Outfit {
 const OUTFITS_WARM: &[Outfit] = &[
     // Wes Anderson — Grand Budapest concierge (cream + plum)
     Outfit {
-        shirt: Rgb(0xee, 0xe1, 0xc6),
-        pants: Rgb(0x4a, 0x2b, 0x3d),
+        shirt: Rgb {
+            r: 0xee,
+            g: 0xe1,
+            b: 0xc6,
+        },
+        pants: Rgb {
+            r: 0x4a,
+            g: 0x2b,
+            b: 0x3d,
+        },
     },
     // Ghibli earthy — terracotta + sand
     Outfit {
-        shirt: Rgb(0xc9, 0x7b, 0x5e),
-        pants: Rgb(0x6b, 0x57, 0x3d),
+        shirt: Rgb {
+            r: 0xc9,
+            g: 0x7b,
+            b: 0x5e,
+        },
+        pants: Rgb {
+            r: 0x6b,
+            g: 0x57,
+            b: 0x3d,
+        },
     },
     // 70s academic — mustard + olive
     Outfit {
-        shirt: Rgb(0xc9, 0xa2, 0x4b),
-        pants: Rgb(0x4a, 0x52, 0x34),
+        shirt: Rgb {
+            r: 0xc9,
+            g: 0xa2,
+            b: 0x4b,
+        },
+        pants: Rgb {
+            r: 0x4a,
+            g: 0x52,
+            b: 0x34,
+        },
     },
     // Burgundy + warm stone (moody academic)
     Outfit {
-        shirt: Rgb(0x8a, 0x2c, 0x36),
-        pants: Rgb(0x5a, 0x4e, 0x42),
+        shirt: Rgb {
+            r: 0x8a,
+            g: 0x2c,
+            b: 0x36,
+        },
+        pants: Rgb {
+            r: 0x5a,
+            g: 0x4e,
+            b: 0x42,
+        },
     },
     // Mediterranean — coral + dark navy
     Outfit {
-        shirt: Rgb(0xd7, 0x7a, 0x61),
-        pants: Rgb(0x27, 0x33, 0x4a),
+        shirt: Rgb {
+            r: 0xd7,
+            g: 0x7a,
+            b: 0x61,
+        },
+        pants: Rgb {
+            r: 0x27,
+            g: 0x33,
+            b: 0x4a,
+        },
     },
     // Camel + chocolate (luxury minimal)
     Outfit {
-        shirt: Rgb(0xb8, 0x99, 0x68),
-        pants: Rgb(0x3d, 0x2a, 0x1f),
+        shirt: Rgb {
+            r: 0xb8,
+            g: 0x99,
+            b: 0x68,
+        },
+        pants: Rgb {
+            r: 0x3d,
+            g: 0x2a,
+            b: 0x1f,
+        },
     },
     // Rust + cream (autumn)
     Outfit {
-        shirt: Rgb(0xa5, 0x4f, 0x2c),
-        pants: Rgb(0xcd, 0xc0, 0xa3),
+        shirt: Rgb {
+            r: 0xa5,
+            g: 0x4f,
+            b: 0x2c,
+        },
+        pants: Rgb {
+            r: 0xcd,
+            g: 0xc0,
+            b: 0xa3,
+        },
     },
     // Salmon + warm charcoal
     Outfit {
-        shirt: Rgb(0xe0, 0x90, 0x7c),
-        pants: Rgb(0x3a, 0x32, 0x2e),
+        shirt: Rgb {
+            r: 0xe0,
+            g: 0x90,
+            b: 0x7c,
+        },
+        pants: Rgb {
+            r: 0x3a,
+            g: 0x32,
+            b: 0x2e,
+        },
     },
 ];
 
@@ -73,64 +137,180 @@ const OUTFITS_WARM: &[Outfit] = &[
 const OUTFITS_COOL: &[Outfit] = &[
     // Modern minimal — sage + charcoal
     Outfit {
-        shirt: Rgb(0xa4, 0xb5, 0x95),
-        pants: Rgb(0x33, 0x36, 0x3d),
+        shirt: Rgb {
+            r: 0xa4,
+            g: 0xb5,
+            b: 0x95,
+        },
+        pants: Rgb {
+            r: 0x33,
+            g: 0x36,
+            b: 0x3d,
+        },
     },
     // Professional — pale blue + slate
     Outfit {
-        shirt: Rgb(0x9b, 0xb5, 0xc8),
-        pants: Rgb(0x3c, 0x44, 0x52),
+        shirt: Rgb {
+            r: 0x9b,
+            g: 0xb5,
+            b: 0xc8,
+        },
+        pants: Rgb {
+            r: 0x3c,
+            g: 0x44,
+            b: 0x52,
+        },
     },
     // Soft moody — lavender + espresso
     Outfit {
-        shirt: Rgb(0xa2, 0x90, 0xb0),
-        pants: Rgb(0x3c, 0x2a, 0x1e),
+        shirt: Rgb {
+            r: 0xa2,
+            g: 0x90,
+            b: 0xb0,
+        },
+        pants: Rgb {
+            r: 0x3c,
+            g: 0x2a,
+            b: 0x1e,
+        },
     },
     // Outdoorsy — forest green + khaki
     Outfit {
-        shirt: Rgb(0x3f, 0x61, 0x4c),
-        pants: Rgb(0x7a, 0x67, 0x48),
+        shirt: Rgb {
+            r: 0x3f,
+            g: 0x61,
+            b: 0x4c,
+        },
+        pants: Rgb {
+            r: 0x7a,
+            g: 0x67,
+            b: 0x48,
+        },
     },
     // Confident — teal + cream
     Outfit {
-        shirt: Rgb(0x3e, 0x7a, 0x85),
-        pants: Rgb(0xc7, 0xb6, 0x96),
+        shirt: Rgb {
+            r: 0x3e,
+            g: 0x7a,
+            b: 0x85,
+        },
+        pants: Rgb {
+            r: 0xc7,
+            g: 0xb6,
+            b: 0x96,
+        },
     },
     // Preppy — indigo + warm grey
     Outfit {
-        shirt: Rgb(0x3f, 0x4a, 0x75),
-        pants: Rgb(0x8a, 0x84, 0x7a),
+        shirt: Rgb {
+            r: 0x3f,
+            g: 0x4a,
+            b: 0x75,
+        },
+        pants: Rgb {
+            r: 0x8a,
+            g: 0x84,
+            b: 0x7a,
+        },
     },
     // Nordic — dusty blue + navy
     Outfit {
-        shirt: Rgb(0x6b, 0x84, 0xa0),
-        pants: Rgb(0x2a, 0x33, 0x4a),
+        shirt: Rgb {
+            r: 0x6b,
+            g: 0x84,
+            b: 0xa0,
+        },
+        pants: Rgb {
+            r: 0x2a,
+            g: 0x33,
+            b: 0x4a,
+        },
     },
     // Mossy — pine + bone
     Outfit {
-        shirt: Rgb(0x47, 0x69, 0x5a),
-        pants: Rgb(0xb8, 0xae, 0x95),
+        shirt: Rgb {
+            r: 0x47,
+            g: 0x69,
+            b: 0x5a,
+        },
+        pants: Rgb {
+            r: 0xb8,
+            g: 0xae,
+            b: 0x95,
+        },
     },
 ];
 
 /// 8 hair colors — was 5. Added silver/grey for older-coded agents,
 /// ginger / strawberry blonde / jet black for more silhouette variety.
 const HAIR_PRESETS: &[Rgb] = &[
-    Rgb(0x14, 0x0a, 0x06), // jet black
-    Rgb(0x2a, 0x1a, 0x0e), // near-black brown
-    Rgb(0x52, 0x32, 0x10), // dark brown
-    Rgb(0x8a, 0x5a, 0x36), // light brown
-    Rgb(0xc7, 0xa3, 0x4a), // blond
-    Rgb(0xd8, 0x68, 0x32), // ginger
-    Rgb(0x7a, 0x32, 0x10), // auburn
-    Rgb(0xa8, 0xa8, 0xb0), // silver-grey
+    Rgb {
+        r: 0x14,
+        g: 0x0a,
+        b: 0x06,
+    }, // jet black
+    Rgb {
+        r: 0x2a,
+        g: 0x1a,
+        b: 0x0e,
+    }, // near-black brown
+    Rgb {
+        r: 0x52,
+        g: 0x32,
+        b: 0x10,
+    }, // dark brown
+    Rgb {
+        r: 0x8a,
+        g: 0x5a,
+        b: 0x36,
+    }, // light brown
+    Rgb {
+        r: 0xc7,
+        g: 0xa3,
+        b: 0x4a,
+    }, // blond
+    Rgb {
+        r: 0xd8,
+        g: 0x68,
+        b: 0x32,
+    }, // ginger
+    Rgb {
+        r: 0x7a,
+        g: 0x32,
+        b: 0x10,
+    }, // auburn
+    Rgb {
+        r: 0xa8,
+        g: 0xa8,
+        b: 0xb0,
+    }, // silver-grey
 ];
 const SKIN_PRESETS: &[Rgb] = &[
-    Rgb(0xf4, 0xc7, 0x9a), // light peach (matches base palette S)
-    Rgb(0xe0, 0xa8, 0x70), // medium
-    Rgb(0xb8, 0x80, 0x50), // tan
-    Rgb(0x8a, 0x5a, 0x36), // deep brown
-    Rgb(0xc8, 0x9a, 0x64), // warm tan
+    Rgb {
+        r: 0xf4,
+        g: 0xc7,
+        b: 0x9a,
+    }, // light peach (matches base palette S)
+    Rgb {
+        r: 0xe0,
+        g: 0xa8,
+        b: 0x70,
+    }, // medium
+    Rgb {
+        r: 0xb8,
+        g: 0x80,
+        b: 0x50,
+    }, // tan
+    Rgb {
+        r: 0x8a,
+        g: 0x5a,
+        b: 0x36,
+    }, // deep brown
+    Rgb {
+        r: 0xc8,
+        g: 0x9a,
+        b: 0x64,
+    }, // warm tan
 ];
 
 /// Build the per-agent palette. `glow_tint` carries the monitor-glow
@@ -157,11 +337,11 @@ pub(super) fn agent_palette(base: &Palette, agent: &AgentSlot, glow_tint: Option
     let hair = HAIR_PRESETS[(seed / 7) % HAIR_PRESETS.len()];
     let skin = SKIN_PRESETS[(seed / 13) % SKIN_PRESETS.len()];
     let final_skin = if let Some(tint) = glow_tint {
-        Rgb(
-            blend(skin.0, tint.0, 0.18),
-            blend(skin.1, tint.1, 0.18),
-            blend(skin.2, tint.2, 0.18),
-        )
+        Rgb {
+            r: blend(skin.r, tint.r, 0.18),
+            g: blend(skin.g, tint.g, 0.18),
+            b: blend(skin.b, tint.b, 0.18),
+        }
     } else {
         skin
     };
@@ -249,14 +429,14 @@ pub(super) fn blend(a: u8, b: u8, t: f32) -> u8 {
 /// `blend()` but only used where the perceptual difference is visible.
 pub(super) fn mix_lab(a: Rgb, b: Rgb, t: f32) -> Rgb {
     use palette::{FromColor, IntoColor, Lab, Mix, Srgb};
-    let sa = Srgb::new(a.0 as f32 / 255.0, a.1 as f32 / 255.0, a.2 as f32 / 255.0);
-    let sb = Srgb::new(b.0 as f32 / 255.0, b.1 as f32 / 255.0, b.2 as f32 / 255.0);
+    let sa = Srgb::new(a.r as f32 / 255.0, a.g as f32 / 255.0, a.b as f32 / 255.0);
+    let sb = Srgb::new(b.r as f32 / 255.0, b.g as f32 / 255.0, b.b as f32 / 255.0);
     let la = Lab::from_color(sa);
     let lb = Lab::from_color(sb);
     let mixed: Srgb = la.mix(lb, t.clamp(0.0, 1.0)).into_color();
-    Rgb(
-        (mixed.red.clamp(0.0, 1.0) * 255.0).round() as u8,
-        (mixed.green.clamp(0.0, 1.0) * 255.0).round() as u8,
-        (mixed.blue.clamp(0.0, 1.0) * 255.0).round() as u8,
-    )
+    Rgb {
+        r: (mixed.red.clamp(0.0, 1.0) * 255.0).round() as u8,
+        g: (mixed.green.clamp(0.0, 1.0) * 255.0).round() as u8,
+        b: (mixed.blue.clamp(0.0, 1.0) * 255.0).round() as u8,
+    }
 }

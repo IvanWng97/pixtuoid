@@ -125,7 +125,7 @@ fn frame_text(buf: &ratatui::buffer::Buffer) -> String {
     out
 }
 fn lum(c: pixtuoid_core::sprite::Rgb) -> f32 {
-    0.299 * c.0 as f32 + 0.587 * c.1 as f32 + 0.114 * c.2 as f32
+    0.299 * c.r as f32 + 0.587 * c.g as f32 + 0.114 * c.b as f32
 }
 /// Average luminance over a rectangle of the RGB buffer (clamped to bounds).
 fn avg_lum(buf: &RgbBuffer, x0: u16, y0: u16, w: u16, h: u16) -> f32 {
@@ -150,9 +150,9 @@ fn region_diff(a: &RgbBuffer, b: &RgbBuffer, x0: u16, y0: u16, w: u16, h: u16) -
     for y in y0..(y0 + h).min(a.height).min(b.height) {
         for x in x0..(x0 + w).min(a.width).min(b.width) {
             let (p, q) = (a.get(x, y), b.get(x, y));
-            d += (p.0 as i32 - q.0 as i32).unsigned_abs() as u64
-                + (p.1 as i32 - q.1 as i32).unsigned_abs() as u64
-                + (p.2 as i32 - q.2 as i32).unsigned_abs() as u64;
+            d += (p.r as i32 - q.r as i32).unsigned_abs() as u64
+                + (p.g as i32 - q.g as i32).unsigned_abs() as u64
+                + (p.b as i32 - q.b as i32).unsigned_abs() as u64;
         }
     }
     d
@@ -438,7 +438,7 @@ fn walkable_debug_toggle_tints_blocked_pixels_and_is_reversible() {
     // so the cell must move CLOSER to that red than it was (a warm cell's red
     // channel barely rises, but green/blue drop — distance is the robust check).
     let to_red = |c: pixtuoid_core::sprite::Rgb| {
-        (c.0 as i32 - 220).abs() + (c.1 as i32 - 60).abs() + (c.2 as i32 - 60).abs()
+        (c.r as i32 - 220).abs() + (c.g as i32 - 60).abs() + (c.b as i32 - 60).abs()
     };
     assert!(
         to_red(on.get(bx, by)) < to_red(before.get(bx, by)),
@@ -1303,7 +1303,7 @@ fn weather_variants_render_without_panic_and_vary() {
                 let c = buf.get(x, y);
                 s = s
                     .wrapping_mul(1099511628211)
-                    .wrapping_add((c.0 as u64) << 16 | (c.1 as u64) << 8 | c.2 as u64);
+                    .wrapping_add((c.r as u64) << 16 | (c.g as u64) << 8 | c.b as u64);
             }
         }
         sigs.insert(s);
@@ -1468,9 +1468,9 @@ fn meeting_glass_partition_connects_at_window_and_corner() {
 
     let buf = r.buf();
     let dist = |a: pixtuoid_core::sprite::Rgb, b: pixtuoid_core::sprite::Rgb| {
-        (a.0 as i32 - b.0 as i32).abs()
-            + (a.1 as i32 - b.1 as i32).abs()
-            + (a.2 as i32 - b.2 as i32).abs()
+        (a.r as i32 - b.r as i32).abs()
+            + (a.g as i32 - b.g as i32).abs()
+            + (a.b as i32 - b.b as i32).abs()
     };
     // The frosted glass is a translucent cool gradient with no single colour,
     // so reference both its lit (left/dx0) and soft (right/dx2) edges — sampled

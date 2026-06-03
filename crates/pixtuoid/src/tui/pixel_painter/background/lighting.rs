@@ -42,11 +42,11 @@ fn paint_ellipse_blend(buf: &mut RgbBuffer, e: Ellipse, strength: f32, color: Rg
             buf.put(
                 x,
                 y,
-                Rgb(
-                    blend(cur.0, color.0, t),
-                    blend(cur.1, color.1, t),
-                    blend(cur.2, color.2, t),
-                ),
+                Rgb {
+                    r: blend(cur.r, color.r, t),
+                    g: blend(cur.g, color.g, t),
+                    b: blend(cur.b, color.b, t),
+                },
             );
         }
     }
@@ -93,11 +93,11 @@ pub(in crate::tui::pixel_painter) fn paint_floor_lamp_halo(
             buf.put(
                 x,
                 y,
-                Rgb(
-                    blend(cur.0, warm.0, t),
-                    blend(cur.1, warm.1, t),
-                    blend(cur.2, warm.2, t),
-                ),
+                Rgb {
+                    r: blend(cur.r, warm.r, t),
+                    g: blend(cur.g, warm.g, t),
+                    b: blend(cur.b, warm.b, t),
+                },
             );
         }
     }
@@ -124,11 +124,11 @@ pub(in crate::tui::pixel_painter) fn paint_neon_panel(
     let base = theme.office.neon_frame_base;
 
     let clamp = |v: f32| v.clamp(0.0, 255.0) as u8;
-    let frame_color = Rgb(
-        clamp(base.0 as f32 + 25.0 * pulse),
-        clamp(base.1 as f32 + 50.0 * pulse),
-        clamp(base.2 as f32 + 50.0 * pulse),
-    );
+    let frame_color = Rgb {
+        r: clamp(base.r as f32 + 25.0 * pulse),
+        g: clamp(base.g as f32 + 50.0 * pulse),
+        b: clamp(base.b as f32 + 50.0 * pulse),
+    };
 
     for dy in 0..h {
         for dx in 0..w {

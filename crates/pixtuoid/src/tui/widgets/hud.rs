@@ -30,9 +30,9 @@ fn pulse_border_color(bg: Rgb, brand: Rgb, now: SystemTime) -> Color {
     let t = (phase.sin() * 0.5 + 0.5) * 0.4 + 0.6;
     let lerp = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * t).round() as u8;
     Color::Rgb(
-        lerp(bg.0, brand.0),
-        lerp(bg.1, brand.1),
-        lerp(bg.2, brand.2),
+        lerp(bg.r, brand.r),
+        lerp(bg.g, brand.g),
+        lerp(bg.b, brand.b),
     )
 }
 
@@ -586,7 +586,7 @@ mod hud_tests {
             pulse_border_color(bg, brand, std::time::UNIX_EPOCH + Duration::from_millis(ms))
         };
         // Peak at 750ms (phase = π/2) → full brand.
-        assert_eq!(at(750), Color::Rgb(brand.0, brand.1, brand.2));
+        assert_eq!(at(750), Color::Rgb(brand.r, brand.g, brand.b));
         // Deterministic + 3s-periodic.
         assert_eq!(at(1234), at(1234 + 3000));
         // Trough at 2250ms (phase = 3π/2) → dimmer than peak but never fully
@@ -595,7 +595,7 @@ mod hud_tests {
         assert_ne!(trough, at(750), "trough should be dimmer than peak");
         assert_ne!(
             trough,
-            Color::Rgb(bg.0, bg.1, bg.2),
+            Color::Rgb(bg.r, bg.g, bg.b),
             "border never drops fully to background"
         );
     }

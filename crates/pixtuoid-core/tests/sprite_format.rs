@@ -5,8 +5,8 @@ use pixtuoid_core::sprite::{Palette, Rgb};
 
 fn palette() -> Palette {
     let mut p = Palette::new();
-    p.insert('A', Some(Rgb(1, 2, 3)));
-    p.insert('B', Some(Rgb(4, 5, 6)));
+    p.insert('A', Some(Rgb { r: 1, g: 2, b: 3 }));
+    p.insert('B', Some(Rgb { r: 4, g: 5, b: 6 }));
     p.insert('.', None);
     p
 }
@@ -19,9 +19,9 @@ fn parses_two_frame_mini_sprite() {
     assert_eq!(frames.len(), 2);
     assert_eq!(frames[0].width, 4);
     assert_eq!(frames[0].height, 2);
-    assert_eq!(frames[0].pixels[0], Some(Rgb(1, 2, 3)));
+    assert_eq!(frames[0].pixels[0], Some(Rgb { r: 1, g: 2, b: 3 }));
     assert_eq!(frames[0].pixels[1], None);
-    assert_eq!(frames[0].pixels[2], Some(Rgb(4, 5, 6)));
+    assert_eq!(frames[0].pixels[2], Some(Rgb { r: 4, g: 5, b: 6 }));
     assert_eq!(frames[0].pixels[3], None);
 }
 
