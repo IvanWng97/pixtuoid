@@ -140,12 +140,11 @@ pub async fn run_tui(
     theme: &'static theme::Theme,
     config_path: std::path::PathBuf,
     desk_cap: Option<usize>,
-    enabled_pets: Vec<pet::PetKind>,
-    pet_names: std::collections::HashMap<pet::PetKind, String>,
+    pets: Vec<pet::Pet>,
 ) -> Result<()> {
     let pack = embedded_pack::load_sprite_pack(pack_dir)?;
     let term = setup_terminal()?;
-    let mut renderer = TuiRenderer::new(term, theme, enabled_pets, pet_names);
+    let mut renderer = TuiRenderer::new(term, theme, pets);
     let mut version_popup = {
         let current_ver = env!("CARGO_PKG_VERSION");
         let cfg = crate::config::load(&config_path);

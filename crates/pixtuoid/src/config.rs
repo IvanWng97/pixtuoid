@@ -148,51 +148,47 @@ pub fn resolve_theme(config: &AppConfig, cli_theme: Option<String>) -> String {
         .unwrap_or_else(|| "normal".to_string())
 }
 
-pub fn resolve_pets(config: &AppConfig) -> Vec<crate::tui::pet::PetKind> {
-    match &config.enabled_pets {
-        None => crate::tui::pet::PetKind::ALL.to_vec(),
+/// Resolve config into the office's [`Pet`]s — one per enabled kind, each
+/// carrying its display name (custom from `[pet-names]`, else
+/// [`PetKind::default_name`]). `enabled-pets` absent → all kinds; unknown
+/// enabled names are warned + skipped. A `[pet-names]` value is trimmed and an
+/// empty/whitespace-only one falls back to the default. Resolving the name HERE
+/// (once, at startup) means the render path reads `pet.name` directly — no
+/// per-frame lookup, no parallel kind→name map to keep in sync.
+pub fn resolve_pets(config: &AppConfig) -> Vec<crate::tui::pet::Pet> {
+    use crate::tui::pet::{Pet, PetKind};
+    let kinds: Vec<PetKind> = match &config.enabled_pets {
+        None => PetKind::ALL.to_vec(),
         Some(names) => {
-            let pets: Vec<_> = names
+            let kinds: Vec<_> = names
                 .iter()
                 .filter_map(|n| {
-                    let kind = crate::tui::pet::PetKind::from_config_name(n);
+                    let kind = PetKind::from_config_name(n);
                     if kind.is_none() {
                         tracing::warn!(pet = %n, "unknown pet in config — skipping");
                     }
                     kind
                 })
                 .collect();
-            if pets.is_empty() && !names.is_empty() {
+            if kinds.is_empty() && !names.is_empty() {
                 tracing::warn!("all enabled-pets names were unknown — no pets will appear");
             }
-            pets
+            kinds
         }
-    }
-}
-
-/// Resolve the `[pet-names]` table to a `PetKind`-keyed map of custom display
-/// names. Unknown keys are warned + skipped; values are trimmed and an
-/// empty/whitespace-only value is dropped (the kind then falls back to its
-/// default name). Absent table → empty map (all kinds use defaults). Mirrors
-/// [`resolve_pets`].
-pub fn resolve_pet_names(config: &AppConfig) -> HashMap<crate::tui::pet::PetKind, String> {
-    let mut out = HashMap::new();
-    let Some(names) = &config.pet_names else {
-        return out;
     };
-    for (key, value) in names {
-        let Some(kind) = crate::tui::pet::PetKind::from_config_name(key) else {
-            tracing::warn!(pet = %key, "unknown pet in [pet-names] — skipping");
-            continue;
-        };
-        let trimmed = value.trim();
-        if trimmed.is_empty() {
-            tracing::warn!(pet = %key, "empty pet name in [pet-names] — using default");
-            continue;
-        }
-        out.insert(kind, trimmed.to_string());
-    }
-    out
+    let overrides = config.pet_names.as_ref();
+    kinds
+        .into_iter()
+        .map(|kind| {
+            let name = overrides
+                .and_then(|m| m.get(kind.config_name()))
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+                .unwrap_or_else(|| kind.default_name().to_string());
+            Pet { kind, name }
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -441,7 +437,12 @@ mod tests {
             ..AppConfig::default()
         };
         let pets = resolve_pets(&cfg);
-        assert_eq!(pets, vec![crate::tui::pet::PetKind::Cat]);
+        assert_eq!(
+            pets,
+            vec![crate::tui::pet::Pet::defaulted(
+                crate::tui::pet::PetKind::Cat
+            )]
+        );
     }
 
     #[test]
@@ -481,91 +482,75 @@ mod tests {
         assert!(pets.is_empty());
     }
 
-    // --- pet-names ----------------------------------------------------------
+    // --- pet-names (resolved into Pet.name) ---------------------------------
 
     #[test]
-    fn resolve_pet_names_none_returns_empty() {
-        let cfg = AppConfig::default();
-        assert!(resolve_pet_names(&cfg).is_empty());
-    }
-
-    #[test]
-    fn resolve_pet_names_cat_and_dog_set() {
+    fn resolve_pets_attaches_custom_name() {
         let mut m = HashMap::new();
         m.insert("cat".to_string(), "Whiskers".to_string());
         m.insert("dog".to_string(), "Rex".to_string());
         let cfg = AppConfig {
+            enabled_pets: Some(vec!["cat".into(), "dog".into()]),
             pet_names: Some(m),
             ..AppConfig::default()
         };
-        let names = resolve_pet_names(&cfg);
-        assert_eq!(
-            names
-                .get(&crate::tui::pet::PetKind::Cat)
-                .map(String::as_str),
-            Some("Whiskers")
-        );
-        assert_eq!(
-            names
-                .get(&crate::tui::pet::PetKind::Dog)
-                .map(String::as_str),
-            Some("Rex")
-        );
+        let pets = resolve_pets(&cfg);
+        let name = |k| pets.iter().find(|p| p.kind == k).map(|p| p.name.as_str());
+        assert_eq!(name(crate::tui::pet::PetKind::Cat), Some("Whiskers"));
+        assert_eq!(name(crate::tui::pet::PetKind::Dog), Some("Rex"));
     }
 
     #[test]
-    fn resolve_pet_names_trims_whitespace() {
+    fn resolve_pets_falls_back_to_default_name() {
+        let cfg = AppConfig {
+            enabled_pets: Some(vec!["dog".into()]),
+            ..AppConfig::default()
+        };
+        let pets = resolve_pets(&cfg);
+        assert_eq!(pets[0].name, "Office Dog");
+    }
+
+    #[test]
+    fn resolve_pets_trims_and_skips_empty_name() {
         let mut m = HashMap::new();
         m.insert("cat".to_string(), "  Mittens  ".to_string());
+        m.insert("dog".to_string(), "   ".to_string()); // whitespace-only → default
         let cfg = AppConfig {
+            enabled_pets: Some(vec!["cat".into(), "dog".into()]),
             pet_names: Some(m),
             ..AppConfig::default()
         };
-        let names = resolve_pet_names(&cfg);
-        assert_eq!(
-            names
-                .get(&crate::tui::pet::PetKind::Cat)
-                .map(String::as_str),
-            Some("Mittens")
-        );
+        let pets = resolve_pets(&cfg);
+        let name = |k| pets.iter().find(|p| p.kind == k).map(|p| p.name.as_str());
+        assert_eq!(name(crate::tui::pet::PetKind::Cat), Some("Mittens"));
+        assert_eq!(name(crate::tui::pet::PetKind::Dog), Some("Office Dog"));
     }
 
     #[test]
-    fn resolve_pet_names_skips_empty_value() {
-        let mut m = HashMap::new();
-        m.insert("cat".to_string(), "   ".to_string());
-        m.insert("dog".to_string(), "Rex".to_string());
-        let cfg = AppConfig {
-            pet_names: Some(m),
-            ..AppConfig::default()
-        };
-        let names = resolve_pet_names(&cfg);
-        assert!(!names.contains_key(&crate::tui::pet::PetKind::Cat));
-        assert_eq!(
-            names
-                .get(&crate::tui::pet::PetKind::Dog)
-                .map(String::as_str),
-            Some("Rex")
-        );
-    }
-
-    #[test]
-    fn resolve_pet_names_skips_unknown_key() {
+    fn resolve_pets_unknown_pet_names_key_is_ignored() {
+        // A name for a kind that isn't enabled is simply never attached.
         let mut m = HashMap::new();
         m.insert("hamster".to_string(), "Nibbles".to_string());
         m.insert("cat".to_string(), "Luna".to_string());
         let cfg = AppConfig {
+            enabled_pets: Some(vec!["cat".into()]),
             pet_names: Some(m),
             ..AppConfig::default()
         };
-        let names = resolve_pet_names(&cfg);
-        assert_eq!(names.len(), 1);
-        assert_eq!(
-            names
-                .get(&crate::tui::pet::PetKind::Cat)
-                .map(String::as_str),
-            Some("Luna")
-        );
+        let pets = resolve_pets(&cfg);
+        assert_eq!(pets.len(), 1);
+        assert_eq!(pets[0].kind, crate::tui::pet::PetKind::Cat);
+        assert_eq!(pets[0].name, "Luna");
+    }
+
+    #[test]
+    fn resolve_pets_none_config_uses_default_names() {
+        let cfg = AppConfig::default(); // enabled_pets = None → all kinds
+        let pets = resolve_pets(&cfg);
+        assert_eq!(pets.len(), crate::tui::pet::PetKind::ALL.len());
+        for pet in &pets {
+            assert_eq!(pet.name, pet.kind.default_name());
+        }
     }
 
     #[test]
@@ -584,24 +569,19 @@ mod tests {
     }
 
     #[test]
-    fn resolve_pet_names_from_toml() {
+    fn resolve_pets_from_toml_attaches_names() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.toml");
-        std::fs::write(&path, "[pet-names]\ncat = \"Luna\"\ndog = \"Rex\"\n").unwrap();
+        std::fs::write(
+            &path,
+            "enabled-pets = [\"cat\", \"dog\"]\n[pet-names]\ncat = \"Luna\"\ndog = \"Rex\"\n",
+        )
+        .unwrap();
         let cfg = load(&path);
-        let names = resolve_pet_names(&cfg);
-        assert_eq!(
-            names
-                .get(&crate::tui::pet::PetKind::Cat)
-                .map(String::as_str),
-            Some("Luna")
-        );
-        assert_eq!(
-            names
-                .get(&crate::tui::pet::PetKind::Dog)
-                .map(String::as_str),
-            Some("Rex")
-        );
+        let pets = resolve_pets(&cfg);
+        let name = |k| pets.iter().find(|p| p.kind == k).map(|p| p.name.as_str());
+        assert_eq!(name(crate::tui::pet::PetKind::Cat), Some("Luna"));
+        assert_eq!(name(crate::tui::pet::PetKind::Dog), Some("Rex"));
     }
 
     #[test]

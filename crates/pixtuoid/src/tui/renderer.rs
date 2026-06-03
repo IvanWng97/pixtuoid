@@ -96,11 +96,11 @@ pub struct DrawCtx<'a> {
     pub floor: crate::tui::floor::FloorMeta,
     pub active_pet: Option<&'a PetState>,
     pub last_pet_pos: Option<(Point, &'static str, PetKind)>,
-    pub floor_pet_kind: Option<PetKind>,
-    /// User-defined pet display names (`[pet-names]` config). Looked up by kind
-    /// in the hover tooltip; an absent kind falls back to `default_name`.
-    /// Borrowed from `TuiRenderer`-owned state.
-    pub pet_names: &'a std::collections::HashMap<PetKind, String>,
+    /// The pet assigned to this floor — its kind AND resolved display name.
+    /// `None` when no pets are configured or none maps to this floor seed.
+    /// Replaces the former `floor_pet_kind` + `pet_names` pair: the name rides
+    /// along, so the tooltip reads `floor_pet.name` directly (no lookup).
+    pub floor_pet: Option<&'a crate::tui::pet::Pet>,
     pub chitchat_state: &'a mut std::collections::HashMap<
         crate::tui::chitchat::VenueKey,
         crate::tui::chitchat::ActiveChitchat,
@@ -243,7 +243,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         theme,
         floor,
         active_pet: ctx.active_pet,
-        floor_pet_kind: ctx.floor_pet_kind,
+        floor_pet: ctx.floor_pet,
         chitchat_state: ctx.chitchat_state,
         coffee_holders: ctx.coffee_holders,
         coffee_fetched_at: ctx.coffee_fetched_at,
@@ -328,10 +328,13 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
                 } else if let Some((pet_pos, anim, kind)) = ctx.last_pet_pos {
                     if hit_test_pet(kind, pet_pos, anim, mx, my) {
                         let on_cooldown = ctx.active_pet.is_some_and(|p| p.is_active(now));
+                        // `last_pet_pos` is only Some on the normal render path,
+                        // where it was written from `floor_pet` — so their kinds
+                        // agree and `floor_pet.name` is the right label. The
+                        // `default_name` arm is defense-in-depth, not a live path.
                         let display_name = ctx
-                            .pet_names
-                            .get(&kind)
-                            .map(String::as_str)
+                            .floor_pet
+                            .map(|p| p.name.as_str())
                             .unwrap_or_else(|| kind.default_name());
                         paint_pet_tooltip(
                             f,

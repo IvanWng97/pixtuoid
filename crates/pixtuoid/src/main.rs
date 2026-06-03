@@ -58,8 +58,7 @@ fn main() -> Result<()> {
             let theme_name = config::resolve_theme(&cfg, cli_theme);
             let desk_cap = cli_max_desks.or(cfg.max_desks);
             let pack_dir = config::resolve_pack_dir(&cfg, pack_dir);
-            let enabled_pets = config::resolve_pets(&cfg);
-            let pet_names = config::resolve_pet_names(&cfg);
+            let pets = config::resolve_pets(&cfg);
             runtime::run(
                 socket,
                 projects_root,
@@ -69,8 +68,7 @@ fn main() -> Result<()> {
                 headless,
                 theme_name,
                 cfg_path,
-                enabled_pets,
-                pet_names,
+                pets,
             )
         }
         Cmd::InstallHooks {

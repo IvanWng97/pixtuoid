@@ -277,7 +277,9 @@ pub struct PixelCtx<'a> {
     pub theme: &'a crate::tui::theme::Theme,
     pub floor: crate::tui::floor::FloorMeta,
     pub active_pet: Option<&'a crate::tui::renderer::PetState>,
-    pub floor_pet_kind: Option<PetKind>,
+    /// The pet on this floor (kind drives the sprite; name is unused here — the
+    /// pixel pass doesn't render the name, the tooltip does).
+    pub floor_pet: Option<&'a crate::tui::pet::Pet>,
     pub chitchat_state: &'a mut HashMap<crate::tui::chitchat::VenueKey, ActiveChitchat>,
     pub coffee_holders: &'a std::collections::HashSet<pixtuoid_core::AgentId>,
     pub coffee_fetched_at: &'a HashMap<pixtuoid_core::AgentId, SystemTime>,
@@ -1267,7 +1269,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
         .iter()
         .all(|a| matches!(a.state, ActivityState::Idle));
 
-    if let Some(kind) = ctx.floor_pet_kind {
+    if let Some(kind) = ctx.floor_pet.map(|p| p.kind) {
         let active_pet = ctx.active_pet.filter(|p| {
             p.is_active(ctx.now) && p.kind == kind && p.floor_idx == ctx.floor.floor_idx
         });

@@ -66,20 +66,23 @@ fn normal_theme() -> &'static crate::tui::theme::Theme {
 fn dark_theme() -> &'static crate::tui::theme::Theme {
     crate::tui::theme::theme_by_name("cyberpunk").expect("cyberpunk theme")
 }
-fn build(cols: u16, rows: u16, pets: Vec<PetKind>) -> TuiRenderer<TestBackend> {
-    build_with_names(cols, rows, pets, std::collections::HashMap::new())
+/// Build a renderer with the given pet KINDS, each using its default name.
+fn build(cols: u16, rows: u16, kinds: Vec<PetKind>) -> TuiRenderer<TestBackend> {
+    build_pets(
+        cols,
+        rows,
+        kinds
+            .into_iter()
+            .map(crate::tui::pet::Pet::defaulted)
+            .collect(),
+    )
 }
-fn build_with_names(
-    cols: u16,
-    rows: u16,
-    pets: Vec<PetKind>,
-    pet_names: std::collections::HashMap<PetKind, String>,
-) -> TuiRenderer<TestBackend> {
+/// Build a renderer with fully-specified pets (kind + custom name).
+fn build_pets(cols: u16, rows: u16, pets: Vec<crate::tui::pet::Pet>) -> TuiRenderer<TestBackend> {
     TuiRenderer::new(
         Terminal::new(TestBackend::new(cols, rows)).expect("test backend"),
         normal_theme(),
         pets,
-        pet_names,
     )
 }
 /// Idle agent on floor 0 at desk `desk`.
@@ -171,7 +174,7 @@ fn offscreen_floor_freezes_and_resyncs_on_return() {
     scene.agents.insert(b, slot(b, 1, cap, t0));
 
     let term = Terminal::new(TestBackend::new(100, 40)).expect("test backend");
-    let mut r = TuiRenderer::new(term, theme, vec![], std::collections::HashMap::new());
+    let mut r = TuiRenderer::new(term, theme, vec![]);
 
     // Warm up floor 0 so agent A's MotionState initialises and wanders.
     let mut now = t0;
@@ -1065,9 +1068,11 @@ fn pet_tooltip_on_hover() {
 #[test]
 fn pet_tooltip_shows_custom_name() {
     let scene = scene_with(vec![active("/tt/cn.jsonl", 0, "Edit", t0())], 16);
-    let mut names = std::collections::HashMap::new();
-    names.insert(PetKind::Cat, "Luna".to_string());
-    let mut r = build_with_names(140, 48, vec![PetKind::Cat], names);
+    let cat = crate::tui::pet::Pet {
+        kind: PetKind::Cat,
+        name: "Luna".to_string(),
+    };
+    let mut r = build_pets(140, 48, vec![cat]);
     r.render(&scene, &pack(), t0()).unwrap();
     let (pos, _, _) = r.cached_pet_pos().expect("cat placed");
     r.set_mouse_pos(Some((pos.x, pos.y / 2)));
@@ -1086,13 +1091,8 @@ fn pet_tooltip_shows_custom_name() {
 #[test]
 fn pet_tooltip_falls_back_to_default_name_when_not_configured() {
     let scene = scene_with(vec![active("/tt/fb.jsonl", 0, "Edit", t0())], 16);
-    // Empty names map → default name.
-    let mut r = build_with_names(
-        140,
-        48,
-        vec![PetKind::Cat],
-        std::collections::HashMap::new(),
-    );
+    // No custom name → default ("Office Cat"). `build` defaults the name.
+    let mut r = build(140, 48, vec![PetKind::Cat]);
     r.render(&scene, &pack(), t0()).unwrap();
     let (pos, _, _) = r.cached_pet_pos().expect("cat placed");
     r.set_mouse_pos(Some((pos.x, pos.y / 2)));

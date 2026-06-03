@@ -103,11 +103,33 @@ impl PetKind {
     }
 }
 
-pub fn select_pet_for_floor(floor_seed: u64, enabled_pets: &[PetKind]) -> Option<PetKind> {
-    if enabled_pets.is_empty() {
+/// A pet configured for the office: its [`PetKind`] plus the display name shown
+/// in the hover tooltip. The name is resolved ONCE (custom from `[pet-names]`,
+/// else [`PetKind::default_name`]) so the render path never does a name lookup
+/// or fallback — it reads `pet.name` directly. Keying the office's pets as a
+/// `&[Pet]` (not a parallel `Vec<PetKind>` + name map) makes "every enabled pet
+/// has a name" true by construction.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Pet {
+    pub kind: PetKind,
+    pub name: String,
+}
+
+impl Pet {
+    /// A pet of `kind` with its default name — the no-custom-name case.
+    pub fn defaulted(kind: PetKind) -> Self {
+        Self {
+            kind,
+            name: kind.default_name().to_string(),
+        }
+    }
+}
+
+pub fn select_pet_for_floor(floor_seed: u64, pets: &[Pet]) -> Option<&Pet> {
+    if pets.is_empty() {
         return None;
     }
-    Some(enabled_pets[(floor_seed as usize) % enabled_pets.len()])
+    Some(&pets[(floor_seed as usize) % pets.len()])
 }
 
 #[cfg(test)]
@@ -146,19 +168,29 @@ mod tests {
 
     #[test]
     fn select_pet_single_always_returns_it() {
-        assert_eq!(select_pet_for_floor(0, &[PetKind::Dog]), Some(PetKind::Dog));
+        let pets = [Pet::defaulted(PetKind::Dog)];
         assert_eq!(
-            select_pet_for_floor(99, &[PetKind::Dog]),
+            select_pet_for_floor(0, &pets).map(|p| p.kind),
+            Some(PetKind::Dog)
+        );
+        assert_eq!(
+            select_pet_for_floor(99, &pets).map(|p| p.kind),
             Some(PetKind::Dog)
         );
     }
 
     #[test]
     fn select_pet_two_pets_alternates_by_seed() {
-        let pets = vec![PetKind::Cat, PetKind::Dog];
-        let floor0 = select_pet_for_floor(0, &pets);
-        let floor1 = select_pet_for_floor(1, &pets);
+        let pets = vec![Pet::defaulted(PetKind::Cat), Pet::defaulted(PetKind::Dog)];
+        let floor0 = select_pet_for_floor(0, &pets).map(|p| p.kind);
+        let floor1 = select_pet_for_floor(1, &pets).map(|p| p.kind);
         assert_ne!(floor0, floor1);
+    }
+
+    #[test]
+    fn defaulted_uses_default_name() {
+        assert_eq!(Pet::defaulted(PetKind::Cat).name, "Office Cat");
+        assert_eq!(Pet::defaulted(PetKind::Dog).kind, PetKind::Dog);
     }
 
     #[test]

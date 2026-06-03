@@ -44,10 +44,11 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     cached_layout: Option<Layout>,
     active_pet: Option<PetState>,
     last_pet_pos: Option<(Point, &'static str, PetKind)>,
-    enabled_pets: Vec<PetKind>,
-    /// User-defined pet display names from `[pet-names]` config (resolved once
-    /// at startup like `enabled_pets`). Borrowed into `DrawCtx` per frame.
-    pet_names: std::collections::HashMap<PetKind, String>,
+    /// Configured pets (kind + resolved display name), in order. Resolved once
+    /// at startup by `config::resolve_pets`. `select_pet_for_floor` picks one
+    /// per floor; the picked `&Pet` flows into `DrawCtx.floor_pet`. Replaces the
+    /// former `enabled_pets: Vec<PetKind>` + `pet_names: HashMap` pair.
+    pets: Vec<crate::tui::pet::Pet>,
     chitchat_state: std::collections::HashMap<
         crate::tui::chitchat::VenueKey,
         crate::tui::chitchat::ActiveChitchat,
@@ -78,8 +79,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     pub fn new(
         terminal: Terminal<B>,
         theme: &'static crate::tui::theme::Theme,
-        enabled_pets: Vec<PetKind>,
-        pet_names: std::collections::HashMap<PetKind, String>,
+        pets: Vec<crate::tui::pet::Pet>,
     ) -> Self {
         Self {
             terminal,
@@ -95,8 +95,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             cached_layout: None,
             active_pet: None,
             last_pet_pos: None,
-            enabled_pets,
-            pet_names,
+            pets,
             chitchat_state: std::collections::HashMap::new(),
             coffee_holders: std::collections::HashSet::new(),
             coffee_fetched_at: std::collections::HashMap::new(),
@@ -454,10 +453,8 @@ impl<B: Backend<Error: Send + Sync + 'static>> Renderer for TuiRenderer<B> {
                 .active_pet
                 .as_ref()
                 .filter(|p| p.floor_idx == to_floor && p.is_active(now));
-            let from_pet_kind =
-                crate::tui::pet::select_pet_for_floor(from_meta.floor_seed, &self.enabled_pets);
-            let to_pet_kind =
-                crate::tui::pet::select_pet_for_floor(to_meta.floor_seed, &self.enabled_pets);
+            let from_pet = crate::tui::pet::select_pet_for_floor(from_meta.floor_seed, &self.pets);
+            let to_pet = crate::tui::pet::select_pet_for_floor(to_meta.floor_seed, &self.pets);
 
             let from_carriers = render_transition_floor(
                 &from_scene,
@@ -467,7 +464,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> Renderer for TuiRenderer<B> {
                 buf_w,
                 buf_h,
                 from_active_pet,
-                from_pet_kind,
+                from_pet,
                 self.theme,
                 &self.coffee_holders,
                 &self.coffee_fetched_at,
@@ -484,7 +481,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> Renderer for TuiRenderer<B> {
                 buf_w,
                 buf_h,
                 to_active_pet,
-                to_pet_kind,
+                to_pet,
                 self.theme,
                 &self.coffee_holders,
                 &self.coffee_fetched_at,
@@ -622,11 +619,11 @@ impl<B: Backend<Error: Send + Sync + 'static>> Renderer for TuiRenderer<B> {
             floor: floor_meta,
             active_pet: self.active_pet.as_ref(),
             last_pet_pos: None,
-            floor_pet_kind: crate::tui::pet::select_pet_for_floor(
-                floor_meta.floor_seed,
-                &self.enabled_pets,
-            ),
-            pet_names: &self.pet_names,
+            // Borrows `self.pets` immutably — disjoint from the `&mut fctx`
+            // (self.floor_ctxs) above, so the field-split borrow is fine (same
+            // as `&self.ticker`/`&self.coffee_holders` here). The picked `&Pet`
+            // carries the name, so the tooltip needs no separate map.
+            floor_pet: crate::tui::pet::select_pet_for_floor(floor_meta.floor_seed, &self.pets),
             chitchat_state: &mut self.chitchat_state,
             chitchat_bubbles: Vec::new(),
             coffee_holders: &self.coffee_holders,
@@ -669,7 +666,7 @@ fn render_transition_floor(
     buf_w: u16,
     buf_h: u16,
     active_pet: Option<&PetState>,
-    floor_pet_kind: Option<PetKind>,
+    floor_pet: Option<&crate::tui::pet::Pet>,
     theme: &'static crate::tui::theme::Theme,
     coffee_holders: &std::collections::HashSet<pixtuoid_core::AgentId>,
     coffee_fetched_at: &std::collections::HashMap<pixtuoid_core::AgentId, SystemTime>,
@@ -702,7 +699,7 @@ fn render_transition_floor(
         theme,
         floor: floor_meta,
         active_pet,
-        floor_pet_kind,
+        floor_pet,
         chitchat_state,
         coffee_holders,
         coffee_fetched_at,
