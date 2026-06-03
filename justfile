@@ -53,8 +53,19 @@ test:
         cargo test --workspace --features {{ features }}
     fi
 
-# Full pre-push gate: everything CI runs, in the same order.
-preflight: lint clippy test
+# Feature-combination check — every feature subset must compile. Catches code
+# that silently only builds with `test-renderer` on (CI runs with it always on).
+hack:
+    cargo hack --feature-powerset --no-dev-deps check --workspace
+
+# SemVer-check the published library against its crates.io baseline. CI-only in
+# practice: needs network to fetch the baseline crate. Scoped to pixtuoid-core
+# (the headless lib others depend on); the binary crates' libs aren't public API.
+semver:
+    cargo semver-checks --package pixtuoid-core
+
+# Full pre-push gate: the core checks CI runs, in the same order.
+preflight: lint clippy hack test
 
 # Regenerate every docs/images screenshot + demo.gif from a release build.
 # Single source of truth for the office images — the render params, crop
