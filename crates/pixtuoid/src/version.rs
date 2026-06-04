@@ -67,6 +67,14 @@ pub fn release_notes(version: &str) -> Option<&'static [&'static str]> {
             "Version popup URL no longer mis-clicks on narrow terminals",
             "Corrupted last_seen_version self-heals on next launch",
         ]),
+        "0.5.0" => Some(&[
+            "Now visualizes Codex sessions too — re-run `pixtuoid install-hooks`",
+            "Office overhaul: unified furniture + smarter approach/seating pathfinding",
+            "Glass meeting rooms, denser desk pods, day/night lighting",
+            "Physics-grounded weather: storms, lightning, moonlight",
+            "Real-physics walking, animated floor transitions, emergent meeting chitchat",
+            "Custom pet names via `[[pets]]` config",
+        ]),
         _ => None,
     }
 }
