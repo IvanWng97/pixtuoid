@@ -31,11 +31,13 @@ done < <(node -e "require('$manifest').forEach(function (t) { console.log(t.id);
 "$bin" --cols "$cols" --rows "$rows" --now-hour 13 "$out/day.png"
 "$bin" --cols "$cols" --rows "$rows" --now-hour 22 "$out/night.png"
 
-# Animated hero → mp4 + poster. Re-encode from frames so it's a true 6s/12fps loop
-# (the GIF's own frame delays otherwise confuse ffmpeg into a fast clip).
+# Animated hero → mp4 + poster: a 20s loop of the office mid-work — multiple
+# agents typing and wandering (to the pantry, the meeting room, the couch).
+# Re-encode from frames so it's a true 20s/12fps loop (the GIF's own frame
+# delays otherwise confuse ffmpeg into a fast clip).
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
-"$bin" --cols 208 --rows 88 --gif --gif-duration 6 --gif-fps 12 --now-hour "$hero_hour" "$tmp/hero.gif"
+"$bin" --cols 208 --rows 88 --gif --gif-duration 20 --gif-fps 12 --now-hour "$hero_hour" "$tmp/hero.gif"
 mkdir -p "$tmp/frames"
 ffmpeg -y -i "$tmp/hero.gif" "$tmp/frames/f%03d.png" >/dev/null 2>&1
 ffmpeg -y -framerate 12 -i "$tmp/frames/f%03d.png" -movflags +faststart -pix_fmt yuv420p \
