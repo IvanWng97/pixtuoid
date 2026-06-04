@@ -536,3 +536,80 @@ body.has-pointer .cursor-glow {
   font-size: 0.72rem;
   opacity: 0.55;
 }
+
+/* ---------- prose: rendered markdown (the /config page) ---------- */
+.prose {
+  line-height: 1.7;
+}
+.prose h1 {
+  font-size: clamp(2.2rem, 1.6rem + 2.2vw, 3.1rem);
+  margin-bottom: 0.5rem;
+}
+.prose h2 {
+  font-size: clamp(1.45rem, 1.2rem + 1.3vw, 1.95rem);
+  margin: 2.2rem 0 0.8rem;
+  padding-top: 1.4rem;
+  border-top: 1px solid var(--border);
+}
+.prose h3 {
+  margin: 1.6rem 0 0.5rem;
+}
+.prose p,
+.prose li {
+  color: var(--fg);
+}
+.prose a {
+  color: var(--coral-deep);
+  font-weight: 600;
+}
+:root[data-theme='night'] .prose a,
+:root[data-theme='dracula'] .prose a {
+  color: var(--coral);
+}
+.prose ul {
+  padding-left: 1.3rem;
+}
+.prose li {
+  margin: 0.3rem 0;
+}
+/* inline code */
+.prose :not(pre) > code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.08rem 0.34rem;
+}
+/* fenced code blocks (Shiki sets the colors; we frame them) */
+.prose pre {
+  margin: 1.2rem 0;
+  padding: 1rem 1.1rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  overflow-x: auto;
+  font-size: 0.9rem;
+  line-height: 1.6;
+}
+.prose pre code {
+  font-family: var(--font-mono);
+}
+/* tables */
+.prose table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1.2rem 0;
+  font-size: 0.95rem;
+}
+.prose th,
+.prose td {
+  text-align: left;
+  padding: 0.55rem 0.8rem;
+  border: 1px solid var(--border);
+  vertical-align: top;
+}
+.prose th {
+  background: var(--surface-2);
+  font-family: var(--font-display);
+  font-weight: 600;
+}

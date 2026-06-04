@@ -1,17 +1,20 @@
 ---
-import { REPO } from '../consts';
+import { REPO, asset } from '../consts';
+// Absolute home so the section anchors work from any page (e.g. /config).
+const home = asset('');
 ---
 
 <header class="nav">
   <div class="container nav__inner">
-    <a class="nav__logo" href="#top">
+    <a class="nav__logo" href={home}>
       <span class="nav__mark" aria-hidden="true"></span>
       pixtuoid
     </a>
     <nav class="nav__links" aria-label="Primary">
-      <a href="#themes">Themes</a>
-      <a href="#features">Features</a>
-      <a href="#install">Install</a>
+      <a href={`${home}#themes`}>Themes</a>
+      <a href={`${home}#features`}>Features</a>
+      <a href={`${home}#install`}>Install</a>
+      <a href={asset('config')}>Config</a>
       <a href={REPO} target="_blank" rel="noreferrer">GitHub ↗</a>
     </nav>
     <button id="theme-toggle" class="nav__toggle" type="button" aria-label="Toggle day / night">
