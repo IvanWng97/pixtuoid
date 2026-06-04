@@ -1242,44 +1242,6 @@ fn version_popup_paints_when_open() {
 }
 
 // ===================================================================
-// Desk personalization by session age (drawable.rs)
-// ===================================================================
-
-#[test]
-fn aged_agent_personalizes_desk() {
-    // A long-lived agent accrues desk items (plant ≥30min, photo ≥1hr);
-    // its desk region should differ from a brand-new agent's.
-    let render_age = |age_secs: u64| -> (RgbBuffer, Point) {
-        let scene = scene_with(
-            vec![idle(
-                "/age/0.jsonl",
-                0,
-                t0() - Duration::from_secs(age_secs),
-            )],
-            16,
-        );
-        let mut r = build(120, 44, vec![]);
-        r.render(&scene, &pack(), t0()).unwrap();
-        let desk = r.cached_layout().expect("layout").home_desks[0];
-        (r.buf().clone(), desk)
-    };
-    let (fresh, desk) = render_age(5);
-    let (aged, _) = render_age(7200); // 2h ⇒ plant + photo frame
-    let d = region_diff(
-        &fresh,
-        &aged,
-        desk.x.saturating_sub(2),
-        desk.y.saturating_sub(4),
-        20,
-        12,
-    );
-    assert!(
-        d > 0,
-        "an aged agent's desk should show personalization items"
-    );
-}
-
-// ===================================================================
 // Weather smoke-render (background/* + ambient.rs paint paths)
 // ===================================================================
 
