@@ -63,8 +63,9 @@ enum KeyAction {
     /// Navigate to this (already validated, in-range, no-transition) floor.
     NavigateFloor(usize),
     /// Toggle the live walkable / approach / route debug layer (`w`).
-    /// Dev-only: the `w` dispatch + handler are debug-gated, so in release this
-    /// variant is never constructed — silence the never-constructed lint there.
+    /// Dev-only: the `w` dispatch arm is `#[cfg(debug_assertions)]`-gated, so in
+    /// release this variant is never constructed — silence the dead-code lint
+    /// there. The match arm in `run_tui` stays unconditional for exhaustiveness.
     #[cfg_attr(not(debug_assertions), allow(dead_code))]
     ToggleWalkableDebug,
 }
