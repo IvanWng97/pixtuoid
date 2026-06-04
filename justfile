@@ -1,10 +1,12 @@
-# Project task runner — single source of truth for local + CI checks.
-# `just` lists recipes; `just preflight` is the full pre-push gate.
-# .github/workflows/ci.yml and the .githooks/ hooks call these recipes, so
-# there is exactly ONE place that defines what each check actually runs.
+# Project task runner — the single source of truth for build / lint / format /
+# test. Every call-site goes through these recipes — the .githooks/ hooks,
+# .github/workflows/{ci,release}.yml, and the docs — so there is exactly ONE
+# place that defines what each command actually runs (no drift between local,
+# CI, and release).
 #
 # Recipes are grouped by intent (see `just --list`):
-#   check    — the dev loop + the pre-push gate
+#   check    — the dev loop + the pre-push gate (lint / format / test / coverage)
+#   build    — compile the workspace + release artifacts
 #   release  — cut a new version (one command: `just bump X.Y.Z`)
 #   docs     — regenerate the repo's screenshots / demo art
 
@@ -81,6 +83,13 @@ hack:
 semver:
     cargo semver-checks --package pixtuoid-core
 
+# Coverage + JUnit XML in one run — the exact command ci.yml's coverage job uses.
+# CI-only in practice: needs cargo-llvm-cov + cargo-nextest + the `ci` nextest
+# profile. Writes lcov.info + target/nextest/ci/junit.xml.
+[group('check')]
+coverage:
+    cargo llvm-cov nextest --workspace --features {{ features }} --lcov --output-path lcov.info --profile ci
+
 # Install the dev tools every check + recipe relies on (idempotent). Prefers
 # cargo-binstall (prebuilt) and falls back to cargo install (compiles).
 [group('check')]
@@ -100,6 +109,37 @@ setup-tools:
 # (semver, coverage, and smoke are CI-only — network baseline / heavy builds.)
 [group('check')]
 preflight: lint clippy hack test
+
+# ── build ─────────────────────────────────────────────────────────
+
+# Compile the workspace; extra args are forwarded:
+#   just build                                # debug
+#   just build --release                      # release
+#   just build --release --bins --examples    # what ci.yml's smoke job builds
+[group('build')]
+build *args:
+    cargo build --workspace {{ args }}
+
+# Cross-compile a release build for ONE target triple (release.yml's build
+# matrix). Pass `true` for targets that need the Docker-backed `cross` toolchain
+# (CI installs it via taiki-e/install-action@cross).
+[group('build')]
+build-target target cross="false":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    use_cross="{{ cross }}"
+    if [ "$use_cross" = "true" ]; then
+        cross build --release --target "{{ target }}"
+    else
+        cargo build --release --target "{{ target }}"
+    fi
+
+# Package the .deb for ONE already-built target (release.yml's deb job, hence
+# --no-build). Needs cargo-deb (CI installs it via taiki-e/install-action@cargo-deb).
+[group('build')]
+deb target:
+    cargo deb -p pixtuoid --no-build --no-strip --target {{ target }}
+    cargo deb -p pixtuoid-hook --no-build --no-strip --target {{ target }}
 
 # ── release ───────────────────────────────────────────────────────
 

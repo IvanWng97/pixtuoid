@@ -80,7 +80,7 @@ cargo install pixtuoid pixtuoid-hook
 
 ```bash
 git clone https://github.com/IvanWng97/pixtuoid && cd pixtuoid
-cargo build --release
+just build --release
 ```
 
 </details>

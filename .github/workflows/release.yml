@@ -67,6 +67,8 @@ jobs:
         with:
           key: ${{ matrix.target }}
 
+      - uses: extractions/setup-just@v4
+
       - name: Install cross
         if: matrix.cross
         uses: taiki-e/install-action@cross
@@ -76,12 +78,7 @@ jobs:
         run: sudo apt-get install -y musl-tools
 
       - name: Build
-        run: |
-          if [ "${{ matrix.cross }}" = "true" ]; then
-            cross build --release --target ${{ matrix.target }}
-          else
-            cargo build --release --target ${{ matrix.target }}
-          fi
+        run: just build-target ${{ matrix.target }} ${{ matrix.cross }}
 
       - name: Package
         run: |
@@ -121,6 +118,8 @@ jobs:
         with:
           key: deb-${{ matrix.target }}
 
+      - uses: extractions/setup-just@v4
+
       - name: Install cross
         if: matrix.cross
         uses: taiki-e/install-action@cross
@@ -129,18 +128,10 @@ jobs:
         uses: taiki-e/install-action@cargo-deb
 
       - name: Build
-        run: |
-          if [ "${{ matrix.cross }}" = "true" ]; then
-            cross build --release --target ${{ matrix.target }}
-          else
-            cargo build --release --target ${{ matrix.target }}
-          fi
+        run: just build-target ${{ matrix.target }} ${{ matrix.cross }}
 
-      - name: Build deb (pixtuoid)
-        run: cargo deb -p pixtuoid --no-build --no-strip --target ${{ matrix.target }}
-
-      - name: Build deb (pixtuoid-hook)
-        run: cargo deb -p pixtuoid-hook --no-build --no-strip --target ${{ matrix.target }}
+      - name: Build .deb packages
+        run: just deb ${{ matrix.target }}
 
       - uses: actions/upload-artifact@v7
         with:
