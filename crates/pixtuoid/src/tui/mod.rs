@@ -63,6 +63,9 @@ enum KeyAction {
     /// Navigate to this (already validated, in-range, no-transition) floor.
     NavigateFloor(usize),
     /// Toggle the live walkable / approach / route debug layer (`w`).
+    /// Dev-only: the `w` dispatch + handler are debug-gated, so in release this
+    /// variant is never constructed — silence the never-constructed lint there.
+    #[cfg_attr(not(debug_assertions), allow(dead_code))]
     ToggleWalkableDebug,
 }
 
@@ -134,6 +137,8 @@ fn dispatch_key(code: KeyCode, mods: KeyModifiers, ctx: KeyCtx) -> KeyAction {
         KeyCode::Char('p') => KeyAction::TogglePause,
         KeyCode::Char('t') => KeyAction::OpenThemePicker,
         KeyCode::Char('?') => KeyAction::ToggleHelp,
+        // Dev-only walkable/approach/route overlay — gated out of release builds.
+        #[cfg(debug_assertions)]
         KeyCode::Char('w') => KeyAction::ToggleWalkableDebug,
         KeyCode::PageUp | KeyCode::Up | KeyCode::Char('k') => {
             if ctx.current_floor + 1 < ctx.n_floors && !ctx.in_transition {
@@ -443,6 +448,8 @@ mod dispatch_tests {
             dispatch_key(KeyCode::Char('?'), NONE, ctx()),
             KeyAction::ToggleHelp
         );
+        // `w` only maps in debug builds; in release it falls through to None.
+        #[cfg(debug_assertions)]
         assert_eq!(
             dispatch_key(KeyCode::Char('w'), NONE, ctx()),
             KeyAction::ToggleWalkableDebug
