@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use anyhow::Result;
-use notify::{RecommendedWatcher, RecursiveMode, Watcher};
+use notify::{Config, PollWatcher, RecommendedWatcher, RecursiveMode, Watcher};
 use tokio::io::{AsyncReadExt, AsyncSeekExt, SeekFrom};
 use tokio::sync::Mutex;
 use tracing::{debug, warn};
@@ -61,6 +61,21 @@ pub struct JsonlWatcher {
 
 const DEFAULT_INITIAL_WINDOW: Duration = Duration::from_secs(3600);
 
+/// Test-only seam: forces every `JsonlWatcher` in this process onto a polling
+/// backend (`notify::PollWatcher`) at `interval`, instead of the native
+/// FSEvents/inotify watcher. Set once — later calls are ignored. Integration
+/// tests use this so they don't spin up + tear down a real FSEvents stream per
+/// test; on macOS that setup/teardown is tens of seconds per `TempDir` and was
+/// the bulk of the watcher tests' runtime (the gate logic itself is already
+/// covered by deterministic, watcher-free unit tests below). Never called in
+/// production, so the default (native watcher + 60s poll backstop) is unchanged.
+#[doc(hidden)]
+pub fn force_polling_backend_for_tests(interval: Duration) {
+    let _ = TEST_POLL_OVERRIDE.set(interval);
+}
+
+static TEST_POLL_OVERRIDE: OnceLock<Duration> = OnceLock::new();
+
 impl JsonlWatcher {
     pub fn new(
         root: PathBuf,
@@ -96,17 +111,31 @@ impl JsonlWatcher {
             Arc::new(Mutex::new(HashMap::new()));
 
         let (notify_tx, mut notify_rx) = tokio::sync::mpsc::unbounded_channel::<PathBuf>();
-        let mut watcher: RecommendedWatcher =
-            notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
-                if let Ok(event) = res {
-                    for path in event.paths {
-                        if path.extension().and_then(|s| s.to_str()) == Some("jsonl") {
-                            let _ = notify_tx.send(path);
-                        }
+        let event_handler = move |res: notify::Result<notify::Event>| {
+            if let Ok(event) = res {
+                for path in event.paths {
+                    if path.extension().and_then(|s| s.to_str()) == Some("jsonl") {
+                        let _ = notify_tx.send(path);
                     }
                 }
-            })?;
+            }
+        };
         let _ = tokio::fs::create_dir_all(&self.root).await;
+        // Native (FSEvents/inotify/…) in production; a fast `PollWatcher` in tests
+        // (see `force_polling_backend_for_tests`). Both impl `notify::Watcher` and
+        // feed the SAME `notify_tx`, so the select! loop below is backend-agnostic.
+        let mut watcher: Box<dyn Watcher + Send> = match TEST_POLL_OVERRIDE.get().copied() {
+            // `with_compare_contents` makes the poll detect changes by hashing
+            // file contents, not just mtime/size — appends and truncate-rewrites
+            // (the partial-line / cursor-reset tests) are caught reliably.
+            Some(interval) => Box::new(PollWatcher::new(
+                event_handler,
+                Config::default()
+                    .with_poll_interval(interval)
+                    .with_compare_contents(true),
+            )?),
+            None => Box::new(RecommendedWatcher::new(event_handler, Config::default())?),
+        };
         watcher.watch(&self.root, RecursiveMode::Recursive)?;
 
         let source_arc: Arc<str> = Arc::from(self.source_name.as_str());

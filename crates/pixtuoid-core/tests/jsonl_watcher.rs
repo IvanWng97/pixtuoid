@@ -10,13 +10,23 @@ use pixtuoid_core::source::claude_code::{
     cc_derive_label, cc_session_ended, decode_cc_line, ClaudeCodeSource,
 };
 use pixtuoid_core::source::codex::CodexSource;
-use pixtuoid_core::source::jsonl::JsonlWatcher;
+use pixtuoid_core::source::jsonl::{force_polling_backend_for_tests, JsonlWatcher};
 use pixtuoid_core::source::AgentEvent;
 use pixtuoid_core::source::Source;
 use pixtuoid_core::source::Transport;
 use pixtuoid_core::AgentId;
 
+/// Run every watcher test on a fast `PollWatcher` backend instead of the native
+/// FSEvents/inotify watcher — events arrive in ~25ms and there's no real
+/// FSEvents stream to set up/tear down (that teardown was tens of seconds per
+/// test). Idempotent / set-once. Call at the top of any test that drives a real
+/// `JsonlWatcher`/`Source::run`.
+fn fast_watch() {
+    force_polling_backend_for_tests(Duration::from_millis(25));
+}
+
 fn cc_watcher(root: std::path::PathBuf) -> JsonlWatcher {
+    fast_watch();
     JsonlWatcher::new(
         root,
         "claude-code".to_string(),
@@ -277,8 +287,8 @@ async fn watcher_emits_session_start_for_recent_files_on_startup() {
     let handle = tokio::spawn(async move { watcher.run(tx).await });
 
     // Give the watcher task a chance to complete the initial seed scan, then
-    // append a no-op newline to trigger FSEvents as a fallback path in case
-    // the initial seed missed the file under heavy I/O contention.
+    // append a no-op newline to trigger a watcher notification as a fallback
+    // path in case the initial seed missed the file under heavy I/O contention.
     tokio::time::sleep(Duration::from_millis(500)).await;
     tokio::fs::OpenOptions::new()
         .append(true)
@@ -474,6 +484,7 @@ fn custom_label(_path: &std::path::Path, _source: &str, _cwd: &std::path::Path) 
 
 #[tokio::test]
 async fn watcher_custom_label_deriver() {
+    fast_watch();
     let dir = TempDir::new().unwrap();
     let projects_root = dir.path().to_path_buf();
     let project_dir = projects_root.join("proj-y");
@@ -533,6 +544,7 @@ async fn watcher_custom_label_deriver() {
 
 #[tokio::test]
 async fn codex_rollout_yields_uuid_keyed_session_start() {
+    fast_watch();
     use pixtuoid_core::source::codex::{codex_id_from_path, decode_codex_line, derive_codex_label};
 
     let dir = TempDir::new().unwrap();
@@ -665,6 +677,7 @@ async fn default_id_deriver_stays_path_keyed() {
 // surface an ActivityStart through the source.
 #[tokio::test]
 async fn codex_source_run_emits_events_from_rollout() {
+    fast_watch();
     let dir = TempDir::new().unwrap();
     let sessions_root = dir.path().to_path_buf();
     let uuid = "019e7762-9ded-7e33-be41-946ecf105bf4";
@@ -717,6 +730,7 @@ async fn codex_source_run_emits_events_from_rollout() {
 // against a TempDir brain_root.
 #[tokio::test]
 async fn antigravity_source_run_emits_events_from_transcript() {
+    fast_watch();
     let dir = TempDir::new().unwrap();
     let brain_root = dir.path().to_path_buf();
     let project_dir = brain_root.join("sess");
@@ -771,6 +785,7 @@ async fn antigravity_source_run_emits_events_from_transcript() {
 // the projects_root must surface a SessionStart through the JSONL leg.
 #[tokio::test]
 async fn claude_code_source_run_binds_socket_and_emits_events() {
+    fast_watch();
     let dir = TempDir::new().unwrap();
     let socket_path = dir.path().join("pixtuoid-test.sock");
     let projects_root = dir.path().join("projects");
