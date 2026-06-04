@@ -124,55 +124,10 @@ Press `t` to switch themes with live preview. Your choice persists across sessio
   <img src="docs/images/themes-composite.png" alt="6 themes: Normal, Cyberpunk, Dracula, Tokyo Night, Catppuccin, Gruvbox" width="800" />
 </p>
 
-Settings are stored in `~/.config/pixtuoid/config.toml` (respects `$XDG_CONFIG_HOME`).
-The file is created on first launch. All user settings below are **optional** —
-omit any key to use its default.
-
-```toml
-theme = "cyberpunk"
-max-desks = 8
-pack-dir = "~/.config/pixtuoid/packs/robot"
-
-# One stanza per pet. Omit the whole section to show all pets with default
-# names; use `pets = []` to disable all pets. `name` is optional (shown in
-# the pet's hover tooltip). Keep [[pets]] last — it's a table section.
-[[pets]]
-kind = "cat"
-name = "Whiskers"   # optional — omit for "Office Cat"
-
-[[pets]]
-kind = "dog"        # name omitted → "Office Dog"
-```
-
-**User settings** (safe to edit):
-
-| Key | Default | Description |
-|-----|---------|-------------|
-| `theme` | `"normal"` | Color theme — `normal`, `cyberpunk`, `dracula`, `tokyo-night`, `catppuccin`, `gruvbox` |
-| `max-desks` | auto | Cap desks per floor. If unset, auto-computed from terminal size. Excess agents overflow to additional floors. |
-| `pack-dir` | — | Custom sprite pack directory. Supports `~` expansion. |
-| `[[pets]]` | all kinds, default names | One stanza per pet. `kind` (`"cat"`/`"dog"`) is required; `name` is optional (the hover-tooltip label, default `Office Cat`/`Office Dog`). Omit the section for all pets; `pets = []` for none; an unknown `kind` is skipped without affecting other settings. Keep it last (it's a table section). |
-
-**System-managed** (don't edit — pixtuoid writes these for you):
-
-| Key | Purpose |
-|-----|---------|
-| `last-seen-version` | Tracks the highest version you've launched, so the "what's new" popup only fires once per upgrade. Pixtuoid overwrites this on every launch. |
-
-CLI flags override config: `pixtuoid run --theme dracula`
-
-### Custom Sprite Packs
-
-Create your own character sprites:
-
-```bash
-pixtuoid init-pack ./my-pack     # extract skeleton template
-# edit the .sprite files in ./my-pack
-pixtuoid validate-pack ./my-pack # check for missing animations
-pixtuoid run --pack-dir ./my-pack
-```
-
-A **robot** pack ships as an example at `crates/pixtuoid/sprites/robot/`. See the [sprite format docs](CLAUDE.md) for palette keys and animation requirements.
+Settings live in `~/.config/pixtuoid/config.toml` — theme, desk cap, custom pet
+names, and sprite packs. CLI flags override the file (`pixtuoid run --theme dracula`).
+See **[docs/CONFIGURATION.md](docs/CONFIGURATION.md)** for the full key reference
+(defaults, system-managed keys) and the custom sprite-pack workflow.
 
 ## How It Works
 
@@ -247,22 +202,7 @@ Three Rust crates:
 
 ## Contributing
 
-See [`CLAUDE.md`](CLAUDE.md) for architecture and conventions. PRs welcome — especially new themes and `Source` adapters for other agent CLIs (Copilot, Cursor, OpenCode).
-
-<details>
-<summary><strong>Adding a new agent CLI</strong></summary>
-
-Implement the `Source` trait and plug in via `SourceManager::with_source()`:
-
-```rust
-#[async_trait]
-pub trait Source: Send + 'static {
-    fn name(&self) -> &str;
-    async fn run(self: Box<Self>, tx: TaggedSender) -> anyhow::Result<()>;
-}
-```
-
-</details>
+PRs welcome — especially new themes and `Source` adapters for other agent CLIs (Copilot, Cursor, OpenCode). See **[CONTRIBUTING.md](CONTRIBUTING.md)** for the build/test workflow, conventions, the review process, and how to add a new agent CLI. Architecture and the load-bearing invariants live in [`CLAUDE.md`](CLAUDE.md).
 
 ## Acknowledgments
 
