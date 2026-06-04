@@ -57,21 +57,39 @@ pub(super) fn paint_sleep_z(
     theme: &Theme,
 ) {
     let z_color = theme.effects.sleep_z;
-    const CYCLE_MS: u64 = 2400;
-    let elapsed_ms = epoch_ms(now);
-    let phase_ms = elapsed_ms.wrapping_add(seed % CYCLE_MS) % CYCLE_MS;
-    if phase_ms >= CYCLE_MS - 400 {
+    // One z drifts up from just above the head — brightest at the head, fading
+    // to nothing as it climbs. The height-coupled fade (`1.0 - t`) is what keeps
+    // it from reading as a solid mark parked over the sprite: it's only briefly
+    // visible near the head, then dissolves. RISE_MS is the visible rise+fade
+    // span; a short REST_MS gap separates one z from the next.
+    const RISE_MS: u64 = 2000;
+    const REST_MS: u64 = 400;
+    const CYCLE_MS: u64 = RISE_MS + REST_MS;
+    const MAX_RISE: u16 = 4;
+    const FADE_IN_MS: f32 = 150.0;
+    const PEAK_ALPHA: f32 = 0.9;
+    let phase_ms = epoch_ms(now).wrapping_add(seed % CYCLE_MS) % CYCLE_MS;
+    if phase_ms >= RISE_MS {
         return;
     }
-    let rise = (phase_ms / 180) as u16;
+    let t = phase_ms as f32 / RISE_MS as f32;
+    // Quick ramp-in over the first FADE_IN_MS avoids a hard pop when a fresh z
+    // spawns at the head; the `1.0 - t` term then fades it out as it rises.
+    let fade_in = (phase_ms as f32 / FADE_IN_MS).min(1.0);
+    let alpha = PEAK_ALPHA * fade_in * (1.0 - t);
+    if alpha < 0.06 {
+        return;
+    }
+    let rise = (t * MAX_RISE as f32) as u16;
     let z_x = head_anchor.x + 5;
     let z_y = head_anchor.y.saturating_sub(rise + 3);
-    let pixels: &[(u16, u16)] = &[(0, 0), (1, 0), (1, 1), (0, 2), (1, 2)];
-    for (dx, dy) in pixels {
+    const GLYPH: &[(u16, u16)] = &[(0, 0), (1, 0), (1, 1), (0, 2), (1, 2)];
+    for (dx, dy) in GLYPH {
         let px = z_x + dx;
         let py = z_y + dy;
         if px < buf.width && py < buf.height {
-            buf.put(px, py, z_color);
+            let cur = buf.get(px, py);
+            buf.put(px, py, blend_rgb(cur, z_color, alpha));
         }
     }
 }
@@ -189,6 +207,65 @@ pub(super) fn paint_waiting_bubble(buf: &mut RgbBuffer, anchor: Point, theme: &T
             let py = by + dy as u16;
             if px < buf.width && py < buf.height {
                 buf.put(px, py, fg);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    fn theme() -> &'static Theme {
+        crate::tui::theme::theme_by_name("normal").expect("normal theme")
+    }
+
+    fn render(head: Point, phase_ms: u64) -> RgbBuffer {
+        let mut buf = RgbBuffer::filled(64, 64, Rgb { r: 0, g: 0, b: 0 });
+        let now = SystemTime::UNIX_EPOCH + Duration::from_millis(phase_ms);
+        paint_sleep_z(&mut buf, head, now, 0, theme());
+        buf
+    }
+
+    fn lum(c: Rgb) -> u32 {
+        c.r as u32 + c.g as u32 + c.b as u32
+    }
+
+    // Topmost lit pixel in the z's column, if any (kept independent of MAX_RISE).
+    fn top_lit(buf: &RgbBuffer, head: Point, bg: Rgb) -> Option<(u16, Rgb)> {
+        let zx = head.x + 5;
+        (0..head.y).find_map(|y| {
+            let p = buf.get(zx, y);
+            (p != bg).then_some((y, p))
+        })
+    }
+
+    #[test]
+    fn sleep_z_dims_as_it_rises_then_rests() {
+        let head = Point { x: 20, y: 30 };
+        let bg = Rgb { r: 0, g: 0, b: 0 };
+        let zx = head.x + 5;
+
+        // Just spawned (rise 0 for any MAX_RISE): brightest, at the spawn row.
+        let low = render(head, 200);
+        let low_px = low.get(zx, head.y - 3);
+        assert!(lum(low_px) > 0, "z near the head is visible");
+
+        // Later it has risen AND faded ("higher = blurrier").
+        let high = render(head, 1600);
+        let (top_y, top_px) = top_lit(&high, head, bg).expect("risen z still visible");
+        assert!(top_y < head.y - 3, "z rose above its spawn row");
+        assert!(
+            lum(top_px) < lum(low_px),
+            "a higher z must be dimmer than one at the head"
+        );
+
+        // During the rest gap (phase >= RISE_MS) nothing is painted at all.
+        let resting = render(head, 2300);
+        for y in 0..resting.height {
+            for x in 0..resting.width {
+                assert_eq!(resting.get(x, y), bg, "no z during the rest gap");
             }
         }
     }
