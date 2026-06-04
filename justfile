@@ -61,6 +61,7 @@ lint:
 # Workspace tests — nextest if available (parallel + JUnit), else cargo test.
 # Extra args are forwarded: `just test reducer::` filters; preflight passes none.
 [group('check')]
+[doc('Run the workspace tests (nextest if installed); forwards a filter')]
 test *args:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -73,6 +74,7 @@ test *args:
 # Feature-combination check — every feature subset must compile. Catches code
 # that silently only builds with `test-renderer` on (CI runs with it always on).
 [group('check')]
+[doc('Feature-powerset check — every feature subset must compile')]
 hack:
     cargo hack --feature-powerset --no-dev-deps check --workspace
 
@@ -80,6 +82,7 @@ hack:
 # practice: needs network to fetch the baseline crate. Scoped to pixtuoid-core
 # (the headless lib others depend on); the binary crates' libs aren't public API.
 [group('check')]
+[doc('SemVer-check pixtuoid-core against its crates.io baseline (CI-only)')]
 semver:
     cargo semver-checks --package pixtuoid-core
 
@@ -87,12 +90,14 @@ semver:
 # CI-only in practice: needs cargo-llvm-cov + cargo-nextest + the `ci` nextest
 # profile. Writes lcov.info + target/nextest/ci/junit.xml.
 [group('check')]
+[doc('Coverage + JUnit XML — the exact command ci.yml runs (needs llvm-cov + nextest)')]
 coverage:
     cargo llvm-cov nextest --workspace --features {{ features }} --lcov --output-path lcov.info --profile ci
 
 # Install the dev tools every check + recipe relies on (idempotent). Prefers
 # cargo-binstall (prebuilt) and falls back to cargo install (compiles).
 [group('check')]
+[doc('Install the dev tools the checks + recipes need (idempotent)')]
 setup-tools:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -108,6 +113,7 @@ setup-tools:
 # Full pre-push gate: the checks worth running locally before a push.
 # (semver, coverage, and smoke are CI-only — network baseline / heavy builds.)
 [group('check')]
+[doc('Full pre-push gate: lint → clippy → hack → test')]
 preflight: lint clippy hack test
 
 # ── build ─────────────────────────────────────────────────────────
@@ -117,6 +123,7 @@ preflight: lint clippy hack test
 #   just build --release                      # release
 #   just build --release --bins --examples    # what ci.yml's smoke job builds
 [group('build')]
+[doc('Compile the workspace; forwards args (e.g. --release --bins --examples)')]
 build *args:
     cargo build --workspace {{ args }}
 
@@ -124,6 +131,7 @@ build *args:
 # matrix). Pass `true` for targets that need the Docker-backed `cross` toolchain
 # (CI installs it via taiki-e/install-action@cross).
 [group('build')]
+[doc('Cross-compile a release for ONE target triple (release.yml build matrix)')]
 build-target target cross="false":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -137,6 +145,7 @@ build-target target cross="false":
 # Package the .deb for ONE already-built target (release.yml's deb job, hence
 # --no-build). Needs cargo-deb (CI installs it via taiki-e/install-action@cargo-deb).
 [group('build')]
+[doc('Package the .deb for ONE already-built target (release.yml deb job)')]
 deb target:
     cargo deb -p pixtuoid --no-build --no-strip --target {{ target }}
     cargo deb -p pixtuoid-hook --no-build --no-strip --target {{ target }}
@@ -177,7 +186,23 @@ bump version:
     if git rev-parse --verify --quiet "$branch" >/dev/null; then
         echo "error: branch $branch already exists" >&2; exit 1; fi
 
+    # a duplicate release_notes arm is an unreachable_patterns error under
+    # clippy -D warnings — catch it here with a clear message, not a compile error
+    if grep -q "\"$ver\" =>" crates/pixtuoid/src/version.rs; then
+        echo "error: version.rs already has a release_notes arm for $ver" >&2; exit 1; fi
+
+    # releases come from main; forking release/v$ver off anything else is usually wrong
+    cur_branch="$(git symbolic-ref --short -q HEAD || echo detached)"
+    if [ "$cur_branch" != "main" ]; then
+        echo "warning: on '$cur_branch', not main — release/v$ver will fork from here" >&2; fi
+
     echo "▸ bump $cur → $ver"
+
+    # restore the tree if anything below fails before the commit lands, so a
+    # failed bump (e.g. red preflight) never strands a half-bumped dirty tree
+    committed=0
+    cleanup() { [ "$committed" = 1 ] || git checkout -- Cargo.toml Cargo.lock crates/*/Cargo.toml crates/pixtuoid/src/version.rs 2>/dev/null || true; }
+    trap cleanup EXIT
 
     # 4. all version numbers + Cargo.lock in one command (incl. the path-dep)
     cargo set-version --workspace "$ver"
@@ -210,6 +235,7 @@ bump version:
     git switch -c "$branch"
     git add Cargo.toml Cargo.lock crates/*/Cargo.toml crates/pixtuoid/src/version.rs
     git commit -q -m "chore(release): v$ver"
+    committed=1
 
     printf '\n\033[32m✓ v%s committed on %s\033[0m\n\n  next:\n    1. curate the drafted bullets in crates/pixtuoid/src/version.rs (release_notes\n       arm) down to ~6 highlights, then: git commit --amend -a\n    2. open a PR, review, merge to main\n    3. AFTER merge, tag to publish — IRREVERSIBLE (crates.io + homebrew):\n         git tag v%s && git push origin v%s\n' "$ver" "$branch" "$ver" "$ver"
 
