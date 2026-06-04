@@ -13,7 +13,7 @@ export default [
   ...astro.configs['jsx-a11y-recommended'],
   {
     languageOptions: {
-      globals: { ...globals.browser },
+      globals: { ...globals.browser, __PIXTUOID_VERSION__: 'readonly' },
     },
     rules: {
       // inline client scripts intentionally swallow storage/JSON errors

@@ -40,6 +40,11 @@ scripts/                crop-snapshot.py (visual verification),
                         replay-fixture.sh (replay a captured source rollout fixture into a
                         headless run via --codex-sessions-root, for eyeballing lifecycle),
                         check_upstream_drift.py (weekly CI: CC/Codex wire-format rename watch)
+site/                   Astro marketing landing page → GitHub Pages (ivanwng97.github.io/pixtuoid).
+                        Self-contained Node project; own CI (.github/workflows/site.yml) + deploy
+                        (.github/workflows/pages.yml). `just site-{setup,dev,check,fmt,demos}`;
+                        demo art is generated from the binary by scripts/gen-demos.sh.
+                        → see site/README.md
 ```
 
 > Note: the `sprites/` directory (default / robot / skeleton character packs) lives under
