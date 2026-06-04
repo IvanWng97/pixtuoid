@@ -236,12 +236,15 @@ section {
   transform: translateY(-2px);
 }
 .btn-primary {
-  background: var(--grad);
+  /* deep-coral gradient (NOT the light amber end of --grad) + a text-shadow so
+     the white label stays legible in both day and night. */
+  background: linear-gradient(100deg, #ad5230, #c96a45);
   color: #fff;
-  box-shadow: 0 6px 18px color-mix(in srgb, var(--coral) 38%, transparent);
+  text-shadow: 0 1px 2px rgba(35, 14, 5, 0.4);
+  box-shadow: 0 8px 20px color-mix(in srgb, var(--coral) 42%, transparent);
 }
 .btn-primary:hover {
-  filter: brightness(1.04);
+  filter: brightness(1.08);
 }
 .btn-ghost {
   background: transparent;
