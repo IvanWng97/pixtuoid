@@ -1,9 +1,12 @@
 name: deploy site
 
 on:
+  # Redeploy when the inputs the build reads change: site/ itself, the version
+  # in ../Cargo.toml, and ../docs/CONFIGURATION.md (the /config page). Without
+  # the latter two the published site silently lags its own source.
   push:
     branches: [main]
-    paths: ['site/**', '.github/workflows/pages.yml']
+    paths: ['site/**', 'Cargo.toml', 'docs/CONFIGURATION.md', '.github/workflows/pages.yml']
   workflow_dispatch:
 
 permissions:
