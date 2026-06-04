@@ -23,8 +23,8 @@ use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_core::AgentSlot;
 
 use super::effects::{
-    paint_coffee_steam, paint_pet_hearts, paint_screen_glow, paint_sleep_z, paint_thinking_dots,
-    paint_waiting_bubble, paint_walking_dust,
+    paint_coffee_steam, paint_pet_hearts, paint_screen_glow, paint_sleep_z, paint_waiting_bubble,
+    paint_walking_dust,
 };
 use super::epoch_ms;
 use super::furniture::{
@@ -68,7 +68,6 @@ pub(super) enum DrawableKind<'a> {
         glow_tint: Option<Rgb>,
         sleep_z_seed: Option<u64>,
         waiting_bubble: bool,
-        thinking_dots: bool,
         walking_dust_frame: Option<usize>,
     },
     /// Lounge couch (mirror_vertical'd — back at bottom, seat at top).
@@ -435,7 +434,6 @@ pub(super) fn paint_drawable(
             glow_tint,
             sleep_z_seed,
             waiting_bubble,
-            thinking_dots,
             walking_dust_frame,
         } => {
             if let Some(dust_frame) = walking_dust_frame {
@@ -449,9 +447,6 @@ pub(super) fn paint_drawable(
             }
             if *waiting_bubble {
                 paint_waiting_bubble(buf, *anchor, theme);
-            }
-            if *thinking_dots {
-                paint_thinking_dots(buf, *anchor, now, theme);
             }
         }
         DrawableKind::WaypointCouch { pos } => {

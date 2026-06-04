@@ -1307,27 +1307,7 @@ fn glass_wall_v_clamps_past_right_edge() {
     assert!(painted, "the in-bounds glass column should paint");
 }
 
-// --- effects: thinking dots phase + pet hearts edges ------------------
-
-#[test]
-fn thinking_dots_phase_two_paints_two_dots() {
-    use super::effects::paint_thinking_dots;
-    let theme = crate::tui::theme::theme_by_name("normal").expect("theme");
-    let bg = Rgb { r: 0, g: 0, b: 0 };
-    // phase = (epoch_ms / 800) % 4 == 2 → 1600..2399 ms. Pick 1700ms.
-    let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(1_700);
-    let anchor = Point { x: 10, y: 10 };
-    let mut buf = RgbBuffer::filled(40, 40, bg);
-    paint_thinking_dots(&mut buf, anchor, now, theme);
-    let painted = (0..40u16)
-        .flat_map(|y| (0..40u16).map(move |x| (x, y)))
-        .filter(|&(x, y)| buf.get(x, y) != bg)
-        .count();
-    assert_eq!(
-        painted, 2,
-        "phase 2 must paint exactly 2 dots, got {painted}"
-    );
-}
+// --- effects: pet hearts edges ------------------
 
 #[test]
 fn pet_hearts_skip_dead_and_faded_hearts() {

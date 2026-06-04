@@ -129,25 +129,6 @@ pub(super) fn paint_walking_dust(
     }
 }
 
-pub(super) fn paint_thinking_dots(
-    buf: &mut RgbBuffer,
-    anchor: Point,
-    now: SystemTime,
-    theme: &Theme,
-) {
-    let fg = theme.ui.label_active;
-    let elapsed_ms = epoch_ms(now);
-    let phase = (elapsed_ms / 800) % 4;
-    let bx = anchor.x + 2;
-    let by = anchor.y.saturating_sub(3);
-    for i in 0..phase {
-        let px = bx + (i as u16) * 2;
-        if px < buf.width && by < buf.height {
-            buf.put(px, by, fg);
-        }
-    }
-}
-
 /// Floating heart particles for the "pet the cat" interaction.
 /// 4 hearts, staggered 150ms apart, each rising 6px over 1550ms and
 /// fading via alpha blend toward the background. Last heart starts at

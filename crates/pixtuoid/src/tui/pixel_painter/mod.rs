@@ -975,7 +975,6 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
                         glow_tint: None,
                         sleep_z_seed: Some(agent.agent_id.raw()),
                         waiting_bubble: false,
-                        thinking_dots: false,
                         walking_dust_frame: None,
                     },
                 });
@@ -997,7 +996,6 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
                         glow_tint: Some(ctx.theme.tool_glow.default),
                         sleep_z_seed: None,
                         waiting_bubble: false,
-                        thinking_dots: true,
                         walking_dust_frame: None,
                     },
                 });
@@ -1019,7 +1017,6 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
                         glow_tint: palette::tool_glow_tint(agent, &ctx.theme.tool_glow),
                         sleep_z_seed: None,
                         waiting_bubble: false,
-                        thinking_dots: false,
                         walking_dust_frame: None,
                     },
                 });
@@ -1042,7 +1039,6 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
                         glow_tint: None,
                         sleep_z_seed: None,
                         waiting_bubble: is_waiting,
-                        thinking_dots: false,
                         walking_dust_frame: None,
                     },
                 });
@@ -1141,7 +1137,6 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
                             glow_tint: None,
                             sleep_z_seed: None,
                             waiting_bubble: false,
-                            thinking_dots: false,
                             walking_dust_frame: None,
                         },
                     });
@@ -1163,7 +1158,6 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
                         glow_tint: None,
                         sleep_z_seed: None,
                         waiting_bubble: false,
-                        thinking_dots: false,
                         walking_dust_frame: None,
                     },
                 });
@@ -1234,7 +1228,6 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
                         glow_tint: None,
                         sleep_z_seed: None,
                         waiting_bubble: false,
-                        thinking_dots: false,
                         walking_dust_frame: Some(frame),
                     },
                 });
