@@ -52,7 +52,7 @@ pixtuoid install-hooks
 pixtuoid
 ```
 
-In another terminal, start a Claude Code session. A character walks in from the elevator within a second.
+In another terminal, start a supported coding agent (Claude Code, Codex, Antigravity, …). A character walks in from the elevator within a second.
 
 **Keyboard shortcuts:** `q` quit · `p` pause · `t` themes · `?` help · `↑↓/jk/PgUp/PgDn` floors · click to pin tooltip
 
@@ -89,7 +89,7 @@ cargo build --release
 
 | | Feature | Description |
 |---|---|---|
-| 🏢 | **Multi-agent office** | Each CC session gets a desk; overflow agents auto-fill new floors |
+| 🏢 | **Multi-agent office** | Each agent session gets a desk; overflow agents auto-fill new floors |
 | 🛗 | **Multi-floor office** | PageUp/PageDown/↑↓/jk to navigate floors with slide transition |
 | 🎭 | **Animated characters** | Typing, waiting (`?`), sleeping (z's), walking with A\*-routed pathfinding |
 | 💡 | **Per-tool monitor glow** | Edit = blue, Bash = orange, Read = cyan — scannable at a glance |
@@ -99,9 +99,7 @@ cargo build --release
 | 🏷️ | **Furniture tooltips** | Hover any item — desks, sofas, plants, vending machine, printer — to see its name |
 | 🐾 | **Office pets** | A cat or dog (one per floor) roams desks, pantry, sofas; sleeps near idle agents. Click to pet — pixel-art hearts float up |
 | ☕ | **Coffee run** | Idle agents visit the pantry, carry a cup back to their desk. Cup stays while you work; taken on exit |
-| 💬 | **Pantry chitchat** | 2+ idle agents at the same waypoint trigger speech bubbles with dev-humor snippets |
-| 🪴 | **Desk personalization** | Plant (30min), photo frame (1hr) appear over time |
-| 🛡️ | **Hook-safe** | The shim always exits 0 — a stuck visualizer can never block Claude Code |
+| 💬 | **Pantry chitchat** | 2+ idle agents at the same waypoint trigger speech bubbles with dev-humor snippets || 🛡️ | **Hook-safe** | The shim always exits 0 — a stuck visualizer can never block your agent |
 
 ## Supported Tools
 
@@ -135,7 +133,7 @@ See **[docs/CONFIGURATION.md](docs/CONFIGURATION.md)** for the full key referenc
 <summary><strong>Architecture</strong></summary>
 
 ```
-CC tool call ──► CC fires hook ──► pixtuoid-hook (shim)
+agent tool call ──► agent fires hook ──► pixtuoid-hook (shim)
                                          │ JSON over Unix socket
                                          ▼
                                   /tmp/pixtuoid-{uid}.sock
@@ -156,7 +154,7 @@ Three Rust crates:
 |---|---|
 | **pixtuoid-core** | Headless library — no terminal deps. Source trait, reducer, pose, layout, sprites. |
 | **pixtuoid** | TUI binary — ratatui + crossterm + tokio. Half-block rendering + theme system. |
-| **pixtuoid-hook** | Tiny shim CC invokes from hooks. 200ms timeout, always exits 0. |
+| **pixtuoid-hook** | Tiny shim the agent CLI invokes from hooks. 200ms timeout, always exits 0. |
 
 </details>
 

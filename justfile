@@ -55,3 +55,11 @@ test:
 
 # Full pre-push gate: everything CI runs, in the same order.
 preflight: lint clippy test
+
+# Regenerate every docs/images screenshot + demo.gif from a release build.
+# Single source of truth for the office images — the render params, crop
+# quadrants, and the themes-composite diagonal angle all live in the script, so
+# the screenshots never "drift". Run after any change to the office's look.
+# Requires the .venv (Pillow): see README "Visual verification".
+demo:
+    .venv/bin/python3 scripts/gen-docs-images.py
