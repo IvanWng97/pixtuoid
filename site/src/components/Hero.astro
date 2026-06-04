@@ -1,0 +1,261 @@
+---
+import { REPO, asset } from '../consts';
+---
+
+<section class="hero">
+  <canvas id="dust" class="dust" aria-hidden="true"></canvas>
+  <div class="container hero__grid">
+    <div class="hero__copy">
+      <p class="eyebrow">Terminal-native · open source</p>
+      <h1>
+        Your coding agents,<br /> alive in a <span class="hl">pixel office</span><span
+          class="cursor"
+          aria-hidden="true"></span>
+      </h1>
+      <p class="lead">
+        Every running Claude Code or Codex session becomes a little animated coworker — typing,
+        pacing the corridor, fetching coffee — in an ASCII office that lives in your terminal.
+      </p>
+      <div class="hero__cta">
+        <a class="btn btn-primary" href="#install"
+          >Install pixtuoid <span aria-hidden="true">→</span></a
+        >
+        <a class="btn btn-ghost" href={REPO} target="_blank" rel="noreferrer">★ Star on GitHub</a>
+      </div>
+      <p class="hero__avail">macOS · Linux · crates.io · MIT licensed</p>
+    </div>
+
+    <div class="hero__demo">
+      <figure class="terminal tilt crt crt-manual">
+        <div class="terminal__bar">
+          <span class="terminal__dot terminal__dot--r"></span>
+          <span class="terminal__dot terminal__dot--y"></span>
+          <span class="terminal__dot terminal__dot--g"></span>
+          <span class="terminal__title"
+            >~ <span id="hero-cmd"></span><span class="cursor" aria-hidden="true"></span></span
+          >
+        </div>
+        <video
+          class="terminal__screen px"
+          autoplay
+          muted
+          loop
+          playsinline
+          preload="metadata"
+          poster={asset('demos/hero-poster.png')}
+        >
+          <source src={asset('demos/hero.mp4')} type="video/mp4" />
+          <img
+            class="px"
+            src={asset('demos/hero-poster.png')}
+            alt="A pixel-art office with animated coding-agent characters working at their desks"
+          />
+        </video>
+        <span class="terminal__scan" aria-hidden="true"></span>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<style>
+  .hero {
+    position: relative;
+    padding-block: clamp(2rem, 5vw, 4.5rem) clamp(3rem, 7vw, 6rem);
+  }
+  .dust {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 0;
+    pointer-events: none;
+  }
+  .hero__grid {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: clamp(2rem, 5vw, 4rem);
+    align-items: center;
+  }
+  @media (min-width: 920px) {
+    .hero__grid {
+      grid-template-columns: 0.92fr 1.08fr;
+    }
+  }
+  .hl {
+    color: var(--coral);
+  }
+  .hero__cta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.8rem;
+    margin-top: 1.8rem;
+  }
+  .hero__avail {
+    margin-top: 1.1rem;
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+    letter-spacing: 0.04em;
+    color: var(--fg-muted);
+  }
+  .terminal__screen {
+    width: 100%;
+    height: auto;
+  }
+
+  /* one orchestrated page-load entrance, staggered */
+  @keyframes rise {
+    from {
+      opacity: 0;
+      transform: translateY(22px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  .hero__copy > * {
+    animation: rise 0.7s both;
+  }
+  .hero__copy .eyebrow {
+    animation-delay: 0.05s;
+  }
+  .hero__copy h1 {
+    animation-delay: 0.14s;
+  }
+  .hero__copy .lead {
+    animation-delay: 0.26s;
+  }
+  .hero__copy .hero__cta {
+    animation-delay: 0.38s;
+  }
+  .hero__copy .hero__avail {
+    animation-delay: 0.48s;
+  }
+  .hero__demo {
+    animation: rise 0.9s 0.3s both;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .hero__copy > *,
+    .hero__demo {
+      animation: none;
+    }
+  }
+</style>
+
+<script is:inline>
+  // Pixel-dust: warm motes drifting up through the hero (echoes the office's dust).
+  (function () {
+    const c = document.getElementById('dust');
+    if (!c || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const ctx = c.getContext('2d');
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    let W = 0,
+      H = 0,
+      motes = [];
+    const COLORS = ['#d97757', '#e6a356', '#c9b08a', '#f0e4cf'];
+    function spawn(anywhere) {
+      return {
+        x: Math.random() * W,
+        y: anywhere ? Math.random() * H : H + 4,
+        s: 2 + Math.floor(Math.random() * 2),
+        vy: -(0.12 + Math.random() * 0.3),
+        vx: (Math.random() - 0.5) * 0.2,
+        a: 0.15 + Math.random() * 0.5,
+        tw: Math.random() * 6.28,
+        tws: 0.01 + Math.random() * 0.03,
+        col: COLORS[Math.floor(Math.random() * COLORS.length)],
+      };
+    }
+    function resize() {
+      const r = c.getBoundingClientRect();
+      W = r.width;
+      H = r.height;
+      c.width = Math.round(W * dpr);
+      c.height = Math.round(H * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      const n = Math.max(18, Math.round((W * H) / 13000));
+      motes = [];
+      for (let i = 0; i < n; i++) motes.push(spawn(true));
+    }
+    let raf = 0,
+      on = false;
+    function frame() {
+      ctx.clearRect(0, 0, W, H);
+      for (let i = 0; i < motes.length; i++) {
+        const m = motes[i];
+        m.x += m.vx;
+        m.y += m.vy;
+        m.tw += m.tws;
+        if (m.y < -4) {
+          motes[i] = spawn(false);
+          continue;
+        }
+        ctx.globalAlpha = m.a * (0.55 + 0.45 * Math.sin(m.tw));
+        ctx.fillStyle = m.col;
+        ctx.fillRect(Math.round(m.x), Math.round(m.y), m.s, m.s);
+      }
+      ctx.globalAlpha = 1;
+      raf = requestAnimationFrame(frame);
+    }
+    function start() {
+      if (!on) {
+        on = true;
+        raf = requestAnimationFrame(frame);
+      }
+    }
+    function stop() {
+      on = false;
+      if (raf) cancelAnimationFrame(raf);
+      raf = 0;
+    }
+    resize();
+    window.addEventListener('resize', resize);
+    if ('IntersectionObserver' in window) {
+      new IntersectionObserver(
+        function (es) {
+          es.forEach(function (e) {
+            if (e.isIntersecting) start();
+            else stop();
+          });
+        },
+        { threshold: 0 }
+      ).observe(c);
+    } else start();
+  })();
+</script>
+
+<script is:inline>
+  // Hero: once the boot intro reveals, type the command, then power on the CRT.
+  (function () {
+    function run() {
+      const el = document.getElementById('hero-cmd');
+      const term = document.querySelector('.hero .terminal');
+      const text = 'pixtuoid run';
+      function powerOn() {
+        if (term) term.classList.add('crt-on');
+      }
+      if (!el) {
+        powerOn();
+        return;
+      }
+      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        el.textContent = text;
+        powerOn();
+        return;
+      }
+      let i = 0;
+      (function type() {
+        el.textContent = text.slice(0, i);
+        if (i < text.length) {
+          i++;
+          setTimeout(type, 55);
+        } else {
+          powerOn();
+        }
+      })();
+    }
+    document.addEventListener('pix:revealed', run, { once: true });
+  })();
+</script>

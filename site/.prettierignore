@@ -1,0 +1,6 @@
+dist
+.astro
+node_modules
+package-lock.json
+# generated/binary demo assets — never reformat
+public/demos

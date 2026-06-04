@@ -1,0 +1,28 @@
+---
+import Base from '../layouts/Base.astro';
+import Nav from '../components/Nav.astro';
+import Hero from '../components/Hero.astro';
+import Ticker from '../components/Ticker.astro';
+import ThemeGallery from '../components/ThemeGallery.astro';
+import Features from '../components/Features.astro';
+import HowItWorks from '../components/HowItWorks.astro';
+import Install from '../components/Install.astro';
+import Footer from '../components/Footer.astro';
+---
+
+<Base>
+  <span id="top"></span>
+  <Nav />
+  <main>
+    <Hero />
+    <Ticker />
+    <ThemeGallery />
+    <hr class="px-rule" />
+    <Features />
+    <hr class="px-rule" />
+    <HowItWorks />
+    <hr class="px-rule" />
+    <Install />
+  </main>
+  <Footer />
+</Base>

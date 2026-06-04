@@ -1,0 +1,146 @@
+---
+import { asset } from '../consts';
+
+const cells = [
+  {
+    img: 'day.png',
+    pos: 'center',
+    title: 'A desk for every session',
+    body: 'Each running Claude Code or Codex session claims a desk — arriving, working, taking breaks, and leaving when the session ends.',
+    wide: true,
+  },
+  {
+    img: 'night.png',
+    pos: '50% 16%',
+    title: 'Day, night & live weather',
+    body: 'Lighting tracks your real clock; rain, storms, fog and moonlight roll past the windows.',
+  },
+  {
+    img: 'theme_cyberpunk.png',
+    pos: 'center',
+    title: 'Six themes',
+    body: 'Reskin the whole office with one keystroke.',
+    href: '#themes',
+  },
+  {
+    img: 'theme_dracula.png',
+    pos: '68% 40%',
+    title: 'Emergent office life',
+    body: 'Agents pace the corridor, fetch coffee, and gather in the meeting room to chitchat.',
+  },
+  {
+    img: 'theme_tokyo-night.png',
+    pos: 'center',
+    title: 'Multi-floor, multi-agent',
+    body: 'Subagents, multiple CLIs and extra floors appear as your swarm grows.',
+  },
+];
+---
+
+<section id="features" class="features">
+  <div class="container">
+    <div class="section-head reveal">
+      <p class="eyebrow">The office is alive</p>
+      <h2>Not a dashboard. A little world.</h2>
+      <p class="lead">
+        pixtuoid renders your agents as coworkers in a top-down pixel office — with the small
+        touches that make it worth glancing at.
+      </p>
+    </div>
+
+    <div class="bento">
+      {
+        cells.map((c) => (
+          <article class:list={['bento__cell reveal', { 'bento__cell--wide': c.wide }]}>
+            <img
+              class="bento__img px"
+              src={asset('demos/' + c.img)}
+              alt=""
+              loading="lazy"
+              style={`object-position:${c.pos}`}
+            />
+            <div class="bento__body">
+              <h3>{c.title}</h3>
+              <p>{c.body}</p>
+              {c.href && (
+                <a class="bento__link" href={c.href}>
+                  Explore →
+                </a>
+              )}
+            </div>
+          </article>
+        ))
+      }
+    </div>
+  </div>
+</section>
+
+<style>
+  .bento {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 1.1rem;
+  }
+  @media (min-width: 720px) {
+    .bento {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+  @media (min-width: 1000px) {
+    .bento {
+      grid-template-columns: repeat(3, 1fr);
+    }
+    .bento__cell--wide {
+      grid-column: span 2;
+    }
+  }
+  .bento__cell {
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    background: var(--surface);
+    box-shadow: var(--shadow);
+    transition:
+      transform 0.2s ease,
+      box-shadow 0.3s ease;
+  }
+  .bento__cell:hover {
+    transform: translateY(-3px);
+    box-shadow: var(--shadow-lg);
+  }
+  .bento__img {
+    width: 100%;
+    height: 190px;
+    object-fit: cover;
+    background: #0e0d0c;
+  }
+  .bento__cell--wide .bento__img {
+    height: 300px;
+  }
+  .bento__body {
+    padding: 1rem 1.2rem 1.3rem;
+  }
+  .bento__body h3 {
+    margin-bottom: 0.3rem;
+  }
+  .bento__body p {
+    color: var(--fg-muted);
+    font-size: 0.98rem;
+    line-height: 1.55;
+  }
+  .bento__link {
+    display: inline-block;
+    margin-top: 0.6rem;
+    font-family: var(--font-mono);
+    font-weight: 700;
+    font-size: 0.86rem;
+    color: var(--coral-deep);
+    text-decoration: none;
+  }
+  :global([data-theme='night']) .bento__link {
+    color: var(--coral);
+  }
+</style>

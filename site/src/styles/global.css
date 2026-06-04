@@ -1,0 +1,535 @@
+/* ============================================================
+   pixtuoid — "Cozy Terminal" skin
+   Claude warmth (paper #faf9f5 · ink #141413 · coral #d97757) kept as the base,
+   pushed toward terminal/pixel character:
+   Display: Pixelify Sans  ·  UI/code: JetBrains Mono  ·  Body: Lora
+   coral→amber accent gradient · blinking cursor · ASCII dividers · CRT scanlines
+   ============================================================ */
+
+:root {
+  /* Brand constants */
+  /* Warm "Coworking" palette — cream lightened from the office carpet (#8A765F)
+     + Claude coral. Analogous warm harmony so the office art sits INTO the page. */
+  --paper: #f4eee2; /* warm cream (carpet hue, lifted) */
+  --ink: #241c14; /* deep warm wood */
+  --gray: #b3a892;
+  --gray-soft: #e7dcc7;
+  --coral: #d97757; /* Claude coral */
+  --coral-deep: #bd5d3c;
+  --amber: #e6a356; /* warm amber — gradient end */
+  --blue: #6a9bcc;
+  --green: #788c5d;
+  --grad: linear-gradient(100deg, var(--coral), var(--amber));
+
+  /* Semantic tokens — DAY (warm cream) */
+  --bg: var(--paper);
+  --bg-tint: #ede3d1;
+  --surface: #fdf9ef;
+  --surface-2: #ece1cd;
+  --fg: var(--ink);
+  --fg-muted: #6f6453;
+  --border: color-mix(in srgb, var(--ink) 12%, transparent);
+  --border-strong: color-mix(in srgb, var(--ink) 20%, transparent);
+  --shadow: 0 1px 2px rgba(36, 28, 20, 0.05), 0 8px 24px rgba(36, 28, 20, 0.09);
+  --shadow-lg: 0 2px 4px rgba(36, 28, 20, 0.06), 0 20px 50px rgba(36, 28, 20, 0.13);
+  --glow: color-mix(in srgb, var(--coral) 15%, transparent);
+
+  /* Type */
+  --font-display: 'Pixelify Sans', 'Segoe UI', system-ui, sans-serif;
+  --font-body: 'Lora', Georgia, 'Times New Roman', serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+
+  /* Scale */
+  --maxw: 1120px;
+  --radius: 16px;
+  --radius-sm: 10px;
+}
+
+:root[data-theme='night'] {
+  /* warm "after-hours office" dark — pairs with the night-office renders */
+  --coral: #e3845f;
+  --coral-deep: #f0a07f;
+  --amber: #ecae66;
+  --bg: #1d1813;
+  --bg-tint: #18130f;
+  --surface: #271f17;
+  --surface-2: #322820;
+  --fg: #f4eee2;
+  --fg-muted: #b3a890;
+  --border: color-mix(in srgb, #f4eee2 13%, transparent);
+  --border-strong: color-mix(in srgb, #f4eee2 24%, transparent);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 10px 30px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 2px 6px rgba(0, 0, 0, 0.4), 0 24px 60px rgba(0, 0, 0, 0.6);
+  --glow: color-mix(in srgb, var(--coral) 24%, transparent);
+}
+
+/* ---------- reset ---------- */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+}
+html {
+  scroll-behavior: smooth;
+  -webkit-text-size-adjust: 100%;
+}
+body {
+  font-family: var(--font-body);
+  background: var(--bg);
+  color: var(--fg);
+  line-height: 1.7;
+  font-size: clamp(1rem, 0.95rem + 0.2vw, 1.115rem);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  transition:
+    background-color 0.5s ease,
+    color 0.5s ease;
+  overflow-x: hidden;
+}
+
+/* warm dawn-glow atmosphere */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(120% 80% at 80% -10%, var(--glow), transparent 60%),
+    radial-gradient(
+      90% 60% at 6% 0%,
+      color-mix(in srgb, var(--amber) 9%, transparent),
+      transparent 55%
+    );
+}
+
+img {
+  max-width: 100%;
+  display: block;
+}
+a {
+  color: var(--coral-deep);
+  text-underline-offset: 2px;
+}
+:root[data-theme='night'] a {
+  color: var(--coral);
+}
+
+/* ---------- type ---------- */
+h1,
+h2,
+h3,
+.display {
+  font-family: var(--font-display);
+  font-weight: 700;
+  line-height: 1.04;
+  letter-spacing: 0;
+  color: var(--fg);
+}
+h1 {
+  font-size: clamp(2.5rem, 1.7rem + 3.6vw, 4.6rem);
+}
+h2 {
+  font-size: clamp(1.9rem, 1.4rem + 2vw, 2.9rem);
+}
+h3 {
+  font-size: clamp(1.15rem, 1.04rem + 0.5vw, 1.4rem);
+  font-weight: 600;
+}
+/* terminal-prompt eyebrow */
+.eyebrow {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 0.76rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--coral-deep);
+}
+.eyebrow::before {
+  content: '› ';
+  opacity: 0.7;
+}
+:root[data-theme='night'] .eyebrow {
+  color: var(--coral);
+}
+.lead {
+  font-size: clamp(1.08rem, 1rem + 0.5vw, 1.34rem);
+  color: var(--fg-muted);
+  max-width: 42ch;
+}
+/* coral→amber gradient headline word */
+.hl {
+  background: var(--grad);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* blinking block cursor */
+.cursor {
+  display: inline-block;
+  width: 0.55ch;
+  height: 0.92em;
+  margin-left: 0.08em;
+  transform: translateY(0.08em);
+  background: var(--coral);
+  animation: blink 1.05s steps(1) infinite;
+}
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+/* ---------- layout ---------- */
+.container {
+  width: 100%;
+  max-width: var(--maxw);
+  margin-inline: auto;
+  padding-inline: clamp(1.1rem, 4vw, 2.5rem);
+}
+section {
+  padding-block: clamp(3.2rem, 7vw, 6rem);
+}
+.section-head {
+  max-width: 48ch;
+  margin-bottom: clamp(1.8rem, 4vw, 3rem);
+}
+.section-head .lead {
+  margin-top: 0.9rem;
+}
+
+/* ASCII pixel divider between sections */
+.px-rule {
+  height: 6px;
+  width: min(100%, var(--maxw));
+  margin: 0 auto;
+  border: 0;
+  background: repeating-linear-gradient(90deg, var(--coral) 0 6px, transparent 6px 14px);
+  image-rendering: pixelated;
+  opacity: 0.4;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
+}
+
+/* ---------- buttons (mono, terminal) ---------- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 0.92rem;
+  padding: 0.72rem 1.3rem;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  text-decoration: none;
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.2s ease,
+    background-color 0.2s ease,
+    border-color 0.2s ease;
+}
+.btn:hover {
+  transform: translateY(-2px);
+}
+.btn-primary {
+  background: var(--grad);
+  color: #fff;
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--coral) 38%, transparent);
+}
+.btn-primary:hover {
+  filter: brightness(1.04);
+}
+.btn-ghost {
+  background: transparent;
+  color: var(--fg);
+  border-color: var(--border-strong);
+}
+.btn-ghost:hover {
+  background: color-mix(in srgb, var(--fg) 5%, transparent);
+}
+
+/* ---------- surfaces ---------- */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+/* faux terminal window + subtle CRT scanlines on the screen */
+.terminal {
+  position: relative;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+.terminal__bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 0.9rem;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+}
+.terminal__dot {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--gray);
+}
+.terminal__dot--r {
+  background: #e06a5a;
+}
+.terminal__dot--y {
+  background: #e3b341;
+}
+.terminal__dot--g {
+  background: var(--green);
+}
+.terminal__title {
+  margin-left: 0.5rem;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--fg-muted);
+}
+.terminal__screen {
+  display: block;
+  width: 100%;
+  background: #0e0d0c;
+}
+/* scanline overlay — very faint, only reads as CRT texture up close */
+.terminal__scan {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  top: 38px; /* below the title bar */
+  pointer-events: none;
+  background: repeating-linear-gradient(to bottom, rgba(0, 0, 0, 0.05) 0 1px, transparent 1px 3px);
+  mix-blend-mode: multiply;
+}
+
+/* crisp pixel art at any scale */
+.px {
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+code,
+.mono {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+}
+
+/* ---------- reveal-on-scroll ---------- */
+.reveal {
+  opacity: 0;
+  transform: translateY(18px);
+  transition:
+    opacity 0.7s ease,
+    transform 0.7s ease;
+}
+.reveal.in {
+  opacity: 1;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.001ms !important;
+    animation-duration: 0.001ms !important;
+  }
+  .reveal {
+    opacity: 1;
+    transform: none;
+  }
+  .cursor,
+  .hl {
+    animation: none;
+  }
+  .tilt {
+    transform: none !important;
+  }
+  .cursor-glow {
+    display: none !important;
+  }
+  .crt.crt-on .terminal__screen {
+    animation: none;
+  }
+}
+
+/* ============================================================
+   FX layer — tasteful flair, all reduced-motion-safe above
+   ============================================================ */
+
+/* animated shimmer across the gradient headline word */
+.hl {
+  background-size: 220% 100%;
+  animation: shimmer 7s ease-in-out infinite;
+}
+@keyframes shimmer {
+  0%,
+  100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+
+/* soft accent glow trailing the pointer (desktop only) */
+.cursor-glow {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 460px;
+  height: 460px;
+  margin: -230px 0 0 -230px;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0;
+  background: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--coral) 26%, transparent),
+    transparent 64%
+  );
+  transform: translate(var(--mx, -1000px), var(--my, -1000px));
+  transition: opacity 0.4s ease;
+  mix-blend-mode: multiply;
+}
+:root[data-theme='night'] .cursor-glow,
+:root[data-theme='dracula'] .cursor-glow {
+  mix-blend-mode: screen;
+}
+body.has-pointer .cursor-glow {
+  opacity: 1;
+}
+
+/* 3D tilt toward the cursor (JS sets --rx/--ry) */
+.tilt {
+  transform: perspective(1000px) rotateX(var(--ry, 0deg)) rotateY(var(--rx, 0deg));
+  transition: transform 0.3s ease;
+  transform-style: preserve-3d;
+  will-change: transform;
+}
+
+/* CRT power-on when a terminal scrolls into view */
+.crt.crt-on .terminal__screen {
+  animation: crt-on 0.9s ease-out both;
+}
+@keyframes crt-on {
+  0% {
+    opacity: 0;
+    filter: brightness(3) saturate(0) blur(2px);
+    transform: scaleY(0.7);
+  }
+  9% {
+    opacity: 1;
+    transform: scaleY(1.02);
+  }
+  14% {
+    filter: brightness(1.5) saturate(1.2);
+  }
+  22% {
+    filter: brightness(0.75);
+    transform: scaleY(1);
+  }
+  40% {
+    filter: brightness(1.25);
+  }
+  100% {
+    filter: none;
+  }
+}
+
+/* retint pulse on the theme preview */
+@keyframes retint-pulse {
+  0% {
+    box-shadow:
+      var(--shadow-lg),
+      0 0 0 0 color-mix(in srgb, var(--accent) 60%, transparent);
+  }
+  100% {
+    box-shadow:
+      var(--shadow-lg),
+      0 0 0 24px transparent;
+  }
+}
+.retint-pulse {
+  animation: retint-pulse 0.6s ease-out;
+}
+
+/* Dracula — hidden easter-egg theme (type "dracula"; Esc restores) */
+:root[data-theme='dracula'] {
+  --coral: #bd93f9;
+  --coral-deep: #caa6fb;
+  --amber: #ff79c6;
+  --bg: #282a36;
+  --bg-tint: #21222c;
+  --surface: #343746;
+  --surface-2: #44475a;
+  --fg: #f8f8f2;
+  --fg-muted: #8b92bd;
+  --border: color-mix(in srgb, #f8f8f2 13%, transparent);
+  --border-strong: color-mix(in srgb, #f8f8f2 24%, transparent);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 10px 30px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 2px 6px rgba(0, 0, 0, 0.4), 0 24px 60px rgba(0, 0, 0, 0.6);
+  --glow: color-mix(in srgb, var(--coral) 26%, transparent);
+}
+
+/* ---------- boot intro overlay ---------- */
+.boot {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  font-family: var(--font-mono);
+  color: var(--fg-muted);
+  font-size: clamp(0.82rem, 0.74rem + 0.4vw, 1rem);
+  line-height: 1.95;
+  transition: opacity 0.45s ease;
+}
+:root[data-booting='1'] .boot {
+  display: flex;
+}
+.boot.is-done {
+  opacity: 0;
+  pointer-events: none;
+}
+.boot__log {
+  width: min(86vw, 420px);
+}
+.boot__line {
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+.boot__line.in {
+  opacity: 1;
+}
+.boot__line b {
+  color: var(--fg);
+}
+.boot__ok {
+  color: var(--green);
+}
+.boot__hint {
+  margin-top: 1.4rem;
+  font-size: 0.72rem;
+  opacity: 0.55;
+}

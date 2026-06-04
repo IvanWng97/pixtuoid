@@ -1,0 +1,99 @@
+---
+const steps = [
+  {
+    n: '01',
+    cmd: 'pixtuoid install-hooks',
+    title: 'Hook in',
+    body: 'One command wires pixtuoid into Claude Code and/or Codex. It only listens for lifecycle events — it never touches your code.',
+  },
+  {
+    n: '02',
+    cmd: 'pixtuoid run',
+    title: 'Open the office',
+    body: 'Launch the TUI in any terminal. Empty desks at first, waiting for someone to show up.',
+  },
+  {
+    n: '03',
+    cmd: '# just start coding',
+    title: 'Watch them arrive',
+    body: 'Every session you start walks in, sits down, and gets to work. End it and they head for the elevator.',
+  },
+];
+---
+
+<section class="how">
+  <div class="container">
+    <div class="section-head reveal">
+      <p class="eyebrow">Three commands</p>
+      <h2>Up and running in a minute.</h2>
+    </div>
+    <ol class="how__steps">
+      {
+        steps.map((s) => (
+          <li class="how__step reveal">
+            <span class="how__n" aria-hidden="true">
+              {s.n}
+            </span>
+            <div class="how__detail">
+              <code class="how__cmd">{s.cmd}</code>
+              <h3>{s.title}</h3>
+              <p>{s.body}</p>
+            </div>
+          </li>
+        ))
+      }
+    </ol>
+  </div>
+</section>
+
+<style>
+  .how__steps {
+    list-style: none;
+    padding: 0;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 1.4rem;
+    counter-reset: step;
+  }
+  @media (min-width: 820px) {
+    .how__steps {
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1.6rem;
+    }
+  }
+  .how__step {
+    position: relative;
+    padding: 1.4rem 1.4rem 1.6rem;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    background: var(--surface);
+    box-shadow: var(--shadow);
+  }
+  .how__n {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 2.2rem;
+    color: color-mix(in srgb, var(--coral) 55%, transparent);
+    line-height: 1;
+  }
+  .how__cmd {
+    display: inline-block;
+    margin: 0.9rem 0 0.5rem;
+    padding: 0.3rem 0.6rem;
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    color: var(--coral-deep);
+    font-size: 0.86rem;
+  }
+  :global([data-theme='night']) .how__cmd {
+    color: var(--coral);
+  }
+  .how__detail h3 {
+    margin-bottom: 0.3rem;
+  }
+  .how__detail p {
+    color: var(--fg-muted);
+    font-size: 0.98rem;
+  }
+</style>

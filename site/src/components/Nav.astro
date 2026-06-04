@@ -1,0 +1,126 @@
+---
+import { REPO } from '../consts';
+---
+
+<header class="nav">
+  <div class="container nav__inner">
+    <a class="nav__logo" href="#top">
+      <span class="nav__mark" aria-hidden="true"></span>
+      pixtuoid
+    </a>
+    <nav class="nav__links" aria-label="Primary">
+      <a href="#themes">Themes</a>
+      <a href="#features">Features</a>
+      <a href="#install">Install</a>
+      <a href={REPO} target="_blank" rel="noreferrer">GitHub ↗</a>
+    </nav>
+    <button id="theme-toggle" class="nav__toggle" type="button" aria-label="Toggle day / night">
+      <span class="nav__toggle-icon" aria-hidden="true">🌙</span>
+    </button>
+  </div>
+</header>
+
+<script is:inline>
+  (function () {
+    const btn = document.getElementById('theme-toggle');
+    const icon = btn && btn.querySelector('.nav__toggle-icon');
+    function sync() {
+      const night = document.documentElement.dataset.theme === 'night';
+      if (icon) icon.textContent = night ? '☀️' : '🌙';
+      if (btn) btn.setAttribute('aria-label', night ? 'Switch to day' : 'Switch to night');
+    }
+    sync();
+    if (btn)
+      btn.addEventListener('click', function () {
+        const night = document.documentElement.dataset.theme === 'night';
+        const next = night ? 'day' : 'night';
+        document.documentElement.dataset.theme = next;
+        try {
+          localStorage.setItem('pix-theme', next);
+        } catch (e) {}
+        sync();
+      });
+  })();
+</script>
+
+<style>
+  .nav {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    background: color-mix(in srgb, var(--bg) 80%, transparent);
+    border-bottom: 1px solid var(--border);
+  }
+  .nav__inner {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    height: 60px;
+  }
+  .nav__logo {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 1.15rem;
+    letter-spacing: -0.02em;
+    color: var(--fg);
+    text-decoration: none;
+  }
+  /* tiny pixel-cluster mark — coral block with blue/green offset pixels */
+  .nav__mark {
+    width: 11px;
+    height: 11px;
+    border-radius: 2px;
+    background: var(--coral);
+    box-shadow:
+      4px 0 0 var(--blue),
+      0 4px 0 var(--green);
+    image-rendering: pixelated;
+  }
+  .nav__links {
+    display: none;
+    gap: 1.4rem;
+    margin-left: auto;
+    font-family: var(--font-mono);
+    font-size: 0.88rem;
+  }
+  .nav__links a {
+    color: var(--fg-muted);
+    text-decoration: none;
+  }
+  .nav__links a:hover {
+    color: var(--fg);
+  }
+  @media (min-width: 760px) {
+    .nav__links {
+      display: flex;
+    }
+  }
+  .nav__toggle {
+    margin-left: auto;
+    width: 40px;
+    height: 40px;
+    display: grid;
+    place-items: center;
+    border-radius: 999px;
+    border: 1px solid var(--border-strong);
+    background: var(--surface);
+    cursor: pointer;
+    font-size: 1rem;
+    transition:
+      transform 0.15s ease,
+      background-color 0.2s ease;
+  }
+  @media (min-width: 760px) {
+    .nav__toggle {
+      margin-left: 0;
+    }
+  }
+  .nav__toggle:hover {
+    transform: translateY(-1px);
+  }
+</style>

@@ -90,3 +90,27 @@ preflight: lint clippy hack test
 # Requires the .venv (Pillow): see README "Visual verification".
 demo:
     .venv/bin/python3 scripts/gen-docs-images.py
+
+# ── website (site/) ───────────────────────────────────────────────
+# The Astro landing page — a self-contained Node project under site/ with its
+# own CI (.github/workflows/site.yml). See site/README.md.
+
+# Install the site's npm deps (run once per clone).
+site-setup:
+    npm --prefix site ci
+
+# Site dev server with HMR → http://localhost:4321/pixtuoid/
+site-dev:
+    npm --prefix site run dev
+
+# Full site gate: format-check → lint → astro check → build (mirrors site CI).
+site-check:
+    npm --prefix site run verify
+
+# Auto-format the site.
+site-fmt:
+    npm --prefix site run format
+
+# Regenerate the site's demo art from the pixtuoid binary.
+site-demos:
+    ./site/scripts/gen-demos.sh

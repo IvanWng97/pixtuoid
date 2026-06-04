@@ -1,0 +1,162 @@
+---
+import { REPO, CRATES, TAP } from '../consts';
+
+const tabs = [
+  { id: 'brew', label: 'Homebrew', cmds: [`brew install ${TAP}/pixtuoid`] },
+  { id: 'cargo', label: 'Cargo', cmds: ['cargo install pixtuoid'] },
+  { id: 'deb', label: 'Debian', cmds: ['# from the Releases page', 'sudo dpkg -i pixtuoid_*.deb'] },
+];
+---
+
+<section id="install" class="install">
+  <div class="container">
+    <div class="section-head reveal">
+      <p class="eyebrow">Get it</p>
+      <h2>Install pixtuoid.</h2>
+      <p class="lead">
+        macOS &amp; Linux. Then <code>pixtuoid install-hooks</code> and <code>pixtuoid run</code>.
+      </p>
+    </div>
+
+    <div class="install__box card reveal">
+      <div class="install__tabs" role="tablist" aria-label="Install method">
+        {
+          tabs.map((t, i) => (
+            <button
+              class:list={['install__tab', { 'is-active': i === 0 }]}
+              role="tab"
+              data-tab={t.id}
+              aria-selected={i === 0 ? 'true' : 'false'}
+            >
+              {t.label}
+            </button>
+          ))
+        }
+      </div>
+
+      {
+        tabs.map((t, i) => (
+          <div class:list={['install__panel', { 'is-active': i === 0 }]} data-panel={t.id}>
+            <pre class="install__code">
+              <code>{t.cmds.join('\n')}</code>
+            </pre>
+            <button class="install__copy" data-copy={t.cmds.join('\n')} aria-label="Copy command">
+              Copy
+            </button>
+          </div>
+        ))
+      }
+
+      <p class="install__note">
+        Also on <a href={CRATES} target="_blank" rel="noreferrer">crates.io</a> · prebuilt binaries on
+        <a href={`${REPO}/releases`} target="_blank" rel="noreferrer">Releases</a>.
+      </p>
+    </div>
+  </div>
+</section>
+
+<script is:inline>
+  (function () {
+    const box = document.querySelector('.install__box');
+    if (!box) return;
+    box.querySelectorAll('.install__tab').forEach(function (tab) {
+      tab.addEventListener('click', function () {
+        const id = tab.dataset.tab;
+        box.querySelectorAll('.install__tab').forEach(function (t) {
+          const on = t === tab;
+          t.classList.toggle('is-active', on);
+          t.setAttribute('aria-selected', on ? 'true' : 'false');
+        });
+        box.querySelectorAll('.install__panel').forEach(function (p) {
+          p.classList.toggle('is-active', p.dataset.panel === id);
+        });
+      });
+    });
+    box.querySelectorAll('.install__copy').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        if (navigator.clipboard) navigator.clipboard.writeText(btn.dataset.copy);
+        const prev = btn.textContent;
+        btn.textContent = 'Copied ✓';
+        setTimeout(function () {
+          btn.textContent = prev;
+        }, 1400);
+      });
+    });
+  })();
+</script>
+
+<style>
+  .install__box {
+    max-width: 680px;
+    padding: 0.6rem;
+    overflow: hidden;
+  }
+  .install__tabs {
+    display: flex;
+    gap: 0.3rem;
+    padding: 0.4rem 0.4rem 0;
+  }
+  .install__tab {
+    flex: 1;
+    font-family: var(--font-mono);
+    font-weight: 700;
+    font-size: 0.86rem;
+    padding: 0.55rem 0.6rem;
+    border: 0;
+    border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+    background: transparent;
+    color: var(--fg-muted);
+    cursor: pointer;
+  }
+  .install__tab.is-active {
+    color: var(--fg);
+    background: var(--surface-2);
+  }
+  .install__panel {
+    display: none;
+    position: relative;
+    margin: 0.4rem;
+    border-radius: var(--radius-sm);
+    background: #14130f;
+    border: 1px solid var(--border);
+  }
+  :global([data-theme='night']) .install__panel {
+    background: #0c0b09;
+  }
+  .install__panel.is-active {
+    display: block;
+  }
+  .install__code {
+    margin: 0;
+    padding: 1rem 1.1rem;
+    overflow-x: auto;
+    color: #f3ede3;
+    font-family: var(--font-mono);
+    font-size: 0.92rem;
+    line-height: 1.6;
+  }
+  .install__copy {
+    position: absolute;
+    top: 0.55rem;
+    right: 0.55rem;
+    font-family: var(--font-mono);
+    font-size: 0.76rem;
+    font-weight: 600;
+    padding: 0.35rem 0.7rem;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    background: rgba(255, 255, 255, 0.08);
+    color: #f3ede3;
+    cursor: pointer;
+  }
+  .install__copy:hover {
+    background: var(--coral);
+    border-color: var(--coral);
+    color: #fff;
+  }
+  .install__note {
+    padding: 0.4rem 0.7rem 0.6rem;
+    font-size: 0.9rem;
+    color: var(--fg-muted);
+  }
+</style>
