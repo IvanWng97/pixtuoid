@@ -35,6 +35,8 @@ crates/
 │                       → see crates/pixtuoid/CLAUDE.md and crates/pixtuoid/src/tui/CLAUDE.md
 └── pixtuoid-hook/      tiny shim CC invokes — stdin JSON → Unix socket, 200ms write timeout
 scripts/                crop-snapshot.py (visual verification),
+                        gen-docs-images.py (regenerate ALL docs/images screenshots + demo.gif
+                        from a release build — single source of truth; run via `just demo`),
                         replay-fixture.sh (replay a captured source rollout fixture into a
                         headless run via --codex-sessions-root, for eyeballing lifecycle),
                         check_upstream_drift.py (weekly CI: CC/Codex wire-format rename watch)
@@ -76,6 +78,11 @@ cargo build --release --example snapshot
 ./target/release/examples/snapshot --cols 192 --rows 80 /tmp/snap.png
 .venv/bin/python3 scripts/crop-snapshot.py /tmp/snap.png --scale 3
 ```
+
+> To regenerate **all** of `docs/images/` (screenshot, gallery-\*, themes-composite, demo.gif)
+> from a release build, run **`just demo`** (→ `scripts/gen-docs-images.py`) — the single source
+> of truth for the office images (render params, crop quadrants, themes-composite diagonal), so
+> the screenshots never drift.
 
 See `.claude/skills/beautify-decoration/SKILL.md` for the full iteration loop, self-critique checklist, and sprite-format pitfalls.
 

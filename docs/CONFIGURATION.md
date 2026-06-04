@@ -58,4 +58,4 @@ pixtuoid run --pack-dir ./my-pack
 ```
 
 A **robot** pack ships as an example at `crates/pixtuoid/sprites/robot/`. See the
-[sprite format docs](../CLAUDE.md) for palette keys and animation requirements.
+[sprite format docs](../crates/pixtuoid/CLAUDE.md) for palette keys and animation requirements.
