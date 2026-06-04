@@ -13,6 +13,8 @@ trim = true
 [git]
 conventional_commits = true
 commit_parsers = [
+    # The release-prep commit itself shouldn't appear in its own changelog.
+    { message = "^chore\\(release\\)", skip = true },
     { message = "^feat",     group = "Features" },
     { message = "^fix",      group = "Bug Fixes" },
     { message = "^perf",     group = "Performance" },

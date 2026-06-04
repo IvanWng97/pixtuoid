@@ -118,6 +118,24 @@ git config core.hooksPath .githooks
 
 Bypass in an emergency with `git commit --no-verify` or `SKIP_PREFLIGHT=1 git push`.
 
+### Cutting a release
+
+`just bump X.Y.Z` is the one command. It rewrites **every** version number — the
+workspace version, the `pixtuoid`→`pixtuoid-core` path-dep requirement, and
+`Cargo.lock` (via `cargo set-version`, so the path-dep can't drift) — drafts the
+in-app `release_notes()` arm from the commit log, runs `just preflight`, and
+commits on a `release/vX.Y.Z` branch. It **stops before the tag**: pushing the
+tag is what triggers the *irreversible* crates.io publish (`release.yml`), so
+that stays a human step.
+
+```
+just bump 0.5.1                              # bump + draft notes + preflight → branch
+# curate release_notes() to ~6 highlights → PR → merge, then:
+git tag v0.5.1 && git push origin v0.5.1     # fires build + crates.io + homebrew
+```
+
+Needs cargo-edit (`just setup-tools`). See [`CONTRIBUTING.md`](CONTRIBUTING.md#releasing).
+
 ## Conventions
 
 - **TDD first.** Plan and existing tests are TDD-shaped — failing test → minimal impl → commit. Don't add code without a test that exercises it.
