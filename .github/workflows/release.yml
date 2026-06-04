@@ -22,6 +22,8 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@cargo-nextest
+      - uses: extractions/setup-just@v4
       - name: Validate tag matches Cargo.toml version
         run: |
           TAG_VERSION="${GITHUB_REF_NAME#v}"
@@ -30,9 +32,12 @@ jobs:
             echo "::error::Tag ${GITHUB_REF_NAME} does not match Cargo.toml version ${CARGO_VERSION}"
             exit 1
           fi
-      - run: cargo fmt --all --check
-      - run: cargo clippy --workspace --all-targets --features pixtuoid-core/test-renderer -- -D warnings
-      - run: cargo test --workspace --features pixtuoid-core/test-renderer
+      # Run the SAME just recipes as ci.yml + the git hooks — the justfile is the
+      # single source of truth for what each check runs (no CI-vs-release drift,
+      # and `just test` uses nextest).
+      - run: just fmt-check
+      - run: just clippy
+      - run: just test
 
   build:
     name: build (${{ matrix.target }})
