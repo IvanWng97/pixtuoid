@@ -53,7 +53,7 @@ tui/
 └── pixel_painter/  pure-pixel pass — split into focused child modules:
                     mod.rs (PixelCtx struct, orchestrator), background/ (weather, sunset, skyline,
                     time_of_day.rs, lighting.rs), ambient.rs (sun spot + dust motes + ceiling halos),
-                    drawable.rs (y-sort Drawable enum + dispatch), effects.rs (glow/z's/dots/steam/dust/bubble),
+                    drawable.rs (y-sort Drawable enum + dispatch), effects.rs (glow/z's/steam/dust/bubble),
                     palette.rs (agent palette + recolor + tool_glow_tint), anchors.rs (breath, walk position,
                     character_anchor; the per-pose anchor fns take `sprite_w` — the pack's character width,
                     resolved ONCE per frame [8 bundled / 10 robot] — so a non-8-wide pack centers correctly),
