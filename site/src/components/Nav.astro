@@ -32,9 +32,14 @@ import { REPO } from '../consts';
     sync();
     if (btn)
       btn.addEventListener('click', function () {
-        const night = document.documentElement.dataset.theme === 'night';
-        const next = night ? 'day' : 'night';
-        document.documentElement.dataset.theme = next;
+        const root = document.documentElement;
+        // clear any per-theme retint a gallery chip applied, so the toggle shows
+        // the clean day/night palette (inline vars would otherwise win the cascade)
+        root.style.removeProperty('--coral');
+        root.style.removeProperty('--coral-deep');
+        root.style.removeProperty('--amber');
+        const next = root.dataset.theme === 'night' ? 'day' : 'night';
+        root.dataset.theme = next;
         try {
           localStorage.setItem('pix-theme', next);
         } catch (e) {}

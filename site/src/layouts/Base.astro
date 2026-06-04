@@ -1,5 +1,6 @@
 ---
 import '../styles/global.css';
+import { asset } from '../consts';
 
 interface Props {
   title?: string;
@@ -11,8 +12,13 @@ const {
   description = 'A terminal-native pixel-art office that visualizes your AI coding agents (Claude Code, Codex, and more) as little animated coworkers — day/night lighting, weather, themes, and pets included.',
 } = Astro.props;
 
-const base = import.meta.env.BASE_URL;
-const ogImage = `${base}demos/hero-poster.png`;
+// Use asset() (base-path-safe) for internal URLs; BASE_URL has no trailing
+// slash, so raw `${base}favicon.svg` would emit `/pixtuoidfavicon.svg` (404).
+const favicon = asset('favicon.svg');
+// Absolute URLs for crawlers (Astro.site is the deploy origin).
+const SITE = Astro.site ?? new URL('https://ivanwng97.github.io');
+const ogImage = new URL(asset('demos/hero-poster.png'), SITE).href;
+const canonical = new URL(asset(''), SITE).href;
 ---
 
 <!doctype html>
@@ -22,11 +28,13 @@ const ogImage = `${base}demos/hero-poster.png`;
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{title}</title>
     <meta name="description" content={description} />
-    <link rel="icon" href={`${base}favicon.svg`} type="image/svg+xml" />
+    <link rel="icon" href={favicon} type="image/svg+xml" />
+    <link rel="canonical" href={canonical} />
     <meta name="theme-color" content="#faf9f5" />
 
     <!-- Open Graph / Twitter -->
     <meta property="og:type" content="website" />
+    <meta property="og:url" content={canonical} />
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
     <meta property="og:image" content={ogImage} />
@@ -216,6 +224,8 @@ const ogImage = `${base}demos/hero-poster.png`;
           setTimeout(function () {
             root.removeAttribute('data-booting');
           }, 460);
+          boot.removeEventListener('click', skip);
+          document.removeEventListener('keydown', onKey);
           reveal();
         }
         function step() {
@@ -231,12 +241,12 @@ const ogImage = `${base}demos/hero-poster.png`;
           for (let j = 0; j < lines.length; j++) lines[j].classList.add('in');
           finish();
         }
+        function onKey() {
+          skip();
+        }
         setTimeout(step, 140);
         boot.addEventListener('click', skip);
-        document.addEventListener('keydown', function onKey() {
-          document.removeEventListener('keydown', onKey);
-          skip();
-        });
+        document.addEventListener('keydown', onKey);
       })();
     </script>
   </body>

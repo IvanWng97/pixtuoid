@@ -3,9 +3,9 @@ name: site
 on:
   push:
     branches: [main]
-    paths: ['site/**', '.github/workflows/site.yml']
+    paths: ['site/**', '.github/workflows/site.yml', '.github/workflows/pages.yml']
   pull_request:
-    paths: ['site/**', '.github/workflows/site.yml']
+    paths: ['site/**', '.github/workflows/site.yml', '.github/workflows/pages.yml']
 
 permissions:
   contents: read

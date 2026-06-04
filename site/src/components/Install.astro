@@ -74,12 +74,17 @@ const tabs = [
     });
     box.querySelectorAll('.install__copy').forEach(function (btn) {
       btn.addEventListener('click', function () {
-        if (navigator.clipboard) navigator.clipboard.writeText(btn.dataset.copy);
-        const prev = btn.textContent;
-        btn.textContent = 'Copied ✓';
-        setTimeout(function () {
-          btn.textContent = prev;
-        }, 1400);
+        if (!navigator.clipboard || !navigator.clipboard.writeText) return;
+        navigator.clipboard
+          .writeText(btn.dataset.copy)
+          .then(function () {
+            const prev = btn.textContent;
+            btn.textContent = 'Copied ✓';
+            setTimeout(function () {
+              btn.textContent = prev;
+            }, 1400);
+          })
+          .catch(function () {});
       });
     });
   })();
