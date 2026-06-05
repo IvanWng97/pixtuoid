@@ -1,5 +1,5 @@
 ---
-import { REPO, asset } from '../consts';
+import { REPO, SPONSOR, asset } from '../consts';
 // Absolute home so the section anchors work from any page (e.g. /config).
 const home = asset('');
 ---
@@ -38,6 +38,15 @@ const home = asset('');
         </div>
       </div>
       <a href={REPO} target="_blank" rel="noreferrer">GitHub ↗</a>
+      <a
+        class="nav__coffee"
+        href={SPONSOR}
+        target="_blank"
+        rel="noreferrer"
+        aria-label="Buy me a coffee (opens in a new tab)"
+      >
+        ☕ Coffee
+      </a>
     </nav>
     <button
       id="nav-burger"
@@ -169,9 +178,10 @@ const home = asset('');
     align-items: center;
     gap: 0.55rem;
     font-family: var(--font-display);
-    font-weight: 700;
-    font-size: 1.15rem;
-    letter-spacing: -0.02em;
+    font-weight: 400;
+    font-synthesis: none;
+    font-size: 1.3rem;
+    letter-spacing: 0;
     color: var(--fg);
     text-decoration: none;
   }
@@ -208,6 +218,16 @@ const home = asset('');
   }
   .nav__links a:hover {
     color: var(--fg);
+  }
+  /* support CTA — coral so it reads as an action, not just another nav link.
+     --coral-deep stays contrast-safe on both day (cream bar) and night (dark bar)
+     and is exempt from the gallery retint. */
+  .nav__links a.nav__coffee {
+    color: var(--coral-deep);
+    white-space: nowrap;
+  }
+  .nav__links a.nav__coffee:hover {
+    color: var(--coral);
   }
   .nav__burger {
     margin-left: auto;

@@ -15,8 +15,8 @@ pub(super) use lighting::{
     paint_neon_panel, paint_shadow, Ellipse,
 };
 pub(super) use time_of_day::{
-    daylight_floor_overlay, dim_floor_overlay, sun_on_wall, sunset_strength, time_of_day_look,
-    weather_light, weather_state, TimeOfDayLook, WallSide, Weather,
+    daylight_floor_overlay, dim_floor_overlay, set_weather_override, sun_on_wall, sunset_strength,
+    time_of_day_look, weather_light, weather_state, TimeOfDayLook, WallSide, Weather,
 };
 
 use std::time::SystemTime;
@@ -425,6 +425,110 @@ fn paint_window_light_spill(
     }
 }
 
+/// One weather's falling particle on the glass. Rain/Storm/Windy are `Streak`s;
+/// Snow is a `Flake`. Every per-weather magic number lives in [`StreakSpec`] so
+/// the four hand-written loops collapse to one without changing a pixel.
+#[derive(Clone, Copy)]
+enum Particle {
+    /// A vertical streak `len_base + seed % len_mod` px long, alpha fading from
+    /// `alpha_base` by `alpha_falloff` over its length, blended over the glass;
+    /// `drift` slants it +x by `dy/2` per row (the wind lean).
+    Streak {
+        len_base: u16,
+        len_mod: u64,
+        alpha_base: f32,
+        alpha_falloff: f32,
+        drift: bool,
+    },
+    /// A single opaque pixel with a 0/1 horizontal wiggle (snow — no falloff,
+    /// no length, written flat rather than blended).
+    Flake,
+}
+
+/// Per-weather constants for the shared particle loop. Snow diverges the most
+/// (`seed_mult` 11 not 7, a different `sx_mult`, `Flake` shape) — all captured
+/// here so [`paint_streaks`] stays a single behavior-exact path.
+struct StreakSpec {
+    count: u64,
+    seed_mult: u64,
+    sx_mult: u64,
+    speed_base: u64,
+    speed_span: u64,
+    color: Rgb,
+    particle: Particle,
+}
+
+/// The drawable glass interior of a window — the frame inset by 1px on each side
+/// (`x0 = x+1`, `w = window_w - 2`). Bundled so [`paint_streaks`] takes one rect
+/// instead of four loose coords.
+#[derive(Clone, Copy)]
+struct GlassRect {
+    x0: u16,
+    y0: u16,
+    w: u16,
+    h: u16,
+}
+
+/// Paint one weather's falling particles onto the glass interior. The seed→
+/// position math is shared across weathers; `spec` supplies the per-weather
+/// constants. This replaced four structurally-identical loops
+/// (Rain/Storm/Windy/Snow); the refactor is pixel-verified (#92): byte-identical
+/// `snapshot --weather <w>` before/after.
+fn paint_streaks(
+    buf: &mut RgbBuffer,
+    spec: &StreakSpec,
+    window_idx: u16,
+    glass: GlassRect,
+    elapsed_ms: u64,
+) {
+    let GlassRect {
+        x0: glass_x0,
+        y0: glass_y0,
+        w: gw,
+        h: gh,
+    } = glass;
+    for i in 0..spec.count {
+        let seed = window_idx as u64 * spec.seed_mult + i;
+        let sx = (seed.wrapping_mul(spec.sx_mult) % gw as u64) as u16;
+        let speed = spec.speed_base + (seed.wrapping_mul(0x4f6c_dd1d) % spec.speed_span);
+        let offset = seed.wrapping_mul(0x85eb_ca6b) % (gh as u64).max(1);
+        let phase = (elapsed_ms / speed + offset) % gh as u64;
+        match spec.particle {
+            Particle::Streak {
+                len_base,
+                len_mod,
+                alpha_base,
+                alpha_falloff,
+                drift,
+            } => {
+                let len = len_base + (seed % len_mod) as u16;
+                for dy in 0..len {
+                    let dx = if drift { dy / 2 } else { 0 };
+                    let px = glass_x0 + (sx + dx) % gw;
+                    let py = glass_y0 + ((phase as u16 + dy) % gh);
+                    if px < buf.width && py < buf.height {
+                        let alpha = alpha_base - (dy as f32 / len as f32) * alpha_falloff;
+                        let cur = buf.get(px, py);
+                        buf.put(px, py, blend_rgb(cur, spec.color, alpha));
+                    }
+                }
+            }
+            Particle::Flake => {
+                let wiggle = if (elapsed_ms / 400 + seed.wrapping_mul(0x9e37)) % 2 == 0 {
+                    0
+                } else {
+                    1
+                };
+                let px = glass_x0 + (sx + wiggle) % gw;
+                let py = glass_y0 + phase as u16;
+                if px < buf.width && py < buf.height {
+                    buf.put(px, py, spec.color);
+                }
+            }
+        }
+    }
+}
+
 /// Floor-to-ceiling window with frame, mullion, and a procedural city view
 /// inside the glass. Sky gradient at top blends with time-of-day glass
 /// colors; the lower portion shows building silhouettes whose "windows"
@@ -548,77 +652,69 @@ fn paint_floor_to_ceiling_window(
     let elapsed_ms = epoch_ms(now);
 
     match weather {
-        Weather::Rain => {
-            let glass_x0 = x + 1;
-            let glass_y0 = y + 1;
-            let gw = w.saturating_sub(2);
-            let gh = h.saturating_sub(2);
-            for streak in 0..4u64 {
-                let seed = window_idx as u64 * 7 + streak;
-                let sx = (seed.wrapping_mul(0x9e37_79b9) % gw as u64) as u16;
-                let speed = 60 + (seed.wrapping_mul(0x4f6c_dd1d) % 50);
-                let offset = seed.wrapping_mul(0x85eb_ca6b) % (gh as u64).max(1);
-                let phase = (elapsed_ms / speed + offset) % gh as u64;
-                let len = 3 + (seed % 2) as u16;
-                let px = glass_x0 + sx;
-                for dy in 0..len {
-                    let py = glass_y0 + ((phase as u16 + dy) % gh);
-                    if px < buf.width && py < buf.height {
-                        let alpha = 0.35 - (dy as f32 / len as f32) * 0.15;
-                        let cur = buf.get(px, py);
-                        buf.put(
-                            px,
-                            py,
-                            blend_rgb(
-                                cur,
-                                Rgb {
-                                    r: 210,
-                                    g: 220,
-                                    b: 240,
-                                },
-                                alpha,
-                            ),
-                        );
-                    }
-                }
-            }
-        }
+        Weather::Rain => paint_streaks(
+            buf,
+            &StreakSpec {
+                count: 4,
+                seed_mult: 7,
+                sx_mult: 0x9e37_79b9,
+                speed_base: 60,
+                speed_span: 50,
+                color: Rgb {
+                    r: 210,
+                    g: 220,
+                    b: 240,
+                },
+                particle: Particle::Streak {
+                    len_base: 3,
+                    len_mod: 2,
+                    alpha_base: 0.35,
+                    alpha_falloff: 0.15,
+                    drift: false,
+                },
+            },
+            window_idx,
+            GlassRect {
+                x0: x + 1,
+                y0: y + 1,
+                w: w.saturating_sub(2),
+                h: h.saturating_sub(2),
+            },
+            elapsed_ms,
+        ),
         Weather::Storm => {
-            let glass_x0 = x + 1;
-            let glass_y0 = y + 1;
-            let gw = w.saturating_sub(2);
-            let gh = h.saturating_sub(2);
-            for streak in 0..6u64 {
-                let seed = window_idx as u64 * 7 + streak;
-                let sx = (seed.wrapping_mul(0x9e37_79b9) % gw as u64) as u16;
-                let speed = 40 + (seed.wrapping_mul(0x4f6c_dd1d) % 40);
-                let offset = seed.wrapping_mul(0x85eb_ca6b) % (gh as u64).max(1);
-                let phase = (elapsed_ms / speed + offset) % gh as u64;
-                let len = 4 + (seed % 3) as u16;
-                let px = glass_x0 + sx;
-                for dy in 0..len {
-                    let py = glass_y0 + ((phase as u16 + dy) % gh);
-                    if px < buf.width && py < buf.height {
-                        let alpha = 0.6 - (dy as f32 / len as f32) * 0.3;
-                        let cur = buf.get(px, py);
-                        // Storm streak keeps its distinct cool-blue target (b:245)
-                        // vs Rain's b:240; one buf.get, same idiom as the Rain arm.
-                        buf.put(
-                            px,
-                            py,
-                            blend_rgb(
-                                cur,
-                                Rgb {
-                                    r: 210,
-                                    g: 220,
-                                    b: 245,
-                                },
-                                alpha,
-                            ),
-                        );
-                    }
-                }
-            }
+            // Storm keeps Rain's idiom but a distinct cool-blue target (b:245 vs
+            // 240), longer/darker streaks, and 6 of them — then the bolt.
+            paint_streaks(
+                buf,
+                &StreakSpec {
+                    count: 6,
+                    seed_mult: 7,
+                    sx_mult: 0x9e37_79b9,
+                    speed_base: 40,
+                    speed_span: 40,
+                    color: Rgb {
+                        r: 210,
+                        g: 220,
+                        b: 245,
+                    },
+                    particle: Particle::Streak {
+                        len_base: 4,
+                        len_mod: 3,
+                        alpha_base: 0.6,
+                        alpha_falloff: 0.3,
+                        drift: false,
+                    },
+                },
+                window_idx,
+                GlassRect {
+                    x0: x + 1,
+                    y0: y + 1,
+                    w: w.saturating_sub(2),
+                    h: h.saturating_sub(2),
+                },
+                elapsed_ms,
+            );
             // The bright on-glass bolt — the strike's source. Uses the shared,
             // jittered flash level so it fires in lockstep with the room-wide
             // bounce (paint_lightning_flash).
@@ -649,37 +745,32 @@ fn paint_floor_to_ceiling_window(
                 }
             }
         }
-        Weather::Snow => {
-            let glass_x0 = x + 1;
-            let glass_y0 = y + 1;
-            let gw = w.saturating_sub(2);
-            let gh = h.saturating_sub(2);
-            for flake in 0..3u64 {
-                let seed = window_idx as u64 * 11 + flake;
-                let sx = (seed.wrapping_mul(0x517c_c1b7) % gw as u64) as u16;
-                let speed = 150 + (seed.wrapping_mul(0x4f6c_dd1d) % 100);
-                let offset = seed.wrapping_mul(0x85eb_ca6b) % (gh as u64).max(1);
-                let phase = (elapsed_ms / speed + offset) % gh as u64;
-                let wiggle = if (elapsed_ms / 400 + seed.wrapping_mul(0x9e37)) % 2 == 0 {
-                    0
-                } else {
-                    1
-                };
-                let px = glass_x0 + (sx + wiggle) % gw;
-                let py = glass_y0 + phase as u16;
-                if px < buf.width && py < buf.height {
-                    buf.put(
-                        px,
-                        py,
-                        Rgb {
-                            r: 240,
-                            g: 240,
-                            b: 250,
-                        },
-                    );
-                }
-            }
-        }
+        Weather::Snow => paint_streaks(
+            buf,
+            &StreakSpec {
+                // Snow diverges: seed_mult 11 (not 7), a different sx_mult, and a
+                // flat single-pixel flake with a 0/1 wiggle (no falloff/length).
+                count: 3,
+                seed_mult: 11,
+                sx_mult: 0x517c_c1b7,
+                speed_base: 150,
+                speed_span: 100,
+                color: Rgb {
+                    r: 240,
+                    g: 240,
+                    b: 250,
+                },
+                particle: Particle::Flake,
+            },
+            window_idx,
+            GlassRect {
+                x0: x + 1,
+                y0: y + 1,
+                w: w.saturating_sub(2),
+                h: h.saturating_sub(2),
+            },
+            elapsed_ms,
+        ),
         Weather::Fog => {
             for dy in 1..h.saturating_sub(1) {
                 for dx in 1..w.saturating_sub(1) {
@@ -728,42 +819,37 @@ fn paint_floor_to_ceiling_window(
                 }
             }
         }
-        Weather::Windy => {
-            let glass_x0 = x + 1;
-            let glass_y0 = y + 1;
-            let gw = w.saturating_sub(2);
-            let gh = h.saturating_sub(2);
-            for streak in 0..5u64 {
-                let seed = window_idx as u64 * 7 + streak;
-                let sx = (seed.wrapping_mul(0x9e37_79b9) % gw as u64) as u16;
-                let speed = 50 + (seed.wrapping_mul(0x4f6c_dd1d) % 40);
-                let offset = seed.wrapping_mul(0x85eb_ca6b) % (gh as u64).max(1);
-                let phase = (elapsed_ms / speed + offset) % gh as u64;
-                let len = 3 + (seed % 2) as u16;
-                for dy in 0..len {
-                    let drift = dy / 2;
-                    let px = glass_x0 + (sx + drift) % gw;
-                    let py = glass_y0 + ((phase as u16 + dy) % gh);
-                    if px < buf.width && py < buf.height {
-                        let alpha = 0.35 - (dy as f32 / len as f32) * 0.15;
-                        let cur = buf.get(px, py);
-                        buf.put(
-                            px,
-                            py,
-                            blend_rgb(
-                                cur,
-                                Rgb {
-                                    r: 210,
-                                    g: 220,
-                                    b: 240,
-                                },
-                                alpha,
-                            ),
-                        );
-                    }
-                }
-            }
-        }
+        Weather::Windy => paint_streaks(
+            buf,
+            &StreakSpec {
+                // Rain's streak with a wind lean (drift) and one more streak.
+                count: 5,
+                seed_mult: 7,
+                sx_mult: 0x9e37_79b9,
+                speed_base: 50,
+                speed_span: 40,
+                color: Rgb {
+                    r: 210,
+                    g: 220,
+                    b: 240,
+                },
+                particle: Particle::Streak {
+                    len_base: 3,
+                    len_mod: 2,
+                    alpha_base: 0.35,
+                    alpha_falloff: 0.15,
+                    drift: true,
+                },
+            },
+            window_idx,
+            GlassRect {
+                x0: x + 1,
+                y0: y + 1,
+                w: w.saturating_sub(2),
+                h: h.saturating_sub(2),
+            },
+            elapsed_ms,
+        ),
         Weather::Smog => {
             // Warm-yellow desaturated haze across the full glass. Heavier
             // than Fog and noticeably warmer — pulls the city behind a

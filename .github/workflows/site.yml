@@ -5,11 +5,14 @@ on:
   # ../docs/{CONFIGURATION,ARCHITECTURE,CONTRIBUTING}.md (the /config, /architecture,
   # /contributing pages — ARCHITECTURE's mermaid block is rendered to an inline SVG at
   # build) — so a change to any of them must run this CI too, else a break slips through.
+  # README.md is here too: its Features table is generated from site/src/features.json
+  # and its install commands are checked against site/src/install.json (readme:check
+  # fails on drift), so a direct README edit must run this guard.
   push:
     branches: [main]
-    paths: ['site/**', 'Cargo.toml', 'docs/CONFIGURATION.md', 'docs/ARCHITECTURE.md', 'docs/CONTRIBUTING.md', '.github/workflows/site.yml', '.github/workflows/pages.yml']
+    paths: ['site/**', 'Cargo.toml', 'docs/CONFIGURATION.md', 'docs/ARCHITECTURE.md', 'docs/CONTRIBUTING.md', 'README.md', '.github/workflows/site.yml', '.github/workflows/pages.yml']
   pull_request:
-    paths: ['site/**', 'Cargo.toml', 'docs/CONFIGURATION.md', 'docs/ARCHITECTURE.md', 'docs/CONTRIBUTING.md', '.github/workflows/site.yml', '.github/workflows/pages.yml']
+    paths: ['site/**', 'Cargo.toml', 'docs/CONFIGURATION.md', 'docs/ARCHITECTURE.md', 'docs/CONTRIBUTING.md', 'README.md', '.github/workflows/site.yml', '.github/workflows/pages.yml']
 
 permissions:
   contents: read
@@ -46,4 +49,8 @@ jobs:
       - run: npm run format:check
       - run: npm run lint
       - run: npm run check
+      # README is kept in sync with the site's data sources — the Features table is
+      # generated from src/features.json and the install commands are checked against
+      # src/install.json. Fail if either drifted (`just gen-readme` regenerates).
+      - run: npm run readme:check
       - run: npm run build

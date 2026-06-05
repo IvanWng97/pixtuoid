@@ -303,3 +303,8 @@ site-fmt:
 [doc('Regenerate the site demo art from the pixtuoid binary')]
 site-demos:
     ./site/scripts/gen-demos.sh
+
+[group('site')]
+[doc('Sync the README from site data: regen Features table (features.json) + check install commands (install.json)')]
+gen-readme:
+    node site/scripts/gen-readme.mjs

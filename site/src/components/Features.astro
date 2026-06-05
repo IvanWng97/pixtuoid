@@ -1,40 +1,30 @@
 ---
-import { asset, THEMES } from '../consts';
+import { asset } from '../consts';
+import features from '../features.json';
 
-const cells = [
-  {
-    img: 'day.png',
-    pos: 'center',
-    title: 'A desk for every session',
-    body: 'Each running Claude Code or Codex session claims a desk — arriving, working, taking breaks, and leaving when the session ends.',
-    wide: true,
-  },
-  {
-    img: 'night.png',
-    pos: '50% 16%',
-    title: 'Day, night & live weather',
-    body: 'Lighting tracks your real clock; rain, storms, fog and moonlight roll past the windows.',
-  },
-  {
-    img: 'theme_cyberpunk.png',
-    pos: 'center',
-    title: `${THEMES.length} themes`,
-    body: 'Reskin the whole office with one keystroke.',
-    href: '#themes',
-  },
-  {
-    img: 'theme_dracula.png',
-    pos: '68% 40%',
-    title: 'Emergent office life',
-    body: 'Agents pace the corridor, fetch coffee, and gather in the meeting room to chitchat.',
-  },
-  {
-    img: 'theme_tokyo-night.png',
-    pos: 'center',
-    title: 'Multi-floor, multi-agent',
-    body: 'Subagents, multiple CLIs and extra floors appear as your swarm grows.',
-  },
-];
+// Single source of truth: site/src/features.json — the SAME list the README
+// Features table is generated from (site/scripts/gen-readme.mjs), so the
+// two can't drift. The bento shows the items that carry `card` metadata (the
+// visual highlights); the README lists every feature.
+const cells = features.flatMap((f) =>
+  f.card
+    ? [
+        {
+          title: f.name,
+          body: f.card.blurb ?? f.desc,
+          img: f.card.img,
+          pos: f.card.pos ?? 'center',
+          wide: f.card.wide ?? false,
+          href: f.card.href,
+        },
+      ]
+    : []
+);
+// A featured card must carry an image — fail the build loudly rather than emit a
+// broken `<img src="demos/undefined">` (astro check won't catch the string concat).
+for (const c of cells) {
+  if (!c.img) throw new Error(`features.json: featured card "${c.title}" is missing \`img\``);
+}
 ---
 
 <section id="features" class="features">

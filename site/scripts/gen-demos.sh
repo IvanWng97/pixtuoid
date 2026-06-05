@@ -41,6 +41,24 @@ done <<<"$ids"
 "$bin" --cols "$cols" --rows "$rows" --now-hour 13 "$out/day.png"
 "$bin" --cols "$cols" --rows "$rows" --now-hour 22 "$out/night.png"
 
+# Weather gallery — one shot per weather at a fixed afternoon hour, so the only
+# thing that changes between chips is the sky/window (WeatherGallery.astro swaps
+# between these). --weather forces the variant, bypassing the 10-min clock cycle.
+# Driven by weather.json (the same manifest the gallery + astro guard read), so a
+# new weather renders here automatically — no hardcoded list to drift.
+weather_hour=15
+weather_manifest="$site/src/weather.json"
+wids="$(node -e "require('$weather_manifest').forEach(function (w) { console.log(w.id); })")" ||
+  {
+    echo "failed to read weather ids from $weather_manifest" >&2
+    exit 1
+  }
+while IFS= read -r w; do
+  [ -n "$w" ] || continue
+  echo "render weather: $w"
+  "$bin" --cols "$cols" --rows "$rows" --weather "$w" --now-hour "$weather_hour" "$out/weather_$w.png"
+done <<<"$wids"
+
 # Animated hero → mp4 + poster: a 20s loop of the office mid-work — multiple
 # agents typing and wandering (to the pantry, the meeting room, the couch).
 # Re-encode from frames so it's a true 20s/12fps loop (the GIF's own frame

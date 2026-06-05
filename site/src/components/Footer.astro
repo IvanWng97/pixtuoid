@@ -1,5 +1,5 @@
 ---
-import { REPO, CRATES, asset } from '../consts';
+import { REPO, CRATES, SPONSOR, asset } from '../consts';
 ---
 
 <footer class="footer">
@@ -23,6 +23,7 @@ import { REPO, CRATES, asset } from '../consts';
       <a href={CRATES} target="_blank" rel="noreferrer">crates.io</a>
       <a href={`${REPO}/releases`} target="_blank" rel="noreferrer">Releases</a>
       <a href="#install">Install</a>
+      <a class="footer__coffee" href={SPONSOR} target="_blank" rel="noreferrer">☕ Coffee</a>
     </nav>
   </div>
   <div class="container footer__legal">
@@ -50,8 +51,9 @@ import { REPO, CRATES, asset } from '../consts';
     align-items: center;
     gap: 0.5rem;
     font-family: var(--font-display);
-    font-weight: 700;
-    font-size: 1.1rem;
+    font-weight: 400;
+    font-synthesis: none;
+    font-size: 1.25rem;
     color: var(--fg);
     text-decoration: none;
   }

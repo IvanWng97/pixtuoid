@@ -1,0 +1,89 @@
+[
+  {
+    "icon": "🏢",
+    "name": "Multi-agent office",
+    "desc": "Each agent session gets a desk; overflow agents auto-fill new floors",
+    "card": {
+      "img": "day.png",
+      "pos": "center",
+      "wide": true,
+      "blurb": "Each running Claude Code or Codex session claims a desk — arriving, working, taking breaks, and leaving when the session ends."
+    }
+  },
+  {
+    "icon": "🛗",
+    "name": "Multi-floor office",
+    "desc": "PageUp/PageDown/↑↓/jk to navigate floors with slide transition",
+    "card": {
+      "img": "theme_tokyo-night.png",
+      "pos": "center",
+      "blurb": "Subagents, multiple CLIs and extra floors appear as your swarm grows."
+    }
+  },
+  {
+    "icon": "🎭",
+    "name": "Animated characters",
+    "desc": "Typing, waiting (`?`), sleeping (z's), walking with A\\*-routed pathfinding"
+  },
+  {
+    "icon": "💡",
+    "name": "Per-tool monitor glow",
+    "desc": "Edit = blue, Bash = orange, Read = cyan — scannable at a glance",
+    "card": {
+      "img": "theme_cyberpunk.png",
+      "pos": "center",
+      "blurb": "Edit glows blue, Bash orange, Read cyan — you can read the room at a glance."
+    }
+  },
+  {
+    "icon": "🎨",
+    "name": "Per-agent identity",
+    "desc": "Deterministic shirt/hair/skin palette from session hash, 16 curated outfits"
+  },
+  {
+    "icon": "🌧️",
+    "name": "Weather effects",
+    "desc": "Rain, storm, snow, fog, overcast, windy — cycles every 10 min + sunset golden hour",
+    "card": {
+      "img": "night.png",
+      "pos": "50% 16%",
+      "blurb": "Lighting tracks your real clock; rain, storms, fog and moonlight roll past the windows.",
+      "href": "#weather"
+    }
+  },
+  {
+    "icon": "📊",
+    "name": "Tooltip stats",
+    "desc": "Hover any agent to see session duration, tool call count, and active time %"
+  },
+  {
+    "icon": "🏷️",
+    "name": "Furniture tooltips",
+    "desc": "Hover any item — desks, sofas, plants, vending machine, printer — to see its name"
+  },
+  {
+    "icon": "🐾",
+    "name": "Office pets",
+    "desc": "A cat or dog (one per floor) roams desks, pantry, sofas; sleeps near idle agents. Click to pet — pixel-art hearts float up",
+    "card": {
+      "img": "theme_dracula.png",
+      "pos": "68% 40%",
+      "blurb": "A cat or dog roams the floor and naps near idle agents — click to pet for a float of pixel-art hearts."
+    }
+  },
+  {
+    "icon": "☕",
+    "name": "Coffee run",
+    "desc": "Idle agents visit the pantry, carry a cup back to their desk. Cup stays while you work; taken on exit"
+  },
+  {
+    "icon": "💬",
+    "name": "Pantry chitchat",
+    "desc": "2+ idle agents at the same waypoint trigger speech bubbles with dev-humor snippets"
+  },
+  {
+    "icon": "🛡️",
+    "name": "Hook-safe",
+    "desc": "The shim always exits 0 — a stuck visualizer can never block your agent"
+  }
+]

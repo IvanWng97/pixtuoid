@@ -2,7 +2,7 @@
    pixtuoid — "Cozy Terminal" skin
    Claude warmth (paper #faf9f5 · ink #141413 · coral #d97757) kept as the base,
    pushed toward terminal/pixel character:
-   Display: Pixelify Sans  ·  UI/code: JetBrains Mono  ·  Body: Lora
+   Display: Jersey 10  ·  UI/code: JetBrains Mono  ·  Body: Lora
    coral→amber accent gradient · blinking cursor · ASCII dividers · CRT scanlines
    ============================================================ */
 
@@ -43,7 +43,7 @@
   --glow: color-mix(in srgb, var(--coral) 15%, transparent);
 
   /* Type */
-  --font-display: 'Pixelify Sans', 'Segoe UI', system-ui, sans-serif;
+  --font-display: 'Jersey 10', 'Segoe UI', system-ui, sans-serif;
   --font-body: 'Lora', Georgia, 'Times New Roman', serif;
   --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
 
@@ -161,7 +161,10 @@ h1,
 h2,
 h3 {
   font-family: var(--font-display);
-  font-weight: 700;
+  /* Jersey 10 ships a single weight — request 400 and forbid synthesis so the
+     browser never fake-bolds it (faux-bold smears a pixel font's crisp edges). */
+  font-weight: 400;
+  font-synthesis: none;
   line-height: 1.04;
   letter-spacing: 0;
   color: var(--fg);
@@ -174,7 +177,10 @@ h2 {
 }
 h3 {
   font-size: clamp(1.15rem, 1.04rem + 0.5vw, 1.4rem);
-  font-weight: 600;
+  /* stays 400: Jersey 10 is single-weight, and a 600 here would only be a dead
+     declaration (the h1,h2,h3 font-synthesis:none guard already blocks faux-bold)
+     until someone relaxes that guard — then h3 would smear. Keep them in sync. */
+  font-weight: 400;
 }
 /* terminal-prompt eyebrow */
 .eyebrow {
@@ -660,7 +666,8 @@ body.has-pointer .tilt {
 .prose th {
   background: var(--surface-2);
   font-family: var(--font-display);
-  font-weight: 600;
+  font-weight: 400;
+  font-synthesis: none;
 }
 /* architecture diagram (```mermaid → build-time inline SVG): frame it in a fixed
    light "terminal screen" so the day-palette SVG stays legible on night/dracula,
@@ -676,6 +683,34 @@ body.has-pointer .tilt {
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
   box-shadow: var(--shadow);
+}
+/* mermaid renders labels as HTML inside <foreignObject> (htmlLabels), so the
+   page's `.prose p{color:var(--fg)}` / `.prose a{color:coral}` / `.prose code
+   {background:surface-2}` cascade leaks in and makes the labels invisible on the
+   light frame in night/dracula. The frame is always light, so pin every label to
+   dark ink on a light backing — readable on all themes. (Scope fill: to text
+   elements only; arrowheads/edges are <path> and keep mermaid's stroke colors.) */
+.prose svg .nodeLabel,
+.prose svg .nodeLabel p,
+.prose svg .edgeLabel,
+.prose svg .edgeLabel p,
+.prose svg .cluster-label,
+.prose svg .cluster-label p,
+.prose svg span,
+.prose svg p,
+.prose svg text,
+.prose svg tspan {
+  color: #241c14 !important;
+  fill: #241c14 !important;
+}
+.prose svg .edgeLabel,
+.prose svg .edgeLabel p,
+.prose svg .edgeLabel rect,
+.prose svg .labelBkg,
+.prose svg foreignObject code {
+  background: #fbfaf6 !important;
+  fill: #fbfaf6 !important;
+  border-color: transparent !important;
 }
 /* mermaid bakes edge @keyframes into the SVG — keep them inert for reduced motion */
 @media (prefers-reduced-motion: reduce) {

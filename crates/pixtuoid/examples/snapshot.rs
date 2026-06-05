@@ -115,6 +115,13 @@ struct SnapshotArgs {
     #[arg(long, default_value_t = 1)]
     now_day: u32,
 
+    /// Force a specific weather, bypassing the clock-based 10-minute cycle.
+    /// One of: clear | rain | storm | snow | fog | overcast | windy | smog.
+    /// Drives the weather gallery (scripts/gen-demos.sh); pair with --now-hour
+    /// to pick a flattering time of day per weather.
+    #[arg(long)]
+    weather: Option<String>,
+
     /// Force the `?` keyboard help overlay open (for screenshots).
     #[arg(long)]
     help_open: bool,
@@ -162,6 +169,17 @@ fn default_projects_root() -> String {
 
 fn main() -> Result<()> {
     let args = SnapshotArgs::parse();
+
+    // Force-weather override (screenshot/gallery only) — set once; the
+    // thread-local it sets is honored by every weather derivation on this
+    // thread, including each frame of the GIF path.
+    if let Err(valid) = pixtuoid::tui::pixel_painter::force_weather(args.weather.as_deref()) {
+        anyhow::bail!(
+            "unknown --weather {:?}; valid: {}",
+            args.weather.unwrap_or_default(),
+            valid.join(" | ")
+        );
+    }
 
     let now = match args.now_hour {
         Some(h) => {

@@ -1,6 +1,7 @@
 //! Time-of-day derived state — glass colors, sunlight spill, weather,
 //! sunset strength, and nighttime floor dim overlay.
 
+use std::cell::Cell;
 use std::time::SystemTime;
 
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
@@ -20,7 +21,59 @@ pub(in crate::tui::pixel_painter) enum Weather {
     Smog,
 }
 
+impl Weather {
+    /// All variants, in canonical order — single source for `--weather` parsing,
+    /// the valid-names list, and the gallery generator.
+    pub(in crate::tui::pixel_painter) const ALL: [Weather; 8] = [
+        Weather::Clear,
+        Weather::Rain,
+        Weather::Storm,
+        Weather::Snow,
+        Weather::Fog,
+        Weather::Overcast,
+        Weather::Windy,
+        Weather::Smog,
+    ];
+
+    /// Lowercase CLI name (`Weather::Rain` → `"rain"`).
+    pub(in crate::tui::pixel_painter) const fn name(self) -> &'static str {
+        match self {
+            Weather::Clear => "clear",
+            Weather::Rain => "rain",
+            Weather::Storm => "storm",
+            Weather::Snow => "snow",
+            Weather::Fog => "fog",
+            Weather::Overcast => "overcast",
+            Weather::Windy => "windy",
+            Weather::Smog => "smog",
+        }
+    }
+
+    /// Parse a CLI name (case-insensitive) back to a variant.
+    pub(in crate::tui::pixel_painter) fn from_name(s: &str) -> Option<Weather> {
+        let s = s.trim().to_ascii_lowercase();
+        Weather::ALL.into_iter().find(|w| w.name() == s)
+    }
+}
+
+thread_local! {
+    /// Screenshot/test affordance: when `Some`, every `weather_state` call on this
+    /// thread returns it, bypassing the time-based selection. Production never sets
+    /// it (only `snapshot --weather` via `force_weather`), so live rendering is
+    /// byte-identical. `weather_state` is the single chokepoint every weather
+    /// derivation (time-of-day look, floor tint, ambient beam, lightning) funnels
+    /// through, so intercepting here covers them all without threading a param.
+    static WEATHER_OVERRIDE: Cell<Option<Weather>> = const { Cell::new(None) };
+}
+
+pub(in crate::tui::pixel_painter) fn set_weather_override(w: Option<Weather>) {
+    WEATHER_OVERRIDE.with(|c| c.set(w));
+}
+
 pub(in crate::tui::pixel_painter) fn weather_state(now: SystemTime) -> Weather {
+    if let Some(forced) = WEATHER_OVERRIDE.with(Cell::get) {
+        return forced;
+    }
     let secs = now
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -613,5 +666,53 @@ mod tests {
                 "weather_state never emitted {w:?} in a week of slots"
             );
         }
+    }
+
+    #[test]
+    fn weather_name_round_trips_for_every_variant() {
+        for w in Weather::ALL {
+            assert_eq!(Weather::from_name(w.name()), Some(w), "{w:?} round-trips");
+        }
+        // case-insensitive + trimmed
+        assert_eq!(Weather::from_name("  SNOW "), Some(Weather::Snow));
+        assert_eq!(Weather::from_name("drizzle"), None);
+    }
+
+    #[test]
+    fn weather_override_forces_a_fixed_variant_then_restores() {
+        use std::time::Duration;
+        // Clear the thread-local even if an assert below panics — `cargo test` shares
+        // threads across tests, so a leaked override would corrupt a sibling weather
+        // test (nextest is process-per-test and immune, but the justfile falls back to
+        // `cargo test` when nextest isn't installed).
+        struct Reset;
+        impl Drop for Reset {
+            fn drop(&mut self) {
+                set_weather_override(None);
+            }
+        }
+        let _reset = Reset;
+        let t = std::time::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+        let natural = weather_state(t);
+        // Force a variant that differs from the natural pick so the assert is real.
+        let forced = Weather::ALL
+            .into_iter()
+            .find(|&w| w != natural)
+            .expect("8 variants");
+        set_weather_override(Some(forced));
+        // The override ignores the timestamp entirely.
+        assert_eq!(weather_state(t), forced);
+        assert_eq!(
+            weather_state(t + Duration::from_secs(987_654)),
+            forced,
+            "override is time-independent"
+        );
+        // Restore so this thread-local can't bleed into sibling tests.
+        set_weather_override(None);
+        assert_eq!(
+            weather_state(t),
+            natural,
+            "None restores time-based selection"
+        );
     }
 }

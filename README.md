@@ -27,13 +27,10 @@
 </p>
 
 <p align="center">
-  <strong><a href="https://ivanwng97.github.io/pixtuoid/">🖥&#xFE0E; Live demo &amp; docs ↗</a></strong>
-  · <a href="https://ivanwng97.github.io/pixtuoid/architecture">Architecture</a>
-  · <a href="https://ivanwng97.github.io/pixtuoid/config">Configuration</a>
-</p>
-
-<p align="center">
-  <a href="#quick-start">Quick Start</a> · <a href="#features">Features</a> · <a href="#supported-tools">Supported Tools</a> · <a href="#themes--configuration">Themes & Configuration</a> · <a href="#how-it-works">How It Works</a>
+  <a href="https://ivanwng97.github.io/pixtuoid/"><strong>🖥&#xFE0E; Live demo ↗</strong></a>
+  &nbsp;·&nbsp; <a href="https://ivanwng97.github.io/pixtuoid/architecture">Architecture</a>
+  &nbsp;·&nbsp; <a href="https://ivanwng97.github.io/pixtuoid/config">Configuration</a>
+  &nbsp;·&nbsp; <a href="https://ivanwng97.github.io/pixtuoid/contributing">Contributing</a>
 </p>
 
 ---
@@ -93,6 +90,7 @@ just build --release
 
 ## Features
 
+<!-- features:start · generated from site/src/features.json by `just gen-readme` — edit the JSON, not this table -->
 | | Feature | Description |
 |---|---|---|
 | 🏢 | **Multi-agent office** | Each agent session gets a desk; overflow agents auto-fill new floors |
@@ -107,6 +105,7 @@ just build --release
 | ☕ | **Coffee run** | Idle agents visit the pantry, carry a cup back to their desk. Cup stays while you work; taken on exit |
 | 💬 | **Pantry chitchat** | 2+ idle agents at the same waypoint trigger speech bubbles with dev-humor snippets |
 | 🛡️ | **Hook-safe** | The shim always exits 0 — a stuck visualizer can never block your agent |
+<!-- features:end -->
 
 ## Supported Tools
 

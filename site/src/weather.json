@@ -1,0 +1,10 @@
+[
+  { "id": "clear", "name": "Clear", "blurb": "blue sky, the city crisp behind the glass" },
+  { "id": "rain", "name": "Rain", "blurb": "streaks run down the windows" },
+  { "id": "storm", "name": "Storm", "blurb": "dark sky, lightning flickers off the walls" },
+  { "id": "snow", "name": "Snow", "blurb": "flakes drift past a softly glowing sky" },
+  { "id": "fog", "name": "Fog", "blurb": "a luminous white-out swallows the skyline" },
+  { "id": "overcast", "name": "Overcast", "blurb": "flat grey daylight" },
+  { "id": "windy", "name": "Windy", "blurb": "rain slants across the gusts" },
+  { "id": "smog", "name": "Smog", "blurb": "a warm, sodium-lit haze" }
+]

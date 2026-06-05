@@ -33,6 +33,19 @@ if (missingDemos.length) {
   );
 }
 
+// Same guard for the weather gallery: every weather.json id needs a weather_<id>.png.
+const weatherIds = /** @type {{ id: string }[]} */ (
+  JSON.parse(readFileSync(fileURLToPath(new URL('./src/weather.json', import.meta.url)), 'utf8'))
+).map((w) => w.id);
+const missingWeather = weatherIds.filter(
+  (id) => !existsSync(fileURLToPath(new URL(`./public/demos/weather_${id}.png`, import.meta.url)))
+);
+if (missingWeather.length) {
+  throw new Error(
+    `astro.config: weather.json lists weather(s) with no public/demos/weather_<id>.png — run scripts/gen-demos.sh: ${missingWeather.join(', ')}`
+  );
+}
+
 // Rewrite repo-relative links in rendered markdown (e.g. ../crates/...) to GitHub
 // so docs/CONFIGURATION.md's links resolve on the deployed site.
 function rehypeRepoLinks() {

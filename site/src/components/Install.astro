@@ -1,12 +1,10 @@
 ---
 import { Code } from 'astro:components';
-import { REPO, CRATES, TAP } from '../consts';
-
-const tabs = [
-  { id: 'brew', label: 'Homebrew', cmds: [`brew install ${TAP}/pixtuoid`] },
-  { id: 'cargo', label: 'Cargo', cmds: ['cargo install pixtuoid'] },
-  { id: 'deb', label: 'Debian', cmds: ['# from the Releases page', 'sudo dpkg -i pixtuoid_*.deb'] },
-];
+import { REPO, CRATES } from '../consts';
+// Single source of truth for install commands → site/src/install.json. The README
+// is checked against the same file (readme:check), so the site and the README's
+// install commands can't drift (this is what let the Cargo command go stale).
+import tabs from '../install.json';
 ---
 
 <section id="install" class="install">

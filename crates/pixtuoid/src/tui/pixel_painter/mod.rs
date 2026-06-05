@@ -81,6 +81,34 @@ use glass::{paint_glass_wall_h, paint_glass_wall_v, stitch_vertical_wall, WALL_T
 use palette::{agent_palette, recolor_frame};
 use seat::{paint_character_at, seat_sprite, settle_seat_view, SeatView};
 
+/// The weather names accepted by [`force_weather`], canonical order — for
+/// `--weather` help/error text and the gallery generator. Derived from the
+/// `Weather` enum (single source), so it can't drift from what renders.
+pub fn weather_names() -> Vec<&'static str> {
+    background::Weather::ALL.iter().map(|w| w.name()).collect()
+}
+
+/// Force every subsequent render **on this thread** to a specific weather (by
+/// name, case-insensitive), or `None` to restore the clock-based selection.
+/// A screenshot/test affordance (`snapshot --weather`) — production never calls
+/// it, so live rendering is byte-identical. `Err` carries the valid names when
+/// `name` is unknown.
+pub fn force_weather(name: Option<&str>) -> Result<(), Vec<&'static str>> {
+    match name {
+        None => {
+            background::set_weather_override(None);
+            Ok(())
+        }
+        Some(s) => match background::Weather::from_name(s) {
+            Some(w) => {
+                background::set_weather_override(Some(w));
+                Ok(())
+            }
+            None => Err(weather_names()),
+        },
+    }
+}
+
 const COFFEE_STEAM_WINDOW_SECS: u64 = 120;
 
 /// The home desk sprite's front lip extends this many px past its blocked

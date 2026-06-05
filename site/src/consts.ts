@@ -1,4 +1,5 @@
 import themesData from './themes.json';
+import weatherData from './weather.json';
 
 // Shared site constants + a base-path-safe asset/link helper.
 // (GitHub Pages serves the site under /pixtuoid/, so every internal URL must
@@ -6,6 +7,7 @@ import themesData from './themes.json';
 export const REPO = 'https://github.com/IvanWng97/pixtuoid';
 export const CRATES = 'https://crates.io/crates/pixtuoid';
 export const TAP = 'ivanwng97/pixtuoid';
+export const SPONSOR = 'https://buymeacoffee.com/IvanWng97';
 
 const BASE = import.meta.env.BASE_URL;
 export const asset = (p: string): string => `${BASE.replace(/\/$/, '')}/${p.replace(/^\//, '')}`;
@@ -23,3 +25,15 @@ export interface ThemeShot {
 // Add a theme there + render its screenshot (scripts/gen-demos.sh) and the gallery,
 // the live count, the retint, and the render script all pick it up. No component edits.
 export const THEMES: ThemeShot[] = themesData as ThemeShot[];
+
+export interface WeatherShot {
+  id: string; // matches `--weather <id>` + public/demos/weather_<id>.png
+  name: string;
+  blurb: string;
+}
+
+// Single source of truth for the weather gallery → site/src/weather.json (mirrors
+// the `Weather` enum in pixtuoid's renderer). gen-demos.sh derives its render loop
+// from this same file, and astro.config guards that every id has a weather_<id>.png,
+// so the manifest, the rendered art, and the gallery can't drift.
+export const WEATHERS: WeatherShot[] = weatherData as WeatherShot[];

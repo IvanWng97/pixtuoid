@@ -39,7 +39,7 @@ From the repo root the same gate is `just site-check` (and `just site-fmt`).
 
 ## Design
 
-- **Layout/type** — "Cozy Terminal": Pixelify Sans (display) · JetBrains Mono
+- **Layout/type** — "Cozy Terminal": Jersey 10 (pixel display) · JetBrains Mono
   (UI/code) · Lora (body); ASCII dividers, blinking cursor, CRT scanlines.
 - **Palette** — warm "Coworking" (cream lifted from the office carpet + Claude
   coral). Day = cream, night = after-hours. `dracula` is a hidden easter-egg
