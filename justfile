@@ -9,6 +9,7 @@
 #   build    — compile the workspace + release artifacts
 #   release  — cut a new version (one command: `just bump X.Y.Z`)
 #   docs     — regenerate the repo's screenshots / demo art
+#   site     — the Astro landing page under site/ (npm, its own CI)
 
 features := "pixtuoid-core/test-renderer"
 
@@ -274,26 +275,31 @@ bump version:
 demo:
     .venv/bin/python3 scripts/gen-docs-images.py
 
-# ── website (site/) ───────────────────────────────────────────────
+# ── site ──────────────────────────────────────────────────────────
 # The Astro landing page — a self-contained Node project under site/ with its
 # own CI (.github/workflows/site.yml). See site/README.md.
 
-# Install the site's npm deps (run once per clone).
+[group('site')]
+[doc('Install the site npm deps (run once per clone)')]
 site-setup:
     npm --prefix site ci
 
-# Site dev server with HMR → http://localhost:4321/pixtuoid/
+[group('site')]
+[doc('Site dev server with HMR → http://localhost:4321/pixtuoid/')]
 site-dev:
     npm --prefix site run dev
 
-# Full site gate: format-check → lint → astro check → build (mirrors site CI).
+[group('site')]
+[doc('Full site gate: format-check → lint → astro check → build (mirrors site CI)')]
 site-check:
     npm --prefix site run verify
 
-# Auto-format the site.
+[group('site')]
+[doc('Auto-format the site')]
 site-fmt:
     npm --prefix site run format
 
-# Regenerate the site's demo art from the pixtuoid binary.
+[group('site')]
+[doc('Regenerate the site demo art from the pixtuoid binary')]
 site-demos:
     ./site/scripts/gen-demos.sh
