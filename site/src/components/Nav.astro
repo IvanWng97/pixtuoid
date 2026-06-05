@@ -91,7 +91,12 @@ const home = asset('');
         });
       });
       document.addEventListener('keydown', function (e) {
-        if (e.key === 'Escape') setMenu(false);
+        if (e.key !== 'Escape' || !links.classList.contains('is-open')) return;
+        // if focus was inside the menu, return it to the burger so closing the
+        // dropdown (display:none) doesn't drop focus to <body> (WCAG 2.4.3)
+        const focusInMenu = links.contains(document.activeElement);
+        setMenu(false);
+        if (focusInMenu) burger.focus();
       });
       document.addEventListener('click', function (e) {
         if (!links.contains(e.target) && !burger.contains(e.target)) setMenu(false);
