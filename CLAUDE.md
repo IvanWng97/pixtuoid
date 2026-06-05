@@ -54,8 +54,8 @@ site/                   Astro marketing landing page → GitHub Pages (ivanwng97
 ## Build & test
 
 ```
-cargo build --workspace                                              # debug build
-cargo build --release --workspace                                    # release build
+just build                                                           # debug build
+just build --release                                                 # release build
 just test                                                            # all tests (600+) — nextest if installed, else cargo test
 cargo test -p pixtuoid --lib <filter>                                # fast iteration: one crate's unit tests only
 cargo run --release --example snapshot -- /tmp/snap.png              # render TUI to PNG
@@ -72,14 +72,14 @@ The `test-renderer` feature is needed for the `e2e.rs` integration test; **`just
 - **Integration / public-contract** — `crates/<crate>/tests/*.rs` (separate crate, only `pub` API): `reducer.rs`, `e2e.rs`, `hook_socket.rs`, `jsonl_watcher.rs`.
 - **Headless render harness** — `tui_renderer/harness.rs` (`#[cfg(test)] mod harness;`). Drives the *real* `TuiRenderer` through `render()` / `navigate_floor()` via ratatui `TestBackend` (no terminal). Output-first assertions: `buf()` (RgbBuffer pixels) + the `#[cfg(test)] frame_buffer()` ratatui-cell inspector; white-box seams (`floor_motion`, `floor_buf`, `inject_coffee`) only where an invariant isn't observable from output. NOT coverable headlessly (excluded in `codecov.yml`): the crossterm event loop (`tui/mod.rs`, reads the real TTY) and `main.rs`.
 
-Coverage: `cargo llvm-cov --workspace --features pixtuoid-core/test-renderer` (CI uses `llvm-cov nextest`).
+Coverage: `just coverage` (writes lcov.info + JUnit XML — the exact command CI runs).
 
 ### Visual verification (Python venv)
 
 ```
 python3 -m venv .venv
 .venv/bin/pip install -r requirements-dev.txt
-cargo build --release --example snapshot
+just build --release --example snapshot
 ./target/release/examples/snapshot --cols 192 --rows 80 /tmp/snap.png
 .venv/bin/python3 scripts/crop-snapshot.py /tmp/snap.png --scale 3
 ```
@@ -97,7 +97,7 @@ The `justfile` is the **single source of truth** for what each check runs —
 `.github/workflows/ci.yml` and the git hooks call the same recipes, so there's
 no CI-vs-local drift to maintain. Requires `just` (`brew install just`); the
 checks also need a handful of cargo tools — `just setup-tools` installs them
-(cargo-hack, cargo-nextest, cargo-machete, cargo-deny, cargo-semver-checks).
+(cargo-hack, cargo-nextest, cargo-machete, cargo-deny, cargo-semver-checks, cargo-edit).
 
 ```
 just              # list recipes
@@ -123,6 +123,24 @@ git config core.hooksPath .githooks
 
 Bypass in an emergency with `git commit --no-verify` or `SKIP_PREFLIGHT=1 git push`.
 
+### Cutting a release
+
+`just bump X.Y.Z` is the one command. It rewrites **every** version number — the
+workspace version, the `pixtuoid`→`pixtuoid-core` path-dep requirement, and
+`Cargo.lock` (via `cargo set-version`, so the path-dep can't drift) — drafts the
+in-app `release_notes()` arm from the commit log, runs `just preflight`, and
+commits on a `release/vX.Y.Z` branch. It **stops before the tag**: pushing the
+tag is what triggers the *irreversible* crates.io publish (`release.yml`), so
+that stays a human step.
+
+```
+just bump 0.5.1                              # bump + draft notes + preflight → branch
+# curate release_notes() to ~6 highlights → PR → merge, then:
+git tag v0.5.1 && git push origin v0.5.1     # fires build + crates.io + homebrew
+```
+
+Needs cargo-edit (`just setup-tools`). See [`CONTRIBUTING.md`](CONTRIBUTING.md#releasing).
+
 ## Conventions
 
 - **TDD first.** Plan and existing tests are TDD-shaped — failing test → minimal impl → commit. Don't add code without a test that exercises it.
@@ -134,7 +152,7 @@ Bypass in an emergency with `git commit --no-verify` or `SKIP_PREFLIGHT=1 git pu
 - **macOS first.** BSD-flavored CLI, brew, launchd for daemons. The hook shim is Unix-socket specific (`std::os::unix::net::UnixStream`).
 - **Keep docs current.** When a change alters module structure, architecture, developer workflow, or the public API surface, update the relevant `CLAUDE.md` (workspace or nested) and `README.md` in the same commit. Stale docs cost more than the 5 minutes to update them.
 - **Track every deferred finding as a GitHub issue.** When a review finding, bug, or improvement is real but you consciously defer it (out of scope for the current PR, low-priority, needs broader design), `gh issue create` to capture it BEFORE moving on — don't let it live only in a chat message or a PR comment that scrolls away. The issue body should state the problem, why it was deferred, and a concrete fix sketch (link the PR/review that surfaced it). A deferred finding with no issue is a silently-dropped finding. (Verify the finding is real first — see "Don't blindly accept reviewer findings" below; never file an issue for a hallucinated/refuted one.)
-- **Sprite changes require visual verification.** After editing any `.sprite` file: (1) rebuild the snapshot example, (2) render at `--cols 192 --rows 80`, (3) crop the relevant quadrant with `scripts/crop-snapshot.py --scale 3`, (4) read the cropped PNG and self-critique — does a stranger recognize the intended pose/object? Iterate until it reads at half-block scale. Then rebuild the release binary (`cargo build --release --workspace`). Commit messages should include iteration history (which designs were tried and why they were rejected). See `.claude/skills/beautify-decoration/SKILL.md` for the full checklist.
+- **Sprite changes require visual verification.** After editing any `.sprite` file: (1) rebuild the snapshot example, (2) render at `--cols 192 --rows 80`, (3) crop the relevant quadrant with `scripts/crop-snapshot.py --scale 3`, (4) read the cropped PNG and self-critique — does a stranger recognize the intended pose/object? Iterate until it reads at half-block scale. Then rebuild the release binary (`just build --release`). Commit messages should include iteration history (which designs were tried and why they were rejected). See `.claude/skills/beautify-decoration/SKILL.md` for the full checklist.
 
 ## Architecture invariants
 

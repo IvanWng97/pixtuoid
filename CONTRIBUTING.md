@@ -16,7 +16,7 @@ check runs — CI and the git hooks call the same recipes.
 
 ```bash
 just              # list recipes
-just preflight    # full pre-push gate: lint (fmt + machete + deny) → clippy → test
+just preflight    # full pre-push gate: lint (fmt + machete + deny) → clippy → hack → test
 just fmt          # auto-format
 just test         # the whole suite (cargo-nextest if installed, else cargo test)
 ```
@@ -42,6 +42,28 @@ git config core.hooksPath .githooks
 
 `pre-commit` runs `just fmt-check` (sub-second); `pre-push` runs `just preflight`.
 Run `just preflight` locally first to avoid the push → CI-red → fix round-trip.
+
+## Releasing
+
+Recipes are grouped by intent — run `just --list` to see them:
+
+| To… | Run | What it touches |
+| --- | --- | --- |
+| **cut a release** | `just bump X.Y.Z` | every version number (workspace + the `pixtuoid`→`pixtuoid-core` path-dep + `Cargo.lock`) · drafts the in-app release notes · `just preflight` · commits on `release/vX.Y.Z` |
+| **regenerate doc art** | `just demo` | `docs/images/*` (screenshots + `demo.gif`) from a release build |
+
+`just bump` rewrites every version number in one shot via `cargo set-version`
+(so the path-dep requirement can't drift — the classic missed edit), drafts the
+`release_notes()` arm from the commit log since the last tag, runs the full
+gate, and lands it on a release branch. It **stops before the tag** — pushing
+the tag is what fires the *irreversible* crates.io publish, so a human owns that:
+
+```bash
+just setup-tools                            # once per clone — installs cargo-edit (+ the rest)
+just bump 0.5.1                             # bump + draft notes + preflight → branch release/v0.5.1
+# curate the drafted release_notes() bullets to ~6 highlights, then PR → review → merge, then:
+git tag v0.5.1 && git push origin v0.5.1    # fires release.yml → build + crates.io + homebrew
+```
 
 ## Conventions (the short version — see [`CLAUDE.md`](CLAUDE.md) for the full set)
 
