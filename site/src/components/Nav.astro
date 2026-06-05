@@ -49,7 +49,9 @@ const home = asset('');
         try {
           localStorage.setItem('pix-theme', next);
         } catch (e) {}
-        sync();
+        // notify listeners (Nav icon sync, gallery chip reset, theme-color meta)
+        // — the same event the dracula egg / Escape dispatch from Base.astro
+        document.dispatchEvent(new CustomEvent('pix:theme'));
       });
   })();
 </script>

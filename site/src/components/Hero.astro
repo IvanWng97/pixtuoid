@@ -37,6 +37,8 @@ import { REPO, asset } from '../consts';
         </div>
         <video
           class="terminal__screen px"
+          width="1664"
+          height="1408"
           autoplay
           muted
           loop
@@ -47,6 +49,8 @@ import { REPO, asset } from '../consts';
           <source src={asset('demos/hero.mp4')} type="video/mp4" />
           <img
             class="px"
+            width="1664"
+            height="1408"
             src={asset('demos/hero-poster.png')}
             alt="A pixel-art office with animated coding-agent characters working at their desks"
           />
@@ -82,9 +86,6 @@ import { REPO, asset } from '../consts';
     .hero__grid {
       grid-template-columns: 0.92fr 1.08fr;
     }
-  }
-  .hl {
-    color: var(--coral);
   }
   .hero__cta {
     display: flex;
@@ -148,7 +149,8 @@ import { REPO, asset } from '../consts';
   // Pixel-dust: warm motes drifting up through the hero (echoes the office's dust).
   (function () {
     const c = document.getElementById('dust');
-    if (!c || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    if (!c) return;
+    const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
     const ctx = c.getContext('2d');
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     let W = 0,
@@ -180,7 +182,8 @@ import { REPO, asset } from '../consts';
       for (let i = 0; i < n; i++) motes.push(spawn(true));
     }
     let raf = 0,
-      on = false;
+      on = false,
+      visible = false;
     function frame() {
       ctx.clearRect(0, 0, W, H);
       for (let i = 0; i < motes.length; i++) {
@@ -200,10 +203,9 @@ import { REPO, asset } from '../consts';
       raf = requestAnimationFrame(frame);
     }
     function start() {
-      if (!on) {
-        on = true;
-        raf = requestAnimationFrame(frame);
-      }
+      if (on || mq.matches || !visible) return;
+      on = true;
+      raf = requestAnimationFrame(frame);
     }
     function stop() {
       on = false;
@@ -211,18 +213,35 @@ import { REPO, asset } from '../consts';
       raf = 0;
     }
     resize();
-    window.addEventListener('resize', resize);
+    let rraf = 0;
+    window.addEventListener('resize', function () {
+      if (rraf) return; // coalesce a burst of resize events into one rAF
+      rraf = requestAnimationFrame(function () {
+        rraf = 0;
+        resize();
+      });
+    });
     if ('IntersectionObserver' in window) {
       new IntersectionObserver(
         function (es) {
           es.forEach(function (e) {
-            if (e.isIntersecting) start();
+            visible = e.isIntersecting;
+            if (visible) start();
             else stop();
           });
         },
         { threshold: 0 }
       ).observe(c);
-    } else start();
+    } else {
+      visible = true;
+      start();
+    }
+    // CSS @media can't gate a canvas rAF — respond to OS reduce-motion live
+    if (mq.addEventListener)
+      mq.addEventListener('change', function () {
+        if (mq.matches) stop();
+        else start();
+      });
   })();
 </script>
 
@@ -257,5 +276,27 @@ import { REPO, asset } from '../consts';
       })();
     }
     document.addEventListener('pix:revealed', run, { once: true });
+  })();
+</script>
+
+<script is:inline>
+  // Native <video autoplay loop> can't be gated by CSS @media, so honor
+  // prefers-reduced-motion (WCAG 2.2.2) in JS: pause + hold the poster frame,
+  // and respond live to OS changes.
+  (function () {
+    const v = document.querySelector('.hero video');
+    if (!v) return;
+    const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+    function apply() {
+      if (mq.matches) {
+        v.removeAttribute('autoplay');
+        v.pause();
+      } else if (v.paused) {
+        const p = v.play();
+        if (p && p.catch) p.catch(function () {});
+      }
+    }
+    apply();
+    if (mq.addEventListener) mq.addEventListener('change', apply);
   })();
 </script>
