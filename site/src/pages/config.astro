@@ -7,6 +7,11 @@ import { REPO, asset } from '../consts';
 
 // Rendered from docs/CONFIGURATION.md (the single source) — there's one entry.
 const [entry] = await getCollection('docs');
+if (!entry) {
+  throw new Error(
+    'config.astro: the "docs" collection is empty — is docs/CONFIGURATION.md present and matched by the glob loader in content.config.ts?'
+  );
+}
 const { Content } = await render(entry);
 ---
 
@@ -15,7 +20,7 @@ const { Content } = await render(entry);
   description="Configure pixtuoid: config.toml keys, themes, and custom sprite packs."
 >
   <Nav />
-  <main class="config">
+  <main id="main" tabindex="-1" class="config">
     <p class="config__back"><a href={asset('')}>← back to pixtuoid</a></p>
     <article class="prose">
       <Content />
@@ -47,7 +52,7 @@ const { Content } = await render(entry);
     text-decoration: none;
   }
   .config__back a:hover {
-    color: var(--coral);
+    color: var(--coral-deep);
   }
   .config__source {
     margin-top: 2.6rem;

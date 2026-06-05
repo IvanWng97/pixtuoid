@@ -33,13 +33,12 @@ const def = THEMES.find((t) => t.featured) ?? THEMES[0];
         <span class="terminal__scan" aria-hidden="true"></span>
       </figure>
 
-      <div class="themes__chips" role="tablist" aria-label="Theme">
+      <div class="themes__chips" role="group" aria-label="Theme">
         {
           THEMES.map((t) => (
             <button
               class:list={['themes__chip', { 'is-active': t.id === def.id }]}
-              role="tab"
-              aria-selected={t.id === def.id ? 'true' : 'false'}
+              aria-pressed={t.id === def.id ? 'true' : 'false'}
               data-id={t.id}
               data-src={asset(`demos/theme_${t.id}.png`)}
               data-name={t.name}
@@ -70,10 +69,12 @@ const def = THEMES.find((t) => t.featured) ?? THEMES[0];
       img.alt = 'pixtuoid office in the ' + chip.dataset.name + ' theme';
       if (title) title.textContent = chip.dataset.name + ' · ' + chip.dataset.blurb;
       stage.style.setProperty('--accent', chip.dataset.accent);
-      // retint the WHOLE page to this theme's hues — like hitting `t` in the app
+      // Retint the page's DECORATIVE hues (gradient/glow/cursor/dividers) to
+      // preview this theme — like hitting `t` in the app. Deliberately NOT
+      // --coral-deep: that's the AA text color for links/eyebrows/prose, and
+      // setting it to a raw chip accent drops body text below WCAG 1.4.3 on cream.
       const root = document.documentElement;
       root.style.setProperty('--coral', chip.dataset.accent);
-      root.style.setProperty('--coral-deep', chip.dataset.accent);
       root.style.setProperty('--amber', chip.dataset.accent2 || chip.dataset.accent);
       const preview = stage.querySelector('.themes__preview');
       if (preview) {
@@ -84,12 +85,31 @@ const def = THEMES.find((t) => t.featured) ?? THEMES[0];
       chips.forEach(function (c) {
         const on = c === chip;
         c.classList.toggle('is-active', on);
-        c.setAttribute('aria-selected', on ? 'true' : 'false');
+        c.setAttribute('aria-pressed', on ? 'true' : 'false');
       });
     }
+    const prefetched = {};
+    function prefetch(src) {
+      if (src && !prefetched[src]) {
+        prefetched[src] = new Image();
+        prefetched[src].src = src;
+      }
+    }
     chips.forEach(function (c) {
+      // warm the theme PNG on hover so the click swaps an already-cached image
+      c.addEventListener('pointerenter', function () {
+        prefetch(c.dataset.src);
+      });
       c.addEventListener('click', function () {
         pick(c);
+      });
+    });
+    // A non-gallery theme change (Nav toggle / Escape / dracula egg all dispatch
+    // pix:theme) clears the retint, so no chip should still read as active/pressed.
+    document.addEventListener('pix:theme', function () {
+      chips.forEach(function (c) {
+        c.classList.remove('is-active');
+        c.setAttribute('aria-pressed', 'false');
       });
     });
   })();
@@ -148,6 +168,9 @@ const def = THEMES.find((t) => t.featured) ?? THEMES[0];
     height: 12px;
     border-radius: 3px;
     background: var(--chip);
+    /* a perceivable edge so the swatch reads even when its fill is below the
+       WCAG 1.4.11 3:1 non-text contrast against the chip surface */
+    border: 1px solid var(--border-strong);
     image-rendering: pixelated;
   }
   .themes__chip.is-active {

@@ -1,4 +1,5 @@
 ---
+import { Code } from 'astro:components';
 import { REPO, CRATES, TAP } from '../consts';
 
 const tabs = [
@@ -19,14 +20,14 @@ const tabs = [
     </div>
 
     <div class="install__box card reveal">
-      <div class="install__tabs" role="tablist" aria-label="Install method">
+      <div class="install__tabs" role="group" aria-label="Install method">
         {
           tabs.map((t, i) => (
             <button
               class:list={['install__tab', { 'is-active': i === 0 }]}
-              role="tab"
               data-tab={t.id}
-              aria-selected={i === 0 ? 'true' : 'false'}
+              aria-pressed={i === 0 ? 'true' : 'false'}
+              aria-controls={`install-panel-${t.id}`}
             >
               {t.label}
             </button>
@@ -36,10 +37,12 @@ const tabs = [
 
       {
         tabs.map((t, i) => (
-          <div class:list={['install__panel', { 'is-active': i === 0 }]} data-panel={t.id}>
-            <pre class="install__code">
-              <code>{t.cmds.join('\n')}</code>
-            </pre>
+          <div
+            id={`install-panel-${t.id}`}
+            class:list={['install__panel', { 'is-active': i === 0 }]}
+            data-panel={t.id}
+          >
+            <Code code={t.cmds.join('\n')} lang="bash" />
             <button class="install__copy" data-copy={t.cmds.join('\n')} aria-label="Copy command">
               Copy
             </button>
@@ -65,7 +68,7 @@ const tabs = [
         box.querySelectorAll('.install__tab').forEach(function (t) {
           const on = t === tab;
           t.classList.toggle('is-active', on);
-          t.setAttribute('aria-selected', on ? 'true' : 'false');
+          t.setAttribute('aria-pressed', on ? 'true' : 'false');
         });
         box.querySelectorAll('.install__panel').forEach(function (p) {
           p.classList.toggle('is-active', p.dataset.panel === id);
@@ -73,18 +76,41 @@ const tabs = [
       });
     });
     box.querySelectorAll('.install__copy').forEach(function (btn) {
+      let restore = 0;
+      // capture the resting label ONCE — not after a click, or a rapid second
+      // click would capture 'Copied ✓' and the button would stick on it
+      const LABEL = (btn.textContent || 'Copy').trim();
+      function flash(msg) {
+        btn.textContent = msg;
+        clearTimeout(restore); // a fresh click cancels the previous restore timer
+        restore = setTimeout(function () {
+          btn.textContent = LABEL;
+        }, 1600);
+      }
+      function manual() {
+        // no / blocked Clipboard API (insecure context, old browser): select the
+        // command so the user can copy it, and say so — don't fail silently.
+        const code = btn.parentElement && btn.parentElement.querySelector('code');
+        const sel = window.getSelection && window.getSelection();
+        if (code && sel) {
+          const range = document.createRange();
+          range.selectNodeContents(code);
+          sel.removeAllRanges();
+          sel.addRange(range);
+        }
+        flash('Select & copy');
+      }
       btn.addEventListener('click', function () {
-        if (!navigator.clipboard || !navigator.clipboard.writeText) return;
+        if (!navigator.clipboard || !navigator.clipboard.writeText) {
+          manual();
+          return;
+        }
         navigator.clipboard
           .writeText(btn.dataset.copy)
           .then(function () {
-            const prev = btn.textContent;
-            btn.textContent = 'Copied ✓';
-            setTimeout(function () {
-              btn.textContent = prev;
-            }, 1400);
+            flash('Copied ✓');
           })
-          .catch(function () {});
+          .catch(manual);
       });
     });
   })();
@@ -122,23 +148,23 @@ const tabs = [
     position: relative;
     margin: 0.4rem;
     border-radius: var(--radius-sm);
-    background: #14130f;
+    overflow: hidden;
     border: 1px solid var(--border);
-  }
-  :global([data-theme='night']) .install__panel {
-    background: #0c0b09;
   }
   .install__panel.is-active {
     display: block;
   }
-  .install__code {
+  /* frame the Shiki <Code> output like the old code box (it brings its own
+     theme background + per-token colors) */
+  .install__panel :global(pre) {
     margin: 0;
     padding: 1rem 1.1rem;
     overflow-x: auto;
-    color: #f3ede3;
-    font-family: var(--font-mono);
     font-size: 0.92rem;
     line-height: 1.6;
+  }
+  .install__panel :global(pre code) {
+    font-family: var(--font-mono);
   }
   .install__copy {
     position: absolute;

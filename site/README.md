@@ -28,6 +28,13 @@ npm run build      # astro build → dist/
 
 From the repo root the same gate is `just site-check` (and `just site-fmt`).
 
+> **Cross-boundary build inputs.** The site reads two files from _outside_ `site/`
+> at build time: `docs/CONFIGURATION.md` (rendered as the `/config` page via the
+> Astro content layer in `src/content.config.ts`) and the workspace `Cargo.toml`
+> (the displayed version, injected via `vite.define` in `astro.config.mjs`).
+> Renaming or moving either breaks `astro build` — both are listed in the
+> `site.yml` / `pages.yml` path filters so a change to them re-runs CI + redeploys.
+
 ## Design
 
 - **Layout/type** — "Cozy Terminal": Pixelify Sans (display) · JetBrains Mono

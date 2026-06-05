@@ -13,13 +13,21 @@
   --paper: #f4eee2; /* warm cream (carpet hue, lifted) */
   --ink: #241c14; /* deep warm wood */
   --gray: #b3a892;
-  --gray-soft: #e7dcc7;
   --coral: #d97757; /* Claude coral */
-  --coral-deep: #bd5d3c;
+  --coral-deep: #a8431f; /* darkened for WCAG AA: ~5:1 on the cream --paper */
   --amber: #e6a356; /* warm amber — gradient end */
   --blue: #6a9bcc;
   --green: #788c5d;
-  --grad: linear-gradient(100deg, var(--coral), var(--amber));
+  --ok: #556b2f; /* AA "ok" green for the boot log — 5.15:1 on cream (raw --green is 3.18:1) */
+  /* Gradient-headline stops, AA-tuned and theme-aware via --grad-2, so the .hl
+     word stays legible (deep coral → deep amber) and — unlike --coral/--amber —
+     is NOT dragged below contrast by the gallery retint. */
+  --grad-2: #9c5a12; /* deep amber — 4.68:1 on the cream --bg */
+  --grad: linear-gradient(100deg, var(--coral-deep), var(--grad-2));
+  /* Focus ring — kept a LITERAL (not `var(--coral-deep)`) and theme-aware, so no
+     retint / theme override can drag the focus affordance below WCAG 1.4.11's
+     3:1 on the cream bg. */
+  --focus-ring: #a8431f;
 
   /* Semantic tokens — DAY (warm cream) */
   --bg: var(--paper);
@@ -50,6 +58,9 @@
   --coral: #e3845f;
   --coral-deep: #f0a07f;
   --amber: #ecae66;
+  --ok: #788c5d; /* 4.79:1 on the night --bg */
+  --grad-2: #ecae66; /* light amber — high contrast on the dark night --bg */
+  --focus-ring: #e3845f; /* literal; matches the night --coral (see :root note) */
   --bg: #1d1813;
   --bg-tint: #18130f;
   --surface: #271f17;
@@ -116,11 +127,39 @@ a {
   color: var(--coral);
 }
 
+/* Visible keyboard focus on every interactive control (WCAG 2.4.7) — the design
+   defined :hover but had no focus affordance. */
+:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+/* skip-to-content: off-screen until focused (WCAG 2.4.1 Bypass Blocks) */
+.skip-link {
+  position: fixed;
+  top: 0.6rem;
+  left: 0.6rem;
+  z-index: 10000;
+  transform: translateY(-150%);
+  padding: 0.6rem 1rem;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--fg);
+  border: 1px solid var(--border-strong);
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
+  text-decoration: none;
+  transition: transform 0.15s ease;
+}
+.skip-link:focus {
+  transform: none;
+}
+
 /* ---------- type ---------- */
 h1,
 h2,
-h3,
-.display {
+h3 {
   font-family: var(--font-display);
   font-weight: 700;
   line-height: 1.04;
@@ -237,11 +276,13 @@ section {
 }
 .btn-primary {
   /* deep-coral gradient (NOT the light amber end of --grad) + a text-shadow so
-     the white label stays legible in both day and night. */
+     the white label stays legible in both day and night. The glow uses a FIXED
+     coral (not var(--coral)) so it matches the baked fill in every theme and
+     gallery retint instead of drifting to the theme hue. */
   background: linear-gradient(100deg, #ad5230, #c96a45);
   color: #fff;
   text-shadow: 0 1px 2px rgba(35, 14, 5, 0.4);
-  box-shadow: 0 8px 20px color-mix(in srgb, var(--coral) 42%, transparent);
+  box-shadow: 0 8px 20px color-mix(in srgb, #c96a45 42%, transparent);
 }
 .btn-primary:hover {
   filter: brightness(1.08);
@@ -425,6 +466,11 @@ body.has-pointer .cursor-glow {
   transform: perspective(1000px) rotateX(var(--ry, 0deg)) rotateY(var(--rx, 0deg));
   transition: transform 0.3s ease;
   transform-style: preserve-3d;
+}
+/* Promote a compositor layer only while the pointer is actually driving the tilt
+   (the JS adds .has-pointer on first pointermove); idle/reduced-motion/coarse-
+   pointer pages don't pay for an unused GPU layer. */
+body.has-pointer .tilt {
   will-change: transform;
 }
 
@@ -479,6 +525,9 @@ body.has-pointer .cursor-glow {
   --coral: #bd93f9;
   --coral-deep: #caa6fb;
   --amber: #ff79c6;
+  --ok: #9db87e; /* 6.50:1 on the dracula --bg */
+  --grad-2: #ff79c6; /* light pink — high contrast on the dark dracula --bg */
+  --focus-ring: #caa6fb; /* literal; matches the dracula --coral-deep (see :root note) */
   --bg: #282a36;
   --bg-tint: #21222c;
   --surface: #343746;
@@ -529,7 +578,7 @@ body.has-pointer .cursor-glow {
   color: var(--fg);
 }
 .boot__ok {
-  color: var(--green);
+  color: var(--ok);
 }
 .boot__hint {
   margin-top: 1.4rem;

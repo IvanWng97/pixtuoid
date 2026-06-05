@@ -7,16 +7,33 @@ const home = asset('');
 <header class="nav">
   <div class="container nav__inner">
     <a class="nav__logo" href={home}>
-      <span class="nav__mark" aria-hidden="true"></span>
+      <img
+        class="nav__mark"
+        src={asset('char-mark.png')}
+        alt=""
+        aria-hidden="true"
+        width="17"
+        height="24"
+      />
       pixtuoid
     </a>
-    <nav class="nav__links" aria-label="Primary">
+    <nav id="nav-links" class="nav__links" aria-label="Primary">
       <a href={`${home}#themes`}>Themes</a>
       <a href={`${home}#features`}>Features</a>
       <a href={`${home}#install`}>Install</a>
       <a href={asset('config')}>Config</a>
       <a href={REPO} target="_blank" rel="noreferrer">GitHub ↗</a>
     </nav>
+    <button
+      id="nav-burger"
+      class="nav__burger"
+      type="button"
+      aria-label="Menu"
+      aria-expanded="false"
+      aria-controls="nav-links"
+    >
+      <span class="nav__burger-icon" aria-hidden="true">☰</span>
+    </button>
     <button id="theme-toggle" class="nav__toggle" type="button" aria-label="Toggle day / night">
       <span class="nav__toggle-icon" aria-hidden="true">🌙</span>
     </button>
@@ -33,6 +50,9 @@ const home = asset('');
       if (btn) btn.setAttribute('aria-label', night ? 'Switch to day' : 'Switch to night');
     }
     sync();
+    // re-sync the icon/aria when the theme is changed elsewhere (the dracula egg
+    // or Escape in Base.astro dispatch this) so the toggle never goes stale
+    document.addEventListener('pix:theme', sync);
     if (btn)
       btn.addEventListener('click', function () {
         const root = document.documentElement;
@@ -46,8 +66,42 @@ const home = asset('');
         try {
           localStorage.setItem('pix-theme', next);
         } catch (e) {}
-        sync();
+        // notify listeners (Nav icon sync, gallery chip reset, theme-color meta)
+        // — the same event the dracula egg / Escape dispatch from Base.astro
+        document.dispatchEvent(new CustomEvent('pix:theme'));
       });
+
+    // mobile hamburger → toggle the nav-links dropdown
+    const burger = document.getElementById('nav-burger');
+    const links = document.getElementById('nav-links');
+    const bicon = burger && burger.querySelector('.nav__burger-icon');
+    if (burger && links) {
+      const setMenu = function (open) {
+        links.classList.toggle('is-open', open);
+        burger.setAttribute('aria-expanded', open ? 'true' : 'false');
+        if (bicon) bicon.textContent = open ? '✕' : '☰';
+      };
+      burger.addEventListener('click', function (e) {
+        e.stopPropagation();
+        setMenu(!links.classList.contains('is-open'));
+      });
+      links.querySelectorAll('a').forEach(function (a) {
+        a.addEventListener('click', function () {
+          setMenu(false);
+        });
+      });
+      document.addEventListener('keydown', function (e) {
+        if (e.key !== 'Escape' || !links.classList.contains('is-open')) return;
+        // if focus was inside the menu, return it to the burger so closing the
+        // dropdown (display:none) doesn't drop focus to <body> (WCAG 2.4.3)
+        const focusInMenu = links.contains(document.activeElement);
+        setMenu(false);
+        if (focusInMenu) burger.focus();
+      });
+      document.addEventListener('click', function (e) {
+        if (!links.contains(e.target) && !burger.contains(e.target)) setMenu(false);
+      });
+    }
   })();
 </script>
 
@@ -78,38 +132,75 @@ const home = asset('');
     color: var(--fg);
     text-decoration: none;
   }
-  /* tiny pixel-cluster mark — coral block with blue/green offset pixels */
+  /* a little pixtuoid coworker as the logo mark (matches the tab favicon) */
   .nav__mark {
-    width: 11px;
-    height: 11px;
-    border-radius: 2px;
-    background: var(--coral);
-    box-shadow:
-      4px 0 0 var(--blue),
-      0 4px 0 var(--green);
+    height: 24px;
+    width: auto;
     image-rendering: pixelated;
   }
+  /* mobile: a dropdown panel toggled by the burger; desktop: an inline row */
   .nav__links {
     display: none;
-    gap: 1.4rem;
-    margin-left: auto;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    flex-direction: column;
+    gap: 0.1rem;
+    padding: 0.5rem clamp(1.1rem, 4vw, 2.5rem) 0.9rem;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    box-shadow: var(--shadow);
     font-family: var(--font-mono);
-    font-size: 0.88rem;
+    font-size: 0.95rem;
+  }
+  .nav__links.is-open {
+    display: flex;
   }
   .nav__links a {
     color: var(--fg-muted);
     text-decoration: none;
+    padding: 0.55rem 0.2rem;
+    border-radius: var(--radius-sm);
   }
   .nav__links a:hover {
     color: var(--fg);
   }
+  .nav__burger {
+    margin-left: auto;
+    width: 40px;
+    height: 40px;
+    display: grid;
+    place-items: center;
+    border-radius: 999px;
+    border: 1px solid var(--border-strong);
+    background: var(--surface);
+    color: var(--fg);
+    cursor: pointer;
+    font-size: 1.1rem;
+    line-height: 1;
+  }
   @media (min-width: 760px) {
     .nav__links {
       display: flex;
+      position: static;
+      flex-direction: row;
+      gap: 1.4rem;
+      margin-left: auto;
+      padding: 0;
+      background: none;
+      border: 0;
+      box-shadow: none;
+      font-size: 0.88rem;
+    }
+    .nav__links a {
+      padding: 0;
+    }
+    .nav__burger {
+      display: none;
     }
   }
   .nav__toggle {
-    margin-left: auto;
     width: 40px;
     height: 40px;
     display: grid;
@@ -122,11 +213,6 @@ const home = asset('');
     transition:
       transform 0.15s ease,
       background-color 0.2s ease;
-  }
-  @media (min-width: 760px) {
-    .nav__toggle {
-      margin-left: 0;
-    }
   }
   .nav__toggle:hover {
     transform: translateY(-1px);

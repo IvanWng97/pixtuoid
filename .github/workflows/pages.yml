@@ -24,6 +24,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+      # withastro/action only runs `astro build`; gate the deploy on lint + types
+      # too, so a build-clean but lint/typecheck-failing commit can't ship.
+      - name: Validate (lint + types)
+        working-directory: site
+        run: npm ci && npm run lint && npm run check
       - uses: withastro/action@v6
         with:
           path: ./site

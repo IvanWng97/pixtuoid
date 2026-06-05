@@ -5,20 +5,21 @@ import { asset } from '../consts';
 interface Props {
   title?: string;
   description?: string;
+  preloadImage?: string;
 }
 
 const {
   title = 'pixtuoid — your coding agents, alive in a pixel office',
   description = 'A terminal-native pixel-art office that visualizes your AI coding agents (Claude Code, Codex, and more) as little animated coworkers — day/night lighting, weather, themes, and pets included.',
+  preloadImage,
 } = Astro.props;
 
-// Use asset() (base-path-safe) for internal URLs; BASE_URL has no trailing
-// slash, so raw `${base}favicon.svg` would emit `/pixtuoidfavicon.svg` (404).
-const favicon = asset('favicon.svg');
 // Absolute URLs for crawlers (Astro.site is the deploy origin).
 const SITE = Astro.site ?? new URL('https://ivanwng97.github.io');
 const ogImage = new URL(asset('demos/hero-poster.png'), SITE).href;
-const canonical = new URL(asset(''), SITE).href;
+// Per-page canonical/og:url — Astro.url.pathname includes the /pixtuoid base in
+// the static build, so /config no longer self-declares the homepage as canonical.
+const canonical = new URL(Astro.url.pathname, SITE).href;
 const version = __PIXTUOID_VERSION__; // from the workspace Cargo.toml at build
 ---
 
@@ -27,11 +28,31 @@ const version = __PIXTUOID_VERSION__; // from the workspace Cargo.toml at build
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    {
+      /* CSP: lock down origins / object-src / base-uri. 'unsafe-inline' stays for
+        script + style because the no-FOUC theme-init and boot must run inline
+        before paint (a strict hashed CSP would need every inline script
+        externalized — and there is no script-injection vector: the only dynamic
+        content is the trusted, scheme-sanitized /config markdown). frame-ancestors
+        and SRI need HTTP headers that GitHub Pages can't set. */
+    }
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; base-uri 'self'; object-src 'none'; img-src 'self' data:; media-src 'self'; font-src 'self' https://fonts.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; script-src 'self' 'unsafe-inline'; connect-src 'self'; form-action 'self'"
+    />
     <title>{title}</title>
     <meta name="description" content={description} />
-    <link rel="icon" href={favicon} type="image/svg+xml" />
+    {
+      /* a little pixtuoid coworker as the tab / home-screen icon (PNG since it's
+        pixel art; mobile Safari also ignores SVG favicons) */
+    }
+    <link rel="icon" type="image/png" sizes="32x32" href={asset('favicon-32.png')} />
+    <link rel="icon" type="image/png" sizes="180x180" href={asset('apple-touch-icon.png')} />
+    <link rel="apple-touch-icon" href={asset('apple-touch-icon.png')} />
     <link rel="canonical" href={canonical} />
-    <meta name="theme-color" content="#faf9f5" />
+    {/* default = day --bg; the theme-init script below updates it for night/dracula */}
+    <meta name="theme-color" content="#f4eee2" />
+    {preloadImage && <link rel="preload" as="image" href={preloadImage} fetchpriority="high" />}
 
     <!-- Open Graph / Twitter -->
     <meta property="og:type" content="website" />
@@ -45,7 +66,7 @@ const version = __PIXTUOID_VERSION__; // from the workspace Cargo.toml at build
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Lora:ital,wght@0,400;0,500;1,400&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400;600;700&family=JetBrains+Mono:wght@400;500;700&family=Lora:wght@400;500&display=swap"
       rel="stylesheet"
     />
 
@@ -59,7 +80,12 @@ const version = __PIXTUOID_VERSION__; // from the workspace Cargo.toml at build
           const forced = new URLSearchParams(location.search).get('theme');
           const pick = ok(forced) ? forced : localStorage.getItem('pix-theme');
           const sys = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'night' : 'day';
-          document.documentElement.dataset.theme = ok(pick) ? pick : sys;
+          const theme = ok(pick) ? pick : sys;
+          document.documentElement.dataset.theme = theme;
+          // keep the mobile browser-chrome tint in sync with the resolved theme
+          const BG = { day: '#f4eee2', night: '#1d1813', dracula: '#282a36' };
+          const meta = document.querySelector('meta[name="theme-color"]');
+          if (meta && BG[theme]) meta.setAttribute('content', BG[theme]);
         } catch (e) {
           document.documentElement.dataset.theme = 'day';
         }
@@ -79,6 +105,7 @@ const version = __PIXTUOID_VERSION__; // from the workspace Cargo.toml at build
     </script>
   </head>
   <body>
+    <a class="skip-link" href="#main">Skip to content</a>
     <div class="cursor-glow" aria-hidden="true"></div>
 
     <div id="boot" class="boot" role="status" aria-label="Loading pixtuoid">
@@ -97,36 +124,51 @@ const version = __PIXTUOID_VERSION__; // from the workspace Cargo.toml at build
     <!-- reveal-on-scroll: one orchestrated entrance per section -->
     <script is:inline>
       (function () {
-        const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-        const els = document.querySelectorAll('.reveal');
-        if (reduce || !('IntersectionObserver' in window)) {
-          els.forEach(function (el) {
-            el.classList.add('in');
-          });
-          return;
-        }
-        const io = new IntersectionObserver(
-          function (entries) {
-            entries.forEach(function (e) {
-              if (e.isIntersecting) {
-                e.target.classList.add('in');
-                io.unobserve(e.target);
-              }
+        function setup() {
+          const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+          const els = document.querySelectorAll('.reveal');
+          if (reduce || !('IntersectionObserver' in window)) {
+            els.forEach(function (el) {
+              el.classList.add('in');
             });
-          },
-          { threshold: 0.12 }
-        );
-        els.forEach(function (el) {
-          io.observe(el);
-        });
+            return;
+          }
+          const io = new IntersectionObserver(
+            function (entries) {
+              entries.forEach(function (e) {
+                if (e.isIntersecting) {
+                  e.target.classList.add('in');
+                  io.unobserve(e.target);
+                }
+              });
+            },
+            { threshold: 0.12 }
+          );
+          els.forEach(function (el) {
+            io.observe(el);
+          });
+        }
+        // Wait for the boot overlay to clear (pix:revealed fires immediately when
+        // boot is skipped/reduced-motion) so above-fold sections don't run their
+        // 0.7s entrance hidden behind the opaque overlay (#119).
+        document.addEventListener('pix:revealed', setup, { once: true });
       })();
     </script>
 
     <!-- FX: pointer glow + 3D tilt, CRT power-on, and a `dracula` easter egg -->
     <script is:inline>
       (function () {
-        const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        const reduceMQ = window.matchMedia('(prefers-reduced-motion: reduce)');
+        const reduce = reduceMQ.matches;
         const fine = window.matchMedia('(pointer: fine)').matches;
+
+        // keep the mobile browser-chrome tint in sync on every theme change
+        const BG = { day: '#f4eee2', night: '#1d1813', dracula: '#282a36' };
+        const themeMeta = document.querySelector('meta[name="theme-color"]');
+        document.addEventListener('pix:theme', function () {
+          const t = document.documentElement.dataset.theme;
+          if (themeMeta && BG[t]) themeMeta.setAttribute('content', BG[t]);
+        });
 
         if (fine && !reduce) {
           const tilts = document.querySelectorAll('.tilt');
@@ -139,38 +181,51 @@ const version = __PIXTUOID_VERSION__; // from the workspace Cargo.toml at build
             if (raf) return;
             raf = requestAnimationFrame(function () {
               raf = 0;
+              if (reduceMQ.matches) return; // OS reduce-motion toggled on mid-session (#120)
+              // READ every rect first (one layout flush), THEN write — otherwise
+              // writing body --mx/--my before each getBoundingClientRect forces a
+              // synchronous reflow on every pointermove frame
+              const rects = [];
+              for (let i = 0; i < tilts.length; i++) rects.push(tilts[i].getBoundingClientRect());
               document.body.classList.add('has-pointer');
               document.body.style.setProperty('--mx', px + 'px');
               document.body.style.setProperty('--my', py + 'px');
-              tilts.forEach(function (el) {
-                const r = el.getBoundingClientRect();
-                if (!r.width) return;
+              for (let i = 0; i < tilts.length; i++) {
+                const r = rects[i];
+                if (!r.width) continue;
                 const dx = (px - (r.left + r.width / 2)) / (r.width / 2);
                 const dy = (py - (r.top + r.height / 2)) / (r.height / 2);
                 const near = Math.abs(dx) < 1.6 && Math.abs(dy) < 1.6;
-                el.style.setProperty('--rx', (near ? dx * 4 : 0).toFixed(2) + 'deg');
-                el.style.setProperty('--ry', (near ? -dy * 4 : 0).toFixed(2) + 'deg');
-              });
+                tilts[i].style.setProperty('--rx', (near ? dx * 4 : 0).toFixed(2) + 'deg');
+                tilts[i].style.setProperty('--ry', (near ? -dy * 4 : 0).toFixed(2) + 'deg');
+              }
             });
           });
         }
 
-        if (!reduce && 'IntersectionObserver' in window) {
-          const co = new IntersectionObserver(
-            function (es) {
-              es.forEach(function (e) {
-                if (e.isIntersecting) {
-                  e.target.classList.add('crt-on');
-                  co.unobserve(e.target);
-                }
-              });
-            },
-            { threshold: 0.3 }
-          );
-          document.querySelectorAll('.crt:not(.crt-manual)').forEach(function (el) {
-            co.observe(el);
-          });
-        }
+        // defer the CRT power-on observer until after boot (same as reveal, #119)
+        // so the gallery terminal doesn't power on hidden behind the boot overlay
+        document.addEventListener(
+          'pix:revealed',
+          function () {
+            if (reduce || !('IntersectionObserver' in window)) return;
+            const co = new IntersectionObserver(
+              function (es) {
+                es.forEach(function (e) {
+                  if (e.isIntersecting) {
+                    e.target.classList.add('crt-on');
+                    co.unobserve(e.target);
+                  }
+                });
+              },
+              { threshold: 0.3 }
+            );
+            document.querySelectorAll('.crt:not(.crt-manual)').forEach(function (el) {
+              co.observe(el);
+            });
+          },
+          { once: true }
+        );
 
         function clearRetint() {
           const s = document.documentElement.style;
@@ -179,21 +234,37 @@ const version = __PIXTUOID_VERSION__; // from the workspace Cargo.toml at build
           s.removeProperty('--amber');
         }
         let buf = '';
+        // set the theme AND notify the Nav toggle so its icon/aria-label stay in
+        // sync (otherwise Escape / the dracula egg leave the toggle inverted)
+        const setTheme = function (t) {
+          document.documentElement.dataset.theme = t;
+          document.dispatchEvent(new CustomEvent('pix:theme'));
+        };
         document.addEventListener('keydown', function (e) {
+          // don't hijack typing: skip when a field is focused or a modifier is held
+          const tgt = e.target;
+          if (e.ctrlKey || e.metaKey || e.altKey) return;
+          if (
+            tgt &&
+            (tgt.tagName === 'INPUT' || tgt.tagName === 'TEXTAREA' || tgt.isContentEditable)
+          )
+            return;
           if (e.key === 'Escape') {
             clearRetint();
             let saved = null;
             try {
               saved = localStorage.getItem('pix-theme');
             } catch (e2) {}
-            document.documentElement.dataset.theme = saved || 'day';
+            // validate like the no-FOUC init — a stale/garbage stored id must not
+            // land in data-theme (it would silently render the default palette)
+            setTheme(saved === 'night' || saved === 'dracula' ? saved : 'day');
             return;
           }
           if (e.key && e.key.length === 1) {
             buf = (buf + e.key.toLowerCase()).slice(-7);
             if (buf.indexOf('dracula') !== -1) {
               clearRetint();
-              document.documentElement.dataset.theme = 'dracula';
+              setTheme('dracula');
             }
           }
         });
@@ -212,6 +283,16 @@ const version = __PIXTUOID_VERSION__; // from the workspace Cargo.toml at build
           reveal();
           return;
         }
+        // make the page behind the opaque overlay inert + hidden from AT, so a
+        // keyboard / screen-reader user can't reach controls obscured under it
+        const bg = [];
+        Array.prototype.forEach.call(document.body.children, function (el) {
+          if (el !== boot) {
+            el.setAttribute('inert', '');
+            el.setAttribute('aria-hidden', 'true');
+            bg.push(el);
+          }
+        });
         const lines = boot.querySelectorAll('.boot__line');
         let i = 0,
           done = false;
@@ -222,20 +303,27 @@ const version = __PIXTUOID_VERSION__; // from the workspace Cargo.toml at build
           try {
             sessionStorage.setItem('pix-booted', '1');
           } catch (e) {}
+          bg.forEach(function (el) {
+            el.removeAttribute('inert');
+            el.removeAttribute('aria-hidden');
+          });
           setTimeout(function () {
             root.removeAttribute('data-booting');
           }, 460);
           boot.removeEventListener('click', skip);
           document.removeEventListener('keydown', onKey);
           reveal();
+          // leave focus at the document start (don't focus #main: it would scroll
+          // the page and skip keyboard users past the nav/skip-link). The bg is
+          // no longer inert, so Tab flows skip-link -> nav -> content as normal.
         }
         function step() {
           if (i < lines.length) {
             lines[i].classList.add('in');
             i++;
-            setTimeout(step, 175);
+            setTimeout(step, 260);
           } else {
-            setTimeout(finish, 380);
+            setTimeout(finish, 520);
           }
         }
         function skip() {
@@ -245,7 +333,7 @@ const version = __PIXTUOID_VERSION__; // from the workspace Cargo.toml at build
         function onKey() {
           skip();
         }
-        setTimeout(step, 140);
+        setTimeout(step, 220);
         boot.addEventListener('click', skip);
         document.addEventListener('keydown', onKey);
       })();
