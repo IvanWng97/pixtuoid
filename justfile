@@ -212,10 +212,19 @@ bump version:
 
     echo "▸ bump $cur → $ver"
 
-    # restore the tree if anything below fails before the commit lands, so a
-    # failed bump (e.g. red preflight) never strands a half-bumped dirty tree
+    # restore everything if anything below fails before the commit lands, so a
+    # failed bump (e.g. red preflight) never strands a half-bumped tree or an
+    # orphan release branch. `restore --staged --worktree` also clears the index —
+    # a plain `checkout --` would leave the bump *staged* if the commit step failed.
     committed=0
-    cleanup() { [ "$committed" = 1 ] || git checkout -- Cargo.toml Cargo.lock crates/*/Cargo.toml crates/pixtuoid/src/version.rs 2>/dev/null || true; }
+    cleanup() {
+        if [ "$committed" = 1 ]; then return 0; fi
+        git restore --staged --worktree Cargo.toml Cargo.lock crates/*/Cargo.toml crates/pixtuoid/src/version.rs 2>/dev/null || true
+        if [ "$(git symbolic-ref --short -q HEAD 2>/dev/null || true)" = "$branch" ]; then
+            git switch -q "$cur_branch" 2>/dev/null || true
+            git branch -qD "$branch" 2>/dev/null || true
+        fi
+    }
     trap cleanup EXIT
 
     # 4. all version numbers + Cargo.lock in one command (incl. the path-dep)
@@ -236,7 +245,7 @@ bump version:
         printf '\n        ]),\n'
     } > "$notes"
     awk -v f="$notes" '
-        /^    match version \{$/ { print; while ((getline l < f) > 0) print l; next }
+        /\[bump-inject-here\]/ { print; while ((getline l < f) > 0) print l; next }
         { print }
     ' crates/pixtuoid/src/version.rs > "$notes.rs" && mv "$notes.rs" crates/pixtuoid/src/version.rs
     rm -f "$notes"
@@ -261,5 +270,6 @@ bump version:
 # the screenshots never "drift". Run after any change to the office's look.
 # Requires the .venv (Pillow): see README "Visual verification".
 [group('docs')]
+[doc('Regenerate docs/images screenshots + demo.gif from a release build')]
 demo:
     .venv/bin/python3 scripts/gen-docs-images.py

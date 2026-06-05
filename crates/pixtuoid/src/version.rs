@@ -54,6 +54,10 @@ fn parse_semver(v: &str) -> Option<(u64, u64, u64, u8)> {
 
 pub fn release_notes(version: &str) -> Option<&'static [&'static str]> {
     match version {
+        // `just bump` injects the new version's arm right after the marker below;
+        // anchoring on a marker is whitespace-independent — matching the `match`
+        // brace would silently break if the indentation ever shifted.
+        // [bump-inject-here]
         "0.4.0" => Some(&[
             "Renamed from ascii-agents to pixtuoid",
             "Run `pixtuoid install-hooks` to update hooks",
@@ -163,7 +167,7 @@ mod tests {
         let manifest = include_str!("../Cargo.toml");
         let dep_line = manifest
             .lines()
-            .find(|l| l.contains("pixtuoid-core") && l.contains("path ="))
+            .find(|l| l.trim_start().starts_with("pixtuoid-core") && l.contains("path ="))
             .expect("a pixtuoid-core path-dependency line in crates/pixtuoid/Cargo.toml");
         let dep_version = dep_line
             .split_once("version = \"")

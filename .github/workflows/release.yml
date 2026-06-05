@@ -32,9 +32,11 @@ jobs:
             echo "::error::Tag ${GITHUB_REF_NAME} does not match Cargo.toml version ${CARGO_VERSION}"
             exit 1
           fi
-      # Run the SAME just recipes as ci.yml + the git hooks — the justfile is the
-      # single source of truth for what each check runs (no CI-vs-release drift,
-      # and `just test` uses nextest).
+      # Single-sourced through the justfile (same recipes as ci.yml + the hooks).
+      # Intentionally lighter than `just preflight` (which also runs lint + hack):
+      # the tag comes from main, which already passed the full CI matrix — here we
+      # re-verify fmt/clippy/tests against the exact tagged commit (`just test`
+      # uses nextest).
       - run: just fmt-check
       - run: just clippy
       - run: just test
@@ -207,15 +209,15 @@ jobs:
             for attempt in 1 2 3; do
               if out=$(cargo publish -p "$crate" 2>&1); then
                 printf '%s\n' "$out"; echo "::notice::$crate published"; return 0
-              elif printf '%s\n' "$out" | grep -qiE 'already (exists|uploaded)|crate version .* is already'; then
+              elif grep -qiE 'already (exists|uploaded)|crate version .* is already' <<<"$out"; then
                 printf '%s\n' "$out"; echo "::warning::$crate already on crates.io, skipping"; return 0
-              elif printf '%s\n' "$out" | grep -qiE 'no matching package|not found in registry|failed to select a version'; then
+              elif grep -qiE 'no matching package|not found in registry|failed to select a version' <<<"$out"; then
                 printf '%s\n' "$out"; echo "::warning::$crate: dependency not yet on the index — retry $attempt/3 after 20s"; sleep 20
               else
                 printf '%s\n' "$out"; echo "::error::$crate publish failed"; return 1
               fi
             done
-            echo "::error::$crate still failing after 3 attempts (index propagation?)"; return 1
+            printf '%s\n' "$out"; echo "::error::$crate failed after 3 attempts — index-propagation race, or an unsatisfiable dependency requirement"; return 1
           }
           for crate in pixtuoid-core pixtuoid-hook pixtuoid; do
             publish_one "$crate"
