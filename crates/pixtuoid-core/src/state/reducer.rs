@@ -349,7 +349,6 @@ impl Reducer {
                     return;
                 };
                 let floor_idx = scene.floor_of(desk_index);
-                self.next_label_n += 1;
                 let base = cwd
                     .file_name()
                     .and_then(|n| n.to_str())
@@ -358,7 +357,13 @@ impl Reducer {
                 let prefix = source_label_prefix(&source);
                 let label: Arc<str> = match base {
                     Some(b) => Arc::<str>::from(format!("{prefix}·{b}").as_str()),
-                    None => Arc::<str>::from(format!("{prefix}#{}", self.next_label_n).as_str()),
+                    None => {
+                        // Only an unknown-cwd ghost consumes an ordinal, so labels
+                        // stay contiguous (cc#1, cc#2, …) instead of skipping the
+                        // count of preceding named sessions.
+                        self.next_label_n += 1;
+                        Arc::<str>::from(format!("{prefix}#{}", self.next_label_n).as_str())
+                    }
                 };
                 // Disambiguation for multiple sessions sharing a cwd happens
                 // at render time, not here — we don't want to suffix unique

@@ -502,6 +502,42 @@ fn session_start_without_cwd_falls_back_to_cc_label() {
 }
 
 #[test]
+fn ghost_label_counter_is_contiguous_after_named_sessions() {
+    // A named-cwd session must NOT consume a ghost ordinal: the first
+    // unknown-cwd ghost is cc#1 even when named sessions preceded it.
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let named = AgentId::from_transcript_path("/p/named.jsonl");
+    let ghost = AgentId::from_transcript_path("/p/ghost.jsonl");
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: named,
+            source: "claude-code".into(),
+            session_id: "named".into(),
+            cwd: PathBuf::from("/Users/me/Desktop/pixtuoid"),
+            parent_id: None,
+        },
+        SystemTime::now(),
+        Transport::Hook,
+    );
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: ghost,
+            source: "claude-code".into(),
+            session_id: "ghost".into(),
+            cwd: PathBuf::from(""),
+            parent_id: None,
+        },
+        SystemTime::now(),
+        Transport::Hook,
+    );
+    assert_eq!(&*scene.agents.get(&named).unwrap().label, "cc·pixtuoid");
+    assert_eq!(&*scene.agents.get(&ghost).unwrap().label, "cc#1");
+}
+
+#[test]
 fn session_start_codex_source_gets_cx_label() {
     // Codex arrives via the shared hook socket (no JSONL Rename), so the cx·
     // prefix must come from the reducer at SessionStart.
