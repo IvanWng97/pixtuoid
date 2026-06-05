@@ -64,7 +64,6 @@ pub enum Transport {
 pub enum Activity {
     Typing,
     Reading,
-    Thinking,
 }
 
 /// Structured tool detail. Replaces the free-form `Option<String>` so the
