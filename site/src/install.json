@@ -14,6 +14,10 @@
   {
     "id": "deb",
     "label": "Debian",
-    "cmds": ["# from the Releases page", "sudo dpkg -i pixtuoid_*.deb"]
+    "cmds": [
+      "# download both .debs from the Releases page",
+      "sudo dpkg -i pixtuoid_*.deb pixtuoid-hook_*.deb"
+    ],
+    "readmeCheck": true
   }
 ]

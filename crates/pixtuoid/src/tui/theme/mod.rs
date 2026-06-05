@@ -202,6 +202,38 @@ mod tests {
     }
 
     #[test]
+    fn theme_gallery_manifest_matches_all_themes() {
+        // site/src/themes.json drives the site's theme switcher + the gen-demos
+        // render loop; ALL_THEMES drives what `--theme` actually accepts. Site CI
+        // never runs the binary, so this test is the bridge (same pattern as
+        // `weather_gallery_manifest_matches_the_weather_enum`). Set equality, not
+        // order: the manifest's order is a site presentation choice (`featured`).
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../site/src/themes.json");
+        let json = match std::fs::read_to_string(path) {
+            Ok(s) => s,
+            // crates.io-packaged test runs don't ship the repo's site/ tree.
+            Err(_) => {
+                eprintln!("skipping: {path} not present (packaged build)");
+                return;
+            }
+        };
+        let manifest: Vec<serde_json::Value> =
+            serde_json::from_str(&json).expect("themes.json parses");
+        let mut ids: Vec<&str> = manifest
+            .iter()
+            .map(|t| t["id"].as_str().expect("themes.json entry has a string id"))
+            .collect();
+        let mut names: Vec<&str> = ALL_THEMES.iter().map(|t| t.name).collect();
+        ids.sort_unstable();
+        names.sort_unstable();
+        assert_eq!(
+            ids, names,
+            "site/src/themes.json ids must match ALL_THEMES names — update the \
+             manifest + run scripts/gen-demos.sh when the registry changes"
+        );
+    }
+
+    #[test]
     fn dark_themes_marked_dark() {
         assert_eq!(CYBERPUNK.kind, ThemeKind::Dark);
         assert_eq!(DRACULA.kind, ThemeKind::Dark);

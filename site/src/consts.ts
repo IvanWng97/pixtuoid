@@ -6,7 +6,6 @@ import weatherData from './weather.json';
 //  be prefixed with import.meta.env.BASE_URL — asset() does that robustly.)
 export const REPO = 'https://github.com/IvanWng97/pixtuoid';
 export const CRATES = 'https://crates.io/crates/pixtuoid';
-export const TAP = 'ivanwng97/pixtuoid';
 export const SPONSOR = 'https://buymeacoffee.com/IvanWng97';
 
 const BASE = import.meta.env.BASE_URL;
@@ -32,8 +31,9 @@ export interface WeatherShot {
   blurb: string;
 }
 
-// Single source of truth for the weather gallery → site/src/weather.json (mirrors
-// the `Weather` enum in pixtuoid's renderer). gen-demos.sh derives its render loop
-// from this same file, and astro.config guards that every id has a weather_<id>.png,
-// so the manifest, the rendered art, and the gallery can't drift.
+// Single source of truth for the weather gallery → site/src/weather.json. The
+// manifest↔art↔gallery triangle is guarded here (gen-demos.sh derives its render
+// loop from this file; astro.config fails the build if any id lacks its
+// weather_<id>.png); the manifest↔Rust-enum edge is guarded by the
+// `weather_gallery_manifest_matches_the_weather_enum` unit test in pixtuoid.
 export const WEATHERS: WeatherShot[] = weatherData as WeatherShot[];

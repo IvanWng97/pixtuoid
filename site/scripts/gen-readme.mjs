@@ -24,14 +24,22 @@ const errors = [];
 const START =
   '<!-- features:start · generated from site/src/features.json by `just gen-readme` — edit the JSON, not this table -->';
 const END = '<!-- features:end -->';
-const rows = features.map((f) => `| ${f.icon} | **${f.name}** | ${f.desc} |`);
+// Escape only what breaks a GFM table row (`|` splits columns, newlines split
+// rows) — desc is intentionally markdown-bearing (backticks, `A\*`), so a
+// blanket escape would corrupt existing rows.
+const cell = (s) => String(s).replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
+const rows = features.map((f) => `| ${cell(f.icon)} | **${cell(f.name)}** | ${cell(f.desc)} |`);
 const block = `${START}\n${['| | Feature | Description |', '|---|---|---|', ...rows].join('\n')}\n${END}`;
 const re = new RegExp(`${escapeRe(START)}[\\s\\S]*?${escapeRe(END)}`);
 if (!re.test(readme)) {
   console.error(`gen-readme: features markers not found in README.md. Expected:\n\n${block}\n`);
   process.exit(1);
 }
-const withFeatures = readme.replace(re, block);
+// () => block: a replacer FUNCTION inserts the value literally — a plain string
+// here would expand `$`-patterns ($$, $&, $') lurking in feature text and
+// silently corrupt the README in a way readme:check can't see (both sides of
+// its comparison would go through the same mangling).
+const withFeatures = readme.replace(re, () => block);
 if (check) {
   if (withFeatures !== readme) {
     errors.push(
@@ -48,13 +56,19 @@ if (check) {
 
 // --- Install commands (checked, not generated — the README install prose is
 // hand-curated, but every canonical command must appear in it verbatim) ---
+// Line-anchored (not substring): a README line that grew a flag (e.g.
+// `... pixtuoid-hook --locked`) must FAIL, or the site would silently keep
+// recommending the shorter command. Comment lines (#…) are site-tab
+// presentation, not commands — skip them.
 const current = readFileSync(readmePath, 'utf8');
+const readmeLines = new Set(current.split('\n').map((l) => l.trim()));
 for (const m of install) {
-  if (!m.readmeCheck) continue; // site-only method (e.g. Debian)
+  if (!m.readmeCheck) continue; // site-only method
   for (const cmd of m.cmds) {
-    if (!current.includes(cmd)) {
+    if (cmd.trimStart().startsWith('#')) continue;
+    if (!readmeLines.has(cmd)) {
       errors.push(
-        `README is missing the ${m.label} install command from install.json: \`${cmd}\` — update the README to match, or fix install.json.`
+        `README is missing the ${m.label} install command from install.json as its own line: \`${cmd}\` — update the README to match, or fix install.json.`
       );
     }
   }

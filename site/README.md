@@ -18,24 +18,35 @@ npm run dev        # http://localhost:4321/pixtuoid/   ·  just site-dev
 ## Quality gates
 
 ```sh
-npm run verify     # format:check → lint → astro check → build  (== site CI)
+npm run verify     # format:check → lint → astro check → readme:check → build  (== site CI)
 # individually:
 npm run format     # prettier --write .
 npm run lint       # eslint .
 npm run check       # astro check (types + templates)
+npm run readme:check # root README in sync with src/{features,install}.json
 npm run build      # astro build → dist/
 ```
 
 From the repo root the same gate is `just site-check` (and `just site-fmt`).
 
-> **Cross-boundary build inputs.** The site reads three files from _outside_ `site/`
+> **Cross-boundary build inputs.** The site reads four files from _outside_ `site/`
 > at build time: the workspace `Cargo.toml` (displayed version, via `vite.define` in
-> `astro.config.mjs`), `docs/CONFIGURATION.md` (rendered as `/config`), and
+> `astro.config.mjs`), `docs/CONFIGURATION.md` (rendered as `/config`),
 > `docs/ARCHITECTURE.md` (rendered as `/architecture` — its Mermaid diagram becomes an
-> inline SVG at build via rehype-mermaid, which is why CI installs Chromium).
+> inline SVG at build via rehype-mermaid, which is why CI installs Chromium), and
+> `docs/CONTRIBUTING.md` (rendered as `/contributing`).
 > Renaming/moving any of them — or breaking the diagram's Mermaid syntax — fails
-> `astro build`; all three are in the `site.yml` / `pages.yml` path filters so a
-> change re-runs CI + redeploys.
+> `astro build`; all four are in the `site.yml` / `pages.yml` path filters so a
+> change re-runs CI + redeploys. The root `README.md` is in `site.yml`'s filters too:
+> its Features table and install commands are sourced from `src/features.json` /
+> `src/install.json` (see below), and `readme:check` fails on drift.
+
+> **Generated README sections.** `src/features.json` (the feature inventory — also
+> drives the Features bento) and `src/install.json` (the canonical install commands —
+> also drives the Install tabs) are single sources shared with the **root README**:
+> `scripts/gen-readme.mjs` regenerates the README's Features table between its
+> markers and checks each `readmeCheck` install command appears verbatim. Edit the
+> JSON → run `just gen-readme` (or `npm run readme:gen`); CI runs `readme:check`.
 
 ## Design
 
@@ -56,9 +67,10 @@ From the repo root the same gate is `just site-check` (and `just site-fmt`).
 ./scripts/gen-demos.sh      # or: just site-demos
 ```
 
-It reads the theme list from `src/themes.json`, so it stays in lock-step with the
-switcher. (Pixel art lives in `public/` on purpose — Astro's `src/assets/`
-optimizer would resize/blur it.)
+It reads the theme list from `src/themes.json` and the weather list from
+`src/weather.json`, so both galleries stay in lock-step with their manifests.
+(Pixel art lives in `public/` on purpose — Astro's `src/assets/` optimizer would
+resize/blur it.)
 
 ## Add a theme
 

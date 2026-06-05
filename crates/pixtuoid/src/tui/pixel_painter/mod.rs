@@ -82,8 +82,10 @@ use palette::{agent_palette, recolor_frame};
 use seat::{paint_character_at, seat_sprite, settle_seat_view, SeatView};
 
 /// The weather names accepted by [`force_weather`], canonical order — for
-/// `--weather` help/error text and the gallery generator. Derived from the
-/// `Weather` enum (single source), so it can't drift from what renders.
+/// `--weather` error text and the manifest drift-guard test. (The gallery
+/// generator itself reads site/src/weather.json; the
+/// `weather_gallery_manifest_matches_the_weather_enum` test keeps that manifest
+/// aligned with this list.)
 pub fn weather_names() -> Vec<&'static str> {
     background::Weather::ALL.iter().map(|w| w.name()).collect()
 }

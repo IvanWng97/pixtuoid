@@ -73,6 +73,13 @@ Download from [GitHub Releases](https://github.com/IvanWng97/pixtuoid/releases/l
 | Linux (x86_64, static) | `pixtuoid-v*-x86_64-unknown-linux-musl.tar.gz` |
 | Linux (ARM64) | `pixtuoid-v*-aarch64-unknown-linux-gnu.tar.gz` |
 
+Debian/Ubuntu `.deb`s (amd64/arm64) are on the same page — install the binary
+**and** the hook shim:
+
+```bash
+sudo dpkg -i pixtuoid_*.deb pixtuoid-hook_*.deb
+```
+
 ### Cargo
 
 ```bash
