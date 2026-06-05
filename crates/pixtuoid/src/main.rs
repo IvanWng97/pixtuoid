@@ -81,7 +81,7 @@ fn main() -> Result<()> {
         } => install::install(install::InstallArgs {
             hook_path,
             config,
-            target: target.map(|t| t.as_str().to_string()),
+            target,
             yes,
         }),
         Cmd::UninstallHooks {
@@ -90,7 +90,7 @@ fn main() -> Result<()> {
             yes,
         } => install::uninstall(install::UninstallArgs {
             config,
-            target: target.map(|t| t.as_str().to_string()),
+            target,
             yes,
         }),
         Cmd::ValidatePack { pack_dir } => validate::validate_pack(&pack_dir),

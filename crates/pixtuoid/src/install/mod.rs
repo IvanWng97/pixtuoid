@@ -8,6 +8,7 @@ use std::path::PathBuf;
 
 use anyhow::{bail, Context, Result};
 
+use crate::cli::TargetName;
 use target::{Target, BACKUP_SUFFIX};
 
 const NO_CLIS_MSG: &str = "no supported CLIs detected; pass --target claude|codex|all";
@@ -20,13 +21,13 @@ fn present_targets(rows: &[(&'static Target, bool)]) -> Vec<&'static Target> {
 pub struct InstallArgs {
     pub hook_path: Option<PathBuf>,
     pub config: Option<PathBuf>,
-    pub target: Option<String>,
+    pub target: Option<TargetName>,
     pub yes: bool,
 }
 
 pub struct UninstallArgs {
     pub config: Option<PathBuf>,
-    pub target: Option<String>,
+    pub target: Option<TargetName>,
     pub yes: bool,
 }
 
@@ -40,13 +41,13 @@ pub enum Plan {
 /// `present` is the injected detection result; `explicit_config` is whether
 /// `--config` was passed (only valid for a single target).
 pub fn plan_targets(
-    requested: Option<&str>,
+    requested: Option<TargetName>,
     explicit_config: bool,
     present: &[(&'static Target, bool)],
     is_tty: bool,
 ) -> Plan {
     match requested {
-        Some("all") => {
+        Some(TargetName::All) => {
             if explicit_config {
                 return Plan::Conflict(
                     "--config applies to a single target; use --target claude|codex".into(),
@@ -59,9 +60,12 @@ pub fn plan_targets(
                 Plan::Targets(chosen)
             }
         }
-        Some(name) => match target::by_name(name) {
-            Some(t) => Plan::Targets(vec![t]),
-            None => Plan::Conflict(format!("unknown target: {name}")),
+        // Claude or Codex: resolve through the registry (`by_name` keeps the
+        // &'static Target lookup string-keyed). The miss arm is defensive — a
+        // registered ValueEnum variant always resolves.
+        Some(t) => match target::by_name(t.as_str()) {
+            Some(found) => Plan::Targets(vec![found]),
+            None => Plan::Conflict(format!("{} target not registered", t.as_str())),
         },
         None => {
             // `--config`/`--settings` without `--target` is the legacy Claude-only
@@ -165,7 +169,7 @@ fn interactive_terminal() -> bool {
 /// True when the run is an interactive bare invocation — no explicit `--target`
 /// or `--config`, not `--yes`, on a TTY — i.e. the case the checklist serves.
 fn interactive_pick(
-    target: &Option<String>,
+    target: &Option<TargetName>,
     config: &Option<PathBuf>,
     yes: bool,
     is_tty: bool,
@@ -224,12 +228,7 @@ pub fn install(args: InstallArgs) -> Result<()> {
     // Flag-driven path (explicit/--yes/non-interactive). Bare interactive
     // multi-target is handled by the picker above, so install never needs a
     // text confirm here — act directly.
-    let plan = plan_targets(
-        args.target.as_deref(),
-        args.config.is_some(),
-        &detection(),
-        is_tty,
-    );
+    let plan = plan_targets(args.target, args.config.is_some(), &detection(), is_tty);
     let targets = resolve_plan(plan)?;
     run_each(&targets, "install", |t| {
         run_install(t, args.config.clone(), args.hook_path.clone())
@@ -257,12 +256,7 @@ pub fn uninstall(args: UninstallArgs) -> Result<()> {
 
     // Flag-driven path. Destructive: confirm an explicit multi-target run (e.g.
     // `--target all`) on a terminal — it rewrites configs + deletes backups.
-    let plan = plan_targets(
-        args.target.as_deref(),
-        args.config.is_some(),
-        &detection(),
-        is_tty,
-    );
+    let plan = plan_targets(args.target, args.config.is_some(), &detection(), is_tty);
     let targets = resolve_plan(plan)?;
     if needs_confirm(targets.len(), args.yes, is_tty)
         && !confirm_targets("remove pixtuoid hooks from", &targets)
@@ -544,13 +538,18 @@ mod tests {
 
     #[test]
     fn explicit_target_claude_ignores_detection() {
-        let p = plan_targets(Some("claude"), false, &present(false, false), false);
+        let p = plan_targets(
+            Some(TargetName::Claude),
+            false,
+            &present(false, false),
+            false,
+        );
         assert!(matches!(p, Plan::Targets(ref t) if t.len() == 1 && t[0].name == "claude"));
     }
 
     #[test]
     fn explicit_all_with_config_is_conflict() {
-        let p = plan_targets(Some("all"), true, &present(true, true), true);
+        let p = plan_targets(Some(TargetName::All), true, &present(true, true), true);
         assert!(matches!(p, Plan::Conflict(_)));
     }
 
@@ -590,7 +589,7 @@ mod tests {
 
     #[test]
     fn interactive_pick_only_on_bare_tty() {
-        let none: Option<String> = None;
+        let none: Option<TargetName> = None;
         let no_cfg: Option<PathBuf> = None;
         // Bare (no --target/--config), not --yes, on a TTY → show the checklist.
         assert!(interactive_pick(&none, &no_cfg, false, true));
@@ -598,7 +597,7 @@ mod tests {
         assert!(!interactive_pick(&none, &no_cfg, false, false));
         assert!(!interactive_pick(&none, &no_cfg, true, true));
         assert!(!interactive_pick(
-            &Some("claude".into()),
+            &Some(TargetName::Claude),
             &no_cfg,
             false,
             true
@@ -630,20 +629,52 @@ mod tests {
 
     #[test]
     fn all_with_nothing_present_is_nothing_detected() {
-        let p = plan_targets(Some("all"), false, &present(false, false), false);
+        let p = plan_targets(Some(TargetName::All), false, &present(false, false), false);
         assert!(matches!(p, Plan::NothingDetected));
     }
 
     #[test]
     fn all_with_both_present_returns_both() {
-        let p = plan_targets(Some("all"), false, &present(true, true), false);
+        let p = plan_targets(Some(TargetName::All), false, &present(true, true), false);
         assert!(matches!(p, Plan::Targets(ref t) if t.len() == 2));
     }
 
     #[test]
-    fn unknown_explicit_target_is_conflict() {
-        let p = plan_targets(Some("bogus"), false, &present(true, true), false);
-        assert!(matches!(p, Plan::Conflict(_)));
+    fn explicit_target_codex_resolves_to_codex() {
+        // The enum makes an unknown --target unrepresentable (clap rejects it),
+        // so the old string "unknown target" conflict path is gone; cover the
+        // other registered variant instead.
+        let p = plan_targets(Some(TargetName::Codex), false, &present(true, true), false);
+        assert!(matches!(p, Plan::Targets(ref t) if t.len() == 1 && t[0].name == "codex"));
+    }
+
+    // The enum and the registry must cover each other BOTH ways — same bridge
+    // pattern as core's `registry_covers_exactly_the_registered_sources`. A
+    // variant without a row hits the defensive "not registered" arm at runtime;
+    // a row without a variant makes its `--target <name>` unrepresentable at
+    // the CLI (clap rejects it) with no compile error — the silent way a new
+    // install target (e.g. reasonix) ships unreachable.
+    #[test]
+    fn target_name_enum_and_registry_cover_each_other() {
+        use clap::ValueEnum;
+        for v in TargetName::value_variants() {
+            if *v != TargetName::All {
+                assert!(
+                    target::by_name(v.as_str()).is_some(),
+                    "{v:?} has no Target row in target::TARGETS"
+                );
+            }
+        }
+        for t in target::TARGETS {
+            assert!(
+                TargetName::value_variants()
+                    .iter()
+                    .any(|v| v.as_str() == t.name),
+                "Target {:?} has no TargetName variant — `--target {}` would be unrepresentable",
+                t.name,
+                t.name
+            );
+        }
     }
 
     // --- resolve_plan ----------------------------------------------------------
