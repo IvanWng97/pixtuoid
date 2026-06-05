@@ -94,6 +94,20 @@ semver:
 coverage:
     cargo llvm-cov nextest --workspace --features {{ features }} --lcov --output-path lcov.info --profile ci
 
+# Fail if the current release_notes() arm still has the uncurated TODO marker.
+# A release-PR guard (#116) — deliberately NOT in preflight, since `just bump`
+# leaves the marker for the human to curate after the bump commit.
+[group('check')]
+[doc('Fail if release_notes() still has the uncurated TODO marker (release-PR guard)')]
+notes-curated:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if grep -q 'TODO: curate' crates/pixtuoid/src/version.rs; then
+        echo "error: release_notes() still has the 'TODO: curate' marker — curate the drafted bullets before merge" >&2
+        exit 1
+    fi
+    echo "release notes curated ✓"
+
 # Install the dev tools every check + recipe relies on (idempotent). Prefers
 # cargo-binstall (prebuilt) and falls back to cargo install (compiles).
 [group('check')]

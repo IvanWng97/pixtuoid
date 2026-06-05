@@ -153,6 +153,30 @@ mod tests {
         );
     }
 
+    /// Guard for #110: the `pixtuoid → pixtuoid-core` path-dep `version` is a
+    /// hardcoded requirement (NOT workspace-inherited), so a bump that misses it
+    /// breaks `cargo publish`. Assert it tracks the crate version. `just bump`
+    /// (cargo set-version) keeps them synced; this fails fast — in `just test`,
+    /// preflight, and the release `check` job — if they ever drift.
+    #[test]
+    fn path_dep_version_tracks_crate_version() {
+        let manifest = include_str!("../Cargo.toml");
+        let dep_line = manifest
+            .lines()
+            .find(|l| l.contains("pixtuoid-core") && l.contains("path ="))
+            .expect("a pixtuoid-core path-dependency line in crates/pixtuoid/Cargo.toml");
+        let dep_version = dep_line
+            .split_once("version = \"")
+            .and_then(|(_, rest)| rest.split('"').next())
+            .expect("a version requirement on the pixtuoid-core path-dep");
+        assert_eq!(
+            dep_version,
+            env!("CARGO_PKG_VERSION"),
+            "pixtuoid-core path-dep version ({dep_version}) != crate version ({}) — run `just bump` (see #110)",
+            env!("CARGO_PKG_VERSION")
+        );
+    }
+
     #[test]
     fn is_valid_version_accepts_well_formed() {
         assert!(is_valid_version("0.4.0"));

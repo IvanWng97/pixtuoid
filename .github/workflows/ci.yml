@@ -57,6 +57,15 @@ jobs:
       - uses: extractions/setup-just@v4
       - run: just machete
 
+  notes-curated:
+    name: release notes curated
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      # No rust-toolchain: a grep guard against shipping uncurated release notes.
+      - uses: extractions/setup-just@v4
+      - run: just notes-curated
+
   hack:
     name: feature combinations
     runs-on: ubuntu-latest
