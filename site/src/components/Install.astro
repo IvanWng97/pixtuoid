@@ -1,4 +1,5 @@
 ---
+import { Code } from 'astro:components';
 import { REPO, CRATES, TAP } from '../consts';
 
 const tabs = [
@@ -41,9 +42,7 @@ const tabs = [
             class:list={['install__panel', { 'is-active': i === 0 }]}
             data-panel={t.id}
           >
-            <pre class="install__code">
-              <code>{t.cmds.join('\n')}</code>
-            </pre>
+            <Code code={t.cmds.join('\n')} lang="bash" />
             <button class="install__copy" data-copy={t.cmds.join('\n')} aria-label="Copy command">
               Copy
             </button>
@@ -149,23 +148,23 @@ const tabs = [
     position: relative;
     margin: 0.4rem;
     border-radius: var(--radius-sm);
-    background: #14130f;
+    overflow: hidden;
     border: 1px solid var(--border);
-  }
-  :global([data-theme='night']) .install__panel {
-    background: #0c0b09;
   }
   .install__panel.is-active {
     display: block;
   }
-  .install__code {
+  /* frame the Shiki <Code> output like the old code box (it brings its own
+     theme background + per-token colors) */
+  .install__panel :global(pre) {
     margin: 0;
     padding: 1rem 1.1rem;
     overflow-x: auto;
-    color: #f3ede3;
-    font-family: var(--font-mono);
     font-size: 0.92rem;
     line-height: 1.6;
+  }
+  .install__panel :global(pre code) {
+    font-family: var(--font-mono);
   }
   .install__copy {
     position: absolute;

@@ -1,12 +1,19 @@
 ---
-import { REPO, CRATES } from '../consts';
+import { REPO, CRATES, asset } from '../consts';
 ---
 
 <footer class="footer">
   <div class="container footer__inner">
     <div class="footer__brand">
       <a class="footer__logo" href="#top">
-        <span class="footer__mark" aria-hidden="true"></span>
+        <img
+          class="footer__mark"
+          src={asset('char-mark.png')}
+          alt=""
+          aria-hidden="true"
+          width="17"
+          height="24"
+        />
         pixtuoid
       </a>
       <p class="footer__tag">A terminal pixel-art office for your AI coding agents.</p>
@@ -49,13 +56,8 @@ import { REPO, CRATES } from '../consts';
     text-decoration: none;
   }
   .footer__mark {
-    width: 11px;
-    height: 11px;
-    border-radius: 2px;
-    background: var(--coral);
-    box-shadow:
-      4px 0 0 var(--blue),
-      0 4px 0 var(--green);
+    height: 24px;
+    width: auto;
     image-rendering: pixelated;
   }
   .footer__tag {

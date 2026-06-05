@@ -14,9 +14,6 @@ const {
   preloadImage,
 } = Astro.props;
 
-// Use asset() (base-path-safe) for internal URLs; BASE_URL has no trailing
-// slash, so raw `${base}favicon.svg` would emit `/pixtuoidfavicon.svg` (404).
-const favicon = asset('favicon.svg');
 // Absolute URLs for crawlers (Astro.site is the deploy origin).
 const SITE = Astro.site ?? new URL('https://ivanwng97.github.io');
 const ogImage = new URL(asset('demos/hero-poster.png'), SITE).href;
@@ -45,9 +42,12 @@ const version = __PIXTUOID_VERSION__; // from the workspace Cargo.toml at build
     />
     <title>{title}</title>
     <meta name="description" content={description} />
-    <link rel="icon" href={favicon} type="image/svg+xml" />
-    {/* PNG fallback + iOS home-screen/tab icon (mobile Safari ignores SVG favicons) */}
+    {
+      /* a little pixtuoid coworker as the tab / home-screen icon (PNG since it's
+        pixel art; mobile Safari also ignores SVG favicons) */
+    }
     <link rel="icon" type="image/png" sizes="32x32" href={asset('favicon-32.png')} />
+    <link rel="icon" type="image/png" sizes="180x180" href={asset('apple-touch-icon.png')} />
     <link rel="apple-touch-icon" href={asset('apple-touch-icon.png')} />
     <link rel="canonical" href={canonical} />
     {/* default = day --bg; the theme-init script below updates it for night/dracula */}
@@ -313,9 +313,9 @@ const version = __PIXTUOID_VERSION__; // from the workspace Cargo.toml at build
           boot.removeEventListener('click', skip);
           document.removeEventListener('keydown', onKey);
           reveal();
-          // focus was confined to the overlay (bg inert) — hand it to the content
-          const main = document.getElementById('main');
-          if (main) main.focus();
+          // leave focus at the document start (don't focus #main: it would scroll
+          // the page and skip keyboard users past the nav/skip-link). The bg is
+          // no longer inert, so Tab flows skip-link -> nav -> content as normal.
         }
         function step() {
           if (i < lines.length) {
