@@ -7,7 +7,7 @@
       "img": "day.png",
       "pos": "center",
       "wide": true,
-      "blurb": "Each running Claude Code or Codex session claims a desk — arriving, working, taking breaks, and leaving when the session ends."
+      "blurb": "Each running coding-agent session claims a desk — arriving, working, taking breaks, and leaving when the session ends."
     }
   },
   {

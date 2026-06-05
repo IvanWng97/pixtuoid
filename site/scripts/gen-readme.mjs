@@ -24,10 +24,11 @@ const errors = [];
 const START =
   '<!-- features:start · generated from site/src/features.json by `just gen-readme` — edit the JSON, not this table -->';
 const END = '<!-- features:end -->';
-// Escape only what breaks a GFM table row (`|` splits columns, newlines split
-// rows) — desc is intentionally markdown-bearing (backticks, `A\*`), so a
-// blanket escape would corrupt existing rows.
-const cell = (s) => String(s).replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
+// Neutralize only what breaks a GFM table row: `|` splits columns (use the
+// HTML entity — backslash-escaping would itself need backslash escaping first,
+// CodeQL js/incomplete-sanitization) and newlines split rows. Desc is
+// intentionally markdown-bearing (backticks, `A\*`), so nothing else is touched.
+const cell = (s) => String(s).replace(/\|/g, '&#124;').replace(/\r?\n/g, ' ');
 const rows = features.map((f) => `| ${cell(f.icon)} | **${cell(f.name)}** | ${cell(f.desc)} |`);
 const block = `${START}\n${['| | Feature | Description |', '|---|---|---|', ...rows].join('\n')}\n${END}`;
 const re = new RegExp(`${escapeRe(START)}[\\s\\S]*?${escapeRe(END)}`);
