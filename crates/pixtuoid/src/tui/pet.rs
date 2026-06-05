@@ -48,13 +48,6 @@ pub enum PetKind {
 impl PetKind {
     pub const ALL: &'static [PetKind] = &[PetKind::Cat, PetKind::Dog];
 
-    pub fn config_name(self) -> &'static str {
-        match self {
-            PetKind::Cat => "cat",
-            PetKind::Dog => "dog",
-        }
-    }
-
     pub fn from_config_name(s: &str) -> Option<Self> {
         match s {
             "cat" => Some(PetKind::Cat),
@@ -159,9 +152,17 @@ mod tests {
     }
 
     #[test]
-    fn config_name_roundtrip() {
+    fn every_pet_kind_is_reachable_from_config() {
         for &kind in PetKind::ALL {
-            assert_eq!(PetKind::from_config_name(kind.config_name()), Some(kind));
+            // Exhaustive match — adding a PetKind without a config string
+            // breaks compile HERE instead of warn-skipping at config load.
+            // (This forcing function used to live in the deleted
+            // config_name's own exhaustive match.)
+            let name = match kind {
+                PetKind::Cat => "cat",
+                PetKind::Dog => "dog",
+            };
+            assert_eq!(PetKind::from_config_name(name), Some(kind));
         }
     }
 
