@@ -1,0 +1,79 @@
+---
+// Faux live agent activity — echoes the app's neon wall-ticker.
+const items = [
+  { state: 'active', who: 'claude-code', what: 'editing src/reducer.rs' },
+  { state: 'waiting', who: 'codex', what: 'awaiting approval' },
+  { state: 'active', who: 'claude-code', what: 'walking to the pantry ☕' },
+  { state: 'active', who: 'codex', what: 'running cargo test' },
+  { state: 'idle', who: 'cursor', what: 'idle at desk' },
+  { state: 'active', who: 'claude-code', what: 'git commit -m "feat: ..."' },
+];
+---
+
+<div class="ticker" aria-hidden="true">
+  <div class="ticker__track">
+    {
+      [0, 1].map(() =>
+        items.map((it) => (
+          <span class="ticker__item">
+            <span class:list={['ticker__dot', it.state]} />
+            <b>{it.who}</b> · {it.what}
+          </span>
+        ))
+      )
+    }
+  </div>
+</div>
+
+<style>
+  .ticker {
+    overflow: hidden;
+    white-space: nowrap;
+    border-block: 1px solid var(--border);
+    background: var(--bg-tint);
+  }
+  .ticker__track {
+    display: inline-flex;
+    padding: 0.55rem 0;
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    color: var(--fg-muted);
+    animation: ticker 38s linear infinite;
+    will-change: transform;
+  }
+  .ticker__item {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-right: 2.6rem;
+  }
+  .ticker__item b {
+    color: var(--fg);
+    font-weight: 700;
+  }
+  .ticker__dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex: none;
+  }
+  .ticker__dot.active {
+    background: var(--green);
+  }
+  .ticker__dot.waiting {
+    background: var(--amber);
+  }
+  .ticker__dot.idle {
+    background: var(--gray);
+  }
+  @keyframes ticker {
+    to {
+      transform: translateX(-50%);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .ticker__track {
+      animation: none;
+    }
+  }
+</style>

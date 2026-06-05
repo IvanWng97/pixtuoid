@@ -13,6 +13,8 @@ const SHORTCUTS: &[(&str, &str)] = &[
     ("Ctrl+C", "quit"),
     ("p", "pause / resume"),
     ("t", "themes"),
+    // Dev-only overlay — hidden from release-build help (see dispatch_key).
+    #[cfg(debug_assertions)]
     ("w", "walkable / approach / route debug"),
     ("?", "toggle this overlay"),
     ("\u{2191} \u{2193} j k", "switch floor"),

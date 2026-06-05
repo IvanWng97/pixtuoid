@@ -1,0 +1,38 @@
+name: site
+
+on:
+  # site/ also renders ../Cargo.toml (the displayed version) and
+  # ../docs/CONFIGURATION.md (the /config page) at build time, so a change to
+  # either must run this CI too — otherwise a broken build slips through.
+  push:
+    branches: [main]
+    paths: ['site/**', 'Cargo.toml', 'docs/CONFIGURATION.md', '.github/workflows/site.yml', '.github/workflows/pages.yml']
+  pull_request:
+    paths: ['site/**', 'Cargo.toml', 'docs/CONFIGURATION.md', '.github/workflows/site.yml', '.github/workflows/pages.yml']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: site-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: format · lint · types · build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: site
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+      - run: npm ci
+      - run: npm run format:check
+      - run: npm run lint
+      - run: npm run check
+      - run: npm run build

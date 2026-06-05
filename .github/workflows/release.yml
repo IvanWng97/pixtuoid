@@ -22,6 +22,8 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@cargo-nextest
+      - uses: extractions/setup-just@v4
       - name: Validate tag matches Cargo.toml version
         run: |
           TAG_VERSION="${GITHUB_REF_NAME#v}"
@@ -30,9 +32,14 @@ jobs:
             echo "::error::Tag ${GITHUB_REF_NAME} does not match Cargo.toml version ${CARGO_VERSION}"
             exit 1
           fi
-      - run: cargo fmt --all --check
-      - run: cargo clippy --workspace --all-targets --features pixtuoid-core/test-renderer -- -D warnings
-      - run: cargo test --workspace --features pixtuoid-core/test-renderer
+      # Single-sourced through the justfile (same recipes as ci.yml + the hooks).
+      # Intentionally lighter than `just preflight` (which also runs lint + hack):
+      # the tag comes from main, which already passed the full CI matrix — here we
+      # re-verify fmt/clippy/tests against the exact tagged commit (`just test`
+      # uses nextest).
+      - run: just fmt-check
+      - run: just clippy
+      - run: just test
 
   build:
     name: build (${{ matrix.target }})
@@ -62,21 +69,18 @@ jobs:
         with:
           key: ${{ matrix.target }}
 
+      - uses: extractions/setup-just@v4
+
       - name: Install cross
         if: matrix.cross
-        run: cargo install cross --git https://github.com/cross-rs/cross
+        uses: taiki-e/install-action@cross
 
       - name: Install musl-tools
         if: contains(matrix.target, 'musl')
         run: sudo apt-get install -y musl-tools
 
       - name: Build
-        run: |
-          if [ "${{ matrix.cross }}" = "true" ]; then
-            cross build --release --target ${{ matrix.target }}
-          else
-            cargo build --release --target ${{ matrix.target }}
-          fi
+        run: just build-target ${{ matrix.target }} ${{ matrix.cross }}
 
       - name: Package
         run: |
@@ -116,26 +120,20 @@ jobs:
         with:
           key: deb-${{ matrix.target }}
 
+      - uses: extractions/setup-just@v4
+
       - name: Install cross
         if: matrix.cross
-        run: cargo install cross --git https://github.com/cross-rs/cross
+        uses: taiki-e/install-action@cross
 
       - name: Install cargo-deb
-        run: cargo install cargo-deb
+        uses: taiki-e/install-action@cargo-deb
 
       - name: Build
-        run: |
-          if [ "${{ matrix.cross }}" = "true" ]; then
-            cross build --release --target ${{ matrix.target }}
-          else
-            cargo build --release --target ${{ matrix.target }}
-          fi
+        run: just build-target ${{ matrix.target }} ${{ matrix.cross }}
 
-      - name: Build deb (pixtuoid)
-        run: cargo deb -p pixtuoid --no-build --no-strip --target ${{ matrix.target }}
-
-      - name: Build deb (pixtuoid-hook)
-        run: cargo deb -p pixtuoid-hook --no-build --no-strip --target ${{ matrix.target }}
+      - name: Build .deb packages
+        run: just deb ${{ matrix.target }}
 
       - uses: actions/upload-artifact@v7
         with:
@@ -173,6 +171,8 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
+          # Mark v*-rc/-beta/-alpha tags as pre-releases so they don't surface as "latest".
+          prerelease: ${{ contains(github.ref_name, '-') }}
           body: ${{ steps.changelog.outputs.content }}
           files: |
             artifacts/*.tar.gz
@@ -198,13 +198,36 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
+          set -euo pipefail
+          # Publish in dependency order. Idempotent: swallow "already on crates.io"
+          # (safe re-run of a partially-published tag). Retry ONLY the index-
+          # propagation race (#111) — a just-published dep not yet visible to the
+          # sparse index when the dependent publishes. Every other failure (auth,
+          # validation, network) fails the job, never hidden.
+          publish_one() {
+            local crate="$1" attempt out
+            for attempt in 1 2 3; do
+              if out=$(cargo publish -p "$crate" 2>&1); then
+                printf '%s\n' "$out"; echo "::notice::$crate published"; return 0
+              elif grep -qiE 'already (exists|uploaded)|crate version .* is already' <<<"$out"; then
+                printf '%s\n' "$out"; echo "::warning::$crate already on crates.io, skipping"; return 0
+              elif grep -qiE 'no matching package|not found in registry|failed to select a version' <<<"$out"; then
+                printf '%s\n' "$out"; echo "::warning::$crate: dependency not yet on the index — retry $attempt/3 after 20s"; sleep 20
+              else
+                printf '%s\n' "$out"; echo "::error::$crate publish failed"; return 1
+              fi
+            done
+            printf '%s\n' "$out"; echo "::error::$crate failed after 3 attempts — index-propagation race, or an unsatisfiable dependency requirement"; return 1
+          }
           for crate in pixtuoid-core pixtuoid-hook pixtuoid; do
-            cargo publish -p "$crate" || echo "::warning::$crate already published, skipping"
+            publish_one "$crate"
           done
 
   homebrew:
     name: update homebrew tap
     needs: release
+    # Never let a pre-release (v*-rc/-beta/-alpha) clobber the stable formula.
+    if: ${{ !contains(github.ref_name, '-') }}
     runs-on: ubuntu-latest
     steps:
       - name: Download artifacts

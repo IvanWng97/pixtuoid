@@ -35,9 +35,16 @@ crates/
 │                       → see crates/pixtuoid/CLAUDE.md and crates/pixtuoid/src/tui/CLAUDE.md
 └── pixtuoid-hook/      tiny shim CC invokes — stdin JSON → Unix socket, 200ms write timeout
 scripts/                crop-snapshot.py (visual verification),
+                        gen-docs-images.py (regenerate ALL docs/images screenshots + demo.gif
+                        from a release build — single source of truth; run via `just demo`),
                         replay-fixture.sh (replay a captured source rollout fixture into a
                         headless run via --codex-sessions-root, for eyeballing lifecycle),
                         check_upstream_drift.py (weekly CI: CC/Codex wire-format rename watch)
+site/                   Astro marketing landing page → GitHub Pages (ivanwng97.github.io/pixtuoid).
+                        Self-contained Node project; own CI (.github/workflows/site.yml) + deploy
+                        (.github/workflows/pages.yml). `just site-{setup,dev,check,fmt,demos}`;
+                        demo art is generated from the binary by scripts/gen-demos.sh.
+                        → see site/README.md
 ```
 
 > Note: the `sprites/` directory (default / robot / skeleton character packs) lives under
@@ -47,8 +54,8 @@ scripts/                crop-snapshot.py (visual verification),
 ## Build & test
 
 ```
-cargo build --workspace                                              # debug build
-cargo build --release --workspace                                    # release build
+just build                                                           # debug build
+just build --release                                                 # release build
 just test                                                            # all tests (600+) — nextest if installed, else cargo test
 cargo test -p pixtuoid --lib <filter>                                # fast iteration: one crate's unit tests only
 cargo run --release --example snapshot -- /tmp/snap.png              # render TUI to PNG
@@ -57,7 +64,7 @@ cargo run --release --example snapshot -- /tmp/snap.png              # render TU
 
 The `test-renderer` feature is needed for the `e2e.rs` integration test; **`just test` injects it for you** (as does every recipe), so prefer it over a raw `cargo test`. `just test` runs `cargo nextest run` when `cargo-nextest` is installed (parallel execution, the same runner CI uses) and falls back to `cargo test` otherwise. While iterating on one crate, scope it (`cargo nextest run -p pixtuoid` or `cargo test -p pixtuoid --lib <filter>`) — seconds, vs a full-workspace run.
 
-> **Don't chain `cargo clippy && cargo test`.** Clippy and test/nextest use *separate* build caches (clippy's rustc driver has a different fingerprint), so chaining them recompiles the whole workspace **twice**. Run the single gate `just preflight` (lint → clippy → test, the exact CI order), or run one check at a time.
+> **Don't chain `cargo clippy && cargo test`.** Clippy and test/nextest use *separate* build caches (clippy's rustc driver has a different fingerprint), so chaining them recompiles the whole workspace **twice**. Run the single gate `just preflight` (lint → clippy → hack → test, the exact CI order), or run one check at a time.
 
 ### Test organization (three tiers)
 
@@ -65,17 +72,22 @@ The `test-renderer` feature is needed for the `e2e.rs` integration test; **`just
 - **Integration / public-contract** — `crates/<crate>/tests/*.rs` (separate crate, only `pub` API): `reducer.rs`, `e2e.rs`, `hook_socket.rs`, `jsonl_watcher.rs`.
 - **Headless render harness** — `tui_renderer/harness.rs` (`#[cfg(test)] mod harness;`). Drives the *real* `TuiRenderer` through `render()` / `navigate_floor()` via ratatui `TestBackend` (no terminal). Output-first assertions: `buf()` (RgbBuffer pixels) + the `#[cfg(test)] frame_buffer()` ratatui-cell inspector; white-box seams (`floor_motion`, `floor_buf`, `inject_coffee`) only where an invariant isn't observable from output. NOT coverable headlessly (excluded in `codecov.yml`): the crossterm event loop (`tui/mod.rs`, reads the real TTY) and `main.rs`.
 
-Coverage: `cargo llvm-cov --workspace --features pixtuoid-core/test-renderer` (CI uses `llvm-cov nextest`).
+Coverage: `just coverage` (writes lcov.info + JUnit XML — the exact command CI runs).
 
 ### Visual verification (Python venv)
 
 ```
 python3 -m venv .venv
 .venv/bin/pip install -r requirements-dev.txt
-cargo build --release --example snapshot
+just build --release --example snapshot
 ./target/release/examples/snapshot --cols 192 --rows 80 /tmp/snap.png
 .venv/bin/python3 scripts/crop-snapshot.py /tmp/snap.png --scale 3
 ```
+
+> To regenerate **all** of `docs/images/` (screenshot, gallery-\*, themes-composite, demo.gif)
+> from a release build, run **`just demo`** (→ `scripts/gen-docs-images.py`) — the single source
+> of truth for the office images (render params, crop quadrants, themes-composite diagonal), so
+> the screenshots never drift.
 
 See `.claude/skills/beautify-decoration/SKILL.md` for the full iteration loop, self-critique checklist, and sprite-format pitfalls.
 
@@ -83,13 +95,19 @@ See `.claude/skills/beautify-decoration/SKILL.md` for the full iteration loop, s
 
 The `justfile` is the **single source of truth** for what each check runs —
 `.github/workflows/ci.yml` and the git hooks call the same recipes, so there's
-no CI-vs-local drift to maintain. Requires `just` (`brew install just`).
+no CI-vs-local drift to maintain. Requires `just` (`brew install just`); the
+checks also need a handful of cargo tools — `just setup-tools` installs them
+(cargo-hack, cargo-nextest, cargo-machete, cargo-deny, cargo-semver-checks, cargo-edit).
 
 ```
 just              # list recipes
-just preflight    # full pre-push gate: lint (fmt+machete+deny, parallel) → clippy → test
+just setup-tools  # install the dev tools the checks need (run once per clone)
+just preflight    # full pre-push gate: lint (fmt+machete+deny, parallel) → clippy → hack → test
 just fmt          # auto-format
 ```
+
+(`hack` is `cargo hack --feature-powerset` — it catches code that only builds
+with `test-renderer` on. `semver` and `coverage`/`smoke` are CI-only.)
 
 Run `just preflight` locally to avoid the round-trip of "push → wait for CI →
 red → fix → push again."
@@ -105,6 +123,24 @@ git config core.hooksPath .githooks
 
 Bypass in an emergency with `git commit --no-verify` or `SKIP_PREFLIGHT=1 git push`.
 
+### Cutting a release
+
+`just bump X.Y.Z` is the one command. It rewrites **every** version number — the
+workspace version, the `pixtuoid`→`pixtuoid-core` path-dep requirement, and
+`Cargo.lock` (via `cargo set-version`, so the path-dep can't drift) — drafts the
+in-app `release_notes()` arm from the commit log, runs `just preflight`, and
+commits on a `release/vX.Y.Z` branch. It **stops before the tag**: pushing the
+tag is what triggers the *irreversible* crates.io publish (`release.yml`), so
+that stays a human step.
+
+```
+just bump 0.5.1                              # bump + draft notes + preflight → branch
+# curate release_notes() to ~6 highlights → PR → merge, then:
+git tag v0.5.1 && git push origin v0.5.1     # fires build + crates.io + homebrew
+```
+
+Needs cargo-edit (`just setup-tools`). See [`CONTRIBUTING.md`](CONTRIBUTING.md#releasing).
+
 ## Conventions
 
 - **TDD first.** Plan and existing tests are TDD-shaped — failing test → minimal impl → commit. Don't add code without a test that exercises it.
@@ -116,7 +152,7 @@ Bypass in an emergency with `git commit --no-verify` or `SKIP_PREFLIGHT=1 git pu
 - **macOS first.** BSD-flavored CLI, brew, launchd for daemons. The hook shim is Unix-socket specific (`std::os::unix::net::UnixStream`).
 - **Keep docs current.** When a change alters module structure, architecture, developer workflow, or the public API surface, update the relevant `CLAUDE.md` (workspace or nested) and `README.md` in the same commit. Stale docs cost more than the 5 minutes to update them.
 - **Track every deferred finding as a GitHub issue.** When a review finding, bug, or improvement is real but you consciously defer it (out of scope for the current PR, low-priority, needs broader design), `gh issue create` to capture it BEFORE moving on — don't let it live only in a chat message or a PR comment that scrolls away. The issue body should state the problem, why it was deferred, and a concrete fix sketch (link the PR/review that surfaced it). A deferred finding with no issue is a silently-dropped finding. (Verify the finding is real first — see "Don't blindly accept reviewer findings" below; never file an issue for a hallucinated/refuted one.)
-- **Sprite changes require visual verification.** After editing any `.sprite` file: (1) rebuild the snapshot example, (2) render at `--cols 192 --rows 80`, (3) crop the relevant quadrant with `scripts/crop-snapshot.py --scale 3`, (4) read the cropped PNG and self-critique — does a stranger recognize the intended pose/object? Iterate until it reads at half-block scale. Then rebuild the release binary (`cargo build --release --workspace`). Commit messages should include iteration history (which designs were tried and why they were rejected). See `.claude/skills/beautify-decoration/SKILL.md` for the full checklist.
+- **Sprite changes require visual verification.** After editing any `.sprite` file: (1) rebuild the snapshot example, (2) render at `--cols 192 --rows 80`, (3) crop the relevant quadrant with `scripts/crop-snapshot.py --scale 3`, (4) read the cropped PNG and self-critique — does a stranger recognize the intended pose/object? Iterate until it reads at half-block scale. Then rebuild the release binary (`just build --release`). Commit messages should include iteration history (which designs were tried and why they were rejected). See `.claude/skills/beautify-decoration/SKILL.md` for the full checklist.
 
 ## Architecture invariants
 

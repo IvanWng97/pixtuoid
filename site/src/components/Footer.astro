@@ -1,0 +1,94 @@
+---
+import { REPO, CRATES, asset } from '../consts';
+---
+
+<footer class="footer">
+  <div class="container footer__inner">
+    <div class="footer__brand">
+      <a class="footer__logo" href="#top">
+        <img
+          class="footer__mark"
+          src={asset('char-mark.png')}
+          alt=""
+          aria-hidden="true"
+          width="17"
+          height="24"
+        />
+        pixtuoid
+      </a>
+      <p class="footer__tag">A terminal pixel-art office for your AI coding agents.</p>
+    </div>
+    <nav class="footer__links" aria-label="Footer">
+      <a href={REPO} target="_blank" rel="noreferrer">GitHub</a>
+      <a href={CRATES} target="_blank" rel="noreferrer">crates.io</a>
+      <a href={`${REPO}/releases`} target="_blank" rel="noreferrer">Releases</a>
+      <a href="#install">Install</a>
+    </nav>
+  </div>
+  <div class="container footer__legal">
+    <span>MIT licensed · built in Rust 🦀</span>
+    <span>Made with Claude Code</span>
+  </div>
+</footer>
+
+<style>
+  .footer {
+    margin-top: clamp(2rem, 6vw, 5rem);
+    padding-block: 2.6rem 1.6rem;
+    border-top: 1px solid var(--border);
+    background: var(--bg-tint);
+  }
+  .footer__inner {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.5rem 2rem;
+    justify-content: space-between;
+    align-items: flex-start;
+  }
+  .footer__logo {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 1.1rem;
+    color: var(--fg);
+    text-decoration: none;
+  }
+  .footer__mark {
+    height: 24px;
+    width: auto;
+    image-rendering: pixelated;
+  }
+  .footer__tag {
+    margin-top: 0.5rem;
+    color: var(--fg-muted);
+    font-size: 0.95rem;
+    max-width: 34ch;
+  }
+  .footer__links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.1rem;
+    font-family: var(--font-mono);
+    font-size: 0.88rem;
+  }
+  .footer__links a {
+    color: var(--fg-muted);
+    text-decoration: none;
+  }
+  .footer__links a:hover {
+    color: var(--fg);
+  }
+  .footer__legal {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.5rem;
+    justify-content: space-between;
+    margin-top: 1.8rem;
+    padding-top: 1.2rem;
+    border-top: 1px solid var(--border);
+    font-size: 0.85rem;
+    color: var(--fg-muted);
+  }
+</style>

@@ -7,7 +7,7 @@ members  = [
 ]
 
 [workspace.package]
-version      = "0.4.1"
+version      = "0.5.0"
 edition      = "2021"
 rust-version = "1.78"
 license      = "MIT"
@@ -17,14 +17,6 @@ description  = "Terminal pixel-art office for AI coding agents"
 homepage     = "https://github.com/IvanWng97/pixtuoid"
 keywords     = ["terminal", "tui", "pixel-art", "ai-agents", "claude"]
 categories   = ["command-line-utilities", "visualization"]
-
-[workspace.metadata.release]
-shared-version         = "workspace"
-tag-prefix             = "v"
-tag-name               = "v{{version}}"
-pre-release-commit-message = "chore: release v{{version}}"
-publish                = false
-push-remote            = "origin"
 
 [profile.release]
 lto           = true

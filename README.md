@@ -52,7 +52,7 @@ pixtuoid install-hooks
 pixtuoid
 ```
 
-In another terminal, start a Claude Code session. A character walks in from the elevator within a second.
+In another terminal, start a supported coding agent (Claude Code, Codex, Antigravity, …). A character walks in from the elevator within a second.
 
 **Keyboard shortcuts:** `q` quit · `p` pause · `t` themes · `?` help · `↑↓/jk/PgUp/PgDn` floors · click to pin tooltip
 
@@ -80,7 +80,7 @@ cargo install pixtuoid pixtuoid-hook
 
 ```bash
 git clone https://github.com/IvanWng97/pixtuoid && cd pixtuoid
-cargo build --release
+just build --release
 ```
 
 </details>
@@ -89,7 +89,7 @@ cargo build --release
 
 | | Feature | Description |
 |---|---|---|
-| 🏢 | **Multi-agent office** | Each CC session gets a desk; overflow agents auto-fill new floors |
+| 🏢 | **Multi-agent office** | Each agent session gets a desk; overflow agents auto-fill new floors |
 | 🛗 | **Multi-floor office** | PageUp/PageDown/↑↓/jk to navigate floors with slide transition |
 | 🎭 | **Animated characters** | Typing, waiting (`?`), sleeping (z's), walking with A\*-routed pathfinding |
 | 💡 | **Per-tool monitor glow** | Edit = blue, Bash = orange, Read = cyan — scannable at a glance |
@@ -100,7 +100,7 @@ cargo build --release
 | 🐾 | **Office pets** | A cat or dog (one per floor) roams desks, pantry, sofas; sleeps near idle agents. Click to pet — pixel-art hearts float up |
 | ☕ | **Coffee run** | Idle agents visit the pantry, carry a cup back to their desk. Cup stays while you work; taken on exit |
 | 💬 | **Pantry chitchat** | 2+ idle agents at the same waypoint trigger speech bubbles with dev-humor snippets |
-| 🛡️ | **Hook-safe** | The shim always exits 0 — a stuck visualizer can never block Claude Code |
+| 🛡️ | **Hook-safe** | The shim always exits 0 — a stuck visualizer can never block your agent |
 
 ## Supported Tools
 
@@ -123,55 +123,10 @@ Press `t` to switch themes with live preview. Your choice persists across sessio
   <img src="docs/images/themes-composite.png" alt="6 themes: Normal, Cyberpunk, Dracula, Tokyo Night, Catppuccin, Gruvbox" width="800" />
 </p>
 
-Settings are stored in `~/.config/pixtuoid/config.toml` (respects `$XDG_CONFIG_HOME`).
-The file is created on first launch. All user settings below are **optional** —
-omit any key to use its default.
-
-```toml
-theme = "cyberpunk"
-max-desks = 8
-pack-dir = "~/.config/pixtuoid/packs/robot"
-
-# One stanza per pet. Omit the whole section to show all pets with default
-# names; use `pets = []` to disable all pets. `name` is optional (shown in
-# the pet's hover tooltip). Keep [[pets]] last — it's a table section.
-[[pets]]
-kind = "cat"
-name = "Whiskers"   # optional — omit for "Office Cat"
-
-[[pets]]
-kind = "dog"        # name omitted → "Office Dog"
-```
-
-**User settings** (safe to edit):
-
-| Key | Default | Description |
-|-----|---------|-------------|
-| `theme` | `"normal"` | Color theme — `normal`, `cyberpunk`, `dracula`, `tokyo-night`, `catppuccin`, `gruvbox` |
-| `max-desks` | auto | Cap desks per floor. If unset, auto-computed from terminal size. Excess agents overflow to additional floors. |
-| `pack-dir` | — | Custom sprite pack directory. Supports `~` expansion. |
-| `[[pets]]` | all kinds, default names | One stanza per pet. `kind` (`"cat"`/`"dog"`) is required; `name` is optional (the hover-tooltip label, default `Office Cat`/`Office Dog`). Omit the section for all pets; `pets = []` for none; an unknown `kind` is skipped without affecting other settings. Keep it last (it's a table section). |
-
-**System-managed** (don't edit — pixtuoid writes these for you):
-
-| Key | Purpose |
-|-----|---------|
-| `last-seen-version` | Tracks the highest version you've launched, so the "what's new" popup only fires once per upgrade. Pixtuoid overwrites this on every launch. |
-
-CLI flags override config: `pixtuoid run --theme dracula`
-
-### Custom Sprite Packs
-
-Create your own character sprites:
-
-```bash
-pixtuoid init-pack ./my-pack     # extract skeleton template
-# edit the .sprite files in ./my-pack
-pixtuoid validate-pack ./my-pack # check for missing animations
-pixtuoid run --pack-dir ./my-pack
-```
-
-A **robot** pack ships as an example at `crates/pixtuoid/sprites/robot/`. See the [sprite format docs](CLAUDE.md) for palette keys and animation requirements.
+Settings live in `~/.config/pixtuoid/config.toml` — theme, desk cap, custom pet
+names, and sprite packs. CLI flags override the file (`pixtuoid run --theme dracula`).
+See **[docs/CONFIGURATION.md](docs/CONFIGURATION.md)** for the full key reference
+(defaults, system-managed keys) and the custom sprite-pack workflow.
 
 ## How It Works
 
@@ -179,7 +134,7 @@ A **robot** pack ships as an example at `crates/pixtuoid/sprites/robot/`. See th
 <summary><strong>Architecture</strong></summary>
 
 ```
-CC tool call ──► CC fires hook ──► pixtuoid-hook (shim)
+agent tool call ──► agent fires hook ──► pixtuoid-hook (shim)
                                          │ JSON over Unix socket
                                          ▼
                                   /tmp/pixtuoid-{uid}.sock
@@ -200,7 +155,7 @@ Three Rust crates:
 |---|---|
 | **pixtuoid-core** | Headless library — no terminal deps. Source trait, reducer, pose, layout, sprites. |
 | **pixtuoid** | TUI binary — ratatui + crossterm + tokio. Half-block rendering + theme system. |
-| **pixtuoid-hook** | Tiny shim CC invokes from hooks. 200ms timeout, always exits 0. |
+| **pixtuoid-hook** | Tiny shim the agent CLI invokes from hooks. 200ms timeout, always exits 0. |
 
 </details>
 
@@ -246,22 +201,7 @@ Three Rust crates:
 
 ## Contributing
 
-See [`CLAUDE.md`](CLAUDE.md) for architecture and conventions. PRs welcome — especially new themes and `Source` adapters for other agent CLIs (Copilot, Cursor, OpenCode).
-
-<details>
-<summary><strong>Adding a new agent CLI</strong></summary>
-
-Implement the `Source` trait and plug in via `SourceManager::with_source()`:
-
-```rust
-#[async_trait]
-pub trait Source: Send + 'static {
-    fn name(&self) -> &str;
-    async fn run(self: Box<Self>, tx: TaggedSender) -> anyhow::Result<()>;
-}
-```
-
-</details>
+PRs welcome — especially new themes and `Source` adapters for other agent CLIs (Copilot, Cursor, OpenCode). See **[CONTRIBUTING.md](CONTRIBUTING.md)** for the build/test workflow, conventions, the review process, and how to add a new agent CLI. Architecture and the load-bearing invariants live in [`CLAUDE.md`](CLAUDE.md).
 
 ## Acknowledgments
 

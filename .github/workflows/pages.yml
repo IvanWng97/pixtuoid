@@ -1,0 +1,49 @@
+name: deploy site
+
+on:
+  # Redeploy when the inputs the build reads change: site/ itself, the version
+  # in ../Cargo.toml, and ../docs/CONFIGURATION.md (the /config page). Without
+  # the latter two the published site silently lags its own source.
+  push:
+    branches: [main]
+    paths: ['site/**', 'Cargo.toml', 'docs/CONFIGURATION.md', '.github/workflows/pages.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# one deploy at a time; don't cancel an in-flight publish
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+      # withastro/action only runs `astro build`; gate the deploy on lint + types
+      # too, so a build-clean but lint/typecheck-failing commit can't ship.
+      - name: Validate (lint + types)
+        working-directory: site
+        run: npm ci && npm run lint && npm run check
+      - uses: withastro/action@v6
+        with:
+          path: ./site
+          node-version: 22
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

@@ -52,10 +52,41 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
+      # No rust-toolchain: cargo-machete parses Cargo.toml, it never compiles.
       - uses: taiki-e/install-action@cargo-machete
       - uses: extractions/setup-just@v4
       - run: just machete
+
+  notes-curated:
+    name: release notes curated
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      # No rust-toolchain: a grep guard against shipping uncurated release notes.
+      - uses: extractions/setup-just@v4
+      - run: just notes-curated
+
+  hack:
+    name: feature combinations
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@cargo-hack
+      - uses: extractions/setup-just@v4
+      - run: just hack
+
+  semver:
+    name: semver-checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@cargo-semver-checks
+      - uses: extractions/setup-just@v4
+      - run: just semver
 
   coverage:
     name: coverage
@@ -70,8 +101,9 @@ jobs:
         uses: taiki-e/install-action@cargo-llvm-cov
       - name: Install cargo-nextest
         uses: taiki-e/install-action@cargo-nextest
+      - uses: extractions/setup-just@v4
       - name: Generate coverage + JUnit XML (single test run)
-        run: cargo llvm-cov nextest --workspace --features pixtuoid-core/test-renderer --lcov --output-path lcov.info --profile ci
+        run: just coverage
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v6
         with:
@@ -100,8 +132,9 @@ jobs:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - uses: extractions/setup-just@v4
       - name: Build release binaries + examples
-        run: cargo build --release --workspace --bins --examples
+        run: just build --release --bins --examples
       - name: pixtuoid --help exits 0
         run: ./target/release/pixtuoid --help
       - name: pixtuoid-hook exits 0 with no socket
