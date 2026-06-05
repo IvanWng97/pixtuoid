@@ -1,5 +1,5 @@
 # 8x12 walker-with-coffee frame 1 — right foot forward, carrying a cup.
-# Cup: warm beige (V) matching the desk personalization cup color.
+# Cup: warm beige (V) matching the desk cup color (paint_desk_coffee).
 @frame 0
 . n H H H H n .
 n H H H H H H n

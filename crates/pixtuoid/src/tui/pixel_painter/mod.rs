@@ -542,10 +542,6 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
         let screen_glow = occupant
             .filter(|_| seated_agents.get(&i).copied().unwrap_or(false))
             .and_then(|a| palette::tool_glow_tint(a, &ctx.theme.tool_glow));
-        let session_age_secs = occupant
-            .and_then(|a| ctx.now.duration_since(a.created_at).ok())
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
         let has_coffee = occupant.is_some_and(|a| ctx.coffee_holders.contains(&a.agent_id));
         let coffee_steam = has_coffee
             && occupant.is_some_and(|a| {
@@ -566,7 +562,6 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
                 is_last_col,
                 has_cabinet: i % 2 == 0,
                 screen_glow,
-                session_age_secs,
                 has_coffee,
                 coffee_steam,
             },

@@ -238,31 +238,6 @@ pub static CYBERPUNK: Theme = Theme {
             g: 48,
             b: 72,
         },
-        desk_plant_light: Rgb {
-            r: 0,
-            g: 255,
-            b: 140,
-        },
-        desk_plant_dark: Rgb {
-            r: 0,
-            g: 180,
-            b: 100,
-        },
-        desk_plant_pot: Rgb {
-            r: 60,
-            g: 50,
-            b: 80,
-        },
-        photo_frame: Rgb {
-            r: 70,
-            g: 50,
-            b: 100,
-        },
-        photo_bg: Rgb {
-            r: 255,
-            g: 60,
-            b: 180,
-        },
     },
     effects: EffectColors {
         monitor_frame_lit: Rgb {

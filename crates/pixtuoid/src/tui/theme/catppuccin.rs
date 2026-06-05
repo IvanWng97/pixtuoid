@@ -262,31 +262,6 @@ pub static CATPPUCCIN: Theme = Theme {
             g: 112,
             b: 134,
         },
-        desk_plant_light: Rgb {
-            r: 166,
-            g: 227,
-            b: 161,
-        },
-        desk_plant_dark: Rgb {
-            r: 116,
-            g: 190,
-            b: 110,
-        },
-        desk_plant_pot: Rgb {
-            r: 69,
-            g: 62,
-            b: 80,
-        },
-        photo_frame: Rgb {
-            r: 69,
-            g: 71,
-            b: 90,
-        },
-        photo_bg: Rgb {
-            r: 245,
-            g: 194,
-            b: 231,
-        },
     },
     effects: EffectColors {
         monitor_frame_lit: Rgb {

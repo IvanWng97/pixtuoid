@@ -254,31 +254,6 @@ pub static TOKYO_NIGHT: Theme = Theme {
             g: 84,
             b: 108,
         },
-        desk_plant_light: Rgb {
-            r: 158,
-            g: 206,
-            b: 106,
-        },
-        desk_plant_dark: Rgb {
-            r: 100,
-            g: 160,
-            b: 70,
-        },
-        desk_plant_pot: Rgb {
-            r: 52,
-            g: 50,
-            b: 70,
-        },
-        photo_frame: Rgb {
-            r: 65,
-            g: 72,
-            b: 104,
-        },
-        photo_bg: Rgb {
-            r: 247,
-            g: 118,
-            b: 142,
-        },
     },
     effects: EffectColors {
         monitor_frame_lit: Rgb {

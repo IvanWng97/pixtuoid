@@ -254,31 +254,6 @@ pub static DRACULA: Theme = Theme {
             g: 98,
             b: 115,
         },
-        desk_plant_light: Rgb {
-            r: 80,
-            g: 250,
-            b: 123,
-        },
-        desk_plant_dark: Rgb {
-            r: 50,
-            g: 180,
-            b: 80,
-        },
-        desk_plant_pot: Rgb {
-            r: 68,
-            g: 60,
-            b: 80,
-        },
-        photo_frame: Rgb {
-            r: 68,
-            g: 71,
-            b: 90,
-        },
-        photo_bg: Rgb {
-            r: 255,
-            g: 121,
-            b: 198,
-        },
     },
     effects: EffectColors {
         monitor_frame_lit: Rgb {

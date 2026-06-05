@@ -260,31 +260,6 @@ pub static GRUVBOX: Theme = Theme {
             g: 131,
             b: 116,
         },
-        desk_plant_light: Rgb {
-            r: 184,
-            g: 187,
-            b: 38,
-        },
-        desk_plant_dark: Rgb {
-            r: 142,
-            g: 192,
-            b: 124,
-        },
-        desk_plant_pot: Rgb {
-            r: 80,
-            g: 70,
-            b: 55,
-        },
-        photo_frame: Rgb {
-            r: 80,
-            g: 73,
-            b: 69,
-        },
-        photo_bg: Rgb {
-            r: 211,
-            g: 134,
-            b: 155,
-        },
     },
     effects: EffectColors {
         monitor_frame_lit: Rgb {

@@ -254,31 +254,6 @@ pub static NORMAL: Theme = Theme {
             g: 160,
             b: 130,
         },
-        desk_plant_light: Rgb {
-            r: 100,
-            g: 180,
-            b: 100,
-        },
-        desk_plant_dark: Rgb {
-            r: 60,
-            g: 140,
-            b: 60,
-        },
-        desk_plant_pot: Rgb {
-            r: 140,
-            g: 100,
-            b: 70,
-        },
-        photo_frame: Rgb {
-            r: 120,
-            g: 100,
-            b: 80,
-        },
-        photo_bg: Rgb {
-            r: 160,
-            g: 200,
-            b: 230,
-        },
     },
     effects: EffectColors {
         monitor_frame_lit: Rgb {

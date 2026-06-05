@@ -100,7 +100,6 @@ cargo build --release
 | 🐾 | **Office pets** | A cat or dog (one per floor) roams desks, pantry, sofas; sleeps near idle agents. Click to pet — pixel-art hearts float up |
 | ☕ | **Coffee run** | Idle agents visit the pantry, carry a cup back to their desk. Cup stays while you work; taken on exit |
 | 💬 | **Pantry chitchat** | 2+ idle agents at the same waypoint trigger speech bubbles with dev-humor snippets |
-| 🪴 | **Desk personalization** | Plant (30min), photo frame (1hr) appear over time |
 | 🛡️ | **Hook-safe** | The shim always exits 0 — a stuck visualizer can never block Claude Code |
 
 ## Supported Tools

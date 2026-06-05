@@ -97,11 +97,6 @@ pub struct FurnitureColors {
     pub chair_trim: Rgb,
     pub coffee_cup: Rgb,
     pub coffee_cup_shadow: Rgb,
-    pub desk_plant_light: Rgb,
-    pub desk_plant_dark: Rgb,
-    pub desk_plant_pot: Rgb,
-    pub photo_frame: Rgb,
-    pub photo_bg: Rgb,
 }
 
 #[derive(Debug, Clone)]

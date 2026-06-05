@@ -52,7 +52,6 @@ pub(super) enum DrawableKind<'a> {
         is_last_col: bool,
         has_cabinet: bool,
         screen_glow: Option<Rgb>,
-        session_age_secs: u64,
         has_coffee: bool,
         coffee_steam: bool,
     },
@@ -373,7 +372,6 @@ pub(super) fn paint_drawable(
             is_last_col,
             has_cabinet,
             screen_glow,
-            session_age_secs,
             has_coffee,
             coffee_steam,
         } => {
@@ -412,15 +410,7 @@ pub(super) fn paint_drawable(
                     blit_frame(bin, bin_x, bin_y, buf);
                 }
             }
-            paint_desk_personalization(
-                buf,
-                *desk,
-                *session_age_secs,
-                *has_coffee,
-                *coffee_steam,
-                now,
-                theme,
-            );
+            paint_desk_coffee(buf, *desk, *has_coffee, *coffee_steam, now, theme);
             if let Some(tint) = screen_glow {
                 paint_screen_glow(buf, desk.x, desk.y, now, *tint, theme);
             }
@@ -710,16 +700,15 @@ pub(super) fn paint_drawable(
     }
 }
 
-fn paint_desk_personalization(
+fn paint_desk_coffee(
     buf: &mut RgbBuffer,
     desk: Point,
-    age_secs: u64,
     has_coffee: bool,
     coffee_steam: bool,
     now: SystemTime,
     theme: &crate::tui::theme::Theme,
 ) {
-    if age_secs == 0 && !has_coffee {
+    if !has_coffee {
         return;
     }
     let put = |buf: &mut RgbBuffer, x: u16, y: u16, c: Rgb| {
@@ -727,34 +716,14 @@ fn paint_desk_personalization(
             buf.put(x, y, c);
         }
     };
-    if has_coffee {
-        let cx = desk.x + 2;
-        let cy = desk.y + 2;
-        put(buf, cx, cy, theme.furniture.coffee_cup);
-        put(buf, cx + 1, cy, theme.furniture.coffee_cup);
-        put(buf, cx, cy + 1, theme.furniture.coffee_cup_shadow);
-        put(buf, cx + 1, cy + 1, theme.furniture.coffee_cup_shadow);
-        if coffee_steam {
-            paint_coffee_steam(buf, Point { x: cx, y: cy }, now, theme);
-        }
-    }
-    if age_secs >= 1800 {
-        let px = desk.x + DESK_W - 2;
-        let py = desk.y + 1;
-        put(buf, px, py, theme.furniture.desk_plant_light);
-        put(buf, px + 1, py, theme.furniture.desk_plant_dark);
-        put(buf, px, py + 1, theme.furniture.desk_plant_light);
-        put(buf, px + 1, py + 1, theme.furniture.desk_plant_light);
-        put(buf, px, py + 2, theme.furniture.desk_plant_pot);
-        put(buf, px + 1, py + 2, theme.furniture.desk_plant_pot);
-    }
-    if age_secs >= 3600 {
-        let fx = desk.x + 1;
-        let fy = desk.y;
-        put(buf, fx, fy, theme.furniture.photo_frame);
-        put(buf, fx + 1, fy, theme.furniture.photo_frame);
-        put(buf, fx, fy + 1, theme.furniture.photo_bg);
-        put(buf, fx + 1, fy + 1, theme.furniture.photo_bg);
+    let cx = desk.x + 2;
+    let cy = desk.y + 2;
+    put(buf, cx, cy, theme.furniture.coffee_cup);
+    put(buf, cx + 1, cy, theme.furniture.coffee_cup);
+    put(buf, cx, cy + 1, theme.furniture.coffee_cup_shadow);
+    put(buf, cx + 1, cy + 1, theme.furniture.coffee_cup_shadow);
+    if coffee_steam {
+        paint_coffee_steam(buf, Point { x: cx, y: cy }, now, theme);
     }
 }
 
@@ -960,7 +929,6 @@ mod tests {
                 is_last_col: true,
                 has_cabinet: true,
                 screen_glow: None,
-                session_age_secs: 0,
                 has_coffee: false,
                 coffee_steam: false,
             },
