@@ -3,7 +3,7 @@
 Thanks for your interest! PRs are welcome — especially **new themes** and
 **`Source` adapters** for other agent CLIs (Copilot, Cursor, OpenCode).
 
-Before you start, read [`CLAUDE.md`](CLAUDE.md) at the repo root (and the nested
+Before you start, read [`CLAUDE.md`](../CLAUDE.md) at the repo root (and the nested
 `crates/*/CLAUDE.md` for the crate you touch). It holds the architecture
 invariants, "known sharp edges", and conventions that are load-bearing here —
 many things that look like bugs are documented, intentional design.
@@ -65,7 +65,7 @@ just bump 0.5.1                             # bump + draft notes + preflight →
 git tag v0.5.1 && git push origin v0.5.1    # fires release.yml → build + crates.io + homebrew
 ```
 
-## Conventions (the short version — see [`CLAUDE.md`](CLAUDE.md) for the full set)
+## Conventions (the short version — see [`CLAUDE.md`](../CLAUDE.md) for the full set)
 
 - **TDD first** — failing test → minimal impl. Don't add code without a test that exercises it.
 - **DRY, YAGNI** — no features beyond what the current scope specifies.
@@ -118,10 +118,10 @@ pub trait Source: Send + 'static {
 
 Per-source JSONL format knowledge lives in the source's own decoder fn (injected
 into `JsonlWatcher` via fn pointers), not a shared decoder. See "Adding a new
-agent CLI" in [`CLAUDE.md`](CLAUDE.md) and `crates/pixtuoid-core/CLAUDE.md` for the
+agent CLI" in [`CLAUDE.md`](../CLAUDE.md) and `crates/pixtuoid-core/CLAUDE.md` for the
 full wiring (and the four test files that must be updated together).
 
 ## License
 
 By contributing, you agree your contributions are licensed under the same terms
-as the project (see the **License** section of the [README](README.md)).
+as the project (see the **License** section of the [README](../README.md)).

@@ -8,7 +8,7 @@ agents — a Cargo workspace of three Rust crates (`pixtuoid-core` headless lib,
 the crate you touch). It holds the architecture invariants and "known sharp
 edges" — much of what looks like a bug is documented, load-bearing design.
 Path-scoped Rust standards: [`.github/instructions/rust.instructions.md`](instructions/rust.instructions.md).
-Workflow + how to add a theme / agent-CLI `Source`: [`CONTRIBUTING.md`](../CONTRIBUTING.md).
+Workflow + how to add a theme / agent-CLI `Source`: [`CONTRIBUTING.md`](../docs/CONTRIBUTING.md).
 
 ## Architecture invariants (never break these)
 

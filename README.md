@@ -181,7 +181,7 @@ live at **[/config](https://ivanwng97.github.io/pixtuoid/config)**.
 
 ## Contributing
 
-PRs welcome — especially new themes and `Source` adapters for other agent CLIs (Copilot, Cursor, OpenCode). See **[CONTRIBUTING.md](CONTRIBUTING.md)** for the build/test workflow, conventions, the review process, and how to add a new agent CLI. Architecture and the load-bearing invariants live in [`CLAUDE.md`](CLAUDE.md).
+PRs welcome — especially new themes and `Source` adapters for other agent CLIs (Copilot, Cursor, OpenCode). See **[CONTRIBUTING.md](docs/CONTRIBUTING.md)** for the build/test workflow, conventions, the review process, and how to add a new agent CLI. Architecture and the load-bearing invariants live in [`CLAUDE.md`](CLAUDE.md).
 
 ## Acknowledgments
 

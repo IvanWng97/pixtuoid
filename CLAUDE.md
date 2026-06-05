@@ -139,7 +139,7 @@ just bump 0.5.1                              # bump + draft notes + preflight â†
 git tag v0.5.1 && git push origin v0.5.1     # fires build + crates.io + homebrew
 ```
 
-Needs cargo-edit (`just setup-tools`). See [`CONTRIBUTING.md`](CONTRIBUTING.md#releasing).
+Needs cargo-edit (`just setup-tools`). See [`CONTRIBUTING.md`](docs/CONTRIBUTING.md#releasing).
 
 ## Conventions
 

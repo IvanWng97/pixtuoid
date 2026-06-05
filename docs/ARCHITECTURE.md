@@ -30,6 +30,8 @@ can drive a PNG/GIF export, not just the terminal).
 
 ```mermaid
 flowchart TB
+  accTitle: pixtuoid data flow
+  accDescr: A hook or transcript event flows from Claude Code / Codex through the pixtuoid-hook shim and pixtuoid-core (socket listener, decoder, Transport-tagged reducer, scene state) into the pixtuoid TUI renderer's terminal-agnostic pixel pass and half-block flush.
   CC["Claude Code / Codex"]
 
   subgraph hook["pixtuoid-hook (shim)"]
@@ -109,6 +111,6 @@ These are load-bearing — see `CLAUDE.md` and the nested guides before changing
 
 - **Configure it:** [`docs/CONFIGURATION.md`](CONFIGURATION.md) ·
   [live `/config`](https://ivanwng97.github.io/pixtuoid/config)
-- **Contribute:** [`CONTRIBUTING.md`](../CONTRIBUTING.md)
+- **Contribute:** [`CONTRIBUTING.md`](CONTRIBUTING.md)
 - **Agent/contributor detail:** the workspace `CLAUDE.md` + the nested per-crate
   `CLAUDE.md` files.
