@@ -28,7 +28,7 @@ npm run build      # astro build → dist/
 
 From the repo root the same gate is `just site-check` (and `just site-fmt`).
 
-> **Cross-boundary build inputs.** The site reads two files from *outside* `site/`
+> **Cross-boundary build inputs.** The site reads two files from _outside_ `site/`
 > at build time: `docs/CONFIGURATION.md` (rendered as the `/config` page via the
 > Astro content layer in `src/content.config.ts`) and the workspace `Cargo.toml`
 > (the displayed version, injected via `vite.define` in `astro.config.mjs`).

@@ -33,13 +33,12 @@ const def = THEMES.find((t) => t.featured) ?? THEMES[0];
         <span class="terminal__scan" aria-hidden="true"></span>
       </figure>
 
-      <div class="themes__chips" role="tablist" aria-label="Theme">
+      <div class="themes__chips" role="group" aria-label="Theme">
         {
           THEMES.map((t) => (
             <button
               class:list={['themes__chip', { 'is-active': t.id === def.id }]}
-              role="tab"
-              aria-selected={t.id === def.id ? 'true' : 'false'}
+              aria-pressed={t.id === def.id ? 'true' : 'false'}
               data-id={t.id}
               data-src={asset(`demos/theme_${t.id}.png`)}
               data-name={t.name}
@@ -84,7 +83,7 @@ const def = THEMES.find((t) => t.featured) ?? THEMES[0];
       chips.forEach(function (c) {
         const on = c === chip;
         c.classList.toggle('is-active', on);
-        c.setAttribute('aria-selected', on ? 'true' : 'false');
+        c.setAttribute('aria-pressed', on ? 'true' : 'false');
       });
     }
     chips.forEach(function (c) {

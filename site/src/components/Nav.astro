@@ -33,6 +33,9 @@ const home = asset('');
       if (btn) btn.setAttribute('aria-label', night ? 'Switch to day' : 'Switch to night');
     }
     sync();
+    // re-sync the icon/aria when the theme is changed elsewhere (the dracula egg
+    // or Escape in Base.astro dispatch this) so the toggle never goes stale
+    document.addEventListener('pix:theme', sync);
     if (btn)
       btn.addEventListener('click', function () {
         const root = document.documentElement;

@@ -179,21 +179,35 @@ const version = __PIXTUOID_VERSION__; // from the workspace Cargo.toml at build
           s.removeProperty('--amber');
         }
         let buf = '';
+        // set the theme AND notify the Nav toggle so its icon/aria-label stay in
+        // sync (otherwise Escape / the dracula egg leave the toggle inverted)
+        const setTheme = function (t) {
+          document.documentElement.dataset.theme = t;
+          document.dispatchEvent(new CustomEvent('pix:theme'));
+        };
         document.addEventListener('keydown', function (e) {
+          // don't hijack typing: skip when a field is focused or a modifier is held
+          const tgt = e.target;
+          if (e.ctrlKey || e.metaKey || e.altKey) return;
+          if (
+            tgt &&
+            (tgt.tagName === 'INPUT' || tgt.tagName === 'TEXTAREA' || tgt.isContentEditable)
+          )
+            return;
           if (e.key === 'Escape') {
             clearRetint();
             let saved = null;
             try {
               saved = localStorage.getItem('pix-theme');
             } catch (e2) {}
-            document.documentElement.dataset.theme = saved || 'day';
+            setTheme(saved || 'day');
             return;
           }
           if (e.key && e.key.length === 1) {
             buf = (buf + e.key.toLowerCase()).slice(-7);
             if (buf.indexOf('dracula') !== -1) {
               clearRetint();
-              document.documentElement.dataset.theme = 'dracula';
+              setTheme('dracula');
             }
           }
         });

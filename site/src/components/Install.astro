@@ -19,14 +19,13 @@ const tabs = [
     </div>
 
     <div class="install__box card reveal">
-      <div class="install__tabs" role="tablist" aria-label="Install method">
+      <div class="install__tabs" role="group" aria-label="Install method">
         {
           tabs.map((t, i) => (
             <button
               class:list={['install__tab', { 'is-active': i === 0 }]}
-              role="tab"
               data-tab={t.id}
-              aria-selected={i === 0 ? 'true' : 'false'}
+              aria-pressed={i === 0 ? 'true' : 'false'}
             >
               {t.label}
             </button>
@@ -65,7 +64,7 @@ const tabs = [
         box.querySelectorAll('.install__tab').forEach(function (t) {
           const on = t === tab;
           t.classList.toggle('is-active', on);
-          t.setAttribute('aria-selected', on ? 'true' : 'false');
+          t.setAttribute('aria-pressed', on ? 'true' : 'false');
         });
         box.querySelectorAll('.install__panel').forEach(function (p) {
           p.classList.toggle('is-active', p.dataset.panel === id);
