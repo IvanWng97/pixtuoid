@@ -12,4 +12,7 @@ export const collections = {
   architecture: defineCollection({
     loader: glob({ pattern: 'ARCHITECTURE.md', base: '../docs' }),
   }),
+  contributing: defineCollection({
+    loader: glob({ pattern: 'CONTRIBUTING.md', base: '../docs' }),
+  }),
 };
