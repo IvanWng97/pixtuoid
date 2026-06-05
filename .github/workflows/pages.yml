@@ -1,13 +1,13 @@
 name: deploy site
 
 on:
-  # Redeploy when the inputs the build reads change: site/ itself, the version
-  # in ../Cargo.toml, ../docs/CONFIGURATION.md (the /config page), and
-  # ../docs/ARCHITECTURE.md (the /architecture page). Without these the published
+  # Redeploy when the inputs the build reads change: site/ itself, the version in
+  # ../Cargo.toml, and the rendered docs ../docs/{CONFIGURATION,ARCHITECTURE,CONTRIBUTING}.md
+  # (the /config, /architecture, /contributing pages). Without these the published
   # site silently lags its own source.
   push:
     branches: [main]
-    paths: ['site/**', 'Cargo.toml', 'docs/CONFIGURATION.md', 'docs/ARCHITECTURE.md', '.github/workflows/pages.yml']
+    paths: ['site/**', 'Cargo.toml', 'docs/CONFIGURATION.md', 'docs/ARCHITECTURE.md', 'docs/CONTRIBUTING.md', '.github/workflows/pages.yml']
   workflow_dispatch:
 
 permissions:
@@ -30,6 +30,11 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: site/package-lock.json
+      - name: Cache Playwright Chromium
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('site/package-lock.json') }}
       # withastro/action only runs `astro build`; gate the deploy on lint + types
       # too, so a build-clean but lint/typecheck-failing commit can't ship. Also
       # install Chromium here (same runner → cached) so withastro/action's build
