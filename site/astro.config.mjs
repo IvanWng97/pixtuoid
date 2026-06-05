@@ -3,6 +3,7 @@ import { defineConfig } from 'astro/config';
 import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { posix } from 'node:path';
+import rehypeMermaid from 'rehype-mermaid';
 
 // Single-source the displayed version from the workspace Cargo.toml so the boot
 // intro never goes stale on a release bump. Scope the match to the
@@ -71,6 +72,21 @@ export default defineConfig({
   site: 'https://ivanwng97.github.io',
   base: '/pixtuoid',
   trailingSlash: 'ignore',
-  markdown: { rehypePlugins: [rehypeRepoLinks] },
+  markdown: {
+    // keep ```mermaid as a RAW code node — Shiki would otherwise highlight it
+    // into a <pre> before rehype-mermaid can turn it into an inline SVG.
+    syntaxHighlight: { type: 'shiki', excludeLangs: ['mermaid'] },
+    rehypePlugins: [
+      // build-time render: ```mermaid → inline <svg> (zero client JS, CSP-safe).
+      [
+        rehypeMermaid,
+        {
+          strategy: 'inline-svg',
+          mermaidConfig: { theme: 'neutral', flowchart: { htmlLabels: true } },
+        },
+      ],
+      rehypeRepoLinks, // after mermaid so it walks the final tree
+    ],
+  },
   vite: { define: { __PIXTUOID_VERSION__: JSON.stringify(version) } },
 });

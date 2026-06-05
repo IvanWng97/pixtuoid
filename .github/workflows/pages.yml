@@ -2,11 +2,12 @@ name: deploy site
 
 on:
   # Redeploy when the inputs the build reads change: site/ itself, the version
-  # in ../Cargo.toml, and ../docs/CONFIGURATION.md (the /config page). Without
-  # the latter two the published site silently lags its own source.
+  # in ../Cargo.toml, ../docs/CONFIGURATION.md (the /config page), and
+  # ../docs/ARCHITECTURE.md (the /architecture page). Without these the published
+  # site silently lags its own source.
   push:
     branches: [main]
-    paths: ['site/**', 'Cargo.toml', 'docs/CONFIGURATION.md', '.github/workflows/pages.yml']
+    paths: ['site/**', 'Cargo.toml', 'docs/CONFIGURATION.md', 'docs/ARCHITECTURE.md', '.github/workflows/pages.yml']
   workflow_dispatch:
 
 permissions:
@@ -30,10 +31,12 @@ jobs:
           cache: npm
           cache-dependency-path: site/package-lock.json
       # withastro/action only runs `astro build`; gate the deploy on lint + types
-      # too, so a build-clean but lint/typecheck-failing commit can't ship.
-      - name: Validate (lint + types)
+      # too, so a build-clean but lint/typecheck-failing commit can't ship. Also
+      # install Chromium here (same runner → cached) so withastro/action's build
+      # can render the /architecture ```mermaid block to an inline SVG.
+      - name: Validate (lint + types) + Chromium for the diagram
         working-directory: site
-        run: npm ci && npm run lint && npm run check
+        run: npm ci && npm run lint && npm run check && npx playwright install --with-deps chromium
       - uses: withastro/action@v6
         with:
           path: ./site

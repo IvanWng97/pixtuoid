@@ -201,7 +201,8 @@ Don't be surprised by these. **Full explanation (the WHY) lives in the nested `C
 
 ## Where to look (cross-cutting)
 
-- "How does a CC tool call become a moving sprite?" → trace `runtime::run_async` → `SourceManager::spawn` → `ClaudeCodeSource::run` → `HookSocketListener::run` → `decoder::decode_hook_payload` → `reducer::Reducer::apply` → `TuiRenderer::render` → `draw_scene` (top-down, cubicle grid). The first half lives in `pixtuoid-core`, the render half in `pixtuoid/tui` — see those nested guides for the per-stage detail.
+- "How does a CC tool call become a moving sprite?" → trace `runtime::run_async` → `SourceManager::spawn` → `ClaudeCodeSource::run` → `HookSocketListener::run` → `decoder::decode_hook_payload` → `reducer::Reducer::apply` → (reducer publishes `Arc<SceneState>` on a `watch` channel) → `TuiRenderer::render` → `render_to_rgb_buffer` (the terminal-agnostic pixel pass any PNG/GIF/web renderer reuses) → `draw_scene` (top-down, cubicle grid). The first half lives in `pixtuoid-core`, the render half in `pixtuoid/tui` — see those nested guides for the per-stage detail.
+- **Architecture overview + the data-flow diagram → [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)** (rendered on the site at `/architecture`; the single source for the public/contributor-facing architecture narrative).
 
 Area-specific "Where to look" entries (layout, sources, install, themes, motion, weather, pets, …) are in the nested `CLAUDE.md` for the owning crate/module.
 

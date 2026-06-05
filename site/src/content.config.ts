@@ -7,4 +7,9 @@ export const collections = {
   docs: defineCollection({
     loader: glob({ pattern: 'CONFIGURATION.md', base: '../docs' }),
   }),
+  // separate collection (not a multi-pattern glob) so each page grabs its single
+  // entry without an order/`.find` dependency
+  architecture: defineCollection({
+    loader: glob({ pattern: 'ARCHITECTURE.md', base: '../docs' }),
+  }),
 };

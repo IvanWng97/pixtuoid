@@ -1,4 +1,6 @@
 ---
+import { asset } from '../consts';
+
 const steps = [
   {
     n: '01',
@@ -43,6 +45,9 @@ const steps = [
         ))
       }
     </ol>
+    <p class="how__more reveal">
+      <a href={asset('architecture')}>See how it works under the hood →</a>
+    </p>
   </div>
 </section>
 
@@ -95,5 +100,22 @@ const steps = [
   .how__detail p {
     color: var(--fg-muted);
     font-size: 0.98rem;
+  }
+  .how__more {
+    margin-top: clamp(1.4rem, 3vw, 2.2rem);
+    font-family: var(--font-mono);
+    font-size: 0.9rem;
+  }
+  .how__more a {
+    color: var(--coral-deep);
+    font-weight: 700;
+    text-decoration: none;
+  }
+  .how__more a:hover {
+    color: var(--coral);
+  }
+  :global([data-theme='night']) .how__more a,
+  :global([data-theme='dracula']) .how__more a {
+    color: var(--coral);
   }
 </style>

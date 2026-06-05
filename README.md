@@ -27,6 +27,12 @@
 </p>
 
 <p align="center">
+  <strong><a href="https://ivanwng97.github.io/pixtuoid/">🖥&#xFE0E; Live demo &amp; docs ↗</a></strong>
+  · <a href="https://ivanwng97.github.io/pixtuoid/architecture">Architecture</a>
+  · <a href="https://ivanwng97.github.io/pixtuoid/config">Configuration</a>
+</p>
+
+<p align="center">
   <a href="#quick-start">Quick Start</a> · <a href="#features">Features</a> · <a href="#supported-tools">Supported Tools</a> · <a href="#themes--configuration">Themes & Configuration</a> · <a href="#how-it-works">How It Works</a>
 </p>
 
@@ -126,38 +132,12 @@ Press `t` to switch themes with live preview. Your choice persists across sessio
 Settings live in `~/.config/pixtuoid/config.toml` — theme, desk cap, custom pet
 names, and sprite packs. CLI flags override the file (`pixtuoid run --theme dracula`).
 See **[docs/CONFIGURATION.md](docs/CONFIGURATION.md)** for the full key reference
-(defaults, system-managed keys) and the custom sprite-pack workflow.
+(defaults, system-managed keys) and the custom sprite-pack workflow — or browse it
+live at **[/config](https://ivanwng97.github.io/pixtuoid/config)**.
 
 ## How It Works
 
-<details>
-<summary><strong>Architecture</strong></summary>
-
-```
-agent tool call ──► agent fires hook ──► pixtuoid-hook (shim)
-                                         │ JSON over Unix socket
-                                         ▼
-                                  /tmp/pixtuoid-{uid}.sock
-                                         │
-                       HookSocketListener ─────► ┐
-                                                 │ (Transport, AgentEvent)
-                       JsonlWatcher       ─────► ┤ shared mpsc channel
-                                                 ▼
-                       Reducer ──► SceneState (watch channel)
-                                         │
-                       TuiRenderer ──► draw_scene @ ~30fps
-                       (pose → pixel_painter → RgbBuffer → half-block → ratatui)
-```
-
-Three Rust crates:
-
-| Crate | Role |
-|---|---|
-| **pixtuoid-core** | Headless library — no terminal deps. Source trait, reducer, pose, layout, sprites. |
-| **pixtuoid** | TUI binary — ratatui + crossterm + tokio. Half-block rendering + theme system. |
-| **pixtuoid-hook** | Tiny shim the agent CLI invokes from hooks. 200ms timeout, always exits 0. |
-
-</details>
+**[How pixtuoid works — the architecture →](https://ivanwng97.github.io/pixtuoid/architecture)** — the producer → reducer → renderer pipeline across three Rust crates, with the data-flow diagram. Single source: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (renders on the site and on GitHub).
 
 <details>
 <summary><strong>Migrating from <code>ascii-agents</code> (v0.3.x → v0.4.0)</strong> — rename, hooks, config paths</summary>
