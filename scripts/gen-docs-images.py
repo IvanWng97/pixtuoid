@@ -14,16 +14,15 @@ clock (deterministic layout + lighting):
   docs/images/themes-composite.png                  6 themes stitched along
                                                     down-left DIAGONAL bands
   docs/images/demo.gif                              15s @ 10fps animated
-  docs/images/multi-floor.gif                       10s @ 10fps — 22 agents
-                                                    overflowing onto floor 2
-                                                    via slide transition
 
 `screenshot-real.png` is a live-agent capture and is NOT regenerated here.
 
 Requires the venv (Pillow) — see README "Visual verification".
 """
 
+import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -102,16 +101,14 @@ def main():
     # Animated demo.
     render(OUT / "demo.gif", "normal", "--gif", "--gif-duration", str(GIF_SECS), "--gif-fps", str(GIF_FPS))
 
-    # Multi-floor slide — the real TuiRenderer transition via --navigate-at;
-    # 22 agents overflow a full 16-desk floor onto floor 2.
-    render(
-        OUT / "multi-floor.gif", "normal", "--gif",
-        "--gif-duration", "10", "--gif-fps", "10",
-        "--max-desks", "16", "--agents", "22",
-        "--navigate-at", "3:1", "--navigate-at", "7:0",
-    )
+    # Pixel art compresses via palette reduction, NOT --lossy (lossy perturbation
+    # breaks gifsicle's inter-frame diffing on flat-color runs and ships a BIGGER
+    # file — measured 5.0MB lossy vs 2.2MB --colors 128 on the same source).
+    if not shutil.which("gifsicle"):
+        sys.exit("gifsicle not found — brew install gifsicle")
+    subprocess.run(["gifsicle", "-b", "-O3", "--colors", "128", str(OUT / "demo.gif")], check=True)
 
-    print(f"wrote screenshot, gallery-*, themes-composite, demo.gif, multi-floor.gif -> {OUT}")
+    print(f"wrote screenshot, gallery-*, themes-composite, demo.gif -> {OUT}")
 
 
 if __name__ == "__main__":

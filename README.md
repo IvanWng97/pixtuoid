@@ -37,15 +37,9 @@
 
 ## Why?
 
-Running multiple AI agents in the terminal is like managing a sweatshop you can't see. They type, they wait, they finish — and you have no idea who's doing what unless you scroll through logs like a bureaucrat.
+Running several coding agents means alt-tabbing between terminals to find out who's stuck, who's waiting on a permission prompt, and who finished ten minutes ago. **pixtuoid** puts them all in one tiny pixel-art office you can watch from above — every session is a character at a desk: typing while it works, raising a `?` when it needs you, dozing off when it's done.
 
-**pixtuoid** puts them all in a tiny pixel-art office you can watch from above. A little bit *Black Mirror*, a little bit *The Sims* — and somehow the most intuitive multi-agent dashboard you'll ever use.
-
-## Who's it for?
-
-- You're running 3+ AI coding agents and losing track of who's stuck on what.
-- You want a glanceable activity signal without tailing logs.
-- You think coding agents should have a vibe.
+A little bit *Black Mirror*, a little bit *The Sims* — and the most glanceable multi-agent dashboard you'll ever use.
 
 ## Quick Start
 
@@ -61,6 +55,8 @@ In another terminal, start a supported coding agent (Claude Code, Codex, Antigra
 
 <details>
 <summary><strong>More install methods</strong></summary>
+
+**Both packages are required** — `pixtuoid` (the visualizer) and `pixtuoid-hook` (the shim your agent invokes).
 
 ### Pre-built binaries
 
@@ -93,6 +89,8 @@ git clone https://github.com/IvanWng97/pixtuoid && cd pixtuoid
 just build --release
 ```
 
+Upgrading from `ascii-agents` v0.3.x? See [docs/MIGRATION.md](docs/MIGRATION.md).
+
 </details>
 
 ## Features
@@ -115,8 +113,18 @@ just build --release
 <!-- features:end -->
 
 <p align="center">
-  <img src="docs/images/multi-floor.gif" alt="switching between floors of the pixel office with a slide transition" width="800" />
+  <a href="https://ivanwng97.github.io/pixtuoid/#showcase-floors">
+    <img src="site/public/demos/multi-floor-poster.png" alt="a full floor of agents — overflow sessions spawn a second floor" width="700" />
+  </a>
+  <br />
+  <sub>One floor fills up, the next one opens — <a href="https://ivanwng97.github.io/pixtuoid/#showcase-floors"><strong>▶ watch the floor-slide transition live</strong></a></sub>
 </p>
+
+<table align="center"><tr>
+  <td align="center"><img src="docs/images/gallery-cubicle.png" alt="cubicle pods with per-tool monitor glow" width="260" /><br /><sub>cubicle pods</sub></td>
+  <td align="center"><img src="docs/images/gallery-meeting.png" alt="meeting lounge sofas" width="260" /><br /><sub>meeting lounge</sub></td>
+  <td align="center"><img src="docs/images/gallery-pantry.png" alt="pantry where idle agents chitchat" width="260" /><br /><sub>pantry</sub></td>
+</tr></table>
 
 ## Supported Tools
 
@@ -133,10 +141,20 @@ just build --release
 
 ## Themes & Configuration
 
-Press `t` to switch themes with live preview. Your choice persists across sessions. 6 built-in:
+Press `t` to cycle the built-in themes with live preview. Your choice persists across sessions:
 
 <p align="center">
-  <img src="docs/images/themes-composite.png" alt="6 themes: Normal, Cyberpunk, Dracula, Tokyo Night, Catppuccin, Gruvbox" width="800" />
+  <img src="docs/images/themes-composite.png" alt="built-in themes side by side" width="800" />
+</p>
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="site/public/demos/night.png">
+    <source media="(prefers-color-scheme: light)" srcset="site/public/demos/day.png">
+    <img alt="the office in daylight — or at night, if you read GitHub in dark mode" src="site/public/demos/day.png" width="800">
+  </picture>
+  <br />
+  <sub>This screenshot follows your GitHub theme — switch to dark mode and the office lights come on.</sub>
 </p>
 
 Settings live in `~/.config/pixtuoid/config.toml` — theme, desk cap, custom pet
@@ -147,47 +165,9 @@ live at **[/config](https://ivanwng97.github.io/pixtuoid/config)**.
 
 ## How It Works
 
-**[How pixtuoid works — the architecture →](https://ivanwng97.github.io/pixtuoid/architecture)** — the producer → reducer → renderer pipeline across three Rust crates, with the data-flow diagram. Single source: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (renders on the site and on GitHub).
+Agent CLIs emit events two ways — a hook shim (a 200ms fire-and-forget Unix-socket write that can never block your agent) and JSONL transcript watching. Both feed one channel; a reducer folds events into office state; the renderer draws it as half-block pixel art. Three Rust crates, zero terminal deps in the core.
 
-<details>
-<summary><strong>Migrating from <code>ascii-agents</code> (v0.3.x → v0.4.0)</strong> — rename, hooks, config paths</summary>
-
-**v0.4.0 renamed the project from `ascii-agents` to `pixtuoid`.**
-
-### What changed
-
-| Before (v0.3.x) | After (v0.4.0) |
-|---|---|
-| `ascii-agents` binary | `pixtuoid` |
-| `ascii-agents-hook` shim | `pixtuoid-hook` |
-| `~/.config/ascii-agents/` | `~/.config/pixtuoid/` |
-| `~/.cache/ascii-agents/` | `~/.cache/pixtuoid/` |
-| `/tmp/ascii-agents-{uid}.sock` | `/tmp/pixtuoid-{uid}.sock` |
-| `_ascii_agents` hook key in `settings.json` | `_pixtuoid` |
-
-### Upgrade steps
-
-1. **Install the new version:**
-   ```bash
-   brew untap IvanWng97/ascii-agents 2>/dev/null
-   brew install IvanWng97/pixtuoid/pixtuoid
-   # or: cargo install pixtuoid pixtuoid-hook
-   ```
-
-2. **Re-register hooks** (replaces old `ascii-agents-hook` entries automatically):
-   ```bash
-   pixtuoid install-hooks
-   ```
-
-3. **Migrate config** (optional — only if you customized `config.toml`):
-   ```bash
-   mkdir -p ~/.config/pixtuoid
-   mv ~/.config/ascii-agents/config.toml ~/.config/pixtuoid/config.toml
-   ```
-
-> **GitHub links:** The old `IvanWng97/ascii-agents` URL automatically redirects to `IvanWng97/pixtuoid`. Existing bookmarks and stars carry over.
-
-</details>
+**[Full architecture with diagrams →](https://ivanwng97.github.io/pixtuoid/architecture)** · single source: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 
 ## Contributing
 
@@ -197,10 +177,10 @@ PRs welcome — especially new themes and `Source` adapters for other agent CLIs
 
 Inspired by [`pixel-agents`](https://github.com/pablodelucca/pixel-agents) (VS Code), [`clawd-on-desk`](https://github.com/rullerzhou-afk/clawd-on-desk) (desktop pet), and Claude Code's [Buddy](https://dev.to/picklepixel/how-i-reverse-engineered-claude-codes-hidden-pet-system-8l7).
 
-## Support
-
-If you enjoy pixtuoid, consider [buying me a coffee](https://buymeacoffee.com/IvanWng97) :)
-
 ## License
 
 [MIT](LICENSE)
+
+<p align="center">
+  <sub>Enjoying the little office? <a href="https://buymeacoffee.com/IvanWng97">☕ Buy me a coffee</a> · <a href="https://github.com/IvanWng97/pixtuoid">⭐ Star the repo</a></sub>
+</p>
