@@ -26,9 +26,11 @@ runtime with the fixture's transcript file path, so a CC hook (which coalesces
 on `transcript_path`) lines up with its JSONL file. Codex carries it too — to
 prove Codex *ignores* it and still coalesces on `session_id`.
 
-**Adding a CLI:** drop a new `fixtures/<source>/<scenario>/` dir and register
-the source's decoder in `tests/fixture_harness.rs::decoder_for`. Run
-`cargo insta review` to accept the generated snapshot. No other test code.
+**Adding a CLI:** drop a new `fixtures/<source>/<scenario>/` dir — the decoder
+comes from the source's `SourceDescriptor` row in `source/registry.rs` (a
+hook-only row, `line_decoder: None`, ships only `hook-payloads.jsonl` instead
+of a transcript). Run `cargo insta review` to accept the generated snapshot.
+No harness edit, no other test code.
 
 ## Provenance
 

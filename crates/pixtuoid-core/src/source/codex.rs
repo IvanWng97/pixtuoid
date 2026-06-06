@@ -253,6 +253,32 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    // The custom-decoder contract: claim our two events FULLY — a malformed
+    // instance must be Err, never Ok(None) (which would silently fall through
+    // to the shared session-keyed arms). These pin the guards directly; the
+    // happy paths are pinned end-to-end in tests/decoder.rs.
+    #[test]
+    fn subagent_hooks_with_empty_ids_are_err_not_fallthrough() {
+        for event in ["SubagentStart", "SubagentStop"] {
+            let no_session = json!({"hook_event_name": event, "agent_id": "child"});
+            assert!(
+                decode_codex_hook_custom(&no_session).is_err(),
+                "{event} without session_id must Err (claim-fully), not fall through"
+            );
+            let empty_child = json!({"hook_event_name": event, "session_id": "s", "agent_id": ""});
+            assert!(
+                decode_codex_hook_custom(&empty_child).is_err(),
+                "{event} with empty agent_id must Err — a phantom child never coalesces"
+            );
+        }
+    }
+
+    #[test]
+    fn non_subagent_events_fall_through_to_shared_arms() {
+        let stop = json!({"hook_event_name": "Stop", "session_id": "s"});
+        assert!(matches!(decode_codex_hook_custom(&stop), Ok(None)));
+    }
+
     fn ev(line: Value) -> Vec<AgentEvent> {
         decode_codex_line(
             "/x/rollout-1-019e7762-9ded-7e33-be41-946ecf105bf4.jsonl",

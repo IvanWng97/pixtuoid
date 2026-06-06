@@ -53,7 +53,10 @@ pub struct HookDecoding {
     /// claim it FULLY — return `Err` on a malformed instance of its own
     /// event, never `Ok(None)` — or the payload silently falls through and
     /// decodes under the shared session-keyed semantics (divergent AgentId
-    /// instead of an error).
+    /// instead of an error). An ALIEN-envelope source (payloads without
+    /// `hook_event_name`/`session_id` at all) must claim EVERY event — its
+    /// simplest correct shape is `decode_x(v).map(Some)`, never `Ok(None)` —
+    /// since the shared arms can only mis-serve it.
     pub custom: Option<HookCustomDecoder>,
 }
 
@@ -61,9 +64,10 @@ pub struct HookDecoding {
 /// protocol, NOT policy names, so a future CLI picks values truthfully and
 /// the policy falls out.
 pub struct SourceCaps {
-    /// Does a closed session leave ANY durable end signal (a SessionEnd hook
-    /// or a JSONL end marker)? When false, the stale-sweep is the ONLY reaper
-    /// a closed session gets. CC: true (best-effort hook + durable `/exit`
+    /// Does a CLEAN exit leave any end signal at all (a SessionEnd hook
+    /// and/or a JSONL end marker — best-effort counts; "none of any kind" is
+    /// the bar for `false`)? When false, the stale-sweep is the ONLY reaper a
+    /// closed session ever gets. CC: true (best-effort hook + durable `/exit`
     /// marker). Codex: false (no SessionEnd hook, no PID, ShutdownComplete
     /// unpersisted — all verified upstream). Antigravity: false (its
     /// session-end checker is always-false; no hook transport).
@@ -176,8 +180,10 @@ const ANTIGRAVITY: SourceDescriptor = SourceDescriptor {
 mod tests {
     use super::*;
 
-    // Replaces reducer's `every_registered_source_has_two_char_label_prefix`
-    // (the prefix data moved here, so the enforcement moves with it).
+    // Registry-local shape check. The reducer KEEPS its own end-to-end
+    // `every_registered_source_has_two_char_label_prefix` (through the real
+    // `source_label_prefix`, lookup included) — this one exists so a bad row
+    // fails HERE with a row-shaped message, not three modules away.
     #[test]
     fn every_descriptor_has_two_char_label_prefix() {
         for d in REGISTRY {
@@ -199,6 +205,9 @@ mod tests {
         assert_eq!(CLAUDE_CODE.name, claude_code::SOURCE_NAME);
         assert_eq!(CODEX.name, codex::SOURCE_NAME);
         assert_eq!(ANTIGRAVITY.name, antigravity::SOURCE_NAME);
+        // Hand-enumerated above — the len pin turns "forgot the new row's
+        // assert" from a silent gap into a loud failure.
+        assert_eq!(REGISTRY.len(), 3, "new row? add its name-pin assert above");
     }
 
     #[test]

@@ -357,6 +357,22 @@ mod tests {
         );
     }
 
+    // Deliberate narrowing (vs pre-registry): SubagentStart/Stop are CODEX's
+    // events (its descriptor's custom decoder); a payload stamped with any
+    // other source now bails instead of minting a child keyed on a raw
+    // agent_id that could never coalesce with that source's own keying.
+    #[test]
+    fn subagent_hooks_from_non_codex_sources_bail() {
+        let ev = decode_hook_payload(json!({
+            "hook_event_name": "SubagentStart",
+            "session_id": "s",
+            "agent_id": "child",
+            "cwd": "/repo"
+            // no _pixtuoid_source → claude-code, whose row has no custom fn
+        }));
+        assert!(ev.is_err(), "CC-attributed SubagentStart must bail");
+    }
+
     // Version-skew pin: a shim stamping a source this binary doesn't know yet
     // (mid-rollout of a new CLI) must degrade gracefully — CC-shaped decode
     // under the UNKNOWN source's own namespace (no ghost merge into cc, no
