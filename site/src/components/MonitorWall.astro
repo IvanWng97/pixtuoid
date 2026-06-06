@@ -78,10 +78,15 @@ const thumb = (c: EnrichedShowcaseChannel) =>
   button.mon:hover {
     transform: translateY(-2px);
     box-shadow: var(--shadow-lg);
+    border-color: color-mix(in srgb, var(--coral) 35%, var(--border));
   }
   .mon[aria-pressed='true'] {
     border-color: color-mix(in srgb, var(--coral) 60%, var(--border-strong));
     background: color-mix(in srgb, var(--coral) 12%, var(--surface));
+    box-shadow:
+      var(--shadow),
+      0 0 0 1px color-mix(in srgb, var(--coral) 45%, transparent),
+      0 0 22px var(--glow);
   }
   .mon__screen {
     position: relative;
@@ -124,9 +129,16 @@ const thumb = (c: EnrichedShowcaseChannel) =>
     aspect-ratio: 1600 / 1440;
     background: repeating-linear-gradient(
       0deg,
-      color-mix(in srgb, #1a1715 55%, var(--surface)) 0 2px,
+      color-mix(in srgb, #0e0d0c 55%, var(--surface)) 0 2px,
       color-mix(in srgb, #211d1a 55%, var(--surface)) 2px 4px
     );
+  }
+  /* centered like a "stay tuned" test card, not a corner debug chip */
+  .mon__badge--soon {
+    right: 50%;
+    bottom: 50%;
+    transform: translate(50%, 50%);
+    letter-spacing: 0.08em;
   }
   /* below the 2-col studio breakpoint the wall becomes a swipeable filmstrip */
   @media (max-width: 979px) {
