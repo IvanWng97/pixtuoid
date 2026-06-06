@@ -9,7 +9,9 @@ Wire up a new agent CLI (`${input:name}`) as a pixtuoid `Source`. This is **not*
 a single-file change — read `crates/pixtuoid-core/CLAUDE.md` ("multi-source
 decoding" / "Adding a new agent CLI") first, then:
 
-1. Implement the `Source` trait. Per-source JSONL format knowledge lives in the
+1. Implement the `Source` trait (hook-only CLI? skip it + the runtime wiring —
+   set `line_decoder: None` and ship a `hook.custom` decoder + install target
+   instead). Per-source JSONL format knowledge lives in the
    source's **own decoder fn** (injected into `JsonlWatcher` via fn pointers), not
    a shared decoder.
 2. Add ONE `SourceDescriptor` row in `source/registry.rs` (label prefix, decoders,

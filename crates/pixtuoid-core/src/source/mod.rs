@@ -14,9 +14,9 @@ use crate::id::AgentId;
 ///   - a coalescing fixture under `tests/fixtures/sources/<name>/` —
 ///     `tests/fixture_harness.rs`'s
 ///     `every_registered_source_has_a_coalescing_fixture`, and
-///   - a [`registry::SourceDescriptor`] row — `registry_covers_exactly_the_
-///     registered_sources` below (the prefix/decoder shape checks live with
-///     the registry's own tests).
+///   - a [`registry::SourceDescriptor`] row — pinned below by
+///     `registry_covers_exactly_the_registered_sources` (the prefix/decoder
+///     shape checks live with the registry's own tests).
 ///
 /// Each entry is keyed off its module's `SOURCE_NAME` const so a rename is a
 /// compile error, not a silent two-sprite-ghost. (Stable Rust can't const-

@@ -104,8 +104,9 @@ TUI), `gh skill` (install Agent Skills, incl. into `.claude/skills/`).
 
 ## Adding a new agent CLI
 
-Step by step (the conformance tests force most of these — a missing step fails
-`just test`, not production):
+Step by step. The registration steps (4–6) are test-forced — skipping one
+fails `just test`; steps 1–3 and 7–9 are on you (7, the runtime wiring, is the
+historically-missed one):
 
 1. **Verify the wire format against the CLI's actual source/releases first.**
    Where does it write transcripts, what does a line look like, does it have
@@ -126,6 +127,13 @@ Step by step (the conformance tests force most of these — a missing step fails
        async fn run(self: Box<Self>, tx: TaggedSender) -> anyhow::Result<()>;
    }
    ```
+
+   **Hook-only CLI** (no watchable transcript — e.g. one that full-rewrites
+   its session file per turn)? Skip the `LineDecoder`, the `Source` trait, and
+   step 7: set `line_decoder: None` in the registry row, put the format
+   knowledge in a `hook.custom` decoder (it must claim EVERY event — see the
+   contract on `HookDecoding::custom`), and do step 8 (install target) instead
+   — its hooks ride the shared socket.
 
 4. **Add ONE `SourceDescriptor` row** in `crates/pixtuoid-core/src/source/registry.rs`
    — label prefix (2 chars), the line decoder, hook keying (`IdKey` + an

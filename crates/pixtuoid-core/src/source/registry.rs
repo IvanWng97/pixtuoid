@@ -23,7 +23,11 @@ use serde_json::Value;
 use crate::source::jsonl::LineDecoder;
 use crate::source::{antigravity, claude_code, codex, AgentEvent};
 
-/// How the shared hook decoder derives the AgentId for this source.
+/// How the shared hook decoder derives the AgentId for this source. Moot for
+/// an alien-envelope source whose `custom` decoder claims every event (the
+/// shared id-key branch is then never reached) — pick
+/// `TranscriptPathThenSessionId` with a `// inert` comment and let the custom
+/// fn construct its own AgentIds.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum IdKey {
     /// `transcript_path` when present and non-empty, else `session_id`.
@@ -136,9 +140,10 @@ const CLAUDE_CODE: SourceDescriptor = SourceDescriptor {
     },
     caps: SourceCaps {
         has_exit_signal: true,
-        // CC sessions re-signal via JSONL activity rather than a prompt hook,
-        // but the flag is moot: with a real exit signal the short reaper
-        // never applies (see short_idle_reap).
+        // CC has no UserPromptSubmit-class resurrect path (its JSONL
+        // SessionStart is first-sight-only, so a swept slot would NOT walk
+        // back in) — but the flag is moot: with a real exit signal the short
+        // reaper never applies (see short_idle_reap).
         resurrects_on_prompt: false,
         delegations_are_hook_silent: false,
     },

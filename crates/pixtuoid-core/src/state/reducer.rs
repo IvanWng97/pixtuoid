@@ -117,11 +117,10 @@ fn stale_threshold_with_caps(
 
 /// Display prefix for a source's labels (`cc·`, `ag·`, `cx·`), from the source
 /// registry (the per-source fact table). Applied at `SessionStart`; the JSONL
-/// `LabelDeriver` Renames (e.g. `cc_derive_label`/`derive_ag_label`) produce
-/// the same prefixed string and so reinforce this idempotently; Codex arrives
-/// only via the shared hook socket (no JSONL Rename), so this is the sole
-/// place its `cx·` label is established. An unregistered source falls back to
-/// its own name (the same `other => other` contract as the old match).
+/// `LabelDeriver` Renames (`cc_derive_label`/`derive_codex_label`/
+/// `derive_ag_label`) produce the same prefixed string and so reinforce this
+/// idempotently. An unregistered source falls back to its own name (the same
+/// `other => other` contract as the old match).
 fn source_label_prefix(source: &str) -> &str {
     crate::source::registry::descriptor_for(source)
         .map(|d| d.label_prefix)
@@ -716,6 +715,28 @@ mod tests {
             stale_threshold_with_caps(slot, None),
             STALE_ACTIVE_TIMEOUT,
             "without the cap, Delegating reaps on the normal Active timer"
+        );
+
+        // Detail-gate negative: caps on + an ORDINARY tool active must stay on
+        // the Active timer — the cap widens the window for delegations only.
+        r.apply(
+            &mut scene,
+            AgentEvent::ActivityStart {
+                agent_id: id,
+                activity: crate::source::Activity::Typing,
+                tool_use_id: None,
+                detail: Some(ToolDetail::Generic {
+                    display: "bash: ls".into(),
+                }),
+            },
+            SystemTime::UNIX_EPOCH,
+            Transport::Hook,
+        );
+        let slot = scene.agents.get(&id).unwrap();
+        assert_eq!(
+            stale_threshold_with_caps(slot, Some(&caps)),
+            STALE_ACTIVE_TIMEOUT,
+            "caps-on but non-Task detail must keep the Active timer"
         );
     }
 

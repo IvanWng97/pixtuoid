@@ -363,14 +363,16 @@ mod tests {
     // agent_id that could never coalesce with that source's own keying.
     #[test]
     fn subagent_hooks_from_non_codex_sources_bail() {
-        let ev = decode_hook_payload(json!({
-            "hook_event_name": "SubagentStart",
-            "session_id": "s",
-            "agent_id": "child",
-            "cwd": "/repo"
-            // no _pixtuoid_source → claude-code, whose row has no custom fn
-        }));
-        assert!(ev.is_err(), "CC-attributed SubagentStart must bail");
+        for event in ["SubagentStart", "SubagentStop"] {
+            let ev = decode_hook_payload(json!({
+                "hook_event_name": event,
+                "session_id": "s",
+                "agent_id": "child",
+                "cwd": "/repo"
+                // no _pixtuoid_source → claude-code, whose row has no custom fn
+            }));
+            assert!(ev.is_err(), "CC-attributed {event} must bail");
+        }
     }
 
     // Version-skew pin: a shim stamping a source this binary doesn't know yet

@@ -83,6 +83,15 @@ struct Decoded {
 /// the transcript key — `AgentId` is a deterministic FNV hash of that key, so
 /// snapshots stay machine-independent.
 fn decode_fixture(source: &str, dir: &Path) -> Decoded {
+    // Catch the dir-name-typo / removed-source cases up front — otherwise
+    // they'd be misdiagnosed as "JSONL-bearing, found 0" (a false claim about
+    // an unregistered name) or "add a SourceDescriptor row" (when the right
+    // action is deleting the stale dir).
+    assert!(
+        registry::descriptor_for(source).is_some(),
+        "fixture dir {source:?} matches no SourceDescriptor row — dir-name typo, \
+         or a removed source whose fixtures should be deleted"
+    );
     // The transcript is the lone non-hook .jsonl in the dir. Exactly one for a
     // JSONL-bearing source — two would make selection (and the snapshot)
     // depend on read_dir order, zero would skip its LineDecoder entirely. A
@@ -115,7 +124,7 @@ fn decode_fixture(source: &str, dir: &Path) -> Decoded {
     // scenario dir instead (stable + machine-independent, same property).
     let logical = transcripts
         .first()
-        .unwrap_or(&dir.to_path_buf())
+        .map_or(dir, PathBuf::as_path)
         .strip_prefix(fixtures_root())
         .unwrap()
         .to_string_lossy()
@@ -167,9 +176,14 @@ fn every_registered_source_has_a_coalescing_fixture() {
     let root = fixtures_root();
     for src in REGISTERED_SOURCES {
         let dir = root.join(src);
+        let shape = if is_hook_only(src) {
+            "hook-payloads.jsonl ONLY (hook-only row)"
+        } else {
+            "transcript.jsonl [+ hook-payloads.jsonl]"
+        };
         assert!(
             dir.is_dir(),
-            "registered source {src:?} has no fixture dir {} — add a coalescing fixture (transcript.jsonl [+ hook-payloads.jsonl])",
+            "registered source {src:?} has no fixture dir {} — add a coalescing fixture ({shape})",
             dir.display()
         );
         assert!(

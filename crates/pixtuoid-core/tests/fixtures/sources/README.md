@@ -6,6 +6,8 @@ driven by `tests/fixture_harness.rs`. Each fixture is a directory:
 ```
 tests/fixtures/sources/<source>/<scenario>/
     <transcript>.jsonl     # JSONL transcript lines, fed to the source's LineDecoder
+                           # (JSONL-bearing sources only — a hook-only row,
+                           # line_decoder: None, ships NO transcript)
     hook-payloads.jsonl    # one hook payload per line, fed to decode_hook_payload
     # expected snapshot lives in tests/snapshots/ (insta), generated on first run
 ```
@@ -22,8 +24,9 @@ The harness, for each fixture dir:
    session differently → two sprites).
 
 `{{TRANSCRIPT_PATH}}` in a hook payload's `transcript_path` is replaced at
-runtime with the fixture's transcript file path, so a CC hook (which coalesces
-on `transcript_path`) lines up with its JSONL file. Codex carries it too — to
+runtime with the fixture's transcript file path (for a hook-only scenario: the
+scenario dir's relative path), so a CC hook (which coalesces on
+`transcript_path`) lines up with its JSONL file. Codex carries it too — to
 prove Codex *ignores* it and still coalesces on `session_id`.
 
 **Adding a CLI:** drop a new `fixtures/<source>/<scenario>/` dir — the decoder
