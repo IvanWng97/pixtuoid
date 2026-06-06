@@ -97,7 +97,7 @@ export function showcaseVariants(c: ShowcaseChannel): ShowcaseVariant[] {
       name: w.name,
       blurb: w.blurb,
       src: `weather_${w.id}.png`,
-      // storm is the most striking opener (carried over from WeatherGallery)
+      // storm is the most striking opener for the weather channel
       featured: w.id === 'storm',
     }));
   return c.variants ?? [];

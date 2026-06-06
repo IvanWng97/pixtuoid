@@ -76,8 +76,8 @@ struct SnapshotArgs {
 
     /// Number of agents in the sample scene (default 12). With more agents
     /// than --max-desks, the extras overflow to additional floors — pair
-    /// >16 agents with --max-desks 16 for an honest full-floor + floor-2
-    /// multi-floor capture.
+    /// more than 16 agents with --max-desks 16 for an honest full-floor +
+    /// floor-2 multi-floor capture.
     #[arg(long, default_value_t = 12)]
     agents: usize,
 
