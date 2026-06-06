@@ -46,21 +46,6 @@ if (missingWeather.length) {
   );
 }
 
-// And for the Features bento: every features.json card.img must exist in
-// public/demos/ (day/night/theme shots referenced by free-form filename sit
-// outside the two id-based guards above — a typo'd img would deploy a 404 card).
-const cardImgs = /** @type {{ card?: { img?: string } }[]} */ (
-  JSON.parse(readFileSync(fileURLToPath(new URL('./src/features.json', import.meta.url)), 'utf8'))
-).flatMap((f) => (f.card?.img ? [f.card.img] : []));
-const missingCards = cardImgs.filter(
-  (img) => !existsSync(fileURLToPath(new URL(`./public/demos/${img}`, import.meta.url)))
-);
-if (missingCards.length) {
-  throw new Error(
-    `astro.config: features.json card img(s) missing from public/demos/ — run scripts/gen-demos.sh or fix the filename: ${missingCards.join(', ')}`
-  );
-}
-
 // Studio Wall guard: showcase.json must have exactly one default channel, unique
 // ids, and every `live` channel's assets on disk (clips: webm + mp4 + poster —
 // the encode_clip ladder always emits webm, so ChannelStage emits its <source>

@@ -1,30 +1,22 @@
 ---
-import { asset } from '../consts';
 import features from '../features.json';
 
 // Single source of truth: site/src/features.json — the SAME list the README
 // Features table is generated from (site/scripts/gen-readme.mjs), so the
-// two can't drift. The bento shows the items that carry `card` metadata (the
-// visual highlights); the README lists every feature.
+// two can't drift. The bento shows the items that carry `card` metadata; cards
+// deep-link into the Studio Wall channel that demos them live.
 const cells = features.flatMap((f) =>
   f.card
     ? [
         {
+          icon: f.icon,
           title: f.name,
           body: f.card.blurb ?? f.desc,
-          img: f.card.img,
-          pos: f.card.pos ?? 'center',
-          wide: f.card.wide ?? false,
           href: f.card.href,
         },
       ]
     : []
 );
-// A featured card must carry an image — fail the build loudly rather than emit a
-// broken `<img src="demos/undefined">` (astro check won't catch the string concat).
-for (const c of cells) {
-  if (!c.img) throw new Error(`features.json: featured card "${c.title}" is missing \`img\``);
-}
 ---
 
 <section id="features" class="features">
@@ -41,20 +33,16 @@ for (const c of cells) {
     <div class="bento">
       {
         cells.map((c) => (
-          <article class:list={['bento__cell reveal', { 'bento__cell--wide': c.wide }]}>
-            <img
-              class="bento__img px"
-              src={asset('demos/' + c.img)}
-              alt=""
-              loading="lazy"
-              style={`object-position:${c.pos}`}
-            />
+          <article class="bento__cell reveal">
             <div class="bento__body">
+              <span class="bento__icon" aria-hidden="true">
+                {c.icon}
+              </span>
               <h3>{c.title}</h3>
               <p>{c.body}</p>
               {c.href && (
                 <a class="bento__link" href={c.href}>
-                  Explore →
+                  See it live →
                 </a>
               )}
             </div>
@@ -80,9 +68,6 @@ for (const c of cells) {
     .bento {
       grid-template-columns: repeat(3, 1fr);
     }
-    .bento__cell--wide {
-      grid-column: span 2;
-    }
   }
   .bento__cell {
     position: relative;
@@ -101,14 +86,10 @@ for (const c of cells) {
     transform: translateY(-3px);
     box-shadow: var(--shadow-lg);
   }
-  .bento__img {
-    width: 100%;
-    height: 190px;
-    object-fit: cover;
-    background: #0e0d0c;
-  }
-  .bento__cell--wide .bento__img {
-    height: 300px;
+  .bento__icon {
+    display: block;
+    font-size: 1.6rem;
+    margin-bottom: 0.45rem;
   }
   .bento__body {
     padding: 1rem 1.2rem 1.3rem;

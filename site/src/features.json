@@ -4,10 +4,8 @@
     "name": "Multi-agent office",
     "desc": "Each agent session gets a desk; overflow agents auto-fill new floors",
     "card": {
-      "img": "day.png",
-      "pos": "center",
-      "wide": true,
-      "blurb": "Each running coding-agent session claims a desk — arriving, working, taking breaks, and leaving when the session ends."
+      "blurb": "Each running coding-agent session claims a desk — arriving, working, taking breaks, and leaving when the session ends.",
+      "href": "#showcase-office"
     }
   },
   {
@@ -15,9 +13,8 @@
     "name": "Multi-floor office",
     "desc": "PageUp/PageDown/↑↓/jk to navigate floors with slide transition",
     "card": {
-      "img": "theme_tokyo-night.png",
-      "pos": "center",
-      "blurb": "Subagents, multiple CLIs and extra floors appear as your swarm grows."
+      "blurb": "Subagents, multiple CLIs and extra floors appear as your swarm grows.",
+      "href": "#showcase-floors"
     }
   },
   {
@@ -30,8 +27,6 @@
     "name": "Per-tool monitor glow",
     "desc": "Edit = blue, Bash = orange, Read = cyan — scannable at a glance",
     "card": {
-      "img": "theme_cyberpunk.png",
-      "pos": "center",
       "blurb": "Edit glows blue, Bash orange, Read cyan — you can read the room at a glance."
     }
   },
@@ -45,10 +40,8 @@
     "name": "Weather effects",
     "desc": "Rain, storm, snow, fog, overcast, windy — cycles every 10 min + sunset golden hour",
     "card": {
-      "img": "night.png",
-      "pos": "50% 16%",
       "blurb": "Lighting tracks your real clock; rain, storms, fog and moonlight roll past the windows.",
-      "href": "#weather"
+      "href": "#showcase-weather"
     }
   },
   {
@@ -66,8 +59,6 @@
     "name": "Office pets",
     "desc": "A cat or dog (one per floor) roams desks, pantry, sofas; sleeps near idle agents. Click to pet — pixel-art hearts float up",
     "card": {
-      "img": "theme_dracula.png",
-      "pos": "68% 40%",
       "blurb": "A cat or dog roams the floor and naps near idle agents — click to pet for a float of pixel-art hearts."
     }
   },
