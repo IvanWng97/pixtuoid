@@ -5,18 +5,19 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use anyhow::Result;
 use serde_json::Value;
 
+mod paths;
+use paths::default_socket_path;
+
 const WRITE_TIMEOUT: Duration = Duration::from_millis(200);
 
-fn default_socket_path() -> String {
-    if let Ok(p) = std::env::var("PIXTUOID_SOCKET") {
-        return p;
-    }
-    if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR") {
-        return format!("{dir}/pixtuoid.sock");
-    }
-    // Safety: getuid is always safe on Unix.
-    let uid = unsafe { libc::getuid() };
-    format!("/tmp/pixtuoid-{uid}.sock")
+/// Explicit `u128 → u64` narrowing (`try_from`, not a truncating `as` cast):
+/// ms-since-epoch fits u64 for ~580M years, so the `unwrap_or(u64::MAX)` arm
+/// is unreachable in practice — it exists to make the narrowing visible and
+/// the fn total. A pre-epoch clock maps to 0 (same as before).
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
 }
 
 fn main() -> Result<()> {
@@ -37,11 +38,7 @@ fn main() -> Result<()> {
     };
 
     if let Value::Object(map) = &mut payload {
-        let ts = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_millis())
-            .unwrap_or(0) as u64;
-        enrich_payload(map, std::env::var("PIXTUOID_SOURCE").ok(), ts);
+        enrich_payload(map, std::env::var("PIXTUOID_SOURCE").ok(), now_ms());
     }
 
     // Best-effort send with a hard write timeout so a stuck daemon can never
@@ -84,6 +81,12 @@ fn enrich_payload(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn now_ms_keeps_real_magnitude() {
+        // 2024-01-01 in ms — a truncating-narrowing bug would land far below.
+        assert!(now_ms() > 1_704_067_200_000);
+    }
 
     #[test]
     fn stamps_cli_source_under_private_key_and_leaves_public_source_untouched() {
