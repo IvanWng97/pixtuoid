@@ -55,23 +55,21 @@ fn main() -> Result<()> {
         } => {
             let cfg_path = config::config_path();
             let cfg = config::load(&cfg_path);
-            let theme_name = config::resolve_theme(&cfg, cli_theme);
+            let theme = config::resolve_theme(&cfg, cli_theme.as_deref())?;
             let desk_cap = cli_max_desks.or(cfg.max_desks);
             let pack_dir = config::resolve_pack_dir(&cfg, pack_dir);
             let pets = config::resolve_pets(&cfg);
-            runtime::run(
-                runtime::RunConfig {
-                    socket,
-                    projects_root,
-                    codex_sessions_root,
-                    pack_dir,
-                    desk_cap,
-                    headless,
-                    config_path: cfg_path,
-                    pets,
-                },
-                theme_name,
-            )
+            runtime::run(runtime::RunConfig {
+                socket,
+                projects_root,
+                codex_sessions_root,
+                pack_dir,
+                desk_cap,
+                headless,
+                config_path: cfg_path,
+                theme,
+                pets,
+            })
         }
         Cmd::InstallHooks {
             hook_path,

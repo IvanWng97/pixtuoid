@@ -145,18 +145,32 @@ pub fn save_version(path: &Path, version: &str) -> Result<()> {
     })
 }
 
-pub fn resolve_theme(config: &AppConfig, cli_theme: Option<String>) -> String {
+/// Resolve CLI + config into the one `&'static Theme` the runtime uses
+/// (CLI > config > `NORMAL`). The asymmetry is deliberate: a `--theme` typo is
+/// explicit user intent and hard-errors (listing valid names), while a config
+/// typo soft-warns and falls back so a stale config file never bricks startup.
+pub fn resolve_theme(
+    config: &AppConfig,
+    cli_theme: Option<&str>,
+) -> Result<&'static crate::tui::theme::Theme> {
+    use crate::tui::theme::{theme_by_name, ALL_THEMES, NORMAL};
+
+    // Validate the config theme even when the CLI overrides it — the warn is
+    // the only signal that a persisted theme in config.toml has gone stale.
     let config_theme = config.theme.as_deref().and_then(|t| {
-        if crate::tui::theme::theme_by_name(t).is_some() {
-            Some(t.to_string())
-        } else {
+        let theme = theme_by_name(t);
+        if theme.is_none() {
             tracing::warn!(theme = %t, "unknown theme in config — ignoring");
-            None
         }
+        theme
     });
-    cli_theme
-        .or(config_theme)
-        .unwrap_or_else(|| "normal".to_string())
+    if let Some(name) = cli_theme {
+        return theme_by_name(name).ok_or_else(|| {
+            let valid: Vec<&str> = ALL_THEMES.iter().map(|t| t.name).collect();
+            anyhow::anyhow!("unknown theme: {name}. Valid: {}", valid.join(", "))
+        });
+    }
+    Ok(config_theme.unwrap_or(&NORMAL))
 }
 
 /// Resolve config into the office's [`Pet`]s. `[[pets]]` absent → all kinds
@@ -317,8 +331,8 @@ mod tests {
             theme: Some("normal".into()),
             ..AppConfig::default()
         };
-        let theme = resolve_theme(&cfg, Some("dracula".into()));
-        assert_eq!(theme, "dracula");
+        let theme = resolve_theme(&cfg, Some("dracula")).unwrap();
+        assert_eq!(theme.name, "dracula");
     }
 
     #[test]
@@ -327,15 +341,15 @@ mod tests {
             theme: Some("gruvbox".into()),
             ..AppConfig::default()
         };
-        let theme = resolve_theme(&cfg, None);
-        assert_eq!(theme, "gruvbox");
+        let theme = resolve_theme(&cfg, None).unwrap();
+        assert_eq!(theme.name, "gruvbox");
     }
 
     #[test]
     fn resolve_all_none_uses_default() {
         let cfg = AppConfig::default();
-        let theme = resolve_theme(&cfg, None);
-        assert_eq!(theme, "normal");
+        let theme = resolve_theme(&cfg, None).unwrap();
+        assert_eq!(theme.name, "normal");
     }
 
     #[test]
@@ -344,8 +358,44 @@ mod tests {
             theme: Some("does-not-exist".into()),
             ..AppConfig::default()
         };
-        let theme = resolve_theme(&cfg, None);
-        assert_eq!(theme, "normal");
+        let theme = resolve_theme(&cfg, None).unwrap();
+        assert_eq!(theme.name, "normal");
+    }
+
+    #[test]
+    fn resolve_invalid_cli_theme_hard_errors() {
+        let cfg = AppConfig::default();
+        let err = resolve_theme(&cfg, Some("definitely-not-a-theme")).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("unknown theme"), "got: {msg}");
+        for t in crate::tui::theme::ALL_THEMES {
+            assert!(
+                msg.contains(t.name),
+                "should list every valid theme, missing {:?} in: {msg}",
+                t.name
+            );
+        }
+    }
+
+    #[test]
+    fn resolve_valid_cli_wins_even_when_config_theme_invalid() {
+        let cfg = AppConfig {
+            theme: Some("does-not-exist".into()),
+            ..AppConfig::default()
+        };
+        let theme = resolve_theme(&cfg, Some("dracula")).unwrap();
+        assert_eq!(theme.name, "dracula");
+    }
+
+    #[test]
+    fn resolve_invalid_cli_theme_errors_even_with_valid_config() {
+        // A CLI typo must NOT silently fall back to the config theme — explicit
+        // user intent on the command line fails loudly.
+        let cfg = AppConfig {
+            theme: Some("gruvbox".into()),
+            ..AppConfig::default()
+        };
+        assert!(resolve_theme(&cfg, Some("definitely-not-a-theme")).is_err());
     }
 
     #[test]
@@ -354,8 +404,8 @@ mod tests {
         let path = dir.path().join("config.toml");
         std::fs::write(&path, "theme = \"cyberpunk\"\n").unwrap();
         let cfg = load(&path);
-        let theme = resolve_theme(&cfg, None);
-        assert_eq!(theme, "cyberpunk");
+        let theme = resolve_theme(&cfg, None).unwrap();
+        assert_eq!(theme.name, "cyberpunk");
     }
 
     #[test]
@@ -364,8 +414,8 @@ mod tests {
         let path = dir.path().join("config.toml");
         std::fs::write(&path, "theme = \"cyberpunk\"\n").unwrap();
         let cfg = load(&path);
-        let theme = resolve_theme(&cfg, Some("dracula".into()));
-        assert_eq!(theme, "dracula");
+        let theme = resolve_theme(&cfg, Some("dracula")).unwrap();
+        assert_eq!(theme.name, "dracula");
     }
 
     // --- max-desks cap flow -----------------------------------------------

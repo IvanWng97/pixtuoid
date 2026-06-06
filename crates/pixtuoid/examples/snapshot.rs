@@ -228,8 +228,19 @@ fn main() -> Result<()> {
     let mut router = pixtuoid::tui::pathfind::AStarRouter::new();
     let mut overlay = pixtuoid_core::walkable::OccupancyOverlay::new();
     let mut history = pixtuoid::tui::pose::PoseHistory::new();
-    let theme =
-        pixtuoid::tui::theme::theme_by_name(&args.theme).unwrap_or(&pixtuoid::tui::theme::NORMAL);
+    // Fail loudly like --weather above — a typo'd theme silently rendering
+    // NORMAL would put wrong-palette art into the docs/site screenshot pipelines.
+    let theme = pixtuoid::tui::theme::theme_by_name(&args.theme).ok_or_else(|| {
+        let valid: Vec<&str> = pixtuoid::tui::theme::ALL_THEMES
+            .iter()
+            .map(|t| t.name)
+            .collect();
+        anyhow::anyhow!(
+            "unknown --theme {:?}; valid: {}",
+            args.theme,
+            valid.join(" | ")
+        )
+    })?;
     let ticker = TickerQueue::new();
 
     if args.gif || args.anim.is_some() {

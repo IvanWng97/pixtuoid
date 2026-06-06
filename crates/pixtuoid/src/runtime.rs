@@ -29,10 +29,11 @@ pub type SceneRx = watch::Receiver<Arc<SceneState>>;
 /// `compute_boot_capacities` before the first TUI frame.
 const FALLBACK_DESKS: usize = 16;
 
-/// The startup inputs shared by `run` + `run_async` (everything but the theme,
-/// which `run` resolves from a name and `run_async` receives already-resolved).
-/// Bundled so a new boot flag is one struct field, not a fourth copy of the
-/// arg list to thread through both signatures + the main.rs call.
+/// The startup inputs shared by `run` + `run_async`. Bundled so a new boot
+/// flag is one struct field, not a fourth copy of the arg list to thread
+/// through both signatures + the main.rs call. The `theme` is already resolved
+/// (`config::resolve_theme` validates CLI + config in one place), so an
+/// unknown theme can't reach the runtime by construction.
 pub struct RunConfig {
     pub socket: Option<PathBuf>,
     pub projects_root: Option<PathBuf>,
@@ -41,24 +42,18 @@ pub struct RunConfig {
     pub desk_cap: Option<usize>,
     pub headless: bool,
     pub config_path: PathBuf,
+    pub theme: &'static crate::tui::theme::Theme,
     pub pets: Vec<crate::tui::pet::Pet>,
 }
 
-pub fn run(cfg: RunConfig, theme_name: String) -> Result<()> {
-    let theme = crate::tui::theme::theme_by_name(&theme_name).ok_or_else(|| {
-        let valid: Vec<&str> = crate::tui::theme::ALL_THEMES
-            .iter()
-            .map(|t| t.name)
-            .collect();
-        anyhow::anyhow!("unknown theme: {theme_name}. Valid: {}", valid.join(", "))
-    })?;
+pub fn run(cfg: RunConfig) -> Result<()> {
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
-    rt.block_on(async move { run_async(cfg, theme).await })
+    rt.block_on(async move { run_async(cfg).await })
 }
 
-async fn run_async(cfg: RunConfig, theme: &'static crate::tui::theme::Theme) -> Result<()> {
+async fn run_async(cfg: RunConfig) -> Result<()> {
     let RunConfig {
         socket,
         projects_root,
@@ -67,6 +62,7 @@ async fn run_async(cfg: RunConfig, theme: &'static crate::tui::theme::Theme) -> 
         desk_cap,
         headless,
         config_path,
+        theme,
         pets,
     } = cfg;
     let mut cc_src = ClaudeCodeSource::default_paths();
@@ -413,24 +409,6 @@ mod tests {
         assert!(summary.contains(":idle"), "got: {summary}");
         // The "@desk_index" format is present for each agent.
         assert!(summary.contains('@'), "got: {summary}");
-    }
-
-    #[test]
-    fn run_with_unknown_theme_errors_before_runtime() {
-        // The theme is resolved synchronously before any tokio runtime / socket is
-        // built, so an unknown name returns Err without touching async machinery.
-        let cfg = RunConfig {
-            socket: None,
-            projects_root: None,
-            codex_sessions_root: None,
-            pack_dir: None,
-            desk_cap: None,
-            headless: true,
-            config_path: std::path::PathBuf::from("/tmp/pixtuoid-test-config.toml"),
-            pets: vec![],
-        };
-        let err = run(cfg, "definitely-not-a-theme".into()).unwrap_err();
-        assert!(err.to_string().contains("unknown theme"), "got: {err}");
     }
 
     #[test]
