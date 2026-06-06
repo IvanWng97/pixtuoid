@@ -85,4 +85,9 @@ encode_clip "$tmp/hero.gif" hero 12
   --max-desks 16 --agents 22 --navigate-at 3:1 --navigate-at 7:0 "$tmp/multi-floor.gif"
 encode_clip "$tmp/multi-floor.gif" multi-floor 15
 
+# Pets clip — the real TuiRenderer pet (cat roams the floor, naps near idle agents).
+"$bin" --cols 208 --rows 88 --gif --gif-duration 12 --gif-fps 15 --now-hour 14 \
+  --pets cat "$tmp/pets.gif"
+encode_clip "$tmp/pets.gif" pets 15
+
 echo "✓ demos regenerated → $out"

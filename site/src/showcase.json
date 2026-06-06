@@ -60,8 +60,12 @@
     "id": "pets",
     "label": "PETS",
     "kind": "clip",
+    "asset": "pets",
+    "w": 1664,
+    "h": 1408,
     "caption": "a cat roams the floor — click to pet",
-    "status": "soon"
+    "duration": "0:12",
+    "status": "live"
   },
   {
     "id": "meetings",

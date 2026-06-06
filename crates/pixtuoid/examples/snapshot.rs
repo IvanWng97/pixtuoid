@@ -150,6 +150,13 @@ struct SnapshotArgs {
     #[arg(long)]
     popup: bool,
 
+    /// Add a wandering office pet to a renderer-driven --gif capture
+    /// (cat | dog). Routes the capture through the real TuiRenderer,
+    /// which owns pet motion -- the pet roams desks/pantry/sofas and
+    /// naps near idle agents.
+    #[arg(long, value_name = "KIND", requires = "gif")]
+    pets: Option<String>,
+
     /// Animation-verification mode: render ONE agent walking to + settling at a
     /// chosen furniture, so the approach→settle reads correctly (no pop, no
     /// teleport) BEFORE human verify. One of: couch | sofa | stand | pantry |
@@ -279,13 +286,29 @@ fn main() -> Result<()> {
     let ticker = TickerQueue::new();
 
     let navigations = parse_navigations(&args.navigate_at)?;
+    let pet_vec: Vec<pixtuoid::tui::pet::Pet> = match args.pets.as_deref() {
+        None => vec![],
+        Some(kind_str) => {
+            use pixtuoid::tui::pet::{Pet, PetKind};
+            let kind = match kind_str {
+                "cat" => PetKind::Cat,
+                "dog" => PetKind::Dog,
+                other => anyhow::bail!("unknown --pets {:?}; valid: cat | dog", other),
+            };
+            vec![Pet {
+                kind,
+                name: "Pixel".into(),
+            }]
+        }
+    };
+
     if args.floor_seed != 0 && !navigations.is_empty() {
         eprintln!(
             "--floor-seed is ignored with --navigate-at (TuiRenderer derives per-floor seeds)"
         );
     }
-    if !navigations.is_empty() {
-        save_floors_gif(
+    if !navigations.is_empty() || !pet_vec.is_empty() {
+        save_renderer_gif(
             term,
             &scene,
             &pack,
@@ -297,6 +320,7 @@ fn main() -> Result<()> {
             args.gif_duration,
             theme,
             &navigations,
+            pet_vec,
         )?;
         println!("wrote {}", args.out.display());
         return Ok(());
@@ -912,10 +936,11 @@ fn cells_to_rgba(
     rgba
 }
 
-/// Multi-floor gif: drive the REAL TuiRenderer (slide transition, footer
-/// floor chip) frame by frame and encode its TestBackend cell buffer.
+/// Drive the real TuiRenderer (slide transition, footer floor chip, pet motion)
+/// frame by frame and encode its TestBackend cell buffer. Covers multi-floor
+/// captures (via `navigations`) and pet clips (via `pets`).
 #[allow(clippy::too_many_arguments)]
-fn save_floors_gif(
+fn save_renderer_gif(
     term: Terminal<TestBackend>,
     scene: &SceneState,
     pack: &pixtuoid_core::sprite::format::Pack,
@@ -927,6 +952,7 @@ fn save_floors_gif(
     duration_secs: u64,
     theme: &'static pixtuoid::tui::theme::Theme,
     navigations: &[(u64, usize)],
+    pets: Vec<pixtuoid::tui::pet::Pet>,
 ) -> Result<()> {
     use pixtuoid_core::render::Renderer as _;
     let frame_count = (duration_secs * fps) as usize;
@@ -938,7 +964,7 @@ fn save_floors_gif(
     let mut encoder = GifEncoder::new(file);
     encoder.set_repeat(Repeat::Infinite)?;
 
-    let mut r = pixtuoid::tui::tui_renderer::TuiRenderer::new(term, theme, vec![]);
+    let mut r = pixtuoid::tui::tui_renderer::TuiRenderer::new(term, theme, pets);
     let mut fired = vec![false; navigations.len()];
     for i in 0..frame_count {
         // Exact, not i * frame_ms: the truncated frame_ms accumulates (15fps → a

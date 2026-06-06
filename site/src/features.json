@@ -59,7 +59,8 @@
     "name": "Office pets",
     "desc": "A cat or dog (one per floor) roams desks, pantry, sofas; sleeps near idle agents. Click to pet — pixel-art hearts float up",
     "card": {
-      "blurb": "A cat or dog roams the floor and naps near idle agents — click to pet for a float of pixel-art hearts."
+      "blurb": "A cat or dog roams the floor and naps near idle agents — click to pet for a float of pixel-art hearts.",
+      "href": "#showcase-pets"
     }
   },
   {
