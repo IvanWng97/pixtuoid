@@ -20,10 +20,10 @@ src/
 │                       renderer, compute_boot_capacities terminal-size query, Ctrl-C loop —
 │                       untestable async glue, codecov-ignored, #103)
 ├── init_pack.rs        extracts the embedded skeleton pack to a target dir for `init-pack`
-├── install/            multi-target (Claude + Codex) hook install via the `Target` registry:
+├── install/            multi-target (Claude + Codex + OpenCode) hook install via the `Target` registry:
 │                       mod.rs (run_install/run_uninstall, plan_targets, interactive_pick),
-│                       target.rs (Target trait + TARGETS = [CLAUDE, CODEX]),
-│                       claude.rs / codex.rs (per-target hook_command + config path),
+│                       target.rs (Target trait + TARGETS = [CLAUDE, CODEX, OPENCODE]),
+│                       claude.rs / codex.rs / opencode.rs (per-target hook_command + config path / plugin),
 │                       io.rs (resolve_symlink, write_config_atomic — advisory lock + atomic rename)
 └── tui/                ratatui App + TuiRenderer (Renderer trait impl) — see src/tui/CLAUDE.md
 
@@ -40,7 +40,7 @@ sprites/                character/environment packs (NOT under pixtuoid-hook):
 
 ## Where to look
 
-- "How do hooks get installed?" → `install::claude::merge_install` for the JSON merge logic, `install::io::write_config_atomic` for the safe filesystem write. Multi-target install via the `install::target::Target` registry (`TARGETS = [CLAUDE, CODEX]`); `install::plan_targets` decides which CLIs to act on (auto-detect + confirm + non-TTY policy). Claude's `hook_command` ignores the resolved binary path (emits bare `pixtuoid-hook`, relying on PATH); Codex embeds the absolute path. Resolution of the hook binary must therefore be soft (warn) for Claude and only fatal for targets that actually need the path.
+- "How do hooks get installed?" → `install::claude::merge_install` for the JSON merge logic, `install::io::write_config_atomic` for the safe filesystem write. Multi-target install via the `install::target::Target` registry (`TARGETS = [CLAUDE, CODEX, OPENCODE]`); `install::plan_targets` decides which CLIs to act on (auto-detect + confirm + non-TTY policy). Claude's `hook_command` ignores the resolved binary path (emits bare `pixtuoid-hook`, relying on PATH); Codex embeds the absolute path. Resolution of the hook binary must therefore be soft (warn) for Claude and only fatal for targets that actually need the path. OpenCode uses file-based plugin install (not config merge): `opencode::install_plugin` writes `pixtuoid.js` to `.opencode/plugins/`. Use `pixtuoid install-hooks --target opencode` to install.
 - "How does the default character pack get into the binary?" → `tui::embedded_pack` does the `include_str!` at compile time (from `crates/pixtuoid/sprites/default/`); `sprite::format::load_pack_from_strings` parses it.
 - "How do custom sprite packs work?" → `pixtuoid init-pack ./dir` extracts the skeleton template from `sprites/skeleton/` (embedded via `include_str!`, see `init_pack.rs`). `pixtuoid validate-pack ./dir` loads the pack and checks against `REQUIRED_CHARACTER_ANIMATIONS` / `OPTIONAL_*` registries in `sprite::format`. `--pack-dir` CLI flag or `pack-dir` config key loads a custom pack at runtime. Custom packs only need character sprites — furniture/environment animations are merged from the embedded default via `Pack::merge_from()` (only `OPTIONAL_FURNITURE_ANIMATIONS`, never character poses). The robot pack at `sprites/robot/` is a TV-head character set (10×12 sprites).
 - "How does the crash log work?" → `main.rs::install_crash_hook` sets a panic hook that restores the terminal, writes a timestamped backtrace to `~/.cache/pixtuoid/crash.log`.

@@ -83,6 +83,8 @@ pub enum TargetName {
     Claude,
     Codex,
     All,
+    #[value(name = "opencode")]
+    OpenCode,
 }
 
 impl TargetName {
@@ -91,6 +93,7 @@ impl TargetName {
             TargetName::Claude => "claude",
             TargetName::Codex => "codex",
             TargetName::All => "all",
+            TargetName::OpenCode => "opencode",
         }
     }
 }
@@ -120,6 +123,7 @@ mod tests {
         assert_eq!(TargetName::Claude.as_str(), "claude");
         assert_eq!(TargetName::Codex.as_str(), "codex");
         assert_eq!(TargetName::All.as_str(), "all");
+        assert_eq!(TargetName::OpenCode.as_str(), "opencode");
     }
 
     #[test]

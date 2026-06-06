@@ -21,7 +21,7 @@ use anyhow::Result;
 use serde_json::Value;
 
 use crate::source::jsonl::LineDecoder;
-use crate::source::{antigravity, claude_code, codex, AgentEvent};
+use crate::source::{antigravity, claude_code, codex, opencode, AgentEvent};
 
 /// How the shared hook decoder derives the AgentId for this source. Moot for
 /// an alien-envelope source whose `custom` decoder claims every event (the
@@ -122,7 +122,7 @@ pub struct SourceDescriptor {
     pub caps: SourceCaps,
 }
 
-pub const REGISTRY: &[SourceDescriptor] = &[CLAUDE_CODE, CODEX, ANTIGRAVITY];
+pub const REGISTRY: &[SourceDescriptor] = &[CLAUDE_CODE, CODEX, ANTIGRAVITY, OPENCODE];
 
 /// Linear scan — at most a handful of entries, called on slot creation and
 /// the per-tick sweep; a map would cost more in ceremony than it saves.
@@ -181,6 +181,23 @@ const ANTIGRAVITY: SourceDescriptor = SourceDescriptor {
     },
 };
 
+const OPENCODE: SourceDescriptor = SourceDescriptor {
+    name: opencode::SOURCE_NAME,
+    label_prefix: opencode::LABEL_PREFIX,
+    line_decoder: None, // hook-only
+    hook: HookDecoding {
+        // Alien envelope — custom decoder constructs its own AgentIds from
+        // session_id; this id_key is never reached (inert).
+        id_key: IdKey::SessionId,
+        custom: Some(opencode::decode_opencode_hook_custom),
+    },
+    caps: SourceCaps {
+        has_exit_signal: true,
+        resurrects_on_prompt: false,
+        delegations_are_hook_silent: false,
+    },
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -210,9 +227,10 @@ mod tests {
         assert_eq!(CLAUDE_CODE.name, claude_code::SOURCE_NAME);
         assert_eq!(CODEX.name, codex::SOURCE_NAME);
         assert_eq!(ANTIGRAVITY.name, antigravity::SOURCE_NAME);
+        assert_eq!(OPENCODE.name, opencode::SOURCE_NAME);
         // Hand-enumerated above — the len pin turns "forgot the new row's
         // assert" from a silent gap into a loud failure.
-        assert_eq!(REGISTRY.len(), 3, "new row? add its name-pin assert above");
+        assert_eq!(REGISTRY.len(), 4, "new row? add its name-pin assert above");
     }
 
     #[test]

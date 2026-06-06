@@ -2,6 +2,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
+use crate::install::opencode;
+
 /// Result of a merge: the reserialized config plus whether anything *semantically*
 /// changed. `changed` is computed by comparing the PARSED document before and after
 /// the merge — NOT by byte-comparing serialized output, which always differs from a
@@ -82,7 +84,33 @@ pub const CODEX: Target = Target {
     ),
 };
 
-pub const TARGETS: &[&Target] = &[&CLAUDE, &CODEX];
+pub const TARGETS: &[&Target] = &[&CLAUDE, &CODEX, &OPENCODE];
+
+pub const OPENCODE: Target = Target {
+    name: "opencode",
+    display_name: "OpenCode",
+    restart_noun: "OpenCode",
+    default_config_path: opencode::default_plugin_dir,
+    hook_command: |resolved| anyhow::Ok(format!("PIXTUOID_SOURCE=opencode {}", resolved.display())),
+    merge_install: |content, _hook_cmd| {
+        // OpenCode uses file-based plugin install, not config merge. The
+        // merge_install/uninstall targets are no-ops; the actual install
+        // happens inside the `install` / `uninstall` dispatcher.
+        Ok(MergeOutcome {
+            content: content.to_string(),
+            changed: false,
+        })
+    },
+    merge_uninstall: |content| {
+        Ok(MergeOutcome {
+            content: content.to_string(),
+            changed: false,
+        })
+    },
+    needs_path_warning: true,
+    needs_resolved_binary: false,
+    post_install_note: Some("installed pixtuoid plugin to .opencode/plugins/pixtuoid.js"),
+};
 
 pub fn by_name(name: &str) -> Option<&'static Target> {
     TARGETS.iter().copied().find(|t| t.name == name)
@@ -106,6 +134,7 @@ mod tests {
     fn by_name_resolves_claude_and_rejects_unknown() {
         assert_eq!(by_name("claude").unwrap().name, "claude");
         assert_eq!(by_name("codex").unwrap().name, "codex");
+        assert_eq!(by_name("opencode").unwrap().name, "opencode");
         assert!(by_name("nope").is_none());
         assert!(by_name("all").is_none()); // "all" is a meta-value, not a Target
     }

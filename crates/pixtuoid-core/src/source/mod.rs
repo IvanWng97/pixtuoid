@@ -25,6 +25,7 @@ pub const REGISTERED_SOURCES: &[&str] = &[
     claude_code::SOURCE_NAME,
     codex::SOURCE_NAME,
     antigravity::SOURCE_NAME,
+    opencode::SOURCE_NAME,
 ];
 
 #[cfg(test)]
@@ -207,6 +208,7 @@ pub mod decoder;
 pub mod hook;
 pub mod jsonl;
 pub mod manager;
+pub mod opencode;
 // `doc(hidden)`: the registry is an internal fact table, `pub` ONLY so the
 // integration-test crates (fixture_harness) can read it. Hiding it keeps it
 // off the published API — cargo-semver-checks then lets descriptor/caps

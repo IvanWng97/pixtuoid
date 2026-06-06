@@ -1,6 +1,7 @@
 pub mod claude;
 pub mod codex;
 pub mod io;
+pub mod opencode;
 pub mod target;
 
 use std::io::IsTerminal;
@@ -338,6 +339,36 @@ fn resolve_hook_binary(
 
 fn run_install(t: &Target, config: Option<PathBuf>, hook_path: Option<PathBuf>) -> Result<()> {
     let path = config.unwrap_or_else(|| (t.default_config_path)());
+
+    // OpenCode uses a file-based plugin install (write pixtuoid.js), not config merge.
+    if t.name == "opencode" {
+        // Resolve hook binary for the PATH check below.
+        let _binary = resolve_hook_binary(t, hook_path, io::default_hook_binary)?;
+        let changed = opencode::install_plugin(&path)
+            .with_context(|| format!("installing plugin to {}", path.display()))?;
+        if t.needs_path_warning && !io::hook_on_path() {
+            println!("warn: `pixtuoid-hook` not found on PATH (checked against this shell).");
+            println!("      Install it on PATH, e.g. `cargo install --path crates/pixtuoid-hook`.");
+        }
+        if !changed {
+            println!("[{}] already up to date — {}", t.name, path.display());
+            return Ok(());
+        }
+        println!(
+            "ok: installed pixtuoid plugin into {} ({})",
+            path.display(),
+            t.display_name
+        );
+        if let Some(note) = t.post_install_note {
+            println!("{note}");
+        }
+        println!(
+            "→ start a new {} session for this to take effect.",
+            t.restart_noun
+        );
+        return Ok(());
+    }
+
     let binary = resolve_hook_binary(t, hook_path, io::default_hook_binary)?;
     let hook_cmd = (t.hook_command)(&binary)?;
     let content = io::read_config(&path)?;
@@ -379,6 +410,31 @@ fn run_install(t: &Target, config: Option<PathBuf>, hook_path: Option<PathBuf>) 
 
 fn run_uninstall(t: &Target, config: Option<PathBuf>) -> Result<()> {
     let path = config.unwrap_or_else(|| (t.default_config_path)());
+
+    // OpenCode uses file-based plugin removal, not config merge.
+    if t.name == "opencode" {
+        if !path.exists() {
+            println!(
+                "[{}] no pixtuoid plugin found in {} — nothing to remove",
+                t.name,
+                path.display()
+            );
+            return Ok(());
+        }
+        opencode::uninstall_plugin(&path)
+            .with_context(|| format!("removing plugin from {}", path.display()))?;
+        println!(
+            "ok: removed pixtuoid plugin from {} ({})",
+            path.display(),
+            t.display_name
+        );
+        println!(
+            "→ start a new {} session for this to take effect.",
+            t.restart_noun
+        );
+        return Ok(());
+    }
+
     let content = io::read_config(&path)?;
     let outcome =
         (t.merge_uninstall)(&content).with_context(|| format!("processing {}", path.display()))?;

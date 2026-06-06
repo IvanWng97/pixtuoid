@@ -124,7 +124,7 @@ Upgrading from `ascii-agents` v0.3.x? See [docs/MIGRATION.md](docs/MIGRATION.md)
 | [**Antigravity CLI**](https://github.com/antiGravity-AI/antigravity-cli) | ✅ Supported | JSONL watcher |
 | [**Codex CLI**](https://github.com/openai/codex) | ✅ Supported | Hook shim + JSONL watcher (hook/JSONL coalesce on session UUID) |
 | [**Copilot CLI**](https://github.com/github/copilot-cli) | 🔜 Planned | Identical event names |
-| [**OpenCode**](https://github.com/anomalyco/opencode) | 🔜 Planned | Any LLM (DeepSeek / GPT / Claude / Gemini) |
+| [**OpenCode**](https://github.com/anomalyco/opencode) | ✅ Supported | Hook shim via JS plugin (any LLM) |
 | [**Cursor CLI**](https://cursor.com/cli) | 🔜 Planned | NDJSON stream |
 
 > Adding a new tool? Implement the [`Source` trait](#contributing) — one file, one channel, done.

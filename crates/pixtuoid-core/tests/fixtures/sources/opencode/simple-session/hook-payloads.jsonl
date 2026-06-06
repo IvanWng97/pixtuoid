@@ -1,0 +1,6 @@
+{"_pixtuoid_source":"opencode","hook_event_name":"SessionStart","session_id":"ses-opencode-1","cwd":"/home/user/my-project"}
+{"_pixtuoid_source":"opencode","hook_event_name":"PreToolUse","session_id":"ses-opencode-1","tool_use_id":"call_abc","tool_name":"Bash"}
+{"_pixtuoid_source":"opencode","hook_event_name":"PostToolUse","session_id":"ses-opencode-1","tool_use_id":"call_abc"}
+{"_pixtuoid_source":"opencode","hook_event_name":"PreToolUse","session_id":"ses-opencode-1","tool_use_id":"call_def","tool_name":"Edit"}
+{"_pixtuoid_source":"opencode","hook_event_name":"PostToolUse","session_id":"ses-opencode-1","tool_use_id":"call_def"}
+{"_pixtuoid_source":"opencode","hook_event_name":"SessionEnd","session_id":"ses-opencode-1"}

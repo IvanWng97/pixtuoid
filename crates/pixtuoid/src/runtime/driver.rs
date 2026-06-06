@@ -17,6 +17,7 @@ use pixtuoid_core::source::antigravity::AntigravitySource;
 use pixtuoid_core::source::claude_code::ClaudeCodeSource;
 use pixtuoid_core::source::codex::CodexSource;
 use pixtuoid_core::source::manager::SourceManager;
+use pixtuoid_core::source::opencode::OpenCodeSource;
 use pixtuoid_core::state::MAX_FLOORS;
 use pixtuoid_core::{AgentEvent, Reducer, SceneState, TaggedReceiver, Transport};
 use tokio::sync::{mpsc, watch};
@@ -59,6 +60,8 @@ async fn run_async(cfg: RunConfig) -> Result<()> {
         codex_src.sessions_root = p;
     }
 
+    let oc_src = OpenCodeSource;
+
     let (tx, rx) = mpsc::channel::<(Transport, AgentEvent)>(256);
     let boot_caps: [usize; MAX_FLOORS] = match (desk_cap, headless) {
         // Headless: no terminal to measure. Honor the cap as-is, else the fallback.
@@ -81,6 +84,7 @@ async fn run_async(cfg: RunConfig) -> Result<()> {
         .with_source(Box::new(cc_src))
         .with_source(Box::new(ag_src))
         .with_source(Box::new(codex_src))
+        .with_source(Box::new(oc_src))
         .spawn(tx);
 
     if headless {

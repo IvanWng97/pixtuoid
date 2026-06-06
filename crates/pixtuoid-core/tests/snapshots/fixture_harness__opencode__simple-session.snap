@@ -1,0 +1,33 @@
+---
+source: crates/pixtuoid-core/tests/fixture_harness.rs
+assertion_line: 240
+expression: events
+---
+- SessionStart:
+    agent_id: 11630954838901006530
+    source: opencode
+    session_id: ses-opencode-1
+    cwd: /home/user/my-project
+    parent_id: ~
+- ActivityStart:
+    agent_id: 11630954838901006530
+    activity: Typing
+    tool_use_id: call_abc
+    detail:
+      Generic:
+        display: Bash
+- ActivityEnd:
+    agent_id: 11630954838901006530
+    tool_use_id: call_abc
+- ActivityStart:
+    agent_id: 11630954838901006530
+    activity: Typing
+    tool_use_id: call_def
+    detail:
+      Generic:
+        display: Edit
+- ActivityEnd:
+    agent_id: 11630954838901006530
+    tool_use_id: call_def
+- SessionEnd:
+    agent_id: 11630954838901006530
