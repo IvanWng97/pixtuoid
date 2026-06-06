@@ -127,6 +127,19 @@ fn source_label_prefix(source: &str) -> &str {
         .unwrap_or(source)
 }
 
+/// Outcome flags from [`Reducer::track_active_tasks`], consumed by `apply`'s
+/// main event match.
+struct TaskTracking {
+    /// An `ActivityEnd` drained a tracked Task: the general ActivityEnd arm
+    /// must be skipped — otherwise it would redundantly re-arm
+    /// `pending_idle_at` or arm it while tasks are still in flight.
+    handled_by_task_tracking: bool,
+    /// An `ActivityStart` dispatched a Task (already applied as
+    /// Active(Delegating) by the pre-pass): the general ActivityStart arm
+    /// must be skipped.
+    handled_by_task_start: bool,
+}
+
 #[derive(Debug, Default)]
 pub struct Reducer {
     /// Track recent hook-derived events so JSONL duplicates can be dropped.
@@ -207,50 +220,19 @@ impl Reducer {
             scope::refresh_lineage(scene, id, now);
         }
 
-        // Subagent-leak suppression: if this AgentId currently has any Task
-        // tool in flight, hook ActivityStart/End events for it are almost
-        // certainly subagent work misattributed to the parent. Drop them and
-        // defer to JSONL, which targets the subagent's own AgentId. The
-        // Task's own PostToolUse is exempt — its tool_use_id matches one we
-        // are tracking, so it passes through and clears the slot.
-        if from == Transport::Hook {
-            let in_task = self.active_tasks.get(&id).is_some_and(|s| !s.is_empty());
-            let suppress = match &event {
-                AgentEvent::ActivityStart { .. } => in_task,
-                AgentEvent::ActivityEnd { tool_use_id, .. } => {
-                    let is_task_self_end = tool_use_id
-                        .as_ref()
-                        .is_some_and(|t| self.active_tasks.get(&id).is_some_and(|s| s.contains(t)));
-                    in_task && !is_task_self_end
-                }
-                _ => false,
-            };
-            if suppress {
-                // The misattributed subagent event already refreshed the
-                // parent's lineage above (liveness flows up), keeping the
-                // delegating parent from being wrongly stale-swept.
-                //
-                // One state change still belongs to the parent: if it is
-                // `Waiting` while delegating, that Waiting is the SUBAGENT's
-                // permission gate (the `Notification` was misattributed to the
-                // parent) — a parent blocked on a Task isn't running its own
-                // tools. A suppressed child event means the subagent resumed
-                // work, so the gate resolved: restore Active(Delegating) instead
-                // of leaving a stale "permission?" Waiting until the 60-min
-                // stale-sweep. Then drop the spurious display update.
-                let task_tuid = self
-                    .active_tasks
-                    .get(&id)
-                    .and_then(|s| s.iter().next())
-                    .map(|t| Arc::<str>::from(t.as_str()));
-                if let Some(slot) = scene.agents.get_mut(&id) {
-                    if matches!(slot.state, ActivityState::Waiting { .. }) {
-                        fsm::enter_delegating(slot, task_tuid, now);
-                        self.gated_before_waiting.remove(&id);
-                    }
-                }
-                return;
-            }
+        // PRE-PASS ORDER IS LOAD-BEARING: suppression → hook-wins dedup →
+        // task tracking.
+        // (1) Suppress before the dedup RECORD: a suppressed hook event must
+        //     not record its tool_use_id, or it would dedup-drop its own JSONL
+        //     copy — the only transport left to track that Task (e.g. a
+        //     parallel second dispatch suppressed as a leak; pinned by
+        //     `suppressed_parallel_task_dispatch_jsonl_copy_survives_dedup_and_tracks`).
+        // (2) Dedup before task tracking: a JSONL duplicate must be dropped
+        //     before it can drain `active_tasks` and fire `cascade_exit`
+        //     mid-delegation (pinned by
+        //     `jsonl_duplicate_task_end_inside_dedup_window_does_not_fire_cascade`).
+        if from == Transport::Hook && self.suppress_subagent_leak(scene, &event, id, now) {
+            return;
         }
 
         // Dedup: drop JSONL events that match a recent Hook event by tool_use_id.
@@ -272,81 +254,10 @@ impl Reducer {
             }
         }
 
-        // Track active Task tool_use_ids from either transport. HashSet is
-        // idempotent so duplicate inserts from both hook+jsonl are harmless.
-        //
-        // Side effect: when the parent gains a Task, also mark it as
-        // Active("Delegating") so it doesn't look idle/asleep while its
-        // subagents do the visible work. When the last Task drains, the
-        // next normal hook/JSONL event will reset its state.
-        //
-        // `handled_by_task_tracking`: when an ActivityEnd drains
-        // active_tasks, the general ActivityEnd arm below must be
-        // skipped — otherwise it would redundantly re-arm
-        // pending_idle_at or arm it while tasks are still in flight.
-        let mut handled_by_task_tracking = false;
-        let mut handled_by_task_start = false;
-        // b1 subagent-completion inference (CC writes no completion marker): set
-        // when the parent's LAST Task drains on this event, so the delegated
-        // subtree can be marked exiting below.
-        let mut completed_subtree_root: Option<AgentId> = None;
-        match &event {
-            AgentEvent::ActivityStart {
-                agent_id,
-                tool_use_id: Some(tuid),
-                detail: Some(d),
-                ..
-            } if d.is_task() => {
-                handled_by_task_start = true;
-                self.active_tasks
-                    .entry(*agent_id)
-                    .or_default()
-                    .insert(tuid.clone());
-                if let Some(slot) = scene.agents.get_mut(agent_id) {
-                    fsm::enter_delegating(slot, Some(Arc::<str>::from(tuid.as_str())), now);
-                }
-            }
-            AgentEvent::ActivityEnd {
-                agent_id,
-                tool_use_id: Some(tuid),
-            } => {
-                if let Some(set) = self.active_tasks.get_mut(agent_id) {
-                    if set.remove(tuid) {
-                        handled_by_task_tracking = true;
-                        if let Some(slot) = scene.agents.get_mut(agent_id) {
-                            slot.last_event_at = now;
-                            // Debounce: stay visually Active for
-                            // ACTIVE_GRACE_WINDOW; expire_pending_idles flips to
-                            // Idle if no new tool starts inside the window. Only
-                            // arm when actually Active — if the parent is Waiting
-                            // (its own permission prompt fired during delegation)
-                            // a Task drain must NOT arm the idle-resolve, or the
-                            // expiry would false-clear a still-pending permission.
-                            if set.is_empty() {
-                                // Parent's last Task returned → the delegated
-                                // subtree is done; mark it exiting after this
-                                // match (b1).
-                                completed_subtree_root = Some(*agent_id);
-                                if matches!(slot.state, ActivityState::Active { .. }) {
-                                    fsm::arm_pending_idle(slot, now);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            _ => {}
-        }
-
-        // b1: a drained parent Task means the delegated subtree returned —
-        // cascade EXIT to the parent's descendants (not the parent, which keeps
-        // running) so completed subagents leave promptly instead of lingering to
-        // the 30-min idle stale-sweep. CC infers completion from the Task drain
-        // here; a source with a clean "subagent finished" signal (e.g. Codex)
-        // would drive the same cascade through its own decoder.
-        if let Some(parent) = completed_subtree_root {
-            scope::cascade_exit(scene, parent, now);
-        }
+        let TaskTracking {
+            handled_by_task_tracking,
+            handled_by_task_start,
+        } = self.track_active_tasks(scene, &event, now);
 
         match event {
             AgentEvent::SessionStart {
@@ -506,6 +417,145 @@ impl Reducer {
                 }
                 scope::cascade_exit(scene, agent_id, now);
             }
+        }
+    }
+
+    /// Pre-pass 1 of [`Reducer::apply`] — subagent-leak suppression (hook
+    /// transport only): if this AgentId currently has any Task tool in
+    /// flight, hook ActivityStart/End events for it are almost certainly
+    /// subagent work misattributed to the parent. Drop them (returns `true`)
+    /// and defer to JSONL, which targets the subagent's own AgentId. The
+    /// Task's own PostToolUse is exempt — its tool_use_id matches one we are
+    /// tracking, so it passes through and clears the slot.
+    fn suppress_subagent_leak(
+        &mut self,
+        scene: &mut SceneState,
+        event: &AgentEvent,
+        id: AgentId,
+        now: SystemTime,
+    ) -> bool {
+        let in_task = self.active_tasks.get(&id).is_some_and(|s| !s.is_empty());
+        let suppress = match event {
+            AgentEvent::ActivityStart { .. } => in_task,
+            AgentEvent::ActivityEnd { tool_use_id, .. } => {
+                let is_task_self_end = tool_use_id
+                    .as_ref()
+                    .is_some_and(|t| self.active_tasks.get(&id).is_some_and(|s| s.contains(t)));
+                in_task && !is_task_self_end
+            }
+            _ => false,
+        };
+        if suppress {
+            // The misattributed subagent event already refreshed the
+            // parent's lineage in `apply` (liveness flows up), keeping the
+            // delegating parent from being wrongly stale-swept.
+            //
+            // One state change still belongs to the parent: if it is
+            // `Waiting` while delegating, that Waiting is the SUBAGENT's
+            // permission gate (the `Notification` was misattributed to the
+            // parent) — a parent blocked on a Task isn't running its own
+            // tools. A suppressed child event means the subagent resumed
+            // work, so the gate resolved: restore Active(Delegating) instead
+            // of leaving a stale "permission?" Waiting until the 60-min
+            // stale-sweep. Then drop the spurious display update.
+            let task_tuid = self
+                .active_tasks
+                .get(&id)
+                .and_then(|s| s.iter().next())
+                .map(|t| Arc::<str>::from(t.as_str()));
+            if let Some(slot) = scene.agents.get_mut(&id) {
+                if matches!(slot.state, ActivityState::Waiting { .. }) {
+                    fsm::enter_delegating(slot, task_tuid, now);
+                    self.gated_before_waiting.remove(&id);
+                }
+            }
+        }
+        suppress
+    }
+
+    /// Last pre-pass of [`Reducer::apply`] (after the inline hook-wins
+    /// dedup) — track active Task tool_use_ids from either transport.
+    /// HashSet is idempotent so duplicate inserts from both hook+jsonl are
+    /// harmless.
+    ///
+    /// Side effect: when the parent gains a Task, also mark it as
+    /// Active("Delegating") so it doesn't look idle/asleep while its
+    /// subagents do the visible work. When the last Task drains, the next
+    /// normal hook/JSONL event will reset its state.
+    ///
+    /// b1 subagent-completion inference (CC writes no completion marker): a
+    /// drained parent Task means the delegated subtree returned — cascade
+    /// EXIT to the parent's descendants (not the parent, which keeps running)
+    /// so completed subagents leave promptly instead of lingering to the
+    /// 30-min idle stale-sweep. CC infers completion from the Task drain
+    /// here; a source with a clean "subagent finished" signal (e.g. Codex)
+    /// would drive the same cascade through its own decoder.
+    fn track_active_tasks(
+        &mut self,
+        scene: &mut SceneState,
+        event: &AgentEvent,
+        now: SystemTime,
+    ) -> TaskTracking {
+        let mut handled_by_task_tracking = false;
+        let mut handled_by_task_start = false;
+        // Set when the parent's LAST Task drains on this event, so the
+        // delegated subtree can be marked exiting below (b1).
+        let mut completed_subtree_root: Option<AgentId> = None;
+        match event {
+            AgentEvent::ActivityStart {
+                agent_id,
+                tool_use_id: Some(tuid),
+                detail: Some(d),
+                ..
+            } if d.is_task() => {
+                handled_by_task_start = true;
+                self.active_tasks
+                    .entry(*agent_id)
+                    .or_default()
+                    .insert(tuid.clone());
+                if let Some(slot) = scene.agents.get_mut(agent_id) {
+                    fsm::enter_delegating(slot, Some(Arc::<str>::from(tuid.as_str())), now);
+                }
+            }
+            AgentEvent::ActivityEnd {
+                agent_id,
+                tool_use_id: Some(tuid),
+            } => {
+                if let Some(set) = self.active_tasks.get_mut(agent_id) {
+                    if set.remove(tuid) {
+                        handled_by_task_tracking = true;
+                        if let Some(slot) = scene.agents.get_mut(agent_id) {
+                            slot.last_event_at = now;
+                            // Debounce: stay visually Active for
+                            // ACTIVE_GRACE_WINDOW; expire_pending_idles flips to
+                            // Idle if no new tool starts inside the window. Only
+                            // arm when actually Active — if the parent is Waiting
+                            // (its own permission prompt fired during delegation)
+                            // a Task drain must NOT arm the idle-resolve, or the
+                            // expiry would false-clear a still-pending permission.
+                            if set.is_empty() {
+                                // Parent's last Task returned → the delegated
+                                // subtree is done; mark it exiting after this
+                                // match (b1).
+                                completed_subtree_root = Some(*agent_id);
+                                if matches!(slot.state, ActivityState::Active { .. }) {
+                                    fsm::arm_pending_idle(slot, now);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        if let Some(parent) = completed_subtree_root {
+            scope::cascade_exit(scene, parent, now);
+        }
+
+        TaskTracking {
+            handled_by_task_tracking,
+            handled_by_task_start,
         }
     }
 

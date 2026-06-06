@@ -2133,6 +2133,232 @@ fn subagent_is_removed_promptly_when_its_parent_task_completes() {
 }
 
 #[test]
+fn jsonl_duplicate_task_end_inside_dedup_window_does_not_fire_cascade() {
+    // Ordering pin for `apply()`'s pre-passes (#90): hook-wins dedup MUST run
+    // BEFORE task tracking. The hook ActivityStart records the Task's
+    // tool_use_id in the dedup map; a JSONL duplicate carrying that id inside
+    // HOOK_WINS_WINDOW must be dropped BEFORE it can drain active_tasks and
+    // cascade-exit a still-working subtree (b1 above fires on real drains only).
+    let mut scene = SceneState::uniform(8);
+    let mut r = Reducer::new();
+    let parent = AgentId::from_transcript_path("/p/orch-dup.jsonl");
+    let child = AgentId::from_parts("claude-code", "/p/orch-dup/subagents/agent-1.jsonl");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: parent,
+            source: "claude-code".into(),
+            session_id: "p".into(),
+            cwd: PathBuf::from("/repo"),
+            parent_id: None,
+        },
+        t0,
+        Transport::Hook,
+    );
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: child,
+            source: "claude-code".into(),
+            session_id: "c".into(),
+            cwd: PathBuf::from("/repo"),
+            parent_id: Some(parent),
+        },
+        t0 + Duration::from_millis(100),
+        Transport::Jsonl,
+    );
+    // Hook Task start → records "task-T" in the dedup map AND active_tasks.
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityStart {
+            agent_id: parent,
+            activity: Activity::Typing,
+            tool_use_id: Some("task-T".into()),
+            detail: Some("Task".into()),
+        },
+        t0 + Duration::from_secs(1),
+        Transport::Hook,
+    );
+    // JSONL duplicate END for the same tool_use_id, inside HOOK_WINS_WINDOW.
+    // If task tracking ran before dedup, this would drain active_tasks and
+    // cascade-exit the child mid-delegation.
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityEnd {
+            agent_id: parent,
+            tool_use_id: Some("task-T".into()),
+        },
+        t0 + Duration::from_secs(1) + Duration::from_millis(100),
+        Transport::Jsonl,
+    );
+
+    assert!(
+        scene.agents.get(&child).unwrap().exiting_at.is_none(),
+        "a JSONL duplicate of the in-flight Task must be dropped by dedup before it can drain active_tasks and cascade-exit the still-working subtree"
+    );
+    match &scene.agents.get(&parent).unwrap().state {
+        ActivityState::Active { detail, .. } => {
+            assert_eq!(
+                detail.as_deref(),
+                Some("Delegating"),
+                "parent must stay Delegating across the duplicate"
+            );
+        }
+        other => panic!("expected Active(Delegating), got {other:?}"),
+    }
+    // Strongest proof active_tasks survived the duplicate: a later
+    // misattributed hook event is still suppressed.
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityStart {
+            agent_id: parent,
+            activity: Activity::Typing,
+            tool_use_id: Some("subagent-R".into()),
+            detail: Some("Read: /foo".into()),
+        },
+        t0 + Duration::from_secs(2),
+        Transport::Hook,
+    );
+    match &scene.agents.get(&parent).unwrap().state {
+        ActivityState::Active { detail, .. } => {
+            assert_eq!(
+                detail.as_deref(),
+                Some("Delegating"),
+                "active_tasks must survive the duplicate — later misattributed hooks stay suppressed"
+            );
+        }
+        other => panic!("expected Active(Delegating), got {other:?}"),
+    }
+}
+
+#[test]
+fn suppressed_parallel_task_dispatch_jsonl_copy_survives_dedup_and_tracks() {
+    // Ordering pin for `apply()`'s pre-passes (#90), leg (1): suppression
+    // MUST run before the hook dedup RECORD. A parallel SECOND Task dispatch
+    // arrives as a hook ActivityStart while the first Task is in flight, so
+    // the leak-suppression drops it — and must drop it BEFORE its
+    // tool_use_id is recorded, or the dedup would also kill the JSONL copy
+    // (same parent AgentId + tool_use_id — the dispatch lives in the
+    // parent's own transcript), leaving the second Task untracked: the
+    // first Task's drain would then empty active_tasks and cascade-exit the
+    // still-working subtree one Task early.
+    let mut scene = SceneState::uniform(8);
+    let mut r = Reducer::new();
+    let parent = AgentId::from_transcript_path("/p/orch-par.jsonl");
+    let child = AgentId::from_parts("claude-code", "/p/orch-par/subagents/agent-1.jsonl");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: parent,
+            source: "claude-code".into(),
+            session_id: "p".into(),
+            cwd: PathBuf::from("/repo"),
+            parent_id: None,
+        },
+        t0,
+        Transport::Hook,
+    );
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: child,
+            source: "claude-code".into(),
+            session_id: "c".into(),
+            cwd: PathBuf::from("/repo"),
+            parent_id: Some(parent),
+        },
+        t0 + Duration::from_millis(100),
+        Transport::Jsonl,
+    );
+    // First Task dispatch — applies normally, active_tasks = {task-1}.
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityStart {
+            agent_id: parent,
+            activity: Activity::Typing,
+            tool_use_id: Some("task-1".into()),
+            detail: Some("Task".into()),
+        },
+        t0 + Duration::from_secs(1),
+        Transport::Hook,
+    );
+    // Parallel SECOND Task dispatch via hook while task-1 is in flight —
+    // suppressed as a leak (and must NOT record "task-2" in the dedup map).
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityStart {
+            agent_id: parent,
+            activity: Activity::Typing,
+            tool_use_id: Some("task-2".into()),
+            detail: Some("Task".into()),
+        },
+        t0 + Duration::from_secs(1) + Duration::from_millis(50),
+        Transport::Hook,
+    );
+    // The JSONL copy of the second dispatch, inside HOOK_WINS_WINDOW of the
+    // suppressed hook copy. It must survive dedup — it is the only transport
+    // left to track task-2.
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityStart {
+            agent_id: parent,
+            activity: Activity::Typing,
+            tool_use_id: Some("task-2".into()),
+            detail: Some("Task".into()),
+        },
+        t0 + Duration::from_secs(1) + Duration::from_millis(110),
+        Transport::Jsonl,
+    );
+    // First Task's own PostToolUse drains task-1. task-2 must still be in
+    // flight, so the subtree must NOT cascade-exit yet.
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityEnd {
+            agent_id: parent,
+            tool_use_id: Some("task-1".into()),
+        },
+        t0 + Duration::from_secs(1) + Duration::from_millis(200),
+        Transport::Hook,
+    );
+
+    assert!(
+        scene.agents.get(&child).unwrap().exiting_at.is_none(),
+        "first Task's drain must not cascade-exit the subtree while the suppressed-then-JSONL-tracked second Task is still in flight"
+    );
+    match &scene.agents.get(&parent).unwrap().state {
+        ActivityState::Active { detail, .. } => {
+            assert_eq!(
+                detail.as_deref(),
+                Some("Delegating"),
+                "parent must stay Delegating on the second Task"
+            );
+        }
+        other => panic!("expected Active(Delegating), got {other:?}"),
+    }
+
+    // Teeth: draining the SECOND Task must fire the cascade — proves the
+    // child is wired to the parent and the earlier no-cascade assertion
+    // wasn't vacuous.
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityEnd {
+            agent_id: parent,
+            tool_use_id: Some("task-2".into()),
+        },
+        t0 + Duration::from_secs(2),
+        Transport::Jsonl,
+    );
+    assert!(
+        scene.agents.get(&child).unwrap().exiting_at.is_some(),
+        "last Task's drain must cascade-exit the completed subtree"
+    );
+}
+
+#[test]
 fn parent_waiting_on_subagent_permission_resolves_when_the_subagent_resumes() {
     // During delegation a subagent's permission Notification is misattributed to
     // the parent → the parent goes Waiting. When the subagent resumes work (a
