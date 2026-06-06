@@ -148,7 +148,7 @@ historically-missed one):
    provenance/sanitization rules), then `cargo insta review` to accept the
    golden snapshot. The harness asserts all of a session's events coalesce to
    ONE `AgentId` — the duplicate-sprite bug class.
-7. **Wire it into `runtime::run_async`** (`crates/pixtuoid/src/runtime/driver.rs`) —
+7. **Wire it into `runtime/driver.rs::run_async`** (`crates/pixtuoid/src/runtime/driver.rs`) —
    the runtime spawns sources by hand; the registry gates tests, not spawning.
 8. **If the CLI has hooks**, add an `install/` target (`Target` registry row +
    a `merge_install`/`merge_uninstall` pair + a registered-events↔decoder-arms

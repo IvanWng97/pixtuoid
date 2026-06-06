@@ -17,7 +17,7 @@ decoding" / "Adding a new agent CLI") first, then:
 2. Add ONE `SourceDescriptor` row in `source/registry.rs` (label prefix, decoders,
    hook keying, reducer caps) and the name to `source::REGISTERED_SOURCES` — the
    bridge + conformance tests force a coalescing fixture and table↔list equality.
-3. Wire it into `runtime::run_async` — the runtime spawns sources by hand; the
+3. Wire it into `runtime/driver.rs::run_async` — the runtime spawns sources by hand; the
    registry only gates the conformance tests, not runtime wiring.
 4. If you add an `AgentEvent` variant, add a matching arm to
    `AgentEvent::agent_id()` in `source/mod.rs`.
