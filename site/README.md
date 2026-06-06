@@ -68,12 +68,12 @@ From the repo root the same gate is `just site-check` (and `just site-fmt`).
 ```
 
 `gen-demos.sh` reads `src/themes.json` and `src/weather.json`, keeping their
-variant-set channels in lock-step with their manifests. It also renders the two
-animated clips via the snapshot example's `--gif`/`--navigate-at`/`--agents`
+variant-set channels in lock-step with their manifests. It also renders the three
+animated clips via the snapshot example's `--gif`/`--navigate-at`/`--agents`/`--pets`
 flags (the multi-floor clip uses `--agents 22 --navigate-at 3:1 --navigate-at 7:0`
-to drive the real TuiRenderer across floors — no screen recording). Each `.gif`
-is re-encoded through `encode_clip` into `.mp4` + `.webm` + a poster frame so
-`ChannelStage` can emit a `<video>` with both sources.
+to drive the real TuiRenderer across floors; the pets clip uses `--pets cat` — no
+screen recording). Each `.gif` is re-encoded through `encode_clip` into `.mp4` +
+`.webm` + a poster frame so `ChannelStage` can emit a `<video>` with both sources.
 
 (Pixel art lives in `public/` on purpose — Astro's `src/assets/` optimizer would
 resize/blur it.)
@@ -99,7 +99,9 @@ Channel kinds:
 live channel, no duplicate ids, and all live clip assets present on disk.
 
 **Adding a demo channel:** add one entry to `showcase.json` + run `gen-demos.sh`
-for the assets. No component edits.
+for the assets. No component edits. For a `clip` channel, also add a render call
+and an `encode_clip` block in `gen-demos.sh`; `variant-set` channels only need
+the manifest entry and whatever static screenshots the manifest references.
 
 ## Add a theme
 

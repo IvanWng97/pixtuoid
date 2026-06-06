@@ -190,7 +190,15 @@ const def = channels.find((c) => c.default) ?? live[0];
       const h = location.hash;
       const legacy = { '#themes': 'themes', '#weather': 'weather' };
       const id = legacy[h] || (h.indexOf('#showcase-') === 0 ? h.slice('#showcase-'.length) : null);
-      if (id) tune(id, true);
+      if (!id) return;
+      const exists = studio.querySelector('[data-stage="' + id + '"]');
+      if (!exists) return;
+      tune(id, true);
+      // #showcase-<id> matches no element id, so the browser never scrolls on its
+      // own — bring the studio into view (legacy #themes/#weather anchors scroll
+      // natively; an extra scrollIntoView to the same spot is a no-op).
+      const sec = document.getElementById('showcase');
+      if (sec) sec.scrollIntoView({ behavior: mq.matches ? 'auto' : 'smooth', block: 'start' });
     }
     fromHash();
     window.addEventListener('hashchange', fromHash);

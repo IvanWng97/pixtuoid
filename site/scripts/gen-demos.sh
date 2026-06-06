@@ -41,11 +41,12 @@ done <<<"$ids"
 "$bin" --cols "$cols" --rows "$rows" --now-hour 13 "$out/day.png"
 "$bin" --cols "$cols" --rows "$rows" --now-hour 22 "$out/night.png"
 
-# Weather gallery — one shot per weather at a fixed afternoon hour, so the only
-# thing that changes between chips is the sky/window (WeatherGallery.astro swaps
-# between these). --weather forces the variant, bypassing the 10-min clock cycle.
-# Driven by weather.json (the same manifest the gallery + astro guard read), so a
-# new weather renders here automatically — no hardcoded list to drift.
+# Weather shots — one per weather at a fixed afternoon hour, so the only thing
+# that changes between chips is the sky/window (the showcase's weather channel in
+# showcase.json swaps between these via its variant-set chips). --weather forces
+# the variant, bypassing the 10-min clock cycle. Driven by weather.json (the same
+# manifest the showcase + astro guard read), so a new weather renders here
+# automatically — no hardcoded list to drift.
 weather_hour=15
 weather_manifest="$site/src/weather.json"
 wids="$(node -e "require('$weather_manifest').forEach(function (w) { console.log(w.id); })")" ||

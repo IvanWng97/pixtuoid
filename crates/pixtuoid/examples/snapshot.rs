@@ -111,7 +111,12 @@ struct SnapshotArgs {
     /// instead of the single-floor draw_scene path. Pair with --max-desks
     /// so overflow agents populate the extra floors. Navigations less than
     /// ~1s apart are dropped (a slide in flight ignores navigate_floor).
-    #[arg(long = "navigate-at", value_name = "SEC:FLOOR", requires = "gif")]
+    #[arg(
+        long = "navigate-at",
+        value_name = "SEC:FLOOR",
+        requires = "gif",
+        conflicts_with = "anim"
+    )]
     navigate_at: Vec<String>,
 
     /// Render an empty office (no agents) — useful for capturing the
@@ -154,7 +159,7 @@ struct SnapshotArgs {
     /// (cat | dog). Routes the capture through the real TuiRenderer,
     /// which owns pet motion -- the pet roams desks/pantry/sofas and
     /// naps near idle agents.
-    #[arg(long, value_name = "KIND", requires = "gif")]
+    #[arg(long, value_name = "KIND", requires = "gif", conflicts_with = "anim")]
     pets: Option<String>,
 
     /// Animation-verification mode: render ONE agent walking to + settling at a
@@ -302,9 +307,10 @@ fn main() -> Result<()> {
         }
     };
 
-    if args.floor_seed != 0 && !navigations.is_empty() {
+    if args.floor_seed != 0 && (!navigations.is_empty() || !pet_vec.is_empty()) {
         eprintln!(
-            "--floor-seed is ignored with --navigate-at (TuiRenderer derives per-floor seeds)"
+            "--floor-seed is ignored on the renderer path (--navigate-at / --pets): \
+             TuiRenderer derives per-floor seeds internally"
         );
     }
     if !navigations.is_empty() || !pet_vec.is_empty() {
