@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use anyhow::Result;
+use anyhow::{Context as _, Result};
 use clap::Parser;
 use image::codecs::gif::{GifEncoder, Repeat};
 use image::{Delay, Frame as GifFrame, Rgb as ImgRgb, RgbImage, Rgba, RgbaImage};
@@ -69,10 +69,17 @@ struct SnapshotArgs {
 
     /// Cap on home desks per floor for the sample scene. Agents past
     /// this count overflow to additional floors (up to MAX_FLOORS=5).
-    /// Use `--max-desks 2` with the default 12-agent scene to see
-    /// multiple floors.
+    /// Pair with `--agents` >16 and `--max-desks 16` to capture a
+    /// full floor-1 + populated floor-2 multi-floor gif.
     #[arg(long, default_value_t = 12)]
     max_desks: usize,
+
+    /// Number of agents in the sample scene (default 12). With more agents
+    /// than --max-desks, the extras overflow to additional floors — pair
+    /// >16 agents with --max-desks 16 for an honest full-floor + floor-2
+    /// multi-floor capture.
+    #[arg(long, default_value_t = 12)]
+    agents: usize,
 
     /// Output an animated GIF instead of a static PNG. Renders
     /// `--gif-duration` seconds at `--gif-fps` frames per second,
@@ -97,6 +104,15 @@ struct SnapshotArgs {
     /// Floor seed — selects floor layout variant (0–4).
     #[arg(long, default_value_t = 0)]
     floor_seed: u64,
+
+    /// Schedule floor navigations inside a --gif capture: repeatable
+    /// `--navigate-at <sec>:<floor>` (0-based floor). Renders through the
+    /// real TuiRenderer — slide transition, footer floor chip and all —
+    /// instead of the single-floor draw_scene path. Pair with --max-desks
+    /// so overflow agents populate the extra floors. Navigations less than
+    /// ~1s apart are dropped (a slide in flight ignores navigate_floor).
+    #[arg(long = "navigate-at", value_name = "SEC:FLOOR", requires = "gif")]
+    navigate_at: Vec<String>,
 
     /// Render an empty office (no agents) — useful for capturing the
     /// dimmed empty-floor look.
@@ -167,6 +183,25 @@ fn default_projects_root() -> String {
     )
 }
 
+fn parse_navigations(specs: &[String]) -> Result<Vec<(u64, usize)>> {
+    specs
+        .iter()
+        .map(|s| {
+            let (sec, floor) = s
+                .split_once(':')
+                .with_context(|| format!("--navigate-at '{s}': expected SEC:FLOOR"))?;
+            let ms = (sec
+                .parse::<f64>()
+                .with_context(|| format!("--navigate-at '{s}': bad SEC"))?
+                * 1000.0) as u64;
+            let floor = floor
+                .parse::<usize>()
+                .with_context(|| format!("--navigate-at '{s}': bad FLOOR"))?;
+            Ok((ms, floor))
+        })
+        .collect()
+}
+
 fn main() -> Result<()> {
     let args = SnapshotArgs::parse();
 
@@ -215,7 +250,7 @@ fn main() -> Result<()> {
             .build()?;
         rt.block_on(capture_live_scene(&args.projects_root, args.listen_secs))?
     } else {
-        sample_scene(now, args.max_desks)
+        sample_scene(now, args.max_desks, args.agents)
     };
 
     let cols = args.cols.unwrap_or(COLS);
@@ -242,6 +277,30 @@ fn main() -> Result<()> {
         )
     })?;
     let ticker = TickerQueue::new();
+
+    let navigations = parse_navigations(&args.navigate_at)?;
+    if args.floor_seed != 0 && !navigations.is_empty() {
+        eprintln!(
+            "--floor-seed is ignored with --navigate-at (TuiRenderer derives per-floor seeds)"
+        );
+    }
+    if !navigations.is_empty() {
+        save_floors_gif(
+            term,
+            &scene,
+            &pack,
+            now,
+            &args.out,
+            cols,
+            rows,
+            args.gif_fps,
+            args.gif_duration,
+            theme,
+            &navigations,
+        )?;
+        println!("wrote {}", args.out.display());
+        return Ok(());
+    }
 
     if args.gif || args.anim.is_some() {
         save_as_gif(
@@ -531,11 +590,9 @@ async fn capture_live_scene(projects_root: &str, listen_secs: u64) -> Result<Sce
     Ok(snapshot)
 }
 
-fn sample_scene(now: SystemTime, max_desks: usize) -> SceneState {
+fn sample_scene(now: SystemTime, max_desks: usize, n_agents: usize) -> SceneState {
     use std::time::Duration as D;
     let mut s = SceneState::uniform(max_desks);
-    // 12-agent scene. With max_desks < 12, agents past the limit
-    // overflow to additional floors.
     let agents: [(&str, ActivityState, D); 12] = [
         (
             "working",
@@ -594,16 +651,25 @@ fn sample_scene(now: SystemTime, max_desks: usize) -> SceneState {
         ),
         ("floor-idle2", ActivityState::Idle, D::from_millis(3_000)),
     ];
-    for (i, (key, state, age)) in agents.iter().enumerate() {
-        let id = AgentId::from_transcript_path(&format!("/demo/{key}.jsonl"));
+    for i in 0..n_agents {
+        let (key, state, age) = &agents[i % agents.len()];
+        // Keys must be unique across the full n_agents range: bare key for the first
+        // pass over the archetypes, suffixed once they cycle so each desk slot gets
+        // its own AgentId and BTreeMap entry.
+        let unique_key = if i < agents.len() {
+            key.to_string()
+        } else {
+            format!("{key}-{i}")
+        };
+        let id = AgentId::from_transcript_path(&format!("/demo/{unique_key}.jsonl"));
         s.agents.insert(
             id,
             AgentSlot {
                 agent_id: id,
                 source: std::sync::Arc::from("claude-code"),
-                session_id: std::sync::Arc::from(format!("demo-{key}").as_str()),
+                session_id: std::sync::Arc::from(format!("demo-{unique_key}").as_str()),
                 cwd: std::sync::Arc::from(PathBuf::from("/demo").as_path()),
-                label: std::sync::Arc::from(*key),
+                label: std::sync::Arc::from(unique_key.as_str()),
                 state: state.clone(),
                 state_started_at: now - *age,
                 created_at: now - *age,
@@ -612,7 +678,9 @@ fn sample_scene(now: SystemTime, max_desks: usize) -> SceneState {
                 pending_idle_at: None,
 
                 desk_index: i,
-                floor_idx: 0,
+                // floor_of maps the global desk_index to the correct floor based on
+                // per-floor capacities; hardcoding 0 would leave overflow agents invisible.
+                floor_idx: s.floor_of(i),
                 tool_call_count: 0,
                 active_ms: 0,
                 unknown_cwd: false,
@@ -802,6 +870,100 @@ fn save_backend_as_png(
     Ok(())
 }
 
+/// Rasterize a post-draw ratatui cell buffer to RGBA: half-block cells become
+/// two stacked pixels (fg = top, bg = bottom); text cells a blocky glyph pad —
+/// the same look the existing demo.gif path produces.
+fn cells_to_rgba(
+    term_buf: &ratatui::buffer::Buffer,
+    cols: u16,
+    rows: u16,
+    img_w: u32,
+    img_h: u32,
+) -> RgbaImage {
+    let mut rgba = RgbaImage::new(img_w, img_h);
+    for y in 0..rows {
+        for x in 0..cols {
+            let cell = &term_buf[(x, y)];
+            let symbol = cell.symbol();
+            let fg = color_to_rgb(cell.fg, ImgRgb([220, 220, 220]));
+            let bg = color_to_rgb(cell.bg, ImgRgb([20, 22, 28]));
+            let x0 = x as u32 * CELL_W;
+            let y0 = y as u32 * CELL_H;
+            if symbol == "▀" {
+                fill_rgba_rect(&mut rgba, x0, y0, CELL_W, CELL_H / 2, fg);
+                fill_rgba_rect(&mut rgba, x0, y0 + CELL_H / 2, CELL_W, CELL_H / 2, bg);
+            } else if symbol.trim().is_empty() {
+                fill_rgba_rect(&mut rgba, x0, y0, CELL_W, CELL_H, bg);
+            } else {
+                fill_rgba_rect(&mut rgba, x0, y0, CELL_W, CELL_H, bg);
+                let pad_x = 1;
+                let pad_y = 3;
+                fill_rgba_rect(
+                    &mut rgba,
+                    x0 + pad_x,
+                    y0 + pad_y,
+                    CELL_W - pad_x * 2,
+                    CELL_H - pad_y * 2,
+                    fg,
+                );
+            }
+        }
+    }
+    rgba
+}
+
+/// Multi-floor gif: drive the REAL TuiRenderer (slide transition, footer
+/// floor chip) frame by frame and encode its TestBackend cell buffer.
+#[allow(clippy::too_many_arguments)]
+fn save_floors_gif(
+    term: Terminal<TestBackend>,
+    scene: &SceneState,
+    pack: &pixtuoid_core::sprite::format::Pack,
+    start_now: SystemTime,
+    path: &PathBuf,
+    cols: u16,
+    rows: u16,
+    fps: u64,
+    duration_secs: u64,
+    theme: &'static pixtuoid::tui::theme::Theme,
+    navigations: &[(u64, usize)],
+) -> Result<()> {
+    use pixtuoid_core::render::Renderer as _;
+    let frame_count = (duration_secs * fps) as usize;
+    let frame_ms = 1000 / fps.max(1);
+    let img_w = cols as u32 * CELL_W;
+    let img_h = rows as u32 * CELL_H;
+
+    let file = std::fs::File::create(path)?;
+    let mut encoder = GifEncoder::new(file);
+    encoder.set_repeat(Repeat::Infinite)?;
+
+    let mut r = pixtuoid::tui::tui_renderer::TuiRenderer::new(term, theme, vec![]);
+    let mut fired = vec![false; navigations.len()];
+    for i in 0..frame_count {
+        // Exact, not i * frame_ms: the truncated frame_ms accumulates (15fps → a
+        // "10s" gif spans only 9834ms, so a late --navigate-at would never fire).
+        let elapsed_ms = i as u64 * 1000 / fps.max(1);
+        let now = start_now + Duration::from_millis(elapsed_ms);
+        for (n, &(at_ms, floor)) in navigations.iter().enumerate() {
+            if !fired[n] && elapsed_ms >= at_ms {
+                r.navigate_floor(floor, now);
+                fired[n] = true;
+            }
+        }
+        r.render(scene, pack, now)?;
+        let rgba = cells_to_rgba(r.terminal.backend().buffer(), cols, rows, img_w, img_h);
+        let delay = Delay::from_numer_denom_ms(frame_ms as u32, 1);
+        encoder.encode_frame(GifFrame::from_parts(rgba, 0, 0, delay))?;
+        let cap = i + 1;
+        if cap % (fps as usize) == 0 {
+            eprint!("\r  encoding: {}/{}s", cap / fps as usize, duration_secs);
+        }
+    }
+    eprintln!("\r  encoded {frame_count} frames @ {fps}fps");
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 fn save_as_gif(
     term: &mut Terminal<TestBackend>,
@@ -882,36 +1044,7 @@ fn save_as_gif(
             continue; // pre-roll: advance the motion state, don't encode
         }
 
-        let term_buf = term.backend().buffer();
-        let mut rgba = RgbaImage::new(img_w, img_h);
-        for y in 0..rows {
-            for x in 0..cols {
-                let cell = &term_buf[(x, y)];
-                let symbol = cell.symbol();
-                let fg = color_to_rgb(cell.fg, ImgRgb([220, 220, 220]));
-                let bg = color_to_rgb(cell.bg, ImgRgb([20, 22, 28]));
-                let x0 = x as u32 * CELL_W;
-                let y0 = y as u32 * CELL_H;
-                if symbol == "▀" {
-                    fill_rgba_rect(&mut rgba, x0, y0, CELL_W, CELL_H / 2, fg);
-                    fill_rgba_rect(&mut rgba, x0, y0 + CELL_H / 2, CELL_W, CELL_H / 2, bg);
-                } else if symbol.trim().is_empty() {
-                    fill_rgba_rect(&mut rgba, x0, y0, CELL_W, CELL_H, bg);
-                } else {
-                    fill_rgba_rect(&mut rgba, x0, y0, CELL_W, CELL_H, bg);
-                    let pad_x = 1;
-                    let pad_y = 3;
-                    fill_rgba_rect(
-                        &mut rgba,
-                        x0 + pad_x,
-                        y0 + pad_y,
-                        CELL_W - pad_x * 2,
-                        CELL_H - pad_y * 2,
-                        fg,
-                    );
-                }
-            }
-        }
+        let rgba = cells_to_rgba(term.backend().buffer(), cols, rows, img_w, img_h);
         let delay = Delay::from_numer_denom_ms(frame_ms as u32, 1);
         let frame = GifFrame::from_parts(rgba, 0, 0, delay);
         encoder.encode_frame(frame)?;
