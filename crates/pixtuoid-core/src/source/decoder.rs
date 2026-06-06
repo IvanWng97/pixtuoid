@@ -1,5 +1,7 @@
-//! Shared decoder utilities used by per-source decoders (CC, Codex, Antigravity).
-//! Hook payload decoding lives here because the hook socket is shared.
+//! Shared decoder utilities used by per-source decoders (CC, Codex,
+//! Antigravity, Reasonix). Hook payload decoding lives here because the hook
+//! socket is shared; Reasonix's non-CC-shaped envelope is dispatched out to
+//! its own module before the CC/Codex field requirements apply.
 
 use std::path::Path;
 
@@ -63,10 +65,11 @@ pub fn decode_hook_payload(v: Value) -> Result<AgentEvent> {
     let desc = crate::source::registry::descriptor_for(source);
 
     // A source's own hook arms run FIRST — before the shared field
-    // requirements below — so an alien envelope (different discriminator, no
-    // `session_id`) or a subject-changing event (Codex SubagentStart/Stop,
-    // whose AgentId is the CHILD's) decodes in the source's module, not here.
-    // `Ok(None)` falls through to the shared CC-shaped arms.
+    // requirements below — so an alien envelope (Reasonix: camelCase, `event`
+    // discriminator, no `session_id` at all) or a subject-changing event
+    // (Codex SubagentStart/Stop, whose AgentId is the CHILD's) decodes in the
+    // source's module, not here. `Ok(None)` falls through to the shared
+    // CC-shaped arms; an alien-envelope source claims EVERY event instead.
     if let Some(custom) = desc.and_then(|d| d.hook.custom) {
         if let Some(ev) = custom(&v)? {
             return Ok(ev);
@@ -477,6 +480,26 @@ mod tests {
             }));
             assert!(ev.is_err(), "CC-attributed {event} must bail");
         }
+    }
+
+    // End-to-end pin for the alien-envelope claim-fully contract: an UNKNOWN
+    // reasonix event must Err out of `decode_hook_payload` itself — proving
+    // the registry dispatch routed it to the rx custom decoder AND that the
+    // decoder never returns Ok(None) for its own envelope (a fall-through
+    // would hit the shared arms' "missing hook_event_name" with a misleading
+    // error, or worse, decode under CC-shaped semantics).
+    #[test]
+    fn unknown_reasonix_event_errs_end_to_end_not_falls_through() {
+        let ev = decode_hook_payload(json!({
+            "_pixtuoid_source": "reasonix",
+            "event": "PreCompact",
+            "cwd": "/repo"
+        }));
+        let msg = ev.expect_err("unknown rx event must bail").to_string();
+        assert!(
+            msg.contains("reasonix"),
+            "error must come from the rx decoder (claimed fully), got: {msg}"
+        );
     }
 
     // Version-skew pin: a shim stamping a source this binary doesn't know yet

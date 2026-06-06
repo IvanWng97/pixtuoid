@@ -12,7 +12,9 @@ use crate::id::AgentId;
 /// ship as the silent two-sprite-ghost bug:
 ///   - a coalescing fixture under `tests/fixtures/sources/<name>/` —
 ///     `tests/fixture_harness.rs`'s
-///     `every_registered_source_has_a_coalescing_fixture`, and
+///     `every_registered_source_has_a_coalescing_fixture` (shape per the row:
+///     hook+JSONL for CC/Codex, JSONL-only for antigravity, hook-only for
+///     reasonix — `hook-payloads.jsonl` with no transcript), and
 ///   - a [`registry::SourceDescriptor`] row — pinned below by
 ///     `registry_covers_exactly_the_registered_sources` (the prefix/decoder
 ///     shape checks live with the registry's own tests).
@@ -24,6 +26,7 @@ pub const REGISTERED_SOURCES: &[&str] = &[
     claude_code::SOURCE_NAME,
     codex::SOURCE_NAME,
     antigravity::SOURCE_NAME,
+    reasonix::SOURCE_NAME,
 ];
 
 #[cfg(test)]
@@ -244,6 +247,7 @@ pub mod decoder;
 pub mod hook;
 pub mod jsonl;
 pub mod manager;
+pub mod reasonix;
 // `doc(hidden)`: the registry is an internal fact table, `pub` ONLY so the
 // integration-test crates (fixture_harness) can read it. Hiding it keeps it
 // off the published API — cargo-semver-checks then lets descriptor/caps

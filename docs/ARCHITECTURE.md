@@ -91,17 +91,22 @@ flowchart TB
 
 These are load-bearing — see `CLAUDE.md` and the nested guides before changing them.
 
-- **The `Source` trait is the only seam for adding an agent CLI** (Codex, Cursor,
-  …). Per-source JSONL knowledge lives in that source's own decoder functions
-  (injected into `JsonlWatcher` as fn pointers), not in a shared decoder.
+- **The `Source` trait is the only seam for adding a transcript-bearing agent
+  CLI** (Codex, Cursor, …). Per-source format knowledge lives in that source's
+  own decoder functions (injected into `JsonlWatcher` as fn pointers), not in a
+  shared decoder. A hook-only CLI (Reasonix — no watchable transcript) is the
+  documented exception: no `Source` impl and no runtime wiring; its registry
+  row sets `line_decoder: None` and supplies a custom hook decoder, and it
+  ships an `install-hooks` target instead.
 - **Cross-source facts live in ONE registry row** (`source/registry.rs`,
   internal): each CLI's `SourceDescriptor` carries its label prefix, JSONL
   decoder, hook keying (`transcript_path` vs `session_id`, plus an optional
-  source-specific hook decoder for events the shared arms can't express), and
-  capability flags. The reducer derives lifecycle policy from those flags —
-  e.g. the short idle reaper is `!has_exit_signal && resurrects_on_prompt`,
-  which today holds only for Codex (no exit signal of any kind, but a swept
-  session walks back in on the next prompt) — instead of matching CLI names.
+  source-specific hook decoder for events the shared arms can't express —
+  Codex's subagent hooks, Reasonix's whole alien envelope), and capability
+  flags. The reducer derives lifecycle policy from those flags — e.g. the
+  short idle reaper is `!has_exit_signal && resurrects_on_prompt`, which today
+  holds only for Codex (no exit signal of any kind, but a swept session walks
+  back in on the next prompt) — instead of matching CLI names.
 - **Events flow through ONE tagged channel.** Producers tag their own events; the
   reducer never hardcodes `Transport::Hook` — it reads the producer's tag.
 - **`pixtuoid-core` has no terminal dependencies.** Anything terminal-specific

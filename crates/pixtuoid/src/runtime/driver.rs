@@ -59,6 +59,9 @@ async fn run_async(cfg: RunConfig) -> Result<()> {
         codex_src.sessions_root = p;
     }
 
+    // No ReasonixSource here: Reasonix is HOOK-ONLY (no watchable JSONL — see
+    // source/reasonix.rs). Its hook payloads ride the shared hook socket that
+    // ClaudeCodeSource binds, attributed per-payload by `_pixtuoid_source`.
     let (tx, rx) = mpsc::channel::<(Transport, AgentEvent)>(256);
     let boot_caps: [usize; MAX_FLOORS] = match (desk_cap, headless) {
         // Headless: no terminal to measure. Honor the cap as-is, else the fallback.

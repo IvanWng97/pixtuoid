@@ -61,6 +61,14 @@ fn hook_sibling_name() -> String {
     format!("pixtuoid-hook{}", std::env::consts::EXE_SUFFIX)
 }
 
+/// POSIX single-quote a string so a shell treats it as one literal token —
+/// embedded single quotes become `'\''`. Codex and Reasonix both run the hook
+/// `command` under a shell, so an unquoted path containing spaces would split
+/// into multiple args and the hook would never be found.
+pub(crate) fn shell_single_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
 /// Build a sibling path by APPENDING `.suffix` to the full filename — never
 /// `with_extension`, which truncates at the last dot (corrupting `config.toml`
 /// into `config.json.pixtuoid.bak` / `config.lock`).

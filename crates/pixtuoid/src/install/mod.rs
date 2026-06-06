@@ -1,6 +1,7 @@
 pub mod claude;
 pub mod codex;
 pub mod io;
+pub mod reasonix;
 pub mod target;
 
 use std::io::IsTerminal;
@@ -11,7 +12,7 @@ use anyhow::{bail, Context, Result};
 use crate::cli::TargetName;
 use target::{Target, BACKUP_SUFFIX};
 
-const NO_CLIS_MSG: &str = "no supported CLIs detected; pass --target claude|codex|all";
+const NO_CLIS_MSG: &str = "no supported CLIs detected; pass --target claude|codex|reasonix|all";
 
 /// Filter a detection table to the targets that are present, dropping the flag.
 fn present_targets(rows: &[(&'static Target, bool)]) -> Vec<&'static Target> {
@@ -50,7 +51,8 @@ pub fn plan_targets(
         Some(TargetName::All) => {
             if explicit_config {
                 return Plan::Conflict(
-                    "--config applies to a single target; use --target claude|codex".into(),
+                    "--config applies to a single target; use --target claude|codex|reasonix"
+                        .into(),
                 );
             }
             let chosen = present_targets(present);
@@ -60,7 +62,7 @@ pub fn plan_targets(
                 Plan::Targets(chosen)
             }
         }
-        // Claude or Codex: resolve through the registry (`by_name` keeps the
+        // A single named target: resolve through the registry (`by_name` keeps the
         // &'static Target lookup string-keyed). The miss arm is defensive — a
         // registered ValueEnum variant always resolves.
         Some(t) => match target::by_name(t.as_str()) {
@@ -83,9 +85,9 @@ pub fn plan_targets(
                 0 => Plan::NothingDetected,
                 1 => Plan::Targets(detected), // TTY or not: a single detected target is safe
                 _ if is_tty => Plan::Targets(detected), // caller confirms interactively
-                _ => {
-                    Plan::Conflict("multiple CLIs detected; pass --target claude|codex|all".into())
-                }
+                _ => Plan::Conflict(
+                    "multiple CLIs detected; pass --target claude|codex|reasonix|all".into(),
+                ),
             }
         }
     }
@@ -437,6 +439,7 @@ mod tests {
         needs_path_warning: false,
         needs_resolved_binary: false,
         post_install_note: None,
+        presence_probe: None,
     };
 
     // A per-process config path under the system temp dir, used by FAKE2/FAKE_DIR
@@ -477,6 +480,7 @@ mod tests {
         needs_path_warning: false,
         needs_resolved_binary: false,
         post_install_note: None,
+        presence_probe: None,
     };
 
     // FAKE_DIR: default_config_path points at a path the test creates as a
@@ -503,6 +507,7 @@ mod tests {
         needs_path_warning: false,
         needs_resolved_binary: false,
         post_install_note: None,
+        presence_probe: None,
     };
 
     fn present(claude: bool, fake: bool) -> Vec<(&'static Target, bool)> {

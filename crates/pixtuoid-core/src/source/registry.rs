@@ -21,7 +21,7 @@ use anyhow::Result;
 use serde_json::Value;
 
 use crate::source::jsonl::LineDecoder;
-use crate::source::{antigravity, claude_code, codex, AgentEvent};
+use crate::source::{antigravity, claude_code, codex, reasonix, AgentEvent};
 
 /// How the shared hook decoder derives the AgentId for this source. Moot for
 /// an alien-envelope source whose `custom` decoder claims every event (the
@@ -122,7 +122,7 @@ pub struct SourceDescriptor {
     pub caps: SourceCaps,
 }
 
-pub const REGISTRY: &[SourceDescriptor] = &[CLAUDE_CODE, CODEX, ANTIGRAVITY];
+pub const REGISTRY: &[SourceDescriptor] = &[CLAUDE_CODE, CODEX, ANTIGRAVITY, REASONIX];
 
 /// Linear scan — at most a handful of entries, called on slot creation and
 /// the per-tick sweep; a map would cost more in ceremony than it saves.
@@ -181,6 +181,34 @@ const ANTIGRAVITY: SourceDescriptor = SourceDescriptor {
     },
 };
 
+/// HOOK-ONLY: Reasonix v2 session files are full-rewritten per turn
+/// (untailable — no `Source` impl, no runtime wiring) and its hook envelope is
+/// ALIEN (camelCase, `event` discriminator, `cwd` as the only identity), so
+/// the custom decoder claims every event and the shared id-key branch is
+/// never reached.
+const REASONIX: SourceDescriptor = SourceDescriptor {
+    name: reasonix::SOURCE_NAME,
+    label_prefix: "rx",
+    line_decoder: None,
+    hook: HookDecoding {
+        id_key: IdKey::TranscriptPathThenSessionId, // inert: custom claims all
+        custom: Some(reasonix::decode_rx_hook_custom),
+    },
+    caps: SourceCaps {
+        // SessionEnd hook fires on clean exit (verified upstream @v1.2.0,
+        // internal/hook/hook.go run sites) — best-effort counts.
+        has_exit_signal: true,
+        // UserPromptSubmit re-emits SessionStart (the decode maps it so) —
+        // a swept-but-live session walks back in on the next prompt.
+        resurrects_on_prompt: true,
+        // Subagents run in-process with hooks disabled upstream
+        // (internal/agent/task.go) — a Delegating slot emits NOTHING until
+        // the dispatch tool's PostToolUse, so it gets the Waiting-class
+        // stale window (see `stale_threshold_with_caps`).
+        delegations_are_hook_silent: true,
+    },
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -210,9 +238,10 @@ mod tests {
         assert_eq!(CLAUDE_CODE.name, claude_code::SOURCE_NAME);
         assert_eq!(CODEX.name, codex::SOURCE_NAME);
         assert_eq!(ANTIGRAVITY.name, antigravity::SOURCE_NAME);
+        assert_eq!(REASONIX.name, reasonix::SOURCE_NAME);
         // Hand-enumerated above — the len pin turns "forgot the new row's
         // assert" from a silent gap into a loud failure.
-        assert_eq!(REGISTRY.len(), 3, "new row? add its name-pin assert above");
+        assert_eq!(REGISTRY.len(), 4, "new row? add its name-pin assert above");
     }
 
     #[test]

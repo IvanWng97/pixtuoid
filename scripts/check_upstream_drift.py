@@ -14,6 +14,10 @@ and compares against the live upstream:
                           vs the `HookEventName` enum in openai/codex protocol.rs
   * CC dispatch tool   -> the known names in `make_tool_detail`
                           vs the tool list in code.claude.com tools-reference
+  * Reasonix hooks     -> `REASONIX_EVENTS` in crates/pixtuoid/src/install/reasonix.rs
+                          + the payload fields decode_rx_hook_payload reads
+                          vs the `Event` consts / json tags in
+                          esengine/DeepSeek-Reasonix internal/hook/hook.go
 
 Exit codes:
   0  no drift
@@ -44,6 +48,21 @@ CC_TOOLS_URL = "https://code.claude.com/docs/en/tools-reference.md"
 # activity a visualizer cares about. A new upstream hook NOT in this set is
 # surfaced for review (it might be a lifecycle signal worth handling).
 CODEX_KNOWN_OMITTED = {"PreCompact", "PostCompact"}
+
+REASONIX_HOOK_URL = (
+    "https://raw.githubusercontent.com/esengine/DeepSeek-Reasonix/main-v2/"
+    "internal/hook/hook.go"
+)
+
+# Reasonix hook events we DELIBERATELY do not register: PostLLMCall fires per
+# model turn (noise), PreCompact is a compaction internal, SubagentStop carries
+# no ids and is already covered by the parent's `task` PostToolUse.
+REASONIX_KNOWN_OMITTED = {"PostLLMCall", "PreCompact", "SubagentStop"}
+
+# Payload fields decode_rx_hook_payload reads — a renamed json tag upstream
+# silently zeroes the decode (`event`/`cwd` are load-bearing: a payload without
+# them is rejected as malformed).
+REASONIX_PAYLOAD_FIELDS = {"event", "cwd", "toolName", "toolArgs", "message"}
 
 
 def fetch(url: str) -> str:
@@ -76,6 +95,20 @@ def upstream_codex_hooks(text: str) -> set[str] | None:
     return set(re.findall(r"\b([A-Z][A-Za-z]+)\b", m.group(1)))
 
 
+def read_reasonix_events() -> set[str]:
+    src = (REPO / "crates/pixtuoid/src/install/reasonix.rs").read_text()
+    m = re.search(r"const REASONIX_EVENTS[^=]*=\s*&\[(.*?)\];", src, re.S)
+    if not m:
+        raise RuntimeError("could not locate REASONIX_EVENTS in install/reasonix.rs")
+    return set(re.findall(r'"(\w+)"', m.group(1)))
+
+
+def upstream_reasonix_hooks(text: str) -> set[str] | None:
+    # Go consts: `PreToolUse Event = "PreToolUse"` — take the string values.
+    found = set(re.findall(r'\w+\s+Event\s*=\s*"(\w+)"', text))
+    return found or None
+
+
 def main() -> int:
     breaking: list[str] = []
     review: list[str] = []
@@ -87,9 +120,11 @@ def main() -> int:
     # one, or drift monitoring would silently stop with zero alarm.
     codex_ours = None
     dispatch_names = None
+    reasonix_ours = None
     try:
         codex_ours = read_codex_events()
         dispatch_names = read_dispatch_names()
+        reasonix_ours = read_reasonix_events()
     except Exception as e:  # noqa: BLE001
         breaking.append(
             f"drift-watch cannot read our own source ({e}) — the parsers in "
@@ -126,6 +161,43 @@ def main() -> int:
                         f"intentionally omit it (add a decoder arm + CODEX_EVENTS, "
                         f"or add it to CODEX_KNOWN_OMITTED)."
                     )
+
+    # --- Reasonix hook events + payload fields (only the FETCH is transient)
+    if reasonix_ours is not None:
+        try:
+            text = fetch(REASONIX_HOOK_URL)
+        except urllib.error.URLError as e:
+            errors.append(f"Reasonix source fetch failed (transient?): {e}")
+            text = None
+        if text is not None:
+            upstream = upstream_reasonix_hooks(text)
+            if upstream is None:
+                breaking.append(
+                    "Reasonix `Event` consts not found at the pinned path "
+                    "(internal/hook/hook.go) — upstream moved it; update "
+                    "REASONIX_HOOK_URL / the parser."
+                )
+            else:
+                for ev in sorted(reasonix_ours):
+                    if ev not in upstream:
+                        breaking.append(
+                            f"Reasonix hook `{ev}` (registered in REASONIX_EVENTS) is "
+                            f"GONE from upstream hook.go — likely renamed; the decoder "
+                            f"will silently drop it."
+                        )
+                for ev in sorted(upstream - reasonix_ours - REASONIX_KNOWN_OMITTED):
+                    review.append(
+                        f"new Reasonix hook `{ev}` upstream — we neither register nor "
+                        f"intentionally omit it (add a decoder arm + REASONIX_EVENTS, "
+                        f"or add it to REASONIX_KNOWN_OMITTED)."
+                    )
+                for field in sorted(REASONIX_PAYLOAD_FIELDS):
+                    if f'json:"{field}' not in text:
+                        breaking.append(
+                            f"Reasonix payload field `{field}` (read by "
+                            f"decode_rx_hook_payload) has no json tag in upstream "
+                            f"hook.go — likely renamed; the decode will silently zero."
+                        )
 
     # --- CC subagent-dispatch tool (only the FETCH is transient) -----------
     if dispatch_names is not None:

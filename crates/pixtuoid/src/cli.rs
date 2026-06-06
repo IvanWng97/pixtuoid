@@ -86,6 +86,7 @@ pub enum Cmd {
 pub enum TargetName {
     Claude,
     Codex,
+    Reasonix,
     All,
 }
 
@@ -94,6 +95,7 @@ impl TargetName {
         match self {
             TargetName::Claude => "claude",
             TargetName::Codex => "codex",
+            TargetName::Reasonix => "reasonix",
             TargetName::All => "all",
         }
     }
@@ -123,6 +125,7 @@ mod tests {
     fn target_name_as_str_covers_all_arms() {
         assert_eq!(TargetName::Claude.as_str(), "claude");
         assert_eq!(TargetName::Codex.as_str(), "codex");
+        assert_eq!(TargetName::Reasonix.as_str(), "reasonix");
         assert_eq!(TargetName::All.as_str(), "all");
     }
 

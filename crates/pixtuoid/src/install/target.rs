@@ -19,7 +19,7 @@ pub struct MergeOutcome {
 /// synchronously). `&CONST` in `const TARGETS` is legal via rvalue static
 /// promotion (Rust 1.21+, MSRV 1.78), so `const` is correct here.
 pub struct Target {
-    /// Stable lowercase id: "claude" | "codex".
+    /// Stable lowercase id: "claude" | "codex" | "reasonix".
     pub name: &'static str,
     /// Human-readable name for CLI output.
     pub display_name: &'static str,
@@ -49,6 +49,12 @@ pub struct Target {
     /// `config.toml` loses comments/ordering on the `toml::Value` round-trip.
     /// Format-agnostic: the orchestrator just prints it, no per-target name-matching.
     pub post_install_note: Option<&'static str>,
+    /// Optional presence probe overriding the default config-file-exists check.
+    /// Needed when the file we WRITE is not a file the CLI CREATES: Reasonix
+    /// never writes `~/.reasonix/settings.json` itself (it is purely
+    /// user-authored), so checking it would mean auto-detection can never fire
+    /// for the one target it was added for — probe install markers instead.
+    pub presence_probe: Option<fn() -> bool>,
 }
 
 /// Backup suffix — the same constant for every target (not a per-target field).
@@ -68,6 +74,7 @@ pub const CLAUDE: Target = Target {
     needs_path_warning: !cfg!(windows),
     needs_resolved_binary: cfg!(windows),
     post_install_note: None,
+    presence_probe: None,
 };
 
 pub const CODEX: Target = Target {
@@ -83,22 +90,42 @@ pub const CODEX: Target = Target {
     post_install_note: Some(
         "note: comments and formatting in config.toml are not preserved (restore from the backup if needed).",
     ),
+    presence_probe: None,
 };
 
-pub const TARGETS: &[&Target] = &[&CLAUDE, &CODEX];
+pub const REASONIX: Target = Target {
+    name: "reasonix",
+    display_name: "Reasonix",
+    restart_noun: "Reasonix",
+    default_config_path: crate::install::reasonix::default_config_path,
+    hook_command: crate::install::reasonix::hook_command,
+    merge_install: crate::install::reasonix::merge_install,
+    merge_uninstall: crate::install::reasonix::merge_uninstall,
+    needs_path_warning: false,
+    needs_resolved_binary: true,
+    post_install_note: None,
+    presence_probe: Some(crate::install::reasonix::detect_installed),
+};
+
+pub const TARGETS: &[&Target] = &[&CLAUDE, &CODEX, &REASONIX];
 
 pub fn by_name(name: &str) -> Option<&'static Target> {
     TARGETS.iter().copied().find(|t| t.name == name)
 }
 
 /// Detection = the config FILE exists (not merely its parent dir): an empty
-/// ~/.codex must NOT count as present.
+/// ~/.codex must NOT count as present. Exception: a target whose written file
+/// the CLI never creates itself (Reasonix) supplies a `presence_probe` over
+/// real install markers instead.
 pub fn config_present(path: &Path) -> bool {
     crate::install::io::resolve_symlink(path).exists()
 }
 
 pub fn is_present(t: &Target) -> bool {
-    config_present((t.default_config_path)().as_path())
+    match t.presence_probe {
+        Some(probe) => probe(),
+        None => config_present((t.default_config_path)().as_path()),
+    }
 }
 
 #[cfg(test)]
@@ -109,6 +136,7 @@ mod tests {
     fn by_name_resolves_claude_and_rejects_unknown() {
         assert_eq!(by_name("claude").unwrap().name, "claude");
         assert_eq!(by_name("codex").unwrap().name, "codex");
+        assert_eq!(by_name("reasonix").unwrap().name, "reasonix");
         assert!(by_name("nope").is_none());
         assert!(by_name("all").is_none()); // "all" is a meta-value, not a Target
     }

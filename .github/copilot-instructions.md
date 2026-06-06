@@ -14,7 +14,7 @@ Workflow + how to add a theme / agent-CLI `Source`: [`CONTRIBUTING.md`](../docs/
 
 1. `pixtuoid-core` has **no terminal dependencies** — no `ratatui`, `crossterm`, or `stdout`/`println!`. Terminal concerns live behind the `Renderer` trait.
 2. Events flow through **one** channel typed `mpsc::Sender<(Transport, AgentEvent)>`; the `Transport` tag is load-bearing (hook-wins dedup). Each `Source` tags its own events — don't hardcode `Transport::Hook` on the consumer side.
-3. The **`Source` trait** is the only seam for adding agent CLIs.
+3. The **`Source` trait** is the only seam for adding a transcript-bearing agent CLI (hook-only CLIs like Reasonix instead ship a hook decoder + `install-hooks` target).
 4. `install-hooks` writes through symlinks (`resolve_symlink`) — don't replace with `fs::rename`.
 5. The hook shim must **never block Claude Code** — always exit 0 silently; the 200 ms write timeout is non-negotiable.
 6. Walkable mask = **ground footprint only** (top-down view); visual sprites may be wider/taller.

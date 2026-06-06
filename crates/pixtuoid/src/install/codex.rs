@@ -23,13 +23,7 @@ pub fn default_config_path() -> PathBuf {
     io::home_relative(".codex/config.toml")
 }
 
-/// POSIX single-quote a string so a shell treats it as one literal token —
-/// embedded single quotes become `'\''`. Codex runs the `command` under a
-/// shell, so an unquoted path containing spaces would split into multiple args
-/// and the hook would never be found.
-fn shell_single_quote(s: &str) -> String {
-    format!("'{}'", s.replace('\'', "'\\''"))
-}
+use crate::install::io::shell_single_quote;
 
 /// Codex runs the `command` string under a shell; we write an ABSOLUTE path
 /// (robust regardless of PATH), single-quoted (robust to spaces), prefixed with

@@ -3167,6 +3167,259 @@ fn parallel_tool_end_while_waiting_keeps_waiting() {
     );
 }
 
+// A turn-end `Stop` (hook, no tool_use_id — Codex/Reasonix) resolves a stale
+// Waiting: an approval prompt BLOCKS those CLIs' turns, so Stop arriving while
+// Waiting means the prompt was denied/abandoned and already resolved upstream.
+// Without this, a denied Reasonix approval at turn end ghosts "waiting" until
+// the 60-min sweep (Reasonix has no second transport to self-heal it).
+#[test]
+fn turn_end_stop_hook_resolves_stale_waiting() {
+    use pixtuoid_core::state::reducer::ACTIVE_GRACE_WINDOW;
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let id = AgentId::from_parts("reasonix", "/Users/dev/proj");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+
+    start(&mut r, &mut scene, id);
+    r.apply(
+        &mut scene,
+        AgentEvent::Waiting {
+            agent_id: id,
+            reason: "approval needed: bash rm -rf ./build".into(),
+        },
+        t0,
+        Transport::Hook,
+    );
+    assert!(matches!(
+        scene.agents.get(&id).unwrap().state,
+        ActivityState::Waiting { .. }
+    ));
+
+    // Turn ends (denied prompt): Stop → ActivityEnd with no id, Hook transport.
+    let end = t0 + Duration::from_millis(800);
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityEnd {
+            agent_id: id,
+            tool_use_id: None,
+        },
+        end,
+        Transport::Hook,
+    );
+    r.tick(
+        &mut scene,
+        end + ACTIVE_GRACE_WINDOW + Duration::from_millis(100),
+    );
+    assert!(
+        matches!(scene.agents.get(&id).unwrap().state, ActivityState::Idle),
+        "turn-end Stop must resolve the stale Waiting to Idle, got {:?}",
+        scene.agents.get(&id).unwrap().state
+    );
+}
+
+// Protection (the Hook gate): a JSONL None-id end must NOT resolve a Waiting —
+// Codex's JSONL emits None-id ActivityEnds per tool (it opts out of dedup),
+// and one can race in just after a fresh PermissionRequest. Only the hook-side
+// turn-end signal is trustworthy.
+#[test]
+fn jsonl_none_id_end_while_waiting_keeps_waiting() {
+    use pixtuoid_core::state::reducer::ACTIVE_GRACE_WINDOW;
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let id = AgentId::from_parts("codex", "sess-1");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+
+    start(&mut r, &mut scene, id);
+    r.apply(
+        &mut scene,
+        AgentEvent::Waiting {
+            agent_id: id,
+            reason: "permission".into(),
+        },
+        t0,
+        Transport::Hook,
+    );
+    // A late rollout line for the PREVIOUS tool races in after the prompt.
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityEnd {
+            agent_id: id,
+            tool_use_id: None,
+        },
+        t0 + Duration::from_millis(200),
+        Transport::Jsonl,
+    );
+    r.tick(
+        &mut scene,
+        t0 + Duration::from_millis(200) + ACTIVE_GRACE_WINDOW + Duration::from_millis(100),
+    );
+    assert!(
+        matches!(
+            scene.agents.get(&id).unwrap().state,
+            ActivityState::Waiting { .. }
+        ),
+        "a racing JSONL None-id end must keep the permission prompt up"
+    );
+}
+
+// Reasonix `/new` fires SessionEnd + SessionStart back-to-back on the SAME
+// cwd-keyed AgentId. The SessionStart must resurrect the exiting slot in place
+// — otherwise it is swallowed by the exists-branch, the corpse is GC'd at
+// 4.5s, and the new session's entire first turn renders nothing.
+#[test]
+fn session_start_on_exiting_slot_resurrects_in_place() {
+    use pixtuoid_core::state::reducer::EXIT_GRACE_WINDOW;
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let id = AgentId::from_parts("reasonix", "/Users/dev/proj");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+
+    start(&mut r, &mut scene, id);
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionEnd { agent_id: id },
+        t0,
+        Transport::Hook,
+    );
+    assert!(scene.agents.get(&id).unwrap().exiting_at.is_some());
+
+    // The rotation's SessionStart lands ms later (same cwd → same id).
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: id,
+            source: "reasonix".into(),
+            session_id: "/Users/dev/proj".into(),
+            cwd: "/Users/dev/proj".into(),
+            parent_id: None,
+        },
+        t0 + Duration::from_millis(20),
+        Transport::Hook,
+    );
+    assert!(
+        scene.agents.get(&id).unwrap().exiting_at.is_none(),
+        "SessionStart on an exiting slot must cancel the walkout"
+    );
+
+    // The new session's first turn works — and survives past the old grace.
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityStart {
+            agent_id: id,
+            tool_use_id: None,
+            detail: None,
+        },
+        t0 + Duration::from_millis(500),
+        Transport::Hook,
+    );
+    r.tick(&mut scene, t0 + EXIT_GRACE_WINDOW + Duration::from_secs(1));
+    let slot = scene
+        .agents
+        .get(&id)
+        .expect("slot survives the grace window");
+    assert!(matches!(slot.state, ActivityState::Active { .. }));
+}
+
+// A duplicate SessionStart (Codex/Reasonix re-emit one per UserPromptSubmit)
+// is a genuine liveness signal: a prompt landing just under the stale
+// threshold must push the boundary out, not lose the race to the sweep while
+// the model is still thinking.
+#[test]
+fn duplicate_session_start_refreshes_liveness() {
+    use pixtuoid_core::state::reducer::STALE_IDLE_TIMEOUT;
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let id = AgentId::from_parts("reasonix", "/Users/dev/proj");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+    start(&mut r, &mut scene, id);
+
+    // Prompt arrives just before the idle threshold…
+    let near = t0 + STALE_IDLE_TIMEOUT - Duration::from_secs(10);
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: id,
+            source: "reasonix".into(),
+            session_id: "/Users/dev/proj".into(),
+            cwd: "/Users/dev/proj".into(),
+            parent_id: None,
+        },
+        near,
+        Transport::Hook,
+    );
+    // …and the slot must still be alive once the ORIGINAL threshold passes.
+    r.tick(
+        &mut scene,
+        t0 + STALE_IDLE_TIMEOUT + Duration::from_secs(60),
+    );
+    assert!(
+        scene
+            .agents
+            .get(&id)
+            .is_some_and(|s| s.exiting_at.is_none()),
+        "duplicate SessionStart must refresh last_event_at"
+    );
+}
+
+// A Delegating Reasonix slot is hook-silent by construction (its in-process
+// subagents fire no hooks), so a >10-min research/review delegation must not
+// be stale-swept mid-turn — it gets the Waiting-class 60-min window.
+#[test]
+fn reasonix_delegating_slot_survives_the_active_timeout() {
+    use pixtuoid_core::source::ToolDetail;
+    use pixtuoid_core::state::reducer::{STALE_ACTIVE_TIMEOUT, STALE_WAITING_TIMEOUT};
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let id = AgentId::from_parts("reasonix", "/Users/dev/proj");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: id,
+            source: "reasonix".into(),
+            session_id: "/Users/dev/proj".into(),
+            cwd: "/Users/dev/proj".into(),
+            parent_id: None,
+        },
+        t0,
+        Transport::Hook,
+    );
+    // PreToolUse(task) — no tool id (Reasonix hooks carry none).
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityStart {
+            agent_id: id,
+            tool_use_id: None,
+            detail: Some(ToolDetail::Task),
+        },
+        t0,
+        Transport::Hook,
+    );
+
+    // Survives well past the generic Active timeout…
+    r.tick(
+        &mut scene,
+        t0 + STALE_ACTIVE_TIMEOUT + Duration::from_secs(60),
+    );
+    assert!(
+        scene
+            .agents
+            .get(&id)
+            .is_some_and(|s| s.exiting_at.is_none()),
+        "a hook-silent Delegating rx slot must not be swept on the 10-min Active timer"
+    );
+    // …but is still reaped on the Waiting-class window (no immortal ghosts).
+    r.tick(
+        &mut scene,
+        t0 + STALE_WAITING_TIMEOUT + Duration::from_secs(60),
+    );
+    assert!(
+        scene.agents.get(&id).is_none_or(|s| s.exiting_at.is_some()),
+        "the carve-out must not make the slot immortal"
+    );
+}
+
 // Regression (adversarial review): a parent Waiting on a permission while a
 // Task is in flight must NOT be false-cleared to Idle when that Task drains.
 // The Task-drain debounce arms `pending_idle_at`; without a state guard it

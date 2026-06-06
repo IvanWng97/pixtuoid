@@ -1,6 +1,6 @@
 name: upstream-drift
 
-# Weekly watch for upstream CC/Codex wire-format renames (hook event names, the
+# Weekly watch for upstream CC/Codex/Reasonix wire-format renames (hook event names, the
 # subagent-dispatch tool). The Task -> Agent rename shipped undocumented and
 # silently disabled subagent suppression; this surfaces the next one before a
 # user hits it. See scripts/check_upstream_drift.py and the "Keeping the decode

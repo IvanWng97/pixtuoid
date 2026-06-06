@@ -206,3 +206,66 @@ fn install_unknown_target_errors() {
     // clap rejects an invalid ValueEnum value → non-zero exit.
     assert!(!status.success());
 }
+
+#[test]
+fn install_reasonix_writes_flat_json_with_sentinel_and_backup() {
+    let dir = TempDir::new().unwrap();
+    let settings = dir.path().join("settings.json");
+    // Pre-existing user hook must survive both install and uninstall.
+    std::fs::write(
+        &settings,
+        r#"{ "hooks": { "PreToolUse": [ { "match": "bash", "command": "my-guard.sh" } ] } }"#,
+    )
+    .unwrap();
+    let bin = env!("CARGO_BIN_EXE_pixtuoid");
+    let status = std::process::Command::new(bin)
+        .args([
+            "install-hooks",
+            "--target",
+            "reasonix",
+            "--config",
+            settings.to_str().unwrap(),
+            "--hook-path",
+            "/fake/pixtuoid-hook",
+        ])
+        .status()
+        .unwrap();
+    assert!(status.success());
+
+    let v: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
+    let pre = v["hooks"]["PreToolUse"].as_array().unwrap();
+    assert_eq!(pre.len(), 2, "user entry + managed entry");
+    assert_eq!(pre[0]["command"], "my-guard.sh", "user entry preserved");
+    // FLAT Reasonix entry: command + source stamp directly on the entry.
+    assert!(pre[1]["_pixtuoid"].as_bool().unwrap());
+    assert_eq!(
+        pre[1]["command"].as_str().unwrap(),
+        "PIXTUOID_SOURCE=reasonix '/fake/pixtuoid-hook'"
+    );
+    assert!(pre[1].get("hooks").is_none(), "no CC-style nested group");
+    assert!(
+        pre[1].get("match").is_none(),
+        "must not write a match key (omitted = every tool)"
+    );
+    assert!(dir.path().join("settings.json.pixtuoid.bak").exists());
+
+    // uninstall strips only the managed entry + removes the backup
+    let status = std::process::Command::new(bin)
+        .args([
+            "uninstall-hooks",
+            "--target",
+            "reasonix",
+            "--config",
+            settings.to_str().unwrap(),
+        ])
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let v: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
+    let pre = v["hooks"]["PreToolUse"].as_array().unwrap();
+    assert_eq!(pre.len(), 1);
+    assert_eq!(pre[0]["command"], "my-guard.sh");
+    assert!(!dir.path().join("settings.json.pixtuoid.bak").exists());
+}

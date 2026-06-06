@@ -132,12 +132,14 @@ fn stale_threshold_with_caps(
     }
     match &slot.state {
         // A Delegating slot on a source whose delegations are hook-silent
-        // (in-process subagents that fire no hooks) emits NOTHING until the
-        // dispatch tool's PostToolUse — `last_event_at` freezes for the whole
-        // delegation, so a long research/review run would be swept mid-turn
-        // on the Active timer. Give it the Waiting-class window instead. (CC
-        // is immune by construction: its subagents' misattributed hooks
-        // drive `refresh_lineage`.)
+        // (in-process subagents that fire no hooks — reasonix is the first
+        // such row) emits NOTHING until the dispatch tool's PostToolUse —
+        // `last_event_at` freezes for the whole delegation, so a long
+        // research/review run would be swept mid-turn on the Active timer.
+        // Give it the Waiting-class window instead. (CC is immune by
+        // construction: its subagents' misattributed hooks drive
+        // `refresh_lineage`. The false-positive ghost self-heals on the next
+        // UserPromptSubmit — same argument as the Codex idle carve-out.)
         ActivityState::Active { detail, .. }
             if caps.is_some_and(|c| c.delegations_are_hook_silent)
                 && detail.as_deref() == Some(crate::source::ToolDetail::Task.display()) =>
@@ -153,12 +155,13 @@ fn stale_threshold_with_caps(
     }
 }
 
-/// Display prefix for a source's labels (`cc·`, `ag·`, `cx·`), from the source
-/// registry (the per-source fact table). Applied at `SessionStart`; the JSONL
-/// `LabelDeriver` Renames (`cc_derive_label`/`derive_codex_label`/
+/// Display prefix for a source's labels (`cc·`, `ag·`, `cx·`, `rx·`), from the
+/// source registry (the per-source fact table). Applied at `SessionStart`; the
+/// JSONL `LabelDeriver` Renames (`cc_derive_label`/`derive_codex_label`/
 /// `derive_ag_label`) produce the same prefixed string and so reinforce this
-/// idempotently. An unregistered source falls back to its own name (the same
-/// `other => other` contract as the old match).
+/// idempotently. A hook-only source (reasonix) has no JSONL Rename, so this is
+/// the sole place its `rx·` label is established. An unregistered source falls
+/// back to its own name (the same `other => other` contract as the old match).
 fn source_label_prefix(source: &str) -> &str {
     crate::source::registry::descriptor_for(source)
         .map(|d| d.label_prefix)
@@ -350,6 +353,28 @@ impl Reducer {
                             slot.parent_id = Some(p);
                         }
                     }
+                    // A duplicate SessionStart is still a genuine liveness
+                    // signal from the session (Codex/Reasonix re-emit one per
+                    // UserPromptSubmit) — refresh it so a prompt landing just
+                    // under the stale threshold pushes the boundary out instead
+                    // of losing the race to the sweep mid-turn.
+                    slot.last_event_at = now;
+                    // Resurrect-in-place: a SessionStart on an EXITING slot
+                    // means the session lives — Reasonix's `/new` fires
+                    // SessionEnd+SessionStart back-to-back on the SAME
+                    // cwd-keyed id, and a Codex resurrect prompt can land
+                    // inside the 4.5s walkout window. Without this the new
+                    // session's start is swallowed and the whole first turn is
+                    // invisible (every later arm is a no-op once the corpse is
+                    // GC'd). Gated to root agents on BOTH sides so a late
+                    // duplicate can't un-exit a b1-cascaded subagent.
+                    if slot.exiting_at.is_some() && slot.parent_id.is_none() && parent_id.is_none()
+                    {
+                        slot.exiting_at = None;
+                        slot.pending_idle_at = None;
+                        slot.state = ActivityState::Idle;
+                        slot.state_started_at = now;
+                    }
                     return;
                 }
                 let Some(desk_index) = scene.next_free_desk() else {
@@ -437,12 +462,29 @@ impl Reducer {
                     // Wait: its tool_use_id matches the one that was Active when
                     // Waiting began. A parallel tool ending has a different id,
                     // so it can't false-clear a still-pending permission.
-                    let resolves_wait = matches!(
+                    //
+                    // A None-id ActivityEnd ON THE HOOK TRANSPORT is a turn-end
+                    // signal (Codex/Reasonix `Stop`; CC hook ends always carry
+                    // ids), and a pending approval BLOCKS those CLIs' turns —
+                    // so a slot still Waiting when Stop arrives can only be a
+                    // stale (denied/abandoned) prompt. Resolve it rather than
+                    // ghosting "waiting" until the 60-min sweep; Reasonix has
+                    // no second transport to self-heal this. The Hook gate is
+                    // load-bearing: Codex's JSONL emits None-id ends per tool
+                    // (it opts out of dedup), and one can race in AFTER a fresh
+                    // PermissionRequest — a JSONL None-id end must keep the
+                    // prompt up, same as the parallel-tool protection above.
+                    let is_waiting = matches!(
                         scene.agents.get(&agent_id).map(|s| &s.state),
                         Some(ActivityState::Waiting { .. })
-                    ) && tool_use_id.is_some()
-                        && self.gated_before_waiting.get(&agent_id).map(|g| &**g)
-                            == tool_use_id.as_deref();
+                    );
+                    let resolves_wait = is_waiting
+                        && match tool_use_id.as_deref() {
+                            Some(tuid) => {
+                                self.gated_before_waiting.get(&agent_id).map(|g| &**g) == Some(tuid)
+                            }
+                            None => from == Transport::Hook,
+                        };
                     if resolves_wait {
                         self.gated_before_waiting.remove(&agent_id);
                     }
@@ -879,10 +921,13 @@ mod tests {
         assert_eq!(STALE_SHORT_IDLE_TIMEOUT, Duration::from_secs(300)); // 5 min
     }
 
-    // The Delegating stale carve-out is caps-driven; no REGISTERED source
-    // sets `delegations_are_hook_silent` yet (the first is Reasonix, PR
-    // #134), so pin the policy half with a synthetic caps value — that's
-    // what the lookup/policy split exists for.
+    // The Delegating stale carve-out is caps-driven; pin the POLICY half with
+    // a synthetic caps value so caps combinations beyond the registered rows
+    // stay covered — that's what the lookup/policy split exists for. (The
+    // registered path — reasonix is the row that sets
+    // `delegations_are_hook_silent` — is pinned end-to-end by
+    // `reasonix_delegating_slot_survives_the_active_timeout` in
+    // tests/reducer.rs.)
     #[test]
     fn delegating_slot_with_hook_silent_caps_gets_waiting_window() {
         use super::{stale_threshold_with_caps, STALE_ACTIVE_TIMEOUT, STALE_WAITING_TIMEOUT};
