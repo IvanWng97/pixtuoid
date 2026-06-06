@@ -8,8 +8,9 @@
 //!      coalescing contract that keeps regressing (a mismatch = two sprites
 //!      for one session).
 //!
-//! Adding a CLI = drop a fixture dir + register its decoder in `decoder_for`.
-//! No other test code; `cargo insta review` accepts the new snapshot.
+//! Adding a CLI = drop a fixture dir; the decoder comes from the source's
+//! `SourceDescriptor` row in `source/registry.rs` — no harness edit. Run
+//! `cargo insta review` to accept the new snapshot.
 //!
 //! Snapshots stay portable because the decoder is fed the fixture's *relative*
 //! path (a stable logical key), not the machine-specific absolute path —
@@ -20,23 +21,20 @@ use std::path::{Path, PathBuf};
 
 use pixtuoid_core::source::decoder::decode_hook_payload;
 use pixtuoid_core::source::jsonl::LineDecoder;
-use pixtuoid_core::source::{antigravity, claude_code, codex, AgentEvent, REGISTERED_SOURCES};
+use pixtuoid_core::source::{registry, AgentEvent, REGISTERED_SOURCES};
 
-/// Map a fixture's source directory name to its JSONL line decoder.
-/// Register a new CLI here (one line) — that plus a fixture dir is all it takes.
+/// A fixture source's JSONL line decoder, from the source registry. A
+/// hook-only source (`line_decoder: None`) ships no transcript and never
+/// reaches this fn.
 fn decoder_for(source: &str) -> LineDecoder {
-    // Keyed off the source modules' own SOURCE_NAME consts so a rename is a
-    // compile error here, not a silent fixture/decoder drift. (Antigravity has
-    // no such const; its name() returns this literal.)
-    if source == codex::SOURCE_NAME {
-        codex::decode_codex_line
-    } else if source == claude_code::SOURCE_NAME {
-        claude_code::decode_cc_line
-    } else if source == "antigravity" {
-        antigravity::decode_ag_line
-    } else {
-        panic!("unknown fixture source {source:?} — register its decoder in decoder_for")
-    }
+    registry::descriptor_for(source)
+        .and_then(|d| d.line_decoder)
+        .unwrap_or_else(|| {
+            panic!(
+                "fixture source {source:?} has no line_decoder — add/extend its \
+                 SourceDescriptor row in source/registry.rs"
+            )
+        })
 }
 
 fn fixtures_root() -> PathBuf {

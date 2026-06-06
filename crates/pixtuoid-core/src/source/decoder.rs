@@ -26,6 +26,30 @@ pub fn decode_hook_payload(v: Value) -> Result<AgentEvent> {
     let obj = v
         .as_object()
         .ok_or_else(|| anyhow!("hook payload must be an object"))?;
+    // CLI attribution comes ONLY from the shim-owned `_pixtuoid_source` (the
+    // shim stamps it from `PIXTUOID_SOURCE`). We must NOT read the public
+    // `source` field: CC's SessionStart payload uses `source` for the start
+    // *reason* (startup/resume/clear/compact), which would namespace the agent
+    // under "startup" and split it from the claude-code-keyed tool/JSONL/
+    // SessionEnd events (an un-reapable ghost). Absent the private key (bare
+    // `pixtuoid-hook` with no env, i.e. CC), default to claude-code.
+    let source = obj
+        .get("_pixtuoid_source")
+        .and_then(|s| s.as_str())
+        .unwrap_or(crate::source::claude_code::SOURCE_NAME);
+    let desc = crate::source::registry::descriptor_for(source);
+
+    // A source's own hook arms run FIRST — before the shared field
+    // requirements below — so an alien envelope (different discriminator, no
+    // `session_id`) or a subject-changing event (Codex SubagentStart/Stop,
+    // whose AgentId is the CHILD's) decodes in the source's module, not here.
+    // `Ok(None)` falls through to the shared CC-shaped arms.
+    if let Some(custom) = desc.and_then(|d| d.hook.custom) {
+        if let Some(ev) = custom(&v)? {
+            return Ok(ev);
+        }
+    }
+
     let event = obj
         .get("hook_event_name")
         .and_then(|s| s.as_str())
@@ -41,30 +65,20 @@ pub fn decode_hook_payload(v: Value) -> Result<AgentEvent> {
         .filter(|s| !s.is_empty())
         .ok_or_else(|| anyhow!("missing/empty session_id"))?
         .to_string();
-    // CLI attribution comes ONLY from the shim-owned `_pixtuoid_source` (the
-    // shim stamps it from `PIXTUOID_SOURCE`). We must NOT read the public
-    // `source` field: CC's SessionStart payload uses `source` for the start
-    // *reason* (startup/resume/clear/compact), which would namespace the agent
-    // under "startup" and split it from the claude-code-keyed tool/JSONL/
-    // SessionEnd events (an un-reapable ghost). Absent the private key (bare
-    // `pixtuoid-hook` with no env, i.e. CC), default to claude-code.
-    let source = obj
-        .get("_pixtuoid_source")
-        .and_then(|s| s.as_str())
-        .unwrap_or(crate::source::claude_code::SOURCE_NAME);
-    // `transcript_path` is the preferred stable per-session key for CC (its hook
-    // and JSONL both carry the same transcript path, so they coalesce on it).
-    // Codex is different: its hooks send `transcript_path` as `string | null`,
-    // and its JSONL source keys on the rollout-filename UUID (== `session_id`).
-    // So Codex MUST key on `session_id` regardless of any `transcript_path`, or
-    // hook and JSONL events would hash to different AgentIds (two sprites).
-    let id_key = if source == crate::source::codex::SOURCE_NAME {
-        session_id.as_str()
-    } else {
-        obj.get("transcript_path")
+    // The per-session key strategy is registry data (`HookDecoding::id_key`),
+    // not a name match: CC keys on `transcript_path` (its hook and JSONL both
+    // carry it, so they coalesce); Codex MUST key on `session_id` (== its
+    // rollout-filename UUID) since its `transcript_path` is `string | null` —
+    // keying on the path would split hook and JSONL into two sprites. Unknown
+    // sources get the CC-shaped default.
+    use crate::source::registry::IdKey;
+    let id_key = match desc.map_or(IdKey::TranscriptPathThenSessionId, |d| d.hook.id_key) {
+        IdKey::SessionId => session_id.as_str(),
+        IdKey::TranscriptPathThenSessionId => obj
+            .get("transcript_path")
             .and_then(|s| s.as_str())
             .filter(|s| !s.is_empty())
-            .unwrap_or(session_id.as_str())
+            .unwrap_or(session_id.as_str()),
     };
     let agent_id = AgentId::from_parts(source, id_key);
 
@@ -142,49 +156,10 @@ pub fn decode_hook_payload(v: Value) -> Result<AgentEvent> {
             tool_use_id: None,
         }),
         "SessionEnd" => Ok(AgentEvent::SessionEnd { agent_id }),
-        // Codex subagents (`spawn_agent`): these two hooks are the ONLY carrier
-        // of the parent<->child link. The subagent owns a SEPARATE rollout file
-        // (filename UUID == this payload's `agent_id`), so the JSONL watcher
-        // already renders it — but orphaned: a flat `~/.codex/sessions/.../
-        // rollout-*.jsonl` path has no `/subagents/` for `detect_parent_id`. So
-        // key the CHILD on `agent_id` (coalesces with that rollout) and link it
-        // to the parent `session_id`. It then joins the same scope tree
-        // (cascade / liveness / readiness) as a CC subagent — source-agnostic.
-        // Wire format captured live (Codex 0.135, gpt-5.5).
-        "SubagentStart" => {
-            // `.filter(non-empty)`: an empty `agent_id` string passes `as_str`
-            // but would key a phantom child that never coalesces with the real
-            // rollout — reject it as malformed instead.
-            let child = obj
-                .get("agent_id")
-                .and_then(|s| s.as_str())
-                .filter(|s| !s.is_empty())
-                .ok_or_else(|| anyhow!("SubagentStart missing/empty agent_id"))?;
-            let cwd = obj.get("cwd").and_then(|s| s.as_str()).unwrap_or("").into();
-            Ok(AgentEvent::SessionStart {
-                agent_id: AgentId::from_parts(source, child),
-                source: source.to_string(),
-                session_id: child.to_string(),
-                cwd,
-                parent_id: Some(AgentId::from_parts(source, session_id.as_str())),
-            })
-        }
-        // Subagent done — end the CHILD promptly (else its rollout lingers to
-        // the 30-min stale-sweep). Keyed on `agent_id`; the parent keeps running.
-        // Best-effort: if this hook wins the race against the child's own slot
-        // creation, the `SessionEnd` is a harmless no-op (no slot yet) and the
-        // later-created orphan falls back to the stale-sweep — Codex has no
-        // durable subagent-stop marker, so "prompt" is not guaranteed.
-        "SubagentStop" => {
-            let child = obj
-                .get("agent_id")
-                .and_then(|s| s.as_str())
-                .filter(|s| !s.is_empty())
-                .ok_or_else(|| anyhow!("SubagentStop missing/empty agent_id"))?;
-            Ok(AgentEvent::SessionEnd {
-                agent_id: AgentId::from_parts(source, child),
-            })
-        }
+        // Codex's SubagentStart/SubagentStop live in
+        // `codex::decode_codex_hook_custom` (dispatched above via the
+        // registry) — they change the event's SUBJECT to the child AgentId,
+        // which these shared session-keyed arms cannot express.
         other => bail!("unsupported hook_event_name: {other}"),
     }
 }
@@ -379,6 +354,25 @@ mod tests {
             ev.agent_id(),
             AgentId::from_parts("codex", "codex-sess"),
             "Codex Stop keys on session_id under the codex namespace"
+        );
+    }
+
+    // Version-skew pin: a shim stamping a source this binary doesn't know yet
+    // (mid-rollout of a new CLI) must degrade gracefully — CC-shaped decode
+    // under the UNKNOWN source's own namespace (no ghost merge into cc, no
+    // bail). This is the registry's `descriptor_for → None` fallback path.
+    #[test]
+    fn unknown_source_decodes_cc_shaped_under_its_own_namespace() {
+        let ev = decode_hook_payload(json!({
+            "hook_event_name": "Stop",
+            "session_id": "s-1",
+            "_pixtuoid_source": "some-future-cli"
+        }))
+        .expect("decodes via the CC-shaped default");
+        assert_eq!(
+            ev.agent_id(),
+            AgentId::from_parts("some-future-cli", "s-1"),
+            "unknown source keys under its own namespace, not claude-code's"
         );
     }
 

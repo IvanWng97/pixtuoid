@@ -57,23 +57,31 @@ pub const STALE_UNKNOWN_CWD_TIMEOUT: Duration = Duration::from_secs(3 * 60);
 /// real `SessionEnd` signals (best-effort hook + durable `/exit` marker) for the
 /// common clean exit, so a short reaper there would only evict genuinely
 /// live-but-idle sessions (lunch-break idle) with no upside.
+// Naming note: selection is now caps-generic (`SourceCaps::short_idle_reap`),
+// so "CODEX" in the name is the historical motivating case, not a gate. It is
+// a pub const in a published crate — fold a rename (STALE_SHORT_IDLE_TIMEOUT)
+// into the next breaking-version batch rather than burning one on it.
 pub const STALE_CODEX_IDLE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
 /// The state-adaptive stale timeout for one slot. Unknown-cwd ghosts reap on the
 /// shortest window (almost always startup-seeding artifacts). Otherwise the
-/// timeout follows the activity state — with one carve-out: an idle **Codex**
-/// slot uses [`STALE_CODEX_IDLE_TIMEOUT`] (not the long [`STALE_IDLE_TIMEOUT`])
-/// because Codex exposes no exit signal of any kind, so the sweep is its only
-/// reaper; the lone false positive (a live-but-idle Codex past the window)
-/// self-heals on its next `UserPromptSubmit`. CC keeps the long window — its
-/// real `SessionEnd` signals make a short reaper all cost, no benefit.
+/// timeout follows the activity state — with one carve-out: an idle slot whose
+/// source has `caps.short_idle_reap()` (today: Codex — no exit signal of any
+/// kind, so the sweep is its only reaper, AND the lone false positive — a
+/// live-but-idle session past the window — self-heals on its next
+/// `UserPromptSubmit`) uses [`STALE_CODEX_IDLE_TIMEOUT`] instead of the long
+/// [`STALE_IDLE_TIMEOUT`]. CC keeps the long window — its real `SessionEnd`
+/// signals make a short reaper all cost, no benefit; Antigravity also lacks an
+/// exit signal but CANNOT resurrect on a prompt, so a short reap would vanish
+/// a live session permanently (see `SourceCaps::short_idle_reap`).
 fn stale_threshold(slot: &AgentSlot) -> Duration {
     if slot.unknown_cwd {
         return STALE_UNKNOWN_CWD_TIMEOUT;
     }
+    let caps = crate::source::registry::descriptor_for(&slot.source).map(|d| &d.caps);
     match &slot.state {
         ActivityState::Active { .. } => STALE_ACTIVE_TIMEOUT,
-        ActivityState::Idle if slot.source.as_ref() == crate::source::codex::SOURCE_NAME => {
+        ActivityState::Idle if caps.is_some_and(|c| c.short_idle_reap()) => {
             STALE_CODEX_IDLE_TIMEOUT
         }
         ActivityState::Idle => STALE_IDLE_TIMEOUT,
@@ -81,18 +89,17 @@ fn stale_threshold(slot: &AgentSlot) -> Duration {
     }
 }
 
-/// Display prefix for a source's labels (`cc·`, `ag·`, `cx·`). Single source of
-/// truth applied at `SessionStart`. The JSONL `LabelDeriver` Renames (e.g.
-/// `cc_derive_label`/`derive_ag_label`) produce the same prefixed string and so
-/// reinforce this idempotently; Codex arrives only via the shared hook socket
-/// (no JSONL Rename), so this is the sole place its `cx·` label is established.
+/// Display prefix for a source's labels (`cc·`, `ag·`, `cx·`), from the source
+/// registry (the per-source fact table). Applied at `SessionStart`; the JSONL
+/// `LabelDeriver` Renames (e.g. `cc_derive_label`/`derive_ag_label`) produce
+/// the same prefixed string and so reinforce this idempotently; Codex arrives
+/// only via the shared hook socket (no JSONL Rename), so this is the sole
+/// place its `cx·` label is established. An unregistered source falls back to
+/// its own name (the same `other => other` contract as the old match).
 fn source_label_prefix(source: &str) -> &str {
-    match source {
-        crate::source::claude_code::SOURCE_NAME => "cc",
-        crate::source::antigravity::SOURCE_NAME => "ag",
-        crate::source::codex::SOURCE_NAME => "cx",
-        other => other,
-    }
+    crate::source::registry::descriptor_for(source)
+        .map(|d| d.label_prefix)
+        .unwrap_or(source)
 }
 
 #[derive(Debug, Default)]

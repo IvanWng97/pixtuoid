@@ -6,22 +6,51 @@ use tokio::sync::mpsc;
 
 use crate::id::AgentId;
 
-/// CLI sources this build supports. The canonical list that the conformance
-/// tests iterate. Every entry MUST have, enforced by tests so omissions fail CI
-/// rather than ship as the silent two-sprite-ghost bug:
-///   - a hook+JSONL coalescing fixture under
-///     `tests/fixtures/sources/<name>/` — `tests/fixture_harness.rs`'s
+/// CLI sources this build supports. The canonical NAME list the conformance
+/// tests iterate; all other per-source facts (label prefix, decoders, hook
+/// keying, reducer caps) live in ONE row per source in [`registry::REGISTRY`].
+/// Every entry MUST have, enforced by tests so omissions fail CI rather than
+/// ship as the silent two-sprite-ghost bug:
+///   - a coalescing fixture under `tests/fixtures/sources/<name>/` —
+///     `tests/fixture_harness.rs`'s
 ///     `every_registered_source_has_a_coalescing_fixture`, and
-///   - an explicit 2-char label prefix arm in `state::reducer::source_label_prefix`
-///     — the inline `every_registered_source_has_two_char_label_prefix` test.
+///   - a [`registry::SourceDescriptor`] row — `registry_covers_exactly_the_
+///     registered_sources` below (the prefix/decoder shape checks live with
+///     the registry's own tests).
 ///
 /// Each entry is keyed off its module's `SOURCE_NAME` const so a rename is a
-/// compile error, not a silent two-sprite-ghost.
+/// compile error, not a silent two-sprite-ghost. (Stable Rust can't const-
+/// project the names out of `REGISTRY`, hence two lists + the bridge test.)
 pub const REGISTERED_SOURCES: &[&str] = &[
     claude_code::SOURCE_NAME,
     codex::SOURCE_NAME,
     antigravity::SOURCE_NAME,
 ];
+
+#[cfg(test)]
+mod registry_bridge_tests {
+    use super::*;
+
+    // The names list and the fact table must cover EXACTLY the same sources —
+    // a REGISTERED_SOURCES entry without a descriptor row (or vice versa) is
+    // the new flavor of the registered-but-not-wired bug class.
+    #[test]
+    fn registry_covers_exactly_the_registered_sources() {
+        for src in REGISTERED_SOURCES {
+            assert!(
+                registry::descriptor_for(src).is_some(),
+                "registered source {src:?} has no SourceDescriptor row — add it to registry::REGISTRY"
+            );
+        }
+        for d in registry::REGISTRY {
+            assert!(
+                REGISTERED_SOURCES.contains(&d.name),
+                "descriptor {:?} is not in REGISTERED_SOURCES — add it there",
+                d.name
+            );
+        }
+    }
+}
 
 /// Which transport produced an event — used by the reducer for hook-wins
 /// dedup. Lives on the source side because every `Source` implementor must
@@ -178,3 +207,10 @@ pub mod decoder;
 pub mod hook;
 pub mod jsonl;
 pub mod manager;
+// `doc(hidden)`: the registry is an internal fact table, `pub` ONLY so the
+// integration-test crates (fixture_harness) can read it. Hiding it keeps it
+// off the published API — cargo-semver-checks then lets descriptor/caps
+// fields evolve (the most likely change when adding a CLI) without a
+// breaking-version bump. Same treatment as `jsonl`'s test-only seam.
+#[doc(hidden)]
+pub mod registry;

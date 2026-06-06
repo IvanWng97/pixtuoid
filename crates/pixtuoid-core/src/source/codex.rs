@@ -47,6 +47,73 @@ fn is_uuid(s: &str) -> bool {
         })
 }
 
+/// Codex's source-specific hook arms — `SubagentStart`/`SubagentStop`. These
+/// change the event's SUBJECT (the child's AgentId, not the session's), which
+/// the shared CC-shaped arms in `decoder::decode_hook_payload` cannot express;
+/// every other Codex hook event falls through (`Ok(None)`) to those shared
+/// arms. Dispatched via `registry::HookDecoding::custom`. The parent link
+/// carried here is the ONLY one a flat Codex rollout gets — see the module
+/// doc and the wire capture pinned in `tests/codex_subagent_lifecycle.rs`.
+pub(crate) fn decode_codex_hook_custom(v: &Value) -> Result<Option<AgentEvent>> {
+    use anyhow::anyhow;
+    let Some(obj) = v.as_object() else {
+        return Ok(None); // shared path reports the malformed payload
+    };
+    let event = obj
+        .get("hook_event_name")
+        .and_then(|s| s.as_str())
+        .unwrap_or("");
+    // Per the registry's custom-decoder contract: claim our two events FULLY
+    // (Err on malformed instances), Ok(None) for everything else. An empty
+    // `session_id` or `agent_id` would mint a phantom that never coalesces
+    // with the real rollout — reject rather than decode.
+    let guards = |obj: &Map<String, Value>| -> Result<(String, Option<String>)> {
+        let session_id = obj
+            .get("session_id")
+            .and_then(|s| s.as_str())
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| anyhow!("missing/empty session_id"))?
+            .to_string();
+        let child = obj
+            .get("agent_id")
+            .and_then(|s| s.as_str())
+            .filter(|s| !s.is_empty())
+            .map(String::from);
+        Ok((session_id, child))
+    };
+    match event {
+        // The subagent owns a SEPARATE rollout (filename UUID == this
+        // payload's `agent_id`), so the JSONL watcher already renders it —
+        // but orphaned (a flat rollout path has no `/subagents/` for
+        // `detect_parent_id`). Key the CHILD on `agent_id` (coalescing with
+        // that rollout) and link it to the parent `session_id`, joining the
+        // same scope tree (cascade / liveness / readiness) as a CC subagent.
+        "SubagentStart" => {
+            let (session_id, child) = guards(obj)?;
+            let child = child.ok_or_else(|| anyhow!("SubagentStart missing/empty agent_id"))?;
+            let cwd = obj.get("cwd").and_then(|s| s.as_str()).unwrap_or("").into();
+            Ok(Some(AgentEvent::SessionStart {
+                agent_id: AgentId::from_parts(SOURCE_NAME, &child),
+                source: SOURCE_NAME.to_string(),
+                session_id: child,
+                cwd,
+                parent_id: Some(AgentId::from_parts(SOURCE_NAME, &session_id)),
+            }))
+        }
+        // End the CHILD promptly (else its rollout lingers to the 30-min
+        // stale-sweep). Best-effort: losing the race against the child's slot
+        // creation leaves a harmless no-op + the stale-sweep fallback.
+        "SubagentStop" => {
+            let (_session_id, child) = guards(obj)?;
+            let child = child.ok_or_else(|| anyhow!("SubagentStop missing/empty agent_id"))?;
+            Ok(Some(AgentEvent::SessionEnd {
+                agent_id: AgentId::from_parts(SOURCE_NAME, &child),
+            }))
+        }
+        _ => Ok(None),
+    }
+}
+
 /// Decode one transcript line. `tool_use_id` is always `None` so these events
 /// are never suppressed by the hook-wins dedup (which keys on `tool_use_id`).
 pub fn decode_codex_line(transcript_path: &str, source: &str, v: Value) -> Result<Vec<AgentEvent>> {
