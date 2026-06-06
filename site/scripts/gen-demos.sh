@@ -59,19 +59,30 @@ while IFS= read -r w; do
   "$bin" --cols "$cols" --rows "$rows" --weather "$w" --now-hour "$weather_hour" "$out/weather_$w.png"
 done <<<"$wids"
 
-# Animated hero → mp4 + poster: a 20s loop of the office mid-work — multiple
-# agents typing and wandering (to the pantry, the meeting room, the couch).
-# Re-encode from frames so it's a true 20s/12fps loop (the GIF's own frame
-# delays otherwise confuse ffmpeg into a fast clip).
+# Animated hero clip — a 20s loop of the office mid-work (agents typing + wandering).
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 "$bin" --cols 208 --rows 88 --gif --gif-duration 20 --gif-fps 12 --now-hour "$hero_hour" "$tmp/hero.gif"
-mkdir -p "$tmp/frames"
-# -loglevel error: quiet on success, but let a real ffmpeg failure surface its
-# reason on stderr (set -e aborts the script either way).
-ffmpeg -loglevel error -y -i "$tmp/hero.gif" "$tmp/frames/f%03d.png"
-ffmpeg -loglevel error -y -framerate 12 -i "$tmp/frames/f%03d.png" -movflags +faststart -pix_fmt yuv420p \
-  -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "$out/hero.mp4"
-ffmpeg -loglevel error -y -i "$tmp/hero.gif" -vframes 1 "$out/hero-poster.png"
+# gif → mp4 + webm + poster, re-encoded from frames so it's a true loop at the
+# given fps (the GIF's own frame delays otherwise confuse ffmpeg into a fast clip).
+encode_clip() { # encode_clip <gif> <id> <fps> — writes to $out (caller scope)
+  local gif="$1" id="$2" fps="$3"
+  mkdir -p "$tmp/frames-$id"
+  ffmpeg -loglevel error -y -i "$gif" "$tmp/frames-$id/f%04d.png"
+  ffmpeg -loglevel error -y -framerate "$fps" -i "$tmp/frames-$id/f%04d.png" -movflags +faststart \
+    -pix_fmt yuv420p -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "$out/$id.mp4"
+  ffmpeg -loglevel error -y -framerate "$fps" -i "$tmp/frames-$id/f%04d.png" \
+    -c:v libvpx-vp9 -b:v 0 -crf 36 -row-mt 1 \
+    -pix_fmt yuv420p -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "$out/$id.webm"
+  ffmpeg -loglevel error -y -i "$gif" -vframes 1 "$out/$id-poster.png"
+}
+
+encode_clip "$tmp/hero.gif" hero 12
+
+# Multi-floor clip — the real TuiRenderer slide (22 agents overflow a full
+# 16-desk floor onto floor 2).
+"$bin" --cols 208 --rows 88 --gif --gif-duration 10 --gif-fps 15 --now-hour "$hero_hour" \
+  --max-desks 16 --agents 22 --navigate-at 3:1 --navigate-at 7:0 "$tmp/multi-floor.gif"
+encode_clip "$tmp/multi-floor.gif" multi-floor 15
 
 echo "✓ demos regenerated → $out"
