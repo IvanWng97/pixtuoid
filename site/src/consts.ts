@@ -1,5 +1,6 @@
 import themesData from './themes.json';
 import weatherData from './weather.json';
+import showcaseData from './showcase.json';
 
 // Shared site constants + a base-path-safe asset/link helper.
 // (GitHub Pages serves the site under /pixtuoid/, so every internal URL must
@@ -37,3 +38,58 @@ export interface WeatherShot {
 // weather_<id>.png); the manifest↔Rust-enum edge is guarded by the
 // `weather_gallery_manifest_matches_the_weather_enum` unit test in pixtuoid.
 export const WEATHERS: WeatherShot[] = weatherData as WeatherShot[];
+
+export interface ShowcaseVariant {
+  id: string;
+  name: string;
+  blurb: string;
+  src: string; // public/demos/-relative filename
+  accent?: string;
+  accent2?: string;
+  featured?: boolean; // default chip for its channel
+}
+
+export interface ShowcaseChannel {
+  id: string; // slug; hash target #showcase-<id>
+  label: string; // monitor label (channel number is derived from manifest order)
+  kind: 'clip' | 'variant-set';
+  asset?: string; // clip: demos/<asset>.mp4 [+ .webm] + <asset>-poster.png
+  w?: number; // clip intrinsic dims (CLS)
+  h?: number;
+  variantsRef?: 'themes' | 'weather'; // variant-set backed by an existing manifest
+  variants?: ShowcaseVariant[]; // …or inline variants
+  retint?: boolean; // chips retint the page (themes only)
+  caption: string; // diegetic one-liner under the stage
+  duration?: string; // clip badge, mm:ss
+  status: 'live' | 'soon'; // soon = dimmed placeholder monitor, no assets needed
+  default?: boolean; // exactly one — the channel tuned at load
+}
+
+// Single source of truth for the Studio Wall → site/src/showcase.json.
+// themes.json / weather.json stay untouched (their README-sync + gen-demos.sh
+// loops + Rust enum guard tests are unaffected); variant-set channels reference
+// them via variantsRef and resolve here.
+export const SHOWCASE: ShowcaseChannel[] = showcaseData as unknown as ShowcaseChannel[];
+
+export function showcaseVariants(c: ShowcaseChannel): ShowcaseVariant[] {
+  if (c.variantsRef === 'themes')
+    return THEMES.map((t) => ({
+      id: t.id,
+      name: t.name,
+      blurb: t.blurb,
+      src: `theme_${t.id}.png`,
+      accent: t.accent,
+      accent2: t.accent2,
+      featured: t.featured,
+    }));
+  if (c.variantsRef === 'weather')
+    return WEATHERS.map((w) => ({
+      id: w.id,
+      name: w.name,
+      blurb: w.blurb,
+      src: `weather_${w.id}.png`,
+      // storm is the most striking opener (carried over from WeatherGallery)
+      featured: w.id === 'storm',
+    }));
+  return c.variants ?? [];
+}

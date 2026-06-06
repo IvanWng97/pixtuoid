@@ -1,0 +1,73 @@
+[
+  {
+    "id": "floors",
+    "label": "FLOORS",
+    "kind": "clip",
+    "asset": "multi-floor",
+    "w": 1664,
+    "h": 1408,
+    "caption": "press 1–9 / PgUp / PgDn — every floor stays alive",
+    "duration": "0:10",
+    "status": "live",
+    "default": true
+  },
+  {
+    "id": "office",
+    "label": "OFFICE",
+    "kind": "clip",
+    "asset": "hero",
+    "w": 1664,
+    "h": 1408,
+    "caption": "every agent session claims a desk — typing, wandering, coffee runs",
+    "duration": "0:20",
+    "status": "live"
+  },
+  {
+    "id": "themes",
+    "label": "THEMES",
+    "kind": "variant-set",
+    "variantsRef": "themes",
+    "retint": true,
+    "caption": "press t in the app — the whole office retints",
+    "status": "live"
+  },
+  {
+    "id": "weather",
+    "label": "WEATHER",
+    "kind": "variant-set",
+    "variantsRef": "weather",
+    "caption": "rain day: productivity +12%",
+    "status": "live"
+  },
+  {
+    "id": "daynight",
+    "label": "NIGHT",
+    "kind": "variant-set",
+    "variants": [
+      { "id": "day", "name": "Day", "blurb": "high noon over the skyline", "src": "day.png" },
+      {
+        "id": "night",
+        "name": "Night",
+        "blurb": "moonlight, monitor glow",
+        "src": "night.png",
+        "featured": true
+      }
+    ],
+    "caption": "lighting tracks your real clock",
+    "status": "live"
+  },
+  {
+    "id": "pets",
+    "label": "PETS",
+    "kind": "clip",
+    "caption": "a cat roams the floor — click to pet",
+    "status": "soon"
+  },
+  {
+    "id": "meetings",
+    "label": "MEETINGS",
+    "kind": "clip",
+    "caption": "idle agents drift to the meeting room for chitchat",
+    "status": "soon"
+  }
+]
