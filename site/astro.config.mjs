@@ -61,6 +61,56 @@ if (missingCards.length) {
   );
 }
 
+// Studio Wall guard: showcase.json must have exactly one default channel, unique
+// ids, and every `live` channel's assets on disk (clips: mp4 + poster; webm is
+// optional — ChannelStage probes it at build). `soon` placeholders need nothing.
+const showcase = /** @type {any[]} */ (
+  JSON.parse(readFileSync(fileURLToPath(new URL('./src/showcase.json', import.meta.url)), 'utf8'))
+);
+const scDefaults = showcase.filter((c) => c.default);
+if (scDefaults.length !== 1 || scDefaults[0].status !== 'live') {
+  throw new Error(
+    `astro.config: showcase.json needs exactly one default LIVE channel (got ${scDefaults.map((c) => c.id).join(', ') || 'none'})`
+  );
+}
+const scIds = new Set();
+for (const c of showcase) {
+  if (scIds.has(c.id)) throw new Error(`astro.config: showcase.json duplicate id "${c.id}"`);
+  scIds.add(c.id);
+  if (c.status === 'soon') continue;
+  const demo = /** @param {string} f */ (f) =>
+    existsSync(fileURLToPath(new URL(`./public/demos/${f}`, import.meta.url)));
+  if (c.kind === 'clip') {
+    if (!c.asset)
+      throw new Error(
+        `astro.config: showcase.json live clip "${c.id}" is missing the required "asset" field`
+      );
+    const missing = [`${c.asset}.mp4`, `${c.asset}-poster.png`].filter((f) => !demo(f));
+    if (missing.length)
+      throw new Error(
+        `astro.config: showcase.json live clip "${c.id}" missing public/demos/ asset(s): ${missing.join(', ')} — run site/scripts/gen-demos.sh`
+      );
+  } else if (c.kind === 'variant-set') {
+    if (c.variantsRef) {
+      if (c.variantsRef !== 'themes' && c.variantsRef !== 'weather')
+        throw new Error(
+          `astro.config: showcase.json "${c.id}" has unknown variantsRef "${c.variantsRef}" (expected "themes" or "weather")`
+        );
+    } else if (!(c.variants && c.variants.length)) {
+      throw new Error(
+        `astro.config: showcase.json variant-set "${c.id}" has neither variantsRef nor variants`
+      );
+    }
+    for (const v of c.variants ?? [])
+      if (!demo(v.src))
+        throw new Error(
+          `astro.config: showcase.json "${c.id}" variant "${v.id}" missing public/demos/${v.src}`
+        );
+  } else {
+    throw new Error(`astro.config: showcase.json "${c.id}" has unknown kind "${c.kind}"`);
+  }
+}
+
 // Rewrite repo-relative links in rendered markdown (e.g. ../crates/...) to GitHub
 // so docs/CONFIGURATION.md's links resolve on the deployed site.
 function rehypeRepoLinks() {

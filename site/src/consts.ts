@@ -60,7 +60,7 @@ export interface ShowcaseChannel {
   variants?: ShowcaseVariant[]; // …or inline variants
   retint?: boolean; // chips retint the page (themes only)
   caption: string; // diegetic one-liner under the stage
-  duration?: string; // clip badge, mm:ss
+  duration?: string; // clip badge, m:ss
   status: 'live' | 'soon'; // soon = dimmed placeholder monitor, no assets needed
   default?: boolean; // exactly one — the channel tuned at load
 }
@@ -69,6 +69,7 @@ export interface ShowcaseChannel {
 // themes.json / weather.json stay untouched (their README-sync + gen-demos.sh
 // loops + Rust enum guard tests are unaffected); variant-set channels reference
 // them via variantsRef and resolve here.
+// The manifest's kind/status/default/asset invariants are enforced at build time by the showcase guard in astro.config.mjs.
 export const SHOWCASE: ShowcaseChannel[] = showcaseData as unknown as ShowcaseChannel[];
 
 export function showcaseVariants(c: ShowcaseChannel): ShowcaseVariant[] {
