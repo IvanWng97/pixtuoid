@@ -114,6 +114,10 @@ just build --release
 | 🛡️ | **Hook-safe** | The shim always exits 0 — a stuck visualizer can never block your agent |
 <!-- features:end -->
 
+<p align="center">
+  <img src="docs/images/multi-floor.gif" alt="switching between floors of the pixel office with a slide transition" width="800" />
+</p>
+
 ## Supported Tools
 
 | Tool | Status | Notes |

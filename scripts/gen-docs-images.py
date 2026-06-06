@@ -14,6 +14,9 @@ clock (deterministic layout + lighting):
   docs/images/themes-composite.png                  6 themes stitched along
                                                     down-left DIAGONAL bands
   docs/images/demo.gif                              15s @ 10fps animated
+  docs/images/multi-floor.gif                       10s @ 10fps — 22 agents
+                                                    overflowing onto floor 2
+                                                    via slide transition
 
 `screenshot-real.png` is a live-agent capture and is NOT regenerated here.
 
@@ -99,7 +102,16 @@ def main():
     # Animated demo.
     render(OUT / "demo.gif", "normal", "--gif", "--gif-duration", str(GIF_SECS), "--gif-fps", str(GIF_FPS))
 
-    print(f"wrote screenshot, gallery-*, themes-composite, demo.gif -> {OUT}")
+    # Multi-floor slide — the real TuiRenderer transition via --navigate-at;
+    # 22 agents overflow a full 16-desk floor onto floor 2.
+    render(
+        OUT / "multi-floor.gif", "normal", "--gif",
+        "--gif-duration", "10", "--gif-fps", "10",
+        "--max-desks", "16", "--agents", "22",
+        "--navigate-at", "3:1", "--navigate-at", "7:0",
+    )
+
+    print(f"wrote screenshot, gallery-*, themes-composite, demo.gif, multi-floor.gif -> {OUT}")
 
 
 if __name__ == "__main__":
