@@ -277,6 +277,9 @@ mod tests {
     fn non_subagent_events_fall_through_to_shared_arms() {
         let stop = json!({"hook_event_name": "Stop", "session_id": "s"});
         assert!(matches!(decode_codex_hook_custom(&stop), Ok(None)));
+        // Non-object payload: defensive fall-through — the dispatcher
+        // pre-validates object-ness, so the shared path owns the error.
+        assert!(matches!(decode_codex_hook_custom(&json!("nope")), Ok(None)));
     }
 
     fn ev(line: Value) -> Vec<AgentEvent> {
