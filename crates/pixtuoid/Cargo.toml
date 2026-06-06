@@ -48,6 +48,7 @@ insta    = "1"
 [[example]]
 name = "snapshot"
 path = "examples/snapshot.rs"
+test = true
 
 [package.metadata.deb]
 section = "utils"

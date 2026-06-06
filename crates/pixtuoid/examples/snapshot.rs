@@ -942,6 +942,25 @@ fn cells_to_rgba(
     rgba
 }
 
+/// Floors whose scheduled navigation comes due at `elapsed_ms`, firing each
+/// schedule entry exactly once (marks `fired`). Pure so the timing contract
+/// is unit-testable — an off-by-one here silently shifts a slide out of the
+/// capture window.
+fn due_navigations(
+    navigations: &[(u64, usize)],
+    fired: &mut [bool],
+    elapsed_ms: u64,
+) -> Vec<usize> {
+    let mut due = Vec::new();
+    for (n, &(at_ms, floor)) in navigations.iter().enumerate() {
+        if !fired[n] && elapsed_ms >= at_ms {
+            fired[n] = true;
+            due.push(floor);
+        }
+    }
+    due
+}
+
 /// Drive the real TuiRenderer (slide transition, footer floor chip, pet motion)
 /// frame by frame and encode its TestBackend cell buffer. Covers multi-floor
 /// captures (via `navigations`) and pet clips (via `pets`).
@@ -977,11 +996,8 @@ fn save_renderer_gif(
         // "10s" gif spans only 9834ms, so a late --navigate-at would never fire).
         let elapsed_ms = i as u64 * 1000 / fps.max(1);
         let now = start_now + Duration::from_millis(elapsed_ms);
-        for (n, &(at_ms, floor)) in navigations.iter().enumerate() {
-            if !fired[n] && elapsed_ms >= at_ms {
-                r.navigate_floor(floor, now);
-                fired[n] = true;
-            }
+        for floor in due_navigations(navigations, &mut fired, elapsed_ms) {
+            r.navigate_floor(floor, now);
         }
         r.render(scene, pack, now)?;
         let rgba = cells_to_rgba(r.terminal.backend().buffer(), cols, rows, img_w, img_h);
@@ -1136,5 +1152,71 @@ fn color_to_rgb(c: Color, default: ImgRgb<u8>) -> ImgRgb<u8> {
         Color::LightMagenta => ImgRgb([240, 130, 240]),
         Color::LightCyan => ImgRgb([130, 240, 240]),
         Color::Indexed(_) | Color::Reset => default,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_navigations_happy_and_fractional() {
+        assert_eq!(
+            parse_navigations(&["3:1".to_string(), "2.5:0".to_string()]).unwrap(),
+            vec![(3000, 1), (2500, 0)]
+        );
+    }
+
+    #[test]
+    fn parse_navigations_truncates_fractional_ms() {
+        // (0.9999 * 1000.0) as u64 == 999 — pin the truncation so it's explicit
+        assert_eq!(
+            parse_navigations(&["0.9999:0".to_string()]).unwrap(),
+            vec![(999, 0)]
+        );
+    }
+
+    #[test]
+    fn parse_navigations_rejects_bad_input() {
+        for bad in ["5-1", "5:x", "x:1", "", ":", "5:"] {
+            assert!(
+                parse_navigations(&[bad.to_string()]).is_err(),
+                "accepted {bad:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn due_navigations_fires_each_exactly_once_in_schedule_order() {
+        // unordered schedule; frame clock at 15fps exact math: i * 1000 / 15
+        let navs = vec![(7000u64, 0usize), (3000, 1)];
+        let mut fired = vec![false; navs.len()];
+        let mut hits: Vec<(u64, usize)> = Vec::new();
+        for i in 0..150u64 {
+            let elapsed_ms = i * 1000 / 15;
+            for floor in due_navigations(&navs, &mut fired, elapsed_ms) {
+                hits.push((i, floor));
+            }
+        }
+        // 3000ms: first frame with i*1000/15 >= 3000 is i=45 (exactly 3000)
+        // 7000ms: first frame with i*1000/15 >= 7000 is i=105 (exactly 7000)
+        assert_eq!(hits, vec![(45, 1), (105, 0)]);
+    }
+
+    #[test]
+    fn due_navigations_late_schedule_still_fires_within_capture() {
+        // regression pin for the exact elapsed math: with truncating per-frame
+        // accumulation (i * 66ms) a 9.9s navigation never fired in a 10s/15fps
+        // capture; exact math reaches 9933ms at i=149.
+        let navs = vec![(9900u64, 1usize)];
+        let mut fired = vec![false; 1];
+        let mut hit = None;
+        for i in 0..150u64 {
+            let elapsed_ms = i * 1000 / 15;
+            if !due_navigations(&navs, &mut fired, elapsed_ms).is_empty() {
+                hit = Some(i);
+            }
+        }
+        assert_eq!(hit, Some(149));
     }
 }
