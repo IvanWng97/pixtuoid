@@ -1,5 +1,4 @@
 ---
-import { existsSync } from 'node:fs';
 import { asset, type EnrichedShowcaseChannel, type ShowcaseVariant } from '../consts';
 
 const { channel: c, active } = Astro.props as {
@@ -10,8 +9,6 @@ const isClip = c.kind === 'clip';
 const defVariant: ShowcaseVariant | null = c.variants.length
   ? (c.variants.find((v: ShowcaseVariant) => v.featured) ?? c.variants[0])
   : null;
-const hasWebm =
-  isClip && existsSync(new URL(`../../public/demos/${c.asset}.webm`, import.meta.url));
 const title = `pixtuoid — CH ${c.ch} ${c.label}` + (defVariant ? ` · ${defVariant.name}` : '');
 const imgAlt = defVariant ? `pixtuoid office — ${defVariant.name} (${c.label.toLowerCase()})` : '';
 ---
@@ -42,10 +39,10 @@ const imgAlt = defVariant ? `pixtuoid office — ${defVariant.name} (${c.label.t
         autoplay={active}
         poster={asset(`demos/${c.asset}-poster.png`)}
         data-mp4={active ? undefined : asset(`demos/${c.asset}.mp4`)}
-        data-webm={active || !hasWebm ? undefined : asset(`demos/${c.asset}.webm`)}
+        data-webm={active ? undefined : asset(`demos/${c.asset}.webm`)}
         aria-label={`pixtuoid demo: ${c.caption}`}
       >
-        {active && hasWebm && <source src={asset(`demos/${c.asset}.webm`)} type="video/webm" />}
+        {active && <source src={asset(`demos/${c.asset}.webm`)} type="video/webm" />}
         {active && <source src={asset(`demos/${c.asset}.mp4`)} type="video/mp4" />}
       </video>
     ) : (

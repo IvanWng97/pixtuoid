@@ -1,0 +1,222 @@
+---
+import { SHOWCASE, showcaseVariants } from '../consts';
+import ChannelStage from './ChannelStage.astro';
+import MonitorWall from './MonitorWall.astro';
+
+const channels = SHOWCASE.map((c, i) => ({
+  ...c,
+  ch: String(i + 1).padStart(2, '0'),
+  variants: showcaseVariants(c),
+}));
+const live = channels.filter((c) => c.status === 'live');
+const def = channels.find((c) => c.default) ?? live[0];
+---
+
+<section id="showcase" class="showcase">
+  {
+    /* legacy anchors — inbound #themes/#weather links land here; the controller
+      also maps them to their channel */
+  }
+  <span id="themes" class="showcase__anchor" aria-hidden="true"></span>
+  <span id="weather" class="showcase__anchor" aria-hidden="true"></span>
+  <div class="container">
+    <div class="section-head reveal">
+      <p class="eyebrow">{live.length} channels on air · more being filmed</p>
+      <h2>Every feature, on air.</h2>
+      <p class="lead">
+        The office, channel by channel — tune a monitor to switch the big screen. Themes and weather
+        expose their dials on-screen.
+      </p>
+    </div>
+
+    <div class="studio reveal" id="studio">
+      <div class="studio__stages">
+        {live.map((c) => <ChannelStage channel={c} active={c.id === def.id} />)}
+      </div>
+      <MonitorWall channels={channels} activeId={def.id} />
+    </div>
+  </div>
+</section>
+
+<script is:inline>
+  (function () {
+    const studio = document.getElementById('studio');
+    if (!studio) return;
+    const stages = studio.querySelectorAll('[data-stage]');
+    const monitors = studio.querySelectorAll('button.mon[data-ch]');
+    const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+    let inView = false;
+
+    // ---- lazy hydration: promote data-src media the first time a channel is
+    // tuned or its monitor is hovered/focused (zero offscreen video bytes)
+    function hydrate(stage) {
+      stage.querySelectorAll('img[data-src]').forEach(function (img) {
+        img.src = img.dataset.src;
+        img.removeAttribute('data-src');
+      });
+      stage.querySelectorAll('video[data-mp4]').forEach(function (v) {
+        if (v.dataset.webm) {
+          const sw = document.createElement('source');
+          sw.src = v.dataset.webm;
+          sw.type = 'video/webm';
+          v.appendChild(sw);
+        }
+        const sm = document.createElement('source');
+        sm.src = v.dataset.mp4;
+        sm.type = 'video/mp4';
+        v.appendChild(sm);
+        v.removeAttribute('data-mp4');
+        v.removeAttribute('data-webm');
+        v.load();
+      });
+    }
+
+    // ---- play policy: a clip plays iff its stage is the tuned one AND the
+    // studio is in view AND reduced-motion is off (WCAG 2.2.2 — same contract
+    // as the hero video). Under reduced-motion show native controls instead.
+    function syncVideos() {
+      stages.forEach(function (st) {
+        const v = st.querySelector('video');
+        if (!v) return;
+        if (mq.matches) {
+          v.removeAttribute('autoplay');
+          v.pause();
+          v.setAttribute('controls', '');
+          return;
+        }
+        v.removeAttribute('controls');
+        if (!st.hidden && inView && !v.dataset.mp4) {
+          const p = v.play();
+          if (p && p.catch) p.catch(function () {});
+        } else {
+          v.pause();
+        }
+      });
+    }
+    new IntersectionObserver(
+      function (entries) {
+        inView = entries[0].isIntersecting;
+        syncVideos();
+      },
+      { threshold: 0.15 }
+    ).observe(studio);
+    if (mq.addEventListener) mq.addEventListener('change', syncVideos);
+    syncVideos();
+
+    // ---- channel tuning (hidden-swap; view-transition crossfade when available)
+    function tune(id, silent) {
+      const next = studio.querySelector('[data-stage="' + id + '"]');
+      if (!next || !next.hidden) return;
+      hydrate(next);
+      function swap() {
+        stages.forEach(function (s) {
+          s.hidden = s !== next;
+        });
+        monitors.forEach(function (m) {
+          m.setAttribute('aria-pressed', m.dataset.ch === id ? 'true' : 'false');
+        });
+        syncVideos();
+      }
+      if (!mq.matches && document.startViewTransition) document.startViewTransition(swap);
+      else swap();
+      if (!silent) history.replaceState(null, '', '#showcase-' + id);
+    }
+    monitors.forEach(function (m) {
+      m.addEventListener('click', function () {
+        tune(m.dataset.ch);
+      });
+      function warm() {
+        const st = studio.querySelector('[data-stage="' + m.dataset.ch + '"]');
+        if (st) hydrate(st);
+      }
+      m.addEventListener('pointerenter', warm);
+      m.addEventListener('focus', warm);
+    });
+
+    // ---- OSD chips (variant-set channels) — the old gallery JS, parameterized
+    stages.forEach(function (st) {
+      const img = st.querySelector('img.terminal__screen');
+      const title = st.querySelector('[data-stage-title]');
+      const chips = st.querySelectorAll('.osd__chip');
+      if (!chips.length || !img) return;
+      const prefetched = {};
+      function prefetch(src) {
+        if (src && !prefetched[src]) {
+          prefetched[src] = new Image();
+          prefetched[src].src = src;
+        }
+      }
+      chips.forEach(function (c) {
+        c.addEventListener('pointerenter', function () {
+          prefetch(c.dataset.src);
+        });
+        c.addEventListener('click', function () {
+          img.src = c.dataset.src;
+          img.alt = c.dataset.alt;
+          if (title) title.textContent = c.dataset.title;
+          if (c.dataset.accent) st.style.setProperty('--accent', c.dataset.accent);
+          if (st.dataset.retint) {
+            // Retint the page's DECORATIVE hues to preview this theme — like
+            // hitting `t` in the app. Deliberately NOT --coral-deep: that's the
+            // AA text color, and a raw chip accent drops it below WCAG 1.4.3.
+            const root = document.documentElement;
+            root.style.setProperty('--coral', c.dataset.accent);
+            root.style.setProperty('--amber', c.dataset.accent2 || c.dataset.accent);
+          }
+          st.classList.remove('retint-pulse');
+          void st.offsetWidth;
+          st.classList.add('retint-pulse');
+          chips.forEach(function (x) {
+            const on = x === c;
+            x.classList.toggle('is-active', on);
+            x.setAttribute('aria-pressed', on ? 'true' : 'false');
+          });
+        });
+      });
+      if (st.dataset.retint) {
+        // a non-gallery theme change (Nav toggle / Escape / dracula egg) clears
+        // the retint, so no chip should still read as active/pressed
+        document.addEventListener('pix:theme', function () {
+          chips.forEach(function (x) {
+            x.classList.remove('is-active');
+            x.setAttribute('aria-pressed', 'false');
+          });
+        });
+      }
+    });
+
+    // ---- deep links: #showcase-<id>, plus legacy #themes/#weather
+    function fromHash() {
+      const h = location.hash;
+      const legacy = { '#themes': 'themes', '#weather': 'weather' };
+      const id = legacy[h] || (h.indexOf('#showcase-') === 0 ? h.slice('#showcase-'.length) : null);
+      if (id) tune(id, true);
+    }
+    fromHash();
+    window.addEventListener('hashchange', fromHash);
+  })();
+</script>
+
+<style>
+  .showcase {
+    position: relative;
+    padding-block: clamp(2.5rem, 6vw, 5rem);
+  }
+  .showcase__anchor {
+    position: absolute;
+    top: 0;
+  }
+  .studio {
+    display: grid;
+    gap: 1.4rem;
+  }
+  @media (min-width: 980px) {
+    .studio {
+      grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr);
+      align-items: start;
+    }
+  }
+  .studio__stages {
+    min-width: 0;
+  }
+</style>

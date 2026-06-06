@@ -62,8 +62,9 @@ if (missingCards.length) {
 }
 
 // Studio Wall guard: showcase.json must have exactly one default channel, unique
-// ids, and every `live` channel's assets on disk (clips: mp4 + poster; webm is
-// optional — ChannelStage probes it at build). `soon` placeholders need nothing.
+// ids, and every `live` channel's assets on disk (clips: webm + mp4 + poster —
+// the encode_clip ladder always emits webm, so ChannelStage emits its <source>
+// unconditionally). `soon` placeholders need nothing.
 const showcase = /** @type {any[]} */ (
   JSON.parse(readFileSync(fileURLToPath(new URL('./src/showcase.json', import.meta.url)), 'utf8'))
 );
@@ -85,7 +86,9 @@ for (const c of showcase) {
       throw new Error(
         `astro.config: showcase.json live clip "${c.id}" is missing the required "asset" field`
       );
-    const missing = [`${c.asset}.mp4`, `${c.asset}-poster.png`].filter((f) => !demo(f));
+    const missing = [`${c.asset}.webm`, `${c.asset}.mp4`, `${c.asset}-poster.png`].filter(
+      (f) => !demo(f)
+    );
     if (missing.length)
       throw new Error(
         `astro.config: showcase.json live clip "${c.id}" missing public/demos/ asset(s): ${missing.join(', ')} — run site/scripts/gen-demos.sh`
