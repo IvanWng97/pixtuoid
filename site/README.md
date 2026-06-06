@@ -67,10 +67,39 @@ From the repo root the same gate is `just site-check` (and `just site-fmt`).
 ./scripts/gen-demos.sh      # or: just site-demos
 ```
 
-It reads the theme list from `src/themes.json` and the weather list from
-`src/weather.json`, so both galleries stay in lock-step with their manifests.
+`gen-demos.sh` reads `src/themes.json` and `src/weather.json`, keeping their
+variant-set channels in lock-step with their manifests. It also renders the two
+animated clips via the snapshot example's `--gif`/`--navigate-at`/`--agents`
+flags (the multi-floor clip uses `--agents 22 --navigate-at 3:1 --navigate-at 7:0`
+to drive the real TuiRenderer across floors — no screen recording). Each `.gif`
+is re-encoded through `encode_clip` into `.mp4` + `.webm` + a poster frame so
+`ChannelStage` can emit a `<video>` with both sources.
+
 (Pixel art lives in `public/` on purpose — Astro's `src/assets/` optimizer would
 resize/blur it.)
+
+## Showcase (Studio Wall)
+
+The landing page's interactive demo section is a single, manifest-driven
+component (`Showcase` → `ChannelStage` / `MonitorWall`). Channel order, labels,
+and content type are all defined in **`src/showcase.json`** — the **fifth
+single-source manifest** alongside `src/themes.json`, `src/weather.json`,
+`src/features.json`, and `src/install.json`.
+
+Channel kinds:
+
+- **`clip`** — mp4 + webm + poster rendered by `gen-demos.sh`. Requires `asset`,
+  `w`, `h`, and the three files in `public/demos/` (`<asset>.mp4`, `.webm`,
+  `-poster.png`).
+- **`variant-set`** — static screenshot grid (themes / weather / day-night).
+  References `variantsRef` (a sibling manifest) or an inline `variants` array.
+- **`soon`** (`"status": "soon"`) — placeholder monitor, no assets needed.
+
+`astro.config.mjs` enforces the invariants at build time: exactly one `default`
+live channel, no duplicate ids, and all live clip assets present on disk.
+
+**Adding a demo channel:** add one entry to `showcase.json` + run `gen-demos.sh`
+for the assets. No component edits.
 
 ## Add a theme
 
