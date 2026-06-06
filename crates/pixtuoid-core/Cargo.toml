@@ -10,6 +10,11 @@ authors.workspace      = true
 homepage.workspace     = true
 keywords.workspace     = true
 categories.workspace   = true
+# The parity test #[path]-includes ../../pixtuoid-hook/src/paths.rs, which
+# can't exist inside the published tarball — shipping the test would make
+# `cargo test` fail on the .crate (publish itself is unaffected: its verify
+# step builds, not tests). Workspace-only test, workspace-only file.
+exclude                = ["tests/socket_path_parity.rs"]
 
 [features]
 default       = []
