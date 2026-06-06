@@ -1,26 +1,21 @@
 //! Terminal-coupled rendering: orchestrator (`draw_scene`), half-block
-//! flush, label/tooltip/notice widget overlays, and terminal lifecycle.
+//! flush, and label/tooltip/notice widget overlays.
 //!
 //! The pure-pixel pass (floor/walls/decor/characters -> `RgbBuffer`) lives
 //! in `tui::pixel_painter`. This file is the integrator that calls into
-//! that pipeline and then hands the buffer to ratatui.
+//! that pipeline and then hands the buffer to ratatui. Terminal lifecycle
+//! (raw mode + alternate screen) lives with the event loop in `tui/mod.rs`.
 //!
 //! Widget paint functions live in `tui::widgets`; hit-test functions live
 //! in `tui::hit_test`. Both are re-exported here for backwards compat.
 
-use std::io::{stdout, Stdout};
 use std::time::SystemTime;
 
 use anyhow::Result;
-use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
-use crossterm::execute;
-use crossterm::terminal::{
-    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
-};
 use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::sprite::RgbBuffer;
 use pixtuoid_core::SceneState;
-use ratatui::backend::{Backend, CrosstermBackend};
+use ratatui::backend::Backend;
 use ratatui::layout::Rect;
 use ratatui::style::Color;
 use ratatui::Terminal;
@@ -155,30 +150,6 @@ pub(crate) fn scene_rect(full: Rect) -> Rect {
         width: full.width,
         height: full.height.saturating_sub(1),
     }
-}
-
-pub type Term = Terminal<CrosstermBackend<Stdout>>;
-
-// --- Terminal lifecycle ---------------------------------------------------
-pub fn setup_terminal() -> Result<Term> {
-    enable_raw_mode()?;
-    let mut out = stdout();
-    // EnableMouseCapture turns on the terminal's mouse-event reporting.
-    // Modern terminals emit MouseEventKind::Moved on cursor motion (no
-    // button required), which is how we drive the hover tooltip.
-    execute!(out, EnterAlternateScreen, EnableMouseCapture)?;
-    Ok(Terminal::new(CrosstermBackend::new(out))?)
-}
-
-pub fn teardown_terminal(term: &mut Term) -> Result<()> {
-    disable_raw_mode()?;
-    execute!(
-        term.backend_mut(),
-        DisableMouseCapture,
-        LeaveAlternateScreen
-    )?;
-    term.show_cursor()?;
-    Ok(())
 }
 
 // --- draw_scene ----------------------------------------------------------

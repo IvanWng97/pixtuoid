@@ -31,7 +31,7 @@ crates/
 │                       source/ state/ sprite/ render/ layout/ physics.rs pose/ walkable.rs
 │                       → see crates/pixtuoid-core/CLAUDE.md for module-level detail
 ├── pixtuoid/           binary — ratatui + crossterm + tokio + clap
-│                       cli.rs config.rs runtime.rs install/ tui/ sprites/ (default/robot/skeleton packs)
+│                       cli.rs config.rs runtime/ install/ tui/ sprites/ (default/robot/skeleton packs)
 │                       → see crates/pixtuoid/CLAUDE.md and crates/pixtuoid/src/tui/CLAUDE.md
 └── pixtuoid-hook/      tiny shim CC invokes — stdin JSON → Unix socket, 200ms write timeout
 scripts/                crop-snapshot.py (visual verification),
@@ -70,7 +70,7 @@ The `test-renderer` feature is needed for the `e2e.rs` integration test; **`just
 
 - **Unit tests** — `#[cfg(test)] mod tests` next to the code. For large modules this is a *sibling file* declared `#[cfg(test)] mod tests;` (e.g. `motion/tests.rs`, `pose/tests.rs`, `layout/tests.rs`, `pixel_painter/tests.rs`) so production stays readable; it keeps `use super::*` and full crate-internal access (no API widening).
 - **Integration / public-contract** — `crates/<crate>/tests/*.rs` (separate crate, only `pub` API): `reducer.rs`, `e2e.rs`, `hook_socket.rs`, `jsonl_watcher.rs`. One deliberate exception: `socket_path_parity.rs` `#[path]`-includes the hook shim's `paths.rs` (source inclusion, not a dep) to pin shim↔daemon socket-path equality across crates without violating the no-core-dep-in-shim invariant; it's `exclude`d from the published tarball (the included file can't exist there).
-- **Headless render harness** — `tui_renderer/harness.rs` (`#[cfg(test)] mod harness;`). Drives the *real* `TuiRenderer` through `render()` / `navigate_floor()` via ratatui `TestBackend` (no terminal). Output-first assertions: `buf()` (RgbBuffer pixels) + the `#[cfg(test)] frame_buffer()` ratatui-cell inspector; white-box seams (`floor_motion`, `floor_buf`, `inject_coffee`) only where an invariant isn't observable from output. NOT coverable headlessly (excluded in `codecov.yml`): the crossterm event loop (`tui/mod.rs`, reads the real TTY) and `main.rs`.
+- **Headless render harness** — `tui_renderer/harness.rs` (`#[cfg(test)] mod harness;`). Drives the *real* `TuiRenderer` through `render()` / `navigate_floor()` via ratatui `TestBackend` (no terminal). Output-first assertions: `buf()` (RgbBuffer pixels) + the `#[cfg(test)] frame_buffer()` ratatui-cell inspector; white-box seams (`floor_motion`, `floor_buf`, `inject_coffee`) only where an invariant isn't observable from output. NOT coverable headlessly (excluded in `codecov.yml`): the crossterm event loop + terminal lifecycle (`tui/mod.rs`, reads/writes the real TTY), the async runtime glue (`runtime/driver.rs`, tokio `block_on` + `ctrl_c` + socket bind), and `main.rs`.
 
 Coverage: `just coverage` (writes lcov.info + JUnit XML — the exact command CI runs).
 
@@ -107,7 +107,10 @@ just fmt          # auto-format
 ```
 
 (`hack` is `cargo hack --feature-powerset` — it catches code that only builds
-with `test-renderer` on. `semver` and `coverage`/`smoke` are CI-only.)
+with `test-renderer` on. `semver` and `coverage`/`smoke` are CI-only. The
+semver gate checks **`pixtuoid-core` only** — the `pixtuoid` binary's lib
+target is an internal-facing surface for examples/integration tests, not a
+semver surface, so its `pub` paths may move without a major bump.)
 
 Run `just preflight` locally to avoid the round-trip of "push → wait for CI →
 red → fix → push again."
@@ -208,6 +211,6 @@ Area-specific "Where to look" entries (layout, sources, install, themes, motion,
 
 ## When refactoring
 
-If you change anything in the channel type, `Source` trait, `AgentEvent` enum, or reducer signature, update **all four** test files that exercise them: `tests/reducer.rs`, `tests/e2e.rs`, `tests/hook_socket.rs`, `tests/jsonl_watcher.rs`, plus `runtime.rs` on the binary side. The `AgentEvent::agent_id()` method in `source/mod.rs` needs a new arm too if you add a variant.
+If you change anything in the channel type, `Source` trait, `AgentEvent` enum, or reducer signature, update **all four** test files that exercise them: `tests/reducer.rs`, `tests/e2e.rs`, `tests/hook_socket.rs`, `tests/jsonl_watcher.rs`, plus `runtime/driver.rs` on the binary side. The `AgentEvent::agent_id()` method in `source/mod.rs` needs a new arm too if you add a variant.
 
 **Adding a new agent CLI**: the source module + ONE `SourceDescriptor` row in `source/registry.rs` (label prefix, decoders, hook keying, reducer caps — the per-source fact table) + the name in `source::REGISTERED_SOURCES` (forces a coalescing fixture via tests) **and** — for a source with a watchable transcript — wire it into `runtime::run_async` (the runtime spawns sources by hand — the registry only gates the conformance tests, not runtime wiring); a hook-only CLI (`line_decoder: None`) skips the `Source` trait and the runtime wiring, shipping a `hook.custom` decoder + an `install/` target instead. See the nested `crates/pixtuoid-core/CLAUDE.md` "multi-source decoding" entry.

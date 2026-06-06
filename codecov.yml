@@ -27,7 +27,8 @@ ignore:
   - "docs/"
   - "*.md"
   # Not coverable headlessly — exercising these needs a real TTY / OS:
-  - "crates/pixtuoid/src/main.rs"       # binary entry: terminal raw-mode, crash hook, signal handling
-  - "crates/pixtuoid/src/tui/mod.rs"    # crossterm event loop: reads real keyboard/mouse from the TTY
+  - "crates/pixtuoid/src/main.rs"            # binary entry: terminal raw-mode, crash hook, signal handling
+  - "crates/pixtuoid/src/tui/mod.rs"         # crossterm event loop + terminal lifecycle: reads/writes the real TTY
+  - "crates/pixtuoid/src/runtime/driver.rs"  # async glue: tokio runtime + block_on + ctrl_c + socket bind (#103)
   # Keeps the % honest: "of the code we CAN test headlessly, X% is tested",
   # rather than dragging the number down with paths no test can reach.

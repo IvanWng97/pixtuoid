@@ -5,9 +5,9 @@ on:
     types: [opened, reopened, synchronize]
     paths:
       - "crates/pixtuoid-hook/**"
-      - "crates/pixtuoid/install/**"
-      - "crates/pixtuoid/runtime.rs"
-      - "crates/pixtuoid-core/source/**"
+      - "crates/pixtuoid/src/install/**"
+      - "crates/pixtuoid/src/runtime/**"
+      - "crates/pixtuoid-core/src/source/**"
 
 permissions:
   contents: read

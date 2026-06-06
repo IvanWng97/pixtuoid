@@ -14,7 +14,8 @@ binary [`../../CLAUDE.md`](../../CLAUDE.md); workspace
 tui/
 ├── anim.rs         centralized easing curves + eased_progress(start, duration_ms, easing, now) free function —
 │                   used by floor slide, A* walk path ease, and version popup entrance/dismissal animations
-├── renderer.rs     draw_scene orchestrator (DrawCtx struct), half-block flush, terminal lifecycle
+├── renderer.rs     draw_scene orchestrator (DrawCtx struct), half-block flush (terminal lifecycle
+│                   — raw mode + alternate screen — lives with the event loop in tui/mod.rs, #103)
 ├── widgets/        ratatui widget paint fns, split into sub-modules:
 │                   mod.rs (TickerQueue, shared helpers), hud.rs (footer, wall display,
 │                   elevator indicator, theme picker), tooltip.rs (hover, cat, coffee,

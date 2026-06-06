@@ -23,7 +23,7 @@ decoding" / "Adding a new agent CLI") first, then:
    `AgentEvent::agent_id()` in `source/mod.rs`.
 5. Update the four test files that exercise the channel / `Source` / reducer
    together: `tests/reducer.rs`, `tests/e2e.rs`, `tests/hook_socket.rs`,
-   `tests/jsonl_watcher.rs`, plus `runtime.rs` on the binary side.
+   `tests/jsonl_watcher.rs`, plus `runtime/driver.rs` on the binary side.
 6. Add a captured rollout fixture + a lifecycle regression test for the new CLI.
 
 Respect the architecture invariants (no terminal deps in `pixtuoid-core`; one

@@ -15,7 +15,7 @@
 //! - `_pixtuoid_source` attribution + the shared CC-shaped hook arms: they
 //!   stay in `decoder.rs` at the read site, pinned by their regression tests.
 //! - The binary crate's `install::Target` registry (this table's design
-//!   precedent) and `runtime.rs` source spawning.
+//!   precedent) and `runtime/driver.rs` source spawning.
 
 use anyhow::Result;
 use serde_json::Value;

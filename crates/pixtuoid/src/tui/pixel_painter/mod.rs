@@ -3,7 +3,7 @@
 //! Split from `tui/renderer.rs` to separate the pixel-painting pipeline
 //! (called by any renderer impl — `TuiRenderer`, a future web canvas, PNG
 //! export, GIF capture) from the ratatui-coupled half-block flush + widget
-//! overlay + terminal lifecycle.
+//! overlay (terminal lifecycle lives with the event loop in `tui/mod.rs`).
 //!
 //! `render_to_rgb_buffer` is the public entry point. Everything else is
 //! private to this module except `character_anchor`, which `widgets.rs`

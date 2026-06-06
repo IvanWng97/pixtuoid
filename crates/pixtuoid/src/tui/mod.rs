@@ -15,14 +15,23 @@ pub mod theme;
 pub mod tui_renderer;
 pub mod widgets;
 
+use std::io::{stdout, Stdout};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::Result;
-use crossterm::event::{self, Event, KeyCode, KeyModifiers, MouseButton, MouseEventKind};
+use crossterm::event::{
+    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers, MouseButton,
+    MouseEventKind,
+};
+use crossterm::execute;
+use crossterm::terminal::{
+    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
+};
 use pixtuoid_core::Renderer;
+use ratatui::backend::CrosstermBackend;
+use ratatui::Terminal;
 
-use renderer::{setup_terminal, teardown_terminal};
 use tui_renderer::TuiRenderer;
 
 use crate::runtime::SceneRx;
@@ -157,6 +166,34 @@ fn dispatch_key(code: KeyCode, mods: KeyModifiers, ctx: KeyCtx) -> KeyAction {
         }
         _ => KeyAction::None,
     }
+}
+
+// --- Terminal lifecycle ---------------------------------------------------
+// Lives here (not renderer.rs) because raw mode + the alternate screen are
+// owned by the event loop, and this file is already excluded from headless
+// coverage — no test can exercise a real TTY (issue #103).
+
+pub type Term = Terminal<CrosstermBackend<Stdout>>;
+
+pub fn setup_terminal() -> Result<Term> {
+    enable_raw_mode()?;
+    let mut out = stdout();
+    // EnableMouseCapture turns on the terminal's mouse-event reporting.
+    // Modern terminals emit MouseEventKind::Moved on cursor motion (no
+    // button required), which is how we drive the hover tooltip.
+    execute!(out, EnterAlternateScreen, EnableMouseCapture)?;
+    Ok(Terminal::new(CrosstermBackend::new(out))?)
+}
+
+pub fn teardown_terminal(term: &mut Term) -> Result<()> {
+    disable_raw_mode()?;
+    execute!(
+        term.backend_mut(),
+        DisableMouseCapture,
+        LeaveAlternateScreen
+    )?;
+    term.show_cursor()?;
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]

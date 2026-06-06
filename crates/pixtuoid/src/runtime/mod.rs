@@ -1,18 +1,19 @@
+//! Runtime wiring: `RunConfig` (the startup inputs), the boot-capacity math,
+//! and the headless summary formatter — everything here is exercised by unit
+//! tests. The untestable async glue (tokio runtime, reducer task, source
+//! spawn, Ctrl-C loop) lives in `driver.rs`, which is excluded from coverage
+//! (issue #103).
+
+mod driver;
+
+pub use driver::run;
+
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
 
-use pixtuoid_core::state::MAX_FLOORS;
-
-use anyhow::Result;
-use pixtuoid_core::source::antigravity::AntigravitySource;
-use pixtuoid_core::source::claude_code::ClaudeCodeSource;
-use pixtuoid_core::source::codex::CodexSource;
-use pixtuoid_core::source::manager::SourceManager;
-use pixtuoid_core::state::ActivityState;
-use pixtuoid_core::{AgentEvent, Reducer, SceneState, TaggedReceiver, Transport};
-use tokio::sync::{mpsc, watch};
+use pixtuoid_core::state::{ActivityState, MAX_FLOORS};
+use pixtuoid_core::SceneState;
+use tokio::sync::watch;
 
 /// The reducer publishes a fresh `Arc<SceneState>` on every mutation through
 /// this watch channel. Consumers (renderer, headless summary loop) hold a
@@ -44,148 +45,6 @@ pub struct RunConfig {
     pub config_path: PathBuf,
     pub theme: &'static crate::tui::theme::Theme,
     pub pets: Vec<crate::tui::pet::Pet>,
-}
-
-pub fn run(cfg: RunConfig) -> Result<()> {
-    let rt = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()?;
-    rt.block_on(async move { run_async(cfg).await })
-}
-
-async fn run_async(cfg: RunConfig) -> Result<()> {
-    let RunConfig {
-        socket,
-        projects_root,
-        codex_sessions_root,
-        pack_dir,
-        desk_cap,
-        headless,
-        config_path,
-        theme,
-        pets,
-    } = cfg;
-    let mut cc_src = ClaudeCodeSource::default_paths();
-    if let Some(s) = socket {
-        cc_src.socket_path = s;
-    }
-    if let Some(p) = projects_root {
-        cc_src.projects_root = p;
-    }
-
-    let ag_src = AntigravitySource::default_paths();
-
-    let mut codex_src = CodexSource::default_paths();
-    if let Some(p) = codex_sessions_root {
-        codex_src.sessions_root = p;
-    }
-
-    let (tx, rx) = mpsc::channel::<(Transport, AgentEvent)>(256);
-    let boot_caps: [usize; MAX_FLOORS] = match (desk_cap, headless) {
-        // Headless: no terminal to measure. Honor the cap as-is, else the fallback.
-        (Some(cap), true) => [cap; MAX_FLOORS],
-        (None, true) => [FALLBACK_DESKS; MAX_FLOORS],
-        // Interactive: measure the real per-floor layout capacity FIRST, then clamp
-        // to the optional cap. Clamping (not `[cap; _]`) keeps the boot atomics from
-        // being seeded above the layout's real capacity — `fetch_max` only grows, so
-        // an over-seed strands agents on non-existent desks until the terminal grows.
-        (cap, false) => cap_boot_capacities(compute_boot_capacities(), cap),
-    };
-    let (scene_tx, scene_rx) = watch::channel(Arc::new(SceneState::new(boot_caps)));
-
-    let floor_caps: Arc<[AtomicUsize; MAX_FLOORS]> =
-        Arc::new(std::array::from_fn(|i| AtomicUsize::new(boot_caps[i])));
-
-    tokio::spawn(reducer_task(rx, scene_tx, Arc::clone(&floor_caps)));
-
-    let _source_handles = SourceManager::new()
-        .with_source(Box::new(cc_src))
-        .with_source(Box::new(ag_src))
-        .with_source(Box::new(codex_src))
-        .spawn(tx);
-
-    if headless {
-        headless_loop(scene_rx).await
-    } else {
-        crate::tui::run_tui(
-            scene_rx,
-            pack_dir,
-            floor_caps,
-            theme,
-            config_path,
-            desk_cap,
-            pets,
-        )
-        .await
-    }
-}
-
-async fn reducer_task(
-    mut rx: TaggedReceiver,
-    scene_tx: watch::Sender<Arc<SceneState>>,
-    floor_caps: Arc<[AtomicUsize; MAX_FLOORS]>,
-) {
-    let mut reducer = Reducer::new();
-    let initial_caps: [usize; MAX_FLOORS] =
-        std::array::from_fn(|i| floor_caps[i].load(Ordering::Relaxed));
-    let mut scene = SceneState::new(initial_caps);
-    // 1-Hz tick so exit-grace sweeps run even when no new events arrive.
-    let mut sweep_interval = tokio::time::interval(Duration::from_secs(1));
-    sweep_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    loop {
-        // Sync per-floor capacities from the shared atomics so the
-        // auto-computed layout capacity propagates to next_free_desk().
-        for (i, a) in floor_caps.iter().enumerate() {
-            scene.floor_capacities[i] = a.load(Ordering::Relaxed);
-        }
-        tokio::select! {
-            event = rx.recv() => {
-                let Some((transport, ev)) = event else { break };
-                let now = SystemTime::now();
-                tracing::debug!(?transport, ?ev, "event");
-                reducer.apply(&mut scene, ev, now, transport);
-                if scene_tx.send(Arc::new(scene.clone())).is_err() {
-                    tracing::warn!("scene channel closed — renderer dropped");
-                    break;
-                }
-            }
-            _ = sweep_interval.tick() => {
-                reducer.tick(&mut scene, SystemTime::now());
-                if scene_tx.send(Arc::new(scene.clone())).is_err() {
-                    tracing::warn!("scene channel closed — renderer dropped");
-                    break;
-                }
-            }
-        }
-    }
-}
-
-async fn headless_loop(mut scene_rx: SceneRx) -> Result<()> {
-    tracing::info!("pixtuoid headless mode — Ctrl-C to quit");
-    let mut prev_summary = String::new();
-    loop {
-        tokio::select! {
-            _ = tokio::time::sleep(Duration::from_millis(200)) => {
-                let snapshot = scene_rx.borrow_and_update().clone();
-                let summary = summarize(&snapshot);
-                if summary != prev_summary {
-                    println!("{summary}");
-                    prev_summary = summary;
-                }
-            }
-            _ = tokio::signal::ctrl_c() => {
-                tracing::info!("shutting down");
-                return Ok(());
-            }
-        }
-    }
-}
-
-fn compute_boot_capacities() -> [usize; MAX_FLOORS] {
-    match crossterm::terminal::size().ok() {
-        Some((cols, rows)) => boot_capacities_for(cols, rows),
-        None => [FALLBACK_DESKS; MAX_FLOORS],
-    }
 }
 
 /// Per-floor boot capacities derived from the real terminal size. Each floor
@@ -250,6 +109,8 @@ fn summarize(scene: &SceneState) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pixtuoid_core::{Reducer, Transport};
+    use std::time::SystemTime;
 
     fn floor_seed(i: u64) -> u64 {
         i.wrapping_mul(crate::tui::floor::FLOOR_SEED_MULTIPLIER)
