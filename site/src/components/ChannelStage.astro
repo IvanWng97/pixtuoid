@@ -48,8 +48,8 @@ const imgAlt = defVariant ? `pixtuoid office — ${defVariant.name} (${c.label.t
     ) : (
       <img
         class="terminal__screen px"
-        width="1600"
-        height="1440"
+        width={c.w ?? 1600}
+        height={c.h ?? 1440}
         src={active ? asset(`demos/${defVariant!.src}`) : undefined}
         data-src={active ? undefined : asset(`demos/${defVariant!.src}`)}
         alt={imgAlt}

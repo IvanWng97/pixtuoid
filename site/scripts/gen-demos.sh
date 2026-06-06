@@ -41,6 +41,18 @@ done <<<"$ids"
 "$bin" --cols "$cols" --rows "$rows" --now-hour 13 "$out/day.png"
 "$bin" --cols "$cols" --rows "$rows" --now-hour 22 "$out/night.png"
 
+# Spaces close-ups — three consistently-sized 800×620 crops from the day render
+# (reuses the already-rendered day.png; no second full render needed).
+# crop=W:H:X:Y in ffmpeg notation. X:Y chosen so no crop catches the legend HUD
+# (top-left, y<110) or the status bar (bottom, y>1408), and frame edges land in
+# walkway gaps rather than slicing desks/agents.
+echo "crop space: cubicles"
+ffmpeg -loglevel error -y -i "$out/day.png" -vf "crop=800:620:680:430" "$out/space_cubicles.png"
+echo "crop space: meeting"
+ffmpeg -loglevel error -y -i "$out/day.png" -vf "crop=800:620:0:415" "$out/space_meeting.png"
+echo "crop space: pantry"
+ffmpeg -loglevel error -y -i "$out/day.png" -vf "crop=800:620:0:775" "$out/space_pantry.png"
+
 # Weather shots — one per weather at a fixed afternoon hour, so the only thing
 # that changes between chips is the sky/window (the showcase's weather channel in
 # showcase.json swaps between these via its variant-set chips). --weather forces

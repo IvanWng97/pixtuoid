@@ -113,18 +113,8 @@ Upgrading from `ascii-agents` v0.3.x? See [docs/MIGRATION.md](docs/MIGRATION.md)
 <!-- features:end -->
 
 <p align="center">
-  <a href="https://ivanwng97.github.io/pixtuoid/#showcase-floors">
-    <img src="site/public/demos/multi-floor-poster.png" alt="a full floor of agents — overflow sessions spawn a second floor" width="700" />
-  </a>
-  <br />
-  <sub>One floor fills up, the next one opens — <a href="https://ivanwng97.github.io/pixtuoid/#showcase-floors"><strong>▶ watch the floor-slide transition live</strong></a></sub>
+  <a href="https://ivanwng97.github.io/pixtuoid/#showcase"><strong>▶ See every feature live — floors, themes, weather, pets, the office tour →</strong></a>
 </p>
-
-<table align="center"><tr>
-  <td align="center"><img src="docs/images/gallery-cubicle.png" alt="cubicle pods with per-tool monitor glow" width="260" /><br /><sub>cubicle pods</sub></td>
-  <td align="center"><img src="docs/images/gallery-meeting.png" alt="meeting lounge sofas" width="260" /><br /><sub>meeting lounge</sub></td>
-  <td align="center"><img src="docs/images/gallery-pantry.png" alt="pantry where idle agents chitchat" width="260" /><br /><sub>pantry</sub></td>
-</tr></table>
 
 ## Supported Tools
 
@@ -145,16 +135,6 @@ Press `t` to cycle the built-in themes with live preview. Your choice persists a
 
 <p align="center">
   <img src="docs/images/themes-composite.png" alt="built-in themes side by side" width="800" />
-</p>
-
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="site/public/demos/night.png">
-    <source media="(prefers-color-scheme: light)" srcset="site/public/demos/day.png">
-    <img alt="the office in daylight — or at night, if you read GitHub in dark mode" src="site/public/demos/day.png" width="800">
-  </picture>
-  <br />
-  <sub>This screenshot follows your GitHub theme — switch to dark mode and the office lights come on.</sub>
 </p>
 
 Settings live in `~/.config/pixtuoid/config.toml` — theme, desk cap, custom pet

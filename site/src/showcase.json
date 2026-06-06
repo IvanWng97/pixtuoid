@@ -57,6 +57,36 @@
     "status": "live"
   },
   {
+    "id": "spaces",
+    "label": "SPACES",
+    "kind": "variant-set",
+    "w": 800,
+    "h": 620,
+    "variants": [
+      {
+        "id": "cubicles",
+        "name": "Cubicles",
+        "blurb": "pods with per-tool monitor glow",
+        "src": "space_cubicles.png",
+        "featured": true
+      },
+      {
+        "id": "meeting",
+        "name": "Meeting lounge",
+        "blurb": "sofas where idle agents chitchat",
+        "src": "space_meeting.png"
+      },
+      {
+        "id": "pantry",
+        "name": "Pantry",
+        "blurb": "coffee runs start here",
+        "src": "space_pantry.png"
+      }
+    ],
+    "caption": "take the office tour — every corner is alive",
+    "status": "live"
+  },
+  {
     "id": "pets",
     "label": "PETS",
     "kind": "clip",
