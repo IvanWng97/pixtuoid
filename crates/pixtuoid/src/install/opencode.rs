@@ -1,10 +1,11 @@
 //! OpenCode plugin install. Unlike CC/Codex (config-merge), OpenCode uses a
 //! file-based plugin system: we write `pixtuoid.js` into `.opencode/plugins/`.
 //!
-//! The JS plugin scans ~/.local/share/opencode/storage/session_diff on load
-//! and uses fs.watch for real-time changes, forwarding structured events to
+//! The JS plugin uses the official OpenCode `event` hook for real-time events
+//! and performs a one-time scan of ~/.local/share/opencode/storage/session_diff
+//! on load to discover pre-existing sessions. Events are forwarded to
 //! `pixtuoid-hook` as fire-and-forget child_process calls (never blocking
-//! OpenCode). The event bus (return { event: ... }) is unused in practice.
+//! OpenCode). No fs.watch — the event hook is the sole runtime channel.
 
 use std::path::{Path, PathBuf};
 
@@ -14,13 +15,13 @@ pub const PLUGIN_FILENAME: &str = "pixtuoid.js";
 
 /// The JS plugin source, embedded in the Rust binary at compile time.
 ///
-/// Strategy: OpenCode's event bus doesn't fire events to plugins in practice,
-/// so we actively scan the session_diff directory on load and watch it with
-/// fs.watch for real-time changes instead of relying on the event bus.
+/// Uses the official OpenCode `event` hook for real-time events (no fs.watch)
+/// and performs a one-time scan of session_diff on load to discover pre-existing
+/// sessions. See the module-level doc comment for the architecture diagram.
 pub const PLUGIN_SOURCE: &str = r#"// pixtuoid — OpenCode visualization plugin
 // Installed by `pixtuoid install-hooks --target opencode`.
-// Scans session_diff on load, watches for changes, and forwards structured
-// events to pixtuoid-hook. Never blocks OpenCode (fire-and-forget).
+// Uses the official event hook for real-time events + one-time boot scan for
+// pre-existing sessions. Never blocks OpenCode (fire-and-forget).
 export const PixtuoidPlugin = async ({ project, client, $, directory, worktree }) => {
   const fs = await import("fs");
   const path = await import("path");
@@ -30,7 +31,7 @@ export const PixtuoidPlugin = async ({ project, client, $, directory, worktree }
   const hookBin = process.env.PIXTUOID_HOOK || "pixtuoid-hook";
   const diffDir = path.join(os.homedir(), ".local/share/opencode/storage/session_diff");
 
-  function sendEvent(hookEventName, sessionId, extra) {
+  function send(hookEventName, sessionId, extra = {}) {
     const msg = JSON.stringify({
       _pixtuoid_source: "opencode",
       hook_event_name: hookEventName,
@@ -38,7 +39,6 @@ export const PixtuoidPlugin = async ({ project, client, $, directory, worktree }
       cwd: directory || "",
       ...extra,
     });
-    // Fire-and-forget: errors silently caught, 3s timeout prevents blocking.
     try {
       execSync(
         `printf '%s' '${msg.replace(/'/g, "'\\''")}' | PIXTUOID_SOURCE=opencode ${hookBin}`,
@@ -47,52 +47,63 @@ export const PixtuoidPlugin = async ({ project, client, $, directory, worktree }
     } catch {}
   }
 
-  // --- Initial scan of existing sessions ---
+  // --- One-time boot scan: discover pre-existing sessions ---
   if (fs.existsSync(diffDir)) {
     try {
       const files = fs.readdirSync(diffDir);
       let planted = 0;
       for (const f of files) {
         if (!f.endsWith(".json") || !f.startsWith("ses_")) continue;
-        if (planted >= 10) break; // cap at 10 to avoid flood on plugin boot
+        if (planted >= 10) break;
         const filePath = path.join(diffDir, f);
         const content = fs.readFileSync(filePath, "utf-8").trim();
         if (!content || content === "[]") continue;
         const sessionId = f.replace(/^ses_/, "").replace(/\.json$/, "");
-        sendEvent("SessionStart", sessionId, {});
+        send("SessionStart", sessionId, {});
         planted++;
       }
     } catch {}
   }
 
-  // --- fs.watch for real-time changes ---
-  let watcher = null;
-  if (fs.existsSync(diffDir)) {
-    try {
-      watcher = fs.watch(diffDir, (eventType, filename) => {
-        if (!filename || !filename.endsWith(".json") || !filename.startsWith("ses_")) return;
-        const sessionId = filename.replace(/^ses_/, "").replace(/\.json$/, "");
-        if (eventType === "rename") {
-          sendEvent("SessionStart", sessionId, {});
-        } else {
-          // change = activity within the session
-          sendEvent("PreToolUse", sessionId, {
-            tool_use_id: "oc-" + sessionId + "-" + Date.now(),
-            tool_name: "Edit:file",
-          });
-          sendEvent("PostToolUse", sessionId, {
-            tool_use_id: "oc-" + sessionId + "-" + Date.now(),
-          });
+  // --- Runtime phase: official OpenCode event hook ---
+  return {
+    event: async ({ event }) => {
+      switch (event.type) {
+        case "session.created": {
+          const { id, directory: dir } = event.properties?.info || {};
+          if (id) send("SessionStart", id, { cwd: dir || directory || "" });
+          break;
         }
-      });
-    } catch {}
-  }
-
-  // Keep watcher alive by attaching to globalThis (GC prevention).
-  if (watcher) globalThis.__pixtuoid_watchers ||= [];
-  if (watcher) globalThis.__pixtuoid_watchers.push(watcher);
-
-  return {};
+        case "message.part.updated": {
+          const part = event.properties?.part || {};
+          if (part.state === "started") {
+            send("PreToolUse", part.sessionID, {
+              tool_use_id: part.callID || "oc-" + Date.now(),
+              tool_name: part.tool || "tool",
+              tool_input: part.input,
+            });
+          } else if (part.state === "done" || part.state === "error") {
+            send("PostToolUse", part.sessionID, {
+              tool_use_id: part.callID || "oc-" + Date.now(),
+            });
+          }
+          break;
+        }
+        case "permission.updated": {
+          const p = event.properties || {};
+          if (p.status === "pending") {
+            send("PermissionRequest", p.sessionID, {});
+          }
+          break;
+        }
+        case "session.deleted": {
+          const { id } = event.properties?.info || {};
+          if (id) send("SessionEnd", id, {});
+          break;
+        }
+      }
+    },
+  };
 };
 "#;
 
@@ -188,8 +199,14 @@ mod tests {
     fn plugin_source_is_valid_js_syntax() {
         // Basic sanity: the embedded JS contains valid exports.
         assert!(PLUGIN_SOURCE.contains("export const PixtuoidPlugin"));
-        assert!(PLUGIN_SOURCE.contains("sendEvent"));
+        assert!(PLUGIN_SOURCE.contains("event: async"));
         assert!(PLUGIN_SOURCE.contains("_pixtuoid_source"));
         assert!(PLUGIN_SOURCE.contains("PIXTUOID_SOURCE=opencode"));
+        assert!(PLUGIN_SOURCE.contains("session.created"));
+        assert!(PLUGIN_SOURCE.contains("message.part.updated"));
+        assert!(PLUGIN_SOURCE.contains("permission.updated"));
+        assert!(PLUGIN_SOURCE.contains("session.deleted"));
+        assert!(!PLUGIN_SOURCE.contains("fs.watch"));
+        assert!(!PLUGIN_SOURCE.contains("__pixtuoid_watchers"));
     }
 }
