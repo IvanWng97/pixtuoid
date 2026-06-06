@@ -72,6 +72,14 @@ export interface ShowcaseChannel {
 // The manifest's kind/status/default/asset invariants are enforced at build time by the showcase guard in astro.config.mjs.
 export const SHOWCASE: ShowcaseChannel[] = showcaseData as unknown as ShowcaseChannel[];
 
+// The shape Showcase.astro passes down to ChannelStage/MonitorWall: each
+// channel enriched with `ch` (zero-padded channel number, from manifest order)
+// and `variants` resolved via showcaseVariants() (always an array, may be empty).
+export interface EnrichedShowcaseChannel extends ShowcaseChannel {
+  ch: string;
+  variants: ShowcaseVariant[];
+}
+
 export function showcaseVariants(c: ShowcaseChannel): ShowcaseVariant[] {
   if (c.variantsRef === 'themes')
     return THEMES.map((t) => ({

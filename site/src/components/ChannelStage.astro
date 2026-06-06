@@ -1,0 +1,154 @@
+---
+import { existsSync } from 'node:fs';
+import { asset, type EnrichedShowcaseChannel, type ShowcaseVariant } from '../consts';
+
+const { channel: c, active } = Astro.props as {
+  channel: EnrichedShowcaseChannel;
+  active: boolean;
+};
+const isClip = c.kind === 'clip';
+const defVariant: ShowcaseVariant | null = c.variants.length
+  ? (c.variants.find((v: ShowcaseVariant) => v.featured) ?? c.variants[0])
+  : null;
+const hasWebm =
+  isClip && existsSync(new URL(`../../public/demos/${c.asset}.webm`, import.meta.url));
+const title = `pixtuoid — CH ${c.ch} ${c.label}` + (defVariant ? ` · ${defVariant.name}` : '');
+const imgAlt = defVariant ? `pixtuoid office — ${defVariant.name} (${c.label.toLowerCase()})` : '';
+---
+
+<figure
+  class="terminal stage crt"
+  data-stage={c.id}
+  data-retint={c.retint ? 'true' : undefined}
+  hidden={!active}
+  style={defVariant?.accent ? `--accent:${defVariant.accent}` : undefined}
+>
+  <div class="terminal__bar">
+    <span class="terminal__dot terminal__dot--r"></span>
+    <span class="terminal__dot terminal__dot--y"></span>
+    <span class="terminal__dot terminal__dot--g"></span>
+    <span class="terminal__title" data-stage-title>{title}</span>
+  </div>
+  {
+    isClip ? (
+      <video
+        class="terminal__screen px"
+        width={c.w}
+        height={c.h}
+        muted
+        loop
+        playsinline
+        preload={active ? 'metadata' : 'none'}
+        autoplay={active}
+        poster={asset(`demos/${c.asset}-poster.png`)}
+        data-mp4={active ? undefined : asset(`demos/${c.asset}.mp4`)}
+        data-webm={active || !hasWebm ? undefined : asset(`demos/${c.asset}.webm`)}
+        aria-label={`pixtuoid demo: ${c.caption}`}
+      >
+        {active && hasWebm && <source src={asset(`demos/${c.asset}.webm`)} type="video/webm" />}
+        {active && <source src={asset(`demos/${c.asset}.mp4`)} type="video/mp4" />}
+      </video>
+    ) : (
+      <img
+        class="terminal__screen px"
+        width="1600"
+        height="1440"
+        src={active ? asset(`demos/${defVariant!.src}`) : undefined}
+        data-src={active ? undefined : asset(`demos/${defVariant!.src}`)}
+        alt={imgAlt}
+        loading="lazy"
+      />
+    )
+  }
+  <span class="terminal__scan" aria-hidden="true"></span>
+  {
+    c.variants.length > 0 && (
+      <div class="stage__osd" role="group" aria-label={c.label.toLowerCase()}>
+        {c.variants.map((v: ShowcaseVariant) => (
+          <button
+            class:list={['osd__chip', { 'is-active': v.id === defVariant!.id }]}
+            aria-pressed={v.id === defVariant!.id ? 'true' : 'false'}
+            data-src={asset(`demos/${v.src}`)}
+            data-title={`pixtuoid — CH ${c.ch} ${c.label} · ${v.name}`}
+            data-alt={`pixtuoid office — ${v.name} (${c.label.toLowerCase()})`}
+            data-accent={v.accent}
+            data-accent2={v.accent2}
+            style={v.accent ? `--chip:${v.accent}` : undefined}
+          >
+            {v.accent && <span class="osd__swatch" />}
+            {v.name}
+          </button>
+        ))}
+      </div>
+    )
+  }
+  <figcaption class="stage__caption">{c.caption}</figcaption>
+</figure>
+
+<style>
+  .stage {
+    --accent: var(--coral);
+    border-color: color-mix(in srgb, var(--accent) 50%, var(--border-strong));
+    box-shadow:
+      var(--shadow-lg),
+      0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent),
+      0 30px 80px color-mix(in srgb, var(--accent) 22%, transparent);
+    transition:
+      box-shadow 0.45s ease,
+      border-color 0.45s ease;
+  }
+  .stage .terminal__screen {
+    width: 100%;
+    height: auto;
+  }
+  .stage__osd {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+    padding: 0.8rem 0.9rem 0.2rem;
+  }
+  .osd__chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-family: var(--font-mono);
+    font-weight: 700;
+    font-size: 0.84rem;
+    padding: 0.5rem 0.95rem;
+    border-radius: 999px;
+    cursor: pointer;
+    color: var(--fg-muted);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    transition:
+      color 0.2s ease,
+      background-color 0.2s ease,
+      border-color 0.2s ease,
+      transform 0.15s ease;
+  }
+  .osd__chip:hover {
+    color: var(--fg);
+    transform: translateY(-1px);
+  }
+  .osd__chip.is-active {
+    color: var(--fg);
+    border-color: color-mix(in srgb, var(--chip, var(--coral)) 60%, var(--border-strong));
+    background: color-mix(in srgb, var(--chip, var(--coral)) 15%, var(--surface));
+  }
+  .osd__swatch {
+    width: 12px;
+    height: 12px;
+    border-radius: 3px;
+    background: var(--chip);
+    /* a perceivable edge so the swatch reads even when its fill is below the
+       WCAG 1.4.11 3:1 non-text contrast against the chip surface */
+    border: 1px solid var(--border-strong);
+    image-rendering: pixelated;
+  }
+  .stage__caption {
+    font-family: var(--font-mono);
+    font-size: 0.84rem;
+    color: var(--fg-muted);
+    padding: 0.7rem 0.9rem 0.9rem;
+  }
+</style>

@@ -90,6 +90,10 @@ for (const c of showcase) {
       throw new Error(
         `astro.config: showcase.json live clip "${c.id}" missing public/demos/ asset(s): ${missing.join(', ')} — run site/scripts/gen-demos.sh`
       );
+    if (!Number.isFinite(c.w) || !Number.isFinite(c.h))
+      throw new Error(
+        `astro.config: showcase.json live clip "${c.id}" needs numeric "w"/"h" (intrinsic video dims, for CLS)`
+      );
   } else if (c.kind === 'variant-set') {
     if (c.variantsRef) {
       if (c.variantsRef !== 'themes' && c.variantsRef !== 'weather')
