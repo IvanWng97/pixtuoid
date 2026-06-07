@@ -119,6 +119,7 @@ mod tests {
     // crate (the integration suite in tests/shim.rs runs in a separate binary
     // and sets PIXTUOID_SOCKET in the spawned child, not in-process), so it can
     // save/restore both vars and drive all three branches without serial_test.
+    #[cfg(unix)]
     #[test]
     fn default_socket_path_branches() {
         let prior_socket = std::env::var("PIXTUOID_SOCKET").ok();
@@ -148,6 +149,34 @@ mod tests {
         match prior_xdg {
             Some(v) => std::env::set_var("XDG_RUNTIME_DIR", v),
             None => std::env::remove_var("XDG_RUNTIME_DIR"),
+        }
+    }
+
+    // The Windows twin only RUNS on a Windows runner (PR 3 turns that CI
+    // job on); until then the ubuntu cross-check job keeps it compiling.
+    #[cfg(windows)]
+    #[test]
+    fn default_socket_path_branches_windows() {
+        let prior_socket = std::env::var("PIXTUOID_SOCKET").ok();
+        let prior_user = std::env::var("USERNAME").ok();
+
+        std::env::set_var("PIXTUOID_SOCKET", r"\\.\pipe\explicit");
+        assert_eq!(default_socket_path(), r"\\.\pipe\explicit");
+
+        std::env::remove_var("PIXTUOID_SOCKET");
+        std::env::set_var("USERNAME", "ada");
+        assert_eq!(default_socket_path(), r"\\.\pipe\pixtuoid-ada");
+
+        std::env::remove_var("USERNAME");
+        assert_eq!(default_socket_path(), r"\\.\pipe\pixtuoid-default");
+
+        match prior_socket {
+            Some(v) => std::env::set_var("PIXTUOID_SOCKET", v),
+            None => std::env::remove_var("PIXTUOID_SOCKET"),
+        }
+        match prior_user {
+            Some(v) => std::env::set_var("USERNAME", v),
+            None => std::env::remove_var("USERNAME"),
         }
     }
 }
