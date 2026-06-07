@@ -8,8 +8,12 @@ mod tooltip;
 pub(super) use help::paint_help_overlay;
 pub(super) use hud::{
     paint_elevator_indicator, paint_footer, paint_theme_picker, paint_version_popup,
-    paint_wall_display, source_warning_message, version_popup_url_rect, VERSION_POPUP_URL,
+    paint_wall_display, version_popup_url_rect, VERSION_POPUP_URL,
 };
+// `pub`: the snapshot example reuses the real formatter for its
+// --source-warning screenshots so the wording cannot drift from production
+// (the pixtuoid lib target is not a semver surface).
+pub use hud::source_warning_message;
 pub use tooltip::paint_chitchat_bubbles;
 pub(super) use tooltip::{paint_coffee_tooltip, paint_furniture_tooltip, paint_pet_tooltip};
 pub(crate) use tooltip::{paint_hover_tooltip, paint_label_widgets};
@@ -264,10 +268,7 @@ mod tests {
     #[test]
     fn source_warning_message_formats_by_death_count() {
         use pixtuoid_core::source::manager::SourceDeath;
-        let d = |s: &str| SourceDeath {
-            source: s.into(),
-            error: "boom".into(),
-        };
+        let d = |s: &str| SourceDeath::new(s, "boom");
         assert_eq!(super::source_warning_message(&[]), None);
         assert_eq!(
             super::source_warning_message(&[d("claude-code")]).unwrap(),

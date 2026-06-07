@@ -59,3 +59,25 @@ pixtuoid run --pack-dir ./my-pack
 
 A **robot** pack ships as an example at `crates/pixtuoid/sprites/robot/`. See the
 [sprite format docs](../crates/pixtuoid/CLAUDE.md) for palette keys and animation requirements.
+
+## Logging & troubleshooting
+
+The TUI owns your terminal (alternate screen), so runtime diagnostics go to a
+**log file** instead of stderr:
+
+| | |
+|-----|-----|
+| Default path | `~/.cache/pixtuoid/log` (or `$XDG_STATE_HOME/pixtuoid/log` if set) |
+| Custom path | set `$PIXTUOID_LOG=/path/to/file` |
+| Level | `warn` and above by default; `--log-level debug` or `trace` (or `$RUST_LOG`) raises it |
+| Rotation | one generation: past 5 MB the file rotates to `<name>.old` at startup |
+
+Warnings about a misconfigured `config.toml` (unknown theme, bad `[[pets]]`
+kind, malformed TOML) are also printed to stderr **before** the office takes
+over the screen — scroll back after quitting to see them. If a data source
+dies mid-run (e.g. the hook listener), the footer shows a persistent ⚠ warning
+and the full error is in the log file.
+
+Crashes are reported separately to `~/.cache/pixtuoid/crash.log`.
+
+Non-TUI commands (`--headless`, `install-hooks`, …) log to stderr directly.

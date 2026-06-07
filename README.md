@@ -140,7 +140,8 @@ Press `t` to cycle the built-in themes with live preview. Your choice persists a
 Settings live in `~/.config/pixtuoid/config.toml` — theme, desk cap, custom pet
 names, and sprite packs. CLI flags override the file (`pixtuoid run --theme dracula`).
 See **[docs/CONFIGURATION.md](docs/CONFIGURATION.md)** for the full key reference
-(defaults, system-managed keys) and the custom sprite-pack workflow — or browse it
+(defaults, system-managed keys), the custom sprite-pack workflow, and **logging /
+troubleshooting** (the TUI writes warnings to `~/.cache/pixtuoid/log`) — or browse it
 live at **[/config](https://ivanwng97.github.io/pixtuoid/config)**.
 
 ## How It Works

@@ -362,8 +362,12 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    let warning_text = args.source_warning.as_deref().map(|src| {
-        format!("{src} source died — its agents are frozen; restart pixtuoid (see log)")
+    // Reuse the REAL formatter so the screenshot wording can't drift from
+    // production.
+    let warning_text = args.source_warning.as_deref().and_then(|src| {
+        pixtuoid::tui::widgets::source_warning_message(&[
+            pixtuoid_core::source::manager::SourceDeath::new(src, "forced for screenshot"),
+        ])
     });
     let mut chitchat_state = std::collections::HashMap::new();
     let mut light = pixtuoid::tui::floor::LightingState::new();

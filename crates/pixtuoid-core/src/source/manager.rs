@@ -6,12 +6,25 @@ use crate::source::{Source, TaggedSender};
 /// A source's fatal exit, published on the health channel so the binary can
 /// surface it (#157). Plain data — no terminal deps (workspace invariant #1);
 /// how it reaches the user (TUI footer, stderr) is the consumer's call.
+/// `non_exhaustive` + [`SourceDeath::new`] keep a future field (timestamp,
+/// exit kind) a minor bump instead of a `constructible_struct_adds_field`
+/// major at the CI semver gate (the #131 class).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct SourceDeath {
     /// [`Source::name`] of the source that died (e.g. "claude-code").
     pub source: String,
     /// Display rendering of the fatal error.
     pub error: String,
+}
+
+impl SourceDeath {
+    pub fn new(source: impl Into<String>, error: impl Into<String>) -> Self {
+        Self {
+            source: source.into(),
+            error: error.into(),
+        }
+    }
 }
 
 /// Owns a set of `Source` implementations and spawns each as its own tokio
@@ -68,12 +81,7 @@ impl SourceManager {
                 tokio::spawn(async move {
                     if let Err(e) = src.run(tx).await {
                         tracing::error!(source = %name, "source died: {e:#}");
-                        deaths.send_modify(|v| {
-                            v.push(SourceDeath {
-                                source: name,
-                                error: format!("{e:#}"),
-                            })
-                        });
+                        deaths.send_modify(|v| v.push(SourceDeath::new(name, format!("{e:#}"))));
                     }
                 })
             })
@@ -125,10 +133,7 @@ mod tests {
         let deaths = deaths_rx.borrow().clone();
         assert_eq!(
             deaths,
-            vec![SourceDeath {
-                source: "dying-test-source".into(),
-                error: "listener exploded".into(),
-            }],
+            vec![SourceDeath::new("dying-test-source", "listener exploded")],
             "a fatal source exit must be attributed and published; a clean exit must not"
         );
     }

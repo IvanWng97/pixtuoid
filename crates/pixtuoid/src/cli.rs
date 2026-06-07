@@ -12,6 +12,10 @@ pub struct Cli {
     #[command(subcommand)]
     pub cmd: Option<Cmd>,
 
+    /// Log verbosity: error, warn, info, debug, trace. The TUI always logs
+    /// warn+ to a file (~/.cache/pixtuoid/log, or $PIXTUOID_LOG /
+    /// $XDG_STATE_HOME/pixtuoid/log); debug/trace raise the file's
+    /// verbosity. Non-TUI commands log to stderr at this level.
     #[arg(long, global = true, default_value = "info")]
     pub log_level: String,
 

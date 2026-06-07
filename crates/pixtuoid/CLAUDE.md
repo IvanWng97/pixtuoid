@@ -15,8 +15,10 @@ src/
 ├── main.rs             entry point; install_crash_hook (panic hook → ~/.cache/pixtuoid/crash.log);
 │                       log routing (#157): TUI mode ALWAYS file-logs at a warn floor
 │                       ($PIXTUOID_LOG > $XDG_STATE_HOME/pixtuoid/log > ~/.cache/pixtuoid/log,
-│                       one-deep rotation at 5MB → log.old; RUST_LOG/--log-level/$PIXTUOID_LOG
-│                       raise verbosity); non-TUI modes log to stderr
+│                       one-deep rotation at 5MB by APPENDING .old; RUST_LOG, --log-level
+│                       debug|trace, or $PIXTUOID_LOG raise verbosity — plain --log-level info
+│                       is indistinguishable from the default and floors to warn); non-TUI
+│                       modes log to stderr; install failure eprintlns pre-altscreen
 ├── cli.rs              clap subcommands (run / install-hooks / uninstall-hooks / validate-pack / init-pack)
 ├── config.rs           AppConfig persistence (~/.config/pixtuoid/config.toml), XDG-aware
 ├── runtime/            mod.rs (RunConfig, boot-capacity math, headless summarize — all unit-tested),

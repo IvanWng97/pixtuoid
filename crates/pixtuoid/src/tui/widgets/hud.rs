@@ -88,8 +88,11 @@ pub(in crate::tui) fn paint_theme_picker(
 
 /// One-line footer warning for dead sources (#157); `None` while healthy.
 /// Deliberately terse — it shares the footer row — with the full error in the
-/// log file (always written since #157's logging fix).
-pub(in crate::tui) fn source_warning_message(
+/// log file (written by default since #157's logging fix; a failed log-file
+/// install is announced on pre-altscreen stderr). `pub`: the snapshot
+/// example's --source-warning reuses this exact formatter so screenshots
+/// can't drift from production wording.
+pub fn source_warning_message(
     deaths: &[pixtuoid_core::source::manager::SourceDeath],
 ) -> Option<String> {
     match deaths {
