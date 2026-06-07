@@ -27,10 +27,11 @@ pub(crate) fn cwd_basename_label(prefix: &str, cwd: &Path) -> Option<String> {
 /// backslash paths in hook payloads but mixes `\`/`/` forms of the same file
 /// internally, and NTFS is case-insensitive; without folding, the hook key
 /// and the watcher key hash to two different AgentIds and every session
-/// renders as TWO sprites. Applied at exactly THREE sites: the hook decoder's
-/// transcript_path, the watcher's default_id_from_path, and the subagent
-/// detect_parent_id's rebuilt parent key (all must agree or the scope tree
-/// breaks).
+/// renders as TWO sprites. Applied at exactly FOUR sites: the hook decoder's
+/// transcript_path, the watcher's default_id_from_path, walk_jsonl's
+/// transcript_path_str handed to the line decoders, and the subagent
+/// detect_parent_id's rebuilt parent key (ALL must agree or events land on
+/// phantom ids / the scope tree breaks).
 pub(crate) fn normalize_path_key(s: &str) -> String {
     normalize_key_inner(cfg!(windows), s)
 }

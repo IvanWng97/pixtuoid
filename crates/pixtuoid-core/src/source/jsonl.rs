@@ -334,7 +334,12 @@ async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &WatchCtx<'_>) {
     }
 
     let new_bytes = &new_chunk[..safe_end_relative];
-    let transcript_path_str = path.to_string_lossy().into_owned();
+    // The FOURTH keying site: line decoders hash this string into per-event
+    // AgentIds (CC keys on it directly; Codex extracts its lowercase UUID, so
+    // the fold is identity there) — it must match the normalized SessionStart
+    // key from id_derive below or every JSONL event lands on a phantom id on
+    // Windows (caught by the PR #160 security review).
+    let transcript_path_str = crate::source::decoder::normalize_path_key(&path.to_string_lossy());
 
     // Take the `seen` lock ONLY to claim first-sight, then drop it before the
     // awaited sends — holding it across `tx.send` would block on a slow consumer
