@@ -237,7 +237,6 @@ impl Reducer {
         self.gc(now);
         self.sweep_exited(scene, now);
         self.expire_pending_idles(scene, now);
-        self.fire_pending_b1_cascades(scene, now);
         let id = event.agent_id();
 
         // Liveness flows UP the tree: any activity by a descendant keeps its
@@ -307,6 +306,14 @@ impl Reducer {
             handled_by_task_tracking,
             handled_by_task_start,
         } = self.track_active_tasks(scene, &event, now);
+
+        // Fire due b1 cascades AFTER task tracking, not at apply-top: a
+        // canceling Task dispatch arriving exactly at the grace boundary must
+        // land in `active_tasks` before the due-check, or the fire would
+        // evict the live subtree in the very apply call that carries its
+        // cancel. An entry armed by THIS event's own drain has zero elapsed
+        // time, so it can never self-fire.
+        self.fire_pending_b1_cascades(scene, now);
 
         match event {
             AgentEvent::SessionStart {

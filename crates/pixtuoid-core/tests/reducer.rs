@@ -2295,6 +2295,86 @@ fn late_jsonl_dispatch_copy_inside_grace_cancels_premature_cascade() {
 }
 
 #[test]
+fn second_drain_inside_grace_restarts_the_cascade_clock() {
+    // Re-arm semantics pin (#151): the drain-to-empty `insert` must
+    // OVERWRITE a previously armed timestamp, so the grace is always
+    // relative to the LATEST drain. Preserve-first semantics (or_insert)
+    // would let a drain → insert → drain-again chain fire only
+    // (grace − inter-drain gap) after the last drain, re-opening a narrowed
+    // #151A window for a third suppressed dispatch. No tick runs between
+    // the two drains — a consumed-then-reinserted entry would mask the
+    // distinction.
+    let mut scene = SceneState::uniform(8);
+    let mut r = Reducer::new();
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+    let (parent, child) = delegating_pair(&mut r, &mut scene, "orch-rearm", t0);
+    let t1 = t0 + Duration::from_secs(1);
+
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityStart {
+            agent_id: parent,
+            activity: Activity::Typing,
+            tool_use_id: Some("task-1".into()),
+            detail: Some("Task".into()),
+        },
+        t1,
+        Transport::Hook,
+    );
+    // First drain arms the pending cascade.
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityEnd {
+            agent_id: parent,
+            tool_use_id: Some("task-1".into()),
+        },
+        t1 + Duration::from_millis(200),
+        Transport::Hook,
+    );
+    // A second Task lands and drains again, all inside the first grace.
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityStart {
+            agent_id: parent,
+            activity: Activity::Typing,
+            tool_use_id: Some("task-2".into()),
+            detail: Some("Task".into()),
+        },
+        t1 + Duration::from_secs(1),
+        Transport::Jsonl,
+    );
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityEnd {
+            agent_id: parent,
+            tool_use_id: Some("task-2".into()),
+        },
+        t1 + Duration::from_secs(2),
+        Transport::Jsonl,
+    );
+
+    // At first-drain + grace the clock must have RESTARTED from the second
+    // drain — nothing fires yet.
+    r.tick(
+        &mut scene,
+        t1 + Duration::from_millis(200) + B1_CASCADE_GRACE + Duration::from_millis(10),
+    );
+    assert!(
+        scene.agents.get(&child).unwrap().exiting_at.is_none(),
+        "the second drain must restart the grace clock — firing on the FIRST drain's timestamp re-opens the #151A window"
+    );
+    // And it fires one full grace after the second drain.
+    r.tick(
+        &mut scene,
+        t1 + Duration::from_secs(2) + B1_CASCADE_GRACE + Duration::from_millis(10),
+    );
+    assert!(
+        scene.agents.get(&child).unwrap().exiting_at.is_some(),
+        "the cascade still fires one grace after the last drain"
+    );
+}
+
+#[test]
 fn late_jsonl_replay_of_drained_task_end_does_not_false_resolve_waiting() {
     // #152: the gate recorded while Delegating holds the Task's own tuid.
     // The Task self-END drains via the tracking path (which deliberately
@@ -2353,7 +2433,17 @@ fn late_jsonl_replay_of_drained_task_end_does_not_false_resolve_waiting() {
         t1 + Duration::from_secs(1) + HOOK_WINS_WINDOW + Duration::from_millis(100),
         Transport::Jsonl,
     );
-    r.tick(&mut scene, t1 + Duration::from_secs(4));
+    // Derived past the point a false resolve would become visible: the
+    // replay would arm the idle debounce, flipping Waiting → Idle
+    // ACTIVE_GRACE_WINDOW later — tick just past that.
+    r.tick(
+        &mut scene,
+        t1 + Duration::from_secs(1)
+            + HOOK_WINS_WINDOW
+            + Duration::from_millis(100)
+            + ACTIVE_GRACE_WINDOW
+            + Duration::from_millis(10),
+    );
     assert!(
         matches!(
             scene.agents.get(&parent).unwrap().state,
