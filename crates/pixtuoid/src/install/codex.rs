@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use toml::value::Table;
 
 use crate::install::io;
@@ -36,6 +36,17 @@ fn shell_single_quote(s: &str) -> String {
 /// PIXTUOID_SOURCE so the shim can stamp the source. Err on non-UTF-8 (prevents
 /// the to_string_lossy dead-hook).
 pub fn hook_command(resolved: &Path) -> Result<String> {
+    // Codex's hook `command` is a POSIX shell string — the env-prefix form
+    // (`PIXTUOID_SOURCE=codex /path`) does not work under cmd.exe or PowerShell.
+    // Windows support for Codex (Git-Bash exec-form or a dedicated shim) is
+    // planned for a follow-up PR; refuse cleanly rather than writing a silently
+    // broken config.
+    if cfg!(windows) {
+        bail!(
+            "the codex target is not yet supported on Windows — \
+             install hooks for Claude Code only (Codex support is planned)"
+        );
+    }
     let p = resolved
         .to_str()
         .ok_or_else(|| anyhow!("pixtuoid-hook path is non-UTF-8: {}", resolved.display()))?;
@@ -331,6 +342,22 @@ command = "/old/pixtuoid-hook"
             v.get("hooks").is_none(),
             "legacy basename entry removed: {}",
             cleaned.content
+        );
+    }
+
+    // On Windows, hook_command must refuse (cfg!(windows) guard). The guard
+    // compiles on all platforms; check-windows exercises the bail! branch.
+    // On non-Windows the guard is false → the POSIX path runs normally, which
+    // is verified by hook_command_prefixes_source_for_valid_path below.
+    #[test]
+    #[cfg(windows)]
+    fn hook_command_refuses_on_windows() {
+        let err = hook_command(std::path::Path::new(r"C:\tools\pixtuoid-hook.exe"))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("not yet supported on Windows"),
+            "unexpected error: {err}"
         );
     }
 

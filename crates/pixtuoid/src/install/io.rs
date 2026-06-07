@@ -80,6 +80,38 @@ pub fn read_config(path: &Path) -> Result<String> {
     Ok(s)
 }
 
+/// Rename `from` onto `to`, with a Windows-only bounded retry.
+///
+/// On Windows, `fs::rename` onto a file that another process holds open raises
+/// ERROR_SHARING_VIOLATION (os error 32). Claude Code keeps `settings.json`
+/// open briefly, so a bare rename can lose the write. Up to 3 attempts with
+/// 50 ms sleeps between them match CC's typical hold duration; on the third
+/// failure the error propagates. On Unix the rename succeeds atomically even
+/// while a reader holds the old fd, so a single attempt is correct there.
+fn rename_with_retry(from: &Path, to: &Path) -> std::io::Result<()> {
+    #[cfg(windows)]
+    {
+        const MAX_ATTEMPTS: u32 = 3;
+        for attempt in 1..=MAX_ATTEMPTS {
+            match std::fs::rename(from, to) {
+                Ok(()) => return Ok(()),
+                Err(e) if attempt < MAX_ATTEMPTS => {
+                    // ERROR_SHARING_VIOLATION = os error 32.
+                    // Sleep only on the retriable attempts; propagate on the last.
+                    let _ = e; // silence unused-variable lint on non-windows
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        unreachable!()
+    }
+    #[cfg(not(windows))]
+    {
+        std::fs::rename(from, to)
+    }
+}
+
 /// Atomic write that follows symlinks: write a temp file beside the resolved
 /// target, fsync, then rename onto it. Advisory-locked. Format-agnostic (&str).
 pub fn write_config_atomic(path: &Path, contents: &str) -> Result<()> {
@@ -107,7 +139,7 @@ pub fn write_config_atomic(path: &Path, contents: &str) -> Result<()> {
         f.write_all(contents.as_bytes())?;
         f.sync_all()?;
     }
-    std::fs::rename(&tmp, &target)?;
+    rename_with_retry(&tmp, &target)?;
     fs2::FileExt::unlock(&lock).ok();
     Ok(())
 }
@@ -169,6 +201,23 @@ pub fn resolve_symlink(path: &Path) -> PathBuf {
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    // rename_with_retry: the retry loop's Windows sharing-violation path is not
+    // cheaply testable cross-platform (triggering os error 32 requires another
+    // process holding the file). The success path is tested here on all
+    // platforms; the retry guard + WHY comment carry the Windows-specific
+    // reasoning. The existing write_config_atomic tests exercise rename_with_retry
+    // end-to-end on every platform (the non-windows branch is a direct rename).
+    #[test]
+    fn rename_with_retry_moves_file() {
+        let dir = TempDir::new().unwrap();
+        let from = dir.path().join("src.tmp");
+        let to = dir.path().join("dst.json");
+        std::fs::write(&from, "hello").unwrap();
+        rename_with_retry(&from, &to).unwrap();
+        assert!(!from.exists());
+        assert_eq!(std::fs::read_to_string(&to).unwrap(), "hello");
+    }
 
     #[test]
     fn resolve_symlink_regular_file_returns_as_is() {
