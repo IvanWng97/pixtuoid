@@ -41,7 +41,7 @@ jobs:
 
             Review this PR for security issues. Focus on:
             1. Hook shim safety: must always exit 0, must never block CC, 200ms timeout non-negotiable
-            2. settings.json writes: must go through write_settings_atomic (advisory lock + atomic rename + symlink resolution)
+            2. settings.json writes: must go through write_config_atomic (advisory lock + atomic rename + symlink resolution)
             3. Unix socket handling: no path traversal, no symlink attacks
             4. Input validation on hook payloads and JSONL lines — malformed input must be logged and skipped, never panic
             5. No raw secrets in command strings or log output
