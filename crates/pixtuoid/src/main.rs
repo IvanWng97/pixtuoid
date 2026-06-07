@@ -11,8 +11,16 @@ use tracing_subscriber::EnvFilter;
 fn main() -> Result<()> {
     install_crash_hook();
     let (log_level, cli_theme, cmd) = Cli::parse().cmd_or_default();
-    let make_filter =
-        || EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(&log_level));
+    // RUST_LOG wins only when set to a NON-EMPTY value; an empty RUST_LOG
+    // parses as Ok(zero directives) = everything OFF, which would silently
+    // defeat logging on the verbose / $PIXTUOID_LOG / --headless paths that
+    // route through make_filter (the #157 silent-diagnostics class). The
+    // empty=unset normalization is pinned by `filter_directives` + its test.
+    let rust_log = std::env::var("RUST_LOG").ok();
+    let make_filter = || {
+        EnvFilter::try_new(filter_directives(rust_log.as_deref(), &log_level))
+            .unwrap_or_else(|_| EnvFilter::new(&log_level))
+    };
 
     // Log routing:
     //   TUI mode: ALWAYS log to the file (#157) — the alternate screen owns
@@ -34,11 +42,12 @@ fn main() -> Result<()> {
         // set-but-EMPTY parses as Ok(zero directives) = everything OFF —
         // treat it as unset, or it silently defeats the always-on floor
         // (the exact silent-failure class #157 exists to kill).
-        let rust_log_set = std::env::var("RUST_LOG").is_ok_and(|v| !v.is_empty());
+        let rust_log_set = rust_log.as_deref().is_some_and(|v| !v.is_empty());
         let filter = if wants_verbose || explicit_log_file {
             make_filter()
         } else if rust_log_set {
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn"))
+            EnvFilter::try_new(rust_log.as_deref().unwrap_or("warn"))
+                .unwrap_or_else(|_| EnvFilter::new("warn"))
         } else {
             EnvFilter::new(match log_level.as_str() {
                 lvl @ ("warn" | "error") => lvl,
@@ -297,6 +306,18 @@ fn crash_log_path() -> PathBuf {
     std::env::temp_dir().join("pixtuoid-crash.log")
 }
 
+/// The tracing directive string to build the `EnvFilter` from: a NON-EMPTY
+/// `RUST_LOG` wins, otherwise the requested `log_level`. An empty `RUST_LOG`
+/// is treated as unset — left as-is it parses to zero directives (everything
+/// OFF) and silently defeats logging (#157). Pure (env read by the caller) so
+/// the normalization is unit-testable without mutating process env.
+fn filter_directives<'a>(rust_log: Option<&'a str>, log_level: &'a str) -> &'a str {
+    match rust_log {
+        Some(v) if !v.is_empty() => v,
+        _ => log_level,
+    }
+}
+
 fn log_file_path() -> PathBuf {
     // Empty value = unset (the value is the PATH, not an on/off toggle; an
     // empty path would silently fail to open and log nothing).
@@ -367,6 +388,20 @@ mod tests {
     use std::path::Path;
 
     use super::*;
+
+    #[test]
+    fn empty_rust_log_falls_back_to_requested_level() {
+        // The bug: an empty-but-set RUST_LOG must be treated as unset, not as
+        // "everything off". (#157 — the make_filter path lacked this guard.)
+        assert_eq!(filter_directives(Some(""), "debug"), "debug");
+        assert_eq!(filter_directives(None, "debug"), "debug");
+        // A non-empty RUST_LOG still wins, simple level or full directive.
+        assert_eq!(filter_directives(Some("trace"), "warn"), "trace");
+        assert_eq!(
+            filter_directives(Some("info,pixtuoid=debug"), "warn"),
+            "info,pixtuoid=debug"
+        );
+    }
 
     #[test]
     fn rotate_if_large_rotates_once_past_the_cap() {
