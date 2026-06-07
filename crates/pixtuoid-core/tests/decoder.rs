@@ -885,7 +885,9 @@ fn decode_hook_payload_missing_tool_name_still_succeeds() {
 // and permission-Waiting silently die). Unix: byte-identity. Windows: the
 // hook emits backslashes while the watcher walks native paths — both fold
 // through normalize_path_key. Pinned via the REAL seams on both sides (no
-// inline re-simulation).
+// inline re-simulation). Honesty note: on Unix the fold is identity, so here
+// this pins PLUMBING (both sides reach one id); the fold itself is pinned by
+// the cfg(windows) twin below on the windows-test job.
 #[tokio::test]
 async fn hook_and_watcher_keys_coalesce_for_one_file() {
     use pixtuoid_core::source::claude_code::{cc_derive_label, cc_session_ended, decode_cc_line};

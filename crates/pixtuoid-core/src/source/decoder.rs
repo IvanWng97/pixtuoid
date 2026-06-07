@@ -27,8 +27,10 @@ pub(crate) fn cwd_basename_label(prefix: &str, cwd: &Path) -> Option<String> {
 /// backslash paths in hook payloads but mixes `\`/`/` forms of the same file
 /// internally, and NTFS is case-insensitive; without folding, the hook key
 /// and the watcher key hash to two different AgentIds and every session
-/// renders as TWO sprites. Applied at exactly two sites: the hook decoder's
-/// transcript_path and the watcher's default_id_from_path.
+/// renders as TWO sprites. Applied at exactly THREE sites: the hook decoder's
+/// transcript_path, the watcher's default_id_from_path, and the subagent
+/// detect_parent_id's rebuilt parent key (all must agree or the scope tree
+/// breaks).
 pub(crate) fn normalize_path_key(s: &str) -> String {
     normalize_key_inner(cfg!(windows), s)
 }
@@ -392,7 +394,13 @@ mod tests {
                 assert_eq!(source, crate::source::claude_code::SOURCE_NAME);
                 assert_eq!(
                     agent_id,
-                    AgentId::from_parts(crate::source::claude_code::SOURCE_NAME, tp),
+                    // Through the same fold the decoder applies — a raw
+                    // from_parts(tp) expectation breaks on the windows
+                    // runner (casefold).
+                    AgentId::from_parts(
+                        crate::source::claude_code::SOURCE_NAME,
+                        &normalize_path_key(tp)
+                    ),
                     "must coalesce with tool/JSONL/SessionEnd events on the claude-code id"
                 );
             }
