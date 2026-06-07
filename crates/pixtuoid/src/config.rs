@@ -515,8 +515,14 @@ mod tests {
             ..AppConfig::default()
         };
         let result = resolve_pack_dir(&cfg, None);
-        if let Ok(home) = std::env::var("HOME") {
-            assert_eq!(result, Some(PathBuf::from(format!("{home}/my-pack"))));
+        // Expectation derives from the SAME helper production uses
+        // (user_home(), USERPROFILE-first on Windows) — pinning raw $HOME
+        // here diverges under the Windows runner's Git Bash.
+        match crate::install::io::user_home() {
+            Some(home) => {
+                assert_eq!(result, Some(PathBuf::from(format!("{home}/my-pack"))));
+            }
+            None => assert_eq!(result, Some(PathBuf::from("~/my-pack"))),
         }
     }
 
