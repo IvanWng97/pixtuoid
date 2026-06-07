@@ -25,10 +25,46 @@ pub fn default_config_path() -> PathBuf {
     io::home_relative(".claude/settings.json")
 }
 
-/// Claude writes the bare name for portability (CC spawns hooks via PATH).
-/// Ignores the resolved path entirely (existence is checked by the orchestrator).
-pub fn hook_command(_resolved: &Path) -> Result<String> {
-    Ok("pixtuoid-hook".to_string())
+/// Unix: writes the bare name so CC can PATH-resolve it (portability over absolute
+/// paths — a stow-managed binary or cargo install may land in a custom prefix).
+///
+/// Windows: exec form requires the absolute PE path (CC's shell-form entry goes
+/// through cmd.exe/PowerShell — unportable, PATHEXT-dependent). The orchestrator
+/// already hard-errors if resolution failed (`needs_resolved_binary: true` on
+/// Windows), so `resolved` is guaranteed to be an absolute path here.
+pub fn hook_command(resolved: &Path) -> Result<String> {
+    #[cfg(not(windows))]
+    {
+        let _ = resolved;
+        Ok("pixtuoid-hook".to_string())
+    }
+    #[cfg(windows)]
+    {
+        resolved
+            .to_str()
+            .map(|s| s.to_string())
+            .ok_or_else(|| anyhow::anyhow!("pixtuoid-hook path is not valid UTF-8: {resolved:?}"))
+    }
+}
+
+/// Build the inner hook object written into the CC settings JSON.
+///
+/// Unix (exec_form=false): `{"type":"command","command":"pixtuoid-hook"}` —
+/// shell-form, CC PATH-resolves the bare name.
+///
+/// Windows (exec_form=true): `{"type":"command","command":"<abs-path>","args":[]}` —
+/// exec form, CC spawns the PE directly without a shell (no cmd.exe /c, no PATHEXT).
+/// serde_json escapes the Windows path (`C:\…`) automatically — no hand-built JSON.
+///
+/// The `_pixtuoid` sentinel and `matcher` live on the OUTER entry object, not here;
+/// detection/uninstall key on the sentinel, so the shape of this inner object is
+/// irrelevant to the matcher — no uninstall changes needed.
+pub fn hook_entry(cmd: &str, exec_form: bool) -> Value {
+    if exec_form {
+        json!({ "type": "command", "command": cmd, "args": [] })
+    } else {
+        json!({ "type": "command", "command": cmd })
+    }
 }
 
 fn parse_or_empty(content: &str) -> Result<Value> {
@@ -92,7 +128,7 @@ fn json_merge_install(doc: Value, hook_command: &str) -> Value {
                 arr.push(json!({
                     SENTINEL_KEY: true,
                     "matcher": ".*",
-                    "hooks": [ { "type": "command", "command": hook_command } ]
+                    "hooks": [ hook_entry(hook_command, cfg!(windows)) ]
                 }));
             }
         }
@@ -342,6 +378,41 @@ mod tests {
         let user = "{\n  \"theme\": \"dark\",\n  \"hooks\": {\n    \"PreToolUse\": [ { \"matcher\": \"Write\", \"hooks\": [ {\"type\":\"command\",\"command\":\"/mine\"} ] } ]\n  }\n}";
         let out = merge_uninstall(user).unwrap();
         assert!(!out.changed, "no managed entries → semantic no-op");
+    }
+
+    // --- hook_entry shape (runs on every platform) ----------------------------
+
+    /// exec_form=true → `{"type":"command","command":"<path>","args":[]}`.
+    /// Simulates Windows entry construction with an absolute path.
+    #[test]
+    fn windows_entry_is_exec_form_with_absolute_path() {
+        let entry = hook_entry(r"C:\Users\user\.cargo\bin\pixtuoid-hook.exe", true);
+        assert_eq!(entry["type"], json!("command"));
+        assert_eq!(
+            entry["command"],
+            json!(r"C:\Users\user\.cargo\bin\pixtuoid-hook.exe")
+        );
+        // exec form MUST have an `args` key (empty array) so CC spawns via
+        // exec/CreateProcess instead of a shell.
+        assert_eq!(
+            entry["args"],
+            json!([]),
+            "exec form must carry args:[] for shell-free spawn"
+        );
+    }
+
+    /// exec_form=false → `{"type":"command","command":"pixtuoid-hook"}`, NO `args` key.
+    /// Byte-stable Unix shape; the missing `args` key is intentional — CC shell-form
+    /// (PATH resolution) requires it absent.
+    #[test]
+    fn unix_entry_stays_bare_shell_form() {
+        let entry = hook_entry("pixtuoid-hook", false);
+        assert_eq!(entry["type"], json!("command"));
+        assert_eq!(entry["command"], json!("pixtuoid-hook"));
+        assert!(
+            entry.get("args").is_none(),
+            "unix shell-form must NOT carry an args key (was: {entry})"
+        );
     }
 
     // Internal-consistency guard (mirror of the Codex one): every hook event we

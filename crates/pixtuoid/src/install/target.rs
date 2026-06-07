@@ -62,8 +62,11 @@ pub const CLAUDE: Target = Target {
     hook_command: crate::install::claude::hook_command,
     merge_install: crate::install::claude::merge_install,
     merge_uninstall: crate::install::claude::merge_uninstall,
-    needs_path_warning: true,
-    needs_resolved_binary: false,
+    // Unix: bare "pixtuoid-hook" relies on PATH — soft resolution (warn only).
+    // Windows: exec form embeds the absolute path, so an unresolvable binary is
+    // fatal (same as Codex) — the hook spawned without a shell can't PATH-search.
+    needs_path_warning: !cfg!(windows),
+    needs_resolved_binary: cfg!(windows),
     post_install_note: None,
 };
 
