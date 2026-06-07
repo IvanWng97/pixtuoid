@@ -108,8 +108,9 @@ mod tests {
 
     #[test]
     fn from_transcript_path_routes_through_from_parts() {
-        // Backwards-compat: existing CC IDs are exactly
-        // `from_parts("claude-code", path)`.
+        // For an already-normalized path (lowercase, forward slashes) the shim
+        // equals raw from_parts on every platform — the fold only rewrites
+        // backslash/uppercase forms (pinned in source::decoder's unit tests).
         let a = AgentId::from_transcript_path("/x.jsonl");
         let b = AgentId::from_parts("claude-code", "/x.jsonl");
         assert_eq!(a, b);
