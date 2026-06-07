@@ -115,10 +115,14 @@ fn missing_socket_exits_zero_without_blocking() {
     // — it never reaches the 200ms WRITE_TIMEOUT (that guards the write AFTER a
     // successful connect). So this bound isn't testing the 200ms invariant; it
     // guards against a regression that added a blocking retry/backoff on connect
-    // failure. 1s is tight enough to catch a real hang while leaving generous
-    // headroom for process-spawn jitter on a loaded CI runner.
+    // failure — don't delete it. The bound measures a CHILD PROCESS's whole
+    // spawn+exit wall-clock, so it is load-sensitive: under the fully-parallel
+    // suite it flaked at 1s from exec/dyld scheduling jitter alone (#161). Two
+    // defenses: .config/nextest.toml gives this test the machine to itself
+    // (threads-required), and 3s keeps headroom for slow runners while still
+    // catching any real hang or retry loop.
     assert!(
-        start.elapsed() < Duration::from_secs(1),
+        start.elapsed() < Duration::from_secs(3),
         "shim must not block when the socket is absent"
     );
 }

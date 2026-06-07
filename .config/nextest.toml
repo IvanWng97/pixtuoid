@@ -1,2 +1,13 @@
 [profile.ci.junit]
 path = "junit.xml"
+
+# The shim latency tests assert wall-clock bounds on a CHILD PROCESS's
+# spawn+exit; under the fully-parallel suite on a loaded machine, exec/dyld
+# scheduling jitter alone can blow the bound (#161 — flaked at 1051/1052
+# during a `just bump` preflight, passed 3/3 in isolation). Give them the
+# machine to themselves; profiles inherit from default, so `ci` gets this
+# too. Covers the Unix test and its two Windows twins (shim_pipe.rs).
+# (Plain `cargo test` runs test binaries sequentially — never affected.)
+[[profile.default.overrides]]
+filter = 'test(_exits_zero_without_blocking) | test(_within_watchdog_bound)'
+threads-required = "num-cpus"
