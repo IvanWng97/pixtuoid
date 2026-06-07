@@ -11,6 +11,10 @@
 #   docs     — regenerate the repo's screenshots / demo art
 #   site     — the Astro landing page under site/ (npm, its own CI)
 
+# Git Bash is preinstalled on GHA windows runners; keeps every recipe
+# single-sourced cross-platform (CI never writes inline commands).
+set windows-shell := ["bash", "-cu"]
+
 features := "pixtuoid-core/test-renderer"
 
 # List available recipes.

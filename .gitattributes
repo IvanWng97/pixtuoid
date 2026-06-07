@@ -1,0 +1,4 @@
+# No EOL translation anywhere: sprite goldens, insta snapshots and JSONL
+# fixtures are byte-compared; autocrlf=true (Git for Windows default on GHA
+# runners) would corrupt them on checkout.
+* -text
