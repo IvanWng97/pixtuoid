@@ -726,25 +726,37 @@ fn jsonl_event_after_dedup_window_is_applied() {
         AgentEvent::ActivityStart {
             agent_id: id,
             tool_use_id: Some("t-1".into()),
-            detail: None,
+            detail: Some("hook-side".into()),
         },
         t0,
         Transport::Hook,
     );
 
+    // Same tool_use_id but 600ms later — OUTSIDE HOOK_WINS_WINDOW (500ms), so
+    // this JSONL event is NOT deduped and must be applied. Distinct `detail`
+    // is the discriminator: a vacuous `Active { .. }` check passes even if the
+    // event were wrongly suppressed (the hook already made it Active), so
+    // assert the slot reflects the JSONL event's detail specifically.
     r.apply(
         &mut scene,
         AgentEvent::ActivityStart {
             agent_id: id,
             tool_use_id: Some("t-1".into()),
-            detail: None,
+            detail: Some("jsonl-side".into()),
         },
         t0 + Duration::from_millis(600),
         Transport::Jsonl,
     );
 
     let slot = scene.agents.get(&id).unwrap();
-    assert!(matches!(slot.state, ActivityState::Active { .. }));
+    match &slot.state {
+        ActivityState::Active { detail, .. } => assert_eq!(
+            detail.as_deref(),
+            Some("jsonl-side"),
+            "JSONL event outside the dedup window must be applied"
+        ),
+        other => panic!("expected Active, got {other:?}"),
+    }
 }
 
 // --- stale-agent sweep ---------------------------------------------------
