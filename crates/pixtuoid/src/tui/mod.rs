@@ -186,12 +186,16 @@ pub fn setup_terminal() -> Result<Term> {
 }
 
 pub fn teardown_terminal(term: &mut Term) -> Result<()> {
-    disable_raw_mode()?;
+    // DisableMouseCapture must run while raw mode is still ON: on Windows it
+    // restores the input mode snapshotted at Enable time (which was raw-era),
+    // so running it after disable_raw_mode re-raws the console and leaves
+    // the user's shell echo-less. Raw mode goes off LAST.
     execute!(
         term.backend_mut(),
         DisableMouseCapture,
         LeaveAlternateScreen
     )?;
+    disable_raw_mode()?;
     term.show_cursor()?;
     Ok(())
 }

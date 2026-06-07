@@ -98,12 +98,14 @@ fn main() -> Result<()> {
 
 fn install_crash_hook() {
     std::panic::set_hook(Box::new(|info| {
-        let _ = crossterm::terminal::disable_raw_mode();
+        // Same ordering contract as tui::teardown_terminal: mouse-capture
+        // restore must precede disable_raw_mode (see the WHY there).
         let _ = crossterm::execute!(
             std::io::stderr(),
             crossterm::event::DisableMouseCapture,
             crossterm::terminal::LeaveAlternateScreen
         );
+        let _ = crossterm::terminal::disable_raw_mode();
 
         let version = env!("CARGO_PKG_VERSION");
         let crash_path = crash_log_path();
