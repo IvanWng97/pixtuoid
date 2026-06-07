@@ -16,6 +16,26 @@ pub const HOOK_WINS_WINDOW: Duration = Duration::from_millis(500);
 /// walkout-to-door animation has time to play before the slot is removed.
 pub const EXIT_GRACE_WINDOW: Duration = Duration::from_millis(4500);
 
+/// How long a drained parent's b1 completion cascade is deferred before the
+/// delegated subtree is marked exiting (#151). A parallel SECOND Task
+/// dispatch arriving via hook is suppressed as a subagent leak and tracked
+/// ONLY via its JSONL copy — if the FIRST Task's END drains `active_tasks`
+/// while that copy is still in watcher latency, an immediate cascade would
+/// evict the second Task's LIVE subtree, unrecoverably (`exiting_at` has no
+/// clearer; after [`EXIT_GRACE_WINDOW`] the GC'd child's JSONL events no-op
+/// forever). Any Task insert inside the grace cancels the pending cascade.
+///
+/// Sizing: ≥5× [`HOOK_WINS_WINDOW`] (the modeled hook↔JSONL skew) to cover
+/// the FSEvents coalescing tail — the drain's own tool_result write triggers
+/// the notify that replays the backlogged dispatch line, so one hop is all
+/// the grace must cover; > [`ACTIVE_GRACE_WINDOW`] so b1 is not the
+/// twitchiest timer in the system; < [`EXIT_GRACE_WINDOW`] so the added
+/// linger stays visually dominated by the exit walk. Deliberately NOT sized
+/// to the 60s scan_root poll backstop — covering that double-missed-notify
+/// outlier would cost a minute's linger on EVERY completed delegation
+/// (residual documented in #151).
+pub const B1_CASCADE_GRACE: Duration = Duration::from_millis(2500);
+
 /// How long the slot stays visually Active after an `ActivityEnd` before
 /// the reducer's tick flips it to Idle. Hides the per-tool-call Active
 /// flicker that rapid PreToolUse → PostToolUse chains produce in CC; any
@@ -159,6 +179,14 @@ pub struct Reducer {
     /// ActivityStart/End events for that AgentId are dropped — JSONL has
     /// correct attribution to the subagent's own AgentId.
     active_tasks: HashMap<AgentId, HashSet<String>>,
+    /// Parents whose last Task drained, awaiting the deferred b1 cascade
+    /// ([`B1_CASCADE_GRACE`]): armed on drain, fired by
+    /// `fire_pending_b1_cascades` on the tick/apply sweep path — but only if
+    /// `active_tasks` is STILL empty at fire time, which is how a Task
+    /// insert inside the grace (the suppressed parallel dispatch's JSONL
+    /// copy — #151) defuses it. Evicted at BOTH sites like the other maps
+    /// (tick's retain + `sweep_exited`'s remove).
+    pending_b1_cascades: HashMap<AgentId, SystemTime>,
     /// `tool_use_id` that was Active immediately before an agent entered
     /// `Waiting` (a CC permission `Notification` fires mid-tool). When THAT
     /// tool's `ActivityEnd` (its `PostToolUse`) arrives, the permission has been
@@ -187,12 +215,15 @@ impl Reducer {
         self.gc(now);
         self.sweep_exited(scene, now);
         self.expire_pending_idles(scene, now);
+        self.fire_pending_b1_cascades(scene, now);
         self.sweep_stale(scene, now);
         // Clean up active_tasks entries for agents that never got a
         // SessionStart (Task event arrived before JSONL created the slot).
         self.active_tasks
             .retain(|id, _| scene.agents.contains_key(id));
         self.gated_before_waiting
+            .retain(|id, _| scene.agents.contains_key(id));
+        self.pending_b1_cascades
             .retain(|id, _| scene.agents.contains_key(id));
     }
 
@@ -206,6 +237,7 @@ impl Reducer {
         self.gc(now);
         self.sweep_exited(scene, now);
         self.expire_pending_idles(scene, now);
+        self.fire_pending_b1_cascades(scene, now);
         let id = event.agent_id();
 
         // Liveness flows UP the tree: any activity by a descendant keeps its
@@ -503,7 +535,11 @@ impl Reducer {
     /// drained parent Task means the delegated subtree returned — cascade
     /// EXIT to the parent's descendants (not the parent, which keeps running)
     /// so completed subagents leave promptly instead of lingering to the
-    /// 30-min idle stale-sweep. CC infers completion from the Task drain
+    /// 30-min idle stale-sweep. The cascade is DEFERRED by
+    /// [`B1_CASCADE_GRACE`] and canceled by any Task insert (#151): a
+    /// suppressed parallel dispatch is tracked only via its JSONL copy, and
+    /// an immediate cascade would evict its live subtree while that copy is
+    /// still in watcher latency. CC infers completion from the Task drain
     /// here; a source with a clean "subagent finished" signal (e.g. Codex)
     /// would drive the same cascade through its own decoder.
     fn track_active_tasks(
@@ -514,9 +550,6 @@ impl Reducer {
     ) -> TaskTracking {
         let mut handled_by_task_tracking = false;
         let mut handled_by_task_start = false;
-        // Set when the parent's LAST Task drains on this event, so the
-        // delegated subtree can be marked exiting below (b1).
-        let mut completed_subtree_root: Option<AgentId> = None;
         match event {
             AgentEvent::ActivityStart {
                 agent_id,
@@ -540,6 +573,20 @@ impl Reducer {
                 if let Some(set) = self.active_tasks.get_mut(agent_id) {
                     if set.remove(tuid) {
                         handled_by_task_tracking = true;
+                        // #152: the gate recorded while Delegating holds THIS
+                        // Task's tuid; the drain path deliberately skips the
+                        // main arm (a Waiting parent must keep Waiting), so
+                        // the entry would go stale — and a later
+                        // out-of-window JSONL replay of this END would
+                        // false-match it via resolves_wait and flip a
+                        // still-pending permission to Idle. Clear only OUR
+                        // tuid: a parallel ordinary tool's gate must survive
+                        // the drain.
+                        if self.gated_before_waiting.get(agent_id).map(|g| &**g)
+                            == Some(tuid.as_str())
+                        {
+                            self.gated_before_waiting.remove(agent_id);
+                        }
                         if let Some(slot) = scene.agents.get_mut(agent_id) {
                             slot.last_event_at = now;
                             // Debounce: stay visually Active for
@@ -550,10 +597,11 @@ impl Reducer {
                             // a Task drain must NOT arm the idle-resolve, or the
                             // expiry would false-clear a still-pending permission.
                             if set.is_empty() {
-                                // Parent's last Task returned → the delegated
-                                // subtree is done; mark it exiting after this
-                                // match (b1).
-                                completed_subtree_root = Some(*agent_id);
+                                // Parent's last Task returned → arm the
+                                // deferred b1 cascade (#151); it fires after
+                                // B1_CASCADE_GRACE unless a Task insert
+                                // cancels it.
+                                self.pending_b1_cascades.insert(*agent_id, now);
                                 if matches!(slot.state, ActivityState::Active { .. }) {
                                     fsm::arm_pending_idle(slot, now);
                                 }
@@ -565,13 +613,36 @@ impl Reducer {
             _ => {}
         }
 
-        if let Some(parent) = completed_subtree_root {
-            scope::cascade_exit(scene, parent, now);
-        }
-
         TaskTracking {
             handled_by_task_tracking,
             handled_by_task_start,
+        }
+    }
+
+    /// Fire deferred b1 cascades whose [`B1_CASCADE_GRACE`] elapsed (#151).
+    /// Runs on the tick/apply sweep path like the other expiries. The
+    /// fire-time emptiness check IS the cancel mechanism: a Task insert any
+    /// time inside the grace (e.g. the suppressed parallel dispatch's JSONL
+    /// copy) re-populates `active_tasks`, so the due entry is discarded
+    /// instead of fired — no separate cancel-on-insert bookkeeping to drift
+    /// out of sync with the ledger.
+    fn fire_pending_b1_cascades(&mut self, scene: &mut SceneState, now: SystemTime) {
+        let due: Vec<AgentId> = self
+            .pending_b1_cascades
+            .iter()
+            .filter(|(_, armed)| {
+                now.duration_since(**armed)
+                    .is_ok_and(|d| d >= B1_CASCADE_GRACE)
+            })
+            .map(|(id, _)| *id)
+            .collect();
+        for id in due {
+            self.pending_b1_cascades.remove(&id);
+            if self.active_tasks.get(&id).is_some_and(|s| !s.is_empty()) {
+                continue;
+            }
+            tracing::debug!(agent_id = ?id, "b1 grace elapsed — cascading completed subtree");
+            scope::cascade_exit(scene, id, now);
         }
     }
 
@@ -699,6 +770,7 @@ impl Reducer {
             // doesn't run — so reclaim it here too, else a Waiting slot that was
             // swept mid-turn leaks its gated tool_use_id until the next tick.
             self.gated_before_waiting.remove(&id);
+            self.pending_b1_cascades.remove(&id);
         }
     }
 }

@@ -2,7 +2,9 @@ use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
 use pixtuoid_core::source::{Activity, AgentEvent, Transport};
-use pixtuoid_core::state::reducer::{Reducer, HOOK_WINS_WINDOW};
+use pixtuoid_core::state::reducer::{
+    Reducer, ACTIVE_GRACE_WINDOW, B1_CASCADE_GRACE, HOOK_WINS_WINDOW,
+};
 use pixtuoid_core::state::{ActivityState, SceneState};
 use pixtuoid_core::AgentId;
 
@@ -2106,7 +2108,9 @@ fn subagent_is_removed_promptly_when_its_parent_task_completes() {
     // marker, so we infer completion — when the parent's LAST Task drains, the
     // delegated subtree returned, and its subagents must leave promptly (marked
     // exiting) instead of lingering as zombies to the 30-min idle stale-sweep.
-    // The parent keeps running.
+    // The parent keeps running. "Promptly" = within B1_CASCADE_GRACE, NOT
+    // immediately (#151): the cascade defers one grace so a suppressed
+    // parallel dispatch's JSONL copy can cancel it.
     let mut scene = SceneState::uniform(8);
     let mut r = Reducer::new();
     let parent = AgentId::from_transcript_path("/p/orch.jsonl");
@@ -2173,12 +2177,266 @@ fn subagent_is_removed_promptly_when_its_parent_task_completes() {
     );
 
     assert!(
+        scene.agents.get(&child).unwrap().exiting_at.is_none(),
+        "the b1 cascade is grace-deferred (#151) — never immediate"
+    );
+    r.tick(
+        &mut scene,
+        t0 + Duration::from_secs(10) + B1_CASCADE_GRACE + Duration::from_millis(10),
+    );
+    assert!(
         scene.agents.get(&child).unwrap().exiting_at.is_some(),
-        "a completed subagent must leave promptly when its parent's Task drains, not linger to the 30-min idle sweep"
+        "a completed subagent must leave promptly (within the b1 grace) when its parent's Task drains, not linger to the 30-min idle sweep"
     );
     assert!(
         scene.agents.get(&parent).unwrap().exiting_at.is_none(),
         "the parent keeps running after a Task completes"
+    );
+}
+
+#[test]
+fn late_jsonl_dispatch_copy_inside_grace_cancels_premature_cascade() {
+    // #151A: a parallel SECOND Task dispatch arrives via hook while the
+    // first is in flight → suppressed as a leak, tracked ONLY via its JSONL
+    // copy. If the FIRST Task's END drains the set while that copy is still
+    // in watcher latency, an immediate b1 cascade evicts the second Task's
+    // LIVE subtree — unrecoverable: exiting_at has no clearer, and after the
+    // 4.5s GC the child's JSONL events no-op forever. The b1 cascade must
+    // therefore be grace-deferred, and a Task insert inside the grace must
+    // cancel it.
+    let mut scene = SceneState::uniform(8);
+    let mut r = Reducer::new();
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+    let (parent, child) = delegating_pair(&mut r, &mut scene, "orch-late", t0);
+    let t1 = t0 + Duration::from_secs(1);
+
+    // First Task dispatch — applies normally, active_tasks = {task-1}.
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityStart {
+            agent_id: parent,
+            activity: Activity::Typing,
+            tool_use_id: Some("task-1".into()),
+            detail: Some("Task".into()),
+        },
+        t1,
+        Transport::Hook,
+    );
+    // Parallel SECOND dispatch via hook — suppressed (leg 1: not recorded).
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityStart {
+            agent_id: parent,
+            activity: Activity::Typing,
+            tool_use_id: Some("task-2".into()),
+            detail: Some("Task".into()),
+        },
+        t1 + Duration::from_millis(50),
+        Transport::Hook,
+    );
+    // First Task's END drains the set BEFORE the second dispatch's JSONL
+    // copy has been delivered (watcher latency) — the #151A race.
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityEnd {
+            agent_id: parent,
+            tool_use_id: Some("task-1".into()),
+        },
+        t1 + Duration::from_millis(200),
+        Transport::Hook,
+    );
+    assert!(
+        scene.agents.get(&child).unwrap().exiting_at.is_none(),
+        "the drain must not cascade-exit the subtree immediately — the suppressed second dispatch's JSONL copy may still be in watcher latency"
+    );
+
+    // The JSONL copy lands inside the grace → tracks task-2 + cancels the
+    // pending cascade.
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityStart {
+            agent_id: parent,
+            activity: Activity::Typing,
+            tool_use_id: Some("task-2".into()),
+            detail: Some("Task".into()),
+        },
+        t1 + Duration::from_secs(1),
+        Transport::Jsonl,
+    );
+    r.tick(
+        &mut scene,
+        t1 + Duration::from_millis(200) + B1_CASCADE_GRACE + Duration::from_millis(10),
+    );
+    assert!(
+        scene.agents.get(&child).unwrap().exiting_at.is_none(),
+        "the JSONL copy's Task insert must cancel the pending cascade — the subtree is still working"
+    );
+    assert_delegating(&scene, parent, "parent stays Delegating on the second Task");
+
+    // Teeth: the second Task's drain re-arms, and with nothing arriving the
+    // cascade fires after the grace.
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityEnd {
+            agent_id: parent,
+            tool_use_id: Some("task-2".into()),
+        },
+        t1 + Duration::from_secs(5),
+        Transport::Jsonl,
+    );
+    r.tick(
+        &mut scene,
+        t1 + Duration::from_secs(5) + B1_CASCADE_GRACE + Duration::from_millis(10),
+    );
+    assert!(
+        scene.agents.get(&child).unwrap().exiting_at.is_some(),
+        "the last Task's drain must still cascade-exit the completed subtree after the grace"
+    );
+}
+
+#[test]
+fn late_jsonl_replay_of_drained_task_end_does_not_false_resolve_waiting() {
+    // #152: the gate recorded while Delegating holds the Task's own tuid.
+    // The Task self-END drains via the tracking path (which deliberately
+    // skips the main arm — the parent's Waiting must survive the drain), so
+    // the gate entry went STALE. A late JSONL replay of that same END
+    // (outside HOOK_WINS_WINDOW, so it passes dedup; set already empty, so
+    // it falls into the main arm) would match the stale gate via
+    // resolves_wait and falsely flip a still-pending permission Waiting to
+    // Idle. The drain must clear its own tuid's gate entry.
+    let mut scene = SceneState::uniform(8);
+    let mut r = Reducer::new();
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+    let (parent, _child) = delegating_pair(&mut r, &mut scene, "orch-152", t0);
+    let t1 = t0 + Duration::from_secs(1);
+
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityStart {
+            agent_id: parent,
+            activity: Activity::Typing,
+            tool_use_id: Some("task-T".into()),
+            detail: Some("Task".into()),
+        },
+        t1,
+        Transport::Hook,
+    );
+    // The parent's own permission prompt fires while Delegating → the gate
+    // records the Task's tuid.
+    r.apply(
+        &mut scene,
+        AgentEvent::Waiting {
+            agent_id: parent,
+            reason: "permission".into(),
+        },
+        t1 + Duration::from_millis(100),
+        Transport::Hook,
+    );
+    // Task self-END drains via tracking; the parent must stay Waiting
+    // (pinned elsewhere) and the gate's tuid is now history.
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityEnd {
+            agent_id: parent,
+            tool_use_id: Some("task-T".into()),
+        },
+        t1 + Duration::from_secs(1),
+        Transport::Hook,
+    );
+    // Late JSONL replay of the same END, outside the dedup window.
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityEnd {
+            agent_id: parent,
+            tool_use_id: Some("task-T".into()),
+        },
+        t1 + Duration::from_secs(1) + HOOK_WINS_WINDOW + Duration::from_millis(100),
+        Transport::Jsonl,
+    );
+    r.tick(&mut scene, t1 + Duration::from_secs(4));
+    assert!(
+        matches!(
+            scene.agents.get(&parent).unwrap().state,
+            ActivityState::Waiting { .. }
+        ),
+        "a late JSONL replay of the drained Task END must not match the stale gate and false-resolve a still-pending permission Waiting"
+    );
+}
+
+#[test]
+fn task_drain_keeps_parallel_ordinary_tool_gate() {
+    // Companion to the stale-gate clear (#152): the clear must be
+    // CONDITIONAL on the drained tuid. While delegating, the parent's own
+    // ordinary tool (applied via JSONL — suppression is hook-only) can be
+    // the gated tool when Waiting fires. The Task drain must NOT wipe that
+    // gate, or the ordinary tool's END could never resolve the Waiting.
+    let mut scene = SceneState::uniform(8);
+    let mut r = Reducer::new();
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+    let (parent, _child) = delegating_pair(&mut r, &mut scene, "orch-keep", t0);
+    let t1 = t0 + Duration::from_secs(1);
+
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityStart {
+            agent_id: parent,
+            activity: Activity::Typing,
+            tool_use_id: Some("task-T".into()),
+            detail: Some("Task".into()),
+        },
+        t1,
+        Transport::Hook,
+    );
+    // Parent's own ordinary tool via JSONL while delegating.
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityStart {
+            agent_id: parent,
+            activity: Activity::Typing,
+            tool_use_id: Some("bash-1".into()),
+            detail: Some("Bash: ls".into()),
+        },
+        t1 + Duration::from_millis(100),
+        Transport::Jsonl,
+    );
+    // Permission prompt fires mid-bash → gate records bash-1.
+    r.apply(
+        &mut scene,
+        AgentEvent::Waiting {
+            agent_id: parent,
+            reason: "permission".into(),
+        },
+        t1 + Duration::from_millis(200),
+        Transport::Hook,
+    );
+    // The Task drains — must not touch bash-1's gate.
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityEnd {
+            agent_id: parent,
+            tool_use_id: Some("task-T".into()),
+        },
+        t1 + Duration::from_secs(1),
+        Transport::Hook,
+    );
+    // bash-1's END resolves the Waiting through the kept gate.
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityEnd {
+            agent_id: parent,
+            tool_use_id: Some("bash-1".into()),
+        },
+        t1 + Duration::from_secs(2),
+        Transport::Jsonl,
+    );
+    r.tick(
+        &mut scene,
+        t1 + Duration::from_secs(2) + ACTIVE_GRACE_WINDOW + Duration::from_millis(10),
+    );
+    assert_eq!(
+        scene.agents.get(&parent).unwrap().state,
+        ActivityState::Idle,
+        "the kept gate must let the ordinary tool's END resolve the Waiting"
     );
 }
 
@@ -2433,6 +2691,18 @@ fn suppressed_parallel_task_dispatch_jsonl_copy_survives_dedup_and_tracks() {
         Transport::Hook,
     );
 
+    // Tick PAST the b1 grace before asserting (#151): under the
+    // record-before-suppress mutant the JSONL copy is dedup-dropped, the
+    // drain empties the set and arms the pending cascade — which only an
+    // expired grace makes observable. Asserting at the drain instant would
+    // pass under the mutant and lose this pin's teeth.
+    r.tick(
+        &mut scene,
+        t0 + Duration::from_secs(1)
+            + HOOK_WINS_WINDOW * 2 / 5
+            + B1_CASCADE_GRACE
+            + Duration::from_millis(10),
+    );
     assert!(
         scene.agents.get(&child).unwrap().exiting_at.is_none(),
         "first Task's drain must not cascade-exit the subtree while the suppressed-then-JSONL-tracked second Task is still in flight"
@@ -2443,17 +2713,21 @@ fn suppressed_parallel_task_dispatch_jsonl_copy_survives_dedup_and_tracks() {
         "parent must stay Delegating on the second Task",
     );
 
-    // Teeth: draining the SECOND Task must fire the cascade — proves the
-    // child is wired to the parent and the earlier no-cascade assertion
-    // wasn't vacuous.
+    // Teeth: draining the SECOND Task must fire the cascade after the grace
+    // — proves the child is wired to the parent and the earlier no-cascade
+    // assertion wasn't vacuous.
     r.apply(
         &mut scene,
         AgentEvent::ActivityEnd {
             agent_id: parent,
             tool_use_id: Some("task-2".into()),
         },
-        t0 + Duration::from_secs(2),
+        t0 + Duration::from_secs(5),
         Transport::Jsonl,
+    );
+    r.tick(
+        &mut scene,
+        t0 + Duration::from_secs(5) + B1_CASCADE_GRACE + Duration::from_millis(10),
     );
     assert!(
         scene.agents.get(&child).unwrap().exiting_at.is_some(),
@@ -2501,9 +2775,16 @@ fn jsonl_task_self_end_drains_when_hook_end_drops() {
         Transport::Jsonl,
     );
 
+    r.tick(
+        &mut scene,
+        t0 + Duration::from_secs(1)
+            + HOOK_WINS_WINDOW / 5
+            + B1_CASCADE_GRACE
+            + Duration::from_millis(10),
+    );
     assert!(
         scene.agents.get(&child).unwrap().exiting_at.is_some(),
-        "the JSONL Task self-END must drain active_tasks and fire the b1 cascade — it is the fallback for the dropped hook END"
+        "the JSONL Task self-END must drain active_tasks and fire the b1 cascade (after the #151 grace) — it is the fallback for the dropped hook END"
     );
     // The parent must not be stuck Delegating: a later ordinary hook event
     // applies normally instead of being suppressed as a subagent leak.
@@ -2515,7 +2796,7 @@ fn jsonl_task_self_end_drains_when_hook_end_drops() {
             tool_use_id: Some("b-1".into()),
             detail: Some("Bash: ls".into()),
         },
-        t0 + Duration::from_secs(2),
+        t0 + Duration::from_secs(5),
         Transport::Hook,
     );
     match &scene.agents.get(&parent).unwrap().state {
