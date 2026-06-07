@@ -1,0 +1,22 @@
+# Use faster linkers for Linux targets in CI/CD environments.
+# On ubuntu-latest GHA runners, `lld` is pre-installed.
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-C", "link-arg=-fuse-ld=lld"]
+
+[target.aarch64-unknown-linux-gnu]
+rustflags = ["-C", "link-arg=-fuse-ld=lld"]
+
+# For local macOS developers:
+# To use a faster linker locally, install one of the following and uncomment:
+#
+# 1. Install lld via Homebrew: `brew install lld`
+# [target.aarch64-apple-darwin]
+# rustflags = ["-C", "link-arg=-fuse-ld=lld"]
+# [target.x86_64-apple-darwin]
+# rustflags = ["-C", "link-arg=-fuse-ld=lld"]
+#
+# 2. Or install zld via Homebrew: `brew install zld`
+# [target.aarch64-apple-darwin]
+# rustflags = ["-C", "link-arg=-fuse-ld=/opt/homebrew/bin/zld"]
+# [target.x86_64-apple-darwin]
+# rustflags = ["-C", "link-arg=-fuse-ld=/opt/homebrew/bin/zld"]
