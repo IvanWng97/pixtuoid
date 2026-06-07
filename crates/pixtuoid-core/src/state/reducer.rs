@@ -439,13 +439,14 @@ impl Reducer {
         id: AgentId,
         now: SystemTime,
     ) -> bool {
-        let in_task = self.active_tasks.get(&id).is_some_and(|s| !s.is_empty());
+        let tasks = self.active_tasks.get(&id);
+        let in_task = tasks.is_some_and(|s| !s.is_empty());
         let suppress = match event {
             AgentEvent::ActivityStart { .. } => in_task,
             AgentEvent::ActivityEnd { tool_use_id, .. } => {
                 let is_task_self_end = tool_use_id
                     .as_ref()
-                    .is_some_and(|t| self.active_tasks.get(&id).is_some_and(|s| s.contains(t)));
+                    .is_some_and(|t| tasks.is_some_and(|s| s.contains(t)));
                 in_task && !is_task_self_end
             }
             _ => false,
@@ -463,13 +464,11 @@ impl Reducer {
             // work, so the gate resolved: restore Active(Delegating) instead
             // of leaving a stale "permission?" Waiting until the 60-min
             // stale-sweep. Then drop the spurious display update.
-            let task_tuid = self
-                .active_tasks
-                .get(&id)
-                .and_then(|s| s.iter().next())
-                .map(|t| Arc::<str>::from(t.as_str()));
             if let Some(slot) = scene.agents.get_mut(&id) {
                 if matches!(slot.state, ActivityState::Waiting { .. }) {
+                    let task_tuid = tasks
+                        .and_then(|s| s.iter().next())
+                        .map(|t| Arc::<str>::from(t.as_str()));
                     fsm::enter_delegating(slot, task_tuid, now);
                     self.gated_before_waiting.remove(&id);
                 }
