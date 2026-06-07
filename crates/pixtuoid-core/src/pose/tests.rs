@@ -1,5 +1,4 @@
 use super::*;
-use crate::source::Activity;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -38,7 +37,6 @@ fn layout() -> SceneLayout {
 
 fn typing() -> ActivityState {
     ActivityState::Active {
-        activity: Activity::Typing,
         tool_use_id: Some("t".into()),
         detail: Some("Edit".into()),
     }
@@ -631,7 +629,6 @@ fn derive_state_only_skips_entry_override() {
         label: std::sync::Arc::from("cc"),
         // Active state so we can assert a non-Walking result.
         state: ActivityState::Active {
-            activity: crate::source::Activity::Typing,
             tool_use_id: Some("t".into()),
             detail: Some("Edit".into()),
         },

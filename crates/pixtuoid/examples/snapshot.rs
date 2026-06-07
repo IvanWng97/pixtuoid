@@ -15,7 +15,7 @@ use pixtuoid::tui::embedded_pack::load_sprite_pack;
 use pixtuoid::tui::frame_cache::FrameCache;
 use pixtuoid::tui::renderer::{draw_scene, DrawCtx, TickerQueue};
 use pixtuoid_core::source::jsonl::JsonlWatcher;
-use pixtuoid_core::source::{Activity, AgentEvent};
+use pixtuoid_core::source::AgentEvent;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_core::state::ActivityState;
 use pixtuoid_core::{AgentId, AgentSlot, Reducer, SceneState, Transport};
@@ -660,7 +660,6 @@ fn sample_scene(now: SystemTime, max_desks: usize, n_agents: usize) -> SceneStat
         (
             "working",
             ActivityState::Active {
-                activity: Activity::Typing,
                 tool_use_id: Some("tu_a".into()),
                 detail: Some("Write: src/foo.rs".into()),
             },
@@ -680,7 +679,6 @@ fn sample_scene(now: SystemTime, max_desks: usize, n_agents: usize) -> SceneStat
         (
             "couch-act",
             ActivityState::Active {
-                activity: Activity::Typing,
                 tool_use_id: Some("tu_c".into()),
                 detail: Some("Read: README.md".into()),
             },
@@ -696,7 +694,6 @@ fn sample_scene(now: SystemTime, max_desks: usize, n_agents: usize) -> SceneStat
         (
             "floor-act",
             ActivityState::Active {
-                activity: Activity::Typing,
                 tool_use_id: Some("tu_d".into()),
                 detail: Some("Bash: cargo test".into()),
             },
@@ -706,7 +703,6 @@ fn sample_scene(now: SystemTime, max_desks: usize, n_agents: usize) -> SceneStat
         (
             "floor-act2",
             ActivityState::Active {
-                activity: Activity::Typing,
                 tool_use_id: Some("tu_e".into()),
                 detail: Some("Grep: TODO".into()),
             },

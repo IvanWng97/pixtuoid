@@ -5,7 +5,6 @@ use std::time::{Duration, SystemTime};
 
 use pixtuoid_core::render::test_renderer::TestRenderer;
 use pixtuoid_core::render::Renderer;
-use pixtuoid_core::source::Activity;
 use pixtuoid_core::sprite::format::load_pack_from_strings;
 use pixtuoid_core::state::ActivityState;
 use pixtuoid_core::{AgentEvent, AgentId, Reducer, SceneState, Transport};
@@ -47,7 +46,6 @@ fn scripted_timeline_drives_scene_through_states() {
     step(
         vec![AgentEvent::ActivityStart {
             agent_id: id,
-            activity: Activity::Typing,
             tool_use_id: None,
             detail: Some("Bash: ls".into()),
         }],

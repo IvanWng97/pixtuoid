@@ -16,7 +16,7 @@
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use crate::source::{Activity, ToolDetail};
+use crate::source::ToolDetail;
 use crate::state::{ActivityState, AgentSlot};
 
 /// Fold the time the slot has spent Active into `active_ms`, then it's safe to
@@ -38,14 +38,12 @@ fn accumulate_active_ms(slot: &mut AgentSlot, until: SystemTime) {
 /// Stamps `last_event_at` (this is the actor's own event).
 pub(crate) fn enter_active(
     slot: &mut AgentSlot,
-    activity: Activity,
     tool_use_id: Option<Arc<str>>,
     detail: Option<Arc<str>>,
     now: SystemTime,
 ) {
     accumulate_active_ms(slot, now);
     slot.state = ActivityState::Active {
-        activity,
         tool_use_id,
         detail,
     };
@@ -67,7 +65,6 @@ pub(crate) fn enter_delegating(
 ) {
     accumulate_active_ms(slot, now);
     slot.state = ActivityState::Active {
-        activity: Activity::Typing,
         tool_use_id,
         // Single source of truth: the tui palette string-matches this against
         // `ToolDetail::Task.display()`, so don't re-spell the literal here.
@@ -162,7 +159,6 @@ mod tests {
     fn active(started: SystemTime) -> AgentSlot {
         slot_at(
             ActivityState::Active {
-                activity: Activity::Typing,
                 tool_use_id: None,
                 detail: None,
             },
@@ -175,13 +171,7 @@ mod tests {
         let t0 = SystemTime::now();
         let mut s = active(t0);
         s.pending_idle_at = Some(t0);
-        enter_active(
-            &mut s,
-            Activity::Typing,
-            None,
-            None,
-            t0 + Duration::from_secs(1),
-        );
+        enter_active(&mut s, None, None, t0 + Duration::from_secs(1));
         assert_eq!(s.active_ms, 1000, "prior Active span folded in");
         assert_eq!(s.state_started_at, t0 + Duration::from_secs(1));
         assert_eq!(s.last_event_at, t0 + Duration::from_secs(1));

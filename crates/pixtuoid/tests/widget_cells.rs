@@ -13,7 +13,6 @@ use std::time::{Duration, SystemTime};
 use pixtuoid::tui::embedded_pack::load_sprite_pack;
 use pixtuoid::tui::renderer::draw_scene;
 use pixtuoid::tui::theme;
-use pixtuoid_core::source::Activity;
 use pixtuoid_core::state::ActivityState;
 use pixtuoid_core::{AgentId, AgentSlot, SceneState};
 use ratatui::backend::TestBackend;
@@ -34,7 +33,6 @@ fn fixture_scene(now: SystemTime) -> SceneState {
         (
             "agent-a",
             ActivityState::Active {
-                activity: Activity::Typing,
                 tool_use_id: Some("tu_a".into()),
                 detail: Some("Write".into()),
             },

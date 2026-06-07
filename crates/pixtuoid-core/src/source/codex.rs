@@ -16,7 +16,7 @@ use serde_json::{Map, Value};
 
 use crate::source::decoder::{cwd_basename_label, make_tool_detail};
 use crate::source::jsonl::JsonlWatcher;
-use crate::source::{Activity, AgentEvent, Source, TaggedSender};
+use crate::source::{AgentEvent, Source, TaggedSender};
 use crate::AgentId;
 
 pub const SOURCE_NAME: &str = "codex";
@@ -127,9 +127,8 @@ pub fn decode_codex_line(transcript_path: &str, source: &str, v: Value) -> Resul
         .and_then(|s| s.as_str())
         .unwrap_or("");
 
-    let start = |activity| AgentEvent::ActivityStart {
+    let start = || AgentEvent::ActivityStart {
         agent_id,
-        activity,
         tool_use_id: None,
         detail: None,
     };
@@ -139,7 +138,7 @@ pub fn decode_codex_line(transcript_path: &str, source: &str, v: Value) -> Resul
     };
 
     let out = match (outer, inner) {
-        ("event_msg", "task_started") => vec![start(Activity::Typing)],
+        ("event_msg", "task_started") => vec![start()],
         ("response_item", "function_call") => {
             if function_call_needs_approval(payload) {
                 vec![AgentEvent::Waiting {
@@ -157,7 +156,7 @@ pub fn decode_codex_line(transcript_path: &str, source: &str, v: Value) -> Resul
         ("response_item", "function_call_output")
         | ("event_msg", "exec_command_end")
         | ("event_msg", "patch_apply_end") => {
-            vec![start(Activity::Typing)]
+            vec![start()]
         }
         ("event_msg", "task_complete") | ("event_msg", "turn_aborted") => vec![end()],
         _ => vec![],
@@ -196,7 +195,6 @@ fn codex_tool_start(agent_id: AgentId, payload: Option<&Map<String, Value>>) -> 
         .unwrap_or("tool");
     AgentEvent::ActivityStart {
         agent_id,
-        activity: Activity::Typing,
         tool_use_id: None,
         // Codex tool calls are function_calls, never subagent dispatches (those
         // arrive as the SubagentStart hook), so no `subagent_type` to pass.

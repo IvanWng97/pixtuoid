@@ -60,12 +60,6 @@ pub enum Transport {
     Jsonl,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Activity {
-    Typing,
-    Reading,
-}
-
 /// Structured tool detail. Replaces the free-form `Option<String>` so the
 /// reducer can pattern-match (instead of string-scanning) on semantic
 /// categories like Task-delegation, which is load-bearing for subagent
@@ -132,7 +126,6 @@ pub enum AgentEvent {
     },
     ActivityStart {
         agent_id: AgentId,
-        activity: Activity,
         tool_use_id: Option<String>,
         detail: Option<ToolDetail>,
     },

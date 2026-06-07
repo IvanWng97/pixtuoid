@@ -209,7 +209,7 @@ mod tests {
     // agents on non-existent desks on small terminals until the terminal grows.
     #[test]
     fn summarize_reports_each_activity_state() {
-        use pixtuoid_core::source::{Activity, AgentEvent};
+        use pixtuoid_core::source::AgentEvent;
         use pixtuoid_core::AgentId;
 
         let mut scene = SceneState::new([8; MAX_FLOORS]);
@@ -238,7 +238,6 @@ mod tests {
             &mut scene,
             AgentEvent::ActivityStart {
                 agent_id: a,
-                activity: Activity::Typing,
                 tool_use_id: Some("t1".into()),
                 detail: Some("Edit: foo.rs".into()),
             },

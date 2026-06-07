@@ -133,7 +133,6 @@ impl TickerQueue {
 mod tests {
     use super::*;
     use hud::{build_status_spans, build_status_summary};
-    use pixtuoid_core::source::Activity;
     use pixtuoid_core::{AgentId, AgentSlot};
     use std::path::PathBuf;
     use std::sync::Arc;
@@ -235,7 +234,6 @@ mod tests {
     fn active_with(detail: &str, label: &str) -> AgentSlot {
         slot_with(
             ActivityState::Active {
-                activity: Activity::Typing,
                 tool_use_id: Some(Arc::from("t")),
                 detail: Some(Arc::from(detail)),
             },

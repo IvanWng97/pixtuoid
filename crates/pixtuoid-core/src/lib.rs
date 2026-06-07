@@ -13,9 +13,7 @@ pub mod walkable;
 
 pub use id::AgentId;
 pub use render::Renderer;
-pub use source::{
-    Activity, AgentEvent, Source, TaggedReceiver, TaggedSender, ToolDetail, Transport,
-};
+pub use source::{AgentEvent, Source, TaggedReceiver, TaggedSender, ToolDetail, Transport};
 pub use sprite::{Frame, Palette, Pixel, Rgb, RgbBuffer, Sprite};
 pub use state::reducer::Reducer;
 pub use state::{ActivityState, AgentSlot, SceneState};

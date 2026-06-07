@@ -407,7 +407,6 @@ impl Reducer {
             }
             AgentEvent::ActivityStart {
                 agent_id,
-                activity,
                 tool_use_id,
                 detail,
             } => {
@@ -421,7 +420,6 @@ impl Reducer {
                         }
                         fsm::enter_active(
                             slot,
-                            activity,
                             tool_use_id.map(|s| Arc::<str>::from(s.as_str())),
                             detail.map(|d| Arc::<str>::from(d.display())),
                             now,
@@ -916,7 +914,6 @@ mod tests {
             &mut scene,
             AgentEvent::ActivityStart {
                 agent_id: id,
-                activity: crate::source::Activity::Typing,
                 tool_use_id: None,
                 detail: Some(ToolDetail::Task),
             },
@@ -941,7 +938,6 @@ mod tests {
             &mut scene,
             AgentEvent::ActivityStart {
                 agent_id: id,
-                activity: crate::source::Activity::Typing,
                 tool_use_id: None,
                 detail: Some(ToolDetail::Generic {
                     display: "bash: ls".into(),
@@ -965,7 +961,7 @@ mod tests {
     // and leak a swept Waiting slot's gated tool_use_id.
     #[test]
     fn gated_before_waiting_evicted_on_apply_path_sweep() {
-        use crate::source::{Activity, AgentEvent, ToolDetail, Transport};
+        use crate::source::{AgentEvent, ToolDetail, Transport};
         use crate::state::SceneState;
         use crate::AgentId;
         use std::path::PathBuf;
@@ -992,7 +988,6 @@ mod tests {
             &mut scene,
             AgentEvent::ActivityStart {
                 agent_id: id,
-                activity: Activity::Typing,
                 tool_use_id: Some("toolT".into()),
                 detail: Some(ToolDetail::from("Bash")),
             },

@@ -4,7 +4,6 @@ expression: events
 ---
 - ActivityStart:
     agent_id: 5893914776247809446
-    activity: Typing
     tool_use_id: ag-1-0
     detail:
       Generic:

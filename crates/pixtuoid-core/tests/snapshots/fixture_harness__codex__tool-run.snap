@@ -4,19 +4,16 @@ expression: events
 ---
 - ActivityStart:
     agent_id: 6841381709280743575
-    activity: Typing
     tool_use_id: ~
     detail: ~
 - ActivityStart:
     agent_id: 6841381709280743575
-    activity: Typing
     tool_use_id: ~
     detail:
       Generic:
         display: exec_command
 - ActivityStart:
     agent_id: 6841381709280743575
-    activity: Typing
     tool_use_id: ~
     detail: ~
 - ActivityEnd:

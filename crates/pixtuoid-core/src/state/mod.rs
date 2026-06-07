@@ -4,7 +4,6 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use crate::id::AgentId;
-use crate::source::Activity;
 
 mod fsm;
 pub mod reducer;
@@ -20,7 +19,6 @@ pub const MAX_FLOORS: usize = 5;
 pub enum ActivityState {
     Idle,
     Active {
-        activity: Activity,
         tool_use_id: Option<Arc<str>>,
         detail: Option<Arc<str>>,
     },

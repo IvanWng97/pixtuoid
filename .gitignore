@@ -13,3 +13,4 @@ docs/superpowers/
 docs/superpowers/
 drift-report.md
 __pycache__/
+lcov.info

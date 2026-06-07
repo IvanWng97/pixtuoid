@@ -8,7 +8,6 @@ use std::time::{Duration, SystemTime};
 
 use pixtuoid::tui::embedded_pack::load_sprite_pack;
 use pixtuoid::tui::tui_renderer::TuiRenderer;
-use pixtuoid_core::source::Activity;
 use pixtuoid_core::state::ActivityState;
 use pixtuoid_core::{AgentId, AgentSlot, Renderer, SceneState};
 use ratatui::backend::TestBackend;
@@ -28,7 +27,6 @@ fn tui_renderer_render_paints_a_full_frame() {
             cwd: std::sync::Arc::from(PathBuf::from("/demo").as_path()),
             label: std::sync::Arc::from("demo"),
             state: ActivityState::Active {
-                activity: Activity::Typing,
                 tool_use_id: Some(std::sync::Arc::from("t1")),
                 detail: Some(std::sync::Arc::from("Write")),
             },

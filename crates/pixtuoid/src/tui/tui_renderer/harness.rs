@@ -95,7 +95,6 @@ fn idle(id: &str, desk: usize, started: SystemTime) -> AgentSlot {
 fn active(id: &str, desk: usize, detail: &str, started: SystemTime) -> AgentSlot {
     let mut s = idle(id, desk, started);
     s.state = ActivityState::Active {
-        activity: pixtuoid_core::source::Activity::Typing,
         tool_use_id: Some(Arc::from("t")),
         detail: Some(Arc::from(detail)),
     };

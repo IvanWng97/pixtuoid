@@ -6,7 +6,7 @@ use serde_json::Value;
 use crate::source::decoder::{cwd_basename_label, make_tool_detail};
 use crate::source::hook::HookSocketListener;
 use crate::source::jsonl::JsonlWatcher;
-use crate::source::{Activity, AgentEvent, Source, TaggedSender};
+use crate::source::{AgentEvent, Source, TaggedSender};
 use crate::AgentId;
 
 pub const SOURCE_NAME: &str = "claude-code";
@@ -130,7 +130,6 @@ pub fn decode_cc_line(transcript_path: &str, source: &str, v: Value) -> Result<V
                 let name = bobj.get("name").and_then(|s| s.as_str()).unwrap_or("?");
                 out.push(AgentEvent::ActivityStart {
                     agent_id,
-                    activity: Activity::Typing,
                     tool_use_id: id,
                     detail: Some(make_tool_detail(name, bobj.get("input"))),
                 });

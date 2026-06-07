@@ -5,7 +5,7 @@ use serde_json::Value;
 
 use crate::source::decoder::{cwd_basename_label, make_tool_detail};
 use crate::source::jsonl::JsonlWatcher;
-use crate::source::{Activity, AgentEvent, Source, TaggedSender};
+use crate::source::{AgentEvent, Source, TaggedSender};
 use crate::AgentId;
 
 pub const SOURCE_NAME: &str = "antigravity";
@@ -115,7 +115,6 @@ fn decode_ag_tool_call(
     let normalized = normalize_ag_tool_input(name, args);
     AgentEvent::ActivityStart {
         agent_id,
-        activity: Activity::Typing,
         tool_use_id: Some(format!("ag-{step_index}-{i}")),
         detail: Some(make_tool_detail(name, Some(&normalized))),
     }

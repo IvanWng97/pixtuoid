@@ -307,12 +307,10 @@ fn agent_palette_glow_tint_shifts_skin_toward_given_color() {
 
 #[test]
 fn tool_glow_tint_maps_known_tools() {
-    use pixtuoid_core::source::Activity;
     let id = pixtuoid_core::AgentId::from_transcript_path("/t.jsonl");
     let edit_slot = make_slot(
         id,
         ActivityState::Active {
-            activity: Activity::Typing,
             tool_use_id: None,
             detail: Some(Arc::from("Edit src/main.rs")),
         },
@@ -320,7 +318,6 @@ fn tool_glow_tint_maps_known_tools() {
     let bash_slot = make_slot(
         id,
         ActivityState::Active {
-            activity: Activity::Typing,
             tool_use_id: None,
             detail: Some(Arc::from("Bash: ls")),
         },
@@ -1173,14 +1170,12 @@ fn waypoint_rank_offset_x_decollision_table() {
 
 #[test]
 fn tool_glow_tint_maps_delegation_search_and_unknown_tokens() {
-    use pixtuoid_core::source::Activity;
     let id = pixtuoid_core::AgentId::from_transcript_path("/g.jsonl");
     let glow = &crate::tui::theme::NORMAL.tool_glow;
     let active = |detail: &str| {
         make_slot(
             id,
             ActivityState::Active {
-                activity: Activity::Typing,
                 tool_use_id: None,
                 detail: Some(Arc::from(detail)),
             },

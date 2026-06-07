@@ -774,7 +774,6 @@ mod hud_tests {
     // empty (leading non-alphanumeric) must be SKIPPED, not counted as a tool.
     #[test]
     fn status_segments_skips_empty_leading_token() {
-        use pixtuoid_core::source::Activity;
         use pixtuoid_core::{AgentId, AgentSlot};
         use std::path::PathBuf;
         use std::sync::Arc;
@@ -786,7 +785,6 @@ mod hud_tests {
             label: Arc::from("lead"),
             // Leading '/' ⇒ first token after split-on-non-alphanumeric is "".
             state: ActivityState::Active {
-                activity: Activity::Typing,
                 tool_use_id: Some(Arc::from("t")),
                 detail: Some(Arc::from("/usr/bin/thing")),
             },

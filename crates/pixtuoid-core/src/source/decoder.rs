@@ -6,7 +6,7 @@ use std::path::Path;
 use anyhow::{anyhow, bail, Result};
 use serde_json::Value;
 
-use crate::source::{Activity, AgentEvent, ToolDetail};
+use crate::source::{AgentEvent, ToolDetail};
 use crate::AgentId;
 
 /// `"{prefix}·{basename}"` from a working directory, or `None` when `cwd` is
@@ -141,7 +141,6 @@ pub fn decode_hook_payload(v: Value) -> Result<AgentEvent> {
                 .map(String::from);
             Ok(AgentEvent::ActivityStart {
                 agent_id,
-                activity: Activity::Typing,
                 tool_use_id,
                 detail: Some(make_tool_detail(tool_name, obj.get("tool_input"))),
             })

@@ -1,7 +1,7 @@
 use pixtuoid_core::source::antigravity;
 use pixtuoid_core::source::claude_code::decode_cc_line;
 use pixtuoid_core::source::decoder::decode_hook_payload;
-use pixtuoid_core::source::{Activity, AgentEvent};
+use pixtuoid_core::source::AgentEvent;
 use pixtuoid_core::AgentId;
 use serde_json::json;
 
@@ -51,10 +51,7 @@ fn decode_session_start_with_custom_source() {
 fn decode_pre_tool_use_write_maps_to_typing() {
     let ev = decode_hook_payload(load("pre_tool_use_write")).unwrap();
     match ev {
-        AgentEvent::ActivityStart {
-            activity, detail, ..
-        } => {
-            assert_eq!(activity, Activity::Typing);
+        AgentEvent::ActivityStart { detail, .. } => {
             assert!(detail.unwrap().display().contains("Write"));
         }
         other => panic!("got {other:?}"),
@@ -227,12 +224,10 @@ fn cc_jsonl_assistant_tool_use_is_activity_start() {
     assert_eq!(events.len(), 1);
     match &events[0] {
         AgentEvent::ActivityStart {
-            activity,
             tool_use_id,
             detail,
             ..
         } => {
-            assert_eq!(*activity, Activity::Typing);
             assert_eq!(tool_use_id.as_deref(), Some("tu_123"));
             assert!(detail.as_ref().unwrap().display().contains("Write"));
         }

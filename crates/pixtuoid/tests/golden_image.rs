@@ -15,7 +15,6 @@ use std::time::{Duration, SystemTime};
 use pixtuoid::tui::embedded_pack::load_sprite_pack;
 use pixtuoid::tui::renderer::draw_scene;
 use pixtuoid::tui::theme;
-use pixtuoid_core::source::Activity;
 use pixtuoid_core::state::ActivityState;
 use pixtuoid_core::{AgentId, AgentSlot, SceneState};
 use ratatui::backend::TestBackend;
@@ -35,7 +34,6 @@ fn populated_scene(now: SystemTime) -> SceneState {
     let labels = ["alice", "bob", "carol", "dave"];
     let states = [
         ActivityState::Active {
-            activity: Activity::Typing,
             tool_use_id: None,
             detail: Some("Edit src/main.rs".into()),
         },
@@ -44,7 +42,6 @@ fn populated_scene(now: SystemTime) -> SceneState {
             reason: "user input".into(),
         },
         ActivityState::Active {
-            activity: Activity::Typing,
             tool_use_id: None,
             detail: Some("Bash ls".into()),
         },

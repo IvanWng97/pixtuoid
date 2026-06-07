@@ -4,7 +4,6 @@ expression: events
 ---
 - ActivityStart:
     agent_id: 6841382808792371786
-    activity: Typing
     tool_use_id: ~
     detail: ~
 - Waiting:
@@ -12,7 +11,6 @@ expression: events
     reason: permission
 - ActivityStart:
     agent_id: 6841382808792371786
-    activity: Typing
     tool_use_id: ~
     detail: ~
 - ActivityEnd:

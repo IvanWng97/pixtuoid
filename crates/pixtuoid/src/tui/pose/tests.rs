@@ -1,5 +1,4 @@
 use super::*;
-use pixtuoid_core::source::Activity;
 use pixtuoid_core::state::ActivityState;
 use pixtuoid_core::walkable::WalkableMask;
 use std::path::PathBuf;
@@ -172,7 +171,6 @@ fn active_slot(state_started_at: SystemTime, created_at: SystemTime) -> AgentSlo
         cwd: Arc::from(PathBuf::from("/p").as_path()),
         label: Arc::from("cc"),
         state: ActivityState::Active {
-            activity: Activity::Typing,
             tool_use_id: Some(Arc::from("t")),
             detail: Some(Arc::from("Edit")),
         },
@@ -2105,7 +2103,6 @@ fn wander_interrupted_by_active_does_not_teleport() {
     // Flip to Active at this frame; continue stepping ~1.5 s of snap-back.
     let active = AgentSlot {
         state: ActivityState::Active {
-            activity: Activity::Typing,
             tool_use_id: Some(Arc::from("t")),
             detail: Some(Arc::from("Edit")),
         },
