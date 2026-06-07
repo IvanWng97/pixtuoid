@@ -6,7 +6,10 @@ use crate::source::{AgentEvent, Transport};
 use crate::state::{fsm, scope, ActivityState, AgentSlot, SceneState};
 use crate::AgentId;
 
-/// Window in which a Hook event suppresses a later Jsonl event with the same tool_use_id.
+/// Window in which a Hook event suppresses a later Jsonl event with the same
+/// tool_use_id. The suppression is asymmetric by event kind — a recorded hook
+/// End drops both JSONL kinds, a recorded hook Start drops only JSONL Starts
+/// (see `ToolEventKind`, #150).
 pub const HOOK_WINS_WINDOW: Duration = Duration::from_millis(500);
 
 /// How long to keep an exiting agent's slot alive after `SessionEnd` so the
@@ -144,7 +147,11 @@ struct TaskTracking {
 #[derive(Debug, Default)]
 pub struct Reducer {
     /// Track recent hook-derived events so JSONL duplicates can be dropped.
-    recent_hook_tool_uses: HashMap<(AgentId, String), SystemTime>,
+    /// The value carries the recorded event's kind: the drop matrix is
+    /// asymmetric — see [`ToolEventKind`]. A hook End overwrites its tool's
+    /// Start entry (kind-in-the-VALUE, not the key), which is what lets one
+    /// End record cover the tool's whole lagged JSONL pair.
+    recent_hook_tool_uses: HashMap<(AgentId, String), (SystemTime, ToolEventKind)>,
     /// Per-agent set of Task tool_use_ids currently in flight. CC's hook
     /// payload sets `transcript_path` to the PARENT'S transcript even when a
     /// subagent is the actor, so subagent hook events hash to the parent's
@@ -228,34 +235,37 @@ impl Reducer {
         //     copy — the only transport left to track that Task (e.g. a
         //     parallel second dispatch suppressed as a leak; pinned by
         //     `suppressed_parallel_task_dispatch_jsonl_copy_survives_dedup_and_tracks`).
-        // (2) Dedup before task tracking: a JSONL duplicate must be dropped
-        //     before it can drain `active_tasks` and fire `cascade_exit`
-        //     mid-delegation (pinned by
-        //     `jsonl_duplicate_task_end_inside_dedup_window_does_not_fire_cascade`).
-        //     Caveat: that guarded window is synthetic-narrow — a real CC
-        //     JSONL Task END only exists once the Task returned — so the pin
-        //     freezes this refactor's ordering, not the kind-blind dedup
-        //     keying (revisited in #150).
+        // (2) Dedup before task tracking: a dropped JSONL duplicate must
+        //     never reach the trackers or the main match (a same-kind End
+        //     replay would re-arm the idle debounce; a stale Start replay
+        //     would re-Activate). The drop itself is kind-ASYMMETRIC (#150):
+        //     a Start record never eats a JSONL End — when the PostToolUse
+        //     hook drops, that JSONL End is the only completion signal left,
+        //     and a Task self-End that gets eaten leaks `active_tasks` for
+        //     the rest of the session (pinned by
+        //     `jsonl_task_self_end_drains_when_hook_end_drops`).
         if from == Transport::Hook && self.suppress_subagent_leak(scene, &event, id, now) {
             return;
         }
 
-        // Dedup: drop JSONL events that match a recent Hook event by tool_use_id.
+        // Dedup: drop JSONL events that match a recent Hook event by
+        // tool_use_id — except a JSONL End against a Start-only record (the
+        // asymmetric matrix; see `ToolEventKind`).
         if from == Transport::Jsonl {
-            if let Some(tuid) = event_tool_use_id(&event) {
-                if self
-                    .recent_hook_tool_uses
-                    .contains_key(&(id, tuid.to_string()))
+            if let Some((kind, tuid)) = event_tool_use_id(&event) {
+                if let Some((_, recorded)) = self.recent_hook_tool_uses.get(&(id, tuid.to_string()))
                 {
-                    return;
+                    if !(*recorded == ToolEventKind::Start && kind == ToolEventKind::End) {
+                        return;
+                    }
                 }
             }
         }
 
         if from == Transport::Hook {
-            if let Some(tuid) = event_tool_use_id(&event) {
+            if let Some((kind, tuid)) = event_tool_use_id(&event) {
                 self.recent_hook_tool_uses
-                    .insert((id, tuid.to_string()), now);
+                    .insert((id, tuid.to_string()), (now, kind));
             }
         }
 
@@ -567,7 +577,7 @@ impl Reducer {
         // SystemTime::duration_since returns Err when `ts` is in the future
         // (clock went backwards). Drop those — stale entries either way.
         self.recent_hook_tool_uses
-            .retain(|_, ts| now.duration_since(*ts).is_ok_and(|d| d < HOOK_WINS_WINDOW));
+            .retain(|_, (ts, _)| now.duration_since(*ts).is_ok_and(|d| d < HOOK_WINS_WINDOW));
     }
 
     /// Walk through agents with `pending_idle_at` set and flip their
@@ -691,10 +701,32 @@ impl Reducer {
     }
 }
 
-fn event_tool_use_id(ev: &AgentEvent) -> Option<&str> {
+/// Kind half of a hook-wins dedup record. Lives in the map VALUE (a hook End
+/// overwrites its tool's Start entry) and drives the asymmetric drop matrix
+/// (#150): an End record suppresses BOTH JSONL kinds — the tool is over, so a
+/// lagged JSONL Start replay would falsely re-Activate and cancel the armed
+/// idle debounce — while a Start record suppresses only Starts. A JSONL End
+/// must never be eaten by its own tool's dispatch record: when the
+/// PostToolUse hook drops (the shim is best-effort), that JSONL End is the
+/// only completion signal left, and a Task self-End that gets eaten leaks
+/// `active_tasks` for the rest of the session (suppression stuck on, b1
+/// cascade disabled). Don't "simplify" this to exact-kind matching either —
+/// it would orphan the lagged-pair case the End-dominates rule covers
+/// (pinned by `late_batched_jsonl_pair_after_delivered_hook_end_is_fully_dropped`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum ToolEventKind {
+    Start,
+    End,
+}
+
+fn event_tool_use_id(ev: &AgentEvent) -> Option<(ToolEventKind, &str)> {
     match ev {
-        AgentEvent::ActivityStart { tool_use_id, .. }
-        | AgentEvent::ActivityEnd { tool_use_id, .. } => tool_use_id.as_deref(),
+        AgentEvent::ActivityStart { tool_use_id, .. } => {
+            tool_use_id.as_deref().map(|t| (ToolEventKind::Start, t))
+        }
+        AgentEvent::ActivityEnd { tool_use_id, .. } => {
+            tool_use_id.as_deref().map(|t| (ToolEventKind::End, t))
+        }
         _ => None,
     }
 }
