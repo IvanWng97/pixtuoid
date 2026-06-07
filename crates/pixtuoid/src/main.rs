@@ -46,7 +46,11 @@ fn main() -> Result<()> {
         let filter = if wants_verbose || explicit_log_file {
             make_filter()
         } else if rust_log_set {
-            EnvFilter::try_new(rust_log.as_deref().unwrap_or("warn"))
+            // Honor RUST_LOG, but floor the parse-failure fallback at warn (not
+            // log_level) so the always-on file stays quiet by default. Routed
+            // through filter_directives so an empty RUST_LOG can't silence this
+            // path either if the rust_log_set guard above ever changes.
+            EnvFilter::try_new(filter_directives(rust_log.as_deref(), "warn"))
                 .unwrap_or_else(|_| EnvFilter::new("warn"))
         } else {
             EnvFilter::new(match log_level.as_str() {
