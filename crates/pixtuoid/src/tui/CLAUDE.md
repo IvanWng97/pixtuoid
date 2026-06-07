@@ -49,7 +49,7 @@ tui/
 │                   tests.rs (#[cfg(test)] mod tests: unit + frame-by-frame continuity guards)
 ├── pathfind.rs     Router trait + AStarRouter with selective cache invalidation
 ├── floor.rs        FloorCtx (per-floor render state), FloorTransition, LightingState, build_floor_scene
-├── pet.rs          PetKind (Cat, Dog) + per-kind static data; Pet{kind,name} (a configured office pet) + Pet::defaulted; select_pet_for_floor(&[Pet])->Option<&Pet>; PetState (heart-anim interaction)
+├── pet.rs          PetKind (Cat, Dog) + per-kind static data; Pet{kind,name} (a configured office pet) + Pet::defaulted; select_pet_for_floor(u64,&[Pet])->Option<&Pet>; PetState (heart-anim interaction)
 ├── chitchat.rs     venue-keyed group/solo speech bubbles (VenueKey::Room vs ::Waypoint)
 └── pixel_painter/  pure-pixel pass — split into focused child modules:
                     mod.rs (PixelCtx struct, orchestrator), background/ (weather, sunset, skyline,
