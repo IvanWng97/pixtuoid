@@ -416,6 +416,16 @@ fn hook_activity_during_active_task_is_suppressed() {
         matches!(slot.state, ActivityState::Active { .. }),
         "parent must remain Active(Task) while task in flight"
     );
+    // The suppressed subagent End must be DROPPED, not merely state-neutral:
+    // an un-suppressed ActivityEnd arms pending_idle (the grace debounce keeps
+    // the slot Active, so the state check above can't see the leak). A None
+    // pending_idle is what proves the End never reached apply — this is the
+    // assertion that kills the `delete ActivityEnd arm in suppress_subagent_leak`
+    // mutant the state check alone leaves alive.
+    assert!(
+        slot.pending_idle_at.is_none(),
+        "a suppressed subagent End must not arm the parent's pending-idle"
+    );
 
     // Task's own PostToolUse: tool_use_id matches the in-flight Task, so the
     // hook IS allowed through. With the Active-grace debounce, the

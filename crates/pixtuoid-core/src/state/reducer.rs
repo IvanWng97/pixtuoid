@@ -834,6 +834,37 @@ mod tests {
         }
     }
 
+    // Accepted-equivalent mutation residuals (cargo-mutants, state files):
+    // three boundary flips survive deliberately — `< → <=` in `gc`'s dedup
+    // retain (reducer.rs:659), `> → >=` in `sweep_stale` (716) and
+    // `sweep_exited` (767). Each only changes behavior at the EXACT threshold
+    // instant (age == timeout, to the nanosecond), a measure-zero event in
+    // wall-clock time and immaterial to a stale-sweep (one tick either way).
+    // Pinning them needs a hand-built exact-boundary SystemTime, which is
+    // brittle for no product value — left as documented equivalents, not gaps.
+
+    /// Pin the deliberate stale-timeout DURATIONS. Every timing test correctly
+    /// derives its offsets FROM these constants (hardcoded ms make leg tests
+    /// vacuous), so mutating `10 * 60` also mutates each test's own
+    /// expectation — leaving the literal value unguarded. A direct pin is the
+    /// only thing that catches `*`→`/` collapsing a window to 0s (everything
+    /// reaped on the next tick) or a typo'd minute count. The values ARE the
+    /// product decision (see the doc comments on each const); change this test
+    /// deliberately when a window changes, never to make it pass.
+    #[test]
+    fn stale_timeout_constants_have_their_intended_durations() {
+        use super::{
+            STALE_ACTIVE_TIMEOUT, STALE_IDLE_TIMEOUT, STALE_SHORT_IDLE_TIMEOUT,
+            STALE_UNKNOWN_CWD_TIMEOUT, STALE_WAITING_TIMEOUT,
+        };
+        use std::time::Duration;
+        assert_eq!(STALE_ACTIVE_TIMEOUT, Duration::from_secs(600)); // 10 min
+        assert_eq!(STALE_IDLE_TIMEOUT, Duration::from_secs(1800)); // 30 min
+        assert_eq!(STALE_WAITING_TIMEOUT, Duration::from_secs(3600)); // 60 min
+        assert_eq!(STALE_UNKNOWN_CWD_TIMEOUT, Duration::from_secs(180)); // 3 min
+        assert_eq!(STALE_SHORT_IDLE_TIMEOUT, Duration::from_secs(300)); // 5 min
+    }
+
     // The Delegating stale carve-out is caps-driven; no REGISTERED source
     // sets `delegations_are_hook_silent` yet (the first is Reasonix, PR
     // #134), so pin the policy half with a synthetic caps value — that's
