@@ -645,9 +645,12 @@ async fn default_id_deriver_stays_path_keyed() {
     // raw TempDir path (rescan via read_dir) or the symlink-resolved path
     // (macOS FSEvents canonicalizes /var → /private/var), so accept either —
     // both are path-keyed. What must NOT match is a UUID/stem key.
-    let raw = AgentId::from_parts("claude-code", &transcript.to_string_lossy());
+    // Expectations go through from_transcript_path — the normalizing public
+    // shim, i.e. exactly the id production derives for a path (raw from_parts
+    // expectations broke on the windows runner: casefold + separators).
+    let raw = AgentId::from_transcript_path(&transcript.to_string_lossy());
     let canon = std::fs::canonicalize(&transcript)
-        .map(|p| AgentId::from_parts("claude-code", &p.to_string_lossy()))
+        .map(|p| AgentId::from_transcript_path(&p.to_string_lossy()))
         .unwrap_or(raw);
     let stem_keyed = AgentId::from_parts("claude-code", "abc");
     let mut ok = false;
@@ -1109,10 +1112,9 @@ async fn watcher_derives_parent_id_for_subagent_path() {
     // The watcher reports either the raw or canonicalized root (macOS /var →
     // /private/var), so accept either parent key.
     let parent_path = projects_root.join("proj").join("parent.jsonl");
-    let raw = AgentId::from_parts("claude-code", &parent_path.to_string_lossy());
+    let raw = AgentId::from_transcript_path(&parent_path.to_string_lossy());
     let canon_root = std::fs::canonicalize(&projects_root).unwrap_or(projects_root.clone());
-    let canon = AgentId::from_parts(
-        "claude-code",
+    let canon = AgentId::from_transcript_path(
         &canon_root
             .join("proj")
             .join("parent.jsonl")
