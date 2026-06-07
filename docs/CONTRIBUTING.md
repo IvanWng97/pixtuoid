@@ -11,8 +11,10 @@ many things that look like bugs are documented, intentional design.
 ## Build & test
 
 Requires a recent stable Rust toolchain and [`just`](https://github.com/casey/just)
-(`brew install just`). The `justfile` is the single source of truth for what each
-check runs — CI and the git hooks call the same recipes.
+(`brew install just`). On Linux you also need `lld` (`apt install lld`) —
+`.cargo/config.toml` links x86_64-linux builds with it, matching CI. The
+`justfile` is the single source of truth for what each check runs — CI and the
+git hooks call the same recipes.
 
 ```bash
 just              # list recipes
