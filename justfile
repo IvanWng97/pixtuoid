@@ -83,11 +83,11 @@ test *args:
 hack:
     cargo hack --feature-powerset --no-dev-deps check --workspace
 
-# Cross-check the workspace compiles for Windows (no linking — no MSVC needed).
+# Cross-lint the workspace for Windows (clippy subsumes check; no linking).
 [group('check')]
-[doc('Cross-check the workspace compiles for x86_64-pc-windows-msvc (no linking; ubuntu runner suffices)')]
+[doc('Cross-lint the workspace for x86_64-pc-windows-msvc via clippy (no linking; ubuntu runner suffices)')]
 check-windows:
-    cargo check --workspace --all-targets --features {{ features }} --target x86_64-pc-windows-msvc
+    cargo clippy --workspace --all-targets --features {{ features }} --target x86_64-pc-windows-msvc -- -D warnings
 
 # SemVer-check the published library against its crates.io baseline. CI-only in
 # practice: needs network to fetch the baseline crate. Scoped to pixtuoid-core

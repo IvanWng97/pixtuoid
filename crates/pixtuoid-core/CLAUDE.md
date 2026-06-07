@@ -16,7 +16,7 @@ src/
 │                       registry.rs (THE per-source fact table: SourceDescriptor{label_prefix, line_decoder,
 │                       hook{id_key,custom}, caps} — one row per CLI; doc(hidden), not public API),
 │                       decoder.rs (shared utils + decode_hook_payload, a registry-driven dispatcher),
-│                       hook/ (HookSocketListener facade — mod.rs shared generic handle_conn over AsyncRead [ONE framing/decode path for both transports], unix.rs UnixListener+umask, windows.rs named-pipe accept loop), jsonl.rs (JsonlWatcher + walk_jsonl's unified first-sight gate should_seed_at_eof),
+│                       hook/ (HookSocketListener facade — mod.rs shared generic handle_conn over AsyncRead [ONE framing/decode path for both transports], unix.rs UnixListener+umask, windows.rs named-pipe accept loop — pipe uses owner-only SDDL `D:P(A;;GA;;;OW)` [umask-0700 equivalent; the kernel copies the descriptor at each CreateNamedPipe]; a failed connect is NOT a reusable instance, so windows.rs recreates the server after each connect error), jsonl.rs (JsonlWatcher + walk_jsonl's unified first-sight gate should_seed_at_eof),
 │                       claude_code.rs / codex.rs / antigravity.rs (per-source decode + label fns + Source impls),
 │                       manager.rs (SourceManager::spawn / with_source)
 ├── state/              SceneState + Reducer (event coordinator: Transport-tagged dedup, the
