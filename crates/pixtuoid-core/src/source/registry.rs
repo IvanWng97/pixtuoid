@@ -97,7 +97,7 @@ pub struct SourceCaps {
 impl SourceCaps {
     /// The short-idle-reaper policy, derived: only safe when the sweep is the
     /// sole reaper (`!has_exit_signal`) AND the false positive self-heals
-    /// (`resurrects_on_prompt`). See `reducer::STALE_CODEX_IDLE_TIMEOUT`'s
+    /// (`resurrects_on_prompt`). See `reducer::STALE_SHORT_IDLE_TIMEOUT`'s
     /// rationale — this encodes that argument as data.
     pub fn short_idle_reap(&self) -> bool {
         !self.has_exit_signal && self.resurrects_on_prompt

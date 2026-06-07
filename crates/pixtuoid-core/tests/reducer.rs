@@ -854,13 +854,13 @@ fn stale_active_agent_uses_shorter_timeout_than_idle() {
 
 #[test]
 fn codex_idle_agent_reaps_faster_than_claude_idle() {
-    use pixtuoid_core::state::reducer::{STALE_CODEX_IDLE_TIMEOUT, STALE_IDLE_TIMEOUT};
+    use pixtuoid_core::state::reducer::{STALE_IDLE_TIMEOUT, STALE_SHORT_IDLE_TIMEOUT};
     // Codex exposes no SessionEnd of any kind (no hook, no PID, no durable rollout
     // marker), so a closed Codex session can ONLY be reaped by the stale-sweep —
     // hence a much shorter idle window than CC, which has real SessionEnd signals
     // and keeps the long lunch-break-safe timeout.
     assert!(
-        STALE_CODEX_IDLE_TIMEOUT < STALE_IDLE_TIMEOUT,
+        STALE_SHORT_IDLE_TIMEOUT < STALE_IDLE_TIMEOUT,
         "codex idle timeout must be shorter than the generic idle timeout"
     );
 
@@ -891,11 +891,11 @@ fn codex_idle_agent_reaps_faster_than_claude_idle() {
     // sprite is reaped; the CC one is spared.
     reducer.tick(
         &mut scene,
-        t0 + STALE_CODEX_IDLE_TIMEOUT + Duration::from_secs(1),
+        t0 + STALE_SHORT_IDLE_TIMEOUT + Duration::from_secs(1),
     );
     assert!(
         scene.agents.get(&cx).unwrap().exiting_at.is_some(),
-        "codex idle agent should reap after STALE_CODEX_IDLE_TIMEOUT"
+        "codex idle agent should reap after STALE_SHORT_IDLE_TIMEOUT"
     );
     assert!(
         scene.agents.get(&cc).unwrap().exiting_at.is_none(),

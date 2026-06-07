@@ -63,28 +63,27 @@ pub const STALE_IDLE_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 pub const STALE_WAITING_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 pub const STALE_UNKNOWN_CWD_TIMEOUT: Duration = Duration::from_secs(3 * 60);
 
-/// Idle timeout for **Codex** agents — much shorter than the generic
-/// [`STALE_IDLE_TIMEOUT`] because Codex exposes **no session-end signal of any
-/// kind**: it has no `SessionEnd` hook (its `HookEventName` enum has none — only
-/// `Stop`, which is *turn* end), its payloads carry no PID, and its internal
+/// Idle timeout for sources with `SourceCaps::short_idle_reap()` — much
+/// shorter than the generic [`STALE_IDLE_TIMEOUT`]. The capability is
+/// `!has_exit_signal && resurrects_on_prompt`, and the motivating case is
+/// **Codex**, which exposes **no session-end signal of any kind**: it has no
+/// `SessionEnd` hook (its `HookEventName` enum has none — only `Stop`, which
+/// is *turn* end), its payloads carry no PID, and its internal
 /// `ShutdownComplete` event is not persisted to the rollout (so there is no
 /// durable marker to tail-scan). All three were verified against upstream
-/// `openai/codex`. The stale-sweep is therefore the ONLY reaper a closed Codex
-/// session ever gets — at the 30-min generic timeout it lingers as a ghost long
-/// after the process is gone.
+/// `openai/codex`. The stale-sweep is therefore the ONLY reaper such a closed
+/// session ever gets — at the 30-min generic timeout it lingers as a ghost
+/// long after the process is gone.
 ///
-/// The shorter window is safe specifically for Codex: the only false-positive is
-/// a *live* Codex session that sits idle between turns past the threshold, and
-/// that is **self-healing** — its next `UserPromptSubmit` re-emits `SessionStart`
-/// and the sprite walks back in. CC keeps the long [`STALE_IDLE_TIMEOUT`]: it has
-/// real `SessionEnd` signals (best-effort hook + durable `/exit` marker) for the
-/// common clean exit, so a short reaper there would only evict genuinely
-/// live-but-idle sessions (lunch-break idle) with no upside.
-// Naming note: selection is now caps-generic (`SourceCaps::short_idle_reap`),
-// so "CODEX" in the name is the historical motivating case, not a gate. It is
-// a pub const in a published crate — fold a rename (STALE_SHORT_IDLE_TIMEOUT)
-// into the next breaking-version batch rather than burning one on it.
-pub const STALE_CODEX_IDLE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+/// The shorter window is safe specifically for this capability pair: the only
+/// false-positive is a *live* session that sits idle between turns past the
+/// threshold, and that is **self-healing** — its next `UserPromptSubmit`
+/// re-emits `SessionStart` and the sprite walks back in. CC keeps the long
+/// [`STALE_IDLE_TIMEOUT`]: it has real `SessionEnd` signals (best-effort
+/// hook plus the durable `/exit` marker) for the common clean exit, so a
+/// short reaper there would only evict genuinely live-but-idle sessions
+/// (lunch-break idle) with no upside.
+pub const STALE_SHORT_IDLE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
 /// The state-adaptive stale timeout for one slot. Unknown-cwd ghosts reap on the
 /// shortest window (almost always startup-seeding artifacts). Otherwise the
@@ -92,7 +91,7 @@ pub const STALE_CODEX_IDLE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 /// source has `caps.short_idle_reap()` (today: Codex — no exit signal of any
 /// kind, so the sweep is its only reaper, AND the lone false positive — a
 /// live-but-idle session past the window — self-heals on its next
-/// `UserPromptSubmit`) uses [`STALE_CODEX_IDLE_TIMEOUT`] instead of the long
+/// `UserPromptSubmit`) uses [`STALE_SHORT_IDLE_TIMEOUT`] instead of the long
 /// [`STALE_IDLE_TIMEOUT`]. CC keeps the long window — its real `SessionEnd`
 /// signals make a short reaper all cost, no benefit; Antigravity also lacks an
 /// exit signal but CANNOT resurrect on a prompt, so a short reap would vanish
@@ -131,7 +130,7 @@ fn stale_threshold_with_caps(
         }
         ActivityState::Active { .. } => STALE_ACTIVE_TIMEOUT,
         ActivityState::Idle if caps.is_some_and(|c| c.short_idle_reap()) => {
-            STALE_CODEX_IDLE_TIMEOUT
+            STALE_SHORT_IDLE_TIMEOUT
         }
         ActivityState::Idle => STALE_IDLE_TIMEOUT,
         ActivityState::Waiting { .. } => STALE_WAITING_TIMEOUT,
