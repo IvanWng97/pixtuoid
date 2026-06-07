@@ -53,7 +53,7 @@ pub fn resolve_pack_dir(config: &AppConfig, cli_pack_dir: Option<PathBuf>) -> Op
         config
             .pack_dir
             .as_ref()
-            .map(|p| PathBuf::from(expand_tilde(p, std::env::var("HOME").ok().as_deref())))
+            .map(|p| PathBuf::from(expand_tilde(p, crate::install::io::user_home().as_deref())))
     })
 }
 
@@ -73,7 +73,7 @@ pub fn config_path() -> PathBuf {
     if let Ok(base) = std::env::var("XDG_CONFIG_HOME") {
         return PathBuf::from(base).join("pixtuoid").join("config.toml");
     }
-    if let Ok(home) = std::env::var("HOME") {
+    if let Some(home) = crate::install::io::user_home() {
         return PathBuf::from(home)
             .join(".config")
             .join("pixtuoid")

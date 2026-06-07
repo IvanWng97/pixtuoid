@@ -29,7 +29,7 @@ use pixtuoid_core::sprite::format::{load_pack, load_pack_from_strings, Pack};
 fn xdg_pack_dir() -> Option<PathBuf> {
     let base = std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))?;
+        .or_else(|| crate::install::io::user_home().map(|h| PathBuf::from(h).join(".config")))?;
     let dir = base.join("pixtuoid").join("sprites");
     if dir.join("pack.toml").is_file() {
         Some(dir)

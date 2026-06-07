@@ -191,7 +191,7 @@ struct SnapshotArgs {
 fn default_projects_root() -> String {
     format!(
         "{}/.claude/projects",
-        std::env::var("HOME").unwrap_or_else(|_| ".".into())
+        pixtuoid::install::io::user_home().unwrap_or_else(|| ".".into())
     )
 }
 

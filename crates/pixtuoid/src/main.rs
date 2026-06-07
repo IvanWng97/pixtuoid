@@ -242,10 +242,13 @@ fn crash_log_path() -> PathBuf {
     if let Ok(state) = std::env::var("XDG_STATE_HOME") {
         return PathBuf::from(format!("{state}/pixtuoid/crash.log"));
     }
-    if let Ok(home) = std::env::var("HOME") {
-        return PathBuf::from(format!("{home}/.cache/pixtuoid/crash.log"));
+    if let Some(home) = pixtuoid::install::io::user_home() {
+        return PathBuf::from(home)
+            .join(".cache")
+            .join("pixtuoid")
+            .join("crash.log");
     }
-    PathBuf::from("/tmp/pixtuoid-crash.log")
+    std::env::temp_dir().join("pixtuoid-crash.log")
 }
 
 fn log_file_path() -> Result<PathBuf> {
@@ -255,8 +258,12 @@ fn log_file_path() -> Result<PathBuf> {
     if let Ok(state) = std::env::var("XDG_STATE_HOME") {
         return Ok(PathBuf::from(format!("{state}/pixtuoid/log")));
     }
-    let home = std::env::var("HOME")?;
-    Ok(PathBuf::from(format!("{home}/.cache/pixtuoid/log")))
+    let home = pixtuoid::install::io::user_home()
+        .ok_or_else(|| anyhow::anyhow!("no HOME/USERPROFILE for the log dir"))?;
+    Ok(PathBuf::from(home)
+        .join(".cache")
+        .join("pixtuoid")
+        .join("log"))
 }
 
 /// Adapter that gives `tracing-subscriber` a `Write`-able file behind a Mutex.
