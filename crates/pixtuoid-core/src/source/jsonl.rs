@@ -517,11 +517,15 @@ mod tests {
     // the algorithm inline and silently pinned the superseded string-scan).
     #[test]
     fn detect_parent_id_derives_grandparent_transcript_key() {
-        let p = Path::new("/Users/me/.claude/projects/x/abc123/subagents/agent-1.jsonl");
-        let expected =
-            AgentId::from_parts("claude-code", "/Users/me/.claude/projects/x/abc123.jsonl");
-        assert_eq!(detect_parent_id(p, "claude-code"), Some(expected));
-        assert!(is_subagent_path(p));
+        // Built via PathBuf so separators are NATIVE on every platform: the
+        // rebuilt parent key uses native separators, matching the watcher's
+        // own to_string_lossy for the parent transcript (a separator-literal
+        // expectation broke on the windows runner — backslash rebuild).
+        let parent: PathBuf = ["projects", "x", "abc123"].iter().collect();
+        let p = parent.join("subagents").join("agent-1.jsonl");
+        let expected = AgentId::from_parts("claude-code", &format!("{}.jsonl", parent.display()));
+        assert_eq!(detect_parent_id(&p, "claude-code"), Some(expected));
+        assert!(is_subagent_path(&p));
     }
 
     #[test]
