@@ -1,7 +1,7 @@
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
-use crate::source::{Source, TaggedSender};
+use crate::source::{DynSource, TaggedSender};
 
 /// A source's fatal exit, published on the health channel so the binary can
 /// surface it (#157). Plain data — no terminal deps (workspace invariant #1);
@@ -33,7 +33,7 @@ impl SourceDeath {
 /// Adding a second CLI (Codex, Cursor, Gemini, …) is a one-line addition.
 #[derive(Default)]
 pub struct SourceManager {
-    sources: Vec<Box<dyn Source>>,
+    sources: Vec<Box<dyn DynSource>>,
 }
 
 impl SourceManager {
@@ -44,7 +44,7 @@ impl SourceManager {
     /// Register one more `Source`. Builder-style — chain to add several.
     /// Named `with_source` (not `add`) to avoid clippy's
     /// `should_implement_trait` confusing it with `std::ops::Add`.
-    pub fn with_source(mut self, source: Box<dyn Source>) -> Self {
+    pub fn with_source(mut self, source: Box<dyn DynSource>) -> Self {
         self.sources.push(source);
         self
     }
@@ -92,12 +92,10 @@ impl SourceManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::source::{AgentEvent, Transport};
-    use async_trait::async_trait;
+    use crate::source::{AgentEvent, Source, Transport};
 
     struct DyingSource;
 
-    #[async_trait]
     impl Source for DyingSource {
         fn name(&self) -> &str {
             "dying-test-source"
@@ -109,7 +107,6 @@ mod tests {
 
     struct HealthySource;
 
-    #[async_trait]
     impl Source for HealthySource {
         fn name(&self) -> &str {
             "healthy-test-source"

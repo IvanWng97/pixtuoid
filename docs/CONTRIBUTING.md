@@ -118,15 +118,23 @@ historically-missed one):
    with a `SOURCE_NAME` const, a `LineDecoder` fn (one JSONL line → `Vec<AgentEvent>`),
    a label deriver, and unit tests for every event mapping. Per-source format
    knowledge lives HERE, not in shared code.
-3. **Implement the `Source` trait** (the watcher lifecycle):
+3. **Implement the `Source` trait** (the watcher lifecycle). Your impl is a
+   plain `async fn`:
 
    ```rust
-   #[async_trait]
-   pub trait Source: Send + 'static {
-       fn name(&self) -> &str;
-       async fn run(self: Box<Self>, tx: TaggedSender) -> anyhow::Result<()>;
+   impl Source for MyCliSource {
+       fn name(&self) -> &str { "my-cli" }
+       async fn run(self: Box<Self>, tx: TaggedSender) -> anyhow::Result<()> {
+           // watch + decode + tx.send(...) until the session universe ends
+       }
    }
    ```
+
+   (The trait itself declares `run` as `-> impl Future<Output = …> + Send` —
+   the explicit form is what carries the `Send` bound `tokio::spawn` needs,
+   so a non-`Send` future in your impl is a compile error, not a runtime
+   surprise. `SourceManager` boxes sources via the object-safe `DynSource`
+   twin; the blanket impl means you never name it.)
 
    **Hook-only CLI** (no watchable transcript — e.g. one that full-rewrites
    its session file per turn)? Skip the `LineDecoder`, the `Source` trait, and

@@ -1,7 +1,6 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use async_trait::async_trait;
 use tokio::sync::mpsc;
 
 use pixtuoid_core::source::{manager::SourceManager, AgentEvent, Source, TaggedSender, Transport};
@@ -12,7 +11,6 @@ struct StaticSource {
     events: Vec<(Transport, AgentEvent)>,
 }
 
-#[async_trait]
 impl Source for StaticSource {
     fn name(&self) -> &str {
         self.name
@@ -29,7 +27,6 @@ impl Source for StaticSource {
 /// log-and-isolate Err arm.
 struct FailingSource;
 
-#[async_trait]
 impl Source for FailingSource {
     fn name(&self) -> &str {
         "failing"

@@ -1,7 +1,6 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
-use async_trait::async_trait;
 use serde_json::Value;
 
 use crate::source::decoder::{cwd_basename_label, make_tool_detail};
@@ -30,7 +29,6 @@ impl AntigravitySource {
     }
 }
 
-#[async_trait]
 impl Source for AntigravitySource {
     fn name(&self) -> &str {
         SOURCE_NAME

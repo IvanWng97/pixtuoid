@@ -12,7 +12,9 @@ and the pure physics/pose math. The binary (`pixtuoid`) and renderer
 ```
 src/
 ├── source/             Source trait, hook+jsonl decoders, listeners, SourceManager
-│                       mod.rs (Source trait, AgentEvent + agent_id(), REGISTERED_SOURCES, AgentId::from_parts),
+│                       mod.rs (Source trait [native async via Send-bounded RPITIT] + its object-safety
+│                       twin DynSource [boxed-future, blanket-impl'd — SourceManager's Box<dyn> currency;
+│                       source authors never name it], AgentEvent + agent_id(), REGISTERED_SOURCES, AgentId::from_parts),
 │                       registry.rs (THE per-source fact table: SourceDescriptor{label_prefix, line_decoder,
 │                       hook{id_key,custom}, caps} — one row per CLI; doc(hidden), not public API),
 │                       decoder.rs (shared utils + decode_hook_payload, a registry-driven dispatcher),

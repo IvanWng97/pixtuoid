@@ -1,6 +1,5 @@
 use std::path::PathBuf;
 
-use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 
@@ -194,10 +193,47 @@ pub type TaggedReceiver = mpsc::Receiver<(Transport, AgentEvent)>;
 ///    than `unwrap`.
 ///
 /// [`AgentId::from_parts`]: crate::AgentId::from_parts
-#[async_trait]
 pub trait Source: Send + 'static {
     fn name(&self) -> &str;
-    async fn run(self: Box<Self>, tx: TaggedSender) -> anyhow::Result<()>;
+    fn run(
+        self: Box<Self>,
+        tx: TaggedSender,
+    ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send;
+}
+
+/// Object-safety twin of [`Source`] — the type `SourceManager` actually
+/// boxes (`Box<dyn DynSource>`). It exists ONLY because [`Source`]'s native
+/// `-> impl Future + Send` return (RPITIT, how the `+ Send` bound is
+/// expressed without `async-trait`) is not dyn-compatible, so `dyn Source`
+/// cannot exist. Don't merge the two traits or make `Source` `dyn` again —
+/// that's the un-simplifiable WHY of the split. Source authors never name
+/// this trait: the blanket impl below + unsize coercion let
+/// `with_source(Box::new(my_source))` work directly; implement [`Source`]
+/// only.
+pub trait DynSource: Send + 'static {
+    fn name(&self) -> &str;
+    fn run(
+        self: Box<Self>,
+        tx: TaggedSender,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<()>> + Send>>;
+}
+
+/// The bridge: every [`Source`] is a [`DynSource`] whose future is boxed at
+/// the erasure boundary — the same one box per `run` that `async-trait` used
+/// to add, now paid only where dynamic dispatch genuinely needs it. The
+/// inner `self.name()`/`self.run(tx)` calls resolve to `<T as Source>` (the
+/// where-clause candidate), not recursively to this impl.
+impl<T: Source> DynSource for T {
+    fn name(&self) -> &str {
+        self.name()
+    }
+
+    fn run(
+        self: Box<Self>,
+        tx: TaggedSender,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<()>> + Send>> {
+        Box::pin(self.run(tx))
+    }
 }
 
 pub mod antigravity;
