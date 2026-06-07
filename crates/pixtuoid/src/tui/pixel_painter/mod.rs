@@ -598,266 +598,12 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
         });
     }
 
-    // Meeting-room area rug — sized to span both sofas + the coffee
-    // table with a small margin. Anchored at the TOP so y-sort paints
-    // it before the furniture sitting on top of it.
-    // Meeting-room area rugs + sofas + tables. For dual-meeting layouts,
-    // sofas come in pairs (2 per room), tables 1 per room.
-    let sofas_per_room = if ctx.layout.meeting_tables.len() > 1 {
-        2
-    } else {
-        ctx.layout.meeting_sofas.len()
-    };
-    for (room_idx, &table) in ctx.layout.meeting_tables.iter().enumerate() {
-        let sofa_start = room_idx * sofas_per_room;
-        let top_sofa = ctx.layout.meeting_sofas.get(sofa_start);
-        let bot_sofa = ctx.layout.meeting_sofas.get(sofa_start + 1);
-        if let (Some(&ts), Some(&bs)) = (top_sofa, bot_sofa) {
-            let rug_w = 18u16;
-            let rug_h =
-                bs.y.saturating_sub(ts.y)
-                    .saturating_add(8)
-                    .min(ctx.layout.buf_h.saturating_sub(table.y).saturating_add(8));
-            drawables.push(Drawable {
-                anchor_y: table.y.saturating_sub(rug_h / 2),
-                kind: DrawableKind::AreaRug {
-                    pos: table,
-                    width: rug_w,
-                    height: rug_h,
-                },
-            });
-        }
-    }
-    for (i, &sofa) in ctx.layout.meeting_sofas.iter().enumerate() {
-        let mirrored = i % 2 != 0;
-        // A south-of-table sofa faces away (Facing::North → `back_couch`
-        // sprite), so the sitter sits BEHIND the sofa back and must be
-        // occluded by it — same as the lounge couch. The sitter's y-sort
-        // key is `sofa.y + 2`, so the back sofa needs +3 to win that tie;
-        // the front (north) sofa stays +2 so its sitter paints on top
-        // (insertion order breaks the tie in the sitter's favor). Mirrors
-        // core's facing rule (`compute.rs`): back iff sofa.y >= table.y.
-        let room_id = i / 2;
-        let table_y = ctx
-            .layout
-            .meeting_tables
-            .get(room_id)
-            .map_or(sofa.y, |t| t.y);
-        let faces_away = sofa.y >= table_y;
-        drawables.push(Drawable {
-            anchor_y: sofa.y + if faces_away { 3 } else { 2 },
-            kind: DrawableKind::MeetingSofa {
-                pos: sofa,
-                mirrored,
-            },
-        });
-    }
-    for &table in &ctx.layout.meeting_tables {
-        drawables.push(Drawable {
-            // z-key = sprite south row, derived from the table (== +2 for the
-            // 11×5 coffee-table sprite) so it can't drift from a visual edit.
-            anchor_y: z_sort_row(
-                Anchor::Center,
-                table,
-                crate::tui::layout::furniture_def(crate::tui::layout::Furniture::MeetingTable)
-                    .visual
-                    .h,
-            ),
-            kind: DrawableKind::MeetingTable { pos: table },
-        });
-    }
+    enqueue_meeting_furniture(ctx.layout, &mut drawables);
 
-    // Pantry bistro table — z-key = sprite south row, derived from the table's
-    // own visual height (was a hand-rolled `table.y + 1`).
-    if let Some(table) = ctx.layout.pantry_table {
-        drawables.push(Drawable {
-            anchor_y: z_sort_row(
-                Anchor::Center,
-                table,
-                crate::tui::layout::furniture_def(crate::tui::layout::Furniture::PantryTable)
-                    .visual
-                    .h,
-            ),
-            kind: DrawableKind::PantryTable { pos: table },
-        });
-    }
-    // Pantry stools (centered) — z-key derived from the stool visual height.
-    for chair in &ctx.layout.pantry_chairs {
-        drawables.push(Drawable {
-            anchor_y: z_sort_row(
-                Anchor::Center,
-                *chair,
-                crate::tui::layout::furniture_def(crate::tui::layout::Furniture::PantryChair)
-                    .visual
-                    .h,
-            ),
-            kind: DrawableKind::PantryChair { pos: *chair },
-        });
-    }
+    enqueue_lounge_pantry_appliances(ctx.layout, &mut drawables);
 
-    // Lounge couch furniture — emitted ONCE, centred on the sofa via
-    // `couch_sprite_center`. The couch is now 3 separate seat waypoints, so
-    // per-seat emission would triple-paint the sofa/rug/table. Decor → pushed
-    // before the character loop so the y-sort tie-break keeps the couch behind
-    // its sitters. The rug anchors BEHIND (north of) the couch so it spans the
-    // floor on the south side; y-sort anchor at the top so the couch sits on it.
-    if let Some(center) = ctx.layout.couch_sprite_center {
-        drawables.push(Drawable {
-            anchor_y: center.y.saturating_sub(2),
-            kind: DrawableKind::AreaRug {
-                pos: Point {
-                    x: center.x,
-                    y: center.y + 3,
-                },
-                width: 22,
-                height: 7,
-            },
-        });
-        drawables.push(Drawable {
-            anchor_y: z_sort_row(
-                Anchor::Center,
-                center,
-                crate::tui::layout::furniture_def(crate::tui::layout::Furniture::Couch)
-                    .visual
-                    .h,
-            ),
-            kind: DrawableKind::WaypointCouch { pos: center },
-        });
-        if let Some(table) = ctx.layout.lounge_side_table {
-            drawables.push(Drawable {
-                anchor_y: z_sort_row(
-                    Anchor::Center,
-                    table,
-                    crate::tui::layout::furniture_def(
-                        crate::tui::layout::Furniture::LoungeSideTable,
-                    )
-                    .visual
-                    .h,
-                ),
-                kind: DrawableKind::LoungeSideTable { pos: table },
-            });
-        }
-    }
-
-    // Waypoint furniture — pantry counter, vending, printer — centered on the
-    // waypoint position. PhoneBooth/StandingDesk render via the `pod_decor`
-    // drawables below (they ARE the decor). The lounge couch is emitted once
-    // above (it spans 3 seat waypoints).
-    for wp in &ctx.layout.waypoints {
-        use crate::tui::layout::{furniture_def, WaypointKind};
-        // Depth (y-sort) baseline = the sprite's south row, via
-        // `center_pin_south_offset` (these appliances are center-pinned at
-        // `pos`). Read the VISUAL height — the drawn sprite's south, NOT the
-        // (now shallow) footprint: if an appliance ever grows an overhang the
-        // z-key must still track what's painted. Equal for today's flat boxes.
-        let visual_h = furniture_def(wp.kind.furniture()).visual.h;
-        match wp.kind {
-            // Rendered once via `couch_sprite_center` above (3 seats, 1 sprite).
-            WaypointKind::Couch => {}
-            WaypointKind::Pantry => {
-                let Size { w: cw, h: ch } = ctx.layout.pantry_counter_size; // runtime-sized
-                drawables.push(Drawable {
-                    anchor_y: z_sort_row(Anchor::Center, wp.pos, ch),
-                    kind: DrawableKind::WaypointPantry {
-                        pos: wp.pos,
-                        use_large: cw >= 32,
-                    },
-                });
-            }
-            // Rendered via the `pod_decor` drawables below (they ARE the decor).
-            WaypointKind::PhoneBooth | WaypointKind::StandingDesk => {}
-            WaypointKind::VendingMachine => {
-                drawables.push(Drawable {
-                    anchor_y: z_sort_row(Anchor::Center, wp.pos, visual_h),
-                    kind: DrawableKind::VendingMachine { pos: wp.pos },
-                });
-            }
-            WaypointKind::Printer => {
-                drawables.push(Drawable {
-                    anchor_y: z_sort_row(Anchor::Center, wp.pos, visual_h),
-                    kind: DrawableKind::Printer { pos: wp.pos },
-                });
-            }
-            // Rendered via the `meeting_sofas` / `meeting_tables` drawables
-            // elsewhere (the slots ride on the sofa/table) — nothing per-slot.
-            WaypointKind::MeetingSofa | WaypointKind::MeetingStand => {}
-        }
-    }
-
-    // Pod-aisle decor (plant / whiteboard / TV / phone booth /
-    // standing desk). All centered at `pos`; anchor at the bottom of
-    // the sprite footprint so y-sort places them correctly against
-    // walkers and characters in the aisles.
-    for &PodDecorItem { kind, pos } in &ctx.layout.pod_decor {
-        // Visual sprite height from the one furniture table (the mask reads the
-        // separate `footprint` off the same row — so a tall plant's canopy can
-        // sort correctly without blocking the aisle).
-        let Size { h, .. } = crate::tui::layout::furniture_def(kind.furniture()).visual;
-        drawables.push(Drawable {
-            anchor_y: z_sort_row(Anchor::Center, pos, h),
-            kind: DrawableKind::PodDecorItem { kind, pos },
-        });
-    }
-
-    // Plants — center-pinned; z-key = sprite south row. Height is the single
-    // source `furniture_def(kind.furniture()).visual.1` (was a parallel fudged
-    // match that drifted: it over-shot Flower/Succulent by one and faked Tall
-    // via `9` instead of `(10-1)/2`). The drop-shadow uses the same offset off
-    // the same height, so the two can't diverge.
-    for &PlantItem { kind, pos } in &ctx.layout.plants {
-        drawables.push(Drawable {
-            anchor_y: z_sort_row(
-                Anchor::Center,
-                pos,
-                crate::tui::layout::furniture_def(kind.furniture()).visual.h,
-            ),
-            kind: DrawableKind::Plant { kind, pos },
-        });
-    }
-
-    // Floor lamp (4×10 centered). z-key = sprite south row = lamp.y + h/2 - 1
-    // (10/2 - 1 = 4), the visual base — was +5 (one row past, floated the
-    // shadow + let the lamp paint over a character standing just in front).
-    if let Some(lamp) = ctx.layout.floor_lamp {
-        drawables.push(Drawable {
-            anchor_y: lamp.y + floor_lamp_south_offset(),
-            kind: DrawableKind::FloorLamp { pos: lamp },
-        });
-    }
-
-    // Meeting-room coat rack — y-sorted at its base row (cy+7) so a character
-    // in front occludes it. Same geometry the background pass used to draw.
-    if let Some(mr) = ctx.layout.meeting_room {
-        if mr.width > 20 {
-            let cx = mr.x + mr.width - 5;
-            let cy = mr.y + mr.height / 2 - 4;
-            drawables.push(Drawable {
-                anchor_y: cy + 7,
-                kind: DrawableKind::CoatRack {
-                    pos: Point { x: cx, y: cy },
-                },
-            });
-        }
-    }
-
-    // Elevator door (16×14, top-left anchored). Frame is computed
-    // stateless from agents in their entry/exit window: door opens
-    // (0→1→2) over the first DOOR_TRANSITION_MS of the agent's
-    // transit, holds open (2) in the middle, then closes (2→1→0)
-    // over the final DOOR_TRANSITION_MS. With multiple agents in
-    // flight we take the MAX frame so the door is at least as open
-    // as the most-in-progress agent needs.
-    if let Some(door_pos) = ctx.layout.door {
-        let frame_idx = compute_door_frame_idx(&agents, ctx.now, ctx.door_anim_max_ms);
-        drawables.push(Drawable {
-            anchor_y: door_pos.y + ELEVATOR_H,
-            kind: DrawableKind::Door {
-                pos: door_pos,
-                frame_idx,
-            },
-        });
-    }
-
+    enqueue_pod_decor_and_plants(ctx.layout, &mut drawables);
+    enqueue_floor_fixtures(ctx, &agents, &mut drawables);
     enqueue_wall_decor(ctx.layout, &mut drawables);
 
     let idle_desk_indices: Vec<usize> = agents
@@ -1303,6 +1049,238 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
         pet_pos: resolved_pet_pos,
         chitchat_bubbles,
         new_coffee_carriers,
+    }
+}
+
+/// Meeting-room rugs + sofas + tables. For dual-meeting layouts sofas come in
+/// pairs (2 per room), tables 1 per room. A south-of-table sofa faces away
+/// (`Facing::North` → `back_couch`), so it y-sorts +3 to occlude its sitter
+/// (whose key is `sofa.y + 2`); the north sofa stays +2 so insertion order
+/// breaks the tie in its sitter's favor.
+fn enqueue_meeting_furniture<'a>(layout: &'a Layout, drawables: &mut Vec<Drawable<'a>>) {
+    let sofas_per_room = if layout.meeting_tables.len() > 1 {
+        2
+    } else {
+        layout.meeting_sofas.len()
+    };
+    for (room_idx, &table) in layout.meeting_tables.iter().enumerate() {
+        let sofa_start = room_idx * sofas_per_room;
+        let top_sofa = layout.meeting_sofas.get(sofa_start);
+        let bot_sofa = layout.meeting_sofas.get(sofa_start + 1);
+        if let (Some(&ts), Some(&bs)) = (top_sofa, bot_sofa) {
+            let rug_w = 18u16;
+            let rug_h =
+                bs.y.saturating_sub(ts.y)
+                    .saturating_add(8)
+                    .min(layout.buf_h.saturating_sub(table.y).saturating_add(8));
+            drawables.push(Drawable {
+                anchor_y: table.y.saturating_sub(rug_h / 2),
+                kind: DrawableKind::AreaRug {
+                    pos: table,
+                    width: rug_w,
+                    height: rug_h,
+                },
+            });
+        }
+    }
+    for (i, &sofa) in layout.meeting_sofas.iter().enumerate() {
+        let mirrored = i % 2 != 0;
+        let room_id = i / 2;
+        let table_y = layout.meeting_tables.get(room_id).map_or(sofa.y, |t| t.y);
+        let faces_away = sofa.y >= table_y;
+        drawables.push(Drawable {
+            anchor_y: sofa.y + if faces_away { 3 } else { 2 },
+            kind: DrawableKind::MeetingSofa {
+                pos: sofa,
+                mirrored,
+            },
+        });
+    }
+    for &table in &layout.meeting_tables {
+        drawables.push(Drawable {
+            // z-key = sprite south row, derived from the table (== +2 for the
+            // 11×5 coffee-table sprite) so it can't drift from a visual edit.
+            anchor_y: z_sort_row(
+                Anchor::Center,
+                table,
+                crate::tui::layout::furniture_def(crate::tui::layout::Furniture::MeetingTable)
+                    .visual
+                    .h,
+            ),
+            kind: DrawableKind::MeetingTable { pos: table },
+        });
+    }
+}
+
+/// Pantry bistro table + stools, the lounge couch (emitted ONCE via
+/// `couch_sprite_center` — 3 seat waypoints share one sprite), and the
+/// center-pinned waypoint appliances (pantry counter, vending, printer).
+/// PhoneBooth/StandingDesk render via pod-decor; meeting slots ride the
+/// sofa/table — so those waypoint kinds emit nothing here.
+fn enqueue_lounge_pantry_appliances<'a>(layout: &'a Layout, drawables: &mut Vec<Drawable<'a>>) {
+    if let Some(table) = layout.pantry_table {
+        drawables.push(Drawable {
+            anchor_y: z_sort_row(
+                Anchor::Center,
+                table,
+                crate::tui::layout::furniture_def(crate::tui::layout::Furniture::PantryTable)
+                    .visual
+                    .h,
+            ),
+            kind: DrawableKind::PantryTable { pos: table },
+        });
+    }
+    for chair in &layout.pantry_chairs {
+        drawables.push(Drawable {
+            anchor_y: z_sort_row(
+                Anchor::Center,
+                *chair,
+                crate::tui::layout::furniture_def(crate::tui::layout::Furniture::PantryChair)
+                    .visual
+                    .h,
+            ),
+            kind: DrawableKind::PantryChair { pos: *chair },
+        });
+    }
+
+    // Lounge couch — pushed before the character loop so the y-sort tie-break
+    // keeps the couch behind its sitters. The rug anchors north of the couch
+    // (y-sort at its top) so the couch sits on it.
+    if let Some(center) = layout.couch_sprite_center {
+        drawables.push(Drawable {
+            anchor_y: center.y.saturating_sub(2),
+            kind: DrawableKind::AreaRug {
+                pos: Point {
+                    x: center.x,
+                    y: center.y + 3,
+                },
+                width: 22,
+                height: 7,
+            },
+        });
+        drawables.push(Drawable {
+            anchor_y: z_sort_row(
+                Anchor::Center,
+                center,
+                crate::tui::layout::furniture_def(crate::tui::layout::Furniture::Couch)
+                    .visual
+                    .h,
+            ),
+            kind: DrawableKind::WaypointCouch { pos: center },
+        });
+        if let Some(table) = layout.lounge_side_table {
+            drawables.push(Drawable {
+                anchor_y: z_sort_row(
+                    Anchor::Center,
+                    table,
+                    crate::tui::layout::furniture_def(
+                        crate::tui::layout::Furniture::LoungeSideTable,
+                    )
+                    .visual
+                    .h,
+                ),
+                kind: DrawableKind::LoungeSideTable { pos: table },
+            });
+        }
+    }
+
+    for wp in &layout.waypoints {
+        use crate::tui::layout::{furniture_def, WaypointKind};
+        // y-sort baseline = the sprite's south row (these appliances are
+        // center-pinned at `pos`). Read the VISUAL height, not the (shallow)
+        // footprint, so an overhang would still sort by what's painted.
+        let visual_h = furniture_def(wp.kind.furniture()).visual.h;
+        match wp.kind {
+            WaypointKind::Couch => {}
+            WaypointKind::Pantry => {
+                let Size { w: cw, h: ch } = layout.pantry_counter_size; // runtime-sized
+                drawables.push(Drawable {
+                    anchor_y: z_sort_row(Anchor::Center, wp.pos, ch),
+                    kind: DrawableKind::WaypointPantry {
+                        pos: wp.pos,
+                        use_large: cw >= 32,
+                    },
+                });
+            }
+            WaypointKind::PhoneBooth | WaypointKind::StandingDesk => {}
+            WaypointKind::VendingMachine => {
+                drawables.push(Drawable {
+                    anchor_y: z_sort_row(Anchor::Center, wp.pos, visual_h),
+                    kind: DrawableKind::VendingMachine { pos: wp.pos },
+                });
+            }
+            WaypointKind::Printer => {
+                drawables.push(Drawable {
+                    anchor_y: z_sort_row(Anchor::Center, wp.pos, visual_h),
+                    kind: DrawableKind::Printer { pos: wp.pos },
+                });
+            }
+            WaypointKind::MeetingSofa | WaypointKind::MeetingStand => {}
+        }
+    }
+}
+
+/// Pod-aisle decor (plant / whiteboard / TV / phone booth / standing desk)
+/// and free-standing plants — all center-pinned, y-sorted at the sprite's
+/// south row from the one furniture table (the mask reads the separate,
+/// shallower `footprint` off the same row, so a tall canopy sorts without
+/// blocking the aisle).
+fn enqueue_pod_decor_and_plants<'a>(layout: &'a Layout, drawables: &mut Vec<Drawable<'a>>) {
+    for &PodDecorItem { kind, pos } in &layout.pod_decor {
+        let Size { h, .. } = crate::tui::layout::furniture_def(kind.furniture()).visual;
+        drawables.push(Drawable {
+            anchor_y: z_sort_row(Anchor::Center, pos, h),
+            kind: DrawableKind::PodDecorItem { kind, pos },
+        });
+    }
+    for &PlantItem { kind, pos } in &layout.plants {
+        drawables.push(Drawable {
+            anchor_y: z_sort_row(
+                Anchor::Center,
+                pos,
+                crate::tui::layout::furniture_def(kind.furniture()).visual.h,
+            ),
+            kind: DrawableKind::Plant { kind, pos },
+        });
+    }
+}
+
+/// Free-standing fixtures: the floor lamp, the meeting-room coat rack, and the
+/// elevator door (whose open/close frame is computed stateless from the agents
+/// currently in their entry/exit window — the MAX frame so the door is at least
+/// as open as the most-in-progress agent needs).
+fn enqueue_floor_fixtures<'a>(
+    ctx: &PixelCtx<'_>,
+    agents: &[AgentSlot],
+    drawables: &mut Vec<Drawable<'a>>,
+) {
+    if let Some(lamp) = ctx.layout.floor_lamp {
+        drawables.push(Drawable {
+            anchor_y: lamp.y + floor_lamp_south_offset(),
+            kind: DrawableKind::FloorLamp { pos: lamp },
+        });
+    }
+    if let Some(mr) = ctx.layout.meeting_room {
+        if mr.width > 20 {
+            let cx = mr.x + mr.width - 5;
+            let cy = mr.y + mr.height / 2 - 4;
+            drawables.push(Drawable {
+                anchor_y: cy + 7,
+                kind: DrawableKind::CoatRack {
+                    pos: Point { x: cx, y: cy },
+                },
+            });
+        }
+    }
+    if let Some(door_pos) = ctx.layout.door {
+        let frame_idx = compute_door_frame_idx(agents, ctx.now, ctx.door_anim_max_ms);
+        drawables.push(Drawable {
+            anchor_y: door_pos.y + ELEVATOR_H,
+            kind: DrawableKind::Door {
+                pos: door_pos,
+                frame_idx,
+            },
+        });
     }
 }
 
