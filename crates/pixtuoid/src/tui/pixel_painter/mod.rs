@@ -549,54 +549,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
     // the painter's algorithm applied to a top-down 2D scene.
     let mut drawables: Vec<Drawable<'_>> = Vec::new();
 
-    // Desk cubicles (each carries its divider + cabinet + bin + screen
-    // glow). Sprite is 16×8, so the actual bottom edge is desk.y + 8 —
-    // just past the seated character's feet (desk.y + 4), which keeps
-    // the seated worker visually behind the desk like it always was.
-    // (`seated_agents` was built once above, before the ambient pass.)
-    for (i, &desk) in ctx.layout.home_desks.iter().enumerate() {
-        let Size {
-            w: desk_fp_w,
-            h: desk_fp_h,
-        } = crate::tui::layout::desk_furniture_def()
-            .footprint
-            .unwrap_or(Size {
-                w: DESK_W,
-                h: DESK_H,
-            });
-        let is_last_col = desk.x + desk_fp_w + DESK_W
-            >= ctx.layout.cubicle_band.x + ctx.layout.cubicle_band.width;
-        let occupant = agents
-            .iter()
-            .find(|a| a.desk_index == i && a.exiting_at.is_none());
-        let screen_glow = occupant
-            .filter(|_| seated_agents.get(&i).copied().unwrap_or(false))
-            .and_then(|a| palette::tool_glow_tint(a, &ctx.theme.tool_glow));
-        let has_coffee = occupant.is_some_and(|a| ctx.coffee_holders.contains(&a.agent_id));
-        let coffee_steam = has_coffee
-            && occupant.is_some_and(|a| {
-                ctx.coffee_fetched_at
-                    .get(&a.agent_id)
-                    .and_then(|t| ctx.now.duration_since(*t).ok())
-                    .is_some_and(|d| d.as_secs() < COFFEE_STEAM_WINDOW_SECS)
-            });
-        drawables.push(Drawable {
-            // z-sort baseline = the footprint's south/front edge + the desk
-            // sprite's front-lip overhang, mirroring every other drawable's
-            // "footprint front + sprite overhang" form (here: 6 + 2 = 8). The
-            // desk's front legs/lip extend DESK_FRONT_OVERHANG px past its
-            // blocked footprint (top-down 3/4 bevel), so it sorts there.
-            anchor_y: desk.y + desk_fp_h + DESK_FRONT_OVERHANG,
-            kind: DrawableKind::DeskCubicle {
-                desk,
-                is_last_col,
-                has_cabinet: i % 2 == 0,
-                screen_glow,
-                has_coffee,
-                coffee_steam,
-            },
-        });
-    }
+    enqueue_desk_cubicles(ctx, &agents, &seated_agents, &mut drawables);
 
     enqueue_meeting_furniture(ctx.layout, &mut drawables);
 
@@ -606,71 +559,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
     enqueue_floor_fixtures(ctx, &agents, &mut drawables);
     enqueue_wall_decor(ctx.layout, &mut drawables);
 
-    let idle_desk_indices: Vec<usize> = agents
-        .iter()
-        .filter(|a| {
-            matches!(a.state, ActivityState::Idle)
-                && a.desk_index < ctx.layout.home_desks.len()
-                && a.exiting_at.is_none()
-        })
-        .map(|a| a.desk_index)
-        .collect();
-    let all_idle = agents
-        .iter()
-        .all(|a| matches!(a.state, ActivityState::Idle));
-
-    if let Some(kind) = ctx.floor_pet.map(|p| p.kind) {
-        let active_pet = ctx.active_pet.filter(|p| {
-            p.is_active(ctx.now) && p.kind == kind && p.floor_idx == ctx.floor.floor_idx
-        });
-        let pet_data = if let Some(pet) = active_pet {
-            Some((
-                pet.pet_pos,
-                false,
-                kind.sit_anim(),
-                0usize,
-                Some(pet.elapsed_ms(ctx.now)),
-            ))
-        } else {
-            pet_position(
-                kind,
-                ctx.layout,
-                ctx.pack,
-                ctx.now,
-                &idle_desk_indices,
-                all_idle,
-                ctx.floor.floor_seed,
-            )
-            .map(|(pos, flip, anim, frame)| (pos, flip, anim, frame, None))
-        };
-        if let Some((pos, flip, anim_name, frame_idx, pet_elapsed)) = pet_data {
-            resolved_pet_pos = Some(PetFrame {
-                pos,
-                anim: anim_name,
-                kind,
-            });
-            // South row derived from the CHOSEN anim's sprite height, not a
-            // literal: the h=4 sleep sprite sorts at pos.y+1, the h=6 walk/sit
-            // sprites at pos.y+2. A hardcoded +2 rendered a sleeping pet OVER a
-            // character whose feet land on pos.y+1 (one row too far south).
-            let pet_h = ctx
-                .pack
-                .animation(anim_name)
-                .and_then(|a| a.frames.first())
-                .map_or(6, |f| f.height);
-            drawables.push(Drawable {
-                anchor_y: z_sort_row(Anchor::Center, pos, pet_h),
-                kind: DrawableKind::Pet {
-                    kind,
-                    pos,
-                    flip,
-                    anim_name,
-                    frame_idx,
-                    pet_elapsed_ms: pet_elapsed,
-                },
-            });
-        }
-    }
+    resolved_pet_pos = enqueue_pet(ctx, &agents, &mut drawables);
 
     // Characters. Anchor = feet (anchor.y + sprite_height). Decollision
     // rank for crowded waypoints — stable across frames thanks to
@@ -1050,6 +939,131 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
         chitchat_bubbles,
         new_coffee_carriers,
     }
+}
+
+/// Desk cubicles — each carries its divider + cabinet + bin + screen glow.
+/// The desk sprite (16×8) sorts at `desk.y + footprint_h + DESK_FRONT_OVERHANG`
+/// (front-lip overhang past the blocked footprint), just past the seated
+/// worker's feet (`desk.y + 4`) so the sitter stays visually behind the desk.
+/// `seated_agents` (built once before the ambient pass) gates the screen glow
+/// so it only paints for a worker actually at the desk. The DeskCubicle
+/// drawable is Copy, so this borrows nothing from the agent set.
+fn enqueue_desk_cubicles<'a>(
+    ctx: &PixelCtx<'_>,
+    agents: &[AgentSlot],
+    seated_agents: &HashMap<usize, bool>,
+    drawables: &mut Vec<Drawable<'a>>,
+) {
+    for (i, &desk) in ctx.layout.home_desks.iter().enumerate() {
+        let Size {
+            w: desk_fp_w,
+            h: desk_fp_h,
+        } = crate::tui::layout::desk_furniture_def()
+            .footprint
+            .unwrap_or(Size {
+                w: DESK_W,
+                h: DESK_H,
+            });
+        let is_last_col = desk.x + desk_fp_w + DESK_W
+            >= ctx.layout.cubicle_band.x + ctx.layout.cubicle_band.width;
+        let occupant = agents
+            .iter()
+            .find(|a| a.desk_index == i && a.exiting_at.is_none());
+        let screen_glow = occupant
+            .filter(|_| seated_agents.get(&i).copied().unwrap_or(false))
+            .and_then(|a| palette::tool_glow_tint(a, &ctx.theme.tool_glow));
+        let has_coffee = occupant.is_some_and(|a| ctx.coffee_holders.contains(&a.agent_id));
+        let coffee_steam = has_coffee
+            && occupant.is_some_and(|a| {
+                ctx.coffee_fetched_at
+                    .get(&a.agent_id)
+                    .and_then(|t| ctx.now.duration_since(*t).ok())
+                    .is_some_and(|d| d.as_secs() < COFFEE_STEAM_WINDOW_SECS)
+            });
+        drawables.push(Drawable {
+            anchor_y: desk.y + desk_fp_h + DESK_FRONT_OVERHANG,
+            kind: DrawableKind::DeskCubicle {
+                desk,
+                is_last_col,
+                has_cabinet: i % 2 == 0,
+                screen_glow,
+                has_coffee,
+                coffee_steam,
+            },
+        });
+    }
+}
+
+/// The office pet (one per floor). An `active_pet` (mid heart-animation) is
+/// pinned in place; otherwise `pet_position` roams it around the idle desks.
+/// Returns the resolved `PetFrame` (for hit-testing) and enqueues the Pet
+/// drawable, y-sorted at the chosen anim's south row (the h=4 sleep sprite
+/// sorts one row shallower than the h=6 walk/sit sprites — a hardcoded +2 once
+/// painted a sleeping pet over a character whose feet land at pos.y+1).
+fn enqueue_pet<'a>(
+    ctx: &PixelCtx<'_>,
+    agents: &[AgentSlot],
+    drawables: &mut Vec<Drawable<'a>>,
+) -> Option<PetFrame> {
+    let kind = ctx.floor_pet.map(|p| p.kind)?;
+    let idle_desk_indices: Vec<usize> = agents
+        .iter()
+        .filter(|a| {
+            matches!(a.state, ActivityState::Idle)
+                && a.desk_index < ctx.layout.home_desks.len()
+                && a.exiting_at.is_none()
+        })
+        .map(|a| a.desk_index)
+        .collect();
+    let all_idle = agents
+        .iter()
+        .all(|a| matches!(a.state, ActivityState::Idle));
+
+    let active_pet = ctx
+        .active_pet
+        .filter(|p| p.is_active(ctx.now) && p.kind == kind && p.floor_idx == ctx.floor.floor_idx);
+    let pet_data = if let Some(pet) = active_pet {
+        Some((
+            pet.pet_pos,
+            false,
+            kind.sit_anim(),
+            0usize,
+            Some(pet.elapsed_ms(ctx.now)),
+        ))
+    } else {
+        pet_position(
+            kind,
+            ctx.layout,
+            ctx.pack,
+            ctx.now,
+            &idle_desk_indices,
+            all_idle,
+            ctx.floor.floor_seed,
+        )
+        .map(|(pos, flip, anim, frame)| (pos, flip, anim, frame, None))
+    };
+    let (pos, flip, anim_name, frame_idx, pet_elapsed) = pet_data?;
+    let pet_h = ctx
+        .pack
+        .animation(anim_name)
+        .and_then(|a| a.frames.first())
+        .map_or(6, |f| f.height);
+    drawables.push(Drawable {
+        anchor_y: z_sort_row(Anchor::Center, pos, pet_h),
+        kind: DrawableKind::Pet {
+            kind,
+            pos,
+            flip,
+            anim_name,
+            frame_idx,
+            pet_elapsed_ms: pet_elapsed,
+        },
+    });
+    Some(PetFrame {
+        pos,
+        anim: anim_name,
+        kind,
+    })
 }
 
 /// Meeting-room rugs + sofas + tables. For dual-meeting layouts sofas come in
