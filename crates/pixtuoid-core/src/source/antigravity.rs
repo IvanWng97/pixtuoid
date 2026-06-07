@@ -20,9 +20,12 @@ pub struct AntigravitySource {
 
 impl AntigravitySource {
     pub fn default_paths() -> Self {
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+        let home = crate::platform::user_home();
         Self {
-            brain_root: PathBuf::from(format!("{home}/.gemini/antigravity-cli/brain")),
+            brain_root: PathBuf::from(home)
+                .join(".gemini")
+                .join("antigravity-cli")
+                .join("brain"),
         }
     }
 }

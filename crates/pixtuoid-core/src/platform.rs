@@ -10,8 +10,6 @@
 //! treated as unset).
 
 /// USERPROFILE-first on Windows, HOME on Unix. See module doc for WHY.
-// consumed by source::*::default_paths in the next commit
-#[allow(dead_code)]
 pub(crate) fn user_home() -> String {
     resolve_home(
         cfg!(windows),

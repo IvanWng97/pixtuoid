@@ -222,9 +222,9 @@ pub struct CodexSource {
 
 impl CodexSource {
     pub fn default_paths() -> Self {
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+        let home = crate::platform::user_home();
         Self {
-            sessions_root: PathBuf::from(format!("{home}/.codex/sessions")),
+            sessions_root: PathBuf::from(home).join(".codex").join("sessions"),
         }
     }
 }

@@ -31,10 +31,10 @@ impl ClaudeCodeSource {
     }
 
     pub fn default_paths() -> Self {
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+        let home = crate::platform::user_home();
         Self {
             socket_path: Self::default_socket_path(),
-            projects_root: PathBuf::from(format!("{home}/.claude/projects")),
+            projects_root: PathBuf::from(home).join(".claude").join("projects"),
         }
     }
 }
