@@ -670,33 +670,6 @@ fn cc_session_ended_exit_then_session_start_is_not_ended() {
 }
 
 #[test]
-fn detect_parent_id_for_subagent_path() {
-    use pixtuoid_core::AgentId;
-    use std::path::Path;
-
-    // Simulate what jsonl.rs::detect_parent_id does
-    let path = Path::new("/Users/me/.claude/projects/x/abc123/subagents/agent-1.jsonl");
-    let path_str = path.to_string_lossy();
-    let idx = path_str.find("/subagents/");
-    assert!(idx.is_some(), "should find /subagents/ in path");
-    let parent_dir = &path_str[..idx.unwrap()];
-    let parent_jsonl = format!("{parent_dir}.jsonl");
-    let parent_id = AgentId::from_parts("claude-code", &parent_jsonl);
-    let expected = AgentId::from_parts("claude-code", "/Users/me/.claude/projects/x/abc123.jsonl");
-    assert_eq!(parent_id, expected);
-}
-
-#[test]
-fn detect_parent_id_returns_none_for_regular_path() {
-    let path = std::path::Path::new("/Users/me/.claude/projects/x/ses-abc.jsonl");
-    let path_str = path.to_string_lossy();
-    assert!(
-        path_str.find("/subagents/").is_none(),
-        "regular path should not match subagent pattern"
-    );
-}
-
-#[test]
 fn decode_hook_payload_missing_session_id_returns_err() {
     let payload = serde_json::json!({
         "hook_event_name": "SessionStart",

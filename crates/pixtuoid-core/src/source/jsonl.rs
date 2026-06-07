@@ -512,6 +512,53 @@ mod tests {
         );
     }
 
+    // These call the REAL detect_parent_id/is_subagent_path (they're private —
+    // an integration test can't reach them; an old decoder.rs test re-simulated
+    // the algorithm inline and silently pinned the superseded string-scan).
+    #[test]
+    fn detect_parent_id_derives_grandparent_transcript_key() {
+        let p = Path::new("/Users/me/.claude/projects/x/abc123/subagents/agent-1.jsonl");
+        let expected =
+            AgentId::from_parts("claude-code", "/Users/me/.claude/projects/x/abc123.jsonl");
+        assert_eq!(detect_parent_id(p, "claude-code"), Some(expected));
+        assert!(is_subagent_path(p));
+    }
+
+    #[test]
+    fn detect_parent_id_none_for_regular_and_lookalike_paths() {
+        assert_eq!(
+            detect_parent_id(
+                Path::new("/Users/me/.claude/projects/x/ses.jsonl"),
+                "claude-code"
+            ),
+            None
+        );
+        // Component matching: a dir merely CONTAINING the word never matches.
+        let lookalike = Path::new("/Users/me/.claude/projects/subagents-paper/ses.jsonl");
+        assert_eq!(detect_parent_id(lookalike, "claude-code"), None);
+        assert!(!is_subagent_path(lookalike));
+        // A bare relative path starting AT `subagents` has no parent to derive.
+        assert_eq!(
+            detect_parent_id(Path::new("subagents/agent-1.jsonl"), "claude-code"),
+            None
+        );
+    }
+
+    // Only RUNS on the windows-test CI job (backslashes are ordinary filename
+    // bytes on Unix, so this shape is only meaningful there) — pins the
+    // components rewrite's whole reason to exist.
+    #[cfg(windows)]
+    #[test]
+    fn detect_parent_id_handles_backslash_paths() {
+        let p = Path::new(r"C:\Users\me\.claude\projects\x\abc123\subagents\agent-1.jsonl");
+        let expected = AgentId::from_parts(
+            "claude-code",
+            r"C:\Users\me\.claude\projects\x\abc123.jsonl",
+        );
+        assert_eq!(detect_parent_id(p, "claude-code"), Some(expected));
+        assert!(is_subagent_path(p));
+    }
+
     #[test]
     fn extract_cwd_reads_top_level_and_nested_payload() {
         // CC/AG shape: top-level cwd.
