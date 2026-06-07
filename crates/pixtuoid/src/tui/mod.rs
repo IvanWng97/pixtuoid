@@ -183,6 +183,16 @@ fn dispatch_key(code: KeyCode, mods: KeyModifiers, ctx: KeyCtx) -> KeyAction {
 pub type Term = Terminal<CrosstermBackend<Stdout>>;
 
 pub fn setup_terminal() -> Result<Term> {
+    // On the WinAPI fallback (no VT), crossterm maps Color::Rgb to console
+    // attribute 0 — the office renders black-on-black invisible. Gate, don't
+    // degrade (Windows Terminal is the supported terminal).
+    #[cfg(windows)]
+    if !crossterm::ansi_support::supports_ansi() {
+        anyhow::bail!(
+            "pixtuoid needs a VT-capable terminal — use Windows Terminal \
+             (or Windows 10 1703+ with VT processing enabled)"
+        );
+    }
     enable_raw_mode()?;
     let mut out = stdout();
     // EnableMouseCapture turns on the terminal's mouse-event reporting.
