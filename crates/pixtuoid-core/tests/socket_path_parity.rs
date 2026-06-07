@@ -29,6 +29,7 @@ fn both() -> (PathBuf, PathBuf) {
 // All three branches in ONE test: env vars are process-global, and this is the
 // only test in this integration binary, so there is nothing to race (same
 // pattern as the per-crate branch tests).
+#[cfg(unix)]
 #[test]
 fn shim_and_daemon_resolve_identical_socket_paths_in_all_three_branches() {
     let saved_socket = std::env::var_os("PIXTUOID_SOCKET");
@@ -59,5 +60,37 @@ fn shim_and_daemon_resolve_identical_socket_paths_in_all_three_branches() {
     match saved_xdg {
         Some(v) => std::env::set_var("XDG_RUNTIME_DIR", v),
         None => std::env::remove_var("XDG_RUNTIME_DIR"),
+    }
+}
+
+// Only EXERCISED on a Windows runner (PR 3's CI job) — until then the
+// ubuntu cross-check job keeps it compiling. The windows CI job is part
+// of invariant #3 from that point on.
+#[cfg(windows)]
+#[test]
+fn shim_and_daemon_resolve_identical_pipe_names_in_both_branches() {
+    let saved_socket = std::env::var_os("PIXTUOID_SOCKET");
+    let saved_user = std::env::var_os("USERNAME");
+
+    // Branch 1: PIXTUOID_SOCKET (a pipe name on Windows) wins on both sides.
+    std::env::set_var("PIXTUOID_SOCKET", r"\\.\pipe\parity-explicit");
+    let (shim, daemon) = both();
+    assert_eq!(shim, daemon, "PIXTUOID_SOCKET branch diverged");
+    assert_eq!(shim, PathBuf::from(r"\\.\pipe\parity-explicit"));
+
+    // Branch 2: USERNAME-keyed default pipe name on both sides.
+    std::env::remove_var("PIXTUOID_SOCKET");
+    std::env::set_var("USERNAME", "parity");
+    let (shim, daemon) = both();
+    assert_eq!(shim, daemon, "USERNAME default branch diverged");
+    assert_eq!(shim, PathBuf::from(r"\\.\pipe\pixtuoid-parity"));
+
+    match saved_socket {
+        Some(v) => std::env::set_var("PIXTUOID_SOCKET", v),
+        None => std::env::remove_var("PIXTUOID_SOCKET"),
+    }
+    match saved_user {
+        Some(v) => std::env::set_var("USERNAME", v),
+        None => std::env::remove_var("USERNAME"),
     }
 }

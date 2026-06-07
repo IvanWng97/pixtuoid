@@ -22,12 +22,23 @@ impl ClaudeCodeSource {
         if let Ok(p) = std::env::var("PIXTUOID_SOCKET") {
             return PathBuf::from(p);
         }
-        if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR") {
-            return PathBuf::from(format!("{dir}/pixtuoid.sock"));
+        #[cfg(unix)]
+        {
+            if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR") {
+                return PathBuf::from(format!("{dir}/pixtuoid.sock"));
+            }
+            // SAFETY: getuid() is a trivial syscall with no pointer args; cannot fail.
+            let uid = unsafe { libc::getuid() };
+            PathBuf::from(format!("/tmp/pixtuoid-{uid}.sock"))
         }
-        // SAFETY: getuid() is a trivial syscall with no pointer args; cannot fail.
-        let uid = unsafe { libc::getuid() };
-        PathBuf::from(format!("/tmp/pixtuoid-{uid}.sock"))
+        #[cfg(windows)]
+        {
+            // Mirrors pixtuoid-hook/src/paths.rs — parity-pinned by
+            // tests/socket_path_parity.rs, not shared (no dep edge between
+            // shim and core).
+            let user = std::env::var("USERNAME").unwrap_or_else(|_| "default".into());
+            PathBuf::from(format!(r"\\.\pipe\pixtuoid-{user}"))
+        }
     }
 
     pub fn default_paths() -> Self {
@@ -317,6 +328,10 @@ mod tests {
     // The socket-path and default-paths env precedence. All three socket
     // branches are checked in ONE test because the env vars are process-global —
     // splitting across tests would race under the default multi-thread runner.
+    // Unix-specific branches (XDG_RUNTIME_DIR + getuid fallback) can only be
+    // asserted on Unix; the platform-neutral default_paths check is split into
+    // a separate test so it compiles + runs on all platforms.
+    #[cfg(unix)]
     #[test]
     fn default_socket_path_env_precedence_and_default_paths() {
         let saved_socket = std::env::var_os("PIXTUOID_SOCKET");
@@ -346,14 +361,6 @@ mod tests {
             PathBuf::from(format!("/tmp/pixtuoid-{uid}.sock"))
         );
 
-        // default_paths derives projects_root from HOME.
-        let paths = ClaudeCodeSource::default_paths();
-        assert!(
-            paths.projects_root.ends_with(".claude/projects"),
-            "projects_root must end with .claude/projects, got {:?}",
-            paths.projects_root
-        );
-
         // Restore prior env so a later env-reading test in this binary isn't
         // poisoned by the cleared state.
         match saved_socket {
@@ -364,5 +371,16 @@ mod tests {
             Some(v) => std::env::set_var("XDG_RUNTIME_DIR", v),
             None => std::env::remove_var("XDG_RUNTIME_DIR"),
         }
+    }
+
+    // Platform-neutral: default_paths derives projects_root from HOME on every OS.
+    #[test]
+    fn default_paths_projects_root() {
+        let paths = ClaudeCodeSource::default_paths();
+        assert!(
+            paths.projects_root.ends_with(".claude/projects"),
+            "projects_root must end with .claude/projects, got {:?}",
+            paths.projects_root
+        );
     }
 }
