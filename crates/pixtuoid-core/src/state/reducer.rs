@@ -236,13 +236,15 @@ impl Reducer {
         //     parallel second dispatch suppressed as a leak; pinned by
         //     `suppressed_parallel_task_dispatch_jsonl_copy_survives_dedup_and_tracks`).
         // (2) Dedup before task tracking: a dropped JSONL duplicate must
-        //     never reach the trackers or the main match (a same-kind End
-        //     replay would re-arm the idle debounce; a stale Start replay
-        //     would re-Activate). The drop itself is kind-ASYMMETRIC (#150):
-        //     a Start record never eats a JSONL End — when the PostToolUse
-        //     hook drops, that JSONL End is the only completion signal left,
-        //     and a Task self-End that gets eaten leaks `active_tasks` for
-        //     the rest of the session (pinned by
+        //     never reach the trackers or the main match — a duplicate Task
+        //     dispatch reaching the tracker would re-fire enter_delegating
+        //     and clobber a Waiting parent (pinned by
+        //     `jsonl_task_start_duplicate_does_not_clobber_waiting_parent`).
+        //     The drop itself is kind-ASYMMETRIC (#150): a Start record
+        //     never eats a JSONL End — when the PostToolUse hook drops, that
+        //     JSONL End is the only completion signal left, and a Task
+        //     self-End that gets eaten leaks `active_tasks` for the rest of
+        //     the session (pinned by
         //     `jsonl_task_self_end_drains_when_hook_end_drops`).
         if from == Transport::Hook && self.suppress_subagent_leak(scene, &event, id, now) {
             return;

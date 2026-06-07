@@ -2224,8 +2224,13 @@ fn late_batched_jsonl_pair_after_delivered_hook_end_is_fully_dropped() {
     assert!(armed_at.is_some(), "hook END arms the idle debounce");
     let count = scene.agents.get(&id).unwrap().tool_call_count;
 
-    // The lagged JSONL pair lands together, inside the END record's window
-    // (the START's own record may have expired — irrelevant: END dominates).
+    // The lagged JSONL pair lands together, PAST the START record's expiry
+    // (t0 + W) but inside the END record's window (until t0 + W/10 + W).
+    // This is the leg that distinguishes kind-in-the-VALUE from a
+    // kind-in-the-key map: a per-kind keyed entry for the START is gc'd by
+    // now, so only the END record's both-kinds dominance can drop the stale
+    // START. Mutation-validated against BOTH rejected shapes (symmetric
+    // value matching AND a (id, tuid, kind) key).
     r.apply(
         &mut scene,
         AgentEvent::ActivityStart {
@@ -2234,7 +2239,7 @@ fn late_batched_jsonl_pair_after_delivered_hook_end_is_fully_dropped() {
             tool_use_id: Some("t-fast".into()),
             detail: Some("Read: /x".into()),
         },
-        t0 + HOOK_WINS_WINDOW / 10 + HOOK_WINS_WINDOW / 5,
+        t0 + HOOK_WINS_WINDOW + HOOK_WINS_WINDOW / 20,
         Transport::Jsonl,
     );
     r.apply(
@@ -2243,7 +2248,7 @@ fn late_batched_jsonl_pair_after_delivered_hook_end_is_fully_dropped() {
             agent_id: id,
             tool_use_id: Some("t-fast".into()),
         },
-        t0 + HOOK_WINS_WINDOW / 10 + HOOK_WINS_WINDOW / 5,
+        t0 + HOOK_WINS_WINDOW + HOOK_WINS_WINDOW / 20,
         Transport::Jsonl,
     );
 
@@ -2255,6 +2260,66 @@ fn late_batched_jsonl_pair_after_delivered_hook_end_is_fully_dropped() {
     assert_eq!(
         slot.tool_call_count, count,
         "stale JSONL replay must not double-count the tool"
+    );
+}
+
+#[test]
+fn jsonl_task_start_duplicate_does_not_clobber_waiting_parent() {
+    // Ordering pin for `apply()`'s pre-passes (#90), leg (2): a JSONL
+    // duplicate the dedup drops must be dropped BEFORE it can reach
+    // track_active_tasks. The parent's own permission prompt fires right
+    // after a Task dispatch → Waiting. The dispatch's JSONL copy (parent's
+    // own transcript, same tool_use_id, inside HOOK_WINS_WINDOW of the hook
+    // record) is a duplicate — if it reached the tracker first, the Task arm
+    // would re-fire enter_delegating and clobber the Waiting back to
+    // Active(Delegating), vanishing a genuinely pending prompt.
+    let mut scene = SceneState::uniform(8);
+    let mut r = Reducer::new();
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+    let (parent, _child) = delegating_pair(&mut r, &mut scene, "orch-wait", t0);
+
+    // Hook Task dispatch — records the Start in the dedup map + active_tasks.
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityStart {
+            agent_id: parent,
+            activity: Activity::Typing,
+            tool_use_id: Some("task-T".into()),
+            detail: Some("Task".into()),
+        },
+        t0 + Duration::from_secs(1),
+        Transport::Hook,
+    );
+    // The parent's own permission Notification fires mid-dispatch.
+    r.apply(
+        &mut scene,
+        AgentEvent::Waiting {
+            agent_id: parent,
+            reason: "permission".into(),
+        },
+        t0 + Duration::from_secs(1) + HOOK_WINS_WINDOW / 50,
+        Transport::Hook,
+    );
+    // The dispatch's JSONL copy, inside the window — must be dedup-dropped
+    // before it can re-enter Delegating over the live Waiting.
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityStart {
+            agent_id: parent,
+            activity: Activity::Typing,
+            tool_use_id: Some("task-T".into()),
+            detail: Some("Task".into()),
+        },
+        t0 + Duration::from_secs(1) + HOOK_WINS_WINDOW / 5,
+        Transport::Jsonl,
+    );
+
+    assert!(
+        matches!(
+            scene.agents.get(&parent).unwrap().state,
+            ActivityState::Waiting { .. }
+        ),
+        "a dedup-dropped JSONL duplicate of the dispatch must not clobber the parent's pending permission Waiting"
     );
 }
 
