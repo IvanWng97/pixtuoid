@@ -64,10 +64,10 @@ pub fn release_notes(version: &str) -> Option<&'static [&'static str]> {
         // the window stabilizes. Re-curate from `git log v0.5.0..HEAD` before
         // tagging.
         "0.6.0" => Some(&[
-            "Windows support: named-pipe hook transport + full CI suite",
-            "Diagnostics you can see: source-death footer warning, config warnings on stderr, always-on log file",
-            "Session-lifecycle hardening: dedup, completion-cascade, and permission-gate race fixes",
-            "Marketing site: live demos, architecture docs, weather gallery",
+            "Windows support — native hook transport, installer, and release builds",
+            "Diagnostics you can see — source-death footer warnings, config warnings on stderr, an always-on log file",
+            "Fewer ghost & duplicate sprites — hook/JSONL dedup + subagent completion-cascade + permission-gate race fixes",
+            "New project site — live demos, architecture & contributing docs, weather gallery",
         ]),
         "0.4.0" => Some(&[
             "Renamed from ascii-agents to pixtuoid",
