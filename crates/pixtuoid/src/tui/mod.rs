@@ -107,6 +107,13 @@ fn is_quit_chord(code: KeyCode, mods: KeyModifiers) -> bool {
     )
 }
 
+/// Windows delivers Press AND Release events per keystroke; only Press may
+/// dispatch (Release/Repeat double-fire keys there — `p` would pause then
+/// instantly unpause). Unix only ever delivers Press, so this is a no-op there.
+fn should_dispatch_key(kind: KeyEventKind) -> bool {
+    kind == KeyEventKind::Press
+}
+
 /// Pure key-dispatch: resolve a key press to a `KeyAction` given the current
 /// modal + floor state. Modal precedence (highest first): help overlay,
 /// version popup, theme picker, then the normal scene.
@@ -297,8 +304,7 @@ pub async fn run_tui(
                     // Windows delivers Press AND Release events per
                     // keystroke; without this guard every key double-fires
                     // there (e.g. `p` pauses then instantly unpauses).
-                    // Non-Press key events fall through to the catch-all arm.
-                    Event::Key(k) if k.kind == KeyEventKind::Press => {
+                    Event::Key(k) if should_dispatch_key(k.kind) => {
                         let ctx = KeyCtx {
                             help_open: renderer.help_open(),
                             version_popup,
@@ -625,5 +631,13 @@ mod dispatch_tests {
             dispatch_key(KeyCode::Down, NONE, hi),
             KeyAction::ThemePreview(5)
         );
+    }
+
+    #[test]
+    fn only_press_events_dispatch() {
+        use crossterm::event::KeyEventKind;
+        assert!(super::should_dispatch_key(KeyEventKind::Press));
+        assert!(!super::should_dispatch_key(KeyEventKind::Release));
+        assert!(!super::should_dispatch_key(KeyEventKind::Repeat));
     }
 }

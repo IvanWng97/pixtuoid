@@ -232,6 +232,12 @@ mod tests {
             .unwrap_or_else(|e| e.into_inner());
         let saved_xdg = std::env::var_os("XDG_CONFIG_HOME");
         let saved_home = std::env::var_os("HOME");
+        let saved_userprofile = std::env::var_os("USERPROFILE");
+
+        // Clear USERPROFILE for the whole test: on Windows it outranks HOME
+        // in user_home(), so both the HOME arm and the relative-fallback arm
+        // need it absent to assert their branches.
+        std::env::remove_var("USERPROFILE");
 
         // XDG_CONFIG_HOME wins when set.
         std::env::set_var("XDG_CONFIG_HOME", "/xdg/base");
@@ -260,6 +266,10 @@ mod tests {
         match saved_home {
             Some(v) => std::env::set_var("HOME", v),
             None => std::env::remove_var("HOME"),
+        }
+        match saved_userprofile {
+            Some(v) => std::env::set_var("USERPROFILE", v),
+            None => std::env::remove_var("USERPROFILE"),
         }
     }
 
