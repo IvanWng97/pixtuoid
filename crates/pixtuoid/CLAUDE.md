@@ -29,8 +29,10 @@ src/
 ├── install/            multi-target (Claude + Codex) hook install via the `Target` registry:
 │                       mod.rs (run_install/run_uninstall, plan_targets, interactive_pick),
 │                       target.rs (Target trait + TARGETS = [CLAUDE, CODEX]),
-│                       claude.rs / codex.rs (per-target hook_command + config path),
-│                       io.rs (resolve_symlink, write_config_atomic — advisory lock + atomic rename)
+│                       claude.rs / codex.rs (per-target hook_command + config path;
+│                         claude.rs: Unix = bare shell-form, Windows = exec-form absolute .exe),
+│                       io.rs (resolve_symlink, write_config_atomic — advisory lock + atomic rename;
+│                         Windows: rename wrapped in 3×50ms retry for sharing-violation tolerance)
 └── tui/                ratatui App + TuiRenderer (Renderer trait impl) — see src/tui/CLAUDE.md
 
 sprites/                character/environment packs (NOT under pixtuoid-hook):
@@ -46,7 +48,7 @@ sprites/                character/environment packs (NOT under pixtuoid-hook):
 
 ## Where to look
 
-- "How do hooks get installed?" → `install::claude::merge_install` for the JSON merge logic, `install::io::write_config_atomic` for the safe filesystem write. Multi-target install via the `install::target::Target` registry (`TARGETS = [CLAUDE, CODEX]`); `install::plan_targets` decides which CLIs to act on (auto-detect + confirm + non-TTY policy). Claude's `hook_command` ignores the resolved binary path (emits bare `pixtuoid-hook`, relying on PATH); Codex embeds the absolute path. Resolution of the hook binary must therefore be soft (warn) for Claude and only fatal for targets that actually need the path.
+- "How do hooks get installed?" → `install::claude::merge_install` for the JSON merge logic, `install::io::write_config_atomic` for the safe filesystem write. Multi-target install via the `install::target::Target` registry (`TARGETS = [CLAUDE, CODEX]`); `install::plan_targets` decides which CLIs to act on (auto-detect + confirm + non-TTY policy). **Unix:** Claude's `hook_command` emits bare `pixtuoid-hook` (shell-form entry, PATH-resolved at runtime); resolution is soft (warn-only) because the shell resolves it. **Windows:** `hook_command` returns the ABSOLUTE resolved `.exe` path; the hook entry gains `"args": []` (exec form — Git Bash/PowerShell make shell-form unportable); resolution is a HARD error because exec form can't fall back to PATH. Codex embeds the absolute path on all platforms. The hook entry detection/uninstall keys on the `_pixtuoid` sentinel, not the command shape, so both forms are idempotent.
 - "How does the default character pack get into the binary?" → `tui::embedded_pack` does the `include_str!` at compile time (from `crates/pixtuoid/sprites/default/`); `sprite::format::load_pack_from_strings` parses it.
 - "How do custom sprite packs work?" → `pixtuoid init-pack ./dir` extracts the skeleton template from `sprites/skeleton/` (embedded via `include_str!`, see `init_pack.rs`). `pixtuoid validate-pack ./dir` loads the pack and checks against `REQUIRED_CHARACTER_ANIMATIONS` / `OPTIONAL_*` registries in `sprite::format`. `--pack-dir` CLI flag or `pack-dir` config key loads a custom pack at runtime. Custom packs only need character sprites — furniture/environment animations are merged from the embedded default via `Pack::merge_from()` (only `OPTIONAL_FURNITURE_ANIMATIONS`, never character poses). The robot pack at `sprites/robot/` is a TV-head character set (10×12 sprites).
 - "How does the crash log work?" → `main.rs::install_crash_hook` sets a panic hook that restores the terminal, writes a timestamped backtrace to `~/.cache/pixtuoid/crash.log`.

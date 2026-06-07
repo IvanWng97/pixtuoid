@@ -82,6 +82,21 @@ sudo dpkg -i pixtuoid_*.deb pixtuoid-hook_*.deb
 cargo install pixtuoid pixtuoid-hook
 ```
 
+### Windows (experimental)
+
+Requires [Windows Terminal](https://aka.ms/terminal) (the Windows 11 default).
+Claude Code only for now — Codex support is coming.
+
+1. Download `pixtuoid-<version>-x86_64-pc-windows-msvc.zip` from the
+   [latest release](https://github.com/IvanWng97/pixtuoid/releases)
+2. Unblock before extracting (the exes are unsigned — SmartScreen marks
+   downloads): right-click the zip → Properties → Unblock, or
+   `Unblock-File .\pixtuoid-*.zip` in PowerShell
+3. Extract anywhere and add the folder to your PATH
+4. `pixtuoid install-hooks` then `pixtuoid run`
+
+ARM64 Windows: use the `aarch64-pc-windows-msvc` zip.
+
 ### From source
 
 ```bash
