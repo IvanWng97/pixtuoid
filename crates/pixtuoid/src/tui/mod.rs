@@ -21,8 +21,8 @@ use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::Result;
 use crossterm::event::{
-    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers, MouseButton,
-    MouseEventKind,
+    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
+    MouseButton, MouseEventKind,
 };
 use crossterm::execute;
 use crossterm::terminal::{
@@ -290,7 +290,11 @@ pub async fn run_tui(
             let mut quit = false;
             while polled {
                 match event::read()? {
-                    Event::Key(k) => {
+                    // Windows delivers Press AND Release events per
+                    // keystroke; without this guard every key double-fires
+                    // there (e.g. `p` pauses then instantly unpauses).
+                    // Non-Press key events fall through to the catch-all arm.
+                    Event::Key(k) if k.kind == KeyEventKind::Press => {
                         let ctx = KeyCtx {
                             help_open: renderer.help_open(),
                             version_popup,
