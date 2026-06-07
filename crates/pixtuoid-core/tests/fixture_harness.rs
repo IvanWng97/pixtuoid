@@ -122,13 +122,16 @@ fn decode_fixture(source: &str, dir: &Path) -> Decoded {
 
     // Hook-only scenarios key the {{TRANSCRIPT_PATH}} substitution on the
     // scenario dir instead (stable + machine-independent, same property).
+    // Separators are normalized to '/' so the key — and therefore every
+    // AgentId hash baked into the snapshots — is byte-identical on Windows
+    // (where strip_prefix yields backslash-separated components).
     let logical = transcripts
         .first()
         .map_or(dir, PathBuf::as_path)
         .strip_prefix(fixtures_root())
         .unwrap()
         .to_string_lossy()
-        .into_owned();
+        .replace('\\', "/");
 
     let mut jsonl = Vec::new();
     if let Some(transcript) = transcripts.first() {

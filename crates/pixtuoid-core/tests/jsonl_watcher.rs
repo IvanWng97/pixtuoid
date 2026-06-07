@@ -787,7 +787,16 @@ async fn antigravity_source_run_emits_events_from_transcript() {
 async fn claude_code_source_run_binds_socket_and_emits_events() {
     fast_watch();
     let dir = TempDir::new().unwrap();
+    // The hook endpoint must be platform-shaped: a filesystem path is an
+    // invalid pipe name on Windows and would fail run()'s bind before the
+    // JSONL leg (the thing under test) ever starts.
+    #[cfg(unix)]
     let socket_path = dir.path().join("pixtuoid-test.sock");
+    #[cfg(windows)]
+    let socket_path = std::path::PathBuf::from(format!(
+        r"\\.\pipe\pixtuoid-test-jsonlw-{}",
+        std::process::id()
+    ));
     let projects_root = dir.path().join("projects");
     let project_dir = projects_root.join("proj-cc");
     tokio::fs::create_dir_all(&project_dir).await.unwrap();
