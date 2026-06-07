@@ -432,29 +432,45 @@ async fn check_session_ended(path: &Path, checker: SessionEndChecker) -> bool {
     checker(&buf)
 }
 
-/// The path segment a CC subagent transcript carries: `<parent>/subagents/
-/// agent-*.jsonl`. Slash-bounded so a project dir merely *containing* the word
-/// (e.g. `subagents-paper`) is not mistaken for one — single source of truth for
-/// both `is_subagent_path` and `detect_parent_id` so they cannot diverge (they
-/// did once: see the `bug_004` fix in `cc_derive_label`).
-const SUBAGENTS_SEGMENT: &str = "/subagents/";
+/// The directory a CC subagent transcript sits under: `<parent>/subagents/
+/// agent-*.jsonl`. Matched as a whole path COMPONENT (never a substring) so a
+/// project dir merely *containing* the word (e.g. `subagents-paper`) is not
+/// mistaken for one, and so Windows backslash-separated paths match too (the
+/// old `"/subagents/"` string scan was '/'-literal — found by the windows-test
+/// CI job). Single source of truth for both `is_subagent_path` and
+/// `detect_parent_id` so they cannot diverge (they did once: see the
+/// `bug_004` fix in `cc_derive_label`).
+const SUBAGENTS_DIR: &str = "subagents";
 
 /// Whether a transcript path is a CC subagent transcript (vs a top-level
 /// session). Codex subagents are FLAT (no such segment) — they're linked via the
 /// `SubagentStart` hook instead, so this predicate is CC-layout-specific.
 pub(crate) fn is_subagent_path(path: &Path) -> bool {
-    path.to_string_lossy().contains(SUBAGENTS_SEGMENT)
+    path.components().any(|c| c.as_os_str() == SUBAGENTS_DIR)
 }
 
-/// Detect if this transcript is a CC subagent by checking for the `/subagents/`
-/// path segment. If found, derive the parent's AgentId from the grandparent
+/// Detect if this transcript is a CC subagent by checking for the `subagents`
+/// path component. If found, derive the parent's AgentId from the grandparent
 /// directory (the parent session's transcript directory). CC-layout-specific —
 /// Codex subagent parent links come from the `SubagentStart` hook, not the path.
+///
+/// The parent key is rebuilt from the components BEFORE the first `subagents`
+/// (`<parent-dir>.jsonl`), using native separators — byte-identical to the
+/// parent transcript's own watcher-derived key on every platform.
 fn detect_parent_id(path: &Path, source: &str) -> Option<AgentId> {
-    let path_str = path.to_string_lossy();
-    let idx = path_str.find(SUBAGENTS_SEGMENT)?;
-    let parent_dir = &path_str[..idx];
-    let parent_jsonl = format!("{parent_dir}.jsonl");
+    let mut parent_dir = PathBuf::new();
+    let mut found = false;
+    for c in path.components() {
+        if c.as_os_str() == SUBAGENTS_DIR {
+            found = true;
+            break;
+        }
+        parent_dir.push(c);
+    }
+    if !found || parent_dir.as_os_str().is_empty() {
+        return None;
+    }
+    let parent_jsonl = format!("{}.jsonl", parent_dir.display());
     Some(AgentId::from_parts(source, &parent_jsonl))
 }
 

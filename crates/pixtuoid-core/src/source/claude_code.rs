@@ -231,7 +231,7 @@ pub fn cc_session_ended(tail: &[u8]) -> bool {
 /// last segment is the project basename. Without this, an empty-cwd Rename
 /// silently degrades a good hook-derived `cc·dotfiles` back to `cc`.
 pub fn cc_derive_label(path: &Path, _source: &str, cwd: &Path) -> String {
-    // ONE shared predicate with `detect_parent_id` (both via `SUBAGENTS_SEGMENT`)
+    // ONE shared predicate with `detect_parent_id` (both via the `SUBAGENTS_DIR` component)
     // so the two can't diverge — a loose `"subagents"` substring once mislabeled a
     // `subagents-paper` repo's parent transcript "subagent" with parent_id=None
     // (bug_004); the slash-bounded predicate fixes that at a single source.

@@ -275,7 +275,10 @@ async fn watcher_emits_session_start_for_recent_files_on_startup() {
     std::fs::write(&fresh, format!("{line}\n")).unwrap();
     // fsync the parent directory so the directory entry is guaranteed visible
     // to read_dir — without this, APFS metadata propagation can race with
-    // the watcher's initial seed walk under heavy concurrent I/O.
+    // the watcher's initial seed walk under heavy concurrent I/O. Unix-only:
+    // Windows can't open a directory as a plain file (and the APFS race
+    // doesn't exist there).
+    #[cfg(unix)]
     std::fs::File::open(&project_dir)
         .unwrap()
         .sync_all()
