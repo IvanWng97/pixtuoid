@@ -3,7 +3,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
-use fs2::FileExt;
+use fs4::FileExt;
 
 /// The user's home dir — `USERPROFILE`-first on Windows (HOME is normally
 /// unset there; Git Bash's exported HOME is POSIX-form and unusable), `HOME`
@@ -140,7 +140,7 @@ pub fn write_config_atomic(path: &Path, contents: &str) -> Result<()> {
         f.sync_all()?;
     }
     rename_with_retry(&tmp, &target)?;
-    fs2::FileExt::unlock(&lock).ok();
+    fs4::FileExt::unlock(&lock).ok();
     Ok(())
 }
 

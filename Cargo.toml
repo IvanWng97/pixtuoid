@@ -36,4 +36,4 @@ notify             = "8"
 ratatui            = "0.30"
 crossterm          = "0.29"
 clap               = { version = "4", features = ["derive"] }
-fs2                = "0.4"
+fs4                = "0.8"
