@@ -29,7 +29,9 @@ anyhow      = { workspace = true }
 async-trait = { workspace = true }
 tracing     = { workspace = true }
 notify      = { workspace = true }
-libc        = "0.2"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["sync", "rt", "macros", "fs", "net", "time", "io-util", "rt-multi-thread"] }
