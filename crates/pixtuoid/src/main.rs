@@ -335,8 +335,12 @@ fn rotate_if_large(path: &Path) {
         // APPEND ".old" rather than with_extension: a custom $PIXTUOID_LOG
         // like app.log must rotate to app.log.old (not clobber a sibling
         // app.old), and a path already ending in .old must not rename onto
-        // itself (a no-op that would never rotate).
-        let _ = std::fs::rename(path, format!("{}.old", path.display()));
+        // itself (a no-op that would never rotate). OsString concatenation,
+        // not format!/display(): display() is lossy on non-UTF-8 paths, and
+        // a U+FFFD-mangled target would silently break the rotation.
+        let mut old = path.as_os_str().to_os_string();
+        old.push(".old");
+        let _ = std::fs::rename(path, &old);
     }
 }
 
