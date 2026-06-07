@@ -191,7 +191,21 @@ struct SnapshotArgs {
     /// faces north). Ignored for non-seat targets.
     #[arg(long)]
     anim_facing: Option<String>,
+
+    /// Crop the generated PNG around a specific agent's visual position.
+    #[arg(long)]
+    pub crop_agent: Option<String>,
+
+    /// Crop the generated PNG around the office pet.
+    #[arg(long)]
+    pub crop_pet: bool,
+
+    /// Crop the generated PNG around a specific furniture piece.
+    /// One of: pantry | couch | vending | printer | meeting | desk.
+    #[arg(long)]
+    pub crop_furniture: Option<String>,
 }
+
 
 fn default_projects_root() -> String {
     format!(
@@ -275,7 +289,7 @@ fn main() -> Result<()> {
     let backend = TestBackend::new(cols, rows);
     let mut term = Terminal::new(backend)?;
     let mut buf = RgbBuffer::filled(0, 0, Rgb { r: 0, g: 0, b: 0 });
-    let pack = load_sprite_pack(args.pack_dir)?;
+    let pack = load_sprite_pack(args.pack_dir.clone())?;
     let mut cache = FrameCache::new();
     let mut router = pixtuoid::tui::pathfind::AStarRouter::new();
     let mut overlay = pixtuoid_core::walkable::OccupancyOverlay::new();
@@ -422,14 +436,29 @@ fn main() -> Result<()> {
         debug_paint_walkable_overlay(&mut term, &scene)?;
     }
 
-    save_backend_as_png(&term, &args.out, cols, rows)?;
+    let last_pet_pos = draw_ctx.last_pet_pos;
+    let crop_rect = compute_crop_rect(
+        &args,
+        &scene,
+        &history,
+        last_pet_pos,
+        cols,
+        rows,
+        now,
+    );
+
+    save_backend_as_png(&term, &args.out, cols, rows, crop_rect)?;
     println!("wrote {}", args.out.display());
 
     println!("\n--- text preview (symbols only) ---");
     let buf = term.backend().buffer();
-    for y in 0..rows {
-        for x in 0..cols {
-            print!("{}", buf[(x, y)].symbol());
+    let (start_x, start_y, render_w, render_h) = match crop_rect {
+        Some(r) => (r.x, r.y, r.width, r.height),
+        None => (0, 0, cols, rows),
+    };
+    for y in 0..render_h {
+        for x in 0..render_w {
+            print!("{}", buf[(start_x + x, start_y + y)].symbol());
         }
         println!();
     }
@@ -862,20 +891,115 @@ fn anim_scene(
     (s, skip_ms)
 }
 
+fn compute_crop_rect(
+    args: &SnapshotArgs,
+    scene: &SceneState,
+    history: &pixtuoid::tui::pose::PoseHistory,
+    last_pet_pos: Option<pixtuoid::tui::pet::PetFrame>,
+    cols: u16,
+    rows: u16,
+    now: SystemTime,
+) -> Option<ratatui::layout::Rect> {
+    let mut target_pixel: Option<pixtuoid::tui::layout::Point> = None;
+
+    if let Some(ref agent_label) = args.crop_agent {
+        if let Some(slot) = scene.agents.values().find(|s| s.label.as_ref() == agent_label) {
+            if let Some(pos) = history.recent(slot.agent_id, u64::MAX, now) {
+                target_pixel = Some(pos);
+            } else {
+                eprintln!("WARN: Agent '{}' has no visual position in PoseHistory", agent_label);
+            }
+        } else {
+            eprintln!("WARN: Agent with label '{}' not found in scene", agent_label);
+        }
+    } else if args.crop_pet {
+        if let Some(pet_frame) = last_pet_pos {
+            target_pixel = Some(pet_frame.pos);
+        } else {
+            eprintln!("WARN: Pet has no visual position in this frame");
+        }
+    } else if let Some(ref furniture_str) = args.crop_furniture {
+        let buf_w = cols;
+        let buf_h = rows.saturating_sub(1).saturating_mul(2);
+        if let Some(layout) = pixtuoid_core::layout::SceneLayout::compute_with_seed(
+            buf_w,
+            buf_h,
+            scene.floor_capacities[0],
+            args.floor_seed,
+        ) {
+            match furniture_str.to_lowercase().as_str() {
+                "pantry" => {
+                    target_pixel = layout.waypoints.iter()
+                        .find(|w| matches!(w.kind, pixtuoid_core::layout::WaypointKind::Pantry))
+                        .map(|w| w.pos);
+                }
+                "couch" => {
+                    target_pixel = layout.waypoints.iter()
+                        .find(|w| matches!(w.kind, pixtuoid_core::layout::WaypointKind::Couch))
+                        .map(|w| w.pos);
+                }
+                "vending" => {
+                    target_pixel = layout.waypoints.iter()
+                        .find(|w| matches!(w.kind, pixtuoid_core::layout::WaypointKind::VendingMachine))
+                        .map(|w| w.pos);
+                }
+                "printer" => {
+                    target_pixel = layout.waypoints.iter()
+                        .find(|w| matches!(w.kind, pixtuoid_core::layout::WaypointKind::Printer))
+                        .map(|w| w.pos);
+                }
+                "meeting" | "sofa" => {
+                    target_pixel = layout.waypoints.iter()
+                        .find(|w| matches!(w.kind, pixtuoid_core::layout::WaypointKind::MeetingSofa))
+                        .map(|w| w.pos);
+                }
+                "desk" => {
+                    target_pixel = layout.home_desks.first().copied();
+                }
+                other => {
+                    eprintln!("WARN: Unknown furniture crop target '{}'", other);
+                }
+            }
+        }
+    }
+
+    let p = target_pixel?;
+    let cell_x = p.x / 8;
+    let cell_y = p.y / 16;
+
+    let crop_w = 40u16.min(cols);
+    let crop_h = 24u16.min(rows);
+
+    let crop_x = cell_x.saturating_sub(crop_w / 2).min(cols.saturating_sub(crop_w));
+    let crop_y = cell_y.saturating_sub(crop_h / 2).min(rows.saturating_sub(crop_h));
+
+    Some(ratatui::layout::Rect {
+        x: crop_x,
+        y: crop_y,
+        width: crop_w,
+        height: crop_h,
+    })
+}
+
 fn save_backend_as_png(
     term: &Terminal<TestBackend>,
     path: &PathBuf,
     cols: u16,
     rows: u16,
+    crop: Option<ratatui::layout::Rect>,
 ) -> Result<()> {
     let buf = term.backend().buffer();
-    let img_w = cols as u32 * CELL_W;
-    let img_h = rows as u32 * CELL_H;
+    let (start_x, start_y, render_w, render_h) = match crop {
+        Some(r) => (r.x, r.y, r.width, r.height),
+        None => (0, 0, cols, rows),
+    };
+    let img_w = render_w as u32 * CELL_W;
+    let img_h = render_h as u32 * CELL_H;
     let mut img = RgbImage::new(img_w, img_h);
 
-    for y in 0..rows {
-        for x in 0..cols {
-            let cell = &buf[(x, y)];
+    for y in 0..render_h {
+        for x in 0..render_w {
+            let cell = &buf[(start_x + x, start_y + y)];
             let symbol = cell.symbol();
             let fg = color_to_rgb(cell.fg, ImgRgb([220, 220, 220]));
             let bg = color_to_rgb(cell.bg, ImgRgb([20, 22, 28]));
@@ -912,6 +1036,7 @@ fn save_backend_as_png(
     img.save(path)?;
     Ok(())
 }
+
 
 /// Rasterize a post-draw ratatui cell buffer to RGBA: half-block cells become
 /// two stacked pixels (fg = top, bg = bottom); text cells a blocky glyph pad —
