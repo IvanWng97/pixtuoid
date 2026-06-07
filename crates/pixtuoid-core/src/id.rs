@@ -20,7 +20,10 @@ impl AgentId {
     /// i.e. the id production derives for a transcript path on every platform
     /// (identity on Unix; `\`→`/` + casefold on Windows). A test/example
     /// ergonomics shim only: production code calls `from_parts` with an
-    /// explicit source at the three normalized keying sites. Kept because the
+    /// explicit source at the four normalized keying sites (hook decoder,
+    /// watcher `default_id_from_path`, `walk_jsonl`'s per-line key, and
+    /// `detect_parent_id`'s rebuilt parent key — see the core CLAUDE.md sharp
+    /// edge). Kept because the
     /// test + snapshot suites lean on it heavily — and normalizing here keeps
     /// every expectation they build platform-consistent by construction.
     pub fn from_transcript_path(path: &str) -> Self {
