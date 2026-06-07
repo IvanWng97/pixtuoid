@@ -192,20 +192,18 @@ struct SnapshotArgs {
     #[arg(long)]
     anim_facing: Option<String>,
 
-    /// Crop the generated PNG around a specific agent's visual position.
-    #[arg(long)]
-    pub crop_agent: Option<String>,
+    /// Crop the generated PNG (and text preview) to a 40x24-cell window
+    /// centered on the agent with this label — e.g. for sprite-iteration
+    /// close-ups without quadrant guessing. Static-PNG path only.
+    #[arg(long, conflicts_with = "crop_furniture")]
+    crop_agent: Option<String>,
 
-    /// Crop the generated PNG around the office pet.
+    /// Crop the generated PNG (and text preview) to a 40x24-cell window
+    /// centered on a furniture piece.
+    /// One of: pantry | couch | vending | printer | meeting | sofa | desk.
     #[arg(long)]
-    pub crop_pet: bool,
-
-    /// Crop the generated PNG around a specific furniture piece.
-    /// One of: pantry | couch | vending | printer | meeting | desk.
-    #[arg(long)]
-    pub crop_furniture: Option<String>,
+    crop_furniture: Option<String>,
 }
-
 
 fn default_projects_root() -> String {
     format!(
@@ -436,16 +434,7 @@ fn main() -> Result<()> {
         debug_paint_walkable_overlay(&mut term, &scene)?;
     }
 
-    let last_pet_pos = draw_ctx.last_pet_pos;
-    let crop_rect = compute_crop_rect(
-        &args,
-        &scene,
-        &history,
-        last_pet_pos,
-        cols,
-        rows,
-        now,
-    );
+    let crop_rect = compute_crop_rect(&args, &scene, &history, cols, rows, now)?;
 
     save_backend_as_png(&term, &args.out, cols, rows, crop_rect)?;
     println!("wrote {}", args.out.display());
@@ -895,90 +884,90 @@ fn compute_crop_rect(
     args: &SnapshotArgs,
     scene: &SceneState,
     history: &pixtuoid::tui::pose::PoseHistory,
-    last_pet_pos: Option<pixtuoid::tui::pet::PetFrame>,
     cols: u16,
     rows: u16,
     now: SystemTime,
-) -> Option<ratatui::layout::Rect> {
-    let mut target_pixel: Option<pixtuoid::tui::layout::Point> = None;
+) -> Result<Option<ratatui::layout::Rect>> {
+    use pixtuoid_core::layout::WaypointKind;
 
-    if let Some(ref agent_label) = args.crop_agent {
-        if let Some(slot) = scene.agents.values().find(|s| s.label.as_ref() == agent_label) {
-            if let Some(pos) = history.recent(slot.agent_id, u64::MAX, now) {
-                target_pixel = Some(pos);
-            } else {
-                eprintln!("WARN: Agent '{}' has no visual position in PoseHistory", agent_label);
-            }
-        } else {
-            eprintln!("WARN: Agent with label '{}' not found in scene", agent_label);
-        }
-    } else if args.crop_pet {
-        if let Some(pet_frame) = last_pet_pos {
-            target_pixel = Some(pet_frame.pos);
-        } else {
-            eprintln!("WARN: Pet has no visual position in this frame");
-        }
+    // Fail loudly like --theme/--weather above — a typo'd crop target silently
+    // writing the full uncropped PNG defeats the point of the flag.
+    let target_pixel: pixtuoid::tui::layout::Point = if let Some(ref agent_label) = args.crop_agent
+    {
+        let slot = scene
+            .agents
+            .values()
+            .find(|s| s.label.as_ref() == agent_label)
+            .ok_or_else(|| {
+                let labels: Vec<&str> = scene.agents.values().map(|s| s.label.as_ref()).collect();
+                anyhow::anyhow!(
+                    "--crop-agent {agent_label:?} not found in scene; labels: {}",
+                    labels.join(", ")
+                )
+            })?;
+        history
+            .recent(slot.agent_id, u64::MAX, now)
+            .ok_or_else(|| anyhow::anyhow!("agent {agent_label:?} has no visual position"))?
     } else if let Some(ref furniture_str) = args.crop_furniture {
         let buf_w = cols;
         let buf_h = rows.saturating_sub(1).saturating_mul(2);
-        if let Some(layout) = pixtuoid_core::layout::SceneLayout::compute_with_seed(
+        let layout = pixtuoid_core::layout::SceneLayout::compute_with_seed(
             buf_w,
             buf_h,
             scene.floor_capacities[0],
             args.floor_seed,
-        ) {
-            match furniture_str.to_lowercase().as_str() {
-                "pantry" => {
-                    target_pixel = layout.waypoints.iter()
-                        .find(|w| matches!(w.kind, pixtuoid_core::layout::WaypointKind::Pantry))
-                        .map(|w| w.pos);
-                }
-                "couch" => {
-                    target_pixel = layout.waypoints.iter()
-                        .find(|w| matches!(w.kind, pixtuoid_core::layout::WaypointKind::Couch))
-                        .map(|w| w.pos);
-                }
-                "vending" => {
-                    target_pixel = layout.waypoints.iter()
-                        .find(|w| matches!(w.kind, pixtuoid_core::layout::WaypointKind::VendingMachine))
-                        .map(|w| w.pos);
-                }
-                "printer" => {
-                    target_pixel = layout.waypoints.iter()
-                        .find(|w| matches!(w.kind, pixtuoid_core::layout::WaypointKind::Printer))
-                        .map(|w| w.pos);
-                }
-                "meeting" | "sofa" => {
-                    target_pixel = layout.waypoints.iter()
-                        .find(|w| matches!(w.kind, pixtuoid_core::layout::WaypointKind::MeetingSofa))
-                        .map(|w| w.pos);
-                }
-                "desk" => {
-                    target_pixel = layout.home_desks.first().copied();
-                }
-                other => {
-                    eprintln!("WARN: Unknown furniture crop target '{}'", other);
-                }
+        )
+        .ok_or_else(|| anyhow::anyhow!("scene too small to compute a layout"))?;
+        let found = match furniture_str.to_lowercase().as_str() {
+            "desk" => layout.home_desks.first().copied(),
+            name => {
+                let kind = match name {
+                    "pantry" => WaypointKind::Pantry,
+                    "couch" => WaypointKind::Couch,
+                    "vending" => WaypointKind::VendingMachine,
+                    "printer" => WaypointKind::Printer,
+                    "meeting" | "sofa" => WaypointKind::MeetingSofa,
+                    other => anyhow::bail!(
+                        "unknown --crop-furniture {other:?}; valid: pantry | couch | vending | printer | meeting | sofa | desk"
+                    ),
+                };
+                layout
+                    .waypoints
+                    .iter()
+                    .find(|w| w.kind == kind)
+                    .map(|w| w.pos)
             }
-        }
-    }
+        };
+        found.ok_or_else(|| {
+            anyhow::anyhow!("no {furniture_str:?} waypoint in this layout (terminal too small?)")
+        })?
+    } else {
+        return Ok(None);
+    };
 
-    let p = target_pixel?;
-    let cell_x = p.x / 8;
-    let cell_y = p.y / 16;
+    // Positions are in the LOGICAL half-block buffer (1 px per cell across,
+    // 2 px per cell down — the same buf_w/buf_h fed to compute_with_seed
+    // above), NOT in PNG pixels: the 8x16 px-per-cell scaling happens later
+    // in save_backend_as_png.
+    let cell_x = target_pixel.x;
+    let cell_y = target_pixel.y / 2;
 
     let crop_w = 40u16.min(cols);
     let crop_h = 24u16.min(rows);
 
-    let crop_x = cell_x.saturating_sub(crop_w / 2).min(cols.saturating_sub(crop_w));
-    let crop_y = cell_y.saturating_sub(crop_h / 2).min(rows.saturating_sub(crop_h));
+    let crop_x = cell_x
+        .saturating_sub(crop_w / 2)
+        .min(cols.saturating_sub(crop_w));
+    let crop_y = cell_y
+        .saturating_sub(crop_h / 2)
+        .min(rows.saturating_sub(crop_h));
 
-    Some(ratatui::layout::Rect {
+    Ok(Some(ratatui::layout::Rect {
         x: crop_x,
         y: crop_y,
         width: crop_w,
         height: crop_h,
-    })
+    }))
 }
 
 fn save_backend_as_png(
@@ -1036,7 +1025,6 @@ fn save_backend_as_png(
     img.save(path)?;
     Ok(())
 }
-
 
 /// Rasterize a post-draw ratatui cell buffer to RGBA: half-block cells become
 /// two stacked pixels (fg = top, bg = bottom); text cells a blocky glyph pad —
