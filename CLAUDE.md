@@ -36,7 +36,10 @@ crates/
 └── pixtuoid-hook/      tiny shim CC invokes — stdin JSON → Unix socket (Unix) / named pipe (Windows) via transport.rs, 200ms send bound
 scripts/                crop-snapshot.py (visual verification),
                         gen-docs-images.py (regenerate ALL docs/images screenshots + demo.gif
+                        + the CI visual-regression baselines reference-*.png
                         from a release build — single source of truth; run via `just demo`),
+                        compare-screenshots.py (pixel-diff used by `just visual-check`,
+                        the CI smoke job's visual-regression gate),
                         replay-fixture.sh (replay a captured source rollout fixture into a
                         headless run via --codex-sessions-root, for eyeballing lifecycle),
                         check_upstream_drift.py (weekly CI: CC/Codex wire-format rename watch)
@@ -84,10 +87,16 @@ just build --release --example snapshot
 .venv/bin/python3 scripts/crop-snapshot.py /tmp/snap.png --scale 3
 ```
 
-> To regenerate **all** of `docs/images/` (screenshot, gallery-\*, themes-composite, demo.gif)
-> from a release build, run **`just demo`** (→ `scripts/gen-docs-images.py`) — the single source
-> of truth for the office images (render params, crop quadrants, themes-composite diagonal), so
-> the screenshots never drift.
+> To regenerate **all** of `docs/images/` (screenshot, gallery-\*, themes-composite, demo.gif,
+> reference-\*) from a release build, run **`just demo`** (→ `scripts/gen-docs-images.py`) — the
+> single source of truth for the office images (render params, crop quadrants, themes-composite
+> diagonal), so the screenshots never drift.
+
+CI's smoke job pixel-diffs two deterministic renders (dusk/normal + night/cyberpunk,
+TZ=UTC) against `docs/images/reference-*.png` via **`just visual-check`** (runnable
+locally). A PR that **intentionally** changes the office's look must run `just demo`
+and commit the regenerated `docs/images/` — including the `reference-*.png` baselines —
+in the same change, or smoke goes red.
 
 See `.claude/skills/beautify-decoration/SKILL.md` for the full iteration loop, self-critique checklist, and sprite-format pitfalls.
 

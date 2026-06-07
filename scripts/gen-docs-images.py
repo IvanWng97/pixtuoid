@@ -14,12 +14,19 @@ clock (deterministic layout + lighting):
   docs/images/themes-composite.png                  6 themes stitched along
                                                     down-left DIAGONAL bands
   docs/images/demo.gif                              15s @ 10fps animated
+  docs/images/reference-screenshot.png              CI visual-regression baseline
+  docs/images/reference-night.png                   (dusk/normal + night/cyberpunk;
+                                                    TZ=UTC + forced --weather so the
+                                                    frame is machine-independent —
+                                                    `just visual-check` must match
+                                                    these params exactly)
 
 `screenshot-real.png` is a live-agent capture and is NOT regenerated here.
 
 Requires the venv (Pillow) — see README "Visual verification".
 """
 
+import os
 import shutil
 import subprocess
 import sys
@@ -45,14 +52,15 @@ QUADRANTS = {  # same regions as scripts/crop-snapshot.py
 }
 
 
-def render(out_path, theme, *extra):
+def render(out_path, theme, *extra, hour=HOUR, env=None):
     subprocess.run(
         [
             str(SNAP), "--cols", str(COLS), "--rows", str(ROWS), "--theme", theme,
-            "--now-hour", str(HOUR), "--now-day", str(DAY), *extra, str(out_path),
+            "--now-hour", str(hour), "--now-day", str(DAY), *extra, str(out_path),
         ],
         check=True,
         stdout=subprocess.DEVNULL,  # suppress the text preview; gif progress is on stderr
+        env=env,
     )
 
 
@@ -98,6 +106,17 @@ def main():
         comp.paste(im, (0, 0), mask)
     comp.save(OUT / "themes-composite.png")
 
+    # CI visual-regression baselines (`just visual-check` renders the same two
+    # frames and pixel-diffs via scripts/compare-screenshots.py). Unlike the doc
+    # art above, these MUST be machine-independent: --now-hour is a chrono::Local
+    # wall time, so the epoch — and with it the 10-minute weather slot and the
+    # city-twinkle phase — depends on the generating machine's timezone. Pin
+    # TZ=UTC and force the weather so the frame is an explicit choice, not a
+    # hash accident. Params here and in the justfile recipe must stay in sync.
+    utc = {**os.environ, "TZ": "UTC"}
+    render(OUT / "reference-screenshot.png", "normal", "--weather", "clear", env=utc)
+    render(OUT / "reference-night.png", "cyberpunk", "--weather", "clear", hour=3, env=utc)
+
     # Animated demo.
     render(OUT / "demo.gif", "normal", "--gif", "--gif-duration", str(GIF_SECS), "--gif-fps", str(GIF_FPS))
 
@@ -108,7 +127,7 @@ def main():
         sys.exit("gifsicle not found — brew install gifsicle")
     subprocess.run(["gifsicle", "-b", "-O3", "--colors", "128", str(OUT / "demo.gif")], check=True)
 
-    print(f"wrote screenshot, gallery-*, themes-composite, demo.gif -> {OUT}")
+    print(f"wrote screenshot, gallery-*, themes-composite, reference-*, demo.gif -> {OUT}")
 
 
 if __name__ == "__main__":

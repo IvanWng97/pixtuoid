@@ -178,17 +178,17 @@ jobs:
         run: |
           python3 -m venv .venv
           .venv/bin/pip install -r requirements-dev.txt
-      - name: Render deterministic snapshot
-        run: ./target/release/examples/snapshot --theme normal --cols 192 --rows 64 --now-hour 19 --now-day 1 /tmp/smoke-snapshot.png
       - name: Visual regression check
-        run: .venv/bin/python3 scripts/compare-screenshots.py docs/images/reference-screenshot.png /tmp/smoke-snapshot.png /tmp/diff-snapshot.png
+        run: just visual-check
       - name: Upload snapshot artifacts
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: smoke-snapshots
           path: |
-            /tmp/smoke-snapshot.png
-            /tmp/diff-snapshot.png
+            /tmp/visual-day.png
+            /tmp/visual-night.png
+            /tmp/diff-day.png
+            /tmp/diff-night.png
           retention-days: 7
 
