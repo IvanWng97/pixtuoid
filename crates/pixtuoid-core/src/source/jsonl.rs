@@ -23,7 +23,7 @@ pub type SessionEndChecker = fn(&[u8]) -> bool;
 pub type IdDeriver = fn(&Path) -> String;
 
 fn default_id_from_path(p: &Path) -> String {
-    p.to_string_lossy().into_owned()
+    crate::source::decoder::normalize_path_key(&p.to_string_lossy())
 }
 
 /// The per-source decode/label/end/id fn-pointers (the invariant-#3 seam)
