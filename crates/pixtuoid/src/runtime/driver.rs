@@ -77,11 +77,17 @@ async fn run_async(cfg: RunConfig) -> Result<()> {
 
     tokio::spawn(reducer_task(rx, scene_tx, Arc::clone(&floor_caps)));
 
+    // Source-health side channel (#157): a fatal source exit must reach the
+    // TUI footer — in default TUI mode tracing only reaches the log file, and
+    // the office silently freezing is the worst failure class. Deliberately
+    // NOT an AgentEvent: the one event channel carries agent activity (its
+    // Transport tag drives hook-wins dedup), not source lifecycle.
+    let (health_tx, health_rx) = tokio::sync::watch::channel(Vec::new());
     let _source_handles = SourceManager::new()
         .with_source(Box::new(cc_src))
         .with_source(Box::new(ag_src))
         .with_source(Box::new(codex_src))
-        .spawn(tx);
+        .spawn_with_health(tx, health_tx);
 
     if headless {
         headless_loop(scene_rx).await
@@ -94,6 +100,7 @@ async fn run_async(cfg: RunConfig) -> Result<()> {
             config_path,
             desk_cap,
             pets,
+            health_rx,
         )
         .await
     }

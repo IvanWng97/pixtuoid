@@ -111,6 +111,8 @@ pub struct DrawCtx<'a> {
     /// Drives entrance (EaseOutCubic/200ms) and dismissal (EaseInQuad/120ms).
     pub popup_scale: f32,
     pub help_open: bool,
+    /// Footer warning when a source has died (#157); `None` while healthy.
+    pub source_warning: Option<&'a str>,
 }
 
 /// Clip a widget rect to fit inside `bounds`. Returns `None` if the rect
@@ -181,12 +183,13 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     let scene_rect = scene_rect(full_rect);
     let theme = ctx.theme;
     let floor_info = ctx.floor_info;
+    let source_warning = ctx.source_warning;
     let floor = ctx.floor;
 
     if scene_rect.width < 20 || scene_rect.height < 12 {
         term.draw(|f| {
             let actual = f.area();
-            paint_footer(f, scene, actual, theme, floor_info);
+            paint_footer(f, scene, actual, theme, floor_info, ctx.source_warning);
         })?;
         return Ok(None);
     }
@@ -200,7 +203,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     else {
         term.draw(|f| {
             let actual = f.area();
-            paint_footer(f, scene, actual, theme, floor_info);
+            paint_footer(f, scene, actual, theme, floor_info, ctx.source_warning);
         })?;
         return Ok(None);
     };
@@ -260,7 +263,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         // terminal resize between term.size() and term.draw().
         let actual_full = f.area();
         let actual_scene = crate::tui::renderer::scene_rect(actual_full);
-        paint_footer(f, scene, actual_full, theme, floor_info);
+        paint_footer(f, scene, actual_full, theme, floor_info, source_warning);
         flush_buffer_to_term(f, buf, actual_scene);
         paint_label_widgets(
             f,

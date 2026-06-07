@@ -82,12 +82,23 @@ pub fn config_path() -> PathBuf {
     PathBuf::from(".config/pixtuoid/config.toml")
 }
 
-pub fn load(path: &Path) -> AppConfig {
+/// Load the config, never crashing: unreadable/malformed files fall back to
+/// defaults. Each fallback is reported twice on purpose (#87): a
+/// `tracing::warn!` for the log file, and a line pushed onto `warnings` so
+/// `main` can print it to stderr BEFORE the alternate screen swallows it —
+/// the resolvers stay layer-clean (no printing here; the caller picks the
+/// sink). Callers that have no user to warn (the save path's internal
+/// reload, the in-TUI version re-load) pass a throwaway Vec.
+pub fn load(path: &Path, warnings: &mut Vec<String>) -> AppConfig {
     let contents = match std::fs::read_to_string(path) {
         Ok(c) => c,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return AppConfig::default(),
         Err(e) => {
             tracing::warn!(path = %path.display(), %e, "cannot read config — using defaults");
+            warnings.push(format!(
+                "cannot read config {} ({e}) — using defaults",
+                path.display()
+            ));
             return AppConfig::default();
         }
     };
@@ -95,6 +106,10 @@ pub fn load(path: &Path) -> AppConfig {
         Ok(cfg) => cfg,
         Err(e) => {
             tracing::warn!(path = %path.display(), %e, "malformed config — using defaults");
+            warnings.push(format!(
+                "malformed config {} — ALL settings reset to defaults ({e})",
+                path.display()
+            ));
             AppConfig::default()
         }
     }
@@ -120,7 +135,7 @@ where
         .map_err(|e| anyhow::anyhow!("config lock held by another process: {e}"))?;
 
     let mut cfg = if real_path.exists() {
-        load(&real_path)
+        load(&real_path, &mut Vec::new())
     } else {
         AppConfig::default()
     };
@@ -152,6 +167,7 @@ pub fn save_version(path: &Path, version: &str) -> Result<()> {
 pub fn resolve_theme(
     config: &AppConfig,
     cli_theme: Option<&str>,
+    warnings: &mut Vec<String>,
 ) -> Result<&'static crate::tui::theme::Theme> {
     use crate::tui::theme::{theme_by_name, ALL_THEMES, NORMAL};
 
@@ -161,6 +177,9 @@ pub fn resolve_theme(
         let theme = theme_by_name(t);
         if theme.is_none() {
             tracing::warn!(theme = %t, "unknown theme in config — ignoring");
+            warnings.push(format!(
+                "unknown theme {t:?} in config — ignoring (falling back to the default)"
+            ));
         }
         theme
     });
@@ -179,7 +198,7 @@ pub fn resolve_theme(
 /// `name` is trimmed; empty/absent → [`PetKind::default_name`]. Resolving HERE
 /// (once, at startup) means the render path reads `pet.name` directly — no
 /// per-frame lookup, no parallel kind→name map to keep in sync.
-pub fn resolve_pets(config: &AppConfig) -> Vec<crate::tui::pet::Pet> {
+pub fn resolve_pets(config: &AppConfig, warnings: &mut Vec<String>) -> Vec<crate::tui::pet::Pet> {
     use crate::tui::pet::{Pet, PetKind};
 
     match &config.pets {
@@ -192,6 +211,10 @@ pub fn resolve_pets(config: &AppConfig) -> Vec<crate::tui::pet::Pet> {
                         pet = ?entry.kind,
                         "missing or unknown pet `kind` in [[pets]] config — skipping"
                     );
+                    warnings.push(format!(
+                        "missing or unknown pet `kind` {:?} in [[pets]] config — skipping that pet",
+                        entry.kind.as_deref().unwrap_or("<missing>")
+                    ));
                     continue;
                 };
                 let name = entry
@@ -205,6 +228,8 @@ pub fn resolve_pets(config: &AppConfig) -> Vec<crate::tui::pet::Pet> {
             }
             if out.is_empty() && !entries.is_empty() {
                 tracing::warn!("all [[pets]] entries had unknown kinds — no pets will appear");
+                warnings
+                    .push("all [[pets]] entries had unknown kinds — no pets will appear".into());
             }
             out
         }
@@ -217,8 +242,73 @@ mod tests {
 
     #[test]
     fn load_missing_returns_defaults() {
-        let cfg = load(Path::new("/nonexistent/path/config.toml"));
+        let cfg = load(Path::new("/nonexistent/path/config.toml"), &mut Vec::new());
         assert!(cfg.theme.is_none());
+    }
+
+    // --- collected warnings (#87): the resolvers stay layer-clean and the
+    // caller (main) picks the sink, so the COLLECTION is the contract. -----
+
+    #[test]
+    fn load_missing_collects_no_warning() {
+        let mut w = Vec::new();
+        load(Path::new("/nonexistent/path/config.toml"), &mut w);
+        assert!(w.is_empty(), "a missing config is normal, not a warning");
+    }
+
+    #[test]
+    fn load_malformed_collects_reset_warning() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("config.toml");
+        std::fs::write(&p, "theme = [unclosed").unwrap();
+        let mut w = Vec::new();
+        load(&p, &mut w);
+        assert_eq!(w.len(), 1);
+        assert!(
+            w[0].contains("malformed config") && w[0].contains("ALL settings reset"),
+            "the all-settings-reset case is the highest-stakes warning: {w:?}"
+        );
+    }
+
+    #[test]
+    fn resolve_theme_collects_unknown_config_theme_warning() {
+        let cfg = AppConfig {
+            theme: Some("not-a-theme".into()),
+            ..AppConfig::default()
+        };
+        let mut w = Vec::new();
+        let theme = resolve_theme(&cfg, None, &mut w).unwrap();
+        assert_eq!(theme.name, "normal", "falls back");
+        assert_eq!(w.len(), 1);
+        assert!(w[0].contains("unknown theme \"not-a-theme\""), "got: {w:?}");
+    }
+
+    #[test]
+    fn resolve_pets_collects_unknown_kind_warnings() {
+        let cfg = AppConfig {
+            pets: Some(vec![
+                PetEntry {
+                    kind: Some("hamster".into()),
+                    name: None,
+                },
+                PetEntry {
+                    kind: None,
+                    name: Some("Rex".into()),
+                },
+            ]),
+            ..AppConfig::default()
+        };
+        let mut w = Vec::new();
+        let pets = resolve_pets(&cfg, &mut w);
+        assert!(pets.is_empty());
+        assert_eq!(
+            w.len(),
+            3,
+            "one per skipped stanza + the all-unknown summary: {w:?}"
+        );
+        assert!(w[0].contains("hamster"), "got: {w:?}");
+        assert!(w[1].contains("<missing>"), "got: {w:?}");
+        assert!(w[2].contains("no pets will appear"), "got: {w:?}");
     }
 
     // config_path reads process-global env, so save+restore both vars and drive
@@ -279,7 +369,7 @@ mod tests {
     fn load_unreadable_path_returns_defaults() {
         let dir = tempfile::tempdir().unwrap();
         // The directory itself is an existing, non-NotFound, unreadable "file".
-        let cfg = load(dir.path());
+        let cfg = load(dir.path(), &mut Vec::new());
         assert!(cfg.theme.is_none());
     }
 
@@ -304,7 +394,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.toml");
         std::fs::write(&path, "not valid { toml }}}").unwrap();
-        let cfg = load(&path);
+        let cfg = load(&path, &mut Vec::new());
         assert!(cfg.theme.is_none());
     }
 
@@ -313,7 +403,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.toml");
         std::fs::write(&path, "theme = \"cyberpunk\"\n").unwrap();
-        let cfg = load(&path);
+        let cfg = load(&path, &mut Vec::new());
         assert_eq!(cfg.theme.as_deref(), Some("cyberpunk"));
     }
 
@@ -322,7 +412,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.toml");
         std::fs::write(&path, "theme = \"normal\"\nfuture-key = 42\n").unwrap();
-        let cfg = load(&path);
+        let cfg = load(&path, &mut Vec::new());
         assert_eq!(cfg.theme.as_deref(), Some("normal"));
     }
 
@@ -331,7 +421,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.toml");
         save(&path, "dracula").unwrap();
-        let cfg = load(&path);
+        let cfg = load(&path, &mut Vec::new());
         assert_eq!(cfg.theme.as_deref(), Some("dracula"));
     }
 
@@ -341,7 +431,7 @@ mod tests {
             theme: Some("normal".into()),
             ..AppConfig::default()
         };
-        let theme = resolve_theme(&cfg, Some("dracula")).unwrap();
+        let theme = resolve_theme(&cfg, Some("dracula"), &mut Vec::new()).unwrap();
         assert_eq!(theme.name, "dracula");
     }
 
@@ -351,14 +441,14 @@ mod tests {
             theme: Some("gruvbox".into()),
             ..AppConfig::default()
         };
-        let theme = resolve_theme(&cfg, None).unwrap();
+        let theme = resolve_theme(&cfg, None, &mut Vec::new()).unwrap();
         assert_eq!(theme.name, "gruvbox");
     }
 
     #[test]
     fn resolve_all_none_uses_default() {
         let cfg = AppConfig::default();
-        let theme = resolve_theme(&cfg, None).unwrap();
+        let theme = resolve_theme(&cfg, None, &mut Vec::new()).unwrap();
         assert_eq!(theme.name, "normal");
     }
 
@@ -368,14 +458,14 @@ mod tests {
             theme: Some("does-not-exist".into()),
             ..AppConfig::default()
         };
-        let theme = resolve_theme(&cfg, None).unwrap();
+        let theme = resolve_theme(&cfg, None, &mut Vec::new()).unwrap();
         assert_eq!(theme.name, "normal");
     }
 
     #[test]
     fn resolve_invalid_cli_theme_hard_errors() {
         let cfg = AppConfig::default();
-        let err = resolve_theme(&cfg, Some("definitely-not-a-theme")).unwrap_err();
+        let err = resolve_theme(&cfg, Some("definitely-not-a-theme"), &mut Vec::new()).unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("unknown theme"), "got: {msg}");
         for t in crate::tui::theme::ALL_THEMES {
@@ -393,7 +483,7 @@ mod tests {
             theme: Some("does-not-exist".into()),
             ..AppConfig::default()
         };
-        let theme = resolve_theme(&cfg, Some("dracula")).unwrap();
+        let theme = resolve_theme(&cfg, Some("dracula"), &mut Vec::new()).unwrap();
         assert_eq!(theme.name, "dracula");
     }
 
@@ -405,7 +495,7 @@ mod tests {
             theme: Some("gruvbox".into()),
             ..AppConfig::default()
         };
-        assert!(resolve_theme(&cfg, Some("definitely-not-a-theme")).is_err());
+        assert!(resolve_theme(&cfg, Some("definitely-not-a-theme"), &mut Vec::new()).is_err());
     }
 
     #[test]
@@ -413,8 +503,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.toml");
         std::fs::write(&path, "theme = \"cyberpunk\"\n").unwrap();
-        let cfg = load(&path);
-        let theme = resolve_theme(&cfg, None).unwrap();
+        let cfg = load(&path, &mut Vec::new());
+        let theme = resolve_theme(&cfg, None, &mut Vec::new()).unwrap();
         assert_eq!(theme.name, "cyberpunk");
     }
 
@@ -423,8 +513,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.toml");
         std::fs::write(&path, "theme = \"cyberpunk\"\n").unwrap();
-        let cfg = load(&path);
-        let theme = resolve_theme(&cfg, Some("dracula")).unwrap();
+        let cfg = load(&path, &mut Vec::new());
+        let theme = resolve_theme(&cfg, Some("dracula"), &mut Vec::new()).unwrap();
         assert_eq!(theme.name, "dracula");
     }
 
@@ -435,7 +525,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.toml");
         std::fs::write(&path, "max-desks = 8\n").unwrap();
-        let cfg = load(&path);
+        let cfg = load(&path, &mut Vec::new());
         let cli_max_desks: Option<usize> = None;
         let desk_cap = cli_max_desks.or(cfg.max_desks);
         assert_eq!(desk_cap, Some(8));
@@ -446,7 +536,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.toml");
         std::fs::write(&path, "max-desks = 8\n").unwrap();
-        let cfg = load(&path);
+        let cfg = load(&path, &mut Vec::new());
         let cli_max_desks: Option<usize> = Some(4);
         let desk_cap = cli_max_desks.or(cfg.max_desks);
         assert_eq!(desk_cap, Some(4));
@@ -462,7 +552,7 @@ mod tests {
 
     #[test]
     fn max_desks_no_config_file() {
-        let cfg = load(Path::new("/nonexistent/path/config.toml"));
+        let cfg = load(Path::new("/nonexistent/path/config.toml"), &mut Vec::new());
         let cli_max_desks: Option<usize> = None;
         let desk_cap = cli_max_desks.or(cfg.max_desks);
         assert_eq!(desk_cap, None);
@@ -474,7 +564,7 @@ mod tests {
         let path = dir.path().join("config.toml");
         std::fs::write(&path, "theme = \"normal\"\nmax-desks = 8\n").unwrap();
         save(&path, "cyberpunk").unwrap();
-        let cfg = load(&path);
+        let cfg = load(&path, &mut Vec::new());
         assert_eq!(cfg.theme.as_deref(), Some("cyberpunk"));
         assert_eq!(cfg.max_desks, Some(8));
     }
@@ -525,7 +615,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.toml");
         std::fs::write(&path, "pack-dir = \"/custom/sprites\"\n").unwrap();
-        let cfg = load(&path);
+        let cfg = load(&path, &mut Vec::new());
         assert_eq!(cfg.pack_dir.as_deref(), Some("/custom/sprites"));
     }
 
@@ -534,7 +624,7 @@ mod tests {
     #[test]
     fn pets_absent_returns_all_with_default_names() {
         let cfg = AppConfig::default();
-        let pets = resolve_pets(&cfg);
+        let pets = resolve_pets(&cfg, &mut Vec::new());
         assert_eq!(pets.len(), crate::tui::pet::PetKind::ALL.len());
         for pet in &pets {
             assert_eq!(pet.name, pet.kind.default_name());
@@ -547,7 +637,7 @@ mod tests {
             pets: Some(vec![]),
             ..AppConfig::default()
         };
-        assert!(resolve_pets(&cfg).is_empty());
+        assert!(resolve_pets(&cfg, &mut Vec::new()).is_empty());
     }
 
     #[test]
@@ -565,7 +655,7 @@ mod tests {
             ]),
             ..AppConfig::default()
         };
-        let pets = resolve_pets(&cfg);
+        let pets = resolve_pets(&cfg, &mut Vec::new());
         assert_eq!(pets.len(), 1);
         assert_eq!(pets[0].kind, crate::tui::pet::PetKind::Cat);
         assert_eq!(pets[0].name, "Office Cat");
@@ -586,7 +676,7 @@ mod tests {
             ]),
             ..AppConfig::default()
         };
-        assert!(resolve_pets(&cfg).is_empty());
+        assert!(resolve_pets(&cfg, &mut Vec::new()).is_empty());
     }
 
     #[test]
@@ -604,7 +694,7 @@ mod tests {
             ]),
             ..AppConfig::default()
         };
-        let pets = resolve_pets(&cfg);
+        let pets = resolve_pets(&cfg, &mut Vec::new());
         let name = |k| pets.iter().find(|p| p.kind == k).map(|p| p.name.as_str());
         assert_eq!(name(crate::tui::pet::PetKind::Cat), Some("Whiskers"));
         assert_eq!(name(crate::tui::pet::PetKind::Dog), Some("Rex"));
@@ -619,7 +709,7 @@ mod tests {
             }]),
             ..AppConfig::default()
         };
-        assert_eq!(resolve_pets(&cfg)[0].name, "Office Dog");
+        assert_eq!(resolve_pets(&cfg, &mut Vec::new())[0].name, "Office Dog");
     }
 
     #[test]
@@ -637,7 +727,7 @@ mod tests {
             ]),
             ..AppConfig::default()
         };
-        let pets = resolve_pets(&cfg);
+        let pets = resolve_pets(&cfg, &mut Vec::new());
         let name = |k| pets.iter().find(|p| p.kind == k).map(|p| p.name.as_str());
         assert_eq!(name(crate::tui::pet::PetKind::Cat), Some("Mittens"));
         assert_eq!(name(crate::tui::pet::PetKind::Dog), Some("Office Dog"));
@@ -648,7 +738,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.toml");
         std::fs::write(&path, "[[pets]]\nkind = \"dog\"\n").unwrap();
-        let cfg = load(&path);
+        let cfg = load(&path, &mut Vec::new());
         assert_eq!(
             cfg.pets,
             Some(vec![PetEntry {
@@ -667,8 +757,8 @@ mod tests {
             "[[pets]]\nkind = \"cat\"\nname = \"Luna\"\n\n[[pets]]\nkind = \"dog\"\n",
         )
         .unwrap();
-        let cfg = load(&path);
-        let pets = resolve_pets(&cfg);
+        let cfg = load(&path, &mut Vec::new());
+        let pets = resolve_pets(&cfg, &mut Vec::new());
         assert_eq!(pets.len(), 2);
         let name = |k| pets.iter().find(|p| p.kind == k).map(|p| p.name.as_str());
         assert_eq!(name(crate::tui::pet::PetKind::Cat), Some("Luna"));
@@ -685,7 +775,7 @@ mod tests {
         )
         .unwrap();
         save(&path, "cyberpunk").unwrap();
-        let cfg = load(&path);
+        let cfg = load(&path, &mut Vec::new());
         assert_eq!(cfg.theme.as_deref(), Some("cyberpunk"));
         assert_eq!(
             cfg.pets,
@@ -738,13 +828,13 @@ mod tests {
             "theme = \"cyberpunk\"\n[[pets]]\nname = \"Ghost\"\n\n[[pets]]\nkind = \"cat\"\n",
         )
         .unwrap();
-        let cfg = load(&path);
+        let cfg = load(&path, &mut Vec::new());
         assert_eq!(
             cfg.theme.as_deref(),
             Some("cyberpunk"),
             "theme must survive a kindless [[pets]] stanza (config not reset)"
         );
-        let pets = resolve_pets(&cfg);
+        let pets = resolve_pets(&cfg, &mut Vec::new());
         assert_eq!(
             pets.len(),
             1,
@@ -760,7 +850,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.toml");
         save_version(&path, "0.4.0").unwrap();
-        let cfg = load(&path);
+        let cfg = load(&path, &mut Vec::new());
         assert_eq!(cfg.last_seen_version.as_deref(), Some("0.4.0"));
     }
 
@@ -770,7 +860,7 @@ mod tests {
         let path = dir.path().join("config.toml");
         std::fs::write(&path, "theme = \"cyberpunk\"\n").unwrap();
         save_version(&path, "0.4.0").unwrap();
-        let cfg = load(&path);
+        let cfg = load(&path, &mut Vec::new());
         assert_eq!(cfg.theme.as_deref(), Some("cyberpunk"));
         assert_eq!(cfg.last_seen_version.as_deref(), Some("0.4.0"));
     }

@@ -216,13 +216,18 @@ pub async fn run_tui(
     config_path: std::path::PathBuf,
     desk_cap: Option<usize>,
     pets: Vec<pet::Pet>,
+    mut source_health: tokio::sync::watch::Receiver<
+        Vec<pixtuoid_core::source::manager::SourceDeath>,
+    >,
 ) -> Result<()> {
     let pack = embedded_pack::load_sprite_pack(pack_dir)?;
     let term = setup_terminal()?;
     let mut renderer = TuiRenderer::new(term, theme, pets);
     let mut version_popup = {
         let current_ver = env!("CARGO_PKG_VERSION");
-        let cfg = crate::config::load(&config_path);
+        // Post-altscreen re-load for last_seen_version only — any config
+        // warning was already surfaced by main's pre-altscreen pass.
+        let cfg = crate::config::load(&config_path, &mut Vec::new());
         let decision = crate::version::boot_decision(current_ver, cfg.last_seen_version.as_deref());
         // Persist the current version immediately so the popup shows at
         // most once per upgrade, regardless of how the user exits this run
@@ -264,6 +269,9 @@ pub async fn run_tui(
             }
             renderer.set_theme_picker(theme_picker);
             renderer.set_version_popup(version_popup, now);
+            renderer.set_source_warning(widgets::source_warning_message(
+                &source_health.borrow_and_update(),
+            ));
             renderer.render(&snapshot, &pack, now)?;
 
             // Auto-compute per-floor desk capacity from the current

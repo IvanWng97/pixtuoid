@@ -62,6 +62,9 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     version_popup: bool,
     version_popup_started_at: Option<SystemTime>,
     help_open: bool,
+    /// Footer warning when a source has died (#157); `None` while healthy.
+    /// Set per-frame from the runtime's health channel, like the popup state.
+    source_warning: Option<String>,
     /// Live walkable/approach/route debug layer toggle (`w`). Off by default,
     /// transient (not persisted).
     debug_walkable: bool,
@@ -102,6 +105,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             version_popup: false,
             version_popup_started_at: None,
             help_open: false,
+            source_warning: None,
             debug_walkable: false,
             version_popup_scale_at_edge: 0.0,
             last_popup_scale: 0.0,
@@ -215,6 +219,10 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
 
     pub fn set_theme_picker(&mut self, picker: Option<usize>) {
         self.theme_picker = picker;
+    }
+
+    pub fn set_source_warning(&mut self, warning: Option<String>) {
+        self.source_warning = warning;
     }
 
     pub fn set_version_popup(&mut self, v: bool, now: SystemTime) {
@@ -466,6 +474,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
 
         let theme = self.theme;
         let theme_picker = self.theme_picker;
+        let source_warning = self.source_warning.clone();
         let help_open = self.help_open;
         // Floor label tracks the destination floor for the duration of the
         // slide so the per-floor agent count in the footer matches the
@@ -482,6 +491,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                 actual_full,
                 theme,
                 transition_floor_info,
+                source_warning.as_deref(),
             );
             flush_buffer_to_term_at_offset(f, from_buf, actual_scene, from_offset);
             flush_buffer_to_term_at_offset(f, to_buf, actual_scene, to_offset);
@@ -638,6 +648,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> Renderer for TuiRenderer<B> {
             new_coffee_carriers: Vec::new(),
             popup_scale,
             help_open: self.help_open,
+            source_warning: self.source_warning.as_deref(),
         };
         let result = draw_scene(&mut self.terminal, &floor_scene, pack, now, &mut draw_ctx);
         self.last_pet_pos = draw_ctx.last_pet_pos;

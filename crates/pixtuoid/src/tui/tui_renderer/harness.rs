@@ -1025,6 +1025,50 @@ fn footer_shows_agent_count() {
 // ===================================================================
 
 #[test]
+fn footer_shows_source_death_warning() {
+    let scene = scene_with(vec![idle("/f/0.jsonl", 0, t0())], 16);
+    let mut r = build(140, 44, vec![]);
+    r.set_source_warning(Some(
+        "claude-code source died — its agents are frozen; restart pixtuoid (see log)".into(),
+    ));
+    r.render(&scene, &pack(), t0()).unwrap();
+    let text = frame_text(r.frame_buffer());
+    assert!(
+        text.contains("source died") && text.contains("restart pixtuoid"),
+        "the footer must surface a dead source (#157); footer row:\n{}",
+        text.lines().last().unwrap_or("")
+    );
+    // And it clears once healthy again (e.g. after a future restart-in-place).
+    r.set_source_warning(None);
+    r.render(&scene, &pack(), t0()).unwrap();
+    let text = frame_text(r.frame_buffer());
+    assert!(
+        !text.contains("source died"),
+        "footer returns to stats when no source is dead"
+    );
+}
+
+#[test]
+fn source_death_warning_survives_floor_transition() {
+    let scene = two_floor_scene();
+    let mut r = build(120, 44, vec![]);
+    let mut now = t0();
+    r.render(&scene, &pack(), now).unwrap();
+    r.set_source_warning(Some(
+        "claude-code source died — its agents are frozen; restart pixtuoid (see log)".into(),
+    ));
+    r.navigate_floor(1, now);
+    now += Duration::from_millis(200); // mid-transition
+    r.render(&scene, &pack(), now).unwrap();
+    assert!(r.transition().is_some(), "still mid-transition");
+    let text = frame_text(r.frame_buffer());
+    assert!(
+        text.contains("source died"),
+        "the warning must not vanish during the ~400ms floor slide"
+    );
+}
+
+#[test]
 fn version_popup_active_during_floor_transition() {
     let scene = two_floor_scene();
     let mut r = build(120, 44, vec![]);

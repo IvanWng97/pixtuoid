@@ -147,6 +147,11 @@ struct SnapshotArgs {
     #[arg(long)]
     help_open: bool,
 
+    /// Force the source-death footer warning (#157) with the given source
+    /// name (for screenshots), e.g. --source-warning claude-code.
+    #[arg(long)]
+    source_warning: Option<String>,
+
     /// Force the theme picker open at the given row index (for screenshots).
     #[arg(long)]
     theme_picker: Option<usize>,
@@ -357,6 +362,9 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
+    let warning_text = args.source_warning.as_deref().map(|src| {
+        format!("{src} source died — its agents are frozen; restart pixtuoid (see log)")
+    });
     let mut chitchat_state = std::collections::HashMap::new();
     let mut light = pixtuoid::tui::floor::LightingState::new();
     let mut motion: std::collections::HashMap<
@@ -402,6 +410,7 @@ fn main() -> Result<()> {
         new_coffee_carriers: Vec::new(),
         popup_scale: if args.popup { 1.0 } else { 0.0 },
         help_open: args.help_open,
+        source_warning: warning_text.as_deref(),
     };
     draw_scene(&mut term, &scene, &pack, now, &mut draw_ctx)?;
 
@@ -1086,6 +1095,7 @@ fn save_as_gif(
             new_coffee_carriers: Vec::new(),
             popup_scale: 0.0,
             help_open: false,
+            source_warning: None,
         };
         draw_scene(term, scene, pack, now, &mut draw_ctx)?;
         if i < skip_frames {

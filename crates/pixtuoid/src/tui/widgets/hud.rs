@@ -86,15 +86,35 @@ pub(in crate::tui) fn paint_theme_picker(
     f.render_widget(Paragraph::new(items).block(block), area);
 }
 
+/// One-line footer warning for dead sources (#157); `None` while healthy.
+/// Deliberately terse — it shares the footer row — with the full error in the
+/// log file (always written since #157's logging fix).
+pub(in crate::tui) fn source_warning_message(
+    deaths: &[pixtuoid_core::source::manager::SourceDeath],
+) -> Option<String> {
+    match deaths {
+        [] => None,
+        [d] => Some(format!(
+            "{} source died — its agents are frozen; restart pixtuoid (see log)",
+            d.source
+        )),
+        many => Some(format!(
+            "{} sources died — restart pixtuoid (see log)",
+            many.len()
+        )),
+    }
+}
+
 pub(in crate::tui) fn paint_footer(
     f: &mut ratatui::Frame<'_>,
     scene: &SceneState,
     full_rect: Rect,
     theme: &crate::tui::theme::Theme,
     floor_info: Option<crate::tui::renderer::FloorInfo>,
+    source_warning: Option<&str>,
 ) {
     use ratatui::text::Line;
-    let spans = build_status_spans(scene, full_rect.width, floor_info, theme);
+    let spans = build_status_spans(scene, full_rect.width, floor_info, theme, source_warning);
     // Base style on the whole row (label_idle) for parity with the old
     // single-Span footer: cells past the rendered spans (quit-only tier on a
     // wide-ish terminal) keep the muted footer tone rather than default.
@@ -122,6 +142,10 @@ enum SegRole {
     Active,
     Waiting,
     Idle,
+    /// Source-death warning (#157) — reuses the Waiting attention color
+    /// rather than adding a theme key (the un-themed-semantic-color audit's
+    /// nearest themed precedent for "needs your eyes").
+    Warning,
 }
 
 impl SegRole {
@@ -129,7 +153,7 @@ impl SegRole {
         match self {
             SegRole::Neutral | SegRole::Idle => to_color(theme.ui.label_idle),
             SegRole::Active => to_color(theme.ui.label_active),
-            SegRole::Waiting => to_color(theme.ui.label_waiting),
+            SegRole::Waiting | SegRole::Warning => to_color(theme.ui.label_waiting),
         }
     }
 }
@@ -152,7 +176,30 @@ fn status_segments(
     scene: &SceneState,
     term_width: u16,
     floor_info: Option<crate::tui::renderer::FloorInfo>,
+    source_warning: Option<&str>,
 ) -> Vec<(String, SegRole)> {
+    // A dead source outranks the stats (#157): the counts below silently go
+    // stale once a transport is gone, so the warning IS the status until
+    // restart. It survives every width — truncated to fit rather than
+    // tiered away — keeping the quit suffix (the advice is to restart).
+    if let Some(warn) = source_warning {
+        let w = term_width as usize;
+        let quit = " [q]uit ";
+        let avail = w.saturating_sub(quit.len());
+        let mut text = format!(" ⚠ {warn} ");
+        if text.chars().count() > avail {
+            text = text.chars().take(avail.saturating_sub(1)).collect();
+            text.push('…');
+        }
+        let pad = w.saturating_sub(text.chars().count() + quit.len());
+        let mut out = vec![(text, SegRole::Warning)];
+        if pad > 0 {
+            out.push((" ".repeat(pad), SegRole::Neutral));
+        }
+        out.push((quit.to_string(), SegRole::Neutral));
+        return out;
+    }
+
     let n = scene.agents.len();
     // Multi-floor view always shows `n/total` so the total stays visible
     // even when an agent migrates and per-floor matches total transiently.
@@ -255,8 +302,9 @@ pub(in crate::tui) fn build_status_summary(
     scene: &SceneState,
     term_width: u16,
     floor_info: Option<crate::tui::renderer::FloorInfo>,
+    source_warning: Option<&str>,
 ) -> String {
-    status_segments(scene, term_width, floor_info)
+    status_segments(scene, term_width, floor_info, source_warning)
         .into_iter()
         .map(|(s, _)| s)
         .collect()
@@ -269,8 +317,9 @@ pub(in crate::tui) fn build_status_spans<'a>(
     term_width: u16,
     floor_info: Option<crate::tui::renderer::FloorInfo>,
     theme: &crate::tui::theme::Theme,
+    source_warning: Option<&str>,
 ) -> Vec<Span<'a>> {
-    status_segments(scene, term_width, floor_info)
+    status_segments(scene, term_width, floor_info, source_warning)
         .into_iter()
         .map(|(s, role)| Span::styled(s, Style::default().fg(role.color(theme))))
         .collect()
@@ -754,7 +803,7 @@ mod hud_tests {
         scene.agents.insert(slot.agent_id, slot);
         // No '×' tool breakdown token survives — the empty leading token was
         // skipped, so the active agent contributes no tool count.
-        let line = build_status_summary(&scene, 200, None);
+        let line = build_status_summary(&scene, 200, None, None);
         assert!(
             !line.contains('\u{00d7}'),
             "empty leading token must not produce a tool count: {line}"

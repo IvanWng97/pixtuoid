@@ -18,7 +18,9 @@ src/
 │                       decoder.rs (shared utils + decode_hook_payload, a registry-driven dispatcher),
 │                       hook/ (HookSocketListener facade — mod.rs shared generic handle_conn over AsyncRead [ONE framing/decode path for both transports], unix.rs UnixListener+umask, windows.rs named-pipe accept loop), jsonl.rs (JsonlWatcher + walk_jsonl's unified first-sight gate should_seed_at_eof),
 │                       claude_code.rs / codex.rs / antigravity.rs (per-source decode + label fns + Source impls),
-│                       manager.rs (SourceManager::spawn / with_source)
+│                       manager.rs (SourceManager::spawn / with_source / spawn_with_health —
+│                       publishes SourceDeath on a watch channel so the binary can surface a
+│                       fatal source exit in the TUI footer, #157; plain data, invariant #1 holds)
 ├── state/              SceneState + Reducer (event coordinator: Transport-tagged dedup, the
 │                       cross-slot active_tasks/gated_before_waiting correlation, the sweeps) +
 │                       fsm.rs (Layer-A per-agent transitions) + scope.rs (Layer-B parent↔subagent tree)

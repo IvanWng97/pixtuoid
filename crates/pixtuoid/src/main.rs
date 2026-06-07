@@ -1,5 +1,5 @@
 use std::fs::OpenOptions;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
@@ -15,29 +15,47 @@ fn main() -> Result<()> {
         || EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(&log_level));
 
     // Log routing:
-    //   TUI mode: silent by default (no file, no stderr). Only logs when
-    //     $PIXTUOID_LOG is set or --log-level is debug/trace.
+    //   TUI mode: ALWAYS log to the file (#157) — the alternate screen owns
+    //     the terminal, so the log file is the only place a runtime error
+    //     ("source died", decode failures) can surface. The default floor is
+    //     `warn`; $RUST_LOG, $PIXTUOID_LOG, or --log-level raise/shape it.
     //     Crash reporting is handled separately by the panic hook.
     //   Non-TUI (install-hooks, uninstall-hooks, --headless): stderr.
     let tui_active = matches!(&cmd, Cmd::Run { headless, .. } if !*headless);
     let wants_verbose = matches!(log_level.as_str(), "debug" | "trace");
-    let explicit_log_file = std::env::var("PIXTUOID_LOG").is_ok();
+    // The env var's VALUE is the log file path — an empty value would
+    // "enable" file mode with an unopenable path; treat it as unset.
+    let explicit_log_file = std::env::var("PIXTUOID_LOG").is_ok_and(|v| !v.is_empty());
 
-    if tui_active && (wants_verbose || explicit_log_file) {
+    if tui_active {
+        // Explicit verbosity keeps today's semantics (the full --log-level /
+        // RUST_LOG filter); the always-on default floors at warn so the file
+        // captures errors without accumulating info-level noise.
+        let filter = if wants_verbose || explicit_log_file {
+            make_filter()
+        } else {
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+                EnvFilter::new(match log_level.as_str() {
+                    lvl @ ("warn" | "error") => lvl,
+                    _ => "warn",
+                })
+            })
+        };
         if let Ok(path) = log_file_path() {
             if let Some(parent) = path.parent() {
                 let _ = std::fs::create_dir_all(parent);
             }
+            rotate_if_large(&path);
             if let Ok(f) = OpenOptions::new().create(true).append(true).open(&path) {
                 let writer = Arc::new(Mutex::new(f));
                 tracing_subscriber::fmt()
-                    .with_env_filter(make_filter())
+                    .with_env_filter(filter)
                     .with_ansi(false)
                     .with_writer(move || MutexFileWriter(writer.clone()))
                     .init();
             }
         }
-    } else if !tui_active {
+    } else {
         tracing_subscriber::fmt()
             .with_env_filter(make_filter())
             .with_writer(std::io::stderr)
@@ -54,11 +72,23 @@ fn main() -> Result<()> {
             headless,
         } => {
             let cfg_path = config::config_path();
-            let cfg = config::load(&cfg_path);
-            let theme = config::resolve_theme(&cfg, cli_theme.as_deref())?;
+            let mut cfg_warnings = Vec::new();
+            let cfg = config::load(&cfg_path, &mut cfg_warnings);
+            let theme = config::resolve_theme(&cfg, cli_theme.as_deref(), &mut cfg_warnings)?;
             let desk_cap = cli_max_desks.or(cfg.max_desks);
             let pack_dir = config::resolve_pack_dir(&cfg, pack_dir);
-            let pets = config::resolve_pets(&cfg);
+            let pets = config::resolve_pets(&cfg, &mut cfg_warnings);
+            // Config problems must reach the user's eyes, not only the log
+            // file (#87): print to stderr BEFORE the alternate screen takes
+            // the terminal (visible again in scrollback after exit — the
+            // crash hook's channel). Headless already has a stderr tracing
+            // subscriber, so the warns above reached stderr there; printing
+            // again would duplicate them.
+            if !headless {
+                for w in &cfg_warnings {
+                    eprintln!("⚠ pixtuoid: {w}");
+                }
+            }
             runtime::run(runtime::RunConfig {
                 socket,
                 projects_root,
@@ -254,8 +284,12 @@ fn crash_log_path() -> PathBuf {
 }
 
 fn log_file_path() -> Result<PathBuf> {
+    // Empty value = unset (the value is the PATH, not an on/off toggle; an
+    // empty path would silently fail to open and log nothing).
     if let Ok(p) = std::env::var("PIXTUOID_LOG") {
-        return Ok(PathBuf::from(p));
+        if !p.is_empty() {
+            return Ok(PathBuf::from(p));
+        }
     }
     if let Ok(state) = std::env::var("XDG_STATE_HOME") {
         return Ok(PathBuf::from(format!("{state}/pixtuoid/log")));
@@ -266,6 +300,18 @@ fn log_file_path() -> Result<PathBuf> {
         .join(".cache")
         .join("pixtuoid")
         .join("log"))
+}
+
+/// The append-only log was opt-in before #157; now that it is always on in
+/// TUI mode it needs a growth bound. One-deep rotation at startup (log →
+/// log.old) keeps the last two generations without a rotation dependency.
+const LOG_ROTATE_BYTES: u64 = 5 * 1024 * 1024;
+
+fn rotate_if_large(path: &Path) {
+    let too_large = std::fs::metadata(path).is_ok_and(|m| m.len() > LOG_ROTATE_BYTES);
+    if too_large {
+        let _ = std::fs::rename(path, path.with_extension("old"));
+    }
 }
 
 /// Adapter that gives `tracing-subscriber` a `Write`-able file behind a Mutex.
@@ -291,6 +337,28 @@ mod tests {
     use std::path::Path;
 
     use super::*;
+
+    #[test]
+    fn rotate_if_large_rotates_once_past_the_cap() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("log");
+
+        // Small file: untouched.
+        std::fs::write(&log, b"recent").unwrap();
+        rotate_if_large(&log);
+        assert!(log.exists(), "under-cap log must not rotate");
+
+        // Over the cap (sparse via set_len — no real 5MB write).
+        let f = std::fs::OpenOptions::new().write(true).open(&log).unwrap();
+        f.set_len(LOG_ROTATE_BYTES + 1).unwrap();
+        drop(f);
+        rotate_if_large(&log);
+        assert!(!log.exists(), "over-cap log rotates away");
+        assert!(
+            log.with_extension("old").exists(),
+            "one prior generation is kept"
+        );
+    }
 
     #[test]
     fn truncate_ascii() {
