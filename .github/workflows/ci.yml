@@ -174,12 +174,21 @@ jobs:
           echo '{}' > /tmp/smoke-test/.claude/settings.json
           HOME=/tmp/smoke-test ./target/release/pixtuoid install-hooks
           HOME=/tmp/smoke-test ./target/release/pixtuoid uninstall-hooks
-      - name: snapshot renders without crash
-        run: ./target/release/examples/snapshot /tmp/smoke-snapshot.png
-      - name: Upload snapshot artifact
+      - name: Set up Python virtual environment
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install -r requirements-dev.txt
+      - name: Render deterministic snapshot
+        run: ./target/release/examples/snapshot --theme normal --cols 192 --rows 64 --now-hour 19 --now-day 1 /tmp/smoke-snapshot.png
+      - name: Visual regression check
+        run: .venv/bin/python3 scripts/compare-screenshots.py docs/images/reference-screenshot.png /tmp/smoke-snapshot.png /tmp/diff-snapshot.png
+      - name: Upload snapshot artifacts
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: smoke-snapshot
-          path: /tmp/smoke-snapshot.png
+          name: smoke-snapshots
+          path: |
+            /tmp/smoke-snapshot.png
+            /tmp/diff-snapshot.png
           retention-days: 7
+
