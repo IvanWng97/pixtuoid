@@ -385,4 +385,20 @@ mod tests {
             paths.projects_root
         );
     }
+
+    // CC on Windows slugs an absolute path like `C:\Users\foo\bar` into a project
+    // dir name using `[^a-zA-Z0-9]→'-'` (regex from upstream CC source, drive
+    // letter kept, no leading dash): `C--Users-foo-bar`. The fallback path in
+    // `cc_derive_label` (empty cwd → rsplit on '-' → last non-empty segment)
+    // must extract the project-basename `bar` and produce `cc·bar`. Verified
+    // against upstream CC; real hook-payload fixture lands post-tester (PR 5).
+    #[test]
+    fn label_falls_back_to_project_dir_for_windows_slug() {
+        // Windows slug: C:\Users\foo\bar  →  C--Users-foo-bar
+        let path = Path::new("/Users/me/.claude/projects/C--Users-foo-bar/abc.jsonl");
+        assert_eq!(
+            cc_derive_label(path, "claude-code", Path::new("")),
+            "cc·bar"
+        );
+    }
 }

@@ -879,3 +879,114 @@ fn decode_hook_payload_missing_tool_name_still_succeeds() {
         other => panic!("expected ActivityStart, got {other:?}"),
     }
 }
+
+// The hook payload's transcript_path and the watcher's walked path must hash
+// to ONE AgentId or every CC session renders as two sprites (hook-wins dedup
+// and permission-Waiting silently die). Unix: byte-identity. Windows: the
+// hook emits backslashes while the watcher walks native paths — both fold
+// through normalize_path_key. Pinned via the REAL seams on both sides (no
+// inline re-simulation).
+#[tokio::test]
+async fn hook_and_watcher_keys_coalesce_for_one_file() {
+    use pixtuoid_core::source::claude_code::{cc_derive_label, cc_session_ended, decode_cc_line};
+    use pixtuoid_core::source::jsonl::{force_polling_backend_for_tests, JsonlWatcher};
+    use pixtuoid_core::source::Transport;
+    use std::time::Duration;
+    use tempfile::TempDir;
+    use tokio::io::AsyncWriteExt;
+    use tokio::sync::mpsc;
+
+    force_polling_backend_for_tests(Duration::from_millis(25));
+
+    let dir = TempDir::new().unwrap();
+    let projects_root = dir.path().to_path_buf();
+    let project_dir = projects_root.join("proj-coalesce");
+    tokio::fs::create_dir_all(&project_dir).await.unwrap();
+    let transcript = project_dir.join("ses-coalesce.jsonl");
+
+    // Hook side: decode a SessionStart payload whose transcript_path is the
+    // native string form of the same file.
+    let transcript_str = transcript.to_string_lossy().to_string();
+    let hook_payload = serde_json::json!({
+        "hook_event_name": "SessionStart",
+        "session_id": "ses-coalesce",
+        "transcript_path": transcript_str,
+        "cwd": "/repo"
+    });
+    let hook_id = decode_hook_payload(hook_payload).unwrap().agent_id();
+
+    // Watcher side: run a real JsonlWatcher over projects_root, write a
+    // session_start line, and capture the SessionStart AgentId.
+    let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(32);
+    let watcher = JsonlWatcher::new(
+        projects_root.clone(),
+        "claude-code".to_string(),
+        decode_cc_line,
+        cc_derive_label,
+        cc_session_ended,
+    );
+    let handle = tokio::spawn(async move { watcher.run(tx).await });
+
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let mut f = tokio::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&transcript)
+        .await
+        .unwrap();
+    let start_line = serde_json::json!({
+        "type": "system",
+        "subtype": "session_start",
+        "sessionId": "ses-coalesce",
+        "cwd": "/repo"
+    });
+    f.write_all(format!("{start_line}\n").as_bytes())
+        .await
+        .unwrap();
+    f.flush().await.unwrap();
+    drop(f);
+
+    let mut watcher_id: Option<AgentId> = None;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    while tokio::time::Instant::now() < deadline {
+        match tokio::time::timeout(Duration::from_millis(200), rx.recv()).await {
+            Ok(Some((_, ev @ AgentEvent::SessionStart { .. }))) => {
+                watcher_id = Some(ev.agent_id());
+                break;
+            }
+            Ok(Some(_)) => {}
+            Ok(None) | Err(_) => {}
+        }
+    }
+    handle.abort();
+
+    let watcher_id = watcher_id.expect("watcher must emit SessionStart");
+    assert_eq!(
+        hook_id, watcher_id,
+        "hook AgentId ({hook_id}) must equal watcher AgentId ({watcher_id}) for the \
+         same file — mismatching IDs split one session into two sprites"
+    );
+}
+
+// The two forms CC actually emits for one file (mixed-separator/case class).
+#[cfg(windows)]
+#[test]
+fn mixed_separator_and_case_forms_coalesce_on_windows() {
+    let a = serde_json::json!({
+        "hook_event_name": "SessionStart",
+        "session_id": "s1",
+        "transcript_path": r"C:\Users\Me\.claude\projects\X\s1.jsonl"
+    });
+    let b = serde_json::json!({
+        "hook_event_name": "SessionStart",
+        "session_id": "s1",
+        "transcript_path": "C:/users/me/.claude/projects/x/s1.jsonl"
+    });
+    assert_eq!(
+        decode_hook_payload(a).unwrap().agent_id(),
+        decode_hook_payload(b).unwrap().agent_id(),
+        "backslash and forward-slash forms of the same Windows path must produce \
+         the same AgentId after normalize_path_key folds both to lowercase forward-slashes"
+    );
+}
