@@ -77,6 +77,18 @@ jobs:
       - uses: extractions/setup-just@v4
       - run: just hack
 
+  windows-check:
+    name: windows-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - uses: Swatinem/rust-cache@v2
+      - uses: extractions/setup-just@v4
+      - run: just check-windows
+
   semver:
     name: semver-checks
     runs-on: ubuntu-latest

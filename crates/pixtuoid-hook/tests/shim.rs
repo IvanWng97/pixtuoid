@@ -1,3 +1,4 @@
+#![cfg(unix)]
 //! Integration tests for the hook shim BINARY's I/O contract (invariant #5:
 //! "always exit 0, never block CC"). The unit tests in main.rs only cover the
 //! pure `enrich_payload`; these spawn the real binary and exercise the
