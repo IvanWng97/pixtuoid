@@ -58,6 +58,17 @@ pub fn release_notes(version: &str) -> Option<&'static [&'static str]> {
         // anchoring on a marker is whitespace-independent — matching the `match`
         // brace would silently break if the indentation ever shifted.
         // [bump-inject-here]
+        // LIVING DRAFT — 0.6.0 is the open breaking-dev window: the version is
+        // bumped at window START so the CI semver gate admits the batched
+        // breaking changes (#145, #131, …); the tag/publish only happens when
+        // the window stabilizes. Re-curate from `git log v0.5.0..HEAD` before
+        // tagging.
+        "0.6.0" => Some(&[
+            "Windows support: named-pipe hook transport + full CI suite",
+            "Diagnostics you can see: source-death footer warning, config warnings on stderr, always-on log file",
+            "Session-lifecycle hardening: dedup, completion-cascade, and permission-gate race fixes",
+            "Marketing site: live demos, architecture docs, weather gallery",
+        ]),
         "0.4.0" => Some(&[
             "Renamed from ascii-agents to pixtuoid",
             "Run `pixtuoid install-hooks` to update hooks",
