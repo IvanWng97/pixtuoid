@@ -89,6 +89,21 @@ jobs:
       - uses: extractions/setup-just@v4
       - run: just check-windows
 
+  windows-test:
+    name: windows-test
+    # Pinned to windows-2022 during the VS 2026 migration of windows-latest
+    # (June 8-15, 2026); unpin once the migration settles (tracked carry-item).
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: extractions/setup-just@v4
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@cargo-nextest
+      - run: just test
+
   semver:
     name: semver-checks
     runs-on: ubuntu-latest
