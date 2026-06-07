@@ -26,7 +26,11 @@ pub fn default_socket_path() -> String {
         // server-side DACL (spec §2). USERNAME is std-only, present in any
         // login session, and computed identically by shim and daemon
         // (parity-pinned in pixtuoid-core/tests/socket_path_parity.rs).
-        let user = std::env::var("USERNAME").unwrap_or_else(|_| "default".into());
+        // Backslashes are sanitized: pipe names can't contain them, and
+        // enterprise boxes do set USERNAME=DOMAIN\user.
+        let user = std::env::var("USERNAME")
+            .unwrap_or_else(|_| "default".into())
+            .replace('\\', "-");
         format!(r"\\.\pipe\pixtuoid-{user}")
     }
 }

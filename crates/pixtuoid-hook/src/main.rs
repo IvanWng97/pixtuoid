@@ -161,6 +161,10 @@ mod tests {
         std::env::set_var("USERNAME", "ada");
         assert_eq!(default_socket_path(), r"\\.\pipe\pixtuoid-ada");
 
+        // DOMAIN\user form is sanitized (backslashes are illegal in pipe names).
+        std::env::set_var("USERNAME", r"CORP\alice");
+        assert_eq!(default_socket_path(), r"\\.\pipe\pixtuoid-CORP-alice");
+
         std::env::remove_var("USERNAME");
         assert_eq!(default_socket_path(), r"\\.\pipe\pixtuoid-default");
 

@@ -68,7 +68,7 @@ fn shim_and_daemon_resolve_identical_socket_paths_in_all_three_branches() {
 // of invariant #3 from that point on.
 #[cfg(windows)]
 #[test]
-fn shim_and_daemon_resolve_identical_pipe_names_in_all_three_branches() {
+fn shim_and_daemon_resolve_identical_pipe_names_in_all_branches() {
     let saved_socket = std::env::var_os("PIXTUOID_SOCKET");
     let saved_user = std::env::var_os("USERNAME");
 
@@ -85,7 +85,15 @@ fn shim_and_daemon_resolve_identical_pipe_names_in_all_three_branches() {
     assert_eq!(shim, daemon, "USERNAME default branch diverged");
     assert_eq!(shim, PathBuf::from(r"\\.\pipe\pixtuoid-parity"));
 
-    // Branch 3: USERNAME absent → the shared "default" fallback on both sides.
+    // Branch 3: DOMAIN\user-form USERNAME is sanitized identically on both
+    // sides (backslashes are illegal in pipe names; enterprise boxes set
+    // USERNAME=DOMAIN\user).
+    std::env::set_var("USERNAME", r"CORP\alice");
+    let (shim, daemon) = both();
+    assert_eq!(shim, daemon, "USERNAME sanitize branch diverged");
+    assert_eq!(shim, PathBuf::from(r"\\.\pipe\pixtuoid-CORP-alice"));
+
+    // Branch 4: USERNAME absent → the shared "default" fallback on both sides.
     std::env::remove_var("USERNAME");
     let (shim, daemon) = both();
     assert_eq!(shim, daemon, "USERNAME-absent fallback branch diverged");
