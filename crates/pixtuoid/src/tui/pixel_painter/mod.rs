@@ -858,17 +858,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
         });
     }
 
-    // Wall decor — hung on walls, TOP-LEFT anchored at `pos`, so its y-sort
-    // row is its south base (`pos.y + h - 1`), same helper the mask + every
-    // other drawable use. (Was a hand-rolled `pos.y + h`, one row past the
-    // sprite's actual bottom.)
-    for &WallDecorItem { kind, pos } in &ctx.layout.wall_decor {
-        let Size { h, .. } = crate::tui::layout::furniture_def(kind.furniture()).visual;
-        drawables.push(Drawable {
-            anchor_y: z_sort_row(Anchor::TopLeft, pos, h),
-            kind: DrawableKind::WallDecor { kind, pos },
-        });
-    }
+    enqueue_wall_decor(ctx.layout, &mut drawables);
 
     let idle_desk_indices: Vec<usize> = agents
         .iter()
@@ -1313,6 +1303,21 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
         pet_pos: resolved_pet_pos,
         chitchat_bubbles,
         new_coffee_carriers,
+    }
+}
+
+/// Enqueue wall decor (clocks/whiteboards hung on walls). TOP-LEFT anchored
+/// at `pos`, so the y-sort row is the sprite's south base (`pos.y + h - 1`),
+/// the same `z_sort_row` helper the mask and every other drawable use. A
+/// pure furniture phase of `render_to_rgb_buffer` — borrows nothing from the
+/// agent set, so it carries no character lifetime.
+fn enqueue_wall_decor<'a>(layout: &'a Layout, drawables: &mut Vec<Drawable<'a>>) {
+    for &WallDecorItem { kind, pos } in &layout.wall_decor {
+        let Size { h, .. } = crate::tui::layout::furniture_def(kind.furniture()).visual;
+        drawables.push(Drawable {
+            anchor_y: z_sort_row(Anchor::TopLeft, pos, h),
+            kind: DrawableKind::WallDecor { kind, pos },
+        });
     }
 }
 
