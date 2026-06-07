@@ -33,7 +33,7 @@ crates/
 ├── pixtuoid/           binary — ratatui + crossterm + tokio + clap
 │                       cli.rs config.rs runtime/ install/ tui/ sprites/ (default/robot/skeleton packs)
 │                       → see crates/pixtuoid/CLAUDE.md and crates/pixtuoid/src/tui/CLAUDE.md
-└── pixtuoid-hook/      tiny shim CC invokes — stdin JSON → Unix socket, 200ms write timeout
+└── pixtuoid-hook/      tiny shim CC invokes — stdin JSON → Unix socket (Unix) / named pipe (Windows) via transport.rs, 200ms send bound
 scripts/                crop-snapshot.py (visual verification),
                         gen-docs-images.py (regenerate ALL docs/images screenshots + demo.gif
                         from a release build — single source of truth; run via `just demo`),
@@ -110,7 +110,8 @@ just fmt          # auto-format
 with `test-renderer` on. `semver` and `coverage`/`smoke` are CI-only. The
 semver gate checks **`pixtuoid-core` only** — the `pixtuoid` binary's lib
 target is an internal-facing surface for examples/integration tests, not a
-semver surface, so its `pub` paths may move without a major bump.)
+semver surface, so its `pub` paths may move without a major bump.
+`check-windows` cross-checks the workspace for `x86_64-pc-windows-msvc` on every PR (compile-only, no linking).)
 
 Run `just preflight` locally to avoid the round-trip of "push → wait for CI →
 red → fix → push again."
@@ -152,7 +153,7 @@ Needs cargo-edit (`just setup-tools`). See [`CONTRIBUTING.md`](docs/CONTRIBUTING
 - **Errors propagate via `anyhow::Result` in app code, `thiserror` in core if a typed error becomes load-bearing.** The hook listener and JSONL watcher log + continue on malformed input — they never panic.
 - **No `unwrap()` in non-test code.** Tests can unwrap freely.
 - **Match the surrounding shell:** scripts in this repo target zsh (interactive) or POSIX sh. `shellcheck` any `.sh` you touch.
-- **macOS first.** BSD-flavored CLI, brew, launchd for daemons. The hook shim is Unix-socket specific (`std::os::unix::net::UnixStream`).
+- **macOS first.** BSD-flavored CLI, brew, launchd for daemons. The hook shim uses a Unix socket on Unix (`std::os::unix::net::UnixStream`) and a named pipe on Windows — transport selection is in `pixtuoid-hook/src/transport.rs`.
 - **Keep docs current.** When a change alters module structure, architecture, developer workflow, or the public API surface, update the relevant `CLAUDE.md` (workspace or nested) and `README.md` in the same commit. Stale docs cost more than the 5 minutes to update them.
 - **Track every deferred finding as a GitHub issue.** When a review finding, bug, or improvement is real but you consciously defer it (out of scope for the current PR, low-priority, needs broader design), `gh issue create` to capture it BEFORE moving on — don't let it live only in a chat message or a PR comment that scrolls away. The issue body should state the problem, why it was deferred, and a concrete fix sketch (link the PR/review that surfaced it). A deferred finding with no issue is a silently-dropped finding. (Verify the finding is real first — see "Don't blindly accept reviewer findings" below; never file an issue for a hallucinated/refuted one.)
 - **Sprite changes require visual verification.** After editing any `.sprite` file: (1) rebuild the snapshot example, (2) render at `--cols 192 --rows 80`, (3) crop the relevant quadrant with `scripts/crop-snapshot.py --scale 3`, (4) read the cropped PNG and self-critique — does a stranger recognize the intended pose/object? Iterate until it reads at half-block scale. Then rebuild the release binary (`just build --release`). Commit messages should include iteration history (which designs were tried and why they were rejected). See `.claude/skills/beautify-decoration/SKILL.md` for the full checklist.
@@ -165,7 +166,7 @@ These are load-bearing; don't break them without updating the spec.
 2. **Events flow through ONE channel** typed `mpsc::Sender<(Transport, AgentEvent)>`. The `Transport` tag is load-bearing — the reducer uses it for hook-wins dedup. Do not hardcode `Transport::Hook` on the consumer side; the producer (each Source impl) tags its own events.
 3. **`Source` trait is the only seam for adding agent CLIs** (Codex / Cursor / Copilot). Don't bypass it. Per-source JSONL format knowledge lives in the source's own decoder fn (injected into `JsonlWatcher` via fn pointers), not in a shared decoder.
 4. **`install-hooks` writes through symlinks.** `resolve_symlink` in `install/io.rs` is critical for stow-managed `~/.claude/settings.json`. Don't replace it with `fs::rename` on the symlink path.
-5. **The hook shim must never block CC.** Always exit 0 silently on any error. The 200ms write timeout is non-negotiable.
+5. **The hook shim must never block CC.** Always exit 0 silently on any error. The 200ms send bound is non-negotiable (Unix: socket write timeout; Windows: a watchdog thread bounding the whole connect+write phase).
 6. **Walkable mask = ground footprint only.** This is a top-down view. Visual sprites can be wider/taller than their ground footprint (elevation effects, shadows, wall trim). The walkable mask must only block the ground-level projection — e.g., a 3px-wide wall visual has a 1px walkable mask because the wall's base is 1px. Characters walk right next to walls, not 3px away.
 
 ## Known sharp edges (index)
