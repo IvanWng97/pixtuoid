@@ -179,7 +179,6 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
     let agents: Vec<_> = ctx.scene.agents.values().cloned().collect();
     let buf_w = ctx.layout.buf_w;
     let buf_h = ctx.layout.buf_h;
-    let mut resolved_pet_pos: Option<PetFrame> = None;
     let mut new_coffee_carriers: Vec<pixtuoid_core::AgentId> = Vec::new();
 
     // Compute time-of-day once per frame and pass to every paint
@@ -559,11 +558,66 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
     enqueue_floor_fixtures(ctx, &agents, &mut drawables);
     enqueue_wall_decor(ctx.layout, &mut drawables);
 
-    resolved_pet_pos = enqueue_pet(ctx, &agents, &mut drawables);
+    let resolved_pet_pos = enqueue_pet(ctx, &agents, &mut drawables);
 
-    // Characters. Anchor = feet (anchor.y + sprite_height). Decollision
-    // rank for crowded waypoints — stable across frames thanks to
-    // BTreeMap iteration order.
+    let waypoint_visitors =
+        enqueue_characters(ctx, &agents, &mut drawables, &mut new_coffee_carriers);
+
+    enqueue_room_walls_h(ctx.layout, &mut drawables);
+
+    // Stable sort (Rust's `sort_by_key` is stable) — ties preserve
+    // insertion order. Insertion order above: decor first, characters
+    // last, so a character tied with a piece of furniture paints
+    // BEFORE the furniture (matches the prior pass-1 → pass-1.5
+    // → pass-2 layering for waypoint couch / pantry counter).
+    drawables.sort_by_key(|d| d.anchor_y);
+    // Occlusion is emergent now: every overhanging object's mask footprint is a
+    // shallow south-anchored ground strip, so a walker parks DEEP behind it and
+    // the object's own sprite (y-sorted at its south base, painted after the
+    // walker) hides their lower body — no snapshot, no synthetic back-cap.
+    for d in &drawables {
+        paint_drawable(d, ctx.buf, ctx.pack, ctx.cache, ctx.now, ctx.theme);
+    }
+
+    // Room-wide lightning bounce — LAST, so a Storm strike briefly flares the
+    // whole interior (floor, walls, furniture, characters), not just the window
+    // strip. No-op outside a strike / non-storm weather.
+    background::paint_lightning_flash(ctx.buf, ctx.now, background::weather_state(ctx.now));
+
+    // Debug layer (the `w` toggle) — composited LAST, over the finished scene:
+    // walkable mask + approach sides + live A* routes. Off by default.
+    if ctx.debug_walkable {
+        debug_overlay::paint(ctx.buf, ctx.layout, ctx.scene, ctx.motion);
+    }
+
+    let chitchat_bubbles = chitchat::update_and_collect(
+        ctx.chitchat_state,
+        ctx.floor.floor_idx,
+        &waypoint_visitors,
+        ctx.now,
+    );
+
+    PixelPassResult {
+        pet_pos: resolved_pet_pos,
+        chitchat_bubbles,
+        new_coffee_carriers,
+    }
+}
+
+/// All character sprites — the y-sorted middle pass's main subject. For each
+/// agent it derives the routed pose (entry/exit/wander/seated via the motion
+/// authority in `derive_with_routing`, which reads/writes ctx.router/overlay/
+/// history/motion) and enqueues the sprite at the feet anchor. Returns the
+/// waypoint visitors (for the chitchat venues) and pushes any agent seen
+/// carrying coffee this frame into `new_coffee_carriers`. The Character
+/// drawable borrows the agent, so this is the ONE phase tied to the agent
+/// set's lifetime `'a`.
+fn enqueue_characters<'a>(
+    ctx: &mut PixelCtx<'_>,
+    agents: &'a [AgentSlot],
+    drawables: &mut Vec<Drawable<'a>>,
+    new_coffee_carriers: &mut Vec<pixtuoid_core::AgentId>,
+) -> Vec<chitchat::Visitor> {
     let mut wp_rank: HashMap<usize, usize> = HashMap::new();
     let mut waypoint_visitors: Vec<chitchat::Visitor> = Vec::new();
     // All 3 lounge-couch seat waypoints collapse to ONE chitchat venue (keyed
@@ -585,7 +639,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
         .animation("standing")
         .and_then(|a| a.frames.first())
         .map_or(CHARACTER_SPRITE_W, |f| f.width);
-    for agent in &agents {
+    for agent in agents {
         let Some(desk) = ctx.layout.home_desks.get(agent.desk_index).copied() else {
             continue;
         };
@@ -884,12 +938,16 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
             }
         }
     }
+    waypoint_visitors
+}
 
-    // Horizontal (E-W) room dividers join the y-sort, anchored at their south
-    // (front) edge, so a character standing behind (north of) the wall is
-    // composited over by the frosted glass instead of painting on top of it.
-    // The vertical (edge-on) dividers already painted in the background pass.
-    for &WallSegment { start, end } in &ctx.layout.room_walls {
+/// Horizontal (E-W) room dividers join the y-sort, anchored at their south
+/// (front) edge so a character standing behind (north of) the wall is
+/// composited over by the frosted glass rather than painting on top of it.
+/// The vertical (edge-on) dividers already painted in the background pass.
+/// Emitted LAST so a character tied with a wall row still paints behind it.
+fn enqueue_room_walls_h<'a>(layout: &'a Layout, drawables: &mut Vec<Drawable<'a>>) {
+    for &WallSegment { start, end } in &layout.room_walls {
         if start.y == end.y {
             drawables.push(Drawable {
                 anchor_y: start.y + (WALL_THICK_H_PX - 1),
@@ -900,44 +958,6 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
                 },
             });
         }
-    }
-
-    // Stable sort (Rust's `sort_by_key` is stable) — ties preserve
-    // insertion order. Insertion order above: decor first, characters
-    // last, so a character tied with a piece of furniture paints
-    // BEFORE the furniture (matches the prior pass-1 → pass-1.5
-    // → pass-2 layering for waypoint couch / pantry counter).
-    drawables.sort_by_key(|d| d.anchor_y);
-    // Occlusion is emergent now: every overhanging object's mask footprint is a
-    // shallow south-anchored ground strip, so a walker parks DEEP behind it and
-    // the object's own sprite (y-sorted at its south base, painted after the
-    // walker) hides their lower body — no snapshot, no synthetic back-cap.
-    for d in &drawables {
-        paint_drawable(d, ctx.buf, ctx.pack, ctx.cache, ctx.now, ctx.theme);
-    }
-
-    // Room-wide lightning bounce — LAST, so a Storm strike briefly flares the
-    // whole interior (floor, walls, furniture, characters), not just the window
-    // strip. No-op outside a strike / non-storm weather.
-    background::paint_lightning_flash(ctx.buf, ctx.now, background::weather_state(ctx.now));
-
-    // Debug layer (the `w` toggle) — composited LAST, over the finished scene:
-    // walkable mask + approach sides + live A* routes. Off by default.
-    if ctx.debug_walkable {
-        debug_overlay::paint(ctx.buf, ctx.layout, ctx.scene, ctx.motion);
-    }
-
-    let chitchat_bubbles = chitchat::update_and_collect(
-        ctx.chitchat_state,
-        ctx.floor.floor_idx,
-        &waypoint_visitors,
-        ctx.now,
-    );
-
-    PixelPassResult {
-        pet_pos: resolved_pet_pos,
-        chitchat_bubbles,
-        new_coffee_carriers,
     }
 }
 
