@@ -518,6 +518,7 @@ mod tests {
         assert_eq!(got.unwrap(), PathBuf::from("/x/hook"));
     }
 
+    #[cfg(unix)]
     #[test]
     fn resolve_hook_binary_claude_falls_back_to_bare_name_when_unresolvable() {
         // Regression: a fresh-machine `install-hooks` hard-failed when pixtuoid-hook
@@ -526,6 +527,16 @@ mod tests {
         // the not-found case), NOT abort the install.
         let got = resolve_hook_binary(&CLAUDE, None, || Err(anyhow::anyhow!("could not locate")));
         assert_eq!(got.unwrap(), PathBuf::from("pixtuoid-hook"));
+    }
+
+    // The Windows twin of the claude fallback test above: exec form embeds the
+    // absolute path, so an unresolvable binary is fatal there too — the bare-
+    // name fallback is the unix-only contract.
+    #[cfg(windows)]
+    #[test]
+    fn resolve_hook_binary_claude_errors_when_unresolvable_on_windows() {
+        let got = resolve_hook_binary(&CLAUDE, None, || Err(anyhow::anyhow!("could not locate")));
+        assert!(got.is_err(), "exec form requires a real resolved .exe");
     }
 
     #[test]

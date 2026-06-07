@@ -369,6 +369,9 @@ command = "/old/pixtuoid-hook"
         assert!(hook_command(bad).is_err());
     }
 
+    // POSIX shell-string pins: unix-only — on Windows hook_command refuses
+    // outright (see hook_command_refuses_on_windows).
+    #[cfg(unix)]
     #[test]
     fn hook_command_prefixes_source_for_valid_path() {
         let cmd = hook_command(std::path::Path::new("/opt/bin/pixtuoid-hook")).unwrap();
@@ -377,6 +380,7 @@ command = "/old/pixtuoid-hook"
 
     // F9: a hook path containing spaces must be single-quoted so the shell does
     // not split it into multiple args (which would silently never find the hook).
+    #[cfg(unix)]
     #[test]
     fn hook_command_quotes_path_with_spaces() {
         let cmd = hook_command(std::path::Path::new("/Users/Jane Doe/bin/pixtuoid-hook")).unwrap();
