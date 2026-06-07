@@ -47,11 +47,18 @@ pub fn default_hook_binary() -> Result<PathBuf> {
         "could not determine the running executable's path while locating pixtuoid-hook",
     )?;
     let dir = exe.parent().ok_or_else(|| anyhow!("exe has no parent"))?;
-    let candidate = dir.join("pixtuoid-hook");
+    let candidate = dir.join(hook_sibling_name());
     if candidate.exists() {
         return Ok(candidate);
     }
     Err(anyhow!("could not locate pixtuoid-hook; pass --hook-path"))
+}
+
+/// The hook binary's filename next to the running exe — `.exe`-suffixed on
+/// Windows (exec-form spawning needs the real PE name; PATHEXT is a shell
+/// behavior we must not rely on).
+fn hook_sibling_name() -> String {
+    format!("pixtuoid-hook{}", std::env::consts::EXE_SUFFIX)
 }
 
 /// Build a sibling path by APPENDING `.suffix` to the full filename — never
@@ -320,5 +327,13 @@ mod tests {
             resolve_user_home(false, up, Some("/Users/me".into())),
             Some("/Users/me".into())
         );
+    }
+
+    #[test]
+    fn default_hook_binary_sibling_appends_exe_suffix() {
+        // Platform-neutral: EXE_SUFFIX is "" on Unix, ".exe" on Windows —
+        // assert the candidate filename is built with it either way.
+        let expected = format!("pixtuoid-hook{}", std::env::consts::EXE_SUFFIX);
+        assert_eq!(hook_sibling_name(), expected);
     }
 }
