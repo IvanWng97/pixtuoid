@@ -1442,6 +1442,7 @@ dependencies = [
  "anyhow",
  "libc",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]
