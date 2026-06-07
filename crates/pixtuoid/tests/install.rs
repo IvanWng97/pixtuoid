@@ -56,6 +56,9 @@ fn install_with_config_and_target_flags() {
     assert!(v["hooks"]["PreToolUse"][0]["_pixtuoid"].as_bool().unwrap());
 }
 
+// Unix-only: the codex INSTALL target refuses on Windows until Codex support
+// lands (uninstall keeps working everywhere — see the windows twin below).
+#[cfg(unix)]
 #[test]
 fn install_codex_writes_toml_with_sentinel_and_backup() {
     let dir = TempDir::new().unwrap();
@@ -101,6 +104,35 @@ fn install_codex_writes_toml_with_sentinel_and_backup() {
     assert!(v.get("hooks").is_none());
     assert_eq!(v["model"].as_str().unwrap(), "o1");
     assert!(!dir.path().join("config.toml.pixtuoid.bak").exists());
+}
+
+// The Windows twin: `install-hooks --target codex` must refuse LOUDLY through
+// the real binary (exit non-zero) and leave the config untouched.
+#[cfg(windows)]
+#[test]
+fn install_codex_refuses_on_windows_and_leaves_config_untouched() {
+    let dir = TempDir::new().unwrap();
+    let cfg = dir.path().join("config.toml");
+    std::fs::write(&cfg, "model = \"o1\"\n").unwrap();
+    let bin = env!("CARGO_BIN_EXE_pixtuoid");
+    let status = std::process::Command::new(bin)
+        .args([
+            "install-hooks",
+            "--target",
+            "codex",
+            "--config",
+            cfg.to_str().unwrap(),
+            "--hook-path",
+            "C:/fake/pixtuoid-hook.exe",
+        ])
+        .status()
+        .unwrap();
+    assert!(!status.success(), "codex install must refuse on Windows");
+    assert_eq!(
+        std::fs::read_to_string(&cfg).unwrap(),
+        "model = \"o1\"\n",
+        "refusal must not touch the config"
+    );
 }
 
 // Regression guard for the byte-vs-semantic no-op bug: uninstall on a config
