@@ -33,6 +33,11 @@ notify      = { workspace = true }
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+# 0.61 to match the major tokio already pulls (via mio) for this target —
+# a second windows-sys major would double-compile the bindings.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization"] }
+
 [dev-dependencies]
 tokio = { workspace = true, features = ["sync", "rt", "macros", "fs", "net", "time", "io-util", "rt-multi-thread"] }
 tempfile = "3"

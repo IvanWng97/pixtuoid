@@ -42,8 +42,9 @@ impl HookSocketListener {
 
 /// Per-connection byte ceiling: 2× the shim's 1MiB stdin cap. lines() buffers
 /// until a newline, so without this an adversarial client could grow the
-/// buffer unboundedly for the whole CONN_TIMEOUT window × 128 slots (the Unix
-/// socket is 0700, but the Windows pipe DACL only hardens in PR 3).
+/// buffer unboundedly for the whole CONN_TIMEOUT window × 128 slots —
+/// defense-in-depth behind the owner-only endpoint (Unix socket 0700, Windows
+/// pipe owner-only SDDL).
 const MAX_CONN_BYTES: u64 = 2 * 1024 * 1024;
 
 pub(crate) async fn handle_conn(stream: impl AsyncRead + Unpin, tx: TaggedSender) {
