@@ -10,6 +10,15 @@ use crate::AgentId;
 /// tool_use_id. The suppression is asymmetric by event kind — a recorded hook
 /// End drops both JSONL kinds, a recorded hook Start drops only JSONL Starts
 /// (see `ToolEventKind`, #150).
+///
+// These reducer tuning constants are `pub` ONLY so the integration test
+// (`tests/reducer.rs`, a separate crate) can derive its timing offsets from
+// them instead of hardcoding ms. They are internal knobs, not a stable API:
+// `#[doc(hidden)]` keeps the cross-crate visibility the test needs while
+// excluding them from the rendered docs AND from cargo-semver-checks, so a
+// future retune/rename is not a breaking change. (`EXIT_GRACE_WINDOW` below
+// is deliberately NOT hidden — the binary's pose module is a real consumer.)
+#[doc(hidden)]
 pub const HOOK_WINS_WINDOW: Duration = Duration::from_millis(500);
 
 /// How long to keep an exiting agent's slot alive after `SessionEnd` so the
@@ -34,6 +43,7 @@ pub const EXIT_GRACE_WINDOW: Duration = Duration::from_millis(4500);
 /// to the 60s scan_root poll backstop — covering that double-missed-notify
 /// outlier would cost a minute's linger on EVERY completed delegation
 /// (residual documented in #151).
+#[doc(hidden)]
 pub const B1_CASCADE_GRACE: Duration = Duration::from_millis(2500);
 
 /// How long the slot stays visually Active after an `ActivityEnd` before
@@ -41,6 +51,7 @@ pub const B1_CASCADE_GRACE: Duration = Duration::from_millis(2500);
 /// flicker that rapid PreToolUse → PostToolUse chains produce in CC; any
 /// `ActivityStart` arriving within this window cancels the pending idle,
 /// so the slot reads as continuously Active for chained tool work.
+#[doc(hidden)]
 pub const ACTIVE_GRACE_WINDOW: Duration = Duration::from_millis(1500);
 
 /// State-adaptive stale-agent thresholds. If `now - last_event_at`
@@ -58,9 +69,13 @@ pub const ACTIVE_GRACE_WINDOW: Duration = Duration::from_millis(1500);
 /// Unknown cwd (cc#N label): almost always a ghost from startup JSONL
 ///   seeding that never gets a follow-up event. 3 min is aggressive
 ///   but the false-positive cost is low (just a desk slot freed).
+#[doc(hidden)]
 pub const STALE_ACTIVE_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+#[doc(hidden)]
 pub const STALE_IDLE_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+#[doc(hidden)]
 pub const STALE_WAITING_TIMEOUT: Duration = Duration::from_secs(60 * 60);
+#[doc(hidden)]
 pub const STALE_UNKNOWN_CWD_TIMEOUT: Duration = Duration::from_secs(3 * 60);
 
 /// Idle timeout for sources with `SourceCaps::short_idle_reap()` — much
@@ -83,6 +98,7 @@ pub const STALE_UNKNOWN_CWD_TIMEOUT: Duration = Duration::from_secs(3 * 60);
 /// hook plus the durable `/exit` marker) for the common clean exit, so a
 /// short reaper there would only evict genuinely live-but-idle sessions
 /// (lunch-break idle) with no upside.
+#[doc(hidden)]
 pub const STALE_SHORT_IDLE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
 /// The state-adaptive stale timeout for one slot. Unknown-cwd ghosts reap on the

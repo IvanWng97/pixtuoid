@@ -70,7 +70,11 @@ pub enum Activity {
 /// reducer can pattern-match (instead of string-scanning) on semantic
 /// categories like Task-delegation, which is load-bearing for subagent
 /// suppression.
+/// `#[non_exhaustive]`: new tool categories (beyond Task/Generic) are
+/// expected as more agent semantics get modeled, so downstream `match`es
+/// must carry a wildcard arm — adding a variant then stays non-breaking.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum ToolDetail {
     /// CC `Task` tool — kicks off a subagent. Reducer suppresses
     /// hook-sourced Activity events for the parent until the matching
@@ -112,7 +116,12 @@ impl From<&str> for ToolDetail {
     }
 }
 
+/// `#[non_exhaustive]`: the event vocabulary grows as new agent CLIs and
+/// lifecycle signals are modeled (Codex subagent hooks, future
+/// permission/compaction events), so external `match`es must carry a
+/// wildcard — adding a variant then stays a minor, non-breaking change.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum AgentEvent {
     SessionStart {
         agent_id: AgentId,
