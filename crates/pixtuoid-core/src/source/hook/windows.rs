@@ -51,12 +51,26 @@ impl Listener {
                 }
             };
             if let Err(e) = self.server.connect().await {
-                warn!("hook pipe connect error: {e}");
+                // A failed instance isn't guaranteed reusable (tokio's own
+                // accept-loop pattern propagates connect errors for this
+                // reason) — recreate it; if THAT fails the error converges
+                // with the recreate-bail below. Unix accept errors leave the
+                // listener fd valid, hence its plain warn+continue.
+                warn!("hook pipe connect error: {e}; recreating instance");
+                self.server = ServerOptions::new()
+                    .reject_remote_clients(true)
+                    .pipe_mode(PipeMode::Byte)
+                    .in_buffer_size(IN_BUFFER_SIZE)
+                    .create(&self.name)
+                    .with_context(|| {
+                        format!("re-creating hook pipe after connect error at {}", self.name)
+                    })?;
                 continue;
             }
             // Create the NEXT instance BEFORE handing this one off —
             // tokio's documented pattern; in the gap between handoff and
-            // re-create, clients would get NotFound.
+            // re-create, clients would get ERROR_PIPE_BUSY or NotFound
+            // depending on timing.
             let next = ServerOptions::new()
                 .reject_remote_clients(true)
                 .pipe_mode(PipeMode::Byte)
