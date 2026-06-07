@@ -86,7 +86,7 @@ git tag v0.5.1 && git push origin v0.5.1    # fires release.yml → build + crat
 2. Events flow through **one** channel typed `mpsc::Sender<(Transport, AgentEvent)>`; the `Transport` tag is load-bearing (hook-wins dedup).
 3. The **`Source` trait** is the only seam for adding agent CLIs.
 4. `install-hooks` writes through symlinks (`resolve_symlink`) — don't replace with `fs::rename`.
-5. The hook shim must **never block CC** — always exit 0 silently; the 200 ms write timeout is non-negotiable.
+5. The hook shim must **never block CC** — always exit 0 silently; the 200 ms send bound (watchdog-enforced on both platforms) is non-negotiable.
 6. Walkable mask = **ground footprint only** (top-down view); visual sprites may be wider/taller.
 
 ## Pull requests

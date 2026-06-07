@@ -111,20 +111,64 @@ fn missing_socket_exits_zero_without_blocking() {
         status.success(),
         "must exit 0 even with no listener; got {status:?}"
     );
-    // A missing socket makes `connect()` return ConnectionRefused in microseconds
-    // — it never reaches the 200ms WRITE_TIMEOUT (that guards the write AFTER a
-    // successful connect). So this bound isn't testing the 200ms invariant; it
-    // guards against a regression that added a blocking retry/backoff on connect
-    // failure — don't delete it. The bound measures a CHILD PROCESS's whole
-    // spawn+exit wall-clock, so it is load-sensitive: under the fully-parallel
-    // suite it flaked at 1s from exec/dyld scheduling jitter alone (#161). Two
-    // defenses: .config/nextest.toml gives this test the machine to itself
-    // (threads-required), and 3s keeps headroom for slow runners while still
-    // catching any real hang or retry loop.
+    // A missing socket makes `connect()` return ConnectionRefused in
+    // microseconds, so this guards against a regression that added a blocking
+    // retry/backoff on connect failure — don't delete it. Bound decomposition
+    // (same as the stalled-listener test below and shim_pipe.rs's twins):
+    // worst-case child RUNTIME is the ~200ms #167 watchdog; the rest is
+    // spawn/exec jitter margin — the bound measures a CHILD PROCESS's whole
+    // spawn+exit wall-clock, which is load-sensitive (#161: flaked at 1s
+    // under the fully-parallel suite, passed isolated). The jitter term is
+    // attacked directly by .config/nextest.toml's threads-required override
+    // (this test runs with the machine to itself).
     assert!(
-        start.elapsed() < Duration::from_secs(3),
+        start.elapsed() < Duration::from_millis(1500),
         "shim must not block when the socket is absent"
     );
+}
+
+#[test]
+fn stalled_listener_shim_exits_zero_within_watchdog_bound() {
+    // A listener whose accept loop is wedged while its backlog saturates —
+    // the one Unix path where `connect()` itself can park forever (#167).
+    // Kernel-dependent: Linux BLOCKS the shim's connect (the watchdog must
+    // shoot the process at ~200ms — the load-bearing arm, exercised on CI),
+    // macOS fails fast with ECONNREFUSED. Both must exit 0 within the bound.
+    // Mirrors shim_pipe.rs's stalled_daemon_shim_exits_zero_within_watchdog_bound.
+    let path = sock_path("stall");
+    let listener = UnixListener::bind(&path).expect("bind listener");
+
+    // Saturate the accept backlog (std binds with backlog 128) without ever
+    // accepting. Each filler holds its connection (or its blocked connect)
+    // open by parking; the threads die with the test process.
+    let fillers: Vec<_> = (0..160)
+        .map(|_| {
+            let p = path.clone();
+            std::thread::spawn(move || {
+                let _conn = std::os::unix::net::UnixStream::connect(&p);
+                std::thread::park();
+            })
+        })
+        .collect();
+    std::thread::sleep(Duration::from_millis(100));
+
+    let start = Instant::now();
+    let status = run_shim(&path, None, br#"{"hook_event_name":"Stop"}"#);
+    assert!(
+        status.success(),
+        "stalled listener must still exit 0; got {status:?}"
+    );
+    // Watchdog bound is 200ms; the rest is spawn-jitter headroom (the
+    // nextest threads-required override runs this test alone).
+    assert!(
+        start.elapsed() < Duration::from_millis(1500),
+        "watchdog must bound the connect phase; took {:?}",
+        start.elapsed()
+    );
+
+    drop(listener);
+    drop(fillers);
+    let _ = std::fs::remove_file(&path);
 }
 
 #[test]
