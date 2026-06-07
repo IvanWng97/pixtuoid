@@ -55,6 +55,8 @@ src/
 │                       walk_arrived, speed_mult, pause_ms_for; constants: V_CRUISE_COMMUTE=0.36,
 │                       V_CRUISE_SNAPBACK=0.65, V_CRUISE_WANDER=0.25, WALK_ACCEL=6.5e-4,
 │                       WALK_ACCEL_SNAPBACK=2.0e-3, SPEED_MULT_MIN/MAX, PAUSE_MS_MIN/MAX
+├── platform.rs         cross-platform home-dir resolution (user_home(), USERPROFILE-first on
+│                       Windows — HOME is unset there and Git Bash's HOME is POSIX-form)
 ├── pose/               pure state→pose derivation + wander state machine (no terminal deps);
 │                       mod.rs (production) + tests.rs sibling.
 │                       ENTRY_ANIMATION_MS is demoted: not a duration knob, only the spawn-window

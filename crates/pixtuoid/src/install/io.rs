@@ -331,9 +331,12 @@ mod tests {
 
     #[test]
     fn default_hook_binary_sibling_appends_exe_suffix() {
-        // Platform-neutral: EXE_SUFFIX is "" on Unix, ".exe" on Windows —
-        // assert the candidate filename is built with it either way.
-        let expected = format!("pixtuoid-hook{}", std::env::consts::EXE_SUFFIX);
-        assert_eq!(hook_sibling_name(), expected);
+        // Pin the per-platform LITERAL (not a re-computation via EXE_SUFFIX,
+        // which would be tautological): catches a base-name typo or an
+        // accidental double-suffix.
+        #[cfg(unix)]
+        assert_eq!(hook_sibling_name(), "pixtuoid-hook");
+        #[cfg(windows)]
+        assert_eq!(hook_sibling_name(), "pixtuoid-hook.exe");
     }
 }
