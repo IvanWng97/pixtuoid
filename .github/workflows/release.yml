@@ -26,7 +26,10 @@ jobs:
       - uses: extractions/setup-just@v4
       - name: Validate tag matches Cargo.toml version
         run: |
+          # Pre-release suffixes (-win.1, -rc.1) validate against the base version —
+          # the suffix is release-channel metadata, not a Cargo version.
           TAG_VERSION="${GITHUB_REF_NAME#v}"
+          TAG_VERSION="${TAG_VERSION%%-*}"
           CARGO_VERSION=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
           if [ "$TAG_VERSION" != "$CARGO_VERSION" ]; then
             echo "::error::Tag ${GITHUB_REF_NAME} does not match Cargo.toml version ${CARGO_VERSION}"
@@ -58,6 +61,12 @@ jobs:
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
             cross: true
+          # windows-2022 pinned — migrate to VS2026 image once stable.
+          # aarch64 cross-links on the same x64 runner (Tier 1; VC ARM64 components preinstalled).
+          - target: x86_64-pc-windows-msvc
+            os: windows-2022
+          - target: aarch64-pc-windows-msvc
+            os: windows-2022
     steps:
       - uses: actions/checkout@v6
 
@@ -82,7 +91,8 @@ jobs:
       - name: Build
         run: just build-target ${{ matrix.target }} ${{ matrix.cross }}
 
-      - name: Package
+      - name: Package (Unix)
+        if: runner.os != 'Windows'
         run: |
           VERSION="${GITHUB_REF_NAME}"
           DIR="pixtuoid-${VERSION}-${{ matrix.target }}"
@@ -92,10 +102,26 @@ jobs:
           cp LICENSE "$DIR/"
           tar czf "${DIR}.tar.gz" "$DIR"
 
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          # Flat zip — exes at zip root so Expand-Archive doesn't double-wrap.
+          # 7z is preinstalled on windows-2022 runners.
+          VERSION="${GITHUB_REF_NAME}"
+          DIR="pixtuoid-${VERSION}-${{ matrix.target }}"
+          mkdir "$DIR"
+          cp "target/${{ matrix.target }}/release/pixtuoid.exe" "$DIR/"
+          cp "target/${{ matrix.target }}/release/pixtuoid-hook.exe" "$DIR/"
+          cp LICENSE "$DIR/"
+          ( cd "$DIR" && 7z a "../${DIR}.zip" . )
+
       - uses: actions/upload-artifact@v7
         with:
           name: artifact-${{ matrix.target }}
-          path: "*.tar.gz"
+          path: |
+            *.tar.gz
+            *.zip
           if-no-files-found: error
 
   deb:
@@ -159,7 +185,7 @@ jobs:
       - name: Generate checksums
         run: |
           cd artifacts
-          sha256sum *.tar.gz *.deb > sha256sums.txt
+          sha256sum *.tar.gz *.deb *.zip > sha256sums.txt
 
       - name: Generate changelog
         id: changelog
@@ -177,6 +203,7 @@ jobs:
           files: |
             artifacts/*.tar.gz
             artifacts/*.deb
+            artifacts/*.zip
             artifacts/sha256sums.txt
 
       - name: Attest build provenance
@@ -185,10 +212,14 @@ jobs:
           subject-path: |
             artifacts/*.tar.gz
             artifacts/*.deb
+            artifacts/*.zip
 
   publish:
     name: publish to crates.io
     needs: check
+    # Never publish a pre-release to crates.io — the publish is irreversible;
+    # tester pre-release tags (v*-win.N etc.) build artifacts only.
+    if: ${{ !contains(github.ref_name, '-') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
