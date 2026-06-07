@@ -134,9 +134,10 @@ struct TaskTracking {
     /// must be skipped — otherwise it would redundantly re-arm
     /// `pending_idle_at` or arm it while tasks are still in flight.
     handled_by_task_tracking: bool,
-    /// An `ActivityStart` dispatched a Task (already applied as
-    /// Active(Delegating) by the pre-pass): the general ActivityStart arm
-    /// must be skipped.
+    /// An `ActivityStart` dispatched a Task (applied as Active(Delegating)
+    /// by the pre-pass when the slot exists; in the Task-before-SessionStart
+    /// race nothing is applied — the skipped general arm would no-op too):
+    /// the general ActivityStart arm must be skipped.
     handled_by_task_start: bool,
 }
 
@@ -231,6 +232,10 @@ impl Reducer {
         //     before it can drain `active_tasks` and fire `cascade_exit`
         //     mid-delegation (pinned by
         //     `jsonl_duplicate_task_end_inside_dedup_window_does_not_fire_cascade`).
+        //     Caveat: that guarded window is synthetic-narrow — a real CC
+        //     JSONL Task END only exists once the Task returned — so the pin
+        //     freezes this refactor's ordering, not the kind-blind dedup
+        //     keying (revisited in #150).
         if from == Transport::Hook && self.suppress_subagent_leak(scene, &event, id, now) {
             return;
         }
