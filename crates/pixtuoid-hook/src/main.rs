@@ -1,6 +1,5 @@
-use std::io::{Read, Write};
-use std::os::unix::net::UnixStream;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::io::Read;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
 use serde_json::Value;
@@ -8,7 +7,7 @@ use serde_json::Value;
 mod paths;
 use paths::default_socket_path;
 
-const WRITE_TIMEOUT: Duration = Duration::from_millis(200);
+mod transport;
 
 /// Explicit `u128 → u64` narrowing (`try_from`, not a truncating `as` cast):
 /// ms-since-epoch fits u64 for ~580M years, so the `unwrap_or(u64::MAX)` arm
@@ -41,16 +40,11 @@ fn main() -> Result<()> {
         enrich_payload(map, std::env::var("PIXTUOID_SOURCE").ok(), now_ms());
     }
 
-    // Best-effort send with a hard write timeout so a stuck daemon can never
-    // block CC's subprocess wait. If the daemon isn't running or is slow,
-    // we drop the event and exit 0.
-    if let Ok(s) = UnixStream::connect(&socket) {
-        let _ = s.set_write_timeout(Some(WRITE_TIMEOUT));
-        let mut s = s;
-        let mut line = serde_json::to_vec(&payload).unwrap_or_default();
-        line.push(b'\n');
-        let _ = s.write_all(&line);
-    }
+    // Best-effort send, hard-bounded so a stuck daemon can never block CC's
+    // subprocess wait — see transport.rs for the per-platform mechanism.
+    let mut line = serde_json::to_vec(&payload).unwrap_or_default();
+    line.push(b'\n');
+    transport::send_line(&socket, &line);
     Ok(())
 }
 
