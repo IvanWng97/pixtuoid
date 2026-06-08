@@ -66,7 +66,7 @@ pub fn release_notes(version: &str) -> Option<&'static [&'static str]> {
         "0.6.0" => Some(&[
             "Windows support — native hook transport, installer, and release builds",
             "Diagnostics you can see — source-death footer warnings, config warnings on stderr, an always-on log file",
-            "Fewer ghost & duplicate sprites — hook/JSONL dedup + subagent completion-cascade + permission-gate race fixes",
+            "Sharper agent activity — fewer ghost & duplicate sprites (hook/JSONL dedup, subagent completion-cascade, permission-gate race fixes), and Codex stays active during web & tool search",
             "New project site — live demos, architecture & contributing docs, weather gallery",
         ]),
         "0.4.0" => Some(&[
