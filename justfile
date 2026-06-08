@@ -116,7 +116,7 @@ coverage:
 [doc('Never-panic fuzz the decoders over a JSONL corpus dir: just fuzz ~/.claude/projects')]
 fuzz dir:
     cargo build --release --example decoder_fuzz -p pixtuoid-core
-    find {{ dir }} -name '*.jsonl' -print0 | xargs -0 cat | ./target/release/examples/decoder_fuzz
+    find "{{ dir }}" -name '*.jsonl' -print0 | xargs -0 cat | ./target/release/examples/decoder_fuzz
 
 # Fail if the current release_notes() arm still has the uncurated TODO marker.
 # A release-PR guard (#116) — deliberately NOT in preflight, since `just bump`
