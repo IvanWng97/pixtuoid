@@ -158,6 +158,20 @@ pub fn decode_codex_line(transcript_path: &str, source: &str, v: Value) -> Resul
         | ("event_msg", "patch_apply_end") => {
             vec![start()]
         }
+        // Web/tool search are turn-INTERNAL work pulses — the agent is actively
+        // searching, not idle — so they keep it Active (→ ActivityStart), the
+        // same as every other intra-turn step above; only task_complete /
+        // turn_aborted end the turn. `web_search_{begin,end}` are EventMsg
+        // lifecycle events (codex-rs `protocol.rs` `EventMsg::WebSearch{Begin,
+        // End}`); `web_search_call` + `tool_search_{call,output}` are raw OpenAI
+        // Responses items (response_item) — both forms appear in real rollouts
+        // (verified, codex-cli 0.137). No approval gate: searching is never
+        // permission-prompted, so unlike function_call there's no Waiting branch.
+        ("response_item", "web_search_call")
+        | ("event_msg", "web_search_begin")
+        | ("event_msg", "web_search_end")
+        | ("response_item", "tool_search_call")
+        | ("response_item", "tool_search_output") => vec![start()],
         ("event_msg", "task_complete") | ("event_msg", "turn_aborted") => vec![end()],
         _ => vec![],
     };
@@ -309,6 +323,27 @@ mod tests {
         let out =
             ev(json!({"type":"event_msg","payload":{"type":"patch_apply_end","success":true}}));
         assert!(matches!(out.as_slice(), [AgentEvent::ActivityStart { .. }]));
+    }
+
+    // Web/tool search are turn-internal work — the agent must read as Active,
+    // not idle, while it searches. Payload shapes are the real ones captured
+    // from local codex-cli 0.137 rollouts (web_search_call is a response_item;
+    // web_search_end is an event_msg; tool_search_call/output are response_items).
+    #[test]
+    fn web_and_tool_search_keep_the_agent_active() {
+        for line in [
+            json!({"type":"response_item","payload":{"type":"web_search_call","status":"completed","action":{}}}),
+            json!({"type":"event_msg","payload":{"type":"web_search_begin","call_id":"c"}}),
+            json!({"type":"event_msg","payload":{"type":"web_search_end","call_id":"c","query":"q","action":{}}}),
+            json!({"type":"response_item","payload":{"type":"tool_search_call","call_id":"c","status":"in_progress","arguments":"{}"}}),
+            json!({"type":"response_item","payload":{"type":"tool_search_output","call_id":"c","status":"completed","tools":[]}}),
+        ] {
+            let out = ev(line.clone());
+            assert!(
+                matches!(out.as_slice(), [AgentEvent::ActivityStart { .. }]),
+                "search event {line} must keep the agent Active"
+            );
+        }
     }
 
     #[test]
