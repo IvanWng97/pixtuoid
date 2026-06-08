@@ -398,4 +398,34 @@ mod tests {
             "cc·bar"
         );
     }
+
+    // CC writes `message.content` as a plain STRING (not a block array) for
+    // simple text turns — 4709 such lines in a local 2379-session / 822 MB
+    // corpus. The tool-event match only fires on `Value::Array`, so a
+    // string-content turn must decode to NOTHING (no events, no panic) unless
+    // it's an /exit marker. A fuzz of all 291k real lines through
+    // decode_cc_line confirmed zero panics; this pins the common
+    // string-content shape the array-only fixtures never exercise.
+    #[test]
+    fn string_content_turns_emit_no_tool_events() {
+        for ty in ["assistant", "user"] {
+            let v = serde_json::json!({
+                "type": ty,
+                "message": { "role": ty, "content": "just some prose, no tool blocks" }
+            });
+            let out = decode_cc_line("/x/.claude/projects/p/s.jsonl", "claude-code", v).unwrap();
+            assert!(
+                out.is_empty(),
+                "{ty} turn with string content must emit no events"
+            );
+        }
+        // The one string-content case that IS load-bearing: a /exit slash
+        // command on a user turn still ends the session.
+        let exit = serde_json::json!({
+            "type": "user",
+            "message": { "role": "user", "content": "<command-name>/exit</command-name>" }
+        });
+        let out = decode_cc_line("/x/.claude/projects/p/s.jsonl", "claude-code", exit).unwrap();
+        assert!(matches!(out.as_slice(), [AgentEvent::SessionEnd { .. }]));
+    }
 }

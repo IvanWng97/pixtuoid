@@ -265,6 +265,43 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    // Real CC sessions are full of task-management tools whose names START WITH
+    // "Task" — TaskCreate/TaskUpdate/TaskList/TaskStop/TaskOutput (1757
+    // occurrences across a local 822 MB / 2379-session corpus) — but NONE carry
+    // a `subagent_type`, so they are ordinary tools, NOT the subagent dispatch.
+    // make_tool_detail must key the dispatch on the EXACT name (`Task`/`Agent`)
+    // or the `subagent_type` field, never a `starts_with("Task")` prefix — a
+    // prefix match would mis-class every TaskUpdate as a delegation and wrongly
+    // trip `active_tasks` subagent-leak suppression. The existing negative test
+    // uses `Read` (doesn't start with "Task"), so it cannot catch a prefix
+    // regression — this one pins the exact collision boundary.
+    #[test]
+    fn task_prefixed_tools_without_subagent_type_are_not_the_dispatch() {
+        for name in [
+            "TaskCreate",
+            "TaskUpdate",
+            "TaskList",
+            "TaskStop",
+            "TaskOutput",
+        ] {
+            assert!(
+                !make_tool_detail(name, Some(&json!({"id": "t-1"}))).is_task(),
+                "{name} (no subagent_type) must be a Generic tool, not the subagent dispatch"
+            );
+        }
+        // The exact dispatch names + the semantic signal still resolve to Task.
+        assert!(make_tool_detail("Task", None).is_task());
+        assert!(make_tool_detail("Agent", None).is_task());
+        assert!(
+            make_tool_detail(
+                "WhateverUpstreamRenamesItTo",
+                Some(&json!({"subagent_type": "x"}))
+            )
+            .is_task(),
+            "a renamed dispatch is still caught by the subagent_type field"
+        );
+    }
+
     #[test]
     fn normalize_path_key_is_identity_on_unix() {
         // The unix arm must be byte-identity — every existing AgentId
