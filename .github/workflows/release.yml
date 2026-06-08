@@ -360,6 +360,7 @@ jobs:
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
+      - uses: extractions/setup-just@v4
 
       - name: Download build artifacts
         uses: actions/download-artifact@v8
@@ -391,7 +392,7 @@ jobs:
           done
 
       - name: Test the package generator
-        run: node --test npm/generate.test.mjs
+        run: just npm-check
 
       - name: Generate npm packages
         run: node npm/generate.mjs --version "${GITHUB_REF_NAME#v}" --artifacts npm/dist

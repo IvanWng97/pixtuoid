@@ -132,6 +132,16 @@ notes-curated:
     fi
     echo "release notes curated ✓"
 
+# Unit-test the npm package generator (Node, no cargo). The ONLY validation of
+# npm/generate.mjs — release.yml runs this as a hard gate right before `npm
+# publish`, and ci.yml runs it on every PR so a generator regression is caught
+# at review time, not at the irreversible tag-push. NOT in preflight: a Rust
+# pre-push shouldn't require a Node toolchain. Needs Node ≥ 22.
+[group('check')]
+[doc('Test the npm package generator (Node; CI + release call it, not in preflight)')]
+npm-check:
+    node --test npm/generate.test.mjs
+
 # Install the dev tools every check + recipe relies on (idempotent). Prefers
 # cargo-binstall (prebuilt) and falls back to cargo install (compiles).
 [group('check')]
@@ -354,3 +364,12 @@ site-demos:
 [doc('Sync the README from site data: regen Features table (features.json) + check install commands (install.json)')]
 gen-readme:
     node site/scripts/gen-readme.mjs
+
+# Verify the committed README still matches site/src/{features,sources,install}.json
+# (exits non-zero on drift; `just gen-readme` regenerates). Pure node:builtins —
+# no npm ci. ci.yml runs this on every PR so README↔manifest drift is a hard gate
+# at REVIEW time, not just a (path-filtered, advisory) site-CI failure.
+[group('site')]
+[doc('Fail if the committed README drifted from site data (features/sources/install.json)')]
+gen-readme-check:
+    node site/scripts/gen-readme.mjs --check

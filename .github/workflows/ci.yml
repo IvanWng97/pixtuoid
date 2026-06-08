@@ -66,6 +66,35 @@ jobs:
       - uses: extractions/setup-just@v4
       - run: just notes-curated
 
+  npm-gen:
+    name: npm package generator
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      # No rust-toolchain: this only exercises the Node generator's unit test —
+      # the same `just npm-check` release.yml gates `npm publish` on, run here at
+      # PR time so a generate.mjs regression can't first surface at tag-push.
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - uses: extractions/setup-just@v4
+      - run: just npm-check
+
+  readme:
+    name: readme drift
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      # No rust-toolchain, no npm ci: gen-readme.mjs is pure node:builtins. It
+      # fails if the committed README drifted from site/src/*.json. Lives HERE
+      # (not the path-filtered `site` workflow) because ci.yml runs on every PR —
+      # so it's safe to mark required without deadlocking PRs that don't touch site/.
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - uses: extractions/setup-just@v4
+      - run: just gen-readme-check
+
   hack:
     name: feature combinations
     runs-on: ubuntu-latest
