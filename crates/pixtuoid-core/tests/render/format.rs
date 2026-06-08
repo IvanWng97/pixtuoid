@@ -15,7 +15,7 @@ fn palette() -> Palette {
 
 #[test]
 fn parses_two_frame_mini_sprite() {
-    let src = std::fs::read_to_string("tests/fixtures/sprites/mini.sprite").unwrap();
+    let src = std::fs::read_to_string("tests/render/fixtures/mini.sprite").unwrap();
     let frames = parse_sprite_file(&src, &palette()).unwrap();
 
     assert_eq!(frames.len(), 2);
@@ -124,7 +124,7 @@ fn validate_reports_insufficient_frames_for_single_frame_typing() {
 
 #[test]
 fn loads_mini_pack() {
-    let pack = load_pack(Path::new("tests/fixtures/sprites/mini_pack")).unwrap();
+    let pack = load_pack(Path::new("tests/render/fixtures/mini_pack")).unwrap();
     let idle = pack.animation("idle").expect("idle animation");
     assert_eq!(idle.frame_ms, 500);
     assert_eq!(idle.frames.len(), 1);
@@ -133,7 +133,7 @@ fn loads_mini_pack() {
 
 #[test]
 fn missing_animation_returns_none() {
-    let pack = load_pack(Path::new("tests/fixtures/sprites/mini_pack")).unwrap();
+    let pack = load_pack(Path::new("tests/render/fixtures/mini_pack")).unwrap();
     assert!(pack.animation("nope").is_none());
 }
 
@@ -210,7 +210,7 @@ fn skeleton_pack_passes_validation() {
 
 #[test]
 fn mini_pack_reports_missing_required() {
-    let pack = load_pack(Path::new("tests/fixtures/sprites/mini_pack")).unwrap();
+    let pack = load_pack(Path::new("tests/render/fixtures/mini_pack")).unwrap();
     let report = validate_pack_animations(&pack);
     assert!(
         !report.missing_required.is_empty(),
@@ -221,7 +221,7 @@ fn mini_pack_reports_missing_required() {
 
 #[test]
 fn validation_detects_unknown_animations() {
-    let pack = load_pack(Path::new("tests/fixtures/sprites/mini_pack")).unwrap();
+    let pack = load_pack(Path::new("tests/render/fixtures/mini_pack")).unwrap();
     let report = validate_pack_animations(&pack);
     assert!(
         report.unknown.contains(&"idle".to_string()),
