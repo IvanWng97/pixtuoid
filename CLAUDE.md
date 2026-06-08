@@ -35,18 +35,24 @@ crates/
 │                       → see crates/pixtuoid/CLAUDE.md and crates/pixtuoid/src/tui/CLAUDE.md
 └── pixtuoid-hook/      tiny shim CC invokes — stdin JSON → Unix socket (Unix) / named pipe (Windows) via transport.rs, 200ms send bound
 scripts/                crop-snapshot.py (visual verification),
-                        gen-docs-images.py (regenerate ALL docs/images screenshots + demo.gif
-                        + the CI visual-regression baselines reference-*.png
-                        from a release build — single source of truth; run via `just demo`),
-                        compare-screenshots.py (pixel-diff used by `just visual-check`,
+                        gen-media.py (ONE manifest-driven driver — regenerate ALL docs/images
+                        screenshots + demo.gif + site/public/demos/ + the CI visual-regression
+                        baselines reference-*.png from a release build; reads its render-job
+                        manifest from scripts/media.json; run via `just gen-media`, supports
+                        `--only docs|site`),
+                        gen-readme.mjs (sync the README install/features/tools sections from
+                        site/src/*.json; run via `just gen-readme`),
+                        compare-screenshots.py (pixel-diff used by `just gen-check`,
                         the CI smoke job's visual-regression gate),
                         replay-fixture.sh (replay a captured source rollout fixture into a
                         headless run via --codex-sessions-root, for eyeballing lifecycle),
                         check_upstream_drift.py (weekly CI: CC/Codex/Reasonix wire-format rename watch)
 site/                   Astro marketing landing page → GitHub Pages (ivanwng97.github.io/pixtuoid).
                         Self-contained Node project; own CI (.github/workflows/site.yml) + deploy
-                        (.github/workflows/pages.yml). `just site-{setup,dev,check,fmt,demos}`;
-                        demo art is generated from the binary by scripts/gen-demos.sh.
+                        (.github/workflows/pages.yml). `just site-{setup,dev,check,fmt}`;
+                        demo art is generated from the binary by scripts/gen-media.py
+                        (driven by scripts/media.json, which @-refs site/src/themes.json +
+                        site/src/weather.json for the theme/weather matrices).
                         → see site/README.md
 ```
 
@@ -90,14 +96,18 @@ just build --release --example snapshot
 ```
 
 > To regenerate **all** of `docs/images/` (screenshot, gallery-\*, themes-composite, demo.gif,
-> reference-\*) from a release build, run **`just demo`** (→ `scripts/gen-docs-images.py`) — the
-> single source of truth for the office images (render params, crop quadrants, themes-composite
-> diagonal), so the screenshots never drift.
+> reference-\*) **and** `site/public/demos/` from a release build, run **`just gen`** (or
+> **`just gen-media`** for the images only) — the ONE manifest-driven driver
+> (`scripts/gen-media.py` + `scripts/media.json`) is the single source of truth for the office
+> images (render params, crop quadrants, themes-composite diagonal), so the screenshots never
+> drift. `just gen-media --only docs|site` scopes it to one target.
 
 CI's smoke job pixel-diffs two deterministic renders (dusk/normal + night/cyberpunk,
-TZ=UTC) against `docs/images/reference-*.png` via **`just visual-check`** (runnable
-locally). A PR that **intentionally** changes the office's look must run `just demo`
-and commit the regenerated `docs/images/` — including the `reference-*.png` baselines —
+TZ=UTC) against `docs/images/reference-*.png` via **`just gen-check`** (runnable
+locally — it also diffs the README sections and the site stills; video clips + demo.gif
+are presence-only, and diff overlays land in `target/gen-check-diff/`). A PR that
+**intentionally** changes the office's look must run `just gen` and commit the regenerated
+`docs/images/` — including the `reference-*.png` baselines — plus `site/public/demos/`
 in the same change, or smoke goes red.
 
 See `.claude/skills/beautify-decoration/SKILL.md` for the full iteration loop, self-critique checklist, and sprite-format pitfalls.
@@ -118,7 +128,9 @@ just fmt          # auto-format
 ```
 
 (`hack` is `cargo hack --feature-powerset` — it catches code that only builds
-with `test-renderer` on. `semver` and `coverage`/`smoke` are CI-only. The
+with `test-renderer` on. `semver`, `coverage`/`smoke`, `gen-check`, `gen-readme-check`,
+and `npm-check` are CI-only (the smoke job runs `gen-check`; the `readme` job runs
+`gen-readme-check`). The
 semver gate checks **`pixtuoid-core` only** — the `pixtuoid` binary's lib
 target is an internal-facing surface for examples/integration tests, not a
 semver surface, so its `pub` paths may move without a major bump.
