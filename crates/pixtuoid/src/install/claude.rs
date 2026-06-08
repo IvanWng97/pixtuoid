@@ -179,6 +179,11 @@ mod tests {
 
     #[test]
     fn default_config_path_honors_claude_config_dir() {
+        // std::env is process-global; serialize against the other env-mutating
+        // tests in this binary (config.rs, tui/embedded_pack.rs) per repo convention.
+        let _env = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let saved_config = std::env::var_os("CLAUDE_CONFIG_DIR");
         let fallback_suffix = PathBuf::from(".claude").join("settings.json");
 

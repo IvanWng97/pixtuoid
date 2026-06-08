@@ -208,10 +208,12 @@ struct SnapshotArgs {
 }
 
 fn default_projects_root() -> String {
-    format!(
-        "{}/.claude/projects",
-        pixtuoid::install::io::user_home().unwrap_or_else(|| ".".into())
-    )
+    // Honor CLAUDE_CONFIG_DIR (#168) via the same resolver the runtime uses,
+    // rather than re-hardcoding the ~/.claude shape (a third drift site).
+    pixtuoid_core::source::claude_code::ClaudeCodeSource::default_paths()
+        .projects_root
+        .to_string_lossy()
+        .into_owned()
 }
 
 fn parse_navigations(specs: &[String]) -> Result<Vec<(u64, usize)>> {
