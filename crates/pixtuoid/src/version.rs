@@ -65,8 +65,10 @@ pub fn release_notes(version: &str) -> Option<&'static [&'static str]> {
         // tagging.
         "0.6.0" => Some(&[
             "Windows support — native hook transport, installer, and release builds",
+            "Install via npm — `npm i -g pixtuoid` now works on macOS, Linux & Windows",
+            "Reasonix sessions now visualized — re-run `pixtuoid install-hooks` to wire it",
+            "Sharper agent activity — fewer ghost & duplicate sprites, and Codex stays active during web & tool search",
             "Diagnostics you can see — source-death footer warnings, config warnings on stderr, an always-on log file",
-            "Sharper agent activity — fewer ghost & duplicate sprites (hook/JSONL dedup, subagent completion-cascade, permission-gate race fixes), and Codex stays active during web & tool search",
             "New project site — live demos, architecture & contributing docs, weather gallery",
         ]),
         "0.4.0" => Some(&[
