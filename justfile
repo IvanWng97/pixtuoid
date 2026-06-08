@@ -5,11 +5,11 @@
 # CI, and release).
 #
 # Recipes are grouped by intent (see `just --list`):
-#   check    — the dev loop + the pre-push gate (lint / format / test / coverage)
-#   build    — compile the workspace + release artifacts
-#   release  — cut a new version (one command: `just bump X.Y.Z`)
-#   docs     — regenerate the repo's screenshots / demo art
+#   rust     — compile the workspace + every Rust gate (fmt / clippy / test / …)
 #   site     — the Astro landing page under site/ (npm, its own CI)
+#   gen      — regenerate committed artifacts (README sections + docs images + site demos)
+#   release  — cut a new version (bump) + the distribution gates (npm-check / notes)
+#   meta     — tooling setup + the full pre-push / full-stack gates
 
 # Git Bash is preinstalled on GHA windows runners; keeps every recipe
 # single-sourced cross-platform (CI never writes inline commands).
@@ -21,35 +21,35 @@ features := "pixtuoid-core/test-renderer"
 default:
     @just --list
 
-# ── check ─────────────────────────────────────────────────────────
+# ── rust ──────────────────────────────────────────────────────────
 
 # Format check only — fast, gates pre-commit.
-[group('check')]
+[group('rust')]
 fmt-check:
     cargo fmt --all --check
 
 # Apply formatting in place.
-[group('check')]
+[group('rust')]
 fmt:
     cargo fmt --all
 
 # Clippy across the workspace, warnings denied.
-[group('check')]
+[group('rust')]
 clippy:
     cargo clippy --workspace --all-targets --features {{ features }} -- -D warnings
 
 # Unused-dependency check.
-[group('check')]
+[group('rust')]
 machete:
     cargo machete
 
 # License + advisory audit.
-[group('check')]
+[group('rust')]
 deny:
     cargo deny check
 
 # Fast, independent lint checks in parallel (fmt + machete + deny).
-[group('check')]
+[group('rust')]
 lint:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -65,7 +65,7 @@ lint:
 
 # Workspace tests — nextest if available (parallel + JUnit), else cargo test.
 # Extra args are forwarded: `just test reducer::` filters; preflight passes none.
-[group('check')]
+[group('rust')]
 [doc('Run the workspace tests (nextest if installed); forwards a filter')]
 test *args:
     #!/usr/bin/env bash
@@ -78,13 +78,13 @@ test *args:
 
 # Feature-combination check — every feature subset must compile. Catches code
 # that silently only builds with `test-renderer` on (CI runs with it always on).
-[group('check')]
+[group('rust')]
 [doc('Feature-powerset check — every feature subset must compile')]
 hack:
     cargo hack --feature-powerset --no-dev-deps check --workspace
 
 # Cross-lint the workspace for Windows (clippy subsumes check; no linking).
-[group('check')]
+[group('rust')]
 [doc('Cross-lint the workspace for x86_64-pc-windows-msvc via clippy (no linking; ubuntu runner suffices)')]
 check-windows:
     cargo clippy --workspace --all-targets --features {{ features }} --target x86_64-pc-windows-msvc -- -D warnings
@@ -92,7 +92,7 @@ check-windows:
 # SemVer-check the published library against its crates.io baseline. CI-only in
 # practice: needs network to fetch the baseline crate. Scoped to pixtuoid-core
 # (the headless lib others depend on); the binary crates' libs aren't public API.
-[group('check')]
+[group('rust')]
 [doc('SemVer-check pixtuoid-core against its crates.io baseline (CI-only)')]
 semver:
     cargo semver-checks --package pixtuoid-core
@@ -100,7 +100,7 @@ semver:
 # Coverage + JUnit XML in one run — the exact command ci.yml's coverage job uses.
 # CI-only in practice: needs cargo-llvm-cov + cargo-nextest + the `ci` nextest
 # profile. Writes lcov.info + target/nextest/ci/junit.xml.
-[group('check')]
+[group('rust')]
 [doc('Coverage + JUnit XML — the exact command ci.yml runs (needs llvm-cov + nextest)')]
 coverage:
     cargo llvm-cov nextest --workspace --features {{ features }} --lcov --output-path lcov.info --profile ci
@@ -112,65 +112,17 @@ coverage:
 #   just fuzz ~/.claude/projects     # your CC sessions (newest formats)
 #   just fuzz ~/.codex/sessions      # your Codex rollouts
 #   git clone https://github.com/daaain/claude-code-log /tmp/cc && just fuzz /tmp/cc/test_data/real_projects
-[group('check')]
+[group('rust')]
 [doc('Never-panic fuzz the decoders over a JSONL corpus dir: just fuzz ~/.claude/projects')]
 fuzz dir:
     cargo build --release --example decoder_fuzz -p pixtuoid-core
     find "{{ dir }}" -name '*.jsonl' -print0 | xargs -0 cat | ./target/release/examples/decoder_fuzz
 
-# Fail if the current release_notes() arm still has the uncurated TODO marker.
-# A release-PR guard (#116) — deliberately NOT in preflight, since `just bump`
-# leaves the marker for the human to curate after the bump commit.
-[group('check')]
-[doc('Fail if release_notes() still has the uncurated TODO marker (release-PR guard)')]
-notes-curated:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    if grep -q 'TODO: curate' crates/pixtuoid/src/version.rs; then
-        echo "error: release_notes() still has the 'TODO: curate' marker — curate the drafted bullets before merge" >&2
-        exit 1
-    fi
-    echo "release notes curated ✓"
-
-# Unit-test the npm package generator (Node, no cargo). The ONLY validation of
-# npm/generate.mjs — release.yml runs this as a hard gate right before `npm
-# publish`, and ci.yml runs it on every PR so a generator regression is caught
-# at review time, not at the irreversible tag-push. NOT in preflight: a Rust
-# pre-push shouldn't require a Node toolchain. Needs Node ≥ 22.
-[group('check')]
-[doc('Test the npm package generator (Node; CI + release call it, not in preflight)')]
-npm-check:
-    node --test npm/generate.test.mjs
-
-# Install the dev tools every check + recipe relies on (idempotent). Prefers
-# cargo-binstall (prebuilt) and falls back to cargo install (compiles).
-[group('check')]
-[doc('Install the dev tools the checks + recipes need (idempotent)')]
-setup-tools:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    tools=(cargo-nextest cargo-machete cargo-deny cargo-hack cargo-semver-checks cargo-edit)
-    if command -v cargo-binstall &>/dev/null; then
-        cargo binstall -y "${tools[@]}"
-    else
-        echo "cargo-binstall not found — compiling from source (slow)." >&2
-        echo "brew install cargo-binstall (or cargo install cargo-binstall) to grab prebuilt binaries instead." >&2
-        cargo install "${tools[@]}"
-    fi
-
-# Full pre-push gate: the checks worth running locally before a push.
-# (semver, coverage, and smoke are CI-only — network baseline / heavy builds.)
-[group('check')]
-[doc('Full pre-push gate: lint → clippy → hack → test')]
-preflight: lint clippy hack test
-
-# ── build ─────────────────────────────────────────────────────────
-
 # Compile the workspace; extra args are forwarded:
 #   just build                                # debug
 #   just build --release                      # release
 #   just build --release --bins --examples    # what ci.yml's smoke job builds
-[group('build')]
+[group('rust')]
 [doc('Compile the workspace; forwards args (e.g. --release --bins --examples)')]
 build *args:
     cargo build --workspace {{ args }}
@@ -178,7 +130,7 @@ build *args:
 # Cross-compile a release build for ONE target triple (release.yml's build
 # matrix). Pass `true` for targets that need the Docker-backed `cross` toolchain
 # (CI installs it via taiki-e/install-action@cross).
-[group('build')]
+[group('rust')]
 [doc('Cross-compile a release for ONE target triple (release.yml build matrix)')]
 build-target target cross="false":
     #!/usr/bin/env bash
@@ -192,11 +144,85 @@ build-target target cross="false":
 
 # Package the .deb for ONE already-built target (release.yml's deb job, hence
 # --no-build). Needs cargo-deb (CI installs it via taiki-e/install-action@cargo-deb).
-[group('build')]
+[group('rust')]
 [doc('Package the .deb for ONE already-built target (release.yml deb job)')]
 deb target:
     cargo deb -p pixtuoid --no-build --no-strip --target {{ target }}
     cargo deb -p pixtuoid-hook --no-build --no-strip --target {{ target }}
+
+# ── site ──────────────────────────────────────────────────────────
+# The Astro landing page — a self-contained Node project under site/ with its
+# own CI (.github/workflows/site.yml). See site/README.md.
+
+[group('site')]
+[doc('Install the site npm deps (run once per clone)')]
+site-setup:
+    npm --prefix site ci
+
+[group('site')]
+[doc('Site dev server with HMR → http://localhost:4321/pixtuoid/')]
+site-dev:
+    npm --prefix site run dev
+
+[group('site')]
+[doc('Full site gate: format-check → lint → astro check → build (mirrors site CI)')]
+site-check:
+    npm --prefix site run verify
+
+[group('site')]
+[doc('Auto-format the site')]
+site-fmt:
+    npm --prefix site run format
+
+# ── gen ───────────────────────────────────────────────────────────
+# Regenerate the committed artifacts that derive from a single source of truth:
+# README sections from site/src/*.json (gen-readme), and the office images for
+# BOTH docs/images/ and site/public/demos/ from scripts/media.json (gen-media).
+
+# Regenerate everything: README sections + docs images + site demos.
+[group('gen')]
+[doc('Regenerate ALL committed artifacts (README sections + docs images + site demos)')]
+gen: gen-readme gen-media
+
+# Sync the README's install/features/tools sections from site/src/*.json.
+[group('gen')]
+[doc('Sync README install/features/tools sections from site/src/*.json')]
+gen-readme:
+    node scripts/gen-readme.mjs
+
+# Fail if the committed README drifted from site/src/{features,sources,install}.json.
+# Pure node:builtins — no npm ci. ci.yml runs this on every PR (the `readme` job),
+# and gen-check composes it.
+[group('gen')]
+[doc('Fail if the committed README drifted from site data (features/sources/install.json)')]
+gen-readme-check:
+    node scripts/gen-readme.mjs --check
+
+# Regenerate docs/images/ + site/public/demos/ from scripts/media.json — ONE
+# manifest-driven driver (replaced gen-docs-images.py + gen-demos.sh). Builds the
+# snapshot example once; Pillow for stills/composite/gif, ffmpeg for clips/crops,
+# gifsicle for the gif. Forwards args, e.g. `just gen-media --only docs`.
+# Requires the .venv (Pillow) + ffmpeg + gifsicle.
+[group('gen')]
+[doc('Regenerate docs/images/ + site/public/demos/ from scripts/media.json')]
+gen-media *args:
+    .venv/bin/python3 scripts/gen-media.py {{ args }}
+
+# Drift gate: fail if any committed README section OR rendered still is stale.
+# Pixel-diffs every PNG (threshold 0); video clips + demo.gif are presence-only
+# (ffmpeg/gifsicle bytes aren't stable cross-version, but the renders feeding
+# them ARE pixel-deterministic). Run by ci.yml's smoke job; runnable locally
+# before pushing a visual change. A red check after an INTENTIONAL office change
+# means: run `just gen` and commit the regenerated docs/images/ +
+# site/public/demos/ in the same change. Requires the .venv + ffmpeg + gifsicle
+# + a release build of the snapshot example.
+[group('gen')]
+[doc('Fail if any committed README section or rendered image has drifted')]
+gen-check: gen-readme-check
+    #!/usr/bin/env sh
+    set -eu
+    test -x .venv/bin/python3 || { echo "needs the venv: python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt"; exit 1; }
+    .venv/bin/python3 scripts/gen-media.py --check
 
 # ── release ───────────────────────────────────────────────────────
 
@@ -296,80 +322,57 @@ bump version:
 
     printf '\n\033[32m✓ v%s committed on %s\033[0m\n\n  next:\n    1. curate the drafted bullets in crates/pixtuoid/src/version.rs (release_notes\n       arm) down to ~6 highlights, then: git commit --amend -a\n    2. open a PR, review, merge to main\n    3. AFTER merge, tag to publish — IRREVERSIBLE (crates.io + homebrew):\n         git tag v%s && git push origin v%s\n' "$ver" "$branch" "$ver" "$ver"
 
-# ── docs ──────────────────────────────────────────────────────────
+# Unit-test the npm package generator (Node, no cargo). The ONLY validation of
+# npm/generate.mjs — release.yml runs this as a hard gate right before `npm
+# publish`, and ci.yml runs it on every PR so a generator regression is caught
+# at review time, not at the irreversible tag-push. NOT in preflight: a Rust
+# pre-push shouldn't require a Node toolchain. Needs Node ≥ 22.
+[group('release')]
+[doc('Test the npm package generator (Node; CI + release call it, not in preflight)')]
+npm-check:
+    node --test npm/generate.test.mjs
 
-# Regenerate every docs/images screenshot + demo.gif from a release build.
-# Single source of truth for the office images — the render params, crop
-# quadrants, and the themes-composite diagonal angle all live in the script, so
-# the screenshots never "drift". Run after any change to the office's look.
-# Requires the .venv (Pillow): see README "Visual verification".
-[group('docs')]
-[doc('Regenerate docs/images screenshots + demo.gif from a release build')]
-demo:
-    .venv/bin/python3 scripts/gen-docs-images.py
+# Fail if the current release_notes() arm still has the uncurated TODO marker.
+# A release-PR guard (#116) — deliberately NOT in preflight, since `just bump`
+# leaves the marker for the human to curate after the bump commit.
+[group('release')]
+[doc('Fail if release_notes() still has the uncurated TODO marker (release-PR guard)')]
+notes-curated:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if grep -q 'TODO: curate' crates/pixtuoid/src/version.rs; then
+        echo "error: release_notes() still has the 'TODO: curate' marker — curate the drafted bullets before merge" >&2
+        exit 1
+    fi
+    echo "release notes curated ✓"
 
-# Pixel-diff two deterministic renders against the checked-in CI baselines
-# (docs/images/reference-*.png). Run by ci.yml's smoke job; runnable locally
-# before pushing a PR that touches the office's look. Render params MUST match
-# the reference step in scripts/gen-docs-images.py (TZ=UTC pins the epoch-
-# derived weather slot + twinkle phase; --weather makes the scene explicit).
-# A red check after an INTENTIONAL visual change means: run `just demo` and
-# commit the regenerated docs/images in the same change.
-# Requires the .venv (Pillow) and a release build of the snapshot example.
-[group('check')]
-[doc('Visual regression: diff deterministic renders vs docs/images/reference-*.png')]
-visual-check:
-    #!/usr/bin/env sh
-    # Both comparisons always run (no fail-fast) so a wide visual change is
-    # diagnosable from ONE CI run's diff artifacts, not two round-trips.
-    set -eu
-    test -x .venv/bin/python3 || { echo "needs the venv: python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt"; exit 1; }
-    TZ=UTC ./target/release/examples/snapshot --theme normal --cols 192 --rows 64 --now-hour 19 --now-day 1 --weather clear /tmp/visual-day.png > /dev/null
-    TZ=UTC ./target/release/examples/snapshot --theme cyberpunk --cols 192 --rows 64 --now-hour 3 --now-day 1 --weather clear /tmp/visual-night.png > /dev/null
-    rc=0
-    .venv/bin/python3 scripts/compare-screenshots.py docs/images/reference-screenshot.png /tmp/visual-day.png /tmp/diff-day.png || rc=1
-    .venv/bin/python3 scripts/compare-screenshots.py docs/images/reference-night.png /tmp/visual-night.png /tmp/diff-night.png || rc=1
-    exit $rc
+# ── meta ──────────────────────────────────────────────────────────
 
-# ── site ──────────────────────────────────────────────────────────
-# The Astro landing page — a self-contained Node project under site/ with its
-# own CI (.github/workflows/site.yml). See site/README.md.
+# Full pre-push gate: the Rust checks worth running locally before a push.
+# (semver, coverage, and the gen/smoke gates are CI-only — network baseline /
+# heavy builds / venv+ffmpeg.)
+[group('meta')]
+[doc('Full pre-push gate: lint → clippy → hack → test')]
+preflight: lint clippy hack test
 
-[group('site')]
-[doc('Install the site npm deps (run once per clone)')]
-site-setup:
-    npm --prefix site ci
+# Everything: the Rust pre-push gate + the site gate + the artifact-drift gate.
+# Heavier than preflight (needs the site npm deps + the .venv + ffmpeg).
+[group('meta')]
+[doc('Full-stack gate: preflight + site-check + gen-check')]
+verify: preflight site-check gen-check
 
-[group('site')]
-[doc('Site dev server with HMR → http://localhost:4321/pixtuoid/')]
-site-dev:
-    npm --prefix site run dev
-
-[group('site')]
-[doc('Full site gate: format-check → lint → astro check → build (mirrors site CI)')]
-site-check:
-    npm --prefix site run verify
-
-[group('site')]
-[doc('Auto-format the site')]
-site-fmt:
-    npm --prefix site run format
-
-[group('site')]
-[doc('Regenerate the site demo art from the pixtuoid binary')]
-site-demos:
-    ./site/scripts/gen-demos.sh
-
-[group('site')]
-[doc('Sync the README from site data: regen Features table (features.json) + check install commands (install.json)')]
-gen-readme:
-    node scripts/gen-readme.mjs
-
-# Verify the committed README still matches site/src/{features,sources,install}.json
-# (exits non-zero on drift; `just gen-readme` regenerates). Pure node:builtins —
-# no npm ci. ci.yml runs this on every PR so README↔manifest drift is a hard gate
-# at REVIEW time, not just a (path-filtered, advisory) site-CI failure.
-[group('site')]
-[doc('Fail if the committed README drifted from site data (features/sources/install.json)')]
-gen-readme-check:
-    node scripts/gen-readme.mjs --check
+# Install the dev tools every check + recipe relies on (idempotent). Prefers
+# cargo-binstall (prebuilt) and falls back to cargo install (compiles).
+[group('meta')]
+[doc('Install the dev tools the checks + recipes need (idempotent)')]
+setup-tools:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    tools=(cargo-nextest cargo-machete cargo-deny cargo-hack cargo-semver-checks cargo-edit)
+    if command -v cargo-binstall &>/dev/null; then
+        cargo binstall -y "${tools[@]}"
+    else
+        echo "cargo-binstall not found — compiling from source (slow)." >&2
+        echo "brew install cargo-binstall (or cargo install cargo-binstall) to grab prebuilt binaries instead." >&2
+        cargo install "${tools[@]}"
+    fi
