@@ -3,7 +3,6 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
-use fs4::FileExt;
 
 /// The user's home dir — `USERPROFILE`-first on Windows (HOME is normally
 /// unset there; Git Bash's exported HOME is POSIX-form and unusable), `HOME`
@@ -134,7 +133,9 @@ pub fn write_config_atomic(path: &Path, contents: &str) -> Result<()> {
         .write(true)
         .truncate(false)
         .open(&lock_path)?;
-    lock.try_lock_exclusive()
+    // UFCS onto fs4's trait (not std's inherent File::try_lock, stable only in
+    // 1.89) so the advisory lock keeps working on the declared MSRV (1.78).
+    fs4::FileExt::try_lock(&lock)
         .map_err(|e| anyhow!("could not lock {}: {e}", lock_path.display()))?;
 
     let tmp = sibling(&target, "tmp");
