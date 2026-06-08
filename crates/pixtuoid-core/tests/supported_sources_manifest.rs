@@ -2,7 +2,7 @@
 //! `REGISTERED_SOURCES`.
 //!
 //! `site/src/sources.json` single-sources the README "Supported Tools" glimpse
-//! (`site/scripts/gen-readme.mjs`) AND the site's full tool × OS support matrix
+//! (`scripts/gen-readme.mjs`) AND the site's full tool × OS support matrix
 //! (`SupportedTools.astro`). That rendering is *parity*; THIS test is *truth*:
 //! the manifest can never claim `"status": "supported"` for a source that isn't
 //! actually wired, and registering a new source forces a manifest row — the same

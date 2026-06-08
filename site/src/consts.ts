@@ -22,7 +22,7 @@ export interface ThemeShot {
 }
 
 // Single source of truth for the theme switcher → site/src/themes.json.
-// Add a theme there + render its screenshot (scripts/gen-demos.sh) and the gallery,
+// Add a theme there + render its screenshot (just gen-media) and the gallery,
 // the live count, the retint, and the render script all pick it up. No component edits.
 export const THEMES: ThemeShot[] = themesData as ThemeShot[];
 
@@ -33,7 +33,7 @@ export interface WeatherShot {
 }
 
 // Single source of truth for the weather gallery → site/src/weather.json. The
-// manifest↔art↔gallery triangle is guarded here (gen-demos.sh derives its render
+// manifest↔art↔gallery triangle is guarded here (just gen-media derives its render
 // loop from this file; astro.config fails the build if any id lacks its
 // weather_<id>.png); the manifest↔Rust-enum edge is guarded by the
 // `weather_gallery_manifest_matches_the_weather_enum` unit test in pixtuoid.
@@ -66,7 +66,7 @@ export interface ShowcaseChannel {
 }
 
 // Single source of truth for the Studio Wall → site/src/showcase.json.
-// themes.json / weather.json stay untouched (their README-sync + gen-demos.sh
+// themes.json / weather.json stay untouched (their README-sync + just gen-media
 // loops + Rust enum guard tests are unaffected); variant-set channels reference
 // them via variantsRef and resolve here.
 // The manifest's kind/status/default/asset invariants are enforced at build time by the showcase guard in astro.config.mjs.

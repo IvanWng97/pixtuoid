@@ -1417,7 +1417,7 @@ fn weather_gallery_manifest_matches_the_weather_enum() {
     // render loop; the `Weather` enum drives what actually renders. Site CI never
     // runs the binary, so nothing else ties the two together — this test is the
     // bridge: manifest ids must equal the canonical names, in order. (A new or
-    // renamed variant fails here until the manifest + scripts/gen-demos.sh art
+    // renamed variant fails here until the manifest + `just gen-media` art
     // are updated with it.)
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../site/src/weather.json");
     let json = match std::fs::read_to_string(path) {
@@ -1442,6 +1442,6 @@ fn weather_gallery_manifest_matches_the_weather_enum() {
         ids,
         weather_names(),
         "site/src/weather.json ids must match Weather::ALL names in order — \
-         update the manifest + run scripts/gen-demos.sh when the enum changes"
+         update the manifest + run `just gen-media` when the enum changes"
     );
 }

@@ -224,7 +224,7 @@ mod tests {
         assert_eq!(
             ids, names,
             "site/src/themes.json ids must match ALL_THEMES names — update the \
-             manifest + run scripts/gen-demos.sh when the registry changes"
+             manifest + run `just gen-media` when the registry changes"
         );
     }
 

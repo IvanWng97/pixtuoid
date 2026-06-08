@@ -20,7 +20,7 @@ if (!version) {
 // Guard: every theme in the switcher manifest must have a rendered demo PNG.
 // site CI never runs the binary, so without this a theme added to themes.json
 // before its screenshot exists would deploy a chip with a 404 image (#121).
-// Fix by running scripts/gen-demos.sh (the binary must ship the theme first).
+// Fix by running `just gen-media` (the binary must ship the theme first).
 const themeIds = /** @type {{ id: string }[]} */ (
   JSON.parse(readFileSync(fileURLToPath(new URL('./src/themes.json', import.meta.url)), 'utf8'))
 ).map((t) => t.id);
@@ -29,7 +29,7 @@ const missingDemos = themeIds.filter(
 );
 if (missingDemos.length) {
   throw new Error(
-    `astro.config: themes.json lists theme(s) with no public/demos/theme_<id>.png — run scripts/gen-demos.sh: ${missingDemos.join(', ')}`
+    `astro.config: themes.json lists theme(s) with no public/demos/theme_<id>.png — run just gen-media: ${missingDemos.join(', ')}`
   );
 }
 
@@ -42,7 +42,7 @@ const missingWeather = weatherIds.filter(
 );
 if (missingWeather.length) {
   throw new Error(
-    `astro.config: weather.json lists weather(s) with no public/demos/weather_<id>.png — run scripts/gen-demos.sh: ${missingWeather.join(', ')}`
+    `astro.config: weather.json lists weather(s) with no public/demos/weather_<id>.png — run just gen-media: ${missingWeather.join(', ')}`
   );
 }
 
@@ -76,7 +76,7 @@ for (const c of showcase) {
     );
     if (missing.length)
       throw new Error(
-        `astro.config: showcase.json live clip "${c.id}" missing public/demos/ asset(s): ${missing.join(', ')} — run site/scripts/gen-demos.sh`
+        `astro.config: showcase.json live clip "${c.id}" missing public/demos/ asset(s): ${missing.join(', ')} — run just gen-media`
       );
     if (!Number.isFinite(c.w) || !Number.isFinite(c.h))
       throw new Error(

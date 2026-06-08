@@ -2,7 +2,7 @@
 import { Code } from 'astro:components';
 import { REPO, CRATES } from '../consts';
 // Single source of truth for install commands → site/src/install.json. The README
-// regenerates its install block from the same file (readme:check), so the site and
+// regenerates its install block from the same file (gen-readme-check), so the site and
 // README can't drift — the site shows every method, the README only the ones
 // flagged `readme: true`.
 import tabs from '../install.json';

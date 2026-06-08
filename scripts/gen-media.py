@@ -87,6 +87,11 @@ def ffmpeg(*args):
 
 
 def run_render(job, out_dirs, work, intermediates):
+    # The `reference` baselines pin TZ=UTC because --now-hour is a chrono::Local
+    # wall time: the epoch — and with it the 10-min weather slot + city-twinkle
+    # phase — is timezone-dependent, so without this a dev's machine and the CI
+    # runner would render different frames and `gen-check` would false-fail. Carry
+    # the WHOLE os.environ (not a bare {"TZ":...}) so PATH/cargo still resolve.
     env = {**os.environ, "TZ": "UTC"} if job.get("tz") == "UTC" else None
 
     if "frames" in job:  # the reference baselines: several named frames, one job
@@ -170,7 +175,7 @@ def run_gif(job, out_dirs, work, intermediates):
         snap(dst, cols=job["cols"], rows=job["rows"], hour=job["hour"], day=job.get("day"),
              theme=job.get("theme"), gif={"duration": job["duration"], "fps": job["fps"]})
         # Palette reduction (NOT --lossy: it breaks gifsicle's inter-frame diff and
-        # ships a bigger file). Same params as the old gen-docs-images.py.
+        # ships a bigger file). These gifsicle params are the established tuning.
         subprocess.run(
             ["gifsicle", "-b", "-O3", "--colors", str(job["colors"]), str(dst)], check=True
         )
@@ -229,7 +234,18 @@ def _presence_only(name):
     return name.endswith((".mp4", ".webm", ".gif", "-poster.png"))
 
 
-def run_check(out_base, work, only=None):
+def _expected_presence_outputs(job):
+    """Committed filenames a presence-only (clip/gif) job owns — asserted to EXIST,
+    since --check skips regenerating them and walking the committed tree alone can't
+    notice one that's missing/renamed/never-generated."""
+    if job["kind"] == "gif":
+        return [f"{job['id']}.gif"]
+    if job["kind"] == "clip":
+        return [f"{job['id']}.mp4", f"{job['id']}.webm", f"{job['id']}-poster.png"]
+    return []
+
+
+def run_check(out_base, work, manifest, only=None):
     """Pixel-diff every committed STILL against a fresh render; presence-check the
     ffmpeg/gifsicle outputs (clips/gif/posters) without regenerating them."""
     failures = []
@@ -262,6 +278,17 @@ def run_check(out_base, work, only=None):
         for name in sorted(produced):
             if not (committed_dir / name).exists():
                 failures.append(f"NEW (uncommitted) output: {target}/{name}")
+
+    # Presence-only outputs (clips/gif) are skipped in --check, so the committed-dir
+    # walk above can't catch one that's MISSING. Assert them from the MANIFEST — the
+    # source of truth for what must exist — so a deleted/renamed/orphaned clip fails.
+    for job in manifest:
+        for t in job["targets"]:
+            if only and t != only:
+                continue
+            for name in _expected_presence_outputs(job):
+                if not (TARGET_DIRS[t] / name).exists():
+                    failures.append(f"MISSING (per manifest): {t}/{name}")
 
     print()
     if failures:
@@ -298,28 +325,29 @@ def main():
         d.mkdir(parents=True, exist_ok=True)
 
     intermediates = {}
-    for job in manifest:
-        if only_jobs and job["id"] not in only_jobs:
-            continue
-        targets = [t for t in job["targets"] if not args.only or t == args.only]
-        if not targets:
-            continue
-        # --check pixel-gates stills only; clips/gif are presence-checked from the
-        # committed tree, so don't waste minutes rendering + vp9-encoding them.
-        if args.check and job["kind"] in ("gif", "clip"):
-            print(f"· {job['id']} ({job['kind']}) → presence-only, skipped in --check")
-            continue
-        out_dirs = [out_base[t] for t in targets]
-        print(f"· {job['id']} ({job['kind']}) → {', '.join(targets)}")
-        HANDLERS[job["kind"]](job, out_dirs, work, intermediates)
+    try:
+        for job in manifest:
+            if only_jobs and job["id"] not in only_jobs:
+                continue
+            targets = [t for t in job["targets"] if not args.only or t == args.only]
+            if not targets:
+                continue
+            # --check pixel-gates stills only; clips/gif are presence-checked from
+            # the manifest, so don't waste minutes rendering + vp9-encoding them.
+            if args.check and job["kind"] in ("gif", "clip"):
+                print(f"· {job['id']} ({job['kind']}) → presence-only, skipped in --check")
+                continue
+            out_dirs = [out_base[t] for t in targets]
+            print(f"· {job['id']} ({job['kind']}) → {', '.join(targets)}")
+            HANDLERS[job["kind"]](job, out_dirs, work, intermediates)
 
-    if args.check:
-        rc = run_check(out_base, work, only=args.only)
+        if args.check:
+            sys.exit(run_check(out_base, work, manifest, only=args.only))
+
+        surfaces = [args.only] if args.only else list(TARGET_DIRS)
+        print(f"\nwrote media → {', '.join(str(TARGET_DIRS[t]) for t in surfaces)}")
+    finally:
         shutil.rmtree(work, ignore_errors=True)
-        sys.exit(rc)
-
-    shutil.rmtree(work, ignore_errors=True)
-    print(f"\nwrote media → {', '.join(str(TARGET_DIRS[t]) for t in (([args.only] if args.only else TARGET_DIRS)))}")
 
 
 if __name__ == "__main__":

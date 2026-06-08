@@ -40,7 +40,7 @@ const cell = (s) => String(s).replace(/\|/g, '&#124;').replace(/\r?\n/g, ' ');
 // Regenerate the block between `start`/`end` markers from `body`. () => block:
 // a replacer FUNCTION inserts the value literally — a plain string would expand
 // `$`-patterns ($$, $&, $') lurking in the text and silently corrupt the README
-// in a way readme:check can't see (both sides of its comparison would go through
+// in a way --check can't see (both sides of its comparison would go through
 // the same mangling). Updates the in-memory `readme`; writes the file on change.
 function regenSection(label, start, end, body) {
   const block = `${start}\n${body}\n${end}`;

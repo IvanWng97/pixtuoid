@@ -138,7 +138,7 @@ struct SnapshotArgs {
 
     /// Force a specific weather, bypassing the clock-based 10-minute cycle.
     /// One of: clear | rain | storm | snow | fog | overcast | windy | smog.
-    /// Drives the weather gallery (scripts/gen-demos.sh); pair with --now-hour
+    /// Drives the weather gallery (`just gen-media`); pair with --now-hour
     /// to pick a flattering time of day per weather.
     #[arg(long)]
     weather: Option<String>,
