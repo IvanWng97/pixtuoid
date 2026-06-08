@@ -1,0 +1,193 @@
+---
+import sources from '../sources.json';
+import { asset } from '../consts';
+
+// Single source of truth → site/src/sources.json. The README "Supported Tools"
+// glimpse is generated from the SAME file (site/scripts/gen-readme.mjs), and the
+// `supported` set is pinned to the code's REGISTERED_SOURCES by a Rust test
+// (crates/pixtuoid-core/tests/supported_sources_manifest.rs) — so this matrix,
+// the README glimpse, and what's actually wired can't drift.
+
+type OsState = 'yes' | 'planned' | 'no';
+const OSES = [
+  { key: 'macos', label: 'macOS' },
+  { key: 'linux', label: 'Linux' },
+  { key: 'windows', label: 'Windows' },
+] as const;
+const GLYPH: Record<OsState, string> = { yes: '✅', planned: '🔜', no: '—' };
+const glyph = (s: string): string => GLYPH[s as OsState] ?? '—';
+// Screen-reader text for each cell. The emoji carries the value visually but is
+// aria-hidden (aria-label on a roleless <span> is naming-prohibited and gets
+// dropped), so the real value rides a visually-hidden sibling.
+const STATE_LABEL: Record<OsState, string> = {
+  yes: 'supported',
+  planned: 'planned',
+  no: 'not supported',
+};
+const stateLabel = (s: string): string => STATE_LABEL[s as OsState] ?? s;
+
+const supported = sources.filter((s) => s.status === 'supported');
+const planned = sources.filter((s) => s.status === 'planned');
+---
+
+<section id="tools" class="tools">
+  <div class="container">
+    <div class="section-head reveal">
+      <p class="eyebrow">Works with</p>
+      <h2>Your agents, whichever CLI they run.</h2>
+      <p class="lead">
+        Each coding agent shows up as a coworker. Support is per-tool <em>and</em> per-OS — here's the
+        full matrix. New CLIs land via one
+        <a href={asset('contributing')}>Source adapter</a>.
+      </p>
+    </div>
+
+    <div class="tools__matrix card reveal">
+      <table>
+        <caption class="sr-only">Supported coding agents by operating system</caption>
+        <thead>
+          <tr>
+            <th scope="col">Tool</th>
+            {OSES.map((o) => <th scope="col">{o.label}</th>)}
+            <th scope="col" class="tools__how-col">How</th>
+          </tr>
+        </thead>
+        <tbody>
+          {
+            supported.map((s) => (
+              <tr>
+                <th scope="row">
+                  <a href={s.url} target="_blank" rel="noreferrer">
+                    {s.name}
+                  </a>
+                </th>
+                {OSES.map((o) => (
+                  <td class="tools__cell" data-state={s.platforms[o.key]}>
+                    <span class="sr-only">{stateLabel(s.platforms[o.key])}</span>
+                    <span aria-hidden="true">{glyph(s.platforms[o.key])}</span>
+                  </td>
+                ))}
+                <td class="tools__how">{s.transport}</td>
+              </tr>
+            ))
+          }
+        </tbody>
+        {
+          planned.length > 0 && (
+            <tbody class="tools__planned">
+              <tr class="tools__group">
+                <td colspan={OSES.length + 2}>Planned</td>
+              </tr>
+              {planned.map((s) => (
+                <tr>
+                  <th scope="row">
+                    <a href={s.url} target="_blank" rel="noreferrer">
+                      {s.name}
+                    </a>
+                  </th>
+                  {OSES.map(() => (
+                    <td class="tools__cell" data-state="planned">
+                      <span class="sr-only">planned</span>
+                      <span aria-hidden="true">🔜</span>
+                    </td>
+                  ))}
+                  <td class="tools__how">{s.transport}</td>
+                </tr>
+              ))}
+            </tbody>
+          )
+        }
+      </table>
+      <p class="tools__legend">
+        <span>✅ supported</span> · <span>🔜 planned</span> · <span>— n/a</span>
+      </p>
+    </div>
+  </div>
+</section>
+
+<style>
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+  .tools__matrix {
+    max-width: 760px;
+    margin-inline: auto;
+    padding: 0.4rem 0.4rem 0.2rem;
+    overflow-x: auto;
+  }
+  .tools table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.95rem;
+  }
+  .tools th,
+  .tools td {
+    padding: 0.6rem 0.7rem;
+    border-bottom: 1px solid var(--px-border, rgba(255, 255, 255, 0.08));
+    text-align: left;
+    white-space: nowrap;
+  }
+  .tools thead th {
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    opacity: 0.7;
+    font-weight: 600;
+  }
+  .tools tbody th[scope='row'] {
+    font-weight: 600;
+  }
+  .tools tbody th a {
+    color: inherit;
+    text-decoration: none;
+    border-bottom: 1px dotted currentColor;
+  }
+  .tools tbody th a:hover {
+    opacity: 0.8;
+  }
+  .tools__cell {
+    text-align: center;
+    font-size: 1.05rem;
+  }
+  .tools__cell[data-state='no'] {
+    opacity: 0.35;
+  }
+  .tools__how {
+    font-size: 0.82rem;
+    opacity: 0.7;
+    white-space: normal;
+  }
+  .tools__group td {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    opacity: 0.55;
+    padding-top: 0.9rem;
+    border-bottom: none;
+  }
+  .tools__planned tbody:last-child tr:last-child th,
+  .tools__planned tr th,
+  .tools__planned tr td {
+    opacity: 0.62;
+  }
+  .tools__legend {
+    margin: 0.7rem 0.2rem 0.3rem;
+    font-size: 0.78rem;
+    opacity: 0.6;
+  }
+  /* The transport column is supplementary — drop it before the grid gets cramped. */
+  @media (max-width: 560px) {
+    .tools__how-col,
+    .tools__how {
+      display: none;
+    }
+  }
+</style>

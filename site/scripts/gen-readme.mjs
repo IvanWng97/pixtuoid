@@ -1,11 +1,20 @@
 #!/usr/bin/env node
 // Keep the README in sync with the site's single-source data files:
-//   • Features table  ← site/src/features.json   (GENERATED between markers)
-//   • install commands ← site/src/install.json    (CHECKED — must appear verbatim)
-// The site (Features.astro / Install.astro) reads the same JSON, so the README and
-// the site can't drift. Run `just gen-readme` (or `node site/scripts/gen-readme.mjs`)
-// after editing either JSON. `--check` writes nothing and exits non-zero on drift
-// (used by CI: `npm run readme:check`).
+//   • Features table          ← site/src/features.json  (GENERATED between markers)
+//   • Supported-tools glimpse ← site/src/sources.json   (GENERATED between markers)
+//   • install commands        ← site/src/install.json   (CHECKED — must appear verbatim)
+// The site (Features.astro / SupportedTools.astro / Install.astro) reads the same
+// JSON, so the README and the site can't drift. The supported-tools glimpse shows
+// only the FEATURED tools + a link to the full tool × OS matrix on the site, so the
+// README stays short as more agent CLIs are added. Run `just gen-readme` (or
+// `node site/scripts/gen-readme.mjs`) after editing any JSON. `--check` writes
+// nothing and exits non-zero on drift (used by CI: `npm run readme:check`).
+//
+// NOTE: the manifest's *supported* set is pinned to the code's REGISTERED_SOURCES
+// by a Rust test (crates/pixtuoid-core/tests/supported_sources_manifest.rs) that
+// runs in the main CI — so the marketing list can never claim "supported" for a
+// source that isn't actually wired (and a newly-wired source forces a manifest
+// update). This script only owns rendering + README/site parity.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -14,46 +23,89 @@ import process from 'node:process';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const readmePath = join(root, 'README.md');
 const features = JSON.parse(readFileSync(join(root, 'site', 'src', 'features.json'), 'utf8'));
+const sources = JSON.parse(readFileSync(join(root, 'site', 'src', 'sources.json'), 'utf8'));
 const install = JSON.parse(readFileSync(join(root, 'site', 'src', 'install.json'), 'utf8'));
 
+const SITE = 'https://ivanwng97.github.io/pixtuoid';
 const check = process.argv.includes('--check');
 let readme = readFileSync(readmePath, 'utf8');
 const errors = [];
 
-// --- Features table (generated between markers) ---
-const START =
-  '<!-- features:start · generated from site/src/features.json by `just gen-readme` — edit the JSON, not this table -->';
-const END = '<!-- features:end -->';
 // Neutralize only what breaks a GFM table row: `|` splits columns (use the
 // HTML entity — backslash-escaping would itself need backslash escaping first,
-// CodeQL js/incomplete-sanitization) and newlines split rows. Desc is
+// CodeQL js/incomplete-sanitization) and newlines split rows. Cell text is
 // intentionally markdown-bearing (backticks, `A\*`), so nothing else is touched.
 const cell = (s) => String(s).replace(/\|/g, '&#124;').replace(/\r?\n/g, ' ');
-const rows = features.map((f) => `| ${cell(f.icon)} | **${cell(f.name)}** | ${cell(f.desc)} |`);
-const block = `${START}\n${['| | Feature | Description |', '|---|---|---|', ...rows].join('\n')}\n${END}`;
-const re = new RegExp(`${escapeRe(START)}[\\s\\S]*?${escapeRe(END)}`);
-if (!re.test(readme)) {
-  console.error(`gen-readme: features markers not found in README.md. Expected:\n\n${block}\n`);
-  process.exit(1);
-}
-// () => block: a replacer FUNCTION inserts the value literally — a plain string
-// here would expand `$`-patterns ($$, $&, $') lurking in feature text and
-// silently corrupt the README in a way readme:check can't see (both sides of
-// its comparison would go through the same mangling).
-const withFeatures = readme.replace(re, () => block);
-if (check) {
-  if (withFeatures !== readme) {
-    errors.push(
-      'README Features table is stale — run `just gen-readme` after editing features.json.'
-    );
+
+// Regenerate the block between `start`/`end` markers from `body`. () => block:
+// a replacer FUNCTION inserts the value literally — a plain string would expand
+// `$`-patterns ($$, $&, $') lurking in the text and silently corrupt the README
+// in a way readme:check can't see (both sides of its comparison would go through
+// the same mangling). Updates the in-memory `readme`; writes the file on change.
+function regenSection(label, start, end, body) {
+  const block = `${start}\n${body}\n${end}`;
+  const re = new RegExp(`${escapeRe(start)}[\\s\\S]*?${escapeRe(end)}`);
+  if (!re.test(readme)) {
+    console.error(`gen-readme: ${label} markers not found in README.md. Expected:\n\n${block}\n`);
+    process.exit(1);
   }
-} else if (withFeatures !== readme) {
-  readme = withFeatures;
-  writeFileSync(readmePath, readme);
-  console.log(`✓ README Features table regenerated (${features.length} features)`);
-} else {
-  console.log('README Features table already up to date ✓');
+  const next = readme.replace(re, () => block);
+  if (next === readme) {
+    console.log(`README ${label} already up to date ✓`);
+    return;
+  }
+  if (check) {
+    errors.push(`README ${label} is stale — run \`just gen-readme\` after editing the JSON.`);
+  } else {
+    readme = next;
+    writeFileSync(readmePath, readme);
+    console.log(`✓ README ${label} regenerated`);
+  }
 }
+
+// --- Features table ---
+const featureRows = features.map(
+  (f) => `| ${cell(f.icon)} | **${cell(f.name)}** | ${cell(f.desc)} |`
+);
+regenSection(
+  'Features table',
+  '<!-- features:start · generated from site/src/features.json by `just gen-readme` — edit the JSON, not this table -->',
+  '<!-- features:end -->',
+  ['| | Feature | Description |', '|---|---|---|', ...featureRows].join('\n')
+);
+
+// --- Supported-tools glimpse (FEATURED only + a link to the full site matrix) ---
+const OS_LABELS = { macos: 'macOS', linux: 'Linux', windows: 'Windows' };
+const OS_ORDER = ['macos', 'linux', 'windows'];
+const runsOn = (s) =>
+  OS_ORDER.filter((os) => s.platforms?.[os] === 'yes')
+    .map((os) => OS_LABELS[os])
+    .join(' · ');
+
+const featured = sources.filter((s) => s.status === 'supported' && s.featured);
+const otherSupported = sources.filter((s) => s.status === 'supported' && !s.featured);
+const planned = sources.filter((s) => s.status === 'planned');
+const link = (s) => `[${cell(s.name)}](${s.url})`;
+const plannedTail = planned.length
+  ? ` Planned: ${planned.map((s) => cell(s.name)).join(', ')}.`
+  : '';
+const alsoLine = otherSupported.length
+  ? `_Also supported: ${otherSupported.map(link).join(', ')}.${plannedTail}_\n\n`
+  : planned.length
+    ? `_Planned: ${planned.map((s) => cell(s.name)).join(', ')}._\n\n`
+    : '';
+regenSection(
+  'Supported-tools glimpse',
+  '<!-- tools:start · generated from site/src/sources.json by `just gen-readme` — edit the JSON, not this table -->',
+  '<!-- tools:end -->',
+  [
+    '| Tool | Runs on |',
+    '|---|---|',
+    ...featured.map((s) => `| ${link(s)} | ${cell(runsOn(s)) || '—'} |`),
+    '',
+    alsoLine + `**→ [Full tool × OS support matrix on the site](${SITE}/#tools)**`,
+  ].join('\n')
+);
 
 // --- Install commands (checked, not generated — the README install prose is
 // hand-curated, but every canonical command must appear in it verbatim) ---
@@ -61,8 +113,7 @@ if (check) {
 // `... pixtuoid-hook --locked`) must FAIL, or the site would silently keep
 // recommending the shorter command. Comment lines (#…) are site-tab
 // presentation, not commands — skip them.
-const current = readFileSync(readmePath, 'utf8');
-const readmeLines = new Set(current.split('\n').map((l) => l.trim()));
+const readmeLines = new Set(readme.split('\n').map((l) => l.trim()));
 for (const m of install) {
   if (!m.readmeCheck) continue; // site-only method
   for (const cmd of m.cmds) {
@@ -79,7 +130,7 @@ if (errors.length) {
   console.error(errors.map((e) => `✗ ${e}`).join('\n'));
   process.exit(1);
 }
-if (check) console.log('README is in sync with features.json + install.json ✓');
+if (check) console.log('README is in sync with features.json + sources.json + install.json ✓');
 else console.log('README install commands match install.json ✓');
 
 function escapeRe(s) {

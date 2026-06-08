@@ -166,10 +166,16 @@ historically-missed one):
 8. **If the CLI has hooks**, add an `install/` target (`Target` registry row +
    a `merge_install`/`merge_uninstall` pair + a registered-events↔decoder-arms
    guard test) so `pixtuoid install-hooks --target <name>` wires the shim.
-9. **Docs in the same PR**: README "Supported Tools" row, the nested
-   `crates/pixtuoid-core/CLAUDE.md` entry, and — if the upstream is open
-   source — a `scripts/check_upstream_drift.py` check so a silent rename
-   pages us weekly.
+9. **Add a row to [`site/src/sources.json`](../site/src/sources.json)** — the
+   single source of truth for the README "Supported Tools" glimpse AND the
+   site's full tool × OS support matrix. Set `status`, `featured` (shown in the
+   README glimpse), and per-OS `platforms`; then `just gen-readme` to regenerate
+   the README. The `supported` set is pinned to `REGISTERED_SOURCES` by
+   `crates/pixtuoid-core/tests/supported_sources_manifest.rs`, so a newly
+   registered source FAILS that test until its manifest row exists.
+10. **Other docs in the same PR**: the nested `crates/pixtuoid-core/CLAUDE.md`
+    entry, and — if the upstream is open source — a
+    `scripts/check_upstream_drift.py` check so a silent rename pages us weekly.
 
 See "Adding a new agent CLI" in [`CLAUDE.md`](../CLAUDE.md) and
 `crates/pixtuoid-core/CLAUDE.md` for the deeper wiring detail (and the four

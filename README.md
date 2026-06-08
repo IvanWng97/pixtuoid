@@ -133,17 +133,18 @@ Upgrading from `ascii-agents` v0.3.x? See [docs/MIGRATION.md](docs/MIGRATION.md)
 
 ## Supported Tools
 
-| Tool | Status | Notes |
-|---|---|---|
-| [**Claude Code**](https://code.claude.com) | ✅ Supported | Hook shim + JSONL watcher |
-| [**Antigravity CLI**](https://github.com/antiGravity-AI/antigravity-cli) | ✅ Supported | JSONL watcher |
-| [**Codex CLI**](https://github.com/openai/codex) | ✅ Supported | Hook shim + JSONL watcher (hook/JSONL coalesce on session UUID) |
-| [**DeepSeek-Reasonix**](https://github.com/esengine/DeepSeek-Reasonix) | ✅ Supported | Hook shim (Go line, `v1.x`+ / `reasonix@next`; npm `latest` is still the 0.x TS line, not covered) |
-| [**Copilot CLI**](https://github.com/github/copilot-cli) | 🔜 Planned | Identical event names |
-| [**OpenCode**](https://github.com/anomalyco/opencode) | 🔜 Planned | Any LLM (DeepSeek / GPT / Claude / Gemini) |
-| [**Cursor CLI**](https://cursor.com/cli) | 🔜 Planned | NDJSON stream |
+<!-- tools:start · generated from site/src/sources.json by `just gen-readme` — edit the JSON, not this table -->
+| Tool | Runs on |
+|---|---|
+| [Claude Code](https://code.claude.com) | macOS · Linux · Windows |
+| [Codex CLI](https://github.com/openai/codex) | macOS · Linux |
 
-> Adding a new tool? Implement the [`Source` trait](#contributing) — or, for a hook-only CLI, just a hook decoder + an `install-hooks` target. One file, one channel, done.
+_Also supported: [Antigravity CLI](https://github.com/antiGravity-AI/antigravity-cli), [DeepSeek-Reasonix](https://github.com/esengine/DeepSeek-Reasonix). Planned: Copilot CLI, OpenCode, Cursor CLI._
+
+**→ [Full tool × OS support matrix on the site](https://ivanwng97.github.io/pixtuoid/#tools)**
+<!-- tools:end -->
+
+> Adding a new tool? Implement the [`Source` trait](#contributing) — or, for a hook-only CLI, just a hook decoder + an `install-hooks` target — then add a row to [`site/src/sources.json`](site/src/sources.json) (its `supported` set is pinned to the code by a test). One file, one channel, done.
 
 ## Themes & Configuration
 

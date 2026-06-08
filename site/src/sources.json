@@ -1,0 +1,65 @@
+[
+  {
+    "id": "claude-code",
+    "name": "Claude Code",
+    "url": "https://code.claude.com",
+    "status": "supported",
+    "featured": true,
+    "transport": "Hook shim + JSONL watcher",
+    "platforms": { "macos": "yes", "linux": "yes", "windows": "yes" }
+  },
+  {
+    "id": "codex",
+    "name": "Codex CLI",
+    "url": "https://github.com/openai/codex",
+    "status": "supported",
+    "featured": true,
+    "transport": "Hook shim + JSONL watcher (hook/JSONL coalesce on session UUID)",
+    "platforms": { "macos": "yes", "linux": "yes", "windows": "planned" }
+  },
+  {
+    "id": "antigravity",
+    "name": "Antigravity CLI",
+    "url": "https://github.com/antiGravity-AI/antigravity-cli",
+    "status": "supported",
+    "featured": false,
+    "transport": "JSONL watcher",
+    "platforms": { "macos": "yes", "linux": "yes", "windows": "planned" }
+  },
+  {
+    "id": "reasonix",
+    "name": "DeepSeek-Reasonix",
+    "url": "https://github.com/esengine/DeepSeek-Reasonix",
+    "status": "supported",
+    "featured": false,
+    "transport": "Hook shim (hook-only — global ~/.reasonix/settings.json)",
+    "platforms": { "macos": "yes", "linux": "yes", "windows": "planned" }
+  },
+  {
+    "id": null,
+    "name": "Copilot CLI",
+    "url": "https://github.com/github/copilot-cli",
+    "status": "planned",
+    "featured": false,
+    "transport": "Identical event names",
+    "platforms": { "macos": "planned", "linux": "planned", "windows": "planned" }
+  },
+  {
+    "id": null,
+    "name": "OpenCode",
+    "url": "https://github.com/anomalyco/opencode",
+    "status": "planned",
+    "featured": false,
+    "transport": "Any LLM (DeepSeek / GPT / Claude / Gemini)",
+    "platforms": { "macos": "planned", "linux": "planned", "windows": "planned" }
+  },
+  {
+    "id": null,
+    "name": "Cursor CLI",
+    "url": "https://cursor.com/cli",
+    "status": "planned",
+    "featured": false,
+    "transport": "NDJSON stream",
+    "platforms": { "macos": "planned", "linux": "planned", "windows": "planned" }
+  }
+]
