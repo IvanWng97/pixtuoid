@@ -26,7 +26,7 @@ const CHILD: &str = "01000000-0000-7000-8000-000000000002";
 /// Decode the captured hook payloads in file order.
 fn captured_hook_events() -> Vec<AgentEvent> {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/codex_subagent_lifecycle/hook-payloads.jsonl");
+        .join("tests/sources/codex/fixtures/hook-payloads.jsonl");
     std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
         .lines()

@@ -6,12 +6,14 @@ use pixtuoid_core::AgentId;
 use serde_json::json;
 
 fn load(name: &str) -> serde_json::Value {
-    let s = std::fs::read_to_string(format!("tests/fixtures/hooks/{name}.json")).unwrap();
+    let s = std::fs::read_to_string(format!("tests/sources/decode/fixtures/hooks/{name}.json"))
+        .unwrap();
     serde_json::from_str(&s).unwrap()
 }
 
 fn load_jsonl(name: &str) -> serde_json::Value {
-    let s = std::fs::read_to_string(format!("tests/fixtures/jsonl/{name}.json")).unwrap();
+    let s = std::fs::read_to_string(format!("tests/sources/decode/fixtures/jsonl/{name}.json"))
+        .unwrap();
     serde_json::from_str(&s).unwrap()
 }
 

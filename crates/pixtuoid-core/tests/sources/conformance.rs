@@ -46,9 +46,10 @@ fn is_hook_only(source: &str) -> bool {
 }
 
 fn fixtures_root() -> PathBuf {
-    // Dedicated subtree — `tests/fixtures/` also holds sprite/hook/jsonl
-    // fixtures for other tests that are not per-source decode fixtures.
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/sources")
+    // Conformance scenarios ONLY — every dir here must be a registered source
+    // (decode_fixture asserts it). Single-owner fixtures (decode's hooks/jsonl,
+    // codex's lifecycle payloads) live with their module, NOT here.
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/sources/fixtures")
 }
 
 fn read_lines(path: &Path) -> Vec<String> {
