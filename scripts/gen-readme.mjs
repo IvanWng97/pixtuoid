@@ -7,8 +7,8 @@
 // JSON, so the README and the site can't drift. The supported-tools glimpse shows
 // only the FEATURED tools + a link to the full tool × OS matrix on the site, so the
 // README stays short as more agent CLIs are added. Run `just gen-readme` (or
-// `node site/scripts/gen-readme.mjs`) after editing any JSON. `--check` writes
-// nothing and exits non-zero on drift (used by CI: `npm run readme:check`).
+// `node scripts/gen-readme.mjs`) after editing any JSON. `--check` writes
+// nothing and exits non-zero on drift (used by CI's gen-check / `just gen-check`).
 //
 // NOTE: the manifest's *supported* set is pinned to the code's REGISTERED_SOURCES
 // by a Rust test (crates/pixtuoid-core/tests/supported_sources_manifest.rs) that
@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import process from 'node:process';
 
-const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const readmePath = join(root, 'README.md');
 const features = JSON.parse(readFileSync(join(root, 'site', 'src', 'features.json'), 'utf8'));
 const sources = JSON.parse(readFileSync(join(root, 'site', 'src', 'sources.json'), 'utf8'));

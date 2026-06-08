@@ -363,7 +363,7 @@ site-demos:
 [group('site')]
 [doc('Sync the README from site data: regen Features table (features.json) + check install commands (install.json)')]
 gen-readme:
-    node site/scripts/gen-readme.mjs
+    node scripts/gen-readme.mjs
 
 # Verify the committed README still matches site/src/{features,sources,install}.json
 # (exits non-zero on drift; `just gen-readme` regenerates). Pure node:builtins —
@@ -372,4 +372,4 @@ gen-readme:
 [group('site')]
 [doc('Fail if the committed README drifted from site data (features/sources/install.json)')]
 gen-readme-check:
-    node site/scripts/gen-readme.mjs --check
+    node scripts/gen-readme.mjs --check
