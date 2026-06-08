@@ -340,3 +340,82 @@ jobs:
           git add Formula/pixtuoid.rb
           git commit -m "pixtuoid ${VERSION}"
           git push
+
+  npm:
+    name: publish to npm
+    needs: build
+    # Never publish a pre-release to npm — like crates.io, an npm publish is
+    # effectively irreversible (no unpublish after 72h). Pre-release tags
+    # (v*-win.N / -rc) build artifacts only. Consumes the SAME build artifacts
+    # as the release/homebrew jobs — npm is a fourth downstream consumer of the
+    # one build matrix, not a parallel build.
+    if: ${{ !contains(github.ref_name, '-') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # npm provenance (`npm publish --provenance`)
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Extract binaries per target
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          for target in aarch64-apple-darwin x86_64-apple-darwin \
+                        x86_64-unknown-linux-musl aarch64-unknown-linux-gnu \
+                        x86_64-pc-windows-msvc aarch64-pc-windows-msvc; do
+            dest="npm/dist/${target}"
+            mkdir -p "$dest"
+            tgz="artifacts/pixtuoid-${TAG}-${target}.tar.gz"
+            zip="artifacts/pixtuoid-${TAG}-${target}.zip"
+            if [ -f "$tgz" ]; then
+              # tarball wraps everything in pixtuoid-<tag>-<target>/ — unwrap it
+              tar xzf "$tgz" -C "$dest" --strip-components=1
+            elif [ -f "$zip" ]; then
+              # windows zip is flat — exes at the root
+              unzip -o "$zip" -d "$dest"
+            else
+              echo "::error::missing artifact for ${target} (${tgz} / ${zip})"
+              exit 1
+            fi
+          done
+
+      - name: Generate npm packages
+        run: node npm/generate.mjs --version "${GITHUB_REF_NAME#v}" --artifacts npm/dist
+
+      - name: Publish (platform packages first, launcher last)
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          # Idempotent: swallow "cannot publish over previously published" so a
+          # re-run of a partially-published tag is safe (mirrors the crates.io job).
+          publish_one() {
+            local dir="$1" name out
+            name=$(node -p "require('./${dir}/package.json').name")
+            if out=$(npm publish "$dir" --access public --provenance 2>&1); then
+              printf '%s\n' "$out"; echo "::notice::${name} published"; return 0
+            elif grep -qiE 'cannot publish over|previously published' <<<"$out"; then
+              # Match ONLY the over-publish phrase — never a bare 403, which npm
+              # also emits for auth/scope/2FA failures we must NOT swallow (the
+              # crates.io job's "every other failure fails loudly" discipline).
+              printf '%s\n' "$out"; echo "::warning::${name}@${VERSION} already on npm, skipping"; return 0
+            else
+              printf '%s\n' "$out"; echo "::error::${name} publish failed"; return 1
+            fi
+          }
+          # Platform packages first so the launcher's optionalDependencies always
+          # resolve to already-live versions; the launcher publishes last.
+          for dir in npm/@pixtuoid/cli-*; do publish_one "$dir"; done
+          publish_one npm/pixtuoid
