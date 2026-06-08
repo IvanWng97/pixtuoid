@@ -10,8 +10,8 @@ use crate::id::AgentId;
 /// keying, reducer caps) live in ONE row per source in [`registry::REGISTRY`].
 /// Every entry MUST have, enforced by tests so omissions fail CI rather than
 /// ship as the silent two-sprite-ghost bug:
-///   - a coalescing fixture under `tests/fixtures/sources/<name>/` —
-///     `tests/fixture_harness.rs`'s
+///   - a coalescing fixture under `tests/sources/fixtures/<name>/` —
+///     `tests/sources/conformance.rs`'s
 ///     `every_registered_source_has_a_coalescing_fixture` (shape per the row:
 ///     hook+JSONL for CC/Codex, JSONL-only for antigravity, hook-only for
 ///     reasonix — `hook-payloads.jsonl` with no transcript), and
@@ -249,7 +249,7 @@ pub mod jsonl;
 pub mod manager;
 pub mod reasonix;
 // `doc(hidden)`: the registry is an internal fact table, `pub` ONLY so the
-// integration-test crates (fixture_harness) can read it. Hiding it keeps it
+// integration-test crates (sources::conformance) can read it. Hiding it keeps it
 // off the published API — cargo-semver-checks then lets descriptor/caps
 // fields evolve (the most likely change when adding a CLI) without a
 // breaking-version bump. Same treatment as `jsonl`'s test-only seam.

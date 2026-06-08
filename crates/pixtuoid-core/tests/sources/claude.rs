@@ -1,5 +1,5 @@
-//! Symmetric regression for the Claude Code subagent lifecycle (parallels
-//! `codex_subagent_lifecycle`). The two CLIs map the SAME scope tree from
+//! Symmetric regression for the Claude Code subagent lifecycle (parallels the
+//! sibling `codex` module). The two CLIs map the SAME scope tree from
 //! DIFFERENT signals — this pins the CC side so a future change can't quietly
 //! break one while fixing the other:
 //!

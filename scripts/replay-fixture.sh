@@ -6,7 +6,7 @@
 #
 # Usage:  scripts/replay-fixture.sh <rollout.jsonl> [delay_secs]
 #   e.g.  scripts/replay-fixture.sh \
-#           crates/pixtuoid-core/tests/fixtures/sources/codex/permission-flow/rollout-*.jsonl
+#           crates/pixtuoid-core/tests/sources/fixtures/codex/permission-flow/rollout-*.jsonl
 #   PIXTUOID_BIN overrides the binary (default: `pixtuoid` on PATH).
 set -euo pipefail
 

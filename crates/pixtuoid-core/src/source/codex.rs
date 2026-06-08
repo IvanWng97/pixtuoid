@@ -52,7 +52,7 @@ fn is_uuid(s: &str) -> bool {
 /// every other Codex hook event falls through (`Ok(None)`) to those shared
 /// arms. Dispatched via `registry::HookDecoding::custom`. The parent link
 /// carried here is the ONLY one a flat Codex rollout gets — see the module
-/// doc and the wire capture pinned in `tests/codex_subagent_lifecycle.rs`.
+/// doc and the wire capture pinned in `tests/sources/codex/mod.rs`.
 pub(crate) fn decode_codex_hook_custom(v: &Value) -> Result<Option<AgentEvent>> {
     use anyhow::anyhow;
     let Some(obj) = v.as_object() else {
@@ -266,7 +266,7 @@ mod tests {
     // The custom-decoder contract: claim our two events FULLY — a malformed
     // instance must be Err, never Ok(None) (which would silently fall through
     // to the shared session-keyed arms). These pin the guards directly; the
-    // happy paths are pinned end-to-end in tests/decoder.rs.
+    // happy paths are pinned end-to-end in tests/sources/decode/mod.rs.
     #[test]
     fn subagent_hooks_with_empty_ids_are_err_not_fallthrough() {
         for event in ["SubagentStart", "SubagentStop"] {

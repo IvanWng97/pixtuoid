@@ -2,7 +2,7 @@
 //! registry core needs (label prefix, JSONL decoder, hook keying, reducer
 //! capability flags). Before this existed those facts were scattered across
 //! `reducer::source_label_prefix`, `decoder::decode_hook_payload`'s id-key
-//! branch, and `fixture_harness::decoder_for` — each individually
+//! branch, and `conformance::decoder_for` — each individually
 //! test-enforced, but adding a CLI meant restating "this source exists" in
 //! 5+ files. Now it's this table + the source's own module.
 //!

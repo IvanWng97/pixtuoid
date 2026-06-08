@@ -156,11 +156,15 @@ historically-missed one):
 5. **Add the name to `source::REGISTERED_SOURCES`** — a bridge test pins
    table↔list equality, and the conformance suite then REQUIRES a fixture.
 6. **Drop a sanitized real-capture fixture** under
-   `crates/pixtuoid-core/tests/fixtures/sources/<name>/<scenario>/`
+   `crates/pixtuoid-core/tests/sources/fixtures/<name>/<scenario>/`
    (transcript + hook payloads as applicable — see the fixtures README for the
    provenance/sanitization rules), then `cargo insta review` to accept the
-   golden snapshot. The harness asserts all of a session's events coalesce to
-   ONE `AgentId` — the duplicate-sprite bug class.
+   golden snapshot. The harness (`tests/sources/conformance.rs`) asserts all of
+   a session's events coalesce to ONE `AgentId` — the duplicate-sprite bug
+   class. A CLI with unique lifecycle behavior (subagent hooks, custom exit)
+   also gets a dedicated `tests/sources/<cli>.rs` module — the test-layout map
+   and the full add-a-CLI test steps are in
+   [`crates/pixtuoid-core/tests/CLAUDE.md`](../crates/pixtuoid-core/tests/CLAUDE.md).
 7. **Wire it into `runtime/driver.rs::run_async`** (`crates/pixtuoid/src/runtime/driver.rs`) —
    the runtime spawns sources by hand; the registry gates tests, not spawning.
 8. **If the CLI has hooks**, add an `install/` target (`Target` registry row +

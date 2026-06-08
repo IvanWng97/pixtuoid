@@ -1,5 +1,5 @@
 #![cfg(windows)]
-//! Windows twin of hook_socket.rs: the same listener contract over a real
+//! Windows twin of socket.rs: the same listener contract over a real
 //! named pipe, plus the accept-loop behaviors only a pipe has (instance
 //! recreate on connect error, create-next-before-handoff under concurrency).
 

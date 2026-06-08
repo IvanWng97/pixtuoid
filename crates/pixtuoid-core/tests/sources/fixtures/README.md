@@ -1,23 +1,26 @@
 # Source decode fixtures
 
 Golden fixtures for the per-CLI decode + hook↔JSONL **coalescing** contract,
-driven by `tests/fixture_harness.rs`. Each fixture is a directory:
+driven by `tests/sources/conformance.rs`. Each fixture is a directory:
 
 ```
-tests/fixtures/sources/<source>/<scenario>/
+tests/sources/fixtures/<source>/<scenario>/
     <transcript>.jsonl     # JSONL transcript lines, fed to the source's LineDecoder
                            # (JSONL-bearing sources only — a hook-only row,
                            # line_decoder: None, ships NO transcript)
     hook-payloads.jsonl    # one hook payload per line, fed to decode_hook_payload
-    # expected snapshot lives in tests/snapshots/ (insta), generated on first run
+    # expected snapshot lives in tests/sources/snapshots/ (insta), generated on first run
 ```
 
 A scenario ships the transports its source actually has: both files
 (CC/Codex), transcript-only (antigravity — no hooks), or hook-payloads-only
 (reasonix — hook-only, no watchable JSONL).
 
-(`tests/fixtures/` also holds sprite/hook/jsonl fixtures for unrelated tests, so
-per-source decode fixtures live under the dedicated `sources/` subtree.)
+(This tree is **conformance-scanned ONLY** — `conformance.rs` asserts every dir
+here is a registered source. Single-owner fixtures read by one module — decode's
+`sources/decode/fixtures/`, codex's `sources/codex/fixtures/`, render's
+`render/fixtures/` — live with their module, NOT here. See
+[`tests/CLAUDE.md`](../../CLAUDE.md) for the governing principle.)
 
 The harness, for each fixture dir:
 1. decodes the transcript lines (via the source's `LineDecoder`) and the hook

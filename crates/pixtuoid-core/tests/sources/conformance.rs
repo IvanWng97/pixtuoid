@@ -1,6 +1,6 @@
 //! Golden-fixture decode + coalescing harness.
 //!
-//! For each `tests/fixtures/<source>/<scenario>/` directory, decode the
+//! For each `tests/sources/fixtures/<source>/<scenario>/` directory, decode the
 //! transcript lines (via the source's `LineDecoder`) and the hook payloads
 //! (via `decode_hook_payload`), then:
 //!   1. snapshot the full decoded `AgentEvent` sequence (insta yaml), and
