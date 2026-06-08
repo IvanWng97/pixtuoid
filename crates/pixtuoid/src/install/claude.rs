@@ -21,8 +21,17 @@ const EVENTS: &[&str] = &[
     "SessionEnd",
 ];
 
+fn claude_config_dir() -> Option<PathBuf> {
+    std::env::var("CLAUDE_CONFIG_DIR")
+        .ok()
+        .filter(|dir| !dir.is_empty())
+        .map(PathBuf::from)
+}
+
 pub fn default_config_path() -> PathBuf {
-    io::home_relative(".claude/settings.json")
+    claude_config_dir()
+        .map(|dir| dir.join("settings.json"))
+        .unwrap_or_else(|| io::home_relative(".claude/settings.json"))
 }
 
 /// Unix: writes the bare name so CC can PATH-resolve it (portability over absolute
@@ -167,6 +176,35 @@ fn json_merge_uninstall(mut doc: Value) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_config_path_honors_claude_config_dir() {
+        let saved_config = std::env::var_os("CLAUDE_CONFIG_DIR");
+        let fallback_suffix = PathBuf::from(".claude").join("settings.json");
+
+        std::env::remove_var("CLAUDE_CONFIG_DIR");
+        let unset_path = default_config_path();
+        assert!(
+            unset_path.ends_with(&fallback_suffix),
+            "default config path must end with .claude/settings.json, got {unset_path:?}"
+        );
+
+        let custom_dir = std::env::temp_dir().join("pixtuoid-claude-config-dir");
+        std::env::set_var("CLAUDE_CONFIG_DIR", &custom_dir);
+        assert_eq!(default_config_path(), custom_dir.join("settings.json"));
+
+        std::env::set_var("CLAUDE_CONFIG_DIR", "");
+        let empty_path = default_config_path();
+        assert!(
+            empty_path.ends_with(&fallback_suffix),
+            "empty CLAUDE_CONFIG_DIR must fall back to .claude/settings.json, got {empty_path:?}"
+        );
+
+        match saved_config {
+            Some(v) => std::env::set_var("CLAUDE_CONFIG_DIR", v),
+            None => std::env::remove_var("CLAUDE_CONFIG_DIR"),
+        }
+    }
 
     #[test]
     fn install_creates_entries_for_all_events() {
