@@ -41,12 +41,15 @@ From the repo root the same gate is `just site-check` (and `just site-fmt`).
 > its Features table and install commands are sourced from `src/features.json` /
 > `src/install.json` (see below), and `readme:check` fails on drift.
 
-> **Generated README sections.** `src/features.json` (the feature inventory — also
-> drives the Features bento) and `src/install.json` (the canonical install commands —
-> also drives the Install tabs) are single sources shared with the **root README**:
-> `scripts/gen-readme.mjs` regenerates the README's Features table between its
-> markers and checks each `readmeCheck` install command appears verbatim. Edit the
-> JSON → run `just gen-readme` (or `npm run readme:gen`); CI runs `readme:check`.
+> **Generated README sections.** `src/features.json` (feature inventory — also
+> drives the Features bento), `src/sources.json` (supported tools — also drives the
+> tool × OS matrix), and `src/install.json` (install methods — also drives the
+> Install tabs) are single sources shared with the **root README**:
+> `scripts/gen-readme.mjs` regenerates the Features table, the supported-tools
+> glimpse, and the install block between their markers. The install block shows
+> only methods flagged `"readme": true` (Homebrew, npm); the rest (Cargo, GitHub
+> Releases) stay site-only. Edit the JSON → run `just gen-readme` (or
+> `npm run readme:gen`); CI runs `readme:check` and fails on drift.
 
 ## Design
 

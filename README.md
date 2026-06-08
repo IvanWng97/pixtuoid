@@ -45,13 +45,19 @@ A little bit *Black Mirror*, a little bit *The Sims* — and the most glanceable
 
 Pick one — Homebrew on macOS, or npm on any OS:
 
+<!-- install:start · generated from site/src/install.json by `just gen-readme` — edit the JSON, not this block -->
+**Homebrew** (macOS):
+
 ```bash
 brew install IvanWng97/pixtuoid/pixtuoid
 ```
 
+**npm** (any OS):
+
 ```bash
 npm install -g pixtuoid
 ```
+<!-- install:end -->
 
 Then wire up your agent and launch:
 
@@ -64,47 +70,7 @@ In another terminal, start a supported coding agent (Claude Code, Codex, Antigra
 
 **Keyboard shortcuts:** `q` quit · `p` pause · `t` themes · `?` help · `↑↓/jk/PgUp/PgDn` floors · click to pin tooltip
 
-<details>
-<summary><strong>More install methods</strong></summary>
-
-**Both packages are required** — `pixtuoid` (the visualizer) and `pixtuoid-hook` (the shim your agent invokes). Homebrew and npm bundle both; with Cargo or the raw binaries, grab both.
-
-### Cargo
-
-```bash
-cargo install pixtuoid pixtuoid-hook
-```
-
-### Pre-built binaries
-
-Download from [GitHub Releases](https://github.com/IvanWng97/pixtuoid/releases/latest):
-
-| Platform | Tarball |
-|---|---|
-| macOS (Apple Silicon) | `pixtuoid-v*-aarch64-apple-darwin.tar.gz` |
-| macOS (Intel) | `pixtuoid-v*-x86_64-apple-darwin.tar.gz` |
-| Linux (x86_64, static) | `pixtuoid-v*-x86_64-unknown-linux-musl.tar.gz` |
-| Linux (ARM64) | `pixtuoid-v*-aarch64-unknown-linux-gnu.tar.gz` |
-
-### Windows
-
-[`npm install -g pixtuoid`](#quick-start) is the simplest route. Support is
-experimental — Claude Code only so far (see the [matrix](#supported-tools)) and
-the binaries are unsigned, so you'll want
-[Windows Terminal](https://aka.ms/terminal). Standalone `.zip`s
-(`x86_64-` / `aarch64-pc-windows-msvc`) are on the
-[Releases page](https://github.com/IvanWng97/pixtuoid/releases).
-
-### From source
-
-```bash
-git clone https://github.com/IvanWng97/pixtuoid && cd pixtuoid
-just build --release
-```
-
-Upgrading from `ascii-agents` v0.3.x? See [docs/MIGRATION.md](docs/MIGRATION.md).
-
-</details>
+**More ways to install** — Cargo, prebuilt binaries, and Debian `.deb`s — are on the **[install guide ↗](https://ivanwng97.github.io/pixtuoid/#install)**. Upgrading from `ascii-agents`? See [docs/MIGRATION.md](docs/MIGRATION.md).
 
 ## Features
 
