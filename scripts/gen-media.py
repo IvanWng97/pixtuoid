@@ -117,7 +117,14 @@ def run_render(job, out_dirs, work, intermediates):
 
 
 def run_crop(job, out_dirs, work, intermediates):
-    src = intermediates[job["from"]]
+    # A crop reads the unscaled render of its `from` job. With --jobs you can
+    # filter that prerequisite out — fail with a useful hint, not a bare KeyError.
+    src = intermediates.get(job["from"])
+    if src is None:
+        sys.exit(
+            f"gen-media: crop job '{job['id']}' needs its source render '{job['from']}' "
+            f"— include it, e.g. --jobs {job['from']},{job['id']}"
+        )
     if "quadrants" in job:  # docs: fractional quadrants → {id}-{key}.png, Pillow upscale
         img = Image.open(src).convert("RGB")
         w, h = img.size
