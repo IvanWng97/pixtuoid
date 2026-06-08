@@ -58,6 +58,18 @@ pub fn release_notes(version: &str) -> Option<&'static [&'static str]> {
         // anchoring on a marker is whitespace-independent — matching the `match`
         // brace would silently break if the indentation ever shifted.
         // [bump-inject-here]
+        // 0.6.1 re-runs the 0.6.0 release with the npm-launcher publish fix
+        // (#186) — 0.6.0 shipped to crates.io/homebrew but the `pixtuoid` npm
+        // launcher failed, so 0.6.1 is the first fully-published version. Same
+        // highlights, since most users first land here.
+        "0.6.1" => Some(&[
+            "Windows support — native hook transport, installer, and release builds",
+            "Install via npm — `npm i -g pixtuoid` on macOS, Linux & Windows",
+            "Reasonix sessions now visualized — re-run `pixtuoid install-hooks` to wire it",
+            "Sharper agent activity — fewer ghost & duplicate sprites, and Codex stays active during web & tool search",
+            "Diagnostics you can see — source-death footer warnings, config warnings on stderr, an always-on log file",
+            "New project site — live demos, architecture & contributing docs, weather gallery",
+        ]),
         // LIVING DRAFT — 0.6.0 is the open breaking-dev window: the version is
         // bumped at window START so the CI semver gate admits the batched
         // breaking changes (#145, #131, …); the tag/publish only happens when
