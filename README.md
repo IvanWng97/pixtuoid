@@ -69,19 +69,6 @@ In another terminal, start a supported coding agent (Claude Code, Codex, Antigra
 
 **Both packages are required** — `pixtuoid` (the visualizer) and `pixtuoid-hook` (the shim your agent invokes). Homebrew and npm bundle both; with Cargo or the raw binaries, grab both.
 
-### npm (macOS · Linux · Windows)
-
-```bash
-npm install -g pixtuoid
-```
-
-The one-liner that works everywhere — npm fetches the prebuilt binary for your
-platform (no Rust toolchain, no compile). This is the recommended **Windows**
-install; it needs [Windows Terminal](https://aka.ms/terminal) (the Windows 11
-default). A standalone `.zip` (`x86_64-` / `aarch64-pc-windows-msvc`) is also on
-the [Releases page](https://github.com/IvanWng97/pixtuoid/releases) if you'd
-rather not use npm.
-
 ### Cargo
 
 ```bash
@@ -98,6 +85,15 @@ Download from [GitHub Releases](https://github.com/IvanWng97/pixtuoid/releases/l
 | macOS (Intel) | `pixtuoid-v*-x86_64-apple-darwin.tar.gz` |
 | Linux (x86_64, static) | `pixtuoid-v*-x86_64-unknown-linux-musl.tar.gz` |
 | Linux (ARM64) | `pixtuoid-v*-aarch64-unknown-linux-gnu.tar.gz` |
+
+### Windows
+
+[`npm install -g pixtuoid`](#quick-start) is the simplest route. Support is
+experimental — Claude Code only so far (see the [matrix](#supported-tools)) and
+the binaries are unsigned, so you'll want
+[Windows Terminal](https://aka.ms/terminal). Standalone `.zip`s
+(`x86_64-` / `aarch64-pc-windows-msvc`) are on the
+[Releases page](https://github.com/IvanWng97/pixtuoid/releases).
 
 ### From source
 
@@ -138,12 +134,14 @@ Upgrading from `ascii-agents` v0.3.x? See [docs/MIGRATION.md](docs/MIGRATION.md)
 <!-- tools:start · generated from site/src/sources.json by `just gen-readme` — edit the JSON, not this table -->
 | Tool | Runs on |
 |---|---|
-| [Claude Code](https://code.claude.com) | macOS · Linux · Windows |
+| [Claude Code](https://code.claude.com) | macOS · Linux · Windows\* |
 | [Codex CLI](https://github.com/openai/codex) | macOS · Linux |
 
 _Also supported: [Antigravity CLI](https://github.com/antiGravity-AI/antigravity-cli), [DeepSeek-Reasonix](https://github.com/esengine/DeepSeek-Reasonix). Planned: Copilot CLI, OpenCode, Cursor CLI._
 
 **→ [Full tool × OS support matrix on the site](https://ivanwng97.github.io/pixtuoid/#tools)**
+
+_\* experimental — limited testing, unsigned binaries._
 <!-- tools:end -->
 
 > Adding a new tool? Implement the [`Source` trait](#contributing) — or, for a hook-only CLI, just a hook decoder + an `install-hooks` target — then add a row to [`site/src/sources.json`](site/src/sources.json) (its `supported` set is pinned to the code by a test). One file, one channel, done.

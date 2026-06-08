@@ -6,7 +6,7 @@
     "status": "supported",
     "featured": true,
     "transport": "Hook shim + JSONL watcher",
-    "platforms": { "macos": "yes", "linux": "yes", "windows": "yes" }
+    "platforms": { "macos": "yes", "linux": "yes", "windows": "experimental" }
   },
   {
     "id": "codex",

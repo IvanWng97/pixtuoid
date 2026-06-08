@@ -78,9 +78,12 @@ regenSection(
 const OS_LABELS = { macos: 'macOS', linux: 'Linux', windows: 'Windows' };
 const OS_ORDER = ['macos', 'linux', 'windows'];
 const runsOn = (s) =>
-  OS_ORDER.filter((os) => s.platforms?.[os] === 'yes')
-    .map((os) => OS_LABELS[os])
+  OS_ORDER.filter((os) => s.platforms?.[os] === 'yes' || s.platforms?.[os] === 'experimental')
+    .map((os) => (s.platforms[os] === 'experimental' ? `${OS_LABELS[os]}\\*` : OS_LABELS[os]))
     .join(' · ');
+const hasExperimental = sources.some(
+  (s) => s.status === 'supported' && Object.values(s.platforms || {}).includes('experimental')
+);
 
 const featured = sources.filter((s) => s.status === 'supported' && s.featured);
 const otherSupported = sources.filter((s) => s.status === 'supported' && !s.featured);
@@ -104,6 +107,7 @@ regenSection(
     ...featured.map((s) => `| ${link(s)} | ${cell(runsOn(s)) || '—'} |`),
     '',
     alsoLine + `**→ [Full tool × OS support matrix on the site](${SITE}/#tools)**`,
+    ...(hasExperimental ? ['', '_\\* experimental — limited testing, unsigned binaries._'] : []),
   ].join('\n')
 );
 

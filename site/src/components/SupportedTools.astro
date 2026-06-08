@@ -8,19 +8,20 @@ import { asset } from '../consts';
 // (crates/pixtuoid-core/tests/supported_sources_manifest.rs) — so this matrix,
 // the README glimpse, and what's actually wired can't drift.
 
-type OsState = 'yes' | 'planned' | 'no';
+type OsState = 'yes' | 'experimental' | 'planned' | 'no';
 const OSES = [
   { key: 'macos', label: 'macOS' },
   { key: 'linux', label: 'Linux' },
   { key: 'windows', label: 'Windows' },
 ] as const;
-const GLYPH: Record<OsState, string> = { yes: '✅', planned: '🔜', no: '—' };
+const GLYPH: Record<OsState, string> = { yes: '✅', experimental: '🧪', planned: '🔜', no: '—' };
 const glyph = (s: string): string => GLYPH[s as OsState] ?? '—';
 // Screen-reader text for each cell. The emoji carries the value visually but is
 // aria-hidden (aria-label on a roleless <span> is naming-prohibited and gets
 // dropped), so the real value rides a visually-hidden sibling.
 const STATE_LABEL: Record<OsState, string> = {
   yes: 'supported',
+  experimental: 'experimental',
   planned: 'planned',
   no: 'not supported',
 };

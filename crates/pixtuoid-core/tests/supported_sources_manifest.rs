@@ -108,8 +108,8 @@ fn manifest_rows_are_well_formed() {
                 .and_then(|v| v.as_str())
                 .unwrap_or_else(|| panic!("{name}: `platforms.{os}` missing/not a string"));
             assert!(
-                matches!(v, "yes" | "planned" | "no"),
-                "{name}: `platforms.{os}` must be yes|planned|no, got {v:?}"
+                matches!(v, "yes" | "experimental" | "planned" | "no"),
+                "{name}: `platforms.{os}` must be yes|experimental|planned|no, got {v:?}"
             );
         }
 
