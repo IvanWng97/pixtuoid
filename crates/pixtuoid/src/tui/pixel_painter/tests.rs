@@ -1413,7 +1413,7 @@ fn furniture_corner_clip_does_not_panic() {
 
 #[test]
 fn weather_gallery_manifest_matches_the_weather_enum() {
-    // site/src/weather.json drives the site's weather gallery AND the gen-demos
+    // site/src/weather.json drives the site's weather gallery AND the gen-media
     // render loop; the `Weather` enum drives what actually renders. Site CI never
     // runs the binary, so nothing else ties the two together — this test is the
     // bridge: manifest ids must equal the canonical names, in order. (A new or

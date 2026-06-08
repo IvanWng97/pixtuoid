@@ -30,7 +30,6 @@
     "id": "reference",
     "kind": "render",
     "targets": ["docs"],
-    "tz": "UTC",
     "cols": 192, "rows": 64, "day": 1,
     "frames": [
       {"name": "reference-screenshot", "theme": "normal",    "hour": 19, "weather": "clear"},

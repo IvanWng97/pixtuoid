@@ -26,7 +26,7 @@ impl Weather {
     /// and the valid-names list. The site's gallery manifest
     /// (site/src/weather.json) mirrors it; the bridge is the
     /// `weather_gallery_manifest_matches_the_weather_enum` test, which fails on
-    /// any add/rename here until the manifest (+ gen-demos art) follows.
+    /// any add/rename here until the manifest (+ gen-media art) follows.
     pub(in crate::tui::pixel_painter) const ALL: [Weather; 8] = [
         Weather::Clear,
         Weather::Rain,

@@ -63,7 +63,7 @@ def expand_ref(ref):
 
 
 def snap(out_path, *, cols, rows, hour, day=None, theme=None, weather=None,
-         extra=(), gif=None, env=None):
+         extra=(), gif=None):
     cmd = [str(SNAP), "--cols", str(cols), "--rows", str(rows), "--now-hour", str(hour)]
     if day is not None:
         cmd += ["--now-day", str(day)]
@@ -75,8 +75,9 @@ def snap(out_path, *, cols, rows, hour, day=None, theme=None, weather=None,
         cmd += ["--gif", "--gif-duration", str(gif["duration"]), "--gif-fps", str(gif["fps"])]
     cmd += list(extra)
     cmd += [str(out_path)]
-    # suppress the text preview on stdout; gif progress stays on stderr
-    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, env=env)
+    # suppress the text preview on stdout; gif progress stays on stderr.
+    # Inherits the process env (TZ=UTC, pinned in main) so renders are deterministic.
+    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL)
 
 
 def ffmpeg(*args):
@@ -87,25 +88,22 @@ def ffmpeg(*args):
 
 
 def run_render(job, out_dirs, work, intermediates):
-    # The `reference` baselines pin TZ=UTC because --now-hour is a chrono::Local
-    # wall time: the epoch — and with it the 10-min weather slot + city-twinkle
-    # phase — is timezone-dependent, so without this a dev's machine and the CI
-    # runner would render different frames and `gen-check` would false-fail. Carry
-    # the WHOLE os.environ (not a bare {"TZ":...}) so PATH/cargo still resolve.
-    env = {**os.environ, "TZ": "UTC"} if job.get("tz") == "UTC" else None
-
-    if "frames" in job:  # the reference baselines: several named frames, one job
+    # TZ=UTC is pinned process-wide in main() (snapshot reads --now-hour as a
+    # chrono::Local wall time, so every epoch-derived effect — the 10-min weather
+    # slot, the city-twinkle/lighting phase — must render under one fixed TZ or a
+    # dev box and the UTC CI runner produce different frames; the committed art is
+    # UTC too). The `reference` baselines are a multi-frame job; the rest single.
+    if "frames" in job:
         for f in job["frames"]:
             for d in out_dirs:
                 snap(d / f"{f['name']}.png", cols=job["cols"], rows=job["rows"],
                      hour=f["hour"], day=job.get("day"), theme=f.get("theme"),
-                     weather=f.get("weather"), env=env)
+                     weather=f.get("weather"))
         return
 
     raw = work / f"{job['id']}_raw.png"
     snap(raw, cols=job["cols"], rows=job["rows"], hour=job["hour"], day=job.get("day"),
-         theme=job.get("theme"), weather=job.get("weather"), extra=job.get("extra", ()),
-         env=env)
+         theme=job.get("theme"), weather=job.get("weather"), extra=job.get("extra", ()))
     intermediates[job["id"]] = raw  # crops read the unscaled render
 
     scale = job.get("scale")
@@ -310,6 +308,14 @@ def main():
     ap.add_argument("--only", choices=["docs", "site"], help="restrict to one surface")
     ap.add_argument("--jobs", help="comma-separated job ids to run (default: all)")
     args = ap.parse_args()
+
+    # Pin TZ=UTC for EVERY render so the office's epoch-derived weather slot +
+    # lighting/twinkle phase (snapshot reads --now-hour as a chrono::Local wall
+    # time) are machine-independent — without this a dev box and the UTC CI runner
+    # render different frames and gen-check pixel-diffs them as drift. The committed
+    # art under docs/images/ + site/public/demos/ is generated UTC too. (Inherited
+    # by every snapshot/ffmpeg subprocess via os.environ.)
+    os.environ["TZ"] = "UTC"
 
     only_jobs = set(args.jobs.split(",")) if args.jobs else None
 
