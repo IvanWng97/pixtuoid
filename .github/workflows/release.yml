@@ -390,6 +390,9 @@ jobs:
             fi
           done
 
+      - name: Test the package generator
+        run: node --test npm/generate.test.mjs
+
       - name: Generate npm packages
         run: node npm/generate.mjs --version "${GITHUB_REF_NAME#v}" --artifacts npm/dist
 

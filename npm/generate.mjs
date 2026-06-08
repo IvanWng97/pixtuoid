@@ -10,9 +10,11 @@
 //   • re-stamps the launcher (npm/pixtuoid) version + its 6 optionalDependencies
 //     pins to <version>.
 //
-// Usage: node npm/generate.mjs --version X.Y.Z --artifacts <dir>
-// (always writes into the repo's npm/ tree in place — version + dep pins are
-//  stamped here; the per-platform @pixtuoid/cli-* dirs are gitignored.)
+// Usage: node npm/generate.mjs --version X.Y.Z --artifacts <dir> [--npm-dir <dir>]
+// Writes into the npm/ tree in place (default: this script's own dir) — version
+// + dep pins are stamped here; the per-platform @pixtuoid/cli-* dirs are
+// gitignored. --npm-dir overrides the target tree (used by the test to generate
+// into a temp copy instead of mutating the tracked launcher).
 //
 // Nothing per-platform is committed (git-cliff style) — the packages are
 // generated here at publish time and gitignored.
@@ -30,7 +32,6 @@ import {
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const NPM_DIR = dirname(fileURLToPath(import.meta.url)); // the repo's npm/ dir
 const SCOPE = "@pixtuoid";
 const BINS = ["pixtuoid", "pixtuoid-hook"];
 
@@ -55,6 +56,7 @@ function arg(name, def) {
 
 const version = arg("version");
 const artifacts = arg("artifacts");
+const NPM_DIR = arg("npm-dir", dirname(fileURLToPath(import.meta.url)));
 if (!version || !artifacts) {
   console.error("usage: node npm/generate.mjs --version X.Y.Z --artifacts <dir>");
   process.exit(1);
