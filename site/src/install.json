@@ -6,18 +6,15 @@
     "readmeCheck": true
   },
   {
-    "id": "cargo",
-    "label": "Cargo",
-    "cmds": ["cargo install pixtuoid pixtuoid-hook"],
+    "id": "npm",
+    "label": "npm",
+    "cmds": ["npm install -g pixtuoid"],
     "readmeCheck": true
   },
   {
-    "id": "deb",
-    "label": "Debian",
-    "cmds": [
-      "# download both .debs from the Releases page",
-      "sudo dpkg -i pixtuoid_*.deb pixtuoid-hook_*.deb"
-    ],
+    "id": "cargo",
+    "label": "Cargo",
+    "cmds": ["cargo install pixtuoid pixtuoid-hook"],
     "readmeCheck": true
   }
 ]

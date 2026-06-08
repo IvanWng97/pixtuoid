@@ -43,8 +43,19 @@ A little bit *Black Mirror*, a little bit *The Sims* — and the most glanceable
 
 ## Quick Start
 
+Pick one — Homebrew on macOS, or npm on any OS:
+
 ```bash
 brew install IvanWng97/pixtuoid/pixtuoid
+```
+
+```bash
+npm install -g pixtuoid
+```
+
+Then wire up your agent and launch:
+
+```bash
 pixtuoid install-hooks
 pixtuoid
 ```
@@ -56,7 +67,26 @@ In another terminal, start a supported coding agent (Claude Code, Codex, Antigra
 <details>
 <summary><strong>More install methods</strong></summary>
 
-**Both packages are required** — `pixtuoid` (the visualizer) and `pixtuoid-hook` (the shim your agent invokes).
+**Both packages are required** — `pixtuoid` (the visualizer) and `pixtuoid-hook` (the shim your agent invokes). Homebrew and npm bundle both; with Cargo or the raw binaries, grab both.
+
+### npm (macOS · Linux · Windows)
+
+```bash
+npm install -g pixtuoid
+```
+
+The one-liner that works everywhere — npm fetches the prebuilt binary for your
+platform (no Rust toolchain, no compile). This is the recommended **Windows**
+install; it needs [Windows Terminal](https://aka.ms/terminal) (the Windows 11
+default). A standalone `.zip` (`x86_64-` / `aarch64-pc-windows-msvc`) is also on
+the [Releases page](https://github.com/IvanWng97/pixtuoid/releases) if you'd
+rather not use npm.
+
+### Cargo
+
+```bash
+cargo install pixtuoid pixtuoid-hook
+```
 
 ### Pre-built binaries
 
@@ -68,34 +98,6 @@ Download from [GitHub Releases](https://github.com/IvanWng97/pixtuoid/releases/l
 | macOS (Intel) | `pixtuoid-v*-x86_64-apple-darwin.tar.gz` |
 | Linux (x86_64, static) | `pixtuoid-v*-x86_64-unknown-linux-musl.tar.gz` |
 | Linux (ARM64) | `pixtuoid-v*-aarch64-unknown-linux-gnu.tar.gz` |
-
-Debian/Ubuntu `.deb`s (amd64/arm64) are on the same page — install the binary
-**and** the hook shim:
-
-```bash
-sudo dpkg -i pixtuoid_*.deb pixtuoid-hook_*.deb
-```
-
-### Cargo
-
-```bash
-cargo install pixtuoid pixtuoid-hook
-```
-
-### Windows (experimental)
-
-Requires [Windows Terminal](https://aka.ms/terminal) (the Windows 11 default).
-Claude Code only for now — Codex support is coming.
-
-1. Download `pixtuoid-<version>-x86_64-pc-windows-msvc.zip` from the
-   [latest release](https://github.com/IvanWng97/pixtuoid/releases)
-2. Unblock before extracting (the exes are unsigned — SmartScreen marks
-   downloads): right-click the zip → Properties → Unblock, or
-   `Unblock-File .\pixtuoid-*.zip` in PowerShell
-3. Extract anywhere and add the folder to your PATH
-4. `pixtuoid install-hooks` then `pixtuoid run`
-
-ARM64 Windows: use the `aarch64-pc-windows-msvc` zip.
 
 ### From source
 
