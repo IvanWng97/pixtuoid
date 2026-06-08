@@ -6,7 +6,7 @@
 //! (eq/ne assertions), so timezone-dependent code paths like
 //! `sunset_strength` don't cause cross-platform failures.
 
-mod test_helpers;
+mod common;
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};

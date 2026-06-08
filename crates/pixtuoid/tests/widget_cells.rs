@@ -4,7 +4,7 @@
 //! cells to verify that footer, elevator indicator, and wall-display branding
 //! widgets wrote the expected text at the expected positions.
 
-mod test_helpers;
+mod common;
 
 use std::path::PathBuf;
 use std::sync::Arc;

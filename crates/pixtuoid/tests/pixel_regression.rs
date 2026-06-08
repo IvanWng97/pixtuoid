@@ -5,7 +5,7 @@
 //! already covers determinism and time-of-day sensitivity) by exercising
 //! floor variants, weather cycles, and theme switching.
 
-mod test_helpers;
+mod common;
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};

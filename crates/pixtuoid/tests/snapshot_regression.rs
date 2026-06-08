@@ -11,7 +11,7 @@
 //! check together catch the most likely regressions (nondeterminism,
 //! broken time wiring) without needing per-machine goldens.
 
-mod test_helpers;
+mod common;
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
