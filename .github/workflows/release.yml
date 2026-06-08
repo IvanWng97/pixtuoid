@@ -420,5 +420,8 @@ jobs:
           }
           # Platform packages first so the launcher's optionalDependencies always
           # resolve to already-live versions; the launcher publishes last.
-          for dir in npm/@pixtuoid/cli-*; do publish_one "$dir"; done
-          publish_one npm/pixtuoid
+          # The `./` prefix is load-bearing: `npm publish npm/pixtuoid` parses the
+          # path as a GitHub `owner/repo` shorthand (npm/pixtuoid) and tries to
+          # `git ls-remote` it; `./npm/pixtuoid` forces folder interpretation.
+          for dir in ./npm/@pixtuoid/cli-*; do publish_one "$dir"; done
+          publish_one ./npm/pixtuoid
