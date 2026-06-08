@@ -221,40 +221,47 @@ HANDLERS = {
 # ── drift check ──────────────────────────────────────────────────────────────
 
 
+def _presence_only(name):
+    """Clips (mp4/webm), the animated gif, and clip posters are ffmpeg/gifsicle
+    outputs whose bytes aren't stable cross-version, so we never pixel-gate them —
+    and --check skips regenerating them entirely (vp9 encoding blew the CI timeout
+    for zero gating value). Everything else is a pixel-deterministic still."""
+    return name.endswith((".mp4", ".webm", ".gif", "-poster.png"))
+
+
 def run_check(out_base, work, only=None):
-    """Pixel-diff every generated PNG vs committed; presence-check video + gif."""
+    """Pixel-diff every committed STILL against a fresh render; presence-check the
+    ffmpeg/gifsicle outputs (clips/gif/posters) without regenerating them."""
     failures = []
     DIFF_DIR.mkdir(parents=True, exist_ok=True)
     for target, tdir in out_base.items():
         if only and target != only:
             continue
         committed_dir = TARGET_DIRS[target]
-        generated = sorted(p for p in tdir.iterdir() if p.is_file())
+        produced = {p.name for p in tdir.iterdir() if p.is_file()}  # stills only
 
-        # every committed generated file must have been (re)generated
-        committed_expected = {
-            p.name for p in committed_dir.iterdir()
-            if p.is_file() and p.name not in NOT_GENERATED
-        }
-        produced = {p.name for p in generated}
-        for missing in sorted(committed_expected - produced):
-            failures.append(f"NOT REGENERATED: {target}/{missing}")
-
-        for f in generated:
-            committed = committed_dir / f.name
-            suf = f.suffix.lower()
-            if not committed.exists():
-                failures.append(f"NEW (uncommitted) output: {target}/{f.name}")
+        for c in sorted((p for p in committed_dir.iterdir() if p.is_file()), key=lambda p: p.name):
+            name = c.name
+            if name in NOT_GENERATED:
                 continue
-            if suf in (".mp4", ".webm", ".gif"):
-                print(f"  present (not pixel-gated): {target}/{f.name}")  # ffmpeg/gifsicle
+            if _presence_only(name):
+                print(f"  present (not pixel-gated): {target}/{name}")
                 continue
-            diff = DIFF_DIR / f"diff-{target}-{f.name}"
+            # a rendered still — must have been regenerated AND pixel-match
+            if name not in produced:
+                failures.append(f"NOT REGENERATED: {target}/{name}")
+                continue
+            diff = DIFF_DIR / f"diff-{target}-{name}"
             rc = subprocess.run(
-                [sys.executable, str(COMPARE), str(committed), str(f), str(diff)]
+                [sys.executable, str(COMPARE), str(c), str(tdir / name), str(diff)]
             ).returncode
             if rc != 0:
-                failures.append(f"PIXEL DRIFT: {target}/{f.name} (compare rc={rc})")
+                failures.append(f"PIXEL DRIFT: {target}/{name} (compare rc={rc})")
+
+        # a still rendered but not committed = a new/renamed output to commit
+        for name in sorted(produced):
+            if not (committed_dir / name).exists():
+                failures.append(f"NEW (uncommitted) output: {target}/{name}")
 
     print()
     if failures:
@@ -296,6 +303,11 @@ def main():
             continue
         targets = [t for t in job["targets"] if not args.only or t == args.only]
         if not targets:
+            continue
+        # --check pixel-gates stills only; clips/gif are presence-checked from the
+        # committed tree, so don't waste minutes rendering + vp9-encoding them.
+        if args.check and job["kind"] in ("gif", "clip"):
+            print(f"· {job['id']} ({job['kind']}) → presence-only, skipped in --check")
             continue
         out_dirs = [out_base[t] for t in targets]
         print(f"· {job['id']} ({job['kind']}) → {', '.join(targets)}")
