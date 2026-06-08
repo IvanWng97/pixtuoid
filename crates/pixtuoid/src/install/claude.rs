@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
+use pixtuoid_core::source::claude_code::claude_config_dir;
 use serde_json::{json, Map, Value};
 
 use crate::install::io;
@@ -20,13 +21,6 @@ const EVENTS: &[&str] = &[
     "Notification",
     "SessionEnd",
 ];
-
-fn claude_config_dir() -> Option<PathBuf> {
-    std::env::var("CLAUDE_CONFIG_DIR")
-        .ok()
-        .filter(|dir| !dir.is_empty())
-        .map(PathBuf::from)
-}
 
 pub fn default_config_path() -> PathBuf {
     claude_config_dir()

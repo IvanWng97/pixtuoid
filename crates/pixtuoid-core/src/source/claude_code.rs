@@ -16,7 +16,12 @@ pub struct ClaudeCodeSource {
     pub projects_root: PathBuf,
 }
 
-fn claude_config_dir() -> Option<PathBuf> {
+/// Resolve `CLAUDE_CONFIG_DIR` (an empty value is treated as unset). `pub` +
+/// `#[doc(hidden)]` so the `pixtuoid` install crate's settings.json resolver
+/// shares this one definition — the two CC path sites must not drift. Internal
+/// cross-crate helper, not a stable API.
+#[doc(hidden)]
+pub fn claude_config_dir() -> Option<PathBuf> {
     std::env::var("CLAUDE_CONFIG_DIR")
         .ok()
         .filter(|dir| !dir.is_empty())
@@ -342,6 +347,9 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn default_socket_path_env_precedence_and_default_paths() {
+        let _env = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let saved_socket = std::env::var_os("PIXTUOID_SOCKET");
         let saved_xdg = std::env::var_os("XDG_RUNTIME_DIR");
 
@@ -383,6 +391,9 @@ mod tests {
 
     #[test]
     fn default_paths_projects_root_honors_claude_config_dir() {
+        let _env = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let saved_config = std::env::var_os("CLAUDE_CONFIG_DIR");
         let fallback_suffix = PathBuf::from(".claude").join("projects");
 
