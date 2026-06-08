@@ -43,6 +43,8 @@ TARGET_DIRS = {
     "docs": ROOT / "docs/images",
     "site": ROOT / "site/public/demos",
 }
+# --check writes pixel-diff overlays here (survives the run for CI artifact upload).
+DIFF_DIR = ROOT / "target/gen-check-diff"
 # Committed files under docs/images/ that this pipeline does NOT generate
 # (a live-agent capture and a hand-made banner) — never compared in --check.
 NOT_GENERATED = {"screenshot-real.png", "sprite-banner.png"}
@@ -222,6 +224,7 @@ HANDLERS = {
 def run_check(out_base, work, only=None):
     """Pixel-diff every generated PNG vs committed; presence-check video + gif."""
     failures = []
+    DIFF_DIR.mkdir(parents=True, exist_ok=True)
     for target, tdir in out_base.items():
         if only and target != only:
             continue
@@ -246,7 +249,7 @@ def run_check(out_base, work, only=None):
             if suf in (".mp4", ".webm", ".gif"):
                 print(f"  present (not pixel-gated): {target}/{f.name}")  # ffmpeg/gifsicle
                 continue
-            diff = work / f"diff-{target}-{f.name}"
+            diff = DIFF_DIR / f"diff-{target}-{f.name}"
             rc = subprocess.run(
                 [sys.executable, str(COMPARE), str(committed), str(f), str(diff)]
             ).returncode

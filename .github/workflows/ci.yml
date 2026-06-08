@@ -203,21 +203,25 @@ jobs:
           echo '{}' > /tmp/smoke-test/.claude/settings.json
           HOME=/tmp/smoke-test ./target/release/pixtuoid install-hooks
           HOME=/tmp/smoke-test ./target/release/pixtuoid uninstall-hooks
+      # gen-check renders the office (Pillow + ffmpeg + gifsicle) and diffs the
+      # committed README sections + every still. node is for gen-readme-check.
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - name: Install ffmpeg + gifsicle
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg gifsicle
       - name: Set up Python virtual environment
         run: |
           python3 -m venv .venv
           .venv/bin/pip install -r requirements-dev.txt
-      - name: Visual regression check
-        run: just visual-check
-      - name: Upload snapshot artifacts
+      - name: Artifact-drift gate (README sections + all rendered stills)
+        run: just gen-check
+      - name: Upload gen-check diff overlays
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: smoke-snapshots
-          path: |
-            /tmp/visual-day.png
-            /tmp/visual-night.png
-            /tmp/diff-day.png
-            /tmp/diff-night.png
+          name: gen-check-diffs
+          path: target/gen-check-diff/
           retention-days: 7
+          if-no-files-found: ignore
 
