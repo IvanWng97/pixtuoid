@@ -105,6 +105,19 @@ semver:
 coverage:
     cargo llvm-cov nextest --workspace --features {{ features }} --lcov --output-path lcov.info --profile ci
 
+# Never-panic fuzz the per-source decoders over a JSONL corpus DIR (on-demand;
+# not in preflight/CI — points at local or public real sessions, not committed
+# data). Auto-routes each line to the CC / Codex / hook decoder by its shape;
+# exits non-zero on any panic. Examples:
+#   just fuzz ~/.claude/projects     # your CC sessions (newest formats)
+#   just fuzz ~/.codex/sessions      # your Codex rollouts
+#   git clone https://github.com/daaain/claude-code-log /tmp/cc && just fuzz /tmp/cc/test_data/real_projects
+[group('check')]
+[doc('Never-panic fuzz the decoders over a JSONL corpus dir: just fuzz ~/.claude/projects')]
+fuzz dir:
+    cargo build --release --example decoder_fuzz -p pixtuoid-core
+    find {{ dir }} -name '*.jsonl' -print0 | xargs -0 cat | ./target/release/examples/decoder_fuzz
+
 # Fail if the current release_notes() arm still has the uncurated TODO marker.
 # A release-PR guard (#116) — deliberately NOT in preflight, since `just bump`
 # leaves the marker for the human to curate after the bump commit.
