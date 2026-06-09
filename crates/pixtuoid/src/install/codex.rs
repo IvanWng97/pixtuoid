@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{anyhow, Context, Result};
 use toml::value::Table;
 
 use crate::install::target::MergeOutcome;
@@ -26,28 +26,33 @@ pub fn default_config_path() -> PathBuf {
     pixtuoid_core::source::codex::codex_home().join("config.toml")
 }
 
+#[cfg(unix)]
 use crate::install::io::shell_single_quote;
 
-/// Codex runs the `command` string under a shell; we write an ABSOLUTE path
-/// (robust regardless of PATH), single-quoted (robust to spaces), prefixed with
-/// PIXTUOID_SOURCE so the shim can stamp the source. Err on non-UTF-8 (prevents
-/// the to_string_lossy dead-hook).
+/// The Codex hook `command`. Codex runs it under a shell — `/bin/sh -lc` on Unix,
+/// `cmd.exe /C` on Windows (verified in codex-rs `command_runner.rs`; codex runs
+/// the plain `command` field on every OS, so we write the OS-correct form here
+/// rather than a `commandWindows` override). We embed an ABSOLUTE path (robust
+/// regardless of PATH) and stamp the source for the shim. Err on non-UTF-8
+/// (prevents the to_string_lossy dead-hook).
+///
+/// - **Unix**: env-prefix form `PIXTUOID_SOURCE=codex '<path>'` (single-quoted
+///   for spaces).
+/// - **Windows**: exec form `"<path>" --source codex`. cmd.exe `/C` can't express
+///   the env-prefix (it would try to exec a program literally named
+///   `PIXTUOID_SOURCE=codex`); the leading-quoted-path / trailing-arg form
+///   survives cmd's quote stripping (it starts but does NOT end with a quote, so
+///   the quotes are kept) and the shim reads the source from `--source`.
 pub fn hook_command(resolved: &Path) -> Result<String> {
-    // Codex's hook `command` is a POSIX shell string — the env-prefix form
-    // (`PIXTUOID_SOURCE=codex /path`) does not work under cmd.exe or PowerShell.
-    // Windows support for Codex (Git-Bash exec-form or a dedicated shim) is
-    // planned for a follow-up PR; refuse cleanly rather than writing a silently
-    // broken config.
-    if cfg!(windows) {
-        bail!(
-            "the codex target is not yet supported on Windows — \
-             install hooks for Claude Code only (Codex support is planned)"
-        );
-    }
     let p = resolved
         .to_str()
         .ok_or_else(|| anyhow!("pixtuoid-hook path is non-UTF-8: {}", resolved.display()))?;
-    Ok(format!("PIXTUOID_SOURCE=codex {}", shell_single_quote(p)))
+    // A Windows path can't contain `"`, so simple double-quote wrapping is safe.
+    #[cfg(windows)]
+    let cmd = format!("\"{p}\" --source codex");
+    #[cfg(unix)]
+    let cmd = format!("PIXTUOID_SOURCE=codex {}", shell_single_quote(p));
+    Ok(cmd)
 }
 
 fn parse_or_empty(content: &str) -> Result<toml::Value> {
@@ -342,20 +347,25 @@ command = "/old/pixtuoid-hook"
         );
     }
 
-    // On Windows, hook_command must refuse (cfg!(windows) guard). The guard
-    // compiles on all platforms; check-windows exercises the bail! branch.
-    // On non-Windows the guard is false → the POSIX path runs normally, which
-    // is verified by hook_command_prefixes_source_for_valid_path below.
+    // On Windows hook_command emits the exec form `"<path>" --source codex`
+    // (cmd.exe /C runs it; the env-prefix form is invalid there). check-windows
+    // cross-lints the branch; windows-test runs these. The Unix env-prefix form
+    // is pinned by hook_command_prefixes_source_for_valid_path below.
     #[test]
     #[cfg(windows)]
-    fn hook_command_refuses_on_windows() {
-        let err = hook_command(std::path::Path::new(r"C:\tools\pixtuoid-hook.exe"))
-            .unwrap_err()
-            .to_string();
-        assert!(
-            err.contains("not yet supported on Windows"),
-            "unexpected error: {err}"
-        );
+    fn hook_command_emits_exec_form_with_source_flag_on_windows() {
+        let cmd = hook_command(std::path::Path::new(r"C:\tools\pixtuoid-hook.exe")).unwrap();
+        assert_eq!(cmd, r#""C:\tools\pixtuoid-hook.exe" --source codex"#);
+    }
+
+    // A Windows install path with spaces must stay one quoted token so cmd.exe
+    // /C execs the exe, not a truncated path.
+    #[test]
+    #[cfg(windows)]
+    fn hook_command_quotes_path_with_spaces_on_windows() {
+        let cmd =
+            hook_command(std::path::Path::new(r"C:\Program Files\pixtuoid-hook.exe")).unwrap();
+        assert_eq!(cmd, r#""C:\Program Files\pixtuoid-hook.exe" --source codex"#);
     }
 
     #[test]
