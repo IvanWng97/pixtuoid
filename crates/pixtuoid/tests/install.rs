@@ -270,11 +270,19 @@ fn install_reasonix_writes_flat_json_with_sentinel_and_backup() {
     let pre = v["hooks"]["PreToolUse"].as_array().unwrap();
     assert_eq!(pre.len(), 2, "user entry + managed entry");
     assert_eq!(pre[0]["command"], "my-guard.sh", "user entry preserved");
-    // FLAT Reasonix entry: command + source stamp directly on the entry.
+    // FLAT Reasonix entry: command + source stamp directly on the entry. The
+    // command form is OS-specific (Reasonix shells via sh -c on Unix, cmd.exe /c
+    // on Windows); the rest of this test is OS-independent and runs on both.
     assert!(pre[1]["_pixtuoid"].as_bool().unwrap());
+    #[cfg(unix)]
     assert_eq!(
         pre[1]["command"].as_str().unwrap(),
         "PIXTUOID_SOURCE=reasonix '/fake/pixtuoid-hook'"
+    );
+    #[cfg(windows)]
+    assert_eq!(
+        pre[1]["command"].as_str().unwrap(),
+        "/fake/pixtuoid-hook --source reasonix"
     );
     assert!(pre[1].get("hooks").is_none(), "no CC-style nested group");
     assert!(
