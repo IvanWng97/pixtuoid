@@ -68,7 +68,7 @@ pixtuoid
 
 In another terminal, start a supported coding agent (Claude Code, Codex, Antigravity, Reasonix, …). A character walks in from the elevator within a second.
 
-**Keyboard shortcuts:** `q` quit · `p` pause · `t` themes · `?` help · `↑↓/jk/PgUp/PgDn` floors · click to pin tooltip
+**Keyboard shortcuts:** `q` quit · `p` pause · `t` themes · `Tab` agent dashboard · `?` help · `↑↓/jk/PgUp/PgDn` floors · click to pin tooltip
 
 **More ways to install** — Cargo, prebuilt binaries, and Debian `.deb`s — are on the **[install guide ↗](https://ivanwng97.github.io/pixtuoid/#install)**. Upgrading from `ascii-agents`? See [docs/MIGRATION.md](docs/MIGRATION.md).
 
