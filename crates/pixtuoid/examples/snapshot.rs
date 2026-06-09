@@ -779,18 +779,23 @@ fn dashboard_scene(now: SystemTime) -> SceneState {
     use pixtuoid_core::source::{claude_code, codex, reasonix};
     use pixtuoid_core::state::ActivityState;
     use std::time::Duration as D;
-    let mut s = SceneState::uniform(12);
 
-    let cc_root_id = AgentId::from_transcript_path("/demo/dash_cc_root.jsonl");
-
-    let agents: &[(
-        &str,
-        &str,
+    // Named to satisfy clippy::type_complexity (a 6-field tuple trips the lint):
+    // (label, transcript path, state, parent_id, desk_index, source SOURCE_NAME).
+    type DashAgentSpec = (
+        &'static str,
+        &'static str,
         ActivityState,
         Option<AgentId>,
         usize,
         &'static str,
-    )] = &[
+    );
+
+    let mut s = SceneState::uniform(12);
+
+    let cc_root_id = AgentId::from_transcript_path("/demo/dash_cc_root.jsonl");
+
+    let agents: &[DashAgentSpec] = &[
         (
             "cc·pixtuoid",
             "/demo/dash_cc_root.jsonl",
