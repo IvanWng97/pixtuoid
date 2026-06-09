@@ -18,6 +18,12 @@ pub struct AntigravitySource {
 }
 
 impl AntigravitySource {
+    /// The Antigravity **CLI** (`agy`) brain dir, home-rooted on every platform:
+    /// `<home>/.gemini/antigravity-cli/brain` (Windows: `%USERPROFILE%\.gemini\…`
+    /// via `user_home()` — the brain is NOT under `%APPDATA%`/`%LOCALAPPDATA%`;
+    /// only the IDE's editor settings and the `agy.exe` binary live there).
+    /// Note `antigravity-cli` (the CLI), NOT `antigravity` (the IDE's brain at
+    /// `~/.gemini/antigravity/brain`) — don't "fix" this to the IDE path.
     pub fn default_paths() -> Self {
         let home = crate::platform::user_home();
         Self {
@@ -185,5 +191,21 @@ mod tests {
         // Antigravity writes no end marker — defer to mtime + stale-sweep.
         assert!(!ag_session_ended(b"x"));
         assert!(!ag_session_ended(b""));
+    }
+
+    // The brain dir is the CLI's (`antigravity-cli`), home-rooted, on every OS —
+    // the suffix is separator-agnostic so this pins it on Unix AND Windows. The
+    // USERPROFILE-vs-HOME rooting itself is covered by platform::user_home tests.
+    #[test]
+    fn brain_root_is_the_cli_brain_under_dot_gemini() {
+        let p = AntigravitySource::default_paths().brain_root;
+        assert!(
+            p.ends_with(
+                PathBuf::from(".gemini")
+                    .join("antigravity-cli")
+                    .join("brain")
+            ),
+            "brain_root must be <home>/.gemini/antigravity-cli/brain, got {p:?}"
+        );
     }
 }

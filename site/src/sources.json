@@ -24,7 +24,7 @@
     "status": "supported",
     "featured": false,
     "transport": "JSONL watcher",
-    "platforms": { "macos": "yes", "linux": "yes", "windows": "planned" }
+    "platforms": { "macos": "yes", "linux": "yes", "windows": "experimental" }
   },
   {
     "id": "reasonix",
