@@ -226,6 +226,14 @@ fn codex_session_ended(_tail: &[u8]) -> bool {
     false
 }
 
+/// The Codex home dir — honors `CODEX_HOME` when it points at an existing dir,
+/// else `~/.codex` (codex's own precedence). The public entry the installer
+/// routes its `config.toml` path through too, so the watched sessions root and
+/// the installed-hook config can never disagree. See `crate::platform::codex_home`.
+pub fn codex_home() -> PathBuf {
+    crate::platform::codex_home()
+}
+
 /// Source that watches the Codex session transcript directory.
 pub struct CodexSource {
     pub sessions_root: PathBuf,
@@ -233,9 +241,8 @@ pub struct CodexSource {
 
 impl CodexSource {
     pub fn default_paths() -> Self {
-        let home = crate::platform::user_home();
         Self {
-            sessions_root: PathBuf::from(home).join(".codex").join("sessions"),
+            sessions_root: codex_home().join("sessions"),
         }
     }
 }
