@@ -146,23 +146,22 @@ fn root_at_threshold_stays_expanded() {
 }
 
 #[test]
-fn toggle_expands_an_auto_collapsed_root_and_sticks() {
+fn unfold_all_overrides_auto_collapse_and_sticks() {
+    // A root over the threshold auto-collapses; an explicit unfold (the `→`
+    // production path) pins it expanded, beating the auto rule.
     let (scene, root, n) = root_with_children(AUTO_COLLAPSE_THRESHOLD + 1);
     let mut folds = DashboardFolds::default();
-    folds.toggle_fold(root, n); // auto-collapsed -> user expands
+    assert!(
+        build_dashboard_rows(&scene, &folds)[0].collapsed,
+        "auto-collapsed before the override"
+    );
+    folds.unfold_all([root]);
     let rows = build_dashboard_rows(&scene, &folds);
-    assert!(!rows[0].collapsed, "manual expand overrides auto-collapse");
+    assert!(
+        !rows[0].collapsed,
+        "explicit unfold overrides auto-collapse"
+    );
     assert_eq!(rows.len(), 1 + n);
-}
-
-#[test]
-fn toggle_collapses_a_small_root() {
-    let (scene, root, n) = root_with_children(2);
-    let mut folds = DashboardFolds::default();
-    folds.toggle_fold(root, n); // small (expanded) -> user collapses
-    let rows = build_dashboard_rows(&scene, &folds);
-    assert!(rows[0].collapsed);
-    assert_eq!(rows.len(), 1);
 }
 
 #[test]
@@ -268,4 +267,61 @@ fn clamp_scroll_keeps_selection_in_view() {
         2,
         "already visible -> unchanged"
     );
+}
+
+#[test]
+fn clamp_scroll_edge_cases() {
+    let rows = flat_rows(6);
+    let r = |i: usize| rows[i].agent_id;
+    assert_eq!(clamp_scroll(&rows, None, 3, 4), 0, "no selection -> 0");
+    assert_eq!(
+        clamp_scroll(&rows, Some(id("/p/gone.jsonl")), 3, 4),
+        3,
+        "selection not in rows -> scroll unchanged"
+    );
+    // A zero-height viewport must not panic (saturating arithmetic).
+    let _ = clamp_scroll(&rows, Some(r(5)), 0, 0);
+}
+
+#[test]
+fn build_rows_carries_waiting_and_active_state() {
+    let w = id("/p/w.jsonl");
+    let a = id("/p/a.jsonl");
+    let mut scene = SceneState::uniform(8);
+    scene.agents.insert(
+        w,
+        mk_slot(
+            w,
+            "cc·w",
+            0,
+            0,
+            None,
+            ActivityState::Waiting {
+                reason: Arc::from("permission"),
+            },
+        ),
+    );
+    scene.agents.insert(
+        a,
+        mk_slot(
+            a,
+            "cc·a",
+            1,
+            0,
+            None,
+            ActivityState::Active {
+                tool_use_id: None,
+                detail: Some(Arc::from("Edit x")),
+            },
+        ),
+    );
+    let rows = build_dashboard_rows(&scene, &DashboardFolds::default());
+    assert_eq!(rows[0].state, RowState::Waiting(Arc::from("permission")));
+    assert_eq!(rows[1].state, RowState::Active(Some(Arc::from("Edit x"))));
+}
+
+#[test]
+fn build_dashboard_rows_empty_scene_is_empty() {
+    let scene = SceneState::uniform(8);
+    assert!(build_dashboard_rows(&scene, &DashboardFolds::default()).is_empty());
 }

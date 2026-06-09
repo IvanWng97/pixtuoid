@@ -52,16 +52,22 @@ pub(in crate::tui) fn paint_dashboard(
         return;
     }
 
-    let rows_shown = rows.len().min(DASHBOARD_VIEWPORT_ROWS);
-    let max_scroll = rows.len().saturating_sub(rows_shown);
-    let scroll = scroll.min(max_scroll);
-    let area = centered_in(bounds, POPUP_W, rows_shown as u16 + 2);
+    let desired = rows.len().min(DASHBOARD_VIEWPORT_ROWS);
+    let area = centered_in(bounds, POPUP_W, desired as u16 + 2);
     f.render_widget(Clear, area);
+
+    // `centered_in` clamps the popup to the terminal, so the real visible-row
+    // count can drop below DASHBOARD_VIEWPORT_ROWS on a short terminal. Re-clamp
+    // the scroll against the ACTUAL window (reusing the model's clamp_scroll, so
+    // the math can't drift) — otherwise the selected row could sit in the
+    // event-loop's wider window but below the painted one.
+    let visible = area.height.saturating_sub(2) as usize;
+    let scroll = crate::tui::dashboard::clamp_scroll(rows, selected, scroll, visible);
 
     let lines: Vec<Line> = rows
         .iter()
         .skip(scroll)
-        .take(rows_shown)
+        .take(visible)
         .map(|row| dashboard_line(row, selected == Some(row.agent_id), theme))
         .collect();
 

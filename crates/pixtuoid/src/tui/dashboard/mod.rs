@@ -69,19 +69,6 @@ impl DashboardFolds {
         }
     }
 
-    /// Flip root `root_id`'s effective collapse state and pin it, so the
-    /// auto-collapse rule won't fight the user's explicit choice. `child_count`
-    /// supplies the current effective state to flip from.
-    pub fn toggle_fold(&mut self, root_id: AgentId, child_count: usize) {
-        let now_collapsed = self.is_collapsed(root_id, child_count);
-        self.user_toggled.insert(root_id);
-        if now_collapsed {
-            self.collapsed.remove(&root_id);
-        } else {
-            self.collapsed.insert(root_id);
-        }
-    }
-
     /// Collapse every given root and pin it (a deliberate bulk op; roots that
     /// appear later still auto-evaluate, since they aren't pinned).
     pub fn fold_all(&mut self, roots: impl IntoIterator<Item = AgentId>) {
@@ -197,7 +184,7 @@ fn row_state(state: &ActivityState) -> RowState {
 
 /// Move the selection one visible row up (`dir = -1`) or down (`dir = +1`),
 /// clamped at the ends. With nothing selected — or a selection that has since
-/// vanished/hidden — it re-anchors to the first row. `None` only when empty. (stub)
+/// vanished/hidden — it re-anchors to the first row. `None` only when empty.
 pub fn move_selection(
     rows: &[DashboardRow],
     current: Option<AgentId>,

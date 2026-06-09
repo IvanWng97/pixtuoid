@@ -2057,3 +2057,101 @@ fn dashboard_closed_paints_no_popup() {
         "no dashboard popup when closed:\n{text}"
     );
 }
+
+/// The popup's box-bordered content lines (those containing the vertical rule),
+/// so substring assertions don't false-match the office sprite labels behind it.
+fn dash_popup(buf: &ratatui::buffer::Buffer) -> String {
+    frame_text(buf)
+        .lines()
+        .filter(|l| l.contains('\u{2502}'))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[test]
+fn dashboard_renders_waiting_reason_and_active_without_detail() {
+    let mut r = build(120, 44, vec![]);
+    let mut w = idle("/h/w.jsonl", 0, t0());
+    w.label = Arc::from("cc\u{b7}wait");
+    w.state = ActivityState::Waiting {
+        reason: Arc::from("permission"),
+    };
+    let mut a = idle("/h/a.jsonl", 1, t0());
+    a.label = Arc::from("cc\u{b7}act");
+    a.state = ActivityState::Active {
+        tool_use_id: Some(Arc::from("t")),
+        detail: None,
+    };
+    let scene = scene_with(vec![w, a], 16);
+
+    let rows = build_dashboard_rows(&scene, &DashboardFolds::default());
+    r.set_dashboard_frame(true, rows, None, 0);
+    r.render(&scene, &pack(), t0()).unwrap();
+
+    let popup = dash_popup(r.frame_buffer());
+    assert!(
+        popup.contains("waiting: permission"),
+        "waiting reason missing:\n{popup}"
+    );
+    assert!(
+        popup.contains("\u{25cf} active"),
+        "active-without-detail must render the bare state word:\n{popup}"
+    );
+}
+
+#[test]
+fn dashboard_scrolls_to_keep_a_deep_selection_visible() {
+    // 20 roots (> DASHBOARD_VIEWPORT_ROWS = 16) spread across floors so the
+    // office only labels a couple — the popup lists all 20. Selecting row 18
+    // must scroll the window down (painter re-clamps via clamp_scroll), so the
+    // popup shows row 18 and NOT row 00.
+    let mut agents = Vec::new();
+    for i in 0..20 {
+        let mut s = idle(&format!("/h/r{i}.jsonl"), i, t0());
+        s.label = Arc::from(format!("row{i:02}").as_str());
+        s.floor_idx = i % 10;
+        agents.push(s);
+    }
+    let scene = scene_with(agents, 16);
+    let rows = build_dashboard_rows(&scene, &DashboardFolds::default());
+    let row18 = rows[18].agent_id;
+    let mut r = build(120, 44, vec![]);
+    r.set_dashboard_frame(true, rows, Some(row18), 0);
+    r.render(&scene, &pack(), t0()).unwrap();
+
+    let buf = r.frame_buffer();
+    let text = frame_text(buf);
+    let popup = dash_popup(buf);
+    // The title sits on the top border (┌…┐), not a │ row — assert it on the full frame.
+    assert!(text.contains("Agents (20)"), "all 20 rows counted:\n{text}");
+    assert!(
+        popup.contains("row18"),
+        "deep selection scrolled into view (painter re-clamps scroll to the real window):\n{popup}"
+    );
+    assert!(
+        !popup.contains("row00"),
+        "top row must scroll off when a deep row is selected:\n{popup}"
+    );
+}
+
+#[test]
+fn dashboard_empty_scene_shows_placeholder() {
+    let mut r = build(120, 44, vec![]);
+    let scene = scene_with(vec![], 16);
+    r.set_dashboard_frame(true, Vec::new(), None, 0);
+    r.render(&scene, &pack(), t0()).unwrap();
+    assert!(
+        frame_text(r.frame_buffer()).contains("No active agents"),
+        "empty dashboard must show the placeholder"
+    );
+}
+
+// NOTE: a dedicated short-terminal clamp test isn't possible via the harness —
+// draw_scene footer-onlys (skips the popup) when the office layout can't fit
+// (terminal shorter than ~the office min height), and a 16-row popup (max 18
+// tall) always fits whenever the office DOES render. So the painter's
+// real-window re-clamp (clamp_scroll on visible = popup-inner-height) can only
+// fire with visible == DASHBOARD_VIEWPORT_ROWS in practice — exercised by
+// dashboard_scrolls_to_keep_a_deep_selection_visible above (scroll 0 → 3). The
+// visible < viewport arithmetic is covered directly by
+// dashboard::tests::clamp_scroll_* with small viewports.
