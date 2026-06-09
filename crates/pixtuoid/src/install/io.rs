@@ -72,7 +72,9 @@ pub(crate) fn shell_single_quote(s: &str) -> String {
 
 /// Characters that are special to cmd.exe's command-line parser (so they're
 /// unsafe in an UNQUOTED hook path): a space TRUNCATES the command; a
-/// separator/redirect/escape/expansion char injects or redirects.
+/// separator/redirect/escape/expansion char injects or redirects. (`!` is
+/// deliberately excluded — it's special only under delayed expansion, `cmd
+/// /V:ON`, which the codex/reasonix hook runners don't enable.)
 const CMD_UNSAFE: &[char] = &[' ', '"', '&', '|', '<', '>', '(', ')', '^', '%'];
 
 #[cfg_attr(not(windows), allow(dead_code))]
@@ -107,6 +109,15 @@ fn resolve_windows_command(
     source: &str,
     short_path: impl FnOnce(&str) -> Option<String>,
 ) -> Result<String> {
+    // Defense-in-depth: `source` is interpolated into the command alongside the
+    // path. It's a hardcoded "codex"/"reasonix" at every call site today, but this
+    // is a general guard — screen it for the same cmd-unsafe chars rather than
+    // trust the caller, so the command string can never be made injectable here.
+    if let Some(bad) = first_cmd_unsafe_char(source) {
+        anyhow::bail!(
+            "internal: hook source name {source:?} contains a cmd-unsafe character {bad:?}"
+        );
+    }
     let Some(bad) = first_cmd_unsafe_char(path) else {
         return Ok(format!("{path} --source {source}"));
     };
@@ -521,6 +532,16 @@ mod tests {
             err.contains("cmd.exe") && err.contains("ordinary characters"),
             "reject message must stay actionable: {err}"
         );
+    }
+
+    #[test]
+    fn windows_command_rejects_a_cmd_unsafe_source() {
+        // `source` is interpolated too — a metacharacter-bearing source is rejected
+        // even with a perfectly clean path (defense-in-depth; never injectable here).
+        let c = resolve_windows_command(r"C:\tools\hook.exe", "co&dex", |_| {
+            panic!("must reject on source before touching the short-path resolver")
+        });
+        assert!(c.unwrap_err().to_string().contains("source name"));
     }
 
     // Smoke-test the real FFI: for an EXISTING dir it returns Some(non-empty),
