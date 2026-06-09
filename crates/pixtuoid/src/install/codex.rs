@@ -376,8 +376,8 @@ command = "/old/pixtuoid-hook"
         assert!(hook_command(bad).is_err());
     }
 
-    // POSIX shell-string pins: unix-only — on Windows hook_command refuses
-    // outright (see hook_command_refuses_on_windows).
+    // POSIX shell-string pins: unix-only — the Windows bare exec form is pinned
+    // by hook_command_emits_bare_exec_form_with_source_flag_on_windows above.
     #[cfg(unix)]
     #[test]
     fn hook_command_prefixes_source_for_valid_path() {

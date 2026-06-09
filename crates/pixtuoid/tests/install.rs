@@ -56,8 +56,8 @@ fn install_with_config_and_target_flags() {
     assert!(v["hooks"]["PreToolUse"][0]["_pixtuoid"].as_bool().unwrap());
 }
 
-// Unix-only: the codex INSTALL target refuses on Windows until Codex support
-// lands (uninstall keeps working everywhere — see the windows twin below).
+// The Unix install flow (env-prefix command form). The Windows twin below
+// exercises the same merge/backup/uninstall round trip with the bare exec form.
 #[cfg(unix)]
 #[test]
 fn install_codex_writes_toml_with_sentinel_and_backup() {
@@ -106,14 +106,16 @@ fn install_codex_writes_toml_with_sentinel_and_backup() {
     assert!(!dir.path().join("config.toml.pixtuoid.bak").exists());
 }
 
-// The Windows twin: `install-hooks --target codex` must refuse LOUDLY through
-// the real binary (exit non-zero) and leave the config untouched.
+// The Windows twin: `install-hooks --target codex` now SUCCEEDS on Windows
+// (the bail was lifted) and writes the BARE exec form `<path> --source codex`
+// into config.toml — NOT a quoted path (codex's cmd.exe /C + Command::arg
+// escaping mangles a quoted path; see install::codex::hook_command).
 #[cfg(windows)]
 #[test]
-fn install_codex_refuses_on_windows_and_leaves_config_untouched() {
+fn install_codex_writes_bare_exec_form_on_windows() {
     let dir = TempDir::new().unwrap();
     let cfg = dir.path().join("config.toml");
-    std::fs::write(&cfg, "model = \"o1\"\n").unwrap();
+    std::fs::write(&cfg, "model = \"o1\"\n").unwrap(); // pre-existing user content
     let bin = env!("CARGO_BIN_EXE_pixtuoid");
     let status = std::process::Command::new(bin)
         .args([
@@ -123,16 +125,47 @@ fn install_codex_refuses_on_windows_and_leaves_config_untouched() {
             "--config",
             cfg.to_str().unwrap(),
             "--hook-path",
-            "C:/fake/pixtuoid-hook.exe",
+            r"C:\fake\pixtuoid-hook.exe",
         ])
         .status()
         .unwrap();
-    assert!(!status.success(), "codex install must refuse on Windows");
-    assert_eq!(
-        std::fs::read_to_string(&cfg).unwrap(),
-        "model = \"o1\"\n",
-        "refusal must not touch the config"
+    assert!(status.success(), "codex install must succeed on Windows");
+
+    let v: toml::Value = toml::from_str(&std::fs::read_to_string(&cfg).unwrap()).unwrap();
+    assert_eq!(v["model"].as_str().unwrap(), "o1", "user content preserved");
+    let handler = &v["hooks"]["PreToolUse"][0]["hooks"][0];
+    assert!(handler["_pixtuoid"].as_bool().unwrap());
+    let cmd = handler["command"].as_str().unwrap();
+    assert!(
+        cmd.ends_with("--source codex"),
+        "command must carry the --source flag: {cmd:?}"
     );
+    assert!(
+        !cmd.contains('"'),
+        "command must be the BARE form (no quotes — they break cmd.exe /C): {cmd:?}"
+    );
+    assert!(
+        cmd.contains("pixtuoid-hook"),
+        "command runs the shim: {cmd:?}"
+    );
+    assert!(dir.path().join("config.toml.pixtuoid.bak").exists());
+
+    // uninstall restores + removes backup (keyed on the _pixtuoid sentinel)
+    let status = std::process::Command::new(bin)
+        .args([
+            "uninstall-hooks",
+            "--target",
+            "codex",
+            "--config",
+            cfg.to_str().unwrap(),
+        ])
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let v: toml::Value = toml::from_str(&std::fs::read_to_string(&cfg).unwrap()).unwrap();
+    assert!(v.get("hooks").is_none());
+    assert_eq!(v["model"].as_str().unwrap(), "o1");
+    assert!(!dir.path().join("config.toml.pixtuoid.bak").exists());
 }
 
 // Regression guard for the byte-vs-semantic no-op bug: uninstall on a config
