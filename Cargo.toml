@@ -34,6 +34,12 @@ debug = "line-tables-only"
 # Dependencies never need debuginfo for our own backtraces.
 debug = false
 
+# Opt-in full debuginfo for an actual debugger session (the third stanza of the
+# official Cargo build-performance recipe): `cargo build --profile debugging`.
+[profile.debugging]
+inherits = "dev"
+debug = true
+
 [workspace.dependencies]
 tokio              = { version = "1", default-features = false }
 serde              = { version = "1", features = ["derive"] }
