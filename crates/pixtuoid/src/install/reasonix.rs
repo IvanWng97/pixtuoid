@@ -31,8 +31,6 @@ use anyhow::{anyhow, Context, Result};
 use serde_json::{json, Map, Value};
 
 use crate::install::io;
-#[cfg(unix)]
-use crate::install::io::shell_single_quote;
 use crate::install::target::MergeOutcome;
 
 const SENTINEL_KEY: &str = "_pixtuoid";
@@ -104,11 +102,9 @@ pub fn hook_command(resolved: &Path) -> Result<String> {
     let p = resolved
         .to_str()
         .ok_or_else(|| anyhow!("pixtuoid-hook path is non-UTF-8: {}", resolved.display()))?;
-    #[cfg(windows)]
-    let cmd = io::windows_bare_hook_command(p, "reasonix")?;
-    #[cfg(unix)]
-    let cmd = format!("PIXTUOID_SOURCE=reasonix {}", shell_single_quote(p));
-    Ok(cmd)
+    // Same OS fork as Codex, in one place (io::shell_hook_command): Unix env-prefix
+    // form / Windows bare `<path> --source reasonix`.
+    io::shell_hook_command(p, "reasonix")
 }
 
 fn parse_or_empty(content: &str) -> Result<Value> {

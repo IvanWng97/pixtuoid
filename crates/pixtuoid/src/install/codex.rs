@@ -26,9 +26,6 @@ pub fn default_config_path() -> PathBuf {
     pixtuoid_core::source::codex::codex_home().join("config.toml")
 }
 
-#[cfg(unix)]
-use crate::install::io::shell_single_quote;
-
 /// The Codex hook `command`. Codex runs it under a shell — `/bin/sh -lc` on Unix,
 /// `cmd.exe /C` on Windows (verified in codex-rs `command_runner.rs`, which spawns
 /// `Command::new(cmd.exe).arg("/C").arg(command)`; codex runs the plain `command`
@@ -57,15 +54,10 @@ pub fn hook_command(resolved: &Path) -> Result<String> {
     let p = resolved
         .to_str()
         .ok_or_else(|| anyhow!("pixtuoid-hook path is non-UTF-8: {}", resolved.display()))?;
-    // Windows: bare `<path> --source codex` via the shared guard (codex shells
-    // through cmd.exe /C; the cmd-unsafe-path rejection lives in ONE place,
-    // io::windows_bare_hook_command, shared with Reasonix so it can't drift).
-    // Unix: POSIX env-prefix form.
-    #[cfg(windows)]
-    let cmd = crate::install::io::windows_bare_hook_command(p, "codex")?;
-    #[cfg(unix)]
-    let cmd = format!("PIXTUOID_SOURCE=codex {}", shell_single_quote(p));
-    Ok(cmd)
+    // One OS fork for the cmd.exe-shelling strategy lives in io::shell_hook_command
+    // (Unix env-prefix form / Windows bare `<path> --source codex`), shared with
+    // Reasonix so the platform halves can't drift.
+    crate::install::io::shell_hook_command(p, "codex")
 }
 
 fn parse_or_empty(content: &str) -> Result<toml::Value> {
