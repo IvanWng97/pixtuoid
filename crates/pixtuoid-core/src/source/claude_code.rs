@@ -11,6 +11,18 @@ use crate::AgentId;
 
 pub const SOURCE_NAME: &str = "claude-code";
 
+/// CC's session/agent id = the transcript filename stem, which is
+/// cwd-independent (the cwd-derived project-dir is the *parent* dir, not the
+/// stem): `<uuid>.jsonl` → `<uuid>` for a root, `agent-<id>.jsonl` →
+/// `agent-<id>` for a subagent. Mirrors `codex_id_from_path`. CC session UUIDs
+/// and agent-ids are lowercase, so the Windows path fold is inert here.
+pub fn cc_id_from_path(path: &Path) -> String {
+    path.file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_string()
+}
+
 pub struct ClaudeCodeSource {
     pub socket_path: PathBuf,
     pub projects_root: PathBuf,
@@ -470,5 +482,39 @@ mod tests {
         });
         let out = decode_cc_line("/x/.claude/projects/p/s.jsonl", "claude-code", exit).unwrap();
         assert!(matches!(out.as_slice(), [AgentEvent::SessionEnd { .. }]));
+    }
+}
+
+#[cfg(test)]
+mod cc_id_tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn cc_id_from_path_root_is_filename_uuid() {
+        let p = Path::new("/Users/me/.claude/projects/-Users-me-proj/01000000-0000-7000-8000-0000000000cc.jsonl");
+        assert_eq!(cc_id_from_path(p), "01000000-0000-7000-8000-0000000000cc");
+    }
+
+    #[test]
+    fn cc_id_from_path_subagent_is_agent_stem() {
+        let p = Path::new("/Users/me/.claude/projects/-Users-me-proj/01000000-0000-7000-8000-0000000000cc/subagents/agent-a0a7dc28dd772bd0d.jsonl");
+        assert_eq!(cc_id_from_path(p), "agent-a0a7dc28dd772bd0d");
+    }
+
+    #[test]
+    fn cc_id_from_path_empty_for_no_stem() {
+        assert_eq!(cc_id_from_path(Path::new("")), "");
+    }
+
+    #[test]
+    fn cc_id_from_path_is_stable_across_path_separators() {
+        // The first-sight deriver gets a raw &Path; the per-line decoder gets the
+        // normalize_path_key'd string (lowercased + forward-slashed on Windows).
+        // Both must yield the SAME stem for a lowercase-hex CC id, or one session
+        // splits into two sprites (same assumption codex_id_from_path relies on).
+        let raw = Path::new("/Users/me/.claude/projects/p/01000000-0000-7000-8000-0000000000cc.jsonl");
+        let normalized = Path::new("/users/me/.claude/projects/p/01000000-0000-7000-8000-0000000000cc.jsonl");
+        assert_eq!(cc_id_from_path(raw), cc_id_from_path(normalized));
     }
 }
