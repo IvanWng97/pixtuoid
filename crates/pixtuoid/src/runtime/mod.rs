@@ -107,7 +107,10 @@ fn summarize(scene: &SceneState) -> String {
             let state = match &a.state {
                 ActivityState::Idle => "idle".to_string(),
                 ActivityState::Active { detail, .. } => {
-                    format!("active({})", sanitize_line(detail.as_deref().unwrap_or("?")))
+                    format!(
+                        "active({})",
+                        sanitize_line(detail.as_deref().unwrap_or("?"))
+                    )
                 }
                 ActivityState::Waiting { reason } => {
                     format!("waiting({})", sanitize_line(reason))

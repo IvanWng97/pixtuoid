@@ -549,7 +549,10 @@ fn no_layout_frame_zeroes_the_popup_hit_box() {
         "the popup is animating this frame"
     );
     r.render(&scene, &pack(), t).expect("render");
-    assert!(r.cached_layout().is_none(), "no layout produced at this size");
+    assert!(
+        r.cached_layout().is_none(),
+        "no layout produced at this size"
+    );
     assert_eq!(
         r.last_popup_scale(),
         0.0,

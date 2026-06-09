@@ -726,7 +726,11 @@ impl<B: Backend<Error: Send + Sync + 'static>> Renderer for TuiRenderer<B> {
             // size): no popup was drawn, so zero the popup-click hit-box rather
             // than leave a stale scale the mouse handler reads as "popup on
             // screen". Mirrors the too-small early-return + the transition path.
-            self.last_popup_scale = if layout_opt.is_some() { popup_scale } else { 0.0 };
+            self.last_popup_scale = if layout_opt.is_some() {
+                popup_scale
+            } else {
+                0.0
+            };
         } else {
             self.last_popup_scale = 0.0;
         }

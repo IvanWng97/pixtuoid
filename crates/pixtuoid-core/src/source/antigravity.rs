@@ -207,7 +207,10 @@ mod tests {
             "tool_calls": [ { "name": "read_file", "args": {} } ],
         });
         let out = decode_ag_line("/x/t.jsonl", SOURCE_NAME, v).unwrap();
-        assert!(out.is_empty(), "negative step_index must emit nothing: {out:?}");
+        assert!(
+            out.is_empty(),
+            "negative step_index must emit nothing: {out:?}"
+        );
 
         // Control: a non-negative step_index still emits the tool start.
         let v = serde_json::json!({
