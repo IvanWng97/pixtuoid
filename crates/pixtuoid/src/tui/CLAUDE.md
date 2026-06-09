@@ -22,10 +22,11 @@ tui/
 │                   furniture, labels, chitchat bubbles), help.rs (paint_help_overlay)
 ├── hit_test.rs     mouse hit-test: agent hover, coffee machine click, furniture tooltips, pet
 ├── tui_renderer/   Renderer trait impl, split production vs tests:
-│                   mod.rs (TuiRenderer: cross-frame state — RgbBuffer, FrameCache, Router, PoseHistory,
-│                   TickerQueue, Theme, cached Layout; Vec<FloorCtx> each carries .motion + .door_anim_max_ms;
+│                   mod.rs (TuiRenderer: cross-frame state — Vec<RgbBuffer> + Vec<FloorCtx>; each FloorCtx owns
+│                   its own FrameCache/Router/PoseHistory/OccupancyOverlay + .motion + .door_anim_max_ms; plus
+│                   TickerQueue, Theme, cached Layout;
 │                   #[cfg(test)] frame_buffer/floor_motion/floor_buf/inject_coffee test seams),
-│                   harness.rs (#[cfg(test)] mod: ~38 headless integration tests driving the real
+│                   harness.rs (#[cfg(test)] mod: ~65 headless integration tests driving the real
 │                   render()/navigate_floor() path via ratatui TestBackend — output-first: buf() pixels + frame_buffer cells)
 ├── theme/          color theme system — one file per theme, Theme struct in mod.rs
 │                   mod.rs (struct defs + ALL_THEMES registry), normal.rs, cyberpunk.rs,
@@ -48,6 +49,11 @@ tui/
 │                   pub(in crate::tui); re-exports core::pose),
 │                   tests.rs (#[cfg(test)] mod tests: unit + frame-by-frame continuity guards)
 ├── pathfind.rs     Router trait + AStarRouter with selective cache invalidation
+├── frame_cache.rs  FrameCache — per-agent recolored-sprite cache keyed (agent_id, anim, frame_idx, flip_x);
+│                   owned per-FloorCtx, flushed on theme change (set_theme) so recolors update immediately
+├── embedded_pack.rs  include_str! the default character pack at compile time (from sprites/default/) →
+│                   sprite::format::load_pack_from_strings; --pack-dir merges OPTIONAL_FURNITURE over it
+├── layout.rs       thin façade re-exporting core::layout::SceneLayout as tui::layout::Layout (renderer's geometry entry)
 ├── floor.rs        FloorCtx (per-floor render state), FloorTransition, LightingState, build_floor_scene
 ├── pet.rs          PetKind (Cat, Dog) + per-kind static data; Pet{kind,name} (a configured office pet) + Pet::defaulted; select_pet_for_floor(u64,&[Pet])->Option<&Pet>; PetState (heart-anim interaction)
 ├── chitchat.rs     venue-keyed group/solo speech bubbles (VenueKey::Room vs ::Waypoint)
@@ -105,7 +111,7 @@ tui/
 ## When refactoring
 
 The render path is exercised by the headless harness (`tui_renderer/harness.rs`,
-~38 tests) plus dense `motion/tests.rs` + `pose/tests.rs` unit suites with a real
+~65 tests) plus dense `motion/tests.rs` + `pose/tests.rs` unit suites with a real
 A\* router and overlay churn. Changes to `derive_with_routing`, `MotionState`, or
 the pixel passes should add or update a frame-by-frame continuity guard — the
 flash/teleport/replay regressions documented above all came back as failing

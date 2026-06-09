@@ -84,7 +84,7 @@ The `test-renderer` feature is needed for the `e2e.rs` integration test; **`just
 
 Coverage: `just coverage` (writes lcov.info + JUnit XML — the exact command CI runs).
 
-Decoder never-panic fuzz: `just fuzz <jsonl-dir>` (→ `examples/decoder_fuzz.rs`) runs every line of a real session corpus through the CC / Codex / hook decoder (auto-routed by shape) and fails on any panic — the "log + continue, never panic" contract (invariant #5) checked on real data, not just fixtures. On-demand, NOT in preflight/CI: point it at your own `~/.claude/projects` / `~/.codex/sessions` or a cloned public corpus (e.g. `daaain/claude-code-log`'s `test_data/real_projects`) — sessions are a target, not committed data.
+Decoder never-panic fuzz: `just fuzz <jsonl-dir>` (→ `crates/pixtuoid-core/examples/decoder_fuzz.rs`) runs every line of a real session corpus through the CC / Codex / hook decoder (auto-routed by shape) and fails on any panic — the "log + continue, never panic" contract (invariant #5) checked on real data, not just fixtures. On-demand, NOT in preflight/CI: point it at your own `~/.claude/projects` / `~/.codex/sessions` or a cloned public corpus (e.g. `daaain/claude-code-log`'s `test_data/real_projects`) — sessions are a target, not committed data.
 
 ### Visual verification (Python venv)
 
