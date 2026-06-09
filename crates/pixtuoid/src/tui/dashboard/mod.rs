@@ -14,6 +14,11 @@ use pixtuoid_core::AgentId;
 /// default, so a large CC workflow (≈20 subagents) doesn't flood the board.
 pub const AUTO_COLLAPSE_THRESHOLD: usize = 5;
 
+/// Inner visible-row count of the dashboard popup. Shared by `clamp_scroll`
+/// (event loop) and the painter so the scroll math and the painted window
+/// can't disagree.
+pub const DASHBOARD_VIEWPORT_ROWS: usize = 16;
+
 /// The activity shown on a row, distilled from `ActivityState`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RowState {

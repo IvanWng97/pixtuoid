@@ -76,6 +76,14 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     /// handler reads this instead of re-computing with a fresh `SystemTime`
     /// so both sides always agree on whether the popup is above a threshold.
     last_popup_scale: f32,
+    /// Agent-dashboard frame mirror, pushed each tick by the event loop via
+    /// `set_dashboard_frame` (rows pre-built from the live snapshot). Kept here
+    /// — disjoint from the floor buffers — so the painter can borrow it into
+    /// the `DrawCtx` without fighting the `floor_ctxs` / `floor_bufs` borrows.
+    dashboard_open: bool,
+    dashboard_rows: Vec<crate::tui::dashboard::DashboardRow>,
+    dashboard_selected: Option<pixtuoid_core::AgentId>,
+    dashboard_scroll: usize,
 }
 
 impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
@@ -109,7 +117,28 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             debug_walkable: false,
             version_popup_scale_at_edge: 0.0,
             last_popup_scale: 0.0,
+            dashboard_open: false,
+            dashboard_rows: Vec::new(),
+            dashboard_selected: None,
+            dashboard_scroll: 0,
         }
+    }
+
+    /// Mirror the dashboard frame the event loop built this tick. Pushing a
+    /// pre-built row snapshot (a cheap clone — `AgentId` is `Copy`, strings are
+    /// `Arc`) rather than the whole `DashboardUi` avoids cloning the fold
+    /// `HashSet`s every frame.
+    pub fn set_dashboard_frame(
+        &mut self,
+        open: bool,
+        rows: Vec<crate::tui::dashboard::DashboardRow>,
+        selected: Option<pixtuoid_core::AgentId>,
+        scroll: usize,
+    ) {
+        self.dashboard_open = open;
+        self.dashboard_rows = rows;
+        self.dashboard_selected = selected;
+        self.dashboard_scroll = scroll;
     }
 
     pub fn help_open(&self) -> bool {
@@ -476,6 +505,13 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         let theme_picker = self.theme_picker;
         let source_warning = self.source_warning.clone();
         let help_open = self.help_open;
+        // Dashboard can be opened mid floor-slide (Tab isn't transition-gated),
+        // so paint it here too. Clone the rows for the brief transition frames
+        // rather than thread a disjoint borrow through the split_at_mut buffers.
+        let dashboard_open = self.dashboard_open;
+        let dashboard_rows = self.dashboard_rows.clone();
+        let dashboard_selected = self.dashboard_selected;
+        let dashboard_scroll = self.dashboard_scroll;
         // Floor label tracks the destination floor for the duration of the
         // slide so the per-floor agent count in the footer matches the
         // label (otherwise users see "F1/3 ... 5 agents" with floor 2's
@@ -498,6 +534,16 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
 
             if let Some(idx) = theme_picker {
                 crate::tui::renderer::paint_theme_picker(f, idx, actual_full, theme);
+            }
+            if dashboard_open {
+                crate::tui::renderer::paint_dashboard(
+                    f,
+                    &dashboard_rows,
+                    dashboard_selected,
+                    dashboard_scroll,
+                    actual_full,
+                    theme,
+                );
             }
             if popup_scale > 0.0 {
                 if let Some(notes) = crate::version::release_notes(env!("CARGO_PKG_VERSION")) {
@@ -649,6 +695,10 @@ impl<B: Backend<Error: Send + Sync + 'static>> Renderer for TuiRenderer<B> {
             popup_scale,
             help_open: self.help_open,
             source_warning: self.source_warning.as_deref(),
+            dashboard_open: self.dashboard_open,
+            dashboard_rows: self.dashboard_rows.as_slice(),
+            dashboard_selected: self.dashboard_selected,
+            dashboard_scroll: self.dashboard_scroll,
         };
         let result = draw_scene(&mut self.terminal, &floor_scene, pack, now, &mut draw_ctx);
         self.last_pet_pos = draw_ctx.last_pet_pos;

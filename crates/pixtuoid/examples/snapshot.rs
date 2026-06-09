@@ -431,6 +431,10 @@ fn main() -> Result<()> {
         popup_scale: if args.popup { 1.0 } else { 0.0 },
         help_open: args.help_open,
         source_warning: warning_text.as_deref(),
+        dashboard_open: false,
+        dashboard_rows: &[],
+        dashboard_selected: None,
+        dashboard_scroll: 0,
     };
     draw_scene(&mut term, &scene, &pack, now, &mut draw_ctx)?;
 
@@ -1221,6 +1225,10 @@ fn save_as_gif(
             popup_scale: 0.0,
             help_open: false,
             source_warning: None,
+            dashboard_open: false,
+            dashboard_rows: &[],
+            dashboard_selected: None,
+            dashboard_scroll: 0,
         };
         draw_scene(term, scene, pack, now, &mut draw_ctx)?;
         if i < skip_frames {

@@ -58,6 +58,10 @@ macro_rules! make_draw_ctx {
             popup_scale: 0.0,
             help_open: false,
             source_warning: None,
+            dashboard_open: false,
+            dashboard_rows: &[],
+            dashboard_selected: None,
+            dashboard_scroll: 0,
         };
     };
 

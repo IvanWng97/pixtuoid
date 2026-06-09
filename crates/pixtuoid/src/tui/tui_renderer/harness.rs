@@ -1977,3 +1977,83 @@ fn theme_picker_renders_during_floor_transition() {
         "theme picker must paint over a floor transition; frame:\n{text}"
     );
 }
+
+// --- agent dashboard overlay -------------------------------------------------
+
+use crate::tui::dashboard::{build_dashboard_rows, DashboardFolds};
+
+#[test]
+fn dashboard_popup_renders_labels_states_and_live_tool() {
+    let mut r = build(120, 44, vec![]);
+    let mut a = active("/h/alpha.jsonl", 0, "Edit reducer.rs", t0());
+    a.label = Arc::from("cc\u{b7}alpha");
+    let mut b = idle("/h/beta.jsonl", 1, t0());
+    b.label = Arc::from("cc\u{b7}beta");
+    let scene = scene_with(vec![a, b], 16);
+
+    let rows = build_dashboard_rows(&scene, &DashboardFolds::default());
+    let first = rows[0].agent_id;
+    r.set_dashboard_frame(true, rows, Some(first), 0);
+    r.render(&scene, &pack(), t0()).unwrap();
+
+    let text = frame_text(r.frame_buffer());
+    assert!(text.contains("Agents ("), "header missing:\n{text}");
+    assert!(text.contains("cc\u{b7}alpha"), "alpha row missing:\n{text}");
+    assert!(text.contains("cc\u{b7}beta"), "beta row missing:\n{text}");
+    assert!(
+        text.contains("Edit reducer.rs"),
+        "live tool detail missing:\n{text}"
+    );
+    assert!(text.contains("idle"), "idle state missing:\n{text}");
+}
+
+#[test]
+fn dashboard_collapsed_big_tree_shows_badge_and_hides_children() {
+    let mut r = build(120, 44, vec![]);
+    let root_id = AgentId::from_transcript_path("/h/root.jsonl");
+    let mut root = slot(root_id, 0, 0, t0());
+    root.label = Arc::from("cc\u{b7}root");
+    let mut agents = vec![root];
+    // 6 > AUTO_COLLAPSE_THRESHOLD (5) → the root auto-collapses on open.
+    for i in 0..6 {
+        let cid = AgentId::from_transcript_path(&format!("/h/root/subagents/agent-{i}.jsonl"));
+        let mut c = slot(cid, 0, 1 + i, t0());
+        c.label = Arc::from(format!("explorer{i}").as_str());
+        c.parent_id = Some(root_id);
+        agents.push(c);
+    }
+    let scene = scene_with(agents, 16);
+
+    let rows = build_dashboard_rows(&scene, &DashboardFolds::default());
+    r.set_dashboard_frame(true, rows, Some(root_id), 0);
+    r.render(&scene, &pack(), t0()).unwrap();
+
+    let text = frame_text(r.frame_buffer());
+    assert!(text.contains("cc\u{b7}root"), "root row missing:\n{text}");
+    assert!(
+        text.contains("(6)"),
+        "collapsed hidden-count badge missing:\n{text}"
+    );
+    // The popup's own count proves only the root is listed (children hidden);
+    // a global `!contains("explorer0")` would false-fail on the office sprite
+    // label behind the popup. Child-hiding in the model is covered by
+    // `dashboard::tests::root_over_threshold_auto_collapses_and_hides_its_subtree`.
+    assert!(
+        text.contains("Agents (1)"),
+        "collapsed tree must list exactly one row:\n{text}"
+    );
+}
+
+#[test]
+fn dashboard_closed_paints_no_popup() {
+    let mut r = build(120, 44, vec![]);
+    let scene = scene_with(vec![idle("/h/a.jsonl", 0, t0())], 16);
+    r.set_dashboard_frame(false, Vec::new(), None, 0);
+    r.render(&scene, &pack(), t0()).unwrap();
+
+    let text = frame_text(r.frame_buffer());
+    assert!(
+        !text.contains("Agents ("),
+        "no dashboard popup when closed:\n{text}"
+    );
+}

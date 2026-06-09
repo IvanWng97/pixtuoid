@@ -314,6 +314,28 @@ pub async fn run_tui(
             renderer.set_source_warning(widgets::source_warning_message(
                 &source_health.borrow_and_update(),
             ));
+            // Mirror the dashboard frame: while open, rebuild the rows from the
+            // live snapshot, re-anchor the selection by AgentId (an agent may
+            // have exited), and keep it in the scroll viewport. Closed → push an
+            // empty frame (the painter reads rows only when open).
+            if dashboard_ui.open {
+                let rows = dashboard::build_dashboard_rows(&snapshot, &dashboard_ui.folds);
+                dashboard_ui.selected = dashboard::reanchor_selection(&rows, dashboard_ui.selected);
+                dashboard_ui.scroll = dashboard::clamp_scroll(
+                    &rows,
+                    dashboard_ui.selected,
+                    dashboard_ui.scroll,
+                    dashboard::DASHBOARD_VIEWPORT_ROWS,
+                );
+                renderer.set_dashboard_frame(
+                    true,
+                    rows,
+                    dashboard_ui.selected,
+                    dashboard_ui.scroll,
+                );
+            } else {
+                renderer.set_dashboard_frame(false, Vec::new(), dashboard_ui.selected, 0);
+            }
             renderer.render(&snapshot, &pack, now)?;
 
             // Auto-compute per-floor desk capacity from the current

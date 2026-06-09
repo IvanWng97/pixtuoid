@@ -29,6 +29,7 @@ use crate::tui::pixel_painter::{render_to_rgb_buffer, PixelCtx};
 use crate::tui::pose;
 
 // Re-exports so tui_renderer.rs and tui/mod.rs import from one place.
+use crate::tui::dashboard::DashboardRow;
 pub(crate) use crate::tui::hit_test::hit_test_agent;
 pub use crate::tui::hit_test::{
     hit_test_coffee_machine, hit_test_from_tui, hit_test_furniture, hit_test_pet,
@@ -36,9 +37,9 @@ pub use crate::tui::hit_test::{
 pub(crate) use crate::tui::widgets::paint_hover_tooltip;
 pub use crate::tui::widgets::TickerQueue;
 pub(super) use crate::tui::widgets::{
-    paint_chitchat_bubbles, paint_coffee_tooltip, paint_elevator_indicator, paint_footer,
-    paint_furniture_tooltip, paint_help_overlay, paint_label_widgets, paint_pet_tooltip,
-    paint_theme_picker, paint_version_popup, paint_wall_display,
+    paint_chitchat_bubbles, paint_coffee_tooltip, paint_dashboard, paint_elevator_indicator,
+    paint_footer, paint_furniture_tooltip, paint_help_overlay, paint_label_widgets,
+    paint_pet_tooltip, paint_theme_picker, paint_version_popup, paint_wall_display,
 };
 
 pub use crate::tui::pet::PetState;
@@ -113,6 +114,14 @@ pub struct DrawCtx<'a> {
     pub help_open: bool,
     /// Footer warning when a source has died (#157); `None` while healthy.
     pub source_warning: Option<&'a str>,
+    /// Agent dashboard overlay: open flag + the pre-built row snapshot
+    /// (borrowed from `TuiRenderer`, disjoint from the floor borrows) +
+    /// selection/scroll. Painted last, modal, mutually exclusive with the
+    /// theme picker by dispatch precedence.
+    pub dashboard_open: bool,
+    pub dashboard_rows: &'a [DashboardRow],
+    pub dashboard_selected: Option<pixtuoid_core::AgentId>,
+    pub dashboard_scroll: usize,
 }
 
 /// Clip a widget rect to fit inside `bounds`. Returns `None` if the rect
@@ -340,6 +349,16 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         }
         if let Some(idx) = theme_picker {
             paint_theme_picker(f, idx, actual_full, theme);
+        }
+        if ctx.dashboard_open {
+            paint_dashboard(
+                f,
+                ctx.dashboard_rows,
+                ctx.dashboard_selected,
+                ctx.dashboard_scroll,
+                actual_full,
+                theme,
+            );
         }
         if ctx.popup_scale > 0.0 {
             if let Some(notes) = crate::version::release_notes(env!("CARGO_PKG_VERSION")) {
