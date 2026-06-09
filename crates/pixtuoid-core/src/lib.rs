@@ -16,7 +16,7 @@ pub use render::Renderer;
 pub use source::{AgentEvent, Source, TaggedReceiver, TaggedSender, ToolDetail, Transport};
 pub use sprite::{Frame, Palette, Pixel, Rgb, RgbBuffer, Sprite};
 pub use state::reducer::Reducer;
-pub use state::{ActivityState, AgentSlot, SceneState};
+pub use state::{ActivityState, AgentSlot, FloorLocalDeskIndex, GlobalDeskIndex, SceneState};
 pub use walkable::{OccupancyOverlay, WalkableMask};
 
 /// Test-only mutex serializing tests that mutate process-global environment

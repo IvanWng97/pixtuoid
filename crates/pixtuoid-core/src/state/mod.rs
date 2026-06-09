@@ -11,6 +11,43 @@ mod scope;
 
 pub const MAX_FLOORS: usize = 10;
 
+/// Global desk index — the reducer's allocation space across ALL floors.
+///
+/// This is the space `AgentSlot.desk_index` lives in (allocated once by
+/// `SceneState::next_free_desk`, never mutated). It is NOT a valid index
+/// into a single floor's `SceneLayout::home_desks`; convert through
+/// `SceneState::floor_local_desk` (the one legal bridge) first.
+///
+/// The inner `usize` stays `pub` for construction in tests and for raw
+/// arithmetic at documented sites — the safety comes from this type being
+/// distinct from `FloorLocalDeskIndex`, not from hiding the integer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct GlobalDeskIndex(pub usize);
+
+/// Floor-local desk index — indexes a single floor's
+/// `SceneLayout::home_desks` (see `SceneLayout::home_desk`).
+///
+/// Produced by `SceneState::floor_local_desk` (the arithmetic bridge) or —
+/// inside a single-floor projected scene — by
+/// `GlobalDeskIndex::single_floor_local` (a documented identity).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct FloorLocalDeskIndex(pub usize);
+
+impl GlobalDeskIndex {
+    /// The floor-local view of this index **within a single-floor scene**.
+    ///
+    /// Valid only for slots in a per-floor projection (the output of
+    /// `build_floor_scene` / `project_floor_scene` in the tui, or any
+    /// `uniform(cap)` scene standing in for one floor): there the scene's
+    /// global space coincides with its floor-0 local space
+    /// (`floor_of(g) == 0`, `floor_local_desk(g).0 == g.0`), so this cast
+    /// is the identity by construction. For a multi-floor scene go through
+    /// `SceneState::floor_local_desk` — the arithmetic bridge — instead.
+    pub fn single_floor_local(self) -> FloorLocalDeskIndex {
+        FloorLocalDeskIndex(self.0)
+    }
+}
+
 /// `AgentSlot` strings (label, source, session_id) and paths (cwd) are
 /// stored as `Arc<str>` / `Arc<Path>` so `SceneState::clone()` is a series
 /// of pointer copies instead of heap allocations. At 30 fps with N agents
@@ -178,6 +215,15 @@ mod tests {
             unknown_cwd: false,
             parent_id: None,
         }
+    }
+
+    #[test]
+    fn single_floor_local_is_the_identity_cast() {
+        // The documented coincidence: in a uniform(cap) scene standing in for
+        // ONE floor, the global space == the floor-0 local space, so the
+        // typed identity cast agrees with the arithmetic bridge.
+        let g = GlobalDeskIndex(7);
+        assert_eq!(g.single_floor_local(), FloorLocalDeskIndex(7));
     }
 
     #[test]

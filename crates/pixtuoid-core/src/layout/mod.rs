@@ -33,6 +33,7 @@ pub use mask::{WALL_THICK_H, WALL_THICK_V};
 pub use placement::{anchored_top_left, z_sort_row, Anchor};
 pub use reach::{ReachSet, REACH_CELL_SIZE, REACH_CELL_WALKABLE_MIN};
 
+use crate::state::FloorLocalDeskIndex;
 use crate::walkable::WalkableMask;
 
 /// Primitive rectangle. Same shape as `ratatui::layout::Rect` so the
@@ -241,6 +242,16 @@ impl SceneLayout {
 
     pub fn is_walkable(&self, x: u16, y: u16) -> bool {
         self.walkable.is_walkable(x, y)
+    }
+
+    /// Typed accessor for a floor's home-desk anchor. `home_desks` is a
+    /// FLOOR-LOCAL vector — index it through a `FloorLocalDeskIndex`
+    /// (from `SceneState::floor_local_desk`, or
+    /// `GlobalDeskIndex::single_floor_local` inside a single-floor
+    /// projected scene), never with an `AgentSlot.desk_index` directly.
+    /// Raw `home_desks[i]` with a loop/iteration `usize` stays fine.
+    pub fn home_desk(&self, i: FloorLocalDeskIndex) -> Option<Point> {
+        self.home_desks.get(i.0).copied()
     }
 }
 

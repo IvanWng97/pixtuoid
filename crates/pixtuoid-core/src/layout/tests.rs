@@ -1,6 +1,24 @@
 use super::*;
 
 #[test]
+fn home_desk_typed_accessor_matches_raw_vec() {
+    let l = SceneLayout::compute(160, 200, 4).expect("layout fits");
+    assert!(!l.home_desks.is_empty());
+    for i in 0..l.home_desks.len() {
+        assert_eq!(
+            l.home_desk(FloorLocalDeskIndex(i)),
+            Some(l.home_desks[i]),
+            "typed accessor must agree with the raw vec at index {i}"
+        );
+    }
+    assert_eq!(
+        l.home_desk(FloorLocalDeskIndex(l.home_desks.len())),
+        None,
+        "out-of-range floor-local index returns None"
+    );
+}
+
+#[test]
 fn partial_bottom_row_caps_mid_fill_when_agents_run_out() {
     // Covers the partial-BOTTOM-ROW capacity break in `compute_pod_desks`
     // (compute.rs `'partial_y` loop): a layout whose fill needs the partial
