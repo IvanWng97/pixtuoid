@@ -167,6 +167,12 @@ struct SnapshotArgs {
     #[arg(long, value_name = "KIND", requires = "gif", conflicts_with = "anim")]
     pets: Option<String>,
 
+    /// Render with the agent-dashboard popup open over a representative mixed
+    /// cc/cx/rx scene (a cc parent with 2 subagents + a cx root + an rx root,
+    /// varied activity states). Drives the dashboard demo image + visual checks.
+    #[arg(long, conflicts_with_all = ["anim", "gif", "live", "empty", "pets"])]
+    dashboard: bool,
+
     /// Animation-verification mode: render ONE agent walking to + settling at a
     /// chosen furniture, so the approach→settle reads correctly (no pop, no
     /// teleport) BEFORE human verify. One of: couch | sofa | stand | pantry |
@@ -282,6 +288,8 @@ fn main() -> Result<()> {
             .enable_all()
             .build()?;
         rt.block_on(capture_live_scene(&args.projects_root, args.listen_secs))?
+    } else if args.dashboard {
+        dashboard_scene(now)
     } else {
         sample_scene(now, args.max_desks, args.agents)
     };
@@ -396,6 +404,14 @@ fn main() -> Result<()> {
     if args.empty {
         light.snap_to_empty();
     }
+    let (dash_rows, dash_selected) = if args.dashboard {
+        let folds = pixtuoid::tui::dashboard::DashboardFolds::default();
+        let rows = pixtuoid::tui::dashboard::build_dashboard_rows(&scene, &folds);
+        let sel = rows.first().map(|r| r.agent_id);
+        (rows, sel)
+    } else {
+        (Vec::new(), None)
+    };
     let mut draw_ctx = DrawCtx {
         buf: &mut buf,
         cache: &mut cache,
@@ -431,9 +447,9 @@ fn main() -> Result<()> {
         popup_scale: if args.popup { 1.0 } else { 0.0 },
         help_open: args.help_open,
         source_warning: warning_text.as_deref(),
-        dashboard_open: false,
-        dashboard_rows: &[],
-        dashboard_selected: None,
+        dashboard_open: args.dashboard,
+        dashboard_rows: &dash_rows,
+        dashboard_selected: dash_selected,
         dashboard_scroll: 0,
     };
     draw_scene(&mut term, &scene, &pack, now, &mut draw_ctx)?;
@@ -750,6 +766,98 @@ fn sample_scene(now: SystemTime, max_desks: usize, n_agents: usize) -> SceneStat
                 active_ms: 0,
                 unknown_cwd: false,
                 parent_id: None,
+            },
+        );
+    }
+    s
+}
+
+/// Build a representative 5-agent scene for the `--dashboard` demo: a CC parent
+/// with 2 subagents, a Codex root, and a Reasonix root — distinct badges and
+/// varied activity states.
+fn dashboard_scene(now: SystemTime) -> SceneState {
+    use pixtuoid_core::source::{claude_code, codex, reasonix};
+    use pixtuoid_core::state::ActivityState;
+    use std::time::Duration as D;
+    let mut s = SceneState::uniform(12);
+
+    let cc_root_id = AgentId::from_transcript_path("/demo/dash_cc_root.jsonl");
+
+    let agents: &[(&str, &str, ActivityState, Option<AgentId>, usize, &'static str)] = &[
+        (
+            "cc·pixtuoid",
+            "/demo/dash_cc_root.jsonl",
+            ActivityState::Active {
+                tool_use_id: Some("tu0".into()),
+                detail: Some("Edit: reducer.rs".into()),
+            },
+            None,
+            0,
+            claude_code::SOURCE_NAME,
+        ),
+        (
+            "code-explorer",
+            "/demo/dash_cc_sub1.jsonl",
+            ActivityState::Active {
+                tool_use_id: Some("tu1".into()),
+                detail: Some("Grep: TODO".into()),
+            },
+            Some(cc_root_id),
+            1,
+            claude_code::SOURCE_NAME,
+        ),
+        (
+            "code-reviewer",
+            "/demo/dash_cc_sub2.jsonl",
+            ActivityState::Idle,
+            Some(cc_root_id),
+            2,
+            claude_code::SOURCE_NAME,
+        ),
+        (
+            "cx·sidecar",
+            "/demo/dash_cx_root.jsonl",
+            ActivityState::Idle,
+            None,
+            3,
+            codex::SOURCE_NAME,
+        ),
+        (
+            "rx·helper",
+            "/demo/dash_rx_root.jsonl",
+            ActivityState::Waiting {
+                reason: "permission?".into(),
+            },
+            None,
+            4,
+            reasonix::SOURCE_NAME,
+        ),
+    ];
+
+    for (label, path, state, parent_id, desk_index, source) in agents {
+        let id = AgentId::from_transcript_path(path);
+        s.agents.insert(
+            id,
+            AgentSlot {
+                agent_id: id,
+                source: std::sync::Arc::from(*source),
+                session_id: std::sync::Arc::from(
+                    format!("demo-dash-{}", label.replace('·', "-")).as_str(),
+                ),
+                cwd: std::sync::Arc::from(PathBuf::from("/demo").as_path()),
+                label: std::sync::Arc::from(*label),
+                state: state.clone(),
+                state_started_at: now,
+                created_at: now - D::from_secs(*desk_index as u64),
+                last_event_at: now,
+                exiting_at: None,
+                pending_idle_at: None,
+                desk_index: *desk_index,
+                floor_idx: s.floor_of(*desk_index),
+                tool_call_count: 0,
+                active_ms: 0,
+                unknown_cwd: false,
+                parent_id: *parent_id,
             },
         );
     }
@@ -1445,5 +1553,19 @@ mod tests {
             "pantry"
         ])
         .is_err());
+    }
+
+    #[test]
+    fn dashboard_flag_parses_and_conflicts_with_anim() {
+        assert!(
+            SnapshotArgs::try_parse_from(["snapshot", "out.png", "--dashboard"]).is_ok()
+        );
+        assert!(
+            SnapshotArgs::try_parse_from(["snapshot", "out.png", "--dashboard", "--anim", "desk"])
+                .is_err()
+        );
+        assert!(
+            SnapshotArgs::try_parse_from(["snapshot", "out.png", "--dashboard", "--gif"]).is_err()
+        );
     }
 }
