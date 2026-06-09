@@ -66,13 +66,19 @@ pub(in crate::tui) fn paint_dashboard(
     // When more rows exist than fit, reserve the bottom line for the overflow
     // cue and clamp the selection into the SMALLER content window — so the row
     // we hand to the cue is never the selected one (clamp_scroll parks a
-    // down-navigated selection at the window's bottom edge).
+    // down-navigated selection at the window's bottom edge). But probe first:
+    // if that reduced clamp already reaches the end (the selection IS the last
+    // row, nothing below), no cue is needed, so render the FULL height instead
+    // — otherwise the reserved line would render blank.
     let overflow = rows.len() > visible;
-    let content_window = if overflow {
+    let reserved = if overflow {
         visible.saturating_sub(1)
     } else {
         visible
     };
+    let probe_scroll = crate::tui::dashboard::clamp_scroll(rows, selected, scroll, reserved);
+    let show_cue = overflow && rows.len() > probe_scroll + reserved;
+    let content_window = if show_cue { reserved } else { visible };
     let scroll = crate::tui::dashboard::clamp_scroll(rows, selected, scroll, content_window);
     let mut lines: Vec<Line> = rows
         .iter()
@@ -80,8 +86,8 @@ pub(in crate::tui) fn paint_dashboard(
         .take(content_window)
         .map(|row| dashboard_line(row, selected == Some(row.agent_id), theme))
         .collect();
-    let hidden_below = rows.len().saturating_sub(scroll + content_window);
-    if overflow && hidden_below > 0 {
+    if show_cue {
+        let hidden_below = rows.len().saturating_sub(scroll + content_window);
         lines.push(Line::from(Span::styled(
             format!("  \u{22ee} {hidden_below} more \u{25be}"),
             Style::default().fg(to_color(theme.ui.label_idle)),

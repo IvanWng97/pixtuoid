@@ -2248,3 +2248,38 @@ fn dashboard_overflow_cue_keeps_a_bottom_navigated_selection_visible() {
         "overflow cue present (rows below):\n{popup}"
     );
 }
+
+#[test]
+fn dashboard_overflow_no_blank_line_when_selection_is_last_row() {
+    // 17 rows (> DASHBOARD_VIEWPORT_ROWS=16) → overflow. Selecting the LAST row
+    // scrolls to the very end where nothing is below: no cue is needed, so the
+    // popup must fill all 16 visible lines (NOT reserve a now-empty cue line).
+    let mut agents = Vec::new();
+    for i in 0..17 {
+        let mut s = idle(&format!("/h/r{i}.jsonl"), i, t0());
+        s.label = Arc::from(format!("row{i:02}").as_str());
+        s.floor_idx = i % 10;
+        agents.push(s);
+    }
+    let scene = scene_with(agents, 16);
+    let rows = build_dashboard_rows(&scene, &DashboardFolds::default());
+    let last = rows[16].agent_id;
+    let mut r = build(120, 44, vec![]);
+    r.set_dashboard_frame(true, rows, Some(last), 0);
+    r.render(&scene, &pack(), t0()).unwrap();
+    let popup = dash_popup(r.frame_buffer());
+    assert!(
+        popup.contains("row16"),
+        "selected last row visible:\n{popup}"
+    );
+    // The fix renders 16 rows (rows 1..16); the blank-line bug renders only 15
+    // (rows 2..16, plus a blank reserved line), so `row01` present distinguishes.
+    assert!(
+        popup.contains("row01"),
+        "all 16 visible lines must be filled — no blank reserved cue line:\n{popup}"
+    );
+    assert!(
+        !popup.contains('\u{22ee}'),
+        "no cue when scrolled to the end (nothing below):\n{popup}"
+    );
+}
