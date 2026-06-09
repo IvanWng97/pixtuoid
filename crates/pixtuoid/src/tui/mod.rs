@@ -46,6 +46,7 @@ struct KeyCtx {
     help_open: bool,
     version_popup: bool,
     theme_picker: Option<usize>,
+    dashboard_open: bool,
     n_themes: usize,
     n_floors: usize,
     current_floor: usize,
@@ -78,6 +79,21 @@ enum KeyAction {
     /// there. The match arm in `run_tui` stays unconditional for exhaustiveness.
     #[cfg_attr(not(debug_assertions), allow(dead_code))]
     ToggleWalkableDebug,
+    /// Open/close the agent dashboard (`Tab`, from the normal scene only).
+    ToggleDashboard,
+    /// Dashboard list navigation.
+    DashboardUp,
+    DashboardDown,
+    /// `←/h`: collapse the selected root (on a child, collapse its parent).
+    DashboardFoldLeft,
+    /// `→/l`: expand the selected root.
+    DashboardFoldRight,
+    /// `z`: fold-all / unfold-all toggle across every root.
+    DashboardFoldAll,
+    /// `Enter`: jump to the selected agent's floor + close.
+    DashboardJump,
+    /// `Esc`/`Tab`: close without jumping.
+    DashboardClose,
 }
 
 /// Left-click pin toggle: if an agent is pinned, clear it; otherwise hit-test
@@ -136,6 +152,19 @@ fn dispatch_key(code: KeyCode, mods: KeyModifiers, ctx: KeyCtx) -> KeyAction {
             _ => KeyAction::None,
         };
     }
+    if ctx.dashboard_open {
+        return match (code, mods) {
+            _ if is_quit_chord(code, mods) => KeyAction::Quit,
+            (KeyCode::Esc, _) | (KeyCode::Tab, _) => KeyAction::DashboardClose,
+            (KeyCode::Enter, _) => KeyAction::DashboardJump,
+            (KeyCode::Up, _) | (KeyCode::Char('k'), _) => KeyAction::DashboardUp,
+            (KeyCode::Down, _) | (KeyCode::Char('j'), _) => KeyAction::DashboardDown,
+            (KeyCode::Left, _) | (KeyCode::Char('h'), _) => KeyAction::DashboardFoldLeft,
+            (KeyCode::Right, _) | (KeyCode::Char('l'), _) => KeyAction::DashboardFoldRight,
+            (KeyCode::Char('z'), _) => KeyAction::DashboardFoldAll,
+            _ => KeyAction::None,
+        };
+    }
     if let Some(idx) = ctx.theme_picker {
         return match code {
             KeyCode::Up | KeyCode::Char('k') => KeyAction::ThemePreview(idx.saturating_sub(1)),
@@ -155,6 +184,7 @@ fn dispatch_key(code: KeyCode, mods: KeyModifiers, ctx: KeyCtx) -> KeyAction {
         KeyCode::Char('p') => KeyAction::TogglePause,
         KeyCode::Char('t') => KeyAction::OpenThemePicker,
         KeyCode::Char('?') => KeyAction::ToggleHelp,
+        KeyCode::Tab => KeyAction::ToggleDashboard,
         // Dev-only walkable/approach/route overlay — gated out of release builds.
         #[cfg(debug_assertions)]
         KeyCode::Char('w') => KeyAction::ToggleWalkableDebug,
@@ -260,6 +290,7 @@ pub async fn run_tui(
         .iter()
         .position(|t| std::ptr::eq(*t, theme))
         .unwrap_or(0);
+    let mut dashboard_ui = dashboard::DashboardUi::default();
 
     let tick = Duration::from_millis(33);
     let result: Result<()> = (async {
@@ -328,6 +359,7 @@ pub async fn run_tui(
                             help_open: renderer.help_open(),
                             version_popup,
                             theme_picker,
+                            dashboard_open: dashboard_ui.open,
                             n_themes: theme::ALL_THEMES.len(),
                             n_floors: crate::tui::floor::num_floors(&snapshot),
                             current_floor: renderer.current_floor(),
@@ -366,6 +398,85 @@ pub async fn run_tui(
                             KeyAction::ToggleWalkableDebug => {
                                 let on = renderer.debug_walkable();
                                 renderer.set_debug_walkable(!on);
+                            }
+                            KeyAction::ToggleDashboard => {
+                                dashboard_ui.open = !dashboard_ui.open;
+                                if dashboard_ui.open {
+                                    let rows = dashboard::build_dashboard_rows(
+                                        &snapshot,
+                                        &dashboard_ui.folds,
+                                    );
+                                    dashboard_ui.selected =
+                                        dashboard::reanchor_selection(&rows, dashboard_ui.selected);
+                                }
+                            }
+                            KeyAction::DashboardClose => dashboard_ui.open = false,
+                            KeyAction::DashboardUp => {
+                                let rows =
+                                    dashboard::build_dashboard_rows(&snapshot, &dashboard_ui.folds);
+                                dashboard_ui.selected =
+                                    dashboard::move_selection(&rows, dashboard_ui.selected, -1);
+                            }
+                            KeyAction::DashboardDown => {
+                                let rows =
+                                    dashboard::build_dashboard_rows(&snapshot, &dashboard_ui.folds);
+                                dashboard_ui.selected =
+                                    dashboard::move_selection(&rows, dashboard_ui.selected, 1);
+                            }
+                            KeyAction::DashboardFoldLeft => {
+                                let rows =
+                                    dashboard::build_dashboard_rows(&snapshot, &dashboard_ui.folds);
+                                if let Some(sel) = dashboard_ui.selected {
+                                    if let Some(row) = rows.iter().find(|r| r.agent_id == sel) {
+                                        // On a child, collapse its parent and move the
+                                        // cursor up to the (now collapsed) root so it
+                                        // stays visible; on a root, collapse it.
+                                        let root = row.parent_id.unwrap_or(sel);
+                                        dashboard_ui.folds.fold_all([root]);
+                                        dashboard_ui.selected = Some(root);
+                                    }
+                                }
+                            }
+                            KeyAction::DashboardFoldRight => {
+                                let rows =
+                                    dashboard::build_dashboard_rows(&snapshot, &dashboard_ui.folds);
+                                if let Some(sel) = dashboard_ui.selected {
+                                    // Only roots are collapsible; expand the selected one.
+                                    if rows
+                                        .iter()
+                                        .any(|r| r.agent_id == sel && r.parent_id.is_none())
+                                    {
+                                        dashboard_ui.folds.unfold_all([sel]);
+                                    }
+                                }
+                            }
+                            KeyAction::DashboardFoldAll => {
+                                let rows =
+                                    dashboard::build_dashboard_rows(&snapshot, &dashboard_ui.folds);
+                                let roots: Vec<_> = rows
+                                    .iter()
+                                    .filter(|r| r.parent_id.is_none())
+                                    .map(|r| r.agent_id)
+                                    .collect();
+                                let any_expanded =
+                                    rows.iter().any(|r| r.parent_id.is_none() && !r.collapsed);
+                                if any_expanded {
+                                    dashboard_ui.folds.fold_all(roots);
+                                } else {
+                                    dashboard_ui.folds.unfold_all(roots);
+                                }
+                            }
+                            KeyAction::DashboardJump => {
+                                if let Some(sel) = dashboard_ui.selected {
+                                    let rows = dashboard::build_dashboard_rows(
+                                        &snapshot,
+                                        &dashboard_ui.folds,
+                                    );
+                                    if let Some(floor) = dashboard::resolve_floor(&rows, sel) {
+                                        renderer.navigate_floor(floor, now);
+                                    }
+                                }
+                                dashboard_ui.open = false;
                             }
                         }
                     }
@@ -489,6 +600,7 @@ mod dispatch_tests {
             help_open: false,
             version_popup: false,
             theme_picker: None,
+            dashboard_open: false,
             n_themes: 6,
             n_floors: 3,
             current_floor: 1,
@@ -658,5 +770,106 @@ mod dispatch_tests {
         assert!(super::should_dispatch_key(KeyEventKind::Press));
         assert!(!super::should_dispatch_key(KeyEventKind::Release));
         assert!(!super::should_dispatch_key(KeyEventKind::Repeat));
+    }
+
+    #[test]
+    fn tab_toggles_dashboard_from_normal_scene() {
+        assert_eq!(
+            dispatch_key(KeyCode::Tab, NONE, ctx()),
+            KeyAction::ToggleDashboard
+        );
+    }
+
+    #[test]
+    fn dashboard_tier_maps_nav_fold_jump_close() {
+        let d = KeyCtx {
+            dashboard_open: true,
+            ..ctx()
+        };
+        assert_eq!(dispatch_key(KeyCode::Up, NONE, d), KeyAction::DashboardUp);
+        assert_eq!(
+            dispatch_key(KeyCode::Char('k'), NONE, d),
+            KeyAction::DashboardUp
+        );
+        assert_eq!(
+            dispatch_key(KeyCode::Down, NONE, d),
+            KeyAction::DashboardDown
+        );
+        assert_eq!(
+            dispatch_key(KeyCode::Char('j'), NONE, d),
+            KeyAction::DashboardDown
+        );
+        assert_eq!(
+            dispatch_key(KeyCode::Left, NONE, d),
+            KeyAction::DashboardFoldLeft
+        );
+        assert_eq!(
+            dispatch_key(KeyCode::Char('h'), NONE, d),
+            KeyAction::DashboardFoldLeft
+        );
+        assert_eq!(
+            dispatch_key(KeyCode::Right, NONE, d),
+            KeyAction::DashboardFoldRight
+        );
+        assert_eq!(
+            dispatch_key(KeyCode::Char('l'), NONE, d),
+            KeyAction::DashboardFoldRight
+        );
+        assert_eq!(
+            dispatch_key(KeyCode::Char('z'), NONE, d),
+            KeyAction::DashboardFoldAll
+        );
+        assert_eq!(
+            dispatch_key(KeyCode::Enter, NONE, d),
+            KeyAction::DashboardJump
+        );
+        assert_eq!(
+            dispatch_key(KeyCode::Esc, NONE, d),
+            KeyAction::DashboardClose
+        );
+        assert_eq!(
+            dispatch_key(KeyCode::Tab, NONE, d),
+            KeyAction::DashboardClose
+        );
+    }
+
+    #[test]
+    fn dashboard_modal_passes_quit_chord_but_swallows_other_keys() {
+        let d = KeyCtx {
+            dashboard_open: true,
+            ..ctx()
+        };
+        assert_eq!(dispatch_key(KeyCode::Char('q'), NONE, d), KeyAction::Quit);
+        assert_eq!(dispatch_key(KeyCode::Char('c'), CTRL, d), KeyAction::Quit);
+        assert_eq!(
+            dispatch_key(KeyCode::Char('p'), NONE, d),
+            KeyAction::None,
+            "modal swallows pause"
+        );
+        assert_eq!(
+            dispatch_key(KeyCode::Char('t'), NONE, d),
+            KeyAction::None,
+            "modal swallows theme picker"
+        );
+    }
+
+    #[test]
+    fn tab_swallowed_while_other_overlays_open() {
+        // help / version / theme-picker tiers precede the normal Tab binding.
+        let h = KeyCtx {
+            help_open: true,
+            ..ctx()
+        };
+        assert_eq!(dispatch_key(KeyCode::Tab, NONE, h), KeyAction::None);
+        let v = KeyCtx {
+            version_popup: true,
+            ..ctx()
+        };
+        assert_eq!(dispatch_key(KeyCode::Tab, NONE, v), KeyAction::None);
+        let p = KeyCtx {
+            theme_picker: Some(0),
+            ..ctx()
+        };
+        assert_eq!(dispatch_key(KeyCode::Tab, NONE, p), KeyAction::None);
     }
 }
