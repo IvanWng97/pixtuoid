@@ -104,7 +104,11 @@ pub(super) fn paint_coffee_steam(buf: &mut RgbBuffer, base: Point, now: SystemTi
         if alpha < 0.15 {
             continue;
         }
-        let wiggle = if (phase / 200) % 2 == 0 { 0 } else { 1 };
+        let wiggle = if (phase / 200).is_multiple_of(2) {
+            0
+        } else {
+            1
+        };
         let px = base.x + wiggle;
         let py = base.y.saturating_sub(rise + 2);
         if px < buf.width && py < buf.height {

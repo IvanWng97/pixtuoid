@@ -107,7 +107,7 @@ pub(super) fn paint_glass_wall_h(
     let cap_top = y_top.saturating_sub(GLASS_CAP_PX);
     let rows = GLASS_CAP_PX + WALL_THICK_H_PX;
     for x in x0..=x1.min(bw.saturating_sub(1)) {
-        let seam = (x - x0) % GLASS_SEAM_STRIDE == 0;
+        let seam = (x - x0).is_multiple_of(GLASS_SEAM_STRIDE);
         for i in 0..rows {
             let y = cap_top + i;
             if y >= bh {
@@ -140,7 +140,7 @@ pub(super) fn paint_glass_wall_v(
     let (hi, mid, lo) = glass_tones(theme);
     let (bw, bh) = (buf.width, buf.height);
     for y in y_top..=y_bot.min(bh.saturating_sub(1)) {
-        let seam = (y - y_top) % GLASS_SEAM_STRIDE == 0;
+        let seam = (y - y_top).is_multiple_of(GLASS_SEAM_STRIDE);
         for dx in 0..WALL_THICK_V_PX {
             let x = x_left + dx;
             if x >= bw {

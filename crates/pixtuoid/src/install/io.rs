@@ -114,9 +114,10 @@ pub fn write_config_atomic(path: &Path, contents: &str) -> Result<()> {
         .write(true)
         .truncate(false)
         .open(&lock_path)?;
-    // UFCS onto fs4's trait (not std's inherent File::try_lock, stable only in
-    // 1.89) so the advisory lock keeps working on the declared MSRV (1.78).
-    fs4::FileExt::try_lock(&lock)
+    // std-native advisory lock (stable since 1.89, our MSRV). FAIL on contention
+    // rather than block — `try_lock` returns `Err(TryLockError::WouldBlock)` when
+    // another install/uninstall holds it, which the `?` surfaces as an error.
+    lock.try_lock()
         .map_err(|e| anyhow!("could not lock {}: {e}", lock_path.display()))?;
 
     let tmp = sibling(&target, "tmp");
@@ -130,7 +131,7 @@ pub fn write_config_atomic(path: &Path, contents: &str) -> Result<()> {
         f.sync_all()?;
     }
     rename_with_retry(&tmp, &target)?;
-    fs4::FileExt::unlock(&lock).ok();
+    lock.unlock().ok();
     Ok(())
 }
 

@@ -108,7 +108,7 @@ pub fn build_dashboard_rows(scene: &SceneState, folds: &DashboardFolds) -> Vec<D
     let mut roots: Vec<AgentId> = scene
         .agents
         .iter()
-        .filter(|(_, s)| s.parent_id.map_or(true, |p| !scene.agents.contains_key(&p)))
+        .filter(|(_, s)| s.parent_id.is_none_or(|p| !scene.agents.contains_key(&p)))
         .map(|(id, _)| *id)
         .collect();
     roots.sort_by_key(|id| scene.agents[id].desk_index);

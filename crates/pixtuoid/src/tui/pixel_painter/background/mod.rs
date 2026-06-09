@@ -514,7 +514,7 @@ fn paint_streaks(
                 }
             }
             Particle::Flake => {
-                let wiggle = if (elapsed_ms / 400 + seed.wrapping_mul(0x9e37)) % 2 == 0 {
+                let wiggle = if (elapsed_ms / 400 + seed.wrapping_mul(0x9e37)).is_multiple_of(2) {
                     0
                 } else {
                     1

@@ -9,7 +9,7 @@ members  = [
 [workspace.package]
 version      = "0.6.1"
 edition      = "2021"
-rust-version = "1.78"
+rust-version = "1.89"
 license      = "MIT"
 repository   = "https://github.com/IvanWng97/pixtuoid"
 authors      = ["Ivan Wang <ivanwng97@icloud.com>"]
@@ -36,4 +36,3 @@ notify             = "8"
 ratatui            = "0.30"
 crossterm          = "0.29"
 clap               = { version = "4", features = ["derive"] }
-fs4                = "1"

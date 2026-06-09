@@ -115,7 +115,7 @@ fn manifest_rows_are_well_formed() {
 
         if status == "planned" {
             assert!(
-                s.get("id").map_or(true, |v| v.is_null()),
+                s.get("id").is_none_or(|v| v.is_null()),
                 "{name}: a `planned` source must not carry an `id` (it isn't wired yet)"
             );
         }

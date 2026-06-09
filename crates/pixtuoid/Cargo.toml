@@ -27,7 +27,6 @@ toml               = { workspace = true }
 anyhow             = { workspace = true }
 tracing            = { workspace = true }
 tracing-subscriber = { workspace = true }
-fs4                = { workspace = true }
 which              = "8"
 # clock feature gives us Local::now() w/ system timezone for the wall clock.
 chrono             = { version = "0.4", default-features = false, features = ["clock"] }

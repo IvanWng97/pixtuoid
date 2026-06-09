@@ -131,7 +131,8 @@ where
     }
     let lock_path = real_path.with_extension("toml.lock");
     let lock_file = std::fs::File::create(&lock_path)?;
-    fs4::FileExt::try_lock(&lock_file)
+    lock_file
+        .try_lock()
         .map_err(|e| anyhow::anyhow!("config lock held by another process: {e}"))?;
 
     let mut cfg = if real_path.exists() {
@@ -145,7 +146,7 @@ where
     let tmp = real_path.with_extension("toml.tmp");
     std::fs::write(&tmp, &contents)?;
     std::fs::rename(&tmp, &real_path)?;
-    fs4::FileExt::unlock(&lock_file).ok();
+    lock_file.unlock().ok();
     let _ = std::fs::remove_file(&lock_path);
     Ok(())
 }

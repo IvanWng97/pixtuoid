@@ -57,6 +57,19 @@ jobs:
       - uses: extractions/setup-just@v4
       - run: just machete
 
+  msrv:
+    name: msrv
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      # `just msrv` reads rust-version from Cargo.toml and self-installs that
+      # pinned toolchain via the runner's rustup, so the floor lives in one place.
+      # No rust-cache: it keys on the runner's stable, but this job builds on the
+      # MSRV toolchain (different rustc fingerprint), so the target cache can't be
+      # reused — a clean cold `cargo check` is the honest gate.
+      - uses: extractions/setup-just@v4
+      - run: just msrv
+
   notes-curated:
     name: release notes curated
     runs-on: ubuntu-latest

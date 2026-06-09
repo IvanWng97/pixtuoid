@@ -1,9 +1,5 @@
 [advisories]
-ignore = [
-    # paste is unmaintained but pulled transitively by ratatui — not actionable
-    # until ratatui migrates to pastey. Track: https://github.com/ratatui/ratatui/issues
-    "RUSTSEC-2024-0436",
-]
+ignore = []
 
 [licenses]
 allow = [

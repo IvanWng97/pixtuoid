@@ -564,9 +564,7 @@ pub async fn run_tui(
                                 kind,
                             }) = renderer.cached_pet_pos()
                             {
-                                if renderer
-                                    .active_pet_ref()
-                                    .map_or(true, |p| !p.is_active(now))
+                                if renderer.active_pet_ref().is_none_or(|p| !p.is_active(now))
                                     && renderer::hit_test_pet(kind, pet_pos, anim, m.column, m.row)
                                 {
                                     renderer.set_active_pet(Some(renderer::PetState {

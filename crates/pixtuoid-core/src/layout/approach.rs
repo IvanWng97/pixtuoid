@@ -123,7 +123,7 @@ pub fn stand_point(
                 let ex = cx as i64 - origin.x as i64;
                 let ey = cy as i64 - origin.y as i64;
                 let d2 = (ex * ex + ey * ey) as u64;
-                if best.map_or(true, |(bd, _)| d2 < bd) {
+                if best.is_none_or(|(bd, _)| d2 < bd) {
                     best = Some((d2, Point { x: cx, y: cy }));
                 }
                 break; // first walkable cell on this side wins
@@ -224,7 +224,7 @@ pub fn approach_point(
                         let ex = c.x as i64 - origin.x as i64;
                         let ey = c.y as i64 - origin.y as i64;
                         let d2 = (ex * ex + ey * ey) as u64;
-                        if allowed.map_or(true, |(b, _)| d2 < b) {
+                        if allowed.is_none_or(|(b, _)| d2 < b) {
                             allowed = Some((d2, c));
                         }
                         break;
@@ -261,7 +261,7 @@ pub fn approach_point(
                         let ex = c.x as i64 - origin.x as i64;
                         let ey = c.y as i64 - origin.y as i64;
                         let d2 = (ex * ex + ey * ey) as u64;
-                        if best.map_or(true, |(bd, _)| d2 < bd) {
+                        if best.is_none_or(|(bd, _)| d2 < bd) {
                             best = Some((d2, c));
                         }
                     }

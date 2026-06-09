@@ -921,7 +921,7 @@ fn anim_scene(
         .iter()
         .enumerate()
         .filter(|(_, w)| Some(w.kind) == target_kind)
-        .filter(|(_, w)| want_facing.map_or(true, |f| w.facing == f))
+        .filter(|(_, w)| want_facing.is_none_or(|f| w.facing == f))
         .map(|(i, _)| i)
         .collect();
 
@@ -1262,7 +1262,7 @@ fn save_renderer_gif(
         let delay = Delay::from_numer_denom_ms(frame_ms as u32, 1);
         encoder.encode_frame(GifFrame::from_parts(rgba, 0, 0, delay))?;
         let cap = i + 1;
-        if cap % (fps as usize) == 0 {
+        if cap.is_multiple_of(fps as usize) {
             eprint!("\r  encoding: {}/{}s", cap / fps as usize, duration_secs);
         }
     }
@@ -1360,7 +1360,7 @@ fn save_as_gif(
         let frame = GifFrame::from_parts(rgba, 0, 0, delay);
         encoder.encode_frame(frame)?;
         let cap = i + 1 - skip_frames;
-        if cap % (fps as usize) == 0 {
+        if cap.is_multiple_of(fps as usize) {
             eprint!("\r  encoding: {}/{}s", cap / fps as usize, duration_secs);
         }
     }
