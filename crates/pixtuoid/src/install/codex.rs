@@ -58,31 +58,12 @@ pub fn hook_command(resolved: &Path) -> Result<String> {
     let p = resolved
         .to_str()
         .ok_or_else(|| anyhow!("pixtuoid-hook path is non-UTF-8: {}", resolved.display()))?;
-    // The Windows command is BARE: codex runs it via `cmd.exe /C`, and Rust's
-    // Command::arg wrapping is stripped back off by cmd's /C quote rule, so the
-    // path is parsed UNQUOTED by cmd. Any char special to cmd's command-line
-    // parser in the path is therefore unsafe — a space TRUNCATES it (#195); a
-    // separator/redirect/escape/expansion char (`& | < > ( ) ^ %`) is worse: e.g.
-    // `C:\Users\a&b\...hook.exe --source codex` splits on `&` and cmd runs the
-    // relative tail `b\...hook.exe` from the CWD (an unintended-execution vector).
-    // We can't quote our way out (Command::arg re-escaping + cmd /C stripping
-    // defeat every quoted form), so REJECT such a path at install rather than
-    // write a dangerous or dead hook. (Tracking: #195.)
+    // Windows: bare `<path> --source codex` via the shared guard (codex shells
+    // through cmd.exe /C; the cmd-unsafe-path rejection lives in ONE place,
+    // io::windows_bare_hook_command, shared with Reasonix so it can't drift).
+    // Unix: POSIX env-prefix form.
     #[cfg(windows)]
-    {
-        const CMD_UNSAFE: &[char] = &[' ', '"', '&', '|', '<', '>', '(', ')', '^', '%'];
-        if let Some(bad) = p.chars().find(|c| CMD_UNSAFE.contains(c)) {
-            anyhow::bail!(
-                "pixtuoid-hook is at a path containing {bad:?} ({p}), which Codex's \
-                 cmd.exe /C hook runner can't safely invoke. Install pixtuoid to a \
-                 path of ordinary characters (e.g. %USERPROFILE%\\.cargo\\bin or the \
-                 npm global prefix) and re-run `install-hooks --target codex`. \
-                 (Tracking: #195.)"
-            );
-        }
-    }
-    #[cfg(windows)]
-    let cmd = format!("{p} --source codex");
+    let cmd = crate::install::io::windows_bare_hook_command(p, "codex")?;
     #[cfg(unix)]
     let cmd = format!("PIXTUOID_SOURCE=codex {}", shell_single_quote(p));
     Ok(cmd)

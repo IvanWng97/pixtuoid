@@ -63,9 +63,39 @@ fn hook_sibling_name() -> String {
 /// POSIX single-quote a string so a shell treats it as one literal token —
 /// embedded single quotes become `'\''`. Codex and Reasonix both run the hook
 /// `command` under a shell, so an unquoted path containing spaces would split
-/// into multiple args and the hook would never be found.
+/// into multiple args and the hook would never be found. Unix-only: on Windows
+/// these targets use `windows_bare_hook_command` (cmd.exe, not `sh`).
+#[cfg(unix)]
 pub(crate) fn shell_single_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
+}
+
+/// The BARE Windows hook `command` for a CLI whose hook runner shells via
+/// `cmd.exe /C` — Codex AND Reasonix both do (verified: codex-rs
+/// `command_runner.rs`; reasonix `internal/hook/hook.go:414` `shellInvocation`).
+/// Form: `<path> --source <name>`. The source rides as the shim's `--source`
+/// flag because cmd.exe has no `VAR=value cmd` env-prefix and neither CLI injects
+/// a per-hook env. The path is UNQUOTED: a quoted path can't survive `cmd /C`
+/// (the host's argv-quoting escapes `"`→`\"`, which cmd then mangles), so cmd
+/// PARSES the path — meaning ANY cmd-special char in it is unsafe. A space
+/// TRUNCATES the command (#195); a separator/redirect/escape/expansion char
+/// (`& | < > ( ) ^ %`) is worse — `C:\Users\a&b\h.exe --source x` splits on `&`
+/// and cmd runs the relative tail `b\h.exe` from the CWD (an unintended-execution
+/// vector; `&` is legal in a Windows username). So REJECT such a path at install
+/// rather than emit a dangerous or dead hook. This is the ONE place the guard
+/// lives — both targets route through it so it can't drift.
+#[cfg(windows)]
+pub(crate) fn windows_bare_hook_command(resolved_path: &str, source: &str) -> Result<String> {
+    const CMD_UNSAFE: &[char] = &[' ', '"', '&', '|', '<', '>', '(', ')', '^', '%'];
+    if let Some(bad) = resolved_path.chars().find(|c| CMD_UNSAFE.contains(c)) {
+        anyhow::bail!(
+            "pixtuoid-hook is at a path containing {bad:?} ({resolved_path}), which the \
+             cmd.exe /C hook runner can't safely invoke. Install pixtuoid to a path of \
+             ordinary characters (e.g. %USERPROFILE%\\.cargo\\bin or the npm global \
+             prefix) and re-run `install-hooks`. (Tracking: #195.)"
+        );
+    }
+    Ok(format!("{resolved_path} --source {source}"))
 }
 
 /// Build a sibling path by APPENDING `.suffix` to the full filename — never
