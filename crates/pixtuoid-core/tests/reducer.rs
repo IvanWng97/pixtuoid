@@ -580,6 +580,85 @@ fn ghost_label_counter_is_contiguous_after_named_sessions() {
 }
 
 #[test]
+fn capacity_dropped_unknown_cwd_session_consumes_no_ghost_ordinal() {
+    // The all-desks-occupied drop returns BEFORE the unknown-cwd ghost-ordinal
+    // increment, so a dropped unknown-cwd session must consume NO ordinal — the
+    // next ghost is still cc#1. Guards against hoisting the increment above the
+    // capacity gate.
+    use pixtuoid_core::state::reducer::EXIT_GRACE_WINDOW;
+    use pixtuoid_core::state::MAX_FLOORS;
+    let mut caps = [0usize; MAX_FLOORS];
+    caps[0] = 1; // exactly one desk in the whole scene
+    let mut scene = SceneState::new(caps);
+    let mut r = Reducer::new();
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+
+    // Fill the single desk with a named session.
+    let occupant = AgentId::from_transcript_path("/p/occupant.jsonl");
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: occupant,
+            source: "claude-code".into(),
+            session_id: "o".into(),
+            cwd: PathBuf::from("/Users/me/proj"),
+            parent_id: None,
+        },
+        t0,
+        Transport::Hook,
+    );
+
+    // An unknown-cwd session now has no free desk → dropped (not inserted).
+    let dropped = AgentId::from_transcript_path("/p/dropped.jsonl");
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: dropped,
+            source: "claude-code".into(),
+            session_id: "d".into(),
+            cwd: PathBuf::from(""),
+            parent_id: None,
+        },
+        t0,
+        Transport::Hook,
+    );
+    assert!(
+        !scene.agents.contains_key(&dropped),
+        "no free desk → the session is dropped, not seated"
+    );
+
+    // Free the desk, then a NEW unknown-cwd session is the FIRST ghost: cc#1,
+    // not cc#2 — the dropped one consumed no ordinal.
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionEnd { agent_id: occupant },
+        t0,
+        Transport::Hook,
+    );
+    r.tick(&mut scene, t0 + EXIT_GRACE_WINDOW + Duration::from_secs(1));
+    assert!(!scene.agents.contains_key(&occupant), "occupant reaped");
+
+    let ghost = AgentId::from_transcript_path("/p/ghost.jsonl");
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: ghost,
+            source: "claude-code".into(),
+            session_id: "g".into(),
+            cwd: PathBuf::from(""),
+            parent_id: None,
+        },
+        t0 + EXIT_GRACE_WINDOW + Duration::from_secs(2),
+        Transport::Hook,
+    );
+    assert_eq!(
+        &*scene.agents.get(&ghost).unwrap().label,
+        "cc#1",
+        "a capacity-dropped unknown-cwd session must consume no ghost ordinal"
+    );
+}
+
+#[test]
 fn session_start_codex_source_gets_cx_label() {
     // Codex arrives via the shared hook socket (no JSONL Rename), so the cx·
     // prefix must come from the reducer at SessionStart.
@@ -3318,6 +3397,143 @@ fn session_start_on_exiting_slot_resurrects_in_place() {
         .get(&id)
         .expect("slot survives the grace window");
     assert!(matches!(slot.state, ActivityState::Active { .. }));
+}
+
+// Resurrect-in-place must FOLD the in-flight Active span into active_ms before
+// resetting to Idle — every other Active-exit site does; a direct `state = Idle`
+// dropped it, losing the pre-rotation work from the tooltip's "% active" stat.
+#[test]
+fn resurrect_in_place_folds_the_active_span_into_active_ms() {
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let id = AgentId::from_parts("reasonix", "/Users/dev/proj");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+
+    start(&mut r, &mut scene, id);
+    // Go Active and hold the span open across the exit (mark_exiting leaves the
+    // slot Active; no tick settles it).
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityStart {
+            agent_id: id,
+            tool_use_id: None,
+            detail: None,
+        },
+        t0,
+        Transport::Hook,
+    );
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionEnd { agent_id: id },
+        t0,
+        Transport::Hook,
+    );
+    assert_eq!(
+        scene.agents.get(&id).unwrap().active_ms,
+        0,
+        "span not folded yet (mark_exiting doesn't accumulate)"
+    );
+
+    // Resurrect 2s later — the open Active span (t0..now) must land in active_ms.
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: id,
+            source: "reasonix".into(),
+            session_id: "/Users/dev/proj".into(),
+            cwd: "/Users/dev/proj".into(),
+            parent_id: None,
+        },
+        t0 + Duration::from_secs(2),
+        Transport::Hook,
+    );
+
+    let slot = scene.agents.get(&id).unwrap();
+    assert!(slot.exiting_at.is_none(), "walkout cancelled");
+    assert_eq!(
+        slot.active_ms, 2000,
+        "the 2s Active span must fold into active_ms on resurrect"
+    );
+}
+
+// The resurrect-in-place arm is gated to ROOT agents on BOTH sides (slot AND
+// event parent_id None) so a late duplicate SessionStart can't un-exit a
+// b1-cascaded subagent — reducer.rs is the SOLE site that clears exiting_at.
+// Pin the negative: a SessionStart on an EXITING subagent leaves it exiting.
+#[test]
+fn session_start_on_exiting_subagent_does_not_resurrect() {
+    use pixtuoid_core::state::reducer::EXIT_GRACE_WINDOW;
+    let mut scene = SceneState::uniform(8);
+    let mut r = Reducer::new();
+    let parent = AgentId::from_transcript_path("/p/resurr-parent.jsonl");
+    let child = AgentId::from_parts("claude-code", "/p/resurr-parent/subagents/agent-1.jsonl");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: parent,
+            source: "claude-code".into(),
+            session_id: "p".into(),
+            cwd: PathBuf::from("/repo"),
+            parent_id: None,
+        },
+        t0,
+        Transport::Hook,
+    );
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: child,
+            source: "claude-code".into(),
+            session_id: "c".into(),
+            cwd: PathBuf::from("/repo"),
+            parent_id: Some(parent),
+        },
+        t0 + Duration::from_millis(100),
+        Transport::Jsonl,
+    );
+
+    // Parent ends → cascade marks the child exiting.
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionEnd { agent_id: parent },
+        t0 + Duration::from_secs(1),
+        Transport::Hook,
+    );
+    assert!(
+        scene.agents.get(&child).unwrap().exiting_at.is_some(),
+        "child cascaded to exiting when the parent ended"
+    );
+
+    // A duplicate SessionStart for the child (it carries a parent link) must NOT
+    // clear exiting_at — only roots resurrect.
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: child,
+            source: "claude-code".into(),
+            session_id: "c".into(),
+            cwd: PathBuf::from("/repo"),
+            parent_id: Some(parent),
+        },
+        t0 + Duration::from_secs(2),
+        Transport::Jsonl,
+    );
+    assert!(
+        scene.agents.get(&child).unwrap().exiting_at.is_some(),
+        "an exiting SUBAGENT must NOT resurrect (the root-only gate)"
+    );
+
+    // And it still GCs at the grace window — the reanimation never happened.
+    r.tick(
+        &mut scene,
+        t0 + Duration::from_secs(1) + EXIT_GRACE_WINDOW + Duration::from_secs(1),
+    );
+    assert!(
+        !scene.agents.contains_key(&child),
+        "the cascaded subagent is reaped after its grace window"
+    );
 }
 
 // A duplicate SessionStart (Codex/Reasonix re-emit one per UserPromptSubmit)

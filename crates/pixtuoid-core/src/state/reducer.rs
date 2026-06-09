@@ -370,10 +370,11 @@ impl Reducer {
                     // duplicate can't un-exit a b1-cascaded subagent.
                     if slot.exiting_at.is_some() && slot.parent_id.is_none() && parent_id.is_none()
                     {
-                        slot.exiting_at = None;
-                        slot.pending_idle_at = None;
-                        slot.state = ActivityState::Idle;
-                        slot.state_started_at = now;
+                        // Route through fsm so an in-flight Active span is folded
+                        // into active_ms before the reset (every other
+                        // Active-exit site does; a direct `state = Idle` here
+                        // silently dropped it).
+                        fsm::resurrect_in_place(slot, now);
                     }
                     return;
                 }

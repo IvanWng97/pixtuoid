@@ -119,6 +119,21 @@ pub(crate) fn mark_exiting(slot: &mut AgentSlot, now: SystemTime) {
     }
 }
 
+/// Resurrect an EXITING slot back to a live `Idle` state — a SessionStart
+/// landed on a slot mid-walkout (Reasonix `/new` fires SessionEnd+SessionStart
+/// on the same cwd-keyed id; a Codex resurrect prompt can land inside the exit
+/// grace window). Folds any in-flight Active span into `active_ms` FIRST, like
+/// every other Active-exit site, before clearing the exit + debounce marks. The
+/// reducer gates this to root agents so a late duplicate can't un-exit a
+/// cascaded subagent — see its SessionStart arm.
+pub(crate) fn resurrect_in_place(slot: &mut AgentSlot, now: SystemTime) {
+    accumulate_active_ms(slot, now);
+    slot.exiting_at = None;
+    slot.pending_idle_at = None;
+    slot.state = ActivityState::Idle;
+    slot.state_started_at = now;
+}
+
 /// Apply a display rename (idempotent) and refresh liveness.
 pub(crate) fn rename(slot: &mut AgentSlot, label: &str, now: SystemTime) {
     if &*slot.label != label {
