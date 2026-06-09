@@ -1,5 +1,6 @@
 pub mod anim;
 pub mod chitchat;
+pub mod dashboard;
 pub mod embedded_pack;
 pub mod floor;
 pub mod frame_cache;
