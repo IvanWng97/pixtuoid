@@ -84,11 +84,7 @@ fn source_from_argv(args: &[String]) -> Option<String> {
 /// events — an un-reapable ghost. The private key is shim-owned, so a plain
 /// insert is safe (nothing else writes it). Absent any source (bare `pixtuoid-hook`,
 /// i.e. CC), the decoder defaults to claude-code.
-fn enrich_payload(
-    map: &mut serde_json::Map<String, Value>,
-    source: Option<String>,
-    ts_ms: u64,
-) {
+fn enrich_payload(map: &mut serde_json::Map<String, Value>, source: Option<String>, ts_ms: u64) {
     map.insert("_shim_ts_ms".into(), Value::from(ts_ms));
     if let Some(src) = source {
         if !src.is_empty() {
@@ -163,7 +159,10 @@ mod tests {
     #[test]
     fn source_from_argv_missing_value_is_none() {
         // `--source` as the final arg → no value → None (env fallback).
-        assert_eq!(source_from_argv(&argv(&["pixtuoid-hook", "--source"])), None);
+        assert_eq!(
+            source_from_argv(&argv(&["pixtuoid-hook", "--source"])),
+            None
+        );
     }
 
     #[test]

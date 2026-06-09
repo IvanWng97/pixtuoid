@@ -116,12 +116,18 @@ mod tests {
         let expected = PathBuf::from("/home/u").join(".codex");
         // Unset and empty both fall back.
         assert_eq!(resolve_codex_home(None, "/home/u".into()), expected);
-        assert_eq!(resolve_codex_home(Some(String::new()), "/home/u".into()), expected);
+        assert_eq!(
+            resolve_codex_home(Some(String::new()), "/home/u".into()),
+            expected
+        );
         // Set to a non-existent dir → fall back (matches upstream codex's gate).
         let missing = std::env::temp_dir().join("pixtuoid-codex-home-missing-xyz");
         let _ = std::fs::remove_dir_all(&missing);
         assert_eq!(
-            resolve_codex_home(Some(missing.to_string_lossy().into_owned()), "/home/u".into()),
+            resolve_codex_home(
+                Some(missing.to_string_lossy().into_owned()),
+                "/home/u".into()
+            ),
             expected
         );
     }

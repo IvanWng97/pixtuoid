@@ -365,7 +365,10 @@ command = "/old/pixtuoid-hook"
     fn hook_command_quotes_path_with_spaces_on_windows() {
         let cmd =
             hook_command(std::path::Path::new(r"C:\Program Files\pixtuoid-hook.exe")).unwrap();
-        assert_eq!(cmd, r#""C:\Program Files\pixtuoid-hook.exe" --source codex"#);
+        assert_eq!(
+            cmd,
+            r#""C:\Program Files\pixtuoid-hook.exe" --source codex"#
+        );
     }
 
     #[test]

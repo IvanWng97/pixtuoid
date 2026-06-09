@@ -83,7 +83,10 @@ fn recv_delivered_json(listener: &UnixListener) -> serde_json::Value {
         match listener.accept() {
             Ok((s, _)) => break s,
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                assert!(Instant::now() < deadline, "shim never delivered to the socket");
+                assert!(
+                    Instant::now() < deadline,
+                    "shim never delivered to the socket"
+                );
                 std::thread::sleep(Duration::from_millis(10));
             }
             Err(e) => panic!("accept: {e}"),
@@ -93,7 +96,9 @@ fn recv_delivered_json(listener: &UnixListener) -> serde_json::Value {
     // shim has already exited, so its end is closed: read drains then sees EOF.
     stream.set_nonblocking(false).unwrap();
     let mut got = String::new();
-    stream.read_to_string(&mut got).expect("read delivered line");
+    stream
+        .read_to_string(&mut got)
+        .expect("read delivered line");
     let line = got.lines().next().expect("at least one line");
     serde_json::from_str(line).expect("delivered line is valid JSON")
 }
