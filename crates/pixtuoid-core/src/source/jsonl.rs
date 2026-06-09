@@ -17,9 +17,13 @@ pub type LabelDeriver = fn(&Path, &str, &Path) -> String;
 pub type SessionEndChecker = fn(&[u8]) -> bool;
 
 /// Derives the opaque session-id string used to build the generic
-/// `SessionStart`'s `AgentId`. Default returns the transcript file path
-/// (CC/Antigravity coalesce hook↔JSONL on the path). Codex overrides it to
-/// the rollout filename's trailing UUID so it matches the hook `session_id`.
+/// `SessionStart`'s `AgentId`. The default (`default_id_from_path`) returns
+/// the normalized transcript file path — used by **Antigravity** (its hook
+/// keys on the path via `IdKey::TranscriptPathThenSessionId`). **CC**
+/// overrides to `cc_id_from_path` (the transcript filename stem = the session
+/// UUID), and **Codex** overrides to `codex_id_from_path` (the rollout UUID),
+/// so that both sources coalesce hook↔JSONL on the session UUID rather than
+/// the full path.
 pub type IdDeriver = fn(&Path) -> String;
 
 fn default_id_from_path(p: &Path) -> String {
@@ -334,11 +338,13 @@ async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &WatchCtx<'_>) {
     }
 
     let new_bytes = &new_chunk[..safe_end_relative];
-    // The FOURTH keying site: line decoders hash this string into per-event
-    // AgentIds (CC keys on it directly; Codex extracts its lowercase UUID, so
-    // the fold is identity there) — it must match the normalized SessionStart
-    // key from id_derive below or every JSONL event lands on a phantom id on
-    // Windows (caught by the PR #160 security review).
+    // Passed to per-line decoders as the `transcript_path` argument. CC's
+    // `decode_cc_line` re-derives the session UUID via `cc_id_from_path` on
+    // this string; Codex's decoder extracts the rollout UUID similarly.
+    // Antigravity keys on the normalized path directly. Must be normalized
+    // (same form as `id_derive` above) so that on Windows the hook key and
+    // per-line key agree — an un-normalized path here would land every JSONL
+    // event on a phantom id (caught by the PR #160 security review).
     let transcript_path_str = crate::source::decoder::normalize_path_key(&path.to_string_lossy());
 
     // Take the `seen` lock ONLY to claim first-sight, then drop it before the

@@ -16,16 +16,15 @@ pub(crate) fn splitmix64(z: u64) -> u64 {
 }
 
 impl AgentId {
-    /// CC-specific shortcut — `from_parts("claude-code", normalize_path_key(path))`,
-    /// i.e. the id production derives for a transcript path on every platform
-    /// (identity on Unix; `\`→`/` + casefold on Windows). A test/example
-    /// ergonomics shim only: production code calls `from_parts` with an
-    /// explicit source at the four normalized keying sites (hook decoder,
-    /// watcher `default_id_from_path`, `walk_jsonl`'s per-line key, and
-    /// `detect_parent_id`'s rebuilt parent key — see the core CLAUDE.md sharp
-    /// edge). Kept because the
-    /// test + snapshot suites lean on it heavily — and normalizing here keeps
-    /// every expectation they build platform-consistent by construction.
+    /// Test/example opaque-id factory — mints a stable, distinct `AgentId`
+    /// from a string by calling `from_parts("claude-code",
+    /// normalize_path_key(path))`. This is **not** how production CC keying
+    /// works anymore: CC now keys on the session UUID (the transcript filename
+    /// stem), derived by `cc_id_from_path`, which is cwd-independent.
+    /// `from_transcript_path` is kept because the test + snapshot suites lean
+    /// on it heavily — `normalize_path_key` makes every expectation they build
+    /// platform-consistent by construction. Do not call this in production
+    /// decode paths; use `from_parts(source, &cc_id_from_path(path))` instead.
     pub fn from_transcript_path(path: &str) -> Self {
         Self::from_parts(
             "claude-code",

@@ -24,16 +24,19 @@ pub(crate) fn cwd_basename_label(prefix: &str, cwd: &Path) -> Option<String> {
     Some(format!("{prefix}·{base}"))
 }
 
-/// Canonical form of a transcript-path STRING before it becomes an `AgentId`
-/// key. Identity on Unix. On Windows: `\`→`/` + lowercase — CC emits
-/// backslash paths in hook payloads but mixes `\`/`/` forms of the same file
-/// internally, and NTFS is case-insensitive; without folding, the hook key
-/// and the watcher key hash to two different AgentIds and every session
-/// renders as TWO sprites. Applied at exactly FOUR sites: the hook decoder's
-/// transcript_path, the watcher's default_id_from_path, walk_jsonl's
-/// transcript_path_str handed to the line decoders, and the subagent
-/// detect_parent_id's rebuilt parent key (ALL must agree or events land on
-/// phantom ids / the scope tree breaks).
+/// Canonical form of a transcript-path STRING before it is used as an
+/// `AgentId` key. Identity on Unix. On Windows: `\`→`/` + lowercase — CC
+/// emits backslash paths in hook payloads but mixes `\`/`/` forms of the
+/// same file internally, and NTFS is case-insensitive; without folding, the
+/// hook key and the watcher key hash to two different AgentIds and every
+/// session renders as TWO sprites. Used directly as an opaque key by
+/// **Antigravity** (whose hook keys on the normalized path). **CC** and
+/// **Codex** pass the normalized path string to their line decoders only as a
+/// routing hint — each decoder then extracts a UUID from the filename stem
+/// (`cc_id_from_path` / `codex_id_from_path`), so the fold is inert for them
+/// on Unix but still required so `normalize_path_key` is the one entry point
+/// for the `walk_jsonl` normalized-path string and `default_id_from_path`
+/// (Antigravity's watcher key) — those two paths must always agree.
 pub(crate) fn normalize_path_key(s: &str) -> String {
     normalize_key_inner(cfg!(windows), s)
 }
