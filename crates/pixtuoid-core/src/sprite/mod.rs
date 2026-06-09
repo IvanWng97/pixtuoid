@@ -122,10 +122,26 @@ impl RgbBuffer {
     }
 
     pub fn get(&self, x: u16, y: u16) -> Rgb {
+        // Unchecked index in release (every caller clips first), but a stray
+        // x >= width would silently read the WRONG row rather than fault — catch
+        // it in debug/tests. (This is a public primitive the v2 PNG/web renderers
+        // are meant to reuse.)
+        debug_assert!(
+            x < self.width && y < self.height,
+            "RgbBuffer::get out of bounds: ({x},{y}) in {}x{}",
+            self.width,
+            self.height
+        );
         self.pixels[(y as usize) * (self.width as usize) + (x as usize)]
     }
 
     pub fn put(&mut self, x: u16, y: u16, rgb: Rgb) {
+        debug_assert!(
+            x < self.width && y < self.height,
+            "RgbBuffer::put out of bounds: ({x},{y}) in {}x{}",
+            self.width,
+            self.height
+        );
         let i = (y as usize) * (self.width as usize) + (x as usize);
         self.pixels[i] = rgb;
     }
@@ -159,6 +175,17 @@ mod tests {
         let p2 = p.with_override('B', Some(Rgb { r: 255, g: 0, b: 0 }));
         assert_eq!(p2.get('B'), Some(Some(Rgb { r: 255, g: 0, b: 0 })));
         assert_eq!(p.get('B'), Some(Some(Rgb { r: 0, g: 0, b: 255 })));
+    }
+
+    // The unchecked get/put index would silently read/write the WRONG row on a
+    // stray out-of-range x (x >= width with small y maps into an earlier row);
+    // the debug_assert turns that into a loud fault under test.
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "out of bounds")]
+    fn rgbbuffer_get_out_of_bounds_panics_in_debug() {
+        let b = RgbBuffer::filled(4, 4, Rgb { r: 0, g: 0, b: 0 });
+        let _ = b.get(4, 0); // x == width
     }
 
     #[test]

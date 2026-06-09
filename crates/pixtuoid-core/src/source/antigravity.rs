@@ -58,13 +58,17 @@ pub fn decode_ag_line(transcript_path: &str, source: &str, v: Value) -> Result<V
         return Ok(vec![]);
     };
 
-    // A present-but-non-integer `step_index` (format drift / a renamed field)
-    // must fail SAFE-AND-VISIBLE: skip the line rather than coerce to 0, which
-    // would silently corrupt the `ag-{step}-{i}` tool_use_id pairing — the
-    // `> 0` guard below would then drop the prev-step ActivityEnd, leaving the
-    // slot stuck Active until the reducer's debounce/stale-sweep. (The
-    // `contains_key` guard only checks presence, not type.)
-    let Some(step_index) = obj.get("step_index").and_then(|v| v.as_i64()) else {
+    // A present-but-non-integer OR negative `step_index` (format drift / a
+    // renamed field) must fail SAFE-AND-VISIBLE: skip the line rather than emit
+    // an unmatchable id. A negative would mint a start like `ag--5-0` that no
+    // end (the `> 0` branch) can ever pair, leaving the slot stuck Active until
+    // the reducer's debounce/stale-sweep; coercing to 0 would silently corrupt
+    // the `ag-{step}-{i}` tool_use_id pairing the same way.
+    let Some(step_index) = obj
+        .get("step_index")
+        .and_then(|v| v.as_i64())
+        .filter(|&s| s >= 0)
+    else {
         return Ok(vec![]);
     };
     let step_type = obj.get("type").and_then(|s| s.as_str()).unwrap_or("");
@@ -191,6 +195,28 @@ mod tests {
         // Antigravity writes no end marker — defer to mtime + stale-sweep.
         assert!(!ag_session_ended(b"x"));
         assert!(!ag_session_ended(b""));
+    }
+
+    #[test]
+    fn negative_step_index_is_skipped_not_minted() {
+        // A negative step_index would mint an unmatchable `ag--1-0` start id,
+        // sticking the slot Active. It must be skipped like a non-integer.
+        let v = serde_json::json!({
+            "type": "PLANNER_RESPONSE",
+            "step_index": -1,
+            "tool_calls": [ { "name": "read_file", "args": {} } ],
+        });
+        let out = decode_ag_line("/x/t.jsonl", SOURCE_NAME, v).unwrap();
+        assert!(out.is_empty(), "negative step_index must emit nothing: {out:?}");
+
+        // Control: a non-negative step_index still emits the tool start.
+        let v = serde_json::json!({
+            "type": "PLANNER_RESPONSE",
+            "step_index": 0,
+            "tool_calls": [ { "name": "read_file", "args": {} } ],
+        });
+        let out = decode_ag_line("/x/t.jsonl", SOURCE_NAME, v).unwrap();
+        assert_eq!(out.len(), 1, "step_index 0 still emits: {out:?}");
     }
 
     // The brain dir is the CLI's (`antigravity-cli`), home-rooted, on every OS —

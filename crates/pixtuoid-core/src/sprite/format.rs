@@ -10,12 +10,14 @@ use crate::sprite::{Frame, Palette, Pixel, Rgb, Sprite};
 pub fn parse_sprite_file(src: &str, palette: &Palette) -> Result<Vec<Frame>> {
     let mut frames: Vec<Frame> = Vec::new();
     let mut current: Option<Vec<Vec<Pixel>>> = None;
+    let mut last_lineno = 0; // last non-empty content line — for the final-frame flush diagnostic
 
     for (lineno, raw) in src.lines().enumerate() {
         let line = strip_comment_and_trim(raw);
         if line.is_empty() {
             continue;
         }
+        last_lineno = lineno;
 
         if let Some(rest) = line.strip_prefix("@frame") {
             if let Some(rows) = current.take() {
@@ -38,7 +40,9 @@ pub fn parse_sprite_file(src: &str, palette: &Palette) -> Result<Vec<Frame>> {
     }
 
     if let Some(rows) = current.take() {
-        frames.push(rows_to_frame(rows)?);
+        // Wrap with line context like the in-loop flush, so an inconsistent-width
+        // or empty final @frame block gets the same diagnostic as every other.
+        frames.push(rows_to_frame(rows).map_err(|e| anyhow!("{e} (line {})", last_lineno + 1))?);
     }
 
     if frames.is_empty() {
@@ -53,6 +57,38 @@ fn strip_comment_and_trim(line: &str) -> &str {
         None => line,
     };
     line.trim()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn palette_value_rejects_sign_prefixed_or_non_hex() {
+        // u8::from_str_radix accepts a leading '+'/'-', so a 6-char value like
+        // `#+f0102` would parse to a valid color without an explicit hex check.
+        assert!(parse_palette_value("#+f0102").is_err());
+        assert!(parse_palette_value("#-f0102").is_err());
+        assert!(parse_palette_value("#abXY12").is_err());
+        // Valid hex + transparent still parse.
+        assert!(parse_palette_value("#Ff0102").unwrap().is_some());
+        assert!(parse_palette_value("transparent").unwrap().is_none());
+    }
+
+    #[test]
+    fn final_frame_width_error_carries_line_context() {
+        let mut pal = Palette::new();
+        pal.insert('X', Some(Rgb { r: 1, g: 1, b: 1 }));
+        // The LAST @frame block has rows of differing widths → rows_to_frame
+        // errors; the diagnostic must carry a line number like in-loop frames.
+        let src = "@frame 0\nX X\nX\n";
+        let err = parse_sprite_file(src, &pal).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("line"),
+            "final-frame parse error needs line context: {msg}"
+        );
+    }
 }
 
 fn parse_row(line: &str, palette: &Palette) -> Result<Vec<Pixel>> {
@@ -363,6 +399,12 @@ fn parse_palette_value(v: &str) -> Result<Pixel> {
         .strip_prefix('#')
         .ok_or_else(|| anyhow!("color must start with '#' or be 'transparent', got {v:?}"))?;
     if hex.len() != 6 {
+        bail!("color {v:?} must be 6 hex digits");
+    }
+    // u8::from_str_radix accepts a leading '+', so reject non-hex bytes up front
+    // — otherwise `#+f0102` would slice to `+f`/`01`/`02` and parse to a valid
+    // color, violating the "must be 6 hex digits" contract on untrusted packs.
+    if !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
         bail!("color {v:?} must be 6 hex digits");
     }
     let r = u8::from_str_radix(&hex[0..2], 16)?;
