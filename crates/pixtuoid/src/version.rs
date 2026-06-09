@@ -58,6 +58,26 @@ pub fn release_notes(version: &str) -> Option<&'static [&'static str]> {
         // anchoring on a marker is whitespace-independent — matching the `match`
         // brace would silently break if the indentation ever shifted.
         // [bump-inject-here]
+        "0.7.0" => Some(&[
+            // TODO: curate into ~6 user-facing highlights (drafted from `git log v0.6.1..HEAD`)
+            "pipeline hygiene from the verified CI audit (#213)",
+            "review-followups — 12 confirmed findings from the whole-codebase review (#210)",
+            "honest MSRV (1.78→1.89) + drop fs4 for std-native locks (closes #194) (#208)",
+            "per-CLI badge, activity-tinted names, wider popup, overflow cue (#207)",
+            "consolidate cross-platform logic — one hook-command seam + one home/config resolver (#206)",
+            "register large transcripts on first-sight instead of waiting for their next write (#205)",
+            "derive agent identity from the session UUID so subagent→parent links survive a worktree cwd-split (#203)",
+            "strip Windows \\?\\ verbatim prefix in normalize_path_key (#202)",
+            "DOS 8.3 short-path for cmd-unsafe Windows hook paths (#201)",
+            "Windows support for Codex + Reasonix hooks + Antigravity watcher (#198)",
+            "agent dashboard (Tab) + raise MAX_FLOORS 5→10 (#199)",
+            "CLAUDE.md audit — 6 verified accuracy fixes (no restructuring) (#193)",
+            "build/test hygiene — drop a stray test binary, dedupe rustix, refresh lockfile (#192)",
+            "reorganize pixtuoid-core integration tests by capability/layer (15 → 8 binaries) (#191)",
+            "unify docs+site image pipelines behind one driver + manifest (#190)",
+            "gate the npm generator + README drift on every PR (#189)",
+            "feature npm + single-source install methods + Windows-experimental matrix (#188)",
+        ]),
         // 0.6.1 re-runs the 0.6.0 release with the npm-launcher publish fix
         // (#186) — 0.6.0 shipped to crates.io/homebrew but the `pixtuoid` npm
         // launcher failed, so 0.6.1 is the first fully-published version. Same
