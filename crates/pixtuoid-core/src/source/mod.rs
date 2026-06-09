@@ -57,7 +57,16 @@ mod registry_bridge_tests {
 /// Which transport produced an event — used by the reducer for hook-wins
 /// dedup. Lives on the source side because every `Source` implementor must
 /// tag its own events; the reducer is downstream.
+///
+/// `#[non_exhaustive]`: this is the tag on the workspace-wide event channel and
+/// a published-crate type, and the docs anticipate transport growth (a v2
+/// daemon split). Marking it non-exhaustive keeps adding a transport a
+/// non-breaking change, matching its channel siblings (`AgentEvent`,
+/// `ToolDetail`, `SourceDeath`). All in-crate uses are `==` comparisons, not
+/// exhaustive matches, so this is purely a forward-compat guard. (#212 — lands
+/// with the 0.7.0 bump so the one-time break rides the version boundary.)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Transport {
     Hook,
     Jsonl,
