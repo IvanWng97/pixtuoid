@@ -1,5 +1,6 @@
 pub mod claude;
 pub mod codex;
+mod hook_cmd;
 pub mod io;
 pub mod reasonix;
 pub mod target;

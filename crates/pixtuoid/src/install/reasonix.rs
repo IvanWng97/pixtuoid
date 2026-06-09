@@ -102,9 +102,9 @@ pub fn hook_command(resolved: &Path) -> Result<String> {
     let p = resolved
         .to_str()
         .ok_or_else(|| anyhow!("pixtuoid-hook path is non-UTF-8: {}", resolved.display()))?;
-    // Same OS fork as Codex, in one place (io::shell_hook_command): Unix env-prefix
-    // form / Windows bare `<path> --source reasonix`.
-    io::shell_hook_command(p, "reasonix")
+    // Same OS fork as Codex, in one place (hook_cmd::shell_hook_command): Unix
+    // env-prefix form / Windows bare `<path> --source reasonix`.
+    crate::install::hook_cmd::shell_hook_command(p, "reasonix")
 }
 
 fn parse_or_empty(content: &str) -> Result<Value> {

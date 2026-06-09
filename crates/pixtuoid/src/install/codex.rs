@@ -54,10 +54,11 @@ pub fn hook_command(resolved: &Path) -> Result<String> {
     let p = resolved
         .to_str()
         .ok_or_else(|| anyhow!("pixtuoid-hook path is non-UTF-8: {}", resolved.display()))?;
-    // One OS fork for the cmd.exe-shelling strategy lives in io::shell_hook_command
-    // (Unix env-prefix form / Windows bare `<path> --source codex`), shared with
-    // Reasonix so the platform halves can't drift.
-    crate::install::io::shell_hook_command(p, "codex")
+    // One OS fork for the cmd.exe-shelling strategy lives in
+    // hook_cmd::shell_hook_command (Unix env-prefix form / Windows bare
+    // `<path> --source codex`), shared with Reasonix so the platform halves can't
+    // drift.
+    crate::install::hook_cmd::shell_hook_command(p, "codex")
 }
 
 fn parse_or_empty(content: &str) -> Result<toml::Value> {
