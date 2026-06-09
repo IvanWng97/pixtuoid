@@ -9,7 +9,7 @@ mod fsm;
 pub mod reducer;
 mod scope;
 
-pub const MAX_FLOORS: usize = 5;
+pub const MAX_FLOORS: usize = 10;
 
 /// `AgentSlot` strings (label, source, session_id) and paths (cwd) are
 /// stored as `Arc<str>` / `Arc<Path>` so `SceneState::clone()` is a series
@@ -223,7 +223,7 @@ mod tests {
 
     #[test]
     fn floor_of_variable_capacities() {
-        let s = SceneState::new([4, 8, 6, 4, 2]);
+        let s = SceneState::new([4, 8, 6, 4, 2, 0, 0, 0, 0, 0]);
         // F0: 0..4, F1: 4..12, F2: 12..18, F3: 18..22, F4: 22..24
         assert_eq!(s.floor_of(0), 0);
         assert_eq!(s.floor_of(3), 0);
@@ -238,7 +238,7 @@ mod tests {
 
     #[test]
     fn floor_local_desk_variable() {
-        let s = SceneState::new([4, 8, 6, 4, 2]);
+        let s = SceneState::new([4, 8, 6, 4, 2, 0, 0, 0, 0, 0]);
         assert_eq!(s.floor_local_desk(0), 0);
         assert_eq!(s.floor_local_desk(3), 3);
         assert_eq!(s.floor_local_desk(4), 0); // first desk on F1
@@ -248,7 +248,7 @@ mod tests {
 
     #[test]
     fn floor_range_variable() {
-        let s = SceneState::new([4, 8, 6, 4, 2]);
+        let s = SceneState::new([4, 8, 6, 4, 2, 0, 0, 0, 0, 0]);
         assert_eq!(s.floor_range(0), 0..4);
         assert_eq!(s.floor_range(1), 4..12);
         assert_eq!(s.floor_range(2), 12..18);
@@ -258,16 +258,16 @@ mod tests {
 
     #[test]
     fn total_capacity_sums_all_floors() {
-        let s = SceneState::new([4, 8, 6, 4, 2]);
+        let s = SceneState::new([4, 8, 6, 4, 2, 0, 0, 0, 0, 0]);
         assert_eq!(s.total_capacity(), 24);
 
         let u = SceneState::uniform(8);
-        assert_eq!(u.total_capacity(), 40);
+        assert_eq!(u.total_capacity(), 80);
     }
 
     #[test]
     fn next_free_desk_with_variable_capacities() {
-        let mut s = SceneState::new([4, 8, 6, 4, 2]);
+        let mut s = SceneState::new([4, 8, 6, 4, 2, 0, 0, 0, 0, 0]);
         // Fill F0 (desks 0..4)
         for i in 0..4 {
             let id = AgentId::from_transcript_path(&format!("f{i}"));
@@ -279,7 +279,7 @@ mod tests {
 
     #[test]
     fn zero_capacity_floor_skipped_by_next_free_desk() {
-        let s = SceneState::new([4, 0, 6, 0, 2]);
+        let s = SceneState::new([4, 0, 6, 0, 2, 0, 0, 0, 0, 0]);
         // F0: 0..4, F1: 4..4 (empty), F2: 4..10, F3: 10..10, F4: 10..12
         assert_eq!(s.total_capacity(), 12);
         assert_eq!(s.floor_range(0), 0..4);
@@ -290,7 +290,7 @@ mod tests {
 
     #[test]
     fn floor_of_skips_zero_capacity_floors() {
-        let s = SceneState::new([4, 0, 6, 0, 2]);
+        let s = SceneState::new([4, 0, 6, 0, 2, 0, 0, 0, 0, 0]);
         // Desk 4 is first desk of F2 (F1 has zero capacity)
         assert_eq!(s.floor_of(4), 2);
         assert_eq!(s.floor_local_desk(4), 0);
@@ -300,7 +300,7 @@ mod tests {
 
     #[test]
     fn floor_of_leading_zero_capacity_floors() {
-        let s = SceneState::new([0, 0, 6, 4, 2]);
+        let s = SceneState::new([0, 0, 6, 4, 2, 0, 0, 0, 0, 0]);
         // F0 and F1 have zero capacity, desk 0 belongs to F2
         assert_eq!(s.floor_of(0), 2);
         assert_eq!(s.floor_of(5), 2);
@@ -318,7 +318,7 @@ mod tests {
 
     #[test]
     fn floor_local_desk_oob_lands_on_last_nonempty_floor() {
-        let s = SceneState::new([4, 8, 6, 4, 2]);
+        let s = SceneState::new([4, 8, 6, 4, 2, 0, 0, 0, 0, 0]);
         let total = s.total_capacity(); // 24
                                         // desk_index 100 is beyond capacity — floor_of returns the last
                                         // floor with nonzero capacity (floor 4, offset 22).
@@ -328,5 +328,21 @@ mod tests {
         let local = s.floor_local_desk(oob);
         // offsets[4] = 22, so local = 100 - 22 = 78
         assert_eq!(local, oob - 22);
+    }
+
+    #[test]
+    fn scene_supports_up_to_ten_floors() {
+        // Raising MAX_FLOORS to 10: a uniform office spans ten floors, seats
+        // 10× a single floor's desks, and a desk on the tenth floor (index 9)
+        // resolves there rather than clamping to a lower floor.
+        let s = SceneState::uniform(2);
+        assert_eq!(s.floor_capacities.len(), 10, "office spans ten floors");
+        assert_eq!(s.total_capacity(), 20, "ten floors × 2 desks");
+        assert_eq!(
+            s.floor_of(18),
+            9,
+            "desk 18 is the first seat on the tenth floor"
+        );
+        assert_eq!(s.floor_of(19), 9);
     }
 }

@@ -461,7 +461,7 @@ mod tests {
         // Agent assigned desk 5 on floor 1 when floor 0 had capacity 4.
         // Floor 0 later grows to capacity 8. floor_range(1).start = 8,
         // so desk 5 < 8 and the agent should be invisible on floor 1.
-        let mut s = SceneState::new([4, 4, 0, 0, 0]);
+        let mut s = SceneState::new([4, 4, 0, 0, 0, 0, 0, 0, 0, 0]);
         let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
         let id = AgentId::from_transcript_path("/p/stale.jsonl");
         s.agents.insert(
@@ -487,7 +487,7 @@ mod tests {
             },
         );
         // Simulate floor 0 capacity growth
-        s.floor_capacities = [8, 4, 0, 0, 0];
+        s.floor_capacities = [8, 4, 0, 0, 0, 0, 0, 0, 0, 0];
         let floor1 = build_floor_scene(&s, 1);
         assert!(
             floor1.is_empty(),
@@ -498,7 +498,7 @@ mod tests {
     #[test]
     fn num_floors_variable_capacities() {
         // F0: 0..4, F1: 4..12 — 6 agents span 2 floors
-        let mut s = SceneState::new([4, 8, 6, 4, 2]);
+        let mut s = SceneState::new([4, 8, 6, 4, 2, 0, 0, 0, 0, 0]);
         let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
         for i in 0..6 {
             let id = AgentId::from_transcript_path(&format!("/p/{i}.jsonl"));

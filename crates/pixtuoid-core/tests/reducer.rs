@@ -2951,7 +2951,7 @@ fn parent_waiting_on_subagent_permission_resolves_when_the_subagent_resumes() {
 #[test]
 fn session_start_overflows_to_floor1_with_heterogeneous_capacity() {
     let mut r = Reducer::new();
-    let mut scene = SceneState::new([2, 4, 0, 0, 0]);
+    let mut scene = SceneState::new([2, 4, 0, 0, 0, 0, 0, 0, 0, 0]);
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
 
     for i in 0..3 {
@@ -2983,7 +2983,7 @@ fn session_start_overflows_to_floor1_with_heterogeneous_capacity() {
 #[test]
 fn session_start_dropped_when_all_desks_occupied() {
     let mut r = Reducer::new();
-    let mut scene = SceneState::new([2, 0, 0, 0, 0]);
+    let mut scene = SceneState::new([2, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
 
     for i in 0..2 {

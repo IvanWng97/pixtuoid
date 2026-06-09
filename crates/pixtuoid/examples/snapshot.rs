@@ -68,7 +68,7 @@ struct SnapshotArgs {
     rows: Option<u16>,
 
     /// Cap on home desks per floor for the sample scene. Agents past
-    /// this count overflow to additional floors (up to MAX_FLOORS=5).
+    /// this count overflow to additional floors (up to MAX_FLOORS=10).
     /// Pair with `--agents` >16 and `--max-desks 16` to capture a
     /// full floor-1 + populated floor-2 multi-floor gif.
     #[arg(long, default_value_t = 12)]
