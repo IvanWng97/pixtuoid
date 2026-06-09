@@ -88,6 +88,17 @@ pub(crate) fn capacity_for_terminal(cols: u16, rows: u16, floor_seed: u64) -> us
     .unwrap_or(0)
 }
 
+/// Strip control characters from an untrusted field before it reaches stdout in
+/// headless mode. The label (cwd basename), tool detail (hook `tool_input`), and
+/// Notification reason all derive from untrusted transcript/hook input, so a
+/// crafted ANSI/OSC escape (set-title, clipboard-prime, cursor relocation) would
+/// otherwise be emitted verbatim to the user's terminal. The interactive TUI is
+/// immune (ratatui writes into a cell buffer that neutralizes escapes); the
+/// headless `println!` path is not.
+fn sanitize_line(s: &str) -> String {
+    s.chars().filter(|c| !c.is_control()).collect()
+}
+
 fn summarize(scene: &SceneState) -> String {
     let agents: Vec<String> = scene
         .agents
@@ -96,11 +107,13 @@ fn summarize(scene: &SceneState) -> String {
             let state = match &a.state {
                 ActivityState::Idle => "idle".to_string(),
                 ActivityState::Active { detail, .. } => {
-                    format!("active({})", detail.as_deref().unwrap_or("?"))
+                    format!("active({})", sanitize_line(detail.as_deref().unwrap_or("?")))
                 }
-                ActivityState::Waiting { reason } => format!("waiting({reason})"),
+                ActivityState::Waiting { reason } => {
+                    format!("waiting({})", sanitize_line(reason))
+                }
             };
-            format!("{}@{}:{}", a.label, a.desk_index, state)
+            format!("{}@{}:{}", sanitize_line(&a.label), a.desk_index, state)
         })
         .collect();
     format!("agents=[{}]", agents.join(", "))
@@ -269,6 +282,53 @@ mod tests {
         assert!(summary.contains(":idle"), "got: {summary}");
         // The "@desk_index" format is present for each agent.
         assert!(summary.contains('@'), "got: {summary}");
+    }
+
+    // Headless `summarize` feeds `println!` directly. The label (cwd basename),
+    // tool detail, and Notification reason are all untrusted, so a crafted
+    // ANSI/OSC escape must be stripped before it reaches the user's terminal.
+    #[test]
+    fn summarize_strips_terminal_escapes_from_untrusted_fields() {
+        use pixtuoid_core::source::AgentEvent;
+        use pixtuoid_core::AgentId;
+
+        let mut scene = SceneState::new([8; MAX_FLOORS]);
+        let mut reducer = Reducer::new();
+        let now = SystemTime::now();
+        let id = AgentId::from_parts("cc", "esc");
+        // The label derives from the cwd basename — an attacker-controlled path
+        // can smuggle an OSC set-title + BEL sequence.
+        reducer.apply(
+            &mut scene,
+            AgentEvent::SessionStart {
+                agent_id: id,
+                source: "claude-code".into(),
+                session_id: "s".into(),
+                cwd: std::path::PathBuf::from("/repo\u{1b}]0;pwned\u{7}"),
+                parent_id: None,
+            },
+            now,
+            Transport::Hook,
+        );
+        // The Notification reason is wholly untrusted and length-uncapped.
+        reducer.apply(
+            &mut scene,
+            AgentEvent::Waiting {
+                agent_id: id,
+                reason: "needs \u{1b}[2J approval".to_string(),
+            },
+            now,
+            Transport::Hook,
+        );
+
+        let out = summarize(&scene);
+        assert!(
+            !out.chars().any(|c| c.is_control()),
+            "summary must carry no control chars (terminal-escape injection): {out:?}"
+        );
+        // The benign text survives the scrub.
+        assert!(out.contains("repo]0;pwned"), "got: {out}");
+        assert!(out.contains("needs [2J approval"), "got: {out}");
     }
 
     #[test]
