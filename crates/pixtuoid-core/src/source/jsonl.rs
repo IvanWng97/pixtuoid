@@ -238,11 +238,13 @@ async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &WatchCtx<'_>) {
         tx,
         window,
     } = *ctx;
+    // `derive_label` / `id_derive` are consumed inside `emit_first_sight` (off
+    // `decoders` directly); only the per-line decoder and the end-checker are
+    // used directly here.
     let SourceDecoders {
         decode_line,
-        derive_label,
         check_ended,
-        id_derive,
+        ..
     } = decoders;
     let meta = match tokio::fs::metadata(path).await {
         Ok(m) => m,
@@ -295,10 +297,23 @@ async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &WatchCtx<'_>) {
     }
     if file_len - cursor_now > MAX_PENDING_BYTES {
         warn!(
-            "{} has > {} pending bytes with no newline; skipping to end",
+            "{} has > {} pending bytes; skipping backlog to end",
             path.display(),
             MAX_PENDING_BYTES
         );
+        // #204: on FIRST-sight of an oversized tail (a recent, not-yet-ended
+        // large session — stale/ended ones were already gated by
+        // should_seed_at_eof above), still REGISTER the agent before seeding the
+        // cursor to EOF. Otherwise a >1 MB transcript stays invisible until its
+        // next small append (a long session, or a delegating parent whose
+        // subagents then render as flat roots). The giant backlog is NOT
+        // replayed; cwd/label come from a BOUNDED head read (CC writes `cwd` on
+        // the first line), never the whole 7.4 MB file. A mid-session oversized
+        // append (`known`) is unchanged — skip to EOF, no re-registration.
+        if !known {
+            let head_cwd = read_head_cwd(path, MAX_PENDING_BYTES).await;
+            emit_first_sight(path, source, decoders, seen, tx, head_cwd).await;
+        }
         cursors.lock().await.insert(path.to_path_buf(), file_len);
         return;
     }
@@ -341,43 +356,7 @@ async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &WatchCtx<'_>) {
     // Windows (caught by the PR #160 security review).
     let transcript_path_str = crate::source::decoder::normalize_path_key(&path.to_string_lossy());
 
-    // Take the `seen` lock ONLY to claim first-sight, then drop it before the
-    // awaited sends — holding it across `tx.send` would block on a slow consumer
-    // for no reason (the flag flip is the entire critical section). Mirrors the
-    // narrow `cursors` locking above.
-    let is_first = seen.lock().await.insert(path.to_path_buf(), true).is_none();
-    if is_first {
-        let id = AgentId::from_parts(source, &id_derive(path));
-        let session_id = path
-            .file_stem()
-            .map(|s| s.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        let cwd = extract_cwd(new_bytes).unwrap_or_default();
-        let parent_id = detect_parent_id(path, source);
-        let _ = tx
-            .send((
-                Transport::Jsonl,
-                AgentEvent::SessionStart {
-                    agent_id: id,
-                    source: source.to_string(),
-                    session_id: session_id.clone(),
-                    cwd: cwd.clone(),
-                    parent_id,
-                },
-            ))
-            .await;
-
-        let label = derive_label(path, source, &cwd);
-        let _ = tx
-            .send((
-                Transport::Jsonl,
-                AgentEvent::Rename {
-                    agent_id: id,
-                    label,
-                },
-            ))
-            .await;
-    }
+    emit_first_sight(path, source, decoders, seen, tx, extract_cwd(new_bytes)).await;
 
     for line in new_bytes.split(|b| *b == b'\n') {
         if line.is_empty() {
@@ -408,6 +387,75 @@ async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &WatchCtx<'_>) {
             Err(e) => warn!("decode error in {}: {e}", path.display()),
         }
     }
+}
+
+/// Claim first-sight for `path` and, if this is the first pass to see it, emit
+/// the synthesized `SessionStart` + `Rename` (the registration pair). Shared by
+/// the normal tail-read path and the #204 oversized-first-sight path so the two
+/// emit IDENTICAL events from one place. `cwd` is the source-derived working dir
+/// (from the tail in the normal path, from a bounded head read in the oversized
+/// path); `None`/empty falls back to the project-dir label in `derive_label`.
+///
+/// Takes the `seen` lock ONLY to claim first-sight, then drops it before the
+/// awaited sends — holding it across `tx.send` would block on a slow consumer
+/// for no reason (the flag flip is the entire critical section). Mirrors the
+/// narrow `cursors` locking in `walk_jsonl`.
+async fn emit_first_sight(
+    path: &Path,
+    source: &Arc<str>,
+    decoders: SourceDecoders,
+    seen: &Arc<Mutex<HashMap<PathBuf, bool>>>,
+    tx: &TaggedSender,
+    cwd: Option<PathBuf>,
+) {
+    let is_first = seen.lock().await.insert(path.to_path_buf(), true).is_none();
+    if !is_first {
+        return;
+    }
+    let id = AgentId::from_parts(source, &(decoders.id_derive)(path));
+    let session_id = path
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let cwd = cwd.unwrap_or_default();
+    let parent_id = detect_parent_id(path, source);
+    let _ = tx
+        .send((
+            Transport::Jsonl,
+            AgentEvent::SessionStart {
+                agent_id: id,
+                source: source.to_string(),
+                session_id,
+                cwd: cwd.clone(),
+                parent_id,
+            },
+        ))
+        .await;
+
+    let label = (decoders.derive_label)(path, source, &cwd);
+    let _ = tx
+        .send((
+            Transport::Jsonl,
+            AgentEvent::Rename {
+                agent_id: id,
+                label,
+            },
+        ))
+        .await;
+}
+
+/// Read at most `limit` bytes from the START of a file and extract `cwd` from
+/// the first complete JSONL line (CC writes `cwd` there). Used by the #204
+/// oversized-first-sight path so registration never reads the whole multi-MB
+/// file — the head is bounded by `MAX_PENDING_BYTES`. Returns `None` when the
+/// file can't be opened/read or has no `cwd` in its head (an empty-cwd
+/// SessionStart then falls back to the project-dir label).
+async fn read_head_cwd(path: &Path, limit: u64) -> Option<PathBuf> {
+    let mut file = tokio::fs::File::open(path).await.ok()?;
+    let mut head = vec![0u8; limit as usize];
+    let n = file.read(&mut head).await.ok()?;
+    head.truncate(n);
+    extract_cwd(&head)
 }
 
 /// Read the tail of a file and delegate to the source-specific checker.

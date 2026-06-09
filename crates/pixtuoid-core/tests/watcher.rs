@@ -941,8 +941,10 @@ async fn watcher_resets_cursor_on_truncation_below_cursor() {
     handle.abort();
 }
 
-// Cursor-safety guard: a > 1 MiB pending tail with no newline must be skipped to
-// EOF (not buffered), and a later newline-terminated valid line still decodes.
+// Cursor-safety guard: a > 1 MiB first-sight pending tail with no newline (no
+// recoverable cwd in its head) must skip its BACKLOG to EOF (not buffer it),
+// yet still REGISTER the agent (#204) — a SessionStart + a project-dir-fallback
+// Rename — and a later newline-terminated valid line still decodes.
 #[tokio::test]
 async fn watcher_skips_oversized_pending_tail() {
     let dir = TempDir::new().unwrap();
@@ -957,7 +959,8 @@ async fn watcher_skips_oversized_pending_tail() {
     tokio::time::sleep(Duration::from_millis(50)).await;
 
     // Write > 1 MiB of junk with NO newline — file_len - cursor exceeds
-    // MAX_PENDING_BYTES, so the watcher seeks the cursor to EOF and skips it.
+    // MAX_PENDING_BYTES, so the watcher seeks the cursor to EOF (skipping the
+    // backlog) but still registers the agent on first-sight.
     let junk = vec![b'x'; (1 << 20) + 1024];
     let mut f = tokio::fs::OpenOptions::new()
         .create(true)
@@ -969,12 +972,47 @@ async fn watcher_skips_oversized_pending_tail() {
     f.flush().await.unwrap();
     drop(f);
 
-    // Give the watcher a scan to skip the junk.
-    tokio::time::sleep(Duration::from_millis(400)).await;
-    while tokio::time::timeout(Duration::from_millis(20), rx.recv())
-        .await
-        .is_ok()
-    {}
+    // Give the watcher a scan; collect the first-sight registration. The junk
+    // head has no complete line → no cwd → empty-cwd SessionStart, and the
+    // Rename falls back to the project-dir basename. No ActivityStart: a
+    // no-newline blob has no decodable line, and the backlog isn't replayed.
+    let mut got_start = false;
+    let mut got_rename = None;
+    let mut activity_before = 0usize;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while tokio::time::Instant::now() < deadline {
+        match tokio::time::timeout(Duration::from_millis(200), rx.recv()).await {
+            Ok(Some((_, AgentEvent::SessionStart { cwd, .. }))) => {
+                got_start = true;
+                assert_eq!(
+                    cwd,
+                    std::path::PathBuf::from(""),
+                    "a no-newline head yields an empty-cwd SessionStart"
+                );
+            }
+            Ok(Some((_, AgentEvent::Rename { label, .. }))) => got_rename = Some(label),
+            Ok(Some((_, AgentEvent::ActivityStart { .. }))) => activity_before += 1,
+            Ok(Some(_)) => {}
+            Ok(None) | Err(_) => {
+                if got_start && got_rename.is_some() {
+                    break;
+                }
+            }
+        }
+    }
+    assert!(
+        got_start,
+        "a first-sight oversized transcript must register an agent (#204), not stay invisible"
+    );
+    assert_eq!(
+        got_rename.as_deref(),
+        Some("cc·big"),
+        "empty-cwd Rename falls back to the project-dir basename"
+    );
+    assert_eq!(
+        activity_before, 0,
+        "the oversized backlog must not be replayed (got {activity_before} ActivityStart)"
+    );
 
     // Append a newline (closing the junk line) plus a valid line. The junk line
     // is past the EOF-seeked cursor, so only the valid line decodes.
@@ -1015,6 +1053,121 @@ async fn watcher_skips_oversized_pending_tail() {
     assert!(
         got_after,
         "the post-skip valid line must decode after the oversized tail is skipped"
+    );
+    handle.abort();
+}
+
+// #204: a RECENT, valid, multi-line transcript larger than MAX_PENDING_BYTES
+// (e.g. a 7.4 MB main session) must REGISTER its agent on first-sight — a
+// SessionStart + Rename derived from a bounded head read — instead of being
+// silently skipped to EOF and staying invisible until its next small append.
+// The giant backlog is still NOT replayed (no flood of historical events).
+#[tokio::test]
+async fn watcher_registers_large_transcript_on_first_sight() {
+    let dir = TempDir::new().unwrap();
+    let projects_root = dir.path().to_path_buf();
+    let project_dir = projects_root.join("-Users-me-bigrepo");
+    tokio::fs::create_dir_all(&project_dir).await.unwrap();
+    let transcript = project_dir.join("big-session.jsonl");
+
+    // Build a valid, newline-terminated transcript that exceeds 1 MiB. The
+    // FIRST line carries `cwd` (CC always writes it on the first line), so a
+    // bounded head read recovers it without touching the whole file. The rest
+    // are valid tool_use lines — the backlog that must NOT be replayed.
+    let first = serde_json::json!({
+        "type": "system",
+        "subtype": "session_start",
+        "sessionId": "big-session",
+        "cwd": "/Users/me/work/bigrepo"
+    });
+    let mut contents = format!("{first}\n");
+    let backlog_line = serde_json::json!({
+        "type": "assistant",
+        "sessionId": "big-session",
+        "cwd": "/Users/me/work/bigrepo",
+        "message": {
+            "role": "assistant",
+            "content": [
+                { "type": "tool_use", "id": "tu_backlog", "name": "Bash", "input": { "command": "ls" } }
+            ]
+        }
+    });
+    let backlog_line = format!("{backlog_line}\n");
+    while contents.len() <= (1usize << 20) + 4096 {
+        contents.push_str(&backlog_line);
+    }
+    assert!(
+        contents.len() > (1usize << 20),
+        "test transcript must exceed MAX_PENDING_BYTES"
+    );
+
+    // Write the whole file BEFORE the watcher first sees it, so the entire body
+    // is one oversized first-sight pending tail (cursor 0 → file_len > 1 MiB).
+    tokio::fs::write(&transcript, contents.as_bytes())
+        .await
+        .unwrap();
+    // Keep it inside the recency window (write() above already set a fresh
+    // mtime; assert it isn't gated as historical by should_seed_at_eof).
+
+    let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(256);
+    let watcher = cc_watcher(projects_root.clone());
+    let handle = tokio::spawn(async move { watcher.run(tx).await });
+
+    let mut start_id = None;
+    let mut start_cwd = None;
+    let mut label = None;
+    let mut activity_count = 0usize;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    while tokio::time::Instant::now() < deadline {
+        match tokio::time::timeout(Duration::from_millis(200), rx.recv()).await {
+            Ok(Some((_, AgentEvent::SessionStart { agent_id, cwd, .. }))) => {
+                start_id = Some(agent_id);
+                start_cwd = Some(cwd);
+            }
+            Ok(Some((_, AgentEvent::Rename { label: l, .. }))) => {
+                label = Some(l);
+            }
+            Ok(Some((_, AgentEvent::ActivityStart { .. }))) => {
+                activity_count += 1;
+            }
+            Ok(Some(_)) => {}
+            Ok(None) | Err(_) => {}
+        }
+        // Once we have the registration pair, drain briefly to confirm the
+        // backlog isn't pouring in, then stop.
+        if start_id.is_some() && label.is_some() {
+            // Short settle: if the backlog were replayed we'd accumulate
+            // hundreds of ActivityStart here.
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            while let Ok(Some((_, ev))) =
+                tokio::time::timeout(Duration::from_millis(20), rx.recv()).await
+            {
+                if matches!(ev, AgentEvent::ActivityStart { .. }) {
+                    activity_count += 1;
+                }
+            }
+            break;
+        }
+    }
+
+    let _start_id = start_id.expect("expected SessionStart for the large first-sight transcript");
+    let start_cwd = start_cwd.expect("SessionStart should carry the head-derived cwd");
+    let label = label.expect("expected a Rename label for the large transcript");
+    assert_eq!(
+        start_cwd,
+        std::path::PathBuf::from("/Users/me/work/bigrepo"),
+        "cwd must come from the bounded head read of the first line"
+    );
+    assert_eq!(
+        label, "cc·bigrepo",
+        "label must derive from the head-read cwd basename"
+    );
+    // The backlog is skipped to EOF: registration fires, but the thousands of
+    // historical tool_use lines are NOT replayed. Allow a small margin (0) but
+    // assert it's nowhere near the backlog count (hundreds of lines).
+    assert!(
+        activity_count < 5,
+        "the giant backlog must not be replayed wholesale (got {activity_count} ActivityStart)"
     );
     handle.abort();
 }
