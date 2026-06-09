@@ -8,24 +8,13 @@ use anyhow::{anyhow, Context, Result};
 /// unset there; Git Bash's exported HOME is POSIX-form and unusable), `HOME`
 /// on Unix. `None` when nothing is set: call sites keep their own fallbacks.
 /// An empty value counts as unset.
+///
+/// Thin adapter over `pixtuoid_core::platform`: the USERPROFILE-vs-HOME rule
+/// lives there (one authority, shared with core's `String`-returning
+/// `user_home`); this just keeps the installer's `Option`/empty-is-unset
+/// contract that the call sites here depend on.
 pub fn user_home() -> Option<String> {
-    resolve_user_home(
-        cfg!(windows),
-        std::env::var("USERPROFILE").ok(),
-        std::env::var("HOME").ok(),
-    )
-}
-
-fn resolve_user_home(
-    windows: bool,
-    userprofile: Option<String>,
-    home: Option<String>,
-) -> Option<String> {
-    let nonempty = |v: Option<String>| v.filter(|s| !s.is_empty());
-    if windows {
-        return nonempty(userprofile).or_else(|| nonempty(home));
-    }
-    nonempty(home)
+    pixtuoid_core::platform::user_home_opt()
 }
 
 /// Resolve a `$HOME`-relative path, falling back to the CWD when no home dir
@@ -363,18 +352,22 @@ mod tests {
 
     #[test]
     fn user_home_is_none_when_no_home_vars() {
-        // resolve_user_home is pure — the Windows arm is testable on macOS.
-        assert_eq!(resolve_user_home(true, None, None), None);
-        assert_eq!(resolve_user_home(false, None, None), None);
+        // The USERPROFILE-vs-HOME rule (and the Option/empty=unset contract this
+        // adapter keeps) now lives in ONE place: pixtuoid_core::platform. Pin the
+        // installer-relevant semantics against that pure seam — testable on macOS.
+        use pixtuoid_core::platform::resolve_user_home_opt;
+        assert_eq!(resolve_user_home_opt(true, None, None), None);
+        assert_eq!(resolve_user_home_opt(false, None, None), None);
     }
 
     #[test]
     fn user_home_userprofile_wins_on_windows_home_wins_on_unix() {
+        use pixtuoid_core::platform::resolve_user_home_opt;
         let up = Some(r"C:\Users\me".to_string());
         let posix = Some("/c/Users/me".to_string());
-        assert_eq!(resolve_user_home(true, up.clone(), posix.clone()), up);
+        assert_eq!(resolve_user_home_opt(true, up.clone(), posix.clone()), up);
         assert_eq!(
-            resolve_user_home(false, up, Some("/Users/me".into())),
+            resolve_user_home_opt(false, up, Some("/Users/me".into())),
             Some("/Users/me".into())
         );
     }
