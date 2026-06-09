@@ -48,26 +48,38 @@ use crate::install::io::shell_single_quote;
 ///   `PIXTUOID_SOURCE=codex`), so the source rides as the shim's `--source` flag —
 ///   codex injects no per-hook env we could set instead. KNOWN EXPERIMENTAL
 ///   LIMITATION: because a quoted path can't survive cmd.exe `/C` here, a
-///   pixtuoid-hook.exe under a path containing SPACES (e.g. a Windows username
-///   with a space) can't be invoked with a trailing arg, so we REJECT a spaced
-///   path at install with an actionable error (#195) rather than write a
-///   silently-broken hook. The space-free install paths (`%USERPROFILE%\.cargo\bin`,
+///   pixtuoid-hook.exe under a path containing a SPACE or a cmd metacharacter
+///   (`& | < > ( ) ^ %`) can't be invoked safely with a trailing arg (a space
+///   truncates it; `&` splits it into two commands), so we REJECT such a path at
+///   install with an actionable error (#195) rather than write a dangerous or
+///   silently-broken hook. The ordinary install paths (`%USERPROFILE%\.cargo\bin`,
 ///   npm prefix) are the common case and work.
 pub fn hook_command(resolved: &Path) -> Result<String> {
     let p = resolved
         .to_str()
         .ok_or_else(|| anyhow!("pixtuoid-hook path is non-UTF-8: {}", resolved.display()))?;
-    // #195: a spaced exe path can't be carried with a trailing arg through codex's
-    // cmd.exe /C (Rust's Command::arg escaping + cmd quoting mangle it). Rather
-    // than write a silently-broken hook, FAIL LOUDLY at install with the workaround.
+    // The Windows command is BARE: codex runs it via `cmd.exe /C`, and Rust's
+    // Command::arg wrapping is stripped back off by cmd's /C quote rule, so the
+    // path is parsed UNQUOTED by cmd. Any char special to cmd's command-line
+    // parser in the path is therefore unsafe — a space TRUNCATES it (#195); a
+    // separator/redirect/escape/expansion char (`& | < > ( ) ^ %`) is worse: e.g.
+    // `C:\Users\a&b\...hook.exe --source codex` splits on `&` and cmd runs the
+    // relative tail `b\...hook.exe` from the CWD (an unintended-execution vector).
+    // We can't quote our way out (Command::arg re-escaping + cmd /C stripping
+    // defeat every quoted form), so REJECT such a path at install rather than
+    // write a dangerous or dead hook. (Tracking: #195.)
     #[cfg(windows)]
-    if p.contains(' ') {
-        anyhow::bail!(
-            "pixtuoid-hook is at a path containing a space ({p}) — Codex's cmd.exe /C \
-             hook runner can't invoke it with arguments. Install pixtuoid to a \
-             space-free location (e.g. %USERPROFILE%\\.cargo\\bin or the npm global \
-             prefix) and re-run `install-hooks --target codex`. (Tracking: #195.)"
-        );
+    {
+        const CMD_UNSAFE: &[char] = &[' ', '"', '&', '|', '<', '>', '(', ')', '^', '%'];
+        if let Some(bad) = p.chars().find(|c| CMD_UNSAFE.contains(c)) {
+            anyhow::bail!(
+                "pixtuoid-hook is at a path containing {bad:?} ({p}), which Codex's \
+                 cmd.exe /C hook runner can't safely invoke. Install pixtuoid to a \
+                 path of ordinary characters (e.g. %USERPROFILE%\\.cargo\\bin or the \
+                 npm global prefix) and re-run `install-hooks --target codex`. \
+                 (Tracking: #195.)"
+            );
+        }
     }
     #[cfg(windows)]
     let cmd = format!("{p} --source codex");
@@ -381,18 +393,34 @@ command = "/old/pixtuoid-hook"
         assert_eq!(cmd, r"C:\tools\pixtuoid-hook.exe --source codex");
     }
 
-    // #195: a spaced exe path is rejected at install (loud, actionable) rather
-    // than written as a hook that cmd.exe /C would silently mangle.
+    // #195 + security: a path with a space (truncates) OR a cmd metacharacter
+    // (`&` splits the command → relative-tail execution from CWD) is rejected at
+    // install rather than written as a hook cmd.exe /C would mangle or mis-run.
     #[test]
     #[cfg(windows)]
-    fn hook_command_rejects_spaced_path_on_windows() {
-        let err = hook_command(std::path::Path::new(r"C:\Program Files\pixtuoid-hook.exe"))
+    fn hook_command_rejects_cmd_unsafe_path_on_windows() {
+        // space → truncation
+        assert!(hook_command(std::path::Path::new(r"C:\Program Files\pixtuoid-hook.exe")).is_err());
+        // `&` → command split / unintended relative-path execution
+        let err = hook_command(std::path::Path::new(r"C:\Users\a&b\pixtuoid-hook.exe"))
             .unwrap_err()
             .to_string();
         assert!(
-            err.contains("space") && err.contains("space-free"),
-            "must explain the spaced-path limitation + workaround: {err}"
+            err.contains("cmd.exe") && err.contains("ordinary characters"),
+            "must explain the cmd-unsafe path + workaround: {err}"
         );
+        // other separators/redirects are rejected too
+        for bad in [
+            r"C:\p|x\h.exe",
+            r"C:\p>x\h.exe",
+            r"C:\p(x)\h.exe",
+            r"C:\p%x\h.exe",
+        ] {
+            assert!(
+                hook_command(std::path::Path::new(bad)).is_err(),
+                "must reject cmd-unsafe path {bad}"
+            );
+        }
     }
 
     #[test]
