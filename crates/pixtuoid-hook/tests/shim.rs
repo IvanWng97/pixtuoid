@@ -22,15 +22,17 @@ fn sock_path(tag: &str) -> std::path::PathBuf {
     p
 }
 
-/// Spawn the shim with the given socket path + optional source env, pipe
-/// `stdin` to it, and return its exit status (after closing stdin → EOF).
-fn run_shim(
+/// Spawn the shim with the given socket path, optional source env, and extra
+/// argv, pipe `stdin` to it, and return its exit status (after closing stdin → EOF).
+fn run_shim_inner(
     socket: &std::path::Path,
     source: Option<&str>,
+    args: &[&str],
     stdin: &[u8],
 ) -> std::process::ExitStatus {
     let mut cmd = Command::new(BIN);
     cmd.env("PIXTUOID_SOCKET", socket)
+        .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
@@ -53,6 +55,49 @@ fn run_shim(
     child.wait().expect("wait shim")
 }
 
+/// Spawn the shim with a source via the `PIXTUOID_SOURCE` env (the Unix install form).
+fn run_shim(
+    socket: &std::path::Path,
+    source: Option<&str>,
+    stdin: &[u8],
+) -> std::process::ExitStatus {
+    run_shim_inner(socket, source, &[], stdin)
+}
+
+/// Spawn the shim with extra argv and NO `PIXTUOID_SOURCE` env, so a `--source`
+/// flag is the only source signal (the Windows install form).
+fn run_shim_args(
+    socket: &std::path::Path,
+    args: &[&str],
+    stdin: &[u8],
+) -> std::process::ExitStatus {
+    run_shim_inner(socket, None, args, stdin)
+}
+
+/// Poll-accept one connection (the shim has already connected+written+exited),
+/// drain it to EOF, and parse the first delivered line as JSON. Shared by the
+/// env-source and argv-source delivery tests.
+fn recv_delivered_json(listener: &UnixListener) -> serde_json::Value {
+    let deadline = Instant::now() + Duration::from_secs(3);
+    let mut stream = loop {
+        match listener.accept() {
+            Ok((s, _)) => break s,
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                assert!(Instant::now() < deadline, "shim never delivered to the socket");
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            Err(e) => panic!("accept: {e}"),
+        }
+    };
+    // accept() inherited the listener's non-blocking mode — restore blocking. The
+    // shim has already exited, so its end is closed: read drains then sees EOF.
+    stream.set_nonblocking(false).unwrap();
+    let mut got = String::new();
+    stream.read_to_string(&mut got).expect("read delivered line");
+    let line = got.lines().next().expect("at least one line");
+    serde_json::from_str(line).expect("delivered line is valid JSON")
+}
+
 #[test]
 fn delivers_one_json_line_to_listener_and_exits_zero() {
     let path = sock_path("deliver");
@@ -66,37 +111,36 @@ fn delivers_one_json_line_to_listener_and_exits_zero() {
     );
     assert!(status.success(), "shim must exit 0; got {status:?}");
 
-    // The connection is already queued (shim connected+wrote+exited); poll-accept
-    // with a deadline so a regression can't hang the test forever.
-    let deadline = Instant::now() + Duration::from_secs(3);
-    let mut stream = loop {
-        match listener.accept() {
-            Ok((s, _)) => break s,
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                assert!(
-                    Instant::now() < deadline,
-                    "shim never delivered to the socket"
-                );
-                std::thread::sleep(Duration::from_millis(10));
-            }
-            Err(e) => panic!("accept: {e}"),
-        }
-    };
-    // accept() inherited the listener's non-blocking mode — restore blocking.
-    // The shim has already exited (we waited above), so its socket end is closed:
-    // read_to_string drains the buffered line then sees EOF and returns (no hang).
-    stream.set_nonblocking(false).unwrap();
-    let mut got = String::new();
-    stream
-        .read_to_string(&mut got)
-        .expect("read delivered line");
-
-    let line = got.lines().next().expect("at least one line");
-    let v: serde_json::Value = serde_json::from_str(line).expect("delivered line is valid JSON");
+    let v = recv_delivered_json(&listener);
     assert_eq!(v["hook_event_name"], "Stop");
     assert_eq!(v["session_id"], "abc", "original payload preserved");
     assert_eq!(v["_pixtuoid_source"], "codex", "shim stamps the CLI source");
     assert!(v.get("_shim_ts_ms").is_some(), "shim stamps a timestamp");
+
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn argv_source_flag_stamps_source_without_env() {
+    // The Windows install form: `pixtuoid-hook --source codex` with NO
+    // PIXTUOID_SOURCE env. The flag alone must drive the `_pixtuoid_source` stamp.
+    let path = sock_path("argvsrc");
+    let listener = UnixListener::bind(&path).expect("bind listener");
+    listener.set_nonblocking(true).unwrap();
+
+    let status = run_shim_args(
+        &path,
+        &["--source", "codex"],
+        br#"{"hook_event_name":"Stop","session_id":"abc"}"#,
+    );
+    assert!(status.success(), "shim must exit 0; got {status:?}");
+
+    let v = recv_delivered_json(&listener);
+    assert_eq!(
+        v["_pixtuoid_source"], "codex",
+        "the --source flag must stamp the CLI source with no env set"
+    );
+    assert_eq!(v["session_id"], "abc", "original payload preserved");
 
     let _ = std::fs::remove_file(&path);
 }

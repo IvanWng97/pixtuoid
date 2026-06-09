@@ -14,9 +14,19 @@ fn shim_bin() -> &'static str {
 }
 
 fn run_shim(pipe_name: &str, stdin_json: &str) -> (std::process::ExitStatus, Duration) {
+    run_shim_args(pipe_name, &[], stdin_json)
+}
+
+fn run_shim_args(
+    pipe_name: &str,
+    args: &[&str],
+    stdin_json: &str,
+) -> (std::process::ExitStatus, Duration) {
     let started = Instant::now();
     let mut child = Command::new(shim_bin())
         .env("PIXTUOID_SOCKET", pipe_name)
+        .env_remove("PIXTUOID_SOURCE")
+        .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -53,6 +63,39 @@ async fn delivers_one_json_line_to_pipe_listener_and_exits_zero() {
     assert!(line.ends_with('\n'), "newline-terminated: {line:?}");
     assert!(line.contains(r#""hook_event_name":"Stop""#));
     assert!(line.contains("_shim_ts_ms"), "shim enrichment present");
+
+    let (status, _) = shim.join().expect("join");
+    assert!(status.success(), "exit 0");
+}
+
+#[tokio::test]
+async fn argv_source_flag_stamps_source_over_pipe_without_env() {
+    // Windows install form: `pixtuoid-hook --source codex` over the named pipe,
+    // NO PIXTUOID_SOURCE env (cmd.exe /C can't express the env-prefix form).
+    let name = format!(r"\\.\pipe\pixtuoid-test-argvsrc-{}", std::process::id());
+    let mut server = ServerOptions::new()
+        .first_pipe_instance(true)
+        .pipe_mode(PipeMode::Byte)
+        .create(&name)
+        .expect("create pipe");
+
+    let name2 = name.clone();
+    let shim = std::thread::spawn(move || {
+        run_shim_args(
+            &name2,
+            &["--source", "codex"],
+            r#"{"hook_event_name":"Stop","session_id":"s1"}"#,
+        )
+    });
+
+    server.connect().await.expect("connect");
+    let mut got = Vec::new();
+    server.read_to_end(&mut got).await.expect("read");
+    let line = String::from_utf8(got).expect("utf8");
+    assert!(
+        line.contains(r#""_pixtuoid_source":"codex""#),
+        "the --source flag must stamp the source with no env: {line:?}"
+    );
 
     let (status, _) = shim.join().expect("join");
     assert!(status.success(), "exit 0");

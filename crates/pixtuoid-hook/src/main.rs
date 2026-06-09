@@ -37,7 +37,13 @@ fn main() -> Result<()> {
     };
 
     if let Value::Object(map) = &mut payload {
-        enrich_payload(map, std::env::var("PIXTUOID_SOURCE").ok(), now_ms());
+        // Source precedence: the `--source <name>` argv flag (the Windows install
+        // form — cmd.exe /C can't express a POSIX `VAR=value cmd` env-prefix) wins,
+        // then the `PIXTUOID_SOURCE` env var (the Unix install form). Either way the
+        // daemon only ever sees the resulting `_pixtuoid_source` stamp.
+        let args: Vec<String> = std::env::args().collect();
+        let source = source_from_argv(&args).or_else(|| std::env::var("PIXTUOID_SOURCE").ok());
+        enrich_payload(map, source, now_ms());
     }
 
     // Best-effort send, hard-bounded so a stuck daemon can never block CC's
@@ -48,7 +54,27 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-/// Stamp the shim timestamp and, when `PIXTUOID_SOURCE` is set, the trusted CLI
+/// The trusted CLI source from `--source <name>` (or `--source=<name>`) in argv.
+/// This is the Windows install form: the codex hook command runs under `cmd.exe
+/// /C`, which has no inline `VAR=value cmd` env-prefix syntax (it would try to exec
+/// a program literally named `PIXTUOID_SOURCE=codex`), so the source rides as a
+/// flag instead. Absent or empty → `None` so the caller falls back to the
+/// `PIXTUOID_SOURCE` env var (the unchanged Unix install form). Total + panic-free
+/// per invariant #5 (the shim must never block CC).
+fn source_from_argv(args: &[String]) -> Option<String> {
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        if let Some(val) = arg.strip_prefix("--source=") {
+            return Some(val).filter(|s| !s.is_empty()).map(str::to_string);
+        }
+        if arg == "--source" {
+            return it.next().filter(|s| !s.is_empty()).cloned();
+        }
+    }
+    None
+}
+
+/// Stamp the shim timestamp and, when a source is resolved, the trusted CLI
 /// source under the PRIVATE `_pixtuoid_source` key.
 ///
 /// We deliberately do NOT write the public `source` field: CC's SessionStart
@@ -56,15 +82,15 @@ fn main() -> Result<()> {
 /// compact). Reading that as the CLI source namespaced the agent under
 /// "startup", splitting it from the claude-code-keyed tool/JSONL/SessionEnd
 /// events — an un-reapable ghost. The private key is shim-owned, so a plain
-/// insert is safe (nothing else writes it). Absent the env (bare `pixtuoid-hook`,
+/// insert is safe (nothing else writes it). Absent any source (bare `pixtuoid-hook`,
 /// i.e. CC), the decoder defaults to claude-code.
 fn enrich_payload(
     map: &mut serde_json::Map<String, Value>,
-    source_env: Option<String>,
+    source: Option<String>,
     ts_ms: u64,
 ) {
     map.insert("_shim_ts_ms".into(), Value::from(ts_ms));
-    if let Some(src) = source_env {
+    if let Some(src) = source {
         if !src.is_empty() {
             map.insert("_pixtuoid_source".into(), Value::from(src));
         }
@@ -107,6 +133,49 @@ mod tests {
         let map = p.as_object_mut().unwrap();
         enrich_payload(map, Some(String::new()), 1);
         assert!(map.get("_pixtuoid_source").is_none());
+    }
+
+    fn argv(parts: &[&str]) -> Vec<String> {
+        parts.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn source_from_argv_reads_space_form() {
+        assert_eq!(
+            source_from_argv(&argv(&["pixtuoid-hook", "--source", "codex"])),
+            Some("codex".into())
+        );
+    }
+
+    #[test]
+    fn source_from_argv_reads_equals_form() {
+        assert_eq!(
+            source_from_argv(&argv(&["pixtuoid-hook", "--source=codex"])),
+            Some("codex".into())
+        );
+    }
+
+    #[test]
+    fn source_from_argv_absent_is_none() {
+        assert_eq!(source_from_argv(&argv(&["pixtuoid-hook"])), None);
+    }
+
+    #[test]
+    fn source_from_argv_missing_value_is_none() {
+        // `--source` as the final arg → no value → None (env fallback).
+        assert_eq!(source_from_argv(&argv(&["pixtuoid-hook", "--source"])), None);
+    }
+
+    #[test]
+    fn source_from_argv_empty_value_is_none() {
+        assert_eq!(
+            source_from_argv(&argv(&["pixtuoid-hook", "--source", ""])),
+            None
+        );
+        assert_eq!(
+            source_from_argv(&argv(&["pixtuoid-hook", "--source="])),
+            None
+        );
     }
 
     // Env vars are process-global. This is the ONLY env-touching test in this
