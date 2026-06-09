@@ -3,7 +3,6 @@ use std::path::{Path, PathBuf};
 use anyhow::{anyhow, bail, Context, Result};
 use toml::value::Table;
 
-use crate::install::io;
 use crate::install::target::MergeOutcome;
 
 const SENTINEL_KEY: &str = "_pixtuoid";
@@ -20,7 +19,11 @@ const CODEX_EVENTS: &[&str] = &[
 ];
 
 pub fn default_config_path() -> PathBuf {
-    io::home_relative(".codex/config.toml")
+    // Route through the SAME codex_home() the watcher uses, so the installed-hook
+    // config and the watched sessions root can't disagree (and honors CODEX_HOME).
+    // codex_home() always yields an absolute path (user_home falls back to the
+    // temp dir), so there's no unsafe `.`/CWD fallback like io::home_relative.
+    pixtuoid_core::source::codex::codex_home().join("config.toml")
 }
 
 use crate::install::io::shell_single_quote;
@@ -431,6 +434,50 @@ command = "/old/pixtuoid-hook"
     // dropping it. This is exactly the class the SubagentStop bug fell into
     // (registered but not decoded). The external drift-watch covers upstream
     // renames; this covers our own registered-vs-decoded drift.
+    // default_config_path routes through codex_home(), so CODEX_HOME (when it
+    // points at an existing dir) redirects BOTH the watcher and the installer.
+    #[test]
+    fn default_config_path_honors_codex_home_env() {
+        // std::env is process-global; serialize against other env-mutating tests.
+        let _env = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var_os("CODEX_HOME");
+        let fallback_suffix = PathBuf::from(".codex").join("config.toml");
+
+        std::env::remove_var("CODEX_HOME");
+        assert!(
+            default_config_path().ends_with(&fallback_suffix),
+            "unset CODEX_HOME must end with .codex/config.toml, got {:?}",
+            default_config_path()
+        );
+
+        // Set to an EXISTING dir → <dir>/config.toml.
+        let custom = std::env::temp_dir().join("pixtuoid-codex-home-cfg-test");
+        std::fs::create_dir_all(&custom).unwrap();
+        std::env::set_var("CODEX_HOME", &custom);
+        assert_eq!(default_config_path(), custom.join("config.toml"));
+
+        // Set to a NON-existent dir → fall back (matches upstream codex's gate).
+        let missing = std::env::temp_dir().join("pixtuoid-codex-home-cfg-missing");
+        let _ = std::fs::remove_dir_all(&missing);
+        std::env::set_var("CODEX_HOME", &missing);
+        assert!(
+            default_config_path().ends_with(&fallback_suffix),
+            "non-existent CODEX_HOME must fall back to .codex/config.toml"
+        );
+
+        // Empty → fallback.
+        std::env::set_var("CODEX_HOME", "");
+        assert!(default_config_path().ends_with(&fallback_suffix));
+
+        match saved {
+            Some(v) => std::env::set_var("CODEX_HOME", v),
+            None => std::env::remove_var("CODEX_HOME"),
+        }
+        let _ = std::fs::remove_dir_all(&custom);
+    }
+
     #[test]
     fn every_registered_codex_event_decodes() {
         use pixtuoid_core::source::decoder::decode_hook_payload;
