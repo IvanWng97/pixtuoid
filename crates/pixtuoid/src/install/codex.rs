@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{anyhow, Context, Result};
 use toml::value::Table;
 
 use crate::install::target::MergeOutcome;
@@ -62,7 +62,7 @@ pub fn hook_command(resolved: &Path) -> Result<String> {
     // than write a silently-broken hook, FAIL LOUDLY at install with the workaround.
     #[cfg(windows)]
     if p.contains(' ') {
-        bail!(
+        anyhow::bail!(
             "pixtuoid-hook is at a path containing a space ({p}) — Codex's cmd.exe /C \
              hook runner can't invoke it with arguments. Install pixtuoid to a \
              space-free location (e.g. %USERPROFILE%\\.cargo\\bin or the npm global \
