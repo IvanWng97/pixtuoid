@@ -663,17 +663,17 @@ async fn default_id_deriver_stays_path_keyed() {
     f.flush().await.unwrap();
     drop(f);
 
-    // The default deriver keys on the file path. The watcher may report the
-    // raw TempDir path (rescan via read_dir) or the symlink-resolved path
-    // (macOS FSEvents canonicalizes /var → /private/var), so accept either —
-    // both are path-keyed. What must NOT match is a UUID/stem key. The watcher
-    // source here is "antigravity" (the path-keyed default user), so the
-    // expectation namespaces under it. Temp paths are lowercase, so the
-    // normalize_path_key fold is identity on this (Unix) runner.
-    let raw = AgentId::from_parts("antigravity", &transcript.to_string_lossy());
-    let canon = std::fs::canonicalize(&transcript)
-        .map(|p| AgentId::from_parts("antigravity", &p.to_string_lossy()))
-        .unwrap_or(raw);
+    // A bare watcher (no `.with_id_deriver`) uses the DEFAULT deriver, which
+    // keys on the file PATH (`default_id_from_path` = `normalize_path_key(path)`),
+    // NOT a UUID/stem — the keying Antigravity relies on; the real
+    // ClaudeCodeSource overrides it with `cc_id_from_path`. Assert the emitted id
+    // is NOT the stem-keyed id (the regression a stem-keyed default deriver would
+    // introduce); this holds on every platform since the path string is never
+    // "abc". The EXACT value (`from_parts(source, normalize_path_key(path))`) is
+    // platform-dependent and `normalize_path_key` is `pub(crate)` (unreachable
+    // here), so it's pinned at the UNIT level instead —
+    // `jsonl.rs::default_id_from_path_returns_normalized_path_key` + `decoder.rs`'s
+    // `normalize_path_key` tests — not re-derived in this integration test.
     let stem_keyed = AgentId::from_parts("antigravity", "abc");
     let mut ok = false;
     let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
@@ -683,10 +683,6 @@ async fn default_id_deriver_stays_path_keyed() {
                 assert_ne!(
                     agent_id, stem_keyed,
                     "default deriver must be path-keyed, not stem-keyed"
-                );
-                assert!(
-                    agent_id == raw || agent_id == canon,
-                    "default deriver must key on the file path (raw or canonical)"
                 );
                 ok = true;
                 break;
