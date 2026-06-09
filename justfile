@@ -43,10 +43,13 @@ clippy:
 machete:
     cargo machete
 
-# License + advisory audit.
+# License + supply-chain gate (bans/licenses/sources). Advisories are NOT here:
+# they're owned by the daily audit.yml (`check advisories`) so an overnight
+# RustSec advisory can't block a push of unchanged code. Keep this list in sync
+# with the ci.yml `deny` job's `command:`.
 [group('rust')]
 deny:
-    cargo deny check
+    cargo deny check bans licenses sources
 
 # Fast, independent lint checks in parallel (fmt + machete + deny).
 [group('rust')]
@@ -59,7 +62,7 @@ lint:
     pids=(); fail=0
     run fmt     cargo fmt --all --check & pids+=($!)
     run machete cargo machete           & pids+=($!)
-    run deny    cargo deny check         & pids+=($!)
+    run deny    cargo deny check bans licenses sources & pids+=($!)
     for p in "${pids[@]}"; do wait "$p" || fail=1; done
     [[ $fail -eq 0 ]]
 

@@ -24,6 +24,16 @@ codegen-units = 1
 strip         = "debuginfo"
 panic         = "abort"
 
+[profile.dev]
+# Keep file:line in backtraces (line-tables-only) but drop the heavier
+# variable/type debuginfo — faster local incremental builds + smaller cached
+# target dirs. Independent of release above (which strips debuginfo entirely).
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+# Dependencies never need debuginfo for our own backtraces.
+debug = false
+
 [workspace.dependencies]
 tokio              = { version = "1", default-features = false }
 serde              = { version = "1", features = ["derive"] }

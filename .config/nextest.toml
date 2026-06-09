@@ -1,3 +1,10 @@
+[profile.default]
+# Cap a hung test at 3×60s so a deadlock fails THAT test (named) and the rest
+# still run, instead of the job-level timeout killing the whole run blind. Far
+# above every real test (incl. the 200ms shim watchdog tests). NOT a retry —
+# #161's no-retries stance is preserved (retries stays unset = 0). `ci` inherits.
+slow-timeout = { period = "60s", terminate-after = 3 }
+
 [profile.ci.junit]
 path = "junit.xml"
 
