@@ -102,7 +102,13 @@ msrv:
     msrv="$(grep -m1 '^rust-version' Cargo.toml | sed -E 's/.*"([0-9]+\.[0-9]+(\.[0-9]+)?)".*/\1/')"
     echo "declared MSRV: $msrv"
     rustup toolchain install "$msrv" --profile minimal --no-self-update >/dev/null 2>&1 || true
-    rustup run "$msrv" cargo check --workspace
+    # Clear RUSTFLAGS so the DEFAULT linker is used. This gate verifies COMPILATION
+    # on the floor; the linker is irrelevant to MSRV. `.cargo/config.toml`'s
+    # `-fuse-ld=lld` perf flag (x86_64-linux only) needs lld, which a fresh
+    # minimal-toolchain build on the CI runner can't resolve — the cached perf
+    # jobs never re-link build scripts so they never hit it, but this no-cache
+    # gate links them fresh. (RUSTFLAGS env overrides target.*.rustflags wholesale.)
+    RUSTFLAGS="" rustup run "$msrv" cargo check --workspace
 
 # SemVer-check the published library against its crates.io baseline. CI-only in
 # practice: needs network to fetch the baseline crate. Scoped to pixtuoid-core
