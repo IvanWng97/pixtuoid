@@ -40,11 +40,24 @@ pub(crate) fn normalize_path_key(s: &str) -> String {
 
 /// Pure core, separated so the Windows arm is unit-testable on any platform.
 fn normalize_key_inner(windows: bool, s: &str) -> String {
-    if windows {
-        s.replace('\\', "/").to_lowercase()
+    if !windows {
+        return s.to_string();
+    }
+    // Strip the `\\?\` verbatim / extended-length prefix before folding, so a
+    // verbatim-prefixed path (the form `std::fs::canonicalize` returns on Windows)
+    // keys the same as its plain form — otherwise `\\?\C:\X` folds to `//?/c:/x`
+    // and never coalesces with `C:\X`. Defensive (#197): nothing in-tree
+    // canonicalizes today, so neither side currently emits a verbatim prefix; this
+    // guards a future regression / an upstream CLI that starts sending one.
+    // `\\?\UNC\server\share` denotes `\\server\share`.
+    let stripped = if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{rest}")
+    } else if let Some(rest) = s.strip_prefix(r"\\?\") {
+        rest.to_string()
     } else {
         s.to_string()
-    }
+    };
+    stripped.replace('\\', "/").to_lowercase()
 }
 
 pub fn decode_hook_payload(v: Value) -> Result<AgentEvent> {
@@ -326,6 +339,28 @@ mod tests {
             normalize_key_inner(true, r"C:\Users\Me\x\s.jsonl"),
             normalize_key_inner(true, "C:/users/me/X/s.jsonl")
         );
+    }
+
+    #[test]
+    fn normalize_path_key_strips_verbatim_prefix_on_windows() {
+        // #197: a \\?\-prefixed path (what canonicalize returns) keys the same as
+        // its plain form, instead of folding to a never-coalescing //?/c:/… .
+        assert_eq!(
+            normalize_key_inner(true, r"\\?\C:\Foo\Bar.jsonl"),
+            normalize_key_inner(true, r"C:\Foo\Bar.jsonl")
+        );
+        assert_eq!(normalize_key_inner(true, r"\\?\C:\Foo"), "c:/foo");
+        // \\?\UNC\server\share denotes \\server\share — they must coalesce.
+        assert_eq!(
+            normalize_key_inner(true, r"\\?\UNC\srv\share\s.jsonl"),
+            normalize_key_inner(true, r"\\srv\share\s.jsonl")
+        );
+    }
+
+    #[test]
+    fn normalize_path_key_verbatim_prefix_is_inert_on_unix() {
+        // On Unix `\\?\` is just ordinary filename bytes — no stripping or folding.
+        assert_eq!(normalize_key_inner(false, r"\\?\C:\Foo"), r"\\?\C:\Foo");
     }
 
     #[test]
