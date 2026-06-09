@@ -32,8 +32,10 @@ pub(crate) fn codex_home() -> PathBuf {
 }
 
 /// Pure precedence core, separated so it's unit-testable without env mutation.
-/// (`is_dir` still touches the filesystem — the existence gate matches upstream
-/// codex, which falls back to `~/.codex` when `CODEX_HOME` doesn't yet exist.)
+/// (`is_dir` still touches the filesystem.) On a set-but-absent `CODEX_HOME`,
+/// upstream codex returns a FATAL error; we deliberately fall back to `~/.codex`
+/// instead — benign for a visualizer, since codex itself won't run (and writes
+/// no rollouts under that path) when its own home dir is missing.
 fn resolve_codex_home(codex_home_env: Option<String>, home: String) -> PathBuf {
     if let Some(p) = codex_home_env.filter(|s| !s.is_empty()) {
         let pb = PathBuf::from(p);
