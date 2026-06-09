@@ -301,20 +301,27 @@ async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &WatchCtx<'_>) {
             path.display(),
             MAX_PENDING_BYTES
         );
+        // Seed the cursor to EOF FIRST — before the awaited head-read +
+        // registration below — so a concurrent walk_jsonl on this path (250ms
+        // rescan / notify) sees `known` on its next read and won't re-enter this
+        // branch. Mirrors the normal tail-read path, which also advances the
+        // cursor before emitting. (`emit_first_sight` is idempotent via `seen`, so
+        // the window only ever cost a redundant head read, never a duplicate
+        // SessionStart — but matching the ordering closes it.)
+        cursors.lock().await.insert(path.to_path_buf(), file_len);
         // #204: on FIRST-sight of an oversized tail (a recent, not-yet-ended
         // large session — stale/ended ones were already gated by
-        // should_seed_at_eof above), still REGISTER the agent before seeding the
-        // cursor to EOF. Otherwise a >1 MB transcript stays invisible until its
-        // next small append (a long session, or a delegating parent whose
-        // subagents then render as flat roots). The giant backlog is NOT
-        // replayed; cwd/label come from a BOUNDED head read (CC writes `cwd` on
-        // the first line), never the whole 7.4 MB file. A mid-session oversized
-        // append (`known`) is unchanged — skip to EOF, no re-registration.
+        // should_seed_at_eof above), still REGISTER the agent. Otherwise a >1 MB
+        // transcript stays invisible until its next small append (a long session,
+        // or a delegating parent whose subagents then render as flat roots). The
+        // giant backlog is NOT replayed; cwd/label come from a BOUNDED head read
+        // (CC writes `cwd` on the first line), never the whole 7.4 MB file. A
+        // mid-session oversized append (`known`) just advances the cursor — no
+        // re-registration.
         if !known {
             let head_cwd = read_head_cwd(path, MAX_PENDING_BYTES).await;
             emit_first_sight(path, source, decoders, seen, tx, head_cwd).await;
         }
-        cursors.lock().await.insert(path.to_path_buf(), file_len);
         return;
     }
 
