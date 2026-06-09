@@ -2,12 +2,17 @@ name: claude security review
 
 on:
   pull_request:
-    types: [opened, reopened, synchronize]
+    # No `synchronize`: don't re-run (billed) on every push. Re-review on demand
+    # by commenting `/security-review` (the issue_comment trigger below) — this is
+    # the ONLY manual re-trigger, so it must stay.
+    types: [opened, reopened]
     paths:
       - "crates/pixtuoid-hook/**"
       - "crates/pixtuoid/src/install/**"
       - "crates/pixtuoid/src/runtime/**"
       - "crates/pixtuoid-core/src/source/**"
+  issue_comment:
+    types: [created]
 
 permissions:
   contents: read
@@ -17,11 +22,14 @@ permissions:
 
 jobs:
   security-review:
-    if: github.actor != 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository
+    if: >
+      (github.event_name == 'pull_request' && github.actor != 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository) ||
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request && contains(github.event.comment.body, '/security-review'))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     concurrency:
-      group: claude-security-${{ github.event.pull_request.number }}
+      # issue_comment events carry github.event.issue.number, not pull_request.number.
+      group: claude-security-${{ github.event.issue.number || github.event.pull_request.number }}
       cancel-in-progress: true
     steps:
       - uses: actions/checkout@v6

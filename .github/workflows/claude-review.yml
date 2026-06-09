@@ -2,7 +2,9 @@ name: claude review
 
 on:
   pull_request:
-    types: [opened, reopened, ready_for_review, synchronize]
+    # No `synchronize`: don't re-run (billed) on every push. Re-review on demand
+    # by commenting `/claude-review` (the issue_comment trigger below).
+    types: [opened, reopened, ready_for_review]
   issue_comment:
     types: [created]
 

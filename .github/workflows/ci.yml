@@ -7,7 +7,10 @@ on:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # Cancel superseded PR runs (push-over-push), but NEVER cancel an in-flight
+  # main run — back-to-back merges would otherwise abort each other's CI
+  # verdict + Codecov upload. Main runs are cheap and rare; let them finish.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -20,6 +23,7 @@ jobs:
   fmt:
     name: rustfmt
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
@@ -31,6 +35,7 @@ jobs:
   clippy:
     name: clippy
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
@@ -43,6 +48,7 @@ jobs:
   deny:
     name: cargo-deny
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
       - uses: EmbarkStudios/cargo-deny-action@v2
@@ -50,6 +56,7 @@ jobs:
   machete:
     name: unused deps
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
       # No rust-toolchain: cargo-machete parses Cargo.toml, it never compiles.
@@ -60,6 +67,7 @@ jobs:
   msrv:
     name: msrv
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
       # `just msrv` reads rust-version from Cargo.toml and self-installs that
@@ -73,6 +81,7 @@ jobs:
   notes-curated:
     name: release notes curated
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
       # No rust-toolchain: a grep guard against shipping uncurated release notes.
@@ -82,6 +91,7 @@ jobs:
   npm-gen:
     name: npm package generator
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
       # No rust-toolchain: this only exercises the Node generator's unit test —
@@ -96,6 +106,7 @@ jobs:
   readme:
     name: readme drift
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
       # No rust-toolchain, no npm ci: gen-readme.mjs is pure node:builtins. It
@@ -111,6 +122,7 @@ jobs:
   hack:
     name: feature combinations
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
@@ -122,6 +134,7 @@ jobs:
   windows-check:
     name: windows-check
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
@@ -149,6 +162,7 @@ jobs:
   semver:
     name: semver-checks
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
@@ -160,6 +174,7 @@ jobs:
   coverage:
     name: coverage
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
@@ -194,7 +209,10 @@ jobs:
 
   smoke:
     name: smoke
-    needs: [fmt, clippy]
+    # No `needs:` — smoke builds the release binary + renders + pixel-diffs; it
+    # has no artifact/data dependency on fmt/clippy (they're independent gates).
+    # Running it in parallel (vs gated behind lint) shaves latency on green PRs;
+    # the only thing given up is fail-fast (a doomed PR still burns one smoke run).
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -216,13 +234,15 @@ jobs:
           echo '{}' > /tmp/smoke-test/.claude/settings.json
           HOME=/tmp/smoke-test ./target/release/pixtuoid install-hooks
           HOME=/tmp/smoke-test ./target/release/pixtuoid uninstall-hooks
-      # gen-check renders the office (Pillow + ffmpeg + gifsicle) and diffs the
-      # committed README sections + every still. node is for gen-readme-check.
+      # gen-check renders the office (Pillow + ffmpeg) and diffs the committed
+      # README sections + every still. node is for gen-readme-check. gifsicle is
+      # NOT needed: --check presence-checks the gif/clip jobs (gen-media.py skips
+      # them before any gifsicle call); ffmpeg IS required (the site `space` crop).
       - uses: actions/setup-node@v6
         with:
           node-version: 22
-      - name: Install ffmpeg + gifsicle
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg gifsicle
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - name: Set up Python virtual environment
         run: |
           python3 -m venv .venv
@@ -237,4 +257,3 @@ jobs:
           path: target/gen-check-diff/
           retention-days: 7
           if-no-files-found: ignore
-

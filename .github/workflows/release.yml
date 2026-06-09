@@ -16,6 +16,7 @@ jobs:
   check:
     name: check
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
@@ -48,6 +49,7 @@ jobs:
     name: build (${{ matrix.target }})
     needs: check
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -128,6 +130,7 @@ jobs:
     name: deb (${{ matrix.target }})
     needs: check
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -171,6 +174,7 @@ jobs:
     name: release
     needs: [build, deb]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
         with:
@@ -221,6 +225,7 @@ jobs:
     # tester pre-release tags (v*-win.N etc.) build artifacts only.
     if: ${{ !contains(github.ref_name, '-') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
@@ -260,6 +265,7 @@ jobs:
     # Never let a pre-release (v*-rc/-beta/-alpha) clobber the stable formula.
     if: ${{ !contains(github.ref_name, '-') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Download artifacts
         uses: actions/download-artifact@v8
@@ -351,12 +357,13 @@ jobs:
     # one build matrix, not a parallel build.
     if: ${{ !contains(github.ref_name, '-') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
       id-token: write # npm provenance (`npm publish --provenance`)
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
