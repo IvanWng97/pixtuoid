@@ -9,7 +9,7 @@
 //! `env::var("HOME")` reads (one deliberate improvement: an empty `HOME` is
 //! treated as unset).
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// USERPROFILE-first on Windows, HOME on Unix. See module doc for WHY.
 pub(crate) fn user_home() -> String {
@@ -58,6 +58,34 @@ fn resolve_codex_home(codex_home_env: Option<String>, home: String) -> PathBuf {
         }
     }
     PathBuf::from(home).join(".codex")
+}
+
+/// Pure mapping of Go's `os.UserConfigDir()` for the platforms we ship, with
+/// the OS and env values injected so every arm (incl. macOS) is unit-testable
+/// on any host — the runtime `cfg!(target_os)` if-else couldn't test its
+/// non-host arms. Pass `std::env::consts::OS` for `os`. Precedence per OS:
+/// - macOS → `<home>/Library/Application Support`.
+/// - Windows → `%APPDATA%` (Roaming) if set, else `<home>/AppData/Roaming`.
+/// - else → `$XDG_CONFIG_HOME` if set, else `<home>/.config`.
+///
+/// Empty env values count as unset. `home` is the already-resolved user home
+/// (see [`user_home`]) used for the relative fallbacks.
+pub fn resolve_user_config_dir(
+    os: &str,
+    appdata: Option<String>,
+    xdg: Option<String>,
+    home: &Path,
+) -> PathBuf {
+    let nonempty = |v: Option<String>| v.filter(|s| !s.is_empty());
+    match os {
+        "macos" => home.join("Library/Application Support"),
+        "windows" => nonempty(appdata)
+            .map(PathBuf::from)
+            .unwrap_or_else(|| home.join("AppData/Roaming")),
+        _ => nonempty(xdg)
+            .map(PathBuf::from)
+            .unwrap_or_else(|| home.join(".config")),
+    }
 }
 
 /// Pure resolution core, separated so the Windows branch is unit-testable
@@ -155,6 +183,64 @@ mod tests {
         );
         assert_eq!(resolve_user_home_opt(false, None, None), None);
         assert_eq!(resolve_user_home_opt(false, None, s("")), None);
+    }
+
+    #[test]
+    fn user_config_dir_macos_is_application_support() {
+        // macOS arm — unit-testable here despite this NOT being a macOS-cfg build.
+        assert_eq!(
+            resolve_user_config_dir(
+                "macos",
+                Some(r"C:\ignored".into()),
+                Some("/ignored".into()),
+                Path::new("/Users/me")
+            ),
+            PathBuf::from("/Users/me/Library/Application Support")
+        );
+    }
+
+    #[test]
+    fn user_config_dir_windows_prefers_appdata_then_roaming_fallback() {
+        assert_eq!(
+            resolve_user_config_dir(
+                "windows",
+                s(r"C:\Users\ada\AppData\Roaming"),
+                None,
+                Path::new(r"C:\Users\ada")
+            ),
+            PathBuf::from(r"C:\Users\ada\AppData\Roaming")
+        );
+        // empty APPDATA → relative fallback under home.
+        assert_eq!(
+            resolve_user_config_dir("windows", s(""), None, Path::new(r"C:\Users\ada")),
+            PathBuf::from(r"C:\Users\ada").join("AppData/Roaming")
+        );
+        assert_eq!(
+            resolve_user_config_dir("windows", None, None, Path::new(r"C:\Users\ada")),
+            PathBuf::from(r"C:\Users\ada").join("AppData/Roaming")
+        );
+    }
+
+    #[test]
+    fn user_config_dir_linux_prefers_xdg_then_dot_config() {
+        assert_eq!(
+            resolve_user_config_dir("linux", None, s("/xdg/cfg"), Path::new("/home/u")),
+            PathBuf::from("/xdg/cfg")
+        );
+        // empty XDG → ~/.config.
+        assert_eq!(
+            resolve_user_config_dir("linux", None, s(""), Path::new("/home/u")),
+            PathBuf::from("/home/u/.config")
+        );
+        assert_eq!(
+            resolve_user_config_dir("linux", None, None, Path::new("/home/u")),
+            PathBuf::from("/home/u/.config")
+        );
+        // any non-macos/windows OS string takes the XDG arm (the `_` catch-all).
+        assert_eq!(
+            resolve_user_config_dir("freebsd", None, s("/xdg/cfg"), Path::new("/home/u")),
+            PathBuf::from("/xdg/cfg")
+        );
     }
 
     #[test]

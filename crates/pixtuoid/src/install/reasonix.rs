@@ -70,20 +70,17 @@ pub fn detect_installed() -> bool {
 /// `detect_installed` probes `~/.config/reasonix` on Windows, which Reasonix never
 /// creates, so auto-detection would always miss), else `$XDG_CONFIG_HOME` falling
 /// back to `~/.config`.
+///
+/// The OS->dir decision is a PURE core fn (`platform::resolve_user_config_dir`)
+/// so every arm is unit-testable on any host; this site just injects the live
+/// OS + env + home values once.
 fn user_config_dir() -> PathBuf {
-    if cfg!(target_os = "macos") {
-        io::home_relative("Library/Application Support")
-    } else if cfg!(windows) {
-        match std::env::var("APPDATA") {
-            Ok(a) if !a.is_empty() => PathBuf::from(a),
-            _ => io::home_relative("AppData/Roaming"),
-        }
-    } else {
-        match std::env::var("XDG_CONFIG_HOME") {
-            Ok(x) if !x.is_empty() => PathBuf::from(x),
-            _ => io::home_relative(".config"),
-        }
-    }
+    pixtuoid_core::platform::resolve_user_config_dir(
+        std::env::consts::OS,
+        std::env::var("APPDATA").ok(),
+        std::env::var("XDG_CONFIG_HOME").ok(),
+        &io::home_relative(""),
+    )
 }
 
 /// Reasonix runs the `command` string under a shell — `sh -c` on Unix, `cmd.exe
