@@ -652,11 +652,14 @@ impl<B: Backend<Error: Send + Sync + 'static>> Renderer for TuiRenderer<B> {
             .retain(|id| scene.agents.contains_key(id));
         self.coffee_fetched_at
             .retain(|id, _| scene.agents.contains_key(id));
-        // Evict per-agent motion state for departed agents (mirrors the
-        // coffee/history/cache eviction above).
-        self.floor_ctxs[self.current_floor]
-            .motion
-            .retain(|id, _| scene.agents.contains_key(id));
+        // Evict per-agent motion state for departed agents across EVERY floor
+        // (mirrors the coffee/cache eviction). MotionState lives on an agent's
+        // own (immutable) floor, so a current-floor-only retain leaked the
+        // walk-path Vec of any agent that exited while a different floor was
+        // current and that floor was never re-navigated.
+        for ctx in &mut self.floor_ctxs {
+            ctx.motion.retain(|id, _| scene.agents.contains_key(id));
+        }
 
         let floor_meta = FloorMeta::for_floor(self.current_floor, nf);
         // Compute popup scale before the mutable borrows below.
@@ -719,8 +722,14 @@ impl<B: Backend<Error: Send + Sync + 'static>> Renderer for TuiRenderer<B> {
         }
         if let Ok(ref layout_opt) = result {
             self.cached_layout = layout_opt.clone();
+            // Ok(None) = draw_scene painted footer-only (compute failed at this
+            // size): no popup was drawn, so zero the popup-click hit-box rather
+            // than leave a stale scale the mouse handler reads as "popup on
+            // screen". Mirrors the too-small early-return + the transition path.
+            self.last_popup_scale = if layout_opt.is_some() { popup_scale } else { 0.0 };
+        } else {
+            self.last_popup_scale = 0.0;
         }
-        self.last_popup_scale = popup_scale;
         result.map(|_| ())
     }
 }

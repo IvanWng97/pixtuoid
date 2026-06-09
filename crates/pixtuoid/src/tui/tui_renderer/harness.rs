@@ -532,6 +532,80 @@ fn colliding_labels_with_multibyte_session_ids_do_not_panic() {
         .expect("render must not panic on a multi-byte session_id");
 }
 
+// Regression: render() set last_popup_scale unconditionally, even on an
+// Ok(None) (footer-only) frame where compute_with_seed fails at a
+// small-but-not-tiny size — leaving a stale popup-click hit-box the mouse
+// handler would honor though nothing was painted.
+#[test]
+fn no_layout_frame_zeroes_the_popup_hit_box() {
+    // 100x16 → scene_rect 100x15 passes render()'s 20x12 gate, but buf_h=30 is
+    // below compute_with_seed's office minimum → draw_scene returns Ok(None).
+    let scene = scene_with(vec![idle("/nl/0.jsonl", 0, t0())], 16);
+    let mut r = build(100, 16, vec![]);
+    r.set_version_popup(true, t0());
+    let t = t0() + Duration::from_millis(150); // mid-entrance ⇒ scale > 0
+    assert!(
+        r.version_popup_scale(t) > 0.0,
+        "the popup is animating this frame"
+    );
+    r.render(&scene, &pack(), t).expect("render");
+    assert!(r.cached_layout().is_none(), "no layout produced at this size");
+    assert_eq!(
+        r.last_popup_scale(),
+        0.0,
+        "a footer-only frame paints no popup → no stale hit-box"
+    );
+}
+
+// Regression: per-agent MotionState was evicted only on the CURRENT floor, so an
+// agent that exited while a different floor was visible leaked its walk-path Vec
+// on its own (non-current) floor until that floor was next navigated to.
+#[test]
+fn departed_agent_motion_is_evicted_on_a_non_current_floor() {
+    let cap = 16;
+    let a = AgentId::from_transcript_path("/ev/floor0.jsonl");
+    let b = AgentId::from_transcript_path("/ev/floor1.jsonl");
+    // Long-idle so both wander and acquire a MotionState.
+    let scene = scene_with(
+        vec![
+            slot(a, 0, 0, t0() - Duration::from_secs(120)),
+            slot(b, 1, cap, t0() - Duration::from_secs(120)),
+        ],
+        cap,
+    );
+    let mut r = build(100, 40, vec![]);
+    let mut now = t0();
+
+    // Warm up floor 0, then visit floor 1 so agent B gets a MotionState there.
+    for _ in 0..10 {
+        r.render(&scene, &pack(), now).expect("render");
+        now += Duration::from_millis(33);
+    }
+    r.navigate_floor(1, now);
+    render_until_settled(&mut r, &scene, &pack(), &mut now, 1);
+    for _ in 0..10 {
+        r.render(&scene, &pack(), now).expect("render");
+        now += Duration::from_millis(33);
+    }
+    assert!(
+        r.floor_motion(1).and_then(|m| m.get(&b)).is_some(),
+        "floor-1 agent B should have a MotionState after visiting floor 1"
+    );
+
+    // Back to floor 0 (B's floor is now NON-current), then B exits the scene.
+    r.navigate_floor(0, now);
+    render_until_settled(&mut r, &scene, &pack(), &mut now, 0);
+    let scene_without_b = scene_with(vec![slot(a, 0, 0, t0() - Duration::from_secs(120))], cap);
+    now += Duration::from_millis(33);
+    r.render(&scene_without_b, &pack(), now).expect("render");
+
+    assert_eq!(
+        r.floor_motion(1).map(|m| m.contains_key(&b)),
+        Some(false),
+        "a departed agent's MotionState must be evicted even on a non-current floor"
+    );
+}
+
 // Regression: an in-flight floor transition used to leave `last_pet_pos` stale
 // from the previous normal frame, so the mouse handler could "pet" a ghost at
 // last frame's location mid-slide. The transition path must clear it.
