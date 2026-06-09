@@ -35,8 +35,8 @@ impl AgentId {
     /// Source-agnostic factory. `source` is the source's name (matches the
     /// `Source::name()` return value, e.g. `"claude-code"`, `"codex"`,
     /// `"cursor"`); `opaque_id` is whatever the source uses to uniquely
-    /// identify a session — a JSONL path for CC, a session UUID for an
-    /// SDK source, a socket path for a hook-based source. The pair is
+    /// identify a session — a session UUID for CC, a rollout-filename UUID for
+    /// Codex, the cwd for a hook-only source. The pair is
     /// hashed so two sources with the same `opaque_id` produce distinct
     /// `AgentId`s (no cross-source collisions).
     pub fn from_parts(source: &str, opaque_id: &str) -> Self {

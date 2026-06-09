@@ -108,11 +108,13 @@ pub fn decode_hook_payload(v: Value) -> Result<AgentEvent> {
         .ok_or_else(|| anyhow!("missing/empty session_id"))?
         .to_string();
     // The per-session key strategy is registry data (`HookDecoding::id_key`),
-    // not a name match: CC keys on `transcript_path` (its hook and JSONL both
-    // carry it, so they coalesce); Codex MUST key on `session_id` (== its
-    // rollout-filename UUID) since its `transcript_path` is `string | null` —
-    // keying on the path would split hook and JSONL into two sprites. Unknown
-    // sources get the CC-shaped default.
+    // not a name match: CC and Codex key on `session_id` (the session UUID);
+    // Antigravity — and the unknown-source default — keys on `transcript_path`,
+    // falling back to `session_id`. Codex MUST use `session_id` since its
+    // `transcript_path` is `string | null` (keying on the path would split hook
+    // and JSONL into two sprites); CC keys on it because that UUID equals its
+    // transcript filename stem (`cc_id_from_path`), so a subagent->parent link
+    // survives a git-worktree cwd-split.
     use crate::source::registry::IdKey;
     // Normalized transcript_path: fold `\`→`/` + lowercase on Windows so the
     // hook key and the JSONL watcher key (which walks real Path strings) hash to
