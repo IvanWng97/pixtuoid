@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use toml::value::Table;
 
 use crate::install::target::MergeOutcome;
@@ -49,13 +49,26 @@ use crate::install::io::shell_single_quote;
 ///   codex injects no per-hook env we could set instead. KNOWN EXPERIMENTAL
 ///   LIMITATION: because a quoted path can't survive cmd.exe `/C` here, a
 ///   pixtuoid-hook.exe under a path containing SPACES (e.g. a Windows username
-///   with a space) can't be invoked with a trailing arg — tracked in #195. The
-///   space-free install paths (`%USERPROFILE%\.cargo\bin`, npm prefix) are the
-///   common case and work.
+///   with a space) can't be invoked with a trailing arg, so we REJECT a spaced
+///   path at install with an actionable error (#195) rather than write a
+///   silently-broken hook. The space-free install paths (`%USERPROFILE%\.cargo\bin`,
+///   npm prefix) are the common case and work.
 pub fn hook_command(resolved: &Path) -> Result<String> {
     let p = resolved
         .to_str()
         .ok_or_else(|| anyhow!("pixtuoid-hook path is non-UTF-8: {}", resolved.display()))?;
+    // #195: a spaced exe path can't be carried with a trailing arg through codex's
+    // cmd.exe /C (Rust's Command::arg escaping + cmd quoting mangle it). Rather
+    // than write a silently-broken hook, FAIL LOUDLY at install with the workaround.
+    #[cfg(windows)]
+    if p.contains(' ') {
+        bail!(
+            "pixtuoid-hook is at a path containing a space ({p}) — Codex's cmd.exe /C \
+             hook runner can't invoke it with arguments. Install pixtuoid to a \
+             space-free location (e.g. %USERPROFILE%\\.cargo\\bin or the npm global \
+             prefix) and re-run `install-hooks --target codex`. (Tracking: #195.)"
+        );
+    }
     #[cfg(windows)]
     let cmd = format!("{p} --source codex");
     #[cfg(unix)]
@@ -366,6 +379,20 @@ command = "/old/pixtuoid-hook"
     fn hook_command_emits_bare_exec_form_with_source_flag_on_windows() {
         let cmd = hook_command(std::path::Path::new(r"C:\tools\pixtuoid-hook.exe")).unwrap();
         assert_eq!(cmd, r"C:\tools\pixtuoid-hook.exe --source codex");
+    }
+
+    // #195: a spaced exe path is rejected at install (loud, actionable) rather
+    // than written as a hook that cmd.exe /C would silently mangle.
+    #[test]
+    #[cfg(windows)]
+    fn hook_command_rejects_spaced_path_on_windows() {
+        let err = hook_command(std::path::Path::new(r"C:\Program Files\pixtuoid-hook.exe"))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("space") && err.contains("space-free"),
+            "must explain the spaced-path limitation + workaround: {err}"
+        );
     }
 
     #[test]

@@ -230,6 +230,21 @@ mod tests {
         }
     }
 
+    // Every label_prefix must be globally UNIQUE: the per-row length check above
+    // catches a malformed prefix, but two rows sharing the same 2-char prefix
+    // (e.g. two `cc`s) would render two distinct CLIs as indistinguishable
+    // sprites with no compile or test error. Pin uniqueness across the table.
+    #[test]
+    fn all_label_prefixes_are_unique() {
+        use std::collections::HashSet;
+        let set: HashSet<&str> = REGISTRY.iter().map(|d| d.label_prefix).collect();
+        assert_eq!(
+            set.len(),
+            REGISTRY.len(),
+            "duplicate label_prefix across sources — two CLIs would share one sprite prefix"
+        );
+    }
+
     // Guards literal-drift: `name` is initialized FROM the module const (so a
     // rename is already a compile error at the init site); this catches the
     // init being replaced with a string literal that later drifts.
