@@ -280,9 +280,13 @@ fn status_segments(
     let seg_min: Vec<(String, SegRole)> = vec![(format!(" {n}a "), SegRole::Neutral)];
 
     let w = term_width as usize;
-    let q = quit.len();
+    // Measure in display COLUMNS, not bytes: the footer carries single-column
+    // multi-byte glyphs (·, ×, ↑↓), so byte length over-counts width, biasing
+    // toward a narrower tier and short-padding the row. Matches the
+    // source-warning branch above (which already uses chars().count()).
+    let q = quit.chars().count();
     for tier in [seg_full, seg_medium, seg_min] {
-        let stats_len: usize = tier.iter().map(|(s, _)| s.len()).sum();
+        let stats_len: usize = tier.iter().map(|(s, _)| s.chars().count()).sum();
         if stats_len + q <= w {
             let pad = w.saturating_sub(stats_len + q);
             let mut out = tier;
@@ -812,6 +816,53 @@ mod hud_tests {
         assert!(
             line.contains("1 active"),
             "active count still shows: {line}"
+        );
+    }
+
+    // Footer tier-selection + padding must measure DISPLAY COLUMNS, not bytes:
+    // the full tier carries single-column multi-byte glyphs (·, ×), so a byte
+    // measure over-counts width and short-pads the row below the terminal width.
+    #[test]
+    fn status_segments_pads_to_full_column_width_with_multibyte_glyphs() {
+        use pixtuoid_core::{AgentId, AgentSlot};
+        use std::path::PathBuf;
+        use std::sync::Arc;
+        let slot = AgentSlot {
+            agent_id: AgentId::from_transcript_path("/p/mb.jsonl"),
+            source: Arc::from("cc"),
+            session_id: Arc::from("s"),
+            cwd: Arc::from(PathBuf::from("/p").as_path()),
+            label: Arc::from("mb"),
+            // A real tool token ⇒ the tail carries `· Bash×1` (·/× are 2-byte,
+            // 1-column glyphs).
+            state: ActivityState::Active {
+                tool_use_id: Some(Arc::from("t")),
+                detail: Some(Arc::from("Bash ls")),
+            },
+            state_started_at: SystemTime::UNIX_EPOCH,
+            created_at: SystemTime::UNIX_EPOCH,
+            last_event_at: SystemTime::UNIX_EPOCH,
+            exiting_at: None,
+            pending_idle_at: None,
+            desk_index: 0,
+            floor_idx: 0,
+            tool_call_count: 0,
+            active_ms: 0,
+            unknown_cwd: false,
+            parent_id: None,
+        };
+        let mut scene = SceneState::uniform(16);
+        scene.agents.insert(slot.agent_id, slot);
+        let width: u16 = 200; // wide enough that the full tier is selected either way
+        let segs = status_segments(&scene, width, None, None);
+        let cols: usize = segs.iter().map(|(s, _)| s.chars().count()).sum();
+        assert_eq!(
+            cols, width as usize,
+            "footer must fill the full width in display columns: {segs:?}"
+        );
+        assert!(
+            segs.iter().any(|(s, _)| s.contains('\u{00d7}')),
+            "full tier (with the tool breakdown) expected at width 200: {segs:?}"
         );
     }
 }

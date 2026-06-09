@@ -2,4 +2,4 @@
 source: crates/pixtuoid/src/tui/widgets/mod.rs
 expression: line
 ---
- 6 agents · 6 active · 0 waiting · 0 idle · Bash×1 Edit×1 Glob×1 Grep×1                                                                                          [?]help [p]ause [t]heme [q]uit
+ 6 agents · 6 active · 0 waiting · 0 idle · Bash×1 Edit×1 Glob×1 Grep×1                                                                                                  [?]help [p]ause [t]heme [q]uit
