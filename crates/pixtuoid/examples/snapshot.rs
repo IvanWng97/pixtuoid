@@ -783,7 +783,14 @@ fn dashboard_scene(now: SystemTime) -> SceneState {
 
     let cc_root_id = AgentId::from_transcript_path("/demo/dash_cc_root.jsonl");
 
-    let agents: &[(&str, &str, ActivityState, Option<AgentId>, usize, &'static str)] = &[
+    let agents: &[(
+        &str,
+        &str,
+        ActivityState,
+        Option<AgentId>,
+        usize,
+        &'static str,
+    )] = &[
         (
             "cc·pixtuoid",
             "/demo/dash_cc_root.jsonl",
@@ -1557,13 +1564,15 @@ mod tests {
 
     #[test]
     fn dashboard_flag_parses_and_conflicts_with_anim() {
-        assert!(
-            SnapshotArgs::try_parse_from(["snapshot", "out.png", "--dashboard"]).is_ok()
-        );
-        assert!(
-            SnapshotArgs::try_parse_from(["snapshot", "out.png", "--dashboard", "--anim", "desk"])
-                .is_err()
-        );
+        assert!(SnapshotArgs::try_parse_from(["snapshot", "out.png", "--dashboard"]).is_ok());
+        assert!(SnapshotArgs::try_parse_from([
+            "snapshot",
+            "out.png",
+            "--dashboard",
+            "--anim",
+            "desk"
+        ])
+        .is_err());
         assert!(
             SnapshotArgs::try_parse_from(["snapshot", "out.png", "--dashboard", "--gif"]).is_err()
         );

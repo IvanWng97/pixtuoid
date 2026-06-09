@@ -458,9 +458,25 @@ pub static DRACULA: Theme = Theme {
         ],
     },
     source: SourceColors {
-        claude_code: Rgb { r: 0xff, g: 0xb8, b: 0x6c }, // dracula orange
-        codex: Rgb { r: 0x8b, g: 0xe9, b: 0xfd },       // dracula cyan
-        reasonix: Rgb { r: 0xbd, g: 0x93, b: 0xf9 },    // dracula purple
-        antigravity: Rgb { r: 0x50, g: 0xfa, b: 0x7b }, // dracula green
+        claude_code: Rgb {
+            r: 0xff,
+            g: 0xb8,
+            b: 0x6c,
+        }, // dracula orange
+        codex: Rgb {
+            r: 0x8b,
+            g: 0xe9,
+            b: 0xfd,
+        }, // dracula cyan
+        reasonix: Rgb {
+            r: 0xbd,
+            g: 0x93,
+            b: 0xf9,
+        }, // dracula purple
+        antigravity: Rgb {
+            r: 0x50,
+            g: 0xfa,
+            b: 0x7b,
+        }, // dracula green
     },
 };

@@ -320,7 +320,11 @@ mod tests {
             // All four mutually distinct (no two CLIs share a badge color).
             for i in 0..hues.len() {
                 for j in (i + 1)..hues.len() {
-                    assert_ne!(hues[i], hues[j], "{}: source hues {i} and {j} collide", t.name);
+                    assert_ne!(
+                        hues[i], hues[j],
+                        "{}: source hues {i} and {j} collide",
+                        t.name
+                    );
                 }
             }
         }

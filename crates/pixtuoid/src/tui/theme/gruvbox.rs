@@ -464,9 +464,25 @@ pub static GRUVBOX: Theme = Theme {
         ],
     },
     source: SourceColors {
-        claude_code: Rgb { r: 0xfe, g: 0x80, b: 0x19 }, // gruvbox bright orange
-        codex: Rgb { r: 0x83, g: 0xa5, b: 0x98 },       // gruvbox aqua
-        reasonix: Rgb { r: 0xd3, g: 0x86, b: 0x9b },    // gruvbox pink
-        antigravity: Rgb { r: 0xb8, g: 0xbb, b: 0x26 }, // gruvbox bright yellow-green
+        claude_code: Rgb {
+            r: 0xfe,
+            g: 0x80,
+            b: 0x19,
+        }, // gruvbox bright orange
+        codex: Rgb {
+            r: 0x83,
+            g: 0xa5,
+            b: 0x98,
+        }, // gruvbox aqua
+        reasonix: Rgb {
+            r: 0xd3,
+            g: 0x86,
+            b: 0x9b,
+        }, // gruvbox pink
+        antigravity: Rgb {
+            r: 0xb8,
+            g: 0xbb,
+            b: 0x26,
+        }, // gruvbox bright yellow-green
     },
 };

@@ -68,7 +68,11 @@ pub(in crate::tui) fn paint_dashboard(
     // we hand to the cue is never the selected one (clamp_scroll parks a
     // down-navigated selection at the window's bottom edge).
     let overflow = rows.len() > visible;
-    let content_window = if overflow { visible.saturating_sub(1) } else { visible };
+    let content_window = if overflow {
+        visible.saturating_sub(1)
+    } else {
+        visible
+    };
     let scroll = crate::tui::dashboard::clamp_scroll(rows, selected, scroll, content_window);
     let mut lines: Vec<Line> = rows
         .iter()
@@ -139,7 +143,10 @@ fn dashboard_line(row: &DashboardRow, is_selected: bool, theme: &Theme) -> Line<
         Span::styled(badge_text, Style::default().fg(badge_color)),
         Span::raw(" "),
         Span::styled(label_cell, base.fg(to_color(color))),
-        Span::styled(format!(" F{:<2} ", row.floor_idx + 1), base.fg(to_color(theme.ui.neon_brand))),
+        Span::styled(
+            format!(" F{:<2} ", row.floor_idx + 1),
+            base.fg(to_color(theme.ui.neon_brand)),
+        ),
         Span::styled(state_cell, base.fg(to_color(color))),
     ])
 }
@@ -231,15 +238,24 @@ mod tests {
         let line = dashboard_line(&row, true, &NORMAL);
         // spans[0]=badge, [1]=space, [2]=name, [3]=floor, [4]=state
         assert!(
-            !line.spans[0].style.add_modifier.contains(Modifier::REVERSED),
+            !line.spans[0]
+                .style
+                .add_modifier
+                .contains(Modifier::REVERSED),
             "badge must not be reversed"
         );
         assert!(
-            line.spans[2].style.add_modifier.contains(Modifier::REVERSED),
+            line.spans[2]
+                .style
+                .add_modifier
+                .contains(Modifier::REVERSED),
             "name must be reversed when selected"
         );
         assert!(
-            line.spans[4].style.add_modifier.contains(Modifier::REVERSED),
+            line.spans[4]
+                .style
+                .add_modifier
+                .contains(Modifier::REVERSED),
             "state must be reversed when selected"
         );
     }

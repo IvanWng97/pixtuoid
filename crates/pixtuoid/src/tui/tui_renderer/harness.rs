@@ -2193,7 +2193,10 @@ fn dashboard_overflow_cue_appears_below_when_more_than_viewport() {
     r.render(&scene, &pack(), t0()).unwrap();
 
     let popup = dash_popup(r.frame_buffer());
-    assert!(popup.contains('\u{22ee}'), "overflow cue ⋮ must appear:\n{popup}");
+    assert!(
+        popup.contains('\u{22ee}'),
+        "overflow cue ⋮ must appear:\n{popup}"
+    );
 }
 
 #[test]
@@ -2212,7 +2215,10 @@ fn dashboard_overflow_cue_absent_when_all_visible() {
     r.render(&scene, &pack(), t0()).unwrap();
 
     let popup = dash_popup(r.frame_buffer());
-    assert!(!popup.contains('\u{22ee}'), "no overflow cue for 8 rows:\n{popup}");
+    assert!(
+        !popup.contains('\u{22ee}'),
+        "no overflow cue for 8 rows:\n{popup}"
+    );
 }
 
 #[test]
@@ -2233,6 +2239,12 @@ fn dashboard_overflow_cue_keeps_a_bottom_navigated_selection_visible() {
     r.set_dashboard_frame(true, rows, Some(row20), 0);
     r.render(&scene, &pack(), t0()).unwrap();
     let popup = dash_popup(r.frame_buffer());
-    assert!(popup.contains("row20"), "selected bottom row must stay visible when a cue shows:\n{popup}");
-    assert!(popup.contains('\u{22ee}'), "overflow cue present (rows below):\n{popup}");
+    assert!(
+        popup.contains("row20"),
+        "selected bottom row must stay visible when a cue shows:\n{popup}"
+    );
+    assert!(
+        popup.contains('\u{22ee}'),
+        "overflow cue present (rows below):\n{popup}"
+    );
 }

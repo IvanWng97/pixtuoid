@@ -438,9 +438,25 @@ pub static CYBERPUNK: Theme = Theme {
         ],
     },
     source: SourceColors {
-        claude_code: Rgb { r: 0xff, g: 0x8c, b: 0x00 }, // neon amber/orange
-        codex: Rgb { r: 0x00, g: 0xe5, b: 0xff },       // electric cyan
-        reasonix: Rgb { r: 0xff, g: 0x00, b: 0xc8 },    // hot magenta
-        antigravity: Rgb { r: 0x39, g: 0xff, b: 0x14 }, // neon green
+        claude_code: Rgb {
+            r: 0xff,
+            g: 0x8c,
+            b: 0x00,
+        }, // neon amber/orange
+        codex: Rgb {
+            r: 0x00,
+            g: 0xe5,
+            b: 0xff,
+        }, // electric cyan
+        reasonix: Rgb {
+            r: 0xff,
+            g: 0x00,
+            b: 0xc8,
+        }, // hot magenta
+        antigravity: Rgb {
+            r: 0x39,
+            g: 0xff,
+            b: 0x14,
+        }, // neon green
     },
 };
