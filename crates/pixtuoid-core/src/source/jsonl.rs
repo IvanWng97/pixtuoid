@@ -454,35 +454,23 @@ pub(crate) fn is_subagent_path(path: &Path) -> bool {
     path.components().any(|c| c.as_os_str() == SUBAGENTS_DIR)
 }
 
-/// Detect if this transcript is a CC subagent by checking for the `subagents`
-/// path component. If found, derive the parent's AgentId from the grandparent
-/// directory (the parent session's transcript directory). CC-layout-specific —
-/// Codex subagent parent links come from the `SubagentStart` hook, not the path.
-///
-/// The parent key is rebuilt from the components BEFORE the first `subagents`
-/// (`<parent-dir>.jsonl`) and folded through `normalize_path_key` — the THIRD
-/// keying site, and it must stay byte-identical to the parent transcript's own
-/// watcher-derived key (`default_id_from_path`) or the subagent's `parent_id`
-/// points at a nonexistent agent and the whole scope tree (liveness↑,
-/// cascade↓, b1 drain) silently no-ops on Windows.
+/// Detect a CC subagent by the `subagents` path component and link it to its
+/// parent via the parent's session UUID — the directory component immediately
+/// before `subagents` (`<parent-uuid>`). That UUID equals the parent's own id
+/// (`cc_id_from_path` of the parent transcript), so the link resolves even when
+/// the subagent transcript lands under a DIFFERENT project dir than the parent
+/// (a git-worktree cwd-split): only the cwd-derived project-dir prefix differs;
+/// the `<parent-uuid>` component is identical. CC-layout-specific — Codex links
+/// subagents via the SubagentStart hook instead.
 fn detect_parent_id(path: &Path, source: &str) -> Option<AgentId> {
-    let mut parent_dir = PathBuf::new();
-    let mut found = false;
+    let mut prev: Option<&str> = None;
     for c in path.components() {
         if c.as_os_str() == SUBAGENTS_DIR {
-            found = true;
-            break;
+            return prev.map(|uuid| AgentId::from_parts(source, uuid));
         }
-        parent_dir.push(c);
+        prev = c.as_os_str().to_str();
     }
-    if !found || parent_dir.as_os_str().is_empty() {
-        return None;
-    }
-    let parent_jsonl = format!("{}.jsonl", parent_dir.display());
-    Some(AgentId::from_parts(
-        source,
-        &crate::source::decoder::normalize_path_key(&parent_jsonl),
-    ))
+    None
 }
 
 fn extract_cwd(bytes: &[u8]) -> Option<PathBuf> {
@@ -531,15 +519,14 @@ mod tests {
     // the algorithm inline and silently pinned the superseded string-scan).
     #[test]
     fn detect_parent_id_derives_grandparent_transcript_key() {
-        // THE contract: the derived parent_id must equal the AgentId the
-        // watcher itself derives for the parent transcript — expectation goes
-        // through the REAL watcher keying fn (default_id_from_path), so the
-        // two keying sites can't drift apart on any platform.
+        // THE contract: the derived parent_id keys on the `<parent-uuid>`
+        // component (the dir immediately before `subagents`), which equals the
+        // parent's own id (`cc_id_from_path` of `<parent-uuid>.jsonl`). The
+        // project-dir prefix is cwd-derived and intentionally NOT part of the
+        // key, so the link survives a git-worktree cwd-split.
         let parent: PathBuf = ["projects", "x", "abc123"].iter().collect();
         let p = parent.join("subagents").join("agent-1.jsonl");
-        let parent_transcript = PathBuf::from(format!("{}.jsonl", parent.display()));
-        let expected =
-            AgentId::from_parts("claude-code", &default_id_from_path(&parent_transcript));
+        let expected = AgentId::from_parts("claude-code", "abc123");
         assert_eq!(detect_parent_id(&p, "claude-code"), Some(expected));
         assert!(is_subagent_path(&p));
     }
@@ -564,25 +551,48 @@ mod tests {
         );
     }
 
+    #[test]
+    fn detect_parent_id_keys_on_parent_uuid_component() {
+        let sub = Path::new("/Users/me/.claude/projects/-Users-me-proj/abc123/subagents/agent-1.jsonl");
+        let expected = AgentId::from_parts("claude-code", "abc123");
+        assert_eq!(detect_parent_id(sub, "claude-code"), Some(expected));
+    }
+
+    #[test]
+    fn detect_parent_id_survives_cwd_split() {
+        // THE bug: parent + subagent under DIFFERENT project dirs (a worktree
+        // cwd-split). Only the project-dir component differs; the <parent-uuid>
+        // component is identical, so BOTH must resolve to the same parent link.
+        let under_a = Path::new("/Users/me/.claude/projects/-PROJECT-A/abc123/subagents/agent-1.jsonl");
+        let under_b = Path::new("/Users/me/.claude/projects/-PROJECT-B/abc123/subagents/agent-1.jsonl");
+        let expected = AgentId::from_parts("claude-code", "abc123");
+        assert_eq!(detect_parent_id(under_a, "claude-code"), Some(expected));
+        assert_eq!(detect_parent_id(under_b, "claude-code"), Some(expected));
+        assert_eq!(detect_parent_id(under_a, "claude-code"), detect_parent_id(under_b, "claude-code"),
+            "same <parent-uuid> under different project dirs resolves to the same parent");
+    }
+
+    #[test]
+    fn detect_parent_id_handles_workflow_nesting() {
+        let sub = Path::new("/Users/me/.claude/projects/p/abc123/subagents/workflows/wf_0d/agent-y.jsonl");
+        let expected = AgentId::from_parts("claude-code", "abc123");
+        assert_eq!(detect_parent_id(sub, "claude-code"), Some(expected));
+    }
+
     // Only RUNS on the windows-test CI job (backslashes are ordinary filename
     // bytes on Unix, so this shape is only meaningful there) — pins the
     // components rewrite's whole reason to exist.
     #[cfg(windows)]
     #[test]
     fn detect_parent_id_handles_backslash_paths() {
+        // Backslash separators are split into ordinary components on Windows, so
+        // the `<parent-uuid>` component (`abc123`) before `subagents` is
+        // extracted just as it is on Unix — pins the component-walk reason to
+        // exist. CC session UUIDs are lowercase, so no casefold is needed on the
+        // key (mirrors `cc_id_from_path`).
         let p = Path::new(r"C:\Users\Me\.claude\projects\x\abc123\subagents\agent-1.jsonl");
-        // Same real-contract formulation: the parent_id must match what the
-        // watcher derives for the parent transcript (normalized — lowercase,
-        // forward slashes), NOT the raw backslash rebuild.
-        let expected = AgentId::from_parts(
-            "claude-code",
-            &default_id_from_path(Path::new(r"C:\Users\Me\.claude\projects\x\abc123.jsonl")),
-        );
+        let expected = AgentId::from_parts("claude-code", "abc123");
         assert_eq!(detect_parent_id(p, "claude-code"), Some(expected));
-        assert_eq!(
-            default_id_from_path(Path::new(r"C:\Users\Me\.claude\projects\x\abc123.jsonl")),
-            "c:/users/me/.claude/projects/x/abc123.jsonl"
-        );
         assert!(is_subagent_path(p));
     }
 

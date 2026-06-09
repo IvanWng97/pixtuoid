@@ -6,10 +6,12 @@
 //!   - **Codex**: the subagent's parent link arrives via the `SubagentStart`
 //!     HOOK (`agent_id` + `session_id`); its rollout is flat.
 //!   - **CC**: the subagent gets its own transcript under
-//!     `<parent>/subagents/agent-*.jsonl`, so the JSONL watcher derives the
-//!     parent link from the PATH (`detect_parent_id`: `<dir>/subagents/…` →
-//!     parent key `<dir>.jsonl`). No hook carries it — CC subagent hook events
-//!     are misattributed to the parent and suppressed via `active_tasks`.
+//!     `<parent-uuid>/subagents/agent-*.jsonl`, so the JSONL watcher derives
+//!     the parent link from the `<parent-uuid>` dir component
+//!     (`detect_parent_id`), which equals the parent's own session-UUID id —
+//!     cwd-independent, so the link survives a git-worktree cwd-split. No hook
+//!     carries it — CC subagent hook events are misattributed to the parent and
+//!     suppressed via `active_tasks`.
 //!
 //! Event shapes mirror the live capture (a `Task` dispatch + a
 //! `general-purpose` subagent + a clean `/exit` → cascade).
@@ -25,17 +27,21 @@ use pixtuoid_core::state::SceneState;
 use pixtuoid_core::AgentId;
 use serde_json::json;
 
+// The parent transcript's filename stem ("parent") IS the session UUID the hook
+// carries — CC keys on the UUID, not the path (IdKey::SessionId), so hook and
+// JSONL coalesce on it.
 const PARENT_PATH: &str = "/proj/parent.jsonl";
-// The subagent transcript lives under `<parent>/subagents/`; the watcher's
-// detect_parent_id turns this path into parent key `/proj/parent.jsonl` — i.e.
-// exactly the parent's own AgentId, which is what wires the two together.
+// The subagent transcript lives under `<parent-uuid>/subagents/`; the watcher's
+// detect_parent_id keys on the `<parent-uuid>` component ("parent") — i.e.
+// exactly the parent's own AgentId, which is what wires the two together. The
+// subagent's own id is its filename stem ("agent-1").
 const SUB_PATH: &str = "/proj/parent/subagents/agent-1.jsonl";
 
 fn parent_id() -> AgentId {
-    AgentId::from_parts("claude-code", PARENT_PATH)
+    AgentId::from_parts("claude-code", "parent")
 }
 fn sub_id() -> AgentId {
-    AgentId::from_parts("claude-code", SUB_PATH)
+    AgentId::from_parts("claude-code", "agent-1")
 }
 
 #[test]

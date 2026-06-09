@@ -20,7 +20,9 @@ fn load_jsonl(name: &str) -> serde_json::Value {
 #[test]
 fn decode_session_start() {
     let ev = decode_hook_payload(load("session_start")).unwrap();
-    let expected_id = AgentId::from_transcript_path("/Users/me/.claude/projects/x/ses-abc.jsonl");
+    // CC keys on the session UUID (IdKey::SessionId), which == the transcript
+    // filename stem the watcher/per-line decode derive (`cc_id_from_path`).
+    let expected_id = AgentId::from_parts("claude-code", "ses-abc");
     match ev {
         AgentEvent::SessionStart {
             agent_id,
@@ -718,18 +720,23 @@ fn decode_hook_payload_missing_session_id_returns_err() {
 }
 
 #[test]
-fn decode_hook_payload_missing_transcript_path_falls_back_to_session_id() {
-    // Codex sends transcript_path as string|null, so a missing/null value must
-    // NOT error — it falls back to session_id for the AgentId (namespaced by
-    // source, so no cross-CLI collision).
+fn decode_cc_hook_keys_on_session_id_ignoring_transcript_path() {
+    // CC keys on the session UUID (IdKey::SessionId) regardless of any
+    // transcript_path the hook carries — keying on the cwd-derived path would
+    // rebuild the wrong parent after a git-worktree split. Pin that a present
+    // transcript_path whose stem DIFFERS from session_id is ignored: the
+    // AgentId must still be the session-id key (which == the watcher's
+    // cc_id_from_path of `<session_id>.jsonl`, so the two transports coalesce).
     let payload = serde_json::json!({
         "hook_event_name": "PreToolUse",
         "session_id": "ses-abc",
+        // A transcript_path whose stem ("OTHER-stem") is NOT the session_id.
+        "transcript_path": "/Users/me/.claude/projects/-Worktree-B/OTHER-stem.jsonl",
         "cwd": "/repo",
         "tool_name": "Bash",
         "tool_input": { "command": "ls" }
     });
-    let ev = decode_hook_payload(payload).expect("decodes via session_id fallback");
+    let ev = decode_hook_payload(payload).expect("decodes");
     let agent_id = match ev {
         pixtuoid_core::source::AgentEvent::ActivityStart { agent_id, .. } => agent_id,
         other => panic!("expected ActivityStart, got {other:?}"),
@@ -739,7 +746,8 @@ fn decode_hook_payload_missing_transcript_path_falls_back_to_session_id() {
         pixtuoid_core::AgentId::from_parts(
             pixtuoid_core::source::claude_code::SOURCE_NAME,
             "ses-abc"
-        )
+        ),
+        "CC must key on session_id, ignoring transcript_path"
     );
 }
 
@@ -915,17 +923,17 @@ fn decode_hook_payload_missing_tool_name_still_succeeds() {
     }
 }
 
-// The hook payload's transcript_path and the watcher's walked path must hash
-// to ONE AgentId or every CC session renders as two sprites (hook-wins dedup
-// and permission-Waiting silently die). Unix: byte-identity. Windows: the
-// hook emits backslashes while the watcher walks native paths — both fold
-// through normalize_path_key. Pinned via the REAL seams on both sides (no
-// inline re-simulation). Honesty note: on Unix the fold is identity, so here
-// this pins PLUMBING (both sides reach one id); the fold itself is pinned by
-// the cfg(windows) twin below on the windows-test job.
+// The cross-platform LOCKSTEP guard: the hook side (IdKey::SessionId →
+// `session_id`) and the watcher side (`cc_id_from_path` of a transcript named
+// `<session_id>.jsonl`) must hash to ONE AgentId or every CC session renders as
+// two sprites (hook-wins dedup and permission-Waiting silently die). Pinned via
+// the REAL seams on both sides (no inline re-simulation): the watcher uses the
+// SAME `.with_id_deriver(cc_id_from_path)` that ClaudeCodeSource::run wires.
 #[tokio::test]
 async fn hook_and_watcher_keys_coalesce_for_one_file() {
-    use pixtuoid_core::source::claude_code::{cc_derive_label, cc_session_ended, decode_cc_line};
+    use pixtuoid_core::source::claude_code::{
+        cc_derive_label, cc_id_from_path, cc_session_ended, decode_cc_line,
+    };
     use pixtuoid_core::source::jsonl::{force_polling_backend_for_tests, JsonlWatcher};
     use pixtuoid_core::source::Transport;
     use std::time::Duration;
@@ -939,10 +947,12 @@ async fn hook_and_watcher_keys_coalesce_for_one_file() {
     let projects_root = dir.path().to_path_buf();
     let project_dir = projects_root.join("proj-coalesce");
     tokio::fs::create_dir_all(&project_dir).await.unwrap();
+    // Filename stem == session_id, so the UUID-keyed hook and the stem-keyed
+    // watcher coalesce.
     let transcript = project_dir.join("ses-coalesce.jsonl");
 
-    // Hook side: decode a SessionStart payload whose transcript_path is the
-    // native string form of the same file.
+    // Hook side: decode a SessionStart payload for the same session. The
+    // transcript_path is present but IGNORED (CC keys on session_id).
     let transcript_str = transcript.to_string_lossy().to_string();
     let hook_payload = serde_json::json!({
         "hook_event_name": "SessionStart",
@@ -961,7 +971,8 @@ async fn hook_and_watcher_keys_coalesce_for_one_file() {
         decode_cc_line,
         cc_derive_label,
         cc_session_ended,
-    );
+    )
+    .with_id_deriver(cc_id_from_path);
     let handle = tokio::spawn(async move { watcher.run(tx).await });
 
     tokio::time::sleep(Duration::from_millis(50)).await;
@@ -1006,19 +1017,24 @@ async fn hook_and_watcher_keys_coalesce_for_one_file() {
     );
 }
 
-// The two forms CC actually emits for one file (mixed-separator/case class).
+// The mixed-separator/case path-fold (Windows) — retargeted to Antigravity,
+// the remaining path-keyed source (IdKey::TranscriptPathThenSessionId). CC no
+// longer path-folds (it keys on session_id), so this guards the surviving
+// transcript-path key class via `normalize_path_key`.
 #[cfg(windows)]
 #[test]
 fn mixed_separator_and_case_forms_coalesce_on_windows() {
     let a = serde_json::json!({
         "hook_event_name": "SessionStart",
         "session_id": "s1",
-        "transcript_path": r"C:\Users\Me\.claude\projects\X\s1.jsonl"
+        "transcript_path": r"C:\Users\Me\.gemini\antigravity-cli\brain\X\s1.jsonl",
+        "_pixtuoid_source": "antigravity"
     });
     let b = serde_json::json!({
         "hook_event_name": "SessionStart",
         "session_id": "s1",
-        "transcript_path": "C:/users/me/.claude/projects/x/s1.jsonl"
+        "transcript_path": "C:/users/me/.gemini/antigravity-cli/brain/x/s1.jsonl",
+        "_pixtuoid_source": "antigravity"
     });
     assert_eq!(
         decode_hook_payload(a).unwrap().agent_id(),

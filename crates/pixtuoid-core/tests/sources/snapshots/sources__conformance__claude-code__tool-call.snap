@@ -3,29 +3,29 @@ source: crates/pixtuoid-core/tests/sources/conformance.rs
 expression: events
 ---
 - Rename:
-    agent_id: 13551487942093082797
+    agent_id: 17402456248370490010
     label: code-architect
 - ActivityStart:
-    agent_id: 13551487942093082797
+    agent_id: 17402456248370490010
     tool_use_id: toolu_demo0000000000000001
     detail:
       Generic:
         display: "Glob: crates/**/*.rs"
 - ActivityEnd:
-    agent_id: 13551487942093082797
+    agent_id: 17402456248370490010
     tool_use_id: toolu_demo0000000000000001
 - SessionStart:
-    agent_id: 13551487942093082797
+    agent_id: 17402456248370490010
     source: claude-code
     session_id: 01000000-0000-7000-8000-0000000000cc
     cwd: /home/user/demo-project
     parent_id: ~
 - ActivityStart:
-    agent_id: 13551487942093082797
+    agent_id: 17402456248370490010
     tool_use_id: toolu_demo0000000000000001
     detail:
       Generic:
         display: "Glob: crates/**/*.rs"
 - ActivityEnd:
-    agent_id: 13551487942093082797
+    agent_id: 17402456248370490010
     tool_use_id: toolu_demo0000000000000001

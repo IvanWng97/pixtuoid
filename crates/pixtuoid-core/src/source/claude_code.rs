@@ -90,7 +90,8 @@ impl Source for ClaudeCodeSource {
             decode_cc_line,
             cc_derive_label,
             cc_session_ended,
-        );
+        )
+        .with_id_deriver(cc_id_from_path);
 
         let tx_hook = tx.clone();
         let tx_jsonl = tx.clone();
@@ -118,7 +119,10 @@ impl Source for ClaudeCodeSource {
 
 /// Decode one CC JSONL transcript line into 0..N AgentEvents.
 pub fn decode_cc_line(transcript_path: &str, source: &str, v: Value) -> Result<Vec<AgentEvent>> {
-    let agent_id = AgentId::from_parts(source, transcript_path);
+    // Key on the session UUID (filename stem), NOT the raw path — matches the
+    // hook decoder's `IdKey::SessionId` and the watcher's `cc_id_from_path`
+    // deriver, so all four CC keying sites coalesce (mirrors Codex).
+    let agent_id = AgentId::from_parts(source, &cc_id_from_path(Path::new(transcript_path)));
     let Some(obj) = v.as_object() else {
         return Ok(vec![]);
     };
@@ -461,6 +465,29 @@ mod tests {
     // it's an /exit marker. A fuzz of all 291k real lines through
     // decode_cc_line confirmed zero panics; this pins the common
     // string-content shape the array-only fixtures never exercise.
+    // Coalescing guard: `cc_id_from_path` is invoked in multiple places that
+    // must agree — the per-line decode (here), the watcher's `with_id_deriver`
+    // (ClaudeCodeSource::run), and the hook decoder's session-id key. If the
+    // per-line decode ever keys differently from the deriver, one CC session
+    // splits into two sprites. Mirrors codex's
+    // `decode_line_keys_agent_id_on_codex_id_from_path`.
+    #[test]
+    fn decode_cc_line_keys_agent_id_on_cc_id_from_path() {
+        let path = "/Users/me/.claude/projects/p/01000000-0000-7000-8000-0000000000cc.jsonl";
+        let events = decode_cc_line(
+            path,
+            "claude-code",
+            serde_json::json!({"type":"assistant","attributionAgent":"explorer","message":{"content":[]}}),
+        )
+        .unwrap();
+        let expected = AgentId::from_parts("claude-code", &cc_id_from_path(std::path::Path::new(path)));
+        assert_eq!(
+            events[0].agent_id(),
+            expected,
+            "decode_cc_line must key its AgentId on cc_id_from_path (the deriver)"
+        );
+    }
+
     #[test]
     fn string_content_turns_emit_no_tool_events() {
         for ty in ["assistant", "user"] {

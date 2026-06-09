@@ -453,11 +453,10 @@ mod tests {
     // CLI attribution; only the shim-owned `_pixtuoid_source` does.
     #[test]
     fn cc_session_start_reason_source_does_not_hijack_cli_source() {
-        let tp = "/Users/me/.claude/projects/x/ses-abc.jsonl";
         let ev = decode_hook_payload(json!({
             "hook_event_name": "SessionStart",
             "session_id": "ses-abc",
-            "transcript_path": tp,
+            "transcript_path": "/Users/me/.claude/projects/x/ses-abc.jsonl",
             "cwd": "/repo",
             "source": "startup"
         }))
@@ -469,13 +468,12 @@ mod tests {
                 assert_eq!(source, crate::source::claude_code::SOURCE_NAME);
                 assert_eq!(
                     agent_id,
-                    // Through the same fold the decoder applies — a raw
-                    // from_parts(tp) expectation breaks on the windows
-                    // runner (casefold).
-                    AgentId::from_parts(
-                        crate::source::claude_code::SOURCE_NAME,
-                        &normalize_path_key(tp)
-                    ),
+                    // CC keys on the session UUID (IdKey::SessionId), which ==
+                    // the transcript filename stem the watcher/per-line decode
+                    // derive — so this coalesces with tool/JSONL/SessionEnd
+                    // events on the claude-code id. The public `source`
+                    // ("startup") must NOT drive CLI attribution.
+                    AgentId::from_parts(crate::source::claude_code::SOURCE_NAME, "ses-abc"),
                     "must coalesce with tool/JSONL/SessionEnd events on the claude-code id"
                 );
             }

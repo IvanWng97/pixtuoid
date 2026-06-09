@@ -31,13 +31,18 @@ use crate::source::{antigravity, claude_code, codex, reasonix, AgentEvent};
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum IdKey {
     /// `transcript_path` when present and non-empty, else `session_id`.
-    /// Correct for CC (hook and JSONL both carry the transcript path, so they
-    /// coalesce on it) and for path-keyed sources generally.
+    /// Correct for Antigravity and the unknown-source default (path-keyed
+    /// sources whose hook and JSONL both carry the transcript path, so they
+    /// coalesce on it). NOT CC — see `SessionId`.
     TranscriptPathThenSessionId,
-    /// Always `session_id`, ignoring any `transcript_path`. Correct for Codex:
-    /// its rollout-filename UUID == the hook `session_id`, while its
-    /// `transcript_path` is `string | null` — keying on the path would split
-    /// hook and JSONL events into two sprites.
+    /// Always `session_id`, ignoring any `transcript_path`. Correct for CC and
+    /// Codex: their hook `session_id` IS the session UUID, which equals the
+    /// transcript filename stem the JSONL watcher derives (`cc_id_from_path` /
+    /// `codex_id_from_path`), so hook and JSONL events coalesce on it. CC's
+    /// transcript path is cwd-derived (different project dirs after a
+    /// git-worktree split → keying on the path rebuilds the wrong parent);
+    /// Codex's `transcript_path` is `string | null` — keying on the path would
+    /// split hook and JSONL events into two sprites for either.
     SessionId,
 }
 
@@ -135,7 +140,10 @@ const CLAUDE_CODE: SourceDescriptor = SourceDescriptor {
     label_prefix: "cc",
     line_decoder: Some(claude_code::decode_cc_line),
     hook: HookDecoding {
-        id_key: IdKey::TranscriptPathThenSessionId,
+        // CC keys on the session UUID (== the transcript filename stem
+        // `cc_id_from_path` derives), NOT the cwd-derived transcript path, so a
+        // subagent→parent link survives a git-worktree cwd-split. Mirrors Codex.
+        id_key: IdKey::SessionId,
         custom: None,
     },
     caps: SourceCaps {

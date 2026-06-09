@@ -7,7 +7,7 @@ use tokio::sync::mpsc;
 
 use pixtuoid_core::source::antigravity::AntigravitySource;
 use pixtuoid_core::source::claude_code::{
-    cc_derive_label, cc_session_ended, decode_cc_line, ClaudeCodeSource,
+    cc_derive_label, cc_id_from_path, cc_session_ended, decode_cc_line, ClaudeCodeSource,
 };
 use pixtuoid_core::source::codex::CodexSource;
 use pixtuoid_core::source::jsonl::{force_polling_backend_for_tests, JsonlWatcher};
@@ -27,6 +27,9 @@ fn fast_watch() {
 
 fn cc_watcher(root: std::path::PathBuf) -> JsonlWatcher {
     fast_watch();
+    // Mirror ClaudeCodeSource::run: CC keys on the session UUID (filename stem),
+    // not the raw path, so hook↔JSONL coalesce and the subagent→parent link
+    // survives a git-worktree cwd-split.
     JsonlWatcher::new(
         root,
         "claude-code".to_string(),
@@ -34,6 +37,7 @@ fn cc_watcher(root: std::path::PathBuf) -> JsonlWatcher {
         cc_derive_label,
         cc_session_ended,
     )
+    .with_id_deriver(cc_id_from_path)
 }
 
 #[tokio::test]
@@ -617,8 +621,11 @@ async fn codex_rollout_yields_uuid_keyed_session_start() {
 
 #[tokio::test]
 async fn default_id_deriver_stays_path_keyed() {
-    // Pin the IdDeriver default: a non-Codex watcher must key on the file path
-    // (so CC/Antigravity hook↔JSONL coalescing is unchanged).
+    // Pin the IdDeriver DEFAULT: a watcher built WITHOUT `.with_id_deriver`
+    // (e.g. Antigravity) must key on the file path. CC + Codex override it
+    // (`.with_id_deriver`) to key on the session UUID; this guards the
+    // un-overridden default so the path-keyed sources keep coalescing.
+    fast_watch();
     let dir = TempDir::new().unwrap();
     let root = dir.path().to_path_buf();
     let project_dir = root.join("proj-y");
@@ -626,7 +633,14 @@ async fn default_id_deriver_stays_path_keyed() {
     let transcript = project_dir.join("abc.jsonl");
 
     let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(32);
-    let watcher = cc_watcher(root.clone());
+    // No `.with_id_deriver` → the default path-keyed deriver is exercised.
+    let watcher = JsonlWatcher::new(
+        root.clone(),
+        "antigravity".to_string(),
+        decode_cc_line,
+        cc_derive_label,
+        cc_session_ended,
+    );
     let handle = tokio::spawn(async move { watcher.run(tx).await });
 
     tokio::time::sleep(Duration::from_millis(50)).await;
@@ -652,15 +666,15 @@ async fn default_id_deriver_stays_path_keyed() {
     // The default deriver keys on the file path. The watcher may report the
     // raw TempDir path (rescan via read_dir) or the symlink-resolved path
     // (macOS FSEvents canonicalizes /var → /private/var), so accept either —
-    // both are path-keyed. What must NOT match is a UUID/stem key.
-    // Expectations go through from_transcript_path — the normalizing public
-    // shim, i.e. exactly the id production derives for a path (raw from_parts
-    // expectations broke on the windows runner: casefold + separators).
-    let raw = AgentId::from_transcript_path(&transcript.to_string_lossy());
+    // both are path-keyed. What must NOT match is a UUID/stem key. The watcher
+    // source here is "antigravity" (the path-keyed default user), so the
+    // expectation namespaces under it. Temp paths are lowercase, so the
+    // normalize_path_key fold is identity on this (Unix) runner.
+    let raw = AgentId::from_parts("antigravity", &transcript.to_string_lossy());
     let canon = std::fs::canonicalize(&transcript)
-        .map(|p| AgentId::from_transcript_path(&p.to_string_lossy()))
+        .map(|p| AgentId::from_parts("antigravity", &p.to_string_lossy()))
         .unwrap_or(raw);
-    let stem_keyed = AgentId::from_parts("claude-code", "abc");
+    let stem_keyed = AgentId::from_parts("antigravity", "abc");
     let mut ok = false;
     let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
     while tokio::time::Instant::now() < deadline {
@@ -1117,17 +1131,10 @@ async fn watcher_derives_parent_id_for_subagent_path() {
     f.flush().await.unwrap();
     drop(f);
 
-    // The watcher reports either the raw or canonicalized root (macOS /var →
-    // /private/var), so accept either parent key.
-    let parent_path = projects_root.join("proj").join("parent.jsonl");
-    let raw = AgentId::from_transcript_path(&parent_path.to_string_lossy());
-    let canon_root = std::fs::canonicalize(&projects_root).unwrap_or(projects_root.clone());
-    let canon = AgentId::from_transcript_path(
-        &canon_root
-            .join("proj")
-            .join("parent.jsonl")
-            .to_string_lossy(),
-    );
+    // The parent link keys on the `<parent-uuid>` dir component ("parent"),
+    // which is cwd-independent — so there is no raw-vs-canonical ambiguity here
+    // (the project-dir prefix is intentionally not part of the key).
+    let expected = AgentId::from_parts("claude-code", "parent");
 
     let mut found_parent = None;
     let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
@@ -1145,9 +1152,116 @@ async fn watcher_derives_parent_id_for_subagent_path() {
         }
     }
     let found = found_parent.expect("expected a SessionStart carrying parent_id");
-    assert!(
-        found == raw || found == canon,
-        "parent_id must derive the parent transcript from the grandparent dir; got {found:?}"
+    assert_eq!(
+        found, expected,
+        "parent_id must key on the <parent-uuid> dir component; got {found:?}"
+    );
+    handle.abort();
+}
+
+// THE cwd-split bug: a git-worktree splits the parent transcript and the
+// subagent transcript into DIFFERENT `~/.claude/projects/<project-dir>/` trees
+// (project-dir is a pure function of cwd). The link must still resolve because
+// the `<parent-uuid>` component is cwd-independent and equals the parent's own
+// session UUID. Drives the REAL watcher: the subagent's emitted parent_id must
+// equal the parent's emitted SessionStart agent_id even though they live under
+// different project dirs.
+#[tokio::test]
+async fn watcher_links_subagent_across_project_dirs() {
+    let dir = TempDir::new().unwrap();
+    let projects_root = dir.path().to_path_buf();
+
+    let parent_uuid = "abc123def456";
+    // Parent transcript under project-dir A.
+    let project_a = projects_root.join("-Users-me-PROJECT-A");
+    tokio::fs::create_dir_all(&project_a).await.unwrap();
+    let parent_transcript = project_a.join(format!("{parent_uuid}.jsonl"));
+    // Subagent transcript under a DIFFERENT project-dir B, sharing the same
+    // `<parent-uuid>/subagents/` component.
+    let subagent_dir = projects_root
+        .join("-Users-me-PROJECT-B")
+        .join(parent_uuid)
+        .join("subagents");
+    tokio::fs::create_dir_all(&subagent_dir).await.unwrap();
+    let sub_transcript = subagent_dir.join("agent-1.jsonl");
+
+    let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(32);
+    let watcher = cc_watcher(projects_root.clone());
+    let handle = tokio::spawn(async move { watcher.run(tx).await });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let parent_line = serde_json::json!({
+        "type": "system",
+        "subtype": "session_start",
+        "sessionId": parent_uuid,
+        "cwd": "/Users/me/PROJECT-A"
+    });
+    let mut pf = tokio::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&parent_transcript)
+        .await
+        .unwrap();
+    pf.write_all(format!("{parent_line}\n").as_bytes())
+        .await
+        .unwrap();
+    pf.flush().await.unwrap();
+    drop(pf);
+
+    let sub_line = serde_json::json!({
+        "type": "assistant",
+        "sessionId": "agent-1",
+        "cwd": "/Users/me/PROJECT-B",
+        "attributionAgent": "feature-dev:code-explorer",
+        "message": {
+            "role": "assistant",
+            "content": [
+                { "type": "tool_use", "id": "tu_1", "name": "Read", "input": { "file_path": "/x" } }
+            ]
+        }
+    });
+    let mut sf = tokio::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&sub_transcript)
+        .await
+        .unwrap();
+    sf.write_all(format!("{sub_line}\n").as_bytes())
+        .await
+        .unwrap();
+    sf.flush().await.unwrap();
+    drop(sf);
+
+    // Collect the parent's SessionStart agent_id (no parent_id) and the
+    // subagent's SessionStart parent_id; they must be equal.
+    let mut parent_agent_id: Option<AgentId> = None;
+    let mut sub_parent_id: Option<AgentId> = None;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    while tokio::time::Instant::now() < deadline {
+        match tokio::time::timeout(Duration::from_millis(200), rx.recv()).await {
+            Ok(Some((
+                _,
+                AgentEvent::SessionStart {
+                    agent_id,
+                    parent_id,
+                    ..
+                },
+            ))) => match parent_id {
+                Some(pid) => sub_parent_id = Some(pid),
+                None => parent_agent_id = Some(agent_id),
+            },
+            Ok(Some(_)) => {}
+            Ok(None) | Err(_) => {}
+        }
+        if parent_agent_id.is_some() && sub_parent_id.is_some() {
+            break;
+        }
+    }
+    let parent_agent_id = parent_agent_id.expect("expected the parent's SessionStart");
+    let sub_parent_id = sub_parent_id.expect("expected the subagent's SessionStart with parent_id");
+    assert_eq!(
+        sub_parent_id, parent_agent_id,
+        "subagent parent_id must equal the parent's agent_id across a cwd-split (different project dirs)"
     );
     handle.abort();
 }
