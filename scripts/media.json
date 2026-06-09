@@ -7,6 +7,14 @@
     "theme": "normal", "scale": 2
   },
   {
+    "id": "dashboard",
+    "kind": "render",
+    "targets": ["docs"],
+    "cols": 192, "rows": 64, "hour": 19, "day": 1,
+    "theme": "normal", "scale": 2,
+    "extra": ["--dashboard"]
+  },
+  {
     "id": "gallery",
     "kind": "crop",
     "targets": ["docs"],
