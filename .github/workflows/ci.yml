@@ -41,7 +41,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+      # prefix-key v1: the [profile.dev] change (line-tables-only / deps
+      # debug=false) altered dep fingerprints, but rust-cache's key (lockfile
+      # hash) still FULL-MATCHED the stale v0 caches — and a full-match restore
+      # suppresses the post-job save, so every run recompiled deps and never
+      # replaced the cache. Bumping the prefix forces fresh keys + saves.
       - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: v1-rust
       - uses: extractions/setup-just@v4
       - run: just clippy
 
@@ -131,6 +138,8 @@ jobs:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: v1-rust # see the clippy job's note
       - uses: taiki-e/install-action@cargo-hack
       - uses: extractions/setup-just@v4
       - run: just hack
@@ -145,6 +154,8 @@ jobs:
         with:
           targets: x86_64-pc-windows-msvc
       - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: v1-rust # see the clippy job's note
       - uses: extractions/setup-just@v4
       - run: just check-windows
 
@@ -158,6 +169,8 @@ jobs:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: v1-rust # see the clippy job's note
       - uses: extractions/setup-just@v4
       - name: Install cargo-nextest
         uses: taiki-e/install-action@cargo-nextest
@@ -171,6 +184,8 @@ jobs:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: v1-rust # see the clippy job's note
       - uses: taiki-e/install-action@cargo-semver-checks
       - uses: extractions/setup-just@v4
       - run: just semver
@@ -185,6 +200,8 @@ jobs:
         with:
           components: llvm-tools-preview
       - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: v1-rust # see the clippy job's note
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
       - name: Install cargo-nextest
@@ -223,6 +240,8 @@ jobs:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: v1-rust # see the clippy job's note
       - uses: extractions/setup-just@v4
       - name: Build release binaries + examples
         run: just build --release --bins --examples

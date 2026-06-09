@@ -62,7 +62,7 @@ lint:
     pids=(); fail=0
     run fmt     cargo fmt --all --check & pids+=($!)
     run machete cargo machete           & pids+=($!)
-    run deny    cargo deny check bans licenses sources & pids+=($!)
+    run deny    just deny                & pids+=($!)
     for p in "${pids[@]}"; do wait "$p" || fail=1; done
     [[ $fail -eq 0 ]]
 
