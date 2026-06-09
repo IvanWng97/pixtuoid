@@ -15,7 +15,7 @@
     "status": "supported",
     "featured": true,
     "transport": "Hook shim + JSONL watcher (hook/JSONL coalesce on session UUID)",
-    "platforms": { "macos": "yes", "linux": "yes", "windows": "planned" }
+    "platforms": { "macos": "yes", "linux": "yes", "windows": "experimental" }
   },
   {
     "id": "antigravity",

@@ -218,6 +218,44 @@ fn codex_subagent_hooks_reject_missing_or_empty_agent_id() {
     }
 }
 
+// Codex coalesces hook↔rollout on the session/agent UUID (NOT a path string), so
+// it's separator-agnostic by construction — but the watcher still has to extract
+// that UUID from a real backslash Windows rollout path. Pin that the child's hook
+// AgentId (keyed on agent_id) equals the watcher's id derived from the on-disk
+// Windows rollout filename. Windows-only: codex_id_from_path's file_stem split
+// needs `\` to act as a separator (on Unix `\` is an ordinary filename byte).
+// The Codex analogue of CC's mixed_separator_and_case_forms_coalesce_on_windows;
+// runs on the windows-test job only.
+#[cfg(windows)]
+#[test]
+fn codex_subagent_hook_coalesces_with_its_windows_rollout_path() {
+    use pixtuoid_core::source::codex::codex_id_from_path;
+    let uuid = "019e7762-9ded-7e33-be41-946ecf105bf4";
+    let rollout =
+        format!(r"C:\Users\Me\.codex\sessions\2026\06\08\rollout-2026-06-08T22-36-52-{uuid}.jsonl");
+
+    // Hook side: SubagentStart keys the CHILD on agent_id (== the rollout UUID).
+    let child = decode_hook_payload(json!({
+        "hook_event_name": "SubagentStart",
+        "session_id": "parent-sess",
+        "agent_id": uuid,
+        "agent_type": "default",
+        "cwd": r"C:\Users\Me\demo",
+        "_pixtuoid_source": "codex"
+    }))
+    .unwrap()
+    .agent_id();
+
+    // Watcher side: the id derived from the on-disk Windows rollout path.
+    let watcher = AgentId::from_parts("codex", &codex_id_from_path(std::path::Path::new(&rollout)));
+
+    assert_eq!(
+        child, watcher,
+        "a Codex subagent hook (agent_id) and its Windows rollout file must coalesce \
+         to one AgentId — a mismatch leaves the subagent orphaned from the scope tree"
+    );
+}
+
 #[test]
 fn cc_jsonl_assistant_tool_use_is_activity_start() {
     let transcript = "/Users/me/.claude/projects/x/ses-abc.jsonl";

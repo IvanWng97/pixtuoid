@@ -101,7 +101,7 @@ In another terminal, start a supported coding agent (Claude Code, Codex, Antigra
 | Tool | Runs on |
 |---|---|
 | [Claude Code](https://code.claude.com) | macOS · Linux · Windows\* |
-| [Codex CLI](https://github.com/openai/codex) | macOS · Linux |
+| [Codex CLI](https://github.com/openai/codex) | macOS · Linux · Windows\* |
 
 _Also supported: [Antigravity CLI](https://github.com/antiGravity-AI/antigravity-cli), [DeepSeek-Reasonix](https://github.com/esengine/DeepSeek-Reasonix). Planned: Copilot CLI, OpenCode, Cursor CLI._
 
