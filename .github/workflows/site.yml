@@ -1,15 +1,13 @@
 name: site
 
 on:
-  # site/ also renders ../Cargo.toml (the displayed version) and the docs at
-  # ../docs/{CONFIGURATION,ARCHITECTURE,CONTRIBUTING}.md (the /config, /architecture,
-  # /contributing pages — ARCHITECTURE's mermaid block is rendered to an inline SVG at
-  # build) — so a change to any of them must run this CI too, else a break slips through.
-  # (README drift from site/src/*.json is gated separately by ci.yml's `readme` job,
-  # which runs on every PR — so README.md is intentionally NOT a path trigger here.)
-  push:
-    branches: [main]
-    paths: ['site/**', 'Cargo.toml', 'docs/CONFIGURATION.md', 'docs/ARCHITECTURE.md', 'docs/CONTRIBUTING.md', '.github/workflows/site.yml', '.github/workflows/pages.yml']
+  # PR-only gate. The on-main build + deploy is owned by pages.yml (which runs
+  # `npm run lint && npm run check` itself), so building here on a main push too
+  # was a redundant 2nd Astro build per push. Only `format:check` is unique to
+  # this workflow — auto-fixable + caught on every PR (everything lands via PR).
+  # site/ also renders ../Cargo.toml + ../docs/{CONFIGURATION,ARCHITECTURE,CONTRIBUTING}.md
+  # (the mermaid block renders to an inline SVG at build). README drift from
+  # site/src/*.json is gated by ci.yml's `readme` job — so README.md is NOT here.
   pull_request:
     paths: ['site/**', 'Cargo.toml', 'docs/CONFIGURATION.md', 'docs/ARCHITECTURE.md', 'docs/CONTRIBUTING.md', '.github/workflows/site.yml', '.github/workflows/pages.yml']
 
