@@ -559,7 +559,8 @@ mod tests {
 
     #[test]
     fn detect_parent_id_keys_on_parent_uuid_component() {
-        let sub = Path::new("/Users/me/.claude/projects/-Users-me-proj/abc123/subagents/agent-1.jsonl");
+        let sub =
+            Path::new("/Users/me/.claude/projects/-Users-me-proj/abc123/subagents/agent-1.jsonl");
         let expected = AgentId::from_parts("claude-code", "abc123");
         assert_eq!(detect_parent_id(sub, "claude-code"), Some(expected));
     }
@@ -569,18 +570,25 @@ mod tests {
         // THE bug: parent + subagent under DIFFERENT project dirs (a worktree
         // cwd-split). Only the project-dir component differs; the <parent-uuid>
         // component is identical, so BOTH must resolve to the same parent link.
-        let under_a = Path::new("/Users/me/.claude/projects/-PROJECT-A/abc123/subagents/agent-1.jsonl");
-        let under_b = Path::new("/Users/me/.claude/projects/-PROJECT-B/abc123/subagents/agent-1.jsonl");
+        let under_a =
+            Path::new("/Users/me/.claude/projects/-PROJECT-A/abc123/subagents/agent-1.jsonl");
+        let under_b =
+            Path::new("/Users/me/.claude/projects/-PROJECT-B/abc123/subagents/agent-1.jsonl");
         let expected = AgentId::from_parts("claude-code", "abc123");
         assert_eq!(detect_parent_id(under_a, "claude-code"), Some(expected));
         assert_eq!(detect_parent_id(under_b, "claude-code"), Some(expected));
-        assert_eq!(detect_parent_id(under_a, "claude-code"), detect_parent_id(under_b, "claude-code"),
-            "same <parent-uuid> under different project dirs resolves to the same parent");
+        assert_eq!(
+            detect_parent_id(under_a, "claude-code"),
+            detect_parent_id(under_b, "claude-code"),
+            "same <parent-uuid> under different project dirs resolves to the same parent"
+        );
     }
 
     #[test]
     fn detect_parent_id_handles_workflow_nesting() {
-        let sub = Path::new("/Users/me/.claude/projects/p/abc123/subagents/workflows/wf_0d/agent-y.jsonl");
+        let sub = Path::new(
+            "/Users/me/.claude/projects/p/abc123/subagents/workflows/wf_0d/agent-y.jsonl",
+        );
         let expected = AgentId::from_parts("claude-code", "abc123");
         assert_eq!(detect_parent_id(sub, "claude-code"), Some(expected));
     }

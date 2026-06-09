@@ -480,7 +480,8 @@ mod tests {
             serde_json::json!({"type":"assistant","attributionAgent":"explorer","message":{"content":[]}}),
         )
         .unwrap();
-        let expected = AgentId::from_parts("claude-code", &cc_id_from_path(std::path::Path::new(path)));
+        let expected =
+            AgentId::from_parts("claude-code", &cc_id_from_path(std::path::Path::new(path)));
         assert_eq!(
             events[0].agent_id(),
             expected,
@@ -519,7 +520,9 @@ mod cc_id_tests {
 
     #[test]
     fn cc_id_from_path_root_is_filename_uuid() {
-        let p = Path::new("/Users/me/.claude/projects/-Users-me-proj/01000000-0000-7000-8000-0000000000cc.jsonl");
+        let p = Path::new(
+            "/Users/me/.claude/projects/-Users-me-proj/01000000-0000-7000-8000-0000000000cc.jsonl",
+        );
         assert_eq!(cc_id_from_path(p), "01000000-0000-7000-8000-0000000000cc");
     }
 
@@ -540,8 +543,10 @@ mod cc_id_tests {
         // normalize_path_key'd string (lowercased + forward-slashed on Windows).
         // Both must yield the SAME stem for a lowercase-hex CC id, or one session
         // splits into two sprites (same assumption codex_id_from_path relies on).
-        let raw = Path::new("/Users/me/.claude/projects/p/01000000-0000-7000-8000-0000000000cc.jsonl");
-        let normalized = Path::new("/users/me/.claude/projects/p/01000000-0000-7000-8000-0000000000cc.jsonl");
+        let raw =
+            Path::new("/Users/me/.claude/projects/p/01000000-0000-7000-8000-0000000000cc.jsonl");
+        let normalized =
+            Path::new("/users/me/.claude/projects/p/01000000-0000-7000-8000-0000000000cc.jsonl");
         assert_eq!(cc_id_from_path(raw), cc_id_from_path(normalized));
     }
 }
