@@ -305,6 +305,15 @@ async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &WatchCtx<'_>) {
             path.display(),
             MAX_PENDING_BYTES
         );
+        // A KNOWN file's skipped span may bury a durable CC `/exit` SessionEnd
+        // (the fallback when the best-effort hook drops). Without a tail-scan
+        // here the terminator is lost and the slot reaps only via the slow
+        // stale-sweep. A !known ended file never reaches this branch — the
+        // first-sight gate (should_seed_at_eof) already seeded it at EOF above —
+        // so only the known case needs the scan. (Only CC writes a terminator;
+        // Codex/Antigravity check_ended no-op.) Scan reads the file tail and is
+        // independent of the cursor, so compute it before seeding.
+        let ended_in_skip = known && check_session_ended(path, check_ended).await;
         // Seed the cursor to EOF FIRST — before the awaited head-read +
         // registration below — so a concurrent walk_jsonl on this path (250ms
         // rescan / notify) sees `known` on its next read and won't re-enter this
@@ -313,6 +322,12 @@ async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &WatchCtx<'_>) {
         // the window only ever cost a redundant head read, never a duplicate
         // SessionStart — but matching the ordering closes it.)
         cursors.lock().await.insert(path.to_path_buf(), file_len);
+        if ended_in_skip {
+            let id = AgentId::from_parts(source, &(decoders.id_derive)(path));
+            let _ = tx
+                .send((Transport::Jsonl, AgentEvent::SessionEnd { agent_id: id }))
+                .await;
+        }
         // #204: on FIRST-sight of an oversized tail (a recent, not-yet-ended
         // large session — stale/ended ones were already gated by
         // should_seed_at_eof above), still REGISTER the agent. Otherwise a >1 MB
@@ -765,6 +780,70 @@ mod tests {
             "a never-seeded STALE file must not emit SessionStart, got {events:?}"
         );
         assert_eq!(cursor, Some(len), "stale file must be seeded at EOF");
+    }
+
+    #[tokio::test]
+    async fn known_oversized_tail_emits_session_end_if_the_skipped_span_ended() {
+        // A tracked file grows by > MAX_PENDING_BYTES between passes, and that
+        // skipped span buries a session_end marker (CC's durable /exit
+        // fallback). The watcher must still emit SessionEnd before skipping to
+        // EOF — otherwise the terminator is lost and the slot reaps only via the
+        // slow stale-sweep.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("big.jsonl");
+        let initial = "{\"type\":\"assistant\",\"cwd\":\"/r\"}\n";
+        tokio::fs::write(&path, initial).await.unwrap();
+        let seeded = initial.len() as u64;
+
+        // Overwrite with the same prefix + > 1 MiB of filler + a trailing
+        // session_end line (lands in the tail-scan window).
+        let mut full = String::from(initial);
+        full.push_str(&"{\"type\":\"assistant\"}\n".repeat(60_000));
+        full.push_str("{\"type\":\"system\",\"subtype\":\"session_end\"}\n");
+        tokio::fs::write(&path, &full).await.unwrap();
+        let len = full.len() as u64;
+        assert!(
+            len - seeded > (1 << 20),
+            "the appended span must exceed MAX_PENDING_BYTES"
+        );
+
+        // Pre-seed the cursor so the file is KNOWN at `seeded`.
+        let cursors = Arc::new(Mutex::new(HashMap::from([(path.clone(), seeded)])));
+        let seen = Arc::new(Mutex::new(HashMap::new()));
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(32);
+        let source: Arc<str> = Arc::from("test");
+        let decoders = SourceDecoders {
+            decode_line: t_decode,
+            derive_label: t_label,
+            check_ended: t_ended,
+            id_derive: default_id_from_path,
+        };
+        let ctx = WatchCtx {
+            source: &source,
+            cursors: &cursors,
+            seen: &seen,
+            tx: &tx,
+            window: Duration::from_secs(3600),
+        };
+        walk_jsonl(&path, decoders, &ctx).await;
+        drop(tx);
+
+        let mut events = Vec::new();
+        while let Ok(ev) = rx.try_recv() {
+            events.push(ev);
+        }
+        let expected = AgentId::from_parts("test", &default_id_from_path(&path));
+        assert!(
+            events.iter().any(
+                |(_, e)| matches!(e, AgentEvent::SessionEnd { agent_id } if *agent_id == expected)
+            ),
+            "a buried session_end in the skipped span must still emit SessionEnd, got {events:?}"
+        );
+        assert_eq!(
+            cursors.lock().await.get(&path).copied(),
+            Some(len),
+            "cursor must advance to EOF"
+        );
     }
 
     #[tokio::test]
