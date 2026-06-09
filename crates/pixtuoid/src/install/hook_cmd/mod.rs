@@ -32,9 +32,58 @@ pub(crate) fn shell_hook_command(path: &str, source: &str) -> Result<String> {
     }
     #[cfg(unix)]
     {
+        // Mirror the Windows arm's source guard: `source` is interpolated
+        // UNQUOTED into the `/bin/sh -c` env-prefix, so it must be a plain
+        // identifier or it could inject a command (`x; rm -rf ~`). Hardcoded
+        // today ("codex"/"reasonix"), but this keeps the shared seam
+        // injection-proof for any future dynamic source. The path is always
+        // single-quoted, so only `source` needs this allowlist.
+        if let Some(bad) = source
+            .chars()
+            .find(|c| !matches!(c, 'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_'))
+        {
+            anyhow::bail!("internal: hook source {source:?} has a shell-unsafe character {bad:?}");
+        }
         Ok(format!(
             "PIXTUOID_SOURCE={source} {}",
             unix::shell_single_quote(path)
         ))
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn valid_source_keeps_the_env_prefix_form_byte_for_byte() {
+        // Behavior-preserving: a normal source name still yields the exact
+        // pre-refactor string (no quoting/validation artifacts).
+        assert_eq!(
+            shell_hook_command("/opt/bin/pixtuoid-hook", "codex").unwrap(),
+            "PIXTUOID_SOURCE=codex '/opt/bin/pixtuoid-hook'"
+        );
+        assert_eq!(
+            shell_hook_command("/opt/bin/pixtuoid-hook", "claude-code").unwrap(),
+            "PIXTUOID_SOURCE=claude-code '/opt/bin/pixtuoid-hook'"
+        );
+    }
+
+    #[test]
+    fn rejects_a_shell_unsafe_source_name() {
+        for bad in [
+            "codex; rm -rf ~",
+            "x`id`",
+            "a b",
+            "a$x",
+            "a&b",
+            "a|b",
+            "a(b)",
+        ] {
+            assert!(
+                shell_hook_command("/opt/bin/pixtuoid-hook", bad).is_err(),
+                "source {bad:?} must be rejected"
+            );
+        }
     }
 }

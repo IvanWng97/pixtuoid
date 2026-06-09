@@ -46,7 +46,7 @@ pub fn default_config_path() -> PathBuf {
 ///   codex injects no per-hook env we could set instead. A pixtuoid-hook.exe under
 ///   a path containing a SPACE or cmd metacharacter (`& | < > ( ) ^ %`) can't be
 ///   invoked unquoted (a space truncates; `&` splits the command), so
-///   `io::windows_bare_hook_command` substitutes the path's DOS 8.3 SHORT name
+///   `hook_cmd::windows::windows_bare_hook_command` substitutes the path's DOS 8.3 SHORT name
 ///   (`C:\PROGRA~1\…`, space/metachar-free) and only REJECTS if 8.3 generation is
 ///   disabled on the volume (#195). Ordinary install paths
 ///   (`%USERPROFILE%\.cargo\bin`, npm prefix) skip 8.3 entirely.
@@ -370,7 +370,7 @@ command = "/old/pixtuoid-hook"
     // (`&` splits → relative-tail execution from CWD) is substituted by its 8.3
     // short name when available, else rejected. These test paths don't exist on
     // the runner, so GetShortPathNameW fails → the reject fallback fires (the
-    // 8.3-success path is covered by io.rs's injected resolve_windows_command
+    // 8.3-success path is covered by hook_cmd/windows.rs's injected resolve_windows_command
     // tests). Either way an unsafe path is never written as a raw hook command.
     #[test]
     #[cfg(windows)]

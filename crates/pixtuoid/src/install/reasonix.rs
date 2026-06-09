@@ -89,7 +89,7 @@ fn user_config_dir() -> PathBuf {
 /// mirror codex::hook_command exactly:
 /// - **Unix**: env-prefix `PIXTUOID_SOURCE=reasonix '<abs-path>'` (single-quoted).
 /// - **Windows**: BARE `<abs-path> --source reasonix` via the shared
-///   `io::windows_bare_hook_command` (cmd.exe can't express the env-prefix; the
+///   `hook_cmd::windows::windows_bare_hook_command` (cmd.exe can't express the env-prefix; the
 ///   source rides as the shim's `--source` flag). That helper substitutes the 8.3
 ///   short name for a space/metacharacter path, rejecting only if 8.3 is disabled
 ///   (#195) — a quoted path can't survive cmd /C.
@@ -336,7 +336,7 @@ mod tests {
     }
 
     // Windows: a space/metacharacter path uses its 8.3 short name when available,
-    // else rejects (shared io::windows_bare_hook_command — see #195). These test
+    // else rejects (shared hook_cmd::shell_hook_command — see #195). These test
     // paths don't exist on the runner, so the reject fallback fires.
     #[test]
     #[cfg(windows)]
