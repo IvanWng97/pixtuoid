@@ -508,6 +508,30 @@ fn too_small_terminal_returns_no_layout_no_panic() {
     );
 }
 
+// Regression: the hover/disambiguation label sliced session_id by BYTE
+// (`&session_id[..4]`), guarded only by a byte-length check, so byte 4 landing
+// inside a multi-byte UTF-8 codepoint panicked the per-frame render loop. A
+// Reasonix session_id IS the raw cwd path, so two same-labeled agents under a
+// non-ASCII project dir hit it. Must render without panicking.
+#[test]
+fn colliding_labels_with_multibyte_session_ids_do_not_panic() {
+    let mut scene = SceneState::uniform(16);
+    // `/naïveté/app`: `ï` occupies bytes 3..5, so `&session_id[..4]` would split
+    // it. Both agents share a label ⇒ the disambiguation suffix fires.
+    let mut mk = |id: &str, desk: usize| {
+        let a = AgentId::from_transcript_path(id);
+        let mut s = slot(a, 0, desk, t0());
+        s.label = Arc::from("rx\u{00b7}proj");
+        s.session_id = Arc::from("/na\u{00ef}vet\u{00e9}/app");
+        scene.agents.insert(a, s);
+    };
+    mk("/mb/0.jsonl", 0);
+    mk("/mb/1.jsonl", 1);
+    let mut r = build(120, 40, vec![]);
+    r.render(&scene, &pack(), t0())
+        .expect("render must not panic on a multi-byte session_id");
+}
+
 // Regression: an in-flight floor transition used to leave `last_pet_pos` stale
 // from the previous normal frame, so the mouse handler could "pet" a ghost at
 // last frame's location mid-slide. The transition path must clear it.

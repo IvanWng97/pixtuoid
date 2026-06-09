@@ -71,9 +71,14 @@ pub(crate) fn paint_label_widgets(
         let lx = scene_rect.x + anchor.x.saturating_sub(2);
         let ly = scene_rect.y + (anchor.y / 2).saturating_sub(1);
         let needs_disambig = label_counts.get(&*agent.label).copied().unwrap_or(0) > 1
-            && agent.session_id.len() >= 4;
+            && agent.session_id.chars().count() >= 4;
         let raw: std::borrow::Cow<'_, str> = if needs_disambig {
-            std::borrow::Cow::Owned(format!("{}·{}", agent.label, &agent.session_id[..4]))
+            // CHAR-safe prefix, not `&session_id[..4]`: a Reasonix session_id IS
+            // the raw cwd path, so byte 4 can fall inside a multi-byte UTF-8
+            // codepoint (e.g. `/naïveté/app`) and a byte slice would panic the
+            // per-frame render loop. `take(4)` is saturating + boundary-safe.
+            let id4: String = agent.session_id.chars().take(4).collect();
+            std::borrow::Cow::Owned(format!("{}·{id4}", agent.label))
         } else {
             std::borrow::Cow::Borrowed(&*agent.label)
         };
