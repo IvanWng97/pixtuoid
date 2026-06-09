@@ -2,10 +2,10 @@ name: claude security review
 
 on:
   pull_request:
-    # No `synchronize`: don't re-run (billed) on every push. Re-review on demand
-    # by commenting `/security-review` (the issue_comment trigger below) — this is
-    # the ONLY manual re-trigger, so it must stay.
-    types: [opened, reopened]
+    # `synchronize` is deliberate (mirrors claude-review): every push to a
+    # security-path PR re-reviews. `/security-review` (below) adds the manual
+    # re-trigger this workflow previously lacked.
+    types: [opened, reopened, synchronize]
     paths:
       - "crates/pixtuoid-hook/**"
       - "crates/pixtuoid/src/install/**"

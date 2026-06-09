@@ -2,9 +2,11 @@ name: claude review
 
 on:
   pull_request:
-    # No `synchronize`: don't re-run (billed) on every push. Re-review on demand
-    # by commenting `/claude-review` (the issue_comment trigger below).
-    types: [opened, reopened, ready_for_review]
+    # `synchronize` is deliberate: every push re-reviews (billed) — the owner
+    # wants continuous review across a PR's commits. `/claude-review` (below)
+    # remains as a manual re-trigger. The per-PR concurrency group cancels a
+    # superseded in-flight review, so rapid pushes don't stack cost.
+    types: [opened, reopened, ready_for_review, synchronize]
   issue_comment:
     types: [created]
 
