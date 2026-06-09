@@ -114,6 +114,11 @@ fn parse_or_empty(content: &str) -> Result<Value> {
 
 pub fn merge_install(content: &str, hook_cmd: &str) -> Result<MergeOutcome> {
     let doc = parse_or_empty(content)?;
+    // See claude.rs: a valid-JSON-but-non-object doc would be silently dropped
+    // by `json_merge_install`. Refuse rather than overwrite the user's content.
+    if !doc.is_object() && !doc.is_null() {
+        anyhow::bail!("settings is valid JSON but not an object — refusing to overwrite");
+    }
     let merged = json_merge_install(doc.clone(), hook_cmd);
     let changed = merged != doc;
     Ok(MergeOutcome {
@@ -297,6 +302,14 @@ mod tests {
         let user = r#"{ "hooks": { "Stop": [ { "command": "notify-send done" } ] } }"#;
         let out = merge_uninstall(user).unwrap();
         assert!(!out.changed, "no managed entries → semantic no-op");
+    }
+
+    #[test]
+    fn merge_install_rejects_valid_json_that_is_not_an_object() {
+        // Mirrors claude.rs: a valid-JSON-but-non-object doc must be refused,
+        // not silently coerced to {} (which drops the user's content).
+        assert!(merge_install("[1, 2, 3]", "/x").is_err());
+        assert!(merge_install("42", "/x").is_err());
     }
 
     #[test]

@@ -144,7 +144,19 @@ where
 
     let contents = toml::to_string_pretty(&cfg)?;
     let tmp = real_path.with_extension("toml.tmp");
-    std::fs::write(&tmp, &contents)?;
+    {
+        use std::io::Write;
+        let mut f = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(&tmp)?;
+        f.write_all(contents.as_bytes())?;
+        // fsync before the atomic rename, matching io.rs::write_config_atomic — a
+        // crash/power loss in the durability window would otherwise leave a
+        // zero-length or torn config.toml.
+        f.sync_all()?;
+    }
     std::fs::rename(&tmp, &real_path)?;
     lock_file.unlock().ok();
     let _ = std::fs::remove_file(&lock_path);
@@ -245,6 +257,22 @@ mod tests {
     fn load_missing_returns_defaults() {
         let cfg = load(Path::new("/nonexistent/path/config.toml"), &mut Vec::new());
         assert!(cfg.theme.is_none());
+    }
+
+    // Exercises update_config's write path (now an OpenOptions write + fsync
+    // before the atomic rename): content must round-trip and leave no tmp
+    // sidecar behind.
+    #[test]
+    fn save_then_load_roundtrips_and_leaves_no_tmp_sidecar() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("config.toml");
+        save(&p, "cyberpunk").expect("save");
+        let cfg = load(&p, &mut Vec::new());
+        assert_eq!(cfg.theme.as_deref(), Some("cyberpunk"));
+        assert!(
+            !p.with_extension("toml.tmp").exists(),
+            "the tmp sidecar must be consumed by the atomic rename"
+        );
     }
 
     // --- collected warnings (#87): the resolvers stay layer-clean and the

@@ -81,6 +81,13 @@ fn parse_or_empty(content: &str) -> Result<Value> {
 
 pub fn merge_install(content: &str, hook_cmd: &str) -> Result<MergeOutcome> {
     let doc = parse_or_empty(content)?;
+    // Valid JSON but not an object (a top-level array/string/number) would be
+    // silently discarded by `json_merge_install`'s `as_object().unwrap_or_default()`
+    // — writing only our hooks and dropping the user's document. Refuse, mirroring
+    // `parse_or_empty`'s stance and the uninstall twin (which preserves it).
+    if !doc.is_object() && !doc.is_null() {
+        anyhow::bail!("settings is valid JSON but not an object — refusing to overwrite");
+    }
     let merged = json_merge_install(doc.clone(), hook_cmd);
     let changed = merged != doc;
     Ok(MergeOutcome {
@@ -225,6 +232,18 @@ mod tests {
         let d1 = json_merge_install(json!({}), "/x");
         let d2 = json_merge_install(d1.clone(), "/x");
         assert_eq!(d1, d2);
+    }
+
+    #[test]
+    fn merge_install_rejects_valid_json_that_is_not_an_object() {
+        // A top-level array/string/number is valid JSON but would be silently
+        // discarded by the object-coercion — refuse rather than drop the doc.
+        assert!(merge_install("[1, 2, 3]", "/x").is_err());
+        assert!(merge_install("\"hi\"", "/x").is_err());
+        // `null` is allowed (treated as empty → a fresh hooks object).
+        assert!(merge_install("null", "/x").is_ok());
+        // A normal object still installs.
+        assert!(merge_install("{}", "/x").unwrap().changed);
     }
 
     #[test]
