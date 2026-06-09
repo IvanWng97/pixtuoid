@@ -457,4 +457,10 @@ pub static NORMAL: Theme = Theme {
             },
         ],
     },
+    source: SourceColors {
+        claude_code: Rgb { r: 0xc8, g: 0x6e, b: 0x12 }, // amber
+        codex: Rgb { r: 0x1e, g: 0x80, b: 0xc0 },       // blue
+        reasonix: Rgb { r: 0x9c, g: 0x3c, b: 0xc0 },    // violet
+        antigravity: Rgb { r: 0x2e, g: 0x9e, b: 0x4a }, // green
+    },
 };

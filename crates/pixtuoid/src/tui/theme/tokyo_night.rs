@@ -457,4 +457,10 @@ pub static TOKYO_NIGHT: Theme = Theme {
             },
         ],
     },
+    source: SourceColors {
+        claude_code: Rgb { r: 0xe0, g: 0xaf, b: 0x68 }, // tokyo-night warm gold
+        codex: Rgb { r: 0x7d, g: 0xcf, b: 0xff },       // tokyo-night sky blue
+        reasonix: Rgb { r: 0xbb, g: 0x9a, b: 0xf7 },    // tokyo-night purple
+        antigravity: Rgb { r: 0x9e, g: 0xce, b: 0x6a }, // tokyo-night green
+    },
 };

@@ -465,4 +465,10 @@ pub static CATPPUCCIN: Theme = Theme {
             },
         ],
     },
+    source: SourceColors {
+        claude_code: Rgb { r: 0xfa, g: 0xb3, b: 0x87 }, // catppuccin peach
+        codex: Rgb { r: 0x89, g: 0xdc, b: 0xeb },       // catppuccin sky
+        reasonix: Rgb { r: 0xcb, g: 0xa6, b: 0xf7 },    // catppuccin mauve
+        antigravity: Rgb { r: 0xa6, g: 0xe3, b: 0xa1 }, // catppuccin green
+    },
 };

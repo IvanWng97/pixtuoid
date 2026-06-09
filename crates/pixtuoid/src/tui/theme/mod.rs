@@ -35,6 +35,7 @@ pub struct Theme {
     pub ui: UiColors,
     pub tool_glow: ToolGlowColors,
     pub appliance: ApplianceColors,
+    pub source: SourceColors,
 }
 
 #[derive(Debug, Clone)]
@@ -163,6 +164,18 @@ pub struct ApplianceColors {
     pub coats: [Rgb; 3],
 }
 
+/// Per-CLI badge hues for the agent-dashboard popup. One color per agent
+/// source (cc/cx/rx/ag), drawn as a leading `[xx]` badge. Each theme supplies
+/// its own so the badge harmonizes with the palette and stays legible on
+/// `tooltip_bg` (guarded by `source_badges_legible_for_every_theme`).
+#[derive(Debug, Clone)]
+pub struct SourceColors {
+    pub claude_code: Rgb,
+    pub codex: Rgb,
+    pub reasonix: Rgb,
+    pub antigravity: Rgb,
+}
+
 pub static ALL_THEMES: &[&Theme] = &[
     &NORMAL,
     &CYBERPUNK,
@@ -282,6 +295,34 @@ mod tests {
                 "{}: vending body should be darker than its drinks",
                 t.name
             );
+        }
+    }
+
+    // Every theme's per-CLI badge palette must read on the popup bg (tooltip_bg)
+    // and be mutually distinguishable, so a glance tells cc from cx from rx.
+    #[test]
+    fn source_badges_legible_for_every_theme() {
+        fn lum(c: Rgb) -> u32 {
+            c.r as u32 + c.g as u32 + c.b as u32
+        }
+        for t in ALL_THEMES {
+            let s = &t.source;
+            let bg = t.ui.tooltip_bg;
+            let hues = [s.claude_code, s.codex, s.reasonix, s.antigravity];
+            // Each hue must contrast the popup bg (lum-sum delta >= 80).
+            for (i, h) in hues.iter().enumerate() {
+                assert!(
+                    lum(*h).abs_diff(lum(bg)) >= 80,
+                    "{}: source hue {i} too close to tooltip_bg",
+                    t.name
+                );
+            }
+            // All four mutually distinct (no two CLIs share a badge color).
+            for i in 0..hues.len() {
+                for j in (i + 1)..hues.len() {
+                    assert_ne!(hues[i], hues[j], "{}: source hues {i} and {j} collide", t.name);
+                }
+            }
         }
     }
 }
