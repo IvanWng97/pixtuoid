@@ -40,6 +40,12 @@ open               = "5"
 # stack); default features dropped to skip fuzzy/macros/one-liners.
 inquire            = { version = "0.9", default-features = false, features = ["crossterm"] }
 
+# GetShortPathNameW for the Codex/Reasonix Windows hook path: resolve a
+# space/metacharacter-bearing install path to its DOS 8.3 short form so cmd.exe /C
+# can invoke it (#195). Same 0.61 major as pixtuoid-core — no second build.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }
+
 [dev-dependencies]
 tempfile = "3"
 image    = { version = "0.25", default-features = false, features = ["png", "gif"] }

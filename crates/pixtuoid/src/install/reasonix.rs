@@ -95,8 +95,9 @@ fn user_config_dir() -> PathBuf {
 /// - **Unix**: env-prefix `PIXTUOID_SOURCE=reasonix '<abs-path>'` (single-quoted).
 /// - **Windows**: BARE `<abs-path> --source reasonix` via the shared
 ///   `io::windows_bare_hook_command` (cmd.exe can't express the env-prefix; the
-///   source rides as the shim's `--source` flag). That helper REJECTS a path with
-///   a space or cmd metacharacter (#195) — a quoted path can't survive cmd /C.
+///   source rides as the shim's `--source` flag). That helper substitutes the 8.3
+///   short name for a space/metacharacter path, rejecting only if 8.3 is disabled
+///   (#195) — a quoted path can't survive cmd /C.
 ///
 /// Err on non-UTF-8 (prevents the to_string_lossy dead-hook).
 pub fn hook_command(resolved: &Path) -> Result<String> {
@@ -341,8 +342,9 @@ mod tests {
         assert_eq!(cmd, r"C:\tools\pixtuoid-hook.exe --source reasonix");
     }
 
-    // Windows: a path with a space or cmd metacharacter is rejected at install
-    // (shared io::windows_bare_hook_command guard — see #195).
+    // Windows: a space/metacharacter path uses its 8.3 short name when available,
+    // else rejects (shared io::windows_bare_hook_command — see #195). These test
+    // paths don't exist on the runner, so the reject fallback fires.
     #[test]
     #[cfg(windows)]
     fn hook_command_rejects_cmd_unsafe_path_on_windows() {

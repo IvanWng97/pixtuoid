@@ -46,14 +46,13 @@ use crate::install::io::shell_single_quote;
 ///   corrupted and the hook silently never fires). The env-prefix form is also
 ///   invalid under cmd.exe (it'd exec a program literally named
 ///   `PIXTUOID_SOURCE=codex`), so the source rides as the shim's `--source` flag —
-///   codex injects no per-hook env we could set instead. KNOWN EXPERIMENTAL
-///   LIMITATION: because a quoted path can't survive cmd.exe `/C` here, a
-///   pixtuoid-hook.exe under a path containing a SPACE or a cmd metacharacter
-///   (`& | < > ( ) ^ %`) can't be invoked safely with a trailing arg (a space
-///   truncates it; `&` splits it into two commands), so we REJECT such a path at
-///   install with an actionable error (#195) rather than write a dangerous or
-///   silently-broken hook. The ordinary install paths (`%USERPROFILE%\.cargo\bin`,
-///   npm prefix) are the common case and work.
+///   codex injects no per-hook env we could set instead. A pixtuoid-hook.exe under
+///   a path containing a SPACE or cmd metacharacter (`& | < > ( ) ^ %`) can't be
+///   invoked unquoted (a space truncates; `&` splits the command), so
+///   `io::windows_bare_hook_command` substitutes the path's DOS 8.3 SHORT name
+///   (`C:\PROGRA~1\…`, space/metachar-free) and only REJECTS if 8.3 generation is
+///   disabled on the volume (#195). Ordinary install paths
+///   (`%USERPROFILE%\.cargo\bin`, npm prefix) skip 8.3 entirely.
 pub fn hook_command(resolved: &Path) -> Result<String> {
     let p = resolved
         .to_str()
@@ -375,8 +374,11 @@ command = "/old/pixtuoid-hook"
     }
 
     // #195 + security: a path with a space (truncates) OR a cmd metacharacter
-    // (`&` splits the command → relative-tail execution from CWD) is rejected at
-    // install rather than written as a hook cmd.exe /C would mangle or mis-run.
+    // (`&` splits → relative-tail execution from CWD) is substituted by its 8.3
+    // short name when available, else rejected. These test paths don't exist on
+    // the runner, so GetShortPathNameW fails → the reject fallback fires (the
+    // 8.3-success path is covered by io.rs's injected resolve_windows_command
+    // tests). Either way an unsafe path is never written as a raw hook command.
     #[test]
     #[cfg(windows)]
     fn hook_command_rejects_cmd_unsafe_path_on_windows() {
