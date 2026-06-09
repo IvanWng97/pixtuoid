@@ -67,11 +67,19 @@ pub fn detect_installed() -> bool {
 }
 
 /// Rust mapping of Go's `os.UserConfigDir()` for the platforms we ship:
-/// macOS `$HOME/Library/Application Support`, elsewhere `$XDG_CONFIG_HOME`
-/// falling back to `~/.config`.
+/// macOS `$HOME/Library/Application Support`, **Windows `%APPDATA%`** (Roaming —
+/// where Reasonix's v2 config dir actually lives; without this arm
+/// `detect_installed` probes `~/.config/reasonix` on Windows, which Reasonix never
+/// creates, so auto-detection would always miss), else `$XDG_CONFIG_HOME` falling
+/// back to `~/.config`.
 fn user_config_dir() -> PathBuf {
     if cfg!(target_os = "macos") {
         io::home_relative("Library/Application Support")
+    } else if cfg!(windows) {
+        match std::env::var("APPDATA") {
+            Ok(a) if !a.is_empty() => PathBuf::from(a),
+            _ => io::home_relative("AppData/Roaming"),
+        }
     } else {
         match std::env::var("XDG_CONFIG_HOME") {
             Ok(x) if !x.is_empty() => PathBuf::from(x),
@@ -346,6 +354,26 @@ mod tests {
             err.contains("cmd.exe") && err.contains("ordinary characters"),
             "must explain the cmd-unsafe path + workaround: {err}"
         );
+    }
+
+    // detect_installed probes user_config_dir()/reasonix; on Windows that must be
+    // %APPDATA% (Go's os.UserConfigDir), not ~/.config, or auto-detection misses.
+    #[cfg(windows)]
+    #[test]
+    fn user_config_dir_uses_appdata_on_windows() {
+        let _env = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var_os("APPDATA");
+        std::env::set_var("APPDATA", r"C:\Users\ada\AppData\Roaming");
+        assert_eq!(
+            user_config_dir(),
+            PathBuf::from(r"C:\Users\ada\AppData\Roaming")
+        );
+        match saved {
+            Some(v) => std::env::set_var("APPDATA", v),
+            None => std::env::remove_var("APPDATA"),
+        }
     }
 
     #[test]
