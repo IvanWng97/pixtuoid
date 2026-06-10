@@ -1,4 +1,5 @@
 use super::*;
+use crate::state::GlobalDeskIndex;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -21,7 +22,7 @@ fn slot(state: ActivityState, age_ms: u64) -> (AgentSlot, SystemTime) {
         last_event_at: created,
         exiting_at: None,
         pending_idle_at: None,
-        desk_index: 0,
+        desk_index: GlobalDeskIndex(0),
         floor_idx: 0,
         tool_call_count: 0,
         active_ms: 0,
@@ -350,7 +351,7 @@ fn entry_animation_overrides_normal_pose_for_first_4s() {
         last_event_at: now0,
         exiting_at: None,
         pending_idle_at: None,
-        desk_index: 0,
+        desk_index: GlobalDeskIndex(0),
         floor_idx: 0,
         tool_call_count: 0,
         active_ms: 0,
@@ -371,7 +372,7 @@ fn entry_animation_overrides_normal_pose_for_first_4s() {
 #[test]
 fn derive_returns_none_when_desk_index_out_of_range() {
     let (mut s, now) = slot(ActivityState::Idle, 0);
-    s.desk_index = 999;
+    s.desk_index = GlobalDeskIndex(999);
     assert!(derive(&s, now, &layout()).is_none());
 }
 
@@ -382,7 +383,7 @@ fn exit_override_walks_desk_to_door_within_window() {
     let (mut s, now) = slot(ActivityState::Idle, 0);
     s.exiting_at = Some(now - Duration::from_secs(1));
     let l = layout();
-    let desk = l.home_desks[s.desk_index];
+    let desk = l.home_desks[s.desk_index.0];
     match derive(&s, now, &l).expect("pose") {
         Pose::Walking { from, to, .. } => {
             assert_eq!(
@@ -592,7 +593,7 @@ fn entry_walk_does_not_carry_coffee() {
         last_event_at: now0,
         exiting_at: None,
         pending_idle_at: None,
-        desk_index: 0,
+        desk_index: GlobalDeskIndex(0),
         floor_idx: 0,
         tool_call_count: 0,
         active_ms: 0,
@@ -637,7 +638,7 @@ fn derive_state_only_skips_entry_override() {
         last_event_at: now0,
         exiting_at: None,
         pending_idle_at: None,
-        desk_index: 0,
+        desk_index: GlobalDeskIndex(0),
         floor_idx: 0,
         tool_call_count: 0,
         active_ms: 0,

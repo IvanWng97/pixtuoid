@@ -201,7 +201,7 @@ pub enum Pose {
 ///      SeatedIdle / Walking / AtWaypoint / AimlessAt based on the
 ///      wander state machine).
 pub fn derive(slot: &AgentSlot, now: SystemTime, layout: &SceneLayout) -> Option<Pose> {
-    let desk = *layout.home_desks.get(slot.desk_index)?;
+    let desk = layout.home_desk(slot.desk_index.single_floor_local())?;
 
     // Exit takes priority — once SessionEnd fires we always walk to the
     // door regardless of entry-window or normal state. Use door_threshold
@@ -303,7 +303,7 @@ fn state_driven_pose(
 ///
 /// Returns `None` when `slot.desk_index` is out of range for `layout`.
 pub fn derive_state_only(slot: &AgentSlot, now: SystemTime, layout: &SceneLayout) -> Option<Pose> {
-    let desk = *layout.home_desks.get(slot.desk_index)?;
+    let desk = layout.home_desk(slot.desk_index.single_floor_local())?;
     state_driven_pose(slot, desk, layout, now)
 }
 

@@ -94,12 +94,11 @@ pub struct AgentSlot {
     /// state to Idle. Hides the per-tool-call Active flicker that rapid
     /// PreToolUse → PostToolUse chains produce in CC.
     pub pending_idle_at: Option<SystemTime>,
-    /// GLOBAL flat desk index across all floors (assigned once at `SessionStart`,
-    /// never mutated). NOT a floor-local index: `build_floor_scene` (tui/floor.rs)
-    /// remaps it to a floor-local index before any `layout.home_desks` lookup —
-    /// indexing `home_desks` with this raw value is a bug. `floor_idx` derives
-    /// from it via `floor_of()`.
-    pub desk_index: usize,
+    /// GLOBAL desk index (assigned once at `SessionStart`, never mutated).
+    /// The `GlobalDeskIndex` newtype encodes the index space — see its docs
+    /// for the bridge to a floor's `home_desks`. `floor_idx` derives from it
+    /// via `floor_of()`.
+    pub desk_index: GlobalDeskIndex,
     /// Floor assigned at desk allocation time. Immutable for the agent's
     /// lifetime so capacity growth never silently migrates agents between
     /// floors.
@@ -151,9 +150,13 @@ impl SceneState {
     }
 
     /// Which floor does `desk_index` belong to, given precomputed `offsets`?
-    fn floor_of_with_offsets(&self, desk_index: usize, offsets: &[usize; MAX_FLOORS]) -> usize {
+    fn floor_of_with_offsets(
+        &self,
+        desk_index: GlobalDeskIndex,
+        offsets: &[usize; MAX_FLOORS],
+    ) -> usize {
         for i in (0..MAX_FLOORS).rev() {
-            if self.floor_capacities[i] > 0 && desk_index >= offsets[i] {
+            if self.floor_capacities[i] > 0 && desk_index.0 >= offsets[i] {
                 return i;
             }
         }
@@ -161,19 +164,22 @@ impl SceneState {
     }
 
     /// Which floor does `desk_index` belong to?
-    pub fn floor_of(&self, desk_index: usize) -> usize {
+    pub fn floor_of(&self, desk_index: GlobalDeskIndex) -> usize {
         self.floor_of_with_offsets(desk_index, &self.cumulative_offsets())
     }
 
-    /// Local desk offset within the floor.
-    pub fn floor_local_desk(&self, desk_index: usize) -> usize {
+    /// Local desk offset within the floor — THE bridge from the reducer's
+    /// global allocation space to a floor's `home_desks` index space.
+    pub fn floor_local_desk(&self, desk_index: GlobalDeskIndex) -> FloorLocalDeskIndex {
         let offsets = self.cumulative_offsets();
         let floor = self.floor_of_with_offsets(desk_index, &offsets);
-        desk_index - offsets[floor]
+        FloorLocalDeskIndex(desk_index.0 - offsets[floor])
     }
 
     /// Global desk index range `[lo, hi)` for a given floor.
     /// Clamps `floor_idx` to `MAX_FLOORS - 1` to avoid panics.
+    /// Stays `Range<usize>` over raw global indices — a `Range` of newtypes
+    /// is painful (no `Step` impl) and the consumers only need the offsets.
     pub fn floor_range(&self, floor_idx: usize) -> std::ops::Range<usize> {
         let idx = floor_idx.min(MAX_FLOORS - 1);
         let offsets = self.cumulative_offsets();
@@ -183,10 +189,12 @@ impl SceneState {
     }
 
     /// Lowest free desk index, or `None` if all desks are occupied.
-    pub fn next_free_desk(&self) -> Option<usize> {
-        let occupied: std::collections::BTreeSet<usize> =
+    pub fn next_free_desk(&self) -> Option<GlobalDeskIndex> {
+        let occupied: std::collections::BTreeSet<GlobalDeskIndex> =
             self.agents.values().map(|a| a.desk_index).collect();
-        (0..self.total_capacity()).find(|i| !occupied.contains(i))
+        (0..self.total_capacity())
+            .map(GlobalDeskIndex)
+            .find(|i| !occupied.contains(i))
     }
 }
 
@@ -208,7 +216,7 @@ mod tests {
             last_event_at: now,
             exiting_at: None,
             pending_idle_at: None,
-            desk_index,
+            desk_index: GlobalDeskIndex(desk_index),
             floor_idx: 0,
             tool_call_count: 0,
             active_ms: 0,
@@ -229,7 +237,7 @@ mod tests {
     #[test]
     fn next_free_desk_starts_at_zero() {
         let s = SceneState::uniform(4);
-        assert_eq!(s.next_free_desk(), Some(0));
+        assert_eq!(s.next_free_desk(), Some(GlobalDeskIndex(0)));
     }
 
     #[test]
@@ -252,7 +260,7 @@ mod tests {
         }
         assert_eq!(
             s.next_free_desk(),
-            Some(4),
+            Some(GlobalDeskIndex(4)),
             "should overflow to desk 4 (floor 1)"
         );
     }
@@ -260,36 +268,36 @@ mod tests {
     #[test]
     fn floor_of_uniform() {
         let s = SceneState::uniform(8);
-        assert_eq!(s.floor_of(0), 0);
-        assert_eq!(s.floor_of(7), 0);
-        assert_eq!(s.floor_of(8), 1);
-        assert_eq!(s.floor_of(15), 1);
-        assert_eq!(s.floor_of(16), 2);
+        assert_eq!(s.floor_of(GlobalDeskIndex(0)), 0);
+        assert_eq!(s.floor_of(GlobalDeskIndex(7)), 0);
+        assert_eq!(s.floor_of(GlobalDeskIndex(8)), 1);
+        assert_eq!(s.floor_of(GlobalDeskIndex(15)), 1);
+        assert_eq!(s.floor_of(GlobalDeskIndex(16)), 2);
     }
 
     #[test]
     fn floor_of_variable_capacities() {
         let s = SceneState::new([4, 8, 6, 4, 2, 0, 0, 0, 0, 0]);
         // F0: 0..4, F1: 4..12, F2: 12..18, F3: 18..22, F4: 22..24
-        assert_eq!(s.floor_of(0), 0);
-        assert_eq!(s.floor_of(3), 0);
-        assert_eq!(s.floor_of(4), 1);
-        assert_eq!(s.floor_of(11), 1);
-        assert_eq!(s.floor_of(12), 2);
-        assert_eq!(s.floor_of(17), 2);
-        assert_eq!(s.floor_of(18), 3);
-        assert_eq!(s.floor_of(22), 4);
-        assert_eq!(s.floor_of(23), 4);
+        assert_eq!(s.floor_of(GlobalDeskIndex(0)), 0);
+        assert_eq!(s.floor_of(GlobalDeskIndex(3)), 0);
+        assert_eq!(s.floor_of(GlobalDeskIndex(4)), 1);
+        assert_eq!(s.floor_of(GlobalDeskIndex(11)), 1);
+        assert_eq!(s.floor_of(GlobalDeskIndex(12)), 2);
+        assert_eq!(s.floor_of(GlobalDeskIndex(17)), 2);
+        assert_eq!(s.floor_of(GlobalDeskIndex(18)), 3);
+        assert_eq!(s.floor_of(GlobalDeskIndex(22)), 4);
+        assert_eq!(s.floor_of(GlobalDeskIndex(23)), 4);
     }
 
     #[test]
     fn floor_local_desk_variable() {
         let s = SceneState::new([4, 8, 6, 4, 2, 0, 0, 0, 0, 0]);
-        assert_eq!(s.floor_local_desk(0), 0);
-        assert_eq!(s.floor_local_desk(3), 3);
-        assert_eq!(s.floor_local_desk(4), 0); // first desk on F1
-        assert_eq!(s.floor_local_desk(11), 7); // last desk on F1
-        assert_eq!(s.floor_local_desk(12), 0); // first desk on F2
+        assert_eq!(s.floor_local_desk(GlobalDeskIndex(0)), FloorLocalDeskIndex(0));
+        assert_eq!(s.floor_local_desk(GlobalDeskIndex(3)), FloorLocalDeskIndex(3));
+        assert_eq!(s.floor_local_desk(GlobalDeskIndex(4)), FloorLocalDeskIndex(0)); // first desk on F1
+        assert_eq!(s.floor_local_desk(GlobalDeskIndex(11)), FloorLocalDeskIndex(7)); // last desk on F1
+        assert_eq!(s.floor_local_desk(GlobalDeskIndex(12)), FloorLocalDeskIndex(0)); // first desk on F2
     }
 
     #[test]
@@ -320,7 +328,7 @@ mod tests {
             s.agents.insert(id, make_slot(id, i));
         }
         // Next free should be desk 4 (first desk on F1)
-        assert_eq!(s.next_free_desk(), Some(4));
+        assert_eq!(s.next_free_desk(), Some(GlobalDeskIndex(4)));
     }
 
     #[test]
@@ -331,26 +339,26 @@ mod tests {
         assert_eq!(s.floor_range(0), 0..4);
         assert_eq!(s.floor_range(1), 4..4);
         assert_eq!(s.floor_range(2), 4..10);
-        assert_eq!(s.next_free_desk(), Some(0));
+        assert_eq!(s.next_free_desk(), Some(GlobalDeskIndex(0)));
     }
 
     #[test]
     fn floor_of_skips_zero_capacity_floors() {
         let s = SceneState::new([4, 0, 6, 0, 2, 0, 0, 0, 0, 0]);
         // Desk 4 is first desk of F2 (F1 has zero capacity)
-        assert_eq!(s.floor_of(4), 2);
-        assert_eq!(s.floor_local_desk(4), 0);
-        assert_eq!(s.floor_of(9), 2);
-        assert_eq!(s.floor_of(10), 4);
+        assert_eq!(s.floor_of(GlobalDeskIndex(4)), 2);
+        assert_eq!(s.floor_local_desk(GlobalDeskIndex(4)), FloorLocalDeskIndex(0));
+        assert_eq!(s.floor_of(GlobalDeskIndex(9)), 2);
+        assert_eq!(s.floor_of(GlobalDeskIndex(10)), 4);
     }
 
     #[test]
     fn floor_of_leading_zero_capacity_floors() {
         let s = SceneState::new([0, 0, 6, 4, 2, 0, 0, 0, 0, 0]);
         // F0 and F1 have zero capacity, desk 0 belongs to F2
-        assert_eq!(s.floor_of(0), 2);
-        assert_eq!(s.floor_of(5), 2);
-        assert_eq!(s.floor_of(6), 3);
+        assert_eq!(s.floor_of(GlobalDeskIndex(0)), 2);
+        assert_eq!(s.floor_of(GlobalDeskIndex(5)), 2);
+        assert_eq!(s.floor_of(GlobalDeskIndex(6)), 3);
     }
 
     #[test]
@@ -369,11 +377,11 @@ mod tests {
                                         // desk_index 100 is beyond capacity — floor_of returns the last
                                         // floor with nonzero capacity (floor 4, offset 22).
         let oob = total + 76; // 100
-        let floor = s.floor_of(oob);
+        let floor = s.floor_of(GlobalDeskIndex(oob));
         assert_eq!(floor, 4, "OOB desk lands on last nonempty floor");
-        let local = s.floor_local_desk(oob);
+        let local = s.floor_local_desk(GlobalDeskIndex(oob));
         // offsets[4] = 22, so local = 100 - 22 = 78
-        assert_eq!(local, oob - 22);
+        assert_eq!(local, FloorLocalDeskIndex(oob - 22));
     }
 
     #[test]
@@ -385,10 +393,10 @@ mod tests {
         assert_eq!(s.floor_capacities.len(), 10, "office spans ten floors");
         assert_eq!(s.total_capacity(), 20, "ten floors × 2 desks");
         assert_eq!(
-            s.floor_of(18),
+            s.floor_of(GlobalDeskIndex(18)),
             9,
             "desk 18 is the first seat on the tenth floor"
         );
-        assert_eq!(s.floor_of(19), 9);
+        assert_eq!(s.floor_of(GlobalDeskIndex(19)), 9);
     }
 }

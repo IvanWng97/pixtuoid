@@ -162,7 +162,7 @@ mod tests {
             created_at: started,
             exiting_at: None,
             pending_idle_at: None,
-            desk_index: 0,
+            desk_index: GlobalDeskIndex(0),
             floor_idx: 0,
             tool_call_count: 0,
             active_ms: 0,
