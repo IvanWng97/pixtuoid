@@ -43,15 +43,20 @@ pub fn claude_config_dir() -> Option<PathBuf> {
 
 /// CC's first-party live-process registry: `<claude_home>/sessions/<pid>.json`,
 /// one tiny JSON file per running CC process (`{pid, sessionId, cwd, status,
-/// procStart, ...}` — undocumented, drift-watched by check_upstream_drift.py).
-/// Returns the session UUIDs of entries whose pid is still ALIVE — a registry
-/// file can outlive a crashed CC, so each entry is verified with kill(pid, 0).
+/// startedAt, procStart, ...}` — undocumented, drift-watched by
+/// check_upstream_drift.py). Returns the session UUIDs of entries whose pid is
+/// still ALIVE — a registry file can outlive a crashed CC, so each entry is
+/// verified with kill(pid, 0).
 ///
-/// PID-reuse caveat (deliberately accepted): a recycled pid makes a dead
-/// session look live; the cost is ONE transient idle sprite reaped by the
-/// normal stale sweep, while verifying process identity needs platform
-/// process-table reads — the registry's `procStart` field is the upgrade path
-/// if that ever matters.
+/// PID-reuse guard (#220): kill(0) only proves SOME process owns the pid. When
+/// the entry carries `startedAt` (ms epoch, stamped by CC at startup) AND the
+/// kernel can report the process start time ([`pid_start_time_secs`] — macOS
+/// only today), the two must agree within [`PID_START_TOLERANCE_SECS`] or the
+/// pid was recycled by an unrelated process and the entry is skipped. Either
+/// side missing falls back to pid-alive-only (the previous behavior — the
+/// check is additive). This matters more now that the probe is ONGOING
+/// liveness (a recycled pid would hold a dead session's sweep exemption open,
+/// not just admit one transient sprite).
 pub fn live_cc_session_ids(sessions_dir: &Path) -> HashSet<String> {
     #[cfg(unix)]
     {
@@ -78,7 +83,7 @@ pub fn live_cc_session_ids(sessions_dir: &Path) -> HashSet<String> {
             let Ok(bytes) = read_registry_entry_bounded(&path) else {
                 continue;
             };
-            let Some((pid, session_id)) = parse_registry_entry(&bytes) else {
+            let Some(reg) = parse_registry_entry(&bytes) else {
                 // Undocumented format — warn ONCE per process, never per scan
                 // (the probe runs every scan pass).
                 static WARN_ONCE: std::sync::Once = std::sync::Once::new();
@@ -90,9 +95,23 @@ pub fn live_cc_session_ids(sessions_dir: &Path) -> HashSet<String> {
                 });
                 continue;
             };
-            if pid_alive(pid) {
-                live.insert(session_id);
+            if !pid_alive(reg.pid) {
+                continue;
             }
+            if let (Some(claimed_ms), Some(actual_secs)) =
+                (reg.started_at_ms, pid_start_time_secs(reg.pid))
+            {
+                if (claimed_ms / 1000).abs_diff(actual_secs) > PID_START_TOLERANCE_SECS {
+                    tracing::debug!(
+                        pid = reg.pid,
+                        claimed_secs = claimed_ms / 1000,
+                        actual_secs,
+                        "pid recycled — registry startedAt does not match process start; skipping"
+                    );
+                    continue;
+                }
+            }
+            live.insert(reg.session_id);
         }
         live
     }
@@ -122,11 +141,24 @@ fn read_registry_entry_bounded(path: &Path) -> std::io::Result<Vec<u8>> {
     Ok(bytes)
 }
 
-/// Extract `{pid, sessionId}` from one registry file. `serde_json::Value`
-/// on purpose — the format is undocumented, so we read only the two fields
-/// the join needs and tolerate everything else changing.
+/// One parsed registry entry — the fields the liveness join needs.
 #[cfg(unix)]
-fn parse_registry_entry(bytes: &[u8]) -> Option<(i32, String)> {
+struct RegistryEntry {
+    pid: i32,
+    session_id: String,
+    /// `startedAt` — ms-epoch CC stamps at startup (~1.2s after process start,
+    /// measured live). Optional: an older CC without the field still probes
+    /// pid-alive-only.
+    started_at_ms: Option<u64>,
+}
+
+/// Extract `{pid, sessionId, startedAt}` from one registry file.
+/// `serde_json::Value` on purpose — the format is undocumented, so we read
+/// only the fields the join needs and tolerate everything else changing.
+/// `startedAt` is optional (missing/malformed → `None`, never a parse fail):
+/// it only powers the additive PID-reuse identity check.
+#[cfg(unix)]
+fn parse_registry_entry(bytes: &[u8]) -> Option<RegistryEntry> {
     let v: serde_json::Value = serde_json::from_slice(bytes).ok()?;
     // pid <= 0 is never a single process (kill(0)/kill(-n) target process
     // GROUPS — a corrupt entry must not probe our own group as "alive").
@@ -134,7 +166,56 @@ fn parse_registry_entry(bytes: &[u8]) -> Option<(i32, String)> {
         .ok()
         .filter(|p| *p > 0)?;
     let session_id = v.get("sessionId")?.as_str().filter(|s| !s.is_empty())?;
-    Some((pid, session_id.to_string()))
+    let started_at_ms = v.get("startedAt").and_then(|s| s.as_u64());
+    Some(RegistryEntry {
+        pid,
+        session_id: session_id.to_string(),
+        started_at_ms,
+    })
+}
+
+/// Tolerance for the `startedAt` ↔ kernel-start-time identity check. Measured
+/// live: CC writes `startedAt` ≈ 1.2s after `pbi_start_tvsec` (Node boot +
+/// module load before the stamp), so 10s is ~8× margin while still being far
+/// below any plausible pid-recycling interval.
+#[cfg(unix)]
+const PID_START_TOLERANCE_SECS: u64 = 10;
+
+/// Kernel-reported process start time in epoch seconds — the identity half of
+/// the PID-reuse guard. macOS: `proc_pidinfo(PROC_PIDTBSDINFO)` →
+/// `pbi_start_tvsec` (same libproc family as `fd_probe.rs`). Linux:
+/// `/proc/<pid>/stat` field 22 is clock ticks since BOOT — epoch conversion
+/// needs boot time + ticks-per-sec, so the identity check is macOS-only for
+/// now and Linux returns `None` (pid-alive-only, today's behavior). `None` on
+/// failure (pid gone mid-probe, EPERM) — never an error: the check is additive.
+#[cfg(target_os = "macos")]
+fn pid_start_time_secs(pid: i32) -> Option<u64> {
+    // SAFETY: all-zero bytes are a valid value for this repr(C) plain-old-data
+    // struct (integers + byte arrays only).
+    let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+    let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+    // SAFETY: the buffer is exactly `size` bytes of a repr(C) struct matching
+    // the macOS SDK's proc_bsdinfo layout (proc_info.h, ABI-stable since
+    // 10.5), so the kernel fills only memory we own. PROC_PIDTBSDINFO returns
+    // the full struct or <= 0 on failure.
+    let n = unsafe {
+        libc::proc_pidinfo(
+            pid,
+            libc::PROC_PIDTBSDINFO,
+            0,
+            &mut info as *mut _ as *mut std::ffi::c_void,
+            size,
+        )
+    };
+    if n != size {
+        return None;
+    }
+    Some(info.pbi_start_tvsec)
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn pid_start_time_secs(_pid: i32) -> Option<u64> {
+    None
 }
 
 /// kill(pid, 0) liveness: rc 0 = alive and signalable; EPERM = alive but owned
@@ -845,6 +926,115 @@ mod liveness_tests {
         let dir = tempfile::tempdir().unwrap();
         let missing = dir.path().join("does-not-exist");
         assert!(live_cc_session_ids(&missing).is_empty());
+    }
+
+    // --- PID-reuse identity check (#220) -----------------------------------
+
+    #[cfg(unix)]
+    #[test]
+    fn parse_registry_entry_extracts_started_at_and_tolerates_absence() {
+        let with = serde_json::json!({
+            "pid": 64924, "sessionId": "s", "startedAt": 1_781_109_422_174_u64
+        })
+        .to_string();
+        let entry = parse_registry_entry(with.as_bytes()).unwrap();
+        assert_eq!(entry.started_at_ms, Some(1_781_109_422_174));
+
+        // Older CC without the field — still a valid entry (pid-alive-only).
+        let without = serde_json::json!({ "pid": 64924, "sessionId": "s" }).to_string();
+        let entry = parse_registry_entry(without.as_bytes()).unwrap();
+        assert_eq!(entry.started_at_ms, None);
+
+        // Malformed startedAt (string / negative) degrades to None, never a
+        // parse failure — the identity check is additive.
+        let junk =
+            serde_json::json!({ "pid": 64924, "sessionId": "s", "startedAt": "soon" }).to_string();
+        let entry = parse_registry_entry(junk.as_bytes()).unwrap();
+        assert_eq!(entry.started_at_ms, None);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn pid_start_time_secs_reports_a_fresh_child_as_just_started() {
+        // Hermetic: a child spawned NOW must have a kernel start time within a
+        // few seconds of the current wall clock (proves both the FFI call and
+        // the epoch-seconds unit — a ticks-since-boot misread would be off by
+        // decades).
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
+        let started = pid_start_time_secs(child.id() as i32);
+        let now_secs = std::time::SystemTime::now()
+            .duration_since(std::time::SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let _ = child.kill();
+        let _ = child.wait();
+        let started = started.expect("proc_pidinfo must report a live child's start time");
+        assert!(
+            started.abs_diff(now_secs) <= 5,
+            "child start time {started} should be within 5s of now {now_secs}"
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn pid_start_time_secs_none_for_dead_pid() {
+        assert_eq!(pid_start_time_secs(999_999_999), None);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn recycled_pid_entry_is_dropped_and_matching_one_kept() {
+        let own_pid = std::process::id() as i32;
+        let own_start = pid_start_time_secs(own_pid).expect("own start time");
+        let dir = tempfile::tempdir().unwrap();
+        // Plausible recycling: the registry claims a start an hour before the
+        // process actually started — a dead CC whose pid was reused.
+        std::fs::write(
+            dir.path().join("recycled.json"),
+            serde_json::json!({
+                "pid": own_pid,
+                "sessionId": "recycled-session",
+                "startedAt": (own_start - 3600) * 1000
+            })
+            .to_string(),
+        )
+        .unwrap();
+        // Live measurement: CC stamps startedAt ~1.2s after process start —
+        // inside the 10s tolerance.
+        std::fs::write(
+            dir.path().join("genuine.json"),
+            serde_json::json!({
+                "pid": own_pid,
+                "sessionId": "genuine-session",
+                "startedAt": own_start * 1000 + 1200
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let live = live_cc_session_ids(dir.path());
+        assert_eq!(
+            live,
+            HashSet::from(["genuine-session".to_string()]),
+            "a recycled-pid entry must be dropped; the identity-matching one kept"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn entry_without_started_at_keeps_pid_alive_only_behavior() {
+        // Additive fallback: no startedAt → no identity check → the live pid
+        // alone vouches (exactly the pre-#220 behavior).
+        let dir = tempfile::tempdir().unwrap();
+        write_entry(
+            dir.path(),
+            "legacy.json",
+            std::process::id() as i64,
+            "legacy-session",
+        );
+        assert!(live_cc_session_ids(dir.path()).contains("legacy-session"));
     }
 
     #[test]

@@ -158,6 +158,17 @@ pub enum AgentEvent {
     SessionEnd {
         agent_id: AgentId,
     },
+    /// Emitted by a watcher once per liveness-probe refresh for EVERY session
+    /// id the probe currently vouches for (CC's `sessions/<pid>.json`
+    /// registry, Codex's open-rollout FD binding). The reducer ONLY refreshes
+    /// a sweep-exemption timestamp for an existing, non-exiting slot — it must
+    /// never create a slot, never touch activity state, and never refresh
+    /// `last_event_at` (the Active→Idle debounce and the label/back-fill logic
+    /// stay driven by real events). When the live signal disappears the
+    /// emissions stop and normal staleness sweeps resume after the TTL.
+    ProofOfLife {
+        agent_id: AgentId,
+    },
 }
 
 impl AgentEvent {
@@ -169,6 +180,7 @@ impl AgentEvent {
             AgentEvent::Waiting { agent_id, .. } => *agent_id,
             AgentEvent::Rename { agent_id, .. } => *agent_id,
             AgentEvent::SessionEnd { agent_id, .. } => *agent_id,
+            AgentEvent::ProofOfLife { agent_id, .. } => *agent_id,
         }
     }
 }

@@ -974,6 +974,299 @@ fn codex_idle_agent_reaps_faster_than_claude_idle() {
     );
 }
 
+// --- probe-vouched sweep exemption (#220) ----------------------------------
+//
+// The liveness probe (CC sessions registry / Codex open-rollout fd) is ground
+// truth that the owning PROCESS is alive; the watcher re-emits ProofOfLife per
+// probe refresh. A vouched slot must not be swept on event silence alone —
+// the motivating case is a permission-parked CC session that renders Active
+// after attach-replay (its hook-only Waiting is unreconstructable from JSONL)
+// and emits nothing while the human decides.
+
+#[test]
+fn proof_of_life_exempts_active_slot_from_stale_sweep() {
+    use pixtuoid_core::state::reducer::{PROOF_OF_LIFE_TTL, STALE_ACTIVE_TIMEOUT};
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let id = AgentId::from_transcript_path("/p/pol-active.jsonl");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: id,
+            source: "claude-code".into(),
+            session_id: "s".into(),
+            cwd: PathBuf::from("/repo"),
+            parent_id: None,
+        },
+        t0,
+        Transport::Hook,
+    );
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityStart {
+            agent_id: id,
+            tool_use_id: Some("t".into()),
+            detail: None,
+        },
+        t0,
+        Transport::Hook,
+    );
+
+    // The watcher re-vouches every ~60s, so by the time the slot crosses the
+    // Active threshold a fresh ProofOfLife has landed well inside the TTL.
+    let vouch_at = t0 + STALE_ACTIVE_TIMEOUT;
+    r.apply(
+        &mut scene,
+        AgentEvent::ProofOfLife { agent_id: id },
+        vouch_at,
+        Transport::Jsonl,
+    );
+
+    // Past the Active threshold (measured from last_event_at = t0) but inside
+    // the vouch TTL: without the exemption this sweep reaps the slot (pinned
+    // by stale_active_agent_uses_shorter_timeout_than_idle).
+    let sweep_at = vouch_at + Duration::from_secs(1);
+    assert!(sweep_at.duration_since(vouch_at).unwrap() < PROOF_OF_LIFE_TTL);
+    r.tick(&mut scene, sweep_at);
+    let slot = scene.agents.get(&id).expect("vouched slot must survive");
+    assert!(
+        slot.exiting_at.is_none(),
+        "a probe-vouched slot must be exempt from the stale sweep"
+    );
+}
+
+#[test]
+fn proof_of_life_lapse_restores_normal_sweep() {
+    use pixtuoid_core::state::reducer::{PROOF_OF_LIFE_TTL, STALE_ACTIVE_TIMEOUT};
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let id = AgentId::from_transcript_path("/p/pol-lapse.jsonl");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: id,
+            source: "claude-code".into(),
+            session_id: "s".into(),
+            cwd: PathBuf::from("/repo"),
+            parent_id: None,
+        },
+        t0,
+        Transport::Hook,
+    );
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityStart {
+            agent_id: id,
+            tool_use_id: Some("t".into()),
+            detail: None,
+        },
+        t0,
+        Transport::Hook,
+    );
+
+    // Last vouch lands mid-window (the process then exits: emissions stop).
+    let vouch_at = t0 + STALE_ACTIVE_TIMEOUT - Duration::from_secs(100);
+    r.apply(
+        &mut scene,
+        AgentEvent::ProofOfLife { agent_id: id },
+        vouch_at,
+        Transport::Jsonl,
+    );
+
+    // Inside the TTL the slot is exempt — also pins that ProofOfLife did NOT
+    // refresh last_event_at (the slot is past the Active threshold here).
+    let exempt_at = t0 + STALE_ACTIVE_TIMEOUT + Duration::from_secs(1);
+    r.tick(&mut scene, exempt_at);
+    assert!(
+        scene.agents.get(&id).unwrap().exiting_at.is_none(),
+        "still inside the vouch TTL — exempt"
+    );
+
+    // Once the vouch lapses, the normal sweep resumes (age is measured from
+    // last_event_at = t0, long past the Active threshold by now).
+    let lapsed_at = vouch_at + PROOF_OF_LIFE_TTL + Duration::from_secs(1);
+    r.tick(&mut scene, lapsed_at);
+    assert!(
+        scene.agents.get(&id).unwrap().exiting_at.is_some(),
+        "a lapsed vouch must fall back to the normal stale sweep"
+    );
+}
+
+#[test]
+fn proof_of_life_for_unknown_id_is_a_no_op() {
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let id = AgentId::from_transcript_path("/p/pol-unknown.jsonl");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    r.apply(
+        &mut scene,
+        AgentEvent::ProofOfLife { agent_id: id },
+        t0,
+        Transport::Jsonl,
+    );
+    assert!(
+        scene.agents.is_empty(),
+        "ProofOfLife must never create a slot — only hook tool/permission events synthesize"
+    );
+}
+
+#[test]
+fn proof_of_life_does_not_touch_activity_state() {
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let id = AgentId::from_transcript_path("/p/pol-state.jsonl");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: id,
+            source: "claude-code".into(),
+            session_id: "s".into(),
+            cwd: PathBuf::from("/repo"),
+            parent_id: None,
+        },
+        t0,
+        Transport::Hook,
+    );
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityStart {
+            agent_id: id,
+            tool_use_id: Some("t1".into()),
+            detail: Some("Edit: foo.rs".into()),
+        },
+        t0,
+        Transport::Hook,
+    );
+    // Arm the idle debounce — ProofOfLife must not cancel or re-arm it.
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityEnd {
+            agent_id: id,
+            tool_use_id: Some("t1".into()),
+        },
+        t0,
+        Transport::Hook,
+    );
+    let before = scene.agents.get(&id).unwrap().clone();
+
+    r.apply(
+        &mut scene,
+        AgentEvent::ProofOfLife { agent_id: id },
+        t0 + Duration::from_millis(100),
+        Transport::Jsonl,
+    );
+    let after = scene.agents.get(&id).unwrap();
+    assert_eq!(
+        after.state, before.state,
+        "ProofOfLife must not change activity state"
+    );
+    assert_eq!(
+        after.last_event_at, before.last_event_at,
+        "ProofOfLife must not refresh last_event_at — it is not a real event"
+    );
+    assert_eq!(
+        after.pending_idle_at, before.pending_idle_at,
+        "ProofOfLife must not disturb the armed Active→Idle debounce"
+    );
+}
+
+#[test]
+fn proof_of_life_does_not_block_session_end() {
+    use pixtuoid_core::state::reducer::EXIT_GRACE_WINDOW;
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let id = AgentId::from_transcript_path("/p/pol-end.jsonl");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: id,
+            source: "claude-code".into(),
+            session_id: "s".into(),
+            cwd: PathBuf::from("/repo"),
+            parent_id: None,
+        },
+        t0,
+        Transport::Hook,
+    );
+    r.apply(
+        &mut scene,
+        AgentEvent::ProofOfLife { agent_id: id },
+        t0,
+        Transport::Jsonl,
+    );
+    // A real exit still removes promptly: SessionEnd marks exiting despite the
+    // fresh vouch, and the grace GC reclaims the slot on schedule.
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionEnd { agent_id: id },
+        t0 + Duration::from_secs(1),
+        Transport::Hook,
+    );
+    assert!(
+        scene.agents.get(&id).unwrap().exiting_at.is_some(),
+        "SessionEnd must mark a vouched slot exiting immediately"
+    );
+    r.tick(
+        &mut scene,
+        t0 + Duration::from_secs(1) + EXIT_GRACE_WINDOW + Duration::from_secs(1),
+    );
+    assert!(
+        !scene.agents.contains_key(&id),
+        "the vouch must not delay the exit GC"
+    );
+}
+
+#[test]
+fn codex_vouched_idle_slot_outlives_short_idle_reap() {
+    use pixtuoid_core::state::reducer::{PROOF_OF_LIFE_TTL, STALE_SHORT_IDLE_TIMEOUT};
+    // The new Codex semantic (#220): while the FD probe vouches for a rollout
+    // (the codex process lives, holding it open), the 5-min short-idle reap is
+    // exempt — it now effectively measures from the moment the process exits
+    // and the vouch lapses. Without the vouch, the short reap is unchanged.
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let vouched = AgentId::from_transcript_path("/p/codex-vouched.jsonl");
+    let ghost = AgentId::from_transcript_path("/p/codex-ghost.jsonl");
+    for id in [vouched, ghost] {
+        r.apply(
+            &mut scene,
+            AgentEvent::SessionStart {
+                agent_id: id,
+                source: "codex".into(),
+                session_id: "s".into(),
+                cwd: PathBuf::from("/repo"),
+                parent_id: None,
+            },
+            t0,
+            Transport::Hook,
+        );
+    }
+    let vouch_at = t0 + STALE_SHORT_IDLE_TIMEOUT - Duration::from_secs(100);
+    r.apply(
+        &mut scene,
+        AgentEvent::ProofOfLife { agent_id: vouched },
+        vouch_at,
+        Transport::Jsonl,
+    );
+
+    let sweep_at = t0 + STALE_SHORT_IDLE_TIMEOUT + Duration::from_secs(1);
+    assert!(sweep_at.duration_since(vouch_at).unwrap() < PROOF_OF_LIFE_TTL);
+    r.tick(&mut scene, sweep_at);
+    assert!(
+        scene.agents.get(&vouched).unwrap().exiting_at.is_none(),
+        "an fd-vouched codex slot must outlive the short-idle reap"
+    );
+    assert!(
+        scene.agents.get(&ghost).unwrap().exiting_at.is_some(),
+        "an unvouched codex slot keeps the 5-min short-idle reap"
+    );
+}
+
 #[test]
 fn fresh_event_resets_stale_timer() {
     use pixtuoid_core::state::reducer::STALE_IDLE_TIMEOUT;

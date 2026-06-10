@@ -374,6 +374,56 @@ async fn codex_watcher_registers_stale_rollout_when_probe_says_live() {
     handle.abort();
 }
 
+/// #220: the probe is ONGOING liveness, not just admission — after each probe
+/// refresh (the initial seed makes this fast; the 60s poll repeats it) the
+/// watcher emits a `ProofOfLife` for every vouched id so the reducer can keep
+/// the slot exempt from staleness sweeps while the process lives.
+#[tokio::test]
+async fn watcher_emits_proof_of_life_for_probe_live_ids() {
+    let dir = TempDir::new().unwrap();
+    let projects_root = dir.path().to_path_buf();
+    let project_dir = projects_root.join("proj-pol");
+    tokio::fs::create_dir_all(&project_dir).await.unwrap();
+
+    let uuid = "01000000-0000-7000-8000-0000000000ab";
+    let stale = project_dir.join(format!("{uuid}.jsonl"));
+    let line = serde_json::json!({
+        "type": "assistant",
+        "sessionId": uuid,
+        "cwd": "/repo",
+        "message": { "role": "assistant", "content": [] }
+    });
+    tokio::fs::write(&stale, format!("{line}\n")).await.unwrap();
+    let backdated = FileTime::from_system_time(SystemTime::now() - Duration::from_secs(3600));
+    set_file_mtime(&stale, backdated).unwrap();
+
+    let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(32);
+    let watcher = cc_watcher(projects_root.clone())
+        .with_initial_window(Duration::from_secs(60))
+        .with_liveness_probe(std::sync::Arc::new(move || {
+            std::iter::once(uuid.to_string()).collect()
+        }));
+    let handle = tokio::spawn(async move { watcher.run(tx).await });
+
+    let expected = AgentId::from_parts("claude-code", uuid);
+    let mut pol = None;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    while tokio::time::Instant::now() < deadline {
+        if let Ok(Some((t, AgentEvent::ProofOfLife { agent_id }))) =
+            tokio::time::timeout(Duration::from_millis(200), rx.recv()).await
+        {
+            pol = Some((t, agent_id));
+            break;
+        }
+    }
+    assert_eq!(
+        pol,
+        Some((Transport::Jsonl, expected)),
+        "each probe refresh must emit a ProofOfLife per vouched id"
+    );
+    handle.abort();
+}
+
 /// Conversely, a transcript whose mtime is *within* the initial-window is
 /// treated as live: its SessionStart and any historical content replays so
 /// in-flight Task / tool state survives a pixtuoid restart.

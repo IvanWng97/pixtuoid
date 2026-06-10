@@ -197,6 +197,7 @@ impl JsonlWatcher {
             },
         )
         .await;
+        emit_proof_of_life(&live, &source_arc, &tx).await;
 
         // Re-scan shortly after startup to catch files that APFS read_dir
         // missed during the initial seed walk (metadata propagation race).
@@ -237,12 +238,14 @@ impl JsonlWatcher {
                         *live.lock().await = probe();
                     }
                     scan_root(&self.root, decoders, &ctx).await;
+                    emit_proof_of_life(&live, &source_arc, &tx).await;
                 }
                 _ = poll.tick() => {
                     if let Some(probe) = &self.liveness_probe {
                         *live.lock().await = probe();
                     }
                     scan_root(&self.root, decoders, &ctx).await;
+                    emit_proof_of_life(&live, &source_arc, &tx).await;
                 }
             }
         }
@@ -287,6 +290,35 @@ async fn should_seed_at_eof(
 async fn probe_admits(path: &Path, decoders: SourceDecoders, ctx: &WatchCtx<'_>) -> bool {
     let live = ctx.live.lock().await;
     !live.is_empty() && live.contains(&(decoders.id_derive)(path))
+}
+
+/// #220: the probe is ONGOING liveness, not just admission. After each probe
+/// refresh (initial seed / 250ms rescan / 60s poll — the same three sites that
+/// re-snapshot `live`) emit a `ProofOfLife` per vouched id so the reducer can
+/// hold its sweep exemption while the process lives; when the live signal
+/// disappears the emissions stop and the exemption ages out. Runs AFTER
+/// `scan_root` so freshly admitted sessions already have slots (ordering is
+/// cosmetic — an unknown-id ProofOfLife is a reducer no-op — but it spares a
+/// wasted pass). An empty snapshot (no probe wired / nothing live) sends
+/// nothing. A closed channel is ignored like the other sends (shutdown path).
+async fn emit_proof_of_life(
+    live: &Arc<Mutex<HashSet<String>>>,
+    source: &Arc<str>,
+    tx: &TaggedSender,
+) {
+    // Snapshot before sending: holding the lock across `tx.send` would block
+    // probe refreshes on a slow consumer for no reason.
+    let ids: Vec<AgentId> = live
+        .lock()
+        .await
+        .iter()
+        .map(|sid| AgentId::from_parts(source, sid))
+        .collect();
+    for agent_id in ids {
+        let _ = tx
+            .send((Transport::Jsonl, AgentEvent::ProofOfLife { agent_id }))
+            .await;
+    }
 }
 
 async fn scan_root(root: &Path, decoders: SourceDecoders, ctx: &WatchCtx<'_>) {

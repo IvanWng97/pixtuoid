@@ -115,6 +115,19 @@ pub const STALE_UNKNOWN_CWD_TIMEOUT: Duration = Duration::from_secs(3 * 60);
 #[doc(hidden)]
 pub const STALE_SHORT_IDLE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
+/// How long an [`AgentEvent::ProofOfLife`] vouch exempts its slot from the
+/// staleness sweeps (#220). The probe is ground truth that the OWNING PROCESS
+/// is alive, while every `STALE_*` window above only models event silence — so
+/// a vouched slot must not be swept on silence alone (the motivating case: a
+/// probe-vouched CC session parked on a permission prompt renders Active after
+/// attach-replay — its hook-only Waiting state is unreconstructable from JSONL
+/// — and 10 min of silence is normal while the human decides). Sized 2.5× the
+/// watcher's 60s poll cadence: two missed polls plus slack. When the live
+/// signal disappears (registry entry removed / rollout fd closed) the
+/// emissions stop and the normal sweeps resume after this lapse.
+#[doc(hidden)]
+pub const PROOF_OF_LIFE_TTL: Duration = Duration::from_secs(150);
+
 /// The state-adaptive stale timeout for one slot. Unknown-cwd ghosts reap on the
 /// shortest window (almost always startup-seeding artifacts). Otherwise the
 /// timeout follows the activity state — with one carve-out: an idle slot whose
@@ -246,6 +259,13 @@ pub struct Reducer {
     /// copy — #151) defuses it. Evicted at BOTH sites like the other maps
     /// (tick's retain + `sweep_exited`'s remove).
     pending_b1_cascades: HashMap<AgentId, SystemTime>,
+    /// Sweep-exemption timestamps from [`AgentEvent::ProofOfLife`] (#220):
+    /// a slot vouched for within [`PROOF_OF_LIFE_TTL`] is skipped by
+    /// `sweep_stale`'s candidate collection. Deliberately reducer-private
+    /// state, NOT a field on the public `AgentSlot` (no semver surface
+    /// change); pruned by `gc` on TTL like its hook-recency siblings and
+    /// evicted with the slot in `sweep_exited`.
+    recent_proof_of_life: HashMap<AgentId, SystemTime>,
     /// `tool_use_id` that was Active immediately before an agent entered
     /// `Waiting` (a CC permission `Notification` fires mid-tool). When THAT
     /// tool's `ActivityEnd` (its `PostToolUse`) arrives, the permission has been
@@ -584,6 +604,21 @@ impl Reducer {
                 }
                 scope::cascade_exit(scene, agent_id, now);
             }
+            // #220: refresh the sweep exemption — and NOTHING else. No slot
+            // synthesis (only hook tool/permission events are proof of NEW
+            // life; this only vouches for already-visible slots), no state
+            // change, no `last_event_at` refresh (the Active→Idle debounce and
+            // back-fill stay driven by real events). An exiting slot is left
+            // alone so the vouch can't tug against SessionEnd/cascade_exit.
+            AgentEvent::ProofOfLife { agent_id } => {
+                if scene
+                    .agents
+                    .get(&agent_id)
+                    .is_some_and(|s| s.exiting_at.is_none())
+                {
+                    self.recent_proof_of_life.insert(agent_id, now);
+                }
+            }
         }
     }
 
@@ -901,6 +936,8 @@ impl Reducer {
             now.duration_since(*ts)
                 .is_ok_and(|d| d < HOOK_SESSION_END_TOMBSTONE_TTL)
         });
+        self.recent_proof_of_life
+            .retain(|_, ts| now.duration_since(*ts).is_ok_and(|d| d < PROOF_OF_LIFE_TTL));
     }
 
     /// Walk through agents with `pending_idle_at` set and flip their
@@ -951,6 +988,18 @@ impl Reducer {
             .filter(|slot| slot.exiting_at.is_none())
             .filter_map(|slot| {
                 if scope::has_waiting_ancestor(agents, slot.agent_id) {
+                    return None;
+                }
+                // Probe-vouched exemption (#220): a recent ProofOfLife means
+                // the owning process is alive RIGHT NOW — event silence is not
+                // death (permission-parked after attach-replay, long-idle).
+                // Clock-regression-safe like the gc retains; once emissions
+                // stop the entry ages out and the normal sweep resumes.
+                if self
+                    .recent_proof_of_life
+                    .get(&slot.agent_id)
+                    .is_some_and(|t| now.duration_since(*t).is_ok_and(|d| d < PROOF_OF_LIFE_TTL))
+                {
                     return None;
                 }
                 let age = now
@@ -1021,6 +1070,10 @@ impl Reducer {
             // swept mid-turn leaks its gated tool_use_id until the next tick.
             self.gated_before_waiting.remove(&id);
             self.pending_b1_cascades.remove(&id);
+            // The gc TTL retain bounds this map anyway; evicting with the slot
+            // (like the per-agent siblings above) keeps a removed id from
+            // exempting a same-id resurrect ghost inside the TTL window.
+            self.recent_proof_of_life.remove(&id);
         }
     }
 }
@@ -1132,7 +1185,7 @@ mod tests {
     #[test]
     fn stale_timeout_constants_have_their_intended_durations() {
         use super::{
-            STALE_ACTIVE_TIMEOUT, STALE_IDLE_TIMEOUT, STALE_SHORT_IDLE_TIMEOUT,
+            PROOF_OF_LIFE_TTL, STALE_ACTIVE_TIMEOUT, STALE_IDLE_TIMEOUT, STALE_SHORT_IDLE_TIMEOUT,
             STALE_UNKNOWN_CWD_TIMEOUT, STALE_WAITING_TIMEOUT,
         };
         use std::time::Duration;
@@ -1141,6 +1194,7 @@ mod tests {
         assert_eq!(STALE_WAITING_TIMEOUT, Duration::from_secs(3600)); // 60 min
         assert_eq!(STALE_UNKNOWN_CWD_TIMEOUT, Duration::from_secs(180)); // 3 min
         assert_eq!(STALE_SHORT_IDLE_TIMEOUT, Duration::from_secs(300)); // 5 min
+        assert_eq!(PROOF_OF_LIFE_TTL, Duration::from_secs(150)); // 2.5× the 60s poll
     }
 
     // The Delegating stale carve-out is caps-driven; pin the POLICY half with
