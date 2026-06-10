@@ -43,6 +43,30 @@ CODEX_PROTOCOL_URL = (
     "codex-rs/protocol/src/protocol.rs"
 )
 CC_TOOLS_URL = "https://code.claude.com/docs/en/tools-reference.md"
+CC_HOOKS_URL = "https://code.claude.com/docs/en/hooks.md"
+
+# CC durable-end-marker + sessions-registry watch. CC is a closed binary, so —
+# exactly like the dispatch-tool check below — the docs markdown is the only
+# watchable surface; this is an APPEARANCE watch (the inverse of the
+# vanished-identifier checks): pixtuoid treats CC lifecycle as hook + idle
+# sweep ONLY, because CC persists NO structural end record in transcripts
+# today (135-transcript corpus, 2026-06; the content-based /exit matcher was
+# removed — chat content must never drive lifecycle). Two surfaces we want to
+# ADOPT the moment they exist upstream:
+#   * a structural transcript end record (`subtype:"session_end"`) —
+#     `cc_session_ended` already decodes it; the docs mentioning it means CC
+#     started persisting it and the JSONL transport gains a durable end signal.
+#   * the `~/.claude/sessions/<pid>.json` registry ({pid, sessionId, cwd,
+#     procStart, status}) — the input an upcoming liveness probe will consume.
+# All markers are ABSENT from hooks.md at add time (verified live); a hit is
+# review-class drift (something new to adopt), never breaking. `session_end`
+# is snake_case on purpose: the SessionEnd HOOK name appears throughout
+# hooks.md and must not match.
+CC_LIFECYCLE_SURFACE_MARKERS = {
+    "session_end": 'a structural transcript end record (subtype:"session_end")',
+    ".claude/sessions/": "the ~/.claude/sessions/<pid>.json session registry",
+    "procStart": "the sessions-registry procStart field",
+}
 
 # Codex hook events we DELIBERATELY do not register — they are not agent
 # activity a visualizer cares about. A new upstream hook NOT in this set is
@@ -217,6 +241,25 @@ def main() -> int:
                     f"renamed again. Update make_tool_detail's known names. (Semantic "
                     f"subagent_type detection still works, but the name fallback is "
                     f"stale.)"
+                )
+
+    # --- CC lifecycle surfaces (end marker + sessions registry) ------------
+    # Unconditional (unlike the sections above, there is nothing to read from
+    # our source first — we depend on these surfaces' ABSENCE; see
+    # CC_LIFECYCLE_SURFACE_MARKERS).
+    try:
+        hooks_doc = fetch(CC_HOOKS_URL)
+    except urllib.error.URLError as e:
+        errors.append(f"CC hooks doc fetch failed (transient?): {e}")
+        hooks_doc = None
+    if hooks_doc is not None:
+        for marker, what in sorted(CC_LIFECYCLE_SURFACE_MARKERS.items()):
+            if marker in hooks_doc:
+                review.append(
+                    f"CC hooks doc now mentions `{marker}` — {what} may have "
+                    f"landed upstream. Adopt it (a durable end signal for the "
+                    f"JSONL transport / the liveness-probe registry) and "
+                    f"update this watch."
                 )
 
     # --- report ------------------------------------------------------------
