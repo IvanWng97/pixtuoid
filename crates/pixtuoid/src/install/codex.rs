@@ -18,12 +18,14 @@ const CODEX_EVENTS: &[&str] = &[
     "PermissionRequest",
 ];
 
-pub fn default_config_path() -> PathBuf {
+pub fn default_config_path() -> Result<PathBuf> {
     // Route through the SAME codex_home() the watcher uses, so the installed-hook
     // config and the watched sessions root can't disagree (and honors CODEX_HOME).
     // codex_home() always yields an absolute path (user_home falls back to the
-    // temp dir), so there's no unsafe `.`/CWD fallback like io::home_relative.
-    pixtuoid_core::source::codex::codex_home().join("config.toml")
+    // temp dir), so there's no unsafe `.`/CWD fallback like io::home_relative —
+    // infallible-Ok; the Result is the shared Target signature (the
+    // home-anchored targets genuinely err without a home dir).
+    Ok(pixtuoid_core::source::codex::codex_home().join("config.toml"))
 }
 
 /// The Codex hook `command`. Codex runs it under a shell — `/bin/sh -lc` on Unix,
@@ -50,7 +52,9 @@ pub fn default_config_path() -> PathBuf {
 ///   (`C:\PROGRA~1\…`, space/metachar-free) and only REJECTS if 8.3 generation is
 ///   disabled on the volume (#195). Ordinary install paths
 ///   (`%USERPROFILE%\.cargo\bin`, npm prefix) skip 8.3 entirely.
-pub fn hook_command(resolved: &Path) -> Result<String> {
+pub fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
+    // `_explicit` is Claude's bare-name-vs-absolute switch — Codex always
+    // embeds the absolute path, so the flag changes nothing here.
     let p = resolved
         .to_str()
         .ok_or_else(|| anyhow!("pixtuoid-hook path is non-UTF-8: {}", resolved.display()))?;
@@ -362,7 +366,7 @@ command = "/old/pixtuoid-hook"
     #[test]
     #[cfg(windows)]
     fn hook_command_emits_bare_exec_form_with_source_flag_on_windows() {
-        let cmd = hook_command(std::path::Path::new(r"C:\tools\pixtuoid-hook.exe")).unwrap();
+        let cmd = hook_command(std::path::Path::new(r"C:\tools\pixtuoid-hook.exe"), false).unwrap();
         assert_eq!(cmd, r"C:\tools\pixtuoid-hook.exe --source codex");
     }
 
@@ -376,11 +380,18 @@ command = "/old/pixtuoid-hook"
     #[cfg(windows)]
     fn hook_command_rejects_cmd_unsafe_path_on_windows() {
         // space → truncation
-        assert!(hook_command(std::path::Path::new(r"C:\Program Files\pixtuoid-hook.exe")).is_err());
+        assert!(hook_command(
+            std::path::Path::new(r"C:\Program Files\pixtuoid-hook.exe"),
+            false
+        )
+        .is_err());
         // `&` → command split / unintended relative-path execution
-        let err = hook_command(std::path::Path::new(r"C:\Users\a&b\pixtuoid-hook.exe"))
-            .unwrap_err()
-            .to_string();
+        let err = hook_command(
+            std::path::Path::new(r"C:\Users\a&b\pixtuoid-hook.exe"),
+            false,
+        )
+        .unwrap_err()
+        .to_string();
         assert!(
             err.contains("cmd.exe") && err.contains("ordinary characters"),
             "must explain the cmd-unsafe path + workaround: {err}"
@@ -393,7 +404,7 @@ command = "/old/pixtuoid-hook"
             r"C:\p%x\h.exe",
         ] {
             assert!(
-                hook_command(std::path::Path::new(bad)).is_err(),
+                hook_command(std::path::Path::new(bad), false).is_err(),
                 "must reject cmd-unsafe path {bad}"
             );
         }
@@ -404,7 +415,7 @@ command = "/old/pixtuoid-hook"
     fn hook_command_errors_on_non_utf8_path() {
         use std::os::unix::ffi::OsStrExt;
         let bad = std::path::Path::new(std::ffi::OsStr::from_bytes(b"/x/\xff/pixtuoid-hook"));
-        assert!(hook_command(bad).is_err());
+        assert!(hook_command(bad, false).is_err());
     }
 
     // POSIX shell-string pins: unix-only — the Windows bare exec form is pinned
@@ -412,7 +423,7 @@ command = "/old/pixtuoid-hook"
     #[cfg(unix)]
     #[test]
     fn hook_command_prefixes_source_for_valid_path() {
-        let cmd = hook_command(std::path::Path::new("/opt/bin/pixtuoid-hook")).unwrap();
+        let cmd = hook_command(std::path::Path::new("/opt/bin/pixtuoid-hook"), false).unwrap();
         assert_eq!(cmd, "PIXTUOID_SOURCE=codex '/opt/bin/pixtuoid-hook'");
     }
 
@@ -421,7 +432,11 @@ command = "/old/pixtuoid-hook"
     #[cfg(unix)]
     #[test]
     fn hook_command_quotes_path_with_spaces() {
-        let cmd = hook_command(std::path::Path::new("/Users/Jane Doe/bin/pixtuoid-hook")).unwrap();
+        let cmd = hook_command(
+            std::path::Path::new("/Users/Jane Doe/bin/pixtuoid-hook"),
+            false,
+        )
+        .unwrap();
         assert_eq!(
             cmd,
             "PIXTUOID_SOURCE=codex '/Users/Jane Doe/bin/pixtuoid-hook'"
@@ -488,29 +503,29 @@ command = "/old/pixtuoid-hook"
 
         std::env::remove_var("CODEX_HOME");
         assert!(
-            default_config_path().ends_with(&fallback_suffix),
+            default_config_path().unwrap().ends_with(&fallback_suffix),
             "unset CODEX_HOME must end with .codex/config.toml, got {:?}",
-            default_config_path()
+            default_config_path().unwrap()
         );
 
         // Set to an EXISTING dir → <dir>/config.toml.
         let custom = std::env::temp_dir().join("pixtuoid-codex-home-cfg-test");
         std::fs::create_dir_all(&custom).unwrap();
         std::env::set_var("CODEX_HOME", &custom);
-        assert_eq!(default_config_path(), custom.join("config.toml"));
+        assert_eq!(default_config_path().unwrap(), custom.join("config.toml"));
 
         // Set to a NON-existent dir → fall back (matches upstream codex's gate).
         let missing = std::env::temp_dir().join("pixtuoid-codex-home-cfg-missing");
         let _ = std::fs::remove_dir_all(&missing);
         std::env::set_var("CODEX_HOME", &missing);
         assert!(
-            default_config_path().ends_with(&fallback_suffix),
+            default_config_path().unwrap().ends_with(&fallback_suffix),
             "non-existent CODEX_HOME must fall back to .codex/config.toml"
         );
 
         // Empty → fallback.
         std::env::set_var("CODEX_HOME", "");
-        assert!(default_config_path().ends_with(&fallback_suffix));
+        assert!(default_config_path().unwrap().ends_with(&fallback_suffix));
 
         match saved {
             Some(v) => std::env::set_var("CODEX_HOME", v),

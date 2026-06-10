@@ -3,10 +3,11 @@
 /// POSIX single-quote a string so a shell treats it as one literal token —
 /// embedded single quotes become `'\''`. Codex and Reasonix both run the hook
 /// `command` under a shell, so an unquoted path containing spaces would split
-/// into multiple args and the hook would never be found. Unix-only: on Windows
+/// into multiple args and the hook would never be found (Claude's explicit
+/// `--hook-path` arm reuses it for the same reason). Unix-only: on Windows
 /// these targets use the windows-half `windows_bare_hook_command` (cmd.exe, not
 /// `sh`).
-pub(super) fn shell_single_quote(s: &str) -> String {
+pub(crate) fn shell_single_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
 }
 

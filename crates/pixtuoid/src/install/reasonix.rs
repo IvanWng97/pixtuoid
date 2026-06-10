@@ -50,8 +50,10 @@ const REASONIX_EVENTS: &[&str] = &[
     "SessionEnd",
 ];
 
-pub fn default_config_path() -> PathBuf {
-    io::home_relative(".reasonix/settings.json")
+pub fn default_config_path() -> Result<PathBuf> {
+    // Checked: with no resolvable home dir, writing `./.reasonix/settings.json`
+    // would "succeed" while the GLOBAL-scope loader never reads it.
+    io::home_relative_checked(".reasonix/settings.json")
 }
 
 /// Presence probe for auto-detection. The default file-exists check on
@@ -95,7 +97,9 @@ fn user_config_dir() -> PathBuf {
 ///   (#195) — a quoted path can't survive cmd /C.
 ///
 /// Err on non-UTF-8 (prevents the to_string_lossy dead-hook).
-pub fn hook_command(resolved: &Path) -> Result<String> {
+pub fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
+    // `_explicit` is Claude's bare-name-vs-absolute switch — Reasonix always
+    // embeds the absolute path, so the flag changes nothing here.
     let p = resolved
         .to_str()
         .ok_or_else(|| anyhow!("pixtuoid-hook path is non-UTF-8: {}", resolved.display()))?;
@@ -332,7 +336,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn hook_command_stamps_source_and_quotes() {
-        let cmd = hook_command(Path::new("/Users/Jane Doe/bin/pixtuoid-hook")).unwrap();
+        let cmd = hook_command(Path::new("/Users/Jane Doe/bin/pixtuoid-hook"), false).unwrap();
         assert_eq!(
             cmd,
             "PIXTUOID_SOURCE=reasonix '/Users/Jane Doe/bin/pixtuoid-hook'"
@@ -344,7 +348,7 @@ mod tests {
     #[test]
     #[cfg(windows)]
     fn hook_command_emits_bare_exec_form_with_source_flag_on_windows() {
-        let cmd = hook_command(Path::new(r"C:\tools\pixtuoid-hook.exe")).unwrap();
+        let cmd = hook_command(Path::new(r"C:\tools\pixtuoid-hook.exe"), false).unwrap();
         assert_eq!(cmd, r"C:\tools\pixtuoid-hook.exe --source reasonix");
     }
 
@@ -354,8 +358,8 @@ mod tests {
     #[test]
     #[cfg(windows)]
     fn hook_command_rejects_cmd_unsafe_path_on_windows() {
-        assert!(hook_command(Path::new(r"C:\Program Files\pixtuoid-hook.exe")).is_err());
-        let err = hook_command(Path::new(r"C:\Users\a&b\pixtuoid-hook.exe"))
+        assert!(hook_command(Path::new(r"C:\Program Files\pixtuoid-hook.exe"), false).is_err());
+        let err = hook_command(Path::new(r"C:\Users\a&b\pixtuoid-hook.exe"), false)
             .unwrap_err()
             .to_string();
         assert!(
@@ -389,7 +393,7 @@ mod tests {
     fn hook_command_errors_on_non_utf8_path() {
         use std::os::unix::ffi::OsStrExt;
         let bad = Path::new(std::ffi::OsStr::from_bytes(b"/x/\xff/pixtuoid-hook"));
-        assert!(hook_command(bad).is_err());
+        assert!(hook_command(bad, false).is_err());
     }
 
     // Internal-consistency guard (mirror of the CC/Codex ones): every hook

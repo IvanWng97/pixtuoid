@@ -25,12 +25,16 @@ pub struct Target {
     pub display_name: &'static str,
     /// Restart noun for the "→ start a new <noun> session" hint.
     pub restart_noun: &'static str,
-    /// Default config path (reads $HOME, hence a fn not a const).
-    pub default_config_path: fn() -> PathBuf,
+    /// Default config path (reads $HOME, hence a fn not a const). Errs when
+    /// the path is home-anchored and no home dir resolves — writing into a
+    /// CWD fallback would "succeed" with a file the CLI never reads.
+    pub default_config_path: fn() -> Result<PathBuf>,
     /// Build the command string written into config from the resolved binary.
-    /// Claude returns bare "pixtuoid-hook"; Codex returns the full path (Err on
+    /// Claude returns bare "pixtuoid-hook" on Unix UNLESS `explicit` (the user
+    /// passed `--hook-path`, which always wins — then the absolute path is
+    /// embedded); Codex/Reasonix always embed the full path (Err on
     /// non-UTF-8). Takes the resolved binary so each target decides how to use it.
-    pub hook_command: fn(resolved: &Path) -> Result<String>,
+    pub hook_command: fn(resolved: &Path, explicit: bool) -> Result<String>,
     /// Parse `content`, inject managed hook entries, reserialize. MUST treat
     /// empty/whitespace-only content as the empty document — never error on empty.
     /// `changed` reflects a SEMANTIC (parsed) diff, not a byte diff.
@@ -124,7 +128,11 @@ pub fn config_present(path: &Path) -> bool {
 pub fn is_present(t: &Target) -> bool {
     match t.presence_probe {
         Some(probe) => probe(),
-        None => config_present((t.default_config_path)().as_path()),
+        // An unresolvable default path (no home dir) means there is no config
+        // anywhere we could detect — not present.
+        None => (t.default_config_path)()
+            .map(|p| config_present(&p))
+            .unwrap_or(false),
     }
 }
 
@@ -148,5 +156,35 @@ mod tests {
         assert!(!config_present(&p));
         std::fs::write(&p, "{}").unwrap();
         assert!(config_present(&p));
+    }
+
+    #[test]
+    fn is_present_false_when_default_path_unresolvable() {
+        // No home dir → default_config_path errs → the target is simply not
+        // detected (never a panic, never a CWD-relative probe).
+        static NO_HOME: Target = Target {
+            name: "nohome",
+            display_name: "NoHome",
+            restart_noun: "NoHome",
+            default_config_path: || Err(anyhow::anyhow!("cannot resolve the home directory")),
+            hook_command: |_, _| Ok("x".into()),
+            merge_install: |c, _| {
+                Ok(MergeOutcome {
+                    content: c.to_string(),
+                    changed: false,
+                })
+            },
+            merge_uninstall: |c| {
+                Ok(MergeOutcome {
+                    content: c.to_string(),
+                    changed: false,
+                })
+            },
+            needs_path_warning: false,
+            needs_resolved_binary: false,
+            post_install_note: None,
+            presence_probe: None,
+        };
+        assert!(!is_present(&NO_HOME));
     }
 }

@@ -115,61 +115,56 @@ pub fn load(path: &Path, warnings: &mut Vec<String>) -> AppConfig {
     }
 }
 
-/// Load-modify-write the config atomically. `mutate` is called on the
-/// loaded (or default) config to apply changes; the resulting struct is
-/// serialized and atomically renamed into place.
+/// Load-modify-write the config atomically through the install/io.rs write
+/// authority: ONE advisory lock held across the whole read→mutate→write
+/// round ([`crate::install::io::lock_config`] — symlink-resolved target,
+/// fsync + atomic rename + Windows retry, lock file left in place).
 ///
-/// Resolves symlinks so the atomic rename targets the real file, not the
-/// symlink itself (critical for stow-managed configs).
+/// The mutation edits the RAW TOML document (`toml_edit`), not a typed
+/// `AppConfig` round-trip — unknown keys (a newer pixtuoid's settings) and
+/// the user's comments/formatting survive a theme/version save, matching the
+/// deliberately-tolerant read side (`load_ignores_unknown_keys`).
+///
+/// Data-safety contract: a config that EXISTS but does not parse is NEVER
+/// rewritten — the save fails with the parse error (both callers
+/// warn-and-continue), leaving the user's typo fixable. The first overwrite
+/// of an existing file takes a one-time sibling backup
+/// (`config.toml.pixtuoid.bak`, `io::backup_once` semantics).
 fn update_config<F>(path: &Path, mutate: F) -> Result<()>
 where
-    F: FnOnce(&mut AppConfig),
+    F: FnOnce(&mut toml_edit::DocumentMut),
 {
-    let real_path = crate::install::io::resolve_symlink(path);
-    if let Some(parent) = real_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let lock_path = real_path.with_extension("toml.lock");
-    let lock_file = std::fs::File::create(&lock_path)?;
-    lock_file
-        .try_lock()
-        .map_err(|e| anyhow::anyhow!("config lock held by another process: {e}"))?;
-
-    let mut cfg = if real_path.exists() {
-        load(&real_path, &mut Vec::new())
-    } else {
-        AppConfig::default()
+    let lock = crate::install::io::lock_config(path)?;
+    let real_path = lock.target();
+    let mut doc = match std::fs::read_to_string(real_path) {
+        Ok(contents) => contents.parse::<toml_edit::DocumentMut>().map_err(|e| {
+            anyhow::anyhow!(
+                "refusing to rewrite {}: it exists but is not valid TOML ({e}); fix or delete it",
+                real_path.display()
+            )
+        })?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => toml_edit::DocumentMut::new(),
+        Err(e) => {
+            return Err(anyhow::Error::new(e).context(format!(
+                "refusing to rewrite {}: cannot read the existing config",
+                real_path.display()
+            )))
+        }
     };
-    mutate(&mut cfg);
-
-    let contents = toml::to_string_pretty(&cfg)?;
-    let tmp = real_path.with_extension("toml.tmp");
-    {
-        use std::io::Write;
-        let mut f = std::fs::OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .open(&tmp)?;
-        f.write_all(contents.as_bytes())?;
-        // fsync before the atomic rename, matching io.rs::write_config_atomic — a
-        // crash/power loss in the durability window would otherwise leave a
-        // zero-length or torn config.toml.
-        f.sync_all()?;
-    }
-    std::fs::rename(&tmp, &real_path)?;
-    lock_file.unlock().ok();
-    let _ = std::fs::remove_file(&lock_path);
-    Ok(())
+    mutate(&mut doc);
+    crate::install::io::backup_once(real_path, crate::install::target::BACKUP_SUFFIX)?;
+    lock.write_atomic(&doc.to_string())
 }
 
 pub fn save(path: &Path, theme_name: &str) -> Result<()> {
-    update_config(path, |cfg| cfg.theme = Some(theme_name.to_string()))
+    update_config(path, |doc| {
+        doc["theme"] = toml_edit::value(theme_name);
+    })
 }
 
 pub fn save_version(path: &Path, version: &str) -> Result<()> {
-    update_config(path, |cfg| {
-        cfg.last_seen_version = Some(version.to_string())
+    update_config(path, |doc| {
+        doc["last-seen-version"] = toml_edit::value(version);
     })
 }
 
@@ -876,6 +871,135 @@ mod tests {
             "the kindless stanza is skipped, the cat kept"
         );
         assert_eq!(pets[0].kind, crate::tui::pet::PetKind::Cat);
+    }
+
+    // --- data safety: malformed-config refusal + one-time backup (#3) ---------
+
+    #[test]
+    fn update_config_refuses_to_overwrite_a_malformed_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("config.toml");
+        let original = "theme = [unclosed";
+        std::fs::write(&p, original).unwrap();
+        let err = save(&p, "cyberpunk").expect_err("a malformed config must not be persisted over");
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains(&p.display().to_string()) && msg.to_lowercase().contains("toml"),
+            "error must name the file and the parse failure: {msg}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&p).unwrap(),
+            original,
+            "the file content must be untouched — the user's typo is still fixable"
+        );
+    }
+
+    #[test]
+    fn save_version_refuses_to_overwrite_a_malformed_config() {
+        // The boot save_version path (tui/mod.rs) is the automatic trigger that
+        // used to wipe a hand-written config on the first boot after a typo.
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("config.toml");
+        let original = "theme = \"cyberpunk\"\nmax-desks = oops\n";
+        std::fs::write(&p, original).unwrap();
+        assert!(save_version(&p, "9.9.9").is_err());
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), original);
+    }
+
+    #[test]
+    fn save_backs_up_an_existing_config_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("config.toml");
+        let original = "theme = \"normal\"\nmax-desks = 8\n";
+        std::fs::write(&p, original).unwrap();
+        let bak = dir.path().join("config.toml.pixtuoid.bak");
+
+        save(&p, "cyberpunk").unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&bak).unwrap(),
+            original,
+            "first overwrite of an existing config takes a one-time backup"
+        );
+
+        save(&p, "dracula").unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&bak).unwrap(),
+            original,
+            "the backup is once — later saves must not churn it"
+        );
+        assert_eq!(load(&p, &mut Vec::new()).theme.as_deref(), Some("dracula"));
+    }
+
+    #[test]
+    fn save_on_a_missing_config_creates_it_without_a_backup() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("config.toml");
+        save(&p, "cyberpunk").unwrap();
+        assert!(p.exists());
+        assert!(
+            !dir.path().join("config.toml.pixtuoid.bak").exists(),
+            "nothing existed to back up"
+        );
+    }
+
+    // --- format preservation: unknown keys + comments survive a save (#15) ----
+
+    #[test]
+    fn save_preserves_comments_and_unknown_keys_byte_for_byte() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("config.toml");
+        let original = "# pixtuoid config — hand-tuned\ntheme = \"normal\"\nfuture-key = 1 # written by a newer pixtuoid\n\n[[pets]]\nkind = \"cat\" # the office cat\n";
+        std::fs::write(&p, original).unwrap();
+
+        save(&p, "cyberpunk").unwrap();
+
+        let after = std::fs::read_to_string(&p).unwrap();
+        assert_eq!(
+            after,
+            original.replace("theme = \"normal\"", "theme = \"cyberpunk\""),
+            "everything but the mutated key must survive byte-for-byte"
+        );
+    }
+
+    #[test]
+    fn save_version_inserts_new_key_before_pets_section() {
+        // A NEW scalar key must land with the other scalars, never after the
+        // [[pets]] array-of-tables (which would re-parent it into the pet).
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("config.toml");
+        std::fs::write(&p, "theme = \"normal\"\n\n[[pets]]\nkind = \"cat\"\n").unwrap();
+
+        save_version(&p, "9.9.9").unwrap();
+
+        let after = std::fs::read_to_string(&p).unwrap();
+        let ver_pos = after.find("last-seen-version").expect("key written");
+        let pets_pos = after.find("[[pets]]").expect("pets kept");
+        assert!(ver_pos < pets_pos, "scalar must precede [[pets]]:\n{after}");
+        let cfg = load(&p, &mut Vec::new());
+        assert_eq!(cfg.last_seen_version.as_deref(), Some("9.9.9"));
+        assert_eq!(
+            cfg.pets,
+            Some(vec![PetEntry {
+                kind: Some("cat".into()),
+                name: None
+            }])
+        );
+    }
+
+    // --- write seam parity with install/io.rs (#16) ----------------------------
+
+    #[test]
+    fn save_leaves_the_lock_file_in_place() {
+        // Parity with io.rs::write_config_atomic, which deliberately never
+        // unlinks its lock file (unlock-then-unlink lets two later writers both
+        // "hold" the lock on different inodes).
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("config.toml");
+        save(&p, "cyberpunk").unwrap();
+        assert!(
+            dir.path().join("config.toml.lock").exists(),
+            "the lock file must stay in place"
+        );
     }
 
     // --- save_version ---------------------------------------------------------

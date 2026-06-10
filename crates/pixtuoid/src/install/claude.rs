@@ -22,27 +22,38 @@ const EVENTS: &[&str] = &[
     "SessionEnd",
 ];
 
-pub fn default_config_path() -> PathBuf {
-    claude_config_dir()
-        .map(|dir| dir.join("settings.json"))
-        .unwrap_or_else(|| io::home_relative(".claude/settings.json"))
+pub fn default_config_path() -> Result<PathBuf> {
+    if let Some(dir) = claude_config_dir() {
+        return Ok(dir.join("settings.json"));
+    }
+    io::home_relative_checked(".claude/settings.json")
 }
 
 /// Unix: writes the bare name so CC can PATH-resolve it (portability over absolute
 /// paths — a stow-managed binary or cargo install may land in a custom prefix).
+/// EXCEPTION: an explicit `--hook-path` (`explicit`) always wins — the user passed
+/// it precisely because the binary is off-PATH, so the absolute path is embedded
+/// (single-quoted; CC runs shell-form commands through a shell), matching the
+/// Codex/Reasonix targets.
 ///
 /// Windows: exec form requires the absolute PE path (CC's shell-form entry goes
 /// through cmd.exe/PowerShell — unportable, PATHEXT-dependent). The orchestrator
 /// already hard-errors if resolution failed (`needs_resolved_binary: true` on
 /// Windows), so `resolved` is guaranteed to be an absolute path here.
-pub fn hook_command(resolved: &Path) -> Result<String> {
+pub fn hook_command(resolved: &Path, explicit: bool) -> Result<String> {
     #[cfg(not(windows))]
     {
-        let _ = resolved;
+        if explicit {
+            let p = resolved.to_str().ok_or_else(|| {
+                anyhow::anyhow!("pixtuoid-hook path is not valid UTF-8: {resolved:?}")
+            })?;
+            return Ok(crate::install::hook_cmd::unix::shell_single_quote(p));
+        }
         Ok("pixtuoid-hook".to_string())
     }
     #[cfg(windows)]
     {
+        let _ = explicit; // exec form always embeds the absolute path
         resolved
             .to_str()
             .map(|s| s.to_string())
@@ -189,7 +200,7 @@ mod tests {
         let fallback_suffix = PathBuf::from(".claude").join("settings.json");
 
         std::env::remove_var("CLAUDE_CONFIG_DIR");
-        let unset_path = default_config_path();
+        let unset_path = default_config_path().unwrap();
         assert!(
             unset_path.ends_with(&fallback_suffix),
             "default config path must end with .claude/settings.json, got {unset_path:?}"
@@ -197,10 +208,13 @@ mod tests {
 
         let custom_dir = std::env::temp_dir().join("pixtuoid-claude-config-dir");
         std::env::set_var("CLAUDE_CONFIG_DIR", &custom_dir);
-        assert_eq!(default_config_path(), custom_dir.join("settings.json"));
+        assert_eq!(
+            default_config_path().unwrap(),
+            custom_dir.join("settings.json")
+        );
 
         std::env::set_var("CLAUDE_CONFIG_DIR", "");
-        let empty_path = default_config_path();
+        let empty_path = default_config_path().unwrap();
         assert!(
             empty_path.ends_with(&fallback_suffix),
             "empty CLAUDE_CONFIG_DIR must fall back to .claude/settings.json, got {empty_path:?}"
@@ -434,6 +448,38 @@ mod tests {
         let user = "{\n  \"theme\": \"dark\",\n  \"hooks\": {\n    \"PreToolUse\": [ { \"matcher\": \"Write\", \"hooks\": [ {\"type\":\"command\",\"command\":\"/mine\"} ] } ]\n  }\n}";
         let out = merge_uninstall(user).unwrap();
         assert!(!out.changed, "no managed entries → semantic no-op");
+    }
+
+    // --- hook_command: explicit --hook-path vs bare PATH name (#19) -----------
+
+    #[cfg(unix)]
+    #[test]
+    fn hook_command_explicit_path_is_embedded_on_unix() {
+        // `--hook-path` always wins: the user passed it precisely because the
+        // binary is off-PATH, so the bare name would write a hook that never
+        // fires. Single-quoted — CC runs shell-form commands through a shell.
+        let cmd = hook_command(Path::new("/opt/custom/pixtuoid-hook"), true).unwrap();
+        assert_eq!(cmd, "'/opt/custom/pixtuoid-hook'");
+        let spaced = hook_command(Path::new("/Users/Jane Doe/bin/pixtuoid-hook"), true).unwrap();
+        assert_eq!(spaced, "'/Users/Jane Doe/bin/pixtuoid-hook'");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn hook_command_auto_resolved_stays_bare_on_unix() {
+        // The PATH-portability default is load-bearing (binary upgrades apply
+        // immediately) — only the explicit flag overrides it.
+        let cmd = hook_command(Path::new("/usr/local/bin/pixtuoid-hook"), false).unwrap();
+        assert_eq!(cmd, "pixtuoid-hook");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn hook_command_embeds_absolute_path_on_windows_either_way() {
+        for explicit in [true, false] {
+            let cmd = hook_command(Path::new(r"C:\tools\pixtuoid-hook.exe"), explicit).unwrap();
+            assert_eq!(cmd, r"C:\tools\pixtuoid-hook.exe");
+        }
     }
 
     // --- hook_entry shape (runs on every platform) ----------------------------

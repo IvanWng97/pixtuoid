@@ -136,7 +136,10 @@ fn detection() -> Vec<(&'static Target, bool)> {
 /// still appears and the user sees the real error from `run_uninstall`, rather
 /// than a misleading "nothing to remove".
 fn has_hooks(t: &'static Target) -> bool {
-    let path = (t.default_config_path)();
+    // No resolvable default path (no home dir) → no config to bear hooks.
+    let Ok(path) = (t.default_config_path)() else {
+        return false;
+    };
     match io::read_config(&path) {
         Ok(c) if c.trim().is_empty() => false,
         Ok(c) => (t.merge_uninstall)(&c).map(|o| o.changed).unwrap_or(true),
@@ -340,16 +343,27 @@ fn resolve_hook_binary(
 }
 
 fn run_install(t: &Target, config: Option<PathBuf>, hook_path: Option<PathBuf>) -> Result<()> {
-    let path = config.unwrap_or_else(|| (t.default_config_path)());
+    let path = config
+        .map(Ok)
+        .unwrap_or_else(|| (t.default_config_path)())?;
+    let explicit_hook = hook_path.is_some();
     let binary = resolve_hook_binary(t, hook_path, io::default_hook_binary)?;
-    let hook_cmd = (t.hook_command)(&binary)?;
+    let hook_cmd = (t.hook_command)(&binary, explicit_hook)?;
+    // The lock covers the WHOLE read→merge→backup→write round (lost-update
+    // TOCTOU: two concurrent pixtuoid runs would otherwise interleave
+    // read(A)→write(B)→write(A) and A's rename clobbers B's change). Residual:
+    // the CLI itself (e.g. CC rewriting settings.json) can't honor this lock —
+    // it only serializes pixtuoid against pixtuoid.
+    let lock = io::lock_config(&path)?;
     let content = io::read_config(&path)?;
     let outcome = (t.merge_install)(&content, &hook_cmd)
         .with_context(|| format!("processing {}", path.display()))?;
     // The PATH check is an install-time environment check, independent of whether
     // the file content changed — always surface it (a no-op re-install on a box
-    // where pixtuoid-hook isn't on PATH would otherwise warn nothing).
-    if t.needs_path_warning && !io::hook_on_path() {
+    // where pixtuoid-hook isn't on PATH would otherwise warn nothing). Skipped
+    // when an explicit --hook-path was written: the absolute path is embedded,
+    // so PATH resolution never happens.
+    if t.needs_path_warning && !explicit_hook && !io::hook_on_path() {
         println!("warn: `pixtuoid-hook` not found on PATH (checked against this shell).");
         println!("      Install it on PATH, e.g. `cargo install --path crates/pixtuoid-hook`.");
     }
@@ -358,7 +372,7 @@ fn run_install(t: &Target, config: Option<PathBuf>, hook_path: Option<PathBuf>) 
         return Ok(());
     }
     let backup = io::backup_once(&path, BACKUP_SUFFIX)?;
-    io::write_config_atomic(&path, &outcome.content)?;
+    lock.write_atomic(&outcome.content)?;
     println!(
         "ok: installed pixtuoid hooks into {} ({})",
         path.display(),
@@ -381,14 +395,29 @@ fn run_install(t: &Target, config: Option<PathBuf>, hook_path: Option<PathBuf>) 
 }
 
 fn run_uninstall(t: &Target, config: Option<PathBuf>) -> Result<()> {
-    let path = config.unwrap_or_else(|| (t.default_config_path)());
+    let path = config
+        .map(Ok)
+        .unwrap_or_else(|| (t.default_config_path)())?;
+    // Absent config → nothing to remove, decided BEFORE locking: lock_config
+    // creates the parent dir + a .lock sidecar, and materializing ~/.reasonix
+    // here would flip that target's presence probe on a pure no-op.
+    if !target::config_present(&path) {
+        println!(
+            "[{}] no pixtuoid hooks found in {} — nothing to remove",
+            t.name,
+            path.display()
+        );
+        return Ok(());
+    }
+    // Same lock scope as run_install: the whole read→merge→write round.
+    let lock = io::lock_config(&path)?;
     let content = io::read_config(&path)?;
     let outcome =
         (t.merge_uninstall)(&content).with_context(|| format!("processing {}", path.display()))?;
     if !outcome.changed {
-        // SEMANTIC no-op (covers file-absent — content == "" — and no managed
-        // entries). Never rewrite the file or delete the backup here: the backup
-        // is the user's only recovery path. A byte comparison here would falsely
+        // SEMANTIC no-op (covers an empty config and no managed entries).
+        // Never rewrite the file or delete the backup here: the backup is the
+        // user's only recovery path. A byte comparison here would falsely
         // fire on any hand-formatted config and destroy the backup.
         println!(
             "[{}] no pixtuoid hooks found in {} — nothing to remove",
@@ -397,7 +426,7 @@ fn run_uninstall(t: &Target, config: Option<PathBuf>) -> Result<()> {
         );
         return Ok(());
     }
-    io::write_config_atomic(&path, &outcome.content)?;
+    lock.write_atomic(&outcome.content)?;
     println!(
         "ok: removed pixtuoid hooks from {} ({})",
         path.display(),
@@ -423,8 +452,8 @@ mod tests {
         name: "fake",
         display_name: "Fake",
         restart_noun: "Fake",
-        default_config_path: || std::path::PathBuf::from("/nonexistent/fake"),
-        hook_command: |_| Ok("x".into()),
+        default_config_path: || Ok(std::path::PathBuf::from("/nonexistent/fake")),
+        hook_command: |_, _| Ok("x".into()),
         merge_install: |c, _| {
             Ok(MergeOutcome {
                 content: c.to_string(),
@@ -464,8 +493,8 @@ mod tests {
         name: "fake2",
         display_name: "Fake2",
         restart_noun: "Fake2",
-        default_config_path: fake2_config_path,
-        hook_command: |_| Ok("x".into()),
+        default_config_path: || Ok(fake2_config_path()),
+        hook_command: |_, _| Ok("x".into()),
         merge_install: |c, _| {
             Ok(MergeOutcome {
                 content: c.to_string(),
@@ -491,8 +520,8 @@ mod tests {
         name: "fakedir",
         display_name: "FakeDir",
         restart_noun: "FakeDir",
-        default_config_path: fake_dir_config_path,
-        hook_command: |_| Ok("x".into()),
+        default_config_path: || Ok(fake_dir_config_path()),
+        hook_command: |_, _| Ok("x".into()),
         merge_install: |c, _| {
             Ok(MergeOutcome {
                 content: c.to_string(),
@@ -824,7 +853,12 @@ mod tests {
     fn run_install_fake_target_is_up_to_date_noop() {
         // FAKE.merge_install reports changed=false → the up-to-date branch (no
         // write, no backup). needs_path_warning=false avoids any PATH coupling.
-        run_install(&FAKE, Some(PathBuf::from("/nonexistent/fake")), None).unwrap();
+        // A tempdir path (not /nonexistent/...): run_install locks BEFORE the
+        // read, and the lock file needs a creatable parent.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cfg = tmp.path().join("fake.toml");
+        run_install(&FAKE, Some(cfg.clone()), None).unwrap();
+        assert!(!cfg.exists(), "the up-to-date branch never writes");
     }
 
     #[test]
@@ -856,6 +890,63 @@ mod tests {
             Some(PathBuf::from("/fake/pixtuoid-hook")),
         )
         .unwrap();
+    }
+
+    // --- the read→merge→write lock (#7) ----------------------------------------
+
+    #[test]
+    fn run_install_fails_fast_while_the_config_lock_is_held() {
+        // Pins lock-before-read: even the up-to-date NO-OP path (which never
+        // reaches the write) must refuse to run while another pixtuoid holds
+        // the lock — we can't even safely read/decide mid-flight of a writer.
+        // (Pre-fix this succeeded: only write_config_atomic locked.)
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cfg = tmp.path().join("settings.json");
+        run_install(
+            &CLAUDE,
+            Some(cfg.clone()),
+            Some(PathBuf::from("/fake/pixtuoid-hook")),
+        )
+        .unwrap();
+
+        let _guard = io::lock_config(&cfg).unwrap();
+        let err = run_install(
+            &CLAUDE,
+            Some(cfg.clone()),
+            Some(PathBuf::from("/fake/pixtuoid-hook")),
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("could not lock"), "got: {err:#}");
+    }
+
+    #[test]
+    fn run_uninstall_fails_fast_while_the_config_lock_is_held() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cfg = tmp.path().join("settings.json");
+        run_install(
+            &CLAUDE,
+            Some(cfg.clone()),
+            Some(PathBuf::from("/fake/pixtuoid-hook")),
+        )
+        .unwrap();
+
+        let _guard = io::lock_config(&cfg).unwrap();
+        let err = run_uninstall(&CLAUDE, Some(cfg.clone())).unwrap_err();
+        assert!(err.to_string().contains("could not lock"), "got: {err:#}");
+    }
+
+    #[test]
+    fn run_uninstall_absent_config_creates_no_dirs_or_lock() {
+        // The nothing-to-remove decision happens BEFORE locking: materializing
+        // the parent dir (e.g. ~/.reasonix) on a no-op would flip that
+        // target's presence probe.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cfg = tmp.path().join("missing").join("settings.json");
+        run_uninstall(&CLAUDE, Some(cfg.clone())).unwrap();
+        assert!(
+            !cfg.parent().unwrap().exists(),
+            "a no-op uninstall must leave no side effects"
+        );
     }
 
     // --- run_uninstall: FAKE2 changed-path write + remove-backup --------------

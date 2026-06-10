@@ -219,7 +219,7 @@ Don't be surprised by these. **Full explanation (the WHY) lives in the nested `C
 ## Things NOT to do
 
 - Don't add `ratatui` / `crossterm` / terminal anything to `pixtuoid-core`.
-- Don't write to `~/.claude/settings.json` directly. Always go through `install/io.rs::write_config_atomic` (advisory lock + atomic rename + symlink resolution).
+- Don't write to `~/.claude/settings.json` directly. Always go through `install/io.rs` — `write_config_atomic` for a single-shot write, or `lock_config` + `ConfigLock::write_atomic` for a read-merge-write round (advisory lock + atomic rename + symlink resolution + target-perms preservation).
 - Don't add `println!` / `eprintln!` to any production path other than the headless summary and explicit user-facing CLI output. Use `tracing::{info, warn, error}` instead.
 - Don't relax the hook shim's "always exit 0" contract. Blocking CC = breaking the user's primary workflow.
 - Don't add `--no-verify` / hook-skipping flags to any git operations performed in this repo.

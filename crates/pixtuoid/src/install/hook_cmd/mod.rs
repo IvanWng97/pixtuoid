@@ -10,7 +10,7 @@
 use anyhow::Result;
 
 #[cfg(unix)]
-mod unix;
+pub(crate) mod unix;
 // Compiled on all platforms: the cmd-safety decision core (with the 8.3 resolver
 // injected) is pure and unit-tests on macOS; only the Win32 FFI inside is
 // `#[cfg(windows)]`.

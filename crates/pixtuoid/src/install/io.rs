@@ -18,10 +18,25 @@ pub fn user_home() -> Option<String> {
 }
 
 /// Resolve a `$HOME`-relative path, falling back to the CWD when no home dir
-/// is resolvable.
+/// is resolvable. Only safe for read-only PROBES (detection): a CWD-relative
+/// existence check is at worst a false positive. WRITE paths must use
+/// [`home_relative_checked`] — installing into `./.reasonix/...` produces a
+/// file the CLI's global-scope loader never reads.
 pub fn home_relative(rel: &str) -> PathBuf {
     let home = user_home().unwrap_or_else(|| ".".into());
     PathBuf::from(home).join(rel)
+}
+
+/// Resolve a `$HOME`-relative path, hard-erroring when no home dir is
+/// resolvable (instead of `home_relative`'s CWD fallback).
+pub fn home_relative_checked(rel: &str) -> Result<PathBuf> {
+    checked_home_join(user_home(), rel)
+}
+
+fn checked_home_join(home: Option<String>, rel: &str) -> Result<PathBuf> {
+    home.map(|h| PathBuf::from(h).join(rel)).ok_or_else(|| {
+        anyhow!("cannot resolve the home directory (HOME/USERPROFILE unset); pass --config <path>")
+    })
 }
 
 pub fn default_hook_binary() -> Result<PathBuf> {
@@ -100,39 +115,103 @@ fn rename_with_retry(from: &Path, to: &Path) -> std::io::Result<()> {
     }
 }
 
-/// Atomic write that follows symlinks: write a temp file beside the resolved
-/// target, fsync, then rename onto it. Advisory-locked. Format-agnostic (&str).
-pub fn write_config_atomic(path: &Path, contents: &str) -> Result<()> {
+/// RAII guard over a config file's advisory lock. Holds the flock on the
+/// sibling `<target>.lock` file for its whole lifetime, so a caller can cover
+/// an entire read→merge→write round (taking it BEFORE the read closes the
+/// lost-update window the write-only lock left open). The lock FILE is
+/// deliberately never unlinked: unlock-then-unlink lets a waiter holding the
+/// old inode and a newcomer creating a fresh one both "hold" the lock.
+///
+/// Residual: an external writer (Claude Code rewriting its own settings.json)
+/// can't honor this lock — it only serializes pixtuoid against pixtuoid.
+#[derive(Debug)]
+pub struct ConfigLock {
+    /// The symlink-resolved real target — writes go here, never the symlink.
+    target: PathBuf,
+    file: File,
+}
+
+/// Acquire the advisory lock for `path`'s config file, resolving symlinks
+/// first (invariant #4) so the lock lives beside the REAL target. FAIL on
+/// contention rather than block — `try_lock` returns
+/// `Err(TryLockError::WouldBlock)` when another install/uninstall holds it.
+/// std-native advisory lock (stable since 1.89, our MSRV).
+pub fn lock_config(path: &Path) -> Result<ConfigLock> {
     let target = resolve_symlink(path);
     if let Some(parent) = target.parent() {
         std::fs::create_dir_all(parent)?;
     }
     let lock_path = sibling(&target, "lock");
-    let lock = OpenOptions::new()
+    let file = OpenOptions::new()
         .create(true)
         .read(true)
         .write(true)
         .truncate(false)
         .open(&lock_path)?;
-    // std-native advisory lock (stable since 1.89, our MSRV). FAIL on contention
-    // rather than block — `try_lock` returns `Err(TryLockError::WouldBlock)` when
-    // another install/uninstall holds it, which the `?` surfaces as an error.
-    lock.try_lock()
+    file.try_lock()
         .map_err(|e| anyhow!("could not lock {}: {e}", lock_path.display()))?;
+    Ok(ConfigLock { target, file })
+}
 
-    let tmp = sibling(&target, "tmp");
-    {
-        let mut f = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .open(&tmp)?;
-        f.write_all(contents.as_bytes())?;
-        f.sync_all()?;
+impl ConfigLock {
+    /// The symlink-resolved real config path this guard locks.
+    pub fn target(&self) -> &Path {
+        &self.target
     }
-    rename_with_retry(&tmp, &target)?;
-    lock.unlock().ok();
-    Ok(())
+
+    /// Atomic write to the locked target: temp file beside it, fsync, then
+    /// rename onto it. Writing through the guard (instead of re-calling
+    /// `write_config_atomic`) is what avoids the same-process flock
+    /// self-deadlock — a second open description on the same lock file
+    /// conflicts even within one process.
+    ///
+    /// Permissions: the temp file is created 0600 on Unix and, when the
+    /// target already exists, restated to the target's exact mode BEFORE any
+    /// content is written — so a user-tightened settings.json (API keys) is
+    /// never widened, and a fresh file defaults tight rather than
+    /// umask-default. Windows is a no-op (ACLs inherit from the directory).
+    pub fn write_atomic(&self, contents: &str) -> Result<()> {
+        let tmp = sibling(&self.target, "tmp");
+        {
+            let mut opts = OpenOptions::new();
+            opts.create(true).write(true).truncate(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                opts.mode(0o600);
+            }
+            let mut f = opts.open(&tmp)?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                // `mode(0o600)` only applies on CREATE — a stale tmp left by a
+                // crashed run keeps its old mode, so restate explicitly.
+                let perms = std::fs::metadata(&self.target)
+                    .map(|m| m.permissions())
+                    .unwrap_or_else(|_| std::fs::Permissions::from_mode(0o600));
+                f.set_permissions(perms)?;
+            }
+            f.write_all(contents.as_bytes())?;
+            f.sync_all()?;
+        }
+        rename_with_retry(&tmp, &self.target)?;
+        Ok(())
+    }
+}
+
+impl Drop for ConfigLock {
+    fn drop(&mut self) {
+        let _ = self.file.unlock();
+    }
+}
+
+/// Atomic write that follows symlinks: write a temp file beside the resolved
+/// target, fsync, then rename onto it. Advisory-locked for the duration of
+/// the write only — callers doing a read→merge→write round must instead take
+/// [`lock_config`] before the read and write via [`ConfigLock::write_atomic`].
+/// Format-agnostic (&str).
+pub fn write_config_atomic(path: &Path, contents: &str) -> Result<()> {
+    lock_config(path)?.write_atomic(contents)
 }
 
 pub fn backup_once(path: &Path, suffix: &str) -> Result<Option<PathBuf>> {
@@ -325,6 +404,103 @@ mod tests {
         write_config_atomic(&link, "{\"a\":1}").unwrap();
         assert!(link.symlink_metadata().unwrap().file_type().is_symlink());
         assert_eq!(std::fs::read_to_string(&target).unwrap(), "{\"a\":1}");
+    }
+
+    // --- ConfigLock: the read→merge→write guard (#7/#16) ------------------------
+
+    #[test]
+    fn lock_config_excludes_a_second_locker_until_dropped() {
+        let dir = TempDir::new().unwrap();
+        let p = dir.path().join("settings.json");
+        let guard = lock_config(&p).unwrap();
+        let err = lock_config(&p).expect_err("a second lock on the same config must fail");
+        assert!(err.to_string().contains("could not lock"), "got: {err:#}");
+        drop(guard);
+        lock_config(&p).expect("the lock is released when the guard drops");
+    }
+
+    #[test]
+    fn write_atomic_under_a_held_guard_does_not_self_deadlock() {
+        // The trap the old delegation idea fell into: flock conflicts across
+        // separate open descriptions WITHIN one process, so a guard-holder
+        // calling write_config_atomic would WouldBlock against itself. Writing
+        // through the guard must succeed.
+        let dir = TempDir::new().unwrap();
+        let p = dir.path().join("settings.json");
+        let guard = lock_config(&p).unwrap();
+        guard.write_atomic("{\"a\":1}").unwrap();
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "{\"a\":1}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn lock_config_resolves_symlinks_to_the_real_target() {
+        // Invariant #4: the lock must live beside the REAL file, so two
+        // writers reaching it via different link paths still contend.
+        let dir = TempDir::new().unwrap();
+        let target = dir.path().join("real.json");
+        std::fs::write(&target, "{}").unwrap();
+        let link = dir.path().join("link.json");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        let guard = lock_config(&link).unwrap();
+        assert_eq!(guard.target(), target);
+        assert!(dir.path().join("real.json.lock").exists());
+        assert!(lock_config(&target).is_err(), "same lock via either path");
+    }
+
+    // --- checked home resolution (#20) ------------------------------------------
+
+    #[test]
+    fn checked_home_join_errors_without_home() {
+        let err = checked_home_join(None, ".reasonix/settings.json").unwrap_err();
+        assert!(
+            err.to_string().contains("--config"),
+            "must point at the workaround: {err}"
+        );
+    }
+
+    #[test]
+    fn checked_home_join_joins_a_resolved_home() {
+        assert_eq!(
+            checked_home_join(Some("/home/u".into()), ".reasonix/settings.json").unwrap(),
+            PathBuf::from("/home/u/.reasonix/settings.json")
+        );
+    }
+
+    // --- permissions preservation (#6) -----------------------------------------
+
+    #[cfg(unix)]
+    #[test]
+    fn write_config_atomic_preserves_target_mode() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = TempDir::new().unwrap();
+        let p = dir.path().join("settings.json");
+        std::fs::write(&p, "{}").unwrap();
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600)).unwrap();
+
+        write_config_atomic(&p, "{\"a\":1}").unwrap();
+
+        let mode = std::fs::metadata(&p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(
+            mode, 0o600,
+            "a user-tightened settings.json must not be widened by a rewrite"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_config_atomic_creates_new_files_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = TempDir::new().unwrap();
+        let p = dir.path().join("settings.json");
+
+        write_config_atomic(&p, "{}").unwrap();
+
+        let mode = std::fs::metadata(&p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(
+            mode, 0o600,
+            "settings.json can carry API keys — a fresh file defaults tight"
+        );
     }
 
     #[test]
