@@ -168,6 +168,27 @@ fn source_label_prefix(source: &str) -> &str {
         .unwrap_or(source)
 }
 
+/// Whether `label` is still a derivation FALLBACK for `source` — i.e. carries
+/// no information worth preserving, so the duplicate-SessionStart back-fill may
+/// upgrade it. Three shapes: the bare prefix (`cx`, a JSONL `LabelDeriver`'s
+/// empty-cwd fallback), the ordinal ghost (`cc#3`), and the source-LESS ordinal
+/// (`#1` — minted by the hook-synthesis pre-pass under its empty source, which
+/// a source-only back-fill may have since re-contextualized, so it's matched
+/// regardless of the current prefix). Real labels (`cc·repo`, a Rename's
+/// `code-explorer`) never match.
+fn is_fallback_label(label: &str, source: &str) -> bool {
+    let prefix = source_label_prefix(source);
+    if !prefix.is_empty() && label == prefix {
+        return true;
+    }
+    // `{prefix}#N` (the ordinal ghost) — or bare `#N` even when the prefix
+    // doesn't match: that's the hook-synthesis shape, whose slot a source-only
+    // back-fill may have re-contextualized since the ordinal was minted.
+    let rest = label.strip_prefix(prefix).unwrap_or(label);
+    rest.strip_prefix('#')
+        .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+}
+
 /// Outcome flags from [`Reducer::track_active_tasks`], consumed by `apply`'s
 /// main event match.
 struct TaskTracking {
@@ -374,6 +395,40 @@ impl Reducer {
                     if slot.parent_id.is_none() {
                         if let Some(p) = parent_id {
                             slot.parent_id = Some(p);
+                        }
+                    }
+                    // G4 back-fill: a slot can exist with MISSING identity
+                    // context — the hook-synthesis pre-pass registers from
+                    // events that carry only the AgentId (empty source/
+                    // session_id/cwd), and a Codex revive ghost has an empty
+                    // cwd. The first SessionStart carrying the missing piece
+                    // heals it; an established value is never overwritten
+                    // (first-wins, this arm's existing semantics). Judge the
+                    // label's fallback-ness BEFORE the source back-fill — the
+                    // ordinal was minted under the OLD source's prefix.
+                    let label_is_fallback = is_fallback_label(&slot.label, &slot.source);
+                    if slot.source.is_empty() && !source.is_empty() {
+                        slot.source = Arc::<str>::from(source.as_str());
+                    }
+                    if slot.session_id.is_empty() && !session_id.is_empty() {
+                        slot.session_id = Arc::<str>::from(session_id.as_str());
+                    }
+                    if slot.unknown_cwd || slot.cwd.as_os_str().is_empty() {
+                        if let Some(base) = cwd
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .filter(|s| !s.is_empty())
+                        {
+                            slot.cwd = Arc::<std::path::Path>::from(cwd.as_path());
+                            slot.unknown_cwd = false;
+                            // Upgrade ONLY a fallback label — a basename- or
+                            // Rename-derived label is real information.
+                            if label_is_fallback {
+                                slot.label = Arc::<str>::from(
+                                    format!("{}·{base}", source_label_prefix(&slot.source))
+                                        .as_str(),
+                                );
+                            }
                         }
                     }
                     // A duplicate SessionStart is still a genuine liveness
@@ -976,6 +1031,40 @@ mod tests {
                 prefix.chars().count(),
                 2,
                 "source {src:?} has no 2-char label prefix (got {prefix:?}) — fix its SourceDescriptor row in source/registry.rs"
+            );
+        }
+    }
+
+    /// The back-fill's clobber gate: only labels carrying NO information may
+    /// be upgraded. Pins each fallback shape (bare prefix from a JSONL
+    /// LabelDeriver's empty-cwd Rename, the ordinal ghost, the source-less
+    /// hook-synthesis ordinal — also after a source-only back-fill changed the
+    /// prefix) and each real-label negative (basename-derived, Rename-derived,
+    /// a `·`-label whose basename merely contains `#N`).
+    #[test]
+    fn fallback_label_detection_covers_each_shape_and_spares_real_labels() {
+        use super::is_fallback_label;
+        for (label, source) in [
+            ("cx", "codex"),         // bare prefix (LabelDeriver fallback)
+            ("cc#3", "claude-code"), // ordinal ghost
+            ("#1", ""),              // hook-synthesis shape, pre-back-fill
+            ("#1", "claude-code"),   // same slot after a source-only back-fill
+        ] {
+            assert!(
+                is_fallback_label(label, source),
+                "{label:?} under source {source:?} must read as a fallback"
+            );
+        }
+        for (label, source) in [
+            ("cc·repo", "claude-code"),       // basename-derived
+            ("code-explorer", "claude-code"), // Rename-derived
+            ("cc·#3", "claude-code"),         // basename that LOOKS ordinal
+            ("xy#3", "claude-code"),          // foreign prefix — not ours to upgrade
+            ("", "claude-code"),              // degenerate: empty is not an ordinal
+        ] {
+            assert!(
+                !is_fallback_label(label, source),
+                "{label:?} under source {source:?} must NOT be clobbered"
             );
         }
     }

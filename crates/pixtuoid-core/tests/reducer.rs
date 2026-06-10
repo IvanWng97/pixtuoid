@@ -4159,3 +4159,237 @@ fn refused_hook_registration_does_not_poison_dedup_for_the_later_jsonl_copy() {
         "the JSONL ActivityStart must not be dedup-eaten by the refused hook's record"
     );
 }
+
+// ── G4: duplicate-SessionStart back-fill ────────────────────────────────────
+// A slot can exist with missing identity context — hook synthesis registers
+// from events that carry only the AgentId; a Codex revive ghost has an empty
+// cwd. The FIRST SessionStart carrying the missing context heals the slot;
+// established values are never overwritten (first-wins, the duplicate arm's
+// existing semantics).
+
+#[test]
+fn duplicate_session_start_backfills_hook_synthesized_slot() {
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let id = AgentId::from_parts("claude-code", "gated-sess");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityStart {
+            agent_id: id,
+            tool_use_id: Some("t1".into()),
+            detail: None,
+        },
+        t0,
+        Transport::Hook,
+    );
+    assert_eq!(&*scene.agents.get(&id).unwrap().label, "#1");
+
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: id,
+            source: "claude-code".into(),
+            session_id: "gated-sess".into(),
+            cwd: PathBuf::from("/Users/me/repo"),
+            parent_id: None,
+        },
+        t0 + Duration::from_secs(1),
+        Transport::Jsonl,
+    );
+
+    let slot = scene.agents.get(&id).unwrap();
+    assert_eq!(&*slot.cwd, std::path::Path::new("/Users/me/repo"));
+    assert!(!slot.unknown_cwd);
+    assert_eq!(&*slot.source, "claude-code", "empty source back-filled");
+    assert_eq!(
+        &*slot.session_id, "gated-sess",
+        "empty session_id back-filled"
+    );
+    assert_eq!(
+        &*slot.label, "cc·repo",
+        "ordinal fallback upgraded with the back-filled source's prefix"
+    );
+}
+
+#[test]
+fn duplicate_session_start_with_real_cwd_heals_an_unknown_cwd_ghost() {
+    // The Codex revive shape: the slot was CREATED by a SessionStart with an
+    // empty cwd (unknown_cwd ghost on the 3-min reap), and a later prompt
+    // re-emits SessionStart with the real cwd — the ghost heals into a named
+    // slot off the aggressive timer.
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let id = AgentId::from_parts("codex", "cx-sess");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: id,
+            source: "codex".into(),
+            session_id: "cx-sess".into(),
+            cwd: PathBuf::from(""),
+            parent_id: None,
+        },
+        t0,
+        Transport::Hook,
+    );
+    let slot = scene.agents.get(&id).unwrap();
+    assert!(slot.unknown_cwd);
+    assert_eq!(&*slot.label, "cx#1");
+
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: id,
+            source: "codex".into(),
+            session_id: "cx-sess".into(),
+            cwd: PathBuf::from("/Users/me/myrepo"),
+            parent_id: None,
+        },
+        t0 + Duration::from_secs(1),
+        Transport::Hook,
+    );
+
+    let slot = scene.agents.get(&id).unwrap();
+    assert_eq!(&*slot.cwd, std::path::Path::new("/Users/me/myrepo"));
+    assert!(!slot.unknown_cwd, "healed ghost leaves the 3-min reap");
+    assert_eq!(&*slot.label, "cx·myrepo");
+}
+
+#[test]
+fn duplicate_session_start_never_overwrites_established_cwd_or_label() {
+    // First cwd wins — matching the duplicate arm's existing semantics.
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let id = AgentId::from_parts("claude-code", "sess");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+
+    for cwd in ["/Users/me/repo-a", "/Users/me/repo-b"] {
+        r.apply(
+            &mut scene,
+            AgentEvent::SessionStart {
+                agent_id: id,
+                source: "claude-code".into(),
+                session_id: "sess".into(),
+                cwd: PathBuf::from(cwd),
+                parent_id: None,
+            },
+            t0,
+            Transport::Hook,
+        );
+    }
+
+    let slot = scene.agents.get(&id).unwrap();
+    assert_eq!(&*slot.cwd, std::path::Path::new("/Users/me/repo-a"));
+    assert_eq!(&*slot.label, "cc·repo-a");
+}
+
+#[test]
+fn backfill_does_not_clobber_a_renamed_label() {
+    // A Rename-derived label (CC `attributionAgent`) is real information —
+    // the back-fill may heal the cwd but must keep the name.
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let id = AgentId::from_parts("claude-code", "gated-sess");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityStart {
+            agent_id: id,
+            tool_use_id: Some("t1".into()),
+            detail: None,
+        },
+        t0,
+        Transport::Hook,
+    );
+    r.apply(
+        &mut scene,
+        AgentEvent::Rename {
+            agent_id: id,
+            label: "code-explorer".into(),
+        },
+        t0,
+        Transport::Jsonl,
+    );
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: id,
+            source: "claude-code".into(),
+            session_id: "gated-sess".into(),
+            cwd: PathBuf::from("/Users/me/repo"),
+            parent_id: None,
+        },
+        t0 + Duration::from_secs(1),
+        Transport::Jsonl,
+    );
+
+    let slot = scene.agents.get(&id).unwrap();
+    assert_eq!(
+        &*slot.cwd,
+        std::path::Path::new("/Users/me/repo"),
+        "cwd healed"
+    );
+    assert_eq!(&*slot.label, "code-explorer", "renamed label kept");
+}
+
+#[test]
+fn two_step_backfill_source_first_then_cwd_still_upgrades_the_label() {
+    // A revive SessionStart can itself carry no cwd (the watcher falls back to
+    // the head cwd, but a truncated head may have none): the first duplicate
+    // back-fills only source/session_id, the second brings the cwd. The
+    // ordinal label must still read as a fallback after the source back-fill
+    // re-contextualizes its prefix ("#1" under source "claude-code").
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let id = AgentId::from_parts("claude-code", "gated-sess");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+
+    r.apply(
+        &mut scene,
+        AgentEvent::Waiting {
+            agent_id: id,
+            reason: "permission".into(),
+        },
+        t0,
+        Transport::Hook,
+    );
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: id,
+            source: "claude-code".into(),
+            session_id: "gated-sess".into(),
+            cwd: PathBuf::from(""),
+            parent_id: None,
+        },
+        t0 + Duration::from_secs(1),
+        Transport::Jsonl,
+    );
+    let slot = scene.agents.get(&id).unwrap();
+    assert_eq!(&*slot.source, "claude-code", "source back-filled first");
+    assert_eq!(&*slot.label, "#1", "no cwd yet — label unchanged");
+
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: id,
+            source: "claude-code".into(),
+            session_id: "gated-sess".into(),
+            cwd: PathBuf::from("/Users/me/repo"),
+            parent_id: None,
+        },
+        t0 + Duration::from_secs(2),
+        Transport::Jsonl,
+    );
+    let slot = scene.agents.get(&id).unwrap();
+    assert_eq!(&*slot.cwd, std::path::Path::new("/Users/me/repo"));
+    assert_eq!(
+        &*slot.label, "cc·repo",
+        "fallback still upgrades after the two-step heal"
+    );
+}
