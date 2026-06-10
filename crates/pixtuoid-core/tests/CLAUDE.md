@@ -19,7 +19,8 @@ tests/
 │   └── fixtures/<source>/    ══ conformance scenarios ONLY — dir name MUST be a registered source ══
 ├── reducer.rs                state-machine behavior (own binary)
 ├── e2e.rs                    end-to-end driver wiring (own binary)
-├── watcher.rs                JsonlWatcher first-sight gate / cursor (own binary)
+├── watcher.rs                JsonlWatcher first-sight gate / liveness-probe bypass / cursor (own binary)
+│                             + the mid-attach scenario suite (attach shows exactly the live set)
 ├── transport/main.rs         #[cfg(unix)] mod socket;  #[cfg(windows)] mod pipe;
 ├── render/main.rs            mod {blit, format, animator}  +  render/fixtures/ (sprites)
 ├── socket_path_parity.rs     FLAT — publish-excluded (see below)
