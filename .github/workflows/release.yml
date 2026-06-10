@@ -4,10 +4,12 @@ on:
   push:
     tags: ["v*"]
 
+# Least-privilege (#215): jobs inherit read-only; the `release` job alone
+# carries write + attestation scopes (it creates the GH release and attests
+# provenance), and `publish`/`npm` carry id-token for OIDC publishing. A
+# compromised action in any other job gets no repo-write.
 permissions:
-  contents: write
-  id-token: write
-  attestations: write
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
@@ -19,12 +21,26 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
+        with:
+          # Full history for the tag-on-main ancestry check below.
+          fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@cargo-nextest
       - uses: extractions/setup-just@v4
+      - name: Validate tag commit is on main
+        # A release tag pushed at an arbitrary (unreviewed) commit must not
+        # build + publish (#215). Pre-release tester tags (v*-win.N / -rc.N)
+        # are deliberately exempt — they exist to test commits BEFORE merge.
+        if: ${{ !contains(github.ref_name, '-') }}
+        run: |
+          git fetch origin main --quiet
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::Tag ${GITHUB_REF_NAME} points at ${GITHUB_SHA}, which is not an ancestor of origin/main — release tags must be cut from main"
+            exit 1
+          fi
       - name: Validate tag matches Cargo.toml version
         run: |
           # Pre-release suffixes (-win.1, -rc.1) validate against the base version —
@@ -175,6 +191,10 @@ jobs:
     needs: [build, deb]
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      contents: write # creates the GitHub release
+      id-token: write # provenance attestation (OIDC)
+      attestations: write
     steps:
       - uses: actions/checkout@v6
         with:
@@ -226,6 +246,12 @@ jobs:
     if: ${{ !contains(github.ref_name, '-') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: read
+      # OIDC prep for crates.io Trusted Publishing (#216): unused until the
+      # Trusted Publisher is configured on crates.io, then the
+      # CARGO_REGISTRY_TOKEN secret can be dropped.
+      id-token: write
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
@@ -367,6 +393,12 @@ jobs:
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
+      # OIDC prep for npm Trusted Publishing (#216): node 22 bundles npm 10.x,
+      # but OIDC publishing needs npm >= 11.5.1 — without this, trusted
+      # publishing would silently not engage and fall back to the token.
+      # Harmless while NODE_AUTH_TOKEN is still configured; required once the
+      # per-package Trusted Publishers exist and the token is dropped.
+      - run: npm install -g npm@11
       - uses: extractions/setup-just@v4
 
       - name: Download build artifacts
