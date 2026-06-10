@@ -35,6 +35,17 @@ fn vouch_snapshot(ids: &[&str]) -> Option<ProbeSnapshot> {
     })
 }
 
+/// A HEALTHY snapshot vouching `ids` with every id bound to `pid` — the shape
+/// the instant-exit (#223 rung 2) tests need: the real probes bind each
+/// session id to its owning OS pid.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn vouch_snapshot_with_pid(ids: &[&str], pid: i32) -> Option<ProbeSnapshot> {
+    Some(ProbeSnapshot {
+        ids: ids.iter().map(|s| s.to_string()).collect(),
+        pid_of: ids.iter().map(|s| (s.to_string(), pid)).collect(),
+    })
+}
+
 fn cc_watcher(root: std::path::PathBuf) -> JsonlWatcher {
     fast_watch();
     // Mirror ClaudeCodeSource::run: CC keys on the session UUID (filename stem),
@@ -521,15 +532,18 @@ async fn poll_arm_refreshes_probe_snapshot_and_reemits_proof_of_life() {
 
 // ── Negative vouch (#223): vouched-then-gone is a high-confidence exit ──────
 
-/// Shared fixture for the negative-vouch tests: a stale transcript admitted
-/// via a MUTABLE probe (the test flips its return value mid-run), driven by a
-/// running watcher with fast poll + a test-tuned confirmation span. Returns
-/// the probe handle, the event receiver, the transcript path, and the watcher
-/// task — after asserting the probe-vouched admission already happened.
+/// Shared fixture for the negative-vouch + instant-exit tests: a stale
+/// transcript admitted via a MUTABLE probe (the test flips its return value
+/// mid-run; `initial` is the snapshot the probe starts on — with or without a
+/// pid binding), driven by a running watcher with fast poll + a test-tuned
+/// confirmation span. Returns the probe handle, the event receiver, the
+/// transcript path, and the watcher task — after asserting the probe-vouched
+/// admission already happened.
 async fn admitted_with_mutable_probe(
     projects_root: std::path::PathBuf,
     uuid: &'static str,
     min_span: Duration,
+    initial: Option<ProbeSnapshot>,
 ) -> (
     std::sync::Arc<std::sync::Mutex<Option<ProbeSnapshot>>>,
     mpsc::Receiver<(Transport, AgentEvent)>,
@@ -543,7 +557,7 @@ async fn admitted_with_mutable_probe(
     backdate(&stale, 7200);
 
     let probe_state: std::sync::Arc<std::sync::Mutex<Option<ProbeSnapshot>>> =
-        std::sync::Arc::new(std::sync::Mutex::new(vouch_snapshot(&[uuid])));
+        std::sync::Arc::new(std::sync::Mutex::new(initial));
     let probe_view = probe_state.clone();
     let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(64);
     let watcher = cc_watcher(projects_root)
@@ -603,9 +617,13 @@ async fn assert_no_session_end_within(
 async fn negative_vouch_emits_session_end_after_sustained_disappearance() {
     let dir = TempDir::new().unwrap();
     let uuid = "01000000-0000-7000-8000-0000000000ad";
-    let (probe_state, mut rx, transcript, handle) =
-        admitted_with_mutable_probe(dir.path().to_path_buf(), uuid, Duration::from_millis(300))
-            .await;
+    let (probe_state, mut rx, transcript, handle) = admitted_with_mutable_probe(
+        dir.path().to_path_buf(),
+        uuid,
+        Duration::from_millis(300),
+        vouch_snapshot(&[uuid]),
+    )
+    .await;
     let expected = AgentId::from_parts("claude-code", uuid);
 
     // The owning process exits: the probe stays HEALTHY but stops vouching.
@@ -674,9 +692,13 @@ async fn negative_vouch_emits_session_end_after_sustained_disappearance() {
 async fn one_missed_snapshot_does_not_end_the_session() {
     let dir = TempDir::new().unwrap();
     let uuid = "01000000-0000-7000-8000-0000000000ae";
-    let (probe_state, mut rx, _transcript, handle) =
-        admitted_with_mutable_probe(dir.path().to_path_buf(), uuid, Duration::from_millis(600))
-            .await;
+    let (probe_state, mut rx, _transcript, handle) = admitted_with_mutable_probe(
+        dir.path().to_path_buf(),
+        uuid,
+        Duration::from_millis(600),
+        vouch_snapshot(&[uuid]),
+    )
+    .await;
     let expected = AgentId::from_parts("claude-code", uuid);
 
     // Brief drop: a few healthy-but-empty snapshots open the miss window...
@@ -704,9 +726,13 @@ async fn one_missed_snapshot_does_not_end_the_session() {
 async fn probe_failure_changes_nothing() {
     let dir = TempDir::new().unwrap();
     let uuid = "01000000-0000-7000-8000-0000000000af";
-    let (probe_state, mut rx, transcript, handle) =
-        admitted_with_mutable_probe(dir.path().to_path_buf(), uuid, Duration::from_millis(200))
-            .await;
+    let (probe_state, mut rx, transcript, handle) = admitted_with_mutable_probe(
+        dir.path().to_path_buf(),
+        uuid,
+        Duration::from_millis(200),
+        vouch_snapshot(&[uuid]),
+    )
+    .await;
     let expected = AgentId::from_parts("claude-code", uuid);
 
     // The probe itself breaks (registry dir unreadable, proc table down).
@@ -761,6 +787,153 @@ async fn probe_failure_changes_nothing() {
         got_activity,
         "a fresh append must still walk normally while the probe is failing"
     );
+    handle.abort();
+}
+
+// ── Instant exit (#223 rung 2): a bound pid dying IS the session's end ──────
+
+/// THE instant-exit pin: a probe snapshot binds the vouched session id to its
+/// owning OS pid (`ProbeSnapshot::pid_of`); when that process dies, the
+/// kernel watch (kqueue NOTE_EXIT / pidfd+poll) emits the SessionEnd within
+/// milliseconds. The negative-vouch span stays at its production 60s DEFAULT,
+/// so a SessionEnd inside the 5s window can ONLY have come from the
+/// instant-exit path. Also pins the shared exit path's `seen` un-claim: a
+/// later append re-registers the session.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[tokio::test]
+async fn instant_exit_emits_session_end_when_bound_pid_dies() {
+    let dir = TempDir::new().unwrap();
+    let uuid = "01000000-0000-7000-8000-0000000000b0";
+    let mut child = std::process::Command::new("sleep")
+        .arg("30")
+        .spawn()
+        .unwrap();
+    let pid = child.id() as i32;
+    let (probe_state, mut rx, transcript, handle) = admitted_with_mutable_probe(
+        dir.path().to_path_buf(),
+        uuid,
+        Duration::from_secs(60), // production default — the fast exit must not come from the negative vouch
+        vouch_snapshot_with_pid(&[uuid], pid),
+    )
+    .await;
+    let expected = AgentId::from_parts("claude-code", uuid);
+
+    // The process is about to die — flip the probe FIRST (a real probe stops
+    // vouching a dead pid) so the re-vouch sweep can't re-admit the ended
+    // session behind the test's back. With the 60s span, this flip alone
+    // cannot produce a SessionEnd inside the assertion window.
+    *probe_state.lock().unwrap() = vouch_snapshot(&[]);
+    let _ = child.kill();
+    let _ = child.wait();
+
+    let mut ended = false;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while tokio::time::Instant::now() < deadline {
+        if let Ok(Some((Transport::Jsonl, AgentEvent::SessionEnd { agent_id }))) =
+            tokio::time::timeout(Duration::from_millis(200), rx.recv()).await
+        {
+            if agent_id == expected {
+                ended = true;
+                break;
+            }
+        }
+    }
+    assert!(
+        ended,
+        "a bound pid dying must SessionEnd within seconds (instant exit), \
+         not wait out the 60s negative vouch"
+    );
+
+    // Shared exit path (emit_session_exit): the `seen` un-claim lets a later
+    // append re-register — identical self-heal to the negative-vouch exit.
+    let mut f = tokio::fs::OpenOptions::new()
+        .append(true)
+        .open(&transcript)
+        .await
+        .unwrap();
+    f.write_all(
+        format!(
+            "{}\n",
+            cc_tool_use_line(uuid, "/repo", "tu_resume_2", "Bash", serde_json::json!({}))
+        )
+        .as_bytes(),
+    )
+    .await
+    .unwrap();
+    f.flush().await.unwrap();
+    drop(f);
+
+    let mut restarted = false;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    while tokio::time::Instant::now() < deadline {
+        if let Ok(Some((_, AgentEvent::SessionStart { agent_id, .. }))) =
+            tokio::time::timeout(Duration::from_millis(200), rx.recv()).await
+        {
+            if agent_id == expected {
+                restarted = true;
+                break;
+            }
+        }
+    }
+    assert!(
+        restarted,
+        "an append after the instant exit must re-register the session (seen un-claim)"
+    );
+    handle.abort();
+}
+
+/// The pid binding must be UNBOUND when the negative vouch confirms an id:
+/// a codex-style process owns many rollouts, so a session can end (rollout
+/// fd closed → vouch gone) while its OS process lives on — when that process
+/// finally dies, the exit event must find no binding and emit NOTHING (no
+/// second SessionEnd for the already-ended id).
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[tokio::test]
+async fn negative_vouch_confirm_unbinds_pid_so_a_later_exit_is_quiet() {
+    let dir = TempDir::new().unwrap();
+    let uuid = "01000000-0000-7000-8000-0000000000b1";
+    let mut child = std::process::Command::new("sleep")
+        .arg("30")
+        .spawn()
+        .unwrap();
+    let pid = child.id() as i32;
+    let (probe_state, mut rx, _transcript, handle) = admitted_with_mutable_probe(
+        dir.path().to_path_buf(),
+        uuid,
+        Duration::from_millis(300),
+        vouch_snapshot_with_pid(&[uuid], pid),
+    )
+    .await;
+    let expected = AgentId::from_parts("claude-code", uuid);
+
+    // The session ends while its process lives: the probe stays healthy but
+    // stops vouching → the negative vouch confirms (tiny span).
+    *probe_state.lock().unwrap() = vouch_snapshot(&[]);
+    let mut ended = false;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    while tokio::time::Instant::now() < deadline {
+        if let Ok(Some((Transport::Jsonl, AgentEvent::SessionEnd { agent_id }))) =
+            tokio::time::timeout(Duration::from_millis(200), rx.recv()).await
+        {
+            if agent_id == expected {
+                ended = true;
+                break;
+            }
+        }
+    }
+    assert!(ended, "the negative vouch must confirm the first exit");
+
+    // NOW the process dies. Its exit event must find no binding (the confirm
+    // unbound the id) — quiet, no panic.
+    let _ = child.kill();
+    let _ = child.wait();
+    assert_no_session_end_within(
+        &mut rx,
+        expected,
+        Duration::from_millis(1500),
+        "a process exit after the id was negative-vouch-confirmed must not re-emit SessionEnd",
+    )
+    .await;
     handle.abort();
 }
 

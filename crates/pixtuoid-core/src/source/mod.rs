@@ -286,6 +286,7 @@ pub mod antigravity;
 pub mod claude_code;
 pub mod codex;
 pub mod decoder;
+pub(crate) mod exit_watch;
 pub(crate) mod fd_probe;
 pub mod hook;
 pub mod jsonl;

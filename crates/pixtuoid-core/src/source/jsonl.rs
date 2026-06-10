@@ -9,6 +9,7 @@ use tokio::io::{AsyncReadExt, AsyncSeekExt, SeekFrom};
 use tokio::sync::Mutex;
 use tracing::{debug, warn};
 
+use crate::source::exit_watch::ExitWatch;
 use crate::source::{AgentEvent, TaggedSender, Transport};
 use crate::AgentId;
 
@@ -194,6 +195,36 @@ impl JsonlWatcher {
         let live: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
         let mut vouch = NegativeVouch::new(self.negative_vouch_min_span);
 
+        // Instant exit (#223 rung 2): a probed watcher spawns ONE detached
+        // ExitWatch thread (kqueue NOTE_EXIT / pidfd+poll) so a bound OS
+        // process dying becomes a SessionEnd in milliseconds — ahead of the
+        // negative vouch (~60–120s) and the TTL/stale sweeps. Purely
+        // additive: spawn() is None on unsupported platforms or backend-init
+        // failure, and a dead thread just stops sending — the slower rungs
+        // still cover.
+        let (exit_tx, mut exit_rx) = tokio::sync::mpsc::unbounded_channel::<i32>();
+        let exit_watch = if self.liveness_probe.is_some() {
+            ExitWatch::spawn(exit_tx.clone())
+        } else {
+            None
+        };
+        // TRAP: the only long-lived sender is owned by the ExitWatch thread.
+        // With no probe wired or a failed spawn, every sender would drop
+        // right here and `exit_rx.recv()` would resolve `Ready(None)` on
+        // every select! pass (a pattern-miss disables the branch per call —
+        // not a spin, but a wasted poll on every loop iteration, forever).
+        // Park one clone so the arm stays forever-pending in exactly those
+        // cases. (A LATER thread death — pidfd ENOSYS, kevent error — does
+        // reintroduce the wasted poll; that residual is accepted.)
+        let _exit_keepalive = exit_watch.is_none().then(|| exit_tx.clone());
+        drop(exit_tx);
+        // pid → the session ids a healthy probe snapshot bound to it
+        // (`ProbeSnapshot::pid_of` folded by `refresh_probe_snapshot`) — the
+        // join the instant-exit arm uses to translate an OS exit into
+        // SessionEnds. Entries leave on exit (whole pid) or negative-vouch
+        // confirm (single id, see `unbind_session`).
+        let mut pid_bindings: HashMap<i32, HashSet<String>> = HashMap::new();
+
         let (notify_tx, mut notify_rx) = tokio::sync::mpsc::unbounded_channel::<PathBuf>();
         let event_handler = move |res: notify::Result<notify::Event>| {
             if let Ok(event) = res {
@@ -243,9 +274,15 @@ impl JsonlWatcher {
                 window: self.initial_window,
                 live: &live,
             };
-            let healthy =
-                refresh_probe_snapshot(self.liveness_probe.as_ref(), &mut vouch, decoders, &ctx)
-                    .await;
+            let healthy = refresh_probe_snapshot(
+                self.liveness_probe.as_ref(),
+                &mut vouch,
+                &mut pid_bindings,
+                exit_watch.as_ref(),
+                decoders,
+                &ctx,
+            )
+            .await;
             scan_root(&self.root, decoders, &ctx).await;
             if healthy {
                 emit_proof_of_life(&live, &source_arc, &tx).await;
@@ -288,7 +325,8 @@ impl JsonlWatcher {
                 _ = &mut rescan_delay, if !rescan_done => {
                     rescan_done = true;
                     let healthy = refresh_probe_snapshot(
-                        self.liveness_probe.as_ref(), &mut vouch, decoders, &ctx,
+                        self.liveness_probe.as_ref(), &mut vouch, &mut pid_bindings,
+                        exit_watch.as_ref(), decoders, &ctx,
                     ).await;
                     scan_root(&self.root, decoders, &ctx).await;
                     if healthy {
@@ -297,11 +335,28 @@ impl JsonlWatcher {
                 }
                 _ = poll.tick() => {
                     let healthy = refresh_probe_snapshot(
-                        self.liveness_probe.as_ref(), &mut vouch, decoders, &ctx,
+                        self.liveness_probe.as_ref(), &mut vouch, &mut pid_bindings,
+                        exit_watch.as_ref(), decoders, &ctx,
                     ).await;
                     scan_root(&self.root, decoders, &ctx).await;
                     if healthy {
                         emit_proof_of_life(&live, &source_arc, &tx).await;
+                    }
+                }
+                Some(pid) = exit_rx.recv() => {
+                    // Instant exit (#223 rung 2): the watched OS process
+                    // died. Translate through the pid→ids binding; an
+                    // unknown pid (already unbound by a negative-vouch
+                    // confirm, or a duplicate event) is a no-op.
+                    if let Some(ids) = pid_bindings.remove(&pid) {
+                        for id in ids {
+                            debug!("instant exit: pid {pid} died; emitting SessionEnd for {id}");
+                            emit_session_exit(&id, decoders, &ctx).await;
+                            // The next healthy snapshot will see the id gone
+                            // anyway; forget it NOW so the negative vouch
+                            // can't re-confirm the exit we just emitted.
+                            vouch.forget(&id);
+                        }
                     }
                 }
             }
@@ -408,14 +463,15 @@ impl NegativeVouch {
     }
 
     /// Fold one HEALTHY snapshot into the ledger, emitting a confirmed exit's
-    /// `SessionEnd` (+ the `seen` un-claim) through `ctx`. Never called on a
-    /// probe failure — the caller (`refresh_probe_snapshot`) only forwards
-    /// `Some` snapshots.
+    /// `SessionEnd` (+ the `seen` un-claim) through `ctx` and dropping the
+    /// confirmed id from `pid_bindings`. Never called on a probe failure —
+    /// the caller (`refresh_probe_snapshot`) only forwards `Some` snapshots.
     async fn observe(
         &mut self,
         snap: &ProbeSnapshot,
         decoders: SourceDecoders,
         ctx: &WatchCtx<'_>,
+        pid_bindings: &mut HashMap<i32, HashSet<String>>,
     ) {
         let now = std::time::Instant::now();
         // A re-appearing id (fd reopened, registry entry back) cancels its
@@ -426,7 +482,16 @@ impl NegativeVouch {
             match self.miss_since.get(&id) {
                 // Second healthy miss past the span — confirmed exit.
                 Some(first_miss) if now.duration_since(*first_miss) >= self.min_span => {
-                    confirm_negative_vouch(&id, decoders, ctx).await;
+                    debug!(
+                        "negative vouch confirmed for {id}: probe stopped vouching; \
+                         emitting SessionEnd"
+                    );
+                    emit_session_exit(&id, decoders, ctx).await;
+                    // Also drop the id's pid binding: a codex-style process
+                    // owns many rollouts, so it may outlive this session —
+                    // its eventual OS exit must not re-emit a SessionEnd for
+                    // an id whose end was already confirmed here.
+                    unbind_session(pid_bindings, &id);
                     self.prev_vouched.remove(&id);
                     self.miss_since.remove(&id);
                 }
@@ -443,16 +508,27 @@ impl NegativeVouch {
         self.prev_vouched = snap.ids.clone();
         self.prev_vouched.extend(self.miss_since.keys().cloned());
     }
+
+    /// Remove `id` from the ledger WITHOUT confirming anything — the
+    /// instant-exit arm already emitted its SessionEnd, so a later healthy
+    /// snapshot must not open/age a miss window toward re-confirming it (a
+    /// duplicate SessionEnd would be a reducer no-op, but the ledger should
+    /// not be left armed for one).
+    fn forget(&mut self, id: &str) {
+        self.prev_vouched.remove(id);
+        self.miss_since.remove(id);
+    }
 }
 
-/// A negative vouch CONFIRMED: emit the `SessionEnd` the CLI never wrote, then
-/// un-claim first-sight for every registered path of this session — mirroring
-/// the decoded-SessionEnd path in `walk_jsonl` (terminator first, un-claim
-/// after) so a LATER append re-registers through `emit_first_sight` (a resumed
+/// ONE exit path for every watcher-synthesized session end — shared by the
+/// negative-vouch confirmation and the instant-exit arm so the two can't
+/// fork: emit the `SessionEnd` the CLI never wrote, then un-claim first-sight
+/// for every registered path of this session — mirroring the
+/// decoded-SessionEnd path in `walk_jsonl` (terminator first, un-claim after)
+/// so a LATER append re-registers through `emit_first_sight` (a resumed
 /// session walks back in; a wrongly-ended live one self-heals on its next
 /// write or re-vouch).
-async fn confirm_negative_vouch(id: &str, decoders: SourceDecoders, ctx: &WatchCtx<'_>) {
-    debug!("negative vouch confirmed for {id}: probe stopped vouching; emitting SessionEnd");
+async fn emit_session_exit(id: &str, decoders: SourceDecoders, ctx: &WatchCtx<'_>) {
     let agent_id = AgentId::from_parts(ctx.source, id);
     let _ = ctx
         .tx
@@ -469,17 +545,31 @@ async fn confirm_negative_vouch(id: &str, decoders: SourceDecoders, ctx: &WatchC
     }
 }
 
+/// Remove one session id from every pid's binding set, dropping pids whose
+/// set empties — the keep-state-clean half of the instant-exit ↔ negative-
+/// vouch handshake (its inverse is `NegativeVouch::forget`).
+fn unbind_session(pid_bindings: &mut HashMap<i32, HashSet<String>>, id: &str) {
+    pid_bindings.retain(|_, ids| {
+        ids.remove(id);
+        !ids.is_empty()
+    });
+}
+
 /// ONE probe refresh, shared by the three sites that re-snapshot `live` (the
 /// initial seed, the 250ms rescan, the 60s poll). On a HEALTHY snapshot
-/// (`Some`): replace the admission set and fold the snapshot into the
-/// negative-vouch ledger; returns true so the caller re-emits `ProofOfLife`
-/// after its scan. On a probe FAILURE (`None`) or no probe wired: change
-/// NOTHING — `ctx.live` keeps the previous ids (admission stays additive),
-/// the miss windows neither advance nor confirm, no `ProofOfLife` is emitted
-/// (the reducer's TTL absorbs the gap).
+/// (`Some`): replace the admission set, fold the snapshot into the
+/// negative-vouch ledger, then fold the id→pid bindings — registering every
+/// newly-seen pid with the exit watch (#223 rung 2); returns true so the
+/// caller re-emits `ProofOfLife` after its scan. On a probe FAILURE (`None`)
+/// or no probe wired: change NOTHING — `ctx.live` keeps the previous ids
+/// (admission stays additive), the miss windows neither advance nor confirm,
+/// no bindings move, no `ProofOfLife` is emitted (the reducer's TTL absorbs
+/// the gap).
 async fn refresh_probe_snapshot(
     probe: Option<&LivenessProbe>,
     vouch: &mut NegativeVouch,
+    pid_bindings: &mut HashMap<i32, HashSet<String>>,
+    exit_watch: Option<&ExitWatch>,
     decoders: SourceDecoders,
     ctx: &WatchCtx<'_>,
 ) -> bool {
@@ -491,7 +581,21 @@ async fn refresh_probe_snapshot(
         return false;
     };
     *ctx.live.lock().await = snap.ids.clone();
-    vouch.observe(&snap, decoders, ctx).await;
+    vouch.observe(&snap, decoders, ctx, pid_bindings).await;
+    // Bindings are ADDITIVE per snapshot (ids leave via the instant-exit arm
+    // or the negative-vouch unbind above, never by snapshot omission — the
+    // vouch ladder owns "gone" semantics). A pid is registered with the exit
+    // watch only on its FIRST appearance; if that registration failed
+    // kernel-side (EPERM), it is not retried — the slower rungs cover.
+    for (id, pid) in &snap.pid_of {
+        let newly_seen = !pid_bindings.contains_key(pid);
+        pid_bindings.entry(*pid).or_default().insert(id.clone());
+        if newly_seen {
+            if let Some(watch) = exit_watch {
+                watch.watch(*pid);
+            }
+        }
+    }
     true
 }
 
@@ -1076,6 +1180,24 @@ fn extract_cwd(bytes: &[u8]) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unbind_session_drops_only_emptied_pid_entries() {
+        let mut bindings: HashMap<i32, HashSet<String>> = HashMap::new();
+        bindings
+            .entry(100)
+            .or_default()
+            .extend(["a".to_string(), "b".to_string()]);
+        bindings.entry(200).or_default().insert("a".to_string());
+        unbind_session(&mut bindings, "a");
+        // pid 200 emptied → dropped; pid 100 keeps its other session.
+        assert!(!bindings.contains_key(&200));
+        assert_eq!(
+            bindings.get(&100).map(|ids| ids.len()),
+            Some(1),
+            "the sibling id on a shared pid must survive the unbind"
+        );
+    }
 
     #[test]
     fn default_id_from_path_returns_normalized_path_key() {
