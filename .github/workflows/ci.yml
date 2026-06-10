@@ -260,9 +260,14 @@ jobs:
       - name: pixtuoid --help exits 0
         run: ./target/release/pixtuoid --help
       - name: pixtuoid-hook exits 0 with no socket
+        # Both halves of invariant #5's "always exit 0 SILENTLY", on the
+        # RELEASE profile (the test suite covers the debug build): the
+        # pipeline status is the shim's exit code (bash -e, no pipefail),
+        # and any output at all fails the emptiness check.
         run: |
-          echo '{}' | ./target/release/pixtuoid-hook || true
-          echo "hook shim exited (expected silent no-op)"
+          out=$(echo '{}' | ./target/release/pixtuoid-hook 2>&1)
+          test -z "$out"
+          echo "hook shim exited 0 silently (expected no-op with no socket)"
       - name: install-hooks round-trip
         run: |
           mkdir -p /tmp/smoke-test/.claude

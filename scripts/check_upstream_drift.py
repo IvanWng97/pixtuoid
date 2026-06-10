@@ -30,11 +30,22 @@ See crates/pixtuoid-core/CLAUDE.md "Keeping the decode mapping current".
 
 from __future__ import annotations
 
+import http.client
 import pathlib
 import re
 import sys
+import traceback
 import urllib.error
 import urllib.request
+
+# What a fetch can raise transiently. URLError covers connect-phase failures
+# (urllib wraps OSErrors only during do_open) and HTTP 4xx/5xx (HTTPError
+# subclasses it), but the READ phase inside fetch() raises raw
+# socket.timeout / ConnectionResetError (OSError subclasses, NOT URLError)
+# and http.client.IncompleteRead (HTTPException) — left uncaught they exit 1
+# and the workflow files a junk "confirmed drift" issue from an empty report.
+# URLError is itself an OSError subclass; kept explicit to document intent.
+FETCH_ERRORS = (urllib.error.URLError, OSError, http.client.HTTPException)
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 
@@ -137,34 +148,25 @@ def upstream_reasonix_hooks(text: str) -> set[str] | None:
     return found or None
 
 
-def main() -> int:
-    breaking: list[str] = []
-    review: list[str] = []
-    errors: list[str] = []
-
-    # Read what WE depend on from our OWN source first. A failure here means the
-    # monitor itself is broken (decoder.rs / install/codex.rs refactored away from
-    # what the parsers expect) — that is a LOUD breaking signal, never a transient
-    # one, or drift monitoring would silently stop with zero alarm.
-    codex_ours = None
-    dispatch_names = None
-    reasonix_ours = None
-    try:
-        codex_ours = read_codex_events()
-        dispatch_names = read_dispatch_names()
-        reasonix_ours = read_reasonix_events()
-    except Exception as e:  # noqa: BLE001
-        breaking.append(
-            f"drift-watch cannot read our own source ({e}) — the parsers in "
-            f"check_upstream_drift.py are stale (decoder.rs / install refactored?). "
-            f"The monitor is blind until the script is fixed."
-        )
-
+def run_checks(
+    codex_ours: set[str] | None,
+    dispatch_names: set[str] | None,
+    reasonix_ours: set[str] | None,
+    breaking: list[str],
+    review: list[str],
+    errors: list[str],
+) -> None:
+    """The upstream comparisons. Split from main() so an UNEXPECTED exception
+    here (a script bug, an exotic network failure outside FETCH_ERRORS) can be
+    routed to the transient bucket with the partial report intact — without it
+    the interpreter exits 1 and the workflow files a junk "confirmed drift"
+    issue from an empty report. The deliberate read-our-own-source LOUD path
+    stays inside main(), before this is called, and still exits 1."""
     # --- Codex hook events (only the FETCH is transient) -------------------
     if codex_ours is not None:
         try:
             text = fetch(CODEX_PROTOCOL_URL)
-        except urllib.error.URLError as e:
+        except FETCH_ERRORS as e:
             errors.append(f"Codex source fetch failed (transient?): {e}")
             text = None
         if text is not None:
@@ -194,7 +196,7 @@ def main() -> int:
     if reasonix_ours is not None:
         try:
             text = fetch(REASONIX_HOOK_URL)
-        except urllib.error.URLError as e:
+        except FETCH_ERRORS as e:
             errors.append(f"Reasonix source fetch failed (transient?): {e}")
             text = None
         if text is not None:
@@ -231,7 +233,7 @@ def main() -> int:
     if dispatch_names is not None:
         try:
             tools = fetch(CC_TOOLS_URL)
-        except urllib.error.URLError as e:
+        except FETCH_ERRORS as e:
             errors.append(f"CC tools-reference fetch failed (transient?): {e}")
             tools = None
         if tools is not None:
@@ -253,7 +255,7 @@ def main() -> int:
     # CC_LIFECYCLE_SURFACE_MARKERS).
     try:
         hooks_doc = fetch(CC_HOOKS_URL)
-    except urllib.error.URLError as e:
+    except FETCH_ERRORS as e:
         errors.append(f"CC hooks doc fetch failed (transient?): {e}")
         hooks_doc = None
     if hooks_doc is not None:
@@ -265,6 +267,41 @@ def main() -> int:
                     f"JSONL transport / the liveness-probe registry) and "
                     f"update this watch."
                 )
+
+
+
+def main() -> int:
+    breaking: list[str] = []
+    review: list[str] = []
+    errors: list[str] = []
+
+    # Read what WE depend on from our OWN source first. A failure here means the
+    # monitor itself is broken (decoder.rs / install/codex.rs refactored away from
+    # what the parsers expect) — that is a LOUD breaking signal, never a transient
+    # one, or drift monitoring would silently stop with zero alarm.
+    codex_ours = None
+    dispatch_names = None
+    reasonix_ours = None
+    try:
+        codex_ours = read_codex_events()
+        dispatch_names = read_dispatch_names()
+        reasonix_ours = read_reasonix_events()
+    except Exception as e:  # noqa: BLE001
+        breaking.append(
+            f"drift-watch cannot read our own source ({e}) — the parsers in "
+            f"check_upstream_drift.py are stale (decoder.rs / install refactored?). "
+            f"The monitor is blind until the script is fixed."
+        )
+
+    try:
+        run_checks(codex_ours, dispatch_names, reasonix_ours, breaking, review, errors)
+    except Exception as e:  # noqa: BLE001
+        traceback.print_exc()
+        errors.append(
+            f"unexpected error during the upstream checks "
+            f"({type(e).__name__}: {e}) — treating as transient; the report "
+            f"covers only the checks that completed (traceback on stderr)"
+        )
 
     # --- report ------------------------------------------------------------
     out = ["# pixtuoid upstream wire-format drift report", ""]

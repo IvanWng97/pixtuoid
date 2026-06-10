@@ -151,6 +151,17 @@ async fn reducer_task(
 
 async fn headless_loop(mut scene_rx: SceneRx) -> Result<()> {
     tracing::info!("pixtuoid headless mode — Ctrl-C to quit");
+    // ONE SIGINT listener for the loop's lifetime. A fresh `ctrl_c()` per
+    // select! iteration drops the old listener while the sleep arm runs, and
+    // tokio's process-global handler (installed once) suppresses default
+    // termination — so a SIGINT landing in that gap notifies zero listeners
+    // and is silently lost (the user must Ctrl-C twice). Pinned outside the
+    // loop the subscription is continuous; the arm returns on completion, so
+    // the future is never polled again after it resolves. No test: driver.rs
+    // is the documented untestable async glue (#103) and a real-signal test
+    // would race the whole test binary.
+    let ctrl_c = tokio::signal::ctrl_c();
+    tokio::pin!(ctrl_c);
     let mut prev_summary = String::new();
     loop {
         tokio::select! {
@@ -162,7 +173,7 @@ async fn headless_loop(mut scene_rx: SceneRx) -> Result<()> {
                     prev_summary = summary;
                 }
             }
-            _ = tokio::signal::ctrl_c() => {
+            _ = &mut ctrl_c => {
                 tracing::info!("shutting down");
                 return Ok(());
             }

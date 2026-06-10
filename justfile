@@ -139,8 +139,17 @@ coverage:
 [group('rust')]
 [doc('Never-panic fuzz the decoders over a JSONL corpus dir: just fuzz ~/.claude/projects')]
 fuzz dir:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dir="{{ dir }}"
+    # Guard the corpus BEFORE fuzzing: under the default no-pipefail shell a
+    # typo'd dir made `find` fail while the pipeline status stayed the
+    # fuzzer's — which fuzzes zero lines and exits 0, reporting the
+    # never-panic contract verified having tested nothing.
+    [ -d "$dir" ] || { echo "error: corpus dir '$dir' does not exist" >&2; exit 1; }
+    [ -n "$(find "$dir" -name '*.jsonl' -print -quit)" ] || { echo "error: no .jsonl files under '$dir' — nothing to fuzz" >&2; exit 1; }
     cargo build --release --example decoder_fuzz -p pixtuoid-core
-    find "{{ dir }}" -name '*.jsonl' -print0 | xargs -0 cat | ./target/release/examples/decoder_fuzz
+    find "$dir" -name '*.jsonl' -print0 | xargs -0 cat | ./target/release/examples/decoder_fuzz
 
 # Compile the workspace; extra args are forwarded:
 #   just build                                # debug

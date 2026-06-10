@@ -11,6 +11,11 @@ use tracing_subscriber::EnvFilter;
 fn main() -> Result<()> {
     install_crash_hook();
     let (log_level, cli_theme, cmd) = Cli::parse().cmd_or_default();
+    // The typed LogLevel's as_str is exactly the old free-string levels, so
+    // every filter built below is unchanged — the enum only moved typo
+    // rejection to the clap seam (a typo used to parse as a bogus EnvFilter
+    // TARGET directive that silently filtered everything off, #157 class).
+    let log_level: &'static str = log_level.as_str();
     // RUST_LOG wins only when set to a NON-EMPTY value; an empty RUST_LOG
     // parses as Ok(zero directives) = everything OFF, which would silently
     // defeat logging on the verbose / $PIXTUOID_LOG / --headless paths that
@@ -18,8 +23,8 @@ fn main() -> Result<()> {
     // empty=unset normalization is pinned by `filter_directives` + its test.
     let rust_log = std::env::var("RUST_LOG").ok();
     let make_filter = || {
-        EnvFilter::try_new(filter_directives(rust_log.as_deref(), &log_level))
-            .unwrap_or_else(|_| EnvFilter::new(&log_level))
+        EnvFilter::try_new(filter_directives(rust_log.as_deref(), log_level))
+            .unwrap_or_else(|_| EnvFilter::new(log_level))
     };
 
     // Log routing:
@@ -30,7 +35,7 @@ fn main() -> Result<()> {
     //     Crash reporting is handled separately by the panic hook.
     //   Non-TUI (install-hooks, uninstall-hooks, --headless): stderr.
     let tui_active = matches!(&cmd, Cmd::Run { headless, .. } if !*headless);
-    let wants_verbose = matches!(log_level.as_str(), "debug" | "trace");
+    let wants_verbose = matches!(log_level, "debug" | "trace");
     // The env var's VALUE is the log file path — an empty value would
     // "enable" file mode with an unopenable path; treat it as unset.
     let explicit_log_file = std::env::var("PIXTUOID_LOG").is_ok_and(|v| !v.is_empty());
@@ -53,7 +58,7 @@ fn main() -> Result<()> {
             EnvFilter::try_new(filter_directives(rust_log.as_deref(), "warn"))
                 .unwrap_or_else(|_| EnvFilter::new("warn"))
         } else {
-            EnvFilter::new(match log_level.as_str() {
+            EnvFilter::new(match log_level {
                 lvl @ ("warn" | "error") => lvl,
                 _ => "warn",
             })
@@ -102,7 +107,11 @@ fn main() -> Result<()> {
             let mut cfg_warnings = Vec::new();
             let cfg = config::load(&cfg_path, &mut cfg_warnings);
             let theme = config::resolve_theme(&cfg, cli_theme.as_deref(), &mut cfg_warnings)?;
-            let desk_cap = cli_max_desks.or(cfg.max_desks);
+            // The config seam's twin of the clap range(1..) guard: a config
+            // max-desks = 0 is ignored with a collected warning (eager `.or`
+            // argument on purpose — the warning must fire even when the CLI
+            // flag overrides, same as the stale-config-theme warn above).
+            let desk_cap = cli_max_desks.or(config::resolve_max_desks(&cfg, &mut cfg_warnings));
             let pack_dir = config::resolve_pack_dir(&cfg, pack_dir);
             let pets = config::resolve_pets(&cfg, &mut cfg_warnings);
             // Config problems must reach the user's eyes, not only the log

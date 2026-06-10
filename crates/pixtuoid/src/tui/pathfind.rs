@@ -7,7 +7,8 @@
 //! `renderer.rs`.
 //!
 //! `AStarRouter` is the concrete impl: A* on a coarsened 4×4 cell grid
-//! with a permissive cell-walkability threshold (≥12/16 px walkable).
+//! with a permissive cell-walkability threshold (≥8/16 px walkable, 50% —
+//! see `CELL_WALKABLE_MIN` for why tighter thresholds were rejected).
 //! Memoizes results in a per-(from, to) cache; auto-invalidates when
 //! the overlay signature changes so per-frame agent movement still routes
 //! around live agents.

@@ -42,8 +42,9 @@ pub fn send_line(endpoint: &str, line: &[u8]) {
     // 200ms invariant is enforced by a watchdog thread that hard-exits the
     // process: after stdin is consumed this send is the shim's only job,
     // and exit(0)-on-timeout IS the contract (never block CC, spec §2).
-    // The daemon sizes its pipe in-buffer >= the shim's 1MiB stdin cap so a
-    // write that gets through open() never stalls on quota in practice.
+    // The daemon's 1MiB pipe in-buffer covers the shim's capped stdin
+    // (`STDIN_CAP = 1MiB − STAMP_HEADROOM` in main.rs) PLUS the stamps +
+    // newline, so a write that gets through open() never stalls on quota.
     // Builder::spawn (not thread::spawn) so OS thread exhaustion degrades to
     // dropping the event instead of an abort — and we must NOT enter the
     // retry loop watchdog-less, or the 231 retry becomes unbounded.

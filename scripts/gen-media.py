@@ -316,6 +316,13 @@ def main():
     ap.add_argument("--jobs", help="comma-separated job ids to run (default: all)")
     args = ap.parse_args()
 
+    # run_check walks the FULL committed tree, so every still owned by a
+    # filtered-out job would report "NOT REGENERATED" — spurious failures.
+    # Rejecting the combination is the honest contract (CI never passes --jobs).
+    if args.check and args.jobs:
+        ap.error("--check renders everything and walks the full committed tree; "
+                 "--jobs cannot be combined with it (run --check without --jobs)")
+
     # Pin TZ=UTC for EVERY render so the office's epoch-derived weather slot +
     # lighting/twinkle phase (snapshot reads --now-hour as a chrono::Local wall
     # time) are machine-independent — without this a dev box and the UTC CI runner
@@ -326,8 +333,19 @@ def main():
 
     only_jobs = set(args.jobs.split(",")) if args.jobs else None
 
-    build_once()
+    # Validate --jobs against the manifest BEFORE the release build: an unknown
+    # id used to be a silent no-op that still printed "wrote media → …".
     manifest = json.loads(MANIFEST.read_text())
+    if only_jobs:
+        known = {j["id"] for j in manifest}
+        unknown = sorted(only_jobs - known)
+        if unknown:
+            sys.exit(
+                f"gen-media: unknown job id(s): {', '.join(unknown)}\n"
+                f"available: {', '.join(sorted(known))}"
+            )
+
+    build_once()
     work = Path(tempfile.mkdtemp(prefix="gen-media-"))
 
     if args.check:
