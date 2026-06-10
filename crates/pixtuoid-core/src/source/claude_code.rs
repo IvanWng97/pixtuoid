@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
@@ -38,6 +39,109 @@ pub fn claude_config_dir() -> Option<PathBuf> {
         .ok()
         .filter(|dir| !dir.is_empty())
         .map(PathBuf::from)
+}
+
+/// CC's first-party live-process registry: `<claude_home>/sessions/<pid>.json`,
+/// one tiny JSON file per running CC process (`{pid, sessionId, cwd, status,
+/// procStart, ...}` — undocumented, drift-watched by check_upstream_drift.py).
+/// Returns the session UUIDs of entries whose pid is still ALIVE — a registry
+/// file can outlive a crashed CC, so each entry is verified with kill(pid, 0).
+///
+/// PID-reuse caveat (deliberately accepted): a recycled pid makes a dead
+/// session look live; the cost is ONE transient idle sprite reaped by the
+/// normal stale sweep, while verifying process identity needs platform
+/// process-table reads — the registry's `procStart` field is the upgrade path
+/// if that ever matters.
+pub fn live_cc_session_ids(sessions_dir: &Path) -> HashSet<String> {
+    #[cfg(unix)]
+    {
+        let mut live = HashSet::new();
+        // No registry dir (older CC, or no CC ever run) → empty set: the
+        // additive-only probe contributes nothing, pure-mtime gate applies.
+        let Ok(entries) = std::fs::read_dir(sessions_dir) else {
+            return live;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                continue;
+            }
+            // An unreadable file is usually a CC exiting and removing its own
+            // entry mid-scan — not format drift; skip silently.
+            let Ok(bytes) = std::fs::read(&path) else {
+                continue;
+            };
+            let Some((pid, session_id)) = parse_registry_entry(&bytes) else {
+                // Undocumented format — warn ONCE per process, never per scan
+                // (the probe runs every scan pass).
+                static WARN_ONCE: std::sync::Once = std::sync::Once::new();
+                WARN_ONCE.call_once(|| {
+                    tracing::warn!(
+                        "unparseable CC session-registry file (format drift?): {}",
+                        path.display()
+                    );
+                });
+                continue;
+            };
+            if pid_alive(pid) {
+                live.insert(session_id);
+            }
+        }
+        live
+    }
+    #[cfg(not(unix))]
+    {
+        // Windows has no kill(0); pid liveness there needs OpenProcess +
+        // exit-code semantics we haven't validated against CC-on-Windows.
+        // Empty set = the additive-only probe contributes nothing and the
+        // first-sight gate keeps today's pure-mtime behavior.
+        let _ = sessions_dir;
+        HashSet::new()
+    }
+}
+
+/// Extract `{pid, sessionId}` from one registry file. `serde_json::Value`
+/// on purpose — the format is undocumented, so we read only the two fields
+/// the join needs and tolerate everything else changing.
+#[cfg(unix)]
+fn parse_registry_entry(bytes: &[u8]) -> Option<(i32, String)> {
+    let v: serde_json::Value = serde_json::from_slice(bytes).ok()?;
+    // pid <= 0 is never a single process (kill(0)/kill(-n) target process
+    // GROUPS — a corrupt entry must not probe our own group as "alive").
+    let pid = i32::try_from(v.get("pid")?.as_i64()?)
+        .ok()
+        .filter(|p| *p > 0)?;
+    let session_id = v.get("sessionId")?.as_str().filter(|s| !s.is_empty())?;
+    Some((pid, session_id.to_string()))
+}
+
+/// kill(pid, 0) liveness: rc 0 = alive and signalable; EPERM = alive but owned
+/// by another user; ESRCH (or anything else) = no such process.
+#[cfg(unix)]
+fn pid_alive(pid: i32) -> bool {
+    // SAFETY: kill with signal 0 performs only the existence/permission check —
+    // no signal is delivered, no memory is touched, no pointer args.
+    if unsafe { libc::kill(pid as libc::pid_t, 0) } == 0 {
+        return true;
+    }
+    std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
+/// The sessions registry is a SIBLING of the projects root
+/// (`<claude_home>/sessions` vs `<claude_home>/projects`). Derive it only when
+/// the parent layout matches (the root's file_name is literally `projects`) —
+/// a custom `--projects-root /tmp/fixture` replay points at an arbitrary dir
+/// whose parent could hold an unrelated `sessions/`, so those runs get no
+/// probe and keep the pure-mtime gate.
+fn cc_sessions_dir(projects_root: &Path) -> Option<PathBuf> {
+    if projects_root.file_name().and_then(|n| n.to_str()) != Some("projects") {
+        return None;
+    }
+    projects_root
+        .parent()
+        // A bare relative `projects` has an EMPTY parent — not a claude home.
+        .filter(|home| !home.as_os_str().is_empty())
+        .map(|home| home.join("sessions"))
 }
 
 impl ClaudeCodeSource {
@@ -84,7 +188,7 @@ impl Source for ClaudeCodeSource {
 
     async fn run(self: Box<Self>, tx: TaggedSender) -> Result<()> {
         let socket = HookSocketListener::bind(self.socket_path.clone()).await?;
-        let watcher = JsonlWatcher::new(
+        let mut watcher = JsonlWatcher::new(
             self.projects_root.clone(),
             SOURCE_NAME.to_string(),
             decode_cc_line,
@@ -92,6 +196,11 @@ impl Source for ClaudeCodeSource {
             cc_session_ended,
         )
         .with_id_deriver(cc_id_from_path);
+        if let Some(sessions_dir) = cc_sessions_dir(&self.projects_root) {
+            watcher = watcher.with_liveness_probe(std::sync::Arc::new(move || {
+                live_cc_session_ids(&sessions_dir)
+            }));
+        }
 
         let tx_hook = tx.clone();
         let tx_jsonl = tx.clone();
@@ -559,5 +668,121 @@ mod cc_id_tests {
         let normalized =
             Path::new("/users/me/.claude/projects/p/01000000-0000-7000-8000-0000000000cc.jsonl");
         assert_eq!(cc_id_from_path(raw), cc_id_from_path(normalized));
+    }
+}
+
+#[cfg(test)]
+mod liveness_tests {
+    use super::*;
+
+    // Only the cfg(unix) tests write registry entries (the Windows impl never
+    // reads them) — keep the helper gated too or it's dead code there.
+    #[cfg(unix)]
+    fn write_entry(dir: &Path, name: &str, pid: i64, session_id: &str) {
+        std::fs::write(
+            dir.join(name),
+            serde_json::json!({ "pid": pid, "sessionId": session_id, "status": "idle" })
+                .to_string(),
+        )
+        .unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn keeps_entry_whose_pid_is_alive() {
+        let dir = tempfile::tempdir().unwrap();
+        // Our own pid is alive by construction.
+        write_entry(
+            dir.path(),
+            "self.json",
+            std::process::id() as i64,
+            "alive-session",
+        );
+        let live = live_cc_session_ids(dir.path());
+        assert!(
+            live.contains("alive-session"),
+            "an entry with a live pid must be kept, got {live:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn drops_entry_whose_pid_is_dead() {
+        // Spawn-and-reap a real child: its pid is guaranteed dead once wait()
+        // returns (modulo an astronomically unlikely instant reuse — the
+        // accepted PID-reuse caveat, see live_cc_session_ids).
+        let mut child = std::process::Command::new("true").spawn().unwrap();
+        let dead_pid = child.id() as i64;
+        child.wait().unwrap();
+
+        let dir = tempfile::tempdir().unwrap();
+        write_entry(dir.path(), "dead.json", dead_pid, "dead-session");
+        write_entry(
+            dir.path(),
+            "alive.json",
+            std::process::id() as i64,
+            "alive-session",
+        );
+        let live = live_cc_session_ids(dir.path());
+        assert!(
+            !live.contains("dead-session"),
+            "a crashed CC's leftover registry file must not count as live, got {live:?}"
+        );
+        assert!(
+            live.contains("alive-session"),
+            "the live sibling must survive the dead entry, got {live:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn malformed_and_incomplete_entries_are_ignored() {
+        let dir = tempfile::tempdir().unwrap();
+        let own_pid = std::process::id() as i64;
+        std::fs::write(dir.path().join("garbage.json"), "not json {{{").unwrap();
+        // Missing sessionId.
+        std::fs::write(
+            dir.path().join("nosid.json"),
+            serde_json::json!({ "pid": own_pid }).to_string(),
+        )
+        .unwrap();
+        // pid <= 0 would kill(0) our own process GROUP — must be rejected.
+        write_entry(dir.path(), "pid0.json", 0, "group-session");
+        // pid as a string (format drift) — not silently coerced.
+        std::fs::write(
+            dir.path().join("strpid.json"),
+            serde_json::json!({ "pid": own_pid.to_string(), "sessionId": "str-pid" }).to_string(),
+        )
+        .unwrap();
+        // Non-.json files are not registry entries.
+        write_entry(dir.path(), "notes.txt", own_pid, "txt-session");
+        write_entry(dir.path(), "valid.json", own_pid, "valid-session");
+
+        let live = live_cc_session_ids(dir.path());
+        assert_eq!(
+            live,
+            HashSet::from(["valid-session".to_string()]),
+            "only the well-formed live entry may survive"
+        );
+    }
+
+    #[test]
+    fn missing_dir_yields_empty_set() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("does-not-exist");
+        assert!(live_cc_session_ids(&missing).is_empty());
+    }
+
+    #[test]
+    fn sessions_dir_derives_only_from_the_standard_layout() {
+        // <claude_home>/projects → the sessions sibling.
+        assert_eq!(
+            cc_sessions_dir(Path::new("/home/u/.claude/projects")),
+            Some(PathBuf::from("/home/u/.claude/sessions"))
+        );
+        // A fixture replay (--projects-root /tmp/fixture) has no registry
+        // sibling — no probe, pure-mtime gate.
+        assert_eq!(cc_sessions_dir(Path::new("/tmp/fixture")), None);
+        assert_eq!(cc_sessions_dir(Path::new("projects")), None);
     }
 }
