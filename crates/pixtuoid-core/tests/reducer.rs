@@ -3857,3 +3857,212 @@ fn codex_subagent_cascades_with_parent_on_session_end() {
         "subagent should cascade out with its parent"
     );
 }
+
+// ── Hook events are proof of life ───────────────────────────────────────────
+// A hook event can only come from a live process. A hook-transport tool /
+// permission event whose AgentId has no slot means a LIVE session is invisible
+// (its transcript was gated at first sight — mid-attach, idle >1h — so no
+// JSONL SessionStart ever ran). The reducer synthesizes the registration the
+// missing SessionStart would have performed; identity context the event
+// doesn't carry (source/session_id/cwd) stays empty until a later real
+// SessionStart back-fills it.
+
+#[test]
+fn hook_activity_start_for_unknown_id_synthesizes_slot_and_goes_active() {
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let id = AgentId::from_parts("claude-code", "gated-sess");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityStart {
+            agent_id: id,
+            tool_use_id: Some("t1".into()),
+            detail: Some("Edit: foo.rs".into()),
+        },
+        t0,
+        Transport::Hook,
+    );
+
+    let slot = scene
+        .agents
+        .get(&id)
+        .expect("hook event must synthesize the slot");
+    assert!(
+        matches!(slot.state, ActivityState::Active { .. }),
+        "the synthesizing event itself applies to the fresh slot"
+    );
+    // The event carries no source/cwd, so the label is the bare ordinal
+    // fallback (empty source prefix) — the shape the SessionStart back-fill
+    // recognizes and upgrades.
+    assert_eq!(&*slot.label, "#1");
+    assert!(slot.cwd.as_os_str().is_empty(), "no cwd on the event");
+}
+
+#[test]
+fn hook_waiting_for_unknown_id_synthesizes_slot_in_waiting_state() {
+    // The motivating case: a mid-attached session parked on a permission
+    // prompt fires ONLY a Notification hook (no transcript append) — without
+    // synthesis it has no revival path at all.
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let id = AgentId::from_parts("claude-code", "parked-sess");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+
+    r.apply(
+        &mut scene,
+        AgentEvent::Waiting {
+            agent_id: id,
+            reason: "permission".into(),
+        },
+        t0,
+        Transport::Hook,
+    );
+
+    let slot = scene
+        .agents
+        .get(&id)
+        .expect("hook Waiting must synthesize the slot");
+    assert!(
+        matches!(slot.state, ActivityState::Waiting { .. }),
+        "slot enters Waiting so the permission prompt is visible"
+    );
+}
+
+#[test]
+fn jsonl_event_for_unknown_id_stays_a_no_op() {
+    // JSONL lines can be historical replays (the watcher's first-sight gate
+    // exists precisely for those) — only a hook proves a live process, so the
+    // JSONL unknown-id no-op stays load-bearing.
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let id = AgentId::from_parts("claude-code", "replayed-sess");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityStart {
+            agent_id: id,
+            tool_use_id: Some("t1".into()),
+            detail: None,
+        },
+        t0,
+        Transport::Jsonl,
+    );
+    r.apply(
+        &mut scene,
+        AgentEvent::Waiting {
+            agent_id: id,
+            reason: "perm".into(),
+        },
+        t0,
+        Transport::Jsonl,
+    );
+
+    assert!(
+        scene.agents.is_empty(),
+        "JSONL events for an unknown id must not synthesize a slot"
+    );
+}
+
+#[test]
+fn hook_session_end_for_unknown_id_does_not_create_slot() {
+    // An end for an unknown agent proves nothing worth showing — there is
+    // nothing to remove and synthesizing a corpse would flash a phantom.
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let id = AgentId::from_parts("claude-code", "already-gone");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionEnd { agent_id: id },
+        t0,
+        Transport::Hook,
+    );
+
+    assert!(scene.agents.is_empty(), "SessionEnd must not synthesize");
+}
+
+#[test]
+fn jsonl_session_start_after_hook_synthesis_coalesces_into_same_slot() {
+    // The revived transcript's SessionStart (same session UUID → same
+    // AgentId) must land in the duplicate-SessionStart arm — one sprite, one
+    // desk — not mint a second slot.
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let id = AgentId::from_parts("claude-code", "revived-sess");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityStart {
+            agent_id: id,
+            tool_use_id: Some("t1".into()),
+            detail: None,
+        },
+        t0,
+        Transport::Hook,
+    );
+    let desk = scene.agents.get(&id).expect("synthesized").desk_index;
+
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: id,
+            source: "claude-code".into(),
+            session_id: "revived-sess".into(),
+            cwd: PathBuf::from("/repo"),
+            parent_id: None,
+        },
+        t0 + Duration::from_secs(1),
+        Transport::Jsonl,
+    );
+
+    assert_eq!(scene.agents.len(), 1, "no duplicate sprite");
+    assert_eq!(
+        scene.agents.get(&id).unwrap().desk_index,
+        desk,
+        "the agent keeps its desk"
+    );
+}
+
+#[test]
+fn hook_synthesized_slot_is_exempt_from_unknown_cwd_reap() {
+    // A hook-synthesized slot has an empty cwd, but it is NOT a startup
+    // JSONL-seeding ghost (the population the 3-min unknown-cwd reap exists
+    // for) — it is process-proven alive. The motivating scenario emits no
+    // further event while parked on its permission prompt, so the 3-min reap
+    // would kill the slot before any JSONL revive: it must get the normal
+    // state-adaptive timeout (Waiting = 60 min) instead.
+    use pixtuoid_core::state::reducer::STALE_UNKNOWN_CWD_TIMEOUT;
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let id = AgentId::from_parts("claude-code", "parked-sess");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+
+    r.apply(
+        &mut scene,
+        AgentEvent::Waiting {
+            agent_id: id,
+            reason: "permission".into(),
+        },
+        t0,
+        Transport::Hook,
+    );
+    assert!(
+        !scene.agents.get(&id).expect("synthesized").unknown_cwd,
+        "process-proven slot must not carry the startup-ghost flag"
+    );
+
+    r.tick(
+        &mut scene,
+        t0 + STALE_UNKNOWN_CWD_TIMEOUT + Duration::from_secs(60),
+    );
+    let slot = scene.agents.get(&id).expect("still present after 4 min");
+    assert!(
+        slot.exiting_at.is_none(),
+        "a parked-on-permission synthesized slot must ride the Waiting timeout, not the 3-min ghost reap"
+    );
+}

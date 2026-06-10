@@ -257,6 +257,22 @@ impl Reducer {
         self.expire_pending_idles(scene, now);
         let id = event.agent_id();
 
+        // PRE-PASS 0 — a hook event is PROOF OF LIFE: it can only come from a
+        // live process. A hook tool/permission event whose id has no slot means
+        // a live session is invisible — its transcript was gated at first sight
+        // (mid-attach, idle >1h), so no JSONL SessionStart ever ran; parked on a
+        // permission prompt (Notification appends nothing to the transcript) it
+        // has no revival path at all. Synthesize the registration the missing
+        // SessionStart would have performed, then let the event itself apply to
+        // the fresh slot. JSONL events must NOT synthesize — a transcript line
+        // can be a historical replay (the watcher's first-sight gate exists
+        // precisely for those), so the unknown-id no-op stays load-bearing
+        // there. SessionEnd/Rename don't synthesize either: an end/rename for
+        // an unknown agent proves nothing worth showing.
+        if from == Transport::Hook {
+            self.synthesize_hook_registration(scene, &event, id, now);
+        }
+
         // Liveness flows UP the tree: any activity by a descendant keeps its
         // ancestors alive, so a parent isn't stale-swept (and its subtree
         // cascaded out) while a subagent is still working — even if the parent's
@@ -378,58 +394,7 @@ impl Reducer {
                     }
                     return;
                 }
-                let Some(desk_index) = scene.next_free_desk() else {
-                    tracing::warn!(
-                        ?agent_id,
-                        cwd = %cwd.display(),
-                        session_id = %session_id,
-                        total_capacity = scene.total_capacity(),
-                        "dropped SessionStart — all desks occupied; bump --max-desks"
-                    );
-                    return;
-                };
-                let floor_idx = scene.floor_of(desk_index);
-                let base = cwd
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .filter(|s| !s.is_empty());
-                let has_cwd = base.is_some();
-                let prefix = source_label_prefix(&source);
-                let label: Arc<str> = match base {
-                    Some(b) => Arc::<str>::from(format!("{prefix}·{b}").as_str()),
-                    None => {
-                        // Only an unknown-cwd ghost consumes an ordinal, so labels
-                        // stay contiguous (cc#1, cc#2, …) instead of skipping the
-                        // count of preceding named sessions.
-                        self.next_label_n += 1;
-                        Arc::<str>::from(format!("{prefix}#{}", self.next_label_n).as_str())
-                    }
-                };
-                // Disambiguation for multiple sessions sharing a cwd happens
-                // at render time, not here — we don't want to suffix unique
-                // sessions with a noisy `·xxxx` they don't need.
-                scene.agents.insert(
-                    agent_id,
-                    AgentSlot {
-                        agent_id,
-                        source: Arc::<str>::from(source.as_str()),
-                        session_id: Arc::<str>::from(session_id.as_str()),
-                        cwd: Arc::<std::path::Path>::from(cwd.as_path()),
-                        label,
-                        state: ActivityState::Idle,
-                        state_started_at: now,
-                        last_event_at: now,
-                        created_at: now,
-                        exiting_at: None,
-                        pending_idle_at: None,
-                        desk_index,
-                        floor_idx,
-                        tool_call_count: 0,
-                        active_ms: 0,
-                        unknown_cwd: !has_cwd,
-                        parent_id,
-                    },
-                );
+                self.register_slot(scene, agent_id, &source, &session_id, &cwd, parent_id, now);
             }
             AgentEvent::ActivityStart {
                 agent_id,
@@ -530,6 +495,123 @@ impl Reducer {
                 scope::cascade_exit(scene, agent_id, now);
             }
         }
+    }
+
+    /// Pre-pass 0 of [`Reducer::apply`] (hook transport only) — hook events
+    /// are proof of life: synthesize a registration for a tool/permission
+    /// event whose id has no slot, so a session whose transcript was gated at
+    /// first sight becomes visible the moment it fires a hook. Only
+    /// `ActivityStart`/`ActivityEnd`/`Waiting` qualify — each unambiguously
+    /// proves a live session; `SessionEnd` (nothing to remove) and `Rename`
+    /// (nothing to relabel) stay no-ops for an unknown id.
+    ///
+    /// The decoded hook events carry no identity context beyond the `AgentId`
+    /// (no source / session_id / cwd — and the id is a hash, not reversible),
+    /// so the slot starts blank with the bare ordinal label (`#N`); the next
+    /// real `SessionStart` back-fills it (see the duplicate-SessionStart arm).
+    /// Routed through [`Reducer::register_slot`] so the desk-capacity gate
+    /// applies the same as for a real `SessionStart`.
+    fn synthesize_hook_registration(
+        &mut self,
+        scene: &mut SceneState,
+        event: &AgentEvent,
+        id: AgentId,
+        now: SystemTime,
+    ) {
+        if scene.agents.contains_key(&id)
+            || !matches!(
+                event,
+                AgentEvent::ActivityStart { .. }
+                    | AgentEvent::ActivityEnd { .. }
+                    | AgentEvent::Waiting { .. }
+            )
+        {
+            return;
+        }
+        if self.register_slot(scene, id, "", "", std::path::Path::new(""), None, now) {
+            if let Some(slot) = scene.agents.get_mut(&id) {
+                // NOT an unknown-cwd ghost: the 3-min reap exists for startup
+                // JSONL-seeding artifacts that never get a follow-up event.
+                // This slot is process-proven alive, and the motivating case —
+                // parked on a permission prompt, appending nothing — emits no
+                // further event within 3 min, so the ghost reap would kill it
+                // before any JSONL revive could back-fill. It rides the normal
+                // state-adaptive timeouts instead; the cost is a normal-length
+                // linger if the process dies right after — the same linger any
+                // abrupt exit already has.
+                slot.unknown_cwd = false;
+            }
+        }
+    }
+
+    /// The slot-creation half of the `SessionStart` arm, shared with
+    /// [`Reducer::synthesize_hook_registration`] so both run the same
+    /// desk-capacity gate + label derivation. Returns `false` when all desks
+    /// are occupied (the session is dropped, consuming no ghost ordinal).
+    #[allow(clippy::too_many_arguments)]
+    fn register_slot(
+        &mut self,
+        scene: &mut SceneState,
+        agent_id: AgentId,
+        source: &str,
+        session_id: &str,
+        cwd: &std::path::Path,
+        parent_id: Option<AgentId>,
+        now: SystemTime,
+    ) -> bool {
+        let Some(desk_index) = scene.next_free_desk() else {
+            tracing::warn!(
+                ?agent_id,
+                cwd = %cwd.display(),
+                session_id = %session_id,
+                total_capacity = scene.total_capacity(),
+                "dropped SessionStart — all desks occupied; bump --max-desks"
+            );
+            return false;
+        };
+        let floor_idx = scene.floor_of(desk_index);
+        let base = cwd
+            .file_name()
+            .and_then(|n| n.to_str())
+            .filter(|s| !s.is_empty());
+        let has_cwd = base.is_some();
+        let prefix = source_label_prefix(source);
+        let label: Arc<str> = match base {
+            Some(b) => Arc::<str>::from(format!("{prefix}·{b}").as_str()),
+            None => {
+                // Only an unknown-cwd ghost consumes an ordinal, so labels
+                // stay contiguous (cc#1, cc#2, …) instead of skipping the
+                // count of preceding named sessions.
+                self.next_label_n += 1;
+                Arc::<str>::from(format!("{prefix}#{}", self.next_label_n).as_str())
+            }
+        };
+        // Disambiguation for multiple sessions sharing a cwd happens
+        // at render time, not here — we don't want to suffix unique
+        // sessions with a noisy `·xxxx` they don't need.
+        scene.agents.insert(
+            agent_id,
+            AgentSlot {
+                agent_id,
+                source: Arc::<str>::from(source),
+                session_id: Arc::<str>::from(session_id),
+                cwd: Arc::<std::path::Path>::from(cwd),
+                label,
+                state: ActivityState::Idle,
+                state_started_at: now,
+                last_event_at: now,
+                created_at: now,
+                exiting_at: None,
+                pending_idle_at: None,
+                desk_index,
+                floor_idx,
+                tool_call_count: 0,
+                active_ms: 0,
+                unknown_cwd: !has_cwd,
+                parent_id,
+            },
+        );
+        true
     }
 
     /// Pre-pass 1 of [`Reducer::apply`] — subagent-leak suppression (hook
