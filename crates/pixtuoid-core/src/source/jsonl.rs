@@ -950,11 +950,15 @@ async fn emit_first_sight(
     if !is_first {
         return;
     }
-    let id = AgentId::from_parts(source, &(decoders.id_derive)(path));
-    let session_id = path
-        .file_stem()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_default();
+    // session_id comes from the SAME deriver as the AgentId — the hook
+    // transport's slots carry the bare session UUID (CC/Codex), and
+    // `backfill_identity` never heals a non-empty session_id, so a raw
+    // file-stem here would leave a JSONL-created slot permanently
+    // disagreeing with its hook-created twin (a Codex stem is
+    // `rollout-<ts>-<uuid>`: every tooltip disambiguator suffix became the
+    // constant `roll`).
+    let session_id = (decoders.id_derive)(path);
+    let id = AgentId::from_parts(source, &session_id);
     let cwd = cwd.unwrap_or_default();
     let parent_id = detect_parent_id(path, source);
     let _ = tx

@@ -73,11 +73,7 @@ pub(crate) fn paint_label_widgets(
         let needs_disambig = label_counts.get(&*agent.label).copied().unwrap_or(0) > 1
             && agent.session_id.chars().count() >= 4;
         let raw: std::borrow::Cow<'_, str> = if needs_disambig {
-            // CHAR-safe prefix, not `&session_id[..4]`: a Reasonix session_id IS
-            // the raw cwd path, so byte 4 can fall inside a multi-byte UTF-8
-            // codepoint (e.g. `/naïveté/app`) and a byte slice would panic the
-            // per-frame render loop. `take(4)` is saturating + boundary-safe.
-            let id4: String = agent.session_id.chars().take(4).collect();
+            let id4 = disambig_suffix(&agent.session_id);
             std::borrow::Cow::Owned(format!("{}·{id4}", agent.label))
         } else {
             std::borrow::Cow::Borrowed(&*agent.label)
@@ -386,5 +382,49 @@ pub fn paint_chitchat_bubbles(
                 .fg(Color::White);
             f.render_widget(Paragraph::new(Span::styled(text, style)), r);
         }
+    }
+}
+
+/// TAIL-anchored, CHAR-safe 4-char disambiguation suffix (never a byte slice
+/// of `session_id`): a session_id can be a UUID (CC/Codex — head and tail
+/// equally unique) or a PATH-shaped id (Antigravity = the normalized full
+/// transcript path, Reasonix = the raw cwd) whose HEAD is a constant like
+/// `/use` — the tail varies where the head can't. `.jsonl` is stripped first
+/// so a path-shaped id doesn't degenerate to the constant `sonl`. chars()-
+/// based because byte 4 can fall inside a multi-byte codepoint (e.g.
+/// `/naïveté/app`) and a byte slice would panic the per-frame render loop.
+fn disambig_suffix(session_id: &str) -> String {
+    let id = session_id.trim_end_matches(".jsonl");
+    let skip = id.chars().count().saturating_sub(4);
+    id.chars().skip(skip).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::disambig_suffix;
+
+    #[test]
+    fn uuid_ids_take_the_tail() {
+        assert_eq!(
+            disambig_suffix("c0f7fb3f-dc9c-47c3-840d-f775dd2855a3"),
+            "55a3"
+        );
+    }
+
+    #[test]
+    fn path_shaped_ids_vary_in_the_tail_not_the_head() {
+        // Antigravity session_ids are normalized full transcript paths: two
+        // same-cwd sessions share the whole prefix; only the stem differs.
+        let a = disambig_suffix("/users/me/.gravity/sessions/proj/alpha-01.jsonl");
+        let b = disambig_suffix("/users/me/.gravity/sessions/proj/beta-02.jsonl");
+        assert_ne!(a, b, "tail must distinguish same-prefix path ids");
+        assert_eq!(a, "a-01");
+        assert_eq!(b, "a-02");
+    }
+
+    #[test]
+    fn multibyte_tails_are_char_safe() {
+        assert_eq!(disambig_suffix("/naïveté/app"), "/app");
+        assert_eq!(disambig_suffix("naï"), "naï"); // shorter than 4: whole id
     }
 }

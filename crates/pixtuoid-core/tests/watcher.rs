@@ -391,6 +391,68 @@ async fn codex_watcher_registers_stale_rollout_when_probe_says_live() {
     handle.abort();
 }
 
+/// First-sight `SessionStart.session_id` must come from the source's
+/// `IdDeriver`, NOT the raw file stem: a Codex stem is the full
+/// `rollout-<ts>-<uuid>` string while the hook transport carries the bare
+/// UUID, so a JSONL-created slot would disagree with its hook-created twin
+/// (and `backfill_identity` never heals a non-empty session_id) — the
+/// tooltip's same-cwd disambiguator then suffixes the constant `roll` for
+/// every JSONL-created Codex slot.
+#[tokio::test]
+async fn codex_first_sight_session_start_carries_bare_uuid_session_id() {
+    fast_watch();
+    use pixtuoid_core::source::codex::{codex_id_from_path, decode_codex_line, derive_codex_label};
+
+    let dir = TempDir::new().unwrap();
+    let root = dir.path().to_path_buf();
+    let day_dir = root.join("2026").join("06").join("10");
+    tokio::fs::create_dir_all(&day_dir).await.unwrap();
+    let uuid = "019e7762-9ded-7e33-be41-946ecf105bf5";
+    let rollout = day_dir.join(format!("rollout-2026-06-10T08-00-00-{uuid}.jsonl"));
+    let meta = serde_json::json!({
+        "type": "session_meta",
+        "payload": { "id": uuid, "cwd": "/Users/me/dotfiles" }
+    });
+    tokio::fs::write(&rollout, format!("{meta}\n"))
+        .await
+        .unwrap();
+
+    let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(32);
+    let watcher = JsonlWatcher::new(
+        root.clone(),
+        "codex".to_string(),
+        decode_codex_line,
+        derive_codex_label,
+        |_t| false,
+    )
+    .with_id_deriver(codex_id_from_path);
+    let handle = tokio::spawn(async move { watcher.run(tx).await });
+
+    let mut got = None;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    while tokio::time::Instant::now() < deadline {
+        if let Ok(Some((
+            _,
+            AgentEvent::SessionStart {
+                agent_id,
+                session_id,
+                ..
+            },
+        ))) = tokio::time::timeout(Duration::from_millis(200), rx.recv()).await
+        {
+            got = Some((agent_id, session_id));
+            break;
+        }
+    }
+    let (agent_id, session_id) = got.expect("expected SessionStart from the codex watcher");
+    assert_eq!(agent_id, AgentId::from_parts("codex", uuid));
+    assert_eq!(
+        session_id, uuid,
+        "first-sight session_id must be the IdDeriver's bare UUID, not the rollout file stem"
+    );
+    handle.abort();
+}
+
 /// #220: the probe is ONGOING liveness, not just admission — after each probe
 /// refresh (the initial seed makes this fast; the 60s poll repeats it) the
 /// watcher emits a `ProofOfLife` for every vouched id so the reducer can keep

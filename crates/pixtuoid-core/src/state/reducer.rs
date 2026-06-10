@@ -521,6 +521,32 @@ impl Reducer {
                         // Active-exit site does; a direct `state = Idle` here
                         // silently dropped it).
                         fsm::resurrect_in_place(slot, now);
+                        // Evict the dead life's correlation state, exactly as
+                        // `sweep_exited` would have if the corpse had GC'd
+                        // before this start — per map:
+                        // - active_tasks: a leftover tuid can NEVER drain (its
+                        //   End belongs to the dead life), so it would keep
+                        //   suppress_subagent_leak eating every hook event of
+                        //   the new life. On a #228 false-exit resurrect the
+                        //   old delegation may still be live, but its subtree
+                        //   was already cascade_exit'd by the SessionEnd (only
+                        //   the root resurrects) and its JSONL End simply
+                        //   no-ops on the empty set — a transient hook
+                        //   misattribution beats permanent suppression.
+                        // - gated_before_waiting: a dead life's gate could
+                        //   false-resolve a future Waiting via resolves_wait.
+                        // - pending_b1_cascades: an armed cascade from the old
+                        //   drain would fire into the NEW life's fresh subtree.
+                        // recent_proof_of_life deliberately SURVIVES: a vouch
+                        // asserts the owning process is alive, and a
+                        // resurrecting slot is the one case where that is true
+                        // by definition (sweep_exited evicts it only because
+                        // the SLOT is gone). The hook-recency maps
+                        // (recent_hook_tool_uses / _session_ends) are
+                        // TTL-bounded and not per-slot state — gc owns them.
+                        self.active_tasks.remove(&agent_id);
+                        self.gated_before_waiting.remove(&agent_id);
+                        self.pending_b1_cascades.remove(&agent_id);
                     }
                     return;
                 }
@@ -911,12 +937,27 @@ impl Reducer {
                 ..
             } if d.is_task() => {
                 handled_by_task_start = true;
-                self.active_tasks
+                // Delegating only on the FIRST insert: the in-window JSONL copy
+                // of a hook dispatch is dedup-dropped upstream, but real
+                // hook↔JSONL skew runs past HOOK_WINS_WINDOW (B1_CASCADE_GRACE
+                // models it at ~2.5s), and an out-of-window replay of an
+                // already-tracked tuid (`insert() == false`) re-firing
+                // enter_delegating would clobber a parent that went Waiting on
+                // its own permission prompt since. The flag above stays
+                // unconditional either way, so the duplicate can't fall through
+                // to the main arm's enter_active instead. (A suppressed
+                // parallel dispatch's JSONL copy is a genuine first insert —
+                // the suppressed hook returned before reaching this tracker —
+                // so it still enters Delegating.)
+                if self
+                    .active_tasks
                     .entry(*agent_id)
                     .or_default()
-                    .insert(tuid.clone());
-                if let Some(slot) = scene.agents.get_mut(agent_id) {
-                    fsm::enter_delegating(slot, Some(Arc::<str>::from(tuid.as_str())), now);
+                    .insert(tuid.clone())
+                {
+                    if let Some(slot) = scene.agents.get_mut(agent_id) {
+                        fsm::enter_delegating(slot, Some(Arc::<str>::from(tuid.as_str())), now);
+                    }
                 }
             }
             AgentEvent::ActivityEnd {
@@ -1458,6 +1499,126 @@ mod tests {
         assert!(
             !r.gated_before_waiting.contains_key(&id),
             "apply-path sweep_exited must evict the gated entry (not only tick's retain)"
+        );
+    }
+
+    // White-box: the resurrect-in-place branch must evict the previous life's
+    // entries from all three correlation maps while KEEPING the proof-of-life
+    // vouch (the resurrecting slot's process is alive — that's what a vouch
+    // asserts). The public pins (tests/reducer.rs) cover the active_tasks and
+    // pending_b1_cascades harms behaviorally; a stale `gated_before_waiting`
+    // entry has no public observable today (every path into Waiting rewrites
+    // the gate first), so its eviction — and the vouch's survival — are
+    // pinned directly here.
+    #[test]
+    fn resurrect_in_place_evicts_correlation_maps_but_keeps_proof_of_life() {
+        use crate::source::{AgentEvent, ToolDetail, Transport};
+        use crate::state::SceneState;
+        use crate::AgentId;
+        use std::path::PathBuf;
+        use std::time::{Duration, SystemTime};
+
+        let mut r = super::Reducer::new();
+        let mut scene = SceneState::uniform(4);
+        let id = AgentId::from_transcript_path("/p/res-maps.jsonl");
+        let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+        let session_start = |sid: &str| AgentEvent::SessionStart {
+            agent_id: id,
+            source: "claude-code".into(),
+            session_id: sid.into(),
+            cwd: PathBuf::from("/repo"),
+            parent_id: None,
+        };
+        r.apply(&mut scene, session_start("s"), t0, Transport::Hook);
+        // Gate: an ordinary tool mid-flight when a permission Waiting fires.
+        r.apply(
+            &mut scene,
+            AgentEvent::ActivityStart {
+                agent_id: id,
+                tool_use_id: Some("t-gate".into()),
+                detail: Some(ToolDetail::from("Bash")),
+            },
+            t0 + Duration::from_secs(1),
+            Transport::Hook,
+        );
+        r.apply(
+            &mut scene,
+            AgentEvent::Waiting {
+                agent_id: id,
+                reason: "perm".into(),
+            },
+            t0 + Duration::from_secs(1),
+            Transport::Hook,
+        );
+        // Tasks: a dispatch that fully drains arms the b1 cascade and leaves
+        // an (empty) active_tasks entry behind.
+        r.apply(
+            &mut scene,
+            AgentEvent::ActivityStart {
+                agent_id: id,
+                tool_use_id: Some("task-1".into()),
+                detail: Some(ToolDetail::from("Task")),
+            },
+            t0 + Duration::from_secs(2),
+            Transport::Hook,
+        );
+        r.apply(
+            &mut scene,
+            AgentEvent::ActivityEnd {
+                agent_id: id,
+                tool_use_id: Some("task-1".into()),
+            },
+            t0 + Duration::from_secs(3),
+            Transport::Hook,
+        );
+        r.apply(
+            &mut scene,
+            AgentEvent::ProofOfLife { agent_id: id },
+            t0 + Duration::from_secs(3),
+            Transport::Hook,
+        );
+        assert!(r.active_tasks.contains_key(&id), "ledger entry populated");
+        assert!(r.gated_before_waiting.contains_key(&id), "gate populated");
+        assert!(r.pending_b1_cascades.contains_key(&id), "cascade armed");
+        assert!(r.recent_proof_of_life.contains_key(&id), "vouch recorded");
+
+        // End + resurrect inside the walkout window (and before the armed
+        // cascade's grace elapses).
+        r.apply(
+            &mut scene,
+            AgentEvent::SessionEnd { agent_id: id },
+            t0 + Duration::from_secs(4),
+            Transport::Hook,
+        );
+        r.apply(
+            &mut scene,
+            session_start("s2"),
+            t0 + Duration::from_millis(4_500),
+            Transport::Jsonl,
+        );
+
+        assert!(
+            scene
+                .agents
+                .get(&id)
+                .is_some_and(|s| s.exiting_at.is_none()),
+            "resurrected"
+        );
+        assert!(
+            !r.active_tasks.contains_key(&id),
+            "resurrect must evict the dead life's active_tasks entry"
+        );
+        assert!(
+            !r.gated_before_waiting.contains_key(&id),
+            "resurrect must evict the dead life's gated_before_waiting entry"
+        );
+        assert!(
+            !r.pending_b1_cascades.contains_key(&id),
+            "resurrect must disarm the dead life's pending b1 cascade"
+        );
+        assert!(
+            r.recent_proof_of_life.contains_key(&id),
+            "the vouch must SURVIVE resurrection — the process is alive"
         );
     }
 }

@@ -3306,6 +3306,64 @@ fn jsonl_task_start_duplicate_does_not_clobber_waiting_parent() {
     );
 }
 
+// Twin of the in-window pin above, OUTSIDE the dedup window: the hook-wins
+// record is GC'd at HOOK_WINS_WINDOW, but real JSONL skew runs to ~2.5s (the
+// B1_CASCADE_GRACE sizing models the FSEvents coalescing tail), so the
+// dispatch's JSONL copy can land with NO dedup record left. The tracker's
+// first-insert gate is then the only guard: a duplicate insert
+// (`insert() == false`) must not re-fire enter_delegating over the parent's
+// genuinely pending permission Waiting.
+#[test]
+fn jsonl_task_start_replay_outside_dedup_window_does_not_clobber_waiting_parent() {
+    let mut scene = SceneState::uniform(8);
+    let mut r = Reducer::new();
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+    let (parent, _child) = delegating_pair(&mut r, &mut scene, "orch-wait-late", t0);
+
+    // Hook Task dispatch — records the Start in the dedup map + active_tasks.
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityStart {
+            agent_id: parent,
+            tool_use_id: Some("task-T".into()),
+            detail: Some("Task".into()),
+        },
+        t0 + Duration::from_secs(1),
+        Transport::Hook,
+    );
+    // The parent's own permission Notification fires mid-dispatch.
+    r.apply(
+        &mut scene,
+        AgentEvent::Waiting {
+            agent_id: parent,
+            reason: "permission".into(),
+        },
+        t0 + Duration::from_secs(1) + HOOK_WINS_WINDOW / 50,
+        Transport::Hook,
+    );
+    // The dispatch's JSONL copy lands at 2× the dedup window — the record is
+    // GC'd, so it reaches the tracker. Its insert is a duplicate (the tuid is
+    // still in flight), which must NOT re-enter Delegating.
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityStart {
+            agent_id: parent,
+            tool_use_id: Some("task-T".into()),
+            detail: Some("Task".into()),
+        },
+        t0 + Duration::from_secs(1) + HOOK_WINS_WINDOW * 2,
+        Transport::Jsonl,
+    );
+
+    assert!(
+        matches!(
+            scene.agents.get(&parent).unwrap().state,
+            ActivityState::Waiting { .. }
+        ),
+        "an out-of-dedup-window JSONL replay of an already-tracked dispatch must not clobber the parent's pending permission Waiting"
+    );
+}
+
 #[test]
 fn jsonl_ordinary_tool_end_drains_when_hook_end_drops() {
     // #150, ordinary-tool leg: a sub-window tool whose PostToolUse hook
@@ -4127,6 +4185,181 @@ fn session_start_on_exiting_subagent_does_not_resurrect() {
     assert!(
         !scene.agents.contains_key(&child),
         "the cascaded subagent is reaped after its grace window"
+    );
+}
+
+// Resurrect-in-place must evict the previous life's correlation state: a tuid
+// left in active_tasks by a session that ended mid-delegation can NEVER drain
+// (its End belongs to the dead life), so suppress_subagent_leak would eat
+// every hook ActivityStart/End of the resurrected session for its entire
+// life. The fresh session's first hook tool must apply.
+#[test]
+fn resurrect_in_place_clears_stale_active_tasks_so_fresh_session_hooks_apply() {
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let id = AgentId::from_transcript_path("/p/resurr-tasks.jsonl");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: id,
+            source: "claude-code".into(),
+            session_id: "res".into(),
+            cwd: PathBuf::from("/repo"),
+            parent_id: None,
+        },
+        t0,
+        Transport::Hook,
+    );
+    // The old life dispatches a Task… and dies before it drains.
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityStart {
+            agent_id: id,
+            tool_use_id: Some("task-stale".into()),
+            detail: Some("Task".into()),
+        },
+        t0 + Duration::from_secs(1),
+        Transport::Hook,
+    );
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionEnd { agent_id: id },
+        t0 + Duration::from_secs(2),
+        Transport::Hook,
+    );
+    // The next session on the same id lands inside the walkout window.
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: id,
+            source: "claude-code".into(),
+            session_id: "res".into(),
+            cwd: PathBuf::from("/repo"),
+            parent_id: None,
+        },
+        t0 + Duration::from_millis(2_500),
+        Transport::Jsonl,
+    );
+    assert!(
+        scene.agents.get(&id).unwrap().exiting_at.is_none(),
+        "resurrected"
+    );
+
+    // The fresh life's first hook tool: with the stale tuid still tracked it
+    // would be suppressed as a subagent leak and the slot would stay Idle.
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityStart {
+            agent_id: id,
+            tool_use_id: Some("t-new".into()),
+            detail: Some("Read: /x".into()),
+        },
+        t0 + Duration::from_secs(3),
+        Transport::Hook,
+    );
+    match &scene.agents.get(&id).unwrap().state {
+        ActivityState::Active { detail, .. } => {
+            assert_eq!(
+                detail.as_deref(),
+                Some("Read: /x"),
+                "the fresh session's hook tool must apply, not render as Delegating"
+            );
+        }
+        other => panic!(
+            "the resurrected session's first hook tool must NOT be suppressed by the dead life's active_tasks residue — got {other:?}"
+        ),
+    }
+}
+
+// Resurrect-in-place must also disarm the previous life's pending b1 cascade:
+// armed by the old life's Task drain, it would otherwise fire after
+// B1_CASCADE_GRACE and cascade-exit the RESURRECTED session's brand-new
+// subagent subtree.
+#[test]
+fn resurrect_in_place_cancels_stale_pending_b1_cascade() {
+    let mut scene = SceneState::uniform(8);
+    let mut r = Reducer::new();
+    let parent = AgentId::from_transcript_path("/p/resurr-b1.jsonl");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: parent,
+            source: "claude-code".into(),
+            session_id: "p".into(),
+            cwd: PathBuf::from("/repo"),
+            parent_id: None,
+        },
+        t0,
+        Transport::Hook,
+    );
+    // Old life: a Task dispatch drains → the deferred b1 cascade is armed.
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityStart {
+            agent_id: parent,
+            tool_use_id: Some("task-old".into()),
+            detail: Some("Task".into()),
+        },
+        t0 + Duration::from_secs(1),
+        Transport::Hook,
+    );
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityEnd {
+            agent_id: parent,
+            tool_use_id: Some("task-old".into()),
+        },
+        t0 + Duration::from_secs(2),
+        Transport::Hook,
+    );
+    // The old life ends and the next session resurrects in place, all inside
+    // the armed cascade's grace.
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionEnd { agent_id: parent },
+        t0 + Duration::from_millis(2_200),
+        Transport::Hook,
+    );
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: parent,
+            source: "claude-code".into(),
+            session_id: "p".into(),
+            cwd: PathBuf::from("/repo"),
+            parent_id: None,
+        },
+        t0 + Duration::from_millis(2_400),
+        Transport::Jsonl,
+    );
+    // The fresh life dispatches a brand-new subagent.
+    let child = AgentId::from_parts("claude-code", "/p/resurr-b1/subagents/agent-1.jsonl");
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: child,
+            source: "claude-code".into(),
+            session_id: "c".into(),
+            cwd: PathBuf::from("/repo"),
+            parent_id: Some(parent),
+        },
+        t0 + Duration::from_millis(2_600),
+        Transport::Jsonl,
+    );
+
+    // Past the OLD drain's grace: a stale armed cascade would fire here and
+    // evict the new subtree.
+    r.tick(
+        &mut scene,
+        t0 + Duration::from_secs(2) + B1_CASCADE_GRACE + Duration::from_millis(10),
+    );
+    assert!(
+        scene.agents.get(&child).unwrap().exiting_at.is_none(),
+        "the dead life's armed b1 cascade must not fire into the resurrected session's fresh subagent"
     );
 }
 
