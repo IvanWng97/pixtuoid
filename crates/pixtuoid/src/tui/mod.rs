@@ -110,9 +110,14 @@ fn toggle_pin<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
         renderer.set_pinned_agent(None);
     } else {
         let snap = scene_rx.borrow().clone();
+        // Project to the VISIBLE floor first: `hit_test_from_tui` requires a
+        // single-floor scene matching `cached_layout` (a raw multi-floor
+        // snapshot would test other floors' agents against this floor's
+        // desks — the global/local desk-index confusion, see its doc).
+        let floor_scene = floor::project_floor_scene(&snap, renderer.current_floor());
         let hit = renderer
             .cached_layout()
-            .and_then(|layout| renderer::hit_test_from_tui(&snap, layout, col, row));
+            .and_then(|layout| renderer::hit_test_from_tui(&floor_scene, layout, col, row));
         renderer.set_pinned_agent(hit);
     }
 }

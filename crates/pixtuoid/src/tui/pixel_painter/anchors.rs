@@ -133,7 +133,7 @@ pub(in crate::tui) fn character_anchor(
     now: SystemTime,
     rctx: &mut pose::RouteCtx<'_>,
 ) -> Option<Point> {
-    let desk = *layout.home_desks.get(agent.desk_index)?;
+    let desk = layout.home_desk(agent.desk_index.single_floor_local())?;
     let pose = pose::derive_with_routing(agent, now, layout, rctx)?;
     // Labels anchor off the DEFAULT character width — a custom pack's true
     // width isn't threaded here and ±1px doesn't matter for a text label.

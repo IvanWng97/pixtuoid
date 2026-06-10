@@ -49,14 +49,21 @@ pub(crate) fn hit_test_agent(
 
 /// Lightweight hit-test for click-to-pin without needing router/overlay state.
 /// Uses home desk positions only (no walking agents).
+///
+/// `scene` must be a SINGLE-FLOOR scene matching `layout` — the caller
+/// projects the live scene via `project_floor_scene(scene, current_floor)`
+/// first, so only the visible floor's agents are tested, with their
+/// re-projected desk indices. (Indexing `layout.home_desks` with a raw
+/// multi-floor `desk_index` was exactly the global/local confusion the
+/// `GlobalDeskIndex` newtype exists to prevent: while viewing floor ≥ 1 it
+/// could pin an invisible agent from another floor.)
 pub fn hit_test_from_tui(scene: &SceneState, layout: &Layout, mx: u16, my: u16) -> Option<AgentId> {
     const SPRITE_W: u16 = 8;
     const SPRITE_H_CELLS: u16 = 6;
     for agent in scene.agents.values() {
-        if agent.desk_index >= layout.home_desks.len() {
+        let Some(desk) = layout.home_desk(scene.floor_local_desk(agent.desk_index)) else {
             continue;
-        }
-        let desk = &layout.home_desks[agent.desk_index];
+        };
         let ax = desk.x + 1;
         let ay = desk.y.saturating_sub(4);
         let cell_x = ax;

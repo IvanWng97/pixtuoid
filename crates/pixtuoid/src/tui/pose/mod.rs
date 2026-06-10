@@ -177,7 +177,7 @@ pub fn derive_with_routing(
     let overlay = rctx.overlay;
     let history = &mut *rctx.history;
     let motion = &mut *rctx.motion;
-    let desk = *layout.home_desks.get(slot.desk_index)?;
+    let desk = layout.home_desk(slot.desk_index.single_floor_local())?;
 
     // ---- EXIT branch -------------------------------------------------------
     // Takes priority over entry and state-driven poses.
@@ -407,7 +407,7 @@ pub fn derive_with_routing(
         match wander_phase {
             WanderPhase::WalkingOut => {
                 let ms = motion.get(&slot.agent_id)?;
-                let desk_point = *layout.home_desks.get(slot.desk_index)?;
+                let desk_point = layout.home_desk(slot.desk_index.single_floor_local())?;
                 let dest = ms.wander_dest;
                 let seat = ms.wander_seat;
                 // Leave the desk via the approach cell (a reachable N/E/W side),
@@ -469,7 +469,7 @@ pub fn derive_with_routing(
             }
             WanderPhase::WalkingBack => {
                 let ms = motion.get(&slot.agent_id)?;
-                let desk_point = *layout.home_desks.get(slot.desk_index)?;
+                let desk_point = layout.home_desk(slot.desk_index.single_floor_local())?;
                 // Copy the fields off `ms` so the immutable `motion` borrow ends
                 // before `route_walking_pose` takes `&mut motion`.
                 let wander_dest = ms.wander_dest;

@@ -20,6 +20,7 @@ use std::time::SystemTime;
 use pixtuoid_core::sprite::blit::blit_frame;
 use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
+use pixtuoid_core::state::FloorLocalDeskIndex;
 use pixtuoid_core::AgentSlot;
 
 use super::effects::{
@@ -175,7 +176,7 @@ pub(super) fn pet_position(
     layout: &Layout,
     pack: &Pack,
     now: SystemTime,
-    idle_desk_indices: &[usize],
+    idle_desk_indices: &[FloorLocalDeskIndex],
     all_idle: bool,
     pet_seed: u64,
 ) -> Option<(Point, bool, &'static str, usize)> {
@@ -196,7 +197,7 @@ pub(super) fn pet_position(
                 x: desk.x + DESK_W + 1,
                 y: desk.y + DESK_H + 2,
             },
-            idle_desk_indices.contains(&i),
+            idle_desk_indices.contains(&FloorLocalDeskIndex(i)),
         ));
     }
     if let Some(wp) = layout

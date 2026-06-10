@@ -281,7 +281,7 @@ pub fn advance_wander(
                     // Resolve the stand cell off the agent's home desk (the
                     // origin must match core::idle_pose's `desk` so the
                     // stateless/stateful destinations stay in lockstep).
-                    let desk_pt = layout.home_desks.get(slot.desk_index).copied();
+                    let desk_pt = layout.home_desk(slot.desk_index.single_floor_local());
                     let origin = desk_pt.unwrap_or(Point { x: 0, y: 0 });
                     let (dest, dest_kind, wp_idx, seat) =
                         pick_wander_dest(id, ms.wander_cycle_n, layout, origin);
@@ -481,9 +481,7 @@ fn snapshot_back_profile(
     overlay: &OccupancyOverlay,
 ) -> WalkProfile {
     let desk = layout
-        .home_desks
-        .get(slot.desk_index)
-        .copied()
+        .home_desk(slot.desk_index.single_floor_local())
         .unwrap_or(ms.wander_dest);
     // Arrive via the desk approach cell (glide onto the chair), mirroring pose's
     // WalkingBack leg; add the chair-glide so the profile covers the full

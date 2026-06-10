@@ -16,7 +16,7 @@ use pixtuoid_core::layout::WALKING_Y_OFF;
 use pixtuoid_core::sprite::blit::blit_frame;
 use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
-use pixtuoid_core::state::ActivityState;
+use pixtuoid_core::state::{ActivityState, FloorLocalDeskIndex};
 use pixtuoid_core::walkable::OccupancyOverlay;
 use pixtuoid_core::{AgentSlot, SceneState};
 
@@ -477,9 +477,14 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
     // (before the ambient pass) and reused by the desk-cubicle screen glow
     // below — so the ceiling halo and the screen glow share one gate and one
     // pose derivation (no double A*).
-    let seated_agents: HashMap<usize, bool> = agents
+    let seated_agents: HashMap<FloorLocalDeskIndex, bool> = agents
         .iter()
-        .filter(|a| a.desk_index < ctx.layout.home_desks.len() && a.exiting_at.is_none())
+        .filter(|a| {
+            ctx.layout
+                .home_desk(a.desk_index.single_floor_local())
+                .is_some()
+                && a.exiting_at.is_none()
+        })
         .map(|a| {
             let p = pose::derive_with_routing(
                 a,
@@ -493,7 +498,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
                 },
             );
             let seated = matches!(p, Some(Pose::SeatedTyping { .. } | Pose::SeatedThinking));
-            (a.desk_index, seated)
+            (a.desk_index.single_floor_local(), seated)
         })
         .collect();
 
@@ -522,9 +527,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
                 // `desk` origin as every other stand_point caller.
                 let origin = ctx
                     .layout
-                    .home_desks
-                    .get(agent.desk_index)
-                    .copied()
+                    .home_desk(agent.desk_index.single_floor_local())
                     .unwrap_or(w.pos);
                 let stand = pixtuoid_core::layout::stand_point(
                     w.kind,
@@ -640,7 +643,7 @@ fn enqueue_characters<'a>(
         .and_then(|a| a.frames.first())
         .map_or(CHARACTER_SPRITE_W, |f| f.width);
     for agent in agents {
-        let Some(desk) = ctx.layout.home_desks.get(agent.desk_index).copied() else {
+        let Some(desk) = ctx.layout.home_desk(agent.desk_index.single_floor_local()) else {
             continue;
         };
         let Some(p) = pose::derive_with_routing(
@@ -971,10 +974,11 @@ fn enqueue_room_walls_h<'a>(layout: &'a Layout, drawables: &mut Vec<Drawable<'a>
 fn enqueue_desk_cubicles<'a>(
     ctx: &PixelCtx<'_>,
     agents: &[AgentSlot],
-    seated_agents: &HashMap<usize, bool>,
+    seated_agents: &HashMap<FloorLocalDeskIndex, bool>,
     drawables: &mut Vec<Drawable<'a>>,
 ) {
     for (i, &desk) in ctx.layout.home_desks.iter().enumerate() {
+        let local = FloorLocalDeskIndex(i);
         let Size {
             w: desk_fp_w,
             h: desk_fp_h,
@@ -988,9 +992,9 @@ fn enqueue_desk_cubicles<'a>(
             >= ctx.layout.cubicle_band.x + ctx.layout.cubicle_band.width;
         let occupant = agents
             .iter()
-            .find(|a| a.desk_index == i && a.exiting_at.is_none());
+            .find(|a| a.desk_index.single_floor_local() == local && a.exiting_at.is_none());
         let screen_glow = occupant
-            .filter(|_| seated_agents.get(&i).copied().unwrap_or(false))
+            .filter(|_| seated_agents.get(&local).copied().unwrap_or(false))
             .and_then(|a| palette::tool_glow_tint(a, &ctx.theme.tool_glow));
         let has_coffee = occupant.is_some_and(|a| ctx.coffee_holders.contains(&a.agent_id));
         let coffee_steam = has_coffee
@@ -1026,14 +1030,17 @@ fn enqueue_pet<'a>(
     drawables: &mut Vec<Drawable<'a>>,
 ) -> Option<PetFrame> {
     let kind = ctx.floor_pet.map(|p| p.kind)?;
-    let idle_desk_indices: Vec<usize> = agents
+    let idle_desk_indices: Vec<FloorLocalDeskIndex> = agents
         .iter()
         .filter(|a| {
             matches!(a.state, ActivityState::Idle)
-                && a.desk_index < ctx.layout.home_desks.len()
+                && ctx
+                    .layout
+                    .home_desk(a.desk_index.single_floor_local())
+                    .is_some()
                 && a.exiting_at.is_none()
         })
-        .map(|a| a.desk_index)
+        .map(|a| a.desk_index.single_floor_local())
         .collect();
     let all_idle = agents
         .iter()

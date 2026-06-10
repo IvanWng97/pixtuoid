@@ -5,7 +5,7 @@ use pixtuoid_core::source::{AgentEvent, Transport};
 use pixtuoid_core::state::reducer::{
     Reducer, ACTIVE_GRACE_WINDOW, B1_CASCADE_GRACE, HOOK_WINS_WINDOW,
 };
-use pixtuoid_core::state::{ActivityState, SceneState};
+use pixtuoid_core::state::{ActivityState, GlobalDeskIndex, SceneState};
 use pixtuoid_core::AgentId;
 
 fn start(reducer: &mut Reducer, scene: &mut SceneState, id: AgentId) {
@@ -93,7 +93,7 @@ fn session_start_creates_idle_slot_at_first_free_desk() {
     );
 
     let slot = scene.agents.get(&id).expect("agent inserted");
-    assert_eq!(slot.desk_index, 0);
+    assert_eq!(slot.desk_index, GlobalDeskIndex(0));
     assert_eq!(
         &*slot.label, "cc·repo",
         "label = source prefix + cwd basename"
@@ -288,7 +288,7 @@ fn session_end_marks_slot_exiting_then_tick_removes_it_after_grace() {
         !scene.agents.contains_key(&a),
         "tick should sweep expired exit"
     );
-    assert_eq!(scene.next_free_desk(), Some(0));
+    assert_eq!(scene.next_free_desk(), Some(GlobalDeskIndex(0)));
 }
 
 #[test]
@@ -3049,14 +3049,14 @@ fn session_start_overflows_to_floor1_with_heterogeneous_capacity() {
         );
     }
     assert_eq!(scene.agents.len(), 3);
-    let desks: Vec<usize> = scene.agents.values().map(|a| a.desk_index).collect();
+    let desks: Vec<usize> = scene.agents.values().map(|a| a.desk_index.0).collect();
     assert!(desks.contains(&0));
     assert!(desks.contains(&1));
     assert!(
         desks.contains(&2),
         "third agent should get desk 2 (floor 1)"
     );
-    assert_eq!(scene.floor_of(2), 1);
+    assert_eq!(scene.floor_of(GlobalDeskIndex(2)), 1);
 }
 
 #[test]

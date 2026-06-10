@@ -116,7 +116,7 @@ fn summarize(scene: &SceneState) -> String {
                     format!("waiting({})", sanitize_line(reason))
                 }
             };
-            format!("{}@{}:{}", sanitize_line(&a.label), a.desk_index, state)
+            format!("{}@{}:{}", sanitize_line(&a.label), a.desk_index.0, state)
         })
         .collect();
     format!("agents=[{}]", agents.join(", "))

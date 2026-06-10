@@ -8,6 +8,7 @@
 use std::time::{Duration, SystemTime};
 
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
+use pixtuoid_core::state::FloorLocalDeskIndex;
 
 use crate::tui::layout::Layout;
 use crate::tui::pixel_painter::background::{
@@ -85,7 +86,7 @@ pub(super) fn dust_mote_positions(
 
 pub(super) fn paint_ambient(
     ctx: &mut PixelCtx<'_>,
-    seated_agents: &std::collections::HashMap<usize, bool>,
+    seated_agents: &std::collections::HashMap<FloorLocalDeskIndex, bool>,
 ) {
     paint_sun_spot(ctx.buf, ctx.theme, ctx.layout, ctx.now);
     paint_dust_motes(
@@ -140,7 +141,7 @@ pub(super) fn paint_ceiling_halos(buf: &mut RgbBuffer, theme: &Theme, halos: &[C
 /// rather than on the monitor frame itself.
 fn collect_ceiling_halos(
     ctx: &PixelCtx<'_>,
-    seated_agents: &std::collections::HashMap<usize, bool>,
+    seated_agents: &std::collections::HashMap<FloorLocalDeskIndex, bool>,
 ) -> Vec<CeilingHalo> {
     use pixtuoid_core::state::ActivityState;
     let mut halos = Vec::new();
@@ -164,13 +165,13 @@ fn collect_ceiling_halos(
         // mid-walk (entry / snap-back) during the Active grace window. Mirrors
         // the desk-cubicle screen-glow gate so the two never disagree.
         if !seated_agents
-            .get(&agent.desk_index)
+            .get(&agent.desk_index.single_floor_local())
             .copied()
             .unwrap_or(false)
         {
             continue;
         }
-        let Some(desk) = ctx.layout.home_desks.get(agent.desk_index) else {
+        let Some(desk) = ctx.layout.home_desk(agent.desk_index.single_floor_local()) else {
             continue;
         };
         // `tool_glow_tint` only returns None for a non-Active state, but the

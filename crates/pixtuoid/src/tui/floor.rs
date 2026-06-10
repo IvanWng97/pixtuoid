@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
 
 use pixtuoid_core::physics::{walk_arrived, WalkProfile};
-use pixtuoid_core::state::{AgentSlot, SceneState};
+use pixtuoid_core::state::{AgentSlot, GlobalDeskIndex, SceneState};
 use pixtuoid_core::walkable::OccupancyOverlay;
 use pixtuoid_core::AgentId;
 
@@ -261,6 +261,15 @@ pub fn num_floors(scene: &SceneState) -> usize {
 /// into the `[0..capacity)` range so the layout engine sees a
 /// self-contained floor. Uses the stored `floor_idx` on each slot so
 /// capacity growth never migrates agents between floors.
+///
+/// The remap is a RE-PROJECTION, not a space mix-up: the projected slots
+/// live in a `uniform(cap)` single-floor scene (`project_floor_scene`)
+/// whose own global desk space coincides with its floor-0 local space by
+/// construction (`floor_of(g) == 0`, `floor_local_desk(g).0 == g.0` —
+/// pinned by `build_floor_scene_remap_is_local_global_coincident` below).
+/// So the remapped value is a genuinely valid `GlobalDeskIndex` FOR THAT
+/// SMALLER SCENE, and the render path's
+/// `GlobalDeskIndex::single_floor_local` identity reads stay honest.
 pub fn build_floor_scene(scene: &SceneState, floor_idx: usize) -> Vec<AgentSlot> {
     let offset = scene.floor_range(floor_idx).start;
     scene
@@ -268,11 +277,11 @@ pub fn build_floor_scene(scene: &SceneState, floor_idx: usize) -> Vec<AgentSlot>
         .values()
         .filter(|a| a.floor_idx == floor_idx)
         .filter_map(|a| {
-            if a.desk_index < offset {
+            if a.desk_index.0 < offset {
                 return None;
             }
             let mut slot = a.clone();
-            slot.desk_index = a.desk_index - offset;
+            slot.desk_index = GlobalDeskIndex(a.desk_index.0 - offset);
             Some(slot)
         })
         .collect()
@@ -294,7 +303,7 @@ pub fn project_floor_scene(scene: &SceneState, floor_idx: usize) -> SceneState {
 mod tests {
     use super::*;
     use pixtuoid_core::id::AgentId;
-    use pixtuoid_core::state::ActivityState;
+    use pixtuoid_core::state::{ActivityState, FloorLocalDeskIndex};
     use std::path::Path;
     use std::sync::Arc;
     use std::time::Duration;
@@ -370,7 +379,7 @@ mod tests {
         let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
         for i in 0..n {
             let id = AgentId::from_transcript_path(&format!("/p/{i}.jsonl"));
-            let floor_idx = s.floor_of(i);
+            let floor_idx = s.floor_of(GlobalDeskIndex(i));
             s.agents.insert(
                 id,
                 AgentSlot {
@@ -386,7 +395,7 @@ mod tests {
                     exiting_at: None,
                     pending_idle_at: None,
 
-                    desk_index: i,
+                    desk_index: GlobalDeskIndex(i),
                     floor_idx,
                     tool_call_count: 0,
                     active_ms: 0,
@@ -401,20 +410,20 @@ mod tests {
     #[test]
     fn floor_of_maps_desk_to_floor() {
         let s = SceneState::uniform(16);
-        assert_eq!(s.floor_of(0), 0);
-        assert_eq!(s.floor_of(15), 0);
-        assert_eq!(s.floor_of(16), 1);
-        assert_eq!(s.floor_of(31), 1);
-        assert_eq!(s.floor_of(32), 2);
+        assert_eq!(s.floor_of(GlobalDeskIndex(0)), 0);
+        assert_eq!(s.floor_of(GlobalDeskIndex(15)), 0);
+        assert_eq!(s.floor_of(GlobalDeskIndex(16)), 1);
+        assert_eq!(s.floor_of(GlobalDeskIndex(31)), 1);
+        assert_eq!(s.floor_of(GlobalDeskIndex(32)), 2);
     }
 
     #[test]
     fn floor_local_desk_remaps_to_floor_range() {
         let s = SceneState::uniform(16);
-        assert_eq!(s.floor_local_desk(0), 0);
-        assert_eq!(s.floor_local_desk(16), 0);
-        assert_eq!(s.floor_local_desk(17), 1);
-        assert_eq!(s.floor_local_desk(31), 15);
+        assert_eq!(s.floor_local_desk(GlobalDeskIndex(0)), FloorLocalDeskIndex(0));
+        assert_eq!(s.floor_local_desk(GlobalDeskIndex(16)), FloorLocalDeskIndex(0));
+        assert_eq!(s.floor_local_desk(GlobalDeskIndex(17)), FloorLocalDeskIndex(1));
+        assert_eq!(s.floor_local_desk(GlobalDeskIndex(31)), FloorLocalDeskIndex(15));
     }
 
     #[test]
@@ -443,17 +452,44 @@ mod tests {
         assert_eq!(floor0.len(), 16);
         for a in &floor0 {
             assert!(
-                a.desk_index < 16,
+                a.desk_index.0 < 16,
                 "desk_index {} out of range",
-                a.desk_index
+                a.desk_index.0
             );
         }
 
         let floor1 = build_floor_scene(&scene, 1);
         assert_eq!(floor1.len(), 4);
-        let mut indices: Vec<usize> = floor1.iter().map(|a| a.desk_index).collect();
+        let mut indices: Vec<usize> = floor1.iter().map(|a| a.desk_index.0).collect();
         indices.sort();
         assert_eq!(indices, vec![0, 1, 2, 3]);
+    }
+
+    #[test]
+    fn build_floor_scene_remap_is_local_global_coincident() {
+        // The doc-comment-backed property on `build_floor_scene`: within a
+        // projected `uniform(cap)` scene the global desk space coincides with
+        // its (only) floor's local space, so the remapped `GlobalDeskIndex`
+        // is simultaneously a valid global index for the smaller scene AND —
+        // through the typed bridge — the floor-local index the render path
+        // needs. This is what makes `single_floor_local` an identity there.
+        let scene = make_scene(20, 16);
+        for floor_idx in 0..num_floors(&scene) {
+            let projected = project_floor_scene(&scene, floor_idx);
+            for slot in projected.agents.values() {
+                assert_eq!(projected.floor_of(slot.desk_index), 0);
+                assert_eq!(
+                    projected.floor_local_desk(slot.desk_index).0,
+                    slot.desk_index.0,
+                    "projected scene: bridge must be the identity"
+                );
+                assert_eq!(
+                    projected.floor_local_desk(slot.desk_index),
+                    slot.desk_index.single_floor_local(),
+                    "typed bridge and identity cast must agree in a projection"
+                );
+            }
+        }
     }
 
     #[test]
@@ -478,7 +514,7 @@ mod tests {
                 last_event_at: now,
                 exiting_at: None,
                 pending_idle_at: None,
-                desk_index: 5,
+                desk_index: GlobalDeskIndex(5),
                 floor_idx: 1,
                 tool_call_count: 0,
                 active_ms: 0,
@@ -502,7 +538,7 @@ mod tests {
         let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
         for i in 0..6 {
             let id = AgentId::from_transcript_path(&format!("/p/{i}.jsonl"));
-            let floor_idx = s.floor_of(i);
+            let floor_idx = s.floor_of(GlobalDeskIndex(i));
             s.agents.insert(
                 id,
                 AgentSlot {
@@ -517,7 +553,7 @@ mod tests {
                     last_event_at: now,
                     exiting_at: None,
                     pending_idle_at: None,
-                    desk_index: i,
+                    desk_index: GlobalDeskIndex(i),
                     floor_idx,
                     tool_call_count: 0,
                     active_ms: 0,
