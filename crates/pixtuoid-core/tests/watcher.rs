@@ -1464,3 +1464,387 @@ async fn watcher_links_subagent_across_project_dirs() {
     );
     handle.abort();
 }
+
+// ── Mid-attach scenario suite ────────────────────────────────────────────────
+// The acceptance criterion: opening pixtuoid at ANY moment must show all
+// active running agent CLIs correctly. These drive JsonlWatcher::run over a
+// pre-populated projects-root — the attach moment — and assert the emitted
+// live set, exercising the first-sight gate, the liveness-probe bypass, the
+// ended check, and the subagent parent link TOGETHER.
+
+/// Write a complete transcript (each line + trailing newline) in one shot, so
+/// the watcher's first sight always reads the full fixture content.
+async fn write_lines(path: &std::path::Path, lines: &[serde_json::Value]) {
+    let mut content = String::new();
+    for l in lines {
+        content.push_str(&l.to_string());
+        content.push('\n');
+    }
+    tokio::fs::write(path, content).await.unwrap();
+}
+
+fn backdate(path: &std::path::Path, secs: u64) {
+    set_file_mtime(
+        path,
+        FileTime::from_system_time(SystemTime::now() - Duration::from_secs(secs)),
+    )
+    .unwrap();
+}
+
+fn cc_session_start_line(uuid: &str, cwd: &str) -> serde_json::Value {
+    serde_json::json!({
+        "type": "system",
+        "subtype": "session_start",
+        "sessionId": uuid,
+        "cwd": cwd
+    })
+}
+
+fn cc_tool_use_line(
+    uuid: &str,
+    cwd: &str,
+    tool_use_id: &str,
+    name: &str,
+    input: serde_json::Value,
+) -> serde_json::Value {
+    serde_json::json!({
+        "type": "assistant",
+        "sessionId": uuid,
+        "cwd": cwd,
+        "message": {
+            "role": "assistant",
+            "content": [
+                { "type": "tool_use", "id": tool_use_id, "name": name, "input": input }
+            ]
+        }
+    })
+}
+
+fn cc_subagent_line(stem: &str, cwd: &str, tool_use_id: &str) -> serde_json::Value {
+    serde_json::json!({
+        "type": "assistant",
+        "sessionId": stem,
+        "cwd": cwd,
+        "attributionAgent": "feature-dev:code-explorer",
+        "message": {
+            "role": "assistant",
+            "content": [
+                { "type": "tool_use", "id": tool_use_id, "name": "Read",
+                  "input": { "file_path": "/x" } }
+            ]
+        }
+    })
+}
+
+/// S2 + S6 — THE acceptance test for "attach shows exactly the live set".
+/// ONE watcher run over a projects-root holding, side by side:
+///   (a) a recent live transcript                 → registers (fresh mtime)
+///   (b) a stale transcript the probe vouches for → registers (probe bypass)
+///   (c) a stale transcript NOT in the probe      → stays hidden
+///   (d) a recent transcript ending in a structural session_end → stays hidden
+///   (e) a fresh subagent transcript under (b)    → registers, linked to (b)
+/// Exactly {a, b, e} emit SessionStart — and each exactly ONCE across the
+/// initial seed, the 250ms rescan, and the poll cycles (S6: emit_first_sight
+/// idempotence at the suite level — re-scans must not duplicate registrations).
+#[tokio::test]
+async fn attach_matrix_registers_exactly_the_live_set() {
+    let dir = TempDir::new().unwrap();
+    let projects_root = dir.path().to_path_buf();
+    let proj = projects_root.join("-Users-me-mixed");
+    let live_a = "aa000000-0000-7000-8000-00000000000a";
+    let idle_b = "bb000000-0000-7000-8000-00000000000b";
+    let dead_c = "cc000000-0000-7000-8000-00000000000c";
+    let ended_d = "dd000000-0000-7000-8000-00000000000d";
+    let sub_dir = proj.join(idle_b).join("subagents");
+    tokio::fs::create_dir_all(&sub_dir).await.unwrap();
+
+    // (a) recent live: fresh mtime, no end marker.
+    write_lines(
+        &proj.join(format!("{live_a}.jsonl")),
+        &[
+            cc_session_start_line(live_a, "/Users/me/proj-a"),
+            cc_tool_use_line(
+                live_a,
+                "/Users/me/proj-a",
+                "tu_a",
+                "Bash",
+                serde_json::json!({"command": "ls"}),
+            ),
+        ],
+    )
+    .await;
+    // (b) long-idle but probe-live: stale mtime, in the probe's live set.
+    let b_path = proj.join(format!("{idle_b}.jsonl"));
+    write_lines(
+        &b_path,
+        &[cc_session_start_line(idle_b, "/Users/me/proj-b")],
+    )
+    .await;
+    backdate(&b_path, 7200);
+    // (c) genuinely dead: stale mtime, NOT in the probe.
+    let c_path = proj.join(format!("{dead_c}.jsonl"));
+    write_lines(
+        &c_path,
+        &[cc_session_start_line(dead_c, "/Users/me/proj-c")],
+    )
+    .await;
+    backdate(&c_path, 7200);
+    // (d) recent but ENDED: fresh mtime, structural session_end at the tail.
+    write_lines(
+        &proj.join(format!("{ended_d}.jsonl")),
+        &[
+            cc_session_start_line(ended_d, "/Users/me/proj-d"),
+            serde_json::json!({
+                "type": "system", "subtype": "session_end", "sessionId": ended_d
+            }),
+        ],
+    )
+    .await;
+    // (e) fresh subagent under the probe-live parent (b).
+    write_lines(
+        &sub_dir.join("agent-e1.jsonl"),
+        &[cc_subagent_line("agent-e1", "/Users/me/proj-b", "tu_e")],
+    )
+    .await;
+
+    let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(64);
+    let watcher = cc_watcher(projects_root.clone())
+        .with_initial_window(Duration::from_secs(60))
+        .with_liveness_probe(std::sync::Arc::new(move || {
+            std::iter::once(idle_b.to_string()).collect()
+        }));
+    let handle = tokio::spawn(async move { watcher.run(tx).await });
+
+    let id_a = AgentId::from_parts("claude-code", live_a);
+    let id_b = AgentId::from_parts("claude-code", idle_b);
+    let id_e = AgentId::from_parts("claude-code", "agent-e1");
+
+    let mut starts: std::collections::HashMap<AgentId, usize> = Default::default();
+    let mut sub_parent: Option<Option<AgentId>> = None;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    while tokio::time::Instant::now() < deadline {
+        if let Ok(Some((
+            _,
+            AgentEvent::SessionStart {
+                agent_id,
+                parent_id,
+                ..
+            },
+        ))) = tokio::time::timeout(Duration::from_millis(100), rx.recv()).await
+        {
+            *starts.entry(agent_id).or_default() += 1;
+            if agent_id == id_e {
+                sub_parent = Some(parent_id);
+            }
+        }
+        if starts.contains_key(&id_a) && starts.contains_key(&id_b) && starts.contains_key(&id_e) {
+            break;
+        }
+    }
+    // S6: settle past the 250ms post-startup rescan (plus several poll
+    // cycles), then drain — re-scans of the SAME root must not re-emit
+    // SessionStart for any fixture.
+    tokio::time::sleep(Duration::from_millis(700)).await;
+    while let Ok(Some((_, ev))) = tokio::time::timeout(Duration::from_millis(50), rx.recv()).await {
+        if let AgentEvent::SessionStart {
+            agent_id,
+            parent_id,
+            ..
+        } = ev
+        {
+            *starts.entry(agent_id).or_default() += 1;
+            if agent_id == id_e {
+                sub_parent = Some(parent_id);
+            }
+        }
+    }
+
+    let expected: std::collections::HashMap<AgentId, usize> =
+        [(id_a, 1), (id_b, 1), (id_e, 1)].into_iter().collect();
+    assert_eq!(
+        starts, expected,
+        "attach must register EXACTLY the live set, once each — a (recent), b (probe-live), e (fresh subagent); c (stale dead) and d (ended) stay hidden"
+    );
+    assert_eq!(
+        sub_parent.expect("the subagent's SessionStart was seen"),
+        Some(id_b),
+        "the fresh subagent must attach linked to its probe-live parent"
+    );
+    handle.abort();
+}
+
+/// S3 — the delegating-parent attach: the parent transcript is STALE (it has
+/// been silently waiting on its subagent for longer than the window), its tail
+/// is a pending Agent dispatch (tool_use with no tool_result), and its UUID is
+/// in the probe's live set; the subagent transcript is fresh. One attach scan
+/// must register BOTH, link the subagent to the parent, and replay the pending
+/// dispatch as a Task ActivityStart (so the reducer's active_tasks suppression
+/// picks the in-flight delegation back up).
+#[tokio::test]
+async fn delegating_parent_attach_registers_parent_and_links_subagent() {
+    let dir = TempDir::new().unwrap();
+    let projects_root = dir.path().to_path_buf();
+    let proj = projects_root.join("-Users-me-deleg");
+    let parent_uuid = "ee000000-0000-7000-8000-00000000000e";
+    let sub_dir = proj.join(parent_uuid).join("subagents");
+    tokio::fs::create_dir_all(&sub_dir).await.unwrap();
+
+    let parent_path = proj.join(format!("{parent_uuid}.jsonl"));
+    write_lines(
+        &parent_path,
+        &[
+            cc_session_start_line(parent_uuid, "/Users/me/deleg"),
+            cc_tool_use_line(
+                parent_uuid,
+                "/Users/me/deleg",
+                "tu_task",
+                "Agent",
+                serde_json::json!({
+                    "description": "explore", "subagent_type": "code-explorer", "prompt": "go"
+                }),
+            ),
+        ],
+    )
+    .await;
+    backdate(&parent_path, 7200);
+    write_lines(
+        &sub_dir.join("agent-x1.jsonl"),
+        &[cc_subagent_line("agent-x1", "/Users/me/deleg", "tu_x")],
+    )
+    .await;
+
+    let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(64);
+    let watcher = cc_watcher(projects_root.clone())
+        .with_initial_window(Duration::from_secs(60))
+        .with_liveness_probe(std::sync::Arc::new(move || {
+            std::iter::once(parent_uuid.to_string()).collect()
+        }));
+    let handle = tokio::spawn(async move { watcher.run(tx).await });
+
+    let expected_parent = AgentId::from_parts("claude-code", parent_uuid);
+    let mut parent_started = false;
+    let mut sub_parent_id: Option<AgentId> = None;
+    let mut dispatch_is_task: Option<bool> = None;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    while tokio::time::Instant::now() < deadline {
+        match tokio::time::timeout(Duration::from_millis(100), rx.recv()).await {
+            Ok(Some((
+                _,
+                AgentEvent::SessionStart {
+                    agent_id,
+                    parent_id,
+                    ..
+                },
+            ))) => match parent_id {
+                Some(pid) => sub_parent_id = Some(pid),
+                None => parent_started |= agent_id == expected_parent,
+            },
+            Ok(Some((
+                _,
+                AgentEvent::ActivityStart {
+                    agent_id,
+                    tool_use_id,
+                    detail,
+                },
+            ))) if agent_id == expected_parent && tool_use_id.as_deref() == Some("tu_task") => {
+                dispatch_is_task = Some(detail.as_ref().is_some_and(|d| d.is_task()));
+            }
+            _ => {}
+        }
+        if parent_started && sub_parent_id.is_some() && dispatch_is_task.is_some() {
+            break;
+        }
+    }
+    assert!(
+        parent_started,
+        "the stale probe-live delegating parent must register at attach"
+    );
+    assert_eq!(
+        sub_parent_id,
+        Some(expected_parent),
+        "the subagent must attach linked to the parent, not as an orphan"
+    );
+    assert_eq!(
+        dispatch_is_task,
+        Some(true),
+        "the replayed pending Agent dispatch must decode as a Task ActivityStart"
+    );
+    handle.abort();
+}
+
+/// S4 — the #203 identity property pinned for the ATTACH path: a worktree
+/// cwd-split puts the parent transcript and the subagent transcript under
+/// DIFFERENT project dirs. At attach time the parent is stale-but-probe-live
+/// and the subagent is fresh; both must register, and the `<parent-uuid>`
+/// join must hold across the project dirs.
+#[tokio::test]
+async fn cwd_split_attach_links_subagent_to_probe_live_stale_parent() {
+    let dir = TempDir::new().unwrap();
+    let projects_root = dir.path().to_path_buf();
+    let parent_uuid = "ff000000-0000-7000-8000-00000000000f";
+
+    let proj_a = projects_root.join("-Users-me-wt-main");
+    tokio::fs::create_dir_all(&proj_a).await.unwrap();
+    let parent_path = proj_a.join(format!("{parent_uuid}.jsonl"));
+    write_lines(
+        &parent_path,
+        &[cc_session_start_line(parent_uuid, "/Users/me/wt-main")],
+    )
+    .await;
+    backdate(&parent_path, 7200);
+
+    let sub_dir = projects_root
+        .join("-Users-me-wt-feature")
+        .join(parent_uuid)
+        .join("subagents");
+    tokio::fs::create_dir_all(&sub_dir).await.unwrap();
+    write_lines(
+        &sub_dir.join("agent-w1.jsonl"),
+        &[cc_subagent_line("agent-w1", "/Users/me/wt-feature", "tu_w")],
+    )
+    .await;
+
+    let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(64);
+    let watcher = cc_watcher(projects_root.clone())
+        .with_initial_window(Duration::from_secs(60))
+        .with_liveness_probe(std::sync::Arc::new(move || {
+            std::iter::once(parent_uuid.to_string()).collect()
+        }));
+    let handle = tokio::spawn(async move { watcher.run(tx).await });
+
+    let mut parent_agent_id: Option<AgentId> = None;
+    let mut sub_parent_id: Option<AgentId> = None;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    while tokio::time::Instant::now() < deadline {
+        if let Ok(Some((
+            _,
+            AgentEvent::SessionStart {
+                agent_id,
+                parent_id,
+                ..
+            },
+        ))) = tokio::time::timeout(Duration::from_millis(100), rx.recv()).await
+        {
+            match parent_id {
+                Some(pid) => sub_parent_id = Some(pid),
+                None => parent_agent_id = Some(agent_id),
+            }
+        }
+        if parent_agent_id.is_some() && sub_parent_id.is_some() {
+            break;
+        }
+    }
+    let parent_agent_id =
+        parent_agent_id.expect("the stale probe-live parent must register at attach");
+    let sub_parent_id = sub_parent_id.expect("the fresh subagent must register at attach");
+    assert_eq!(
+        parent_agent_id,
+        AgentId::from_parts("claude-code", parent_uuid),
+        "the parent registers on its session UUID"
+    );
+    assert_eq!(
+        sub_parent_id, parent_agent_id,
+        "the UUID join must link the subagent to the parent across project dirs (a worktree cwd-split) on the attach path"
+    );
+    handle.abort();
+}

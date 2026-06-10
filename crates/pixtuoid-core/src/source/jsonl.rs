@@ -1293,6 +1293,56 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn gated_file_revives_on_small_append_with_tail_cwd() {
+        // S1 (the audit's never-pinned plain case): a file GATED at first sight
+        // (stale mtime → cursor seeded at EOF, no SessionStart) then revived by
+        // a SMALL newline-terminated append must register — SessionStart +
+        // Rename — and the registration carries the APPEND's cwd (the tail
+        // read wins; the head read is only the G4 fallback when the tail
+        // carries none, pinned by the head-vs-tail value split below).
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("gated-small.jsonl");
+        let head = "{\"type\":\"assistant\",\"cwd\":\"/repo/head\"}\n";
+        let (cursors, seen) = gated_fixture(&path, head).await;
+
+        let mut f = tokio::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .await
+            .unwrap();
+        tokio::io::AsyncWriteExt::write_all(
+            &mut f,
+            b"{\"type\":\"assistant\",\"cwd\":\"/repo/tail\"}\n",
+        )
+        .await
+        .unwrap();
+        tokio::io::AsyncWriteExt::flush(&mut f).await.unwrap();
+        drop(f);
+
+        let events = walk_once(&path, Duration::from_secs(60), t_ended, &cursors, &seen).await;
+        let expected = AgentId::from_parts("test", &default_id_from_path(&path));
+        let starts: Vec<(AgentId, PathBuf)> = events
+            .iter()
+            .filter_map(|(_, e)| match e {
+                AgentEvent::SessionStart { agent_id, cwd, .. } => Some((*agent_id, cwd.clone())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            starts,
+            vec![(expected, PathBuf::from("/repo/tail"))],
+            "the small-append revive must register exactly once, carrying the APPEND's cwd, got {events:?}"
+        );
+        assert!(
+            events.iter().any(|(_, e)| matches!(
+                e,
+                AgentEvent::Rename { agent_id, .. } if *agent_id == expected
+            )),
+            "the revive must emit the Rename half of the registration pair, got {events:?}"
+        );
+    }
+
+    #[tokio::test]
     async fn walk_jsonl_emits_for_a_first_sight_recent_live_file() {
         // The gate must NOT over-suppress: a recent, not-ended file seen first by
         // any path is a live session and must still get its SessionStart.
