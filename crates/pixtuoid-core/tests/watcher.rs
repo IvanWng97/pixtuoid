@@ -1885,6 +1885,153 @@ async fn delegating_parent_attach_registers_parent_and_links_subagent() {
     handle.abort();
 }
 
+/// #222 — the oversized delegating-parent attach: like S3, but the parent
+/// transcript has > MAX_PENDING_BYTES pending at attach, so the backlog is
+/// skipped to EOF instead of replayed. The in-flight Agent dispatch sits in
+/// the last 256 KiB (TASK_SCAN_BYTES) with no tool_result — the tail scan
+/// must re-emit it as a Task ActivityStart, EXACTLY ONCE across the initial
+/// seed + rescan + poll cycles, while the completed Bash backlog stays
+/// un-replayed. The parent registers via the bounded head read (#204) and the
+/// fresh subagent links to it.
+#[tokio::test]
+async fn oversized_delegating_parent_attach_replays_pending_dispatch() {
+    let dir = TempDir::new().unwrap();
+    let projects_root = dir.path().to_path_buf();
+    let proj = projects_root.join("-Users-me-bigdeleg");
+    let parent_uuid = "ab000000-0000-7000-8000-0000000000ab";
+    let sub_dir = proj.join(parent_uuid).join("subagents");
+    tokio::fs::create_dir_all(&sub_dir).await.unwrap();
+
+    // Parent: head session_start (cwd on line 1), > 1 MiB of completed-tool
+    // backlog, then the pending Agent dispatch at the tail.
+    let parent_path = proj.join(format!("{parent_uuid}.jsonl"));
+    let mut contents = format!(
+        "{}\n",
+        cc_session_start_line(parent_uuid, "/Users/me/bigdeleg")
+    );
+    let backlog_line = format!(
+        "{}\n",
+        cc_tool_use_line(
+            parent_uuid,
+            "/Users/me/bigdeleg",
+            "tu_backlog",
+            "Bash",
+            serde_json::json!({"command": "ls"}),
+        )
+    );
+    while contents.len() <= (1usize << 20) + 4096 {
+        contents.push_str(&backlog_line);
+    }
+    contents.push_str(&format!(
+        "{}\n",
+        cc_tool_use_line(
+            parent_uuid,
+            "/Users/me/bigdeleg",
+            "tu_task",
+            "Agent",
+            serde_json::json!({
+                "description": "explore", "subagent_type": "code-explorer", "prompt": "go"
+            }),
+        )
+    ));
+    tokio::fs::write(&parent_path, contents.as_bytes())
+        .await
+        .unwrap();
+    write_lines(
+        &sub_dir.join("agent-b1.jsonl"),
+        &[cc_subagent_line("agent-b1", "/Users/me/bigdeleg", "tu_s")],
+    )
+    .await;
+
+    let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(256);
+    let watcher = cc_watcher(projects_root.clone());
+    let handle = tokio::spawn(async move { watcher.run(tx).await });
+
+    let expected_parent = AgentId::from_parts("claude-code", parent_uuid);
+    let is_parent_start = |e: &AgentEvent| {
+        matches!(e, AgentEvent::SessionStart { agent_id, parent_id: None, .. }
+            if *agent_id == expected_parent)
+    };
+    let is_sub_start = |e: &AgentEvent| {
+        matches!(
+            e,
+            AgentEvent::SessionStart {
+                parent_id: Some(_),
+                ..
+            }
+        )
+    };
+    let is_task_start = |e: &AgentEvent| {
+        matches!(e, AgentEvent::ActivityStart { agent_id, tool_use_id, detail }
+            if *agent_id == expected_parent
+                && tool_use_id.as_deref() == Some("tu_task")
+                && detail.as_ref().is_some_and(|d| d.is_task()))
+    };
+
+    let mut events: Vec<(Transport, AgentEvent)> = Vec::new();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    while tokio::time::Instant::now() < deadline {
+        if let Ok(Some(pair)) = tokio::time::timeout(Duration::from_millis(100), rx.recv()).await {
+            events.push(pair);
+        }
+        if events.iter().any(|(_, e)| is_parent_start(e))
+            && events.iter().any(|(_, e)| is_sub_start(e))
+            && events.iter().any(|(_, e)| is_task_start(e))
+        {
+            break;
+        }
+    }
+    // Settle past the 250ms rescan + several poll cycles, then drain: the
+    // scan runs only on the oversized-skip pass, so re-scans (cursor parked
+    // at EOF) must not re-emit the dispatch.
+    tokio::time::sleep(Duration::from_millis(700)).await;
+    while let Ok(Some(pair)) = tokio::time::timeout(Duration::from_millis(50), rx.recv()).await {
+        events.push(pair);
+    }
+
+    assert!(
+        events.iter().any(|(_, e)| is_parent_start(e)),
+        "the oversized delegating parent must register at attach (#204 head read), got {events:?}"
+    );
+    let sub_parents: Vec<Option<AgentId>> = events
+        .iter()
+        .filter_map(|(_, e)| match e {
+            AgentEvent::SessionStart {
+                parent_id: Some(pid),
+                ..
+            } => Some(Some(*pid)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        sub_parents,
+        vec![Some(expected_parent)],
+        "the fresh subagent must attach linked to the parent, exactly once"
+    );
+    let task_starts: Vec<Transport> = events
+        .iter()
+        .filter(|(_, e)| is_task_start(e))
+        .map(|(t, _)| *t)
+        .collect();
+    assert_eq!(
+        task_starts,
+        vec![Transport::Jsonl],
+        "the in-flight dispatch must be re-emitted exactly once, Jsonl-tagged (it passes the hook-wins dedup at mid-attach)"
+    );
+    let backlog_replays = events
+        .iter()
+        .filter(|(_, e)| {
+            matches!(e, AgentEvent::ActivityStart { tool_use_id, .. }
+                if tool_use_id.as_deref() == Some("tu_backlog"))
+        })
+        .count();
+    assert_eq!(
+        backlog_replays, 0,
+        "the completed Bash backlog must not be replayed — this is a Task-seeding scan, not a replay"
+    );
+    handle.abort();
+}
+
 /// S4 — the #203 identity property pinned for the ATTACH path: a worktree
 /// cwd-split puts the parent transcript and the subagent transcript under
 /// DIFFERENT project dirs. At attach time the parent is stale-but-probe-live

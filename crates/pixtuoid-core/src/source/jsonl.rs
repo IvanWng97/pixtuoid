@@ -512,6 +512,19 @@ async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &WatchCtx<'_>) {
             let head_cwd = read_head_cwd(path, MAX_PENDING_BYTES).await;
             emit_first_sight(path, source, decoders, seen, tx, head_cwd).await;
         }
+        // #222: the skipped span may bury an IN-FLIGHT Agent/Task dispatch —
+        // tail-scan the last TASK_SCAN_BYTES for unmatched Task starts and
+        // re-emit exactly those, restoring subagent-leak suppression + b1
+        // (see scan_pending_tasks for the full WHY). Only when the session is
+        // NOT ended (a terminator was just forwarded — seeding a Task after
+        // it would animate a ghost delegation) AND the file is registered
+        // after the decision above (no slot → JSONL events for an unknown id
+        // are reducer no-ops; skip the wasted 256 KiB decode). Runs AFTER
+        // emit_first_sight so the registration precedes the synthesized
+        // starts on the channel.
+        if !ended_in_skip && seen.lock().await.contains_key(path) {
+            scan_pending_tasks(path, file_len, decoders, ctx).await;
+        }
         return;
     }
 
@@ -687,31 +700,142 @@ async fn read_head_cwd(path: &Path, limit: u64) -> Option<PathBuf> {
     extract_cwd(&head)
 }
 
+/// Read at most `bytes` from the END of a file (clamped to file size).
+/// `None` on any I/O error — callers treat that as "nothing to scan" (log +
+/// continue, never panic). Shared by `check_session_ended` (8 KiB ended-marker
+/// scan) and `scan_pending_tasks` (the #222 Task scan) so the two bounded
+/// tail reads can't drift apart.
+async fn read_tail(path: &Path, bytes: u64) -> Option<Vec<u8>> {
+    let meta = tokio::fs::metadata(path).await.ok()?;
+    let file_len = meta.len();
+    let mut file = tokio::fs::File::open(path).await.ok()?;
+    let start = file_len.saturating_sub(bytes);
+    file.seek(SeekFrom::Start(start)).await.ok()?;
+    let mut buf = Vec::with_capacity(bytes.min(file_len) as usize);
+    file.read_to_end(&mut buf).await.ok()?;
+    Some(buf)
+}
+
 /// Read the tail of a file and delegate to the source-specific checker.
 async fn check_session_ended(path: &Path, checker: SessionEndChecker) -> bool {
     const TAIL_BYTES: u64 = 8192;
-    let Ok(meta) = tokio::fs::metadata(path).await else {
-        return false;
-    };
-    let file_len = meta.len();
-    let Ok(mut file) = tokio::fs::File::open(path).await else {
-        return false;
-    };
-    let start = file_len.saturating_sub(TAIL_BYTES);
-    if tokio::io::AsyncSeekExt::seek(&mut file, SeekFrom::Start(start))
-        .await
-        .is_err()
-    {
-        return false;
+    match read_tail(path, TAIL_BYTES).await {
+        Some(buf) => checker(&buf),
+        None => false,
     }
-    let mut buf = Vec::with_capacity(TAIL_BYTES as usize);
-    if tokio::io::AsyncReadExt::read_to_end(&mut file, &mut buf)
-        .await
-        .is_err()
-    {
-        return false;
+}
+
+/// How far back from EOF the oversized-skip Task scan looks (#222). Bounds
+/// both the I/O and the decode work; survivors are at most the parallel-
+/// dispatch ceiling in practice, so no further cap is needed.
+const TASK_SCAN_BYTES: u64 = 256 * 1024;
+
+/// #222: tail-scan an oversized skipped span for IN-FLIGHT Task dispatches
+/// and re-emit exactly their `ActivityStart`s. Mid-attach to a delegating
+/// session whose backlog exceeds `MAX_PENDING_BYTES` seeds the cursor at EOF,
+/// so the in-flight `Agent` dispatch tool_use line is never decoded — and its
+/// PreToolUse hook predates attach — leaving the reducer's `active_tasks`
+/// empty: subagent-leak suppression stays OFF (the parent animates the
+/// subagent's misattributed hook tools instead of showing Delegating) and the
+/// b1 completion cascade never arms (the finished subagent lingers Idle up to
+/// the 30-min stale sweep). Re-sending the unmatched Task starts restores
+/// both: `track_active_tasks` seeds `active_tasks` from any transport's Task
+/// ActivityStart, so the reducer needs no change.
+///
+/// Tail-window geometry guarantees no false leak: a completion is always
+/// LATER in the file than its start, so any windowed start's completion (if
+/// one exists) is also in the window — a synthesized start is only ever a
+/// genuinely in-flight dispatch OR one whose completion raced in beyond the
+/// `file_len` snapshot (the next walk re-decodes that span; `active_tasks` is
+/// a HashSet, so the duplicate insert is idempotent). A dispatch buried
+/// deeper than `TASK_SCAN_BYTES` of subsequent traffic keeps the pre-#222
+/// skip behavior — bounded, documented residual.
+///
+/// `decode_line` also emits OTHER events from these lines (Rename, plain
+/// ActivityStarts, SessionStart…) — everything except the unmatched Task
+/// starts is DISCARDED. This is a Task-seeding scan, not a replay: replaying
+/// 256 KiB of activity would animate a burst of stale tools.
+///
+/// Hook-wins dedup (#150): the synthesized events are Jsonl-tagged. On
+/// mid-attach no hook record for these tuids exists (the hooks predate the
+/// listener), so they pass the dedup. A mid-RUN oversized skip (> 1 MiB
+/// appended between scans on an attached session) can race a recent hook
+/// record — the dedup eating the synthesized start then is CORRECT: the hook
+/// copy already seeded `active_tasks`.
+///
+/// Codex/Antigravity rollouts produce no Task ActivityStarts from line
+/// decode (Codex subagents wire via the SubagentStart/Stop hooks), so the
+/// scan is a structural no-op for them.
+async fn scan_pending_tasks(
+    path: &Path,
+    file_len: u64,
+    decoders: SourceDecoders,
+    ctx: &WatchCtx<'_>,
+) {
+    let Some(buf) = read_tail(path, TASK_SCAN_BYTES).await else {
+        return;
+    };
+    // Same per-line keying as the walk loop: the decoder re-derives the agent
+    // id from this normalized path string (see `transcript_path_str` there).
+    let transcript_path_str = crate::source::decoder::normalize_path_key(&path.to_string_lossy());
+    let mut lines = buf.split(|b| *b == b'\n');
+    if file_len > TASK_SCAN_BYTES {
+        // The window starts mid-file, so its first chunk is almost always a
+        // partial line — skip through the first newline rather than decode a
+        // fragment (which could even parse as JSON by accident).
+        let _ = lines.next();
     }
-    checker(&buf)
+    // Unmatched Task dispatches in file order. A Vec keeps the order; a
+    // duplicate ActivityStart for a seen tuid is skipped (HashSet semantics)
+    // and a completion removes its start wherever it sits.
+    let mut pending: Vec<(String, AgentEvent)> = Vec::new();
+    for line in lines {
+        if line.is_empty() {
+            continue;
+        }
+        let Ok(s) = std::str::from_utf8(line) else {
+            continue;
+        };
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(s) else {
+            continue;
+        };
+        let events = match (decoders.decode_line)(&transcript_path_str, ctx.source, v) {
+            Ok(events) => events,
+            Err(e) => {
+                debug!("task-scan decode error in {}: {e}", path.display());
+                continue;
+            }
+        };
+        for ev in events {
+            match &ev {
+                AgentEvent::ActivityStart {
+                    tool_use_id: Some(tuid),
+                    detail: Some(d),
+                    ..
+                } if d.is_task() => {
+                    if !pending.iter().any(|(t, _)| t == tuid) {
+                        pending.push((tuid.clone(), ev));
+                    }
+                }
+                AgentEvent::ActivityEnd {
+                    tool_use_id: Some(tuid),
+                    ..
+                } => {
+                    pending.retain(|(t, _)| t != tuid);
+                }
+                _ => {}
+            }
+        }
+    }
+    for (tuid, ev) in pending {
+        debug!(
+            "re-emitting in-flight Task dispatch {tuid} from the oversized tail of {}",
+            path.display()
+        );
+        if ctx.tx.send((Transport::Jsonl, ev)).await.is_err() {
+            return;
+        }
+    }
 }
 
 /// The directory a CC subagent transcript sits under: `<parent>/subagents/
@@ -1749,6 +1873,319 @@ mod tests {
             cursors.lock().await.get(&path).copied(),
             Some(len),
             "gated subagent transcript must be seeded at EOF"
+        );
+    }
+
+    // ── #222: oversized-skip Task scan ──────────────────────────────────────
+    // Mid-attach to a delegating session with > MAX_PENDING_BYTES pending
+    // skips the backlog, losing the in-flight Agent dispatch (its PreToolUse
+    // hook predates attach too) — active_tasks stays empty, so subagent-leak
+    // suppression is off and b1 never arms. The oversized branch must
+    // tail-scan the last TASK_SCAN_BYTES and re-emit exactly the UNMATCHED
+    // Task ActivityStarts. These drive the REAL decode_cc_line so the line
+    // shapes (Agent tool_use with subagent_type / tool_result) are wire-true.
+
+    const FILLER_LINE: &str = "{\"type\":\"assistant\"}\n";
+    const CC_HEAD_LINE: &str = "{\"type\":\"assistant\",\"cwd\":\"/repo/head\"}\n";
+
+    fn cc_task_dispatch_line(tuid: &str) -> String {
+        serde_json::json!({
+            "type": "assistant",
+            "cwd": "/repo/head",
+            "message": {
+                "role": "assistant",
+                "content": [
+                    { "type": "tool_use", "id": tuid, "name": "Agent",
+                      "input": { "description": "explore",
+                                 "subagent_type": "code-explorer",
+                                 "prompt": "go" } }
+                ]
+            }
+        })
+        .to_string()
+            + "\n"
+    }
+
+    fn cc_task_result_line(tuid: &str) -> String {
+        serde_json::json!({
+            "type": "user",
+            "message": {
+                "role": "user",
+                "content": [
+                    { "type": "tool_result", "tool_use_id": tuid, "content": "done" }
+                ]
+            }
+        })
+        .to_string()
+            + "\n"
+    }
+
+    /// `CC_HEAD_LINE` + filler past MAX_PENDING_BYTES + the given tail lines —
+    /// the whole body is one oversized first-sight pending span.
+    fn oversized_body(tail_lines: &[String]) -> String {
+        let mut full = String::from(CC_HEAD_LINE);
+        while full.len() <= (1usize << 20) + 4096 {
+            full.push_str(FILLER_LINE);
+        }
+        for l in tail_lines {
+            full.push_str(l);
+        }
+        full
+    }
+
+    /// The Jsonl-tagged Task ActivityStarts among `events`, as tuids.
+    fn task_start_tuids(events: &[(Transport, AgentEvent)]) -> Vec<String> {
+        events
+            .iter()
+            .filter_map(|(t, e)| match e {
+                AgentEvent::ActivityStart {
+                    tool_use_id: Some(tuid),
+                    detail: Some(d),
+                    ..
+                } if d.is_task() => {
+                    assert_eq!(*t, Transport::Jsonl, "synthesized starts are Jsonl-tagged");
+                    Some(tuid.clone())
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    async fn walk_oversized_cc(
+        path: &Path,
+        window: Duration,
+        cursors: &Arc<Mutex<HashMap<PathBuf, u64>>>,
+        seen: &Arc<Mutex<HashMap<PathBuf, bool>>>,
+    ) -> Vec<(Transport, AgentEvent)> {
+        walk_once_with(
+            path,
+            window,
+            crate::source::claude_code::decode_cc_line,
+            t_ended,
+            cursors,
+            seen,
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn oversized_attach_seeds_unmatched_task_dispatch() {
+        // The headline #222 case: a recent > 1 MiB transcript whose tail holds
+        // an Agent dispatch with NO matching tool_result — the walk must
+        // register the agent AND re-emit that dispatch as a Task
+        // ActivityStart (after the SessionStart, so the reducer has a slot).
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("deleg-big.jsonl");
+        let full = oversized_body(&[cc_task_dispatch_line("tu_task")]);
+        tokio::fs::write(&path, &full).await.unwrap();
+        let cursors = Arc::new(Mutex::new(HashMap::new()));
+        let seen = Arc::new(Mutex::new(HashMap::new()));
+
+        let events = walk_oversized_cc(&path, Duration::from_secs(3600), &cursors, &seen).await;
+        let start_pos = events
+            .iter()
+            .position(|(_, e)| matches!(e, AgentEvent::SessionStart { .. }))
+            .expect("the oversized first sight must register the agent (#204)");
+        assert_eq!(
+            task_start_tuids(&events),
+            vec!["tu_task".to_string()],
+            "the unmatched in-flight dispatch must be re-emitted, got {events:?}"
+        );
+        let task_pos = events
+            .iter()
+            .position(|(_, e)| matches!(e, AgentEvent::ActivityStart { .. }))
+            .expect("checked above");
+        assert!(
+            start_pos < task_pos,
+            "registration must precede the synthesized Task start (a JSONL event for an unknown id is a reducer no-op)"
+        );
+        assert_eq!(
+            cursors.lock().await.get(&path).copied(),
+            Some(full.len() as u64),
+            "cursor must land at EOF — the scan seeds tasks, it must not replay the backlog"
+        );
+    }
+
+    #[tokio::test]
+    async fn oversized_attach_matched_task_is_not_seeded() {
+        // A dispatch whose tool_result also sits in the window has RETURNED —
+        // re-emitting it would pin the parent Delegating forever (no further
+        // completion is coming). Window geometry makes this exact: a
+        // completion is always later in the file than its start.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("deleg-done.jsonl");
+        let full = oversized_body(&[
+            cc_task_dispatch_line("tu_task"),
+            cc_task_result_line("tu_task"),
+        ]);
+        tokio::fs::write(&path, &full).await.unwrap();
+        let cursors = Arc::new(Mutex::new(HashMap::new()));
+        let seen = Arc::new(Mutex::new(HashMap::new()));
+
+        let events = walk_oversized_cc(&path, Duration::from_secs(3600), &cursors, &seen).await;
+        assert!(
+            events
+                .iter()
+                .any(|(_, e)| matches!(e, AgentEvent::SessionStart { .. })),
+            "registration still fires, got {events:?}"
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|(_, e)| matches!(e, AgentEvent::ActivityStart { .. })),
+            "a matched (returned) dispatch must not be seeded — and no other backlog event may leak from the scan, got {events:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn oversized_attach_ended_session_skips_task_scan() {
+        // Ended wins: the buried terminator just emitted SessionEnd, so
+        // seeding a Task afterwards would animate a ghost delegation. The
+        // file is pre-seeded KNOWN at the head — a recent ENDED file at FIRST
+        // sight is gated by should_seed_at_eof and never reaches the
+        // oversized branch at all.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("deleg-ended.jsonl");
+        let full = oversized_body(&[
+            cc_task_dispatch_line("tu_task"),
+            "{\"type\":\"system\",\"subtype\":\"session_end\"}\n".to_string(),
+        ]);
+        tokio::fs::write(&path, &full).await.unwrap();
+        let cursors = Arc::new(Mutex::new(HashMap::from([(
+            path.clone(),
+            CC_HEAD_LINE.len() as u64,
+        )])));
+        let seen = Arc::new(Mutex::new(HashMap::new()));
+
+        let events = walk_oversized_cc(&path, Duration::from_secs(3600), &cursors, &seen).await;
+        assert!(
+            events
+                .iter()
+                .any(|(_, e)| matches!(e, AgentEvent::SessionEnd { .. })),
+            "the buried terminator must still emit SessionEnd, got {events:?}"
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|(_, e)| matches!(e, AgentEvent::ActivityStart { .. })),
+            "an ended span must not seed Task starts, got {events:?}"
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|(_, e)| matches!(e, AgentEvent::SessionStart { .. })),
+            "an ended span must not register either (ghost), got {events:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn oversized_attach_unregistered_skips_task_scan() {
+        // A stale, probe-less oversized file is gated unregistered (no slot)
+        // — JSONL events for an unknown id are reducer no-ops, so the scan
+        // must not run (no wasted decode, no orphan Task events).
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("deleg-stale.jsonl");
+        let full = oversized_body(&[cc_task_dispatch_line("tu_task")]);
+        tokio::fs::write(&path, &full).await.unwrap();
+        backdate_one_hour(&path);
+        let cursors = Arc::new(Mutex::new(HashMap::new()));
+        let seen = Arc::new(Mutex::new(HashMap::new()));
+
+        let events = walk_oversized_cc(&path, Duration::from_secs(60), &cursors, &seen).await;
+        assert!(
+            events.is_empty(),
+            "a gated unregistered oversized file must emit NOTHING — no Task seeding without a slot, got {events:?}"
+        );
+        assert_eq!(
+            cursors.lock().await.get(&path).copied(),
+            Some(full.len() as u64),
+            "gated file must still be seeded at EOF"
+        );
+    }
+
+    #[tokio::test]
+    async fn oversized_attach_dispatch_outside_window_is_missed() {
+        // THE documented residual: a dispatch buried deeper than
+        // TASK_SCAN_BYTES of subsequent traffic keeps the pre-#222 behavior
+        // (skipped — the parent re-enters Delegating only via live signals).
+        // Pinned explicitly so a window-size change is a conscious decision.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("deleg-buried.jsonl");
+        let mut full = String::from(CC_HEAD_LINE);
+        let dispatch = cc_task_dispatch_line("tu_buried");
+        full.push_str(&dispatch);
+        let dispatch_end = full.len();
+        while full.len() <= (1usize << 20) + 4096 {
+            full.push_str(FILLER_LINE);
+        }
+        assert!(
+            (full.len() - dispatch_end) as u64 > TASK_SCAN_BYTES,
+            "the dispatch must sit deeper than the scan window"
+        );
+        tokio::fs::write(&path, &full).await.unwrap();
+        let cursors = Arc::new(Mutex::new(HashMap::new()));
+        let seen = Arc::new(Mutex::new(HashMap::new()));
+
+        let events = walk_oversized_cc(&path, Duration::from_secs(3600), &cursors, &seen).await;
+        assert!(
+            events
+                .iter()
+                .any(|(_, e)| matches!(e, AgentEvent::SessionStart { .. })),
+            "registration still fires, got {events:?}"
+        );
+        assert!(
+            task_start_tuids(&events).is_empty(),
+            "a dispatch outside the tail window is consciously missed (bounded residual), got {events:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn task_scan_handles_partial_first_line() {
+        // The window boundary (file_len - TASK_SCAN_BYTES) almost never lands
+        // on a line boundary. Engineer it to split a Task dispatch mid-JSON:
+        // the straddled fragment must be skipped (not decoded, no panic) and
+        // a complete dispatch inside the window still seeds.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("deleg-straddle.jsonl");
+        let task_a = cc_task_dispatch_line("tu_straddle");
+        let task_b = cc_task_dispatch_line("tu_inside");
+
+        let mut full = String::from(CC_HEAD_LINE);
+        // Deep enough that suffix + window keeps the total > MAX_PENDING_BYTES.
+        while full.len() < (1usize << 20) {
+            full.push_str(FILLER_LINE);
+        }
+        let offset_a = full.len();
+        full.push_str(&task_a);
+        full.push_str(&task_b);
+        // Pad the tail so the boundary lands strictly inside task_a's bytes.
+        let delta = task_a.len() / 2;
+        let target_len = offset_a + delta + TASK_SCAN_BYTES as usize;
+        let pad = target_len - full.len();
+        assert!(pad > FILLER_LINE.len(), "padding must fit one JSON line");
+        full.push_str("{\"type\":\"assistant\"}");
+        full.push_str(&" ".repeat(pad - FILLER_LINE.len()));
+        full.push('\n');
+        assert_eq!(full.len(), target_len);
+        let boundary = full.len() - TASK_SCAN_BYTES as usize;
+        assert!(
+            boundary > offset_a && boundary < offset_a + task_a.len(),
+            "the window boundary must split the straddled dispatch mid-line"
+        );
+        tokio::fs::write(&path, &full).await.unwrap();
+        let cursors = Arc::new(Mutex::new(HashMap::new()));
+        let seen = Arc::new(Mutex::new(HashMap::new()));
+
+        let events = walk_oversized_cc(&path, Duration::from_secs(3600), &cursors, &seen).await;
+        assert_eq!(
+            task_start_tuids(&events),
+            vec!["tu_inside".to_string()],
+            "the complete in-window dispatch seeds; the straddled fragment is skipped, got {events:?}"
+        );
+        assert_eq!(
+            cursors.lock().await.get(&path).copied(),
+            Some(full.len() as u64),
+            "cursor must land at EOF"
         );
     }
 }

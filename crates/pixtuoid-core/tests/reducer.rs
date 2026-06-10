@@ -2542,6 +2542,128 @@ fn subagent_is_removed_promptly_when_its_parent_task_completes() {
 }
 
 #[test]
+fn oversized_attach_synthesized_task_start_restores_suppression_and_b1() {
+    // #222 at the reducer layer: mid-attach to a delegating parent whose
+    // > 1 MiB backlog was skipped — the watcher tail-scans and re-emits the
+    // in-flight dispatch as a Jsonl-tagged Task ActivityStart. The mid-attach
+    // dedup pin (#150): NO hook record for that tuid exists (its PreToolUse
+    // predates the listener), so the synthesized start passes the hook-wins
+    // dedup and seeds active_tasks — suppression and b1 then work from the
+    // Jsonl copy alone, with zero reducer changes.
+    let mut scene = SceneState::uniform(8);
+    let mut r = Reducer::new();
+    let parent = AgentId::from_transcript_path("/p/att.jsonl");
+    let child = AgentId::from_parts("claude-code", "/p/att/subagents/agent-1.jsonl");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+
+    // Both registrations arrive via Jsonl — the watcher's attach replay
+    // (emit_first_sight for the parent, the fresh subagent transcript).
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: parent,
+            source: "claude-code".into(),
+            session_id: "p".into(),
+            cwd: PathBuf::from("/repo"),
+            parent_id: None,
+        },
+        t0,
+        Transport::Jsonl,
+    );
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: child,
+            source: "claude-code".into(),
+            session_id: "c".into(),
+            cwd: PathBuf::from("/repo"),
+            parent_id: Some(parent),
+        },
+        t0 + Duration::from_millis(100),
+        Transport::Jsonl,
+    );
+
+    // The synthesized Task start (Jsonl, no prior hook record at attach).
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityStart {
+            agent_id: parent,
+            tool_use_id: Some("tu_task".into()),
+            detail: Some("Agent".into()),
+        },
+        t0 + Duration::from_secs(1),
+        Transport::Jsonl,
+    );
+    assert_delegating(
+        &scene,
+        parent,
+        "the synthesized Jsonl Task start must seed active_tasks — no hook record exists at mid-attach to dedup-eat it",
+    );
+
+    // The subagent's next tool fires a hook misattributed to the PARENT
+    // (CC hook transcript_path is always the parent's). With active_tasks
+    // seeded, it must be suppressed — parent stays Delegating.
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityStart {
+            agent_id: parent,
+            tool_use_id: Some("sub-R".into()),
+            detail: Some("Read: /foo".into()),
+        },
+        t0 + Duration::from_secs(2),
+        Transport::Hook,
+    );
+    assert_delegating(
+        &scene,
+        parent,
+        "the misattributed subagent hook must be suppressed, not animated on the parent",
+    );
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityEnd {
+            agent_id: parent,
+            tool_use_id: Some("sub-R".into()),
+        },
+        t0 + Duration::from_secs(3),
+        Transport::Hook,
+    );
+    assert!(
+        scene.agents.get(&parent).unwrap().pending_idle_at.is_none(),
+        "the suppressed subagent End must not arm the parent's pending-idle"
+    );
+
+    // The Task's JSONL self-END (the tool_result line in the parent
+    // transcript) drains the seeded task and arms the grace-deferred b1
+    // cascade — the completed subagent leaves promptly instead of lingering
+    // to the 30-min idle sweep.
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityEnd {
+            agent_id: parent,
+            tool_use_id: Some("tu_task".into()),
+        },
+        t0 + Duration::from_secs(10),
+        Transport::Jsonl,
+    );
+    assert!(
+        scene.agents.get(&child).unwrap().exiting_at.is_none(),
+        "the b1 cascade is grace-deferred (#151) — never immediate"
+    );
+    r.tick(
+        &mut scene,
+        t0 + Duration::from_secs(10) + B1_CASCADE_GRACE + Duration::from_millis(10),
+    );
+    assert!(
+        scene.agents.get(&child).unwrap().exiting_at.is_some(),
+        "the synthesized Task start must arm b1: the drain cascades the completed subagent out"
+    );
+    assert!(
+        scene.agents.get(&parent).unwrap().exiting_at.is_none(),
+        "the parent keeps running after the Task drains"
+    );
+}
+
+#[test]
 fn late_jsonl_dispatch_copy_inside_grace_cancels_premature_cascade() {
     // #151A: a parallel SECOND Task dispatch arrives via hook while the
     // first is in flight → suppressed as a leak, tracked ONLY via its JSONL
