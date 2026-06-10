@@ -61,7 +61,13 @@ pub fn hit_test_from_tui(scene: &SceneState, layout: &Layout, mx: u16, my: u16) 
     const SPRITE_W: u16 = 8;
     const SPRITE_H_CELLS: u16 = 6;
     for agent in scene.agents.values() {
-        let Some(desk) = layout.home_desk(scene.floor_local_desk(agent.desk_index)) else {
+        // `single_floor_local()` (the projected-scene identity), NOT the
+        // arithmetic bridge: on an out-of-range desk the bridge would wrap onto
+        // a synthetic later floor of the uniform projection and could land back
+        // in `[0..len)` — hit-testable while invisible to the renderer. The
+        // identity keeps the OOB index OOB, so `home_desk` skips it like the
+        // render path does.
+        let Some(desk) = layout.home_desk(agent.desk_index.single_floor_local()) else {
             continue;
         };
         let ax = desk.x + 1;
@@ -523,6 +529,33 @@ mod tests {
         // No agent occupies any cell — scan a few and confirm None everywhere.
         for &(mx, my) in &[(0u16, 0u16), (40, 20), (80, 40)] {
             assert_eq!(hit_test_from_tui(&scene, &layout, mx, my), None);
+        }
+    }
+
+    // Regression for the bridge-choice bug: with the ARITHMETIC bridge
+    // (`scene.floor_local_desk`), an OOB desk equal to the uniform scene's cap
+    // wraps onto a synthetic floor 1 and lands back at local 0 — hit-testable
+    // at desk 0 while the renderer skips it. The identity cast must keep it
+    // OOB everywhere.
+    #[test]
+    fn from_tui_oob_desk_at_capacity_boundary_does_not_wrap_to_desk_zero() {
+        use pixtuoid_core::state::GlobalDeskIndex;
+        let layout = Layout::compute(160, 200, 4).expect("layout");
+        let (mut scene, id) = scene_with_agent_at_desk(0);
+        let cap = scene.floor_capacities[0];
+        // Re-seat the agent at exactly `cap` — the wrap-prone value.
+        scene.agents.get_mut(&id).expect("slot").desk_index = GlobalDeskIndex(cap);
+        // Scan desk 0's whole sprite box — the wrapped bridge would hit here.
+        let desk0 = layout.home_desks[0];
+        let (ax, ay) = (desk0.x + 1, desk0.y.saturating_sub(4) / 2);
+        for dx in 0..8u16 {
+            for dy in 0..6u16 {
+                assert_eq!(
+                    hit_test_from_tui(&scene, &layout, ax + dx, ay + dy),
+                    None,
+                    "an OOB desk at the capacity boundary must never hit-test"
+                );
+            }
         }
     }
 
