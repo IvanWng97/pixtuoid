@@ -10,7 +10,7 @@ use pixtuoid_core::source::claude_code::{
     cc_derive_label, cc_id_from_path, cc_session_ended, decode_cc_line, ClaudeCodeSource,
 };
 use pixtuoid_core::source::codex::CodexSource;
-use pixtuoid_core::source::jsonl::{force_polling_backend_for_tests, JsonlWatcher};
+use pixtuoid_core::source::jsonl::{force_polling_backend_for_tests, JsonlWatcher, ProbeSnapshot};
 use pixtuoid_core::source::AgentEvent;
 use pixtuoid_core::source::Source;
 use pixtuoid_core::source::Transport;
@@ -23,6 +23,16 @@ use pixtuoid_core::AgentId;
 /// `JsonlWatcher`/`Source::run`.
 fn fast_watch() {
     force_polling_backend_for_tests(Duration::from_millis(25));
+}
+
+/// A HEALTHY probe snapshot vouching exactly `ids`. No pid binding — these
+/// tests fake the probe closure; the id→pid join is unit-tested at the source
+/// level (`claude_code::liveness_tests`, `codex::tests`).
+fn vouch_snapshot(ids: &[&str]) -> Option<ProbeSnapshot> {
+    Some(ProbeSnapshot {
+        ids: ids.iter().map(|s| s.to_string()).collect(),
+        pid_of: std::collections::HashMap::new(),
+    })
 }
 
 fn cc_watcher(root: std::path::PathBuf) -> JsonlWatcher {
@@ -287,9 +297,7 @@ async fn watcher_registers_stale_file_when_probe_says_live() {
     let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(32);
     let watcher = cc_watcher(projects_root.clone())
         .with_initial_window(Duration::from_secs(60))
-        .with_liveness_probe(std::sync::Arc::new(move || {
-            std::iter::once(uuid.to_string()).collect()
-        }));
+        .with_liveness_probe(std::sync::Arc::new(move || vouch_snapshot(&[uuid])));
     let handle = tokio::spawn(async move { watcher.run(tx).await });
 
     let expected = AgentId::from_parts("claude-code", uuid);
@@ -350,9 +358,7 @@ async fn codex_watcher_registers_stale_rollout_when_probe_says_live() {
     )
     .with_id_deriver(codex_id_from_path)
     .with_initial_window(Duration::from_secs(60))
-    .with_liveness_probe(std::sync::Arc::new(move || {
-        std::iter::once(uuid.to_string()).collect()
-    }));
+    .with_liveness_probe(std::sync::Arc::new(move || vouch_snapshot(&[uuid])));
     let handle = tokio::spawn(async move { watcher.run(tx).await });
 
     let expected = AgentId::from_parts("codex", uuid);
@@ -400,9 +406,7 @@ async fn watcher_emits_proof_of_life_for_probe_live_ids() {
     let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(32);
     let watcher = cc_watcher(projects_root.clone())
         .with_initial_window(Duration::from_secs(60))
-        .with_liveness_probe(std::sync::Arc::new(move || {
-            std::iter::once(uuid.to_string()).collect()
-        }));
+        .with_liveness_probe(std::sync::Arc::new(move || vouch_snapshot(&[uuid])));
     let handle = tokio::spawn(async move { watcher.run(tx).await });
 
     let expected = AgentId::from_parts("claude-code", uuid);
@@ -459,7 +463,12 @@ async fn poll_arm_refreshes_probe_snapshot_and_reemits_proof_of_life() {
     let watcher = cc_watcher(projects_root.clone())
         .with_initial_window(Duration::from_secs(60))
         .with_poll_interval(Duration::from_millis(100))
-        .with_liveness_probe(Arc::new(move || probe_view.lock().unwrap().clone()));
+        .with_liveness_probe(Arc::new(move || {
+            Some(ProbeSnapshot {
+                ids: probe_view.lock().unwrap().clone(),
+                pid_of: std::collections::HashMap::new(),
+            })
+        }));
     let handle = tokio::spawn(async move { watcher.run(tx).await });
 
     // While the snapshot is empty (initial seed, rescan, first polls), the
@@ -506,6 +515,251 @@ async fn poll_arm_refreshes_probe_snapshot_and_reemits_proof_of_life() {
     assert!(
         got_pol,
         "the poll arm must re-emit ProofOfLife for every vouched id"
+    );
+    handle.abort();
+}
+
+// ── Negative vouch (#223): vouched-then-gone is a high-confidence exit ──────
+
+/// Shared fixture for the negative-vouch tests: a stale transcript admitted
+/// via a MUTABLE probe (the test flips its return value mid-run), driven by a
+/// running watcher with fast poll + a test-tuned confirmation span. Returns
+/// the probe handle, the event receiver, the transcript path, and the watcher
+/// task — after asserting the probe-vouched admission already happened.
+async fn admitted_with_mutable_probe(
+    projects_root: std::path::PathBuf,
+    uuid: &'static str,
+    min_span: Duration,
+) -> (
+    std::sync::Arc<std::sync::Mutex<Option<ProbeSnapshot>>>,
+    mpsc::Receiver<(Transport, AgentEvent)>,
+    std::path::PathBuf,
+    tokio::task::JoinHandle<anyhow::Result<()>>,
+) {
+    let project_dir = projects_root.join("proj-nvouch");
+    tokio::fs::create_dir_all(&project_dir).await.unwrap();
+    let stale = project_dir.join(format!("{uuid}.jsonl"));
+    write_lines(&stale, &[cc_session_start_line(uuid, "/repo")]).await;
+    backdate(&stale, 7200);
+
+    let probe_state: std::sync::Arc<std::sync::Mutex<Option<ProbeSnapshot>>> =
+        std::sync::Arc::new(std::sync::Mutex::new(vouch_snapshot(&[uuid])));
+    let probe_view = probe_state.clone();
+    let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(64);
+    let watcher = cc_watcher(projects_root)
+        .with_initial_window(Duration::from_secs(60))
+        .with_poll_interval(Duration::from_millis(100))
+        .with_negative_vouch_min_span(min_span)
+        .with_liveness_probe(std::sync::Arc::new(move || {
+            probe_view.lock().unwrap().clone()
+        }));
+    let handle = tokio::spawn(async move { watcher.run(tx).await });
+
+    let expected = AgentId::from_parts("claude-code", uuid);
+    let mut registered = false;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    while tokio::time::Instant::now() < deadline {
+        if let Ok(Some((_, AgentEvent::SessionStart { agent_id, .. }))) =
+            tokio::time::timeout(Duration::from_millis(200), rx.recv()).await
+        {
+            if agent_id == expected {
+                registered = true;
+                break;
+            }
+        }
+    }
+    assert!(
+        registered,
+        "the probe-vouched stale transcript must register"
+    );
+    (probe_state, rx, stale, handle)
+}
+
+/// Drain `rx` for `window`, panicking if a `SessionEnd` for `expected`
+/// arrives — the quiet-window assertion the no-exit tests share.
+async fn assert_no_session_end_within(
+    rx: &mut mpsc::Receiver<(Transport, AgentEvent)>,
+    expected: AgentId,
+    window: Duration,
+    why: &str,
+) {
+    let quiet_until = tokio::time::Instant::now() + window;
+    while tokio::time::Instant::now() < quiet_until {
+        if let Ok(Some((_, AgentEvent::SessionEnd { agent_id }))) =
+            tokio::time::timeout(Duration::from_millis(50), rx.recv()).await
+        {
+            assert_ne!(agent_id, expected, "{why}");
+        }
+    }
+}
+
+/// #223 rung 2 — THE negative-vouch exit: a previously-vouched session id
+/// missing from two healthy snapshots ≥ the confirmation span apart gets the
+/// `SessionEnd` its CLI never wrote (Codex has no exit signal at all; CC's
+/// hook is best-effort), instead of ghosting until the 10–30 min stale-sweep.
+/// Also pins the self-heal: the confirmation un-claims `seen`, so a LATER
+/// append (a resumed session) re-registers through `emit_first_sight`.
+#[tokio::test]
+async fn negative_vouch_emits_session_end_after_sustained_disappearance() {
+    let dir = TempDir::new().unwrap();
+    let uuid = "01000000-0000-7000-8000-0000000000ad";
+    let (probe_state, mut rx, transcript, handle) =
+        admitted_with_mutable_probe(dir.path().to_path_buf(), uuid, Duration::from_millis(300))
+            .await;
+    let expected = AgentId::from_parts("claude-code", uuid);
+
+    // The owning process exits: the probe stays HEALTHY but stops vouching.
+    *probe_state.lock().unwrap() = vouch_snapshot(&[]);
+
+    let mut ended = false;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    while tokio::time::Instant::now() < deadline {
+        if let Ok(Some((Transport::Jsonl, AgentEvent::SessionEnd { agent_id }))) =
+            tokio::time::timeout(Duration::from_millis(200), rx.recv()).await
+        {
+            if agent_id == expected {
+                ended = true;
+                break;
+            }
+        }
+    }
+    assert!(
+        ended,
+        "two healthy snapshots ≥ the span apart without the vouch must emit SessionEnd"
+    );
+
+    // Self-heal: the un-claimed `seen` lets a resumed session re-register on
+    // its next append (mirrors the decoded-SessionEnd revive).
+    let mut f = tokio::fs::OpenOptions::new()
+        .append(true)
+        .open(&transcript)
+        .await
+        .unwrap();
+    f.write_all(
+        format!(
+            "{}\n",
+            cc_tool_use_line(uuid, "/repo", "tu_resume", "Bash", serde_json::json!({}))
+        )
+        .as_bytes(),
+    )
+    .await
+    .unwrap();
+    f.flush().await.unwrap();
+    drop(f);
+
+    let mut restarted = false;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    while tokio::time::Instant::now() < deadline {
+        if let Ok(Some((_, AgentEvent::SessionStart { agent_id, .. }))) =
+            tokio::time::timeout(Duration::from_millis(200), rx.recv()).await
+        {
+            if agent_id == expected {
+                restarted = true;
+                break;
+            }
+        }
+    }
+    assert!(
+        restarted,
+        "an append after the negative-vouch exit must re-register the session (seen un-claim)"
+    );
+    handle.abort();
+}
+
+/// One missed snapshot is NOT an exit: Codex briefly drops and reopens its
+/// rollout fd on a write failure, so a vouch that disappears and re-appears
+/// within the confirmation span must cancel the pending miss window — no
+/// SessionEnd, even well past the span.
+#[tokio::test]
+async fn one_missed_snapshot_does_not_end_the_session() {
+    let dir = TempDir::new().unwrap();
+    let uuid = "01000000-0000-7000-8000-0000000000ae";
+    let (probe_state, mut rx, _transcript, handle) =
+        admitted_with_mutable_probe(dir.path().to_path_buf(), uuid, Duration::from_millis(600))
+            .await;
+    let expected = AgentId::from_parts("claude-code", uuid);
+
+    // Brief drop: a few healthy-but-empty snapshots open the miss window...
+    *probe_state.lock().unwrap() = vouch_snapshot(&[]);
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    // ...then the vouch re-appears INSIDE the span — the window must cancel.
+    *probe_state.lock().unwrap() = vouch_snapshot(&[uuid]);
+
+    assert_no_session_end_within(
+        &mut rx,
+        expected,
+        Duration::from_millis(1500),
+        "a vouch re-appearing within the span must cancel the miss window — no SessionEnd",
+    )
+    .await;
+    handle.abort();
+}
+
+/// A probe FAILURE (`None`) is not an observation: it must neither open nor
+/// age a miss window (no SessionEnd ever — the span here is tiny, so treating
+/// None as an empty snapshot WOULD confirm within the quiet window), and it
+/// must not disturb admission state (the previous snapshot keeps vouching; a
+/// fresh append still walks normally).
+#[tokio::test]
+async fn probe_failure_changes_nothing() {
+    let dir = TempDir::new().unwrap();
+    let uuid = "01000000-0000-7000-8000-0000000000af";
+    let (probe_state, mut rx, transcript, handle) =
+        admitted_with_mutable_probe(dir.path().to_path_buf(), uuid, Duration::from_millis(200))
+            .await;
+    let expected = AgentId::from_parts("claude-code", uuid);
+
+    // The probe itself breaks (registry dir unreadable, proc table down).
+    *probe_state.lock().unwrap() = None;
+
+    assert_no_session_end_within(
+        &mut rx,
+        expected,
+        Duration::from_millis(1500),
+        "a probe failure must never confirm an exit — None is not an observation",
+    )
+    .await;
+
+    // Admission state intact: the session is still registered, so a fresh
+    // append decodes through the normal walk (no re-gate, no resurrection).
+    let mut f = tokio::fs::OpenOptions::new()
+        .append(true)
+        .open(&transcript)
+        .await
+        .unwrap();
+    f.write_all(
+        format!(
+            "{}\n",
+            cc_tool_use_line(
+                uuid,
+                "/repo",
+                "tu_after_failure",
+                "Bash",
+                serde_json::json!({})
+            )
+        )
+        .as_bytes(),
+    )
+    .await
+    .unwrap();
+    f.flush().await.unwrap();
+    drop(f);
+
+    let mut got_activity = false;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    while tokio::time::Instant::now() < deadline {
+        if let Ok(Some((_, AgentEvent::ActivityStart { tool_use_id, .. }))) =
+            tokio::time::timeout(Duration::from_millis(200), rx.recv()).await
+        {
+            if tool_use_id.as_deref() == Some("tu_after_failure") {
+                got_activity = true;
+                break;
+            }
+        }
+    }
+    assert!(
+        got_activity,
+        "a fresh append must still walk normally while the probe is failing"
     );
     handle.abort();
 }
@@ -1809,9 +2063,7 @@ async fn attach_matrix_registers_exactly_the_live_set() {
     let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(64);
     let watcher = cc_watcher(projects_root.clone())
         .with_initial_window(Duration::from_secs(60))
-        .with_liveness_probe(std::sync::Arc::new(move || {
-            std::iter::once(idle_b.to_string()).collect()
-        }));
+        .with_liveness_probe(std::sync::Arc::new(move || vouch_snapshot(&[idle_b])));
     let handle = tokio::spawn(async move { watcher.run(tx).await });
 
     let id_a = AgentId::from_parts("claude-code", live_a);
@@ -1915,9 +2167,7 @@ async fn delegating_parent_attach_registers_parent_and_links_subagent() {
     let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(64);
     let watcher = cc_watcher(projects_root.clone())
         .with_initial_window(Duration::from_secs(60))
-        .with_liveness_probe(std::sync::Arc::new(move || {
-            std::iter::once(parent_uuid.to_string()).collect()
-        }));
+        .with_liveness_probe(std::sync::Arc::new(move || vouch_snapshot(&[parent_uuid])));
     let handle = tokio::spawn(async move { watcher.run(tx).await });
 
     let expected_parent = AgentId::from_parts("claude-code", parent_uuid);
@@ -2153,9 +2403,7 @@ async fn cwd_split_attach_links_subagent_to_probe_live_stale_parent() {
     let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(64);
     let watcher = cc_watcher(projects_root.clone())
         .with_initial_window(Duration::from_secs(60))
-        .with_liveness_probe(std::sync::Arc::new(move || {
-            std::iter::once(parent_uuid.to_string()).collect()
-        }));
+        .with_liveness_probe(std::sync::Arc::new(move || vouch_snapshot(&[parent_uuid])));
     let handle = tokio::spawn(async move { watcher.run(tx).await });
 
     let mut parent_agent_id: Option<AgentId> = None;

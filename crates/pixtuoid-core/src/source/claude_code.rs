@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
@@ -6,7 +5,7 @@ use serde_json::Value;
 
 use crate::source::decoder::{cwd_basename_label, make_tool_detail};
 use crate::source::hook::HookSocketListener;
-use crate::source::jsonl::JsonlWatcher;
+use crate::source::jsonl::{JsonlWatcher, ProbeSnapshot};
 use crate::source::{AgentEvent, Source, TaggedSender};
 use crate::AgentId;
 
@@ -44,9 +43,16 @@ pub fn claude_config_dir() -> Option<PathBuf> {
 /// CC's first-party live-process registry: `<claude_home>/sessions/<pid>.json`,
 /// one tiny JSON file per running CC process (`{pid, sessionId, cwd, status,
 /// startedAt, procStart, ...}` — undocumented, drift-watched by
-/// check_upstream_drift.py). Returns the session UUIDs of entries whose pid is
-/// still ALIVE — a registry file can outlive a crashed CC, so each entry is
-/// verified with kill(pid, 0).
+/// check_upstream_drift.py). Returns the session UUIDs (+ owning pid each) of
+/// entries whose pid is still ALIVE — a registry file can outlive a crashed
+/// CC, so each entry is verified with kill(pid, 0).
+///
+/// Failure is explicit (#223): an UNREADABLE-or-MISSING registry dir is
+/// `None` — on a machine where CC runs the dir's absence is ambiguous (older
+/// CC without the registry, a permissions problem), so the probe declares
+/// failure and the watcher changes nothing. An EMPTY but readable dir is
+/// `Some(empty)`: a healthy "no CC running" observation that the negative
+/// vouch may act on.
 ///
 /// PID-reuse guard (#220): kill(0) only proves SOME process owns the pid. When
 /// the entry carries `startedAt` (ms epoch, stamped by CC at startup) AND the
@@ -57,14 +63,16 @@ pub fn claude_config_dir() -> Option<PathBuf> {
 /// check is additive). This matters more now that the probe is ONGOING
 /// liveness (a recycled pid would hold a dead session's sweep exemption open,
 /// not just admit one transient sprite).
-pub fn live_cc_session_ids(sessions_dir: &Path) -> HashSet<String> {
+pub fn live_cc_session_ids(sessions_dir: &Path) -> Option<ProbeSnapshot> {
     #[cfg(unix)]
     {
-        let mut live = HashSet::new();
-        // No registry dir (older CC, or no CC ever run) → empty set: the
-        // additive-only probe contributes nothing, pure-mtime gate applies.
+        let mut live = ProbeSnapshot::default();
         let Ok(entries) = std::fs::read_dir(sessions_dir) else {
-            return live;
+            tracing::debug!(
+                "CC session registry {} unreadable or missing; probe pass failed",
+                sessions_dir.display()
+            );
+            return None;
         };
         for entry in entries.flatten() {
             let path = entry.path();
@@ -111,18 +119,20 @@ pub fn live_cc_session_ids(sessions_dir: &Path) -> HashSet<String> {
                     continue;
                 }
             }
-            live.insert(reg.session_id);
+            live.pid_of.insert(reg.session_id.clone(), reg.pid);
+            live.ids.insert(reg.session_id);
         }
-        live
+        Some(live)
     }
     #[cfg(not(unix))]
     {
         // Windows has no kill(0); pid liveness there needs OpenProcess +
         // exit-code semantics we haven't validated against CC-on-Windows.
-        // Empty set = the additive-only probe contributes nothing and the
-        // first-sight gate keeps today's pure-mtime behavior.
+        // The probe CANNOT enumerate → None (explicit failure): the watcher
+        // changes nothing — admission keeps today's pure-mtime behavior and
+        // the negative vouch never arms.
         let _ = sessions_dir;
-        HashSet::new()
+        None
     }
 }
 
@@ -777,6 +787,8 @@ mod cc_id_tests {
 #[cfg(test)]
 mod liveness_tests {
     use super::*;
+    #[cfg(unix)]
+    use std::collections::HashSet;
 
     // Only the cfg(unix) tests write registry entries (the Windows impl never
     // reads them) — keep the helper gated too or it's dead code there.
@@ -792,7 +804,7 @@ mod liveness_tests {
 
     #[cfg(unix)]
     #[test]
-    fn keeps_entry_whose_pid_is_alive() {
+    fn keeps_entry_whose_pid_is_alive_and_binds_its_pid() {
         let dir = tempfile::tempdir().unwrap();
         // Our own pid is alive by construction.
         write_entry(
@@ -801,10 +813,17 @@ mod liveness_tests {
             std::process::id() as i64,
             "alive-session",
         );
-        let live = live_cc_session_ids(dir.path());
+        let live = live_cc_session_ids(dir.path()).expect("readable dir is a healthy probe");
         assert!(
-            live.contains("alive-session"),
+            live.ids.contains("alive-session"),
             "an entry with a live pid must be kept, got {live:?}"
+        );
+        // #223: the snapshot binds each vouched id to its owning OS pid (the
+        // exit-watch half).
+        assert_eq!(
+            live.pid_of.get("alive-session"),
+            Some(&(std::process::id() as i32)),
+            "the vouched id must bind to the registry entry's pid"
         );
     }
 
@@ -826,13 +845,13 @@ mod liveness_tests {
             std::process::id() as i64,
             "alive-session",
         );
-        let live = live_cc_session_ids(dir.path());
+        let live = live_cc_session_ids(dir.path()).expect("readable dir is a healthy probe");
         assert!(
-            !live.contains("dead-session"),
+            !live.ids.contains("dead-session"),
             "a crashed CC's leftover registry file must not count as live, got {live:?}"
         );
         assert!(
-            live.contains("alive-session"),
+            live.ids.contains("alive-session"),
             "the live sibling must survive the dead entry, got {live:?}"
         );
     }
@@ -861,9 +880,9 @@ mod liveness_tests {
         write_entry(dir.path(), "notes.txt", own_pid, "txt-session");
         write_entry(dir.path(), "valid.json", own_pid, "valid-session");
 
-        let live = live_cc_session_ids(dir.path());
+        let live = live_cc_session_ids(dir.path()).expect("readable dir is a healthy probe");
         assert_eq!(
-            live,
+            live.ids,
             HashSet::from(["valid-session".to_string()]),
             "only the well-formed live entry may survive"
         );
@@ -884,9 +903,9 @@ mod liveness_tests {
             std::process::id() as i64,
             "valid-session",
         );
-        let live = live_cc_session_ids(dir.path());
+        let live = live_cc_session_ids(dir.path()).expect("readable dir is a healthy probe");
         assert_eq!(
-            live,
+            live.ids,
             HashSet::from(["valid-session".to_string()]),
             "an oversized junk entry must be ignored, not break the probe"
         );
@@ -913,19 +932,45 @@ mod liveness_tests {
             std::process::id() as i64,
             "valid-session",
         );
-        let live = live_cc_session_ids(dir.path());
+        let live = live_cc_session_ids(dir.path()).expect("readable dir is a healthy probe");
         assert_eq!(
-            live,
+            live.ids,
             HashSet::from(["valid-session".to_string()]),
             "a FIFO entry must be skipped; the live sibling must survive"
         );
     }
 
     #[test]
-    fn missing_dir_yields_empty_set() {
+    fn missing_dir_is_probe_failure_none() {
+        // #223: a MISSING registry dir on a machine where CC runs is
+        // ambiguous (older CC, permissions) — explicit failure, the watcher
+        // changes nothing. (On Windows the probe can't enumerate at all, so
+        // None holds there too.)
         let dir = tempfile::tempdir().unwrap();
         let missing = dir.path().join("does-not-exist");
-        assert!(live_cc_session_ids(&missing).is_empty());
+        assert!(live_cc_session_ids(&missing).is_none());
+    }
+
+    #[test]
+    fn unreadable_dir_is_probe_failure_none() {
+        // A FILE where the sessions dir should be makes read_dir fail
+        // deterministically (no chmod games) — same explicit-failure path.
+        let dir = tempfile::tempdir().unwrap();
+        let file_not_dir = dir.path().join("sessions");
+        std::fs::write(&file_not_dir, b"not a dir").unwrap();
+        assert!(live_cc_session_ids(&file_not_dir).is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn empty_readable_dir_is_some_empty() {
+        // An empty but READABLE registry is a healthy observation: no CC is
+        // running (meaningful — the negative vouch may act on it), NOT a
+        // probe failure.
+        let dir = tempfile::tempdir().unwrap();
+        let snap = live_cc_session_ids(dir.path()).expect("empty readable dir is healthy");
+        assert!(snap.ids.is_empty());
+        assert!(snap.pid_of.is_empty());
     }
 
     // --- PID-reuse identity check (#220) -----------------------------------
@@ -1014,9 +1059,9 @@ mod liveness_tests {
             .to_string(),
         )
         .unwrap();
-        let live = live_cc_session_ids(dir.path());
+        let live = live_cc_session_ids(dir.path()).expect("readable dir is a healthy probe");
         assert_eq!(
-            live,
+            live.ids,
             HashSet::from(["genuine-session".to_string()]),
             "a recycled-pid entry must be dropped; the identity-matching one kept"
         );
@@ -1034,7 +1079,10 @@ mod liveness_tests {
             std::process::id() as i64,
             "legacy-session",
         );
-        assert!(live_cc_session_ids(dir.path()).contains("legacy-session"));
+        assert!(live_cc_session_ids(dir.path())
+            .expect("readable dir is a healthy probe")
+            .ids
+            .contains("legacy-session"));
     }
 
     #[test]

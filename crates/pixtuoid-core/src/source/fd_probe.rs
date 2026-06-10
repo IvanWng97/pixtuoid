@@ -20,7 +20,15 @@ use std::path::PathBuf;
 /// exactly. Both kernels truncate the comparand — macOS `proc_name` and Linux
 /// `comm` cap at well under 32 bytes — so only short names like `codex` can
 /// ever match; that's the intended use.
-pub(crate) fn pids_by_name(name: &str) -> Vec<i32> {
+///
+/// `None` = the proc-table enumeration ITSELF failed (macOS
+/// `proc_listallpids` sizing/fill <= 0; Linux `/proc` unreadable) — the
+/// caller must treat the whole probe pass as failed (#223: an empty result
+/// from a broken enumeration must not read as "every process exited").
+/// `Some(vec![])` = the enumeration ran fine and nothing matched
+/// (meaningful). Per-PID failures inside [`open_vnode_paths`] stay
+/// non-failures — a pid vanishing mid-probe is normal.
+pub(crate) fn pids_by_name(name: &str) -> Option<Vec<i32>> {
     imp::pids_by_name(name)
 }
 
@@ -60,14 +68,14 @@ mod imp {
         pvip: libc::vnode_info_path,
     }
 
-    pub(super) fn pids_by_name(name: &str) -> Vec<i32> {
+    pub(super) fn pids_by_name(name: &str) -> Option<Vec<i32>> {
         // Two-call sizing: a null buffer returns the current process count.
         // SAFETY: the null-buffer/0-size form is the documented sizing call —
         // nothing is written.
         let count = unsafe { libc::proc_listallpids(std::ptr::null_mut(), 0) };
         if count <= 0 {
-            tracing::debug!("proc_listallpids sizing failed ({count}); probe contributes nothing");
-            return Vec::new();
+            tracing::debug!("proc_listallpids sizing failed ({count}); probe pass failed");
+            return None;
         }
         // Slack for processes spawned between the sizing call and the fill.
         let cap = count as usize + 32;
@@ -82,11 +90,12 @@ mod imp {
             )
         };
         if filled <= 0 {
-            return Vec::new();
+            tracing::debug!("proc_listallpids fill failed ({filled}); probe pass failed");
+            return None;
         }
         pids.truncate(usize::min(filled as usize, cap));
         pids.retain(|&pid| pid > 0 && process_name(pid).as_deref() == Some(name));
-        pids
+        Some(pids)
     }
 
     fn process_name(pid: libc::pid_t) -> Option<String> {
@@ -188,10 +197,10 @@ mod imp {
 mod imp {
     use std::path::PathBuf;
 
-    pub(super) fn pids_by_name(name: &str) -> Vec<i32> {
+    pub(super) fn pids_by_name(name: &str) -> Option<Vec<i32>> {
         let Ok(entries) = std::fs::read_dir("/proc") else {
-            tracing::debug!("/proc unreadable; probe contributes nothing");
-            return Vec::new();
+            tracing::debug!("/proc unreadable; probe pass failed");
+            return None;
         };
         let mut pids = Vec::new();
         for entry in entries.flatten() {
@@ -210,7 +219,7 @@ mod imp {
                 pids.push(pid);
             }
         }
-        pids
+        Some(pids)
     }
 
     pub(super) fn open_vnode_paths(pid: i32) -> Vec<PathBuf> {
@@ -232,10 +241,13 @@ mod imp {
     use std::path::PathBuf;
 
     // No validated fd-enumeration path on this platform (Windows needs
-    // NtQuerySystemInformation handle walks we haven't vetted). Empty =
-    // the additive-only probe contributes nothing; pure-mtime gate applies.
-    pub(super) fn pids_by_name(_name: &str) -> Vec<i32> {
-        Vec::new()
+    // NtQuerySystemInformation handle walks we haven't vetted). Some(empty) =
+    // "ran fine, nothing matched": nothing is ever vouched here, so the
+    // pure-mtime gate applies AND the negative vouch can never fire (an empty
+    // prev_vouched set has nothing to lose) — Some keeps the un-gated
+    // empty-result tests platform-uniform.
+    pub(super) fn pids_by_name(_name: &str) -> Option<Vec<i32>> {
+        Some(Vec::new())
     }
 
     pub(super) fn open_vnode_paths(_pid: i32) -> Vec<PathBuf> {
@@ -275,9 +287,16 @@ mod tests {
     }
 
     #[test]
-    fn pids_by_name_for_nonexistent_process_is_empty() {
-        // Longer than any kernel-truncated process name, so it can never match.
-        assert!(pids_by_name("definitely-not-a-process-7q3z9").is_empty());
+    fn pids_by_name_for_nonexistent_process_is_some_empty() {
+        // Longer than any kernel-truncated process name, so it can never
+        // match. Some(empty) — the enumeration RAN and found nothing; None is
+        // reserved for the proc table itself failing (#223: the distinction
+        // is what keeps a broken enumeration from reading as "everything
+        // exited").
+        assert_eq!(
+            pids_by_name("definitely-not-a-process-7q3z9"),
+            Some(Vec::new())
+        );
     }
 
     #[test]
@@ -298,7 +317,9 @@ mod tests {
             .spawn()
             .unwrap();
         let pid = child.id() as i32;
-        let found = pids_by_name("sleep").contains(&pid);
+        let found = pids_by_name("sleep")
+            .expect("a healthy system's proc-table enumeration must succeed")
+            .contains(&pid);
         let _ = child.kill();
         let _ = child.wait();
         assert!(found, "expected spawned sleep (pid {pid}) in pids_by_name");

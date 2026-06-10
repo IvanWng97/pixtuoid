@@ -30,15 +30,33 @@ fn default_id_from_path(p: &Path) -> String {
     crate::source::decoder::normalize_path_key(&p.to_string_lossy())
 }
 
+/// One healthy liveness-probe observation: which agent processes are verified
+/// alive RIGHT NOW, and which OS pid owns each.
+#[derive(Debug, Clone, Default)]
+pub struct ProbeSnapshot {
+    /// Session ids (`IdDeriver` id-space) of agent processes verified alive
+    /// right now.
+    pub ids: HashSet<String>,
+    /// id → owning OS pid, for the exit watch (many ids may share one pid —
+    /// one codex process holds every rollout it has open).
+    pub pid_of: HashMap<String, i32>,
+}
+
 /// Optional first-party liveness probe: returns the session ids — in the
 /// source's `IdDeriver` id-space — of agent processes known to be ALIVE right
-/// now (e.g. CC's `~/.claude/sessions/<pid>.json` registry). ADDITIVE-ONLY:
-/// membership bypasses the first-sight recency/ended gate (a live-but-idle
-/// session is read from the top however old its mtime); absence changes
-/// nothing — no probe / empty set = the pure mtime+ended gate. `Arc<dyn Fn>`
-/// rather than a fn pointer like the other seams because the real probe
-/// captures its registry dir (the others are stateless).
-pub type LivenessProbe = Arc<dyn Fn() -> HashSet<String> + Send + Sync>;
+/// now (e.g. CC's `~/.claude/sessions/<pid>.json` registry). ADDITIVE-ONLY for
+/// admission: membership bypasses the first-sight recency/ended gate (a
+/// live-but-idle session is read from the top however old its mtime).
+/// Failure is EXPLICIT: `None` means the probe itself FAILED (the enumeration
+/// errored — unreadable registry dir, proc-table failure) and callers must
+/// change NOTHING; `Some` with empty `ids` means the probe ran fine and
+/// nothing is alive (meaningful!). Absence of an id is therefore only
+/// meaningful in a `Some` snapshot — which is what lets a previously-vouched
+/// id MISSING from two healthy snapshots count as a high-confidence exit (the
+/// negative vouch, #223). `Arc<dyn Fn>` rather than a fn pointer like the
+/// other seams because the real probe captures its registry dir (the others
+/// are stateless).
+pub type LivenessProbe = Arc<dyn Fn() -> Option<ProbeSnapshot> + Send + Sync>;
 
 /// The per-source decode/label/end/id fn-pointers (the invariant-#3 seam)
 /// bundled so the seed/scan/walk helpers thread ONE Copy value, not four.
@@ -78,10 +96,19 @@ pub struct JsonlWatcher {
     id_derive: IdDeriver,
     liveness_probe: Option<LivenessProbe>,
     poll_interval: Duration,
+    negative_vouch_min_span: Duration,
 }
 
 const DEFAULT_INITIAL_WINDOW: Duration = Duration::from_secs(3600);
 const DEFAULT_POLL_INTERVAL: Duration = Duration::from_secs(60);
+
+/// Negative vouch (#223): a previously-vouched id must be MISSING from two
+/// healthy probe snapshots at least this far apart before its exit is
+/// confirmed. Two observations ≥60s apart make the signal immune to Codex's
+/// brief drop-and-reopen fd gap on a write failure and to the initial-seed /
+/// 250ms-rescan adjacency (back-to-back snapshots seconds apart can never
+/// confirm on their own).
+const NEGATIVE_VOUCH_MIN_SPAN: Duration = Duration::from_secs(60);
 
 /// Test-only seam: forces every `JsonlWatcher` in this process onto a polling
 /// backend (`notify::PollWatcher`) at `interval`, instead of the native
@@ -116,6 +143,7 @@ impl JsonlWatcher {
             id_derive: default_id_from_path,
             liveness_probe: None,
             poll_interval: DEFAULT_POLL_INTERVAL,
+            negative_vouch_min_span: NEGATIVE_VOUCH_MIN_SPAN,
         }
     }
 
@@ -135,6 +163,16 @@ impl JsonlWatcher {
         self
     }
 
+    /// Test-only seam (mirrors `with_poll_interval`): shrinks the
+    /// [`NEGATIVE_VOUCH_MIN_SPAN`] confirmation window so the negative-vouch
+    /// exit path is testable — at the production 60s span a test would wait
+    /// over a minute per confirmation. Production never calls this.
+    #[doc(hidden)]
+    pub fn with_negative_vouch_min_span(mut self, span: Duration) -> Self {
+        self.negative_vouch_min_span = span;
+        self
+    }
+
     pub fn with_id_deriver(mut self, id_derive: IdDeriver) -> Self {
         self.id_derive = id_derive;
         self
@@ -149,14 +187,12 @@ impl JsonlWatcher {
         let cursors: Arc<Mutex<HashMap<PathBuf, u64>>> = Arc::new(Mutex::new(HashMap::new()));
         let seen_sessions: Arc<Mutex<HashMap<PathBuf, bool>>> =
             Arc::new(Mutex::new(HashMap::new()));
-        // Refreshed once per scan pass (here for the initial seed, then in the
-        // rescan/poll arms below); notify walks read the latest snapshot.
-        let live: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(
-            self.liveness_probe
-                .as_ref()
-                .map(|p| p())
-                .unwrap_or_default(),
-        ));
+        // Refreshed once per scan pass (the initial seed below, then the
+        // rescan/poll arms) via `refresh_probe_snapshot`; notify walks read
+        // the latest snapshot. Starts empty — the seed refresh fills it before
+        // the first scan.
+        let live: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
+        let mut vouch = NegativeVouch::new(self.negative_vouch_min_span);
 
         let (notify_tx, mut notify_rx) = tokio::sync::mpsc::unbounded_channel::<PathBuf>();
         let event_handler = move |res: notify::Result<notify::Event>| {
@@ -198,20 +234,23 @@ impl JsonlWatcher {
         // uses, so a file is gated identically (recency + session_end) no matter
         // which pass first sees it. (Previously a separate `initial_seed_walk`
         // owned the gate and `walk_jsonl` had none — the divergence behind #85.)
-        scan_root(
-            &self.root,
-            decoders,
-            &WatchCtx {
+        {
+            let ctx = WatchCtx {
                 source: &source_arc,
                 cursors: &cursors,
                 seen: &seen_sessions,
                 tx: &tx,
                 window: self.initial_window,
                 live: &live,
-            },
-        )
-        .await;
-        emit_proof_of_life(&live, &source_arc, &tx).await;
+            };
+            let healthy =
+                refresh_probe_snapshot(self.liveness_probe.as_ref(), &mut vouch, decoders, &ctx)
+                    .await;
+            scan_root(&self.root, decoders, &ctx).await;
+            if healthy {
+                emit_proof_of_life(&live, &source_arc, &tx).await;
+            }
+        }
 
         // Re-scan shortly after startup to catch files that APFS read_dir
         // missed during the initial seed walk (metadata propagation race).
@@ -248,18 +287,22 @@ impl JsonlWatcher {
                 }
                 _ = &mut rescan_delay, if !rescan_done => {
                     rescan_done = true;
-                    if let Some(probe) = &self.liveness_probe {
-                        *live.lock().await = probe();
-                    }
+                    let healthy = refresh_probe_snapshot(
+                        self.liveness_probe.as_ref(), &mut vouch, decoders, &ctx,
+                    ).await;
                     scan_root(&self.root, decoders, &ctx).await;
-                    emit_proof_of_life(&live, &source_arc, &tx).await;
+                    if healthy {
+                        emit_proof_of_life(&live, &source_arc, &tx).await;
+                    }
                 }
                 _ = poll.tick() => {
-                    if let Some(probe) = &self.liveness_probe {
-                        *live.lock().await = probe();
-                    }
+                    let healthy = refresh_probe_snapshot(
+                        self.liveness_probe.as_ref(), &mut vouch, decoders, &ctx,
+                    ).await;
                     scan_root(&self.root, decoders, &ctx).await;
-                    emit_proof_of_life(&live, &source_arc, &tx).await;
+                    if healthy {
+                        emit_proof_of_life(&live, &source_arc, &tx).await;
+                    }
                 }
             }
         }
@@ -333,6 +376,123 @@ async fn emit_proof_of_life(
             .send((Transport::Jsonl, AgentEvent::ProofOfLife { agent_id }))
             .await;
     }
+}
+
+/// #223: the negative-vouch ledger. A session id the probe previously vouched
+/// for that DISAPPEARS from a healthy snapshot is a high-confidence exit — the
+/// registry entry was removed / the rollout fd closed, signals only the OWNING
+/// process can produce — so the watcher can emit the `SessionEnd` the CLI
+/// never writes (Codex has no exit signal of any kind; CC's hook is
+/// best-effort) instead of waiting out the 10–30 min stale-sweep.
+/// Confirmation needs the id missing from two healthy observations at least
+/// `min_span` apart (see [`NEGATIVE_VOUCH_MIN_SPAN`]); a probe FAILURE
+/// (`None`) is never an observation — failure changes nothing.
+struct NegativeVouch {
+    min_span: Duration,
+    /// Ids vouched by an earlier healthy snapshot. An id stays "previously
+    /// vouched" while its miss window runs, so the second observation can
+    /// confirm it.
+    prev_vouched: HashSet<String>,
+    /// id → when a healthy snapshot FIRST came back without it. `Instant`
+    /// (monotonic): a wall-clock jump must not fake a 60s span.
+    miss_since: HashMap<String, std::time::Instant>,
+}
+
+impl NegativeVouch {
+    fn new(min_span: Duration) -> Self {
+        Self {
+            min_span,
+            prev_vouched: HashSet::new(),
+            miss_since: HashMap::new(),
+        }
+    }
+
+    /// Fold one HEALTHY snapshot into the ledger, emitting a confirmed exit's
+    /// `SessionEnd` (+ the `seen` un-claim) through `ctx`. Never called on a
+    /// probe failure — the caller (`refresh_probe_snapshot`) only forwards
+    /// `Some` snapshots.
+    async fn observe(
+        &mut self,
+        snap: &ProbeSnapshot,
+        decoders: SourceDecoders,
+        ctx: &WatchCtx<'_>,
+    ) {
+        let now = std::time::Instant::now();
+        // A re-appearing id (fd reopened, registry entry back) cancels its
+        // pending miss window.
+        self.miss_since.retain(|id, _| !snap.ids.contains(id));
+        let missing: Vec<String> = self.prev_vouched.difference(&snap.ids).cloned().collect();
+        for id in missing {
+            match self.miss_since.get(&id) {
+                // Second healthy miss past the span — confirmed exit.
+                Some(first_miss) if now.duration_since(*first_miss) >= self.min_span => {
+                    confirm_negative_vouch(&id, decoders, ctx).await;
+                    self.prev_vouched.remove(&id);
+                    self.miss_since.remove(&id);
+                }
+                // Window still running — wait for a later snapshot.
+                Some(_) => {}
+                // First miss — open the window, keep the id vouched.
+                None => {
+                    self.miss_since.insert(id, now);
+                }
+            }
+        }
+        // Previously-vouched = the current snapshot ∪ ids whose miss window
+        // still runs (they must stay eligible for the confirming observation).
+        self.prev_vouched = snap.ids.clone();
+        self.prev_vouched.extend(self.miss_since.keys().cloned());
+    }
+}
+
+/// A negative vouch CONFIRMED: emit the `SessionEnd` the CLI never wrote, then
+/// un-claim first-sight for every registered path of this session — mirroring
+/// the decoded-SessionEnd path in `walk_jsonl` (terminator first, un-claim
+/// after) so a LATER append re-registers through `emit_first_sight` (a resumed
+/// session walks back in; a wrongly-ended live one self-heals on its next
+/// write or re-vouch).
+async fn confirm_negative_vouch(id: &str, decoders: SourceDecoders, ctx: &WatchCtx<'_>) {
+    debug!("negative vouch confirmed for {id}: probe stopped vouching; emitting SessionEnd");
+    let agent_id = AgentId::from_parts(ctx.source, id);
+    let _ = ctx
+        .tx
+        .send((Transport::Jsonl, AgentEvent::SessionEnd { agent_id }))
+        .await;
+    let mut seen = ctx.seen.lock().await;
+    let claimed: Vec<PathBuf> = seen
+        .keys()
+        .filter(|p| (decoders.id_derive)(p) == id)
+        .cloned()
+        .collect();
+    for path in claimed {
+        seen.remove(&path);
+    }
+}
+
+/// ONE probe refresh, shared by the three sites that re-snapshot `live` (the
+/// initial seed, the 250ms rescan, the 60s poll). On a HEALTHY snapshot
+/// (`Some`): replace the admission set and fold the snapshot into the
+/// negative-vouch ledger; returns true so the caller re-emits `ProofOfLife`
+/// after its scan. On a probe FAILURE (`None`) or no probe wired: change
+/// NOTHING — `ctx.live` keeps the previous ids (admission stays additive),
+/// the miss windows neither advance nor confirm, no `ProofOfLife` is emitted
+/// (the reducer's TTL absorbs the gap).
+async fn refresh_probe_snapshot(
+    probe: Option<&LivenessProbe>,
+    vouch: &mut NegativeVouch,
+    decoders: SourceDecoders,
+    ctx: &WatchCtx<'_>,
+) -> bool {
+    let Some(probe) = probe else {
+        return false;
+    };
+    let Some(snap) = probe() else {
+        debug!("liveness probe failed; keeping the previous snapshot (failure changes nothing)");
+        return false;
+    };
+    *ctx.live.lock().await = snap.ids.clone();
+    vouch.observe(&snap, decoders, ctx).await;
+    true
 }
 
 async fn scan_root(root: &Path, decoders: SourceDecoders, ctx: &WatchCtx<'_>) {
