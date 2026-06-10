@@ -64,10 +64,16 @@ pub(crate) async fn handle_conn(stream: impl AsyncRead + Unpin, tx: TaggedSender
                     }
                 };
                 match decode_hook_payload(v) {
-                    Ok(ev) => {
-                        debug!("hook event: {ev:?}");
-                        if tx.send((Transport::Hook, ev)).await.is_err() {
-                            return;
+                    // One payload can decode to multiple events (an Identity
+                    // attached ahead of a tool/permission event, #221) — sent
+                    // in order on the same channel, so the reducer registers
+                    // with real identity before the activity event applies.
+                    Ok(evs) => {
+                        for ev in evs {
+                            debug!("hook event: {ev:?}");
+                            if tx.send((Transport::Hook, ev)).await.is_err() {
+                                return;
+                            }
                         }
                     }
                     Err(e) => warn!("hook decode error: {e}"),

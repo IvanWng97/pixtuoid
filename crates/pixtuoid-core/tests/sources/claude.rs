@@ -51,37 +51,35 @@ fn cc_subagent_links_renames_and_cascades_on_parent_exit() {
     let now = SystemTime::now();
 
     // Parent SessionStart (hook, keyed on transcript_path).
-    r.apply(
-        &mut scene,
-        decode_hook_payload(json!({
-            "hook_event_name": "SessionStart",
-            "session_id": "parent",
-            "transcript_path": PARENT_PATH,
-            "cwd": "/home/user/demo-project"
-        }))
-        .unwrap(),
-        now,
-        Transport::Hook,
-    );
+    for ev in decode_hook_payload(json!({
+        "hook_event_name": "SessionStart",
+        "session_id": "parent",
+        "transcript_path": PARENT_PATH,
+        "cwd": "/home/user/demo-project"
+    }))
+    .unwrap()
+    {
+        r.apply(&mut scene, ev, now, Transport::Hook);
+    }
     assert!(scene.agents.contains_key(&parent_id()), "parent created");
 
     // Parent dispatches a subagent. Real CC names this tool "Agent" (not
     // "Task") — Task-detection must still fire so the reducer records an
     // active_task and suppresses the subagent's misattributed hook events.
-    r.apply(
-        &mut scene,
-        decode_hook_payload(json!({
-            "hook_event_name": "PreToolUse",
-            "session_id": "parent",
-            "transcript_path": PARENT_PATH,
-            "tool_name": "Agent",
-            "tool_input": {"description": "explore", "subagent_type": "general-purpose"},
-            "tool_use_id": "task-1"
-        }))
-        .unwrap(),
-        now,
-        Transport::Hook,
-    );
+    // (Decodes to [Identity, ActivityStart] since #221 — apply both, like the
+    // hook listener would.)
+    for ev in decode_hook_payload(json!({
+        "hook_event_name": "PreToolUse",
+        "session_id": "parent",
+        "transcript_path": PARENT_PATH,
+        "tool_name": "Agent",
+        "tool_input": {"description": "explore", "subagent_type": "general-purpose"},
+        "tool_use_id": "task-1"
+    }))
+    .unwrap()
+    {
+        r.apply(&mut scene, ev, now, Transport::Hook);
+    }
 
     // The subagent's own transcript appears: the watcher emits SessionStart with
     // parent_id derived from the `/subagents/` path. Mirror that emission (the

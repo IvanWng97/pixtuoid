@@ -158,7 +158,9 @@ fn decode_fixture(source: &str, dir: &Path) -> Decoded {
             let v: serde_json::Value = serde_json::from_str(&line)
                 .unwrap_or_else(|e| panic!("bad hook json in {}: {e}", hooks_path.display()));
             match decode_hook_payload(v) {
-                Ok(ev) => hooks.push(ev),
+                // One payload can decode to multiple events (Identity attached
+                // ahead of a tool/permission event, #221).
+                Ok(evs) => hooks.extend(evs),
                 Err(e) => panic!("hook decode error in {}: {e}", hooks_path.display()),
             }
         }

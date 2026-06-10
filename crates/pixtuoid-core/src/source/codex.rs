@@ -55,7 +55,7 @@ fn is_uuid(s: &str) -> bool {
 /// arms. Dispatched via `registry::HookDecoding::custom`. The parent link
 /// carried here is the ONLY one a flat Codex rollout gets — see the module
 /// doc and the wire capture pinned in `tests/sources/codex/mod.rs`.
-pub(crate) fn decode_codex_hook_custom(v: &Value) -> Result<Option<AgentEvent>> {
+pub(crate) fn decode_codex_hook_custom(v: &Value) -> Result<Option<Vec<AgentEvent>>> {
     use anyhow::anyhow;
     let Some(obj) = v.as_object() else {
         return Ok(None); // shared path reports the malformed payload
@@ -93,13 +93,13 @@ pub(crate) fn decode_codex_hook_custom(v: &Value) -> Result<Option<AgentEvent>> 
             let (session_id, child) = guards(obj)?;
             let child = child.ok_or_else(|| anyhow!("SubagentStart missing/empty agent_id"))?;
             let cwd = obj.get("cwd").and_then(|s| s.as_str()).unwrap_or("").into();
-            Ok(Some(AgentEvent::SessionStart {
+            Ok(Some(vec![AgentEvent::SessionStart {
                 agent_id: AgentId::from_parts(SOURCE_NAME, &child),
                 source: SOURCE_NAME.to_string(),
                 session_id: child,
                 cwd,
                 parent_id: Some(AgentId::from_parts(SOURCE_NAME, &session_id)),
-            }))
+            }]))
         }
         // End the CHILD promptly (else its rollout lingers to the 30-min
         // stale-sweep). Best-effort: losing the race against the child's slot
@@ -107,9 +107,9 @@ pub(crate) fn decode_codex_hook_custom(v: &Value) -> Result<Option<AgentEvent>> 
         "SubagentStop" => {
             let (_session_id, child) = guards(obj)?;
             let child = child.ok_or_else(|| anyhow!("SubagentStop missing/empty agent_id"))?;
-            Ok(Some(AgentEvent::SessionEnd {
+            Ok(Some(vec![AgentEvent::SessionEnd {
                 agent_id: AgentId::from_parts(SOURCE_NAME, &child),
-            }))
+            }]))
         }
         _ => Ok(None),
     }

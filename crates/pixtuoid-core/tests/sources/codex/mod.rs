@@ -23,7 +23,8 @@ use pixtuoid_core::AgentId;
 const PARENT: &str = "01000000-0000-7000-8000-000000000001";
 const CHILD: &str = "01000000-0000-7000-8000-000000000002";
 
-/// Decode the captured hook payloads in file order.
+/// Decode the captured hook payloads in file order (a payload can decode to
+/// multiple events — Identity ahead of a tool/permission event, #221).
 fn captured_hook_events() -> Vec<AgentEvent> {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/sources/codex/fixtures/hook-payloads.jsonl");
@@ -31,7 +32,7 @@ fn captured_hook_events() -> Vec<AgentEvent> {
         .unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
         .lines()
         .filter(|l| !l.trim().is_empty())
-        .map(|l| {
+        .flat_map(|l| {
             let v: serde_json::Value = serde_json::from_str(l).expect("valid hook json");
             decode_hook_payload(v).expect("captured Codex hook payload must decode")
         })

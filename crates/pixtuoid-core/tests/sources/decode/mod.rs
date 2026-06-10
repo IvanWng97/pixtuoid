@@ -11,6 +11,34 @@ fn load(name: &str) -> serde_json::Value {
     serde_json::from_str(&s).unwrap()
 }
 
+/// Decode a hook payload expected to yield exactly ONE event (lifecycle arms —
+/// SessionStart / UserPromptSubmit / Stop / SessionEnd / Subagent*).
+fn decode_single(v: serde_json::Value) -> AgentEvent {
+    let mut evs = decode_hook_payload(v).expect("decodes");
+    assert_eq!(evs.len(), 1, "expected exactly one event, got {evs:?}");
+    evs.pop().expect("one event")
+}
+
+/// Decode a tool/permission hook payload and return its ACTIVITY event. Those
+/// arms prepend an `Identity` (#221) — assert the pair shape and that the two
+/// events coalesce on one AgentId, then hand back the activity event so each
+/// test keeps asserting what it always did.
+fn decode_activity(v: serde_json::Value) -> AgentEvent {
+    let mut evs = decode_hook_payload(v).expect("decodes");
+    assert_eq!(evs.len(), 2, "expected Identity + activity, got {evs:?}");
+    assert!(
+        matches!(evs[0], AgentEvent::Identity { .. }),
+        "tool/permission arms must lead with Identity, got {evs:?}"
+    );
+    let activity = evs.pop().expect("activity event");
+    assert_eq!(
+        evs[0].agent_id(),
+        activity.agent_id(),
+        "Identity must coalesce with its activity event"
+    );
+    activity
+}
+
 fn load_jsonl(name: &str) -> serde_json::Value {
     let s = std::fs::read_to_string(format!("tests/sources/decode/fixtures/jsonl/{name}.json"))
         .unwrap();
@@ -19,7 +47,7 @@ fn load_jsonl(name: &str) -> serde_json::Value {
 
 #[test]
 fn decode_session_start() {
-    let ev = decode_hook_payload(load("session_start")).unwrap();
+    let ev = decode_single(load("session_start"));
     // CC keys on the session UUID (IdKey::SessionId), which == the transcript
     // filename stem the watcher/per-line decode derive (`cc_id_from_path`).
     let expected_id = AgentId::from_parts("claude-code", "ses-abc");
@@ -42,7 +70,7 @@ fn decode_session_start() {
 fn decode_session_start_with_custom_source() {
     let mut payload = load("session_start");
     payload["_pixtuoid_source"] = serde_json::Value::String("antigravity".into());
-    let ev = decode_hook_payload(payload).unwrap();
+    let ev = decode_single(payload);
     match ev {
         AgentEvent::SessionStart { source, .. } => {
             assert_eq!(source, "antigravity");
@@ -53,7 +81,7 @@ fn decode_session_start_with_custom_source() {
 
 #[test]
 fn decode_pre_tool_use_write_maps_to_typing() {
-    let ev = decode_hook_payload(load("pre_tool_use_write")).unwrap();
+    let ev = decode_activity(load("pre_tool_use_write"));
     match ev {
         AgentEvent::ActivityStart { detail, .. } => {
             assert!(detail.unwrap().display().contains("Write"));
@@ -64,13 +92,13 @@ fn decode_pre_tool_use_write_maps_to_typing() {
 
 #[test]
 fn decode_post_tool_use_is_activity_end() {
-    let ev = decode_hook_payload(load("post_tool_use_write")).unwrap();
+    let ev = decode_activity(load("post_tool_use_write"));
     assert!(matches!(ev, AgentEvent::ActivityEnd { .. }));
 }
 
 #[test]
 fn decode_notification_is_waiting() {
-    let ev = decode_hook_payload(load("notification")).unwrap();
+    let ev = decode_activity(load("notification"));
     match ev {
         AgentEvent::Waiting { reason, .. } => assert!(reason.contains("permission")),
         other => panic!("got {other:?}"),
@@ -79,7 +107,7 @@ fn decode_notification_is_waiting() {
 
 #[test]
 fn decode_session_end() {
-    let ev = decode_hook_payload(load("session_end")).unwrap();
+    let ev = decode_single(load("session_end"));
     assert!(matches!(ev, AgentEvent::SessionEnd { .. }));
 }
 
@@ -134,7 +162,7 @@ fn cc_empty_attribution_agent_emits_no_rename() {
 // agent_id/agent_type/turn_id beside the common session_id/cwd/transcript_path.
 #[test]
 fn codex_subagent_start_links_child_to_parent() {
-    let ev = decode_hook_payload(json!({
+    let ev = decode_single(json!({
         "hook_event_name": "SubagentStart",
         "session_id": "parent-sess",
         "agent_id": "child-agent",
@@ -142,8 +170,7 @@ fn codex_subagent_start_links_child_to_parent() {
         "turn_id": "turn-1",
         "cwd": "/home/user/demo-project",
         "_pixtuoid_source": "codex"
-    }))
-    .expect("SubagentStart decodes");
+    }));
     match ev {
         AgentEvent::SessionStart {
             agent_id,
@@ -171,15 +198,14 @@ fn codex_subagent_start_links_child_to_parent() {
 
 #[test]
 fn codex_subagent_stop_ends_child_not_parent() {
-    let ev = decode_hook_payload(json!({
+    let ev = decode_single(json!({
         "hook_event_name": "SubagentStop",
         "session_id": "parent-sess",
         "agent_id": "child-agent",
         "agent_type": "default",
         "stop_hook_active": false,
         "_pixtuoid_source": "codex"
-    }))
-    .expect("SubagentStop decodes");
+    }));
     match ev {
         AgentEvent::SessionEnd { agent_id } => assert_eq!(
             agent_id,
@@ -237,7 +263,7 @@ fn codex_subagent_hook_coalesces_with_its_windows_rollout_path() {
         format!(r"C:\Users\Me\.codex\sessions\2026\06\08\rollout-2026-06-08T22-36-52-{uuid}.jsonl");
 
     // Hook side: SubagentStart keys the CHILD on agent_id (== the rollout UUID).
-    let child = decode_hook_payload(json!({
+    let child = decode_single(json!({
         "hook_event_name": "SubagentStart",
         "session_id": "parent-sess",
         "agent_id": uuid,
@@ -245,7 +271,6 @@ fn codex_subagent_hook_coalesces_with_its_windows_rollout_path() {
         "cwd": r"C:\Users\Me\demo",
         "_pixtuoid_source": "codex"
     }))
-    .unwrap()
     .agent_id();
 
     // Watcher side: the id derived from the on-disk Windows rollout path.
@@ -302,7 +327,7 @@ fn decode_hook_payload_with_multibyte_tool_input_does_not_panic() {
             "command": "echo 这是一个非常长的中文命令需要被截断这是一个非常长的中文命令需要被截断"
         }
     });
-    let ev = decode_hook_payload(payload).unwrap();
+    let ev = decode_activity(payload);
     match ev {
         AgentEvent::ActivityStart { detail, .. } => {
             let d = detail.expect("detail set");
@@ -323,7 +348,7 @@ fn decode_pre_tool_use_carries_tool_use_id_from_payload() {
         "tool_use_id": "toolu_01ABC",
         "tool_input": { "description": "go" }
     });
-    let ev = decode_hook_payload(payload).unwrap();
+    let ev = decode_activity(payload);
     match ev {
         AgentEvent::ActivityStart {
             tool_use_id,
@@ -355,7 +380,7 @@ fn decode_pre_tool_use_agent_tool_is_task() {
             "tool_use_id": "toolu_01ABC",
             "tool_input": { "description": "go", "subagent_type": "Explore" }
         });
-        match decode_hook_payload(payload).unwrap() {
+        match decode_activity(payload) {
             AgentEvent::ActivityStart { detail, .. } => assert!(
                 detail.expect("detail set").is_task(),
                 "{tool} must be Task-detected"
@@ -379,7 +404,7 @@ fn subagent_dispatch_detected_by_subagent_type_under_novel_name() {
         "tool_use_id": "toolu_01ZZ",
         "tool_input": { "description": "go", "subagent_type": "Explore" }
     });
-    match decode_hook_payload(payload).unwrap() {
+    match decode_activity(payload) {
         AgentEvent::ActivityStart { detail, .. } => assert!(
             detail.expect("detail").is_task(),
             "a tool carrying subagent_type is a dispatch regardless of its name"
@@ -399,7 +424,7 @@ fn non_dispatch_tool_is_not_task() {
         "tool_use_id": "t",
         "tool_input": { "file_path": "/x" }
     });
-    match decode_hook_payload(payload).unwrap() {
+    match decode_activity(payload) {
         AgentEvent::ActivityStart { detail, .. } => {
             assert!(!detail.expect("detail").is_task(), "Read is not a dispatch")
         }
@@ -437,7 +462,7 @@ fn decode_post_tool_use_carries_tool_use_id_from_payload() {
         "tool_name": "Task",
         "tool_use_id": "toolu_01ABC"
     });
-    let ev = decode_hook_payload(payload).unwrap();
+    let ev = decode_activity(payload);
     match ev {
         AgentEvent::ActivityEnd { tool_use_id, .. } => {
             assert_eq!(tool_use_id.as_deref(), Some("toolu_01ABC"));
@@ -732,7 +757,7 @@ fn decode_cc_hook_keys_on_session_id_ignoring_transcript_path() {
         "tool_name": "Bash",
         "tool_input": { "command": "ls" }
     });
-    let ev = decode_hook_payload(payload).expect("decodes");
+    let ev = decode_activity(payload);
     let agent_id = match ev {
         pixtuoid_core::source::AgentEvent::ActivityStart { agent_id, .. } => agent_id,
         other => panic!("expected ActivityStart, got {other:?}"),
@@ -761,7 +786,7 @@ fn decode_pre_tool_use_long_command_is_ellipsis_truncated() {
         "tool_name": "Bash",
         "tool_input": { "command": long_cmd }
     });
-    match decode_hook_payload(payload).unwrap() {
+    match decode_activity(payload) {
         AgentEvent::ActivityStart { detail, .. } => {
             let d = detail.expect("detail set");
             assert!(
@@ -787,7 +812,7 @@ fn decode_pre_tool_use_missing_target_field_has_no_suffix() {
         "tool_name": "Bash",
         "tool_input": {}
     });
-    match decode_hook_payload(payload).unwrap() {
+    match decode_activity(payload) {
         AgentEvent::ActivityStart { detail, .. } => {
             let d = detail.expect("detail set");
             assert_eq!(
@@ -906,7 +931,7 @@ fn decode_hook_payload_missing_tool_name_still_succeeds() {
         "session_id": "ses-abc",
         "transcript_path": "/tmp/t.jsonl"
     });
-    let ev = decode_hook_payload(payload).unwrap();
+    let ev = decode_activity(payload);
     match ev {
         AgentEvent::ActivityStart { detail, .. } => {
             let d = detail.expect("detail set");
@@ -956,7 +981,7 @@ async fn hook_and_watcher_keys_coalesce_for_one_file() {
         "transcript_path": transcript_str,
         "cwd": "/repo"
     });
-    let hook_id = decode_hook_payload(hook_payload).unwrap().agent_id();
+    let hook_id = decode_single(hook_payload).agent_id();
 
     // Watcher side: run a real JsonlWatcher over projects_root, write a
     // session_start line, and capture the SessionStart AgentId.
@@ -1033,8 +1058,8 @@ fn mixed_separator_and_case_forms_coalesce_on_windows() {
         "_pixtuoid_source": "antigravity"
     });
     assert_eq!(
-        decode_hook_payload(a).unwrap().agent_id(),
-        decode_hook_payload(b).unwrap().agent_id(),
+        decode_single(a).agent_id(),
+        decode_single(b).agent_id(),
         "backslash and forward-slash forms of the same Windows path must produce \
          the same AgentId after normalize_path_key folds both to lowercase forward-slashes"
     );

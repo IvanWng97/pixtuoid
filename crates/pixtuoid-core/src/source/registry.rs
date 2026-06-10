@@ -47,9 +47,11 @@ pub enum IdKey {
 }
 
 /// A source's own hook-payload decoder, dispatched ahead of the shared arms.
-/// `Ok(Some(ev))` short-circuits; `Ok(None)` means "not my event" and falls
+/// `Ok(Some(events))` short-circuits (the decoded sequence for this payload —
+/// usually one event, two when an [`AgentEvent::Identity`] is attached ahead
+/// of an activity event, #221); `Ok(None)` means "not my event" and falls
 /// through to the shared arms; `Err` propagates.
-pub type HookCustomDecoder = fn(&Value) -> Result<Option<AgentEvent>>;
+pub type HookCustomDecoder = fn(&Value) -> Result<Option<Vec<AgentEvent>>>;
 
 /// Per-source hook decoding behaviour beyond the shared CC-shaped arms.
 pub struct HookDecoding {

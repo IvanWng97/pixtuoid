@@ -169,6 +169,26 @@ pub enum AgentEvent {
     ProofOfLife {
         agent_id: AgentId,
     },
+    /// Identity context a hook decoder attaches IMMEDIATELY AHEAD of a
+    /// tool/permission activity event (#221): hook payloads carry
+    /// source/session_id/cwd that the activity variants don't, so without
+    /// this a proof-of-life registration for an unknown id starts BLANK
+    /// (empty identity, ordinal `#N` label) until the next real
+    /// `SessionStart` — for a hook-only source (Reasonix) that's the whole
+    /// rest of the turn. The reducer registers-or-back-fills from it on the
+    /// Hook transport ONLY (a JSONL `Identity` is a structural no-op —
+    /// transcript lines can be historical replays and must never synthesize);
+    /// it never touches labels, activity state, or `last_event_at` (the
+    /// paired activity event right behind it carries those).
+    Identity {
+        agent_id: AgentId,
+        source: String,
+        session_id: String,
+        /// `None` when the payload carries no usable cwd (e.g. CC PostToolUse,
+        /// Codex PermissionRequest) — the registration is then label-ordinal
+        /// but still reap-exempt, exactly like the blank synthesis path.
+        cwd: Option<PathBuf>,
+    },
 }
 
 impl AgentEvent {
@@ -181,6 +201,7 @@ impl AgentEvent {
             AgentEvent::Rename { agent_id, .. } => *agent_id,
             AgentEvent::SessionEnd { agent_id, .. } => *agent_id,
             AgentEvent::ProofOfLife { agent_id, .. } => *agent_id,
+            AgentEvent::Identity { agent_id, .. } => *agent_id,
         }
     }
 }

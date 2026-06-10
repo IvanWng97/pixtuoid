@@ -216,6 +216,38 @@ fn is_fallback_label(label: &str, source: &str) -> bool {
         .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
 }
 
+/// First-wins identity back-fill shared by the duplicate-`SessionStart` arm
+/// and the hook [`AgentEvent::Identity`] arm (#221): heal EMPTY
+/// source/session_id/cwd — an established value is never overwritten. Returns
+/// the healed cwd's basename when THIS call healed the cwd; the SessionStart
+/// arm alone upgrades a fallback label from it (`Identity` carries no label
+/// authority — label upgrades stay on the SessionStart path).
+fn backfill_identity<'a>(
+    slot: &mut AgentSlot,
+    source: &str,
+    session_id: &str,
+    cwd: &'a std::path::Path,
+) -> Option<&'a str> {
+    if slot.source.is_empty() && !source.is_empty() {
+        slot.source = Arc::<str>::from(source);
+    }
+    if slot.session_id.is_empty() && !session_id.is_empty() {
+        slot.session_id = Arc::<str>::from(session_id);
+    }
+    if slot.unknown_cwd || slot.cwd.as_os_str().is_empty() {
+        if let Some(base) = cwd
+            .file_name()
+            .and_then(|n| n.to_str())
+            .filter(|s| !s.is_empty())
+        {
+            slot.cwd = Arc::<std::path::Path>::from(cwd);
+            slot.unknown_cwd = false;
+            return Some(base);
+        }
+    }
+    None
+}
+
 /// Outcome flags from [`Reducer::track_active_tasks`], consumed by `apply`'s
 /// main event match.
 struct TaskTracking {
@@ -451,32 +483,20 @@ impl Reducer {
                     // session_id/cwd), and a Codex revive ghost has an empty
                     // cwd. The first SessionStart carrying the missing piece
                     // heals it; an established value is never overwritten
-                    // (first-wins, this arm's existing semantics). Judge the
+                    // (first-wins, via the shared `backfill_identity` — the
+                    // hook `Identity` arm runs the same heal). Judge the
                     // label's fallback-ness BEFORE the source back-fill — the
                     // ordinal was minted under the OLD source's prefix.
                     let label_is_fallback = is_fallback_label(&slot.label, &slot.source);
-                    if slot.source.is_empty() && !source.is_empty() {
-                        slot.source = Arc::<str>::from(source.as_str());
-                    }
-                    if slot.session_id.is_empty() && !session_id.is_empty() {
-                        slot.session_id = Arc::<str>::from(session_id.as_str());
-                    }
-                    if slot.unknown_cwd || slot.cwd.as_os_str().is_empty() {
-                        if let Some(base) = cwd
-                            .file_name()
-                            .and_then(|n| n.to_str())
-                            .filter(|s| !s.is_empty())
-                        {
-                            slot.cwd = Arc::<std::path::Path>::from(cwd.as_path());
-                            slot.unknown_cwd = false;
-                            // Upgrade ONLY a fallback label — a basename- or
-                            // Rename-derived label is real information.
-                            if label_is_fallback {
-                                slot.label = Arc::<str>::from(
-                                    format!("{}·{base}", source_label_prefix(&slot.source))
-                                        .as_str(),
-                                );
-                            }
+                    if let Some(base) = backfill_identity(slot, &source, &session_id, &cwd) {
+                        // Upgrade ONLY a fallback label — a basename- or
+                        // Rename-derived label is real information. This stays
+                        // on the SessionStart path: `Identity` carries no
+                        // label authority.
+                        if label_is_fallback {
+                            slot.label = Arc::<str>::from(
+                                format!("{}·{base}", source_label_prefix(&slot.source)).as_str(),
+                            );
                         }
                     }
                     // A duplicate SessionStart is still a genuine liveness
@@ -619,7 +639,57 @@ impl Reducer {
                     self.recent_proof_of_life.insert(agent_id, now);
                 }
             }
+            // #221: the identity context a hook decoder attaches ahead of a
+            // tool/permission activity event — register-or-back-fill, NOTHING
+            // else: no label change (Identity carries no label authority — see
+            // `backfill_identity`), no activity-state change, no
+            // `last_event_at` refresh (the paired activity event right behind
+            // it carries those).
+            AgentEvent::Identity {
+                agent_id,
+                source,
+                session_id,
+                cwd,
+            } => {
+                // Boundary (1) made structural: JSONL must never synthesize —
+                // a transcript line can be a historical replay. No in-tree
+                // JSONL path emits Identity today; this guard IS the boundary,
+                // not dead code (cf. the transport-relevant ProofOfLife arm).
+                if from != Transport::Hook {
+                    tracing::debug!(?agent_id, "ignoring Identity on a non-hook transport");
+                    return;
+                }
+                let cwd = cwd.as_deref().unwrap_or_else(|| std::path::Path::new(""));
+                if let Some(slot) = scene.agents.get_mut(&agent_id) {
+                    backfill_identity(slot, &source, &session_id, cwd);
+                } else if !self.hook_session_end_tombstoned(agent_id, now)
+                    && self.register_slot(scene, agent_id, &source, &session_id, cwd, None, now)
+                {
+                    // The same reap exemption as the blank hook synthesis: a
+                    // cwd-less Identity registers an ordinal-labeled slot that
+                    // is process-proven alive, NOT a startup-seeding ghost —
+                    // the 3-min unknown-cwd reap would kill it before any
+                    // back-fill. No-op when the Identity carried a real cwd.
+                    // A desk-capacity refusal does nothing further — Identity
+                    // carries no tool_use_id, so the dedup map can't be
+                    // poisoned (boundary 3 untouched).
+                    if let Some(slot) = scene.agents.get_mut(&agent_id) {
+                        slot.unknown_cwd = false;
+                    }
+                }
+            }
         }
+    }
+
+    /// Whether a hook `SessionEnd` for `id` (which had no slot) is still inside
+    /// its [`HOOK_SESSION_END_TOMBSTONE_TTL`]: a trailing hook event delivered
+    /// reordered after the end must not re-register the dead session. Shared by
+    /// [`Reducer::synthesize_hook_registration`] and the `Identity` arm.
+    fn hook_session_end_tombstoned(&self, id: AgentId, now: SystemTime) -> bool {
+        self.recent_hook_session_ends.get(&id).is_some_and(|ts| {
+            now.duration_since(*ts)
+                .is_ok_and(|d| d < HOOK_SESSION_END_TOMBSTONE_TTL)
+        })
     }
 
     /// Pre-pass 0 of [`Reducer::apply`] (hook transport only) — hook events
@@ -630,12 +700,17 @@ impl Reducer {
     /// proves a live session; `SessionEnd` (nothing to remove) and `Rename`
     /// (nothing to relabel) stay no-ops for an unknown id.
     ///
-    /// The decoded hook events carry no identity context beyond the `AgentId`
-    /// (no source / session_id / cwd — and the id is a hash, not reversible),
-    /// so the slot starts blank with the bare ordinal label (`#N`); the next
-    /// real `SessionStart` back-fills it (see the duplicate-SessionStart arm).
-    /// Routed through [`Reducer::register_slot`] so the desk-capacity gate
-    /// applies the same as for a real `SessionStart`.
+    /// The decoded activity events carry no identity context beyond the
+    /// `AgentId` (no source / session_id / cwd — and the id is a hash, not
+    /// reversible), so the slot starts blank with the bare ordinal label
+    /// (`#N`); a later real `SessionStart` back-fills it (see the
+    /// duplicate-SessionStart arm). Since #221 the hook decoders attach an
+    /// [`AgentEvent::Identity`] AHEAD of tool/permission events, so the slot
+    /// normally already exists — with real identity — by the time the activity
+    /// event applies; this blank path remains the fallback for identity-less
+    /// hook events (`Stop`, directly-constructed events). Routed through
+    /// [`Reducer::register_slot`] so the desk-capacity gate applies the same
+    /// as for a real `SessionStart`.
     fn synthesize_hook_registration(
         &mut self,
         scene: &mut SceneState,
@@ -658,10 +733,7 @@ impl Reducer {
         // (per-connection hook tasks reorder), not proof of new life.
         // Synthesizing would mint a blank Idle ghost that no future
         // SessionEnd can remove — only the 30-min idle sweep.
-        if self.recent_hook_session_ends.get(&id).is_some_and(|ts| {
-            now.duration_since(*ts)
-                .is_ok_and(|d| d < HOOK_SESSION_END_TOMBSTONE_TTL)
-        }) {
+        if self.hook_session_end_tombstoned(id, now) {
             return;
         }
         if self.register_slot(scene, id, "", "", std::path::Path::new(""), None, now) {

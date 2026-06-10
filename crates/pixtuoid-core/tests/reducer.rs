@@ -4771,3 +4771,271 @@ fn two_step_backfill_source_first_then_cwd_still_upgrades_the_label() {
         "fallback still upgrades after the two-step heal"
     );
 }
+
+// ── #221: hook Identity — registration with real identity ──────────────────
+// Hook decoders attach an `Identity` event (source/session_id/cwd) ahead of
+// tool/permission activity events, so the proof-of-life registration for an
+// unknown id normally lands with REAL identity instead of a blank `#N` slot
+// (which remains the fallback for identity-less events like Stop). The arm
+// registers-or-back-fills and NOTHING else: labels, activity state, and
+// `last_event_at` stay owned by the activity/SessionStart paths.
+
+#[test]
+fn hook_identity_registers_unknown_id_with_real_identity() {
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let id = AgentId::from_parts("claude-code", "gated-sess");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+
+    r.apply(
+        &mut scene,
+        AgentEvent::Identity {
+            agent_id: id,
+            source: "claude-code".into(),
+            session_id: "gated-sess".into(),
+            cwd: Some(PathBuf::from("/Users/me/repo")),
+        },
+        t0,
+        Transport::Hook,
+    );
+
+    let slot = scene
+        .agents
+        .get(&id)
+        .expect("hook Identity must register the slot");
+    assert_eq!(
+        &*slot.label, "cc·repo",
+        "the normal minted label, NOT a blank #N ordinal"
+    );
+    assert_eq!(&*slot.source, "claude-code");
+    assert_eq!(&*slot.session_id, "gated-sess");
+    assert_eq!(&*slot.cwd, std::path::Path::new("/Users/me/repo"));
+    assert!(
+        !slot.unknown_cwd,
+        "real-cwd registration — not an unknown-cwd ghost"
+    );
+    // Same floor/desk behavior as a real-cwd SessionStart registration: a
+    // desk is allocated through the shared register_slot.
+    assert_eq!(slot.floor_idx, scene.floor_of(slot.desk_index));
+    assert!(
+        matches!(slot.state, ActivityState::Idle),
+        "Identity itself sets no activity state — the paired activity event does"
+    );
+}
+
+#[test]
+fn hook_identity_without_cwd_registers_reap_exempt_blank_cwd() {
+    // Mirrors the blank synthesis path's exemption: a cwd-less Identity
+    // (e.g. Codex PermissionRequest) registers an ordinal-labeled slot that
+    // is process-proven alive — NOT a startup-seeding ghost, so it must ride
+    // the normal state-adaptive timeouts, not the 3-min unknown-cwd reap.
+    use pixtuoid_core::state::reducer::STALE_UNKNOWN_CWD_TIMEOUT;
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let id = AgentId::from_parts("codex", "cx-sess");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+
+    r.apply(
+        &mut scene,
+        AgentEvent::Identity {
+            agent_id: id,
+            source: "codex".into(),
+            session_id: "cx-sess".into(),
+            cwd: None,
+        },
+        t0,
+        Transport::Hook,
+    );
+
+    let slot = scene.agents.get(&id).expect("registered");
+    assert_eq!(&*slot.label, "cx#1", "no cwd → ordinal label");
+    assert_eq!(&*slot.source, "codex", "source still lands");
+    assert_eq!(&*slot.session_id, "cx-sess", "session_id still lands");
+    assert!(!slot.unknown_cwd, "process-proven — reap-exempt");
+
+    r.tick(
+        &mut scene,
+        t0 + STALE_UNKNOWN_CWD_TIMEOUT + Duration::from_secs(60),
+    );
+    assert!(
+        scene
+            .agents
+            .get(&id)
+            .is_some_and(|s| s.exiting_at.is_none()),
+        "must outlive the 3-min unknown-cwd reap"
+    );
+}
+
+#[test]
+fn hook_identity_backfills_blank_synthesized_slot() {
+    // An identity-less hook event (e.g. a reordered Stop) synthesized a blank
+    // slot first; the next Identity heals source/session_id/cwd — but leaves
+    // the label alone (label upgrades stay on the SessionStart path) and does
+    // not touch activity state.
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let id = AgentId::from_parts("reasonix", "/Users/dev/proj");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityEnd {
+            agent_id: id,
+            tool_use_id: None,
+        },
+        t0,
+        Transport::Hook,
+    );
+    assert_eq!(&*scene.agents.get(&id).unwrap().label, "#1", "blank slot");
+
+    r.apply(
+        &mut scene,
+        AgentEvent::Identity {
+            agent_id: id,
+            source: "reasonix".into(),
+            session_id: "/Users/dev/proj".into(),
+            cwd: Some(PathBuf::from("/Users/dev/proj")),
+        },
+        t0 + Duration::from_secs(1),
+        Transport::Hook,
+    );
+
+    let slot = scene.agents.get(&id).unwrap();
+    assert_eq!(&*slot.source, "reasonix", "empty source healed");
+    assert_eq!(&*slot.session_id, "/Users/dev/proj", "session_id healed");
+    assert_eq!(&*slot.cwd, std::path::Path::new("/Users/dev/proj"));
+    assert!(!slot.unknown_cwd);
+    assert_eq!(
+        &*slot.label, "#1",
+        "Identity carries no label authority — upgrade stays on SessionStart"
+    );
+}
+
+#[test]
+fn hook_identity_does_not_clobber_existing_identity() {
+    // First-wins, exactly like the duplicate-SessionStart back-fill: a slot
+    // with established identity is untouched by a divergent Identity.
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let id = AgentId::from_parts("claude-code", "sess");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: id,
+            source: "claude-code".into(),
+            session_id: "sess".into(),
+            cwd: PathBuf::from("/Users/me/repo-a"),
+            parent_id: None,
+        },
+        t0,
+        Transport::Hook,
+    );
+    r.apply(
+        &mut scene,
+        AgentEvent::Identity {
+            agent_id: id,
+            source: "codex".into(),
+            session_id: "other-sess".into(),
+            cwd: Some(PathBuf::from("/Users/me/repo-b")),
+        },
+        t0 + Duration::from_secs(1),
+        Transport::Hook,
+    );
+
+    let slot = scene.agents.get(&id).unwrap();
+    assert_eq!(&*slot.source, "claude-code");
+    assert_eq!(&*slot.session_id, "sess");
+    assert_eq!(&*slot.cwd, std::path::Path::new("/Users/me/repo-a"));
+    assert_eq!(&*slot.label, "cc·repo-a");
+}
+
+#[test]
+fn hook_identity_respects_session_end_tombstone() {
+    // A SessionEnd for an unknown id tombstones it; a reordered trailing
+    // Identity from the same dying session must not re-register it — the same
+    // guard the blank synthesis path runs.
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let id = AgentId::from_parts("claude-code", "exited-invisible");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionEnd { agent_id: id },
+        t0,
+        Transport::Hook,
+    );
+    r.apply(
+        &mut scene,
+        AgentEvent::Identity {
+            agent_id: id,
+            source: "claude-code".into(),
+            session_id: "exited-invisible".into(),
+            cwd: Some(PathBuf::from("/Users/me/repo")),
+        },
+        t0 + Duration::from_millis(50),
+        Transport::Hook,
+    );
+    assert!(
+        !scene.agents.contains_key(&id),
+        "a tombstoned id must not be re-registered by a reordered Identity"
+    );
+}
+
+#[test]
+fn jsonl_identity_is_a_no_op() {
+    // Boundary (1) made structural: JSONL events must never synthesize — a
+    // transcript line can be a historical replay. Nothing in-tree emits
+    // Identity on Jsonl; the guard IS the boundary.
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let id = AgentId::from_parts("claude-code", "replayed-sess");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+
+    r.apply(
+        &mut scene,
+        AgentEvent::Identity {
+            agent_id: id,
+            source: "claude-code".into(),
+            session_id: "replayed-sess".into(),
+            cwd: Some(PathBuf::from("/Users/me/repo")),
+        },
+        t0,
+        Transport::Jsonl,
+    );
+    assert!(
+        scene.agents.is_empty(),
+        "a JSONL Identity must not register a slot"
+    );
+}
+
+#[test]
+fn hook_identity_desk_refusal_is_quiet() {
+    // Desk exhaustion refuses the registration — no slot, no panic, and (with
+    // no tool_use_id on Identity) nothing that could poison the hook-wins
+    // dedup map (boundary 3 untouched).
+    use pixtuoid_core::state::MAX_FLOORS;
+    let caps = [0usize; MAX_FLOORS]; // zero desks anywhere
+    let mut scene = SceneState::new(caps);
+    let mut r = Reducer::new();
+    let id = AgentId::from_parts("claude-code", "gated-sess");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+
+    r.apply(
+        &mut scene,
+        AgentEvent::Identity {
+            agent_id: id,
+            source: "claude-code".into(),
+            session_id: "gated-sess".into(),
+            cwd: Some(PathBuf::from("/Users/me/repo")),
+        },
+        t0,
+        Transport::Hook,
+    );
+    assert!(
+        scene.agents.is_empty(),
+        "no desks — the registration must be quietly refused"
+    );
+}

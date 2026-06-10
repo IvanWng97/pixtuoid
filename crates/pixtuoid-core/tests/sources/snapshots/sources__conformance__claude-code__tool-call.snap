@@ -20,12 +20,22 @@ expression: events
     session_id: 01000000-0000-7000-8000-0000000000cc
     cwd: /home/user/demo-project
     parent_id: ~
+- Identity:
+    agent_id: 17402456248370490010
+    source: claude-code
+    session_id: 01000000-0000-7000-8000-0000000000cc
+    cwd: /home/user/demo-project
 - ActivityStart:
     agent_id: 17402456248370490010
     tool_use_id: toolu_demo0000000000000001
     detail:
       Generic:
         display: "Glob: crates/**/*.rs"
+- Identity:
+    agent_id: 17402456248370490010
+    source: claude-code
+    session_id: 01000000-0000-7000-8000-0000000000cc
+    cwd: ~
 - ActivityEnd:
     agent_id: 17402456248370490010
     tool_use_id: toolu_demo0000000000000001

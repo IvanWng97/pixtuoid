@@ -72,14 +72,23 @@ const SUBAGENT_TOOLS: &[&str] = &["task", "explore", "research", "review", "secu
 /// Event mapping:
 /// - `SessionStart` / `UserPromptSubmit` → `SessionStart` (idempotent in the
 ///   reducer; `UserPromptSubmit` doubles as the resurrect path after a sweep)
-/// - `PreToolUse`  → `ActivityStart` (subagent dispatch family → `Task`)
-/// - `PostToolUse` → `ActivityEnd`
-/// - `Stop`        → `ActivityEnd` (turn end → idle debounce)
-/// - `Notification`→ `Waiting` (upstream's only producer is the approval gate)
+/// - `PreToolUse`  → `Identity` + `ActivityStart` (dispatch family → `Task`)
+/// - `PostToolUse` → `Identity` + `ActivityEnd`
+/// - `Stop`        → `ActivityEnd` (turn end → idle debounce; NO Identity —
+///   an end for an unknown agent proves nothing worth registering)
+/// - `Notification`→ `Identity` + `Waiting` (upstream's only producer is the
+///   approval gate)
 /// - `SessionEnd`  → `SessionEnd`
 /// - anything else → bail (registered-vs-decoded drift must be loud, not a
 ///   silent drop — same contract as the CC/Codex arms)
-pub fn decode_rx_hook_payload(v: &Value) -> Result<AgentEvent> {
+///
+/// The activity arms prepend an [`AgentEvent::Identity`] (#221) because
+/// Reasonix is HOOK-ONLY: a slot the reducer's proof-of-life pre-pass
+/// synthesizes mid-turn has no JSONL back-fill path, so without the attached
+/// identity it would stay a blank `#N` ghost until the next
+/// `UserPromptSubmit`. The cwd is the whole identity (it IS the session key),
+/// so `session_id` mirrors the `SessionStart` arm exactly — coalescing holds.
+pub fn decode_rx_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
     let obj = v
         .as_object()
         .ok_or_else(|| anyhow!("reasonix hook payload must be an object"))?;
@@ -97,32 +106,55 @@ pub fn decode_rx_hook_payload(v: &Value) -> Result<AgentEvent> {
         .ok_or_else(|| anyhow!("reasonix payload missing/empty cwd"))?;
     let agent_id = AgentId::from_parts(SOURCE_NAME, cwd);
 
+    let identity = || AgentEvent::Identity {
+        agent_id,
+        source: SOURCE_NAME.to_string(),
+        // Mirrors the SessionStart arm: no upstream session id exists; the
+        // cwd IS the session key.
+        session_id: cwd.to_string(),
+        cwd: Some(cwd.into()),
+    };
+
     match event {
         // SessionStart fires lazily on the first turn; UserPromptSubmit fires
         // on every prompt. Both map to SessionStart: the reducer ignores it
         // when the slot exists, and the UserPromptSubmit duplicate is the
         // RESURRECT path — a stale-swept session walks back in on its next
         // prompt (Reasonix has no other re-creation signal; cf. the Codex arm).
-        "SessionStart" | "UserPromptSubmit" => Ok(AgentEvent::SessionStart {
+        "SessionStart" | "UserPromptSubmit" => Ok(vec![AgentEvent::SessionStart {
             agent_id,
             source: SOURCE_NAME.to_string(),
             // No upstream session id exists; the cwd IS the session key.
             session_id: cwd.to_string(),
             cwd: cwd.into(),
             parent_id: None,
-        }),
+        }]),
         "PreToolUse" => {
             let tool = obj.get("toolName").and_then(|s| s.as_str()).unwrap_or("?");
-            Ok(AgentEvent::ActivityStart {
+            Ok(vec![
+                identity(),
+                AgentEvent::ActivityStart {
+                    agent_id,
+                    tool_use_id: None,
+                    detail: Some(rx_tool_detail(tool, obj.get("toolArgs"))),
+                },
+            ])
+        }
+        "PostToolUse" => Ok(vec![
+            identity(),
+            AgentEvent::ActivityEnd {
                 agent_id,
                 tool_use_id: None,
-                detail: Some(rx_tool_detail(tool, obj.get("toolArgs"))),
-            })
-        }
-        "PostToolUse" | "Stop" => Ok(AgentEvent::ActivityEnd {
+            },
+        ]),
+        // Turn end — same decoded event as PostToolUse but deliberately
+        // Identity-LESS: ends don't prove a session worth registering (the
+        // shared Stop arm makes the same call), so an unknown id here rides
+        // the reducer's blank-synthesis fallback.
+        "Stop" => Ok(vec![AgentEvent::ActivityEnd {
             agent_id,
             tool_use_id: None,
-        }),
+        }]),
         "Notification" => {
             // Upstream's only Notification producer is the approval gate
             // (`controller.go:2065-2071`): "approval needed: <tool> <subject>".
@@ -130,12 +162,15 @@ pub fn decode_rx_hook_payload(v: &Value) -> Result<AgentEvent> {
                 .get("message")
                 .and_then(|s| s.as_str())
                 .unwrap_or("waiting");
-            Ok(AgentEvent::Waiting {
-                agent_id,
-                reason: msg.into(),
-            })
+            Ok(vec![
+                identity(),
+                AgentEvent::Waiting {
+                    agent_id,
+                    reason: msg.into(),
+                },
+            ])
         }
-        "SessionEnd" => Ok(AgentEvent::SessionEnd { agent_id }),
+        "SessionEnd" => Ok(vec![AgentEvent::SessionEnd { agent_id }]),
         other => bail!("unsupported reasonix hook event: {other}"),
     }
 }
@@ -144,7 +179,7 @@ pub fn decode_rx_hook_payload(v: &Value) -> Result<AgentEvent> {
 /// `hook_event_name`/`session_id`), so per the `HookDecoding::custom` contract
 /// it claims EVERY event reaching it — `.map(Some)`, never `Ok(None)` — and
 /// the shared CC-shaped arms are unreachable for `_pixtuoid_source=reasonix`.
-pub(crate) fn decode_rx_hook_custom(v: &Value) -> Result<Option<AgentEvent>> {
+pub(crate) fn decode_rx_hook_custom(v: &Value) -> Result<Option<Vec<AgentEvent>>> {
     decode_rx_hook_payload(v).map(Some)
 }
 
@@ -185,8 +220,14 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn decode(v: Value) -> AgentEvent {
+    fn decode_all(v: Value) -> Vec<AgentEvent> {
         decode_rx_hook_payload(&v).expect("decodes")
+    }
+
+    /// The payload's MAIN event — the lifecycle/activity event the arm maps
+    /// to, i.e. the last decoded event (activity arms prepend an `Identity`).
+    fn decode(v: Value) -> AgentEvent {
+        decode_all(v).pop().expect("at least one event")
     }
 
     #[test]
@@ -353,7 +394,8 @@ mod tests {
     #[test]
     fn all_events_for_one_cwd_share_one_agent_id() {
         // The coalescing contract, hook-only flavor: every event of a session
-        // keys on the same cwd-derived AgentId.
+        // (the prepended Identity events INCLUDED) keys on the same
+        // cwd-derived AgentId.
         let events = [
             json!({"event": "SessionStart", "cwd": "/Users/dev/p"}),
             json!({"event": "UserPromptSubmit", "cwd": "/Users/dev/p"}),
@@ -366,9 +408,67 @@ mod tests {
         ];
         let ids: std::collections::BTreeSet<_> = events
             .iter()
-            .map(|v| decode_rx_hook_payload(v).unwrap().agent_id())
+            .flat_map(|v| decode_rx_hook_payload(v).unwrap())
+            .map(|e| e.agent_id())
             .collect();
         assert_eq!(ids.len(), 1, "all events must coalesce to one AgentId");
+    }
+
+    // #221: Reasonix is hook-only, so a slot synthesized mid-turn has NO JSONL
+    // back-fill path — the activity arms must attach the identity the payload
+    // carries (cwd = source key = session key) ahead of the activity event,
+    // mirroring the SessionStart arm exactly so coalescing holds.
+    #[test]
+    fn activity_arms_prepend_identity_with_cwd_keyed_session() {
+        let payloads = [
+            json!({"event": "PreToolUse", "cwd": "/Users/dev/p", "toolName": "bash",
+                   "toolArgs": {"command": "ls"}}),
+            json!({"event": "PostToolUse", "cwd": "/Users/dev/p", "toolName": "bash"}),
+            json!({"event": "Notification", "cwd": "/Users/dev/p", "message": "approval needed"}),
+        ];
+        for payload in payloads {
+            let name = payload["event"].clone();
+            let events = decode_all(payload);
+            assert_eq!(events.len(), 2, "{name}: Identity + activity");
+            match &events[0] {
+                AgentEvent::Identity {
+                    agent_id,
+                    source,
+                    session_id,
+                    cwd,
+                } => {
+                    assert_eq!(*agent_id, AgentId::from_parts(SOURCE_NAME, "/Users/dev/p"));
+                    assert_eq!(source, SOURCE_NAME);
+                    assert_eq!(session_id, "/Users/dev/p", "cwd IS the session key");
+                    assert_eq!(
+                        cwd.as_deref(),
+                        Some(std::path::Path::new("/Users/dev/p")),
+                        "rx hooks always know their cwd"
+                    );
+                }
+                other => panic!("{name}: expected leading Identity, got {other:?}"),
+            }
+        }
+    }
+
+    // Ends don't prove a session worth registering (same call as the shared
+    // Stop arm) — and SessionStart/UserPromptSubmit already carry identity.
+    #[test]
+    fn stop_session_events_and_session_end_carry_no_identity() {
+        for payload in [
+            json!({"event": "Stop", "cwd": "/r"}),
+            json!({"event": "SessionStart", "cwd": "/r"}),
+            json!({"event": "UserPromptSubmit", "cwd": "/r"}),
+            json!({"event": "SessionEnd", "cwd": "/r"}),
+        ] {
+            let name = payload["event"].clone();
+            let events = decode_all(payload);
+            assert_eq!(events.len(), 1, "{name}: exactly one event");
+            assert!(
+                !matches!(events[0], AgentEvent::Identity { .. }),
+                "{name} must not emit Identity"
+            );
+        }
     }
 
     #[test]

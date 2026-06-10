@@ -58,7 +58,7 @@ fn main() {
 
         let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             if is_hook {
-                decode_hook_payload(v.clone()).map(|e| vec![e])
+                decode_hook_payload(v.clone())
             } else if is_codex {
                 decode_codex_line(codex_path, "codex", v.clone())
             } else {

@@ -63,7 +63,19 @@ fn normalize_key_inner(windows: bool, s: &str) -> String {
     stripped.replace('\\', "/").to_lowercase()
 }
 
-pub fn decode_hook_payload(v: Value) -> Result<AgentEvent> {
+/// Decode one hook payload into the event sequence the reducer applies.
+///
+/// Tool/permission arms (PreToolUse / PostToolUse / Notification /
+/// PermissionRequest) return TWO events: an [`AgentEvent::Identity`] carrying
+/// the payload's source/session_id/cwd, then the activity event (#221) — so
+/// the reducer's proof-of-life registration for an unknown id lands with REAL
+/// identity instead of a blank `#N` slot. Identity is deliberately NOT
+/// attached to: `SessionStart`/`UserPromptSubmit` (the SessionStart event
+/// already carries full identity), `Stop`/`SessionEnd` (an end for an unknown
+/// agent proves nothing worth registering — the reducer's end-events-don't-
+/// synthesize boundary stays meaningful), and the custom Subagent arms
+/// (already enriched with parent links).
+pub fn decode_hook_payload(v: Value) -> Result<Vec<AgentEvent>> {
     let obj = v
         .as_object()
         .ok_or_else(|| anyhow!("hook payload must be an object"))?;
@@ -87,8 +99,8 @@ pub fn decode_hook_payload(v: Value) -> Result<AgentEvent> {
     // source's module, not here. `Ok(None)` falls through to the shared
     // CC-shaped arms; an alien-envelope source claims EVERY event instead.
     if let Some(custom) = desc.and_then(|d| d.hook.custom) {
-        if let Some(ev) = custom(&v)? {
-            return Ok(ev);
+        if let Some(evs) = custom(&v)? {
+            return Ok(evs);
         }
     }
 
@@ -142,17 +154,33 @@ pub fn decode_hook_payload(v: Value) -> Result<AgentEvent> {
     };
     let agent_id = AgentId::from_parts(source, id_key);
 
+    // The identity context the tool/permission arms attach ahead of their
+    // activity event (#221). `cwd` is on the wire for CC tool hooks (verified
+    // on PreToolUse fixtures) but absent on e.g. Codex PermissionRequest/CC
+    // PostToolUse — absent or empty maps to `None` so the reducer's cwd-less
+    // registration path (ordinal label, reap-exempt) applies.
+    let identity = || AgentEvent::Identity {
+        agent_id,
+        source: source.to_string(),
+        session_id: session_id.clone(),
+        cwd: obj
+            .get("cwd")
+            .and_then(|s| s.as_str())
+            .filter(|s| !s.is_empty())
+            .map(std::path::PathBuf::from),
+    };
+
     match event {
         "SessionStart" => {
             let cwd = obj.get("cwd").and_then(|s| s.as_str()).unwrap_or("").into();
             let source = source.to_string();
-            Ok(AgentEvent::SessionStart {
+            Ok(vec![AgentEvent::SessionStart {
                 agent_id,
                 source,
                 session_id,
                 cwd,
                 parent_id: None,
-            })
+            }])
         }
         "PreToolUse" => {
             let tool_name = obj.get("tool_name").and_then(|s| s.as_str()).unwrap_or("?");
@@ -160,38 +188,50 @@ pub fn decode_hook_payload(v: Value) -> Result<AgentEvent> {
                 .get("tool_use_id")
                 .and_then(|s| s.as_str())
                 .map(String::from);
-            Ok(AgentEvent::ActivityStart {
-                agent_id,
-                tool_use_id,
-                detail: Some(make_tool_detail(tool_name, obj.get("tool_input"))),
-            })
+            Ok(vec![
+                identity(),
+                AgentEvent::ActivityStart {
+                    agent_id,
+                    tool_use_id,
+                    detail: Some(make_tool_detail(tool_name, obj.get("tool_input"))),
+                },
+            ])
         }
         "PostToolUse" => {
             let tool_use_id = obj
                 .get("tool_use_id")
                 .and_then(|s| s.as_str())
                 .map(String::from);
-            Ok(AgentEvent::ActivityEnd {
-                agent_id,
-                tool_use_id,
-            })
+            Ok(vec![
+                identity(),
+                AgentEvent::ActivityEnd {
+                    agent_id,
+                    tool_use_id,
+                },
+            ])
         }
         "Notification" => {
             let msg = obj
                 .get("message")
                 .and_then(|s| s.as_str())
                 .unwrap_or("waiting");
-            Ok(AgentEvent::Waiting {
-                agent_id,
-                reason: msg.into(),
-            })
+            Ok(vec![
+                identity(),
+                AgentEvent::Waiting {
+                    agent_id,
+                    reason: msg.into(),
+                },
+            ])
         }
         // Codex's permission prompt is a "waiting on the human" signal — maps to
         // the same Waiting state as Claude's Notification.
-        "PermissionRequest" => Ok(AgentEvent::Waiting {
-            agent_id,
-            reason: "permission".into(),
-        }),
+        "PermissionRequest" => Ok(vec![
+            identity(),
+            AgentEvent::Waiting {
+                agent_id,
+                reason: "permission".into(),
+            },
+        ]),
         // Codex turn lifecycle. Verified live (Codex 0.135): the ONLY hook events
         // that fire are UserPromptSubmit + Stop — SessionStart and PreToolUse do
         // NOT fire. So UserPromptSubmit is our agent-creation signal: emit
@@ -200,21 +240,23 @@ pub fn decode_hook_payload(v: Value) -> Result<AgentEvent> {
         // show seated-thinking, so it reads as "working" right after a prompt.
         "UserPromptSubmit" => {
             let cwd = obj.get("cwd").and_then(|s| s.as_str()).unwrap_or("").into();
-            Ok(AgentEvent::SessionStart {
+            Ok(vec![AgentEvent::SessionStart {
                 agent_id,
                 source: source.to_string(),
                 session_id,
                 cwd,
                 parent_id: None,
-            })
+            }])
         }
         // Turn end — Codex fires no SessionEnd, so keep the slot; just settle to
-        // idle (harmless no-op if the agent is already idle).
-        "Stop" => Ok(AgentEvent::ActivityEnd {
+        // idle (harmless no-op if the agent is already idle). NO Identity: a
+        // turn end for an unknown agent proves nothing worth registering, so it
+        // must keep riding the reducer's blank-synthesis fallback.
+        "Stop" => Ok(vec![AgentEvent::ActivityEnd {
             agent_id,
             tool_use_id: None,
-        }),
-        "SessionEnd" => Ok(AgentEvent::SessionEnd { agent_id }),
+        }]),
+        "SessionEnd" => Ok(vec![AgentEvent::SessionEnd { agent_id }]),
         // Codex's SubagentStart/SubagentStop live in
         // `codex::decode_codex_hook_custom` (dispatched above via the
         // registry) — they change the event's SUBJECT to the child AgentId,
@@ -368,17 +410,25 @@ mod tests {
         assert_eq!(normalize_key_inner(false, r"\\?\C:\Foo"), r"\\?\C:\Foo");
     }
 
+    /// A payload expected to decode to EXACTLY one event (lifecycle arms —
+    /// the Identity-attaching tool/permission arms assert their pair shape
+    /// explicitly instead).
+    fn decode_single(v: Value) -> AgentEvent {
+        let mut evs = decode_hook_payload(v).expect("decodes");
+        assert_eq!(evs.len(), 1, "expected exactly one event, got {evs:?}");
+        evs.pop().expect("one event")
+    }
+
     #[test]
     fn codex_session_start_without_transcript_path_uses_session_id() {
         // Codex sends transcript_path as string|null; decode must still work,
         // namespacing the AgentId under the explicit "codex" source.
-        let ev = decode_hook_payload(json!({
+        let ev = decode_single(json!({
             "hook_event_name": "SessionStart",
             "session_id": "codex-sess-1",
             "_pixtuoid_source": "codex",
             "cwd": "/Users/me/work/myrepo"
-        }))
-        .expect("decodes without transcript_path");
+        }));
         match ev {
             AgentEvent::SessionStart {
                 agent_id,
@@ -395,14 +445,31 @@ mod tests {
     }
 
     #[test]
-    fn codex_permission_request_maps_to_waiting() {
-        let ev = decode_hook_payload(json!({
+    fn codex_permission_request_maps_to_identity_plus_waiting() {
+        // A cwd-less PermissionRequest (the captured Codex shape) still gets
+        // an Identity — source/session_id alone fix the blank-slot bug class;
+        // cwd: None routes the reducer to the ordinal-but-reap-exempt path.
+        let evs = decode_hook_payload(json!({
             "hook_event_name": "PermissionRequest",
             "session_id": "s",
             "_pixtuoid_source": "codex"
         }))
         .expect("decodes");
-        assert!(matches!(ev, AgentEvent::Waiting { .. }));
+        assert_eq!(evs.len(), 2, "Identity + Waiting, got {evs:?}");
+        match &evs[0] {
+            AgentEvent::Identity {
+                source,
+                session_id,
+                cwd,
+                ..
+            } => {
+                assert_eq!(source, "codex");
+                assert_eq!(session_id, "s");
+                assert_eq!(*cwd, None, "no cwd on the wire → None");
+            }
+            other => panic!("expected leading Identity, got {other:?}"),
+        }
+        assert!(matches!(evs[1], AgentEvent::Waiting { .. }));
     }
 
     #[test]
@@ -410,15 +477,15 @@ mod tests {
         // Codex 0.135 fires NO SessionStart/PreToolUse — only UserPromptSubmit +
         // Stop (verified live). So UserPromptSubmit is the agent-creation signal:
         // it carries source + cwd and decodes to a SessionStart the reducer turns
-        // into a cx· agent.
-        let ev = decode_hook_payload(json!({
+        // into a cx· agent. No Identity attached — the SessionStart already
+        // carries full identity.
+        let ev = decode_single(json!({
             "hook_event_name": "UserPromptSubmit",
             "session_id": "codex-sess",
             "_pixtuoid_source": "codex",
             "cwd": "/Users/me/work/myrepo",
             "transcript_path": "/Users/me/.codex/sessions/x.jsonl"
-        }))
-        .expect("decodes");
+        }));
         match ev {
             AgentEvent::SessionStart {
                 agent_id,
@@ -440,14 +507,161 @@ mod tests {
     }
 
     #[test]
-    fn codex_stop_maps_to_activity_end() {
-        let ev = decode_hook_payload(json!({
+    fn codex_stop_maps_to_activity_end_with_no_identity() {
+        // An end for an unknown agent proves nothing worth registering — the
+        // Stop arm must NOT attach an Identity (the reducer's end-events-
+        // don't-synthesize boundary keeps its bite).
+        let ev = decode_single(json!({
             "hook_event_name": "Stop",
             "session_id": "s",
             "_pixtuoid_source": "codex"
+        }));
+        assert!(matches!(ev, AgentEvent::ActivityEnd { .. }));
+    }
+
+    // #221: the tool/permission arms attach the payload's identity context
+    // (source / session_id / cwd) ahead of the activity event, so the
+    // reducer's proof-of-life registration lands with REAL identity instead
+    // of a blank `#N` slot.
+    #[test]
+    fn pre_tool_use_decodes_to_identity_plus_activity_start() {
+        let evs = decode_hook_payload(json!({
+            "hook_event_name": "PreToolUse",
+            "session_id": "ses-abc",
+            "transcript_path": "/p/ses-abc.jsonl",
+            "cwd": "/Users/me/repo",
+            "tool_name": "Bash",
+            "tool_input": {"command": "ls"},
+            "tool_use_id": "t1"
         }))
         .expect("decodes");
-        assert!(matches!(ev, AgentEvent::ActivityEnd { .. }));
+        assert_eq!(evs.len(), 2, "Identity + ActivityStart, got {evs:?}");
+        match &evs[0] {
+            AgentEvent::Identity {
+                agent_id,
+                source,
+                session_id,
+                cwd,
+            } => {
+                assert_eq!(
+                    *agent_id,
+                    AgentId::from_parts(crate::source::claude_code::SOURCE_NAME, "ses-abc"),
+                    "Identity must coalesce with the activity event's id"
+                );
+                assert_eq!(source, crate::source::claude_code::SOURCE_NAME);
+                assert_eq!(session_id, "ses-abc");
+                assert_eq!(cwd.as_deref(), Some(std::path::Path::new("/Users/me/repo")));
+            }
+            other => panic!("expected leading Identity, got {other:?}"),
+        }
+        match &evs[1] {
+            AgentEvent::ActivityStart { tool_use_id, .. } => {
+                assert_eq!(tool_use_id.as_deref(), Some("t1"));
+            }
+            other => panic!("expected ActivityStart, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn post_tool_use_without_cwd_decodes_to_identity_with_none_cwd() {
+        // Real CC PostToolUse payloads can omit cwd — Identity still fixes
+        // source/session_id; cwd: None (never Some("")).
+        let evs = decode_hook_payload(json!({
+            "hook_event_name": "PostToolUse",
+            "session_id": "ses-abc",
+            "transcript_path": "/p/ses-abc.jsonl",
+            "tool_name": "Bash",
+            "tool_use_id": "t1"
+        }))
+        .expect("decodes");
+        assert_eq!(evs.len(), 2, "Identity + ActivityEnd, got {evs:?}");
+        match &evs[0] {
+            AgentEvent::Identity {
+                source,
+                session_id,
+                cwd,
+                ..
+            } => {
+                assert_eq!(source, crate::source::claude_code::SOURCE_NAME);
+                assert_eq!(session_id, "ses-abc");
+                assert_eq!(*cwd, None, "absent cwd must map to None");
+            }
+            other => panic!("expected leading Identity, got {other:?}"),
+        }
+        assert!(matches!(evs[1], AgentEvent::ActivityEnd { .. }));
+    }
+
+    #[test]
+    fn empty_cwd_on_tool_hook_decodes_to_identity_with_none_cwd() {
+        // Present-but-empty cwd is as good as absent: Some("") would route
+        // the reducer's registration around the unknown-cwd reap exemption.
+        let evs = decode_hook_payload(json!({
+            "hook_event_name": "Notification",
+            "session_id": "ses-abc",
+            "transcript_path": "/p/ses-abc.jsonl",
+            "cwd": "",
+            "message": "permission?"
+        }))
+        .expect("decodes");
+        match &evs[0] {
+            AgentEvent::Identity { cwd, .. } => {
+                assert_eq!(*cwd, None, "empty cwd must map to None, not Some(\"\")");
+            }
+            other => panic!("expected leading Identity, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn notification_decodes_to_identity_plus_waiting() {
+        let evs = decode_hook_payload(json!({
+            "hook_event_name": "Notification",
+            "session_id": "ses-abc",
+            "transcript_path": "/p/ses-abc.jsonl",
+            "cwd": "/Users/me/repo",
+            "message": "permission?"
+        }))
+        .expect("decodes");
+        assert_eq!(evs.len(), 2, "Identity + Waiting, got {evs:?}");
+        match &evs[0] {
+            AgentEvent::Identity { cwd, .. } => {
+                assert_eq!(cwd.as_deref(), Some(std::path::Path::new("/Users/me/repo")));
+            }
+            other => panic!("expected leading Identity, got {other:?}"),
+        }
+        assert!(matches!(&evs[1], AgentEvent::Waiting { reason, .. } if reason == "permission?"));
+    }
+
+    #[test]
+    fn session_start_and_session_end_carry_no_identity() {
+        // SessionStart already carries full identity; an end for an unknown
+        // agent proves nothing worth registering (boundary 2).
+        for (payload, name) in [
+            (
+                json!({
+                    "hook_event_name": "SessionStart",
+                    "session_id": "s",
+                    "transcript_path": "/p/s.jsonl",
+                    "cwd": "/repo"
+                }),
+                "SessionStart",
+            ),
+            (
+                json!({
+                    "hook_event_name": "SessionEnd",
+                    "session_id": "s",
+                    "transcript_path": "/p/s.jsonl",
+                    "cwd": "/repo"
+                }),
+                "SessionEnd",
+            ),
+        ] {
+            let evs = decode_hook_payload(payload).expect("decodes");
+            assert_eq!(evs.len(), 1, "{name}: exactly one event, got {evs:?}");
+            assert!(
+                !matches!(evs[0], AgentEvent::Identity { .. }),
+                "{name} must not emit Identity"
+            );
+        }
     }
 
     // Regression: CC's SessionStart hook payload carries `source: "startup"`
@@ -458,14 +672,13 @@ mod tests {
     // CLI attribution; only the shim-owned `_pixtuoid_source` does.
     #[test]
     fn cc_session_start_reason_source_does_not_hijack_cli_source() {
-        let ev = decode_hook_payload(json!({
+        let ev = decode_single(json!({
             "hook_event_name": "SessionStart",
             "session_id": "ses-abc",
             "transcript_path": "/Users/me/.claude/projects/x/ses-abc.jsonl",
             "cwd": "/repo",
             "source": "startup"
-        }))
-        .expect("decodes");
+        }));
         match ev {
             AgentEvent::SessionStart {
                 agent_id, source, ..
@@ -489,12 +702,11 @@ mod tests {
     #[test]
     fn pixtuoid_source_private_key_drives_cli_attribution() {
         // The shim stamps the trusted CLI source under `_pixtuoid_source`.
-        let ev = decode_hook_payload(json!({
+        let ev = decode_single(json!({
             "hook_event_name": "Stop",
             "session_id": "codex-sess",
             "_pixtuoid_source": "codex"
-        }))
-        .expect("decodes");
+        }));
         assert_eq!(
             ev.agent_id(),
             AgentId::from_parts("codex", "codex-sess"),
@@ -546,12 +758,11 @@ mod tests {
     // bail). This is the registry's `descriptor_for → None` fallback path.
     #[test]
     fn unknown_source_decodes_cc_shaped_under_its_own_namespace() {
-        let ev = decode_hook_payload(json!({
+        let ev = decode_single(json!({
             "hook_event_name": "Stop",
             "session_id": "s-1",
             "_pixtuoid_source": "some-future-cli"
-        }))
-        .expect("decodes via the CC-shaped default");
+        }));
         assert_eq!(
             ev.agent_id(),
             AgentId::from_parts("some-future-cli", "s-1"),
@@ -562,13 +773,12 @@ mod tests {
     #[test]
     fn absent_source_still_defaults_to_claude() {
         // A payload with no `source` (legacy / un-stamped) must remain CC.
-        let ev = decode_hook_payload(json!({
+        let ev = decode_single(json!({
             "hook_event_name": "SessionStart",
             "session_id": "s",
             "transcript_path": "/p/a.jsonl",
             "cwd": "/repo"
-        }))
-        .expect("decodes");
+        }));
         match ev {
             AgentEvent::SessionStart { source, .. } => {
                 assert_eq!(source, crate::source::claude_code::SOURCE_NAME)
