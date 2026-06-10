@@ -329,7 +329,14 @@ impl Reducer {
             }
         }
 
-        if from == Transport::Hook {
+        // The record is gated on the slot EXISTING (post-synthesis): when the
+        // hook synthesis above was REFUSED (desk exhaustion), the event applies
+        // to nothing — but its record would outlive the refusal, and a desk can
+        // free within HOOK_WINS_WINDOW (an exiting slot's grace elapsing). The
+        // JSONL SessionStart + ActivityStart that then register the session
+        // would have their ActivityStart dedup-eaten by the stale record,
+        // rendering the freshly visible agent Idle through its first tool.
+        if from == Transport::Hook && scene.agents.contains_key(&id) {
             if let Some((kind, tuid)) = event_tool_use_id(&event) {
                 self.recent_hook_tool_uses
                     .insert((id, tuid.to_string()), (now, kind));

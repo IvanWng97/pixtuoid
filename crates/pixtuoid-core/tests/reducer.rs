@@ -4066,3 +4066,96 @@ fn hook_synthesized_slot_is_exempt_from_unknown_cwd_reap() {
         "a parked-on-permission synthesized slot must ride the Waiting timeout, not the 3-min ghost reap"
     );
 }
+
+#[test]
+fn refused_hook_registration_does_not_poison_dedup_for_the_later_jsonl_copy() {
+    // Desk exhaustion can refuse the hook synthesis. The slotless hook
+    // ActivityStart must then NOT record into the hook-wins dedup map: a desk
+    // can free within HOOK_WINS_WINDOW (an exiting slot's grace elapsing), and
+    // the JSONL SessionStart + ActivityStart that then register the session
+    // would have their ActivityStart dedup-eaten by the stale record — the
+    // freshly visible agent would render Idle through its whole first tool.
+    use pixtuoid_core::state::reducer::EXIT_GRACE_WINDOW;
+    use pixtuoid_core::state::MAX_FLOORS;
+    let mut caps = [0usize; MAX_FLOORS];
+    caps[0] = 1; // exactly one desk in the whole scene
+    let mut scene = SceneState::new(caps);
+    let mut r = Reducer::new();
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+
+    // Fill the single desk, then end the occupant — its slot lingers for the
+    // exit walk and keeps the desk occupied until the grace elapses.
+    let occupant = AgentId::from_transcript_path("/p/occupant.jsonl");
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: occupant,
+            source: "claude-code".into(),
+            session_id: "o".into(),
+            cwd: PathBuf::from("/Users/me/proj"),
+            parent_id: None,
+        },
+        t0,
+        Transport::Hook,
+    );
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionEnd { agent_id: occupant },
+        t0,
+        Transport::Hook,
+    );
+
+    // Hook ActivityStart for an unknown session while the desk is still held:
+    // synthesis is refused. Sanity: no slot was created.
+    let id = AgentId::from_parts("claude-code", "gated-sess");
+    let th = t0 + EXIT_GRACE_WINDOW - Duration::from_millis(100);
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityStart {
+            agent_id: id,
+            tool_use_id: Some("t9".into()),
+            detail: None,
+        },
+        th,
+        Transport::Hook,
+    );
+    assert!(
+        !scene.agents.contains_key(&id),
+        "desk exhausted — registration must be refused"
+    );
+
+    // 300ms later (inside HOOK_WINS_WINDOW) the exit grace has elapsed: the
+    // occupant sweeps, the desk frees, and the session registers via JSONL.
+    let tj = t0 + EXIT_GRACE_WINDOW + Duration::from_millis(200);
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: id,
+            source: "claude-code".into(),
+            session_id: "gated-sess".into(),
+            cwd: PathBuf::from("/repo"),
+            parent_id: None,
+        },
+        tj,
+        Transport::Jsonl,
+    );
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityStart {
+            agent_id: id,
+            tool_use_id: Some("t9".into()),
+            detail: None,
+        },
+        tj,
+        Transport::Jsonl,
+    );
+
+    let slot = scene
+        .agents
+        .get(&id)
+        .expect("registered once the desk freed");
+    assert!(
+        matches!(slot.state, ActivityState::Active { .. }),
+        "the JSONL ActivityStart must not be dedup-eaten by the refused hook's record"
+    );
+}
