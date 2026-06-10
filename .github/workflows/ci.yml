@@ -210,7 +210,7 @@ jobs:
       - name: Generate coverage + JUnit XML (single test run)
         run: just coverage
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         with:
           files: lcov.info
           flags: unit
@@ -219,7 +219,7 @@ jobs:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
       - name: Upload test results to Codecov
         if: always()
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         with:
           files: target/nextest/ci/junit.xml
           report-type: test_results
