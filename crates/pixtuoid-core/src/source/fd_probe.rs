@@ -215,7 +215,11 @@ mod imp {
             let Ok(comm) = std::fs::read_to_string(format!("/proc/{pid}/comm")) else {
                 continue;
             };
-            if comm.trim_end_matches('\n') == name {
+            // `pid > 0` for parity with the macOS arm: /proc never lists 0 or
+            // negative pids, but a 0 leaking downstream would collide with the
+            // kqueue wake slot's ident-0 on the macOS twin — keep both arms
+            // structurally incapable of emitting it.
+            if pid > 0 && comm.trim_end_matches('\n') == name {
                 pids.push(pid);
             }
         }

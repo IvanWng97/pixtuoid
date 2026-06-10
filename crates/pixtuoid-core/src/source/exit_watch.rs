@@ -451,9 +451,16 @@ mod imp {
         let rc =
             unsafe { libc::syscall(libc::SYS_pidfd_open, pid as libc::pid_t, 0 as libc::c_uint) };
         if rc >= 0 {
+            // Kernel fds are int-bounded (RLIMIT_NOFILE), so this conversion
+            // can't fail in practice — the guard just makes the i64→i32
+            // narrowing explicit instead of a silent `as` truncation.
+            let Ok(fd) = RawFd::try_from(rc) else {
+                tracing::debug!("pidfd_open({pid}): fd {rc} out of RawFd range; dropped");
+                return PidfdOpen::Failed;
+            };
             // SAFETY: the fd was just created by pidfd_open and has no other
             // owner — transferring ownership to OwnedFd is sound.
-            return PidfdOpen::Opened(unsafe { OwnedFd::from_raw_fd(rc as RawFd) });
+            return PidfdOpen::Opened(unsafe { OwnedFd::from_raw_fd(fd) });
         }
         let err = std::io::Error::last_os_error();
         match err.raw_os_error() {
