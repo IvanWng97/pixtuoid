@@ -56,6 +56,10 @@ tui/
 │                   sprite::format::load_pack_from_strings; --pack-dir merges OPTIONAL_FURNITURE over it
 ├── layout.rs       thin façade re-exporting core::layout::SceneLayout as tui::layout::Layout (renderer's geometry entry)
 ├── floor.rs        FloorCtx (per-floor render state), FloorTransition, LightingState, build_floor_scene
+│                   (projects one floor's agents into a self-contained uniform scene; the desk_index
+│                   remap stays typed — it re-wraps as a GlobalDeskIndex valid FOR THAT smaller scene,
+│                   so single_floor_local identity reads stay honest; see its doc comment + core's
+│                   GlobalDeskIndex/FloorLocalDeskIndex docs in state/mod.rs)
 ├── pet.rs          PetKind (Cat, Dog) + per-kind static data; Pet{kind,name} (a configured office pet) + Pet::defaulted; select_pet_for_floor(u64,&[Pet])->Option<&Pet>; PetState (heart-anim interaction)
 ├── chitchat.rs     venue-keyed group/solo speech bubbles (VenueKey::Room vs ::Waypoint)
 ├── dashboard/      agent-dashboard PURE model (no ratatui): mod.rs (DashboardUi / DashboardRow /

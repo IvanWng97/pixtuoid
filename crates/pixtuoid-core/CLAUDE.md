@@ -26,7 +26,11 @@ src/
 │                       fatal source exit in the TUI footer, #157; plain data, invariant #1 holds)
 ├── state/              SceneState + Reducer (event coordinator: Transport-tagged dedup, the
 │                       cross-slot active_tasks/gated_before_waiting correlation, the sweeps) +
-│                       fsm.rs (Layer-A per-agent transitions) + scope.rs (Layer-B parent↔subagent tree)
+│                       fsm.rs (Layer-A per-agent transitions) + scope.rs (Layer-B parent↔subagent tree);
+│                       GlobalDeskIndex / FloorLocalDeskIndex newtypes encode the two desk-index
+│                       spaces (AgentSlot.desk_index is GLOBAL; the typed bridge to a floor's
+│                       home_desks is floor_local_desk(), or the documented single_floor_local()
+│                       identity for a single-floor scene)
 ├── sprite/             .sprite parser, pack.toml loader, half-block blitter, animator, Pack::merge_from
 ├── render/             Renderer trait + TestRenderer (feature = "test-renderer")
 ├── layout/             zone-based office geometry (terminal-agnostic):
