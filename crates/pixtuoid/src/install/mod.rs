@@ -333,6 +333,22 @@ fn resolve_hook_binary(
     locate: impl FnOnce() -> Result<PathBuf>,
 ) -> Result<PathBuf> {
     if let Some(p) = hook_path {
+        // An explicit path gets EMBEDDED into the config, where a relative
+        // path would resolve against the CLI's cwd at hook time — hooks would
+        // silently never fire from other dirs. Absolutize against our cwd
+        // (plain join, not canonicalize — Windows canonicalize yields a
+        // \\?\ verbatim path that the cmd.exe bare form can't take).
+        let p = if p.is_relative() {
+            std::env::current_dir().map(|cwd| cwd.join(&p)).unwrap_or(p)
+        } else {
+            p
+        };
+        if !p.exists() {
+            println!(
+                "warning: --hook-path {} does not exist yet; the hook will fail until it does",
+                p.display()
+            );
+        }
         return Ok(p);
     }
     match locate() {
@@ -551,6 +567,20 @@ mod tests {
             panic!("locate must not be called when --hook-path is given")
         });
         assert_eq!(got.unwrap(), PathBuf::from("/x/hook"));
+    }
+
+    #[test]
+    fn resolve_hook_binary_absolutizes_a_relative_explicit_path() {
+        // An embedded relative path would resolve against the CLI's cwd at
+        // hook time and silently never fire from other dirs.
+        let got = resolve_hook_binary(
+            &CLAUDE,
+            Some(PathBuf::from("target/debug/pixtuoid-hook")),
+            || unreachable!("explicit path must win"),
+        )
+        .unwrap();
+        assert!(got.is_absolute(), "expected absolutized path, got {got:?}");
+        assert!(got.ends_with("target/debug/pixtuoid-hook"));
     }
 
     #[cfg(unix)]

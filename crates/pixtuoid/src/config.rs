@@ -137,12 +137,27 @@ where
     let lock = crate::install::io::lock_config(path)?;
     let real_path = lock.target();
     let mut doc = match std::fs::read_to_string(real_path) {
-        Ok(contents) => contents.parse::<toml_edit::DocumentMut>().map_err(|e| {
-            anyhow::anyhow!(
-                "refusing to rewrite {}: it exists but is not valid TOML ({e}); fix or delete it",
-                real_path.display()
-            )
-        })?,
+        Ok(contents) => {
+            let doc = contents.parse::<toml_edit::DocumentMut>().map_err(|e| {
+                anyhow::anyhow!(
+                    "refusing to rewrite {}: it exists but is not valid TOML ({e}); fix or delete it",
+                    real_path.display()
+                )
+            })?;
+            // Syntax alone isn't enough: a type-invalid value (`max-desks =
+            // "oops"`) parses as a document but fails the typed `load`, which
+            // resets everything to defaults in memory each boot — persisting
+            // over it would make this save "succeed" while never taking
+            // effect. Unknown keys still pass (forward-compat, pinned by
+            // `load_ignores_unknown_keys`).
+            toml::from_str::<AppConfig>(&contents).map_err(|e| {
+                anyhow::anyhow!(
+                    "refusing to rewrite {}: it exists but has invalid values ({e}); fix or delete it",
+                    real_path.display()
+                )
+            })?;
+            doc
+        }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => toml_edit::DocumentMut::new(),
         Err(e) => {
             return Err(anyhow::Error::new(e).context(format!(
@@ -874,6 +889,37 @@ mod tests {
     }
 
     // --- data safety: malformed-config refusal + one-time backup (#3) ---------
+
+    #[test]
+    fn update_config_refuses_a_type_invalid_config() {
+        // Valid TOML syntax but a type-invalid value: the typed `load` fails
+        // (resetting to defaults in memory each boot), so persisting over it
+        // would make this save "succeed" while never taking effect. Refuse
+        // with the same fix-or-delete contract as the syntax-level gate.
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("config.toml");
+        let original = "theme = \"normal\"\nmax-desks = \"oops\"\n";
+        std::fs::write(&p, original).unwrap();
+        let err = save(&p, "cyberpunk").expect_err("a type-invalid config must not be persisted");
+        assert!(
+            format!("{err:#}").contains("invalid values"),
+            "error must name the value failure: {err:#}"
+        );
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), original);
+    }
+
+    #[test]
+    fn update_config_still_accepts_unknown_keys() {
+        // Forward-compat must survive the typed gate: a key written by a
+        // newer binary is unknown here but NOT type-invalid.
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("config.toml");
+        std::fs::write(&p, "future-key = 1\n").unwrap();
+        save(&p, "cyberpunk").expect("unknown keys must not block saves");
+        let after = std::fs::read_to_string(&p).unwrap();
+        assert!(after.contains("future-key = 1"));
+        assert!(after.contains("theme = \"cyberpunk\""));
+    }
 
     #[test]
     fn update_config_refuses_to_overwrite_a_malformed_config() {

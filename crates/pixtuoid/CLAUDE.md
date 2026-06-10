@@ -41,7 +41,9 @@ src/
 │                         in 3×50ms retry for sharing-violation tolerance). write_config_atomic
 │                         = lock_config + write_atomic for single-shot writers; NEVER re-call it
 │                         while holding a ConfigLock — same-process flock self-deadlocks. The
-│                         .lock file is deliberately never unlinked.)
+│                         .lock file is deliberately never unlinked, and even a no-op
+│                         re-install creates it: the lock must be taken BEFORE the read
+│                         that detects "nothing changed".)
 └── tui/                ratatui App + TuiRenderer (Renderer trait impl) — see src/tui/CLAUDE.md
 
 sprites/                character/environment packs (NOT under pixtuoid-hook):
