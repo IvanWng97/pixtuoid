@@ -253,6 +253,7 @@ pub mod antigravity;
 pub mod claude_code;
 pub mod codex;
 pub mod decoder;
+pub(crate) mod fd_probe;
 pub mod hook;
 pub mod jsonl;
 pub mod manager;

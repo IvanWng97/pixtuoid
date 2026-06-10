@@ -316,7 +316,7 @@ async fn scan_root(root: &Path, decoders: SourceDecoders, ctx: &WatchCtx<'_>) {
 /// watcher is a single task, so a snapshot race is theoretical.
 async fn revouch_gated_files(decoders: SourceDecoders, ctx: &WatchCtx<'_>) {
     // Empty snapshot = no probe wired, or nothing live: skip the sweep so
-    // probe-less sources (Codex/Antigravity) pay one lock check per pass,
+    // probe-less sources (Antigravity) pay one lock check per pass,
     // not a metadata read per gated file.
     if ctx.live.lock().await.is_empty() {
         return;

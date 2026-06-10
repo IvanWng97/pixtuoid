@@ -9,12 +9,14 @@
 //! (hook.session_id == session_meta.id == filename UUID), so both transports
 //! merge onto one sprite.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use serde_json::{Map, Value};
 
 use crate::source::decoder::{cwd_basename_label, make_tool_detail};
+use crate::source::fd_probe;
 use crate::source::jsonl::JsonlWatcher;
 use crate::source::{AgentEvent, Source, TaggedSender};
 use crate::AgentId;
@@ -226,6 +228,86 @@ fn codex_session_ended(_tail: &[u8]) -> bool {
     false
 }
 
+/// Codex's liveness probe: the rollout UUIDs (in `codex_id_from_path`
+/// id-space, so they join the watcher's first-sight gate directly) of every
+/// rollout under `sessions_root` held OPEN by a running `codex` process.
+///
+/// Codex has no session registry (unlike CC's `sessions/<pid>.json`), but a
+/// live `codex` process holds its rollout file open in append mode for the
+/// whole session (upstream `RolloutRecorder` owns the handle), so an open
+/// rollout fd IS the first-party liveness signal: pid → open fd → rollout
+/// path → UUID. ADDITIVE-ONLY like every probe — any failure (missing root,
+/// FFI error, no codex running) returns the empty set, which changes nothing.
+pub fn live_codex_rollout_ids(sessions_root: &Path) -> HashSet<String> {
+    // Canonicalize once per probe call: kernel-reported fd paths are fully
+    // resolved (e.g. /tmp → /private/tmp on macOS), so the prefix compare
+    // must run against the canonical root or every rollout misses.
+    let Ok(root) = sessions_root.canonicalize() else {
+        tracing::debug!(
+            "codex probe: sessions root {} not canonicalizable; contributing nothing",
+            sessions_root.display()
+        );
+        return HashSet::new();
+    };
+    let pairs = fd_probe::pids_by_name("codex").into_iter().flat_map(|pid| {
+        fd_probe::open_vnode_paths(pid)
+            .into_iter()
+            .map(move |path| (pid, path))
+    });
+    rollout_ids_from_paths(&root, pairs)
+}
+
+/// The pure join half of the probe (unit-testable without FFI): keep the
+/// (pid, path) pairs whose path is a `rollout-*.jsonl` under `root`, mapped
+/// through `codex_id_from_path` — the watcher's `IdDeriver`, so probe ids and
+/// gate ids can't drift.
+fn rollout_ids_from_paths(
+    root: &Path,
+    pairs: impl Iterator<Item = (i32, PathBuf)>,
+) -> HashSet<String> {
+    let mut ids = HashSet::new();
+    for (pid, path) in pairs {
+        if !path.starts_with(root) || !is_rollout_filename(&path) {
+            continue;
+        }
+        tracing::debug!("codex probe: pid {pid} holds {} open", path.display());
+        ids.insert(codex_id_from_path(&path));
+    }
+    ids
+}
+
+fn is_rollout_filename(path: &Path) -> bool {
+    path.extension().and_then(|e| e.to_str()) == Some("jsonl")
+        && path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .is_some_and(|s| s.starts_with("rollout-"))
+}
+
+/// Attach the probe ONLY for the standard `~/.codex/sessions` layout (the
+/// root's file_name is literally `sessions` AND its parent's is `.codex`) —
+/// mirrors `cc_sessions_dir`'s gating: a `--codex-sessions-root /tmp/fixture`
+/// replay points at an arbitrary dir, and those runs must keep the pure-mtime
+/// first-sight gate (the probe is additive-only; a replayed rollout vouched
+/// for by a coincidentally-running codex would resurrect as live).
+fn codex_probe_root(sessions_root: &Path) -> Option<PathBuf> {
+    if sessions_root.file_name().and_then(|n| n.to_str()) != Some("sessions") {
+        return None;
+    }
+    let parent_is_codex = sessions_root
+        .parent()
+        .and_then(|p| p.file_name())
+        .and_then(|n| n.to_str())
+        == Some(".codex");
+    if !parent_is_codex {
+        return None;
+    }
+    // Not canonicalized here: the dir may not exist yet at wiring time
+    // (codex never run); `live_codex_rollout_ids` canonicalizes per probe
+    // call, which also picks up a root created after startup.
+    Some(sessions_root.to_path_buf())
+}
+
 /// The Codex home dir — honors `CODEX_HOME` when it points at an existing dir,
 /// else `~/.codex` (codex's own precedence). The public entry the installer
 /// routes its `config.toml` path through too, so the watched sessions root and
@@ -253,7 +335,7 @@ impl Source for CodexSource {
     }
 
     async fn run(self: Box<Self>, tx: TaggedSender) -> Result<()> {
-        let watcher = JsonlWatcher::new(
+        let mut watcher = JsonlWatcher::new(
             self.sessions_root.clone(),
             SOURCE_NAME.to_string(),
             decode_codex_line,
@@ -261,6 +343,10 @@ impl Source for CodexSource {
             codex_session_ended,
         )
         .with_id_deriver(codex_id_from_path);
+        if let Some(root) = codex_probe_root(&self.sessions_root) {
+            watcher = watcher
+                .with_liveness_probe(std::sync::Arc::new(move || live_codex_rollout_ids(&root)));
+        }
         watcher.run(tx).await
     }
 }
@@ -505,5 +591,71 @@ mod tests {
         // mtime window + stale-sweep.
         assert!(!codex_session_ended(b"anything"));
         assert!(!codex_session_ended(b""));
+    }
+
+    // ---- liveness probe (open-rollout FD binding) ----
+
+    const UUID: &str = "019e7762-9ded-7e33-be41-946ecf105bf4";
+
+    fn ids(root: &Path, paths: Vec<PathBuf>) -> std::collections::HashSet<String> {
+        rollout_ids_from_paths(root, paths.into_iter().map(|p| (42, p)))
+    }
+
+    #[test]
+    fn rollout_under_root_yields_its_uuid() {
+        let root = Path::new("/home/u/.codex/sessions");
+        // Real layout nests YYYY/MM/DD below the root — starts_with must
+        // admit the whole subtree, not only direct children.
+        let nested = root.join(format!(
+            "2026/06/10/rollout-2026-06-10T08-00-00-{UUID}.jsonl"
+        ));
+        let got = ids(root, vec![nested]);
+        assert_eq!(got, std::iter::once(UUID.to_string()).collect());
+    }
+
+    #[test]
+    fn rollout_outside_root_is_excluded() {
+        let root = Path::new("/home/u/.codex/sessions");
+        let outside = PathBuf::from(format!("/tmp/elsewhere/rollout-1-{UUID}.jsonl"));
+        assert!(ids(root, vec![outside]).is_empty());
+    }
+
+    #[test]
+    fn non_rollout_files_under_root_are_excluded() {
+        let root = Path::new("/home/u/.codex/sessions");
+        let wrong_stem = root.join("2026/06/10/history.jsonl");
+        let wrong_ext = root.join(format!("2026/06/10/rollout-1-{UUID}.log"));
+        let no_ext = root.join("2026/06/10/rollout-noext");
+        assert!(ids(root, vec![wrong_stem, wrong_ext, no_ext]).is_empty());
+    }
+
+    #[test]
+    fn probe_root_requires_dot_codex_sessions_layout() {
+        assert_eq!(
+            codex_probe_root(Path::new("/home/u/.codex/sessions")),
+            Some(PathBuf::from("/home/u/.codex/sessions"))
+        );
+        // A fixture replay root must get NO probe (pure-mtime behavior).
+        assert_eq!(codex_probe_root(Path::new("/tmp/fixture")), None);
+        // `sessions` under a non-.codex parent is not the standard layout.
+        assert_eq!(codex_probe_root(Path::new("/srv/other/sessions")), None);
+        // A bare relative `sessions` has no parent to check.
+        assert_eq!(codex_probe_root(Path::new("sessions")), None);
+    }
+
+    #[test]
+    fn live_ids_for_missing_root_is_empty_not_panic() {
+        // canonicalize() fails on a nonexistent dir → empty set (additive-only
+        // probe contributes nothing; pure-mtime gate applies).
+        let missing = Path::new("/definitely/not/a/real/.codex/sessions");
+        assert!(live_codex_rollout_ids(missing).is_empty());
+    }
+
+    #[test]
+    fn live_ids_for_unrelated_root_is_empty() {
+        // Real FFI smoke: whatever processes exist, none hold a rollout open
+        // under a fresh tempdir.
+        let dir = tempfile::tempdir().unwrap();
+        assert!(live_codex_rollout_ids(dir.path()).is_empty());
     }
 }

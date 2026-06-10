@@ -311,6 +311,69 @@ async fn watcher_registers_stale_file_when_probe_says_live() {
     handle.abort();
 }
 
+/// Codex twin of T4: the Codex liveness probe (`live_codex_rollout_ids`)
+/// returns ids in `codex_id_from_path` space — the rollout-filename UUID —
+/// so a stale rollout the probe vouches for must register through the same
+/// `with_liveness_probe` seam. A FAKE probe closure stands in for the real
+/// open-FD enumeration (that half is unit-tested in `source::fd_probe` /
+/// `source::codex`); this pins the id-space JOIN: probe ids and the watcher's
+/// `IdDeriver` agree, or every vouched rollout would stay gated.
+#[tokio::test]
+async fn codex_watcher_registers_stale_rollout_when_probe_says_live() {
+    fast_watch();
+    use pixtuoid_core::source::codex::{codex_id_from_path, decode_codex_line, derive_codex_label};
+
+    let dir = TempDir::new().unwrap();
+    let root = dir.path().to_path_buf();
+    // Real rollout layout: YYYY/MM/DD below the sessions root.
+    let day_dir = root.join("2026").join("06").join("10");
+    tokio::fs::create_dir_all(&day_dir).await.unwrap();
+    let uuid = "019e7762-9ded-7e33-be41-946ecf105bf4";
+    let rollout = day_dir.join(format!("rollout-2026-06-10T08-00-00-{uuid}.jsonl"));
+    let meta = serde_json::json!({
+        "type": "session_meta",
+        "payload": { "id": uuid, "cwd": "/Users/me/dotfiles" }
+    });
+    tokio::fs::write(&rollout, format!("{meta}\n"))
+        .await
+        .unwrap();
+    let backdated = FileTime::from_system_time(SystemTime::now() - Duration::from_secs(3600));
+    set_file_mtime(&rollout, backdated).unwrap();
+
+    let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(32);
+    let watcher = JsonlWatcher::new(
+        root.clone(),
+        "codex".to_string(),
+        decode_codex_line,
+        derive_codex_label,
+        |_t| false,
+    )
+    .with_id_deriver(codex_id_from_path)
+    .with_initial_window(Duration::from_secs(60))
+    .with_liveness_probe(std::sync::Arc::new(move || {
+        std::iter::once(uuid.to_string()).collect()
+    }));
+    let handle = tokio::spawn(async move { watcher.run(tx).await });
+
+    let expected = AgentId::from_parts("codex", uuid);
+    let mut start_id = None;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    while tokio::time::Instant::now() < deadline {
+        if let Ok(Some((_, AgentEvent::SessionStart { agent_id, .. }))) =
+            tokio::time::timeout(Duration::from_millis(200), rx.recv()).await
+        {
+            start_id = Some(agent_id);
+            break;
+        }
+    }
+    assert_eq!(
+        start_id,
+        Some(expected),
+        "a probe-live stale rollout must register on startup, UUID-keyed"
+    );
+    handle.abort();
+}
+
 /// Conversely, a transcript whose mtime is *within* the initial-window is
 /// treated as live: its SessionStart and any historical content replays so
 /// in-flight Task / tool state survives a pixtuoid restart.
