@@ -389,7 +389,17 @@ async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &WatchCtx<'_>) {
     // event on a phantom id (caught by the PR #160 security review).
     let transcript_path_str = crate::source::decoder::normalize_path_key(&path.to_string_lossy());
 
-    emit_first_sight(path, source, decoders, seen, tx, extract_cwd(new_bytes)).await;
+    // The first-sight cwd normally comes from the read span, but a GATED file
+    // revived by an append only reads the tail — and Codex rollouts carry cwd
+    // ONLY on the head session_meta line, so the revive would register with an
+    // empty cwd (downstream: unknown cwd → the short reap). Fall back to a
+    // bounded head read, gated on the `seen` check so an already-registered
+    // append pays at most that one contains read, never the head I/O.
+    let mut first_sight_cwd = extract_cwd(new_bytes);
+    if first_sight_cwd.is_none() && !seen.lock().await.contains_key(path) {
+        first_sight_cwd = read_head_cwd(path, MAX_PENDING_BYTES).await;
+    }
+    emit_first_sight(path, source, decoders, seen, tx, first_sight_cwd).await;
 
     for line in new_bytes.split(|b| *b == b'\n') {
         if line.is_empty() {
@@ -961,6 +971,38 @@ mod tests {
             cursors.lock().await.get(&path).copied(),
             Some(len),
             "cursor must advance to EOF"
+        );
+    }
+
+    #[tokio::test]
+    async fn gated_revive_falls_back_to_head_cwd_when_tail_has_none() {
+        // G4: Codex rollouts carry cwd ONLY on the head session_meta line. A
+        // file gated at first sight then revived by a small cwd-less append
+        // used to register with an EMPTY cwd (downstream: unknown cwd → the
+        // short reap), because the revive read cwd only from the appended
+        // tail. The revive must fall back to a bounded head read.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("rollout-gated.jsonl");
+        let head =
+            "{\"type\":\"session_meta\",\"payload\":{\"cwd\":\"/repo/head\",\"id\":\"u\"}}\n";
+        let (cursors, seen) = gated_fixture(&path, head).await;
+
+        let mut full = String::from(head);
+        full.push_str("{\"type\":\"assistant\"}\n");
+        tokio::fs::write(&path, &full).await.unwrap();
+
+        let events = walk_once(&path, Duration::from_secs(60), t_ended, &cursors, &seen).await;
+        let cwds: Vec<PathBuf> = events
+            .iter()
+            .filter_map(|(_, e)| match e {
+                AgentEvent::SessionStart { cwd, .. } => Some(cwd.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            cwds,
+            vec![PathBuf::from("/repo/head")],
+            "the revive SessionStart must carry the head cwd, got {events:?}"
         );
     }
 
