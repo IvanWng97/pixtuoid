@@ -3,7 +3,8 @@ use std::time::{Duration, SystemTime};
 
 use pixtuoid_core::source::{AgentEvent, Transport};
 use pixtuoid_core::state::reducer::{
-    Reducer, ACTIVE_GRACE_WINDOW, B1_CASCADE_GRACE, HOOK_WINS_WINDOW,
+    Reducer, ACTIVE_GRACE_WINDOW, B1_CASCADE_GRACE, HOOK_SESSION_END_TOMBSTONE_TTL,
+    HOOK_WINS_WINDOW,
 };
 use pixtuoid_core::state::{ActivityState, GlobalDeskIndex, SceneState};
 use pixtuoid_core::AgentId;
@@ -3983,6 +3984,90 @@ fn hook_session_end_for_unknown_id_does_not_create_slot() {
     );
 
     assert!(scene.agents.is_empty(), "SessionEnd must not synthesize");
+}
+
+#[test]
+fn hook_session_end_tombstone_blocks_reordered_trailing_event_synthesis() {
+    // Hook connections are per-connection spawned tasks, so a session's
+    // SessionEnd and a trailing Stop/ActivityEnd can be DELIVERED reordered.
+    // For an INVISIBLE (never-registered) session ending at /exit, the
+    // reordered ActivityEnd used to hit the proof-of-life synthesis and mint
+    // a blank Idle ghost — and with the session over, no SessionEnd will
+    // ever come again: the ghost lived out the full 30-min idle sweep.
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let id = AgentId::from_parts("claude-code", "exited-invisible");
+    let other = AgentId::from_parts("claude-code", "still-alive");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionEnd { agent_id: id },
+        t0,
+        Transport::Hook,
+    );
+    // The straggler lands shortly after — within the tombstone TTL.
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityEnd {
+            agent_id: id,
+            tool_use_id: None,
+        },
+        t0 + Duration::from_millis(50),
+        Transport::Hook,
+    );
+    assert!(
+        !scene.agents.contains_key(&id),
+        "a reordered trailing event must not resurrect a tombstoned session"
+    );
+
+    // Control: a DIFFERENT id is untouched by the tombstone — hook proof of
+    // life still synthesizes for it.
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityEnd {
+            agent_id: other,
+            tool_use_id: None,
+        },
+        t0 + Duration::from_millis(50),
+        Transport::Hook,
+    );
+    assert!(
+        scene.agents.contains_key(&other),
+        "the tombstone must be per-id, not a global synthesis gate"
+    );
+}
+
+#[test]
+fn hook_event_after_tombstone_ttl_synthesizes_again() {
+    // The tombstone is a short reorder guard, not a permanent ban: a hook
+    // event well past the TTL is genuine NEW proof of life (a fresh process
+    // turn on the same session id) and must register.
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let id = AgentId::from_parts("claude-code", "revived-later");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionEnd { agent_id: id },
+        t0,
+        Transport::Hook,
+    );
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityStart {
+            agent_id: id,
+            tool_use_id: Some("t1".into()),
+            detail: None,
+        },
+        t0 + HOOK_SESSION_END_TOMBSTONE_TTL + Duration::from_secs(1),
+        Transport::Hook,
+    );
+    assert!(
+        scene.agents.contains_key(&id),
+        "past the TTL a hook event is fresh proof of life and must synthesize"
+    );
 }
 
 #[test]

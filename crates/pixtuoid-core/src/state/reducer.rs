@@ -25,6 +25,20 @@ pub const HOOK_WINS_WINDOW: Duration = Duration::from_millis(500);
 /// walkout-to-door animation has time to play before the slot is removed.
 pub const EXIT_GRACE_WINDOW: Duration = Duration::from_millis(4500);
 
+/// How long a hook `SessionEnd` for an UNKNOWN id suppresses hook-synthesis
+/// for that id ([`Reducer::synthesize_hook_registration`]). Hook connections
+/// are per-connection spawned tasks, so a session's SessionEnd and a trailing
+/// Stop/ActivityEnd can be DELIVERED reordered — for an invisible
+/// (never-registered) session ending at /exit, the reordered straggler would
+/// otherwise synthesize a blank Idle ghost with NO SessionEnd left to ever
+/// remove it (it lives out the full 30-min idle sweep). 5s is generous next
+/// to [`HOOK_WINS_WINDOW`]'s modeled transport skew — reordering here is
+/// same-machine task-scheduling jitter, so the headroom costs nothing —
+/// while short enough that a genuinely revived session on the same id is
+/// never visibly delayed.
+#[doc(hidden)]
+pub const HOOK_SESSION_END_TOMBSTONE_TTL: Duration = Duration::from_secs(5);
+
 /// How long a drained parent's b1 completion cascade is deferred before the
 /// delegated subtree is marked exiting (#151). A parallel SECOND Task
 /// dispatch arriving via hook is suppressed as a subagent leak and tracked
@@ -211,6 +225,12 @@ pub struct Reducer {
     /// Start entry (kind-in-the-VALUE, not the key), which is what lets one
     /// End record cover the tool's whole lagged JSONL pair.
     recent_hook_tool_uses: HashMap<(AgentId, String), (SystemTime, ToolEventKind)>,
+    /// Short-TTL tombstones for hook `SessionEnd`s that arrived for an id
+    /// with NO slot — an invisible (unregistered) session ending. A reordered
+    /// trailing hook event for a tombstoned id must not re-synthesize the
+    /// session (see [`HOOK_SESSION_END_TOMBSTONE_TTL`]). Mirrors
+    /// `recent_hook_tool_uses`, including its `gc` tick-time pruning.
+    recent_hook_session_ends: HashMap<AgentId, SystemTime>,
     /// Per-agent set of Task tool_use_ids currently in flight. CC's hook
     /// payload sets `transcript_path` to the PARENT'S transcript even when a
     /// subagent is the actor, so subagent hook events hash to the parent's
@@ -291,6 +311,14 @@ impl Reducer {
         // there. SessionEnd/Rename don't synthesize either: an end/rename for
         // an unknown agent proves nothing worth showing.
         if from == Transport::Hook {
+            // A SessionEnd for an UNKNOWN id tombstones it: the session ended
+            // while invisible, and a reordered trailing event from the same
+            // dying session (per-connection hook tasks) must not resurrect it
+            // through the synthesis below. A KNOWN id keeps today's behavior
+            // (the main arm marks the slot exiting; no tombstone needed).
+            if matches!(event, AgentEvent::SessionEnd { .. }) && !scene.agents.contains_key(&id) {
+                self.recent_hook_session_ends.insert(id, now);
+            }
             self.synthesize_hook_registration(scene, &event, id, now);
         }
 
@@ -590,6 +618,17 @@ impl Reducer {
         {
             return;
         }
+        // A tombstoned id just had its hook SessionEnd arrive with no slot:
+        // this event is a reordered trailing straggler from the DEAD session
+        // (per-connection hook tasks reorder), not proof of new life.
+        // Synthesizing would mint a blank Idle ghost that no future
+        // SessionEnd can remove — only the 30-min idle sweep.
+        if self.recent_hook_session_ends.get(&id).is_some_and(|ts| {
+            now.duration_since(*ts)
+                .is_ok_and(|d| d < HOOK_SESSION_END_TOMBSTONE_TTL)
+        }) {
+            return;
+        }
         if self.register_slot(scene, id, "", "", std::path::Path::new(""), None, now) {
             if let Some(slot) = scene.agents.get_mut(&id) {
                 // NOT an unknown-cwd ghost: the 3-min reap exists for startup
@@ -858,6 +897,10 @@ impl Reducer {
         // (clock went backwards). Drop those — stale entries either way.
         self.recent_hook_tool_uses
             .retain(|_, (ts, _)| now.duration_since(*ts).is_ok_and(|d| d < HOOK_WINS_WINDOW));
+        self.recent_hook_session_ends.retain(|_, ts| {
+            now.duration_since(*ts)
+                .is_ok_and(|d| d < HOOK_SESSION_END_TOMBSTONE_TTL)
+        });
     }
 
     /// Walk through agents with `pending_idle_at` set and flip their
