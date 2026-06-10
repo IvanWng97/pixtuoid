@@ -479,43 +479,17 @@ fn cc_jsonl_plain_user_message_yields_no_events() {
     assert!(events.is_empty());
 }
 
-// CC writes no `session_end` line on `/exit` — only a `<command-name>` user
-// event. Decoding it to SessionEnd gives the durable JSONL transport an exit
-// signal so a cleanly-exited session is reaped even when the best-effort
-// SessionEnd hook is dropped.
+// Session lifecycle never reads chat content. The old content-based /exit
+// matcher had ZERO true positives across a 135-transcript corpus (modern CC
+// persists no /exit user line — slash commands are `type:"system",
+// subtype:"local_command"` lines) and false-positived on any user message
+// QUOTING the wrapper. Every slash-command-shaped user line — terminating or
+// not — must decode to nothing; live /exit reaping is the SessionEnd HOOK's
+// job, with the idle sweep as the dropped-hook fallback.
 #[test]
-fn cc_jsonl_exit_command_emits_session_end() {
+fn cc_jsonl_slash_command_user_lines_yield_no_events() {
     let transcript = "/Users/me/.claude/projects/x/ses-abc.jsonl";
-    let v = serde_json::json!({
-        "type": "user",
-        "message": {
-            "role": "user",
-            "content": "<command-name>/exit</command-name>\n            <command-message>exit</command-message>\n            <command-args></command-args>"
-        }
-    });
-    let events = decode_cc_line(transcript, "claude-code", v).unwrap();
-    assert_eq!(events.len(), 1, "got {events:?}");
-    assert!(matches!(events[0], AgentEvent::SessionEnd { .. }));
-}
-
-#[test]
-fn cc_jsonl_quit_command_emits_session_end() {
-    let transcript = "/Users/me/.claude/projects/x/ses-abc.jsonl";
-    let v = serde_json::json!({
-        "type": "user",
-        "message": { "role": "user", "content": "<command-name>/quit</command-name>" }
-    });
-    let events = decode_cc_line(transcript, "claude-code", v).unwrap();
-    assert_eq!(events.len(), 1, "got {events:?}");
-    assert!(matches!(events[0], AgentEvent::SessionEnd { .. }));
-}
-
-// `/clear` and `/compact` keep the session (and process) alive — they must
-// NOT be treated as session-terminating.
-#[test]
-fn cc_jsonl_non_terminating_slash_command_yields_no_events() {
-    let transcript = "/Users/me/.claude/projects/x/ses-abc.jsonl";
-    for cmd in ["/clear", "/compact"] {
+    for cmd in ["/exit", "/quit", "/clear", "/compact"] {
         let v = serde_json::json!({
             "type": "user",
             "message": { "role": "user", "content": format!("<command-name>{cmd}</command-name>") }
@@ -523,9 +497,29 @@ fn cc_jsonl_non_terminating_slash_command_yields_no_events() {
         let events = decode_cc_line(transcript, "claude-code", v).unwrap();
         assert!(
             events.is_empty(),
-            "{cmd} should not end the session: {events:?}"
+            "{cmd} content must not drive lifecycle: {events:?}"
         );
     }
+}
+
+// Regression for the false-positive class: a user message quoting the wrapper
+// text mid-prose (common when a session discusses CC internals) must not end
+// the session.
+#[test]
+fn cc_jsonl_quoted_exit_wrapper_mid_prose_yields_no_events() {
+    let transcript = "/Users/me/.claude/projects/x/ses-abc.jsonl";
+    let v = serde_json::json!({
+        "type": "user",
+        "message": {
+            "role": "user",
+            "content": "I saw <command-name>/exit</command-name> in a transcript — what writes that?"
+        }
+    });
+    let events = decode_cc_line(transcript, "claude-code", v).unwrap();
+    assert!(
+        events.is_empty(),
+        "quoting the wrapper must not emit SessionEnd: {events:?}"
+    );
 }
 
 #[test]
@@ -671,38 +665,40 @@ fn cc_session_ended_ignores_string_content_containing_session_end() {
     );
 }
 
+// The tail scan is STRUCTURAL-only: user-message content (including a
+// slash-command wrapper, exact or quoted mid-prose) is user-controllable and
+// must never read as a session end.
 #[test]
-fn cc_session_ended_detects_exit_command() {
+fn cc_session_ended_ignores_slash_command_content() {
     use pixtuoid_core::source::claude_code::cc_session_ended;
     let tail = br#"{"type":"system","subtype":"session_start","sessionId":"s1"}
 {"type":"assistant","message":{"role":"assistant","content":[]}}
 {"type":"user","message":{"role":"user","content":"<command-name>/exit</command-name>\n            <command-message>exit</command-message>"}}
 "#;
-    assert!(cc_session_ended(tail));
-}
-
-#[test]
-fn cc_session_ended_ignores_non_terminating_slash_command() {
-    use pixtuoid_core::source::claude_code::cc_session_ended;
-    let tail = br#"{"type":"system","subtype":"session_start","sessionId":"s1"}
-{"type":"user","message":{"role":"user","content":"<command-name>/clear</command-name>"}}
-"#;
     assert!(
         !cc_session_ended(tail),
-        "/clear keeps the session alive — not an end marker"
+        "an /exit-wrapper user line is content, not a structural end marker"
+    );
+    let quoted = br#"{"type":"system","subtype":"session_start","sessionId":"s1"}
+{"type":"user","message":{"role":"user","content":"why does <command-name>/quit</command-name> show up wrapped?"}}
+"#;
+    assert!(
+        !cc_session_ended(quoted),
+        "quoting the wrapper mid-prose must not end the session"
     );
 }
 
-// A resume after exit (new session_start tail-appended) resets the end state.
+// A resume after a structural end (new session_start tail-appended) resets the
+// end state — last marker wins.
 #[test]
-fn cc_session_ended_exit_then_session_start_is_not_ended() {
+fn cc_session_ended_end_then_session_start_is_not_ended() {
     use pixtuoid_core::source::claude_code::cc_session_ended;
-    let tail = br#"{"type":"user","message":{"role":"user","content":"<command-name>/exit</command-name>"}}
+    let tail = br#"{"type":"system","subtype":"session_end","sessionId":"s1"}
 {"type":"system","subtype":"session_start","sessionId":"s1"}
 "#;
     assert!(
         !cc_session_ended(tail),
-        "session resumed after exit — last marker wins"
+        "session resumed after a structural end — last marker wins"
     );
 }
 

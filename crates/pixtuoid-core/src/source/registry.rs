@@ -76,10 +76,12 @@ pub struct SourceCaps {
     /// Does a CLEAN exit leave any end signal at all (a SessionEnd hook
     /// and/or a JSONL end marker — best-effort counts; "none of any kind" is
     /// the bar for `false`)? When false, the stale-sweep is the ONLY reaper a
-    /// closed session ever gets. CC: true (best-effort hook + durable `/exit`
-    /// marker). Codex: false (no SessionEnd hook, no PID, ShutdownComplete
-    /// unpersisted — all verified upstream). Antigravity: false (its
-    /// session-end checker is always-false; no hook transport).
+    /// closed session ever gets. CC: true (the best-effort SessionEnd hook —
+    /// no durable transcript marker exists; content-based /exit detection was
+    /// removed because chat content must never drive lifecycle). Codex: false
+    /// (no SessionEnd hook, no PID, ShutdownComplete unpersisted — all
+    /// verified upstream). Antigravity: false (its session-end checker is
+    /// always-false; no hook transport).
     pub has_exit_signal: bool,
     /// Does a live-but-swept session WALK BACK IN on the user's next prompt
     /// (a `UserPromptSubmit`-class event re-emitting `SessionStart`)? This is

@@ -184,26 +184,14 @@ pub fn decode_cc_line(transcript_path: &str, source: &str, v: Value) -> Result<V
                 });
             }
         }
-        // CC writes no `session_end` line on a clean `/exit`; it logs the
-        // slash command as a string-valued user message. Treat `/exit`+`/quit`
-        // as a durable SessionEnd so the JSONL transport reaps the session even
-        // when the best-effort SessionEnd hook is dropped (the hook races CC's
-        // own teardown and has no retry). See `is_exit_command`.
-        ("user", Some(Value::String(s))) if is_exit_command(s) => {
-            out.push(AgentEvent::SessionEnd { agent_id });
-        }
+        // No content arm: user-message content is user-controllable and must
+        // never drive session lifecycle (a message QUOTING the slash-command
+        // wrapper would false-positive), and modern CC persists no /exit
+        // marker in the transcript anyway. Lifecycle = the SessionEnd hook +
+        // the idle sweep.
         _ => {}
     }
     Ok(out)
-}
-
-/// True if a CC user-message content string is a session-terminating slash
-/// command (`/exit` or `/quit`). CC logs slash commands as a `<command-name>`
-/// wrapper. Only the two that actually end the session count — `/clear` and
-/// `/compact` keep it alive, and prose merely mentioning `/exit` is not wrapped.
-fn is_exit_command(content: &str) -> bool {
-    content.contains("<command-name>/exit</command-name>")
-        || content.contains("<command-name>/quit</command-name>")
 }
 
 /// CC session-end checker: parses lines as JSON and checks for
@@ -231,21 +219,10 @@ pub fn cc_session_ended(tail: &[u8]) -> bool {
         if subtype == "session_end" || hook == "SessionEnd" {
             last_is_end = true;
         }
-        // A `/exit` or `/quit` user event ends the session too (CC writes no
-        // `session_end` line for it) — without this, a recently-exited session
-        // re-ghosts on restart within the mtime window. Same matcher as the
-        // live decode path so the two transports agree.
-        if v.get("type").and_then(|s| s.as_str()) == Some("user") {
-            if let Some(c) = v
-                .get("message")
-                .and_then(|m| m.get("content"))
-                .and_then(|c| c.as_str())
-            {
-                if is_exit_command(c) {
-                    last_is_end = true;
-                }
-            }
-        }
+        // Only STRUCTURAL markers count. Message content is user-controllable
+        // and must never drive lifecycle (quoting the slash-command wrapper
+        // would false-positive), and modern CC persists no /exit marker at
+        // all — a session whose end hook dropped is reaped by the idle sweep.
     }
     last_is_end
 }
@@ -461,10 +438,11 @@ mod tests {
     // CC writes `message.content` as a plain STRING (not a block array) for
     // simple text turns — 4709 such lines in a local 2379-session / 822 MB
     // corpus. The tool-event match only fires on `Value::Array`, so a
-    // string-content turn must decode to NOTHING (no events, no panic) unless
-    // it's an /exit marker. A fuzz of all 291k real lines through
-    // decode_cc_line confirmed zero panics; this pins the common
-    // string-content shape the array-only fixtures never exercise.
+    // string-content turn must decode to NOTHING (no events, no panic) — even
+    // a slash-command wrapper line: content never drives lifecycle. A fuzz of
+    // all 291k real lines through decode_cc_line confirmed zero panics; this
+    // pins the common string-content shape the array-only fixtures never
+    // exercise.
     // Coalescing guard: `cc_id_from_path` is invoked in multiple places that
     // must agree — the per-line decode (here), the watcher's `with_id_deriver`
     // (ClaudeCodeSource::run), and the hook decoder's session-id key. If the
@@ -489,6 +467,35 @@ mod tests {
         );
     }
 
+    // Lifecycle must never read chat content: a user message QUOTING the CC
+    // slash-command wrapper mid-prose (common in sessions discussing CC
+    // internals) is user-controllable text, not a lifecycle signal. Neither
+    // the live decode nor the tail scan may treat it as a session end.
+    #[test]
+    fn quoted_exit_wrapper_in_user_content_never_ends_the_session() {
+        let prose =
+            "the transcript shows <command-name>/exit</command-name> as a wrapped line — why?";
+        let v = serde_json::json!({
+            "type": "user",
+            "message": { "role": "user", "content": prose }
+        });
+        let events = decode_cc_line("/x/.claude/projects/p/s.jsonl", "claude-code", v).unwrap();
+        assert!(
+            events.is_empty(),
+            "quoting the wrapper must not emit SessionEnd: {events:?}"
+        );
+
+        let tail = serde_json::json!({
+            "type": "user",
+            "message": { "role": "user", "content": prose }
+        })
+        .to_string();
+        assert!(
+            !cc_session_ended(tail.as_bytes()),
+            "tail scan must not end a session on quoted wrapper text"
+        );
+    }
+
     #[test]
     fn string_content_turns_emit_no_tool_events() {
         for ty in ["assistant", "user"] {
@@ -502,14 +509,18 @@ mod tests {
                 "{ty} turn with string content must emit no events"
             );
         }
-        // The one string-content case that IS load-bearing: a /exit slash
-        // command on a user turn still ends the session.
+        // Even an exact slash-command wrapper decodes to nothing — the old
+        // content-based /exit → SessionEnd matcher is gone (zero true
+        // positives in a 135-transcript corpus; lifecycle is hooks + sweep).
         let exit = serde_json::json!({
             "type": "user",
             "message": { "role": "user", "content": "<command-name>/exit</command-name>" }
         });
         let out = decode_cc_line("/x/.claude/projects/p/s.jsonl", "claude-code", exit).unwrap();
-        assert!(matches!(out.as_slice(), [AgentEvent::SessionEnd { .. }]));
+        assert!(
+            out.is_empty(),
+            "slash-command content must not emit lifecycle events: {out:?}"
+        );
     }
 }
 

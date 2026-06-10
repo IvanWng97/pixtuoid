@@ -305,14 +305,15 @@ async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &WatchCtx<'_>) {
             path.display(),
             MAX_PENDING_BYTES
         );
-        // A KNOWN file's skipped span may bury a durable CC `/exit` SessionEnd
-        // (the fallback when the best-effort hook drops). Without a tail-scan
-        // here the terminator is lost and the slot reaps only via the slow
-        // stale-sweep. A !known ended file never reaches this branch — the
-        // first-sight gate (should_seed_at_eof) already seeded it at EOF above —
-        // so only the known case needs the scan. (Only CC writes a terminator;
-        // Codex/Antigravity check_ended no-op.) Scan reads the file tail and is
-        // independent of the cursor, so compute it before seeding.
+        // A KNOWN file's skipped span may bury a structural session-end marker
+        // (the source's check_ended — CC's matches `subtype:"session_end"` /
+        // `SessionEnd`; content never counts). Without a tail-scan here the
+        // terminator is lost and the slot reaps only via the slow stale-sweep.
+        // A !known ended file never reaches this branch — the first-sight gate
+        // (should_seed_at_eof) already seeded it at EOF above — so only the
+        // known case needs the scan. (Codex/Antigravity check_ended no-op.)
+        // Scan reads the file tail and is independent of the cursor, so
+        // compute it before seeding.
         let ended_in_skip = known && check_session_ended(path, check_ended).await;
         // Seed the cursor to EOF FIRST — before the awaited head-read +
         // registration below — so a concurrent walk_jsonl on this path (250ms
@@ -913,10 +914,9 @@ mod tests {
     #[tokio::test]
     async fn known_oversized_tail_emits_session_end_if_the_skipped_span_ended() {
         // A tracked file grows by > MAX_PENDING_BYTES between passes, and that
-        // skipped span buries a session_end marker (CC's durable /exit
-        // fallback). The watcher must still emit SessionEnd before skipping to
-        // EOF — otherwise the terminator is lost and the slot reaps only via the
-        // slow stale-sweep.
+        // skipped span buries a structural session_end marker. The watcher
+        // must still emit SessionEnd before skipping to EOF — otherwise the
+        // terminator is lost and the slot reaps only via the slow stale-sweep.
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("big.jsonl");
         let initial = "{\"type\":\"assistant\",\"cwd\":\"/r\"}\n";

@@ -14,7 +14,7 @@
 //!     suppressed via `active_tasks`.
 //!
 //! Event shapes mirror the live capture (a `Task` dispatch + a
-//! `general-purpose` subagent + a clean `/exit` → cascade).
+//! `general-purpose` subagent + a SessionEnd hook on clean exit → cascade).
 
 use std::path::PathBuf;
 use std::time::SystemTime;
@@ -127,7 +127,8 @@ fn cc_subagent_links_renames_and_cascades_on_parent_exit() {
         "attributionAgent renames the subagent sprite"
     );
 
-    // Clean `/exit` → parent SessionEnd → cascade → subagent leaves WITH it.
+    // Clean exit (SessionEnd hook) → parent SessionEnd → cascade → subagent
+    // leaves WITH it.
     r.apply(
         &mut scene,
         AgentEvent::SessionEnd {

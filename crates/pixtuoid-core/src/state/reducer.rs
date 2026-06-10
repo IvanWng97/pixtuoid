@@ -94,10 +94,10 @@ pub const STALE_UNKNOWN_CWD_TIMEOUT: Duration = Duration::from_secs(3 * 60);
 /// false-positive is a *live* session that sits idle between turns past the
 /// threshold, and that is **self-healing** — its next `UserPromptSubmit`
 /// re-emits `SessionStart` and the sprite walks back in. CC keeps the long
-/// [`STALE_IDLE_TIMEOUT`]: it has real `SessionEnd` signals (best-effort
-/// hook plus the durable `/exit` marker) for the common clean exit, so a
-/// short reaper there would only evict genuinely live-but-idle sessions
-/// (lunch-break idle) with no upside.
+/// [`STALE_IDLE_TIMEOUT`]: it has a real `SessionEnd` signal (the
+/// best-effort hook) for the common clean exit, so a short reaper there
+/// would only evict genuinely live-but-idle sessions (lunch-break idle)
+/// with no upside.
 #[doc(hidden)]
 pub const STALE_SHORT_IDLE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
