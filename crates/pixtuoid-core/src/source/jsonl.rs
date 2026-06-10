@@ -366,16 +366,19 @@ async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &WatchCtx<'_>) {
             path.display(),
             MAX_PENDING_BYTES
         );
-        // A KNOWN file's skipped span may bury a structural session-end marker
-        // (the source's check_ended — CC's matches `subtype:"session_end"` /
+        // A skipped span may bury a structural session-end marker (the
+        // source's check_ended — CC's matches `subtype:"session_end"` /
         // `SessionEnd`; content never counts). Without a tail-scan here the
         // terminator is lost and the slot reaps only via the slow stale-sweep.
-        // A !known ended file never reaches this branch — the first-sight gate
-        // (should_seed_at_eof) already seeded it at EOF above — so only the
-        // known case needs the scan. (Codex/Antigravity check_ended no-op.)
-        // Scan reads the file tail and is independent of the cursor, so
-        // compute it before seeding.
-        let ended_in_skip = known && check_session_ended(path, check_ended).await;
+        // Checked UNCONDITIONALLY (one bounded 8 KB tail read on a branch
+        // already doing head I/O): a KNOWN file's span can end mid-skip, and a
+        // !known file lands here too — the liveness probe bypasses the
+        // first-sight gate (should_seed_at_eof) INCLUDING its ended tail-scan,
+        // so a probe-admitted ENDED transcript must be caught here or the
+        // #204 registration below would mint a ghost for a session that is
+        // over. (Codex/Antigravity check_ended no-op.) Scan reads the file
+        // tail and is independent of the cursor, so compute it before seeding.
+        let ended_in_skip = check_session_ended(path, check_ended).await;
         // Seed the cursor to EOF FIRST — before the awaited head-read +
         // registration below — so a concurrent walk_jsonl on this path (250ms
         // rescan / notify) sees `known` on its next read and won't re-enter this
@@ -1491,6 +1494,54 @@ mod tests {
             cwds,
             vec![PathBuf::from("/repo/head")],
             "the oversized probe-live first sight must register with the head cwd, got {events:?}"
+        );
+        assert_eq!(
+            cursors.lock().await.get(&path).copied(),
+            Some(full.len() as u64),
+            "backlog must be skipped to EOF, not replayed"
+        );
+    }
+
+    #[tokio::test]
+    async fn probe_live_oversized_ended_first_sight_stays_unregistered() {
+        // M1: the probe bypasses the first-sight gate — INCLUDING its ended
+        // tail-scan — so a probe-admitted !known >1MiB ENDED transcript
+        // reaches the oversized branch. Its ended check used to be gated on
+        // `known` (assuming should_seed_at_eof had already filtered !known
+        // ended files, which the probe bypass breaks): the terminator was
+        // never emitted AND the #204 path registered a ghost for a session
+        // that is over.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(format!("{LIVE_UUID}.jsonl"));
+        let mut full = String::from("{\"type\":\"assistant\",\"cwd\":\"/repo/head\"}\n");
+        full.push_str(&"{\"type\":\"assistant\"}\n".repeat(60_000));
+        full.push_str("{\"type\":\"system\",\"subtype\":\"session_end\"}\n");
+        assert!(full.len() as u64 > (1 << 20), "body must exceed 1 MiB");
+        tokio::fs::write(&path, &full).await.unwrap();
+        backdate_one_hour(&path);
+        let cursors = Arc::new(Mutex::new(HashMap::new()));
+        let seen = Arc::new(Mutex::new(HashMap::new()));
+
+        let events = walk_once_live(
+            &path,
+            Duration::from_secs(60),
+            &[LIVE_UUID],
+            &cursors,
+            &seen,
+        )
+        .await;
+        assert!(
+            !events
+                .iter()
+                .any(|(_, e)| matches!(e, AgentEvent::SessionStart { .. })),
+            "an ended oversized probe-admitted first sight must not register a ghost, got {events:?}"
+        );
+        let expected = AgentId::from_parts("test", LIVE_UUID);
+        assert!(
+            events.iter().any(
+                |(_, e)| matches!(e, AgentEvent::SessionEnd { agent_id } if *agent_id == expected)
+            ),
+            "the buried terminator must still emit SessionEnd (a reducer no-op for an unknown id), got {events:?}"
         );
         assert_eq!(
             cursors.lock().await.get(&path).copied(),
