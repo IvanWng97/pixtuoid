@@ -328,6 +328,12 @@ async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &WatchCtx<'_>) {
             let _ = tx
                 .send((Transport::Jsonl, AgentEvent::SessionEnd { agent_id: id }))
                 .await;
+            // Un-claim first-sight AFTER forwarding the terminator: the
+            // session is over, so a LATER append must re-register through
+            // emit_first_sight (the documented revive). Leaving the claim in
+            // place pinned the path "registered" forever — a resumed session
+            // could never re-appear without a watcher restart.
+            seen.lock().await.remove(path);
         }
         // #204: on the first oversized sight of a recent, live session, still
         // REGISTER the agent. Otherwise a >1 MB transcript stays invisible
@@ -402,6 +408,11 @@ async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &WatchCtx<'_>) {
     }
     emit_first_sight(path, source, decoders, seen, tx, first_sight_cwd).await;
 
+    // Used below to recognize a decoded SessionEnd for THIS transcript (the
+    // decoder keys events the same way `id_derive` does — pinned by the
+    // hook↔watcher coalesce tests).
+    let path_agent_id = AgentId::from_parts(source, &(decoders.id_derive)(path));
+    let mut session_ended = false;
     for line in new_bytes.split(|b| *b == b'\n') {
         if line.is_empty() {
             continue;
@@ -423,13 +434,28 @@ async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &WatchCtx<'_>) {
         match decode_line(&transcript_path_str, source, v) {
             Ok(events) => {
                 for ev in events {
+                    let ends_this_agent = matches!(
+                        &ev,
+                        AgentEvent::SessionEnd { agent_id } if *agent_id == path_agent_id
+                    );
                     if tx.send((Transport::Jsonl, ev)).await.is_err() {
                         return;
                     }
+                    session_ended |= ends_this_agent;
                 }
             }
             Err(e) => warn!("decode error in {}: {e}", path.display()),
         }
+    }
+    if session_ended {
+        // Un-claim first-sight: a decoded SessionEnd retires this path's claim
+        // so a LATER append re-registers through emit_first_sight (the
+        // documented revive) — otherwise `seen` stays claimed forever and the
+        // agent can never re-register without a watcher restart. Runs AFTER
+        // the whole chunk is forwarded (the terminator precedes any re-claim),
+        // and in-pass emit_first_sight idempotence is unaffected: this pass's
+        // claim already happened above; the NEXT pass re-emits the pair.
+        seen.lock().await.remove(path);
     }
 }
 
@@ -709,6 +735,18 @@ mod tests {
     fn t_decode(_t: &str, _s: &str, _v: serde_json::Value) -> Result<Vec<AgentEvent>> {
         Ok(vec![])
     }
+    /// Minimal lifecycle decoder: a structural `session_end` line decodes to
+    /// `SessionEnd` keyed exactly like the harness's default `id_derive`
+    /// (`transcript_path` == `default_id_from_path(path)` here), mirroring how
+    /// the real CC pair (`decode_cc_line` + `cc_id_from_path`) agrees.
+    fn t_decode_lifecycle(t: &str, s: &str, v: serde_json::Value) -> Result<Vec<AgentEvent>> {
+        if v.get("subtype").and_then(|x| x.as_str()) == Some("session_end") {
+            return Ok(vec![AgentEvent::SessionEnd {
+                agent_id: AgentId::from_parts(s, t),
+            }]);
+        }
+        Ok(vec![])
+    }
     fn t_label(_p: &Path, _s: &str, _c: &Path) -> String {
         "t".to_string()
     }
@@ -719,9 +757,10 @@ mod tests {
     /// Drive `walk_jsonl` once over `path` against caller-owned cursor/seen
     /// maps, so multi-pass scenarios (gate → append → revive) share state the
     /// way the real watch loop does. Returns the emitted events.
-    async fn walk_once(
+    async fn walk_once_with(
         path: &Path,
         window: Duration,
+        decode_line: LineDecoder,
         check_ended: SessionEndChecker,
         cursors: &Arc<Mutex<HashMap<PathBuf, u64>>>,
         seen: &Arc<Mutex<HashMap<PathBuf, bool>>>,
@@ -729,7 +768,7 @@ mod tests {
         let (tx, mut rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(32);
         let source: Arc<str> = Arc::from("test");
         let decoders = SourceDecoders {
-            decode_line: t_decode,
+            decode_line,
             derive_label: t_label,
             check_ended,
             id_derive: default_id_from_path,
@@ -748,6 +787,18 @@ mod tests {
             events.push(ev);
         }
         events
+    }
+
+    /// `walk_once_with` with the no-op decoder — the common case for tests
+    /// that exercise the gate / cursor / registration paths, not decoding.
+    async fn walk_once(
+        path: &Path,
+        window: Duration,
+        check_ended: SessionEndChecker,
+        cursors: &Arc<Mutex<HashMap<PathBuf, u64>>>,
+        seen: &Arc<Mutex<HashMap<PathBuf, bool>>>,
+    ) -> Vec<(Transport, AgentEvent)> {
+        walk_once_with(path, window, t_decode, check_ended, cursors, seen).await
     }
 
     /// Drive `walk_jsonl` once over a fresh (never-seeded) file — the
@@ -863,6 +914,141 @@ mod tests {
                 .iter()
                 .any(|(_, e)| matches!(e, AgentEvent::SessionStart { .. })),
             "an ended oversized span must not register a ghost, got {events:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn session_end_unclaims_seen_so_a_later_append_re_registers() {
+        // Self-heal layer: once a decoded line yields SessionEnd for this
+        // path's agent, the path must be UN-claimed from `seen` so a LATER
+        // append re-registers through the documented emit_first_sight revive.
+        // Today `seen` stays claimed forever — the agent can never re-register
+        // without a watcher restart.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("resumed.jsonl");
+        tokio::fs::write(&path, "{\"type\":\"assistant\",\"cwd\":\"/repo\"}\n")
+            .await
+            .unwrap();
+        let cursors = Arc::new(Mutex::new(HashMap::new()));
+        let seen = Arc::new(Mutex::new(HashMap::new()));
+
+        // Pass 1: first-sight registration.
+        let window = Duration::from_secs(3600);
+        let events =
+            walk_once_with(&path, window, t_decode_lifecycle, t_ended, &cursors, &seen).await;
+        assert!(
+            events
+                .iter()
+                .any(|(_, e)| matches!(e, AgentEvent::SessionStart { .. })),
+            "live first sight must register, got {events:?}"
+        );
+
+        // Pass 2: a structural session_end line decodes to SessionEnd.
+        let mut f = tokio::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .await
+            .unwrap();
+        tokio::io::AsyncWriteExt::write_all(
+            &mut f,
+            b"{\"type\":\"system\",\"subtype\":\"session_end\"}\n",
+        )
+        .await
+        .unwrap();
+        tokio::io::AsyncWriteExt::flush(&mut f).await.unwrap();
+        drop(f);
+        let events =
+            walk_once_with(&path, window, t_decode_lifecycle, t_ended, &cursors, &seen).await;
+        assert!(
+            events
+                .iter()
+                .any(|(_, e)| matches!(e, AgentEvent::SessionEnd { .. })),
+            "the structural end must decode to SessionEnd, got {events:?}"
+        );
+        assert!(
+            !seen.lock().await.contains_key(&path),
+            "SessionEnd must un-claim `seen` so a revival can re-register"
+        );
+
+        // Pass 3: the session resumes (normal lines again) — a SECOND
+        // SessionStart must be emitted via the revive path.
+        let mut f = tokio::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .await
+            .unwrap();
+        tokio::io::AsyncWriteExt::write_all(&mut f, b"{\"type\":\"assistant\"}\n")
+            .await
+            .unwrap();
+        tokio::io::AsyncWriteExt::flush(&mut f).await.unwrap();
+        drop(f);
+        let events =
+            walk_once_with(&path, window, t_decode_lifecycle, t_ended, &cursors, &seen).await;
+        assert!(
+            events
+                .iter()
+                .any(|(_, e)| matches!(e, AgentEvent::SessionStart { .. })),
+            "a post-end append must re-register the agent, got {events:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn oversized_ended_skip_unclaims_seen_so_a_later_append_re_registers() {
+        // Same self-heal for the oversized branch: a REGISTERED file whose
+        // > MAX_PENDING_BYTES skipped span buries a session_end emits the
+        // terminator AND un-claims `seen`, so a later small append revives the
+        // agent with a fresh SessionStart.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("big-resumed.jsonl");
+        let initial = "{\"type\":\"assistant\",\"cwd\":\"/repo\"}\n";
+        tokio::fs::write(&path, initial).await.unwrap();
+        let cursors = Arc::new(Mutex::new(HashMap::new()));
+        let seen = Arc::new(Mutex::new(HashMap::new()));
+
+        // Pass 1: first-sight registration (file is small + live).
+        let window = Duration::from_secs(3600);
+        let events = walk_once(&path, window, t_ended, &cursors, &seen).await;
+        assert!(
+            events
+                .iter()
+                .any(|(_, e)| matches!(e, AgentEvent::SessionStart { .. })),
+            "live first sight must register, got {events:?}"
+        );
+
+        // Pass 2: an oversized span ending in session_end → terminator + skip.
+        let mut full = String::from(initial);
+        full.push_str(&"{\"type\":\"assistant\"}\n".repeat(60_000));
+        full.push_str("{\"type\":\"system\",\"subtype\":\"session_end\"}\n");
+        tokio::fs::write(&path, &full).await.unwrap();
+        let events = walk_once(&path, window, t_ended, &cursors, &seen).await;
+        assert!(
+            events
+                .iter()
+                .any(|(_, e)| matches!(e, AgentEvent::SessionEnd { .. })),
+            "the buried terminator must emit SessionEnd, got {events:?}"
+        );
+        assert!(
+            !seen.lock().await.contains_key(&path),
+            "the oversized-ended skip must un-claim `seen`"
+        );
+
+        // Pass 3: a small live append revives the agent.
+        let mut f = tokio::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .await
+            .unwrap();
+        tokio::io::AsyncWriteExt::write_all(&mut f, b"{\"type\":\"assistant\"}\n")
+            .await
+            .unwrap();
+        tokio::io::AsyncWriteExt::flush(&mut f).await.unwrap();
+        drop(f);
+        let events = walk_once(&path, window, t_ended, &cursors, &seen).await;
+        assert!(
+            events
+                .iter()
+                .any(|(_, e)| matches!(e, AgentEvent::SessionStart { .. })),
+            "a post-end append must re-register the agent, got {events:?}"
         );
     }
 
