@@ -205,6 +205,18 @@ impl JsonlWatcher {
         let rescan_delay = tokio::time::sleep(Duration::from_millis(250));
         tokio::pin!(rescan_delay);
 
+        // The 60s poll backstop is an INTERVAL hoisted outside the loop — a
+        // sleep re-created per iteration resets its deadline on every notify
+        // event, so sustained notify traffic starves scan_root (and the probe
+        // refresh + re-vouch sweep riding it) indefinitely. An interval keeps
+        // ticking under load; Delay (not the Burst default) so a long stall
+        // doesn't fire catch-up scans back-to-back.
+        let mut poll = tokio::time::interval(Duration::from_secs(60));
+        poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        // An interval's first tick completes immediately; the initial seed
+        // above already scanned, so consume it.
+        poll.tick().await;
+
         loop {
             let source_arc = source_arc.clone();
             let ctx = WatchCtx {
@@ -226,7 +238,7 @@ impl JsonlWatcher {
                     }
                     scan_root(&self.root, decoders, &ctx).await;
                 }
-                _ = tokio::time::sleep(Duration::from_secs(60)) => {
+                _ = poll.tick() => {
                     if let Some(probe) = &self.liveness_probe {
                         *live.lock().await = probe();
                     }
@@ -278,10 +290,57 @@ async fn probe_admits(path: &Path, decoders: SourceDecoders, ctx: &WatchCtx<'_>)
 }
 
 async fn scan_root(root: &Path, decoders: SourceDecoders, ctx: &WatchCtx<'_>) {
+    revouch_gated_files(decoders, ctx).await;
     if let Ok(mut read) = tokio::fs::read_dir(root).await {
         while let Ok(Some(entry)) = read.next_entry().await {
             walk_jsonl(&entry.path(), decoders, ctx).await;
         }
+    }
+}
+
+/// The probe is consulted only in `walk_jsonl`'s !known first-sight branch, so
+/// a TRANSIENT probe miss (registry file mid-rewrite, a read race) would gate
+/// a live session PERMANENTLY — every later pass exits at `cursor == file_len`
+/// and never asks again. On each SCAN pass (the snapshot in `ctx.live` was
+/// just refreshed; notify single-file walks don't run this), re-ask about
+/// every file that is known-but-never-registered (cursor parked at EOF, no
+/// `seen` claim) and reset a vouched one's cursor to 0 so this same pass's
+/// walk replays/registers it (≤1 MiB replays; an oversized body lands in the
+/// #204 head-read registration branch).
+///
+/// Cannot loop: a re-vouched file that registers claims `seen` and drops out
+/// of the candidate set; one whose replay turns out ENDED is re-parked at EOF
+/// unregistered (the oversized branch's ended skip) — it re-enters at most
+/// once per scan pass, and only while the probe actively (mis)vouches for it.
+/// Locking is sequential short locks on the sibling maps, never nested — the
+/// watcher is a single task, so a snapshot race is theoretical.
+async fn revouch_gated_files(decoders: SourceDecoders, ctx: &WatchCtx<'_>) {
+    // Empty snapshot = no probe wired, or nothing live: skip the sweep so
+    // probe-less sources (Codex/Antigravity) pay one lock check per pass,
+    // not a metadata read per gated file.
+    if ctx.live.lock().await.is_empty() {
+        return;
+    }
+    let candidates: Vec<(PathBuf, u64)> = {
+        let cursors = ctx.cursors.lock().await;
+        cursors.iter().map(|(p, c)| (p.clone(), *c)).collect()
+    };
+    for (path, cursor) in candidates {
+        if ctx.seen.lock().await.contains_key(&path) {
+            continue;
+        }
+        // Only a file parked exactly at EOF is stuck — one with a pending
+        // append revives through the normal walk on this same pass.
+        let Ok(meta) = tokio::fs::metadata(&path).await else {
+            continue;
+        };
+        if meta.len() != cursor {
+            continue;
+        }
+        if !probe_admits(&path, decoders, ctx).await {
+            continue;
+        }
+        ctx.cursors.lock().await.insert(path, 0);
     }
 }
 
@@ -339,7 +398,11 @@ async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &WatchCtx<'_>) {
     // and a long-idle / delegating / stuck-in-a-long-tool-call session writes
     // nothing for hours — when the probe has ground truth that the owning
     // process is alive, the file is read from the top (a > MAX_PENDING_BYTES
-    // body falls into the oversized first-sight registration below).
+    // body falls into the oversized first-sight registration below). The
+    // bypass deliberately skips the gate's ended tail-scan too: CC (the only
+    // probe user) persists no structural end marker today, so there is
+    // nothing to scan for — if the upstream drift watch fires (CC starts
+    // writing one), admission needs an ended-check before bypassing.
     if !known
         && !probe_admits(path, decoders, ctx).await
         && should_seed_at_eof(&meta, window, path, check_ended).await
@@ -1499,6 +1562,76 @@ mod tests {
             cursors.lock().await.get(&path).copied(),
             Some(full.len() as u64),
             "backlog must be skipped to EOF, not replayed"
+        );
+    }
+
+    #[tokio::test]
+    async fn scan_pass_re_vouches_a_transiently_gated_live_file() {
+        // F1: a transient probe miss at first sight (registry file
+        // mid-rewrite, a read race) gates a LIVE session — and without a
+        // re-check every later pass exits at cursor == file_len and never
+        // asks the probe again, hiding the session permanently. Each SCAN
+        // pass (whose probe snapshot was just refreshed) must re-ask about
+        // gated-but-never-registered files and replay a vouched one.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(format!("{LIVE_UUID}.jsonl"));
+        tokio::fs::write(&path, "{\"type\":\"assistant\",\"cwd\":\"/repo\"}\n")
+            .await
+            .unwrap();
+        backdate_one_hour(&path);
+        let cursors = Arc::new(Mutex::new(HashMap::new()));
+        let seen = Arc::new(Mutex::new(HashMap::new()));
+        let live: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(32);
+        let source: Arc<str> = Arc::from("test");
+        let decoders = SourceDecoders {
+            decode_line: t_decode,
+            derive_label: t_label,
+            check_ended: t_ended,
+            id_derive: crate::source::claude_code::cc_id_from_path,
+        };
+        let ctx = WatchCtx {
+            source: &source,
+            cursors: &cursors,
+            seen: &seen,
+            tx: &tx,
+            window: Duration::from_secs(60),
+            live: &live,
+        };
+
+        // Pass 1: empty probe snapshot (the transient miss) → gated.
+        scan_root(dir.path(), decoders, &ctx).await;
+        assert!(rx.try_recv().is_err(), "pass 1 must gate silently");
+        assert!(
+            !seen.lock().await.contains_key(&path),
+            "gated, not registered"
+        );
+
+        // The next probe refresh sees the session — simulate it by mutating
+        // the shared snapshot the way the run loop's refresh arms do.
+        live.lock().await.insert(LIVE_UUID.to_string());
+
+        // Pass 2: the scan must re-vouch the gated file and register it.
+        scan_root(dir.path(), decoders, &ctx).await;
+        let mut events = Vec::new();
+        while let Ok(ev) = rx.try_recv() {
+            events.push(ev);
+        }
+        let expected = AgentId::from_parts("test", LIVE_UUID);
+        assert!(
+            events.iter().any(|(_, e)| matches!(
+                e,
+                AgentEvent::SessionStart { agent_id, .. } if *agent_id == expected
+            )),
+            "a re-vouched scan pass must register the gated live session, got {events:?}"
+        );
+
+        // Pass 3 (loop guard): the file registered → claimed `seen` → out of
+        // the candidate set; nothing is re-emitted while the probe vouches.
+        scan_root(dir.path(), decoders, &ctx).await;
+        assert!(
+            rx.try_recv().is_err(),
+            "a registered file must not be re-vouched/replayed again"
         );
     }
 

@@ -56,6 +56,10 @@ CC_HOOKS_URL = "https://code.claude.com/docs/en/hooks.md"
 #   * a structural transcript end record (`subtype:"session_end"`) —
 #     `cc_session_ended` already decodes it; the docs mentioning it means CC
 #     started persisting it and the JSONL transport gains a durable end signal.
+#     Adoption note: the liveness-probe first-sight bypass (`probe_admits` in
+#     core's source/jsonl.rs) deliberately skips the gate's ended tail-scan
+#     because no such marker exists today — when one lands, admission needs an
+#     ended-check before bypassing the gate.
 #   * the `~/.claude/sessions/<pid>.json` registry ({pid, sessionId, cwd,
 #     procStart, status}) — the input an upcoming liveness probe will consume.
 # All markers are ABSENT from hooks.md at add time (verified live); a hit is
