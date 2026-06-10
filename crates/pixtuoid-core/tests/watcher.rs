@@ -261,6 +261,56 @@ async fn watcher_skips_session_start_for_stale_files_on_startup() {
     handle.abort();
 }
 
+/// T4: a stale-mtime transcript whose session id the first-party liveness
+/// probe vouches for (CC's `~/.claude/sessions/<pid>.json` registry) must
+/// register on startup — mtime is only a liveness proxy; a long-idle or
+/// delegating session writes nothing for hours while its process is alive.
+#[tokio::test]
+async fn watcher_registers_stale_file_when_probe_says_live() {
+    let dir = TempDir::new().unwrap();
+    let projects_root = dir.path().to_path_buf();
+    let project_dir = projects_root.join("proj-idle-live");
+    tokio::fs::create_dir_all(&project_dir).await.unwrap();
+
+    let uuid = "01000000-0000-7000-8000-0000000000aa";
+    let stale = project_dir.join(format!("{uuid}.jsonl"));
+    let line = serde_json::json!({
+        "type": "assistant",
+        "sessionId": uuid,
+        "cwd": "/repo",
+        "message": { "role": "assistant", "content": [] }
+    });
+    tokio::fs::write(&stale, format!("{line}\n")).await.unwrap();
+    let backdated = FileTime::from_system_time(SystemTime::now() - Duration::from_secs(3600));
+    set_file_mtime(&stale, backdated).unwrap();
+
+    let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(32);
+    let watcher = cc_watcher(projects_root.clone())
+        .with_initial_window(Duration::from_secs(60))
+        .with_liveness_probe(std::sync::Arc::new(move || {
+            std::iter::once(uuid.to_string()).collect()
+        }));
+    let handle = tokio::spawn(async move { watcher.run(tx).await });
+
+    let expected = AgentId::from_parts("claude-code", uuid);
+    let mut start_id = None;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    while tokio::time::Instant::now() < deadline {
+        if let Ok(Some((_, AgentEvent::SessionStart { agent_id, .. }))) =
+            tokio::time::timeout(Duration::from_millis(200), rx.recv()).await
+        {
+            start_id = Some(agent_id);
+            break;
+        }
+    }
+    assert_eq!(
+        start_id,
+        Some(expected),
+        "a probe-live stale transcript must register on startup"
+    );
+    handle.abort();
+}
+
 /// Conversely, a transcript whose mtime is *within* the initial-window is
 /// treated as live: its SessionStart and any historical content replays so
 /// in-flight Task / tool state survives a pixtuoid restart.

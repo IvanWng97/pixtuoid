@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
@@ -30,6 +30,16 @@ fn default_id_from_path(p: &Path) -> String {
     crate::source::decoder::normalize_path_key(&p.to_string_lossy())
 }
 
+/// Optional first-party liveness probe: returns the session ids — in the
+/// source's `IdDeriver` id-space — of agent processes known to be ALIVE right
+/// now (e.g. CC's `~/.claude/sessions/<pid>.json` registry). ADDITIVE-ONLY:
+/// membership bypasses the first-sight recency/ended gate (a live-but-idle
+/// session is read from the top however old its mtime); absence changes
+/// nothing — no probe / empty set = the pure mtime+ended gate. `Arc<dyn Fn>`
+/// rather than a fn pointer like the other seams because the real probe
+/// captures its registry dir (the others are stateless).
+pub type LivenessProbe = Arc<dyn Fn() -> HashSet<String> + Send + Sync>;
+
 /// The per-source decode/label/end/id fn-pointers (the invariant-#3 seam)
 /// bundled so the seed/scan/walk helpers thread ONE Copy value, not four.
 #[derive(Clone, Copy)]
@@ -51,6 +61,11 @@ struct WatchCtx<'a> {
     /// seeded at EOF without a SessionStart). The whole watch shares one window
     /// so every path that can first-see a file gates identically (see #85).
     window: Duration,
+    /// Most recent liveness-probe snapshot (session ids in `IdDeriver` space).
+    /// Refreshed once per scan pass (initial seed / 250ms rescan / 60s poll);
+    /// notify-driven single-file walks reuse it — seconds of staleness is fine
+    /// because the probe is ADDITIVE-ONLY (it can only admit, never gate).
+    live: &'a Arc<Mutex<HashSet<String>>>,
 }
 
 pub struct JsonlWatcher {
@@ -61,6 +76,7 @@ pub struct JsonlWatcher {
     derive_label: LabelDeriver,
     check_session_ended: SessionEndChecker,
     id_derive: IdDeriver,
+    liveness_probe: Option<LivenessProbe>,
 }
 
 const DEFAULT_INITIAL_WINDOW: Duration = Duration::from_secs(3600);
@@ -96,6 +112,7 @@ impl JsonlWatcher {
             derive_label,
             check_session_ended,
             id_derive: default_id_from_path,
+            liveness_probe: None,
         }
     }
 
@@ -109,10 +126,23 @@ impl JsonlWatcher {
         self
     }
 
+    pub fn with_liveness_probe(mut self, probe: LivenessProbe) -> Self {
+        self.liveness_probe = Some(probe);
+        self
+    }
+
     pub async fn run(self, tx: TaggedSender) -> Result<()> {
         let cursors: Arc<Mutex<HashMap<PathBuf, u64>>> = Arc::new(Mutex::new(HashMap::new()));
         let seen_sessions: Arc<Mutex<HashMap<PathBuf, bool>>> =
             Arc::new(Mutex::new(HashMap::new()));
+        // Refreshed once per scan pass (here for the initial seed, then in the
+        // rescan/poll arms below); notify walks read the latest snapshot.
+        let live: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(
+            self.liveness_probe
+                .as_ref()
+                .map(|p| p())
+                .unwrap_or_default(),
+        ));
 
         let (notify_tx, mut notify_rx) = tokio::sync::mpsc::unbounded_channel::<PathBuf>();
         let event_handler = move |res: notify::Result<notify::Event>| {
@@ -163,6 +193,7 @@ impl JsonlWatcher {
                 seen: &seen_sessions,
                 tx: &tx,
                 window: self.initial_window,
+                live: &live,
             },
         )
         .await;
@@ -182,6 +213,7 @@ impl JsonlWatcher {
                 seen: &seen_sessions,
                 tx: &tx,
                 window: self.initial_window,
+                live: &live,
             };
             tokio::select! {
                 Some(path) = notify_rx.recv() => {
@@ -189,9 +221,15 @@ impl JsonlWatcher {
                 }
                 _ = &mut rescan_delay, if !rescan_done => {
                     rescan_done = true;
+                    if let Some(probe) = &self.liveness_probe {
+                        *live.lock().await = probe();
+                    }
                     scan_root(&self.root, decoders, &ctx).await;
                 }
                 _ = tokio::time::sleep(Duration::from_secs(60)) => {
+                    if let Some(probe) = &self.liveness_probe {
+                        *live.lock().await = probe();
+                    }
                     scan_root(&self.root, decoders, &ctx).await;
                 }
             }
@@ -226,6 +264,19 @@ async fn should_seed_at_eof(
     !recent || check_session_ended(path, check_ended).await
 }
 
+/// Whether the liveness probe vouches for this transcript: its derived session
+/// id appears in the most recent live-session snapshot. A vouched-for file is
+/// a RUNNING agent however old its mtime (long-idle, delegating to subagents,
+/// or stuck in a long tool call), so the first-sight gate must not hide it.
+/// Subagent transcripts can never match — their stems are agent ids
+/// (`agent-<id>`), not session UUIDs, so only the root transcript is admitted.
+/// The empty-set check short-circuits the id derivation (an allocation) in the
+/// no-probe case.
+async fn probe_admits(path: &Path, decoders: SourceDecoders, ctx: &WatchCtx<'_>) -> bool {
+    let live = ctx.live.lock().await;
+    !live.is_empty() && live.contains(&(decoders.id_derive)(path))
+}
+
 async fn scan_root(root: &Path, decoders: SourceDecoders, ctx: &WatchCtx<'_>) {
     if let Ok(mut read) = tokio::fs::read_dir(root).await {
         while let Ok(Some(entry)) = read.next_entry().await {
@@ -241,6 +292,8 @@ async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &WatchCtx<'_>) {
         seen,
         tx,
         window,
+        // `live` is consumed inside `probe_admits` (off `ctx` directly).
+        live: _,
     } = *ctx;
     // `derive_label` / `id_derive` are consumed inside `emit_first_sight` (off
     // `decoders` directly); only the per-line decoder and the end-checker are
@@ -282,7 +335,15 @@ async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &WatchCtx<'_>) {
     // here first, so a historical or already-ended session is seeded at EOF
     // instead of resurrected with a phantom SessionStart. (A later write makes it
     // `known` with cursor < len, so the documented revive-on-append still fires.)
-    if !known && should_seed_at_eof(&meta, window, path, check_ended).await {
+    // The liveness probe pre-empts the gate: mtime is only a liveness PROXY,
+    // and a long-idle / delegating / stuck-in-a-long-tool-call session writes
+    // nothing for hours — when the probe has ground truth that the owning
+    // process is alive, the file is read from the top (a > MAX_PENDING_BYTES
+    // body falls into the oversized first-sight registration below).
+    if !known
+        && !probe_admits(path, decoders, ctx).await
+        && should_seed_at_eof(&meta, window, path, check_ended).await
+    {
         cursors.lock().await.insert(path.to_path_buf(), file_len);
         return;
     }
@@ -773,12 +834,14 @@ mod tests {
             check_ended,
             id_derive: default_id_from_path,
         };
+        let live = Arc::new(Mutex::new(HashSet::new()));
         let ctx = WatchCtx {
             source: &source,
             cursors,
             seen,
             tx: &tx,
             window,
+            live: &live,
         };
         walk_jsonl(path, decoders, &ctx).await;
         drop(tx);
@@ -787,6 +850,53 @@ mod tests {
             events.push(ev);
         }
         events
+    }
+
+    /// `walk_once` against a NON-EMPTY liveness snapshot, using the CC stem
+    /// deriver (`cc_id_from_path`) — the id-space the real probe joins on
+    /// (the registry carries session UUIDs; transcripts are `<uuid>.jsonl`).
+    async fn walk_once_live(
+        path: &Path,
+        window: Duration,
+        live_ids: &[&str],
+        cursors: &Arc<Mutex<HashMap<PathBuf, u64>>>,
+        seen: &Arc<Mutex<HashMap<PathBuf, bool>>>,
+    ) -> Vec<(Transport, AgentEvent)> {
+        let live: Arc<Mutex<HashSet<String>>> =
+            Arc::new(Mutex::new(live_ids.iter().map(|s| s.to_string()).collect()));
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(32);
+        let source: Arc<str> = Arc::from("test");
+        let decoders = SourceDecoders {
+            decode_line: t_decode,
+            derive_label: t_label,
+            check_ended: t_ended,
+            id_derive: crate::source::claude_code::cc_id_from_path,
+        };
+        let ctx = WatchCtx {
+            source: &source,
+            cursors,
+            seen,
+            tx: &tx,
+            window,
+            live: &live,
+        };
+        walk_jsonl(path, decoders, &ctx).await;
+        drop(tx);
+        let mut events = Vec::new();
+        while let Ok(ev) = rx.try_recv() {
+            events.push(ev);
+        }
+        events
+    }
+
+    fn backdate_one_hour(path: &Path) {
+        filetime::set_file_mtime(
+            path,
+            filetime::FileTime::from_system_time(
+                std::time::SystemTime::now() - Duration::from_secs(3600),
+            ),
+        )
+        .unwrap();
     }
 
     /// `walk_once_with` with the no-op decoder — the common case for tests
@@ -829,13 +939,7 @@ mod tests {
         Arc<Mutex<HashMap<PathBuf, bool>>>,
     ) {
         tokio::fs::write(path, initial).await.unwrap();
-        filetime::set_file_mtime(
-            path,
-            filetime::FileTime::from_system_time(
-                std::time::SystemTime::now() - Duration::from_secs(3600),
-            ),
-        )
-        .unwrap();
+        backdate_one_hour(path);
         let cursors = Arc::new(Mutex::new(HashMap::new()));
         let seen = Arc::new(Mutex::new(HashMap::new()));
         let gated = walk_once(path, Duration::from_secs(60), t_ended, &cursors, &seen).await;
@@ -1080,13 +1184,7 @@ mod tests {
         tokio::fs::write(&path, "{\"type\":\"assistant\",\"cwd\":\"/r\"}\n")
             .await
             .unwrap();
-        filetime::set_file_mtime(
-            &path,
-            filetime::FileTime::from_system_time(
-                std::time::SystemTime::now() - Duration::from_secs(3600),
-            ),
-        )
-        .unwrap();
+        backdate_one_hour(&path);
         let len = tokio::fs::metadata(&path).await.unwrap().len();
 
         let (events, cursor) = first_sight_walk(&path, Duration::from_secs(60), t_ended).await;
@@ -1132,12 +1230,14 @@ mod tests {
             check_ended: t_ended,
             id_derive: default_id_from_path,
         };
+        let live = Arc::new(Mutex::new(HashSet::new()));
         let ctx = WatchCtx {
             source: &source,
             cursors: &cursors,
             seen: &seen,
             tx: &tx,
             window: Duration::from_secs(3600),
+            live: &live,
         };
         walk_jsonl(&path, decoders, &ctx).await;
         drop(tx);
@@ -1208,6 +1308,181 @@ mod tests {
                 .iter()
                 .any(|(_, e)| matches!(e, AgentEvent::SessionStart { .. })),
             "a recent, not-ended file seen first must still emit SessionStart, got {events:?}"
+        );
+    }
+
+    const LIVE_UUID: &str = "01000000-0000-7000-8000-0000000000aa";
+
+    #[tokio::test]
+    async fn probe_live_stale_file_registers_at_first_sight() {
+        // T4: pixtuoid starts AFTER a long-idle live session. mtime says
+        // historical (outside the window), but the first-party liveness probe
+        // says the owning process is ALIVE — the gate must not hide it.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(format!("{LIVE_UUID}.jsonl"));
+        tokio::fs::write(&path, "{\"type\":\"assistant\",\"cwd\":\"/repo\"}\n")
+            .await
+            .unwrap();
+        backdate_one_hour(&path);
+        let cursors = Arc::new(Mutex::new(HashMap::new()));
+        let seen = Arc::new(Mutex::new(HashMap::new()));
+
+        let events = walk_once_live(
+            &path,
+            Duration::from_secs(60),
+            &[LIVE_UUID],
+            &cursors,
+            &seen,
+        )
+        .await;
+        let expected = AgentId::from_parts("test", LIVE_UUID);
+        assert!(
+            events.iter().any(|(_, e)| matches!(
+                e,
+                AgentEvent::SessionStart { agent_id, .. } if *agent_id == expected
+            )),
+            "a probe-live stale transcript must register at first sight, got {events:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn probe_miss_keeps_the_stale_gate() {
+        // A non-empty live set that does NOT contain this transcript's id
+        // changes nothing: the recency gate applies as today.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(format!("{LIVE_UUID}.jsonl"));
+        tokio::fs::write(&path, "{\"type\":\"assistant\",\"cwd\":\"/repo\"}\n")
+            .await
+            .unwrap();
+        backdate_one_hour(&path);
+        let len = tokio::fs::metadata(&path).await.unwrap().len();
+        let cursors = Arc::new(Mutex::new(HashMap::new()));
+        let seen = Arc::new(Mutex::new(HashMap::new()));
+
+        let events = walk_once_live(
+            &path,
+            Duration::from_secs(60),
+            &["99999999-9999-7999-8999-999999999999"],
+            &cursors,
+            &seen,
+        )
+        .await;
+        assert!(
+            events.is_empty(),
+            "a stale transcript the probe does not vouch for must stay gated, got {events:?}"
+        );
+        assert_eq!(
+            cursors.lock().await.get(&path).copied(),
+            Some(len),
+            "gated file must be seeded at EOF"
+        );
+    }
+
+    #[tokio::test]
+    async fn probe_never_gates_a_recent_file() {
+        // ADDITIVE-ONLY: a recent file absent from a non-empty live set still
+        // registers — the probe can only admit, never hide what mtime admits.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(format!("{LIVE_UUID}.jsonl"));
+        tokio::fs::write(&path, "{\"type\":\"assistant\",\"cwd\":\"/repo\"}\n")
+            .await
+            .unwrap();
+        let cursors = Arc::new(Mutex::new(HashMap::new()));
+        let seen = Arc::new(Mutex::new(HashMap::new()));
+
+        let events = walk_once_live(
+            &path,
+            Duration::from_secs(3600),
+            &["99999999-9999-7999-8999-999999999999"],
+            &cursors,
+            &seen,
+        )
+        .await;
+        assert!(
+            events
+                .iter()
+                .any(|(_, e)| matches!(e, AgentEvent::SessionStart { .. })),
+            "a recent file must register regardless of the probe, got {events:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn probe_live_oversized_stale_file_registers_via_head_read() {
+        // A probe-live stale transcript whose whole body exceeds
+        // MAX_PENDING_BYTES at first sight skips the gate and lands in the
+        // #204 oversized first-sight branch: registered from a bounded head
+        // read (cwd off line 1), backlog skipped to EOF.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(format!("{LIVE_UUID}.jsonl"));
+        let mut full = String::from("{\"type\":\"assistant\",\"cwd\":\"/repo/head\"}\n");
+        full.push_str(&"{\"type\":\"assistant\"}\n".repeat(60_000));
+        assert!(full.len() as u64 > (1 << 20), "body must exceed 1 MiB");
+        tokio::fs::write(&path, &full).await.unwrap();
+        backdate_one_hour(&path);
+        let cursors = Arc::new(Mutex::new(HashMap::new()));
+        let seen = Arc::new(Mutex::new(HashMap::new()));
+
+        let events = walk_once_live(
+            &path,
+            Duration::from_secs(60),
+            &[LIVE_UUID],
+            &cursors,
+            &seen,
+        )
+        .await;
+        let cwds: Vec<PathBuf> = events
+            .iter()
+            .filter_map(|(_, e)| match e {
+                AgentEvent::SessionStart { cwd, .. } => Some(cwd.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            cwds,
+            vec![PathBuf::from("/repo/head")],
+            "the oversized probe-live first sight must register with the head cwd, got {events:?}"
+        );
+        assert_eq!(
+            cursors.lock().await.get(&path).copied(),
+            Some(full.len() as u64),
+            "backlog must be skipped to EOF, not replayed"
+        );
+    }
+
+    #[tokio::test]
+    async fn probe_parent_uuid_does_not_admit_subagent_transcript() {
+        // Subagent transcripts (<parent-uuid>/subagents/agent-*.jsonl) are NOT
+        // in the registry; the join key is the file STEM (an agent id, not a
+        // session UUID), so the parent's registry entry must not admit them —
+        // they keep today's mtime gate.
+        let dir = tempfile::tempdir().unwrap();
+        let sub_dir = dir.path().join(LIVE_UUID).join("subagents");
+        tokio::fs::create_dir_all(&sub_dir).await.unwrap();
+        let path = sub_dir.join("agent-deadbeef.jsonl");
+        tokio::fs::write(&path, "{\"type\":\"assistant\",\"cwd\":\"/repo\"}\n")
+            .await
+            .unwrap();
+        backdate_one_hour(&path);
+        let len = tokio::fs::metadata(&path).await.unwrap().len();
+        let cursors = Arc::new(Mutex::new(HashMap::new()));
+        let seen = Arc::new(Mutex::new(HashMap::new()));
+
+        let events = walk_once_live(
+            &path,
+            Duration::from_secs(60),
+            &[LIVE_UUID],
+            &cursors,
+            &seen,
+        )
+        .await;
+        assert!(
+            events.is_empty(),
+            "a stale subagent transcript must stay gated even when its parent is probe-live, got {events:?}"
+        );
+        assert_eq!(
+            cursors.lock().await.get(&path).copied(),
+            Some(len),
+            "gated subagent transcript must be seeded at EOF"
         );
     }
 }
