@@ -1268,6 +1268,184 @@ fn codex_vouched_idle_slot_outlives_short_idle_reap() {
 }
 
 #[test]
+fn proof_of_life_on_delegating_parent_shields_its_active_subtree() {
+    use pixtuoid_core::state::reducer::{PROOF_OF_LIFE_TTL, STALE_ACTIVE_TIMEOUT};
+    // The probe never vouches subagent ids (their transcript stems are
+    // `agent-<id>`, not session UUIDs), and a permission-parked parent renders
+    // Active after attach-replay (not Waiting — `has_waiting_ancestor` can't
+    // fire). So a vouched, actively-delegating ANCESTOR must shield its
+    // delegated subtree from the stale sweep: sweeping the live-but-blocked
+    // child is unrecoverable (its JSONL events become unknown-id no-ops; its
+    // hooks attribute to the parent).
+    let mut scene = SceneState::uniform(8);
+    let mut r = Reducer::new();
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let (parent, child) = delegating_pair(&mut r, &mut scene, "pol-shield", t0);
+    // A grandchild proves the walk is multi-level, not parent-only.
+    let grandchild = AgentId::from_parts(
+        "claude-code",
+        "/p/pol-shield/subagents/agent-1/subagents/agent-2.jsonl",
+    );
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: grandchild,
+            source: "claude-code".into(),
+            session_id: "g".into(),
+            cwd: PathBuf::from("/repo"),
+            parent_id: Some(child),
+        },
+        t0 + Duration::from_millis(150),
+        Transport::Jsonl,
+    );
+    // Parent dispatches a Task → active_tasks[parent] non-empty (delegating).
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityStart {
+            agent_id: parent,
+            tool_use_id: Some("task-T".into()),
+            detail: Some("Task".into()),
+        },
+        t0 + Duration::from_secs(1),
+        Transport::Hook,
+    );
+    // Child + grandchild go Active via their own JSONL, then fall silent
+    // (blocked behind the parent's permission prompt).
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityStart {
+            agent_id: child,
+            tool_use_id: Some("c1".into()),
+            detail: Some("Read: /x".into()),
+        },
+        t0 + Duration::from_secs(2),
+        Transport::Jsonl,
+    );
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityStart {
+            agent_id: grandchild,
+            tool_use_id: Some("g1".into()),
+            detail: Some("Read: /y".into()),
+        },
+        t0 + Duration::from_secs(3),
+        Transport::Jsonl,
+    );
+
+    // The probe re-vouches the PARENT only, well past the subtree's Active
+    // threshold (the watcher re-emits every ~60s, so the vouch is fresh).
+    let vouch_at = t0 + STALE_ACTIVE_TIMEOUT + Duration::from_secs(60);
+    r.apply(
+        &mut scene,
+        AgentEvent::ProofOfLife { agent_id: parent },
+        vouch_at,
+        Transport::Jsonl,
+    );
+
+    let sweep_at = vouch_at + Duration::from_secs(1);
+    assert!(sweep_at.duration_since(vouch_at).unwrap() < PROOF_OF_LIFE_TTL);
+    r.tick(&mut scene, sweep_at);
+    assert!(
+        scene.agents.get(&parent).unwrap().exiting_at.is_none(),
+        "the vouched parent survives via its own-id exemption"
+    );
+    assert!(
+        scene.agents.get(&child).unwrap().exiting_at.is_none(),
+        "a vouched delegating parent must shield its silent Active child"
+    );
+    assert!(
+        scene.agents.get(&grandchild).unwrap().exiting_at.is_none(),
+        "the shield must walk the whole ancestor chain, not one level"
+    );
+}
+
+#[test]
+fn vouch_lapse_restores_subtree_sweep() {
+    use pixtuoid_core::state::reducer::{PROOF_OF_LIFE_TTL, STALE_ACTIVE_TIMEOUT};
+    // When the process exits, emissions stop and the lapse must restore the
+    // normal sweep for the whole subtree — the shield is strictly
+    // process-liveness-scoped, never a permanent exemption.
+    let mut scene = SceneState::uniform(8);
+    let mut r = Reducer::new();
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let (parent, child) = delegating_pair(&mut r, &mut scene, "pol-lapse-tree", t0);
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityStart {
+            agent_id: parent,
+            tool_use_id: Some("task-T".into()),
+            detail: Some("Task".into()),
+        },
+        t0 + Duration::from_secs(1),
+        Transport::Hook,
+    );
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityStart {
+            agent_id: child,
+            tool_use_id: Some("c1".into()),
+            detail: Some("Read: /x".into()),
+        },
+        t0 + Duration::from_secs(2),
+        Transport::Jsonl,
+    );
+
+    // Last vouch lands mid-window; the process then exits — emissions stop.
+    let vouch_at = t0 + STALE_ACTIVE_TIMEOUT - Duration::from_secs(100);
+    r.apply(
+        &mut scene,
+        AgentEvent::ProofOfLife { agent_id: parent },
+        vouch_at,
+        Transport::Jsonl,
+    );
+
+    let lapsed_at = vouch_at + PROOF_OF_LIFE_TTL + Duration::from_secs(1);
+    r.tick(&mut scene, lapsed_at);
+    assert!(
+        scene.agents.get(&parent).unwrap().exiting_at.is_some(),
+        "a lapsed vouch must restore the parent's normal stale sweep"
+    );
+    assert!(
+        scene.agents.get(&child).unwrap().exiting_at.is_some(),
+        "the child must be swept too once the ancestor vouch lapses"
+    );
+}
+
+#[test]
+fn vouched_idle_parent_without_tasks_does_not_shield_idle_child() {
+    use pixtuoid_core::state::reducer::{PROOF_OF_LIFE_TTL, STALE_IDLE_TIMEOUT};
+    // The backstop pin: the ancestor shield is gated on the ancestor ACTIVELY
+    // delegating (non-empty active_tasks). A vouched parent with no Task in
+    // flight must not shield a lingering completed/idle child — that's the
+    // documented 30-min idle backstop for the b1 chained-dispatch residual.
+    let mut scene = SceneState::uniform(8);
+    let mut r = Reducer::new();
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let (parent, child) = delegating_pair(&mut r, &mut scene, "pol-backstop", t0);
+    // NO Task dispatch: active_tasks[parent] stays empty; both slots sit Idle.
+
+    let vouch_at = t0 + STALE_IDLE_TIMEOUT + Duration::from_secs(60);
+    r.apply(
+        &mut scene,
+        AgentEvent::ProofOfLife { agent_id: parent },
+        vouch_at,
+        Transport::Jsonl,
+    );
+
+    let sweep_at = vouch_at + Duration::from_secs(1);
+    assert!(sweep_at.duration_since(vouch_at).unwrap() < PROOF_OF_LIFE_TTL);
+    r.tick(&mut scene, sweep_at);
+    assert!(
+        scene.agents.get(&child).unwrap().exiting_at.is_some(),
+        "a vouched but non-delegating parent must NOT shield its idle child — the 30-min backstop holds"
+    );
+    assert!(
+        scene.agents.get(&parent).unwrap().exiting_at.is_none(),
+        "the vouched parent itself keeps the own-id exemption"
+    );
+}
+
+#[test]
 fn fresh_event_resets_stale_timer() {
     use pixtuoid_core::state::reducer::STALE_IDLE_TIMEOUT;
     let mut scene = SceneState::uniform(4);

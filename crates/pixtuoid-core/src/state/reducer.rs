@@ -1038,6 +1038,17 @@ impl Reducer {
         }
     }
 
+    /// Whether `id` holds a FRESH probe vouch — an [`AgentEvent::ProofOfLife`]
+    /// recorded within [`PROOF_OF_LIFE_TTL`]. The single freshness predicate
+    /// shared by `sweep_stale`'s own-id exemption and its delegating-ancestor
+    /// walk, so the TTL logic can't fork. Clock-regression-safe like the `gc`
+    /// retains (`duration_since` Errs on a future timestamp → not fresh).
+    fn vouch_fresh(&self, id: &AgentId, now: SystemTime) -> bool {
+        self.recent_proof_of_life
+            .get(id)
+            .is_some_and(|t| now.duration_since(*t).is_ok_and(|d| d < PROOF_OF_LIFE_TTL))
+    }
+
     /// Mark agents as exiting when they haven't emitted any event for
     /// longer than their state-adaptive threshold. Uses `last_event_at`
     /// (updated on every reducer event) as the liveness signal, NOT
@@ -1065,13 +1076,29 @@ impl Reducer {
                 // Probe-vouched exemption (#220): a recent ProofOfLife means
                 // the owning process is alive RIGHT NOW — event silence is not
                 // death (permission-parked after attach-replay, long-idle).
-                // Clock-regression-safe like the gc retains; once emissions
-                // stop the entry ages out and the normal sweep resumes.
-                if self
-                    .recent_proof_of_life
-                    .get(&slot.agent_id)
-                    .is_some_and(|t| now.duration_since(*t).is_ok_and(|d| d < PROOF_OF_LIFE_TTL))
-                {
+                // Once emissions stop the entry ages out and the normal sweep
+                // resumes.
+                if self.vouch_fresh(&slot.agent_id, now) {
+                    return None;
+                }
+                // The vouch extends to a vouched ancestor's DELEGATED subtree:
+                // the probe never vouches subagent ids (their stems are
+                // `agent-<id>`, not session UUIDs), and a permission-parked
+                // parent renders Active after attach-replay (not Waiting), so
+                // `has_waiting_ancestor` can't fire for its blocked-but-live
+                // child — which would be swept unrecoverably (its JSONL events
+                // become unknown-id no-ops; its hooks attribute to the
+                // parent). Gated on the ancestor ACTIVELY delegating (a
+                // non-empty `active_tasks` entry) so a completed lingering
+                // child — the b1 chained-dispatch residual — keeps the 30-min
+                // idle backstop.
+                if scope::has_ancestor_where(agents, slot.agent_id, |a| {
+                    self.vouch_fresh(&a.agent_id, now)
+                        && self
+                            .active_tasks
+                            .get(&a.agent_id)
+                            .is_some_and(|t| !t.is_empty())
+                }) {
                     return None;
                 }
                 let age = now

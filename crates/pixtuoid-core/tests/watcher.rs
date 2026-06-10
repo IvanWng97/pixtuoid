@@ -424,6 +424,92 @@ async fn watcher_emits_proof_of_life_for_probe_live_ids() {
     handle.abort();
 }
 
+/// #220 follow-up: the 60s-poll arm must REFRESH the probe snapshot
+/// (`*live = probe()`) and RE-EMIT `ProofOfLife` — not only the initial seed.
+/// The probe starts EMPTY so the initial seed + 250ms rescan gate the stale
+/// file; the session id becomes probe-live only afterwards, so the SessionStart
+/// can ONLY come from a poll-arm snapshot refresh (re-vouch sweep), and the
+/// ProofOfLife only from the poll-arm emission. Uses the `with_poll_interval`
+/// test seam — the production 60s cadence makes the poll arm untestable.
+#[tokio::test]
+async fn poll_arm_refreshes_probe_snapshot_and_reemits_proof_of_life() {
+    use std::collections::HashSet;
+    use std::sync::{Arc, Mutex};
+
+    let dir = TempDir::new().unwrap();
+    let projects_root = dir.path().to_path_buf();
+    let project_dir = projects_root.join("proj-poll-pol");
+    tokio::fs::create_dir_all(&project_dir).await.unwrap();
+
+    let uuid = "01000000-0000-7000-8000-0000000000ac";
+    let stale = project_dir.join(format!("{uuid}.jsonl"));
+    let line = serde_json::json!({
+        "type": "assistant",
+        "sessionId": uuid,
+        "cwd": "/repo",
+        "message": { "role": "assistant", "content": [] }
+    });
+    tokio::fs::write(&stale, format!("{line}\n")).await.unwrap();
+    let backdated = FileTime::from_system_time(SystemTime::now() - Duration::from_secs(3600));
+    set_file_mtime(&stale, backdated).unwrap();
+
+    let live: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
+    let probe_view = live.clone();
+    let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(32);
+    let watcher = cc_watcher(projects_root.clone())
+        .with_initial_window(Duration::from_secs(60))
+        .with_poll_interval(Duration::from_millis(100))
+        .with_liveness_probe(Arc::new(move || probe_view.lock().unwrap().clone()));
+    let handle = tokio::spawn(async move { watcher.run(tx).await });
+
+    // While the snapshot is empty (initial seed, rescan, first polls), the
+    // first-sight gate must hold: no SessionStart, no ProofOfLife.
+    let quiet_until = tokio::time::Instant::now() + Duration::from_millis(300);
+    while tokio::time::Instant::now() < quiet_until {
+        if let Ok(Some((_, ev))) = tokio::time::timeout(Duration::from_millis(50), rx.recv()).await
+        {
+            assert!(
+                !matches!(
+                    ev,
+                    AgentEvent::SessionStart { .. } | AgentEvent::ProofOfLife { .. }
+                ),
+                "the gate must hold while the probe snapshot is empty, got {ev:?}"
+            );
+        }
+    }
+
+    // The session becomes probe-live AFTER startup (e.g. pixtuoid attached
+    // before CC's registry entry landed). Only a poll-arm refresh can see it.
+    live.lock().unwrap().insert(uuid.to_string());
+
+    let expected = AgentId::from_parts("claude-code", uuid);
+    let mut got_start = false;
+    let mut got_pol = false;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    while tokio::time::Instant::now() < deadline && !(got_start && got_pol) {
+        match tokio::time::timeout(Duration::from_millis(200), rx.recv()).await {
+            Ok(Some((_, AgentEvent::SessionStart { agent_id, .. }))) if agent_id == expected => {
+                got_start = true;
+            }
+            Ok(Some((Transport::Jsonl, AgentEvent::ProofOfLife { agent_id })))
+                if agent_id == expected =>
+            {
+                got_pol = true;
+            }
+            _ => {}
+        }
+    }
+    assert!(
+        got_start,
+        "the poll-arm snapshot refresh must re-vouch and admit the gated file"
+    );
+    assert!(
+        got_pol,
+        "the poll arm must re-emit ProofOfLife for every vouched id"
+    );
+    handle.abort();
+}
+
 /// Conversely, a transcript whose mtime is *within* the initial-window is
 /// treated as live: its SessionStart and any historical content replays so
 /// in-flight Task / tool state survives a pixtuoid restart.

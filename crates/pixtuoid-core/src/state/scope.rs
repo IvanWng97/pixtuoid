@@ -93,17 +93,21 @@ pub(crate) fn refresh_lineage(scene: &mut SceneState, id: AgentId, now: SystemTi
     }
 }
 
-/// True if any ancestor of `id` (walking `parent_id`) is in `Waiting` state. A
-/// subagent's permission `Notification` is attributed to the PARENT (the hook
-/// `transcript_path` is the parent's), so the parent goes `Waiting` while the
-/// blocked subagent stays `Active`. Such a subagent is paused on a human gate the
-/// ancestor holds — "not ready", not dead — so `sweep_stale` exempts it from the
-/// aggressive Active timer (liveness vs readiness). Cycle-guarded; the chain is
-/// shallow in practice. Takes `&BTreeMap` rather than `&SceneState` (unlike its
-/// siblings) so it can be called inside `sweep_stale`'s pass-1 closure while
-/// `&scene.agents` is already borrowed immutably — `&SceneState` would conflict
-/// with that live borrow.
-pub(crate) fn has_waiting_ancestor(agents: &BTreeMap<AgentId, AgentSlot>, id: AgentId) -> bool {
+/// True if any ancestor of `id` (walking `parent_id`, the node itself excluded)
+/// satisfies `pred`. The ONE cycle-guarded ancestor walk behind the readiness
+/// queries — [`has_waiting_ancestor`] and `sweep_stale`'s vouched-delegating-
+/// ancestor exemption express their predicates through it so the walk (cycle
+/// guard, dangling-parent tolerance) can't fork. Takes `&BTreeMap` rather than
+/// `&SceneState` so it can be called inside `sweep_stale`'s pass-1 closure
+/// while `&scene.agents` is already borrowed immutably — `&SceneState` would
+/// conflict with that live borrow. The chain is shallow in practice; the
+/// `None => break` arm tolerates a dangling `parent_id` (same contract as
+/// [`refresh_lineage`]).
+pub(crate) fn has_ancestor_where(
+    agents: &BTreeMap<AgentId, AgentSlot>,
+    id: AgentId,
+    pred: impl Fn(&AgentSlot) -> bool,
+) -> bool {
     let mut visited: HashSet<AgentId> = HashSet::new();
     let mut cur = agents.get(&id).and_then(|s| s.parent_id);
     while let Some(pid) = cur {
@@ -111,12 +115,24 @@ pub(crate) fn has_waiting_ancestor(agents: &BTreeMap<AgentId, AgentSlot>, id: Ag
             break;
         }
         match agents.get(&pid) {
-            Some(p) if matches!(p.state, ActivityState::Waiting { .. }) => return true,
+            Some(p) if pred(p) => return true,
             Some(p) => cur = p.parent_id,
             None => break,
         }
     }
     false
+}
+
+/// True if any ancestor of `id` is in `Waiting` state. A subagent's permission
+/// `Notification` is attributed to the PARENT (the hook `transcript_path` is
+/// the parent's), so the parent goes `Waiting` while the blocked subagent stays
+/// `Active`. Such a subagent is paused on a human gate the ancestor holds —
+/// "not ready", not dead — so `sweep_stale` exempts it from the aggressive
+/// Active timer (liveness vs readiness).
+pub(crate) fn has_waiting_ancestor(agents: &BTreeMap<AgentId, AgentSlot>, id: AgentId) -> bool {
+    has_ancestor_where(agents, id, |p| {
+        matches!(p.state, ActivityState::Waiting { .. })
+    })
 }
 
 #[cfg(test)]

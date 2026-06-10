@@ -77,9 +77,11 @@ pub struct JsonlWatcher {
     check_session_ended: SessionEndChecker,
     id_derive: IdDeriver,
     liveness_probe: Option<LivenessProbe>,
+    poll_interval: Duration,
 }
 
 const DEFAULT_INITIAL_WINDOW: Duration = Duration::from_secs(3600);
+const DEFAULT_POLL_INTERVAL: Duration = Duration::from_secs(60);
 
 /// Test-only seam: forces every `JsonlWatcher` in this process onto a polling
 /// backend (`notify::PollWatcher`) at `interval`, instead of the native
@@ -113,11 +115,23 @@ impl JsonlWatcher {
             check_session_ended,
             id_derive: default_id_from_path,
             liveness_probe: None,
+            poll_interval: DEFAULT_POLL_INTERVAL,
         }
     }
 
     pub fn with_initial_window(mut self, window: Duration) -> Self {
         self.initial_window = window;
+        self
+    }
+
+    /// Test-only seam (mirrors the `with_initial_window` builder shape):
+    /// shrinks the 60s `scan_root` poll backstop so the poll arm's probe
+    /// refresh + `ProofOfLife` re-emission are testable — at the production
+    /// cadence a test would have to wait a minute per tick. Production never
+    /// calls this; the default stays [`DEFAULT_POLL_INTERVAL`].
+    #[doc(hidden)]
+    pub fn with_poll_interval(mut self, interval: Duration) -> Self {
+        self.poll_interval = interval;
         self
     }
 
@@ -212,7 +226,7 @@ impl JsonlWatcher {
         // refresh + re-vouch sweep riding it) indefinitely. An interval keeps
         // ticking under load; Delay (not the Burst default) so a long stall
         // doesn't fire catch-up scans back-to-back.
-        let mut poll = tokio::time::interval(Duration::from_secs(60));
+        let mut poll = tokio::time::interval(self.poll_interval);
         poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         // An interval's first tick completes immediately; the initial seed
         // above already scanned, so consume it.
