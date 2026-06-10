@@ -3,7 +3,7 @@ use super::*;
 use std::path::Path;
 use std::time::SystemTime;
 
-use pixtuoid_core::state::{ActivityState, AgentSlot};
+use pixtuoid_core::state::{ActivityState, AgentSlot, GlobalDeskIndex};
 use pixtuoid_core::AgentId;
 
 /// Build a slot with the fields the dashboard reads; the rest are inert.
@@ -28,7 +28,7 @@ fn mk_slot(
         last_event_at: now,
         exiting_at: None,
         pending_idle_at: None,
-        desk_index,
+        desk_index: GlobalDeskIndex(desk_index),
         floor_idx,
         tool_call_count: 0,
         active_ms: 0,

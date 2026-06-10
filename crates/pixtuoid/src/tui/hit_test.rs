@@ -469,7 +469,7 @@ mod tests {
     // --- hit_test_from_tui (click-to-pin, home-desk-only) -----------------
 
     fn scene_with_agent_at_desk(desk_index: usize) -> (SceneState, AgentId) {
-        use pixtuoid_core::state::{ActivityState, AgentSlot};
+        use pixtuoid_core::state::{ActivityState, AgentSlot, GlobalDeskIndex};
         use std::path::Path;
         use std::sync::Arc;
         let id = AgentId::from_transcript_path("/pin/0.jsonl");
@@ -485,7 +485,7 @@ mod tests {
             last_event_at: SystemTime::UNIX_EPOCH,
             exiting_at: None,
             pending_idle_at: None,
-            desk_index,
+            desk_index: GlobalDeskIndex(desk_index),
             floor_idx: 0,
             tool_call_count: 0,
             active_ms: 0,

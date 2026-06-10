@@ -6,7 +6,7 @@
 use super::*;
 use crate::tui::layout::Point;
 use crate::tui::pet::PetKind;
-use pixtuoid_core::state::{ActivityState, AgentSlot, SceneState};
+use pixtuoid_core::state::{ActivityState, AgentSlot, GlobalDeskIndex, SceneState};
 use pixtuoid_core::AgentId;
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
@@ -27,7 +27,7 @@ fn slot(id: AgentId, floor_idx: usize, desk_index: usize, started: SystemTime) -
         last_event_at: started,
         exiting_at: None,
         pending_idle_at: None,
-        desk_index,
+        desk_index: GlobalDeskIndex(desk_index),
         floor_idx,
         tool_call_count: 0,
         active_ms: 0,

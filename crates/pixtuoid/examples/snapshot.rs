@@ -18,7 +18,7 @@ use pixtuoid_core::source::jsonl::JsonlWatcher;
 use pixtuoid_core::source::AgentEvent;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_core::state::ActivityState;
-use pixtuoid_core::{AgentId, AgentSlot, Reducer, SceneState, Transport};
+use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex, Reducer, SceneState, Transport};
 use ratatui::backend::TestBackend;
 use ratatui::style::Color;
 use ratatui::Terminal;
@@ -668,7 +668,7 @@ async fn capture_live_scene(projects_root: &str, listen_secs: u64) -> Result<Sce
     for (id, slot) in &snapshot.agents {
         println!(
             "  {} ({}) at desk {}: {:?}",
-            slot.label, id, slot.desk_index, slot.state
+            slot.label, id, slot.desk_index.0, slot.state
         );
     }
     watcher_handle.abort();
@@ -758,10 +758,10 @@ fn sample_scene(now: SystemTime, max_desks: usize, n_agents: usize) -> SceneStat
                 exiting_at: None,
                 pending_idle_at: None,
 
-                desk_index: i,
+                desk_index: GlobalDeskIndex(i),
                 // floor_of maps the global desk_index to the correct floor based on
                 // per-floor capacities; hardcoding 0 would leave overflow agents invisible.
-                floor_idx: s.floor_of(i),
+                floor_idx: s.floor_of(GlobalDeskIndex(i)),
                 tool_call_count: 0,
                 active_ms: 0,
                 unknown_cwd: false,
@@ -864,8 +864,8 @@ fn dashboard_scene(now: SystemTime) -> SceneState {
                 last_event_at: now,
                 exiting_at: None,
                 pending_idle_at: None,
-                desk_index: *desk_index,
-                floor_idx: s.floor_of(*desk_index),
+                desk_index: GlobalDeskIndex(*desk_index),
+                floor_idx: s.floor_of(GlobalDeskIndex(*desk_index)),
                 tool_call_count: 0,
                 active_ms: 0,
                 unknown_cwd: false,
@@ -993,7 +993,7 @@ fn anim_scene(
             last_event_at: now,
             exiting_at: None,
             pending_idle_at: None,
-            desk_index: 0,
+            desk_index: GlobalDeskIndex(0),
             floor_idx: 0,
             tool_call_count: 0,
             active_ms: 0,

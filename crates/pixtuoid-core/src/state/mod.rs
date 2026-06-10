@@ -293,11 +293,26 @@ mod tests {
     #[test]
     fn floor_local_desk_variable() {
         let s = SceneState::new([4, 8, 6, 4, 2, 0, 0, 0, 0, 0]);
-        assert_eq!(s.floor_local_desk(GlobalDeskIndex(0)), FloorLocalDeskIndex(0));
-        assert_eq!(s.floor_local_desk(GlobalDeskIndex(3)), FloorLocalDeskIndex(3));
-        assert_eq!(s.floor_local_desk(GlobalDeskIndex(4)), FloorLocalDeskIndex(0)); // first desk on F1
-        assert_eq!(s.floor_local_desk(GlobalDeskIndex(11)), FloorLocalDeskIndex(7)); // last desk on F1
-        assert_eq!(s.floor_local_desk(GlobalDeskIndex(12)), FloorLocalDeskIndex(0)); // first desk on F2
+        assert_eq!(
+            s.floor_local_desk(GlobalDeskIndex(0)),
+            FloorLocalDeskIndex(0)
+        );
+        assert_eq!(
+            s.floor_local_desk(GlobalDeskIndex(3)),
+            FloorLocalDeskIndex(3)
+        );
+        assert_eq!(
+            s.floor_local_desk(GlobalDeskIndex(4)),
+            FloorLocalDeskIndex(0)
+        ); // first desk on F1
+        assert_eq!(
+            s.floor_local_desk(GlobalDeskIndex(11)),
+            FloorLocalDeskIndex(7)
+        ); // last desk on F1
+        assert_eq!(
+            s.floor_local_desk(GlobalDeskIndex(12)),
+            FloorLocalDeskIndex(0)
+        ); // first desk on F2
     }
 
     #[test]
@@ -347,7 +362,10 @@ mod tests {
         let s = SceneState::new([4, 0, 6, 0, 2, 0, 0, 0, 0, 0]);
         // Desk 4 is first desk of F2 (F1 has zero capacity)
         assert_eq!(s.floor_of(GlobalDeskIndex(4)), 2);
-        assert_eq!(s.floor_local_desk(GlobalDeskIndex(4)), FloorLocalDeskIndex(0));
+        assert_eq!(
+            s.floor_local_desk(GlobalDeskIndex(4)),
+            FloorLocalDeskIndex(0)
+        );
         assert_eq!(s.floor_of(GlobalDeskIndex(9)), 2);
         assert_eq!(s.floor_of(GlobalDeskIndex(10)), 4);
     }

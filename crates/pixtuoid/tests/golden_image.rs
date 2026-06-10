@@ -16,7 +16,7 @@ use pixtuoid::tui::embedded_pack::load_sprite_pack;
 use pixtuoid::tui::renderer::draw_scene;
 use pixtuoid::tui::theme;
 use pixtuoid_core::state::ActivityState;
-use pixtuoid_core::{AgentId, AgentSlot, SceneState};
+use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex, SceneState};
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 
@@ -56,7 +56,7 @@ fn populated_scene(now: SystemTime) -> SceneState {
                 session_id: format!("sess-{i}").into(),
                 cwd: std::path::PathBuf::from(format!("/tmp/test/{label}")).into(),
                 label: (*label).into(),
-                desk_index: i,
+                desk_index: GlobalDeskIndex(i),
                 floor_idx: 0,
                 state,
                 created_at: now - age_offset,

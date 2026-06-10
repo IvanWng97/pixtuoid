@@ -420,10 +420,22 @@ mod tests {
     #[test]
     fn floor_local_desk_remaps_to_floor_range() {
         let s = SceneState::uniform(16);
-        assert_eq!(s.floor_local_desk(GlobalDeskIndex(0)), FloorLocalDeskIndex(0));
-        assert_eq!(s.floor_local_desk(GlobalDeskIndex(16)), FloorLocalDeskIndex(0));
-        assert_eq!(s.floor_local_desk(GlobalDeskIndex(17)), FloorLocalDeskIndex(1));
-        assert_eq!(s.floor_local_desk(GlobalDeskIndex(31)), FloorLocalDeskIndex(15));
+        assert_eq!(
+            s.floor_local_desk(GlobalDeskIndex(0)),
+            FloorLocalDeskIndex(0)
+        );
+        assert_eq!(
+            s.floor_local_desk(GlobalDeskIndex(16)),
+            FloorLocalDeskIndex(0)
+        );
+        assert_eq!(
+            s.floor_local_desk(GlobalDeskIndex(17)),
+            FloorLocalDeskIndex(1)
+        );
+        assert_eq!(
+            s.floor_local_desk(GlobalDeskIndex(31)),
+            FloorLocalDeskIndex(15)
+        );
     }
 
     #[test]

@@ -11,7 +11,7 @@ use std::time::SystemTime;
 use pixtuoid::tui::frame_cache::{FrameCache, FrameKey};
 use pixtuoid_core::sprite::{Frame, Rgb};
 use pixtuoid_core::state::ActivityState;
-use pixtuoid_core::{AgentId, AgentSlot, SceneState};
+use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex, SceneState};
 
 /// Build a glow-less frame key (no test here varies glow_tint).
 fn key(id: AgentId, anim_name: &'static str, frame_idx: usize, flip_x: bool) -> FrameKey {
@@ -51,7 +51,7 @@ fn make_slot(id: AgentId) -> AgentSlot {
         exiting_at: None,
         pending_idle_at: None,
 
-        desk_index: 0,
+        desk_index: GlobalDeskIndex(0),
         floor_idx: 0,
         tool_call_count: 0,
         active_ms: 0,

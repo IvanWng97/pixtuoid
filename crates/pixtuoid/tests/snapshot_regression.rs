@@ -21,7 +21,7 @@ use std::time::{Duration, SystemTime};
 use pixtuoid::tui::embedded_pack::load_sprite_pack;
 use pixtuoid::tui::renderer::draw_scene;
 use pixtuoid_core::state::ActivityState;
-use pixtuoid_core::{AgentId, AgentSlot, SceneState};
+use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex, SceneState};
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 
@@ -63,7 +63,7 @@ fn fixture_scene(now: SystemTime) -> SceneState {
                 exiting_at: None,
                 pending_idle_at: None,
 
-                desk_index: i,
+                desk_index: GlobalDeskIndex(i),
                 floor_idx: 0,
                 tool_call_count: 0,
                 active_ms: 0,

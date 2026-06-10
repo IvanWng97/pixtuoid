@@ -1,5 +1,5 @@
 use super::*;
-use pixtuoid_core::state::ActivityState;
+use pixtuoid_core::state::{ActivityState, GlobalDeskIndex};
 use pixtuoid_core::walkable::WalkableMask;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -180,7 +180,7 @@ fn active_slot(state_started_at: SystemTime, created_at: SystemTime) -> AgentSlo
         exiting_at: None,
         pending_idle_at: None,
 
-        desk_index: 0,
+        desk_index: GlobalDeskIndex(0),
         floor_idx: 0,
         tool_call_count: 0,
         active_ms: 0,
@@ -628,7 +628,7 @@ fn snap_back_routes_via_the_approach_cell_then_settles_onto_the_chair() {
     let approach = desk_approach_cell(desk, &l).expect("approach cell");
 
     let mut slot = active_slot(now, now - Duration::from_secs(60));
-    slot.desk_index = desk_index;
+    slot.desk_index = GlobalDeskIndex(desk_index);
     slot.agent_id = AgentId::from_transcript_path("/snapapproach/slot.jsonl");
     // Far from the chair (≥ SNAP_BACK_MIN_DIST) so the snap-back arms.
     let prev = Point {
@@ -845,7 +845,7 @@ fn at_waypoint_pose_records_position_to_history() {
         exiting_at: None,
         pending_idle_at: None,
 
-        desk_index: 0,
+        desk_index: GlobalDeskIndex(0),
         floor_idx: 0,
         tool_call_count: 0,
         active_ms: 0,
@@ -879,7 +879,7 @@ fn delegates_to_derive_for_oob_desk() {
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let l = layout();
     let mut slot = active_slot(now, now - Duration::from_secs(60));
-    slot.desk_index = 999;
+    slot.desk_index = GlobalDeskIndex(999);
     let mut history = PoseHistory::new();
     let overlay = pixtuoid_core::walkable::OccupancyOverlay::new();
     let mut router = StubRouter::straight();
@@ -1163,14 +1163,14 @@ fn snap_back_rearms_on_new_state_transition() {
 fn entry_slot_near(created_at: SystemTime) -> AgentSlot {
     let mut s = active_slot(created_at, created_at);
     s.state = pixtuoid_core::state::ActivityState::Idle;
-    s.desk_index = 0;
+    s.desk_index = GlobalDeskIndex(0);
     s
 }
 
 /// Build an entry slot for a far desk index.
 fn entry_slot_far(created_at: SystemTime, desk_index: usize) -> AgentSlot {
     let mut s = entry_slot_near(created_at);
-    s.desk_index = desk_index;
+    s.desk_index = GlobalDeskIndex(desk_index);
     // Give each far slot a distinct agent_id so speed_mult differs.
     s.agent_id = AgentId::from_transcript_path(&format!("/far/{desk_index}.jsonl"));
     s
@@ -1849,7 +1849,7 @@ fn wander_legs_approach_the_desk_via_an_allowed_side_not_through_the_front() {
     let old = now - Duration::from_secs(120);
     let mut slot = entry_slot(old);
     slot.agent_id = trip_id;
-    slot.desk_index = desk_index;
+    slot.desk_index = GlobalDeskIndex(desk_index);
     slot.last_event_at = old;
 
     let mut router = AStarRouter::new();
@@ -1951,7 +1951,7 @@ fn exit_from_desk_rises_off_the_chair_via_the_approach_cell() {
     let approach = desk_approach_cell(desk, &l).expect("approach cell");
 
     let mut slot = exiting_slot(now, now - Duration::from_secs(300));
-    slot.desk_index = desk_index;
+    slot.desk_index = GlobalDeskIndex(desk_index);
     slot.agent_id = AgentId::from_transcript_path("/exitdesk/slot.jsonl");
 
     let overlay = pixtuoid_core::walkable::OccupancyOverlay::new();
@@ -2383,7 +2383,7 @@ fn wander_continuous_across_layouts_and_agents() {
             let old = now - Duration::from_secs(120);
             let mut slot = entry_slot(old);
             slot.agent_id = id;
-            slot.desk_index = k;
+            slot.desk_index = GlobalDeskIndex(k);
             slot.last_event_at = old;
             // ~20 s ⇒ 2–3 full wander cycles per agent.
             let (max_step, _) = max_anchor_step(&slot, &l, now, 600, true);
@@ -2531,7 +2531,7 @@ fn multiple_agents_share_overlay_without_teleport() {
         .map(|k| {
             let mut s = entry_slot(old);
             s.agent_id = AgentId::from_transcript_path(&format!("/multi/{k}.jsonl"));
-            s.desk_index = k;
+            s.desk_index = GlobalDeskIndex(k);
             s.last_event_at = old;
             s
         })

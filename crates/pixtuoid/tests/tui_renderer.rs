@@ -9,7 +9,7 @@ use std::time::{Duration, SystemTime};
 use pixtuoid::tui::embedded_pack::load_sprite_pack;
 use pixtuoid::tui::tui_renderer::TuiRenderer;
 use pixtuoid_core::state::ActivityState;
-use pixtuoid_core::{AgentId, AgentSlot, Renderer, SceneState};
+use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex, Renderer, SceneState};
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 
@@ -36,7 +36,7 @@ fn tui_renderer_render_paints_a_full_frame() {
             exiting_at: None,
             pending_idle_at: None,
 
-            desk_index: 0,
+            desk_index: GlobalDeskIndex(0),
             floor_idx: 0,
             tool_call_count: 0,
             active_ms: 0,
@@ -113,7 +113,7 @@ fn tui_renderer_transition_paints_pets_and_coffee() {
                 last_event_at: now - Duration::from_secs(60),
                 exiting_at: None,
                 pending_idle_at: None,
-                desk_index: i * 8,
+                desk_index: GlobalDeskIndex(i * 8),
                 floor_idx: i,
                 tool_call_count: 0,
                 active_ms: 0,
@@ -352,7 +352,7 @@ fn cancel_transition_lands_on_destination_floor() {
                 last_event_at: now - Duration::from_secs(60),
                 exiting_at: None,
                 pending_idle_at: None,
-                desk_index: i * 8,
+                desk_index: GlobalDeskIndex(i * 8),
                 floor_idx: i,
                 tool_call_count: 0,
                 active_ms: 0,

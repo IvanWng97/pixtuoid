@@ -778,7 +778,7 @@ mod hud_tests {
     // empty (leading non-alphanumeric) must be SKIPPED, not counted as a tool.
     #[test]
     fn status_segments_skips_empty_leading_token() {
-        use pixtuoid_core::{AgentId, AgentSlot};
+        use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex};
         use std::path::PathBuf;
         use std::sync::Arc;
         let slot = AgentSlot {
@@ -797,7 +797,7 @@ mod hud_tests {
             last_event_at: SystemTime::UNIX_EPOCH,
             exiting_at: None,
             pending_idle_at: None,
-            desk_index: 0,
+            desk_index: GlobalDeskIndex(0),
             floor_idx: 0,
             tool_call_count: 0,
             active_ms: 0,
@@ -824,7 +824,7 @@ mod hud_tests {
     // measure over-counts width and short-pads the row below the terminal width.
     #[test]
     fn status_segments_pads_to_full_column_width_with_multibyte_glyphs() {
-        use pixtuoid_core::{AgentId, AgentSlot};
+        use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex};
         use std::path::PathBuf;
         use std::sync::Arc;
         let slot = AgentSlot {
@@ -844,7 +844,7 @@ mod hud_tests {
             last_event_at: SystemTime::UNIX_EPOCH,
             exiting_at: None,
             pending_idle_at: None,
-            desk_index: 0,
+            desk_index: GlobalDeskIndex(0),
             floor_idx: 0,
             tool_call_count: 0,
             active_ms: 0,

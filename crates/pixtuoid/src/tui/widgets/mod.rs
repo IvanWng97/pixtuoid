@@ -135,7 +135,7 @@ impl TickerQueue {
 mod tests {
     use super::*;
     use hud::{build_status_spans, build_status_summary};
-    use pixtuoid_core::{AgentId, AgentSlot};
+    use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex};
     use std::path::PathBuf;
     use std::sync::Arc;
     use tooltip::truncate_label;
@@ -225,7 +225,7 @@ mod tests {
             exiting_at: None,
             pending_idle_at: None,
 
-            desk_index: 0,
+            desk_index: GlobalDeskIndex(0),
             floor_idx: 0,
             tool_call_count: 0,
             active_ms: 0,

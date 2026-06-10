@@ -1,5 +1,5 @@
 use super::*;
-use pixtuoid_core::AgentId;
+use pixtuoid_core::{AgentId, GlobalDeskIndex};
 
 fn id() -> AgentId {
     AgentId::from_parts("test", "motion-test-agent")
@@ -145,7 +145,7 @@ fn idle_slot(path: &str, state_started: SystemTime) -> AgentSlot {
             .unwrap_or(state_started),
         exiting_at: None,
         pending_idle_at: None,
-        desk_index: 0,
+        desk_index: GlobalDeskIndex(0),
         floor_idx: 0,
         tool_call_count: 0,
         active_ms: 0,
