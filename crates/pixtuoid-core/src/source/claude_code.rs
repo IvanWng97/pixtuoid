@@ -66,9 +66,16 @@ pub fn live_cc_session_ids(sessions_dir: &Path) -> HashSet<String> {
             if path.extension().and_then(|e| e.to_str()) != Some("json") {
                 continue;
             }
+            // Regular files only, decided WITHOUT following symlinks (so a
+            // symlink-to-FIFO is rejected too): reading a writer-less FIFO
+            // named `x.json` blocks forever, hanging the probe and silently
+            // killing the whole CC watcher task it runs inside.
+            if !entry.file_type().is_ok_and(|t| t.is_file()) {
+                continue;
+            }
             // An unreadable file is usually a CC exiting and removing its own
             // entry mid-scan — not format drift; skip silently.
-            let Ok(bytes) = std::fs::read(&path) else {
+            let Ok(bytes) = read_registry_entry_bounded(&path) else {
                 continue;
             };
             let Some((pid, session_id)) = parse_registry_entry(&bytes) else {
@@ -98,6 +105,21 @@ pub fn live_cc_session_ids(sessions_dir: &Path) -> HashSet<String> {
         let _ = sessions_dir;
         HashSet::new()
     }
+}
+
+/// Read one registry entry, bounded to 64 KiB. Real entries are <1 KiB; the
+/// bound keeps junk dropped into the registry dir from ballooning a read that
+/// runs on every scan pass (truncated bytes just fail the JSON parse and hit
+/// the warn-once skip).
+#[cfg(unix)]
+fn read_registry_entry_bounded(path: &Path) -> std::io::Result<Vec<u8>> {
+    use std::io::Read;
+    const MAX_REGISTRY_ENTRY_BYTES: u64 = 64 * 1024;
+    let file = std::fs::File::open(path)?;
+    let mut bytes = Vec::new();
+    file.take(MAX_REGISTRY_ENTRY_BYTES)
+        .read_to_end(&mut bytes)?;
+    Ok(bytes)
 }
 
 /// Extract `{pid, sessionId}` from one registry file. `serde_json::Value`
@@ -763,6 +785,58 @@ mod liveness_tests {
             live,
             HashSet::from(["valid-session".to_string()]),
             "only the well-formed live entry may survive"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn oversized_junk_json_entry_is_ignored() {
+        // Real registry entries are <1 KiB; a 256 KiB blob is junk (or drift
+        // we couldn't parse anyway). The bounded read keeps the per-scan
+        // probe cost flat — the truncated bytes just fail the JSON parse and
+        // land in the warn-once skip.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("huge.json"), vec![b'x'; 256 * 1024]).unwrap();
+        write_entry(
+            dir.path(),
+            "valid.json",
+            std::process::id() as i64,
+            "valid-session",
+        );
+        let live = live_cc_session_ids(dir.path());
+        assert_eq!(
+            live,
+            HashSet::from(["valid-session".to_string()]),
+            "an oversized junk entry must be ignored, not break the probe"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fifo_named_json_does_not_hang_the_probe() {
+        // A FIFO named like a registry entry must be skipped BEFORE any read:
+        // reading a writer-less FIFO blocks forever, which would hang the
+        // probe and silently kill the whole CC watcher task. The file_type()
+        // filter (which doesn't follow symlinks) rejects it without touching
+        // its contents.
+        use std::os::unix::ffi::OsStrExt;
+        let dir = tempfile::tempdir().unwrap();
+        let fifo = dir.path().join("fifo.json");
+        let c_path = std::ffi::CString::new(fifo.as_os_str().as_bytes()).unwrap();
+        // SAFETY: mkfifo only reads the NUL-terminated path; 0o600 owner-only.
+        let rc = unsafe { libc::mkfifo(c_path.as_ptr(), 0o600) };
+        assert_eq!(rc, 0, "mkfifo failed: {}", std::io::Error::last_os_error());
+        write_entry(
+            dir.path(),
+            "valid.json",
+            std::process::id() as i64,
+            "valid-session",
+        );
+        let live = live_cc_session_ids(dir.path());
+        assert_eq!(
+            live,
+            HashSet::from(["valid-session".to_string()]),
+            "a FIFO entry must be skipped; the live sibling must survive"
         );
     }
 
