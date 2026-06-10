@@ -522,26 +522,44 @@ impl NegativeVouch {
 
 /// ONE exit path for every watcher-synthesized session end — shared by the
 /// negative-vouch confirmation and the instant-exit arm so the two can't
-/// fork: emit the `SessionEnd` the CLI never wrote, then un-claim first-sight
-/// for every registered path of this session — mirroring the
-/// decoded-SessionEnd path in `walk_jsonl` (terminator first, un-claim after)
-/// so a LATER append re-registers through `emit_first_sight` (a resumed
-/// session walks back in; a wrongly-ended live one self-heals on its next
-/// write or re-vouch).
+/// fork: drain the session's pending bytes, emit the `SessionEnd` the CLI
+/// never wrote, then un-claim first-sight for every registered path of this
+/// session so a LATER append re-registers through `emit_first_sight` (a
+/// resumed session walks back in; a wrongly-ended live one self-heals on its
+/// next write or re-vouch).
+///
+/// The drain-FIRST ordering is load-bearing: the decoded-SessionEnd path in
+/// `walk_jsonl` un-claims with its cursor already at EOF past the terminator,
+/// so any later bytes are genuinely post-end. The instant exit can beat a
+/// pre-death write's notify event by orders of magnitude — un-claiming with
+/// bytes still pending would let that stale chunk re-enter `walk_jsonl` as a
+/// first-sight and resurrect the dead session as a ghost, with every fast
+/// rung already disarmed for it (pid unbound, vouch forgotten): reaped only
+/// by the 10–30 min stale sweep, the exact ladder #223 exists to climb.
+/// Draining through the normal decode path parks the cursor at EOF, so the
+/// straggler notify walk no-ops. (A drained chunk decoding its own
+/// `SessionEnd` un-claims + terminates inside `walk_jsonl`; the duplicate
+/// terminator below is a reducer no-op. For the negative-vouch caller the
+/// drain is itself a no-op — its poll tick ran `scan_root` just before.)
 async fn emit_session_exit(id: &str, decoders: SourceDecoders, ctx: &WatchCtx<'_>) {
+    let claimed: Vec<PathBuf> = {
+        let seen = ctx.seen.lock().await;
+        seen.keys()
+            .filter(|p| (decoders.id_derive)(p) == id)
+            .cloned()
+            .collect()
+    };
+    for path in &claimed {
+        walk_jsonl(path, decoders, ctx).await;
+    }
     let agent_id = AgentId::from_parts(ctx.source, id);
     let _ = ctx
         .tx
         .send((Transport::Jsonl, AgentEvent::SessionEnd { agent_id }))
         .await;
     let mut seen = ctx.seen.lock().await;
-    let claimed: Vec<PathBuf> = seen
-        .keys()
-        .filter(|p| (decoders.id_derive)(p) == id)
-        .cloned()
-        .collect();
-    for path in claimed {
-        seen.remove(&path);
+    for path in &claimed {
+        seen.remove(path);
     }
 }
 
@@ -1180,6 +1198,7 @@ fn extract_cwd(bytes: &[u8]) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
 
     #[test]
     fn unbind_session_drops_only_emptied_pid_entries() {
@@ -1611,6 +1630,103 @@ mod tests {
                 .iter()
                 .any(|(_, e)| matches!(e, AgentEvent::SessionStart { .. })),
             "a post-end append must re-register the agent, got {events:?}"
+        );
+    }
+
+    /// The instant-exit ↔ pre-death-write race (#223 review finding): a write
+    /// landing just before the process dies can have its notify event delivered
+    /// AFTER the exit arm runs. `emit_session_exit` must drain those pending
+    /// bytes (cursor → EOF) BEFORE un-claiming `seen`, or the straggler walk
+    /// re-enters as a first-sight and resurrects the dead session as a ghost —
+    /// with every fast rung already disarmed for it.
+    #[tokio::test]
+    async fn session_exit_drains_pending_bytes_so_a_straggler_walk_cannot_resurrect() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("t.jsonl");
+        std::fs::write(&path, "{\"type\":\"assistant\"}\n").unwrap();
+        let cursors = Arc::new(Mutex::new(HashMap::new()));
+        let seen = Arc::new(Mutex::new(HashMap::new()));
+        let window = Duration::from_secs(3600);
+
+        // Register normally (recent file → SessionStart, cursor at EOF).
+        let events = walk_once(&path, window, t_ended, &cursors, &seen).await;
+        assert!(events
+            .iter()
+            .any(|(_, e)| matches!(e, AgentEvent::SessionStart { .. })));
+
+        // The pre-death write: appended, but its notify walk has NOT run.
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap()
+            .write_all(b"{\"type\":\"assistant\"}\n")
+            .unwrap();
+        let pre_exit_cursor = *cursors.lock().await.get(&path).unwrap();
+        let file_len = std::fs::metadata(&path).unwrap().len();
+        assert!(pre_exit_cursor < file_len, "fixture: bytes must be pending");
+
+        // The instant exit fires (process died) before the notify event lands.
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(32);
+        let source: Arc<str> = Arc::from("test");
+        let decoders = SourceDecoders {
+            decode_line: t_decode,
+            derive_label: t_label,
+            check_ended: t_ended,
+            id_derive: default_id_from_path,
+        };
+        let live = Arc::new(Mutex::new(HashSet::new()));
+        let ctx = WatchCtx {
+            source: &source,
+            cursors: &cursors,
+            seen: &seen,
+            tx: &tx,
+            window,
+            live: &live,
+        };
+        let id = default_id_from_path(&path);
+        emit_session_exit(&id, decoders, &ctx).await;
+        drop(tx);
+        let mut exit_events = Vec::new();
+        while let Ok(ev) = rx.try_recv() {
+            exit_events.push(ev);
+        }
+        assert!(
+            matches!(
+                exit_events.last(),
+                Some((Transport::Jsonl, AgentEvent::SessionEnd { .. }))
+            ),
+            "the terminator must be emitted (last), got {exit_events:?}"
+        );
+        assert_eq!(
+            cursors.lock().await.get(&path).copied(),
+            Some(file_len),
+            "the exit must drain pending bytes to EOF before un-claiming"
+        );
+        assert!(
+            !seen.lock().await.contains_key(&path),
+            "seen must be un-claimed so a genuine post-death append revives"
+        );
+
+        // The straggler notify walk: must be a no-op, NOT a ghost first-sight.
+        let events = walk_once(&path, window, t_ended, &cursors, &seen).await;
+        assert!(
+            events.is_empty(),
+            "a straggler walk after the exit must not resurrect, got {events:?}"
+        );
+
+        // A genuinely post-death append still revives — the self-heal contract.
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap()
+            .write_all(b"{\"type\":\"assistant\"}\n")
+            .unwrap();
+        let events = walk_once(&path, window, t_ended, &cursors, &seen).await;
+        assert!(
+            events
+                .iter()
+                .any(|(_, e)| matches!(e, AgentEvent::SessionStart { .. })),
+            "a post-exit append must re-register, got {events:?}"
         );
     }
 
