@@ -328,16 +328,21 @@ async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &WatchCtx<'_>) {
                 .send((Transport::Jsonl, AgentEvent::SessionEnd { agent_id: id }))
                 .await;
         }
-        // #204: on FIRST-sight of an oversized tail (a recent, not-yet-ended
-        // large session — stale/ended ones were already gated by
-        // should_seed_at_eof above), still REGISTER the agent. Otherwise a >1 MB
-        // transcript stays invisible until its next small append (a long session,
-        // or a delegating parent whose subagents then render as flat roots). The
-        // giant backlog is NOT replayed; cwd/label come from a BOUNDED head read
-        // (CC writes `cwd` on the first line), never the whole 7.4 MB file. A
-        // mid-session oversized append (`known`) just advances the cursor — no
-        // re-registration.
-        if !known {
+        // #204: on the first oversized sight of a recent, live session, still
+        // REGISTER the agent. Otherwise a >1 MB transcript stays invisible
+        // until its next small append (a long session, or a delegating parent
+        // whose subagents then render as flat roots). The giant backlog is NOT
+        // replayed; cwd/label come from a BOUNDED head read (CC writes `cwd`
+        // on the first line), never the whole 7.4 MB file. Registration keys
+        // on `seen` (= "registered"), NOT `!known`: a first-sight-GATED file
+        // (cursor seeded at EOF, no SessionStart) is `known`, yet its first
+        // >1 MiB append lands here — keying on `!known` left that agent
+        // invisible until a later ≤1 MiB append. The `seen` check also spares
+        // already-registered files a redundant head read on every oversized
+        // append. A span that itself ENDED stays unregistered — a SessionStart
+        // after the SessionEnd just sent would resurrect a ghost.
+        let registered = seen.lock().await.contains_key(path);
+        if !registered && !ended_in_skip {
             let head_cwd = read_head_cwd(path, MAX_PENDING_BYTES).await;
             emit_first_sight(path, source, decoders, seen, tx, head_cwd).await;
         }
@@ -700,6 +705,40 @@ mod tests {
         std::str::from_utf8(buf).is_ok_and(|s| s.contains("session_end"))
     }
 
+    /// Drive `walk_jsonl` once over `path` against caller-owned cursor/seen
+    /// maps, so multi-pass scenarios (gate → append → revive) share state the
+    /// way the real watch loop does. Returns the emitted events.
+    async fn walk_once(
+        path: &Path,
+        window: Duration,
+        check_ended: SessionEndChecker,
+        cursors: &Arc<Mutex<HashMap<PathBuf, u64>>>,
+        seen: &Arc<Mutex<HashMap<PathBuf, bool>>>,
+    ) -> Vec<(Transport, AgentEvent)> {
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(32);
+        let source: Arc<str> = Arc::from("test");
+        let decoders = SourceDecoders {
+            decode_line: t_decode,
+            derive_label: t_label,
+            check_ended,
+            id_derive: default_id_from_path,
+        };
+        let ctx = WatchCtx {
+            source: &source,
+            cursors,
+            seen,
+            tx: &tx,
+            window,
+        };
+        walk_jsonl(path, decoders, &ctx).await;
+        drop(tx);
+        let mut events = Vec::new();
+        while let Ok(ev) = rx.try_recv() {
+            events.push(ev);
+        }
+        events
+    }
+
     /// Drive `walk_jsonl` once over a fresh (never-seeded) file — the
     /// deterministic, timing-free repro of the #85 race. When the watcher's
     /// `walk_jsonl` (rescan / 60s poll / notify) is the FIRST to see a file,
@@ -712,29 +751,108 @@ mod tests {
     ) -> (Vec<(Transport, AgentEvent)>, Option<u64>) {
         let cursors = Arc::new(Mutex::new(HashMap::new()));
         let seen = Arc::new(Mutex::new(HashMap::new()));
-        let (tx, mut rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(32);
-        let source: Arc<str> = Arc::from("test");
-        let decoders = SourceDecoders {
-            decode_line: t_decode,
-            derive_label: t_label,
-            check_ended,
-            id_derive: default_id_from_path,
-        };
-        let ctx = WatchCtx {
-            source: &source,
-            cursors: &cursors,
-            seen: &seen,
-            tx: &tx,
-            window,
-        };
-        walk_jsonl(path, decoders, &ctx).await;
-        drop(tx);
-        let mut events = Vec::new();
-        while let Ok(ev) = rx.try_recv() {
-            events.push(ev);
-        }
+        let events = walk_once(path, window, check_ended, &cursors, &seen).await;
         let cursor = cursors.lock().await.get(path).copied();
         (events, cursor)
+    }
+
+    /// Build the G2 fixture: a file GATED at first sight (old mtime → cursor
+    /// seeded at EOF, `seen` unclaimed), returning the shared maps for the
+    /// follow-up walk.
+    async fn gated_fixture(
+        path: &Path,
+        initial: &str,
+    ) -> (
+        Arc<Mutex<HashMap<PathBuf, u64>>>,
+        Arc<Mutex<HashMap<PathBuf, bool>>>,
+    ) {
+        tokio::fs::write(path, initial).await.unwrap();
+        filetime::set_file_mtime(
+            path,
+            filetime::FileTime::from_system_time(
+                std::time::SystemTime::now() - Duration::from_secs(3600),
+            ),
+        )
+        .unwrap();
+        let cursors = Arc::new(Mutex::new(HashMap::new()));
+        let seen = Arc::new(Mutex::new(HashMap::new()));
+        let gated = walk_once(path, Duration::from_secs(60), t_ended, &cursors, &seen).await;
+        assert!(
+            gated.is_empty(),
+            "stale first sight must gate silently, got {gated:?}"
+        );
+        assert!(
+            !seen.lock().await.contains_key(path),
+            "a gated file must not claim `seen`"
+        );
+        (cursors, seen)
+    }
+
+    #[tokio::test]
+    async fn gated_file_registers_on_oversized_first_append() {
+        // G2: a file gated at first sight (cursor at EOF, never registered)
+        // then appends > MAX_PENDING_BYTES in one burst. The oversized branch
+        // used to key registration on `!known`, but a gated file IS known —
+        // the agent stayed invisible until a later ≤1 MiB append.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("gated-big.jsonl");
+        let initial = "{\"type\":\"assistant\",\"cwd\":\"/repo/head\"}\n";
+        let (cursors, seen) = gated_fixture(&path, initial).await;
+
+        let mut full = String::from(initial);
+        full.push_str(&"{\"type\":\"assistant\"}\n".repeat(60_000));
+        tokio::fs::write(&path, &full).await.unwrap();
+        assert!(
+            (full.len() - initial.len()) as u64 > (1 << 20),
+            "the appended span must exceed MAX_PENDING_BYTES"
+        );
+
+        let events = walk_once(&path, Duration::from_secs(60), t_ended, &cursors, &seen).await;
+        let expected = AgentId::from_parts("test", &default_id_from_path(&path));
+        assert!(
+            events.iter().any(|(_, e)| matches!(
+                e,
+                AgentEvent::SessionStart { agent_id, .. } if *agent_id == expected
+            )),
+            "a gated file's oversized first append must register the agent, got {events:?}"
+        );
+        assert_eq!(
+            cursors.lock().await.get(&path).copied(),
+            Some(full.len() as u64),
+            "cursor must advance to EOF"
+        );
+    }
+
+    #[tokio::test]
+    async fn gated_file_oversized_ended_append_stays_unregistered() {
+        // Same shape as above, but the burst ENDS the session: registering
+        // would emit SessionStart AFTER the buried SessionEnd and resurrect a
+        // ghost slot. The terminator must still be emitted; registration must
+        // not.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("gated-big-ended.jsonl");
+        let initial = "{\"type\":\"assistant\",\"cwd\":\"/repo/head\"}\n";
+        let (cursors, seen) = gated_fixture(&path, initial).await;
+
+        let mut full = String::from(initial);
+        full.push_str(&"{\"type\":\"assistant\"}\n".repeat(60_000));
+        full.push_str("{\"type\":\"system\",\"subtype\":\"session_end\"}\n");
+        tokio::fs::write(&path, &full).await.unwrap();
+
+        let events = walk_once(&path, Duration::from_secs(60), t_ended, &cursors, &seen).await;
+        let expected = AgentId::from_parts("test", &default_id_from_path(&path));
+        assert!(
+            events.iter().any(
+                |(_, e)| matches!(e, AgentEvent::SessionEnd { agent_id } if *agent_id == expected)
+            ),
+            "the buried terminator must still emit SessionEnd, got {events:?}"
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|(_, e)| matches!(e, AgentEvent::SessionStart { .. })),
+            "an ended oversized span must not register a ghost, got {events:?}"
+        );
     }
 
     #[tokio::test]
