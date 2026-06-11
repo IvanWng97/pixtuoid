@@ -398,7 +398,10 @@ jobs:
       # publishing would silently not engage and fall back to the token.
       # Harmless while NODE_AUTH_TOKEN is still configured; required once the
       # per-package Trusted Publishers exist and the token is dropped.
-      - run: npm install -g npm@11
+      # Pinned EXACTLY (not @11): the publish path is irreversible, so what
+      # runs must not float with the registry at release time; bump
+      # deliberately (and drop this line once node's bundled npm >= 11.5.1).
+      - run: npm install -g npm@11.5.1
       - uses: extractions/setup-just@v4
 
       - name: Download build artifacts
