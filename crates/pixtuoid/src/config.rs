@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 /// One `[[pets]]` stanza. `kind` is an OPTIONAL raw `String` (NOT a required
 /// field, NOT a serde-derived `PetKind`) on purpose: an unknown value (`kind =
@@ -142,35 +142,37 @@ where
 {
     let lock = crate::install::io::lock_config(path)?;
     let real_path = lock.target();
-    let mut doc = match std::fs::read_to_string(real_path) {
-        Ok(contents) => {
-            let doc = contents.parse::<toml_edit::DocumentMut>().map_err(|e| {
-                anyhow::anyhow!(
-                    "refusing to rewrite {}: it exists but is not valid TOML ({e}); fix or delete it",
-                    real_path.display()
-                )
-            })?;
-            // Syntax alone isn't enough: a type-invalid value (`max-desks =
-            // "oops"`) parses as a document but fails the typed `load`, which
-            // resets everything to defaults in memory each boot — persisting
-            // over it would make this save "succeed" while never taking
-            // effect. Unknown keys still pass (forward-compat, pinned by
-            // `load_ignores_unknown_keys`).
-            toml::from_str::<AppConfig>(&contents).map_err(|e| {
-                anyhow::anyhow!(
-                    "refusing to rewrite {}: it exists but has invalid values ({e}); fix or delete it",
-                    real_path.display()
-                )
-            })?;
-            doc
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => toml_edit::DocumentMut::new(),
-        Err(e) => {
-            return Err(anyhow::Error::new(e).context(format!(
-                "refusing to rewrite {}: cannot read the existing config",
+    // Read through the guard's pinned resolution (ConfigLock::read — "" for a
+    // missing/empty file), NOT a raw read of a re-derived path: every leg of
+    // the locked round must address the ONE file the flock protects.
+    let contents = lock.read().with_context(|| {
+        format!(
+            "refusing to rewrite {}: cannot read the existing config",
+            real_path.display()
+        )
+    })?;
+    let mut doc = if contents.is_empty() {
+        toml_edit::DocumentMut::new()
+    } else {
+        let doc = contents.parse::<toml_edit::DocumentMut>().map_err(|e| {
+            anyhow::anyhow!(
+                "refusing to rewrite {}: it exists but is not valid TOML ({e}); fix or delete it",
                 real_path.display()
-            )))
-        }
+            )
+        })?;
+        // Syntax alone isn't enough: a type-invalid value (`max-desks =
+        // "oops"`) parses as a document but fails the typed `load`, which
+        // resets everything to defaults in memory each boot — persisting
+        // over it would make this save "succeed" while never taking
+        // effect. Unknown keys still pass (forward-compat, pinned by
+        // `load_ignores_unknown_keys`).
+        toml::from_str::<AppConfig>(&contents).map_err(|e| {
+            anyhow::anyhow!(
+                "refusing to rewrite {}: it exists but has invalid values ({e}); fix or delete it",
+                real_path.display()
+            )
+        })?;
+        doc
     };
     mutate(&mut doc);
     lock.backup_once(crate::install::target::BACKUP_SUFFIX)?;
