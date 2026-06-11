@@ -1,4 +1,4 @@
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -13,43 +13,89 @@ use super::{handle_conn, CONN_TIMEOUT, MAX_CONCURRENT_CONNS};
 
 pub(super) struct Listener {
     listener: UnixListener,
+    // Held (never unlocked) for the daemon's lifetime: the kernel releases
+    // the advisory lock when the process dies, however abruptly, so the lock
+    // — not the socket file, which nothing unlinks on exit/crash — is what
+    // the next bind's liveness arbitration reads.
+    _lock: std::fs::File,
 }
 
 impl Listener {
     pub(super) async fn bind(path: &Path) -> Result<Self> {
-        if path.exists() {
-            // An existing socket file is NOT proof of a live daemon (nothing
-            // unlinks it on exit/crash) — but it might be one. Probe before
-            // reclaiming: unconditionally unlinking a LIVE daemon's socket
-            // would leave it accepting on an anonymous inode forever while
-            // every hook-borne signal silently routes here. Mirrors the
-            // Windows arm's loud bail (`first_pipe_instance` → ACCESS_DENIED).
-            match tokio::net::UnixStream::connect(path).await {
-                Ok(stream) => {
-                    // Close immediately — the probe counts against the live
-                    // daemon's MAX_CONCURRENT_CONNS (its CONN_TIMEOUT bounds
-                    // it regardless). Typed so the CC source can degrade to
-                    // transcript-only instead of dying wholesale.
-                    drop(stream);
-                    return Err(anyhow::Error::new(super::SocketBusy {
-                        path: path.to_path_buf(),
-                    }));
-                }
-                Err(e)
-                    if matches!(
-                        e.kind(),
-                        std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::NotFound
-                    ) =>
-                {
-                    // Genuinely stale (a crashed daemon's residue): reclaim.
-                    let _ = tokio::fs::remove_file(path).await;
-                }
-                Err(e) => {
-                    return Err(e).with_context(|| {
-                        format!("probing existing hook socket at {}", path.display())
-                    });
-                }
+        // Liveness arbitration is an EXCLUSIVE advisory lock on a sibling
+        // `<sock>.lock`, NOT connect() errnos: a backlog-saturated LIVE
+        // daemon yields ECONNREFUSED on macOS (the kernel behavior the shim's
+        // stalled-listener test documents) and EAGAIN on Linux, so an
+        // errno-guessing probe can unlink a live daemon's socket — leaving it
+        // accepting on an anonymous inode forever while every hook-borne
+        // signal silently routes here. The lock file is NEVER unlinked
+        // (unlock-then-unlink lets a waiter on the old inode and a newcomer
+        // on a fresh one both "hold" it — same rule as install/io.rs's
+        // ConfigLock) and is derived from the FINAL socket path so both bind
+        // branches (temp-rename and the sun_path>100 fallback below — a
+        // regular file has no sun_path cap) arbitrate on the same file.
+        let lock_path = path.with_file_name(format!(
+            "{}.lock",
+            path.file_name()
+                .map(|n| n.to_string_lossy())
+                .unwrap_or_default()
+        ));
+        let lock = std::fs::OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .truncate(false)
+            .mode(0o600)
+            // O_NOFOLLOW: a symlink planted at `<sock>.lock` (the parent dir
+            // may be a shared /tmp) must fail the open, not make the daemon
+            // flock — and hold for its lifetime — an arbitrary file.
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(&lock_path)
+            .with_context(|| format!("opening hook socket lock at {}", lock_path.display()))?;
+        match lock.try_lock() {
+            Ok(()) => {}
+            Err(std::fs::TryLockError::WouldBlock) => {
+                // A live owner holds the lock. Typed so the CC source can
+                // degrade to transcript-only instead of dying wholesale. This
+                // also closes the old simultaneous-start rename TOCTOU: of
+                // two racing first starts exactly one acquires the lock; the
+                // loser degrades instead of leaving an anonymous listener.
+                return Err(anyhow::Error::new(super::SocketBusy {
+                    path: path.to_path_buf(),
+                }));
             }
+            Err(std::fs::TryLockError::Error(e)) => {
+                return Err(e)
+                    .with_context(|| format!("locking hook socket at {}", lock_path.display()));
+            }
+        }
+        if path.exists() {
+            // Lock acquired ⇒ any previous lock-holding owner is dead ⇒ the
+            // socket file is residue. Belt-and-braces probe before
+            // reclaiming: a connect that SUCCEEDS — or backlogs (WouldBlock:
+            // a full accept queue only happens on a live listener) — proves a
+            // LIVE owner that predates the lock protocol (an older pixtuoid
+            // mid-upgrade, or an arbitrary squatter); defer to it rather than
+            // steal. Any OTHER connect error is NOT evidence of life — the
+            // lock already arbitrated — so reclaim. Honest residual: a
+            // lock-LESS live owner under a saturated backlog yields
+            // ECONNREFUSED on macOS (not WouldBlock), so this probe still
+            // steals from it — accepted, because the window only exists while
+            // pre-lock daemons run (mixed-version upgrade) and ages out once
+            // every daemon holds the lock.
+            let alive = match tokio::net::UnixStream::connect(path).await {
+                // Close immediately — the probe counts against the live
+                // daemon's MAX_CONCURRENT_CONNS (its CONN_TIMEOUT bounds it
+                // regardless).
+                Ok(_stream) => true,
+                Err(e) => e.kind() == std::io::ErrorKind::WouldBlock,
+            };
+            if alive {
+                return Err(anyhow::Error::new(super::SocketBusy {
+                    path: path.to_path_buf(),
+                }));
+            }
+            let _ = tokio::fs::remove_file(path).await;
         }
         // Bind at a temp name, chmod to owner-only, then atomically rename
         // onto the final path (a rename doesn't disturb the listening inode).
@@ -58,12 +104,6 @@ impl Listener {
         // touching the process-global umask, which raced every other tokio
         // worker's concurrent file creation (e.g. a JsonlWatcher's
         // create_dir_all) for the duration of the bind.
-        //
-        // Accepted TOCTOU: two SIMULTANEOUS first starts can both pass the
-        // probe and race the rename; the last rename wins the name and the
-        // loser keeps an anonymous listener until its next restart. Same
-        // one-winner-loudness class as Windows' first_pipe_instance bail,
-        // not worth a lockfile.
         let tmp = path.with_file_name(format!(
             "{}.{}.tmp",
             path.file_name()
@@ -82,7 +122,10 @@ impl Listener {
             tokio::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
                 .await
                 .with_context(|| format!("restricting hook socket mode at {}", path.display()))?;
-            return Ok(Self { listener });
+            return Ok(Self {
+                listener,
+                _lock: lock,
+            });
         }
         // A leftover temp can only be ours-by-name from a crashed prior run
         // that had this very pid — never a live socket.
@@ -106,7 +149,10 @@ impl Listener {
                 )
             });
         }
-        Ok(Self { listener })
+        Ok(Self {
+            listener,
+            _lock: lock,
+        })
     }
 
     pub(super) async fn run(self, tx: TaggedSender) -> Result<()> {

@@ -291,22 +291,35 @@ fn is_rollout_filename(path: &Path) -> bool {
             .is_some_and(|s| s.starts_with("rollout-"))
 }
 
-/// Attach the probe ONLY for the standard `~/.codex/sessions` layout (the
-/// root's file_name is literally `sessions` AND its parent's is `.codex`) —
-/// mirrors `cc_sessions_dir`'s gating: a `--codex-sessions-root /tmp/fixture`
-/// replay points at an arbitrary dir, and those runs must keep the pure-mtime
-/// first-sight gate (the probe is additive-only; a replayed rollout vouched
-/// for by a coincidentally-running codex would resurrect as live).
+/// Attach the probe ONLY for codex's first-party layout: the standard
+/// `~/.codex/sessions` shape (the root's file_name is literally `sessions`
+/// AND its parent's is `.codex`) or the resolved `codex_home()/sessions` for
+/// THIS environment (a `CODEX_HOME` user's real rollout root — codex itself
+/// writes there, and rejecting it would silently drop the whole liveness
+/// ladder for a supported config). Mirrors `cc_sessions_dir`'s gating: a
+/// `--codex-sessions-root /tmp/fixture` replay points at an arbitrary dir,
+/// and those runs must keep the pure-mtime first-sight gate (the probe is
+/// additive-only; a replayed rollout vouched for by a coincidentally-running
+/// codex would resurrect as live).
 fn codex_probe_root(sessions_root: &Path) -> Option<PathBuf> {
+    codex_probe_root_resolved(sessions_root, &codex_home())
+}
+
+/// The injectable core of [`codex_probe_root`] (mirrors
+/// `platform::resolve_codex_home`'s testable split): `home` is the resolved
+/// codex home for this environment.
+fn codex_probe_root_resolved(sessions_root: &Path, home: &Path) -> Option<PathBuf> {
     if sessions_root.file_name().and_then(|n| n.to_str()) != Some("sessions") {
         return None;
     }
-    let parent_is_codex = sessions_root
-        .parent()
-        .and_then(|p| p.file_name())
-        .and_then(|n| n.to_str())
-        == Some(".codex");
-    if !parent_is_codex {
+    let parent = sessions_root.parent();
+    let parent_is_codex =
+        parent.and_then(|p| p.file_name()).and_then(|n| n.to_str()) == Some(".codex");
+    // A parent that IS the resolved codex home is first-party even when not
+    // named `.codex` — the CODEX_HOME case (`codex_home()` honors the env
+    // var the same way `default_paths` does, one resolution for both).
+    let parent_is_resolved_home = parent.is_some_and(|p| p == home);
+    if !parent_is_codex && !parent_is_resolved_home {
         return None;
     }
     // Not canonicalized here: the dir may not exist yet at wiring time
@@ -651,10 +664,37 @@ mod tests {
         );
         // A fixture replay root must get NO probe (pure-mtime behavior).
         assert_eq!(codex_probe_root(Path::new("/tmp/fixture")), None);
-        // `sessions` under a non-.codex parent is not the standard layout.
-        assert_eq!(codex_probe_root(Path::new("/srv/other/sessions")), None);
         // A bare relative `sessions` has no parent to check.
         assert_eq!(codex_probe_root(Path::new("sessions")), None);
+    }
+
+    #[test]
+    fn probe_root_accepts_resolved_codex_home_sessions_layout() {
+        // A CODEX_HOME-shaped layout: the resolved home is NOT named
+        // `.codex`, but its `sessions` child is codex's first-party rollout
+        // root for this environment — the probe must attach, or CODEX_HOME
+        // users silently lose the entire liveness ladder (admission bypass,
+        // ProofOfLife, negative vouch, instant exit). The env→home
+        // resolution itself is pinned by `platform::resolve_codex_home`'s
+        // unit tests; this pins the probe gate against the resolved value.
+        let home = tempfile::tempdir().unwrap();
+        let sessions = home.path().join("sessions");
+        std::fs::create_dir_all(&sessions).unwrap();
+        assert_eq!(
+            codex_probe_root_resolved(&sessions, home.path()),
+            Some(sessions.clone())
+        );
+        // Replay roots stay probe-less even with a custom home resolved.
+        assert_eq!(
+            codex_probe_root_resolved(Path::new("/tmp/fixture"), home.path()),
+            None
+        );
+        // `sessions` under a parent that is neither `.codex` nor the
+        // resolved home is not first-party.
+        assert_eq!(
+            codex_probe_root_resolved(Path::new("/srv/other/sessions"), home.path()),
+            None
+        );
     }
 
     #[test]

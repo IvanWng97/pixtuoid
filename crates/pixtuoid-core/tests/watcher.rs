@@ -999,6 +999,136 @@ async fn negative_vouch_confirm_unbinds_pid_so_a_later_exit_is_quiet() {
     handle.abort();
 }
 
+/// The instant-exit arm must purge the dead id from the shared admission set:
+/// `live` is only rewritten by a HEALTHY probe refresh, so without the purge
+/// a probe FAILURE (`None`) pass right after the exit keeps the stale
+/// snapshot vouching the dead id — the re-vouch sweep re-admits the parked
+/// transcript (cursor reset to 0) and replays it into a phantom SessionStart
+/// for the session whose SessionEnd just emitted, unreachable by every fast
+/// rung (pid unbound, vouch forgotten).
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[tokio::test]
+async fn instant_exit_under_probe_failure_does_not_resurrect_the_session() {
+    let dir = TempDir::new().unwrap();
+    let uuid = "01000000-0000-7000-8000-0000000000b2";
+    let mut child = std::process::Command::new("sleep")
+        .arg("30")
+        .spawn()
+        .unwrap();
+    let pid = child.id() as i32;
+    let (probe_state, mut rx, _transcript, handle) = admitted_with_mutable_probe(
+        dir.path().to_path_buf(),
+        uuid,
+        Duration::from_secs(60), // production span — the negative vouch stays out of the picture
+        vouch_snapshot_with_pid(&[uuid], pid),
+    )
+    .await;
+    let expected = AgentId::from_parts("claude-code", uuid);
+
+    // The probe breaks FIRST (`None` = enumeration failure: `live` keeps the
+    // last healthy snapshot, which still vouches the id)...
+    *probe_state.lock().unwrap() = None;
+    // ...then the bound process dies → the instant exit emits SessionEnd.
+    let _ = child.kill();
+    let _ = child.wait();
+
+    let mut ended = false;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while tokio::time::Instant::now() < deadline {
+        if let Ok(Some((Transport::Jsonl, AgentEvent::SessionEnd { agent_id }))) =
+            tokio::time::timeout(Duration::from_millis(200), rx.recv()).await
+        {
+            if agent_id == expected {
+                ended = true;
+                break;
+            }
+        }
+    }
+    assert!(ended, "the instant exit must emit the SessionEnd");
+
+    // Scan passes keep running against the failing probe (100ms poll). The
+    // stale snapshot must NOT let the re-vouch sweep resurrect the session.
+    let quiet_until = tokio::time::Instant::now() + Duration::from_millis(1500);
+    while tokio::time::Instant::now() < quiet_until {
+        if let Ok(Some((_, AgentEvent::SessionStart { agent_id, .. }))) =
+            tokio::time::timeout(Duration::from_millis(50), rx.recv()).await
+        {
+            assert_ne!(
+                agent_id, expected,
+                "a probe-failure pass after the instant exit must not mint a phantom SessionStart"
+            );
+        }
+    }
+    handle.abort();
+}
+
+/// An id that REBINDS to a new pid (a codex `resume` of the same rollout in
+/// process B while process A still lives) must MIGRATE between pid sets:
+/// the OLD pid's later death must not instant-exit the session now alive
+/// under the new pid, and the NEW pid's death must (the binding moved, it
+/// wasn't dropped).
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[tokio::test]
+async fn rebound_session_survives_old_pid_death_and_follows_the_new_pid() {
+    let dir = TempDir::new().unwrap();
+    let uuid = "01000000-0000-7000-8000-0000000000b3";
+    let mut old = std::process::Command::new("sleep")
+        .arg("30")
+        .spawn()
+        .unwrap();
+    let mut new = std::process::Command::new("sleep")
+        .arg("30")
+        .spawn()
+        .unwrap();
+    let old_pid = old.id() as i32;
+    let new_pid = new.id() as i32;
+    let (probe_state, mut rx, _transcript, handle) = admitted_with_mutable_probe(
+        dir.path().to_path_buf(),
+        uuid,
+        Duration::from_secs(60), // production span — only the instant-exit rung is in play
+        vouch_snapshot_with_pid(&[uuid], old_pid),
+    )
+    .await;
+    let expected = AgentId::from_parts("claude-code", uuid);
+
+    // The session rebinds: later healthy snapshots observe the id under the
+    // NEW pid. Give the 100ms poll a few passes to fold the migration.
+    *probe_state.lock().unwrap() = vouch_snapshot_with_pid(&[uuid], new_pid);
+    tokio::time::sleep(Duration::from_millis(700)).await;
+
+    // The OLD process dies — its stale binding must not end the live session.
+    let _ = old.kill();
+    let _ = old.wait();
+    assert_no_session_end_within(
+        &mut rx,
+        expected,
+        Duration::from_millis(1500),
+        "the old pid's death must not end a session that rebound to a new pid",
+    )
+    .await;
+
+    // The NEW process dying IS the session's end.
+    let _ = new.kill();
+    let _ = new.wait();
+    let mut ended = false;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while tokio::time::Instant::now() < deadline {
+        if let Ok(Some((Transport::Jsonl, AgentEvent::SessionEnd { agent_id }))) =
+            tokio::time::timeout(Duration::from_millis(200), rx.recv()).await
+        {
+            if agent_id == expected {
+                ended = true;
+                break;
+            }
+        }
+    }
+    assert!(
+        ended,
+        "the migrated binding must follow the new pid — its death is the session's instant exit"
+    );
+    handle.abort();
+}
+
 /// Conversely, a transcript whose mtime is *within* the initial-window is
 /// treated as live: its SessionStart and any historical content replays so
 /// in-flight Task / tool state survives a pixtuoid restart.

@@ -5,7 +5,8 @@
 
 use std::time::Duration;
 
-use tokio::io::AsyncWriteExt;
+use tempfile::TempDir;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::windows::named_pipe::ClientOptions;
 use tokio::sync::mpsc;
 use tokio::time::sleep;
@@ -195,11 +196,27 @@ async fn listener_drops_slow_connection_via_timeout() {
     let handle = tokio::spawn(async move { listener.run(tx).await });
     sleep(Duration::from_millis(20)).await;
 
-    // Open a connection but hold it without sending; the 1s CONN_TIMEOUT
-    // should drop it. Then a second valid connection proves the loop is alive.
-    let _slow = connect_client(&name).await;
+    // Open a connection and hold it without sending anything past the 1s
+    // CONN_TIMEOUT, then observe the drop DIRECTLY: once the server task
+    // times out and drops its end, a read on the client side completes.
+    // Without this read the test passes even with CONN_TIMEOUT deleted — the
+    // per-connection semaphore alone keeps the accept loop serving a second
+    // connection (the pipe even pre-creates the next instance).
+    let mut slow = connect_client(&name).await;
     sleep(Duration::from_millis(1_200)).await;
+    let mut buf = [0u8; 1];
+    let res = tokio::time::timeout(Duration::from_millis(500), slow.read(&mut buf))
+        .await
+        .expect("read must complete promptly — CONN_TIMEOUT should have dropped the slow conn");
+    // A dropped server end reads as EOF (Ok(0)) or a broken-pipe error
+    // depending on how the close lands; both prove the drop — a LIVE server
+    // end would park the read past the timeout above.
+    match res {
+        Ok(0) | Err(_) => {}
+        Ok(n) => panic!("unexpected {n} bytes from a dropped connection"),
+    }
 
+    // And the listener is still serving after the drop.
     let mut c = connect_client(&name).await;
     let payload = serde_json::json!({
         "hook_event_name": "SessionStart",
@@ -274,16 +291,74 @@ async fn clients_reconnect_after_open_close_churn() {
 }
 
 /// Binding two listeners on the same pipe name must fail: the first instance
-/// held `first_pipe_instance(true)`, so the second attempt returns an
-/// ACCESS_DENIED error — squatting is detected loudly rather than silently
-/// queuing behind an impostor.
+/// held `first_pipe_instance(true)`, so the second attempt gets ACCESS_DENIED
+/// — mapped to the typed SocketBusy (Unix parity) so ClaudeCodeSource::run
+/// can degrade to transcript-only instead of killing the whole CC source.
 #[tokio::test]
-async fn second_listener_on_same_name_fails_loudly() {
+async fn second_listener_on_same_name_fails_with_typed_socket_busy() {
     let name = pipe_name("squat");
     let _first = HookSocketListener::bind(&name).await.unwrap();
-    let second = HookSocketListener::bind(&name).await;
+    let err = HookSocketListener::bind(&name)
+        .await
+        .err()
+        .expect("bind on an already-owned pipe must fail, not silently queue");
     assert!(
-        second.is_err(),
-        "expected bind on an already-owned pipe to fail, got Ok"
+        err.downcast_ref::<pixtuoid_core::source::hook::SocketBusy>()
+            .is_some(),
+        "the busy bind must be the typed SocketBusy so the source can degrade: {err:#}"
     );
+    assert!(
+        format!("{err:#}").contains(&name),
+        "error must name the contended pipe: {err:#}"
+    );
+}
+
+// The SocketBusy degradation contract, Windows twin of socket.rs's
+// claude_source_degrades_to_transcript_only_when_socket_busy: a SECOND
+// instance whose pipe create loses ACCESS_DENIED to a live daemon must still
+// run its JSONL watcher — transcript-only, not dead. A fresh transcript
+// written before spawn must produce a SessionStart from the degraded source.
+#[tokio::test]
+async fn claude_source_degrades_to_transcript_only_when_socket_busy() {
+    use pixtuoid_core::source::claude_code::ClaudeCodeSource;
+    use pixtuoid_core::source::Source;
+
+    // The documented polling seam — never a real native watcher in tests;
+    // the assertion below rides only the backend-independent initial seed walk.
+    pixtuoid_core::source::jsonl::force_polling_backend_for_tests(Duration::from_millis(25));
+
+    let name = pipe_name("busy");
+    // The "first instance": occupy the pipe name and keep it alive.
+    let _owner = HookSocketListener::bind(&name).await.unwrap();
+
+    let dir = TempDir::new().unwrap();
+    let projects = dir.path().join("projects");
+    std::fs::create_dir_all(projects.join("proj")).unwrap();
+    std::fs::write(
+        projects.join("proj/11111111-2222-3333-4444-555555555555.jsonl"),
+        "{\"type\":\"user\",\"cwd\":\"/repo\"}\n",
+    )
+    .unwrap();
+
+    let src = ClaudeCodeSource {
+        socket_path: std::path::PathBuf::from(&name),
+        projects_root: projects,
+    };
+    let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(32);
+    let task = tokio::spawn(async move { Box::new(src).run(tx).await });
+
+    // The initial seed walk must register the fresh transcript even though
+    // the hook bind lost — transcript-only, not a dead source.
+    let ev = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let (transport, ev) = rx.recv().await.expect("source must stay alive");
+            if matches!(ev, AgentEvent::SessionStart { .. }) {
+                return (transport, ev);
+            }
+        }
+    })
+    .await
+    .expect("degraded source must still emit the transcript's SessionStart");
+    assert_eq!(ev.0, Transport::Jsonl);
+    task.abort();
 }

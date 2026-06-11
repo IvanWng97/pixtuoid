@@ -2,7 +2,7 @@
 use std::time::Duration;
 
 use tempfile::TempDir;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
 use tokio::sync::mpsc;
 use tokio::time::sleep;
@@ -84,12 +84,22 @@ async fn listener_drops_slow_connection_via_timeout() {
     let handle = tokio::spawn(async move { listener.run(tx).await });
     sleep(Duration::from_millis(20)).await;
 
-    // Open a connection but hold it without sending anything. The 1s
-    // CONN_TIMEOUT should drop it. Then send a second valid connection
-    // to prove the listener is still alive.
-    let _slow = UnixStream::connect(&path).await.unwrap();
+    // Open a connection and hold it without sending anything past the 1s
+    // CONN_TIMEOUT, then observe the drop DIRECTLY: once the server task
+    // times out and drops its end, a read on the client side completes with
+    // EOF (Ok(0)). Without this read the test passes even with CONN_TIMEOUT
+    // deleted — the per-connection semaphore alone keeps the accept loop
+    // serving a second connection.
+    let mut slow = UnixStream::connect(&path).await.unwrap();
     sleep(Duration::from_millis(1_200)).await;
+    let mut buf = [0u8; 1];
+    let n = tokio::time::timeout(Duration::from_millis(500), slow.read(&mut buf))
+        .await
+        .expect("read must complete promptly — CONN_TIMEOUT should have dropped the slow conn")
+        .expect("a server-dropped unix conn reads EOF, not an error");
+    assert_eq!(n, 0, "server must have closed the slow connection");
 
+    // And the listener is still serving after the drop.
     let mut s = UnixStream::connect(&path).await.unwrap();
     let payload = serde_json::json!({
         "hook_event_name": "SessionStart",
@@ -162,10 +172,12 @@ async fn listener_survives_non_utf8_read_error() {
 }
 
 // A second pixtuoid instance must NOT silently steal the socket from a live
-// daemon (the old unconditional unlink left the first instance accepting on
+// daemon (an unconditional unlink would leave the first instance accepting on
 // an anonymous inode forever, with every hook-borne signal vanishing). The
-// bind must probe the existing socket and bail loudly, naming the path — the
-// error propagates out of Source::run into the #157 SourceDeath channel.
+// live owner holds the exclusive lock on the sibling `<sock>.lock`, so the
+// second bind's try-lock fails and it returns the typed SocketBusy naming the
+// path — which ClaudeCodeSource::run downcasts to degrade to transcript-only
+// (no SourceDeath; see claude_source_degrades_to_transcript_only_when_socket_busy).
 #[tokio::test]
 async fn bind_bails_when_a_live_listener_holds_the_path() {
     let dir = TempDir::new().unwrap();
@@ -179,6 +191,11 @@ async fn bind_bails_when_a_live_listener_holds_the_path() {
         .await
         .err()
         .expect("a second bind on a LIVE socket must fail loudly, not steal it");
+    assert!(
+        err.downcast_ref::<pixtuoid_core::source::hook::SocketBusy>()
+            .is_some(),
+        "the busy bind must be the typed SocketBusy so the source can degrade: {err:#}"
+    );
     let msg = format!("{err:#}");
     assert!(
         msg.contains("another pixtuoid instance"),
@@ -189,7 +206,9 @@ async fn bind_bails_when_a_live_listener_holds_the_path() {
         "error must name the contended path: {msg}"
     );
 
-    // The liveness probe's connect must not have harmed the first listener.
+    // A bind attempt against a live owner must be side-effect-free: the
+    // try-lock fails before any probe connect or unlink, so the owner's
+    // socket keeps serving untouched.
     let mut s = UnixStream::connect(&path).await.unwrap();
     let payload = serde_json::json!({
         "hook_event_name": "SessionStart",
@@ -213,7 +232,9 @@ async fn bind_bails_when_a_live_listener_holds_the_path() {
 
 // A crashed daemon's residue must still be reclaimed: neither std nor tokio
 // unlink the socket file on listener drop, so the file alone is not proof of
-// life — the probe's ConnectionRefused is what distinguishes stale from live.
+// life — the released `<sock>.lock` (the kernel drops the advisory lock with
+// the owning process) is what distinguishes stale from live, NOT connect()
+// errnos (a backlog-saturated LIVE daemon also yields ECONNREFUSED on macOS).
 #[tokio::test]
 async fn bind_reclaims_a_stale_socket_file() {
     let dir = TempDir::new().unwrap();
@@ -265,14 +286,53 @@ async fn bound_socket_is_owner_only_with_no_temp_residue() {
     let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
     assert_eq!(mode, 0o600, "hook socket must be owner-only rw (0600)");
 
-    let names: Vec<String> = std::fs::read_dir(dir.path())
+    // The lock sibling is the liveness arbiter — if it regressed to a
+    // umask-default mode, another local user could open+flock it and force
+    // every future daemon into silent transcript-only degradation.
+    let lock_mode = std::fs::metadata(dir.path().join("pixtuoid.sock.lock"))
+        .unwrap()
+        .permissions()
+        .mode()
+        & 0o777;
+    assert_eq!(lock_mode, 0o600, "lock file must be owner-only rw (0600)");
+
+    let mut names: Vec<String> = std::fs::read_dir(dir.path())
         .unwrap()
         .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
         .collect();
+    names.sort();
     assert_eq!(
         names,
-        vec!["pixtuoid.sock".to_string()],
-        "the temp-name bind must leave nothing but the final socket"
+        vec![
+            "pixtuoid.sock".to_string(),
+            // The liveness-arbitration lock file is a deliberate, permanent
+            // sibling (never unlinked — unlink races re-introduce the TOCTOU
+            // it exists to close); only the `.tmp` bind name must be gone.
+            "pixtuoid.sock.lock".to_string(),
+        ],
+        "the temp-name bind must leave nothing but the final socket + its lock"
+    );
+}
+
+// The lock — not connect() errnos — is the liveness arbiter: with the owner
+// LIVE (lock held) but its socket file gone (so any connect probe would see
+// NotFound, the old "stale" verdict), a second bind must still yield the
+// typed SocketBusy instead of binding over the live owner's path.
+#[tokio::test]
+async fn bind_respects_lock_arbitration_even_without_a_socket_file() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("pixtuoid.sock");
+    let _owner = HookSocketListener::bind(path.clone()).await.unwrap();
+    std::fs::remove_file(&path).unwrap();
+
+    let err = HookSocketListener::bind(path.clone())
+        .await
+        .err()
+        .expect("a live lock-holder must make a second bind fail, socket file or not");
+    assert!(
+        err.downcast_ref::<pixtuoid_core::source::hook::SocketBusy>()
+            .is_some(),
+        "expected the typed SocketBusy: {err:#}"
     );
 }
 
@@ -355,6 +415,11 @@ async fn long_path_fallback_binds_owner_only() {
 async fn claude_source_degrades_to_transcript_only_when_socket_busy() {
     use pixtuoid_core::source::claude_code::ClaudeCodeSource;
     use pixtuoid_core::source::Source;
+
+    // The documented polling seam — never a real FSEvents stream in tests
+    // (tens of seconds of setup/teardown + the #85 flake class); the
+    // assertion below rides only the backend-independent initial seed walk.
+    pixtuoid_core::source::jsonl::force_polling_backend_for_tests(Duration::from_millis(25));
 
     let dir = TempDir::new().unwrap();
     let sock = dir.path().join("pixtuoid.sock");

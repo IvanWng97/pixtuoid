@@ -42,6 +42,17 @@ fn shim_and_daemon_resolve_identical_socket_paths_in_all_three_branches() {
     assert_eq!(shim, daemon, "PIXTUOID_SOCKET branch diverged");
     assert_eq!(shim, PathBuf::from("/explicit/parity.sock"));
 
+    // Branch 1b: set-but-empty PIXTUOID_SOCKET = unset on BOTH sides (the
+    // #172 RUST_LOG policy) — falls through to XDG identically.
+    std::env::set_var("PIXTUOID_SOCKET", "");
+    let (shim, daemon) = both();
+    assert_eq!(shim, daemon, "empty PIXTUOID_SOCKET branch diverged");
+    assert_eq!(shim, PathBuf::from("/run/user/7/pixtuoid.sock"));
+    std::env::set_var("PIXTUOID_SOCKET", "   ");
+    let (shim, daemon) = both();
+    assert_eq!(shim, daemon, "whitespace PIXTUOID_SOCKET branch diverged");
+    assert_eq!(shim, PathBuf::from("/run/user/7/pixtuoid.sock"));
+
     // Branch 2: XDG_RUNTIME_DIR drives the path on both sides.
     std::env::remove_var("PIXTUOID_SOCKET");
     let (shim, daemon) = both();
@@ -77,6 +88,18 @@ fn shim_and_daemon_resolve_identical_pipe_names_in_all_branches() {
     let (shim, daemon) = both();
     assert_eq!(shim, daemon, "PIXTUOID_SOCKET branch diverged");
     assert_eq!(shim, PathBuf::from(r"\\.\pipe\parity-explicit"));
+
+    // Branch 1b: set-but-empty PIXTUOID_SOCKET = unset on BOTH sides (the
+    // #172 RUST_LOG policy) — falls through to the USERNAME default.
+    std::env::set_var("PIXTUOID_SOCKET", "");
+    std::env::set_var("USERNAME", "parity");
+    let (shim, daemon) = both();
+    assert_eq!(shim, daemon, "empty PIXTUOID_SOCKET branch diverged");
+    assert_eq!(shim, PathBuf::from(r"\\.\pipe\pixtuoid-parity"));
+    std::env::set_var("PIXTUOID_SOCKET", "   ");
+    let (shim, daemon) = both();
+    assert_eq!(shim, daemon, "whitespace PIXTUOID_SOCKET branch diverged");
+    assert_eq!(shim, PathBuf::from(r"\\.\pipe\pixtuoid-parity"));
 
     // Branch 2: USERNAME-keyed default pipe name on both sides.
     std::env::remove_var("PIXTUOID_SOCKET");

@@ -273,6 +273,14 @@ mod tests {
         std::env::set_var("XDG_RUNTIME_DIR", "/run/user/0");
         assert_eq!(default_socket_path(), "/explicit/path.sock");
 
+        // Arm 1b: set-but-empty/whitespace PIXTUOID_SOCKET = unset (the #172
+        // RUST_LOG policy) -> falls through to XDG.
+        std::env::set_var("PIXTUOID_SOCKET", "");
+        std::env::set_var("XDG_RUNTIME_DIR", "/run/user/0");
+        assert_eq!(default_socket_path(), "/run/user/0/pixtuoid.sock");
+        std::env::set_var("PIXTUOID_SOCKET", "   ");
+        assert_eq!(default_socket_path(), "/run/user/0/pixtuoid.sock");
+
         // Arm 2: no PIXTUOID_SOCKET, XDG_RUNTIME_DIR set -> "{dir}/pixtuoid.sock".
         std::env::remove_var("PIXTUOID_SOCKET");
         std::env::set_var("XDG_RUNTIME_DIR", "/run/user/1000");
@@ -305,6 +313,14 @@ mod tests {
 
         std::env::set_var("PIXTUOID_SOCKET", r"\\.\pipe\explicit");
         assert_eq!(default_socket_path(), r"\\.\pipe\explicit");
+
+        // Set-but-empty/whitespace = unset (the #172 RUST_LOG policy) ->
+        // USERNAME default.
+        std::env::set_var("PIXTUOID_SOCKET", "");
+        std::env::set_var("USERNAME", "ada");
+        assert_eq!(default_socket_path(), r"\\.\pipe\pixtuoid-ada");
+        std::env::set_var("PIXTUOID_SOCKET", "   ");
+        assert_eq!(default_socket_path(), r"\\.\pipe\pixtuoid-ada");
 
         std::env::remove_var("PIXTUOID_SOCKET");
         std::env::set_var("USERNAME", "ada");

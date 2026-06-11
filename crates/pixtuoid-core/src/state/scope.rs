@@ -108,7 +108,11 @@ pub(crate) fn has_ancestor_where(
     id: AgentId,
     pred: impl Fn(&AgentSlot) -> bool,
 ) -> bool {
-    let mut visited: HashSet<AgentId> = HashSet::new();
+    // Seeded with the start node: in a parent cycle the walk returns to `id`
+    // and would otherwise run `pred` on it before the cycle guard breaks —
+    // violating "the node itself excluded" (a Waiting cycle member counting
+    // as its own Waiting ancestor self-exempts from sweep_stale forever).
+    let mut visited: HashSet<AgentId> = HashSet::from([id]);
     let mut cur = agents.get(&id).and_then(|s| s.parent_id);
     while let Some(pid) = cur {
         if !visited.insert(pid) {
@@ -259,5 +263,32 @@ mod tests {
         // Waiting ancestor.
         let (scene, a, _b) = cycle_scene(ActivityState::Idle, waiting());
         assert!(has_waiting_ancestor(&scene.agents, a));
+    }
+
+    #[test]
+    fn has_waiting_ancestor_excludes_self_reached_via_cycle() {
+        // The queried node is the cycle's ONLY Waiting member: the walk
+        // b -> a -> (b again) must break BEFORE the predicate runs on the
+        // start node — "the node itself excluded" — or a Waiting cycle member
+        // counts as its own Waiting ancestor and self-exempts from
+        // `sweep_stale` forever (an immortal slot).
+        let (scene, _a, b) = cycle_scene(ActivityState::Idle, waiting());
+        assert!(
+            !has_waiting_ancestor(&scene.agents, b),
+            "a node must never count as its own Waiting ancestor through a parent cycle"
+        );
+    }
+
+    #[test]
+    fn has_waiting_ancestor_excludes_self_parented_node() {
+        // The degenerate one-node cycle: a slot naming ITSELF as parent must
+        // not satisfy the predicate through its own state.
+        let x = AgentId::from_transcript_path("/p/self.jsonl");
+        let mut scene = SceneState::uniform(4);
+        scene.agents.insert(x, slot(x, Some(x), waiting()));
+        assert!(
+            !has_waiting_ancestor(&scene.agents, x),
+            "a self-parented Waiting node is not its own ancestor"
+        );
     }
 }

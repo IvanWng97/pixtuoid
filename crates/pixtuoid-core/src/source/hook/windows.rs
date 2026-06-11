@@ -99,28 +99,47 @@ impl Listener {
     pub(super) async fn bind(path: &Path) -> Result<Self> {
         let name = path.to_string_lossy().into_owned();
         let sd = OwnerOnlySd::new()?;
-        // first_pipe_instance: if another process already owns this name
-        // (squatting), creation fails ACCESS_DENIED — bail loudly rather
-        // than silently queueing behind an impostor. reject_remote_clients
-        // is the tokio default; pinned here explicitly. The server stays
-        // DUPLEX (tokio default) — the shim's client opens read+write, so an
-        // inbound-only pipe would reject it with ACCESS_DENIED (silent event
-        // drop).
+        // first_pipe_instance: if another process already owns this name,
+        // creation fails ACCESS_DENIED — mapped to the typed SocketBusy
+        // below (Unix lock-arbitration parity) so the CC source degrades to
+        // transcript-only instead of silently queueing behind the owner OR
+        // dying wholesale. reject_remote_clients is the tokio default;
+        // pinned here explicitly. The server stays DUPLEX (tokio default) —
+        // the shim's client opens read+write, so an inbound-only pipe would
+        // reject it with ACCESS_DENIED (silent event drop).
         //
         // SAFETY: sd outlives the call (it moves into Self below) and
         // attributes_ptr points at its well-formed SECURITY_ATTRIBUTES whose
         // lpSecurityDescriptor is the valid converted descriptor; the kernel
         // copies the descriptor during CreateNamedPipeW, so nothing borrows
         // past the call.
-        let server = unsafe {
+        let server = match unsafe {
             ServerOptions::new()
                 .first_pipe_instance(true)
                 .reject_remote_clients(true)
                 .pipe_mode(PipeMode::Byte)
                 .in_buffer_size(IN_BUFFER_SIZE)
                 .create_with_security_attributes_raw(&name, sd.attributes_ptr())
-        }
-        .with_context(|| format!("creating hook pipe at {name}"))?;
+        } {
+            Ok(s) => s,
+            // ERROR_ACCESS_DENIED (5): almost always another instance holding
+            // first_pipe_instance on this name — the one recoverable bind
+            // failure. A genuine ACL denial (restricted token / AppContainer)
+            // is indistinguishable and also degrades; accepted trade-off, the
+            // JSONL watcher stays alive either way. Every other create error
+            // stays fatal.
+            Err(e)
+                if e.kind() == std::io::ErrorKind::PermissionDenied
+                    || e.raw_os_error() == Some(5) =>
+            {
+                return Err(anyhow::Error::new(super::SocketBusy {
+                    path: path.to_path_buf(),
+                }));
+            }
+            Err(e) => {
+                return Err(e).with_context(|| format!("creating hook pipe at {name}"));
+            }
+        };
         Ok(Self { server, name, sd })
     }
 

@@ -84,6 +84,8 @@ struct WatchCtx<'a> {
     /// Refreshed once per scan pass (initial seed / 250ms rescan / 60s poll);
     /// notify-driven single-file walks reuse it — seconds of staleness is fine
     /// because the probe is ADDITIVE-ONLY (it can only admit, never gate).
+    /// Second writer: `emit_session_exit` purges a confirmed-dead id, so a
+    /// probe-failure pass can't re-admit a session the exit rung just ended.
     live: &'a Arc<Mutex<HashSet<String>>>,
 }
 
@@ -221,17 +223,32 @@ impl JsonlWatcher {
         // pid → the session ids a healthy probe snapshot bound to it
         // (`ProbeSnapshot::pid_of` folded by `refresh_probe_snapshot`) — the
         // join the instant-exit arm uses to translate an OS exit into
-        // SessionEnds. Entries leave on exit (whole pid) or negative-vouch
-        // confirm (single id, see `unbind_session`).
+        // SessionEnds. Entries leave on exit (whole pid), negative-vouch
+        // confirm (single id, see `unbind_session`), or a rebind migration
+        // (the snapshot observes the id under a different pid).
         let mut pid_bindings: HashMap<i32, HashSet<String>> = HashMap::new();
+        let mut root_health = FailureLatch::default();
 
         let (notify_tx, mut notify_rx) = tokio::sync::mpsc::unbounded_channel::<PathBuf>();
-        let event_handler = move |res: notify::Result<notify::Event>| {
-            if let Ok(event) = res {
+        let mut notify_health = FailureLatch::default();
+        let event_handler = move |res: notify::Result<notify::Event>| match res {
+            Ok(event) => {
+                if notify_health.on_success() {
+                    tracing::info!("file-watch backend delivering again");
+                }
                 for path in event.paths {
                     if path.extension().and_then(|s| s.to_str()) == Some("jsonl") {
                         let _ = notify_tx.send(path);
                     }
+                }
+            }
+            // A backend error means events were LOST (inotify queue overflow,
+            // an FSEvents failure) — the 60s poll papers over the gap, but
+            // the user must get a breadcrumb. Latched: a persistently broken
+            // backend must not warn on every delivery.
+            Err(e) => {
+                if notify_health.on_failure() {
+                    warn!("file-watch backend error (events may have been lost): {e}");
                 }
             }
         };
@@ -283,7 +300,7 @@ impl JsonlWatcher {
                 &ctx,
             )
             .await;
-            scan_root(&self.root, decoders, &ctx).await;
+            scan_root(&self.root, decoders, &ctx, &mut root_health).await;
             if healthy {
                 emit_proof_of_life(&live, &source_arc, &tx).await;
             }
@@ -328,7 +345,7 @@ impl JsonlWatcher {
                         self.liveness_probe.as_ref(), &mut vouch, &mut pid_bindings,
                         exit_watch.as_ref(), decoders, &ctx,
                     ).await;
-                    scan_root(&self.root, decoders, &ctx).await;
+                    scan_root(&self.root, decoders, &ctx, &mut root_health).await;
                     if healthy {
                         emit_proof_of_life(&live, &source_arc, &tx).await;
                     }
@@ -338,7 +355,7 @@ impl JsonlWatcher {
                         self.liveness_probe.as_ref(), &mut vouch, &mut pid_bindings,
                         exit_watch.as_ref(), decoders, &ctx,
                     ).await;
-                    scan_root(&self.root, decoders, &ctx).await;
+                    scan_root(&self.root, decoders, &ctx, &mut root_health).await;
                     if healthy {
                         emit_proof_of_life(&live, &source_arc, &tx).await;
                     }
@@ -557,10 +574,21 @@ async fn emit_session_exit(id: &str, decoders: SourceDecoders, ctx: &WatchCtx<'_
         .tx
         .send((Transport::Jsonl, AgentEvent::SessionEnd { agent_id }))
         .await;
-    let mut seen = ctx.seen.lock().await;
-    for path in &claimed {
-        seen.remove(path);
+    {
+        let mut seen = ctx.seen.lock().await;
+        for path in &claimed {
+            seen.remove(path);
+        }
     }
+    // Purge the admission set too: `live` is otherwise only rewritten by a
+    // HEALTHY probe refresh, so after an instant exit a probe-FAILURE pass
+    // (failure changes nothing — the stale snapshot stays) would keep
+    // vouching the id this watcher just declared dead, and the re-vouch
+    // sweep would re-admit its parked file (cursor reset to 0 → full replay
+    // → a phantom SessionStart) with every fast rung already disarmed for
+    // it. For the negative-vouch caller this is a no-op — its refresh
+    // already replaced `live` with a snapshot that lacks the id.
+    ctx.live.lock().await.remove(id);
 }
 
 /// Remove one session id from every pid's binding set, dropping pids whose
@@ -602,10 +630,23 @@ async fn refresh_probe_snapshot(
     vouch.observe(&snap, decoders, ctx, pid_bindings).await;
     // Bindings are ADDITIVE per snapshot (ids leave via the instant-exit arm
     // or the negative-vouch unbind above, never by snapshot omission — the
-    // vouch ladder owns "gone" semantics). A pid is registered with the exit
-    // watch only on its FIRST appearance; if that registration failed
-    // kernel-side (EPERM), it is not retried — the slower rungs cover.
+    // vouch ladder owns "gone" semantics) — EXCEPT an observed rebind: the
+    // snapshot's `pid_of` is the probe's current ownership ground truth, so
+    // an id seen under a NEW pid (a codex `resume` of the same rollout in
+    // another process while the old one lives) migrates between sets. The
+    // negative vouch can't clean that stale binding (the id stays vouched
+    // under the new pid, so no miss window ever opens), and the old pid's
+    // later death would otherwise instant-exit a session that is alive. A
+    // pid is registered with the exit watch only on its FIRST appearance; if
+    // that registration failed kernel-side (EPERM), it is not retried — the
+    // slower rungs cover.
     for (id, pid) in &snap.pid_of {
+        let bound_elsewhere = pid_bindings
+            .iter()
+            .any(|(p, ids)| p != pid && ids.contains(id));
+        if bound_elsewhere {
+            unbind_session(pid_bindings, id);
+        }
         let newly_seen = !pid_bindings.contains_key(pid);
         pid_bindings.entry(*pid).or_default().insert(id.clone());
         if newly_seen {
@@ -617,11 +658,54 @@ async fn refresh_probe_snapshot(
     true
 }
 
-async fn scan_root(root: &Path, decoders: SourceDecoders, ctx: &WatchCtx<'_>) {
+/// Once-per-transition gate for the watcher's persistent-failure warnings
+/// (the root going unreadable mid-run, a broken notify backend). Both
+/// failures recur on every pass — the poll backstop re-scans forever — so an
+/// ungated `warn!` would spam the warn-floor file log every interval, while
+/// total silence leaves the watcher permanently blind with no breadcrumb
+/// (the silently-empty-office class #157/#224 exist to surface; after a
+/// successful bind there is no SourceDeath path left to report through).
+/// `on_failure` is true exactly on the first failure after a success;
+/// `on_success` is true exactly on recovery.
+#[derive(Default)]
+struct FailureLatch {
+    failing: bool,
+}
+
+impl FailureLatch {
+    fn on_failure(&mut self) -> bool {
+        !std::mem::replace(&mut self.failing, true)
+    }
+
+    fn on_success(&mut self) -> bool {
+        std::mem::replace(&mut self.failing, false)
+    }
+}
+
+async fn scan_root(
+    root: &Path,
+    decoders: SourceDecoders,
+    ctx: &WatchCtx<'_>,
+    root_health: &mut FailureLatch,
+) {
     revouch_gated_files(decoders, ctx).await;
-    if let Ok(mut read) = tokio::fs::read_dir(root).await {
-        while let Ok(Some(entry)) = read.next_entry().await {
-            walk_jsonl(&entry.path(), decoders, ctx).await;
+    match tokio::fs::read_dir(root).await {
+        Ok(mut read) => {
+            if root_health.on_success() {
+                tracing::info!("watched root {} is readable again", root.display());
+            }
+            while let Ok(Some(entry)) = read.next_entry().await {
+                walk_jsonl(&entry.path(), decoders, ctx).await;
+            }
+        }
+        Err(e) => {
+            if root_health.on_failure() {
+                warn!(
+                    "cannot read watched root {} ({e}); new sessions will not be \
+                     discovered until it is readable again",
+                    root.display()
+                );
+            }
         }
     }
 }
@@ -1735,6 +1819,83 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn session_exit_purges_live_so_a_probe_failure_pass_cannot_revouch() {
+        // Instant-exit ghost: `live` is only rewritten by a HEALTHY probe
+        // refresh, so after an instant exit a probe-FAILURE pass keeps the
+        // stale snapshot vouching the dead id — `revouch_gated_files` would
+        // re-admit the parked file (cursor reset to 0 → full replay → a
+        // phantom SessionStart for the session whose SessionEnd just
+        // emitted, with every fast rung already disarmed for it).
+        // `emit_session_exit` must purge the id from the admission set.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("t.jsonl");
+        std::fs::write(&path, "{\"type\":\"assistant\"}\n").unwrap();
+        let cursors = Arc::new(Mutex::new(HashMap::new()));
+        let seen = Arc::new(Mutex::new(HashMap::new()));
+        let window = Duration::from_secs(3600);
+
+        let id = default_id_from_path(&path);
+        // The last healthy snapshot vouched the id (that is how its pid got
+        // bound in the first place).
+        let live: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::from([id.clone()])));
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(64);
+        let source: Arc<str> = Arc::from("test");
+        let decoders = SourceDecoders {
+            decode_line: t_decode,
+            derive_label: t_label,
+            check_ended: t_ended,
+            id_derive: default_id_from_path,
+        };
+        let ctx = WatchCtx {
+            source: &source,
+            cursors: &cursors,
+            seen: &seen,
+            tx: &tx,
+            window,
+            live: &live,
+        };
+
+        // Register normally, then the bound process dies (instant exit).
+        walk_jsonl(&path, decoders, &ctx).await;
+        emit_session_exit(&id, decoders, &ctx).await;
+        assert!(
+            !live.lock().await.contains(&id),
+            "the exit must purge the dead id from the admission set"
+        );
+        while rx.try_recv().is_ok() {} // drain the registration + exit events
+
+        // The next scan pass runs under a FAILING probe: `live` was NOT
+        // refreshed. The re-vouch sweep + walk must not resurrect the
+        // session the watcher itself just declared dead.
+        let mut health = FailureLatch::default();
+        scan_root(dir.path(), decoders, &ctx, &mut health).await;
+        drop(tx);
+        let mut events = Vec::new();
+        while let Ok(ev) = rx.try_recv() {
+            events.push(ev);
+        }
+        assert!(
+            !events
+                .iter()
+                .any(|(_, e)| matches!(e, AgentEvent::SessionStart { .. })),
+            "a probe-failure pass after the instant exit must not mint a phantom SessionStart, got {events:?}"
+        );
+    }
+
+    #[test]
+    fn failure_latch_fires_once_per_state_change() {
+        let mut latch = FailureLatch::default();
+        assert!(latch.on_failure(), "first failure after a success reports");
+        assert!(!latch.on_failure(), "a persistent failure stays quiet");
+        assert!(latch.on_success(), "recovery reports once");
+        assert!(!latch.on_success(), "steady success stays quiet");
+        assert!(
+            latch.on_failure(),
+            "a NEW failure after recovery reports again"
+        );
+    }
+
+    #[tokio::test]
     async fn oversized_ended_skip_unclaims_seen_so_a_later_append_re_registers() {
         // Same self-heal for the oversized branch: a REGISTERED file whose
         // > MAX_PENDING_BYTES skipped span buries a session_end emits the
@@ -2171,8 +2332,9 @@ mod tests {
             live: &live,
         };
 
+        let mut health = FailureLatch::default();
         // Pass 1: empty probe snapshot (the transient miss) → gated.
-        scan_root(dir.path(), decoders, &ctx).await;
+        scan_root(dir.path(), decoders, &ctx, &mut health).await;
         assert!(rx.try_recv().is_err(), "pass 1 must gate silently");
         assert!(
             !seen.lock().await.contains_key(&path),
@@ -2184,7 +2346,7 @@ mod tests {
         live.lock().await.insert(LIVE_UUID.to_string());
 
         // Pass 2: the scan must re-vouch the gated file and register it.
-        scan_root(dir.path(), decoders, &ctx).await;
+        scan_root(dir.path(), decoders, &ctx, &mut health).await;
         let mut events = Vec::new();
         while let Ok(ev) = rx.try_recv() {
             events.push(ev);
@@ -2200,7 +2362,7 @@ mod tests {
 
         // Pass 3 (loop guard): the file registered → claimed `seen` → out of
         // the candidate set; nothing is re-emitted while the probe vouches.
-        scan_root(dir.path(), decoders, &ctx).await;
+        scan_root(dir.path(), decoders, &ctx, &mut health).await;
         assert!(
             rx.try_recv().is_err(),
             "a registered file must not be re-vouched/replayed again"

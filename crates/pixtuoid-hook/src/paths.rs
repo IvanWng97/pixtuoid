@@ -9,7 +9,12 @@
 
 pub fn default_socket_path() -> String {
     if let Ok(p) = std::env::var("PIXTUOID_SOCKET") {
-        return p;
+        // Set-but-empty/whitespace = unset (the #172 RUST_LOG policy):
+        // honored verbatim, "" would make the daemon's bind fail fatally and
+        // the shim silently drop every event.
+        if !p.trim().is_empty() {
+            return p;
+        }
     }
     #[cfg(unix)]
     {
