@@ -20,10 +20,12 @@ pub(crate) const MAX_CONCURRENT_CONNS: usize = 128;
 pub(crate) const CONN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
 
 /// Typed marker for "another live instance owns the hook endpoint" — bind's
-/// ONE recoverable failure. `ClaudeCodeSource::run` downcasts for it and
-/// degrades to transcript-only (hooks disabled) instead of taking the whole
-/// CC source (and the hook-only Reasonix source riding the same socket) down
-/// with the bail. Every other bind error stays fatal.
+/// ONE recoverable failure (Unix: the sibling `<sock>.lock` advisory lock is
+/// held by a live owner; Windows: CreateNamedPipeW fails ACCESS_DENIED
+/// against the owner's `first_pipe_instance`). `ClaudeCodeSource::run`
+/// downcasts for it and degrades to transcript-only (hooks disabled) instead
+/// of taking the whole CC source (and the hook-only Reasonix source riding
+/// the same socket) down with the bail. Every other bind error stays fatal.
 #[derive(Debug)]
 pub struct SocketBusy {
     pub path: PathBuf,

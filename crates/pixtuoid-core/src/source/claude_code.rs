@@ -260,7 +260,14 @@ fn cc_sessions_dir(projects_root: &Path) -> Option<PathBuf> {
 impl ClaudeCodeSource {
     pub fn default_socket_path() -> PathBuf {
         if let Ok(p) = std::env::var("PIXTUOID_SOCKET") {
-            return PathBuf::from(p);
+            // Set-but-empty/whitespace = unset (the #172 RUST_LOG policy):
+            // honored verbatim, "" makes bind() fail fatally — killing the
+            // whole CC source — for a trivially recoverable misconfiguration.
+            // Same shape as pixtuoid-hook's paths.rs (parity-pinned by
+            // tests/socket_path_parity.rs).
+            if !p.trim().is_empty() {
+                return PathBuf::from(p);
+            }
         }
         #[cfg(unix)]
         {
@@ -592,6 +599,19 @@ mod tests {
         assert_eq!(
             ClaudeCodeSource::default_socket_path(),
             PathBuf::from("/tmp/explicit.sock")
+        );
+
+        // Set-but-empty/whitespace PIXTUOID_SOCKET = unset (the #172 RUST_LOG
+        // policy): falls through to XDG instead of binding an empty path.
+        std::env::set_var("PIXTUOID_SOCKET", "");
+        assert_eq!(
+            ClaudeCodeSource::default_socket_path(),
+            PathBuf::from("/run/user/1000/pixtuoid.sock")
+        );
+        std::env::set_var("PIXTUOID_SOCKET", "   ");
+        assert_eq!(
+            ClaudeCodeSource::default_socket_path(),
+            PathBuf::from("/run/user/1000/pixtuoid.sock")
         );
 
         // Without PIXTUOID_SOCKET, XDG_RUNTIME_DIR drives the path.
