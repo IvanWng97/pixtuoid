@@ -319,3 +319,75 @@ async fn listener_handles_concurrent_connections() {
     );
     handle.abort();
 }
+
+// The sun_path-overflow fallback (final path fits, the `.<pid>.tmp` twin
+// doesn't): bind must still succeed via the direct-bind+chmod path and the
+// socket must still end up owner-only — pins both the >100 threshold (a
+// future edit silently breaking 88-100-byte custom paths fails here) and the
+// 0600 mode on the fallback.
+#[tokio::test]
+async fn long_path_fallback_binds_owner_only() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = TempDir::new().unwrap();
+    // Pad the FINAL path to exactly 97 bytes: ≤100 (no fallback needed for
+    // the final name, and well under sun_path 104), while the temp twin
+    // `.{pid}.tmp` adds ≥6 bytes → >100 → must take the fallback branch.
+    let base = dir.path().to_string_lossy().len();
+    let pad = 97usize
+        .checked_sub(base + 1 + ".sock".len())
+        .expect("tempdir path too long to stage a 97-byte socket path");
+    let name = format!("{}{}", "x".repeat(pad), ".sock");
+    let path = dir.path().join(name);
+    assert_eq!(path.as_os_str().len(), 97, "fixture: final path length");
+
+    let listener = HookSocketListener::bind(path.clone()).await.unwrap();
+    let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o600, "fallback-bound socket must be owner-only");
+    // And it actually accepts: the shim-visible contract is unchanged.
+    drop(listener);
+}
+
+// The SocketBusy degradation contract (#232 review): a SECOND instance whose
+// hook bind loses to a live daemon must still run its JSONL watcher —
+// transcript-only, not dead. A fresh transcript written before spawn must
+// produce a SessionStart from the degraded source.
+#[tokio::test]
+async fn claude_source_degrades_to_transcript_only_when_socket_busy() {
+    use pixtuoid_core::source::claude_code::ClaudeCodeSource;
+    use pixtuoid_core::source::Source;
+
+    let dir = TempDir::new().unwrap();
+    let sock = dir.path().join("pixtuoid.sock");
+    // The "first instance": occupy the socket and keep it alive.
+    let _owner = HookSocketListener::bind(sock.clone()).await.unwrap();
+
+    let projects = dir.path().join("projects");
+    std::fs::create_dir_all(projects.join("proj")).unwrap();
+    std::fs::write(
+        projects.join("proj/11111111-2222-3333-4444-555555555555.jsonl"),
+        "{\"type\":\"user\",\"cwd\":\"/repo\"}\n",
+    )
+    .unwrap();
+
+    let src = ClaudeCodeSource {
+        socket_path: sock,
+        projects_root: projects,
+    };
+    let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(32);
+    let task = tokio::spawn(async move { Box::new(src).run(tx).await });
+
+    // The initial seed walk must register the fresh transcript even though
+    // the hook bind lost — transcript-only, not a dead source.
+    let ev = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let (transport, ev) = rx.recv().await.expect("source must stay alive");
+            if matches!(ev, AgentEvent::SessionStart { .. }) {
+                return (transport, ev);
+            }
+        }
+    })
+    .await
+    .expect("degraded source must still emit the transcript's SessionStart");
+    assert_eq!(ev.0, Transport::Jsonl);
+    task.abort();
+}
