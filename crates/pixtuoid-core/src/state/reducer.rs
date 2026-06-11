@@ -60,6 +60,21 @@ pub const HOOK_SESSION_END_TOMBSTONE_TTL: Duration = Duration::from_secs(5);
 #[doc(hidden)]
 pub const B1_CASCADE_GRACE: Duration = Duration::from_millis(2500);
 
+/// How long a drained Task `tool_use_id` is remembered so a lagged JSONL
+/// replay of its Start cannot re-fire `enter_delegating`. A fast Task (both
+/// hooks delivered) drains `active_tasks` and its hook-End dedup record is
+/// GC'd at [`HOOK_WINS_WINDOW`] — the transcript's batched Start+End pair
+/// then replays into an EMPTY set, so the first-insert gate reads it as a
+/// fresh dispatch and would clobber a Waiting the parent raised in the gap
+/// (then settle the still-pending prompt to Idle via the replayed End).
+/// Sized past the 60s `scan_root` poll backstop (the worst-case replay path
+/// when notify drops the dispatch's write) plus slack; unlike
+/// [`B1_CASCADE_GRACE`] generosity costs nothing here — a `tool_use_id` is
+/// never legitimately re-dispatched, so the only cost is the tombstone's
+/// map entry.
+#[doc(hidden)]
+pub const DRAINED_TASK_TOMBSTONE_TTL: Duration = Duration::from_secs(90);
+
 /// How long the slot stays visually Active after an `ActivityEnd` before
 /// the reducer's tick flips it to Idle. Hides the per-tool-call Active
 /// flicker that rapid PreToolUse → PostToolUse chains produce in CC; any
@@ -291,6 +306,14 @@ pub struct Reducer {
     /// copy — #151) defuses it. Evicted at BOTH sites like the other maps
     /// (tick's retain + `sweep_exited`'s remove).
     pending_b1_cascades: HashMap<AgentId, SystemTime>,
+    /// Tombstones for Task tool_use_ids whose drain already completed: a
+    /// lagged JSONL pair-replay after the drain re-inserts the tuid as a
+    /// FRESH first insert (set empty, dedup record GC'd), so the tracker's
+    /// first-insert gate alone can't stop `enter_delegating` from clobbering
+    /// a Waiting raised since. Consulted by the Start arm; TTL-pruned by
+    /// `gc` ([`DRAINED_TASK_TOMBSTONE_TTL`]) like the hook-recency maps —
+    /// not per-slot state, a tuid can't recur across lives.
+    recent_task_drains: HashMap<(AgentId, String), SystemTime>,
     /// Sweep-exemption timestamps from [`AgentEvent::ProofOfLife`] (#220):
     /// a slot vouched for within [`PROOF_OF_LIFE_TTL`] is skipped by
     /// `sweep_stale`'s candidate collection. Deliberately reducer-private
@@ -952,11 +975,22 @@ impl Reducer {
                 // parallel dispatch's JSONL copy is a genuine first insert —
                 // the suppressed hook returned before reaching this tracker —
                 // so it still enters Delegating.)
+                //
+                // The drained-tuid tombstone closes the gate's residual: once
+                // the hook End DRAINS the tuid, a pair-replay's Start IS a
+                // fresh first insert — re-insert it for End symmetry (the
+                // replayed End re-drains it cleanly), but never re-enter
+                // Delegating for a Task that already completed. `gc` (run at
+                // apply-top with this same `now`) already pruned expired
+                // tombstones, so membership means fresh.
                 if self
                     .active_tasks
                     .entry(*agent_id)
                     .or_default()
                     .insert(tuid.clone())
+                    && !self
+                        .recent_task_drains
+                        .contains_key(&(*agent_id, tuid.clone()))
                 {
                     if let Some(slot) = scene.agents.get_mut(agent_id) {
                         fsm::enter_delegating(slot, Some(Arc::<str>::from(tuid.as_str())), now);
@@ -970,6 +1004,8 @@ impl Reducer {
                 if let Some(set) = self.active_tasks.get_mut(agent_id) {
                     if set.remove(tuid) {
                         handled_by_task_tracking = true;
+                        self.recent_task_drains
+                            .insert((*agent_id, tuid.clone()), now);
                         // #152: the gate recorded while Delegating holds THIS
                         // Task's tuid; the drain path deliberately skips the
                         // main arm (a Waiting parent must keep Waiting), so
@@ -1054,6 +1090,10 @@ impl Reducer {
         });
         self.recent_proof_of_life
             .retain(|_, ts| now.duration_since(*ts).is_ok_and(|d| d < PROOF_OF_LIFE_TTL));
+        self.recent_task_drains.retain(|_, ts| {
+            now.duration_since(*ts)
+                .is_ok_and(|d| d < DRAINED_TASK_TOMBSTONE_TTL)
+        });
     }
 
     /// Walk through agents with `pending_idle_at` set and flip their

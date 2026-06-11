@@ -3364,6 +3364,99 @@ fn jsonl_task_start_replay_outside_dedup_window_does_not_clobber_waiting_parent(
     );
 }
 
+// Third leg of the pin family: the pair-replay AFTER the drain. A fast Task
+// (hook Start + hook End both delivered) drains `active_tasks`, and the End's
+// dedup record is GC'd at HOOK_WINS_WINDOW — but the transcript's batched
+// Start+End pair replays at real skew (~2.5s, the B1_CASCADE_GRACE model;
+// up to 60s under the missed-notify poll backstop). With the set drained the
+// replayed Start is a FRESH first insert, so the first-insert gate alone
+// can't hold: the drained-tuid tombstone must keep enter_delegating from
+// re-firing over a Waiting raised in the gap, and the replayed End must not
+// settle the still-pending prompt to Idle.
+#[test]
+fn lagged_jsonl_task_pair_after_drain_does_not_clobber_waiting_parent() {
+    let mut scene = SceneState::uniform(8);
+    let mut r = Reducer::new();
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+    let (parent, _child) = delegating_pair(&mut r, &mut scene, "orch-drained", t0);
+
+    // Fast Task: both hooks deliver — the Start tracks, the End DRAINS.
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityStart {
+            agent_id: parent,
+            tool_use_id: Some("task-T".into()),
+            detail: Some("Task".into()),
+        },
+        t0 + Duration::from_secs(1),
+        Transport::Hook,
+    );
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityEnd {
+            agent_id: parent,
+            tool_use_id: Some("task-T".into()),
+        },
+        t0 + Duration::from_secs(2),
+        Transport::Hook,
+    );
+
+    // The parent's own permission prompt fires in the gap → Waiting.
+    r.apply(
+        &mut scene,
+        AgentEvent::Waiting {
+            agent_id: parent,
+            reason: "permission".into(),
+        },
+        t0 + Duration::from_secs(3),
+        Transport::Hook,
+    );
+
+    // The batched JSONL pair lands at real skew — far outside
+    // HOOK_WINS_WINDOW, so no dedup record is left and the set is empty.
+    let replay_at = t0 + Duration::from_secs(2) + B1_CASCADE_GRACE + Duration::from_millis(100);
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityStart {
+            agent_id: parent,
+            tool_use_id: Some("task-T".into()),
+            detail: Some("Task".into()),
+        },
+        replay_at,
+        Transport::Jsonl,
+    );
+    assert!(
+        matches!(
+            scene.agents.get(&parent).unwrap().state,
+            ActivityState::Waiting { .. }
+        ),
+        "a replayed Start of an already-drained Task must not re-enter Delegating over a pending Waiting"
+    );
+
+    // ...and the replayed End must not arm an idle-resolve on the prompt.
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityEnd {
+            agent_id: parent,
+            tool_use_id: Some("task-T".into()),
+        },
+        replay_at,
+        Transport::Jsonl,
+    );
+    r.tick(
+        &mut scene,
+        replay_at + ACTIVE_GRACE_WINDOW + Duration::from_millis(100),
+    );
+    assert!(
+        matches!(
+            scene.agents.get(&parent).unwrap().state,
+            ActivityState::Waiting { .. }
+        ),
+        "the replayed pair must leave the still-pending permission Waiting, got {:?}",
+        scene.agents.get(&parent).unwrap().state
+    );
+}
+
 #[test]
 fn jsonl_ordinary_tool_end_drains_when_hook_end_drops() {
     // #150, ordinary-tool leg: a sub-window tool whose PostToolUse hook
@@ -4461,6 +4554,73 @@ fn reasonix_delegating_slot_survives_the_active_timeout() {
         scene.agents.get(&id).is_none_or(|s| s.exiting_at.is_some()),
         "the carve-out must not make the slot immortal"
     );
+}
+
+// A parent_id 2-cycle (two crafted/buggy SessionStarts each naming the other —
+// the same input class the scope cycle tests harden termination against) with
+// a Waiting member must still be reaped by the stale sweep. Pre-fix the
+// Waiting node counted as its OWN Waiting ancestor (the ancestor walk
+// re-entered the start node before the cycle guard fired) and self-exempted
+// from `sweep_stale` every tick — and its cycle partner was exempted through
+// it — so the pair held two desks forever (no SessionEnd ever arrives for a
+// phantom).
+#[test]
+fn waiting_parent_cycle_is_still_reaped_by_the_stale_sweep() {
+    use pixtuoid_core::state::reducer::STALE_WAITING_TIMEOUT;
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+    let a = AgentId::from_transcript_path("/p/cycle-a.jsonl");
+    let b = AgentId::from_transcript_path("/p/cycle-b.jsonl");
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: a,
+            source: "claude-code".into(),
+            session_id: "cyc-a".into(),
+            cwd: PathBuf::from("/repo"),
+            parent_id: Some(b),
+        },
+        t0,
+        Transport::Hook,
+    );
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: b,
+            source: "claude-code".into(),
+            session_id: "cyc-b".into(),
+            cwd: PathBuf::from("/repo"),
+            parent_id: Some(a),
+        },
+        t0,
+        Transport::Hook,
+    );
+    // One member parks on a permission prompt → Waiting (its resolution
+    // never arrives — the slots are malformed input, not a real session).
+    r.apply(
+        &mut scene,
+        AgentEvent::Waiting {
+            agent_id: b,
+            reason: "permission".into(),
+        },
+        t0,
+        Transport::Hook,
+    );
+
+    // Even the most generous threshold elapsing must reap the whole cycle:
+    // the Waiting member is collected on STALE_WAITING_TIMEOUT (it is NOT
+    // its own ancestor) and the cascade takes its cycle partner.
+    r.tick(
+        &mut scene,
+        t0 + STALE_WAITING_TIMEOUT + Duration::from_secs(60),
+    );
+    for id in [a, b] {
+        assert!(
+            scene.agents.get(&id).is_none_or(|s| s.exiting_at.is_some()),
+            "a Waiting parent-cycle member must not self-exempt from the stale sweep"
+        );
+    }
 }
 
 // Regression (adversarial review): a parent Waiting on a permission while a
