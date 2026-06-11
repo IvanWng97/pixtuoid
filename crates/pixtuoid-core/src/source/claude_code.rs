@@ -148,7 +148,7 @@ pub fn claude_config_dir() -> Option<PathBuf> {
 /// watches for the registry APPEARING in the docs, so shape drift (#247) is
 /// detected HERE: an entry that parses as JSON but lacks a consumed key warns
 /// once per process run and yields no vouch — graceful mtime-only degradation
-/// with a breadcrumb instead of silence). Returns the session UUIDs (+ owning
+/// with a breadcrumb instead of silence. Returns the session UUIDs (+ owning
 /// pid each) of entries whose pid is still ALIVE — a registry file can outlive
 /// a crashed CC, so each entry is verified with kill(pid, 0).
 ///
@@ -282,14 +282,21 @@ struct RegistryEntry {
 
 /// One registry-file parse outcome — the seam the #247 drift warn keys on.
 /// `ShapeDrift` carries WHICH consumed key vanished/changed type, so the
-/// warn-once can name it.
+/// warn-once can name it. Routing rule for future keys: a REQUIRED consumed
+/// key goes to `ShapeDrift("<key>")`; an additive key stays `Option` on the
+/// entry and its absence is never a parse fail nor drift (the `startedAt`
+/// precedent).
 #[cfg(unix)]
 #[derive(Debug)]
 enum RegistryParse {
     Entry(RegistryEntry),
     /// Skip silently: not JSON at all (a half-written file mid-write —
     /// transient) or a value-level corruption (pid <= 0, empty sessionId) —
-    /// the keys are shaped right, so it's not format drift.
+    /// the keys are shaped right, so it's not format drift. A PERSISTENT
+    /// wholesale format replacement (registry no longer JSON at all) also
+    /// lands here, deliberately silent: indistinguishable from torn reads
+    /// per-file, and warning on it would let one startup transient consume
+    /// the once-per-run breadcrumb that a real key rename deserves.
     Skip,
     /// Parses as JSON but a consumed key is missing or mistyped — the
     /// undocumented upstream shape changed (#247); the consumer warns once.
