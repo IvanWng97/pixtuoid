@@ -59,12 +59,12 @@ pub fn release_notes(version: &str) -> Option<&'static [&'static str]> {
         // brace would silently break if the indentation ever shifted.
         // [bump-inject-here]
         "0.7.0" => Some(&[
-            "Agent dashboard: Tab opens a foldable agent tree with per-CLI badges; Enter jumps floors",
-            "Offices now stack up to 10 floors (was 5)",
+            "Agents leave the moment they finish — instant exit detection (process watch + SubagentStop hooks); re-run `pixtuoid install-hooks` once to enable",
+            "Workflow fleets render right: instant seats on arrival, desks free in seconds, parent links survive worktree splits and revivals",
+            "Attach mid-session and every live agent appears immediately — even idle or permission-parked ones",
+            "Agent dashboard: Tab opens a foldable agent tree with per-CLI badges; Enter jumps floors (now up to 10)",
             "Windows: Codex + Reasonix hooks and the Antigravity watcher work end-to-end",
-            "Subagent links survive git-worktree cwd splits (CC agents key on the session UUID)",
-            "Big transcripts appear on first sight instead of after their next write",
-            "Fixed a render crash on non-ASCII project paths; headless output is escape-sanitized",
+            "Your config is never wiped: installs and saves preserve comments & permissions under one atomic locked round",
         ]),
         // 0.6.1 re-runs the 0.6.0 release with the npm-launcher publish fix
         // (#186) — 0.6.0 shipped to crates.io/homebrew but the `pixtuoid` npm
