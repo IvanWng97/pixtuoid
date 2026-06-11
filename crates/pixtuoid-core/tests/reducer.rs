@@ -4556,14 +4556,14 @@ fn reasonix_delegating_slot_survives_the_active_timeout() {
     );
 }
 
-// A parent_id 2-cycle (two crafted/buggy SessionStarts each naming the other —
-// the same input class the scope cycle tests harden termination against) with
-// a Waiting member must still be reaped by the stale sweep. Pre-fix the
-// Waiting node counted as its OWN Waiting ancestor (the ancestor walk
-// re-entered the start node before the cycle guard fired) and self-exempted
-// from `sweep_stale` every tick — and its cycle partner was exempted through
-// it — so the pair held two desks forever (no SessionEnd ever arrives for a
-// phantom).
+// A cycle-ATTEMPTING input (two crafted/buggy SessionStarts each naming the
+// other) with a Waiting member must still be reaped by the stale sweep.
+// History: pre-#234 the Waiting node counted as its OWN Waiting ancestor and
+// the pair held two desks forever; since #238 the second registration's
+// cycle-closing parent is REFUSED at the link seam, so the 2-cycle never
+// forms in the scene — this test now pins the no-immortal-pair observable
+// end-to-end (registration-path refusal + reap), while the crafted-state
+// cycle WALKS stay pinned by the scope.rs unit tests (`cycle_scene`).
 #[test]
 fn waiting_parent_cycle_is_still_reaped_by_the_stale_sweep() {
     use pixtuoid_core::state::reducer::STALE_WAITING_TIMEOUT;

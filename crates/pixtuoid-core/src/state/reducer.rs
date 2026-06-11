@@ -496,12 +496,26 @@ impl Reducer {
                 // satisfy `has_waiting_ancestor` and exempt each other from
                 // `sweep_stale` forever (#238). Degrade to parentless — the
                 // session is real even when its claimed lineage is malformed.
+                // The check runs up here (the walk needs `&scene.agents`
+                // before the `get_mut` below) but is gated on a link actually
+                // being APPLIED — against an already-parented slot the
+                // enrichment is a no-op, so a duplicate's malformed parent
+                // must neither warn nor change anything.
+                let link_would_apply = scene
+                    .agents
+                    .get(&agent_id)
+                    .is_none_or(|slot| slot.parent_id.is_none());
                 let parent_id = parent_id.filter(|&p| {
+                    if !link_would_apply {
+                        return true;
+                    }
                     let cycle = scope::would_create_cycle(&scene.agents, agent_id, p);
                     if cycle {
                         tracing::warn!(
                             ?agent_id,
                             proposed_parent = ?p,
+                            %session_id,
+                            cwd = %cwd.display(),
                             "refused parent_id link — it would close a parent cycle; degrading to parentless"
                         );
                     }

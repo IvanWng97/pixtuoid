@@ -767,11 +767,13 @@ pub(super) fn compute_pod_decor(
     // same graceful degradation as desks. The kind cycle still advances so
     // surviving slots keep the kinds they'd have on a wider floor.
     let band_right = cubicle_band.x + cubicle_band.width;
-    // Vertical twin of the x clamp: the last horizontal aisle's slot center
-    // can sit close enough to the band's bottom that a tall centered visual
-    // (PhoneBooth, 12px at 200x116 seed 2) crosses into the walkway, its
-    // south-anchored footprint blocking walkway cells. Same centered-blit
-    // math the painter uses (pos - h/2 .. pos - h/2 + h).
+    // Vertical twin of the x clamp: the LAST POD ROW's vertical-aisle slot
+    // center (pod_origin_y + pod_h/2) can sit close enough to the band's
+    // bottom that a tall centered visual (PhoneBooth, 12px at 200x116 seed 2)
+    // crosses into the walkway, its south-anchored footprint blocking walkway
+    // cells. (Horizontal-aisle slots sit a full pod_h shallower and can't
+    // reach the edge.) Same centered-blit math the painter uses
+    // (pos - h/2 .. pos - h/2 + h).
     let band_bottom = cubicle_band.y + cubicle_band.height;
     let mut push_slot = |pod_decor: &mut Vec<PodDecorItem>, x: u16, y: u16| {
         let kind = PodDecor::ALL[slot_idx % PodDecor::ALL.len()];
