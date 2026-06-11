@@ -118,7 +118,7 @@ fn stale_threshold(slot: &AgentSlot) -> Duration {
 /// Policy half of [`stale_threshold`], split from the registry lookup so caps
 /// combinations no registered source has YET are unit-testable with a
 /// synthetic [`SourceCaps`] (the lookup half is pinned by the registered-
-/// source tests in `tests/reducer.rs`).
+/// source tests in `tests/reducer/liveness.rs`).
 fn stale_threshold_with_caps(
     slot: &AgentSlot,
     caps: Option<&crate::source::registry::SourceCaps>,
@@ -1431,7 +1431,7 @@ mod tests {
     // registered path — reasonix is the row that sets
     // `delegations_are_hook_silent` — is pinned end-to-end by
     // `reasonix_delegating_slot_survives_the_active_timeout` in
-    // tests/reducer.rs.)
+    // tests/reducer/liveness.rs.)
     #[test]
     fn delegating_slot_with_hook_silent_caps_gets_waiting_window() {
         use super::{stale_threshold_with_caps, STALE_ACTIVE_TIMEOUT, STALE_WAITING_TIMEOUT};
@@ -1596,7 +1596,7 @@ mod tests {
     // White-box: the resurrect-in-place branch must evict the previous life's
     // entries from all three correlation maps while KEEPING the proof-of-life
     // vouch (the resurrecting slot's process is alive — that's what a vouch
-    // asserts). The public pins (tests/reducer.rs) cover the active_tasks and
+    // asserts). The public pins (tests/reducer/) cover the active_tasks and
     // pending_b1_cascades harms behaviorally; a stale `gated_before_waiting`
     // entry has no public observable today (every path into Waiting rewrites
     // the gate first), so its eviction — and the vouch's survival — are
@@ -1731,7 +1731,7 @@ mod tests {
     // ended_at stamped by `sweep_exited` — that both arms the #244-w2 gate
     // for those exits and starts the gc clock — and gc must prune it after
     // CHILD_END_LEDGER_TTL. Roots never enter the ledger. The public
-    // behavioral pins live in tests/reducer.rs; the stamping/pruning
+    // behavioral pins live in tests/reducer/child_ledger.rs; the stamping/pruning
     // internals have no other observable.
     #[test]
     fn child_ledger_is_stamped_on_sweep_and_pruned_by_gc() {

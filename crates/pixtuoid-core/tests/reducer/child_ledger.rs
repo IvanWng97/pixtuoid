@@ -287,7 +287,7 @@ fn tombstoned_parentless_session_start_still_registers() {
 // child, upstream provides NO SessionStart carrier at turn N+1 — the
 // child-end un-claim side-channel manufactures one: the hook tee +
 // `ChildEndUnclaims` release the rollout's `seen` claim so the next append
-// first-sights; pinned end-to-end in tests/watcher.rs
+// first-sights; pinned end-to-end in tests/watcher/unclaim.rs
 // `in_flight_multi_turn_codex_child_revives_and_relinks_via_unclaim`.)
 
 /// Drive the captured-shape hook payload through the REAL decoder and apply
@@ -413,7 +413,7 @@ fn parentless_revival_start_of_an_ended_codex_child_relinks_via_ledger() {
     // SubagentStop at EVERY turn end but SubagentStart only at thread
     // STARTUP; hook_runtime.rs verified 2026-06-11), so the un-claim
     // side-channel manufactures the carrier — the watcher+reducer e2e lives
-    // in tests/watcher.rs
+    // in tests/watcher/unclaim.rs
     // `in_flight_multi_turn_codex_child_revives_and_relinks_via_unclaim`.
     use pixtuoid_core::state::reducer::EXIT_GRACE_WINDOW;
     use serde_json::json;

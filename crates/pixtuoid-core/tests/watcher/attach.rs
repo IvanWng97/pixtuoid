@@ -1,3 +1,10 @@
+// ── Mid-attach scenario suite ────────────────────────────────────────────────
+// The acceptance criterion: opening pixtuoid at ANY moment must show all
+// active running agent CLIs correctly. These drive JsonlWatcher::run over a
+// pre-populated projects-root — the attach moment — and assert the emitted
+// live set, exercising the first-sight gate, the liveness-probe bypass, the
+// ended check, and the subagent parent link TOGETHER.
+
 use std::time::Duration;
 
 use tempfile::TempDir;

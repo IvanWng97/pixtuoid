@@ -48,12 +48,11 @@ fn cc_watcher(root: std::path::PathBuf) -> JsonlWatcher {
     .with_id_deriver(cc_id_from_path)
 }
 
-// ── Mid-attach scenario suite ────────────────────────────────────────────────
-// The acceptance criterion: opening pixtuoid at ANY moment must show all
-// active running agent CLIs correctly. These drive JsonlWatcher::run over a
-// pre-populated projects-root — the attach moment — and assert the emitted
-// live set, exercising the first-sight gate, the liveness-probe bypass, the
-// ended check, and the subagent parent link TOGETHER.
+// ── Shared watcher harness + builders ───────────────────────────────────────
+// Fixture writers (`write_lines`, `backdate`), the CC transcript line
+// builders, and probe-snapshot helpers — consumed by attach, first_sight,
+// liveness, and unclaim alike. The mid-attach suite narrative lives atop
+// `attach.rs`.
 
 /// Write a complete transcript (each line + trailing newline) in one shot, so
 /// the watcher's first sight always reads the full fixture content.

@@ -22,8 +22,8 @@ decoding" / "Adding a new agent CLI") first, then:
 4. If you add an `AgentEvent` variant, add a matching arm to
    `AgentEvent::agent_id()` in `source/mod.rs`.
 5. Update the four test areas that exercise the channel / `Source` / reducer
-   together: `tests/reducer.rs`, `tests/e2e.rs`, `tests/transport/socket.rs`,
-   `tests/watcher.rs`, plus `runtime/driver.rs` on the binary side.
+   together: `tests/reducer/`, `tests/e2e.rs`, `tests/transport/socket.rs`,
+   `tests/watcher/`, plus `runtime/driver.rs` on the binary side.
 6. Add a captured fixture under `tests/sources/fixtures/<name>/<scenario>/` (a
    unique lifecycle also gets a `tests/sources/<cli>.rs` module). The test
    layout + add-a-CLI steps are in `crates/pixtuoid-core/tests/CLAUDE.md`.

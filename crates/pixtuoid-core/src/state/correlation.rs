@@ -23,7 +23,7 @@ use crate::AgentId;
 /// (see `ToolEventKind`, #150).
 ///
 // These reducer tuning constants are `pub` ONLY so the integration test
-// (`tests/reducer.rs`, a separate crate) can derive its timing offsets from
+// (the `tests/reducer/` binary, a separate crate) can derive its timing offsets from
 // them instead of hardcoding ms. They are internal knobs, not a stable API:
 // `#[doc(hidden)]` keeps the cross-crate visibility the test needs while
 // excluding them from the rendered docs AND from cargo-semver-checks, so a

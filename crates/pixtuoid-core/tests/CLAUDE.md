@@ -27,7 +27,7 @@ tests/
 │   └── child_ledger.rs       SessionEnd tombstones + child-end ledger: gating, revival relink, parent adoption, cycle filter
 ├── e2e.rs                    end-to-end driver wiring (own binary)
 ├── watcher/main.rs           JsonlWatcher behavior (1 binary; the poll-seam harness — `fast_watch`,
-│   │                         `cc_watcher`, `vouch_snapshot`, `write_lines` + the cc line builders — lives in main.rs)
+│   │                         `cc_watcher`, `vouch_snapshot`, `write_lines`, `backdate` + the cc line builders — lives in main.rs)
 │   ├── tailing.rs            cursor mechanics: append-tail emit, partial trailing line, truncation reset, non-UTF-8 skip
 │   ├── first_sight.rs        the first-sight gate: stale/recent/ended/oversized seeds, probe bypass, cwd + id/label derivers, subagent parent links
 │   ├── liveness.rs           proof-of-life emission, negative vouch, instant exit (pid death), probe-failure no-ops
