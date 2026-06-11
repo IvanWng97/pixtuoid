@@ -133,6 +133,11 @@ pub(super) enum ToolEventKind {
 /// are `pub(super)` on purpose: the reducer's arms keep their map-touching
 /// logic verbatim (`self.corr.<map>`), while the named predicates/pruning
 /// below carry the helper logic that is purely map-shaped.
+///
+/// In/out criterion for a future map: PASSIVE cross-event memory (consulted
+/// to interpret a later event) lives here; ARMED actions that mutate the
+/// scene on a schedule (`pending_b1_cascades` and its fire pass) stay on
+/// `Reducer`.
 #[derive(Debug, Default)]
 pub(super) struct Correlation {
     /// Track recent hook-derived events so JSONL duplicates can be dropped.

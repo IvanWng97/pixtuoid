@@ -1395,7 +1395,7 @@ mod tests {
 
     // Accepted-equivalent mutation residuals (cargo-mutants, state files):
     // three boundary flips survive deliberately — `< → <=` in `gc`'s dedup
-    // retain (reducer.rs:659), `> → >=` in `sweep_stale` (716) and
+    // retain (state/correlation.rs (Correlation::gc)), `> → >=` in `sweep_stale` (reducer.rs) and
     // `sweep_exited` (767). Each only changes behavior at the EXACT threshold
     // instant (age == timeout, to the nanosecond), a measure-zero event in
     // wall-clock time and immaterial to a stale-sweep (one tick either way).
