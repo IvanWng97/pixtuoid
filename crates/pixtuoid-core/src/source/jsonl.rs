@@ -84,6 +84,8 @@ struct WatchCtx<'a> {
     /// Refreshed once per scan pass (initial seed / 250ms rescan / 60s poll);
     /// notify-driven single-file walks reuse it — seconds of staleness is fine
     /// because the probe is ADDITIVE-ONLY (it can only admit, never gate).
+    /// Second writer: `emit_session_exit` purges a confirmed-dead id, so a
+    /// probe-failure pass can't re-admit a session the exit rung just ended.
     live: &'a Arc<Mutex<HashSet<String>>>,
 }
 
@@ -231,7 +233,9 @@ impl JsonlWatcher {
         let mut notify_health = FailureLatch::default();
         let event_handler = move |res: notify::Result<notify::Event>| match res {
             Ok(event) => {
-                notify_health.on_success();
+                if notify_health.on_success() {
+                    tracing::info!("file-watch backend delivering again");
+                }
                 for path in event.paths {
                     if path.extension().and_then(|s| s.to_str()) == Some("jsonl") {
                         let _ = notify_tx.send(path);
