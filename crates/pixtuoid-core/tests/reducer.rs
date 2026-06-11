@@ -5231,13 +5231,56 @@ fn jsonl_child_session_start_within_tombstone_is_gated_too() {
 }
 
 #[test]
+fn non_child_session_end_tombstone_alone_gates_a_parented_start() {
+    // #242 independence pin: an unknown-id hook SessionEnd with
+    // `as_child: false` mints the 5s tombstone but writes NO child-ledger
+    // `ended_at` (only the SubagentStop decoders stamp as_child), so the 90s
+    // ledger gate cannot fire here — only the original #242 tombstone gate
+    // can block the parented Start inside the TTL. Deleting that gate would
+    // pass every ledger-armed test above; this one keeps it load-bearing.
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let parent = AgentId::from_parts("claude-code", "parent-sess");
+    let child = AgentId::from_parts("claude-code", "agent-nonchild-end");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+
+    start(&mut r, &mut scene, parent);
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionEnd {
+            agent_id: child,
+            as_child: false,
+        },
+        t0,
+        Transport::Hook,
+    );
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: child,
+            source: "claude-code".into(),
+            session_id: "agent-nonchild-end".into(),
+            cwd: PathBuf::from("/repo"),
+            parent_id: Some(parent),
+        },
+        t0 + Duration::from_millis(200),
+        Transport::Hook,
+    );
+    assert!(
+        !scene.agents.contains_key(&child),
+        "an as_child: false end arms ONLY the 5s #242 tombstone — that gate \
+         alone must block the parented Start inside the TTL"
+    );
+}
+
+#[test]
 fn child_session_start_past_tombstone_ttl_registers() {
     // The gates are tombstones, not blacklists: child ids are per-spawn
     // unique, so a Start past the windows is the late-discovery case (e.g. a
     // notify outage deferring the transcript first-sight to the 60s poll)
     // and must register — the TTLs bound the guards, the sweeps own the rest.
     // The end here is a SubagentStop (as_child) for an UNKNOWN id, so BOTH
-    // guards arm: the 5s #245 hook tombstone and the 90s child ledger
+    // guards arm: the 5s #242 hook tombstone and the 90s child ledger
     // (#244); the registration must clear the LONGER one.
     let mut scene = SceneState::uniform(4);
     let mut r = Reducer::new();
@@ -5316,14 +5359,18 @@ fn tombstoned_parentless_session_start_still_registers() {
 
 // ---- Child ledger (#244 / #246) -------------------------------------------
 //
-// The #245 hook tombstone above covers only the 5s reorder window for
+// The #242 hook tombstone above covers only the 5s reorder window for
 // UNKNOWN-id ends. The reducer-private child ledger covers the residual
 // windows: it remembers each child's APPLIED parent and stamps `ended_at`
 // from `as_child` SessionEnds (SubagentStop decodes) and from slot removal,
 // so (w2) a KNOWN child's late parented re-registration is gated for
-// CHILD_END_LEDGER_TTL, and a PARENTLESS revival — a multi-turn Codex child
-// (#246) or a tombstoned child's flat-rollout first-sight (#244-w1) —
-// re-links to the remembered parent instead of registering as an orphan.
+// CHILD_END_LEDGER_TTL, and a PARENTLESS start that DOES occur — a
+// post-un-claim revival (#246's adoption seam) or a tombstoned child's
+// flat-rollout first-sight (#244-w1) — re-links to the remembered parent
+// instead of registering as an orphan. (An IN-FLIGHT multi-turn Codex child
+// has NO SessionStart carrier at turn N+1 on either transport — upstream
+// hook_runtime.rs verified 2026-06-11 — so it stays invisible until a
+// carrier exists; #246 stays open for the hook-End→seen-un-claim design.)
 
 /// Drive the captured-shape hook payload through the REAL decoder and apply
 /// every decoded event — the same end-to-end path the listener uses, so these
@@ -5341,7 +5388,7 @@ fn apply_hook_payload(
 
 #[test]
 fn late_parented_restart_of_an_ended_child_is_gated_by_the_child_ledger() {
-    // #244-w2: Start→Stop on a KNOWN slot mints NO #245 tombstone (the Stop
+    // #244-w2: Start→Stop on a KNOWN slot mints NO #242 tombstone (the Stop
     // had a slot to mark exiting), so after the 4.5s GC a late transcript
     // first-sight (notify outage → the 60s poll backstop) used to re-register
     // the dead child as a phantom — no future SessionEnd would ever remove
@@ -5399,7 +5446,7 @@ fn late_parented_restart_of_an_ended_child_is_gated_by_the_child_ledger() {
     assert!(!scene.agents.contains_key(&child), "child GC'd");
 
     // The late parented first-sight (CC subagent transcripts carry the
-    // parent in their path) lands at +30s: past the 5s #245 tombstone — only
+    // parent in their path) lands at +30s: past the 5s #242 tombstone — only
     // the ledger can catch it.
     let late_start = |r: &mut Reducer, scene: &mut SceneState, at: SystemTime| {
         r.apply(
@@ -5435,14 +5482,22 @@ fn late_parented_restart_of_an_ended_child_is_gated_by_the_child_ledger() {
 }
 
 #[test]
-fn parentless_restart_of_a_multi_turn_codex_child_relinks_to_its_parent() {
-    // #246: codex-rs fires SubagentStop at EVERY turn end of a child thread
-    // but SubagentStart only at thread STARTUP — so a multi-turn child
-    // (parent `send_input`) ends after turn 1, GCs, and its revival arrives
-    // as a PARENTLESS SessionStart on the SAME id (the flat rollout carries
-    // no parent; neither does the hook's UserPromptSubmit shape). The ledger
-    // must restore the remembered parent so the revived child re-joins the
-    // scope tree instead of registering as an orphan — on EITHER transport.
+fn parentless_revival_start_of_an_ended_codex_child_relinks_via_ledger() {
+    // #246's re-link mechanism, pinned for the carriers that EXIST: when a
+    // parentless SessionStart on a known-ended child id DOES arrive — a
+    // post-un-claim revival (negative vouch / instant exit / decoded
+    // terminator un-claims the rollout from `seen`, so its next line
+    // re-emits SessionStart) or a flat first-sight — the ledger must restore
+    // the remembered parent so the revived child re-joins the scope tree
+    // instead of registering as an orphan, on EITHER transport. This does
+    // NOT cover the IN-FLIGHT multi-turn child: codex-rs fires SubagentStop
+    // at EVERY turn end but SubagentStart only at thread STARTUP, and
+    // provides NO other SessionStart carrier at turn N+1 (hook_runtime.rs
+    // verified 2026-06-11: UserPromptSubmit fires only for direct user
+    // input, never a parent `send_input`; non-Subagent events in a child's
+    // context carry the ROOT session_id) — that child stays invisible until
+    // a carrier exists (#246 stays open for the hook-End→seen-un-claim
+    // design).
     use pixtuoid_core::state::reducer::EXIT_GRACE_WINDOW;
     use serde_json::json;
     for transport in [Transport::Jsonl, Transport::Hook] {
@@ -5479,9 +5534,9 @@ fn parentless_restart_of_a_multi_turn_codex_child_relinks_to_its_parent() {
         assert_eq!(
             scene.agents.get(&child).map(|s| s.parent_id),
             Some(Some(parent)),
-            "turn 1: child registered with the parent link ({transport:?})"
+            "first life: child registered with the parent link ({transport:?})"
         );
-        // Turn 1 ends; the child slot exits and GCs.
+        // The child's first life ends; the slot exits and GCs.
         let stop = t0 + Duration::from_secs(2);
         apply_hook_payload(
             &mut r,
@@ -5500,10 +5555,11 @@ fn parentless_restart_of_a_multi_turn_codex_child_relinks_to_its_parent() {
         );
         assert!(
             !scene.agents.contains_key(&child),
-            "child GC'd after turn 1"
+            "child GC'd after its first life"
         );
 
-        // Turn 2: the revival is a PARENTLESS SessionStart on the same id.
+        // The revival start arrives as a PARENTLESS SessionStart on the same
+        // id (a post-un-claim re-emit / flat first-sight shape).
         r.apply(
             &mut scene,
             AgentEvent::SessionStart {
@@ -5519,16 +5575,103 @@ fn parentless_restart_of_a_multi_turn_codex_child_relinks_to_its_parent() {
         assert_eq!(
             scene.agents.get(&child).map(|s| s.parent_id),
             Some(Some(parent)),
-            "turn 2: the parentless revival must re-link to the ledger's \
+            "the parentless revival start must re-link to the ledger's \
              remembered parent, not register as an orphan ({transport:?})"
         );
     }
 }
 
 #[test]
+fn parentless_session_start_enriching_a_parentless_child_slot_adopts_ledger_parent() {
+    // The ENRICHMENT-path twin of the registration-path adoption above — the
+    // self-heal of the hook-straggler residual: a dead child's hook
+    // straggler landing in the (5s, 90s] window re-registers it PARENTLESS
+    // (the Identity arm / blank hook synthesis consult only the 5s #242
+    // tombstone, never the ledger), so the slot EXISTS parentless when the
+    // later parentless SessionStart arrives. That start lands in the
+    // duplicate-SessionStart arm, whose enrichment must adopt the ledger's
+    // remembered parent — not leave the orphan.
+    use pixtuoid_core::state::reducer::EXIT_GRACE_WINDOW;
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let parent = AgentId::from_parts("codex", "parent-sess");
+    let child_uuid = "05000000-0000-7000-8000-0000000000d0";
+    let child = AgentId::from_parts("codex", child_uuid);
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+    let session_start = |agent_id, sid: &str, parent_id| AgentEvent::SessionStart {
+        agent_id,
+        source: "codex".into(),
+        session_id: sid.into(),
+        cwd: PathBuf::from("/repo"),
+        parent_id,
+    };
+
+    // The child's first life: registered parented (ledger remembers the
+    // link), ended as_child, GC'd.
+    r.apply(
+        &mut scene,
+        session_start(parent, "parent-sess", None),
+        t0,
+        Transport::Hook,
+    );
+    r.apply(
+        &mut scene,
+        session_start(child, child_uuid, Some(parent)),
+        t0 + Duration::from_secs(1),
+        Transport::Hook,
+    );
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionEnd {
+            agent_id: child,
+            as_child: true,
+        },
+        t0 + Duration::from_secs(2),
+        Transport::Hook,
+    );
+    let gone = t0 + Duration::from_secs(2) + EXIT_GRACE_WINDOW + Duration::from_secs(1);
+    r.tick(&mut scene, gone);
+    assert!(!scene.agents.contains_key(&child), "child GC'd");
+
+    // The hook straggler at +10s (inside the 90s ledger window, no #242
+    // tombstone — the end had a slot) re-registers the child PARENTLESS via
+    // hook synthesis.
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityStart {
+            agent_id: child,
+            tool_use_id: Some("t-straggler".into()),
+            detail: None,
+        },
+        gone + Duration::from_secs(10),
+        Transport::Hook,
+    );
+    assert_eq!(
+        scene.agents.get(&child).map(|s| s.parent_id),
+        Some(None),
+        "precondition: the straggler re-registered the child parentless"
+    );
+
+    // The later parentless SessionStart hits the duplicate-SessionStart arm:
+    // enrichment must adopt the ledger parent (the self-heal).
+    r.apply(
+        &mut scene,
+        session_start(child, child_uuid, None),
+        gone + Duration::from_secs(11),
+        Transport::Jsonl,
+    );
+    assert_eq!(
+        scene.agents.get(&child).map(|s| s.parent_id),
+        Some(Some(parent)),
+        "the enrichment path must adopt the ledger's remembered parent for a \
+         parentless child slot"
+    );
+}
+
+#[test]
 fn tombstoned_codex_child_flat_first_sight_relinks_within_ledger_ttl() {
     // #244-w1: a straggler SubagentStop AFTER the child's slot was GC'd
-    // lands on an unknown id and mints the #245 tombstone — which can't
+    // lands on an unknown id and mints the #242 tombstone — which can't
     // catch the child's PARENTLESS flat-rollout first-sight (parentless
     // starts are tombstone-exempt for the Reasonix resurrect). The ledger
     // turns that former orphan-phantom into a parent-LINKED registration:
@@ -5581,12 +5724,12 @@ fn tombstoned_codex_child_flat_first_sight_relinks_within_ledger_ttl() {
     assert!(!scene.agents.contains_key(&child), "child GC'd");
 
     // The straggler Stop (codex fires one per child turn end) hits the now
-    // UNKNOWN id → #245 tombstone minted.
+    // UNKNOWN id → #242 tombstone minted.
     let straggler = stop + EXIT_GRACE_WINDOW + Duration::from_secs(2);
     apply_hook_payload(&mut r, &mut scene, subagent_stop, straggler);
 
     // The flat rollout's first-sight lands INSIDE the 5s hook tombstone —
-    // parentless, so the #245 gate must not block it, and the ledger must
+    // parentless, so the #242 gate must not block it, and the ledger must
     // supply the parent.
     r.apply(
         &mut scene,

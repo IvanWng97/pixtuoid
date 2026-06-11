@@ -44,7 +44,7 @@ pub const HOOK_SESSION_END_TOMBSTONE_TTL: Duration = Duration::from_secs(5);
 
 /// How long a child-ledger entry's `ended_at` keeps gating a PARENTED
 /// re-registration of that child after it ended ([`Reducer::apply`]'s
-/// `SessionStart` arm, #244). The #245 hook tombstone above covers only the
+/// `SessionStart` arm, #244). The #242 hook tombstone above covers only the
 /// 5s reorder window for UNKNOWN-id ends; this covers the residual windows it
 /// can't: a child that ended on a KNOWN slot (no tombstone minted) whose
 /// transcript first-sight arrives LATE — a notify outage defers discovery to
@@ -364,8 +364,8 @@ pub struct Reducer {
     /// link-upsert clears it). Consumed by the `SessionStart` arm: a fresh
     /// `ended_at` gates a PARENTED re-registration (the dead child's late
     /// echo, #244-w2), while a PARENTLESS start ADOPTS the remembered parent
-    /// (a multi-turn Codex child's revival re-links, #246; a tombstoned
-    /// child's flat first-sight registers parent-linked, #244-w1).
+    /// (a post-un-claim revival start re-links — #246's adoption seam; a
+    /// tombstoned child's flat first-sight registers parent-linked, #244-w1).
     /// Deliberately reducer-private like `recent_proof_of_life` — not an
     /// `AgentSlot` field, no semver surface; pruned by `gc` on
     /// [`CHILD_END_LEDGER_TTL`] once ended.
@@ -581,14 +581,14 @@ impl Reducer {
                     );
                     return;
                 }
-                // #244-w2 — the ledger-keyed sibling of the #245 gate above,
+                // #244-w2 — the ledger-keyed sibling of the #242 gate above,
                 // for the windows the 5s tombstone can't cover: a child that
                 // ended on a KNOWN slot mints no tombstone, so once the 4.5s
                 // exit grace GC'd it, a LATE parented first-sight of its
                 // transcript (notify outage → the watcher's 60s poll) would
                 // re-register a dead child as a phantom no future SessionEnd
                 // can remove. The ledger's `ended_at` survives the slot;
-                // gate on it for CHILD_END_LEDGER_TTL. Same shape as #245:
+                // gate on it for CHILD_END_LEDGER_TTL. Same shape as #242:
                 // PARENTED starts only (the event's OWN parent, judged
                 // BEFORE the ledger adoption below — parentless revivals are
                 // deliberately allowed through and re-linked instead, #246),
@@ -608,12 +608,24 @@ impl Reducer {
                 }
                 // Ledger adoption (#246 / #244-w1): a PARENTLESS start for an
                 // id whose ledger entry remembers an applied parent is a
-                // same-id new life of a known CHILD — a multi-turn Codex
-                // child revived by the next prompt (SubagentStart fires only
-                // at thread STARTUP, SubagentStop at EVERY turn end), or a
-                // dead child's flat-rollout first-sight (parentless by
-                // layout). Adopt the remembered parent so it re-joins the
-                // scope tree (cascade/liveness/readiness) instead of
+                // same-id new life of a known CHILD. It engages for the
+                // re-registrations that OCCUR: a dead child's flat-rollout
+                // first-sight (parentless by layout, #244-w1) and a
+                // post-un-claim revival (a negative vouch / instant exit /
+                // decoded terminator un-claimed the rollout from `seen`, so
+                // its next line re-emits a parentless SessionStart). NOT
+                // covered: the IN-FLIGHT multi-turn Codex child (parent
+                // `send_input`; rollout still seen-claimed — the hook End
+                // doesn't un-claim) has NO SessionStart carrier on either
+                // transport at turn N+1, so it stays invisible until a
+                // carrier exists — upstream provides none (hook_runtime.rs
+                // verified 2026-06-11: UserPromptSubmit fires only for direct
+                // user input, never a parent send_input; non-Subagent events
+                // in a child's context carry the ROOT session_id;
+                // SubagentStart fires only at thread STARTUP); #246 stays
+                // open for the hook-End→seen-un-claim design. Adopt the
+                // remembered parent so the start that does arrive re-joins
+                // the scope tree (cascade/liveness/readiness) instead of
                 // registering as an orphan. Revivals are deliberately NOT
                 // blocked the way parented re-registrations are: Codex
                 // resurrect-on-prompt is a legitimate same-id new life, and
@@ -863,7 +875,7 @@ impl Reducer {
                 // gate (entry defaults parentless — the blocked Start never
                 // applies a link). For a KNOWN slot this is the stamp that
                 // outlives the 4.5s GC, covering the late-first-sight window
-                // the #245 unknown-id tombstone structurally can't.
+                // the #242 unknown-id tombstone structurally can't.
                 if as_child {
                     self.child_ledger.entry(agent_id).or_default().ended_at = Some(now);
                 }
@@ -913,6 +925,15 @@ impl Reducer {
                 } else if !self.hook_session_end_tombstoned(agent_id, now)
                     && self.register_slot(scene, agent_id, &source, &session_id, cwd, None, now)
                 {
+                    // Only the 5s #242 tombstone is consulted — NOT the 90s
+                    // child ledger, deliberately: a hook is proof of life and
+                    // the reorder skew it guards is ms-scale. Residual: a dead
+                    // child's hook straggler landing in the (5s, 90s] window
+                    // re-registers it PARENTLESS here (and via the blank hook
+                    // synthesis, which makes the same call); it self-heals to
+                    // parent-linked when a later parentless SessionStart hits
+                    // the enrichment adoption.
+                    //
                     // The same reap exemption as the blank hook synthesis: a
                     // cwd-less Identity registers an ordinal-labeled slot that
                     // is process-proven alive, NOT a startup-seeding ghost —
