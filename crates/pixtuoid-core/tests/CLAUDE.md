@@ -18,7 +18,13 @@ tests/
 │   │   └── fixtures/hook-payloads.jsonl   codex's OWN data (single-owner; NOT scanned)
 │   ├── snapshots/            insta snaps  (sources__conformance__<source>__<scenario>)
 │   └── fixtures/<source>/    ══ conformance scenarios ONLY — dir name MUST be a registered source ══
-├── reducer.rs                state-machine behavior (own binary)
+├── reducer/main.rs           state-machine behavior (1 binary; shared builders `start`/`delegating_pair` live in main.rs)
+│   ├── lifecycle.rs          SessionStart/End arms: registration/capacity, resurrect-in-place, hook synthesis of unknown ids, duplicate-start backfill, `Identity`
+│   ├── activity.rs           per-slot FSM: Active/Idle debounce, Waiting set/resolve gates, active_ms + tool_call_count
+│   ├── tasks.rs              active_tasks suppression, hook-wins dedup, drains, b1 cascade grace + waiting-clobber pins
+│   ├── liveness.rs           stale sweeps/timeouts, proof-of-life + vouch exemptions, cascade↓ / liveness↑ / readiness, cycle reap
+│   ├── display.rs            labels: cwd-basename derivation, ghost ordinals, source prefixes, rename
+│   └── child_ledger.rs       SessionEnd tombstones + child-end ledger: gating, revival relink, parent adoption, cycle filter
 ├── e2e.rs                    end-to-end driver wiring (own binary)
 ├── watcher.rs                JsonlWatcher first-sight gate / liveness-probe bypass / cursor (own binary)
 │                             + the mid-attach scenario suite (attach shows exactly the live set)
