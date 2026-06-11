@@ -111,7 +111,18 @@ fn rows_to_frame(rows: Vec<Vec<Pixel>>) -> Result<Frame> {
     if rows.is_empty() {
         bail!("frame has no rows");
     }
+    // Frame dims are u16; a silent `as u16` truncation would wrap the dims
+    // while `pixels` keeps the full flattened length, breaking Frame's
+    // documented `pixels.len() == width * height` contract that blit/mirror
+    // index against. Pathological pack input only — bail like the
+    // inconsistent-row-width case below.
+    if rows.len() > u16::MAX as usize {
+        bail!("frame has {} rows (maximum {})", rows.len(), u16::MAX);
+    }
     let w = rows[0].len();
+    if w > u16::MAX as usize {
+        bail!("frame row width {w} exceeds the maximum {}", u16::MAX);
+    }
     for (i, r) in rows.iter().enumerate() {
         if r.len() != w {
             bail!(

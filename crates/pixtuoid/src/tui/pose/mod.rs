@@ -64,6 +64,17 @@ impl PoseHistory {
     pub fn record(&mut self, agent_id: AgentId, anchor: Point, now: SystemTime) {
         self.last.insert(agent_id, (anchor, now));
     }
+    /// Drop entries for agents no longer in `scene` (mirrors
+    /// `FrameCache::evict_missing`). Without this, one `(Point, SystemTime)`
+    /// per AgentId ever rendered lived for the process lifetime, per floor.
+    pub fn evict_missing(&mut self, scene: &pixtuoid_core::state::SceneState) {
+        self.last.retain(|id, _| scene.agents.contains_key(id));
+    }
+    /// Whether an entry exists for `agent_id` (test seam for eviction checks).
+    #[cfg(test)]
+    pub fn contains(&self, agent_id: AgentId) -> bool {
+        self.last.contains_key(&agent_id)
+    }
     /// Latest recorded position if it's at most `max_age_ms` old.
     pub fn recent(&self, agent_id: AgentId, max_age_ms: u64, now: SystemTime) -> Option<Point> {
         let (pt, when) = self.last.get(&agent_id).copied()?;
@@ -586,13 +597,21 @@ pub fn derive_with_routing(
                         // approach cell and SETTLE onto the chair, so the correction
                         // arrives from an allowed side instead of the south front
                         // (aiming A* at the blocked chair would snap the goal to the
-                        // nearest — south — cell). The profile covers the chair-glide
-                        // so its duration matches the settled polyline; its higher
+                        // nearest — south — cell). Route ONCE here at arm time —
+                        // mirroring the entry/exit arms, same jittered goal as the
+                        // render route — because the leg renders through
+                        // route_walking_pose's A* polyline: the profile must measure
+                        // that polyline (+ the chair-glide), or a detouring return
+                        // traverses a longer path inside a straight-line duration
+                        // (too fast). The arm stays once-per-transition; the rendered
+                        // leg itself is still frozen (no per-frame re-route). Higher
                         // accel (WalkIntent::SnapBack → WALK_ACCEL_SNAPBACK) keeps the
                         // urgent return brisk under pure physics.
                         let (snap_target, chair_settle) = desk_leg_endpoint(desk, layout);
-                        let len = octile_path_len(&[prev, snap_target])
-                            + settle_len(snap_target, chair_settle);
+                        let to_jittered = jitter_dest(slot.agent_id, snap_target);
+                        let path = router.route(&layout.walkable, overlay, prev, to_jittered);
+                        let len =
+                            (octile_path_len(&path) + settle_len(snap_target, chair_settle)).max(1);
                         let p = walk_profile(len, WalkIntent::SnapBack, slot.agent_id);
                         ms_entry.snap_back = Some(WalkLeg {
                             started_at: slot.state_started_at,

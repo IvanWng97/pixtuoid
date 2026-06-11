@@ -342,9 +342,10 @@ fn snap_back_cornered_leg_freezes_path_no_reroute() {
     );
     history.record(slot.agent_id, prev0, now - Duration::from_millis(50));
 
-    // Frame 1: arms the snap-back and snapshots the cornered walk_path (the
-    // profile is built from octile length, not a router call, so this is the
-    // ONE route call of the leg).
+    // Frame 1: arms the snap-back and snapshots the cornered walk_path. The
+    // arm routes once (to measure the rendered polyline for the profile) and
+    // route_walking_pose routes once for the freeze snapshot — both within
+    // ChangingRouter's `first` window, so they agree on the shape.
     let _ = derive_with_routing(
         &slot,
         now,
@@ -2835,5 +2836,63 @@ fn route_walking_pose_records_at_waypoint_and_aimless_history() {
         history.recent(slot.agent_id, 1_000, later),
         Some(dest),
         "AimlessAt must record its dest to history"
+    );
+}
+
+#[test]
+fn snap_back_profile_length_measures_the_routed_polyline() {
+    // The snap-back leg RENDERS through route_walking_pose's A* polyline, so
+    // the WalkProfile armed for it must measure that same polyline (mirroring
+    // the entry/exit arms). Arming the straight-line octile distance made a
+    // detouring (cornered) snap-back traverse a longer path inside the
+    // straight-line duration — visibly faster than V_CRUISE_SNAPBACK.
+    let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let l = layout();
+    let slot = active_slot(now, now - Duration::from_secs(60));
+    let desk = l.home_desks[0];
+    let (snap_target, chair_settle) = crate::tui::pose::desk_leg_endpoint(desk, &l);
+    let prev = Point {
+        x: desk.x + 50,
+        y: desk.y + 30,
+    };
+    // A detouring polyline well longer than the straight line.
+    let corner = Point {
+        x: prev.x,
+        y: prev.y + 40,
+    };
+    let detour = vec![prev, corner, snap_target];
+    let mut router = StubRouter::corners(detour.clone());
+    let overlay = pixtuoid_core::walkable::OccupancyOverlay::new();
+    let mut history = PoseHistory::new();
+    history.record(slot.agent_id, prev, now - Duration::from_millis(50));
+    let mut motion: HashMap<AgentId, MotionState> = HashMap::new();
+
+    let _ = derive_with_routing(
+        &slot,
+        now,
+        &l,
+        &mut crate::tui::pose::RouteCtx {
+            router: &mut router,
+            overlay: &overlay,
+            history: &mut history,
+            motion: &mut motion,
+        },
+    );
+
+    let leg = motion
+        .get(&slot.agent_id)
+        .and_then(|ms| ms.snap_back.as_ref())
+        .expect("snap-back must be armed");
+    let settle = settle_len(snap_target, chair_settle);
+    let routed = octile_path_len(&detour) + settle;
+    let straight = octile_path_len(&[prev, snap_target]) + settle;
+    assert!(
+        routed > straight,
+        "test setup: the detour must be longer than the straight line"
+    );
+    assert_eq!(
+        leg.profile.path_len_octile,
+        routed.max(1),
+        "armed profile must cover the routed polyline (+ chair settle), not the straight line"
     );
 }

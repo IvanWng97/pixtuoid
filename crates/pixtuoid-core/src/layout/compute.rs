@@ -637,8 +637,16 @@ pub(super) fn compute_pod_desks(
     // formula counts strides between origins but not the final
     // pod's tail height).
     let desk_y_max = cubicle_band.y + cubicle_band.height - DESK_H;
+    // Mirror clamp for x: `pod_cols` floors at 1, so on a 34-66px band the
+    // forced pod's 2nd desk column lands past the band's right edge (even
+    // entirely off-buffer) — an invisible desk whose walk anchor sits outside
+    // the mask. Skip those desks; the floor degrades to fewer desks, the same
+    // graceful degradation as the y clamp and the meeting room's
+    // MEETING_FURNITURE_MIN_W gate (capacity auto-computes from
+    // `home_desks.len()`, so the smaller count IS the floor's real capacity).
+    let desk_x_max = (cubicle_band.x + cubicle_band.width).saturating_sub(DESK_W);
     let push_desk = |desks: &mut Vec<Point>, x: u16, y: u16| -> bool {
-        if desks.len() >= n || y > desk_y_max {
+        if desks.len() >= n || y > desk_y_max || x > desk_x_max {
             return desks.len() >= n;
         }
         desks.push(Point { x, y });

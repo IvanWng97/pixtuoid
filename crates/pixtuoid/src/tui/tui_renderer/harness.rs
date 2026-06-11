@@ -562,7 +562,9 @@ fn no_layout_frame_zeroes_the_popup_hit_box() {
 
 // Regression: per-agent MotionState was evicted only on the CURRENT floor, so an
 // agent that exited while a different floor was visible leaked its walk-path Vec
-// on its own (non-current) floor until that floor was next navigated to.
+// on its own (non-current) floor until that floor was next navigated to. The
+// eviction now lives in `evict_missing` (called by the event loop with the live
+// snapshot before every render), which this drives like the production loop.
 #[test]
 fn departed_agent_motion_is_evicted_on_a_non_current_floor() {
     let cap = 16;
@@ -600,6 +602,7 @@ fn departed_agent_motion_is_evicted_on_a_non_current_floor() {
     render_until_settled(&mut r, &scene, &pack(), &mut now, 0);
     let scene_without_b = scene_with(vec![slot(a, 0, 0, t0() - Duration::from_secs(120))], cap);
     now += Duration::from_millis(33);
+    r.evict_missing(&scene_without_b);
     r.render(&scene_without_b, &pack(), now).expect("render");
 
     assert_eq!(
@@ -607,6 +610,69 @@ fn departed_agent_motion_is_evicted_on_a_non_current_floor() {
         Some(false),
         "a departed agent's MotionState must be evicted even on a non-current floor"
     );
+}
+
+// Regression: PoseHistory had NO eviction anywhere — one `(Point, SystemTime)`
+// per AgentId ever rendered lived for the process lifetime, on every floor —
+// and motion eviction lived only inside the normal render path (skipped on
+// transition frames). Both belong in `TuiRenderer::evict_missing`, the seam the
+// event loop calls with the live snapshot before every render, next to the
+// frame-cache eviction — across EVERY floor.
+#[test]
+fn evict_missing_drops_history_and_motion_on_every_floor() {
+    let cap = 16;
+    let a = AgentId::from_transcript_path("/ev2/floor0.jsonl");
+    let b = AgentId::from_transcript_path("/ev2/floor1.jsonl");
+    // Fresh agents: the entry walk populates BOTH history (per-frame walker
+    // position records) and motion (entry profile) on their floors.
+    let scene = scene_with(vec![slot(a, 0, 0, t0()), slot(b, 1, cap, t0())], cap);
+    let mut r = build(100, 40, vec![]);
+    let mut now = t0();
+
+    for _ in 0..5 {
+        now += Duration::from_millis(33);
+        r.render(&scene, &pack(), now).expect("render");
+    }
+    r.navigate_floor(1, now);
+    render_until_settled(&mut r, &scene, &pack(), &mut now, 1);
+    for _ in 0..5 {
+        now += Duration::from_millis(33);
+        r.render(&scene, &pack(), now).expect("render");
+    }
+    assert_eq!(
+        r.floor_history(0).map(|h| h.contains(a)),
+        Some(true),
+        "floor-0 history should hold agent A after its entry frames"
+    );
+    assert_eq!(
+        r.floor_history(1).map(|h| h.contains(b)),
+        Some(true),
+        "floor-1 history should hold agent B after its entry frames"
+    );
+    assert!(
+        r.floor_motion(1).and_then(|m| m.get(&b)).is_some(),
+        "floor-1 motion should hold agent B"
+    );
+
+    // Both agents leave the scene; the loop hands the new snapshot to
+    // evict_missing before the next render.
+    let empty = SceneState::uniform(cap);
+    r.evict_missing(&empty);
+
+    for floor in 0..2 {
+        assert_eq!(
+            r.floor_history(floor)
+                .map(|h| h.contains(a) || h.contains(b)),
+            Some(false),
+            "departed agents' PoseHistory must be evicted on floor {floor}"
+        );
+        assert_eq!(
+            r.floor_motion(floor)
+                .map(|m| m.contains_key(&a) || m.contains_key(&b)),
+            Some(false),
+            "departed agents' MotionState must be evicted on floor {floor}"
+        );
+    }
 }
 
 // Regression: an in-flight floor transition used to leave `last_pet_pos` stale

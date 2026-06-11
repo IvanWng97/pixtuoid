@@ -26,7 +26,7 @@ tui/
 │                   mod.rs (TuiRenderer: cross-frame state — Vec<RgbBuffer> + Vec<FloorCtx>; each FloorCtx owns
 │                   its own FrameCache/Router/PoseHistory/OccupancyOverlay + .motion + .door_anim_max_ms; plus
 │                   TickerQueue, Theme, cached Layout;
-│                   #[cfg(test)] frame_buffer/floor_motion/floor_buf/inject_coffee test seams),
+│                   #[cfg(test)] frame_buffer/floor_motion/floor_history/floor_buf/inject_coffee test seams),
 │                   harness.rs (#[cfg(test)] mod: ~65 headless integration tests driving the real
 │                   render()/navigate_floor() path via ratatui TestBackend — output-first: buf() pixels + frame_buffer cells)
 ├── theme/          color theme system — one file per theme, Theme struct in mod.rs

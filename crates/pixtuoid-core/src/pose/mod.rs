@@ -319,9 +319,15 @@ pub fn aimless_wander_seed(agent_id: AgentId, cycle_n: u64) -> u64 {
 /// because that's where people naturally drift during breaks; corridor
 /// and cubicle aisles are incidental; meeting room is rare. After
 /// picking a zone (weighted random), rejection-sample 32 points
-/// within the zone for a walkable pixel. Falls back to a randomised
-/// point along the corridor if every probe fails.
-pub fn pick_aimless_dest(layout: &SceneLayout, seed: u64) -> Point {
+/// within the zone for a walkable pixel. Falls back to the nearest
+/// walkable corridor-midline cell from a randomised x if every probe
+/// fails, and to `home_desk`'s walk anchor in the degenerate fully
+/// blocked-corridor case — never a cell inside furniture.
+///
+/// `home_desk` is the caller's home desk (`idle_pose`'s `desk` /
+/// `pick_wander_dest`'s `origin` — the same Point on both paths), so the
+/// result stays deterministic in `(layout, seed)` across the two callers.
+pub fn pick_aimless_dest(layout: &SceneLayout, seed: u64, home_desk: Point) -> Point {
     // Build the zone list. Use small rectangles for "window strip"
     // (top of cubicle band, where viewing-the-city makes sense) and
     // larger bounding boxes for the rooms / corridor. Zones can
@@ -368,14 +374,47 @@ pub fn pick_aimless_dest(layout: &SceneLayout, seed: u64) -> Point {
             return Point { x, y };
         }
     }
-    // Fallback — randomised point along the corridor's x-range so
-    // multiple fallback agents spread out instead of clustering.
+    // Fallback — randomised point along the corridor's x-range so multiple
+    // fallback agents spread out instead of clustering. The midline is NOT
+    // guaranteed open (vending / printer / water-cooler / trash footprints
+    // sit in the walkway band), so scan outward from the jittered x for the
+    // nearest walkable midline cell — everywhere else this function's
+    // contract is "returns a walkable pixel". Bounded by the corridor width
+    // and purely (layout, seed)-deterministic, like the probes above.
     let c = layout.corridor.unwrap_or(layout.walkway);
     let x_jitter = (seed as u16) % c.width.max(1);
-    Point {
-        x: c.x + x_jitter,
-        y: c.y + c.height / 2,
+    let base_x = c.x + x_jitter;
+    let mid_y = c.y + c.height / 2;
+    let in_band = |x: u16| x >= c.x && x < c.x.saturating_add(c.width);
+    for d in 0..c.width {
+        let east = base_x.saturating_add(d);
+        if in_band(east) && layout.is_walkable(east, mid_y) {
+            return Point { x: east, y: mid_y };
+        }
+        let west = base_x.saturating_sub(d);
+        if in_band(west) && layout.is_walkable(west, mid_y) {
+            return Point { x: west, y: mid_y };
+        }
     }
+    // Whole midline blocked (degenerate layout): the agent's own desk anchor
+    // is a destination every consumer already handles (A* snap / render
+    // anchor) — return it rather than hand out a cell inside furniture.
+    desk_walk_anchor(home_desk)
+}
+
+/// Milliseconds of the current Idle period during which `state_driven_pose`'s
+/// SeatedThinking gate held the agent at its desk: from `state_started_at`
+/// until `last_event_at + THINKING_WINDOW_SECS`. 0 when the agent was never
+/// active (mirrors the gate's `was_active`) or when the window expired before
+/// this Idle period began.
+fn thinking_hold_ms(slot: &AgentSlot) -> u64 {
+    if slot.last_event_at <= slot.created_at {
+        return 0;
+    }
+    slot.last_event_at
+        .checked_add(Duration::from_secs(THINKING_WINDOW_SECS))
+        .and_then(|release| release.duration_since(slot.state_started_at).ok())
+        .map_or(0, |d| d.as_millis() as u64)
 }
 
 fn idle_pose(slot: &AgentSlot, desk: Point, layout: &SceneLayout, elapsed_ms: u64) -> Pose {
@@ -398,6 +437,22 @@ fn idle_pose(slot: &AgentSlot, desk: Point, layout: &SceneLayout, elapsed_ms: u6
     let walk_out_end = seated_end + WANDER_WALK_EST_MS;
     let at_wp_end = walk_out_end + WANDER_DWELL_EST_MS;
 
+    // Thinking-gate continuity: the SeatedThinking gate masks this timeline
+    // until `thinking_hold_ms` into the Idle period. If the release lands PAST
+    // this cycle's seated phase, the first pose `derive()` would emit after
+    // SeatedThinking is mid-Walking / AtWaypoint — a desk→corridor pop in
+    // every stateless consumer (TestRenderer, occupancy overlay, snapshot
+    // tooling). Sit out the RELEASE cycle instead: SeatedThinking → SeatedIdle
+    // is continuous, the cycle boundary stays continuous (Seated → Seated),
+    // and the next trip's walk-out starts from its beginning. Deliberately
+    // phase-only — shifting `cycle_n` would desync destination selection from
+    // `tui::motion::advance_wander`'s bootstrap (`elapsed_idle /
+    // est_wander_cycle_ms`), which must stay in lockstep with this function.
+    let hold = thinking_hold_ms(slot);
+    if cycle_n == hold / cycle_ms && hold % cycle_ms > seated_end {
+        return Pose::SeatedIdle;
+    }
+
     // Weighted-zone aimless wander. Instead of uniformly sampling
     // anywhere in the buffer (which clusters at the fallback because most
     // cubicle pixels are obstacles), pick a ZONE by weight first — window-
@@ -409,7 +464,7 @@ fn idle_pose(slot: &AgentSlot, desk: Point, layout: &SceneLayout, elapsed_ms: u6
     // aimless branch and the no-reachable-side waypoint fallback below.
     let amble = || {
         let seed = aimless_wander_seed(slot.agent_id, cycle_n);
-        let p = pick_aimless_dest(layout, seed);
+        let p = pick_aimless_dest(layout, seed, desk);
         (p, Pose::AimlessAt { dest: p })
     };
 

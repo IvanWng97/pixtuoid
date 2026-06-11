@@ -52,7 +52,10 @@ src/
 │                         TopLeft as wall decor),
 │                       mask.rs (build_walkable_mask — stamps each obstacle via stamp_anchored/anchored_top_left
 │                         [no inline origin math]; WALL_THICK_H/V wall footprints; pantry south-strip +
-│                         meeting-furniture-too-narrow gate are the documented exceptions),
+│                         meeting-furniture-too-narrow gate are the documented exceptions; a TopLeft
+│                         south-strip CENTERS the narrower ground footprint under the sprite's visual
+│                         width — the wall-decor whiteboard's 10px wheel span sits at sprite cols 2-11,
+│                         not hugged to the west edge),
 │                       approach.rs (stand_point [obstacle render anchor] + approach_point [A*'s goal] +
 │                         seated_foot_cell [the seat's render-anchor inverse] — the walkable cell an agent
 │                         stands/approaches at, on the reachable allowed side nearest its desk, filtered by

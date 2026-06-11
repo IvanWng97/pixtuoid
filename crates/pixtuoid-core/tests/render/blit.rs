@@ -348,3 +348,37 @@ fn half_block_cells_pads_odd_height_with_repeated_row() {
         }
     );
 }
+
+#[test]
+fn dotted_hline_zero_dash_zero_gap_terminates_and_paints_nothing() {
+    // dash == 0 && gap == 0 used to never advance `x` — `while x <= x1` spun
+    // forever. A zero-length dash paints nothing; the call must just return.
+    let mut buf = RgbBuffer::filled(8, 1, Rgb { r: 0, g: 0, b: 0 });
+    draw_dotted_hline(&mut buf, 0, 0, 7, Rgb { r: 255, g: 0, b: 0 }, 0, 0);
+    for x in 0..8 {
+        assert_eq!(
+            buf.get(x, 0),
+            Rgb { r: 0, g: 0, b: 0 },
+            "zero-width dash must paint nothing at x={x}"
+        );
+    }
+}
+
+#[test]
+fn dotted_hline_near_u16_max_does_not_overflow() {
+    // `dash + gap` and `x + i` were unchecked u16 adds — a debug-build panic
+    // near the u16 ceiling (this is pub API; callers control the params).
+    let red = Rgb { r: 255, g: 0, b: 0 };
+    let mut buf = RgbBuffer::filled(4, 1, Rgb { r: 0, g: 0, b: 0 });
+    // dash + gap far beyond u16::MAX.
+    draw_dotted_hline(&mut buf, 0, 0, u16::MAX, red, u16::MAX, u16::MAX);
+    // x + i crossing u16::MAX before the x1 break fires.
+    draw_dotted_hline(&mut buf, u16::MAX - 3, 0, u16::MAX, red, 8, 1);
+    // Still paints normally in-range (fresh buffer — the calls above painted
+    // the in-range columns of `buf`).
+    let mut buf2 = RgbBuffer::filled(4, 1, Rgb { r: 0, g: 0, b: 0 });
+    draw_dotted_hline(&mut buf2, 0, 0, 3, red, 2, u16::MAX);
+    assert_eq!(buf2.get(0, 0), red);
+    assert_eq!(buf2.get(1, 0), red);
+    assert_eq!(buf2.get(2, 0), Rgb { r: 0, g: 0, b: 0 });
+}

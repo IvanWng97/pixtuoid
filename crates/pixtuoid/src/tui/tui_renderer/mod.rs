@@ -161,6 +161,13 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         self.current_floor
     }
 
+    /// Read a floor's pose history (test harness only) — used to assert that
+    /// departed agents are evicted on every floor.
+    #[cfg(test)]
+    pub fn floor_history(&self, floor: usize) -> Option<&crate::tui::pose::PoseHistory> {
+        self.floor_ctxs.get(floor).map(|f| &f.history)
+    }
+
     /// Read a floor's per-agent motion map (test harness only) — used to
     /// assert that an off-screen floor freezes and resyncs on return.
     #[cfg(test)]
@@ -316,11 +323,18 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         self.last_pet_pos
     }
 
-    /// Drop the cached frame entries for agents no longer in `scene`.
-    /// Forwarded so the render loop doesn't reach into the cache directly.
+    /// Drop per-agent state for agents no longer in `scene` — cached frames,
+    /// pose history, and motion (walk-path/profile) entries — across EVERY
+    /// floor (an agent's state lives on its own floor, which need not be the
+    /// current one). The event loop calls this with the live snapshot before
+    /// each render; keeping all per-agent eviction on this one seam means the
+    /// transition render path (which short-circuits the normal frame body)
+    /// can't skip it.
     pub fn evict_missing(&mut self, scene: &SceneState) {
         for ctx in &mut self.floor_ctxs {
             ctx.cache.evict_missing(scene);
+            ctx.history.evict_missing(scene);
+            ctx.motion.retain(|id, _| scene.agents.contains_key(id));
         }
     }
 
@@ -647,19 +661,13 @@ impl<B: Backend<Error: Send + Sync + 'static>> Renderer for TuiRenderer<B> {
         // --- Normal path: single floor ------------------------------------
         let floor_scene = project_floor_scene(scene, self.current_floor);
 
-        // Evict coffee state for agents no longer in the scene.
+        // Evict coffee state for agents no longer in the scene. (History,
+        // motion, and frame-cache eviction live in `evict_missing`, which the
+        // event loop calls with the live snapshot before every render.)
         self.coffee_holders
             .retain(|id| scene.agents.contains_key(id));
         self.coffee_fetched_at
             .retain(|id, _| scene.agents.contains_key(id));
-        // Evict per-agent motion state for departed agents across EVERY floor
-        // (mirrors the coffee/cache eviction). MotionState lives on an agent's
-        // own (immutable) floor, so a current-floor-only retain leaked the
-        // walk-path Vec of any agent that exited while a different floor was
-        // current and that floor was never re-navigated.
-        for ctx in &mut self.floor_ctxs {
-            ctx.motion.retain(|id, _| scene.agents.contains_key(id));
-        }
 
         let floor_meta = FloorMeta::for_floor(self.current_floor, nf);
         // Compute popup scale before the mutable borrows below.

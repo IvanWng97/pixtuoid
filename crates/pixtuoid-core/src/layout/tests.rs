@@ -245,6 +245,46 @@ fn compute_places_one_home_desk_per_agent() {
         assert!(d.y >= l.cubicle_band.y);
         assert!(d.y + DESK_H <= l.cubicle_band.y + l.cubicle_band.height);
         assert!(d.x >= l.cubicle_band.x);
+        assert!(d.x + DESK_W <= l.cubicle_band.x + l.cubicle_band.width);
+    }
+}
+
+#[test]
+fn narrow_width_desks_stay_inside_the_band_with_anchors_on_buffer() {
+    // 34-66px-wide buffers force one pod column (`pod_cols` floors at 1) even
+    // when the 36px pod doesn't fit. Without an x clamp in `push_desk` the
+    // pod's 2nd desk column landed past the band's right edge — even entirely
+    // off-buffer (x=47 at buf_w=40) — giving agents invisible desks whose walk
+    // anchors sit outside the mask. Mirror of the y clamp: those desks are
+    // skipped and the floor degrades to fewer desks (capacity auto-computes
+    // from home_desks.len(), so the smaller count IS the floor's capacity).
+    for &w in &[40u16, 50, 60] {
+        for seed in 0..6u64 {
+            let Some(l) = SceneLayout::compute_with_seed(w, 70, 8, seed) else {
+                continue;
+            };
+            let band_right = l.cubicle_band.x + l.cubicle_band.width;
+            for d in &l.home_desks {
+                assert!(
+                    d.x >= l.cubicle_band.x,
+                    "{w}x70 seed {seed}: desk x={} west of band x={}",
+                    d.x,
+                    l.cubicle_band.x
+                );
+                assert!(
+                    d.x + DESK_W <= band_right,
+                    "{w}x70 seed {seed}: desk x={} overflows the band's right edge {band_right}",
+                    d.x
+                );
+                let a = desk_walk_anchor(*d);
+                assert!(
+                    a.x < l.buf_w && a.y < l.buf_h,
+                    "{w}x70 seed {seed}: desk_walk_anchor {a:?} is off-buffer ({}x{})",
+                    l.buf_w,
+                    l.buf_h
+                );
+            }
+        }
     }
 }
 

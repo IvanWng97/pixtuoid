@@ -326,3 +326,38 @@ fn merge_from_inherits_furniture_only_and_never_clobbers_own() {
         "REQUIRED_CHARACTER anim must never be inherited via merge_from"
     );
 }
+
+#[test]
+fn frame_wider_than_u16_max_errors_instead_of_truncating() {
+    // `rows_to_frame` casts the row width to u16; a 65536-wide row used to
+    // wrap to width 0 against an untruncated 65536-long pixels vec, silently
+    // violating Frame's `pixels.len() == width * height` contract.
+    let mut src = String::with_capacity(2 * (u16::MAX as usize + 2) + 16);
+    src.push_str("@frame 0\n");
+    for _ in 0..=u16::MAX as usize {
+        src.push_str("A ");
+    }
+    src.push('\n');
+    let err = parse_sprite_file(&src, &palette()).unwrap_err();
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains("width") && msg.contains("line"),
+        "oversized width must error with line context, got: {msg}"
+    );
+}
+
+#[test]
+fn frame_taller_than_u16_max_errors_instead_of_truncating() {
+    // Same contract for the row count: 65536 rows wrapped height to 0.
+    let mut src = String::with_capacity(2 * (u16::MAX as usize + 2) + 16);
+    src.push_str("@frame 0\n");
+    for _ in 0..=u16::MAX as usize {
+        src.push_str("A\n");
+    }
+    let err = parse_sprite_file(&src, &palette()).unwrap_err();
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains("rows") && msg.contains("line"),
+        "oversized height must error with line context, got: {msg}"
+    );
+}

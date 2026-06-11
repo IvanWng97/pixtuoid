@@ -66,7 +66,8 @@ pub struct FloorCtx {
     pub cache: FrameCache,
     pub light: LightingState,
     /// Per-agent walk-timing state (physics profiles for entry/exit/wander).
-    /// Evicted alongside `history` and `cache` when the agent leaves.
+    /// Evicted alongside `history` and `cache` in
+    /// `TuiRenderer::evict_missing` when the agent leaves the scene.
     pub motion: HashMap<AgentId, MotionState>,
     /// Longest in-flight entry- or exit-walk `duration_ms + pause_ms` on
     /// this floor (ms). Written each frame by `derive_with_routing`; read by

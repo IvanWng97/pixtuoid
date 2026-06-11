@@ -429,7 +429,7 @@ fn pick_wander_dest(
     if is_aimless_cycle(id, cycle_n) {
         // Shared seed helper so this can never drift from core::pose::idle_pose.
         let seed = aimless_wander_seed(id, cycle_n);
-        let p = pick_aimless_dest(layout, seed);
+        let p = pick_aimless_dest(layout, seed, origin);
         (p, None, None, None)
     } else {
         let wp_idx = waypoint_index_for_cycle(id, cycle_n, layout.waypoints.len());
@@ -454,7 +454,7 @@ fn pick_wander_dest(
         // seat). Amble aimlessly this cycle instead, matching idle_pose.
         if dest == wp.pos {
             let seed = aimless_wander_seed(id, cycle_n);
-            return (pick_aimless_dest(layout, seed), None, None, None);
+            return (pick_aimless_dest(layout, seed, origin), None, None, None);
         }
         // Seat foot cell `S`: the walk SETTLES from `dest` onto it (the sprite
         // renders here). `None` for obstacles — the agent stands AT `dest`.

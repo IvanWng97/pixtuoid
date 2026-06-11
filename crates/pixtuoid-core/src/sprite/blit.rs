@@ -1,10 +1,17 @@
 use crate::sprite::{Frame, Rgb, RgbBuffer};
 
 /// Blit a sprite frame with a 1-pixel outline painted around its silhouette.
-/// For each opaque pixel in the frame whose 4-neighborhood (up/down/left/right)
-/// in the frame contains at least one transparent (or out-of-frame) pixel,
-/// the destination buffer gets an `outline` pixel painted at the corresponding
-/// neighbor position *before* the actual sprite pixels are blitted on top.
+/// For each **transparent in-frame** pixel whose 4-neighborhood (up/down/
+/// left/right) contains at least one opaque pixel, the destination buffer
+/// gets an `outline` pixel painted at that position *before* the actual
+/// sprite pixels are blitted on top.
+///
+/// The scan covers in-frame cells ONLY: a silhouette needs a transparent
+/// margin inside the frame to receive its halo on that side. An opaque pixel
+/// touching the frame edge gets no halo beyond the boundary, and a fully
+/// opaque frame gets none at all (pinned by
+/// `outlined_blit_does_not_outline_interior_opaque_pixels`) — author sprites
+/// with a 1-px transparent border where the halo matters.
 ///
 /// Result: a clean 1-pixel halo around the sprite silhouette, useful for
 /// making solid-color shapes (desks, plants) pop against the floor pattern.
@@ -78,6 +85,10 @@ pub fn draw_line(buf: &mut RgbBuffer, x0: i32, y0: i32, x1: i32, y1: i32, rgb: R
 }
 
 /// Convenience: dotted horizontal line. `dash` painted px, then `gap` skipped.
+/// A zero-length dash paints nothing. All arithmetic runs in u32 so a
+/// `dash + gap == 0` step can't spin forever (the step floors at 1) and
+/// coordinates near `u16::MAX` can't overflow — this is pub API, the caller
+/// controls every parameter.
 pub fn draw_dotted_hline(
     buf: &mut RgbBuffer,
     x0: u16,
@@ -87,17 +98,20 @@ pub fn draw_dotted_hline(
     dash: u16,
     gap: u16,
 ) {
-    let mut x = x0;
+    let step = (dash as u32 + gap as u32).max(1);
+    let x1 = x1 as u32;
+    let mut x = x0 as u32;
     while x <= x1 {
-        for i in 0..dash {
-            if x + i > x1 {
+        for i in 0..dash as u32 {
+            let px = x + i;
+            if px > x1 {
                 break;
             }
-            if (x + i) < buf.width && y < buf.height {
-                buf.put(x + i, y, rgb);
+            if px < buf.width as u32 && y < buf.height {
+                buf.put(px as u16, y, rgb);
             }
         }
-        x = x.saturating_add(dash + gap);
+        x += step;
     }
 }
 

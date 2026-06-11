@@ -663,3 +663,158 @@ fn derive_state_only_skips_entry_override() {
         ),
     }
 }
+
+// ---------------------------------------------------------------------------
+// Thinking-gate release continuity (#22)
+// ---------------------------------------------------------------------------
+
+/// Search the id space for an agent matching `pred` (personality/dwell are
+/// id-hashed, so tests that need a specific combination scan for one).
+fn agent_matching(pred: impl Fn(AgentId) -> bool) -> AgentId {
+    (0..100_000u64)
+        .map(|i| AgentId::from_transcript_path(&format!("/think/{i}.jsonl")))
+        .find(|id| pred(*id))
+        .expect("id space should contain a matching agent")
+}
+
+/// Build an Idle slot whose SeatedThinking gate releases `hold_ms` into the
+/// Idle period: `last_event_at = state_started_at - (THINKING_WINDOW - hold)`,
+/// i.e. the reducer settled to Idle (window - hold) after the last event.
+fn thinking_slot(id: AgentId, hold_ms: u64) -> AgentSlot {
+    let (mut s, _) = slot(ActivityState::Idle, 0);
+    s.agent_id = id;
+    s.last_event_at =
+        s.state_started_at - Duration::from_millis(THINKING_WINDOW_SECS * 1000 - hold_ms);
+    s
+}
+
+#[test]
+fn thinking_gate_release_is_continuous_with_seated_thinking() {
+    // The gate holds SeatedThinking while `since_last_event < 20s`, but the
+    // wander clock runs from `state_started_at` throughout — so when the
+    // release lands PAST the cycle's seated phase, `derive()` jumped straight
+    // from SeatedThinking (at the desk) to mid-Walking / AtWaypoint (a
+    // desk→corridor pop in every stateless consumer). The release cycle must
+    // instead stay seated: SeatedThinking → SeatedIdle is continuous.
+    let l = layout();
+    // Settle lag 2s → gate releases 18s into the Idle period.
+    let hold_ms = THINKING_WINDOW_SECS * 1000 - 2_000;
+    let id = agent_matching(|id| takes_trip(id, 0) && seated_dwell_ms(id) + 500 < hold_ms);
+    let s = thinking_slot(id, hold_ms);
+
+    // Just before release: the gate itself holds the thinking pose.
+    let before = s.state_started_at + Duration::from_millis(hold_ms - 100);
+    assert_eq!(derive(&s, before, &l), Some(Pose::SeatedThinking));
+
+    // Just after release: continuous with the desk, NOT mid-wander.
+    let after = s.state_started_at + Duration::from_millis(hold_ms + 200);
+    assert_eq!(
+        derive(&s, after, &l),
+        Some(Pose::SeatedIdle),
+        "gate release must land on a desk-seated pose, not mid-wander"
+    );
+}
+
+#[test]
+fn walk_out_intact_when_gate_releases_during_the_seated_phase() {
+    // When the gate releases while the cycle is still in its seated phase
+    // (hold <= seated_dwell), nothing was masked — the cycle-0 walk-out must
+    // run normally from its beginning (pins that the continuity guard does
+    // not over-suppress).
+    let l = layout();
+    let hold_ms = THINKING_WINDOW_SECS * 1000 - 2_000;
+    let id = agent_matching(|id| takes_trip(id, 0) && seated_dwell_ms(id) > hold_ms + 1_000);
+    let s = thinking_slot(id, hold_ms);
+    let desk = l.home_desks[0];
+
+    let mid_walk_out = seated_dwell_ms(id) + WANDER_WALK_EST_MS / 2;
+    let now = s.state_started_at + Duration::from_millis(mid_walk_out);
+    match derive(&s, now, &l).expect("pose") {
+        Pose::Walking { from, t_x1000, .. } => {
+            assert_eq!(from, desk, "cycle-0 walk-out starts from the desk");
+            assert!((400..=600).contains(&t_x1000), "t_x1000={t_x1000}");
+        }
+        other => panic!("expected the cycle-0 walk-out, got {other:?}"),
+    }
+}
+
+#[test]
+fn cycle_after_a_suppressed_release_walks_out_from_its_beginning() {
+    // The continuity guard is confined to the RELEASE cycle: the next trip
+    // cycle's walk-out plays in full, starting at phase 0.
+    let l = layout();
+    let hold_ms = THINKING_WINDOW_SECS * 1000 - 2_000;
+    let id = agent_matching(|id| {
+        takes_trip(id, 0) && takes_trip(id, 1) && seated_dwell_ms(id) + 500 < hold_ms
+    });
+    let s = thinking_slot(id, hold_ms);
+    let desk = l.home_desks[0];
+
+    let cycle = est_wander_cycle_ms(id);
+    let mid_walk_out = cycle + seated_dwell_ms(id) + WANDER_WALK_EST_MS / 2;
+    let now = s.state_started_at + Duration::from_millis(mid_walk_out);
+    match derive(&s, now, &l).expect("pose") {
+        Pose::Walking { from, t_x1000, .. } => {
+            assert_eq!(from, desk, "cycle-1 walk-out starts from the desk");
+            assert!((400..=600).contains(&t_x1000), "t_x1000={t_x1000}");
+        }
+        other => panic!("expected the cycle-1 walk-out, got {other:?}"),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// pick_aimless_dest fallback walkability (#24)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn aimless_fallback_scans_the_midline_for_a_walkable_cell() {
+    // The corridor midline hosts furniture footprints (vending / printer /
+    // water cooler / trash), so the post-probe fallback point can be blocked.
+    // Force the fallback (only ONE walkable pixel in the whole mask — the 32
+    // zone probes virtually never hit it) and require a walkable result.
+    let mut l = layout();
+    let c = l.corridor.unwrap_or(l.walkway);
+    let mid_y = c.y + c.height / 2;
+    let open = Point {
+        x: c.x + c.width - 2,
+        y: mid_y,
+    };
+    let mut mask = crate::walkable::WalkableMask::new_open(l.buf_w, l.buf_h);
+    mask.mark_blocked(0, 0, l.buf_w, l.buf_h, 0);
+    mask.mark_walkable(open.x, open.y, 1, 1);
+    l.walkable = mask;
+
+    let desk = l.home_desks[0];
+    for seed in 0..16u64 {
+        let p = pick_aimless_dest(&l, seed, desk);
+        assert!(
+            l.is_walkable(p.x, p.y),
+            "seed {seed}: fallback returned a blocked cell {p:?}"
+        );
+        assert_eq!(
+            p,
+            pick_aimless_dest(&l, seed, desk),
+            "must stay deterministic in (layout, seed)"
+        );
+    }
+}
+
+#[test]
+fn aimless_fallback_on_a_fully_blocked_mask_returns_the_desk_anchor() {
+    // Degenerate layout (nothing walkable at all): the fallback must hand out
+    // the agent's own desk anchor — a destination every consumer already
+    // handles (A* snap / render anchor) — rather than a cell inside furniture.
+    let mut l = layout();
+    let mut mask = crate::walkable::WalkableMask::new_open(l.buf_w, l.buf_h);
+    mask.mark_blocked(0, 0, l.buf_w, l.buf_h, 0);
+    l.walkable = mask;
+
+    let desk = l.home_desks[0];
+    for seed in 0..8u64 {
+        assert_eq!(
+            pick_aimless_dest(&l, seed, desk),
+            crate::layout::desk_walk_anchor(desk),
+            "seed {seed}: fully blocked corridor must fall back to the desk anchor"
+        );
+    }
+}
