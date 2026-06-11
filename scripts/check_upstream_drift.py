@@ -76,8 +76,9 @@ CC_HOOKS_URL = "https://code.claude.com/docs/en/hooks.md"
 #     core's source/jsonl.rs) deliberately skips the gate's ended tail-scan
 #     because no such marker exists today — when one lands, admission needs an
 #     ended-check before bypassing the gate.
-#   * the `~/.claude/sessions/<pid>.json` registry ({pid, sessionId, cwd,
-#     procStart, status}) — the input an upcoming liveness probe will consume.
+#   * the `~/.claude/sessions/<pid>.json` registry ({pid, sessionId, startedAt,
+#     cwd, procStart, status}) — the input the liveness probe consumes
+#     (#224/#227; shape drift is consumer-warned in live_cc_session_ids, #247).
 # All markers are ABSENT from hooks.md at add time (verified live); a hit is
 # review-class drift (something new to adopt), never breaking. `session_end`
 # is snake_case on purpose: the SessionEnd HOOK name appears throughout
