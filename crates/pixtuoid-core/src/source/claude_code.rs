@@ -5,8 +5,8 @@ use serde_json::Value;
 
 use crate::source::decoder::{cwd_basename_label, make_tool_detail};
 use crate::source::hook::HookSocketListener;
-use crate::source::jsonl::{JsonlWatcher, ProbeSnapshot};
-use crate::source::{AgentEvent, Source, TaggedSender};
+use crate::source::jsonl::{ChildEndUnclaims, JsonlWatcher, ProbeSnapshot};
+use crate::source::{AgentEvent, Source, TaggedReceiver, TaggedSender, Transport};
 use crate::AgentId;
 
 pub const SOURCE_NAME: &str = "claude-code";
@@ -129,6 +129,14 @@ pub(crate) fn decode_cc_hook_custom(v: &Value) -> Result<Option<Vec<AgentEvent>>
 pub struct ClaudeCodeSource {
     pub socket_path: PathBuf,
     pub projects_root: PathBuf,
+    /// The #246 child-end un-claim side-channel. This source is BOTH the
+    /// producer (its hook tee observes every decoded `SubagentStop` — all
+    /// sources' hooks ride the one shared socket it owns) and a consumer
+    /// (its own watcher releases CC child-transcript claims, the rare CC
+    /// blocked-stop continuation). The runtime shares ONE handle with
+    /// `CodexSource` (whose multi-turn children are the motivating case);
+    /// `None` disables the side-channel (bare test construction).
+    pub child_end_unclaims: Option<ChildEndUnclaims>,
 }
 
 /// Resolve `CLAUDE_CONFIG_DIR` (an empty value is treated as unset). `pub` +
@@ -449,6 +457,40 @@ impl ClaudeCodeSource {
         Self {
             socket_path: Self::default_socket_path(),
             projects_root,
+            child_end_unclaims: None,
+        }
+    }
+}
+
+/// Producer half of the #246 child-end un-claim side-channel (see
+/// `ChildEndUnclaims` for the WHY). Interposed between the hook listener and
+/// the real channel inside [`ClaudeCodeSource::run`] — the listener's API
+/// stays source-agnostic; this is source-local plumbing at the ONE seam every
+/// decoded `SubagentStop` (CC and Codex alike — all sources' hooks ride this
+/// source's shared socket) passes through. Every event is forwarded UNCHANGED,
+/// transport tag included (invariant #2: the producer's tag flows through).
+/// The push happens BEFORE the forward — the order is irrelevant for
+/// correctness (the watcher drains on its own scan cadence), but push-first
+/// means the un-claim is already pending by the time the reducer applies the
+/// end, which keeps tests deterministic. Exits when either side closes
+/// (listener gone → `recv` None; reducer gone → send Err).
+async fn tee_child_end_unclaims(
+    mut rx: TaggedReceiver,
+    tx: TaggedSender,
+    unclaims: ChildEndUnclaims,
+) {
+    while let Some((transport, ev)) = rx.recv().await {
+        if transport == Transport::Hook {
+            if let AgentEvent::SessionEnd {
+                agent_id,
+                as_child: true,
+            } = &ev
+            {
+                unclaims.push(*agent_id);
+            }
+        }
+        if tx.send((transport, ev)).await.is_err() {
+            return;
         }
     }
 }
@@ -488,11 +530,27 @@ impl Source for ClaudeCodeSource {
                 live_cc_session_ids(&sessions_dir)
             }));
         }
+        if let Some(unclaims) = &self.child_end_unclaims {
+            watcher = watcher.with_child_end_unclaims(unclaims.clone());
+        }
 
         let Some(socket) = socket else {
             return watcher.run(tx).await;
         };
-        let tx_hook = tx.clone();
+        // #246: route hook events through the un-claim tee when the
+        // side-channel is wired (the runtime always wires it; `None` is bare
+        // test construction). The tee task is a passive pipe — not part of
+        // the select! below — and dies with the listener (its sender drops).
+        let tx_hook = match &self.child_end_unclaims {
+            Some(unclaims) => {
+                // Same capacity as the runtime's event channel: the tee adds
+                // a stage, not a different backpressure policy.
+                let (tee_tx, tee_rx) = tokio::sync::mpsc::channel(256);
+                tokio::spawn(tee_child_end_unclaims(tee_rx, tx.clone(), unclaims.clone()));
+                tee_tx
+            }
+            None => tx.clone(),
+        };
         let tx_jsonl = tx.clone();
         let hook_task = tokio::spawn(async move { socket.run(tx_hook).await });
         let jsonl_task = tokio::spawn(async move { watcher.run(tx_jsonl).await });
@@ -659,6 +717,82 @@ pub fn cc_derive_label(path: &Path, _source: &str, cwd: &Path) -> String {
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::time::Duration;
+
+    /// The #246 tee contract: a Hook-transport `SessionEnd { as_child: true }`
+    /// flowing through the forwarding task lands its id in the shared handle,
+    /// AND every event — that one included — reaches the downstream channel
+    /// UNCHANGED, in order, transport tag intact (invariant #2). Jsonl-tagged
+    /// child ends and root (`as_child: false`) hook ends must NOT be pushed:
+    /// only the SubagentStop decode shape feeds the un-claim.
+    #[tokio::test]
+    async fn tee_pushes_hook_child_ends_and_forwards_every_event_unchanged() {
+        let unclaims = ChildEndUnclaims::new();
+        let (in_tx, in_rx) = tokio::sync::mpsc::channel(16);
+        let (out_tx, mut out_rx) = tokio::sync::mpsc::channel(16);
+        let tee = tokio::spawn(tee_child_end_unclaims(in_rx, out_tx, unclaims.clone()));
+
+        let child = AgentId::from_parts("codex", "child-uuid");
+        let root = AgentId::from_parts(SOURCE_NAME, "root-uuid");
+        let events: Vec<(Transport, AgentEvent)> = vec![
+            (
+                Transport::Hook,
+                AgentEvent::ActivityStart {
+                    agent_id: root,
+                    tool_use_id: Some("tu_1".into()),
+                    detail: None,
+                },
+            ),
+            // A JSONL-tagged child end must not feed the handle (nothing
+            // in-tree emits one; the guard IS the boundary).
+            (
+                Transport::Jsonl,
+                AgentEvent::SessionEnd {
+                    agent_id: root,
+                    as_child: true,
+                },
+            ),
+            // A root hook end is not a SubagentStop — not pushed.
+            (
+                Transport::Hook,
+                AgentEvent::SessionEnd {
+                    agent_id: root,
+                    as_child: false,
+                },
+            ),
+            // THE shape: the decoded SubagentStop.
+            (
+                Transport::Hook,
+                AgentEvent::SessionEnd {
+                    agent_id: child,
+                    as_child: true,
+                },
+            ),
+        ];
+        for ev in &events {
+            in_tx.send(ev.clone()).await.unwrap();
+        }
+        for expected in &events {
+            let got = tokio::time::timeout(Duration::from_secs(5), out_rx.recv())
+                .await
+                .expect("tee must forward promptly")
+                .expect("tee must not drop the channel");
+            assert_eq!(
+                &got, expected,
+                "event parity: forwarded unchanged, in order"
+            );
+        }
+        assert_eq!(
+            unclaims.take_matching(|_| true),
+            vec![child],
+            "exactly the Hook-transport as_child end lands in the handle"
+        );
+        drop(in_tx);
+        tokio::time::timeout(Duration::from_secs(5), tee)
+            .await
+            .expect("tee exits when the listener side closes")
+            .unwrap();
+    }
 
     // The custom-decoder contract (mirrors the codex twin): claim our two
     // events FULLY — a malformed instance must be Err, never Ok(None) (which

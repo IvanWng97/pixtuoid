@@ -437,6 +437,7 @@ async fn claude_source_degrades_to_transcript_only_when_socket_busy() {
     let src = ClaudeCodeSource {
         socket_path: sock,
         projects_root: projects,
+        child_end_unclaims: None,
     };
     let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(32);
     let task = tokio::spawn(async move { Box::new(src).run(tx).await });
@@ -454,5 +455,82 @@ async fn claude_source_degrades_to_transcript_only_when_socket_busy() {
     .await
     .expect("degraded source must still emit the transcript's SessionStart");
     assert_eq!(ev.0, Transport::Jsonl);
+    task.abort();
+}
+
+// The #246 tee WIRING (the tee fn itself is unit-pinned in claude_code.rs):
+// a SubagentStop riding the real shared socket through ClaudeCodeSource::run
+// must BOTH reach the downstream channel unchanged (Hook-tagged `as_child`
+// SessionEnd — event parity through the interposed tee) AND land its child id
+// in the shared un-claim handle. Codex-stamped on purpose: the Codex child is
+// the motivating #246 case, and it proves the CC-owned socket feeds every
+// source's child ends into the ONE handle.
+#[tokio::test]
+async fn claude_source_tee_captures_child_ends_from_the_shared_socket() {
+    use pixtuoid_core::source::claude_code::ClaudeCodeSource;
+    use pixtuoid_core::source::jsonl::ChildEndUnclaims;
+    use pixtuoid_core::source::Source;
+    use pixtuoid_core::AgentId;
+
+    // The documented polling seam — never a real FSEvents stream in tests.
+    pixtuoid_core::source::jsonl::force_polling_backend_for_tests(Duration::from_millis(25));
+
+    let dir = TempDir::new().unwrap();
+    let sock = dir.path().join("pixtuoid.sock");
+    let projects = dir.path().join("projects");
+    std::fs::create_dir_all(&projects).unwrap();
+
+    let unclaims = ChildEndUnclaims::new();
+    let src = ClaudeCodeSource {
+        socket_path: sock.clone(),
+        projects_root: projects,
+        child_end_unclaims: Some(unclaims.clone()),
+    };
+    let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(32);
+    let task = tokio::spawn(async move { Box::new(src).run(tx).await });
+    sleep(Duration::from_millis(50)).await;
+
+    let child_uuid = "0d000000-0000-7000-8000-0000000000d1";
+    let expected = AgentId::from_parts("codex", child_uuid);
+    let payload = serde_json::json!({
+        "hook_event_name": "SubagentStop",
+        "session_id": "parent-sess",
+        "agent_id": child_uuid,
+        "_pixtuoid_source": "codex",
+    });
+    let mut s = UnixStream::connect(&sock).await.unwrap();
+    let mut line = serde_json::to_vec(&payload).unwrap();
+    line.push(b'\n');
+    s.write_all(&line).await.unwrap();
+    s.shutdown().await.unwrap();
+
+    let (transport, ev) = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let (transport, ev) = rx.recv().await.expect("source must stay alive");
+            if matches!(ev, AgentEvent::SessionEnd { .. }) {
+                return (transport, ev);
+            }
+        }
+    })
+    .await
+    .expect("the SubagentStop must reach the downstream channel through the tee");
+    assert_eq!(
+        transport,
+        Transport::Hook,
+        "the Transport tag flows through"
+    );
+    assert_eq!(
+        ev,
+        AgentEvent::SessionEnd {
+            agent_id: expected,
+            as_child: true
+        },
+        "event parity: the decoded end is forwarded unchanged"
+    );
+    assert_eq!(
+        unclaims.take_matching(|id| *id == expected),
+        vec![expected],
+        "the child id must land in the shared un-claim handle"
+    );
     task.abort();
 }

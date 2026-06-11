@@ -206,6 +206,7 @@ Don't be surprised by these. **Full explanation (the WHY) lives in the nested `C
 - Subagent display names come from `attributionAgent` in JSONL.
 - The subagent-dispatch tool is **`Agent`** in current CC (not `Task`); `make_tool_detail` maps both → `ToolDetail::Task`. Missing the name silently disables subagent-leak suppression + b1 completion. `Workflow` (the fleet dispatcher) is deliberately NOT mapped — mapping it would sweep-exempt finished fleet agents for the whole workflow (the WHY lives at `make_tool_detail`); fleet lifecycle is the SubagentStart/Stop hooks'.
 - Codex subagents (`spawn_agent`) wire into the scope tree via the `SubagentStart`/`SubagentStop` HOOKS (distinct `agent_id` + parent `session_id`), since their rollout is flat (no `/subagents/` path); the reducer's `SessionStart` arm enriches a JSONL-first orphan's `parent_id`. Regression: `tests/sources/codex/mod.rs` (CC's hook twin: `tests/sources/claude/mod.rs`).
+- Subagent CLEAN-EXIT ladder: b1 (Agent-tool drain) / `SubagentStop` hooks (incl. Workflow fleets, #243); the reducer's child ledger re-links revivals and tombstones re-registration windows (#244/#249); the un-claim side-channel creates the revival carrier for in-flight multi-turn children (#246) — detail in the core CLAUDE.md child-ledger edge.
 - `AgentSlot.state_started_at` is `SystemTime` (process-local; v2-daemon-ready type).
 - `ActivityState::Active` ≠ "tool currently executing" — Active→Idle is debounced (`ACTIVE_GRACE_WINDOW`).
 

@@ -19,6 +19,7 @@ use anyhow::Result;
 use pixtuoid_core::source::antigravity::AntigravitySource;
 use pixtuoid_core::source::claude_code::ClaudeCodeSource;
 use pixtuoid_core::source::codex::CodexSource;
+use pixtuoid_core::source::jsonl::ChildEndUnclaims;
 use pixtuoid_core::source::manager::SourceManager;
 use pixtuoid_core::state::MAX_FLOORS;
 use pixtuoid_core::{AgentEvent, Reducer, SceneState, TaggedReceiver, Transport};
@@ -61,6 +62,15 @@ async fn run_async(cfg: RunConfig) -> Result<()> {
     if let Some(p) = codex_sessions_root {
         codex_src.sessions_root = p;
     }
+
+    // #246: ONE shared child-end un-claim handle. ClaudeCodeSource's hook tee
+    // is the producer (every source's SubagentStop rides its shared socket);
+    // both watchers consume — each drains only the ids whose transcripts it
+    // claims (AgentId is source-namespaced), so a Codex child's id waits for
+    // the Codex watcher even though the CC source decoded its hook.
+    let child_end_unclaims = ChildEndUnclaims::new();
+    cc_src.child_end_unclaims = Some(child_end_unclaims.clone());
+    codex_src.child_end_unclaims = Some(child_end_unclaims);
 
     // No ReasonixSource here: Reasonix is HOOK-ONLY (no watchable JSONL — see
     // source/reasonix.rs). Its hook payloads ride the shared hook socket that

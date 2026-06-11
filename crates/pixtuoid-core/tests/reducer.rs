@@ -5367,10 +5367,12 @@ fn tombstoned_parentless_session_start_still_registers() {
 // CHILD_END_LEDGER_TTL, and a PARENTLESS start that DOES occur — a
 // post-un-claim revival (#246's adoption seam) or a tombstoned child's
 // flat-rollout first-sight (#244-w1) — re-links to the remembered parent
-// instead of registering as an orphan. (An IN-FLIGHT multi-turn Codex child
-// has NO SessionStart carrier at turn N+1 on either transport — upstream
-// hook_runtime.rs verified 2026-06-11 — so it stays invisible until a
-// carrier exists; #246 stays open for the hook-End→seen-un-claim design.)
+// instead of registering as an orphan. (For the IN-FLIGHT multi-turn Codex
+// child, upstream provides NO SessionStart carrier at turn N+1 — the
+// child-end un-claim side-channel manufactures one: the hook tee +
+// `ChildEndUnclaims` release the rollout's `seen` claim so the next append
+// first-sights; pinned end-to-end in tests/watcher.rs
+// `in_flight_multi_turn_codex_child_revives_and_relinks_via_unclaim`.)
 
 /// Drive the captured-shape hook payload through the REAL decoder and apply
 /// every decoded event — the same end-to-end path the listener uses, so these
@@ -5483,21 +5485,20 @@ fn late_parented_restart_of_an_ended_child_is_gated_by_the_child_ledger() {
 
 #[test]
 fn parentless_revival_start_of_an_ended_codex_child_relinks_via_ledger() {
-    // #246's re-link mechanism, pinned for the carriers that EXIST: when a
-    // parentless SessionStart on a known-ended child id DOES arrive — a
+    // #246's re-link mechanism, pinned at the reducer seam: when a
+    // parentless SessionStart on a known-ended child id arrives — a
     // post-un-claim revival (negative vouch / instant exit / decoded
-    // terminator un-claims the rollout from `seen`, so its next line
-    // re-emits SessionStart) or a flat first-sight — the ledger must restore
-    // the remembered parent so the revived child re-joins the scope tree
-    // instead of registering as an orphan, on EITHER transport. This does
-    // NOT cover the IN-FLIGHT multi-turn child: codex-rs fires SubagentStop
-    // at EVERY turn end but SubagentStart only at thread STARTUP, and
-    // provides NO other SessionStart carrier at turn N+1 (hook_runtime.rs
-    // verified 2026-06-11: UserPromptSubmit fires only for direct user
-    // input, never a parent `send_input`; non-Subagent events in a child's
-    // context carry the ROOT session_id) — that child stays invisible until
-    // a carrier exists (#246 stays open for the hook-End→seen-un-claim
-    // design).
+    // terminator / the #246 child-end un-claim releases the rollout from
+    // `seen`, so its next line re-emits SessionStart) or a flat first-sight
+    // — the ledger must restore the remembered parent so the revived child
+    // re-joins the scope tree instead of registering as an orphan, on EITHER
+    // transport. The IN-FLIGHT multi-turn child rides exactly this arm:
+    // upstream provides NO SessionStart carrier at turn N+1 (codex-rs fires
+    // SubagentStop at EVERY turn end but SubagentStart only at thread
+    // STARTUP; hook_runtime.rs verified 2026-06-11), so the un-claim
+    // side-channel manufactures the carrier — the watcher+reducer e2e lives
+    // in tests/watcher.rs
+    // `in_flight_multi_turn_codex_child_revives_and_relinks_via_unclaim`.
     use pixtuoid_core::state::reducer::EXIT_GRACE_WINDOW;
     use serde_json::json;
     for transport in [Transport::Jsonl, Transport::Hook] {

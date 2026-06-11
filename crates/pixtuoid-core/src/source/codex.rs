@@ -16,7 +16,7 @@ use serde_json::{Map, Value};
 
 use crate::source::decoder::{cwd_basename_label, make_tool_detail};
 use crate::source::fd_probe;
-use crate::source::jsonl::{JsonlWatcher, ProbeSnapshot};
+use crate::source::jsonl::{ChildEndUnclaims, JsonlWatcher, ProbeSnapshot};
 use crate::source::{AgentEvent, Source, TaggedSender};
 use crate::AgentId;
 
@@ -340,12 +340,21 @@ pub fn codex_home() -> PathBuf {
 /// Source that watches the Codex session transcript directory.
 pub struct CodexSource {
     pub sessions_root: PathBuf,
+    /// The #246 child-end un-claim side-channel — Codex is consumer-only:
+    /// its `SubagentStop` hooks ride the shared socket `ClaudeCodeSource`
+    /// owns (whose tee is the producer), and THIS watcher releases the ended
+    /// child's rollout claim so a multi-turn child's turn-N+1 append
+    /// re-registers (the motivating #246 case). The runtime shares ONE
+    /// handle across both sources; `None` disables it (bare test
+    /// construction).
+    pub child_end_unclaims: Option<ChildEndUnclaims>,
 }
 
 impl CodexSource {
     pub fn default_paths() -> Self {
         Self {
             sessions_root: codex_home().join("sessions"),
+            child_end_unclaims: None,
         }
     }
 }
@@ -367,6 +376,9 @@ impl Source for CodexSource {
         if let Some(root) = codex_probe_root(&self.sessions_root) {
             watcher = watcher
                 .with_liveness_probe(std::sync::Arc::new(move || live_codex_rollout_ids(&root)));
+        }
+        if let Some(unclaims) = &self.child_end_unclaims {
+            watcher = watcher.with_child_end_unclaims(unclaims.clone());
         }
         watcher.run(tx).await
     }

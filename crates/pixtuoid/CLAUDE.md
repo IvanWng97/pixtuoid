@@ -26,7 +26,11 @@ src/
 │                       renderer, compute_boot_capacities terminal-size query, Ctrl-C loop —
 │                       untestable async glue, codecov-ignored, #103; exception: headless_loop
 │                       takes its ctrl_c future as an injected seam, so its signal arms — incl.
-│                       the registration-failure disarm — are unit-tested)
+│                       the registration-failure disarm — are unit-tested. Also creates the ONE
+│                       shared ChildEndUnclaims handle (#246) and hands it to BOTH
+│                       ClaudeCodeSource (hook-tee producer + CC watcher consumer) and
+│                       CodexSource (watcher consumer) — manual wiring like the rest of
+│                       source construction, the registry can't force it)
 ├── init_pack.rs        extracts the embedded skeleton pack to a target dir for `init-pack`
 ├── install/            multi-target (Claude + Codex + Reasonix) hook install via the `Target` registry:
 │                       mod.rs (run_install/run_uninstall, plan_targets, interactive_pick),

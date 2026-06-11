@@ -608,25 +608,23 @@ impl Reducer {
                 }
                 // Ledger adoption (#246 / #244-w1): a PARENTLESS start for an
                 // id whose ledger entry remembers an applied parent is a
-                // same-id new life of a known CHILD. It engages for the
-                // re-registrations that OCCUR: a dead child's flat-rollout
-                // first-sight (parentless by layout, #244-w1) and a
+                // same-id new life of a known CHILD. It engages for every
+                // parentless re-registration: a dead child's flat-rollout
+                // first-sight (parentless by layout, #244-w1), a
                 // post-un-claim revival (a negative vouch / instant exit /
                 // decoded terminator un-claimed the rollout from `seen`, so
-                // its next line re-emits a parentless SessionStart). NOT
-                // covered: the IN-FLIGHT multi-turn Codex child (parent
-                // `send_input`; rollout still seen-claimed — the hook End
-                // doesn't un-claim) has NO SessionStart carrier on either
-                // transport at turn N+1, so it stays invisible until a
-                // carrier exists — upstream provides none (hook_runtime.rs
-                // verified 2026-06-11: UserPromptSubmit fires only for direct
-                // user input, never a parent send_input; non-Subagent events
-                // in a child's context carry the ROOT session_id;
-                // SubagentStart fires only at thread STARTUP); #246 stays
-                // open for the hook-End→seen-un-claim design. Adopt the
-                // remembered parent so the start that does arrive re-joins
-                // the scope tree (cascade/liveness/readiness) instead of
-                // registering as an orphan. Revivals are deliberately NOT
+                // its next line re-emits a parentless SessionStart), and —
+                // the #246 case this adoption was built for — the IN-FLIGHT
+                // multi-turn child: upstream provides no SessionStart carrier
+                // at turn N+1 (hook_runtime.rs verified 2026-06-11), so the
+                // child-end un-claim side-channel (`source/jsonl.rs`
+                // ChildEndUnclaims: the CC hook tee observes the SubagentStop
+                // and the owning watcher releases the rollout's `seen` claim)
+                // manufactures the JSONL first-sight carrier this arm
+                // re-links. Adopt the remembered parent so the start that
+                // does arrive re-joins the scope tree (cascade/liveness/
+                // readiness) instead of registering as an orphan. Revivals
+                // are deliberately NOT
                 // blocked the way parented re-registrations are: Codex
                 // resurrect-on-prompt is a legitimate same-id new life, and
                 // for a genuinely dead child a parent-linked slot rides the
