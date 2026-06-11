@@ -173,6 +173,28 @@ pub fn save_version(path: &Path, version: &str) -> Result<()> {
     })
 }
 
+/// Resolve the config `max-desks` into the runtime desk cap. `0` is treated
+/// as unset with a collected warning (#87 channel): the cap clamps every
+/// floor via `min`, and the per-frame capacity re-seed only grows atomics
+/// when `capacity > 0` — so an accepted 0 would permanently zero every floor
+/// and silently drop every SessionStart (a permanently empty office with no
+/// in-TUI signal). The hidden `--max-desks` CLI flag rejects 0 at the clap
+/// seam (`range(1..)`); this is the config file's twin of that guard.
+pub fn resolve_max_desks(config: &AppConfig, warnings: &mut Vec<String>) -> Option<usize> {
+    match config.max_desks {
+        Some(0) => {
+            tracing::warn!("max-desks = 0 in config would hide every agent — ignoring");
+            warnings.push(
+                "max-desks = 0 in config would hide every agent — ignoring it \
+                 (the --max-desks flag or auto-computed capacity applies)"
+                    .into(),
+            );
+            None
+        }
+        other => other,
+    }
+}
+
 /// Resolve CLI + config into the one `&'static Theme` the runtime uses
 /// (CLI > config > `NORMAL`). The asymmetry is deliberate: a `--theme` typo is
 /// explicit user intent and hard-errors (listing valid names), while a config
@@ -556,8 +578,10 @@ mod tests {
         std::fs::write(&path, "max-desks = 8\n").unwrap();
         let cfg = load(&path, &mut Vec::new());
         let cli_max_desks: Option<usize> = None;
-        let desk_cap = cli_max_desks.or(cfg.max_desks);
+        let mut w = Vec::new();
+        let desk_cap = cli_max_desks.or(resolve_max_desks(&cfg, &mut w));
         assert_eq!(desk_cap, Some(8));
+        assert!(w.is_empty(), "a valid cap collects no warning: {w:?}");
     }
 
     #[test]
@@ -567,7 +591,7 @@ mod tests {
         std::fs::write(&path, "max-desks = 8\n").unwrap();
         let cfg = load(&path, &mut Vec::new());
         let cli_max_desks: Option<usize> = Some(4);
-        let desk_cap = cli_max_desks.or(cfg.max_desks);
+        let desk_cap = cli_max_desks.or(resolve_max_desks(&cfg, &mut Vec::new()));
         assert_eq!(desk_cap, Some(4));
     }
 
@@ -575,7 +599,7 @@ mod tests {
     fn max_desks_neither_set() {
         let cfg = AppConfig::default();
         let cli_max_desks: Option<usize> = None;
-        let desk_cap = cli_max_desks.or(cfg.max_desks);
+        let desk_cap = cli_max_desks.or(resolve_max_desks(&cfg, &mut Vec::new()));
         assert_eq!(desk_cap, None);
     }
 
@@ -583,8 +607,28 @@ mod tests {
     fn max_desks_no_config_file() {
         let cfg = load(Path::new("/nonexistent/path/config.toml"), &mut Vec::new());
         let cli_max_desks: Option<usize> = None;
-        let desk_cap = cli_max_desks.or(cfg.max_desks);
+        let desk_cap = cli_max_desks.or(resolve_max_desks(&cfg, &mut Vec::new()));
         assert_eq!(desk_cap, None);
+    }
+
+    #[test]
+    fn max_desks_zero_in_config_is_ignored_with_warning() {
+        // 0 would permanently zero every floor (the per-frame re-seed guards
+        // `capacity > 0`, so the boot atomics never grow) — every agent
+        // silently dropped. The config seam must degrade to auto capacity
+        // and say so on the #87 warning channel.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "max-desks = 0\n").unwrap();
+        let cfg = load(&path, &mut Vec::new());
+        assert_eq!(cfg.max_desks, Some(0), "the raw key still deserializes");
+        let mut w = Vec::new();
+        assert_eq!(resolve_max_desks(&cfg, &mut w), None, "0 resolves to unset");
+        assert_eq!(w.len(), 1);
+        assert!(
+            w[0].contains("max-desks = 0"),
+            "the warning names the bad key: {w:?}"
+        );
     }
 
     #[test]

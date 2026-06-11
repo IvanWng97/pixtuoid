@@ -9,6 +9,25 @@ use paths::default_socket_path;
 
 mod transport;
 
+/// Headroom reserved below the daemon's 1MiB pipe quota for what the shim
+/// ADDS to stdin: the `_shim_ts_ms` stamp, the optional `_pixtuoid_source`
+/// stamp, and the trailing newline (≲100 B worst case — pinned by
+/// `stamp_headroom_covers_worst_case_stamps`). Without it, a payload within
+/// ~65 B of 1MiB re-serializes to a wire line that exceeds the quota, and the
+/// sync write can stall behind a momentarily busy daemon task until the
+/// watchdog fires (event dropped).
+const STAMP_HEADROOM: u64 = 256;
+
+/// Stdin cap. `STDIN_CAP + STAMP_HEADROOM` equals the daemon's Windows pipe
+/// in-buffer quota (`IN_BUFFER_SIZE = 1 << 20` in pixtuoid-core's
+/// source/hook/windows.rs), so a stamped payload fits the pipe and the shim's
+/// sync write can't stall on quota. The headroom covers what the SHIM adds;
+/// pathological number canonicalization can still expand the body itself
+/// (e.g. `1e9` re-serializes to `1000000000.0`) and an absurdly long
+/// `--source` value can exceed the stamp budget — both degrade to the
+/// pre-existing stall→watchdog→drop mode, never a block of CC.
+const STDIN_CAP: u64 = (1 << 20) - STAMP_HEADROOM;
+
 /// Explicit `u128 → u64` narrowing (`try_from`, not a truncating `as` cast):
 /// ms-since-epoch fits u64 for ~580M years, so the `unwrap_or(u64::MAX)` arm
 /// is unreachable in practice — it exists to make the narrowing visible and
@@ -24,7 +43,7 @@ fn main() -> Result<()> {
 
     let mut buf = String::new();
     if std::io::stdin()
-        .take(1 << 20)
+        .take(STDIN_CAP)
         .read_to_string(&mut buf)
         .is_err()
     {
@@ -41,7 +60,16 @@ fn main() -> Result<()> {
         // form — cmd.exe /C can't express a POSIX `VAR=value cmd` env-prefix) wins,
         // then the `PIXTUOID_SOURCE` env var (the Unix install form). Either way the
         // daemon only ever sees the resulting `_pixtuoid_source` stamp.
-        let args: Vec<String> = std::env::args().collect();
+        //
+        // `args_os` + lossy, NOT `args()`: `std::env::args()` PANICS on any
+        // non-Unicode argument (legal Unix argv), breaching invariant #5's
+        // silent exit-0. Lossy rather than filter_map: dropping a non-UTF-8
+        // arg would shift `--source <value>` pairing so the NEXT arg gets
+        // read as the value; lossy preserves arity, and a U+FFFD-mangled
+        // value simply fails the daemon's registry lookup downstream.
+        let args: Vec<String> = std::env::args_os()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
         let source = source_from_argv(&args).or_else(|| std::env::var("PIXTUOID_SOURCE").ok());
         enrich_payload(map, source, now_ms());
     }
@@ -81,10 +109,14 @@ fn source_from_argv(args: &[String]) -> Option<String> {
 /// payload already uses `source` for the start *reason* (startup/resume/clear/
 /// compact). Reading that as the CLI source namespaced the agent under
 /// "startup", splitting it from the claude-code-keyed tool/JSONL/SessionEnd
-/// events — an un-reapable ghost. The private key is shim-owned, so a plain
-/// insert is safe (nothing else writes it). Absent any source (bare `pixtuoid-hook`,
-/// i.e. CC), the decoder defaults to claude-code.
+/// events — an un-reapable ghost. The private key is shim-OWNED — the daemon
+/// trusts it exclusively for CLI attribution — so any inbound
+/// `_pixtuoid_source` (spoofed or replayed) is stripped unconditionally
+/// before stamping; the daemon never sees a value the shim didn't write.
+/// Absent any source (bare `pixtuoid-hook`, i.e. CC), no key is stamped and
+/// the decoder defaults to claude-code.
 fn enrich_payload(map: &mut serde_json::Map<String, Value>, source: Option<String>, ts_ms: u64) {
+    map.remove("_pixtuoid_source");
     map.insert("_shim_ts_ms".into(), Value::from(ts_ms));
     if let Some(src) = source {
         if !src.is_empty() {
@@ -97,6 +129,31 @@ fn enrich_payload(map: &mut serde_json::Map<String, Value>, source: Option<Strin
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn stdin_cap_plus_headroom_equals_the_pipe_quota() {
+        // The daemon's Windows pipe in-buffer (hook/windows.rs IN_BUFFER_SIZE)
+        // is 1 MiB; the wire line is capped stdin + stamps + newline. Pin the
+        // arithmetic the "one payload always fits the quota" claim rests on.
+        assert_eq!(STDIN_CAP + STAMP_HEADROOM, 1 << 20);
+    }
+
+    #[test]
+    fn stamp_headroom_covers_worst_case_stamps() {
+        let mut p = json!({});
+        let map = p.as_object_mut().unwrap();
+        // Worst realistic stamps: a 20-digit u64::MAX timestamp + a source
+        // name far longer than any registered CLI name (claude-code / codex /
+        // reasonix / antigravity are all ≤ 11 chars; allow 64 for custom ones).
+        enrich_payload(map, Some("x".repeat(64)), u64::MAX);
+        let stamped = serde_json::to_vec(&p).unwrap();
+        // minus the bare `{}` baseline, plus the trailing '\n' main appends.
+        let overhead = (stamped.len() - 2 + 1) as u64;
+        assert!(
+            overhead <= STAMP_HEADROOM,
+            "stamps ({overhead}B) must fit within STAMP_HEADROOM ({STAMP_HEADROOM}B)"
+        );
+    }
 
     #[test]
     fn now_ms_keeps_real_magnitude() {
@@ -125,10 +182,34 @@ mod tests {
 
     #[test]
     fn empty_source_env_is_ignored() {
-        let mut p = json!({});
+        // Seeded with a spoofed inbound key: the empty-source path must strip
+        // it too, not just decline to insert.
+        let mut p = json!({ "_pixtuoid_source": "codex" });
         let map = p.as_object_mut().unwrap();
         enrich_payload(map, Some(String::new()), 1);
         assert!(map.get("_pixtuoid_source").is_none());
+    }
+
+    #[test]
+    fn inbound_spoofed_private_key_is_stripped_when_no_source_resolves() {
+        // `_pixtuoid_source` is shim-OWNED: the daemon trusts it exclusively
+        // for CLI attribution (AgentId namespacing), so a spoofed/replayed
+        // inbound key must never pass through on the bare-CC (no source) path.
+        let mut p = json!({ "hook_event_name": "Stop", "_pixtuoid_source": "codex" });
+        let map = p.as_object_mut().unwrap();
+        enrich_payload(map, None, 1);
+        assert!(
+            map.get("_pixtuoid_source").is_none(),
+            "inbound spoofed key must be stripped, not passed through"
+        );
+    }
+
+    #[test]
+    fn inbound_spoofed_private_key_is_overwritten_when_source_resolves() {
+        let mut p = json!({ "_pixtuoid_source": "codex" });
+        let map = p.as_object_mut().unwrap();
+        enrich_payload(map, Some("reasonix".into()), 1);
+        assert_eq!(map["_pixtuoid_source"], json!("reasonix"));
     }
 
     fn argv(parts: &[&str]) -> Vec<String> {

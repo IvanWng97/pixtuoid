@@ -23,11 +23,13 @@ fn sock_path(tag: &str) -> std::path::PathBuf {
 }
 
 /// Spawn the shim with the given socket path, optional source env, and extra
-/// argv, pipe `stdin` to it, and return its exit status (after closing stdin → EOF).
-fn run_shim_inner(
+/// argv, pipe `stdin` to it, and return its exit status (after closing stdin →
+/// EOF). Generic over the arg type so the non-UTF-8-argv test can pass raw
+/// `OsStr` bytes.
+fn run_shim_inner<S: AsRef<std::ffi::OsStr>>(
     socket: &std::path::Path,
     source: Option<&str>,
-    args: &[&str],
+    args: &[S],
     stdin: &[u8],
 ) -> std::process::ExitStatus {
     let mut cmd = Command::new(BIN);
@@ -61,7 +63,7 @@ fn run_shim(
     source: Option<&str>,
     stdin: &[u8],
 ) -> std::process::ExitStatus {
-    run_shim_inner(socket, source, &[], stdin)
+    run_shim_inner::<&str>(socket, source, &[], stdin)
 }
 
 /// Spawn the shim with extra argv and NO `PIXTUOID_SOURCE` env, so a `--source`
@@ -218,6 +220,31 @@ fn stalled_listener_shim_exits_zero_within_watchdog_bound() {
     drop(listener);
     drop(fillers);
     let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn non_utf8_argv_exits_zero() {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+    // Non-UTF-8 bytes are legal in Unix argv (e.g. a binary installed under a
+    // non-UTF-8 path, or shell-expanded bytes in a settings.json hook
+    // command). `std::env::args()` PANICS while collecting such an argument —
+    // exit 101 + stderr, breaching invariant #5's silent exit-0 contract. The
+    // shim must collect argv panic-free and degrade gracefully instead.
+    let path = sock_path("nonutf8");
+    let status = run_shim_inner(
+        &path,
+        None,
+        &[
+            OsStr::from_bytes(b"--source"),
+            OsStr::from_bytes(b"\xff\xfe not utf8"),
+        ],
+        br#"{"hook_event_name":"Stop"}"#,
+    );
+    assert!(
+        status.success(),
+        "non-UTF-8 argv must not panic the shim; got {status:?}"
+    );
 }
 
 #[test]

@@ -85,7 +85,9 @@ pub struct WalkProfile {
     pub path_len_octile: u32,
     /// Effective cruise speed after `speed_mult` applied.
     pub v_cruise: f32,
-    /// Acceleration constant (same as `WALK_ACCEL`; stored for walk_progress).
+    /// Acceleration constant for this leg's intent (`WALK_ACCEL`, or
+    /// `WALK_ACCEL_SNAPBACK` for SnapBack); stored so `walk_progress`
+    /// replays the same kinematics.
     pub accel: f32,
 }
 

@@ -16,9 +16,12 @@ use crate::source::TaggedSender;
 
 use super::{handle_conn, CONN_TIMEOUT, MAX_CONCURRENT_CONNS};
 
-/// In-buffer must cover the shim's 1MiB stdin cap (pixtuoid-hook main.rs
-/// `take(1 << 20)`) so one payload always fits the pipe quota and the shim's
-/// sync write can't stall behind a momentarily busy daemon task.
+/// In-buffer must cover the shim's stamped wire line: stdin is capped at
+/// `STDIN_CAP = 1MiB − 256B` and the stamps + newline fit the 256B
+/// `STAMP_HEADROOM` (both in pixtuoid-hook main.rs, where their sum is
+/// test-pinned to this 1MiB quota) — so one payload always fits the pipe
+/// quota and the shim's sync write can't stall behind a momentarily busy
+/// daemon task.
 const IN_BUFFER_SIZE: u32 = 1 << 20;
 
 /// Owner-only security descriptor via SDDL `D:P(A;;GA;;;OW)` — protected
