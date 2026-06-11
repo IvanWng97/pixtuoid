@@ -758,9 +758,22 @@ pub(super) fn compute_pod_decor(
     // PhoneBooth at common buffer sizes — slots were stuck on
     // PlantTall / Whiteboard / StandingDesk.
     let mut slot_idx: usize = (floor_seed % 7) as usize;
+    // Mirror of push_desk's x clamp: `pod_cols` floors at 1, so on a 34-41px
+    // band the forced pod's horizontal-aisle slot center (pod_origin_x +
+    // pod_w/2) lands past the band's right edge — even fully off-buffer — and
+    // PhoneBooth/StandingDesk slots there get promoted to wander waypoints,
+    // sending idle agents to invisible furniture. Skip a slot whose visual
+    // would overflow the band; the floor degrades to fewer decor pieces, the
+    // same graceful degradation as desks. The kind cycle still advances so
+    // surviving slots keep the kinds they'd have on a wider floor.
+    let band_right = cubicle_band.x + cubicle_band.width;
     let mut push_slot = |pod_decor: &mut Vec<PodDecorItem>, x: u16, y: u16| {
         let kind = PodDecor::ALL[slot_idx % PodDecor::ALL.len()];
         slot_idx += 1;
+        let vis_w = furniture_def(kind.furniture()).visual.w;
+        if x.saturating_sub(vis_w / 2) + vis_w > band_right {
+            return;
+        }
         pod_decor.push(PodDecorItem {
             kind,
             pos: Point { x, y },

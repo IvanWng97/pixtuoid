@@ -19,8 +19,10 @@ pixtuoid is a Cargo workspace of **three crates** wired as a strict
 - **`pixtuoid`** — the binary: `clap` CLI, `tokio` runtime wiring, and the TUI
   renderer (`ratatui` + `crossterm`).
 - **`pixtuoid-hook`** — a tiny shim Claude Code invokes per hook event. It depends
-  on neither other crate; it reads stdin JSON, forwards it over a Unix socket, and
-  **always exits 0** so it can never block your agent.
+  on neither other crate; it reads stdin JSON, forwards it over a local IPC
+  endpoint — a Unix socket on macOS/Linux, a named pipe on Windows (selected in
+  `pixtuoid-hook/src/transport.rs`) — and **always exits 0** so it can never
+  block your agent.
 
 Dependency direction is one-way: `pixtuoid → pixtuoid-core`. The `Renderer` trait
 is the inversion point that keeps the core terminal-free (so the same pixel pass
@@ -39,7 +41,7 @@ flowchart TB
   end
 
   subgraph core["pixtuoid-core (headless)"]
-    L["HookSocketListener<br/>(Unix socket)"]
+    L["HookSocketListener<br/>(Unix socket / named pipe)"]
     D["decode_hook_payload"]
     J["JsonlWatcher · walk_jsonl"]
     R["Reducer::apply<br/>(Transport-tagged)"]
@@ -69,8 +71,11 @@ flowchart TB
 
 1. **Ingest.** Claude Code fires a hook → the **`pixtuoid-hook`** shim
    (`enrich_payload` stamps `_pixtuoid_source`, a 200 ms write timeout, exit 0) →
-   `HookSocketListener` on a Unix socket → **`decode_hook_payload`** turns the JSON
-   into an `AgentEvent`. In parallel, **`JsonlWatcher` → `walk_jsonl`** tails each
+   `HookSocketListener` on a Unix socket (a named pipe on Windows) →
+   **`decode_hook_payload`** turns the JSON into one or more `AgentEvent`s —
+   tool/permission payloads are preceded by an `Identity` event the reducer uses
+   to register live-but-invisible sessions with real identity (mid-attach).
+   In parallel, **`JsonlWatcher` → `walk_jsonl`** tails each
    agent's transcript file (with a first-sight gate so historical/ended sessions
    don't resurrect) and decodes lines via a per-source decoder (`decode_cc_line` /
    `decode_codex_line`).

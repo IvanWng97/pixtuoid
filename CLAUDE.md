@@ -213,7 +213,7 @@ Don't be surprised by these. **Full explanation (the WHY) lives in the nested `C
 - `draw_scene` is called through `TuiRenderer` (owns cross-frame state, returns the cached `Layout`).
 - `recolor_frame` substitutes by RGB equality (each palette key must map to a unique RGB).
 - Terminal cell aspect drives sprite design (~16×16 px ceiling; bundled character pack maxes at 8×12).
-- Snap-back and exit walks are time-compressed to fit their GC windows; entry/wander are not.
+- EXIT walks are time-compressed to fit the GC window (`EXIT_GRACE_WINDOW`); snap-back runs pure physics with a brisk SnapBack profile (`SNAP_BACK_MS` is only the ARM window, not a render cap); entry/wander are uncompressed.
 - A walk leg's A\* polyline shape is frozen once per leg, not re-routed per frame (prevents the "flash").
 
 ## Things NOT to do

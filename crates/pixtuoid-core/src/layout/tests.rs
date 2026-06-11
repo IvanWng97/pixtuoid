@@ -289,6 +289,54 @@ fn narrow_width_desks_stay_inside_the_band_with_anchors_on_buffer() {
 }
 
 #[test]
+fn narrow_width_pod_decor_stays_inside_the_band_and_off_band_slots_are_skipped() {
+    // 34-41px-wide buffers force one pod column (`pod_cols` floors at 1), and
+    // without the push_slot clamp the forced pod's horizontal-aisle decor slot
+    // (center = pod_origin_x + pod_w/2 ≈ band.x + 29) landed past the band's
+    // right edge — even fully off-buffer (x=41 at buf_w=40). Worse than the
+    // clipped sprite: PhoneBooth/StandingDesk slots are promoted to wander
+    // waypoints unconditionally, so idle agents walked to and "used" invisible
+    // furniture at the buffer edge. Mirror of push_desk's x clamp: off-band
+    // slots are skipped and the floor degrades to fewer decor pieces.
+    for &w in &[34u16, 36, 38, 40, 41] {
+        for &h in &[100u16, 120, 160] {
+            for seed in 0..10u64 {
+                let Some(l) = SceneLayout::compute_with_seed(w, h, MAX_VISIBLE_DESKS, seed) else {
+                    continue;
+                };
+                let band_right = l.cubicle_band.x + l.cubicle_band.width;
+                for item in &l.pod_decor {
+                    let vis = furniture_def(item.kind.furniture()).visual;
+                    let east = item.pos.x.saturating_sub(vis.w / 2) + vis.w;
+                    assert!(
+                        east <= band_right,
+                        "{w}x{h} seed {seed}: {:?} decor at x={} (east edge {east}) \
+                         overflows the band's right edge {band_right}",
+                        item.kind,
+                        item.pos.x
+                    );
+                }
+                for wp in &l.waypoints {
+                    if matches!(
+                        wp.kind,
+                        WaypointKind::PhoneBooth | WaypointKind::StandingDesk
+                    ) {
+                        assert!(
+                            wp.pos.x < band_right,
+                            "{w}x{h} seed {seed}: {:?} waypoint at x={} promoted past \
+                             the band edge {band_right} — agents would wander to \
+                             invisible furniture",
+                            wp.kind,
+                            wp.pos.x
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn compute_places_all_waypoint_kinds() {
     let l = SceneLayout::compute(120, 96, 1).expect("fits");
     // Couch + Pantry are unconditional; PhoneBooth / StandingDesk
