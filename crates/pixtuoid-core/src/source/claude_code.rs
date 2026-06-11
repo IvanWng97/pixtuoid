@@ -144,10 +144,13 @@ pub fn claude_config_dir() -> Option<PathBuf> {
 
 /// CC's first-party live-process registry: `<claude_home>/sessions/<pid>.json`,
 /// one tiny JSON file per running CC process (`{pid, sessionId, cwd, status,
-/// startedAt, procStart, ...}` — undocumented, drift-watched by
-/// check_upstream_drift.py). Returns the session UUIDs (+ owning pid each) of
-/// entries whose pid is still ALIVE — a registry file can outlive a crashed
-/// CC, so each entry is verified with kill(pid, 0).
+/// startedAt, procStart, ...}` — undocumented; check_upstream_drift.py only
+/// watches for the registry APPEARING in the docs, so shape drift (#247) is
+/// detected HERE: an entry that parses as JSON but lacks a consumed key warns
+/// once per process run and yields no vouch — graceful mtime-only degradation
+/// with a breadcrumb instead of silence). Returns the session UUIDs (+ owning
+/// pid each) of entries whose pid is still ALIVE — a registry file can outlive
+/// a crashed CC, so each entry is verified with kill(pid, 0).
 ///
 /// Failure is explicit (#223): an UNREADABLE-or-MISSING registry dir is
 /// `None` — on a machine where CC runs the dir's absence is ambiguous (older
@@ -193,17 +196,29 @@ pub fn live_cc_session_ids(sessions_dir: &Path) -> Option<ProbeSnapshot> {
             let Ok(bytes) = read_registry_entry_bounded(&path) else {
                 continue;
             };
-            let Some(reg) = parse_registry_entry(&bytes) else {
-                // Undocumented format — warn ONCE per process, never per scan
-                // (the probe runs every scan pass).
-                static WARN_ONCE: std::sync::Once = std::sync::Once::new();
-                WARN_ONCE.call_once(|| {
-                    tracing::warn!(
-                        "unparseable CC session-registry file (format drift?): {}",
-                        path.display()
-                    );
-                });
-                continue;
+            let reg = match parse_registry_entry(&bytes) {
+                RegistryParse::Entry(reg) => reg,
+                // Not JSON / corrupt value — likely a half-written file
+                // mid-write or junk, transient: skip silently, not drift.
+                RegistryParse::Skip => continue,
+                RegistryParse::ShapeDrift(key) => {
+                    // The registry is the one undocumented upstream surface
+                    // with no fetchable text to drift-diff (#247): a silent
+                    // key rename would degrade the probe to mtime-only gating
+                    // with zero signal. Warn ONCE per process run, never per
+                    // 250ms scan pass (FailureLatch spirit; no recovery
+                    // logging — drift doesn't un-happen mid-run).
+                    static SHAPE_DRIFT_WARNED: std::sync::Once = std::sync::Once::new();
+                    SHAPE_DRIFT_WARNED.call_once(|| {
+                        tracing::warn!(
+                            "CC sessions-registry entry {} parses as JSON but `{key}` is \
+                             missing or mistyped — the registry shape changed upstream; \
+                             mid-attach liveness degraded to mtime gating",
+                            path.display()
+                        );
+                    });
+                    continue;
+                }
             };
             if !pid_alive(reg.pid) {
                 continue;
@@ -240,8 +255,8 @@ pub fn live_cc_session_ids(sessions_dir: &Path) -> Option<ProbeSnapshot> {
 
 /// Read one registry entry, bounded to 64 KiB. Real entries are <1 KiB; the
 /// bound keeps junk dropped into the registry dir from ballooning a read that
-/// runs on every scan pass (truncated bytes just fail the JSON parse and hit
-/// the warn-once skip).
+/// runs on every scan pass (truncated bytes just fail the JSON parse and are
+/// skipped silently).
 #[cfg(unix)]
 fn read_registry_entry_bounded(path: &Path) -> std::io::Result<Vec<u8>> {
     use std::io::Read;
@@ -255,6 +270,7 @@ fn read_registry_entry_bounded(path: &Path) -> std::io::Result<Vec<u8>> {
 
 /// One parsed registry entry — the fields the liveness join needs.
 #[cfg(unix)]
+#[derive(Debug)]
 struct RegistryEntry {
     pid: i32,
     session_id: String,
@@ -264,22 +280,48 @@ struct RegistryEntry {
     started_at_ms: Option<u64>,
 }
 
+/// One registry-file parse outcome — the seam the #247 drift warn keys on.
+/// `ShapeDrift` carries WHICH consumed key vanished/changed type, so the
+/// warn-once can name it.
+#[cfg(unix)]
+#[derive(Debug)]
+enum RegistryParse {
+    Entry(RegistryEntry),
+    /// Skip silently: not JSON at all (a half-written file mid-write —
+    /// transient) or a value-level corruption (pid <= 0, empty sessionId) —
+    /// the keys are shaped right, so it's not format drift.
+    Skip,
+    /// Parses as JSON but a consumed key is missing or mistyped — the
+    /// undocumented upstream shape changed (#247); the consumer warns once.
+    ShapeDrift(&'static str),
+}
+
 /// Extract `{pid, sessionId, startedAt}` from one registry file.
 /// `serde_json::Value` on purpose — the format is undocumented, so we read
 /// only the fields the join needs and tolerate everything else changing.
-/// `startedAt` is optional (missing/malformed → `None`, never a parse fail):
-/// it only powers the additive PID-reuse identity check.
+/// `startedAt` is optional (missing/malformed → `None`, never a parse fail
+/// nor drift): it only powers the additive PID-reuse identity check.
 #[cfg(unix)]
-fn parse_registry_entry(bytes: &[u8]) -> Option<RegistryEntry> {
-    let v: serde_json::Value = serde_json::from_slice(bytes).ok()?;
+fn parse_registry_entry(bytes: &[u8]) -> RegistryParse {
+    let Ok(v) = serde_json::from_slice::<serde_json::Value>(bytes) else {
+        return RegistryParse::Skip;
+    };
+    let Some(pid) = v.get("pid").and_then(|p| p.as_i64()) else {
+        return RegistryParse::ShapeDrift("pid");
+    };
     // pid <= 0 is never a single process (kill(0)/kill(-n) target process
     // GROUPS — a corrupt entry must not probe our own group as "alive").
-    let pid = i32::try_from(v.get("pid")?.as_i64()?)
-        .ok()
-        .filter(|p| *p > 0)?;
-    let session_id = v.get("sessionId")?.as_str().filter(|s| !s.is_empty())?;
+    let Some(pid) = i32::try_from(pid).ok().filter(|p| *p > 0) else {
+        return RegistryParse::Skip;
+    };
+    let Some(session_id) = v.get("sessionId").and_then(|s| s.as_str()) else {
+        return RegistryParse::ShapeDrift("sessionId");
+    };
+    if session_id.is_empty() {
+        return RegistryParse::Skip;
+    }
     let started_at_ms = v.get("startedAt").and_then(|s| s.as_u64());
-    Some(RegistryEntry {
+    RegistryParse::Entry(RegistryEntry {
         pid,
         session_id: session_id.to_string(),
         started_at_ms,
@@ -1083,7 +1125,7 @@ mod liveness_tests {
         // Real registry entries are <1 KiB; a 256 KiB blob is junk (or drift
         // we couldn't parse anyway). The bounded read keeps the per-scan
         // probe cost flat — the truncated bytes just fail the JSON parse and
-        // land in the warn-once skip.
+        // land in the silent skip.
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("huge.json"), vec![b'x'; 256 * 1024]).unwrap();
         write_entry(
@@ -1165,26 +1207,147 @@ mod liveness_tests {
     // --- PID-reuse identity check (#220) -----------------------------------
 
     #[cfg(unix)]
+    fn expect_entry(bytes: &[u8]) -> RegistryEntry {
+        match parse_registry_entry(bytes) {
+            RegistryParse::Entry(e) => e,
+            other => panic!("expected a parsed entry, got {other:?}"),
+        }
+    }
+
+    #[cfg(unix)]
     #[test]
     fn parse_registry_entry_extracts_started_at_and_tolerates_absence() {
         let with = serde_json::json!({
             "pid": 64924, "sessionId": "s", "startedAt": 1_781_109_422_174_u64
         })
         .to_string();
-        let entry = parse_registry_entry(with.as_bytes()).unwrap();
+        let entry = expect_entry(with.as_bytes());
         assert_eq!(entry.started_at_ms, Some(1_781_109_422_174));
 
         // Older CC without the field — still a valid entry (pid-alive-only).
         let without = serde_json::json!({ "pid": 64924, "sessionId": "s" }).to_string();
-        let entry = parse_registry_entry(without.as_bytes()).unwrap();
+        let entry = expect_entry(without.as_bytes());
         assert_eq!(entry.started_at_ms, None);
 
         // Malformed startedAt (string / negative) degrades to None, never a
         // parse failure — the identity check is additive.
         let junk =
             serde_json::json!({ "pid": 64924, "sessionId": "s", "startedAt": "soon" }).to_string();
-        let entry = parse_registry_entry(junk.as_bytes()).unwrap();
+        let entry = expect_entry(junk.as_bytes());
         assert_eq!(entry.started_at_ms, None);
+    }
+
+    // --- registry shape pin (#247) ------------------------------------------
+
+    /// Pin of the CURRENT live `<claude_home>/sessions/<pid>.json` shape
+    /// (synthesized values, same keys as a real 2026-06 entry). The format is
+    /// undocumented with no upstream text to diff, so this fixture is the
+    /// shape's regression detector: if a consumed key is renamed upstream,
+    /// the drift tests below are what a maintainer updates against reality.
+    #[cfg(unix)]
+    fn live_shape_entry(pid: i64, session_id: &str) -> String {
+        serde_json::json!({
+            "pid": pid,
+            "sessionId": session_id,
+            "startedAt": 1_781_109_422_174_u64,
+            "procStart": 1_781_109_420_000_u64,
+            "cwd": "/Users/someone/project",
+            "version": "2.1.0",
+            "peerProtocol": 1,
+            "kind": "repl",
+            "entrypoint": "cli",
+            "status": "idle",
+            "updatedAt": 1_781_109_500_000_u64,
+            "name": "project",
+            "bridgeSessionId": "00000000-0000-7000-8000-00000000bb1d"
+        })
+        .to_string()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn registry_shape_pin_parses_the_current_live_format() {
+        let entry = expect_entry(live_shape_entry(64924, "pinned-session").as_bytes());
+        assert_eq!(entry.pid, 64924);
+        assert_eq!(entry.session_id, "pinned-session");
+        assert_eq!(entry.started_at_ms, Some(1_781_109_422_174));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn renamed_or_mistyped_required_key_is_shape_drift() {
+        // The warn predicate (#247), tested directly — the warn site itself is
+        // gated by a process-global Once, so the classification is the seam.
+        let renamed_sid = serde_json::json!({ "pid": 64924, "session_id": "s" }).to_string();
+        assert!(matches!(
+            parse_registry_entry(renamed_sid.as_bytes()),
+            RegistryParse::ShapeDrift("sessionId")
+        ));
+        let nonstring_sid = serde_json::json!({ "pid": 64924, "sessionId": 7 }).to_string();
+        assert!(matches!(
+            parse_registry_entry(nonstring_sid.as_bytes()),
+            RegistryParse::ShapeDrift("sessionId")
+        ));
+        let renamed_pid = serde_json::json!({ "processId": 64924, "sessionId": "s" }).to_string();
+        assert!(matches!(
+            parse_registry_entry(renamed_pid.as_bytes()),
+            RegistryParse::ShapeDrift("pid")
+        ));
+        let string_pid = serde_json::json!({ "pid": "64924", "sessionId": "s" }).to_string();
+        assert!(matches!(
+            parse_registry_entry(string_pid.as_bytes()),
+            RegistryParse::ShapeDrift("pid")
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn non_json_and_corrupt_values_are_silent_skips_not_drift() {
+        // Half-written mid-write file — transient, never a drift warn.
+        assert!(matches!(
+            parse_registry_entry(b"{\"pid\": 64924, \"sessionI"),
+            RegistryParse::Skip
+        ));
+        // Value-level corruption (the keys exist with the right types): pid
+        // <= 0 targets a process GROUP, an empty sessionId vouches nothing.
+        let pid_zero = serde_json::json!({ "pid": 0, "sessionId": "s" }).to_string();
+        assert!(matches!(
+            parse_registry_entry(pid_zero.as_bytes()),
+            RegistryParse::Skip
+        ));
+        let empty_sid = serde_json::json!({ "pid": 64924, "sessionId": "" }).to_string();
+        assert!(matches!(
+            parse_registry_entry(empty_sid.as_bytes()),
+            RegistryParse::Skip
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn shape_drifted_entry_yields_no_vouch() {
+        // End-to-end through the probe: a key-renamed entry for a LIVE pid
+        // must not vouch (the degraded-to-mtime path #247 warns about).
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("drifted.json"),
+            serde_json::json!({
+                "pid": std::process::id(), "session_id": "drifted-session"
+            })
+            .to_string(),
+        )
+        .unwrap();
+        write_entry(
+            dir.path(),
+            "valid.json",
+            std::process::id() as i64,
+            "valid-session",
+        );
+        let live = live_cc_session_ids(dir.path()).expect("readable dir is a healthy probe");
+        assert_eq!(
+            live.ids,
+            HashSet::from(["valid-session".to_string()]),
+            "a shape-drifted entry must not vouch; the well-formed sibling survives"
+        );
     }
 
     #[cfg(target_os = "macos")]
