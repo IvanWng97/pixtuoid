@@ -333,32 +333,23 @@ fn is_drive_relative(p: &std::path::Path) -> bool {
 
 /// Resolve the hook binary for a target. An explicit path always wins —
 /// `--hook-path` first, then the `PIXTUOID_HOOK` env override (empty =
-/// unset); both flow through the same absolutize-and-warn arm. Otherwise
-/// `locate` tries to find `pixtuoid-hook`; if that fails we only hard-error
-/// for targets that EMBED the path (`needs_resolved_binary`, e.g. Codex). Targets
-/// that write the bare name and rely on PATH (Claude) fall back to the bare name so
-/// a fresh-machine install still succeeds — the PATH warning in `run_install` covers
-/// the not-yet-on-PATH case.
-fn resolve_hook_binary(
-    t: &Target,
-    hook_path: Option<PathBuf>,
-    locate: impl FnOnce() -> Result<PathBuf>,
-) -> Result<PathBuf> {
-    let env_hook = std::env::var("PIXTUOID_HOOK")
-        .ok()
-        .filter(|v| !v.trim().is_empty())
-        .map(PathBuf::from);
-    resolve_hook_binary_from(t, hook_path, env_hook, locate)
-}
-
-/// Decision core with the `PIXTUOID_HOOK` override injected, so both explicit
-/// seams are testable without mutating process env.
+/// unset, see `io::nonempty_env`); both flow through the same
+/// absolutize-and-warn arm, and the returned bool reports that an explicit
+/// override was used so `run_install` EMBEDS it (the user pointed at a
+/// specific binary — writing the bare PATH-resolved name would discard their
+/// choice) and skips the PATH warning. Otherwise `locate` tries to find
+/// `pixtuoid-hook`; if that fails we only hard-error for targets that EMBED
+/// the path (`needs_resolved_binary`, e.g. Codex). Targets that write the
+/// bare name and rely on PATH (Claude) fall back to the bare name so a
+/// fresh-machine install still succeeds — the PATH warning in `run_install`
+/// covers the not-yet-on-PATH case. The env override is injected by the
+/// caller so the whole decision is testable without mutating process env.
 fn resolve_hook_binary_from(
     t: &Target,
     hook_path: Option<PathBuf>,
     env_hook: Option<PathBuf>,
     locate: impl FnOnce() -> Result<PathBuf>,
-) -> Result<PathBuf> {
+) -> Result<(PathBuf, bool)> {
     // The CLI flag outranks the ambient env override. Both are EXPLICIT paths
     // that get EMBEDDED into the config, where a relative path would resolve
     // against the CLI's cwd at hook time — hooks would silently never fire
@@ -398,12 +389,12 @@ fn resolve_hook_binary_from(
                 p.display()
             );
         }
-        return Ok(p);
+        return Ok((p, true));
     }
     match locate() {
-        Ok(p) => Ok(p),
+        Ok(p) => Ok((p, false)),
         Err(e) if t.needs_resolved_binary => Err(e),
-        Err(_) => Ok(PathBuf::from("pixtuoid-hook")),
+        Err(_) => Ok((PathBuf::from("pixtuoid-hook"), false)),
     }
 }
 
@@ -411,8 +402,9 @@ fn run_install(t: &Target, config: Option<PathBuf>, hook_path: Option<PathBuf>) 
     let path = config
         .map(Ok)
         .unwrap_or_else(|| (t.default_config_path)())?;
-    let explicit_hook = hook_path.is_some();
-    let binary = resolve_hook_binary(t, hook_path, io::default_hook_binary)?;
+    let env_hook = io::nonempty_env("PIXTUOID_HOOK").map(PathBuf::from);
+    let (binary, explicit_hook) =
+        resolve_hook_binary_from(t, hook_path, env_hook, io::default_hook_binary)?;
     let hook_cmd = (t.hook_command)(&binary, explicit_hook)?;
     // The lock covers the WHOLE read→merge→backup→write round (lost-update
     // TOCTOU: two concurrent pixtuoid runs would otherwise interleave
@@ -628,22 +620,24 @@ mod tests {
     fn resolve_hook_binary_explicit_path_wins() {
         // --hook-path always short-circuits resolution (locate is never called).
         let p = abs_fixture("/x/hook", r"C:\x\hook");
-        let got = resolve_hook_binary(&CLAUDE, Some(p.clone()), || {
+        let got = resolve_hook_binary_from(&CLAUDE, Some(p.clone()), None, || {
             panic!("locate must not be called when --hook-path is given")
         });
-        assert_eq!(got.unwrap(), p);
+        assert_eq!(got.unwrap(), (p, true));
     }
 
     #[test]
     fn resolve_hook_binary_absolutizes_a_relative_explicit_path() {
         // An embedded relative path would resolve against the CLI's cwd at
         // hook time and silently never fire from other dirs.
-        let got = resolve_hook_binary(
+        let (got, explicit) = resolve_hook_binary_from(
             &CLAUDE,
             Some(PathBuf::from("target/debug/pixtuoid-hook")),
+            None,
             || unreachable!("explicit path must win"),
         )
         .unwrap();
+        assert!(explicit);
         assert!(got.is_absolute(), "expected absolutized path, got {got:?}");
         assert!(got.ends_with("target/debug/pixtuoid-hook"));
     }
@@ -655,8 +649,13 @@ mod tests {
         // wasn't yet on PATH. Claude writes the bare name and relies on PATH, so an
         // unresolvable binary must fall back to the bare name (the PATH warning covers
         // the not-found case), NOT abort the install.
-        let got = resolve_hook_binary(&CLAUDE, None, || Err(anyhow::anyhow!("could not locate")));
-        assert_eq!(got.unwrap(), PathBuf::from("pixtuoid-hook"));
+        // Routed through the injected seam (env_hook: None) so an ambient
+        // PIXTUOID_HOOK on the dev machine cannot short-circuit the
+        // locate-failure scenario this test stages.
+        let got = resolve_hook_binary_from(&CLAUDE, None, None, || {
+            Err(anyhow::anyhow!("could not locate"))
+        });
+        assert_eq!(got.unwrap(), (PathBuf::from("pixtuoid-hook"), false));
     }
 
     // The Windows twin of the claude fallback test above: exec form embeds the
@@ -665,7 +664,9 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn resolve_hook_binary_claude_errors_when_unresolvable_on_windows() {
-        let got = resolve_hook_binary(&CLAUDE, None, || Err(anyhow::anyhow!("could not locate")));
+        let got = resolve_hook_binary_from(&CLAUDE, None, None, || {
+            Err(anyhow::anyhow!("could not locate"))
+        });
         assert!(got.is_err(), "exec form requires a real resolved .exe");
     }
 
@@ -673,7 +674,9 @@ mod tests {
     fn resolve_hook_binary_codex_errors_when_unresolvable() {
         // Codex embeds the absolute path in the command, so an unresolvable binary
         // is genuinely fatal for that target.
-        let got = resolve_hook_binary(&CODEX, None, || Err(anyhow::anyhow!("could not locate")));
+        let got = resolve_hook_binary_from(&CODEX, None, None, || {
+            Err(anyhow::anyhow!("could not locate"))
+        });
         assert!(got.is_err());
     }
 
@@ -683,7 +686,7 @@ mod tests {
         // be absolutized (embedded verbatim it resolves against the CLI's cwd
         // at hook time → silent dead hook for the embed targets), never passed
         // through locate() untouched.
-        let got = resolve_hook_binary_from(
+        let (got, explicit) = resolve_hook_binary_from(
             &CODEX,
             None,
             Some(PathBuf::from("target/debug/pixtuoid-hook")),
@@ -695,6 +698,10 @@ mod tests {
             "expected absolutized env path, got {got:?}"
         );
         assert!(got.ends_with("target/debug/pixtuoid-hook"));
+        // The env override is EXPLICIT: run_install embeds it (Claude/Unix
+        // included) instead of writing the bare PATH-resolved name, and the
+        // PATH warning is skipped — same contract as --hook-path.
+        assert!(explicit);
     }
 
     #[test]
@@ -704,7 +711,7 @@ mod tests {
         let got = resolve_hook_binary_from(&CLAUDE, Some(cli.clone()), Some(env), || {
             unreachable!("an explicit path must win over locate")
         });
-        assert_eq!(got.unwrap(), cli);
+        assert_eq!(got.unwrap(), (cli, true));
     }
 
     #[test]
@@ -712,26 +719,31 @@ mod tests {
         let located = abs_fixture("/located/hook", r"C:\located\hook");
         let expect = located.clone();
         let got = resolve_hook_binary_from(&CLAUDE, None, None, || Ok(located));
-        assert_eq!(got.unwrap(), expect);
+        assert_eq!(got.unwrap(), (expect, false));
     }
 
     #[test]
-    fn resolve_hook_binary_empty_env_override_counts_as_unset() {
-        // io.rs convention: an empty env value is unset. PIXTUOID_HOOK="" must
-        // fall through to locate(), not become an embedded "" command.
+    fn empty_env_override_counts_as_unset_at_the_live_read() {
+        // io::nonempty_env is the live seam run_install reads PIXTUOID_HOOK
+        // through: empty/whitespace must be unset (the #172 policy), so ""
+        // never becomes an embedded "" command.
         let _env = crate::TEST_ENV_LOCK
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         let saved = std::env::var_os("PIXTUOID_HOOK");
         std::env::set_var("PIXTUOID_HOOK", "");
-        let located = abs_fixture("/located/hook", r"C:\located\hook");
-        let expect = located.clone();
-        let got = resolve_hook_binary(&CLAUDE, None, || Ok(located));
+        let empty = io::nonempty_env("PIXTUOID_HOOK");
+        std::env::set_var("PIXTUOID_HOOK", "   ");
+        let blank = io::nonempty_env("PIXTUOID_HOOK");
+        std::env::set_var("PIXTUOID_HOOK", "/real/hook");
+        let real = io::nonempty_env("PIXTUOID_HOOK");
         match saved {
             Some(v) => std::env::set_var("PIXTUOID_HOOK", v),
             None => std::env::remove_var("PIXTUOID_HOOK"),
         }
-        assert_eq!(got.unwrap(), expect);
+        assert_eq!(empty, None);
+        assert_eq!(blank, None);
+        assert_eq!(real, Some("/real/hook".into()));
     }
 
     #[test]

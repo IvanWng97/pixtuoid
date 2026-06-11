@@ -8,6 +8,13 @@
 //! `HOME` stays authoritative and behavior matches the old per-site
 //! `env::var("HOME")` reads (one deliberate improvement: an empty `HOME` is
 //! treated as unset).
+//!
+//! Every env filter here is TRIM-based — empty or whitespace-only counts as
+//! unset, matching the workspace convention (`install::io::nonempty_env` on
+//! the binary side, the shim's `PIXTUOID_SOCKET` guard): these values are
+//! paths, and a whitespace-only path can never be the absolute path the
+//! contracts require. One semantics, so `XDG_CONFIG_HOME="   "` can't be
+//! unset for the app config but set for the CLI config-dir resolution.
 
 use std::path::{Path, PathBuf};
 
@@ -51,7 +58,7 @@ pub(crate) fn codex_home() -> PathBuf {
 /// instead — benign for a visualizer, since codex itself won't run (and writes
 /// no rollouts under that path) when its own home dir is missing.
 fn resolve_codex_home(codex_home_env: Option<String>, home: String) -> PathBuf {
-    if let Some(p) = codex_home_env.filter(|s| !s.is_empty()) {
+    if let Some(p) = codex_home_env.filter(|s| !s.trim().is_empty()) {
         let pb = PathBuf::from(p);
         if pb.is_dir() {
             return pb;
@@ -76,7 +83,7 @@ pub fn resolve_user_config_dir(
     xdg: Option<String>,
     home: &Path,
 ) -> PathBuf {
-    let nonempty = |v: Option<String>| v.filter(|s| !s.is_empty());
+    let nonempty = |v: Option<String>| v.filter(|s| !s.trim().is_empty());
     match os {
         "macos" => home.join("Library/Application Support"),
         "windows" => nonempty(appdata)
@@ -117,7 +124,7 @@ pub fn resolve_user_home_opt(
     userprofile: Option<String>,
     home: Option<String>,
 ) -> Option<String> {
-    let nonempty = |v: Option<String>| v.filter(|s| !s.is_empty());
+    let nonempty = |v: Option<String>| v.filter(|s| !s.trim().is_empty());
     if windows {
         // USERPROFILE is effectively always set on Windows; a lone HOME here
         // was set deliberately (MSYS users exporting a real Windows path).
@@ -148,8 +155,9 @@ mod tests {
             "/c/Users/me"
         );
         assert_eq!(resolve_home(true, None, None, "T".into()), "T");
-        // empty strings are treated as unset
+        // empty/whitespace strings are treated as unset
         assert_eq!(resolve_home(true, s(""), s(""), "T".into()), "T");
+        assert_eq!(resolve_home(true, s("  "), s("  "), "T".into()), "T");
     }
 
     #[test]
@@ -160,6 +168,7 @@ mod tests {
         );
         assert_eq!(resolve_home(false, None, None, "T".into()), "/tmp");
         assert_eq!(resolve_home(false, None, s(""), "T".into()), "/tmp");
+        assert_eq!(resolve_home(false, None, s("  "), "T".into()), "/tmp");
     }
 
     #[test]
@@ -174,8 +183,9 @@ mod tests {
             s("/c/Users/me")
         );
         assert_eq!(resolve_user_home_opt(true, None, None), None);
-        // empty strings are unset on both axes.
+        // empty/whitespace strings are unset on both axes.
         assert_eq!(resolve_user_home_opt(true, s(""), s("")), None);
+        assert_eq!(resolve_user_home_opt(true, s("  "), s("  ")), None);
         // Unix: HOME only, empty = unset, None when absent.
         assert_eq!(
             resolve_user_home_opt(false, s(r"C:\ignored"), s("/Users/me")),
@@ -227,9 +237,13 @@ mod tests {
             resolve_user_config_dir("linux", None, s("/xdg/cfg"), Path::new("/home/u")),
             PathBuf::from("/xdg/cfg")
         );
-        // empty XDG → ~/.config.
+        // empty/whitespace XDG → ~/.config.
         assert_eq!(
             resolve_user_config_dir("linux", None, s(""), Path::new("/home/u")),
+            PathBuf::from("/home/u/.config")
+        );
+        assert_eq!(
+            resolve_user_config_dir("linux", None, s("   "), Path::new("/home/u")),
             PathBuf::from("/home/u/.config")
         );
         assert_eq!(
@@ -261,6 +275,10 @@ mod tests {
         assert_eq!(resolve_codex_home(None, "/home/u".into()), expected);
         assert_eq!(
             resolve_codex_home(Some(String::new()), "/home/u".into()),
+            expected
+        );
+        assert_eq!(
+            resolve_codex_home(Some("   ".into()), "/home/u".into()),
             expected
         );
         // Set to a non-existent dir → fall back (matches upstream codex's gate).

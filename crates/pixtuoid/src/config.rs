@@ -70,13 +70,12 @@ fn expand_tilde(p: &str, home: Option<&str>) -> String {
 }
 
 pub fn config_path() -> PathBuf {
-    // XDG basedir spec: a set-but-empty value means UNSET. Without the filter,
-    // `PathBuf::from("")` yields the CWD-relative `pixtuoid/config.toml` — the
-    // real ~/.config copy is silently bypassed every boot and a theme save
-    // scatters orphan configs into whatever cwd pixtuoid was launched from.
-    let xdg = std::env::var("XDG_CONFIG_HOME")
-        .ok()
-        .filter(|v| !v.trim().is_empty());
+    // Empty XDG_CONFIG_HOME = unset (see io::nonempty_env). Without the
+    // filter, `PathBuf::from("")` yields the CWD-relative
+    // `pixtuoid/config.toml` — the real ~/.config copy is silently bypassed
+    // every boot and a theme save scatters orphan configs into whatever cwd
+    // pixtuoid was launched from.
+    let xdg = crate::install::io::nonempty_env("XDG_CONFIG_HOME");
     if let Some(base) = xdg {
         return PathBuf::from(base).join("pixtuoid").join("config.toml");
     }

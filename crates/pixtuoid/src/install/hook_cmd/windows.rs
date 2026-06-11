@@ -154,8 +154,9 @@ mod tests {
     #[test]
     fn windows_command_treats_cmd_first_token_delimiters_as_unsafe() {
         // cmd.exe terminates the command token at ';' ',' '=' and tab exactly
-        // like a space — and all four are legal NTFS filename chars, so a
-        // space-free path can carry one. The bare form would exec a truncated
+        // like a space — ';' ',' '=' are legal Win32 filename chars and tab
+        // survives at the NTFS/POSIX-namespace layer (Win32 forbids 0-31), so
+        // a space-free path can carry one. The bare form would exec a truncated
         // sibling path (`C:\tools\a` for `C:\tools\a;b\…`): each must take the
         // 8.3 route, and reject when 8.3 is unavailable — never the bare form.
         for path in [

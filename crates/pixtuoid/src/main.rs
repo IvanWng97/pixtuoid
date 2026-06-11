@@ -306,17 +306,10 @@ fn truncate_to_char_boundary(s: &str, max_bytes: usize) -> usize {
     cut
 }
 
-/// XDG basedir contract: a set-but-empty (or whitespace-only) value means
-/// unset — left unfiltered, `XDG_STATE_HOME=""` yields the root-absolute
-/// `/pixtuoid/...` (unwritable for non-root). Pure (env read by the caller)
-/// so the normalization is unit-testable without mutating process env,
-/// matching `filter_directives`.
-fn xdg_nonempty(value: Option<String>) -> Option<String> {
-    value.filter(|v| !v.trim().is_empty())
-}
-
 fn crash_log_path() -> PathBuf {
-    if let Some(state) = xdg_nonempty(std::env::var("XDG_STATE_HOME").ok()) {
+    // Empty XDG_STATE_HOME = unset (see io::nonempty_env) — left unfiltered,
+    // "" yields the root-absolute `/pixtuoid/...` (unwritable for non-root).
+    if let Some(state) = pixtuoid::install::io::nonempty_env("XDG_STATE_HOME") {
         return PathBuf::from(format!("{state}/pixtuoid/crash.log"));
     }
     if let Some(home) = pixtuoid::install::io::user_home() {
@@ -348,7 +341,7 @@ fn log_file_path() -> PathBuf {
             return PathBuf::from(p);
         }
     }
-    if let Some(state) = xdg_nonempty(std::env::var("XDG_STATE_HOME").ok()) {
+    if let Some(state) = pixtuoid::install::io::nonempty_env("XDG_STATE_HOME") {
         return PathBuf::from(format!("{state}/pixtuoid/log"));
     }
     if let Some(home) = pixtuoid::install::io::user_home() {
@@ -426,17 +419,15 @@ mod tests {
     }
 
     #[test]
-    fn xdg_nonempty_treats_empty_and_whitespace_as_unset() {
-        // XDG basedir spec: empty means unset. An unfiltered empty
-        // XDG_STATE_HOME would route the crash log / runtime log to the
-        // root-absolute `/pixtuoid/...`.
-        assert_eq!(xdg_nonempty(None), None);
-        assert_eq!(xdg_nonempty(Some(String::new())), None);
-        assert_eq!(xdg_nonempty(Some("   ".into())), None);
-        assert_eq!(
-            xdg_nonempty(Some("/state".into())),
-            Some("/state".to_string())
-        );
+    fn nonempty_treats_empty_and_whitespace_as_unset() {
+        // The shared io::nonempty filter backs XDG_STATE_HOME here: an
+        // unfiltered empty value would route the crash log / runtime log to
+        // the root-absolute `/pixtuoid/...`.
+        use pixtuoid::install::io::nonempty;
+        assert_eq!(nonempty(None), None);
+        assert_eq!(nonempty(Some(String::new())), None);
+        assert_eq!(nonempty(Some("   ".into())), None);
+        assert_eq!(nonempty(Some("/state".into())), Some("/state".to_string()));
     }
 
     #[test]

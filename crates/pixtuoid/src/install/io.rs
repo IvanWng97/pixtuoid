@@ -17,6 +17,21 @@ pub fn user_home() -> Option<String> {
     pixtuoid_core::platform::user_home_opt()
 }
 
+/// The ONE empty-as-unset filter for env values, trim-based: empty means
+/// unset (the #172 RUST_LOG policy; the XDG basedir spec says the same), and
+/// a whitespace-only value can never be the absolute path the env contracts
+/// here require, so it counts as unset too. Used for `XDG_CONFIG_HOME`
+/// (config.rs), `XDG_STATE_HOME` (main.rs log paths), and `PIXTUOID_HOOK` —
+/// keep new env reads on this helper so the workspace has one semantics.
+pub fn nonempty(value: Option<String>) -> Option<String> {
+    value.filter(|v| !v.trim().is_empty())
+}
+
+/// [`nonempty`] over a live env read.
+pub fn nonempty_env(name: &str) -> Option<String> {
+    nonempty(std::env::var(name).ok())
+}
+
 /// Resolve a `$HOME`-relative path, falling back to the CWD when no home dir
 /// is resolvable. Only safe for read-only PROBES (detection): a CWD-relative
 /// existence check is at worst a false positive. WRITE paths must use
