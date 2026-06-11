@@ -12,6 +12,10 @@ and compares against the live upstream:
 
   * Codex hook events  -> `CODEX_EVENTS` in crates/pixtuoid/src/install/codex.rs
                           vs the `HookEventName` enum in openai/codex protocol.rs
+  * CC hook events     -> `EVENTS` in crates/pixtuoid/src/install/claude.rs
+                          vs the hook-event summary table in code.claude.com
+                          hooks.md (CC is a closed binary; the docs markdown is
+                          the only watchable surface)
   * CC dispatch tool   -> the known names in `make_tool_detail`
                           vs the tool list in code.claude.com tools-reference
   * Reasonix hooks     -> `REASONIX_EVENTS` in crates/pixtuoid/src/install/reasonix.rs
@@ -88,6 +92,43 @@ CC_LIFECYCLE_SURFACE_MARKERS = {
 # surfaced for review (it might be a lifecycle signal worth handling).
 CODEX_KNOWN_OMITTED = {"PreCompact", "PostCompact"}
 
+# CC hook events we DELIBERATELY do not register (vs install/claude.rs EVENTS,
+# which since #241 includes SubagentStart/SubagentStop). A NEW upstream event
+# beyond both sets is surfaced for review — the weekly "evaluate this" ping.
+# Verified against hooks.md 2026-06: per-turn / content noise (UserPromptSubmit,
+# UserPromptExpansion, MessageDisplay, Stop, StopFailure, PostToolBatch,
+# PostToolUseFailure), permission detail already covered by Notification
+# (PermissionRequest, PermissionDenied), task/teammate bookkeeping (TaskCreated,
+# TaskCompleted, TeammateIdle), environment/config plumbing (Setup,
+# InstructionsLoaded, ConfigChange, CwdChanged, FileChanged, WorktreeCreate,
+# WorktreeRemove, Elicitation, ElicitationResult), compaction internals
+# (PreCompact, PostCompact).
+CC_KNOWN_OMITTED = {
+    "Setup",
+    "UserPromptSubmit",
+    "UserPromptExpansion",
+    "PermissionRequest",
+    "PermissionDenied",
+    "PostToolUseFailure",
+    "PostToolBatch",
+    "MessageDisplay",
+    "TaskCreated",
+    "TaskCompleted",
+    "Stop",
+    "StopFailure",
+    "TeammateIdle",
+    "InstructionsLoaded",
+    "ConfigChange",
+    "CwdChanged",
+    "FileChanged",
+    "WorktreeCreate",
+    "WorktreeRemove",
+    "PreCompact",
+    "PostCompact",
+    "Elicitation",
+    "ElicitationResult",
+}
+
 REASONIX_HOOK_URL = (
     "https://raw.githubusercontent.com/esengine/DeepSeek-Reasonix/main-v2/"
     "internal/hook/hook.go"
@@ -118,6 +159,14 @@ def read_codex_events() -> set[str]:
     return set(re.findall(r'"(\w+)"', m.group(1)))
 
 
+def read_cc_events() -> set[str]:
+    src = (REPO / "crates/pixtuoid/src/install/claude.rs").read_text()
+    m = re.search(r"const EVENTS[^=]*=\s*&\[(.*?)\];", src, re.S)
+    if not m:
+        raise RuntimeError("could not locate EVENTS in install/claude.rs")
+    return set(re.findall(r'"(\w+)"', m.group(1)))
+
+
 def read_dispatch_names() -> set[str]:
     src = (REPO / "crates/pixtuoid-core/src/source/decoder.rs").read_text()
     m = re.search(r"known_name\s*=\s*([^;]+);", src)
@@ -132,6 +181,16 @@ def upstream_codex_hooks(text: str) -> set[str] | None:
         return None
     # variant identifiers (drop comments/attrs by keeping CamelCase words)
     return set(re.findall(r"\b([A-Z][A-Za-z]+)\b", m.group(1)))
+
+
+def upstream_cc_hook_events(text: str) -> set[str] | None:
+    """The hook-event summary table near the top of hooks.md ("| Event | When
+    it fires |") is the canonical event list — parse only its rows (other
+    tables in the doc repeat event names with different columns)."""
+    m = re.search(r"^\|\s*Event\s*\|[^\n]*\n\|[\s:|-]*\n((?:\|[^\n]*\n)+)", text, re.M)
+    if not m:
+        return None
+    return set(re.findall(r"^\|\s*`(\w+)`\s*\|", m.group(1), re.M)) or None
 
 
 def read_reasonix_events() -> set[str]:
@@ -150,6 +209,7 @@ def upstream_reasonix_hooks(text: str) -> set[str] | None:
 
 def run_checks(
     codex_ours: set[str] | None,
+    cc_ours: set[str] | None,
     dispatch_names: set[str] | None,
     reasonix_ours: set[str] | None,
     breaking: list[str],
@@ -249,9 +309,11 @@ def run_checks(
                     f"stale.)"
                 )
 
-    # --- CC lifecycle surfaces (end marker + sessions registry) ------------
-    # Unconditional (unlike the sections above, there is nothing to read from
-    # our source first — we depend on these surfaces' ABSENCE; see
+    # --- CC hook-event list + lifecycle surfaces (ONE hooks.md fetch) ------
+    # The event-list diff mirrors the Codex HookEventName check (CC is a
+    # closed binary, so the docs markdown is the only watchable surface); the
+    # lifecycle-marker scan is unconditional (nothing to read from our source
+    # first — we depend on those surfaces' ABSENCE; see
     # CC_LIFECYCLE_SURFACE_MARKERS).
     try:
         hooks_doc = fetch(CC_HOOKS_URL)
@@ -259,6 +321,29 @@ def run_checks(
         errors.append(f"CC hooks doc fetch failed (transient?): {e}")
         hooks_doc = None
     if hooks_doc is not None:
+        if cc_ours is not None:
+            upstream = upstream_cc_hook_events(hooks_doc)
+            if upstream is None:
+                breaking.append(
+                    "CC hook-event summary table not found in hooks.md — the "
+                    "docs were restructured; update upstream_cc_hook_events' "
+                    "parser."
+                )
+            else:
+                for ev in sorted(cc_ours):
+                    if ev not in upstream:
+                        breaking.append(
+                            f"CC hook `{ev}` (registered in install/claude.rs "
+                            f"EVENTS) is GONE from hooks.md — likely renamed; "
+                            f"the decoder will silently drop it."
+                        )
+                for ev in sorted(upstream - cc_ours - CC_KNOWN_OMITTED):
+                    review.append(
+                        f"new CC hook `{ev}` upstream — we neither register nor "
+                        f"intentionally omit it (add a decoder arm + "
+                        f"install/claude.rs EVENTS, or add it to "
+                        f"CC_KNOWN_OMITTED)."
+                    )
         for marker, what in sorted(CC_LIFECYCLE_SURFACE_MARKERS.items()):
             if marker in hooks_doc:
                 review.append(
@@ -280,10 +365,12 @@ def main() -> int:
     # what the parsers expect) — that is a LOUD breaking signal, never a transient
     # one, or drift monitoring would silently stop with zero alarm.
     codex_ours = None
+    cc_ours = None
     dispatch_names = None
     reasonix_ours = None
     try:
         codex_ours = read_codex_events()
+        cc_ours = read_cc_events()
         dispatch_names = read_dispatch_names()
         reasonix_ours = read_reasonix_events()
     except Exception as e:  # noqa: BLE001
@@ -294,7 +381,7 @@ def main() -> int:
         )
 
     try:
-        run_checks(codex_ours, dispatch_names, reasonix_ours, breaking, review, errors)
+        run_checks(codex_ours, cc_ours, dispatch_names, reasonix_ours, breaking, review, errors)
     except Exception as e:  # noqa: BLE001
         traceback.print_exc()
         errors.append(

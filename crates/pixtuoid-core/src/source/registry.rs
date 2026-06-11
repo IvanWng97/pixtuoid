@@ -148,7 +148,10 @@ const CLAUDE_CODE: SourceDescriptor = SourceDescriptor {
         // `cc_id_from_path` derives), NOT the cwd-derived transcript path, so a
         // subagent→parent link survives a git-worktree cwd-split. Mirrors Codex.
         id_key: IdKey::SessionId,
-        custom: None,
+        // SubagentStart/Stop change the event's SUBJECT (child AgentId ≠
+        // session AgentId) — inexpressible in the shared arms. The Stop is the
+        // ONLY end signal a Workflow-fleet subagent gets (#241).
+        custom: Some(claude_code::decode_cc_hook_custom),
     },
     caps: SourceCaps {
         has_exit_signal: true,

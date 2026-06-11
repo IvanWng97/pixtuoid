@@ -19,6 +19,11 @@ const EVENTS: &[&str] = &[
     "PreToolUse",
     "PostToolUse",
     "Notification",
+    // Subagent lifecycle (#241): instant child registration + the ONLY end
+    // signal a Workflow-fleet subagent gets (no per-agent Agent tool_use →
+    // no b1 drain; no transcript end marker → stale-sweep otherwise).
+    "SubagentStart",
+    "SubagentStop",
     "SessionEnd",
 ];
 
@@ -529,12 +534,49 @@ mod tests {
                 "session_id": "sess",
                 "transcript_path": "/p/sess.jsonl",
                 "cwd": "/repo",
+                // Required by the SubagentStart/Stop arms (claim-fully guard);
+                // an inert extra field for every other event.
+                "agent_id": "a0000000000000001",
             });
             assert!(
                 decode_hook_payload(payload).is_ok(),
                 "registered CC hook {ev:?} has no decoder arm — it would bail as \
-                 unsupported. Add an arm in pixtuoid-core source/decoder.rs."
+                 unsupported. Add an arm in pixtuoid-core (decoder.rs shared arms \
+                 or claude_code.rs's custom decoder)."
             );
         }
+    }
+
+    // The #241 upgrade path: a re-run over a settings.json installed by an
+    // older pixtuoid (pre-Subagent events) must ADD the new event arrays —
+    // changed=true, all current EVENTS present — and stay idempotent after.
+    #[test]
+    fn reinstall_adds_newly_registered_events_to_an_older_install() {
+        let old_events = [
+            "SessionStart",
+            "PreToolUse",
+            "PostToolUse",
+            "Notification",
+            "SessionEnd",
+        ];
+        let mut old = json!({ "hooks": {} });
+        for ev in old_events {
+            old["hooks"][ev] = json!([{
+                SENTINEL_KEY: true,
+                "matcher": ".*",
+                "hooks": [ hook_entry("pixtuoid-hook", false) ]
+            }]);
+        }
+        let out = merge_install(&old.to_string(), "pixtuoid-hook").unwrap();
+        assert!(out.changed, "adding the Subagent events is a real change");
+        let v: Value = serde_json::from_str(&out.content).unwrap();
+        for ev in EVENTS {
+            assert!(
+                v["hooks"][*ev][0][SENTINEL_KEY].as_bool().unwrap_or(false),
+                "event {ev} must be installed after the upgrade re-run"
+            );
+        }
+        let again = merge_install(&out.content, "pixtuoid-hook").unwrap();
+        assert!(!again.changed, "second re-run is a semantic no-op");
     }
 }

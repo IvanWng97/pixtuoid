@@ -246,6 +246,195 @@ fn codex_subagent_hooks_reject_missing_or_empty_agent_id() {
     }
 }
 
+// ---- CC SubagentStart/SubagentStop (#241) ---------------------------------
+//
+// CC Workflow-tool fleets spawn subagents with NO per-agent `Agent` tool_use in
+// the parent transcript (b1 Task-drain structurally can't fire) and their
+// transcripts carry no end marker — the SubagentStart/Stop HOOKS are the only
+// instant lifecycle signal. Wire facts (captured live, CC v2.1.170):
+// SubagentStart carries the parent's session_id/transcript_path/cwd plus
+// `agent_id` (BARE hex — NO "agent-" prefix) and `agent_type`
+// ("general-purpose" | "workflow-subagent"); SubagentStop adds
+// `agent_transcript_path` (the subagent's own transcript, incl. the deeper
+// `subagents/workflows/wf_*/` nesting) and noise fields we don't consume.
+
+// The bare wire agent_id must key the child as `agent-<id>` — the transcript
+// filename stem (`cc_id_from_path`), i.e. the JSONL watcher's id space — and
+// link it to the parent session. Both captured agent_types decode identically.
+#[test]
+fn cc_subagent_start_keys_prefixed_child_and_links_parent() {
+    for agent_type in ["general-purpose", "workflow-subagent"] {
+        let ev = decode_single(json!({
+            "hook_event_name": "SubagentStart",
+            "session_id": "01000000-0000-7000-8000-0000000000cc",
+            "transcript_path": "/home/user/.claude/projects/-home-user-demo-project/01000000-0000-7000-8000-0000000000cc.jsonl",
+            "cwd": "/home/user/demo-project",
+            "agent_id": "a0000000000000001",
+            "agent_type": agent_type
+        }));
+        match ev {
+            AgentEvent::SessionStart {
+                agent_id,
+                source,
+                cwd,
+                parent_id,
+                ..
+            } => {
+                assert_eq!(source, "claude-code");
+                assert_eq!(
+                    agent_id,
+                    AgentId::from_parts("claude-code", "agent-a0000000000000001"),
+                    "{agent_type}: child keyed `agent-<id>` — the bare wire id \
+                     lacks the prefix the transcript stem carries"
+                );
+                assert_eq!(
+                    parent_id,
+                    Some(AgentId::from_parts(
+                        "claude-code",
+                        "01000000-0000-7000-8000-0000000000cc"
+                    )),
+                    "{agent_type}: linked to the parent session"
+                );
+                assert_eq!(cwd, std::path::PathBuf::from("/home/user/demo-project"));
+            }
+            other => panic!("expected SessionStart, got {other:?}"),
+        }
+    }
+}
+
+// SubagentStop keys its SessionEnd on `cc_id_from_path(agent_transcript_path)`
+// — EXACT parity with the JSONL watcher's id space (the authoritative key) —
+// including the deeper `subagents/workflows/wf_*/` nesting of Workflow fleets.
+#[test]
+fn cc_subagent_stop_keys_on_agent_transcript_path_stem() {
+    for nested_path in [
+        "/home/user/.claude/projects/-home-user-demo-project/01000000-0000-7000-8000-0000000000cc/subagents/agent-a0000000000000001.jsonl",
+        "/home/user/.claude/projects/-home-user-demo-project/01000000-0000-7000-8000-0000000000cc/subagents/workflows/wf_00000000-000/agent-a0000000000000001.jsonl",
+    ] {
+        let ev = decode_single(json!({
+            "hook_event_name": "SubagentStop",
+            "session_id": "01000000-0000-7000-8000-0000000000cc",
+            "transcript_path": "/home/user/.claude/projects/-home-user-demo-project/01000000-0000-7000-8000-0000000000cc.jsonl",
+            "cwd": "/home/user/demo-project",
+            "agent_id": "a0000000000000001",
+            "agent_type": "general-purpose",
+            "agent_transcript_path": nested_path,
+            "stop_hook_active": false,
+            "last_assistant_message": "done"
+        }));
+        match ev {
+            AgentEvent::SessionEnd { agent_id } => assert_eq!(
+                agent_id,
+                AgentId::from_parts("claude-code", "agent-a0000000000000001"),
+                "ends the CHILD keyed on the agent transcript's filename stem \
+                 (path: {nested_path})"
+            ),
+            other => panic!("expected SessionEnd, got {other:?}"),
+        }
+    }
+}
+
+// A Stop without `agent_transcript_path` (absent, null, or empty) falls back to
+// the prefixed wire agent_id — the same key SubagentStart minted.
+#[test]
+fn cc_subagent_stop_without_transcript_path_falls_back_to_prefixed_agent_id() {
+    for payload in [
+        json!({
+            "hook_event_name": "SubagentStop",
+            "session_id": "parent-sess",
+            "agent_id": "a0000000000000001"
+        }),
+        json!({
+            "hook_event_name": "SubagentStop",
+            "session_id": "parent-sess",
+            "agent_id": "a0000000000000001",
+            "agent_transcript_path": null
+        }),
+        json!({
+            "hook_event_name": "SubagentStop",
+            "session_id": "parent-sess",
+            "agent_id": "a0000000000000001",
+            "agent_transcript_path": ""
+        }),
+    ] {
+        let ev = decode_single(payload);
+        match ev {
+            AgentEvent::SessionEnd { agent_id } => assert_eq!(
+                agent_id,
+                AgentId::from_parts("claude-code", "agent-a0000000000000001")
+            ),
+            other => panic!("expected SessionEnd, got {other:?}"),
+        }
+    }
+}
+
+// The keying-parity pin: a Start (prefix-keyed from the bare wire id) and its
+// Stop (path-keyed via cc_id_from_path) MUST resolve to one AgentId, or the
+// start registers a sprite the stop can never end.
+#[test]
+fn cc_subagent_start_and_stop_coalesce_on_one_child_id() {
+    let start = decode_single(json!({
+        "hook_event_name": "SubagentStart",
+        "session_id": "01000000-0000-7000-8000-0000000000cc",
+        "cwd": "/home/user/demo-project",
+        "agent_id": "a0000000000000001",
+        "agent_type": "workflow-subagent"
+    }))
+    .agent_id();
+    let stop = decode_single(json!({
+        "hook_event_name": "SubagentStop",
+        "session_id": "01000000-0000-7000-8000-0000000000cc",
+        "agent_id": "a0000000000000001",
+        "agent_type": "workflow-subagent",
+        "agent_transcript_path": "/home/user/.claude/projects/-home-user-demo-project/01000000-0000-7000-8000-0000000000cc/subagents/workflows/wf_00000000-000/agent-a0000000000000001.jsonl"
+    }))
+    .agent_id();
+    assert_eq!(
+        start, stop,
+        "Start (prefix fallback) and Stop (transcript stem) must coalesce"
+    );
+}
+
+// Defensive: the CC docs' SubagentStart example shows an ALREADY-prefixed
+// `"agent_id": "agent-abc123"` while the live wire sends bare hex — both
+// forms must key identically (no `agent-agent-` double prefix).
+#[test]
+fn cc_subagent_start_does_not_double_prefix_an_already_prefixed_agent_id() {
+    for wire_id in ["abc123", "agent-abc123"] {
+        let ev = decode_single(json!({
+            "hook_event_name": "SubagentStart",
+            "session_id": "parent-sess",
+            "cwd": "/home/user/demo-project",
+            "agent_id": wire_id,
+            "agent_type": "general-purpose"
+        }));
+        assert_eq!(
+            ev.agent_id(),
+            AgentId::from_parts("claude-code", "agent-abc123"),
+            "wire form {wire_id:?} must key as agent-abc123"
+        );
+    }
+}
+
+// Claim-fully contract (mirrors the codex twin): a malformed CC Subagent
+// payload must Err (logged + skipped by the listener), never fall through to
+// the shared session-keyed arms or mint a phantom child.
+#[test]
+fn cc_subagent_hooks_reject_missing_or_empty_agent_id() {
+    for event in ["SubagentStart", "SubagentStop"] {
+        for payload in [
+            json!({"hook_event_name": event, "session_id": "parent-sess"}),
+            json!({"hook_event_name": event, "session_id": "parent-sess", "agent_id": ""}),
+            json!({"hook_event_name": event, "agent_id": "abc"}),
+        ] {
+            assert!(
+                decode_hook_payload(payload.clone()).is_err(),
+                "CC {event} with missing/empty ids must Err, got Ok for {payload}"
+            );
+        }
+    }
+}
+
 // Codex coalesces hook↔rollout on the session/agent UUID (NOT a path string), so
 // it's separator-agnostic by construction — but the watcher still has to extract
 // that UUID from a real backslash Windows rollout path. Pin that the child's hook

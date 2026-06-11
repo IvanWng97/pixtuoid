@@ -23,6 +23,101 @@ pub fn cc_id_from_path(path: &Path) -> String {
         .to_string()
 }
 
+/// CC's source-specific hook arms — `SubagentStart`/`SubagentStop` (#241).
+/// Like the Codex twin (`codex::decode_codex_hook_custom`) they change the
+/// event's SUBJECT to the child's AgentId, which the shared session-keyed arms
+/// cannot express; every other CC hook event falls through (`Ok(None)`) to
+/// those shared arms. Dispatched via `registry::HookDecoding::custom`.
+///
+/// Why CC needs these at all when its subagents already register via JSONL:
+/// a Workflow-tool fleet spawns subagents with NO per-agent `Agent` tool_use
+/// in the parent transcript (b1 Task-drain structurally can't fire) and the
+/// subagent transcripts carry NO end marker — without `SubagentStop`, finished
+/// fleet agents idle until the 10/30-min stale sweeps batch-reap them, holding
+/// desks and starving the next wave. Wire facts (captured live, CC v2.1.170,
+/// pinned in `tests/sources/claude/fixtures/hook-payloads.jsonl`): the
+/// payload's `agent_id` is BARE hex (no `agent-` prefix) while the transcript
+/// filename stem — the JSONL watcher's id space (`cc_id_from_path`) — is
+/// `agent-<id>`; `SubagentStop` additionally carries `agent_transcript_path`
+/// (the subagent's own transcript, incl. the deeper `subagents/workflows/
+/// wf_*/` nesting), which is the authoritative key.
+pub(crate) fn decode_cc_hook_custom(v: &Value) -> Result<Option<Vec<AgentEvent>>> {
+    use anyhow::anyhow;
+    let Some(obj) = v.as_object() else {
+        return Ok(None); // shared path reports the malformed payload
+    };
+    let event = obj
+        .get("hook_event_name")
+        .and_then(|s| s.as_str())
+        .unwrap_or("");
+    if event != "SubagentStart" && event != "SubagentStop" {
+        return Ok(None);
+    }
+    // Per the registry's custom-decoder contract: claim our two events FULLY
+    // (Err on malformed instances), never fall through. An empty `session_id`
+    // or `agent_id` would mint a phantom that never coalesces with the real
+    // subagent transcript — reject rather than decode.
+    let session_id = obj
+        .get("session_id")
+        .and_then(|s| s.as_str())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| anyhow!("{event} missing/empty session_id"))?;
+    let wire_agent_id = obj
+        .get("agent_id")
+        .and_then(|s| s.as_str())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| anyhow!("{event} missing/empty agent_id"))?;
+    // The wire id is bare hex; prefix it into the transcript-stem id space.
+    // Tolerate an already-prefixed form (the CC docs' example shows one even
+    // though the live wire sends bare) without double-prefixing.
+    let prefixed = if wire_agent_id.starts_with("agent-") {
+        wire_agent_id.to_string()
+    } else {
+        format!("agent-{wire_agent_id}")
+    };
+    if event == "SubagentStart" {
+        // Instant registration with the parent link — the JSONL watcher's
+        // later SessionStart for the same transcript coalesces (duplicate
+        // SessionStart = enrichment no-op in the reducer). Mirrors the Codex
+        // arm field-by-field so the reducer treats both identically.
+        let cwd = obj.get("cwd").and_then(|s| s.as_str()).unwrap_or("").into();
+        Ok(Some(vec![AgentEvent::SessionStart {
+            agent_id: AgentId::from_parts(SOURCE_NAME, &prefixed),
+            source: SOURCE_NAME.to_string(),
+            session_id: prefixed,
+            cwd,
+            parent_id: Some(AgentId::from_parts(SOURCE_NAME, session_id)),
+        }]))
+    } else {
+        // SubagentStop: end the CHILD promptly. The authoritative key is the
+        // subagent transcript's filename stem (`cc_id_from_path` on
+        // `agent_transcript_path` — EXACT parity with the watcher's id
+        // deriver, immune to a prefix-scheme drift); the prefixed wire id is
+        // the fallback when the path is absent.
+        let path_key = obj
+            .get("agent_transcript_path")
+            .and_then(|s| s.as_str())
+            .filter(|s| !s.is_empty())
+            .map(|p| cc_id_from_path(Path::new(&crate::source::decoder::normalize_path_key(p))))
+            .filter(|s| !s.is_empty());
+        if let Some(ref k) = path_key {
+            if *k != prefixed {
+                // Drift breadcrumb: the stem and the prefixed wire id disagree
+                // — upstream changed the filename scheme or the prefix. The
+                // stem keeps us keyed to the watcher.
+                tracing::debug!(
+                    stem = %k,
+                    wire = %prefixed,
+                    "SubagentStop transcript stem != prefixed agent_id; keying on the stem"
+                );
+            }
+        }
+        Ok(Some(vec![AgentEvent::SessionEnd {
+            agent_id: AgentId::from_parts(SOURCE_NAME, &path_key.unwrap_or(prefixed)),
+        }]))
+    }
+}
+
 pub struct ClaudeCodeSource {
     pub socket_path: PathBuf,
     pub projects_root: PathBuf,
@@ -506,6 +601,55 @@ pub fn cc_derive_label(path: &Path, _source: &str, cwd: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
+
+    // The custom-decoder contract (mirrors the codex twin): claim our two
+    // events FULLY — a malformed instance must be Err, never Ok(None) (which
+    // would silently fall through to the shared session-keyed arms). Happy
+    // paths are pinned end-to-end in tests/sources/decode/mod.rs and against
+    // the captured fixture in tests/sources/claude/mod.rs.
+    #[test]
+    fn subagent_hooks_with_empty_ids_are_err_not_fallthrough() {
+        for event in ["SubagentStart", "SubagentStop"] {
+            let no_session = json!({"hook_event_name": event, "agent_id": "abc"});
+            assert!(
+                decode_cc_hook_custom(&no_session).is_err(),
+                "{event} without session_id must Err (claim-fully), not fall through"
+            );
+            let empty_child = json!({"hook_event_name": event, "session_id": "s", "agent_id": ""});
+            assert!(
+                decode_cc_hook_custom(&empty_child).is_err(),
+                "{event} with empty agent_id must Err — a phantom child never coalesces"
+            );
+        }
+    }
+
+    #[test]
+    fn non_subagent_events_fall_through_to_shared_arms() {
+        let start = json!({"hook_event_name": "SessionStart", "session_id": "s"});
+        assert!(matches!(decode_cc_hook_custom(&start), Ok(None)));
+        // Non-object payload: defensive fall-through — the dispatcher
+        // pre-validates object-ness, so the shared path owns the error.
+        assert!(matches!(decode_cc_hook_custom(&json!("nope")), Ok(None)));
+    }
+
+    // A present agent_transcript_path whose stem is EMPTY (degenerate path)
+    // must fall back to the prefixed wire id, never mint AgentId("").
+    #[test]
+    fn subagent_stop_with_stemless_path_falls_back_to_prefixed_id() {
+        let evs = decode_cc_hook_custom(&json!({
+            "hook_event_name": "SubagentStop",
+            "session_id": "s",
+            "agent_id": "abc",
+            "agent_transcript_path": "/"
+        }))
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            evs[0].agent_id(),
+            crate::AgentId::from_parts(SOURCE_NAME, "agent-abc")
+        );
+    }
 
     #[test]
     fn label_prefers_cwd_basename_when_present() {

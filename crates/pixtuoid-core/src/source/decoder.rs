@@ -95,9 +95,10 @@ pub fn decode_hook_payload(v: Value) -> Result<Vec<AgentEvent>> {
     // A source's own hook arms run FIRST — before the shared field
     // requirements below — so an alien envelope (Reasonix: camelCase, `event`
     // discriminator, no `session_id` at all) or a subject-changing event
-    // (Codex SubagentStart/Stop, whose AgentId is the CHILD's) decodes in the
-    // source's module, not here. `Ok(None)` falls through to the shared
-    // CC-shaped arms; an alien-envelope source claims EVERY event instead.
+    // (CC's and Codex's SubagentStart/Stop, whose AgentId is the CHILD's)
+    // decodes in the source's module, not here. `Ok(None)` falls through to
+    // the shared CC-shaped arms; an alien-envelope source claims EVERY event
+    // instead.
     if let Some(custom) = desc.and_then(|d| d.hook.custom) {
         if let Some(evs) = custom(&v)? {
             return Ok(evs);
@@ -257,10 +258,11 @@ pub fn decode_hook_payload(v: Value) -> Result<Vec<AgentEvent>> {
             tool_use_id: None,
         }]),
         "SessionEnd" => Ok(vec![AgentEvent::SessionEnd { agent_id }]),
-        // Codex's SubagentStart/SubagentStop live in
-        // `codex::decode_codex_hook_custom` (dispatched above via the
-        // registry) — they change the event's SUBJECT to the child AgentId,
-        // which these shared session-keyed arms cannot express.
+        // SubagentStart/SubagentStop live in the source modules'
+        // `claude_code::decode_cc_hook_custom` / `codex::decode_codex_hook_custom`
+        // (dispatched above via the registry) — they change the event's
+        // SUBJECT to the child AgentId, which these shared session-keyed arms
+        // cannot express. A source whose row has no custom decoder bails here.
         other => bail!("unsupported hook_event_name: {other}"),
     }
 }
@@ -276,6 +278,15 @@ pub(crate) fn make_tool_detail(tool_name: &str, input: Option<&Value>) -> ToolDe
     // (`active_tasks`) and b1 Task-drain completion on `is_task()`, so a missed
     // dispatch silently disables both for real subagents.
     let has_subagent_type = input.and_then(|v| v.get("subagent_type")).is_some();
+    // DELIBERATELY NOT a known name: `Workflow` (CC's fleet dispatcher). Its
+    // children fire no per-agent `Agent` tool_use, so mapping Workflow → Task
+    // would park ONE months-long entry in the parent's `active_tasks` for the
+    // whole workflow — and the vouched-Delegating subtree shield
+    // (`sweep_stale`'s ancestor-vouch ∧ active-delegation gate) would then
+    // sweep-EXEMPT every FINISHED fleet subagent until the workflow ends:
+    // worse desk starvation than the gap it would "fix". Fleet lifecycle is
+    // owned by the SubagentStart/Stop hooks instead
+    // (`claude_code::decode_cc_hook_custom`, #241).
     let known_name = tool_name == "Task" || tool_name == "Agent";
     if has_subagent_type || known_name {
         // Drift breadcrumb: a dispatch under a name we don't recognise means
@@ -714,21 +725,23 @@ mod tests {
         );
     }
 
-    // Deliberate narrowing (vs pre-registry): SubagentStart/Stop are CODEX's
-    // events (its descriptor's custom decoder); a payload stamped with any
-    // other source now bails instead of minting a child keyed on a raw
-    // agent_id that could never coalesce with that source's own keying.
+    // Deliberate narrowing (vs pre-registry): SubagentStart/Stop decode only
+    // through a source's OWN custom decoder (CC's and Codex's rows carry one,
+    // #241); a payload stamped with a source whose row has none bails instead
+    // of minting a child keyed on a raw agent_id that could never coalesce
+    // with that source's own keying.
     #[test]
-    fn subagent_hooks_from_non_codex_sources_bail() {
+    fn subagent_hooks_from_sources_without_a_custom_decoder_bail() {
         for event in ["SubagentStart", "SubagentStop"] {
             let ev = decode_hook_payload(json!({
                 "hook_event_name": event,
                 "session_id": "s",
                 "agent_id": "child",
-                "cwd": "/repo"
-                // no _pixtuoid_source → claude-code, whose row has no custom fn
+                "cwd": "/repo",
+                // antigravity's row has no custom fn
+                "_pixtuoid_source": "antigravity"
             }));
-            assert!(ev.is_err(), "CC-attributed {event} must bail");
+            assert!(ev.is_err(), "antigravity-attributed {event} must bail");
         }
     }
 
