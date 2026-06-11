@@ -26,8 +26,14 @@ tests/
 │   ├── display.rs            labels: cwd-basename derivation, ghost ordinals, source prefixes, rename
 │   └── child_ledger.rs       SessionEnd tombstones + child-end ledger: gating, revival relink, parent adoption, cycle filter
 ├── e2e.rs                    end-to-end driver wiring (own binary)
-├── watcher.rs                JsonlWatcher first-sight gate / liveness-probe bypass / cursor (own binary)
-│                             + the mid-attach scenario suite (attach shows exactly the live set)
+├── watcher/main.rs           JsonlWatcher behavior (1 binary; the poll-seam harness — `fast_watch`,
+│   │                         `cc_watcher`, `vouch_snapshot`, `write_lines` + the cc line builders — lives in main.rs)
+│   ├── tailing.rs            cursor mechanics: append-tail emit, partial trailing line, truncation reset, non-UTF-8 skip
+│   ├── first_sight.rs        the first-sight gate: stale/recent/ended/oversized seeds, probe bypass, cwd + id/label derivers, subagent parent links
+│   ├── liveness.rs           proof-of-life emission, negative vouch, instant exit (pid death), probe-failure no-ops
+│   ├── unclaim.rs            child-end un-claim: turn-N+1 re-register + in-flight multi-turn revival
+│   ├── sources.rs            Source::run glue (codex / antigravity / claude-code bind+spawn)
+│   └── attach.rs             the mid-attach scenario suite (attach shows exactly the live set)
 ├── transport/main.rs         #[cfg(unix)] mod socket;  #[cfg(windows)] mod pipe;
 ├── render/main.rs            mod {blit, format, animator}  +  render/fixtures/ (sprites)
 ├── socket_path_parity.rs     FLAT — publish-excluded (see below)
