@@ -5142,6 +5142,122 @@ fn hook_event_after_tombstone_ttl_synthesizes_again() {
 }
 
 #[test]
+fn jsonl_child_session_start_within_tombstone_is_gated_too() {
+    // #242, transport scoping: the tombstone is evidence the child ALREADY
+    // ENDED — transport-agnostic. A CC subagent transcript first-sighted by
+    // the watcher AFTER the hook SubagentStop ended the never-registered
+    // child has the same phantom shape as the reordered hook Start: the
+    // transcript carries no end marker, so the JSONL-registered slot would
+    // also linger to the stale sweeps. (A historical replay never
+    // SessionStarts — the watcher's first-sight gate — so no legitimate
+    // JSONL flow reaches this gate.)
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let parent = AgentId::from_parts("claude-code", "parent-sess");
+    let child = AgentId::from_parts("claude-code", "agent-late-file");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+
+    start(&mut r, &mut scene, parent);
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionEnd { agent_id: child },
+        t0,
+        Transport::Hook,
+    );
+    // The watcher's first-sight emission for the child's transcript lands
+    // within the TTL.
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: child,
+            source: "claude-code".into(),
+            session_id: "agent-late-file".into(),
+            cwd: PathBuf::from("/repo"),
+            parent_id: Some(parent),
+        },
+        t0 + Duration::from_millis(200),
+        Transport::Jsonl,
+    );
+    assert!(
+        !scene.agents.contains_key(&child),
+        "a JSONL child SessionStart racing its own hook Stop must not register"
+    );
+}
+
+#[test]
+fn child_session_start_past_tombstone_ttl_registers() {
+    // The gate is a tombstone, not a blacklist: a child Start past the TTL
+    // is a genuinely new life on a recycled id and must register.
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let parent = AgentId::from_parts("claude-code", "parent-sess");
+    let child = AgentId::from_parts("claude-code", "agent-recycled");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+
+    start(&mut r, &mut scene, parent);
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionEnd { agent_id: child },
+        t0,
+        Transport::Hook,
+    );
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: child,
+            source: "claude-code".into(),
+            session_id: "agent-recycled".into(),
+            cwd: PathBuf::from("/repo"),
+            parent_id: Some(parent),
+        },
+        t0 + HOOK_SESSION_END_TOMBSTONE_TTL + Duration::from_secs(1),
+        Transport::Hook,
+    );
+    assert!(
+        scene.agents.contains_key(&child),
+        "past the TTL a child SessionStart is a fresh registration"
+    );
+}
+
+#[test]
+fn tombstoned_parentless_session_start_still_registers() {
+    // Reasonix's documented SessionEnd→SessionStart resurrect rides the SAME
+    // cwd-keyed id: an INVISIBLE (never-registered) session's `/new` rotation
+    // fires SessionEnd (→ tombstone, unknown id) then SessionStart
+    // back-to-back. The #242 gate is scoped to CHILD registrations
+    // (`parent_id: Some`) precisely so this PARENTLESS start keeps
+    // registering — Reasonix has no other re-creation signal.
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let id = AgentId::from_parts("reasonix", "/Users/dev/proj");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionEnd { agent_id: id },
+        t0,
+        Transport::Hook,
+    );
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: id,
+            source: "reasonix".into(),
+            session_id: "/Users/dev/proj".into(),
+            cwd: PathBuf::from("/Users/dev/proj"),
+            parent_id: None,
+        },
+        t0 + Duration::from_millis(20),
+        Transport::Hook,
+    );
+    assert!(
+        scene.agents.contains_key(&id),
+        "a parentless SessionStart must register straight through a fresh \
+         tombstone (the Reasonix resurrect)"
+    );
+}
+
+#[test]
 fn jsonl_session_start_after_hook_synthesis_coalesces_into_same_slot() {
     // The revived transcript's SessionStart (same session UUID → same
     // AgentId) must land in the duplicate-SessionStart arm — one sprite, one

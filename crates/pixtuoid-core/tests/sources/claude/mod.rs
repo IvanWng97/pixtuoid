@@ -27,7 +27,7 @@
 //! decoder's tolerance of fields we don't consume stays pinned).
 
 use std::path::PathBuf;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use pixtuoid_core::source::claude_code::decode_cc_line;
 use pixtuoid_core::source::decoder::decode_hook_payload;
@@ -293,6 +293,54 @@ fn cc_jsonl_registered_subagent_exits_cleanly_on_hook_subagent_stop() {
             .agents
             .contains_key(&AgentId::from_parts("claude-code", "a0000000000000001")),
         "no bare-keyed phantom twin"
+    );
+}
+
+// #242: hook deliveries ride per-connection tasks and can reorder — for a
+// short-lived subagent the SubagentStop can be DECODED before its
+// SubagentStart. The Stop's SessionEnd lands on an unknown child id and
+// tombstones it; the late Start must then degrade to a no-op instead of
+// registering a slot whose end already passed (no future SessionEnd is
+// coming — it would hold a desk until the 10/30-min stale sweeps).
+#[test]
+fn cc_reordered_subagent_stop_before_start_does_not_mint_a_phantom() {
+    let mut scene = SceneState::uniform(8);
+    let mut r = Reducer::new();
+    let now = SystemTime::now();
+    start_parent(&mut r, &mut scene, now);
+
+    let (stops, starts): (Vec<_>, Vec<_>) = captured_hook_events()
+        .into_iter()
+        .partition(|ev| matches!(ev, AgentEvent::SessionEnd { .. }));
+    for ev in stops {
+        r.apply(&mut scene, ev, now, Transport::Hook);
+    }
+    // The late Starts land within the tombstone TTL — TWICE, because the gate
+    // must not consume the tombstone (a duplicate late Start must no-op too).
+    for ev in starts.iter().chain(starts.iter()).cloned() {
+        r.apply(
+            &mut scene,
+            ev,
+            now + Duration::from_millis(50),
+            Transport::Hook,
+        );
+    }
+
+    for child_key in [HOOK_CHILD_GP, HOOK_CHILD_WF] {
+        assert!(
+            !scene
+                .agents
+                .contains_key(&AgentId::from_parts("claude-code", child_key)),
+            "{child_key}: a SubagentStart reordered after its own Stop must not register"
+        );
+    }
+    let parent = scene
+        .agents
+        .get(&hook_parent_id())
+        .expect("parent untouched");
+    assert!(
+        parent.exiting_at.is_none(),
+        "the children's tombstones must not affect the parent"
     );
 }
 

@@ -26,12 +26,15 @@ pub const HOOK_WINS_WINDOW: Duration = Duration::from_millis(500);
 pub const EXIT_GRACE_WINDOW: Duration = Duration::from_millis(4500);
 
 /// How long a hook `SessionEnd` for an UNKNOWN id suppresses hook-synthesis
-/// for that id ([`Reducer::synthesize_hook_registration`]). Hook connections
-/// are per-connection spawned tasks, so a session's SessionEnd and a trailing
-/// Stop/ActivityEnd can be DELIVERED reordered — for an invisible
-/// (never-registered) session ending at /exit, the reordered straggler would
-/// otherwise synthesize a blank Idle ghost with NO SessionEnd left to ever
-/// remove it (it lives out the full 30-min idle sweep). 5s is generous next
+/// for that id ([`Reducer::synthesize_hook_registration`]) AND child
+/// (`parent_id`-carrying) `SessionStart` registration (#242, either
+/// transport). Hook connections are per-connection spawned tasks, so a
+/// session's SessionEnd and a trailing Stop/ActivityEnd can be DELIVERED
+/// reordered — for an invisible (never-registered) session ending at /exit,
+/// the reordered straggler would otherwise synthesize a blank Idle ghost with
+/// NO SessionEnd left to ever remove it (it lives out the full 30-min idle
+/// sweep); a short-lived subagent's SubagentStart decoded after its own
+/// SubagentStop would likewise register a phantom child. 5s is generous next
 /// to [`HOOK_WINS_WINDOW`]'s modeled transport skew — reordering here is
 /// same-machine task-scheduling jitter, so the headroom costs nothing —
 /// while short enough that a genuinely revived session on the same id is
@@ -288,8 +291,11 @@ pub struct Reducer {
     /// Short-TTL tombstones for hook `SessionEnd`s that arrived for an id
     /// with NO slot — an invisible (unregistered) session ending. A reordered
     /// trailing hook event for a tombstoned id must not re-synthesize the
-    /// session (see [`HOOK_SESSION_END_TOMBSTONE_TTL`]). Mirrors
-    /// `recent_hook_tool_uses`, including its `gc` tick-time pruning.
+    /// session, and a reordered CHILD `SessionStart` (`parent_id`-carrying —
+    /// a SubagentStart decoded after its own SubagentStop, #242; gated on
+    /// BOTH transports) must not register it (see
+    /// [`HOOK_SESSION_END_TOMBSTONE_TTL`]). Mirrors `recent_hook_tool_uses`,
+    /// including its `gc` tick-time pruning.
     recent_hook_session_ends: HashMap<AgentId, SystemTime>,
     /// Per-agent set of Task tool_use_ids currently in flight. CC's hook
     /// payload sets `transcript_path` to the PARENT'S transcript even when a
@@ -488,6 +494,37 @@ impl Reducer {
                 cwd,
                 parent_id,
             } => {
+                // #242: hook deliveries ride per-connection tasks, so a
+                // short-lived subagent's SubagentStop can be DECODED before
+                // its SubagentStart. The Stop's SessionEnd landed on an
+                // unknown id and tombstoned it; registering this late CHILD
+                // start (the event carries a parent link) would mint a slot
+                // whose end already passed — no future SessionEnd is coming,
+                // so only the stale sweeps would clear it. Degrade to a
+                // no-op. Deliberately TRANSPORT-AGNOSTIC: the tombstone is
+                // evidence the child already ended regardless of which
+                // transport re-introduces it — a JSONL first-sight of the
+                // child's transcript racing the hook Stop has the same
+                // phantom shape (CC subagent transcripts carry no end
+                // marker), and a historical replay never SessionStarts (the
+                // watcher's first-sight gate), so no legitimate JSONL flow is
+                // lost. Parentless starts are exempt BY CONSTRUCTION:
+                // Reasonix's documented SessionEnd→SessionStart resurrect
+                // rides the same (cwd-keyed, parentless) id and must keep
+                // registering. The tombstone is NOT consumed — a duplicate
+                // late Start must no-op too.
+                if parent_id.is_some()
+                    && !scene.agents.contains_key(&agent_id)
+                    && self.hook_session_end_tombstoned(agent_id, now)
+                {
+                    tracing::warn!(
+                        ?agent_id,
+                        %session_id,
+                        "skipped child SessionStart — its hook SessionEnd already passed \
+                         (reordered SubagentStop, #242)"
+                    );
+                    return;
+                }
                 // Refuse a parent link whose ancestor chain reaches the child
                 // — the ONE seam where `parent_id` is set (registration below)
                 // or enriched (the orphan arm), so a cycle can never EXIST and
@@ -769,7 +806,8 @@ impl Reducer {
     /// Whether a hook `SessionEnd` for `id` (which had no slot) is still inside
     /// its [`HOOK_SESSION_END_TOMBSTONE_TTL`]: a trailing hook event delivered
     /// reordered after the end must not re-register the dead session. Shared by
-    /// [`Reducer::synthesize_hook_registration`] and the `Identity` arm.
+    /// [`Reducer::synthesize_hook_registration`], the `Identity` arm, and the
+    /// `SessionStart` arm's child-registration gate (#242).
     fn hook_session_end_tombstoned(&self, id: AgentId, now: SystemTime) -> bool {
         self.recent_hook_session_ends.get(&id).is_some_and(|ts| {
             now.duration_since(*ts)

@@ -126,6 +126,43 @@ fn codex_subagent_jsonl_first_orphan_is_enriched_by_subagent_start() {
     );
 }
 
+// #242 (the CC twin lives in `sources/claude`): a SubagentStop decoded before
+// its SubagentStart tombstones the unknown child id — the late Start must not
+// register a slot whose end already passed (Codex has no further end signal
+// of any kind, so the phantom would ride the stale sweeps).
+#[test]
+fn codex_reordered_subagent_stop_before_start_does_not_mint_a_phantom() {
+    let parent = AgentId::from_parts("codex", PARENT);
+    let child = AgentId::from_parts("codex", CHILD);
+    let mut scene = SceneState::uniform(8);
+    let mut r = Reducer::new();
+    let now = SystemTime::now();
+
+    let (stops, rest): (Vec<_>, Vec<_>) = captured_hook_events()
+        .into_iter()
+        .partition(|ev| matches!(ev, AgentEvent::SessionEnd { .. }));
+    // The child's SessionEnd is delivered first (per-connection reorder)…
+    for ev in stops {
+        r.apply(&mut scene, ev, now, Transport::Hook);
+    }
+    // …then the rest in capture order: the parent's UserPromptSubmit
+    // SessionStart, the child's SubagentStart, the parent's Stop.
+    let later = now + std::time::Duration::from_millis(50);
+    for ev in rest {
+        r.apply(&mut scene, ev, later, Transport::Hook);
+    }
+
+    assert!(
+        !scene.agents.contains_key(&child),
+        "a SubagentStart reordered after its own Stop must not register"
+    );
+    let parent_slot = scene.agents.get(&parent).expect("parent registered");
+    assert!(
+        parent_slot.exiting_at.is_none(),
+        "the child's tombstone must not affect the parent"
+    );
+}
+
 #[test]
 fn codex_subagent_stop_before_start_is_a_safe_noop() {
     // The hooks are best-effort and unordered: a SubagentStop can win the race
