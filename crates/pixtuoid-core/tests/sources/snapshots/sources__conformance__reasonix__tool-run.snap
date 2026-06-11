@@ -74,3 +74,4 @@ expression: events
     tool_use_id: ~
 - SessionEnd:
     agent_id: 15483861344227895817
+    as_child: false

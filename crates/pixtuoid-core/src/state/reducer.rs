@@ -42,6 +42,23 @@ pub const EXIT_GRACE_WINDOW: Duration = Duration::from_millis(4500);
 #[doc(hidden)]
 pub const HOOK_SESSION_END_TOMBSTONE_TTL: Duration = Duration::from_secs(5);
 
+/// How long a child-ledger entry's `ended_at` keeps gating a PARENTED
+/// re-registration of that child after it ended ([`Reducer::apply`]'s
+/// `SessionStart` arm, #244). The #245 hook tombstone above covers only the
+/// 5s reorder window for UNKNOWN-id ends; this covers the residual windows it
+/// can't: a child that ended on a KNOWN slot (no tombstone minted) whose
+/// transcript first-sight arrives LATE — a notify outage defers discovery to
+/// the watcher's 60s poll backstop, well past both the 5s tombstone and the
+/// 4.5s [`EXIT_GRACE_WINDOW`] GC. Sized like
+/// [`DRAINED_TASK_TOMBSTONE_TTL`]: past the 60s poll plus slack, and
+/// generosity costs nothing — child ids are per-spawn unique, so a parented
+/// Start inside the window is never a legitimate new child, only the dead
+/// one's late echo. (Parentless Starts are deliberately NOT gated: a Codex
+/// resurrect-on-prompt is a legitimate same-id new life — they RE-LINK via
+/// the ledger's remembered parent instead, #246.)
+#[doc(hidden)]
+pub const CHILD_END_LEDGER_TTL: Duration = Duration::from_secs(90);
+
 /// How long a drained parent's b1 completion cascade is deferred before the
 /// delegated subtree is marked exiting (#151). A parallel SECOND Task
 /// dispatch arriving via hook is suppressed as a subagent leak and tracked
@@ -266,6 +283,22 @@ fn backfill_identity<'a>(
     None
 }
 
+/// One child's remembered lifecycle in [`Reducer::child_ledger`]. `Default`
+/// is the "as_child end for a never-registered child" shape: parent unknown,
+/// not yet ended (the end-site sets `ended_at` right after the upsert).
+#[derive(Debug, Default, Clone, Copy)]
+struct ChildLedgerEntry {
+    /// The last APPLIED parent link — `None` when the child was only ever
+    /// seen ending (the Stop-before-Start reorder blocked its Start, so no
+    /// link was ever applied; an accepted residual: its later flat
+    /// first-sight registers parentless, bounded by the sweeps).
+    parent_id: Option<AgentId>,
+    /// When the child ended (`as_child` SessionEnd) or its slot was removed,
+    /// whichever came first; `None` while a registered life is still alive.
+    /// Starts the [`CHILD_END_LEDGER_TTL`] GC clock AND the #244-w2 gate.
+    ended_at: Option<SystemTime>,
+}
+
 /// Outcome flags from [`Reducer::track_active_tasks`], consumed by `apply`'s
 /// main event match.
 struct TaskTracking {
@@ -320,6 +353,23 @@ pub struct Reducer {
     /// `gc` ([`DRAINED_TASK_TOMBSTONE_TTL`]) like the hook-recency maps —
     /// not per-slot state, a tuid can't recur across lives.
     recent_task_drains: HashMap<(AgentId, String), SystemTime>,
+    /// Memory of CHILD (subagent) lifecycles, surviving the slots themselves
+    /// (#244/#246). Keyed by the child's id; `parent_id` is upserted whenever
+    /// a parent link is APPLIED (registration or orphan-enrichment — never a
+    /// cycle-refused or tombstone-blocked one), `ended_at` is stamped by an
+    /// `as_child` SessionEnd (a SubagentStop decode — regardless of slot
+    /// existence, covering the Stop-before-Start reorder) and by
+    /// `sweep_exited` removing the child's slot (so a stale-swept/cascaded
+    /// child starts the GC clock too and the map stays bounded; a new life's
+    /// link-upsert clears it). Consumed by the `SessionStart` arm: a fresh
+    /// `ended_at` gates a PARENTED re-registration (the dead child's late
+    /// echo, #244-w2), while a PARENTLESS start ADOPTS the remembered parent
+    /// (a multi-turn Codex child's revival re-links, #246; a tombstoned
+    /// child's flat first-sight registers parent-linked, #244-w1).
+    /// Deliberately reducer-private like `recent_proof_of_life` — not an
+    /// `AgentSlot` field, no semver surface; pruned by `gc` on
+    /// [`CHILD_END_LEDGER_TTL`] once ended.
+    child_ledger: HashMap<AgentId, ChildLedgerEntry>,
     /// Sweep-exemption timestamps from [`AgentEvent::ProofOfLife`] (#220):
     /// a slot vouched for within [`PROOF_OF_LIFE_TTL`] is skipped by
     /// `sweep_stale`'s candidate collection. Deliberately reducer-private
@@ -511,13 +561,13 @@ impl Reducer {
                 // lost. Parentless starts are exempt BY CONSTRUCTION:
                 // Reasonix's documented SessionEnd→SessionStart resurrect
                 // rides the same (cwd-keyed, parentless) id and must keep
-                // registering. KNOWN BYPASS of that exemption: a Codex
-                // child's flat-rollout first-sight is itself parentless
-                // (detect_parent_id is CC-layout-specific), so a tombstoned
-                // Codex child can still register as an orphan through the
-                // JSONL leg — bounded by the 5-min short-idle reap, tracked
-                // as a residual. The tombstone is NOT consumed — a duplicate
-                // late Start must no-op too.
+                // registering. (A tombstoned Codex child's flat-rollout
+                // first-sight is itself parentless — detect_parent_id is
+                // CC-layout-specific — and slips this exemption on purpose;
+                // since #244 the ledger adoption below re-links it to its
+                // remembered parent instead of leaving an orphan phantom.)
+                // The tombstone is NOT consumed — a duplicate late Start
+                // must no-op too.
                 if parent_id.is_some()
                     && !scene.agents.contains_key(&agent_id)
                     && self.hook_session_end_tombstoned(agent_id, now)
@@ -531,6 +581,49 @@ impl Reducer {
                     );
                     return;
                 }
+                // #244-w2 — the ledger-keyed sibling of the #245 gate above,
+                // for the windows the 5s tombstone can't cover: a child that
+                // ended on a KNOWN slot mints no tombstone, so once the 4.5s
+                // exit grace GC'd it, a LATE parented first-sight of its
+                // transcript (notify outage → the watcher's 60s poll) would
+                // re-register a dead child as a phantom no future SessionEnd
+                // can remove. The ledger's `ended_at` survives the slot;
+                // gate on it for CHILD_END_LEDGER_TTL. Same shape as #245:
+                // PARENTED starts only (the event's OWN parent, judged
+                // BEFORE the ledger adoption below — parentless revivals are
+                // deliberately allowed through and re-linked instead, #246),
+                // unknown ids only, tombstone not consumed.
+                if parent_id.is_some()
+                    && !scene.agents.contains_key(&agent_id)
+                    && self.child_recently_ended(agent_id, now)
+                {
+                    tracing::warn!(
+                        ?agent_id,
+                        %session_id,
+                        proposed_parent = ?parent_id,
+                        "skipped child SessionStart — the child already ended \
+                         (child ledger, #244)"
+                    );
+                    return;
+                }
+                // Ledger adoption (#246 / #244-w1): a PARENTLESS start for an
+                // id whose ledger entry remembers an applied parent is a
+                // same-id new life of a known CHILD — a multi-turn Codex
+                // child revived by the next prompt (SubagentStart fires only
+                // at thread STARTUP, SubagentStop at EVERY turn end), or a
+                // dead child's flat-rollout first-sight (parentless by
+                // layout). Adopt the remembered parent so it re-joins the
+                // scope tree (cascade/liveness/readiness) instead of
+                // registering as an orphan. Revivals are deliberately NOT
+                // blocked the way parented re-registrations are: Codex
+                // resurrect-on-prompt is a legitimate same-id new life, and
+                // for a genuinely dead child a parent-linked slot rides the
+                // parent cascade / the 5-min Codex short-idle reap — strictly
+                // better than the orphan phantom. The adopted link runs
+                // through the #240 cycle filter below exactly like a
+                // wire-carried one (a poisoned ledger degrades to parentless).
+                let parent_id = parent_id
+                    .or_else(|| self.child_ledger.get(&agent_id).and_then(|e| e.parent_id));
                 // Refuse a parent link whose ancestor chain reaches the child
                 // — the ONE seam where `parent_id` is set (registration below)
                 // or enriched (the orphan arm), so a cycle can never EXIST and
@@ -574,6 +667,13 @@ impl Reducer {
                     if slot.parent_id.is_none() {
                         if let Some(p) = parent_id {
                             slot.parent_id = Some(p);
+                            // An APPLIED link feeds the child ledger
+                            // (#244/#246); clearing ended_at marks this life
+                            // alive so gc can't prune the memory while the
+                            // child still lives (the end/sweep re-stamps it).
+                            let entry = self.child_ledger.entry(agent_id).or_default();
+                            entry.parent_id = Some(p);
+                            entry.ended_at = None;
                         }
                     }
                     // G4 back-fill: a slot can exist with MISSING identity
@@ -652,7 +752,17 @@ impl Reducer {
                     }
                     return;
                 }
-                self.register_slot(scene, agent_id, &source, &session_id, &cwd, parent_id, now);
+                if self.register_slot(scene, agent_id, &source, &session_id, &cwd, parent_id, now) {
+                    // A CHILD registration feeds the ledger with its APPLIED
+                    // parent (a desk-exhaustion refusal records nothing — the
+                    // session was dropped, not registered); ended_at clears
+                    // for the new life, mirroring the enrichment above.
+                    if let Some(p) = parent_id {
+                        let entry = self.child_ledger.entry(agent_id).or_default();
+                        entry.parent_id = Some(p);
+                        entry.ended_at = None;
+                    }
+                }
             }
             AgentEvent::ActivityStart {
                 agent_id,
@@ -746,7 +856,17 @@ impl Reducer {
                     fsm::rename(slot, &label, now);
                 }
             }
-            AgentEvent::SessionEnd { agent_id } => {
+            AgentEvent::SessionEnd { agent_id, as_child } => {
+                // A SubagentStop-derived end stamps the child ledger
+                // REGARDLESS of slot existence (#244): the Stop-before-Start
+                // reorder has no slot, yet its ended_at must arm the parented
+                // gate (entry defaults parentless — the blocked Start never
+                // applies a link). For a KNOWN slot this is the stamp that
+                // outlives the 4.5s GC, covering the late-first-sight window
+                // the #245 unknown-id tombstone structurally can't.
+                if as_child {
+                    self.child_ledger.entry(agent_id).or_default().ended_at = Some(now);
+                }
                 if let Some(slot) = scene.agents.get_mut(&agent_id) {
                     fsm::mark_exiting(slot, now);
                 }
@@ -818,6 +938,19 @@ impl Reducer {
         self.recent_hook_session_ends.get(&id).is_some_and(|ts| {
             now.duration_since(*ts)
                 .is_ok_and(|d| d < HOOK_SESSION_END_TOMBSTONE_TTL)
+        })
+    }
+
+    /// Whether the child ledger records `id` as ENDED within
+    /// [`CHILD_END_LEDGER_TTL`] — the #244-w2 gate's predicate (the ledger
+    /// sibling of [`Reducer::hook_session_end_tombstoned`]). Clock-regression
+    /// safe like the `gc` retains (a future timestamp is not fresh).
+    fn child_recently_ended(&self, id: AgentId, now: SystemTime) -> bool {
+        self.child_ledger.get(&id).is_some_and(|e| {
+            e.ended_at.is_some_and(|ts| {
+                now.duration_since(ts)
+                    .is_ok_and(|d| d < CHILD_END_LEDGER_TTL)
+            })
         })
     }
 
@@ -1171,6 +1304,15 @@ impl Reducer {
             now.duration_since(*ts)
                 .is_ok_and(|d| d < DRAINED_TASK_TOMBSTONE_TTL)
         });
+        // Not-yet-ended entries ride until their end/sweep stamps ended_at
+        // (every slot removal goes through sweep_exited, which stamps it), so
+        // the map is bounded by live children + the TTL's trailing window.
+        self.child_ledger.retain(|_, e| match e.ended_at {
+            None => true,
+            Some(ts) => now
+                .duration_since(ts)
+                .is_ok_and(|d| d < CHILD_END_LEDGER_TTL),
+        });
     }
 
     /// Walk through agents with `pending_idle_at` set and flip their
@@ -1334,6 +1476,14 @@ impl Reducer {
             // (like the per-agent siblings above) keeps a removed id from
             // exempting a same-id resurrect ghost inside the TTL window.
             self.recent_proof_of_life.remove(&id);
+            // A CHILD whose end wasn't `as_child` (stale-swept, parent-
+            // cascaded, negative-vouched) starts its ledger GC clock at slot
+            // removal, keeping the map bounded — and arming the #244-w2 gate
+            // for those exits too. `get_or_insert` keeps an earlier as_child
+            // stamp; roots have no entry, so this scopes itself to children.
+            if let Some(entry) = self.child_ledger.get_mut(&id) {
+                entry.ended_at.get_or_insert(now);
+            }
         }
     }
 }
@@ -1593,7 +1743,10 @@ mod tests {
         // sweep_exited runs on the APPLY path (not tick).
         r.apply(
             &mut scene,
-            AgentEvent::SessionEnd { agent_id: id },
+            AgentEvent::SessionEnd {
+                agent_id: id,
+                as_child: false,
+            },
             t0,
             Transport::Hook,
         );
@@ -1706,7 +1859,10 @@ mod tests {
         // cascade's grace elapses).
         r.apply(
             &mut scene,
-            AgentEvent::SessionEnd { agent_id: id },
+            AgentEvent::SessionEnd {
+                agent_id: id,
+                as_child: false,
+            },
             t0 + Duration::from_secs(4),
             Transport::Hook,
         );
@@ -1739,6 +1895,85 @@ mod tests {
         assert!(
             r.recent_proof_of_life.contains_key(&id),
             "the vouch must SURVIVE resurrection — the process is alive"
+        );
+    }
+
+    // White-box: the child ledger's BOUNDING contract (#244). An entry is
+    // created with `ended_at: None` when a parent link is applied; a child
+    // removed WITHOUT an as_child end (here: the parent's cascade) must get
+    // ended_at stamped by `sweep_exited` — that both arms the #244-w2 gate
+    // for those exits and starts the gc clock — and gc must prune it after
+    // CHILD_END_LEDGER_TTL. Roots never enter the ledger. The public
+    // behavioral pins live in tests/reducer.rs; the stamping/pruning
+    // internals have no other observable.
+    #[test]
+    fn child_ledger_is_stamped_on_sweep_and_pruned_by_gc() {
+        use crate::source::{AgentEvent, Transport};
+        use crate::state::SceneState;
+        use crate::AgentId;
+        use std::path::PathBuf;
+        use std::time::{Duration, SystemTime};
+
+        let mut r = super::Reducer::new();
+        let mut scene = SceneState::uniform(4);
+        let parent = AgentId::from_parts("codex", "ledger-parent");
+        let child = AgentId::from_parts("codex", "ledger-child");
+        let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+        let session_start = |agent_id, sid: &str, parent_id| AgentEvent::SessionStart {
+            agent_id,
+            source: "codex".into(),
+            session_id: sid.into(),
+            cwd: PathBuf::from("/repo"),
+            parent_id,
+        };
+        r.apply(
+            &mut scene,
+            session_start(parent, "ledger-parent", None),
+            t0,
+            Transport::Hook,
+        );
+        r.apply(
+            &mut scene,
+            session_start(child, "ledger-child", Some(parent)),
+            t0,
+            Transport::Hook,
+        );
+        assert!(
+            !r.child_ledger.contains_key(&parent),
+            "a root registration must not enter the child ledger"
+        );
+        let entry = r.child_ledger.get(&child).expect("child link recorded");
+        assert_eq!(entry.parent_id, Some(parent));
+        assert!(entry.ended_at.is_none(), "alive — no gc clock yet");
+
+        // The parent's clean exit cascades the child out; neither end was
+        // `as_child`, so only sweep_exited can stamp the clock.
+        r.apply(
+            &mut scene,
+            AgentEvent::SessionEnd {
+                agent_id: parent,
+                as_child: false,
+            },
+            t0 + Duration::from_secs(1),
+            Transport::Hook,
+        );
+        let swept = t0 + Duration::from_secs(1) + super::EXIT_GRACE_WINDOW + Duration::from_secs(1);
+        r.tick(&mut scene, swept);
+        assert!(!scene.agents.contains_key(&child), "child swept");
+        assert!(
+            r.child_ledger
+                .get(&child)
+                .is_some_and(|e| e.ended_at.is_some()),
+            "sweep_exited must stamp ended_at for a child whose end wasn't as_child"
+        );
+
+        r.tick(
+            &mut scene,
+            swept + super::CHILD_END_LEDGER_TTL + Duration::from_secs(1),
+        );
+        assert!(
+            !r.child_ledger.contains_key(&child),
+            "gc must prune an ended entry past CHILD_END_LEDGER_TTL"
         );
     }
 }

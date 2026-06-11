@@ -141,6 +141,7 @@ fn cc_subagent_links_renames_and_cascades_on_parent_exit() {
         &mut scene,
         AgentEvent::SessionEnd {
             agent_id: parent_id(),
+            as_child: false,
         },
         now,
         Transport::Hook,

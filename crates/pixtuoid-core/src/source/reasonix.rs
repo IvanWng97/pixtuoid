@@ -170,7 +170,10 @@ pub fn decode_rx_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
                 },
             ])
         }
-        "SessionEnd" => Ok(vec![AgentEvent::SessionEnd { agent_id }]),
+        "SessionEnd" => Ok(vec![AgentEvent::SessionEnd {
+            agent_id,
+            as_child: false,
+        }]),
         other => bail!("unsupported reasonix hook event: {other}"),
     }
 }

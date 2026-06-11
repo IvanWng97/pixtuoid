@@ -257,7 +257,10 @@ pub fn decode_hook_payload(v: Value) -> Result<Vec<AgentEvent>> {
             agent_id,
             tool_use_id: None,
         }]),
-        "SessionEnd" => Ok(vec![AgentEvent::SessionEnd { agent_id }]),
+        "SessionEnd" => Ok(vec![AgentEvent::SessionEnd {
+            agent_id,
+            as_child: false,
+        }]),
         // SubagentStart/SubagentStop live in the source modules'
         // `claude_code::decode_cc_hook_custom` / `codex::decode_codex_hook_custom`
         // (dispatched above via the registry) — they change the event's

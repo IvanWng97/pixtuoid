@@ -121,6 +121,7 @@ pub(crate) fn decode_cc_hook_custom(v: &Value) -> Result<Option<Vec<AgentEvent>>
         }
         Ok(Some(vec![AgentEvent::SessionEnd {
             agent_id: AgentId::from_parts(SOURCE_NAME, &path_key.unwrap_or(prefixed)),
+            as_child: true,
         }]))
     }
 }

@@ -78,7 +78,10 @@ fn scripted_timeline_drives_scene_through_states() {
     );
 
     step(
-        vec![AgentEvent::SessionEnd { agent_id: id }],
+        vec![AgentEvent::SessionEnd {
+            agent_id: id,
+            as_child: false,
+        }],
         10,
         &mut reducer,
         &mut scene,

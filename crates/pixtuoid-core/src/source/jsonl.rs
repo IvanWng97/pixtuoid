@@ -572,7 +572,13 @@ async fn emit_session_exit(id: &str, decoders: SourceDecoders, ctx: &WatchCtx<'_
     let agent_id = AgentId::from_parts(ctx.source, id);
     let _ = ctx
         .tx
-        .send((Transport::Jsonl, AgentEvent::SessionEnd { agent_id }))
+        .send((
+            Transport::Jsonl,
+            AgentEvent::SessionEnd {
+                agent_id,
+                as_child: false,
+            },
+        ))
         .await;
     {
         let mut seen = ctx.seen.lock().await;
@@ -865,7 +871,13 @@ async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &WatchCtx<'_>) {
         if ended_in_skip {
             let id = AgentId::from_parts(source, &(decoders.id_derive)(path));
             let _ = tx
-                .send((Transport::Jsonl, AgentEvent::SessionEnd { agent_id: id }))
+                .send((
+                    Transport::Jsonl,
+                    AgentEvent::SessionEnd {
+                        agent_id: id,
+                        as_child: false,
+                    },
+                ))
                 .await;
             // Un-claim first-sight AFTER forwarding the terminator: the
             // session is over, so a LATER append must re-register through
@@ -988,7 +1000,7 @@ async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &WatchCtx<'_>) {
                 for ev in events {
                     let ends_this_agent = matches!(
                         &ev,
-                        AgentEvent::SessionEnd { agent_id } if *agent_id == path_agent_id
+                        AgentEvent::SessionEnd { agent_id, .. } if *agent_id == path_agent_id
                     );
                     if tx.send((Transport::Jsonl, ev)).await.is_err() {
                         return;
@@ -1429,6 +1441,7 @@ mod tests {
         if v.get("subtype").and_then(|x| x.as_str()) == Some("session_end") {
             return Ok(vec![AgentEvent::SessionEnd {
                 agent_id: AgentId::from_parts(s, t),
+                as_child: false,
             }]);
         }
         Ok(vec![])
@@ -1634,7 +1647,7 @@ mod tests {
         let expected = AgentId::from_parts("test", &default_id_from_path(&path));
         assert!(
             events.iter().any(
-                |(_, e)| matches!(e, AgentEvent::SessionEnd { agent_id } if *agent_id == expected)
+                |(_, e)| matches!(e, AgentEvent::SessionEnd { agent_id, as_child: false } if *agent_id == expected)
             ),
             "the buried terminator must still emit SessionEnd, got {events:?}"
         );
@@ -2048,7 +2061,7 @@ mod tests {
         let expected = AgentId::from_parts("test", &default_id_from_path(&path));
         assert!(
             events.iter().any(
-                |(_, e)| matches!(e, AgentEvent::SessionEnd { agent_id } if *agent_id == expected)
+                |(_, e)| matches!(e, AgentEvent::SessionEnd { agent_id, as_child: false } if *agent_id == expected)
             ),
             "a buried session_end in the skipped span must still emit SessionEnd, got {events:?}"
         );
@@ -2406,7 +2419,7 @@ mod tests {
         let expected = AgentId::from_parts("test", LIVE_UUID);
         assert!(
             events.iter().any(
-                |(_, e)| matches!(e, AgentEvent::SessionEnd { agent_id } if *agent_id == expected)
+                |(_, e)| matches!(e, AgentEvent::SessionEnd { agent_id, as_child: false } if *agent_id == expected)
             ),
             "the buried terminator must still emit SessionEnd (a reducer no-op for an unknown id), got {events:?}"
         );

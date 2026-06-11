@@ -661,7 +661,7 @@ async fn assert_no_session_end_within(
 ) {
     let quiet_until = tokio::time::Instant::now() + window;
     while tokio::time::Instant::now() < quiet_until {
-        if let Ok(Some((_, AgentEvent::SessionEnd { agent_id }))) =
+        if let Ok(Some((_, AgentEvent::SessionEnd { agent_id, .. }))) =
             tokio::time::timeout(Duration::from_millis(50), rx.recv()).await
         {
             assert_ne!(agent_id, expected, "{why}");
@@ -694,8 +694,13 @@ async fn negative_vouch_emits_session_end_after_sustained_disappearance() {
     let mut ended = false;
     let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
     while tokio::time::Instant::now() < deadline {
-        if let Ok(Some((Transport::Jsonl, AgentEvent::SessionEnd { agent_id }))) =
-            tokio::time::timeout(Duration::from_millis(200), rx.recv()).await
+        if let Ok(Some((
+            Transport::Jsonl,
+            AgentEvent::SessionEnd {
+                agent_id,
+                as_child: false,
+            },
+        ))) = tokio::time::timeout(Duration::from_millis(200), rx.recv()).await
         {
             if agent_id == expected {
                 ended = true;
@@ -891,8 +896,13 @@ async fn instant_exit_emits_session_end_when_bound_pid_dies() {
     let mut ended = false;
     let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
     while tokio::time::Instant::now() < deadline {
-        if let Ok(Some((Transport::Jsonl, AgentEvent::SessionEnd { agent_id }))) =
-            tokio::time::timeout(Duration::from_millis(200), rx.recv()).await
+        if let Ok(Some((
+            Transport::Jsonl,
+            AgentEvent::SessionEnd {
+                agent_id,
+                as_child: false,
+            },
+        ))) = tokio::time::timeout(Duration::from_millis(200), rx.recv()).await
         {
             if agent_id == expected {
                 ended = true;
@@ -974,8 +984,13 @@ async fn negative_vouch_confirm_unbinds_pid_so_a_later_exit_is_quiet() {
     let mut ended = false;
     let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
     while tokio::time::Instant::now() < deadline {
-        if let Ok(Some((Transport::Jsonl, AgentEvent::SessionEnd { agent_id }))) =
-            tokio::time::timeout(Duration::from_millis(200), rx.recv()).await
+        if let Ok(Some((
+            Transport::Jsonl,
+            AgentEvent::SessionEnd {
+                agent_id,
+                as_child: false,
+            },
+        ))) = tokio::time::timeout(Duration::from_millis(200), rx.recv()).await
         {
             if agent_id == expected {
                 ended = true;
@@ -1035,8 +1050,13 @@ async fn instant_exit_under_probe_failure_does_not_resurrect_the_session() {
     let mut ended = false;
     let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
     while tokio::time::Instant::now() < deadline {
-        if let Ok(Some((Transport::Jsonl, AgentEvent::SessionEnd { agent_id }))) =
-            tokio::time::timeout(Duration::from_millis(200), rx.recv()).await
+        if let Ok(Some((
+            Transport::Jsonl,
+            AgentEvent::SessionEnd {
+                agent_id,
+                as_child: false,
+            },
+        ))) = tokio::time::timeout(Duration::from_millis(200), rx.recv()).await
         {
             if agent_id == expected {
                 ended = true;
@@ -1113,8 +1133,13 @@ async fn rebound_session_survives_old_pid_death_and_follows_the_new_pid() {
     let mut ended = false;
     let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
     while tokio::time::Instant::now() < deadline {
-        if let Ok(Some((Transport::Jsonl, AgentEvent::SessionEnd { agent_id }))) =
-            tokio::time::timeout(Duration::from_millis(200), rx.recv()).await
+        if let Ok(Some((
+            Transport::Jsonl,
+            AgentEvent::SessionEnd {
+                agent_id,
+                as_child: false,
+            },
+        ))) = tokio::time::timeout(Duration::from_millis(200), rx.recv()).await
         {
             if agent_id == expected {
                 ended = true;

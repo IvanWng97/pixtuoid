@@ -108,6 +108,7 @@ pub(crate) fn decode_codex_hook_custom(v: &Value) -> Result<Option<Vec<AgentEven
             let child = child.ok_or_else(|| anyhow!("SubagentStop missing/empty agent_id"))?;
             Ok(Some(vec![AgentEvent::SessionEnd {
                 agent_id: AgentId::from_parts(SOURCE_NAME, &child),
+                as_child: true,
             }]))
         }
         _ => Ok(None),

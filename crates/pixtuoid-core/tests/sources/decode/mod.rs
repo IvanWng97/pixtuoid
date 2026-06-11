@@ -108,7 +108,16 @@ fn decode_notification_is_waiting() {
 #[test]
 fn decode_session_end() {
     let ev = decode_single(load("session_end"));
-    assert!(matches!(ev, AgentEvent::SessionEnd { .. }));
+    // The shared session-keyed SessionEnd arm ends the SESSION ITSELF, never
+    // a child — as_child stays false so the reducer's child ledger
+    // (#244/#246) is written only by the SubagentStop decoders.
+    assert!(matches!(
+        ev,
+        AgentEvent::SessionEnd {
+            as_child: false,
+            ..
+        }
+    ));
 }
 
 #[test]
@@ -207,11 +216,18 @@ fn codex_subagent_stop_ends_child_not_parent() {
         "_pixtuoid_source": "codex"
     }));
     match ev {
-        AgentEvent::SessionEnd { agent_id } => assert_eq!(
-            agent_id,
-            AgentId::from_parts("codex", "child-agent"),
-            "ends the CHILD (keyed on agent_id), never the parent session"
-        ),
+        AgentEvent::SessionEnd { agent_id, as_child } => {
+            assert_eq!(
+                agent_id,
+                AgentId::from_parts("codex", "child-agent"),
+                "ends the CHILD (keyed on agent_id), never the parent session"
+            );
+            assert!(
+                as_child,
+                "a SubagentStop end must carry the as_child stamp (the reducer's \
+                 child ledger keys on it, #244/#246)"
+            );
+        }
         other => panic!("expected SessionEnd, got {other:?}"),
     }
 }
@@ -323,12 +339,19 @@ fn cc_subagent_stop_keys_on_agent_transcript_path_stem() {
             "last_assistant_message": "done"
         }));
         match ev {
-            AgentEvent::SessionEnd { agent_id } => assert_eq!(
-                agent_id,
-                AgentId::from_parts("claude-code", "agent-a0000000000000001"),
-                "ends the CHILD keyed on the agent transcript's filename stem \
-                 (path: {nested_path})"
-            ),
+            AgentEvent::SessionEnd { agent_id, as_child } => {
+                assert_eq!(
+                    agent_id,
+                    AgentId::from_parts("claude-code", "agent-a0000000000000001"),
+                    "ends the CHILD keyed on the agent transcript's filename stem \
+                     (path: {nested_path})"
+                );
+                assert!(
+                    as_child,
+                    "a SubagentStop end must carry the as_child stamp (the reducer's \
+                     child ledger keys on it, #244/#246)"
+                );
+            }
             other => panic!("expected SessionEnd, got {other:?}"),
         }
     }
@@ -359,7 +382,7 @@ fn cc_subagent_stop_without_transcript_path_falls_back_to_prefixed_agent_id() {
     ] {
         let ev = decode_single(payload);
         match ev {
-            AgentEvent::SessionEnd { agent_id } => assert_eq!(
+            AgentEvent::SessionEnd { agent_id, .. } => assert_eq!(
                 agent_id,
                 AgentId::from_parts("claude-code", "agent-a0000000000000001")
             ),

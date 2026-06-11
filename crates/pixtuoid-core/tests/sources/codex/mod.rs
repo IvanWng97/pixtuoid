@@ -186,10 +186,14 @@ fn codex_subagent_stop_before_start_is_a_safe_noop() {
         now,
         Transport::Hook,
     );
-    // SubagentStop decodes to SessionEnd{child}; apply with no child present.
+    // SubagentStop decodes to SessionEnd{child, as_child: true}; apply with
+    // no child present.
     r.apply(
         &mut scene,
-        AgentEvent::SessionEnd { agent_id: child },
+        AgentEvent::SessionEnd {
+            agent_id: child,
+            as_child: true,
+        },
         now,
         Transport::Hook,
     );
