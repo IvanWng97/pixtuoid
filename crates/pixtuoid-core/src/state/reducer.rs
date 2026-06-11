@@ -511,7 +511,12 @@ impl Reducer {
                 // lost. Parentless starts are exempt BY CONSTRUCTION:
                 // Reasonix's documented SessionEnd→SessionStart resurrect
                 // rides the same (cwd-keyed, parentless) id and must keep
-                // registering. The tombstone is NOT consumed — a duplicate
+                // registering. KNOWN BYPASS of that exemption: a Codex
+                // child's flat-rollout first-sight is itself parentless
+                // (detect_parent_id is CC-layout-specific), so a tombstoned
+                // Codex child can still register as an orphan through the
+                // JSONL leg — bounded by the 5-min short-idle reap, tracked
+                // as a residual. The tombstone is NOT consumed — a duplicate
                 // late Start must no-op too.
                 if parent_id.is_some()
                     && !scene.agents.contains_key(&agent_id)
@@ -520,8 +525,9 @@ impl Reducer {
                     tracing::warn!(
                         ?agent_id,
                         %session_id,
+                        proposed_parent = ?parent_id,
                         "skipped child SessionStart — its hook SessionEnd already passed \
-                         (reordered SubagentStop, #242)"
+                         (a late or reordered start, #242)"
                     );
                     return;
                 }

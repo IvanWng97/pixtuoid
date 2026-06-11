@@ -5186,8 +5186,10 @@ fn jsonl_child_session_start_within_tombstone_is_gated_too() {
 
 #[test]
 fn child_session_start_past_tombstone_ttl_registers() {
-    // The gate is a tombstone, not a blacklist: a child Start past the TTL
-    // is a genuinely new life on a recycled id and must register.
+    // The gate is a tombstone, not a blacklist: child ids are per-spawn
+    // unique, so a Start past the TTL is the late-discovery case (e.g. a
+    // notify outage deferring the transcript first-sight to the 60s poll)
+    // and must register — the TTL bounds the guard, the sweeps own the rest.
     let mut scene = SceneState::uniform(4);
     let mut r = Reducer::new();
     let parent = AgentId::from_parts("claude-code", "parent-sess");
