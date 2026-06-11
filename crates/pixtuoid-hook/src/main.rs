@@ -20,8 +20,12 @@ const STAMP_HEADROOM: u64 = 256;
 
 /// Stdin cap. `STDIN_CAP + STAMP_HEADROOM` equals the daemon's Windows pipe
 /// in-buffer quota (`IN_BUFFER_SIZE = 1 << 20` in pixtuoid-core's
-/// source/hook/windows.rs), so one stamped payload always fits the pipe and
-/// the shim's sync write can't stall on quota.
+/// source/hook/windows.rs), so a stamped payload fits the pipe and the shim's
+/// sync write can't stall on quota. The headroom covers what the SHIM adds;
+/// pathological number canonicalization can still expand the body itself
+/// (e.g. `1e9` re-serializes to `1000000000.0`) and an absurdly long
+/// `--source` value can exceed the stamp budget — both degrade to the
+/// pre-existing stall→watchdog→drop mode, never a block of CC.
 const STDIN_CAP: u64 = (1 << 20) - STAMP_HEADROOM;
 
 /// Explicit `u128 → u64` narrowing (`try_from`, not a truncating `as` cast):

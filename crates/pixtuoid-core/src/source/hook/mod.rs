@@ -40,7 +40,9 @@ impl HookSocketListener {
     }
 }
 
-/// Per-connection byte ceiling: 2× the shim's 1MiB stdin cap. lines() buffers
+/// Per-connection byte ceiling: 2× the shim's ~1MiB stdin cap (the cap is
+/// `1MiB − STAMP_HEADROOM` since the pipe-quota fix, so 2MiB sits comfortably
+/// above any stamped line). lines() buffers
 /// until a newline, so without this an adversarial client could grow the
 /// buffer unboundedly for the whole CONN_TIMEOUT window × 128 slots —
 /// defense-in-depth behind the owner-only endpoint (Unix socket 0700, Windows

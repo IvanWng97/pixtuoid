@@ -186,7 +186,7 @@ pub fn resolve_max_desks(config: &AppConfig, warnings: &mut Vec<String>) -> Opti
             tracing::warn!("max-desks = 0 in config would hide every agent — ignoring");
             warnings.push(
                 "max-desks = 0 in config would hide every agent — ignoring it \
-                 (desk capacity stays auto-computed)"
+                 (the --max-desks flag or auto-computed capacity applies)"
                     .into(),
             );
             None
