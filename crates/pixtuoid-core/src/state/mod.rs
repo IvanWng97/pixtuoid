@@ -5,6 +5,7 @@ use std::time::SystemTime;
 
 use crate::id::AgentId;
 
+mod correlation;
 mod fsm;
 pub mod reducer;
 mod scope;

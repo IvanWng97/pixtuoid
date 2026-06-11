@@ -1,63 +1,25 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use crate::source::{AgentEvent, Transport};
+use crate::state::correlation::{Correlation, ToolEventKind};
 use crate::state::{fsm, scope, ActivityState, AgentSlot, SceneState};
 use crate::AgentId;
 
-/// Window in which a Hook event suppresses a later Jsonl event with the same
-/// tool_use_id. The suppression is asymmetric by event kind — a recorded hook
-/// End drops both JSONL kinds, a recorded hook Start drops only JSONL Starts
-/// (see `ToolEventKind`, #150).
-///
-// These reducer tuning constants are `pub` ONLY so the integration test
-// (`tests/reducer.rs`, a separate crate) can derive its timing offsets from
-// them instead of hardcoding ms. They are internal knobs, not a stable API:
-// `#[doc(hidden)]` keeps the cross-crate visibility the test needs while
-// excluding them from the rendered docs AND from cargo-semver-checks, so a
-// future retune/rename is not a breaking change. (`EXIT_GRACE_WINDOW` below
-// is deliberately NOT hidden — the binary's pose module is a real consumer.)
+// The correlation-map TTL constants moved to `state/correlation.rs` with
+// their maps; re-exported here so the `state::reducer::*` paths the
+// integration tests (and any external user of the doc(hidden) knobs) consume
+// are unchanged.
 #[doc(hidden)]
-pub const HOOK_WINS_WINDOW: Duration = Duration::from_millis(500);
+pub use crate::state::correlation::{
+    CHILD_END_LEDGER_TTL, DRAINED_TASK_TOMBSTONE_TTL, HOOK_SESSION_END_TOMBSTONE_TTL,
+    HOOK_WINS_WINDOW, PROOF_OF_LIFE_TTL,
+};
 
 /// How long to keep an exiting agent's slot alive after `SessionEnd` so the
 /// walkout-to-door animation has time to play before the slot is removed.
 pub const EXIT_GRACE_WINDOW: Duration = Duration::from_millis(4500);
-
-/// How long a hook `SessionEnd` for an UNKNOWN id suppresses hook-synthesis
-/// for that id ([`Reducer::synthesize_hook_registration`]) AND child
-/// (`parent_id`-carrying) `SessionStart` registration (#242, either
-/// transport). Hook connections are per-connection spawned tasks, so a
-/// session's SessionEnd and a trailing Stop/ActivityEnd can be DELIVERED
-/// reordered — for an invisible (never-registered) session ending at /exit,
-/// the reordered straggler would otherwise synthesize a blank Idle ghost with
-/// NO SessionEnd left to ever remove it (it lives out the full 30-min idle
-/// sweep); a short-lived subagent's SubagentStart decoded after its own
-/// SubagentStop would likewise register a phantom child. 5s is generous next
-/// to [`HOOK_WINS_WINDOW`]'s modeled transport skew — reordering here is
-/// same-machine task-scheduling jitter, so the headroom costs nothing —
-/// while short enough that a genuinely revived session on the same id is
-/// never visibly delayed.
-#[doc(hidden)]
-pub const HOOK_SESSION_END_TOMBSTONE_TTL: Duration = Duration::from_secs(5);
-
-/// How long a child-ledger entry's `ended_at` keeps gating a PARENTED
-/// re-registration of that child after it ended ([`Reducer::apply`]'s
-/// `SessionStart` arm, #244). The #242 hook tombstone above covers only the
-/// 5s reorder window for UNKNOWN-id ends; this covers the residual windows it
-/// can't: a child that ended on a KNOWN slot (no tombstone minted) whose
-/// transcript first-sight arrives LATE — a notify outage defers discovery to
-/// the watcher's 60s poll backstop, well past both the 5s tombstone and the
-/// 4.5s [`EXIT_GRACE_WINDOW`] GC. Sized like
-/// [`DRAINED_TASK_TOMBSTONE_TTL`]: past the 60s poll plus slack, and
-/// generosity costs nothing — child ids are per-spawn unique, so a parented
-/// Start inside the window is never a legitimate new child, only the dead
-/// one's late echo. (Parentless Starts are deliberately NOT gated: a Codex
-/// resurrect-on-prompt is a legitimate same-id new life — they RE-LINK via
-/// the ledger's remembered parent instead, #246.)
-#[doc(hidden)]
-pub const CHILD_END_LEDGER_TTL: Duration = Duration::from_secs(90);
 
 /// How long a drained parent's b1 completion cascade is deferred before the
 /// delegated subtree is marked exiting (#151). A parallel SECOND Task
@@ -79,21 +41,6 @@ pub const CHILD_END_LEDGER_TTL: Duration = Duration::from_secs(90);
 /// (residual documented in #151).
 #[doc(hidden)]
 pub const B1_CASCADE_GRACE: Duration = Duration::from_millis(2500);
-
-/// How long a drained Task `tool_use_id` is remembered so a lagged JSONL
-/// replay of its Start cannot re-fire `enter_delegating`. A fast Task (both
-/// hooks delivered) drains `active_tasks` and its hook-End dedup record is
-/// GC'd at [`HOOK_WINS_WINDOW`] — the transcript's batched Start+End pair
-/// then replays into an EMPTY set, so the first-insert gate reads it as a
-/// fresh dispatch and would clobber a Waiting the parent raised in the gap
-/// (then settle the still-pending prompt to Idle via the replayed End).
-/// Sized past the 60s `scan_root` poll backstop (the worst-case replay path
-/// when notify drops the dispatch's write) plus slack; unlike
-/// [`B1_CASCADE_GRACE`] generosity costs nothing here — a `tool_use_id` is
-/// never legitimately re-dispatched, so the only cost is the tombstone's
-/// map entry.
-#[doc(hidden)]
-pub const DRAINED_TASK_TOMBSTONE_TTL: Duration = Duration::from_secs(90);
 
 /// How long the slot stays visually Active after an `ActivityEnd` before
 /// the reducer's tick flips it to Idle. Hides the per-tool-call Active
@@ -149,19 +96,6 @@ pub const STALE_UNKNOWN_CWD_TIMEOUT: Duration = Duration::from_secs(3 * 60);
 /// with no upside.
 #[doc(hidden)]
 pub const STALE_SHORT_IDLE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
-
-/// How long an [`AgentEvent::ProofOfLife`] vouch exempts its slot from the
-/// staleness sweeps (#220). The probe is ground truth that the OWNING PROCESS
-/// is alive, while every `STALE_*` window above only models event silence — so
-/// a vouched slot must not be swept on silence alone (the motivating case: a
-/// probe-vouched CC session parked on a permission prompt renders Active after
-/// attach-replay — its hook-only Waiting state is unreconstructable from JSONL
-/// — and 10 min of silence is normal while the human decides). Sized 2.5× the
-/// watcher's 60s poll cadence: two missed polls plus slack. When the live
-/// signal disappears (registry entry removed / rollout fd closed) the
-/// emissions stop and the normal sweeps resume after this lapse.
-#[doc(hidden)]
-pub const PROOF_OF_LIFE_TTL: Duration = Duration::from_secs(150);
 
 /// The state-adaptive stale timeout for one slot. Unknown-cwd ghosts reap on the
 /// shortest window (almost always startup-seeding artifacts). Otherwise the
@@ -283,22 +217,6 @@ fn backfill_identity<'a>(
     None
 }
 
-/// One child's remembered lifecycle in [`Reducer::child_ledger`]. `Default`
-/// is the "as_child end for a never-registered child" shape: parent unknown,
-/// not yet ended (the end-site sets `ended_at` right after the upsert).
-#[derive(Debug, Default, Clone, Copy)]
-struct ChildLedgerEntry {
-    /// The last APPLIED parent link — `None` when the child was only ever
-    /// seen ending (the Stop-before-Start reorder blocked its Start, so no
-    /// link was ever applied; an accepted residual: its later flat
-    /// first-sight registers parentless, bounded by the sweeps).
-    parent_id: Option<AgentId>,
-    /// When the child ended (`as_child` SessionEnd) or its slot was removed,
-    /// whichever came first; `None` while a registered life is still alive.
-    /// Starts the [`CHILD_END_LEDGER_TTL`] GC clock AND the #244-w2 gate.
-    ended_at: Option<SystemTime>,
-}
-
 /// Outcome flags from [`Reducer::track_active_tasks`], consumed by `apply`'s
 /// main event match.
 struct TaskTracking {
@@ -315,28 +233,10 @@ struct TaskTracking {
 
 #[derive(Debug, Default)]
 pub struct Reducer {
-    /// Track recent hook-derived events so JSONL duplicates can be dropped.
-    /// The value carries the recorded event's kind: the drop matrix is
-    /// asymmetric — see [`ToolEventKind`]. A hook End overwrites its tool's
-    /// Start entry (kind-in-the-VALUE, not the key), which is what lets one
-    /// End record cover the tool's whole lagged JSONL pair.
-    recent_hook_tool_uses: HashMap<(AgentId, String), (SystemTime, ToolEventKind)>,
-    /// Short-TTL tombstones for hook `SessionEnd`s that arrived for an id
-    /// with NO slot — an invisible (unregistered) session ending. A reordered
-    /// trailing hook event for a tombstoned id must not re-synthesize the
-    /// session, and a reordered CHILD `SessionStart` (`parent_id`-carrying —
-    /// a SubagentStart decoded after its own SubagentStop, #242; gated on
-    /// BOTH transports) must not register it (see
-    /// [`HOOK_SESSION_END_TOMBSTONE_TTL`]). Mirrors `recent_hook_tool_uses`,
-    /// including its `gc` tick-time pruning.
-    recent_hook_session_ends: HashMap<AgentId, SystemTime>,
-    /// Per-agent set of Task tool_use_ids currently in flight. CC's hook
-    /// payload sets `transcript_path` to the PARENT'S transcript even when a
-    /// subagent is the actor, so subagent hook events hash to the parent's
-    /// AgentId. While the parent has any Task in flight, hook
-    /// ActivityStart/End events for that AgentId are dropped — JSONL has
-    /// correct attribution to the subagent's own AgentId.
-    active_tasks: HashMap<AgentId, HashSet<String>>,
+    /// The seven cross-slot correlation maps + their TTL pruning — see
+    /// `state/correlation.rs` (the maps moved there verbatim; decisions stay
+    /// in the arms below).
+    corr: Correlation,
     /// Parents whose last Task drained, awaiting the deferred b1 cascade
     /// ([`B1_CASCADE_GRACE`]): armed on drain, fired by
     /// `fire_pending_b1_cascades` on the tick/apply sweep path — but only if
@@ -345,48 +245,7 @@ pub struct Reducer {
     /// copy — #151) defuses it. Evicted at BOTH sites like the other maps
     /// (tick's retain + `sweep_exited`'s remove).
     pending_b1_cascades: HashMap<AgentId, SystemTime>,
-    /// Tombstones for Task tool_use_ids whose drain already completed: a
-    /// lagged JSONL pair-replay after the drain re-inserts the tuid as a
-    /// FRESH first insert (set empty, dedup record GC'd), so the tracker's
-    /// first-insert gate alone can't stop `enter_delegating` from clobbering
-    /// a Waiting raised since. Consulted by the Start arm; TTL-pruned by
-    /// `gc` ([`DRAINED_TASK_TOMBSTONE_TTL`]) like the hook-recency maps —
-    /// not per-slot state, a tuid can't recur across lives.
-    recent_task_drains: HashMap<(AgentId, String), SystemTime>,
-    /// Memory of CHILD (subagent) lifecycles, surviving the slots themselves
-    /// (#244/#246). Keyed by the child's id; `parent_id` is upserted whenever
-    /// a parent link is APPLIED (registration or orphan-enrichment — never a
-    /// cycle-refused or tombstone-blocked one), `ended_at` is stamped by an
-    /// `as_child` SessionEnd (a SubagentStop decode — regardless of slot
-    /// existence, covering the Stop-before-Start reorder) and by
-    /// `sweep_exited` removing the child's slot (so a stale-swept/cascaded
-    /// child starts the GC clock too and the map stays bounded; a new life's
-    /// link-upsert clears it). Consumed by the `SessionStart` arm: a fresh
-    /// `ended_at` gates a PARENTED re-registration (the dead child's late
-    /// echo, #244-w2), while a PARENTLESS start ADOPTS the remembered parent
-    /// (a post-un-claim revival start re-links — #246's adoption seam; a
-    /// tombstoned child's flat first-sight registers parent-linked, #244-w1).
-    /// Deliberately reducer-private like `recent_proof_of_life` — not an
-    /// `AgentSlot` field, no semver surface; pruned by `gc` on
-    /// [`CHILD_END_LEDGER_TTL`] once ended.
-    child_ledger: HashMap<AgentId, ChildLedgerEntry>,
-    /// Sweep-exemption timestamps from [`AgentEvent::ProofOfLife`] (#220):
-    /// a slot vouched for within [`PROOF_OF_LIFE_TTL`] is skipped by
-    /// `sweep_stale`'s candidate collection. Deliberately reducer-private
-    /// state, NOT a field on the public `AgentSlot` (no semver surface
-    /// change); pruned by `gc` on TTL like its hook-recency siblings and
-    /// evicted with the slot in `sweep_exited`.
-    recent_proof_of_life: HashMap<AgentId, SystemTime>,
-    /// `tool_use_id` that was Active immediately before an agent entered
-    /// `Waiting` (a CC permission `Notification` fires mid-tool). When THAT
-    /// tool's `ActivityEnd` (its `PostToolUse`) arrives, the permission has been
-    /// resolved and the gated tool ran — so the Waiting resolves (debounced to
-    /// Idle) instead of lingering until the agent's next tool. A *parallel*
-    /// tool ending carries a different id, so it can't false-clear a still-
-    /// pending permission (preserves `parallel_tool_end_while_waiting_keeps_waiting`).
-    /// Codex never populates this (its tool events carry no `tool_use_id`), so
-    /// its permission resume stays on the `ActivityStart` path.
-    gated_before_waiting: HashMap<AgentId, Arc<str>>,
+
     /// Monotonic counter for human-readable labels.
     next_label_n: u32,
 }
@@ -402,16 +261,18 @@ impl Reducer {
     /// timers actually fire even when no new event arrives to drive
     /// `apply`.
     pub fn tick(&mut self, scene: &mut SceneState, now: SystemTime) {
-        self.gc(now);
+        self.corr.gc(now);
         self.sweep_exited(scene, now);
         self.expire_pending_idles(scene, now);
         self.fire_pending_b1_cascades(scene, now);
         self.sweep_stale(scene, now);
         // Clean up active_tasks entries for agents that never got a
         // SessionStart (Task event arrived before JSONL created the slot).
-        self.active_tasks
+        self.corr
+            .active_tasks
             .retain(|id, _| scene.agents.contains_key(id));
-        self.gated_before_waiting
+        self.corr
+            .gated_before_waiting
             .retain(|id, _| scene.agents.contains_key(id));
         self.pending_b1_cascades
             .retain(|id, _| scene.agents.contains_key(id));
@@ -424,7 +285,7 @@ impl Reducer {
         now: SystemTime,
         from: Transport,
     ) {
-        self.gc(now);
+        self.corr.gc(now);
         self.sweep_exited(scene, now);
         self.expire_pending_idles(scene, now);
         let id = event.agent_id();
@@ -448,7 +309,7 @@ impl Reducer {
             // through the synthesis below. A KNOWN id keeps today's behavior
             // (the main arm marks the slot exiting; no tombstone needed).
             if matches!(event, AgentEvent::SessionEnd { .. }) && !scene.agents.contains_key(&id) {
-                self.recent_hook_session_ends.insert(id, now);
+                self.corr.recent_hook_session_ends.insert(id, now);
             }
             self.synthesize_hook_registration(scene, &event, id, now);
         }
@@ -500,7 +361,8 @@ impl Reducer {
         // asymmetric matrix; see `ToolEventKind`).
         if from == Transport::Jsonl {
             if let Some((kind, tuid)) = event_tool_use_id(&event) {
-                if let Some((_, recorded)) = self.recent_hook_tool_uses.get(&(id, tuid.to_string()))
+                if let Some((_, recorded)) =
+                    self.corr.recent_hook_tool_uses.get(&(id, tuid.to_string()))
                 {
                     if !(*recorded == ToolEventKind::Start && kind == ToolEventKind::End) {
                         return;
@@ -518,7 +380,8 @@ impl Reducer {
         // rendering the freshly visible agent Idle through its first tool.
         if from == Transport::Hook && scene.agents.contains_key(&id) {
             if let Some((kind, tuid)) = event_tool_use_id(&event) {
-                self.recent_hook_tool_uses
+                self.corr
+                    .recent_hook_tool_uses
                     .insert((id, tuid.to_string()), (now, kind));
             }
         }
@@ -570,7 +433,7 @@ impl Reducer {
                 // must no-op too.
                 if parent_id.is_some()
                     && !scene.agents.contains_key(&agent_id)
-                    && self.hook_session_end_tombstoned(agent_id, now)
+                    && self.corr.hook_session_end_tombstoned(agent_id, now)
                 {
                     tracing::warn!(
                         ?agent_id,
@@ -595,7 +458,7 @@ impl Reducer {
                 // unknown ids only, tombstone not consumed.
                 if parent_id.is_some()
                     && !scene.agents.contains_key(&agent_id)
-                    && self.child_recently_ended(agent_id, now)
+                    && self.corr.child_recently_ended(agent_id, now)
                 {
                     tracing::warn!(
                         ?agent_id,
@@ -632,8 +495,12 @@ impl Reducer {
                 // better than the orphan phantom. The adopted link runs
                 // through the #240 cycle filter below exactly like a
                 // wire-carried one (a poisoned ledger degrades to parentless).
-                let parent_id = parent_id
-                    .or_else(|| self.child_ledger.get(&agent_id).and_then(|e| e.parent_id));
+                let parent_id = parent_id.or_else(|| {
+                    self.corr
+                        .child_ledger
+                        .get(&agent_id)
+                        .and_then(|e| e.parent_id)
+                });
                 // Refuse a parent link whose ancestor chain reaches the child
                 // — the ONE seam where `parent_id` is set (registration below)
                 // or enriched (the orphan arm), so a cycle can never EXIST and
@@ -681,7 +548,7 @@ impl Reducer {
                             // (#244/#246); clearing ended_at marks this life
                             // alive so gc can't prune the memory while the
                             // child still lives (the end/sweep re-stamps it).
-                            let entry = self.child_ledger.entry(agent_id).or_default();
+                            let entry = self.corr.child_ledger.entry(agent_id).or_default();
                             entry.parent_id = Some(p);
                             entry.ended_at = None;
                         }
@@ -756,8 +623,8 @@ impl Reducer {
                         // the SLOT is gone). The hook-recency maps
                         // (recent_hook_tool_uses / _session_ends) are
                         // TTL-bounded and not per-slot state — gc owns them.
-                        self.active_tasks.remove(&agent_id);
-                        self.gated_before_waiting.remove(&agent_id);
+                        self.corr.active_tasks.remove(&agent_id);
+                        self.corr.gated_before_waiting.remove(&agent_id);
                         self.pending_b1_cascades.remove(&agent_id);
                     }
                     return;
@@ -768,7 +635,7 @@ impl Reducer {
                     // session was dropped, not registered); ended_at clears
                     // for the new life, mirroring the enrichment above.
                     if let Some(p) = parent_id {
-                        let entry = self.child_ledger.entry(agent_id).or_default();
+                        let entry = self.corr.child_ledger.entry(agent_id).or_default();
                         entry.parent_id = Some(p);
                         entry.ended_at = None;
                     }
@@ -782,7 +649,7 @@ impl Reducer {
                 if !handled_by_task_start {
                     // Resuming to Active (next tool / Codex function_call_output)
                     // makes any pending gated-permission correlation moot.
-                    self.gated_before_waiting.remove(&agent_id);
+                    self.corr.gated_before_waiting.remove(&agent_id);
                     if let Some(slot) = scene.agents.get_mut(&agent_id) {
                         if !detail.as_ref().is_some_and(|d| d.is_task()) {
                             slot.tool_call_count += 1;
@@ -825,12 +692,13 @@ impl Reducer {
                     let resolves_wait = is_waiting
                         && match tool_use_id.as_deref() {
                             Some(tuid) => {
-                                self.gated_before_waiting.get(&agent_id).map(|g| &**g) == Some(tuid)
+                                self.corr.gated_before_waiting.get(&agent_id).map(|g| &**g)
+                                    == Some(tuid)
                             }
                             None => from == Transport::Hook,
                         };
                     if resolves_wait {
-                        self.gated_before_waiting.remove(&agent_id);
+                        self.corr.gated_before_waiting.remove(&agent_id);
                     }
                     if let Some(slot) = scene.agents.get_mut(&agent_id) {
                         // Arm the idle debounce when Active (normal tool end) or
@@ -854,9 +722,11 @@ impl Reducer {
                         ..
                     } = &slot.state
                     {
-                        self.gated_before_waiting.insert(agent_id, tuid.clone());
+                        self.corr
+                            .gated_before_waiting
+                            .insert(agent_id, tuid.clone());
                     } else {
-                        self.gated_before_waiting.remove(&agent_id);
+                        self.corr.gated_before_waiting.remove(&agent_id);
                     }
                     fsm::enter_waiting(slot, Arc::<str>::from(reason.as_str()), now);
                 }
@@ -875,7 +745,7 @@ impl Reducer {
                 // outlives the 4.5s GC, covering the late-first-sight window
                 // the #242 unknown-id tombstone structurally can't.
                 if as_child {
-                    self.child_ledger.entry(agent_id).or_default().ended_at = Some(now);
+                    self.corr.child_ledger.entry(agent_id).or_default().ended_at = Some(now);
                 }
                 if let Some(slot) = scene.agents.get_mut(&agent_id) {
                     fsm::mark_exiting(slot, now);
@@ -894,7 +764,7 @@ impl Reducer {
                     .get(&agent_id)
                     .is_some_and(|s| s.exiting_at.is_none())
                 {
-                    self.recent_proof_of_life.insert(agent_id, now);
+                    self.corr.recent_proof_of_life.insert(agent_id, now);
                 }
             }
             // #221: the identity context a hook decoder attaches ahead of a
@@ -920,7 +790,7 @@ impl Reducer {
                 let cwd = cwd.as_deref().unwrap_or_else(|| std::path::Path::new(""));
                 if let Some(slot) = scene.agents.get_mut(&agent_id) {
                     backfill_identity(slot, &source, &session_id, cwd);
-                } else if !self.hook_session_end_tombstoned(agent_id, now)
+                } else if !self.corr.hook_session_end_tombstoned(agent_id, now)
                     && self.register_slot(scene, agent_id, &source, &session_id, cwd, None, now)
                 {
                     // Only the 5s #242 tombstone is consulted — NOT the 90s
@@ -946,31 +816,6 @@ impl Reducer {
                 }
             }
         }
-    }
-
-    /// Whether a hook `SessionEnd` for `id` (which had no slot) is still inside
-    /// its [`HOOK_SESSION_END_TOMBSTONE_TTL`]: a trailing hook event delivered
-    /// reordered after the end must not re-register the dead session. Shared by
-    /// [`Reducer::synthesize_hook_registration`], the `Identity` arm, and the
-    /// `SessionStart` arm's child-registration gate (#242).
-    fn hook_session_end_tombstoned(&self, id: AgentId, now: SystemTime) -> bool {
-        self.recent_hook_session_ends.get(&id).is_some_and(|ts| {
-            now.duration_since(*ts)
-                .is_ok_and(|d| d < HOOK_SESSION_END_TOMBSTONE_TTL)
-        })
-    }
-
-    /// Whether the child ledger records `id` as ENDED within
-    /// [`CHILD_END_LEDGER_TTL`] — the #244-w2 gate's predicate (the ledger
-    /// sibling of [`Reducer::hook_session_end_tombstoned`]). Clock-regression
-    /// safe like the `gc` retains (a future timestamp is not fresh).
-    fn child_recently_ended(&self, id: AgentId, now: SystemTime) -> bool {
-        self.child_ledger.get(&id).is_some_and(|e| {
-            e.ended_at.is_some_and(|ts| {
-                now.duration_since(ts)
-                    .is_ok_and(|d| d < CHILD_END_LEDGER_TTL)
-            })
-        })
     }
 
     /// Pre-pass 0 of [`Reducer::apply`] (hook transport only) — hook events
@@ -1014,7 +859,7 @@ impl Reducer {
         // (per-connection hook tasks reorder), not proof of new life.
         // Synthesizing would mint a blank Idle ghost that no future
         // SessionEnd can remove — only the 30-min idle sweep.
-        if self.hook_session_end_tombstoned(id, now) {
+        if self.corr.hook_session_end_tombstoned(id, now) {
             return;
         }
         if self.register_slot(scene, id, "", "", std::path::Path::new(""), None, now) {
@@ -1117,7 +962,7 @@ impl Reducer {
         id: AgentId,
         now: SystemTime,
     ) -> bool {
-        let tasks = self.active_tasks.get(&id);
+        let tasks = self.corr.active_tasks.get(&id);
         let in_task = tasks.is_some_and(|s| !s.is_empty());
         let suppress = match event {
             AgentEvent::ActivityStart { .. } => in_task,
@@ -1148,7 +993,7 @@ impl Reducer {
                         .and_then(|s| s.iter().next())
                         .map(|t| Arc::<str>::from(t.as_str()));
                     fsm::enter_delegating(slot, task_tuid, now);
-                    self.gated_before_waiting.remove(&id);
+                    self.corr.gated_before_waiting.remove(&id);
                 }
             }
         }
@@ -1213,11 +1058,13 @@ impl Reducer {
                 // apply-top with this same `now`) already pruned expired
                 // tombstones, so membership means fresh.
                 if self
+                    .corr
                     .active_tasks
                     .entry(*agent_id)
                     .or_default()
                     .insert(tuid.clone())
                     && !self
+                        .corr
                         .recent_task_drains
                         .contains_key(&(*agent_id, tuid.clone()))
                 {
@@ -1230,10 +1077,11 @@ impl Reducer {
                 agent_id,
                 tool_use_id: Some(tuid),
             } => {
-                if let Some(set) = self.active_tasks.get_mut(agent_id) {
+                if let Some(set) = self.corr.active_tasks.get_mut(agent_id) {
                     if set.remove(tuid) {
                         handled_by_task_tracking = true;
-                        self.recent_task_drains
+                        self.corr
+                            .recent_task_drains
                             .insert((*agent_id, tuid.clone()), now);
                         // #152: the gate recorded while Delegating holds THIS
                         // Task's tuid; the drain path deliberately skips the
@@ -1244,10 +1092,10 @@ impl Reducer {
                         // still-pending permission to Idle. Clear only OUR
                         // tuid: a parallel ordinary tool's gate must survive
                         // the drain.
-                        if self.gated_before_waiting.get(agent_id).map(|g| &**g)
+                        if self.corr.gated_before_waiting.get(agent_id).map(|g| &**g)
                             == Some(tuid.as_str())
                         {
-                            self.gated_before_waiting.remove(agent_id);
+                            self.corr.gated_before_waiting.remove(agent_id);
                         }
                         if let Some(slot) = scene.agents.get_mut(agent_id) {
                             slot.last_event_at = now;
@@ -1300,38 +1148,17 @@ impl Reducer {
             .collect();
         for id in due {
             self.pending_b1_cascades.remove(&id);
-            if self.active_tasks.get(&id).is_some_and(|s| !s.is_empty()) {
+            if self
+                .corr
+                .active_tasks
+                .get(&id)
+                .is_some_and(|s| !s.is_empty())
+            {
                 continue;
             }
             tracing::debug!(agent_id = ?id, "b1 grace elapsed — cascading completed subtree");
             scope::cascade_exit(scene, id, now);
         }
-    }
-
-    fn gc(&mut self, now: SystemTime) {
-        // SystemTime::duration_since returns Err when `ts` is in the future
-        // (clock went backwards). Drop those — stale entries either way.
-        self.recent_hook_tool_uses
-            .retain(|_, (ts, _)| now.duration_since(*ts).is_ok_and(|d| d < HOOK_WINS_WINDOW));
-        self.recent_hook_session_ends.retain(|_, ts| {
-            now.duration_since(*ts)
-                .is_ok_and(|d| d < HOOK_SESSION_END_TOMBSTONE_TTL)
-        });
-        self.recent_proof_of_life
-            .retain(|_, ts| now.duration_since(*ts).is_ok_and(|d| d < PROOF_OF_LIFE_TTL));
-        self.recent_task_drains.retain(|_, ts| {
-            now.duration_since(*ts)
-                .is_ok_and(|d| d < DRAINED_TASK_TOMBSTONE_TTL)
-        });
-        // Not-yet-ended entries ride until their end/sweep stamps ended_at
-        // (every slot removal goes through sweep_exited, which stamps it), so
-        // the map is bounded by live children + the TTL's trailing window.
-        self.child_ledger.retain(|_, e| match e.ended_at {
-            None => true,
-            Some(ts) => now
-                .duration_since(ts)
-                .is_ok_and(|d| d < CHILD_END_LEDGER_TTL),
-        });
     }
 
     /// Walk through agents with `pending_idle_at` set and flip their
@@ -1358,17 +1185,6 @@ impl Reducer {
                 fsm::settle_to_idle(slot, pending, now);
             }
         }
-    }
-
-    /// Whether `id` holds a FRESH probe vouch — an [`AgentEvent::ProofOfLife`]
-    /// recorded within [`PROOF_OF_LIFE_TTL`]. The single freshness predicate
-    /// shared by `sweep_stale`'s own-id exemption and its delegating-ancestor
-    /// walk, so the TTL logic can't fork. Clock-regression-safe like the `gc`
-    /// retains (`duration_since` Errs on a future timestamp → not fresh).
-    fn vouch_fresh(&self, id: &AgentId, now: SystemTime) -> bool {
-        self.recent_proof_of_life
-            .get(id)
-            .is_some_and(|t| now.duration_since(*t).is_ok_and(|d| d < PROOF_OF_LIFE_TTL))
     }
 
     /// Mark agents as exiting when they haven't emitted any event for
@@ -1400,7 +1216,7 @@ impl Reducer {
                 // death (permission-parked after attach-replay, long-idle).
                 // Once emissions stop the entry ages out and the normal sweep
                 // resumes.
-                if self.vouch_fresh(&slot.agent_id, now) {
+                if self.corr.vouch_fresh(&slot.agent_id, now) {
                     return None;
                 }
                 // The vouch extends to a vouched ancestor's DELEGATED subtree:
@@ -1415,8 +1231,9 @@ impl Reducer {
                 // child — the b1 chained-dispatch residual — keeps the 30-min
                 // idle backstop.
                 if scope::has_ancestor_where(agents, slot.agent_id, |a| {
-                    self.vouch_fresh(&a.agent_id, now)
+                    self.corr.vouch_fresh(&a.agent_id, now)
                         && self
+                            .corr
                             .active_tasks
                             .get(&a.agent_id)
                             .is_some_and(|t| !t.is_empty())
@@ -1484,45 +1301,27 @@ impl Reducer {
             .collect();
         for id in expired {
             scene.agents.remove(&id);
-            self.active_tasks.remove(&id);
+            self.corr.active_tasks.remove(&id);
             // Symmetric with active_tasks: sweep_exited runs on the apply path
             // (not just tick), where the tick-time `gated_before_waiting.retain`
             // doesn't run — so reclaim it here too, else a Waiting slot that was
             // swept mid-turn leaks its gated tool_use_id until the next tick.
-            self.gated_before_waiting.remove(&id);
+            self.corr.gated_before_waiting.remove(&id);
             self.pending_b1_cascades.remove(&id);
             // The gc TTL retain bounds this map anyway; evicting with the slot
             // (like the per-agent siblings above) keeps a removed id from
             // exempting a same-id resurrect ghost inside the TTL window.
-            self.recent_proof_of_life.remove(&id);
+            self.corr.recent_proof_of_life.remove(&id);
             // A CHILD whose end wasn't `as_child` (stale-swept, parent-
             // cascaded, negative-vouched) starts its ledger GC clock at slot
             // removal, keeping the map bounded — and arming the #244-w2 gate
             // for those exits too. `get_or_insert` keeps an earlier as_child
             // stamp; roots have no entry, so this scopes itself to children.
-            if let Some(entry) = self.child_ledger.get_mut(&id) {
+            if let Some(entry) = self.corr.child_ledger.get_mut(&id) {
                 entry.ended_at.get_or_insert(now);
             }
         }
     }
-}
-
-/// Kind half of a hook-wins dedup record. Lives in the map VALUE (a hook End
-/// overwrites its tool's Start entry) and drives the asymmetric drop matrix
-/// (#150): an End record suppresses BOTH JSONL kinds — the tool is over, so a
-/// lagged JSONL Start replay would falsely re-Activate and cancel the armed
-/// idle debounce — while a Start record suppresses only Starts. A JSONL End
-/// must never be eaten by its own tool's dispatch record: when the
-/// PostToolUse hook drops (the shim is best-effort), that JSONL End is the
-/// only completion signal left, and a Task self-End that gets eaten leaks
-/// `active_tasks` for the rest of the session (suppression stuck on, b1
-/// cascade disabled). Don't "simplify" this to exact-kind matching either —
-/// it would orphan the lagged-pair case the End-dominates rule covers
-/// (pinned by `late_batched_jsonl_pair_after_delivered_hook_end_is_fully_dropped`).
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum ToolEventKind {
-    Start,
-    End,
 }
 
 fn event_tool_use_id(ev: &AgentEvent) -> Option<(ToolEventKind, &str)> {
@@ -1754,7 +1553,7 @@ mod tests {
             Transport::Hook,
         );
         assert!(
-            r.gated_before_waiting.contains_key(&id),
+            r.corr.gated_before_waiting.contains_key(&id),
             "gate recorded while Waiting mid-tool"
         );
 
@@ -1789,7 +1588,7 @@ mod tests {
             "exited slot swept on the apply path"
         );
         assert!(
-            !r.gated_before_waiting.contains_key(&id),
+            !r.corr.gated_before_waiting.contains_key(&id),
             "apply-path sweep_exited must evict the gated entry (not only tick's retain)"
         );
     }
@@ -1869,10 +1668,19 @@ mod tests {
             t0 + Duration::from_secs(3),
             Transport::Hook,
         );
-        assert!(r.active_tasks.contains_key(&id), "ledger entry populated");
-        assert!(r.gated_before_waiting.contains_key(&id), "gate populated");
+        assert!(
+            r.corr.active_tasks.contains_key(&id),
+            "ledger entry populated"
+        );
+        assert!(
+            r.corr.gated_before_waiting.contains_key(&id),
+            "gate populated"
+        );
         assert!(r.pending_b1_cascades.contains_key(&id), "cascade armed");
-        assert!(r.recent_proof_of_life.contains_key(&id), "vouch recorded");
+        assert!(
+            r.corr.recent_proof_of_life.contains_key(&id),
+            "vouch recorded"
+        );
 
         // End + resurrect inside the walkout window (and before the armed
         // cascade's grace elapses).
@@ -1900,11 +1708,11 @@ mod tests {
             "resurrected"
         );
         assert!(
-            !r.active_tasks.contains_key(&id),
+            !r.corr.active_tasks.contains_key(&id),
             "resurrect must evict the dead life's active_tasks entry"
         );
         assert!(
-            !r.gated_before_waiting.contains_key(&id),
+            !r.corr.gated_before_waiting.contains_key(&id),
             "resurrect must evict the dead life's gated_before_waiting entry"
         );
         assert!(
@@ -1912,7 +1720,7 @@ mod tests {
             "resurrect must disarm the dead life's pending b1 cascade"
         );
         assert!(
-            r.recent_proof_of_life.contains_key(&id),
+            r.corr.recent_proof_of_life.contains_key(&id),
             "the vouch must SURVIVE resurrection — the process is alive"
         );
     }
@@ -1958,10 +1766,14 @@ mod tests {
             Transport::Hook,
         );
         assert!(
-            !r.child_ledger.contains_key(&parent),
+            !r.corr.child_ledger.contains_key(&parent),
             "a root registration must not enter the child ledger"
         );
-        let entry = r.child_ledger.get(&child).expect("child link recorded");
+        let entry = r
+            .corr
+            .child_ledger
+            .get(&child)
+            .expect("child link recorded");
         assert_eq!(entry.parent_id, Some(parent));
         assert!(entry.ended_at.is_none(), "alive — no gc clock yet");
 
@@ -1980,7 +1792,8 @@ mod tests {
         r.tick(&mut scene, swept);
         assert!(!scene.agents.contains_key(&child), "child swept");
         assert!(
-            r.child_ledger
+            r.corr
+                .child_ledger
                 .get(&child)
                 .is_some_and(|e| e.ended_at.is_some()),
             "sweep_exited must stamp ended_at for a child whose end wasn't as_child"
@@ -1991,7 +1804,7 @@ mod tests {
             swept + super::CHILD_END_LEDGER_TTL + Duration::from_secs(1),
         );
         assert!(
-            !r.child_ledger.contains_key(&child),
+            !r.corr.child_ledger.contains_key(&child),
             "gc must prune an ended entry past CHILD_END_LEDGER_TTL"
         );
     }
