@@ -6,7 +6,10 @@
 //! any headless test (real tokio runtime + `block_on` + `ctrl_c` + socket
 //! bind; see issue #103) — can be excluded from coverage on its own, while
 //! the tested helpers (`RunConfig`, capacity math, `summarize`) keep full
-//! coverage accounting in the parent module.
+//! coverage accounting in the parent module. One exception: `headless_loop`'s
+//! signal handling takes the ctrl_c future as an injected seam, so its
+//! registration-failure arm IS unit-tested here (the file stays
+//! coverage-excluded regardless).
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -150,21 +153,28 @@ async fn reducer_task(
 }
 
 async fn headless_loop(
-    mut scene_rx: SceneRx,
-    mut health_rx: tokio::sync::watch::Receiver<Vec<pixtuoid_core::source::manager::SourceDeath>>,
+    scene_rx: SceneRx,
+    health_rx: tokio::sync::watch::Receiver<Vec<pixtuoid_core::source::manager::SourceDeath>>,
 ) -> Result<()> {
-    tracing::info!("pixtuoid headless mode — Ctrl-C to quit");
     // ONE SIGINT listener for the loop's lifetime. A fresh `ctrl_c()` per
     // select! iteration drops the old listener while the sleep arm runs, and
     // tokio's process-global handler (installed once) suppresses default
     // termination — so a SIGINT landing in that gap notifies zero listeners
-    // and is silently lost (the user must Ctrl-C twice). Pinned outside the
-    // loop the subscription is continuous; the arm returns on completion, so
-    // the future is never polled again after it resolves. No test: driver.rs
-    // is the documented untestable async glue (#103) and a real-signal test
-    // would race the whole test binary.
-    let ctrl_c = tokio::signal::ctrl_c();
-    tokio::pin!(ctrl_c);
+    // and is silently lost (the user must Ctrl-C twice). Created once here,
+    // the subscription is continuous; the future is boxed so the loop can
+    // disarm a registration FAILURE (a resolved future must never be polled
+    // again). The signal future is INJECTED into the loop body so the
+    // registration-failure arm is testable in-process (the real ctrl_c()
+    // registers an unfakeable process-global handler).
+    headless_loop_with_signal(scene_rx, health_rx, Box::pin(tokio::signal::ctrl_c())).await
+}
+
+async fn headless_loop_with_signal(
+    mut scene_rx: SceneRx,
+    mut health_rx: tokio::sync::watch::Receiver<Vec<pixtuoid_core::source::manager::SourceDeath>>,
+    mut ctrl_c: std::pin::Pin<Box<dyn std::future::Future<Output = std::io::Result<()>> + Send>>,
+) -> Result<()> {
+    tracing::info!("pixtuoid headless mode — Ctrl-C to quit");
     let mut prev_summary = String::new();
     // Headless has no TUI footer (#157's sink for source deaths) and no
     // stderr subscriber guarantee — surface them in the summary stream, or a
@@ -188,9 +198,26 @@ async fn headless_loop(
                 }
                 deaths_seen = deaths.len();
             }
-            _ = &mut ctrl_c => {
-                tracing::info!("shutting down");
-                return Ok(());
+            res = &mut ctrl_c => match res {
+                Ok(()) => {
+                    tracing::info!("shutting down");
+                    return Ok(());
+                }
+                Err(e) => {
+                    // A failed handler registration resolves Err on the FIRST
+                    // poll. A wildcard match here exited headless mode
+                    // instantly — silently, status 0 (the #157 class), on the
+                    // exact CI/container surface where registration can be
+                    // denied. Disarm the arm and keep serving: the default
+                    // SIGINT disposition was never replaced, so Ctrl-C still
+                    // terminates the process.
+                    tracing::error!(
+                        %e,
+                        "Ctrl-C handler registration failed — headless loop \
+                         continues; SIGINT falls back to the default disposition"
+                    );
+                    ctrl_c = Box::pin(std::future::pending());
+                }
             }
         }
     }
@@ -200,5 +227,53 @@ fn compute_boot_capacities() -> [usize; MAX_FLOORS] {
     match crossterm::terminal::size().ok() {
         Some((cols, rows)) => boot_capacities_for(cols, rows),
         None => [FALLBACK_DESKS; MAX_FLOORS],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pixtuoid_core::source::manager::SourceDeath;
+
+    type HealthPair = (
+        watch::Sender<Vec<SourceDeath>>,
+        watch::Receiver<Vec<SourceDeath>>,
+    );
+
+    fn channels() -> (watch::Sender<Arc<SceneState>>, SceneRx, HealthPair) {
+        let (scene_tx, scene_rx) =
+            watch::channel(Arc::new(SceneState::new([FALLBACK_DESKS; MAX_FLOORS])));
+        (scene_tx, scene_rx, watch::channel(Vec::new()))
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn headless_loop_shuts_down_on_a_delivered_signal() {
+        let (_scene_tx, scene_rx, (_health_tx, health_rx)) = channels();
+        headless_loop_with_signal(scene_rx, health_rx, Box::pin(async { Ok(()) }))
+            .await
+            .expect("a delivered Ctrl-C is a clean shutdown");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn headless_loop_keeps_serving_after_a_failed_signal_registration() {
+        // A failed ctrl_c registration resolves Err on the first poll. The old
+        // wildcard arm (`_ = &mut ctrl_c`) matched it and returned Ok(()) —
+        // headless mode exited instantly, silently, status 0. The Err arm must
+        // disarm itself instead: the loop keeps serving the scene/health arms,
+        // so the timeout elapses (paused-clock time, so this is instant).
+        let (_scene_tx, scene_rx, (_health_tx, health_rx)) = channels();
+        let res = tokio::time::timeout(
+            Duration::from_secs(5),
+            headless_loop_with_signal(
+                scene_rx,
+                health_rx,
+                Box::pin(async { Err(std::io::Error::other("sigaction denied")) }),
+            ),
+        )
+        .await;
+        assert!(
+            res.is_err(),
+            "the loop must still be running after a failed signal registration, got {res:?}"
+        );
     }
 }

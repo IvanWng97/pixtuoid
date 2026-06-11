@@ -299,6 +299,44 @@ pub async fn run_tui(
 
     let tick = Duration::from_millis(33);
     let result: Result<()> = (async {
+        // External-signal teardown: raw mode delivers keyboard Ctrl-C as a key
+        // event (the quit chord), but an EXTERNAL SIGINT/SIGTERM (`kill <pid>`,
+        // logout) would hit the default disposition and kill the process
+        // mid-altscreen with mouse reporting on — the shell is left unusable
+        // until `reset`. Route both into the loop so the normal teardown path
+        // runs. Pinned ONCE outside the loop (same rationale as headless_loop:
+        // a per-iteration ctrl_c() drops the subscription mid-gap); boxed so a
+        // registration FAILURE can disarm the arm by swapping in a pending
+        // future — a resolved future must never be polled again, and quitting
+        // on Err would exit the TUI at boot.
+        let mut ctrl_c: std::pin::Pin<
+            Box<dyn std::future::Future<Output = std::io::Result<()>> + Send>,
+        > = Box::pin(tokio::signal::ctrl_c());
+        #[cfg(unix)]
+        let terminate = {
+            let sig = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate());
+            async move {
+                match sig {
+                    Ok(mut s) => {
+                        if s.recv().await.is_none() {
+                            // Stream closed without a signal — never quit on that.
+                            std::future::pending::<()>().await;
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            %e,
+                            "SIGTERM handler registration failed — an external \
+                             SIGTERM will not restore the terminal"
+                        );
+                        std::future::pending::<()>().await;
+                    }
+                }
+            }
+        };
+        #[cfg(not(unix))]
+        let terminate = std::future::pending::<()>();
+        tokio::pin!(terminate);
         loop {
             let now = if paused {
                 *frozen_now.get_or_insert(SystemTime::now())
@@ -597,9 +635,25 @@ pub async fn run_tui(
                 }
                 break;
             }
-            let elapsed = start.elapsed();
-            if let Some(rem) = tick.checked_sub(elapsed) {
-                tokio::time::sleep(rem).await;
+            // The frame-pacing sleep doubles as the signal-listen window (the
+            // crossterm poll above is synchronous; this is the loop's only
+            // await point). An external signal breaks to the SAME teardown
+            // below that `q` reaches.
+            let rem = tick.checked_sub(start.elapsed()).unwrap_or(Duration::ZERO);
+            tokio::select! {
+                _ = tokio::time::sleep(rem) => {}
+                res = &mut ctrl_c => match res {
+                    Ok(()) => break,
+                    Err(e) => {
+                        tracing::error!(
+                            %e,
+                            "SIGINT handler registration failed — an external \
+                             Ctrl-C will not restore the terminal"
+                        );
+                        ctrl_c = Box::pin(std::future::pending());
+                    }
+                },
+                _ = &mut terminate => break,
             }
             tokio::task::yield_now().await;
         }

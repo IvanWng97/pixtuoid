@@ -70,7 +70,14 @@ fn expand_tilde(p: &str, home: Option<&str>) -> String {
 }
 
 pub fn config_path() -> PathBuf {
-    if let Ok(base) = std::env::var("XDG_CONFIG_HOME") {
+    // XDG basedir spec: a set-but-empty value means UNSET. Without the filter,
+    // `PathBuf::from("")` yields the CWD-relative `pixtuoid/config.toml` — the
+    // real ~/.config copy is silently bypassed every boot and a theme save
+    // scatters orphan configs into whatever cwd pixtuoid was launched from.
+    let xdg = std::env::var("XDG_CONFIG_HOME")
+        .ok()
+        .filter(|v| !v.trim().is_empty());
+    if let Some(base) = xdg {
         return PathBuf::from(base).join("pixtuoid").join("config.toml");
     }
     if let Some(home) = crate::install::io::user_home() {
@@ -167,7 +174,7 @@ where
         }
     };
     mutate(&mut doc);
-    crate::install::io::backup_once(real_path, crate::install::target::BACKUP_SUFFIX)?;
+    lock.backup_once(crate::install::target::BACKUP_SUFFIX)?;
     lock.write_atomic(&doc.to_string())
 }
 
@@ -396,6 +403,20 @@ mod tests {
         assert_eq!(
             config_path(),
             PathBuf::from("/xdg/base/pixtuoid/config.toml")
+        );
+
+        // Set-but-empty (and whitespace-only) XDG is UNSET per the basedir
+        // spec — it must fall through to $HOME/.config, never become the
+        // CWD-relative `pixtuoid/config.toml`.
+        std::env::set_var("XDG_CONFIG_HOME", "");
+        assert_eq!(
+            config_path(),
+            PathBuf::from("/home/u/.config/pixtuoid/config.toml")
+        );
+        std::env::set_var("XDG_CONFIG_HOME", "   ");
+        assert_eq!(
+            config_path(),
+            PathBuf::from("/home/u/.config/pixtuoid/config.toml")
         );
 
         // No XDG → fall back to $HOME/.config.

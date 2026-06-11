@@ -321,8 +321,20 @@ fn run_each(
     Ok(())
 }
 
-/// Resolve the hook binary for a target. An explicit `--hook-path` always wins.
-/// Otherwise `locate` tries to find `pixtuoid-hook`; if that fails we only hard-error
+/// A Windows drive-relative path (`C:foo.exe` — a drive prefix but no root).
+/// `is_relative()` is true for it, yet `cwd.join` replaces NOTHING (std: a
+/// path with a prefix replaces self in its entirety), so the absolutization
+/// arm would silently no-op and embed a command that resolves against the
+/// hook-spawner's per-drive cwd. Always false on Unix (`Component::Prefix`
+/// is Windows-only).
+fn is_drive_relative(p: &std::path::Path) -> bool {
+    !p.has_root() && matches!(p.components().next(), Some(std::path::Component::Prefix(_)))
+}
+
+/// Resolve the hook binary for a target. An explicit path always wins —
+/// `--hook-path` first, then the `PIXTUOID_HOOK` env override (empty =
+/// unset); both flow through the same absolutize-and-warn arm. Otherwise
+/// `locate` tries to find `pixtuoid-hook`; if that fails we only hard-error
 /// for targets that EMBED the path (`needs_resolved_binary`, e.g. Codex). Targets
 /// that write the bare name and rely on PATH (Claude) fall back to the bare name so
 /// a fresh-machine install still succeeds — the PATH warning in `run_install` covers
@@ -332,25 +344,57 @@ fn resolve_hook_binary(
     hook_path: Option<PathBuf>,
     locate: impl FnOnce() -> Result<PathBuf>,
 ) -> Result<PathBuf> {
-    if let Some(p) = hook_path {
-        // An explicit path gets EMBEDDED into the config, where a relative
-        // path would resolve against the CLI's cwd at hook time — hooks would
-        // silently never fire from other dirs. Absolutize against our cwd
-        // (plain join, not canonicalize — Windows canonicalize yields a
-        // \\?\ verbatim path that the cmd.exe bare form can't take).
+    let env_hook = std::env::var("PIXTUOID_HOOK")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .map(PathBuf::from);
+    resolve_hook_binary_from(t, hook_path, env_hook, locate)
+}
+
+/// Decision core with the `PIXTUOID_HOOK` override injected, so both explicit
+/// seams are testable without mutating process env.
+fn resolve_hook_binary_from(
+    t: &Target,
+    hook_path: Option<PathBuf>,
+    env_hook: Option<PathBuf>,
+    locate: impl FnOnce() -> Result<PathBuf>,
+) -> Result<PathBuf> {
+    // The CLI flag outranks the ambient env override. Both are EXPLICIT paths
+    // that get EMBEDDED into the config, where a relative path would resolve
+    // against the CLI's cwd at hook time — hooks would silently never fire
+    // from other dirs — so both take the same absolutize-and-warn arm (the
+    // env seam used to pass through `locate()` verbatim and bypass it).
+    let explicit = hook_path
+        .map(|p| (p, "--hook-path"))
+        .or(env_hook.map(|p| (p, "PIXTUOID_HOOK")));
+    if let Some((p, origin)) = explicit {
+        // Drive-relative input would make the cwd-join below a silent no-op
+        // (see `is_drive_relative`) — the exact never-fires embed this arm
+        // exists to prevent, so hard-error like the unreadable-cwd case.
+        if is_drive_relative(&p) {
+            bail!(
+                "{origin} {} is drive-relative (a drive prefix with no root, like C:foo.exe) \
+                 and would resolve against a per-drive cwd at hook time; pass an absolute path",
+                p.display()
+            );
+        }
+        // Absolutize against our cwd (plain join, not canonicalize — Windows
+        // canonicalize yields a \\?\ verbatim path that the cmd.exe bare form
+        // can't take).
         let p = if p.is_relative() {
             // A failed cwd query must NOT fall back to silently embedding the
             // relative path — that re-creates exactly the never-fires bug the
             // absolutization exists to prevent.
-            let cwd = std::env::current_dir()
-                .context("--hook-path is relative and the current directory is unreadable; pass an absolute path")?;
+            let cwd = std::env::current_dir().with_context(|| {
+                format!("{origin} is relative and the current directory is unreadable; pass an absolute path")
+            })?;
             cwd.join(&p)
         } else {
             p
         };
         if !p.exists() {
             println!(
-                "warning: --hook-path {} does not exist yet; the hook will fail until it does",
+                "warning: {origin} {} does not exist yet; the hook will fail until it does",
                 p.display()
             );
         }
@@ -376,7 +420,11 @@ fn run_install(t: &Target, config: Option<PathBuf>, hook_path: Option<PathBuf>) 
     // the CLI itself (e.g. CC rewriting settings.json) can't honor this lock —
     // it only serializes pixtuoid against pixtuoid.
     let lock = io::lock_config(&path)?;
-    let content = io::read_config(&path)?;
+    // Read + backup through the guard's pinned resolution (ConfigLock::read /
+    // ::backup_once), NOT by re-resolving `path`: a symlink retarget between
+    // lock and read would otherwise split the round across two files (see
+    // ConfigLock::read).
+    let content = lock.read()?;
     let outcome = (t.merge_install)(&content, &hook_cmd)
         .with_context(|| format!("processing {}", path.display()))?;
     // The PATH check is an install-time environment check, independent of whether
@@ -392,7 +440,7 @@ fn run_install(t: &Target, config: Option<PathBuf>, hook_path: Option<PathBuf>) 
         println!("[{}] already up to date — {}", t.name, path.display());
         return Ok(());
     }
-    let backup = io::backup_once(&path, BACKUP_SUFFIX)?;
+    let backup = lock.backup_once(BACKUP_SUFFIX)?;
     lock.write_atomic(&outcome.content)?;
     println!(
         "ok: installed pixtuoid hooks into {} ({})",
@@ -430,9 +478,10 @@ fn run_uninstall(t: &Target, config: Option<PathBuf>) -> Result<()> {
         );
         return Ok(());
     }
-    // Same lock scope as run_install: the whole read→merge→write round.
+    // Same lock scope as run_install: the whole read→merge→write round, all
+    // addressed through the guard's pinned resolution.
     let lock = io::lock_config(&path)?;
-    let content = io::read_config(&path)?;
+    let content = lock.read()?;
     let outcome =
         (t.merge_uninstall)(&content).with_context(|| format!("processing {}", path.display()))?;
     if !outcome.changed {
@@ -453,7 +502,7 @@ fn run_uninstall(t: &Target, config: Option<PathBuf>) -> Result<()> {
         path.display(),
         t.display_name
     );
-    if let Some(b) = io::remove_backup(&path, BACKUP_SUFFIX)? {
+    if let Some(b) = lock.remove_backup(BACKUP_SUFFIX)? {
         println!("removed backup: {}", b.display());
     }
     println!(
@@ -626,6 +675,115 @@ mod tests {
         // is genuinely fatal for that target.
         let got = resolve_hook_binary(&CODEX, None, || Err(anyhow::anyhow!("could not locate")));
         assert!(got.is_err());
+    }
+
+    #[test]
+    fn resolve_hook_binary_env_override_routes_through_the_explicit_arm() {
+        // PIXTUOID_HOOK is the env twin of --hook-path: a relative value must
+        // be absolutized (embedded verbatim it resolves against the CLI's cwd
+        // at hook time → silent dead hook for the embed targets), never passed
+        // through locate() untouched.
+        let got = resolve_hook_binary_from(
+            &CODEX,
+            None,
+            Some(PathBuf::from("target/debug/pixtuoid-hook")),
+            || unreachable!("the env override must win over locate"),
+        )
+        .unwrap();
+        assert!(
+            got.is_absolute(),
+            "expected absolutized env path, got {got:?}"
+        );
+        assert!(got.ends_with("target/debug/pixtuoid-hook"));
+    }
+
+    #[test]
+    fn resolve_hook_binary_cli_flag_outranks_env_override() {
+        let cli = abs_fixture("/cli/hook", r"C:\cli\hook");
+        let env = abs_fixture("/env/hook", r"C:\env\hook");
+        let got = resolve_hook_binary_from(&CLAUDE, Some(cli.clone()), Some(env), || {
+            unreachable!("an explicit path must win over locate")
+        });
+        assert_eq!(got.unwrap(), cli);
+    }
+
+    #[test]
+    fn resolve_hook_binary_no_overrides_uses_locate() {
+        let located = abs_fixture("/located/hook", r"C:\located\hook");
+        let expect = located.clone();
+        let got = resolve_hook_binary_from(&CLAUDE, None, None, || Ok(located));
+        assert_eq!(got.unwrap(), expect);
+    }
+
+    #[test]
+    fn resolve_hook_binary_empty_env_override_counts_as_unset() {
+        // io.rs convention: an empty env value is unset. PIXTUOID_HOOK="" must
+        // fall through to locate(), not become an embedded "" command.
+        let _env = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var_os("PIXTUOID_HOOK");
+        std::env::set_var("PIXTUOID_HOOK", "");
+        let located = abs_fixture("/located/hook", r"C:\located\hook");
+        let expect = located.clone();
+        let got = resolve_hook_binary(&CLAUDE, None, || Ok(located));
+        match saved {
+            Some(v) => std::env::set_var("PIXTUOID_HOOK", v),
+            None => std::env::remove_var("PIXTUOID_HOOK"),
+        }
+        assert_eq!(got.unwrap(), expect);
+    }
+
+    #[test]
+    fn is_drive_relative_only_matches_prefix_without_root() {
+        use std::path::Path;
+        #[cfg(windows)]
+        {
+            assert!(is_drive_relative(Path::new(r"C:rel\hook.exe")));
+            assert!(!is_drive_relative(Path::new(r"C:\abs\hook.exe")));
+            assert!(!is_drive_relative(Path::new(r"rel\hook.exe")));
+            // Rooted-no-prefix (`\x\hook`) IS handled by join (keeps cwd's
+            // drive) — it must not trip the hard error.
+            assert!(!is_drive_relative(Path::new(r"\rooted\hook.exe")));
+        }
+        // Unix has no path prefixes — `C:foo` is an ordinary relative path there.
+        #[cfg(unix)]
+        assert!(!is_drive_relative(Path::new("C:foo.exe")));
+    }
+
+    // Drive-relative `C:foo.exe` (prefix, no root): is_relative() is true but
+    // `cwd.join` no-ops on it, so the "absolutized" embed would still resolve
+    // against a per-drive cwd at hook time — hard-error instead.
+    #[cfg(windows)]
+    #[test]
+    fn resolve_hook_binary_rejects_a_drive_relative_explicit_path() {
+        let err = resolve_hook_binary_from(
+            &CLAUDE,
+            Some(PathBuf::from(r"C:rel\hook.exe")),
+            None,
+            || unreachable!("the explicit path must win"),
+        )
+        .unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("drive-relative") && msg.contains("absolute path"),
+            "got: {msg}"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn resolve_hook_binary_rejects_a_drive_relative_env_override() {
+        let err =
+            resolve_hook_binary_from(&CODEX, None, Some(PathBuf::from(r"C:rel\hook.exe")), || {
+                unreachable!("the env override must win")
+            })
+            .unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("PIXTUOID_HOOK") && msg.contains("drive-relative"),
+            "the error must name the seam that supplied the bad path: {msg}"
+        );
     }
 
     #[test]

@@ -39,10 +39,13 @@ fn checked_home_join(home: Option<String>, rel: &str) -> Result<PathBuf> {
     })
 }
 
+/// AUTO-locate `pixtuoid-hook`: PATH, then a sibling of the running exe —
+/// both arms return absolute, verified-existing paths. The `PIXTUOID_HOOK`
+/// env override is deliberately NOT read here: it is an explicit path like
+/// `--hook-path` and is handled by `resolve_hook_binary`'s absolutize-and-warn
+/// arm (returned verbatim from here, a relative value would get embedded into
+/// Codex/Reasonix configs and silently never fire from other cwds).
 pub fn default_hook_binary() -> Result<PathBuf> {
-    if let Ok(p) = std::env::var("PIXTUOID_HOOK") {
-        return Ok(PathBuf::from(p));
-    }
     if let Ok(p) = which::which("pixtuoid-hook") {
         return Ok(p);
     }
@@ -73,13 +76,19 @@ fn sibling(target: &Path, suffix: &str) -> PathBuf {
 
 /// Read raw config content, following symlinks. Returns "" for a missing or
 /// empty file — the target's parser supplies the empty-document default.
+/// For a locked read→merge→write round use [`ConfigLock::read`] instead, so
+/// the read shares the guard's pinned resolution.
 pub fn read_config(path: &Path) -> Result<String> {
-    let target = resolve_symlink(path);
+    read_resolved(&resolve_symlink(path))
+}
+
+/// `target` must already be symlink-resolved (or be a plain path).
+fn read_resolved(target: &Path) -> Result<String> {
     if !target.exists() {
         return Ok(String::new());
     }
     let mut s = String::new();
-    File::open(&target)?.read_to_string(&mut s)?;
+    File::open(target)?.read_to_string(&mut s)?;
     Ok(s)
 }
 
@@ -159,6 +168,27 @@ impl ConfigLock {
         &self.target
     }
 
+    /// Read the locked config (missing → "") through the guard's PINNED
+    /// resolution — never re-resolving the symlink. A locked round's read,
+    /// backup, and write must all address the ONE file the flock protects: a
+    /// concurrent symlink retarget (e.g. `stow --restow` mid-install) would
+    /// otherwise split them across two files — merge input from the NEW
+    /// target, write onto the OLD — under a lock that excludes nobody at the
+    /// new path.
+    pub fn read(&self) -> Result<String> {
+        read_resolved(&self.target)
+    }
+
+    /// [`backup_once`] against the pinned resolution (see [`Self::read`]).
+    pub fn backup_once(&self, suffix: &str) -> Result<Option<PathBuf>> {
+        backup_once_resolved(&self.target, suffix)
+    }
+
+    /// [`remove_backup`] against the pinned resolution (see [`Self::read`]).
+    pub fn remove_backup(&self, suffix: &str) -> Result<Option<PathBuf>> {
+        remove_backup_resolved(&self.target, suffix)
+    }
+
     /// Atomic write to the locked target: temp file beside it, fsync, then
     /// rename onto it. Writing through the guard (instead of re-calling
     /// `write_config_atomic`) is what avoids the same-process flock
@@ -215,21 +245,27 @@ pub fn write_config_atomic(path: &Path, contents: &str) -> Result<()> {
 }
 
 pub fn backup_once(path: &Path, suffix: &str) -> Result<Option<PathBuf>> {
-    let target = resolve_symlink(path);
+    backup_once_resolved(&resolve_symlink(path), suffix)
+}
+
+fn backup_once_resolved(target: &Path, suffix: &str) -> Result<Option<PathBuf>> {
     if !target.exists() {
         return Ok(None);
     }
-    let bak = sibling(&target, suffix);
+    let bak = sibling(target, suffix);
     if bak.exists() {
         return Ok(Some(bak));
     }
-    std::fs::copy(&target, &bak)?;
+    std::fs::copy(target, &bak)?;
     Ok(Some(bak))
 }
 
 pub fn remove_backup(path: &Path, suffix: &str) -> Result<Option<PathBuf>> {
-    let target = resolve_symlink(path);
-    let bak = sibling(&target, suffix);
+    remove_backup_resolved(&resolve_symlink(path), suffix)
+}
+
+fn remove_backup_resolved(target: &Path, suffix: &str) -> Result<Option<PathBuf>> {
+    let bak = sibling(target, suffix);
     if !bak.exists() {
         return Ok(None);
     }
@@ -446,6 +482,42 @@ mod tests {
         assert_eq!(guard.target(), target);
         assert!(dir.path().join("real.json.lock").exists());
         assert!(lock_config(&target).is_err(), "same lock via either path");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn config_lock_read_and_backup_pin_the_lock_time_resolution() {
+        // A symlink retarget AFTER lock acquisition (a dotfiles tool swapping
+        // ~/.claude/settings.json mid-install) must not split the round:
+        // read, backup, and remove_backup all go through the guard's pinned
+        // target — the file the flock and write_atomic address — never a
+        // re-resolve of the link.
+        let dir = TempDir::new().unwrap();
+        let old = dir.path().join("old.json");
+        std::fs::write(&old, "old-content").unwrap();
+        let new = dir.path().join("new.json");
+        std::fs::write(&new, "new-content").unwrap();
+        let link = dir.path().join("link.json");
+        std::os::unix::fs::symlink(&old, &link).unwrap();
+
+        let guard = lock_config(&link).unwrap();
+        // The concurrent retarget lands inside the locked round.
+        std::fs::remove_file(&link).unwrap();
+        std::os::unix::fs::symlink(&new, &link).unwrap();
+
+        assert_eq!(
+            guard.read().unwrap(),
+            "old-content",
+            "the read is pinned to the lock-time target"
+        );
+        let bak = guard.backup_once("pixtuoid.bak").unwrap().unwrap();
+        assert_eq!(
+            bak,
+            dir.path().join("old.json.pixtuoid.bak"),
+            "the backup lands beside the lock-time target"
+        );
+        assert_eq!(std::fs::read_to_string(&bak).unwrap(), "old-content");
+        assert_eq!(guard.remove_backup("pixtuoid.bak").unwrap(), Some(bak));
     }
 
     // --- checked home resolution (#20) ------------------------------------------

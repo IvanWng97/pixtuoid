@@ -9,11 +9,16 @@
 use anyhow::Result;
 
 /// Characters that are special to cmd.exe's command-line parser (so they're
-/// unsafe in an UNQUOTED hook path): a space TRUNCATES the command; a
-/// separator/redirect/escape/expansion char injects or redirects. (`!` is
-/// deliberately excluded — it's special only under delayed expansion, `cmd
-/// /V:ON`, which the codex/reasonix hook runners don't enable.)
-const CMD_UNSAFE: &[char] = &[' ', '"', '&', '|', '<', '>', '(', ')', '^', '%'];
+/// unsafe in an UNQUOTED hook path): a first-token DELIMITER — space, tab,
+/// `;`, `,`, `=` — TRUNCATES the command (and unlike `"` `<` `>` `|`, the
+/// `;`/`,`/`=` trio is LEGAL in an NTFS filename, so a space-free path can
+/// genuinely carry one); a separator/redirect/escape/expansion char injects
+/// or redirects. (`!` is deliberately excluded — it's special only under
+/// delayed expansion, `cmd /V:ON`, which the codex/reasonix hook runners
+/// don't enable.)
+const CMD_UNSAFE: &[char] = &[
+    ' ', '\t', ';', ',', '=', '"', '&', '|', '<', '>', '(', ')', '^', '%',
+];
 
 #[cfg_attr(not(windows), allow(dead_code))]
 fn first_cmd_unsafe_char(p: &str) -> Option<char> {
@@ -144,6 +149,35 @@ mod tests {
             err.contains("cmd.exe") && err.contains("ordinary characters"),
             "reject message must stay actionable: {err}"
         );
+    }
+
+    #[test]
+    fn windows_command_treats_cmd_first_token_delimiters_as_unsafe() {
+        // cmd.exe terminates the command token at ';' ',' '=' and tab exactly
+        // like a space — and all four are legal NTFS filename chars, so a
+        // space-free path can carry one. The bare form would exec a truncated
+        // sibling path (`C:\tools\a` for `C:\tools\a;b\…`): each must take the
+        // 8.3 route, and reject when 8.3 is unavailable — never the bare form.
+        for path in [
+            r"C:\tools\a;b\pixtuoid-hook.exe",
+            r"C:\tools\a,b\pixtuoid-hook.exe",
+            r"C:\tools\a=b\pixtuoid-hook.exe",
+            "C:\\tools\\a\tb\\pixtuoid-hook.exe",
+        ] {
+            let short = resolve_windows_command(path, "codex", |_| {
+                Some(r"C:\TOOLS\SHORT~1\PIXTUO~1.EXE".to_string())
+            });
+            assert_eq!(
+                short.unwrap(),
+                r"C:\TOOLS\SHORT~1\PIXTUO~1.EXE --source codex",
+                "{path:?} must substitute the 8.3 short name"
+            );
+            let rejected = resolve_windows_command(path, "codex", |_| None);
+            assert!(
+                rejected.is_err(),
+                "{path:?} must reject, never write a silently-truncating bare form"
+            );
+        }
     }
 
     #[test]
