@@ -382,10 +382,17 @@ fn cc_subagent_stop_without_transcript_path_falls_back_to_prefixed_agent_id() {
     ] {
         let ev = decode_single(payload);
         match ev {
-            AgentEvent::SessionEnd { agent_id, .. } => assert_eq!(
-                agent_id,
-                AgentId::from_parts("claude-code", "agent-a0000000000000001")
-            ),
+            AgentEvent::SessionEnd { agent_id, as_child } => {
+                assert!(
+                    as_child,
+                    "fallback-path SubagentStop must stamp as_child: true \
+                     (the child ledger keys on it, #244/#246)"
+                );
+                assert_eq!(
+                    agent_id,
+                    AgentId::from_parts("claude-code", "agent-a0000000000000001")
+                );
+            }
             other => panic!("expected SessionEnd, got {other:?}"),
         }
     }

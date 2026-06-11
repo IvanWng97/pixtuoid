@@ -167,6 +167,14 @@ pub enum AgentEvent {
         /// the watcher's negative-vouch/instant-exit synthesis, Reasonix's
         /// `/new` rotation — stamps `false` and never writes the ledger, so
         /// parentless root resurrects stay untouched by construction.
+        ///
+        /// Source-trait CONTRACT: only SubagentStop decoders may stamp `true`;
+        /// a custom `Source` must stamp `false` on every root end. (Not
+        /// enforced structurally on purpose: a misbehaving source already
+        /// controls the whole event stream — it can forge `SessionStart`
+        /// parent links directly, which is strictly stronger than poisoning
+        /// the ledger — so a private constructor would add friction to the
+        /// documented extension seam without adding a trust boundary.)
         as_child: bool,
     },
     /// Emitted by a watcher once per liveness-probe refresh for EVERY session
