@@ -93,7 +93,7 @@ async fn run_async(cfg: RunConfig) -> Result<()> {
         .spawn_with_health(tx, health_tx);
 
     if headless {
-        headless_loop(scene_rx).await
+        headless_loop(scene_rx, health_rx).await
     } else {
         crate::tui::run_tui(
             scene_rx,
@@ -149,9 +149,17 @@ async fn reducer_task(
     }
 }
 
-async fn headless_loop(mut scene_rx: SceneRx) -> Result<()> {
+async fn headless_loop(
+    mut scene_rx: SceneRx,
+    mut health_rx: tokio::sync::watch::Receiver<Vec<pixtuoid_core::source::manager::SourceDeath>>,
+) -> Result<()> {
     tracing::info!("pixtuoid headless mode — Ctrl-C to quit");
     let mut prev_summary = String::new();
+    // Headless has no TUI footer (#157's sink for source deaths) and no
+    // stderr subscriber guarantee — surface them in the summary stream, or a
+    // dead transport reads as a silently empty office. Tracked by count: the
+    // watch Vec only grows.
+    let mut deaths_seen = 0usize;
     loop {
         tokio::select! {
             _ = tokio::time::sleep(Duration::from_millis(200)) => {
@@ -161,6 +169,13 @@ async fn headless_loop(mut scene_rx: SceneRx) -> Result<()> {
                     println!("{summary}");
                     prev_summary = summary;
                 }
+            }
+            Ok(()) = health_rx.changed() => {
+                let deaths = health_rx.borrow_and_update().clone();
+                for d in deaths.iter().skip(deaths_seen) {
+                    println!("warning: source '{}' died: {}", d.source, d.error);
+                }
+                deaths_seen = deaths.len();
             }
             _ = tokio::signal::ctrl_c() => {
                 tracing::info!("shutting down");

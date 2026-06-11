@@ -300,7 +300,22 @@ impl Source for ClaudeCodeSource {
     }
 
     async fn run(self: Box<Self>, tx: TaggedSender) -> Result<()> {
-        let socket = HookSocketListener::bind(self.socket_path.clone()).await?;
+        // SocketBusy (another live instance owns the endpoint) must not take
+        // the whole source down: the JSONL watcher works fine concurrently,
+        // so this instance degrades to transcript-only — hooks (and the
+        // hook-only Reasonix source riding the same socket) stay with the
+        // owning instance. Every other bind error is fatal as before.
+        let socket = match HookSocketListener::bind(self.socket_path.clone()).await {
+            Ok(s) => Some(s),
+            Err(e) if e.downcast_ref::<super::hook::SocketBusy>().is_some() => {
+                tracing::warn!(
+                    "{e:#}; continuing transcript-only — hook-borne signals \
+                     (permission Waiting, instant lifecycle) belong to the owning instance"
+                );
+                None
+            }
+            Err(e) => return Err(e),
+        };
         let mut watcher = JsonlWatcher::new(
             self.projects_root.clone(),
             SOURCE_NAME.to_string(),
@@ -315,6 +330,9 @@ impl Source for ClaudeCodeSource {
             }));
         }
 
+        let Some(socket) = socket else {
+            return watcher.run(tx).await;
+        };
         let tx_hook = tx.clone();
         let tx_jsonl = tx.clone();
         let hook_task = tokio::spawn(async move { socket.run(tx_hook).await });

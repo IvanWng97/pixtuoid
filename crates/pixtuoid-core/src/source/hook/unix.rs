@@ -28,14 +28,12 @@ impl Listener {
                 Ok(stream) => {
                     // Close immediately — the probe counts against the live
                     // daemon's MAX_CONCURRENT_CONNS (its CONN_TIMEOUT bounds
-                    // it regardless).
+                    // it regardless). Typed so the CC source can degrade to
+                    // transcript-only instead of dying wholesale.
                     drop(stream);
-                    anyhow::bail!(
-                        "another pixtuoid instance is listening on {} — \
-                         close it first, or run this one with PIXTUOID_SOCKET \
-                         pointing at a different path",
-                        path.display()
-                    );
+                    return Err(anyhow::Error::new(super::SocketBusy {
+                        path: path.to_path_buf(),
+                    }));
                 }
                 Err(e)
                     if matches!(
@@ -73,6 +71,19 @@ impl Listener {
                 .unwrap_or_default(),
             std::process::id()
         ));
+        // sun_path caps at 104 bytes (macOS; 108 Linux). A custom
+        // PIXTUOID_SOCKET whose FINAL path fits but whose `.<pid>.tmp` twin
+        // doesn't must not fail the bind — fall back to a direct bind +
+        // chmod at the final name, re-accepting the micro-TOCTOU (pre-chmod
+        // window) the temp-rename dance exists to avoid.
+        if tmp.as_os_str().len() > 100 {
+            let listener = UnixListener::bind(path)
+                .with_context(|| format!("binding hook socket at {}", path.display()))?;
+            tokio::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+                .await
+                .with_context(|| format!("restricting hook socket mode at {}", path.display()))?;
+            return Ok(Self { listener });
+        }
         // A leftover temp can only be ours-by-name from a crashed prior run
         // that had this very pid — never a live socket.
         let _ = tokio::fs::remove_file(&tmp).await;

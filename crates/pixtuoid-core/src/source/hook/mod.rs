@@ -19,6 +19,29 @@ use windows as imp;
 pub(crate) const MAX_CONCURRENT_CONNS: usize = 128;
 pub(crate) const CONN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
 
+/// Typed marker for "another live instance owns the hook endpoint" — bind's
+/// ONE recoverable failure. `ClaudeCodeSource::run` downcasts for it and
+/// degrades to transcript-only (hooks disabled) instead of taking the whole
+/// CC source (and the hook-only Reasonix source riding the same socket) down
+/// with the bail. Every other bind error stays fatal.
+#[derive(Debug)]
+pub struct SocketBusy {
+    pub path: PathBuf,
+}
+
+impl std::fmt::Display for SocketBusy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "another pixtuoid instance is listening on {} — close it first, or run this one \
+             with PIXTUOID_SOCKET pointing at a different path",
+            self.path.display()
+        )
+    }
+}
+
+impl std::error::Error for SocketBusy {}
+
 pub struct HookSocketListener {
     inner: imp::Listener,
     path: PathBuf,

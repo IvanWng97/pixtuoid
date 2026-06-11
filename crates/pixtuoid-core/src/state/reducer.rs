@@ -530,8 +530,11 @@ impl Reducer {
                         //   the new life. On a #228 false-exit resurrect the
                         //   old delegation may still be live, but its subtree
                         //   was already cascade_exit'd by the SessionEnd (only
-                        //   the root resurrects) and its JSONL End simply
-                        //   no-ops on the empty set — a transient hook
+                        //   the root resurrects); an out-of-window JSONL
+                        //   replay of its Start re-inserts (a fresh first
+                        //   insert) and its End then drains + re-arms b1 —
+                        //   safe: the fire-time emptiness check holds and the
+                        //   old subtree is already exiting. A transient hook
                         //   misattribution beats permanent suppression.
                         // - gated_before_waiting: a dead life's gate could
                         //   false-resolve a future Waiting via resolves_wait.
