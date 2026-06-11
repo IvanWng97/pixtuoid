@@ -70,13 +70,20 @@ pub trait Router {
 /// state: aimless wander mints a fresh pseudo-random destination every cycle
 /// and snap-back/exit legs route from live interpolated origins, so an
 /// always-on office accumulates keys forever — and the per-overlay-change
-/// `retain` scan inside `route` grows linearly with the map. One floor's
-/// recurring discrete anchors (door/desks/waypoints) fit comfortably under
-/// this cap; on overflow the whole map is cleared. A mid-leg clear is safe by
-/// construction: cornered in-flight legs are frozen on
-/// `MotionState.walk_path` (they never re-consult the router) and straight
-/// 2-point legs recompute bit-identically (A* is deterministic).
-const PATH_CACHE_CAP: usize = 384;
+/// `retain` scan inside `route` grows linearly with the map. Keys are
+/// per-agent jittered (from, to) PAIRS, not shared anchors: a fully loaded
+/// floor (16 agents × ~12-16 waypoints × 2 directions) recurs ~400-500
+/// keys, which 512 covers. If the working set ever cycles past the cap
+/// anyway, the failure mode is graceful: on overflow the whole map is
+/// cleared, and each evicted route is a sub-ms uncached A* on its next
+/// request — at most #walking-agents re-misses per frame. A mid-leg clear
+/// is safe by construction: cornered in-flight legs are frozen on
+/// `MotionState.walk_path` (they never re-consult the router), and a
+/// straight 2-point leg recomputes bit-identically only while the overlay
+/// is unchanged — after a clear it re-routes under the CURRENT overlay,
+/// the same self-healing re-route class the design already accepts for
+/// unfrozen legs.
+const PATH_CACHE_CAP: usize = 512;
 
 /// A* router with internal path cache. Cache invalidates on overlay
 /// signature change so per-frame occupancy movement (live agents) still
@@ -707,7 +714,10 @@ mod tests {
         // On a cell-center (x % 4 == 2) so same-row routes collapse to the
         // straight 2-point polyline (see routes_around_dynamic_obstacle).
         let from = Point { x: 10, y: 50 };
-        for i in 0..(PATH_CACHE_CAP + 100) {
+        // Strictly more distinct (from, to) pairs than the cap holds, so the
+        // overflow clear provably fires at least once.
+        let distinct_routes = PATH_CACHE_CAP + 100;
+        for i in 0..distinct_routes {
             let to = Point {
                 x: (8 + (i % 90) * 4) as u16,
                 y: (8 + (i / 90) * 4) as u16,
