@@ -337,6 +337,40 @@ fn narrow_width_pod_decor_stays_inside_the_band_and_off_band_slots_are_skipped()
 }
 
 #[test]
+fn pod_decor_south_edge_stays_inside_the_band_and_spilling_slots_are_skipped() {
+    // The vertical twin of the east clamp above: the last horizontal aisle's
+    // decor slot center (pod_origin_y + pod_h + INTER_POD_AISLE_Y/2) can sit
+    // close enough to the cubicle band's bottom edge that a tall CENTERED
+    // visual crosses into the walkway — at 200x116 seed 2 a PhoneBooth's 12px
+    // visual lands 3px past the band bottom, and its south-anchored 3-row
+    // footprint blocks a walkway patch. Same anchoring math as the painter's
+    // centered blit (pos - h/2 .. pos - h/2 + h); spilling slots are skipped
+    // (kind cycle still advances) and the floor degrades to fewer decor
+    // pieces, mirroring the east clamp.
+    for &w in &[120u16, 160, 200] {
+        for &h in &[90u16, 100, 116, 120, 160] {
+            for seed in 0..10u64 {
+                let Some(l) = SceneLayout::compute_with_seed(w, h, MAX_VISIBLE_DESKS, seed) else {
+                    continue;
+                };
+                let band_bottom = l.cubicle_band.y + l.cubicle_band.height;
+                for item in &l.pod_decor {
+                    let vis = furniture_def(item.kind.furniture()).visual;
+                    let south = item.pos.y.saturating_sub(vis.h / 2) + vis.h;
+                    assert!(
+                        south <= band_bottom,
+                        "{w}x{h} seed {seed}: {:?} decor at y={} (south edge {south}) \
+                         crosses the band's bottom edge {band_bottom} into the walkway",
+                        item.kind,
+                        item.pos.y
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn compute_places_all_waypoint_kinds() {
     let l = SceneLayout::compute(120, 96, 1).expect("fits");
     // Couch + Pantry are unconditional; PhoneBooth / StandingDesk

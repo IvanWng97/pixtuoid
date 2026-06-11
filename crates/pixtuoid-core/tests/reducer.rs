@@ -4623,6 +4623,91 @@ fn waiting_parent_cycle_is_still_reaped_by_the_stale_sweep() {
     }
 }
 
+// The #234 residual (#238): a 2-cycle whose members are BOTH Waiting would
+// mutually exempt — each has the OTHER as a genuine Waiting ancestor, so
+// `has_waiting_ancestor` skips both every sweep tick (an immortal pair). The
+// fix is upstream of the sweep: the SessionStart arm REFUSES a parent link
+// whose ancestor chain reaches the child (warn + degrade to parentless), so
+// the cycle never exists and the sweep needs no cycle awareness.
+#[test]
+fn mutual_waiting_parent_cycle_is_refused_at_the_link_seam_and_reaped() {
+    use pixtuoid_core::state::reducer::STALE_WAITING_TIMEOUT;
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+    let a = AgentId::from_transcript_path("/p/mutual-a.jsonl");
+    let b = AgentId::from_transcript_path("/p/mutual-b.jsonl");
+    // B registers parentless, then A registers parented to B (a legitimate
+    // link — B's chain is empty, no cycle).
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: b,
+            source: "claude-code".into(),
+            session_id: "mut-b".into(),
+            cwd: PathBuf::from("/repo"),
+            parent_id: None,
+        },
+        t0,
+        Transport::Hook,
+    );
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: a,
+            source: "claude-code".into(),
+            session_id: "mut-a".into(),
+            cwd: PathBuf::from("/repo"),
+            parent_id: Some(b),
+        },
+        t0,
+        Transport::Hook,
+    );
+    // B's duplicate SessionStart proposes parent A — the orphan-enrichment
+    // seam. A's chain reaches B (A → B), so the link would close the cycle:
+    // it must be refused (warn + continue, never panic), leaving B parentless.
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: b,
+            source: "claude-code".into(),
+            session_id: "mut-b".into(),
+            cwd: PathBuf::from("/repo"),
+            parent_id: Some(a),
+        },
+        t0,
+        Transport::Hook,
+    );
+    assert_eq!(
+        scene.agents.get(&b).and_then(|s| s.parent_id),
+        None,
+        "a cycle-closing enrichment must degrade to parentless"
+    );
+    // Both members park Waiting — pre-fix this pair was immortal.
+    for id in [a, b] {
+        r.apply(
+            &mut scene,
+            AgentEvent::Waiting {
+                agent_id: id,
+                reason: "permission".into(),
+            },
+            t0,
+            Transport::Hook,
+        );
+    }
+
+    r.tick(
+        &mut scene,
+        t0 + STALE_WAITING_TIMEOUT + Duration::from_secs(60),
+    );
+    for id in [a, b] {
+        assert!(
+            scene.agents.get(&id).is_none_or(|s| s.exiting_at.is_some()),
+            "a mutual-Waiting pair must not exempt each other from the stale sweep"
+        );
+    }
+}
+
 // Regression (adversarial review): a parent Waiting on a permission while a
 // Task is in flight must NOT be false-cleared to Idle when that Task drains.
 // The Task-drain debounce arms `pending_idle_at`; without a state guard it

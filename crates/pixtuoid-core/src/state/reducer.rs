@@ -488,6 +488,25 @@ impl Reducer {
                 cwd,
                 parent_id,
             } => {
+                // Refuse a parent link whose ancestor chain reaches the child
+                // — the ONE seam where `parent_id` is set (registration below)
+                // or enriched (the orphan arm), so a cycle can never EXIST and
+                // the scope walks need cycle guards only for termination: a
+                // 2-cycle whose members are BOTH Waiting would mutually
+                // satisfy `has_waiting_ancestor` and exempt each other from
+                // `sweep_stale` forever (#238). Degrade to parentless — the
+                // session is real even when its claimed lineage is malformed.
+                let parent_id = parent_id.filter(|&p| {
+                    let cycle = scope::would_create_cycle(&scene.agents, agent_id, p);
+                    if cycle {
+                        tracing::warn!(
+                            ?agent_id,
+                            proposed_parent = ?p,
+                            "refused parent_id link — it would close a parent cycle; degrading to parentless"
+                        );
+                    }
+                    !cycle
+                });
                 if let Some(slot) = scene.agents.get_mut(&agent_id) {
                     // Already created — usually a harmless duplicate from the
                     // other transport. But a Codex subagent's own rollout

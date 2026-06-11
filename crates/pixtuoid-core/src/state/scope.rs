@@ -127,6 +127,37 @@ pub(crate) fn has_ancestor_where(
     false
 }
 
+/// True if linking `child.parent_id = proposed_parent` would close a
+/// `parent_id` cycle — i.e. `proposed_parent`'s ancestor chain (itself
+/// included) reaches `child`. The reducer calls this at every seam that sets
+/// or enriches `parent_id` and REFUSES the link (degrading to parentless), so
+/// a cycle can never EXIST and the walks above need their cycle guards only
+/// for termination, never for correctness: a 2-cycle whose members are BOTH
+/// `Waiting` would mutually satisfy [`has_waiting_ancestor`] and exempt each
+/// other from the stale sweep forever — an immortal pair (#238). Bounded by
+/// the same visited-set + dangling-parent tolerance as every walk here.
+pub(crate) fn would_create_cycle(
+    agents: &BTreeMap<AgentId, AgentSlot>,
+    child: AgentId,
+    proposed_parent: AgentId,
+) -> bool {
+    if proposed_parent == child {
+        return true;
+    }
+    let mut visited: HashSet<AgentId> = HashSet::from([proposed_parent]);
+    let mut cur = agents.get(&proposed_parent).and_then(|s| s.parent_id);
+    while let Some(pid) = cur {
+        if pid == child {
+            return true;
+        }
+        if !visited.insert(pid) {
+            break;
+        }
+        cur = agents.get(&pid).and_then(|s| s.parent_id);
+    }
+    false
+}
+
 /// True if any ancestor of `id` is in `Waiting` state. A subagent's permission
 /// `Notification` is attributed to the PARENT (the hook `transcript_path` is
 /// the parent's), so the parent goes `Waiting` while the blocked subagent stays
@@ -277,6 +308,74 @@ mod tests {
             !has_waiting_ancestor(&scene.agents, b),
             "a node must never count as its own Waiting ancestor through a parent cycle"
         );
+    }
+
+    // --- would_create_cycle: the link-seam guard that keeps cycles from ever
+    // existing (the tests above harden the walks' TERMINATION on a crafted
+    // cycle; this guard removes the input class at the source). ---------------
+
+    #[test]
+    fn would_create_cycle_rejects_self_parent() {
+        let x = AgentId::from_transcript_path("/p/self.jsonl");
+        let scene = SceneState::uniform(4);
+        assert!(would_create_cycle(&scene.agents, x, x));
+    }
+
+    #[test]
+    fn would_create_cycle_rejects_two_node_closure() {
+        // A already parented to B; B proposing parent A closes the 2-cycle.
+        let a = AgentId::from_transcript_path("/p/a.jsonl");
+        let b = AgentId::from_transcript_path("/p/b.jsonl");
+        let mut scene = SceneState::uniform(4);
+        scene
+            .agents
+            .insert(a, slot(a, Some(b), ActivityState::Idle));
+        scene.agents.insert(b, slot(b, None, ActivityState::Idle));
+        assert!(would_create_cycle(&scene.agents, b, a));
+    }
+
+    #[test]
+    fn would_create_cycle_rejects_deep_chain_closure() {
+        // C → B → A; A proposing parent C closes the 3-cycle through the chain.
+        let a = AgentId::from_transcript_path("/p/a.jsonl");
+        let b = AgentId::from_transcript_path("/p/b.jsonl");
+        let c = AgentId::from_transcript_path("/p/c.jsonl");
+        let mut scene = SceneState::uniform(4);
+        scene.agents.insert(a, slot(a, None, ActivityState::Idle));
+        scene
+            .agents
+            .insert(b, slot(b, Some(a), ActivityState::Idle));
+        scene
+            .agents
+            .insert(c, slot(c, Some(b), ActivityState::Idle));
+        assert!(would_create_cycle(&scene.agents, a, c));
+    }
+
+    #[test]
+    fn would_create_cycle_allows_legitimate_and_dangling_links() {
+        let a = AgentId::from_transcript_path("/p/a.jsonl");
+        let b = AgentId::from_transcript_path("/p/b.jsonl");
+        let ghost = AgentId::from_transcript_path("/p/never-created.jsonl");
+        let mut scene = SceneState::uniform(4);
+        scene.agents.insert(b, slot(b, None, ActivityState::Idle));
+        // A fresh child under an existing root: fine.
+        assert!(!would_create_cycle(&scene.agents, a, b));
+        // A parent that has no slot yet (the hook can outrun the JSONL
+        // registration): dangling is tolerated, same as the walks.
+        assert!(!would_create_cycle(&scene.agents, a, ghost));
+    }
+
+    #[test]
+    fn would_create_cycle_terminates_on_preexisting_cycle_elsewhere() {
+        // A pre-existing A⇄B cycle (crafted state) must not hang the walk when
+        // an unrelated child proposes a parent inside it — and the proposal is
+        // legitimately allowed (the chain never reaches the child).
+        let (mut scene, a, _b) = cycle_scene(ActivityState::Idle, ActivityState::Idle);
+        let child = AgentId::from_transcript_path("/p/child.jsonl");
+        scene
+            .agents
+            .insert(child, slot(child, None, ActivityState::Idle));
+        assert!(!would_create_cycle(&scene.agents, child, a));
     }
 
     #[test]
