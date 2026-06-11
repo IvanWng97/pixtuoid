@@ -302,6 +302,7 @@ impl<T: Source> DynSource for T {
 }
 
 pub mod antigravity;
+pub(crate) mod cc_probe;
 pub mod claude_code;
 pub mod codex;
 pub mod decoder;
