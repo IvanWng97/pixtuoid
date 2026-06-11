@@ -681,7 +681,9 @@ fn unknown_cwd_agent_reaps_faster() {
         t0,
         Transport::Jsonl,
     );
-    let label = scene.agents.get(&id).unwrap().label.clone();
+    let slot = scene.agents.get(&id).unwrap();
+    assert!(slot.unknown_cwd, "empty cwd should set unknown_cwd");
+    let label = slot.label.clone();
     assert!(
         label.contains('#'),
         "empty cwd should produce source#N label, got {label}"
@@ -809,39 +811,6 @@ fn session_end_cascades_to_grandchildren() {
     assert!(
         scene.agents.get(&child).unwrap().exiting_at.is_some(),
         "grandchild should cascade to exiting via BFS"
-    );
-}
-
-#[test]
-fn unknown_cwd_agent_uses_faster_stale_timeout() {
-    use pixtuoid_core::state::reducer::STALE_UNKNOWN_CWD_TIMEOUT;
-    let mut scene = SceneState::uniform(4);
-    let mut r = Reducer::new();
-    let id = AgentId::from_transcript_path("/p/unknown.jsonl");
-    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
-
-    r.apply(
-        &mut scene,
-        AgentEvent::SessionStart {
-            agent_id: id,
-            source: "claude-code".into(),
-            session_id: "u".into(),
-            cwd: PathBuf::new(),
-            parent_id: None,
-        },
-        t0,
-        Transport::Jsonl,
-    );
-    let slot = scene.agents.get(&id).unwrap();
-    assert!(slot.unknown_cwd, "empty cwd should set unknown_cwd");
-
-    r.tick(
-        &mut scene,
-        t0 + STALE_UNKNOWN_CWD_TIMEOUT + Duration::from_secs(1),
-    );
-    assert!(
-        scene.agents.get(&id).unwrap().exiting_at.is_some(),
-        "unknown_cwd agent should reap after STALE_UNKNOWN_CWD_TIMEOUT"
     );
 }
 
