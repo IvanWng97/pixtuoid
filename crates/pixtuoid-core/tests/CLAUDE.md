@@ -12,7 +12,8 @@ tests/
 │   │   └── fixtures/{hooks,jsonl}/   decode's OWN data (single-owner; NOT scanned)
 │   ├── conformance.rs        per-source SessionStart→tool snapshot harness (insta)
 │   ├── manager.rs            SourceManager spawn/health
-│   ├── claude.rs             CC subagent lifecycle (inline json — no fixture)
+│   ├── claude/mod.rs         CC subagent lifecycle
+│   │   └── fixtures/hook-payloads.jsonl   CC's OWN data (single-owner; NOT scanned)
 │   ├── codex/mod.rs          codex subagent lifecycle
 │   │   └── fixtures/hook-payloads.jsonl   codex's OWN data (single-owner; NOT scanned)
 │   ├── snapshots/            insta snaps  (sources__conformance__<source>__<scenario>)

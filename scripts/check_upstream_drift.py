@@ -26,7 +26,8 @@ and compares against the live upstream:
 Exit codes:
   0  no drift
   1  actionable drift (a name we depend on vanished, or a new upstream Codex
-     hook we neither register nor intentionally omit) -> open a tracking issue
+     or CC hook event we neither register nor intentionally omit) -> open a
+     tracking issue
   2  could not check (network/HTTP error) -> transient, do NOT alarm
 
 See crates/pixtuoid-core/CLAUDE.md "Keeping the decode mapping current".

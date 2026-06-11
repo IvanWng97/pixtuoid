@@ -89,8 +89,11 @@ pub(crate) fn decode_cc_hook_custom(v: &Value) -> Result<Option<Vec<AgentEvent>>
             parent_id: Some(AgentId::from_parts(SOURCE_NAME, session_id)),
         }]))
     } else {
-        // SubagentStop: end the CHILD promptly. The authoritative key is the
-        // subagent transcript's filename stem (`cc_id_from_path` on
+        // SubagentStop: end the CHILD promptly (else its transcript lingers
+        // to the 10/30-min stale sweeps). Best-effort, mirroring the Codex
+        // twin: losing the race against the child's slot creation leaves a
+        // harmless no-op + the stale-sweep fallback. The authoritative key is
+        // the subagent transcript's filename stem (`cc_id_from_path` on
         // `agent_transcript_path` — EXACT parity with the watcher's id
         // deriver, immune to a prefix-scheme drift); the prefixed wire id is
         // the fallback when the path is absent.
@@ -102,10 +105,14 @@ pub(crate) fn decode_cc_hook_custom(v: &Value) -> Result<Option<Vec<AgentEvent>>
             .filter(|s| !s.is_empty());
         if let Some(ref k) = path_key {
             if *k != prefixed {
-                // Drift breadcrumb: the stem and the prefixed wire id disagree
-                // — upstream changed the filename scheme or the prefix. The
-                // stem keeps us keyed to the watcher.
-                tracing::debug!(
+                // Drift alarm: the stem and the prefixed wire id disagree —
+                // upstream changed the filename scheme or the prefix. The
+                // stem keeps THIS exit keyed to the watcher, but hook-FIRST
+                // registrations (Start keys on the prefixed form) would
+                // become sweep-cleared phantoms — genuinely actionable, so
+                // warn (it reaches the warn-floor file log), unlike the
+                // per-dispatch tool-name breadcrumbs.
+                tracing::warn!(
                     stem = %k,
                     wire = %prefixed,
                     "SubagentStop transcript stem != prefixed agent_id; keying on the stem"
