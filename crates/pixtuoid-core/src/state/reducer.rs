@@ -617,7 +617,7 @@ impl Reducer {
                 // the #246 case this adoption was built for — the IN-FLIGHT
                 // multi-turn child: upstream provides no SessionStart carrier
                 // at turn N+1 (hook_runtime.rs verified 2026-06-11), so the
-                // child-end un-claim side-channel (`source/jsonl.rs`
+                // child-end un-claim side-channel (`source/jsonl/unclaim.rs`
                 // ChildEndUnclaims: the CC hook tee observes the SubagentStop
                 // and the owning watcher releases the rollout's `seen` claim)
                 // manufactures the JSONL first-sight carrier this arm

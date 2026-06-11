@@ -1166,7 +1166,7 @@ async fn rebound_session_survives_old_pid_death_and_follows_the_new_pid() {
 /// job in production, pinned separately) must make the running watcher
 /// release the claim on a scan/notify pass, so a later append re-registers
 /// the SAME id with a FRESH SessionStart. (The drain-before-release straggler
-/// discipline is pinned deterministically in jsonl.rs's
+/// discipline is pinned deterministically in source/jsonl/tests.rs's
 /// `child_end_unclaim_drains_stragglers_then_releases_without_session_end`.)
 #[tokio::test]
 async fn child_end_unclaim_lets_a_turn_n_plus_1_append_re_register() {
@@ -1823,7 +1823,7 @@ async fn default_id_deriver_stays_path_keyed() {
     // "abc". The EXACT value (`from_parts(source, normalize_path_key(path))`) is
     // platform-dependent and `normalize_path_key` is `pub(crate)` (unreachable
     // here), so it's pinned at the UNIT level instead —
-    // `jsonl.rs::default_id_from_path_returns_normalized_path_key` + `decoder.rs`'s
+    // `jsonl/tests.rs::default_id_from_path_returns_normalized_path_key` + `decoder.rs`'s
     // `normalize_path_key` tests — not re-derived in this integration test.
     let stem_keyed = AgentId::from_parts("antigravity", "abc");
     let mut ok = false;
