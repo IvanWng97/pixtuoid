@@ -314,9 +314,12 @@ mod tests {
         std::env::set_var("PIXTUOID_SOCKET", r"\\.\pipe\explicit");
         assert_eq!(default_socket_path(), r"\\.\pipe\explicit");
 
-        // Set-but-empty = unset (the #172 RUST_LOG policy) -> USERNAME default.
+        // Set-but-empty/whitespace = unset (the #172 RUST_LOG policy) ->
+        // USERNAME default.
         std::env::set_var("PIXTUOID_SOCKET", "");
         std::env::set_var("USERNAME", "ada");
+        assert_eq!(default_socket_path(), r"\\.\pipe\pixtuoid-ada");
+        std::env::set_var("PIXTUOID_SOCKET", "   ");
         assert_eq!(default_socket_path(), r"\\.\pipe\pixtuoid-ada");
 
         std::env::remove_var("PIXTUOID_SOCKET");

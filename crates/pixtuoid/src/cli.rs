@@ -29,7 +29,9 @@ pub struct Cli {
 pub enum Cmd {
     /// Run the TUI (default if no subcommand given).
     Run {
-        #[arg(long)]
+        /// Empty/whitespace is rejected: an explicit override deserves a loud
+        /// answer, and bind("") would strand a relative `.lock` in the CWD.
+        #[arg(long, value_parser = parse_nonempty_path)]
         socket: Option<PathBuf>,
         #[arg(long)]
         projects_root: Option<PathBuf>,
@@ -151,9 +153,27 @@ impl Cli {
     }
 }
 
+fn parse_nonempty_path(s: &str) -> Result<PathBuf, String> {
+    if s.trim().is_empty() {
+        Err("must not be empty — pass a socket path, or drop the flag for the default".into())
+    } else {
+        Ok(PathBuf::from(s))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn empty_socket_is_a_hard_parse_error() {
+        // An explicit override deserves a loud answer: bind("") would die
+        // late with an opaque error and strand a relative `.lock` in the CWD.
+        for v in ["", "   "] {
+            let err = Cli::try_parse_from(["pixtuoid", "run", "--socket", v]).unwrap_err();
+            assert_eq!(err.kind(), clap::error::ErrorKind::ValueValidation);
+        }
+    }
 
     #[test]
     fn log_level_typo_is_a_hard_parse_error() {

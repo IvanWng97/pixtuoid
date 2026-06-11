@@ -206,7 +206,9 @@ async fn bind_bails_when_a_live_listener_holds_the_path() {
         "error must name the contended path: {msg}"
     );
 
-    // The liveness probe's connect must not have harmed the first listener.
+    // A bind attempt against a live owner must be side-effect-free: the
+    // try-lock fails before any probe connect or unlink, so the owner's
+    // socket keeps serving untouched.
     let mut s = UnixStream::connect(&path).await.unwrap();
     let payload = serde_json::json!({
         "hook_event_name": "SessionStart",
@@ -283,6 +285,16 @@ async fn bound_socket_is_owner_only_with_no_temp_residue() {
 
     let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
     assert_eq!(mode, 0o600, "hook socket must be owner-only rw (0600)");
+
+    // The lock sibling is the liveness arbiter — if it regressed to a
+    // umask-default mode, another local user could open+flock it and force
+    // every future daemon into silent transcript-only degradation.
+    let lock_mode = std::fs::metadata(dir.path().join("pixtuoid.sock.lock"))
+        .unwrap()
+        .permissions()
+        .mode()
+        & 0o777;
+    assert_eq!(lock_mode, 0o600, "lock file must be owner-only rw (0600)");
 
     let mut names: Vec<String> = std::fs::read_dir(dir.path())
         .unwrap()

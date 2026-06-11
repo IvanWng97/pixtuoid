@@ -122,9 +122,12 @@ impl Listener {
                 .create_with_security_attributes_raw(&name, sd.attributes_ptr())
         } {
             Ok(s) => s,
-            // ERROR_ACCESS_DENIED (5): another instance holds
+            // ERROR_ACCESS_DENIED (5): almost always another instance holding
             // first_pipe_instance on this name — the one recoverable bind
-            // failure. Every other create error stays fatal.
+            // failure. A genuine ACL denial (restricted token / AppContainer)
+            // is indistinguishable and also degrades; accepted trade-off, the
+            // JSONL watcher stays alive either way. Every other create error
+            // stays fatal.
             Err(e)
                 if e.kind() == std::io::ErrorKind::PermissionDenied
                     || e.raw_os_error() == Some(5) =>

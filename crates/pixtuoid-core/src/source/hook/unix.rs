@@ -46,6 +46,10 @@ impl Listener {
             .write(true)
             .truncate(false)
             .mode(0o600)
+            // O_NOFOLLOW: a symlink planted at `<sock>.lock` (the parent dir
+            // may be a shared /tmp) must fail the open, not make the daemon
+            // flock — and hold for its lifetime — an arbitrary file.
+            .custom_flags(libc::O_NOFOLLOW)
             .open(&lock_path)
             .with_context(|| format!("opening hook socket lock at {}", lock_path.display()))?;
         match lock.try_lock() {
@@ -73,7 +77,12 @@ impl Listener {
             // LIVE owner that predates the lock protocol (an older pixtuoid
             // mid-upgrade, or an arbitrary squatter); defer to it rather than
             // steal. Any OTHER connect error is NOT evidence of life — the
-            // lock already arbitrated — so reclaim.
+            // lock already arbitrated — so reclaim. Honest residual: a
+            // lock-LESS live owner under a saturated backlog yields
+            // ECONNREFUSED on macOS (not WouldBlock), so this probe still
+            // steals from it — accepted, because the window only exists while
+            // pre-lock daemons run (mixed-version upgrade) and ages out once
+            // every daemon holds the lock.
             let alive = match tokio::net::UnixStream::connect(path).await {
                 // Close immediately — the probe counts against the live
                 // daemon's MAX_CONCURRENT_CONNS (its CONN_TIMEOUT bounds it
