@@ -339,7 +339,12 @@ fn resolve_hook_binary(
         // (plain join, not canonicalize — Windows canonicalize yields a
         // \\?\ verbatim path that the cmd.exe bare form can't take).
         let p = if p.is_relative() {
-            std::env::current_dir().map(|cwd| cwd.join(&p)).unwrap_or(p)
+            // A failed cwd query must NOT fall back to silently embedding the
+            // relative path — that re-creates exactly the never-fires bug the
+            // absolutization exists to prevent.
+            let cwd = std::env::current_dir()
+                .context("--hook-path is relative and the current directory is unreadable; pass an absolute path")?;
+            cwd.join(&p)
         } else {
             p
         };
@@ -560,13 +565,24 @@ mod tests {
         vec![(&CLAUDE, claude), (&FAKE, fake)]
     }
 
+    /// A platform-absolute fixture path: `/x/hook` is DRIVE-RELATIVE on
+    /// Windows, so the absolutization would rewrite it there.
+    fn abs_fixture(unix: &str, windows: &str) -> PathBuf {
+        if cfg!(windows) {
+            PathBuf::from(windows)
+        } else {
+            PathBuf::from(unix)
+        }
+    }
+
     #[test]
     fn resolve_hook_binary_explicit_path_wins() {
         // --hook-path always short-circuits resolution (locate is never called).
-        let got = resolve_hook_binary(&CLAUDE, Some(PathBuf::from("/x/hook")), || {
+        let p = abs_fixture("/x/hook", r"C:\x\hook");
+        let got = resolve_hook_binary(&CLAUDE, Some(p.clone()), || {
             panic!("locate must not be called when --hook-path is given")
         });
-        assert_eq!(got.unwrap(), PathBuf::from("/x/hook"));
+        assert_eq!(got.unwrap(), p);
     }
 
     #[test]

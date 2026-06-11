@@ -251,6 +251,14 @@ fn install_reasonix_writes_flat_json_with_sentinel_and_backup() {
     )
     .unwrap();
     let bin = env!("CARGO_BIN_EXE_pixtuoid");
+    // Platform-ABSOLUTE fixture: `/fake/...` is drive-relative on Windows and
+    // the explicit --hook-path absolutization would rewrite it against the
+    // test's cwd.
+    let hook_path = if cfg!(windows) {
+        r"C:\fake\pixtuoid-hook"
+    } else {
+        "/fake/pixtuoid-hook"
+    };
     let status = std::process::Command::new(bin)
         .args([
             "install-hooks",
@@ -259,7 +267,7 @@ fn install_reasonix_writes_flat_json_with_sentinel_and_backup() {
             "--config",
             settings.to_str().unwrap(),
             "--hook-path",
-            "/fake/pixtuoid-hook",
+            hook_path,
         ])
         .status()
         .unwrap();
@@ -282,7 +290,7 @@ fn install_reasonix_writes_flat_json_with_sentinel_and_backup() {
     #[cfg(windows)]
     assert_eq!(
         pre[1]["command"].as_str().unwrap(),
-        "/fake/pixtuoid-hook --source reasonix"
+        r"C:\fake\pixtuoid-hook --source reasonix"
     );
     assert!(pre[1].get("hooks").is_none(), "no CC-style nested group");
     assert!(
