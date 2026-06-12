@@ -215,7 +215,11 @@ def run_clip(job, out_dirs, work, intermediates):
         ffmpeg("-framerate", str(fps), "-i", str(frames / "f%04d.png"),
                "-c:v", "libvpx-vp9", "-b:v", "0", "-crf", "36", "-row-mt", "1",
                "-pix_fmt", "yuv420p", "-vf", scale, str(d / f"{cid}.webm"))
-        ffmpeg("-i", str(gif), "-vframes", "1", str(d / f"{cid}-poster.png"))
+        # poster frame: `poster` (seconds into the clip) lets a staged clip
+        # (e.g. meetings, whose opening seconds are pre-action) poster on the
+        # money shot instead of frame 0. Posters are presence-only in --check.
+        poster_seek = ["-ss", str(job["poster"])] if "poster" in job else []
+        ffmpeg(*poster_seek, "-i", str(gif), "-vframes", "1", str(d / f"{cid}-poster.png"))
 
 
 HANDLERS = {

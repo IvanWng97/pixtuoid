@@ -144,7 +144,11 @@
     "id": "meetings",
     "label": "MEETINGS",
     "kind": "clip",
-    "caption": "idle agents drift to the meeting room for chitchat",
-    "status": "soon"
+    "asset": "meetings",
+    "w": 1664,
+    "h": 1408,
+    "caption": "idle agents drift to the meeting room — and the chitchat starts",
+    "duration": "0:16",
+    "status": "live"
   }
 ]

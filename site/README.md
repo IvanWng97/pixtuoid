@@ -88,12 +88,16 @@ just gen-media              # from the repo root (or: just gen for README + all 
 
 `scripts/gen-media.py` (driven by `scripts/media.json`) reads `src/themes.json` and
 `src/weather.json` (via `@`-refs in the manifest), keeping their variant-set channels
-in lock-step with their manifests. It also renders the three animated clips via the
-snapshot example's `--gif`/`--navigate-at`/`--agents`/`--pets`
+in lock-step with their manifests. It also renders the four animated clips via the
+snapshot example's `--gif`/`--navigate-at`/`--agents`/`--pets`/`--meeting`
 flags (the multi-floor clip uses `--agents 22 --navigate-at 3:1 --navigate-at 7:0`
-to drive the real TuiRenderer across floors; the pets clip uses `--pets cat` — no
-screen recording). Each `.gif` is re-encoded through `encode_clip` into `.mp4` +
-`.webm` + a poster frame so `ChannelStage` can emit a `<video>` with both sources.
+to drive the real TuiRenderer across floors; the pets clip uses `--pets cat`; the
+meetings clip uses `--meeting 3` to stage three agents converging on one meeting
+room, with an auto-computed warmup pre-roll so the clip opens just before the
+first agent rises — no screen recording). Each `.gif` is re-encoded through
+`encode_clip` into `.mp4` + `.webm` + a poster frame (a clip job's optional
+`poster` field picks the poster's second, e.g. mid-meeting for `meetings`) so
+`ChannelStage` can emit a `<video>` with both sources.
 
 (Pixel art lives in `public/` on purpose — Astro's `src/assets/` optimizer would
 resize/blur it.)

@@ -190,6 +190,33 @@ struct SnapshotArgs {
     #[arg(long)]
     anim_skip_ms: Option<u64>,
 
+    /// Stage N agents (2–3) converging on ONE meeting room in a `--gif`
+    /// capture: each agent's wander state is back-dated onto a cycle whose
+    /// deterministic destination is a distinct meeting-room slot, with their
+    /// desk dwells aligned (≤3s spread) so they rise near-together, walk over,
+    /// and chitchat fires within seconds of the second arrival. Composes with
+    /// `--agents`: the staged agents take desk indices 0..N and the normal
+    /// sample archetypes fill desks N..--agents so the floor stays alive.
+    /// Auto-computes a pre-roll (min staged desk-dwell − 1.5s) so the encoded
+    /// clip starts just before the first agent rises; `--warmup-secs`
+    /// overrides it. Drives the MEETINGS clip in scripts/media.json.
+    #[arg(
+        long,
+        value_name = "N",
+        value_parser = clap::value_parser!(u8).range(2..=3),
+        requires = "gif",
+        conflicts_with_all = ["anim", "dashboard", "empty", "live", "pets", "navigate_at"]
+    )]
+    meeting: Option<u8>,
+
+    /// Pre-roll a `--gif` capture: advance the simulated clock through the
+    /// real per-frame render (motion state advances) WITHOUT encoding frames
+    /// for the first N seconds, so the clip starts mid-action. Overrides the
+    /// `--meeting` auto-computed warmup. (`--anim` has its own pre-roll knob,
+    /// `--anim-skip-ms`.)
+    #[arg(long, value_name = "SECS", requires = "gif", conflicts_with = "anim")]
+    warmup_secs: Option<f64>,
+
     /// Restrict `--anim sofa`/`couch`/`stand` to a seat with a given SEATED
     /// facing: `north` (back-view, `back_couch` sprite — sofa occludes the lower
     /// body) or `south` (front-view, `seated` sprite). Lets a single meeting room
@@ -268,18 +295,33 @@ fn main() -> Result<()> {
         }
         None => SystemTime::now(),
     };
-    let mut anim_skip_ms = 0u64;
+    let cols = args.cols.unwrap_or(COLS);
+    let rows = args.rows.unwrap_or(ROWS);
+    let mut skip_ms = 0u64;
     let scene = if let Some(target) = args.anim.as_deref() {
         let (s, skip) = anim_scene(
             now,
             target,
-            args.cols.unwrap_or(COLS),
-            args.rows.unwrap_or(ROWS),
+            cols,
+            rows,
             args.floor_seed,
             args.anim_facing.as_deref(),
         );
-        anim_skip_ms = args.anim_skip_ms.unwrap_or(skip);
-        eprintln!("ANIM pre-roll skip = {anim_skip_ms}ms (default {skip}ms)");
+        skip_ms = args.anim_skip_ms.unwrap_or(skip);
+        eprintln!("ANIM pre-roll skip = {skip_ms}ms (default {skip}ms)");
+        s
+    } else if let Some(n) = args.meeting {
+        let (s, warmup) = meeting_scene(
+            now,
+            n as usize,
+            cols,
+            rows,
+            args.floor_seed,
+            args.max_desks,
+            args.agents,
+        )?;
+        skip_ms = warmup;
+        eprintln!("MEETING auto warmup = {warmup}ms");
         s
     } else if args.empty {
         SceneState::uniform(args.max_desks)
@@ -293,9 +335,10 @@ fn main() -> Result<()> {
     } else {
         sample_scene(now, args.max_desks, args.agents)
     };
-
-    let cols = args.cols.unwrap_or(COLS);
-    let rows = args.rows.unwrap_or(ROWS);
+    if let Some(secs) = args.warmup_secs {
+        skip_ms = (secs * 1000.0) as u64;
+        eprintln!("WARMUP pre-roll = {skip_ms}ms (explicit --warmup-secs)");
+    }
     let backend = TestBackend::new(cols, rows);
     let mut term = Terminal::new(backend)?;
     let mut buf = RgbBuffer::filled(0, 0, Rgb { r: 0, g: 0, b: 0 });
@@ -379,7 +422,7 @@ fn main() -> Result<()> {
             args.gif_duration,
             theme,
             args.floor_seed,
-            anim_skip_ms,
+            skip_ms,
             args.debug_walkable,
         )?;
         println!("wrote {}", args.out.display());
@@ -676,8 +719,16 @@ async fn capture_live_scene(projects_root: &str, listen_secs: u64) -> Result<Sce
 }
 
 fn sample_scene(now: SystemTime, max_desks: usize, n_agents: usize) -> SceneState {
-    use std::time::Duration as D;
     let mut s = SceneState::uniform(max_desks);
+    fill_sample_agents(&mut s, now, 0..n_agents);
+    s
+}
+
+/// Insert the standard sample-scene archetypes at desk indices `desks`
+/// (`i % 12` cycles the archetype list). Split out of `sample_scene` so
+/// `meeting_scene` can fill desks N.. around its staged agents.
+fn fill_sample_agents(s: &mut SceneState, now: SystemTime, desks: std::ops::Range<usize>) {
+    use std::time::Duration as D;
     let agents: [(&str, ActivityState, D); 12] = [
         (
             "working",
@@ -732,9 +783,9 @@ fn sample_scene(now: SystemTime, max_desks: usize, n_agents: usize) -> SceneStat
         ),
         ("floor-idle2", ActivityState::Idle, D::from_millis(3_000)),
     ];
-    for i in 0..n_agents {
+    for i in desks {
         let (key, state, age) = &agents[i % agents.len()];
-        // Keys must be unique across the full n_agents range: bare key for the first
+        // Keys must be unique across the full desk range: bare key for the first
         // pass over the archetypes, suffixed once they cycle so each desk slot gets
         // its own AgentId and BTreeMap entry.
         let unique_key = if i < agents.len() {
@@ -769,7 +820,179 @@ fn sample_scene(now: SystemTime, max_desks: usize, n_agents: usize) -> SceneStat
             },
         );
     }
-    s
+}
+
+/// One (agent, cycle) whose deterministic wander destination is a meeting-room
+/// slot — a candidate for `--meeting` staging.
+#[derive(Debug, Clone)]
+struct MeetingCandidate {
+    path: String,
+    id: AgentId,
+    cycle_n: u64,
+    wp_idx: usize,
+    room_id: usize,
+    is_sofa: bool,
+    dwell_ms: u64,
+}
+
+/// Max per-group spread of the staged agents' desk dwells (ms) — they should
+/// rise from their desks near-together so arrivals overlap well inside the
+/// 20–40s meeting dwell.
+const MEETING_DWELL_SPREAD_MS: u64 = 3_000;
+
+/// Encoded clip starts this long before the earliest staged rise.
+const MEETING_WARMUP_LEAD_MS: u64 = 1_500;
+
+/// Build a scene where `n` agents (desks 0..n) are staged to converge on ONE
+/// meeting room: each agent's `state_started_at` is back-dated by
+/// `cycle_n * est_wander_cycle_ms + ε` so motion's bootstrap fast-forward
+/// selects a cycle whose deterministic `waypoint_index_for_cycle` lands on a
+/// DISTINCT slot of the same room (so they don't fight for one seat). Motion
+/// deliberately restarts the phase clock on first observation (anti-teleport),
+/// so every staged agent still sits out its full `seated_dwell_ms` before
+/// rising — the returned warmup (min dwell − 1.5s) pre-rolls the capture to
+/// just before the first rise. Desks n..n_agents get the sample archetypes.
+fn meeting_scene(
+    now: SystemTime,
+    n: usize,
+    cols: u16,
+    rows: u16,
+    floor_seed: u64,
+    max_desks: usize,
+    n_agents: usize,
+) -> Result<(SceneState, u64)> {
+    use pixtuoid_core::layout::{SceneLayout, WaypointKind};
+    use pixtuoid_core::pose::{
+        est_wander_cycle_ms, is_aimless_cycle, seated_dwell_ms, takes_trip,
+        waypoint_index_for_cycle,
+    };
+
+    // Match the renderer's layout EXACTLY (terminal minus 1-row footer,
+    // half-block doubling) — same convention as anim_scene. Capacity must be
+    // the scene's floor-0 capacity (max_desks), which is what draw_scene
+    // passes, or the waypoint indices shift and the staging silently misses.
+    let (buf_w, buf_h) = (cols, rows.saturating_sub(1).saturating_mul(2));
+    let l = SceneLayout::compute_with_seed(buf_w, buf_h, max_desks, floor_seed)
+        .ok_or_else(|| anyhow::anyhow!("--meeting: scene too small to compute a layout"))?;
+    let nw = l.waypoints.len();
+
+    // Candidate sweep: deterministic synthetic ids; for each, the LOWEST cycle
+    // (≥1 — cycle 0 would back-date less than the 20s thinking window) whose
+    // trip deterministically lands on a meeting slot.
+    let mut cands: Vec<MeetingCandidate> = Vec::new();
+    for i in 0..20_000u64 {
+        let path = format!("/meeting/agent_{i}.jsonl");
+        let id = AgentId::from_transcript_path(&path);
+        for cycle_n in 1..=5u64 {
+            if !takes_trip(id, cycle_n) || is_aimless_cycle(id, cycle_n) {
+                continue;
+            }
+            let wp_idx = waypoint_index_for_cycle(id, cycle_n, nw);
+            let wp = l.waypoints[wp_idx];
+            let is_sofa = match wp.kind {
+                WaypointKind::MeetingSofa => true,
+                WaypointKind::MeetingStand => false,
+                _ => continue,
+            };
+            cands.push(MeetingCandidate {
+                path,
+                id,
+                cycle_n,
+                wp_idx,
+                room_id: wp.room_id.unwrap_or(0),
+                is_sofa,
+                dwell_ms: seated_dwell_ms(id),
+            });
+            break;
+        }
+    }
+    cands.sort_by_key(|c| (c.dwell_ms, c.id.raw()));
+
+    // Lowest-dwell window of n candidates with: same room, distinct slots,
+    // dwell spread ≤ 3s. Prefer windows seating ≥2 on sofas (reads "meeting"
+    // far better than a stand-up cluster); fall back without that bias.
+    let pick = |need_sofas: usize| -> Option<Vec<MeetingCandidate>> {
+        for (i, base) in cands.iter().enumerate() {
+            let mut sel = vec![base.clone()];
+            for c in cands[i + 1..].iter() {
+                if c.dwell_ms - base.dwell_ms > MEETING_DWELL_SPREAD_MS {
+                    break;
+                }
+                if c.room_id == base.room_id && sel.iter().all(|s| s.wp_idx != c.wp_idx) {
+                    sel.push(c.clone());
+                    if sel.len() == n {
+                        break;
+                    }
+                }
+            }
+            if sel.len() == n && sel.iter().filter(|c| c.is_sofa).count() >= need_sofas {
+                return Some(sel);
+            }
+        }
+        None
+    };
+    let staged = pick(2.min(n)).or_else(|| pick(0)).ok_or_else(|| {
+        anyhow::anyhow!(
+            "--meeting {n}: no candidate group found ({} meeting-bound candidates at \
+             {buf_w}x{buf_h} seed {floor_seed})",
+            cands.len()
+        )
+    })?;
+
+    let min_dwell = staged.iter().map(|c| c.dwell_ms).min().unwrap_or(0);
+    let warmup_ms = min_dwell.saturating_sub(MEETING_WARMUP_LEAD_MS);
+
+    let mut s = SceneState::uniform(max_desks);
+    for (i, c) in staged.iter().enumerate() {
+        let wp = l.waypoints[c.wp_idx];
+        eprintln!(
+            "MEETING agent {} desk {} id={} cycle={} → waypoint[{}] {:?} room {} at ({}, {}) \
+             desk_dwell={}ms rise@{}ms",
+            (b'a' + i as u8) as char,
+            i,
+            c.path,
+            c.cycle_n,
+            c.wp_idx,
+            wp.kind,
+            c.room_id,
+            wp.pos.x,
+            wp.pos.y,
+            c.dwell_ms,
+            c.dwell_ms.saturating_sub(warmup_ms),
+        );
+        // Back-date past `cycle_n` whole estimated cycles (+ a hair so the
+        // integer division can't land on the boundary). created_at matches so
+        // the entry-walk override can't fire.
+        let back_date = Duration::from_millis(c.cycle_n * est_wander_cycle_ms(c.id) + 400);
+        let label = format!("meet-{}", (b'a' + i as u8) as char);
+        s.agents.insert(
+            c.id,
+            AgentSlot {
+                agent_id: c.id,
+                source: std::sync::Arc::from("claude-code"),
+                session_id: std::sync::Arc::from(format!("meeting-{i}").as_str()),
+                cwd: std::sync::Arc::from(PathBuf::from("/meeting").as_path()),
+                label: std::sync::Arc::from(label.as_str()),
+                state: ActivityState::Idle,
+                state_started_at: now - back_date,
+                created_at: now - back_date,
+                last_event_at: now - back_date,
+                exiting_at: None,
+                pending_idle_at: None,
+                desk_index: GlobalDeskIndex(i),
+                floor_idx: s.floor_of(GlobalDeskIndex(i)),
+                tool_call_count: 0,
+                active_ms: 0,
+                unknown_cwd: false,
+                parent_id: None,
+            },
+        );
+    }
+    // Fill the rest of the office with the normal archetypes so the floor
+    // doesn't look dead around the meeting.
+    fill_sample_agents(&mut s, now, n..n_agents);
+    eprintln!("MEETING staged {n} agents, warmup={warmup_ms}ms (min desk_dwell {min_dwell}ms − {MEETING_WARMUP_LEAD_MS}ms)");
+    Ok((s, warmup_ms))
 }
 
 /// Build a representative 5-agent scene for the `--dashboard` demo: a CC parent
@@ -1565,6 +1788,126 @@ mod tests {
             "pantry"
         ])
         .is_err());
+    }
+
+    #[test]
+    fn meeting_flag_parses_caps_and_conflicts() {
+        let ok = ["snapshot", "out.gif", "--gif", "--meeting", "3"];
+        assert!(SnapshotArgs::try_parse_from(ok).is_ok());
+        // 2..=3 cap; requires --gif; conflicts with the other scene modes.
+        for bad in [
+            vec!["snapshot", "--gif", "--meeting", "1"],
+            vec!["snapshot", "--gif", "--meeting", "4"],
+            vec!["snapshot", "--meeting", "3"],
+            vec!["snapshot", "--gif", "--meeting", "3", "--anim", "sofa"],
+            vec!["snapshot", "--gif", "--meeting", "3", "--pets", "cat"],
+            vec![
+                "snapshot",
+                "--gif",
+                "--meeting",
+                "3",
+                "--navigate-at",
+                "3:1",
+            ],
+            vec!["snapshot", "--gif", "--meeting", "3", "--dashboard"],
+            vec!["snapshot", "--gif", "--meeting", "3", "--empty"],
+        ] {
+            assert!(
+                SnapshotArgs::try_parse_from(bad.clone()).is_err(),
+                "accepted {bad:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn warmup_flag_requires_gif_and_conflicts_with_anim() {
+        assert!(
+            SnapshotArgs::try_parse_from(["snapshot", "--gif", "--warmup-secs", "13.5"]).is_ok()
+        );
+        assert!(SnapshotArgs::try_parse_from(["snapshot", "--warmup-secs", "5"]).is_err());
+        assert!(SnapshotArgs::try_parse_from([
+            "snapshot",
+            "--gif",
+            "--warmup-secs",
+            "5",
+            "--anim",
+            "sofa"
+        ])
+        .is_err());
+    }
+
+    /// Re-derive the motion bootstrap from the staged slots and pin every
+    /// invariant the convergence depends on: motion's first-frame fast-forward
+    /// (`elapsed_idle / est_wander_cycle_ms`) must select a trip cycle whose
+    /// deterministic destination is a meeting slot, all staged agents in ONE
+    /// room on DISTINCT slots, desk dwells within the spread, and the warmup
+    /// pre-roll just under the earliest rise.
+    #[test]
+    fn meeting_scene_stages_a_convergent_group() {
+        use pixtuoid_core::layout::{SceneLayout, WaypointKind};
+        use pixtuoid_core::pose::{
+            est_wander_cycle_ms, is_aimless_cycle, seated_dwell_ms, takes_trip,
+            waypoint_index_for_cycle,
+        };
+
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+        let (cols, rows, max_desks) = (208u16, 88u16, 12);
+        let (scene, warmup_ms) = meeting_scene(now, 3, cols, rows, 0, max_desks, 12).unwrap();
+        assert_eq!(scene.agents.len(), 12, "staged 3 + 9 archetype fillers");
+
+        let layout =
+            SceneLayout::compute_with_seed(cols, (rows - 1) as u16 * 2, max_desks, 0).unwrap();
+        let staged: Vec<_> = scene
+            .agents
+            .values()
+            .filter(|s| s.label.starts_with("meet-"))
+            .collect();
+        assert_eq!(staged.len(), 3);
+
+        let mut wp_idxs = Vec::new();
+        let mut rooms = Vec::new();
+        let mut dwells = Vec::new();
+        for slot in &staged {
+            assert!(slot.desk_index.0 < 3, "staged agents take desks 0..n");
+            let id = slot.agent_id;
+            let elapsed_ms = now
+                .duration_since(slot.state_started_at)
+                .unwrap()
+                .as_millis() as u64;
+            // Mirror motion's bootstrap fast-forward exactly.
+            let cycle_n = elapsed_ms / est_wander_cycle_ms(id);
+            assert!(cycle_n >= 1, "cycle 0 back-dates under the thinking window");
+            assert!(takes_trip(id, cycle_n), "staged cycle must be a trip");
+            assert!(!is_aimless_cycle(id, cycle_n), "trip must be directed");
+            let wp_idx = waypoint_index_for_cycle(id, cycle_n, layout.waypoints.len());
+            let wp = layout.waypoints[wp_idx];
+            assert!(
+                matches!(
+                    wp.kind,
+                    WaypointKind::MeetingSofa | WaypointKind::MeetingStand
+                ),
+                "destination must be a meeting slot, got {:?}",
+                wp.kind
+            );
+            wp_idxs.push(wp_idx);
+            rooms.push(wp.room_id.expect("meeting slots carry a room_id"));
+            dwells.push(seated_dwell_ms(id));
+        }
+        wp_idxs.sort_unstable();
+        wp_idxs.dedup();
+        assert_eq!(wp_idxs.len(), 3, "slots must be distinct (no seat fights)");
+        assert!(
+            rooms.iter().all(|r| *r == rooms[0]),
+            "one room → one chitchat venue"
+        );
+        let (min_d, max_d) = (*dwells.iter().min().unwrap(), *dwells.iter().max().unwrap());
+        assert!(
+            max_d - min_d <= MEETING_DWELL_SPREAD_MS,
+            "dwell spread {}ms exceeds {}ms",
+            max_d - min_d,
+            MEETING_DWELL_SPREAD_MS
+        );
+        assert_eq!(warmup_ms, min_d.saturating_sub(MEETING_WARMUP_LEAD_MS));
     }
 
     #[test]

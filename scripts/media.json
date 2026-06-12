@@ -268,5 +268,22 @@
    "--pets",
    "cat"
   ]
+ },
+ {
+  "id": "meetings",
+  "kind": "clip",
+  "targets": [
+   "site"
+  ],
+  "cols": 208,
+  "rows": 88,
+  "duration": 16,
+  "fps": 15,
+  "hour": 15,
+  "poster": 12,
+  "extra": [
+   "--meeting",
+   "3"
+  ]
  }
 ]
