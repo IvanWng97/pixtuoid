@@ -152,4 +152,5 @@ A/B clause: routing alone is the steady state. Whole-codebase reviews also
 carry a SYSTEM lens — module decomposition still right, dependency
 directions clean, cross-PR composition seams — because architecture erodes
 BETWEEN PRs, not within them (no per-PR lens can see it; the census's
-"emergent cross-PR composition" escape class is its bug-shaped form).
+"emergent cross-PR composition" bucket — a NON-escape class precisely
+because no per-PR review could have caught it — is its bug-shaped form).
