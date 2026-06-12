@@ -1,6 +1,9 @@
 ---
-// Faux live agent activity — echoes the app's neon wall-ticker.
-const items = [
+// The app's neon wall-ticker, fed with REAL provenance at build time: the most
+// recently merged PRs of this repo — which are themselves authored by coding
+// agents working in this office. Falls back to the canned reel when the API is
+// unreachable (offline dev, rate limit) so the build never fails or blocks.
+const FALLBACK = [
   { state: 'active', who: 'claude-code', what: 'editing src/reducer.rs' },
   { state: 'waiting', who: 'codex', what: 'awaiting approval' },
   { state: 'active', who: 'claude-code', what: 'walking to the pantry ☕' },
@@ -8,6 +11,38 @@ const items = [
   { state: 'idle', who: 'cursor', what: 'idle at desk' },
   { state: 'active', who: 'claude-code', what: 'git commit -m "feat: ..."' },
 ];
+
+interface TickerItem {
+  state: string;
+  who: string;
+  what: string;
+}
+
+let items: TickerItem[] = FALLBACK;
+try {
+  // Unauthenticated is fine (one request per build, 60/h limit); CI can pass
+  // GITHUB_TOKEN for headroom. 5s timeout keeps a hung API from stalling builds.
+  const headers: Record<string, string> = { accept: 'application/vnd.github+json' };
+  if (process.env.GITHUB_TOKEN) headers.authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
+  const res = await fetch(
+    'https://api.github.com/repos/IvanWng97/pixtuoid/pulls?state=closed&base=main&sort=updated&direction=desc&per_page=12',
+    { headers, signal: AbortSignal.timeout(5000) }
+  );
+  if (res.ok) {
+    const prs = (await res.json()) as { number: number; title: string; merged_at: string | null }[];
+    const merged = prs.filter((p) => p.merged_at).slice(0, 8);
+    // Below 4 the loop reads as broken — keep the canned reel instead.
+    if (merged.length >= 4) {
+      items = merged.map((p) => ({
+        state: 'active',
+        who: 'cc·pixtuoid',
+        what: `merged #${p.number} · ${p.title.length > 64 ? p.title.slice(0, 63) + '…' : p.title}`,
+      }));
+    }
+  }
+} catch {
+  // offline / timeout → FALLBACK already in place
+}
 ---
 
 <div class="ticker" aria-hidden="true">

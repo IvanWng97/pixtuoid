@@ -1,0 +1,234 @@
+---
+import type { MarkdownHeading } from 'astro';
+import Base from './Base.astro';
+import Nav from '../components/Nav.astro';
+import Footer from '../components/Footer.astro';
+import { REPO, asset } from '../consts';
+
+interface Props {
+  title: string;
+  description: string;
+  /** from `await render(entry)` — drives the build-time mini-TOC */
+  headings: MarkdownHeading[];
+  /** which doc this page is (sidebar highlight + prev/next) */
+  current: 'config' | 'architecture' | 'contributing' | 'migration';
+  /** repo-relative path for the "Source of truth" footer link, e.g. docs/CONFIGURATION.md */
+  sourcePath: string;
+  /** suffix after the source link (architecture mentions its Mermaid diagram) */
+  sourceNote?: string;
+}
+
+const {
+  title,
+  description,
+  headings,
+  current,
+  sourcePath,
+  sourceNote = 'this page renders it verbatim.',
+} = Astro.props;
+
+// Fixed reading order — also the prev/next sequence.
+const DOCS = [
+  { id: 'config', label: 'Configuration', href: 'config' },
+  { id: 'architecture', label: 'Architecture', href: 'architecture' },
+  { id: 'contributing', label: 'Contributing', href: 'contributing' },
+  { id: 'migration', label: 'Migration', href: 'migration' },
+] as const;
+
+const idx = DOCS.findIndex((d) => d.id === current);
+const prev = idx > 0 ? DOCS[idx - 1] : undefined;
+const next = idx >= 0 && idx < DOCS.length - 1 ? DOCS[idx + 1] : undefined;
+
+// Mini-TOC: h2 sections; when a doc has few of them, fold in the h3s too.
+const h2s = headings.filter((h) => h.depth === 2);
+const toc = h2s.length < 3 ? headings.filter((h) => h.depth === 2 || h.depth === 3) : h2s;
+---
+
+<Base title={title} description={description}>
+  <Nav />
+  <main id="main" tabindex="-1" class="docs">
+    <nav class="docs__rail docs__sidebar" aria-label="Docs">
+      <p class="eyebrow docs__eyebrow">docs</p>
+      <ul class="docs__list">
+        {
+          DOCS.map((d) => (
+            <li>
+              <a href={asset(d.href)} aria-current={d.id === current ? 'page' : undefined}>
+                {d.label}
+              </a>
+            </li>
+          ))
+        }
+      </ul>
+    </nav>
+
+    <div class="docs__body">
+      <article class="prose">
+        <slot />
+      </article>
+
+      <nav class="docs__pager" aria-label="Docs pagination">
+        {
+          prev ? (
+            <a class="docs__pager-link" href={asset(prev.href)} rel="prev">
+              <span class="docs__pager-dir" aria-hidden="true">
+                ← previous
+              </span>
+              {prev.label}
+            </a>
+          ) : (
+            <span />
+          )
+        }
+        {
+          next && (
+            <a class="docs__pager-link docs__pager-link--next" href={asset(next.href)} rel="next">
+              <span class="docs__pager-dir" aria-hidden="true">
+                next →
+              </span>
+              {next.label}
+            </a>
+          )
+        }
+      </nav>
+
+      <p class="docs__source">
+        Source of truth:
+        <a href={`${REPO}/blob/main/${sourcePath}`} target="_blank" rel="noreferrer">
+          {sourcePath}
+        </a> — {sourceNote}
+      </p>
+    </div>
+
+    {
+      toc.length > 0 && (
+        <nav class="docs__rail docs__toc" aria-label="On this page">
+          <p class="docs__toc-label">on this page</p>
+          <ul class="docs__list">
+            {toc.map((h) => (
+              <li class={h.depth === 3 ? 'docs__toc-sub' : undefined}>
+                <a href={`#${h.slug}`}>{h.text}</a>
+              </li>
+            ))}
+          </ul>
+        </nav>
+      )
+    }
+  </main>
+  <Footer />
+</Base>
+
+<style>
+  .docs {
+    width: 100%;
+    max-width: 1280px;
+    margin-inline: auto;
+    padding: clamp(2rem, 5vw, 4rem) clamp(1.1rem, 4vw, 2.5rem) clamp(3rem, 7vw, 5rem);
+    display: grid;
+    grid-template-columns: 13rem minmax(0, 820px) 13rem;
+    gap: clamp(1.4rem, 3vw, 3rem);
+    justify-content: center;
+    align-items: start;
+  }
+  /* rails: sticky below the 60px sticky nav */
+  .docs__rail {
+    position: sticky;
+    top: 84px;
+    font-family: var(--font-mono);
+    font-size: 0.84rem;
+  }
+  .docs__eyebrow {
+    margin-bottom: 0.8rem;
+  }
+  .docs__toc-label {
+    font-weight: 700;
+    font-size: 0.76rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--fg-muted);
+    margin-bottom: 0.8rem;
+  }
+  .docs__list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+  }
+  .docs__list a {
+    display: block;
+    padding: 0.35rem 0.6rem;
+    border-radius: var(--radius-sm);
+    color: var(--fg-muted);
+    text-decoration: none;
+    border-left: 2px solid transparent;
+  }
+  .docs__list a:hover {
+    color: var(--fg);
+    background: color-mix(in srgb, var(--fg) 5%, transparent);
+  }
+  .docs__sidebar a[aria-current='page'] {
+    color: var(--coral-deep);
+    background: var(--surface);
+    border-left-color: var(--coral-deep);
+    border-top-left-radius: 0;
+    border-bottom-left-radius: 0;
+  }
+  .docs__toc-sub a {
+    padding-left: 1.4rem;
+  }
+  .docs__pager {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-top: 2.6rem;
+    padding-top: 1.3rem;
+    border-top: 1px solid var(--border);
+    font-family: var(--font-mono);
+    font-size: 0.92rem;
+  }
+  .docs__pager-link {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding: 0.7rem 0.9rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    color: var(--fg);
+    text-decoration: none;
+  }
+  .docs__pager-link--next {
+    text-align: right;
+    margin-left: auto;
+  }
+  .docs__pager-link:hover {
+    border-color: var(--border-strong);
+    color: var(--coral-deep);
+  }
+  .docs__pager-dir {
+    font-size: 0.76rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--fg-muted);
+  }
+  .docs__source {
+    margin-top: 2.6rem;
+    padding-top: 1.3rem;
+    border-top: 1px solid var(--border);
+    font-family: var(--font-mono);
+    font-size: 0.84rem;
+    color: var(--fg-muted);
+  }
+  /* single column: content first, rails hidden (Nav's Docs dropdown covers them) */
+  @media (max-width: 1000px) {
+    .docs {
+      display: block;
+      max-width: 820px;
+    }
+    .docs__rail {
+      display: none;
+    }
+  }
+</style>

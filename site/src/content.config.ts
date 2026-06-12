@@ -15,4 +15,7 @@ export const collections = {
   contributing: defineCollection({
     loader: glob({ pattern: 'CONTRIBUTING.md', base: '../docs' }),
   }),
+  migration: defineCollection({
+    loader: glob({ pattern: 'MIGRATION.md', base: '../docs' }),
+  }),
 };

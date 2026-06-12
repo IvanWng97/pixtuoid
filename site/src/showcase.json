@@ -23,6 +23,38 @@
     "status": "live"
   },
   {
+    "id": "dashboard",
+    "label": "DASHBOARD",
+    "kind": "variant-set",
+    "variants": [
+      {
+        "id": "tree",
+        "name": "Tab ⇥ agent tree",
+        "blurb": "every floor's agents in one foldable tree",
+        "src": "agent-tree.png",
+        "featured": true
+      }
+    ],
+    "caption": "press Tab — parents, subagents, per-CLI badges; jump to any agent's floor",
+    "status": "live"
+  },
+  {
+    "id": "fleet",
+    "label": "FLEET",
+    "kind": "variant-set",
+    "variants": [
+      {
+        "id": "night-shift",
+        "name": "Night shift",
+        "blurb": "40 agents across 3 floors",
+        "src": "fleet.png",
+        "featured": true
+      }
+    ],
+    "caption": "workflow fleets get desks too — this codebase was reviewed by 91 agents in this office",
+    "status": "live"
+  },
+  {
     "id": "themes",
     "label": "THEMES",
     "kind": "variant-set",
@@ -44,7 +76,12 @@
     "label": "NIGHT",
     "kind": "variant-set",
     "variants": [
-      { "id": "day", "name": "Day", "blurb": "high noon over the skyline", "src": "day.png" },
+      {
+        "id": "day",
+        "name": "Day",
+        "blurb": "high noon over the skyline",
+        "src": "day.png"
+      },
       {
         "id": "night",
         "name": "Night",
