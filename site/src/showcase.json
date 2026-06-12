@@ -130,6 +130,17 @@
     "status": "live"
   },
   {
+    "id": "meetings",
+    "label": "MEETINGS",
+    "kind": "clip",
+    "asset": "meetings",
+    "w": 1664,
+    "h": 1408,
+    "caption": "idle agents drift to the meeting room — “no tests?” “trust me” “ship it!”",
+    "duration": "0:16",
+    "status": "live"
+  },
+  {
     "id": "pets",
     "label": "PETS",
     "kind": "clip",
@@ -138,17 +149,6 @@
     "h": 1408,
     "caption": "a cat roams the floor — click to pet",
     "duration": "0:12",
-    "status": "live"
-  },
-  {
-    "id": "meetings",
-    "label": "MEETINGS",
-    "kind": "clip",
-    "asset": "meetings",
-    "w": 1664,
-    "h": 1408,
-    "caption": "idle agents drift to the meeting room — and the chitchat starts",
-    "duration": "0:16",
     "status": "live"
   }
 ]

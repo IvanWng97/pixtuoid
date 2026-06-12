@@ -213,8 +213,15 @@ struct SnapshotArgs {
     /// real per-frame render (motion state advances) WITHOUT encoding frames
     /// for the first N seconds, so the clip starts mid-action. Overrides the
     /// `--meeting` auto-computed warmup. (`--anim` has its own pre-roll knob,
-    /// `--anim-skip-ms`.)
-    #[arg(long, value_name = "SECS", requires = "gif", conflicts_with = "anim")]
+    /// `--anim-skip-ms`; `--pets`/`--navigate-at` render through
+    /// save_renderer_gif, which has no skip seam — conflict rather than
+    /// silently no-op.)
+    #[arg(
+        long,
+        value_name = "SECS",
+        requires = "gif",
+        conflicts_with_all = ["anim", "pets", "navigate_at"]
+    )]
     warmup_secs: Option<f64>,
 
     /// Restrict `--anim sofa`/`couch`/`stand` to a seat with a given SEATED
@@ -832,6 +839,11 @@ struct MeetingCandidate {
     wp_idx: usize,
     room_id: usize,
     is_sofa: bool,
+    /// The room's bottom-most meeting seat renders the sitter in BACK view,
+    /// mostly occluded behind the table — a staged group should avoid it so
+    /// all sprites read on camera (review finding; the seat itself is fine
+    /// for organic wander).
+    is_south_seat: bool,
     dwell_ms: u64,
 }
 
@@ -877,8 +889,28 @@ fn meeting_scene(
     let nw = l.waypoints.len();
 
     // Candidate sweep: deterministic synthetic ids; for each, the LOWEST cycle
-    // (≥1 — cycle 0 would back-date less than the 20s thinking window) whose
-    // trip deterministically lands on a meeting slot.
+    // (≥1 — cycle 0's 400ms back-date sits inside ENTRY_ANIMATION_MS, so the
+    // door entry-walk override would hijack the staging; the thinking window
+    // can never fire here since last_event_at == created_at) whose trip
+    // deterministically lands on a meeting slot. The sweep trusts motion's
+    // approach_point fallback for reachability: a boxed-in seat degrades to an
+    // aimless amble, caught by the visual check at `just gen` time, not here.
+    // Per room, the bottom-most (max-y) meeting seat seats its sitter in BACK
+    // view behind the table — flag it so the picker can avoid staging there.
+    let south_y_of_room = |room: usize| -> Option<u16> {
+        l.waypoints
+            .iter()
+            .filter(|w| {
+                w.room_id == Some(room)
+                    && matches!(
+                        w.kind,
+                        WaypointKind::MeetingSofa | WaypointKind::MeetingStand
+                    )
+            })
+            .map(|w| w.pos.y)
+            .max()
+    };
+
     let mut cands: Vec<MeetingCandidate> = Vec::new();
     for i in 0..20_000u64 {
         let path = format!("/meeting/agent_{i}.jsonl");
@@ -894,13 +926,15 @@ fn meeting_scene(
                 WaypointKind::MeetingStand => false,
                 _ => continue,
             };
+            let room_id = wp.room_id.unwrap_or(0);
             cands.push(MeetingCandidate {
                 path,
                 id,
                 cycle_n,
                 wp_idx,
-                room_id: wp.room_id.unwrap_or(0),
+                room_id,
                 is_sofa,
+                is_south_seat: south_y_of_room(room_id) == Some(wp.pos.y),
                 dwell_ms: seated_dwell_ms(id),
             });
             break;
@@ -911,18 +945,25 @@ fn meeting_scene(
     // Lowest-dwell window of n candidates with: same room, distinct slots,
     // dwell spread ≤ 3s. Prefer windows seating ≥2 on sofas (reads "meeting"
     // far better than a stand-up cluster); fall back without that bias.
-    let pick = |need_sofas: usize| -> Option<Vec<MeetingCandidate>> {
+    let pick = |need_sofas: usize, avoid_south: bool| -> Option<Vec<MeetingCandidate>> {
         for (i, base) in cands.iter().enumerate() {
+            if avoid_south && base.is_south_seat {
+                continue;
+            }
             let mut sel = vec![base.clone()];
             for c in cands[i + 1..].iter() {
                 if c.dwell_ms - base.dwell_ms > MEETING_DWELL_SPREAD_MS {
                     break;
                 }
-                if c.room_id == base.room_id && sel.iter().all(|s| s.wp_idx != c.wp_idx) {
-                    sel.push(c.clone());
-                    if sel.len() == n {
-                        break;
-                    }
+                if (avoid_south && c.is_south_seat)
+                    || c.room_id != base.room_id
+                    || sel.iter().any(|s| s.wp_idx == c.wp_idx)
+                {
+                    continue;
+                }
+                sel.push(c.clone());
+                if sel.len() == n {
+                    break;
                 }
             }
             if sel.len() == n && sel.iter().filter(|c| c.is_sofa).count() >= need_sofas {
@@ -931,13 +972,16 @@ fn meeting_scene(
         }
         None
     };
-    let staged = pick(2.min(n)).or_else(|| pick(0)).ok_or_else(|| {
-        anyhow::anyhow!(
-            "--meeting {n}: no candidate group found ({} meeting-bound candidates at \
+    let staged = pick(2.min(n), true)
+        .or_else(|| pick(2.min(n), false))
+        .or_else(|| pick(0, false))
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "--meeting {n}: no candidate group found ({} meeting-bound candidates at \
              {buf_w}x{buf_h} seed {floor_seed})",
-            cands.len()
-        )
-    })?;
+                cands.len()
+            )
+        })?;
 
     let min_dwell = staged.iter().map(|c| c.dwell_ms).min().unwrap_or(0);
     let warmup_ms = min_dwell.saturating_sub(MEETING_WARMUP_LEAD_MS);
