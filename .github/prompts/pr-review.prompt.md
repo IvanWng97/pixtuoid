@@ -132,9 +132,14 @@ finding became a 0.4.1 release-blocker (#46); two more drop cases:
 docs/review-metrics/mining-2026-06.md. After a fix
 round, re-run the gates and watch the NEW head's CI.
 
-Whole-codebase reviews additionally: finder briefs do NOT carry the ledger —
-unbiased candidate recall is what keeps the ledger's calibration measurable;
-the ledger enters at routing/verification only. Until the demote path's
-false-suppression rate has a measurement, run the A/B harness alongside
-(control arm = the ledger-blind pass; see
-docs/review-metrics/phase2-ab-2026-06.md).
+Whole-codebase reviews (the finder → dedup → ledger-routing → verification
+pipeline; worked design: docs/review-metrics/phase2-ab-2026-06.md)
+additionally: finder briefs do NOT carry the ledger — unbiased candidate
+recall is what keeps the ledger's calibration measurable; the ledger enters
+at routing/verification only. Until a run records the demote path's
+false-suppression rate (status lives in that report or its successor —
+phase 2 never fired a demotion), verify A/B per that design: a control arm
+of full pairs on ALL candidates — which doubles the run's verification
+spend and doubles as protocol step 8's ledger-blind calibration — alongside
+the ledger-routed treatment arm. Once the rate is recorded, delete this
+A/B clause: routing alone is the steady state.

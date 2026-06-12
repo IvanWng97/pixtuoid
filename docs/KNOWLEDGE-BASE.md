@@ -85,9 +85,11 @@ repo's maintainer agent repeated a known `preflight | tail` exit-code mistake
 
 **Counter:** friction goes on the distiller, never the capturer; recurrence is
 the promotion trigger (twice = it leaves prose and becomes a rule); and the
-ladder has a top rung — see Layer 4. The distillation pass itself rides the
-existing periodic context-file audit rather than its own calendar (the
-graveyard rule below: maintenance must ride an existing habit). Git-native, review-gated promotion is
+ladder has a top rung — see Layer 4. The distillation pass has no calendar
+of its own — it rides Layer 1's periodic context-file audit
+(`/revise-claude-md`): every audit also sweeps recent session memories for
+promote-to-repo candidates (the graveyard rule below: maintenance must ride
+an existing habit). Git-native, review-gated promotion is
 the only team-memory pattern we've found without a public postmortem as of
 mid-2026.
 
