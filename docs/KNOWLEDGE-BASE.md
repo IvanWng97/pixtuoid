@@ -160,6 +160,7 @@ replicating this on their own repo:
 | onboarding proxy: standard tasks with / without KB | first-pass gate rate, review nits | task completion |
 | ledger calibration (every Nth review, ledger-blind) | false-suppression rate | — |
 | context health (quarterly) | auto-loaded tokens vs. sharp-edge citation rate | — |
+| plan-stage miss rate (planned changes) | review findings the plan never named, from `plan-miss:` commit lines | trigger compliance held constant |
 
 Efficiency metrics are only reported **paired with their quality guard** —
 a review that got cheaper by finding less is not a saving.

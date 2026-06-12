@@ -35,11 +35,12 @@ You are reviewer 1/2 (correctness lens) for <PR/branch> on pixtuoid.
 Worktree: <path> (branch <name>, base <sha>). Diff: git -C <path> diff <base>..HEAD.
 
 Verify rigorously (read the actual code, not just the diff):
-1. <the change-specific claims to check, one per line — e.g. "the staging math
-   vs motion's bootstrap", "byte-identity of the refactor", "every cited
-   PR/sharp-edge exists". When the change shipped with an impl-plan brief
-   (impl-plan.prompt.md), fill these slots from the plan's claims — a
-   finding the plan never named is a plan-stage miss; say so in the report>
+1. <the change-specific claims to check, one per line — filled from the
+   impl-plan brief's claims in the PR body when the change shipped with one
+   (impl-plan.prompt.md) — e.g. "the staging math vs motion's bootstrap",
+   "byte-identity of the refactor", "every cited PR/sharp-edge exists">
+   For planned changes: a finding the plan never named is a plan-stage
+   miss — flag it in your report.
 2. House rules on touched code: no unwrap() outside tests, tracing not
    println, comments WHY-only, docs-currency (CLAUDE.md/README updated when
    public surface moved).
@@ -124,7 +125,10 @@ history:
 Process notes for the orchestrator: dispatch both in parallel, in the
 worktree, background; verify every MEDIUM+ finding's premise yourself before
 coding a fix (reviewers have incomplete design context — check sharp edges
-first); fold accepted findings into ONE review-round commit. Before merging, sweep
+first); fold accepted findings into ONE review-round commit, recording any
+reviewer-flagged plan-misses as `plan-miss:` lines in that commit's message
+and carrying them into the squash body (the census harvests that channel).
+Before merging, sweep
 every reviewer/bot finding to exactly one terminal state — FIXED,
 REFUTED-with-trace (ledger row if it will recur), ISSUE FILED (no-deferral
 rule applies: only big/refactor work defers), or ACCEPTED-residual with its
