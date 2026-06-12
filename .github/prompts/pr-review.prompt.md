@@ -37,7 +37,9 @@ Worktree: <path> (branch <name>, base <sha>). Diff: git -C <path> diff <base>..H
 Verify rigorously (read the actual code, not just the diff):
 1. <the change-specific claims to check, one per line — e.g. "the staging math
    vs motion's bootstrap", "byte-identity of the refactor", "every cited
-   PR/sharp-edge exists">
+   PR/sharp-edge exists". When the change shipped with an impl-plan brief
+   (impl-plan.prompt.md), fill these slots from the plan's claims — a
+   finding the plan never named is a plan-stage miss; say so in the report>
 2. House rules on touched code: no unwrap() outside tests, tracing not
    println, comments WHY-only, docs-currency (CLAUDE.md/README updated when
    public surface moved).
