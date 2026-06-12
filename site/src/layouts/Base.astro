@@ -87,6 +87,9 @@ const version = __PIXTUOID_VERSION__; // from the workspace Cargo.toml at build
           const afterHours = hour >= 19 || hour < 7;
           const sys = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'night' : 'day';
           const theme = ok(pick) ? pick : afterHours ? 'night' : sys;
+          // clock-forced (not chosen, not system) → the footer explains itself
+          if (!ok(pick) && afterHours && sys === 'day')
+            document.documentElement.dataset.clockNight = '1';
           document.documentElement.dataset.theme = theme;
           // keep the mobile browser-chrome tint in sync with the resolved theme
           const BG = { day: '#f4eee2', night: '#1d1813', dracula: '#282a36' };
@@ -186,6 +189,8 @@ const version = __PIXTUOID_VERSION__; // from the workspace Cargo.toml at build
           const t = document.documentElement.dataset.theme;
           if (themeMeta && BG[t]) themeMeta.setAttribute('content', BG[t]);
           syncFavicon();
+          // any explicit theme act ends the clock's authority (and its footer line)
+          delete document.documentElement.dataset.clockNight;
         });
 
         // defer the CRT power-on observer until after boot (same as reveal, #119)
@@ -241,8 +246,18 @@ const version = __PIXTUOID_VERSION__; // from the workspace Cargo.toml at build
               saved = localStorage.getItem('pix-theme');
             } catch (e2) {}
             // validate like the no-FOUC init — a stale/garbage stored id must not
-            // land in data-theme (it would silently render the default palette)
-            setTheme(saved === 'night' || saved === 'dracula' ? saved : 'day');
+            // land in data-theme — and restore through the SAME fallback chain
+            // the init uses (clock, then system), or an after-hours visitor with
+            // no saved choice would get snapped to day by the Escape that merely
+            // closed the Docs dropdown.
+            const hour = new Date().getHours();
+            const fallback =
+              hour >= 19 || hour < 7 || window.matchMedia('(prefers-color-scheme: dark)').matches
+                ? 'night'
+                : 'day';
+            setTheme(
+              saved === 'night' || saved === 'dracula' || saved === 'day' ? saved : fallback
+            );
             return;
           }
           if (e.key && e.key.length === 1) {
@@ -265,6 +280,9 @@ const version = __PIXTUOID_VERSION__; // from the workspace Cargo.toml at build
         let i = -1;
         document.addEventListener('keydown', function (e) {
           if (e.key !== 't' || e.ctrlKey || e.metaKey || e.altKey) return;
+          // "press any key to skip" the boot must not also retint (inert blocks
+          // focus/clicks, not document-level keydown)
+          if (document.documentElement.dataset.booting === '1') return;
           const t = e.target;
           if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable))
             return;

@@ -40,8 +40,11 @@ const prev = idx > 0 ? DOCS[idx - 1] : undefined;
 const next = idx >= 0 && idx < DOCS.length - 1 ? DOCS[idx + 1] : undefined;
 
 // Mini-TOC: h2 sections; when a doc has few of them, fold in the h3s too.
+// Trailing parentheticals are stripped for the rail — "System-managed (don't
+// edit — pixtuoid writes these for you)" wraps to three lines at 13rem.
 const h2s = headings.filter((h) => h.depth === 2);
-const toc = h2s.length < 3 ? headings.filter((h) => h.depth === 2 || h.depth === 3) : h2s;
+const raw = h2s.length < 3 ? headings.filter((h) => h.depth === 2 || h.depth === 3) : h2s;
+const toc = raw.map((h) => ({ ...h, text: h.text.replace(/\s*\([^)]*\)\s*$/, '') }));
 ---
 
 <Base title={title} description={description}>

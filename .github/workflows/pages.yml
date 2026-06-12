@@ -2,12 +2,12 @@ name: deploy site
 
 on:
   # Redeploy when the inputs the build reads change: site/ itself, the version in
-  # ../Cargo.toml, and the rendered docs ../docs/{CONFIGURATION,ARCHITECTURE,CONTRIBUTING}.md
+  # ../Cargo.toml, and the rendered docs ../docs/{CONFIGURATION,ARCHITECTURE,CONTRIBUTING,MIGRATION}.md
   # (the /config, /architecture, /contributing pages). Without these the published
   # site silently lags its own source.
   push:
     branches: [main]
-    paths: ['site/**', 'Cargo.toml', 'docs/CONFIGURATION.md', 'docs/ARCHITECTURE.md', 'docs/CONTRIBUTING.md', '.github/workflows/pages.yml']
+    paths: ['site/**', 'Cargo.toml', 'docs/CONFIGURATION.md', 'docs/ARCHITECTURE.md', 'docs/CONTRIBUTING.md', 'docs/MIGRATION.md', '.github/workflows/pages.yml']
   workflow_dispatch:
 
 permissions:
@@ -44,6 +44,11 @@ jobs:
         working-directory: site
         run: npm ci && npm run lint && npm run check && npx playwright install --with-deps chromium
       - uses: withastro/action@v6
+        # the ticker's build-time merged-PR fetch: unauthenticated quota on
+        # shared runner IPs is routinely exhausted -> silent canned-reel
+        # fallback; the ambient token (contents: read) gives real headroom
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         with:
           path: ./site
           node-version: 22

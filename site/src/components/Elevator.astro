@@ -4,7 +4,7 @@
 // elevator HUD). Desktop-only (≥1100px): on smaller screens the burger nav's
 // anchors cover navigation without eating horizontal space.
 const FLOORS = [
-  { n: 6, id: 'lobby', name: 'lobby' },
+  { n: 6, id: 'lobby', name: 'penthouse' },
   { n: 5, id: 'showcase', name: 'studio' },
   { n: 4, id: 'features', name: 'amenities' },
   { n: 3, id: 'how', name: 'machine room' },
@@ -16,7 +16,7 @@ const FLOORS = [
 <nav class="lift" id="lift" aria-label="Floors">
   <div class="lift__display" aria-hidden="true">
     <span class="lift__digit" data-lift-digit>6F</span>
-    <span class="lift__name" data-lift-name>lobby</span>
+    <span class="lift__name" data-lift-name>penthouse</span>
   </div>
   <div class="lift__panel">
     {
@@ -25,14 +25,17 @@ const FLOORS = [
           class="lift__btn"
           data-floor-btn={String(f.n)}
           data-target={f.id}
+          data-name={f.name}
           aria-label={`Floor ${f.n} — ${f.name}`}
-          aria-current={f.n === 6 ? 'true' : 'false'}
+          aria-current={f.n === 6 ? 'location' : undefined}
         >
           {f.n}
         </button>
       ))
     }
   </div>
+  {/* the app's keybinding, surfaced — the signature interaction shouldn't be a secret */}
+  <span class="lift__hint" aria-hidden="true">keys 1–6</span>
 </nav>
 
 <script is:inline>
@@ -47,10 +50,12 @@ const FLOORS = [
     function setActive(n) {
       btns.forEach(function (b) {
         const on = b.dataset.floorBtn === String(n);
-        b.setAttribute('aria-current', on ? 'true' : 'false');
         if (on) {
+          b.setAttribute('aria-current', 'location');
           if (digit) digit.textContent = n + 'F';
-          if (name) name.textContent = b.getAttribute('aria-label').split('— ')[1] || '';
+          if (name) name.textContent = b.dataset.name || '';
+        } else {
+          b.removeAttribute('aria-current');
         }
       });
     }
@@ -59,6 +64,9 @@ const FLOORS = [
       const sec = document.getElementById(btn.dataset.target);
       if (!sec) return;
       sec.scrollIntoView({ behavior: mq.matches ? 'auto' : 'smooth', block: 'start' });
+      // hand keyboard focus to the arrived floor, or Tab resumes from the lift
+      sec.setAttribute('tabindex', '-1');
+      sec.focus({ preventScroll: true });
     }
     btns.forEach(function (b) {
       b.addEventListener('click', function () {
@@ -70,6 +78,8 @@ const FLOORS = [
     // while typing in a field or holding a modifier — same guard as the egg)
     document.addEventListener('keydown', function (e) {
       if (e.ctrlKey || e.metaKey || e.altKey) return;
+      // "press any key to skip" the boot must not also ride the elevator
+      if (document.documentElement.dataset.booting === '1') return;
       const t = e.target;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
       const btn = btns.find(function (b) {
@@ -138,11 +148,18 @@ const FLOORS = [
   }
   .lift__name {
     font-family: var(--font-mono);
-    font-size: 0.52rem;
-    letter-spacing: 0.06em;
+    font-size: 0.58rem;
+    letter-spacing: 0.05em;
     color: #b3a892;
     max-width: 4.6rem;
     text-align: center;
+  }
+  .lift__hint {
+    font-family: var(--font-mono);
+    font-size: 0.56rem;
+    letter-spacing: 0.05em;
+    text-align: center;
+    color: var(--fg-muted);
   }
   .lift__panel {
     display: flex;
@@ -172,7 +189,7 @@ const FLOORS = [
     color: var(--fg);
     border-color: color-mix(in srgb, var(--coral) 45%, var(--border-strong));
   }
-  .lift__btn[aria-current='true'] {
+  .lift__btn[aria-current='location'] {
     color: #fff;
     background: linear-gradient(100deg, #ad5230, #c96a45);
     border-color: transparent;

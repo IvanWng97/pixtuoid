@@ -28,14 +28,15 @@ npm run build      # astro build → dist/
 
 From the repo root the same gate is `just site-check` (and `just site-fmt`).
 
-> **Cross-boundary build inputs.** The site reads four files from _outside_ `site/`
+> **Cross-boundary build inputs.** The site reads five files from _outside_ `site/`
 > at build time: the workspace `Cargo.toml` (displayed version, via `vite.define` in
 > `astro.config.mjs`), `docs/CONFIGURATION.md` (rendered as `/config`),
 > `docs/ARCHITECTURE.md` (rendered as `/architecture` — its Mermaid diagram becomes an
-> inline SVG at build via rehype-mermaid, which is why CI installs Chromium), and
-> `docs/CONTRIBUTING.md` (rendered as `/contributing`).
+> inline SVG at build via rehype-mermaid, which is why CI installs Chromium),
+> `docs/CONTRIBUTING.md` (rendered as `/contributing`), and `docs/MIGRATION.md`
+> (rendered as `/migration`).
 > Renaming/moving any of them — or breaking the diagram's Mermaid syntax — fails
-> `astro build`; all four are in the `site.yml` / `pages.yml` path filters so a
+> `astro build`; all five are in the `site.yml` / `pages.yml` path filters so a
 > change re-runs CI + redeploys. The root `README.md`'s Features table and install
 > commands are sourced from `src/features.json` / `src/install.json` (see below);
 > drift is gated by the `readme` job in `.github/workflows/ci.yml` (`just gen-readme-check`)
@@ -62,7 +63,7 @@ From the repo root the same gate is `just site-check` (and `just site-fmt`).
   via the `prefers-color-scheme` fallback). `dracula` is a hidden easter-egg
   theme (type it, or `?theme=dracula`).
 - **The building** — the landing page maps the product's multi-floor metaphor
-  onto its own structure: each section is a floor (6F lobby → 1F front desk),
+  onto its own structure: each section is a floor (6F penthouse → 1F front desk),
   `Elevator.astro` is a fixed desktop panel tracking scroll, and the app's
   literal keys work on the page — digits `1–6` ride the elevator, `t` retints
   the decorative palette through the THEMES list (Esc restores). The favicon

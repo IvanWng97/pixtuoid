@@ -30,14 +30,27 @@ try {
   );
   if (res.ok) {
     const prs = (await res.json()) as { number: number; title: string; merged_at: string | null }[];
-    const merged = prs.filter((p) => p.merged_at).slice(0, 8);
+    const merged = prs.filter((p) => p.merged_at).slice(0, 6);
     // Below 4 the loop reads as broken — keep the canned reel instead.
     if (merged.length >= 4) {
-      items = merged.map((p) => ({
-        state: 'active',
+      // Strip the conventional-commit prefix (the visitor-facing voice is the
+      // change, not its taxonomy) and truncate on a word boundary.
+      const human = (title: string) => {
+        const t = title.replace(/^[a-z]+(\([^)]*\))?!?:\s*/, '');
+        if (t.length <= 64) return t;
+        const cut = t.slice(0, 63);
+        return cut.slice(0, Math.max(40, cut.lastIndexOf(' '))) + '…';
+      };
+      const real: TickerItem[] = merged.map((p, i) => ({
+        // vary the dots like a live wall would — merged work isn't all-green
+        state: ['active', 'active', 'idle'][i % 3],
         who: 'cc·pixtuoid',
-        what: `merged #${p.number} · ${p.title.length > 64 ? p.title.slice(0, 63) + '…' : p.title}`,
+        what: `merged #${p.number} · ${human(p.title)}`,
       }));
+      // Interleave office-life beats between the real PRs: authenticity AND the
+      // product's voice — all-real read as a dull commit feed in review.
+      const flavor = FALLBACK.filter((f) => f.who !== 'cursor');
+      items = real.flatMap((r, i) => (i % 2 === 1 ? [flavor[(i >> 1) % flavor.length], r] : [r]));
     }
   }
 } catch {

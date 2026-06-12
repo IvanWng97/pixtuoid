@@ -28,6 +28,8 @@ import { REPO, CRATES, SPONSOR, asset } from '../consts';
   </div>
   <div class="container footer__legal">
     <span>MIT licensed · built in Rust 🦀</span>
+    {/* visible only while the clock (not the visitor, not the OS) holds night */}
+    <span class="footer__clock">after hours — the office lights follow your clock</span>
     <span>Made with Claude Code</span>
   </div>
 </footer>
@@ -92,5 +94,13 @@ import { REPO, CRATES, SPONSOR, asset } from '../consts';
     border-top: 1px solid var(--border);
     font-size: 0.85rem;
     color: var(--fg-muted);
+  }
+  .footer__clock {
+    display: none;
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+  }
+  :global([data-clock-night='1']) .footer__clock {
+    display: inline;
   }
 </style>

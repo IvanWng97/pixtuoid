@@ -23,6 +23,22 @@
     "status": "live"
   },
   {
+    "id": "fleet",
+    "label": "FLEET",
+    "kind": "variant-set",
+    "variants": [
+      {
+        "id": "night-shift",
+        "name": "Night shift",
+        "blurb": "one floor of a 40-agent run",
+        "src": "fleet.png",
+        "featured": true
+      }
+    ],
+    "caption": "workflow fleets get desks too — a 91-agent review of this repo ran in this office",
+    "status": "live"
+  },
+  {
     "id": "dashboard",
     "label": "DASHBOARD",
     "kind": "variant-set",
@@ -35,23 +51,7 @@
         "featured": true
       }
     ],
-    "caption": "press Tab — parents, subagents, per-CLI badges; jump to any agent's floor",
-    "status": "live"
-  },
-  {
-    "id": "fleet",
-    "label": "FLEET",
-    "kind": "variant-set",
-    "variants": [
-      {
-        "id": "night-shift",
-        "name": "Night shift",
-        "blurb": "40 agents across 3 floors",
-        "src": "fleet.png",
-        "featured": true
-      }
-    ],
-    "caption": "workflow fleets get desks too — this codebase was reviewed by 91 agents in this office",
+    "caption": "press Tab — the whole building's roster, badged by CLI",
     "status": "live"
   },
   {
