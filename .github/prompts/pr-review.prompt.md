@@ -148,4 +148,8 @@ phase 2 never fired a demotion), verify A/B per that design: a control arm
 of full pairs on ALL candidates — which doubles the run's verification
 spend and doubles as protocol step 8's ledger-blind calibration — alongside
 the ledger-routed treatment arm. Once the rate is recorded, delete this
-A/B clause: routing alone is the steady state.
+A/B clause: routing alone is the steady state. Whole-codebase reviews also
+carry a SYSTEM lens — module decomposition still right, dependency
+directions clean, cross-PR composition seams — because architecture erodes
+BETWEEN PRs, not within them (no per-PR lens can see it; the census's
+"emergent cross-PR composition" escape class is its bug-shaped form).

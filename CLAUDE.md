@@ -97,7 +97,7 @@ git hooks call the same recipes (no local-vs-CI drift). `just setup-tools`
 installs the needed cargo tools once per clone.
 
 ```
-just preflight    # full pre-push gate: lint (fmt+machete+deny) → clippy → hack → test
+just preflight    # full pre-push gate: lint (fmt+machete+deny+arch) → clippy → hack → test
 just fmt          # auto-format
 git config core.hooksPath .githooks   # activate hooks once per clone
 ```

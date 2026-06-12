@@ -51,7 +51,19 @@ machete:
 deny:
     cargo deny check bans licenses sources
 
-# Fast, independent lint checks in parallel (fmt + machete + deny).
+# Architecture invariant #1, mechanized: pixtuoid-core must stay terminal-free.
+# The other five invariants have test/bridge backstops; this one was
+# review-enforced only until the 2026-06 KB pilot's gap audit (issue #265 arc).
+[group('rust')]
+arch:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if cargo tree -p pixtuoid-core --edges normal | grep -qE '(ratatui|crossterm)'; then
+        echo "ARCH VIOLATION: pixtuoid-core depends on a terminal crate (CLAUDE.md invariant #1)"; exit 1
+    fi
+    echo "arch: pixtuoid-core is terminal-free"
+
+# Fast, independent lint checks in parallel (fmt + machete + deny + arch).
 [group('rust')]
 lint:
     #!/usr/bin/env bash
@@ -63,6 +75,7 @@ lint:
     run fmt     cargo fmt --all --check & pids+=($!)
     run machete cargo machete           & pids+=($!)
     run deny    just deny                & pids+=($!)
+    run arch    just arch                & pids+=($!)
     for p in "${pids[@]}"; do wait "$p" || fail=1; done
     [[ $fail -eq 0 ]]
 
