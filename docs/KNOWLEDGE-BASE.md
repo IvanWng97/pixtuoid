@@ -1,174 +1,185 @@
 # The knowledge base
 
-How this repo stops paying for the same lesson twice.
+How this repo stops paying for the same lesson twice — and what we measured
+when we tested whether it works.
 
 pixtuoid is built almost entirely by AI coding agents, reviewed by fleets of
 AI reviewers, and maintained across hundreds of agent sessions. That makes it
 a live laboratory for a question every team adopting agents hits eventually:
-**where does the knowledge live, and who pays when it doesn't?**
+**where does the knowledge live, and who pays when it doesn't?** This page is
+the system we run, the experiments we ran against it, and the honest results
+— including the null ones.
 
-This page documents the system we run — four layers, each with a job, a known
-failure mode, and a counter-measure — plus the numbers we collected before
-turning it on, so the after-side is measurable rather than vibes.
-
-## Why — the baseline numbers
+## The numbers that started it
 
 Between May 29 and June 11, 2026, this repo ran 21 review-class multi-agent
-workflows: **1,177 agents, 7.1M output tokens** — and **75.3% of those output
-tokens were spent in the Verify stage**, adversarially adjudicating candidate
-findings (the June-9 whole-codebase review alone dispatched 110 verifiers
-against 3 finders). Worse, the two whole-codebase reviews re-adjudicated overlapping
-claims: June 9 refuted 26 of 49 candidates; in the June-10 review a third of
-distinct candidates (12 of 37) ended refuted — among them re-derivations of
-ground June 9 had already adjudicated (June-10's `/tmp`-socket and EMFILE
-refutations are preserved as ledger rows R0610-13/14; June-9's copies survive
-only in its grouped record — exactly the bookkeeping gap the ledger closes).
-Full data:
-[`baseline-2026-06.md`](review-metrics/baseline-2026-06.md).
+workflows: **1,177 agents, 7.1M output tokens — 75.3% of which were spent in
+the Verify stage**, adversarially adjudicating candidate findings (one
+whole-codebase review dispatched 110 verifiers against 3 finders).
+Consecutive reviews re-adjudicated overlapping claims — re-refuting the same
+`/tmp`-socket and EMFILE candidates two days apart. Paying repeatedly for
+knowledge the project already had is the cost this whole system attacks.
+Full data: [`baseline-2026-06.md`](review-metrics/baseline-2026-06.md).
 
-Verification spend re-adjudicating known ground is the cost the ledger
-attacks. The knowledge base is the fix — under one design constraint learned
-the hard way (see "The graveyard rule" below).
+## The model: storage and the conveyor
 
-## Layer 1 — Context files (knowledge agents load without asking)
+Knowledge can be **stored** at three altitudes, and our experiments ranked
+them by durability:
 
-**What:** `CLAUDE.md` at the workspace root plus nested per-crate files, with
-[`AGENTS.md`](https://agents.md/) symlinked to the root file so every agent
-CLI (Claude Code, Codex, Cursor, Copilot, Gemini…) reads the same source. The
-load-bearing content is the **"Known sharp edges"** sections: things that look
-like bugs but are deliberate, each with its WHY. In review after review, these
-are what kill false positives — a design-intent skeptic armed with sharp edges
-refuted 26 candidates in one June run.
+1. **In the code** — WHY comments at the hazard seams, types that make
+   invalid states unrepresentable, tests and lints that fail the build.
+   Strongest form: our with/without-KB experiment stripped every knowledge
+   file from an agent's world and the code-embedded lessons still carried
+   the tasks.
+2. **In process artifacts** — review briefs, plan templates, PR checklists,
+   routing protocols. These don't wait to be read: they are filled into
+   prompts and forced into workflows at specific moments.
+3. **In prose** — context files, wikis, design docs. Weakest form: the
+   industry evidence (below) and our own null result both say marginal
+   prose has marginal value. Prose is a map and a waystation, not a
+   destination.
 
-**Failure mode:** monotonic bloat. Rules force additions; nothing forces
-deletions; signal density decays. Industry evidence is brutal here: an ETH
-Zurich study (arXiv:2602.11988) found LLM-generated context files *reduced*
-agent success in 5 of 8 settings while raising cost ~20%; the converged
-practice at frontier labs is a ~100–300 line **map, not a manual**, pointing
-into deeper docs.
+What turns storage into a system is the **conveyor**: the process layer
+moves lessons down the ladder — an incident becomes a review finding,
+a finding becomes a checklist item, a recurring item becomes a comment, a
+type, or a CI gate. Documentation can be ignored; the build cannot.
 
-**Counter:** size budgets, citation tracking (a sharp edge no review has cited
-in two quarters is a demotion candidate), and periodic audits
-(`/revise-claude-md`) — paired metrics: auto-loaded token cost vs. sharp-edge
-citation hit rate.
+## The storage layers in practice
 
-## Layer 2 — Retrieval (knowledge computed on demand, never stored)
+### Context files (prose that loads automatically)
 
-**What:** agentic search (grep + LSP) over the live tree, plus build-system
-dependency graphs computed at review time (`cargo modules`) to expand a diff
-into its affected-subsystem set. Nothing is indexed ahead of time.
+`CLAUDE.md` at the workspace root plus nested per-crate files, with
+[`AGENTS.md`](https://agents.md/) symlinked to the root so every agent CLI
+reads the same source. The load-bearing content is the **"Known sharp
+edges"** sections: things that look like bugs but are deliberate, each with
+its WHY — in review after review, these kill false positives (a
+design-intent skeptic armed with them refuted 26 candidates in one run).
 
-**Failure mode:** persistent code indexes drift the moment they're built — and
-dependency graphs are blind to **non-code coupling** (this repo's
-`media.json` ↔ `showcase.json` ↔ README-generation triangle has zero imports
-between its corners).
+**Failure mode:** monotonic bloat. An ETH Zurich study (arXiv:2602.11988)
+found LLM-generated context files *reduced* agent success in 5 of 8 settings
+while raising cost ~20%; the converged practice is a ~100–300 line **map,
+not a manual**. **Counter:** size budgets, citation tracking (a sharp edge
+no review has cited in two quarters is a demotion candidate), periodic
+audits.
 
-**Counter:** indexes are computed per-use and discarded; cross-boundary
-couplings are either declared in a small manual map or — better — pinned by a
-**bridge test** (`supported_sources_manifest` pins a JSON manifest to a Rust
-const list; the build fails if they diverge). If a coupling matters, a test
-enforces it; if no test enforces it, reviews assume it will be missed.
+### Retrieval (knowledge computed on demand, never stored)
 
-## Layer 3 — Memory (episodic, not yet distilled)
+Agentic search over the live tree plus build-system dependency graphs
+computed at review time and discarded — persistent indexes drift the moment
+they're built. **Failure mode:** dependency graphs are blind to non-code
+coupling (this repo's `media.json` ↔ `showcase.json` ↔ README triangle has
+zero imports between its corners). **Counter:** if a cross-boundary coupling
+matters, a **bridge test** pins it (`supported_sources_manifest` fails the
+build if a JSON manifest and a Rust const list diverge); if no test enforces
+it, reviews assume it will be missed.
 
-**What:** agent session memory captures raw lessons with zero friction; a
-periodic distillation pass promotes the keepers into the repo — sharp edges,
-conventions, or this page. The pipeline is one-directional:
-**capture → distill → promote → expire the raw entry.**
+### Memory (episodic, not yet distilled)
+
+Agent session memory captures raw lessons with zero friction; a periodic
+distillation pass promotes the keepers into the repo. The pipeline is
+one-directional: **capture → distill → promote → expire the raw entry.**
 
 **Failure mode:** both directions die. Unmanaged automatic capture rots — a
 publicly audited self-hosted memory deployment hit **97.8% junk in 32 days**
 (mem0ai/mem0#4573). Gated capture starves — put an MR in front of writing a
-memory and people stop writing. And recalled-but-not-applied is real: this
-repo's maintainer agent repeated a known `preflight | tail` exit-code mistake
-*while the lesson sat in its own memory*.
+memory and people stop writing. **Counter:** friction goes on the distiller,
+never the capturer; recurrence is the promotion trigger (twice = it leaves
+prose and becomes a rule). The distillation pass has no calendar of its own —
+it rides the periodic context-file audit (the graveyard rule, below): every
+audit also sweeps recent session memories for promote-to-repo candidates.
 
-**Counter:** friction goes on the distiller, never the capturer; recurrence is
-the promotion trigger (twice = it leaves prose and becomes a rule); and the
-ladder has a top rung — see Layer 4. The distillation pass has no calendar
-of its own — it rides Layer 1's periodic context-file audit
-(`/revise-claude-md`): every audit also sweeps recent session memories for
-promote-to-repo candidates (the graveyard rule below: maintenance must ride
-an existing habit). Git-native, review-gated promotion is
-the only team-memory pattern we've found without a public postmortem as of
-mid-2026.
+### The review ledger (adjudications as institutional memory)
 
-## Layer 4 — The review ledger (adjudications as institutional memory)
+[`REVIEW-LEDGER.md`](REVIEW-LEDGER.md) records every adjudicated review
+finding: seam, claim, verdict, and — critically — the **anchor**: the
+mechanism (file + sharp edge + HEAD) that justified it. Future reviews match
+candidates against it before spending verifier tokens.
 
-**What:** [`REVIEW-LEDGER.md`](REVIEW-LEDGER.md) records every adjudicated
-review finding: the seam, the claim, the verdict, and — critically — the
-**anchor**: the specific mechanism (file + sharp edge + HEAD) that justified
-it. Future reviews match candidates against the ledger before spending
-verifier tokens.
-
-**Failure mode:** a naive suppression list hides real bugs. This repo has the
-proof: June 9 correctly refuted a socket-steal claim; June 10 found a
-*different* socket-steal on the **same seam** that was real (a
-backlog-saturated live daemon returns `ECONNREFUSED` on macOS, so a second
+**Failure mode:** a naive suppression list hides real bugs, and this repo has
+the proof — one review correctly refuted a socket-steal claim; the next
+found a *different* socket-steal on the **same seam** that was real (a
+backlog-saturated daemon returns `ECONNREFUSED` on macOS, so a second
 instance reclaims a live socket — fixed by flock arbitration in PR #235).
-A fuzzy-matched kill list would have suppressed it.
+**Counter — the protocol:** a match **demotes, never kills** (one cheap
+checker instead of a full panel); anchors expire when the anchoring code
+changes; only sharp-edge/PR-cited verdicts get the fast path; periodic
+ledger-blind calibration measures the false-suppression rate; append-only —
+flips supersede, and the flip itself is knowledge.
 
-**Counter — the protocol** (full version in the ledger header):
+## The conveyor: process as the change lifecycle
 
-1. A ledger match **demotes, never kills**: the candidate goes to one cheap
-   checker ("does the cited mechanism still refute *this* claim?") instead of
-   a full adversarial panel.
-2. Anchors expire: if `git diff <verdict-HEAD>..HEAD -- <anchor paths>` shows
-   the anchoring code changed, the entry is void for that candidate.
-3. Only verdicts citing a documented sharp edge or merged PR get the fast
-   path; judgment calls always re-verify.
-4. Every Nth review runs ledger-blind as a calibration pass; findings the
-   ledger would have suppressed but the clean run confirms = the measured
-   **false-suppression rate**.
-5. Append-only; flipped verdicts supersede, never overwrite — the flip itself
-   is knowledge.
+The process layer's collective form is **a path every change must walk**,
+each gate a versioned file with an automatic reader:
 
-And the terminal rung of the whole system: **a lesson that recurs stops being
-text and becomes a lint, a CI gate, or a type**. Prose is the weakest storage
-format for knowledge; this repo's MSRV lesson is a `just msrv` gate, its
-shell-injection lesson is a `CMD_UNSAFE` guard, its socket-path lesson is a
-parity test. Documentation can be ignored; the build cannot.
-
-## The graveyard rule
-
-This repo once had a beautifully written `.claude/agents/pixtuoid-dev.md` —
-architecture, conventions, sprite workflow, exit criteria. It was never
-loaded by anything, went stale within weeks (it described files that had been
-restructured), and was eventually deleted with its one not-already-covered
-rule salvaged into `CLAUDE.md`. The lesson generalizes to every layer above:
-
-> **Knowledge files live or die by their load path, not their quality.**
-> Design the automatic reader first, then write the content. Every layer's
-> maintenance must ride an existing habit — the review workflow writes the
-> ledger, CI runs the lints, the audit sits on a calendar — because knowledge
-> that needs someone to *remember* to maintain it is already dead.
-
-## Measuring it
-
-The collector (`scripts/review-metrics.py`) turns any review workflow journal
-into per-stage token/agent metrics, and the review history itself gets mined:
-[`mining-2026-06.md`](review-metrics/mining-2026-06.md) censused all 185
-merged PRs' reviews plus 50 post-merge fixes — 7 adjudicated escapes, each
-of which named a concrete guideline change — plus one bot-missed design
-lesson, caught pre-merge by a self-dispatched architect pass and validated
-by a controlled backtest on the original diff. The onboarding experiment
-([`phase3-onboarding-2026-06.md`](review-metrics/phase3-onboarding-2026-06.md))
-ran the with/without-KB A/B: arms indistinguishable on first-pass quality
-(n=2, directional; contamination caveats in the report) — consistent with
-the load-bearing lessons already being IN the code at the hazard seams (the
-executability ladder working). The KB's value showed up in process, not
-code: its prescribed duties (docs currency, ledger routing, plan
-auditability) executed correctly at +19% token overhead — duties a bare
-repo cannot perform at all. The experiment design, for anyone
-replicating this on their own repo:
-
-| experiment | metric | quality guard |
+| gate | artifact | automatic reader |
 |---|---|---|
-| A/B: same-HEAD review with / without ledger | verifier tokens, repeat-refutation count | confirmed-findings held constant |
-| onboarding proxy: standard tasks with / without KB | first-pass gate rate, review nits | task completion |
-| ledger calibration (every Nth review, ledger-blind) | false-suppression rate | — |
-| context health (quarterly) | auto-loaded tokens vs. sharp-edge citation rate | — |
-| plan-stage miss rate (planned changes) | review findings the plan never named, from `plan-miss:` commit lines | trigger compliance held constant |
+| plan | [`impl-plan.prompt.md`](../.github/prompts/impl-plan.prompt.md) — 7 sections every non-trivial plan must answer (data-shape identity, named consumers, sibling paths, negative branches, sharp-edge + ledger sweep, blocking verification) | routed from the workspace context file; the plan lands in the PR body |
+| implement | the 6 recurring pitfalls + the PR template checkbox pointing at them | the template is forced on every author |
+| review | [`pr-review.prompt.md`](../.github/prompts/pr-review.prompt.md) — two differentiated lenses, five hard requirements, escalation triggers, ledger routing | copied verbatim into reviewer prompts; the bot loads its own rules file |
+| merge | the disposition sweep — every finding ends FIXED / REFUTED-with-trace / ISSUE-FILED / ACCEPTED-residual; plan-misses become `plan-miss:` commit lines | the orchestrator's process notes; commit messages become the data channel |
+| periodic | the history census (each run files its successor as a pinned issue), ledger-blind calibration, `scripts/review-metrics.py` + the reports below | the issue backlog and the harvest scripts |
+
+Three properties make this a system rather than a document set:
+
+1. **No bypass.** Knowledge here is not a library someone might consult; it
+   is a toll gate on the road. In our experiment, agents avoided a classic
+   parallel-structure design smell not by reading about it but because plan
+   section 1 forces the identity/key-space question before code exists.
+2. **One path for every member.** Humans get the PR template, agents get the
+   filled briefs, the bot gets its rules file — the platform remembers so no
+   individual has to. Onboarding is not training; it is being walked through
+   the gates by your first PR.
+3. **Closed loop.** The last gate's output rewrites the earlier gates: the
+   history census found 7 escape classes, each became a rule, and every rule
+   was adversarially verified before landing. Revising the path is itself a
+   PR that walks the path.
+
+## What we measured (the honest results)
+
+| experiment | result | report |
+|---|---|---|
+| Ledger A/B — routed vs full verification, same candidate set | **0 false suppressions**; 61% saving per routed candidate; ±0 overall at a 10% route rate — the payoff scales with re-tread density, and the demote path is not yet exercised | [`phase2-ab-2026-06.md`](review-metrics/phase2-ab-2026-06.md) |
+| Review-history census — 185 merged PRs + 50 post-merge fixes | 7 adjudicated escape classes (~4% of PRs) → 7 verified guideline changes; the design-class lens **backtested 0/3 → 3/3** on the original missed diff, 0/4 over-fires on controls | [`mining-2026-06.md`](review-metrics/mining-2026-06.md) |
+| Onboarding proxy — with/without KB, 2 tasks × 2 arms | **Null on first-pass quality** — arms indistinguishable, consistent with the load-bearing lessons already being in the code; the KB's prescribed process duties executed at +19% token overhead (n=2, contamination caveats in the report) | [`phase3-onboarding-2026-06.md`](review-metrics/phase3-onboarding-2026-06.md) |
+
+The null is the most instructive row: it is what the conveyor *succeeding*
+looks like. Once a lesson reaches the code, the prose that carried it becomes
+scaffolding — which is exactly why the investment ranking puts code first
+and prose last.
+
+## The two design principles
+
+**The graveyard rule.** This repo once had a beautifully written agent guide
+that nothing loaded; it went stale within weeks and was deleted, its one
+not-already-covered rule salvaged. **Knowledge files live or die by their
+load path, not their quality.** Design the automatic reader first; every
+layer's maintenance must ride an existing habit — the review workflow writes
+the ledger, CI runs the lints, the census files its own successor issue —
+because knowledge that needs someone to *remember* to maintain it is already
+dead.
+
+**The executability ladder.** A lesson that recurs stops being text: this
+repo's MSRV lesson is a build gate, its shell-injection lesson is a
+character-set guard, its socket-path lesson is a parity test. Prose is the
+weakest storage format for knowledge; the terminal rung is code — and the
+with/without experiment showed the terminal rung carrying tasks on its own.
+
+## Steal this (adoption order for another team)
+
+1. **Mine your own review history first** (zero new infrastructure): your
+   merged MRs and post-merge fixes already contain your escape taxonomy and
+   your false-positive classes. Ours took one afternoon and produced every
+   rule below.
+2. **Review briefs**: two differentiated lenses, reasoning-before-verdict,
+   negative-space lists, and your mined failure classes as standing items.
+3. **A disposition rule**: every review finding reaches a terminal state —
+   our census caught an ignored finding becoming a release blocker.
+4. **Promote on recurrence**: the second occurrence of a lesson becomes a
+   linter rule or a test, not another paragraph (for mobile teams,
+   SwiftLint/detekt are excellent terminal rungs).
+5. **A ledger only if you run repeated large reviews** — its payoff scales
+   with re-adjudication density: measure it, don't assume it.
 
 Efficiency metrics are only reported **paired with their quality guard** —
-a review that got cheaper by finding less is not a saving.
+a review that got cheaper by finding less is not a saving. Every claim on
+this page links to the report that grounds it.
