@@ -235,3 +235,23 @@ Source: PR #256 body (the #240 precedent: residuals batched in one PR).
 | GEO-01 | `live_cc_session_ids` registry scan (#252) | duplicate sessionId across two live registry entries binds id→pid by unspecified `read_dir` order — binding flaps across refreshes, churns exit-watch rebinds, and a losing pid's death emits a spurious SessionEnd for a live session | CONFIRMED→PR#256 | PR #256 (5e26cfb): fold into a winners map — newest `startedAt` > has-`startedAt` > larger pid + warn-once. The issue's own "keep the first" fix sketch REFUTED-wrong-premise (itself scan-order-dependent); winner rule proven a strict total order | A | post-#255 (f353350) | 2026-06-12 |
 | GEO-02 | `codex.rs::rollout_ids_from_paths` (review-round sibling) | same last-writer-wins shape for two live processes holding one rollout (resume overlap) | CONFIRMED→PR#256 | PR #256 reviewer-2 finding: same larger-pid rule, pinned in both enumeration orders | A | post-#255 (f353350) | 2026-06-12 |
 | GEO-03 | `tests/reducer/liveness.rs` unknown_cwd twins (#254) | `unknown_cwd_agent_uses_faster_stale_timeout` is a ~90% duplicate of `unknown_cwd_agent_reaps_faster` | CONFIRMED→PR#256 | PR #256: merged keeping BOTH distinguishing assertions (`unknown_cwd` flag + ghost-`#N` label); reviewer diffed both at base — only incidentals differed (couldn't merge inside move-only #255 without breaking its byte-identical property) | A | post-#255 (f353350) | 2026-06-12 |
+
+## 2026-06-12 — Phase-2 A/B experiment @ a8aaae9 (source/ module) → issue #262
+
+Source: the ledger's first controlled calibration run
+([`phase2-ab-2026-06.md`](review-metrics/phase2-ab-2026-06.md), workflow
+`wf_04e5f98b-735`): every candidate adjudicated by TWO independent
+skeptic+trace pairs (control + treatment arms). The run also re-executed the
+regression-check on SUB-01/04/05/06/07 + GEO-01/02 — all fix mechanisms
+verified present at a8aaae9 (3/3 confirmed). Three 2-2 split candidates
+(inline blocking probe enumeration; codex name-only vouch forgeability; the
+un-claim "emits NOTHING" test-artifact claim) are NOT adjudicated — listed in
+#262 for the next whole-codebase review to re-derive.
+
+| # | seam (file/mechanism) | claim (1 line) | verdict | anchor (paths + cited sharp edge / fix PR) | tier | head | date |
+|---|---|---|---|---|---|---|---|
+| R0612-01 | `jsonl/walk.rs:127-128` probe-bypass WHY comment | "CC (the only probe user)" is stale — Codex wires `with_liveness_probe` since #220/#227 (`codex.rs:383-386`); the bypass's safety silently rests on `codex_session_ended` being constant-false | CONFIRMED→#262 | walk.rs first-sight gate comment vs codex.rs:383-386; the oversized branch (walk.rs:163-167) already states it correctly | B | a8aaae9 | 2026-06-12 |
+| R0612-02 | `hook/unix.rs:172` + `hook/windows.rs:195` CONN_TIMEOUT wrap | timeout cancellation mid-`tx.send()` under >1s back-pressure drops the rest of a decoded payload with no warn breadcrumb (`let _ =` swallows Elapsed) | CONFIRMED→#262 | handle_conn's per-event send inside the timeout scope (hook/mod.rs:101); hooks best-effort end-to-end bounds impact — breadcrumb is the actionable part | B | a8aaae9 | 2026-06-12 |
+| R0612-03 | `jsonl/walk.rs:90-101` walk_jsonl dir recursion | `tokio::fs::metadata` follows symlinks + unbounded `Box::pin` recursion — symlink loop recurses unbounded; out-of-root symlink walks foreign `.jsonl` (precondition: planted in the user's own root) | CONFIRMED→#262 | no `symlink_metadata`/visited-set anywhere in walk.rs; first-sight gate limits registration impact | B | a8aaae9 | 2026-06-12 |
+| R0612-04 | `jsonl/walk.rs:138-147` truncation reset × exit-path drains | transcript truncated below cursor at the moment a negative-vouch/instant-exit/un-claim drain runs interacts with the #228 drain-before-unclaim discipline | CONFIRMED→#262 | truncation reset arm vs liveness.rs:212-248 drain ordering | B | a8aaae9 | 2026-06-12 |
+| R0612-05 | `cc_probe.rs:303` pid_alive on unreaped zombie | healthy snapshot in a zombie window re-vouches a just-ended id → retired transcript replays as a phantom — self-healing within ~one loop turn (second exit synthesizes via ESRCH receipt / immediately-readable pidfd) | ACCEPTED-residual | exit arm purge (jsonl/mod.rs:375-389) + watch(pid) re-end path; rare ms-scale window, cosmetic burst | B | a8aaae9 | 2026-06-12 |
