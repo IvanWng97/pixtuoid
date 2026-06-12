@@ -1,25 +1,37 @@
 # Review-economics baseline — May 29 → Jun 11, 2026 (pre-ledger)
 
 The "before" snapshot for the knowledge-base experiments: every multi-agent
-review-class Workflow run (>20 agents) found in this machine's workflow
-journals, measured by `scripts/review-metrics.py` BEFORE any ledger/KB
-mechanism existed. Raw per-run numbers: [`baseline-2026-06.json`](baseline-2026-06.json).
+review-class Workflow run (>20 agents) found under `~/.claude/projects`
+(all project dirs, worktree sessions included; duplicate journals of one run
+deduped to the fuller copy), measured by `scripts/review-metrics.py` BEFORE
+any ledger/KB mechanism existed. An earlier draft scanned only the main
+project dir and missed 4 runs — including the June-9 review itself; the
+review process caught it, which is the methodology working as intended. Raw per-run numbers: [`baseline-2026-06.json`](baseline-2026-06.json).
 
 ## Headline numbers
 
 | metric | value |
 |---|---|
-| review-class workflow runs (14 days) | 17 |
-| agents dispatched | 840 |
-| output tokens | 5,611,665 |
-| cache-write tokens | 145,585,099 |
-| cache-read tokens | 1,030,017,538 |
-| **verifier share of output tokens** | **71.1%** |
+| review-class workflow runs (14 days) | 21 |
+| agents dispatched | 1,177 |
+| output tokens | 7,149,485 |
+| cache-write tokens | 197,773,929 |
+| cache-read tokens | 1,398,988,529 |
+| **verifier share of output tokens** | **75.3%** |
 
 The verify stage — adversarial verification of finder candidates — is the
-dominant cost center. That is the stage the REVIEW-LEDGER targets: a third
-of verification effort in the two whole-codebase reviews re-adjudicated
-findings that a previous review had already refuted (see funnel below).
+dominant cost center (the role split is keyword-classified from each agent's
+brief: crude but stable for our workflows, so treat 75.3% as a sound estimate,
+not exact accounting). That is the stage the REVIEW-LEDGER targets: in the
+June-10 review a third of distinct candidates (12 of 37) ended refuted,
+several re-deriving verdicts the June-9 run had already adjudicated (see
+funnel below).
+
+## The June-9 whole-codebase review @ 151e38d (`wf_bb515859-ce0`)
+
+115 agents — **110 of them verifiers** (3 finders, 1 implementer, 1 other),
+457,981 output tokens. The purest illustration of where review money goes:
+the find side was 3 agents; adjudicating what they found took 110.
 
 ## Flagship run: whole-codebase review @ 7bc2777 (2026-06-10/11)
 

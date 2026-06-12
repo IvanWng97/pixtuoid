@@ -11,20 +11,24 @@ This page documents the system we run — four layers, each with a job, a known
 failure mode, and a counter-measure — plus the numbers we collected before
 turning it on, so the after-side is measurable rather than vibes.
 
-## Why (the baseline numbers)
+## Why — the baseline numbers
 
-Between May 29 and June 11, 2026, this repo ran 17 review-class multi-agent
-workflows: **840 agents, 5.6M output tokens** — and **71.1% of those output
+Between May 29 and June 11, 2026, this repo ran 21 review-class multi-agent
+workflows: **1,177 agents, 7.1M output tokens** — and **75.3% of those output
 tokens were spent in the Verify stage**, adversarially adjudicating candidate
-findings. Worse, the two whole-codebase reviews re-adjudicated overlapping
-claims: June 9 refuted 26 of 49 candidates, June 10 refuted 12 of 42 — and
-several were the *same* refutations, re-derived from scratch
-(the `/tmp` socket "vulnerability", the EMFILE hot-spin, the Storm>Rain
-lighting inversion). Full data: `docs/review-metrics/baseline-2026-06.md`.
+findings (the June-9 whole-codebase review alone dispatched 110 verifiers
+against 3 finders). Worse, the two whole-codebase reviews re-adjudicated overlapping
+claims: June 9 refuted 26 of 49 candidates; in the June-10 review a third of
+distinct candidates (12 of 37) ended refuted — among them re-derivations of
+ground June 9 had already adjudicated (June-10's `/tmp`-socket and EMFILE
+refutations are preserved as ledger rows R0610-13/14; June-9's copies survive
+only in its grouped record — exactly the bookkeeping gap the ledger closes).
+Full data:
+[`baseline-2026-06.md`](review-metrics/baseline-2026-06.md).
 
-A third of verification spend was the institution forgetting what it already
-knew. The knowledge base is the fix — under one design constraint learned the
-hard way (see "The graveyard rule" below).
+Verification spend re-adjudicating known ground is the cost the ledger
+attacks. The knowledge base is the fix — under one design constraint learned
+the hard way (see "The graveyard rule" below).
 
 ## Layer 1 — Context files (knowledge agents load without asking)
 
@@ -82,7 +86,8 @@ repo's maintainer agent repeated a known `preflight | tail` exit-code mistake
 **Counter:** friction goes on the distiller, never the capturer; recurrence is
 the promotion trigger (twice = it leaves prose and becomes a rule); and the
 ladder has a top rung — see Layer 4. Git-native, review-gated promotion is
-the only team-memory pattern without a public postmortem as of mid-2026.
+the only team-memory pattern we've found without a public postmortem as of
+mid-2026.
 
 ## Layer 4 — The review ledger (adjudications as institutional memory)
 
@@ -125,8 +130,8 @@ parity test. Documentation can be ignored; the build cannot.
 This repo once had a beautifully written `.claude/agents/pixtuoid-dev.md` —
 architecture, conventions, sprite workflow, exit criteria. It was never
 loaded by anything, went stale within weeks (it described files that had been
-restructured), and was eventually deleted with its two unique rules salvaged
-into `CLAUDE.md`. The lesson generalizes to every layer above:
+restructured), and was eventually deleted with its one not-already-covered
+rule salvaged into `CLAUDE.md`. The lesson generalizes to every layer above:
 
 > **Knowledge files live or die by their load path, not their quality.**
 > Design the automatic reader first, then write the content. Every layer's

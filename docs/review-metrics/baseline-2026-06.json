@@ -1,6 +1,7 @@
 {
  "collected": "2026-06-12",
  "collector": "scripts/review-metrics.py",
+ "scan": "all of ~/.claude/projects (incl. worktree project dirs); duplicate wf journals deduped keeping the fuller copy",
  "runs": [
   {
    "label": "wf_0b37cafc-c11",
@@ -129,6 +130,22 @@
    "first_ts": "2026-06-08"
   },
   {
+   "label": "wf_66207d52-189",
+   "agents": 156,
+   "output_tokens": 746597,
+   "input_tokens_uncached": 6491702,
+   "cache_read_tokens": 128140170,
+   "cache_write_tokens": 17943657,
+   "by_role": {
+    "verifier": {
+     "agents": 156,
+     "output_tokens": 746597,
+     "cache_write_tokens": 17943657
+    }
+   },
+   "first_ts": "2026-06-03"
+  },
+  {
    "label": "wf_6b6262bb-126",
    "agents": 46,
    "output_tokens": 119177,
@@ -218,6 +235,37 @@
    "first_ts": "2026-05-30"
   },
   {
+   "label": "wf_a3d91b44-1b1",
+   "agents": 43,
+   "output_tokens": 238865,
+   "input_tokens_uncached": 393006,
+   "cache_read_tokens": 56657413,
+   "cache_write_tokens": 6335166,
+   "by_role": {
+    "verifier": {
+     "agents": 36,
+     "output_tokens": 151717,
+     "cache_write_tokens": 4771676
+    },
+    "other": {
+     "agents": 5,
+     "output_tokens": 67366,
+     "cache_write_tokens": 1160180
+    },
+    "finder": {
+     "agents": 1,
+     "output_tokens": 12448,
+     "cache_write_tokens": 199155
+    },
+    "implementer": {
+     "agents": 1,
+     "output_tokens": 7334,
+     "cache_write_tokens": 204155
+    }
+   },
+   "first_ts": "2026-05-29"
+  },
+  {
    "label": "wf_adff86a0-66d",
    "agents": 36,
    "output_tokens": 122805,
@@ -232,6 +280,37 @@
     }
    },
    "first_ts": "2026-06-03"
+  },
+  {
+   "label": "wf_bb515859-ce0",
+   "agents": 115,
+   "output_tokens": 457981,
+   "input_tokens_uncached": 7221600,
+   "cache_read_tokens": 154409103,
+   "cache_write_tokens": 23521155,
+   "by_role": {
+    "finder": {
+     "agents": 3,
+     "output_tokens": 23041,
+     "cache_write_tokens": 1678984
+    },
+    "verifier": {
+     "agents": 110,
+     "output_tokens": 421443,
+     "cache_write_tokens": 21015920
+    },
+    "implementer": {
+     "agents": 1,
+     "output_tokens": 6318,
+     "cache_write_tokens": 343850
+    },
+    "other": {
+     "agents": 1,
+     "output_tokens": 7179,
+     "cache_write_tokens": 482401
+    }
+   },
+   "first_ts": "2026-06-09"
   },
   {
    "label": "wf_be690cee-df4",
@@ -342,6 +421,32 @@
     }
    },
    "first_ts": "2026-06-05"
+  },
+  {
+   "label": "wf_dce180a5-51e",
+   "agents": 23,
+   "output_tokens": 94377,
+   "input_tokens_uncached": 1948259,
+   "cache_read_tokens": 29764305,
+   "cache_write_tokens": 4388852,
+   "by_role": {
+    "verifier": {
+     "agents": 21,
+     "output_tokens": 76278,
+     "cache_write_tokens": 3831841
+    },
+    "other": {
+     "agents": 1,
+     "output_tokens": 8467,
+     "cache_write_tokens": 289903
+    },
+    "implementer": {
+     "agents": 1,
+     "output_tokens": 9632,
+     "cache_write_tokens": 267108
+    }
+   },
+   "first_ts": "2026-06-09"
   },
   {
    "label": "wf_f01778db-84c",

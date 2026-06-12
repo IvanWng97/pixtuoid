@@ -36,7 +36,9 @@ def first_user_prompt(path: Path) -> str:
                 rec = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            msg = rec.get("message") or {}
+            msg = rec.get("message")
+            if not isinstance(msg, dict):
+                continue
             if msg.get("role") == "user":
                 content = msg.get("content")
                 if isinstance(content, str):
@@ -69,13 +71,14 @@ def agent_metrics(path: Path) -> dict:
             if ts:
                 first_ts = first_ts or ts
                 last_ts = ts
-            usage = (rec.get("message") or {}).get("usage")
-            if usage:
+            msg = rec.get("message")
+            usage = msg.get("usage") if isinstance(msg, dict) else None
+            if isinstance(usage, dict):
                 calls += 1
-                out_tok += usage.get("output_tokens", 0)
-                in_uncached += usage.get("input_tokens", 0)
-                cache_read += usage.get("cache_read_input_tokens", 0)
-                cache_write += usage.get("cache_creation_input_tokens", 0)
+                out_tok += usage.get("output_tokens") or 0
+                in_uncached += usage.get("input_tokens") or 0
+                cache_read += usage.get("cache_read_input_tokens") or 0
+                cache_write += usage.get("cache_creation_input_tokens") or 0
     prompt = first_user_prompt(path)
     return {
         "agent": path.stem,

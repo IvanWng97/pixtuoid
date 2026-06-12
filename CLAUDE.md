@@ -1,6 +1,9 @@
 # CLAUDE.md
 
 Instructions for Claude Code (or any AI coding agent) working in this repo.
+(`AGENTS.md` is a symlink to this file for the cross-tool standard; a Windows
+checkout without `core.symlinks` materializes it as a one-line pointer — read
+this file.)
 This is the **workspace-level** guide — conventions, invariants, and rules that
 apply everywhere. **Module-level detail and the crate-specific "sharp edges"
 live in nested `CLAUDE.md` files**, which Claude Code auto-loads when you touch
@@ -66,7 +69,7 @@ site/                   Astro marketing landing page → GitHub Pages (ivanwng97
 ```
 just build                                                           # debug build
 just build --release                                                 # release build
-just test                                                            # all tests (600+) — nextest if installed, else cargo test
+just test                                                            # all tests (1,400+) — nextest if installed, else cargo test
 cargo test -p pixtuoid --lib <filter>                                # fast iteration: one crate's unit tests only
 cargo run --release --example snapshot -- /tmp/snap.png              # render TUI to PNG
 ./target/release/pixtuoid run --headless --projects-root ~/.claude/projects   # live test against real CC
@@ -138,7 +141,9 @@ semver surface, so its `pub` paths may move without a major bump.
 `check-windows` cross-lints the workspace for `x86_64-pc-windows-msvc` on every PR (clippy, no linking).)
 
 Run `just preflight` locally to avoid the round-trip of "push → wait for CI →
-red → fix → push again."
+red → fix → push again." Never pipe its output through `tail`/`head` — the
+exit code becomes the pipe's and a real failure reads as green; redirect to a
+file (`just preflight > /tmp/pf.log 2>&1; echo $?`) and read the log."
 
 `.githooks/pre-commit` runs `just fmt-check` only (sub-second).
 `.githooks/pre-push` runs `just preflight` before pushing (honors `SKIP_PREFLIGHT=1`).
@@ -228,7 +233,8 @@ Don't be surprised by these. **Full explanation (the WHY) lives in the nested `C
 - Don't add `--no-verify` / hook-skipping flags to any git operations performed in this repo.
 - Don't generate a README / CLAUDE.md / CHANGELOG / docs in PRs unless explicitly asked.
 - Don't `git push` without explicit user confirmation, even after committing.
-- Don't merge a PR without running the code review process (2+ agents: explorer/reviewer/architect). No exceptions — PR #23 was merged without review and had a critical path-traversal vulnerability.
+- Don't leave stale `Closes #N` in commit/squash bodies or PR text on a re-scope — GitHub fires the keyword from EITHER place, and conditional phrasing ("Closes #N if …") still fires (#246 was auto-closed this way).
+- Don't merge a PR without the **two-lens review**: 2+ agents, lenses differentiated — one correctness/grounding (does the code do what it claims; are cited anchors real), one design/blast-radius (API shape, downstream consumers, docs). Both briefs follow [`.github/prompts/pr-review.prompt.md`](.github/prompts/pr-review.prompt.md) (reasoning-before-verdict, negative-space list, integer confidence + file:line, ledger check, three-valued verdict). No exceptions — PR #23 was merged without review and had a critical path-traversal vulnerability.
 - Don't blindly accept reviewer findings. Verify the premise before coding a fix — the reviewer may have incomplete context about design intent. Check the relevant "Known sharp edges" and existing comments first. If a fix contradicts an earlier design decision, trace the code path manually.
 
 ## Where to look (cross-cutting)
