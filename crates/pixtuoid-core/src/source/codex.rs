@@ -278,7 +278,14 @@ fn rollout_ids_from_paths(
         }
         tracing::debug!("codex probe: pid {pid} holds {} open", path.display());
         let id = codex_id_from_path(&path);
-        snap.pid_of.insert(id.clone(), pid);
+        // Two live processes holding ONE rollout open (a resume overlap) must
+        // not bind id→pid by proc-enumeration order — the same determinism
+        // rule as the CC registry fold's no-startedAt arm (#252): larger pid
+        // wins, arbitrary but stable for live processes.
+        let bound = snap.pid_of.entry(id.clone()).or_insert(pid);
+        if pid > *bound {
+            *bound = pid;
+        }
         snap.ids.insert(id);
     }
     snap
@@ -647,6 +654,26 @@ mod tests {
         // #223: the snapshot binds each id to the OWNING pid (the exit-watch
         // half) — the (42, path) pair above must survive the join intact.
         assert_eq!(got.pid_of.get(UUID), Some(&42));
+    }
+
+    #[test]
+    fn shared_rollout_binds_the_larger_pid_regardless_of_enumeration_order() {
+        // Two live processes holding ONE rollout (a resume overlap, #252's
+        // codex sibling): the binding must be the deterministic tiebreak
+        // winner in BOTH presentation orders, never last-writer-wins.
+        let root = Path::new("/home/u/.codex/sessions");
+        let path = root.join(format!(
+            "2026/06/10/rollout-2026-06-10T08-00-00-{UUID}.jsonl"
+        ));
+        for pids in [[100, 200], [200, 100]] {
+            let got = rollout_ids_from_paths(root, pids.into_iter().map(|p| (p, path.clone())));
+            assert_eq!(got.ids, std::iter::once(UUID.to_string()).collect());
+            assert_eq!(
+                got.pid_of.get(UUID),
+                Some(&200),
+                "the larger pid must win in both enumeration orders"
+            );
+        }
     }
 
     #[test]

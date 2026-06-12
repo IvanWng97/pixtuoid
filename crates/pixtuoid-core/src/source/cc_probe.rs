@@ -122,7 +122,7 @@ pub fn live_cc_session_ids(sessions_dir: &Path) -> Option<ProbeSnapshot> {
                             session_id = %reg.session_id,
                             pids = ?(slot.get().pid, reg.pid),
                             "two live CC registry entries claim the same sessionId — \
-                             keeping the most recently started"
+                             keeping a deterministic winner"
                         );
                     });
                     if prefer_candidate(slot.get(), &reg) {
@@ -155,9 +155,9 @@ pub fn live_cc_session_ids(sessions_dir: &Path) -> Option<ProbeSnapshot> {
 /// unspecified and may differ between refreshes, and the binding must not
 /// flap. Newest `startedAt` wins (the genuinely newer CC owns a reused id);
 /// a `startedAt`-carrying entry beats one without (it also passed the pid
-/// identity check, so it's the better-attested binding); both absent → larger
-/// pid — arbitrary, but stable for live processes, which is all stability
-/// needs.
+/// identity check, so it's the better-attested binding); both absent or equal
+/// → larger pid — arbitrary, but stable for live processes, which is all
+/// stability needs.
 #[cfg(unix)]
 fn prefer_candidate(incumbent: &RegistryEntry, candidate: &RegistryEntry) -> bool {
     match (candidate.started_at_ms, incumbent.started_at_ms) {
@@ -762,7 +762,10 @@ mod liveness_tests {
         // Newest startedAt wins, in BOTH presentation orders (the symmetry IS
         // the scan-order independence).
         assert!(prefer_candidate(&entry(1, Some(100)), &entry(2, Some(200))));
-        assert!(!prefer_candidate(&entry(2, Some(200)), &entry(1, Some(100))));
+        assert!(!prefer_candidate(
+            &entry(2, Some(200)),
+            &entry(1, Some(100))
+        ));
         // A startedAt-carrying entry beats one without, both orders.
         assert!(prefer_candidate(&entry(9, None), &entry(1, Some(100))));
         assert!(!prefer_candidate(&entry(1, Some(100)), &entry(9, None)));
@@ -770,7 +773,10 @@ mod liveness_tests {
         assert!(prefer_candidate(&entry(1, None), &entry(2, None)));
         assert!(!prefer_candidate(&entry(2, None), &entry(1, None)));
         assert!(prefer_candidate(&entry(1, Some(100)), &entry(2, Some(100))));
-        assert!(!prefer_candidate(&entry(2, Some(100)), &entry(1, Some(100))));
+        assert!(!prefer_candidate(
+            &entry(2, Some(100)),
+            &entry(1, Some(100))
+        ));
     }
 
     #[cfg(unix)]
@@ -781,23 +787,26 @@ mod liveness_tests {
         // is presented under file names sorting in OPPOSITE orders; whatever
         // order read_dir yields, the binding must come out identical — the
         // flap in #252 was exactly this binding following dir order.
-        let mut child_a = std::process::Command::new("sleep").arg("30").spawn().unwrap();
-        let mut child_b = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+        let mut child_a = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
+        let mut child_b = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
         let (pid_a, pid_b) = (child_a.id() as i64, child_b.id() as i64);
         let expected = pid_a.max(pid_b) as i32;
 
-        let mut bindings = Vec::new();
+        // Probe inside the loop, assert only after the children are reaped —
+        // a panicking assert here would leak two sleep-30s (the sibling
+        // pid_start_time test's kill-before-assert discipline).
+        let mut snapshots = Vec::new();
         for (first, second) in [(pid_a, pid_b), (pid_b, pid_a)] {
             let dir = tempfile::tempdir().unwrap();
             write_entry(dir.path(), "aaa.json", first, "dup");
             write_entry(dir.path(), "zzz.json", second, "dup");
-            let live = live_cc_session_ids(dir.path()).expect("readable dir is a healthy probe");
-            assert_eq!(
-                live.ids,
-                HashSet::from(["dup".to_string()]),
-                "a duplicate id must yield ONE vouch, not two"
-            );
-            bindings.push(*live.pid_of.get("dup").unwrap());
+            snapshots.push(live_cc_session_ids(dir.path()));
         }
 
         let _ = child_a.kill();
@@ -805,11 +814,19 @@ mod liveness_tests {
         let _ = child_b.kill();
         let _ = child_b.wait();
 
-        assert_eq!(
-            bindings,
-            vec![expected, expected],
-            "the winning pid must be the deterministic tiebreak winner in both name orders"
-        );
+        for snapshot in snapshots {
+            let live = snapshot.expect("readable dir is a healthy probe");
+            assert_eq!(
+                live.ids,
+                HashSet::from(["dup".to_string()]),
+                "a duplicate id must yield ONE vouch, not two"
+            );
+            assert_eq!(
+                live.pid_of.get("dup"),
+                Some(&expected),
+                "the winning pid must be the deterministic tiebreak winner in both name orders"
+            );
+        }
     }
 
     #[test]
