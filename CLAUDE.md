@@ -9,7 +9,7 @@ apply everywhere. **Module-level detail and the crate-specific "sharp edges"
 live in nested `CLAUDE.md` files**, auto-loaded when you touch those trees:
 
 - [`crates/pixtuoid-core/CLAUDE.md`](crates/pixtuoid-core/CLAUDE.md) — the headless lib: sources, reducer/state, sprites, layout, physics, pose.
-  - [`crates/pixtuoid-core/tests/CLAUDE.md`](crates/pixtuoid-core/tests/CLAUDE.md) — the integration-test layout (8 grouped binaries, parity twins, publish-excluded flat tests) + add-a-CLI test steps.
+  - [`crates/pixtuoid-core/tests/CLAUDE.md`](crates/pixtuoid-core/tests/CLAUDE.md) — the integration-test layout (8 test binaries: six grouped + two flat publish-excluded; parity twins) + add-a-CLI test steps.
 - [`crates/pixtuoid/CLAUDE.md`](crates/pixtuoid/CLAUDE.md) — the binary: install, runtime, cli, config, multi-floor, embedded pack.
 - [`crates/pixtuoid/src/tui/CLAUDE.md`](crates/pixtuoid/src/tui/CLAUDE.md) — the terminal renderer: draw_scene, pixel painter, harness, widgets, themes, motion/pose authority, pathfinding.
 
@@ -68,8 +68,8 @@ scope to one crate (seconds vs a full-workspace run).
 **Test organization (three tiers):** unit tests next to the code (large
 modules use a sibling `#[cfg(test)] mod tests;` file — keeps `use super::*`
 without API widening); integration tests in `crates/<crate>/tests/` —
-pixtuoid-core's suite is 8 capability-grouped binaries with two deliberately
-flat publish-excluded tests and `#[cfg(windows)]` parity twins, all mapped in
+pixtuoid-core's suite is 8 binaries (six capability-grouped + two
+deliberately flat publish-excluded) with `#[cfg(windows)]` parity twins, all mapped in
 [`crates/pixtuoid-core/tests/CLAUDE.md`](crates/pixtuoid-core/tests/CLAUDE.md);
 the headless render harness (`tui_renderer/harness.rs`) drives the real
 `TuiRenderer` through ratatui `TestBackend` — see the tui guide. Coverage:
@@ -127,7 +127,7 @@ and stays a human step. See
 - **Every review adjudication leaves a trace** in [`docs/REVIEW-LEDGER.md`](docs/REVIEW-LEDGER.md) (premise-anchored protocol in its header; economics in `docs/review-metrics/`). A finding refuted as "deliberate design" MUST cite an existing sharp edge or add one in the same change.
 - **Track every deferred finding as a GitHub issue** BEFORE moving on — problem, why deferred, fix sketch. A deferred finding with no issue is a silently-dropped finding. (Verify it's real first — see "Don't blindly accept reviewer findings".)
 - **Sprite changes require visual verification** — render, crop, read the PNG, self-critique until it reads at half-block scale; commit messages carry the iteration history. Full checklist: `.claude/skills/beautify-decoration/SKILL.md`.
-- **Periodic context-file audits also distill memory**: each `/revise-claude-md`-style audit sweeps recent session memories for promote-to-repo candidates (`docs/KNOWLEDGE-BASE.md`, Layer 3).
+- **Periodic context-file audits also distill memory**: each `/revise-claude-md`-style audit sweeps recent session memories for promote-to-repo candidates (the memory layer of [`docs/KNOWLEDGE-BASE.md`](docs/KNOWLEDGE-BASE.md)).
 
 ## Architecture invariants
 
