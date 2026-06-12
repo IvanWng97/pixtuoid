@@ -151,7 +151,12 @@ into per-stage token/agent metrics, and the review history itself gets mined:
 merged PRs' reviews plus 50 post-merge fixes — 7 adjudicated escapes, each
 of which named a concrete guideline change — plus one bot-missed design
 lesson, caught pre-merge by a self-dispatched architect pass and validated
-by a controlled backtest on the original diff. The experiment design, for anyone
+by a controlled backtest on the original diff. The onboarding experiment
+([`phase3-onboarding-2026-06.md`](review-metrics/phase3-onboarding-2026-06.md))
+ran the with/without-KB A/B: arms indistinguishable on first-pass quality —
+because the load-bearing lessons were already IN the code at the hazard
+seams (the executability ladder working); the KB differentiated on process
+(docs currency, ledger discipline, plan auditability). The experiment design, for anyone
 replicating this on their own repo:
 
 | experiment | metric | quality guard |
