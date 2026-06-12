@@ -131,3 +131,10 @@ governs). "Acknowledged, no action" is not a state: #40's ignored migration
 finding became a 0.4.1 release-blocker (#46); two more drop cases:
 docs/review-metrics/mining-2026-06.md. After a fix
 round, re-run the gates and watch the NEW head's CI.
+
+Whole-codebase reviews additionally: finder briefs do NOT carry the ledger —
+unbiased candidate recall is what keeps the ledger's calibration measurable;
+the ledger enters at routing/verification only. Until the demote path's
+false-suppression rate has a measurement, run the A/B harness alongside
+(control arm = the ledger-blind pass; see
+docs/review-metrics/phase2-ab-2026-06.md).
