@@ -6,7 +6,7 @@ use tracing::debug;
 
 use crate::AgentId;
 
-use super::walk::walk_jsonl;
+use super::walk::{park_if_truncated_below_cursor, walk_jsonl};
 use super::{SourceDecoders, WatchCtx};
 
 /// How long an un-drained [`ChildEndUnclaims`] entry survives. Bounds the
@@ -187,7 +187,11 @@ pub(super) async fn drain_child_end_unclaims(
             // nothing), THEN release. The release only DOWNGRADES an entry
             // that still exists: if the drained chunk decoded this path's own
             // terminator, walk_jsonl fully retired the claim (removed) — a
-            // blind insert would resurrect it as merely-released.
+            // blind insert would resurrect it as merely-released. R0612-04: a
+            // truncated-below-cursor file is parked at its new EOF first —
+            // the walk's truncation arm would reset the cursor to 0 without
+            // draining (see park_if_truncated_below_cursor).
+            park_if_truncated_below_cursor(path, ctx).await;
             walk_jsonl(path, decoders, ctx).await;
             {
                 let mut seen = ctx.seen.lock().await;

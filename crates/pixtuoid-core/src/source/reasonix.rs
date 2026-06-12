@@ -53,6 +53,7 @@
 use anyhow::{anyhow, bail, Result};
 use serde_json::Value;
 
+use crate::source::decoder::{ellipsize, MAX_DECODED_FIELD_CHARS};
 use crate::source::{AgentEvent, ToolDetail};
 use crate::AgentId;
 
@@ -166,7 +167,8 @@ pub fn decode_rx_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
                 identity(),
                 AgentEvent::Waiting {
                     agent_id,
-                    reason: msg.into(),
+                    // Capped at decode like CC's Notification arm (pitfall 3).
+                    reason: ellipsize(msg, MAX_DECODED_FIELD_CHARS),
                 },
             ])
         }
@@ -531,5 +533,26 @@ mod tests {
             matches!(&ev, AgentEvent::ActivityStart { detail: Some(d), .. } if !d.is_task()),
             "spoofed subagent_type must stay Generic"
         );
+    }
+
+    // conf-35 (#262 item 5): the in-diff sibling of CC's Notification cap
+    // (pitfall 2) — Reasonix's `message` is the same content-derived field.
+    #[test]
+    fn notification_reason_is_capped_at_the_decode_boundary() {
+        let long = "é".repeat(MAX_DECODED_FIELD_CHARS * 10);
+        let ev = decode(json!({
+            "event": "Notification",
+            "cwd": "/r",
+            "message": long
+        }));
+        match &ev {
+            AgentEvent::Waiting { reason, .. } => {
+                assert_eq!(reason.chars().count(), MAX_DECODED_FIELD_CHARS + 1);
+                assert!(reason.ends_with('…'));
+            }
+            other => panic!("expected Waiting, got {other:?}"),
+        }
+        // The short-message pass-through is pinned by
+        // notification_maps_to_waiting_with_message above.
     }
 }

@@ -74,6 +74,58 @@ impl HookSocketListener {
 /// pipe owner-only SDDL).
 const MAX_CONN_BYTES: u64 = 2 * 1024 * 1024;
 
+/// Breadcrumb for the silent-loss path (R0612-02): the per-connection budget
+/// (`CONN_TIMEOUT` in both platform listeners) bounds `handle_conn` by
+/// DROPPING its future, so when cancellation lands mid-payload — e.g. the
+/// send loop parked on a full reducer channel under heavy load — no code
+/// after the cancelled await ever runs, and only a `Drop` impl can record
+/// that the payload's already-decoded remainder never reached the reducer.
+/// Runtime shutdown dropping the spawned conn task reaches this same `Drop`,
+/// so the message reports the loss (count + agent attribution + the budget
+/// for context) without asserting WHICH cancellation fired. Disarmed on
+/// channel-closed (receiver gone = daemon shutdown): those events are
+/// dropped on purpose, not lost.
+struct UndeliveredEvents {
+    ids: Vec<crate::AgentId>,
+    delivered: usize,
+}
+
+impl UndeliveredEvents {
+    fn new(evs: &[crate::source::AgentEvent]) -> Self {
+        Self {
+            ids: evs.iter().map(|ev| ev.agent_id()).collect(),
+            delivered: 0,
+        }
+    }
+
+    fn delivered_one(&mut self) {
+        self.delivered += 1;
+    }
+
+    fn disarm(&mut self) {
+        self.delivered = self.ids.len();
+    }
+}
+
+impl Drop for UndeliveredEvents {
+    fn drop(&mut self) {
+        let undelivered = &self.ids[self.delivered..];
+        if undelivered.is_empty() {
+            return;
+        }
+        let mut agents: Vec<String> = undelivered.iter().map(ToString::to_string).collect();
+        // One payload's events share at most a couple of ids, adjacent by
+        // construction (Identity precedes its activity event).
+        agents.dedup();
+        warn!(
+            "hook connection cancelled mid-payload: {} decoded event(s) for agent(s) [{}] \
+             never reached the reducer (per-connection budget: {CONN_TIMEOUT:?})",
+            undelivered.len(),
+            agents.join(", ")
+        );
+    }
+}
+
 pub(crate) async fn handle_conn(stream: impl AsyncRead + Unpin, tx: TaggedSender) {
     let reader = BufReader::new(stream.take(MAX_CONN_BYTES));
     let mut lines = reader.lines();
@@ -96,11 +148,14 @@ pub(crate) async fn handle_conn(stream: impl AsyncRead + Unpin, tx: TaggedSender
                     // in order on the same channel, so the reducer registers
                     // with real identity before the activity event applies.
                     Ok(evs) => {
+                        let mut undelivered = UndeliveredEvents::new(&evs);
                         for ev in evs {
                             debug!("hook event: {ev:?}");
                             if tx.send((Transport::Hook, ev)).await.is_err() {
+                                undelivered.disarm();
                                 return;
                             }
+                            undelivered.delivered_one();
                         }
                     }
                     Err(e) => warn!("hook decode error: {e}"),
@@ -119,7 +174,61 @@ pub(crate) async fn handle_conn(stream: impl AsyncRead + Unpin, tx: TaggedSender
 mod tests {
     use super::*;
     use crate::source::AgentEvent;
+    use crate::AgentId;
+    use std::sync::{Arc, Mutex};
     use tokio::io::AsyncWriteExt;
+
+    /// MakeWriter that captures formatted log lines so the tests can assert
+    /// on the breadcrumb's presence/absence.
+    #[derive(Clone, Default)]
+    struct CaptureWriter(Arc<Mutex<Vec<u8>>>);
+
+    impl CaptureWriter {
+        fn contents(&self) -> String {
+            String::from_utf8_lossy(&self.0.lock().unwrap()).into_owned()
+        }
+    }
+
+    impl std::io::Write for CaptureWriter {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for CaptureWriter {
+        type Writer = CaptureWriter;
+
+        fn make_writer(&'a self) -> Self::Writer {
+            self.clone()
+        }
+    }
+
+    fn capture_warns() -> (CaptureWriter, tracing::subscriber::DefaultGuard) {
+        let logs = CaptureWriter::default();
+        let guard = tracing::subscriber::set_default(
+            tracing_subscriber::fmt()
+                .with_writer(logs.clone())
+                .with_ansi(false)
+                .with_max_level(tracing::Level::WARN)
+                .finish(),
+        );
+        (logs, guard)
+    }
+
+    // Decodes to TWO events (Identity + ActivityStart, #221) — the shape the
+    // mid-payload loss path needs: more than one event per payload.
+    const PRE_TOOL_USE_LINE: &[u8] = b"{\"hook_event_name\":\"PreToolUse\",\
+        \"session_id\":\"ses-abc\",\
+        \"transcript_path\":\"/p/ses-abc.jsonl\",\
+        \"cwd\":\"/repo\",\
+        \"tool_name\":\"Bash\",\
+        \"tool_input\":{\"command\":\"ls\"},\
+        \"tool_use_id\":\"t1\"}\n";
 
     // Platform-neutral framing test: handle_conn is generic over AsyncRead,
     // so the SHARED decode path is pinned without any socket/pipe — this is
@@ -143,5 +252,91 @@ mod tests {
         assert_eq!(transport, Transport::Hook);
         assert!(matches!(ev, AgentEvent::SessionStart { .. }));
         task.await.unwrap();
+    }
+
+    // The silent-loss path (R0612-02): the budget expires while the send loop
+    // is parked on a full reducer channel, the timeout wrapper drops the
+    // handle_conn future, and the payload's already-decoded remainder is
+    // discarded — the breadcrumb is the only trace. Deterministic by
+    // construction: nothing drains the capacity-1 channel, so the second send
+    // can NEVER complete and the timeout always cancels mid-payload
+    // regardless of scheduling.
+    #[tokio::test]
+    async fn cancelled_conn_leaves_breadcrumb_for_undelivered_events() {
+        let (mut client, server) = tokio::io::duplex(4096);
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(1);
+        let (logs, _guard) = capture_warns();
+
+        client.write_all(PRE_TOOL_USE_LINE).await.unwrap();
+
+        let timed_out = tokio::time::timeout(
+            std::time::Duration::from_millis(50),
+            handle_conn(server, tx),
+        )
+        .await
+        .is_err();
+        assert!(timed_out, "second send parks on the full channel forever");
+
+        // The Identity made it through; the ActivityStart is the loss.
+        let (_, ev) = rx.try_recv().expect("first decoded event delivered");
+        assert!(matches!(ev, AgentEvent::Identity { .. }));
+        assert!(
+            rx.try_recv().is_err(),
+            "second event must have been dropped"
+        );
+
+        let out = logs.contents();
+        assert!(
+            out.contains("1 decoded event(s)"),
+            "loss breadcrumb missing from logs: {out:?}"
+        );
+        // Cause-neutral phrasing: runtime-shutdown future-drop reaches the
+        // same Drop, so the message must not assert CONN_TIMEOUT fired.
+        assert!(
+            out.contains("cancelled mid-payload"),
+            "breadcrumb must report a cancellation, not assert a cause: {out:?}"
+        );
+        // Session attribution: the undelivered event's agent id is in the line.
+        let expected = AgentId::from_parts("claude-code", "ses-abc");
+        assert!(
+            out.contains(&expected.to_string()),
+            "breadcrumb must attribute the loss to its agent id: {out:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn clean_delivery_leaves_no_breadcrumb() {
+        let (mut client, server) = tokio::io::duplex(4096);
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(8);
+        let (logs, _guard) = capture_warns();
+
+        client.write_all(PRE_TOOL_USE_LINE).await.unwrap();
+        drop(client);
+        handle_conn(server, tx).await;
+
+        assert!(rx.try_recv().is_ok());
+        assert!(rx.try_recv().is_ok());
+        let out = logs.contents();
+        assert!(
+            !out.contains("cancelled mid-payload"),
+            "fully delivered payload must not warn: {out:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn channel_closed_shutdown_leaves_no_breadcrumb() {
+        let (mut client, server) = tokio::io::duplex(4096);
+        let (tx, rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(8);
+        drop(rx); // receiver gone = daemon shutdown
+        let (logs, _guard) = capture_warns();
+
+        client.write_all(PRE_TOOL_USE_LINE).await.unwrap();
+        handle_conn(server, tx).await;
+
+        let out = logs.contents();
+        assert!(
+            !out.contains("cancelled mid-payload"),
+            "shutdown drop is deliberate, not a loss: {out:?}"
+        );
     }
 }

@@ -7,7 +7,9 @@ use crate::source::cc_probe::cc_sessions_dir;
 // The registry-probe machinery lives in `source/cc_probe.rs`; the public path
 // `claude_code::live_cc_session_ids` is preserved via this re-export.
 pub use crate::source::cc_probe::live_cc_session_ids;
-use crate::source::decoder::{cwd_basename_label, make_tool_detail};
+use crate::source::decoder::{
+    cwd_basename_label, ellipsize, make_tool_detail, MAX_DECODED_FIELD_CHARS,
+};
 use crate::source::hook::HookSocketListener;
 use crate::source::jsonl::{ChildEndUnclaims, JsonlWatcher};
 use crate::source::{AgentEvent, Source, TaggedReceiver, TaggedSender, Transport};
@@ -333,7 +335,13 @@ pub fn decode_cc_line(transcript_path: &str, source: &str, v: Value) -> Result<V
         .and_then(|v| v.as_str())
         .filter(|s| !s.is_empty())
     {
-        let label = name.rsplit(':').next().unwrap_or(name).to_string();
+        // Capped at decode (CONTRIBUTING pitfall 3): `attributionAgent` is
+        // transcript content, and the label persists in slot state for the
+        // session's lifetime.
+        let label = ellipsize(
+            name.rsplit(':').next().unwrap_or(name),
+            MAX_DECODED_FIELD_CHARS,
+        );
         out.push(AgentEvent::Rename { agent_id, label });
     }
 
@@ -892,5 +900,38 @@ mod cc_id_tests {
         let normalized =
             Path::new("/users/me/.claude/projects/p/01000000-0000-7000-8000-0000000000cc.jsonl");
         assert_eq!(cc_id_from_path(raw), cc_id_from_path(normalized));
+    }
+
+    // conf-35 (#262 item 5): `attributionAgent` is transcript content — the
+    // Rename label it produces persists in slot state, so it is capped where
+    // it enters (pitfall 3); a legitimate short name stays untouched.
+    #[test]
+    fn attribution_agent_label_is_capped_at_the_decode_boundary() {
+        let path = "/p/x/s.jsonl";
+        let long = "é".repeat(MAX_DECODED_FIELD_CHARS * 10);
+        let events = decode_cc_line(
+            path,
+            "claude-code",
+            serde_json::json!({"type":"assistant","attributionAgent": long, "message":{"content":[]}}),
+        )
+        .unwrap();
+        match &events[0] {
+            AgentEvent::Rename { label, .. } => {
+                assert_eq!(label.chars().count(), MAX_DECODED_FIELD_CHARS + 1);
+                assert!(label.ends_with('…'));
+            }
+            other => panic!("expected Rename, got {other:?}"),
+        }
+
+        let events = decode_cc_line(
+            path,
+            "claude-code",
+            serde_json::json!({"type":"assistant","attributionAgent":"explorer","message":{"content":[]}}),
+        )
+        .unwrap();
+        assert!(
+            matches!(&events[0], AgentEvent::Rename { label, .. } if label == "explorer"),
+            "a short label must pass through unchanged, got {events:?}"
+        );
     }
 }

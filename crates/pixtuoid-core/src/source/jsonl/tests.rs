@@ -1726,3 +1726,249 @@ async fn task_scan_handles_partial_first_line() {
         "cursor must land at EOF"
     );
 }
+
+/// R0612-03: symlinked entries under a watched root are refused wholesale —
+/// a directory symlink would recurse through a planted loop / walk foreign
+/// `.jsonl` trees outside the root, and a file symlink would pull a foreign
+/// transcript into this source's id space. Nothing first-party lays out
+/// symlinks under a projects/sessions root, so the skip costs no legitimate
+/// session; a REAL transcript next to the symlinks must still register.
+#[cfg(unix)]
+#[tokio::test]
+async fn walk_refuses_symlinked_entries() {
+    let outside = tempfile::tempdir().unwrap();
+    let foreign = outside.path().join("foreign.jsonl");
+    std::fs::write(&foreign, "{\"type\":\"assistant\"}\n").unwrap();
+
+    let root = tempfile::tempdir().unwrap();
+    let real = root.path().join("real.jsonl");
+    std::fs::write(&real, "{\"type\":\"assistant\"}\n").unwrap();
+    // The three refusal shapes: an out-of-root dir symlink, an out-of-root
+    // file symlink, and a self-loop.
+    std::os::unix::fs::symlink(outside.path(), root.path().join("escape")).unwrap();
+    std::os::unix::fs::symlink(&foreign, root.path().join("link.jsonl")).unwrap();
+    std::os::unix::fs::symlink(root.path(), root.path().join("loop")).unwrap();
+
+    let cursors = Arc::new(Mutex::new(HashMap::new()));
+    let seen = Arc::new(Mutex::new(HashMap::new()));
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(64);
+    let source: Arc<str> = Arc::from("test");
+    let live = Arc::new(Mutex::new(HashSet::new()));
+    let ctx = WatchCtx {
+        source: &source,
+        cursors: &cursors,
+        seen: &seen,
+        tx: &tx,
+        window: Duration::from_secs(3600),
+        live: &live,
+    };
+    let mut health = FailureLatch::default();
+    scan_root(root.path(), t_decoders(), &ctx, &mut health).await;
+    drop(tx);
+    let events = drain_events(&mut rx);
+
+    let real_id = AgentId::from_parts("test", &default_id_from_path(&real));
+    assert!(
+        events.iter().any(|(_, e)| matches!(
+            e,
+            AgentEvent::SessionStart { agent_id, .. } if *agent_id == real_id
+        )),
+        "the real transcript must still register, got {events:?}"
+    );
+    let foreign_id = AgentId::from_parts("test", &default_id_from_path(&foreign));
+    assert!(
+        !events.iter().any(|(_, e)| e.agent_id() == foreign_id),
+        "a symlinked foreign transcript must emit nothing, got {events:?}"
+    );
+    assert!(
+        cursors
+            .lock()
+            .await
+            .keys()
+            .all(|p| p.parent() == Some(root.path()) && !p.is_symlink()),
+        "no symlinked or out-of-root path may be tracked: {:?}",
+        cursors.lock().await.keys().collect::<Vec<_>>()
+    );
+}
+
+/// R0612-04 (exit arm): a transcript truncated/recreated BELOW its cursor at
+/// the moment the exit drain runs hits `walk_jsonl`'s truncation arm — cursor
+/// reset to 0, return WITHOUT draining — leaving exactly the state the #228
+/// drain-before-unclaim discipline forbids: existing bytes "pending" on a
+/// path whose claim the exit is about to retire. The exit must park the
+/// cursor at the NEW EOF instead, so a straggler walk cannot replay the dead
+/// session's bytes as a ghost first-sight (every fast rung is already
+/// disarmed for it); only a genuinely NEW append revives.
+#[tokio::test]
+async fn session_exit_parks_truncated_transcript_so_a_straggler_walk_cannot_resurrect() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("t.jsonl");
+    std::fs::write(
+        &path,
+        "{\"type\":\"assistant\"}\n{\"type\":\"assistant\"}\n{\"type\":\"assistant\"}\n",
+    )
+    .unwrap();
+    let cursors = Arc::new(Mutex::new(HashMap::new()));
+    let seen = Arc::new(Mutex::new(HashMap::new()));
+    let window = Duration::from_secs(3600);
+
+    // Register normally (recent file → SessionStart, cursor at EOF).
+    let events = walk_once(&path, window, t_ended, &cursors, &seen).await;
+    assert!(events
+        .iter()
+        .any(|(_, e)| matches!(e, AgentEvent::SessionStart { .. })));
+
+    // The transcript is recreated SMALLER before the exit arm runs.
+    std::fs::write(&path, "{\"type\":\"assistant\"}\n").unwrap();
+    let new_len = std::fs::metadata(&path).unwrap().len();
+    assert!(
+        *cursors.lock().await.get(&path).unwrap() > new_len,
+        "fixture: the file must be truncated below the cursor"
+    );
+
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(32);
+    let source: Arc<str> = Arc::from("test");
+    let live = Arc::new(Mutex::new(HashSet::new()));
+    let ctx = WatchCtx {
+        source: &source,
+        cursors: &cursors,
+        seen: &seen,
+        tx: &tx,
+        window,
+        live: &live,
+    };
+    let id = default_id_from_path(&path);
+    emit_session_exit(&id, t_decoders(), &ctx).await;
+    drop(tx);
+    let exit_events = drain_events(&mut rx);
+    assert!(
+        matches!(
+            exit_events.last(),
+            Some((Transport::Jsonl, AgentEvent::SessionEnd { .. }))
+        ),
+        "the terminator must be emitted (last), got {exit_events:?}"
+    );
+    assert!(
+        !exit_events
+            .iter()
+            .any(|(_, e)| matches!(e, AgentEvent::SessionStart { .. })),
+        "the exit drain must not register anything, got {exit_events:?}"
+    );
+    assert_eq!(
+        cursors.lock().await.get(&path).copied(),
+        Some(new_len),
+        "a truncated transcript must be PARKED at the new EOF, not reset to 0"
+    );
+    assert!(
+        !seen.lock().await.contains_key(&path),
+        "seen must be un-claimed so a genuine post-death append revives"
+    );
+
+    // The straggler walk: must be a no-op, NOT a ghost first-sight replay.
+    let events = walk_once(&path, window, t_ended, &cursors, &seen).await;
+    assert!(
+        events.is_empty(),
+        "a straggler walk after the exit must not resurrect, got {events:?}"
+    );
+
+    // A genuinely NEW append still revives — the self-heal contract.
+    std::fs::OpenOptions::new()
+        .append(true)
+        .open(&path)
+        .unwrap()
+        .write_all(b"{\"type\":\"assistant\"}\n")
+        .unwrap();
+    let events = walk_once(&path, window, t_ended, &cursors, &seen).await;
+    assert!(
+        events
+            .iter()
+            .any(|(_, e)| matches!(e, AgentEvent::SessionStart { .. })),
+        "a post-exit append must re-register, got {events:?}"
+    );
+}
+
+/// R0612-04 (the #246 sibling): the child-end un-claim drain has the same
+/// truncation corner — its release (`seen` → false) must not leave the
+/// truncation arm's cursor-0 reset behind, or the next pass replays the
+/// rollout's existing bytes and re-registers the just-ended child.
+#[tokio::test]
+async fn child_end_unclaim_parks_truncated_transcript_before_release() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("child.jsonl");
+    std::fs::write(
+        &path,
+        "{\"type\":\"assistant\"}\n{\"type\":\"assistant\"}\n{\"type\":\"assistant\"}\n",
+    )
+    .unwrap();
+    let cursors = Arc::new(Mutex::new(HashMap::new()));
+    let seen = Arc::new(Mutex::new(HashMap::new()));
+    let window = Duration::from_secs(3600);
+
+    let events = walk_once(&path, window, t_ended, &cursors, &seen).await;
+    assert!(events
+        .iter()
+        .any(|(_, e)| matches!(e, AgentEvent::SessionStart { .. })));
+
+    // Truncated/recreated smaller before the drain runs.
+    std::fs::write(&path, "{\"type\":\"assistant\"}\n").unwrap();
+    let new_len = std::fs::metadata(&path).unwrap().len();
+    assert!(
+        *cursors.lock().await.get(&path).unwrap() > new_len,
+        "fixture: the file must be truncated below the cursor"
+    );
+
+    let unclaims = ChildEndUnclaims::new();
+    let id = AgentId::from_parts("test", &default_id_from_path(&path));
+    unclaims.push(id);
+
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(64);
+    let source: Arc<str> = Arc::from("test");
+    let live = Arc::new(Mutex::new(HashSet::new()));
+    let ctx = WatchCtx {
+        source: &source,
+        cursors: &cursors,
+        seen: &seen,
+        tx: &tx,
+        window,
+        live: &live,
+    };
+    drain_child_end_unclaims(Some(&unclaims), t_decoders(), &ctx).await;
+    let events = drain_events(&mut rx);
+    assert!(
+        events.is_empty(),
+        "the un-claim emits NOTHING, truncated or not — got {events:?}"
+    );
+    assert_eq!(
+        cursors.lock().await.get(&path).copied(),
+        Some(new_len),
+        "a truncated rollout must be PARKED at the new EOF before release"
+    );
+    assert_eq!(
+        seen.lock().await.get(&path),
+        Some(&false),
+        "the claim must still be RELEASED (kept known)"
+    );
+
+    // Straggler walk after the release: no replay of existing bytes.
+    let events = walk_once(&path, window, t_ended, &cursors, &seen).await;
+    assert!(
+        events.is_empty(),
+        "a straggler walk after the release must not resurrect, got {events:?}"
+    );
+
+    // Turn N+1: a fresh append re-registers the SAME id.
+    std::fs::OpenOptions::new()
+        .append(true)
+        .open(&path)
+        .unwrap()
+        .write_all(b"{\"type\":\"assistant\"}\n")
+        .unwrap();
+    let events = walk_once(&path, window, t_ended, &cursors, &seen).await;
+    assert!(
+        events.iter().any(|(_, e)| matches!(
+            e,
+            AgentEvent::SessionStart { agent_id, .. } if *agent_id == id
+        )),
+        "the turn-N+1 append must re-register the child, got {events:?}"
+    );
+}

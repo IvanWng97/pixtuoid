@@ -220,7 +220,7 @@ pub fn decode_hook_payload(v: Value) -> Result<Vec<AgentEvent>> {
                 identity(),
                 AgentEvent::Waiting {
                     agent_id,
-                    reason: msg.into(),
+                    reason: ellipsize(msg, MAX_DECODED_FIELD_CHARS),
                 },
             ])
         }
@@ -329,12 +329,30 @@ pub(crate) fn describe_tool_target(tool: &str, input: Option<&Value>) -> String 
     let Some(s) = input.get(key).and_then(|v| v.as_str()) else {
         return String::new();
     };
-    let total_chars = s.chars().count();
-    let mut s: String = s.chars().take(40).collect();
-    if total_chars > 40 {
-        s.push('…');
+    format!(": {}", ellipsize(s, 40))
+}
+
+/// Cap for content-derived strings that become slot state (Waiting reason,
+/// Rename label) — generous against every legitimate value on those fields
+/// (subagent names, "Claude needs your permission to use Bash"), tight
+/// against a crafted ~1 MiB hook/transcript line: every TUI display site is
+/// individually bounded (tooltip char cap + rect clip, 512-char ticker
+/// buffer, ratatui cell clipping), but the headless summary line is not, and
+/// the uncapped value would sit in `AgentSlot` for the session's lifetime
+/// either way.
+pub(crate) const MAX_DECODED_FIELD_CHARS: usize = 80;
+
+/// Char-safe truncation for untrusted display strings at the decode boundary
+/// — where the content ENTERS (CONTRIBUTING pitfall 3), on char boundaries,
+/// never bytes (pitfall 1). Shared by the tool-target cap above and the
+/// Waiting-reason / Rename-label caps (CC + Reasonix) so the sites can't
+/// drift apart.
+pub(crate) fn ellipsize(s: &str, max_chars: usize) -> String {
+    let mut out: String = s.chars().take(max_chars).collect();
+    if s.chars().count() > max_chars {
+        out.push('…');
     }
-    format!(": {s}")
+    out
 }
 
 #[cfg(test)]
@@ -801,5 +819,43 @@ mod tests {
             }
             other => panic!("expected SessionStart, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn ellipsize_caps_on_chars_only_past_the_limit() {
+        // Exactly AT the limit → unchanged (the negative branch of the cap),
+        // multi-byte chars so a byte-slicing regression would panic/garble.
+        let at = "é".repeat(MAX_DECODED_FIELD_CHARS);
+        assert_eq!(ellipsize(&at, MAX_DECODED_FIELD_CHARS), at);
+        // One char past → capped at the limit + '…'.
+        let over = "é".repeat(MAX_DECODED_FIELD_CHARS + 1);
+        let capped = ellipsize(&over, MAX_DECODED_FIELD_CHARS);
+        assert_eq!(capped.chars().count(), MAX_DECODED_FIELD_CHARS + 1);
+        assert!(capped.ends_with('…'), "cap must be marked: {capped:?}");
+    }
+
+    // conf-35 (#262 item 5): a Notification `message` is content-derived and
+    // a hook line can legally be ~1 MiB — the Waiting reason must be capped
+    // where it ENTERS (pitfall 3), like describe_tool_target already does.
+    #[test]
+    fn notification_reason_is_capped_at_the_decode_boundary() {
+        let long = "メ".repeat(MAX_DECODED_FIELD_CHARS * 100);
+        let evs = decode_hook_payload(json!({
+            "hook_event_name": "Notification",
+            "session_id": "ses-abc",
+            "transcript_path": "/p/ses-abc.jsonl",
+            "cwd": "/repo",
+            "message": long
+        }))
+        .expect("decodes");
+        match &evs[1] {
+            AgentEvent::Waiting { reason, .. } => {
+                assert_eq!(reason.chars().count(), MAX_DECODED_FIELD_CHARS + 1);
+                assert!(reason.ends_with('…'));
+            }
+            other => panic!("expected Waiting, got {other:?}"),
+        }
+        // A legitimate short reason passes through untouched — pinned by
+        // notification_decodes_to_identity_plus_waiting above ("permission?").
     }
 }

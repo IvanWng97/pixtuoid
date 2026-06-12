@@ -10,7 +10,7 @@ use crate::source::exit_watch::ExitWatch;
 use crate::source::{AgentEvent, TaggedSender, Transport};
 use crate::AgentId;
 
-use super::walk::walk_jsonl;
+use super::walk::{park_if_truncated_below_cursor, walk_jsonl};
 use super::{SourceDecoders, WatchCtx};
 
 /// One healthy liveness-probe observation: which agent processes are verified
@@ -218,6 +218,10 @@ pub(super) async fn emit_session_exit(id: &str, decoders: SourceDecoders, ctx: &
             .collect()
     };
     for path in &claimed {
+        // R0612-04: a truncated-below-cursor file must be parked at its new
+        // EOF, not handed to the walk's truncation arm (cursor→0, no drain) —
+        // see park_if_truncated_below_cursor for the full mechanism.
+        park_if_truncated_below_cursor(path, ctx).await;
         walk_jsonl(path, decoders, ctx).await;
     }
     let agent_id = AgentId::from_parts(ctx.source, id);

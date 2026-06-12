@@ -87,10 +87,24 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
         check_ended,
         ..
     } = decoders;
-    let meta = match tokio::fs::metadata(path).await {
+    // symlink_metadata (identical to metadata for non-symlinks, so one stat
+    // still serves the gate below): symlinked entries are refused wholesale.
+    // A directory symlink planted under the watched root would otherwise
+    // recurse unboundedly through a loop (each Box::pin level re-walking
+    // every transcript until the kernel's ELOOP depth) or walk foreign
+    // `.jsonl` trees outside the root into this source's id space; a file
+    // symlink pulls in a single foreign transcript the same way. Nothing
+    // first-party lays out symlinks under a projects/sessions root (CC/Codex
+    // create real dirs/files), and the ROOT itself may still be a symlink —
+    // scan_root's read_dir resolves the root path; only entries are checked.
+    let meta = match tokio::fs::symlink_metadata(path).await {
         Ok(m) => m,
         Err(_) => return,
     };
+    if meta.file_type().is_symlink() {
+        debug!("skipping symlinked entry {}", path.display());
+        return;
+    }
     if meta.is_dir() {
         if let Ok(mut read) = tokio::fs::read_dir(path).await {
             while let Ok(Some(entry)) = read.next_entry().await {
@@ -124,10 +138,13 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
     // nothing for hours — when the probe has ground truth that the owning
     // process is alive, the file is read from the top (a > MAX_PENDING_BYTES
     // body falls into the oversized first-sight registration below). The
-    // bypass deliberately skips the gate's ended tail-scan too: CC (the only
-    // probe user) persists no structural end marker today, so there is
-    // nothing to scan for — if the upstream drift watch fires (CC starts
-    // writing one), admission needs an ended-check before bypassing.
+    // bypass deliberately skips the gate's ended tail-scan too, which is safe
+    // only because NEITHER probe user persists a structural end marker today:
+    // CC (sessions-registry probe) writes none — `cc_session_ended` matches
+    // only legacy/structural shapes — and Codex (FD probe) ships the
+    // constant-false `codex_session_ended`. There is nothing to scan for; if
+    // the upstream drift watch fires (either CLI starts writing one),
+    // admission needs an ended-check before bypassing.
     if !known
         && !probe_admits(path, decoders, ctx).await
         && should_seed_at_eof(&meta, window, path, check_ended).await
@@ -332,6 +349,30 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
         // and in-pass emit_first_sight idempotence is unaffected: this pass's
         // claim already happened above; the NEXT pass re-emits the pair.
         seen.lock().await.remove(path);
+    }
+}
+
+/// Pre-drain guard for the exit-path drains (`emit_session_exit` and the #246
+/// child-end un-claim): a transcript truncated/recreated BELOW its cursor at
+/// the moment a drain runs would hit `walk_jsonl`'s truncation arm — cursor
+/// reset to 0, return WITHOUT draining — leaving exactly the state the #228
+/// drain-before-unclaim discipline forbids: the file's EXISTING bytes
+/// "pending" on a path whose claim is about to be retired/released, so the
+/// next pass replays the whole file as a first-sight and re-registers the
+/// just-ended session as a ghost, with every fast rung already disarmed for
+/// it. Park the cursor at the new EOF instead: a dead session's existing
+/// bytes are not pending work, and the revive contract is untouched — only
+/// genuinely NEW bytes (len > cursor) re-register. The reset-to-0 replay
+/// stays the right call on the NORMAL walk path, where a live session's
+/// truncate-rewrite resyncs from the top.
+pub(super) async fn park_if_truncated_below_cursor(path: &Path, ctx: &WatchCtx<'_>) {
+    let Ok(meta) = tokio::fs::symlink_metadata(path).await else {
+        return;
+    };
+    let len = meta.len();
+    let mut cursors = ctx.cursors.lock().await;
+    if cursors.get(path).is_some_and(|c| *c > len) {
+        cursors.insert(path.to_path_buf(), len);
     }
 }
 
