@@ -23,14 +23,15 @@ Full data: [`baseline-2026-06.md`](review-metrics/baseline-2026-06.md).
 
 ## The model: storage and the conveyor
 
-Knowledge can be **stored** at three altitudes, and our experiments ranked
-them by durability:
+Knowledge can be **stored** at three altitudes; we rank them by durability —
+a ranking the industry evidence supports and our own experiments back
+directionally (two tasks; caveats in the results table below):
 
 1. **In the code** — WHY comments at the hazard seams, types that make
    invalid states unrepresentable, tests and lints that fail the build.
-   Strongest form: our with/without-KB experiment stripped every knowledge
-   file from an agent's world and the code-embedded lessons still carried
-   the tasks.
+   Strongest form: our with/without-KB experiment removed every knowledge
+   file from the worktree and the code-embedded lessons still carried both
+   tasks (contamination bounded, not eliminated — report below).
 2. **In process artifacts** — review briefs, plan templates, PR checklists,
    routing protocols. These don't wait to be read: they are filled into
    prompts and forced into workflows at specific moments.
@@ -45,6 +46,8 @@ a finding becomes a checklist item, a recurring item becomes a comment, a
 type, or a CI gate. Documentation can be ignored; the build cannot.
 
 ## The storage layers in practice
+
+(The linked reports call these Layers 1–4, this page's former numbering.)
 
 ### Context files (prose that loads automatically)
 
@@ -113,7 +116,7 @@ each gate a versioned file with an automatic reader:
 
 | gate | artifact | automatic reader |
 |---|---|---|
-| plan | [`impl-plan.prompt.md`](../.github/prompts/impl-plan.prompt.md) — 7 sections every non-trivial plan must answer (data-shape identity, named consumers, sibling paths, negative branches, sharp-edge + ledger sweep, blocking verification) | routed from the workspace context file; the plan lands in the PR body |
+| plan | [`impl-plan.prompt.md`](../.github/prompts/impl-plan.prompt.md) — 7 sections every non-trivial plan must answer (data-shape identity, named consumers, sibling paths, untrusted-input boundaries, tests-first + negative branches, sharp-edge + ledger sweep, blocking verification) | routed from the workspace context file; the plan lands in the PR body |
 | implement | the 6 recurring pitfalls + the PR template checkbox pointing at them | the template is forced on every author |
 | review | [`pr-review.prompt.md`](../.github/prompts/pr-review.prompt.md) — two differentiated lenses, five hard requirements, escalation triggers, ledger routing | copied verbatim into reviewer prompts; the bot loads its own rules file |
 | merge | the disposition sweep — every finding ends FIXED / REFUTED-with-trace / ISSUE-FILED / ACCEPTED-residual; plan-misses become `plan-miss:` commit lines | the orchestrator's process notes; commit messages become the data channel |
@@ -121,10 +124,14 @@ each gate a versioned file with an automatic reader:
 
 Three properties make this a system rather than a document set:
 
-1. **No bypass.** Knowledge here is not a library someone might consult; it
-   is a toll gate on the road. In our experiment, agents avoided a classic
-   parallel-structure design smell not by reading about it but because plan
-   section 1 forces the identity/key-space question before code exists.
+1. **On the path, not on a shelf.** Knowledge here is not a library someone
+   might consult; the templates, the briefs, and the disposition sweep sit on
+   the road itself. The PR #86 backtest shows what putting a question on the
+   path is worth: 0/3 reviewers flagged a parallel-structure smell under the
+   old brief, 3/3 once the data-shape question became a standing item, 0/4
+   over-fires on controls. The plan gate is the softest link — its trigger
+   is a context-file rule — so its misses are measured (`plan-miss:` commit
+   lines) rather than prevented.
 2. **One path for every member.** Humans get the PR template, agents get the
    filled briefs, the bot gets its rules file — the platform remembers so no
    individual has to. Onboarding is not training; it is being walked through
@@ -168,8 +175,9 @@ with/without experiment showed the terminal rung carrying tasks on its own.
 
 1. **Mine your own review history first** (zero new infrastructure): your
    merged MRs and post-merge fixes already contain your escape taxonomy and
-   your false-positive classes. Ours took one afternoon and produced every
-   rule below.
+   your false-positive classes. Ours took one afternoon and produced seven
+   verified guideline changes — including the standing failure classes in
+   step 2 and the disposition rule in step 3.
 2. **Review briefs**: two differentiated lenses, reasoning-before-verdict,
    negative-space lists, and your mined failure classes as standing items.
 3. **A disposition rule**: every review finding reaches a terminal state —
