@@ -49,6 +49,12 @@
         "blurb": "every floor's agents in one foldable tree",
         "src": "agent-tree.png",
         "featured": true
+      },
+      {
+        "id": "zoom",
+        "name": "Zoom in",
+        "blurb": "badges, activity bars, the tree up close",
+        "src": "agent-tree-zoom_popup.png"
       }
     ],
     "caption": "press Tab — the whole building's roster, badged by CLI",

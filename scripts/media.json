@@ -167,6 +167,17 @@
   ]
  },
  {
+  "id": "agent-tree-zoom",
+  "kind": "crop",
+  "targets": [
+   "site"
+  ],
+  "from": "agent-tree",
+  "crops": {
+   "popup": "800:720:400:352"
+  }
+ },
+ {
   "id": "fleet",
   "kind": "render",
   "targets": [

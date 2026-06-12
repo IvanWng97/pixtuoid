@@ -110,7 +110,9 @@ const toc = raw.map((h) => ({ ...h, text: h.text.replace(/\s*\([^)]*\)\s*$/, '')
           <ul class="docs__list">
             {toc.map((h) => (
               <li class={h.depth === 3 ? 'docs__toc-sub' : undefined}>
-                <a href={`#${h.slug}`}>{h.text}</a>
+                <a href={`#${h.slug}`} data-toc-link={h.slug}>
+                  {h.text}
+                </a>
               </li>
             ))}
           </ul>
@@ -120,6 +122,37 @@ const toc = raw.map((h) => ({ ...h, text: h.text.replace(/\s*\([^)]*\)\s*$/, '')
   </main>
   <Footer />
 </Base>
+
+<script is:inline>
+  // Scrollspy: light the TOC entry whose section holds the viewport's mid-band
+  // (#257) — the same IntersectionObserver pattern the landing elevator uses.
+  (function () {
+    const links = document.querySelectorAll('[data-toc-link]');
+    if (!links.length || !('IntersectionObserver' in window)) return;
+    const bySlug = {};
+    links.forEach(function (a) {
+      bySlug[a.dataset.tocLink] = a;
+    });
+    function setActive(slug) {
+      links.forEach(function (a) {
+        if (a.dataset.tocLink === slug) a.setAttribute('aria-current', 'location');
+        else a.removeAttribute('aria-current');
+      });
+    }
+    const io = new IntersectionObserver(
+      function (entries) {
+        entries.forEach(function (e) {
+          if (e.isIntersecting && bySlug[e.target.id]) setActive(e.target.id);
+        });
+      },
+      { rootMargin: '-15% 0px -75% 0px', threshold: 0 }
+    );
+    Object.keys(bySlug).forEach(function (slug) {
+      const h = document.getElementById(slug);
+      if (h) io.observe(h);
+    });
+  })();
+</script>
 
 <style>
   .docs {
@@ -174,6 +207,14 @@ const toc = raw.map((h) => ({ ...h, text: h.text.replace(/\s*\([^)]*\)\s*$/, '')
   .docs__sidebar a[aria-current='page'] {
     color: var(--coral-deep);
     background: var(--surface);
+    border-left-color: var(--coral-deep);
+    border-top-left-radius: 0;
+    border-bottom-left-radius: 0;
+  }
+  /* scrollspy state (#257) — same affordance family as the sidebar's current
+     page (--coral-deep is theme-retuned, so no per-theme override needed) */
+  .docs__toc a[aria-current='location'] {
+    color: var(--coral-deep);
     border-left-color: var(--coral-deep);
     border-top-left-radius: 0;
     border-bottom-left-radius: 0;
