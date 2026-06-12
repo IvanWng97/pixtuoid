@@ -17,10 +17,9 @@ Both briefs MUST carry, verbatim or equivalent:
    existence/version claims about external artifacts (GH Action tags, crate
    releases, sibling repos/taps) made from memory — verify via `gh api`/the
    registry IN THIS SESSION, or write "unverified" instead of asserting.
-   A registry 404 observed now IS a finding; a recollection is not — stale
-   training data insisted `checkout@v6` doesn't exist (#80, 2 rounds) and
-   the homebrew tap doesn't exist (#112, 4 rounds; created 12 days prior);
-   both were wrong.
+   A registry 404 observed now IS a finding; a recollection is not — reviews
+   insisted a 12-day-old tap "doesn't exist" for 4 rounds (#112; the twin
+   `checkout@v6` case: docs/review-metrics/mining-2026-06.md). Both existed.
 3. **Integer confidence 0–100 + `file:line`** on every finding.
 4. **Ledger check** — match familiar-smelling claims against
    `docs/REVIEW-LEDGER.md` (its header protocol governs; premise-anchored:
@@ -77,9 +76,8 @@ Judge as a demanding critic:
    the moment to create it. Do NOT demand merging orthogonal state that
    merely concerns the same entity (render caches, interaction state, scalar
    keys with disjoint key-spaces) — consolidate shared IDENTITY, not shared
-   TOPIC. (The `[pet-names]` lesson, PR #86: review called the parallel
-   names-map draft "clean"; backtested on that real diff — 0/3 reviewers
-   caught it without this item, 3/3 with it, 0/4 over-fires on controls.)
+   TOPIC. (The `[pet-names]` lesson, PR #86 — backtest-validated, controls
+   included: docs/review-metrics/mining-2026-06.md.)
 
 [the five hard requirements]
 Your final message is the report.
@@ -115,9 +113,9 @@ history:
   the verdict: animated gif via the snapshot example, and/or replay a fixture
   through the binary (`scripts/replay-fixture.sh`) for resume/lifecycle
   motion. PR #61 was approved by per-phase + whole-feature code review (its
-  "live run" test-plan checkbox left unchecked) and shipped FIVE walk
-  regressions — mid-walk flash, wander/exit teleports, bootstrap rush,
-  stale-resume replay — all fixed in #62 (919ea7a). This fires even when no
+  "live run" test-plan checkbox left unchecked) and shipped five walk
+  regressions, all visible within minutes of watching (fixed in #62,
+  919ea7a). This fires even when no
   committed art changes: the film-critic trigger above covers shipped clips,
   and the lifecycle lens traces state, not pixels in motion.
 
@@ -126,9 +124,10 @@ worktree, background; verify every MEDIUM+ finding's premise yourself before
 coding a fix (reviewers have incomplete design context — check sharp edges
 first); fold accepted findings into ONE review-round commit. Before merging, sweep
 every reviewer/bot finding to exactly one terminal state — FIXED,
-REFUTED-with-trace (ledger row if it will recur), or ISSUE FILED
-(no-deferral rule applies: only big/refactor work defers). "Acknowledged,
-no action" is not a state: #40's ignored migration finding became a 0.4.1
-release-blocker (#46), #178's "worth a follow-up issue" was never filed,
-and #163's two MEDIUMs out-lived three review rounds unfixed. After a fix
+REFUTED-with-trace (ledger row if it will recur), ISSUE FILED (no-deferral
+rule applies: only big/refactor work defers), or ACCEPTED-residual with its
+WHY documented in code or a ledger row (the ledger's verdict vocabulary
+governs). "Acknowledged, no action" is not a state: #40's ignored migration
+finding became a 0.4.1 release-blocker (#46); two more drop cases:
+docs/review-metrics/mining-2026-06.md. After a fix
 round, re-run the gates and watch the NEW head's CI.

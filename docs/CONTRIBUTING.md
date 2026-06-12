@@ -109,8 +109,7 @@ against them before opening the PR:
    it or add a bridge test pinning them equal. Two copies of anything drift apart.
    The in-diff form bites hardest: a guard or fix added to ONE of two sibling
    paths in the same diff (the empty-`RUST_LOG` guard shipped at one call site
-   but not its sibling — #159, caught in #172; the frozen walk origin wired
-   for EXIT but left unwired for snap-back — #62, caught in #66) — when your
+   but not its sibling — #159, caught in #172) — when your
    diff guards one path, grep for its siblings before opening the PR.
 3. **Sanitize at the decode boundary.** Untrusted input (transcripts, hook
    payloads, file paths) is cleaned where it ENTERS (`decoder.rs` / first-sight),
@@ -128,9 +127,10 @@ against them before opening the PR:
    consumer the same diff wires up — the compiler won't always warn (`_x`
    bindings and `pub` fields evade dead-code lints). The smells: a capture
    bound as `_x`, a parameter every call site passes as a literal default, an
-   asset or enum variant nothing constructs. (PR #62 shipped `snap_prev`
-   bound as `_snap_prev`, silently defeating the very walk-path freeze it was
-   added for — escaped review, fixed in #66.)
+   asset or enum variant nothing constructs. (PR #61 shipped `snap_prev`
+   bound as `_snap_prev`, silently defeating the very origin-freeze it was
+   added for — then survived #62's dedicated fix-round review too; wired
+   in #66.)
 6. **Denylist completeness.** A denylist/strip-set is only as strong as its
    enumeration: diff it against the platform's *documented* set, never
    memory, and prefer an allowlist where possible — an allowlist can't miss

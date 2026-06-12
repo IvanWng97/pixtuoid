@@ -238,12 +238,16 @@ Source: PR #256 body (the #240 precedent: residuals batched in one PR).
 
 ## 2026-06-12 — Phase-2 A/B experiment @ a8aaae9 (source/ module) → issue #262
 
-Source: the ledger's first controlled calibration run
+Source: the ledger's first controlled A/B run (its control arm doubles as
+the ledger-blind calibration pass — protocol step 8)
 ([`phase2-ab-2026-06.md`](review-metrics/phase2-ab-2026-06.md), workflow
-`wf_04e5f98b-735`): every candidate adjudicated by TWO independent
-skeptic+trace pairs (control + treatment arms). The run also re-executed the
-regression-check on SUB-01/04/05/06/07 + GEO-01/02 — all fix mechanisms
-verified present at a8aaae9 (3/3 confirmed). Three 2-2 split candidates
+`wf_04e5f98b-735`): every candidate adjudicated twice — a full skeptic+trace
+pair in the control arm, and the ledger-routed treatment arm (full pair for
+the 9 unmatched candidates; ONE cheap regression-checker for routed C08).
+The run also re-executed the regression-check on R0610-01 +
+SUB-01/04/05/06/07 + GEO-01/02 — all fix mechanisms verified present at
+a8aaae9 by each of C08's three adjudications (control pair + the routed
+cheap check). Three 2-2 split candidates
 (inline blocking probe enumeration; codex name-only vouch forgeability; the
 un-claim "emits NOTHING" test-artifact claim) are NOT adjudicated — listed in
 #262 for the next whole-codebase review to re-derive.
