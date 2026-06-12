@@ -3,7 +3,10 @@ use std::io::Write;
 use super::health::FailureLatch;
 use super::liveness::{emit_session_exit, unbind_session};
 use super::unclaim::drain_child_end_unclaims;
-use super::walk::{detect_parent_id, extract_cwd, scan_root, walk_jsonl, TASK_SCAN_BYTES};
+use super::walk::{
+    detect_parent_id, extract_cwd, park_if_truncated_below_cursor, scan_root, walk_jsonl,
+    TASK_SCAN_BYTES,
+};
 use super::*;
 use crate::source::Transport;
 use crate::AgentId;
@@ -1970,5 +1973,46 @@ async fn child_end_unclaim_parks_truncated_transcript_before_release() {
             AgentEvent::SessionStart { agent_id, .. } if *agent_id == id
         )),
         "the turn-N+1 append must re-register the child, got {events:?}"
+    );
+}
+
+/// Direct pin of the park primitive (review round, lens-1 DEMONSTRATED: a
+/// park-at-0 mutant survived the two lifecycle tests above — the drain's own
+/// walk re-reads from 0 and advances the cursor to EOF itself, and the no-op
+/// decoder makes the replay invisible). Seed a cursor ABOVE the file's
+/// length and assert the park lands EXACTLY at the new EOF, plus the
+/// negative branch: a cursor at/below the length is untouched.
+#[tokio::test]
+async fn park_if_truncated_below_cursor_lands_exactly_at_new_eof() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("t.jsonl");
+    std::fs::write(&path, vec![b'x'; 40]).unwrap();
+    let cursors = Arc::new(Mutex::new(HashMap::from([(path.clone(), 100u64)])));
+    let seen = Arc::new(Mutex::new(HashMap::new()));
+    let (tx, _rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(8);
+    let source: Arc<str> = Arc::from("test");
+    let live = Arc::new(Mutex::new(HashSet::new()));
+    let ctx = WatchCtx {
+        source: &source,
+        cursors: &cursors,
+        seen: &seen,
+        tx: &tx,
+        window: Duration::from_secs(3600),
+        live: &live,
+    };
+
+    park_if_truncated_below_cursor(&path, &ctx).await;
+    assert_eq!(
+        cursors.lock().await.get(&path).copied(),
+        Some(40),
+        "the park must land at the NEW EOF, not 0"
+    );
+
+    cursors.lock().await.insert(path.clone(), 10);
+    park_if_truncated_below_cursor(&path, &ctx).await;
+    assert_eq!(
+        cursors.lock().await.get(&path).copied(),
+        Some(10),
+        "a cursor at/below the file length must be untouched"
     );
 }

@@ -570,8 +570,20 @@ impl Reducer {
                         // on the SessionStart path: `Identity` carries no
                         // label authority.
                         if label_is_fallback {
+                            // `base` is the event cwd's basename — content
+                            // that BYPASSES the `cwd_basename_label`
+                            // chokepoint, so it carries the same
+                            // decode-boundary cap.
                             slot.label = Arc::<str>::from(
-                                format!("{}·{base}", source_label_prefix(&slot.source)).as_str(),
+                                format!(
+                                    "{}·{}",
+                                    source_label_prefix(&slot.source),
+                                    crate::source::decoder::ellipsize(
+                                        base,
+                                        crate::source::decoder::MAX_DECODED_FIELD_CHARS,
+                                    )
+                                )
+                                .as_str(),
                             );
                         }
                     }

@@ -102,6 +102,8 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
         Err(_) => return,
     };
     if meta.file_type().is_symlink() {
+        // debug!, not warn!: a benign persistent symlink would otherwise
+        // repeat the warning on every 250ms walk pass.
         debug!("skipping symlinked entry {}", path.display());
         return;
     }
@@ -152,6 +154,11 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
         cursors.lock().await.insert(path.to_path_buf(), file_len);
         return;
     }
+    // Reset-to-0 is the LIVE-session resync (replay the rewritten file from
+    // the top on the next pass). The exit-path drains must NOT take this arm
+    // — they pre-park a truncated file at its new EOF instead, or the
+    // un-claim right behind the drain would turn this reset into a ghost
+    // replay (see park_if_truncated_below_cursor).
     if cursor_now > file_len {
         warn!(
             "{} truncated below cursor ({} < {}), resetting cursor",
@@ -364,7 +371,11 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
 /// bytes are not pending work, and the revive contract is untouched — only
 /// genuinely NEW bytes (len > cursor) re-register. The reset-to-0 replay
 /// stays the right call on the NORMAL walk path, where a live session's
-/// truncate-rewrite resyncs from the top.
+/// truncate-rewrite resyncs from the top. Accepted residual: a SECOND
+/// truncation landing in the await gap between this stat and the drain's own
+/// stat re-opens the ghost — two independent truncations bracketing one
+/// await is vanishingly rare, and closing it needs a WalkMode flag threaded
+/// through the walk (disproportionate to the window).
 pub(super) async fn park_if_truncated_below_cursor(path: &Path, ctx: &WatchCtx<'_>) {
     let Ok(meta) = tokio::fs::symlink_metadata(path).await else {
         return;
