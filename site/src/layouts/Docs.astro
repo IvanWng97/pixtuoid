@@ -11,7 +11,7 @@ interface Props {
   /** from `await render(entry)` — drives the build-time mini-TOC */
   headings: MarkdownHeading[];
   /** which doc this page is (sidebar highlight + prev/next) */
-  current: 'config' | 'architecture' | 'contributing' | 'migration';
+  current: 'config' | 'architecture' | 'knowledge-base' | 'contributing' | 'migration';
   /** repo-relative path for the "Source of truth" footer link, e.g. docs/CONFIGURATION.md */
   sourcePath: string;
   /** suffix after the source link (architecture mentions its Mermaid diagram) */
@@ -31,6 +31,7 @@ const {
 const DOCS = [
   { id: 'config', label: 'Configuration', href: 'config' },
   { id: 'architecture', label: 'Architecture', href: 'architecture' },
+  { id: 'knowledge-base', label: 'Knowledge base', href: 'knowledge-base' },
   { id: 'contributing', label: 'Contributing', href: 'contributing' },
   { id: 'migration', label: 'Migration', href: 'migration' },
 ] as const;

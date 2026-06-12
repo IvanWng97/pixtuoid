@@ -1,0 +1,23 @@
+---
+import { getCollection, render } from 'astro:content';
+import Docs from '../layouts/Docs.astro';
+
+// Rendered from docs/KNOWLEDGE-BASE.md (the single source) — there's one entry.
+const [entry] = await getCollection('knowledgeBase');
+if (!entry) {
+  throw new Error(
+    'knowledge-base.astro: the "knowledgeBase" collection is empty — is docs/KNOWLEDGE-BASE.md present and matched by the glob loader in content.config.ts?'
+  );
+}
+const { Content, headings } = await render(entry);
+---
+
+<Docs
+  title="Knowledge base — pixtuoid"
+  description="How an agent-built repo stops paying for the same lesson twice: context files, on-demand retrieval, memory pipelines, and a premise-anchored review ledger — with baseline numbers."
+  headings={headings}
+  current="knowledge-base"
+  sourcePath="docs/KNOWLEDGE-BASE.md"
+>
+  <Content />
+</Docs>

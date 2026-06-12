@@ -18,4 +18,7 @@ export const collections = {
   migration: defineCollection({
     loader: glob({ pattern: 'MIGRATION.md', base: '../docs' }),
   }),
+  knowledgeBase: defineCollection({
+    loader: glob({ pattern: 'KNOWLEDGE-BASE.md', base: '../docs' }),
+  }),
 };
