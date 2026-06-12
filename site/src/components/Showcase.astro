@@ -12,7 +12,7 @@ const live = channels.filter((c) => c.status === 'live');
 const def = channels.find((c) => c.default) ?? live[0];
 ---
 
-<section id="showcase" class="showcase">
+<section id="showcase" class="showcase" data-floor="5">
   {
     /* legacy anchors — inbound #themes/#weather links land here; the controller
       also maps them to their channel */
@@ -21,7 +21,7 @@ const def = channels.find((c) => c.default) ?? live[0];
   <span id="weather" class="showcase__anchor" aria-hidden="true"></span>
   <div class="container">
     <div class="section-head reveal">
-      <p class="eyebrow">{live.length} channels on air · more being filmed</p>
+      <p class="eyebrow">5F · studio — {live.length} channels on air</p>
       <h2>Every feature, on air.</h2>
       <p class="lead">
         The office, channel by channel — tune a monitor to switch the big screen. Themes and weather

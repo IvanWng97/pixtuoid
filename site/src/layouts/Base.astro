@@ -1,6 +1,6 @@
 ---
 import '../styles/global.css';
-import { asset } from '../consts';
+import { asset, THEMES } from '../consts';
 
 interface Props {
   title?: string;
@@ -46,7 +46,7 @@ const version = __PIXTUOID_VERSION__; // from the workspace Cargo.toml at build
       /* a little pixtuoid coworker as the tab / home-screen icon (PNG since it's
         pixel art; mobile Safari also ignores SVG favicons) */
     }
-    <link rel="icon" type="image/png" sizes="32x32" href={asset('favicon-32.png')} />
+    <link id="favicon" rel="icon" type="image/png" sizes="32x32" href={asset('favicon-32.png')} />
     <link rel="icon" type="image/png" sizes="180x180" href={asset('apple-touch-icon.png')} />
     <link rel="apple-touch-icon" href={asset('apple-touch-icon.png')} />
     <link rel="canonical" href={canonical} />
@@ -79,8 +79,14 @@ const version = __PIXTUOID_VERSION__; // from the workspace Cargo.toml at build
           };
           const forced = new URLSearchParams(location.search).get('theme');
           const pick = ok(forced) ? forced : localStorage.getItem('pix-theme');
+          // The app's office lighting follows the wall clock; until the visitor
+          // chooses a theme, so does the site — arriving after dark means the
+          // night office. The clock only ever turns night ON: a dark-preference
+          // user keeps night at noon via the system fallback below.
+          const hour = new Date().getHours();
+          const afterHours = hour >= 19 || hour < 7;
           const sys = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'night' : 'day';
-          const theme = ok(pick) ? pick : sys;
+          const theme = ok(pick) ? pick : afterHours ? 'night' : sys;
           document.documentElement.dataset.theme = theme;
           // keep the mobile browser-chrome tint in sync with the resolved theme
           const BG = { day: '#f4eee2', night: '#1d1813', dracula: '#282a36' };
@@ -106,7 +112,6 @@ const version = __PIXTUOID_VERSION__; // from the workspace Cargo.toml at build
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
-    <div class="cursor-glow" aria-hidden="true"></div>
 
     <div id="boot" class="boot" role="status" aria-label="Loading pixtuoid">
       <div class="boot__log">
@@ -155,53 +160,33 @@ const version = __PIXTUOID_VERSION__; // from the workspace Cargo.toml at build
       })();
     </script>
 
-    <!-- FX: pointer glow + 3D tilt, CRT power-on, and a `dracula` easter egg -->
+    <!-- FX: CRT power-on + a `dracula` easter egg. (The pointer glow + 3D tilt
+         are gone on purpose: perspective transforms smear pixel art's crisp
+         edges, and both were generic-SaaS flair — the building effects in
+         Elevator.astro replace them with product-true ones.) -->
     <script is:inline>
       (function () {
         const reduceMQ = window.matchMedia('(prefers-reduced-motion: reduce)');
         const reduce = reduceMQ.matches;
-        const fine = window.matchMedia('(pointer: fine)').matches;
 
         // keep the mobile browser-chrome tint in sync on every theme change
         const BG = { day: '#f4eee2', night: '#1d1813', dracula: '#282a36' };
         const themeMeta = document.querySelector('meta[name="theme-color"]');
+        // …and the tab icon: the little coworker turns the lights off after
+        // dark (path derived from the day href so the Pages base-path holds)
+        const fav = document.getElementById('favicon');
+        function syncFavicon() {
+          if (!fav) return;
+          const t = document.documentElement.dataset.theme;
+          const day = fav.href.replace('favicon-32-night.png', 'favicon-32.png');
+          fav.href = t === 'day' ? day : day.replace('favicon-32.png', 'favicon-32-night.png');
+        }
+        syncFavicon();
         document.addEventListener('pix:theme', function () {
           const t = document.documentElement.dataset.theme;
           if (themeMeta && BG[t]) themeMeta.setAttribute('content', BG[t]);
+          syncFavicon();
         });
-
-        if (fine && !reduce) {
-          const tilts = document.querySelectorAll('.tilt');
-          let raf = 0,
-            px = 0,
-            py = 0;
-          document.addEventListener('pointermove', function (e) {
-            px = e.clientX;
-            py = e.clientY;
-            if (raf) return;
-            raf = requestAnimationFrame(function () {
-              raf = 0;
-              if (reduceMQ.matches) return; // OS reduce-motion toggled on mid-session (#120)
-              // READ every rect first (one layout flush), THEN write — otherwise
-              // writing body --mx/--my before each getBoundingClientRect forces a
-              // synchronous reflow on every pointermove frame
-              const rects = [];
-              for (let i = 0; i < tilts.length; i++) rects.push(tilts[i].getBoundingClientRect());
-              document.body.classList.add('has-pointer');
-              document.body.style.setProperty('--mx', px + 'px');
-              document.body.style.setProperty('--my', py + 'px');
-              for (let i = 0; i < tilts.length; i++) {
-                const r = rects[i];
-                if (!r.width) continue;
-                const dx = (px - (r.left + r.width / 2)) / (r.width / 2);
-                const dy = (py - (r.top + r.height / 2)) / (r.height / 2);
-                const near = Math.abs(dx) < 1.6 && Math.abs(dy) < 1.6;
-                tilts[i].style.setProperty('--rx', (near ? dx * 4 : 0).toFixed(2) + 'deg');
-                tilts[i].style.setProperty('--ry', (near ? -dy * 4 : 0).toFixed(2) + 'deg');
-              }
-            });
-          });
-        }
 
         // defer the CRT power-on observer until after boot (same as reveal, #119)
         // so the gallery terminal doesn't power on hidden behind the boot overlay
@@ -267,6 +252,27 @@ const version = __PIXTUOID_VERSION__; // from the workspace Cargo.toml at build
               setTheme('dracula');
             }
           }
+        });
+      })();
+    </script>
+
+    <!-- the app's literal `t` key: retint the page through the same theme
+         palette list the THEMES channel uses (decorative hues only — the
+         AA-tuned --coral-deep is deliberately exempt, same as the gallery
+         chips). Esc restores; the chips' pressed state clears via pix:theme. -->
+    <script is:inline define:vars={{ accents: THEMES.map((t) => ({ a: t.accent, b: t.accent2 })) }}>
+      (function () {
+        let i = -1;
+        document.addEventListener('keydown', function (e) {
+          if (e.key !== 't' || e.ctrlKey || e.metaKey || e.altKey) return;
+          const t = e.target;
+          if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable))
+            return;
+          i = (i + 1) % accents.length;
+          const s = document.documentElement.style;
+          s.setProperty('--coral', accents[i].a);
+          s.setProperty('--amber', accents[i].b || accents[i].a);
+          document.dispatchEvent(new CustomEvent('pix:theme'));
         });
       })();
     </script>

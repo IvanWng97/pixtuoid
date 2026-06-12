@@ -408,12 +408,6 @@ code,
   .hl {
     animation: none;
   }
-  .tilt {
-    transform: none !important;
-  }
-  .cursor-glow {
-    display: none !important;
-  }
   .crt.crt-on .terminal__screen {
     animation: none;
   }
@@ -436,48 +430,6 @@ code,
   50% {
     background-position: 100% 50%;
   }
-}
-
-/* soft accent glow trailing the pointer (desktop only) */
-.cursor-glow {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 460px;
-  height: 460px;
-  margin: -230px 0 0 -230px;
-  border-radius: 50%;
-  pointer-events: none;
-  z-index: 0;
-  opacity: 0;
-  background: radial-gradient(
-    circle,
-    color-mix(in srgb, var(--coral) 26%, transparent),
-    transparent 64%
-  );
-  transform: translate(var(--mx, -1000px), var(--my, -1000px));
-  transition: opacity 0.4s ease;
-  mix-blend-mode: multiply;
-}
-:root[data-theme='night'] .cursor-glow,
-:root[data-theme='dracula'] .cursor-glow {
-  mix-blend-mode: screen;
-}
-body.has-pointer .cursor-glow {
-  opacity: 1;
-}
-
-/* 3D tilt toward the cursor (JS sets --rx/--ry) */
-.tilt {
-  transform: perspective(1000px) rotateX(var(--ry, 0deg)) rotateY(var(--rx, 0deg));
-  transition: transform 0.3s ease;
-  transform-style: preserve-3d;
-}
-/* Promote a compositor layer only while the pointer is actually driving the tilt
-   (the JS adds .has-pointer on first pointermove); idle/reduced-motion/coarse-
-   pointer pages don't pay for an unused GPU layer. */
-body.has-pointer .tilt {
-  will-change: transform;
 }
 
 /* CRT power-on when a terminal scrolls into view */

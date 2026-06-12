@@ -1,0 +1,182 @@
+---
+// The landing page is a building: each section is a floor, and this is the
+// elevator panel — the same mental model as the app's floor keys (1–9 jump,
+// elevator HUD). Desktop-only (≥1100px): on smaller screens the burger nav's
+// anchors cover navigation without eating horizontal space.
+const FLOORS = [
+  { n: 6, id: 'lobby', name: 'lobby' },
+  { n: 5, id: 'showcase', name: 'studio' },
+  { n: 4, id: 'features', name: 'amenities' },
+  { n: 3, id: 'how', name: 'machine room' },
+  { n: 2, id: 'tools', name: 'tenants' },
+  { n: 1, id: 'install', name: 'front desk' },
+];
+---
+
+<nav class="lift" id="lift" aria-label="Floors">
+  <div class="lift__display" aria-hidden="true">
+    <span class="lift__digit" data-lift-digit>6F</span>
+    <span class="lift__name" data-lift-name>lobby</span>
+  </div>
+  <div class="lift__panel">
+    {
+      FLOORS.map((f) => (
+        <button
+          class="lift__btn"
+          data-floor-btn={String(f.n)}
+          data-target={f.id}
+          aria-label={`Floor ${f.n} — ${f.name}`}
+          aria-current={f.n === 6 ? 'true' : 'false'}
+        >
+          {f.n}
+        </button>
+      ))
+    }
+  </div>
+</nav>
+
+<script is:inline>
+  (function () {
+    const lift = document.getElementById('lift');
+    if (!lift) return;
+    const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const btns = Array.prototype.slice.call(lift.querySelectorAll('[data-floor-btn]'));
+    const digit = lift.querySelector('[data-lift-digit]');
+    const name = lift.querySelector('[data-lift-name]');
+
+    function setActive(n) {
+      btns.forEach(function (b) {
+        const on = b.dataset.floorBtn === String(n);
+        b.setAttribute('aria-current', on ? 'true' : 'false');
+        if (on) {
+          if (digit) digit.textContent = n + 'F';
+          if (name) name.textContent = b.getAttribute('aria-label').split('— ')[1] || '';
+        }
+      });
+    }
+
+    function go(btn) {
+      const sec = document.getElementById(btn.dataset.target);
+      if (!sec) return;
+      sec.scrollIntoView({ behavior: mq.matches ? 'auto' : 'smooth', block: 'start' });
+    }
+    btns.forEach(function (b) {
+      b.addEventListener('click', function () {
+        go(b);
+      });
+    });
+
+    // the app's literal floor keys: bare digits 1–6 ride the elevator (skipped
+    // while typing in a field or holding a modifier — same guard as the egg)
+    document.addEventListener('keydown', function (e) {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const t = e.target;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      const btn = btns.find(function (b) {
+        return b.dataset.floorBtn === e.key;
+      });
+      if (btn) go(btn);
+    });
+
+    // track the floor the viewport is on. rootMargin centers the trigger band
+    // so the indicator flips roughly when a floor crosses mid-screen.
+    if ('IntersectionObserver' in window) {
+      const io = new IntersectionObserver(
+        function (entries) {
+          entries.forEach(function (e) {
+            if (e.isIntersecting) setActive(e.target.dataset.floor);
+          });
+        },
+        { rootMargin: '-45% 0px -45% 0px', threshold: 0 }
+      );
+      document.querySelectorAll('[data-floor]').forEach(function (s) {
+        io.observe(s);
+      });
+    }
+  })();
+</script>
+
+<style>
+  .lift {
+    position: fixed;
+    right: clamp(0.6rem, 1.6vw, 1.6rem);
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 40;
+    display: none;
+    flex-direction: column;
+    gap: 0.55rem;
+    padding: 0.6rem 0.5rem;
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    box-shadow: var(--shadow-lg);
+  }
+  @media (min-width: 1100px) {
+    .lift {
+      display: flex;
+    }
+  }
+  .lift__display {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.1rem;
+    padding: 0.35rem 0.3rem 0.45rem;
+    border-radius: 6px;
+    background: #0e0d0c;
+    border: 1px solid var(--border-strong);
+  }
+  .lift__digit {
+    font-family: var(--font-display);
+    font-size: 1.25rem;
+    line-height: 1;
+    /* the app's elevator HUD glow — fixed greens, not theme vars: it's a lit
+       LED panel on a dark backing in every theme */
+    color: #8de069;
+    text-shadow: 0 0 6px rgba(141, 224, 105, 0.55);
+  }
+  .lift__name {
+    font-family: var(--font-mono);
+    font-size: 0.52rem;
+    letter-spacing: 0.06em;
+    color: #b3a892;
+    max-width: 4.6rem;
+    text-align: center;
+  }
+  .lift__panel {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+  .lift__btn {
+    width: 30px;
+    height: 30px;
+    display: grid;
+    place-items: center;
+    font-family: var(--font-mono);
+    font-weight: 700;
+    font-size: 0.82rem;
+    color: var(--fg-muted);
+    background: var(--surface-2);
+    border: 1px solid var(--border-strong);
+    border-radius: 999px;
+    cursor: pointer;
+    transition:
+      background-color 0.2s ease,
+      color 0.2s ease,
+      border-color 0.2s ease,
+      box-shadow 0.2s ease;
+  }
+  .lift__btn:hover {
+    color: var(--fg);
+    border-color: color-mix(in srgb, var(--coral) 45%, var(--border-strong));
+  }
+  .lift__btn[aria-current='true'] {
+    color: #fff;
+    background: linear-gradient(100deg, #ad5230, #c96a45);
+    border-color: transparent;
+    box-shadow: 0 0 10px color-mix(in srgb, #c96a45 55%, transparent);
+    text-shadow: 0 1px 2px rgba(35, 14, 5, 0.4);
+  }
+</style>

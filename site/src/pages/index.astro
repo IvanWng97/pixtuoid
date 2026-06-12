@@ -8,6 +8,7 @@ import Features from '../components/Features.astro';
 import HowItWorks from '../components/HowItWorks.astro';
 import SupportedTools from '../components/SupportedTools.astro';
 import Install from '../components/Install.astro';
+import Elevator from '../components/Elevator.astro';
 import Footer from '../components/Footer.astro';
 import { asset } from '../consts';
 ---
@@ -15,6 +16,7 @@ import { asset } from '../consts';
 <Base preloadImage={asset('demos/hero-poster.png')}>
   <span id="top"></span>
   <Nav />
+  <Elevator />
   <main id="main" tabindex="-1">
     <Hero />
     <Ticker />

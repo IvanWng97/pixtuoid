@@ -56,10 +56,25 @@ From the repo root the same gate is `just site-check` (and `just site-fmt`).
 - **Layout/type** — "Cozy Terminal": Jersey 10 (pixel display) · JetBrains Mono
   (UI/code) · Lora (body); ASCII dividers, blinking cursor, CRT scanlines.
 - **Palette** — warm "Coworking" (cream lifted from the office carpet + Claude
-  coral). Day = cream, night = after-hours. `dracula` is a hidden easter-egg
+  coral). Day = cream, night = after-hours. Until the visitor picks a theme the
+  site follows their wall clock like the app does (19:00–07:00 → night; the
+  clock only ever turns night ON — a dark-preference system keeps night at noon
+  via the `prefers-color-scheme` fallback). `dracula` is a hidden easter-egg
   theme (type it, or `?theme=dracula`).
-- **FX** (all `prefers-reduced-motion`-safe) — pointer glow, 3D tilt, headline
-  shimmer, CRT power-on, pixel-dust, and click-to-retint theme chips.
+- **The building** — the landing page maps the product's multi-floor metaphor
+  onto its own structure: each section is a floor (6F lobby → 1F front desk),
+  `Elevator.astro` is a fixed desktop panel tracking scroll, and the app's
+  literal keys work on the page — digits `1–6` ride the elevator, `t` retints
+  the decorative palette through the THEMES list (Esc restores). The favicon
+  dims with the night theme; 404 is the office at 3 a.m. (`--empty` render).
+- **FX** (all `prefers-reduced-motion`-safe) — headline shimmer, CRT power-on,
+  pixel-dust, and click-to-retint theme chips. (The old pointer glow + 3D tilt
+  were removed deliberately: perspective transforms smear pixel art.)
+- **Ticker** — fed at build time with the repo's last merged PRs (the agents
+  that built pixtuoid); falls back to a canned reel offline so builds never
+  block on the GitHub API.
+- **Docs shell** — `layouts/Docs.astro` gives /config, /architecture,
+  /contributing, /migration a shared sidebar + build-time mini-TOC + pager.
 
 ## Demo art
 
