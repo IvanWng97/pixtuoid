@@ -79,3 +79,12 @@ tests/
   multi-payload fixtures (decode's hooks/jsonl, codex's lifecycle file) CANNOT live
   there — they'd be mis-scanned and panic. They co-locate with their module instead.
 - **insta snapshot names = `<binary>__<module>__<explicit-name>`** → `sources__conformance__<source>__<scenario>.snap`. The decoded-event bodies hash an `AgentId` from the fixture's path *relative to `fixtures_root()`* — so moving the fixtures tree is snapshot-safe as long as the per-source suffix is preserved.
+
+## Windows parity twins
+
+`transport/pipe.rs` (in `transport/main.rs`) and the hook shim's
+`tests/shim_pipe.rs` are `#[cfg(windows)]` twins of `transport/socket.rs`
+and `tests/shim.rs` respectively — they run only on the `windows-test` CI
+job (windows-2022, full nextest suite). Each branch executes only on its
+target OS, and the windows job is part of the parity invariant: a behavior
+pinned on one platform's transport must stay pinned on the other's twin.

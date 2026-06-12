@@ -4,248 +4,194 @@ Instructions for Claude Code (or any AI coding agent) working in this repo.
 (`AGENTS.md` is a symlink to this file for the cross-tool standard; a Windows
 checkout without `core.symlinks` materializes it as a one-line pointer — read
 this file.)
-This is the **workspace-level** guide — conventions, invariants, and rules that
+This is the **workspace-level map** — conventions, invariants, and rules that
 apply everywhere. **Module-level detail and the crate-specific "sharp edges"
-live in nested `CLAUDE.md` files**, which Claude Code auto-loads when you touch
-files in those trees:
+live in nested `CLAUDE.md` files**, auto-loaded when you touch those trees:
 
 - [`crates/pixtuoid-core/CLAUDE.md`](crates/pixtuoid-core/CLAUDE.md) — the headless lib: sources, reducer/state, sprites, layout, physics, pose.
-  - [`crates/pixtuoid-core/tests/CLAUDE.md`](crates/pixtuoid-core/tests/CLAUDE.md) — the integration-test layout (8 binaries, grouped by capability/layer) + add-a-CLI test steps.
+  - [`crates/pixtuoid-core/tests/CLAUDE.md`](crates/pixtuoid-core/tests/CLAUDE.md) — the integration-test layout (8 grouped binaries, parity twins, publish-excluded flat tests) + add-a-CLI test steps.
 - [`crates/pixtuoid/CLAUDE.md`](crates/pixtuoid/CLAUDE.md) — the binary: install, runtime, cli, config, multi-floor, embedded pack.
-- [`crates/pixtuoid/src/tui/CLAUDE.md`](crates/pixtuoid/src/tui/CLAUDE.md) — the terminal renderer: draw_scene, pixel painter, widgets, themes, motion/pose authority, pathfinding.
+- [`crates/pixtuoid/src/tui/CLAUDE.md`](crates/pixtuoid/src/tui/CLAUDE.md) — the terminal renderer: draw_scene, pixel painter, harness, widgets, themes, motion/pose authority, pathfinding.
 
 **Read the nested guide for the crate you're editing.** Many things that look
-like a bug are documented, load-bearing design — the "Known sharp edges" section
-in each nested file (indexed below) explains why.
+like a bug are documented, load-bearing design — the "Known sharp edges"
+section in each nested file (indexed below) explains why.
 
 ## What this is
 
-Terminal-native, multi-agent pixel-art visualizer for AI coding agents. Each running CC (Claude Code) session shows up as an animated half-block sprite in an ASCII office. Built in Rust as a Cargo workspace of three crates.
-
-User-facing overview: [`README.md`](README.md).
-
-(Design specs/plans are kept locally under `docs/superpowers/` but are not
-versioned — see `.gitignore`.)
+Terminal-native, multi-agent pixel-art visualizer for AI coding agents. Each
+running CC (Claude Code) session shows up as an animated half-block sprite in
+an ASCII office. Rust workspace of three crates. User-facing overview:
+[`README.md`](README.md). (Design specs live locally under
+`docs/superpowers/`, unversioned.)
 
 ## Layout (workspace)
 
 ```
 crates/
-├── pixtuoid-core/      headless lib — no terminal deps (ratatui/crossterm forbidden here)
-│                       source/ state/ sprite/ render/ layout/ physics.rs pose/ walkable.rs
-│                       → see crates/pixtuoid-core/CLAUDE.md for module-level detail
-├── pixtuoid/           binary — ratatui + crossterm + tokio + clap
-│                       cli.rs config.rs runtime/ install/ tui/ sprites/ (default/robot/skeleton packs)
-│                       → see crates/pixtuoid/CLAUDE.md and crates/pixtuoid/src/tui/CLAUDE.md
-└── pixtuoid-hook/      tiny shim CC invokes — stdin JSON → Unix socket (Unix) / named pipe (Windows) via transport.rs, 200ms send bound
-scripts/                crop-snapshot.py (visual verification),
-                        gen-media.py (ONE manifest-driven driver — regenerate ALL docs/images
-                        screenshots + demo.gif + site/public/demos/ + the CI visual-regression
-                        baselines reference-*.png from a release build; reads its render-job
-                        manifest from scripts/media.json; run via `just gen-media`, supports
-                        `--only docs|site`),
-                        gen-readme.mjs (sync the README install/features/tools sections from
-                        site/src/*.json; run via `just gen-readme`),
-                        compare-screenshots.py (pixel-diff used by `just gen-check`,
-                        the CI smoke job's visual-regression gate),
-                        replay-fixture.sh (replay a captured source rollout fixture into a
-                        headless run via --codex-sessions-root, for eyeballing lifecycle),
-                        check_upstream_drift.py (weekly CI: CC/Codex/Reasonix wire-format rename watch)
-site/                   Astro marketing landing page → GitHub Pages (ivanwng97.github.io/pixtuoid).
-                        Self-contained Node project; own CI (.github/workflows/site.yml) + deploy
-                        (.github/workflows/pages.yml). `just site-{setup,dev,check,fmt}`;
-                        demo art is generated from the binary by scripts/gen-media.py
-                        (driven by scripts/media.json, which @-refs site/src/themes.json +
-                        site/src/weather.json for the theme/weather matrices).
-                        → see site/README.md
+├── pixtuoid-core/   headless lib — no terminal deps (ratatui/crossterm forbidden)
+│                    source/ state/ sprite/ render/ layout/ physics.rs pose/ walkable.rs
+├── pixtuoid/        binary — ratatui + crossterm + tokio + clap
+│                    cli.rs config.rs runtime/ install/ tui/ sprites/ (character packs;
+│                    default pack embedded via include_str!)
+└── pixtuoid-hook/   tiny shim CC invokes — stdin JSON → Unix socket / Windows named
+                     pipe (transport.rs), 200ms send bound
+scripts/             gen-media.py + media.json (the ONE manifest-driven driver for ALL
+                     docs/images + site demos + CI visual baselines → `just gen-media`),
+                     crop-snapshot.py (visual verify), gen-readme.mjs (README sections
+                     from site/src/*.json), compare-screenshots.py (`just gen-check`),
+                     replay-fixture.sh (replay a captured rollout headlessly),
+                     check_upstream_drift.py (weekly wire-format watch),
+                     review-metrics.py (review-economics collector)
+site/                Astro landing page → GitHub Pages; self-contained Node project,
+                     own CI; `just site-{setup,dev,check,fmt}` → see site/README.md
 ```
-
-> Note: the `sprites/` directory (default / robot / skeleton character packs) lives under
-> **`crates/pixtuoid/`**, not `pixtuoid-hook/`. The default pack is embedded into the binary
-> via `include_str!`; the robot/skeleton packs are loadable examples.
 
 ## Build & test
 
 ```
-just build                                                           # debug build
-just build --release                                                 # release build
-just test                                                            # all tests (1,400+) — nextest if installed, else cargo test
-cargo test -p pixtuoid --lib <filter>                                # fast iteration: one crate's unit tests only
-cargo run --release --example snapshot -- /tmp/snap.png              # render TUI to PNG
-./target/release/pixtuoid run --headless --projects-root ~/.claude/projects   # live test against real CC
+just build [--release]                                  # build
+just test                                               # all tests (1,400+), nextest if installed
+cargo test -p pixtuoid --lib <filter>                   # fast iteration: one crate's unit tests
+cargo run --release --example snapshot -- /tmp/snap.png # render TUI to PNG
+./target/release/pixtuoid run --headless --projects-root ~/.claude/projects  # live vs real CC
 ```
 
-The `test-renderer` feature is needed for the `e2e.rs` integration test; **`just test` injects it for you** (as does every recipe), so prefer it over a raw `cargo test`. `just test` runs `cargo nextest run` when `cargo-nextest` is installed (parallel execution, the same runner CI uses) and falls back to `cargo test` otherwise. While iterating on one crate, scope it (`cargo nextest run -p pixtuoid` or `cargo test -p pixtuoid --lib <filter>`) — seconds, vs a full-workspace run.
+The `test-renderer` feature is needed by `e2e.rs`; every `just` recipe
+injects it — prefer `just test` over raw `cargo test`. While iterating,
+scope to one crate (seconds vs a full-workspace run).
 
-> **Don't chain `cargo clippy && cargo test`.** Clippy and test/nextest use *separate* build caches (clippy's rustc driver has a different fingerprint), so chaining them recompiles the whole workspace **twice**. Run the single gate `just preflight` (lint → clippy → hack → test, the exact CI order), or run one check at a time.
+> **Don't chain `cargo clippy && cargo test`** — they use separate build
+> caches and recompile the workspace twice. Run `just preflight` (lint →
+> clippy → hack → test, the exact CI order) or one check at a time.
 
-### Test organization (three tiers)
+**Test organization (three tiers):** unit tests next to the code (large
+modules use a sibling `#[cfg(test)] mod tests;` file — keeps `use super::*`
+without API widening); integration tests in `crates/<crate>/tests/` —
+pixtuoid-core's suite is 8 capability-grouped binaries with two deliberately
+flat publish-excluded tests and `#[cfg(windows)]` parity twins, all mapped in
+[`crates/pixtuoid-core/tests/CLAUDE.md`](crates/pixtuoid-core/tests/CLAUDE.md);
+the headless render harness (`tui_renderer/harness.rs`) drives the real
+`TuiRenderer` through ratatui `TestBackend` — see the tui guide. Coverage:
+`just coverage`. Decoder never-panic fuzz vs a real session corpus:
+`just fuzz <jsonl-dir>` (on-demand, not in CI).
 
-- **Unit tests** — `#[cfg(test)] mod tests` next to the code. For large modules this is a *sibling file* declared `#[cfg(test)] mod tests;` (e.g. `motion/tests.rs`, `pose/tests.rs`, `layout/tests.rs`, `pixel_painter/tests.rs`) so production stays readable; it keeps `use super::*` and full crate-internal access (no API widening).
-- **Integration / public-contract** — `crates/<crate>/tests/*.rs` (separate crate, only `pub` API). `pixtuoid-core`'s suite is **grouped by capability/layer into 8 binaries** — `sources/main.rs` (decode/conformance/manager/claude/codex), `transport/main.rs` (socket + pipe), `render/main.rs`, `reducer/main.rs` (state-machine behavior, sub-grouped by mechanism), `e2e.rs`, `watcher/main.rs` (JsonlWatcher first-sight/liveness/attach, sub-grouped by mechanism), plus the two flat publish-excluded tests below — see [`crates/pixtuoid-core/tests/CLAUDE.md`](crates/pixtuoid-core/tests/CLAUDE.md) for the full map + governing principle. One deliberate exception: `socket_path_parity.rs` `#[path]`-includes the hook shim's `paths.rs` (source inclusion, not a dep) to pin shim↔daemon socket-path equality across crates without violating the no-core-dep-in-shim invariant; it's `exclude`d from the published tarball (the included file can't exist there) and so MUST stay flat (a grouped-binary submodule can't be individually excluded). Windows pipe parity: `pixtuoid-core/tests/transport/pipe.rs` and `pixtuoid-hook/tests/shim_pipe.rs` are `#[cfg(windows)]` twins of `transport/socket.rs` and `shim.rs` respectively — they run only on the `windows-test` CI job (windows-2022, full nextest suite); from PR 3 onward the windows job is part of the parity invariant (each branch only executes on its target OS).
-- **Headless render harness** — `tui_renderer/harness.rs` (`#[cfg(test)] mod harness;`). Drives the *real* `TuiRenderer` through `render()` / `navigate_floor()` via ratatui `TestBackend` (no terminal). Output-first assertions: `buf()` (RgbBuffer pixels) + the `#[cfg(test)] frame_buffer()` ratatui-cell inspector; white-box seams (`floor_motion`, `floor_buf`, `inject_coffee`) only where an invariant isn't observable from output. NOT coverable headlessly (excluded in `codecov.yml`): the crossterm event loop + terminal lifecycle (`tui/mod.rs`, reads/writes the real TTY), the async runtime glue (`runtime/driver.rs`, tokio `block_on` + `ctrl_c` + socket bind), and `main.rs`.
-
-Coverage: `just coverage` (writes lcov.info + JUnit XML — the exact command CI runs).
-
-Decoder never-panic fuzz: `just fuzz <jsonl-dir>` (→ `crates/pixtuoid-core/examples/decoder_fuzz.rs`) runs every line of a real session corpus through the CC / Codex / hook decoder (auto-routed by shape) and fails on any panic — the "log + continue, never panic" contract (invariant #5) checked on real data, not just fixtures. On-demand, NOT in preflight/CI: point it at your own `~/.claude/projects` / `~/.codex/sessions` or a cloned public corpus (e.g. `daaain/claude-code-log`'s `test_data/real_projects`) — sessions are a target, not committed data.
-
-### Visual verification (Python venv)
+### Visual verification
 
 ```
-python3 -m venv .venv
-.venv/bin/pip install -r requirements-dev.txt
 just build --release --example snapshot
 ./target/release/examples/snapshot --cols 192 --rows 80 /tmp/snap.png
-.venv/bin/python3 scripts/crop-snapshot.py /tmp/snap.png --scale 3
+.venv/bin/python3 scripts/crop-snapshot.py /tmp/snap.png --scale 3   # venv: requirements-dev.txt
 ```
 
-> To regenerate **all** of `docs/images/` (screenshot, gallery-\*, themes-composite, demo.gif,
-> reference-\*) **and** `site/public/demos/` from a release build, run **`just gen`** (or
-> **`just gen-media`** for the images only) — the ONE manifest-driven driver
-> (`scripts/gen-media.py` + `scripts/media.json`) is the single source of truth for the office
-> images (render params, crop quadrants, themes-composite diagonal), so the screenshots never
-> drift. `just gen-media --only docs|site` scopes it to one target.
+A PR that **intentionally** changes the office's look must run `just gen`
+and commit the regenerated `docs/images/` (incl. the `reference-*.png` CI
+baselines) plus `site/public/demos/` in the same change, or the smoke job's
+`just gen-check` pixel-diff goes red. Full iteration loop + sprite pitfalls:
+`.claude/skills/beautify-decoration/SKILL.md`.
 
-CI's smoke job pixel-diffs two deterministic renders (dusk/normal + night/cyberpunk,
-TZ=UTC) against `docs/images/reference-*.png` via **`just gen-check`** (runnable
-locally — it also diffs the README sections and the site stills; video clips + demo.gif
-are presence-only, and diff overlays land in `target/gen-check-diff/`). A PR that
-**intentionally** changes the office's look must run `just gen` and commit the regenerated
-`docs/images/` — including the `reference-*.png` baselines — plus `site/public/demos/`
-in the same change, or smoke goes red.
+### Preflight, hooks, release
 
-See `.claude/skills/beautify-decoration/SKILL.md` for the full iteration loop, self-critique checklist, and sprite-format pitfalls.
-
-### Pre-commit / pre-push preflight
-
-The `justfile` is the **single source of truth** for what each check runs —
-`.github/workflows/ci.yml` and the git hooks call the same recipes, so there's
-no CI-vs-local drift to maintain. Requires `just` (`brew install just`); the
-checks also need a handful of cargo tools — `just setup-tools` installs them
-(cargo-hack, cargo-nextest, cargo-machete, cargo-deny, cargo-semver-checks, cargo-edit).
+The `justfile` is the single source of truth for every check — CI and the
+git hooks call the same recipes (no local-vs-CI drift). `just setup-tools`
+installs the needed cargo tools once per clone.
 
 ```
-just              # list recipes
-just setup-tools  # install the dev tools the checks need (run once per clone)
-just preflight    # full pre-push gate: lint (fmt+machete+deny, parallel) → clippy → hack → test
+just preflight    # full pre-push gate: lint (fmt+machete+deny) → clippy → hack → test
 just fmt          # auto-format
+git config core.hooksPath .githooks   # activate hooks once per clone
 ```
 
-(`hack` is `cargo hack --feature-powerset` — it catches code that only builds
-with `test-renderer` on. `semver`, `coverage`/`smoke`, `gen-check`, `gen-readme-check`,
-and `npm-check` are CI-only (the smoke job runs `gen-check`; the `readme` job runs
-`gen-readme-check`). The
-semver gate checks **`pixtuoid-core` only** — the `pixtuoid` binary's lib
-target is an internal-facing surface for examples/integration tests, not a
-semver surface, so its `pub` paths may move without a major bump.
-`check-windows` cross-lints the workspace for `x86_64-pc-windows-msvc` on every PR (clippy, no linking).)
+Never pipe `preflight` through `tail`/`head` — the exit code becomes the
+pipe's and a real failure reads as green; redirect to a file and `echo $?`.
+CI-only gates: semver (pixtuoid-core only — the binary's lib target is not a
+semver surface), coverage/smoke, gen-check, gen-readme-check, npm-check,
+check-windows (cross-lint for msvc on every PR).
 
-Run `just preflight` locally to avoid the round-trip of "push → wait for CI →
-red → fix → push again." Never pipe its output through `tail`/`head` — the
-exit code becomes the pipe's and a real failure reads as green; redirect to a
-file (`just preflight > /tmp/pf.log 2>&1; echo $?`) and read the log."
-
-`.githooks/pre-commit` runs `just fmt-check` only (sub-second).
-`.githooks/pre-push` runs `just preflight` before pushing (honors `SKIP_PREFLIGHT=1`).
-
-Activate hooks **once per clone**:
-
-```
-git config core.hooksPath .githooks
-```
-
-Bypass in an emergency with `git commit --no-verify` or `SKIP_PREFLIGHT=1 git push`.
-
-### Cutting a release
-
-`just bump X.Y.Z` is the one command. It rewrites **every** version number — the
-workspace version, the `pixtuoid`→`pixtuoid-core` path-dep requirement, and
-`Cargo.lock` (via `cargo set-version`, so the path-dep can't drift) — drafts the
-in-app `release_notes()` arm from the commit log, runs `just preflight`, and
-commits on a `release/vX.Y.Z` branch. It **stops before the tag**: pushing the
-tag is what triggers the *irreversible* crates.io publish (`release.yml`), so
-that stays a human step.
-
-```
-just bump 0.5.1                              # bump + draft notes + preflight → branch
-# curate release_notes() to ~6 highlights → PR → merge, then:
-git tag v0.5.1 && git push origin v0.5.1     # fires build + crates.io + homebrew
-```
-
-Needs cargo-edit (`just setup-tools`). See [`CONTRIBUTING.md`](docs/CONTRIBUTING.md#releasing).
+**Release:** `just bump X.Y.Z` rewrites every version number, drafts
+`release_notes()`, runs preflight, and commits on a release branch — it
+stops before the tag; pushing the tag is the irreversible crates.io publish
+and stays a human step. See
+[`CONTRIBUTING.md`](docs/CONTRIBUTING.md#releasing).
 
 ## Conventions
 
-- **TDD first.** Plan and existing tests are TDD-shaped — failing test → minimal impl → commit. Don't add code without a test that exercises it. Non-trivial changes (new feature/config key/seam, sharp edge, or spanning ≥3 files) plan against [`.github/prompts/impl-plan.prompt.md`](.github/prompts/impl-plan.prompt.md) first — it front-loads the review's failure classes, and its answers fill the review's change-specific slots.
-- **DRY, YAGNI.** No features beyond what v1 specifies. v2 items are deferred — adding them in v1 code is a regression.
-- **No comments unless WHY.** Don't write comments that restate what the code does. Comment only when a future reader can't tell from the code why something is the way it is (a workaround, a non-obvious constraint, a surprising invariant).
-- **Errors propagate via `anyhow::Result` in app code, `thiserror` in core if a typed error becomes load-bearing.** The hook listener and JSONL watcher log + continue on malformed input — they never panic.
+- **TDD first.** Failing test → minimal impl → commit. Don't add code without a test that exercises it. Non-trivial changes (new feature/config key/seam, sharp edge, or spanning ≥3 files) plan against [`.github/prompts/impl-plan.prompt.md`](.github/prompts/impl-plan.prompt.md) first — it front-loads the review's failure classes, and its answers fill the review's change-specific slots.
+- **DRY, YAGNI.** No features beyond what v1 specifies; v2 items are deferred.
+- **No comments unless WHY.** Comment only what a future reader can't tell from the code (a workaround, a non-obvious constraint, a surprising invariant).
+- **Errors propagate via `anyhow::Result` in app code, `thiserror` in core** if a typed error becomes load-bearing. The hook listener and JSONL watcher log + continue on malformed input — they never panic.
 - **No `unwrap()` in non-test code.** Tests can unwrap freely.
-- **No scan-the-history logic.** Don't derive state by scanning cycle history or iterating backward through time — keep persistent state (a `HashSet`, a map, a bool on the owning struct) and update it as events arrive.
-- **Match the surrounding shell:** scripts in this repo target zsh (interactive) or POSIX sh. `shellcheck` any `.sh` you touch.
-- **macOS first.** BSD-flavored CLI, brew, launchd for daemons. The hook shim uses a Unix socket on Unix (`std::os::unix::net::UnixStream`) and a named pipe on Windows — transport selection is in `pixtuoid-hook/src/transport.rs`.
-- **Keep docs current.** When a change alters module structure, architecture, developer workflow, or the public API surface, update the relevant `CLAUDE.md` (workspace or nested) and `README.md` in the same commit. Stale docs cost more than the 5 minutes to update them.
-- **Every review adjudication leaves a trace.** Whole-codebase / multi-agent review verdicts are recorded in [`docs/REVIEW-LEDGER.md`](docs/REVIEW-LEDGER.md) (the usage protocol — premise-anchored matching, demote-don't-kill — is in its header; review economics baselines live in `docs/review-metrics/`). A finding refuted as "deliberate design" MUST either cite an existing sharp edge or add one in the same change — an undocumented refutation will be re-paid at the next review.
-- **Track every deferred finding as a GitHub issue.** When a review finding, bug, or improvement is real but you consciously defer it (out of scope for the current PR, low-priority, needs broader design), `gh issue create` to capture it BEFORE moving on — don't let it live only in a chat message or a PR comment that scrolls away. The issue body should state the problem, why it was deferred, and a concrete fix sketch (link the PR/review that surfaced it). A deferred finding with no issue is a silently-dropped finding. (Verify the finding is real first — see "Don't blindly accept reviewer findings" below; never file an issue for a hallucinated/refuted one.)
-- **Sprite changes require visual verification.** After editing any `.sprite` file: (1) rebuild the snapshot example, (2) render at `--cols 192 --rows 80`, (3) crop the relevant quadrant with `scripts/crop-snapshot.py --scale 3`, (4) read the cropped PNG and self-critique — does a stranger recognize the intended pose/object? Iterate until it reads at half-block scale. Then rebuild the release binary (`just build --release`). Commit messages should include iteration history (which designs were tried and why they were rejected). See `.claude/skills/beautify-decoration/SKILL.md` for the full checklist.
+- **No scan-the-history logic.** Keep persistent state (a set, a map, a bool) updated as events arrive; never derive state by scanning backward through time.
+- **Match the surrounding shell** (zsh interactive / POSIX sh); `shellcheck` any `.sh` you touch. **macOS first**: BSD CLI, brew, launchd.
+- **Keep docs current.** A change that alters module structure, architecture, workflow, or public API updates the relevant `CLAUDE.md` + `README.md` in the same commit.
+- **Every review adjudication leaves a trace** in [`docs/REVIEW-LEDGER.md`](docs/REVIEW-LEDGER.md) (premise-anchored protocol in its header; economics in `docs/review-metrics/`). A finding refuted as "deliberate design" MUST cite an existing sharp edge or add one in the same change.
+- **Track every deferred finding as a GitHub issue** BEFORE moving on — problem, why deferred, fix sketch. A deferred finding with no issue is a silently-dropped finding. (Verify it's real first — see "Don't blindly accept reviewer findings".)
+- **Sprite changes require visual verification** — render, crop, read the PNG, self-critique until it reads at half-block scale; commit messages carry the iteration history. Full checklist: `.claude/skills/beautify-decoration/SKILL.md`.
+- **Periodic context-file audits also distill memory**: each `/revise-claude-md`-style audit sweeps recent session memories for promote-to-repo candidates (`docs/KNOWLEDGE-BASE.md`, Layer 3).
 
 ## Architecture invariants
 
 These are load-bearing; don't break them without updating the spec.
 
 1. **`pixtuoid-core` has no terminal dependencies.** No `ratatui`, no `crossterm`, no `stdout` writes. If you need one, the abstraction belongs behind the `Renderer` trait.
-2. **Events flow through ONE channel** typed `mpsc::Sender<(Transport, AgentEvent)>`. The `Transport` tag is load-bearing — the reducer uses it for hook-wins dedup. Do not hardcode `Transport::Hook` on the consumer side; the producer (each Source impl) tags its own events.
-3. **`Source` trait is the only seam for adding a transcript-bearing agent CLI** (Codex / Cursor / Copilot). Don't bypass it. Per-source format knowledge lives in the source's own decoder fn (injected into `JsonlWatcher` via fn pointers), not in a shared decoder. A **hook-only** CLI (Reasonix — no watchable transcript) is the documented exception: no `Source` impl; it registers in `REGISTERED_SOURCES`, its own decoder fn is dispatched from `decode_hook_payload` on the shim's `_pixtuoid_source` stamp, and it ships an `install/` target instead of runtime wiring — see `crates/pixtuoid-core/CLAUDE.md` "multi-source decoding".
-4. **`install-hooks` writes through symlinks.** `resolve_symlink` in `install/io.rs` is critical for stow-managed `~/.claude/settings.json`. Don't replace it with `fs::rename` on the symlink path (Unix). On Windows `write_config_atomic` uses a bounded rename-retry (3 × 50ms) behind `cfg!(windows)` — sharing violations on open files are a platform reality there.
-5. **The hook shim must never block CC.** Always exit 0 silently on any error. The 200ms send bound is non-negotiable — on BOTH platforms a watchdog thread bounds the whole connect+write phase (#167; Unix keeps the socket write timeout as a second layer). Because the watchdog hard-exits the process, `send_line` has NO in-process unit tests — all shim coverage is child-process level (`tests/shim.rs`, `tests/shim_pipe.rs`).
-6. **Walkable mask = ground footprint only.** This is a top-down view. Visual sprites can be wider/taller than their ground footprint (elevation effects, shadows, wall trim). The walkable mask must only block the ground-level projection — e.g., a 3px-wide wall visual has a 1px walkable mask because the wall's base is 1px. Characters walk right next to walls, not 3px away.
+2. **Events flow through ONE channel** typed `mpsc::Sender<(Transport, AgentEvent)>`. The `Transport` tag is load-bearing — the reducer uses it for hook-wins dedup. Do not hardcode `Transport::Hook` on the consumer side; the producer tags its own events.
+3. **`Source` trait is the only seam for adding a transcript-bearing agent CLI.** Per-source format knowledge lives in the source's own decoder fn, not a shared decoder. A **hook-only** CLI (Reasonix) is the documented exception — see `crates/pixtuoid-core/CLAUDE.md` "multi-source decoding".
+4. **`install-hooks` writes through symlinks.** `resolve_symlink` in `install/io.rs` is critical for stow-managed `~/.claude/settings.json`; on Windows `write_config_atomic` keeps a bounded rename-retry (sharing violations are a platform reality).
+5. **The hook shim must never block CC.** Always exit 0 silently on any error; the 200ms send bound is non-negotiable (watchdog thread on BOTH platforms). The watchdog hard-exits, so `send_line` has NO in-process tests — all shim coverage is child-process level.
+6. **Walkable mask = ground footprint only.** Visual sprites can be wider than their footprint; the mask blocks only the ground-level projection, so characters walk right next to walls.
 
 ## Known sharp edges (index)
 
-Don't be surprised by these. **Full explanation (the WHY) lives in the nested `CLAUDE.md` for the owning crate** — read it before "fixing" any of them.
+Don't be surprised by these — and don't "fix" them. One line each here; the
+full WHY lives in the nested `CLAUDE.md` for the owning crate.
 
-**`pixtuoid-core`** (see [`crates/pixtuoid-core/CLAUDE.md`](crates/pixtuoid-core/CLAUDE.md)):
+**`pixtuoid-core`** ([full entries](crates/pixtuoid-core/CLAUDE.md)):
 - CC hook payloads DO include `tool_use_id` (hook-wins dedup fires).
-- CC hook `transcript_path` always points to the PARENT transcript → `active_tasks` suppresses subagent-leak; **liveness flows UP** (`refresh_lineage`) so a working subagent keeps its ancestors fresh and a long delegation isn't stale-swept. CC's own `SubagentStart`/`SubagentStop` hooks DO decode (#241, `decode_cc_hook_custom`): instant child registration + the only end signal a Workflow-fleet subagent gets — the bare wire `agent_id` is prefixed into the transcript-stem id space (`agent-<id>`); Stop keys on `cc_id_from_path(agent_transcript_path)`.
-- JSONL watcher gates historical/ended transcripts on EVERY first-sight path (initial seed, 250ms rescan, 60s poll, notify) — not just startup, in tier order: the **liveness probe** first (CC: the first-party `~/.claude/sessions/<pid>.json` registry, `kill(pid,0)`-verified + a `startedAt`↔kernel-start identity check against PID recycling (macOS); Codex: open-rollout FD binding — a live `codex` process holds its rollout open, enumerated via macOS libproc / Linux `/proc/<pid>/fd` — probe-live sessions register however stale their mtime), then `should_seed_at_eof` in `walk_jsonl` as the fallback (1-hour mtime window + structural session-end tail scan → seed cursor at EOF, no `SessionStart`). Content-based `/exit` detection is GONE — lifecycle never reads chat content. Unifying this gate was the #85 fix. The probe is ALSO ongoing liveness (#220): each refresh emits `ProofOfLife` per vouched id → a 150s-TTL reducer-private exemption from the staleness sweeps. And it drives the NEGATIVE vouch (#223): probe failure is explicit (`Option<ProbeSnapshot>` — `None` changes nothing); a previously-vouched id missing from two healthy snapshots ≥60s apart emits the `SessionEnd` the CLI never writes, with a `seen` un-claim so a resume re-registers. Rung above (#223 rung 2): a probed watcher also spawns an `exit_watch` thread (kqueue `NOTE_EXIT` / pidfd+poll) on the snapshot's id→pid bindings — a bound process dying emits that `SessionEnd` in milliseconds through the same exit path; ladder: instant (ms) > negative vouch (60–120s) > TTL/stale sweeps.
-- A hook event for an UNKNOWN session id registers it (hooks are proof of life) — normally with REAL identity (#221: decoders attach an `Identity` event ahead of tool/permission activity, carrying the payload's source/session_id/cwd); the blank `#N` slot (reap-exempt, back-filled by the next `SessionStart`) remains the fallback for identity-less events (`Stop`); JSONL events never synthesize (historical replays — a JSONL `Identity` is a structural no-op).
-- Agent removal needs a `SessionEnd`; abrupt exits (Ctrl-C / Codex) have none → fall back to the slow stale-sweep, which cascade-exits the parent's whole subagent subtree — but only once the subtree is genuinely silent (liveness-vs-readiness guards: `refresh_lineage` up-propagation + `has_waiting_ancestor` exemption for permission-blocked subagents; plus the probe-vouched `ProofOfLife` exemption (#220) — a slot whose process the probe sees alive is never staleness-swept, so Codex's 5-min short-idle reap now effectively fires only after the process exits and the vouch lapses).
-- Subagent display names come from `attributionAgent` in JSONL.
-- The subagent-dispatch tool is **`Agent`** in current CC (not `Task`); `make_tool_detail` maps both → `ToolDetail::Task`. Missing the name silently disables subagent-leak suppression + b1 completion. `Workflow` (the fleet dispatcher) is deliberately NOT mapped — mapping it would sweep-exempt finished fleet agents for the whole workflow (the WHY lives at `make_tool_detail`); fleet lifecycle is the SubagentStart/Stop hooks'.
-- Codex subagents (`spawn_agent`) wire into the scope tree via the `SubagentStart`/`SubagentStop` HOOKS (distinct `agent_id` + parent `session_id`), since their rollout is flat (no `/subagents/` path); the reducer's `SessionStart` arm enriches a JSONL-first orphan's `parent_id`. Regression: `tests/sources/codex/mod.rs` (CC's hook twin: `tests/sources/claude/mod.rs`).
-- Subagent CLEAN-EXIT ladder: b1 (Agent-tool drain) / `SubagentStop` hooks (incl. Workflow fleets, #243); the reducer's child ledger re-links revivals and tombstones re-registration windows (#244/#249); the un-claim side-channel creates the revival carrier for in-flight multi-turn children (#246) — detail in the core CLAUDE.md child-ledger edge.
-- `AgentSlot.state_started_at` is `SystemTime` (process-local; v2-daemon-ready type).
-- `ActivityState::Active` ≠ "tool currently executing" — Active→Idle is debounced (`ACTIVE_GRACE_WINDOW`).
+- CC hook `transcript_path` points at the PARENT transcript; subagent-leak is suppressed via `active_tasks`, and liveness flows UP (`refresh_lineage`). CC's `SubagentStart`/`SubagentStop` hooks decode (`decode_cc_hook_custom`).
+- The JSONL watcher gates historical/ended transcripts on EVERY first-sight path: liveness probe first (CC pid registry / Codex open-rollout FDs), `should_seed_at_eof` fallback. Content NEVER drives lifecycle. The probe also powers ongoing liveness: the `ProofOfLife` sweep exemption, the negative vouch, and the ms-scale `exit_watch` rung.
+- A hook event for an unknown session id registers it (hooks are proof of life), normally with real `Identity`; JSONL events never synthesize.
+- Abrupt exits have no `SessionEnd` → stale-sweep cascade, guarded by the liveness-vs-readiness exemptions.
+- Subagent display names come from `attributionAgent`; the dispatch tool is **`Agent`** (mapped with legacy `Task` → `ToolDetail::Task`); `Workflow` is deliberately NOT mapped.
+- Codex subagents wire via the SubagentStart/Stop hooks (flat rollout, no path nesting).
+- Subagent clean-exit ladder: b1 drain / SubagentStop hooks / child-ledger re-links / the un-claim side-channel.
+- `AgentSlot.state_started_at` is `SystemTime` (process-local, v2-daemon-ready); `ActivityState::Active` ≠ "tool executing" (debounced via `ACTIVE_GRACE_WINDOW`).
 
-**`pixtuoid` / `tui`** (see [`crates/pixtuoid/CLAUDE.md`](crates/pixtuoid/CLAUDE.md) and [`crates/pixtuoid/src/tui/CLAUDE.md`](crates/pixtuoid/src/tui/CLAUDE.md)):
+**`pixtuoid` / `tui`** ([binary](crates/pixtuoid/CLAUDE.md), [tui](crates/pixtuoid/src/tui/CLAUDE.md)):
 - `draw_scene` is called through `TuiRenderer` (owns cross-frame state, returns the cached `Layout`).
-- `recolor_frame` substitutes by RGB equality (each palette key must map to a unique RGB).
-- Terminal cell aspect drives sprite design (~16×16 px ceiling; bundled character pack maxes at 8×12).
-- EXIT walks are time-compressed to fit the GC window (`EXIT_GRACE_WINDOW`); snap-back runs pure physics with a brisk SnapBack profile (`SNAP_BACK_MS` is only the ARM window, not a render cap); entry/wander are uncompressed.
-- A walk leg's A\* polyline shape is frozen once per leg, not re-routed per frame (prevents the "flash").
+- `recolor_frame` substitutes by RGB equality (palette keys must map to unique RGBs).
+- Terminal cell aspect drives sprite design (~16×16 px ceiling; bundled pack maxes at 8×12).
+- EXIT walks are time-compressed to fit the GC window; snap-back runs pure physics (`SNAP_BACK_MS` is only the ARM window); entry/wander are uncompressed.
+- A walk leg's A\* polyline is frozen once per leg, not re-routed per frame.
 
 ## Things NOT to do
 
 - Don't add `ratatui` / `crossterm` / terminal anything to `pixtuoid-core`.
-- Don't write to `~/.claude/settings.json` directly. Always go through `install/io.rs` — `write_config_atomic` for a single-shot write, or `lock_config` + `ConfigLock::write_atomic` for a read-merge-write round (advisory lock + atomic rename + symlink resolution + target-perms preservation).
-- Don't add `println!` / `eprintln!` to any production path other than the headless summary and explicit user-facing CLI output. Use `tracing::{info, warn, error}` instead.
+- Don't write to `~/.claude/settings.json` directly — go through `install/io.rs` (`write_config_atomic`, or `lock_config` + `ConfigLock::write_atomic` for read-merge-write).
+- Don't add `println!` / `eprintln!` to production paths (headless summary and explicit CLI output excepted) — use `tracing`.
 - Don't relax the hook shim's "always exit 0" contract. Blocking CC = breaking the user's primary workflow.
-- Don't add `--no-verify` / hook-skipping flags to any git operations performed in this repo.
+- Don't add `--no-verify` / hook-skipping flags to git operations in this repo.
 - Don't generate a README / CLAUDE.md / CHANGELOG / docs in PRs unless explicitly asked.
 - Don't `git push` without explicit user confirmation, even after committing.
-- Don't leave stale `Closes #N` in commit/squash bodies or PR text on a re-scope — GitHub fires the keyword from EITHER place, and conditional phrasing ("Closes #N if …") still fires (#246 was auto-closed this way).
-- Don't merge a PR without the **two-lens review**: 2+ agents, lenses differentiated — one correctness/grounding (does the code do what it claims; are cited anchors real), one design/blast-radius (API shape, downstream consumers, docs). Both briefs follow [`.github/prompts/pr-review.prompt.md`](.github/prompts/pr-review.prompt.md) (reasoning-before-verdict, negative-space list, integer confidence + file:line, ledger check, three-valued verdict). No exceptions — PR #23 was merged without review and had a critical path-traversal vulnerability.
-- Don't blindly accept reviewer findings. Verify the premise before coding a fix — the reviewer may have incomplete context about design intent. Check the relevant "Known sharp edges" and existing comments first. If a fix contradicts an earlier design decision, trace the code path manually.
+- Don't leave stale `Closes #N` in commit/squash bodies or PR text on a re-scope — GitHub fires the keyword from either place, and conditional phrasing still fires.
+- Don't merge a PR without the **two-lens review**: 2+ agents, lenses differentiated (correctness/grounding + design/blast-radius), briefs from [`.github/prompts/pr-review.prompt.md`](.github/prompts/pr-review.prompt.md). No exceptions — PR #23 merged unreviewed with a critical path-traversal vulnerability.
+- Don't blindly accept reviewer findings. Verify the premise before coding a fix — check the relevant sharp edges and existing comments first; if a fix contradicts an earlier design decision, trace the code path manually.
 
-## Where to look (cross-cutting)
+## Where to look
 
-- "How does a CC tool call become a moving sprite?" → trace `runtime/driver.rs::run_async` → `SourceManager::spawn` → `ClaudeCodeSource::run` → `HookSocketListener::run` → `decoder::decode_hook_payload` → `reducer::Reducer::apply` → (reducer publishes `Arc<SceneState>` on a `watch` channel) → `TuiRenderer::render` → `render_to_rgb_buffer` (the terminal-agnostic pixel pass any PNG/GIF/web renderer reuses) → `draw_scene` (top-down, cubicle grid). The first half lives in `pixtuoid-core`, the render half in `pixtuoid/tui` — see those nested guides for the per-stage detail.
-- **Architecture overview + the data-flow diagram → [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)** (rendered on the site at `/architecture`; the single source for the public/contributor-facing architecture narrative).
-
-Area-specific "Where to look" entries (layout, sources, install, themes, motion, weather, pets, …) are in the nested `CLAUDE.md` for the owning crate/module.
+- "How does a CC tool call become a moving sprite?" → `runtime/driver.rs::run_async` → `SourceManager::spawn` → source → decoder → `reducer::Reducer::apply` → `watch` channel → `TuiRenderer::render` → `render_to_rgb_buffer` → `draw_scene`. First half in `pixtuoid-core`, render half in `pixtuoid/tui`.
+- Architecture overview + data-flow diagram: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Area-specific entries (layout, sources, install, themes, motion, weather, pets, …) are in the nested guides.
 
 ## When refactoring
 
-If you change anything in the channel type, `Source` trait, `AgentEvent` enum, or reducer signature, update **all four** test areas that exercise them: `tests/reducer/`, `tests/e2e.rs`, `tests/transport/socket.rs`, `tests/watcher/`, plus `runtime/driver.rs` on the binary side. The `AgentEvent::agent_id()` method in `source/mod.rs` needs a new arm too if you add a variant.
+If you change the channel type, `Source` trait, `AgentEvent` enum, or reducer
+signature, update **all four** test areas (`tests/reducer/`, `tests/e2e.rs`,
+`tests/transport/socket.rs`, `tests/watcher/`) plus `runtime/driver.rs`; a
+new `AgentEvent` variant also needs an `agent_id()` arm.
 
-**Adding a new agent CLI**: the source module + ONE `SourceDescriptor` row in `source/registry.rs` (label prefix, decoders, hook keying, reducer caps — the per-source fact table) + the name in `source::REGISTERED_SOURCES` (forces a coalescing fixture via tests) **and** — for a source with a watchable transcript — wire it into `runtime/driver.rs::run_async` (the runtime spawns sources by hand — the registry only gates the conformance tests, not runtime wiring); a hook-only CLI (`line_decoder: None`, e.g. reasonix) skips the `Source` trait and the runtime wiring, shipping a `hook.custom` decoder + an `install/` target instead. Either way, add a row to `site/src/sources.json` (the single source for the README "Supported Tools" glimpse + the site's tool × OS matrix; `tests/supported_sources_manifest.rs` pins its `supported` set to `REGISTERED_SOURCES`, so a new source fails that test until added). See the nested `crates/pixtuoid-core/CLAUDE.md` "multi-source decoding" entry.
+**Adding a new agent CLI**: source module + one `SourceDescriptor` row in
+`source/registry.rs` + the name in `REGISTERED_SOURCES` + runtime wiring in
+`runtime/driver.rs::run_async` (transcript-bearing CLIs only; hook-only CLIs
+ship a `hook.custom` decoder + an `install/` target instead) + a row in
+`site/src/sources.json` (bridge-tested against `REGISTERED_SOURCES`). Full
+steps: `crates/pixtuoid-core/CLAUDE.md` "multi-source decoding" + the tests
+guide.

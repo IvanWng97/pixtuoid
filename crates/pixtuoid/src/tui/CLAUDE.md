@@ -29,6 +29,10 @@ tui/
 │                   #[cfg(test)] frame_buffer/floor_motion/floor_history/floor_buf/inject_coffee test seams),
 │                   harness.rs (#[cfg(test)] mod: ~65 headless integration tests driving the real
 │                   render()/navigate_floor() path via ratatui TestBackend — output-first: buf() pixels + frame_buffer cells)
+│                   white-box seams only where an invariant isn't output-observable. NOT
+│                   coverable headlessly (excluded in codecov.yml): tui/mod.rs (crossterm
+│                   event loop + real TTY), runtime/driver.rs (tokio block_on + ctrl_c +
+│                   socket bind), main.rs
 ├── theme/          color theme system — one file per theme, Theme struct in mod.rs
 │                   mod.rs (struct defs + ALL_THEMES registry), normal.rs, cyberpunk.rs,
 │                   dracula.rs, tokyo_night.rs, catppuccin.rs, gruvbox.rs
