@@ -53,7 +53,7 @@
       {
         "id": "zoom",
         "name": "Zoom in",
-        "blurb": "badges, activity bars, the tree up close",
+        "blurb": "badges, activity tints, the tree up close",
         "src": "agent-tree-zoom_popup.png"
       }
     ],
