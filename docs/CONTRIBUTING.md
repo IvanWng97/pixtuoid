@@ -94,6 +94,25 @@ git tag v0.5.1 && git push origin v0.5.1    # fires release.yml → build + crat
 - Every PR is reviewed by **2+ agents** (explorer / reviewer / architect) before merge — no exceptions.
 - AI-authored PRs get the `needs-human-verify` label and a human visual check before merge.
 - Track every consciously-deferred finding as a GitHub issue (`gh issue create`) before moving on.
+- Review verdicts on recurring claims live in [`REVIEW-LEDGER.md`](REVIEW-LEDGER.md) — check it before re-arguing a finding that smells familiar.
+
+### Recurring pitfalls (this codebase's review history, distilled)
+
+The four mistake families that whole-codebase reviews keep catching — check your
+diff against them before opening the PR:
+
+1. **Byte-vs-char slicing.** Anything that truncates or indexes user-visible
+   text must slice on `char`/grapheme boundaries, never bytes (`.chars().take(n)`,
+   not `&s[..n]`) — labels, tooltips, HUD strings all carry non-ASCII.
+2. **Parallel-implementation drift.** If a value/behavior exists in two places
+   (Unix + Windows arms, core + tui twins, manifest + enum), either single-source
+   it or add a bridge test pinning them equal. Two copies of anything drift apart.
+3. **Sanitize at the decode boundary.** Untrusted input (transcripts, hook
+   payloads, file paths) is cleaned where it ENTERS (`decoder.rs` / first-sight),
+   not at each use site — a use-site you forget is an injection.
+4. **Negative-branch test gaps.** A guard without a test asserting the REFUSAL
+   path (wrong input → no-op/warn) will be silently broken by a future refactor.
+   Pin the "must not happen" side, not just the happy path.
 
 ### Handy `gh` commands
 
