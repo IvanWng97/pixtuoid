@@ -11,11 +11,18 @@ fresh agent's first-pass code quality? Two standardized tasks × two arms at
 - **bare arm**: KB files physically removed from the worktree, instructed to
   derive conventions from code + README only, freestyle planning.
 
-Task A: per-pet `mood` config attribute end-to-end (designed trap: the
-`[pet-names]` parallel-map temptation). Task B: diagnostic breadcrumb for the
-CONN_TIMEOUT mid-payload event loss, #262 item 2 (designed trap: fixing one
-platform sibling). Per-implementation two-lens reviews, identical briefs
-across arms; a blind classifier counted findings, pitfall classes, and
+Design: issue #264, which registered THREE tasks — the third (a
+negative-branch test probing the derived-offset pitfall) was cut for budget
+under a reduced-scope authorization, so this is n=2 of 3. Task completion,
+the design's quality guard, was full in all four runs: both arms shipped a
+working implementation of each task. Task A: per-pet `mood` config attribute
+end-to-end (designed trap: the `[pet-names]` parallel-map temptation). Task
+B: diagnostic breadcrumb for the CONN_TIMEOUT mid-payload event loss, #262
+item 2 (designed trap: fixing one platform sibling). Per-implementation two-lens reviews, identical briefs
+across arms (reviewers of bare-arm code read the bare worktree, but were not
+themselves stripped of ambient context — the instrument is constant in
+brief, not in ambience); a hypothesis-blind (not arm-blind — the run ids
+leak arm identity) classifier counted findings, pitfall classes, and
 plan-misses.
 
 ## Results
@@ -25,7 +32,7 @@ plan-misses.
 | first `just preflight` exit | **0** | **0** | 1 | 1 |
 | preflight attempts to green | 1 | 1 | 2 | 2 |
 | distinct review findings (deduped\*) | 1 | 1 (+1 artifact†) | 2 | 2 |
-| worst severity | nit | low | low | low |
+| worst severity (deduped; artifact excluded) | nit | nit | low | low |
 | designed trap | avoided | avoided | avoided | avoided |
 | implementation output tokens | 34,776 | 29,975 | 33,775 | 26,705 |
 
@@ -35,7 +42,11 @@ to update; experiment scaffolding, not an agent failure (though it is what a
 genuinely KB-less repo looks like to a reviewer: docs-currency violations by
 construction).
 
-**On every quality metric the arms are indistinguishable.** Both arms put
+The opening question, answered on this evidence: **no — the KB did not
+improve first-pass code quality on these two tasks.** The rest of this
+report is why, and what the KB bought instead. No quality row separates the
+arms by more than one severity step, and none in the KB arm's favor. Both
+arms put
 `mood` ON the existing `PetEntry`/`Pet` entities with a raw-string-then-
 validate field (no parallel map, config-reset-safe); both arms independently
 invented the same task-B design — a Drop-guard in the SHARED `hook/mod.rs`
@@ -47,22 +58,30 @@ updates only it could make.
 
 ## The central finding: knowledge redundancy
 
-The bare arm reproduced KB-grade decisions because the load-bearing lessons
-were not only in the KB files — they are embedded **in the code at the
-hazard seams**: `config.rs`'s field docs carry the entire
+The bare arm reproduced KB-grade decisions, and the explanation with
+in-repo evidence is that the load-bearing lessons were never only in the KB
+files — they are embedded **in the code at the hazard seams** (A-bare's own
+summary credits "mirroring the existing `kind` pattern", read from the
+field docs): `config.rs`'s field docs carry the entire
 raw-string-vs-serde-enum footgun story (the `[pet-names]`/all-or-nothing
 lesson), and the hook module's structure makes the shared-seam fix the
 natural one. The executability ladder predicts exactly this: knowledge that
 reached the code (WHY comments, types, tests) survives context stripping;
-prose-only knowledge would have differentiated. Both tasks landed on seams
+prose-only knowledge is where the ladder predicts the arms would diverge —
+untested here. Both tasks landed on seams
 that June's arcs had already pushed down the ladder — a selection effect
 that under-measures KB value on less-documented seams.
 
-What the KB measurably added was **process-level**: B-kb consulted the
-ledger unprompted, cited R0609-15 (bounded drop = documented design) and
-correctly scoped the change as trace-only; A-kb updated the nested CLAUDE.md
-files in the same commit (docs currency); and the plan made review cheaper —
-lens 1 verified claims instead of re-deriving them.
+What the KB added was **process-level — with the qualifier that all three
+duties were prescribed by the KB's own machinery, not emergent**: the plan
+brief's §6 routed B-kb to the ledger, where it went beyond the letter of
+the instruction (§6 asks for CONFIRMED rows; it also cited the
+REFUTED-design row R0609-15 governing the exact seam) and correctly scoped
+the change as trace-only; A-kb updated the nested CLAUDE.md files in the
+same commit — a duty the bare arm could not perform by construction; and
+the plan made review cheaper (lens 1 verified claims instead of re-deriving
+them). The measured result is that the prescribed machinery executes
+correctly at +19% overhead — not that agents adopt it spontaneously.
 
 ## Plan-miss rate (first measurement)
 
@@ -70,8 +89,9 @@ KB-arm plans named everything reviews later found except: A-kb 1 miss (warn
 message detail), B-kb 1 distinct miss (the breadcrumb hard-attributes a
 cause that a second drop path — runtime shutdown — shares). Both misses are
 the same species: **diagnostic-message precision**, a class the plan brief's
-sections don't currently probe. n=2; recorded per the `plan-miss:` protocol,
-not yet a rate.
+sections don't currently probe. n=2 — and the protocol's harvest channel
+(`plan-miss:` lines in review-round commits) died with the throwaway
+worktrees, so this report is the record for these two; not yet a rate.
 
 ## Caveats
 
@@ -86,8 +106,11 @@ not yet a rate.
 
 ## Implications
 
-- For #265's CLAUDE.md slim: this LOWERS the risk — code-embedded knowledge
-  carried both tasks, so a map-not-manual context file is safer than feared.
+- For #265's CLAUDE.md slim: supports it **for knowledge that has already
+  reached the code** — both tasks were carried by code-embedded lessons, so
+  thinning the prose map costs nothing on promoted seams. It says nothing
+  about prose-only sharp edges, the seams this experiment by selection never
+  touched — gate those cuts on Layer 1's citation tracking, not this result.
 - For the KB roadmap: the highest-leverage promotion target is always the
   code itself; KB files earn their keep on seams the code doesn't yet
   self-document, and on process duties (docs currency, ledger discipline,

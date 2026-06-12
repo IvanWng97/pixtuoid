@@ -153,10 +153,13 @@ of which named a concrete guideline change — plus one bot-missed design
 lesson, caught pre-merge by a self-dispatched architect pass and validated
 by a controlled backtest on the original diff. The onboarding experiment
 ([`phase3-onboarding-2026-06.md`](review-metrics/phase3-onboarding-2026-06.md))
-ran the with/without-KB A/B: arms indistinguishable on first-pass quality —
-because the load-bearing lessons were already IN the code at the hazard
-seams (the executability ladder working); the KB differentiated on process
-(docs currency, ledger discipline, plan auditability). The experiment design, for anyone
+ran the with/without-KB A/B: arms indistinguishable on first-pass quality
+(n=2, directional; contamination caveats in the report) — consistent with
+the load-bearing lessons already being IN the code at the hazard seams (the
+executability ladder working). The KB's value showed up in process, not
+code: its prescribed duties (docs currency, ledger routing, plan
+auditability) executed correctly at +19% token overhead — duties a bare
+repo cannot perform at all. The experiment design, for anyone
 replicating this on their own repo:
 
 | experiment | metric | quality guard |
