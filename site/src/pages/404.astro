@@ -1,0 +1,76 @@
+---
+import Base from '../layouts/Base.astro';
+import Nav from '../components/Nav.astro';
+import Footer from '../components/Footer.astro';
+import { asset } from '../consts';
+---
+
+<Base
+  title="404 — pixtuoid"
+  description="Session not found — this desk has been swept."
+  preloadImage={asset('demos/empty.png')}
+>
+  <Nav />
+  <main id="main" tabindex="-1" class="lost">
+    <div class="container lost__grid">
+      <div class="lost__copy">
+        <p class="eyebrow">404 · floor unknown</p>
+        <h1>
+          Session not <span class="hl">found</span><span class="cursor" aria-hidden="true"></span>
+        </h1>
+        <p class="lead">
+          Whatever lived at this desk idled past the stale sweep — 3&nbsp;a.m., lights off, chairs
+          tucked in. The elevator still works:
+        </p>
+        <div class="lost__cta">
+          <a class="btn btn-primary" href={asset('')}>Back to the lobby</a>
+          <a class="btn btn-ghost" href={`${asset('')}#install`}>Install pixtuoid</a>
+        </div>
+      </div>
+      <figure class="terminal lost__scene">
+        <div class="terminal__bar">
+          <span class="terminal__dot terminal__dot--r"></span>
+          <span class="terminal__dot terminal__dot--y"></span>
+          <span class="terminal__dot terminal__dot--g"></span>
+          <span class="terminal__title">~ pixtuoid run · 0 agents</span>
+        </div>
+        <img
+          class="terminal__screen px"
+          width="1600"
+          height="1440"
+          src={asset('demos/empty.png')}
+          alt="An empty pixel-art office at 3 a.m. — dark desks, city lights in the windows, nobody home"
+        />
+        <span class="terminal__scan" aria-hidden="true"></span>
+      </figure>
+    </div>
+  </main>
+  <Footer />
+</Base>
+
+<style>
+  .lost {
+    padding-block: clamp(2.5rem, 6vw, 5rem);
+  }
+  .lost__grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: clamp(2rem, 5vw, 4rem);
+    align-items: center;
+  }
+  @media (min-width: 920px) {
+    .lost__grid {
+      grid-template-columns: 0.92fr 1.08fr;
+    }
+  }
+  .lost__cta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.8rem;
+    margin-top: 1.8rem;
+  }
+  .lost__scene .terminal__screen {
+    width: 100%;
+    height: auto;
+  }
+</style>
