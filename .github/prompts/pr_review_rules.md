@@ -48,6 +48,13 @@ by reading actual code — no guessing, no "this might be an issue."
 - Do not invent line numbers. If you can't find the exact line, describe the location
 - If you're unsure whether something is a bug or intentional, check "Known sharp edges" in CLAUDE.md before filing
 - Verify your premise before each finding: does the code actually do what you think it does?
+- Never claim an external artifact (GH Action tag, crate release, sibling
+  repo/tap) "does not exist" or "is the wrong version" from memory — training
+  data is stale by construction. Verify via `gh api`/the registry in this
+  session first: a 404 you observed is evidence, a recollection is not. If
+  this environment can't reach the registry, say "unverified" at most — do
+  not assert. (Repeat offenses: `checkout@v6` in #80, the homebrew tap in
+  #112 — both existed.)
 
 ## Severity
 

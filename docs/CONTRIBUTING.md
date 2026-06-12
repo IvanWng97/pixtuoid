@@ -98,8 +98,8 @@ git tag v0.5.1 && git push origin v0.5.1    # fires release.yml → build + crat
 
 ### Recurring pitfalls (this codebase's review history, distilled)
 
-The four mistake families that whole-codebase reviews keep catching — check your
-diff against them before opening the PR:
+The mistake families this repo's reviews keep catching — check your diff
+against them before opening the PR:
 
 1. **Byte-vs-char slicing.** Anything that truncates or indexes user-visible
    text must slice on `char`/grapheme boundaries, never bytes (`.chars().take(n)`,
@@ -107,12 +107,36 @@ diff against them before opening the PR:
 2. **Parallel-implementation drift.** If a value/behavior exists in two places
    (Unix + Windows arms, core + tui twins, manifest + enum), either single-source
    it or add a bridge test pinning them equal. Two copies of anything drift apart.
+   The in-diff form bites hardest: a guard or fix added to ONE of two sibling
+   paths in the same diff (the empty-`RUST_LOG` guard shipped at one call site
+   but not its sibling — #159, caught in #172; the frozen walk origin wired
+   for EXIT but left unwired for snap-back — #62, caught in #66) — when your
+   diff guards one path, grep for its siblings before opening the PR.
 3. **Sanitize at the decode boundary.** Untrusted input (transcripts, hook
    payloads, file paths) is cleaned where it ENTERS (`decoder.rs` / first-sight),
    not at each use site — a use-site you forget is an injection.
 4. **Negative-branch test gaps.** A guard without a test asserting the REFUSAL
    path (wrong input → no-op/warn) will be silently broken by a future refactor.
    Pin the "must not happen" side, not just the happy path.
+   When a comment names a hazard with a window/threshold, pin BOTH sides of
+   it — the Waiting-clobber comment named the exact out-of-window harm while
+   the pin covered only the in-window path (escaped the #150 dedup arc, fixed
+   in #232). Derive test offsets from the constant under test
+   (`HOOK_WINS_WINDOW / 10`, the #142 pattern), never hardcoded ms — retuning
+   the constant silently makes a hardcoded pin vacuous.
+5. **Unwired additions.** Every new field, parameter, or asset needs a
+   consumer the same diff wires up — the compiler won't always warn (`_x`
+   bindings and `pub` fields evade dead-code lints). The smells: a capture
+   bound as `_x`, a parameter every call site passes as a literal default, an
+   asset or enum variant nothing constructs. (PR #62 shipped `snap_prev`
+   bound as `_snap_prev`, silently defeating the very walk-path freeze it was
+   added for — escaped review, fixed in #66.)
+6. **Denylist completeness.** A denylist/strip-set is only as strong as its
+   enumeration: diff it against the platform's *documented* set, never
+   memory, and prefer an allowlist where possible — an allowlist can't miss
+   a character (PR #206). (`CMD_UNSAFE` shipped missing cmd.exe's
+   first-token delimiters — tab, `;`, `,`, `=` — through two dedicated
+   security reviews, #198/#201.)
 
 ### Handy `gh` commands
 

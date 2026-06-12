@@ -13,7 +13,14 @@ Both briefs MUST carry, verbatim or equivalent:
 2. **Negative space** — do NOT flag: behavior documented as a sharp edge in
    any `CLAUDE.md` (read the nested file for the crate under review first),
    theoretical risks requiring unlikely preconditions, absence of
-   defense-in-depth where a primary defense exists, pure style.
+   defense-in-depth where a primary defense exists, pure style, and
+   existence/version claims about external artifacts (GH Action tags, crate
+   releases, sibling repos/taps) made from memory — verify via `gh api`/the
+   registry IN THIS SESSION, or write "unverified" instead of asserting.
+   A registry 404 observed now IS a finding; a recollection is not — stale
+   training data insisted `checkout@v6` doesn't exist (#80, 2 rounds) and
+   the homebrew tap doesn't exist (#112, 4 rounds; created 12 days prior);
+   both were wrong.
 3. **Integer confidence 0–100 + `file:line`** on every finding.
 4. **Ledger check** — match familiar-smelling claims against
    `docs/REVIEW-LEDGER.md` (its header protocol governs; premise-anchored:
@@ -62,6 +69,17 @@ Judge as a demanding critic:
 3. Copy/docs sweep of everything new (typos, overclaims, undefined notation).
 4. Propose concrete replacement text where you object — a finding without a
    suggested fix is half a finding.
+5. Data-shape check on every NEW field, config key, map, or collection the
+   diff introduces: name its identity/key-space. If it overlaps an existing
+   structure's identity (two collections keyed by the same id; an attribute
+   map shadowing an entity list), flag consolidation into one entity type —
+   two facts about the same thing want one type, and the second attribute is
+   the moment to create it. Do NOT demand merging orthogonal state that
+   merely concerns the same entity (render caches, interaction state, scalar
+   keys with disjoint key-spaces) — consolidate shared IDENTITY, not shared
+   TOPIC. (The `[pet-names]` lesson, PR #86: review called the parallel
+   names-map draft "clean"; backtested on that real diff — 0/3 reviewers
+   caught it without this item, 3/3 with it, 0/4 over-fires on controls.)
 
 [the five hard requirements]
 Your final message is the report.
@@ -87,10 +105,30 @@ history:
 - **Public-facing artifact** (site page, README section, release notes) →
   add an editorial lens reading as an outside engineer, checking every
   number against its source.
+- **Diff touches `pixtuoid-hook` (the shim)** → run a never-panic audit on
+  the WHOLE shim, not just the diff: `args_os()` not `args()` (non-UTF-8
+  argv panics → exit 101, visible to CC), no slicing/indexing on untrusted
+  bytes, every read bounded, every error path a silent `exit(0)`. Invariant
+  #5 is the repo's most-documented contract, yet PR #198 added `env::args()`
+  and both bot and local rounds missed it (caught post-merge, bae3541).
+- **Motion / pose / walk-leg behavior changed** → render and WATCH it before
+  the verdict: animated gif via the snapshot example, and/or replay a fixture
+  through the binary (`scripts/replay-fixture.sh`) for resume/lifecycle
+  motion. PR #61 was approved by per-phase + whole-feature code review (its
+  "live run" test-plan checkbox left unchecked) and shipped FIVE walk
+  regressions — mid-walk flash, wander/exit teleports, bootstrap rush,
+  stale-resume replay — all fixed in #62 (919ea7a). This fires even when no
+  committed art changes: the film-critic trigger above covers shipped clips,
+  and the lifecycle lens traces state, not pixels in motion.
 
 Process notes for the orchestrator: dispatch both in parallel, in the
 worktree, background; verify every MEDIUM+ finding's premise yourself before
 coding a fix (reviewers have incomplete design context — check sharp edges
-first); fold accepted findings into ONE review-round commit; deferred-but-real
-findings get a GitHub issue (no-deferral rule applies: only big/refactor work
-defers). After a fix round, re-run the gates and watch the NEW head's CI.
+first); fold accepted findings into ONE review-round commit. Before merging, sweep
+every reviewer/bot finding to exactly one terminal state — FIXED,
+REFUTED-with-trace (ledger row if it will recur), or ISSUE FILED
+(no-deferral rule applies: only big/refactor work defers). "Acknowledged,
+no action" is not a state: #40's ignored migration finding became a 0.4.1
+release-blocker (#46), #178's "worth a follow-up issue" was never filed,
+and #163's two MEDIUMs out-lived three review rounds unfixed. After a fix
+round, re-run the gates and watch the NEW head's CI.
