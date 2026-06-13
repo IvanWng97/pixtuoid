@@ -178,6 +178,23 @@ pub struct SourceColors {
     pub opencode: Rgb,
 }
 
+impl SourceColors {
+    /// All badge hues in declaration order. The ONE enumeration the legibility
+    /// guard and the count-pin test share, so adding a source forces a new field
+    /// HERE (caught by `source_colors_cover_every_registered_source`) instead of
+    /// silently escaping the per-theme distinctness check.
+    pub fn all(&self) -> [Rgb; 6] {
+        [
+            self.claude_code,
+            self.codex,
+            self.reasonix,
+            self.antigravity,
+            self.codewhale,
+            self.opencode,
+        ]
+    }
+}
+
 pub static ALL_THEMES: &[&Theme] = &[
     &NORMAL,
     &CYBERPUNK,
@@ -327,14 +344,7 @@ mod tests {
         for t in ALL_THEMES {
             let s = &t.source;
             let bg = t.ui.tooltip_bg;
-            let hues = [
-                s.claude_code,
-                s.codex,
-                s.reasonix,
-                s.antigravity,
-                s.codewhale,
-                s.opencode,
-            ];
+            let hues = s.all();
             // Each hue must contrast the popup bg (lum-sum delta >= 80).
             for (i, h) in hues.iter().enumerate() {
                 assert!(
@@ -355,5 +365,20 @@ mod tests {
                 }
             }
         }
+    }
+
+    // A newly registered source must get a SourceColors field (→ a hue in every
+    // theme + an entry in `all()`), or its badge escapes the distinctness guard
+    // above. Pinned by count so the omission fails loudly HERE rather than
+    // shipping an unchecked badge color.
+    #[test]
+    fn source_colors_cover_every_registered_source() {
+        use pixtuoid_core::source::REGISTERED_SOURCES;
+        assert_eq!(
+            NORMAL.source.all().len(),
+            REGISTERED_SOURCES.len(),
+            "SourceColors has a different hue count than the registered sources — add the \
+             new source's field to SourceColors + all() (and a hue in every theme file)"
+        );
     }
 }
