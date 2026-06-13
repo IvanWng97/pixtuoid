@@ -54,13 +54,13 @@
     "platforms": { "macos": "planned", "linux": "planned", "windows": "planned" }
   },
   {
-    "id": null,
-    "name": "OpenCode",
+    "id": "opencode",
+    "name": "opencode",
     "url": "https://github.com/anomalyco/opencode",
-    "status": "planned",
+    "status": "supported",
     "featured": false,
-    "transport": "Any LLM (DeepSeek / GPT / Claude / Gemini)",
-    "platforms": { "macos": "planned", "linux": "planned", "windows": "planned" }
+    "transport": "Hook shim (TS plugin → ~/.config/opencode/plugin/, session-id-keyed)",
+    "platforms": { "macos": "yes", "linux": "yes", "windows": "experimental" }
   },
   {
     "id": null,

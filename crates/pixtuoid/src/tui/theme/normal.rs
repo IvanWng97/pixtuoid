@@ -483,5 +483,10 @@ pub static NORMAL: Theme = Theme {
             g: 0xb8,
             b: 0xb0,
         }, // teal
+        opencode: Rgb {
+            r: 0xd8,
+            g: 0x3a,
+            b: 0x3a,
+        }, // red
     },
 };

@@ -175,6 +175,7 @@ pub struct SourceColors {
     pub reasonix: Rgb,
     pub antigravity: Rgb,
     pub codewhale: Rgb,
+    pub opencode: Rgb,
 }
 
 pub static ALL_THEMES: &[&Theme] = &[
@@ -332,6 +333,7 @@ mod tests {
                 s.reasonix,
                 s.antigravity,
                 s.codewhale,
+                s.opencode,
             ];
             // Each hue must contrast the popup bg (lum-sum delta >= 80).
             for (i, h) in hues.iter().enumerate() {

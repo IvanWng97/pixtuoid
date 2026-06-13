@@ -25,6 +25,11 @@ and compares against the live upstream:
   * CodeWhale hooks    -> `CODEWHALE_EVENTS` in crates/pixtuoid/src/install/codewhale.rs
                           vs the snake_case `HookEvent` enum in
                           Hmbown/CodeWhale crates/tui/src/hooks.rs
+  * opencode events    -> the EventV2 `type`s the decoder maps (the `match event`
+                          block in crates/pixtuoid-core/src/source/opencode.rs)
+                          vs the `EventV2.define` type literals in
+                          anomalyco/opencode core/src/v1/session.ts + permission.ts
+                          (one-directional: only a VANISHED depended type alarms)
 
 Exit codes:
   0  no drift
@@ -165,6 +170,21 @@ CODEWHALE_KNOWN_OMITTED = {
     "shell_env",
 }
 
+# opencode is open TS: the EventV2 `type` strings the plugin forwards + the
+# decoder maps live in these files. The check is ONE-DIRECTIONAL — opencode emits
+# ~50 event types and we intentionally map only a handful, so "new upstream event"
+# is noise; we only alarm when a type WE DEPEND ON vanishes (a rename the plugin
+# would forward but the decoder would map to nothing).
+OPENCODE_EVENT_URLS = (
+    "https://raw.githubusercontent.com/anomalyco/opencode/main/packages/core/src/v1/session.ts",
+    "https://raw.githubusercontent.com/anomalyco/opencode/main/packages/core/src/permission.ts",
+)
+
+# `permission.asked` is forwarded/decoded DEFENSIVELY (a V1/alias spelling); only
+# `permission.v2.asked` is a guaranteed standalone upstream EventV2 definition, so
+# don't alarm if the bare form isn't found as a `type:` literal.
+OPENCODE_TOLERATED = {"permission.asked"}
+
 
 def fetch(url: str) -> str:
     req = urllib.request.Request(url, headers={"User-Agent": "pixtuoid-drift-watch"})
@@ -236,6 +256,17 @@ def read_codewhale_events() -> set[str]:
     return set(re.findall(r'"(\w+)"', m.group(1)))
 
 
+def read_opencode_events() -> set[str]:
+    """The EventV2 `type` strings the decoder maps, read from the `match event`
+    block in source/opencode.rs (the source of truth — stays in sync with the
+    decoder by construction)."""
+    src = (REPO / "crates/pixtuoid-core/src/source/opencode.rs").read_text()
+    m = re.search(r"match event \{(.*?)\n    \}", src, re.S)
+    if not m:
+        raise RuntimeError("could not locate the `match event` block in source/opencode.rs")
+    return set(re.findall(r'"((?:session|message|permission)\.[a-z0-9.]+)"', m.group(1)))
+
+
 def upstream_codewhale_hooks(text: str) -> set[str] | None:
     # The TUI shell-command hook enum `pub enum HookEvent { SessionStart, ... }`
     # in crates/tui/src/hooks.rs (NOT the app-server `codewhale-hooks` sink enum
@@ -256,6 +287,7 @@ def run_checks(
     dispatch_names: set[str] | None,
     reasonix_ours: set[str] | None,
     codewhale_ours: set[str] | None,
+    opencode_ours: set[str] | None,
     breaking: list[str],
     review: list[str],
     errors: list[str],
@@ -363,6 +395,24 @@ def run_checks(
                         f"or add it to CODEWHALE_KNOWN_OMITTED)."
                     )
 
+    # --- opencode EventV2 types (only the FETCH is transient) --------------
+    if opencode_ours is not None:
+        try:
+            text = "\n".join(fetch(u) for u in OPENCODE_EVENT_URLS)
+        except FETCH_ERRORS as e:
+            errors.append(f"opencode source fetch failed (transient?): {e}")
+            text = None
+        if text is not None:
+            for ev in sorted(opencode_ours - OPENCODE_TOLERATED):
+                # The type strings appear as `type: "session.created"` etc. in
+                # the EventV2.define / Schema.Literal definitions.
+                if f'"{ev}"' not in text:
+                    breaking.append(
+                        f"opencode event `{ev}` (decoded in source/opencode.rs) is GONE "
+                        f"from upstream — likely renamed; the plugin still forwards it but "
+                        f"the decoder maps it to nothing (no sprite / no activity)."
+                    )
+
     # --- CC subagent-dispatch tool (only the FETCH is transient) -----------
     if dispatch_names is not None:
         try:
@@ -443,12 +493,14 @@ def main() -> int:
     dispatch_names = None
     reasonix_ours = None
     codewhale_ours = None
+    opencode_ours = None
     try:
         codex_ours = read_codex_events()
         cc_ours = read_cc_events()
         dispatch_names = read_dispatch_names()
         reasonix_ours = read_reasonix_events()
         codewhale_ours = read_codewhale_events()
+        opencode_ours = read_opencode_events()
     except Exception as e:  # noqa: BLE001
         breaking.append(
             f"drift-watch cannot read our own source ({e}) — the parsers in "
@@ -463,6 +515,7 @@ def main() -> int:
             dispatch_names,
             reasonix_ours,
             codewhale_ours,
+            opencode_ours,
             breaking,
             review,
             errors,

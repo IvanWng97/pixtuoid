@@ -463,5 +463,10 @@ pub static CYBERPUNK: Theme = Theme {
             g: 0x90,
             b: 0xff,
         }, // electric azure
+        opencode: Rgb {
+            r: 0xff,
+            g: 0x3b,
+            b: 0x30,
+        }, // neon red
     },
 };

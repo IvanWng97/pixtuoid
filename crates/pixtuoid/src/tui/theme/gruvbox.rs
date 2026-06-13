@@ -489,5 +489,10 @@ pub static GRUVBOX: Theme = Theme {
             g: 0xa0,
             b: 0xa8,
         }, // gruvbox teal
+        opencode: Rgb {
+            r: 0xfb,
+            g: 0x49,
+            b: 0x34,
+        }, // gruvbox red
     },
 };

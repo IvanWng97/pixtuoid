@@ -103,7 +103,7 @@ In another terminal, start a supported coding agent (Claude Code, Codex, Antigra
 | [Claude Code](https://code.claude.com) | macOS · Linux · Windows\* |
 | [Codex CLI](https://github.com/openai/codex) | macOS · Linux · Windows\* |
 
-_Also supported: [Antigravity CLI](https://github.com/antiGravity-AI/antigravity-cli), [DeepSeek-Reasonix](https://github.com/esengine/DeepSeek-Reasonix), [CodeWhale](https://github.com/Hmbown/CodeWhale). Planned: Copilot CLI, OpenCode, Cursor CLI._
+_Also supported: [Antigravity CLI](https://github.com/antiGravity-AI/antigravity-cli), [DeepSeek-Reasonix](https://github.com/esengine/DeepSeek-Reasonix), [CodeWhale](https://github.com/Hmbown/CodeWhale), [opencode](https://github.com/anomalyco/opencode). Planned: Copilot CLI, Cursor CLI._
 
 **→ [Full tool × OS support matrix on the site](https://ivanwng97.github.io/pixtuoid/#tools)**
 

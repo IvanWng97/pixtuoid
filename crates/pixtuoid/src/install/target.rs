@@ -131,7 +131,32 @@ pub const CODEWHALE: Target = Target {
     presence_probe: Some(crate::install::codewhale::detect_installed),
 };
 
-pub const TARGETS: &[&Target] = &[&CLAUDE, &CODEX, &REASONIX, &CODEWHALE];
+pub const OPENCODE: Target = Target {
+    name: "opencode",
+    display_name: "opencode",
+    restart_noun: "opencode",
+    default_config_path: crate::install::opencode::default_config_path,
+    hook_command: crate::install::opencode::hook_command,
+    merge_install: crate::install::opencode::merge_install,
+    merge_uninstall: crate::install::opencode::merge_uninstall,
+    needs_path_warning: false,
+    // The plugin embeds the absolute shim path (opencode runs it under Bun, no
+    // PATH reliance), so an unresolvable binary is fatal.
+    needs_resolved_binary: true,
+    // The managed file is a CODE artifact wholly owned by pixtuoid, not a shared
+    // config — uninstall replaces it with a no-op stub (it can't be deleted via
+    // the write-only orchestrator); the sentinel-based probe still reports it
+    // correctly as removed. Noted so the residual isn't a surprise.
+    post_install_note: Some(
+        "note: uninstall replaces the plugin with a no-op stub at <config>/plugin/pixtuoid.ts rather than deleting it.",
+    ),
+    // The plugin file we WRITE is also a file opencode could otherwise lack on a
+    // fresh install, and a post-uninstall stub still exists — so detect on the
+    // `@pixtuoid-opencode-plugin` sentinel, not mere file existence.
+    presence_probe: Some(crate::install::opencode::detect_installed),
+};
+
+pub const TARGETS: &[&Target] = &[&CLAUDE, &CODEX, &REASONIX, &CODEWHALE, &OPENCODE];
 
 pub fn by_name(name: &str) -> Option<&'static Target> {
     TARGETS.iter().copied().find(|t| t.name == name)
@@ -166,6 +191,7 @@ mod tests {
         assert_eq!(by_name("codex").unwrap().name, "codex");
         assert_eq!(by_name("reasonix").unwrap().name, "reasonix");
         assert_eq!(by_name("codewhale").unwrap().name, "codewhale");
+        assert_eq!(by_name("opencode").unwrap().name, "opencode");
         assert!(by_name("nope").is_none());
         assert!(by_name("all").is_none()); // "all" is a meta-value, not a Target
     }

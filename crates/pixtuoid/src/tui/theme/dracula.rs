@@ -483,5 +483,10 @@ pub static DRACULA: Theme = Theme {
             g: 0xb8,
             b: 0xa8,
         }, // deep teal
+        opencode: Rgb {
+            r: 0xff,
+            g: 0x55,
+            b: 0x55,
+        }, // dracula red
     },
 };

@@ -21,7 +21,7 @@ use anyhow::Result;
 use serde_json::Value;
 
 use crate::source::jsonl::LineDecoder;
-use crate::source::{antigravity, claude_code, codewhale, codex, reasonix, AgentEvent};
+use crate::source::{antigravity, claude_code, codewhale, codex, opencode, reasonix, AgentEvent};
 
 /// How the shared hook decoder derives the AgentId for this source. Moot for
 /// an alien-envelope source whose `custom` decoder claims every event (the
@@ -131,7 +131,14 @@ pub struct SourceDescriptor {
     pub caps: SourceCaps,
 }
 
-pub const REGISTRY: &[SourceDescriptor] = &[CLAUDE_CODE, CODEX, ANTIGRAVITY, REASONIX, CODEWHALE];
+pub const REGISTRY: &[SourceDescriptor] = &[
+    CLAUDE_CODE,
+    CODEX,
+    ANTIGRAVITY,
+    REASONIX,
+    CODEWHALE,
+    OPENCODE,
+];
 
 /// Linear scan — at most a handful of entries, called on slot creation and
 /// the per-tick sweep; a map would cost more in ceremony than it saves.
@@ -259,6 +266,35 @@ const CODEWHALE: SourceDescriptor = SourceDescriptor {
     },
 };
 
+const OPENCODE: SourceDescriptor = SourceDescriptor {
+    name: opencode::SOURCE_NAME,
+    label_prefix: "oc",
+    line_decoder: None,
+    hook: HookDecoding {
+        id_key: IdKey::TranscriptPathThenSessionId, // inert: custom claims all
+        custom: Some(opencode::decode_oc_hook_custom),
+    },
+    caps: SourceCaps {
+        // A clean per-session close fires `session.deleted` → SessionEnd, and an
+        // abrupt exit / TUI quit kills the opencode process → `hook::HookPidWatch`
+        // ends every bound sprite (the plugin stamps `_pid`). So there IS an exit
+        // signal — no Codex-style short-idle carve-out.
+        has_exit_signal: true,
+        // opencode sessions are persistent SQLite rows; a follow-up prompt
+        // continues the SAME session and emits NO new `session.created`. So a
+        // stale-swept session does NOT walk back in on the next prompt (unlike
+        // CodeWhale/Reasonix/Codex) — combined with `has_exit_signal` this keeps
+        // the normal long idle timeout, not the short-idle reaper.
+        resurrects_on_prompt: false,
+        // The `task` dispatch tool emits BOTH a `running` and a `completed`/`error`
+        // tool part (→ ActivityStart + ActivityEnd), so a delegation is NOT
+        // hook-silent; liveness also flows UP from the child session (its own
+        // sprite, parent-linked via `info.parentID`). No Waiting-class retention
+        // needed.
+        delegations_are_hook_silent: false,
+    },
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -305,9 +341,10 @@ mod tests {
         assert_eq!(ANTIGRAVITY.name, antigravity::SOURCE_NAME);
         assert_eq!(REASONIX.name, reasonix::SOURCE_NAME);
         assert_eq!(CODEWHALE.name, codewhale::SOURCE_NAME);
+        assert_eq!(OPENCODE.name, opencode::SOURCE_NAME);
         // Hand-enumerated above — the len pin turns "forgot the new row's
         // assert" from a silent gap into a loud failure.
-        assert_eq!(REGISTRY.len(), 5, "new row? add its name-pin assert above");
+        assert_eq!(REGISTRY.len(), 6, "new row? add its name-pin assert above");
     }
 
     #[test]

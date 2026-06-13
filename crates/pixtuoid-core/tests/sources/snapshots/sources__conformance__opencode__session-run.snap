@@ -1,0 +1,40 @@
+---
+source: crates/pixtuoid-core/tests/sources/conformance.rs
+expression: events
+---
+- SessionStart:
+    agent_id: 15020910450894780276
+    source: opencode
+    session_id: ses_demo
+    cwd: /Users/dev/ocproj
+    parent_id: ~
+- Identity:
+    agent_id: 15020910450894780276
+    source: opencode
+    session_id: ses_demo
+    cwd: ~
+- ActivityStart:
+    agent_id: 15020910450894780276
+    tool_use_id: call_1
+    detail:
+      Generic:
+        display: "bash: ls -la"
+- Identity:
+    agent_id: 15020910450894780276
+    source: opencode
+    session_id: ses_demo
+    cwd: ~
+- ActivityEnd:
+    agent_id: 15020910450894780276
+    tool_use_id: call_1
+- Identity:
+    agent_id: 15020910450894780276
+    source: opencode
+    session_id: ses_demo
+    cwd: ~
+- Waiting:
+    agent_id: 15020910450894780276
+    reason: "Run bash: rm -rf build"
+- SessionEnd:
+    agent_id: 15020910450894780276
+    as_child: false

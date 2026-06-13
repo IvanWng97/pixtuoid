@@ -483,5 +483,10 @@ pub static TOKYO_NIGHT: Theme = Theme {
             g: 0xc0,
             b: 0xb0,
         }, // tokyo-night teal
+        opencode: Rgb {
+            r: 0xf7,
+            g: 0x76,
+            b: 0x8e,
+        }, // tokyo-night red
     },
 };
