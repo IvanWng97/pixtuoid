@@ -175,12 +175,12 @@ fn build_rows_makes_every_source_with_a_target_actionable() {
         let row = rows
             .iter()
             .find(|r| r.source_id == d.name)
-            .unwrap_or_else(|| panic!("no Status row for registered source {:?}", d.name));
+            .unwrap_or_else(|| panic!("no Connection row for registered source {:?}", d.name));
         let has_target = crate::install::target::by_source(d.name).is_some();
         if has_target {
             assert!(
                 row.target.is_some() && row.hooks != HookState::JsonlNoHooks,
-                "source {:?} has an install target but its Status row is non-actionable \
+                "source {:?} has an install target but its Connection row is non-actionable \
                  (target={:?}, hooks={:?}) — the registry/target join drifted",
                 d.name,
                 row.target.map(|t| t.name),

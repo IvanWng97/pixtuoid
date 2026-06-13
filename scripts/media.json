@@ -29,7 +29,7 @@
   ]
  },
  {
-  "id": "status",
+  "id": "connection",
   "kind": "render",
   "targets": [
    "docs"
@@ -41,7 +41,7 @@
   "theme": "normal",
   "scale": 2,
   "extra": [
-   "--status"
+   "--connection"
   ]
  },
  {

@@ -62,13 +62,13 @@ macro_rules! make_draw_ctx {
             dashboard_rows: &[],
             dashboard_selected: None,
             dashboard_scroll: 0,
-            status_open: false,
-            status_rows: &[],
-            status_live: &[],
-            status_selected: 0,
-            status_confirm: None,
-            status_result: None,
-            status_socket_line: "",
+            connection_open: false,
+            connection_rows: &[],
+            connection_live: &[],
+            connection_selected: 0,
+            connection_confirm: None,
+            connection_result: None,
+            connection_socket_line: "",
         };
     };
 

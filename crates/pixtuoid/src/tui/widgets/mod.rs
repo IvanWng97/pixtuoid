@@ -1,13 +1,14 @@
 //! Ratatui widget paint functions: footer, labels, wall display, tooltips,
 //! ticker queue, and theme picker overlay.
 
+mod connection;
 mod dashboard;
 mod help;
 mod hud;
 mod panel;
-mod status;
 mod tooltip;
 
+pub(super) use connection::paint_connection_panel;
 pub(super) use dashboard::paint_dashboard;
 pub(super) use help::paint_help_overlay;
 pub(super) use hud::{
@@ -15,7 +16,6 @@ pub(super) use hud::{
     paint_wall_display, version_popup_url_rect, VERSION_POPUP_URL,
 };
 pub(in crate::tui) use panel::{borderless_panel, PANEL_PAD_X, PANEL_PAD_Y};
-pub(super) use status::paint_status_panel;
 // `pub`: the snapshot example reuses the real formatter for its
 // --source-warning screenshots so the wording cannot drift from production
 // (the pixtuoid lib target is not a semver surface).
@@ -53,7 +53,7 @@ fn centered_in(bounds: Rect, desired_w: u16, desired_h: u16) -> Rect {
 }
 
 /// Truncate to `max` characters (char-safe), appending `…` when clipped. Shared
-/// by the dashboard + status popup row painters (display-column safe — never
+/// by the dashboard + connection popup row painters (display-column safe — never
 /// slices a multi-byte glyph).
 fn truncate(s: &str, max: usize) -> String {
     if s.chars().count() <= max {

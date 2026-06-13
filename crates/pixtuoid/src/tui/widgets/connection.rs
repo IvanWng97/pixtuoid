@@ -1,5 +1,5 @@
-//! The Status panel painter (ratatui). Pure presentation over the pre-built
-//! row list + per-frame live facet from `tui::status`; all model logic lives
+//! The Connection panel painter (ratatui). Pure presentation over the pre-built
+//! row list + per-frame live facet from `tui::connection`; all model logic lives
 //! there. Borderless (via `panel::borderless_panel`), painted over the scene in
 //! both the normal and floor-transition draw paths.
 
@@ -11,20 +11,20 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
 use super::{borderless_panel, centered_in, to_color, truncate};
-use crate::tui::status::{no_action_hint, HookState, LiveInfo, StatusRow};
+use crate::tui::connection::{no_action_hint, ConnectionRow, HookState, LiveInfo};
 use crate::tui::theme::Theme;
 
 /// Popup width (clamped to the terminal by `centered_in`).
-const STATUS_POPUP_W: u16 = 66;
+const CONNECTION_POPUP_W: u16 = 66;
 /// Char budget for the display-name column (after the badge).
 const NAME_W: usize = 13;
 /// Char budget for the hooks-state column.
 const HOOKS_W: usize = 11;
 
 #[allow(clippy::too_many_arguments)]
-pub(in crate::tui) fn paint_status_panel(
+pub(in crate::tui) fn paint_connection_panel(
     f: &mut ratatui::Frame<'_>,
-    rows: &[StatusRow],
+    rows: &[ConnectionRow],
     live: &[LiveInfo],
     selected: usize,
     confirm: Option<usize>,
@@ -37,13 +37,13 @@ pub(in crate::tui) fn paint_status_panel(
     // + detail (1) + footer (1) — the title row is drawn by borderless_panel.
     let area = centered_in(
         bounds,
-        STATUS_POPUP_W + 2 * super::PANEL_PAD_X,
+        CONNECTION_POPUP_W + 2 * super::PANEL_PAD_X,
         rows.len() as u16 + 7 + 2 * super::PANEL_PAD_Y,
     );
     if area.width < 4 || area.height < 3 {
         return;
     }
-    let inner = borderless_panel(f, area, Some("Status \u{2014} c/esc close"), theme);
+    let inner = borderless_panel(f, area, Some("Connection \u{2014} c/esc close"), theme);
 
     let dim = Style::default().fg(to_color(theme.ui.label_idle));
     let mut lines: Vec<Line> = Vec::with_capacity(rows.len() + 6);
@@ -56,7 +56,7 @@ pub(in crate::tui) fn paint_status_panel(
     )));
     for (i, row) in rows.iter().enumerate() {
         let li = live.get(i).cloned().unwrap_or_default();
-        lines.push(status_line(row, &li, selected == i, theme));
+        lines.push(connection_line(row, &li, selected == i, theme));
     }
     lines.push(Line::from(""));
 
@@ -90,8 +90,8 @@ pub(in crate::tui) fn paint_status_panel(
 
 /// One CLI row: a colored badge (never reversed), the name (tinted/reversed by
 /// selection), the hooks-setup column, and the live-connection column.
-fn status_line(
-    row: &StatusRow,
+fn connection_line(
+    row: &ConnectionRow,
     live: &LiveInfo,
     is_selected: bool,
     theme: &Theme,
@@ -174,11 +174,11 @@ fn fmt_age(d: Duration) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tui::status::{HookFacts, RowInput};
+    use crate::tui::connection::{HookFacts, RowInput};
     use crate::tui::theme::NORMAL;
 
-    fn row(source_id: &'static str, label_prefix: &'static str, hooks: HookState) -> StatusRow {
-        StatusRow {
+    fn row(source_id: &'static str, label_prefix: &'static str, hooks: HookState) -> ConnectionRow {
+        ConnectionRow {
             source_id,
             label_prefix,
             display_name: "Name",
@@ -189,9 +189,9 @@ mod tests {
     }
 
     #[test]
-    fn status_line_badge_uses_source_color_and_is_never_reversed() {
+    fn connection_line_badge_uses_source_color_and_is_never_reversed() {
         let r = row("codex", "cx", HookState::Off);
-        let line = status_line(&r, &LiveInfo::default(), true, &NORMAL);
+        let line = connection_line(&r, &LiveInfo::default(), true, &NORMAL);
         let badge = &line.spans[1];
         assert_eq!(badge.style.fg, Some(to_color(NORMAL.source.codex)));
         assert!(!badge.style.add_modifier.contains(Modifier::REVERSED));
@@ -203,14 +203,14 @@ mod tests {
     }
 
     #[test]
-    fn status_line_renders_hooks_and_live_text() {
+    fn connection_line_renders_hooks_and_live_text() {
         let r = row("claude", "cc", HookState::On);
         let live = LiveInfo {
             agents: 2,
             last_event_age: Some(Duration::from_secs(3)),
             dead: false,
         };
-        let line = status_line(&r, &live, false, &NORMAL);
+        let line = connection_line(&r, &live, false, &NORMAL);
         let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(text.contains("[cc]"));
         assert!(text.contains("on"));
@@ -219,22 +219,22 @@ mod tests {
     }
 
     #[test]
-    fn status_line_dead_transport_overrides_live_column() {
+    fn connection_line_dead_transport_overrides_live_column() {
         let r = row("codex", "cx", HookState::On);
         let live = LiveInfo {
             agents: 1,
             last_event_age: Some(Duration::from_secs(1)),
             dead: true,
         };
-        let line = status_line(&r, &live, false, &NORMAL);
+        let line = connection_line(&r, &live, false, &NORMAL);
         let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(text.contains("transport died"));
     }
 
     #[test]
-    fn status_line_singular_vs_plural_agents() {
+    fn connection_line_singular_vs_plural_agents() {
         let r = row("claude", "cc", HookState::On);
-        let one = status_line(
+        let one = connection_line(
             &r,
             &LiveInfo {
                 agents: 1,
@@ -251,11 +251,11 @@ mod tests {
 
     // Registry-bridge pin: every registered source gets a real badge color, not
     // the idle fallback — a new source added to REGISTRY without a matching arm
-    // in `status_line` would render in the idle color (mirrors the dashboard's
+    // in `connection_line` would render in the idle color (mirrors the dashboard's
     // `every_registry_source_has_a_non_fallback_badge_color`).
     #[test]
     fn every_registry_source_has_a_non_fallback_badge_color() {
-        use crate::tui::status::build_rows_from;
+        use crate::tui::connection::build_rows_from;
         use pixtuoid_core::source::registry::REGISTRY;
         let fallback = to_color(NORMAL.ui.label_idle);
         // Build through the real builder so the prefixes come from the registry.
@@ -273,11 +273,11 @@ mod tests {
             })
             .collect();
         for sr in build_rows_from(inputs) {
-            let line = status_line(&sr, &LiveInfo::default(), false, &NORMAL);
+            let line = connection_line(&sr, &LiveInfo::default(), false, &NORMAL);
             assert_ne!(
                 line.spans[1].style.fg,
                 Some(fallback),
-                "source {:?} (prefix {:?}) renders the idle FALLBACK badge — add its arm to status_line",
+                "source {:?} (prefix {:?}) renders the idle FALLBACK badge — add its arm to connection_line",
                 sr.source_id,
                 sr.label_prefix,
             );

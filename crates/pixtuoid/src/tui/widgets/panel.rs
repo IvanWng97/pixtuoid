@@ -2,7 +2,7 @@
 //! solid-bg `Block` with NO border — readability over the busy pixel office
 //! without the outline — plus an optional bold inner title line, and returns the
 //! inner content `Rect` the caller paints into. Replaces every popup's bordered
-//! Block (help / version / theme picker / dashboard / tooltips / status).
+//! Block (help / version / theme picker / dashboard / tooltips / connection).
 
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
@@ -96,11 +96,11 @@ mod tests {
 
     #[test]
     fn borderless_panel_has_no_border_glyphs_and_renders_title() {
-        let s = render_to_string(40, 8, Some("Status"));
+        let s = render_to_string(40, 8, Some("Connection"));
         for g in ['╭', '╮', '╰', '╯', '│', '─', '┌', '┐', '└', '┘'] {
             assert!(!s.contains(g), "panel must be borderless, found {g:?}");
         }
-        assert!(s.contains("Status"), "title must render in the body");
+        assert!(s.contains("Connection"), "title must render in the body");
     }
 
     #[test]

@@ -173,11 +173,11 @@ struct SnapshotArgs {
     #[arg(long, conflicts_with_all = ["anim", "gif", "live", "empty", "pets"])]
     dashboard: bool,
 
-    /// Render with the Status panel open over a representative mixed fixture
-    /// (per-CLI hook state + live connection). Drives the status demo image +
+    /// Render with the Connection panel open over a representative mixed fixture
+    /// (per-CLI hook state + live connection). Drives the connection demo image +
     /// borderless visual checks.
     #[arg(long, conflicts_with_all = ["anim", "gif", "live", "empty", "pets", "dashboard"])]
-    status: bool,
+    connection: bool,
 
     /// Animation-verification mode: render ONE agent walking to + settling at a
     /// chosen furniture, so the approach→settle reads correctly (no pop, no
@@ -469,13 +469,13 @@ fn main() -> Result<()> {
         (Vec::new(), None)
     };
 
-    // Representative Status-panel fixture (deterministic — no FS probes), so the
+    // Representative Connection-panel fixture (deterministic — no FS probes), so the
     // demo image is reproducible across machines.
-    let (status_rows, status_live, status_socket_line) = if args.status {
-        use pixtuoid::tui::status::{HookState, LiveInfo, StatusRow};
+    let (connection_rows, connection_live, connection_socket_line) = if args.connection {
+        use pixtuoid::tui::connection::{ConnectionRow, HookState, LiveInfo};
         use std::path::PathBuf;
         use std::time::Duration;
-        let mk = |source_id, label_prefix, display_name, hooks, cfg: Option<&str>| StatusRow {
+        let mk = |source_id, label_prefix, display_name, hooks, cfg: Option<&str>| ConnectionRow {
             source_id,
             label_prefix,
             display_name,
@@ -588,13 +588,13 @@ fn main() -> Result<()> {
         dashboard_rows: &dash_rows,
         dashboard_selected: dash_selected,
         dashboard_scroll: 0,
-        status_open: args.status,
-        status_rows: &status_rows,
-        status_live: &status_live,
-        status_selected: 0,
-        status_confirm: None,
-        status_result: None,
-        status_socket_line: &status_socket_line,
+        connection_open: args.connection,
+        connection_rows: &connection_rows,
+        connection_live: &connection_live,
+        connection_selected: 0,
+        connection_confirm: None,
+        connection_result: None,
+        connection_socket_line: &connection_socket_line,
     };
     draw_scene(&mut term, &scene, &pack, now, &mut draw_ctx)?;
 
@@ -1710,13 +1710,13 @@ fn save_as_gif(
             dashboard_rows: &[],
             dashboard_selected: None,
             dashboard_scroll: 0,
-            status_open: false,
-            status_rows: &[],
-            status_live: &[],
-            status_selected: 0,
-            status_confirm: None,
-            status_result: None,
-            status_socket_line: "",
+            connection_open: false,
+            connection_rows: &[],
+            connection_live: &[],
+            connection_selected: 0,
+            connection_confirm: None,
+            connection_result: None,
+            connection_socket_line: "",
         };
         draw_scene(term, scene, pack, now, &mut draw_ctx)?;
         if i < skip_frames {

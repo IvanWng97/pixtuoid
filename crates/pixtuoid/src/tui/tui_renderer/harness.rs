@@ -2175,12 +2175,12 @@ fn dashboard_popup_renders_labels_states_and_live_tool() {
 }
 
 #[test]
-fn status_panel_renders_both_facets_borderless() {
-    use crate::tui::status::{HookState, LiveInfo, StatusRow};
+fn connection_panel_renders_both_facets_borderless() {
+    use crate::tui::connection::{ConnectionRow, HookState, LiveInfo};
     let mut r = build(120, 44, vec![]);
     let scene = scene_with(vec![], 16);
     let rows = vec![
-        StatusRow {
+        ConnectionRow {
             source_id: "claude",
             label_prefix: "cc",
             display_name: "Claude Code",
@@ -2188,7 +2188,7 @@ fn status_panel_renders_both_facets_borderless() {
             config_path: Some(std::path::PathBuf::from("~/.claude/settings.json")),
             target: None,
         },
-        StatusRow {
+        ConnectionRow {
             source_id: "antigravity",
             label_prefix: "ag",
             display_name: "Antigravity",
@@ -2209,7 +2209,7 @@ fn status_panel_renders_both_facets_borderless() {
             dead: false,
         },
     ];
-    r.set_status_frame(
+    r.set_connection_frame(
         true,
         rows,
         live,
@@ -2221,7 +2221,7 @@ fn status_panel_renders_both_facets_borderless() {
     r.render(&scene, &pack(), t0()).unwrap();
 
     let text = frame_text(r.frame_buffer());
-    assert!(text.contains("Status"), "title missing:\n{text}");
+    assert!(text.contains("Connection"), "title missing:\n{text}");
     assert!(text.contains("[cc]"), "cc badge missing:\n{text}");
     assert!(text.contains("[ag]"), "ag badge missing:\n{text}");
     assert!(text.contains("2 agents"), "live count missing:\n{text}");
@@ -2233,17 +2233,17 @@ fn status_panel_renders_both_facets_borderless() {
     ] {
         assert!(
             !popup.contains(g),
-            "status panel must be borderless, found {g}:\n{popup}"
+            "connection panel must be borderless, found {g}:\n{popup}"
         );
     }
 }
 
 #[test]
-fn status_panel_armed_shows_confirm_prompt() {
-    use crate::tui::status::{HookState, LiveInfo, StatusRow};
+fn connection_panel_armed_shows_confirm_prompt() {
+    use crate::tui::connection::{ConnectionRow, HookState, LiveInfo};
     let mut r = build(120, 44, vec![]);
     let scene = scene_with(vec![], 16);
-    let rows = vec![StatusRow {
+    let rows = vec![ConnectionRow {
         source_id: "codex",
         label_prefix: "cx",
         display_name: "Codex",
@@ -2251,7 +2251,7 @@ fn status_panel_armed_shows_confirm_prompt() {
         config_path: Some(std::path::PathBuf::from("~/.codex/config.toml")),
         target: None,
     }];
-    r.set_status_frame(
+    r.set_connection_frame(
         true,
         rows,
         vec![LiveInfo::default()],

@@ -1,6 +1,6 @@
-//! The Status panel: a modal listing every agent CLI with its hook-setup state
+//! The Connection panel: a modal listing every agent CLI with its hook-setup state
 //! (install/uninstall actionable) and its live-connection state. This module is
-//! the PURE model — no ratatui. The painter lives in `tui::widgets::status`; the
+//! the PURE model — no ratatui. The painter lives in `tui::widgets::connection`; the
 //! event-loop wiring lives in `tui::mod`.
 //!
 //! Rows are the UNION of install targets and registry sources, keyed on the
@@ -31,9 +31,9 @@ pub enum HookState {
     JsonlNoHooks,
 }
 
-/// One row in the Status list = one agent CLI.
+/// One row in the Connection list = one agent CLI.
 #[derive(Debug, Clone)]
-pub struct StatusRow {
+pub struct ConnectionRow {
     /// The core source id (registry `SourceDescriptor.name`, e.g. "claude-code")
     /// — the unifying key; joined to an install target via `Target.core_source`.
     pub source_id: &'static str,
@@ -48,7 +48,7 @@ pub struct StatusRow {
 }
 
 /// Live-connection facet, derived per frame from the scene snapshot. Aligned by
-/// index to `StatusUi.rows`.
+/// index to `ConnectionUi.rows`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LiveInfo {
     pub agents: usize,
@@ -58,10 +58,10 @@ pub struct LiveInfo {
     pub dead: bool,
 }
 
-/// Session-persistent Status UI state, owned by the event loop. Only `open`
+/// Session-persistent Connection UI state, owned by the event loop. Only `open`
 /// flips on close, so the cached rows + selection survive close/reopen.
 #[derive(Debug, Default)]
-pub struct StatusUi {
+pub struct ConnectionUi {
     pub open: bool,
     /// Index into the registry-stable `rows` (fixed order, rebuilt in place on
     /// open/action) — a plain `usize` is sound precisely because the row set
@@ -69,7 +69,7 @@ pub struct StatusUi {
     pub selected: usize,
     /// Cached HOOK facet — rebuilt on open + after each action (filesystem
     /// reads), NEVER per frame. The LIVE facet is recomputed per frame instead.
-    pub rows: Vec<StatusRow>,
+    pub rows: Vec<ConnectionRow>,
     /// `Some(row_idx)` ⇒ uninstall is armed on that row, awaiting y/n.
     pub confirm: Option<usize>,
     pub last_result: Option<String>,
@@ -104,7 +104,7 @@ fn display_name_for(source_id: &'static str) -> &'static str {
 }
 
 /// Pure row builder over injected facts — the testable core of `build_rows`.
-pub fn build_rows_from(inputs: Vec<RowInput>) -> Vec<StatusRow> {
+pub fn build_rows_from(inputs: Vec<RowInput>) -> Vec<ConnectionRow> {
     inputs
         .into_iter()
         .map(|input| {
@@ -122,7 +122,7 @@ pub fn build_rows_from(inputs: Vec<RowInput>) -> Vec<StatusRow> {
                 // No install target (Antigravity) — or facts missing (defensive).
                 _ => (HookState::JsonlNoHooks, None),
             };
-            StatusRow {
+            ConnectionRow {
                 source_id: input.source_id,
                 label_prefix: input.label_prefix,
                 display_name: input
@@ -139,7 +139,7 @@ pub fn build_rows_from(inputs: Vec<RowInput>) -> Vec<StatusRow> {
 /// Build the cached hook-facet rows from the registry + install targets.
 /// Performs filesystem reads (`is_present`/`has_hooks`/`default_config_path`) —
 /// call on open + after each action, NEVER per frame.
-pub fn build_rows() -> Vec<StatusRow> {
+pub fn build_rows() -> Vec<ConnectionRow> {
     use pixtuoid_core::source::registry::REGISTRY;
     let inputs = REGISTRY
         .iter()
@@ -194,7 +194,7 @@ pub fn live_for(
 /// The per-frame parallel `LiveInfo` vec aligned to `rows`.
 pub fn live_view(
     now: SystemTime,
-    rows: &[StatusRow],
+    rows: &[ConnectionRow],
     scene: &SceneState,
     health: &[SourceDeath],
 ) -> Vec<LiveInfo> {
@@ -204,7 +204,7 @@ pub fn live_view(
 }
 
 /// Move the selection one row up (`-1`) or down (`+1`), clamped at the ends.
-pub fn move_selection(rows: &[StatusRow], sel: usize, delta: i32) -> usize {
+pub fn move_selection(rows: &[ConnectionRow], sel: usize, delta: i32) -> usize {
     if rows.is_empty() {
         return 0;
     }
@@ -212,7 +212,7 @@ pub fn move_selection(rows: &[StatusRow], sel: usize, delta: i32) -> usize {
 }
 
 /// Detail-line hint when an action key lands on a row that can't be acted on.
-pub fn no_action_hint(row: &StatusRow) -> String {
+pub fn no_action_hint(row: &ConnectionRow) -> String {
     match row.hooks {
         HookState::JsonlNoHooks => {
             format!(
