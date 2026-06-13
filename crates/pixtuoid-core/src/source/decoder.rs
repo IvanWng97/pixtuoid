@@ -240,12 +240,18 @@ pub fn decode_hook_payload(v: Value) -> Result<Vec<AgentEvent>> {
                 reason: "permission".into(),
             },
         ]),
-        // Codex turn lifecycle. Verified live (Codex 0.135): the ONLY hook events
-        // that fire are UserPromptSubmit + Stop — SessionStart and PreToolUse do
-        // NOT fire. So UserPromptSubmit is our agent-creation signal: emit
-        // SessionStart from its cwd (idempotent in the reducer — ignored if the
-        // agent already exists). The fresh `last_event_at` makes the cx· agent
-        // show seated-thinking, so it reads as "working" right after a prompt.
+        // Codex agent-creation signal. Codex DOES fire SessionStart (carries
+        // session_id + cwd) and Pre/PostToolUse — but the tool hooks fire only
+        // for shell/apply_patch/MCP; ~25 other handlers (web_search, read_file,
+        // grep, …) fire nothing (openai/codex#20204), and hook firing is
+        // version-unstable: a `matcher="*"` group is silently dropped (hence the
+        // matcher-less install) and some builds emit no hooks at all
+        // (openai/codex#21639). So we DON'T trust the SessionStart hook alone —
+        // UserPromptSubmit ALSO emits SessionStart (idempotent in the reducer,
+        // ignored if the agent already exists), and the JSONL rollout stays the
+        // system of record for tool activity regardless. The fresh `last_event_at`
+        // makes the cx· agent show seated-thinking, so it reads as "working" right
+        // after a prompt.
         "UserPromptSubmit" => {
             let cwd = obj.get("cwd").and_then(|s| s.as_str()).unwrap_or("").into();
             Ok(vec![AgentEvent::SessionStart {
@@ -524,11 +530,12 @@ mod tests {
 
     #[test]
     fn codex_user_prompt_submit_creates_agent_via_session_start() {
-        // Codex 0.135 fires NO SessionStart/PreToolUse — only UserPromptSubmit +
-        // Stop (verified live). So UserPromptSubmit is the agent-creation signal:
-        // it carries source + cwd and decodes to a SessionStart the reducer turns
-        // into a cx· agent. No Identity attached — the SessionStart already
-        // carries full identity.
+        // UserPromptSubmit is a Codex agent-creation signal: it carries source +
+        // cwd and decodes to a SessionStart the reducer turns into a cx· agent. We
+        // emit it here IN ADDITION to Codex's own SessionStart hook because Codex
+        // hook firing is version-unstable (see the UserPromptSubmit arm), so the
+        // agent registers whether or not SessionStart fired. No Identity attached —
+        // the SessionStart already carries full identity.
         let ev = decode_single(json!({
             "hook_event_name": "UserPromptSubmit",
             "session_id": "codex-sess",
