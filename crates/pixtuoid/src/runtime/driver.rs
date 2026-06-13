@@ -57,6 +57,13 @@ async fn run_async(cfg: RunConfig) -> Result<()> {
     // watchable JSONL — their hook payloads ride the shared socket
     // ClaudeCodeSource binds, attributed per-payload by `_pixtuoid_source` — so
     // they are deliberately absent here.
+    // Resolve the bound socket (Unix) / pipe (Windows) BEFORE `socket` is moved
+    // into build_transcript_sources — the Status panel shows it. Same rule the CC
+    // source applies (explicit --socket override, else the default), so the panel
+    // can't disagree with the actually-bound path.
+    let socket_path = socket
+        .clone()
+        .unwrap_or_else(ClaudeCodeSource::default_socket_path);
     let transcript_sources = build_transcript_sources(socket, projects_root, codex_sessions_root);
 
     let (tx, rx) = mpsc::channel::<(Transport, AgentEvent)>(256);
@@ -101,6 +108,7 @@ async fn run_async(cfg: RunConfig) -> Result<()> {
             desk_cap,
             pets,
             health_rx,
+            socket_path,
         )
         .await
     }

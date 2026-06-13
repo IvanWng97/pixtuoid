@@ -12,6 +12,7 @@ pub mod pet;
 pub mod pixel_painter;
 pub mod pose;
 pub mod renderer;
+pub mod status;
 pub mod theme;
 pub mod tui_renderer;
 pub mod widgets;
@@ -47,6 +48,10 @@ struct KeyCtx {
     version_popup: bool,
     theme_picker: Option<usize>,
     dashboard_open: bool,
+    status_open: bool,
+    /// Whether the Status panel has an uninstall armed (awaiting y/n). Splits the
+    /// open-status dispatch into the armed (y/n only) vs unarmed (nav/actions) sub-tiers.
+    status_confirm: bool,
     n_themes: usize,
     n_floors: usize,
     current_floor: usize,
@@ -94,6 +99,21 @@ enum KeyAction {
     DashboardJump,
     /// `Esc`/`Tab`: close without jumping.
     DashboardClose,
+    /// Open/close the Status panel (`c`, from the normal scene; `c`/Esc closes).
+    ToggleStatus,
+    /// Status list navigation.
+    StatusUp,
+    StatusDown,
+    /// `i`: install the selected CLI's hooks (immediate, idempotent).
+    StatusInstall,
+    /// `u`: arm the uninstall confirm on the selected CLI.
+    StatusArmUninstall,
+    /// `y` while armed: run the uninstall.
+    StatusConfirm,
+    /// `n`/`Esc` while armed: cancel the arm (panel stays open).
+    StatusCancelConfirm,
+    /// `c`/`Esc` while unarmed: close the panel.
+    StatusClose,
 }
 
 /// Left-click pin toggle: if an agent is pinned, clear it; otherwise hit-test
@@ -157,6 +177,28 @@ fn dispatch_key(code: KeyCode, mods: KeyModifiers, ctx: KeyCtx) -> KeyAction {
             _ => KeyAction::None,
         };
     }
+    if ctx.status_open {
+        // Armed sub-tier: a uninstall is awaiting confirmation — only y/n/Esc
+        // (and the quit chord) act; nav/action keys are swallowed.
+        if ctx.status_confirm {
+            return match (code, mods) {
+                _ if is_quit_chord(code, mods) => KeyAction::Quit,
+                (KeyCode::Char('y'), _) => KeyAction::StatusConfirm,
+                (KeyCode::Char('n'), _) | (KeyCode::Esc, _) => KeyAction::StatusCancelConfirm,
+                _ => KeyAction::None,
+            };
+        }
+        return match (code, mods) {
+            _ if is_quit_chord(code, mods) => KeyAction::Quit,
+            // Bare `c` (not Ctrl+C — that hit the quit chord above) toggles closed.
+            (KeyCode::Esc, _) | (KeyCode::Char('c'), _) => KeyAction::StatusClose,
+            (KeyCode::Up, _) | (KeyCode::Char('k'), _) => KeyAction::StatusUp,
+            (KeyCode::Down, _) | (KeyCode::Char('j'), _) => KeyAction::StatusDown,
+            (KeyCode::Char('i'), _) => KeyAction::StatusInstall,
+            (KeyCode::Char('u'), _) => KeyAction::StatusArmUninstall,
+            _ => KeyAction::None,
+        };
+    }
     if ctx.dashboard_open {
         return match (code, mods) {
             _ if is_quit_chord(code, mods) => KeyAction::Quit,
@@ -190,6 +232,8 @@ fn dispatch_key(code: KeyCode, mods: KeyModifiers, ctx: KeyCtx) -> KeyAction {
         KeyCode::Char('t') => KeyAction::OpenThemePicker,
         KeyCode::Char('?') => KeyAction::ToggleHelp,
         KeyCode::Tab => KeyAction::ToggleDashboard,
+        // Bare `c` only — `Ctrl+C` already returned Quit at the top of this arm.
+        KeyCode::Char('c') => KeyAction::ToggleStatus,
         // Dev-only walkable/approach/route overlay — gated out of release builds.
         #[cfg(debug_assertions)]
         KeyCode::Char('w') => KeyAction::ToggleWalkableDebug,
@@ -265,6 +309,9 @@ pub async fn run_tui(
     mut source_health: tokio::sync::watch::Receiver<
         Vec<pixtuoid_core::source::manager::SourceDeath>,
     >,
+    // The resolved hook socket (Unix) / named pipe (Windows) the daemon bound,
+    // shown in the Status panel's connection line.
+    socket_path: std::path::PathBuf,
 ) -> Result<()> {
     let pack = embedded_pack::load_sprite_pack(pack_dir)?;
     let term = setup_terminal()?;
@@ -296,6 +343,7 @@ pub async fn run_tui(
         .position(|t| std::ptr::eq(*t, theme))
         .unwrap_or(0);
     let mut dashboard_ui = dashboard::DashboardUi::default();
+    let mut status_ui = status::StatusUi::default();
 
     let tick = Duration::from_millis(33);
     let result: Result<()> = (async {
@@ -354,9 +402,10 @@ pub async fn run_tui(
             }
             renderer.set_theme_picker(theme_picker);
             renderer.set_version_popup(version_popup, now);
-            renderer.set_source_warning(widgets::source_warning_message(
-                &source_health.borrow_and_update(),
-            ));
+            // Capture the health snapshot ONCE this frame — both the footer
+            // warning and the Status panel's per-source `dead` flag read it.
+            let health = source_health.borrow_and_update().clone();
+            renderer.set_source_warning(widgets::source_warning_message(&health));
             // Mirror the dashboard frame: while open, rebuild the rows from the
             // live snapshot, re-anchor the selection by AgentId (an agent may
             // have exited), and keep it in the scroll viewport. Closed → push an
@@ -378,6 +427,33 @@ pub async fn run_tui(
                 );
             } else {
                 renderer.set_dashboard_frame(false, Vec::new(), dashboard_ui.selected, 0);
+            }
+            // Mirror the Status frame: the HOOK facet (`status_ui.rows`) is cached
+            // (rebuilt on open + after actions, NOT per frame — it does FS reads);
+            // only the LIVE facet + socket line recompute here from the snapshot.
+            if status_ui.open {
+                status_ui.selected = status::move_selection(&status_ui.rows, status_ui.selected, 0);
+                let live = status::live_view(now, &status_ui.rows, &snapshot, &health);
+                let socket_line = format!("socket  {}  (listening)", socket_path.display());
+                renderer.set_status_frame(
+                    true,
+                    status_ui.rows.clone(),
+                    live,
+                    status_ui.selected,
+                    status_ui.confirm,
+                    status_ui.last_result.clone(),
+                    socket_line,
+                );
+            } else {
+                renderer.set_status_frame(
+                    false,
+                    Vec::new(),
+                    Vec::new(),
+                    0,
+                    None,
+                    None,
+                    String::new(),
+                );
             }
             renderer.render(&snapshot, &pack, now)?;
 
@@ -425,6 +501,8 @@ pub async fn run_tui(
                             version_popup,
                             theme_picker,
                             dashboard_open: dashboard_ui.open,
+                            status_open: status_ui.open,
+                            status_confirm: status_ui.confirm.is_some(),
                             n_themes: theme::ALL_THEMES.len(),
                             n_floors: crate::tui::floor::num_floors(&snapshot),
                             current_floor: renderer.current_floor(),
@@ -542,6 +620,93 @@ pub async fn run_tui(
                                     }
                                 }
                                 dashboard_ui.open = false;
+                            }
+                            KeyAction::ToggleStatus => {
+                                status_ui.open = !status_ui.open;
+                                status_ui.confirm = None;
+                                if status_ui.open {
+                                    // Cached hook facet: FS reads happen HERE (on
+                                    // open) + after each action, never per frame.
+                                    status_ui.rows = status::build_rows();
+                                    status_ui.selected = status::move_selection(
+                                        &status_ui.rows,
+                                        status_ui.selected,
+                                        0,
+                                    );
+                                    status_ui.last_result = None;
+                                }
+                            }
+                            KeyAction::StatusUp => {
+                                status_ui.selected =
+                                    status::move_selection(&status_ui.rows, status_ui.selected, -1);
+                                status_ui.last_result = None;
+                            }
+                            KeyAction::StatusDown => {
+                                status_ui.selected =
+                                    status::move_selection(&status_ui.rows, status_ui.selected, 1);
+                                status_ui.last_result = None;
+                            }
+                            KeyAction::StatusInstall => {
+                                // Copy the fields out before any rebuild of `rows`
+                                // (which would invalidate a `&StatusRow` borrow).
+                                let action = status_ui
+                                    .rows
+                                    .get(status_ui.selected)
+                                    .map(|r| (r.target, r.display_name, status::no_action_hint(r)));
+                                if let Some((target, name, hint)) = action {
+                                    match target {
+                                        Some(t) => {
+                                            let res =
+                                                match crate::install::install_target(t, None, None)
+                                                {
+                                                    Ok(r) => {
+                                                        status::format_install_result(&r, name)
+                                                    }
+                                                    Err(e) => {
+                                                        format!("{name}: install failed — {e:#}")
+                                                    }
+                                                };
+                                            status_ui.last_result = Some(res);
+                                            status_ui.rows = status::build_rows();
+                                        }
+                                        None => status_ui.last_result = Some(hint),
+                                    }
+                                }
+                            }
+                            KeyAction::StatusArmUninstall => {
+                                let info = status_ui.rows.get(status_ui.selected).map(|r| {
+                                    (
+                                        r.target.is_some() && r.hooks == status::HookState::On,
+                                        status::no_action_hint(r),
+                                    )
+                                });
+                                if let Some((armable, hint)) = info {
+                                    if armable {
+                                        status_ui.confirm = Some(status_ui.selected);
+                                    } else {
+                                        status_ui.last_result = Some(hint);
+                                    }
+                                }
+                            }
+                            KeyAction::StatusConfirm => {
+                                if let Some(idx) = status_ui.confirm {
+                                    let action =
+                                        status_ui.rows.get(idx).map(|r| (r.target, r.display_name));
+                                    if let Some((Some(t), name)) = action {
+                                        let res = match crate::install::uninstall_target(t, None) {
+                                            Ok(r) => status::format_uninstall_result(&r, name),
+                                            Err(e) => format!("{name}: uninstall failed — {e:#}"),
+                                        };
+                                        status_ui.last_result = Some(res);
+                                        status_ui.rows = status::build_rows();
+                                    }
+                                }
+                                status_ui.confirm = None;
+                            }
+                            KeyAction::StatusCancelConfirm => status_ui.confirm = None,
+                            KeyAction::StatusClose => {
+                                status_ui.open = false;
+                                status_ui.confirm = None;
                             }
                         }
                     }
@@ -680,6 +845,8 @@ mod dispatch_tests {
             version_popup: false,
             theme_picker: None,
             dashboard_open: false,
+            status_open: false,
+            status_confirm: false,
             n_themes: 6,
             n_floors: 3,
             current_floor: 1,
@@ -950,5 +1117,107 @@ mod dispatch_tests {
             ..ctx()
         };
         assert_eq!(dispatch_key(KeyCode::Tab, NONE, p), KeyAction::None);
+    }
+
+    #[test]
+    fn c_opens_status_from_normal_scene() {
+        assert_eq!(
+            dispatch_key(KeyCode::Char('c'), NONE, ctx()),
+            KeyAction::ToggleStatus
+        );
+        // Ctrl+C remains the quit chord, never the status toggle.
+        assert_eq!(
+            dispatch_key(KeyCode::Char('c'), CTRL, ctx()),
+            KeyAction::Quit
+        );
+    }
+
+    #[test]
+    fn status_tier_maps_nav_install_uninstall_close() {
+        let s = KeyCtx {
+            status_open: true,
+            ..ctx()
+        };
+        assert_eq!(dispatch_key(KeyCode::Up, NONE, s), KeyAction::StatusUp);
+        assert_eq!(
+            dispatch_key(KeyCode::Char('k'), NONE, s),
+            KeyAction::StatusUp
+        );
+        assert_eq!(dispatch_key(KeyCode::Down, NONE, s), KeyAction::StatusDown);
+        assert_eq!(
+            dispatch_key(KeyCode::Char('j'), NONE, s),
+            KeyAction::StatusDown
+        );
+        assert_eq!(
+            dispatch_key(KeyCode::Char('i'), NONE, s),
+            KeyAction::StatusInstall
+        );
+        assert_eq!(
+            dispatch_key(KeyCode::Char('u'), NONE, s),
+            KeyAction::StatusArmUninstall
+        );
+        assert_eq!(
+            dispatch_key(KeyCode::Char('c'), NONE, s),
+            KeyAction::StatusClose
+        );
+        assert_eq!(dispatch_key(KeyCode::Esc, NONE, s), KeyAction::StatusClose);
+        // Quit chord passes through; unarmed swallows y/n.
+        assert_eq!(dispatch_key(KeyCode::Char('q'), NONE, s), KeyAction::Quit);
+        assert_eq!(dispatch_key(KeyCode::Char('c'), CTRL, s), KeyAction::Quit);
+        assert_eq!(dispatch_key(KeyCode::Char('y'), NONE, s), KeyAction::None);
+        assert_eq!(dispatch_key(KeyCode::Char('n'), NONE, s), KeyAction::None);
+    }
+
+    #[test]
+    fn status_armed_tier_maps_yn_and_swallows_nav() {
+        let s = KeyCtx {
+            status_open: true,
+            status_confirm: true,
+            ..ctx()
+        };
+        assert_eq!(
+            dispatch_key(KeyCode::Char('y'), NONE, s),
+            KeyAction::StatusConfirm
+        );
+        assert_eq!(
+            dispatch_key(KeyCode::Char('n'), NONE, s),
+            KeyAction::StatusCancelConfirm
+        );
+        assert_eq!(
+            dispatch_key(KeyCode::Esc, NONE, s),
+            KeyAction::StatusCancelConfirm
+        );
+        // Armed swallows navigation + action keys.
+        for k in [
+            KeyCode::Char('j'),
+            KeyCode::Char('k'),
+            KeyCode::Char('i'),
+            KeyCode::Char('u'),
+        ] {
+            assert_eq!(dispatch_key(k, NONE, s), KeyAction::None);
+        }
+        // Quit chord still quits even while armed.
+        assert_eq!(dispatch_key(KeyCode::Char('c'), CTRL, s), KeyAction::Quit);
+    }
+
+    #[test]
+    fn status_precedence_help_version_win_and_status_swallows_tab() {
+        // help / version tiers precede the status tier — bare `c` does nothing.
+        let h = KeyCtx {
+            help_open: true,
+            ..ctx()
+        };
+        assert_eq!(dispatch_key(KeyCode::Char('c'), NONE, h), KeyAction::None);
+        let v = KeyCtx {
+            version_popup: true,
+            ..ctx()
+        };
+        assert_eq!(dispatch_key(KeyCode::Char('c'), NONE, v), KeyAction::None);
+        // status precedes dashboard: with status open, Tab is swallowed.
+        let s = KeyCtx {
+            status_open: true,
+            ..ctx()
+        };
+        assert_eq!(dispatch_key(KeyCode::Tab, NONE, s), KeyAction::None);
     }
 }

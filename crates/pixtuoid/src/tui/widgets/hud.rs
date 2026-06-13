@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::time::SystemTime;
 
-use pixtuoid_core::sprite::Rgb;
 use pixtuoid_core::state::ActivityState;
 use pixtuoid_core::SceneState;
 use ratatui::layout::Rect;
@@ -9,31 +8,13 @@ use ratatui::style::{Color, Style};
 use ratatui::text::Span;
 use ratatui::widgets::Paragraph;
 
-use super::{centered_in, compact_hms, to_color, TickerQueue};
+use super::{centered_in, compact_hms, to_color, TickerQueue, PANEL_PAD_X, PANEL_PAD_Y};
 use crate::tui::renderer::clip_widget_rect;
 
 /// The two colors that characterize a theme in the picker swatch: its
 /// accent (`neon_brand`) and its dominant office surface (`carpet_base`).
 fn theme_swatch(t: &crate::tui::theme::Theme) -> (Color, Color) {
     (to_color(t.ui.neon_brand), to_color(t.surface.carpet_base))
-}
-
-/// Border glow color for the version popup: a ~3s sine pulse that lerps
-/// from 60% to 100% of `brand` toward `bg`, so the frame breathes without
-/// ever dropping so dim it reads as "off". Deterministic in `now`.
-fn pulse_border_color(bg: Rgb, brand: Rgb, now: SystemTime) -> Color {
-    let ms = now
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0);
-    let phase = (ms % 3000) as f32 / 3000.0 * std::f32::consts::TAU;
-    let t = (phase.sin() * 0.5 + 0.5) * 0.4 + 0.6;
-    let lerp = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * t).round() as u8;
-    Color::Rgb(
-        lerp(bg.r, brand.r),
-        lerp(bg.g, brand.g),
-        lerp(bg.b, brand.b),
-    )
 }
 
 pub(in crate::tui) fn paint_theme_picker(
@@ -45,15 +26,17 @@ pub(in crate::tui) fn paint_theme_picker(
     use crate::tui::theme;
     use ratatui::style::Modifier;
     use ratatui::text::{Line, Span as TSpan};
-    use ratatui::widgets::{Block, Borders, Clear};
 
-    // `centered_in` clamps to bounds.width: `Clear::render` (unlike
-    // Block/Paragraph) does not intersect with the buffer area, so an
-    // over-wide `area` panics on narrow terminals. The floor-transition paint
-    // path has no layout gate, so this is reachable at widths the normal path
-    // rejects.
-    let area = centered_in(bounds, 28, theme::ALL_THEMES.len() as u16 + 2);
-    f.render_widget(Clear, area);
+    // `centered_in` clamps to bounds.width: `borderless_panel`'s `Clear` (unlike
+    // Block/Paragraph) does not intersect with the buffer area, so an over-wide
+    // `area` panics on narrow terminals. The floor-transition paint path has no
+    // layout gate, so this is reachable at widths the normal path rejects.
+    // Borderless: 1 title row + the theme rows (no top/bottom border).
+    let area = centered_in(
+        bounds,
+        28 + 2 * PANEL_PAD_X,
+        theme::ALL_THEMES.len() as u16 + 1 + 2 * PANEL_PAD_Y,
+    );
     let items: Vec<Line> = theme::ALL_THEMES
         .iter()
         .enumerate()
@@ -78,12 +61,13 @@ pub(in crate::tui) fn paint_theme_picker(
             ])
         })
         .collect();
-    let block = Block::default()
-        .title(" Theme [\u{2191}\u{2193}/jk] Enter/Esc ")
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(to_color(theme.ui.neon_brand)))
-        .style(Style::default().bg(to_color(theme.ui.tooltip_bg)));
-    f.render_widget(Paragraph::new(items).block(block), area);
+    let inner = super::borderless_panel(
+        f,
+        area,
+        Some("Theme [\u{2191}\u{2193}/jk] Enter/Esc"),
+        theme,
+    );
+    f.render_widget(Paragraph::new(items), inner);
 }
 
 /// One-line footer warning for dead sources (#157); `None` while healthy.
@@ -438,9 +422,12 @@ const URL_PREFIX: &str = "  More details: ";
 /// w_full/h_full to `bounds` BEFORE scaling, then floor the scaled dims at 2.
 /// `scale` must already be clamped to `0.0..=1.0` by the caller.
 fn version_popup_envelope(bounds: Rect, notes_len: usize, scale: f32) -> Rect {
-    let needed_w = 2 + URL_PREFIX.len() as u16 + VERSION_POPUP_URL.len() as u16 + 2;
+    // Borderless: no side-border columns, but the shared `borderless_panel`
+    // insets content by PANEL_PAD_* — so the envelope must include 2× pad on each
+    // axis. Content rows = title + blank + notes + blank + url + 1 slack.
+    let needed_w = URL_PREFIX.len() as u16 + VERSION_POPUP_URL.len() as u16 + 2 + 2 * PANEL_PAD_X;
     let w_full = needed_w.min(bounds.width);
-    let h_full = (notes_len as u16 + 6).min(bounds.height);
+    let h_full = (notes_len as u16 + 5 + 2 * PANEL_PAD_Y).min(bounds.height);
     let w = ((w_full as f32 * scale).round() as u16).max(2);
     let h = ((h_full as f32 * scale).round() as u16).max(2);
     let x = bounds.x + bounds.width.saturating_sub(w) / 2;
@@ -460,18 +447,15 @@ pub(in crate::tui) fn paint_version_popup(
     bounds: Rect,
     theme: &crate::tui::theme::Theme,
     scale: f32,
-    now: SystemTime,
 ) {
     use ratatui::style::Modifier;
     use ratatui::text::{Line, Span as TSpan};
-    use ratatui::widgets::{Block, Borders, Clear};
 
     let scale = scale.clamp(0.0, 1.0);
     if scale <= 0.01 {
         return; // fully dismissed, skip render
     }
     let area = version_popup_envelope(bounds, notes.len(), scale);
-    f.render_widget(Clear, area);
 
     let mut items: Vec<Line> = Vec::with_capacity(notes.len() + 3);
     items.push(Line::from(""));
@@ -495,23 +479,9 @@ pub(in crate::tui) fn paint_version_popup(
         ),
     ]));
 
-    let title = format!(" What's new in v{version} \u{2014} Enter to close ");
-    // Gentle ~3s glow pulse on the border: lerp between 60% and 100% of the
-    // neon_brand toward the popup background, so the frame breathes like a
-    // marketing-shot neon sign without distracting from the notes.
-    let border = pulse_border_color(theme.ui.tooltip_bg, theme.ui.neon_brand, now);
-    let block = Block::default()
-        .title(TSpan::styled(
-            title,
-            Style::default()
-                .fg(to_color(theme.ui.neon_brand))
-                .add_modifier(Modifier::BOLD),
-        ))
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(border))
-        .style(Style::default().bg(to_color(theme.ui.tooltip_bg)));
-
-    f.render_widget(Paragraph::new(items).block(block), area);
+    let title = format!("What's new in v{version} \u{2014} Enter to close");
+    let inner = super::borderless_panel(f, area, Some(&title), theme);
+    f.render_widget(Paragraph::new(items), inner);
 }
 
 /// Computes the screen rect of the clickable URL inside the version popup.
@@ -540,17 +510,18 @@ pub(in crate::tui) fn version_popup_url_rect(
     if w < 4 || h < 3 {
         return None;
     }
-    // URL line layout inside popup (Block with Borders::ALL has 1-cell border):
-    //   y = popup_y + 1 (border) + 1 (blank) + notes_len (notes) + 1 (blank)
-    //   x = popup_x + 1 (border) + URL_PREFIX.len()
-    let url_y = popup_y + notes_len as u16 + 3;
-    let url_x = popup_x + 1 + URL_PREFIX.len() as u16;
+    // URL line layout inside the borderless, PANEL_PAD_*-padded popup:
+    //   y = popup_y + PAD_Y + 1 (title) + 1 (blank) + notes_len + 1 (blank)
+    //   x = popup_x + PAD_X + URL_PREFIX.len()
+    // The title row replaces the old top border; the pad shifts both offsets.
+    let url_y = popup_y + PANEL_PAD_Y + notes_len as u16 + 3;
+    let url_x = popup_x + PANEL_PAD_X + URL_PREFIX.len() as u16;
 
-    // Clip against the popup's inner content area: when the painter clipped
-    // the envelope (narrow / short terminal), the URL rect must shrink too —
-    // otherwise clicks past the visible popup register as URL clicks.
-    let inner_right = popup_x + w - 1; // bottom-right border column (exclusive)
-    let inner_bottom = popup_y + h - 1; // bottom border row (exclusive)
+    // Clip against the popup's PADDED content area: when the painter clipped the
+    // envelope (narrow / short terminal), the URL rect must shrink too — otherwise
+    // clicks past the visible popup register as URL clicks.
+    let inner_right = popup_x + w - PANEL_PAD_X; // content right edge (exclusive)
+    let inner_bottom = popup_y + h - PANEL_PAD_Y; // content bottom edge (exclusive)
     if url_x >= inner_right || url_y >= inner_bottom {
         return None;
     }
@@ -606,7 +577,6 @@ pub(in crate::tui) fn paint_elevator_indicator(
 #[cfg(test)]
 mod hud_tests {
     use super::*;
-    use std::time::Duration;
 
     fn full_bounds(w: u16, h: u16) -> Rect {
         Rect {
@@ -622,29 +592,6 @@ mod hud_tests {
         let rect = version_popup_url_rect(4, full_bounds(200, 60), 1.0).expect("should fit");
         assert_eq!(rect.width, VERSION_POPUP_URL.len() as u16);
         assert_eq!(rect.height, 1);
-    }
-
-    #[test]
-    fn pulse_border_color_breathes_within_bounds() {
-        use crate::tui::theme;
-        let bg = theme::NORMAL.ui.tooltip_bg;
-        let brand = theme::NORMAL.ui.neon_brand;
-        let at = |ms: u64| {
-            pulse_border_color(bg, brand, std::time::UNIX_EPOCH + Duration::from_millis(ms))
-        };
-        // Peak at 750ms (phase = π/2) → full brand.
-        assert_eq!(at(750), Color::Rgb(brand.r, brand.g, brand.b));
-        // Deterministic + 3s-periodic.
-        assert_eq!(at(1234), at(1234 + 3000));
-        // Trough at 2250ms (phase = 3π/2) → dimmer than peak but never fully
-        // dropped to the background.
-        let trough = at(2250);
-        assert_ne!(trough, at(750), "trough should be dimmer than peak");
-        assert_ne!(
-            trough,
-            Color::Rgb(bg.r, bg.g, bg.b),
-            "border never drops fully to background"
-        );
     }
 
     // Regression: paint_theme_picker rendered Clear onto an unclamped
@@ -687,16 +634,17 @@ mod hud_tests {
     fn url_rect_does_not_extend_past_clipped_popup_right_edge() {
         let bounds = full_bounds(50, 30);
         if let Some(rect) = version_popup_url_rect(4, bounds, 1.0) {
-            let needed_w = 2 + URL_PREFIX.len() as u16 + VERSION_POPUP_URL.len() as u16 + 2;
+            let needed_w =
+                URL_PREFIX.len() as u16 + VERSION_POPUP_URL.len() as u16 + 2 + 2 * PANEL_PAD_X;
             let w = needed_w.min(bounds.width);
             let popup_x = bounds.width.saturating_sub(w) / 2;
-            let popup_inner_right = popup_x + w - 1;
+            let popup_right = popup_x + w; // borderless: exclusive panel edge
             assert!(
-                rect.x + rect.width <= popup_inner_right,
-                "url rect cols {}..{} extend past popup inner-right {}",
+                rect.x + rect.width <= popup_right,
+                "url rect cols {}..{} extend past popup right edge {}",
                 rect.x,
                 rect.x + rect.width,
-                popup_inner_right
+                popup_right
             );
         }
     }
@@ -708,17 +656,21 @@ mod hud_tests {
     #[test]
     fn url_rect_centering_matches_painter_at_partial_scale() {
         let bounds = full_bounds(200, 60);
-        let scale = 0.85; // ≥ 0.7 gate and ≥ 0.8 vertical threshold for notes_len=4
-        let needed_w = 2 + URL_PREFIX.len() as u16 + VERSION_POPUP_URL.len() as u16 + 2;
+        // ≥ 0.7 gate; high enough that the padded URL row still clears the
+        // scaled height (the extra PANEL_PAD_Y needs a bit more vertical room).
+        let scale = 0.9;
+        let needed_w =
+            URL_PREFIX.len() as u16 + VERSION_POPUP_URL.len() as u16 + 2 + 2 * PANEL_PAD_X;
         let w_full = needed_w.min(bounds.width);
         let w_scaled = ((w_full as f32 * scale).round() as u16).max(2);
         let expected_popup_x = bounds.width.saturating_sub(w_scaled) / 2;
-        let expected_url_x = expected_popup_x + 1 + URL_PREFIX.len() as u16;
+        // Borderless + padded: url_x = popup_x + PAD_X + prefix.
+        let expected_url_x = expected_popup_x + PANEL_PAD_X + URL_PREFIX.len() as u16;
         let rect = version_popup_url_rect(4, bounds, scale)
-            .expect("url rect should exist at scale=0.85 with notes_len=4");
+            .expect("url rect should exist at scale=0.9 with notes_len=4");
         assert_eq!(
             rect.x, expected_url_x,
-            "url click rect x={} must match painter's scaled-centering popup_x+1+prefix={}",
+            "url click rect x={} must match painter's scaled-centering popup_x+pad+prefix={}",
             rect.x, expected_url_x
         );
     }
@@ -729,10 +681,10 @@ mod hud_tests {
     // paints it). The rect must return None instead.
     #[test]
     fn url_rect_returns_none_when_url_row_falls_outside_clipped_popup() {
-        // notes_len=4 → needed h=10. With bounds.height=8 the popup clips
-        // to h=8, leaving room for at most ~3 notes — the URL row at offset
-        // (notes_len + 3) = 7 lands on the bottom border.
-        let rect = version_popup_url_rect(4, full_bounds(200, 8), 1.0);
+        // notes_len=4 → needed h=11 (borderless + 2·PAD_Y). With bounds.height=9
+        // the popup clips to h=9; the padded URL row (PAD_Y + notes_len + 3 = 8)
+        // lands at the exclusive content bottom (h − PAD_Y = 8) → None.
+        let rect = version_popup_url_rect(4, full_bounds(200, 9), 1.0);
         assert!(
             rect.is_none(),
             "expected None when URL row falls on the clipped popup's bottom border: got {rect:?}"
@@ -768,7 +720,6 @@ mod hud_tests {
                 Rect::new(0, 0, 80, 30),
                 &crate::tui::theme::NORMAL,
                 0.0, // fully dismissed
-                std::time::UNIX_EPOCH,
             );
         })
         .unwrap();

@@ -2175,6 +2175,101 @@ fn dashboard_popup_renders_labels_states_and_live_tool() {
 }
 
 #[test]
+fn status_panel_renders_both_facets_borderless() {
+    use crate::tui::status::{HookState, LiveInfo, StatusRow};
+    let mut r = build(120, 44, vec![]);
+    let scene = scene_with(vec![], 16);
+    let rows = vec![
+        StatusRow {
+            source_id: "claude",
+            label_prefix: "cc",
+            display_name: "Claude Code",
+            hooks: HookState::On,
+            config_path: Some(std::path::PathBuf::from("~/.claude/settings.json")),
+            target: None,
+        },
+        StatusRow {
+            source_id: "antigravity",
+            label_prefix: "ag",
+            display_name: "Antigravity",
+            hooks: HookState::JsonlNoHooks,
+            config_path: None,
+            target: None,
+        },
+    ];
+    let live = vec![
+        LiveInfo {
+            agents: 2,
+            last_event_age: Some(std::time::Duration::from_secs(3)),
+            dead: false,
+        },
+        LiveInfo {
+            agents: 1,
+            last_event_age: Some(std::time::Duration::from_secs(12)),
+            dead: false,
+        },
+    ];
+    r.set_status_frame(
+        true,
+        rows,
+        live,
+        0,
+        None,
+        None,
+        "socket  /tmp/p.sock  (listening)".into(),
+    );
+    r.render(&scene, &pack(), t0()).unwrap();
+
+    let text = frame_text(r.frame_buffer());
+    assert!(text.contains("Status"), "title missing:\n{text}");
+    assert!(text.contains("[cc]"), "cc badge missing:\n{text}");
+    assert!(text.contains("[ag]"), "ag badge missing:\n{text}");
+    assert!(text.contains("2 agents"), "live count missing:\n{text}");
+    assert!(text.contains("socket"), "socket line missing:\n{text}");
+    // Borderless: the popup (the tooltip_bg-filled region) carries no box glyphs.
+    let popup = dash_popup(r.frame_buffer());
+    for g in [
+        '\u{256d}', '\u{256e}', '\u{2570}', '\u{256f}', '\u{2502}', '\u{2500}',
+    ] {
+        assert!(
+            !popup.contains(g),
+            "status panel must be borderless, found {g}:\n{popup}"
+        );
+    }
+}
+
+#[test]
+fn status_panel_armed_shows_confirm_prompt() {
+    use crate::tui::status::{HookState, LiveInfo, StatusRow};
+    let mut r = build(120, 44, vec![]);
+    let scene = scene_with(vec![], 16);
+    let rows = vec![StatusRow {
+        source_id: "codex",
+        label_prefix: "cx",
+        display_name: "Codex",
+        hooks: HookState::On,
+        config_path: Some(std::path::PathBuf::from("~/.codex/config.toml")),
+        target: None,
+    }];
+    r.set_status_frame(
+        true,
+        rows,
+        vec![LiveInfo::default()],
+        0,
+        Some(0),
+        None,
+        String::new(),
+    );
+    r.render(&scene, &pack(), t0()).unwrap();
+    let text = frame_text(r.frame_buffer());
+    assert!(
+        text.contains("(y/n)"),
+        "armed confirm prompt missing:\n{text}"
+    );
+    assert!(text.contains("Codex"), "armed target name missing:\n{text}");
+}
+
+#[test]
 fn dashboard_collapsed_big_tree_shows_badge_and_hides_children() {
     let mut r = build(120, 44, vec![]);
     let root_id = AgentId::from_transcript_path("/h/root.jsonl");
@@ -2228,11 +2323,30 @@ fn dashboard_closed_paints_no_popup() {
 /// The popup's box-bordered content lines (those containing the vertical rule),
 /// so substring assertions don't false-match the office sprite labels behind it.
 fn dash_popup(buf: &ratatui::buffer::Buffer) -> String {
-    frame_text(buf)
-        .lines()
-        .filter(|l| l.contains('\u{2502}'))
-        .collect::<Vec<_>>()
-        .join("\n")
+    // The popup is borderless (no `│` to key on) but is the only region painted
+    // with the UI `tooltip_bg` fill, so isolate it by background color. (The
+    // pixel office never produces this exact chrome RGB.)
+    let tb = crate::tui::theme::NORMAL.ui.tooltip_bg;
+    let bg = ratatui::style::Color::Rgb(tb.r, tb.g, tb.b);
+    let area = buf.area;
+    let mut out = String::new();
+    for y in area.y..area.y + area.height {
+        let mut row = String::new();
+        for x in area.x..area.x + area.width {
+            if let Some(cell) = buf.cell((x, y)) {
+                if cell.bg == bg {
+                    row.push_str(cell.symbol());
+                }
+            }
+        }
+        if !row.trim().is_empty() {
+            if !out.is_empty() {
+                out.push('\n');
+            }
+            out.push_str(&row);
+        }
+    }
+    out
 }
 
 #[test]

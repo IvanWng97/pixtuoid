@@ -7,12 +7,12 @@
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use ratatui::widgets::Paragraph;
 
 use pixtuoid_core::source::registry::descriptor_for;
 use pixtuoid_core::AgentId;
 
-use super::{centered_in, to_color};
+use super::{centered_in, to_color, truncate};
 use crate::tui::dashboard::{DashboardRow, RowState, DASHBOARD_VIEWPORT_ROWS};
 use crate::tui::theme::Theme;
 
@@ -31,38 +31,44 @@ pub(in crate::tui) fn paint_dashboard(
     bounds: Rect,
     theme: &Theme,
 ) {
-    let brand = to_color(theme.ui.neon_brand);
-    let bg = to_color(theme.ui.tooltip_bg);
-
     if rows.is_empty() {
-        let area = centered_in(bounds, 24, 3);
-        f.render_widget(Clear, area);
-        let block = Block::default()
-            .title(" Agents ")
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(brand))
-            .style(Style::default().bg(bg));
+        let area = centered_in(
+            bounds,
+            24 + 2 * super::PANEL_PAD_X,
+            2 + 2 * super::PANEL_PAD_Y,
+        );
+        let inner = super::borderless_panel(f, area, Some("Agents"), theme);
         f.render_widget(
             Paragraph::new(Line::from(Span::styled(
                 "No active agents",
                 Style::default().fg(to_color(theme.ui.label_idle)),
-            )))
-            .block(block),
-            area,
+            ))),
+            inner,
         );
         return;
     }
 
     let desired = rows.len().min(DASHBOARD_VIEWPORT_ROWS);
-    let area = centered_in(bounds, POPUP_W, desired as u16 + 2);
-    f.render_widget(Clear, area);
+    // Borderless: 1 title row + the visible content rows (no top/bottom border).
+    let area = centered_in(
+        bounds,
+        POPUP_W + 2 * super::PANEL_PAD_X,
+        desired as u16 + 1 + 2 * super::PANEL_PAD_Y,
+    );
+    // Hint in the title (borderless — it's the panel's first inner row).
+    let title = format!(
+        " Agents ({})  [\u{2191}\u{2193} \u{2190}\u{2192} z \u{23ce} esc] ",
+        rows.len()
+    );
+    let inner = super::borderless_panel(f, area, Some(&title), theme);
 
     // `centered_in` clamps the popup to the terminal, so the real visible-row
     // count can drop below DASHBOARD_VIEWPORT_ROWS on a short terminal. Re-clamp
     // the scroll against the ACTUAL window (reusing the model's clamp_scroll, so
     // the math can't drift) — otherwise the selected row could sit in the
-    // event-loop's wider window but below the painted one.
-    let visible = area.height.saturating_sub(2) as usize;
+    // event-loop's wider window but below the painted one. `inner.height` already
+    // excludes the title row.
+    let visible = inner.height as usize;
     // When more rows exist than fit, reserve the bottom line for the overflow
     // cue and clamp the selection into the SMALLER content window — so the row
     // we hand to the cue is never the selected one (clamp_scroll parks a
@@ -93,15 +99,7 @@ pub(in crate::tui) fn paint_dashboard(
             Style::default().fg(to_color(theme.ui.label_idle)),
         )));
     }
-
-    // Hint in the title (version-agnostic — no title_bottom API dependency).
-    let title = format!(" Agents ({})  [↑↓ ←→ z ⏎ esc] ", rows.len());
-    let block = Block::default()
-        .title(title)
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(brand))
-        .style(Style::default().bg(bg));
-    f.render_widget(Paragraph::new(lines).block(block), area);
+    f.render_widget(Paragraph::new(lines), inner);
 }
 
 fn dashboard_line(row: &DashboardRow, is_selected: bool, theme: &Theme) -> Line<'static> {
@@ -157,19 +155,6 @@ fn dashboard_line(row: &DashboardRow, is_selected: bool, theme: &Theme) -> Line<
         ),
         Span::styled(state_cell, base.fg(to_color(color))),
     ])
-}
-
-/// Truncate to `max` characters (char-safe), appending `…` when clipped.
-fn truncate(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
-        return s.to_string();
-    }
-    if max == 0 {
-        return String::new();
-    }
-    let mut out: String = s.chars().take(max - 1).collect();
-    out.push('…');
-    out
 }
 
 #[cfg(test)]

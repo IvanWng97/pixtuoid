@@ -173,6 +173,12 @@ struct SnapshotArgs {
     #[arg(long, conflicts_with_all = ["anim", "gif", "live", "empty", "pets"])]
     dashboard: bool,
 
+    /// Render with the Status panel open over a representative mixed fixture
+    /// (per-CLI hook state + live connection). Drives the status demo image +
+    /// borderless visual checks.
+    #[arg(long, conflicts_with_all = ["anim", "gif", "live", "empty", "pets", "dashboard"])]
+    status: bool,
+
     /// Animation-verification mode: render ONE agent walking to + settling at a
     /// chosen furniture, so the approach→settle reads correctly (no pop, no
     /// teleport) BEFORE human verify. One of: couch | sofa | stand | pantry |
@@ -462,6 +468,87 @@ fn main() -> Result<()> {
     } else {
         (Vec::new(), None)
     };
+
+    // Representative Status-panel fixture (deterministic — no FS probes), so the
+    // demo image is reproducible across machines.
+    let (status_rows, status_live, status_socket_line) = if args.status {
+        use pixtuoid::tui::status::{HookState, LiveInfo, StatusRow};
+        use std::path::PathBuf;
+        use std::time::Duration;
+        let mk = |source_id, label_prefix, display_name, hooks, cfg: Option<&str>| StatusRow {
+            source_id,
+            label_prefix,
+            display_name,
+            hooks,
+            config_path: cfg.map(PathBuf::from),
+            target: None,
+        };
+        let rows = vec![
+            mk(
+                "claude",
+                "cc",
+                "Claude Code",
+                HookState::On,
+                Some("~/.claude/settings.json"),
+            ),
+            mk(
+                "codex",
+                "cx",
+                "Codex",
+                HookState::Off,
+                Some("~/.codex/config.toml"),
+            ),
+            mk("reasonix", "rx", "Reasonix", HookState::NoCli, None),
+            mk(
+                "codewhale",
+                "cw",
+                "CodeWhale",
+                HookState::On,
+                Some("~/.codewhale/config.toml"),
+            ),
+            mk(
+                "opencode",
+                "oc",
+                "opencode",
+                HookState::Off,
+                Some("~/.config/opencode/plugins/pixtuoid.ts"),
+            ),
+            mk(
+                "antigravity",
+                "ag",
+                "Antigravity",
+                HookState::JsonlNoHooks,
+                None,
+            ),
+        ];
+        let live = vec![
+            LiveInfo {
+                agents: 2,
+                last_event_age: Some(Duration::from_secs(3)),
+                dead: false,
+            },
+            LiveInfo::default(),
+            LiveInfo::default(),
+            LiveInfo {
+                agents: 0,
+                last_event_age: None,
+                dead: true,
+            },
+            LiveInfo::default(),
+            LiveInfo {
+                agents: 1,
+                last_event_age: Some(Duration::from_secs(12)),
+                dead: false,
+            },
+        ];
+        (
+            rows,
+            live,
+            "socket  /run/user/501/pixtuoid.sock  (listening)".to_string(),
+        )
+    } else {
+        (Vec::new(), Vec::new(), String::new())
+    };
     let mut draw_ctx = DrawCtx {
         buf: &mut buf,
         cache: &mut cache,
@@ -501,6 +588,13 @@ fn main() -> Result<()> {
         dashboard_rows: &dash_rows,
         dashboard_selected: dash_selected,
         dashboard_scroll: 0,
+        status_open: args.status,
+        status_rows: &status_rows,
+        status_live: &status_live,
+        status_selected: 0,
+        status_confirm: None,
+        status_result: None,
+        status_socket_line: &status_socket_line,
     };
     draw_scene(&mut term, &scene, &pack, now, &mut draw_ctx)?;
 
@@ -1616,6 +1710,13 @@ fn save_as_gif(
             dashboard_rows: &[],
             dashboard_selected: None,
             dashboard_scroll: 0,
+            status_open: false,
+            status_rows: &[],
+            status_live: &[],
+            status_selected: 0,
+            status_confirm: None,
+            status_result: None,
+            status_socket_line: "",
         };
         draw_scene(term, scene, pack, now, &mut draw_ctx)?;
         if i < skip_frames {

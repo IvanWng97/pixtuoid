@@ -39,7 +39,8 @@ pub use crate::tui::widgets::TickerQueue;
 pub(super) use crate::tui::widgets::{
     paint_chitchat_bubbles, paint_coffee_tooltip, paint_dashboard, paint_elevator_indicator,
     paint_footer, paint_furniture_tooltip, paint_help_overlay, paint_label_widgets,
-    paint_pet_tooltip, paint_theme_picker, paint_version_popup, paint_wall_display,
+    paint_pet_tooltip, paint_status_panel, paint_theme_picker, paint_version_popup,
+    paint_wall_display,
 };
 
 pub use crate::tui::pet::PetState;
@@ -122,6 +123,17 @@ pub struct DrawCtx<'a> {
     pub dashboard_rows: &'a [DashboardRow],
     pub dashboard_selected: Option<pixtuoid_core::AgentId>,
     pub dashboard_scroll: usize,
+    /// Status panel overlay: open flag + the cached hook-facet rows (borrowed
+    /// from `TuiRenderer`) + the per-frame live facet aligned to them, plus
+    /// selection / armed-confirm / last-action result / socket line. Modal,
+    /// mutually exclusive with the other overlays by dispatch precedence.
+    pub status_open: bool,
+    pub status_rows: &'a [crate::tui::status::StatusRow],
+    pub status_live: &'a [crate::tui::status::LiveInfo],
+    pub status_selected: usize,
+    pub status_confirm: Option<usize>,
+    pub status_result: Option<&'a str>,
+    pub status_socket_line: &'a str,
 }
 
 /// Clip a widget rect to fit inside `bounds`. Returns `None` if the rect
@@ -360,6 +372,19 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
                 theme,
             );
         }
+        if ctx.status_open {
+            paint_status_panel(
+                f,
+                ctx.status_rows,
+                ctx.status_live,
+                ctx.status_selected,
+                ctx.status_confirm,
+                ctx.status_result,
+                ctx.status_socket_line,
+                actual_full,
+                theme,
+            );
+        }
         if ctx.popup_scale > 0.0 {
             if let Some(notes) = crate::version::release_notes(env!("CARGO_PKG_VERSION")) {
                 paint_version_popup(
@@ -369,7 +394,6 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
                     actual_full,
                     theme,
                     ctx.popup_scale,
-                    now,
                 );
             }
         }

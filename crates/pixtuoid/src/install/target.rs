@@ -18,6 +18,7 @@ pub struct MergeOutcome {
 /// at compile time as `const` data — no dyn dispatch (install runs once,
 /// synchronously). `&CONST` in `const TARGETS` is legal via rvalue static
 /// promotion (Rust 1.21+, MSRV 1.89), so `const` is correct here.
+#[derive(Debug)]
 pub struct Target {
     /// Stable lowercase id: "claude" | "codex" | "reasonix".
     pub name: &'static str,

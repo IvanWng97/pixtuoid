@@ -3,9 +3,9 @@
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
+use ratatui::widgets::Paragraph;
 
-use super::{centered_in, to_color};
+use super::{borderless_panel, centered_in, to_color};
 use crate::tui::theme::Theme;
 
 const SHORTCUTS: &[(&str, &str)] = &[
@@ -14,6 +14,7 @@ const SHORTCUTS: &[(&str, &str)] = &[
     ("p", "pause / resume"),
     ("t", "themes"),
     ("Tab", "agent dashboard"),
+    ("c", "connections / hooks"),
     // Dev-only overlay — hidden from release-build help (see dispatch_key).
     #[cfg(debug_assertions)]
     ("w", "walkable / approach / route debug"),
@@ -25,11 +26,17 @@ const SHORTCUTS: &[(&str, &str)] = &[
 ];
 
 pub(in crate::tui) fn paint_help_overlay(f: &mut ratatui::Frame<'_>, bounds: Rect, theme: &Theme) {
-    let area = centered_in(bounds, 36, SHORTCUTS.len() as u16 + 4);
+    // Borderless: a title row + 1 lead-blank + the shortcut rows (no top/bottom
+    // border). Title is drawn by `borderless_panel`; content fills below it.
+    let area = centered_in(
+        bounds,
+        36 + 2 * super::PANEL_PAD_X,
+        SHORTCUTS.len() as u16 + 2 + 2 * super::PANEL_PAD_Y,
+    );
     if area.width < 4 || area.height < 3 {
         return;
     }
-    f.render_widget(Clear, area);
+    let inner = borderless_panel(f, area, Some("? Keyboard"), theme);
 
     let mut lines: Vec<Line> = Vec::with_capacity(SHORTCUTS.len() + 1);
     lines.push(Line::from(""));
@@ -48,18 +55,7 @@ pub(in crate::tui) fn paint_help_overlay(f: &mut ratatui::Frame<'_>, bounds: Rec
             ),
         ]));
     }
-    let block = Block::default()
-        .title(Span::styled(
-            " ? Keyboard ",
-            Style::default()
-                .fg(to_color(theme.ui.neon_brand))
-                .add_modifier(Modifier::BOLD),
-        ))
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(to_color(theme.ui.neon_brand)))
-        .style(Style::default().bg(to_color(theme.ui.tooltip_bg)));
-    f.render_widget(Paragraph::new(lines).block(block), area);
+    f.render_widget(Paragraph::new(lines), inner);
 }
 
 #[cfg(test)]

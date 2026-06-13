@@ -6,7 +6,7 @@ use pixtuoid_core::{AgentId, SceneState};
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
+use ratatui::widgets::{Block, Padding, Paragraph};
 
 use super::{compact_hms, to_color};
 use crate::tui::layout::{Layout, DESK_W};
@@ -16,15 +16,16 @@ use crate::tui::pose;
 use crate::tui::renderer::clip_widget_rect;
 use crate::tui::theme::Theme;
 
-/// Rounded-border tooltip frame shared by every hover/click tooltip. Mirrors
-/// the version popup / keyboard help framing so all overlays read as one
-/// visual family. Border colour is `label_idle` — gentler than `neon_brand`,
-/// which we reserve for actionable popups (help / version notes).
+/// Borderless tooltip frame shared by every hover/click tooltip. No outline
+/// (the whole UI dropped popup borders) — a solid `tooltip_bg` fill plus a
+/// 1-cell uniform padding stands in for the old rounded border, so the content
+/// keeps its readable inset and the existing `+2` width/height math is unchanged
+/// (padding consumes exactly the two cells the border used to). The caller still
+/// renders `Clear` under it. Reads as one visual family with the other
+/// borderless popups (`panel::borderless_panel`).
 pub(super) fn framed_tooltip<'a>(lines: Vec<Line<'a>>, theme: &Theme) -> Paragraph<'a> {
     let block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(to_color(theme.ui.label_idle)))
+        .padding(Padding::uniform(1))
         .style(Style::default().bg(to_color(theme.ui.tooltip_bg)));
     Paragraph::new(lines).block(block)
 }

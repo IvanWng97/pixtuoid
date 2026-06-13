@@ -139,7 +139,7 @@ fn detection() -> Vec<(&'static Target, bool)> {
 /// or unparseable is INCLUDED (true) so a hooks-bearing-but-malformed config
 /// still appears and the user sees the real error from `run_uninstall`, rather
 /// than a misleading "nothing to remove".
-fn has_hooks(t: &'static Target) -> bool {
+pub(crate) fn has_hooks(t: &'static Target) -> bool {
     // No resolvable default path (no home dir) → no config to bear hooks.
     let Ok(path) = (t.default_config_path)() else {
         return false;
@@ -402,7 +402,38 @@ fn resolve_hook_binary_from(
     }
 }
 
-fn run_install(t: &Target, config: Option<PathBuf>, hook_path: Option<PathBuf>) -> Result<()> {
+/// Whether an install changed the config or was already current. Carried by
+/// `InstallReport` so both presenters (CLI stdout, TUI panel) render the same
+/// outcome from one core.
+pub enum InstallOutcome {
+    Installed,
+    AlreadyUpToDate,
+}
+
+/// Structured result of `install_target` — the data both the CLI `run_install`
+/// presenter and the in-TUI Status panel render. NO I/O: the core does the
+/// ConfigLock round and returns this; presenters decide how to surface it.
+pub struct InstallReport {
+    pub outcome: InstallOutcome,
+    pub config_path: PathBuf,
+    /// The backup taken this round (`None` on a no-op, or when one already exists).
+    pub backup: Option<PathBuf>,
+    pub restart_noun: &'static str,
+    pub post_note: Option<&'static str>,
+    /// True when the bare `pixtuoid-hook` isn't on PATH (Claude/Unix, no explicit
+    /// hook). An install-time environment check, surfaced by the presenter.
+    pub path_warning: bool,
+}
+
+/// Install pixtuoid hooks into `t`'s config, returning a structured report.
+/// This is the pure core under the CLI `run_install` AND the TUI Status panel —
+/// the ONLY install path. The ConfigLock round (read→merge→backup→write) is
+/// the load-bearing write authority (invariant #4); it stays intact here.
+pub fn install_target(
+    t: &Target,
+    config: Option<PathBuf>,
+    hook_path: Option<PathBuf>,
+) -> Result<InstallReport> {
     let path = config
         .map(Ok)
         .unwrap_or_else(|| (t.default_config_path)())?;
@@ -428,38 +459,90 @@ fn run_install(t: &Target, config: Option<PathBuf>, hook_path: Option<PathBuf>) 
     // where pixtuoid-hook isn't on PATH would otherwise warn nothing). Skipped
     // when an explicit --hook-path was written: the absolute path is embedded,
     // so PATH resolution never happens.
-    if t.needs_path_warning && !explicit_hook && !io::hook_on_path() {
-        println!("warn: `pixtuoid-hook` not found on PATH (checked against this shell).");
-        println!("      Install it on PATH, e.g. `cargo install --path crates/pixtuoid-hook`.");
-    }
+    let path_warning = t.needs_path_warning && !explicit_hook && !io::hook_on_path();
     if !outcome.changed {
-        println!("[{}] already up to date — {}", t.name, path.display());
-        return Ok(());
+        return Ok(InstallReport {
+            outcome: InstallOutcome::AlreadyUpToDate,
+            config_path: path,
+            backup: None,
+            restart_noun: t.restart_noun,
+            post_note: t.post_install_note,
+            path_warning,
+        });
     }
     let backup = lock.backup_once(BACKUP_SUFFIX)?;
     lock.write_atomic(&outcome.content)?;
-    println!(
-        "ok: installed pixtuoid hooks into {} ({})",
-        path.display(),
-        t.display_name
-    );
-    if let Some(b) = backup {
-        println!(
-            "backup: {} (removed automatically on uninstall-hooks)",
-            b.display()
-        );
+    Ok(InstallReport {
+        outcome: InstallOutcome::Installed,
+        config_path: path,
+        backup,
+        restart_noun: t.restart_noun,
+        post_note: t.post_install_note,
+        path_warning,
+    })
+}
+
+/// CLI presenter over `install_target`. Output is byte-identical to the
+/// pre-refactor `run_install` (warning first, then the outcome lines).
+fn run_install(t: &Target, config: Option<PathBuf>, hook_path: Option<PathBuf>) -> Result<()> {
+    let r = install_target(t, config, hook_path)?;
+    if r.path_warning {
+        println!("warn: `pixtuoid-hook` not found on PATH (checked against this shell).");
+        println!("      Install it on PATH, e.g. `cargo install --path crates/pixtuoid-hook`.");
     }
-    if let Some(note) = t.post_install_note {
-        println!("{note}");
+    match r.outcome {
+        InstallOutcome::AlreadyUpToDate => {
+            println!(
+                "[{}] already up to date — {}",
+                t.name,
+                r.config_path.display()
+            );
+        }
+        InstallOutcome::Installed => {
+            println!(
+                "ok: installed pixtuoid hooks into {} ({})",
+                r.config_path.display(),
+                t.display_name
+            );
+            if let Some(b) = r.backup {
+                println!(
+                    "backup: {} (removed automatically on uninstall-hooks)",
+                    b.display()
+                );
+            }
+            if let Some(note) = r.post_note {
+                println!("{note}");
+            }
+            println!(
+                "→ start a new {} session for this to take effect.",
+                r.restart_noun
+            );
+        }
     }
-    println!(
-        "→ start a new {} session for this to take effect.",
-        t.restart_noun
-    );
     Ok(())
 }
 
-fn run_uninstall(t: &Target, config: Option<PathBuf>) -> Result<()> {
+/// Whether an uninstall removed managed entries or found nothing to remove.
+pub enum UninstallOutcome {
+    Removed,
+    NothingToRemove,
+}
+
+/// Structured result of `uninstall_target`.
+pub struct UninstallReport {
+    pub outcome: UninstallOutcome,
+    pub config_path: PathBuf,
+    /// The backup deleted on a successful removal (the install backup is no
+    /// longer needed once the hooks are gone).
+    pub removed_backup: Option<PathBuf>,
+    pub restart_noun: &'static str,
+}
+
+/// Remove pixtuoid hooks from `t`'s config, returning a structured report. The
+/// pure core under the CLI `run_uninstall` AND the TUI Status panel. Same lock
+/// scope + the load-bearing "never rewrite/delete-backup on a semantic no-op"
+/// rule as before.
+pub fn uninstall_target(t: &Target, config: Option<PathBuf>) -> Result<UninstallReport> {
     let path = config
         .map(Ok)
         .unwrap_or_else(|| (t.default_config_path)())?;
@@ -467,14 +550,14 @@ fn run_uninstall(t: &Target, config: Option<PathBuf>) -> Result<()> {
     // creates the parent dir + a .lock sidecar, and materializing ~/.reasonix
     // here would flip that target's presence probe on a pure no-op.
     if !target::config_present(&path) {
-        println!(
-            "[{}] no pixtuoid hooks found in {} — nothing to remove",
-            t.name,
-            path.display()
-        );
-        return Ok(());
+        return Ok(UninstallReport {
+            outcome: UninstallOutcome::NothingToRemove,
+            config_path: path,
+            removed_backup: None,
+            restart_noun: t.restart_noun,
+        });
     }
-    // Same lock scope as run_install: the whole read→merge→write round, all
+    // Same lock scope as install_target: the whole read→merge→write round, all
     // addressed through the guard's pinned resolution.
     let lock = io::lock_config(&path)?;
     let content = lock.read()?;
@@ -485,26 +568,50 @@ fn run_uninstall(t: &Target, config: Option<PathBuf>) -> Result<()> {
         // Never rewrite the file or delete the backup here: the backup is the
         // user's only recovery path. A byte comparison here would falsely
         // fire on any hand-formatted config and destroy the backup.
-        println!(
-            "[{}] no pixtuoid hooks found in {} — nothing to remove",
-            t.name,
-            path.display()
-        );
-        return Ok(());
+        return Ok(UninstallReport {
+            outcome: UninstallOutcome::NothingToRemove,
+            config_path: path,
+            removed_backup: None,
+            restart_noun: t.restart_noun,
+        });
     }
     lock.write_atomic(&outcome.content)?;
-    println!(
-        "ok: removed pixtuoid hooks from {} ({})",
-        path.display(),
-        t.display_name
-    );
-    if let Some(b) = lock.remove_backup(BACKUP_SUFFIX)? {
-        println!("removed backup: {}", b.display());
+    let removed_backup = lock.remove_backup(BACKUP_SUFFIX)?;
+    Ok(UninstallReport {
+        outcome: UninstallOutcome::Removed,
+        config_path: path,
+        removed_backup,
+        restart_noun: t.restart_noun,
+    })
+}
+
+/// CLI presenter over `uninstall_target`. Output is byte-identical to the
+/// pre-refactor `run_uninstall`.
+fn run_uninstall(t: &Target, config: Option<PathBuf>) -> Result<()> {
+    let r = uninstall_target(t, config)?;
+    match r.outcome {
+        UninstallOutcome::NothingToRemove => {
+            println!(
+                "[{}] no pixtuoid hooks found in {} — nothing to remove",
+                t.name,
+                r.config_path.display()
+            );
+        }
+        UninstallOutcome::Removed => {
+            println!(
+                "ok: removed pixtuoid hooks from {} ({})",
+                r.config_path.display(),
+                t.display_name
+            );
+            if let Some(b) = r.removed_backup {
+                println!("removed backup: {}", b.display());
+            }
+            println!(
+                "→ start a new {} session for this to take effect.",
+                r.restart_noun
+            );
+        }
     }
-    println!(
-        "→ start a new {} session for this to take effect.",
-        t.restart_noun
-    );
     Ok(())
 }
 
@@ -1202,5 +1309,78 @@ mod tests {
         run_uninstall(&FAKE, Some(cfg.clone())).unwrap();
 
         assert!(bak.exists(), "a no-op uninstall must NOT delete the backup");
+    }
+
+    // --- structured report core (install_target / uninstall_target) -----------
+
+    #[test]
+    fn install_target_reports_installed_then_up_to_date() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cfg = tmp.path().join("settings.json");
+        std::fs::write(&cfg, "{}\n").unwrap(); // existing content → backup on first write
+
+        let r = install_target(
+            &CLAUDE,
+            Some(cfg.clone()),
+            Some(PathBuf::from("/fake/pixtuoid-hook")),
+        )
+        .unwrap();
+        assert!(matches!(r.outcome, InstallOutcome::Installed));
+        assert!(
+            r.backup.is_some(),
+            "first install of an existing file takes a backup"
+        );
+        assert_eq!(r.config_path, cfg);
+
+        // Second install is a SEMANTIC no-op → AlreadyUpToDate, no backup churn.
+        let r2 = install_target(
+            &CLAUDE,
+            Some(cfg.clone()),
+            Some(PathBuf::from("/fake/pixtuoid-hook")),
+        )
+        .unwrap();
+        assert!(matches!(r2.outcome, InstallOutcome::AlreadyUpToDate));
+        assert!(r2.backup.is_none(), "a no-op install reports no backup");
+    }
+
+    #[test]
+    fn install_target_explicit_hook_suppresses_path_warning() {
+        // An explicit --hook-path embeds the absolute path, so PATH resolution
+        // never happens → path_warning is deterministically false (no host PATH
+        // dependency, unlike the no-explicit-hook case).
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cfg = tmp.path().join("settings.json");
+        let r = install_target(
+            &CLAUDE,
+            Some(cfg),
+            Some(PathBuf::from("/fake/pixtuoid-hook")),
+        )
+        .unwrap();
+        assert!(!r.path_warning);
+    }
+
+    #[test]
+    fn uninstall_target_reports_removed_then_nothing() {
+        // Removed: FAKE2 (changed=true on non-empty content) over a config with a backup.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cfg = tmp.path().join("config.toml");
+        std::fs::write(&cfg, "model = \"x\"\n").unwrap();
+        let bak = tmp.path().join("config.toml.pixtuoid.bak");
+        std::fs::write(&bak, "backup").unwrap();
+
+        let r = uninstall_target(&FAKE2, Some(cfg.clone())).unwrap();
+        assert!(matches!(r.outcome, UninstallOutcome::Removed));
+        assert_eq!(r.removed_backup.as_deref(), Some(bak.as_path()));
+        assert!(!bak.exists());
+
+        // NothingToRemove: an absent config, decided BEFORE locking (no side effects).
+        let missing = tmp.path().join("missing").join("settings.json");
+        let r2 = uninstall_target(&CLAUDE, Some(missing.clone())).unwrap();
+        assert!(matches!(r2.outcome, UninstallOutcome::NothingToRemove));
+        assert!(r2.removed_backup.is_none());
+        assert!(
+            !missing.parent().unwrap().exists(),
+            "a no-op uninstall leaves no dirs"
+        );
     }
 }
