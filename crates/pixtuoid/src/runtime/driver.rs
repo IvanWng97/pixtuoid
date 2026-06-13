@@ -301,7 +301,7 @@ mod tests {
         let expected: BTreeSet<&str> = REGISTERED_SOURCES
             .iter()
             .copied()
-            .filter(|&name| descriptor_for(name).map_or(false, |d| d.line_decoder.is_some()))
+            .filter(|&name| descriptor_for(name).is_some_and(|d| d.line_decoder.is_some()))
             .collect();
         assert_eq!(
             built, expected,
