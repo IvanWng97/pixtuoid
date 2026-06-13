@@ -516,6 +516,7 @@ mod tests {
     // A second fake target for "both present" rows (avoids depending on Phase 2's CODEX).
     static FAKE: Target = Target {
         name: "fake",
+        core_source: "fake",
         display_name: "Fake",
         restart_noun: "Fake",
         default_config_path: || Ok(std::path::PathBuf::from("/nonexistent/fake")),
@@ -557,6 +558,7 @@ mod tests {
     // (false) arms by controlling the on-disk content.
     static FAKE2: Target = Target {
         name: "fake2",
+        core_source: "fake2",
         display_name: "Fake2",
         restart_noun: "Fake2",
         default_config_path: || Ok(fake2_config_path()),
@@ -584,6 +586,7 @@ mod tests {
     // has_hooks Err(_) => true arm.
     static FAKE_DIR: Target = Target {
         name: "fakedir",
+        core_source: "fakedir",
         display_name: "FakeDir",
         restart_noun: "FakeDir",
         default_config_path: || Ok(fake_dir_config_path()),

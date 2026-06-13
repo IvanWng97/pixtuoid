@@ -21,6 +21,12 @@ pub struct MergeOutcome {
 pub struct Target {
     /// Stable lowercase id: "claude" | "codex" | "reasonix".
     pub name: &'static str,
+    /// The core `SourceDescriptor.name` this target installs hooks FOR. Usually
+    /// equals `name`, but Claude's target is "claude" while its source is
+    /// "claude-code". Pins the install↔source bridge: a target naming no
+    /// registered source, or a hook-only source with no target (= its hooks
+    /// never install, so its sprite never appears), is caught by the tests below.
+    pub core_source: &'static str,
     /// Human-readable name for CLI output.
     pub display_name: &'static str,
     /// Restart noun for the "→ start a new <noun> session" hint.
@@ -70,6 +76,7 @@ pub const BACKUP_SUFFIX: &str = "pixtuoid.bak";
 
 pub const CLAUDE: Target = Target {
     name: "claude",
+    core_source: pixtuoid_core::source::claude_code::SOURCE_NAME,
     display_name: "Claude Code",
     restart_noun: "Claude Code",
     default_config_path: crate::install::claude::default_config_path,
@@ -87,6 +94,7 @@ pub const CLAUDE: Target = Target {
 
 pub const CODEX: Target = Target {
     name: "codex",
+    core_source: pixtuoid_core::source::codex::SOURCE_NAME,
     display_name: "Codex",
     restart_noun: "Codex",
     default_config_path: crate::install::codex::default_config_path,
@@ -103,6 +111,7 @@ pub const CODEX: Target = Target {
 
 pub const REASONIX: Target = Target {
     name: "reasonix",
+    core_source: pixtuoid_core::source::reasonix::SOURCE_NAME,
     display_name: "Reasonix",
     restart_noun: "Reasonix",
     default_config_path: crate::install::reasonix::default_config_path,
@@ -117,6 +126,7 @@ pub const REASONIX: Target = Target {
 
 pub const CODEWHALE: Target = Target {
     name: "codewhale",
+    core_source: pixtuoid_core::source::codewhale::SOURCE_NAME,
     display_name: "CodeWhale",
     restart_noun: "CodeWhale",
     default_config_path: crate::install::codewhale::default_config_path,
@@ -133,6 +143,7 @@ pub const CODEWHALE: Target = Target {
 
 pub const OPENCODE: Target = Target {
     name: "opencode",
+    core_source: pixtuoid_core::source::opencode::SOURCE_NAME,
     display_name: "opencode",
     restart_noun: "opencode",
     default_config_path: crate::install::opencode::default_config_path,
@@ -211,6 +222,7 @@ mod tests {
         // detected (never a panic, never a CWD-relative probe).
         static NO_HOME: Target = Target {
             name: "nohome",
+            core_source: "nohome",
             display_name: "NoHome",
             restart_noun: "NoHome",
             default_config_path: || Err(anyhow::anyhow!("cannot resolve the home directory")),
@@ -233,5 +245,57 @@ mod tests {
             presence_probe: None,
         };
         assert!(!is_present(&NO_HOME));
+    }
+
+    // Bridge: the install TARGETS registry and core's source registry must not
+    // silently diverge. The site manifest is already bridge-tested against
+    // REGISTERED_SOURCES (`supported_sources_manifest`); the install targets were
+    // NOT — the one dual-source-of-truth this codebase otherwise rigorously kills.
+    #[test]
+    fn every_target_names_a_registered_source() {
+        use pixtuoid_core::source::REGISTERED_SOURCES;
+        for t in TARGETS {
+            assert!(
+                REGISTERED_SOURCES.contains(&t.core_source),
+                "install target {:?} names core_source {:?}, which is not a REGISTERED_SOURCE \
+                 (typo, or a renamed source) — fix the target or register the source",
+                t.name,
+                t.core_source
+            );
+        }
+    }
+
+    // A HOOK-ONLY source (no JSONL watcher, `line_decoder: None`) reaches pixtuoid
+    // ONLY through its installed hooks — so it MUST have an install target, or it
+    // is invisible at runtime (hooks never installed → no sprite ever appears),
+    // shipped green. Transcript-bearing sources may legitimately have no target
+    // (Antigravity reads its transcript, installs no hooks). Derived from
+    // `line_decoder.is_none()`, so there is no hand-maintained exemption list to
+    // drift.
+    #[test]
+    fn every_hook_only_source_has_an_install_target() {
+        use pixtuoid_core::source::{registry::descriptor_for, REGISTERED_SOURCES};
+        for &src in REGISTERED_SOURCES {
+            let d = descriptor_for(src).expect("registered source must have a descriptor row");
+            if d.line_decoder.is_none() {
+                assert!(
+                    TARGETS.iter().any(|t| t.core_source == src),
+                    "hook-only source {src:?} has no install target — its hooks would never \
+                     install, so its sprite never appears. Add a Target in install/target.rs."
+                );
+            }
+        }
+    }
+
+    // Two targets claiming one core source would double-install the same hooks.
+    #[test]
+    fn target_core_sources_are_unique() {
+        use std::collections::HashSet;
+        let set: HashSet<&str> = TARGETS.iter().map(|t| t.core_source).collect();
+        assert_eq!(
+            set.len(),
+            TARGETS.len(),
+            "two install targets claim the same core_source — one source, double hooks"
+        );
     }
 }
