@@ -26,8 +26,11 @@ const FORWARD = new Set<string>([
 // opencode re-publishes a tool part with status STILL `running` on EVERY output
 // chunk (streaming `bash`/`task` output). Forwarding each would spawn a shim per
 // chunk and inflate the tooltip's tool-call count, so we forward a tool part only
-// when its status CHANGES for that callID (the pending→running→completed edges).
-// Bounded by the live tool-call count; entries are freed on a terminal status.
+// when its status CHANGES (the pending→running→completed edges). The key is
+// `sessionID:callID`, NOT callID alone: this Map is module-level (one plugin
+// process serves a parent AND its task-spawned child sessions concurrently), so
+// callID alone could collide across sessions and drop the wrong one. Bounded by
+// the live tool-call count; entries are freed on a terminal status.
 const lastToolStatus = new Map<string, string>()
 
 export const PixtuoidOpencode = async () => ({
@@ -39,10 +42,12 @@ export const PixtuoidOpencode = async () => ({
         const part = event.properties.part
         const callID: unknown = part?.callID
         const status: unknown = part?.state?.status
+        const sessionID: unknown = event.properties?.sessionID
         if (typeof callID === "string" && typeof status === "string") {
-          if (lastToolStatus.get(callID) === status) return // same status re-published (streaming) — drop
-          lastToolStatus.set(callID, status)
-          if (status === "completed" || status === "error") lastToolStatus.delete(callID)
+          const key = `${typeof sessionID === "string" ? sessionID : "?"}:${callID}`
+          if (lastToolStatus.get(key) === status) return // same status re-published (streaming) — drop
+          lastToolStatus.set(key, status)
+          if (status === "completed" || status === "error") lastToolStatus.delete(key)
         }
         keep = true
       }

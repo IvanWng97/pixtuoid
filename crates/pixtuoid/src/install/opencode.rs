@@ -32,7 +32,7 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 
 use crate::install::io;
 use crate::install::target::MergeOutcome;
@@ -120,7 +120,7 @@ pub fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
 /// escaped JS string literal, so a path with quotes/backslashes can't break the
 /// module). `changed` is a content diff: a same-path re-install is a no-op.
 pub fn merge_install(content: &str, hook_path: &str) -> Result<MergeOutcome> {
-    let baked = render_plugin(hook_path);
+    let baked = render_plugin(hook_path)?;
     Ok(MergeOutcome {
         changed: content != baked,
         content: baked,
@@ -142,13 +142,16 @@ pub fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
     })
 }
 
-fn render_plugin(hook_path: &str) -> String {
+fn render_plugin(hook_path: &str) -> Result<String> {
     // serde_json emits a double-quoted, escaped JSON string. JSON strings are a
     // subset of JS string literals EXCEPT U+2028/U+2029 (valid unescaped in JSON,
     // line terminators in JS) — neither occurs in a real filesystem path, so this
-    // is a valid JS literal for any path the resolver hands us.
-    let json = serde_json::to_string(hook_path).unwrap_or_else(|_| "\"\"".to_string());
-    PLUGIN_TEMPLATE.replace(HOOK_PLACEHOLDER, &json)
+    // is a valid JS literal for any path the resolver hands us. Serializing a
+    // `&str` is infallible in practice, but propagate the error rather than
+    // default to a broken `HOOK_PATH = ""` if it ever weren't.
+    let json = serde_json::to_string(hook_path)
+        .context("serializing the hook path into the opencode plugin")?;
+    Ok(PLUGIN_TEMPLATE.replace(HOOK_PLACEHOLDER, &json))
 }
 
 #[cfg(test)]
