@@ -318,7 +318,7 @@ command = "echo hi"
             "unrelated keys survive"
         );
         let arr = v["hooks"]["hooks"].as_array().unwrap();
-        // user's 1 + our 5
+        // user's 1 + every managed CodeWhale event
         assert_eq!(arr.len(), 1 + CODEWHALE_EVENTS.len());
         assert!(
             arr.iter().any(|e| e["command"].as_str() == Some("echo hi")),
