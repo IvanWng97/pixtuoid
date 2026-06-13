@@ -411,7 +411,7 @@ pub enum InstallOutcome {
 }
 
 /// Structured result of `install_target` — the data both the CLI `run_install`
-/// presenter and the in-TUI Status panel render. NO I/O: the core does the
+/// presenter and the in-TUI Connection panel render. NO I/O: the core does the
 /// ConfigLock round and returns this; presenters decide how to surface it.
 pub struct InstallReport {
     pub outcome: InstallOutcome,
@@ -426,7 +426,7 @@ pub struct InstallReport {
 }
 
 /// Install pixtuoid hooks into `t`'s config, returning a structured report.
-/// This is the pure core under the CLI `run_install` AND the TUI Status panel —
+/// This is the pure core under the CLI `run_install` AND the TUI Connection panel —
 /// the ONLY install path. The ConfigLock round (read→merge→backup→write) is
 /// the load-bearing write authority (invariant #4); it stays intact here.
 pub fn install_target(
@@ -539,7 +539,7 @@ pub struct UninstallReport {
 }
 
 /// Remove pixtuoid hooks from `t`'s config, returning a structured report. The
-/// pure core under the CLI `run_uninstall` AND the TUI Status panel. Same lock
+/// pure core under the CLI `run_uninstall` AND the TUI Connection panel. Same lock
 /// scope + the load-bearing "never rewrite/delete-backup on a semantic no-op"
 /// rule as before.
 pub fn uninstall_target(t: &Target, config: Option<PathBuf>) -> Result<UninstallReport> {

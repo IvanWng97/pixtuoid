@@ -58,7 +58,7 @@ async fn run_async(cfg: RunConfig) -> Result<()> {
     // ClaudeCodeSource binds, attributed per-payload by `_pixtuoid_source` — so
     // they are deliberately absent here.
     // Resolve the bound socket (Unix) / pipe (Windows) BEFORE `socket` is moved
-    // into build_transcript_sources — the Status panel shows it. Same rule the CC
+    // into build_transcript_sources — the Connection panel shows it. Same rule the CC
     // source applies (explicit --socket override, else the default), so the panel
     // can't disagree with the actually-bound path.
     let socket_path = socket
