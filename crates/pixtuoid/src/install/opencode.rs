@@ -2,11 +2,12 @@
 //!
 //! opencode has no config-level shell hook (and SQLite-only sessions, no
 //! tailable transcript), so pixtuoid integrates as an opencode plugin: opencode
-//! auto-discovers `<config>/plugin/*.{ts,js}` (`config/plugin.ts::load` globs
-//! `{plugin,plugins}/*.{ts,js}` @ v1.17.3), so we DROP a plugin file at
-//! `<opencode-config>/plugin/pixtuoid.ts` — no edit to the user's
-//! `opencode.jsonc` (no comment-clobber risk). This is the FIRST install target
-//! that ships a CODE artifact rather than a declarative config block.
+//! auto-discovers `<config>/plugins/*.{ts,js}` (the canonical docs' dir; the
+//! anomalyco fork's `config/plugin.ts::load` globs `{plugin,plugins}` so both
+//! work there, but PLURAL `plugins/` is the documented dir canonical opencode
+//! scans), so we DROP a plugin file at `<opencode-config>/plugins/pixtuoid.ts` —
+//! no edit to the user's `opencode.jsonc` (no comment-clobber risk). This is the
+//! FIRST install target that ships a CODE artifact rather than a config block.
 //!
 //! The plugin's `event` hook receives the same EventV2 stream the server SSE
 //! endpoint serves (dir-scoped, base `type` — `event-v2-bridge.ts`), and pipes
@@ -81,9 +82,13 @@ fn config_dir_from(oc: Option<&str>, xdg: Option<&str>, home: Option<&str>) -> R
         })
 }
 
-/// The managed plugin file: `<opencode-config>/plugin/pixtuoid.ts`.
+/// The managed plugin file: `<opencode-config>/plugins/pixtuoid.ts`. The dir is
+/// `plugins` (PLURAL) — the canonical opencode docs auto-discover
+/// `<config>/plugins/*.{ts,js}`; the anomalyco fork globs `{plugin,plugins}` (so
+/// both work there), but plural is the documented form and the only one canonical
+/// opencode scans, so it's correct for every install.
 pub fn default_config_path() -> Result<PathBuf> {
-    Ok(opencode_config_dir()?.join("plugin").join("pixtuoid.ts"))
+    Ok(opencode_config_dir()?.join("plugins").join("pixtuoid.ts"))
 }
 
 /// Presence probe for auto-detect (`is_present`): is the opencode CLI present,
@@ -257,13 +262,15 @@ mod tests {
     }
 
     #[test]
-    fn default_path_is_the_plugin_file_under_the_config_dir() {
+    fn default_path_is_the_plugin_file_under_the_plural_plugins_dir() {
+        // PLURAL `plugins/` — the canonical opencode auto-discovery dir (the
+        // fork globs both, but canonical scans only `plugins/`).
         assert_eq!(
             config_dir_from(None, Some("/xdg"), None)
                 .unwrap()
-                .join("plugin")
+                .join("plugins")
                 .join("pixtuoid.ts"),
-            PathBuf::from("/xdg/opencode/plugin/pixtuoid.ts")
+            PathBuf::from("/xdg/opencode/plugins/pixtuoid.ts")
         );
     }
 

@@ -148,7 +148,7 @@ pub const OPENCODE: Target = Target {
     // the write-only orchestrator); the sentinel-based probe still reports it
     // correctly as removed. Noted so the residual isn't a surprise.
     post_install_note: Some(
-        "note: uninstall replaces the plugin with a no-op stub at <config>/plugin/pixtuoid.ts rather than deleting it.",
+        "note: uninstall replaces the plugin with a no-op stub at <config>/plugins/pixtuoid.ts rather than deleting it.",
     ),
     // The plugin file we WRITE is also a file opencode could otherwise lack on a
     // fresh install, and a post-uninstall stub still exists — so detect on the

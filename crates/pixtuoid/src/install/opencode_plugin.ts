@@ -1,7 +1,7 @@
 // @pixtuoid-opencode-plugin — managed by `pixtuoid install-hooks --target opencode`.
 //
 // opencode has no config-level shell hook, so pixtuoid integrates as a tiny
-// opencode plugin (auto-discovered from `<config>/plugin/*.ts`). This pipes the
+// opencode plugin (auto-discovered from `<config>/plugins/*.ts`). This pipes the
 // session lifecycle / tool / permission events pixtuoid maps into the
 // `pixtuoid-hook` shim on stdin; the shim forwards them over the pixtuoid
 // daemon's socket. It NEVER blocks or breaks opencode (the shim is best-effort,
