@@ -132,7 +132,10 @@ pub fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
 }
 
 fn render_plugin(hook_path: &str) -> String {
-    // serde_json produces a double-quoted, fully-escaped JS string literal.
+    // serde_json emits a double-quoted, escaped JSON string. JSON strings are a
+    // subset of JS string literals EXCEPT U+2028/U+2029 (valid unescaped in JSON,
+    // line terminators in JS) — neither occurs in a real filesystem path, so this
+    // is a valid JS literal for any path the resolver hands us.
     let json = serde_json::to_string(hook_path).unwrap_or_else(|_| "\"\"".to_string());
     PLUGIN_TEMPLATE.replace(HOOK_PLACEHOLDER, &json)
 }

@@ -6,6 +6,7 @@ use tracing::{debug, warn};
 
 use crate::source::decoder::decode_hook_payload;
 use crate::source::{AgentEvent, TaggedSender, Transport};
+use crate::AgentId;
 
 #[cfg(unix)]
 mod unix;
@@ -145,6 +146,22 @@ impl Drop for UndeliveredEvents {
     }
 }
 
+/// The agent a decoded event should bind to the connection's `_pid` (for the
+/// abrupt-exit watch). BOTH `SessionStart` and `Identity` register-or-back-fill
+/// a slot, and `Identity` is the ONLY registration carrier for a mid-attached
+/// session whose `SessionStart` predates the daemon (opencode, which never
+/// re-emits `session.created`). Activity/Waiting/End events never register a new
+/// slot, so they don't bind. Pure so the binding rule is unit-testable without
+/// the socket loop.
+fn pid_bind_target(ev: &AgentEvent) -> Option<AgentId> {
+    match ev {
+        AgentEvent::SessionStart { agent_id, .. } | AgentEvent::Identity { agent_id, .. } => {
+            Some(*agent_id)
+        }
+        _ => None,
+    }
+}
+
 pub(crate) async fn handle_conn(
     stream: impl AsyncRead + Unpin,
     tx: TaggedSender,
@@ -166,8 +183,8 @@ pub(crate) async fn handle_conn(
                     }
                 };
                 // Peek the shim-supplied CLI pid BEFORE `v` is consumed by
-                // decode. Only sources whose shim stamps `_pid` (CodeWhale) have
-                // it, so this is inert for the rest.
+                // decode. Only sources whose shim/plugin stamps `_pid`
+                // (CodeWhale, opencode) have it, so this is inert for the rest.
                 let pid = pid_watch
                     .as_ref()
                     .and_then(|_| v.get("_pid"))
@@ -180,11 +197,20 @@ pub(crate) async fn handle_conn(
                     // with real identity before the activity event applies.
                     Ok(evs) => {
                         // Bind every freshly-registered agent to the CLI's pid so
-                        // an abrupt exit ends it (see `HookPidWatch`).
+                        // an abrupt exit ends it (see `HookPidWatch`). Binds on
+                        // BOTH SessionStart AND Identity (`pid_bind_target`): a
+                        // session whose SessionStart predates our attach
+                        // (mid-attach) registers through the Identity prepended
+                        // ahead of its next tool/permission event — and opencode
+                        // emits its SessionStart-carrier (`session.created`) only
+                        // ONCE per session (no resurrect-on-prompt), so binding on
+                        // SessionStart alone would leave a mid-attached opencode
+                        // sprite with NO abrupt-exit signal. `note` is idempotent
+                        // per (pid, agent), so the redundant bind is harmless.
                         if let (Some(pid), Some(watch)) = (pid, pid_watch.as_ref()) {
                             for ev in &evs {
-                                if let AgentEvent::SessionStart { agent_id, .. } = ev {
-                                    watch.note(pid, *agent_id);
+                                if let Some(agent_id) = pid_bind_target(ev) {
+                                    watch.note(pid, agent_id);
                                 }
                             }
                         }
@@ -217,6 +243,53 @@ mod tests {
     use crate::AgentId;
     use std::sync::{Arc, Mutex};
     use tokio::io::AsyncWriteExt;
+
+    #[test]
+    fn pid_bind_target_covers_both_registration_carriers() {
+        // SessionStart and Identity both register-or-back-fill a slot, so both
+        // bind the pid. Identity is the mid-attach carrier (a session whose
+        // SessionStart predates attach — opencode never re-emits session.created).
+        let id = AgentId::from_parts("opencode", "ses_x");
+        for ev in [
+            AgentEvent::SessionStart {
+                agent_id: id,
+                source: "opencode".into(),
+                session_id: "ses_x".into(),
+                cwd: "/r".into(),
+                parent_id: None,
+            },
+            AgentEvent::Identity {
+                agent_id: id,
+                source: "opencode".into(),
+                session_id: "ses_x".into(),
+                cwd: None,
+            },
+        ] {
+            assert_eq!(pid_bind_target(&ev), Some(id), "{ev:?} must bind the pid");
+        }
+        // Activity / Waiting / End never register a NEW slot, so they don't bind.
+        for ev in [
+            AgentEvent::ActivityStart {
+                agent_id: id,
+                tool_use_id: None,
+                detail: None,
+            },
+            AgentEvent::ActivityEnd {
+                agent_id: id,
+                tool_use_id: None,
+            },
+            AgentEvent::Waiting {
+                agent_id: id,
+                reason: "x".into(),
+            },
+            AgentEvent::SessionEnd {
+                agent_id: id,
+                as_child: false,
+            },
+        ] {
+            assert_eq!(pid_bind_target(&ev), None, "{ev:?} must not bind the pid");
+        }
+    }
 
     /// MakeWriter that captures formatted log lines so the tests can assert
     /// on the breadcrumb's presence/absence.

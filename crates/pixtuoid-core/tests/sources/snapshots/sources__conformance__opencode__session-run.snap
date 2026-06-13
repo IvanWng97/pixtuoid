@@ -34,7 +34,7 @@ expression: events
     cwd: ~
 - Waiting:
     agent_id: 15020910450894780276
-    reason: "Run bash: rm -rf build"
+    reason: bash
 - SessionEnd:
     agent_id: 15020910450894780276
     as_child: false

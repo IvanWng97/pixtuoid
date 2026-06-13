@@ -13,8 +13,9 @@
 const HOOK_PATH: string = {{HOOK_PATH_JSON}}
 
 // Only forward what pixtuoid maps. `message.part.updated` fires per token, so we
-// gate it to tool parts (one forward per tool-state change) instead of flooding
-// the socket. The decoder (`source/opencode.rs`) ignores anything else anyway.
+// gate it to tool parts — AND only on a tool-state TRANSITION (see below),
+// instead of flooding the socket. The decoder (`source/opencode.rs`) ignores
+// anything else anyway.
 const FORWARD = new Set<string>([
   "session.created",
   "session.deleted",
@@ -22,13 +23,29 @@ const FORWARD = new Set<string>([
   "permission.v2.asked",
 ])
 
+// opencode re-publishes a tool part with status STILL `running` on EVERY output
+// chunk (streaming `bash`/`task` output). Forwarding each would spawn a shim per
+// chunk and inflate the tooltip's tool-call count, so we forward a tool part only
+// when its status CHANGES for that callID (the pending→running→completed edges).
+// Bounded by the live tool-call count; entries are freed on a terminal status.
+const lastToolStatus = new Map<string, string>()
+
 export const PixtuoidOpencode = async () => ({
   event: async ({ event }: { event: { type: string; properties: any } }) => {
     try {
       const t = event?.type
-      const keep =
-        FORWARD.has(t) ||
-        (t === "message.part.updated" && event?.properties?.part?.type === "tool")
+      let keep = FORWARD.has(t)
+      if (t === "message.part.updated" && event?.properties?.part?.type === "tool") {
+        const part = event.properties.part
+        const callID: unknown = part?.callID
+        const status: unknown = part?.state?.status
+        if (typeof callID === "string" && typeof status === "string") {
+          if (lastToolStatus.get(callID) === status) return // same status re-published (streaming) — drop
+          lastToolStatus.set(callID, status)
+          if (status === "completed" || status === "error") lastToolStatus.delete(callID)
+        }
+        keep = true
+      }
       if (!keep) return
       const payload = JSON.stringify({
         type: t,

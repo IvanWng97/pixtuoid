@@ -2,5 +2,5 @@
 {"type": "message.part.updated", "properties": {"sessionID": "ses_demo", "part": {"id": "prt_1", "sessionID": "ses_demo", "messageID": "msg_1", "type": "tool", "callID": "call_1", "tool": "bash", "state": {"status": "running", "input": {"command": "ls -la"}}}}, "_pid": 4242, "_pixtuoid_source": "opencode"}
 {"type": "message.part.updated", "properties": {"sessionID": "ses_demo", "part": {"id": "prt_2", "sessionID": "ses_demo", "messageID": "msg_1", "type": "text", "text": "the files are"}}, "_pid": 4242, "_pixtuoid_source": "opencode"}
 {"type": "message.part.updated", "properties": {"sessionID": "ses_demo", "part": {"id": "prt_1", "sessionID": "ses_demo", "messageID": "msg_1", "type": "tool", "callID": "call_1", "tool": "bash", "state": {"status": "completed"}}}, "_pid": 4242, "_pixtuoid_source": "opencode"}
-{"type": "permission.asked", "properties": {"sessionID": "ses_demo", "title": "Run bash: rm -rf build"}, "_pid": 4242, "_pixtuoid_source": "opencode"}
+{"type": "permission.v2.asked", "properties": {"sessionID": "ses_demo", "action": "bash", "resources": ["rm -rf build"]}, "_pid": 4242, "_pixtuoid_source": "opencode"}
 {"type": "session.deleted", "properties": {"sessionID": "ses_demo", "info": {"id": "ses_demo", "directory": "/Users/dev/ocproj"}}, "_pid": 4242, "_pixtuoid_source": "opencode"}

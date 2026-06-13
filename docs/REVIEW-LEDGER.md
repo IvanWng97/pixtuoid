@@ -279,3 +279,22 @@ un-claim "emits NOTHING" test-artifact claim) are NOT adjudicated — listed in
 > comment); one LOW deferred with proof-of-impossibility (R0613-08 → #276). The
 > shim never-panic / `_pid`-peek-inert / no-Mutex-across-await / Arc<ExitWatch>
 > lifetime claims were all independently re-derived and held.
+
+## 2026-06-13 — opencode integration review @ 6183494 (feat/opencode-source) → PR pending
+
+A 4-lens fan-out (correctness/grounding · design/blast-radius/semver ·
+install+TS-plugin-artifact+cross-platform · liveness/lifecycle) over the whole
+opencode diff, each MEDIUM+ adversarially verified. opencode is the 6th source —
+HOOK-ONLY via a bundled TS plugin (the FIRST install target that ships CODE). The
+event SHAPES are grounded in the cloned upstream source + the real persisted
+`opencode.db` event log (a free-model self-run; the full tool+subagent LIVE
+capture is confirm-before-merge, blocked on the throttled free tier). Result:
+**0 CRITICAL / 0 HIGH / 1 MEDIUM (held)**, all lenses APPROVE-WITH-NITS; all
+findings fixed in-PR.
+
+| # | seam (file/mechanism) | claim (1 line) | verdict | anchor (paths + fix) | tier | head | date |
+|---|---|---|---|---|---|---|---|
+| R0613-09 | `hook/mod.rs` pid-bind only on `SessionStart` × opencode `resurrects_on_prompt:false` | a MID-ATTACHED opencode session registers via the prepended `Identity` (opencode emits `session.created` once per session, never re-emits it), so `HookPidWatch.note` — fired only on `SessionStart` — never binds its pid; on an abrupt TUI quit (no `session.deleted` either) the sprite ghosts to the 30-min sweep. Invisible for CodeWhale (its `message_submit` re-emits `SessionStart` every prompt) — genuinely new for opencode | CONFIRMED→fixed | bind on `Identity` too via the new pure `pid_bind_target(ev)` (SessionStart \| Identity) — the `_pid` is already on every forwarded event; `note` is idempotent per (pid,agent). Also hardens CodeWhale mid-attach. Pinned by `pid_bind_target_covers_both_registration_carriers`. Found by the liveness lens (c88), adversarially verified holds=true | A | 6183494 | 2026-06-13 |
+| R0613-10 | `install/opencode_plugin.ts` tool-part gate + `source/opencode.rs` running→ActivityStart | opencode re-publishes a tool part with status STILL `running` on every output chunk (streaming `bash`/`task`, upstream `prompt.ts`), so the plugin forwarded one shim-spawn PER chunk and the reducer's `tool_call_count` over-counted (no per-callID dedup under the single Hook transport) — contradicting the "one connection per tool-state change" claim | CONFIRMED→fixed | the plugin now tracks last-seen status per `callID` (a `Map`, freed on terminal status) and forwards a tool part only on a status TRANSITION — collapses the spawn burst AND fixes the count. Grounded in upstream source (not schema-inference). Found by the correctness lens (c78) | B | 6183494 | 2026-06-13 |
+| R0613-11 | `source/opencode.rs` `decode_permission` reason keys | the reason was read from `title`/`pattern`/`type`/`tool`/`permission`, but the real upstream `permission.v2.asked` schema (`Request.fields` = `{sessionID, action, resources, …}`) carries NONE of them — so Waiting reason ALWAYS degraded to the literal `"permission"` (the synthetic fixture's `title` never occurs upstream) | CONFIRMED→fixed | key order is now `["action","permission",…]` (the v2 verb + v1 name first); the conformance fixture uses the real `{sessionID, action, resources}` v2 shape (snapshot reason now `bash`); tests exercise both v2 `action` and v1 `permission`. Found by the design + correctness lenses (c80) | B | 6183494 | 2026-06-13 |
+| R0613-12 | `source/opencode.rs` module doc | the module header still described the SUPERSEDED install design ("registers it in `~/.config/opencode/opencode.jsonc`") — the install actually DROPS a plugin file in the auto-discovered `<config>/plugin/` dir, no jsonc edit | CONFIRMED→fixed | header corrected to the plugin-file-drop design. Plus two NIT doc/comment fixes (the `handle_conn` `_pid`-peek comment named only CodeWhale → CodeWhale+opencode; the `render_plugin` JSON⊂JS-string caveat re U+2028/U+2029, sound for filesystem paths). Found by the install lens (c96) | B | 6183494 | 2026-06-13 |

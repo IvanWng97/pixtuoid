@@ -79,8 +79,10 @@ impl HookPidWatch {
     }
 
     /// Bind `agent_id` to `pid` and start watching the pid (idempotent). Called
-    /// from the hook decode path for every `SessionStart` whose payload carried
-    /// a `_pid`.
+    /// from the hook decode path for every registration carrier whose payload
+    /// carried a `_pid` — `SessionStart` AND `Identity` (`pid_bind_target`), the
+    /// latter being the only carrier for a mid-attached session whose
+    /// `SessionStart` predates the daemon.
     pub(crate) fn note(&self, pid: i32, agent_id: AgentId) {
         note_pid(&self.pids, pid, agent_id);
         self.exit.watch(pid);

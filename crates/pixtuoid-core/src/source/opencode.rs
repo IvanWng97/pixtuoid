@@ -10,8 +10,10 @@
 //! TUI/`run` (an in-process worker server — no `opencode serve` needed). The
 //! plugin gets `Bun.$`, so it pipes the events pixtuoid maps into the existing
 //! `pixtuoid-hook` shim on stdin (plain mode, no `--event`, like CodeWhale's
-//! subagent hooks). `pixtuoid install-hooks --target opencode` writes that
-//! bundled plugin + registers it in `~/.config/opencode/opencode.jsonc`.
+//! subagent hooks). `pixtuoid install-hooks --target opencode` DROPS that
+//! bundled plugin at `<opencode-config>/plugin/pixtuoid.ts` — opencode
+//! auto-discovers `<config>/plugin/*.{ts,js}`, so there is NO `opencode.jsonc`
+//! edit (see `install/opencode.rs`).
 //!
 //! So this is the FIRST integration whose install target ships a CODE artifact
 //! (a `.ts` file) rather than a declarative config block — the plugin IS the
@@ -221,11 +223,14 @@ fn decode_tool_part(props: &serde_json::Map<String, Value>) -> Result<Vec<AgentE
 }
 
 /// `permission.asked` / `permission.v2.asked` → `Waiting`. The request fields
-/// vary by opencode version; derive a short human reason defensively from the
-/// common shape (a title / pattern / tool / permission name), else a generic
-/// label. cwd is unknown here (the request carries only `sessionID`), so the
-/// prepended `Identity` registers ordinal-labeled if the session is unknown —
-/// back-filled when its `session.created` arrives (#221).
+/// vary by opencode version; derive a short human reason defensively. The keys
+/// are ordered by the REAL upstream shapes: `action` is the `permission.v2.asked`
+/// verb (`Request.fields` = `{sessionID, action, resources, …}`, permission.ts),
+/// `permission` the v1 `PermissionRequest` name; `title`/`pattern`/`type`/`tool`
+/// are tolerated fallbacks. Else a generic label. cwd is unknown here (the
+/// request carries only `sessionID`), so the prepended `Identity` registers
+/// ordinal-labeled if the session is unknown — back-filled when its
+/// `session.created` arrives (#221).
 fn decode_permission(props: &serde_json::Map<String, Value>) -> Result<Vec<AgentEvent>> {
     let session_id = props
         .get("sessionID")
@@ -233,7 +238,7 @@ fn decode_permission(props: &serde_json::Map<String, Value>) -> Result<Vec<Agent
         .filter(|s| !s.is_empty())
         .ok_or_else(|| anyhow!("opencode permission event missing sessionID"))?;
     let agent_id = AgentId::from_parts(SOURCE_NAME, session_id);
-    let reason = ["title", "pattern", "type", "tool", "permission"]
+    let reason = ["action", "permission", "title", "pattern", "type", "tool"]
         .iter()
         .find_map(|k| props.get(*k).and_then(|v| v.as_str()))
         .filter(|s| !s.is_empty())
@@ -488,14 +493,26 @@ mod tests {
 
     #[test]
     fn permission_asked_maps_to_waiting() {
-        for ty in ["permission.asked", "permission.v2.asked"] {
-            let events = decode_all(json!({"type": ty,
-                "properties": {"sessionID": "ses_x", "title": "Run bash: rm -rf"}}));
+        // Real upstream shapes: permission.v2.asked carries `action` (the verb);
+        // the v1 permission.asked carries `permission` (the name).
+        for (ty, props, want) in [
+            (
+                "permission.v2.asked",
+                json!({"sessionID": "ses_x", "action": "bash", "resources": ["rm -rf build"]}),
+                "bash",
+            ),
+            (
+                "permission.asked",
+                json!({"sessionID": "ses_x", "permission": "edit"}),
+                "edit",
+            ),
+        ] {
+            let events = decode_all(json!({"type": ty, "properties": props}));
             assert_eq!(events.len(), 2, "{ty}: Identity + Waiting");
             match &events[1] {
                 AgentEvent::Waiting { agent_id, reason } => {
                     assert_eq!(*agent_id, AgentId::from_parts(SOURCE_NAME, "ses_x"));
-                    assert_eq!(reason, "Run bash: rm -rf");
+                    assert_eq!(reason, want);
                 }
                 other => panic!("{ty}: expected Waiting, got {other:?}"),
             }
