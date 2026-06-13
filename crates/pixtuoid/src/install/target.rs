@@ -20,13 +20,17 @@ pub struct MergeOutcome {
 /// promotion (Rust 1.21+, MSRV 1.89), so `const` is correct here.
 #[derive(Debug)]
 pub struct Target {
-    /// Stable lowercase id: "claude" | "codex" | "reasonix".
+    /// Stable lowercase id: "claude" | "codex" | "reasonix". This is the
+    /// `--target` / CLI-facing name and does NOT always equal the core source
+    /// id (Claude's target is "claude" but its source is "claude-code") — join
+    /// against the source registry via `core_source`, never `name`.
     pub name: &'static str,
     /// The core `SourceDescriptor.name` this target installs hooks FOR. Usually
     /// equals `name`, but Claude's target is "claude" while its source is
     /// "claude-code". Pins the install↔source bridge: a target naming no
     /// registered source, or a hook-only source with no target (= its hooks
     /// never install, so its sprite never appears), is caught by the tests below.
+    /// The Status panel joins its rows to targets on this via `by_source`.
     pub core_source: &'static str,
     /// Human-readable name for CLI output.
     pub display_name: &'static str,
@@ -174,6 +178,14 @@ pub fn by_name(name: &str) -> Option<&'static Target> {
     TARGETS.iter().copied().find(|t| t.name == name)
 }
 
+/// Resolve the install target for a core source id (`SourceDescriptor.name`,
+/// e.g. "claude-code"). This is the correct join for anything keyed on the
+/// source registry (the Status panel) — `by_name` keys on the CLI-facing
+/// `--target` name, which differs from the source id for Claude.
+pub fn by_source(source_id: &str) -> Option<&'static Target> {
+    TARGETS.iter().copied().find(|t| t.core_source == source_id)
+}
+
 /// Detection = the config FILE exists (not merely its parent dir): an empty
 /// ~/.codex must NOT count as present. Exception: a target whose written file
 /// the CLI never creates itself (Reasonix) supplies a `presence_probe` over
@@ -206,6 +218,16 @@ mod tests {
         assert_eq!(by_name("opencode").unwrap().name, "opencode");
         assert!(by_name("nope").is_none());
         assert!(by_name("all").is_none()); // "all" is a meta-value, not a Target
+    }
+
+    #[test]
+    fn by_source_resolves_claude_via_core_source_not_name() {
+        // The flagship divergence: the Claude install target is named "claude"
+        // but its core source id is "claude-code". The Status panel joins on
+        // core_source — `by_name` on the source id must NOT match.
+        assert_eq!(by_source("claude-code").unwrap().name, "claude");
+        assert!(by_name("claude-code").is_none());
+        assert!(by_source("nope").is_none());
     }
 
     #[test]

@@ -485,7 +485,7 @@ fn main() -> Result<()> {
         };
         let rows = vec![
             mk(
-                "claude",
+                "claude-code",
                 "cc",
                 "Claude Code",
                 HookState::On,

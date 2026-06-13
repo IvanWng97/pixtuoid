@@ -1,8 +1,8 @@
 //! The agent-dashboard popup painter (ratatui). Pure presentation over the
 //! pre-built row list from `tui::dashboard`; all model / fold / selection
-//! logic lives there. Mirrors the theme-picker overlay: a centered, cleared,
-//! bordered block painted over the scene in both the normal and floor-
-//! transition draw paths.
+//! logic lives there. Mirrors the other popups: a centered, cleared, BORDERLESS
+//! panel (via `panel::borderless_panel`) painted over the scene in both the
+//! normal and floor-transition draw paths.
 
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};

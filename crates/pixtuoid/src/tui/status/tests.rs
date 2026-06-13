@@ -161,3 +161,44 @@ fn build_rows_covers_every_registry_source_with_aligned_live_view() {
     let live = live_view(SystemTime::UNIX_EPOCH, &rows, &scene, &[]);
     assert_eq!(live.len(), rows.len());
 }
+
+// Regression guard for the claude-code-vs-claude join (review CRITICAL): the
+// REAL build_rows() must produce an actionable (target-bearing) row for EVERY
+// registry source that has an install target — Antigravity is the only
+// JSONL/no-target source. A namespace drift between `SourceDescriptor.name` and
+// `Target.core_source` would make a flagship row non-actionable, and this fails.
+#[test]
+fn build_rows_makes_every_source_with_a_target_actionable() {
+    use pixtuoid_core::source::registry::REGISTRY;
+    let rows = build_rows();
+    for d in REGISTRY {
+        let row = rows
+            .iter()
+            .find(|r| r.source_id == d.name)
+            .unwrap_or_else(|| panic!("no Status row for registered source {:?}", d.name));
+        let has_target = crate::install::target::by_source(d.name).is_some();
+        if has_target {
+            assert!(
+                row.target.is_some() && row.hooks != HookState::JsonlNoHooks,
+                "source {:?} has an install target but its Status row is non-actionable \
+                 (target={:?}, hooks={:?}) — the registry/target join drifted",
+                d.name,
+                row.target.map(|t| t.name),
+                row.hooks,
+            );
+        } else {
+            assert!(
+                row.target.is_none() && row.hooks == HookState::JsonlNoHooks,
+                "source {:?} has no install target but rendered as actionable",
+                d.name,
+            );
+        }
+    }
+    // The flagship specifically: claude-code → a "Claude Code" actionable row.
+    let claude = rows.iter().find(|r| r.source_id == "claude-code").unwrap();
+    assert!(
+        claude.target.is_some(),
+        "Claude Code row must be actionable"
+    );
+    assert_eq!(claude.display_name, "Claude Code");
+}

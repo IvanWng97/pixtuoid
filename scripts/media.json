@@ -29,6 +29,22 @@
   ]
  },
  {
+  "id": "status",
+  "kind": "render",
+  "targets": [
+   "docs"
+  ],
+  "cols": 192,
+  "rows": 64,
+  "hour": 19,
+  "day": 1,
+  "theme": "normal",
+  "scale": 2,
+  "extra": [
+   "--status"
+  ]
+ },
+ {
   "id": "gallery",
   "kind": "crop",
   "targets": [

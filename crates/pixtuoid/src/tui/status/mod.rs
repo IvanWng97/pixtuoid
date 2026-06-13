@@ -4,7 +4,8 @@
 //! event-loop wiring lives in `tui::mod`.
 //!
 //! Rows are the UNION of install targets and registry sources, keyed on the
-//! shared lowercase source id (`SourceDescriptor.name` == `Target.name`). A
+//! source id (`SourceDescriptor.name`, joined to an install target via
+//! `Target.core_source` — NOT `Target.name`, which differs for Claude). A
 //! source with no install target (Antigravity, JSONL-only) renders a
 //! `JsonlNoHooks` row where install/uninstall no-op.
 
@@ -33,7 +34,8 @@ pub enum HookState {
 /// One row in the Status list = one agent CLI.
 #[derive(Debug, Clone)]
 pub struct StatusRow {
-    /// Registry name == `Target.name` — the unifying key for the whole feature.
+    /// The core source id (registry `SourceDescriptor.name`, e.g. "claude-code")
+    /// — the unifying key; joined to an install target via `Target.core_source`.
     pub source_id: &'static str,
     /// 2-char badge id (`cc`/`cx`/…), from the source descriptor.
     pub label_prefix: &'static str,
@@ -61,6 +63,9 @@ pub struct LiveInfo {
 #[derive(Debug, Default)]
 pub struct StatusUi {
     pub open: bool,
+    /// Index into the registry-stable `rows` (fixed order, rebuilt in place on
+    /// open/action) — a plain `usize` is sound precisely because the row set
+    /// doesn't churn frame-to-frame (unlike the dashboard, which is AgentId-keyed).
     pub selected: usize,
     /// Cached HOOK facet — rebuilt on open + after each action (filesystem
     /// reads), NEVER per frame. The LIVE facet is recomputed per frame instead.
@@ -139,7 +144,11 @@ pub fn build_rows() -> Vec<StatusRow> {
     let inputs = REGISTRY
         .iter()
         .map(|d| {
-            let target = target::by_name(d.name);
+            // Join on the SOURCE id via `core_source`, NOT `by_name`: the Claude
+            // target is named "claude" but its source is "claude-code", so
+            // `by_name(d.name)` would miss it and render the flagship CLI as a
+            // non-actionable JSONL row.
+            let target = target::by_source(d.name);
             let facts = target.map(|t| HookFacts {
                 present: target::is_present(t),
                 installed: crate::install::has_hooks(t),
