@@ -5,7 +5,7 @@ use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, BufReader};
 use tracing::{debug, warn};
 
 use crate::source::decoder::decode_hook_payload;
-use crate::source::{TaggedSender, Transport};
+use crate::source::{AgentEvent, TaggedSender, Transport};
 
 #[cfg(unix)]
 mod unix;
@@ -15,6 +15,9 @@ use unix as imp;
 mod windows;
 #[cfg(windows)]
 use windows as imp;
+
+mod pid_watch;
+pub(crate) use pid_watch::HookPidWatch;
 
 pub(crate) const MAX_CONCURRENT_CONNS: usize = 128;
 pub(crate) const CONN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
@@ -47,21 +50,37 @@ impl std::error::Error for SocketBusy {}
 pub struct HookSocketListener {
     inner: imp::Listener,
     path: PathBuf,
+    /// Optional hook-supplied-pid liveness (CodeWhale). Set via
+    /// `with_pid_watch`; a builder field rather than a `run` parameter so
+    /// `run`'s public signature stays put (no semver break on pixtuoid-core).
+    pid_watch: Option<HookPidWatch>,
 }
 
 impl HookSocketListener {
     pub async fn bind(path: impl Into<PathBuf>) -> Result<Self> {
         let path = path.into();
         let inner = imp::Listener::bind(&path).await?;
-        Ok(Self { inner, path })
+        Ok(Self {
+            inner,
+            path,
+            pid_watch: None,
+        })
     }
 
     pub fn path(&self) -> &Path {
         &self.path
     }
 
+    /// Attach a [`HookPidWatch`] so hook payloads carrying a `_pid` register a
+    /// process-exit watch (instant `SessionEnd` on an abrupt CLI exit). `pub(crate)`
+    /// — only the in-crate sources wire it.
+    pub(crate) fn with_pid_watch(mut self, pid_watch: Option<HookPidWatch>) -> Self {
+        self.pid_watch = pid_watch;
+        self
+    }
+
     pub async fn run(self, tx: TaggedSender) -> Result<()> {
-        self.inner.run(tx).await
+        self.inner.run(tx, self.pid_watch).await
     }
 }
 
@@ -126,7 +145,11 @@ impl Drop for UndeliveredEvents {
     }
 }
 
-pub(crate) async fn handle_conn(stream: impl AsyncRead + Unpin, tx: TaggedSender) {
+pub(crate) async fn handle_conn(
+    stream: impl AsyncRead + Unpin,
+    tx: TaggedSender,
+    pid_watch: Option<HookPidWatch>,
+) {
     let reader = BufReader::new(stream.take(MAX_CONN_BYTES));
     let mut lines = reader.lines();
     loop {
@@ -142,12 +165,29 @@ pub(crate) async fn handle_conn(stream: impl AsyncRead + Unpin, tx: TaggedSender
                         continue;
                     }
                 };
+                // Peek the shim-supplied CLI pid BEFORE `v` is consumed by
+                // decode. Only sources whose shim stamps `_pid` (CodeWhale) have
+                // it, so this is inert for the rest.
+                let pid = pid_watch
+                    .as_ref()
+                    .and_then(|_| v.get("_pid"))
+                    .and_then(serde_json::Value::as_u64)
+                    .and_then(|p| i32::try_from(p).ok());
                 match decode_hook_payload(v) {
                     // One payload can decode to multiple events (an Identity
                     // attached ahead of a tool/permission event, #221) — sent
                     // in order on the same channel, so the reducer registers
                     // with real identity before the activity event applies.
                     Ok(evs) => {
+                        // Bind every freshly-registered agent to the CLI's pid so
+                        // an abrupt exit ends it (see `HookPidWatch`).
+                        if let (Some(pid), Some(watch)) = (pid, pid_watch.as_ref()) {
+                            for ev in &evs {
+                                if let AgentEvent::SessionStart { agent_id, .. } = ev {
+                                    watch.note(pid, *agent_id);
+                                }
+                            }
+                        }
                         let mut undelivered = UndeliveredEvents::new(&evs);
                         for ev in evs {
                             debug!("hook event: {ev:?}");
@@ -238,7 +278,7 @@ mod tests {
         let (mut client, server) = tokio::io::duplex(4096);
         let (tx, mut rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(8);
 
-        let task = tokio::spawn(handle_conn(server, tx));
+        let task = tokio::spawn(handle_conn(server, tx, None));
         client
             .write_all(
                 b"{\"hook_event_name\":\"SessionStart\",\"session_id\":\"s1\",\
@@ -271,7 +311,7 @@ mod tests {
 
         let timed_out = tokio::time::timeout(
             std::time::Duration::from_millis(50),
-            handle_conn(server, tx),
+            handle_conn(server, tx, None),
         )
         .await
         .is_err();
@@ -312,7 +352,7 @@ mod tests {
 
         client.write_all(PRE_TOOL_USE_LINE).await.unwrap();
         drop(client);
-        handle_conn(server, tx).await;
+        handle_conn(server, tx, None).await;
 
         assert!(rx.try_recv().is_ok());
         assert!(rx.try_recv().is_ok());
@@ -331,7 +371,7 @@ mod tests {
         let (logs, _guard) = capture_warns();
 
         client.write_all(PRE_TOOL_USE_LINE).await.unwrap();
-        handle_conn(server, tx).await;
+        handle_conn(server, tx, None).await;
 
         let out = logs.contents();
         assert!(

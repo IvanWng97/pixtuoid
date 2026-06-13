@@ -10,7 +10,7 @@ pub use crate::source::cc_probe::live_cc_session_ids;
 use crate::source::decoder::{
     cwd_basename_label, ellipsize, make_tool_detail, MAX_DECODED_FIELD_CHARS,
 };
-use crate::source::hook::HookSocketListener;
+use crate::source::hook::{HookPidWatch, HookSocketListener};
 use crate::source::jsonl::{ChildEndUnclaims, JsonlWatcher};
 use crate::source::{AgentEvent, Source, TaggedReceiver, TaggedSender, Transport};
 use crate::AgentId;
@@ -292,6 +292,12 @@ impl Source for ClaudeCodeSource {
             None => tx.clone(),
         };
         let tx_jsonl = tx.clone();
+        // Hook-supplied-pid liveness (CodeWhale): its hooks ride THIS shared
+        // socket, so attaching the watch here covers it. The synthesized
+        // SessionEnd goes on the main `tx` (it is `as_child: false`, so the #246
+        // tee — which acts only on `as_child: true` — would ignore it anyway).
+        // `None` on platforms without an exit-watch backend → no-op.
+        let socket = socket.with_pid_watch(HookPidWatch::spawn(tx.clone()));
         let hook_task = tokio::spawn(async move { socket.run(tx_hook).await });
         let jsonl_task = tokio::spawn(async move { watcher.run(tx_jsonl).await });
 

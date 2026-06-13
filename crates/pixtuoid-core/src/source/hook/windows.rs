@@ -143,7 +143,11 @@ impl Listener {
         Ok(Self { server, name, sd })
     }
 
-    pub(super) async fn run(mut self, tx: TaggedSender) -> Result<()> {
+    pub(super) async fn run(
+        mut self,
+        tx: TaggedSender,
+        pid_watch: Option<super::HookPidWatch>,
+    ) -> Result<()> {
         let sem = Arc::new(Semaphore::new(MAX_CONCURRENT_CONNS));
         loop {
             let permit = match Arc::clone(&sem).acquire_owned().await {
@@ -190,9 +194,10 @@ impl Listener {
             .with_context(|| format!("re-creating hook pipe at {}", self.name))?;
             let conn = std::mem::replace(&mut self.server, next);
             let tx = tx.clone();
+            let pid_watch = pid_watch.clone();
             tokio::spawn(async move {
                 let _permit = permit;
-                let _ = tokio::time::timeout(CONN_TIMEOUT, handle_conn(conn, tx)).await;
+                let _ = tokio::time::timeout(CONN_TIMEOUT, handle_conn(conn, tx, pid_watch)).await;
             });
         }
     }

@@ -113,7 +113,28 @@ fn env_payload(event: &str) -> serde_json::Map<String, Value> {
     let cwd_fallback = std::env::current_dir()
         .ok()
         .map(|p| p.to_string_lossy().into_owned());
-    env_payload_from(event, cwd_fallback, |k| std::env::var(k).ok())
+    env_payload_from(event, cwd_fallback, cw_parent_pid(), |k| {
+        std::env::var(k).ok()
+    })
+}
+
+/// CodeWhale's pid, for the daemon's liveness watch — stamped as `_pid` so an
+/// abrupt CodeWhale exit (kill/crash/terminal-close, which fires no
+/// `session_end`) ends the sprite promptly instead of ghosting until the
+/// stale-sweep. `sh -c` EXEC's the hook (verified: the hook's getppid() ==
+/// CodeWhale's pid), so the shim's parent IS CodeWhale — on UNIX. On Windows the
+/// hook runs under `cmd /C`, so the parent is `cmd.exe` (the WRONG pid, and it
+/// exits right after spawning the shim → a false exit), so we send no pid there
+/// and CodeWhale falls back to `session_end` + the stale-sweep.
+#[cfg(unix)]
+fn cw_parent_pid() -> Option<u32> {
+    // getppid() is always safe (no args, infallible) and gives the hook's
+    // parent — CodeWhale, since `sh -c` exec's the hook (verified).
+    u32::try_from(unsafe { libc::getppid() }).ok()
+}
+#[cfg(not(unix))]
+fn cw_parent_pid() -> Option<u32> {
+    None
 }
 
 /// Per-field byte cap on env-mode values. The stdin arm enforces `STDIN_CAP`
@@ -148,10 +169,15 @@ fn cap_env_field(mut val: String) -> String {
 fn env_payload_from(
     event: &str,
     cwd_fallback: Option<String>,
+    pid: Option<u32>,
     get: impl Fn(&str) -> Option<String>,
 ) -> serde_json::Map<String, Value> {
     let mut map = serde_json::Map::new();
     map.insert("event".into(), Value::from(event));
+    // CodeWhale's pid for the daemon's liveness watch (see `cw_parent_pid`).
+    if let Some(pid) = pid {
+        map.insert("_pid".into(), Value::from(pid));
+    }
     // cwd is the AgentId KEY (the decoder drops a cwd-less event). Prefer
     // DEEPSEEK_WORKSPACE, but fall back to the hook child's own working dir:
     // CodeWhale runs the hook with current_dir = its working dir (= the
@@ -409,13 +435,18 @@ mod tests {
         ]
         .into_iter()
         .collect();
-        let map = env_payload_from("tool_call_before", None, |k| {
+        let map = env_payload_from("tool_call_before", None, Some(4321), |k| {
             env.get(k).map(|s| s.to_string())
         });
         assert_eq!(map["event"], json!("tool_call_before"));
         assert_eq!(map["cwd"], json!("/repo"));
         assert_eq!(map["tool"], json!("exec_shell"));
         assert_eq!(map["tool_args"], json!(r#"{"command":"ls -la"}"#));
+        assert_eq!(
+            map["_pid"],
+            json!(4321),
+            "CodeWhale's pid is stamped for the liveness watch"
+        );
     }
 
     #[test]
@@ -426,7 +457,9 @@ mod tests {
             [("DEEPSEEK_WORKSPACE", "/repo"), ("DEEPSEEK_TOOL_NAME", "")]
                 .into_iter()
                 .collect();
-        let map = env_payload_from("session_start", None, |k| env.get(k).map(|s| s.to_string()));
+        let map = env_payload_from("session_start", None, None, |k| {
+            env.get(k).map(|s| s.to_string())
+        });
         assert_eq!(map["cwd"], json!("/repo"));
         assert!(
             !map.contains_key("tool"),
@@ -436,6 +469,7 @@ mod tests {
             !map.contains_key("tool_args"),
             "absent tool_args must be omitted"
         );
+        assert!(!map.contains_key("_pid"), "no pid → no _pid");
         assert_eq!(map.len(), 2, "exactly event + cwd");
     }
 
@@ -453,7 +487,7 @@ mod tests {
         ]
         .into_iter()
         .collect();
-        let map = env_payload_from("tool_call_before", None, |k| env.get(k).cloned());
+        let map = env_payload_from("tool_call_before", None, None, |k| env.get(k).cloned());
         let args = map["tool_args"].as_str().unwrap();
         assert!(
             args.len() <= ENV_FIELD_CAP,
@@ -485,7 +519,7 @@ mod tests {
             [("DEEPSEEK_TOOL_NAME", "exec_shell".to_string())]
                 .into_iter()
                 .collect();
-        let map = env_payload_from("session_start", Some("/proj/here".to_string()), |k| {
+        let map = env_payload_from("session_start", Some("/proj/here".to_string()), None, |k| {
             no_ws.get(k).cloned()
         });
         assert_eq!(
@@ -499,7 +533,7 @@ mod tests {
             [("DEEPSEEK_WORKSPACE", "/ws".to_string())]
                 .into_iter()
                 .collect();
-        let map = env_payload_from("session_start", Some("/proj/here".to_string()), |k| {
+        let map = env_payload_from("session_start", Some("/proj/here".to_string()), None, |k| {
             ws.get(k).cloned()
         });
         assert_eq!(
@@ -509,7 +543,7 @@ mod tests {
         );
 
         // Neither present → no cwd (the decoder drops it; nothing to key on).
-        let map = env_payload_from("session_start", None, |_| None);
+        let map = env_payload_from("session_start", None, None, |_| None);
         assert!(
             !map.contains_key("cwd"),
             "no workspace and no cwd fallback → no cwd field"

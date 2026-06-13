@@ -46,10 +46,14 @@
 //!   user approves. This is strictly less than Reasonix (which had
 //!   `Notification` → Waiting) — accepted, no signal exists to do better.
 //!
-//! - **Exit profile is CC-class.** `session_end` fires on a clean quit (Ctrl+C
-//!   confirm; verified live) carrying `DEEPSEEK_WORKSPACE`; only SIGKILL /
-//!   terminal-close leaves no signal and falls to the generic stale-sweep. So
-//!   `has_exit_signal: true` — no Codex-style short-idle carve-out.
+//! - **Exit profile.** `session_end` fires on a clean quit (Ctrl+C confirm;
+//!   verified live) carrying `DEEPSEEK_WORKSPACE`, so `has_exit_signal: true`
+//!   (no Codex-style short-idle carve-out). An ABRUPT exit (SIGKILL /
+//!   terminal-close / crash) fires no `session_end` — on **Unix** the shim
+//!   stamps CodeWhale's pid (`_pid`, via getppid since `sh -c` exec's the hook)
+//!   and the daemon's `hook::HookPidWatch` ends the sprite the moment that pid
+//!   dies; on Windows (no usable pid through `cmd /C`) it falls to the
+//!   stale-sweep.
 //!
 //! Why no JSONL transport: CodeWhale's `rollout_path` (a `ThreadMetadata`
 //! column in `~/.codewhale/state.db`) is NEVER written in production (set to
