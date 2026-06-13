@@ -19,10 +19,12 @@
 //! into), so `merge_install` renders the whole file and `merge_uninstall`
 //! replaces it with a sentinel-free no-op stub (`export {}`). ACCEPTED residual:
 //! uninstall leaves that ~1-line stub rather than deleting the file — the
-//! orchestrator's `write_atomic` can't delete, the stub is a harmless empty
-//! module opencode loads to nothing, and `detect_installed` keys on the
-//! `@pixtuoid-opencode-plugin` sentinel (absent from the stub) so detection
-//! still reports "not installed".
+//! orchestrator's `write_atomic` can't delete, and the stub is a harmless empty
+//! module opencode loads to nothing. `merge_uninstall` keys on the
+//! `@pixtuoid-opencode-plugin` sentinel (absent from the stub) to decide
+//! `changed`, so a re-install/uninstall round-trip is exact. (`detect_installed`
+//! — the auto-detect probe — keys on the opencode CLI's dirs, NOT this sentinel;
+//! see its doc.)
 //!
 //! Config dir resolution mirrors opencode's own (`global.ts`): `OPENCODE_CONFIG_DIR`
 //! else `$XDG_CONFIG_HOME/opencode` else `~/.config/opencode`.
@@ -34,8 +36,9 @@ use anyhow::{anyhow, Result};
 use crate::install::io;
 use crate::install::target::MergeOutcome;
 
-/// First-line marker in the rendered plugin — `detect_installed`/uninstall key
-/// on it. Absent from the removed-stub, so detection flips correctly.
+/// First-line marker in the rendered plugin — `merge_uninstall` keys on it to
+/// detect our managed plugin (absent from the removed-stub, so an uninstall of
+/// a foreign/removed file is a clean no-op).
 const SENTINEL: &str = "@pixtuoid-opencode-plugin";
 
 /// The placeholder the bundled template carries for the baked shim path.
@@ -45,7 +48,7 @@ const HOOK_PLACEHOLDER: &str = "{{HOOK_PATH_JSON}}";
 const PLUGIN_TEMPLATE: &str = include_str!("opencode_plugin.ts");
 
 /// Written on uninstall: a valid empty ES module (opencode loads it to zero
-/// hooks) WITHOUT the sentinel, so `detect_installed` reports "not installed".
+/// hooks) WITHOUT the sentinel, so a re-uninstall is a clean no-op.
 const REMOVED_STUB: &str = "// pixtuoid opencode plugin removed by `pixtuoid uninstall-hooks --target opencode`.\nexport {}\n";
 
 /// opencode's config dir: `OPENCODE_CONFIG_DIR`, else `$XDG_CONFIG_HOME/opencode`,
@@ -83,14 +86,17 @@ pub fn default_config_path() -> Result<PathBuf> {
     Ok(opencode_config_dir()?.join("plugin").join("pixtuoid.ts"))
 }
 
-/// Auto-detect: the plugin file exists AND still carries the sentinel (a
-/// post-uninstall stub does not).
+/// Presence probe for auto-detect (`is_present`): is the opencode CLI present,
+/// so a bare `install-hooks` OFFERS it? Probe opencode's OWN dirs — the config
+/// dir we write into (created on first run) and the XDG data dir (the SQLite
+/// store) — NOT our plugin file: keying on our own artifact would chicken-and-egg
+/// (opencode could never be auto-detected until AFTER we'd installed into it).
+/// Mirrors CodeWhale's CLI-dir probe. Uninstall keys on the plugin file existing
+/// (`config_present`, file-existence) and `merge_uninstall` on the
+/// `@pixtuoid-opencode-plugin` sentinel, so removal stays exact regardless.
 pub fn detect_installed() -> bool {
-    default_config_path()
-        .ok()
-        .map(|p| io::resolve_symlink(&p))
-        .and_then(|p| std::fs::read_to_string(p).ok())
-        .is_some_and(|c| c.contains(SENTINEL))
+    opencode_config_dir().map(|d| d.exists()).unwrap_or(false)
+        || io::home_relative(".local/share/opencode").exists()
 }
 
 /// The "command" for opencode is the shim's absolute path, baked into the
@@ -215,9 +221,9 @@ mod tests {
     }
 
     #[test]
-    fn install_then_uninstall_round_trips_detection() {
+    fn install_then_uninstall_round_trips_the_content_sentinel() {
         // After install the content carries the sentinel; after uninstall it
-        // doesn't — so a sentinel-based detect flips correctly.
+        // doesn't — so merge_uninstall's changed-detection round-trips cleanly.
         let installed = merge_install("", "/opt/bin/pixtuoid-hook").unwrap();
         assert!(installed.content.contains(SENTINEL));
         let removed = merge_uninstall(&installed.content).unwrap();
