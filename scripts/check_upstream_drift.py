@@ -22,6 +22,9 @@ and compares against the live upstream:
                           + the payload fields decode_rx_hook_payload reads
                           vs the `Event` consts / json tags in
                           esengine/DeepSeek-Reasonix internal/hook/hook.go
+  * CodeWhale hooks    -> `CODEWHALE_EVENTS` in crates/pixtuoid/src/install/codewhale.rs
+                          vs the snake_case `HookEvent` enum in
+                          Hmbown/CodeWhale crates/tui/src/hooks.rs
 
 Exit codes:
   0  no drift
@@ -146,6 +149,24 @@ REASONIX_KNOWN_OMITTED = {"PostLLMCall", "PreCompact", "SubagentStop"}
 # them is rejected as malformed).
 REASONIX_PAYLOAD_FIELDS = {"event", "cwd", "toolName", "toolArgs", "message"}
 
+CODEWHALE_HOOK_URL = (
+    "https://raw.githubusercontent.com/Hmbown/CodeWhale/main/"
+    "crates/tui/src/hooks.rs"
+)
+
+# CodeWhale hook events we DELIBERATELY do not register (snake_case wire names):
+# turn_end is per-turn telemetry, mode_change/on_error/shell_env are not agent
+# activity a visualizer shows, and subagent_spawn/subagent_complete are deferred
+# to a v2 (individual sub-agent sprites via the observer hooks).
+CODEWHALE_KNOWN_OMITTED = {
+    "turn_end",
+    "mode_change",
+    "on_error",
+    "subagent_spawn",
+    "subagent_complete",
+    "shell_env",
+}
+
 
 def fetch(url: str) -> str:
     req = urllib.request.Request(url, headers={"User-Agent": "pixtuoid-drift-watch"})
@@ -209,11 +230,34 @@ def upstream_reasonix_hooks(text: str) -> set[str] | None:
     return found or None
 
 
+def read_codewhale_events() -> set[str]:
+    src = (REPO / "crates/pixtuoid/src/install/codewhale.rs").read_text()
+    m = re.search(r"const CODEWHALE_EVENTS[^=]*=\s*&\[(.*?)\];", src, re.S)
+    if not m:
+        raise RuntimeError("could not locate CODEWHALE_EVENTS in install/codewhale.rs")
+    return set(re.findall(r'"(\w+)"', m.group(1)))
+
+
+def upstream_codewhale_hooks(text: str) -> set[str] | None:
+    # The TUI shell-command hook enum `pub enum HookEvent { SessionStart, ... }`
+    # in crates/tui/src/hooks.rs (NOT the app-server `codewhale-hooks` sink enum
+    # in crates/hooks). serde `rename_all = "snake_case"`, so convert each
+    # CamelCase variant to the wire name we register. Variant lines are bare
+    # `Identifier,` — doc comments (`///`) start with `/` and are skipped.
+    m = re.search(r"pub enum HookEvent\s*\{(.*?)\}", text, re.S)
+    if not m:
+        return None
+    variants = re.findall(r"^\s*([A-Z][A-Za-z0-9]+)\s*,", m.group(1), re.M)
+    snake = {re.sub(r"(?<!^)(?=[A-Z])", "_", v).lower() for v in variants}
+    return snake or None
+
+
 def run_checks(
     codex_ours: set[str] | None,
     cc_ours: set[str] | None,
     dispatch_names: set[str] | None,
     reasonix_ours: set[str] | None,
+    codewhale_ours: set[str] | None,
     breaking: list[str],
     review: list[str],
     errors: list[str],
@@ -290,6 +334,36 @@ def run_checks(
                             f"decode_rx_hook_payload) has no json tag in upstream "
                             f"hook.go — likely renamed; the decode will silently zero."
                         )
+
+    # --- CodeWhale hook events (only the FETCH is transient) ---------------
+    if codewhale_ours is not None:
+        try:
+            text = fetch(CODEWHALE_HOOK_URL)
+        except FETCH_ERRORS as e:
+            errors.append(f"CodeWhale source fetch failed (transient?): {e}")
+            text = None
+        if text is not None:
+            upstream = upstream_codewhale_hooks(text)
+            if upstream is None:
+                breaking.append(
+                    "CodeWhale `pub enum HookEvent` not found at the pinned path "
+                    "(crates/tui/src/hooks.rs) — upstream moved it; update "
+                    "CODEWHALE_HOOK_URL / the parser."
+                )
+            else:
+                for ev in sorted(codewhale_ours):
+                    if ev not in upstream:
+                        breaking.append(
+                            f"CodeWhale hook `{ev}` (registered in CODEWHALE_EVENTS) is "
+                            f"GONE from upstream HookEvent — likely renamed; the decoder "
+                            f"will silently drop it."
+                        )
+                for ev in sorted(upstream - codewhale_ours - CODEWHALE_KNOWN_OMITTED):
+                    review.append(
+                        f"new CodeWhale hook `{ev}` upstream — we neither register nor "
+                        f"intentionally omit it (add a decoder arm + CODEWHALE_EVENTS, "
+                        f"or add it to CODEWHALE_KNOWN_OMITTED)."
+                    )
 
     # --- CC subagent-dispatch tool (only the FETCH is transient) -----------
     if dispatch_names is not None:
@@ -370,11 +444,13 @@ def main() -> int:
     cc_ours = None
     dispatch_names = None
     reasonix_ours = None
+    codewhale_ours = None
     try:
         codex_ours = read_codex_events()
         cc_ours = read_cc_events()
         dispatch_names = read_dispatch_names()
         reasonix_ours = read_reasonix_events()
+        codewhale_ours = read_codewhale_events()
     except Exception as e:  # noqa: BLE001
         breaking.append(
             f"drift-watch cannot read our own source ({e}) — the parsers in "
@@ -383,7 +459,16 @@ def main() -> int:
         )
 
     try:
-        run_checks(codex_ours, cc_ours, dispatch_names, reasonix_ours, breaking, review, errors)
+        run_checks(
+            codex_ours,
+            cc_ours,
+            dispatch_names,
+            reasonix_ours,
+            codewhale_ours,
+            breaking,
+            review,
+            errors,
+        )
     except Exception as e:  # noqa: BLE001
         traceback.print_exc()
         errors.append(

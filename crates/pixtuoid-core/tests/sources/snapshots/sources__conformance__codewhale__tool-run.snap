@@ -1,0 +1,57 @@
+---
+source: crates/pixtuoid-core/tests/sources/conformance.rs
+expression: events
+---
+- SessionStart:
+    agent_id: 15722429363048284587
+    source: codewhale
+    session_id: /Users/dev/cwproj
+    cwd: /Users/dev/cwproj
+    parent_id: ~
+- SessionStart:
+    agent_id: 15722429363048284587
+    source: codewhale
+    session_id: /Users/dev/cwproj
+    cwd: /Users/dev/cwproj
+    parent_id: ~
+- Identity:
+    agent_id: 15722429363048284587
+    source: codewhale
+    session_id: /Users/dev/cwproj
+    cwd: /Users/dev/cwproj
+- ActivityStart:
+    agent_id: 15722429363048284587
+    tool_use_id: ~
+    detail:
+      Generic:
+        display: "exec_shell: ls -la"
+- Identity:
+    agent_id: 15722429363048284587
+    source: codewhale
+    session_id: /Users/dev/cwproj
+    cwd: /Users/dev/cwproj
+- ActivityEnd:
+    agent_id: 15722429363048284587
+    tool_use_id: ~
+- Identity:
+    agent_id: 15722429363048284587
+    source: codewhale
+    session_id: /Users/dev/cwproj
+    cwd: /Users/dev/cwproj
+- ActivityStart:
+    agent_id: 15722429363048284587
+    tool_use_id: ~
+    detail:
+      Generic:
+        display: "read_file: src/main.rs"
+- Identity:
+    agent_id: 15722429363048284587
+    source: codewhale
+    session_id: /Users/dev/cwproj
+    cwd: /Users/dev/cwproj
+- ActivityEnd:
+    agent_id: 15722429363048284587
+    tool_use_id: ~
+- SessionEnd:
+    agent_id: 15722429363048284587
+    as_child: false

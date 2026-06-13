@@ -126,6 +126,7 @@ pub enum TargetName {
     Claude,
     Codex,
     Reasonix,
+    Codewhale,
     All,
 }
 
@@ -135,6 +136,7 @@ impl TargetName {
             TargetName::Claude => "claude",
             TargetName::Codex => "codex",
             TargetName::Reasonix => "reasonix",
+            TargetName::Codewhale => "codewhale",
             TargetName::All => "all",
         }
     }
@@ -247,6 +249,7 @@ mod tests {
         assert_eq!(TargetName::Claude.as_str(), "claude");
         assert_eq!(TargetName::Codex.as_str(), "codex");
         assert_eq!(TargetName::Reasonix.as_str(), "reasonix");
+        assert_eq!(TargetName::Codewhale.as_str(), "codewhale");
         assert_eq!(TargetName::All.as_str(), "all");
     }
 

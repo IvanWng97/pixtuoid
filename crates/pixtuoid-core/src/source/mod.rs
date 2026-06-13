@@ -27,6 +27,7 @@ pub const REGISTERED_SOURCES: &[&str] = &[
     codex::SOURCE_NAME,
     antigravity::SOURCE_NAME,
     reasonix::SOURCE_NAME,
+    codewhale::SOURCE_NAME,
 ];
 
 #[cfg(test)]
@@ -304,6 +305,7 @@ impl<T: Source> DynSource for T {
 pub mod antigravity;
 pub(crate) mod cc_probe;
 pub mod claude_code;
+pub mod codewhale;
 pub mod codex;
 pub mod decoder;
 pub(crate) mod exit_watch;

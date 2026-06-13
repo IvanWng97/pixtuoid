@@ -478,5 +478,10 @@ pub static DRACULA: Theme = Theme {
             g: 0xfa,
             b: 0x7b,
         }, // dracula green
+        codewhale: Rgb {
+            r: 0x33,
+            g: 0xb8,
+            b: 0xa8,
+        }, // deep teal
     },
 };

@@ -486,5 +486,10 @@ pub static CATPPUCCIN: Theme = Theme {
             g: 0xe3,
             b: 0xa1,
         }, // catppuccin green
+        codewhale: Rgb {
+            r: 0x94,
+            g: 0xe2,
+            b: 0xd5,
+        }, // catppuccin teal
     },
 };

@@ -1,4 +1,5 @@
 pub mod claude;
+pub mod codewhale;
 pub mod codex;
 mod hook_cmd;
 pub mod io;

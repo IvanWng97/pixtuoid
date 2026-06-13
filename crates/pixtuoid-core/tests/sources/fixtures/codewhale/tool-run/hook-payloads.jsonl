@@ -1,0 +1,7 @@
+{"event": "session_start", "cwd": "/Users/dev/cwproj", "_pixtuoid_source": "codewhale"}
+{"event": "message_submit", "cwd": "/Users/dev/cwproj", "_pixtuoid_source": "codewhale"}
+{"event": "tool_call_before", "cwd": "/Users/dev/cwproj", "tool": "exec_shell", "tool_args": "{\"command\":\"ls -la\"}", "_pixtuoid_source": "codewhale"}
+{"event": "tool_call_after", "cwd": "/Users/dev/cwproj", "tool": "exec_shell", "_pixtuoid_source": "codewhale"}
+{"event": "tool_call_before", "cwd": "/Users/dev/cwproj", "tool": "read_file", "tool_args": "{\"path\":\"src/main.rs\"}", "_pixtuoid_source": "codewhale"}
+{"event": "tool_call_after", "cwd": "/Users/dev/cwproj", "tool": "read_file", "_pixtuoid_source": "codewhale"}
+{"event": "session_end", "cwd": "/Users/dev/cwproj", "_pixtuoid_source": "codewhale"}

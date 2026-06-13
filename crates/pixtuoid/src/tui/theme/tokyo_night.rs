@@ -478,5 +478,10 @@ pub static TOKYO_NIGHT: Theme = Theme {
             g: 0xce,
             b: 0x6a,
         }, // tokyo-night green
+        codewhale: Rgb {
+            r: 0x2a,
+            g: 0xc0,
+            b: 0xb0,
+        }, // tokyo-night teal
     },
 };

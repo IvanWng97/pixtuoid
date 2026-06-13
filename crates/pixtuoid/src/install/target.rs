@@ -34,6 +34,10 @@ pub struct Target {
     /// passed `--hook-path`, which always wins — then the absolute path is
     /// embedded); Codex/Reasonix always embed the full path (Err on
     /// non-UTF-8). Takes the resolved binary so each target decides how to use it.
+    /// Usually this IS the verbatim command written for every event, but a
+    /// target's `merge_install` MAY append a per-entry suffix — CodeWhale bakes
+    /// ` --event <name>` onto each entry (it sets no event env var), so its
+    /// `hook_command` returns a per-source BASE that `merge_install` extends.
     pub hook_command: fn(resolved: &Path, explicit: bool) -> Result<String>,
     /// Parse `content`, inject managed hook entries, reserialize. MUST treat
     /// empty/whitespace-only content as the empty document — never error on empty.
@@ -111,7 +115,23 @@ pub const REASONIX: Target = Target {
     presence_probe: Some(crate::install::reasonix::detect_installed),
 };
 
-pub const TARGETS: &[&Target] = &[&CLAUDE, &CODEX, &REASONIX];
+pub const CODEWHALE: Target = Target {
+    name: "codewhale",
+    display_name: "CodeWhale",
+    restart_noun: "CodeWhale",
+    default_config_path: crate::install::codewhale::default_config_path,
+    hook_command: crate::install::codewhale::hook_command,
+    merge_install: crate::install::codewhale::merge_install,
+    merge_uninstall: crate::install::codewhale::merge_uninstall,
+    needs_path_warning: false,
+    needs_resolved_binary: true,
+    post_install_note: Some(
+        "note: comments and formatting in config.toml are not preserved (restore from the backup if needed).",
+    ),
+    presence_probe: Some(crate::install::codewhale::detect_installed),
+};
+
+pub const TARGETS: &[&Target] = &[&CLAUDE, &CODEX, &REASONIX, &CODEWHALE];
 
 pub fn by_name(name: &str) -> Option<&'static Target> {
     TARGETS.iter().copied().find(|t| t.name == name)
@@ -145,6 +165,7 @@ mod tests {
         assert_eq!(by_name("claude").unwrap().name, "claude");
         assert_eq!(by_name("codex").unwrap().name, "codex");
         assert_eq!(by_name("reasonix").unwrap().name, "reasonix");
+        assert_eq!(by_name("codewhale").unwrap().name, "codewhale");
         assert!(by_name("nope").is_none());
         assert!(by_name("all").is_none()); // "all" is a meta-value, not a Target
     }

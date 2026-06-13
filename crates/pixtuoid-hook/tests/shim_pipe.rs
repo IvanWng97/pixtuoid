@@ -102,6 +102,69 @@ async fn argv_source_flag_stamps_source_over_pipe_without_env() {
 }
 
 #[tokio::test]
+async fn codewhale_event_mode_builds_envelope_from_env_and_ignores_stdin() {
+    // Windows twin of tests/shim.rs: CodeWhale env-mode (`--event <name>`)
+    // synthesizes the envelope from DEEPSEEK_* env and must NOT read stdin. The
+    // installer writes the bare `<exe> --source codewhale --event <name>` form
+    // on Windows (cmd.exe can't express the env-prefix). Like the Unix twin we
+    // HOLD the child's stdin open (never write, never close → no EOF) so a
+    // re-added blind stdin read would BLOCK (the shim never connects to the
+    // pipe), tripping the connect timeout below — not just an EOF-able pipe a
+    // blind read would drain instantly.
+    let name = format!(r"\\.\pipe\pixtuoid-test-cwevent-{}", std::process::id());
+    let mut server = ServerOptions::new()
+        .first_pipe_instance(true)
+        .pipe_mode(PipeMode::Byte)
+        .create(&name)
+        .expect("create pipe");
+
+    let name2 = name.clone();
+    let shim = std::thread::spawn(move || {
+        let mut child = Command::new(shim_bin())
+            .env("PIXTUOID_SOCKET", &name2)
+            .env_remove("PIXTUOID_SOURCE")
+            .env("DEEPSEEK_WORKSPACE", r"C:\repo\myproj")
+            .env("DEEPSEEK_TOOL_NAME", "exec_shell")
+            .env("DEEPSEEK_TOOL_ARGS", r#"{"command":"dir"}"#)
+            .args(["--source", "codewhale", "--event", "tool_call_before"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn shim");
+        // Hold stdin open for the child's lifetime (no write, no close → no EOF).
+        let stdin = child.stdin.take().expect("stdin");
+        let status = child.wait().expect("wait shim");
+        drop(stdin);
+        status
+    });
+
+    // Bound the connect: a correct env-mode shim connects+writes promptly; a
+    // regression that blocks on the never-EOF stdin never connects.
+    let connect = tokio::time::timeout(Duration::from_secs(3), server.connect())
+        .await
+        .expect("env-mode shim must connect within 3s — it must NOT block reading stdin")
+        .expect("connect");
+    let _ = connect;
+    let mut got = Vec::new();
+    server.read_to_end(&mut got).await.expect("read");
+    let line = String::from_utf8(got).expect("utf8");
+    assert!(line.contains(r#""event":"tool_call_before""#), "{line:?}");
+    assert!(
+        line.contains(r#""cwd":"C:\\repo\\myproj""#),
+        "AgentId key from DEEPSEEK_WORKSPACE, not stdin: {line:?}"
+    );
+    assert!(line.contains(r#""tool":"exec_shell""#), "{line:?}");
+    assert!(
+        line.contains(r#""_pixtuoid_source":"codewhale""#),
+        "{line:?}"
+    );
+
+    let status = shim.join().expect("join");
+    assert!(status.success(), "env-mode shim exits 0");
+}
+
+#[tokio::test]
 async fn codex_cmd_c_invocation_of_hook_command_stamps_source() {
     // Faithfully reproduce codex's Windows hook spawn (codex-rs
     // command_runner.rs): `Command::new("cmd.exe").arg("/C").arg(<command>)`,

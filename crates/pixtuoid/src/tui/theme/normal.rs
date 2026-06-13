@@ -478,5 +478,10 @@ pub static NORMAL: Theme = Theme {
             g: 0x9e,
             b: 0x4a,
         }, // green
+        codewhale: Rgb {
+            r: 0x14,
+            g: 0xb8,
+            b: 0xb0,
+        }, // teal
     },
 };

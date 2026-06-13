@@ -142,6 +142,7 @@ fn dashboard_line(row: &DashboardRow, is_selected: bool, theme: &Theme) -> Line<
         "cx" => theme.source.codex,
         "rx" => theme.source.reasonix,
         "ag" => theme.source.antigravity,
+        "cw" => theme.source.codewhale,
         _ => theme.ui.label_idle,
     });
 

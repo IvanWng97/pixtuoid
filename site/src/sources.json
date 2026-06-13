@@ -36,6 +36,15 @@
     "platforms": { "macos": "yes", "linux": "yes", "windows": "experimental" }
   },
   {
+    "id": "codewhale",
+    "name": "CodeWhale",
+    "url": "https://github.com/Hmbown/CodeWhale",
+    "status": "supported",
+    "featured": false,
+    "transport": "Hook shim (hook-only — ~/.codewhale/config.toml [hooks], cwd-keyed)",
+    "platforms": { "macos": "yes", "linux": "yes", "windows": "experimental" }
+  },
+  {
     "id": null,
     "name": "Copilot CLI",
     "url": "https://github.com/github/copilot-cli",

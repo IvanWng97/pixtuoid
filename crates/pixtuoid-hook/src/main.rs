@@ -41,35 +41,53 @@ fn now_ms() -> u64 {
 fn main() -> Result<()> {
     let socket = default_socket_path();
 
-    let mut buf = String::new();
-    if std::io::stdin()
-        .take(STDIN_CAP)
-        .read_to_string(&mut buf)
-        .is_err()
-    {
-        return Ok(());
-    }
-    let mut payload: Value = match serde_json::from_str(&buf) {
-        Ok(v) => v,
-        // If we can't parse, exit 0 silently so CC isn't blocked.
-        Err(_) => return Ok(()),
+    // `args_os` + lossy, NOT `args()`: `std::env::args()` PANICS on any
+    // non-Unicode argument (legal Unix argv), breaching invariant #5's silent
+    // exit-0. Lossy rather than filter_map: dropping a non-UTF-8 arg would
+    // shift `--source <value>`/`--event <value>` pairing so the NEXT arg gets
+    // read as the value; lossy preserves arity, and a U+FFFD-mangled value
+    // simply fails the daemon's lookup downstream.
+    let args: Vec<String> = std::env::args_os()
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
+
+    let mut payload: Value = match event_from_argv(&args) {
+        // CodeWhale env-mode: CodeWhale's hooks deliver identity as `DEEPSEEK_*`
+        // ENV VARS, not a stdin JSON payload, and the registered command bakes
+        // `--event <name>` (the event name is absent from the env). Critically,
+        // for env-only events (session_start/tool_call_*/session_end) CodeWhale
+        // does NOT pipe stdin, so the hook child INHERITS the TUI's terminal
+        // stdin — a blind `read_to_string(stdin)` would BLOCK (and tool_call_before
+        // runs synchronously, freezing the user's tool call until the hook
+        // timeout). So when `--event` is present we build the envelope from env
+        // and NEVER touch stdin. Verified against CodeWhale 0.8.59
+        // hooks.rs::execute_sync_inner + a live capture (2026-06-12).
+        Some(event) => Value::Object(env_payload(&event)),
+        None => {
+            let mut buf = String::new();
+            if std::io::stdin()
+                .take(STDIN_CAP)
+                .read_to_string(&mut buf)
+                .is_err()
+            {
+                return Ok(());
+            }
+            match serde_json::from_str(&buf) {
+                Ok(v) => v,
+                // If we can't parse, exit 0 silently so CC isn't blocked.
+                Err(_) => return Ok(()),
+            }
+        }
     };
 
     if let Value::Object(map) = &mut payload {
         // Source precedence: the `--source <name>` argv flag (the Windows install
         // form — cmd.exe /C can't express a POSIX `VAR=value cmd` env-prefix) wins,
         // then the `PIXTUOID_SOURCE` env var (the Unix install form). Either way the
-        // daemon only ever sees the resulting `_pixtuoid_source` stamp.
-        //
-        // `args_os` + lossy, NOT `args()`: `std::env::args()` PANICS on any
-        // non-Unicode argument (legal Unix argv), breaching invariant #5's
-        // silent exit-0. Lossy rather than filter_map: dropping a non-UTF-8
-        // arg would shift `--source <value>` pairing so the NEXT arg gets
-        // read as the value; lossy preserves arity, and a U+FFFD-mangled
-        // value simply fails the daemon's registry lookup downstream.
-        let args: Vec<String> = std::env::args_os()
-            .map(|a| a.to_string_lossy().into_owned())
-            .collect();
+        // daemon only ever sees the resulting `_pixtuoid_source` stamp. NB:
+        // `--event` (env-mode) is orthogonal to source — CodeWhale's Unix install
+        // resolves source via the env-prefix arm, its Windows install via `--source`;
+        // `--event` never implies a source.
         let source = source_from_argv(&args).or_else(|| std::env::var("PIXTUOID_SOURCE").ok());
         enrich_payload(map, source, now_ms());
     }
@@ -80,6 +98,54 @@ fn main() -> Result<()> {
     line.push(b'\n');
     transport::send_line(&socket, &line);
     Ok(())
+}
+
+/// CodeWhale env-mode: synthesize the hook envelope from `DEEPSEEK_*` env vars
+/// (CodeWhale's hooks carry identity there, not on stdin). `event` is the
+/// baked `--event <name>`; `cwd` (the AgentId key), `tool`, and `tool_args` are
+/// read from env. Pure assembly split from the `std::env` read so it is
+/// testable without mutating process-global env (the source/socket env tests
+/// are the crate's only env-touching ones — see `default_socket_path_branches`).
+fn env_payload(event: &str) -> serde_json::Map<String, Value> {
+    env_payload_from(event, |k| std::env::var(k).ok())
+}
+
+fn env_payload_from(
+    event: &str,
+    get: impl Fn(&str) -> Option<String>,
+) -> serde_json::Map<String, Value> {
+    let mut map = serde_json::Map::new();
+    map.insert("event".into(), Value::from(event));
+    // (env var, envelope field) — the fields `source/codewhale.rs` reads. A
+    // missing or empty value is omitted (the decoder treats an absent cwd as
+    // malformed and drops the event, never minting a phantom agent).
+    for (env_key, field) in [
+        ("DEEPSEEK_WORKSPACE", "cwd"),
+        ("DEEPSEEK_TOOL_NAME", "tool"),
+        ("DEEPSEEK_TOOL_ARGS", "tool_args"),
+    ] {
+        if let Some(val) = get(env_key).filter(|v| !v.is_empty()) {
+            map.insert(field.into(), Value::from(val));
+        }
+    }
+    map
+}
+
+/// The baked event name from `--event <name>` (or `--event=<name>`) in argv —
+/// CodeWhale's env-mode trigger. Absent or empty → `None` (the shim reads its
+/// payload from stdin, the unchanged CC/Codex/Reasonix path). Total + panic-free
+/// per invariant #5, mirroring `source_from_argv`.
+fn event_from_argv(args: &[String]) -> Option<String> {
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        if let Some(val) = arg.strip_prefix("--event=") {
+            return Some(val).filter(|s| !s.is_empty()).map(str::to_string);
+        }
+        if arg == "--event" {
+            return it.next().filter(|s| !s.is_empty()).cloned();
+        }
+    }
+    None
 }
 
 /// The trusted CLI source from `--source <name>` (or `--source=<name>`) in argv.
@@ -256,6 +322,70 @@ mod tests {
             source_from_argv(&argv(&["pixtuoid-hook", "--source="])),
             None
         );
+    }
+
+    #[test]
+    fn event_from_argv_reads_both_forms_and_rejects_empty() {
+        assert_eq!(
+            event_from_argv(&argv(&[
+                "pixtuoid-hook",
+                "--source",
+                "codewhale",
+                "--event",
+                "session_start"
+            ])),
+            Some("session_start".into())
+        );
+        assert_eq!(
+            event_from_argv(&argv(&["pixtuoid-hook", "--event=tool_call_before"])),
+            Some("tool_call_before".into())
+        );
+        assert_eq!(event_from_argv(&argv(&["pixtuoid-hook"])), None);
+        assert_eq!(event_from_argv(&argv(&["pixtuoid-hook", "--event"])), None);
+        assert_eq!(
+            event_from_argv(&argv(&["pixtuoid-hook", "--event", ""])),
+            None
+        );
+        assert_eq!(event_from_argv(&argv(&["pixtuoid-hook", "--event="])), None);
+    }
+
+    #[test]
+    fn env_payload_folds_codewhale_env_into_the_envelope() {
+        // The live-captured shape: cwd (the AgentId key), tool, tool_args (raw
+        // JSON string). Pure getter — no process-global env mutation.
+        let env: std::collections::HashMap<&str, &str> = [
+            ("DEEPSEEK_WORKSPACE", "/repo"),
+            ("DEEPSEEK_TOOL_NAME", "exec_shell"),
+            ("DEEPSEEK_TOOL_ARGS", r#"{"command":"ls -la"}"#),
+        ]
+        .into_iter()
+        .collect();
+        let map = env_payload_from("tool_call_before", |k| env.get(k).map(|s| s.to_string()));
+        assert_eq!(map["event"], json!("tool_call_before"));
+        assert_eq!(map["cwd"], json!("/repo"));
+        assert_eq!(map["tool"], json!("exec_shell"));
+        assert_eq!(map["tool_args"], json!(r#"{"command":"ls -la"}"#));
+    }
+
+    #[test]
+    fn env_payload_omits_missing_and_empty_env() {
+        // session_start carries only DEEPSEEK_WORKSPACE (no tool) — empty/absent
+        // tool fields must be omitted, not written as "".
+        let env: std::collections::HashMap<&str, &str> =
+            [("DEEPSEEK_WORKSPACE", "/repo"), ("DEEPSEEK_TOOL_NAME", "")]
+                .into_iter()
+                .collect();
+        let map = env_payload_from("session_start", |k| env.get(k).map(|s| s.to_string()));
+        assert_eq!(map["cwd"], json!("/repo"));
+        assert!(
+            !map.contains_key("tool"),
+            "empty DEEPSEEK_TOOL_NAME must be omitted"
+        );
+        assert!(
+            !map.contains_key("tool_args"),
+            "absent tool_args must be omitted"
+        );
+        assert_eq!(map.len(), 2, "exactly event + cwd");
     }
 
     // Env vars are process-global. This is the ONLY env-touching test in this

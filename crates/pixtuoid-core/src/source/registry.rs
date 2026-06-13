@@ -21,7 +21,7 @@ use anyhow::Result;
 use serde_json::Value;
 
 use crate::source::jsonl::LineDecoder;
-use crate::source::{antigravity, claude_code, codex, reasonix, AgentEvent};
+use crate::source::{antigravity, claude_code, codewhale, codex, reasonix, AgentEvent};
 
 /// How the shared hook decoder derives the AgentId for this source. Moot for
 /// an alien-envelope source whose `custom` decoder claims every event (the
@@ -131,7 +131,7 @@ pub struct SourceDescriptor {
     pub caps: SourceCaps,
 }
 
-pub const REGISTRY: &[SourceDescriptor] = &[CLAUDE_CODE, CODEX, ANTIGRAVITY, REASONIX];
+pub const REGISTRY: &[SourceDescriptor] = &[CLAUDE_CODE, CODEX, ANTIGRAVITY, REASONIX, CODEWHALE];
 
 /// Linear scan — at most a handful of entries, called on slot creation and
 /// the per-tick sweep; a map would cost more in ceremony than it saves.
@@ -224,6 +224,40 @@ const REASONIX: SourceDescriptor = SourceDescriptor {
     },
 };
 
+/// HOOK-ONLY: CodeWhale has NO tailable transcript (`rollout_path` is an unused
+/// `state.db` column; saved sessions are full-snapshot rewrites; headless
+/// `codewhale exec` runs hooks-off — only the TUI fires hooks). Its hook
+/// envelope is ALIEN (snake_case `event` discriminator, identity via
+/// `DEEPSEEK_*` env vars the shim folds into `cwd`/`tool`/`tool_args`), so the
+/// custom decoder claims every event and the shared id-key branch is never
+/// reached. Keyed on cwd because `session_id` is inconsistent across events
+/// (live-verified 2026-06-12) — see `source/codewhale.rs`.
+const CODEWHALE: SourceDescriptor = SourceDescriptor {
+    name: codewhale::SOURCE_NAME,
+    label_prefix: "cw",
+    line_decoder: None,
+    hook: HookDecoding {
+        id_key: IdKey::TranscriptPathThenSessionId, // inert: custom claims all
+        custom: Some(codewhale::decode_cw_hook_custom),
+    },
+    caps: SourceCaps {
+        // session_end fires on a clean TUI quit carrying DEEPSEEK_WORKSPACE
+        // (verified live 2026-06-12) — best-effort counts.
+        has_exit_signal: true,
+        // message_submit re-emits SessionStart (the decode maps it so) —
+        // a swept-but-live session walks back in on the next prompt.
+        resurrects_on_prompt: true,
+        // Conservative ASSUMPTION (the live exec_shell capture did not exercise
+        // a dispatch): if the dispatch tool (`agent_spawn`) blocks hook-silently
+        // until its tool_call_after, a Delegating slot must get the Waiting-class
+        // stale window rather than be swept mid-delegation. `true` is the safe
+        // default — it can only over-retain a dead Delegating slot, never reap a
+        // live one; matches Reasonix. Individual sub-agent sprites are deferred
+        // to a v2 using the subagent_spawn/complete observer hooks.
+        delegations_are_hook_silent: true,
+    },
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -269,9 +303,10 @@ mod tests {
         assert_eq!(CODEX.name, codex::SOURCE_NAME);
         assert_eq!(ANTIGRAVITY.name, antigravity::SOURCE_NAME);
         assert_eq!(REASONIX.name, reasonix::SOURCE_NAME);
+        assert_eq!(CODEWHALE.name, codewhale::SOURCE_NAME);
         // Hand-enumerated above — the len pin turns "forgot the new row's
         // assert" from a silent gap into a loud failure.
-        assert_eq!(REGISTRY.len(), 4, "new row? add its name-pin assert above");
+        assert_eq!(REGISTRY.len(), 5, "new row? add its name-pin assert above");
     }
 
     #[test]

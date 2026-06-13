@@ -484,5 +484,10 @@ pub static GRUVBOX: Theme = Theme {
             g: 0xbb,
             b: 0x26,
         }, // gruvbox bright yellow-green
+        codewhale: Rgb {
+            r: 0x45,
+            g: 0xa0,
+            b: 0xa8,
+        }, // gruvbox teal
     },
 };

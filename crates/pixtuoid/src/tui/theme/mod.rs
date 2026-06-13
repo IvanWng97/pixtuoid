@@ -165,7 +165,7 @@ pub struct ApplianceColors {
 }
 
 /// Per-CLI badge hues for the agent-dashboard popup. One color per agent
-/// source (cc/cx/rx/ag), drawn as a leading `[xx]` badge. Each theme supplies
+/// source (cc/cx/rx/ag/cw), drawn as a leading `[xx]` badge. Each theme supplies
 /// its own so the badge harmonizes with the palette and stays legible on
 /// `tooltip_bg` (guarded by `source_badges_legible_for_every_theme`).
 #[derive(Debug, Clone)]
@@ -174,6 +174,7 @@ pub struct SourceColors {
     pub codex: Rgb,
     pub reasonix: Rgb,
     pub antigravity: Rgb,
+    pub codewhale: Rgb,
 }
 
 pub static ALL_THEMES: &[&Theme] = &[
@@ -308,7 +309,13 @@ mod tests {
         for t in ALL_THEMES {
             let s = &t.source;
             let bg = t.ui.tooltip_bg;
-            let hues = [s.claude_code, s.codex, s.reasonix, s.antigravity];
+            let hues = [
+                s.claude_code,
+                s.codex,
+                s.reasonix,
+                s.antigravity,
+                s.codewhale,
+            ];
             // Each hue must contrast the popup bg (lum-sum delta >= 80).
             for (i, h) in hues.iter().enumerate() {
                 assert!(

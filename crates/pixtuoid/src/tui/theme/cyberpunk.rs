@@ -458,5 +458,10 @@ pub static CYBERPUNK: Theme = Theme {
             g: 0xff,
             b: 0x14,
         }, // neon green
+        codewhale: Rgb {
+            r: 0x1e,
+            g: 0x90,
+            b: 0xff,
+        }, // electric azure
     },
 };

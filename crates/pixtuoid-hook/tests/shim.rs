@@ -153,6 +153,70 @@ fn argv_source_flag_stamps_source_without_env() {
 }
 
 #[test]
+fn codewhale_event_mode_builds_envelope_from_env_and_ignores_stdin() {
+    // CodeWhale env-mode (`--event <name>`): the shim synthesizes the envelope
+    // from DEEPSEEK_* env vars and MUST NOT read stdin. For env-only events
+    // CodeWhale leaves the child's stdin = the TUI terminal, which NEVER reaches
+    // EOF — and `tool_call_before` runs SYNCHRONOUSLY, so a blind read_to_string
+    // would freeze the user's tool call (and steal keystrokes). This is the
+    // regression class invariant #5 exists for (cf. PR #198's missed panic), so
+    // the test must catch a re-added blocking read, not just an EOF-able one:
+    // we hold the child's stdin pipe OPEN (never write, never close → no EOF)
+    // and assert the shim still delivers + exits within a wall-clock bound. If
+    // env-mode regressed to read stdin, it would block on the open pipe forever
+    // and the bounded wait below would trip.
+    let path = sock_path("cwevent");
+    let listener = UnixListener::bind(&path).expect("bind listener");
+    listener.set_nonblocking(true).unwrap();
+
+    let mut cmd = Command::new(BIN);
+    cmd.env("PIXTUOID_SOCKET", &path)
+        .env("PIXTUOID_SOURCE", "codewhale")
+        .env("DEEPSEEK_WORKSPACE", "/repo/myproj")
+        .env("DEEPSEEK_TOOL_NAME", "exec_shell")
+        .env("DEEPSEEK_TOOL_ARGS", r#"{"command":"ls -la"}"#)
+        .args(["--event", "tool_call_before"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let mut child = cmd.spawn().expect("spawn shim");
+    // Hold stdin open for the child's whole lifetime — never write, never drop
+    // until after it exits → the read-end never sees EOF.
+    let stdin = child.stdin.take().expect("stdin piped");
+
+    let deadline = Instant::now() + Duration::from_millis(2000);
+    let status = loop {
+        if let Some(s) = child.try_wait().expect("try_wait") {
+            break s;
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("env-mode shim did not exit within 2s — it must NOT read stdin (the inherited, never-EOF TUI terminal would block it; tool_call_before runs synchronously)");
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    drop(stdin);
+    assert!(
+        status.success(),
+        "env-mode shim must exit 0; got {status:?}"
+    );
+
+    let v = recv_delivered_json(&listener);
+    assert_eq!(v["event"], "tool_call_before");
+    assert_eq!(
+        v["cwd"], "/repo/myproj",
+        "AgentId key folded from DEEPSEEK_WORKSPACE, not stdin"
+    );
+    assert_eq!(v["tool"], "exec_shell");
+    assert_eq!(v["tool_args"], r#"{"command":"ls -la"}"#);
+    assert_eq!(v["_pixtuoid_source"], "codewhale", "source stamped");
+    assert!(v.get("_shim_ts_ms").is_some(), "timestamp stamped");
+
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
 fn missing_socket_exits_zero_without_blocking() {
     // No listener bound at this path: connect fails, the event is dropped, exit 0.
     let path = sock_path("nosock");
