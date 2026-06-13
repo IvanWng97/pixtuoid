@@ -110,6 +110,35 @@ fn env_payload(event: &str) -> serde_json::Map<String, Value> {
     env_payload_from(event, |k| std::env::var(k).ok())
 }
 
+/// Per-field byte cap on env-mode values. The stdin arm enforces `STDIN_CAP`
+/// (≈1 MiB) before parsing, so a stamped stdin payload always fits the daemon's
+/// pipe quota; the env arm has no such gate, and `DEEPSEEK_TOOL_ARGS` can be
+/// large (a big write/edit tool's input). Capping each of the ≤3 folded fields
+/// keeps the serialized line well under 1 MiB (3 × 128 KiB ≪ 1 MiB), so a large
+/// tool's `tool_call_before` still delivers instead of building a >1 MiB line
+/// the 200 ms watchdog would drop (invariant #5 holds either way, but the event
+/// — the sprite's "working" pulse — would otherwise be lost).
+const ENV_FIELD_CAP: usize = 128 * 1024;
+
+/// Byte-bounded, char-SAFE truncation (never split a UTF-8 scalar — same idiom
+/// CodeWhale itself uses; the shim must never produce invalid UTF-8). `cwd` is
+/// the AgentId key but a real workspace path is far under the cap, so it is
+/// never truncated in practice; a crafted oversized one is bounded to a stable
+/// prefix (two such events still coalesce — correct). A truncated `tool_args`
+/// just yields no target suffix (the decoder degrades gracefully on unparseable
+/// JSON).
+fn cap_env_field(mut val: String) -> String {
+    if val.len() > ENV_FIELD_CAP {
+        let end = val
+            .char_indices()
+            .take_while(|(i, _)| *i < ENV_FIELD_CAP)
+            .last()
+            .map_or(0, |(i, c)| i + c.len_utf8());
+        val.truncate(end);
+    }
+    val
+}
+
 fn env_payload_from(
     event: &str,
     get: impl Fn(&str) -> Option<String>,
@@ -118,14 +147,15 @@ fn env_payload_from(
     map.insert("event".into(), Value::from(event));
     // (env var, envelope field) — the fields `source/codewhale.rs` reads. A
     // missing or empty value is omitted (the decoder treats an absent cwd as
-    // malformed and drops the event, never minting a phantom agent).
+    // malformed and drops the event, never minting a phantom agent); a present
+    // value is capped (see ENV_FIELD_CAP).
     for (env_key, field) in [
         ("DEEPSEEK_WORKSPACE", "cwd"),
         ("DEEPSEEK_TOOL_NAME", "tool"),
         ("DEEPSEEK_TOOL_ARGS", "tool_args"),
     ] {
         if let Some(val) = get(env_key).filter(|v| !v.is_empty()) {
-            map.insert(field.into(), Value::from(val));
+            map.insert(field.into(), Value::from(cap_env_field(val)));
         }
     }
     map
@@ -386,6 +416,42 @@ mod tests {
             "absent tool_args must be omitted"
         );
         assert_eq!(map.len(), 2, "exactly event + cwd");
+    }
+
+    #[test]
+    fn env_payload_caps_oversized_fields_at_a_char_boundary() {
+        // A large DEEPSEEK_TOOL_ARGS (e.g. a big write/edit tool's input) must be
+        // capped so the serialized line stays under the daemon's 1 MiB pipe quota
+        // — extending the stdin arm's STDIN_CAP guarantee to env-mode, so a large
+        // tool's tool_call_before still delivers instead of being watchdog-dropped.
+        // Multi-byte value: a byte-slice cap would split a UTF-8 scalar.
+        let huge = "é".repeat(ENV_FIELD_CAP); // ~2·CAP bytes, well over the cap
+        let env: std::collections::HashMap<&str, String> = [
+            ("DEEPSEEK_WORKSPACE", "/repo".to_string()),
+            ("DEEPSEEK_TOOL_ARGS", huge),
+        ]
+        .into_iter()
+        .collect();
+        let map = env_payload_from("tool_call_before", |k| env.get(k).cloned());
+        let args = map["tool_args"].as_str().unwrap();
+        assert!(
+            args.len() <= ENV_FIELD_CAP,
+            "tool_args must be capped to <= {ENV_FIELD_CAP} bytes, got {}",
+            args.len()
+        );
+        assert!(
+            args.len() > ENV_FIELD_CAP - 4,
+            "cap should truncate NEAR the limit (last char boundary), not collapse"
+        );
+        assert!(
+            args.chars().all(|c| c == 'é'),
+            "no mid-scalar split → still valid é runs"
+        );
+        assert_eq!(
+            map["cwd"],
+            json!("/repo"),
+            "the AgentId key (a real path) is untouched"
+        );
     }
 
     // Env vars are process-global. This is the ONLY env-touching test in this

@@ -14,7 +14,8 @@ use anyhow::{bail, Context, Result};
 use crate::cli::TargetName;
 use target::{Target, BACKUP_SUFFIX};
 
-const NO_CLIS_MSG: &str = "no supported CLIs detected; pass --target claude|codex|reasonix|all";
+const NO_CLIS_MSG: &str =
+    "no supported CLIs detected; pass --target claude|codex|reasonix|codewhale|all";
 
 /// Filter a detection table to the targets that are present, dropping the flag.
 fn present_targets(rows: &[(&'static Target, bool)]) -> Vec<&'static Target> {
@@ -53,7 +54,7 @@ pub fn plan_targets(
         Some(TargetName::All) => {
             if explicit_config {
                 return Plan::Conflict(
-                    "--config applies to a single target; use --target claude|codex|reasonix"
+                    "--config applies to a single target; use --target claude|codex|reasonix|codewhale"
                         .into(),
                 );
             }
@@ -88,7 +89,8 @@ pub fn plan_targets(
                 1 => Plan::Targets(detected), // TTY or not: a single detected target is safe
                 _ if is_tty => Plan::Targets(detected), // caller confirms interactively
                 _ => Plan::Conflict(
-                    "multiple CLIs detected; pass --target claude|codex|reasonix|all".into(),
+                    "multiple CLIs detected; pass --target claude|codex|reasonix|codewhale|all"
+                        .into(),
                 ),
             }
         }
