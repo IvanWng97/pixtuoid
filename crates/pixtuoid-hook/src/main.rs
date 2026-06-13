@@ -107,7 +107,13 @@ fn main() -> Result<()> {
 /// testable without mutating process-global env (the source/socket env tests
 /// are the crate's only env-touching ones — see `default_socket_path_branches`).
 fn env_payload(event: &str) -> serde_json::Map<String, Value> {
-    env_payload_from(event, |k| std::env::var(k).ok())
+    // CodeWhale runs the hook with current_dir = its working dir (= the
+    // workspace), so the shim's own cwd is the reliable cwd fallback when
+    // DEEPSEEK_WORKSPACE is unset (see env_payload_from).
+    let cwd_fallback = std::env::current_dir()
+        .ok()
+        .map(|p| p.to_string_lossy().into_owned());
+    env_payload_from(event, cwd_fallback, |k| std::env::var(k).ok())
 }
 
 /// Per-field byte cap on env-mode values. The stdin arm enforces `STDIN_CAP`
@@ -141,16 +147,29 @@ fn cap_env_field(mut val: String) -> String {
 
 fn env_payload_from(
     event: &str,
+    cwd_fallback: Option<String>,
     get: impl Fn(&str) -> Option<String>,
 ) -> serde_json::Map<String, Value> {
     let mut map = serde_json::Map::new();
     map.insert("event".into(), Value::from(event));
-    // (env var, envelope field) — the fields `source/codewhale.rs` reads. A
-    // missing or empty value is omitted (the decoder treats an absent cwd as
-    // malformed and drops the event, never minting a phantom agent); a present
-    // value is capped (see ENV_FIELD_CAP).
+    // cwd is the AgentId KEY (the decoder drops a cwd-less event). Prefer
+    // DEEPSEEK_WORKSPACE, but fall back to the hook child's own working dir:
+    // CodeWhale runs the hook with current_dir = its working dir (= the
+    // workspace), and DEEPSEEK_WORKSPACE is UNSET for a fresh `codewhale`
+    // launched without `-C` until the workspace resolves — so `session_start`
+    // would otherwise carry no cwd and never register a sprite (caught by live
+    // testing 2026-06-13; the `-C` capture + unit tests masked it). The
+    // fallback resolves to the same path the workspace eventually does, so all
+    // of a session's events coalesce on one AgentId.
+    if let Some(cwd) = get("DEEPSEEK_WORKSPACE")
+        .filter(|v| !v.is_empty())
+        .or_else(|| cwd_fallback.filter(|v| !v.is_empty()))
+    {
+        map.insert("cwd".into(), Value::from(cap_env_field(cwd)));
+    }
+    // (env var, envelope field) — the remaining fields `source/codewhale.rs`
+    // reads. A missing or empty value is omitted; a present value is capped.
     for (env_key, field) in [
-        ("DEEPSEEK_WORKSPACE", "cwd"),
         ("DEEPSEEK_TOOL_NAME", "tool"),
         ("DEEPSEEK_TOOL_ARGS", "tool_args"),
     ] {
@@ -390,7 +409,9 @@ mod tests {
         ]
         .into_iter()
         .collect();
-        let map = env_payload_from("tool_call_before", |k| env.get(k).map(|s| s.to_string()));
+        let map = env_payload_from("tool_call_before", None, |k| {
+            env.get(k).map(|s| s.to_string())
+        });
         assert_eq!(map["event"], json!("tool_call_before"));
         assert_eq!(map["cwd"], json!("/repo"));
         assert_eq!(map["tool"], json!("exec_shell"));
@@ -405,7 +426,7 @@ mod tests {
             [("DEEPSEEK_WORKSPACE", "/repo"), ("DEEPSEEK_TOOL_NAME", "")]
                 .into_iter()
                 .collect();
-        let map = env_payload_from("session_start", |k| env.get(k).map(|s| s.to_string()));
+        let map = env_payload_from("session_start", None, |k| env.get(k).map(|s| s.to_string()));
         assert_eq!(map["cwd"], json!("/repo"));
         assert!(
             !map.contains_key("tool"),
@@ -432,7 +453,7 @@ mod tests {
         ]
         .into_iter()
         .collect();
-        let map = env_payload_from("tool_call_before", |k| env.get(k).cloned());
+        let map = env_payload_from("tool_call_before", None, |k| env.get(k).cloned());
         let args = map["tool_args"].as_str().unwrap();
         assert!(
             args.len() <= ENV_FIELD_CAP,
@@ -451,6 +472,47 @@ mod tests {
             map["cwd"],
             json!("/repo"),
             "the AgentId key (a real path) is untouched"
+        );
+    }
+
+    #[test]
+    fn env_payload_falls_back_to_cwd_when_workspace_unset() {
+        // The live-testing bug (2026-06-13): a fresh `codewhale` without `-C` has
+        // no DEEPSEEK_WORKSPACE at session_start, so the cwd-less envelope was
+        // dropped (no sprite). CodeWhale runs the hook with current_dir = its
+        // working dir, so the shim must fall back to that. R0613-05.
+        let no_ws: std::collections::HashMap<&str, String> =
+            [("DEEPSEEK_TOOL_NAME", "exec_shell".to_string())]
+                .into_iter()
+                .collect();
+        let map = env_payload_from("session_start", Some("/proj/here".to_string()), |k| {
+            no_ws.get(k).cloned()
+        });
+        assert_eq!(
+            map["cwd"],
+            json!("/proj/here"),
+            "cwd must fall back to the hook child's working dir when DEEPSEEK_WORKSPACE is unset"
+        );
+
+        // DEEPSEEK_WORKSPACE remains authoritative over the fallback when present.
+        let ws: std::collections::HashMap<&str, String> =
+            [("DEEPSEEK_WORKSPACE", "/ws".to_string())]
+                .into_iter()
+                .collect();
+        let map = env_payload_from("session_start", Some("/proj/here".to_string()), |k| {
+            ws.get(k).cloned()
+        });
+        assert_eq!(
+            map["cwd"],
+            json!("/ws"),
+            "DEEPSEEK_WORKSPACE wins over the fallback"
+        );
+
+        // Neither present → no cwd (the decoder drops it; nothing to key on).
+        let map = env_payload_from("session_start", None, |_| None);
+        assert!(
+            !map.contains_key("cwd"),
+            "no workspace and no cwd fallback → no cwd field"
         );
     }
 
