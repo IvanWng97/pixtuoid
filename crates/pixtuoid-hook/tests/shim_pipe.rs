@@ -140,12 +140,13 @@ async fn codewhale_event_mode_builds_envelope_from_env_and_ignores_stdin() {
     });
 
     // Bound the connect: a correct env-mode shim connects+writes promptly; a
-    // regression that blocks on the never-EOF stdin never connects.
-    let connect = tokio::time::timeout(Duration::from_secs(3), server.connect())
+    // regression that blocks on the never-EOF stdin never connects. (Bare
+    // statement, not a `let` binding — `connect()` yields `()`, and binding a
+    // unit value trips clippy::let_unit_value under check-windows' -D warnings.)
+    tokio::time::timeout(Duration::from_secs(3), server.connect())
         .await
         .expect("env-mode shim must connect within 3s — it must NOT block reading stdin")
         .expect("connect");
-    let _ = connect;
     let mut got = Vec::new();
     server.read_to_end(&mut got).await.expect("read");
     let line = String::from_utf8(got).expect("utf8");
