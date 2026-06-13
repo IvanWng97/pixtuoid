@@ -1,12 +1,14 @@
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
+use pixtuoid_core::source::decoder::decode_hook_payload;
 use pixtuoid_core::source::{AgentEvent, Transport};
 use pixtuoid_core::state::reducer::{
     Reducer, ACTIVE_GRACE_WINDOW, B1_CASCADE_GRACE, HOOK_WINS_WINDOW,
 };
 use pixtuoid_core::state::{ActivityState, SceneState};
 use pixtuoid_core::AgentId;
+use serde_json::json;
 
 use crate::{delegating_pair, start};
 
@@ -1611,5 +1613,114 @@ fn task_drain_while_parent_waiting_keeps_waiting() {
         matches!(scene.agents[&id].state, ActivityState::Waiting { .. }),
         "parent's permission must stay Waiting through a Task drain, got {:?}",
         scene.agents[&id].state
+    );
+}
+
+// --- CodeWhale subagent nesting, anchored on a REAL captured transcript -----
+
+#[test]
+fn real_codewhale_subagent_payload_nests_the_child_under_its_workspace_parent() {
+    // Anchored on an ACTUAL CodeWhale subagent run (#276): the user's
+    // ~/dotfiles/.deepseek/state/subagents.v1.json recorded child id
+    // `agent_ad945f4c` (an `explore` subagent) with workspace
+    // `/Users/navepnow/dotfiles`. The hook payload shape here is verbatim from
+    // upstream `crates/tui/src/tui/ui.rs::execute_subagent_observer_hook`
+    // (event / agent_id / session_id / workspace / mode / model / total_tokens
+    // + a `<text>_preview` + `<text>_truncated` pair) — the decoder reads only
+    // event/agent_id/workspace, so the extra real-world fields must pass
+    // through inertly (this is the regression the minimal earlier tests miss).
+    //
+    // The byte-match this pins (the R0613-08 worry): the PARENT registers via
+    // an env-mode `session_start` keyed on `cwd`; the CHILD's parent link is
+    // `workspace`-keyed. Both strings originate in the same CodeWhale
+    // `App.workspace`, so when they're equal the link MUST resolve to the
+    // parent's own AgentId and the child MUST be a distinct (un-coalesced)
+    // sprite nested under it. Decode runs through the public
+    // `decode_hook_payload` (the socket listener's own entry), routed by the
+    // shim-stamped `_pixtuoid_source`.
+    fn feed(r: &mut Reducer, scene: &mut SceneState, v: serde_json::Value, t: SystemTime) {
+        for ev in decode_hook_payload(v).expect("real CodeWhale payload must decode") {
+            r.apply(scene, ev, t, Transport::Hook);
+        }
+    }
+
+    const WS: &str = "/Users/navepnow/dotfiles";
+    let parent = AgentId::from_parts("codewhale", WS);
+    let child = AgentId::from_parts("codewhale", "agent_ad945f4c");
+    assert_ne!(
+        parent, child,
+        "child keys on agent_id, parent on cwd — structurally distinct sprites"
+    );
+
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+
+    // 1. Parent session_start — the shim's env-mode envelope (cwd resolved from
+    //    DEEPSEEK_WORKSPACE, source stamped). Keys the parent on its cwd.
+    feed(
+        &mut r,
+        &mut scene,
+        json!({ "event": "session_start", "cwd": WS, "_pixtuoid_source": "codewhale" }),
+        t0,
+    );
+    assert!(
+        scene.agents.contains_key(&parent),
+        "parent registers on its cwd-keyed sprite"
+    );
+
+    // 2. Child subagent_spawn — full upstream payload, REAL values, forwarded
+    //    RAW from CodeWhale stdin (plain hook entry, no --event).
+    feed(
+        &mut r,
+        &mut scene,
+        json!({
+            "event": "subagent_spawn",
+            "agent_id": "agent_ad945f4c",
+            "session_id": "sess_1a2b3c4d",
+            "workspace": WS,
+            "mode": "Yolo",
+            "model": "deepseek-v4-pro",
+            "total_tokens": 4096,
+            "prompt_preview": "Search the web for how people organize their dotfiles.",
+            "prompt_truncated": true,
+            "_pixtuoid_source": "codewhale"
+        }),
+        t0 + Duration::from_secs(1),
+    );
+    let slot = scene
+        .agents
+        .get(&child)
+        .expect("the subagent registers as its OWN sprite, distinct from the workspace parent");
+    assert_eq!(
+        slot.parent_id,
+        Some(parent),
+        "the workspace-keyed parent link must resolve to the parent's own cwd-keyed AgentId — the byte-match holds for the real captured workspace string"
+    );
+
+    // 3. subagent_complete ends the child AS A CHILD (mark_exiting + scope
+    //    cascade), NOT a top-level session end, and must not touch the parent.
+    feed(
+        &mut r,
+        &mut scene,
+        json!({
+            "event": "subagent_complete",
+            "agent_id": "agent_ad945f4c",
+            "session_id": "sess_1a2b3c4d",
+            "workspace": WS,
+            "status": "completed",
+            "result_preview": "I cannot proceed with this task because the required tools are not available.",
+            "result_truncated": true,
+            "_pixtuoid_source": "codewhale"
+        }),
+        t0 + Duration::from_secs(11),
+    );
+    assert!(
+        scene.agents.get(&child).unwrap().exiting_at.is_some(),
+        "subagent_complete must mark the child exiting (a child end), not leave it live"
+    );
+    assert!(
+        scene.agents.get(&parent).unwrap().exiting_at.is_none(),
+        "ending a subagent must never exit its parent"
     );
 }
