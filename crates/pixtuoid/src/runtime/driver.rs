@@ -11,6 +11,7 @@
 //! registration-failure arm IS unit-tested here (the file stays
 //! coverage-excluded regardless).
 
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
@@ -21,6 +22,7 @@ use pixtuoid_core::source::claude_code::ClaudeCodeSource;
 use pixtuoid_core::source::codex::CodexSource;
 use pixtuoid_core::source::jsonl::ChildEndUnclaims;
 use pixtuoid_core::source::manager::SourceManager;
+use pixtuoid_core::source::DynSource;
 use pixtuoid_core::state::MAX_FLOORS;
 use pixtuoid_core::{AgentEvent, Reducer, SceneState, TaggedReceiver, Transport};
 use tokio::sync::{mpsc, watch};
@@ -48,33 +50,15 @@ async fn run_async(cfg: RunConfig) -> Result<()> {
         theme,
         pets,
     } = cfg;
-    let mut cc_src = ClaudeCodeSource::default_paths();
-    if let Some(s) = socket {
-        cc_src.socket_path = s;
-    }
-    if let Some(p) = projects_root {
-        cc_src.projects_root = p;
-    }
+    // The transcript-bearing sources (CC / Antigravity / Codex), built in ONE
+    // place: `build_transcript_sources` is the single source of truth its test
+    // pins against the registry, closing the documented "registered but never
+    // spawned" gap. Hook-only sources (Reasonix / CodeWhale / opencode) have no
+    // watchable JSONL — their hook payloads ride the shared socket
+    // ClaudeCodeSource binds, attributed per-payload by `_pixtuoid_source` — so
+    // they are deliberately absent here.
+    let transcript_sources = build_transcript_sources(socket, projects_root, codex_sessions_root);
 
-    let ag_src = AntigravitySource::default_paths();
-
-    let mut codex_src = CodexSource::default_paths();
-    if let Some(p) = codex_sessions_root {
-        codex_src.sessions_root = p;
-    }
-
-    // #246: ONE shared child-end un-claim handle. ClaudeCodeSource's hook tee
-    // is the producer (every source's SubagentStop rides its shared socket);
-    // both watchers consume — each drains only the ids whose transcripts it
-    // claims (AgentId is source-namespaced), so a Codex child's id waits for
-    // the Codex watcher even though the CC source decoded its hook.
-    let child_end_unclaims = ChildEndUnclaims::new();
-    cc_src.child_end_unclaims = Some(child_end_unclaims.clone());
-    codex_src.child_end_unclaims = Some(child_end_unclaims);
-
-    // No ReasonixSource here: Reasonix is HOOK-ONLY (no watchable JSONL — see
-    // source/reasonix.rs). Its hook payloads ride the shared hook socket that
-    // ClaudeCodeSource binds, attributed per-payload by `_pixtuoid_source`.
     let (tx, rx) = mpsc::channel::<(Transport, AgentEvent)>(256);
     let boot_caps: [usize; MAX_FLOORS] = match (desk_cap, headless) {
         // Headless: no terminal to measure. Honor the cap as-is, else the fallback.
@@ -99,11 +83,11 @@ async fn run_async(cfg: RunConfig) -> Result<()> {
     // NOT an AgentEvent: the one event channel carries agent activity (its
     // Transport tag drives hook-wins dedup), not source lifecycle.
     let (health_tx, health_rx) = tokio::sync::watch::channel(Vec::new());
-    let _source_handles = SourceManager::new()
-        .with_source(Box::new(cc_src))
-        .with_source(Box::new(ag_src))
-        .with_source(Box::new(codex_src))
-        .spawn_with_health(tx, health_tx);
+    let mut manager = SourceManager::new();
+    for src in transcript_sources {
+        manager = manager.with_source(src);
+    }
+    let _source_handles = manager.spawn_with_health(tx, health_tx);
 
     if headless {
         headless_loop(scene_rx, health_rx).await
@@ -120,6 +104,50 @@ async fn run_async(cfg: RunConfig) -> Result<()> {
         )
         .await
     }
+}
+
+/// Build the transcript-bearing sources `run_async` spawns — the ONE place that
+/// set is constructed, so a source registered in the core registry but missing
+/// here (a silent "never spawns" no-op) is caught by
+/// `build_transcript_sources_wires_every_transcript_bearing_source`. Each source
+/// carries different typed config (CC's socket/projects root, Codex's sessions
+/// root), so this stays imperative rather than a registry-driven loop —
+/// invariant #3's per-source-typed seam. Hook-only sources are absent by design
+/// (they ride the shared hook socket ClaudeCodeSource binds).
+fn build_transcript_sources(
+    socket: Option<PathBuf>,
+    projects_root: Option<PathBuf>,
+    codex_sessions_root: Option<PathBuf>,
+) -> Vec<Box<dyn DynSource>> {
+    let mut cc_src = ClaudeCodeSource::default_paths();
+    if let Some(s) = socket {
+        cc_src.socket_path = s;
+    }
+    if let Some(p) = projects_root {
+        cc_src.projects_root = p;
+    }
+
+    let ag_src = AntigravitySource::default_paths();
+
+    let mut codex_src = CodexSource::default_paths();
+    if let Some(p) = codex_sessions_root {
+        codex_src.sessions_root = p;
+    }
+
+    // #246: ONE shared child-end un-claim handle. ClaudeCodeSource's hook tee is
+    // the producer (every source's SubagentStop rides its shared socket); both
+    // watchers consume — each drains only the ids whose transcripts it claims
+    // (AgentId is source-namespaced), so a Codex child's id waits for the Codex
+    // watcher even though the CC source decoded its hook.
+    let child_end_unclaims = ChildEndUnclaims::new();
+    cc_src.child_end_unclaims = Some(child_end_unclaims.clone());
+    codex_src.child_end_unclaims = Some(child_end_unclaims);
+
+    vec![
+        Box::new(cc_src) as Box<dyn DynSource>,
+        Box::new(ag_src),
+        Box::new(codex_src),
+    ]
 }
 
 async fn reducer_task(
@@ -254,6 +282,33 @@ mod tests {
         let (scene_tx, scene_rx) =
             watch::channel(Arc::new(SceneState::new([FALLBACK_DESKS; MAX_FLOORS])));
         (scene_tx, scene_rx, watch::channel(Vec::new()))
+    }
+
+    // The documented "a source registered in the core registry but NOT wired
+    // into run_async passes every conformance/manifest test yet never spawns"
+    // gap (core/CLAUDE.md) — closed. The set `build_transcript_sources` actually
+    // constructs MUST equal the registry's transcript-bearing sources
+    // (`line_decoder.is_some()`); it reads names off the real boxes, so it can't
+    // drift from a hand-maintained second list. Hook-only sources are absent by
+    // design (they ride the shared socket).
+    #[test]
+    fn build_transcript_sources_wires_every_transcript_bearing_source() {
+        use pixtuoid_core::source::{registry::descriptor_for, REGISTERED_SOURCES};
+        use std::collections::BTreeSet;
+
+        let sources = build_transcript_sources(None, None, None);
+        let built: BTreeSet<&str> = sources.iter().map(|s| s.name()).collect();
+        let expected: BTreeSet<&str> = REGISTERED_SOURCES
+            .iter()
+            .copied()
+            .filter(|&name| descriptor_for(name).map_or(false, |d| d.line_decoder.is_some()))
+            .collect();
+        assert_eq!(
+            built, expected,
+            "run_async's transcript-source wiring diverged from the registry: a \
+             transcript-bearing source is registered but not built (it would never \
+             spawn), or a built source isn't registered"
+        );
     }
 
     #[tokio::test(start_paused = true)]
