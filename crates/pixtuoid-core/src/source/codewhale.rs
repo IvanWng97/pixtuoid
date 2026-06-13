@@ -69,10 +69,9 @@ pub const SOURCE_NAME: &str = "codewhale";
 
 /// CodeWhale tools that dispatch a sub-agent (`crates/tui/src/tools/subagent`
 /// @0.8.59: the tool is `agent_spawn`, with the deprecated alias `spawn_agent`).
-/// Mapped to `ToolDetail::Task` so the slot reads "Delegating" while the
-/// dispatch tool runs. v1 shows the dispatch only — individual sub-agent
-/// sprites would need the `subagent_spawn`/`subagent_complete` observer hooks
-/// (which carry an `agent_id`) and are deferred.
+/// Mapped to `ToolDetail::Task` so the PARENT slot reads "Delegating" while the
+/// dispatch tool runs. The CHILD gets its own sprite via the
+/// `subagent_spawn`/`subagent_complete` observer hooks (see `decode_cw_subagent`).
 const SUBAGENT_TOOLS: &[&str] = &["agent_spawn", "spawn_agent"];
 
 /// Decode one CodeWhale hook envelope (already identified by
@@ -100,10 +99,21 @@ pub fn decode_cw_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
         .get("event")
         .and_then(|s| s.as_str())
         .ok_or_else(|| anyhow!("codewhale payload missing event"))?;
-    // `cwd` (DEEPSEEK_WORKSPACE) is the ONLY stable identity — see the module
-    // header on why session_id is unusable. An empty one would mint a phantom
-    // agent nothing coalesces with (the same empty-key-is-malformed idiom as
-    // the Reasonix cwd guard and the shared decoder's session_id guard).
+
+    // Subagent observer hooks are forwarded RAW from CodeWhale's stdin (not via
+    // the shim's env-mode), so they carry CodeWhale's OWN field names — `agent_id`
+    // (the CHILD) and `workspace` (the parent's cwd) — and are keyed on the child
+    // agent_id, not cwd. Handled before the cwd requirement below (they have no
+    // `cwd` field).
+    if let Some(events) = decode_cw_subagent(event, obj)? {
+        return Ok(events);
+    }
+
+    // The remaining events are the shim's env-mode envelope, keyed on `cwd`
+    // (DEEPSEEK_WORKSPACE, or the hook child's cwd fallback). `cwd` is the ONLY
+    // stable identity for a session — see the module header on why session_id is
+    // unusable. An empty one would mint a phantom agent nothing coalesces with
+    // (the same empty-key-is-malformed idiom as the Reasonix cwd guard).
     let cwd = obj
         .get("cwd")
         .and_then(|s| s.as_str())
@@ -157,6 +167,64 @@ pub fn decode_cw_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
         }]),
         other => bail!("unsupported codewhale hook event: {other}"),
     }
+}
+
+/// CodeWhale's `subagent_spawn` / `subagent_complete` observer hooks
+/// (`ui.rs::execute_subagent_observer_hook`), forwarded RAW from stdin so the
+/// payload is CodeWhale's own shape: `agent_id` = the CHILD, `session_id` =
+/// parent session, `workspace` = the parent's cwd, plus a `prompt`/`result`
+/// preview + (on complete) `status`. `Ok(None)` for any other event (the caller
+/// falls through to the env-mode cwd-keyed arms).
+///
+/// The child is keyed on its `agent_id` and parent-linked to the WORKSPACE-keyed
+/// parent sprite — a MIXED keying (parent on cwd, child on agent_id), exactly
+/// like CC/Codex subagents: a subagent runs in the same workspace as its parent,
+/// so cwd-keying alone would coalesce it INTO the parent. The parent link rides
+/// the reducer's `scope` tree (cascade/liveness) + child ledger (`as_child`).
+fn decode_cw_subagent(
+    event: &str,
+    obj: &serde_json::Map<String, Value>,
+) -> Result<Option<Vec<AgentEvent>>> {
+    let is_spawn = match event {
+        "subagent_spawn" => true,
+        "subagent_complete" => false,
+        _ => return Ok(None),
+    };
+    // The child agent_id is the KEY — required (an empty one can't be keyed).
+    let child = obj
+        .get("agent_id")
+        .and_then(|s| s.as_str())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| anyhow!("codewhale {event} missing/empty agent_id"))?;
+    let child_id = AgentId::from_parts(SOURCE_NAME, child);
+
+    if !is_spawn {
+        // subagent_complete → end the child. `as_child: true` (the CC/Codex
+        // SubagentStop semantics) so the reducer's child ledger / scope tree
+        // handle the parent link + cascade.
+        return Ok(Some(vec![AgentEvent::SessionEnd {
+            agent_id: child_id,
+            as_child: true,
+        }]));
+    }
+
+    // subagent_spawn → register the child. `workspace` (the parent's cwd) links
+    // it to the parent sprite; it's OPTIONAL — if CodeWhale hasn't resolved the
+    // workspace yet (the same `app.workspace = None` window as session_start),
+    // register the child as a parentless root rather than dropping it (it still
+    // shows, just not nested).
+    let workspace = obj
+        .get("workspace")
+        .and_then(|s| s.as_str())
+        .filter(|s| !s.is_empty());
+    let parent_id = workspace.map(|ws| AgentId::from_parts(SOURCE_NAME, ws));
+    Ok(Some(vec![AgentEvent::SessionStart {
+        agent_id: child_id,
+        source: SOURCE_NAME.to_string(),
+        session_id: child.to_string(),
+        cwd: workspace.unwrap_or("").into(),
+        parent_id,
+    }]))
 }
 
 /// The registry's `hook.custom` entry point. CodeWhale's envelope is ALIEN (no
@@ -421,21 +489,101 @@ mod tests {
     #[test]
     fn unknown_event_bails_loudly() {
         // Registered-vs-decoded drift must surface, not silently drop. We
-        // deliberately do NOT decode turn_end/mode_change/on_error/subagent_*.
-        for ev in [
-            "turn_end",
-            "mode_change",
-            "on_error",
-            "subagent_spawn",
-            "subagent_complete",
-            "shell_env",
-            "Bogus",
-        ] {
+        // deliberately do NOT decode turn_end/mode_change/on_error/shell_env
+        // (subagent_spawn/complete ARE decoded — see the subagent tests).
+        for ev in ["turn_end", "mode_change", "on_error", "shell_env", "Bogus"] {
             assert!(
                 decode_cw_hook_payload(&json!({"event": ev, "cwd": "/r"})).is_err(),
                 "{ev} must bail (not registered, must not decode silently)"
             );
         }
+    }
+
+    #[test]
+    fn subagent_spawn_registers_a_child_parented_to_the_workspace_sprite() {
+        // Forwarded RAW from CodeWhale stdin: agent_id = child, workspace = parent cwd.
+        let ev = decode(json!({
+            "event": "subagent_spawn",
+            "agent_id": "agent-abc123",
+            "session_id": "sess_dead",
+            "workspace": "/Users/dev/cwproj",
+            "prompt_preview": "investigate X"
+        }));
+        match ev {
+            AgentEvent::SessionStart {
+                agent_id,
+                source,
+                cwd,
+                parent_id,
+                ..
+            } => {
+                assert_eq!(source, SOURCE_NAME);
+                // child keyed on agent_id (NOT cwd) — else it coalesces with the parent.
+                assert_eq!(agent_id, AgentId::from_parts(SOURCE_NAME, "agent-abc123"));
+                assert_eq!(
+                    parent_id,
+                    Some(AgentId::from_parts(SOURCE_NAME, "/Users/dev/cwproj")),
+                    "parent link is the WORKSPACE-keyed sprite (= the session_start/message_submit agent)"
+                );
+                assert_eq!(cwd, std::path::PathBuf::from("/Users/dev/cwproj"));
+            }
+            other => panic!("expected SessionStart, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn subagent_complete_ends_the_child_as_a_child() {
+        let ev = decode(json!({
+            "event": "subagent_complete",
+            "agent_id": "agent-abc123",
+            "session_id": "sess_dead",
+            "workspace": "/Users/dev/cwproj",
+            "status": "completed"
+        }));
+        match ev {
+            AgentEvent::SessionEnd { agent_id, as_child } => {
+                assert_eq!(agent_id, AgentId::from_parts(SOURCE_NAME, "agent-abc123"));
+                assert!(
+                    as_child,
+                    "subagent_complete is a CHILD end (drives the scope cascade)"
+                );
+            }
+            other => panic!("expected SessionEnd, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn subagent_spawn_without_workspace_registers_a_parentless_root() {
+        // app.workspace can be None early (same window as session_start) — the
+        // child must still register (parentless root), not be dropped.
+        let ev = decode(json!({"event": "subagent_spawn", "agent_id": "agent-xy"}));
+        assert!(
+            matches!(ev, AgentEvent::SessionStart { parent_id: None, agent_id, .. }
+            if agent_id == AgentId::from_parts(SOURCE_NAME, "agent-xy"))
+        );
+    }
+
+    #[test]
+    fn subagent_event_without_agent_id_is_malformed() {
+        // agent_id is the child's KEY — its absence is a hard error, not a silent drop.
+        assert!(
+            decode_cw_hook_payload(&json!({"event": "subagent_spawn", "workspace": "/r"})).is_err()
+        );
+        assert!(decode_cw_hook_payload(&json!({"event": "subagent_complete"})).is_err());
+    }
+
+    #[test]
+    fn a_subagent_does_not_coalesce_with_its_workspace_parent() {
+        // The whole point of agent_id-keying: a child in the SAME workspace as
+        // its parent must be a DISTINCT AgentId (cwd-keying alone would merge them).
+        let parent = decode(json!({"event": "session_start", "cwd": "/ws"}));
+        let child =
+            decode(json!({"event": "subagent_spawn", "agent_id": "agent-1", "workspace": "/ws"}));
+        assert_ne!(
+            parent.agent_id(),
+            child.agent_id(),
+            "parent (cwd-keyed) and child (agent_id-keyed) must be distinct sprites"
+        );
     }
 
     #[test]

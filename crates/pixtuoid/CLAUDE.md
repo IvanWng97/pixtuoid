@@ -40,9 +40,10 @@ src/
 │                         reasonix = GLOBAL ~/.reasonix/settings.json, FLAT {match,command,timeout-ms}
 │                         entries — project-scope is trust-gated; match omitted = every tool;
 │                         codewhale = ~/.codewhale/config.toml [hooks] (enabled=true) + a `hooks` array of
-│                         {event, command} entries — PER-EVENT command (bakes ` --event <name>`, since
-│                         CodeWhale sets no event env var); hook_command returns the BASE form, merge_install
-│                         appends the event; `_pixtuoid` sentinel idempotency),
+│                         {event, command} entries. Env-mode events (session/tool/end) bake ` --event <name>`
+│                         (CodeWhale sets no event env var; shim builds from DEEPSEEK_*); the subagent observer
+│                         events (subagent_spawn/complete) use the PLAIN stdin-forward command (no --event) —
+│                         CodeWhale pipes a full JSON payload with the child agent_id. `_pixtuoid` sentinel idempotency),
 │                       io.rs (resolve_symlink + the ONE config-write authority: ConfigLock —
 │                         an RAII advisory-lock guard taken BEFORE the read and held across
 │                         read+merge+backup+write (lost-update TOCTOU); its pinned symlink

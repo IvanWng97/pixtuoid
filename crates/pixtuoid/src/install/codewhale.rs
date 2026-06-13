@@ -46,17 +46,25 @@ use crate::install::target::MergeOutcome;
 const SENTINEL_KEY: &str = "_pixtuoid";
 
 /// Events we register == events we decode (`source/codewhale.rs`), enforced by
-/// `every_registered_codewhale_event_decodes` below. turn_end / mode_change /
-/// on_error / subagent_* / shell_env are deliberately absent: per-turn noise,
-/// no lifecycle meaning, or (subagents) deferred to a v2 using the observer
-/// hooks. CodeWhale has NO approval/notification hook, so there is no Waiting
-/// event to register.
-const CODEWHALE_EVENTS: &[&str] = &[
-    "session_start",
-    "message_submit",
-    "tool_call_before",
-    "tool_call_after",
-    "session_end",
+/// `every_registered_codewhale_event_decodes` below. The `bool` is `env_mode`:
+/// `true` events carry identity via `DEEPSEEK_*` env vars, so their command bakes
+/// `--event <name>` and the shim builds the envelope from env; `false` events
+/// (the subagent observer hooks) are forwarded RAW on stdin — CodeWhale pipes a
+/// complete JSON payload (with the child `agent_id`), so the command is the plain
+/// stdin-forward form (no `--event`), exactly like the CC/Codex hooks.
+///
+/// turn_end / mode_change / on_error / shell_env are deliberately absent
+/// (per-turn noise / no lifecycle meaning). CodeWhale has NO approval hook in the
+/// TUI path (`ApprovalRequired` shows UI + writes the audit log, fires no hook),
+/// so there is no Waiting event to register — not a scope cut, no signal exists.
+const CODEWHALE_EVENTS: &[(&str, bool)] = &[
+    ("session_start", true),
+    ("message_submit", true),
+    ("tool_call_before", true),
+    ("tool_call_after", true),
+    ("session_end", true),
+    ("subagent_spawn", false),
+    ("subagent_complete", false),
 ];
 
 /// The config CodeWhale actually reads: prefer `~/.codewhale/config.toml`, else
@@ -136,13 +144,18 @@ fn is_managed_entry(entry: &toml::Value) -> bool {
     entry.get(SENTINEL_KEY).and_then(|v| v.as_bool()) == Some(true)
 }
 
-fn managed_entry(event: &str, base_cmd: &str) -> toml::Value {
+fn managed_entry(event: &str, env_mode: bool, base_cmd: &str) -> toml::Value {
     let mut entry = Table::new();
     entry.insert("event".into(), toml::Value::String(event.into()));
-    entry.insert(
-        "command".into(),
-        toml::Value::String(format!("{base_cmd} --event {event}")),
-    );
+    // env-mode events bake `--event <name>` (the shim reads DEEPSEEK_* env);
+    // the subagent observer events forward the raw stdin JSON, so the command is
+    // the plain base form (no `--event`) — the shim reads stdin like CC/Codex.
+    let command = if env_mode {
+        format!("{base_cmd} --event {event}")
+    } else {
+        base_cmd.to_string()
+    };
+    entry.insert("command".into(), toml::Value::String(command));
     entry.insert(SENTINEL_KEY.into(), toml::Value::Boolean(true));
     toml::Value::Table(entry)
 }
@@ -167,8 +180,8 @@ fn toml_merge_install(doc: toml::Value, base_cmd: &str) -> toml::Value {
         }
         if let Some(arr) = arr.as_array_mut() {
             arr.retain(|e| !is_managed_entry(e));
-            for ev in CODEWHALE_EVENTS {
-                arr.push(managed_entry(ev, base_cmd));
+            for (ev, env_mode) in CODEWHALE_EVENTS {
+                arr.push(managed_entry(ev, *env_mode, base_cmd));
             }
         }
     }
@@ -234,12 +247,19 @@ mod tests {
         );
         let arr = v["hooks"]["hooks"].as_array().unwrap();
         assert_eq!(arr.len(), CODEWHALE_EVENTS.len());
-        for (entry, ev) in arr.iter().zip(CODEWHALE_EVENTS) {
+        for (entry, (ev, env_mode)) in arr.iter().zip(CODEWHALE_EVENTS) {
             assert_eq!(entry["event"].as_str().unwrap(), *ev);
+            let expected = if *env_mode {
+                // env-mode events bake `--event <name>`.
+                format!("{BASE} --event {ev}")
+            } else {
+                // subagent observer events forward raw stdin — plain command.
+                BASE.to_string()
+            };
             assert_eq!(
                 entry["command"].as_str().unwrap(),
-                format!("{BASE} --event {ev}"),
-                "the event name must be baked into the per-event command"
+                expected,
+                "env-mode events bake --event; subagent events use the plain stdin-forward command"
             );
             assert!(entry[SENTINEL_KEY].as_bool().unwrap());
         }
@@ -395,10 +415,14 @@ command = "echo hi"
     #[test]
     fn every_registered_codewhale_event_decodes() {
         use pixtuoid_core::source::decoder::decode_hook_payload;
-        for ev in CODEWHALE_EVENTS {
+        for (ev, _env_mode) in CODEWHALE_EVENTS {
+            // Carry every identity field a decoder arm might need: `cwd` for the
+            // env-mode events, `agent_id`/`workspace` for the subagent events.
             let payload = serde_json::json!({
                 "event": ev,
                 "cwd": "/repo",
+                "agent_id": "agent-1",
+                "workspace": "/repo",
                 "_pixtuoid_source": "codewhale",
             });
             assert!(

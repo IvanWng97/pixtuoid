@@ -155,15 +155,13 @@ CODEWHALE_HOOK_URL = (
 )
 
 # CodeWhale hook events we DELIBERATELY do not register (snake_case wire names):
-# turn_end is per-turn telemetry, mode_change/on_error/shell_env are not agent
-# activity a visualizer shows, and subagent_spawn/subagent_complete are deferred
-# to a v2 (individual sub-agent sprites via the observer hooks).
+# turn_end is per-turn telemetry, and mode_change/on_error/shell_env are not
+# agent activity a visualizer shows. (subagent_spawn/subagent_complete ARE
+# registered — they drive child sprites.)
 CODEWHALE_KNOWN_OMITTED = {
     "turn_end",
     "mode_change",
     "on_error",
-    "subagent_spawn",
-    "subagent_complete",
     "shell_env",
 }
 

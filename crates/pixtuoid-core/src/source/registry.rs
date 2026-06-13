@@ -252,8 +252,9 @@ const CODEWHALE: SourceDescriptor = SourceDescriptor {
         // until its tool_call_after, a Delegating slot must get the Waiting-class
         // stale window rather than be swept mid-delegation. `true` is the safe
         // default — it can only over-retain a dead Delegating slot, never reap a
-        // live one; matches Reasonix. Individual sub-agent sprites are deferred
-        // to a v2 using the subagent_spawn/complete observer hooks.
+        // live one; matches Reasonix. (Individual sub-agents ALSO get their own
+        // child sprites via the subagent_spawn/complete observer hooks —
+        // `codewhale::decode_cw_subagent`.)
         delegations_are_hook_silent: true,
     },
 };
