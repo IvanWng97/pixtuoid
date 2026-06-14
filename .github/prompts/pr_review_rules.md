@@ -18,7 +18,7 @@ by reading actual code — no guessing, no "this might be an issue."
    - `pixtuoid-core` importing terminal dependencies (ratatui, crossterm)
    - Events bypassing the typed `mpsc` channel or hardcoding `Transport::Hook`
    - Source implementations not going through the `Source` trait
-   - `install-hooks` not using `write_config_atomic` for settings.json
+   - `install::install_target`/`uninstall_target` not going through the `ConfigLock` round (`write_config_atomic`) for settings.json
    - Hook shim doing anything other than exit 0 on error
    - Walkable mask blocking more than ground footprint
 

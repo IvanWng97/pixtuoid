@@ -269,12 +269,10 @@ jobs:
           out=$(echo '{}' | ./target/release/pixtuoid-hook 2>&1)
           test -z "$out"
           echo "hook shim exited 0 silently (expected no-op with no socket)"
-      - name: install-hooks round-trip
-        run: |
-          mkdir -p /tmp/smoke-test/.claude
-          echo '{}' > /tmp/smoke-test/.claude/settings.json
-          HOME=/tmp/smoke-test ./target/release/pixtuoid install-hooks
-          HOME=/tmp/smoke-test ./target/release/pixtuoid uninstall-hooks
+      # (The install/uninstall round-trip is no longer a CLI command — binding a
+      # source is the in-TUI Connection panel's job. The hook-write round-trip
+      # against every target is unit-tested by
+      # `install::tests::install_target_round_trips_every_registered_target`.)
       # gen-check renders the office (Pillow + ffmpeg) and diffs the committed
       # README sections + every still. node is for gen-readme-check. gifsicle is
       # NOT needed: --check presence-checks the gif/clip jobs (gen-media.py skips

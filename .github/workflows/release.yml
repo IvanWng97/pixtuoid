@@ -350,12 +350,12 @@ jobs:
 
             def caveats
               <<~EOS
-                To start visualizing your Claude Code sessions:
-                  pixtuoid install-hooks
-                  pixtuoid run
+                To start visualizing your AI coding sessions:
+                  pixtuoid
 
-                Before uninstalling, remove hooks from Claude Code:
-                  pixtuoid uninstall-hooks
+                Then press `c` to open the Connection panel and connect your
+                CLI (Claude Code, Codex, ...). Disconnect there before
+                uninstalling to remove its hooks.
               EOS
             end
 
