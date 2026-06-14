@@ -39,6 +39,14 @@ src/
 │                       panel disconnect walks characters out gracefully + live (no restart), the JSONL watcher
 │                       still running can't keep a disconnected source visible, AND a blank-source slot that
 │                       slipped the per-event gate is swept too. Stateless on purpose (no prev-set bookkeeping).
+│                       LIVENESS-LADDER INTERACTIONS (all benign — a disconnect is an explicit user toggle, the
+│                       same authority class as a SessionEnd, NOT content-driven lifecycle): a disconnected source
+│                       is evicted by THIS 1-Hz reconcile, NOT the minutes-scale stale-sweep; reconcile's
+│                       write-once `mark_exiting` is honored by the probe ladder (ProofOfLife/vouch SKIP exiting
+│                       slots + never create/resurrect them — core sharp edge), so a vouched-but-disconnected
+│                       source still exits; `cascade_exit` is source-agnostic (parent_id BFS) so a disconnect of
+│                       a delegating parent takes its whole subtree while a DIFFERENT connected source's subtree
+│                       is untouched. Reconnect = a fresh `SessionStart` resurrects-in-place once the old slot GCs.
 │                       Also creates the ONE shared ChildEndUnclaims handle (#246) and hands it
 │                       to BOTH ClaudeCodeSource (hook-tee producer + CC watcher consumer) and CodexSource
 │                       (watcher consumer) — manual wiring like the rest of source construction)
