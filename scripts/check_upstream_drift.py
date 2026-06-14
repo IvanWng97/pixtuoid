@@ -36,8 +36,8 @@ and compares against the live upstream:
                           @github/copilot session-events JSON schema (unpkg)
                           (one-directional: Copilot emits ~100 event types and we
                           map ~10 by design, so only a VANISHED depended type alarms)
-  * Cursor hooks       -> the camelCase `hook_event_name`s the decoder maps (the
-                          `match event` block in crates/pixtuoid-core/src/source/cursor.rs)
+  * Cursor hooks       -> the camelCase `hook_event_name`s we register
+                          (CURSOR_EVENTS in crates/pixtuoid/src/install/cursor.rs)
                           vs the hook-event names on cursor.com/docs/hooks
                           (one-directional: Cursor exposes ~18 hook events and we
                           map ~5 by design, so only a VANISHED depended event alarms)
@@ -314,15 +314,17 @@ def read_copilot_events() -> set[str]:
 
 
 def read_cursor_events() -> set[str]:
-    """The camelCase hook events the decoder maps, read from the `match event`
-    block in source/cursor.rs (the source of truth). Scoped to the match block
-    so other quoted strings in the arms (`"tool_name"`, `"?"`) don't leak in —
-    the event patterns are the only fully-`[a-z][A-Za-z]+` quoted literals."""
-    src = (REPO / "crates/pixtuoid-core/src/source/cursor.rs").read_text()
-    m = re.search(r"match event \{(.*?)\n    \}", src, re.S)
+    """The camelCase hook events we register/decode, read from the explicit
+    `CURSOR_EVENTS` const in install/cursor.rs — the same registered list the
+    `every_registered_cursor_event_decodes` test pins, and a leak-free source of
+    truth (mirrors read_reasonix_events / read_codewhale_events). Reading the
+    decoder's `match event` block instead would risk a future camelCase field
+    lookup in an arm leaking a phantom event into the drift set."""
+    src = (REPO / "crates/pixtuoid/src/install/cursor.rs").read_text()
+    m = re.search(r"const CURSOR_EVENTS[^=]*=\s*&\[(.*?)\];", src, re.S)
     if not m:
-        raise RuntimeError("could not locate the `match event` block in source/cursor.rs")
-    return set(re.findall(r'"([a-z][A-Za-z]+)"', m.group(1)))
+        raise RuntimeError("could not locate CURSOR_EVENTS in install/cursor.rs")
+    return set(re.findall(r'"(\w+)"', m.group(1)))
 
 
 def upstream_copilot_events(text: str) -> set[str] | None:

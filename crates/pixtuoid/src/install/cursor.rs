@@ -171,11 +171,13 @@ fn json_merge_uninstall(mut doc: Value) -> Value {
     }
     if hooks_obj.is_empty() {
         root.remove("hooks");
-        // The `version` we added is meaningless without hooks — drop it too so a
-        // full uninstall leaves the file as we found it (empty object), keeping
-        // uninstall a clean inverse of install.
-        root.remove("version");
     }
+    // Deliberately do NOT remove `version`: we can't tell our set-if-absent `1`
+    // from a user's own value, and stripping it would DELETE a user's
+    // `{"version": N}` (no hooks) on uninstall. A leftover `{"version": 1}` after
+    // a from-scratch install→uninstall is a harmless valid-Cursor residual
+    // (accepted, like opencode's no-op stub) — preserving the user's data wins
+    // over a perfectly-empty inverse.
     doc
 }
 
@@ -265,13 +267,25 @@ mod tests {
     }
 
     #[test]
-    fn uninstall_all_managed_drops_hooks_and_version() {
+    fn uninstall_all_managed_drops_hooks_but_keeps_version() {
         let installed = json_merge_install(json!({}), "/x");
         let cleaned = json_merge_uninstall(installed);
         assert!(cleaned.get("hooks").is_none(), "got {cleaned}");
-        assert!(
-            cleaned.get("version").is_none(),
-            "version we added is dropped on full uninstall: {cleaned}"
+        // `version` is preserved (we can't distinguish our `1` from a user's) —
+        // a harmless residual, and the only safe choice (see below).
+        assert_eq!(cleaned["version"], json!(1), "got {cleaned}");
+    }
+
+    #[test]
+    fn uninstall_preserves_a_users_version_only_file() {
+        // The data-loss case the review caught: a user's {"version": N} with NO
+        // hooks must survive install→uninstall, not be stripped to {}.
+        let installed = json_merge_install(json!({"version": 3}), "/x");
+        let cleaned = json_merge_uninstall(installed);
+        assert_eq!(
+            cleaned,
+            json!({"version": 3}),
+            "a user's version must not be lost on uninstall: {cleaned}"
         );
     }
 
