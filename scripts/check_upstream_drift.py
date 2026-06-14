@@ -194,7 +194,9 @@ OPENCODE_TOLERATED = {"permission.asked"}
 
 # Copilot CLI publishes a session-events JSON schema in its npm package; unpkg
 # serves the file directly (the bare path 302-redirects to the latest pinned
-# version, which urllib follows). Each event is a `definitions.<Name>` object whose
+# version, which urllib follows — intentionally UNPINNED: a drift watch wants to
+# track the latest published shape, not freeze a tested one). Each event is a
+# `definitions.<Name>` object whose
 # `properties.type.const` is the wire `type` string. The check is ONE-DIRECTIONAL
 # (like opencode): Copilot emits ~100 event types and copilot.rs intentionally maps
 # only ~10, so "new upstream event" is noise — we alarm only when a type WE DEPEND
