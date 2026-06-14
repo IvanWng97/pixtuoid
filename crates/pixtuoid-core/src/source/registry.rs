@@ -21,7 +21,9 @@ use anyhow::Result;
 use serde_json::Value;
 
 use crate::source::jsonl::LineDecoder;
-use crate::source::{antigravity, claude_code, codewhale, codex, opencode, reasonix, AgentEvent};
+use crate::source::{
+    antigravity, claude_code, codewhale, codex, copilot, opencode, reasonix, AgentEvent,
+};
 
 /// How the shared hook decoder derives the AgentId for this source. Moot for
 /// an alien-envelope source whose `custom` decoder claims every event (the
@@ -138,6 +140,7 @@ pub const REGISTRY: &[SourceDescriptor] = &[
     REASONIX,
     CODEWHALE,
     OPENCODE,
+    COPILOT,
 ];
 
 /// Linear scan — at most a handful of entries, called on slot creation and
@@ -295,6 +298,32 @@ const OPENCODE: SourceDescriptor = SourceDescriptor {
     },
 };
 
+/// GitHub Copilot CLI (`@github/copilot`). TRANSCRIPT-ONLY (Antigravity/Codex-class):
+/// the whole lifecycle is persisted to `<copilot_home>/session-state/<id>/events.jsonl`
+/// (permission + sub-agent events included — richer than Codex), so it needs NO hook
+/// install target and NO custom hook decoder. Sub-agents interleave in the root file,
+/// keyed on the envelope `agentId`; the session id is the parent-dir UUID
+/// (`copilot::copilot_id_from_path`).
+const COPILOT: SourceDescriptor = SourceDescriptor {
+    name: copilot::SOURCE_NAME,
+    label_prefix: "cp",
+    line_decoder: Some(copilot::decode_copilot_line),
+    hook: HookDecoding {
+        id_key: IdKey::TranscriptPathThenSessionId, // inert: no hook transport for this source
+        custom: None,
+    },
+    caps: SourceCaps {
+        // `session.shutdown` is a real persisted exit marker → no short-idle reaper.
+        has_exit_signal: true,
+        // Sessions are stable + resumable (sessionId constant across --resume); a
+        // stale-swept session does not silently walk back in on the next prompt.
+        resurrects_on_prompt: false,
+        // The `task` dispatch emits a `tool.execution_start`/`complete` pair AND explicit
+        // `subagent.started`/`completed` events, so a delegation is not hook-silent.
+        delegations_are_hook_silent: false,
+    },
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -342,9 +371,10 @@ mod tests {
         assert_eq!(REASONIX.name, reasonix::SOURCE_NAME);
         assert_eq!(CODEWHALE.name, codewhale::SOURCE_NAME);
         assert_eq!(OPENCODE.name, opencode::SOURCE_NAME);
+        assert_eq!(COPILOT.name, copilot::SOURCE_NAME);
         // Hand-enumerated above — the len pin turns "forgot the new row's
         // assert" from a silent gap into a loud failure.
-        assert_eq!(REGISTRY.len(), 6, "new row? add its name-pin assert above");
+        assert_eq!(REGISTRY.len(), 7, "new row? add its name-pin assert above");
     }
 
     #[test]

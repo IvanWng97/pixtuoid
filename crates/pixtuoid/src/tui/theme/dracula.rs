@@ -488,5 +488,10 @@ pub static DRACULA: Theme = Theme {
             g: 0x55,
             b: 0x55,
         }, // dracula red
+        copilot: Rgb {
+            r: 0xe0,
+            g: 0x60,
+            b: 0x9c,
+        }, // copilot rose
     },
 };

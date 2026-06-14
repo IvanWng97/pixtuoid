@@ -488,5 +488,10 @@ pub static TOKYO_NIGHT: Theme = Theme {
             g: 0x76,
             b: 0x8e,
         }, // tokyo-night red
+        copilot: Rgb {
+            r: 0xd0,
+            g: 0x5c,
+            b: 0xc8,
+        }, // copilot rose-magenta (tokyo-night's opencode is pink-red)
     },
 };

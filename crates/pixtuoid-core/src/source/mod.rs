@@ -29,6 +29,7 @@ pub const REGISTERED_SOURCES: &[&str] = &[
     reasonix::SOURCE_NAME,
     codewhale::SOURCE_NAME,
     opencode::SOURCE_NAME,
+    copilot::SOURCE_NAME,
 ];
 
 #[cfg(test)]
@@ -308,6 +309,7 @@ pub(crate) mod cc_probe;
 pub mod claude_code;
 pub mod codewhale;
 pub mod codex;
+pub mod copilot;
 pub mod decoder;
 pub(crate) mod exit_watch;
 pub(crate) mod fd_probe;

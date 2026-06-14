@@ -20,6 +20,7 @@ use anyhow::Result;
 use pixtuoid_core::source::antigravity::AntigravitySource;
 use pixtuoid_core::source::claude_code::ClaudeCodeSource;
 use pixtuoid_core::source::codex::CodexSource;
+use pixtuoid_core::source::copilot::CopilotSource;
 use pixtuoid_core::source::jsonl::ChildEndUnclaims;
 use pixtuoid_core::source::manager::SourceManager;
 use pixtuoid_core::source::DynSource;
@@ -147,6 +148,7 @@ fn build_transcript_sources(
     }
 
     let ag_src = AntigravitySource::default_paths();
+    let copilot_src = CopilotSource::default_paths();
 
     let mut codex_src = CodexSource::default_paths();
     if let Some(p) = codex_sessions_root {
@@ -166,6 +168,7 @@ fn build_transcript_sources(
         Box::new(cc_src) as Box<dyn DynSource>,
         Box::new(ag_src),
         Box::new(codex_src),
+        Box::new(copilot_src),
     ]
 }
 

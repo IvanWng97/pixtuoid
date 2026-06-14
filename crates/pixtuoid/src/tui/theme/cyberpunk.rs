@@ -468,5 +468,10 @@ pub static CYBERPUNK: Theme = Theme {
             g: 0x3b,
             b: 0x30,
         }, // neon red
+        copilot: Rgb {
+            r: 0xe0,
+            g: 0x60,
+            b: 0x9c,
+        }, // copilot rose
     },
 };

@@ -496,5 +496,10 @@ pub static CATPPUCCIN: Theme = Theme {
             g: 0x8b,
             b: 0xa8,
         }, // catppuccin red
+        copilot: Rgb {
+            r: 0xe0,
+            g: 0x60,
+            b: 0x9c,
+        }, // copilot rose
     },
 };

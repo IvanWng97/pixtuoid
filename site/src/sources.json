@@ -45,13 +45,13 @@
     "platforms": { "macos": "yes", "linux": "yes", "windows": "experimental" }
   },
   {
-    "id": null,
+    "id": "copilot",
     "name": "Copilot CLI",
     "url": "https://github.com/github/copilot-cli",
-    "status": "planned",
+    "status": "supported",
     "featured": false,
-    "transport": "Identical event names",
-    "platforms": { "macos": "planned", "linux": "planned", "windows": "planned" }
+    "transport": "JSONL watcher (transcript-only — ~/.copilot/session-state/, sub-agents interleave by agentId)",
+    "platforms": { "macos": "yes", "linux": "yes", "windows": "experimental" }
   },
   {
     "id": "opencode",

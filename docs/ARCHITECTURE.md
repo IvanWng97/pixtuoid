@@ -97,7 +97,7 @@ flowchart TB
 These are load-bearing — see `CLAUDE.md` and the nested guides before changing them.
 
 - **The `Source` trait is the only seam for adding a transcript-bearing agent
-  CLI** (Codex, Cursor, …). Per-source format knowledge lives in that source's
+  CLI** (Codex, Copilot CLI, Cursor, …). Per-source format knowledge lives in that source's
   own decoder functions (injected into `JsonlWatcher` as fn pointers), not in a
   shared decoder. A hook-only CLI (Reasonix — no watchable transcript) is the
   documented exception: no `Source` impl and no runtime wiring; its registry

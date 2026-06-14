@@ -1,0 +1,19 @@
+---
+source: crates/pixtuoid-core/tests/sources/conformance.rs
+expression: events
+---
+- SessionStart:
+    agent_id: 9716945019479703174
+    source: copilot
+    session_id: 65f8cef9-7dd8-46fa-9f6a-78cc95f68ab3
+    cwd: "d:\\contentforge-fullstack (1)"
+    parent_id: ~
+- ActivityStart:
+    agent_id: 9716945019479703174
+    tool_use_id: tooluse_9CoqZL2lZlJUsz7TjJsSUk
+    detail:
+      Generic:
+        display: report_intent
+- ActivityEnd:
+    agent_id: 9716945019479703174
+    tool_use_id: tooluse_9CoqZL2lZlJUsz7TjJsSUk

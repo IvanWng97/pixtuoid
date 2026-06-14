@@ -142,6 +142,7 @@ fn dashboard_line(row: &DashboardRow, is_selected: bool, theme: &Theme) -> Line<
         "ag" => theme.source.antigravity,
         "cw" => theme.source.codewhale,
         "oc" => theme.source.opencode,
+        "cp" => theme.source.copilot,
         _ => theme.ui.label_idle,
     });
 

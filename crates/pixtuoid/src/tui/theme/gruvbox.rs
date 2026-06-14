@@ -494,5 +494,10 @@ pub static GRUVBOX: Theme = Theme {
             g: 0x49,
             b: 0x34,
         }, // gruvbox red
+        copilot: Rgb {
+            r: 0xff,
+            g: 0x7a,
+            b: 0xb0,
+        }, // copilot rose
     },
 };
