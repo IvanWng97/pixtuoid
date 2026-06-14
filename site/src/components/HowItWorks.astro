@@ -4,21 +4,21 @@ import { asset } from '../consts';
 const steps = [
   {
     n: '01',
-    cmd: 'pixtuoid install-hooks',
-    title: 'Hook in',
-    body: 'One command wires pixtuoid into your agent CLIs. It only listens for lifecycle events — it never touches your code.',
+    cmd: 'pixtuoid',
+    title: 'Open the office',
+    body: 'Launch the TUI in any terminal. Empty desks at first, waiting for someone to show up.',
   },
   {
     n: '02',
-    cmd: 'pixtuoid run',
-    title: 'Open the office',
-    body: 'Launch the TUI in any terminal. Empty desks at first, waiting for someone to show up.',
+    cmd: 'press c → connect',
+    title: 'Connect your CLI',
+    body: 'Open the Connection panel and bind your agent (Claude Code, Codex, …). pixtuoid wires up the integration for you — it only listens for lifecycle events, never your code.',
   },
   {
     n: '03',
     cmd: '# just start coding',
     title: 'Watch them arrive',
-    body: 'Every session you start walks in, sits down, and gets to work. End it and they head for the elevator.',
+    body: 'Every session you start walks in, sits down, and gets to work. Disconnect in the panel and they head for the elevator.',
   },
 ];
 ---
@@ -26,7 +26,7 @@ const steps = [
 <section id="how" class="how" data-floor="3">
   <div class="container">
     <div class="section-head reveal">
-      <p class="eyebrow">3F · machine room — three commands</p>
+      <p class="eyebrow">3F · machine room — launch, connect, code</p>
       <h2>Up and running in a minute.</h2>
     </div>
     <ol class="how__steps">

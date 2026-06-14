@@ -150,7 +150,7 @@ fn toggle_pin<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
 fn connect_source(
     config_path: &std::path::Path,
     connected: &crate::runtime::ConnectedSources,
-    source_id: &str,
+    source_id: &'static str,
     target: Option<&'static crate::install::target::Target>,
     display_name: &str,
 ) -> String {
@@ -164,7 +164,16 @@ fn connect_source(
     match target {
         Some(t) => match crate::install::install_target(t, None, None) {
             Ok(r) => connection::format_connect_result(&r, display_name),
-            Err(e) => format!("{display_name}: connect failed \u{2014} {e:#}"),
+            // The hooks did NOT install — roll back the flag + gate so the next
+            // restart doesn't honor a persisted "connected" with no integration
+            // behind it (a hook-only source would show connected yet never
+            // produce an agent). The rollback save writes the same path the
+            // first save just succeeded on, so it's reliable.
+            Err(e) => {
+                let _ = crate::config::save_source_connected(config_path, source_id, false);
+                connected.set(source_id, false);
+                format!("{display_name}: connect failed \u{2014} {e:#}")
+            }
         },
         None => format!("\u{2713} {display_name} connected"),
     }
@@ -179,7 +188,7 @@ fn connect_source(
 fn disconnect_source(
     config_path: &std::path::Path,
     connected: &crate::runtime::ConnectedSources,
-    source_id: &str,
+    source_id: &'static str,
     target: Option<&'static crate::install::target::Target>,
     display_name: &str,
 ) -> String {
@@ -1351,6 +1360,63 @@ mod dispatch_tests {
         assert!(
             !connected.is_connected("antigravity"),
             "a failed persist must NOT open the gate (else restart re-evicts)"
+        );
+    }
+
+    // A target whose install ALWAYS fails (its default_config_path errs, so
+    // install_target bails before any FS) — to exercise connect_source's
+    // install-failure rollback deterministically + cross-platform.
+    static FAIL_TARGET: crate::install::target::Target = crate::install::target::Target {
+        name: "rollbacktest",
+        core_source: "rollbacktest",
+        display_name: "RollbackTest",
+        restart_noun: "RollbackTest",
+        default_config_path: || Err(anyhow::anyhow!("forced install failure")),
+        hook_command: |_, _| Ok(String::new()),
+        merge_install: |c, _| {
+            Ok(crate::install::target::MergeOutcome {
+                content: c.to_string(),
+                changed: false,
+            })
+        },
+        merge_uninstall: |c| {
+            Ok(crate::install::target::MergeOutcome {
+                content: c.to_string(),
+                changed: false,
+            })
+        },
+        needs_path_warning: false,
+        needs_resolved_binary: false,
+        post_install_note: None,
+        presence_probe: None,
+    };
+
+    #[test]
+    fn connect_source_rolls_back_gate_and_flag_when_install_target_fails() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cfg = tmp.path().join("config.toml");
+        let connected = crate::runtime::ConnectedSources::default();
+
+        // Save succeeds (writable cfg) so the gate opens, THEN install_target
+        // fails → connect_source must undo both.
+        let res = connect_source(
+            &cfg,
+            &connected,
+            "rollbacktest",
+            Some(&FAIL_TARGET),
+            "RollbackTest",
+        );
+        assert!(res.contains("failed"), "must report the failure: {res}");
+        assert!(
+            !connected.is_connected("rollbacktest"),
+            "install failure must roll the gate back closed"
+        );
+        // The persisted flag is rolled back to false too (no shown-but-broken
+        // source surviving the next restart).
+        let written = std::fs::read_to_string(&cfg).unwrap();
+        assert!(
+            written.contains("rollbacktest") && written.contains("false"),
+            "the flag was rolled back to false: {written}"
         );
     }
 }

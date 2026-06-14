@@ -208,7 +208,7 @@ pub fn save_version(path: &Path, version: &str) -> Result<()> {
 /// Persist a single source's connection flag, auto-vivifying the `[sources]`
 /// table, through the comment/unknown-key-preserving `update_config` path. The
 /// `c` Connection panel calls this on every connect/disconnect toggle.
-pub fn save_source_connected(path: &Path, source_id: &str, connected: bool) -> Result<()> {
+pub fn save_source_connected(path: &Path, source_id: &'static str, connected: bool) -> Result<()> {
     update_config(path, |doc| {
         doc["sources"][source_id] = toml_edit::value(connected);
     })

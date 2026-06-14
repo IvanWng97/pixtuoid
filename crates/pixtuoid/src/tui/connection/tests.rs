@@ -222,3 +222,103 @@ fn build_rows_makes_every_source_with_a_target_actionable() {
     );
     assert_eq!(claude.display_name, "Claude Code");
 }
+
+#[test]
+fn format_connect_result_renders_connected_plus_backup_and_path_notes() {
+    use crate::install::{InstallOutcome, InstallReport};
+    let base = |outcome, backup, path_warning| InstallReport {
+        outcome,
+        config_path: PathBuf::from("/c"),
+        backup,
+        restart_noun: "Claude",
+        post_note: None,
+        path_warning,
+    };
+    // Both outcomes read as "connected" (the flag flip is the real action).
+    let plain = format_connect_result(&base(InstallOutcome::Installed, None, false), "Claude Code");
+    assert_eq!(plain, "\u{2713} Claude Code connected");
+    assert_eq!(
+        format_connect_result(
+            &base(InstallOutcome::AlreadyUpToDate, None, false),
+            "Claude Code"
+        ),
+        "\u{2713} Claude Code connected"
+    );
+    // Backup + PATH notes append.
+    let noted = format_connect_result(
+        &base(
+            InstallOutcome::Installed,
+            Some(PathBuf::from("/c.bak")),
+            true,
+        ),
+        "Claude Code",
+    );
+    assert!(noted.contains("connected"), "{noted}");
+    assert!(noted.contains("backup saved"), "{noted}");
+    assert!(noted.contains("PATH"), "{noted}");
+}
+
+#[test]
+fn format_disconnect_result_renders_disconnected_plus_backup_note() {
+    use crate::install::{UninstallOutcome, UninstallReport};
+    let removed = UninstallReport {
+        outcome: UninstallOutcome::Removed,
+        config_path: PathBuf::from("/c"),
+        removed_backup: Some(PathBuf::from("/c.bak")),
+        restart_noun: "Claude",
+    };
+    let s = format_disconnect_result(&removed, "Claude Code");
+    assert!(s.contains("disconnected"), "{s}");
+    assert!(s.contains("backup cleared"), "{s}");
+
+    // NothingToRemove still reads as disconnected, no backup line.
+    let nothing = UninstallReport {
+        outcome: UninstallOutcome::NothingToRemove,
+        config_path: PathBuf::from("/c"),
+        removed_backup: None,
+        restart_noun: "Codex",
+    };
+    let s2 = format_disconnect_result(&nothing, "Codex");
+    assert!(s2.contains("disconnected"), "{s2}");
+    assert!(!s2.contains("backup"), "{s2}");
+}
+
+#[test]
+fn no_action_hint_distinguishes_nocli_from_actionable() {
+    let cc = claude_target();
+    let rows = build_rows_from(vec![
+        RowInput {
+            source_id: "claude",
+            label_prefix: "cc",
+            target: Some(cc),
+            facts: Some(RowFacts {
+                present: false, // → NoCli
+                config_path: None,
+            }),
+            connected: false,
+        },
+        RowInput {
+            source_id: "claude",
+            label_prefix: "cc",
+            target: Some(cc),
+            facts: Some(RowFacts {
+                present: true, // → Disconnected (actionable)
+                config_path: None,
+            }),
+            connected: false,
+        },
+    ]);
+    assert_eq!(rows[0].state, ConnState::NoCli);
+    assert!(
+        no_action_hint(&rows[0]).contains("not detected"),
+        "NoCli hint: {}",
+        no_action_hint(&rows[0])
+    );
+    // The actionable fallback arm (not normally surfaced — the painter routes
+    // Disconnected to the action line — but the toggle effect calls it).
+    assert!(
+        no_action_hint(&rows[1]).contains("nothing to do"),
+        "fallback hint: {}",
+        no_action_hint(&rows[1])
+    );
+}
