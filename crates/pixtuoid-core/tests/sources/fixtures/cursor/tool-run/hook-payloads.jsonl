@@ -1,6 +1,7 @@
 {"hook_event_name": "sessionStart", "session_id": "c7cef226-sess", "conversation_id": "c7cef226-sess", "workspace_roots": ["/Users/dev/proj"], "transcript_path": null, "_pixtuoid_source": "cursor"}
-{"hook_event_name": "preToolUse", "session_id": "c7cef226-sess", "cwd": "", "workspace_roots": ["/Users/dev/proj"], "tool_name": "Shell", "tool_input": {"command": "ls -la"}, "tool_use_id": "357c27e0", "_pixtuoid_source": "cursor"}
+{"hook_event_name": "preToolUse", "session_id": "c7cef226-sess", "cwd": "", "workspace_roots": ["/Users/dev/proj"], "tool_name": "Shell", "tool_input": {"command": "ls -la"}, "_pixtuoid_source": "cursor"}
 {"hook_event_name": "postToolUse", "session_id": "c7cef226-sess", "workspace_roots": ["/Users/dev/proj"], "tool_name": "Shell", "_pixtuoid_source": "cursor"}
 {"hook_event_name": "preToolUse", "session_id": "c7cef226-sess", "workspace_roots": ["/Users/dev/proj"], "tool_name": "Read", "tool_input": {"file_path": "/Users/dev/proj/README.md"}, "_pixtuoid_source": "cursor"}
 {"hook_event_name": "postToolUse", "session_id": "c7cef226-sess", "workspace_roots": ["/Users/dev/proj"], "tool_name": "Read", "_pixtuoid_source": "cursor"}
+{"hook_event_name": "preToolUse", "session_id": "c7cef226-sess", "workspace_roots": ["/Users/dev/proj"], "tool_name": "Task", "tool_input": {"subagent_type": "code-explorer", "description": "investigate the build setup"}, "_pixtuoid_source": "cursor"}
 {"hook_event_name": "sessionEnd", "session_id": "c7cef226-sess", "reason": "completed", "workspace_roots": ["/Users/dev/proj"], "_pixtuoid_source": "cursor"}

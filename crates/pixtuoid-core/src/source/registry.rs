@@ -329,11 +329,13 @@ const COPILOT: SourceDescriptor = SourceDescriptor {
 /// — its `--output-format stream-json` NDJSON is per-invocation stdout (pixtuoid
 /// never spawns the agent) and its on-disk sessions are SQLite, not a tailable
 /// JSONL. The reachable seam is Cursor Hooks (`~/.cursor/hooks.json`). The hook
-/// envelope reuses CC's `hook_event_name` field NAME but with camelCase values
-/// and no usable session id in CLI mode, so the custom decoder claims every
-/// event and keys on cwd (`source/cursor.rs`). Session-only: subagent linkage
-/// fires no CLI hook and is absent from every other surface (a proven upstream
-/// absence; drift-watched).
+/// envelope reuses CC's `hook_event_name` field NAME but with camelCase values,
+/// so the custom decoder claims every event and keys on `session_id`
+/// (capture-verified present + consistent; `workspace_roots[0]` is the fallback
+/// label/cwd — `source/cursor.rs`). Subagents render FLAT, not nested: a `Task`
+/// dispatch makes the parent Delegating, but children run as independent
+/// sessions with no parent-link in the stream (a proven upstream absence;
+/// drift-watched).
 const CURSOR: SourceDescriptor = SourceDescriptor {
     name: cursor::SOURCE_NAME,
     label_prefix: "cu",

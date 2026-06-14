@@ -46,6 +46,15 @@ expression: events
 - ActivityEnd:
     agent_id: 10665186905899668507
     tool_use_id: ~
+- Identity:
+    agent_id: 10665186905899668507
+    source: cursor
+    session_id: c7cef226-sess
+    cwd: /Users/dev/proj
+- ActivityStart:
+    agent_id: 10665186905899668507
+    tool_use_id: ~
+    detail: Task
 - SessionEnd:
     agent_id: 10665186905899668507
     as_child: false
