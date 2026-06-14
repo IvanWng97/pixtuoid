@@ -679,7 +679,7 @@ fn copilot_denied_permission_clears_waiting_through_the_reducer() {
     let mut r = Reducer::new();
     let path = "/p/session-state/sess/events.jsonl";
     let id = AgentId::from_parts("copilot", "sess");
-    let mut feed = |r: &mut Reducer, scene: &mut SceneState, line: &str| {
+    let feed = |r: &mut Reducer, scene: &mut SceneState, line: &str| {
         for ev in decode_copilot_line(path, "copilot", serde_json::from_str(line).unwrap()).unwrap()
         {
             r.apply(scene, ev, SystemTime::now(), Transport::Jsonl);
