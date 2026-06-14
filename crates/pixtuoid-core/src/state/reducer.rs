@@ -991,7 +991,16 @@ impl Reducer {
                 floor_idx,
                 tool_call_count: 0,
                 active_ms: 0,
-                unknown_cwd: !has_cwd,
+                // The 3-min unknown-cwd reap exists for startup JSONL-seeding
+                // GHOSTS (a blind first-sight with no identity). A PARENTED slot
+                // came from an explicit subagent signal (e.g. Copilot's
+                // `subagent.started`, whose payload carries no cwd) — it is a
+                // real, process-proven child, not a ghost, so it must ride the
+                // normal lifecycle (parent cascade / child-end / Idle backstop),
+                // never the 3-min reap. Same rationale as the hook-synthesis
+                // exemption above; without it a sub-agent running > 3 min with no
+                // cwd-bearing event is swept while alive.
+                unknown_cwd: !has_cwd && parent_id.is_none(),
                 parent_id,
             },
         );

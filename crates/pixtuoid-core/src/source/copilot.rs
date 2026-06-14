@@ -159,13 +159,26 @@ pub fn decode_copilot_line(
                 reason,
             }]
         }
-        // Approval resolved → an ActivityStart clears the Waiting gate (the
-        // approved tool's own start/complete follows; a denial still un-waits).
-        "permission.completed" => vec![AgentEvent::ActivityStart {
-            agent_id: acting,
-            tool_use_id: None,
-            detail: None,
-        }],
+        // Approval resolved. On APPROVED the gated tool's own `tool.execution_start`
+        // follows immediately and clears the Waiting gate — so emit nothing (a
+        // detail-less ActivityStart here would only inflate tool_call_count). On
+        // a DENIAL/cancel no tool runs, so emit the clearing ActivityStart
+        // ourselves to un-wait the slot.
+        "permission.completed" => {
+            let approved = data
+                .and_then(|d| d.get("result"))
+                .and_then(|r| str_at(r, "kind"))
+                .is_some_and(|k| k.starts_with("approved"));
+            if approved {
+                vec![]
+            } else {
+                vec![AgentEvent::ActivityStart {
+                    agent_id: acting,
+                    tool_use_id: None,
+                    detail: None,
+                }]
+            }
+        }
         "subagent.started" => {
             // The child id is the envelope `agentId` (== data.toolCallId). Register
             // it as a child of the root session, then name it from the display name.
@@ -414,15 +427,28 @@ mod tests {
             }
             other => panic!("expected Waiting, got {other:?}"),
         }
-        let done = json!({
+        // APPROVED → emit nothing (the approved tool's own start clears Waiting;
+        // a phantom ActivityStart would inflate tool_call_count).
+        let approved = json!({
             "type": "permission.completed",
             "data": {"requestId": "r1", "result": {"kind": "approved"}},
             "id": "p2", "timestamp": "t", "parentId": null
         })
         .to_string();
-        // An ActivityStart clears the Waiting gate in the reducer.
+        assert!(
+            decode(&approved).is_empty(),
+            "approved → no event (tool start clears the gate)"
+        );
+
+        // DENIED → emit the clearing ActivityStart ourselves (no tool follows).
+        let denied = json!({
+            "type": "permission.completed",
+            "data": {"requestId": "r1", "result": {"kind": "denied-interactively-by-user"}},
+            "id": "p3", "timestamp": "t", "parentId": null
+        })
+        .to_string();
         assert!(matches!(
-            &decode(&done)[..],
+            &decode(&denied)[..],
             [AgentEvent::ActivityStart { .. }]
         ));
     }

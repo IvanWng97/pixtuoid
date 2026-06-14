@@ -659,6 +659,18 @@ pub(super) fn extract_cwd(bytes: &[u8]) -> Option<PathBuf> {
         {
             return Some(PathBuf::from(cwd));
         }
+        // Copilot CLI nests it: session.start `data.context.cwd`. Without this
+        // arm a copilot transcript gated-then-tail-revived registers an
+        // empty-cwd root (→ the short unknown-cwd reap); the head-read also
+        // gives the root its real `cp·<dir>` label instead of `cp#N`.
+        if let Some(cwd) = v
+            .get("data")
+            .and_then(|d| d.get("context"))
+            .and_then(|c| c.get("cwd"))
+            .and_then(|c| c.as_str())
+        {
+            return Some(PathBuf::from(cwd));
+        }
     }
     None
 }

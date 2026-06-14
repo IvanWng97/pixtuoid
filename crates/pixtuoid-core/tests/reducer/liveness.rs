@@ -701,6 +701,60 @@ fn unknown_cwd_agent_reaps_faster() {
 }
 
 #[test]
+fn parented_empty_cwd_subagent_is_not_ghost_reaped() {
+    // A sub-agent (e.g. Copilot's subagent.started) registers with NO cwd but a
+    // parent link — it is a real, process-proven child, not a startup-seed
+    // ghost, so it must NOT ride the 3-min unknown-cwd reap (else a multi-minute
+    // sub-agent vanishes while alive). Regression for the PR #292 lifecycle find.
+    use pixtuoid_core::state::reducer::STALE_UNKNOWN_CWD_TIMEOUT;
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let parent = AgentId::from_parts("copilot", "root-sess");
+    let child = AgentId::from_parts("copilot", "call_child1");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: parent,
+            source: "copilot".into(),
+            session_id: "root-sess".into(),
+            cwd: PathBuf::from("/repo"),
+            parent_id: None,
+        },
+        t0,
+        Transport::Jsonl,
+    );
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: child,
+            source: "copilot".into(),
+            session_id: "call_child1".into(),
+            cwd: PathBuf::new(), // sub-agents carry no cwd
+            parent_id: Some(parent),
+        },
+        t0 + Duration::from_millis(10),
+        Transport::Jsonl,
+    );
+    assert!(
+        !scene.agents.get(&child).unwrap().unknown_cwd,
+        "a parented (subagent) slot must NOT be flagged unknown_cwd"
+    );
+    // It survives well past the 3-min ghost window while the parent delegates.
+    r.tick(
+        &mut scene,
+        t0 + STALE_UNKNOWN_CWD_TIMEOUT + Duration::from_secs(30),
+    );
+    assert!(
+        scene
+            .agents
+            .get(&child)
+            .is_some_and(|s| s.exiting_at.is_none()),
+        "a parented empty-cwd subagent must not be reaped on the 3-min ghost timer"
+    );
+}
+
+#[test]
 fn session_end_cascades_to_children() {
     let mut scene = SceneState::uniform(8);
     let mut r = Reducer::new();

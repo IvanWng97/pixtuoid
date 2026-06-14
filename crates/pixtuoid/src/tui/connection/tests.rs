@@ -224,6 +224,25 @@ fn build_rows_makes_every_source_with_a_target_actionable() {
 }
 
 #[test]
+fn every_no_target_row_has_an_explicit_display_name_not_the_raw_id() {
+    // A NO-TARGET source's display name comes from `display_name_for`, which must
+    // have an explicit arm — its `other => other` fallthrough leaks the lowercase
+    // registry id into the panel name column + prompts (the PR #292 `copilot` nit).
+    // Target-bearing rows are exempt: they use `Target.display_name`, which may be
+    // a deliberate lowercase brand (e.g. "opencode"). Mechanized so the next
+    // no-target source fails loudly.
+    for row in build_rows(&HashSet::new()) {
+        if row.target.is_none() {
+            assert_ne!(
+                row.display_name, row.source_id,
+                "no-target source {:?} shows its raw id — add a title-cased arm to display_name_for",
+                row.source_id
+            );
+        }
+    }
+}
+
+#[test]
 fn format_connect_result_renders_connected_plus_backup_and_path_notes() {
     use crate::install::{InstallOutcome, InstallReport};
     let base = |outcome, backup, path_warning| InstallReport {

@@ -99,11 +99,12 @@ pub struct RowInput {
     pub connected: bool,
 }
 
-/// Title-case the one no-target source (the registry deliberately omits display
+/// Title-case the no-target sources (the registry deliberately omits display
 /// names). Target-bearing rows use `Target.display_name`.
 fn display_name_for(source_id: &'static str) -> &'static str {
     match source_id {
         "antigravity" => "Antigravity",
+        "copilot" => "Copilot CLI",
         other => other,
     }
 }
