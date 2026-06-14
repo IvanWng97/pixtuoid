@@ -5,7 +5,7 @@
     "desc": "Each agent session gets a desk; overflow agents auto-fill new floors",
     "card": {
       "blurb": "Each running coding-agent session claims a desk — arriving, working, taking breaks, and leaving when the session ends.",
-      "href": "#showcase-office"
+      "href": "#showcase-agents"
     }
   },
   {
@@ -14,7 +14,7 @@
     "desc": "PageUp/PageDown/↑↓/jk to navigate floors with slide transition",
     "card": {
       "blurb": "Subagents, multiple CLIs and extra floors appear as your swarm grows.",
-      "href": "#showcase-floors"
+      "href": "#showcase-agents"
     }
   },
   {

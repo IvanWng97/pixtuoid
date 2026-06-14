@@ -206,6 +206,9 @@ def run_clip(job, out_dirs, work, intermediates):
     # a close-up on a fixed region — e.g. the meetings clip onto its meeting room
     # so the chitchat reads (a roaming subject like the pets cat uses a smaller
     # cols/rows render instead, never a crop). Prepended to the even-dims scale.
+    # NB: this singular clip-level `crop` is unrelated to the separate
+    # kind:"crop" job (run_crop), which reads a plural `crops` dict off a `from`
+    # render — different mechanism, different key.
     crop = job.get("crop")
     scale = "scale=trunc(iw/2)*2:trunc(ih/2)*2"
     vf = f"crop={crop},{scale}" if crop else scale

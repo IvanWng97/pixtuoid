@@ -103,6 +103,24 @@ for (const c of showcase) {
   }
 }
 
+// Cross-guard: every features.json card `#showcase-<id>` deep-link must resolve
+// to a real showcase channel — so renaming/removing a channel (e.g. OFFICE/FLOORS
+// → AGENTS) can't silently orphan a "See it live →" button (the showcase guard
+// above only checks ids internal to showcase.json).
+const features = /** @type {any[]} */ (
+  JSON.parse(readFileSync(fileURLToPath(new URL('./src/features.json', import.meta.url)), 'utf8'))
+);
+for (const f of features) {
+  const href = f.card?.href;
+  if (typeof href === 'string' && href.startsWith('#showcase-')) {
+    const id = href.slice('#showcase-'.length);
+    if (!scIds.has(id))
+      throw new Error(
+        `astro.config: features.json "${f.name}" links to #showcase-${id}, which is not a showcase.json channel id (${[...scIds].join(', ')})`
+      );
+  }
+}
+
 // Rewrite repo-relative links in rendered markdown (e.g. ../crates/...) to GitHub
 // so docs/CONFIGURATION.md's links resolve on the deployed site.
 function rehypeRepoLinks() {
