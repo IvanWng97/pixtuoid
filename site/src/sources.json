@@ -68,7 +68,7 @@
     "url": "https://cursor.com/cli",
     "status": "supported",
     "featured": false,
-    "transport": "Hook shim (~/.cursor/hooks.json, cwd-keyed)",
-    "platforms": { "macos": "experimental", "linux": "experimental", "windows": "experimental" }
+    "transport": "Hook shim (~/.cursor/hooks.json, session-id-keyed)",
+    "platforms": { "macos": "yes", "linux": "yes", "windows": "experimental" }
   }
 ]

@@ -3,52 +3,49 @@ source: crates/pixtuoid-core/tests/sources/conformance.rs
 expression: events
 ---
 - SessionStart:
-    agent_id: 13425774401741839407
+    agent_id: 10665186905899668507
     source: cursor
-    session_id: /Users/dev/proj
+    session_id: c7cef226-sess
     cwd: /Users/dev/proj
     parent_id: ~
 - Identity:
-    agent_id: 13425774401741839407
+    agent_id: 10665186905899668507
     source: cursor
-    session_id: /Users/dev/proj
+    session_id: c7cef226-sess
     cwd: /Users/dev/proj
 - ActivityStart:
-    agent_id: 13425774401741839407
+    agent_id: 10665186905899668507
     tool_use_id: ~
     detail:
       Generic:
-        display: "readToolCall: hello.txt"
+        display: "Shell: ls -la"
 - Identity:
-    agent_id: 13425774401741839407
+    agent_id: 10665186905899668507
     source: cursor
-    session_id: /Users/dev/proj
+    session_id: c7cef226-sess
     cwd: /Users/dev/proj
 - ActivityEnd:
-    agent_id: 13425774401741839407
+    agent_id: 10665186905899668507
     tool_use_id: ~
 - Identity:
-    agent_id: 13425774401741839407
+    agent_id: 10665186905899668507
     source: cursor
-    session_id: /Users/dev/proj
+    session_id: c7cef226-sess
     cwd: /Users/dev/proj
 - ActivityStart:
-    agent_id: 13425774401741839407
+    agent_id: 10665186905899668507
     tool_use_id: ~
     detail:
       Generic:
-        display: "shell: wc -c hello.txt"
+        display: "Read: /Users/dev/proj/README.md"
 - Identity:
-    agent_id: 13425774401741839407
+    agent_id: 10665186905899668507
     source: cursor
-    session_id: /Users/dev/proj
+    session_id: c7cef226-sess
     cwd: /Users/dev/proj
 - ActivityEnd:
-    agent_id: 13425774401741839407
-    tool_use_id: ~
-- ActivityEnd:
-    agent_id: 13425774401741839407
+    agent_id: 10665186905899668507
     tool_use_id: ~
 - SessionEnd:
-    agent_id: 13425774401741839407
+    agent_id: 10665186905899668507
     as_child: false

@@ -18,36 +18,38 @@
 //! `_pixtuoid_source: "cursor"`; `decoder::decode_hook_payload` dispatches them
 //! here (the custom decoder runs FIRST, before the shared CC-shaped field
 //! requirements). Cursor's envelope reuses CC's `hook_event_name` field NAME
-//! but with **camelCase values** and **no usable session id in CLI mode**:
+//! but with **camelCase values** — wire shape verified against a real
+//! `cursor-agent -p` capture (2026-06-14):
 //!
 //! ```json
-//! {"hook_event_name":"preToolUse","cwd":"/repo","tool_name":"shell",
-//!  "tool_input":{"command":"ls"}}
+//! {"hook_event_name":"preToolUse","session_id":"c7cef226-…","cwd":"",
+//!  "workspace_roots":["/repo"],"tool_name":"Shell",
+//!  "tool_input":{"command":"ls -la"}}
 //! ```
 //!
-//! Keyed on **cwd** (the CodeWhale/Reasonix precedent), NOT `conversation_id`:
-//! the field is IDE-documented but UNVERIFIED in the CLI payload, while
-//! `cwd`/`workspace_roots` is always present — so cwd-keying guarantees
-//! coalescing. Consequences, all deliberate and matching Reasonix:
+//! Keyed on **`session_id`** (present + CONSISTENT across every CLI event in the
+//! capture; == `conversation_id` and the transcript filename stem), so concurrent
+//! sessions in one project stay distinct and all of a session's events coalesce.
+//! The TOP-LEVEL `cwd` is EMPTY/absent in CLI hooks — `workspace_roots[0]` is the
+//! real workspace, used for the label + the SessionStart cwd (a workspace
+//! fallback covers the degenerate session_id-less event). Deliberate:
 //!
-//! - Two concurrent Cursor sessions in ONE project render as one sprite
-//!   (indistinguishable on a cwd key; same accepted blur as Reasonix/CodeWhale).
 //! - `tool_use_id` is always `None`: the reducer's per-call machinery
 //!   (hook-wins dedup, `active_tasks`) is bypassed — harmless on a single
-//!   transport with no rendered delegation.
+//!   transport with no rendered delegation. `tool_name` is PascalCase
+//!   (`Shell`/`Grep`/`Read`); `tool_input` carries `command`/`pattern`/`file_path`.
 //! - **Session-only.** Cursor's subagent linkage lives ONLY in
-//!   `subagentStart`/`subagentStop` hooks (not firing in the CLI) and is absent
-//!   from every other surface — a proven upstream absence, so no child sprites
-//!   (tracked by the upstream-drift watch for if/when the CLI lands them).
-//! - Exit profile: `sessionEnd` is NOT confirmed firing in the CLI and `stop`
-//!   is turn-end, not session-end, and no PID is exposed — so a closed session
-//!   falls to the generic stale-sweep (the Antigravity profile;
-//!   `has_exit_signal: false`, `resurrects_on_prompt: false` → the LONG idle
-//!   window, never the short-idle reaper).
-//!
-//! The exact firing set + `conversation_id` presence are pinned by a one-shot
-//! live capture before this source flips to "supported"; the decoder is written
-//! generously so the capture refines the firing set, not the architecture.
+//!   `subagentStart`/`subagentStop` hooks (not firing in the CLI — none fired in
+//!   the capture) and is absent from every other surface — a proven upstream
+//!   absence, so no child sprites (drift-watched for if/when the CLI lands them).
+//! - Exit profile: `sessionEnd` FIRES on clean completion (capture-verified:
+//!   `reason:"completed"`) → `has_exit_signal: true` (best-effort, CC/Reasonix
+//!   class). `stop` is turn-end and did NOT fire under `-p` (kept mapped for
+//!   interactive turns); abrupt exits (no PID exposed) fall to the stale-sweep.
+//! - A per-session JSONL transcript DOES exist
+//!   (`~/.cursor/projects/<proj>/agent-transcripts/<session-id>/<id>.jsonl`,
+//!   `transcript_path` on the payload) — hook-only is complete today, but this is
+//!   the seam if a watcher is ever wanted (its stem == our `session_id` key).
 
 use anyhow::{anyhow, bail, Result};
 use serde_json::Value;
@@ -61,20 +63,20 @@ pub const SOURCE_NAME: &str = "cursor";
 /// Decode one Cursor hook payload (already identified by
 /// `_pixtuoid_source == "cursor"`). Envelope per `cursor.com/docs/hooks`.
 ///
-/// Event mapping (camelCase `hook_event_name` values):
-/// - `sessionStart`          → `SessionStart` (cwd-keyed)
+/// Event mapping (camelCase `hook_event_name` values), all keyed on `session_id`:
+/// - `sessionStart`          → `SessionStart`
 /// - `preToolUse`            → `Identity` + `ActivityStart`
 /// - `postToolUse`           → `Identity` + `ActivityEnd`
 /// - `stop`                  → `ActivityEnd` (turn end → idle debounce; NO
 ///   Identity — an end for an unknown agent proves nothing worth registering)
-/// - `sessionEnd`            → `SessionEnd` (harmless if it never fires in CLI)
+/// - `sessionEnd`            → `SessionEnd`
 /// - anything else           → bail (registered-vs-decoded drift must be loud)
 ///
 /// The activity arms prepend an [`AgentEvent::Identity`] (#221) because Cursor
 /// is HOOK-ONLY: a slot the reducer's proof-of-life pre-pass synthesizes
 /// mid-turn has no JSONL back-fill path, so without the attached identity it
-/// would stay a blank `#N` ghost. The cwd IS the session key, so `session_id`
-/// mirrors the `SessionStart` arm exactly — coalescing holds.
+/// would stay a blank `#N` ghost. The Identity's `session_id` mirrors the
+/// `SessionStart` arm's key exactly — coalescing holds.
 pub fn decode_cursor_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
     let obj = v
         .as_object()
@@ -83,10 +85,10 @@ pub fn decode_cursor_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
         .get("hook_event_name")
         .and_then(|s| s.as_str())
         .ok_or_else(|| anyhow!("cursor payload missing hook_event_name"))?;
-    // cwd is the ONLY usable identity a Cursor CLI hook carries — the `cwd`
-    // field, falling back to the first `workspace_roots` entry. An empty one
-    // would mint a phantom agent nothing coalesces with (the Reasonix idiom).
-    let cwd = obj
+    // The workspace path: the top-level `cwd` is EMPTY/absent in CLI hook
+    // payloads (capture-verified 2026-06-14) — `workspace_roots[0]` is the real
+    // one. Used for the label + the SessionStart/Identity cwd, NOT the AgentId key.
+    let workspace = obj
         .get("cwd")
         .and_then(|s| s.as_str())
         .filter(|s| !s.is_empty())
@@ -96,24 +98,33 @@ pub fn decode_cursor_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
                 .and_then(|a| a.first())
                 .and_then(|s| s.as_str())
                 .filter(|s| !s.is_empty())
-        })
-        .ok_or_else(|| anyhow!("cursor payload missing/empty cwd and workspace_roots"))?;
-    let agent_id = AgentId::from_parts(SOURCE_NAME, cwd);
+        });
+    // Key on `session_id` — present and CONSISTENT across every CLI hook event
+    // (capture-verified; == `conversation_id` and the transcript filename stem),
+    // so it distinguishes concurrent sessions in one project AND coalesces all of
+    // a session's events. Fall back to the workspace path only if a future event
+    // ever omits it (keeps coalescing best-effort instead of dropping the event).
+    let key = obj
+        .get("session_id")
+        .and_then(|s| s.as_str())
+        .filter(|s| !s.is_empty())
+        .or(workspace)
+        .ok_or_else(|| anyhow!("cursor payload has no session_id, cwd, or workspace_roots"))?;
+    let agent_id = AgentId::from_parts(SOURCE_NAME, key);
+    let cwd = workspace.unwrap_or("");
 
     let identity = || AgentEvent::Identity {
         agent_id,
         source: SOURCE_NAME.to_string(),
-        // Mirrors the SessionStart arm: no usable session id in CLI mode; the
-        // cwd IS the session key.
-        session_id: cwd.to_string(),
-        cwd: Some(cwd.into()),
+        session_id: key.to_string(),
+        cwd: (!cwd.is_empty()).then(|| cwd.into()),
     };
 
     match event {
         "sessionStart" => Ok(vec![AgentEvent::SessionStart {
             agent_id,
             source: SOURCE_NAME.to_string(),
-            session_id: cwd.to_string(),
+            session_id: key.to_string(),
             cwd: cwd.into(),
             parent_id: None,
         }]),
@@ -193,11 +204,15 @@ mod tests {
     }
 
     #[test]
-    fn session_start_keys_on_cwd() {
+    fn session_start_keys_on_session_id_label_from_workspace() {
+        // Real CLI shape: session_id present, top-level cwd EMPTY, the workspace
+        // in workspace_roots[0]. Key = session_id; label cwd = workspace_roots[0].
         let ev = decode(json!({
             "hook_event_name": "sessionStart",
-            "cwd": "/Users/dev/proj",
-            "conversation_id": "ignored-in-cli"
+            "session_id": "c7cef226-sess",
+            "conversation_id": "c7cef226-sess",
+            "cwd": "",
+            "workspace_roots": ["/Users/dev/proj"]
         }));
         match ev {
             AgentEvent::SessionStart {
@@ -208,12 +223,13 @@ mod tests {
                 parent_id,
             } => {
                 assert_eq!(source, SOURCE_NAME);
+                assert_eq!(agent_id, AgentId::from_parts(SOURCE_NAME, "c7cef226-sess"));
+                assert_eq!(session_id, "c7cef226-sess", "key on session_id, not cwd");
                 assert_eq!(
-                    agent_id,
-                    AgentId::from_parts(SOURCE_NAME, "/Users/dev/proj")
+                    cwd,
+                    std::path::PathBuf::from("/Users/dev/proj"),
+                    "empty top-level cwd → workspace_roots[0] for the label"
                 );
-                assert_eq!(session_id, "/Users/dev/proj", "cwd IS the session key");
-                assert_eq!(cwd, std::path::PathBuf::from("/Users/dev/proj"));
                 assert_eq!(parent_id, None);
             }
             other => panic!("expected SessionStart, got {other:?}"),
@@ -221,8 +237,28 @@ mod tests {
     }
 
     #[test]
-    fn cwd_falls_back_to_workspace_roots() {
-        // When `cwd` is absent the first workspace root is the identity.
+    fn session_id_distinguishes_two_sessions_in_one_workspace() {
+        // The upgrade's whole point: cwd-keying would merge these into one sprite;
+        // session_id keeps them distinct.
+        let a = decode(
+            json!({"hook_event_name": "sessionStart", "session_id": "sess-A",
+                              "workspace_roots": ["/repo"]}),
+        );
+        let b = decode(
+            json!({"hook_event_name": "sessionStart", "session_id": "sess-B",
+                              "workspace_roots": ["/repo"]}),
+        );
+        assert_ne!(
+            a.agent_id(),
+            b.agent_id(),
+            "two sessions in one repo must be distinct"
+        );
+    }
+
+    #[test]
+    fn key_falls_back_to_workspace_when_session_id_absent() {
+        // Defensive: a (hypothetical) event with no session_id still keys
+        // consistently on the workspace rather than dropping.
         let ev = decode(json!({
             "hook_event_name": "sessionStart",
             "workspace_roots": ["/Users/dev/proj", "/other"]
@@ -233,11 +269,14 @@ mod tests {
 
     #[test]
     fn pre_tool_use_is_activity_start_with_no_tool_id() {
+        // Real CLI tool shape: PascalCase tool_name, file_path input, empty cwd.
         let ev = decode(json!({
             "hook_event_name": "preToolUse",
-            "cwd": "/repo",
-            "tool_name": "readToolCall",
-            "tool_input": {"path": "src/main.rs"}
+            "session_id": "s",
+            "cwd": "",
+            "workspace_roots": ["/repo"],
+            "tool_name": "Read",
+            "tool_input": {"file_path": "/repo/src/main.rs"}
         }));
         match ev {
             AgentEvent::ActivityStart {
@@ -246,7 +285,7 @@ mod tests {
                 ..
             } => {
                 assert_eq!(tool_use_id, None);
-                assert_eq!(detail.unwrap().display(), "readToolCall: src/main.rs");
+                assert_eq!(detail.unwrap().display(), "Read: /repo/src/main.rs");
             }
             other => panic!("expected ActivityStart, got {other:?}"),
         }
@@ -346,16 +385,18 @@ mod tests {
     }
 
     #[test]
-    fn all_events_for_one_cwd_share_one_agent_id() {
-        // The coalescing contract: every event of a session (the prepended
-        // Identity events INCLUDED) keys on the same cwd-derived AgentId.
+    fn all_events_for_one_session_share_one_agent_id() {
+        // The coalescing contract: every event of a session keys on the same
+        // session_id-derived AgentId — even though the top-level cwd is empty and
+        // only workspace_roots carries the path (the real CLI shape).
+        let sid = "c7cef226-sess";
         let events = [
-            json!({"hook_event_name": "sessionStart", "cwd": "/Users/dev/p"}),
-            json!({"hook_event_name": "preToolUse", "cwd": "/Users/dev/p", "tool_name": "shell",
-                   "tool_input": {"command": "ls"}}),
-            json!({"hook_event_name": "postToolUse", "cwd": "/Users/dev/p", "tool_name": "shell"}),
-            json!({"hook_event_name": "stop", "cwd": "/Users/dev/p"}),
-            json!({"hook_event_name": "sessionEnd", "cwd": "/Users/dev/p"}),
+            json!({"hook_event_name": "sessionStart", "session_id": sid, "workspace_roots": ["/repo"]}),
+            json!({"hook_event_name": "preToolUse", "session_id": sid, "cwd": "", "workspace_roots": ["/repo"],
+                   "tool_name": "Shell", "tool_input": {"command": "ls"}}),
+            json!({"hook_event_name": "postToolUse", "session_id": sid, "workspace_roots": ["/repo"], "tool_name": "Shell"}),
+            json!({"hook_event_name": "stop", "session_id": sid, "workspace_roots": ["/repo"]}),
+            json!({"hook_event_name": "sessionEnd", "session_id": sid, "reason": "completed", "workspace_roots": ["/repo"]}),
         ];
         let ids: std::collections::BTreeSet<_> = events
             .iter()
@@ -366,11 +407,11 @@ mod tests {
     }
 
     #[test]
-    fn activity_arms_prepend_identity_with_cwd_keyed_session() {
+    fn activity_arms_prepend_identity_keyed_on_session_id() {
         for payload in [
-            json!({"hook_event_name": "preToolUse", "cwd": "/Users/dev/p", "tool_name": "shell",
-                   "tool_input": {"command": "ls"}}),
-            json!({"hook_event_name": "postToolUse", "cwd": "/Users/dev/p", "tool_name": "shell"}),
+            json!({"hook_event_name": "preToolUse", "session_id": "s", "cwd": "", "workspace_roots": ["/repo"],
+                   "tool_name": "Shell", "tool_input": {"command": "ls"}}),
+            json!({"hook_event_name": "postToolUse", "session_id": "s", "workspace_roots": ["/repo"], "tool_name": "Shell"}),
         ] {
             let name = payload["hook_event_name"].clone();
             let events = decode_all(payload);
@@ -382,13 +423,13 @@ mod tests {
                     session_id,
                     cwd,
                 } => {
-                    assert_eq!(*agent_id, AgentId::from_parts(SOURCE_NAME, "/Users/dev/p"));
+                    assert_eq!(*agent_id, AgentId::from_parts(SOURCE_NAME, "s"));
                     assert_eq!(source, SOURCE_NAME);
-                    assert_eq!(session_id, "/Users/dev/p", "cwd IS the session key");
+                    assert_eq!(session_id, "s", "key on session_id");
                     assert_eq!(
                         cwd.as_deref(),
-                        Some(std::path::Path::new("/Users/dev/p")),
-                        "cursor hooks always know their cwd"
+                        Some(std::path::Path::new("/repo")),
+                        "Identity cwd comes from workspace_roots[0]"
                     );
                 }
                 other => panic!("{name}: expected leading Identity, got {other:?}"),
@@ -414,16 +455,18 @@ mod tests {
     }
 
     #[test]
-    fn empty_or_missing_cwd_is_malformed() {
-        assert!(
-            decode_cursor_hook_payload(&json!({"hook_event_name": "stop", "cwd": ""})).is_err()
-        );
+    fn no_session_id_cwd_or_workspace_is_malformed_but_session_id_alone_is_ok() {
+        // Nothing to key on → Err.
         assert!(decode_cursor_hook_payload(&json!({"hook_event_name": "stop"})).is_err());
-        // An empty workspace_roots array doesn't rescue an absent cwd.
         assert!(decode_cursor_hook_payload(
-            &json!({"hook_event_name": "stop", "workspace_roots": []})
+            &json!({"hook_event_name": "stop", "cwd": "", "workspace_roots": []})
         )
         .is_err());
+        // session_id alone is enough — cwd/workspace are only for the label.
+        assert!(
+            decode_cursor_hook_payload(&json!({"hook_event_name": "stop", "session_id": "s"}))
+                .is_ok()
+        );
     }
 
     #[test]

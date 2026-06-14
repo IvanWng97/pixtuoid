@@ -343,18 +343,16 @@ const CURSOR: SourceDescriptor = SourceDescriptor {
         custom: Some(cursor::decode_cursor_hook_custom),
     },
     caps: SourceCaps {
-        // Antigravity profile: `sessionEnd` is NOT confirmed firing in the CLI,
-        // `stop` is turn-end not session-end, and no PID is exposed — so a
-        // closed session has no exit signal of record and falls to the generic
-        // stale-sweep.
-        has_exit_signal: false,
-        // No UserPromptSubmit-class event re-emits `sessionStart` mid-session, so
-        // a stale-swept session does NOT walk back in — combined with the missing
-        // exit signal this keeps the LONG idle window (short_idle_reap == false,
-        // the Antigravity shape), never the Codex short-idle reaper.
+        // `sessionEnd` FIRES on clean completion (capture-verified 2026-06-14:
+        // `reason:"completed"`) — best-effort counts, CC/Reasonix class. Abrupt
+        // exits (no PID exposed) fall to the generic stale-sweep.
+        has_exit_signal: true,
+        // Each `cursor-agent` invocation is a NEW session_id, so a stale-swept
+        // session does NOT walk back in on a later prompt — but moot: with an
+        // exit signal the short reaper never applies (short_idle_reap == false).
         resurrects_on_prompt: false,
-        // No delegation is rendered (session-only), so there is no Delegating
-        // slot to retain.
+        // No delegation is rendered (session-only — subagent hooks don't fire in
+        // the CLI), so there is no Delegating slot to retain.
         delegations_are_hook_silent: false,
     },
 };
