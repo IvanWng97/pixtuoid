@@ -1487,8 +1487,8 @@ fn save_backend_as_png(
             let bg = color_to_rgb(cell.bg, ImgRgb([20, 22, 28]));
 
             // For the half-block character "▀", the cell is split: top half = fg, bottom half = bg.
-            // For other characters, we approximate by drawing the cell as one bg-color tile and
-            // overlaying a roughly-centered fg-color glyph rectangle.
+            // Other characters are rasterized as real text via the 8x8 bitmap font (glyph8x8);
+            // a glyph no font set covers falls back to a centered fg block.
             let x0 = x as u32 * CELL_W;
             let y0 = y as u32 * CELL_H;
 
@@ -1497,10 +1497,17 @@ fn save_backend_as_png(
                 fill_rect(&mut img, x0, y0 + CELL_H / 2, CELL_W, CELL_H / 2, bg);
             } else if symbol.trim().is_empty() {
                 fill_rect(&mut img, x0, y0, CELL_W, CELL_H, bg);
-            } else {
-                // Background, then a small fg square in the middle to represent text.
+            } else if let Some(rows) = glyph8x8(symbol) {
                 fill_rect(&mut img, x0, y0, CELL_W, CELL_H, bg);
-                // Tiny glyph box — gives a visible indication of where text lives.
+                blit_glyph_cell(rows, x0, y0, |px, py| {
+                    if px < img_w && py < img_h {
+                        img.put_pixel(px, py, fg);
+                    }
+                });
+            } else {
+                // No glyph in any font set (a decorative symbol): keep the old
+                // centered block so the cell still reads in its fg color.
+                fill_rect(&mut img, x0, y0, CELL_W, CELL_H, bg);
                 let pad_x = 1;
                 let pad_y = 3;
                 fill_rect(
@@ -1520,8 +1527,8 @@ fn save_backend_as_png(
 }
 
 /// Rasterize a post-draw ratatui cell buffer to RGBA: half-block cells become
-/// two stacked pixels (fg = top, bg = bottom); text cells a blocky glyph pad —
-/// the same look the existing demo.gif path produces.
+/// two stacked pixels (fg = top, bg = bottom); text cells are drawn as real
+/// glyphs via the 8x8 bitmap font (glyph8x8) — same path as the PNG rasterizer.
 fn cells_to_rgba(
     term_buf: &ratatui::buffer::Buffer,
     cols: u16,
@@ -1543,6 +1550,14 @@ fn cells_to_rgba(
                 fill_rgba_rect(&mut rgba, x0, y0 + CELL_H / 2, CELL_W, CELL_H / 2, bg);
             } else if symbol.trim().is_empty() {
                 fill_rgba_rect(&mut rgba, x0, y0, CELL_W, CELL_H, bg);
+            } else if let Some(rows) = glyph8x8(symbol) {
+                fill_rgba_rect(&mut rgba, x0, y0, CELL_W, CELL_H, bg);
+                let fg_rgba = Rgba([fg[0], fg[1], fg[2], 255]);
+                blit_glyph_cell(rows, x0, y0, |px, py| {
+                    if px < img_w && py < img_h {
+                        rgba.put_pixel(px, py, fg_rgba);
+                    }
+                });
             } else {
                 fill_rgba_rect(&mut rgba, x0, y0, CELL_W, CELL_H, bg);
                 let pad_x = 1;
@@ -1758,6 +1773,39 @@ fn fill_rect(img: &mut RgbImage, x: u32, y: u32, w: u32, h: u32, color: ImgRgb<u
             let px_y = y + j;
             if px_x < img_w && px_y < img_h {
                 img.put_pixel(px_x, px_y, color);
+            }
+        }
+    }
+}
+
+/// The demo rasterizer's "font": an 8x8 bitmap per char, looked up across
+/// font8x8's sets (ASCII first, then Latin/box/block/misc/greek). Returns rows
+/// top→bottom; within a row bit 0 (LSB) is the leftmost pixel. `None` for a
+/// glyph no set covers (most decorative symbols) — the caller draws a block.
+fn glyph8x8(symbol: &str) -> Option<[u8; 8]> {
+    use font8x8::{
+        UnicodeFonts, BASIC_FONTS, BLOCK_FONTS, BOX_FONTS, GREEK_FONTS, LATIN_FONTS, MISC_FONTS,
+    };
+    let ch = symbol.chars().next()?;
+    BASIC_FONTS
+        .get(ch)
+        .or_else(|| LATIN_FONTS.get(ch))
+        .or_else(|| BOX_FONTS.get(ch))
+        .or_else(|| BLOCK_FONTS.get(ch))
+        .or_else(|| MISC_FONTS.get(ch))
+        .or_else(|| GREEK_FONTS.get(ch))
+}
+
+/// Blit an 8x8 glyph into one 8x16 cell, doubled vertically (1px → 2px tall) so
+/// it fills the cell. `put` paints one foreground pixel (bg is pre-filled).
+fn blit_glyph_cell(rows: [u8; 8], x0: u32, y0: u32, mut put: impl FnMut(u32, u32)) {
+    for (fr, &bits) in rows.iter().enumerate() {
+        for col in 0..CELL_W {
+            if bits & (1u8 << col) != 0 {
+                let px = x0 + col;
+                let py = y0 + fr as u32 * 2;
+                put(px, py);
+                put(px, py + 1);
             }
         }
     }

@@ -48,6 +48,7 @@ tempfile = "3"
 tokio    = { workspace = true, features = ["test-util"] }
 image    = { version = "0.25", default-features = false, features = ["png", "gif"] }
 insta    = "1"
+font8x8 = "0.3.1"
 
 [[example]]
 name = "snapshot"
