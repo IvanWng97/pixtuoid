@@ -30,6 +30,12 @@ and compares against the live upstream:
                           vs the `EventV2.define` type literals in
                           anomalyco/opencode core/src/v1/session.ts + permission.ts
                           (one-directional: only a VANISHED depended type alarms)
+  * Copilot events     -> the event `type`s the decoder maps (the `match kind`
+                          block in crates/pixtuoid-core/src/source/copilot.rs)
+                          vs the per-event `type` consts in the published
+                          @github/copilot session-events JSON schema (unpkg)
+                          (one-directional: Copilot emits ~100 event types and we
+                          map ~10 by design, so only a VANISHED depended type alarms)
 
 Exit codes:
   0  no drift
@@ -44,6 +50,7 @@ See crates/pixtuoid-core/CLAUDE.md "Keeping the decode mapping current".
 from __future__ import annotations
 
 import http.client
+import json
 import pathlib
 import re
 import sys
@@ -185,6 +192,15 @@ OPENCODE_EVENT_URLS = (
 # don't alarm if the bare form isn't found as a `type:` literal.
 OPENCODE_TOLERATED = {"permission.asked"}
 
+# Copilot CLI publishes a session-events JSON schema in its npm package; unpkg
+# serves the file directly (the bare path 302-redirects to the latest pinned
+# version, which urllib follows). Each event is a `definitions.<Name>` object whose
+# `properties.type.const` is the wire `type` string. The check is ONE-DIRECTIONAL
+# (like opencode): Copilot emits ~100 event types and copilot.rs intentionally maps
+# only ~10, so "new upstream event" is noise — we alarm only when a type WE DEPEND
+# ON vanishes (a rename the transcript still carries but the decoder maps to nothing).
+COPILOT_SCHEMA_URL = "https://unpkg.com/@github/copilot/schemas/session-events.schema.json"
+
 
 def fetch(url: str) -> str:
     req = urllib.request.Request(url, headers={"User-Agent": "pixtuoid-drift-watch"})
@@ -267,6 +283,43 @@ def read_opencode_events() -> set[str]:
     return set(re.findall(r'"((?:session|message|permission)\.[a-z0-9.]+)"', m.group(1)))
 
 
+def read_copilot_events() -> set[str]:
+    """The event `type` strings the decoder maps, read from the `match kind`
+    block in source/copilot.rs (the source of truth — stays in sync with the
+    decoder by construction). Scoped to the match block so the test fixtures
+    further down the file (which embed the same strings as JSON) don't leak in."""
+    src = (REPO / "crates/pixtuoid-core/src/source/copilot.rs").read_text()
+    m = re.search(r"let out = match kind \{(.*?)\n    \};", src, re.S)
+    if not m:
+        raise RuntimeError("could not locate the `match kind` block in source/copilot.rs")
+    return set(re.findall(r'"((?:session|tool|subagent|permission)\.[a-z._]+)"', m.group(1)))
+
+
+def upstream_copilot_events(text: str) -> set[str] | None:
+    """The per-event `type` consts from the @github/copilot session-events JSON
+    schema. Each event is a `definitions.<Name>` object whose `properties.type`
+    pins the wire string as a `const` (or a single-element `enum`)."""
+    try:
+        defs = json.loads(text).get("definitions", {})
+    except (json.JSONDecodeError, AttributeError):
+        return None
+    consts: set[str] = set()
+    for sch in defs.values():
+        if not isinstance(sch, dict):
+            continue
+        t = sch.get("properties", {}).get("type")
+        if not isinstance(t, dict):
+            continue
+        c = t.get("const")
+        if c is None:
+            enum = t.get("enum")
+            if isinstance(enum, list) and len(enum) == 1:
+                c = enum[0]
+        if isinstance(c, str):
+            consts.add(c)
+    return consts or None
+
+
 def upstream_codewhale_hooks(text: str) -> set[str] | None:
     # The TUI shell-command hook enum `pub enum HookEvent { SessionStart, ... }`
     # in crates/tui/src/hooks.rs (NOT the app-server `codewhale-hooks` sink enum
@@ -288,6 +341,7 @@ def run_checks(
     reasonix_ours: set[str] | None,
     codewhale_ours: set[str] | None,
     opencode_ours: set[str] | None,
+    copilot_ours: set[str] | None,
     breaking: list[str],
     review: list[str],
     errors: list[str],
@@ -413,6 +467,31 @@ def run_checks(
                         f"the decoder maps it to nothing (no sprite / no activity)."
                     )
 
+    # --- Copilot event types (only the FETCH is transient) -----------------
+    if copilot_ours is not None:
+        try:
+            text = fetch(COPILOT_SCHEMA_URL)
+        except FETCH_ERRORS as e:
+            errors.append(f"Copilot schema fetch failed (transient?): {e}")
+            text = None
+        if text is not None:
+            upstream = upstream_copilot_events(text)
+            if upstream is None:
+                breaking.append(
+                    "Copilot session-events schema has no parseable `type` consts "
+                    "(definitions empty / shape changed) — upstream restructured the "
+                    "schema; update COPILOT_SCHEMA_URL / upstream_copilot_events."
+                )
+            else:
+                for ev in sorted(copilot_ours):
+                    if ev not in upstream:
+                        breaking.append(
+                            f"Copilot event `{ev}` (decoded in source/copilot.rs) is GONE "
+                            f"from the @github/copilot schema — likely renamed; the "
+                            f"transcript still carries it but the decoder maps it to "
+                            f"nothing (no sprite / no activity)."
+                        )
+
     # --- CC subagent-dispatch tool (only the FETCH is transient) -----------
     if dispatch_names is not None:
         try:
@@ -494,6 +573,7 @@ def main() -> int:
     reasonix_ours = None
     codewhale_ours = None
     opencode_ours = None
+    copilot_ours = None
     try:
         codex_ours = read_codex_events()
         cc_ours = read_cc_events()
@@ -501,6 +581,7 @@ def main() -> int:
         reasonix_ours = read_reasonix_events()
         codewhale_ours = read_codewhale_events()
         opencode_ours = read_opencode_events()
+        copilot_ours = read_copilot_events()
     except Exception as e:  # noqa: BLE001
         breaking.append(
             f"drift-watch cannot read our own source ({e}) — the parsers in "
@@ -516,6 +597,7 @@ def main() -> int:
             reasonix_ours,
             codewhale_ours,
             opencode_ours,
+            copilot_ours,
             breaking,
             review,
             errors,
