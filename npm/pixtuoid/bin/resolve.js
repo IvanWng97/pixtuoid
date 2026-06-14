@@ -38,7 +38,7 @@ function binaryPath(bin) {
   // Dev / CI override: PIXTUOID_BINARY points at a directory holding the
   // binaries (or at the pixtuoid binary itself). Lets a local debug build be
   // driven through the npm shim without publishing; composes with the Rust-side
-  // PIXTUOID_HOOK override used by install-hooks.
+  // PIXTUOID_HOOK override used by the Connection panel's hook install.
   const override = process.env.PIXTUOID_BINARY;
   if (override) {
     // One guarded statSync (not existsSync + statSync) — the two-syscall form

@@ -9,8 +9,8 @@
 // self-bounds to 200ms.
 //
 // NOTE: a Node hop adds ~tens of ms in front of the native shim. That stays well
-// within CC's hook tolerance, but the latency-optimal path is to have
-// `install-hooks` write the ABSOLUTE path of the sibling native pixtuoid-hook
+// within CC's hook tolerance, but the latency-optimal path is to have the
+// Connection panel write the ABSOLUTE path of the sibling native pixtuoid-hook
 // (zero Node hop) — tracked as a follow-up. Until then, do not "optimize" this
 // shim into anything that could exit non-zero or print on error.
 
