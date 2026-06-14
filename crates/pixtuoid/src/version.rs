@@ -58,6 +58,13 @@ pub fn release_notes(version: &str) -> Option<&'static [&'static str]> {
         // anchoring on a marker is whitespace-independent — matching the `match`
         // brace would silently break if the indentation ever shifted.
         // [bump-inject-here]
+        "0.8.0" => Some(&[
+            "New in-TUI Connection panel (press c) — connect or disconnect any agent CLI live; its characters walk in when you connect and out when you disconnect, no restart",
+            "Manage every CLI from that panel: the `install-hooks` / `uninstall-hooks` commands are gone — connecting a CLI is now the panel's job (press c)",
+            "CodeWhale sessions now visualized (cw·), subagents included — connect it in the Connection panel",
+            "opencode sessions now visualized (oc·), subagents included — connect it in the Connection panel",
+            "Every popup (Connection, agent dashboard, themes, help) is now borderless for a cleaner look",
+        ]),
         "0.7.0" => Some(&[
             "Agents leave the moment they finish — instant exit detection (process watch + SubagentStop hooks); connect Claude Code in the Connection panel (press c) to enable",
             "Workflow fleets render right: instant seats on arrival, desks free in seconds, parent links survive worktree splits and revivals",
