@@ -194,22 +194,6 @@
   }
  },
  {
-  "id": "fleet",
-  "kind": "render",
-  "targets": [
-   "site"
-  ],
-  "cols": 200,
-  "rows": 90,
-  "hour": 23,
-  "extra": [
-   "--agents",
-   "40",
-   "--max-desks",
-   "16"
-  ]
- },
- {
   "id": "empty",
   "kind": "render",
   "targets": [
@@ -275,8 +259,8 @@
   "targets": [
    "site"
   ],
-  "cols": 208,
-  "rows": 88,
+  "cols": 120,
+  "rows": 52,
   "duration": 12,
   "fps": 15,
   "hour": 14,
@@ -297,6 +281,7 @@
   "fps": 15,
   "hour": 15,
   "poster": 12,
+  "crop": "760:640:0:300",
   "extra": [
    "--meeting",
    "3"

@@ -202,24 +202,32 @@ def run_clip(job, out_dirs, work, intermediates):
          extra=job.get("extra", ()), gif={"duration": job["duration"], "fps": job["fps"]})
     fps = job["fps"]
     cid = job["id"]
+    # Optional `crop` (ffmpeg "W:H:X:Y", in the unscaled render's px space) frames
+    # a close-up on a fixed region — e.g. the meetings clip onto its meeting room
+    # so the chitchat reads (a roaming subject like the pets cat uses a smaller
+    # cols/rows render instead, never a crop). Prepended to the even-dims scale.
+    crop = job.get("crop")
+    scale = "scale=trunc(iw/2)*2:trunc(ih/2)*2"
+    vf = f"crop={crop},{scale}" if crop else scale
+    poster_vf = ["-vf", f"crop={crop}"] if crop else []
     for d in out_dirs:
         frames = work / f"frames-{cid}"
         frames.mkdir(exist_ok=True)
         # re-encode from frames so it's a true loop at `fps` (the GIF's own frame
         # delays otherwise confuse ffmpeg into a fast clip).
         ffmpeg("-i", str(gif), str(frames / "f%04d.png"))
-        scale = "scale=trunc(iw/2)*2:trunc(ih/2)*2"
         ffmpeg("-framerate", str(fps), "-i", str(frames / "f%04d.png"),
-               "-movflags", "+faststart", "-pix_fmt", "yuv420p", "-vf", scale,
+               "-movflags", "+faststart", "-pix_fmt", "yuv420p", "-vf", vf,
                str(d / f"{cid}.mp4"))
         ffmpeg("-framerate", str(fps), "-i", str(frames / "f%04d.png"),
                "-c:v", "libvpx-vp9", "-b:v", "0", "-crf", "36", "-row-mt", "1",
-               "-pix_fmt", "yuv420p", "-vf", scale, str(d / f"{cid}.webm"))
+               "-pix_fmt", "yuv420p", "-vf", vf, str(d / f"{cid}.webm"))
         # poster frame: `poster` (seconds into the clip) lets a staged clip
         # (e.g. meetings, whose opening seconds are pre-action) poster on the
         # money shot instead of frame 0. Posters are presence-only in --check.
         poster_seek = ["-ss", str(job["poster"])] if "poster" in job else []
-        ffmpeg(*poster_seek, "-i", str(gif), "-vframes", "1", str(d / f"{cid}-poster.png"))
+        ffmpeg(*poster_seek, "-i", str(gif), *poster_vf, "-vframes", "1",
+               str(d / f"{cid}-poster.png"))
 
 
 HANDLERS = {

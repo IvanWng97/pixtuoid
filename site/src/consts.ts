@@ -81,24 +81,34 @@ export interface EnrichedShowcaseChannel extends ShowcaseChannel {
 }
 
 export function showcaseVariants(c: ShowcaseChannel): ShowcaseVariant[] {
+  // A channel may carry a manifest-backed `variantsRef` AND extra inline
+  // `variants`, appended after it — e.g. WEATHER folds the day/night lighting
+  // stills in after the weather list (the former standalone NIGHT channel).
+  const inline = c.variants ?? [];
   if (c.variantsRef === 'themes')
-    return THEMES.map((t) => ({
-      id: t.id,
-      name: t.name,
-      blurb: t.blurb,
-      src: `theme_${t.id}.png`,
-      accent: t.accent,
-      accent2: t.accent2,
-      featured: t.featured,
-    }));
+    return [
+      ...THEMES.map((t) => ({
+        id: t.id,
+        name: t.name,
+        blurb: t.blurb,
+        src: `theme_${t.id}.png`,
+        accent: t.accent,
+        accent2: t.accent2,
+        featured: t.featured,
+      })),
+      ...inline,
+    ];
   if (c.variantsRef === 'weather')
-    return WEATHERS.map((w) => ({
-      id: w.id,
-      name: w.name,
-      blurb: w.blurb,
-      src: `weather_${w.id}.png`,
-      // storm is the most striking opener for the weather channel
-      featured: w.id === 'storm',
-    }));
-  return c.variants ?? [];
+    return [
+      ...WEATHERS.map((w) => ({
+        id: w.id,
+        name: w.name,
+        blurb: w.blurb,
+        src: `weather_${w.id}.png`,
+        // storm is the most striking opener for the weather channel
+        featured: w.id === 'storm',
+      })),
+      ...inline,
+    ];
+  return inline;
 }

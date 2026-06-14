@@ -1,42 +1,15 @@
 [
   {
-    "id": "floors",
-    "label": "FLOORS",
+    "id": "agents",
+    "label": "AGENTS",
     "kind": "clip",
     "asset": "multi-floor",
     "w": 1664,
     "h": 1408,
-    "caption": "press 1–9 / PgUp / PgDn — every floor stays alive",
+    "caption": "every session claims a desk across floors — typing, wandering, coffee runs. Workflow fleets get desks too: a 91-agent review of this repo ran in this office.",
     "duration": "0:10",
     "status": "live",
     "default": true
-  },
-  {
-    "id": "office",
-    "label": "OFFICE",
-    "kind": "clip",
-    "asset": "hero",
-    "w": 1664,
-    "h": 1408,
-    "caption": "every agent session claims a desk — typing, wandering, coffee runs",
-    "duration": "0:20",
-    "status": "live"
-  },
-  {
-    "id": "fleet",
-    "label": "FLEET",
-    "kind": "variant-set",
-    "variants": [
-      {
-        "id": "night-shift",
-        "name": "Night shift",
-        "blurb": "one floor of a 40-agent run",
-        "src": "fleet.png",
-        "featured": true
-      }
-    ],
-    "caption": "workflow fleets get desks too — a 91-agent review of this repo ran in this office",
-    "status": "live"
   },
   {
     "id": "dashboard",
@@ -61,42 +34,25 @@
     "status": "live"
   },
   {
-    "id": "themes",
-    "label": "THEMES",
-    "kind": "variant-set",
-    "variantsRef": "themes",
-    "retint": true,
-    "caption": "press t in the app — the whole office retints",
+    "id": "meetings",
+    "label": "MEETINGS",
+    "kind": "clip",
+    "asset": "meetings",
+    "w": 760,
+    "h": 640,
+    "caption": "idle agents drift to the meeting room — “no tests?” “trust me” “ship it!”",
+    "duration": "0:16",
     "status": "live"
   },
   {
-    "id": "weather",
-    "label": "WEATHER",
-    "kind": "variant-set",
-    "variantsRef": "weather",
-    "caption": "rain day: productivity +12%",
-    "status": "live"
-  },
-  {
-    "id": "daynight",
-    "label": "NIGHT",
-    "kind": "variant-set",
-    "variants": [
-      {
-        "id": "day",
-        "name": "Day",
-        "blurb": "high noon over the skyline",
-        "src": "day.png"
-      },
-      {
-        "id": "night",
-        "name": "Night",
-        "blurb": "moonlight, monitor glow",
-        "src": "night.png",
-        "featured": true
-      }
-    ],
-    "caption": "lighting tracks your real clock",
+    "id": "pets",
+    "label": "PETS",
+    "kind": "clip",
+    "asset": "pets",
+    "w": 960,
+    "h": 832,
+    "caption": "a cat roams the floor — click to pet",
+    "duration": "0:12",
     "status": "live"
   },
   {
@@ -130,25 +86,34 @@
     "status": "live"
   },
   {
-    "id": "meetings",
-    "label": "MEETINGS",
-    "kind": "clip",
-    "asset": "meetings",
-    "w": 1664,
-    "h": 1408,
-    "caption": "idle agents drift to the meeting room — “no tests?” “trust me” “ship it!”",
-    "duration": "0:16",
+    "id": "themes",
+    "label": "THEMES",
+    "kind": "variant-set",
+    "variantsRef": "themes",
+    "retint": true,
+    "caption": "press t in the app — the whole office retints",
     "status": "live"
   },
   {
-    "id": "pets",
-    "label": "PETS",
-    "kind": "clip",
-    "asset": "pets",
-    "w": 1664,
-    "h": 1408,
-    "caption": "a cat roams the floor — click to pet",
-    "duration": "0:12",
+    "id": "weather",
+    "label": "WEATHER",
+    "kind": "variant-set",
+    "variantsRef": "weather",
+    "variants": [
+      {
+        "id": "day",
+        "name": "Day",
+        "blurb": "high noon over the skyline",
+        "src": "day.png"
+      },
+      {
+        "id": "night",
+        "name": "Night",
+        "blurb": "moonlight, monitor glow",
+        "src": "night.png"
+      }
+    ],
+    "caption": "rain day: productivity +12% · lighting tracks your real clock",
     "status": "live"
   }
 ]
