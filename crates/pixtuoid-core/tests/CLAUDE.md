@@ -24,7 +24,8 @@ tests/
 │   ├── tasks.rs              active_tasks suppression, hook-wins dedup, drains, b1 cascade grace + waiting-clobber pins
 │   ├── liveness.rs           stale sweeps/timeouts, proof-of-life + vouch exemptions, cascade↓ / liveness↑ / readiness, cycle reap
 │   ├── display.rs            labels: cwd-basename derivation, ghost ordinals, source prefixes, rename
-│   └── child_ledger.rs       SessionEnd tombstones + child-end ledger: gating, revival relink, parent adoption, cycle filter
+│   ├── child_ledger.rs       SessionEnd tombstones + child-end ledger: gating, revival relink, parent adoption, cycle filter
+│   └── snapshot.rs           full-scene serialization golden (#279): deterministic fixed-time script → insta YAML of the whole SceneState (locks tree shape + reducer output end-to-end)
 ├── e2e.rs                    end-to-end driver wiring (own binary)
 ├── watcher/main.rs           JsonlWatcher behavior (1 binary; the poll-seam harness — `fast_watch`,
 │   │                         `cc_watcher`, `vouch_snapshot`, `write_lines`, `backdate` + the cc line builders — lives in main.rs)

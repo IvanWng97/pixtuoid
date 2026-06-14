@@ -1,0 +1,96 @@
+---
+source: crates/pixtuoid-core/tests/reducer/snapshot.rs
+expression: scene
+---
+agents:
+  4793496948666765799:
+    agent_id: 4793496948666765799
+    source: claude-code
+    session_id: p
+    cwd: /proj
+    label: cc·proj
+    state:
+      Active:
+        tool_use_id: task-1
+        detail: Delegating
+    state_started_at:
+      secs_since_epoch: 1
+      nanos_since_epoch: 0
+    last_event_at:
+      secs_since_epoch: 2
+      nanos_since_epoch: 0
+    created_at:
+      secs_since_epoch: 0
+      nanos_since_epoch: 0
+    exiting_at: ~
+    pending_idle_at: ~
+    desk_index: 0
+    floor_idx: 0
+    tool_call_count: 0
+    active_ms: 0
+    unknown_cwd: false
+    parent_id: ~
+  9732828348925669089:
+    agent_id: 9732828348925669089
+    source: codex
+    session_id: s
+    cwd: /other
+    label: cx·other
+    state:
+      Waiting:
+        reason: "permission: Bash"
+    state_started_at:
+      secs_since_epoch: 4
+      nanos_since_epoch: 0
+    last_event_at:
+      secs_since_epoch: 4
+      nanos_since_epoch: 0
+    created_at:
+      secs_since_epoch: 3
+      nanos_since_epoch: 0
+    exiting_at: ~
+    pending_idle_at: ~
+    desk_index: 2
+    floor_idx: 0
+    tool_call_count: 0
+    active_ms: 0
+    unknown_cwd: false
+    parent_id: ~
+  17734653872224286956:
+    agent_id: 17734653872224286956
+    source: claude-code
+    session_id: c
+    cwd: /proj
+    label: cc·proj
+    state:
+      Active:
+        tool_use_id: tool-9
+        detail: Read · src/main.rs
+    state_started_at:
+      secs_since_epoch: 2
+      nanos_since_epoch: 0
+    last_event_at:
+      secs_since_epoch: 2
+      nanos_since_epoch: 0
+    created_at:
+      secs_since_epoch: 1
+      nanos_since_epoch: 0
+    exiting_at: ~
+    pending_idle_at: ~
+    desk_index: 1
+    floor_idx: 0
+    tool_call_count: 1
+    active_ms: 0
+    unknown_cwd: false
+    parent_id: 4793496948666765799
+floor_capacities:
+  - 8
+  - 8
+  - 8
+  - 8
+  - 8
+  - 8
+  - 8
+  - 8
+  - 8
+  - 8

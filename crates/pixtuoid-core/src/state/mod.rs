@@ -3,6 +3,8 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::SystemTime;
 
+use serde::{Deserialize, Serialize};
+
 use crate::id::AgentId;
 
 mod correlation;
@@ -11,6 +13,57 @@ pub mod reducer;
 mod scope;
 
 pub const MAX_FLOORS: usize = 10;
+
+// serde adapters for the `Arc<str>` / `Arc<Path>` slot fields (#279). serde has
+// no blanket `Arc<T>` impl, and its opt-in `rc` feature wouldn't cover
+// `Arc<Path>` anyway (no `Box<Path>: Deserialize`), so the snapshot crosses
+// through an owned `String` / `PathBuf`. These derives exist for debug state
+// dumps + the full-scene regression snapshot (`tests/reducer/snapshot.rs`) —
+// the serialized shape is NOT a stable wire contract, so a new field is free to
+// add (the golden just flags it for review), not a breaking change.
+mod arc_str_serde {
+    use std::sync::Arc;
+
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(v: &Arc<str>, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(v)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Arc<str>, D::Error> {
+        Ok(Arc::from(String::deserialize(d)?.as_str()))
+    }
+}
+
+mod opt_arc_str_serde {
+    use std::sync::Arc;
+
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S: Serializer>(v: &Option<Arc<str>>, s: S) -> Result<S::Ok, S::Error> {
+        v.as_deref().serialize(s)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Arc<str>>, D::Error> {
+        Ok(Option::<String>::deserialize(d)?.map(|s| Arc::from(s.as_str())))
+    }
+}
+
+mod arc_path_serde {
+    use std::path::{Path, PathBuf};
+    use std::sync::Arc;
+
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S: Serializer>(v: &Arc<Path>, s: S) -> Result<S::Ok, S::Error> {
+        let p: &Path = v;
+        p.serialize(s)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Arc<Path>, D::Error> {
+        Ok(Arc::from(PathBuf::deserialize(d)?.as_path()))
+    }
+}
 
 /// Global desk index — the reducer's allocation space across ALL floors.
 ///
@@ -22,7 +75,7 @@ pub const MAX_FLOORS: usize = 10;
 /// The inner `usize` stays `pub` for construction in tests and for raw
 /// arithmetic at documented sites — the safety comes from this type being
 /// distinct from `FloorLocalDeskIndex`, not from hiding the integer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct GlobalDeskIndex(pub usize);
 
 /// Floor-local desk index — indexes a single floor's
@@ -53,24 +106,31 @@ impl GlobalDeskIndex {
 /// stored as `Arc<str>` / `Arc<Path>` so `SceneState::clone()` is a series
 /// of pointer copies instead of heap allocations. At 30 fps with N agents
 /// this turns ~5N allocations/frame into 0.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ActivityState {
     Idle,
     Active {
+        #[serde(with = "opt_arc_str_serde")]
         tool_use_id: Option<Arc<str>>,
+        #[serde(with = "opt_arc_str_serde")]
         detail: Option<Arc<str>>,
     },
     Waiting {
+        #[serde(with = "arc_str_serde")]
         reason: Arc<str>,
     },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentSlot {
     pub agent_id: AgentId,
+    #[serde(with = "arc_str_serde")]
     pub source: Arc<str>,
+    #[serde(with = "arc_str_serde")]
     pub session_id: Arc<str>,
+    #[serde(with = "arc_path_serde")]
     pub cwd: Arc<Path>,
+    #[serde(with = "arc_str_serde")]
     pub label: Arc<str>,
     pub state: ActivityState,
     pub state_started_at: SystemTime,
@@ -110,7 +170,7 @@ pub struct AgentSlot {
     pub parent_id: Option<AgentId>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SceneState {
     pub agents: BTreeMap<AgentId, AgentSlot>,
     pub floor_capacities: [usize; MAX_FLOORS],
@@ -224,6 +284,48 @@ mod tests {
             unknown_cwd: false,
             parent_id: None,
         }
+    }
+
+    #[test]
+    fn scene_state_json_round_trips_losslessly() {
+        // #279: the whole SceneState tree serializes and restores without loss
+        // — the basis for debug state dumps and the full-scene regression
+        // snapshot. The tree has no PartialEq (deliberate), so round-trip
+        // stability is asserted via canonical-JSON equality; the Arc-backed
+        // fields (Arc<str> / Arc<Path>, and the Option<Arc<str>> Active
+        // variant) are the ones that cross through owned String/PathBuf.
+        let mut s = SceneState::uniform(8);
+
+        let a = AgentId::from_transcript_path("/p/a.jsonl");
+        let mut slot_a = make_slot(a, 0);
+        slot_a.state = ActivityState::Active {
+            tool_use_id: Some(Arc::from("tuid-1")),
+            detail: Some(Arc::from("Read · src/main.rs")),
+        };
+        s.agents.insert(a, slot_a);
+
+        let b = AgentId::from_transcript_path("/p/b.jsonl");
+        let mut slot_b = make_slot(b, 1);
+        slot_b.state = ActivityState::Waiting {
+            reason: Arc::from("permission: Bash"),
+        };
+        slot_b.parent_id = Some(a);
+        s.agents.insert(b, slot_b);
+
+        let json = serde_json::to_string(&s).expect("serialize");
+        let back: SceneState = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(
+            json,
+            serde_json::to_string(&back).expect("re-serialize"),
+            "round-trip must be byte-stable"
+        );
+        assert_eq!(back.agents.len(), 2);
+        assert!(matches!(
+            back.agents[&a].state,
+            ActivityState::Active { .. }
+        ));
+        assert_eq!(&*back.agents[&a].cwd, Path::new("/repo"));
+        assert_eq!(back.agents[&b].parent_id, Some(a));
     }
 
     #[test]

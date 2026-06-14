@@ -3,6 +3,7 @@ mod child_ledger;
 mod display;
 mod lifecycle;
 mod liveness;
+mod snapshot;
 mod tasks;
 
 use std::path::PathBuf;
