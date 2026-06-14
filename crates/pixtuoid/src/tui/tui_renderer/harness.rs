@@ -2226,6 +2226,11 @@ fn connection_panel_renders_both_facets_borderless() {
     assert!(text.contains("[ag]"), "ag badge missing:\n{text}");
     assert!(text.contains("2 agents"), "live count missing:\n{text}");
     assert!(text.contains("socket"), "socket line missing:\n{text}");
+    // Selected row (cc) is Connected → the detail line shows where it's installed.
+    assert!(
+        text.contains("installed at"),
+        "connected detail (install path) missing:\n{text}"
+    );
     // Borderless: the popup (the tooltip_bg-filled region) carries no box glyphs.
     let popup = dash_popup(r.frame_buffer());
     for g in [

@@ -104,7 +104,7 @@ enum KeyAction {
     /// Connection list navigation.
     ConnectionUp,
     ConnectionDown,
-    /// `Enter`: toggle the selected CLI's connection. Connecting is immediate;
+    /// `t`: toggle the selected CLI's connection. Connecting is immediate;
     /// disconnecting arms a confirm first (it removes hooks + walks characters out).
     ConnectionToggle,
     /// `y` while armed: run the disconnect.
@@ -251,7 +251,7 @@ fn dispatch_key(code: KeyCode, mods: KeyModifiers, ctx: KeyCtx) -> KeyAction {
             (KeyCode::Esc, _) | (KeyCode::Char('c'), _) => KeyAction::ConnectionClose,
             (KeyCode::Up, _) | (KeyCode::Char('k'), _) => KeyAction::ConnectionUp,
             (KeyCode::Down, _) | (KeyCode::Char('j'), _) => KeyAction::ConnectionDown,
-            (KeyCode::Enter, _) => KeyAction::ConnectionToggle,
+            (KeyCode::Char('t'), _) => KeyAction::ConnectionToggle,
             _ => KeyAction::None,
         };
     }
@@ -1223,14 +1223,15 @@ mod dispatch_tests {
             dispatch_key(KeyCode::Char('j'), NONE, s),
             KeyAction::ConnectionDown
         );
-        // Enter is the single connect/disconnect toggle (replaced i/u).
+        // `t` is the single connect/disconnect toggle (replaced i/u, then Enter).
         assert_eq!(
-            dispatch_key(KeyCode::Enter, NONE, s),
+            dispatch_key(KeyCode::Char('t'), NONE, s),
             KeyAction::ConnectionToggle
         );
-        // The old install/uninstall keys are now unbound in the panel.
+        // The old install/uninstall keys + Enter are unbound in the panel now.
         assert_eq!(dispatch_key(KeyCode::Char('i'), NONE, s), KeyAction::None);
         assert_eq!(dispatch_key(KeyCode::Char('u'), NONE, s), KeyAction::None);
+        assert_eq!(dispatch_key(KeyCode::Enter, NONE, s), KeyAction::None);
         assert_eq!(
             dispatch_key(KeyCode::Char('c'), NONE, s),
             KeyAction::ConnectionClose

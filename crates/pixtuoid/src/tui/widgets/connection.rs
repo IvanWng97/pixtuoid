@@ -66,16 +66,24 @@ pub(in crate::tui) fn paint_connection_panel(
     lines.push(Line::from(""));
 
     // Detail line: armed-confirm prompt > last action result > selected row's
-    // config path > a no-action hint. Char-safe truncated to the panel width.
+    // install location > a no-action hint. Char-safe truncated to the panel width.
     let detail = if let Some(ci) = confirm {
         let name = rows.get(ci).map_or("", |r| r.display_name);
         format!("\u{26a0} disconnect {name}? (y/n)")
     } else if let Some(res) = last_result {
         res.to_string()
     } else if let Some(row) = rows.get(selected) {
-        match &row.config_path {
-            Some(p) => p.display().to_string(),
-            None => no_action_hint(row),
+        // State-aware: surface the install path ONLY when our integration is
+        // actually there (Connected). Disconnected shows the action (the path is
+        // just the future destination — meaningless until you connect); no-CLI
+        // explains why it can't be bound.
+        match row.state {
+            ConnState::Connected => match &row.config_path {
+                Some(p) => format!("installed at: {}", p.display()),
+                None => "connected".to_string(),
+            },
+            ConnState::Disconnected => "disconnected \u{2014} press t to connect".to_string(),
+            ConnState::NoCli => no_action_hint(row),
         }
     } else {
         String::new()
@@ -86,7 +94,7 @@ pub(in crate::tui) fn paint_connection_panel(
         dim,
     )));
     lines.push(Line::from(Span::styled(
-        "  j/k move \u{00b7} enter toggle \u{00b7} c/esc close",
+        "  j/k move \u{00b7} t toggle \u{00b7} c/esc close",
         dim,
     )));
 
