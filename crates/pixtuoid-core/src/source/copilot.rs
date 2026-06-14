@@ -15,7 +15,10 @@
 //! completed` lines) plus a live `copilot` 1.0.62 capture (#294) that upgraded
 //! `permission.requested/completed` (approve + both deny kinds) and
 //! `subagent.failed` from schema-faithful to byte-real (see
-//! `docs/superpowers/specs/2026-06-14-copilot-cli-source-design.md`).
+//! `docs/superpowers/specs/2026-06-14-copilot-cli-source-design.md`). The
+//! captured event lines are verbatim; the lone neutralized field is the
+//! `permission` conformance fixture's `session.start` `cwd` (a machine temp
+//! path → `/home/user/project`) so the insta golden stays portable.
 //!
 //! Sharp edges (real-byte-confirmed):
 //! - **Session id = the PARENT-DIR UUID** of `events.jsonl` (the filename stem is
