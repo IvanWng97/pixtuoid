@@ -154,7 +154,7 @@ full WHY lives in the nested `CLAUDE.md` for the owning crate.
 - Subagent display names come from `attributionAgent`; the dispatch tool is **`Agent`** (mapped with legacy `Task` → `ToolDetail::Task`); `Workflow` is deliberately NOT mapped.
 - Codex subagents wire via the SubagentStart/Stop hooks (flat rollout, no path nesting).
 - Subagent clean-exit ladder: b1 drain / SubagentStop hooks / child-ledger re-links / the un-claim side-channel.
-- `AgentSlot.state_started_at` is `SystemTime` (process-local, v2-daemon-ready); `ActivityState::Active` ≠ "tool executing" (debounced via `ACTIVE_GRACE_WINDOW`).
+- `AgentSlot.state_started_at` is `SystemTime` (process-local; the whole `SceneState` tree is `Serialize`/`Deserialize` for debug dumps + the snapshot golden, NOT a stable wire contract — the v2-daemon consumer is closed out-of-scope, #279/#280/#281); `ActivityState::Active` ≠ "tool executing" (debounced via `ACTIVE_GRACE_WINDOW`).
 
 **`pixtuoid` / `tui`** ([binary](crates/pixtuoid/CLAUDE.md), [tui](crates/pixtuoid/src/tui/CLAUDE.md)):
 - `draw_scene` is called through `TuiRenderer` (owns cross-frame state, returns the cached `Layout`).

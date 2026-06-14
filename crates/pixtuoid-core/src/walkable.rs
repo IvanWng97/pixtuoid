@@ -7,7 +7,8 @@
 //! `OccupancyOverlay` is the dynamic counterpart — a small list of blocked
 //! rects added/cleared each frame so routers can avoid live agents. Kept
 //! separate from the static mask so the mask can be cached / shipped over
-//! the wire (v2 daemon split) while occupancy stays per-frame.
+//! the wire (serializable; no out-of-process consumer today) while occupancy
+//! stays per-frame.
 //!
 //! Both types are sprite-pack-agnostic and have no terminal dependencies,
 //! so they're safe to live in core and reuse from any future renderer

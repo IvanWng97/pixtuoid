@@ -23,7 +23,8 @@ use tokio::sync::watch;
 ///   - cloning is a pointer copy (Arc::clone), not a heap allocation per
 ///     field (thanks to interned `Arc<str>` strings in `AgentSlot`)
 ///   - the renderer never holds a lock that could block the reducer
-///   - swapping in a v2 daemon means publishing the same Arc over a socket
+///   - the Arc is serializable, so an out-of-process viewer could read it
+///     over a socket (no such consumer today)
 pub type SceneRx = watch::Receiver<Arc<SceneState>>;
 
 /// Fallback desk capacity when the terminal cannot be queried (e.g.

@@ -28,10 +28,15 @@ fn full_scene_serialization_is_stable() {
     let parent = AgentId::from_transcript_path("/proj/parent.jsonl");
     let child = AgentId::from_parts("claude-code", "/proj/parent/subagents/agent-1.jsonl");
     let solo = AgentId::from_transcript_path("/other/solo.jsonl");
+    let idle = AgentId::from_transcript_path("/idle/sess.jsonl");
+    let winding = AgentId::from_transcript_path("/wind/sess.jsonl");
 
-    // A delegating CC parent (Hook) with its subagent (Jsonl), plus an
-    // independent Codex session parked on a permission prompt — three sources
-    // and the three non-Idle activity states in one tree.
+    // A delegating CC parent (Hook) with its subagent (Jsonl), an independent
+    // Codex session parked on a permission prompt, a freshly-started Idle CC
+    // session, and one CC session in the Active→Idle debounce window (its
+    // ActivityEnd armed pending_idle_at without flipping state). Covers all
+    // FOUR ActivityState shapes — incl. Idle — plus a populated
+    // Option<SystemTime>, across three sources.
     r.apply(
         &mut scene,
         AgentEvent::SessionStart {
@@ -97,6 +102,54 @@ fn full_scene_serialization_is_stable() {
             reason: "permission: Bash".into(),
         },
         at(4),
+        Transport::Hook,
+    );
+    // Idle: a session that started and did nothing else.
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: idle,
+            source: "claude-code".into(),
+            session_id: "i".into(),
+            cwd: PathBuf::from("/idle"),
+            parent_id: None,
+        },
+        at(5),
+        Transport::Hook,
+    );
+    // Active→Idle debounce: ActivityEnd arms pending_idle_at but keeps Active
+    // (the documented grace window), pinning a populated Option<SystemTime>.
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: winding,
+            source: "claude-code".into(),
+            session_id: "w".into(),
+            cwd: PathBuf::from("/wind"),
+            parent_id: None,
+        },
+        at(5),
+        Transport::Hook,
+    );
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityStart {
+            agent_id: winding,
+            tool_use_id: Some("w-1".into()),
+            detail: Some(ToolDetail::Generic {
+                display: "Bash · cargo test".into(),
+            }),
+        },
+        at(6),
+        Transport::Hook,
+    );
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityEnd {
+            agent_id: winding,
+            tool_use_id: Some("w-1".into()),
+        },
+        at(7),
         Transport::Hook,
     );
 

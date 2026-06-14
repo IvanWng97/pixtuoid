@@ -1,6 +1,6 @@
 //! Zone-based scene layout for the top-down office — primitive geometry
 //! only, no terminal deps. Computed once per (buf_w, buf_h, num_agents)
-//! triple; serializable / wire-shippable for the future v2 daemon split.
+//! triple; serializable / wire-shippable (no out-of-process consumer today).
 //!
 //! Splits a buf-pixel rectangle into quadrants (meeting / pantry /
 //! cubicles / lounge), then computes per-agent home desks, named lounge

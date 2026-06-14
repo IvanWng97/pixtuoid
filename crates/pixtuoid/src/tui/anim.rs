@@ -5,8 +5,8 @@
 //! wall-clock `started_at` + `duration_ms` and returns the eased progress.
 //!
 //! SystemTime: matches existing animation state (FloorTransition,
-//! LightingState, PoseHistory) for v2 daemon-split compatibility.
-//! See CLAUDE.md "Known sharp edges".
+//! LightingState, PoseHistory) — serializable, no out-of-process consumer
+//! today. See CLAUDE.md "Known sharp edges".
 
 use std::time::{Duration, SystemTime};
 

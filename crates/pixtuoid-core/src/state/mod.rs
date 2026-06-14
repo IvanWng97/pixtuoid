@@ -17,10 +17,11 @@ pub const MAX_FLOORS: usize = 10;
 // serde adapters for the `Arc<str>` / `Arc<Path>` slot fields (#279). serde has
 // no blanket `Arc<T>` impl, and its opt-in `rc` feature wouldn't cover
 // `Arc<Path>` anyway (no `Box<Path>: Deserialize`), so the snapshot crosses
-// through an owned `String` / `PathBuf`. These derives exist for debug state
-// dumps + the full-scene regression snapshot (`tests/reducer/snapshot.rs`) —
-// the serialized shape is NOT a stable wire contract, so a new field is free to
-// add (the golden just flags it for review), not a breaking change.
+// through an owned `String` / `PathBuf`. These derives back the full-scene
+// regression snapshot (`tests/reducer/snapshot.rs`) today; a future debug
+// state dump / daemon snapshot would build on the same shape. That shape is
+// NOT a stable wire contract — a new field is free to add (the golden just
+// flags it for review), not a breaking change.
 mod arc_str_serde {
     use std::sync::Arc;
 
@@ -84,6 +85,11 @@ pub struct GlobalDeskIndex(pub usize);
 /// Produced by `SceneState::floor_local_desk` (the arithmetic bridge) or —
 /// inside a single-floor projected scene — by
 /// `GlobalDeskIndex::single_floor_local` (a documented identity).
+///
+/// Deliberately NOT `Serialize` (its twin `GlobalDeskIndex` is): this is a
+/// transient bridge value, never a stored `SceneState` field — only
+/// `GlobalDeskIndex` (`AgentSlot.desk_index`) is reachable from the
+/// serialized tree, so deriving serde here would widen the surface for nothing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct FloorLocalDeskIndex(pub usize);
 
@@ -312,6 +318,12 @@ mod tests {
         slot_b.parent_id = Some(a);
         s.agents.insert(b, slot_b);
 
+        // An Idle slot too: Idle is a unit variant today, but pinning it here
+        // (and in the golden) catches a future Idle field silently reshaping
+        // the wire form from `"Idle"` to `{"Idle": {..}}`.
+        let c = AgentId::from_transcript_path("/p/c.jsonl");
+        s.agents.insert(c, make_slot(c, 2)); // make_slot defaults to Idle
+
         let json = serde_json::to_string(&s).expect("serialize");
         let back: SceneState = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(
@@ -319,11 +331,12 @@ mod tests {
             serde_json::to_string(&back).expect("re-serialize"),
             "round-trip must be byte-stable"
         );
-        assert_eq!(back.agents.len(), 2);
+        assert_eq!(back.agents.len(), 3);
         assert!(matches!(
             back.agents[&a].state,
             ActivityState::Active { .. }
         ));
+        assert_eq!(back.agents[&c].state, ActivityState::Idle);
         assert_eq!(&*back.agents[&a].cwd, Path::new("/repo"));
         assert_eq!(back.agents[&b].parent_id, Some(a));
     }
