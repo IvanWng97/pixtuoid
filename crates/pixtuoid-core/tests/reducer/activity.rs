@@ -690,10 +690,12 @@ fn copilot_denied_permission_clears_waiting_through_the_reducer() {
         &mut scene,
         r#"{"type":"session.start","data":{"sessionId":"sess","context":{"cwd":"/repo"}},"id":"a","parentId":null}"#,
     );
+    // BYTE-REAL (#294): a matched interactive permission round captured from a
+    // live `copilot` 1.0.62 session (requestId 954afe31…, the user pressed Reject).
     feed(
         &mut r,
         &mut scene,
-        r#"{"type":"permission.requested","data":{"requestId":"r1","permissionRequest":{"kind":"shell"}},"id":"b","parentId":null}"#,
+        r#"{"type":"permission.requested","data":{"requestId":"954afe31-559a-4afc-9eb6-13e30cf48aea","permissionRequest":{"kind":"shell","toolCallId":"call_nf1RvU9GxssNg2g7WtPgHqQ4","fullCommandText":"cat /etc/hostname","intention":"Show system hostname","commands":[{"identifier":"cat","readOnly":true}],"possiblePaths":["/etc/hostname"],"possibleUrls":[],"hasWriteFileRedirection":false,"canOfferSessionApproval":true},"promptRequest":{"kind":"path","accessKind":"shell","paths":["/etc/hostname"],"toolCallId":"call_nf1RvU9GxssNg2g7WtPgHqQ4"}},"id":"5240af45-3ad2-4bf7-bc37-83c329c9c2ea","timestamp":"2026-06-14T21:38:40.507Z","parentId":"cb3c0a03-3f84-451c-bac6-843f0632ba9f"}"#,
     );
     assert!(
         matches!(
@@ -705,7 +707,7 @@ fn copilot_denied_permission_clears_waiting_through_the_reducer() {
     feed(
         &mut r,
         &mut scene,
-        r#"{"type":"permission.completed","data":{"requestId":"r1","result":{"kind":"denied-interactively-by-user"}},"id":"c","parentId":null}"#,
+        r#"{"type":"permission.completed","data":{"requestId":"954afe31-559a-4afc-9eb6-13e30cf48aea","toolCallId":"call_nf1RvU9GxssNg2g7WtPgHqQ4","result":{"kind":"denied-interactively-by-user"}},"id":"60dae716-c76c-45e2-84e1-c3248ce3790c","timestamp":"2026-06-14T21:38:43.086Z","parentId":"5240af45-3ad2-4bf7-bc37-83c329c9c2ea"}"#,
     );
     assert!(
         !matches!(

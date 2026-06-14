@@ -1,0 +1,29 @@
+---
+source: crates/pixtuoid-core/tests/sources/conformance.rs
+expression: events
+---
+- SessionStart:
+    agent_id: 4184320534004752587
+    source: copilot
+    session_id: a2bada0a-ccf7-454a-b890-ec44d64ab0ed
+    cwd: /home/user/project
+    parent_id: ~
+- ActivityStart:
+    agent_id: 4184320534004752587
+    tool_use_id: call_nf1RvU9GxssNg2g7WtPgHqQ4
+    detail:
+      Generic:
+        display: bash
+- Waiting:
+    agent_id: 4184320534004752587
+    reason: "permission: shell"
+- ActivityStart:
+    agent_id: 4184320534004752587
+    tool_use_id: ~
+    detail: ~
+- ActivityEnd:
+    agent_id: 4184320534004752587
+    tool_use_id: call_nf1RvU9GxssNg2g7WtPgHqQ4
+- SessionEnd:
+    agent_id: 4184320534004752587
+    as_child: false

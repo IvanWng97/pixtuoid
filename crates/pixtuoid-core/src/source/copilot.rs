@@ -10,8 +10,12 @@
 //! disk; the decoder simply ignores everything it doesn't map.
 //!
 //! Grounded in the canonical schema (npm `@github/copilot` tarball
-//! `schemas/session-events.schema.json`) + two real committed on-disk
-//! `events.jsonl` files (see `docs/superpowers/specs/2026-06-14-copilot-cli-source-design.md`).
+//! `schemas/session-events.schema.json`) + real on-disk `events.jsonl` files:
+//! two committed (the `tool-run` fixture + the tamirdresher `subagent.started/
+//! completed` lines) plus a live `copilot` 1.0.62 capture (#294) that upgraded
+//! `permission.requested/completed` (approve + both deny kinds) and
+//! `subagent.failed` from schema-faithful to byte-real (see
+//! `docs/superpowers/specs/2026-06-14-copilot-cli-source-design.md`).
 //!
 //! Sharp edges (real-byte-confirmed):
 //! - **Session id = the PARENT-DIR UUID** of `events.jsonl` (the filename stem is
@@ -152,8 +156,8 @@ pub fn decode_copilot_line(
         }
         "permission.requested" => {
             // permissionRequest.kind (write/shell/read/…) names the gate; fall
-            // back to a generic reason. (Field shape schema-pinned; the on-disk
-            // permission bytes are the one needs-human-verify item.)
+            // back to a generic reason. (Byte-real: the on-disk permission
+            // envelope is capture-verified against copilot 1.0.62, #294.)
             let reason = data
                 .and_then(|d| d.get("permissionRequest"))
                 .and_then(|p| str_at(p, "kind"))
@@ -395,6 +399,26 @@ mod tests {
     }
 
     #[test]
+    fn real_subagent_failed_ends_child_as_child() {
+        // BYTE-REAL (#294): a general-purpose subagent that errored out on copilot
+        // 1.0.62 (`error:"No response generated"` — captured by aborting a running
+        // task subagent). Same envelope + keying as subagent.completed (top-level
+        // agentId == data.toolCallId), so the shared `completed | failed` arm ends
+        // the CHILD as_child, ignoring the failure-only fields (error/durationMs).
+        let line = r#"{"type":"subagent.failed","data":{"toolCallId":"toolu_bdrk_014wc1joyQCq3f6RBzGcxVRb","agentName":"general-purpose","agentDisplayName":"General Purpose Agent","model":"claude-haiku-4.5","totalToolCalls":0,"durationMs":2183,"error":"No response generated"},"id":"225a0bef-8b18-4d4d-a643-4cedd7f2e603","timestamp":"2026-06-14T21:30:31.494Z","parentId":"5a8b7e5e-9d2c-43b7-82b2-1d8f98f820de","agentId":"toolu_bdrk_014wc1joyQCq3f6RBzGcxVRb"}"#;
+        match &decode(line)[..] {
+            [AgentEvent::SessionEnd { agent_id, as_child }] => {
+                assert_eq!(
+                    *agent_id,
+                    AgentId::from_parts(SOURCE_NAME, "toolu_bdrk_014wc1joyQCq3f6RBzGcxVRb")
+                );
+                assert!(*as_child, "a subagent failure is a child end");
+            }
+            other => panic!("expected child SessionEnd, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn child_tool_line_attributes_to_the_child_via_envelope_agent_id() {
         // Schema-derived (no public capture logs child tool events with agentId;
         // pins the defensive interleave-demux per the design §8.2).
@@ -417,15 +441,12 @@ mod tests {
 
     #[test]
     fn permission_requested_waits_and_completed_clears() {
-        // Schema-faithful (the one needs-human-verify item — on-disk permission
-        // bytes weren't public). Pins BOTH sides of the gate.
-        let req = json!({
-            "type": "permission.requested",
-            "data": {"requestId": "r1", "permissionRequest": {"kind": "shell", "toolCallId": "tc1"}},
-            "id": "p1", "timestamp": "t", "parentId": null
-        })
-        .to_string();
-        match &decode(&req)[..] {
+        // BYTE-REAL (#294): captured from a live `copilot` 1.0.62 session — an
+        // interactive shell-permission prompt approved once and denied once,
+        // plus the headless `denied-no-approval-rule…` auto-deny. Pins BOTH
+        // sides of the gate against the real on-disk envelope, not a mock.
+        let req = r#"{"type":"permission.requested","data":{"requestId":"8c508e21-0a6c-4a06-8824-3930476499ea","permissionRequest":{"kind":"shell","toolCallId":"call_K8WLZkwufHsI9bTvkZmMKec2","fullCommandText":"cat /etc/hostname","intention":"Print /etc/hostname contents","commands":[{"identifier":"cat","readOnly":true}],"possiblePaths":["/etc/hostname"],"possibleUrls":[],"hasWriteFileRedirection":false,"canOfferSessionApproval":true},"promptRequest":{"kind":"path","accessKind":"shell","paths":["/etc/hostname"],"toolCallId":"call_K8WLZkwufHsI9bTvkZmMKec2"}},"id":"1f975691-a108-4d6f-924b-d48263d46274","timestamp":"2026-06-14T21:35:55.637Z","parentId":"e0a534c6-d548-4def-b0bd-316c83efe5fd"}"#;
+        match &decode(req)[..] {
             [AgentEvent::Waiting { agent_id, reason }] => {
                 assert_eq!(*agent_id, root());
                 assert!(reason.contains("shell"), "reason names the gate: {reason}");
@@ -433,29 +454,27 @@ mod tests {
             other => panic!("expected Waiting, got {other:?}"),
         }
         // APPROVED → emit nothing (the approved tool's own start clears Waiting;
-        // a phantom ActivityStart would inflate tool_call_count).
-        let approved = json!({
-            "type": "permission.completed",
-            "data": {"requestId": "r1", "result": {"kind": "approved"}},
-            "id": "p2", "timestamp": "t", "parentId": null
-        })
-        .to_string();
+        // a phantom ActivityStart would inflate tool_call_count). Real `approved`.
+        let approved = r#"{"type":"permission.completed","data":{"requestId":"8c508e21-0a6c-4a06-8824-3930476499ea","toolCallId":"call_K8WLZkwufHsI9bTvkZmMKec2","result":{"kind":"approved"}},"id":"8123a44a-3471-4262-9191-b3cddaf5224d","timestamp":"2026-06-14T21:35:58.218Z","parentId":"1f975691-a108-4d6f-924b-d48263d46274"}"#;
         assert!(
-            decode(&approved).is_empty(),
+            decode(approved).is_empty(),
             "approved → no event (tool start clears the gate)"
         );
 
-        // DENIED → emit the clearing ActivityStart ourselves (no tool follows).
-        let denied = json!({
-            "type": "permission.completed",
-            "data": {"requestId": "r1", "result": {"kind": "denied-interactively-by-user"}},
-            "id": "p3", "timestamp": "t", "parentId": null
-        })
-        .to_string();
-        assert!(matches!(
-            &decode(&denied)[..],
-            [AgentEvent::ActivityStart { .. }]
-        ));
+        // Every NON-approved result.kind clears the slot via a detail-less
+        // ActivityStart (no tool follows). Two REAL deny variants: the
+        // interactive user reject, and the non-interactive no-rule auto-deny —
+        // both must hit the same clear path (decoder keys on !starts_with
+        // "approved", so a new deny kind can't silently strand a Waiting slot).
+        for denied in [
+            r#"{"type":"permission.completed","data":{"requestId":"954afe31-559a-4afc-9eb6-13e30cf48aea","toolCallId":"call_nf1RvU9GxssNg2g7WtPgHqQ4","result":{"kind":"denied-interactively-by-user"}},"id":"60dae716-c76c-45e2-84e1-c3248ce3790c","timestamp":"2026-06-14T21:38:43.086Z","parentId":"5240af45-3ad2-4bf7-bc37-83c329c9c2ea"}"#,
+            r#"{"type":"permission.completed","data":{"requestId":"eab9bd2c-ca42-4ab6-8567-1c11906500a6","toolCallId":"toolu_bdrk_015JoceQkzNKnLkeCj5NaLzT","result":{"kind":"denied-no-approval-rule-and-could-not-request-from-user"}},"id":"2cc6bffe-6443-4d8b-9765-dbfeda13c4de","timestamp":"2026-06-14T21:27:17.209Z","parentId":"c113f81d-6f12-4080-bd13-8613526543dc"}"#,
+        ] {
+            assert!(
+                matches!(&decode(denied)[..], [AgentEvent::ActivityStart { .. }]),
+                "a non-approved result must clear Waiting: {denied}"
+            );
+        }
     }
 
     #[test]
