@@ -65,11 +65,16 @@ pub fn derive_copilot_label(_path: &Path, _source: &str, cwd: &Path) -> String {
 /// already ended carries that marker — the first-sight gate uses it to avoid
 /// resurrecting a finished session.
 fn copilot_session_ended(tail: &[u8]) -> bool {
-    // Substring scan over the tail window (the watcher passes the last bytes).
-    // `session.shutdown` is the durable end marker; `session_end` is a defensive
-    // alias in case a future build renames it.
+    // Substring scan over the tail window. ANCHOR on the structural `"type"`
+    // field — a bare `session.shutdown` would false-positive on tool OUTPUT
+    // (e.g. a shell result containing "run session.shutdown the cluster"),
+    // seeding the cursor at EOF and silently dropping a live session. Content
+    // must never drive lifecycle (the CC sharp edge — its own end-checker only
+    // matches structural markers for exactly this reason). events.jsonl is
+    // compact JSON with `type` first, so `"type":"session.shutdown"` is the
+    // real on-disk shape; `"session_end"` is a quoted defensive alias.
     let hay = String::from_utf8_lossy(tail);
-    hay.contains("session.shutdown") || hay.contains("\"session_end\"")
+    hay.contains("\"type\":\"session.shutdown\"") || hay.contains("\"session_end\"")
 }
 
 fn str_at<'a>(v: &'a Value, key: &str) -> Option<&'a str> {
@@ -489,9 +494,15 @@ mod tests {
     }
 
     #[test]
-    fn session_ended_marker_detects_shutdown() {
+    fn session_ended_marker_is_anchored_on_the_type_field() {
+        // Real compact on-disk shape → ended.
         assert!(copilot_session_ended(
             br#"...{"type":"session.shutdown","data":{}}"#
+        ));
+        // A tool result that merely MENTIONS the string must NOT end the session
+        // (content must never drive lifecycle — the CC sharp edge).
+        assert!(!copilot_session_ended(
+            br#"{"type":"tool.execution_complete","data":{"result":{"content":"run session.shutdown the cluster"}}}"#
         ));
         assert!(!copilot_session_ended(
             br#"{"type":"tool.execution_start"}"#

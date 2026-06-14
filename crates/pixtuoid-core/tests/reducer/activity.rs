@@ -666,3 +666,52 @@ fn codex_permission_then_jsonl_output_resumes_to_active() {
         "resume must return to Active"
     );
 }
+
+// Copilot permission gate, decoder → reducer (cross-layer): a DENIED permission
+// must leave the sprite, not strand it in Waiting for the 60-min sweep. The
+// decoder emits ActivityStart{tool_use_id:None} on denial; this pins that the
+// reducer actually transitions Waiting→Active on it (the bot's PR #292 ask —
+// the decoder unit test only proved the event is emitted, not that it clears).
+#[test]
+fn copilot_denied_permission_clears_waiting_through_the_reducer() {
+    use pixtuoid_core::source::copilot::decode_copilot_line;
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let path = "/p/session-state/sess/events.jsonl";
+    let id = AgentId::from_parts("copilot", "sess");
+    let mut feed = |r: &mut Reducer, scene: &mut SceneState, line: &str| {
+        for ev in decode_copilot_line(path, "copilot", serde_json::from_str(line).unwrap()).unwrap()
+        {
+            r.apply(scene, ev, SystemTime::now(), Transport::Jsonl);
+        }
+    };
+    feed(
+        &mut r,
+        &mut scene,
+        r#"{"type":"session.start","data":{"sessionId":"sess","context":{"cwd":"/repo"}},"id":"a","parentId":null}"#,
+    );
+    feed(
+        &mut r,
+        &mut scene,
+        r#"{"type":"permission.requested","data":{"requestId":"r1","permissionRequest":{"kind":"shell"}},"id":"b","parentId":null}"#,
+    );
+    assert!(
+        matches!(
+            scene.agents.get(&id).unwrap().state,
+            ActivityState::Waiting { .. }
+        ),
+        "permission.requested should set Waiting"
+    );
+    feed(
+        &mut r,
+        &mut scene,
+        r#"{"type":"permission.completed","data":{"requestId":"r1","result":{"kind":"denied-interactively-by-user"}},"id":"c","parentId":null}"#,
+    );
+    assert!(
+        !matches!(
+            scene.agents.get(&id).unwrap().state,
+            ActivityState::Waiting { .. }
+        ),
+        "a DENIED permission must clear Waiting (else the sprite hangs 60 min)"
+    );
+}
