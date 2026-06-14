@@ -3,14 +3,14 @@
 //! there. Borderless (via `panel::borderless_panel`), painted over the scene in
 //! both the normal and floor-transition draw paths.
 
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
-use super::{borderless_panel, centered_in, to_color, truncate};
+use super::{borderless_panel, centered_in, marquee_or_truncate, marquee_window, to_color};
 use crate::tui::connection::{no_action_hint, ConnState, ConnectionRow, LiveInfo};
 use crate::tui::theme::Theme;
 
@@ -30,6 +30,7 @@ pub(in crate::tui) fn paint_connection_panel(
     confirm: Option<usize>,
     last_result: Option<&str>,
     socket_line: &str,
+    now: SystemTime,
     bounds: Rect,
     theme: &Theme,
 ) {
@@ -61,7 +62,7 @@ pub(in crate::tui) fn paint_connection_panel(
     )));
     for (i, row) in rows.iter().enumerate() {
         let li = live.get(i).cloned().unwrap_or_default();
-        lines.push(connection_line(row, &li, selected == i, theme));
+        lines.push(connection_line(row, &li, selected == i, now, theme));
     }
     lines.push(Line::from(""));
 
@@ -88,9 +89,12 @@ pub(in crate::tui) fn paint_connection_panel(
     } else {
         String::new()
     };
+    // The detail line always shows the SELECTED row's content (path / hint), so
+    // it scrolls (ping-pong) when it overflows — same focused-row treatment as
+    // the selected list row's cells.
     let detail_w = inner.width.saturating_sub(2) as usize;
     lines.push(Line::from(Span::styled(
-        format!("  {}", truncate(&detail, detail_w)),
+        format!("  {}", marquee_window(&detail, detail_w, now)),
         dim,
     )));
     lines.push(Line::from(Span::styled(
@@ -107,6 +111,7 @@ fn connection_line(
     row: &ConnectionRow,
     live: &LiveInfo,
     is_selected: bool,
+    now: SystemTime,
     theme: &Theme,
 ) -> Line<'static> {
     let prefix = if is_selected { "\u{25b8} " } else { "  " };
@@ -157,7 +162,10 @@ fn connection_line(
         ('\u{25cc}', "idle".to_string(), theme.ui.label_idle)
     };
 
-    let name_cell = format!("{:<NAME_W$}", truncate(row.display_name, NAME_W));
+    let name_cell = format!(
+        "{:<NAME_W$}",
+        marquee_or_truncate(row.display_name, NAME_W, is_selected, now)
+    );
 
     Line::from(vec![
         Span::raw(prefix),
@@ -204,7 +212,13 @@ mod tests {
     #[test]
     fn connection_line_badge_uses_source_color_and_is_never_reversed() {
         let r = row("codex", "cx", ConnState::Disconnected);
-        let line = connection_line(&r, &LiveInfo::default(), true, &NORMAL);
+        let line = connection_line(
+            &r,
+            &LiveInfo::default(),
+            true,
+            SystemTime::UNIX_EPOCH,
+            &NORMAL,
+        );
         let badge = &line.spans[1];
         assert_eq!(badge.style.fg, Some(to_color(NORMAL.source.codex)));
         assert!(!badge.style.add_modifier.contains(Modifier::REVERSED));
@@ -223,7 +237,7 @@ mod tests {
             last_event_age: Some(Duration::from_secs(3)),
             dead: false,
         };
-        let line = connection_line(&r, &live, false, &NORMAL);
+        let line = connection_line(&r, &live, false, SystemTime::UNIX_EPOCH, &NORMAL);
         let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(text.contains("[cc]"));
         assert!(text.contains("connected"));
@@ -239,7 +253,7 @@ mod tests {
             last_event_age: Some(Duration::from_secs(1)),
             dead: true,
         };
-        let line = connection_line(&r, &live, false, &NORMAL);
+        let line = connection_line(&r, &live, false, SystemTime::UNIX_EPOCH, &NORMAL);
         let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(text.contains("transport died"));
     }
@@ -255,11 +269,57 @@ mod tests {
                 dead: false,
             },
             false,
+            SystemTime::UNIX_EPOCH,
             &NORMAL,
         );
         let t1: String = one.spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(t1.contains("1 agent "), "singular: {t1}");
         assert!(!t1.contains("1 agents"));
+    }
+
+    #[test]
+    fn connection_line_selected_long_name_scrolls_unselected_truncates() {
+        let r = ConnectionRow {
+            source_id: "x",
+            label_prefix: "cc",
+            display_name: "A-Very-Long-CLI-Display-Name-That-Overflows",
+            state: ConnState::Connected,
+            config_path: None,
+            target: None,
+        };
+        // Unselected: static `…`-truncated name (spans[3]).
+        let unsel = connection_line(
+            &r,
+            &LiveInfo::default(),
+            false,
+            SystemTime::UNIX_EPOCH,
+            &NORMAL,
+        );
+        let name_unsel = unsel.spans[3].content.to_string();
+        assert!(
+            name_unsel.contains('\u{2026}'),
+            "unselected long name must ellipsize: {name_unsel:?}"
+        );
+        // Selected: scrolling window — no ellipsis, animates across time.
+        let t1 = SystemTime::UNIX_EPOCH + Duration::from_millis(3000);
+        let n0 = connection_line(
+            &r,
+            &LiveInfo::default(),
+            true,
+            SystemTime::UNIX_EPOCH,
+            &NORMAL,
+        )
+        .spans[3]
+            .content
+            .to_string();
+        let n1 = connection_line(&r, &LiveInfo::default(), true, t1, &NORMAL).spans[3]
+            .content
+            .to_string();
+        assert!(
+            !n0.contains('\u{2026}'),
+            "selected scrolling name must not ellipsize: {n0:?}"
+        );
+        assert_ne!(n0, n1, "selected name must animate across time");
     }
 
     // Registry-bridge pin: every registered source gets a real badge color, not
@@ -286,7 +346,13 @@ mod tests {
             })
             .collect();
         for sr in build_rows_from(inputs) {
-            let line = connection_line(&sr, &LiveInfo::default(), false, &NORMAL);
+            let line = connection_line(
+                &sr,
+                &LiveInfo::default(),
+                false,
+                SystemTime::UNIX_EPOCH,
+                &NORMAL,
+            );
             assert_ne!(
                 line.spans[1].style.fg,
                 Some(fallback),

@@ -368,6 +368,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
                 ctx.dashboard_rows,
                 ctx.dashboard_selected,
                 ctx.dashboard_scroll,
+                now,
                 actual_full,
                 theme,
             );
@@ -381,6 +382,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
                 ctx.connection_confirm,
                 ctx.connection_result,
                 ctx.connection_socket_line,
+                now,
                 actual_full,
                 theme,
             );

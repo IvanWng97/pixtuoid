@@ -606,6 +606,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                     &dashboard_rows,
                     dashboard_selected,
                     dashboard_scroll,
+                    now,
                     actual_full,
                     theme,
                 );
@@ -619,6 +620,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                     connection_confirm,
                     connection_result.as_deref(),
                     &connection_socket_line,
+                    now,
                     actual_full,
                     theme,
                 );

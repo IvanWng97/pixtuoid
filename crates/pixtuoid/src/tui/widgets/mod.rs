@@ -67,6 +67,64 @@ fn truncate(s: &str, max: usize) -> String {
     out
 }
 
+/// Time (ms) the marquee dwells on each character while scrolling — matches the
+/// wall ticker's 150ms cadence (~6.7 chars/sec).
+const MARQUEE_MS_PER_CHAR: u64 = 150;
+/// Time (ms) the marquee holds at each end (head / tail) before reversing.
+const MARQUEE_END_PAUSE_MS: u64 = 1200;
+
+/// Visible char-window of `s` for a ping-pong auto-scrolling field `width`
+/// columns wide, at time `now`. If `s` fits, it is returned unchanged (the
+/// caller pads/uses it exactly as it would `truncate`'s output). Otherwise it
+/// bounces — hold head → scroll to tail → hold tail → scroll back — purely as a
+/// function of `now`, with NO per-frame state (same wallclock trick as
+/// `TickerQueue::visible`, so two painters can call it freely). Char-windowed,
+/// matching `truncate` (single-column glyphs only; a wide CJK glyph would
+/// misalign by a column mid-scroll — the same assumption `truncate` makes).
+/// Unlike `truncate`, the scrolling window emits NO `…` — the motion signals
+/// "more". `[p]ause` freezes `now`, which freezes the scroll.
+fn marquee_window(s: &str, width: usize, now: SystemTime) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    let len = chars.len();
+    if len <= width {
+        return s.to_string();
+    }
+    if width == 0 {
+        return String::new();
+    }
+    let max_off = len - width; // >= 1
+    let scroll_ms = max_off as u64 * MARQUEE_MS_PER_CHAR; // >= MARQUEE_MS_PER_CHAR
+    let pause = MARQUEE_END_PAUSE_MS;
+    let cycle = 2 * pause + 2 * scroll_ms; // > 0
+    let elapsed = now
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    let phase = elapsed % cycle;
+    let off = if phase < pause {
+        0 // hold head
+    } else if phase < pause + scroll_ms {
+        (((phase - pause) / MARQUEE_MS_PER_CHAR) as usize).min(max_off) // scroll out
+    } else if phase < 2 * pause + scroll_ms {
+        max_off // hold tail
+    } else {
+        let back = (phase - (2 * pause + scroll_ms)) / MARQUEE_MS_PER_CHAR;
+        max_off.saturating_sub(back as usize) // scroll back
+    };
+    chars[off..off + width].iter().collect()
+}
+
+/// The focused (selected) row auto-scrolls overflowing text via ping-pong; every
+/// other row stays statically `…`-truncated. Both honor the same `width` contract
+/// so the caller's fixed-width padding is unchanged. Shared by both popups.
+fn marquee_or_truncate(s: &str, width: usize, selected: bool, now: SystemTime) -> String {
+    if selected {
+        marquee_window(s, width, now)
+    } else {
+        truncate(s, width)
+    }
+}
+
 /// Format a duration in seconds as a compact `"{h}h{m}m"` / `"{m}m"` / `"<1m"`
 /// string (no prefix). The HUD uptime badge prepends "↑"; the tooltip uses the
 /// bare form. Bucket thresholds: ≥1h shows hours+minutes, ≥1m shows minutes.
@@ -186,6 +244,87 @@ mod tests {
         let out = truncate_label("x\u{00b7}abcdefgh", 4);
         assert_eq!(out.chars().count(), 4);
         assert_eq!(out, "x\u{00b7}ab");
+    }
+
+    // --- marquee_window ----------------------------------------------------
+
+    // A 10-char string scrolled in a 5-col window: max_off=5, scroll_ms=750,
+    // pause=1200, cycle = 2*1200 + 2*750 = 3900. Phases (ms):
+    //   [0,1200)        hold head  -> "ABCDE"
+    //   [1200,1950)     scroll out -> off=(p-1200)/150
+    //   [1950,3150)     hold tail  -> "FGHIJ"
+    //   [3150,3900)     scroll back-> off=5-((p-3150)/150)
+    const M: &str = "ABCDEFGHIJ";
+    fn at(ms: u64) -> SystemTime {
+        SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(ms)
+    }
+
+    #[test]
+    fn marquee_fits_returns_unchanged_no_ellipsis() {
+        // len <= width on both the exact and under cases — today's behavior.
+        assert_eq!(marquee_window("short", 10, at(99_999)), "short");
+        assert_eq!(marquee_window("EXACTLYTEN", 10, at(99_999)), "EXACTLYTEN");
+    }
+
+    #[test]
+    fn marquee_zero_width_is_empty() {
+        assert_eq!(marquee_window(M, 0, at(0)), "");
+        assert_eq!(marquee_window("", 0, at(0)), "");
+    }
+
+    #[test]
+    fn marquee_holds_head_then_tail() {
+        // phase 0 -> head; phase 2000 (in [1950,3150)) -> tail.
+        assert_eq!(marquee_window(M, 5, at(0)), "ABCDE");
+        assert_eq!(marquee_window(M, 5, at(2000)), "FGHIJ");
+    }
+
+    #[test]
+    fn marquee_scrolls_out_and_back() {
+        // out: phase 1500 -> off=(300/150)=2 -> "CDEFG".
+        assert_eq!(marquee_window(M, 5, at(1500)), "CDEFG");
+        // back: phase 3450 -> off=5-(300/150)=3 -> "DEFGH".
+        assert_eq!(marquee_window(M, 5, at(3450)), "DEFGH");
+    }
+
+    #[test]
+    fn marquee_is_deterministic_and_cycles() {
+        // Same (s,width,now) -> same window; one full cycle (3900ms) later is
+        // identical (wallclock modulo).
+        assert_eq!(
+            marquee_window(M, 5, at(1500)),
+            marquee_window(M, 5, at(1500))
+        );
+        assert_eq!(
+            marquee_window(M, 5, at(1500)),
+            marquee_window(M, 5, at(1500 + 3900))
+        );
+    }
+
+    #[test]
+    fn marquee_min_overflow_reaches_both_ends() {
+        // len == width + 1 (max_off=1): the single-char travel must expose both
+        // the first and last char. scroll_ms=150, cycle = 2*1200 + 2*150 = 2700.
+        let s = "ABCDEF"; // len 6, width 5
+        assert_eq!(marquee_window(s, 5, at(0)), "ABCDE"); // head
+        assert_eq!(marquee_window(s, 5, at(1500)), "BCDEF"); // tail-hold [1350,2550)
+    }
+
+    #[test]
+    fn marquee_never_panics_on_multibyte() {
+        // Multi-byte chars must window by char, never slice a byte boundary.
+        let s = "café·ünïcödé·scroll·test";
+        for ms in [0u64, 500, 1500, 2500, 5000, 9999] {
+            let out = marquee_window(s, 8, at(ms));
+            assert_eq!(out.chars().count(), 8, "ms={ms}: {out:?}");
+        }
+    }
+
+    #[test]
+    fn marquee_or_truncate_selected_scrolls_unselected_ellipsizes() {
+        // Selected (scrolling) emits no ellipsis; unselected keeps `…`.
+        assert_eq!(marquee_or_truncate(M, 5, true, at(0)), "ABCDE");
+        assert_eq!(marquee_or_truncate(M, 5, false, at(0)), "ABCD\u{2026}");
     }
 
     // --- TickerQueue -------------------------------------------------------
