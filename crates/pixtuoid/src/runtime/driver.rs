@@ -28,7 +28,8 @@ use pixtuoid_core::{AgentEvent, Reducer, SceneState, TaggedReceiver, Transport};
 use tokio::sync::{mpsc, watch};
 
 use super::{
-    boot_capacities_for, cap_boot_capacities, summarize, RunConfig, SceneRx, FALLBACK_DESKS,
+    boot_capacities_for, cap_boot_capacities, summarize, ConnectedSources, RunConfig, SceneRx,
+    FALLBACK_DESKS,
 };
 
 pub fn run(cfg: RunConfig) -> Result<()> {
@@ -49,7 +50,11 @@ async fn run_async(cfg: RunConfig) -> Result<()> {
         config_path,
         theme,
         pets,
+        connected,
     } = cfg;
+    // The live, shared connected-source set: the reducer-task gate reads it, the
+    // Connection panel mutates it. Seeded from the resolved boot flags.
+    let connected = ConnectedSources::new(connected);
     // The transcript-bearing sources (CC / Antigravity / Codex), built in ONE
     // place: `build_transcript_sources` is the single source of truth its test
     // pins against the registry, closing the documented "registered but never
@@ -82,7 +87,12 @@ async fn run_async(cfg: RunConfig) -> Result<()> {
     let floor_caps: Arc<[AtomicUsize; MAX_FLOORS]> =
         Arc::new(std::array::from_fn(|i| AtomicUsize::new(boot_caps[i])));
 
-    tokio::spawn(reducer_task(rx, scene_tx, Arc::clone(&floor_caps)));
+    tokio::spawn(reducer_task(
+        rx,
+        scene_tx,
+        Arc::clone(&floor_caps),
+        connected.clone(),
+    ));
 
     // Source-health side channel (#157): a fatal source exit must reach the
     // TUI footer — in default TUI mode tracing only reaches the log file, and
@@ -109,6 +119,7 @@ async fn run_async(cfg: RunConfig) -> Result<()> {
             pets,
             health_rx,
             socket_path,
+            connected,
         )
         .await
     }
@@ -158,10 +169,29 @@ fn build_transcript_sources(
     ]
 }
 
+/// The source id an event would register/refresh — so the Connection gate can
+/// drop a disconnected source's events BEFORE they reach the reducer. The source
+/// is NOT recoverable from an `AgentId` (it's a hash), so read it off the two
+/// variants that carry it (a hook `Identity` is emitted ahead of every activity
+/// event since #221, so a fresh hook session's first event self-identifies);
+/// otherwise fall back to the existing slot's source. `None` (an identity-less
+/// event for an unknown id) slips the gate once and is evicted on the next tick.
+fn event_source<'a>(scene: &'a SceneState, ev: &'a AgentEvent) -> Option<&'a str> {
+    match ev {
+        AgentEvent::SessionStart { source, .. } | AgentEvent::Identity { source, .. }
+            if !source.is_empty() =>
+        {
+            Some(source)
+        }
+        _ => scene.agents.get(&ev.agent_id()).map(|s| s.source.as_ref()),
+    }
+}
+
 async fn reducer_task(
     mut rx: TaggedReceiver,
     scene_tx: watch::Sender<Arc<SceneState>>,
     floor_caps: Arc<[AtomicUsize; MAX_FLOORS]>,
+    connected: ConnectedSources,
 ) {
     let mut reducer = Reducer::new();
     let initial_caps: [usize; MAX_FLOORS] =
@@ -180,6 +210,11 @@ async fn reducer_task(
             event = rx.recv() => {
                 let Some((transport, ev)) = event else { break };
                 let now = SystemTime::now();
+                // Connection gate: drop a disconnected source's events before
+                // they register/refresh a sprite. No scene change → no send.
+                if event_source(&scene, &ev).is_some_and(|src| !connected.is_connected(src)) {
+                    continue;
+                }
                 tracing::debug!(?transport, ?ev, "event");
                 reducer.apply(&mut scene, ev, now, transport);
                 if scene_tx.send(Arc::new(scene.clone())).is_err() {
@@ -188,7 +223,16 @@ async fn reducer_task(
                 }
             }
             _ = sweep_interval.tick() => {
-                reducer.tick(&mut scene, SystemTime::now());
+                let now = SystemTime::now();
+                // Reconcile the scene toward the connected-set: walk out (idempotently)
+                // every sprite whose source is NOT connected. Stateless on purpose —
+                // no prev-set bookkeeping — and keyed on the COMPLEMENT of the set
+                // (not a registered-source list), so it ALSO evicts a blank-source
+                // slot synthesized for an identity-less event that slipped the
+                // per-event gate, closing that hole within one tick.
+                let cur = connected.snapshot();
+                reducer.reconcile_connected(&mut scene, &cur, now);
+                reducer.tick(&mut scene, now);
                 if scene_tx.send(Arc::new(scene.clone())).is_err() {
                     tracing::warn!("scene channel closed — renderer dropped");
                     break;
@@ -317,6 +361,61 @@ mod tests {
              transcript-bearing source is registered but not built (it would never \
              spawn), or a built source isn't registered"
         );
+    }
+
+    // The Connection-gate seam: `event_source` decides which source an incoming
+    // event belongs to so reducer_task can drop a disconnected source's events.
+    // Carrying variants (SessionStart/Identity) self-identify; everything else
+    // resolves via the existing slot; an unknown id with no carried source slips
+    // the gate once (None) and is swept by the per-tick reconciler.
+    #[test]
+    fn event_source_extracts_source_for_the_connection_gate() {
+        use pixtuoid_core::AgentId;
+        let now = SystemTime::now();
+        let mut scene = SceneState::new([FALLBACK_DESKS; MAX_FLOORS]);
+        let mut reducer = Reducer::new();
+        let id = AgentId::from_transcript_path("/p/a.jsonl");
+
+        // SessionStart carries the source directly — even before the slot exists.
+        let ss = AgentEvent::SessionStart {
+            agent_id: id,
+            source: "claude-code".into(),
+            session_id: "s".into(),
+            cwd: PathBuf::from("/repo"),
+            parent_id: None,
+        };
+        assert_eq!(event_source(&scene, &ss), Some("claude-code"));
+
+        // Identity likewise self-identifies.
+        let idy = AgentEvent::Identity {
+            agent_id: id,
+            source: "codex".into(),
+            session_id: "s".into(),
+            cwd: None,
+        };
+        assert_eq!(event_source(&scene, &idy), Some("codex"));
+
+        // A non-carrying event for an UNKNOWN id slips the gate (None) — the
+        // reconciler is the safety net.
+        let act = AgentEvent::ActivityStart {
+            agent_id: id,
+            tool_use_id: None,
+            detail: None,
+        };
+        assert_eq!(event_source(&scene, &act), None);
+
+        // Once registered, the same event resolves via the slot's source.
+        reducer.apply(&mut scene, ss, now, Transport::Jsonl);
+        assert_eq!(event_source(&scene, &act), Some("claude-code"));
+
+        // An EMPTY source on a carrying variant falls through to the slot.
+        let empty = AgentEvent::Identity {
+            agent_id: id,
+            source: String::new(),
+            session_id: "s".into(),
+            cwd: None,
+        };
+        assert_eq!(event_source(&scene, &empty), Some("claude-code"));
     }
 
     #[tokio::test(start_paused = true)]

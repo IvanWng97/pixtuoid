@@ -3,8 +3,8 @@
 //! CodeWhale (github.com/Hmbown/CodeWhale, the Rust line, a DeepSeek-V4 agent
 //! CLI+TUI) ships a CC-style shell-command hook system (`[[hooks.hooks]]` under
 //! a `[hooks]` table in `~/.codewhale/config.toml` / project `.codewhale/
-//! hooks.toml`); `pixtuoid install-hooks --target codewhale` registers the shim
-//! there. But CodeWhale's hooks DON'T hand the command a CC-shaped JSON payload
+//! hooks.toml`); connecting CodeWhale in the in-TUI Connection panel (`c`) registers
+//! the shim there. But CodeWhale's hooks DON'T hand the command a CC-shaped JSON payload
 //! on stdin — identity travels as `DEEPSEEK_*` ENV VARS (verified against
 //! `crates/tui/src/hooks.rs::HookContext::to_env_vars` @0.8.59, and a live
 //! capture 2026-06-12), and only `message_submit`/`turn_end`/`subagent_*` pass

@@ -37,6 +37,7 @@ kind = "dog"        # name omitted → "Office Dog"
 | Key | Purpose |
 |-----|---------|
 | `last-seen-version` | Tracks the highest version you've launched, so the "what's new" popup only fires once per upgrade. Pixtuoid overwrites this on every launch. |
+| `[sources]` | Per-agent-CLI connection state (`source-id = true/false`), written when you connect/disconnect a source in the in-TUI **Connection panel** (`c`). When a source has no entry, pixtuoid migrates a default on launch: connected if its hooks are already installed (or it has no hooks to install, like Antigravity), else disconnected. A disconnected source's characters are hidden even if its hooks/transcripts are still present. |
 
 ## Themes
 
@@ -80,4 +81,4 @@ and the full error is in the log file.
 
 Crashes are reported separately to `~/.cache/pixtuoid/crash.log`.
 
-Non-TUI commands (`--headless`, `install-hooks`, …) log to stderr directly.
+Non-TUI commands (`--headless`, `validate-pack`, …) log to stderr directly.

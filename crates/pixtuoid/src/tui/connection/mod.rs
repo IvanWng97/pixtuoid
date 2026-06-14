@@ -1,14 +1,18 @@
-//! The Connection panel: a modal listing every agent CLI with its hook-setup state
-//! (install/uninstall actionable) and its live-connection state. This module is
-//! the PURE model — no ratatui. The painter lives in `tui::widgets::connection`; the
-//! event-loop wiring lives in `tui::mod`.
+//! The Connection panel: a modal listing every agent CLI with its connection
+//! state (bound / unbound) and its live activity. This module is the PURE model
+//! — no ratatui. The painter lives in `tui::widgets::connection`; the event-loop
+//! wiring lives in `tui::mod`.
 //!
 //! Rows are the UNION of install targets and registry sources, keyed on the
 //! source id (`SourceDescriptor.name`, joined to an install target via
-//! `Target.core_source` — NOT `Target.name`, which differs for Claude). A
-//! source with no install target (Antigravity, JSONL-only) renders a
-//! `JsonlNoHooks` row where install/uninstall no-op.
+//! `Target.core_source` — NOT `Target.name`, which differs for Claude). A row's
+//! `state` is driven by the live connected-set (the persisted per-source intent),
+//! NOT by whether hooks happen to be installed: connecting a source opens its
+//! gate (characters appear); disconnecting closes it (characters walk out) AND,
+//! for target-bearing sources, removes its hooks. Users bind/unbind a source;
+//! they never think in terms of hooks vs JSONL.
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
@@ -18,17 +22,15 @@ use pixtuoid_core::state::SceneState;
 use crate::install::target::{self, Target};
 use crate::install::{InstallOutcome, InstallReport, UninstallOutcome, UninstallReport};
 
-/// Hook-setup state for one CLI row.
+/// Connection state for one CLI row — the single facet the toggle acts on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum HookState {
-    /// Managed pixtuoid hooks are present in the config.
-    On,
-    /// CLI detected, hooks absent.
-    Off,
-    /// CLI not detected on this machine.
+pub enum ConnState {
+    /// Bound: this source's events flow and its characters show. Toggle disconnects.
+    Connected,
+    /// Unbound: the gate is closed; no characters. Toggle connects.
+    Disconnected,
+    /// A target-bearing CLI that isn't installed on this machine — nothing to bind to.
     NoCli,
-    /// A source with no install target (Antigravity, JSONL-only) — nothing to install.
-    JsonlNoHooks,
 }
 
 /// One row in the Connection list = one agent CLI.
@@ -40,10 +42,11 @@ pub struct ConnectionRow {
     /// 2-char badge id (`cc`/`cx`/…), from the source descriptor.
     pub label_prefix: &'static str,
     pub display_name: &'static str,
-    pub hooks: HookState,
-    /// The config the hooks live in; `None` for JSONL/no-target rows.
+    pub state: ConnState,
+    /// The config the hooks live in; `None` for no-target (JSONL-only) rows.
     pub config_path: Option<PathBuf>,
-    /// The install target backing this row; `None` ⇒ actions no-op (Antigravity).
+    /// The install target backing this row; `None` ⇒ connect/disconnect is a
+    /// flag-only flip (Antigravity — no hooks to write).
     pub target: Option<&'static Target>,
 }
 
@@ -67,21 +70,21 @@ pub struct ConnectionUi {
     /// open/action) — a plain `usize` is sound precisely because the row set
     /// doesn't churn frame-to-frame (unlike the dashboard, which is AgentId-keyed).
     pub selected: usize,
-    /// Cached HOOK facet — rebuilt on open + after each action (filesystem
-    /// reads), NEVER per frame. The LIVE facet is recomputed per frame instead.
+    /// Cached CONNECTION facet — rebuilt on open + after each toggle (filesystem
+    /// reads + a connected-set read), NEVER per frame. The LIVE facet is
+    /// recomputed per frame instead.
     pub rows: Vec<ConnectionRow>,
-    /// `Some(row_idx)` ⇒ uninstall is armed on that row, awaiting y/n.
+    /// `Some(row_idx)` ⇒ a disconnect is armed on that row, awaiting y/n.
     pub confirm: Option<usize>,
     pub last_result: Option<String>,
 }
 
-/// Per-target filesystem facts, injected so `build_rows_from` is pure (mirrors
-/// `install::plan_targets` taking an injected `present` slice). `Some` exactly
-/// when the row has an install target.
+/// Per-target filesystem facts, injected so `build_rows_from` is pure (the FS
+/// reads — `is_present`/`default_config_path` — happen in `build_rows`). `Some`
+/// exactly when the row has an install target.
 #[derive(Debug, Clone)]
-pub struct HookFacts {
+pub struct RowFacts {
     pub present: bool,
-    pub installed: bool,
     pub config_path: Option<PathBuf>,
 }
 
@@ -91,7 +94,9 @@ pub struct RowInput {
     pub source_id: &'static str,
     pub label_prefix: &'static str,
     pub target: Option<&'static Target>,
-    pub facts: Option<HookFacts>,
+    pub facts: Option<RowFacts>,
+    /// Whether this source is in the live connected-set (the persisted intent).
+    pub connected: bool,
 }
 
 /// Title-case the one no-target source (the registry deliberately omits display
@@ -104,23 +109,22 @@ fn display_name_for(source_id: &'static str) -> &'static str {
 }
 
 /// Pure row builder over injected facts — the testable core of `build_rows`.
+/// A target-bearing CLI that isn't present is `NoCli` (nothing to bind to, even
+/// if a stale flag says connected); otherwise the connected-set is authoritative.
 pub fn build_rows_from(inputs: Vec<RowInput>) -> Vec<ConnectionRow> {
     inputs
         .into_iter()
         .map(|input| {
-            let (hooks, config_path) = match (&input.target, &input.facts) {
-                (Some(_), Some(f)) => {
-                    let hooks = if !f.present {
-                        HookState::NoCli
-                    } else if f.installed {
-                        HookState::On
-                    } else {
-                        HookState::Off
-                    };
-                    (hooks, f.config_path.clone())
-                }
-                // No install target (Antigravity) — or facts missing (defensive).
-                _ => (HookState::JsonlNoHooks, None),
+            let absent_cli = matches!(
+                (&input.target, &input.facts),
+                (Some(_), Some(f)) if !f.present
+            );
+            let state = if absent_cli {
+                ConnState::NoCli
+            } else if input.connected {
+                ConnState::Connected
+            } else {
+                ConnState::Disconnected
             };
             ConnectionRow {
                 source_id: input.source_id,
@@ -128,18 +132,18 @@ pub fn build_rows_from(inputs: Vec<RowInput>) -> Vec<ConnectionRow> {
                 display_name: input
                     .target
                     .map_or_else(|| display_name_for(input.source_id), |t| t.display_name),
-                hooks,
-                config_path,
+                state,
+                config_path: input.facts.and_then(|f| f.config_path),
                 target: input.target,
             }
         })
         .collect()
 }
 
-/// Build the cached hook-facet rows from the registry + install targets.
-/// Performs filesystem reads (`is_present`/`has_hooks`/`default_config_path`) —
-/// call on open + after each action, NEVER per frame.
-pub fn build_rows() -> Vec<ConnectionRow> {
+/// Build the cached connection-facet rows from the registry + install targets +
+/// the live connected-set. Performs filesystem reads (`is_present`/
+/// `default_config_path`) — call on open + after each toggle, NEVER per frame.
+pub fn build_rows(connected: &HashSet<String>) -> Vec<ConnectionRow> {
     use pixtuoid_core::source::registry::REGISTRY;
     let inputs = REGISTRY
         .iter()
@@ -149,9 +153,8 @@ pub fn build_rows() -> Vec<ConnectionRow> {
             // `by_name(d.name)` would miss it and render the flagship CLI as a
             // non-actionable JSONL row.
             let target = target::by_source(d.name);
-            let facts = target.map(|t| HookFacts {
+            let facts = target.map(|t| RowFacts {
                 present: target::is_present(t),
-                installed: crate::install::has_hooks(t),
                 config_path: (t.default_config_path)().ok(),
             });
             RowInput {
@@ -159,6 +162,7 @@ pub fn build_rows() -> Vec<ConnectionRow> {
                 label_prefix: d.label_prefix,
                 target,
                 facts,
+                connected: connected.contains(d.name),
             }
         })
         .collect();
@@ -211,51 +215,41 @@ pub fn move_selection(rows: &[ConnectionRow], sel: usize, delta: i32) -> usize {
     (sel as i32 + delta).clamp(0, rows.len() as i32 - 1) as usize
 }
 
-/// Detail-line hint when an action key lands on a row that can't be acted on.
+/// Detail-line hint when the toggle lands on a row that can't be acted on.
 pub fn no_action_hint(row: &ConnectionRow) -> String {
-    match row.hooks {
-        HookState::JsonlNoHooks => {
-            format!(
-                "{} connects via JSONL — no hooks to install",
-                row.display_name
-            )
-        }
-        HookState::NoCli => format!("{} not detected on this machine", row.display_name),
+    match row.state {
+        ConnState::NoCli => format!("{} not detected on this machine", row.display_name),
         _ => format!("nothing to do for {}", row.display_name),
     }
 }
 
-/// Render an `InstallReport` into the panel's one-line result string.
-pub fn format_install_result(r: &InstallReport, display_name: &str) -> String {
-    match r.outcome {
-        InstallOutcome::AlreadyUpToDate => format!("{display_name}: already up to date"),
-        InstallOutcome::Installed => {
-            let mut s = format!("\u{2713} {display_name} hooks installed");
-            if r.backup.is_some() {
-                s.push_str(" \u{00b7} backup saved");
-            }
-            s.push_str(&format!(" \u{00b7} start a new {} session", r.restart_noun));
-            if r.path_warning {
-                s.push_str(" \u{00b7} \u{26a0} pixtuoid-hook not on PATH");
-            }
-            s
+/// Render an `InstallReport` into the panel's one-line "connected" result.
+pub fn format_connect_result(r: &InstallReport, display_name: &str) -> String {
+    let mut s = match r.outcome {
+        InstallOutcome::AlreadyUpToDate | InstallOutcome::Installed => {
+            format!("\u{2713} {display_name} connected")
         }
+    };
+    if r.backup.is_some() {
+        s.push_str(" \u{00b7} backup saved");
     }
+    if r.path_warning {
+        s.push_str(" \u{00b7} \u{26a0} pixtuoid-hook not on PATH");
+    }
+    s
 }
 
-/// Render an `UninstallReport` into the panel's one-line result string.
-pub fn format_uninstall_result(r: &UninstallReport, display_name: &str) -> String {
-    match r.outcome {
-        UninstallOutcome::NothingToRemove => format!("{display_name}: nothing to remove"),
-        UninstallOutcome::Removed => {
-            let mut s = format!("\u{2713} {display_name} hooks removed");
-            if r.removed_backup.is_some() {
-                s.push_str(" \u{00b7} backup cleared");
-            }
-            s.push_str(&format!(" \u{00b7} start a new {} session", r.restart_noun));
-            s
+/// Render an `UninstallReport` into the panel's one-line "disconnected" result.
+pub fn format_disconnect_result(r: &UninstallReport, display_name: &str) -> String {
+    let mut s = match r.outcome {
+        UninstallOutcome::NothingToRemove | UninstallOutcome::Removed => {
+            format!("\u{2713} {display_name} disconnected")
         }
+    };
+    if r.removed_backup.is_some() {
+        s.push_str(" \u{00b7} backup cleared");
     }
+    s
 }
 
 #[cfg(test)]

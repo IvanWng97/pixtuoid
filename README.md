@@ -59,16 +59,15 @@ npm install -g pixtuoid
 ```
 <!-- install:end -->
 
-Then wire up your agent and launch:
+Then launch:
 
 ```bash
-pixtuoid install-hooks
 pixtuoid
 ```
 
-In another terminal, start a supported coding agent (Claude Code, Codex, Antigravity, Reasonix, …). A character walks in from the elevator within a second.
+Press `c` to open the **Connection** panel and connect your agent CLI (Claude Code, Codex, Antigravity, Reasonix, …) — pixtuoid wires up the integration for you, no separate install step. In another terminal, start that coding agent. A character walks in from the elevator within a second; disconnect in the same panel and it walks back out.
 
-**Keyboard shortcuts:** `q` quit · `p` pause · `t` themes · `Tab` agent dashboard · `?` help · `↑↓/jk/PgUp/PgDn` floors · click to pin tooltip
+**Keyboard shortcuts:** `q` quit · `p` pause · `c` connections · `t` themes · `Tab` agent dashboard · `?` help · `↑↓/jk/PgUp/PgDn` floors · click to pin tooltip
 
 **More ways to install** — Cargo, prebuilt binaries, and Debian `.deb`s — are on the **[install guide ↗](https://ivanwng97.github.io/pixtuoid/#install)**. Upgrading from `ascii-agents`? See [docs/MIGRATION.md](docs/MIGRATION.md).
 
@@ -110,7 +109,7 @@ _Also supported: [Antigravity CLI](https://github.com/antiGravity-AI/antigravity
 _\* experimental — limited testing, unsigned binaries._
 <!-- tools:end -->
 
-> Adding a new tool? Implement the [`Source` trait](#contributing) — or, for a hook-only CLI, just a hook decoder + an `install-hooks` target — then add a row to [`site/src/sources.json`](site/src/sources.json) (its `supported` set is pinned to the code by a test). One file, one channel, done.
+> Adding a new tool? Implement the [`Source` trait](#contributing) — or, for a hook-only CLI, just a hook decoder + an install `Target` — then add a row to [`site/src/sources.json`](site/src/sources.json) (its `supported` set is pinned to the code by a test). One file, one channel, done.
 
 ## Themes & Configuration
 

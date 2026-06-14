@@ -24,10 +24,10 @@ Migrating from `ascii-agents` (v0.3.x → v0.4.0) — rename, hooks, config path
    # or: cargo install pixtuoid pixtuoid-hook
    ```
 
-2. **Re-register hooks** (replaces old `ascii-agents-hook` entries automatically):
-   ```bash
-   pixtuoid install-hooks
-   ```
+2. **Re-register hooks**: launch `pixtuoid`, press `c` to open the Connection
+   panel, and connect your agent CLI (this replaces any old `ascii-agents-hook`
+   entries automatically). The old `pixtuoid install-hooks` subcommand is gone —
+   binding a source is now done live inside the TUI.
 
 3. **Migrate config** (optional — only if you customized `config.toml`):
    ```bash

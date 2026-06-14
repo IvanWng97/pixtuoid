@@ -35,10 +35,6 @@ chrono             = { version = "0.4", default-features = false, features = ["c
 # transitions and dim overlays vs naive sRGB linear blend.
 palette            = { version = "0.7", default-features = false, features = ["std"] }
 open               = "5"
-# inquire: interactive MultiSelect for picking install/uninstall targets. Uses
-# the crossterm backend (same 0.29 the TUI already pulls in — no second terminal
-# stack); default features dropped to skip fuzzy/macros/one-liners.
-inquire            = { version = "0.9", default-features = false, features = ["crossterm"] }
 
 # GetShortPathNameW for the Codex/Reasonix Windows hook path: resolve a
 # space/metacharacter-bearing install path to its DOS 8.3 short form so cmd.exe /C

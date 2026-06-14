@@ -1,8 +1,8 @@
 //! Reasonix source — HOOK-ONLY (no JSONL watcher).
 //!
 //! Reasonix (github.com/esengine/DeepSeek-Reasonix, the Go line, releases
-//! v1.0.0+) ships a CC-style hook system; `pixtuoid install-hooks --target
-//! reasonix` registers the shim in the GLOBAL `~/.reasonix/settings.json`
+//! v1.0.0+) ships a CC-style hook system; connecting Reasonix in the in-TUI
+//! Connection panel (`c`) registers the shim in the GLOBAL `~/.reasonix/settings.json`
 //! (project-scope hooks are trust-gated and would silently not fire). Hook
 //! payloads arrive on the shared hook socket stamped
 //! `_pixtuoid_source: "reasonix"`; `decoder::decode_hook_payload` dispatches

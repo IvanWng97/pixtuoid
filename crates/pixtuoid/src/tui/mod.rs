@@ -49,8 +49,8 @@ struct KeyCtx {
     theme_picker: Option<usize>,
     dashboard_open: bool,
     connection_open: bool,
-    /// Whether the Connection panel has an uninstall armed (awaiting y/n). Splits the
-    /// open-connection dispatch into the armed (y/n only) vs unarmed (nav/actions) sub-tiers.
+    /// Whether the Connection panel has a disconnect armed (awaiting y/n). Splits the
+    /// open-connection dispatch into the armed (y/n only) vs unarmed (nav/toggle) sub-tiers.
     connection_confirm: bool,
     n_themes: usize,
     n_floors: usize,
@@ -104,11 +104,10 @@ enum KeyAction {
     /// Connection list navigation.
     ConnectionUp,
     ConnectionDown,
-    /// `i`: install the selected CLI's hooks (immediate, idempotent).
-    ConnectionInstall,
-    /// `u`: arm the uninstall confirm on the selected CLI.
-    ConnectionArmUninstall,
-    /// `y` while armed: run the uninstall.
+    /// `Enter`: toggle the selected CLI's connection. Connecting is immediate;
+    /// disconnecting arms a confirm first (it removes hooks + walks characters out).
+    ConnectionToggle,
+    /// `y` while armed: run the disconnect.
     ConnectionConfirm,
     /// `n`/`Esc` while armed: cancel the arm (panel stays open).
     ConnectionCancelConfirm,
@@ -139,6 +138,64 @@ fn toggle_pin<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
             .cached_layout()
             .and_then(|layout| renderer::hit_test_from_tui(&floor_scene, layout, col, row));
         renderer.set_pinned_agent(hit);
+    }
+}
+
+/// Connect a source from the panel: PERSIST the intent FIRST (so it survives
+/// restart), then — only if that succeeded — open the live gate (`connected.set`
+/// → the reducer task's reconciler stops evicting it + its events flow) and, for
+/// target-bearing sources, install its hooks. If the persist fails we abort
+/// loudly and flip NOTHING: opening a gate the next restart can't remember would
+/// silently re-evict the sprites the user just connected. Returns the panel result.
+fn connect_source(
+    config_path: &std::path::Path,
+    connected: &crate::runtime::ConnectedSources,
+    source_id: &str,
+    target: Option<&'static crate::install::target::Target>,
+    display_name: &str,
+) -> String {
+    if let Err(e) = crate::config::save_source_connected(config_path, source_id, true) {
+        tracing::warn!("failed to persist connection for {source_id}: {e:#}");
+        return format!(
+            "{display_name}: connect failed \u{2014} couldn't save config \u{2014} {e:#}"
+        );
+    }
+    connected.set(source_id, true);
+    match target {
+        Some(t) => match crate::install::install_target(t, None, None) {
+            Ok(r) => connection::format_connect_result(&r, display_name),
+            Err(e) => format!("{display_name}: connect failed \u{2014} {e:#}"),
+        },
+        None => format!("\u{2713} {display_name} connected"),
+    }
+}
+
+/// Disconnect a source from the panel: PERSIST the intent FIRST, then — only if
+/// that succeeded — close the live gate (`connected.set(false)` → the reducer
+/// task's reconciler walks its characters out on the next tick) and remove its
+/// hooks. Same persist-or-abort rule as connect: a runtime hide the next restart
+/// reverts (the saved flag still says connected) is a lie, so on a persist
+/// failure flip NOTHING and report it. Returns the panel result.
+fn disconnect_source(
+    config_path: &std::path::Path,
+    connected: &crate::runtime::ConnectedSources,
+    source_id: &str,
+    target: Option<&'static crate::install::target::Target>,
+    display_name: &str,
+) -> String {
+    if let Err(e) = crate::config::save_source_connected(config_path, source_id, false) {
+        tracing::warn!("failed to persist disconnection for {source_id}: {e:#}");
+        return format!(
+            "{display_name}: disconnect failed \u{2014} couldn't save config \u{2014} {e:#}"
+        );
+    }
+    connected.set(source_id, false);
+    match target {
+        Some(t) => match crate::install::uninstall_target(t, None) {
+            Ok(r) => connection::format_disconnect_result(&r, display_name),
+            Err(e) => format!("{display_name}: disconnect failed \u{2014} {e:#}"),
+        },
+        None => format!("\u{2713} {display_name} disconnected"),
     }
 }
 
@@ -194,8 +251,7 @@ fn dispatch_key(code: KeyCode, mods: KeyModifiers, ctx: KeyCtx) -> KeyAction {
             (KeyCode::Esc, _) | (KeyCode::Char('c'), _) => KeyAction::ConnectionClose,
             (KeyCode::Up, _) | (KeyCode::Char('k'), _) => KeyAction::ConnectionUp,
             (KeyCode::Down, _) | (KeyCode::Char('j'), _) => KeyAction::ConnectionDown,
-            (KeyCode::Char('i'), _) => KeyAction::ConnectionInstall,
-            (KeyCode::Char('u'), _) => KeyAction::ConnectionArmUninstall,
+            (KeyCode::Enter, _) => KeyAction::ConnectionToggle,
             _ => KeyAction::None,
         };
     }
@@ -312,6 +368,10 @@ pub async fn run_tui(
     // The resolved hook socket (Unix) / named pipe (Windows) the daemon bound,
     // shown in the Connection panel's connection line.
     socket_path: std::path::PathBuf,
+    // The live connected-source set — the Connection panel's mutation seam: a
+    // toggle calls `connected.set(src, on)`, which the reducer task's reconciler
+    // observes (gate + graceful evict). Shared `Arc<Mutex<…>>` with the reducer.
+    connected: crate::runtime::ConnectedSources,
 ) -> Result<()> {
     let pack = embedded_pack::load_sprite_pack(pack_dir)?;
     let term = setup_terminal()?;
@@ -626,9 +686,11 @@ pub async fn run_tui(
                                 connection_ui.open = !connection_ui.open;
                                 connection_ui.confirm = None;
                                 if connection_ui.open {
-                                    // Cached hook facet: FS reads happen HERE (on
-                                    // open) + after each action, never per frame.
-                                    connection_ui.rows = connection::build_rows();
+                                    // Cached connection facet: FS reads + the
+                                    // connected-set snapshot happen HERE (on open)
+                                    // + after each toggle, never per frame.
+                                    connection_ui.rows =
+                                        connection::build_rows(&connected.snapshot());
                                     connection_ui.selected = connection::move_selection(
                                         &connection_ui.rows,
                                         connection_ui.selected,
@@ -653,47 +715,43 @@ pub async fn run_tui(
                                 );
                                 connection_ui.last_result = None;
                             }
-                            KeyAction::ConnectionInstall => {
+                            KeyAction::ConnectionToggle => {
                                 // Copy the fields out before any rebuild of `rows`
                                 // (which would invalidate a `&ConnectionRow` borrow).
                                 let action =
                                     connection_ui.rows.get(connection_ui.selected).map(|r| {
-                                        (r.target, r.display_name, connection::no_action_hint(r))
-                                    });
-                                if let Some((target, name, hint)) = action {
-                                    match target {
-                                        Some(t) => {
-                                            let res =
-                                                match crate::install::install_target(t, None, None)
-                                                {
-                                                    Ok(r) => {
-                                                        connection::format_install_result(&r, name)
-                                                    }
-                                                    Err(e) => {
-                                                        format!("{name}: install failed — {e:#}")
-                                                    }
-                                                };
-                                            connection_ui.last_result = Some(res);
-                                            connection_ui.rows = connection::build_rows();
-                                        }
-                                        None => connection_ui.last_result = Some(hint),
-                                    }
-                                }
-                            }
-                            KeyAction::ConnectionArmUninstall => {
-                                let info =
-                                    connection_ui.rows.get(connection_ui.selected).map(|r| {
                                         (
-                                            r.target.is_some()
-                                                && r.hooks == connection::HookState::On,
+                                            r.state,
+                                            r.target,
+                                            r.source_id,
+                                            r.display_name,
                                             connection::no_action_hint(r),
                                         )
                                     });
-                                if let Some((armable, hint)) = info {
-                                    if armable {
-                                        connection_ui.confirm = Some(connection_ui.selected);
-                                    } else {
-                                        connection_ui.last_result = Some(hint);
+                                if let Some((state, target, source_id, name, hint)) = action {
+                                    match state {
+                                        // Bound → arm the disconnect confirm (it
+                                        // removes hooks + walks characters out).
+                                        connection::ConnState::Connected => {
+                                            connection_ui.confirm = Some(connection_ui.selected);
+                                        }
+                                        // Unbound → connect immediately (additive,
+                                        // reversible): flip the flag, open the live
+                                        // gate, and install hooks for richer signal.
+                                        connection::ConnState::Disconnected => {
+                                            connection_ui.last_result = Some(connect_source(
+                                                &config_path,
+                                                &connected,
+                                                source_id,
+                                                target,
+                                                name,
+                                            ));
+                                            connection_ui.rows =
+                                                connection::build_rows(&connected.snapshot());
+                                        }
+                                        connection::ConnState::NoCli => {
+                                            connection_ui.last_result = Some(hint);
+                                        }
                                     }
                                 }
                             }
@@ -702,14 +760,17 @@ pub async fn run_tui(
                                     let action = connection_ui
                                         .rows
                                         .get(idx)
-                                        .map(|r| (r.target, r.display_name));
-                                    if let Some((Some(t), name)) = action {
-                                        let res = match crate::install::uninstall_target(t, None) {
-                                            Ok(r) => connection::format_uninstall_result(&r, name),
-                                            Err(e) => format!("{name}: uninstall failed — {e:#}"),
-                                        };
-                                        connection_ui.last_result = Some(res);
-                                        connection_ui.rows = connection::build_rows();
+                                        .map(|r| (r.target, r.source_id, r.display_name));
+                                    if let Some((target, source_id, name)) = action {
+                                        connection_ui.last_result = Some(disconnect_source(
+                                            &config_path,
+                                            &connected,
+                                            source_id,
+                                            target,
+                                            name,
+                                        ));
+                                        connection_ui.rows =
+                                            connection::build_rows(&connected.snapshot());
                                     }
                                 }
                                 connection_ui.confirm = None;
@@ -843,7 +904,7 @@ pub async fn run_tui(
 
 #[cfg(test)]
 mod dispatch_tests {
-    use super::{dispatch_key, KeyAction, KeyCtx};
+    use super::{connect_source, disconnect_source, dispatch_key, KeyAction, KeyCtx};
     use crossterm::event::{KeyCode, KeyModifiers};
 
     const NONE: KeyModifiers = KeyModifiers::NONE;
@@ -1144,7 +1205,7 @@ mod dispatch_tests {
     }
 
     #[test]
-    fn connection_tier_maps_nav_install_uninstall_close() {
+    fn connection_tier_maps_nav_toggle_close() {
         let s = KeyCtx {
             connection_open: true,
             ..ctx()
@@ -1162,14 +1223,14 @@ mod dispatch_tests {
             dispatch_key(KeyCode::Char('j'), NONE, s),
             KeyAction::ConnectionDown
         );
+        // Enter is the single connect/disconnect toggle (replaced i/u).
         assert_eq!(
-            dispatch_key(KeyCode::Char('i'), NONE, s),
-            KeyAction::ConnectionInstall
+            dispatch_key(KeyCode::Enter, NONE, s),
+            KeyAction::ConnectionToggle
         );
-        assert_eq!(
-            dispatch_key(KeyCode::Char('u'), NONE, s),
-            KeyAction::ConnectionArmUninstall
-        );
+        // The old install/uninstall keys are now unbound in the panel.
+        assert_eq!(dispatch_key(KeyCode::Char('i'), NONE, s), KeyAction::None);
+        assert_eq!(dispatch_key(KeyCode::Char('u'), NONE, s), KeyAction::None);
         assert_eq!(
             dispatch_key(KeyCode::Char('c'), NONE, s),
             KeyAction::ConnectionClose
@@ -1236,5 +1297,59 @@ mod dispatch_tests {
             ..ctx()
         };
         assert_eq!(dispatch_key(KeyCode::Tab, NONE, s), KeyAction::None);
+    }
+
+    // --- connect/disconnect persist-or-abort (no-target Antigravity path) ------
+
+    #[test]
+    fn connect_source_persists_then_flips_the_gate() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cfg = tmp.path().join("config.toml");
+        let connected = crate::runtime::ConnectedSources::default();
+
+        let res = connect_source(&cfg, &connected, "antigravity", None, "Antigravity");
+        assert!(res.contains("connected"), "result: {res}");
+        assert!(connected.is_connected("antigravity"), "gate opened");
+        let written = std::fs::read_to_string(&cfg).unwrap();
+        assert!(
+            written.contains("antigravity") && written.contains("true"),
+            "the flag was persisted: {written}"
+        );
+    }
+
+    #[test]
+    fn disconnect_source_persists_then_closes_the_gate() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cfg = tmp.path().join("config.toml");
+        let connected = crate::runtime::ConnectedSources::new(
+            std::iter::once("antigravity".to_string()).collect(),
+        );
+
+        let res = disconnect_source(&cfg, &connected, "antigravity", None, "Antigravity");
+        assert!(res.contains("disconnected"), "result: {res}");
+        assert!(!connected.is_connected("antigravity"), "gate closed");
+        let written = std::fs::read_to_string(&cfg).unwrap();
+        assert!(
+            written.contains("antigravity") && written.contains("false"),
+            "the flag was persisted: {written}"
+        );
+    }
+
+    #[test]
+    fn connect_source_aborts_without_flipping_the_gate_when_persist_fails() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        // A regular file used as a directory component → the config write's
+        // create-parent-dir fails → save_source_connected errs.
+        let blocker = tmp.path().join("not-a-dir");
+        std::fs::write(&blocker, "x").unwrap();
+        let cfg = blocker.join("config.toml");
+        let connected = crate::runtime::ConnectedSources::default();
+
+        let res = connect_source(&cfg, &connected, "antigravity", None, "Antigravity");
+        assert!(res.contains("failed"), "must report the failure: {res}");
+        assert!(
+            !connected.is_connected("antigravity"),
+            "a failed persist must NOT open the gate (else restart re-evicts)"
+        );
     }
 }

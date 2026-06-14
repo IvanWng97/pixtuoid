@@ -472,14 +472,14 @@ fn main() -> Result<()> {
     // Representative Connection-panel fixture (deterministic — no FS probes), so the
     // demo image is reproducible across machines.
     let (connection_rows, connection_live, connection_socket_line) = if args.connection {
-        use pixtuoid::tui::connection::{ConnectionRow, HookState, LiveInfo};
+        use pixtuoid::tui::connection::{ConnState, ConnectionRow, LiveInfo};
         use std::path::PathBuf;
         use std::time::Duration;
-        let mk = |source_id, label_prefix, display_name, hooks, cfg: Option<&str>| ConnectionRow {
+        let mk = |source_id, label_prefix, display_name, state, cfg: Option<&str>| ConnectionRow {
             source_id,
             label_prefix,
             display_name,
-            hooks,
+            state,
             config_path: cfg.map(PathBuf::from),
             target: None,
         };
@@ -488,36 +488,36 @@ fn main() -> Result<()> {
                 "claude-code",
                 "cc",
                 "Claude Code",
-                HookState::On,
+                ConnState::Connected,
                 Some("~/.claude/settings.json"),
             ),
             mk(
                 "codex",
                 "cx",
                 "Codex",
-                HookState::Off,
+                ConnState::Disconnected,
                 Some("~/.codex/config.toml"),
             ),
-            mk("reasonix", "rx", "Reasonix", HookState::NoCli, None),
+            mk("reasonix", "rx", "Reasonix", ConnState::NoCli, None),
             mk(
                 "codewhale",
                 "cw",
                 "CodeWhale",
-                HookState::On,
+                ConnState::Connected,
                 Some("~/.codewhale/config.toml"),
             ),
             mk(
                 "opencode",
                 "oc",
                 "opencode",
-                HookState::Off,
+                ConnState::Disconnected,
                 Some("~/.config/opencode/plugins/pixtuoid.ts"),
             ),
             mk(
                 "antigravity",
                 "ag",
                 "Antigravity",
-                HookState::JsonlNoHooks,
+                ConnState::Connected,
                 None,
             ),
         ];

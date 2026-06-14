@@ -24,8 +24,8 @@
 //!   command; `merge_install` appends the per-event suffix.
 //! - **`enabled = true`.** CodeWhale gates ALL hooks on `[hooks].enabled`
 //!   (default true, `hooks.rs::default_enabled`). We set it explicitly so a
-//!   user who had previously disabled hooks still gets the visualizer — running
-//!   `install-hooks` is an explicit opt-in (the silent-non-fire trap is worse
+//!   user who had previously disabled hooks still gets the visualizer —
+//!   connecting CodeWhale is an explicit opt-in (the silent-non-fire trap is worse
 //!   than re-enabling; cf. Reasonix's project-scope trust gate).
 //! - **`_pixtuoid` sentinel.** CodeWhale's `Hook` serde has no
 //!   `deny_unknown_fields` (verified @0.8.59), so the marker is ignored by

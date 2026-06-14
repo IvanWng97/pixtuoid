@@ -59,7 +59,7 @@ pub fn release_notes(version: &str) -> Option<&'static [&'static str]> {
         // brace would silently break if the indentation ever shifted.
         // [bump-inject-here]
         "0.7.0" => Some(&[
-            "Agents leave the moment they finish — instant exit detection (process watch + SubagentStop hooks); re-run `pixtuoid install-hooks` once to enable",
+            "Agents leave the moment they finish — instant exit detection (process watch + SubagentStop hooks); connect Claude Code in the Connection panel (press c) to enable",
             "Workflow fleets render right: instant seats on arrival, desks free in seconds, parent links survive worktree splits and revivals",
             "Attach mid-session and every live agent appears immediately — even idle or permission-parked ones",
             "Agent dashboard: Tab opens a foldable agent tree with per-CLI badges; Enter jumps floors (now up to 10)",
@@ -73,7 +73,7 @@ pub fn release_notes(version: &str) -> Option<&'static [&'static str]> {
         "0.6.1" => Some(&[
             "Windows support — native hook transport, installer, and release builds",
             "Install via npm — `npm i -g pixtuoid` on macOS, Linux & Windows",
-            "Reasonix sessions now visualized — re-run `pixtuoid install-hooks` to wire it",
+            "Reasonix sessions now visualized — connect it in the Connection panel (press c)",
             "Sharper agent activity — fewer ghost & duplicate sprites, and Codex stays active during web & tool search",
             "Diagnostics you can see — source-death footer warnings, config warnings on stderr, an always-on log file",
             "New project site — live demos, architecture & contributing docs, weather gallery",
@@ -86,26 +86,26 @@ pub fn release_notes(version: &str) -> Option<&'static [&'static str]> {
         "0.6.0" => Some(&[
             "Windows support — native hook transport, installer, and release builds",
             "Install via npm — `npm i -g pixtuoid` now works on macOS, Linux & Windows",
-            "Reasonix sessions now visualized — re-run `pixtuoid install-hooks` to wire it",
+            "Reasonix sessions now visualized — connect it in the Connection panel (press c)",
             "Sharper agent activity — fewer ghost & duplicate sprites, and Codex stays active during web & tool search",
             "Diagnostics you can see — source-death footer warnings, config warnings on stderr, an always-on log file",
             "New project site — live demos, architecture & contributing docs, weather gallery",
         ]),
         "0.4.0" => Some(&[
             "Renamed from ascii-agents to pixtuoid",
-            "Run `pixtuoid install-hooks` to update hooks",
+            "Reconnect your CLI in the Connection panel (press c) to update hooks",
             "New env vars: PIXTUOID_SOCKET/HOOK/LOG",
             "Flaky startup test fixed + 250ms rescan",
         ]),
         "0.4.1" => Some(&[
             "Per-floor boot capacity fixes invisible-agent edge case",
-            "install-hooks now strips legacy `_ascii_agents` entries again",
+            "Connecting a CLI now strips legacy `_ascii_agents` entries again",
             "Resize mid-slide lands on destination floor, not source",
             "Version popup URL no longer mis-clicks on narrow terminals",
             "Corrupted last_seen_version self-heals on next launch",
         ]),
         "0.5.0" => Some(&[
-            "Now visualizes Codex sessions too — re-run `pixtuoid install-hooks`",
+            "Now visualizes Codex sessions too — connect it in the Connection panel (press c)",
             "Office overhaul: unified furniture + smarter approach/seating pathfinding",
             "Glass meeting rooms, denser desk pods, day/night lighting",
             "Physics-grounded weather: storms, lightning, moonlight",

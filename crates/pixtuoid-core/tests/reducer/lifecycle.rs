@@ -6,7 +6,7 @@ use pixtuoid_core::state::reducer::{Reducer, B1_CASCADE_GRACE};
 use pixtuoid_core::state::{ActivityState, GlobalDeskIndex, SceneState};
 use pixtuoid_core::AgentId;
 
-use crate::start;
+use crate::{delegating_pair, start};
 
 #[test]
 fn session_start_creates_idle_slot_at_first_free_desk() {
@@ -1496,5 +1496,107 @@ fn hook_identity_desk_refusal_is_quiet() {
     assert!(
         scene.agents.is_empty(),
         "no desks — the registration must be quietly refused"
+    );
+}
+
+// --- reconcile_connected (Connection-panel DISCONNECT / the runtime sweep) --
+
+fn connected_set<const N: usize>(srcs: [&str; N]) -> std::collections::HashSet<String> {
+    srcs.iter().map(|s| s.to_string()).collect()
+}
+
+#[test]
+fn reconcile_connected_evicts_disconnected_sources_and_cascades_subtree() {
+    let mut scene = SceneState::uniform(8);
+    let mut reducer = Reducer::new();
+    let now = SystemTime::now();
+
+    // A claude-code parent + its subagent (same source), plus a codex root.
+    let (cc_parent, cc_child) = delegating_pair(&mut reducer, &mut scene, "x", now);
+    let cx = AgentId::from_transcript_path("/p/cx.jsonl");
+    reducer.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: cx,
+            source: "codex".into(),
+            session_id: "cx".into(),
+            cwd: PathBuf::from("/repo"),
+            parent_id: None,
+        },
+        now,
+        Transport::Hook,
+    );
+
+    // codex connected, claude-code NOT → cc walks out, cx stays.
+    reducer.reconcile_connected(&mut scene, &connected_set(["codex"]), now);
+
+    assert!(
+        scene.agents.get(&cc_parent).unwrap().exiting_at.is_some(),
+        "the disconnected source's agent exits"
+    );
+    assert!(
+        scene.agents.get(&cc_child).unwrap().exiting_at.is_some(),
+        "its subtree cascades out"
+    );
+    assert!(
+        scene.agents.get(&cx).unwrap().exiting_at.is_none(),
+        "a CONNECTED source is untouched"
+    );
+}
+
+#[test]
+fn reconcile_connected_is_idempotent_on_already_exiting() {
+    let mut scene = SceneState::uniform(4);
+    let mut reducer = Reducer::new();
+    let id = AgentId::from_transcript_path("/p/a.jsonl");
+    start(&mut reducer, &mut scene, id); // claude-code
+
+    let t1 = SystemTime::UNIX_EPOCH + Duration::from_secs(1000);
+    let none = connected_set([]); // nothing connected → evict everything
+    reducer.reconcile_connected(&mut scene, &none, t1);
+    let first = scene.agents.get(&id).unwrap().exiting_at;
+    assert!(first.is_some(), "first reconcile marks exiting");
+
+    // A second reconcile must NOT reset the walkout clock.
+    reducer.reconcile_connected(&mut scene, &none, t1 + Duration::from_secs(2));
+    assert_eq!(
+        scene.agents.get(&id).unwrap().exiting_at,
+        first,
+        "already-exiting slot's exiting_at is left untouched"
+    );
+}
+
+// The gate-slip hole the per-event check leaves open: an identity-less hook event
+// for an unknown id synthesizes a BLANK-source slot. Reconciling on the COMPLEMENT
+// of the connected set (not a registered-source list) must still evict it.
+#[test]
+fn reconcile_connected_evicts_a_blank_source_gate_slipper() {
+    let mut scene = SceneState::uniform(4);
+    let mut reducer = Reducer::new();
+    let now = SystemTime::now();
+    let blank = AgentId::from_transcript_path("/p/blank.jsonl");
+
+    // An identity-less Hook ActivityStart for an unknown id → blank-source slot.
+    reducer.apply(
+        &mut scene,
+        AgentEvent::ActivityStart {
+            agent_id: blank,
+            tool_use_id: None,
+            detail: None,
+        },
+        now,
+        Transport::Hook,
+    );
+    assert_eq!(
+        scene.agents.get(&blank).unwrap().source.as_ref(),
+        "",
+        "the synthesized slot is blank-source"
+    );
+
+    // A connected set listing real sources (but never the empty string) evicts it.
+    reducer.reconcile_connected(&mut scene, &connected_set(["claude-code", "codex"]), now);
+    assert!(
+        scene.agents.get(&blank).unwrap().exiting_at.is_some(),
+        "a blank-source gate-slipper is evicted within one reconcile tick"
     );
 }

@@ -1,4 +1,4 @@
-// @pixtuoid-opencode-plugin — managed by `pixtuoid install-hooks --target opencode`.
+// @pixtuoid-opencode-plugin — managed by pixtuoid (connect/disconnect opencode in pixtuoid's Connection panel: press c).
 //
 // opencode has no config-level shell hook, so pixtuoid integrates as a tiny
 // opencode plugin (auto-discovered from `<config>/plugins/*.ts`). This pipes the
@@ -8,8 +8,8 @@
 // self-bounds at 200ms, and every error here is swallowed — invariant #5).
 //
 // HOOK_PATH is baked in at install time (a JSON-encoded absolute path). Safe to
-// delete — `pixtuoid uninstall-hooks --target opencode` replaces this with a
-// removed-marker stub.
+// delete — disconnecting opencode in pixtuoid's Connection panel replaces this
+// with a removed-marker stub.
 const HOOK_PATH: string = {{HOOK_PATH_JSON}}
 
 // Only forward what pixtuoid maps. `message.part.updated` fires per token, so we

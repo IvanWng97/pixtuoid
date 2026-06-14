@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -35,6 +36,19 @@ pub struct AppConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub last_seen_version: Option<String>,
+    /// Per-source connection flags (registry source id → connected). An absent
+    /// id falls to the migrate-default in [`resolve_connected`] (connected iff
+    /// hooks are already installed; a source with no install target ⇒ connected;
+    /// else disconnected). The `c` Connection panel writes a flag on toggle. A
+    /// `[sources]` table; empty ⇒ omitted on save. Keep BEFORE `pets` — pets
+    /// must stay last (its array-of-tables serializes cleanest after all tables,
+    /// and a `[sources]` table written after `[[pets]]` would re-parent).
+    #[serde(
+        rename = "sources",
+        default,
+        skip_serializing_if = "BTreeMap::is_empty"
+    )]
+    pub sources: BTreeMap<String, bool>,
     /// The office's pets — one `[[pets]]` stanza each (`kind` + optional
     /// `name`). Absent = all kinds with default names; `pets = []` = no pets;
     /// an unknown `kind` is warn-skipped (non-fatal). Resolved into the runtime
@@ -189,6 +203,37 @@ pub fn save_version(path: &Path, version: &str) -> Result<()> {
     update_config(path, |doc| {
         doc["last-seen-version"] = toml_edit::value(version);
     })
+}
+
+/// Persist a single source's connection flag, auto-vivifying the `[sources]`
+/// table, through the comment/unknown-key-preserving `update_config` path. The
+/// `c` Connection panel calls this on every connect/disconnect toggle.
+pub fn save_source_connected(path: &Path, source_id: &str, connected: bool) -> Result<()> {
+    update_config(path, |doc| {
+        doc["sources"][source_id] = toml_edit::value(connected);
+    })
+}
+
+/// Resolve the runtime connected-set the office gates its sprites on. An
+/// explicit `[sources]` flag wins; an absent id MIGRATES: a source with an
+/// install target is connected iff its hooks are already installed, and a
+/// source with NO install target (e.g. Antigravity, which never had a connect
+/// step) defaults connected. `has_hooks` is injected — `Some(installed)` for a
+/// target-bearing source, `None` for a no-target source — so this stays pure +
+/// FS-free for tests (mirrors `plan_targets`' injected detection).
+pub fn resolve_connected(
+    config: &AppConfig,
+    has_hooks: impl Fn(&'static str) -> Option<bool>,
+) -> std::collections::HashSet<String> {
+    pixtuoid_core::source::REGISTERED_SOURCES
+        .iter()
+        .copied()
+        .filter(|src| match config.sources.get(*src) {
+            Some(&flag) => flag,
+            None => has_hooks(src).unwrap_or(true),
+        })
+        .map(String::from)
+        .collect()
 }
 
 /// Resolve the config `max-desks` into the runtime desk cap. `0` is treated
@@ -1095,6 +1140,103 @@ mod tests {
                 kind: Some("cat".into()),
                 name: None
             }])
+        );
+    }
+
+    // --- sources / connection flags -------------------------------------------
+
+    #[test]
+    fn sources_table_roundtrips_and_empty_is_omitted() {
+        let cfg: AppConfig =
+            toml::from_str("theme = \"normal\"\n[sources]\nclaude-code = false\ncodex = true\n")
+                .unwrap();
+        assert_eq!(cfg.sources.get("claude-code"), Some(&false));
+        assert_eq!(cfg.sources.get("codex"), Some(&true));
+        assert_eq!(cfg.sources.get("antigravity"), None);
+        // An empty map is omitted on serialize (skip_serializing_if).
+        let c = AppConfig {
+            theme: Some("normal".into()),
+            ..Default::default()
+        };
+        assert!(!toml::to_string(&c).unwrap().contains("[sources]"));
+    }
+
+    #[test]
+    fn resolve_connected_explicit_flag_wins_over_migrate() {
+        let mut cfg = AppConfig::default();
+        cfg.sources.insert("claude-code".into(), false);
+        // Hooks ARE installed everywhere, but the explicit `false` wins for cc.
+        let set = resolve_connected(&cfg, |_| Some(true));
+        assert!(!set.contains("claude-code"), "explicit false wins");
+        assert!(
+            set.contains("codex"),
+            "absent + hooks installed → connected"
+        );
+    }
+
+    #[test]
+    fn resolve_connected_migrate_defaults_both_sides() {
+        let cfg = AppConfig::default(); // no [sources] → everything migrates
+        let set = resolve_connected(&cfg, |src| match src {
+            "codex" => Some(true), // hooks installed → connected
+            "antigravity" => None, // no install target → connected
+            _ => Some(false),      // target-bearing, hooks absent → disconnected
+        });
+        assert!(set.contains("codex"), "hooks installed → connected");
+        assert!(set.contains("antigravity"), "no install target → connected");
+        assert!(!set.contains("claude-code"), "hooks absent → disconnected");
+        assert!(!set.contains("reasonix"), "hooks absent → disconnected");
+    }
+
+    // A newly-added source must self-gate on first boot: resolve_connected
+    // iterates the registry, so every REGISTERED_SOURCES entry is decided (here,
+    // all "installed" → all connected). A source added to the registry without a
+    // config flag can't silently fall through.
+    #[test]
+    fn resolve_connected_covers_every_registered_source() {
+        let cfg = AppConfig::default(); // no [sources] → all migrate
+        let set = resolve_connected(&cfg, |_| Some(true));
+        let expected: std::collections::HashSet<String> = pixtuoid_core::source::REGISTERED_SOURCES
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert_eq!(
+            set, expected,
+            "resolve_connected must decide every registered source"
+        );
+    }
+
+    #[test]
+    fn save_source_connected_roundtrips_and_preserves_other_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("config.toml");
+        std::fs::write(
+            &p,
+            "# hand-tuned\ntheme = \"normal\"\nfuture-key = 1\n\n[[pets]]\nkind = \"cat\"\n",
+        )
+        .unwrap();
+
+        save_source_connected(&p, "claude-code", false).unwrap();
+        let cfg = load(&p, &mut Vec::new());
+        assert_eq!(cfg.sources.get("claude-code"), Some(&false));
+        assert_eq!(cfg.theme.as_deref(), Some("normal"), "theme survives");
+        assert_eq!(
+            cfg.pets,
+            Some(vec![PetEntry {
+                kind: Some("cat".into()),
+                name: None
+            }]),
+            "pets survive"
+        );
+        let after = std::fs::read_to_string(&p).unwrap();
+        assert!(after.contains("# hand-tuned"), "comment survives");
+        assert!(after.contains("future-key = 1"), "unknown key survives");
+
+        // A second flip updates the same key in place.
+        save_source_connected(&p, "claude-code", true).unwrap();
+        assert_eq!(
+            load(&p, &mut Vec::new()).sources.get("claude-code"),
+            Some(&true)
         );
     }
 

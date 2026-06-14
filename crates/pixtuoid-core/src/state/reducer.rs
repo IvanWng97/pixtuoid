@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
@@ -276,6 +276,44 @@ impl Reducer {
             .retain(|id, _| scene.agents.contains_key(id));
         self.pending_b1_cascades
             .retain(|id, _| scene.agents.contains_key(id));
+    }
+
+    /// Gracefully evict every live agent of `source_id` — mark each exiting and
+    /// Reconcile the scene toward the `connected` set: mark exiting every
+    /// non-exiting slot whose source is NOT connected, then cascade to its subtree
+    /// (exactly as the `SessionEnd` arm does per agent), so the existing EXIT-walk
+    /// animation + `sweep_exited` GC remove them. Driven by the Connection panel's
+    /// DISCONNECT toggle (an explicit user action — the runtime calls this every
+    /// sweep tick with the live connected snapshot), NOT by transcript content, so
+    /// it does NOT violate the "content never drives lifecycle" invariant: it's the
+    /// same authority class as a SessionEnd hook.
+    ///
+    /// Keying on `!connected.contains(source)` — the COMPLEMENT of the connected
+    /// set — rather than iterating a known source list is load-bearing: it also
+    /// evicts a BLANK-source slot (`source == ""`) synthesized for an identity-less
+    /// hook event that slipped the per-event gate (an empty string is in no
+    /// connected set), closing the gate-slip hole the per-event check leaves open.
+    /// Already-exiting slots are left untouched (idempotent — a re-reconcile must
+    /// not reset their walkout clock). Leftover `active_tasks`/`gated_before_waiting`
+    /// entries are reaped by `sweep_exited` on GC, like any other exit.
+    pub fn reconcile_connected(
+        &self,
+        scene: &mut SceneState,
+        connected: &HashSet<String>,
+        now: SystemTime,
+    ) {
+        let ids: Vec<AgentId> = scene
+            .agents
+            .values()
+            .filter(|s| s.exiting_at.is_none() && !connected.contains(s.source.as_ref()))
+            .map(|s| s.agent_id)
+            .collect();
+        for id in ids {
+            if let Some(slot) = scene.agents.get_mut(&id) {
+                fsm::mark_exiting(slot, now);
+            }
+            scope::cascade_exit(scene, id, now);
+        }
     }
 
     pub fn apply(

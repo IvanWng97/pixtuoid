@@ -10,8 +10,8 @@
 //! TUI/`run` (an in-process worker server — no `opencode serve` needed). The
 //! plugin gets `Bun.$`, so it pipes the events pixtuoid maps into the existing
 //! `pixtuoid-hook` shim on stdin (plain mode, no `--event`, like CodeWhale's
-//! subagent hooks). `pixtuoid install-hooks --target opencode` DROPS that
-//! bundled plugin at `<opencode-config>/plugins/pixtuoid.ts` — opencode
+//! subagent hooks). Connecting opencode in the in-TUI Connection panel (`c`) DROPS
+//! that bundled plugin at `<opencode-config>/plugins/pixtuoid.ts` — opencode
 //! auto-discovers `<config>/plugins/*.{ts,js}`, so there is NO `opencode.jsonc`
 //! edit (see `install/opencode.rs`).
 //!

@@ -33,7 +33,7 @@ fn main() -> Result<()> {
     //     ("source died", decode failures) can surface. The default floor is
     //     `warn`; $RUST_LOG, $PIXTUOID_LOG, or --log-level raise/shape it.
     //     Crash reporting is handled separately by the panic hook.
-    //   Non-TUI (install-hooks, uninstall-hooks, --headless): stderr.
+    //   Non-TUI (--headless, validate-pack, init-pack): stderr.
     let tui_active = matches!(&cmd, Cmd::Run { headless, .. } if !*headless);
     let wants_verbose = matches!(log_level, "debug" | "trace");
     // The env var's VALUE is the log file path — an empty value would
@@ -114,6 +114,14 @@ fn main() -> Result<()> {
             let desk_cap = cli_max_desks.or(config::resolve_max_desks(&cfg, &mut cfg_warnings));
             let pack_dir = config::resolve_pack_dir(&cfg, pack_dir);
             let pets = config::resolve_pets(&cfg, &mut cfg_warnings);
+            // The connected-source set the office gates sprites on: explicit
+            // `[sources]` flags win; an absent flag migrates from the current
+            // install state (a target-bearing source connected iff its hooks are
+            // installed; a no-target source like Antigravity connected). The
+            // probe joins the registry id → install target via `by_source`.
+            let connected = config::resolve_connected(&cfg, |src| {
+                install::target::by_source(src).map(install::has_hooks)
+            });
             // Config problems must reach the user's eyes, not only the log
             // file (#87): print to stderr BEFORE the alternate screen takes
             // the terminal (visible again in scrollback after exit — the
@@ -135,28 +143,9 @@ fn main() -> Result<()> {
                 config_path: cfg_path,
                 theme,
                 pets,
+                connected,
             })
         }
-        Cmd::InstallHooks {
-            hook_path,
-            config,
-            target,
-            yes,
-        } => install::install(install::InstallArgs {
-            hook_path,
-            config,
-            target,
-            yes,
-        }),
-        Cmd::UninstallHooks {
-            config,
-            target,
-            yes,
-        } => install::uninstall(install::UninstallArgs {
-            config,
-            target,
-            yes,
-        }),
         Cmd::ValidatePack { pack_dir } => validate::validate_pack(&pack_dir),
         Cmd::InitPack { dest, force } => init_pack::init_pack(&dest, force),
     }

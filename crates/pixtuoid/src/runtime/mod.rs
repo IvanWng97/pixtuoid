@@ -8,8 +8,9 @@ mod driver;
 
 pub use driver::run;
 
+use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use pixtuoid_core::state::{ActivityState, MAX_FLOORS};
 use pixtuoid_core::SceneState;
@@ -45,6 +46,42 @@ pub struct RunConfig {
     pub config_path: PathBuf,
     pub theme: &'static crate::tui::theme::Theme,
     pub pets: Vec<crate::tui::pet::Pet>,
+    /// The resolved set of CONNECTED source ids (registry names). Seeded at boot
+    /// from `config::resolve_connected`; the runtime wraps it in a shared
+    /// [`ConnectedSources`] the reducer gate reads and the Connection panel
+    /// mutates. A disconnected source's events are dropped + its sprites evicted.
+    pub connected: HashSet<String>,
+}
+
+/// A live, shared set of connected source ids — the runtime mirror of the
+/// persisted `[sources]` flags. One writer (the Connection panel toggle), many
+/// readers (the reducer-task event gate + its per-tick reconcile sweep). On lock
+/// poison it recovers the set via `into_inner` (insert/remove/contains never
+/// panic, so the data is always valid — losing it would mass-evict the office).
+#[derive(Clone, Default)]
+pub struct ConnectedSources(Arc<Mutex<HashSet<String>>>);
+
+impl ConnectedSources {
+    pub fn new(initial: HashSet<String>) -> Self {
+        Self(Arc::new(Mutex::new(initial)))
+    }
+    fn guard(&self) -> std::sync::MutexGuard<'_, HashSet<String>> {
+        self.0.lock().unwrap_or_else(|e| e.into_inner())
+    }
+    pub fn is_connected(&self, source_id: &str) -> bool {
+        self.guard().contains(source_id)
+    }
+    pub fn snapshot(&self) -> HashSet<String> {
+        self.guard().clone()
+    }
+    pub fn set(&self, source_id: &str, connected: bool) {
+        let mut g = self.guard();
+        if connected {
+            g.insert(source_id.to_string());
+        } else {
+            g.remove(source_id);
+        }
+    }
 }
 
 /// Per-floor boot capacities derived from the real terminal size. Each floor
@@ -348,5 +385,17 @@ mod tests {
         assert!(cap_boot_capacities(base, Some(1)).iter().all(|&c| c <= 1));
         // No cap leaves the base untouched.
         assert_eq!(cap_boot_capacities(base, None), base);
+    }
+
+    #[test]
+    fn connected_sources_set_get_snapshot() {
+        let cs = ConnectedSources::new(HashSet::from(["claude-code".to_string()]));
+        assert!(cs.is_connected("claude-code"));
+        assert!(!cs.is_connected("codex"));
+        cs.set("codex", true);
+        assert!(cs.is_connected("codex"));
+        cs.set("claude-code", false);
+        assert!(!cs.is_connected("claude-code"));
+        assert_eq!(cs.snapshot(), HashSet::from(["codex".to_string()]));
     }
 }

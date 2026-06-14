@@ -11,15 +11,15 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
 use super::{borderless_panel, centered_in, to_color, truncate};
-use crate::tui::connection::{no_action_hint, ConnectionRow, HookState, LiveInfo};
+use crate::tui::connection::{no_action_hint, ConnState, ConnectionRow, LiveInfo};
 use crate::tui::theme::Theme;
 
 /// Popup width (clamped to the terminal by `centered_in`).
 const CONNECTION_POPUP_W: u16 = 66;
 /// Char budget for the display-name column (after the badge).
 const NAME_W: usize = 13;
-/// Char budget for the hooks-state column.
-const HOOKS_W: usize = 11;
+/// Char budget for the connection-state column.
+const CONN_W: usize = 15;
 
 #[allow(clippy::too_many_arguments)]
 pub(in crate::tui) fn paint_connection_panel(
@@ -51,7 +51,12 @@ pub(in crate::tui) fn paint_connection_panel(
     lines.push(Line::from(Span::styled(format!("  {socket_line}"), dim)));
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        format!("  {:<18}{:<width$}Live", "CLI", "Hooks", width = HOOKS_W),
+        format!(
+            "  {:<18}{:<width$}Live",
+            "CLI",
+            "Connection",
+            width = CONN_W
+        ),
         dim,
     )));
     for (i, row) in rows.iter().enumerate() {
@@ -64,7 +69,7 @@ pub(in crate::tui) fn paint_connection_panel(
     // config path > a no-action hint. Char-safe truncated to the panel width.
     let detail = if let Some(ci) = confirm {
         let name = rows.get(ci).map_or("", |r| r.display_name);
-        format!("\u{26a0} remove {name} hooks? (y/n)")
+        format!("\u{26a0} disconnect {name}? (y/n)")
     } else if let Some(res) = last_result {
         res.to_string()
     } else if let Some(row) = rows.get(selected) {
@@ -81,7 +86,7 @@ pub(in crate::tui) fn paint_connection_panel(
         dim,
     )));
     lines.push(Line::from(Span::styled(
-        "  j/k move \u{00b7} i install \u{00b7} u uninstall",
+        "  j/k move \u{00b7} enter toggle \u{00b7} c/esc close",
         dim,
     )));
 
@@ -89,7 +94,7 @@ pub(in crate::tui) fn paint_connection_panel(
 }
 
 /// One CLI row: a colored badge (never reversed), the name (tinted/reversed by
-/// selection), the hooks-setup column, and the live-connection column.
+/// selection), the connection-state column, and the live-activity column.
 fn connection_line(
     row: &ConnectionRow,
     live: &LiveInfo,
@@ -117,14 +122,13 @@ fn connection_line(
         Style::default()
     };
 
-    let (h_glyph, h_text, h_color) = match row.hooks {
-        HookState::On => ('\u{25cf}', "on", theme.ui.label_active),
-        HookState::Off => ('\u{25cb}', "off", theme.ui.label_idle),
-        HookState::NoCli => ('\u{2014}', "no CLI", theme.ui.label_idle),
-        HookState::JsonlNoHooks => ('\u{00b7}', "JSONL", theme.ui.label_idle),
+    let (c_glyph, c_text, c_color) = match row.state {
+        ConnState::Connected => ('\u{25cf}', "connected", theme.ui.label_active),
+        ConnState::Disconnected => ('\u{25cb}', "disconnected", theme.ui.label_idle),
+        ConnState::NoCli => ('\u{2014}', "no CLI", theme.ui.label_idle),
     };
-    // glyph + space (2) + text padded to HOOKS_W - 2.
-    let hooks_cell = format!("{h_glyph} {:<width$}", h_text, width = HOOKS_W - 2);
+    // glyph + space (2) + text padded to CONN_W - 2.
+    let conn_cell = format!("{c_glyph} {:<width$}", c_text, width = CONN_W - 2);
 
     let (l_glyph, l_text, l_color) = if live.dead {
         (
@@ -154,7 +158,7 @@ fn connection_line(
         ),
         Span::raw(" "),
         Span::styled(name_cell, base.fg(to_color(theme.ui.tooltip_text))),
-        Span::styled(hooks_cell, base.fg(to_color(h_color))),
+        Span::styled(conn_cell, base.fg(to_color(c_color))),
         Span::styled(format!("{l_glyph} {l_text}"), base.fg(to_color(l_color))),
     ])
 }
@@ -174,15 +178,15 @@ fn fmt_age(d: Duration) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tui::connection::{HookFacts, RowInput};
+    use crate::tui::connection::{RowFacts, RowInput};
     use crate::tui::theme::NORMAL;
 
-    fn row(source_id: &'static str, label_prefix: &'static str, hooks: HookState) -> ConnectionRow {
+    fn row(source_id: &'static str, label_prefix: &'static str, state: ConnState) -> ConnectionRow {
         ConnectionRow {
             source_id,
             label_prefix,
             display_name: "Name",
-            hooks,
+            state,
             config_path: None,
             target: None,
         }
@@ -190,7 +194,7 @@ mod tests {
 
     #[test]
     fn connection_line_badge_uses_source_color_and_is_never_reversed() {
-        let r = row("codex", "cx", HookState::Off);
+        let r = row("codex", "cx", ConnState::Disconnected);
         let line = connection_line(&r, &LiveInfo::default(), true, &NORMAL);
         let badge = &line.spans[1];
         assert_eq!(badge.style.fg, Some(to_color(NORMAL.source.codex)));
@@ -203,8 +207,8 @@ mod tests {
     }
 
     #[test]
-    fn connection_line_renders_hooks_and_live_text() {
-        let r = row("claude", "cc", HookState::On);
+    fn connection_line_renders_state_and_live_text() {
+        let r = row("claude", "cc", ConnState::Connected);
         let live = LiveInfo {
             agents: 2,
             last_event_age: Some(Duration::from_secs(3)),
@@ -213,14 +217,14 @@ mod tests {
         let line = connection_line(&r, &live, false, &NORMAL);
         let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(text.contains("[cc]"));
-        assert!(text.contains("on"));
+        assert!(text.contains("connected"));
         assert!(text.contains("2 agents"));
         assert!(text.contains("3s ago"));
     }
 
     #[test]
     fn connection_line_dead_transport_overrides_live_column() {
-        let r = row("codex", "cx", HookState::On);
+        let r = row("codex", "cx", ConnState::Connected);
         let live = LiveInfo {
             agents: 1,
             last_event_age: Some(Duration::from_secs(1)),
@@ -233,7 +237,7 @@ mod tests {
 
     #[test]
     fn connection_line_singular_vs_plural_agents() {
-        let r = row("claude", "cc", HookState::On);
+        let r = row("claude", "cc", ConnState::Connected);
         let one = connection_line(
             &r,
             &LiveInfo {
@@ -265,11 +269,11 @@ mod tests {
                 source_id: d.name,
                 label_prefix: d.label_prefix,
                 target: None,
-                facts: Some(HookFacts {
+                facts: Some(RowFacts {
                     present: true,
-                    installed: false,
                     config_path: None,
                 }),
+                connected: true,
             })
             .collect();
         for sr in build_rows_from(inputs) {

@@ -2176,7 +2176,7 @@ fn dashboard_popup_renders_labels_states_and_live_tool() {
 
 #[test]
 fn connection_panel_renders_both_facets_borderless() {
-    use crate::tui::connection::{ConnectionRow, HookState, LiveInfo};
+    use crate::tui::connection::{ConnState, ConnectionRow, LiveInfo};
     let mut r = build(120, 44, vec![]);
     let scene = scene_with(vec![], 16);
     let rows = vec![
@@ -2184,7 +2184,7 @@ fn connection_panel_renders_both_facets_borderless() {
             source_id: "claude",
             label_prefix: "cc",
             display_name: "Claude Code",
-            hooks: HookState::On,
+            state: ConnState::Connected,
             config_path: Some(std::path::PathBuf::from("~/.claude/settings.json")),
             target: None,
         },
@@ -2192,7 +2192,7 @@ fn connection_panel_renders_both_facets_borderless() {
             source_id: "antigravity",
             label_prefix: "ag",
             display_name: "Antigravity",
-            hooks: HookState::JsonlNoHooks,
+            state: ConnState::Disconnected,
             config_path: None,
             target: None,
         },
@@ -2240,14 +2240,14 @@ fn connection_panel_renders_both_facets_borderless() {
 
 #[test]
 fn connection_panel_armed_shows_confirm_prompt() {
-    use crate::tui::connection::{ConnectionRow, HookState, LiveInfo};
+    use crate::tui::connection::{ConnState, ConnectionRow, LiveInfo};
     let mut r = build(120, 44, vec![]);
     let scene = scene_with(vec![], 16);
     let rows = vec![ConnectionRow {
         source_id: "codex",
         label_prefix: "cx",
         display_name: "Codex",
-        hooks: HookState::On,
+        state: ConnState::Connected,
         config_path: Some(std::path::PathBuf::from("~/.codex/config.toml")),
         target: None,
     }];

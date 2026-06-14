@@ -53,30 +53,6 @@ pub enum Cmd {
         #[arg(long, default_value_t = false)]
         headless: bool,
     },
-    /// Install pixtuoid hooks into agent CLI config(s).
-    InstallHooks {
-        /// Empty/whitespace is rejected: an explicit override deserves a loud
-        /// answer — unfiltered, `""` wins the precedence, cwd-joins to the
-        /// current directory, and gets embedded as the hook with no warning.
-        #[arg(long, value_parser = parse_nonempty_path)]
-        hook_path: Option<PathBuf>,
-        /// Config file override (single target only; conflicts with --target all).
-        #[arg(long, alias = "settings")]
-        config: Option<PathBuf>,
-        #[arg(long, value_enum)]
-        target: Option<TargetName>,
-        #[arg(long, short = 'y')]
-        yes: bool,
-    },
-    /// Remove pixtuoid hook entries from agent CLI config(s).
-    UninstallHooks {
-        #[arg(long, alias = "settings")]
-        config: Option<PathBuf>,
-        #[arg(long, value_enum)]
-        target: Option<TargetName>,
-        #[arg(long, short = 'y')]
-        yes: bool,
-    },
     /// Validate a custom sprite pack directory.
     ValidatePack {
         /// Path to the pack directory (must contain pack.toml).
@@ -121,29 +97,6 @@ impl LogLevel {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
-pub enum TargetName {
-    Claude,
-    Codex,
-    Reasonix,
-    Codewhale,
-    Opencode,
-    All,
-}
-
-impl TargetName {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            TargetName::Claude => "claude",
-            TargetName::Codex => "codex",
-            TargetName::Reasonix => "reasonix",
-            TargetName::Codewhale => "codewhale",
-            TargetName::Opencode => "opencode",
-            TargetName::All => "all",
-        }
-    }
-}
-
 impl Cli {
     pub fn cmd_or_default(self) -> (LogLevel, Option<String>, Cmd) {
         let level = self.log_level;
@@ -171,18 +124,6 @@ fn parse_nonempty_path(s: &str) -> Result<PathBuf, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn empty_hook_path_is_a_hard_parse_error() {
-        // Unfiltered, an explicit `--hook-path ""` wins the override
-        // precedence, cwd-joins to the launch directory (which exists), and
-        // is embedded as the hook command with no warning at all.
-        for v in ["", "   "] {
-            let err =
-                Cli::try_parse_from(["pixtuoid", "install-hooks", "--hook-path", v]).unwrap_err();
-            assert_eq!(err.kind(), clap::error::ErrorKind::ValueValidation);
-        }
-    }
 
     #[test]
     fn empty_socket_is_a_hard_parse_error() {
@@ -247,16 +188,6 @@ mod tests {
     }
 
     #[test]
-    fn target_name_as_str_covers_all_arms() {
-        assert_eq!(TargetName::Claude.as_str(), "claude");
-        assert_eq!(TargetName::Codex.as_str(), "codex");
-        assert_eq!(TargetName::Reasonix.as_str(), "reasonix");
-        assert_eq!(TargetName::Codewhale.as_str(), "codewhale");
-        assert_eq!(TargetName::Opencode.as_str(), "opencode");
-        assert_eq!(TargetName::All.as_str(), "all");
-    }
-
-    #[test]
     fn cmd_or_default_returns_run_when_no_subcommand() {
         let cli = Cli {
             cmd: None,
@@ -279,10 +210,8 @@ mod tests {
     #[test]
     fn cmd_or_default_preserves_explicit_subcommand() {
         let cli = Cli {
-            cmd: Some(Cmd::UninstallHooks {
-                config: None,
-                target: None,
-                yes: false,
+            cmd: Some(Cmd::ValidatePack {
+                pack_dir: PathBuf::from("/some/pack"),
             }),
             log_level: LogLevel::Debug,
             theme: Some("cyberpunk".into()),
@@ -290,6 +219,6 @@ mod tests {
         let (level, theme, cmd) = cli.cmd_or_default();
         assert_eq!(level, LogLevel::Debug);
         assert_eq!(theme.as_deref(), Some("cyberpunk"));
-        assert!(matches!(cmd, Cmd::UninstallHooks { .. }));
+        assert!(matches!(cmd, Cmd::ValidatePack { .. }));
     }
 }

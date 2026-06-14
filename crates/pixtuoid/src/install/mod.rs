@@ -7,139 +7,20 @@ pub mod opencode;
 pub mod reasonix;
 pub mod target;
 
-use std::io::IsTerminal;
 use std::path::PathBuf;
 
 use anyhow::{bail, Context, Result};
 
-use crate::cli::TargetName;
 use target::{Target, BACKUP_SUFFIX};
 
-const NO_CLIS_MSG: &str =
-    "no supported CLIs detected; pass --target claude|codex|reasonix|codewhale|opencode|all";
-
-/// Filter a detection table to the targets that are present, dropping the flag.
-fn present_targets(rows: &[(&'static Target, bool)]) -> Vec<&'static Target> {
-    rows.iter().filter(|(_, p)| *p).map(|(t, _)| *t).collect()
-}
-
-pub struct InstallArgs {
-    pub hook_path: Option<PathBuf>,
-    pub config: Option<PathBuf>,
-    pub target: Option<TargetName>,
-    pub yes: bool,
-}
-
-pub struct UninstallArgs {
-    pub config: Option<PathBuf>,
-    pub target: Option<TargetName>,
-    pub yes: bool,
-}
-
-pub enum Plan {
-    Targets(Vec<&'static Target>),
-    NothingDetected,
-    Conflict(String),
-}
-
-/// Pure policy: decide which targets to act on. No filesystem, no stdin.
-/// `present` is the injected detection result; `explicit_config` is whether
-/// `--config` was passed (only valid for a single target).
-pub fn plan_targets(
-    requested: Option<TargetName>,
-    explicit_config: bool,
-    present: &[(&'static Target, bool)],
-    is_tty: bool,
-) -> Plan {
-    match requested {
-        Some(TargetName::All) => {
-            if explicit_config {
-                return Plan::Conflict(
-                    "--config applies to a single target; use --target claude|codex|reasonix|codewhale|opencode"
-                        .into(),
-                );
-            }
-            let chosen = present_targets(present);
-            if chosen.is_empty() {
-                Plan::NothingDetected
-            } else {
-                Plan::Targets(chosen)
-            }
-        }
-        // A single named target: resolve through the registry (`by_name` keeps the
-        // &'static Target lookup string-keyed). The miss arm is defensive — a
-        // registered ValueEnum variant always resolves.
-        Some(t) => match target::by_name(t.as_str()) {
-            Some(found) => Plan::Targets(vec![found]),
-            None => Plan::Conflict(format!("{} target not registered", t.as_str())),
-        },
-        None => {
-            // `--config`/`--settings` without `--target` is the legacy Claude-only
-            // contract (pre-multi-CLI scripts). The supplied path IS the target
-            // selection signal — `$HOME` detection is meaningless here — so default
-            // to Claude rather than coupling the explicit path to ambient detection.
-            if explicit_config {
-                return match target::by_name("claude") {
-                    Some(t) => Plan::Targets(vec![t]),
-                    None => Plan::Conflict("claude target not registered".into()),
-                };
-            }
-            let detected = present_targets(present);
-            match detected.len() {
-                0 => Plan::NothingDetected,
-                1 => Plan::Targets(detected), // TTY or not: a single detected target is safe
-                _ if is_tty => Plan::Targets(detected), // caller confirms interactively
-                _ => Plan::Conflict(
-                    "multiple CLIs detected; pass --target claude|codex|reasonix|codewhale|opencode|all"
-                        .into(),
-                ),
-            }
-        }
-    }
-}
-
-/// Parse a confirm answer: empty/Enter or y/yes → true; anything else → false.
-fn parse_confirm(answer: &str) -> bool {
-    let a = answer.trim().to_ascii_lowercase();
-    a.is_empty() || a == "y" || a == "yes"
-}
-
-/// Interpret a `read_line` result on the destructive confirm prompt.
-/// `read` is `Ok(bytes)` from `read_line` or `Err(())` for a read error.
-/// EOF (`Ok(0)`, e.g. Ctrl-D) and a read error both CANCEL (false) — only a
-/// genuinely-entered line (`Ok(n>0)`, including a bare Enter) takes
-/// `parse_confirm`'s default-yes. Pure so the EOF→cancel rule is unit-testable
-/// without injecting stdin.
-fn interpret_confirm_read(read: Result<usize, ()>, line: &str) -> bool {
-    match read {
-        Ok(0) | Err(()) => false,
-        Ok(_) => parse_confirm(line),
-    }
-}
-
-fn confirm(prompt: &str) -> bool {
-    use std::io::Write;
-    print!("{prompt} [Y/n] ");
-    let _ = std::io::stdout().flush();
-    let mut line = String::new();
-    let read = std::io::stdin().read_line(&mut line).map_err(|_| ());
-    interpret_confirm_read(read, &line)
-}
-
-fn detection() -> Vec<(&'static Target, bool)> {
-    target::TARGETS
-        .iter()
-        .map(|t| (*t, target::is_present(t)))
-        .collect()
-}
-
-/// Whether `t` is a candidate for the interactive uninstall picker. A dry-run
+/// Whether `t`'s config currently bears pixtuoid hooks — the migrate-default
+/// signal for an absent `[sources]` flag (see `config::resolve_connected`: a
+/// target-bearing source is connected iff its hooks are installed). A dry-run
 /// uninstall that would change the parsed doc means managed hooks are present.
-/// An absent/empty config is excluded; a config that is present but unreadable
-/// or unparseable is INCLUDED (true) so a hooks-bearing-but-malformed config
-/// still appears and the user sees the real error from `run_uninstall`, rather
-/// than a misleading "nothing to remove".
-pub(crate) fn has_hooks(t: &'static Target) -> bool {
+/// An absent/empty config is excluded; a config present but unreadable or
+/// unparseable is INCLUDED (true) so a hooks-bearing-but-malformed config still
+/// counts as connected.
+pub fn has_hooks(t: &'static Target) -> bool {
     // No resolvable default path (no home dir) → no config to bear hooks.
     let Ok(path) = (t.default_config_path)() else {
         return false;
@@ -149,180 +30,6 @@ pub(crate) fn has_hooks(t: &'static Target) -> bool {
         Ok(c) => (t.merge_uninstall)(&c).map(|o| o.changed).unwrap_or(true),
         Err(_) => true,
     }
-}
-
-/// Interactive checklist of `candidates`, all pre-checked. Returns the chosen
-/// targets, or `None` if the user cancelled (Esc). TTY-only — callers gate on it.
-fn select_targets(
-    prompt: &str,
-    candidates: &[&'static Target],
-) -> Result<Option<Vec<&'static Target>>> {
-    let options: Vec<&str> = candidates.iter().map(|t| t.display_name).collect();
-    let all: Vec<usize> = (0..options.len()).collect();
-    let chosen = inquire::MultiSelect::new(prompt, options)
-        .with_default(&all)
-        .raw_prompt_skippable()
-        .context("target selection prompt failed")?;
-    // Map back by INDEX, not display label — two targets sharing a display_name
-    // must not both get selected when only one is checked.
-    Ok(chosen.map(|sel| sel.into_iter().map(|opt| candidates[opt.index]).collect()))
-}
-
-/// Both stdin AND stdout must be a terminal before we run an interactive prompt:
-/// inquire reads keys via /dev/tty but renders to the output stream, so gating on
-/// stdin alone would let `install-hooks > log` render a garbled prompt into the
-/// redirected file. Output redirection ⇒ treat the run as non-interactive.
-fn interactive_terminal() -> bool {
-    std::io::stdin().is_terminal() && std::io::stdout().is_terminal()
-}
-
-/// True when the run is an interactive bare invocation — no explicit `--target`
-/// or `--config`, not `--yes`, on a TTY — i.e. the case the checklist serves.
-fn interactive_pick(
-    target: &Option<TargetName>,
-    config: &Option<PathBuf>,
-    yes: bool,
-    is_tty: bool,
-) -> bool {
-    target.is_none() && config.is_none() && !yes && is_tty
-}
-
-/// Shared interactive picker flow for install + uninstall: 0 candidates → print
-/// `empty_msg`; 1 → act directly (no list to pick from); >1 → checklist, where
-/// Esc/none-selected aborts. Keeps install's and uninstall's UX identical.
-fn run_interactive(
-    candidates: Vec<&'static Target>,
-    empty_msg: &str,
-    prompt: &str,
-    verb: &str,
-    op: impl Fn(&'static Target) -> Result<()>,
-) -> Result<()> {
-    let chosen = match candidates.len() {
-        0 => {
-            println!("{empty_msg}");
-            return Ok(());
-        }
-        1 => candidates,
-        _ => match select_targets(prompt, &candidates)? {
-            Some(sel) if !sel.is_empty() => sel,
-            Some(_) => {
-                println!("nothing selected");
-                return Ok(());
-            }
-            None => {
-                println!("aborted");
-                return Ok(());
-            }
-        },
-    };
-    run_each(&chosen, verb, op)
-}
-
-pub fn install(args: InstallArgs) -> Result<()> {
-    let is_tty = interactive_terminal();
-
-    // Interactive picker: detected CLIs as a checklist (all pre-checked) so the
-    // user installs into a subset instead of always all. Explicit `--target` /
-    // `--config` / `--yes` / non-interactive take the flag-driven path below.
-    if interactive_pick(&args.target, &args.config, args.yes, is_tty) {
-        let detected = present_targets(&detection());
-        return run_interactive(
-            detected,
-            NO_CLIS_MSG,
-            "Install pixtuoid hooks into",
-            "install",
-            |t| run_install(t, None, args.hook_path.clone()),
-        );
-    }
-
-    // Flag-driven path (explicit/--yes/non-interactive). Bare interactive
-    // multi-target is handled by the picker above, so install never needs a
-    // text confirm here — act directly.
-    let plan = plan_targets(args.target, args.config.is_some(), &detection(), is_tty);
-    let targets = resolve_plan(plan)?;
-    run_each(&targets, "install", |t| {
-        run_install(t, args.config.clone(), args.hook_path.clone())
-    })
-}
-
-pub fn uninstall(args: UninstallArgs) -> Result<()> {
-    let is_tty = interactive_terminal();
-
-    // Interactive picker: list only CLIs that ACTUALLY have pixtuoid hooks.
-    if interactive_pick(&args.target, &args.config, args.yes, is_tty) {
-        let installed: Vec<&'static Target> = target::TARGETS
-            .iter()
-            .copied()
-            .filter(|t| has_hooks(t))
-            .collect();
-        return run_interactive(
-            installed,
-            "no pixtuoid hooks found to remove",
-            "Remove pixtuoid hooks from",
-            "uninstall",
-            |t| run_uninstall(t, None),
-        );
-    }
-
-    // Flag-driven path. Destructive: confirm an explicit multi-target run (e.g.
-    // `--target all`) on a terminal — it rewrites configs + deletes backups.
-    let plan = plan_targets(args.target, args.config.is_some(), &detection(), is_tty);
-    let targets = resolve_plan(plan)?;
-    if needs_confirm(targets.len(), args.yes, is_tty)
-        && !confirm_targets("remove pixtuoid hooks from", &targets)
-    {
-        println!("aborted");
-        return Ok(());
-    }
-    run_each(&targets, "uninstall", |t| {
-        run_uninstall(t, args.config.clone())
-    })
-}
-
-fn resolve_plan(plan: Plan) -> Result<Vec<&'static Target>> {
-    match plan {
-        Plan::Targets(t) => Ok(t),
-        Plan::NothingDetected => {
-            println!("{NO_CLIS_MSG}");
-            Ok(vec![])
-        }
-        Plan::Conflict(msg) => bail!(msg),
-    }
-}
-
-/// Confirm a destructive multi-target run before acting. Only uninstall calls
-/// this (it rewrites configs + deletes backups); install's interactive case is
-/// handled by the picker, and its flag path never confirms. Skipped by `--yes`,
-/// a non-interactive terminal, or a single target.
-fn needs_confirm(n: usize, yes: bool, is_tty: bool) -> bool {
-    !yes && is_tty && n > 1
-}
-
-fn confirm_targets(verb: &str, targets: &[&'static Target]) -> bool {
-    let names: Vec<_> = targets.iter().map(|t| t.display_name).collect();
-    confirm(&format!("{verb} {}?", names.join(" + ")))
-}
-
-/// Run `op` for each target independently. A failure on one target is reported
-/// but does NOT abort the others — otherwise a malformed second config (e.g.
-/// `--target all` with bad TOML) could hide that the first target was already
-/// modified. Returns Err iff any target failed.
-fn run_each(
-    targets: &[&'static Target],
-    verb: &str,
-    op: impl Fn(&'static Target) -> Result<()>,
-) -> Result<()> {
-    let mut failed = 0usize;
-    for &t in targets {
-        if let Err(e) = op(t) {
-            eprintln!("error: {verb} for {} failed: {e:#}", t.display_name);
-            failed += 1;
-        }
-    }
-    if failed > 0 {
-        bail!("{failed} of {} target(s) failed", targets.len());
-    }
-    Ok(())
 }
 
 /// A Windows drive-relative path (`C:foo.exe` — a drive prefix but no root).
@@ -339,14 +46,14 @@ fn is_drive_relative(p: &std::path::Path) -> bool {
 /// `--hook-path` first, then the `PIXTUOID_HOOK` env override (empty =
 /// unset, see `io::nonempty_env`); both flow through the same
 /// absolutize-and-warn arm, and the returned bool reports that an explicit
-/// override was used so `run_install` EMBEDS it (the user pointed at a
+/// override was used so `install_target` EMBEDS it (the user pointed at a
 /// specific binary — writing the bare PATH-resolved name would discard their
 /// choice) and skips the PATH warning. Otherwise `locate` tries to find
 /// `pixtuoid-hook`; if that fails we only hard-error for targets that EMBED
 /// the path (`needs_resolved_binary`, e.g. Codex). Targets that write the
 /// bare name and rely on PATH (Claude) fall back to the bare name so a
-/// fresh-machine install still succeeds — the PATH warning in `run_install`
-/// covers the not-yet-on-PATH case. The env override is injected by the
+/// fresh-machine install still succeeds — the `path_warning` flag in the
+/// Connection panel covers the not-yet-on-PATH case. The env override is injected by the
 /// caller so the whole decision is testable without mutating process env.
 fn resolve_hook_binary_from(
     t: &Target,
@@ -405,14 +112,16 @@ fn resolve_hook_binary_from(
 /// Whether an install changed the config or was already current. Carried by
 /// `InstallReport` so both presenters (CLI stdout, TUI panel) render the same
 /// outcome from one core.
+#[derive(Debug)]
 pub enum InstallOutcome {
     Installed,
     AlreadyUpToDate,
 }
 
-/// Structured result of `install_target` — the data both the CLI `run_install`
-/// presenter and the in-TUI Connection panel render. NO I/O: the core does the
-/// ConfigLock round and returns this; presenters decide how to surface it.
+/// Structured result of `install_target` — the data the in-TUI Connection panel
+/// renders. NO I/O: the core does the ConfigLock round and returns this; the
+/// panel decides how to surface it.
+#[derive(Debug)]
 pub struct InstallReport {
     pub outcome: InstallOutcome,
     pub config_path: PathBuf,
@@ -426,7 +135,7 @@ pub struct InstallReport {
 }
 
 /// Install pixtuoid hooks into `t`'s config, returning a structured report.
-/// This is the pure core under the CLI `run_install` AND the TUI Connection panel —
+/// This is the pure core behind the TUI Connection panel's connect action —
 /// the ONLY install path. The ConfigLock round (read→merge→backup→write) is
 /// the load-bearing write authority (invariant #4); it stays intact here.
 pub fn install_target(
@@ -482,53 +191,15 @@ pub fn install_target(
     })
 }
 
-/// CLI presenter over `install_target`. Output is byte-identical to the
-/// pre-refactor `run_install` (warning first, then the outcome lines).
-fn run_install(t: &Target, config: Option<PathBuf>, hook_path: Option<PathBuf>) -> Result<()> {
-    let r = install_target(t, config, hook_path)?;
-    if r.path_warning {
-        println!("warn: `pixtuoid-hook` not found on PATH (checked against this shell).");
-        println!("      Install it on PATH, e.g. `cargo install --path crates/pixtuoid-hook`.");
-    }
-    match r.outcome {
-        InstallOutcome::AlreadyUpToDate => {
-            println!(
-                "[{}] already up to date — {}",
-                t.name,
-                r.config_path.display()
-            );
-        }
-        InstallOutcome::Installed => {
-            println!(
-                "ok: installed pixtuoid hooks into {} ({})",
-                r.config_path.display(),
-                t.display_name
-            );
-            if let Some(b) = r.backup {
-                println!(
-                    "backup: {} (removed automatically on uninstall-hooks)",
-                    b.display()
-                );
-            }
-            if let Some(note) = r.post_note {
-                println!("{note}");
-            }
-            println!(
-                "→ start a new {} session for this to take effect.",
-                r.restart_noun
-            );
-        }
-    }
-    Ok(())
-}
-
 /// Whether an uninstall removed managed entries or found nothing to remove.
+#[derive(Debug)]
 pub enum UninstallOutcome {
     Removed,
     NothingToRemove,
 }
 
 /// Structured result of `uninstall_target`.
+#[derive(Debug)]
 pub struct UninstallReport {
     pub outcome: UninstallOutcome,
     pub config_path: PathBuf,
@@ -539,7 +210,7 @@ pub struct UninstallReport {
 }
 
 /// Remove pixtuoid hooks from `t`'s config, returning a structured report. The
-/// pure core under the CLI `run_uninstall` AND the TUI Connection panel. Same lock
+/// pure core behind the TUI Connection panel's disconnect action. Same lock
 /// scope + the load-bearing "never rewrite/delete-backup on a semantic no-op"
 /// rule as before.
 pub fn uninstall_target(t: &Target, config: Option<PathBuf>) -> Result<UninstallReport> {
@@ -583,36 +254,6 @@ pub fn uninstall_target(t: &Target, config: Option<PathBuf>) -> Result<Uninstall
         removed_backup,
         restart_noun: t.restart_noun,
     })
-}
-
-/// CLI presenter over `uninstall_target`. Output is byte-identical to the
-/// pre-refactor `run_uninstall`.
-fn run_uninstall(t: &Target, config: Option<PathBuf>) -> Result<()> {
-    let r = uninstall_target(t, config)?;
-    match r.outcome {
-        UninstallOutcome::NothingToRemove => {
-            println!(
-                "[{}] no pixtuoid hooks found in {} — nothing to remove",
-                t.name,
-                r.config_path.display()
-            );
-        }
-        UninstallOutcome::Removed => {
-            println!(
-                "ok: removed pixtuoid hooks from {} ({})",
-                r.config_path.display(),
-                t.display_name
-            );
-            if let Some(b) = r.removed_backup {
-                println!("removed backup: {}", b.display());
-            }
-            println!(
-                "→ start a new {} session for this to take effect.",
-                r.restart_noun
-            );
-        }
-    }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -716,10 +357,6 @@ mod tests {
         presence_probe: None,
     };
 
-    fn present(claude: bool, fake: bool) -> Vec<(&'static Target, bool)> {
-        vec![(&CLAUDE, claude), (&FAKE, fake)]
-    }
-
     /// A platform-absolute fixture path: `/x/hook` is DRIVE-RELATIVE on
     /// Windows, so the absolutization would rewrite it there.
     fn abs_fixture(unix: &str, windows: &str) -> PathBuf {
@@ -759,7 +396,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn resolve_hook_binary_claude_falls_back_to_bare_name_when_unresolvable() {
-        // Regression: a fresh-machine `install-hooks` hard-failed when pixtuoid-hook
+        // Regression: a fresh-machine connect hard-failed when pixtuoid-hook
         // wasn't yet on PATH. Claude writes the bare name and relies on PATH, so an
         // unresolvable binary must fall back to the bare name (the PATH warning covers
         // the not-found case), NOT abort the install.
@@ -812,7 +449,7 @@ mod tests {
             "expected absolutized env path, got {got:?}"
         );
         assert!(got.ends_with("target/debug/pixtuoid-hook"));
-        // The env override is EXPLICIT: run_install embeds it (Claude/Unix
+        // The env override is EXPLICIT: install_target embeds it (Claude/Unix
         // included) instead of writing the bare PATH-resolved name, and the
         // PATH warning is skipped — same contract as --hook-path.
         assert!(explicit);
@@ -838,7 +475,7 @@ mod tests {
 
     #[test]
     fn empty_env_override_counts_as_unset_at_the_live_read() {
-        // io::nonempty_env is the live seam run_install reads PIXTUOID_HOOK
+        // io::nonempty_env is the live seam install_target reads PIXTUOID_HOOK
         // through: empty/whitespace must be unset (the #172 policy), so ""
         // never becomes an embedded "" command.
         let _env = crate::TEST_ENV_LOCK
@@ -912,210 +549,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn explicit_target_claude_ignores_detection() {
-        let p = plan_targets(
-            Some(TargetName::Claude),
-            false,
-            &present(false, false),
-            false,
-        );
-        assert!(matches!(p, Plan::Targets(ref t) if t.len() == 1 && t[0].name == "claude"));
-    }
-
-    #[test]
-    fn explicit_all_with_config_is_conflict() {
-        let p = plan_targets(Some(TargetName::All), true, &present(true, true), true);
-        assert!(matches!(p, Plan::Conflict(_)));
-    }
-
-    #[test]
-    fn no_target_tty_returns_detected() {
-        let p = plan_targets(None, false, &present(true, true), true);
-        assert!(matches!(p, Plan::Targets(ref t) if t.len() == 2));
-    }
-
-    #[test]
-    fn no_target_non_tty_single_claude_installs_claude() {
-        let p = plan_targets(None, false, &present(true, false), false);
-        assert!(matches!(p, Plan::Targets(ref t) if t.len() == 1 && t[0].name == "claude"));
-    }
-
-    #[test]
-    fn no_target_non_tty_multiple_present_is_conflict() {
-        let p = plan_targets(None, false, &present(true, true), false);
-        assert!(matches!(p, Plan::Conflict(_)));
-    }
-
-    #[test]
-    fn no_target_nothing_present_is_nothing_detected() {
-        let p = plan_targets(None, false, &present(false, false), false);
-        assert!(matches!(p, Plan::NothingDetected));
-    }
-
-    #[test]
-    fn confirm_answer_parses_default_yes() {
-        assert!(parse_confirm(""));
-        assert!(parse_confirm("y"));
-        assert!(parse_confirm("YES"));
-        assert!(!parse_confirm("n"));
-        assert!(!parse_confirm("no"));
-        assert!(!parse_confirm("garbage")); // anything not yes/empty → no
-    }
-
-    #[test]
-    fn interactive_pick_only_on_bare_tty() {
-        let none: Option<TargetName> = None;
-        let no_cfg: Option<PathBuf> = None;
-        // Bare (no --target/--config), not --yes, on a TTY → show the checklist.
-        assert!(interactive_pick(&none, &no_cfg, false, true));
-        // Any of: non-TTY, --yes, explicit --target, or --config → flag path.
-        assert!(!interactive_pick(&none, &no_cfg, false, false));
-        assert!(!interactive_pick(&none, &no_cfg, true, true));
-        assert!(!interactive_pick(
-            &Some(TargetName::Claude),
-            &no_cfg,
-            false,
-            true
-        ));
-        assert!(!interactive_pick(
-            &none,
-            &Some(PathBuf::from("/x")),
-            false,
-            true
-        ));
-    }
-
-    // --- confirm EOF/cancel (CR: Ctrl-D must abort the destructive uninstall) --
-
-    #[test]
-    fn confirm_read_eof_and_error_cancel_but_entered_line_decides() {
-        // EOF (Ctrl-D → Ok(0)) and a read error (Err) must CANCEL, even though
-        // the buffered line is empty (which parse_confirm would treat as yes).
-        assert!(!interpret_confirm_read(Ok(0), ""));
-        assert!(!interpret_confirm_read(Err(()), ""));
-        // A genuinely-entered empty line (bare Enter, Ok(1) for the newline)
-        // still takes the default-yes; an entered "n" is a no.
-        assert!(interpret_confirm_read(Ok(1), "\n"));
-        assert!(interpret_confirm_read(Ok(2), "y\n"));
-        assert!(!interpret_confirm_read(Ok(2), "n\n"));
-    }
-
-    // --- plan_targets branch coverage -----------------------------------------
-
-    #[test]
-    fn all_with_nothing_present_is_nothing_detected() {
-        let p = plan_targets(Some(TargetName::All), false, &present(false, false), false);
-        assert!(matches!(p, Plan::NothingDetected));
-    }
-
-    #[test]
-    fn all_with_both_present_returns_both() {
-        let p = plan_targets(Some(TargetName::All), false, &present(true, true), false);
-        assert!(matches!(p, Plan::Targets(ref t) if t.len() == 2));
-    }
-
-    #[test]
-    fn explicit_target_codex_resolves_to_codex() {
-        // The enum makes an unknown --target unrepresentable (clap rejects it),
-        // so the old string "unknown target" conflict path is gone; cover the
-        // other registered variant instead.
-        let p = plan_targets(Some(TargetName::Codex), false, &present(true, true), false);
-        assert!(matches!(p, Plan::Targets(ref t) if t.len() == 1 && t[0].name == "codex"));
-    }
-
-    // The enum and the registry must cover each other BOTH ways — same bridge
-    // pattern as core's `registry_covers_exactly_the_registered_sources`. A
-    // variant without a row hits the defensive "not registered" arm at runtime;
-    // a row without a variant makes its `--target <name>` unrepresentable at
-    // the CLI (clap rejects it) with no compile error — the silent way a new
-    // install target (e.g. reasonix) ships unreachable.
-    #[test]
-    fn target_name_enum_and_registry_cover_each_other() {
-        use clap::ValueEnum;
-        for v in TargetName::value_variants() {
-            if *v != TargetName::All {
-                assert!(
-                    target::by_name(v.as_str()).is_some(),
-                    "{v:?} has no Target row in target::TARGETS"
-                );
-            }
-        }
-        for t in target::TARGETS {
-            assert!(
-                TargetName::value_variants()
-                    .iter()
-                    .any(|v| v.as_str() == t.name),
-                "Target {:?} has no TargetName variant — `--target {}` would be unrepresentable",
-                t.name,
-                t.name
-            );
-        }
-    }
-
-    // --- resolve_plan ----------------------------------------------------------
-
-    // `Target` isn't Debug, so unwrap/unwrap_err on Result<Vec<&Target>> won't
-    // compile — match explicitly instead.
-    #[test]
-    fn resolve_plan_targets_passes_through() {
-        match resolve_plan(Plan::Targets(vec![&CLAUDE])) {
-            Ok(got) => {
-                assert_eq!(got.len(), 1);
-                assert_eq!(got[0].name, "claude");
-            }
-            Err(e) => panic!("expected Ok, got {e}"),
-        }
-    }
-
-    #[test]
-    fn resolve_plan_nothing_detected_is_ok_empty() {
-        match resolve_plan(Plan::NothingDetected) {
-            Ok(got) => assert!(got.is_empty()),
-            Err(e) => panic!("expected Ok(empty), got {e}"),
-        }
-    }
-
-    #[test]
-    fn resolve_plan_conflict_is_err() {
-        match resolve_plan(Plan::Conflict("boom".into())) {
-            Ok(_) => panic!("expected a Conflict to be an Err"),
-            Err(e) => assert!(e.to_string().contains("boom")),
-        }
-    }
-
-    // --- run_each --------------------------------------------------------------
-
-    #[test]
-    fn run_each_all_ok_returns_ok() {
-        let n = std::cell::Cell::new(0);
-        run_each(&[&FAKE, &FAKE2], "install", |_| {
-            n.set(n.get() + 1);
-            Ok(())
-        })
-        .unwrap();
-        assert_eq!(n.get(), 2, "op ran for each target");
-    }
-
-    #[test]
-    fn run_each_reports_failed_count_and_bails() {
-        let err = run_each(&[&FAKE, &FAKE2], "install", |_| anyhow::bail!("kaboom")).unwrap_err();
-        assert!(
-            err.to_string().contains("2 of 2 target(s) failed"),
-            "got: {err}"
-        );
-    }
-
-    // --- needs_confirm / confirm_targets format -------------------------------
-
-    #[test]
-    fn needs_confirm_only_multi_target_interactive_no_yes() {
-        assert!(needs_confirm(2, false, true));
-        assert!(!needs_confirm(1, false, true)); // single target
-        assert!(!needs_confirm(2, true, true)); // --yes
-        assert!(!needs_confirm(2, false, false)); // non-tty
-    }
-
     // --- has_hooks arms --------------------------------------------------------
 
     #[test]
@@ -1149,56 +582,16 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
-    // --- run_interactive 0/1-candidate arms (no TTY needed) -------------------
+    // --- install_target: CLAUDE sentinel write + backup ----------------------
 
     #[test]
-    fn run_interactive_zero_candidates_prints_and_skips_op() {
-        let ran = std::cell::Cell::new(false);
-        run_interactive(vec![], "nothing here", "prompt", "install", |_| {
-            ran.set(true);
-            Ok(())
-        })
-        .unwrap();
-        assert!(!ran.get(), "op must NOT run when there are no candidates");
-    }
-
-    #[test]
-    fn run_interactive_single_candidate_runs_op_once() {
-        let count = std::cell::Cell::new(0);
-        run_interactive(vec![&FAKE], "nothing here", "prompt", "install", |_| {
-            count.set(count.get() + 1);
-            Ok(())
-        })
-        .unwrap();
-        assert_eq!(
-            count.get(),
-            1,
-            "single candidate acts directly, no checklist"
-        );
-    }
-
-    // --- run_install: FAKE up-to-date + CLAUDE sentinel write + backup --------
-
-    #[test]
-    fn run_install_fake_target_is_up_to_date_noop() {
-        // FAKE.merge_install reports changed=false → the up-to-date branch (no
-        // write, no backup). needs_path_warning=false avoids any PATH coupling.
-        // A tempdir path (not /nonexistent/...): run_install locks BEFORE the
-        // read, and the lock file needs a creatable parent.
-        let tmp = tempfile::TempDir::new().unwrap();
-        let cfg = tmp.path().join("fake.toml");
-        run_install(&FAKE, Some(cfg.clone()), None).unwrap();
-        assert!(!cfg.exists(), "the up-to-date branch never writes");
-    }
-
-    #[test]
-    fn run_install_claude_writes_sentinel_and_backs_up() {
+    fn install_target_claude_writes_sentinel_and_backs_up() {
         let tmp = tempfile::TempDir::new().unwrap();
         let cfg = tmp.path().join("settings.json");
         std::fs::write(&cfg, "{}\n").unwrap(); // existing content → triggers a backup
 
         // Explicit hook_path short-circuits resolution (no host PATH dependency).
-        run_install(
+        install_target(
             &CLAUDE,
             Some(cfg.clone()),
             Some(PathBuf::from("/fake/pixtuoid-hook")),
@@ -1214,7 +607,7 @@ mod tests {
         );
 
         // Second install is a semantic no-op → already-up-to-date branch.
-        run_install(
+        install_target(
             &CLAUDE,
             Some(cfg.clone()),
             Some(PathBuf::from("/fake/pixtuoid-hook")),
@@ -1225,14 +618,13 @@ mod tests {
     // --- the read→merge→write lock (#7) ----------------------------------------
 
     #[test]
-    fn run_install_fails_fast_while_the_config_lock_is_held() {
+    fn install_target_fails_fast_while_the_config_lock_is_held() {
         // Pins lock-before-read: even the up-to-date NO-OP path (which never
         // reaches the write) must refuse to run while another pixtuoid holds
         // the lock — we can't even safely read/decide mid-flight of a writer.
-        // (Pre-fix this succeeded: only write_config_atomic locked.)
         let tmp = tempfile::TempDir::new().unwrap();
         let cfg = tmp.path().join("settings.json");
-        run_install(
+        install_target(
             &CLAUDE,
             Some(cfg.clone()),
             Some(PathBuf::from("/fake/pixtuoid-hook")),
@@ -1240,7 +632,7 @@ mod tests {
         .unwrap();
 
         let _guard = io::lock_config(&cfg).unwrap();
-        let err = run_install(
+        let err = install_target(
             &CLAUDE,
             Some(cfg.clone()),
             Some(PathBuf::from("/fake/pixtuoid-hook")),
@@ -1250,10 +642,10 @@ mod tests {
     }
 
     #[test]
-    fn run_uninstall_fails_fast_while_the_config_lock_is_held() {
+    fn uninstall_target_fails_fast_while_the_config_lock_is_held() {
         let tmp = tempfile::TempDir::new().unwrap();
         let cfg = tmp.path().join("settings.json");
-        run_install(
+        install_target(
             &CLAUDE,
             Some(cfg.clone()),
             Some(PathBuf::from("/fake/pixtuoid-hook")),
@@ -1261,52 +653,21 @@ mod tests {
         .unwrap();
 
         let _guard = io::lock_config(&cfg).unwrap();
-        let err = run_uninstall(&CLAUDE, Some(cfg.clone())).unwrap_err();
+        let err = uninstall_target(&CLAUDE, Some(cfg.clone())).unwrap_err();
         assert!(err.to_string().contains("could not lock"), "got: {err:#}");
     }
 
     #[test]
-    fn run_uninstall_absent_config_creates_no_dirs_or_lock() {
-        // The nothing-to-remove decision happens BEFORE locking: materializing
-        // the parent dir (e.g. ~/.reasonix) on a no-op would flip that
-        // target's presence probe.
-        let tmp = tempfile::TempDir::new().unwrap();
-        let cfg = tmp.path().join("missing").join("settings.json");
-        run_uninstall(&CLAUDE, Some(cfg.clone())).unwrap();
-        assert!(
-            !cfg.parent().unwrap().exists(),
-            "a no-op uninstall must leave no side effects"
-        );
-    }
-
-    // --- run_uninstall: FAKE2 changed-path write + remove-backup --------------
-
-    #[test]
-    fn run_uninstall_fake2_changed_writes_and_removes_backup() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let cfg = tmp.path().join("config.toml");
-        std::fs::write(&cfg, "model = \"x\"\n").unwrap(); // non-empty → changed=true
-        let bak = tmp.path().join("config.toml.pixtuoid.bak");
-        std::fs::write(&bak, "backup").unwrap();
-
-        run_uninstall(&FAKE2, Some(cfg.clone())).unwrap();
-
-        assert!(
-            !bak.exists(),
-            "the backup is removed on a changing uninstall"
-        );
-    }
-
-    #[test]
-    fn run_uninstall_fake_unchanged_is_noop() {
-        // FAKE.merge_uninstall reports changed=false → the semantic no-op branch.
+    fn uninstall_target_unchanged_preserves_backup() {
+        // FAKE.merge_uninstall reports changed=false → the semantic no-op branch
+        // must NOT delete the backup (the user's only recovery path).
         let tmp = tempfile::TempDir::new().unwrap();
         let cfg = tmp.path().join("config.toml");
         std::fs::write(&cfg, "anything\n").unwrap();
         let bak = tmp.path().join("config.toml.pixtuoid.bak");
         std::fs::write(&bak, "backup").unwrap();
 
-        run_uninstall(&FAKE, Some(cfg.clone())).unwrap();
+        uninstall_target(&FAKE, Some(cfg.clone())).unwrap();
 
         assert!(bak.exists(), "a no-op uninstall must NOT delete the backup");
     }
@@ -1382,5 +743,51 @@ mod tests {
             !missing.parent().unwrap().exists(),
             "a no-op uninstall leaves no dirs"
         );
+    }
+
+    // Per-target end-to-end round-trip through the REAL install_target/
+    // uninstall_target (each target's merge + the shared ConfigLock write),
+    // replacing the per-target coverage the deleted CLI integration suite
+    // (tests/install.rs) gave — now driven straight against the cores the
+    // Connection panel calls, no CLI needed. Covers all 5 targets' formats:
+    // Claude JSON, Codex/CodeWhale TOML, Reasonix flat-JSON, opencode TS plugin.
+    #[test]
+    fn install_target_round_trips_every_registered_target() {
+        for t in target::TARGETS {
+            let tmp = tempfile::TempDir::new().unwrap();
+            let cfg = tmp.path().join("cfg");
+            let hook = || Some(PathBuf::from("/fake/pixtuoid-hook"));
+
+            let r = install_target(t, Some(cfg.clone()), hook()).unwrap();
+            assert!(
+                matches!(r.outcome, InstallOutcome::Installed),
+                "{}: first install must write hooks",
+                t.name
+            );
+            assert!(cfg.exists(), "{}: install wrote a config", t.name);
+
+            // Idempotent: a second install over our own output is a semantic no-op.
+            let r2 = install_target(t, Some(cfg.clone()), hook()).unwrap();
+            assert!(
+                matches!(r2.outcome, InstallOutcome::AlreadyUpToDate),
+                "{}: re-install must be a no-op (sentinel idempotency)",
+                t.name
+            );
+
+            // Uninstall removes the managed entries...
+            let u = uninstall_target(t, Some(cfg.clone())).unwrap();
+            assert!(
+                matches!(u.outcome, UninstallOutcome::Removed),
+                "{}: uninstall must remove the managed entries",
+                t.name
+            );
+            // ...and is itself idempotent.
+            let u2 = uninstall_target(t, Some(cfg.clone())).unwrap();
+            assert!(
+                matches!(u2.outcome, UninstallOutcome::NothingToRemove),
+                "{}: re-uninstall must find nothing to remove",
+                t.name
+            );
+        }
     }
 }
