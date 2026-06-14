@@ -91,8 +91,10 @@ pub(in crate::tui) fn paint_connection_panel(
     };
     // The detail line always shows the SELECTED row's content (path / hint), so
     // it scrolls (ping-pong) when it overflows — same focused-row treatment as
-    // the selected list row's cells.
-    let detail_w = inner.width.saturating_sub(2) as usize;
+    // the selected list row's cells. Width budget reserves BOTH the 2-space left
+    // indent below AND a symmetric 2-col right margin (so a full-width scroll
+    // doesn't run flush to the panel edge — left/right padding stays balanced).
+    let detail_w = inner.width.saturating_sub(4) as usize;
     lines.push(Line::from(Span::styled(
         format!("  {}", marquee_window(&detail, detail_w, now)),
         dim,
