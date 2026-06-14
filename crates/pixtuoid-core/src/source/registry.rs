@@ -22,7 +22,7 @@ use serde_json::Value;
 
 use crate::source::jsonl::LineDecoder;
 use crate::source::{
-    antigravity, claude_code, codewhale, codex, copilot, opencode, reasonix, AgentEvent,
+    antigravity, claude_code, codewhale, codex, copilot, cursor, opencode, reasonix, AgentEvent,
 };
 
 /// How the shared hook decoder derives the AgentId for this source. Moot for
@@ -141,6 +141,7 @@ pub const REGISTRY: &[SourceDescriptor] = &[
     CODEWHALE,
     OPENCODE,
     COPILOT,
+    CURSOR,
 ];
 
 /// Linear scan — at most a handful of entries, called on slot creation and
@@ -324,6 +325,40 @@ const COPILOT: SourceDescriptor = SourceDescriptor {
     },
 };
 
+/// HOOK-ONLY: Cursor CLI (`cursor-agent`) has no passively-observable transcript
+/// — its `--output-format stream-json` NDJSON is per-invocation stdout (pixtuoid
+/// never spawns the agent) and its on-disk sessions are SQLite, not a tailable
+/// JSONL. The reachable seam is Cursor Hooks (`~/.cursor/hooks.json`). The hook
+/// envelope reuses CC's `hook_event_name` field NAME but with camelCase values
+/// and no usable session id in CLI mode, so the custom decoder claims every
+/// event and keys on cwd (`source/cursor.rs`). Session-only: subagent linkage
+/// fires no CLI hook and is absent from every other surface (a proven upstream
+/// absence; drift-watched).
+const CURSOR: SourceDescriptor = SourceDescriptor {
+    name: cursor::SOURCE_NAME,
+    label_prefix: "cu",
+    line_decoder: None,
+    hook: HookDecoding {
+        id_key: IdKey::TranscriptPathThenSessionId, // inert: custom claims all
+        custom: Some(cursor::decode_cursor_hook_custom),
+    },
+    caps: SourceCaps {
+        // Antigravity profile: `sessionEnd` is NOT confirmed firing in the CLI,
+        // `stop` is turn-end not session-end, and no PID is exposed — so a
+        // closed session has no exit signal of record and falls to the generic
+        // stale-sweep.
+        has_exit_signal: false,
+        // No UserPromptSubmit-class event re-emits `sessionStart` mid-session, so
+        // a stale-swept session does NOT walk back in — combined with the missing
+        // exit signal this keeps the LONG idle window (short_idle_reap == false,
+        // the Antigravity shape), never the Codex short-idle reaper.
+        resurrects_on_prompt: false,
+        // No delegation is rendered (session-only), so there is no Delegating
+        // slot to retain.
+        delegations_are_hook_silent: false,
+    },
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -372,9 +407,10 @@ mod tests {
         assert_eq!(CODEWHALE.name, codewhale::SOURCE_NAME);
         assert_eq!(OPENCODE.name, opencode::SOURCE_NAME);
         assert_eq!(COPILOT.name, copilot::SOURCE_NAME);
+        assert_eq!(CURSOR.name, cursor::SOURCE_NAME);
         // Hand-enumerated above — the len pin turns "forgot the new row's
         // assert" from a silent gap into a loud failure.
-        assert_eq!(REGISTRY.len(), 7, "new row? add its name-pin assert above");
+        assert_eq!(REGISTRY.len(), 8, "new row? add its name-pin assert above");
     }
 
     #[test]

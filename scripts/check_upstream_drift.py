@@ -36,6 +36,11 @@ and compares against the live upstream:
                           @github/copilot session-events JSON schema (unpkg)
                           (one-directional: Copilot emits ~100 event types and we
                           map ~10 by design, so only a VANISHED depended type alarms)
+  * Cursor hooks       -> the camelCase `hook_event_name`s the decoder maps (the
+                          `match event` block in crates/pixtuoid-core/src/source/cursor.rs)
+                          vs the hook-event names on cursor.com/docs/hooks
+                          (one-directional: Cursor exposes ~18 hook events and we
+                          map ~5 by design, so only a VANISHED depended event alarms)
 
 Exit codes:
   0  no drift
@@ -203,6 +208,17 @@ OPENCODE_TOLERATED = {"permission.asked"}
 # ON vanishes (a rename the transcript still carries but the decoder maps to nothing).
 COPILOT_SCHEMA_URL = "https://unpkg.com/@github/copilot/schemas/session-events.schema.json"
 
+# Cursor CLI (`cursor-agent`) is HOOK-ONLY; the events we register/decode are
+# camelCase `hook_event_name`s (`source/cursor.rs`). Cursor is a closed binary,
+# so — like CC — the docs markdown is the only watchable surface. ONE-DIRECTIONAL
+# (like opencode): Cursor exposes ~18 hook events and we map ~5 by design, so a
+# "new upstream event" is noise; we alarm only when an event WE DEPEND ON
+# vanishes (a rename the CLI would fire but the decoder maps to nothing). The
+# common-word event `stop` is intrinsically low-confidence (the docs page
+# contains the word regardless), so its disappearance can be masked — the
+# distinctive `sessionStart`/`sessionEnd`/`preToolUse`/`postToolUse` carry the check.
+CURSOR_HOOKS_URL = "https://cursor.com/docs/hooks"
+
 
 def fetch(url: str) -> str:
     req = urllib.request.Request(url, headers={"User-Agent": "pixtuoid-drift-watch"})
@@ -297,6 +313,18 @@ def read_copilot_events() -> set[str]:
     return set(re.findall(r'"((?:session|tool|subagent|permission)\.[a-z._]+)"', m.group(1)))
 
 
+def read_cursor_events() -> set[str]:
+    """The camelCase hook events the decoder maps, read from the `match event`
+    block in source/cursor.rs (the source of truth). Scoped to the match block
+    so other quoted strings in the arms (`"tool_name"`, `"?"`) don't leak in —
+    the event patterns are the only fully-`[a-z][A-Za-z]+` quoted literals."""
+    src = (REPO / "crates/pixtuoid-core/src/source/cursor.rs").read_text()
+    m = re.search(r"match event \{(.*?)\n    \}", src, re.S)
+    if not m:
+        raise RuntimeError("could not locate the `match event` block in source/cursor.rs")
+    return set(re.findall(r'"([a-z][A-Za-z]+)"', m.group(1)))
+
+
 def upstream_copilot_events(text: str) -> set[str] | None:
     """The per-event `type` consts from the @github/copilot session-events JSON
     schema. Each event is a `definitions.<Name>` object whose `properties.type`
@@ -344,6 +372,7 @@ def run_checks(
     codewhale_ours: set[str] | None,
     opencode_ours: set[str] | None,
     copilot_ours: set[str] | None,
+    cursor_ours: set[str] | None,
     breaking: list[str],
     review: list[str],
     errors: list[str],
@@ -494,6 +523,26 @@ def run_checks(
                             f"nothing (no sprite / no activity)."
                         )
 
+    # --- Cursor hook events (only the FETCH is transient) ------------------
+    if cursor_ours is not None:
+        try:
+            text = fetch(CURSOR_HOOKS_URL)
+        except FETCH_ERRORS as e:
+            errors.append(f"Cursor hooks doc fetch failed (transient?): {e}")
+            text = None
+        if text is not None:
+            for ev in sorted(cursor_ours):
+                # Word-boundary token match (the docs render the names inline /
+                # in tables, not as quoted literals). ONE-DIRECTIONAL: a depended
+                # event missing from the page is breaking; a new upstream event
+                # is intentionally ignored (we map ~5 of ~18 by design).
+                if not re.search(rf"\b{re.escape(ev)}\b", text):
+                    breaking.append(
+                        f"Cursor hook `{ev}` (decoded in source/cursor.rs) is GONE from "
+                        f"cursor.com/docs/hooks — likely renamed; the CLI still fires it but "
+                        f"the decoder maps it to nothing (no sprite / no activity)."
+                    )
+
     # --- CC subagent-dispatch tool (only the FETCH is transient) -----------
     if dispatch_names is not None:
         try:
@@ -576,6 +625,7 @@ def main() -> int:
     codewhale_ours = None
     opencode_ours = None
     copilot_ours = None
+    cursor_ours = None
     try:
         codex_ours = read_codex_events()
         cc_ours = read_cc_events()
@@ -584,6 +634,7 @@ def main() -> int:
         codewhale_ours = read_codewhale_events()
         opencode_ours = read_opencode_events()
         copilot_ours = read_copilot_events()
+        cursor_ours = read_cursor_events()
     except Exception as e:  # noqa: BLE001
         breaking.append(
             f"drift-watch cannot read our own source ({e}) — the parsers in "
@@ -600,6 +651,7 @@ def main() -> int:
             codewhale_ours,
             opencode_ours,
             copilot_ours,
+            cursor_ours,
             breaking,
             review,
             errors,

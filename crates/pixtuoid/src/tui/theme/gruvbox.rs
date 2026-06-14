@@ -499,5 +499,10 @@ pub static GRUVBOX: Theme = Theme {
             g: 0x7a,
             b: 0xb0,
         }, // copilot rose
+        cursor: Rgb {
+            r: 0xa0,
+            g: 0xaa,
+            b: 0xc3,
+        }, // cursor slate-blue (monochrome brand; distinct from all 7)
     },
 };

@@ -172,7 +172,23 @@ pub const OPENCODE: Target = Target {
     presence_probe: Some(crate::install::opencode::detect_installed),
 };
 
-pub const TARGETS: &[&Target] = &[&CLAUDE, &CODEX, &REASONIX, &CODEWHALE, &OPENCODE];
+pub const CURSOR: Target = Target {
+    name: "cursor",
+    core_source: pixtuoid_core::source::cursor::SOURCE_NAME,
+    display_name: "Cursor CLI",
+    restart_noun: "Cursor",
+    default_config_path: crate::install::cursor::default_config_path,
+    hook_command: crate::install::cursor::hook_command,
+    merge_install: crate::install::cursor::merge_install,
+    merge_uninstall: crate::install::cursor::merge_uninstall,
+    needs_path_warning: false,
+    needs_resolved_binary: true,
+    post_install_note: None,
+    // Cursor never creates ~/.cursor/hooks.json itself — probe ~/.cursor instead.
+    presence_probe: Some(crate::install::cursor::detect_installed),
+};
+
+pub const TARGETS: &[&Target] = &[&CLAUDE, &CODEX, &REASONIX, &CODEWHALE, &OPENCODE, &CURSOR];
 
 pub fn by_name(name: &str) -> Option<&'static Target> {
     TARGETS.iter().copied().find(|t| t.name == name)
@@ -216,6 +232,7 @@ mod tests {
         assert_eq!(by_name("reasonix").unwrap().name, "reasonix");
         assert_eq!(by_name("codewhale").unwrap().name, "codewhale");
         assert_eq!(by_name("opencode").unwrap().name, "opencode");
+        assert_eq!(by_name("cursor").unwrap().name, "cursor");
         assert!(by_name("nope").is_none());
         assert!(by_name("all").is_none()); // "all" is a meta-value, not a Target
     }

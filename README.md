@@ -102,7 +102,7 @@ Press `c` to open the **Connection** panel and connect your agent CLI (Claude Co
 | [Claude Code](https://code.claude.com) | macOS · Linux · Windows\* |
 | [Codex CLI](https://github.com/openai/codex) | macOS · Linux · Windows\* |
 
-_Also supported: [Antigravity CLI](https://github.com/antiGravity-AI/antigravity-cli), [DeepSeek-Reasonix](https://github.com/esengine/DeepSeek-Reasonix), [CodeWhale](https://github.com/Hmbown/CodeWhale), [Copilot CLI](https://github.com/github/copilot-cli), [opencode](https://github.com/anomalyco/opencode). Planned: Cursor CLI._
+_Also supported: [Antigravity CLI](https://github.com/antiGravity-AI/antigravity-cli), [DeepSeek-Reasonix](https://github.com/esengine/DeepSeek-Reasonix), [CodeWhale](https://github.com/Hmbown/CodeWhale), [Copilot CLI](https://github.com/github/copilot-cli), [opencode](https://github.com/anomalyco/opencode), [Cursor CLI](https://cursor.com/cli)._
 
 **→ [Full tool × OS support matrix on the site](https://ivanwng97.github.io/pixtuoid/#tools)**
 

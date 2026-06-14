@@ -129,6 +129,7 @@ fn connection_line(
         "cw" => theme.source.codewhale,
         "oc" => theme.source.opencode,
         "cp" => theme.source.copilot,
+        "cu" => theme.source.cursor,
         _ => theme.ui.label_idle,
     });
 

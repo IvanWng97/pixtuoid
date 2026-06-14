@@ -1,0 +1,7 @@
+{"hook_event_name": "sessionStart", "cwd": "/Users/dev/proj", "_pixtuoid_source": "cursor"}
+{"hook_event_name": "preToolUse", "cwd": "/Users/dev/proj", "tool_name": "readToolCall", "tool_input": {"path": "hello.txt"}, "_pixtuoid_source": "cursor"}
+{"hook_event_name": "postToolUse", "cwd": "/Users/dev/proj", "tool_name": "readToolCall", "_pixtuoid_source": "cursor"}
+{"hook_event_name": "preToolUse", "cwd": "/Users/dev/proj", "tool_name": "shell", "tool_input": {"command": "wc -c hello.txt"}, "_pixtuoid_source": "cursor"}
+{"hook_event_name": "postToolUse", "cwd": "/Users/dev/proj", "tool_name": "shell", "_pixtuoid_source": "cursor"}
+{"hook_event_name": "stop", "cwd": "/Users/dev/proj", "_pixtuoid_source": "cursor"}
+{"hook_event_name": "sessionEnd", "cwd": "/Users/dev/proj", "_pixtuoid_source": "cursor"}

@@ -501,5 +501,10 @@ pub static CATPPUCCIN: Theme = Theme {
             g: 0x60,
             b: 0x9c,
         }, // copilot rose
+        cursor: Rgb {
+            r: 0x96,
+            g: 0xa2,
+            b: 0xbe,
+        }, // cursor slate-blue (monochrome brand; distinct from all 7)
     },
 };

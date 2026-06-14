@@ -473,5 +473,10 @@ pub static CYBERPUNK: Theme = Theme {
             g: 0x60,
             b: 0x9c,
         }, // copilot rose
+        cursor: Rgb {
+            r: 0xaa,
+            g: 0xb4,
+            b: 0xc8,
+        }, // cursor slate-blue (monochrome brand; distinct from all 7)
     },
 };

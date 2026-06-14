@@ -1,6 +1,7 @@
 pub mod claude;
 pub mod codewhale;
 pub mod codex;
+pub mod cursor;
 mod hook_cmd;
 pub mod io;
 pub mod opencode;

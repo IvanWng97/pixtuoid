@@ -177,6 +177,7 @@ pub struct SourceColors {
     pub codewhale: Rgb,
     pub opencode: Rgb,
     pub copilot: Rgb,
+    pub cursor: Rgb,
 }
 
 impl SourceColors {
@@ -184,7 +185,7 @@ impl SourceColors {
     /// guard and the count-pin test share, so adding a source forces a new field
     /// HERE (caught by `source_colors_cover_every_registered_source`) instead of
     /// silently escaping the per-theme distinctness check.
-    pub fn all(&self) -> [Rgb; 7] {
+    pub fn all(&self) -> [Rgb; 8] {
         [
             self.claude_code,
             self.codex,
@@ -193,6 +194,7 @@ impl SourceColors {
             self.codewhale,
             self.opencode,
             self.copilot,
+            self.cursor,
         ]
     }
 }

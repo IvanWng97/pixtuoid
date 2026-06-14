@@ -1,0 +1,365 @@
+//! Cursor CLI hook install target.
+//!
+//! Writes the GLOBAL `~/.cursor/hooks.json` — Cursor's CC-style hook config.
+//! The `cursor-agent` CLI reads both the user-global file and a project
+//! `<repo>/.cursor/hooks.json`; we install user-global so it covers every
+//! project. Schema (`cursor.com/docs/hooks`) is a `version` + per-event arrays
+//! of FLAT `{command}` entries — NOT Claude's nested `{matcher, hooks:[...]}`
+//! groups (the group shape reportedly does not fire in the Cursor CLI):
+//!
+//! ```json
+//! {"version": 1,
+//!  "hooks": {"preToolUse": [{"command": "PIXTUOID_SOURCE=cursor '/abs/pixtuoid-hook'",
+//!                            "_pixtuoid": true}]}}
+//! ```
+//!
+//! - `version` is required by Cursor; set to 1 on install if absent (a user's
+//!   existing value is preserved).
+//! - `_pixtuoid` is the managed-entry sentinel; Cursor's loader ignores unknown
+//!   object fields (the same assumption Reasonix's Go loader makes).
+//! - Cursor runs the `command` under a shell (its hook model mirrors Claude
+//!   Code's), so the OS forms mirror `codex`/`reasonix` exactly via
+//!   `hook_cmd::shell_hook_command`: Unix env-prefix `PIXTUOID_SOURCE=cursor
+//!   '<path>'`, Windows bare `<path> --source cursor`. (Capture-gated: if the
+//!   CLI exec's the command WITHOUT a shell, the Unix env-prefix won't take and
+//!   this switches to the bare `--source` form — verified by the one-shot live
+//!   capture before this target flips to "supported".)
+
+use std::path::{Path, PathBuf};
+
+use anyhow::{anyhow, Context, Result};
+use serde_json::{json, Map, Value};
+
+use crate::install::io;
+use crate::install::target::MergeOutcome;
+
+const SENTINEL_KEY: &str = "_pixtuoid";
+
+/// Events we register == events we decode (`source/cursor.rs`), enforced by
+/// `every_registered_cursor_event_decodes` below. The camelCase names are
+/// Cursor's. `subagentStart`/`subagentStop` are deliberately absent (not firing
+/// in the CLI; session-only) and the shell/file-specific `before*`/`after*`
+/// hooks are omitted in favor of the generic `preToolUse`/`postToolUse` pair —
+/// the live capture refines this firing set, tracked by the upstream-drift watch.
+const CURSOR_EVENTS: &[&str] = &[
+    "sessionStart",
+    "preToolUse",
+    "postToolUse",
+    "stop",
+    "sessionEnd",
+];
+
+pub fn default_config_path() -> Result<PathBuf> {
+    // Checked: with no resolvable home dir, writing `./.cursor/hooks.json` would
+    // "succeed" while the GLOBAL-scope loader never reads it.
+    io::home_relative_checked(".cursor/hooks.json")
+}
+
+/// Presence probe for auto-detection. Cursor never creates `~/.cursor/hooks.json`
+/// itself (it is purely user-authored), so a default file-exists check on it
+/// would never fire — probe Cursor's own dir (`~/.cursor`, created on first run)
+/// instead, the same reason Reasonix/CodeWhale/opencode probe their CLI dirs.
+pub fn detect_installed() -> bool {
+    io::home_relative(".cursor").exists()
+}
+
+/// Cursor runs the `command` under a shell (its hook system mirrors Claude
+/// Code's). Same contract as Codex/Reasonix, so the OS forms mirror them:
+/// - **Unix**: env-prefix `PIXTUOID_SOURCE=cursor '<abs-path>'` (single-quoted).
+/// - **Windows**: BARE `<abs-path> --source cursor` via the shared
+///   `hook_cmd::windows::windows_bare_hook_command` (8.3 short name for a
+///   space/metacharacter path, else reject — #195).
+///
+/// Err on non-UTF-8 (prevents the to_string_lossy dead-hook).
+pub fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
+    let p = resolved
+        .to_str()
+        .ok_or_else(|| anyhow!("pixtuoid-hook path is non-UTF-8: {}", resolved.display()))?;
+    crate::install::hook_cmd::shell_hook_command(p, "cursor")
+}
+
+fn parse_or_empty(content: &str) -> Result<Value> {
+    if content.trim().is_empty() {
+        return Ok(json!({}));
+    }
+    serde_json::from_str(content).context("not valid JSON — refusing to overwrite")
+}
+
+pub fn merge_install(content: &str, hook_cmd: &str) -> Result<MergeOutcome> {
+    let doc = parse_or_empty(content)?;
+    if !doc.is_object() && !doc.is_null() {
+        anyhow::bail!("hooks.json is valid JSON but not an object — refusing to overwrite");
+    }
+    let merged = json_merge_install(doc.clone(), hook_cmd);
+    let changed = merged != doc;
+    Ok(MergeOutcome {
+        content: serde_json::to_string_pretty(&merged)?,
+        changed,
+    })
+}
+
+pub fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
+    let doc = parse_or_empty(content)?;
+    let cleaned = json_merge_uninstall(doc.clone());
+    let changed = cleaned != doc;
+    Ok(MergeOutcome {
+        content: serde_json::to_string_pretty(&cleaned)?,
+        changed,
+    })
+}
+
+fn is_managed_entry(entry: &Value) -> bool {
+    entry.get(SENTINEL_KEY).and_then(|v| v.as_bool()) == Some(true)
+}
+
+fn managed_entry(hook_command: &str) -> Value {
+    json!({
+        SENTINEL_KEY: true,
+        "command": hook_command
+    })
+}
+
+fn json_merge_install(doc: Value, hook_command: &str) -> Value {
+    let mut root: Map<String, Value> = doc.as_object().cloned().unwrap_or_default();
+    // Cursor requires a `version`; set it if absent, preserve a user's value.
+    root.entry("version".to_string())
+        .or_insert_with(|| json!(1));
+    let hooks = root
+        .entry("hooks".to_string())
+        .or_insert_with(|| Value::Object(Map::new()));
+    if !hooks.is_object() {
+        *hooks = Value::Object(Map::new());
+    }
+    if let Value::Object(hooks_obj) = hooks {
+        for ev in CURSOR_EVENTS {
+            let list = hooks_obj
+                .entry((*ev).to_string())
+                .or_insert_with(|| Value::Array(vec![]));
+            if !list.is_array() {
+                *list = Value::Array(vec![]);
+            }
+            if let Value::Array(arr) = list {
+                arr.retain(|entry| !is_managed_entry(entry));
+                arr.push(managed_entry(hook_command));
+            }
+        }
+    }
+    Value::Object(root)
+}
+
+fn json_merge_uninstall(mut doc: Value) -> Value {
+    let Some(root) = doc.as_object_mut() else {
+        return doc;
+    };
+    let Some(Value::Object(hooks_obj)) = root.get_mut("hooks") else {
+        return doc;
+    };
+    for (_ev, list) in hooks_obj.iter_mut() {
+        if let Some(arr) = list.as_array_mut() {
+            arr.retain(|entry| !is_managed_entry(entry));
+        }
+    }
+    let to_remove: Vec<String> = hooks_obj
+        .iter()
+        .filter_map(|(k, v)| match v.as_array() {
+            Some(a) if a.is_empty() => Some(k.clone()),
+            _ => None,
+        })
+        .collect();
+    for k in to_remove {
+        hooks_obj.remove(&k);
+    }
+    if hooks_obj.is_empty() {
+        root.remove("hooks");
+        // The `version` we added is meaningless without hooks — drop it too so a
+        // full uninstall leaves the file as we found it (empty object), keeping
+        // uninstall a clean inverse of install.
+        root.remove("version");
+    }
+    doc
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn install_creates_flat_entries_for_all_events_with_version() {
+        let doc = json_merge_install(json!({}), "PIXTUOID_SOURCE=cursor '/opt/pixtuoid-hook'");
+        assert_eq!(doc["version"], json!(1), "Cursor requires a version field");
+        let hooks = doc.get("hooks").and_then(|v| v.as_object()).unwrap();
+        for ev in CURSOR_EVENTS {
+            let arr = hooks.get(*ev).and_then(|v| v.as_array()).unwrap();
+            assert_eq!(arr.len(), 1, "event {ev}");
+            let entry = &arr[0];
+            assert_eq!(
+                entry["command"].as_str().unwrap(),
+                "PIXTUOID_SOURCE=cursor '/opt/pixtuoid-hook'"
+            );
+            assert!(entry[SENTINEL_KEY].as_bool().unwrap());
+            // Flat shape: command directly on the entry — no CC-style nested group.
+            assert!(
+                entry.get("hooks").is_none() && entry.get("type").is_none(),
+                "must not write CC-style nested groups"
+            );
+        }
+    }
+
+    #[test]
+    fn install_preserves_existing_version() {
+        let doc = json_merge_install(json!({"version": 2}), "/x");
+        assert_eq!(
+            doc["version"],
+            json!(2),
+            "must not clobber a user's version"
+        );
+    }
+
+    #[test]
+    fn install_is_idempotent_and_replaces_across_paths() {
+        let a = json_merge_install(json!({}), "PIXTUOID_SOURCE=cursor '/opt/a/pixtuoid-hook'");
+        let b = json_merge_install(a.clone(), "PIXTUOID_SOURCE=cursor '/opt/a/pixtuoid-hook'");
+        assert_eq!(a, b, "same command re-install is a no-op");
+        let c = json_merge_install(a, "PIXTUOID_SOURCE=cursor '/opt/b/pixtuoid-hook'");
+        for ev in CURSOR_EVENTS {
+            assert_eq!(
+                c["hooks"][*ev].as_array().unwrap().len(),
+                1,
+                "event {ev} duplicated on path change"
+            );
+        }
+    }
+
+    #[test]
+    fn install_preserves_user_entries() {
+        let initial = json!({
+            "version": 1,
+            "hooks": {"preToolUse": [ { "command": "my-guard.sh" } ]},
+            "other": "setting"
+        });
+        let merged = json_merge_install(initial, "/x");
+        let arr = merged["hooks"]["preToolUse"].as_array().unwrap();
+        assert_eq!(arr.len(), 2);
+        assert_eq!(arr[0]["command"], json!("my-guard.sh"));
+        assert_eq!(merged["other"], json!("setting"));
+    }
+
+    #[test]
+    fn uninstall_removes_only_managed_entries_and_empty_maps() {
+        let installed = json_merge_install(
+            json!({"hooks": {"preToolUse": [ { "command": "my-guard.sh" } ]}}),
+            "/x",
+        );
+        let cleaned = json_merge_uninstall(installed);
+        let arr = cleaned["hooks"]["preToolUse"].as_array().unwrap();
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["command"], json!("my-guard.sh"));
+        for ev in CURSOR_EVENTS.iter().filter(|e| **e != "preToolUse") {
+            assert!(
+                cleaned["hooks"].get(*ev).is_none(),
+                "event {ev} should be dropped once empty"
+            );
+        }
+        // A user hook survived → the file is not empty → version stays.
+        assert_eq!(cleaned["version"], json!(1));
+    }
+
+    #[test]
+    fn uninstall_all_managed_drops_hooks_and_version() {
+        let installed = json_merge_install(json!({}), "/x");
+        let cleaned = json_merge_uninstall(installed);
+        assert!(cleaned.get("hooks").is_none(), "got {cleaned}");
+        assert!(
+            cleaned.get("version").is_none(),
+            "version we added is dropped on full uninstall: {cleaned}"
+        );
+    }
+
+    #[test]
+    fn merge_install_idempotent_reports_unchanged() {
+        let first = merge_install("", "/x").unwrap();
+        assert!(first.changed);
+        let second = merge_install(&first.content, "/x").unwrap();
+        assert!(!second.changed, "second install is a semantic no-op");
+    }
+
+    #[test]
+    fn merge_uninstall_no_pixtuoid_hooks_reports_unchanged() {
+        let user = r#"{ "version": 1, "hooks": { "stop": [ { "command": "notify done" } ] } }"#;
+        let out = merge_uninstall(user).unwrap();
+        assert!(!out.changed, "no managed entries → semantic no-op");
+    }
+
+    #[test]
+    fn merge_install_rejects_valid_json_that_is_not_an_object() {
+        assert!(merge_install("[1, 2, 3]", "/x").is_err());
+        assert!(merge_install("42", "/x").is_err());
+    }
+
+    #[test]
+    fn merge_install_rejects_invalid_json() {
+        assert!(merge_install("{not json", "/x").is_err());
+    }
+
+    #[test]
+    fn install_coerces_non_object_hooks_and_non_array_events() {
+        let doc = json_merge_install(json!({"hooks": "garbage"}), "/x");
+        assert!(doc["hooks"].is_object());
+        let doc = json_merge_install(json!({"hooks": {"stop": 42}}), "/x");
+        assert_eq!(doc["hooks"]["stop"].as_array().unwrap().len(), 1);
+    }
+
+    // Unix POSIX-form pin (single-quoted env-prefix). Unix-only: on Windows the
+    // bare form is emitted and this spaced path would be REJECTED.
+    #[cfg(unix)]
+    #[test]
+    fn hook_command_stamps_source_and_quotes() {
+        let cmd = hook_command(Path::new("/Users/Jane Doe/bin/pixtuoid-hook"), false).unwrap();
+        assert_eq!(
+            cmd,
+            "PIXTUOID_SOURCE=cursor '/Users/Jane Doe/bin/pixtuoid-hook'"
+        );
+    }
+
+    // Windows: bare exec form `<path> --source cursor` (mirrors codex/reasonix).
+    #[test]
+    #[cfg(windows)]
+    fn hook_command_emits_bare_exec_form_with_source_flag_on_windows() {
+        let cmd = hook_command(Path::new(r"C:\tools\pixtuoid-hook.exe"), false).unwrap();
+        assert_eq!(cmd, r"C:\tools\pixtuoid-hook.exe --source cursor");
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn hook_command_rejects_cmd_unsafe_path_on_windows() {
+        assert!(hook_command(Path::new(r"C:\Program Files\pixtuoid-hook.exe"), false).is_err());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn hook_command_errors_on_non_utf8_path() {
+        use std::os::unix::ffi::OsStrExt;
+        let bad = Path::new(std::ffi::OsStr::from_bytes(b"/x/\xff/pixtuoid-hook"));
+        assert!(hook_command(bad, false).is_err());
+    }
+
+    // Internal-consistency guard (mirror of CC/Codex/Reasonix): every hook event
+    // we REGISTER with Cursor must have a decoder arm, else it arrives at the
+    // shared socket and `decode_hook_payload` bails — silently dropped.
+    #[test]
+    fn every_registered_cursor_event_decodes() {
+        use pixtuoid_core::source::decoder::decode_hook_payload;
+        for ev in CURSOR_EVENTS {
+            let payload = serde_json::json!({
+                "hook_event_name": ev,
+                "cwd": "/repo",
+                "_pixtuoid_source": "cursor",
+            });
+            assert!(
+                decode_hook_payload(payload).is_ok(),
+                "registered Cursor hook {ev:?} has no decoder arm — it would bail \
+                 as unsupported. Add an arm in pixtuoid-core source/cursor.rs."
+            );
+        }
+    }
+}

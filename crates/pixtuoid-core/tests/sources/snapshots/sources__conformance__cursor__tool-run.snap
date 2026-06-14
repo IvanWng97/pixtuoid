@@ -1,0 +1,54 @@
+---
+source: crates/pixtuoid-core/tests/sources/conformance.rs
+expression: events
+---
+- SessionStart:
+    agent_id: 13425774401741839407
+    source: cursor
+    session_id: /Users/dev/proj
+    cwd: /Users/dev/proj
+    parent_id: ~
+- Identity:
+    agent_id: 13425774401741839407
+    source: cursor
+    session_id: /Users/dev/proj
+    cwd: /Users/dev/proj
+- ActivityStart:
+    agent_id: 13425774401741839407
+    tool_use_id: ~
+    detail:
+      Generic:
+        display: "readToolCall: hello.txt"
+- Identity:
+    agent_id: 13425774401741839407
+    source: cursor
+    session_id: /Users/dev/proj
+    cwd: /Users/dev/proj
+- ActivityEnd:
+    agent_id: 13425774401741839407
+    tool_use_id: ~
+- Identity:
+    agent_id: 13425774401741839407
+    source: cursor
+    session_id: /Users/dev/proj
+    cwd: /Users/dev/proj
+- ActivityStart:
+    agent_id: 13425774401741839407
+    tool_use_id: ~
+    detail:
+      Generic:
+        display: "shell: wc -c hello.txt"
+- Identity:
+    agent_id: 13425774401741839407
+    source: cursor
+    session_id: /Users/dev/proj
+    cwd: /Users/dev/proj
+- ActivityEnd:
+    agent_id: 13425774401741839407
+    tool_use_id: ~
+- ActivityEnd:
+    agent_id: 13425774401741839407
+    tool_use_id: ~
+- SessionEnd:
+    agent_id: 13425774401741839407
+    as_child: false

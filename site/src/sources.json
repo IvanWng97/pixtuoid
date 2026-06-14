@@ -63,12 +63,12 @@
     "platforms": { "macos": "yes", "linux": "yes", "windows": "experimental" }
   },
   {
-    "id": null,
+    "id": "cursor",
     "name": "Cursor CLI",
     "url": "https://cursor.com/cli",
-    "status": "planned",
+    "status": "supported",
     "featured": false,
-    "transport": "NDJSON stream",
-    "platforms": { "macos": "planned", "linux": "planned", "windows": "planned" }
+    "transport": "Hook shim (~/.cursor/hooks.json, cwd-keyed)",
+    "platforms": { "macos": "yes", "linux": "yes", "windows": "experimental" }
   }
 ]
