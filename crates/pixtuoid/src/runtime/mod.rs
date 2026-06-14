@@ -201,7 +201,10 @@ mod tests {
         );
         // The human-readable text is preserved (only control chars stripped).
         assert!(out.contains("source 'codex]0;pwned' died"), "got {out:?}");
-        assert!(out.contains("open /tmp/a[2Jb.jsonl: [31mboom"), "got {out:?}");
+        assert!(
+            out.contains("open /tmp/a[2Jb.jsonl: [31mboom"),
+            "got {out:?}"
+        );
     }
 
     #[test]
