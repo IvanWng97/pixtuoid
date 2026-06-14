@@ -53,7 +53,7 @@
 use anyhow::{anyhow, bail, Result};
 use serde_json::Value;
 
-use crate::source::decoder::{ellipsize, MAX_DECODED_FIELD_CHARS};
+use crate::source::decoder::{ellipsize, MAX_DECODED_FIELD_CHARS, MAX_TOOL_TARGET_CHARS};
 use crate::source::{AgentEvent, ToolDetail};
 use crate::AgentId;
 
@@ -206,17 +206,13 @@ fn rx_tool_detail(tool: &str, args: Option<&Value>) -> ToolDetail {
                 .iter()
                 .find_map(|k| a.get(k).and_then(|v| v.as_str()))
         })
-        .map(|s| {
-            let total = s.chars().count();
-            let mut t: String = s.chars().take(40).collect();
-            if total > 40 {
-                t.push('…');
-            }
-            format!(": {t}")
-        })
+        .map(|s| format!(": {}", ellipsize(s, MAX_TOOL_TARGET_CHARS)))
         .unwrap_or_default();
+    // Cap the tool NAME too (wire content from the hook payload) — the
+    // decode-boundary cap that CodeWhale/OpenCode/`make_tool_detail` already apply
+    // (pitfall 3: content-derived strings are capped where they ENTER the system).
     ToolDetail::Generic {
-        display: format!("{tool}{target}"),
+        display: format!("{}{target}", ellipsize(tool, MAX_TOOL_TARGET_CHARS)),
     }
 }
 
@@ -335,6 +331,30 @@ mod tests {
                 assert!(display.starts_with("bash: "));
                 assert!(display.ends_with('…'));
                 assert_eq!(display.chars().count(), "bash: ".chars().count() + 41);
+            }
+            other => panic!("expected ActivityStart, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn long_tool_name_is_truncated_at_the_decode_boundary() {
+        // The tool NAME is wire content too — it must be capped like the target
+        // (d01: it used to be emitted uncapped, unlike CodeWhale/OpenCode).
+        let long = "T".repeat(MAX_TOOL_TARGET_CHARS * 3);
+        let ev = decode(json!({
+            "event": "PreToolUse", "cwd": "/r",
+            "toolName": long, "toolArgs": {}
+        }));
+        match ev {
+            AgentEvent::ActivityStart {
+                detail: Some(d), ..
+            } => {
+                let display = d.display();
+                assert!(
+                    display.ends_with('…'),
+                    "name should be ellipsized: {display}"
+                );
+                assert_eq!(display.chars().count(), MAX_TOOL_TARGET_CHARS + 1);
             }
             other => panic!("expected ActivityStart, got {other:?}"),
         }
