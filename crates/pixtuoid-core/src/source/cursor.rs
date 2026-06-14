@@ -36,12 +36,21 @@
 //!
 //! - `tool_use_id` is always `None`: the reducer's per-call machinery
 //!   (hook-wins dedup, `active_tasks`) is bypassed — harmless on a single
-//!   transport with no rendered delegation. `tool_name` is PascalCase
-//!   (`Shell`/`Grep`/`Read`); `tool_input` carries `command`/`pattern`/`file_path`.
-//! - **Session-only.** Cursor's subagent linkage lives ONLY in
-//!   `subagentStart`/`subagentStop` hooks (not firing in the CLI — none fired in
-//!   the capture) and is absent from every other surface — a proven upstream
-//!   absence, so no child sprites (drift-watched for if/when the CLI lands them).
+//!   transport. `tool_name` is PascalCase (`Shell`/`Grep`/`Read`); `tool_input`
+//!   carries `command`/`pattern`/`file_path`.
+//! - **Subagents: rendered FLAT, never nested (parent-link is genuinely
+//!   absent).** A parallel-subagent task dispatches via a `Task` tool
+//!   (`tool_name:"Task"` + `tool_input.subagent_type` — capture-verified, the
+//!   CC semantic) → the PARENT reads "Delegating" (`cursor_tool_detail`). But
+//!   each child runs as an INDEPENDENT session (own `session_id`, firing tool
+//!   events with NO `sessionStart`/`sessionEnd`), and NOTHING in the stream
+//!   links a child to its parent — `subagentStart`/`subagentStop` don't fire
+//!   (capture-verified: 0), the `Task` dispatch carries only the PARENT's id,
+//!   and child events carry no `parentId`. So children appear as sibling `cu·`
+//!   sprites (a "parallel agents" effect), NOT nested, and — getting no
+//!   `sessionEnd` — they age out via the idle stale-sweep. The missing link is a
+//!   proven upstream constraint (drift-watched for if/when the CLI lands the
+//!   subagent hooks).
 //! - Exit profile: `sessionEnd` FIRES on clean completion (capture-verified:
 //!   `reason:"completed"`) → `has_exit_signal: true` (best-effort, CC/Reasonix
 //!   class). `stop` is turn-end and did NOT fire under `-p` (kept mapped for
@@ -175,6 +184,17 @@ pub(crate) fn decode_cursor_hook_custom(v: &Value) -> Result<Option<Vec<AgentEve
 /// `make_tool_detail`/`rx_tool_detail`. No subagent-dispatch detection — Cursor
 /// renders session-only (no in-CLI delegation signal).
 fn cursor_tool_detail(tool: &str, args: Option<&Value>) -> ToolDetail {
+    // Subagent dispatch: Cursor's `Task` tool carries a `subagent_type`
+    // (capture-verified 2026-06-14, e.g. "code-explorer") — the SAME stable
+    // semantic signal CC's `make_tool_detail` keys on. Show "Delegating" on the
+    // parent while the children work. (The children run as INDEPENDENT sessions
+    // with no parent-link in the stream — see the module doc — so this is the
+    // only delegation signal pixtuoid can render; mirrors CC's `has_subagent_type
+    // || known_name`.)
+    let has_subagent_type = args.and_then(|a| a.get("subagent_type")).is_some();
+    if tool == "Task" || has_subagent_type {
+        return ToolDetail::Task;
+    }
     let target = args
         .and_then(|a| {
             ["command", "file_path", "path", "pattern", "url"]
@@ -289,6 +309,30 @@ mod tests {
             }
             other => panic!("expected ActivityStart, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn task_dispatch_with_subagent_type_is_delegating() {
+        // Capture-verified: a parallel-subagent dispatch fires preToolUse with
+        // tool_name "Task" + tool_input.subagent_type — the parent must read
+        // Delegating (ToolDetail::Task), mirroring CC's semantic detection.
+        let ev = decode(json!({
+            "hook_event_name": "preToolUse",
+            "session_id": "parent",
+            "workspace_roots": ["/repo"],
+            "tool_name": "Task",
+            "tool_input": {"subagent_type": "code-explorer", "description": "investigate the build"}
+        }));
+        assert!(
+            matches!(&ev, AgentEvent::ActivityStart { detail: Some(d), .. } if d.is_task()),
+            "Task + subagent_type must map to ToolDetail::Task, got {ev:?}"
+        );
+        // An ordinary tool stays Generic.
+        let read = decode(json!({
+            "hook_event_name": "preToolUse", "session_id": "p", "workspace_roots": ["/r"],
+            "tool_name": "Read", "tool_input": {"file_path": "/r/x.rs"}
+        }));
+        assert!(matches!(&read, AgentEvent::ActivityStart { detail: Some(d), .. } if !d.is_task()));
     }
 
     #[test]

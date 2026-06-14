@@ -351,9 +351,14 @@ const CURSOR: SourceDescriptor = SourceDescriptor {
         // session does NOT walk back in on a later prompt — but moot: with an
         // exit signal the short reaper never applies (short_idle_reap == false).
         resurrects_on_prompt: false,
-        // No delegation is rendered (session-only — subagent hooks don't fire in
-        // the CLI), so there is no Delegating slot to retain.
-        delegations_are_hook_silent: false,
+        // Cursor's `Task` dispatch (capture-verified) makes the parent Delegating,
+        // and it gets NO `postToolUse` for the Task — the parent is hook-silent
+        // through the delegation (the children run as separate, unlinkable
+        // sessions), so the Delegating slot needs the Waiting-class stale window
+        // rather than a mid-delegation sweep (matches Reasonix/CodeWhale; safe —
+        // it can only over-retain a dead Delegating slot, the parent's own
+        // `sessionEnd` reaps it cleanly in the normal case).
+        delegations_are_hook_silent: true,
     },
 };
 
