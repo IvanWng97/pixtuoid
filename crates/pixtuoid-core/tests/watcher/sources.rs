@@ -7,6 +7,7 @@ use tokio::sync::mpsc;
 use pixtuoid_core::source::antigravity::AntigravitySource;
 use pixtuoid_core::source::claude_code::ClaudeCodeSource;
 use pixtuoid_core::source::codex::CodexSource;
+use pixtuoid_core::source::copilot::CopilotSource;
 use pixtuoid_core::source::AgentEvent;
 use pixtuoid_core::source::Source;
 use pixtuoid_core::source::Transport;
@@ -191,6 +192,75 @@ async fn claude_code_source_run_binds_socket_and_emits_events() {
     assert!(
         got_start,
         "ClaudeCodeSource::run should surface SessionStart from the JSONL leg"
+    );
+    handle.abort();
+}
+
+// CopilotSource::run drives a JsonlWatcher over <sessions_root>/<id>/events.jsonl
+// with the parent-dir id-deriver. The e2e gap that unit tests can't cover: does
+// the real watcher RECURSE into the <sessionId>/ dir, pick up the constant-named
+// `events.jsonl`, derive the id from the PARENT DIR (not the "events" stem), and
+// surface a copilot SessionStart? Driven against real-shaped bytes.
+#[tokio::test]
+async fn copilot_source_run_emits_session_start_from_events_jsonl() {
+    fast_watch();
+    let dir = TempDir::new().unwrap();
+    let sessions_root = dir.path().to_path_buf();
+    let session_dir = sessions_root.join("65f8cef9-7dd8-46fa-9f6a-78cc95f68ab3");
+    tokio::fs::create_dir_all(&session_dir).await.unwrap();
+    let transcript = session_dir.join("events.jsonl");
+
+    let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(32);
+    let src = CopilotSource { sessions_root };
+    let handle = tokio::spawn(async move { Box::new(src).run(tx).await });
+
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    // Real session.start shape + a tool round (single agent → one AgentId).
+    let start = serde_json::json!({
+        "type": "session.start",
+        "data": {"sessionId": "65f8cef9-7dd8-46fa-9f6a-78cc95f68ab3", "version": 1,
+                 "producer": "copilot-agent", "context": {"cwd": "/repo"}},
+        "id": "a", "timestamp": "2026-05-22T05:59:45.488Z", "parentId": serde_json::Value::Null
+    });
+    let tool = serde_json::json!({
+        "type": "tool.execution_start",
+        "data": {"toolCallId": "tooluse_1", "toolName": "view", "arguments": {"path": "/repo"}},
+        "id": "b", "timestamp": "2026-05-22T06:00:14.298Z", "parentId": "a"
+    });
+    let mut f = tokio::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&transcript)
+        .await
+        .unwrap();
+    f.write_all(format!("{start}\n{tool}\n").as_bytes())
+        .await
+        .unwrap();
+    f.flush().await.unwrap();
+    drop(f);
+
+    let mut session_id = None;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    while tokio::time::Instant::now() < deadline {
+        if let Ok(Some((
+            _,
+            AgentEvent::SessionStart {
+                source,
+                session_id: sid,
+                ..
+            },
+        ))) = tokio::time::timeout(Duration::from_millis(200), rx.recv()).await
+        {
+            assert_eq!(source, "copilot");
+            session_id = Some(sid);
+            break;
+        }
+    }
+    assert_eq!(
+        session_id.as_deref(),
+        Some("65f8cef9-7dd8-46fa-9f6a-78cc95f68ab3"),
+        "CopilotSource::run should surface a copilot SessionStart from events.jsonl"
     );
     handle.abort();
 }
