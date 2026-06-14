@@ -65,7 +65,7 @@
 use anyhow::{anyhow, bail, Result};
 use serde_json::Value;
 
-use crate::source::decoder::{ellipsize, MAX_TOOL_TARGET_CHARS};
+use crate::source::decoder::{ellipsize, MAX_DECODED_FIELD_CHARS, MAX_TOOL_TARGET_CHARS};
 use crate::source::{AgentEvent, ToolDetail};
 use crate::AgentId;
 
@@ -267,8 +267,10 @@ fn cw_tool_detail(tool: &str, raw_args: Option<&Value>) -> ToolDetail {
         })
         .map(|s| format!(": {}", ellipsize(s, MAX_TOOL_TARGET_CHARS)))
         .unwrap_or_default();
+    // Tool name = a content field (MAX_DECODED_FIELD_CHARS), the `: target`
+    // descriptor = MAX_TOOL_TARGET_CHARS — matching `make_tool_detail`.
     ToolDetail::Generic {
-        display: format!("{}{target}", ellipsize(tool, MAX_TOOL_TARGET_CHARS)),
+        display: format!("{}{target}", ellipsize(tool, MAX_DECODED_FIELD_CHARS)),
     }
 }
 

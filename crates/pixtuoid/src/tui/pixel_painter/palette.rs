@@ -7,6 +7,7 @@
 //! because the palette tint code uses them directly and they're widely
 //! shared with background/effects.
 
+use pixtuoid_core::sprite::format::RECOLOR_KEYS;
 use pixtuoid_core::sprite::{Frame, Palette, Pixel, Rgb, RgbBuffer};
 use pixtuoid_core::AgentSlot;
 
@@ -372,23 +373,24 @@ pub(super) fn tool_glow_tint(
 }
 
 pub(super) fn recolor_frame(frame: &Frame, pal: &Palette, base_pal: &Palette) -> Frame {
-    let base_shirt = base_pal.get('B').flatten();
-    let base_hair = base_pal.get('H').flatten();
-    let base_skin = base_pal.get('S').flatten();
-    let base_pants = base_pal.get('P').flatten();
-    let agent_shirt = pal.get('B').flatten();
-    let agent_hair = pal.get('H').flatten();
-    let agent_skin = pal.get('S').flatten();
-    let agent_pants = pal.get('P').flatten();
+    // The base->agent color swap per recolor key, resolved ONCE (not per pixel).
+    // Keyed off `RECOLOR_KEYS` (core's single source of truth, the same set
+    // `validate_recolor_palette` guards for RGB-uniqueness) so the substitution
+    // and the load-time guard can't drift. A `None` base never equals a `Some`
+    // pixel, so a transparent/absent key naturally substitutes nothing.
+    let swaps: Vec<(Pixel, Pixel)> = RECOLOR_KEYS
+        .iter()
+        .map(|&k| (base_pal.get(k).flatten(), pal.get(k).flatten()))
+        .collect();
     let pixels: Vec<Pixel> = frame
         .pixels
         .iter()
         .map(|p| match p {
-            Some(rgb) if Some(*rgb) == base_shirt => agent_shirt,
-            Some(rgb) if Some(*rgb) == base_hair => agent_hair,
-            Some(rgb) if Some(*rgb) == base_skin => agent_skin,
-            Some(rgb) if Some(*rgb) == base_pants => agent_pants,
-            other => *other,
+            Some(rgb) => swaps
+                .iter()
+                .find(|(base, _)| *base == Some(*rgb))
+                .map_or(*p, |(_, agent)| *agent),
+            None => None,
         })
         .collect();
     Frame {

@@ -208,11 +208,12 @@ fn rx_tool_detail(tool: &str, args: Option<&Value>) -> ToolDetail {
         })
         .map(|s| format!(": {}", ellipsize(s, MAX_TOOL_TARGET_CHARS)))
         .unwrap_or_default();
-    // Cap the tool NAME too (wire content from the hook payload) — the
-    // decode-boundary cap that CodeWhale/OpenCode/`make_tool_detail` already apply
-    // (pitfall 3: content-derived strings are capped where they ENTER the system).
+    // Cap BOTH fields at the decode boundary, matching `make_tool_detail` (pitfall
+    // 3: content-derived strings are capped where they ENTER the system). The tool
+    // NAME is a content field → `MAX_DECODED_FIELD_CHARS`; the `: target` descriptor
+    // suffix → `MAX_TOOL_TARGET_CHARS`. (Wire content from the hook payload.)
     ToolDetail::Generic {
-        display: format!("{}{target}", ellipsize(tool, MAX_TOOL_TARGET_CHARS)),
+        display: format!("{}{target}", ellipsize(tool, MAX_DECODED_FIELD_CHARS)),
     }
 }
 
@@ -338,9 +339,9 @@ mod tests {
 
     #[test]
     fn long_tool_name_is_truncated_at_the_decode_boundary() {
-        // The tool NAME is wire content too — it must be capped like the target
-        // (d01: it used to be emitted uncapped, unlike CodeWhale/OpenCode).
-        let long = "T".repeat(MAX_TOOL_TARGET_CHARS * 3);
+        // The tool NAME is wire content — capped at the FIELD width like
+        // `make_tool_detail` (d01: it used to be emitted uncapped).
+        let long = "T".repeat(MAX_DECODED_FIELD_CHARS * 3);
         let ev = decode(json!({
             "event": "PreToolUse", "cwd": "/r",
             "toolName": long, "toolArgs": {}
@@ -354,7 +355,7 @@ mod tests {
                     display.ends_with('…'),
                     "name should be ellipsized: {display}"
                 );
-                assert_eq!(display.chars().count(), MAX_TOOL_TARGET_CHARS + 1);
+                assert_eq!(display.chars().count(), MAX_DECODED_FIELD_CHARS + 1);
             }
             other => panic!("expected ActivityStart, got {other:?}"),
         }

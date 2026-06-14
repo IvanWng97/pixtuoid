@@ -296,13 +296,15 @@ pub fn load_pack_from_strings(pack_toml: &str, frames: &[(&str, &str)]) -> Resul
     })
 }
 
-/// The base palette keys the tui's `recolor_frame` substitutes by RGB equality
-/// for per-agent recoloring (shirt/hair/skin/pants). They MUST map to distinct
-/// RGBs: if two share a color, recolor's second match arm never fires and that
-/// key silently fails to recolor (no panic — just the wrong color on the
+/// The base palette keys per-agent recoloring substitutes by RGB equality
+/// (shirt/hair/skin/pants). The SINGLE source of truth: the tui's `recolor_frame`
+/// consumes this exact set, and `validate_recolor_palette` guards it — so the
+/// substitution and the guard can't drift (add a 5th key here, once). They MUST
+/// map to distinct RGBs: if two share a color, recolor swaps only the first and
+/// the other key silently fails (no panic — just the wrong color on the
 /// overlapping character). Enforced at LOAD so a `--pack-dir` custom pack can't
-/// violate it undetectably at runtime — the embedded pack is also test-pinned.
-const RECOLOR_KEYS: [char; 4] = ['B', 'H', 'S', 'P'];
+/// violate it undetectably — the embedded pack is also test-pinned.
+pub const RECOLOR_KEYS: [char; 4] = ['B', 'H', 'S', 'P'];
 
 /// Fail a pack whose recolor keys collide on an RGB. Only the colored
 /// (`Some(rgb)`) recolor keys participate — a transparent key isn't substituted.

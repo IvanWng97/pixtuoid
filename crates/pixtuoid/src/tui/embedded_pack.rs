@@ -291,7 +291,8 @@ mod tests {
     #[test]
     fn embedded_pack_recolor_keys_are_distinct_rgbs() {
         let pack = load_sprite_pack(None).expect("embedded pack loads");
-        let keys = ['B', 'H', 'S', 'P'];
+        // The single source of truth — same set recolor_frame + the load guard use.
+        let keys = pixtuoid_core::sprite::format::RECOLOR_KEYS;
         let rgbs: Vec<_> = keys
             .iter()
             .map(|&k| {
