@@ -12,6 +12,7 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+use pixtuoid_core::source::manager::SourceDeath;
 use pixtuoid_core::state::{ActivityState, MAX_FLOORS};
 use pixtuoid_core::SceneState;
 use tokio::sync::watch;
@@ -160,6 +161,20 @@ fn summarize(scene: &SceneState) -> String {
     format!("agents=[{}]", agents.join(", "))
 }
 
+/// Format a `SourceDeath` for the headless stdout health line. Both fields are
+/// `sanitize_line`d before printing: `error` is `format!("{e:#}")` of an
+/// `anyhow` chain that can embed external strings (a malformed transcript path,
+/// a parse error quoting file content) carrying terminal escapes, and `source`
+/// is sanitized too for defense-in-depth — the same escape-injection class the
+/// `summarize` path already guards (R0609-02).
+fn format_source_death(d: &SourceDeath) -> String {
+    format!(
+        "warning: source '{}' died: {}",
+        sanitize_line(&d.source),
+        sanitize_line(&d.error)
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -168,6 +183,25 @@ mod tests {
 
     fn floor_seed(i: u64) -> u64 {
         i.wrapping_mul(crate::tui::floor::FLOOR_SEED_MULTIPLIER)
+    }
+
+    #[test]
+    fn format_source_death_strips_terminal_escapes_from_both_fields() {
+        // `error` is the untrusted vector (anyhow `{e:#}` can quote a malformed
+        // transcript path / file content); `source` is sanitized too for
+        // defense-in-depth. Headless prints this straight to a terminal.
+        let d = SourceDeath::new(
+            "codex\u{1b}]0;pwned\u{7}",
+            "open /tmp/a\u{1b}[2Jb.jsonl: \u{1b}[31mboom\u{7}",
+        );
+        let out = format_source_death(&d);
+        assert!(
+            !out.chars().any(|c| c.is_control()),
+            "no control chars may survive into the headless terminal line: {out:?}"
+        );
+        // The human-readable text is preserved (only control chars stripped).
+        assert!(out.contains("source 'codex]0;pwned' died"), "got {out:?}");
+        assert!(out.contains("open /tmp/a[2Jb.jsonl: [31mboom"), "got {out:?}");
     }
 
     #[test]
