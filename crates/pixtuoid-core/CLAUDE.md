@@ -22,7 +22,7 @@ src/
 │                       hook()/caps()/presence_decoder() — never the enum shape. presence_decoder_for + daemon_sources
 │                       drive the registry-driven daemon demux + per-daemon sweep, so a 2nd daemon = one row),
 │                       daemon.rs (the SHARED, daemon-AGNOSTIC presence layer: DaemonPresenceUpdate vocabulary +
-│                       PresenceMsg=(source,delta) tuple + PresenceTtl + apply_presence/sweep_presence_ttl/
+│                       PresenceMsg{source,delta} struct + PresenceTtl + apply_presence/sweep_presence_ttl/
 │                       mark_presence_down + the source-tagged PresenceExitWatch — every daemon's state machine,
 │                       keyed by source name in SceneState::daemons; the per-daemon WIRE decode stays in the
 │                       daemon's own module, e.g. openclaw.rs. The instant abrupt-down (PidExited) rung arms
