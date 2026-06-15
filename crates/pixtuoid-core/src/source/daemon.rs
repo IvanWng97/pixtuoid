@@ -1,0 +1,643 @@
+//! The shared, daemon-AGNOSTIC presence layer. A "daemon" source (the OpenClaw
+//! gateway is instance #1) produces NO agent activity — it has no desk, no
+//! `AgentSlot`. Instead it earns ONE presence-gated wandering mascot whose
+//! motion encodes the daemon's liveness (idle ambles, busy shuttles, down walks
+//! out). This module owns the state machine + lifecycle that is identical for
+//! EVERY daemon; the per-daemon WIRE decode (e.g. `openclaw::decode_openclaw_
+//! hook_payload`, which maps a gateway envelope → `Vec<DaemonPresenceUpdate>`)
+//! stays in the daemon's own module, exactly like an agent source owns its own
+//! line/hook decoder.
+//!
+//! Presence rides a SIBLING channel (invariant #2: NOT the one `AgentEvent`
+//! channel), carrying `PresenceMsg = (source, DaemonPresenceUpdate)` so N
+//! daemons land in DISTINCT `SceneState::daemons` entries. The reducer task
+//! merges them via [`apply_presence`], NEVER through `Reducer::apply` (which is
+//! `AgentId`-pure). See `docs/superpowers/specs/2026-06-15-source-kind-daemon-
+//! agent-decouple-design.md`.
+
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use std::time::SystemTime;
+
+use crate::state::{DaemonPresence, DaemonState, SceneState};
+
+/// One presence delta for a daemon mascot — the SHARED vocabulary every daemon
+/// emits (a daemon's wire decoder maps its own envelope onto these). The decode
+/// arms produce the hook-derived variants; `PidExited` is emitted by the
+/// [`PresenceExitWatch`] drain (the reducer wiring), never by a decoder. All
+/// consumed by [`apply_presence`]. Source-agnostic ON PURPOSE: a 2nd daemon
+/// needs ZERO new variants — the routing key rides the channel tuple, not the
+/// enum.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DaemonPresenceUpdate {
+    /// `gateway_start` — the daemon is up; `pid` (its `process.pid`) is armed
+    /// for `ExitWatch`. UP-winning + idempotent; resets the session count.
+    GatewayUp { pid: Option<i32> },
+    /// `gateway_stop` — clean shutdown.
+    GatewayDown,
+    /// `session_start` — a multiplexed session began (bumps the bubble count).
+    SessionStarted,
+    /// `session_end` — a session ended.
+    SessionEnded,
+    /// `before_agent_run` — a turn entered flight, keyed for self-healing busy.
+    RunStarted { run_key: String },
+    /// `agent_end` — a turn completed (best-effort; the TTL decay is the backstop).
+    RunEnded { run_key: String },
+    /// The armed gateway pid died (from the `ExitWatch` drain, not a decoder).
+    PidExited { pid: i32 },
+}
+
+/// A presence delta tagged with WHICH daemon it belongs to — the routing key for
+/// N daemons. Both producers (the `handle_conn` demux and the exit-watch drain)
+/// emit this, so a daemon's deltas always reach the right `daemons[source]`.
+pub type PresenceMsg = (String, DaemonPresenceUpdate);
+
+/// The daemon-presence SIDE channel (invariant #2: NOT the one `AgentEvent`
+/// channel). Unbounded — presence deltas are tiny + rare.
+pub type PresenceSender = tokio::sync::mpsc::UnboundedSender<PresenceMsg>;
+
+/// Per-daemon decay/stale knobs. A daemon has no per-session pid, so silence is
+/// the only abrupt-exit signal — these bound how long busy/up linger without
+/// fresh deltas. Carried per-daemon (today every daemon uses [`PresenceTtl::
+/// DEFAULT`]; a future faster/slower daemon sets its own without touching the
+/// sweep, which already takes `ttl` as a parameter).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PresenceTtl {
+    /// Grace before busy → idle when no `before_agent_run`/`agent_end` arrives
+    /// (a dropped `agent_end` must self-heal, never strand perpetual busy).
+    pub busy_decay_ms: u64,
+    /// With no activity for this long the daemon is presumed DOWN (covers
+    /// SIGTERM, where neither `session_end` nor `gateway_stop` fires).
+    pub presence_ttl_ms: u64,
+    /// How long a `Down` presence lingers (drawn walking out) before it is
+    /// REMOVED (back to absent) — generously past the renderer's elevator walk-
+    /// out so the leave animation always completes first.
+    pub down_remove_ms: u64,
+}
+
+impl PresenceTtl {
+    /// The default decay profile (OpenClaw's). 30s busy decay, 5min presence
+    /// TTL, 5s Down linger.
+    pub const DEFAULT: PresenceTtl = PresenceTtl {
+        busy_decay_ms: 30_000,
+        presence_ttl_ms: 5 * 60 * 1_000,
+        down_remove_ms: 5_000,
+    };
+}
+
+/// Merge one presence delta into `scene.daemons[source]`. Called by the reducer
+/// task off the SIBLING channel — NEVER through `Reducer::apply` (which is
+/// `AgentId`-pure). Every update refreshes `last_seen` (any event is proof of
+/// life) and "any event implies UP" resurrects a wrongly-DOWN daemon.
+pub fn apply_presence(
+    scene: &mut SceneState,
+    source: &str,
+    update: DaemonPresenceUpdate,
+    now: SystemTime,
+) {
+    use DaemonPresenceUpdate::*;
+    let p = scene
+        .daemons_mut()
+        .entry(source.to_string())
+        .or_insert_with(|| DaemonPresence {
+            state: DaemonState::Idle,
+            active_sessions: 0,
+            last_seen: now,
+            entered_at: now,
+            in_flight_run_keys: Default::default(),
+            current_pid: None,
+        });
+    // A transition out of Down (or a fresh GatewayUp) re-anchors the enter
+    // animation — the mascot scuttles back in from the elevator. Idle↔Busy
+    // does NOT reset it, so the steady wander clock stays continuous.
+    let was_down = p.state == DaemonState::Down;
+    p.last_seen = now;
+    match update {
+        // UP-winning + idempotent. A (re)start resets the multiplexed-session
+        // count + in-flight runs and rebinds the armed pid — so a later stale
+        // `PidExited` for the OLD pid is ignored (restart rebind).
+        GatewayUp { pid } => {
+            p.current_pid = pid;
+            p.active_sessions = 0;
+            p.in_flight_run_keys.clear();
+            p.state = DaemonState::Idle;
+        }
+        GatewayDown => {
+            p.state = DaemonState::Down;
+            p.active_sessions = 0;
+            p.in_flight_run_keys.clear();
+        }
+        SessionStarted => {
+            p.active_sessions = p.active_sessions.saturating_add(1);
+            if p.state == DaemonState::Down {
+                p.state = DaemonState::Idle; // any event ⇒ up
+            }
+        }
+        SessionEnded => {
+            // saturating: a pre-attach session_start we never saw must not underflow.
+            p.active_sessions = p.active_sessions.saturating_sub(1);
+            if p.state == DaemonState::Down {
+                p.state = DaemonState::Idle;
+            }
+        }
+        RunStarted { run_key } => {
+            p.in_flight_run_keys.insert(run_key);
+            p.state = DaemonState::Busy;
+        }
+        RunEnded { run_key } => {
+            p.in_flight_run_keys.remove(&run_key);
+            if p.in_flight_run_keys.is_empty() {
+                p.state = DaemonState::Idle;
+            }
+        }
+        // Only the CURRENTLY-armed pid dying takes the daemon down. A stale
+        // `PidExited` for an old pid after a restart (`current_pid` already
+        // rebound to the new pid) is a no-op — the live daemon stays up.
+        PidExited { pid } => {
+            if p.current_pid == Some(pid) {
+                p.state = DaemonState::Down;
+                p.active_sessions = 0;
+                p.in_flight_run_keys.clear();
+            }
+        }
+    }
+    // Re-anchor the enter animation on a Down → up resurrection (the entry was
+    // not yet TTL-swept). A fresh insert already stamped `entered_at = now`.
+    if was_down && p.state != DaemonState::Down {
+        p.entered_at = now;
+    }
+}
+
+/// Decay one daemon's stale presence on the reducer's sweep tick: BUSY → IDLE
+/// after `ttl.busy_decay_ms` of silence (a dropped `agent_end` self-heals —
+/// never a latch), any live state → DOWN after `ttl.presence_ttl_ms` (covers
+/// SIGTERM), and a `Down` entry is REMOVED after `ttl.down_remove_ms` (back to
+/// absent, so it doesn't leak forever). Single-source so the reducer iterates
+/// `registry::daemon_sources()` and each daemon decays on its own profile.
+pub fn sweep_presence_ttl(scene: &mut SceneState, source: &str, ttl: PresenceTtl, now: SystemTime) {
+    let map = scene.daemons_mut();
+    let remove = {
+        let Some(p) = map.get_mut(source) else {
+            return;
+        };
+        let idle_ms = now
+            .duration_since(p.last_seen)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        if p.state == DaemonState::Down {
+            // Keep the Down entry only until the walk-out has had time to finish.
+            idle_ms >= ttl.down_remove_ms
+        } else {
+            if idle_ms >= ttl.presence_ttl_ms {
+                p.state = DaemonState::Down;
+                // Re-anchor `last_seen` to NOW so the renderer's `now - last_seen`
+                // walk-out timer starts at 0 and the mascot plays the elevator
+                // leave (without this the entry is ≥TTL stale → it vanishes with
+                // no walk-out). Mirrors the explicit GatewayDown/PidExited paths.
+                p.last_seen = now;
+                p.active_sessions = 0;
+                p.in_flight_run_keys.clear();
+            } else if p.state == DaemonState::Busy && idle_ms >= ttl.busy_decay_ms {
+                p.state = DaemonState::Idle;
+                p.in_flight_run_keys.clear();
+            }
+            false
+        }
+    };
+    if remove {
+        map.remove(source);
+    }
+}
+
+/// Drive a source's presence to `Down` (arming the renderer's walk-out) iff it
+/// exists and is not already Down — idempotent, so the `down_remove_ms` removal
+/// timer in [`sweep_presence_ttl`] isn't reset on every tick. The runtime calls
+/// this to walk a mascot out when its source is DISCONNECTED in the Sources
+/// panel: the presence side-channel is separate from the `AgentEvent`
+/// connection gate, so a disconnect must reconcile presence too (mirrors the
+/// reducer's `reconcile_connected` for agents).
+pub fn mark_presence_down(scene: &mut SceneState, source: &str, now: SystemTime) {
+    if let Some(p) = scene.daemons_mut().get_mut(source) {
+        if p.state != DaemonState::Down {
+            p.state = DaemonState::Down;
+            p.last_seen = now;
+            p.active_sessions = 0;
+            p.in_flight_run_keys.clear();
+        }
+    }
+}
+
+/// A handle to arm gateway-pid exit watches across ALL daemons. A dying gateway
+/// pid converts to a source-tagged `PidExited` presence delta — the instant
+/// abrupt-down rung — reusing the AGNOSTIC `ExitWatch` (pid → channel, no
+/// `AgentId` coupling), NOT `HookPidWatch` (which emits an AgentSlot-shaped
+/// `SessionEnd` the non-slot mascot can't consume). One watcher multiplexes
+/// every daemon's pid; the `pid → source` binding routes the death back.
+pub struct PresenceExitWatch {
+    inner: crate::source::exit_watch::ExitWatch,
+    /// pid → owning daemon source, so a death emits `(source, PidExited)`.
+    pids: Arc<Mutex<HashMap<i32, String>>>,
+}
+
+impl PresenceExitWatch {
+    /// Watch a daemon's gateway pid; its death emits `(source, PidExited)`.
+    /// Idempotent per pid (a re-arm just refreshes the binding).
+    pub fn watch(&self, source: &str, pid: i32) {
+        self.pids
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(pid, source.to_string());
+        self.inner.watch(pid);
+    }
+}
+
+/// Spawn the shared gateway-pid exit watcher: pid deaths drain into source-tagged
+/// `PidExited` on `presence_tx`. `None` where the platform has no exit-watch
+/// backend (then the `presence_ttl_ms` sweep is the only abrupt-down signal).
+/// Call in a tokio runtime.
+pub fn spawn_presence_exit_watch(presence_tx: PresenceSender) -> Option<PresenceExitWatch> {
+    let pids: Arc<Mutex<HashMap<i32, String>>> = Arc::new(Mutex::new(HashMap::new()));
+    let (pid_tx, mut pid_rx) = tokio::sync::mpsc::unbounded_channel::<i32>();
+    let inner = crate::source::exit_watch::ExitWatch::spawn(pid_tx)?;
+    let pids_drain = Arc::clone(&pids);
+    tokio::spawn(async move {
+        while let Some(pid) = pid_rx.recv().await {
+            // A pid with no binding is a stale receipt (already routed) — skip.
+            let source = pids_drain
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .remove(&pid);
+            if let Some(source) = source {
+                if presence_tx
+                    .send((source, DaemonPresenceUpdate::PidExited { pid }))
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        }
+    });
+    Some(PresenceExitWatch { inner, pids })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // The presence state machine is daemon-AGNOSTIC: every assertion runs
+    // against TWO synthetic sources to PROVE a 2nd daemon needs zero new
+    // state-machine code (the multi-daemon directive's structural guarantee).
+    const SOURCES: [&str; 2] = ["openclaw", "daemon2"];
+
+    fn ms(m: u64) -> SystemTime {
+        SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(m)
+    }
+    fn st(s: &SceneState, src: &str) -> DaemonState {
+        s.daemons()[src].state
+    }
+    fn sessions(s: &SceneState, src: &str) -> u32 {
+        s.daemons()[src].active_sessions
+    }
+    fn entered_at(s: &SceneState, src: &str) -> SystemTime {
+        s.daemons()[src].entered_at
+    }
+    fn last_seen(s: &SceneState, src: &str) -> SystemTime {
+        s.daemons()[src].last_seen
+    }
+    fn up(s: &mut SceneState, src: &str, pid: i32, at: u64) {
+        apply_presence(
+            s,
+            src,
+            DaemonPresenceUpdate::GatewayUp { pid: Some(pid) },
+            ms(at),
+        );
+    }
+
+    #[test]
+    fn gateway_up_sets_idle_and_records_pid() {
+        for src in SOURCES {
+            let mut s = SceneState::default();
+            up(&mut s, src, 4242, 0);
+            assert_eq!(st(&s, src), DaemonState::Idle);
+            assert_eq!(s.daemons()[src].current_pid, Some(4242));
+        }
+    }
+
+    #[test]
+    fn gateway_up_resets_sessions_and_in_flight_runs() {
+        for src in SOURCES {
+            let mut s = SceneState::default();
+            apply_presence(&mut s, src, DaemonPresenceUpdate::SessionStarted, ms(0));
+            apply_presence(&mut s, src, DaemonPresenceUpdate::SessionStarted, ms(1));
+            apply_presence(
+                &mut s,
+                src,
+                DaemonPresenceUpdate::RunStarted {
+                    run_key: "r".into(),
+                },
+                ms(2),
+            );
+            assert_eq!(st(&s, src), DaemonState::Busy);
+            up(&mut s, src, 1, 3);
+            assert_eq!(st(&s, src), DaemonState::Idle);
+            assert_eq!(sessions(&s, src), 0);
+            assert!(s.daemons()[src].in_flight_run_keys.is_empty());
+        }
+    }
+
+    #[test]
+    fn gateway_down_sets_down() {
+        for src in SOURCES {
+            let mut s = SceneState::default();
+            up(&mut s, src, 1, 0);
+            apply_presence(&mut s, src, DaemonPresenceUpdate::GatewayDown, ms(1));
+            assert_eq!(st(&s, src), DaemonState::Down);
+        }
+    }
+
+    #[test]
+    fn session_count_increments_and_saturates_at_zero() {
+        for src in SOURCES {
+            let mut s = SceneState::default();
+            apply_presence(&mut s, src, DaemonPresenceUpdate::SessionStarted, ms(0));
+            apply_presence(&mut s, src, DaemonPresenceUpdate::SessionStarted, ms(1));
+            assert_eq!(sessions(&s, src), 2);
+            for i in 0..3 {
+                apply_presence(&mut s, src, DaemonPresenceUpdate::SessionEnded, ms(2 + i));
+            }
+            assert_eq!(
+                sessions(&s, src),
+                0,
+                "saturating — a pre-attach miss never underflows"
+            );
+        }
+    }
+
+    #[test]
+    fn busy_holds_until_the_last_run_ends() {
+        for src in SOURCES {
+            let mut s = SceneState::default();
+            apply_presence(
+                &mut s,
+                src,
+                DaemonPresenceUpdate::RunStarted {
+                    run_key: "a".into(),
+                },
+                ms(0),
+            );
+            apply_presence(
+                &mut s,
+                src,
+                DaemonPresenceUpdate::RunStarted {
+                    run_key: "b".into(),
+                },
+                ms(1),
+            );
+            assert_eq!(st(&s, src), DaemonState::Busy);
+            apply_presence(
+                &mut s,
+                src,
+                DaemonPresenceUpdate::RunEnded {
+                    run_key: "a".into(),
+                },
+                ms(2),
+            );
+            assert_eq!(st(&s, src), DaemonState::Busy, "b still in flight");
+            apply_presence(
+                &mut s,
+                src,
+                DaemonPresenceUpdate::RunEnded {
+                    run_key: "b".into(),
+                },
+                ms(3),
+            );
+            assert_eq!(st(&s, src), DaemonState::Idle);
+        }
+    }
+
+    #[test]
+    fn pid_exit_matching_current_takes_the_daemon_down() {
+        for src in SOURCES {
+            let mut s = SceneState::default();
+            up(&mut s, src, 7, 0);
+            apply_presence(
+                &mut s,
+                src,
+                DaemonPresenceUpdate::PidExited { pid: 7 },
+                ms(1),
+            );
+            assert_eq!(st(&s, src), DaemonState::Down);
+        }
+    }
+
+    #[test]
+    fn stale_pid_exit_after_restart_leaves_the_daemon_up() {
+        for src in SOURCES {
+            let mut s = SceneState::default();
+            up(&mut s, src, 1, 0);
+            up(&mut s, src, 2, 1);
+            apply_presence(
+                &mut s,
+                src,
+                DaemonPresenceUpdate::PidExited { pid: 1 },
+                ms(2),
+            );
+            assert_eq!(
+                st(&s, src),
+                DaemonState::Idle,
+                "P2 stays up; stale P1 exit ignored"
+            );
+            assert_eq!(s.daemons()[src].current_pid, Some(2));
+        }
+    }
+
+    #[test]
+    fn any_event_resurrects_from_down() {
+        for src in SOURCES {
+            let mut s = SceneState::default();
+            apply_presence(&mut s, src, DaemonPresenceUpdate::GatewayDown, ms(0));
+            assert_eq!(st(&s, src), DaemonState::Down);
+            apply_presence(&mut s, src, DaemonPresenceUpdate::SessionStarted, ms(1));
+            assert_eq!(
+                st(&s, src),
+                DaemonState::Idle,
+                "any presence event implies up"
+            );
+        }
+    }
+
+    #[test]
+    fn entered_at_reanchors_on_resurrection_but_not_on_idle_busy() {
+        for src in SOURCES {
+            let mut s = SceneState::default();
+            up(&mut s, src, 1, 0);
+            assert_eq!(entered_at(&s, src), ms(0));
+            apply_presence(
+                &mut s,
+                src,
+                DaemonPresenceUpdate::RunStarted {
+                    run_key: "r".into(),
+                },
+                ms(2000),
+            );
+            apply_presence(
+                &mut s,
+                src,
+                DaemonPresenceUpdate::RunEnded {
+                    run_key: "r".into(),
+                },
+                ms(3000),
+            );
+            assert_eq!(
+                entered_at(&s, src),
+                ms(0),
+                "idle↔busy must not move entered_at"
+            );
+            apply_presence(&mut s, src, DaemonPresenceUpdate::GatewayDown, ms(4000));
+            apply_presence(&mut s, src, DaemonPresenceUpdate::SessionStarted, ms(9000));
+            assert_eq!(st(&s, src), DaemonState::Idle);
+            assert_eq!(
+                entered_at(&s, src),
+                ms(9000),
+                "resurrection re-anchors the walk-in"
+            );
+        }
+    }
+
+    #[test]
+    fn mark_presence_down_arms_the_walkout_idempotently() {
+        for src in SOURCES {
+            let mut s = SceneState::default();
+            up(&mut s, src, 1, 0);
+            mark_presence_down(&mut s, src, ms(1000));
+            assert_eq!(st(&s, src), DaemonState::Down);
+            assert_eq!(
+                last_seen(&s, src),
+                ms(1000),
+                "Down re-anchors last_seen for the walk-out"
+            );
+            mark_presence_down(&mut s, src, ms(5000));
+            assert_eq!(
+                last_seen(&s, src),
+                ms(1000),
+                "idempotent: already-Down is untouched"
+            );
+        }
+        // Unknown source is a no-op (no panic / no phantom entry).
+        let mut s = SceneState::default();
+        up(&mut s, "openclaw", 1, 0);
+        mark_presence_down(&mut s, "not-a-source", ms(6000));
+        assert_eq!(s.daemons().len(), 1);
+    }
+
+    #[test]
+    fn sweep_takes_the_daemon_down_after_presence_ttl() {
+        let ttl = PresenceTtl::DEFAULT;
+        for src in SOURCES {
+            let mut s = SceneState::default();
+            up(&mut s, src, 1, 0);
+            sweep_presence_ttl(&mut s, src, ttl, ms(ttl.presence_ttl_ms + 1));
+            assert_eq!(
+                st(&s, src),
+                DaemonState::Down,
+                "silence past the TTL ⇒ down (covers SIGTERM)"
+            );
+            assert_eq!(sessions(&s, src), 0);
+            assert_eq!(
+                last_seen(&s, src),
+                ms(ttl.presence_ttl_ms + 1),
+                "walk-out anchor re-stamped"
+            );
+        }
+    }
+
+    #[test]
+    fn sweep_removes_a_down_entry_after_the_walkout_window() {
+        let ttl = PresenceTtl::DEFAULT;
+        for src in SOURCES {
+            let mut s = SceneState::default();
+            apply_presence(&mut s, src, DaemonPresenceUpdate::GatewayDown, ms(0));
+            sweep_presence_ttl(&mut s, src, ttl, ms(ttl.down_remove_ms - 1));
+            assert!(s.daemons().contains_key(src), "still present mid walk-out");
+            sweep_presence_ttl(&mut s, src, ttl, ms(ttl.down_remove_ms + 1));
+            assert!(
+                !s.daemons().contains_key(src),
+                "removed once the walk-out window elapsed"
+            );
+        }
+    }
+
+    #[test]
+    fn sweep_self_heals_a_stranded_busy_after_the_grace_window() {
+        let ttl = PresenceTtl::DEFAULT;
+        for src in SOURCES {
+            let mut s = SceneState::default();
+            apply_presence(
+                &mut s,
+                src,
+                DaemonPresenceUpdate::RunStarted {
+                    run_key: "stranded".into(),
+                },
+                ms(0),
+            );
+            assert_eq!(st(&s, src), DaemonState::Busy);
+            sweep_presence_ttl(&mut s, src, ttl, ms(ttl.busy_decay_ms + 1));
+            assert_eq!(
+                st(&s, src),
+                DaemonState::Idle,
+                "stranded busy self-heals to idle"
+            );
+            assert!(s.daemons()[src].in_flight_run_keys.is_empty());
+        }
+    }
+
+    #[test]
+    fn sweep_within_the_grace_window_keeps_busy() {
+        let ttl = PresenceTtl::DEFAULT;
+        for src in SOURCES {
+            let mut s = SceneState::default();
+            apply_presence(
+                &mut s,
+                src,
+                DaemonPresenceUpdate::RunStarted {
+                    run_key: "r".into(),
+                },
+                ms(0),
+            );
+            sweep_presence_ttl(&mut s, src, ttl, ms(ttl.busy_decay_ms - 1));
+            assert_eq!(
+                st(&s, src),
+                DaemonState::Busy,
+                "still within the decay grace"
+            );
+        }
+    }
+
+    // The cross-daemon isolation proof: two daemons coexist in one scene with
+    // INDEPENDENT state — a delta for one never touches the other's entry. This
+    // is the structural guarantee behind "register a 2nd daemon = one row".
+    #[test]
+    fn two_daemons_coexist_with_independent_presence() {
+        let mut s = SceneState::default();
+        up(&mut s, "openclaw", 1, 0);
+        apply_presence(
+            &mut s,
+            "daemon2",
+            DaemonPresenceUpdate::RunStarted {
+                run_key: "r".into(),
+            },
+            ms(1),
+        );
+        assert_eq!(st(&s, "openclaw"), DaemonState::Idle);
+        assert_eq!(st(&s, "daemon2"), DaemonState::Busy);
+        // Taking openclaw down leaves daemon2 untouched.
+        apply_presence(&mut s, "openclaw", DaemonPresenceUpdate::GatewayDown, ms(2));
+        assert_eq!(st(&s, "openclaw"), DaemonState::Down);
+        assert_eq!(
+            st(&s, "daemon2"),
+            DaemonState::Busy,
+            "daemon2 unaffected by openclaw down"
+        );
+        assert_eq!(s.daemons().len(), 2);
+    }
+}

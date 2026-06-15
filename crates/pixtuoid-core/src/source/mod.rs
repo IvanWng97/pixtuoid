@@ -313,6 +313,10 @@ pub mod codewhale;
 pub mod codex;
 pub mod copilot;
 pub mod cursor;
+/// The shared, daemon-agnostic presence layer (state machine + lifecycle for
+/// every daemon-style source; OpenClaw is instance #1). Per-daemon wire decode
+/// stays in the daemon's own module.
+pub mod daemon;
 pub mod decoder;
 pub mod drift;
 pub(crate) mod exit_watch;

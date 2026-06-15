@@ -58,6 +58,12 @@ pub fn release_notes(version: &str) -> Option<&'static [&'static str]> {
         // anchoring on a marker is whitespace-independent — matching the `match`
         // brace would silently break if the indentation ever shifted.
         // [bump-inject-here]
+        "0.9.0" => Some(&[
+            "OpenClaw gateway visualized as Molty — a presence-gated wandering lobster mascot whose motion tracks the daemon (idle ambles, busy shuttles, down walks out); connect it in the Sources panel (press s)",
+            "Cursor CLI sessions now visualized (cu·) — connect it in the Sources panel",
+            "GitHub Copilot CLI sessions now visualized (cp·), permission prompts and sub-agents included — connect it in the Sources panel",
+            "New `pixtuoid doctor` — a read-only self-diagnosis: which sources are connected, whether their hooks are installed and sound, and a live footer nudge when an upstream wire-format change starts dropping events",
+        ]),
         "0.8.0" => Some(&[
             "New in-TUI Sources panel (press s) — connect or disconnect any agent CLI live; its characters walk in when you connect and out when you disconnect, no restart",
             "Manage every CLI from that panel: the `install-hooks` / `uninstall-hooks` commands are gone — connecting a CLI is now the panel's job (press s)",

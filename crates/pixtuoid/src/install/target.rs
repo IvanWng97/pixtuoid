@@ -370,19 +370,20 @@ mod tests {
         }
     }
 
-    // A HOOK-ONLY source (no JSONL watcher, `line_decoder: None`) reaches pixtuoid
-    // ONLY through its installed hooks — so it MUST have an install target, or it
-    // is invisible at runtime (hooks never installed → no sprite ever appears),
-    // shipped green. Transcript-bearing sources may legitimately have no target
-    // (Antigravity reads its transcript, installs no hooks). Derived from
-    // `line_decoder.is_none()`, so there is no hand-maintained exemption list to
+    // A source with no JSONL watcher (`line_decoder()` is `None` — a hook-only
+    // agent OR a daemon) reaches pixtuoid ONLY through its installed hooks/plugin
+    // — so it MUST have an install target, or it is invisible at runtime (hooks
+    // never installed → no sprite/mascot ever appears), shipped green.
+    // Transcript-bearing sources may legitimately have no target (Antigravity
+    // reads its transcript, installs no hooks). Derived from
+    // `line_decoder().is_none()`, so there is no hand-maintained exemption list to
     // drift.
     #[test]
     fn every_hook_only_source_has_an_install_target() {
         use pixtuoid_core::source::{registry::descriptor_for, REGISTERED_SOURCES};
         for &src in REGISTERED_SOURCES {
             let d = descriptor_for(src).expect("registered source must have a descriptor row");
-            if d.line_decoder.is_none() {
+            if d.line_decoder().is_none() {
                 assert!(
                     TARGETS.iter().any(|t| t.core_source == src),
                     "hook-only source {src:?} has no install target — its hooks would never \

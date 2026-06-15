@@ -99,6 +99,15 @@ pub fn decode_hook_payload(v: Value) -> Result<Vec<AgentEvent>> {
         .unwrap_or(crate::source::claude_code::SOURCE_NAME);
     let desc = crate::source::registry::descriptor_for(source);
 
+    // A DAEMON source produces ZERO AgentEvents — its payloads ride the sibling
+    // presence channel (the `HookRouter` demux routes them via the daemon's
+    // `presence_decoder`). Short-circuit so a daemon envelope never reaches the
+    // shared agent arms below (which would bail on the missing
+    // `hook_event_name`). Registry-driven: a 2nd daemon needs no edit here.
+    if desc.is_some_and(|d| d.is_daemon()) {
+        return Ok(vec![]);
+    }
+
     // A source's own hook arms run FIRST — before the shared field
     // requirements below — so an alien envelope (Reasonix: camelCase, `event`
     // discriminator, no `session_id` at all) or a subject-changing event
@@ -106,7 +115,7 @@ pub fn decode_hook_payload(v: Value) -> Result<Vec<AgentEvent>> {
     // decodes in the source's module, not here. `Ok(None)` falls through to
     // the shared CC-shaped arms; an alien-envelope source claims EVERY event
     // instead.
-    if let Some(custom) = desc.and_then(|d| d.hook.custom) {
+    if let Some(custom) = desc.and_then(|d| d.hook()).and_then(|h| h.custom) {
         if let Some(evs) = custom(&v)? {
             return Ok(evs);
         }
@@ -144,7 +153,10 @@ pub fn decode_hook_payload(v: Value) -> Result<Vec<AgentEvent>> {
     // `.filter(!is_empty)` guard is preserved: an empty transcript_path must
     // still fall back to session_id.
     let normalized_transcript_path: String;
-    let id_key = match desc.map_or(IdKey::TranscriptPathThenSessionId, |d| d.hook.id_key) {
+    let id_key = match desc
+        .and_then(|d| d.hook())
+        .map_or(IdKey::TranscriptPathThenSessionId, |h| h.id_key)
+    {
         IdKey::SessionId => session_id.as_str(),
         IdKey::TranscriptPathThenSessionId => {
             match obj
@@ -931,5 +943,20 @@ mod tests {
             ToolDetail::Generic { display } => assert_eq!(display, "Read"),
             other => panic!("expected Generic, got {other:?}"),
         }
+    }
+
+    // A DAEMON source's payload decodes to ZERO AgentEvents — the `is_daemon()`
+    // short-circuit that replaced the deleted `decode_openclaw_hook_custom`. Pins
+    // that a daemon envelope (alien `{type:…}`, no `hook_event_name`) never reaches
+    // the shared agent arms (which would bail on the missing field) — registry-
+    // driven, so a 2nd daemon is covered for free.
+    #[test]
+    fn daemon_source_payload_decodes_to_zero_agent_events() {
+        let v = json!({"_pixtuoid_source": "openclaw", "type": "gateway_start", "_pid": 1});
+        let evs = decode_hook_payload(v).expect("a daemon payload must not error");
+        assert!(
+            evs.is_empty(),
+            "a daemon source decodes to zero AgentEvents (presence rides the sibling channel), got {evs:?}"
+        );
     }
 }

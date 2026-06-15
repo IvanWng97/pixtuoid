@@ -111,7 +111,7 @@ pub const STALE_SHORT_IDLE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 fn stale_threshold(slot: &AgentSlot) -> Duration {
     stale_threshold_with_caps(
         slot,
-        crate::source::registry::descriptor_for(&slot.source).map(|d| &d.caps),
+        crate::source::registry::descriptor_for(&slot.source).map(|d| d.caps()),
     )
 }
 
@@ -121,7 +121,7 @@ fn stale_threshold(slot: &AgentSlot) -> Duration {
 /// source tests in `tests/reducer/liveness.rs`).
 fn stale_threshold_with_caps(
     slot: &AgentSlot,
-    caps: Option<&crate::source::registry::SourceCaps>,
+    caps: Option<crate::source::registry::SourceCaps>,
 ) -> Duration {
     if slot.unknown_cwd {
         return STALE_UNKNOWN_CWD_TIMEOUT;
@@ -1530,7 +1530,7 @@ mod tests {
         );
         let slot = scene.agents.get(&id).unwrap();
         assert_eq!(
-            stale_threshold_with_caps(slot, Some(&caps)),
+            stale_threshold_with_caps(slot, Some(caps)),
             STALE_WAITING_TIMEOUT,
             "hook-silent Delegating slot must get the Waiting-class window"
         );
@@ -1556,7 +1556,7 @@ mod tests {
         );
         let slot = scene.agents.get(&id).unwrap();
         assert_eq!(
-            stale_threshold_with_caps(slot, Some(&caps)),
+            stale_threshold_with_caps(slot, Some(caps)),
             STALE_ACTIVE_TIMEOUT,
             "caps-on but non-Task detail must keep the Active timer"
         );

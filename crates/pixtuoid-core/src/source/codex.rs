@@ -351,12 +351,12 @@ pub fn codex_home() -> PathBuf {
 pub struct CodexSource {
     pub sessions_root: PathBuf,
     /// The #246 child-end un-claim side-channel — Codex is consumer-only:
-    /// its `SubagentStop` hooks ride the shared socket `ClaudeCodeSource`
+    /// its `SubagentStop` hooks ride the shared socket the `HookRouter`
     /// owns (whose tee is the producer), and THIS watcher releases the ended
     /// child's rollout claim so a multi-turn child's turn-N+1 append
     /// re-registers (the motivating #246 case). The runtime shares ONE
-    /// handle across both sources; `None` disables it (bare test
-    /// construction).
+    /// handle across the router + the CC and Codex watchers; `None` disables
+    /// it (bare test construction).
     pub child_end_unclaims: Option<ChildEndUnclaims>,
 }
 

@@ -20,16 +20,20 @@ use windows as imp;
 mod pid_watch;
 pub(crate) use pid_watch::HookPidWatch;
 
+mod router;
+pub use router::HookRouter;
+
 pub(crate) const MAX_CONCURRENT_CONNS: usize = 128;
 pub(crate) const CONN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
 
 /// Typed marker for "another live instance owns the hook endpoint" — bind's
 /// ONE recoverable failure (Unix: the sibling `<sock>.lock` advisory lock is
 /// held by a live owner; Windows: CreateNamedPipeW fails ACCESS_DENIED
-/// against the owner's `first_pipe_instance`). `ClaudeCodeSource::run`
-/// downcasts for it and degrades to transcript-only (hooks disabled) instead
-/// of taking the whole CC source (and the hook-only Reasonix source riding
-/// the same socket) down with the bail. Every other bind error stays fatal.
+/// against the owner's `first_pipe_instance`). `HookRouter::run` downcasts for
+/// it and degrades the HOOK PLANE to a quiet `Ok(())` (no `SourceDeath`) instead
+/// of dying — so a second instance takes ONLY the hook plane down while the
+/// transcript watchers (CC/Codex/…) keep running as independent `SourceManager`
+/// tasks. Every other bind error stays fatal → `SourceDeath`.
 #[derive(Debug)]
 pub struct SocketBusy {
     pub path: PathBuf,
@@ -61,10 +65,11 @@ pub struct HookSocketListener {
     presence_tx: Option<PresenceSender>,
 }
 
-/// The OpenClaw daemon-presence side channel (invariant #2: NOT the one
-/// `AgentEvent` channel). Unbounded — presence deltas are tiny + rare.
-pub(crate) type PresenceSender =
-    tokio::sync::mpsc::UnboundedSender<crate::source::openclaw::DaemonPresenceUpdate>;
+/// The daemon-presence side channel (invariant #2: NOT the one `AgentEvent`
+/// channel). The shared, source-tagged tuple form (`(source, delta)`) so N
+/// daemons route to distinct `SceneState::daemons` entries — see
+/// [`crate::source::daemon::PresenceSender`].
+pub(crate) type PresenceSender = crate::source::daemon::PresenceSender;
 
 impl HookSocketListener {
     pub async fn bind(path: impl Into<PathBuf>) -> Result<Self> {
@@ -90,9 +95,9 @@ impl HookSocketListener {
         self
     }
 
-    /// Attach the presence side-channel so OpenClaw payloads decode to daemon
-    /// fixture deltas (they produce no `AgentEvent`s). Wired by `ClaudeCodeSource`,
-    /// which owns the shared socket every CLI's hooks ride.
+    /// Attach the presence side-channel so daemon payloads decode to presence
+    /// deltas (they produce no `AgentEvent`s). Wired by the `HookRouter`, which
+    /// owns the shared socket every CLI's hooks ride.
     pub(crate) fn with_presence(mut self, presence_tx: Option<PresenceSender>) -> Self {
         self.presence_tx = presence_tx;
         self
@@ -201,6 +206,31 @@ pub(crate) async fn handle_conn(
                         continue;
                     }
                 };
+                // DAEMON demux (registry-DRIVEN — NO source named here): a daemon
+                // (the OpenClaw gateway is instance #1) emits ZERO `AgentEvent`s;
+                // its payloads decode to presence deltas on the sibling channel
+                // (invariant #2), source-tagged so N daemons route to distinct
+                // `SceneState::daemons` entries. `presence_decoder_for` returns
+                // `None` for every agent source, so this is inert for them — and a
+                // 2nd daemon needs NO edit here.
+                if let (Some(ptx), Some(src)) = (
+                    presence_tx.as_ref(),
+                    v.get("_pixtuoid_source")
+                        .and_then(serde_json::Value::as_str),
+                ) {
+                    if let Some(decode) = crate::source::registry::presence_decoder_for(src) {
+                        match decode(&v) {
+                            Ok(updates) => {
+                                for u in updates {
+                                    let _ = ptx.send((src.to_string(), u));
+                                }
+                            }
+                            Err(e) => warn!("daemon presence decode error: {e}"),
+                        }
+                        // A daemon produces no AgentEvents — never the agent arms.
+                        continue;
+                    }
+                }
                 // Peek the shim-supplied CLI pid BEFORE `v` is consumed by
                 // decode. Only sources whose shim/plugin stamps `_pid`
                 // (CodeWhale, opencode) have it, so this is inert for the rest.
@@ -209,25 +239,6 @@ pub(crate) async fn handle_conn(
                     .and_then(|_| v.get("_pid"))
                     .and_then(serde_json::Value::as_u64)
                     .and_then(|p| i32::try_from(p).ok());
-                // OpenClaw is PRESENCE-ONLY: `decode_hook_payload` below yields
-                // ZERO `AgentEvent`s for it — its daemon-fixture deltas ride this
-                // SIDE channel instead (invariant #2). Peek before `v` is consumed.
-                // Inert for every other source (gated on the source tag).
-                if let Some(ptx) = presence_tx.as_ref() {
-                    if v.get("_pixtuoid_source")
-                        .and_then(serde_json::Value::as_str)
-                        == Some(crate::source::openclaw::SOURCE_NAME)
-                    {
-                        match crate::source::openclaw::decode_openclaw_hook_payload(&v) {
-                            Ok(updates) => {
-                                for u in updates {
-                                    let _ = ptx.send(u);
-                                }
-                            }
-                            Err(e) => warn!("openclaw presence decode error: {e}"),
-                        }
-                    }
-                }
                 match decode_hook_payload(v) {
                     // One payload can decode to multiple events (an Identity
                     // attached ahead of a tool/permission event, #221) — sent
@@ -405,12 +416,17 @@ mod tests {
         task.await.unwrap();
     }
 
+    // The daemon demux is registry-DRIVEN (no source named in handle_conn): an
+    // OpenClaw line routes to the SIDE channel as a SOURCE-TAGGED tuple
+    // `("openclaw", GatewayUp)` and emits ZERO AgentEvents, while an ordinary CC
+    // line decodes only on the AgentEvent channel.
     #[tokio::test]
     async fn handle_conn_routes_openclaw_presence_to_the_side_channel_only() {
-        use crate::source::openclaw::DaemonPresenceUpdate;
+        use crate::source::daemon::DaemonPresenceUpdate;
         let (mut client, server) = tokio::io::duplex(4096);
         let (tx, mut rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(8);
-        let (ptx, mut prx) = tokio::sync::mpsc::unbounded_channel::<DaemonPresenceUpdate>();
+        let (ptx, mut prx) =
+            tokio::sync::mpsc::unbounded_channel::<(String, DaemonPresenceUpdate)>();
 
         let task = tokio::spawn(handle_conn(server, tx, None, Some(ptx)));
         // A shim-stamped OpenClaw presence line, then an ordinary CC agent line.
@@ -429,9 +445,13 @@ mod tests {
             .unwrap();
         drop(client);
 
-        // The OpenClaw line → exactly one GatewayUp on the SIDE channel, and the
-        // AgentEvent channel never sees it (presence-only: zero AgentEvents).
-        let update = prx.recv().await.expect("one presence update");
+        // The OpenClaw line → exactly one ("openclaw", GatewayUp) on the SIDE
+        // channel, and the AgentEvent channel never sees it (zero AgentEvents).
+        let (src, update) = prx.recv().await.expect("one presence update");
+        assert_eq!(
+            src, "openclaw",
+            "presence is source-tagged for N-daemon routing"
+        );
         assert!(matches!(
             update,
             DaemonPresenceUpdate::GatewayUp { pid: Some(4242) }

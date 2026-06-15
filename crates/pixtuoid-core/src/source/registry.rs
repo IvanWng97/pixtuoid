@@ -76,7 +76,9 @@ pub struct HookDecoding {
 
 /// Reducer-facing capability flags — stable facts about the source's wire
 /// protocol, NOT policy names, so a future CLI picks values truthfully and
-/// the policy falls out.
+/// the policy falls out. `Copy` (three bools) so `SourceDescriptor::caps()`
+/// can hand back a value (a `Daemon` row has no stored caps to borrow).
+#[derive(Clone, Copy)]
 pub struct SourceCaps {
     /// Does a CLEAN exit leave any end signal at all (a SessionEnd hook
     /// and/or a JSONL end marker — best-effort counts; "none of any kind" is
@@ -107,6 +109,14 @@ pub struct SourceCaps {
 }
 
 impl SourceCaps {
+    /// All-false caps for a `Daemon` source: it creates no `AgentSlot`s, so the
+    /// AgentSlot-reaping caps never apply — `short_idle_reap()` is false.
+    pub const INERT_DAEMON: SourceCaps = SourceCaps {
+        has_exit_signal: false,
+        resurrects_on_prompt: false,
+        delegations_are_hook_silent: false,
+    };
+
     /// The short-idle-reaper policy, derived: only safe when the sweep is the
     /// sole reaper (`!has_exit_signal`) AND the false positive self-heals
     /// (`resurrects_on_prompt`). See `reducer::STALE_SHORT_IDLE_TIMEOUT`'s
@@ -136,18 +146,75 @@ pub struct SourceDescriptor {
     /// `None` = no probe (no stable CLI binary). `doctor` runs it best-effort; a
     /// missing binary / parse failure degrades to "version: unknown".
     pub version_probe: Option<&'static [&'static str]>,
-    /// JSONL line decoder. `None` = a HOOK-ONLY source (no watchable
-    /// transcript): the fixture harness then accepts a transcript-less,
-    /// hook-payloads-only scenario for it — and ONLY for it.
-    pub line_decoder: Option<LineDecoder>,
-    /// True for a PRESENCE-ONLY source: its `hook.custom` claims every event but
-    /// produces ZERO `AgentEvent`s — presence rides a sibling channel into
-    /// `SceneState::source_presence` (the OpenClaw gateway mascot). The
-    /// conformance harness treats the empty `AgentEvent` output as by-design, not
-    /// a broken decoder. `false` for every agent-rendering source.
-    pub presence_only: bool,
-    pub hook: HookDecoding,
-    pub caps: SourceCaps,
+    /// What KIND of source this is — the typed discriminator that replaced a
+    /// `presence_only: bool` over `Option`-soup fields. Consumers read through
+    /// the accessors (`line_decoder()`/`hook()`/`caps()`/`is_daemon()`/
+    /// `presence_decoder()`) so the enum shape stays an internal detail.
+    pub kind: SourceKind,
+}
+
+/// The two source classes, type-isolated. Adding a daemon (a 2nd one is "one
+/// `Daemon` row + one binary mascot arm + one badge arm") needs no `handle_conn`
+/// edit and no new reducer arm — the registry-driven demux + the
+/// `daemon_sources()` sweep loop dispatch on this.
+pub enum SourceKind {
+    /// Produces `AgentEvent`s → `SceneState::agents` → a desk sprite.
+    Agent {
+        /// JSONL line decoder. `None` = a HOOK-ONLY agent (no watchable
+        /// transcript): the fixture harness then accepts a transcript-less,
+        /// hook-payloads-only scenario for it — and ONLY for it.
+        line_decoder: Option<LineDecoder>,
+        hook: HookDecoding,
+        caps: SourceCaps,
+    },
+    /// Produces `DaemonPresenceUpdate`s → `SceneState::daemons` → a wandering
+    /// mascot (the OpenClaw gateway is instance #1). Its `presence_decoder` maps
+    /// the daemon's wire envelope to presence deltas; it emits ZERO `AgentEvent`s
+    /// (the `HookRouter` demux routes its payloads to the sibling channel, and
+    /// `decode_hook_payload` short-circuits `is_daemon()` → empty).
+    Daemon { presence_decoder: PresenceDecoder },
+}
+
+impl SourceDescriptor {
+    /// A `Daemon`-kind row renders a mascot, not a desk sprite — the conformance
+    /// harness treats its empty `AgentEvent` output as by-design.
+    pub fn is_daemon(&self) -> bool {
+        matches!(self.kind, SourceKind::Daemon { .. })
+    }
+
+    /// The JSONL line decoder (`None` for a hook-only agent AND every daemon).
+    pub fn line_decoder(&self) -> Option<LineDecoder> {
+        match &self.kind {
+            SourceKind::Agent { line_decoder, .. } => *line_decoder,
+            SourceKind::Daemon { .. } => None,
+        }
+    }
+
+    /// The hook-decoding spec (`None` for a daemon — its payloads never reach
+    /// the shared agent arms).
+    pub fn hook(&self) -> Option<&HookDecoding> {
+        match &self.kind {
+            SourceKind::Agent { hook, .. } => Some(hook),
+            SourceKind::Daemon { .. } => None,
+        }
+    }
+
+    /// Reducer capability flags — an INERT all-false default for a daemon (it
+    /// creates no `AgentSlot`s, so `short_idle_reap()` is false).
+    pub fn caps(&self) -> SourceCaps {
+        match &self.kind {
+            SourceKind::Agent { caps, .. } => *caps,
+            SourceKind::Daemon { .. } => SourceCaps::INERT_DAEMON,
+        }
+    }
+
+    /// The daemon's presence decoder (`None` for an agent source).
+    pub fn presence_decoder(&self) -> Option<PresenceDecoder> {
+        match &self.kind {
+            SourceKind::Daemon { presence_decoder } => Some(*presence_decoder),
+            SourceKind::Agent { .. } => None,
+        }
+    }
 }
 
 pub const REGISTRY: &[SourceDescriptor] = &[
@@ -168,31 +235,55 @@ pub fn descriptor_for(name: &str) -> Option<&'static SourceDescriptor> {
     REGISTRY.iter().find(|d| d.name == name)
 }
 
+/// A daemon source's wire decoder: its envelope → presence deltas. The pointer
+/// type the registry hands the `HookRouter` demux so each daemon routes to its
+/// OWN decoder (a 2nd daemon needs no `handle_conn` edit).
+pub type PresenceDecoder = fn(&Value) -> Result<Vec<crate::source::daemon::DaemonPresenceUpdate>>;
+
+/// The presence decoder for a daemon source, or `None` for an agent source.
+/// Registry-DRIVEN — the demux never names a source, so a 2nd daemon needs no
+/// `handle_conn` edit.
+pub fn presence_decoder_for(source: &str) -> Option<PresenceDecoder> {
+    descriptor_for(source).and_then(|d| d.presence_decoder())
+}
+
+/// Every registered daemon source paired with its presence-decay profile — the
+/// reducer iterates this for the per-daemon presence sweep + disconnect
+/// reconcile, so each daemon decays on its own TTL with no hardcoded name.
+pub fn daemon_sources() -> impl Iterator<Item = (&'static str, crate::source::daemon::PresenceTtl)>
+{
+    REGISTRY
+        .iter()
+        .filter(|d| d.is_daemon())
+        .map(|d| (d.name, crate::source::daemon::PresenceTtl::DEFAULT))
+}
+
 const CLAUDE_CODE: SourceDescriptor = SourceDescriptor {
     name: claude_code::SOURCE_NAME,
     label_prefix: "cc",
     verified_version: "unknown",
     version_probe: Some(&["claude", "--version"]),
-    line_decoder: Some(claude_code::decode_cc_line),
-    hook: HookDecoding {
-        // CC keys on the session UUID (== the transcript filename stem
-        // `cc_id_from_path` derives), NOT the cwd-derived transcript path, so a
-        // subagent→parent link survives a git-worktree cwd-split. Mirrors Codex.
-        id_key: IdKey::SessionId,
-        // SubagentStart/Stop change the event's SUBJECT (child AgentId ≠
-        // session AgentId) — inexpressible in the shared arms. The Stop is the
-        // ONLY end signal a Workflow-fleet subagent gets (#241).
-        custom: Some(claude_code::decode_cc_hook_custom),
-    },
-    presence_only: false,
-    caps: SourceCaps {
-        has_exit_signal: true,
-        // CC has no UserPromptSubmit-class resurrect path (its JSONL
-        // SessionStart is first-sight-only, so a swept slot would NOT walk
-        // back in) — but the flag is moot: with a real exit signal the short
-        // reaper never applies (see short_idle_reap).
-        resurrects_on_prompt: false,
-        delegations_are_hook_silent: false,
+    kind: SourceKind::Agent {
+        line_decoder: Some(claude_code::decode_cc_line),
+        hook: HookDecoding {
+            // CC keys on the session UUID (== the transcript filename stem
+            // `cc_id_from_path` derives), NOT the cwd-derived transcript path, so a
+            // subagent→parent link survives a git-worktree cwd-split. Mirrors Codex.
+            id_key: IdKey::SessionId,
+            // SubagentStart/Stop change the event's SUBJECT (child AgentId ≠
+            // session AgentId) — inexpressible in the shared arms. The Stop is the
+            // ONLY end signal a Workflow-fleet subagent gets (#241).
+            custom: Some(claude_code::decode_cc_hook_custom),
+        },
+        caps: SourceCaps {
+            has_exit_signal: true,
+            // CC has no UserPromptSubmit-class resurrect path (its JSONL
+            // SessionStart is first-sight-only, so a swept slot would NOT walk
+            // back in) — but the flag is moot: with a real exit signal the short
+            // reaper never applies (see short_idle_reap).
+            resurrects_on_prompt: false,
+            delegations_are_hook_silent: false,
+        },
     },
 };
 
@@ -201,18 +292,19 @@ const CODEX: SourceDescriptor = SourceDescriptor {
     label_prefix: "cx",
     verified_version: "unknown",
     version_probe: Some(&["codex", "--version"]),
-    line_decoder: Some(codex::decode_codex_line),
-    hook: HookDecoding {
-        id_key: IdKey::SessionId,
-        // SubagentStart/Stop change the event's SUBJECT (child AgentId ≠
-        // session AgentId) — inexpressible in the shared arms.
-        custom: Some(codex::decode_codex_hook_custom),
-    },
-    presence_only: false,
-    caps: SourceCaps {
-        has_exit_signal: false,
-        resurrects_on_prompt: true,
-        delegations_are_hook_silent: false,
+    kind: SourceKind::Agent {
+        line_decoder: Some(codex::decode_codex_line),
+        hook: HookDecoding {
+            id_key: IdKey::SessionId,
+            // SubagentStart/Stop change the event's SUBJECT (child AgentId ≠
+            // session AgentId) — inexpressible in the shared arms.
+            custom: Some(codex::decode_codex_hook_custom),
+        },
+        caps: SourceCaps {
+            has_exit_signal: false,
+            resurrects_on_prompt: true,
+            delegations_are_hook_silent: false,
+        },
     },
 };
 
@@ -221,16 +313,17 @@ const ANTIGRAVITY: SourceDescriptor = SourceDescriptor {
     label_prefix: "ag",
     verified_version: "unknown",
     version_probe: Some(&["agy", "--version"]),
-    line_decoder: Some(antigravity::decode_ag_line),
-    hook: HookDecoding {
-        id_key: IdKey::TranscriptPathThenSessionId,
-        custom: None,
-    },
-    presence_only: false,
-    caps: SourceCaps {
-        has_exit_signal: false,
-        resurrects_on_prompt: false,
-        delegations_are_hook_silent: false,
+    kind: SourceKind::Agent {
+        line_decoder: Some(antigravity::decode_ag_line),
+        hook: HookDecoding {
+            id_key: IdKey::TranscriptPathThenSessionId,
+            custom: None,
+        },
+        caps: SourceCaps {
+            has_exit_signal: false,
+            resurrects_on_prompt: false,
+            delegations_are_hook_silent: false,
+        },
     },
 };
 
@@ -244,24 +337,25 @@ const REASONIX: SourceDescriptor = SourceDescriptor {
     label_prefix: "rx",
     verified_version: "unknown",
     version_probe: Some(&["reasonix", "--version"]),
-    line_decoder: None,
-    hook: HookDecoding {
-        id_key: IdKey::TranscriptPathThenSessionId, // inert: custom claims all
-        custom: Some(reasonix::decode_rx_hook_custom),
-    },
-    presence_only: false,
-    caps: SourceCaps {
-        // SessionEnd hook fires on clean exit (verified upstream @v1.2.0,
-        // internal/hook/hook.go run sites) — best-effort counts.
-        has_exit_signal: true,
-        // UserPromptSubmit re-emits SessionStart (the decode maps it so) —
-        // a swept-but-live session walks back in on the next prompt.
-        resurrects_on_prompt: true,
-        // Subagents run in-process with hooks disabled upstream
-        // (internal/agent/task.go) — a Delegating slot emits NOTHING until
-        // the dispatch tool's PostToolUse, so it gets the Waiting-class
-        // stale window (see `stale_threshold_with_caps`).
-        delegations_are_hook_silent: true,
+    kind: SourceKind::Agent {
+        line_decoder: None,
+        hook: HookDecoding {
+            id_key: IdKey::TranscriptPathThenSessionId, // inert: custom claims all
+            custom: Some(reasonix::decode_rx_hook_custom),
+        },
+        caps: SourceCaps {
+            // SessionEnd hook fires on clean exit (verified upstream @v1.2.0,
+            // internal/hook/hook.go run sites) — best-effort counts.
+            has_exit_signal: true,
+            // UserPromptSubmit re-emits SessionStart (the decode maps it so) —
+            // a swept-but-live session walks back in on the next prompt.
+            resurrects_on_prompt: true,
+            // Subagents run in-process with hooks disabled upstream
+            // (internal/agent/task.go) — a Delegating slot emits NOTHING until
+            // the dispatch tool's PostToolUse, so it gets the Waiting-class
+            // stale window (see `stale_threshold_with_caps`).
+            delegations_are_hook_silent: true,
+        },
     },
 };
 
@@ -278,28 +372,29 @@ const CODEWHALE: SourceDescriptor = SourceDescriptor {
     label_prefix: "cw",
     verified_version: "unknown",
     version_probe: Some(&["codewhale", "--version"]),
-    line_decoder: None,
-    hook: HookDecoding {
-        id_key: IdKey::TranscriptPathThenSessionId, // inert: custom claims all
-        custom: Some(codewhale::decode_cw_hook_custom),
-    },
-    presence_only: false,
-    caps: SourceCaps {
-        // session_end fires on a clean TUI quit carrying DEEPSEEK_WORKSPACE
-        // (verified live 2026-06-12) — best-effort counts.
-        has_exit_signal: true,
-        // message_submit re-emits SessionStart (the decode maps it so) —
-        // a swept-but-live session walks back in on the next prompt.
-        resurrects_on_prompt: true,
-        // Conservative ASSUMPTION (the live exec_shell capture did not exercise
-        // a dispatch): if the dispatch tool (`agent_spawn`) blocks hook-silently
-        // until its tool_call_after, a Delegating slot must get the Waiting-class
-        // stale window rather than be swept mid-delegation. `true` is the safe
-        // default — it can only over-retain a dead Delegating slot, never reap a
-        // live one; matches Reasonix. (Individual sub-agents ALSO get their own
-        // child sprites via the subagent_spawn/complete observer hooks —
-        // `codewhale::decode_cw_subagent`.)
-        delegations_are_hook_silent: true,
+    kind: SourceKind::Agent {
+        line_decoder: None,
+        hook: HookDecoding {
+            id_key: IdKey::TranscriptPathThenSessionId, // inert: custom claims all
+            custom: Some(codewhale::decode_cw_hook_custom),
+        },
+        caps: SourceCaps {
+            // session_end fires on a clean TUI quit carrying DEEPSEEK_WORKSPACE
+            // (verified live 2026-06-12) — best-effort counts.
+            has_exit_signal: true,
+            // message_submit re-emits SessionStart (the decode maps it so) —
+            // a swept-but-live session walks back in on the next prompt.
+            resurrects_on_prompt: true,
+            // Conservative ASSUMPTION (the live exec_shell capture did not exercise
+            // a dispatch): if the dispatch tool (`agent_spawn`) blocks hook-silently
+            // until its tool_call_after, a Delegating slot must get the Waiting-class
+            // stale window rather than be swept mid-delegation. `true` is the safe
+            // default — it can only over-retain a dead Delegating slot, never reap a
+            // live one; matches Reasonix. (Individual sub-agents ALSO get their own
+            // child sprites via the subagent_spawn/complete observer hooks —
+            // `codewhale::decode_cw_subagent`.)
+            delegations_are_hook_silent: true,
+        },
     },
 };
 
@@ -308,57 +403,50 @@ const OPENCODE: SourceDescriptor = SourceDescriptor {
     label_prefix: "oc",
     verified_version: "unknown",
     version_probe: Some(&["opencode", "--version"]),
-    line_decoder: None,
-    hook: HookDecoding {
-        id_key: IdKey::TranscriptPathThenSessionId, // inert: custom claims all
-        custom: Some(opencode::decode_oc_hook_custom),
-    },
-    presence_only: false,
-    caps: SourceCaps {
-        // A clean per-session close fires `session.deleted` → SessionEnd, and an
-        // abrupt exit / TUI quit kills the opencode process → `hook::HookPidWatch`
-        // ends every bound sprite (the plugin stamps `_pid`). So there IS an exit
-        // signal — no Codex-style short-idle carve-out.
-        has_exit_signal: true,
-        // opencode sessions are persistent SQLite rows; a follow-up prompt
-        // continues the SAME session and emits NO new `session.created`. So a
-        // stale-swept session does NOT walk back in on the next prompt (unlike
-        // CodeWhale/Reasonix/Codex) — combined with `has_exit_signal` this keeps
-        // the normal long idle timeout, not the short-idle reaper.
-        resurrects_on_prompt: false,
-        // The `task` dispatch tool emits BOTH a `running` and a `completed`/`error`
-        // tool part (→ ActivityStart + ActivityEnd), so a delegation is NOT
-        // hook-silent; liveness also flows UP from the child session (its own
-        // sprite, parent-linked via `info.parentID`). No Waiting-class retention
-        // needed.
-        delegations_are_hook_silent: false,
+    kind: SourceKind::Agent {
+        line_decoder: None,
+        hook: HookDecoding {
+            id_key: IdKey::TranscriptPathThenSessionId, // inert: custom claims all
+            custom: Some(opencode::decode_oc_hook_custom),
+        },
+        caps: SourceCaps {
+            // A clean per-session close fires `session.deleted` → SessionEnd, and an
+            // abrupt exit / TUI quit kills the opencode process → `hook::HookPidWatch`
+            // ends every bound sprite (the plugin stamps `_pid`). So there IS an exit
+            // signal — no Codex-style short-idle carve-out.
+            has_exit_signal: true,
+            // opencode sessions are persistent SQLite rows; a follow-up prompt
+            // continues the SAME session and emits NO new `session.created`. So a
+            // stale-swept session does NOT walk back in on the next prompt (unlike
+            // CodeWhale/Reasonix/Codex) — combined with `has_exit_signal` this keeps
+            // the normal long idle timeout, not the short-idle reaper.
+            resurrects_on_prompt: false,
+            // The `task` dispatch tool emits BOTH a `running` and a `completed`/`error`
+            // tool part (→ ActivityStart + ActivityEnd), so a delegation is NOT
+            // hook-silent; liveness also flows UP from the child session (its own
+            // sprite, parent-linked via `info.parentID`). No Waiting-class retention
+            // needed.
+            delegations_are_hook_silent: false,
+        },
     },
 };
 
-/// HOOK-ONLY and PRESENCE-ONLY: OpenClaw is one always-on gateway DAEMON, not a
-/// per-session coding agent. Its backend `claude-cli` sessions are already shown
-/// by `cc·`, so OpenClaw renders ONE presence-gated wandering mascot (Molty) — its
-/// `hook.custom` claims every event (alien `{type:…}` envelope) but emits ZERO
-/// `AgentEvent`s; presence rides a sibling channel into `SceneState::source_presence`.
-/// `caps` are INERT (it creates no `AgentSlot`s — these gate AgentSlot reaping).
+/// The DAEMON row: OpenClaw is one always-on gateway DAEMON, not a per-session
+/// coding agent. Its backend `claude-cli` sessions are already shown by `cc·`,
+/// so OpenClaw renders ONE presence-gated wandering mascot (Molty). The
+/// `presence_decoder` maps its alien `{type:…}` envelope to presence deltas on
+/// the sibling channel; it emits ZERO `AgentEvent`s (the `HookRouter` demux
+/// routes its payloads via this decoder, and `decode_hook_payload` short-circuits
+/// `is_daemon()` → empty). `line_decoder()`/`hook()`/`caps()` are inert by
+/// construction (a daemon creates no `AgentSlot`s — `short_idle_reap()` is false).
 const OPENCLAW: SourceDescriptor = SourceDescriptor {
     name: openclaw::SOURCE_NAME,
     label_prefix: "ok",
     // Byte-real capture anchor (2026-06-15): `openclaw 2026.6.6`.
     verified_version: "2026.6.6",
     version_probe: Some(&["openclaw", "--version"]),
-    line_decoder: None,
-    presence_only: true,
-    hook: HookDecoding {
-        id_key: IdKey::TranscriptPathThenSessionId, // inert: custom claims all
-        custom: Some(openclaw::decode_openclaw_hook_custom),
-    },
-    caps: SourceCaps {
-        // INERT — OpenClaw creates no AgentSlots (daemon-presence only), so these
-        // AgentSlot-reaping caps never apply. Set so `short_idle_reap()` is false.
-        has_exit_signal: false,
-        resurrects_on_prompt: false,
-        delegations_are_hook_silent: false,
+    kind: SourceKind::Daemon {
+        presence_decoder: openclaw::decode_openclaw_hook_payload,
     },
 };
 
@@ -373,21 +461,22 @@ const COPILOT: SourceDescriptor = SourceDescriptor {
     label_prefix: "cp",
     verified_version: "1.0.62",
     version_probe: Some(&["copilot", "--version"]),
-    line_decoder: Some(copilot::decode_copilot_line),
-    hook: HookDecoding {
-        id_key: IdKey::TranscriptPathThenSessionId, // inert: no hook transport for this source
-        custom: None,
-    },
-    presence_only: false,
-    caps: SourceCaps {
-        // `session.shutdown` is a real persisted exit marker → no short-idle reaper.
-        has_exit_signal: true,
-        // Sessions are stable + resumable (sessionId constant across --resume); a
-        // stale-swept session does not silently walk back in on the next prompt.
-        resurrects_on_prompt: false,
-        // The `task` dispatch emits a `tool.execution_start`/`complete` pair AND explicit
-        // `subagent.started`/`completed` events, so a delegation is not hook-silent.
-        delegations_are_hook_silent: false,
+    kind: SourceKind::Agent {
+        line_decoder: Some(copilot::decode_copilot_line),
+        hook: HookDecoding {
+            id_key: IdKey::TranscriptPathThenSessionId, // inert: no hook transport for this source
+            custom: None,
+        },
+        caps: SourceCaps {
+            // `session.shutdown` is a real persisted exit marker → no short-idle reaper.
+            has_exit_signal: true,
+            // Sessions are stable + resumable (sessionId constant across --resume); a
+            // stale-swept session does not silently walk back in on the next prompt.
+            resurrects_on_prompt: false,
+            // The `task` dispatch emits a `tool.execution_start`/`complete` pair AND explicit
+            // `subagent.started`/`completed` events, so a delegation is not hook-silent.
+            delegations_are_hook_silent: false,
+        },
     },
 };
 
@@ -407,29 +496,30 @@ const CURSOR: SourceDescriptor = SourceDescriptor {
     label_prefix: "cu",
     verified_version: "unknown",
     version_probe: Some(&["cursor-agent", "--version"]),
-    line_decoder: None,
-    hook: HookDecoding {
-        id_key: IdKey::TranscriptPathThenSessionId, // inert: custom claims all
-        custom: Some(cursor::decode_cursor_hook_custom),
-    },
-    presence_only: false,
-    caps: SourceCaps {
-        // `sessionEnd` FIRES on clean completion (capture-verified 2026-06-14:
-        // `reason:"completed"`) — best-effort counts, CC/Reasonix class. Abrupt
-        // exits (no PID exposed) fall to the generic stale-sweep.
-        has_exit_signal: true,
-        // Each `cursor-agent` invocation is a NEW session_id, so a stale-swept
-        // session does NOT walk back in on a later prompt — but moot: with an
-        // exit signal the short reaper never applies (short_idle_reap == false).
-        resurrects_on_prompt: false,
-        // Cursor's `Task` dispatch (capture-verified) makes the parent Delegating,
-        // and it gets NO `postToolUse` for the Task — the parent is hook-silent
-        // through the delegation (the children run as separate, unlinkable
-        // sessions), so the Delegating slot needs the Waiting-class stale window
-        // rather than a mid-delegation sweep (matches Reasonix/CodeWhale; safe —
-        // it can only over-retain a dead Delegating slot, the parent's own
-        // `sessionEnd` reaps it cleanly in the normal case).
-        delegations_are_hook_silent: true,
+    kind: SourceKind::Agent {
+        line_decoder: None,
+        hook: HookDecoding {
+            id_key: IdKey::TranscriptPathThenSessionId, // inert: custom claims all
+            custom: Some(cursor::decode_cursor_hook_custom),
+        },
+        caps: SourceCaps {
+            // `sessionEnd` FIRES on clean completion (capture-verified 2026-06-14:
+            // `reason:"completed"`) — best-effort counts, CC/Reasonix class. Abrupt
+            // exits (no PID exposed) fall to the generic stale-sweep.
+            has_exit_signal: true,
+            // Each `cursor-agent` invocation is a NEW session_id, so a stale-swept
+            // session does NOT walk back in on a later prompt — but moot: with an
+            // exit signal the short reaper never applies (short_idle_reap == false).
+            resurrects_on_prompt: false,
+            // Cursor's `Task` dispatch (capture-verified) makes the parent Delegating,
+            // and it gets NO `postToolUse` for the Task — the parent is hook-silent
+            // through the delegation (the children run as separate, unlinkable
+            // sessions), so the Delegating slot needs the Waiting-class stale window
+            // rather than a mid-delegation sweep (matches Reasonix/CodeWhale; safe —
+            // it can only over-retain a dead Delegating slot, the parent's own
+            // `sessionEnd` reaps it cleanly in the normal case).
+            delegations_are_hook_silent: true,
+        },
     },
 };
 
@@ -517,9 +607,81 @@ mod tests {
     fn short_idle_reap_fires_for_codex_only() {
         for d in REGISTRY {
             assert_eq!(
-                d.caps.short_idle_reap(),
+                d.caps().short_idle_reap(),
                 d.name == codex::SOURCE_NAME,
                 "short_idle_reap mismatch for {:?}",
+                d.name
+            );
+        }
+    }
+
+    // OpenClaw is the ONLY daemon today. The Agent/Daemon partition must be exact:
+    // a 2nd daemon updates this list (and gets a mascot arm + badge arm). Pins the
+    // `SourceKind` discriminant so an Agent row never silently becomes daemon-shaped.
+    #[test]
+    fn openclaw_is_the_only_daemon() {
+        let daemons: Vec<&str> = REGISTRY
+            .iter()
+            .filter(|d| d.is_daemon())
+            .map(|d| d.name)
+            .collect();
+        assert_eq!(daemons, vec![openclaw::SOURCE_NAME]);
+    }
+
+    // A `Daemon` row's agent-facing accessors are INERT by construction: no JSONL
+    // watcher, no hook spec (its payloads never reach the shared agent arms),
+    // all-false caps (so `short_idle_reap()` is false), AND a presence decoder.
+    #[test]
+    fn daemon_accessors_are_inert() {
+        let d = descriptor_for(openclaw::SOURCE_NAME).unwrap();
+        assert!(d.is_daemon());
+        assert!(d.line_decoder().is_none(), "a daemon has no JSONL watcher");
+        assert!(
+            d.hook().is_none(),
+            "a daemon never reaches the shared agent arms"
+        );
+        assert!(
+            !d.caps().short_idle_reap(),
+            "INERT caps — a daemon reaps no AgentSlot"
+        );
+        assert!(
+            d.presence_decoder().is_some(),
+            "a daemon MUST carry a presence decoder"
+        );
+    }
+
+    // The complement: every Agent exposes a hook spec and NO presence decoder, so
+    // the registry-driven demux never routes an agent payload to the presence
+    // channel (and a daemon's payload never decodes as an agent — pinned above).
+    #[test]
+    fn agents_expose_hook_and_no_presence_decoder() {
+        for d in REGISTRY.iter().filter(|d| !d.is_daemon()) {
+            assert!(
+                d.hook().is_some(),
+                "agent {:?} must expose a hook spec",
+                d.name
+            );
+            assert!(
+                d.presence_decoder().is_none(),
+                "agent {:?} must have no presence decoder",
+                d.name
+            );
+        }
+    }
+
+    // A `Daemon` row can't ALSO be a transcript source: it carries a presence
+    // decoder and NO line decoder (the demux + conformance harness rely on this).
+    #[test]
+    fn every_daemon_source_has_a_presence_decoder_and_no_line_decoder() {
+        for d in REGISTRY.iter().filter(|d| d.is_daemon()) {
+            assert!(
+                d.presence_decoder().is_some(),
+                "daemon {:?} needs a presence decoder",
+                d.name
+            );
+            assert!(
+                d.line_decoder().is_none(),
+                "daemon {:?} must not also be a transcript source",
                 d.name
             );
         }

@@ -21,9 +21,11 @@ use pixtuoid_core::source::antigravity::AntigravitySource;
 use pixtuoid_core::source::claude_code::ClaudeCodeSource;
 use pixtuoid_core::source::codex::CodexSource;
 use pixtuoid_core::source::copilot::CopilotSource;
+use pixtuoid_core::source::daemon::{self, DaemonPresenceUpdate, PresenceMsg};
+use pixtuoid_core::source::hook::HookRouter;
 use pixtuoid_core::source::jsonl::ChildEndUnclaims;
 use pixtuoid_core::source::manager::SourceManager;
-use pixtuoid_core::source::openclaw::{self, DaemonPresenceUpdate};
+use pixtuoid_core::source::registry;
 use pixtuoid_core::source::DynSource;
 use pixtuoid_core::state::MAX_FLOORS;
 use pixtuoid_core::{AgentEvent, Reducer, SceneState, TaggedReceiver, Transport};
@@ -58,28 +60,24 @@ async fn run_async(cfg: RunConfig) -> Result<()> {
     // The live, shared connected-source set: the reducer-task gate reads it, the
     // Sources panel mutates it. Seeded from the resolved boot flags.
     let connected = ConnectedSources::new(connected);
-    // The transcript-bearing sources (CC / Antigravity / Codex), built in ONE
-    // place: `build_transcript_sources` is the single source of truth its test
-    // pins against the registry, closing the documented "registered but never
-    // spawned" gap. Hook-only sources (Reasonix / CodeWhale / opencode) have no
-    // watchable JSONL — their hook payloads ride the shared socket
-    // ClaudeCodeSource binds, attributed per-payload by `_pixtuoid_source` — so
-    // they are deliberately absent here.
-    // Resolve the bound socket (Unix) / pipe (Windows) BEFORE `socket` is moved
-    // into build_transcript_sources — the Sources panel shows it. Same rule the CC
-    // source applies (explicit --socket override, else the default), so the panel
-    // can't disagree with the actually-bound path.
-    let socket_path = socket
-        .clone()
-        .unwrap_or_else(ClaudeCodeSource::default_socket_path);
-    // OpenClaw daemon-presence SIDE channel (invariant #2: NOT the AgentEvent
-    // channel). The hook listener decodes openclaw payloads into presence deltas
-    // sent here; the exit watch drains gateway-pid deaths into the SAME channel as
-    // PidExited; the reducer task merges both into SceneState::source_presence.
-    let (presence_tx, presence_rx) = tokio::sync::mpsc::unbounded_channel::<DaemonPresenceUpdate>();
-    let presence_exit_watch = openclaw::spawn_presence_exit_watch(presence_tx.clone());
-    let transcript_sources = build_transcript_sources(
-        socket,
+    // The runtime source set, built in ONE place (`build_source_set`): the
+    // `HookRouter` (the shared-socket owner — every source's hooks ride it) plus
+    // the transcript-bearing watchers (CC / Antigravity / Codex / Copilot). The
+    // hook-only sources (Reasonix / CodeWhale / opencode / Cursor) and the daemon
+    // (OpenClaw) have no watchable JSONL — their payloads ride the router's socket,
+    // attributed per-payload by `_pixtuoid_source` — so they have no entry here.
+    // Resolve the bound socket (Unix) / pipe (Windows) the HookRouter binds; the
+    // Sources panel shows the same path (explicit --socket override, else default).
+    let socket_path = socket.unwrap_or_else(ClaudeCodeSource::default_socket_path);
+    // Daemon-presence SIDE channel (invariant #2: NOT the AgentEvent channel). The
+    // HookRouter demux decodes daemon payloads into source-tagged presence deltas
+    // sent here; the shared exit watch drains gateway-pid deaths into the SAME
+    // channel as `(source, PidExited)`; the reducer task merges both into
+    // SceneState::daemons.
+    let (presence_tx, presence_rx) = tokio::sync::mpsc::unbounded_channel::<PresenceMsg>();
+    let presence_exit_watch = daemon::spawn_presence_exit_watch(presence_tx.clone());
+    let sources = build_source_set(
+        socket_path.clone(),
         projects_root,
         codex_sessions_root,
         Some(presence_tx),
@@ -117,7 +115,7 @@ async fn run_async(cfg: RunConfig) -> Result<()> {
     // Transport tag drives hook-wins dedup), not source lifecycle.
     let (health_tx, health_rx) = tokio::sync::watch::channel(Vec::new());
     let mut manager = SourceManager::new();
-    for src in transcript_sources {
+    for src in sources {
         manager = manager.with_source(src);
     }
     let _source_handles = manager.spawn_with_health(tx, health_tx);
@@ -142,24 +140,22 @@ async fn run_async(cfg: RunConfig) -> Result<()> {
     }
 }
 
-/// Build the transcript-bearing sources `run_async` spawns — the ONE place that
-/// set is constructed, so a source registered in the core registry but missing
-/// here (a silent "never spawns" no-op) is caught by
-/// `build_transcript_sources_wires_every_transcript_bearing_source`. Each source
-/// carries different typed config (CC's socket/projects root, Codex's sessions
-/// root), so this stays imperative rather than a registry-driven loop —
-/// invariant #3's per-source-typed seam. Hook-only sources are absent by design
-/// (they ride the shared hook socket ClaudeCodeSource binds).
-fn build_transcript_sources(
-    socket: Option<PathBuf>,
+/// Build the runtime source set `run_async` spawns — the ONE place that set is
+/// constructed: the `HookRouter` (shared-socket owner) + the transcript-bearing
+/// watchers. A transcript source registered in the core registry but missing here
+/// (a silent "never spawns" no-op) is caught by
+/// `build_source_set_wires_every_transcript_bearing_source_plus_the_hook_router`.
+/// Each transcript source carries different typed config (CC's projects root,
+/// Codex's sessions root), so this stays imperative rather than a registry-driven
+/// loop — invariant #3's per-source-typed seam. Hook-only sources + the daemon
+/// (OpenClaw) are absent by design — they ride the router's shared socket.
+fn build_source_set(
+    socket_path: PathBuf,
     projects_root: Option<PathBuf>,
     codex_sessions_root: Option<PathBuf>,
-    presence_tx: Option<tokio::sync::mpsc::UnboundedSender<DaemonPresenceUpdate>>,
+    presence_tx: Option<daemon::PresenceSender>,
 ) -> Vec<Box<dyn DynSource>> {
     let mut cc_src = ClaudeCodeSource::default_paths();
-    if let Some(s) = socket {
-        cc_src.socket_path = s;
-    }
     if let Some(p) = projects_root {
         cc_src.projects_root = p;
     }
@@ -171,20 +167,25 @@ fn build_transcript_sources(
         codex_src.sessions_root = p;
     }
 
-    // #246: ONE shared child-end un-claim handle. ClaudeCodeSource's hook tee is
-    // the producer (every source's SubagentStop rides its shared socket); both
-    // watchers consume — each drains only the ids whose transcripts it claims
+    // #246: ONE shared child-end un-claim handle. The HookRouter's hook tee is the
+    // PRODUCER (every source's SubagentStop rides the one shared socket it owns);
+    // both watchers CONSUME — each drains only the ids whose transcripts it claims
     // (AgentId is source-namespaced), so a Codex child's id waits for the Codex
-    // watcher even though the CC source decoded its hook.
+    // watcher even though the router decoded its hook.
     let child_end_unclaims = ChildEndUnclaims::new();
     cc_src.child_end_unclaims = Some(child_end_unclaims.clone());
-    codex_src.child_end_unclaims = Some(child_end_unclaims);
+    codex_src.child_end_unclaims = Some(child_end_unclaims.clone());
+
+    // The HookRouter owns the ONE shared hook socket every source's hooks ride;
+    // it is the tee producer + the daemon-presence demux. CC/Codex are now pure
+    // transcript watchers (consumers of the un-claim handle).
+    let hook_router = HookRouter::new(socket_path)
+        .with_child_end_unclaims(Some(child_end_unclaims))
+        .with_presence_tx(presence_tx);
 
     vec![
-        // OpenClaw hooks ride the shared socket ClaudeCodeSource binds; route its
-        // (presence-only) payloads to the daemon-fixture side channel (consumes
-        // cc_src last, after its other fields are set).
-        Box::new(cc_src.with_presence_tx(presence_tx)) as Box<dyn DynSource>,
+        Box::new(hook_router) as Box<dyn DynSource>,
+        Box::new(cc_src),
         Box::new(ag_src),
         Box::new(codex_src),
         Box::new(copilot_src),
@@ -214,8 +215,8 @@ async fn reducer_task(
     scene_tx: watch::Sender<Arc<SceneState>>,
     floor_caps: Arc<[AtomicUsize; MAX_FLOORS]>,
     connected: ConnectedSources,
-    mut presence_rx: tokio::sync::mpsc::UnboundedReceiver<DaemonPresenceUpdate>,
-    presence_exit_watch: Option<openclaw::PresenceExitWatch>,
+    mut presence_rx: tokio::sync::mpsc::UnboundedReceiver<PresenceMsg>,
+    presence_exit_watch: Option<daemon::PresenceExitWatch>,
 ) {
     let mut reducer = Reducer::new();
     // Disabled once the presence channel closes (all senders dropped) so its
@@ -249,26 +250,26 @@ async fn reducer_task(
                     break;
                 }
             }
-            // OpenClaw daemon-presence deltas (hook-derived + PidExited from the
-            // exit watch) — merged into SceneState::source_presence, NEVER through
-            // Reducer::apply (which is AgentId-pure). Invariant #2.
+            // Daemon-presence deltas — source-tagged `(source, delta)` (hook-derived
+            // + `(source, PidExited)` from the shared exit watch) — merged into
+            // SceneState::daemons, NEVER through Reducer::apply (which is
+            // AgentId-pure). Invariant #2. N daemons route by the tuple's source.
             update = presence_rx.recv(), if presence_open => {
                 match update {
-                    Some(update) => {
+                    Some((source, update)) => {
                         let now = SystemTime::now();
                         // CONNECTION GATE (mirrors the AgentEvent arm above): a
-                        // gateway DISCONNECTED in the Sources panel has its
-                        // presence hooks DROPPED — don't arm the exit watch, don't
-                        // apply, don't refresh. Any lingering presence entry is
-                        // walked out by the sweep-tick reconcile below.
-                        if connected.is_connected(openclaw::SOURCE_NAME) {
+                        // daemon DISCONNECTED in the Sources panel has its presence
+                        // DROPPED — don't arm the exit watch, don't apply. Any
+                        // lingering entry is walked out by the sweep-tick reconcile.
+                        if connected.is_connected(&source) {
                             // Arm the instant abrupt-down watch on a fresh gateway pid.
                             if let (DaemonPresenceUpdate::GatewayUp { pid: Some(pid) }, Some(ew)) =
                                 (&update, presence_exit_watch.as_ref())
                             {
-                                ew.watch(*pid);
+                                ew.watch(&source, *pid);
                             }
-                            openclaw::apply_presence(&mut scene, update, now);
+                            daemon::apply_presence(&mut scene, &source, update, now);
                             if scene_tx.send(Arc::new(scene.clone())).is_err() {
                                 tracing::warn!("scene channel closed — renderer dropped");
                                 break;
@@ -289,15 +290,17 @@ async fn reducer_task(
                 let cur = connected.snapshot();
                 reducer.reconcile_connected(&mut scene, &cur, now);
                 reducer.tick(&mut scene, now);
-                // Presence reconcile: a panel-disconnected gateway must walk its
-                // mascot out too (the presence side-channel is separate from the
-                // AgentEvent connection gate). Drive its entry to Down so the
-                // existing walk-out + DOWN_REMOVE_MS removal lifecycle runs.
-                if !connected.is_connected(openclaw::SOURCE_NAME) {
-                    openclaw::mark_presence_down(&mut scene, openclaw::SOURCE_NAME, now);
+                // Per-daemon presence reconcile + decay (registry-DRIVEN, N daemons):
+                // a panel-disconnected daemon walks its mascot out (Down → walk-out →
+                // DOWN_REMOVE removal — the presence side-channel is separate from the
+                // AgentEvent gate), and every daemon decays busy→idle / up→down on
+                // silence per its own TTL. A 2nd daemon needs no edit here.
+                for (source, ttl) in registry::daemon_sources() {
+                    if !connected.is_connected(source) {
+                        daemon::mark_presence_down(&mut scene, source, now);
+                    }
+                    daemon::sweep_presence_ttl(&mut scene, source, ttl, now);
                 }
-                // Decay stale daemon presence (busy→idle, up→down on silence).
-                openclaw::sweep_presence_ttl(&mut scene, now);
                 if scene_tx.send(Arc::new(scene.clone())).is_err() {
                     tracing::warn!("scene channel closed — renderer dropped");
                     break;
@@ -403,25 +406,40 @@ mod tests {
 
     // The documented "a source registered in the core registry but NOT wired
     // into run_async passes every conformance/manifest test yet never spawns"
-    // gap (core/CLAUDE.md) — closed. The set `build_transcript_sources` actually
-    // constructs MUST equal the registry's transcript-bearing sources
-    // (`line_decoder.is_some()`); it reads names off the real boxes, so it can't
-    // drift from a hand-maintained second list. Hook-only sources are absent by
-    // design (they ride the shared socket).
+    // gap (core/CLAUDE.md) — closed. `build_source_set` constructs the shared-
+    // socket `HookRouter` PLUS every transcript-bearing registered source
+    // (`line_decoder().is_some()`); it reads names off the real boxes, so it
+    // can't drift from a hand-maintained second list. Hook-only sources + the
+    // daemon (OpenClaw) are absent by design (they ride the router's socket).
     #[test]
-    fn build_transcript_sources_wires_every_transcript_bearing_source() {
+    fn build_source_set_wires_every_transcript_bearing_source_plus_the_hook_router() {
         use pixtuoid_core::source::{registry::descriptor_for, REGISTERED_SOURCES};
         use std::collections::BTreeSet;
 
-        let sources = build_transcript_sources(None, None, None, None);
+        let sources = build_source_set(PathBuf::from("/tmp/pixtuoid-test.sock"), None, None, None);
         let built: BTreeSet<&str> = sources.iter().map(|s| s.name()).collect();
+
+        // The HookRouter (infrastructure — owns the shared socket, NOT a
+        // registered CLI) must be in the set so its fatal-bind death surfaces via
+        // `spawn_with_health` (#157); it has no descriptor, so it's excluded from
+        // the transcript-coverage check below.
+        assert!(
+            built.contains("hook-router"),
+            "the shared-socket HookRouter must be spawned (else hook signals never decode)"
+        );
+
+        let transcript_built: BTreeSet<&str> = built
+            .iter()
+            .copied()
+            .filter(|&n| n != "hook-router")
+            .collect();
         let expected: BTreeSet<&str> = REGISTERED_SOURCES
             .iter()
             .copied()
-            .filter(|&name| descriptor_for(name).is_some_and(|d| d.line_decoder.is_some()))
+            .filter(|&name| descriptor_for(name).is_some_and(|d| d.line_decoder().is_some()))
             .collect();
         assert_eq!(
-            built, expected,
+            transcript_built, expected,
             "run_async's transcript-source wiring diverged from the registry: a \
              transcript-bearing source is registered but not built (it would never \
              spawn), or a built source isn't registered"

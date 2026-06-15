@@ -28,7 +28,7 @@ use pixtuoid_core::source::{registry, AgentEvent, REGISTERED_SOURCES};
 /// reaches this fn (`is_hook_only` gates the transcript requirement).
 fn decoder_for(source: &str) -> LineDecoder {
     registry::descriptor_for(source)
-        .and_then(|d| d.line_decoder)
+        .and_then(|d| d.line_decoder())
         .unwrap_or_else(|| {
             panic!(
                 "fixture source {source:?} has no line_decoder — add/extend its \
@@ -37,20 +37,20 @@ fn decoder_for(source: &str) -> LineDecoder {
         })
 }
 
-/// Hook-only-ness comes from the registry row (`line_decoder: None`), never a
-/// harness-side list — a second list could mark a JSONL source hook-only and
+/// Hook-only-ness comes from the registry row (`line_decoder()` is `None`), never
+/// a harness-side list — a second list could mark a JSONL source hook-only and
 /// pass the harness without its LineDecoder ever running ("registration is
 /// not coverage").
 fn is_hook_only(source: &str) -> bool {
-    registry::descriptor_for(source).is_some_and(|d| d.line_decoder.is_none())
+    registry::descriptor_for(source).is_some_and(|d| d.line_decoder().is_none())
 }
 
-/// Presence-only sources (`presence_only: true` in the registry) decode to ZERO
-/// AgentEvents — their `hook.custom` claims all but presence rides a sibling
-/// channel into `SceneState::source_presence` (the OpenClaw daemon fixture). The
+/// Daemon sources (`SourceKind::Daemon` in the registry) decode to ZERO
+/// AgentEvents — their `presence_decoder` claims all but presence rides a sibling
+/// channel into `SceneState::daemons` (the OpenClaw daemon fixture). The
 /// coalesce-to-one-AgentId contract doesn't apply (no agent slots).
-fn is_presence_only(source: &str) -> bool {
-    registry::descriptor_for(source).is_some_and(|d| d.presence_only)
+fn is_daemon(source: &str) -> bool {
+    registry::descriptor_for(source).is_some_and(|d| d.is_daemon())
 }
 
 fn fixtures_root() -> PathBuf {
@@ -234,21 +234,21 @@ fn all_source_fixtures_decode_and_coalesce() {
             let d = decode_fixture(&source, &scenario_dir);
             let events: Vec<AgentEvent> = d.jsonl.iter().chain(d.hooks.iter()).cloned().collect();
 
-            // PRESENCE-ONLY (OpenClaw): the hook.custom claims every event but
+            // DAEMON (OpenClaw): the presence_decoder claims every event but
             // emits ZERO AgentEvents — presence rides a sibling channel into
-            // SceneState::source_presence. The fixture must still ship hooks (so
-            // the decoder runs + can't panic) and decode to NO AgentEvents (the
-            // by-design emptiness `presence_only` guards). The contribution +
+            // SceneState::daemons. The fixture must still ship hooks (so the
+            // decoder runs + can't panic) and decode to NO AgentEvents (the
+            // by-design emptiness `is_daemon` guards). The contribution +
             // coalesce contracts below don't apply (no agent slots).
-            if is_presence_only(&source) {
+            if is_daemon(&source) {
                 assert!(
                     d.had_hook_file && !d.hooks_raw.is_empty(),
-                    "{source}/{scenario}: a presence-only source must ship a NON-EMPTY \
+                    "{source}/{scenario}: a daemon source must ship a NON-EMPTY \
                      hook-payloads.jsonl (an empty fixture passes the zero-events check vacuously)"
                 );
                 assert!(
                     events.is_empty(),
-                    "{source}/{scenario}: a presence-only source must decode to ZERO AgentEvents \
+                    "{source}/{scenario}: a daemon source must decode to ZERO AgentEvents \
                      (presence rides the sibling channel), got {events:?}"
                 );
                 // Byte-real PIN for the field-reading presence decoder (openclaw is

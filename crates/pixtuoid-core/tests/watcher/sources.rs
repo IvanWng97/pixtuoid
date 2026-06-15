@@ -124,25 +124,14 @@ async fn antigravity_source_run_emits_events_from_transcript() {
     handle.abort();
 }
 
-// ClaudeCodeSource::run binds the hook socket, spawns the watcher, and enters
-// the select! — drive the real Source impl so the bind + spawn + select-entry
-// glue is exercised (only the select abort/warn arms stay structurally
-// unreachable: both inner tasks loop forever). A CC transcript written under
-// the projects_root must surface a SessionStart through the JSONL leg.
+// CC is now a PURE transcript watcher (the hook socket lifted to `HookRouter`) —
+// drive the real Source impl so the watcher spawn + run glue is exercised. A CC
+// transcript written under the projects_root must surface a SessionStart through
+// the JSONL leg, with NO hook socket involved at all (platform-neutral now).
 #[tokio::test]
-async fn claude_code_source_run_binds_socket_and_emits_events() {
+async fn claude_code_source_run_emits_session_start_from_jsonl() {
     fast_watch();
     let dir = TempDir::new().unwrap();
-    // The hook endpoint must be platform-shaped: a filesystem path is an
-    // invalid pipe name on Windows and would fail run()'s bind before the
-    // JSONL leg (the thing under test) ever starts.
-    #[cfg(unix)]
-    let socket_path = dir.path().join("pixtuoid-test.sock");
-    #[cfg(windows)]
-    let socket_path = std::path::PathBuf::from(format!(
-        r"\\.\pipe\pixtuoid-test-jsonlw-{}",
-        std::process::id()
-    ));
     let projects_root = dir.path().join("projects");
     let project_dir = projects_root.join("proj-cc");
     tokio::fs::create_dir_all(&project_dir).await.unwrap();
@@ -150,7 +139,6 @@ async fn claude_code_source_run_binds_socket_and_emits_events() {
 
     let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(32);
     let mut src = ClaudeCodeSource::default_paths();
-    src.socket_path = socket_path;
     src.projects_root = projects_root;
     let handle = tokio::spawn(async move { Box::new(src).run(tx).await });
 

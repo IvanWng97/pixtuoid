@@ -176,8 +176,8 @@ async fn listener_survives_non_utf8_read_error() {
 // an anonymous inode forever, with every hook-borne signal vanishing). The
 // live owner holds the exclusive lock on the sibling `<sock>.lock`, so the
 // second bind's try-lock fails and it returns the typed SocketBusy naming the
-// path — which ClaudeCodeSource::run downcasts to degrade to transcript-only
-// (no SourceDeath; see claude_source_degrades_to_transcript_only_when_socket_busy).
+// path — which HookRouter::run downcasts to degrade the hook plane to a quiet
+// Ok(()) (no SourceDeath; see hook_router_socket_busy_exits_clean_without_death).
 #[tokio::test]
 async fn bind_bails_when_a_live_listener_holds_the_path() {
     let dir = TempDir::new().unwrap();
@@ -407,84 +407,60 @@ async fn long_path_fallback_binds_owner_only() {
     drop(listener);
 }
 
-// The SocketBusy degradation contract (#232 review): a SECOND instance whose
-// hook bind loses to a live daemon must still run its JSONL watcher —
-// transcript-only, not dead. A fresh transcript written before spawn must
-// produce a SessionStart from the degraded source.
+// HookRouter is the socket's honest owner (it lifts off ClaudeCodeSource). The
+// SocketBusy degradation under the split: a SECOND instance whose hook bind
+// loses to a live daemon takes ONLY the hook plane down — `run` returns Ok(())
+// with NO SourceDeath (the transcript sources run as independent tasks). This
+// is the negative complement of `fatal_source_exit_is_published_on_the_health_
+// channel` (manager.rs): the GRACEFUL path must push nothing. Pinned via
+// `spawn_with_health` so a regression to `Err(SocketBusy)` would spuriously
+// fire the #157 footer death every time a 2nd instance launches.
 #[tokio::test]
-async fn claude_source_degrades_to_transcript_only_when_socket_busy() {
-    use pixtuoid_core::source::claude_code::ClaudeCodeSource;
-    use pixtuoid_core::source::Source;
-
-    // The documented polling seam — never a real FSEvents stream in tests
-    // (tens of seconds of setup/teardown + the #85 flake class); the
-    // assertion below rides only the backend-independent initial seed walk.
-    pixtuoid_core::source::jsonl::force_polling_backend_for_tests(Duration::from_millis(25));
+async fn hook_router_socket_busy_exits_clean_without_death() {
+    use pixtuoid_core::source::hook::HookRouter;
+    use pixtuoid_core::source::manager::{SourceDeath, SourceManager};
 
     let dir = TempDir::new().unwrap();
     let sock = dir.path().join("pixtuoid.sock");
     // The "first instance": occupy the socket and keep it alive.
     let _owner = HookSocketListener::bind(sock.clone()).await.unwrap();
 
-    let projects = dir.path().join("projects");
-    std::fs::create_dir_all(projects.join("proj")).unwrap();
-    std::fs::write(
-        projects.join("proj/11111111-2222-3333-4444-555555555555.jsonl"),
-        "{\"type\":\"user\",\"cwd\":\"/repo\"}\n",
-    )
-    .unwrap();
-
-    let mut src = ClaudeCodeSource::default_paths();
-    src.socket_path = sock;
-    src.projects_root = projects;
-    let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(32);
-    let task = tokio::spawn(async move { Box::new(src).run(tx).await });
-
-    // The initial seed walk must register the fresh transcript even though
-    // the hook bind lost — transcript-only, not a dead source.
-    let ev = tokio::time::timeout(Duration::from_secs(10), async {
-        loop {
-            let (transport, ev) = rx.recv().await.expect("source must stay alive");
-            if matches!(ev, AgentEvent::SessionStart { .. }) {
-                return (transport, ev);
-            }
-        }
-    })
-    .await
-    .expect("degraded source must still emit the transcript's SessionStart");
-    assert_eq!(ev.0, Transport::Jsonl);
-    task.abort();
+    let (tx, _rx) = mpsc::channel::<(Transport, AgentEvent)>(8);
+    let (deaths_tx, deaths_rx) = tokio::sync::watch::channel(Vec::<SourceDeath>::new());
+    let handles = SourceManager::new()
+        .with_source(Box::new(HookRouter::new(sock)))
+        .spawn_with_health(tx, deaths_tx);
+    for h in handles {
+        tokio::time::timeout(Duration::from_secs(10), h)
+            .await
+            .expect("router must exit promptly on SocketBusy")
+            .unwrap();
+    }
+    assert!(
+        deaths_rx.borrow().is_empty(),
+        "SocketBusy must degrade quietly (Ok) — no SourceDeath, the hook plane just goes dark"
+    );
 }
 
-// The #246 tee WIRING (the tee fn itself is unit-pinned in claude_code.rs):
-// a SubagentStop riding the real shared socket through ClaudeCodeSource::run
-// must BOTH reach the downstream channel unchanged (Hook-tagged `as_child`
-// SessionEnd — event parity through the interposed tee) AND land its child id
-// in the shared un-claim handle. Codex-stamped on purpose: the Codex child is
-// the motivating #246 case, and it proves the CC-owned socket feeds every
-// source's child ends into the ONE handle.
+// The #246 tee now rides HookRouter (its honest owner): a SubagentStop on the
+// shared socket must reach the downstream channel unchanged (Hook-tagged
+// `as_child` SessionEnd) AND land its child id in the
+// shared un-claim handle. Codex-stamped — the motivating #246 case, proving the
+// router feeds EVERY source's child ends into the ONE handle.
 #[tokio::test]
-async fn claude_source_tee_captures_child_ends_from_the_shared_socket() {
-    use pixtuoid_core::source::claude_code::ClaudeCodeSource;
+async fn hook_router_tee_captures_child_ends_from_the_shared_socket() {
+    use pixtuoid_core::source::hook::HookRouter;
     use pixtuoid_core::source::jsonl::ChildEndUnclaims;
     use pixtuoid_core::source::Source;
     use pixtuoid_core::AgentId;
 
-    // The documented polling seam — never a real FSEvents stream in tests.
-    pixtuoid_core::source::jsonl::force_polling_backend_for_tests(Duration::from_millis(25));
-
     let dir = TempDir::new().unwrap();
     let sock = dir.path().join("pixtuoid.sock");
-    let projects = dir.path().join("projects");
-    std::fs::create_dir_all(&projects).unwrap();
 
     let unclaims = ChildEndUnclaims::new();
-    let mut src = ClaudeCodeSource::default_paths();
-    src.socket_path = sock.clone();
-    src.projects_root = projects;
-    src.child_end_unclaims = Some(unclaims.clone());
+    let router = HookRouter::new(sock.clone()).with_child_end_unclaims(Some(unclaims.clone()));
     let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(32);
-    let task = tokio::spawn(async move { Box::new(src).run(tx).await });
+    let task = tokio::spawn(async move { Box::new(router).run(tx).await });
     sleep(Duration::from_millis(50)).await;
 
     let child_uuid = "0d000000-0000-7000-8000-0000000000d1";
@@ -503,7 +479,7 @@ async fn claude_source_tee_captures_child_ends_from_the_shared_socket() {
 
     let (transport, ev) = tokio::time::timeout(Duration::from_secs(10), async {
         loop {
-            let (transport, ev) = rx.recv().await.expect("source must stay alive");
+            let (transport, ev) = rx.recv().await.expect("router must stay alive");
             if matches!(ev, AgentEvent::SessionEnd { .. }) {
                 return (transport, ev);
             }

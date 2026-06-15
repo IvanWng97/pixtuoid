@@ -179,7 +179,7 @@ pub struct AgentSlot {
 /// Liveness of a daemon-style source (the OpenClaw gateway). Drives the
 /// wandering "Molty" mascot's behaviour (idle ambles, busy shuttles, down
 /// walks out). A daemon is NOT an `AgentSlot` (it has no desk / no agent
-/// activity), so its presence lives in `SceneState::source_presence`, read
+/// activity), so its presence lives in `SceneState::daemons`, read
 /// directly by the geometry pass. `Down` is distinct from *absent* (no map
 /// entry): absent = not configured / plugin not loaded (Molty not on the
 /// floor); `Down` = the daemon was seen and then died (Molty walks out).
@@ -223,27 +223,26 @@ pub struct DaemonPresence {
 pub struct SceneState {
     pub agents: BTreeMap<AgentId, AgentSlot>,
     pub floor_capacities: [usize; MAX_FLOORS],
-    /// Daemon-style sources (OpenClaw gateway) rendered as a wandering mascot,
-    /// keyed on the registry source name. Empty for an all-agent scene. PRIVATE
-    /// (with `source_presence`/`source_presence_mut` accessors) on purpose: a new
-    /// pub field would be a semver-major break, and a pub mutable `BTreeMap` is a
-    /// leaky surface — the renderer reads via the accessor. `pub(crate)` so the
-    /// reducer/source modules still touch it directly while the field stays out
-    /// of the external public API (semver-invisible).
+    /// Daemon-style sources (the OpenClaw gateway is instance #1) rendered as
+    /// wandering mascots, keyed on the registry source name. Empty for an
+    /// all-agent scene. PRIVATE (with `daemons`/`daemons_mut` accessors) on
+    /// purpose: a pub mutable `BTreeMap` is a leaky surface — the renderer reads
+    /// via the accessor. `pub(crate)` so the reducer/source modules still touch
+    /// it directly while the field stays out of the external public API.
     #[serde(default)]
-    pub(crate) source_presence: BTreeMap<String, DaemonPresence>,
+    pub(crate) daemons: BTreeMap<String, DaemonPresence>,
 }
 
 impl SceneState {
     /// Daemon-presence map (the gateway mascots) — read access for the renderer.
-    pub fn source_presence(&self) -> &BTreeMap<String, DaemonPresence> {
-        &self.source_presence
+    pub fn daemons(&self) -> &BTreeMap<String, DaemonPresence> {
+        &self.daemons
     }
 
-    /// Mutable daemon-presence map — for the reducer task's `apply_presence`
+    /// Mutable daemon-presence map — for the shared `daemon::apply_presence`
     /// merge and the per-floor projection.
-    pub fn source_presence_mut(&mut self) -> &mut BTreeMap<String, DaemonPresence> {
-        &mut self.source_presence
+    pub fn daemons_mut(&mut self) -> &mut BTreeMap<String, DaemonPresence> {
+        &mut self.daemons
     }
 }
 
@@ -252,7 +251,7 @@ impl Default for SceneState {
         Self {
             agents: BTreeMap::new(),
             floor_capacities: [0; MAX_FLOORS],
-            source_presence: BTreeMap::new(),
+            daemons: BTreeMap::new(),
         }
     }
 }
@@ -262,7 +261,7 @@ impl SceneState {
         Self {
             agents: BTreeMap::new(),
             floor_capacities,
-            source_presence: BTreeMap::new(),
+            daemons: BTreeMap::new(),
         }
     }
 
@@ -449,11 +448,11 @@ mod tests {
     }
 
     #[test]
-    fn scene_state_source_presence_round_trips() {
+    fn scene_state_daemons_round_trips() {
         // A SceneState carrying an openclaw daemon-presence entry round-trips
         // byte-stably alongside the agents tree.
         let mut s = SceneState::uniform(8);
-        s.source_presence.insert(
+        s.daemons.insert(
             "openclaw".to_string(),
             DaemonPresence {
                 state: DaemonState::Idle,
@@ -471,8 +470,8 @@ mod tests {
             serde_json::to_string(&back).expect("re-serialize"),
             "round-trip must be byte-stable"
         );
-        assert_eq!(back.source_presence["openclaw"].state, DaemonState::Idle);
-        assert_eq!(back.source_presence["openclaw"].current_pid, Some(900));
+        assert_eq!(back.daemons["openclaw"].state, DaemonState::Idle);
+        assert_eq!(back.daemons["openclaw"].current_pid, Some(900));
     }
 
     #[test]

@@ -36,11 +36,9 @@ const CHILD_END_UNCLAIM_TTL: Duration = Duration::from_secs(300);
 /// first-sight `SessionStart` the reducer's child ledger (#244/#246) re-links
 /// to the remembered parent.
 ///
-/// PRODUCER: the tee inside `ClaudeCodeSource::run` — ALL sources' hook
-/// payloads ride the ONE shared socket it owns, so every `SubagentStop`
-/// (CC and Codex alike) passes that single seam. (If sockets ever split
-/// per-source, each source spawns its own tee — `tee_child_end_unclaims`
-/// is source-generic.) CONSUMERS: each WIRED source's
+/// PRODUCER: the tee inside `HookRouter::run` (the `HookRouter` owns the ONE
+/// shared socket ALL sources' hook payloads ride), so every `SubagentStop`
+/// (CC and Codex alike) passes that single seam. CONSUMERS: each WIRED source's
 /// `JsonlWatcher` (via [`JsonlWatcher::with_child_end_unclaims`] — CC and
 /// Codex today; Antigravity stays unwired, nothing stamps its ends
 /// `as_child`) drains only

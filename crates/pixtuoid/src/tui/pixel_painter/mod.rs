@@ -1116,7 +1116,7 @@ fn enqueue_pet<'a>(
     })
 }
 
-/// Enqueue any gateway mascots present in `source_presence` (only the ground
+/// Enqueue any gateway mascots present in `daemons` (only the ground
 /// floor carries the map, so a mascot shows once). Presence-gated: an absent
 /// entry draws nothing, so the ~99% who don't run a gateway see a normal office.
 /// The runtime is responsible for KEEPING the map honest — a never-connected or
@@ -1129,7 +1129,7 @@ fn enqueue_gateway_mascot<'a>(
     drawables: &mut Vec<Drawable<'a>>,
 ) -> Option<MascotFrame> {
     let mut hover = None;
-    for (source, presence) in ctx.scene.source_presence() {
+    for (source, presence) in ctx.scene.daemons() {
         let Some((walk, rest)) = gateway_mascot_anims(source) else {
             continue;
         };

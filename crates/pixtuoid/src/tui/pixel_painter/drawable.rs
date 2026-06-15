@@ -152,7 +152,7 @@ pub(super) enum DrawableKind<'a> {
         pet_elapsed_ms: Option<u64>,
     },
     /// The OpenClaw (or any gateway) "Molty" mascot — a presence-gated wandering
-    /// creature, NOT an agent (lives in `source_presence`, not `scene.agents`).
+    /// creature, NOT an agent (lives in `daemons`, not `scene.agents`).
     /// y-sorted at its south row like a pet. `run_count > 0` (an in-flight agent
     /// run) adds a rising activity-bubble cue — the busy tell keys on RUNS, not
     /// the (persistent, single-user) session count, which sticks at 1 at rest.

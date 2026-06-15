@@ -63,9 +63,13 @@ src/
 │                       source still exits; `cascade_exit` is source-agnostic (parent_id BFS) so a disconnect of
 │                       a delegating parent takes its whole subtree while a DIFFERENT connected source's subtree
 │                       is untouched. Reconnect = a fresh `SessionStart` resurrects-in-place once the old slot GCs.
-│                       Also creates the ONE shared ChildEndUnclaims handle (#246) and hands it
-│                       to BOTH ClaudeCodeSource (hook-tee producer + CC watcher consumer) and CodexSource
-│                       (watcher consumer) — manual wiring like the rest of source construction)
+│                       `build_source_set` is the ONE source-construction site: it mints the HookRouter (the
+│                       Source that owns the shared hook socket — every CLI's hooks ride it), the transcript
+│                       watchers (CC/Antigravity/Codex/Copilot), and the ONE shared ChildEndUnclaims handle (#246)
+│                       — handed to the HookRouter (hook-tee PRODUCER) + ClaudeCodeSource & CodexSource (watcher
+│                       CONSUMERS). Daemon presence (OpenClaw) rides a source-tagged sibling channel into
+│                       SceneState::daemons; reducer_task's presence/sweep arms are registry-driven
+│                       (daemon_sources()) so N daemons need no driver edit)
 ├── init_pack.rs        extracts the embedded skeleton pack to a target dir for `init-pack`
 ├── install/            multi-target (Claude + Codex + Reasonix + CodeWhale + opencode) hook install via the `Target` registry:
 │                       mod.rs (install_target/uninstall_target = structured core → InstallReport/UninstallReport,

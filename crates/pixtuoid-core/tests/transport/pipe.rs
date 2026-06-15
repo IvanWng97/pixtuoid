@@ -313,51 +313,34 @@ async fn second_listener_on_same_name_fails_with_typed_socket_busy() {
     );
 }
 
-// The SocketBusy degradation contract, Windows twin of socket.rs's
-// claude_source_degrades_to_transcript_only_when_socket_busy: a SECOND
-// instance whose pipe create loses ACCESS_DENIED to a live daemon must still
-// run its JSONL watcher — transcript-only, not dead. A fresh transcript
-// written before spawn must produce a SessionStart from the degraded source.
+// HookRouter SocketBusy degradation, Windows twin of socket.rs's
+// hook_router_socket_busy_exits_clean_without_death: a 2nd instance whose pipe
+// create loses ACCESS_DENIED (mapped to the typed SocketBusy) takes ONLY the
+// hook plane down — `run` returns Ok(()) with NO SourceDeath. Pinned via
+// spawn_with_health so a regression to `Err(SocketBusy)` would spuriously fire
+// the #157 footer death every time a 2nd instance launches.
 #[tokio::test]
-async fn claude_source_degrades_to_transcript_only_when_socket_busy() {
-    use pixtuoid_core::source::claude_code::ClaudeCodeSource;
-    use pixtuoid_core::source::Source;
+async fn hook_router_socket_busy_exits_clean_without_death() {
+    use pixtuoid_core::source::hook::HookRouter;
+    use pixtuoid_core::source::manager::{SourceDeath, SourceManager};
 
-    // The documented polling seam — never a real native watcher in tests;
-    // the assertion below rides only the backend-independent initial seed walk.
-    pixtuoid_core::source::jsonl::force_polling_backend_for_tests(Duration::from_millis(25));
-
-    let name = pipe_name("busy");
+    let name = pipe_name("router-busy");
     // The "first instance": occupy the pipe name and keep it alive.
     let _owner = HookSocketListener::bind(&name).await.unwrap();
 
-    let dir = TempDir::new().unwrap();
-    let projects = dir.path().join("projects");
-    std::fs::create_dir_all(projects.join("proj")).unwrap();
-    std::fs::write(
-        projects.join("proj/11111111-2222-3333-4444-555555555555.jsonl"),
-        "{\"type\":\"user\",\"cwd\":\"/repo\"}\n",
-    )
-    .unwrap();
-
-    let mut src = ClaudeCodeSource::default_paths();
-    src.socket_path = std::path::PathBuf::from(&name);
-    src.projects_root = projects;
-    let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(32);
-    let task = tokio::spawn(async move { Box::new(src).run(tx).await });
-
-    // The initial seed walk must register the fresh transcript even though
-    // the hook bind lost — transcript-only, not a dead source.
-    let ev = tokio::time::timeout(Duration::from_secs(10), async {
-        loop {
-            let (transport, ev) = rx.recv().await.expect("source must stay alive");
-            if matches!(ev, AgentEvent::SessionStart { .. }) {
-                return (transport, ev);
-            }
-        }
-    })
-    .await
-    .expect("degraded source must still emit the transcript's SessionStart");
-    assert_eq!(ev.0, Transport::Jsonl);
-    task.abort();
+    let (tx, _rx) = mpsc::channel::<(Transport, AgentEvent)>(8);
+    let (deaths_tx, deaths_rx) = tokio::sync::watch::channel(Vec::<SourceDeath>::new());
+    let handles = SourceManager::new()
+        .with_source(Box::new(HookRouter::new(std::path::PathBuf::from(&name))))
+        .spawn_with_health(tx, deaths_tx);
+    for h in handles {
+        tokio::time::timeout(Duration::from_secs(10), h)
+            .await
+            .expect("router must exit promptly on SocketBusy")
+            .unwrap();
+    }
+    assert!(
+        deaths_rx.borrow().is_empty(),
+        "SocketBusy must degrade quietly (Ok) — no SourceDeath, the hook plane just goes dark"
+    );
 }

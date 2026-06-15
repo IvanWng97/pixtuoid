@@ -880,7 +880,7 @@ fn inject_openclaw_presence(s: &mut SceneState, state: &str, now: SystemTime) ->
     let entered_at = now
         .checked_sub(std::time::Duration::from_secs(20))
         .unwrap_or(now);
-    s.source_presence_mut().insert(
+    s.daemons_mut().insert(
         pixtuoid_core::source::openclaw::SOURCE_NAME.to_string(),
         DaemonPresence {
             state,
