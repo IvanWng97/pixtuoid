@@ -74,6 +74,14 @@ pub struct Target {
     /// user-authored), so checking it would mean auto-detection can never fire
     /// for the one target it was added for — probe install markers instead.
     pub presence_probe: Option<fn() -> bool>,
+    /// Extra wholly-owned artifacts written verbatim on install (absolute path +
+    /// content) BEYOND the merged `config_path` — for OpenClaw, the plugin dir
+    /// (manifest + package.json + entry module) that the openclaw.json
+    /// `plugins.load.paths` entry points at. Takes the resolved shim path to bake
+    /// into the entry module. `None` for single-file targets. Left in place on
+    /// uninstall (the config un-merge disables loading) — an accepted residual
+    /// like opencode's stub. Written idempotently (only if content differs).
+    pub extra_artifacts: Option<fn(hook_path: &Path) -> Result<Vec<(PathBuf, String)>>>,
 }
 
 /// Backup suffix — the same constant for every target (not a per-target field).
@@ -95,6 +103,7 @@ pub const CLAUDE: Target = Target {
     needs_resolved_binary: cfg!(windows),
     post_install_note: None,
     presence_probe: None,
+    extra_artifacts: None,
 };
 
 pub const CODEX: Target = Target {
@@ -112,6 +121,7 @@ pub const CODEX: Target = Target {
         "note: comments and formatting in config.toml are not preserved (restore from the backup if needed).",
     ),
     presence_probe: None,
+    extra_artifacts: None,
 };
 
 pub const REASONIX: Target = Target {
@@ -127,6 +137,7 @@ pub const REASONIX: Target = Target {
     needs_resolved_binary: true,
     post_install_note: None,
     presence_probe: Some(crate::install::reasonix::detect_installed),
+    extra_artifacts: None,
 };
 
 pub const CODEWHALE: Target = Target {
@@ -144,6 +155,7 @@ pub const CODEWHALE: Target = Target {
         "note: comments and formatting in config.toml are not preserved (restore from the backup if needed).",
     ),
     presence_probe: Some(crate::install::codewhale::detect_installed),
+    extra_artifacts: None,
 };
 
 pub const OPENCODE: Target = Target {
@@ -170,6 +182,7 @@ pub const OPENCODE: Target = Target {
     // fresh install, and a post-uninstall stub still exists — so detect on the
     // `@pixtuoid-opencode-plugin` sentinel, not mere file existence.
     presence_probe: Some(crate::install::opencode::detect_installed),
+    extra_artifacts: None,
 };
 
 pub const CURSOR: Target = Target {
@@ -186,9 +199,37 @@ pub const CURSOR: Target = Target {
     post_install_note: None,
     // Cursor never creates ~/.cursor/hooks.json itself — probe ~/.cursor instead.
     presence_probe: Some(crate::install::cursor::detect_installed),
+    extra_artifacts: None,
 };
 
-pub const TARGETS: &[&Target] = &[&CLAUDE, &CODEX, &REASONIX, &CODEWHALE, &OPENCODE, &CURSOR];
+pub const OPENCLAW: Target = Target {
+    name: "openclaw",
+    core_source: pixtuoid_core::source::openclaw::SOURCE_NAME,
+    display_name: "OpenClaw",
+    restart_noun: "OpenClaw gateway",
+    // We MERGE openclaw.json (plugins.load.paths + plugins.entries.<id>.enabled +
+    // the hooks.allowConversationAccess grant) AND write the plugin dir as an
+    // extra artifact — the two-ownership split (confirmed by capture: `plugins
+    // install --link` writes exactly these config keys, no separate registry).
+    default_config_path: crate::install::openclaw::default_config_path,
+    hook_command: crate::install::openclaw::hook_command,
+    merge_install: crate::install::openclaw::merge_install,
+    merge_uninstall: crate::install::openclaw::merge_uninstall,
+    needs_path_warning: false,
+    // The plugin bakes the absolute shim path (run under the gateway's Node, no
+    // PATH reliance), so an unresolvable binary is fatal.
+    needs_resolved_binary: true,
+    post_install_note: Some(
+        "note: restart the OpenClaw gateway to load the plugin. Uninstall removes the openclaw.json entries (incl. the conversation-access grant) but leaves the plugin files — a harmless residual the gateway no longer loads.",
+    ),
+    // openclaw.json is created by OpenClaw itself; probe OpenClaw's own dir so
+    // auto-detect fires whether or not we've installed (the opencode rationale).
+    presence_probe: Some(crate::install::openclaw::detect_installed),
+    extra_artifacts: Some(crate::install::openclaw::plugin_artifacts),
+};
+
+pub const TARGETS: &[&Target] =
+    &[&CLAUDE, &CODEX, &REASONIX, &CODEWHALE, &OPENCODE, &CURSOR, &OPENCLAW];
 
 pub fn by_name(name: &str) -> Option<&'static Target> {
     TARGETS.iter().copied().find(|t| t.name == name)
@@ -233,6 +274,7 @@ mod tests {
         assert_eq!(by_name("codewhale").unwrap().name, "codewhale");
         assert_eq!(by_name("opencode").unwrap().name, "opencode");
         assert_eq!(by_name("cursor").unwrap().name, "cursor");
+        assert_eq!(by_name("openclaw").unwrap().name, "openclaw");
         assert!(by_name("nope").is_none());
         assert!(by_name("all").is_none()); // "all" is a meta-value, not a Target
     }
@@ -283,6 +325,7 @@ mod tests {
             needs_resolved_binary: false,
             post_install_note: None,
             presence_probe: None,
+            extra_artifacts: None,
         };
         assert!(!is_present(&NO_HOME));
     }

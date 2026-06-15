@@ -4,6 +4,7 @@ pub mod codex;
 pub mod cursor;
 mod hook_cmd;
 pub mod io;
+pub mod openclaw;
 pub mod opencode;
 pub mod reasonix;
 pub mod target;
@@ -151,6 +152,18 @@ pub fn install_target(
     let (binary, explicit_hook) =
         resolve_hook_binary_from(t, hook_path, env_hook, io::default_hook_binary)?;
     let hook_cmd = (t.hook_command)(&binary, explicit_hook)?;
+    // Wholly-owned extra artifacts (the OpenClaw plugin dir) — written before the
+    // config merge so a re-install refreshes them even when the config is a no-op.
+    // The shim's resolved path is baked into the entry module.
+    if let Some(make) = t.extra_artifacts {
+        for (p, c) in make(&binary)? {
+            if let Some(dir) = p.parent() {
+                std::fs::create_dir_all(dir)
+                    .with_context(|| format!("creating plugin dir {}", dir.display()))?;
+            }
+            std::fs::write(&p, c).with_context(|| format!("writing {}", p.display()))?;
+        }
+    }
     // The lock covers the WHOLE read→merge→backup→write round (lost-update
     // TOCTOU: two concurrent pixtuoid runs would otherwise interleave
     // read(A)→write(B)→write(A) and A's rename clobbers B's change). Residual:
@@ -286,6 +299,7 @@ mod tests {
         needs_resolved_binary: false,
         post_install_note: None,
         presence_probe: None,
+        extra_artifacts: None,
     };
 
     // A per-process config path under the system temp dir, used by FAKE2/FAKE_DIR
@@ -328,6 +342,7 @@ mod tests {
         needs_resolved_binary: false,
         post_install_note: None,
         presence_probe: None,
+        extra_artifacts: None,
     };
 
     // FAKE_DIR: default_config_path points at a path the test creates as a
@@ -356,6 +371,7 @@ mod tests {
         needs_resolved_binary: false,
         post_install_note: None,
         presence_probe: None,
+        extra_artifacts: None,
     };
 
     /// A platform-absolute fixture path: `/x/hook` is DRIVE-RELATIVE on
