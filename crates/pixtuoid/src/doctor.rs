@@ -10,7 +10,9 @@
 //! / shape drift), with a sanitized sample of the distinctive new names so the
 //! user can report them.
 //!
-//! Strictly READ-ONLY: log file + config + install-state. It never writes config
+//! Strictly READ-ONLY: log file + config + install-state + best-effort
+//! `<cli> --version` subprocess probes (stdin nulled so they can't block; argv
+//! from the static registry, never user input). It never writes config
 //! (re-connecting hooks stays the Connection panel's job) and never spawns the
 //! TUI. The untrusted wire values (event/tool names) it samples are
 //! `sanitize`d before display (R0615-06) — `doctor` is the third consumer of
@@ -226,7 +228,13 @@ pub fn format_doctor_row(row: &DoctorSourceRow) -> String {
 /// stdout then stderr (some CLIs print `--version` to stderr).
 fn probe_version(argv: &'static [&'static str]) -> Option<String> {
     let (cmd, args) = argv.split_first()?;
-    let output = std::process::Command::new(cmd).args(args).output().ok()?;
+    // NULL stdin so a misbehaving `<cli> --version` that reads stdin can't block
+    // doctor on the inherited TTY (`output()` inherits stdin + has no timeout).
+    let output = std::process::Command::new(cmd)
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .ok()?;
     let first_line = |b: &[u8]| {
         String::from_utf8_lossy(b)
             .lines()
