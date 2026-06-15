@@ -113,7 +113,12 @@ pub fn decode_copilot_line(
 
     let out = match kind {
         "session.start" => {
-            let session_id = data.and_then(|d| str_at(d, "sessionId")).unwrap_or("");
+            let session_id = data
+                .and_then(|d| str_at(d, "sessionId"))
+                .unwrap_or_else(|| {
+                    crate::source::drift::missing_field(source, "session.start", "sessionId");
+                    ""
+                });
             let cwd = data
                 .and_then(|d| d.get("context"))
                 .and_then(|c| str_at(c, "cwd"))
@@ -131,7 +136,10 @@ pub fn decode_copilot_line(
             let Some(tool_call_id) = str_at(d, "toolCallId") else {
                 return Ok(vec![]);
             };
-            let tool_name = str_at(d, "toolName").unwrap_or("");
+            let tool_name = str_at(d, "toolName").unwrap_or_else(|| {
+                crate::source::drift::missing_field(source, "tool.execution_start", "toolName");
+                ""
+            });
             // The sub-agent dispatch is the `task` tool (`arguments.agent_type`);
             // make_tool_detail keys on the CC `subagent_type` field, which Copilot
             // doesn't use — so detect `task` by name here (the child sprite still
@@ -139,7 +147,7 @@ pub fn decode_copilot_line(
             let detail = if tool_name == "task" {
                 ToolDetail::Task
             } else {
-                make_tool_detail(tool_name, d.get("arguments"))
+                make_tool_detail(source, tool_name, d.get("arguments"))
             };
             vec![AgentEvent::ActivityStart {
                 agent_id: acting,

@@ -131,7 +131,13 @@ pub fn decode_rx_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
             parent_id: None,
         }]),
         "PreToolUse" => {
-            let tool = obj.get("toolName").and_then(|s| s.as_str()).unwrap_or("?");
+            let tool = obj
+                .get("toolName")
+                .and_then(|s| s.as_str())
+                .unwrap_or_else(|| {
+                    crate::source::drift::missing_field(SOURCE_NAME, "PreToolUse", "toolName");
+                    "?"
+                });
             Ok(vec![
                 identity(),
                 AgentEvent::ActivityStart {

@@ -191,7 +191,13 @@ pub fn decode_hook_payload(v: Value) -> Result<Vec<AgentEvent>> {
             }])
         }
         "PreToolUse" => {
-            let tool_name = obj.get("tool_name").and_then(|s| s.as_str()).unwrap_or("?");
+            let tool_name = obj
+                .get("tool_name")
+                .and_then(|s| s.as_str())
+                .unwrap_or_else(|| {
+                    super::drift::missing_field(source, "PreToolUse", "tool_name");
+                    "?"
+                });
             let tool_use_id = obj
                 .get("tool_use_id")
                 .and_then(|s| s.as_str())
@@ -201,7 +207,7 @@ pub fn decode_hook_payload(v: Value) -> Result<Vec<AgentEvent>> {
                 AgentEvent::ActivityStart {
                     agent_id,
                     tool_use_id,
-                    detail: Some(make_tool_detail(tool_name, obj.get("tool_input"))),
+                    detail: Some(make_tool_detail(source, tool_name, obj.get("tool_input"))),
                 },
             ])
         }
@@ -279,11 +285,17 @@ pub fn decode_hook_payload(v: Value) -> Result<Vec<AgentEvent>> {
         // (dispatched above via the registry) — they change the event's
         // SUBJECT to the child AgentId, which these shared session-keyed arms
         // cannot express. A source whose row has no custom decoder bails here.
-        other => bail!("unsupported hook_event_name: {other}"),
+        other => {
+            // Drift breadcrumb: a hook event we don't handle (and no custom
+            // decoder claimed) — upstream added or renamed one. Surfaced before
+            // the bail so the self-diagnosis layer can see it.
+            super::drift::unknown_event(source, other);
+            bail!("unsupported hook_event_name: {other}")
+        }
     }
 }
 
-pub(crate) fn make_tool_detail(tool_name: &str, input: Option<&Value>) -> ToolDetail {
+pub(crate) fn make_tool_detail(source: &str, tool_name: &str, input: Option<&Value>) -> ToolDetail {
     // Detect the subagent-dispatch tool SEMANTICALLY, by the PRESENCE of a
     // `subagent_type` input field. The dispatch tool was renamed `Task` →
     // `Agent` (CC v2.1.63, undocumented) and upstream can rename it again, but
@@ -309,10 +321,7 @@ pub(crate) fn make_tool_detail(tool_name: &str, input: Option<&Value>) -> ToolDe
         // upstream renamed the tool again. Semantic detection keeps us working;
         // this surfaces the new name so the known set / docs can be updated.
         if has_subagent_type && !known_name {
-            tracing::debug!(
-                tool = %tool_name,
-                "subagent-dispatch tool has an unrecognized name (handled via subagent_type); upstream may have renamed it"
-            );
+            super::drift::unknown_dispatch(source, tool_name);
         }
         ToolDetail::Task
     } else {
@@ -404,15 +413,16 @@ mod tests {
             "TaskOutput",
         ] {
             assert!(
-                !make_tool_detail(name, Some(&json!({"id": "t-1"}))).is_task(),
+                !make_tool_detail("test", name, Some(&json!({"id": "t-1"}))).is_task(),
                 "{name} (no subagent_type) must be a Generic tool, not the subagent dispatch"
             );
         }
         // The exact dispatch names + the semantic signal still resolve to Task.
-        assert!(make_tool_detail("Task", None).is_task());
-        assert!(make_tool_detail("Agent", None).is_task());
+        assert!(make_tool_detail("test", "Task", None).is_task());
+        assert!(make_tool_detail("test", "Agent", None).is_task());
         assert!(
             make_tool_detail(
+                "test",
                 "WhateverUpstreamRenamesItTo",
                 Some(&json!({"subagent_type": "x"}))
             )
@@ -909,7 +919,7 @@ mod tests {
     #[test]
     fn generic_tool_name_is_capped_in_the_display() {
         let long = "T".repeat(MAX_DECODED_FIELD_CHARS * 10);
-        match make_tool_detail(&long, None) {
+        match make_tool_detail("test", &long, None) {
             ToolDetail::Generic { display } => {
                 assert_eq!(display.chars().count(), MAX_DECODED_FIELD_CHARS + 1);
                 assert!(display.ends_with('…'));
@@ -917,7 +927,7 @@ mod tests {
             other => panic!("expected Generic, got {other:?}"),
         }
         // A legitimate short name passes through unchanged.
-        match make_tool_detail("Read", None) {
+        match make_tool_detail("test", "Read", None) {
             ToolDetail::Generic { display } => assert_eq!(display, "Read"),
             other => panic!("expected Generic, got {other:?}"),
         }

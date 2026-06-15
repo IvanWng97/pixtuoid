@@ -82,6 +82,9 @@ pub fn live_cc_session_ids(sessions_dir: &Path) -> Option<ProbeSnapshot> {
                     static SHAPE_DRIFT_WARNED: std::sync::Once = std::sync::Once::new();
                     SHAPE_DRIFT_WARNED.call_once(|| {
                         tracing::warn!(
+                            target: crate::source::drift::TARGET,
+                            source = "claude-code",
+                            kind = "shape_drift",
                             "CC sessions-registry entry {} parses as JSON but `{key}` is \
                              missing or mistyped — the registry shape changed upstream; \
                              mid-attach liveness degraded to mtime gating",

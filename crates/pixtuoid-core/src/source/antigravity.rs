@@ -126,7 +126,7 @@ fn decode_ag_tool_call(
     AgentEvent::ActivityStart {
         agent_id,
         tool_use_id: Some(format!("ag-{step_index}-{i}")),
-        detail: Some(make_tool_detail(name, Some(&normalized))),
+        detail: Some(make_tool_detail(SOURCE_NAME, name, Some(&normalized))),
     }
 }
 

@@ -208,13 +208,16 @@ fn codex_tool_start(agent_id: AgentId, payload: Option<&Map<String, Value>>) -> 
     let name = payload
         .and_then(|p| p.get("name"))
         .and_then(|s| s.as_str())
-        .unwrap_or("tool");
+        .unwrap_or_else(|| {
+            crate::source::drift::missing_field(SOURCE_NAME, "function_call", "name");
+            "tool"
+        });
     AgentEvent::ActivityStart {
         agent_id,
         tool_use_id: None,
         // Codex tool calls are function_calls, never subagent dispatches (those
         // arrive as the SubagentStart hook), so no `subagent_type` to pass.
-        detail: Some(make_tool_detail(name, None)),
+        detail: Some(make_tool_detail(SOURCE_NAME, name, None)),
     }
 }
 

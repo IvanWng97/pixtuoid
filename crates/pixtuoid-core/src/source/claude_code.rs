@@ -119,6 +119,9 @@ pub(crate) fn decode_cc_hook_custom(v: &Value) -> Result<Option<Vec<AgentEvent>>
                 // warn (it reaches the warn-floor file log), unlike the
                 // per-dispatch tool-name breadcrumbs.
                 tracing::warn!(
+                    target: crate::source::drift::TARGET,
+                    source = SOURCE_NAME,
+                    kind = "shape_drift",
                     stem = %k,
                     wire = %prefixed,
                     "SubagentStop transcript stem != prefixed agent_id; keying on the stem"
@@ -366,11 +369,17 @@ pub fn decode_cc_line(transcript_path: &str, source: &str, v: Value) -> Result<V
                     continue;
                 }
                 let id = bobj.get("id").and_then(|s| s.as_str()).map(String::from);
-                let name = bobj.get("name").and_then(|s| s.as_str()).unwrap_or("?");
+                let name = bobj
+                    .get("name")
+                    .and_then(|s| s.as_str())
+                    .unwrap_or_else(|| {
+                        crate::source::drift::missing_field(SOURCE_NAME, "tool_use", "name");
+                        "?"
+                    });
                 out.push(AgentEvent::ActivityStart {
                     agent_id,
                     tool_use_id: id,
-                    detail: Some(make_tool_detail(name, bobj.get("input"))),
+                    detail: Some(make_tool_detail(SOURCE_NAME, name, bobj.get("input"))),
                 });
             }
         }

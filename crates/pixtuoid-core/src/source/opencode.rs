@@ -199,7 +199,17 @@ fn decode_tool_part(props: &serde_json::Map<String, Value>) -> Result<Vec<AgentE
     let identity = oc_identity(agent_id, session_id);
     match status {
         "running" => {
-            let tool = part.get("tool").and_then(|t| t.as_str()).unwrap_or("?");
+            let tool = part
+                .get("tool")
+                .and_then(|t| t.as_str())
+                .unwrap_or_else(|| {
+                    crate::source::drift::missing_field(
+                        SOURCE_NAME,
+                        "message.part.updated",
+                        "tool",
+                    );
+                    "?"
+                });
             let input = part.get("state").and_then(|s| s.get("input"));
             Ok(vec![
                 identity,

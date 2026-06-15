@@ -313,6 +313,7 @@ pub mod codex;
 pub mod copilot;
 pub mod cursor;
 pub mod decoder;
+pub mod drift;
 pub(crate) mod exit_watch;
 pub(crate) mod fd_probe;
 pub mod hook;
