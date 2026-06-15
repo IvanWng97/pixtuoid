@@ -22,7 +22,8 @@ use serde_json::Value;
 
 use crate::source::jsonl::LineDecoder;
 use crate::source::{
-    antigravity, claude_code, codewhale, codex, copilot, cursor, opencode, reasonix, AgentEvent,
+    antigravity, claude_code, codewhale, codex, copilot, cursor, openclaw, opencode, reasonix,
+    AgentEvent,
 };
 
 /// How the shared hook decoder derives the AgentId for this source. Moot for
@@ -139,6 +140,12 @@ pub struct SourceDescriptor {
     /// transcript): the fixture harness then accepts a transcript-less,
     /// hook-payloads-only scenario for it — and ONLY for it.
     pub line_decoder: Option<LineDecoder>,
+    /// True for a PRESENCE-ONLY source: its `hook.custom` claims every event but
+    /// produces ZERO `AgentEvent`s — presence rides a sibling channel into
+    /// `SceneState::source_presence` (the OpenClaw daemon "tank" fixture). The
+    /// conformance harness treats the empty `AgentEvent` output as by-design, not
+    /// a broken decoder. `false` for every agent-rendering source.
+    pub presence_only: bool,
     pub hook: HookDecoding,
     pub caps: SourceCaps,
 }
@@ -152,6 +159,7 @@ pub const REGISTRY: &[SourceDescriptor] = &[
     OPENCODE,
     COPILOT,
     CURSOR,
+    OPENCLAW,
 ];
 
 /// Linear scan — at most a handful of entries, called on slot creation and
@@ -176,6 +184,7 @@ const CLAUDE_CODE: SourceDescriptor = SourceDescriptor {
         // ONLY end signal a Workflow-fleet subagent gets (#241).
         custom: Some(claude_code::decode_cc_hook_custom),
     },
+    presence_only: false,
     caps: SourceCaps {
         has_exit_signal: true,
         // CC has no UserPromptSubmit-class resurrect path (its JSONL
@@ -199,6 +208,7 @@ const CODEX: SourceDescriptor = SourceDescriptor {
         // session AgentId) — inexpressible in the shared arms.
         custom: Some(codex::decode_codex_hook_custom),
     },
+    presence_only: false,
     caps: SourceCaps {
         has_exit_signal: false,
         resurrects_on_prompt: true,
@@ -216,6 +226,7 @@ const ANTIGRAVITY: SourceDescriptor = SourceDescriptor {
         id_key: IdKey::TranscriptPathThenSessionId,
         custom: None,
     },
+    presence_only: false,
     caps: SourceCaps {
         has_exit_signal: false,
         resurrects_on_prompt: false,
@@ -238,6 +249,7 @@ const REASONIX: SourceDescriptor = SourceDescriptor {
         id_key: IdKey::TranscriptPathThenSessionId, // inert: custom claims all
         custom: Some(reasonix::decode_rx_hook_custom),
     },
+    presence_only: false,
     caps: SourceCaps {
         // SessionEnd hook fires on clean exit (verified upstream @v1.2.0,
         // internal/hook/hook.go run sites) — best-effort counts.
@@ -271,6 +283,7 @@ const CODEWHALE: SourceDescriptor = SourceDescriptor {
         id_key: IdKey::TranscriptPathThenSessionId, // inert: custom claims all
         custom: Some(codewhale::decode_cw_hook_custom),
     },
+    presence_only: false,
     caps: SourceCaps {
         // session_end fires on a clean TUI quit carrying DEEPSEEK_WORKSPACE
         // (verified live 2026-06-12) — best-effort counts.
@@ -300,6 +313,7 @@ const OPENCODE: SourceDescriptor = SourceDescriptor {
         id_key: IdKey::TranscriptPathThenSessionId, // inert: custom claims all
         custom: Some(opencode::decode_oc_hook_custom),
     },
+    presence_only: false,
     caps: SourceCaps {
         // A clean per-session close fires `session.deleted` → SessionEnd, and an
         // abrupt exit / TUI quit kills the opencode process → `hook::HookPidWatch`
@@ -321,6 +335,33 @@ const OPENCODE: SourceDescriptor = SourceDescriptor {
     },
 };
 
+/// HOOK-ONLY and PRESENCE-ONLY: OpenClaw is one always-on gateway DAEMON, not a
+/// per-session coding agent. Its backend `claude-cli` sessions are already shown
+/// by `cc·`, so OpenClaw renders ONE daemon-presence fixture (the HQ tank) — its
+/// `hook.custom` claims every event (alien `{type:…}` envelope) but emits ZERO
+/// `AgentEvent`s; presence rides a sibling channel into `SceneState::source_presence`.
+/// `caps` are INERT (it creates no `AgentSlot`s — these gate AgentSlot reaping).
+const OPENCLAW: SourceDescriptor = SourceDescriptor {
+    name: openclaw::SOURCE_NAME,
+    label_prefix: "ok",
+    // Byte-real capture anchor (2026-06-15): `openclaw 2026.6.6`.
+    verified_version: "2026.6.6",
+    version_probe: Some(&["openclaw", "--version"]),
+    line_decoder: None,
+    presence_only: true,
+    hook: HookDecoding {
+        id_key: IdKey::TranscriptPathThenSessionId, // inert: custom claims all
+        custom: Some(openclaw::decode_openclaw_hook_custom),
+    },
+    caps: SourceCaps {
+        // INERT — OpenClaw creates no AgentSlots (daemon-presence only), so these
+        // AgentSlot-reaping caps never apply. Set so `short_idle_reap()` is false.
+        has_exit_signal: false,
+        resurrects_on_prompt: false,
+        delegations_are_hook_silent: false,
+    },
+};
+
 /// GitHub Copilot CLI (`@github/copilot`). TRANSCRIPT-ONLY (Antigravity/Codex-class):
 /// the whole lifecycle is persisted to `<copilot_home>/session-state/<id>/events.jsonl`
 /// (permission + sub-agent events included — richer than Codex), so it needs NO hook
@@ -337,6 +378,7 @@ const COPILOT: SourceDescriptor = SourceDescriptor {
         id_key: IdKey::TranscriptPathThenSessionId, // inert: no hook transport for this source
         custom: None,
     },
+    presence_only: false,
     caps: SourceCaps {
         // `session.shutdown` is a real persisted exit marker → no short-idle reaper.
         has_exit_signal: true,
@@ -370,6 +412,7 @@ const CURSOR: SourceDescriptor = SourceDescriptor {
         id_key: IdKey::TranscriptPathThenSessionId, // inert: custom claims all
         custom: Some(cursor::decode_cursor_hook_custom),
     },
+    presence_only: false,
     caps: SourceCaps {
         // `sessionEnd` FIRES on clean completion (capture-verified 2026-06-14:
         // `reason:"completed"`) — best-effort counts, CC/Reasonix class. Abrupt
@@ -454,9 +497,10 @@ mod tests {
         assert_eq!(OPENCODE.name, opencode::SOURCE_NAME);
         assert_eq!(COPILOT.name, copilot::SOURCE_NAME);
         assert_eq!(CURSOR.name, cursor::SOURCE_NAME);
+        assert_eq!(OPENCLAW.name, openclaw::SOURCE_NAME);
         // Hand-enumerated above — the len pin turns "forgot the new row's
         // assert" from a silent gap into a loud failure.
-        assert_eq!(REGISTRY.len(), 8, "new row? add its name-pin assert above");
+        assert_eq!(REGISTRY.len(), 9, "new row? add its name-pin assert above");
     }
 
     #[test]

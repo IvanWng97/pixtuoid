@@ -45,6 +45,14 @@ fn is_hook_only(source: &str) -> bool {
     registry::descriptor_for(source).is_some_and(|d| d.line_decoder.is_none())
 }
 
+/// Presence-only sources (`presence_only: true` in the registry) decode to ZERO
+/// AgentEvents — their `hook.custom` claims all but presence rides a sibling
+/// channel into `SceneState::source_presence` (the OpenClaw daemon fixture). The
+/// coalesce-to-one-AgentId contract doesn't apply (no agent slots).
+fn is_presence_only(source: &str) -> bool {
+    registry::descriptor_for(source).is_some_and(|d| d.presence_only)
+}
+
 fn fixtures_root() -> PathBuf {
     // Conformance scenarios ONLY — every dir here must be a registered source
     // (decode_fixture asserts it). Single-owner fixtures (decode's hooks/jsonl,
@@ -217,6 +225,29 @@ fn all_source_fixtures_decode_and_coalesce() {
                 .to_string_lossy()
                 .into_owned();
             let d = decode_fixture(&source, &scenario_dir);
+            let events: Vec<AgentEvent> =
+                d.jsonl.iter().chain(d.hooks.iter()).cloned().collect();
+
+            // PRESENCE-ONLY (OpenClaw): the hook.custom claims every event but
+            // emits ZERO AgentEvents — presence rides a sibling channel into
+            // SceneState::source_presence. The fixture must still ship hooks (so
+            // the decoder runs + can't panic) and decode to NO AgentEvents (the
+            // by-design emptiness `presence_only` guards). The contribution +
+            // coalesce contracts below don't apply (no agent slots).
+            if is_presence_only(&source) {
+                assert!(
+                    d.had_hook_file,
+                    "{source}/{scenario}: a presence-only source must ship hook-payloads.jsonl"
+                );
+                assert!(
+                    events.is_empty(),
+                    "{source}/{scenario}: a presence-only source must decode to ZERO AgentEvents \
+                     (presence rides the sibling channel), got {events:?}"
+                );
+                insta::assert_yaml_snapshot!(format!("{source}__{scenario}"), events);
+                ran += 1;
+                continue;
+            }
 
             // Each present transport must actually contribute — else a
             // degenerate fixture (e.g. all-no-op JSONL) could pass coalescing
@@ -239,8 +270,6 @@ fn all_source_fixtures_decode_and_coalesce() {
                     "{source}/{scenario}: hook-payloads.jsonl decoded to ZERO events"
                 );
             }
-
-            let events: Vec<AgentEvent> = d.jsonl.iter().chain(d.hooks.iter()).cloned().collect();
 
             // Contract 1: the decoded event sequence is stable (golden snapshot).
             insta::assert_yaml_snapshot!(format!("{source}__{scenario}"), events);

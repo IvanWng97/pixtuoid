@@ -153,6 +153,7 @@ async fn claude_code_source_run_binds_socket_and_emits_events() {
         socket_path,
         projects_root,
         child_end_unclaims: None,
+        presence_tx: None,
     };
     let handle = tokio::spawn(async move { Box::new(src).run(tx).await });
 

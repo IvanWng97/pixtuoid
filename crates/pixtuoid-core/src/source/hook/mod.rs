@@ -55,7 +55,16 @@ pub struct HookSocketListener {
     /// `with_pid_watch`; a builder field rather than a `run` parameter so
     /// `run`'s public signature stays put (no semver break on pixtuoid-core).
     pid_watch: Option<HookPidWatch>,
+    /// Optional presence side-channel for the daemon fixture (OpenClaw): its
+    /// payloads decode to presence deltas sent here (they yield no `AgentEvent`s).
+    /// A builder field like `pid_watch`, so `run`'s signature stays put.
+    presence_tx: Option<PresenceSender>,
 }
+
+/// The OpenClaw daemon-presence side channel (invariant #2: NOT the one
+/// `AgentEvent` channel). Unbounded — presence deltas are tiny + rare.
+pub(crate) type PresenceSender =
+    tokio::sync::mpsc::UnboundedSender<crate::source::openclaw::DaemonPresenceUpdate>;
 
 impl HookSocketListener {
     pub async fn bind(path: impl Into<PathBuf>) -> Result<Self> {
@@ -65,6 +74,7 @@ impl HookSocketListener {
             inner,
             path,
             pid_watch: None,
+            presence_tx: None,
         })
     }
 
@@ -80,8 +90,16 @@ impl HookSocketListener {
         self
     }
 
+    /// Attach the presence side-channel so OpenClaw payloads decode to daemon
+    /// fixture deltas (they produce no `AgentEvent`s). Wired by `ClaudeCodeSource`,
+    /// which owns the shared socket every CLI's hooks ride.
+    pub(crate) fn with_presence(mut self, presence_tx: Option<PresenceSender>) -> Self {
+        self.presence_tx = presence_tx;
+        self
+    }
+
     pub async fn run(self, tx: TaggedSender) -> Result<()> {
-        self.inner.run(tx, self.pid_watch).await
+        self.inner.run(tx, self.pid_watch, self.presence_tx).await
     }
 }
 
@@ -166,6 +184,7 @@ pub(crate) async fn handle_conn(
     stream: impl AsyncRead + Unpin,
     tx: TaggedSender,
     pid_watch: Option<HookPidWatch>,
+    presence_tx: Option<PresenceSender>,
 ) {
     let reader = BufReader::new(stream.take(MAX_CONN_BYTES));
     let mut lines = reader.lines();
@@ -190,6 +209,24 @@ pub(crate) async fn handle_conn(
                     .and_then(|_| v.get("_pid"))
                     .and_then(serde_json::Value::as_u64)
                     .and_then(|p| i32::try_from(p).ok());
+                // OpenClaw is PRESENCE-ONLY: `decode_hook_payload` below yields
+                // ZERO `AgentEvent`s for it — its daemon-fixture deltas ride this
+                // SIDE channel instead (invariant #2). Peek before `v` is consumed.
+                // Inert for every other source (gated on the source tag).
+                if let Some(ptx) = presence_tx.as_ref() {
+                    if v.get("_pixtuoid_source").and_then(serde_json::Value::as_str)
+                        == Some(crate::source::openclaw::SOURCE_NAME)
+                    {
+                        match crate::source::openclaw::decode_openclaw_hook_payload(&v) {
+                            Ok(updates) => {
+                                for u in updates {
+                                    let _ = ptx.send(u);
+                                }
+                            }
+                            Err(e) => warn!("openclaw presence decode error: {e}"),
+                        }
+                    }
+                }
                 match decode_hook_payload(v) {
                     // One payload can decode to multiple events (an Identity
                     // attached ahead of a tool/permission event, #221) — sent
@@ -351,7 +388,7 @@ mod tests {
         let (mut client, server) = tokio::io::duplex(4096);
         let (tx, mut rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(8);
 
-        let task = tokio::spawn(handle_conn(server, tx, None));
+        let task = tokio::spawn(handle_conn(server, tx, None, None));
         client
             .write_all(
                 b"{\"hook_event_name\":\"SessionStart\",\"session_id\":\"s1\",\
@@ -384,7 +421,7 @@ mod tests {
 
         let timed_out = tokio::time::timeout(
             std::time::Duration::from_millis(50),
-            handle_conn(server, tx, None),
+            handle_conn(server, tx, None, None),
         )
         .await
         .is_err();
@@ -425,7 +462,7 @@ mod tests {
 
         client.write_all(PRE_TOOL_USE_LINE).await.unwrap();
         drop(client);
-        handle_conn(server, tx, None).await;
+        handle_conn(server, tx, None, None).await;
 
         assert!(rx.try_recv().is_ok());
         assert!(rx.try_recv().is_ok());
@@ -444,7 +481,7 @@ mod tests {
         let (logs, _guard) = capture_warns();
 
         client.write_all(PRE_TOOL_USE_LINE).await.unwrap();
-        handle_conn(server, tx, None).await;
+        handle_conn(server, tx, None, None).await;
 
         let out = logs.contents();
         assert!(

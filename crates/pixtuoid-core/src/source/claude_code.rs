@@ -145,6 +145,11 @@ pub struct ClaudeCodeSource {
     /// `CodexSource` (whose multi-turn children are the motivating case);
     /// `None` disables the side-channel (bare test construction).
     pub child_end_unclaims: Option<ChildEndUnclaims>,
+    /// The OpenClaw daemon-presence side channel (the HQ tank fixture). OpenClaw
+    /// hooks ride this one shared socket; its payloads decode to presence deltas
+    /// (no `AgentEvent`s), forwarded here for the reducer task. `None` disables it
+    /// (bare test construction). Set by `runtime/driver.rs`, like `child_end_unclaims`.
+    pub presence_tx: Option<crate::source::hook::PresenceSender>,
 }
 
 /// Resolve `CLAUDE_CONFIG_DIR` (an empty value is treated as unset). `pub` +
@@ -200,6 +205,7 @@ impl ClaudeCodeSource {
             socket_path: Self::default_socket_path(),
             projects_root,
             child_end_unclaims: None,
+            presence_tx: None,
         }
     }
 }
@@ -299,7 +305,9 @@ impl Source for ClaudeCodeSource {
         // SessionEnd goes on the main `tx` (it is `as_child: false`, so the #246
         // tee — which acts only on `as_child: true` — would ignore it anyway).
         // `None` on platforms without an exit-watch backend → no-op.
-        let socket = socket.with_pid_watch(HookPidWatch::spawn(tx.clone()));
+        let socket = socket
+            .with_pid_watch(HookPidWatch::spawn(tx.clone()))
+            .with_presence(self.presence_tx.clone());
         let hook_task = tokio::spawn(async move { socket.run(tx_hook).await });
         let jsonl_task = tokio::spawn(async move { watcher.run(tx_jsonl).await });
 

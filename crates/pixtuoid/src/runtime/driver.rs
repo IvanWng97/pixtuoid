@@ -19,6 +19,7 @@ use std::time::{Duration, SystemTime};
 use anyhow::Result;
 use pixtuoid_core::source::antigravity::AntigravitySource;
 use pixtuoid_core::source::claude_code::ClaudeCodeSource;
+use pixtuoid_core::source::openclaw::{self, DaemonPresenceUpdate};
 use pixtuoid_core::source::codex::CodexSource;
 use pixtuoid_core::source::copilot::CopilotSource;
 use pixtuoid_core::source::jsonl::ChildEndUnclaims;
@@ -70,7 +71,15 @@ async fn run_async(cfg: RunConfig) -> Result<()> {
     let socket_path = socket
         .clone()
         .unwrap_or_else(ClaudeCodeSource::default_socket_path);
-    let transcript_sources = build_transcript_sources(socket, projects_root, codex_sessions_root);
+    // OpenClaw daemon-presence SIDE channel (invariant #2: NOT the AgentEvent
+    // channel). The hook listener decodes openclaw payloads into presence deltas
+    // sent here; the exit watch drains gateway-pid deaths into the SAME channel as
+    // PidExited; the reducer task merges both into SceneState::source_presence.
+    let (presence_tx, presence_rx) =
+        tokio::sync::mpsc::unbounded_channel::<DaemonPresenceUpdate>();
+    let presence_exit_watch = openclaw::spawn_presence_exit_watch(presence_tx.clone());
+    let transcript_sources =
+        build_transcript_sources(socket, projects_root, codex_sessions_root, Some(presence_tx));
 
     let (tx, rx) = mpsc::channel::<(Transport, AgentEvent)>(256);
     let boot_caps: [usize; MAX_FLOORS] = match (desk_cap, headless) {
@@ -93,6 +102,8 @@ async fn run_async(cfg: RunConfig) -> Result<()> {
         scene_tx,
         Arc::clone(&floor_caps),
         connected.clone(),
+        presence_rx,
+        presence_exit_watch,
     ));
 
     // Source-health side channel (#157): a fatal source exit must reach the
@@ -138,6 +149,7 @@ fn build_transcript_sources(
     socket: Option<PathBuf>,
     projects_root: Option<PathBuf>,
     codex_sessions_root: Option<PathBuf>,
+    presence_tx: Option<tokio::sync::mpsc::UnboundedSender<DaemonPresenceUpdate>>,
 ) -> Vec<Box<dyn DynSource>> {
     let mut cc_src = ClaudeCodeSource::default_paths();
     if let Some(s) = socket {
@@ -146,6 +158,9 @@ fn build_transcript_sources(
     if let Some(p) = projects_root {
         cc_src.projects_root = p;
     }
+    // OpenClaw hooks ride the shared socket ClaudeCodeSource binds; route its
+    // (presence-only) payloads to the daemon-fixture side channel.
+    cc_src.presence_tx = presence_tx;
 
     let ag_src = AntigravitySource::default_paths();
     let copilot_src = CopilotSource::default_paths();
@@ -195,8 +210,13 @@ async fn reducer_task(
     scene_tx: watch::Sender<Arc<SceneState>>,
     floor_caps: Arc<[AtomicUsize; MAX_FLOORS]>,
     connected: ConnectedSources,
+    mut presence_rx: tokio::sync::mpsc::UnboundedReceiver<DaemonPresenceUpdate>,
+    presence_exit_watch: Option<openclaw::PresenceExitWatch>,
 ) {
     let mut reducer = Reducer::new();
+    // Disabled once the presence channel closes (all senders dropped) so its
+    // `recv() -> None` branch can't busy-loop the select.
+    let mut presence_open = true;
     let initial_caps: [usize; MAX_FLOORS] =
         std::array::from_fn(|i| floor_caps[i].load(Ordering::Relaxed));
     let mut scene = SceneState::new(initial_caps);
@@ -225,6 +245,28 @@ async fn reducer_task(
                     break;
                 }
             }
+            // OpenClaw daemon-presence deltas (hook-derived + PidExited from the
+            // exit watch) — merged into SceneState::source_presence, NEVER through
+            // Reducer::apply (which is AgentId-pure). Invariant #2.
+            update = presence_rx.recv(), if presence_open => {
+                match update {
+                    Some(update) => {
+                        let now = SystemTime::now();
+                        // Arm the instant abrupt-down watch on a fresh gateway pid.
+                        if let (DaemonPresenceUpdate::GatewayUp { pid: Some(pid) }, Some(ew)) =
+                            (&update, presence_exit_watch.as_ref())
+                        {
+                            ew.watch(*pid);
+                        }
+                        openclaw::apply_presence(&mut scene, update, now);
+                        if scene_tx.send(Arc::new(scene.clone())).is_err() {
+                            tracing::warn!("scene channel closed — renderer dropped");
+                            break;
+                        }
+                    }
+                    None => presence_open = false,
+                }
+            }
             _ = sweep_interval.tick() => {
                 let now = SystemTime::now();
                 // Reconcile the scene toward the connected-set: walk out (idempotently)
@@ -236,6 +278,8 @@ async fn reducer_task(
                 let cur = connected.snapshot();
                 reducer.reconcile_connected(&mut scene, &cur, now);
                 reducer.tick(&mut scene, now);
+                // Decay stale daemon presence (busy→idle, up→down on silence).
+                openclaw::sweep_presence_ttl(&mut scene, now);
                 if scene_tx.send(Arc::new(scene.clone())).is_err() {
                     tracing::warn!("scene channel closed — renderer dropped");
                     break;
@@ -351,7 +395,7 @@ mod tests {
         use pixtuoid_core::source::{registry::descriptor_for, REGISTERED_SOURCES};
         use std::collections::BTreeSet;
 
-        let sources = build_transcript_sources(None, None, None);
+        let sources = build_transcript_sources(None, None, None, None);
         let built: BTreeSet<&str> = sources.iter().map(|s| s.name()).collect();
         let expected: BTreeSet<&str> = REGISTERED_SOURCES
             .iter()
