@@ -1,7 +1,7 @@
 //! OpenClaw install target — the TWO-OWNERSHIP hybrid.
 //!
 //! OpenClaw is one always-on gateway DAEMON; pixtuoid renders it as a single
-//! presence-gated wandering mascot ("Molty"). Its plugin observes the gateway
+//! presence-gated wandering lobster mascot. Its plugin observes the gateway
 //! lifecycle and pipes a STRICT allowlist of timing/id fields (never message
 //! content) to the `pixtuoid-hook` shim (`--source openclaw`).
 //!

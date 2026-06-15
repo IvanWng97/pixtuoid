@@ -1033,11 +1033,11 @@ fn version_popup_interrupt_continues_from_edge() {
 }
 
 // ===================================================================
-// Gateway mascot (Molty) — presence-gated wandering creature
+// Gateway lobster mascot — presence-gated wandering creature
 // ===================================================================
 
 /// A scene carrying an OpenClaw gateway presence (and nothing else, so the only
-/// lobster-red pixels on the floor are Molty's).
+/// lobster-red pixels on the floor are the lobster's).
 fn gateway_scene(
     state: pixtuoid_core::state::DaemonState,
     entered_at: SystemTime,
@@ -1089,10 +1089,10 @@ fn bubble_px(buf: &RgbBuffer) -> usize {
     n
 }
 
-/// Count Molty's exclusive carapace reds in the buffer (the lobster sprite is
+/// Count the lobster's exclusive carapace reds in the buffer (the lobster sprite is
 /// not recolored, so its authored RGBs render exactly). An empty agents scene
 /// means no recolored shirts can collide.
-fn molty_px(buf: &RgbBuffer) -> usize {
+fn lobster_px(buf: &RgbBuffer) -> usize {
     let reds = [
         pixtuoid_core::sprite::Rgb {
             r: 0xd2,
@@ -1128,11 +1128,11 @@ fn molty_px(buf: &RgbBuffer) -> usize {
 
 #[test]
 fn no_gateway_mascot_without_presence() {
-    // The ~99% who don't run a gateway see a normal office — no Molty.
+    // The ~99% who don't run a gateway see a normal office — no lobster.
     let scene = SceneState::uniform(16);
     let mut r = build(160, 80, vec![]);
     r.render(&scene, &pack(), t0()).unwrap();
-    assert_eq!(molty_px(r.buf()), 0, "no presence ⇒ no lobster pixels");
+    assert_eq!(lobster_px(r.buf()), 0, "no presence ⇒ no lobster pixels");
 }
 
 #[test]
@@ -1147,8 +1147,8 @@ fn gateway_mascot_present_when_up() {
     let mut r = build(160, 80, vec![]);
     r.render(&scene, &pack(), t0()).unwrap();
     assert!(
-        molty_px(r.buf()) > 10,
-        "a live gateway ⇒ Molty scuttles the floor"
+        lobster_px(r.buf()) > 10,
+        "a live gateway ⇒ the lobster scuttles the floor"
     );
 }
 
@@ -1197,8 +1197,8 @@ fn gateway_mascot_walks_out_then_is_gone() {
     );
     r.render(&leaving, &pack(), t0()).unwrap();
     assert!(
-        molty_px(r.buf()) > 0,
-        "mid walk-out, Molty is still visible"
+        lobster_px(r.buf()) > 0,
+        "mid walk-out, the lobster is still visible"
     );
 
     // Well past the walk-out window ⇒ gone (back to a normal office).
@@ -1209,12 +1209,16 @@ fn gateway_mascot_walks_out_then_is_gone() {
         0,
     );
     r.render(&gone, &pack(), t0()).unwrap();
-    assert_eq!(molty_px(r.buf()), 0, "after the walk-out, Molty has left");
+    assert_eq!(
+        lobster_px(r.buf()),
+        0,
+        "after the walk-out, the lobster has left"
+    );
 }
 
 #[test]
 fn gateway_mascot_wanders_over_time() {
-    // Same scene rendered across a wander cycle ⇒ Molty changes position
+    // Same scene rendered across a wander cycle ⇒ the lobster changes position
     // (proves the motion is live, not a fixed sticker).
     let scene = gateway_scene(
         pixtuoid_core::state::DaemonState::Idle,
@@ -1227,7 +1231,7 @@ fn gateway_mascot_wanders_over_time() {
     for k in 0..8u64 {
         let now = t0() + Duration::from_secs(k * 3);
         r.render(&scene, &pack(), now).unwrap();
-        // Signature: the topmost-leftmost Molty pixel.
+        // Signature: the topmost-leftmost lobster pixel.
         let buf = r.buf();
         'scan: for y in 0..buf.height {
             for x in 0..buf.width {
@@ -1252,7 +1256,7 @@ fn gateway_mascot_wanders_over_time() {
     }
     assert!(
         tops.len() >= 2,
-        "Molty should wander to ≥2 distinct positions, saw {}",
+        "the lobster should wander to ≥2 distinct positions, saw {}",
         tops.len()
     );
 }

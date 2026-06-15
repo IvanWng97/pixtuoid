@@ -151,7 +151,7 @@ pub(super) enum DrawableKind<'a> {
         frame_idx: usize,
         pet_elapsed_ms: Option<u64>,
     },
-    /// The OpenClaw (or any gateway) "Molty" mascot — a presence-gated wandering
+    /// The OpenClaw (or any gateway) lobster mascot — a presence-gated wandering
     /// creature, NOT an agent (lives in `daemons`, not `scene.agents`).
     /// y-sorted at its south row like a pet. `run_count > 0` (an in-flight agent
     /// run) adds a rising activity-bubble cue — the busy tell keys on RUNS, not
@@ -370,7 +370,7 @@ fn sample_polyline(pts: &[Point], t: f32, fallback: Point) -> Point {
     last_pt
 }
 
-// ── Gateway mascot ("Molty") ──────────────────────────────────────────────
+// ── Gateway lobster mascot ──────────────────────────────────────────────
 // A presence-gated wandering creature (NOT an agent). Motion *encodes* the
 // gateway state: it enters from the elevator on first sight, ambles + rests
 // when Idle, shuttles toward the backend desks when Busy (the "routing" read),
@@ -392,7 +392,7 @@ const MASCOT_WALK_FRAC: f32 = 0.45;
 pub(super) fn gateway_mascot_anims(source: &str) -> Option<(&'static str, &'static str)> {
     match source {
         s if s == pixtuoid_core::source::openclaw::SOURCE_NAME => {
-            Some(("molty_walk", "molty_rest"))
+            Some(("lobster_walk", "lobster_rest"))
         }
         _ => None,
     }
@@ -550,7 +550,7 @@ pub(super) fn mascot_position(
     let frame = ((epoch_ms(now) / 200) % 2) as usize;
 
     if presence.state == DaemonState::Down {
-        // Walk-out: from where Molty was at the instant of Down, to the elevator.
+        // Walk-out: from where the lobster was at the instant of Down, to the elevator.
         let down_age = now.duration_since(presence.last_seen).ok()?.as_millis() as u64;
         if down_age >= MASCOT_LEAVE_MS {
             return None; // gone
@@ -607,7 +607,7 @@ pub(super) fn mascot_position(
     }
 }
 
-/// Busy "working" cue — a few bubbles rising above Molty's head while a run is
+/// Busy "working" cue — a few bubbles rising above the lobster's head while a run is
 /// in flight. Count is a small baseline + concurrent-run count (capped): a
 /// single serialized run reads as a calm stream, a power-user fan-out bubbles
 /// harder. Stateless: phase derives from `now`.
@@ -955,7 +955,7 @@ pub(super) fn paint_drawable(
                 blit_frame(frame, px, py, buf);
             }
             // Busy (an in-flight agent run) → a rising activity-bubble stream
-            // above Molty's head. `run_count > 0` IS the busy gate (busy ⟺
+            // above the lobster's head. `run_count > 0` IS the busy gate (busy ⟺
             // in-flight runs); a persistent idle session must NOT bubble.
             if *run_count > 0 {
                 paint_mascot_bubbles(buf, *pos, frame.height, *run_count, now);

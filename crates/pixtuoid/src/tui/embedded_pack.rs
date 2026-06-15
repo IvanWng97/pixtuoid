@@ -101,9 +101,9 @@ fn load_embedded_pack() -> Result<Pack> {
     let dog_1 = include_str!("../../sprites/default/dog_walk_1.sprite");
     let dog_sit = include_str!("../../sprites/default/dog_sit.sprite");
     let dog_sleep = include_str!("../../sprites/default/dog_sleep.sprite");
-    let molty_0 = include_str!("../../sprites/default/molty_walk_0.sprite");
-    let molty_1 = include_str!("../../sprites/default/molty_walk_1.sprite");
-    let molty_rest = include_str!("../../sprites/default/molty_rest.sprite");
+    let lobster_0 = include_str!("../../sprites/default/lobster_walk_0.sprite");
+    let lobster_1 = include_str!("../../sprites/default/lobster_walk_1.sprite");
+    let lobster_rest = include_str!("../../sprites/default/lobster_rest.sprite");
     let meeting_sofa = include_str!("../../sprites/default/meeting_sofa.sprite");
     let meeting_screen = include_str!("../../sprites/default/meeting_screen.sprite");
     let back_couch = include_str!("../../sprites/default/back_couch.sprite");
@@ -152,9 +152,9 @@ fn load_embedded_pack() -> Result<Pack> {
             ("dog_walk_1.sprite", dog_1),
             ("dog_sit.sprite", dog_sit),
             ("dog_sleep.sprite", dog_sleep),
-            ("molty_walk_0.sprite", molty_0),
-            ("molty_walk_1.sprite", molty_1),
-            ("molty_rest.sprite", molty_rest),
+            ("lobster_walk_0.sprite", lobster_0),
+            ("lobster_walk_1.sprite", lobster_1),
+            ("lobster_rest.sprite", lobster_rest),
             ("meeting_sofa.sprite", meeting_sofa),
             ("meeting_screen.sprite", meeting_screen),
             ("back_couch.sprite", back_couch),

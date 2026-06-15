@@ -70,7 +70,7 @@ pub struct MascotFrame {
     /// persistent session even at rest, so session count is a poor idle/busy tell.
     pub busy: bool,
     /// Gateway up but its model backend is failing every run (#317) — the tooltip
-    /// reads "model error" and Molty renders sickly red.
+    /// reads "model error" and the lobster renders sickly red.
     pub degraded: bool,
     pub active_sessions: u32,
 }

@@ -77,7 +77,7 @@
     "url": "https://github.com/openclaw/openclaw",
     "status": "supported",
     "featured": false,
-    "transport": "Hook shim (TS plugin → openclaw gateway; a wandering gateway mascot 'Molty', not a desk agent)",
+    "transport": "Hook shim (TS plugin → openclaw gateway; a wandering gateway mascot, not a desk agent)",
     "platforms": { "macos": "yes", "linux": "yes", "windows": "experimental" }
   }
 ]

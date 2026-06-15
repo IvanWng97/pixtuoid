@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # OpenClaw + Claude-Code-backend COMBINED live-e2e — the REAL end-to-end proof of
 # the OpenClaw daemon design premise (`source/openclaw.rs` module doc): the
-# gateway DAEMON renders as the wandering "Molty" mascot (presence), WHILE its
+# gateway DAEMON renders as the wandering lobster mascot (presence), WHILE its
 # bundled `claude-cli` backend coding session renders as a full-fidelity `cc·`
 # desk sprite. One headless scene, two sources, two sprites:
 #
@@ -10,9 +10,9 @@
 # Flow:
 #   1. headless pixtuoid binds an ISOLATED socket + watches ~/.claude/projects
 #   2. `openclaw gateway run` (PIXTUOID_SOCKET pointed at that socket so its
-#      pixtuoid plugin reaches THIS instance) -> gateway_start -> Molty idle
+#      pixtuoid plugin reaches THIS instance) -> gateway_start -> the lobster idle
 #   3. `openclaw agent --message …` routes ONE turn to the claude-cli backend ->
-#      before_agent_run -> Molty busy AND a real `claude` writes ~/.claude/projects
+#      before_agent_run -> the lobster busy AND a real `claude` writes ~/.claude/projects
 #      -> a NEW `cc·` sprite (label = the openclaw workspace cwd basename)
 #   4. assert a backend cc· label (absent from the pre-gateway baseline) AND
 #      openclaw:busy were both observed; then tear the gateway down
@@ -114,23 +114,23 @@ echo "    watching for the backend label: $WS_LABEL  (openclaw workspace)"
 echo "[2] openclaw gateway run (plugin -> $SOCK)"
 PIXTUOID_SOCKET="$SOCK" openclaw gateway run --bind loopback >"$GWLOG" 2>&1 &
 GWPID=$!
-molty_up=0
+lobster_up=0
 for _ in $(seq 1 120); do
     case "$(grep 'daemons=' "$PIXLOG" | tail -1)" in
     *"openclaw:"*)
-        molty_up=1
+        lobster_up=1
         break
         ;;
     esac
     sleep 0.25
 done
-[ "$molty_up" = 1 ] || {
-    echo "FAIL: Molty never appeared (gateway plugin didn't reach $SOCK)" >&2
+[ "$lobster_up" = 1 ] || {
+    echo "FAIL: the lobster never appeared (gateway plugin didn't reach $SOCK)" >&2
     echo "--- gateway log tail ---" >&2
     tail -6 "$GWLOG" >&2
     exit 1
 }
-echo "    Molty up: $(grep 'daemons=' "$PIXLOG" | tail -1 | grep -oE 'daemons=\[[^]]*\]')"
+echo "    the lobster up: $(grep 'daemons=' "$PIXLOG" | tail -1 | grep -oE 'daemons=\[[^]]*\]')"
 
 echo "[3] openclaw agent --message (routes to the claude-cli backend)"
 (
@@ -170,7 +170,7 @@ else
     FAILED=1
 fi
 if [ "$saw_busy" = 1 ]; then
-    echo "PASS  Molty went busy during the backend run (openclaw:busy)"
+    echo "PASS  the lobster went busy during the backend run (openclaw:busy)"
 else
     echo "FAIL  never observed openclaw:busy" >&2
     FAILED=1
@@ -178,7 +178,7 @@ fi
 [ "$saw_both" = 1 ] && echo "PASS  both rendered in ONE frame ($WS_LABEL + openclaw:busy)"
 
 if [ "$FAILED" = 0 ]; then
-    echo "openclaw-cc-backend-e2e: PASS — Molty (gateway) + cc· (claude-cli backend) coexist live"
+    echo "openclaw-cc-backend-e2e: PASS — the lobster (gateway) + cc· (claude-cli backend) coexist live"
 else
     echo "openclaw-cc-backend-e2e: FAIL" >&2
 fi

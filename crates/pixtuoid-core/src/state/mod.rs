@@ -177,12 +177,12 @@ pub struct AgentSlot {
 }
 
 /// Liveness of a daemon-style source (the OpenClaw gateway). Drives the
-/// wandering "Molty" mascot's behaviour (idle ambles, busy shuttles, down
+/// wandering lobster mascot's behaviour (idle ambles, busy shuttles, down
 /// walks out). A daemon is NOT an `AgentSlot` (it has no desk / no agent
 /// activity), so its presence lives in `SceneState::daemons`, read
 /// directly by the geometry pass. `Down` is distinct from *absent* (no map
-/// entry): absent = not configured / plugin not loaded (Molty not on the
-/// floor); `Down` = the daemon was seen and then died (Molty walks out).
+/// entry): absent = not configured / plugin not loaded (the lobster not on the
+/// floor); `Down` = the daemon was seen and then died (the lobster walks out).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DaemonState {
     Idle,

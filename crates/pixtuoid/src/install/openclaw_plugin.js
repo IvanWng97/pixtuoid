@@ -1,7 +1,7 @@
 // @pixtuoid-openclaw-plugin
 //
 // Forwards OpenClaw gateway daemon-presence signals to pixtuoid's `pixtuoid-hook`
-// shim, which relays them to the running pixtuoid office (the wandering "Molty"
+// shim, which relays them to the running pixtuoid office (the wandering lobster
 // gateway mascot).
 //
 // PRIVACY (load-bearing): build the shim payload from an explicit ALLOWLIST of
@@ -21,7 +21,7 @@ const HOOK_PATH = {{HOOK_PATH_JSON}};
 // The ONLY fields forwarded. `messages` / `prompt` / `sessionFile` / `systemPrompt`
 // are deliberately ABSENT — the daemon fixture needs the run pairing key + ids,
 // never content. `success` is the agent_end run pass/fail BOOLEAN (#317: false =
-// the model backend broke → Molty renders Degraded); the `error` STRING that
+// the model backend broke → the lobster renders Degraded); the `error` STRING that
 // rides alongside it is deliberately NOT forwarded (it can embed content).
 const ALLOW = ["runId", "sessionId", "sessionKey", "reason", "messageCount", "success"];
 

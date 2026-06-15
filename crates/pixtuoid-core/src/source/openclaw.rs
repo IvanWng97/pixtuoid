@@ -11,8 +11,8 @@
 //! layer, keyed by source name so N daemons coexist — exactly as an agent source
 //! owns its own decoder but shares the reducer.
 //!
-//! So OpenClaw earns a SINGLE presence-gated mascot (the wandering "Molty"
-//! lobster) showing the one thing `cc·` can't: is the gateway alive and handling
+//! So OpenClaw earns a SINGLE presence-gated mascot (a wandering lobster)
+//! showing the one thing `cc·` can't: is the gateway alive and handling
 //! traffic (its motion encodes state — idle ambles, busy shuttles, down leaves).
 //! Its plugin (`install/openclaw_plugin.js`) forwards a strict ALLOWLIST envelope
 //! — never message content (the busy tell needs only the run pairing key) —

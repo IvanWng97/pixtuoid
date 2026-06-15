@@ -510,6 +510,6 @@ pub static CATPPUCCIN: Theme = Theme {
             r: 0xff,
             g: 0xaa,
             b: 0x30,
-        }, // openclaw marigold (Molty; warm, clears claude-amber + opencode-red)
+        }, // openclaw marigold (lobster; warm, clears claude-amber + opencode-red)
     },
 };

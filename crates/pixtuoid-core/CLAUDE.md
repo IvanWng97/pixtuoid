@@ -30,7 +30,7 @@ src/
 │                       _pid on EVERY event, so a MID-ATTACH / reconnect-while-alive adopts current_pid off the
 │                       next event (apply_presence's None-only adopt; driver arms the watch on PidSeen too).
 │                       The 4th state DaemonState::Degraded (#317): agent_end.success:false → RunFailed →
-│                       Degraded (sickly-red sluggish Molty), healed by the next clean RunEnded / new RunStarted /
+│                       Degraded (sickly-red sluggish the lobster), healed by the next clean RunEnded / new RunStarted /
 │                       GatewayUp restart),
 │                       decoder.rs (shared utils + decode_hook_payload, a registry-driven dispatcher;
 │                       short-circuits is_daemon() → zero AgentEvents),

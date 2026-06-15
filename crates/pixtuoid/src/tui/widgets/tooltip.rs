@@ -322,7 +322,7 @@ pub(crate) fn paint_pet_tooltip(
     paint_simple_tooltip(f, text, mx, my, scene_rect, theme);
 }
 
-/// Hover tooltip for the gateway mascot (Molty) — which gateway it represents
+/// Hover tooltip for the gateway lobster mascot — which gateway it represents
 /// and whether an agent run is in flight (`busy`). The verb keys on the run
 /// state, not the session count (a single-user gateway holds one persistent
 /// session even at rest); the session count rides along only as a >1 garnish
@@ -347,7 +347,7 @@ pub fn paint_mascot_tooltip(
 /// The mascot tooltip's text (pure, unit-tested separately from the ratatui
 /// paint). Verb keys on the run state; `degraded` (#317: gateway up but its
 /// model backend failing every run) takes precedence over busy/idle so a
-/// sickly-red Molty reads "model error". The `>1` session count is a power-user
+/// sickly-red lobster reads "model error". The `>1` session count is a power-user
 /// garnish only. Plain text (no emoji) to keep the width math exact.
 fn mascot_tooltip_text(name: &str, busy: bool, degraded: bool, active_sessions: u32) -> String {
     let verb = if degraded {

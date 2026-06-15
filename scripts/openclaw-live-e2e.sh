@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # OpenClaw daemon live-e2e — drives the REAL `pixtuoid-hook` shim with crafted
 # OpenClaw gateway envelopes on an ISOLATED socket, and asserts the wandering
-# "Molty" mascot's presence transitions via the headless
+# lobster mascot's presence transitions via the headless
 # `daemons=[openclaw:<state>]` summary line:
 #
 #   idle (gateway_start) -> busy (before_agent_run) -> idle (agent_end) -> down (gateway_stop)
@@ -141,7 +141,7 @@ echo "[11] kill $SPID -> down (instant abrupt-down off the adopted pid, #318)"
 kill "$SPID" 2>/dev/null
 expect down down-abrupt
 
-echo "--- Molty timeline (headless) ---"
+echo "--- the lobster timeline (headless) ---"
 grep 'daemons=' "$OUT" | sed 's/^/  /'
 if [ "$FAILED" = 0 ]; then
     echo "openclaw-live-e2e: PASS"

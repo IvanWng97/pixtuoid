@@ -317,7 +317,7 @@ mod tests {
     #[test]
     fn daemons_projects_onto_the_ground_floor_only() {
         // The gateway mascot is global, not per-floor — the projection carries
-        // daemons onto floor 0 ONLY, so a multi-floor office renders Molty
+        // daemons onto floor 0 ONLY, so a multi-floor office renders the lobster
         // exactly once (a regression dropping the gate / flipping the index would
         // duplicate him on every floor).
         use pixtuoid_core::state::{DaemonPresence, DaemonState};

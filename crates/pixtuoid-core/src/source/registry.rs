@@ -433,7 +433,7 @@ const OPENCODE: SourceDescriptor = SourceDescriptor {
 
 /// The DAEMON row: OpenClaw is one always-on gateway DAEMON, not a per-session
 /// coding agent. Its backend `claude-cli` sessions are already shown by `cc·`,
-/// so OpenClaw renders ONE presence-gated wandering mascot (Molty). The
+/// so OpenClaw renders ONE presence-gated wandering lobster mascot. The
 /// `presence_decoder` maps its alien `{type:…}` envelope to presence deltas on
 /// the sibling channel; it emits ZERO `AgentEvent`s (the `HookRouter` demux
 /// routes its payloads via this decoder, and `decode_hook_payload` short-circuits

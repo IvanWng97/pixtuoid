@@ -124,7 +124,7 @@ struct SnapshotArgs {
     #[arg(long)]
     empty: bool,
 
-    /// Inject an OpenClaw gateway presence (the wandering Molty mascot) in the
+    /// Inject an OpenClaw gateway presence (the wandering lobster mascot) in the
     /// given state (idle | busy | down) for the beautify visual loop. Off by
     /// default so the gen-media baselines are unaffected.
     #[arg(long)]
@@ -264,7 +264,7 @@ struct SnapshotArgs {
     #[arg(long, conflicts_with_all = ["gif", "anim"])]
     crop_furniture: Option<String>,
 
-    /// Crop the generated PNG to a window centered on the gateway mascot (Molty)
+    /// Crop the generated PNG to a window centered on the gateway lobster mascot
     /// — its position is time-derived, so this reads it back from the renderer
     /// AFTER the draw (unlike --crop-agent/--crop-furniture, which precompute).
     /// Needs a VISIBLE mascot: pass --openclaw <state> (and not `down` past the
@@ -878,7 +878,7 @@ fn sample_scene(now: SystemTime, max_desks: usize, n_agents: usize) -> SceneStat
 }
 
 /// Inject an OpenClaw gateway presence for the beautify visual loop — drives
-/// the wandering Molty mascot. `state` ∈ {idle, busy, down}; off the gen-media
+/// the wandering lobster mascot. `state` ∈ {idle, busy, down}; off the gen-media
 /// path so baselines hold.
 fn inject_openclaw_presence(s: &mut SceneState, state: &str, now: SystemTime) -> Result<()> {
     use pixtuoid_core::state::{DaemonPresence, DaemonState};
@@ -892,7 +892,7 @@ fn inject_openclaw_presence(s: &mut SceneState, state: &str, now: SystemTime) ->
             vec!["run-a".to_string(), "run-b".to_string()],
         ),
         // #317: the gateway is up but its model backend is failing every run —
-        // a sickly-red, sluggishly-wandering Molty (no in-flight runs: the last
+        // a sickly-red, sluggishly-wandering lobster (no in-flight runs: the last
         // one FAILED out of the set).
         "degraded" => (DaemonState::Degraded, 1, Vec::new()),
         "down" => (DaemonState::Down, 0, Vec::new()),

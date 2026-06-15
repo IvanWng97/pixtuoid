@@ -234,7 +234,7 @@ CURSOR_HOOKS_URL = "https://cursor.com/docs/hooks"
 
 # OpenClaw is a daemon gateway; pixtuoid ships a TS plugin that registers a
 # handful of lifecycle hooks (`OPENCLAW_EVENTS` in install/openclaw.rs) and
-# forwards their timing to the wandering "Molty" mascot. OpenClaw is open TS:
+# forwards their timing to the wandering lobster mascot. OpenClaw is open TS:
 # the canonical hook-name union lives in `src/plugins/hook-types.ts` as quoted
 # string literals. ONE-DIRECTIONAL (like opencode/cursor): OpenClaw defines ~40
 # hook types and we register 6 by design, so a "new upstream event" is noise —
@@ -609,7 +609,7 @@ def run_checks(
                     breaking.append(
                         f"OpenClaw hook `{ev}` (registered in OPENCLAW_EVENTS / the TS "
                         f"plugin) is GONE from src/plugins/hook-types.ts — likely renamed; "
-                        f"the plugin registers a hook OpenClaw never fires, so the Molty "
+                        f"the plugin registers a hook OpenClaw never fires, so the lobster "
                         f"mascot silently stops reacting (no presence)."
                     )
 

@@ -162,9 +162,9 @@ fn summarize(scene: &SceneState) -> String {
             format!("{}@{}:{}", sanitize_line(&a.label), a.desk_index.0, state)
         })
         .collect();
-    // Daemon-style sources (the OpenClaw "Molty" gateway) render as wandering
+    // Daemon-style sources (the OpenClaw gateway lobster) render as wandering
     // mascots, not desk agents — surface them here too so headless is a complete
-    // window onto the scene (and the live-e2e harness can assert Molty's state).
+    // window onto the scene (and the live-e2e harness can assert the lobster's state).
     // Source name is a registry id (controlled), but sanitize for defense like
     // every other field on this println path (R0609-02).
     let daemons: Vec<String> = scene
@@ -388,7 +388,7 @@ mod tests {
         assert!(summary.contains('@'), "got: {summary}");
     }
 
-    // Headless must surface the DAEMON layer too (the OpenClaw "Molty" gateway),
+    // Headless must surface the DAEMON layer too (the OpenClaw gateway lobster),
     // not just agents — in headless it is the ONLY programmatic window onto a
     // daemon's presence. Format is `<source>:<idle|busy|down>`, source-keyed so N
     // daemons each get an entry. (This is also what the live-e2e harness asserts.)

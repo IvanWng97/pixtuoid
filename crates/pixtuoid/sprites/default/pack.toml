@@ -42,11 +42,11 @@ version = "1"
 "x" = "#c8a060"   # dog tan fur
 "z" = "#7a5030"   # dog dark brown (ears, tail tip, nose)
 "R" = "#c45050"   # dog nose/tongue
-"o" = "#d2402f"   # Molty lobster body red
-"N" = "#9e2a20"   # Molty lobster shade (dark red)
-"Q" = "#f0895a"   # Molty lobster highlight (orange carapace)
-"A" = "#e85540"   # Molty lobster claw (lit)
-"a" = "#c83828"   # Molty lobster antenna
+"o" = "#d2402f"   # lobster body red
+"N" = "#9e2a20"   # lobster shade (dark red)
+"Q" = "#f0895a"   # lobster highlight (orange carapace)
+"A" = "#e85540"   # lobster claw (lit)
+"a" = "#c83828"   # lobster antenna
 
 [animations.seated]
 frames   = ["seated.sprite"]
@@ -145,14 +145,14 @@ frame_ms = 600
 frames   = ["dog_sleep.sprite"]
 frame_ms = 600
 
-[animations.molty_walk]
+[animations.lobster_walk]
 # 14x12 top-down lobster — the OpenClaw gateway mascot. Scuttles around the
 # floor (presence-gated); the two frames twitch the legs to read as motion.
-frames   = ["molty_walk_0.sprite", "molty_walk_1.sprite"]
+frames   = ["lobster_walk_0.sprite", "lobster_walk_1.sprite"]
 frame_ms = 200
 
-[animations.molty_rest]
-frames   = ["molty_rest.sprite"]
+[animations.lobster_rest]
+frames   = ["lobster_rest.sprite"]
 frame_ms = 600
 
 [animations.meeting_sofa]

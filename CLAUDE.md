@@ -42,12 +42,12 @@ scripts/             gen-media.py + media.json (the ONE manifest-driven driver f
                      from site/src/*.json), compare-screenshots.py (`just gen-check`),
                      replay-fixture.sh (replay a captured rollout headlessly),
                      openclaw-live-e2e.sh (zero-cost HERMETIC daemon live-e2e: drives the real
-                     shim with crafted OpenClaw envelopes on an isolated socket → asserts Molty's
+                     shim with crafted OpenClaw envelopes on an isolated socket → asserts the lobster's
                      idle/busy/degraded/down via the headless `daemons=` line, incl. #317 degraded
                      + #318 mid-attach pid-adopt→kill→down),
                      openclaw-cc-backend-e2e.sh (NON-hermetic: starts a REAL `openclaw gateway run`
                      + one `openclaw agent` turn on the claude-cli backend → proves the gateway
-                     Molty AND its backend `cc·<workspace>` coding sprite coexist live; real
+                     the lobster AND its backend `cc·<workspace>` coding sprite coexist live; real
                      account/gateway footprint, NOT a CI test),
                      check_upstream_drift.py (weekly wire-format watch),
                      review-metrics.py (review-economics collector)
