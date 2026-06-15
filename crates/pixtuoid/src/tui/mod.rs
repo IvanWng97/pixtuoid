@@ -420,6 +420,15 @@ pub async fn run_tui(
     // doctor's tested scanner) at most every ~15s, NOT per frame.
     let mut last_drift_scan: Option<std::time::Instant> = None;
     let mut drifted_prefixes: Vec<String> = Vec::new();
+    // The Connection panel's cached rows carry a per-source HEALTH summary
+    // (install soundness + drift) computed on open/toggle; it scans the warn-floor
+    // log, so read it fresh at each (infrequent) rebuild. `""` when no log path.
+    let read_conn_log = || {
+        log_path
+            .as_deref()
+            .and_then(|p| std::fs::read_to_string(p).ok())
+            .unwrap_or_default()
+    };
 
     let tick = Duration::from_millis(33);
     let result: Result<()> = (async {
@@ -724,8 +733,10 @@ pub async fn run_tui(
                                     // Cached connection facet: FS reads + the
                                     // connected-set snapshot happen HERE (on open)
                                     // + after each toggle, never per frame.
-                                    connection_ui.rows =
-                                        connection::build_rows(&connected.snapshot());
+                                    connection_ui.rows = connection::build_rows(
+                                        &connected.snapshot(),
+                                        &read_conn_log(),
+                                    );
                                     connection_ui.selected = connection::move_selection(
                                         &connection_ui.rows,
                                         connection_ui.selected,
@@ -781,8 +792,10 @@ pub async fn run_tui(
                                                 target,
                                                 name,
                                             ));
-                                            connection_ui.rows =
-                                                connection::build_rows(&connected.snapshot());
+                                            connection_ui.rows = connection::build_rows(
+                                                &connected.snapshot(),
+                                                &read_conn_log(),
+                                            );
                                         }
                                         connection::ConnState::NoCli => {
                                             connection_ui.last_result = Some(hint);
@@ -804,8 +817,10 @@ pub async fn run_tui(
                                             target,
                                             name,
                                         ));
-                                        connection_ui.rows =
-                                            connection::build_rows(&connected.snapshot());
+                                        connection_ui.rows = connection::build_rows(
+                                            &connected.snapshot(),
+                                            &read_conn_log(),
+                                        );
                                     }
                                 }
                                 connection_ui.confirm = None;
@@ -1411,6 +1426,7 @@ mod dispatch_tests {
                 changed: false,
             })
         },
+        verify_schema: |_| crate::install::verify::SchemaParse::broken("test fake"),
         needs_path_warning: false,
         needs_resolved_binary: false,
         post_install_note: None,

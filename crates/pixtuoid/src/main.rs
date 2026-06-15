@@ -132,6 +132,24 @@ fn main() -> Result<()> {
                 for w in &cfg_warnings {
                     eprintln!("⚠ pixtuoid: {w}");
                 }
+                // Pre-flight (#309): a CONNECTED source whose hooks are installed
+                // but structurally BROKEN renders zero sprites with no other hint.
+                // Warn here (the config-warning channel) so the fully-passive user
+                // who never opens the Connection panel or runs `doctor` still
+                // learns. Static state, so a boot eprintln — NOT the live footer.
+                for &t in install::target::TARGETS {
+                    if connected.contains(t.core_source) && install::has_hooks(t) {
+                        let v = install::verify_target(t, None);
+                        if !v.is_sound() {
+                            eprintln!(
+                                "⚠ pixtuoid: {} hooks are installed but BROKEN: {} — \
+                                 reconnect in the Connection panel (press c)",
+                                t.core_source,
+                                v.issues.join("; ")
+                            );
+                        }
+                    }
+                }
             }
             runtime::run(runtime::RunConfig {
                 socket,

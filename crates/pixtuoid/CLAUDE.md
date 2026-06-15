@@ -28,7 +28,15 @@ src/
 │                       parse_version/version_status (tested; scan vs REAL fmt output); sanitizes
 │                       untrusted sampled names (R0615-06). verified_version lives on SourceDescriptor.
 │                       drifted_sources/footer_warning (also pure, tested) feed the LIVE footer nudge —
-│                       run_tui throttle-scans the same log (≤15s) → ⚠ decode drift footer (see tui guide)
+│                       run_tui throttle-scans the same log (≤15s) → ⚠ decode drift footer (see tui guide).
+│                       **THE unified source-HEALTH module** (#309 health-consolidation): `SourceDiagnostics`
+│                       { install: Option<SchemaVerifyResult>, drift } + `diagnose(src, log)` (install
+│                       soundness via install::verify_target + drift scan) + `summary()` (⚠ install-broken
+│                       > decode-drift) is the ONE rollup the Connection panel detail, the boot preflight
+│                       (main.rs), AND `run` (the CLI report) all read — surfaces can't drift apart. Version
+│                       skew stays report-ONLY (the <cli> --version probe is too costly for the interactive
+│                       panel-open; advisory). doctor=health PROVIDER, ConnState=connection lifecycle it
+│                       ANNOTATES (sub-state, not overlap)
 ├── config.rs           AppConfig persistence (~/.config/pixtuoid/config.toml), XDG-aware
 ├── runtime/            mod.rs (RunConfig, boot-capacity math, headless summarize — all unit-tested;
 │                       ConnectedSources = the live `Arc<Mutex<HashSet<String>>>` connected-set,
@@ -64,7 +72,15 @@ src/
 │                         driven SOLELY by the in-TUI Connection panel's connect/disconnect (no CLI orchestration —
 │                         plan_targets/interactive_pick/run_install/run_uninstall + inquire were deleted with the
 │                         install-hooks CLI); has_hooks(t) is `pub` (the migrate-default signal for config::resolve_connected)),
-│                       target.rs (Target trait + TARGETS = [CLAUDE, CODEX, REASONIX, CODEWHALE, OPENCODE, CURSOR]),
+│                       target.rs (Target trait + TARGETS = [CLAUDE, CODEX, REASONIX, CODEWHALE, OPENCODE, CURSOR];
+│                         each Target carries a `verify_schema` fn-ptr — the #309 install-soundness check, per-source
+│                         format-local like merge_install/uninstall),
+│                       verify.rs (the #309 install-schema verifier: SchemaParse/SchemaVerifyResult/ShimRef +
+│                         shared helpers shell_shim_ref (4 shell targets) / flat_json_verify (reasonix+cursor) /
+│                         assemble; install::verify_target(t, config) = the I/O wrapper that reads the config +
+│                         calls verify_schema + stats the shim. ONLY call when has_hooks(t) — the load-bearing gate
+│                         (an uninstalled config verifies "broken"; a disconnect removes hooks → has_hooks=false →
+│                         never called → never a false broken)),
 │                       claude.rs / codex.rs / reasonix.rs / codewhale.rs / opencode.rs (per-target hook_command + config path;
 │                         claude.rs: Unix = bare shell-form, Windows = exec-form absolute .exe;
 │                         reasonix = GLOBAL ~/.reasonix/settings.json, FLAT {match,command,timeout-ms}

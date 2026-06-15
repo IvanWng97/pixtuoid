@@ -48,6 +48,7 @@ fn build_rows_from_state_follows_connected_set_with_nocli_override() {
             config_path: Some(PathBuf::from("/c")),
         }),
         connected,
+        health: None,
     };
     let absent = |connected| RowInput {
         source_id: "claude",
@@ -58,6 +59,7 @@ fn build_rows_from_state_follows_connected_set_with_nocli_override() {
             config_path: Some(PathBuf::from("/c")),
         }),
         connected,
+        health: None,
     };
     let no_target = |connected| RowInput {
         source_id: "antigravity",
@@ -65,6 +67,7 @@ fn build_rows_from_state_follows_connected_set_with_nocli_override() {
         target: None,
         facts: None,
         connected,
+        health: None,
     };
     let rows = build_rows_from(vec![
         present(true),    // present + connected → Connected
@@ -135,6 +138,7 @@ fn move_selection_clamps_at_both_ends() {
                 config_path: None,
             }),
             connected: true,
+            health: None,
         },
         RowInput {
             source_id: "antigravity",
@@ -142,6 +146,7 @@ fn move_selection_clamps_at_both_ends() {
             target: None,
             facts: None,
             connected: false,
+            health: None,
         },
     ]);
     assert_eq!(move_selection(&rows, 0, -1), 0); // clamp at the low end
@@ -155,7 +160,7 @@ fn build_rows_covers_every_registry_source_with_aligned_live_view() {
     // The real registry-backed builder produces one row per source, and
     // live_view returns a parallel vec of the same length (the painter relies on
     // the index alignment).
-    let rows = build_rows(&HashSet::new());
+    let rows = build_rows(&HashSet::new(), "");
     assert!(rows.len() >= 5, "expected the 5 install targets + sources");
     assert!(
         rows.iter()
@@ -173,7 +178,7 @@ fn build_rows_honors_the_connected_set() {
     // absent → NoCli); one omitted renders Disconnected/NoCli — never Connected.
     let mut set = HashSet::new();
     set.insert("antigravity".to_string()); // no-target → flag alone drives it
-    let rows = build_rows(&set);
+    let rows = build_rows(&set, "");
     let ag = rows.iter().find(|r| r.source_id == "antigravity").unwrap();
     assert_eq!(ag.state, ConnState::Connected);
     // A source NOT in the set is never Connected.
@@ -197,7 +202,7 @@ fn build_rows_honors_the_connected_set() {
 #[test]
 fn build_rows_makes_every_source_with_a_target_actionable() {
     use pixtuoid_core::source::registry::REGISTRY;
-    let rows = build_rows(&HashSet::new());
+    let rows = build_rows(&HashSet::new(), "");
     for d in REGISTRY {
         let row = rows
             .iter()
@@ -231,7 +236,7 @@ fn every_no_target_row_has_an_explicit_display_name_not_the_raw_id() {
     // Target-bearing rows are exempt: they use `Target.display_name`, which may be
     // a deliberate lowercase brand (e.g. "opencode"). Mechanized so the next
     // no-target source fails loudly.
-    for row in build_rows(&HashSet::new()) {
+    for row in build_rows(&HashSet::new(), "") {
         if row.target.is_none() {
             assert_ne!(
                 row.display_name, row.source_id,
@@ -315,6 +320,7 @@ fn no_action_hint_distinguishes_nocli_from_actionable() {
                 config_path: None,
             }),
             connected: false,
+            health: None,
         },
         RowInput {
             source_id: "claude",
@@ -325,6 +331,7 @@ fn no_action_hint_distinguishes_nocli_from_actionable() {
                 config_path: None,
             }),
             connected: false,
+            health: None,
         },
     ]);
     assert_eq!(rows[0].state, ConnState::NoCli);

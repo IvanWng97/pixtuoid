@@ -156,6 +156,12 @@ fn managed_entry(hook_command: &str) -> Value {
     })
 }
 
+/// Install-schema verification (#309) — Reasonix's flat-JSON shape (shared with
+/// Cursor): `hooks.<event>` arrays of `{_pixtuoid, command}`.
+pub fn verify_schema(content: &str) -> crate::install::verify::SchemaParse {
+    crate::install::verify::flat_json_verify(content, REASONIX_EVENTS, SENTINEL_KEY)
+}
+
 fn json_merge_install(doc: Value, hook_command: &str) -> Value {
     let mut root: Map<String, Value> = doc.as_object().cloned().unwrap_or_default();
     let hooks = root

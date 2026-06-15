@@ -160,6 +160,54 @@ fn managed_entry(event: &str, env_mode: bool, base_cmd: &str) -> toml::Value {
     toml::Value::Table(entry)
 }
 
+/// Install-schema verification (#309): every CODEWHALE_EVENTS event still has a
+/// sentinel-tagged `{event, command}` entry, AND `[hooks].enabled == true` (it
+/// gates ALL hooks — `enabled = false` with entries present is a true
+/// silent-dead the other checks miss). Shim command is shell-form (with a
+/// per-entry ` --event <name>` tail that `shell_shim_ref` strips).
+pub fn verify_schema(content: &str) -> crate::install::verify::SchemaParse {
+    use crate::install::verify::{assemble, shell_shim_ref, SchemaParse, ShimRef};
+    let Ok(doc) = toml::from_str::<toml::Value>(content) else {
+        return SchemaParse::broken("config.toml no longer parses as TOML");
+    };
+    let hooks = doc.get("hooks").and_then(|h| h.as_table());
+    let entries: Vec<&toml::Value> = hooks
+        .and_then(|h| h.get("hooks"))
+        .and_then(|a| a.as_array())
+        .map(|a| a.iter().filter(|e| is_managed_entry(e)).collect())
+        .unwrap_or_default();
+    let mut missing = Vec::new();
+    let mut shim = ShimRef::Unknown;
+    for &(ev, _) in CODEWHALE_EVENTS {
+        match entries
+            .iter()
+            .find(|e| e.get("event").and_then(|v| v.as_str()) == Some(ev))
+        {
+            Some(e) => {
+                if shim == ShimRef::Unknown {
+                    shim = e
+                        .get("command")
+                        .and_then(|c| c.as_str())
+                        .map(shell_shim_ref)
+                        .unwrap_or(ShimRef::Unknown);
+                }
+            }
+            None => missing.push(ev),
+        }
+    }
+    let mut extra = Vec::new();
+    if hooks
+        .and_then(|h| h.get("enabled"))
+        .and_then(|v| v.as_bool())
+        == Some(false)
+    {
+        extra.push(
+            "[hooks].enabled = false — CodeWhale gates ALL hooks on it, so none fire".to_string(),
+        );
+    }
+    assemble(&missing, !entries.is_empty(), shim, extra)
+}
+
 fn toml_merge_install(doc: toml::Value, base_cmd: &str) -> toml::Value {
     let mut root = doc.as_table().cloned().unwrap_or_default();
     let hooks = root

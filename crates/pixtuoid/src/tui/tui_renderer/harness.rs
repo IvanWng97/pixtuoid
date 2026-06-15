@@ -2187,6 +2187,7 @@ fn connection_panel_renders_both_facets_borderless() {
             state: ConnState::Connected,
             config_path: Some(std::path::PathBuf::from("~/.claude/settings.json")),
             target: None,
+            health: None,
         },
         ConnectionRow {
             source_id: "antigravity",
@@ -2195,6 +2196,7 @@ fn connection_panel_renders_both_facets_borderless() {
             state: ConnState::Disconnected,
             config_path: None,
             target: None,
+            health: None,
         },
     ];
     let live = vec![
@@ -2243,6 +2245,43 @@ fn connection_panel_renders_both_facets_borderless() {
     }
 }
 
+// #309 / health-consolidation: a connected row whose cached health summary is
+// set shows it in the detail line, PREEMPTING the benign "installed at" hint.
+#[test]
+fn connection_panel_health_summary_preempts_the_install_path() {
+    use crate::tui::connection::{ConnState, ConnectionRow, LiveInfo};
+    let mut r = build(120, 44, vec![]);
+    let scene = scene_with(vec![], 16);
+    let rows = vec![ConnectionRow {
+        source_id: "reasonix",
+        label_prefix: "rx",
+        display_name: "Reasonix",
+        state: ConnState::Connected,
+        config_path: Some(std::path::PathBuf::from("~/.reasonix/settings.json")),
+        target: None,
+        health: Some("\u{26a0} install broken: shim binary missing".into()),
+    }];
+    r.set_connection_frame(
+        true,
+        rows,
+        vec![LiveInfo::default()],
+        0,
+        None,
+        None,
+        "socket  /tmp/p.sock  (listening)".into(),
+    );
+    r.render(&scene, &pack(), t0()).unwrap();
+    let text = frame_text(r.frame_buffer());
+    assert!(
+        text.contains("install broken"),
+        "health summary must show in the detail line:\n{text}"
+    );
+    assert!(
+        !text.contains("installed at"),
+        "health summary must PREEMPT the install-path hint:\n{text}"
+    );
+}
+
 #[test]
 fn connection_panel_armed_shows_confirm_prompt() {
     use crate::tui::connection::{ConnState, ConnectionRow, LiveInfo};
@@ -2255,6 +2294,7 @@ fn connection_panel_armed_shows_confirm_prompt() {
         state: ConnState::Connected,
         config_path: Some(std::path::PathBuf::from("~/.codex/config.toml")),
         target: None,
+        health: None,
     }];
     r.set_connection_frame(
         true,

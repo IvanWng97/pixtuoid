@@ -48,6 +48,11 @@ pub struct ConnectionRow {
     /// The install target backing this row; `None` ⇒ connect/disconnect is a
     /// flag-only flip (Antigravity — no hooks to write).
     pub target: Option<&'static Target>,
+    /// Cached HEALTH summary (the consolidation arc): a one-line `⚠ …` verdict
+    /// from `doctor::diagnose(..).summary()` — install-broken (#309) > decode
+    /// drift — computed on row build for CONNECTED rows only (`None` = healthy /
+    /// not connected). Shown in the detail line ABOVE the benign per-state hint.
+    pub health: Option<String>,
 }
 
 /// Live-connection facet, derived per frame from the scene snapshot. Aligned by
@@ -97,6 +102,10 @@ pub struct RowInput {
     pub facts: Option<RowFacts>,
     /// Whether this source is in the live connected-set (the persisted intent).
     pub connected: bool,
+    /// Cached health summary for this row (see `ConnectionRow.health`) — injected
+    /// so `build_rows_from` stays pure (the I/O — log scan + install verify —
+    /// happens in `build_rows`).
+    pub health: Option<String>,
 }
 
 /// Title-case the no-target sources (the registry deliberately omits display
@@ -136,6 +145,7 @@ pub fn build_rows_from(inputs: Vec<RowInput>) -> Vec<ConnectionRow> {
                 state,
                 config_path: input.facts.and_then(|f| f.config_path),
                 target: input.target,
+                health: input.health,
             }
         })
         .collect()
@@ -143,8 +153,12 @@ pub fn build_rows_from(inputs: Vec<RowInput>) -> Vec<ConnectionRow> {
 
 /// Build the cached connection-facet rows from the registry + install targets +
 /// the live connected-set. Performs filesystem reads (`is_present`/
-/// `default_config_path`) — call on open + after each toggle, NEVER per frame.
-pub fn build_rows(connected: &HashSet<String>) -> Vec<ConnectionRow> {
+/// `default_config_path`) AND, for connected rows, the health rollup
+/// (`doctor::diagnose` — install verify + a per-source log scan over `log`) —
+/// call on open + after each toggle, NEVER per frame. `log` is the warn-floor
+/// log text (`""` when none); health is computed only for CONNECTED rows (a
+/// disconnected source's stale drift/soundness isn't actionable here).
+pub fn build_rows(connected: &HashSet<String>, log: &str) -> Vec<ConnectionRow> {
     use pixtuoid_core::source::registry::REGISTRY;
     let inputs = REGISTRY
         .iter()
@@ -158,12 +172,16 @@ pub fn build_rows(connected: &HashSet<String>) -> Vec<ConnectionRow> {
                 present: target::is_present(t),
                 config_path: (t.default_config_path)().ok(),
             });
+            let connected = connected.contains(d.name);
             RowInput {
                 source_id: d.name,
                 label_prefix: d.label_prefix,
                 target,
                 facts,
-                connected: connected.contains(d.name),
+                connected,
+                health: connected
+                    .then(|| crate::doctor::diagnose(d.name, log).summary())
+                    .flatten(),
             }
         })
         .collect();

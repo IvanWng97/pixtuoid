@@ -56,6 +56,12 @@ pub struct Target {
     pub merge_install: fn(content: &str, hook_cmd: &str) -> Result<MergeOutcome>,
     /// Parse `content`, remove only managed entries, reserialize. Same empty rule.
     pub merge_uninstall: fn(content: &str) -> Result<MergeOutcome>,
+    /// Verify the installed config is structurally SOUND (#309) — PURE over the
+    /// config content: the `_pixtuoid` sentinel present, every registered event
+    /// still has a managed entry, target-specific extras (CodeWhale `enabled`),
+    /// and the shim path extracted for `install::verify_target` to stat. Per-
+    /// source format knowledge stays here (invariant #3), like the merge fns.
+    pub verify_schema: fn(content: &str) -> crate::install::verify::SchemaParse,
     /// True if the bare hook name must resolve on PATH (Claude writes the bare name).
     pub needs_path_warning: bool,
     /// True if `hook_command` EMBEDS the resolved binary path (Codex), so an
@@ -88,6 +94,7 @@ pub const CLAUDE: Target = Target {
     hook_command: crate::install::claude::hook_command,
     merge_install: crate::install::claude::merge_install,
     merge_uninstall: crate::install::claude::merge_uninstall,
+    verify_schema: crate::install::claude::verify_schema,
     // Unix: bare "pixtuoid-hook" relies on PATH — soft resolution (warn only).
     // Windows: exec form embeds the absolute path, so an unresolvable binary is
     // fatal (same as Codex) — the hook spawned without a shell can't PATH-search.
@@ -106,6 +113,7 @@ pub const CODEX: Target = Target {
     hook_command: crate::install::codex::hook_command,
     merge_install: crate::install::codex::merge_install,
     merge_uninstall: crate::install::codex::merge_uninstall,
+    verify_schema: crate::install::codex::verify_schema,
     needs_path_warning: false,
     needs_resolved_binary: true,
     post_install_note: Some(
@@ -123,6 +131,7 @@ pub const REASONIX: Target = Target {
     hook_command: crate::install::reasonix::hook_command,
     merge_install: crate::install::reasonix::merge_install,
     merge_uninstall: crate::install::reasonix::merge_uninstall,
+    verify_schema: crate::install::reasonix::verify_schema,
     needs_path_warning: false,
     needs_resolved_binary: true,
     post_install_note: None,
@@ -138,6 +147,7 @@ pub const CODEWHALE: Target = Target {
     hook_command: crate::install::codewhale::hook_command,
     merge_install: crate::install::codewhale::merge_install,
     merge_uninstall: crate::install::codewhale::merge_uninstall,
+    verify_schema: crate::install::codewhale::verify_schema,
     needs_path_warning: false,
     needs_resolved_binary: true,
     post_install_note: Some(
@@ -155,6 +165,7 @@ pub const OPENCODE: Target = Target {
     hook_command: crate::install::opencode::hook_command,
     merge_install: crate::install::opencode::merge_install,
     merge_uninstall: crate::install::opencode::merge_uninstall,
+    verify_schema: crate::install::opencode::verify_schema,
     needs_path_warning: false,
     // The plugin embeds the absolute shim path (opencode runs it under Bun, no
     // PATH reliance), so an unresolvable binary is fatal.
@@ -181,6 +192,7 @@ pub const CURSOR: Target = Target {
     hook_command: crate::install::cursor::hook_command,
     merge_install: crate::install::cursor::merge_install,
     merge_uninstall: crate::install::cursor::merge_uninstall,
+    verify_schema: crate::install::cursor::verify_schema,
     needs_path_warning: false,
     needs_resolved_binary: true,
     post_install_note: None,
@@ -279,6 +291,7 @@ mod tests {
                     changed: false,
                 })
             },
+            verify_schema: |_| crate::install::verify::SchemaParse::broken("test fake"),
             needs_path_warning: false,
             needs_resolved_binary: false,
             post_install_note: None,

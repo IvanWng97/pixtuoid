@@ -197,6 +197,61 @@ pub fn footer_warning(source_death: Option<&str>, drifted: &[String]) -> Option<
     Some(format!("decode drift: {prefixes} — run `pixtuoid doctor`"))
 }
 
+/// Per-source diagnostics rollup — the SHARED source of truth the Connection
+/// panel (the board), the boot preflight, and `run` (the CLI report) all read,
+/// so the surfaces can't drift apart and no check runs twice (the
+/// health-consolidation arc / #309). Scope is the CHEAP signals: install-schema
+/// soundness (#309) + decode drift. Version skew stays report-only (the
+/// `<cli> --version` probe, up to 5s each, is too costly for an interactive
+/// panel-open across N sources, and is advisory); live activity + transport
+/// death stay the panel's per-frame facets.
+#[derive(Debug, Default)]
+pub struct SourceDiagnostics {
+    /// #309 install-schema soundness — `Some` only when hooks are installed in
+    /// the target's config; `None` = not checked (no target / not installed).
+    pub install: Option<crate::install::verify::SchemaVerifyResult>,
+    /// Decode-drift tally from the warn-floor log.
+    pub drift: LogScanResult,
+}
+
+impl SourceDiagnostics {
+    /// A HARD install problem ⇒ the source is broken (zero sprites despite a
+    /// claimed connection). Soft notes + drift do NOT count as broken.
+    pub fn is_broken(&self) -> bool {
+        self.install.as_ref().is_some_and(|i| !i.is_sound())
+    }
+
+    /// The single worst issue as a one-line, glyph-prefixed summary for the
+    /// Connection panel detail + the boot warning. `None` = nothing to flag.
+    /// Priority: install-broken (hooks can't fire) > decode-drift.
+    pub fn summary(&self) -> Option<String> {
+        if let Some(i) = &self.install {
+            if !i.is_sound() {
+                return Some(format!("⚠ install broken: {}", i.issues.join("; ")));
+            }
+        }
+        let n = self.drift.total();
+        if n > 0 {
+            return Some(format!("⚠ {n} decode drift — run `pixtuoid doctor`"));
+        }
+        None
+    }
+}
+
+/// Compute the cheap per-source diagnostics given the warn-floor log text. The
+/// install check runs whenever the source's target has managed hooks installed
+/// (NOT gated on the connected flag — `run` reports a stale broken install even
+/// on a disconnected source; the boot warning gates on connected itself).
+pub fn diagnose(source: &str, log: &str) -> SourceDiagnostics {
+    let install = crate::install::target::by_source(source)
+        .filter(|t| crate::install::has_hooks(t))
+        .map(|t| crate::install::verify_target(t, None));
+    SourceDiagnostics {
+        install,
+        drift: scan_log_for_source(log, source),
+    }
+}
+
 /// One source's diagnosis row (plain data, so `format_doctor_row` is pure/tested).
 pub struct DoctorSourceRow {
     pub prefix: &'static str,
@@ -210,6 +265,10 @@ pub struct DoctorSourceRow {
     /// anchor), from the source's `SourceDescriptor`.
     pub verified_version: &'static str,
     pub scan: LogScanResult,
+    /// Install-schema soundness (#309) — `Some` only when hooks are installed;
+    /// `None` = not checked (no target / not installed). A non-sound result is
+    /// surfaced in the `hooks:` column as "installed but BROKEN: …".
+    pub schema: Option<crate::install::verify::SchemaVerifyResult>,
 }
 
 /// A dotted-run major at or above this looks like a YEAR/date token, not a semver
@@ -292,11 +351,17 @@ pub fn format_doctor_row(row: &DoctorSourceRow) -> String {
         "disconnected"
     };
     let hooks = if !row.has_target {
-        "n/a (transcript-only)"
-    } else if row.hooks_installed {
-        "installed"
+        "n/a (transcript-only)".to_string()
+    } else if !row.hooks_installed {
+        "NOT installed".to_string()
     } else {
-        "NOT installed"
+        // Installed — but is the install structurally SOUND (#309)? A non-sound
+        // result is the silent-dead case: connected, "installed", zero sprites.
+        match &row.schema {
+            Some(s) if !s.is_sound() => format!("installed but BROKEN: {}", s.issues.join("; ")),
+            Some(s) if !s.notes.is_empty() => format!("installed ({})", s.notes.join("; ")),
+            _ => "installed".to_string(),
+        }
     };
     let drift = if row.scan.total() == 0 {
         "drift: none".to_string()
@@ -410,24 +475,38 @@ pub fn run(log_path: &std::path::Path) -> anyhow::Result<()> {
     out.push('\n');
 
     let mut any_drift = false;
+    let mut any_broken = false;
     for &src in REGISTERED_SOURCES {
         let desc = registry::descriptor_for(src);
         let target = crate::install::target::by_source(src);
+        let hooks_installed = target.map(crate::install::has_hooks).unwrap_or(false);
+        // ONE shared rollup (install soundness + drift) — the same `diagnose` the
+        // Connection panel + boot preflight read, so the report can't drift apart
+        // from the live surfaces.
+        let diag = diagnose(src, &log);
         let row = DoctorSourceRow {
             prefix: desc.map(|d| d.label_prefix).unwrap_or("??"),
             name: src,
             connected: connected.contains(src),
             has_target: target.is_some(),
-            hooks_installed: target.map(crate::install::has_hooks).unwrap_or(false),
+            hooks_installed,
             installed_version: desc.and_then(|d| d.version_probe).and_then(probe_version),
             verified_version: desc.map(|d| d.verified_version).unwrap_or("unknown"),
-            scan: scan_log_for_source(&log, src),
+            scan: diag.drift,
+            schema: diag.install,
         };
         any_drift |= row.scan.total() > 0;
+        any_broken |= row.schema.as_ref().is_some_and(|s| !s.is_sound());
         out.push_str(&format_doctor_row(&row));
         out.push('\n');
     }
 
+    if any_broken {
+        out.push_str(
+            "\n⚠ a connected source's hooks are INSTALLED BUT BROKEN — it renders no agents.\n   \
+             Reconnect it in the Connection panel (press c) to repair the install.\n",
+        );
+    }
     if any_drift {
         out.push_str(
             "\n⚠ decode drift recorded — your pixtuoid may predate a CLI's current wire format.\n   \
@@ -601,11 +680,16 @@ mod tests {
             installed_version: Some("2.0.0".into()),
             verified_version: "unknown",
             scan: LogScanResult::default(),
+            schema: Some(crate::install::verify::SchemaVerifyResult::default()),
         };
         let c = format_doctor_row(&clean);
         assert!(c.contains("codex") && c.contains("connected") && c.contains("installed"));
         assert!(c.contains("2.0.0"));
         assert!(c.contains("drift: none"));
+        assert!(
+            !c.contains("BROKEN"),
+            "a sound install must not say BROKEN: {c}"
+        );
 
         let drifted = DoctorSourceRow {
             prefix: "cp",
@@ -619,11 +703,108 @@ mod tests {
                 missing_field: 3,
                 ..Default::default()
             },
+            schema: None,
         };
         let d = format_doctor_row(&drifted);
         assert!(d.contains("3 missing-field"));
         assert!(d.contains("n/a (transcript-only)"));
         assert!(d.contains("NEWER than verified"), "skew flagged: {d}");
+    }
+
+    #[test]
+    fn format_row_flags_a_broken_install() {
+        let broken = DoctorSourceRow {
+            prefix: "rx",
+            name: "reasonix",
+            connected: true,
+            has_target: true,
+            hooks_installed: true,
+            installed_version: None,
+            verified_version: "unknown",
+            scan: LogScanResult::default(),
+            schema: Some(crate::install::verify::SchemaVerifyResult {
+                issues: vec!["shim binary missing: /old/pixtuoid-hook".into()],
+                notes: vec![],
+            }),
+        };
+        let b = format_doctor_row(&broken);
+        assert!(
+            b.contains("installed but BROKEN") && b.contains("shim binary missing"),
+            "{b}"
+        );
+    }
+
+    // --- SourceDiagnostics rollup (the shared panel/boot/report source of truth) ---
+
+    fn diag(
+        install: Option<crate::install::verify::SchemaVerifyResult>,
+        drift: LogScanResult,
+    ) -> SourceDiagnostics {
+        SourceDiagnostics { install, drift }
+    }
+
+    #[test]
+    fn diagnostics_healthy_has_no_summary_and_is_not_broken() {
+        let d = diag(
+            Some(crate::install::verify::SchemaVerifyResult::default()),
+            LogScanResult::default(),
+        );
+        assert!(!d.is_broken());
+        assert_eq!(d.summary(), None);
+    }
+
+    #[test]
+    fn diagnostics_broken_install_wins_over_drift() {
+        let d = diag(
+            Some(crate::install::verify::SchemaVerifyResult {
+                issues: vec!["shim binary missing: /x".into()],
+                notes: vec![],
+            }),
+            LogScanResult {
+                unknown_event: 2,
+                ..Default::default()
+            },
+        );
+        assert!(d.is_broken());
+        let s = d.summary().unwrap();
+        assert!(
+            s.contains("install broken") && s.contains("shim binary missing"),
+            "{s}"
+        );
+        assert!(!s.contains("decode drift"), "install-broken must win: {s}");
+    }
+
+    #[test]
+    fn diagnostics_drift_only_summarizes_when_install_is_sound() {
+        let d = diag(
+            Some(crate::install::verify::SchemaVerifyResult::default()),
+            LogScanResult {
+                missing_field: 3,
+                ..Default::default()
+            },
+        );
+        assert!(!d.is_broken());
+        assert!(d.summary().unwrap().contains("3 decode drift"));
+    }
+
+    #[test]
+    fn diagnostics_soft_notes_are_not_broken_and_do_not_summarize() {
+        let d = diag(
+            Some(crate::install::verify::SchemaVerifyResult {
+                issues: vec![],
+                notes: vec!["pixtuoid-hook not on PATH".into()],
+            }),
+            LogScanResult::default(),
+        );
+        assert!(!d.is_broken());
+        assert_eq!(d.summary(), None);
+    }
+
+    #[test]
+    fn diagnostics_no_install_check_is_not_broken() {
+        let d = diag(None, LogScanResult::default());
+        assert!(!d.is_broken());
+        assert_eq!(d.summary(), None);
     }
 
     #[test]

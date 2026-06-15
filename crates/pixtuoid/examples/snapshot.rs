@@ -502,6 +502,7 @@ fn main() -> Result<()> {
             state,
             config_path: cfg.map(PathBuf::from),
             target: None,
+            health: None,
         };
         let rows = vec![
             mk(

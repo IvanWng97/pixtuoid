@@ -74,17 +74,24 @@ pub(in crate::tui) fn paint_connection_panel(
     } else if let Some(res) = last_result {
         res.to_string()
     } else if let Some(row) = rows.get(selected) {
-        // State-aware: surface the install path ONLY when our integration is
-        // actually there (Connected). Disconnected shows the action (the path is
-        // just the future destination — meaningless until you connect); no-CLI
-        // explains why it can't be bound.
-        match row.state {
-            ConnState::Connected => match &row.config_path {
-                Some(p) => format!("installed at: {}", p.display()),
-                None => "connected".to_string(),
-            },
-            ConnState::Disconnected => "disconnected \u{2014} press t to connect".to_string(),
-            ConnState::NoCli => no_action_hint(row),
+        // Health verdict first: a broken install / decode drift (#309, the
+        // health-consolidation arc) is what you'd act on here, so it preempts the
+        // benign per-state line. Cached on row build (connected rows only).
+        if let Some(h) = &row.health {
+            h.clone()
+        } else {
+            // State-aware: surface the install path ONLY when our integration is
+            // actually there (Connected). Disconnected shows the action (the path
+            // is just the future destination — meaningless until you connect);
+            // no-CLI explains why it can't be bound.
+            match row.state {
+                ConnState::Connected => match &row.config_path {
+                    Some(p) => format!("installed at: {}", p.display()),
+                    None => "connected".to_string(),
+                },
+                ConnState::Disconnected => "disconnected \u{2014} press t to connect".to_string(),
+                ConnState::NoCli => no_action_hint(row),
+            }
         }
     } else {
         String::new()
@@ -209,6 +216,7 @@ mod tests {
             state,
             config_path: None,
             target: None,
+            health: None,
         }
     }
 
@@ -289,6 +297,7 @@ mod tests {
             state: ConnState::Connected,
             config_path: None,
             target: None,
+            health: None,
         };
         // Unselected: static `…`-truncated name (spans[3]).
         let unsel = connection_line(
@@ -341,6 +350,7 @@ mod tests {
                 source_id: d.name,
                 label_prefix: d.label_prefix,
                 target: None,
+                health: None,
                 facts: Some(RowFacts {
                     present: true,
                     config_path: None,
