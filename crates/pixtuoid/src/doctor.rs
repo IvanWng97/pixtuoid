@@ -168,7 +168,14 @@ pub fn run(log_path: &std::path::Path) -> anyhow::Result<()> {
     let log = std::fs::read_to_string(log_path).unwrap_or_default();
 
     let mut out = String::from("pixtuoid doctor — source health\n");
-    out.push_str(&format!("log: {}\n\n", log_path.display()));
+    out.push_str(&format!("log: {}\n", log_path.display()));
+    // Surface config-load warnings IN the report — a malformed config makes every
+    // source read disconnected, and a diagnostic tool must say WHY rather than
+    // silently swallow it. Sanitized: a warning can interpolate config content.
+    for w in &warnings {
+        out.push_str(&format!("⚠ config: {}\n", sanitize(w)));
+    }
+    out.push('\n');
 
     let mut any_drift = false;
     for &src in REGISTERED_SOURCES {
