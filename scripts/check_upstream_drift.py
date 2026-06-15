@@ -72,6 +72,15 @@ import urllib.request
 # URLError is itself an OSError subclass; kept explicit to document intent.
 FETCH_ERRORS = (urllib.error.URLError, OSError, http.client.HTTPException)
 
+# A permanent HTTP status means the URL itself is wrong/gone — our pinned
+# upstream path moved, so the watch is BLIND for that source until fixed. This is
+# BREAKING, never transient. Everything else (403/429 throttling behind a CDN,
+# 5xx server hiccups, connect/read timeouts) is genuinely retry-later. The trap
+# this guards: `HTTPError` subclasses `URLError` ⊂ FETCH_ERRORS, so a 404 used to
+# fall into the transient bucket and the weekly job stayed green while silently
+# watching nothing.
+PERMANENT_HTTP_STATUS = frozenset({404, 410, 451})
+
 REPO = pathlib.Path(__file__).resolve().parent.parent
 
 CODEX_PROTOCOL_URL = (
@@ -187,9 +196,12 @@ CODEWHALE_KNOWN_OMITTED = {
 # ~50 event types and we intentionally map only a handful, so "new upstream event"
 # is noise; we only alarm when a type WE DEPEND ON vanishes (a rename the plugin
 # would forward but the decoder would map to nothing).
+# NB: the repo's default branch is `dev` (not `main`) — the `main` branch was
+# retired, which 404'd these URLs and (pre-`try_fetch`) was silently bucketed as
+# transient, blinding the opencode watch. Track `dev` (the active default).
 OPENCODE_EVENT_URLS = (
-    "https://raw.githubusercontent.com/anomalyco/opencode/main/packages/core/src/v1/session.ts",
-    "https://raw.githubusercontent.com/anomalyco/opencode/main/packages/core/src/permission.ts",
+    "https://raw.githubusercontent.com/anomalyco/opencode/dev/packages/core/src/v1/session.ts",
+    "https://raw.githubusercontent.com/anomalyco/opencode/dev/packages/core/src/permission.ts",
 )
 
 # `permission.asked` is forwarded/decoded DEFENSIVELY (a V1/alias spelling); only
@@ -224,6 +236,35 @@ def fetch(url: str) -> str:
     req = urllib.request.Request(url, headers={"User-Agent": "pixtuoid-drift-watch"})
     with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310 (trusted hosts)
         return resp.read().decode("utf-8", "replace")
+
+
+def try_fetch(
+    url: str, label: str, breaking: list[str], errors: list[str]
+) -> str | None:
+    """Fetch `url`, classifying failures so a PERMANENT upstream move is loud.
+
+    A `PERMANENT_HTTP_STATUS` (404/410/451) means our pinned URL is wrong/gone →
+    `breaking` (the watch is blind for this source until the `*_URL` constant is
+    fixed). 403/429/5xx + connect/read timeouts → `errors` (transient). Returns
+    the body, or None on any failure (the caller skips that source's checks).
+    Centralizes the try/except every fetch site repeated, AND fixes the
+    `HTTPError ⊂ URLError ⊂ FETCH_ERRORS` swallow that bucketed 404 as transient.
+    """
+    try:
+        return fetch(url)
+    except urllib.error.HTTPError as e:
+        if e.code in PERMANENT_HTTP_STATUS:
+            breaking.append(
+                f"{label}: HTTP {e.code} at {url} — the upstream URL moved or was "
+                f"removed; drift-watch is BLIND for this source until the *_URL "
+                f"constant / parser is updated."
+            )
+        else:
+            errors.append(f"{label}: transient HTTP {e.code} at {url}: {e}")
+        return None
+    except FETCH_ERRORS as e:
+        errors.append(f"{label}: fetch failed (transient?): {e}")
+        return None
 
 
 def read_codex_events() -> set[str]:
@@ -387,11 +428,7 @@ def run_checks(
     stays inside main(), before this is called, and still exits 1."""
     # --- Codex hook events (only the FETCH is transient) -------------------
     if codex_ours is not None:
-        try:
-            text = fetch(CODEX_PROTOCOL_URL)
-        except FETCH_ERRORS as e:
-            errors.append(f"Codex source fetch failed (transient?): {e}")
-            text = None
+        text = try_fetch(CODEX_PROTOCOL_URL, "Codex source", breaking, errors)
         if text is not None:
             upstream = upstream_codex_hooks(text)
             if upstream is None:
@@ -417,11 +454,7 @@ def run_checks(
 
     # --- Reasonix hook events + payload fields (only the FETCH is transient)
     if reasonix_ours is not None:
-        try:
-            text = fetch(REASONIX_HOOK_URL)
-        except FETCH_ERRORS as e:
-            errors.append(f"Reasonix source fetch failed (transient?): {e}")
-            text = None
+        text = try_fetch(REASONIX_HOOK_URL, "Reasonix source", breaking, errors)
         if text is not None:
             upstream = upstream_reasonix_hooks(text)
             if upstream is None:
@@ -454,11 +487,7 @@ def run_checks(
 
     # --- CodeWhale hook events (only the FETCH is transient) ---------------
     if codewhale_ours is not None:
-        try:
-            text = fetch(CODEWHALE_HOOK_URL)
-        except FETCH_ERRORS as e:
-            errors.append(f"CodeWhale source fetch failed (transient?): {e}")
-            text = None
+        text = try_fetch(CODEWHALE_HOOK_URL, "CodeWhale source", breaking, errors)
         if text is not None:
             upstream = upstream_codewhale_hooks(text)
             if upstream is None:
@@ -484,11 +513,14 @@ def run_checks(
 
     # --- opencode EventV2 types (only the FETCH is transient) --------------
     if opencode_ours is not None:
-        try:
-            text = "\n".join(fetch(u) for u in OPENCODE_EVENT_URLS)
-        except FETCH_ERRORS as e:
-            errors.append(f"opencode source fetch failed (transient?): {e}")
-            text = None
+        parts = [
+            try_fetch(u, "opencode source", breaking, errors)
+            for u in OPENCODE_EVENT_URLS
+        ]
+        # If ANY url failed, skip the check — a partial concat would
+        # false-positive a depended type as "GONE" just because it lived in the
+        # half we couldn't fetch. (try_fetch already classified each failure.)
+        text = "\n".join(parts) if all(p is not None for p in parts) else None
         if text is not None:
             for ev in sorted(opencode_ours - OPENCODE_TOLERATED):
                 # The type strings appear as `type: "session.created"` etc. in
@@ -502,11 +534,7 @@ def run_checks(
 
     # --- Copilot event types (only the FETCH is transient) -----------------
     if copilot_ours is not None:
-        try:
-            text = fetch(COPILOT_SCHEMA_URL)
-        except FETCH_ERRORS as e:
-            errors.append(f"Copilot schema fetch failed (transient?): {e}")
-            text = None
+        text = try_fetch(COPILOT_SCHEMA_URL, "Copilot schema", breaking, errors)
         if text is not None:
             upstream = upstream_copilot_events(text)
             if upstream is None:
@@ -527,11 +555,7 @@ def run_checks(
 
     # --- Cursor hook events (only the FETCH is transient) ------------------
     if cursor_ours is not None:
-        try:
-            text = fetch(CURSOR_HOOKS_URL)
-        except FETCH_ERRORS as e:
-            errors.append(f"Cursor hooks doc fetch failed (transient?): {e}")
-            text = None
+        text = try_fetch(CURSOR_HOOKS_URL, "Cursor hooks doc", breaking, errors)
         if text is not None:
             for ev in sorted(cursor_ours):
                 # Word-boundary token match (the docs render the names inline /
@@ -547,11 +571,7 @@ def run_checks(
 
     # --- CC subagent-dispatch tool (only the FETCH is transient) -----------
     if dispatch_names is not None:
-        try:
-            tools = fetch(CC_TOOLS_URL)
-        except FETCH_ERRORS as e:
-            errors.append(f"CC tools-reference fetch failed (transient?): {e}")
-            tools = None
+        tools = try_fetch(CC_TOOLS_URL, "CC tools-reference", breaking, errors)
         if tools is not None:
             # At least one name we'd detect by-name must still be the documented
             # dispatch tool. (Losing a legacy name like `Task` is fine.)
@@ -571,11 +591,7 @@ def run_checks(
     # lifecycle-marker scan is unconditional (nothing to read from our source
     # first — we depend on those surfaces' ABSENCE; see
     # CC_LIFECYCLE_SURFACE_MARKERS).
-    try:
-        hooks_doc = fetch(CC_HOOKS_URL)
-    except FETCH_ERRORS as e:
-        errors.append(f"CC hooks doc fetch failed (transient?): {e}")
-        hooks_doc = None
+    hooks_doc = try_fetch(CC_HOOKS_URL, "CC hooks doc", breaking, errors)
     if hooks_doc is not None:
         if cc_ours is not None:
             upstream = upstream_cc_hook_events(hooks_doc)

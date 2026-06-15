@@ -423,3 +423,12 @@ setup-tools:
         echo "brew install cargo-binstall (or cargo install cargo-binstall) to grab prebuilt binaries instead." >&2
         cargo install "${tools[@]}"
     fi
+
+# Self-test the upstream-drift watcher — its ONLY test. A regex-parser regression
+# is a silent monitor death (the script returns empty / raises, the weekly job
+# alarms on junk or watches nothing); this pins the parsers + the fetch
+# classifier. Pure Python, no deps, no network.
+[group('meta')]
+[doc('Self-test the upstream-drift watcher (parsers + fetch classifier)')]
+drift-selftest:
+    python3 scripts/check_upstream_drift_selftest.py

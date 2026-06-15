@@ -11,6 +11,13 @@ on:
   schedule:
     - cron: "0 9 * * 1" # Mondays 09:00 UTC
   workflow_dispatch:
+  # On PRs that touch the watcher itself, run ONLY the selftest (the live network
+  # check + issue-filing stay schedule/dispatch-only — a flaky upstream fetch must
+  # never gate a PR). A parser/classifier regression IS caught here.
+  pull_request:
+    paths:
+      - "scripts/check_upstream_drift*.py"
+      - ".github/workflows/upstream-drift.yml"
 
 permissions:
   contents: read
@@ -24,8 +31,14 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      # Always runs (incl. PRs): a parser/classifier regression = silent monitor
+      # death, so guard it before the live check trusts the parsers.
+      - name: Self-test the watcher
+        run: python3 scripts/check_upstream_drift_selftest.py
+
       - name: Check upstream drift
         id: check
+        if: github.event_name != 'pull_request'
         shell: bash
         run: |
           set +e
