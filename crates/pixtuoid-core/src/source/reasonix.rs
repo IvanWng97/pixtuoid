@@ -204,9 +204,17 @@ pub fn decode_rx_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
                 .get("subject")
                 .and_then(|s| s.as_str())
                 .filter(|s| !s.is_empty());
+            // Pre-cap each component before concatenating (matching
+            // `rx_tool_detail` in this file) so an oversized `subject` can't
+            // force a large intermediate allocation; the outer `ellipsize` on
+            // the combined reason stays the authoritative cap.
             let reason = match (tool, subject) {
-                (Some(t), Some(s)) => format!("approval: {t} {s}"),
-                (Some(t), None) => format!("approval: {t}"),
+                (Some(t), Some(s)) => format!(
+                    "approval: {} {}",
+                    ellipsize(t, MAX_DECODED_FIELD_CHARS),
+                    ellipsize(s, MAX_DECODED_FIELD_CHARS),
+                ),
+                (Some(t), None) => format!("approval: {}", ellipsize(t, MAX_DECODED_FIELD_CHARS)),
                 (None, _) => "approval required".to_string(),
             };
             Ok(vec![
