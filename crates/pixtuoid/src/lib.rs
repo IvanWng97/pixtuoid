@@ -4,6 +4,7 @@
 
 pub mod cli;
 pub mod config;
+pub mod doctor;
 pub mod init_pack;
 pub mod install;
 pub mod runtime;

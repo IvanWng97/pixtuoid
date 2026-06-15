@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use anyhow::Result;
 use clap::Parser;
 use pixtuoid::cli::{Cli, Cmd};
-use pixtuoid::{config, init_pack, install, runtime, validate};
+use pixtuoid::{config, doctor, init_pack, install, runtime, validate};
 use tracing_subscriber::EnvFilter;
 
 fn main() -> Result<()> {
@@ -148,6 +148,7 @@ fn main() -> Result<()> {
         }
         Cmd::ValidatePack { pack_dir } => validate::validate_pack(&pack_dir),
         Cmd::InitPack { dest, force } => init_pack::init_pack(&dest, force),
+        Cmd::Doctor => doctor::run(&log_file_path()),
     }
 }
 

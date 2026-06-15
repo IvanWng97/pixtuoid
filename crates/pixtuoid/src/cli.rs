@@ -66,6 +66,9 @@ pub enum Cmd {
         #[arg(long, default_value_t = false)]
         force: bool,
     },
+    /// Diagnose source health: connection, hooks, and decode drift recorded in
+    /// the log. Read-only.
+    Doctor,
 }
 
 /// `--log-level` values. A typed enum (not a free `String`) so a typo like

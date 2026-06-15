@@ -19,8 +19,12 @@ src/
 │                       debug|trace, or $PIXTUOID_LOG raise verbosity — plain --log-level info
 │                       is indistinguishable from the default and floors to warn); non-TUI
 │                       modes log to stderr; install failure eprintlns pre-altscreen
-├── cli.rs              clap subcommands (run / validate-pack / init-pack) — NO install-hooks/uninstall-hooks
+├── cli.rs              clap subcommands (run / validate-pack / init-pack / doctor) — NO install-hooks/uninstall-hooks
 │                       (deleted; binding a source is the in-TUI Connection panel's job, `c`)
+├── doctor.rs           `pixtuoid doctor` — read-only source self-diagnosis (connected? hooks
+│                       installed? + decode-drift counts scanned from the warn-floor log's
+│                       `pixtuoid::drift` breadcrumbs). Pure scan_log_for_source/format_doctor_row
+│                       (tested vs REAL fmt output); sanitizes untrusted sampled names (R0615-06)
 ├── config.rs           AppConfig persistence (~/.config/pixtuoid/config.toml), XDG-aware
 ├── runtime/            mod.rs (RunConfig, boot-capacity math, headless summarize — all unit-tested;
 │                       ConnectedSources = the live `Arc<Mutex<HashSet<String>>>` connected-set,
