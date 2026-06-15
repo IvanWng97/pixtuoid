@@ -127,9 +127,10 @@ pub fn footer_warning(source_death: Option<&str>, drifted: &[String]) -> Option<
         .map(|p| format!("{p}·"))
         .collect::<Vec<_>>()
         .join(" ");
-    Some(format!(
-        "⚠ decode drift: {prefixes} — run `pixtuoid doctor`"
-    ))
+    // No leading `⚠` — the footer painter (`hud.rs` `" ⚠ {warn} "`) owns the
+    // glyph, same as the source-death message. Embedding one here double-prints
+    // it (`⚠ ⚠ decode drift`), a regression a snapshot caught.
+    Some(format!("decode drift: {prefixes} — run `pixtuoid doctor`"))
 }
 
 /// One source's diagnosis row (plain data, so `format_doctor_row` is pure/tested).
@@ -537,6 +538,9 @@ mod tests {
             w.contains("cc·") && w.contains("cx·") && w.contains("doctor"),
             "{w}"
         );
+        // The footer painter (`hud.rs` `" ⚠ {warn} "`) owns the warning glyph;
+        // neither message may embed its own or it double-prints (`⚠ ⚠ …`).
+        assert!(!w.contains('⚠'), "drift msg must not embed ⚠: {w}");
         // both clear → nothing.
         assert_eq!(footer_warning(None, &[]), None);
     }
