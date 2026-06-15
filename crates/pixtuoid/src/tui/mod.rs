@@ -483,13 +483,13 @@ pub async fn run_tui(
             let health = source_health.borrow_and_update().clone();
             // Throttled drift re-scan (≤ every 15s) — reuse doctor's tested
             // scanner; the source-death warning still preempts it in the merge.
+            // This is the ONE deliberate exception to "no scan-the-history": it
+            // derives a passive diagnostic nudge from the log artifact, NOT
+            // lifecycle state (the no-history rule guards the reducer). A counting
+            // tracing::Layer was rejected — it would add stateful blast radius to
+            // the single global file subscriber for a hint the 15s scan covers.
             if let Some(lp) = &log_path {
-                // `match` not `map_or`/`is_none_or`: clippy(stable) flags map_or
-                // → is_none_or, but is_none_or is 1.82+ and the MSRV is 1.78.
-                let due = match last_drift_scan {
-                    Some(t) => t.elapsed().as_secs() >= 15,
-                    None => true,
-                };
+                let due = last_drift_scan.is_none_or(|t| t.elapsed().as_secs() >= 15);
                 if due {
                     last_drift_scan = Some(std::time::Instant::now());
                     drifted_prefixes = std::fs::read_to_string(lp)

@@ -26,7 +26,9 @@ src/
 │                       anchor → skew flag; + decode-drift counts scanned from the warn-floor log's
 │                       `pixtuoid::drift` breadcrumbs). Pure scan_log_for_source/format_doctor_row/
 │                       parse_version/version_status (tested; scan vs REAL fmt output); sanitizes
-│                       untrusted sampled names (R0615-06). verified_version lives on SourceDescriptor
+│                       untrusted sampled names (R0615-06). verified_version lives on SourceDescriptor.
+│                       drifted_sources/footer_warning (also pure, tested) feed the LIVE footer nudge —
+│                       run_tui throttle-scans the same log (≤15s) → ⚠ decode drift footer (see tui guide)
 ├── config.rs           AppConfig persistence (~/.config/pixtuoid/config.toml), XDG-aware
 ├── runtime/            mod.rs (RunConfig, boot-capacity math, headless summarize — all unit-tested;
 │                       ConnectedSources = the live `Arc<Mutex<HashSet<String>>>` connected-set,
