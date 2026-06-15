@@ -263,11 +263,20 @@ async fn reducer_task(
                         // DROPPED — don't arm the exit watch, don't apply. Any
                         // lingering entry is walked out by the sweep-tick reconcile.
                         if connected.is_connected(&source) {
-                            // Arm the instant abrupt-down watch on a fresh gateway pid.
-                            if let (DaemonPresenceUpdate::GatewayUp { pid: Some(pid) }, Some(ew)) =
-                                (&update, presence_exit_watch.as_ref())
-                            {
-                                ew.watch(&source, *pid);
+                            // Arm the instant abrupt-down watch on the gateway pid —
+                            // from GatewayUp (gateway_start) OR PidSeen (#318: a
+                            // mid-attach / reconnect that never saw gateway_start, so
+                            // the pid rides a later event). `watch` is idempotent per
+                            // pid; `apply_presence` owns the None-only adoption.
+                            if let Some(ew) = presence_exit_watch.as_ref() {
+                                let armed_pid = match &update {
+                                    DaemonPresenceUpdate::GatewayUp { pid: Some(p) } => Some(*p),
+                                    DaemonPresenceUpdate::PidSeen { pid } => Some(*pid),
+                                    _ => None,
+                                };
+                                if let Some(pid) = armed_pid {
+                                    ew.watch(&source, pid);
+                                }
                             }
                             daemon::apply_presence(&mut scene, &source, update, now);
                             if scene_tx.send(Arc::new(scene.clone())).is_err() {

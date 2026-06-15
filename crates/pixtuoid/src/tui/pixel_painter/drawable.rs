@@ -161,6 +161,8 @@ pub(super) enum DrawableKind<'a> {
         anim_name: &'static str,
         frame_idx: usize,
         run_count: u32,
+        /// Gateway up but model-broken (#317) → render the lobster sickly red.
+        degraded: bool,
     },
     /// Horizontal (E-W) frosted-glass room divider, y-sorted at its south
     /// (front) edge so it composites over a character standing behind it.
@@ -381,6 +383,8 @@ const MASCOT_ENTER_MS: u64 = 2200;
 const MASCOT_LEAVE_MS: u64 = 2200;
 const MASCOT_IDLE_CYCLE_MS: u64 = 9000;
 const MASCOT_BUSY_CYCLE_MS: u64 = 4500;
+// Degraded (#317) wanders SLOWER than idle — a sluggish, unwell drag.
+const MASCOT_DEGRADED_CYCLE_MS: u64 = 14000;
 const MASCOT_WALK_FRAC: f32 = 0.45;
 
 /// Per-source mascot sprite (walk, rest). The ONE place a new gateway registers
@@ -589,10 +593,10 @@ pub(super) fn mascot_position(
     }
 
     // Steady wander, styled by state.
-    let cycle_ms = if presence.state == DaemonState::Busy {
-        MASCOT_BUSY_CYCLE_MS
-    } else {
-        MASCOT_IDLE_CYCLE_MS
+    let cycle_ms = match presence.state {
+        DaemonState::Busy => MASCOT_BUSY_CYCLE_MS,
+        DaemonState::Degraded => MASCOT_DEGRADED_CYCLE_MS,
+        _ => MASCOT_IDLE_CYCLE_MS,
     };
     let spots = mascot_spots(layout, presence.state, home);
     let (pos, walking) = mascot_wander(layout, age - MASCOT_ENTER_MS, seed, &spots, home, cycle_ms);
@@ -934,6 +938,7 @@ pub(super) fn paint_drawable(
             anim_name,
             frame_idx,
             run_count,
+            degraded,
         } => {
             let Some(anim) = pack.animation(anim_name) else {
                 return;
@@ -943,7 +948,12 @@ pub(super) fn paint_drawable(
             };
             let px = pos.x.saturating_sub(frame.width / 2);
             let py = pos.y.saturating_sub(frame.height / 2);
-            blit_frame(frame, px, py, buf);
+            // Degraded (#317): blit a sickly-red tinted copy of the frame.
+            if *degraded {
+                blit_frame(&super::palette::degraded_frame(frame), px, py, buf);
+            } else {
+                blit_frame(frame, px, py, buf);
+            }
             // Busy (an in-flight agent run) → a rising activity-bubble stream
             // above Molty's head. `run_count > 0` IS the busy gate (busy ⟺
             // in-flight runs); a persistent idle session must NOT bubble.

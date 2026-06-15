@@ -41,8 +41,18 @@ pub enum DaemonPresenceUpdate {
     SessionEnded,
     /// `before_agent_run` — a turn entered flight, keyed for self-healing busy.
     RunStarted { run_key: String },
-    /// `agent_end` — a turn completed (best-effort; the TTL decay is the backstop).
+    /// `agent_end` with `success: true` — a turn completed OK.
     RunEnded { run_key: String },
+    /// `agent_end` with `success: false` (#317) — a turn FAILED (the model
+    /// backend is broken: auth revoked, provider down). Drives `Degraded`.
+    RunFailed { run_key: String },
+    /// A live gateway pid OBSERVED on any event carrying `_pid` (#318) — adopted
+    /// into `current_pid` ONLY when it was `None`, so a MID-ATTACH or a
+    /// reconnect-while-alive can still arm the abrupt-down exit watch even though
+    /// it never saw the `gateway_start` that carries the pid via `GatewayUp`.
+    /// Does NOT change `DaemonState` (it's a pure pid adoption). `GatewayUp` still
+    /// owns restart-rebinds (overwrites), so `PidSeen` never clobbers a known pid.
+    PidSeen { pid: i32 },
     /// The armed gateway pid died (from the `ExitWatch` drain, not a decoder).
     PidExited { pid: i32 },
 }
@@ -147,12 +157,34 @@ pub fn apply_presence(
         RunEnded { run_key } => {
             p.in_flight_run_keys.remove(&run_key);
             if p.in_flight_run_keys.is_empty() {
+                // A successful run ending heals a prior Degraded back to Idle.
                 p.state = DaemonState::Idle;
+            }
+        }
+        // A FAILED run (#317): the gateway is alive but its model backend broke.
+        // Degraded overrides Busy/Idle and persists until the next SUCCESSFUL run
+        // (RunEnded → Idle) or a new attempt (RunStarted → Busy) or a restart
+        // (GatewayUp → Idle). Remove this run from the in-flight set (it ended).
+        RunFailed { run_key } => {
+            p.in_flight_run_keys.remove(&run_key);
+            p.state = DaemonState::Degraded;
+        }
+        // Pure pid adoption (#318): bootstrap `current_pid` for a live daemon we
+        // never saw `gateway_start` for (mid-attach / reconnect-while-alive), so
+        // the abrupt-down exit watch can arm. ONLY when None — `GatewayUp` owns
+        // restart-rebinds, so this never clobbers a known pid. No state change.
+        PidSeen { pid } => {
+            if p.current_pid.is_none() {
+                p.current_pid = Some(pid);
             }
         }
         // Only the CURRENTLY-armed pid dying takes the daemon down. A stale
         // `PidExited` for an old pid after a restart (`current_pid` already
         // rebound to the new pid) is a no-op — the live daemon stays up.
+        // `current_pid` is armed by `GatewayUp` (restart-rebind) AND adopted by
+        // `PidSeen` (#318 mid-attach) — the gateway plugin now stamps `_pid` on
+        // EVERY event, so a daemon pixtuoid attaches to AFTER its `gateway_start`
+        // still arms this instant abrupt-down rung off the next event's `PidSeen`.
         PidExited { pid } => {
             if p.current_pid == Some(pid) {
                 p.state = DaemonState::Down;
@@ -415,6 +447,202 @@ mod tests {
         }
     }
 
+    // ---- #317: the Degraded (model-error) arm ----
+
+    #[test]
+    fn failed_run_degrades_the_daemon() {
+        for src in SOURCES {
+            let mut s = SceneState::default();
+            apply_presence(
+                &mut s,
+                src,
+                DaemonPresenceUpdate::RunStarted {
+                    run_key: "r".into(),
+                },
+                ms(0),
+            );
+            assert_eq!(st(&s, src), DaemonState::Busy);
+            apply_presence(
+                &mut s,
+                src,
+                DaemonPresenceUpdate::RunFailed {
+                    run_key: "r".into(),
+                },
+                ms(1),
+            );
+            assert_eq!(
+                st(&s, src),
+                DaemonState::Degraded,
+                "agent_end.success:false ⇒ degraded"
+            );
+            assert!(
+                s.daemons()[src].in_flight_run_keys.is_empty(),
+                "the failed run leaves the in-flight set"
+            );
+        }
+    }
+
+    #[test]
+    fn a_new_run_clears_degraded_back_to_busy() {
+        for src in SOURCES {
+            let mut s = SceneState::default();
+            apply_presence(
+                &mut s,
+                src,
+                DaemonPresenceUpdate::RunFailed {
+                    run_key: "a".into(),
+                },
+                ms(0),
+            );
+            assert_eq!(st(&s, src), DaemonState::Degraded);
+            apply_presence(
+                &mut s,
+                src,
+                DaemonPresenceUpdate::RunStarted {
+                    run_key: "b".into(),
+                },
+                ms(1),
+            );
+            assert_eq!(
+                st(&s, src),
+                DaemonState::Busy,
+                "a fresh attempt re-enters Busy (the gateway is trying again)"
+            );
+        }
+    }
+
+    #[test]
+    fn a_successful_run_heals_degraded_to_idle() {
+        for src in SOURCES {
+            let mut s = SceneState::default();
+            apply_presence(
+                &mut s,
+                src,
+                DaemonPresenceUpdate::RunFailed {
+                    run_key: "a".into(),
+                },
+                ms(0),
+            );
+            // The next attempt enters flight, then SUCCEEDS.
+            apply_presence(
+                &mut s,
+                src,
+                DaemonPresenceUpdate::RunStarted {
+                    run_key: "b".into(),
+                },
+                ms(1),
+            );
+            apply_presence(
+                &mut s,
+                src,
+                DaemonPresenceUpdate::RunEnded {
+                    run_key: "b".into(),
+                },
+                ms(2),
+            );
+            assert_eq!(
+                st(&s, src),
+                DaemonState::Idle,
+                "a clean run drains the in-flight set ⇒ heals to idle"
+            );
+        }
+    }
+
+    #[test]
+    fn gateway_restart_clears_degraded() {
+        for src in SOURCES {
+            let mut s = SceneState::default();
+            apply_presence(
+                &mut s,
+                src,
+                DaemonPresenceUpdate::RunFailed {
+                    run_key: "a".into(),
+                },
+                ms(0),
+            );
+            assert_eq!(st(&s, src), DaemonState::Degraded);
+            up(&mut s, src, 9, 1);
+            assert_eq!(
+                st(&s, src),
+                DaemonState::Idle,
+                "a restart (re-auth, provider back) clears the degraded latch"
+            );
+        }
+    }
+
+    // ---- #318: the PidSeen mid-attach pid adoption ----
+
+    #[test]
+    fn pid_seen_adopts_when_current_pid_is_none() {
+        for src in SOURCES {
+            // Mid-attach: pixtuoid never saw `gateway_start`, so the entry is
+            // first created by a plain activity event carrying `_pid`.
+            let mut s = SceneState::default();
+            apply_presence(
+                &mut s,
+                src,
+                DaemonPresenceUpdate::PidSeen { pid: 555 },
+                ms(0),
+            );
+            assert_eq!(
+                s.daemons()[src].current_pid,
+                Some(555),
+                "the live pid is adopted so the instant abrupt-down rung can arm"
+            );
+            // And it does NOT change the state (pure pid adoption).
+            assert_eq!(st(&s, src), DaemonState::Idle);
+            // The adopted pid dying now takes the daemon down (the #318 payoff).
+            apply_presence(
+                &mut s,
+                src,
+                DaemonPresenceUpdate::PidExited { pid: 555 },
+                ms(1),
+            );
+            assert_eq!(st(&s, src), DaemonState::Down);
+        }
+    }
+
+    #[test]
+    fn pid_seen_never_clobbers_a_known_pid() {
+        for src in SOURCES {
+            let mut s = SceneState::default();
+            up(&mut s, src, 100, 0);
+            // A later event re-stamps a (possibly stale) pid — must NOT overwrite
+            // the authoritative `GatewayUp` binding (restart-rebind owns that).
+            apply_presence(
+                &mut s,
+                src,
+                DaemonPresenceUpdate::PidSeen { pid: 999 },
+                ms(1),
+            );
+            assert_eq!(
+                s.daemons()[src].current_pid,
+                Some(100),
+                "PidSeen is adopt-only-when-None; GatewayUp owns rebinds"
+            );
+        }
+    }
+
+    #[test]
+    fn pid_seen_is_pure_adoption_and_does_not_change_state() {
+        // PidSeen adopts the pid but is intentionally state-NEUTRAL — the decoder
+        // ALWAYS prepends it to a state-bearing update (`out.insert(0, PidSeen)`
+        // only when `out` is non-empty), so resurrection rides on that sibling
+        // update, never on PidSeen alone. Verify the state-neutrality directly.
+        for src in SOURCES {
+            let mut s = SceneState::default();
+            apply_presence(&mut s, src, DaemonPresenceUpdate::GatewayDown, ms(0));
+            assert_eq!(st(&s, src), DaemonState::Down);
+            apply_presence(&mut s, src, DaemonPresenceUpdate::PidSeen { pid: 7 }, ms(1));
+            assert_eq!(
+                st(&s, src),
+                DaemonState::Down,
+                "PidSeen is pure pid adoption — it does NOT resurrect by itself"
+            );
+            assert_eq!(s.daemons()[src].current_pid, Some(7));
+        }
+    }
+
     #[test]
     fn pid_exit_matching_current_takes_the_daemon_down() {
         for src in SOURCES {
@@ -588,6 +816,39 @@ mod tests {
                 "stranded busy self-heals to idle"
             );
             assert!(s.daemons()[src].in_flight_run_keys.is_empty());
+        }
+    }
+
+    #[test]
+    fn sweep_does_not_busy_decay_a_degraded_daemon_but_ttl_takes_it_down() {
+        // #317: a Degraded gateway is NOT a stale Busy — the busy_decay arm only
+        // matches Busy, so a broken gateway can't silently "heal" to Idle on a
+        // dropped event (only a real RunEnded/RunStarted/GatewayUp heals). It does
+        // still go Down on the presence_ttl silence (covers a SIGTERM'd broken gateway).
+        let ttl = PresenceTtl::DEFAULT;
+        for src in SOURCES {
+            let mut s = SceneState::default();
+            apply_presence(
+                &mut s,
+                src,
+                DaemonPresenceUpdate::RunFailed {
+                    run_key: "r".into(),
+                },
+                ms(0),
+            );
+            assert_eq!(st(&s, src), DaemonState::Degraded);
+            sweep_presence_ttl(&mut s, src, ttl, ms(ttl.busy_decay_ms + 1));
+            assert_eq!(
+                st(&s, src),
+                DaemonState::Degraded,
+                "Degraded must NOT busy-decay to Idle (only Busy does)"
+            );
+            sweep_presence_ttl(&mut s, src, ttl, ms(ttl.presence_ttl_ms + 1));
+            assert_eq!(
+                st(&s, src),
+                DaemonState::Down,
+                "silence past the TTL takes even a Degraded daemon down"
+            );
         }
     }
 

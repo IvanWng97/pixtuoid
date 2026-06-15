@@ -14,7 +14,7 @@
 //! So OpenClaw earns a SINGLE presence-gated mascot (the wandering "Molty"
 //! lobster) showing the one thing `cc·` can't: is the gateway alive and handling
 //! traffic (its motion encodes state — idle ambles, busy shuttles, down leaves).
-//! Its plugin (`install/openclaw_plugin.ts`) forwards a strict ALLOWLIST envelope
+//! Its plugin (`install/openclaw_plugin.js`) forwards a strict ALLOWLIST envelope
 //! — never message content (the busy tell needs only the run pairing key) —
 //! stamped `_pixtuoid_source: "openclaw"` by the shim:
 //!
@@ -50,9 +50,13 @@ use crate::source::daemon::DaemonPresenceUpdate;
 
 pub const SOURCE_NAME: &str = "openclaw";
 
-/// The busy pairing key: prefer the turn's `runId`, fall back to its `sessionId`,
-/// else a constant. The last-seen TTL decay is the real backstop, so a coarse
-/// key only affects active-session intensity, never correctness.
+/// The busy pairing key: prefer a non-empty `runId`; if `runId` is ABSENT (not
+/// merely empty) fall back to `sessionId`; an empty pick collapses to a constant
+/// `"_"` (the `!is_empty` filter sits AFTER the `runId`-or-`sessionId` pick, so a
+/// present-but-empty `runId` short-circuits to `"_"`, NOT the sessionId —
+/// pinned by `run_key_fallbacks_are_coarse_by_design`). Coarse BY DESIGN: the
+/// last-seen TTL decay is the real backstop, so the key only affects busy-bubble
+/// intensity, never correctness.
 fn run_key(obj: &serde_json::Map<String, Value>) -> String {
     obj.get("runId")
         .and_then(|s| s.as_str())
@@ -74,25 +78,35 @@ pub fn decode_openclaw_hook_payload(v: &Value) -> Result<Vec<DaemonPresenceUpdat
         .get("type")
         .and_then(|s| s.as_str())
         .ok_or_else(|| anyhow!("openclaw payload missing type"))?;
-    Ok(match event {
-        "gateway_start" => vec![DaemonPresenceUpdate::GatewayUp {
-            // Checked narrowing: a crafted out-of-range `_pid` (e.g. 2^32+1) must
-            // NOT silently truncate to a valid pid (arming ExitWatch on PID 1) — an
-            // unrepresentable pid is dropped (None); the TTL backstop still covers it.
-            pid: obj
-                .get("_pid")
-                .and_then(|p| p.as_i64())
-                .and_then(|p| i32::try_from(p).ok()),
-        }],
+    // Checked narrowing: a crafted out-of-range `_pid` (e.g. 2^32+1) must NOT
+    // silently truncate to a valid pid (arming ExitWatch on PID 1) — an
+    // unrepresentable pid is dropped (None); the TTL backstop still covers it.
+    let pid = obj
+        .get("_pid")
+        .and_then(|p| p.as_i64())
+        .and_then(|p| i32::try_from(p).ok());
+    let mut out = match event {
+        "gateway_start" => vec![DaemonPresenceUpdate::GatewayUp { pid }],
         "gateway_stop" => vec![DaemonPresenceUpdate::GatewayDown],
         "session_start" => vec![DaemonPresenceUpdate::SessionStarted],
         "session_end" => vec![DaemonPresenceUpdate::SessionEnded],
         "before_agent_run" => vec![DaemonPresenceUpdate::RunStarted {
             run_key: run_key(obj),
         }],
-        "agent_end" => vec![DaemonPresenceUpdate::RunEnded {
-            run_key: run_key(obj),
-        }],
+        "agent_end" => {
+            // #317: `agent_end` carries `success: boolean` (PluginHookAgentEndEvent).
+            // `false` = the run failed (the model backend is broken — auth revoked,
+            // provider down) → Degraded; `true`/absent = OK → RunEnded. Absent
+            // defaults to OK (an older plugin not forwarding `success` must never
+            // false-degrade a healthy gateway).
+            let ok = obj.get("success").and_then(|s| s.as_bool()).unwrap_or(true);
+            let run_key = run_key(obj);
+            vec![if ok {
+                DaemonPresenceUpdate::RunEnded { run_key }
+            } else {
+                DaemonPresenceUpdate::RunFailed { run_key }
+            }]
+        }
         // Any other forwarded hook is a benign skip (the plugin forwards a
         // filtered set). Log a drift breadcrumb instead of bailing — a NEW
         // upstream gateway event the plugin starts forwarding surfaces here in
@@ -106,7 +120,17 @@ pub fn decode_openclaw_hook_payload(v: &Value) -> Result<Vec<DaemonPresenceUpdat
             );
             vec![]
         }
-    })
+    };
+    // #318: any NON-`gateway_start` event carrying `_pid` bootstraps the abrupt-
+    // down exit watch for a mid-attached / reconnected daemon (`gateway_start`
+    // already carries the pid via `GatewayUp`). Prepend `PidSeen` so the pid is
+    // adopted before the state update applies. Skip unmapped events (empty `out`).
+    if event != "gateway_start" && !out.is_empty() {
+        if let Some(pid) = pid {
+            out.insert(0, DaemonPresenceUpdate::PidSeen { pid });
+        }
+    }
+    Ok(out)
 }
 
 // `decode_openclaw_hook_custom` was DELETED: with `SourceKind::Daemon`,
@@ -185,6 +209,79 @@ mod tests {
             vec![DaemonPresenceUpdate::RunEnded {
                 run_key: "run_1".into()
             }]
+        );
+    }
+
+    #[test]
+    fn agent_end_success_false_decodes_to_run_failed() {
+        // #317: a failed run (the model backend broke) → RunFailed (drives Degraded).
+        assert_eq!(
+            decode(
+                json!({"type": "agent_end", "runId": "run_1", "sessionId": "s1", "success": false})
+            ),
+            vec![DaemonPresenceUpdate::RunFailed {
+                run_key: "run_1".into()
+            }]
+        );
+    }
+
+    #[test]
+    fn agent_end_success_true_or_absent_decodes_to_run_ended() {
+        // Explicit success:true and a legacy plugin omitting `success` both → OK.
+        for v in [
+            json!({"type": "agent_end", "runId": "r", "sessionId": "s", "success": true}),
+            json!({"type": "agent_end", "runId": "r", "sessionId": "s"}),
+        ] {
+            assert_eq!(
+                decode(v),
+                vec![DaemonPresenceUpdate::RunEnded {
+                    run_key: "r".into()
+                }],
+                "success:true/absent must never false-degrade a healthy gateway"
+            );
+        }
+    }
+
+    #[test]
+    fn non_gateway_start_event_with_pid_prepends_pid_seen() {
+        // #318: a `_pid`-bearing NON-gateway_start event adopts the live pid so a
+        // mid-attached daemon can arm the instant abrupt-down rung. PidSeen leads.
+        assert_eq!(
+            decode(json!({"type": "session_start", "sessionId": "s1", "_pid": 7777})),
+            vec![
+                DaemonPresenceUpdate::PidSeen { pid: 7777 },
+                DaemonPresenceUpdate::SessionStarted,
+            ]
+        );
+        assert_eq!(
+            decode(json!({"type": "agent_end", "runId": "r", "_pid": 8888, "success": false})),
+            vec![
+                DaemonPresenceUpdate::PidSeen { pid: 8888 },
+                DaemonPresenceUpdate::RunFailed {
+                    run_key: "r".into()
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn gateway_start_pid_is_not_double_emitted_as_pid_seen() {
+        // gateway_start already carries the pid via GatewayUp — the PidSeen prepend
+        // is suppressed for it (event == "gateway_start" guard), so the pid arrives
+        // exactly once.
+        assert_eq!(
+            decode(json!({"type": "gateway_start", "_pid": 4242})),
+            vec![DaemonPresenceUpdate::GatewayUp { pid: Some(4242) }]
+        );
+    }
+
+    #[test]
+    fn unmapped_event_with_pid_emits_nothing_not_a_lone_pid_seen() {
+        // An empty `out` (unmapped event) must stay empty even with `_pid` — a lone
+        // PidSeen with no sibling update would never resurrect a Down daemon.
+        assert!(
+            decode(json!({"type": "model_call_started", "_pid": 5})).is_empty(),
+            "no lone PidSeen for an unmapped event"
         );
     }
 

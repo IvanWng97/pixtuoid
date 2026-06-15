@@ -20,8 +20,10 @@ const HOOK_PATH = {{HOOK_PATH_JSON}};
 
 // The ONLY fields forwarded. `messages` / `prompt` / `sessionFile` / `systemPrompt`
 // are deliberately ABSENT — the daemon fixture needs the run pairing key + ids,
-// never content.
-const ALLOW = ["runId", "sessionId", "sessionKey", "reason", "messageCount"];
+// never content. `success` is the agent_end run pass/fail BOOLEAN (#317: false =
+// the model backend broke → Molty renders Degraded); the `error` STRING that
+// rides alongside it is deliberately NOT forwarded (it can embed content).
+const ALLOW = ["runId", "sessionId", "sessionKey", "reason", "messageCount", "success"];
 
 function forward(type, ev, ctx) {
   try {
@@ -32,8 +34,12 @@ function forward(type, ev, ctx) {
       const v = ctx && ctx[k] !== undefined ? ctx[k] : ev && ev[k];
       if (v !== undefined) payload[k] = v;
     }
-    // The gateway pid arms pixtuoid's instant abrupt-down (ExitWatch).
-    if (type === "gateway_start") payload._pid = process.pid;
+    // pixtuoid arms its instant abrupt-down (ExitWatch) on the gateway pid. Stamp
+    // it on EVERY event (not just gateway_start) so a MID-ATTACH or reconnect —
+    // where pixtuoid never observed gateway_start — can still adopt the live pid
+    // (#318). The plugin runs IN the gateway process, so process.pid is the
+    // gateway's pid for every hook.
+    payload._pid = process.pid;
 
     const proc = spawn(HOOK_PATH, ["--source", "openclaw"], {
       stdio: ["pipe", "ignore", "ignore"],

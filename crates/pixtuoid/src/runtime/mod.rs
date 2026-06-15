@@ -174,6 +174,7 @@ fn summarize(scene: &SceneState) -> String {
             let state = match p.state {
                 DaemonState::Idle => "idle",
                 DaemonState::Busy => "busy",
+                DaemonState::Degraded => "degraded",
                 DaemonState::Down => "down",
             };
             format!("{}:{}", sanitize_line(source), state)

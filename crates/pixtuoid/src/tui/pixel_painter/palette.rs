@@ -400,6 +400,46 @@ pub(super) fn recolor_frame(frame: &Frame, pal: &Palette, base_pal: &Palette) ->
     }
 }
 
+/// Map one mascot pixel to its "degraded" look (#317): a gateway that is UP but
+/// whose model backend is failing every run reads as UNWELL — drain saturation
+/// toward grey, bias toward a dull blood-red, then dim. Transparent stays
+/// transparent (handled by `degraded_frame`).
+pub(super) fn degraded_pixel(c: Rgb) -> Rgb {
+    let lum = ((c.r as f32) * 0.30 + (c.g as f32) * 0.59 + (c.b as f32) * 0.11) as u8;
+    let gray = Rgb {
+        r: lum,
+        g: lum,
+        b: lum,
+    };
+    let desat = blend_rgb(c, gray, 0.55); // drain saturation
+    let sick = Rgb {
+        r: 150,
+        g: 40,
+        b: 40,
+    };
+    let tinted = blend_rgb(desat, sick, 0.45); // bias toward a dull red
+    blend_rgb(
+        tinted,
+        Rgb { r: 0, g: 0, b: 0 },
+        0.18, // dim ~18% — the lobster looks drained
+    )
+}
+
+/// A degraded copy of a mascot frame (#317): every opaque pixel runs through
+/// [`degraded_pixel`]; transparency is preserved. Mirrors `recolor_frame`'s
+/// pixel-map shape.
+pub(super) fn degraded_frame(frame: &Frame) -> Frame {
+    Frame {
+        width: frame.width,
+        height: frame.height,
+        pixels: frame
+            .pixels
+            .iter()
+            .map(|&p| p.map(degraded_pixel))
+            .collect(),
+    }
+}
+
 // --- Color math primitives -----------------------------------------------
 
 pub(super) fn lerp_rgb(a: Rgb, b: Rgb, t: f32) -> Rgb {

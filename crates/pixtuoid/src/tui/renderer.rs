@@ -366,6 +366,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
                         f,
                         m.name,
                         m.busy,
+                        m.degraded,
                         m.active_sessions,
                         mx,
                         my,

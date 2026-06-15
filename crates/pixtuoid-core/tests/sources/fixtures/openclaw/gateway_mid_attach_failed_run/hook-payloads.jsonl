@@ -1,0 +1,4 @@
+{"type":"session_start","sessionId":"gwcap7","sessionKey":"agent:main:gwcap7","_pid":54321,"_pixtuoid_source":"openclaw"}
+{"type":"before_agent_run","runId":"a1b2c3d4-0000-4453-a9a8-975d1b469900","sessionId":"gwcap7","_pid":54321,"_pixtuoid_source":"openclaw"}
+{"type":"agent_end","runId":"a1b2c3d4-0000-4453-a9a8-975d1b469900","sessionId":"gwcap7","success":false,"_pid":54321,"_pixtuoid_source":"openclaw"}
+{"type":"session_end","sessionId":"gwcap7","sessionKey":"agent:main:gwcap7","reason":"idle","messageCount":1,"_pid":54321,"_pixtuoid_source":"openclaw"}

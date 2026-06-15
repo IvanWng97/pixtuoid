@@ -164,10 +164,13 @@ pub struct ApplianceColors {
     pub coats: [Rgb; 3],
 }
 
-/// Per-CLI badge hues for the agent-dashboard popup. One color per agent
-/// source (cc/cx/rx/ag/cw), drawn as a leading `[xx]` badge. Each theme supplies
-/// its own so the badge harmonizes with the palette and stays legible on
-/// `tooltip_bg` (guarded by `source_badges_legible_for_every_theme`).
+/// Per-source badge hues. One color per registered source — the 8 agent CLIs +
+/// the OpenClaw daemon (`all()` returns `[Rgb; 9]`, count-pinned to
+/// `REGISTERED_SOURCES` by `source_colors_cover_every_registered_source`) — drawn
+/// as a leading `[xx]` badge in the agent-dashboard popup (agents only) and the
+/// Sources panel (all sources, incl. the daemon). Each theme supplies its own so
+/// the badge harmonizes with the palette and stays legible on `tooltip_bg`
+/// (guarded by `source_badges_legible_for_every_theme`).
 #[derive(Debug, Clone)]
 pub struct SourceColors {
     pub claude_code: Rgb,

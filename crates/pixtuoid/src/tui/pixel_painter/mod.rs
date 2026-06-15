@@ -69,6 +69,9 @@ pub struct MascotFrame {
     /// the run state, NOT the session count — a single-user gateway holds one
     /// persistent session even at rest, so session count is a poor idle/busy tell.
     pub busy: bool,
+    /// Gateway up but its model backend is failing every run (#317) — the tooltip
+    /// reads "model error" and Molty renders sickly red.
+    pub degraded: bool,
     pub active_sessions: u32,
 }
 
@@ -1155,6 +1158,7 @@ fn enqueue_gateway_mascot<'a>(
                 anim_name,
                 frame_idx,
                 run_count,
+                degraded: presence.state == pixtuoid_core::state::DaemonState::Degraded,
             },
         });
         // First present gateway wins the hover frame (single-gateway today).
@@ -1162,6 +1166,7 @@ fn enqueue_gateway_mascot<'a>(
             pos,
             name: gateway_display_name(source),
             busy: presence.state == pixtuoid_core::state::DaemonState::Busy,
+            degraded: presence.state == pixtuoid_core::state::DaemonState::Degraded,
             active_sessions: presence.active_sessions,
         });
     }

@@ -263,6 +263,15 @@ struct SnapshotArgs {
     /// One of: pantry | couch | vending | printer | meeting | sofa | desk.
     #[arg(long, conflicts_with_all = ["gif", "anim"])]
     crop_furniture: Option<String>,
+
+    /// Crop the generated PNG to a window centered on the gateway mascot (Molty)
+    /// — its position is time-derived, so this reads it back from the renderer
+    /// AFTER the draw (unlike --crop-agent/--crop-furniture, which precompute).
+    /// Needs a VISIBLE mascot: pass --openclaw <state> (and not `down` past the
+    /// leave window, which renders none) — enforced at runtime, not by clap, since
+    /// "visible" isn't expressible as a static flag dependency. Static-PNG path only.
+    #[arg(long, conflicts_with_all = ["crop_agent", "crop_furniture", "gif", "anim"])]
+    crop_mascot: bool,
 }
 
 fn default_projects_root() -> String {
@@ -634,7 +643,18 @@ fn main() -> Result<()> {
         debug_paint_walkable_overlay(&mut term, &scene)?;
     }
 
-    let crop_rect = compute_crop_rect(&args, &scene, &history, cols, rows, now)?;
+    let crop_rect = if args.crop_mascot {
+        // The mascot wanders to a time-derived cell, so we crop on the position
+        // the renderer actually resolved (written back to last_mascot_pos), not
+        // a precomputed layout point. pos is the logical half-block buffer (1px
+        // per cell across, 2px down — same convention as compute_crop_rect).
+        let m = draw_ctx.last_mascot_pos.as_ref().ok_or_else(|| {
+            anyhow::anyhow!("--crop-mascot needs a visible mascot; pass --openclaw <state>")
+        })?;
+        Some(centered_crop(m.pos.x, m.pos.y / 2, cols, rows))
+    } else {
+        compute_crop_rect(&args, &scene, &history, cols, rows, now)?
+    };
 
     save_backend_as_png(&term, &args.out, cols, rows, crop_rect)?;
     println!("wrote {}", args.out.display());
@@ -871,8 +891,14 @@ fn inject_openclaw_presence(s: &mut SceneState, state: &str, now: SystemTime) ->
             1,
             vec!["run-a".to_string(), "run-b".to_string()],
         ),
+        // #317: the gateway is up but its model backend is failing every run —
+        // a sickly-red, sluggishly-wandering Molty (no in-flight runs: the last
+        // one FAILED out of the set).
+        "degraded" => (DaemonState::Degraded, 1, Vec::new()),
         "down" => (DaemonState::Down, 0, Vec::new()),
-        other => anyhow::bail!("unknown --openclaw {other:?}; valid: idle | busy | down"),
+        other => {
+            anyhow::bail!("unknown --openclaw {other:?}; valid: idle | busy | degraded | down")
+        }
     };
     // `entered_at` ~20s in the past → past the enter animation, so a static
     // snapshot captures the steady wander (not the walk-in). For `down`,

@@ -187,6 +187,13 @@ pub struct AgentSlot {
 pub enum DaemonState {
     Idle,
     Busy,
+    /// Gateway is UP but its model backend is failing every run (#317) — the
+    /// Apr-2026 Anthropic-ban failure mode: `gateway_start`/`session_start`/
+    /// `before_agent_run` all fire normally, but each `agent_end` reports
+    /// `success: false`, so the daemon is alive-but-broken, NOT idle. Entered on
+    /// a failed run; self-heals on the next successful run (or a new run start /
+    /// gateway restart). The mascot renders distressed (sickly red, sluggish).
+    Degraded,
     Down,
 }
 
