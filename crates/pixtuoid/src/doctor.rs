@@ -222,10 +222,6 @@ pub fn format_doctor_row(row: &DoctorSourceRow) -> String {
     )
 }
 
-/// Run a source's version-probe argv (from the static registry — never user
-/// input) and return the first non-empty output line, trimmed. Best-effort: a
-/// missing binary / nonzero exit / non-UTF8 → None ("version: unknown"). Checks
-/// stdout then stderr (some CLIs print `--version` to stderr).
 /// First non-empty line of subprocess output, trimmed AND control-char
 /// `sanitize`d — `--version` output is untrusted (a PATH-substituted binary
 /// could emit ANSI/OSC to manipulate the terminal; R0615-06). Pure → tested.
@@ -237,15 +233,19 @@ fn first_sanitized_line(bytes: &[u8]) -> Option<String> {
         .map(sanitize)
 }
 
+/// Probe a source's `<cli> --version` (argv from the static registry — never
+/// user input) → the first non-empty output line, sanitized. Best-effort; every
+/// failure → None ("unknown"):
+/// - missing binary / spawn error,
+/// - NONZERO exit (a broken `--version` must not show its error text as the
+///   version),
+/// - a HANG: stdin is nulled (no block on the inherited TTY) and the child is
+///   killed after a deadline (a slow/blocking/PATH-substituted binary can't hang
+///   doctor — `output()` has no timeout). Checks stdout then stderr.
 fn probe_version(argv: &'static [&'static str]) -> Option<String> {
     use std::process::{Command, Stdio};
     use std::time::{Duration, Instant};
     let (cmd, args) = argv.split_first()?;
-    // Bounded + best-effort: NULL stdin so it can't block on the inherited TTY,
-    // and KILL it after a deadline so a hung/slow/malicious `<cli> --version`
-    // (a network call, an interactive prompt, a PATH-substituted binary) can't
-    // hang doctor. `--version` output is tiny, so the piped buffers never fill
-    // while we poll (no reader-vs-writer deadlock for this use).
     let mut child = Command::new(cmd)
         .args(args)
         .stdin(Stdio::null())
@@ -253,6 +253,8 @@ fn probe_version(argv: &'static [&'static str]) -> Option<String> {
         .stderr(Stdio::piped())
         .spawn()
         .ok()?;
+    // `--version` output is tiny, so the piped buffers never fill while we poll
+    // (no reader-vs-writer deadlock for this use).
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         match child.try_wait() {
@@ -267,6 +269,10 @@ fn probe_version(argv: &'static [&'static str]) -> Option<String> {
         }
     }
     let output = child.wait_with_output().ok()?;
+    // A `--version` that exits nonzero is broken — "unknown", never its error text.
+    if !output.status.success() {
+        return None;
+    }
     first_sanitized_line(&output.stdout).or_else(|| first_sanitized_line(&output.stderr))
 }
 
