@@ -5,7 +5,6 @@
 
 use std::time::Duration;
 
-use tempfile::TempDir;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::windows::named_pipe::ClientOptions;
 use tokio::sync::mpsc;
