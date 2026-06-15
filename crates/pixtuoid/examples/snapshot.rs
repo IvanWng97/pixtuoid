@@ -460,7 +460,13 @@ fn main() -> Result<()> {
     let drifted: Vec<String> = args
         .drift_warning
         .as_deref()
-        .map(|s| s.split(',').map(|p| p.trim().to_string()).collect())
+        .map(|s| {
+            s.split(',')
+                .map(str::trim)
+                .filter(|p| !p.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
         .unwrap_or_default();
     let warning_text = pixtuoid::doctor::footer_warning(death_text.as_deref(), &drifted);
     let mut chitchat_state = std::collections::HashMap::new();
