@@ -256,7 +256,10 @@ async fn reducer_task(
             // AgentId-pure). Invariant #2. N daemons route by the tuple's source.
             update = presence_rx.recv(), if presence_open => {
                 match update {
-                    Some((source, update)) => {
+                    Some(PresenceMsg {
+                        source,
+                        delta: update,
+                    }) => {
                         let now = SystemTime::now();
                         // CONNECTION GATE (mirrors the AgentEvent arm above): a
                         // daemon DISCONNECTED in the Sources panel has its presence

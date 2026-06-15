@@ -222,7 +222,10 @@ pub(crate) async fn handle_conn(
                         match decode(&v) {
                             Ok(updates) => {
                                 for u in updates {
-                                    let _ = ptx.send((src.to_string(), u));
+                                    let _ = ptx.send(crate::source::daemon::PresenceMsg {
+                                        source: src.to_string(),
+                                        delta: u,
+                                    });
                                 }
                             }
                             Err(e) => warn!("daemon presence decode error: {e}"),
@@ -426,7 +429,7 @@ mod tests {
         let (mut client, server) = tokio::io::duplex(4096);
         let (tx, mut rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(8);
         let (ptx, mut prx) =
-            tokio::sync::mpsc::unbounded_channel::<(String, DaemonPresenceUpdate)>();
+            tokio::sync::mpsc::unbounded_channel::<crate::source::daemon::PresenceMsg>();
 
         let task = tokio::spawn(handle_conn(server, tx, None, Some(ptx)));
         // A shim-stamped OpenClaw presence line, then an ordinary CC agent line.
@@ -447,13 +450,13 @@ mod tests {
 
         // The OpenClaw line → exactly one ("openclaw", GatewayUp) on the SIDE
         // channel, and the AgentEvent channel never sees it (zero AgentEvents).
-        let (src, update) = prx.recv().await.expect("one presence update");
+        let msg = prx.recv().await.expect("one presence update");
         assert_eq!(
-            src, "openclaw",
+            msg.source, "openclaw",
             "presence is source-tagged for N-daemon routing"
         );
         assert!(matches!(
-            update,
+            msg.delta,
             DaemonPresenceUpdate::GatewayUp { pid: Some(4242) }
         ));
         assert!(

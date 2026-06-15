@@ -9,7 +9,7 @@
 //! line/hook decoder.
 //!
 //! Presence rides a SIBLING channel (invariant #2: NOT the one `AgentEvent`
-//! channel), carrying `PresenceMsg = (source, DaemonPresenceUpdate)` so N
+//! channel), carrying `PresenceMsg { source, delta }` so N
 //! daemons land in DISTINCT `SceneState::daemons` entries. The reducer task
 //! merges them via [`apply_presence`], NEVER through `Reducer::apply` (which is
 //! `AgentId`-pure). See `docs/superpowers/specs/2026-06-15-source-kind-daemon-
@@ -59,8 +59,14 @@ pub enum DaemonPresenceUpdate {
 
 /// A presence delta tagged with WHICH daemon it belongs to — the routing key for
 /// N daemons. Both producers (the `handle_conn` demux and the exit-watch drain)
-/// emit this, so a daemon's deltas always reach the right `daemons[source]`.
-pub type PresenceMsg = (String, DaemonPresenceUpdate);
+/// emit this, so a daemon's deltas always reach the right `daemons[source]`. A
+/// named struct (not a `(String, Update)` tuple) so the routing key can't be
+/// read positionally at the seam.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PresenceMsg {
+    pub source: String,
+    pub delta: DaemonPresenceUpdate,
+}
 
 /// The daemon-presence SIDE channel (invariant #2: NOT the one `AgentEvent`
 /// channel). Unbounded — presence deltas are tiny + rare.
@@ -329,7 +335,10 @@ pub fn spawn_presence_exit_watch(presence_tx: PresenceSender) -> Option<Presence
                 .remove(&pid);
             if let Some(source) = source {
                 if presence_tx
-                    .send((source, DaemonPresenceUpdate::PidExited { pid }))
+                    .send(PresenceMsg {
+                        source,
+                        delta: DaemonPresenceUpdate::PidExited { pid },
+                    })
                     .is_err()
                 {
                     break;

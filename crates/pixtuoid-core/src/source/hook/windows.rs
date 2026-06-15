@@ -95,6 +95,33 @@ pub(super) struct Listener {
     sd: OwnerOnlySd,
 }
 
+/// The ONE `ServerOptions` chain (+ its SAFETY contract) for our hook pipe, so
+/// the initial bind, the per-connect recreate, and the next-instance create
+/// can't drift — they were byte-for-byte identical apart from `first_pipe_instance`.
+///
+/// `first` claims `first_pipe_instance`: ONLY the initial bind does, so a missing
+/// name surfaces as the typed `SocketBusy`. The recreate + next-instance must NOT
+/// claim it (the instance still in flight already holds it, and re-claiming would
+/// fail ACCESS_DENIED).
+///
+/// SAFETY: `attributes_ptr` must point at a well-formed `SECURITY_ATTRIBUTES`
+/// whose `lpSecurityDescriptor` is valid for the duration of the call; the kernel
+/// copies the descriptor during `CreateNamedPipeW`, so nothing borrows past it.
+unsafe fn create_hook_pipe(
+    name: &str,
+    attributes_ptr: *mut c_void,
+    first: bool,
+) -> std::io::Result<NamedPipeServer> {
+    let mut opts = ServerOptions::new();
+    if first {
+        opts.first_pipe_instance(true);
+    }
+    opts.reject_remote_clients(true)
+        .pipe_mode(PipeMode::Byte)
+        .in_buffer_size(IN_BUFFER_SIZE)
+        .create_with_security_attributes_raw(name, attributes_ptr)
+}
+
 impl Listener {
     pub(super) async fn bind(path: &Path) -> Result<Self> {
         let name = path.to_string_lossy().into_owned();
@@ -113,14 +140,7 @@ impl Listener {
         // lpSecurityDescriptor is the valid converted descriptor; the kernel
         // copies the descriptor during CreateNamedPipeW, so nothing borrows
         // past the call.
-        let server = match unsafe {
-            ServerOptions::new()
-                .first_pipe_instance(true)
-                .reject_remote_clients(true)
-                .pipe_mode(PipeMode::Byte)
-                .in_buffer_size(IN_BUFFER_SIZE)
-                .create_with_security_attributes_raw(&name, sd.attributes_ptr())
-        } {
+        let server = match unsafe { create_hook_pipe(&name, sd.attributes_ptr(), true) } {
             Ok(s) => s,
             // ERROR_ACCESS_DENIED (5): almost always another instance holding
             // first_pipe_instance on this name — the one recoverable bind
@@ -164,18 +184,11 @@ impl Listener {
                 // with the recreate-bail below. Unix accept errors leave the
                 // listener fd valid, hence its plain warn+continue.
                 warn!("hook pipe connect error: {e}; recreating instance");
-                // SAFETY: self.sd lives for the whole loop; same descriptor
-                // validity argument as bind().
-                self.server = unsafe {
-                    ServerOptions::new()
-                        .reject_remote_clients(true)
-                        .pipe_mode(PipeMode::Byte)
-                        .in_buffer_size(IN_BUFFER_SIZE)
-                        .create_with_security_attributes_raw(&self.name, self.sd.attributes_ptr())
-                }
-                .with_context(|| {
-                    format!("re-creating hook pipe after connect error at {}", self.name)
-                })?;
+                self.server =
+                    unsafe { create_hook_pipe(&self.name, self.sd.attributes_ptr(), false) }
+                        .with_context(|| {
+                            format!("re-creating hook pipe after connect error at {}", self.name)
+                        })?;
                 continue;
             }
             // Create the NEXT instance BEFORE handing this one off —
@@ -183,16 +196,8 @@ impl Listener {
             // re-create, clients would get ERROR_PIPE_BUSY or NotFound
             // depending on timing.
             //
-            // SAFETY: self.sd lives for the whole loop; same descriptor
-            // validity argument as bind().
-            let next = unsafe {
-                ServerOptions::new()
-                    .reject_remote_clients(true)
-                    .pipe_mode(PipeMode::Byte)
-                    .in_buffer_size(IN_BUFFER_SIZE)
-                    .create_with_security_attributes_raw(&self.name, self.sd.attributes_ptr())
-            }
-            .with_context(|| format!("re-creating hook pipe at {}", self.name))?;
+            let next = unsafe { create_hook_pipe(&self.name, self.sd.attributes_ptr(), false) }
+                .with_context(|| format!("re-creating hook pipe at {}", self.name))?;
             let conn = std::mem::replace(&mut self.server, next);
             let tx = tx.clone();
             let pid_watch = pid_watch.clone();

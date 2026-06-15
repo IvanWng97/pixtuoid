@@ -189,6 +189,41 @@ impl JsonlWatcher {
         self
     }
 
+    /// One scan pass: refresh the liveness probe → (optionally) drain child-end
+    /// un-claims → re-scan the root → re-emit proof-of-life when the probe is
+    /// healthy. The initial seed + the 250ms rescan + the 60s poll all run this
+    /// SAME sequence; only the seed skips the un-claim drain (`drain = false` —
+    /// nothing has been pushed at startup). `decoders` is `Copy`.
+    #[allow(clippy::too_many_arguments)]
+    async fn run_scan_pass(
+        &self,
+        ctx: &WatchCtx<'_>,
+        vouch: &mut NegativeVouch,
+        pid_bindings: &mut HashMap<i32, HashSet<String>>,
+        root_health: &mut FailureLatch,
+        exit_watch: Option<&ExitWatch>,
+        unclaims: Option<&ChildEndUnclaims>,
+        decoders: SourceDecoders,
+        drain: bool,
+    ) {
+        let healthy = refresh_probe_snapshot(
+            self.liveness_probe.as_ref(),
+            vouch,
+            pid_bindings,
+            exit_watch,
+            decoders,
+            ctx,
+        )
+        .await;
+        if drain {
+            drain_child_end_unclaims(unclaims, decoders, ctx).await;
+        }
+        scan_root(&self.root, decoders, ctx, root_health).await;
+        if healthy {
+            emit_proof_of_life(ctx.live, ctx.source, ctx.tx).await;
+        }
+    }
+
     pub async fn run(self, tx: TaggedSender) -> Result<()> {
         let cursors: Arc<Mutex<HashMap<PathBuf, u64>>> = Arc::new(Mutex::new(HashMap::new()));
         let seen_sessions: Arc<Mutex<HashMap<PathBuf, bool>>> =
@@ -295,19 +330,17 @@ impl JsonlWatcher {
                 window: self.initial_window,
                 live: &live,
             };
-            let healthy = refresh_probe_snapshot(
-                self.liveness_probe.as_ref(),
+            self.run_scan_pass(
+                &ctx,
                 &mut vouch,
                 &mut pid_bindings,
+                &mut root_health,
                 exit_watch.as_ref(),
+                unclaims.as_ref(),
                 decoders,
-                &ctx,
+                false,
             )
             .await;
-            scan_root(&self.root, decoders, &ctx, &mut root_health).await;
-            if healthy {
-                emit_proof_of_life(&live, &source_arc, &tx).await;
-            }
         }
 
         // Re-scan shortly after startup to catch files that APFS read_dir
@@ -351,26 +384,16 @@ impl JsonlWatcher {
                 }
                 _ = &mut rescan_delay, if !rescan_done => {
                     rescan_done = true;
-                    let healthy = refresh_probe_snapshot(
-                        self.liveness_probe.as_ref(), &mut vouch, &mut pid_bindings,
-                        exit_watch.as_ref(), decoders, &ctx,
+                    self.run_scan_pass(
+                        &ctx, &mut vouch, &mut pid_bindings, &mut root_health,
+                        exit_watch.as_ref(), unclaims.as_ref(), decoders, true,
                     ).await;
-                    drain_child_end_unclaims(unclaims.as_ref(), decoders, &ctx).await;
-                    scan_root(&self.root, decoders, &ctx, &mut root_health).await;
-                    if healthy {
-                        emit_proof_of_life(&live, &source_arc, &tx).await;
-                    }
                 }
                 _ = poll.tick() => {
-                    let healthy = refresh_probe_snapshot(
-                        self.liveness_probe.as_ref(), &mut vouch, &mut pid_bindings,
-                        exit_watch.as_ref(), decoders, &ctx,
+                    self.run_scan_pass(
+                        &ctx, &mut vouch, &mut pid_bindings, &mut root_health,
+                        exit_watch.as_ref(), unclaims.as_ref(), decoders, true,
                     ).await;
-                    drain_child_end_unclaims(unclaims.as_ref(), decoders, &ctx).await;
-                    scan_root(&self.root, decoders, &ctx, &mut root_health).await;
-                    if healthy {
-                        emit_proof_of_life(&live, &source_arc, &tx).await;
-                    }
                 }
                 Some(pid) = exit_rx.recv() => {
                     // Instant exit (#223 rung 2): the watched OS process
