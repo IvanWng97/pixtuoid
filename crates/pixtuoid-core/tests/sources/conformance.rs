@@ -225,8 +225,7 @@ fn all_source_fixtures_decode_and_coalesce() {
                 .to_string_lossy()
                 .into_owned();
             let d = decode_fixture(&source, &scenario_dir);
-            let events: Vec<AgentEvent> =
-                d.jsonl.iter().chain(d.hooks.iter()).cloned().collect();
+            let events: Vec<AgentEvent> = d.jsonl.iter().chain(d.hooks.iter()).cloned().collect();
 
             // PRESENCE-ONLY (OpenClaw): the hook.custom claims every event but
             // emits ZERO AgentEvents — presence rides a sibling channel into

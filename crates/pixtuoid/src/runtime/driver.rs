@@ -19,11 +19,11 @@ use std::time::{Duration, SystemTime};
 use anyhow::Result;
 use pixtuoid_core::source::antigravity::AntigravitySource;
 use pixtuoid_core::source::claude_code::ClaudeCodeSource;
-use pixtuoid_core::source::openclaw::{self, DaemonPresenceUpdate};
 use pixtuoid_core::source::codex::CodexSource;
 use pixtuoid_core::source::copilot::CopilotSource;
 use pixtuoid_core::source::jsonl::ChildEndUnclaims;
 use pixtuoid_core::source::manager::SourceManager;
+use pixtuoid_core::source::openclaw::{self, DaemonPresenceUpdate};
 use pixtuoid_core::source::DynSource;
 use pixtuoid_core::state::MAX_FLOORS;
 use pixtuoid_core::{AgentEvent, Reducer, SceneState, TaggedReceiver, Transport};
@@ -75,11 +75,14 @@ async fn run_async(cfg: RunConfig) -> Result<()> {
     // channel). The hook listener decodes openclaw payloads into presence deltas
     // sent here; the exit watch drains gateway-pid deaths into the SAME channel as
     // PidExited; the reducer task merges both into SceneState::source_presence.
-    let (presence_tx, presence_rx) =
-        tokio::sync::mpsc::unbounded_channel::<DaemonPresenceUpdate>();
+    let (presence_tx, presence_rx) = tokio::sync::mpsc::unbounded_channel::<DaemonPresenceUpdate>();
     let presence_exit_watch = openclaw::spawn_presence_exit_watch(presence_tx.clone());
-    let transcript_sources =
-        build_transcript_sources(socket, projects_root, codex_sessions_root, Some(presence_tx));
+    let transcript_sources = build_transcript_sources(
+        socket,
+        projects_root,
+        codex_sessions_root,
+        Some(presence_tx),
+    );
 
     let (tx, rx) = mpsc::channel::<(Transport, AgentEvent)>(256);
     let boot_caps: [usize; MAX_FLOORS] = match (desk_cap, headless) {

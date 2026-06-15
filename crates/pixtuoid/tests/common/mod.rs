@@ -49,6 +49,7 @@ macro_rules! make_draw_ctx {
             floor: _floor,
             active_pet: None,
             last_pet_pos: None,
+            last_mascot_pos: None,
             floor_pet: None,
             chitchat_state: &mut _chitchat_state,
             chitchat_bubbles: Vec::new(),

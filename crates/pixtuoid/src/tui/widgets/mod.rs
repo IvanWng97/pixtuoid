@@ -21,7 +21,9 @@ pub(in crate::tui) use panel::{borderless_panel, PANEL_PAD_X, PANEL_PAD_Y};
 // (the pixtuoid lib target is not a semver surface).
 pub use hud::source_warning_message;
 pub use tooltip::paint_chitchat_bubbles;
-pub(super) use tooltip::{paint_coffee_tooltip, paint_furniture_tooltip, paint_pet_tooltip};
+pub(super) use tooltip::{
+    paint_coffee_tooltip, paint_furniture_tooltip, paint_mascot_tooltip, paint_pet_tooltip,
+};
 pub(crate) use tooltip::{paint_hover_tooltip, paint_label_widgets};
 
 use std::time::SystemTime;

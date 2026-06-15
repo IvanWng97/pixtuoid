@@ -231,6 +231,18 @@ COPILOT_SCHEMA_URL = "https://unpkg.com/@github/copilot/schemas/session-events.s
 # distinctive `sessionStart`/`sessionEnd`/`preToolUse`/`postToolUse` carry the check.
 CURSOR_HOOKS_URL = "https://cursor.com/docs/hooks"
 
+# OpenClaw is a daemon gateway; pixtuoid ships a TS plugin that registers a
+# handful of lifecycle hooks (`OPENCLAW_EVENTS` in install/openclaw.rs) and
+# forwards their timing to the wandering "Molty" mascot. OpenClaw is open TS:
+# the canonical hook-name union lives in `src/plugins/hook-types.ts` as quoted
+# string literals. ONE-DIRECTIONAL (like opencode/cursor): OpenClaw defines ~40
+# hook types and we register 6 by design, so a "new upstream event" is noise —
+# we alarm only when an event WE REGISTER vanishes (a rename means the plugin
+# registers a hook OpenClaw never fires, so presence silently goes dark).
+OPENCLAW_HOOK_TYPES_URL = (
+    "https://raw.githubusercontent.com/openclaw/openclaw/main/src/plugins/hook-types.ts"
+)
+
 
 def fetch(url: str) -> str:
     req = urllib.request.Request(url, headers={"User-Agent": "pixtuoid-drift-watch"})
@@ -368,6 +380,19 @@ def read_cursor_events() -> set[str]:
     return set(re.findall(r'"(\w+)"', m.group(1)))
 
 
+def read_openclaw_events() -> set[str]:
+    """The OpenClaw gateway hook events we register/decode, read from the
+    `OPENCLAW_EVENTS` const in install/openclaw.rs — the SAME list the plugin
+    HOOKS array and the decoder arms are pinned to by
+    `openclaw_events_plugin_decoder_and_const_agree`, so this is a leak-free
+    source of truth (mirrors read_cursor_events / read_codewhale_events)."""
+    src = (REPO / "crates/pixtuoid/src/install/openclaw.rs").read_text()
+    m = re.search(r"const OPENCLAW_EVENTS[^=]*=\s*&\[(.*?)\];", src, re.S)
+    if not m:
+        raise RuntimeError("could not locate OPENCLAW_EVENTS in install/openclaw.rs")
+    return set(re.findall(r'"(\w+)"', m.group(1)))
+
+
 def upstream_copilot_events(text: str) -> set[str] | None:
     """The per-event `type` consts from the @github/copilot session-events JSON
     schema. Each event is a `definitions.<Name>` object whose `properties.type`
@@ -416,6 +441,7 @@ def run_checks(
     opencode_ours: set[str] | None,
     copilot_ours: set[str] | None,
     cursor_ours: set[str] | None,
+    openclaw_ours: set[str] | None,
     breaking: list[str],
     review: list[str],
     errors: list[str],
@@ -569,6 +595,23 @@ def run_checks(
                         f"the decoder maps it to nothing (no sprite / no activity)."
                     )
 
+    # --- OpenClaw gateway hook events (only the FETCH is transient) ---------
+    if openclaw_ours is not None:
+        text = try_fetch(OPENCLAW_HOOK_TYPES_URL, "OpenClaw hook-types", breaking, errors)
+        if text is not None:
+            for ev in sorted(openclaw_ours):
+                # The union lists each hook as a quoted string literal
+                # (`| "before_agent_run"` / `"before_agent_run",`). ONE-DIRECTIONAL:
+                # a registered event missing upstream is breaking; new upstream
+                # hooks are ignored (we register 6 of ~40 by design).
+                if f'"{ev}"' not in text:
+                    breaking.append(
+                        f"OpenClaw hook `{ev}` (registered in OPENCLAW_EVENTS / the TS "
+                        f"plugin) is GONE from src/plugins/hook-types.ts — likely renamed; "
+                        f"the plugin registers a hook OpenClaw never fires, so the Molty "
+                        f"mascot silently stops reacting (no presence)."
+                    )
+
     # --- CC subagent-dispatch tool (only the FETCH is transient) -----------
     if dispatch_names is not None:
         tools = try_fetch(CC_TOOLS_URL, "CC tools-reference", breaking, errors)
@@ -644,6 +687,7 @@ def main() -> int:
     opencode_ours = None
     copilot_ours = None
     cursor_ours = None
+    openclaw_ours = None
     try:
         codex_ours = read_codex_events()
         cc_ours = read_cc_events()
@@ -653,6 +697,7 @@ def main() -> int:
         opencode_ours = read_opencode_events()
         copilot_ours = read_copilot_events()
         cursor_ours = read_cursor_events()
+        openclaw_ours = read_openclaw_events()
     except Exception as e:  # noqa: BLE001
         breaking.append(
             f"drift-watch cannot read our own source ({e}) — the parsers in "
@@ -670,6 +715,7 @@ def main() -> int:
             opencode_ours,
             copilot_ours,
             cursor_ours,
+            openclaw_ours,
             breaking,
             review,
             errors,

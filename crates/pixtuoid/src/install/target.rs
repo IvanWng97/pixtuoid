@@ -2,6 +2,10 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
+/// Builds a target's extra wholly-owned artifacts (absolute path + content) from
+/// the resolved shim path — see `Target::extra_artifacts`.
+pub type ExtraArtifactsFn = fn(hook_path: &Path) -> Result<Vec<(PathBuf, String)>>;
+
 /// Result of a merge: the reserialized config plus whether anything *semantically*
 /// changed. `changed` is computed by comparing the PARSED document before and after
 /// the merge — NOT by byte-comparing serialized output, which always differs from a
@@ -81,7 +85,7 @@ pub struct Target {
     /// into the entry module. `None` for single-file targets. Left in place on
     /// uninstall (the config un-merge disables loading) — an accepted residual
     /// like opencode's stub. Written idempotently (only if content differs).
-    pub extra_artifacts: Option<fn(hook_path: &Path) -> Result<Vec<(PathBuf, String)>>>,
+    pub extra_artifacts: Option<ExtraArtifactsFn>,
 }
 
 /// Backup suffix — the same constant for every target (not a per-target field).
@@ -228,8 +232,9 @@ pub const OPENCLAW: Target = Target {
     extra_artifacts: Some(crate::install::openclaw::plugin_artifacts),
 };
 
-pub const TARGETS: &[&Target] =
-    &[&CLAUDE, &CODEX, &REASONIX, &CODEWHALE, &OPENCODE, &CURSOR, &OPENCLAW];
+pub const TARGETS: &[&Target] = &[
+    &CLAUDE, &CODEX, &REASONIX, &CODEWHALE, &OPENCODE, &CURSOR, &OPENCLAW,
+];
 
 pub fn by_name(name: &str) -> Option<&'static Target> {
     TARGETS.iter().copied().find(|t| t.name == name)

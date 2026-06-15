@@ -1,7 +1,8 @@
 // @pixtuoid-openclaw-plugin
 //
 // Forwards OpenClaw gateway daemon-presence signals to pixtuoid's `pixtuoid-hook`
-// shim, which relays them to the running pixtuoid office (the "HQ tank" fixture).
+// shim, which relays them to the running pixtuoid office (the wandering "Molty"
+// gateway mascot).
 //
 // PRIVACY (load-bearing): build the shim payload from an explicit ALLOWLIST of
 // timing/id fields ONLY — NEVER message content, prompts, or file paths. The

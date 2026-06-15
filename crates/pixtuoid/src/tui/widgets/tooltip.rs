@@ -322,6 +322,32 @@ pub(crate) fn paint_pet_tooltip(
     paint_simple_tooltip(f, text, mx, my, scene_rect, theme);
 }
 
+/// Hover tooltip for the gateway mascot (Molty) — which gateway it represents
+/// and whether an agent run is in flight (`busy`). The verb keys on the run
+/// state, not the session count (a single-user gateway holds one persistent
+/// session even at rest); the session count rides along only as a >1 garnish
+/// (the multi-tenant power-user case). Plain text (no emoji) to keep
+/// `paint_simple_tooltip`'s width math exact.
+#[allow(clippy::too_many_arguments)]
+pub fn paint_mascot_tooltip(
+    f: &mut ratatui::Frame<'_>,
+    name: &str,
+    busy: bool,
+    active_sessions: u32,
+    mx: u16,
+    my: u16,
+    scene_rect: Rect,
+    theme: &crate::tui::theme::Theme,
+) {
+    let verb = if busy { "working" } else { "idle" };
+    let text = if active_sessions > 1 {
+        format!(" {name} gateway · {verb} · {active_sessions} sessions ")
+    } else {
+        format!(" {name} gateway · {verb} ")
+    };
+    paint_simple_tooltip(f, &text, mx, my, scene_rect, theme);
+}
+
 /// Fit a label into `budget` chars without losing the `·xxxx` session-id
 /// disambiguation suffix that the reducer appends to colliding cwds.
 /// Truncates from the base (left side of the `·`), not from the suffix —

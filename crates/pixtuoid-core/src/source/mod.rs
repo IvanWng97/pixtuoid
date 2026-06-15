@@ -320,8 +320,8 @@ pub(crate) mod fd_probe;
 pub mod hook;
 pub mod jsonl;
 pub mod manager;
-pub mod opencode;
 pub mod openclaw;
+pub mod opencode;
 pub mod reasonix;
 // `doc(hidden)`: the registry is an internal fact table, `pub` ONLY so the
 // integration-test crates (sources::conformance) can read it. Hiding it keeps it

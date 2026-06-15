@@ -176,12 +176,13 @@ pub struct AgentSlot {
     pub parent_id: Option<AgentId>,
 }
 
-/// Liveness of a daemon-style source (the OpenClaw gateway). Drives the HQ
-/// "tank" fixture. A daemon is NOT an `AgentSlot` (it has no desk / no agent
+/// Liveness of a daemon-style source (the OpenClaw gateway). Drives the
+/// wandering "Molty" mascot's behaviour (idle ambles, busy shuttles, down
+/// walks out). A daemon is NOT an `AgentSlot` (it has no desk / no agent
 /// activity), so its presence lives in `SceneState::source_presence`, read
 /// directly by the geometry pass. `Down` is distinct from *absent* (no map
-/// entry): absent = not configured / plugin not loaded; `Down` = the daemon
-/// was seen and then died.
+/// entry): absent = not configured / plugin not loaded (Molty not on the
+/// floor); `Down` = the daemon was seen and then died (Molty walks out).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DaemonState {
     Idle,
@@ -189,9 +190,9 @@ pub enum DaemonState {
     Down,
 }
 
-/// Per-daemon presence for the HQ fixture (the P-A representation): lives on
+/// Per-daemon presence for the gateway mascot (the P-A representation): lives on
 /// `SceneState` so the serializable scene snapshot the renderer reads carries
-/// the fixture's state + bubble intensity.
+/// the mascot's state + concurrency (bubble) intensity.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DaemonPresence {
     pub state: DaemonState,
@@ -199,7 +200,14 @@ pub struct DaemonPresence {
     pub active_sessions: u32,
     /// Last time ANY presence event arrived — drives the busy→idle decay and
     /// the presence-TTL stale-down sweep (a daemon has no per-session pid).
+    /// Also the leave-animation anchor: when `state == Down`, this is the
+    /// moment the gateway died, so the mascot's walk-to-the-elevator exit is
+    /// timed `now − last_seen`.
     pub last_seen: SystemTime,
+    /// When the gateway first appeared (absent/Down → up). Anchors the
+    /// mascot's enter animation (walk in from the elevator) and is the steady
+    /// wander clock — process-local timing only, like `AgentSlot.state_started_at`.
+    pub entered_at: SystemTime,
     /// In-flight run keys (busy iff non-empty). Transient process state: a
     /// daemon restart resets it and a dropped `agent_end` self-heals via the
     /// TTL decay, so it is NOT serialized (a restored dump must not strand a
@@ -215,7 +223,7 @@ pub struct DaemonPresence {
 pub struct SceneState {
     pub agents: BTreeMap<AgentId, AgentSlot>,
     pub floor_capacities: [usize; MAX_FLOORS],
-    /// Daemon-style sources (OpenClaw gateway) rendered as a presence fixture,
+    /// Daemon-style sources (OpenClaw gateway) rendered as a wandering mascot,
     /// keyed on the registry source name. Empty for an all-agent scene.
     #[serde(default)]
     pub source_presence: BTreeMap<String, DaemonPresence>,
@@ -384,7 +392,7 @@ mod tests {
 
     #[test]
     fn daemon_presence_round_trips_and_skips_in_flight_keys() {
-        // The openclaw daemon-presence fixture state lives on SceneState (P-A) so
+        // The openclaw daemon-presence (mascot) state lives on SceneState (P-A) so
         // the geometry pass can read it. It serializes like the rest of the tree
         // (#279). `in_flight_run_keys` is transient process state — a daemon
         // restart resets it — so it is `#[serde(skip)]` and restores empty.
@@ -392,6 +400,7 @@ mod tests {
             state: DaemonState::Busy,
             active_sessions: 3,
             last_seen: SystemTime::now(),
+            entered_at: SystemTime::now(),
             in_flight_run_keys: ["run-1".to_string(), "run-2".to_string()]
                 .into_iter()
                 .collect(),
@@ -414,7 +423,10 @@ mod tests {
         for st in [DaemonState::Idle, DaemonState::Busy, DaemonState::Down] {
             p.state = st;
             let j = serde_json::to_string(&p).unwrap();
-            assert_eq!(serde_json::from_str::<DaemonPresence>(&j).unwrap().state, st);
+            assert_eq!(
+                serde_json::from_str::<DaemonPresence>(&j).unwrap().state,
+                st
+            );
         }
     }
 
@@ -429,6 +441,7 @@ mod tests {
                 state: DaemonState::Idle,
                 active_sessions: 0,
                 last_seen: SystemTime::now(),
+                entered_at: SystemTime::now(),
                 in_flight_run_keys: Default::default(),
                 current_pid: Some(900),
             },

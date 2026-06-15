@@ -758,6 +758,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> Renderer for TuiRenderer<B> {
             floor: floor_meta,
             active_pet: self.active_pet.as_ref(),
             last_pet_pos: None,
+            last_mascot_pos: None,
             // Borrows `self.pets` immutably — disjoint from the `&mut fctx`
             // (self.floor_ctxs) above, so the field-split borrow is fine (same
             // as `&self.ticker`/`&self.coffee_holders` here). The picked `&Pet`

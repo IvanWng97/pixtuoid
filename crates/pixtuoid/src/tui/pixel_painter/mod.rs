@@ -47,11 +47,29 @@ pub(super) fn epoch_ms(now: SystemTime) -> u64 {
 /// caller can persist them into `coffee_holders`).
 pub struct PixelPassResult {
     pub pet_pos: Option<PetFrame>,
+    /// The gateway mascot's resolved frame this tick (for hover identity).
+    /// `None` when no gateway is present.
+    pub mascot_pos: Option<MascotFrame>,
     pub chitchat_bubbles: Vec<ChitchatBubble>,
     /// Agent ids observed in `Walking { carrying_coffee: true }` this
     /// frame. The caller inserts them into the persistent
     /// `coffee_holders` set and records `coffee_fetched_at`.
     pub new_coffee_carriers: Vec<pixtuoid_core::AgentId>,
+}
+
+/// The gateway mascot's screen frame — enough to hover-identify it (which
+/// gateway, how busy). The wandering position is recomputed every frame, so
+/// this is recaptured each render like `PetFrame`.
+#[derive(Clone, Copy)]
+pub struct MascotFrame {
+    pub pos: Point,
+    /// Human-readable gateway name (e.g. "OpenClaw").
+    pub name: &'static str,
+    /// An agent run is in flight (the tooltip's idle-vs-working verb). Keyed on
+    /// the run state, NOT the session count — a single-user gateway holds one
+    /// persistent session even at rest, so session count is a poor idle/busy tell.
+    pub busy: bool,
+    pub active_sessions: u32,
 }
 
 mod ambient;
@@ -76,7 +94,10 @@ use background::{
     paint_corridor_runner, paint_floor_and_walls, paint_floor_lamp_halo, paint_neon_panel,
     paint_shadow, time_of_day_look, Ellipse,
 };
-use drawable::{paint_drawable, pet_position, Drawable, DrawableKind};
+use drawable::{
+    gateway_display_name, gateway_mascot_anims, mascot_position, paint_drawable, pet_position,
+    Drawable, DrawableKind,
+};
 use glass::{paint_glass_wall_h, paint_glass_wall_v, stitch_vertical_wall, WALL_THICK_H_PX};
 use palette::{agent_palette, recolor_frame};
 use seat::{paint_character_at, seat_sprite, settle_seat_view, SeatView};
@@ -562,6 +583,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
     enqueue_wall_decor(ctx.layout, &mut drawables);
 
     let resolved_pet_pos = enqueue_pet(ctx, &agents, &mut drawables);
+    let resolved_mascot_pos = enqueue_gateway_mascot(ctx, &mut drawables);
 
     let waypoint_visitors =
         enqueue_characters(ctx, &agents, &mut drawables, &mut new_coffee_carriers);
@@ -602,6 +624,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
 
     PixelPassResult {
         pet_pos: resolved_pet_pos,
+        mascot_pos: resolved_mascot_pos,
         chitchat_bubbles,
         new_coffee_carriers,
     }
@@ -1091,6 +1114,54 @@ fn enqueue_pet<'a>(
         anim: anim_name,
         kind,
     })
+}
+
+/// Enqueue any gateway mascots present in `source_presence` (only the ground
+/// floor carries the map, so a mascot shows once). Presence-gated: an absent
+/// entry — i.e. no OpenClaw connected — draws nothing, so the ~99% who don't
+/// run a gateway see a normal office. y-sorted at the mascot's south row.
+fn enqueue_gateway_mascot<'a>(
+    ctx: &PixelCtx<'_>,
+    drawables: &mut Vec<Drawable<'a>>,
+) -> Option<MascotFrame> {
+    let mut hover = None;
+    for (source, presence) in &ctx.scene.source_presence {
+        let Some((walk, rest)) = gateway_mascot_anims(source) else {
+            continue;
+        };
+        // Per-source deterministic seed so two gateways don't wander in lockstep.
+        let seed = source
+            .bytes()
+            .fold(0u64, |h, b| h.wrapping_mul(131).wrapping_add(b as u64));
+        let Some((pos, anim_name, frame_idx)) =
+            mascot_position(ctx.layout, presence, walk, rest, ctx.now, seed)
+        else {
+            continue;
+        };
+        let h = ctx
+            .pack
+            .animation(anim_name)
+            .and_then(|a| a.frames.first())
+            .map_or(12, |f| f.height);
+        let run_count = presence.in_flight_run_keys.len() as u32;
+        drawables.push(Drawable {
+            anchor_y: z_sort_row(Anchor::Center, pos, h),
+            kind: DrawableKind::GatewayMascot {
+                pos,
+                anim_name,
+                frame_idx,
+                run_count,
+            },
+        });
+        // First present gateway wins the hover frame (single-gateway today).
+        hover.get_or_insert(MascotFrame {
+            pos,
+            name: gateway_display_name(source),
+            busy: presence.state == pixtuoid_core::state::DaemonState::Busy,
+            active_sessions: presence.active_sessions,
+        });
+    }
+    hover
 }
 
 /// Meeting-room rugs + sofas + tables. For dual-meeting layouts sofas come in

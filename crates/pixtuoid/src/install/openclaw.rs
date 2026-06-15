@@ -1,17 +1,17 @@
 //! OpenClaw install target — the TWO-OWNERSHIP hybrid.
 //!
 //! OpenClaw is one always-on gateway DAEMON; pixtuoid renders it as a single
-//! daemon-presence "HQ tank" fixture (see the design spec). Its plugin observes
-//! the gateway lifecycle and pipes a STRICT allowlist of timing/id fields (never
-//! message content) to the `pixtuoid-hook` shim (`--source openclaw`).
+//! presence-gated wandering mascot ("Molty"). Its plugin observes the gateway
+//! lifecycle and pipes a STRICT allowlist of timing/id fields (never message
+//! content) to the `pixtuoid-hook` shim (`--source openclaw`).
 //!
 //! Unlike opencode (a single auto-discovered plugin file), OpenClaw needs BOTH:
 //!   1. the plugin DIR — `<openclaw-home>/plugins/pixtuoid/{openclaw.plugin.json,
 //!      package.json, index.js}` — wholly owned by pixtuoid (the `extra_artifacts`
 //!      Target hook writes these verbatim, the shim path baked into `index.js`).
-//!   2. a config merge into `<openclaw-home>/openclaw.json`:
-//!        plugins.load.paths        += [<plugin-dir>]
-//!        plugins.entries.pixtuoid   = { enabled: true, hooks: { allowConversationAccess: true } }
+//!   2. a config merge into `<openclaw-home>/openclaw.json` adding
+//!      `plugins.load.paths += [<plugin-dir>]` and `plugins.entries.pixtuoid =
+//!      { enabled: true, hooks: { allowConversationAccess: true } }`.
 //!
 //! Capture-confirmed (2026-06-15): `openclaw plugins install --link <dir>` +
 //! `enable` writes EXACTLY those config keys to openclaw.json (no separate
@@ -39,6 +39,21 @@ const SENTINEL: &str = "@pixtuoid-openclaw-plugin";
 /// Placeholder for the baked shim path in the bundled entry module.
 const HOOK_PLACEHOLDER: &str = "{{HOOK_PATH_JSON}}";
 const PLUGIN_TEMPLATE: &str = include_str!("openclaw_plugin.js");
+
+/// The OpenClaw gateway hook events pixtuoid depends on — the SINGLE source of
+/// truth, pinned to BOTH the plugin's `HOOKS` array (what we register) AND the
+/// `decode_openclaw_hook_payload` arms (what we decode) by the consistency test
+/// below, and the list `check_upstream_drift.py` reads for the CI upstream watch.
+/// A rename upstream makes that hook silently stop firing (the plugin registers
+/// by name), so this is the drift surface to watch (defense #4).
+pub const OPENCLAW_EVENTS: &[&str] = &[
+    "gateway_start",
+    "gateway_stop",
+    "session_start",
+    "session_end",
+    "before_agent_run",
+    "agent_end",
+];
 
 const MANIFEST: &str = r#"{
   "id": "pixtuoid",
@@ -202,15 +217,70 @@ pub fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
 mod tests {
     use super::*;
 
+    /// Internal drift defense (#3): the events we REGISTER (the plugin's HOOKS
+    /// array) must equal the events we DECODE (`decode_openclaw_hook_payload`
+    /// arms) must equal `OPENCLAW_EVENTS`. A registered-but-undecoded (or vice
+    /// versa) event — the class that bit Codex's SubagentStop — fails here at
+    /// `cargo test`, no network needed.
+    #[test]
+    fn openclaw_events_plugin_decoder_and_const_agree() {
+        use pixtuoid_core::source::openclaw::decode_openclaw_hook_payload;
+        // 1) Every const event has a plugin HOOKS registration.
+        for ev in OPENCLAW_EVENTS {
+            assert!(
+                PLUGIN_TEMPLATE.contains(&format!("\"{ev}\"")),
+                "plugin HOOKS is missing the registered event `{ev}`"
+            );
+        }
+        // 2) The plugin registers EXACTLY the const set (no extra/stale name).
+        let hooks_block = PLUGIN_TEMPLATE
+            .split_once("const HOOKS = [")
+            .and_then(|(_, rest)| rest.split_once("];"))
+            .map(|(inner, _)| inner)
+            .expect("plugin defines a HOOKS array");
+        let registered: std::collections::HashSet<&str> = hooks_block
+            .split(',')
+            .map(|s| s.trim().trim_matches('"'))
+            .filter(|s| !s.is_empty())
+            .collect();
+        let expected: std::collections::HashSet<&str> = OPENCLAW_EVENTS.iter().copied().collect();
+        assert_eq!(
+            registered, expected,
+            "plugin HOOKS drifted from OPENCLAW_EVENTS"
+        );
+        // 3) Every const event has a decoder arm (non-empty presence update).
+        for ev in OPENCLAW_EVENTS {
+            let payload = json!({ "type": ev });
+            let updates = decode_openclaw_hook_payload(&payload).unwrap();
+            assert!(
+                !updates.is_empty(),
+                "decode_openclaw_hook_payload has no arm for registered event `{ev}`"
+            );
+        }
+    }
+
     #[test]
     fn install_renders_plugin_with_baked_shim_path_and_sentinel() {
         let arts = plugin_artifacts(Path::new("/opt/bin/pixtuoid-hook")).unwrap();
         assert_eq!(arts.len(), 3, "manifest + package.json + index.js");
-        let index = &arts.iter().find(|(p, _)| p.ends_with("index.js")).unwrap().1;
-        assert!(index.contains(SENTINEL), "entry module carries the sentinel");
-        assert!(index.contains("\"/opt/bin/pixtuoid-hook\""), "shim path baked JSON-escaped");
+        let index = &arts
+            .iter()
+            .find(|(p, _)| p.ends_with("index.js"))
+            .unwrap()
+            .1;
+        assert!(
+            index.contains(SENTINEL),
+            "entry module carries the sentinel"
+        );
+        assert!(
+            index.contains("\"/opt/bin/pixtuoid-hook\""),
+            "shim path baked JSON-escaped"
+        );
         assert!(!index.contains(HOOK_PLACEHOLDER), "placeholder replaced");
-        assert!(index.contains("--source"), "spawns the shim with --source openclaw");
+        assert!(
+            index.contains("--source"),
+            "spawns the shim with --source openclaw"
+        );
     }
 
     #[test]
@@ -220,10 +290,16 @@ mod tests {
         let v: Value = serde_json::from_str(&out.content).unwrap();
         let entry = &v["plugins"]["entries"]["pixtuoid"];
         assert_eq!(entry["enabled"], json!(true));
-        assert_eq!(entry["hooks"]["allowConversationAccess"], json!(true), "the busy-tell grant");
+        assert_eq!(
+            entry["hooks"]["allowConversationAccess"],
+            json!(true),
+            "the busy-tell grant"
+        );
         let paths = v["plugins"]["load"]["paths"].as_array().unwrap();
         assert!(
-            paths.iter().any(|p| p.as_str().unwrap().ends_with("plugins/pixtuoid")),
+            paths
+                .iter()
+                .any(|p| p.as_str().unwrap().ends_with("plugins/pixtuoid")),
             "load.paths points at the plugin dir"
         );
     }
@@ -243,7 +319,12 @@ mod tests {
         assert_eq!(v["gateway"]["mode"], json!("local"), "foreign keys survive");
         assert_eq!(v["plugins"]["entries"]["anthropic"]["enabled"], json!(true));
         let paths = v["plugins"]["load"]["paths"].as_array().unwrap();
-        assert!(paths.iter().any(|p| p.as_str() == Some("/some/other/plugin")), "foreign path kept");
+        assert!(
+            paths
+                .iter()
+                .any(|p| p.as_str() == Some("/some/other/plugin")),
+            "foreign path kept"
+        );
         assert_eq!(paths.len(), 2, "ours appended, foreign kept");
     }
 
@@ -268,7 +349,9 @@ mod tests {
         );
         let paths = v["plugins"]["load"]["paths"].as_array().unwrap();
         assert!(
-            !paths.iter().any(|p| p.as_str().unwrap().ends_with("plugins/pixtuoid")),
+            !paths
+                .iter()
+                .any(|p| p.as_str().unwrap().ends_with("plugins/pixtuoid")),
             "our load.path removed"
         );
     }
@@ -277,7 +360,11 @@ mod tests {
     fn uninstall_of_unmanaged_config_is_a_no_op() {
         assert!(!merge_uninstall("{}").unwrap().changed);
         assert!(!merge_uninstall("").unwrap().changed);
-        assert!(!merge_uninstall(r#"{"gateway":{"mode":"local"}}"#).unwrap().changed);
+        assert!(
+            !merge_uninstall(r#"{"gateway":{"mode":"local"}}"#)
+                .unwrap()
+                .changed
+        );
     }
 
     #[test]

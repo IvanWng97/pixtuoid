@@ -297,6 +297,11 @@ pub fn project_floor_scene(scene: &SceneState, floor_idx: usize) -> SceneState {
     for a in build_floor_scene(scene, floor_idx) {
         s.agents.insert(a.agent_id, a);
     }
+    // Daemon presences (the OpenClaw gateway mascot) are global, not per-desk —
+    // carry them onto the GROUND floor only so the mascot renders exactly once.
+    if floor_idx == 0 {
+        s.source_presence = scene.source_presence.clone();
+    }
     s
 }
 

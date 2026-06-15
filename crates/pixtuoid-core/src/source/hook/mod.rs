@@ -214,7 +214,8 @@ pub(crate) async fn handle_conn(
                 // SIDE channel instead (invariant #2). Peek before `v` is consumed.
                 // Inert for every other source (gated on the source tag).
                 if let Some(ptx) = presence_tx.as_ref() {
-                    if v.get("_pixtuoid_source").and_then(serde_json::Value::as_str)
+                    if v.get("_pixtuoid_source")
+                        .and_then(serde_json::Value::as_str)
                         == Some(crate::source::openclaw::SOURCE_NAME)
                     {
                         match crate::source::openclaw::decode_openclaw_hook_payload(&v) {

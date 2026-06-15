@@ -1,0 +1,14 @@
+# 14x12 top-down lobster "Molty" the OpenClaw gateway mascot (walk frame 0).
+@frame 0
+. . . . . a . . a . . . . .
+. A A . . a . . a . . A A .
+A A . A . . a a . . A . A A
+A A A A . N o o N . A A A A
+. . N A o e o o e o A N . .
+. . . . . o Q Q o . . . . .
+. . . N N o Q Q o N N . . .
+. . . . . o o o o . . . . .
+. . . N . N o o N . N . . .
+. . . . . . o o . . . . . .
+. . . . . o N N o . . . . .
+. . . . o N o o N o . . . .

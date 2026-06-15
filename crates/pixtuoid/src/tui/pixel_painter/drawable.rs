@@ -20,7 +20,7 @@ use std::time::SystemTime;
 use pixtuoid_core::sprite::blit::blit_frame;
 use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
-use pixtuoid_core::state::FloorLocalDeskIndex;
+use pixtuoid_core::state::{DaemonPresence, DaemonState, FloorLocalDeskIndex};
 use pixtuoid_core::AgentSlot;
 
 use super::effects::{
@@ -150,6 +150,17 @@ pub(super) enum DrawableKind<'a> {
         anim_name: &'static str,
         frame_idx: usize,
         pet_elapsed_ms: Option<u64>,
+    },
+    /// The OpenClaw (or any gateway) "Molty" mascot — a presence-gated wandering
+    /// creature, NOT an agent (lives in `source_presence`, not `scene.agents`).
+    /// y-sorted at its south row like a pet. `run_count > 0` (an in-flight agent
+    /// run) adds a rising activity-bubble cue — the busy tell keys on RUNS, not
+    /// the (persistent, single-user) session count, which sticks at 1 at rest.
+    GatewayMascot {
+        pos: Point,
+        anim_name: &'static str,
+        frame_idx: usize,
+        run_count: u32,
     },
     /// Horizontal (E-W) frosted-glass room divider, y-sorted at its south
     /// (front) edge so it composites over a character standing behind it.
@@ -355,6 +366,256 @@ fn sample_polyline(pts: &[Point], t: f32, fallback: Point) -> Point {
         cumul += slen;
     }
     last_pt
+}
+
+// ── Gateway mascot ("Molty") ──────────────────────────────────────────────
+// A presence-gated wandering creature (NOT an agent). Motion *encodes* the
+// gateway state: it enters from the elevator on first sight, ambles + rests
+// when Idle, shuttles toward the backend desks when Busy (the "routing" read),
+// and walks back out to the elevator when the gateway goes Down. Stateless like
+// the pet — position is a pure function of `now`, the presence timestamps, and a
+// seed — so there is no per-frame state and the A*-on-static-mask legs never
+// flash. The per-source sprite is resolved by `gateway_mascot_anims`.
+
+const MASCOT_ENTER_MS: u64 = 2200;
+const MASCOT_LEAVE_MS: u64 = 2200;
+const MASCOT_IDLE_CYCLE_MS: u64 = 9000;
+const MASCOT_BUSY_CYCLE_MS: u64 = 4500;
+const MASCOT_WALK_FRAC: f32 = 0.45;
+
+/// Per-source mascot sprite (walk, rest). The ONE place a new gateway registers
+/// its creature; `None` for non-gateway / un-mascotted sources.
+pub(super) fn gateway_mascot_anims(source: &str) -> Option<(&'static str, &'static str)> {
+    match source {
+        s if s == pixtuoid_core::source::openclaw::SOURCE_NAME => {
+            Some(("molty_walk", "molty_rest"))
+        }
+        _ => None,
+    }
+}
+
+/// Human-readable gateway name for the hover tooltip.
+pub(super) fn gateway_display_name(source: &str) -> &'static str {
+    match source {
+        s if s == pixtuoid_core::source::openclaw::SOURCE_NAME => "OpenClaw",
+        _ => "Gateway",
+    }
+}
+
+fn hash_pick(spots: &[Point], n: u64) -> Point {
+    let h = n.wrapping_mul(0x9e37_79b9_7f4a_7c15) as usize;
+    spots[h % spots.len()]
+}
+
+/// A* on the STATIC mask with a throwaway EMPTY overlay (identical inputs every
+/// frame of a leg ⇒ identical polyline ⇒ no flash), endpoints pre-snapped to
+/// walkable floor, sampled at arc-length `t`. The pet's no-flash discipline.
+fn mascot_walk_between(layout: &Layout, from: Point, to: Point, t: f32) -> Point {
+    let src = snap_point_to_walkable(&layout.walkable, from).unwrap_or(from);
+    let dst = snap_point_to_walkable(&layout.walkable, to).unwrap_or(to);
+    let empty = OccupancyOverlay::new();
+    if let Some(mut pts) = find_path(&layout.walkable, &empty, layout.corridor, from, to) {
+        if let Some(first) = pts.first_mut() {
+            *first = src;
+        }
+        if let Some(last) = pts.last_mut() {
+            *last = dst;
+        }
+        sample_polyline(&pts, t, dst)
+    } else {
+        Point {
+            x: (src.x as f32 + (dst.x as f32 - src.x as f32) * t) as u16,
+            y: (src.y as f32 + (dst.y as f32 - src.y as f32) * t) as u16,
+        }
+    }
+}
+
+/// The walkable cell the mascot enters from / leaves to (the elevator
+/// threshold), snapped to floor; falls back to the corridor centre.
+fn mascot_elevator(layout: &Layout) -> Option<Point> {
+    let raw = layout.door_threshold.or(layout.door).or_else(|| {
+        layout.corridor.map(|c| Point {
+            x: c.x + c.width / 2,
+            y: c.y,
+        })
+    })?;
+    snap_point_to_walkable(&layout.walkable, raw)
+}
+
+/// The wander "home" beat — the corridor centre, snapped. Also the leg-0 origin
+/// so the enter hand-off is pop-free (enter ends here, wander cycle 0 starts here).
+fn mascot_home(layout: &Layout) -> Option<Point> {
+    let c = layout.corridor?;
+    snap_point_to_walkable(
+        &layout.walkable,
+        Point {
+            x: c.x + c.width / 2,
+            y: c.y + c.height / 2,
+        },
+    )
+}
+
+/// Wander destinations, state-dependent. Idle roams the social spots (corridor,
+/// pantry, sofas, couch); Busy shuttles to the backend desks (the coders it
+/// routes to). Snapped lazily inside `mascot_walk_between`.
+fn mascot_spots(layout: &Layout, state: DaemonState, home: Point) -> Vec<Point> {
+    let mut spots = vec![home];
+    if state == DaemonState::Busy {
+        for desk in &layout.home_desks {
+            spots.push(Point {
+                x: desk.x + DESK_W + 1,
+                y: desk.y + DESK_H + 2,
+            });
+        }
+    } else {
+        if let Some(wp) = layout
+            .waypoints
+            .iter()
+            .find(|w| matches!(w.kind, crate::tui::layout::WaypointKind::Pantry))
+        {
+            spots.push(Point {
+                x: wp.pos.x + 4,
+                y: wp.pos.y + 6,
+            });
+        }
+        for sofa in &layout.meeting_sofas {
+            spots.push(Point {
+                x: sofa.x + 4,
+                y: sofa.y + 4,
+            });
+        }
+        if let Some(wp) = layout
+            .waypoints
+            .iter()
+            .find(|w| matches!(w.kind, crate::tui::layout::WaypointKind::Couch))
+        {
+            spots.push(Point {
+                x: wp.pos.x + 4,
+                y: wp.pos.y + 6,
+            });
+        }
+    }
+    spots
+}
+
+/// Steady wander position at wander-clock `we_ms`. Returns `(pos, walking)`:
+/// walking during the first `MASCOT_WALK_FRAC` of each cycle, resting after.
+/// Cycle 0's origin is forced to `home` so it joins the enter walk pop-free.
+fn mascot_wander(
+    layout: &Layout,
+    we_ms: u64,
+    seed: u64,
+    spots: &[Point],
+    home: Point,
+    cycle_ms: u64,
+) -> (Point, bool) {
+    if spots.is_empty() {
+        return (home, false);
+    }
+    let cycle = we_ms / cycle_ms;
+    let frac = (we_ms % cycle_ms) as f32 / cycle_ms as f32;
+    let dest = hash_pick(spots, seed.wrapping_add(cycle).wrapping_add(1));
+    let prev = if cycle == 0 {
+        home
+    } else {
+        hash_pick(spots, seed.wrapping_add(cycle))
+    };
+    if frac < MASCOT_WALK_FRAC {
+        let t = (frac / MASCOT_WALK_FRAC).clamp(0.0, 1.0);
+        (mascot_walk_between(layout, prev, dest, t), true)
+    } else {
+        (
+            snap_point_to_walkable(&layout.walkable, dest).unwrap_or(dest),
+            false,
+        )
+    }
+}
+
+/// Resolve the mascot's frame this tick: `(pos, anim_name, frame_idx)`, or
+/// `None` when it should not be drawn (gateway gone after the walk-out).
+pub(super) fn mascot_position(
+    layout: &Layout,
+    presence: &DaemonPresence,
+    walk_anim: &'static str,
+    rest_anim: &'static str,
+    now: SystemTime,
+    seed: u64,
+) -> Option<(Point, &'static str, usize)> {
+    let elevator = mascot_elevator(layout)?;
+    let home = mascot_home(layout)?;
+    let frame = ((epoch_ms(now) / 200) % 2) as usize;
+
+    if presence.state == DaemonState::Down {
+        // Walk-out: from where Molty was at the instant of Down, to the elevator.
+        let down_age = now.duration_since(presence.last_seen).ok()?.as_millis() as u64;
+        if down_age >= MASCOT_LEAVE_MS {
+            return None; // gone
+        }
+        let spots = mascot_spots(layout, DaemonState::Idle, home);
+        let down_we = presence
+            .last_seen
+            .duration_since(presence.entered_at)
+            .ok()
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0)
+            .saturating_sub(MASCOT_ENTER_MS);
+        let (from, _) = mascot_wander(layout, down_we, seed, &spots, home, MASCOT_IDLE_CYCLE_MS);
+        let t = down_age as f32 / MASCOT_LEAVE_MS as f32;
+        return Some((
+            mascot_walk_between(layout, from, elevator, t),
+            walk_anim,
+            frame,
+        ));
+    }
+
+    let age = now.duration_since(presence.entered_at).ok()?.as_millis() as u64;
+    if age < MASCOT_ENTER_MS {
+        // Walk-in from the elevator to the home beat.
+        let t = age as f32 / MASCOT_ENTER_MS as f32;
+        return Some((
+            mascot_walk_between(layout, elevator, home, t),
+            walk_anim,
+            frame,
+        ));
+    }
+
+    // Steady wander, styled by state.
+    let cycle_ms = if presence.state == DaemonState::Busy {
+        MASCOT_BUSY_CYCLE_MS
+    } else {
+        MASCOT_IDLE_CYCLE_MS
+    };
+    let spots = mascot_spots(layout, presence.state, home);
+    let (pos, walking) = mascot_wander(layout, age - MASCOT_ENTER_MS, seed, &spots, home, cycle_ms);
+    if walking {
+        Some((pos, walk_anim, frame))
+    } else {
+        Some((pos, rest_anim, 0))
+    }
+}
+
+/// Busy "working" cue — a few bubbles rising above Molty's head while a run is
+/// in flight. Count is a small baseline + concurrent-run count (capped): a
+/// single serialized run reads as a calm stream, a power-user fan-out bubbles
+/// harder. Stateless: phase derives from `now`.
+fn paint_mascot_bubbles(buf: &mut RgbBuffer, pos: Point, frame_h: u16, runs: u32, now: SystemTime) {
+    let now_ms = epoch_ms(now);
+    let bubble = Rgb {
+        r: 0xd6,
+        g: 0xf2,
+        b: 0xf8,
+    };
+    let top = pos.y.saturating_sub(frame_h / 2 + 1);
+    let n = (runs + 1).min(4) as u16;
+    for i in 0..n {
+        // Each bubble rises on its own phase over a ~6px column above the head.
+        let phase = ((now_ms / 110) + i as u64 * 7) % 6;
+        let by = top.saturating_sub(phase as u16);
+        let bx = (pos.x + i * 2).saturating_sub(n);
+        if bx < buf.width && by < buf.height {
+            buf.put(bx, by, bubble);
+        }
+    }
 }
 
 /// Dispatch one Drawable's paint. Effects attached to characters paint
@@ -657,6 +918,28 @@ pub(super) fn paint_drawable(
                 paint_pet_hearts(buf, *pos, *elapsed);
             } else if *anim_name == kind.sleep_anim() {
                 paint_sleep_z(buf, *pos, now, 0xCAFE, theme);
+            }
+        }
+        DrawableKind::GatewayMascot {
+            pos,
+            anim_name,
+            frame_idx,
+            run_count,
+        } => {
+            let Some(anim) = pack.animation(anim_name) else {
+                return;
+            };
+            let Some(frame) = anim.frames.get(*frame_idx).or(anim.frames.first()) else {
+                return;
+            };
+            let px = pos.x.saturating_sub(frame.width / 2);
+            let py = pos.y.saturating_sub(frame.height / 2);
+            blit_frame(frame, px, py, buf);
+            // Busy (an in-flight agent run) → a rising activity-bubble stream
+            // above Molty's head. `run_count > 0` IS the busy gate (busy ⟺
+            // in-flight runs); a persistent idle session must NOT bubble.
+            if *run_count > 0 {
+                paint_mascot_bubbles(buf, *pos, frame.height, *run_count, now);
             }
         }
         DrawableKind::RoomWallH { x0, x1, y_top } => {

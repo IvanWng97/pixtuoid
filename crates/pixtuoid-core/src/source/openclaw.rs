@@ -4,8 +4,9 @@
 //! coding sessions (the bundled `claude-cli` backend) are already visualized by
 //! the `cc·` source at full fidelity (a real `claude` writing `~/.claude/...`).
 //!
-//! So OpenClaw earns a SINGLE daemon-presence fixture (the HQ "tank" lobster)
-//! showing the one thing `cc·` can't: is the gateway alive and handling traffic.
+//! So OpenClaw earns a SINGLE presence-gated mascot (the wandering "Molty"
+//! lobster) showing the one thing `cc·` can't: is the gateway alive and handling
+//! traffic (its motion encodes state — idle ambles, busy shuttles, down leaves).
 //! Its plugin (`install/openclaw_plugin.ts`) forwards a strict ALLOWLIST envelope
 //! — never message content (the busy tell needs only the run pairing key) —
 //! stamped `_pixtuoid_source: "openclaw"` by the shim:
@@ -48,7 +49,7 @@ pub const BUSY_DECAY_MS: u64 = 30_000;
 /// Covers SIGTERM, where neither `session_end` nor `gateway_stop` fires (§2.4).
 pub const PRESENCE_TTL_MS: u64 = 5 * 60 * 1_000;
 
-/// One presence delta for the daemon fixture. The decoder emits the hook-derived
+/// One presence delta for the gateway mascot. The decoder emits the hook-derived
 /// variants; `PidExited` is emitted by the `ExitWatch` drain task (the reducer
 /// wiring), never by this decoder. All consumed by `apply_presence`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -108,8 +109,18 @@ pub fn decode_openclaw_hook_payload(v: &Value) -> Result<Vec<DaemonPresenceUpdat
             run_key: run_key(obj),
         }],
         // Any other forwarded hook is a benign skip (the plugin forwards a
-        // filtered set; drift is caught by check_upstream_drift.py, not a bail).
-        _ => vec![],
+        // filtered set). Log a drift breadcrumb instead of bailing — a NEW
+        // upstream gateway event the plugin starts forwarding surfaces here in
+        // the user's own stream (defense #2), the always-on backstop the
+        // `OPENCLAW_EVENTS` ⇔ decoder-arm consistency test (#3) complements.
+        other => {
+            tracing::debug!(
+                target: "pixtuoid::drift",
+                event = other,
+                "unhandled openclaw gateway hook event (upstream may have added one)"
+            );
+            vec![]
+        }
     })
 }
 
@@ -138,9 +149,14 @@ pub fn apply_presence(scene: &mut SceneState, update: DaemonPresenceUpdate, now:
             state: DaemonState::Idle,
             active_sessions: 0,
             last_seen: now,
+            entered_at: now,
             in_flight_run_keys: Default::default(),
             current_pid: None,
         });
+    // A transition out of Down (or a fresh GatewayUp) re-anchors the enter
+    // animation — the mascot scuttles back in from the elevator. Idle↔Busy
+    // does NOT reset it, so the steady wander clock stays continuous.
+    let was_down = p.state == DaemonState::Down;
     p.last_seen = now;
     match update {
         // UP-winning + idempotent. A (re)start resets the multiplexed-session
@@ -191,6 +207,11 @@ pub fn apply_presence(scene: &mut SceneState, update: DaemonPresenceUpdate, now:
             }
         }
     }
+    // Re-anchor the enter animation on a Down → up resurrection (the entry was
+    // not yet TTL-swept). A fresh insert already stamped `entered_at = now`.
+    if was_down && p.state != DaemonState::Down {
+        p.entered_at = now;
+    }
 }
 
 /// Decay stale presence on the reducer's sweep tick (a daemon has no per-session
@@ -222,7 +243,7 @@ pub fn sweep_presence_ttl(scene: &mut SceneState, now: SystemTime) {
 /// A handle to arm gateway-pid exit watches. A dying gateway pid converts to a
 /// `PidExited` presence delta — the instant abrupt-down rung (§4.2), reusing the
 /// AGNOSTIC `ExitWatch` (pid → channel, no `AgentId` coupling), NOT `HookPidWatch`
-/// (which emits an AgentSlot-shaped `SessionEnd` a non-slot fixture can't consume).
+/// (which emits an AgentSlot-shaped `SessionEnd` the non-slot mascot can't consume).
 pub struct PresenceExitWatch(crate::source::exit_watch::ExitWatch);
 
 impl PresenceExitWatch {
@@ -293,7 +314,9 @@ mod tests {
             vec![DaemonPresenceUpdate::SessionStarted]
         );
         assert_eq!(
-            decode(json!({"type": "session_end", "sessionId": "s1", "reason": "idle", "messageCount": 4})),
+            decode(
+                json!({"type": "session_end", "sessionId": "s1", "reason": "idle", "messageCount": 4})
+            ),
             vec![DaemonPresenceUpdate::SessionEnded]
         );
     }
@@ -302,11 +325,15 @@ mod tests {
     fn before_agent_run_and_agent_end_pair_on_runid() {
         assert_eq!(
             decode(json!({"type": "before_agent_run", "runId": "run_1", "sessionId": "s1"})),
-            vec![DaemonPresenceUpdate::RunStarted { run_key: "run_1".into() }]
+            vec![DaemonPresenceUpdate::RunStarted {
+                run_key: "run_1".into()
+            }]
         );
         assert_eq!(
             decode(json!({"type": "agent_end", "runId": "run_1", "sessionId": "s1"})),
-            vec![DaemonPresenceUpdate::RunEnded { run_key: "run_1".into() }]
+            vec![DaemonPresenceUpdate::RunEnded {
+                run_key: "run_1".into()
+            }]
         );
     }
 
@@ -314,7 +341,9 @@ mod tests {
     fn run_without_runid_falls_back_to_session_key() {
         assert_eq!(
             decode(json!({"type": "before_agent_run", "sessionId": "s9"})),
-            vec![DaemonPresenceUpdate::RunStarted { run_key: "s9".into() }]
+            vec![DaemonPresenceUpdate::RunStarted {
+                run_key: "s9".into()
+            }]
         );
     }
 
@@ -331,8 +360,16 @@ mod tests {
             "prompt": "SECRET_PROMPT"
         }));
         let dbg = format!("{updates:?}");
-        assert!(!dbg.contains("SECRET"), "no message/path content may leak: {dbg}");
-        assert_eq!(updates, vec![DaemonPresenceUpdate::RunEnded { run_key: "run_1".into() }]);
+        assert!(
+            !dbg.contains("SECRET"),
+            "no message/path content may leak: {dbg}"
+        );
+        assert_eq!(
+            updates,
+            vec![DaemonPresenceUpdate::RunEnded {
+                run_key: "run_1".into()
+            }]
+        );
     }
 
     #[test]
@@ -373,7 +410,11 @@ mod tests {
         s.source_presence[SOURCE_NAME].active_sessions
     }
     fn up(s: &mut SceneState, pid: i32, at: u64) {
-        apply_presence(s, DaemonPresenceUpdate::GatewayUp { pid: Some(pid) }, ms(at));
+        apply_presence(
+            s,
+            DaemonPresenceUpdate::GatewayUp { pid: Some(pid) },
+            ms(at),
+        );
     }
 
     #[test]
@@ -389,7 +430,13 @@ mod tests {
         let mut s = SceneState::default();
         apply_presence(&mut s, DaemonPresenceUpdate::SessionStarted, ms(0));
         apply_presence(&mut s, DaemonPresenceUpdate::SessionStarted, ms(1));
-        apply_presence(&mut s, DaemonPresenceUpdate::RunStarted { run_key: "r".into() }, ms(2));
+        apply_presence(
+            &mut s,
+            DaemonPresenceUpdate::RunStarted {
+                run_key: "r".into(),
+            },
+            ms(2),
+        );
         assert_eq!(st(&s), DaemonState::Busy);
         up(&mut s, 1, 3);
         assert_eq!(st(&s), DaemonState::Idle);
@@ -414,18 +461,46 @@ mod tests {
         for i in 0..3 {
             apply_presence(&mut s, DaemonPresenceUpdate::SessionEnded, ms(2 + i));
         }
-        assert_eq!(sessions(&s), 0, "saturating — a pre-attach miss never underflows");
+        assert_eq!(
+            sessions(&s),
+            0,
+            "saturating — a pre-attach miss never underflows"
+        );
     }
 
     #[test]
     fn busy_holds_until_the_last_run_ends() {
         let mut s = SceneState::default();
-        apply_presence(&mut s, DaemonPresenceUpdate::RunStarted { run_key: "a".into() }, ms(0));
-        apply_presence(&mut s, DaemonPresenceUpdate::RunStarted { run_key: "b".into() }, ms(1));
+        apply_presence(
+            &mut s,
+            DaemonPresenceUpdate::RunStarted {
+                run_key: "a".into(),
+            },
+            ms(0),
+        );
+        apply_presence(
+            &mut s,
+            DaemonPresenceUpdate::RunStarted {
+                run_key: "b".into(),
+            },
+            ms(1),
+        );
         assert_eq!(st(&s), DaemonState::Busy);
-        apply_presence(&mut s, DaemonPresenceUpdate::RunEnded { run_key: "a".into() }, ms(2));
+        apply_presence(
+            &mut s,
+            DaemonPresenceUpdate::RunEnded {
+                run_key: "a".into(),
+            },
+            ms(2),
+        );
         assert_eq!(st(&s), DaemonState::Busy, "b still in flight");
-        apply_presence(&mut s, DaemonPresenceUpdate::RunEnded { run_key: "b".into() }, ms(3));
+        apply_presence(
+            &mut s,
+            DaemonPresenceUpdate::RunEnded {
+                run_key: "b".into(),
+            },
+            ms(3),
+        );
         assert_eq!(st(&s), DaemonState::Idle);
     }
 
@@ -444,7 +519,11 @@ mod tests {
         up(&mut s, 1, 0);
         up(&mut s, 2, 1);
         apply_presence(&mut s, DaemonPresenceUpdate::PidExited { pid: 1 }, ms(2));
-        assert_eq!(st(&s), DaemonState::Idle, "P2 stays up; stale P1 exit ignored");
+        assert_eq!(
+            st(&s),
+            DaemonState::Idle,
+            "P2 stays up; stale P1 exit ignored"
+        );
         assert_eq!(s.source_presence[SOURCE_NAME].current_pid, Some(2));
     }
 
@@ -462,7 +541,11 @@ mod tests {
         let mut s = SceneState::default();
         up(&mut s, 1, 0);
         sweep_presence_ttl(&mut s, ms(PRESENCE_TTL_MS + 1));
-        assert_eq!(st(&s), DaemonState::Down, "silence past the TTL ⇒ down (covers SIGTERM)");
+        assert_eq!(
+            st(&s),
+            DaemonState::Down,
+            "silence past the TTL ⇒ down (covers SIGTERM)"
+        );
         assert_eq!(sessions(&s), 0);
     }
 
@@ -470,17 +553,33 @@ mod tests {
     fn sweep_self_heals_a_stranded_busy_after_the_grace_window() {
         // A dropped agent_end strands a run key in flight; the decay clears it.
         let mut s = SceneState::default();
-        apply_presence(&mut s, DaemonPresenceUpdate::RunStarted { run_key: "stranded".into() }, ms(0));
+        apply_presence(
+            &mut s,
+            DaemonPresenceUpdate::RunStarted {
+                run_key: "stranded".into(),
+            },
+            ms(0),
+        );
         assert_eq!(st(&s), DaemonState::Busy);
         sweep_presence_ttl(&mut s, ms(BUSY_DECAY_MS + 1));
-        assert_eq!(st(&s), DaemonState::Idle, "stranded busy self-heals to idle");
+        assert_eq!(
+            st(&s),
+            DaemonState::Idle,
+            "stranded busy self-heals to idle"
+        );
         assert!(s.source_presence[SOURCE_NAME].in_flight_run_keys.is_empty());
     }
 
     #[test]
     fn sweep_within_the_grace_window_keeps_busy() {
         let mut s = SceneState::default();
-        apply_presence(&mut s, DaemonPresenceUpdate::RunStarted { run_key: "r".into() }, ms(0));
+        apply_presence(
+            &mut s,
+            DaemonPresenceUpdate::RunStarted {
+                run_key: "r".into(),
+            },
+            ms(0),
+        );
         sweep_presence_ttl(&mut s, ms(BUSY_DECAY_MS - 1));
         assert_eq!(st(&s), DaemonState::Busy, "still within the decay grace");
     }

@@ -142,7 +142,7 @@ pub struct SourceDescriptor {
     pub line_decoder: Option<LineDecoder>,
     /// True for a PRESENCE-ONLY source: its `hook.custom` claims every event but
     /// produces ZERO `AgentEvent`s — presence rides a sibling channel into
-    /// `SceneState::source_presence` (the OpenClaw daemon "tank" fixture). The
+    /// `SceneState::source_presence` (the OpenClaw gateway mascot). The
     /// conformance harness treats the empty `AgentEvent` output as by-design, not
     /// a broken decoder. `false` for every agent-rendering source.
     pub presence_only: bool,
@@ -337,7 +337,7 @@ const OPENCODE: SourceDescriptor = SourceDescriptor {
 
 /// HOOK-ONLY and PRESENCE-ONLY: OpenClaw is one always-on gateway DAEMON, not a
 /// per-session coding agent. Its backend `claude-cli` sessions are already shown
-/// by `cc·`, so OpenClaw renders ONE daemon-presence fixture (the HQ tank) — its
+/// by `cc·`, so OpenClaw renders ONE presence-gated wandering mascot (Molty) — its
 /// `hook.custom` claims every event (alien `{type:…}` envelope) but emits ZERO
 /// `AgentEvent`s; presence rides a sibling channel into `SceneState::source_presence`.
 /// `caps` are INERT (it creates no `AgentSlot`s — these gate AgentSlot reaping).

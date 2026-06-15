@@ -124,6 +124,12 @@ struct SnapshotArgs {
     #[arg(long)]
     empty: bool,
 
+    /// Inject an OpenClaw gateway presence (the wandering Molty mascot) in the
+    /// given state (idle | busy | down) for the beautify visual loop. Off by
+    /// default so the gen-media baselines are unaffected.
+    #[arg(long)]
+    openclaw: Option<String>,
+
     /// Override local hour-of-day (0–23) used by time-of-day effects
     /// (sun spot, dust motes, lighting). Useful for capturing screenshots
     /// of daylight effects from a machine running at night.
@@ -352,6 +358,10 @@ fn main() -> Result<()> {
         skip_ms = (secs * 1000.0) as u64;
         eprintln!("WARMUP pre-roll = {skip_ms}ms (explicit --warmup-secs)");
     }
+    let mut scene = scene;
+    if let Some(state) = args.openclaw.as_deref() {
+        inject_openclaw_presence(&mut scene, state, now)?;
+    }
     let backend = TestBackend::new(cols, rows);
     let mut term = Terminal::new(backend)?;
     let mut buf = RgbBuffer::filled(0, 0, Rgb { r: 0, g: 0, b: 0 });
@@ -575,6 +585,7 @@ fn main() -> Result<()> {
         },
         active_pet: None,
         last_pet_pos: None,
+        last_mascot_pos: None,
         floor_pet: None,
         chitchat_state: &mut chitchat_state,
         chitchat_bubbles: Vec::new(),
@@ -823,6 +834,43 @@ fn sample_scene(now: SystemTime, max_desks: usize, n_agents: usize) -> SceneStat
     let mut s = SceneState::uniform(max_desks);
     fill_sample_agents(&mut s, now, 0..n_agents);
     s
+}
+
+/// Inject an OpenClaw gateway presence for the beautify visual loop — drives
+/// the wandering Molty mascot. `state` ∈ {idle, busy, down}; off the gen-media
+/// path so baselines hold.
+fn inject_openclaw_presence(s: &mut SceneState, state: &str, now: SystemTime) -> Result<()> {
+    use pixtuoid_core::state::{DaemonPresence, DaemonState};
+    // Busy carries in-flight RUN keys (two, for a lively demo stream) — the
+    // bubble tell keys on runs, not the persistent single session.
+    let (state, active_sessions, runs) = match state {
+        "idle" => (DaemonState::Idle, 1, Vec::new()),
+        "busy" => (
+            DaemonState::Busy,
+            1,
+            vec!["run-a".to_string(), "run-b".to_string()],
+        ),
+        "down" => (DaemonState::Down, 0, Vec::new()),
+        other => anyhow::bail!("unknown --openclaw {other:?}; valid: idle | busy | down"),
+    };
+    // `entered_at` ~20s in the past → past the enter animation, so a static
+    // snapshot captures the steady wander (not the walk-in). For `down`,
+    // `last_seen = now` so the frame catches the start of the walk-out.
+    let entered_at = now
+        .checked_sub(std::time::Duration::from_secs(20))
+        .unwrap_or(now);
+    s.source_presence.insert(
+        pixtuoid_core::source::openclaw::SOURCE_NAME.to_string(),
+        DaemonPresence {
+            state,
+            active_sessions,
+            last_seen: now,
+            entered_at,
+            in_flight_run_keys: runs.into_iter().collect(),
+            current_pid: Some(4242),
+        },
+    );
+    Ok(())
 }
 
 /// Insert the standard sample-scene archetypes at desk indices `desks`
@@ -1712,6 +1760,7 @@ fn save_as_gif(
             },
             active_pet: None,
             last_pet_pos: None,
+            last_mascot_pos: None,
             floor_pet: None,
             chitchat_state: &mut chitchat_state,
             chitchat_bubbles: Vec::new(),

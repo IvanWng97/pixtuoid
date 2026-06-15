@@ -145,7 +145,7 @@ pub struct ClaudeCodeSource {
     /// `CodexSource` (whose multi-turn children are the motivating case);
     /// `None` disables the side-channel (bare test construction).
     pub child_end_unclaims: Option<ChildEndUnclaims>,
-    /// The OpenClaw daemon-presence side channel (the HQ tank fixture). OpenClaw
+    /// The OpenClaw daemon-presence side channel (the gateway mascot). OpenClaw
     /// hooks ride this one shared socket; its payloads decode to presence deltas
     /// (no `AgentEvent`s), forwarded here for the reducer task. `None` disables it
     /// (bare test construction). Set by `runtime/driver.rs`, like `child_end_unclaims`.

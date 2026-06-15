@@ -357,6 +357,18 @@ pub fn hit_test_pet(
     mx >= tl_x && mx < tl_x.saturating_add(w) && cell_y >= tl_y && cell_y < tl_y.saturating_add(h)
 }
 
+/// True if `(mx, my)` (terminal cell coords) falls on the gateway mascot's
+/// 14×12 sprite, centered at `pos` (pixel coords). The lobster is symmetric and
+/// a single sprite size, so no per-anim hitbox is needed.
+pub fn hit_test_mascot(pos: crate::tui::layout::Point, mx: u16, my: u16) -> bool {
+    const W: u16 = 14;
+    const H: u16 = 12;
+    let tl_x = pos.x.saturating_sub(W / 2);
+    let tl_y = pos.y.saturating_sub(H / 2);
+    let cell_y = my * 2;
+    mx >= tl_x && mx < tl_x.saturating_add(W) && cell_y >= tl_y && cell_y < tl_y.saturating_add(H)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -470,6 +482,17 @@ mod tests {
         let pos = Point { x: 50, y: 80 };
         // Way outside the 6x6 sprite.
         assert!(!hit_test_pet(PetKind::Cat, pos, "cat_sit", 10, 10));
+    }
+
+    #[test]
+    fn mascot_hit_test_inside_and_outside() {
+        use crate::tui::layout::Point;
+        // 14x12 sprite centered at (50, 80) → top-left pixel (43, 74).
+        let pos = Point { x: 50, y: 80 };
+        // cell my=39 → pixel 78 ∈ [74..86); mx=50 ∈ [43..57).
+        assert!(hit_test_mascot(pos, 50, 39));
+        // Far away.
+        assert!(!hit_test_mascot(pos, 10, 10));
     }
 
     // --- hit_test_from_tui (click-to-pin, home-desk-only) -----------------

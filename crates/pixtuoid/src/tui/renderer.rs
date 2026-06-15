@@ -25,22 +25,22 @@ use crate::tui::layout::Layout;
 use crate::tui::motion::MotionState;
 use crate::tui::pathfind::Router;
 use crate::tui::pet::PetFrame;
-use crate::tui::pixel_painter::{render_to_rgb_buffer, PixelCtx};
+use crate::tui::pixel_painter::{render_to_rgb_buffer, MascotFrame, PixelCtx};
 use crate::tui::pose;
 
 // Re-exports so tui_renderer.rs and tui/mod.rs import from one place.
 use crate::tui::dashboard::DashboardRow;
 pub(crate) use crate::tui::hit_test::hit_test_agent;
 pub use crate::tui::hit_test::{
-    hit_test_coffee_machine, hit_test_from_tui, hit_test_furniture, hit_test_pet,
+    hit_test_coffee_machine, hit_test_from_tui, hit_test_furniture, hit_test_mascot, hit_test_pet,
 };
 pub(crate) use crate::tui::widgets::paint_hover_tooltip;
 pub use crate::tui::widgets::TickerQueue;
 pub(super) use crate::tui::widgets::{
     paint_chitchat_bubbles, paint_coffee_tooltip, paint_connection_panel, paint_dashboard,
     paint_elevator_indicator, paint_footer, paint_furniture_tooltip, paint_help_overlay,
-    paint_label_widgets, paint_pet_tooltip, paint_theme_picker, paint_version_popup,
-    paint_wall_display,
+    paint_label_widgets, paint_mascot_tooltip, paint_pet_tooltip, paint_theme_picker,
+    paint_version_popup, paint_wall_display,
 };
 
 pub use crate::tui::pet::PetState;
@@ -93,6 +93,9 @@ pub struct DrawCtx<'a> {
     pub floor: crate::tui::floor::FloorMeta,
     pub active_pet: Option<&'a PetState>,
     pub last_pet_pos: Option<PetFrame>,
+    /// The gateway mascot's frame this render (for hover identity). Set from the
+    /// pixel pass; `None` when no gateway is present.
+    pub last_mascot_pos: Option<MascotFrame>,
     /// The pet assigned to this floor — its kind AND resolved display name.
     /// `None` when no pets are configured or none maps to this floor seed.
     /// Replaces the former `floor_pet_kind` + `pet_names` pair: the name rides
@@ -254,6 +257,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         debug_walkable: ctx.debug_walkable,
     });
     ctx.last_pet_pos = pixel_result.pet_pos;
+    ctx.last_mascot_pos = pixel_result.mascot_pos;
     ctx.chitchat_bubbles = pixel_result.chitchat_bubbles;
     ctx.new_coffee_carriers = pixel_result.new_coffee_carriers;
 
@@ -349,6 +353,20 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
                         anim,
                         on_cooldown,
                         display_name,
+                        mx,
+                        my,
+                        actual_scene,
+                        theme,
+                    );
+                } else if let Some(m) = ctx
+                    .last_mascot_pos
+                    .filter(|m| hit_test_mascot(m.pos, mx, my))
+                {
+                    paint_mascot_tooltip(
+                        f,
+                        m.name,
+                        m.busy,
+                        m.active_sessions,
                         mx,
                         my,
                         actual_scene,
