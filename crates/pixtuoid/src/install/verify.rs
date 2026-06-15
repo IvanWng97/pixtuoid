@@ -75,6 +75,23 @@ impl SchemaVerifyResult {
     }
 }
 
+/// Control-char-strip a path for display in a HARD issue string that may reach a
+/// REAL terminal (`pixtuoid doctor`'s stdout, the boot `eprintln!`). The shim
+/// path is extracted from the user's HAND-EDITABLE hook command, so a crafted
+/// path could carry ANSI/OSC escapes. Sanitize at the SOURCE (here, where the
+/// untrusted value enters the issue Vec) so EVERY surface is covered at once —
+/// per-output-site sanitize already missed the `doctor` stdout path once (the
+/// online review). Mirrors `doctor`'s R0615-06 sanitize discipline. The
+/// Connection panel is already safe (ratatui renders control bytes as literals),
+/// but source-sanitizing it too is harmless + future-proof.
+pub fn display_safe(p: &std::path::Path) -> String {
+    p.display()
+        .to_string()
+        .chars()
+        .filter(|c| !c.is_control())
+        .collect()
+}
+
 /// Assemble a `SchemaParse` from a per-target scan: the registered events that
 /// LACK a managed entry, whether ANY managed entry was found at all, the shim
 /// ref extracted from a managed command, and any target-specific extra issues
@@ -213,6 +230,16 @@ mod tests {
     #[test]
     fn shell_shim_ref_empty_is_unknown() {
         assert_eq!(shell_shim_ref(""), ShimRef::Unknown);
+    }
+
+    #[test]
+    fn display_safe_strips_control_chars_from_a_hostile_path() {
+        // A shim path crafted (via a hand-edited hook command) with an ANSI/OSC
+        // escape must not reach a real terminal raw.
+        let hostile = std::path::Path::new("/x/\x1b]0;pwned\x07\x1b[31mhook");
+        let got = display_safe(hostile);
+        assert!(!got.chars().any(|c| c.is_control()), "{got:?}");
+        assert!(got.contains("hook") && got.contains("/x/"), "{got:?}");
     }
 
     #[test]

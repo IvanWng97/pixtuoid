@@ -64,7 +64,10 @@ pub fn verify_target(t: &'static Target, config: Option<PathBuf>) -> verify::Sch
         Ok(c) => c,
         Err(_) => {
             return verify::SchemaVerifyResult {
-                issues: vec![format!("config unreadable: {}", path.display())],
+                issues: vec![format!(
+                    "config unreadable: {}",
+                    verify::display_safe(&path)
+                )],
                 notes: vec![],
             }
         }
@@ -74,10 +77,15 @@ pub fn verify_target(t: &'static Target, config: Option<PathBuf>) -> verify::Sch
     let mut notes = Vec::new();
     match parse.shim {
         ShimRef::Absolute(p) => {
+            // `display_safe`: the path came from the user's hand-editable hook
+            // command, and these issues reach a real terminal (doctor stdout /
+            // boot eprintln) — strip control chars at the SOURCE so no surface
+            // can leak an ANSI/OSC escape (R0615-06 discipline; online review).
+            let shown = verify::display_safe(&p);
             if !p.exists() {
-                issues.push(format!("shim binary missing: {}", p.display()));
+                issues.push(format!("shim binary missing: {shown}"));
             } else if !is_executable(&p) {
-                issues.push(format!("shim binary not executable: {}", p.display()));
+                issues.push(format!("shim binary not executable: {shown}"));
             }
         }
         ShimRef::BareName => {
