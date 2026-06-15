@@ -1213,7 +1213,7 @@ fn enqueue_meeting_furniture<'a>(layout: &'a Layout, drawables: &mut Vec<Drawabl
     for room in &layout.meeting_furniture {
         drawables.push(Drawable {
             // z-key = sprite south row, derived from the table (== +2 for the
-            // 11×5 coffee-table sprite) so it can't drift from a visual edit.
+            // 11×5 meeting-table sprite) so it can't drift from a visual edit.
             anchor_y: z_sort_row(
                 Anchor::Center,
                 room.table,

@@ -1,4 +1,4 @@
-//! Standalone furniture paint helpers — coffee table, area rug,
+//! Standalone furniture paint helpers — meeting table, area rug,
 //! side table, pantry bistro table, pantry chair, and the procedural
 //! room-fill decor (notice board, doormat, water cooler, trash bin).
 //!
@@ -9,7 +9,7 @@ use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
 use crate::tui::layout::Bounds;
 
-/// Low coffee table in front of the lounge couch. Wood top with darker
+/// Low meeting-room table between the sofas. Wood top with darker
 /// trim along the front edge so it reads as a real piece of furniture,
 /// not just a brown rectangle.
 pub(super) fn paint_meeting_table(
@@ -35,7 +35,7 @@ pub(super) fn paint_meeting_table(
 }
 
 /// Meeting-room area rug — warm Persian-tone rectangle painted under
-/// the coffee table. Border ring in a darker shade so the rug reads as
+/// the meeting table. Border ring in a darker shade so the rug reads as
 /// having a fringe/binding rather than a flat blob. Centred on `cx,cy`.
 pub(super) fn paint_area_rug(
     buf: &mut RgbBuffer,
@@ -120,7 +120,7 @@ pub(super) fn paint_side_table(
 
 /// Pantry bistro table — round-ish wood top (rounded corners by skipping
 /// the 4 corner pixels) painted with the same warm wood palette as the
-/// coffee table so they read as the same furniture family.
+/// meeting table so they read as the same furniture family.
 pub(super) fn paint_pantry_table(
     buf: &mut RgbBuffer,
     cx: u16,

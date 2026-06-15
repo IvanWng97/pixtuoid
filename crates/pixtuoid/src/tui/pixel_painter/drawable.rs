@@ -783,7 +783,7 @@ pub(super) fn paint_drawable(
         }
         DrawableKind::MeetingTable { pos } => {
             // Sprite size from the table (== footprint for the meeting table) so
-            // the painted coffee table can't drift from the masked obstacle.
+            // the painted meeting table can't drift from the masked obstacle.
             let Size { w, h } =
                 crate::tui::layout::furniture_def(crate::tui::layout::Furniture::MeetingTable)
                     .visual;

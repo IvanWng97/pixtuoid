@@ -505,7 +505,7 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             visual: Size { w: 20, h: 7 }, // == the real meeting_sofa.sprite (20w × 7 data rows)
             ..DECOR
         },
-        // 11×5 = the real coffee-table sprite (paint_meeting_table). footprint ==
+        // 11×5 = the real meeting-table sprite (paint_meeting_table). footprint ==
         // visual so the mask blocks exactly what's drawn; the MeetingStand west
         // offset (compute.rs, t.x-9) still clears (padded west edge = cx-7).
         Furniture::MeetingTable => FurnitureDef {
