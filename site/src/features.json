@@ -38,7 +38,7 @@
   {
     "icon": "🦞",
     "name": "OpenClaw gateway mascot",
-    "desc": "A live OpenClaw daemon gateway appears as \"Molty\", a wandering lobster whose motion encodes gateway health — idle ambles, busy shuttles, model errors flush sickly-red, shutdown walks out",
+    "desc": "A live OpenClaw gateway shows up as \"Molty\", a wandering lobster whose motion tracks gateway health",
     "card": {
       "blurb": "Run an OpenClaw gateway and \"Molty\" scuttles in — a lobster whose wander encodes the daemon's health: idle ambles, busy shuttles, a failing model backend flushes it sickly-red, shutdown walks it out to the elevator.",
       "href": "#showcase-openclaw"
