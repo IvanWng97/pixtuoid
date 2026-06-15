@@ -123,7 +123,7 @@ pub struct DrawCtx<'a> {
     pub dashboard_rows: &'a [DashboardRow],
     pub dashboard_selected: Option<pixtuoid_core::AgentId>,
     pub dashboard_scroll: usize,
-    /// Connection panel overlay: open flag + the cached hook-facet rows (borrowed
+    /// Sources panel overlay: open flag + the cached hook-facet rows (borrowed
     /// from `TuiRenderer`) + the per-frame live facet aligned to them, plus
     /// selection / armed-confirm / last-action result / socket line. Modal,
     /// mutually exclusive with the other overlays by dispatch precedence.

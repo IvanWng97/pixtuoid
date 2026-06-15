@@ -13,7 +13,7 @@
 //! Strictly READ-ONLY: log file + config + install-state + best-effort
 //! `<cli> --version` subprocess probes (stdin nulled so they can't block; argv
 //! from the static registry, never user input). It never writes config
-//! (re-connecting hooks stays the Connection panel's job) and never spawns the
+//! (re-connecting hooks stays the Sources panel's job) and never spawns the
 //! TUI. The untrusted wire values (event/tool names) it samples are
 //! `sanitize`d before display (R0615-06) — `doctor` is the third consumer of
 //! those breadcrumbs and must hold the same line as the headless path + footer.
@@ -222,7 +222,7 @@ impl SourceDiagnostics {
     }
 
     /// The single worst issue as a one-line, glyph-prefixed summary for the
-    /// Connection panel detail + the boot warning. `None` = nothing to flag.
+    /// Sources panel detail + the boot warning. `None` = nothing to flag.
     /// Priority: install-broken (hooks can't fire) > decode-drift.
     pub fn summary(&self) -> Option<String> {
         if let Some(i) = &self.install {

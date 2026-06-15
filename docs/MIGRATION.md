@@ -6,8 +6,8 @@ the two that changed something user-visible.
 ## v0.7.x → v0.8.0
 
 **The `pixtuoid install-hooks` / `uninstall-hooks` subcommands were removed.**
-Binding a CLI is now done live in the in-TUI **Connection panel**: launch
-`pixtuoid`, press `c`, and connect (or disconnect) each agent CLI — its
+Binding a CLI is now done live in the in-TUI **Sources panel**: launch
+`pixtuoid`, press `s`, and connect (or disconnect) each agent CLI — its
 characters appear when you connect and walk out when you disconnect, no restart.
 `pixtuoid run` is the only subcommand left (plus `validate-pack` / `init-pack`).
 
@@ -40,7 +40,7 @@ This release also adds two new sources you can connect there: **CodeWhale**
    # or: cargo install pixtuoid pixtuoid-hook
    ```
 
-2. **Re-register hooks**: launch `pixtuoid`, press `c` to open the Connection
+2. **Re-register hooks**: launch `pixtuoid`, press `s` to open the Connection
    panel, and connect your agent CLI (this replaces any old `ascii-agents-hook`
    entries automatically). The old `pixtuoid install-hooks` subcommand is gone —
    binding a source is now done live inside the TUI.

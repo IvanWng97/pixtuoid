@@ -2240,7 +2240,7 @@ fn connection_panel_renders_both_facets_borderless() {
     ] {
         assert!(
             !popup.contains(g),
-            "connection panel must be borderless, found {g}:\n{popup}"
+            "Sources panel must be borderless, found {g}:\n{popup}"
         );
     }
 }

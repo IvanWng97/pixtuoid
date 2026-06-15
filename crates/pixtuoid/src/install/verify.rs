@@ -82,7 +82,7 @@ impl SchemaVerifyResult {
 /// untrusted value enters the issue Vec) so EVERY surface is covered at once —
 /// per-output-site sanitize already missed the `doctor` stdout path once (the
 /// online review). Mirrors `doctor`'s R0615-06 sanitize discipline. The
-/// Connection panel is already safe (ratatui renders control bytes as literals),
+/// Sources panel is already safe (ratatui renders control bytes as literals),
 /// but source-sanitizing it too is harmless + future-proof.
 pub fn display_safe(p: &std::path::Path) -> String {
     p.display()
@@ -113,7 +113,7 @@ pub fn assemble(
     } else if !missing_events.is_empty() {
         issues.push(format!(
             "missing hook entries for: {} (an older pixtuoid install, or an upstream config-schema \
-             change, orphaned them — reconnect via the Connection panel)",
+             change, orphaned them — reconnect via the Sources panel)",
             missing_events.join(", ")
         ));
     }

@@ -179,7 +179,7 @@ struct SnapshotArgs {
     #[arg(long, conflicts_with_all = ["anim", "gif", "live", "empty", "pets"])]
     dashboard: bool,
 
-    /// Render with the Connection panel open over a representative mixed fixture
+    /// Render with the Sources panel open over a representative mixed fixture
     /// (per-CLI hook state + live connection). Drives the connection demo image +
     /// borderless visual checks.
     #[arg(long, conflicts_with_all = ["anim", "gif", "live", "empty", "pets", "dashboard"])]

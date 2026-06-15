@@ -77,7 +77,7 @@ fn resolve_windows_command(
          runner can't safely invoke, and no DOS 8.3 short name is available (8.3 \
          generation is disabled on this volume). Install pixtuoid to a path of ordinary \
          characters (e.g. %USERPROFILE%\\.cargo\\bin or the npm global prefix) and \
-         reconnect the target in pixtuoid's Connection panel. (Tracking: #195.)"
+         reconnect the target in pixtuoid's Sources panel. (Tracking: #195.)"
     );
 }
 

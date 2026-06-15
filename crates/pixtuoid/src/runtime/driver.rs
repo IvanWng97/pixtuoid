@@ -55,7 +55,7 @@ async fn run_async(cfg: RunConfig) -> Result<()> {
         log_path,
     } = cfg;
     // The live, shared connected-source set: the reducer-task gate reads it, the
-    // Connection panel mutates it. Seeded from the resolved boot flags.
+    // Sources panel mutates it. Seeded from the resolved boot flags.
     let connected = ConnectedSources::new(connected);
     // The transcript-bearing sources (CC / Antigravity / Codex), built in ONE
     // place: `build_transcript_sources` is the single source of truth its test
@@ -65,7 +65,7 @@ async fn run_async(cfg: RunConfig) -> Result<()> {
     // ClaudeCodeSource binds, attributed per-payload by `_pixtuoid_source` — so
     // they are deliberately absent here.
     // Resolve the bound socket (Unix) / pipe (Windows) BEFORE `socket` is moved
-    // into build_transcript_sources — the Connection panel shows it. Same rule the CC
+    // into build_transcript_sources — the Sources panel shows it. Same rule the CC
     // source applies (explicit --socket override, else the default), so the panel
     // can't disagree with the actually-bound path.
     let socket_path = socket

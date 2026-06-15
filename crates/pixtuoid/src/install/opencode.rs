@@ -50,7 +50,7 @@ const PLUGIN_TEMPLATE: &str = include_str!("opencode_plugin.ts");
 
 /// Written on uninstall: a valid empty ES module (opencode loads it to zero
 /// hooks) WITHOUT the sentinel, so a re-uninstall is a clean no-op.
-const REMOVED_STUB: &str = "// pixtuoid opencode plugin removed by disconnecting opencode in pixtuoid's Connection panel (press c).\nexport {}\n";
+const REMOVED_STUB: &str = "// pixtuoid opencode plugin removed by disconnecting opencode in pixtuoid's Sources panel (press s).\nexport {}\n";
 
 /// opencode's config dir: `OPENCODE_CONFIG_DIR`, else `$XDG_CONFIG_HOME/opencode`,
 /// else `~/.config/opencode` — mirroring opencode `global.ts` so we write into
@@ -92,7 +92,7 @@ pub fn default_config_path() -> Result<PathBuf> {
 }
 
 /// Presence probe for auto-detect (`is_present`): is the opencode CLI present,
-/// so the Connection panel OFFERS it? Probe opencode's OWN dirs — the config
+/// so the Sources panel OFFERS it? Probe opencode's OWN dirs — the config
 /// dir we write into (created on first run) and the XDG data dir (the SQLite
 /// store) — NOT our plugin file: keying on our own artifact would chicken-and-egg
 /// (opencode could never be auto-detected until AFTER we'd installed into it).

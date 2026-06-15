@@ -1,4 +1,4 @@
-//! The Connection panel: a modal listing every agent CLI with its connection
+//! The Sources panel: a modal listing every agent CLI with its connection
 //! state (bound / unbound) and its live activity. This module is the PURE model
 //! — no ratatui. The painter lives in `tui::widgets::connection`; the event-loop
 //! wiring lives in `tui::mod`.

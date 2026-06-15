@@ -50,7 +50,7 @@ pub struct RunConfig {
     pub pets: Vec<crate::tui::pet::Pet>,
     /// The resolved set of CONNECTED source ids (registry names). Seeded at boot
     /// from `config::resolve_connected`; the runtime wraps it in a shared
-    /// [`ConnectedSources`] the reducer gate reads and the Connection panel
+    /// [`ConnectedSources`] the reducer gate reads and the Sources panel
     /// mutates. A disconnected source's events are dropped + its sprites evicted.
     pub connected: HashSet<String>,
     /// The warn-floor log path (`main` owns the resolution). `run_tui`
@@ -60,7 +60,7 @@ pub struct RunConfig {
 }
 
 /// A live, shared set of connected source ids — the runtime mirror of the
-/// persisted `[sources]` flags. One writer (the Connection panel toggle), many
+/// persisted `[sources]` flags. One writer (the Sources panel toggle), many
 /// readers (the reducer-task event gate + its per-tick reconcile sweep). On lock
 /// poison it recovers the set via `into_inner` (insert/remove/contains never
 /// panic, so the data is always valid — losing it would mass-evict the office).

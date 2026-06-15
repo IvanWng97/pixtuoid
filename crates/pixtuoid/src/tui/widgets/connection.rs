@@ -1,4 +1,4 @@
-//! The Connection panel painter (ratatui). Pure presentation over the pre-built
+//! The Sources panel painter (ratatui). Pure presentation over the pre-built
 //! row list + per-frame live facet from `tui::connection`; all model logic lives
 //! there. Borderless (via `panel::borderless_panel`), painted over the scene in
 //! both the normal and floor-transition draw paths.

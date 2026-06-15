@@ -145,7 +145,7 @@ fn is_drive_relative(p: &std::path::Path) -> bool {
 /// the path (`needs_resolved_binary`, e.g. Codex). Targets that write the
 /// bare name and rely on PATH (Claude) fall back to the bare name so a
 /// fresh-machine install still succeeds — the `path_warning` flag in the
-/// Connection panel covers the not-yet-on-PATH case. The env override is injected by the
+/// Sources panel covers the not-yet-on-PATH case. The env override is injected by the
 /// caller so the whole decision is testable without mutating process env.
 fn resolve_hook_binary_from(
     t: &Target,
@@ -210,7 +210,7 @@ pub enum InstallOutcome {
     AlreadyUpToDate,
 }
 
-/// Structured result of `install_target` — the data the in-TUI Connection panel
+/// Structured result of `install_target` — the data the in-TUI Sources panel
 /// renders. NO I/O: the core does the ConfigLock round and returns this; the
 /// panel decides how to surface it.
 #[derive(Debug)]
@@ -227,7 +227,7 @@ pub struct InstallReport {
 }
 
 /// Install pixtuoid hooks into `t`'s config, returning a structured report.
-/// This is the pure core behind the TUI Connection panel's connect action —
+/// This is the pure core behind the TUI Sources panel's connect action —
 /// the ONLY install path. The ConfigLock round (read→merge→backup→write) is
 /// the load-bearing write authority (invariant #4); it stays intact here.
 pub fn install_target(
@@ -302,7 +302,7 @@ pub struct UninstallReport {
 }
 
 /// Remove pixtuoid hooks from `t`'s config, returning a structured report. The
-/// pure core behind the TUI Connection panel's disconnect action. Same lock
+/// pure core behind the TUI Sources panel's disconnect action. Same lock
 /// scope + the load-bearing "never rewrite/delete-backup on a semantic no-op"
 /// rule as before.
 pub fn uninstall_target(t: &Target, config: Option<PathBuf>) -> Result<UninstallReport> {
@@ -844,7 +844,7 @@ mod tests {
     // uninstall_target (each target's merge + the shared ConfigLock write),
     // replacing the per-target coverage the deleted CLI integration suite
     // (tests/install.rs) gave — now driven straight against the cores the
-    // Connection panel calls, no CLI needed. Covers all 5 targets' formats:
+    // Sources panel calls, no CLI needed. Covers all 5 targets' formats:
     // Claude JSON, Codex/CodeWhale TOML, Reasonix flat-JSON, opencode TS plugin.
     #[test]
     fn install_target_round_trips_every_registered_target() {

@@ -212,7 +212,7 @@ historically-missed one):
    the runtime spawns sources by hand; the registry gates tests, not spawning.
 8. **If the CLI has hooks**, add an `install/` target (`Target` registry row +
    a `merge_install`/`merge_uninstall` pair + a registered-events↔decoder-arms
-   guard test) so connecting `<name>` in the in-TUI Connection panel (`c`) wires
+   guard test) so connecting `<name>` in the in-TUI Sources panel (`s`) wires
    the shim.
 9. **Add a row to [`site/src/sources.json`](../site/src/sources.json)** — the
    single source of truth for the README "Supported Tools" glimpse AND the
