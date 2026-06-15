@@ -44,7 +44,7 @@ pub(in crate::tui) fn paint_connection_panel(
     if area.width < 4 || area.height < 3 {
         return;
     }
-    let inner = borderless_panel(f, area, Some("Connection \u{2014} c/esc close"), theme);
+    let inner = borderless_panel(f, area, Some("Sources \u{2014} s/esc close"), theme);
 
     let dim = Style::default().fg(to_color(theme.ui.label_idle));
     let mut lines: Vec<Line> = Vec::with_capacity(rows.len() + 6);
@@ -107,7 +107,7 @@ pub(in crate::tui) fn paint_connection_panel(
         dim,
     )));
     lines.push(Line::from(Span::styled(
-        "  j/k move \u{00b7} t toggle \u{00b7} c/esc close",
+        "  j/k move \u{00b7} t toggle \u{00b7} s/esc close",
         dim,
     )));
 
@@ -177,6 +177,17 @@ fn connection_line(
         marquee_or_truncate(row.display_name, NAME_W, is_selected, now)
     );
 
+    // Health flag (#309 / consolidation): a fixed 2-col slot — `⚠` when this row
+    // has a health summary (install broken / decode drift), else blank to keep
+    // the Live column aligned. SEPARATE from the Connection column on purpose:
+    // ConnState is the lifecycle, health is the sub-state it annotates. The full
+    // reason is on the selected row's detail line below.
+    let health_flag = if row.health.is_some() {
+        "\u{26a0} "
+    } else {
+        "  "
+    };
+
     Line::from(vec![
         Span::raw(prefix),
         Span::styled(
@@ -186,6 +197,10 @@ fn connection_line(
         Span::raw(" "),
         Span::styled(name_cell, base.fg(to_color(theme.ui.tooltip_text))),
         Span::styled(conn_cell, base.fg(to_color(c_color))),
+        Span::styled(
+            health_flag.to_string(),
+            base.fg(to_color(theme.ui.label_waiting)),
+        ),
         Span::styled(format!("{l_glyph} {l_text}"), base.fg(to_color(l_color))),
     ])
 }

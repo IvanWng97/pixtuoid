@@ -2223,7 +2223,7 @@ fn connection_panel_renders_both_facets_borderless() {
     r.render(&scene, &pack(), t0()).unwrap();
 
     let text = frame_text(r.frame_buffer());
-    assert!(text.contains("Connection"), "title missing:\n{text}");
+    assert!(text.contains("Sources"), "title missing:\n{text}");
     assert!(text.contains("[cc]"), "cc badge missing:\n{text}");
     assert!(text.contains("[ag]"), "ag badge missing:\n{text}");
     assert!(text.contains("2 agents"), "live count missing:\n{text}");
@@ -2246,9 +2246,12 @@ fn connection_panel_renders_both_facets_borderless() {
 }
 
 // #309 / health-consolidation: a connected row whose cached health summary is
-// set shows it in the detail line, PREEMPTING the benign "installed at" hint.
+// set (a) shows a per-row ⚠ FLAG (scannable in the list), and (b) shows the full
+// reason in the detail line, PREEMPTING the benign "installed at" hint. The
+// health string here is glyph-FREE so the only ⚠ in the buffer is the per-row
+// flag the painter adds — proving the flag specifically.
 #[test]
-fn connection_panel_health_summary_preempts_the_install_path() {
+fn connection_panel_health_flag_and_detail_preempt_the_install_path() {
     use crate::tui::connection::{ConnState, ConnectionRow, LiveInfo};
     let mut r = build(120, 44, vec![]);
     let scene = scene_with(vec![], 16);
@@ -2259,7 +2262,7 @@ fn connection_panel_health_summary_preempts_the_install_path() {
         state: ConnState::Connected,
         config_path: Some(std::path::PathBuf::from("~/.reasonix/settings.json")),
         target: None,
-        health: Some("\u{26a0} install broken: shim binary missing".into()),
+        health: Some("install broken: shim binary missing".into()), // NO ⚠ prefix
     }];
     r.set_connection_frame(
         true,
@@ -2273,12 +2276,16 @@ fn connection_panel_health_summary_preempts_the_install_path() {
     r.render(&scene, &pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
     assert!(
+        text.contains('\u{26a0}'),
+        "the per-row health flag (⚠) must render (health string carries none):\n{text}"
+    );
+    assert!(
         text.contains("install broken"),
-        "health summary must show in the detail line:\n{text}"
+        "the full reason must show in the detail line:\n{text}"
     );
     assert!(
         !text.contains("installed at"),
-        "health summary must PREEMPT the install-path hint:\n{text}"
+        "the health verdict must PREEMPT the install-path hint:\n{text}"
     );
 }
 
