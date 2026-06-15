@@ -28,8 +28,9 @@ use crate::tui::motion::{
 pub use pixtuoid_core::pose::{
     aimless_wander_seed, cycle_ms_for, derive, derive_state_only, dwell_ms, est_wander_cycle_ms,
     is_aimless_cycle, personality_for, pick_aimless_dest, seated_dwell_ms, takes_trip,
-    waypoint_index_for_cycle, Personality, Pose, ENTRY_ANIMATION_MS, THINKING_WINDOW_SECS,
-    TYPING_FRAMES, TYPING_FRAME_MS, WALKING_FRAMES, WALKING_FRAME_MS, WANDER_CYCLE_BASE_MS,
+    walking_frame, waypoint_index_for_cycle, Personality, Pose, ENTRY_ANIMATION_MS,
+    THINKING_WINDOW_SECS, TYPING_FRAMES, TYPING_FRAME_MS, WALKING_FRAMES, WALKING_FRAME_MS,
+    WANDER_CYCLE_BASE_MS,
     WANDER_CYCLE_RANGE_MS, WANDER_DWELL_EST_MS, WANDER_WALK_EST_MS,
 };
 
@@ -290,7 +291,7 @@ pub fn derive_with_routing(
         }
 
         let t_x1000 = walk_progress(profile, eff_elapsed);
-        let frame = ((eff_elapsed / WALKING_FRAME_MS) as usize) % WALKING_FRAMES;
+        let frame = walking_frame(eff_elapsed);
 
         // Desk departure: when the stored origin is the chair, rise off it via
         // the approach cell (matching the snapshotted profile + every other
@@ -362,7 +363,7 @@ pub fn derive_with_routing(
 
             if !walk_arrived(profile, elapsed_ms) {
                 let t_x1000 = walk_progress(profile, elapsed_ms);
-                let frame = ((elapsed_ms / WALKING_FRAME_MS) as usize) % WALKING_FRAMES;
+                let frame = walking_frame(elapsed_ms);
                 return route_walking_pose(
                     slot,
                     now,
@@ -441,7 +442,7 @@ pub fn derive_with_routing(
                     .duration_since(ms.wander_phase_started_at)
                     .unwrap_or(Duration::ZERO)
                     .as_millis() as u64;
-                let frame = (elapsed_phase / WALKING_FRAME_MS) as usize % WALKING_FRAMES;
+                let frame = walking_frame(elapsed_phase);
                 return route_walking_pose(
                     slot,
                     now,
@@ -507,7 +508,7 @@ pub fn derive_with_routing(
                     .duration_since(wander_phase_started_at)
                     .unwrap_or(Duration::ZERO)
                     .as_millis() as u64;
-                let frame = (elapsed_phase / WALKING_FRAME_MS) as usize % WALKING_FRAMES;
+                let frame = walking_frame(elapsed_phase);
                 return route_walking_pose(
                     slot,
                     now,
@@ -647,7 +648,7 @@ pub fn derive_with_routing(
                     raw
                 } else {
                     let t_x1000 = walk_progress(&profile, elapsed_ms);
-                    let frame = ((elapsed_ms / WALKING_FRAME_MS) as usize) % WALKING_FRAMES;
+                    let frame = walking_frame(elapsed_ms);
                     // Recompute the desk endpoint (deterministic) so the rendered leg
                     // matches the armed profile: route to the approach cell and SETTLE
                     // onto the chair (`desk_walk_anchor`, == seated_foot_cell(Desk), so

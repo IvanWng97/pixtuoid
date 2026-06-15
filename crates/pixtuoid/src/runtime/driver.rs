@@ -21,7 +21,7 @@ use pixtuoid_core::source::antigravity::AntigravitySource;
 use pixtuoid_core::source::claude_code::ClaudeCodeSource;
 use pixtuoid_core::source::codex::CodexSource;
 use pixtuoid_core::source::copilot::CopilotSource;
-use pixtuoid_core::source::daemon::{self, DaemonPresenceUpdate, PresenceMsg};
+use pixtuoid_core::source::daemon::{self, PresenceMsg};
 use pixtuoid_core::source::hook::HookRouter;
 use pixtuoid_core::source::jsonl::ChildEndUnclaims;
 use pixtuoid_core::source::manager::SourceManager;
@@ -269,12 +269,7 @@ async fn reducer_task(
                             // the pid rides a later event). `watch` is idempotent per
                             // pid; `apply_presence` owns the None-only adoption.
                             if let Some(ew) = presence_exit_watch.as_ref() {
-                                let armed_pid = match &update {
-                                    DaemonPresenceUpdate::GatewayUp { pid: Some(p) } => Some(*p),
-                                    DaemonPresenceUpdate::PidSeen { pid } => Some(*pid),
-                                    _ => None,
-                                };
-                                if let Some(pid) = armed_pid {
+                                if let Some(pid) = update.armable_pid() {
                                     ew.watch(&source, pid);
                                 }
                             }

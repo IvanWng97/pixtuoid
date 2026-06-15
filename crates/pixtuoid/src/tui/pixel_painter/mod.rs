@@ -98,7 +98,7 @@ use background::{
     paint_shadow, time_of_day_look, Ellipse,
 };
 use drawable::{
-    gateway_display_name, gateway_mascot_anims, mascot_position, paint_drawable, pet_position,
+    gateway_mascot_def, mascot_position, paint_drawable, pet_position,
     Drawable, DrawableKind,
 };
 use glass::{paint_glass_wall_h, paint_glass_wall_v, stitch_vertical_wall, WALL_THICK_H_PX};
@@ -1133,7 +1133,7 @@ fn enqueue_gateway_mascot<'a>(
 ) -> Option<MascotFrame> {
     let mut hover = None;
     for (source, presence) in ctx.scene.daemons() {
-        let Some((walk, rest)) = gateway_mascot_anims(source) else {
+        let Some(def) = gateway_mascot_def(source) else {
             continue;
         };
         // Per-source deterministic seed so two gateways don't wander in lockstep.
@@ -1141,7 +1141,7 @@ fn enqueue_gateway_mascot<'a>(
             .bytes()
             .fold(0u64, |h, b| h.wrapping_mul(131).wrapping_add(b as u64));
         let Some((pos, anim_name, frame_idx)) =
-            mascot_position(ctx.layout, presence, walk, rest, ctx.now, seed)
+            mascot_position(ctx.layout, presence, def.walk, def.rest, ctx.now, seed)
         else {
             continue;
         };
@@ -1164,7 +1164,7 @@ fn enqueue_gateway_mascot<'a>(
         // First present gateway wins the hover frame (single-gateway today).
         hover.get_or_insert(MascotFrame {
             pos,
-            name: gateway_display_name(source),
+            name: def.display_name,
             busy: presence.state == pixtuoid_core::state::DaemonState::Busy,
             degraded: presence.state == pixtuoid_core::state::DaemonState::Degraded,
             active_sessions: presence.active_sessions,

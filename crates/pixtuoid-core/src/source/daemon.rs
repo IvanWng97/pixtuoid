@@ -95,6 +95,42 @@ impl PresenceTtl {
     };
 }
 
+impl DaemonPresenceUpdate {
+    /// The gateway pid this update arms the abrupt-down `ExitWatch` on, if any.
+    /// The variant→pid mapping lives HERE (one place) so the driver's watch-arm
+    /// and `apply_presence`'s `current_pid` adoption can't drift: `GatewayUp`
+    /// carries the restart-rebind pid, `PidSeen` the mid-attach (#318) adopted pid.
+    pub fn armable_pid(&self) -> Option<i32> {
+        match self {
+            DaemonPresenceUpdate::GatewayUp { pid } => *pid,
+            DaemonPresenceUpdate::PidSeen { pid } => Some(*pid),
+            _ => None,
+        }
+    }
+}
+
+impl DaemonPresence {
+    /// Zero the "live work" pair (multiplexed-session bubble count + in-flight
+    /// run keys) — one concept, always reset together on every restart-or-down
+    /// path. (The busy-decay arm deliberately clears only `in_flight_run_keys`
+    /// — keeping the session count — so it does NOT use this.)
+    fn clear_concurrency(&mut self) {
+        self.active_sessions = 0;
+        self.in_flight_run_keys.clear();
+    }
+
+    /// Transition to `Down` + clear the live-work pair — the daemon mirror of
+    /// `fsm::accumulate_active_ms`-style single-owner transitions, so a future
+    /// must-clear-on-down field (e.g. a #317 degraded-reason) can't be forgotten
+    /// at one of the four down sites. Does NOT touch `last_seen`: the
+    /// `apply_presence` callers ride its top-level stamp, and the sweep /
+    /// `mark_presence_down` re-anchor it explicitly for the walk-out timer.
+    fn enter_down(&mut self) {
+        self.state = DaemonState::Down;
+        self.clear_concurrency();
+    }
+}
+
 /// Merge one presence delta into `scene.daemons[source]`. Called by the reducer
 /// task off the SIBLING channel — NEVER through `Reducer::apply` (which is
 /// `AgentId`-pure). Every update refreshes `last_seen` (any event is proof of
@@ -128,14 +164,11 @@ pub fn apply_presence(
         // `PidExited` for the OLD pid is ignored (restart rebind).
         GatewayUp { pid } => {
             p.current_pid = pid;
-            p.active_sessions = 0;
-            p.in_flight_run_keys.clear();
+            p.clear_concurrency();
             p.state = DaemonState::Idle;
         }
         GatewayDown => {
-            p.state = DaemonState::Down;
-            p.active_sessions = 0;
-            p.in_flight_run_keys.clear();
+            p.enter_down();
         }
         SessionStarted => {
             p.active_sessions = p.active_sessions.saturating_add(1);
@@ -187,9 +220,7 @@ pub fn apply_presence(
         // still arms this instant abrupt-down rung off the next event's `PidSeen`.
         PidExited { pid } => {
             if p.current_pid == Some(pid) {
-                p.state = DaemonState::Down;
-                p.active_sessions = 0;
-                p.in_flight_run_keys.clear();
+                p.enter_down();
             }
         }
     }
@@ -221,14 +252,13 @@ pub fn sweep_presence_ttl(scene: &mut SceneState, source: &str, ttl: PresenceTtl
             idle_ms >= ttl.down_remove_ms
         } else {
             if idle_ms >= ttl.presence_ttl_ms {
-                p.state = DaemonState::Down;
+                p.enter_down();
                 // Re-anchor `last_seen` to NOW so the renderer's `now - last_seen`
                 // walk-out timer starts at 0 and the mascot plays the elevator
                 // leave (without this the entry is ≥TTL stale → it vanishes with
-                // no walk-out). Mirrors the explicit GatewayDown/PidExited paths.
+                // no walk-out). The apply-path GatewayDown/PidExited ride
+                // `apply_presence`'s top-level stamp instead.
                 p.last_seen = now;
-                p.active_sessions = 0;
-                p.in_flight_run_keys.clear();
             } else if p.state == DaemonState::Busy && idle_ms >= ttl.busy_decay_ms {
                 p.state = DaemonState::Idle;
                 p.in_flight_run_keys.clear();
@@ -251,10 +281,8 @@ pub fn sweep_presence_ttl(scene: &mut SceneState, source: &str, ttl: PresenceTtl
 pub fn mark_presence_down(scene: &mut SceneState, source: &str, now: SystemTime) {
     if let Some(p) = scene.daemons_mut().get_mut(source) {
         if p.state != DaemonState::Down {
-            p.state = DaemonState::Down;
+            p.enter_down();
             p.last_seen = now;
-            p.active_sessions = 0;
-            p.in_flight_run_keys.clear();
         }
     }
 }
@@ -641,6 +669,26 @@ mod tests {
             );
             assert_eq!(s.daemons()[src].current_pid, Some(7));
         }
+    }
+
+    #[test]
+    fn armable_pid_is_only_gateway_up_some_and_pid_seen() {
+        // The ONE variant→exit-watch-pid mapping the driver arms on must match the
+        // pids apply_presence adopts into current_pid.
+        use DaemonPresenceUpdate::*;
+        assert_eq!(GatewayUp { pid: Some(7) }.armable_pid(), Some(7));
+        assert_eq!(GatewayUp { pid: None }.armable_pid(), None);
+        assert_eq!(PidSeen { pid: 9 }.armable_pid(), Some(9));
+        assert_eq!(GatewayDown.armable_pid(), None);
+        assert_eq!(SessionStarted.armable_pid(), None);
+        assert_eq!(
+            RunStarted {
+                run_key: "r".into()
+            }
+            .armable_pid(),
+            None
+        );
+        assert_eq!(PidExited { pid: 3 }.armable_pid(), None);
     }
 
     #[test]

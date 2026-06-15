@@ -387,22 +387,25 @@ const MASCOT_BUSY_CYCLE_MS: u64 = 4500;
 const MASCOT_DEGRADED_CYCLE_MS: u64 = 14000;
 const MASCOT_WALK_FRAC: f32 = 0.45;
 
-/// Per-source mascot sprite (walk, rest). The ONE place a new gateway registers
-/// its creature; `None` for non-gateway / un-mascotted sources.
-pub(super) fn gateway_mascot_anims(source: &str) -> Option<(&'static str, &'static str)> {
-    match source {
-        s if s == pixtuoid_core::source::openclaw::SOURCE_NAME => {
-            Some(("lobster_walk", "lobster_rest"))
-        }
-        _ => None,
-    }
+/// Per-source gateway mascot facts: its sprite (walk, rest) + the hover-tooltip
+/// display name. The ONE place a new gateway registers its creature — `None` for
+/// non-gateway / un-mascotted sources (which gates the whole mascot in
+/// `enqueue_gateway_mascot`), so a 2nd daemon adds exactly one arm here, not two
+/// parallel `match source` tables kept in lockstep.
+pub(super) struct GatewayMascotDef {
+    pub walk: &'static str,
+    pub rest: &'static str,
+    pub display_name: &'static str,
 }
 
-/// Human-readable gateway name for the hover tooltip.
-pub(super) fn gateway_display_name(source: &str) -> &'static str {
+pub(super) fn gateway_mascot_def(source: &str) -> Option<GatewayMascotDef> {
     match source {
-        s if s == pixtuoid_core::source::openclaw::SOURCE_NAME => "OpenClaw",
-        _ => "Gateway",
+        s if s == pixtuoid_core::source::openclaw::SOURCE_NAME => Some(GatewayMascotDef {
+            walk: "lobster_walk",
+            rest: "lobster_rest",
+            display_name: "OpenClaw",
+        }),
+        _ => None,
     }
 }
 

@@ -56,6 +56,14 @@ pub const WALKING_FRAME_MS: u64 = 220;
 pub const TYPING_FRAMES: usize = 2;
 pub const WALKING_FRAMES: usize = 2;
 
+/// The walking sprite's frame index at `elapsed_ms` into the walk — the one
+/// `(elapsed / WALKING_FRAME_MS) % WALKING_FRAMES` cadence, named once so the
+/// core stateless overlay and the tui motion authority can't recompute it
+/// differently (it was open-coded at 8 sites across both crates).
+pub fn walking_frame(elapsed_ms: u64) -> usize {
+    (elapsed_ms / WALKING_FRAME_MS) as usize % WALKING_FRAMES
+}
+
 /// Spawn-window guard for entry routing in `tui::pose::derive_with_routing`.
 /// After `physics::walk_profile` took over motion timing this constant is no
 /// longer used to compute walk duration — it is only the *upper bound* on the
@@ -243,7 +251,7 @@ pub fn derive(slot: &AgentSlot, now: SystemTime, layout: &SceneLayout) -> Option
 /// the overlay/snapshot path stays linear so it has no per-frame history.
 fn linear_walk_pose(since_ms: u64, from: Point, to: Point) -> Pose {
     let t = (since_ms * 1000 / ENTRY_ANIMATION_MS).min(1000) as u16;
-    let frame = ((since_ms / WALKING_FRAME_MS) as usize) % WALKING_FRAMES;
+    let frame = walking_frame(since_ms);
     Pose::Walking {
         from,
         to,
@@ -510,7 +518,7 @@ fn idle_pose(slot: &AgentSlot, desk: Point, layout: &SceneLayout, elapsed_ms: u6
     } else if phase_t < walk_out_end {
         let span = walk_out_end - seated_end;
         let t = ((phase_t - seated_end) * 1000 / span) as u16;
-        let frame = ((elapsed_ms / WALKING_FRAME_MS) as usize) % WALKING_FRAMES;
+        let frame = walking_frame(elapsed_ms);
         Pose::Walking {
             from: desk,
             to: dest,
@@ -527,7 +535,7 @@ fn idle_pose(slot: &AgentSlot, desk: Point, layout: &SceneLayout, elapsed_ms: u6
         let span = cycle_ms - at_wp_end;
         debug_assert!(span > 0, "idle_pose walk-back span invariant violated");
         let t = ((phase_t - at_wp_end) * 1000 / span) as u16;
-        let frame = ((elapsed_ms / WALKING_FRAME_MS) as usize) % WALKING_FRAMES;
+        let frame = walking_frame(elapsed_ms);
         let carrying_coffee = matches!(
             at_dest_pose,
             Pose::AtWaypoint {
