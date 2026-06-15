@@ -14,7 +14,7 @@ const SHORTCUTS: &[(&str, &str)] = &[
     ("p", "pause / resume"),
     ("t", "themes"),
     ("Tab", "agent dashboard"),
-    ("c", "connections"),
+    ("s", "sources (connect / health)"),
     // Dev-only overlay — hidden from release-build help (see dispatch_key).
     #[cfg(debug_assertions)]
     ("w", "walkable / approach / route debug"),

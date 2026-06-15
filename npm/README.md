@@ -26,7 +26,7 @@ package via `require.resolve` and exec the native binary:
   prebuilt binary matches the host.
 - **`bin/pixtuoid-hook`** — the hook shim. **ALWAYS exits 0, never writes stderr,
   never throws** (invariant #5: never block the agent). A Node hop adds ~tens of
-  ms; the zero-hop optimization (the Connection panel targeting the sibling
+  ms; the zero-hop optimization (the Sources panel targeting the sibling
   native binary directly) is a tracked follow-up.
 - **`bin/resolve.js`** — shared platform→package map + the `PIXTUOID_BINARY`
   dev/CI override.

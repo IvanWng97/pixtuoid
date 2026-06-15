@@ -635,7 +635,7 @@ mod tests {
 
     #[test]
     fn mark_presence_down_arms_the_walkout_idempotently() {
-        // The Connection-panel disconnect path: drive a live presence to Down
+        // The Sources-panel disconnect path: drive a live presence to Down
         // (re-stamping last_seen so the renderer plays the walk-out), idempotent
         // so the DOWN_REMOVE_MS timer isn't reset every sweep tick.
         let mut s = SceneState::default();

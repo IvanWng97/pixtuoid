@@ -135,7 +135,7 @@ fn main() -> Result<()> {
                 // Pre-flight (#309): a CONNECTED source whose hooks are installed
                 // but structurally BROKEN renders zero sprites with no other hint.
                 // Warn here (the config-warning channel) so the fully-passive user
-                // who never opens the Connection panel or runs `doctor` still
+                // who never opens the Sources panel or runs `doctor` still
                 // learns. Static state, so a boot eprintln — NOT the live footer.
                 // Routed through the SHARED `doctor::diagnose` rollup (empty log =
                 // skip the drift scan; boot warns on broken installs only) so this
@@ -157,7 +157,7 @@ fn main() -> Result<()> {
                             .unwrap_or_default();
                         eprintln!(
                             "⚠ pixtuoid: {} hooks are installed but BROKEN: {issues} — \
-                             reconnect in the Connection panel (press c)",
+                             reconnect in the Sources panel (press s)",
                             t.core_source
                         );
                     }

@@ -102,7 +102,7 @@ These are load-bearing — see `CLAUDE.md` and the nested guides before changing
   shared decoder. A hook-only CLI (Reasonix — no watchable transcript) is the
   documented exception: no `Source` impl and no runtime wiring; its registry
   row sets `line_decoder: None` and supplies a custom hook decoder, and it
-  ships an install `Target` instead (bound via the in-TUI Connection panel).
+  ships an install `Target` instead (bound via the in-TUI Sources panel).
 - **Cross-source facts live in ONE registry row** (`source/registry.rs`,
   internal): each CLI's `SourceDescriptor` carries its label prefix, JSONL
   decoder, hook keying (`transcript_path` vs `session_id`, plus an optional

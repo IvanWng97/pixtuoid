@@ -282,7 +282,7 @@ impl Reducer {
     /// Reconcile the scene toward the `connected` set: mark exiting every
     /// non-exiting slot whose source is NOT connected, then cascade to its subtree
     /// (exactly as the `SessionEnd` arm does per agent), so the existing EXIT-walk
-    /// animation + `sweep_exited` GC remove them. Driven by the Connection panel's
+    /// animation + `sweep_exited` GC remove them. Driven by the Sources panel's
     /// DISCONNECT toggle (an explicit user action — the runtime calls this every
     /// sweep tick with the live connected snapshot), NOT by transcript content, so
     /// it does NOT violate the "content never drives lifecycle" invariant: it's the

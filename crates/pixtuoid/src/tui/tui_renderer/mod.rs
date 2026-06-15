@@ -568,7 +568,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         let dashboard_rows = self.dashboard_rows.clone();
         let dashboard_selected = self.dashboard_selected;
         let dashboard_scroll = self.dashboard_scroll;
-        // Connection panel can likewise be opened mid-slide (`c` isn't gated); clone
+        // Sources panel can likewise be opened mid-slide (`s` isn't gated); clone
         // its frame for the brief transition.
         let connection_open = self.connection_open;
         let connection_rows = self.connection_rows.clone();

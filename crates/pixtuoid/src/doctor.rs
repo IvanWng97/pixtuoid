@@ -13,7 +13,7 @@
 //! Strictly READ-ONLY: log file + config + install-state + best-effort
 //! `<cli> --version` subprocess probes (stdin nulled so they can't block; argv
 //! from the static registry, never user input). It never writes config
-//! (re-connecting hooks stays the Connection panel's job) and never spawns the
+//! (re-connecting hooks stays the Sources panel's job) and never spawns the
 //! TUI. The untrusted wire values (event/tool names) it samples are
 //! `sanitize`d before display (R0615-06) — `doctor` is the third consumer of
 //! those breadcrumbs and must hold the same line as the headless path + footer.
@@ -222,7 +222,7 @@ impl SourceDiagnostics {
     }
 
     /// The single worst issue as a one-line, glyph-prefixed summary for the
-    /// Connection panel detail + the boot warning. `None` = nothing to flag.
+    /// Sources panel detail + the boot warning. `None` = nothing to flag.
     /// Priority: install-broken (hooks can't fire) > decode-drift.
     pub fn summary(&self) -> Option<String> {
         if let Some(i) = &self.install {
@@ -266,8 +266,9 @@ pub struct DoctorSourceRow {
     pub verified_version: &'static str,
     pub scan: LogScanResult,
     /// Install-schema soundness (#309) — `Some` only when hooks are installed;
-    /// `None` = not checked (no target / not installed). A non-sound result is
-    /// surfaced in the `hooks:` column as "installed but BROKEN: …".
+    /// `None` = not checked (no target / not installed). A non-sound result
+    /// flips the verdict glyph to `⚠` and prints the reason on an indented `↳`
+    /// continuation line.
     pub schema: Option<crate::install::verify::SchemaVerifyResult>,
 }
 
@@ -343,60 +344,102 @@ pub fn version_status(installed: Option<&str>, verified: &str) -> String {
     format!("{inst_disp} (verified {verified}{cmp})")
 }
 
-/// Render one row. Pure — the test seam (like `runtime::summarize`).
+/// Whether the row has a HARD install problem (the silent-dead case).
+fn row_broken(row: &DoctorSourceRow) -> bool {
+    row.schema.as_ref().is_some_and(|s| !s.is_sound())
+}
+
+/// The scannable per-row HEALTH verdict glyph (the rollup made visible):
+/// `⚠` a problem (install broken OR decode drift), `✓` healthy (installed +
+/// sound + no drift), `○` installable but not installed, `–` transcript-only
+/// (no install schema to verify).
+fn verdict_glyph(row: &DoctorSourceRow) -> char {
+    if row_broken(row) || row.scan.total() > 0 {
+        '\u{26a0}' // ⚠
+    } else if !row.has_target {
+        '\u{2013}' // –
+    } else if !row.hooks_installed {
+        '\u{25cb}' // ○
+    } else {
+        '\u{2713}' // ✓
+    }
+}
+
+/// The decode-drift detail (counts + when + samples) for a continuation line.
+fn drift_detail(s: &LogScanResult) -> String {
+    let mut parts = Vec::new();
+    if s.unknown_event > 0 {
+        parts.push(format!("{} unknown-event", s.unknown_event));
+    }
+    if s.missing_field > 0 {
+        parts.push(format!("{} missing-field", s.missing_field));
+    }
+    if s.unknown_dispatch > 0 {
+        parts.push(format!("{} unknown-dispatch", s.unknown_dispatch));
+    }
+    if s.shape_drift > 0 {
+        parts.push(format!("{} shape-drift", s.shape_drift));
+    }
+    let when = s
+        .last_ts
+        .as_deref()
+        .map(|t| format!(" (last {t})"))
+        .unwrap_or_default();
+    let samples = if s.samples.is_empty() {
+        String::new()
+    } else {
+        format!(" [{}]", s.samples.join(", "))
+    };
+    format!("{}{when}{samples}", parts.join(", "))
+}
+
+/// Render one row: a scannable verdict line (glyph + name + connection + install
+/// state + version), plus an indented `↳` continuation line per problem (broken
+/// install / soft note / decode drift) so the long detail never wrecks the
+/// table's column alignment. Pure — the test seam (like `runtime::summarize`).
 pub fn format_doctor_row(row: &DoctorSourceRow) -> String {
     let conn = if row.connected {
         "connected"
     } else {
         "disconnected"
     };
-    let hooks = if !row.has_target {
-        "n/a (transcript-only)".to_string()
+    let state = if !row.has_target {
+        "transcript-only"
     } else if !row.hooks_installed {
-        "NOT installed".to_string()
+        "not installed"
     } else {
-        // Installed — but is the install structurally SOUND (#309)? A non-sound
-        // result is the silent-dead case: connected, "installed", zero sprites.
-        match &row.schema {
-            Some(s) if !s.is_sound() => format!("installed but BROKEN: {}", s.issues.join("; ")),
-            Some(s) if !s.notes.is_empty() => format!("installed ({})", s.notes.join("; ")),
-            _ => "installed".to_string(),
-        }
-    };
-    let drift = if row.scan.total() == 0 {
-        "drift: none".to_string()
-    } else {
-        let mut parts = Vec::new();
-        let s = &row.scan;
-        if s.unknown_event > 0 {
-            parts.push(format!("{} unknown-event", s.unknown_event));
-        }
-        if s.missing_field > 0 {
-            parts.push(format!("{} missing-field", s.missing_field));
-        }
-        if s.unknown_dispatch > 0 {
-            parts.push(format!("{} unknown-dispatch", s.unknown_dispatch));
-        }
-        if s.shape_drift > 0 {
-            parts.push(format!("{} shape-drift", s.shape_drift));
-        }
-        let when = s
-            .last_ts
-            .as_deref()
-            .map(|t| format!(" (last {t})"))
-            .unwrap_or_default();
-        let samples = if s.samples.is_empty() {
-            String::new()
-        } else {
-            format!(" [{}]", s.samples.join(", "))
-        };
-        format!("DRIFT: {}{when}{samples}", parts.join(", "))
+        "installed"
     };
     let version = version_status(row.installed_version.as_deref(), row.verified_version);
-    format!(
-        "  {}·{:<13} {:<12} hooks: {:<22} {:<34} {}",
-        row.prefix, row.name, conn, hooks, version, drift
-    )
+    let mut out = format!(
+        "  {} {}\u{b7}{:<13} {:<12} {:<15} {}",
+        verdict_glyph(row),
+        row.prefix,
+        row.name,
+        conn,
+        state,
+        version
+    );
+    // Reason continuation lines — only emitted when there IS a problem, so a
+    // healthy row stays a single clean line. `issues` are already control-char
+    // sanitized at the source (`verify::display_safe`).
+    if let Some(s) = &row.schema {
+        if !s.is_sound() {
+            out.push_str(&format!(
+                "\n       \u{21b3} install broken: {}",
+                s.issues.join("; ")
+            ));
+        } else if !s.notes.is_empty() {
+            out.push_str(&format!("\n       \u{21b3} note: {}", s.notes.join("; ")));
+        }
+    }
+    if row.scan.total() > 0 {
+        out.push_str(&format!(
+            "\n       \u{21b3} decode drift: {}",
+            drift_detail(&row.scan)
+        ));
+    }
+    out
 }
 
 /// First non-empty line of subprocess output, trimmed AND control-char
@@ -481,13 +524,13 @@ pub fn run(log_path: &std::path::Path) -> anyhow::Result<()> {
     out.push('\n');
 
     let mut any_drift = false;
-    let mut any_broken = false;
+    let mut broken: Vec<String> = Vec::new(); // prefixes of broken installs (locally fixable)
     for &src in REGISTERED_SOURCES {
         let desc = registry::descriptor_for(src);
         let target = crate::install::target::by_source(src);
         let hooks_installed = target.map(crate::install::has_hooks).unwrap_or(false);
         // ONE shared rollup (install soundness + drift) — the same `diagnose` the
-        // Connection panel + boot preflight read, so the report can't drift apart
+        // Sources panel + boot preflight read, so the report can't drift apart
         // from the live surfaces.
         let diag = diagnose(src, &log);
         let row = DoctorSourceRow {
@@ -502,24 +545,33 @@ pub fn run(log_path: &std::path::Path) -> anyhow::Result<()> {
             schema: diag.install,
         };
         any_drift |= row.scan.total() > 0;
-        any_broken |= row.schema.as_ref().is_some_and(|s| !s.is_sound());
+        if row_broken(&row) {
+            broken.push(format!("{}\u{b7}{}", row.prefix, row.name));
+        }
         out.push_str(&format_doctor_row(&row));
         out.push('\n');
     }
 
-    if any_broken {
-        out.push_str(
-            "\n⚠ a connected source's hooks are INSTALLED BUT BROKEN — it renders no agents.\n   \
-             Reconnect it in the Connection panel (press c) to repair the install.\n",
-        );
+    // Rolled-up footer: a broken install is locally fixable (reconnect); decode
+    // drift is a report-upstream concern — distinct remediation paths.
+    let n = REGISTERED_SOURCES.len();
+    if broken.is_empty() {
+        out.push_str(&format!("\n{n} sources · ✓ all connected installs sound"));
+    } else {
+        let verb = if broken.len() == 1 { "needs" } else { "need" };
+        out.push_str(&format!(
+            "\n{n} sources · ⚠ {} {verb} attention ({}) — reconnect in the Sources panel (press s)",
+            broken.len(),
+            broken.join(", ")
+        ));
     }
     if any_drift {
         out.push_str(
-            "\n⚠ decode drift recorded — your pixtuoid may predate a CLI's current wire format.\n   \
-             Please report it: https://github.com/IvanWng97/pixtuoid/issues\n",
+            " · ⚠ decode drift recorded — may predate a CLI's wire format; report: \
+             https://github.com/IvanWng97/pixtuoid/issues\n",
         );
     } else {
-        out.push_str("\n✓ no decode drift recorded in the log.\n");
+        out.push_str(" · ✓ no decode drift\n");
     }
     print!("{out}");
     Ok(())
@@ -691,10 +743,12 @@ mod tests {
         let c = format_doctor_row(&clean);
         assert!(c.contains("codex") && c.contains("connected") && c.contains("installed"));
         assert!(c.contains("2.0.0"));
-        assert!(c.contains("drift: none"));
+        assert!(c.starts_with("  \u{2713}"), "sound row leads with ✓: {c}");
+        // A healthy row is a SINGLE line — no `↳` reason continuation.
+        assert!(!c.contains('\n'), "a healthy row has no reason line: {c}");
         assert!(
-            !c.contains("BROKEN"),
-            "a sound install must not say BROKEN: {c}"
+            !c.to_lowercase().contains("broken"),
+            "a sound install must not say broken: {c}"
         );
 
         let drifted = DoctorSourceRow {
@@ -712,9 +766,17 @@ mod tests {
             schema: None,
         };
         let d = format_doctor_row(&drifted);
-        assert!(d.contains("3 missing-field"));
-        assert!(d.contains("n/a (transcript-only)"));
+        assert!(
+            d.starts_with("  \u{26a0}"),
+            "a drifting row leads with ⚠: {d}"
+        );
+        assert!(d.contains("transcript-only"), "{d}");
         assert!(d.contains("NEWER than verified"), "skew flagged: {d}");
+        // Drift detail is on its own `↳` continuation line.
+        assert!(
+            d.contains("\n       \u{21b3} decode drift: 3 missing-field"),
+            "{d}"
+        );
     }
 
     #[test]
@@ -735,8 +797,12 @@ mod tests {
         };
         let b = format_doctor_row(&broken);
         assert!(
-            b.contains("installed but BROKEN") && b.contains("shim binary missing"),
-            "{b}"
+            b.starts_with("  \u{26a0}"),
+            "a broken row leads with ⚠: {b}"
+        );
+        assert!(
+            b.contains("\n       \u{21b3} install broken: shim binary missing"),
+            "broken reason on its own ↳ line: {b}"
         );
     }
 

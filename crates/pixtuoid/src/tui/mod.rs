@@ -49,7 +49,7 @@ struct KeyCtx {
     theme_picker: Option<usize>,
     dashboard_open: bool,
     connection_open: bool,
-    /// Whether the Connection panel has a disconnect armed (awaiting y/n). Splits the
+    /// Whether the Sources panel has a disconnect armed (awaiting y/n). Splits the
     /// open-connection dispatch into the armed (y/n only) vs unarmed (nav/toggle) sub-tiers.
     connection_confirm: bool,
     n_themes: usize,
@@ -99,7 +99,8 @@ enum KeyAction {
     DashboardJump,
     /// `Esc`/`Tab`: close without jumping.
     DashboardClose,
-    /// Open/close the Connection panel (`c`, from the normal scene; `c`/Esc closes).
+    /// Open/close the Sources panel (`s`, from the normal scene; `s`/Esc closes).
+    /// (Variant + module keep the historical `Connection`/`connection` names.)
     ToggleConnection,
     /// Connection list navigation.
     ConnectionUp,
@@ -111,7 +112,7 @@ enum KeyAction {
     ConnectionConfirm,
     /// `n`/`Esc` while armed: cancel the arm (panel stays open).
     ConnectionCancelConfirm,
-    /// `c`/`Esc` while unarmed: close the panel.
+    /// `s`/`Esc` while unarmed: close the panel.
     ConnectionClose,
 }
 
@@ -256,8 +257,8 @@ fn dispatch_key(code: KeyCode, mods: KeyModifiers, ctx: KeyCtx) -> KeyAction {
         }
         return match (code, mods) {
             _ if is_quit_chord(code, mods) => KeyAction::Quit,
-            // Bare `c` (not Ctrl+C — that hit the quit chord above) toggles closed.
-            (KeyCode::Esc, _) | (KeyCode::Char('c'), _) => KeyAction::ConnectionClose,
+            // Bare `s` (the Sources panel's key) toggles it closed; Esc too.
+            (KeyCode::Esc, _) | (KeyCode::Char('s'), _) => KeyAction::ConnectionClose,
             (KeyCode::Up, _) | (KeyCode::Char('k'), _) => KeyAction::ConnectionUp,
             (KeyCode::Down, _) | (KeyCode::Char('j'), _) => KeyAction::ConnectionDown,
             (KeyCode::Char('t'), _) => KeyAction::ConnectionToggle,
@@ -297,8 +298,10 @@ fn dispatch_key(code: KeyCode, mods: KeyModifiers, ctx: KeyCtx) -> KeyAction {
         KeyCode::Char('t') => KeyAction::OpenThemePicker,
         KeyCode::Char('?') => KeyAction::ToggleHelp,
         KeyCode::Tab => KeyAction::ToggleDashboard,
-        // Bare `c` only — `Ctrl+C` already returned Quit at the top of this arm.
-        KeyCode::Char('c') => KeyAction::ToggleConnection,
+        // `s` opens the Sources panel (connection + health + live). Renamed from
+        // `c`/"Connection" once the panel grew past bind/unbind into a per-source
+        // board; `Ctrl+C` stays the quit chord (handled above).
+        KeyCode::Char('s') => KeyAction::ToggleConnection,
         // Dev-only walkable/approach/route overlay — gated out of release builds.
         #[cfg(debug_assertions)]
         KeyCode::Char('w') => KeyAction::ToggleWalkableDebug,
@@ -375,9 +378,9 @@ pub async fn run_tui(
         Vec<pixtuoid_core::source::manager::SourceDeath>,
     >,
     // The resolved hook socket (Unix) / named pipe (Windows) the daemon bound,
-    // shown in the Connection panel's connection line.
+    // shown in the Sources panel's connection line.
     socket_path: std::path::PathBuf,
-    // The live connected-source set — the Connection panel's mutation seam: a
+    // The live connected-source set — the Sources panel's mutation seam: a
     // toggle calls `connected.set(src, on)`, which the reducer task's reconciler
     // observes (gate + graceful evict). Shared `Arc<Mutex<…>>` with the reducer.
     connected: crate::runtime::ConnectedSources,
@@ -420,7 +423,7 @@ pub async fn run_tui(
     // doctor's tested scanner) at most every ~15s, NOT per frame.
     let mut last_drift_scan: Option<std::time::Instant> = None;
     let mut drifted_prefixes: Vec<String> = Vec::new();
-    // The Connection panel's cached rows carry a per-source HEALTH summary
+    // The Sources panel's cached rows carry a per-source HEALTH summary
     // (install soundness + drift) computed on open/toggle; it scans the warn-floor
     // log, so read it fresh at each (infrequent) rebuild. `""` when no log path.
     let read_conn_log = || {
@@ -488,7 +491,7 @@ pub async fn run_tui(
             renderer.set_theme_picker(theme_picker);
             renderer.set_version_popup(version_popup, now);
             // Capture the health snapshot ONCE this frame — both the footer
-            // warning and the Connection panel's per-source `dead` flag read it.
+            // warning and the Sources panel's per-source `dead` flag read it.
             let health = source_health.borrow_and_update().clone();
             // Throttled drift re-scan (≤ every 15s) — reuse doctor's tested
             // scanner; the source-death warning still preempts it in the merge.
@@ -1242,12 +1245,16 @@ mod dispatch_tests {
     }
 
     #[test]
-    fn c_opens_connection_from_normal_scene() {
+    fn s_opens_sources_panel_from_normal_scene() {
         assert_eq!(
-            dispatch_key(KeyCode::Char('c'), NONE, ctx()),
+            dispatch_key(KeyCode::Char('s'), NONE, ctx()),
             KeyAction::ToggleConnection
         );
-        // Ctrl+C remains the quit chord, never the connection toggle.
+        // Bare `c` is now UNbound (the panel moved to `s`); Ctrl+C stays quit.
+        assert_eq!(
+            dispatch_key(KeyCode::Char('c'), NONE, ctx()),
+            KeyAction::None
+        );
         assert_eq!(
             dispatch_key(KeyCode::Char('c'), CTRL, ctx()),
             KeyAction::Quit
@@ -1283,7 +1290,7 @@ mod dispatch_tests {
         assert_eq!(dispatch_key(KeyCode::Char('u'), NONE, s), KeyAction::None);
         assert_eq!(dispatch_key(KeyCode::Enter, NONE, s), KeyAction::None);
         assert_eq!(
-            dispatch_key(KeyCode::Char('c'), NONE, s),
+            dispatch_key(KeyCode::Char('s'), NONE, s),
             KeyAction::ConnectionClose
         );
         assert_eq!(

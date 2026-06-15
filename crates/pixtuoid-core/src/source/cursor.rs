@@ -12,7 +12,7 @@
 //! - **Cursor Hooks** (`~/.cursor/hooks.json`) — shell commands fired on
 //!   lifecycle/tool events, JSON on stdin, staff-confirmed firing in the
 //!   standalone CLI. THIS is the seam: connecting Cursor in the Connection
-//!   panel (`c`) registers the shim in the GLOBAL `~/.cursor/hooks.json`.
+//!   panel (`s`) registers the shim in the GLOBAL `~/.cursor/hooks.json`.
 //!
 //! Hook payloads arrive on the shared hook socket stamped
 //! `_pixtuoid_source: "cursor"`; `decoder::decode_hook_payload` dispatches them

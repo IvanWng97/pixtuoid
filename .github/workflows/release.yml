@@ -353,7 +353,7 @@ jobs:
                 To start visualizing your AI coding sessions:
                   pixtuoid
 
-                Then press `c` to open the Connection panel and connect your
+                Then press `s` to open the Sources panel and connect your
                 CLI (Claude Code, Codex, ...). Disconnect there before
                 uninstalling to remove its hooks.
               EOS

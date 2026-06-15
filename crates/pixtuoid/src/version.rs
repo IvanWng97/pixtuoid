@@ -59,14 +59,14 @@ pub fn release_notes(version: &str) -> Option<&'static [&'static str]> {
         // brace would silently break if the indentation ever shifted.
         // [bump-inject-here]
         "0.8.0" => Some(&[
-            "New in-TUI Connection panel (press c) — connect or disconnect any agent CLI live; its characters walk in when you connect and out when you disconnect, no restart",
-            "Manage every CLI from that panel: the `install-hooks` / `uninstall-hooks` commands are gone — connecting a CLI is now the panel's job (press c)",
-            "CodeWhale sessions now visualized (cw·), subagents included — connect it in the Connection panel",
-            "opencode sessions now visualized (oc·), subagents included — connect it in the Connection panel",
+            "New in-TUI Sources panel (press s) — connect or disconnect any agent CLI live; its characters walk in when you connect and out when you disconnect, no restart",
+            "Manage every CLI from that panel: the `install-hooks` / `uninstall-hooks` commands are gone — connecting a CLI is now the panel's job (press s)",
+            "CodeWhale sessions now visualized (cw·), subagents included — connect it in the Sources panel",
+            "opencode sessions now visualized (oc·), subagents included — connect it in the Sources panel",
             "Every popup (Connection, agent dashboard, themes, help) is now borderless for a cleaner look",
         ]),
         "0.7.0" => Some(&[
-            "Agents leave the moment they finish — instant exit detection (process watch + SubagentStop hooks); connect Claude Code in the Connection panel (press c) to enable",
+            "Agents leave the moment they finish — instant exit detection (process watch + SubagentStop hooks); connect Claude Code in the Sources panel (press s) to enable",
             "Workflow fleets render right: instant seats on arrival, desks free in seconds, parent links survive worktree splits and revivals",
             "Attach mid-session and every live agent appears immediately — even idle or permission-parked ones",
             "Agent dashboard: Tab opens a foldable agent tree with per-CLI badges; Enter jumps floors (now up to 10)",
@@ -80,7 +80,7 @@ pub fn release_notes(version: &str) -> Option<&'static [&'static str]> {
         "0.6.1" => Some(&[
             "Windows support — native hook transport, installer, and release builds",
             "Install via npm — `npm i -g pixtuoid` on macOS, Linux & Windows",
-            "Reasonix sessions now visualized — connect it in the Connection panel (press c)",
+            "Reasonix sessions now visualized — connect it in the Sources panel (press s)",
             "Sharper agent activity — fewer ghost & duplicate sprites, and Codex stays active during web & tool search",
             "Diagnostics you can see — source-death footer warnings, config warnings on stderr, an always-on log file",
             "New project site — live demos, architecture & contributing docs, weather gallery",
@@ -93,14 +93,14 @@ pub fn release_notes(version: &str) -> Option<&'static [&'static str]> {
         "0.6.0" => Some(&[
             "Windows support — native hook transport, installer, and release builds",
             "Install via npm — `npm i -g pixtuoid` now works on macOS, Linux & Windows",
-            "Reasonix sessions now visualized — connect it in the Connection panel (press c)",
+            "Reasonix sessions now visualized — connect it in the Sources panel (press s)",
             "Sharper agent activity — fewer ghost & duplicate sprites, and Codex stays active during web & tool search",
             "Diagnostics you can see — source-death footer warnings, config warnings on stderr, an always-on log file",
             "New project site — live demos, architecture & contributing docs, weather gallery",
         ]),
         "0.4.0" => Some(&[
             "Renamed from ascii-agents to pixtuoid",
-            "Reconnect your CLI in the Connection panel (press c) to update hooks",
+            "Reconnect your CLI in the Sources panel (press s) to update hooks",
             "New env vars: PIXTUOID_SOCKET/HOOK/LOG",
             "Flaky startup test fixed + 250ms rescan",
         ]),
@@ -112,7 +112,7 @@ pub fn release_notes(version: &str) -> Option<&'static [&'static str]> {
             "Corrupted last_seen_version self-heals on next launch",
         ]),
         "0.5.0" => Some(&[
-            "Now visualizes Codex sessions too — connect it in the Connection panel (press c)",
+            "Now visualizes Codex sessions too — connect it in the Sources panel (press s)",
             "Office overhaul: unified furniture + smarter approach/seating pathfinding",
             "Glass meeting rooms, denser desk pods, day/night lighting",
             "Physics-grounded weather: storms, lightning, moonlight",

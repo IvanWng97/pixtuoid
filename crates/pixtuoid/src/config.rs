@@ -39,7 +39,7 @@ pub struct AppConfig {
     /// Per-source connection flags (registry source id → connected). An absent
     /// id falls to the migrate-default in [`resolve_connected`] (connected iff
     /// hooks are already installed; a source with no install target ⇒ connected;
-    /// else disconnected). The `c` Connection panel writes a flag on toggle. A
+    /// else disconnected). The `s` Sources panel writes a flag on toggle. A
     /// `[sources]` table; empty ⇒ omitted on save. Keep BEFORE `pets` — pets
     /// must stay last (its array-of-tables serializes cleanest after all tables,
     /// and a `[sources]` table written after `[[pets]]` would re-parent).
@@ -207,7 +207,7 @@ pub fn save_version(path: &Path, version: &str) -> Result<()> {
 
 /// Persist a single source's connection flag, auto-vivifying the `[sources]`
 /// table, through the comment/unknown-key-preserving `update_config` path. The
-/// `c` Connection panel calls this on every connect/disconnect toggle.
+/// `s` Sources panel calls this on every connect/disconnect toggle.
 pub fn save_source_connected(path: &Path, source_id: &'static str, connected: bool) -> Result<()> {
     update_config(path, |doc| {
         doc["sources"][source_id] = toml_edit::value(connected);

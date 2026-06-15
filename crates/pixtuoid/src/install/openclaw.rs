@@ -93,7 +93,7 @@ fn plugin_dir() -> Result<PathBuf> {
 }
 
 /// Auto-detect probe: is OpenClaw present (its home dir exists), so the
-/// Connection panel OFFERS it? Probe OpenClaw's OWN dir, NOT our plugin/config —
+/// Sources panel OFFERS it? Probe OpenClaw's OWN dir, NOT our plugin/config —
 /// keying on our artifact would chicken-and-egg (opencode/Reasonix rationale).
 pub fn detect_installed() -> bool {
     openclaw_home().map(|d| d.exists()).unwrap_or(false)
