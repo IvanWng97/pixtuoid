@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use pixtuoid_core::source::manager::SourceDeath;
-use pixtuoid_core::state::{ActivityState, MAX_FLOORS};
+use pixtuoid_core::state::{ActivityState, DaemonState, MAX_FLOORS};
 use pixtuoid_core::SceneState;
 use tokio::sync::watch;
 
@@ -162,7 +162,28 @@ fn summarize(scene: &SceneState) -> String {
             format!("{}@{}:{}", sanitize_line(&a.label), a.desk_index.0, state)
         })
         .collect();
-    format!("agents=[{}]", agents.join(", "))
+    // Daemon-style sources (the OpenClaw "Molty" gateway) render as wandering
+    // mascots, not desk agents — surface them here too so headless is a complete
+    // window onto the scene (and the live-e2e harness can assert Molty's state).
+    // Source name is a registry id (controlled), but sanitize for defense like
+    // every other field on this println path (R0609-02).
+    let daemons: Vec<String> = scene
+        .daemons()
+        .iter()
+        .map(|(source, p)| {
+            let state = match p.state {
+                DaemonState::Idle => "idle",
+                DaemonState::Busy => "busy",
+                DaemonState::Down => "down",
+            };
+            format!("{}:{}", sanitize_line(source), state)
+        })
+        .collect();
+    format!(
+        "agents=[{}] daemons=[{}]",
+        agents.join(", "),
+        daemons.join(", ")
+    )
 }
 
 /// Format a `SourceDeath` for the headless stdout health line. Both fields are
@@ -364,6 +385,66 @@ mod tests {
         assert!(summary.contains(":idle"), "got: {summary}");
         // The "@desk_index" format is present for each agent.
         assert!(summary.contains('@'), "got: {summary}");
+    }
+
+    // Headless must surface the DAEMON layer too (the OpenClaw "Molty" gateway),
+    // not just agents — in headless it is the ONLY programmatic window onto a
+    // daemon's presence. Format is `<source>:<idle|busy|down>`, source-keyed so N
+    // daemons each get an entry. (This is also what the live-e2e harness asserts.)
+    #[test]
+    fn summarize_reports_daemon_presence() {
+        use pixtuoid_core::source::daemon::{apply_presence, DaemonPresenceUpdate};
+
+        let mut scene = SceneState::new([8; MAX_FLOORS]);
+        let now = SystemTime::now();
+
+        // No daemon configured → an empty (but present) daemons section.
+        assert!(
+            summarize(&scene).contains("daemons=[]"),
+            "got: {}",
+            summarize(&scene)
+        );
+
+        // gateway_start → idle.
+        apply_presence(
+            &mut scene,
+            "openclaw",
+            DaemonPresenceUpdate::GatewayUp { pid: Some(4242) },
+            now,
+        );
+        assert!(
+            summarize(&scene).contains("daemons=[openclaw:idle]"),
+            "got: {}",
+            summarize(&scene)
+        );
+
+        // a run in flight → busy.
+        apply_presence(
+            &mut scene,
+            "openclaw",
+            DaemonPresenceUpdate::RunStarted {
+                run_key: "r".into(),
+            },
+            now,
+        );
+        assert!(
+            summarize(&scene).contains("daemons=[openclaw:busy]"),
+            "got: {}",
+            summarize(&scene)
+        );
+
+        // gateway_stop → down.
+        apply_presence(
+            &mut scene,
+            "openclaw",
+            DaemonPresenceUpdate::GatewayDown,
+            now,
+        );
+        assert!(
+            summarize(&scene).contains("daemons=[openclaw:down]"),
+            "got: {}",
+            summarize(&scene)
+        );
     }
 
     // Headless `summarize` feeds `println!` directly. The label (cwd basename),

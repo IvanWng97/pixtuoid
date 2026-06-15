@@ -41,6 +41,9 @@ scripts/             gen-media.py + media.json (the ONE manifest-driven driver f
                      crop-snapshot.py (visual verify), gen-readme.mjs (README sections
                      from site/src/*.json), compare-screenshots.py (`just gen-check`),
                      replay-fixture.sh (replay a captured rollout headlessly),
+                     openclaw-live-e2e.sh (zero-cost daemon live-e2e: drives the real shim
+                     with OpenClaw envelopes on an isolated socket → asserts Molty's
+                     idle/busy/down via the headless `daemons=` line),
                      check_upstream_drift.py (weekly wire-format watch),
                      review-metrics.py (review-economics collector)
 site/                Astro landing page → GitHub Pages; self-contained Node project,
