@@ -286,5 +286,24 @@
    "--meeting",
    "3"
   ]
+ },
+ {
+  "id": "openclaw",
+  "kind": "clip",
+  "targets": [
+   "site"
+  ],
+  "cols": 140,
+  "rows": 60,
+  "duration": 9,
+  "fps": 12,
+  "hour": 14,
+  "poster": 3,
+  "extra": [
+   "--openclaw",
+   "busy",
+   "--agents",
+   "5"
+  ]
  }
 ]

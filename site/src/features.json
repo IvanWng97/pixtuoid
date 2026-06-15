@@ -36,6 +36,15 @@
     "desc": "Deterministic shirt/hair/skin palette from session hash, 16 curated outfits"
   },
   {
+    "icon": "🦞",
+    "name": "OpenClaw gateway mascot",
+    "desc": "A live OpenClaw daemon gateway appears as \"Molty\", a wandering lobster whose motion encodes gateway health — idle ambles, busy shuttles, model errors flush sickly-red, shutdown walks out",
+    "card": {
+      "blurb": "Run an OpenClaw gateway and \"Molty\" scuttles in — a lobster whose wander encodes the daemon's health: idle ambles, busy shuttles, a failing model backend flushes it sickly-red, shutdown walks it out to the elevator.",
+      "href": "#showcase-openclaw"
+    }
+  },
+  {
     "icon": "🌧️",
     "name": "Weather effects",
     "desc": "Rain, storm, snow, fog, overcast, windy — cycles every 10 min + sunset golden hour",
@@ -45,14 +54,9 @@
     }
   },
   {
-    "icon": "📊",
-    "name": "Tooltip stats",
-    "desc": "Hover any agent to see session duration, tool call count, and active time %"
-  },
-  {
-    "icon": "🏷️",
-    "name": "Furniture tooltips",
-    "desc": "Hover any item — desks, sofas, plants, vending machine, printer — to see its name"
+    "icon": "🔎",
+    "name": "Hover tooltips",
+    "desc": "Hover an agent for session duration, tool-call count and active-time %; hover any furniture — desks, sofas, plants, vending machine, printer — for its name"
   },
   {
     "icon": "🐾",
@@ -66,12 +70,14 @@
   {
     "icon": "☕",
     "name": "Coffee run",
-    "desc": "Idle agents visit the pantry, carry a cup back to their desk. Cup stays while you work; taken on exit"
+    "desc": "Idle agents visit the pantry, carry a cup back to their desk. Cup stays while you work; taken on exit",
+    "featured": false
   },
   {
     "icon": "💬",
     "name": "Pantry chitchat",
-    "desc": "2+ idle agents at the same waypoint trigger speech bubbles with dev-humor snippets"
+    "desc": "2+ idle agents at the same waypoint trigger speech bubbles with dev-humor snippets",
+    "featured": false
   },
   {
     "icon": "🛡️",

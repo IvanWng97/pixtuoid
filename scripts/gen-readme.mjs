@@ -64,9 +64,14 @@ function regenSection(label, start, end, body) {
 }
 
 // --- Features table ---
-const featureRows = features.map(
-  (f) => `| ${cell(f.icon)} | **${cell(f.name)}** | ${cell(f.desc)} |`
-);
+// The README lists the HEADLINE features only; the site's Features grid shows the
+// full set. A feature is README-featured by DEFAULT — opt a secondary one OUT with
+// `"featured": false` (the inverse of install.json's opt-IN `readme:true`, because
+// most features are headline and only a few are flavor). Edit the flag in
+// features.json, never this table.
+const featureRows = features
+  .filter((f) => f.featured !== false)
+  .map((f) => `| ${cell(f.icon)} | **${cell(f.name)}** | ${cell(f.desc)} |`);
 regenSection(
   'Features table',
   '<!-- features:start · generated from site/src/features.json by `just gen-readme` — edit the JSON, not this table -->',
