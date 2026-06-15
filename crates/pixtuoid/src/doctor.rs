@@ -226,23 +226,48 @@ pub fn format_doctor_row(row: &DoctorSourceRow) -> String {
 /// input) and return the first non-empty output line, trimmed. Best-effort: a
 /// missing binary / nonzero exit / non-UTF8 → None ("version: unknown"). Checks
 /// stdout then stderr (some CLIs print `--version` to stderr).
+/// First non-empty line of subprocess output, trimmed AND control-char
+/// `sanitize`d — `--version` output is untrusted (a PATH-substituted binary
+/// could emit ANSI/OSC to manipulate the terminal; R0615-06). Pure → tested.
+fn first_sanitized_line(bytes: &[u8]) -> Option<String> {
+    String::from_utf8_lossy(bytes)
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .map(sanitize)
+}
+
 fn probe_version(argv: &'static [&'static str]) -> Option<String> {
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
     let (cmd, args) = argv.split_first()?;
-    // NULL stdin so a misbehaving `<cli> --version` that reads stdin can't block
-    // doctor on the inherited TTY (`output()` inherits stdin + has no timeout).
-    let output = std::process::Command::new(cmd)
+    // Bounded + best-effort: NULL stdin so it can't block on the inherited TTY,
+    // and KILL it after a deadline so a hung/slow/malicious `<cli> --version`
+    // (a network call, an interactive prompt, a PATH-substituted binary) can't
+    // hang doctor. `--version` output is tiny, so the piped buffers never fill
+    // while we poll (no reader-vs-writer deadlock for this use).
+    let mut child = Command::new(cmd)
         .args(args)
-        .stdin(std::process::Stdio::null())
-        .output()
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .ok()?;
-    let first_line = |b: &[u8]| {
-        String::from_utf8_lossy(b)
-            .lines()
-            .map(str::trim)
-            .find(|l| !l.is_empty())
-            .map(str::to_string)
-    };
-    first_line(&output.stdout).or_else(|| first_line(&output.stderr))
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(20)),
+            Err(_) => return None,
+        }
+    }
+    let output = child.wait_with_output().ok()?;
+    first_sanitized_line(&output.stdout).or_else(|| first_sanitized_line(&output.stderr))
 }
 
 /// Run the diagnosis: read config + install-state + the log, probe installed CLI
@@ -454,5 +479,21 @@ mod tests {
         // un-probeable installed → shows unknown, no false skew.
         let n = version_status(None, "1.0.62");
         assert!(n.contains("unknown") && !n.contains("NEWER"));
+    }
+
+    #[test]
+    fn probe_output_is_sanitized_and_first_nonempty() {
+        // Leading blank lines skipped; the version line returned with control
+        // chars (ANSI/OSC/BEL) stripped — a PATH-substituted binary can't drive
+        // the terminal through `--version`.
+        let raw = b"\n\n\x1b]0;pwned\x07cli \x1b[31m1.2.3\x1b[0m\nnext line";
+        let got = first_sanitized_line(raw).unwrap();
+        assert_eq!(got, "]0;pwnedcli [31m1.2.3[0m"); // ESC + BEL stripped, text kept
+        assert!(
+            !got.chars().any(|c| c.is_control()),
+            "no control chars: {got:?}"
+        );
+        assert_eq!(first_sanitized_line(b""), None);
+        assert_eq!(first_sanitized_line(b"   \n  \n"), None);
     }
 }
