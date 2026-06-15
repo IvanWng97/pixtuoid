@@ -39,11 +39,13 @@ const SENTINEL_KEY: &str = "_pixtuoid";
 /// `every_registered_reasonix_event_decodes` below. PostLLMCall / PreCompact /
 /// SubagentStop are deliberately absent: per-model-turn noise, compaction
 /// internals, and a no-id subagent signal already covered by the parent's
-/// `task` PostToolUse.
+/// `task` PostToolUse. `PermissionRequest` (#302) is the structured approval
+/// gate → Waiting, fired alongside `Notification` (idempotent).
 const REASONIX_EVENTS: &[&str] = &[
     "SessionStart",
     "PreToolUse",
     "PostToolUse",
+    "PermissionRequest",
     "UserPromptSubmit",
     "Stop",
     "Notification",
