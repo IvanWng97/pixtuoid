@@ -53,6 +53,10 @@ pub struct RunConfig {
     /// [`ConnectedSources`] the reducer gate reads and the Connection panel
     /// mutates. A disconnected source's events are dropped + its sprites evicted.
     pub connected: HashSet<String>,
+    /// The warn-floor log path (`main` owns the resolution). `run_tui`
+    /// throttle-scans it for decode-drift breadcrumbs → the footer nudge. `None`
+    /// in headless / when no log file (then no footer drift surfacing).
+    pub log_path: Option<PathBuf>,
 }
 
 /// A live, shared set of connected source ids — the runtime mirror of the

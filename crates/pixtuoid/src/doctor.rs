@@ -102,6 +102,36 @@ pub fn scan_log_for_source(log: &str, source: &str) -> LogScanResult {
     r
 }
 
+/// Source label-prefixes (e.g. `"cc"`) that have ANY decode-drift breadcrumb in
+/// the log — for the live footer nudge. Reuses `scan_log_for_source` (tested).
+pub fn drifted_sources(log: &str) -> Vec<String> {
+    REGISTERED_SOURCES
+        .iter()
+        .filter(|s| scan_log_for_source(log, s).total() > 0)
+        .filter_map(|s| registry::descriptor_for(s).map(|d| d.label_prefix.to_string()))
+        .collect()
+}
+
+/// Merge the source-death footer warning (HIGHEST priority — the office is
+/// partially frozen) with a passive decode-drift nudge. `None` when both clear.
+/// The footer (`run_tui`) sets this each frame; the drift list is throttle-scanned.
+pub fn footer_warning(source_death: Option<&str>, drifted: &[String]) -> Option<String> {
+    if let Some(d) = source_death {
+        return Some(d.to_string());
+    }
+    if drifted.is_empty() {
+        return None;
+    }
+    let prefixes = drifted
+        .iter()
+        .map(|p| format!("{p}·"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    Some(format!(
+        "⚠ decode drift: {prefixes} — run `pixtuoid doctor`"
+    ))
+}
+
 /// One source's diagnosis row (plain data, so `format_doctor_row` is pure/tested).
 pub struct DoctorSourceRow {
     pub prefix: &'static str,
@@ -485,6 +515,30 @@ mod tests {
         // un-probeable installed → shows unknown, no false skew.
         let n = version_status(None, "1.0.62");
         assert!(n.contains("unknown") && !n.contains("NEWER"));
+    }
+
+    #[test]
+    fn drifted_sources_and_footer_warning() {
+        let log = capture(|| {
+            drift::unknown_event("claude-code", "NewHook");
+            drift::missing_field("codex", "function_call", "name");
+        });
+        let mut d = drifted_sources(&log);
+        d.sort();
+        assert_eq!(d, vec!["cc".to_string(), "cx".to_string()]);
+        // source-death wins (the office is partially frozen).
+        assert_eq!(
+            footer_warning(Some("source 'x' died"), &d).as_deref(),
+            Some("source 'x' died")
+        );
+        // drift nudge when no death.
+        let w = footer_warning(None, &d).unwrap();
+        assert!(
+            w.contains("cc·") && w.contains("cx·") && w.contains("doctor"),
+            "{w}"
+        );
+        // both clear → nothing.
+        assert_eq!(footer_warning(None, &[]), None);
     }
 
     #[test]

@@ -144,6 +144,7 @@ fn main() -> Result<()> {
                 theme,
                 pets,
                 connected,
+                log_path: Some(log_file_path()),
             })
         }
         Cmd::ValidatePack { pack_dir } => validate::validate_pack(&pack_dir),
