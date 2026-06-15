@@ -137,17 +137,29 @@ fn main() -> Result<()> {
                 // Warn here (the config-warning channel) so the fully-passive user
                 // who never opens the Connection panel or runs `doctor` still
                 // learns. Static state, so a boot eprintln — NOT the live footer.
+                // Routed through the SHARED `doctor::diagnose` rollup (empty log =
+                // skip the drift scan; boot warns on broken installs only) so this
+                // surface can't drift from the panel + the CLI report. `diagnose`
+                // gates the install check on `has_hooks` internally.
+                // Iterates TARGETS, not REGISTERED_SOURCES: only an install-bearing
+                // source can be install-BROKEN — transcript-only sources (Antigravity,
+                // Copilot) have no schema to verify, so the asymmetry is correct.
                 for &t in install::target::TARGETS {
-                    if connected.contains(t.core_source) && install::has_hooks(t) {
-                        let v = install::verify_target(t, None);
-                        if !v.is_sound() {
-                            eprintln!(
-                                "⚠ pixtuoid: {} hooks are installed but BROKEN: {} — \
-                                 reconnect in the Connection panel (press c)",
-                                t.core_source,
-                                v.issues.join("; ")
-                            );
-                        }
+                    if !connected.contains(t.core_source) {
+                        continue;
+                    }
+                    let diag = doctor::diagnose(t.core_source, "");
+                    if diag.is_broken() {
+                        let issues = diag
+                            .install
+                            .as_ref()
+                            .map(|v| v.issues.join("; "))
+                            .unwrap_or_default();
+                        eprintln!(
+                            "⚠ pixtuoid: {} hooks are installed but BROKEN: {issues} — \
+                             reconnect in the Connection panel (press c)",
+                            t.core_source
+                        );
                     }
                 }
             }

@@ -459,6 +459,12 @@ fn probe_version(argv: &'static [&'static str]) -> Option<String> {
 pub fn run(log_path: &std::path::Path) -> anyhow::Result<()> {
     let mut warnings = Vec::new();
     let cfg = crate::config::load(&crate::config::config_path(), &mut warnings);
+    // `doctor` is a separate PROCESS from the running TUI, so it derives the
+    // connected-set fresh from config via the SAME `resolve_connected` the boot
+    // seeder uses (NOT the live in-process `ConnectedSources`, which it can't
+    // see). A snapshot diagnostic reading live on-disk state is the correct
+    // semantic — it can lag a just-made in-TUI toggle until that toggle persists,
+    // which it always does (persist-first; see `connect_source`/`disconnect_source`).
     let connected = crate::config::resolve_connected(&cfg, |src| {
         crate::install::target::by_source(src).map(crate::install::has_hooks)
     });

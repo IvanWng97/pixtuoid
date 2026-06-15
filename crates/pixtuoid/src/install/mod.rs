@@ -90,7 +90,13 @@ pub fn verify_target(t: &'static Target, config: Option<PathBuf>) -> verify::Sch
             }
         }
         ShimRef::Unknown => {
-            issues.push("could not read the shim path from the managed hook command".into());
+            // SOFT, not hard: we couldn't extract a path from the command, so we
+            // can't CONFIRM the shim exists — but we also can't prove it's broken
+            // (a future source with a novel-but-valid command shape lands here).
+            // False-positive-free wins: a note, never a "broken" verdict. The
+            // genuine no-hooks case is already a HARD issue from verify_schema's
+            // sentinel/event-set check, so this never masks a real break.
+            notes.push("could not read the shim path from the managed hook command".into());
         }
     }
     verify::SchemaVerifyResult { issues, notes }
