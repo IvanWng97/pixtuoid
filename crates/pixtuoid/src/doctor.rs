@@ -539,8 +539,18 @@ mod tests {
             "{w}"
         );
         // The footer painter (`hud.rs` `" ⚠ {warn} "`) owns the warning glyph;
-        // neither message may embed its own or it double-prints (`⚠ ⚠ …`).
+        // neither the drift NOR the death message may embed its own or it
+        // double-prints (`⚠ ⚠ …`).
         assert!(!w.contains('⚠'), "drift msg must not embed ⚠: {w}");
+        // Death tier: route the REAL `source_warning_message` output through the
+        // merge (not a literal) — if that producer ever embeds a glyph, this
+        // catches the same double-print at the death tier too.
+        let death = crate::tui::widgets::source_warning_message(&[
+            pixtuoid_core::source::manager::SourceDeath::new("claude-code", "x"),
+        ])
+        .unwrap();
+        let dw = footer_warning(Some(&death), &d).unwrap();
+        assert!(!dw.contains('⚠'), "death msg must not embed ⚠: {dw}");
         // both clear → nothing.
         assert_eq!(footer_warning(None, &[]), None);
     }
