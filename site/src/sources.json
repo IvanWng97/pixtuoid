@@ -70,5 +70,14 @@
     "featured": false,
     "transport": "Hook shim (~/.cursor/hooks.json, session-id-keyed)",
     "platforms": { "macos": "yes", "linux": "yes", "windows": "experimental" }
+  },
+  {
+    "id": "openclaw",
+    "name": "OpenClaw",
+    "url": "https://github.com/openclaw/openclaw",
+    "status": "supported",
+    "featured": false,
+    "transport": "Hook shim (TS plugin → openclaw gateway; one daemon-presence HQ fixture, not a desk sprite)",
+    "platforms": { "macos": "yes", "linux": "yes", "windows": "experimental" }
   }
 ]

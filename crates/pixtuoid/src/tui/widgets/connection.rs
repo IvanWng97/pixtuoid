@@ -130,6 +130,7 @@ fn connection_line(
         "oc" => theme.source.opencode,
         "cp" => theme.source.copilot,
         "cu" => theme.source.cursor,
+        "ok" => theme.source.openclaw,
         _ => theme.ui.label_idle,
     });
 

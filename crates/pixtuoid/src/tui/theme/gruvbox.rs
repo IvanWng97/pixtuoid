@@ -504,5 +504,10 @@ pub static GRUVBOX: Theme = Theme {
             g: 0xaa,
             b: 0xc3,
         }, // cursor slate-blue (monochrome brand; distinct from all 7)
+        openclaw: Rgb {
+            r: 0xff,
+            g: 0xaa,
+            b: 0x30,
+        }, // openclaw marigold (Molty; warm, clears claude-amber + opencode-red)
     },
 };

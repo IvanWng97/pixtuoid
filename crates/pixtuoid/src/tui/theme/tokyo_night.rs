@@ -498,5 +498,10 @@ pub static TOKYO_NIGHT: Theme = Theme {
             g: 0x96,
             b: 0xd2,
         }, // cursor slate-blue (monochrome brand; distinct from all 7)
+        openclaw: Rgb {
+            r: 0xff,
+            g: 0xaa,
+            b: 0x30,
+        }, // openclaw marigold (Molty; warm, clears claude-amber + opencode-red)
     },
 };
