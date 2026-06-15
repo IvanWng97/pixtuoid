@@ -139,12 +139,7 @@ fn floor_variant_hash_gives_unique_layouts_per_floor() {
         .map(|i| {
             let seed = i.wrapping_mul(FLOOR_SEED_MULTIPLIER);
             let l = SceneLayout::compute_with_seed(192, 160, 4, seed).unwrap();
-            (
-                l.meeting_room,
-                l.pantry_room,
-                l.meeting_tables,
-                l.home_desks,
-            )
+            (l.meeting_room, l.pantry_room, l.meeting_rooms, l.home_desks)
         })
         .collect();
 

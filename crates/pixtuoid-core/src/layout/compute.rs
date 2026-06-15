@@ -246,18 +246,15 @@ pub(super) fn compute_with_seed(
         };
         (sofas, table)
     };
-    let mut meeting_sofas: Vec<Point> = Vec::new();
-    let mut meeting_table_vec: Vec<Point> = Vec::new();
+    let mut meeting_rooms: Vec<MeetingRoom> = Vec::new();
     // Order is load-bearing: room 0 = `meeting_room`, room 1 = `meeting_room_2`
-    // (dense layout). `compute_waypoints` keys seats to a table by this index.
+    // (dense layout). `compute_waypoints` keys seats to a room by this index.
     for room in [meeting_room, meeting_room_2] {
         if let Some(mr) = room.filter(&room_fits_furniture) {
             let (sofas, table) = room_furniture(&mr);
-            meeting_sofas.extend(sofas);
-            meeting_table_vec.push(table);
+            meeting_rooms.push(MeetingRoom { sofas, table });
         }
     }
-    let meeting_tables = meeting_table_vec;
 
     let room_walls = compute_room_walls(
         RoomPresence {
@@ -296,10 +293,7 @@ pub(super) fn compute_with_seed(
         pantry_counter_size,
         &pod_decor,
         &walkway,
-        MeetingFurniture {
-            sofas: &meeting_sofas,
-            tables: &meeting_tables,
-        },
+        &meeting_rooms,
     );
 
     // Plants scatter through the cubicle corridor edges + pantry.
@@ -513,8 +507,7 @@ pub(super) fn compute_with_seed(
         top_margin,
         door,
         &home_desks,
-        &meeting_sofas,
-        &meeting_tables,
+        &meeting_rooms,
         pantry_table,
         &pantry_chairs,
         &waypoints,
@@ -556,8 +549,7 @@ pub(super) fn compute_with_seed(
         door_threshold,
         meeting_room,
         pantry_room,
-        meeting_sofas,
-        meeting_tables,
+        meeting_rooms,
         room_walls,
         top_margin,
         pantry_table,
@@ -603,13 +595,6 @@ pub(super) struct RoomPresence {
     has_dual_meeting: bool,
     has_meeting: bool,
     has_pantry: bool,
-}
-
-/// A meeting room's furniture in lockstep (2 sofas + 1 table per room).
-#[derive(Clone, Copy)]
-pub(super) struct MeetingFurniture<'a> {
-    sofas: &'a [Point],
-    tables: &'a [Point],
 }
 
 /// Pod-grid desk placement: full pods, partial columns at right edge,
@@ -933,14 +918,10 @@ pub(super) fn compute_waypoints(
     pantry_counter_size: Size,
     pod_decor: &[PodDecorItem],
     walkway: &Bounds,
-    meeting: MeetingFurniture<'_>,
+    meeting_rooms: &[MeetingRoom],
 ) -> (Vec<Waypoint>, Option<Point>) {
     let right_x = cubicle_band.x;
     let right_w = cubicle_band.width;
-    let MeetingFurniture {
-        sofas: meeting_sofas,
-        tables: meeting_tables,
-    } = meeting;
     let Point {
         x: couch_x,
         y: couch_y,
@@ -1037,45 +1018,34 @@ pub(super) fn compute_waypoints(
         });
     }
 
-    // Meeting-room slots. Sofas are stored north→south per room (2 per
-    // room, see `meeting_sofas` assembly); each seats up to 3 agents
-    // (dx ∈ {-6, 0, +6} along the 20px sofa) facing the table. Two standing
-    // slots flank each table. Every slot in a room shares its `room_id` so the
+    // Meeting-room slots. Each room's 2 sofas are stored north→south
+    // (`MeetingRoom.sofas[0/1]`); each seats up to 3 agents (dx ∈ {-6, 0, +6}
+    // along the 20px sofa) facing the table. Two standing slots flank the table.
+    // Every slot in a room shares its `room_id` (the room's index) so the
     // group-chitchat venue keys on the room, not the individual seat.
-    for (i, sofa) in meeting_sofas.iter().enumerate() {
-        let room_id = i / 2;
-        // Lockstep invariant: 2 sofas + 1 table per room (see meeting_sofas /
-        // meeting_tables assembly), so room_id < meeting_tables.len() always.
-        // The map_or fallback below is therefore dead; assert it so a future
-        // break (e.g. a 3rd sofa, conditional table) surfaces loudly instead of
-        // silently flipping a sofa's facing.
-        debug_assert!(
-            room_id < meeting_tables.len(),
-            "meeting sofa/table lockstep broken: sofa {i} -> room {room_id} but {} tables",
-            meeting_tables.len()
-        );
-        let table_y = meeting_tables.get(room_id).map_or(sofa.y, |t| t.y);
-        // North-of-table sofa faces South (front toward the viewer); the
-        // south sofa faces North (back toward the viewer) — the pair reads
-        // as two people facing each other across the table.
-        let facing = if sofa.y < table_y {
-            Facing::South
-        } else {
-            Facing::North
-        };
-        for dx in SEAT_DX {
-            waypoints.push(Waypoint {
-                pos: Point {
-                    x: sofa.x.saturating_add_signed(dx),
-                    y: sofa.y,
-                },
-                kind: WaypointKind::MeetingSofa,
-                facing,
-                room_id: Some(room_id),
-            });
+    for (room_id, room) in meeting_rooms.iter().enumerate() {
+        let table = room.table;
+        for sofa in room.sofas {
+            // North-of-table sofa faces South (front toward the viewer); the
+            // south sofa faces North (back toward the viewer) — the pair reads
+            // as two people facing each other across the table.
+            let facing = if sofa.y < table.y {
+                Facing::South
+            } else {
+                Facing::North
+            };
+            for dx in SEAT_DX {
+                waypoints.push(Waypoint {
+                    pos: Point {
+                        x: sofa.x.saturating_add_signed(dx),
+                        y: sofa.y,
+                    },
+                    kind: WaypointKind::MeetingSofa,
+                    facing,
+                    room_id: Some(room_id),
+                });
+            }
         }
-    }
-    for (room_id, table) in meeting_tables.iter().enumerate() {
         // West stand faces East (toward the table centre); east stand faces West.
         // The table obstacle (mask.rs) is `mark_blocked(t.x-5, w=11, pad=2)` →
         // blocks x ∈ [t.x-7, t.x+7] (symmetric, 7 px each side). West stand at

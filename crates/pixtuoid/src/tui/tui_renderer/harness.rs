@@ -1964,10 +1964,8 @@ fn furniture_hit_test_covers_every_kind_on_real_layouts() {
                 );
             }
         }
-        if !layout.meeting_sofas.is_empty() {
+        if !layout.meeting_rooms.is_empty() {
             assert!(labels.contains("Meeting Sofa"), "seed {seed}: Meeting Sofa");
-        }
-        if !layout.meeting_tables.is_empty() {
             assert!(
                 labels.contains("Meeting Table"),
                 "seed {seed}: Meeting Table"

@@ -94,6 +94,18 @@ pub struct PodDecorItem {
     pub pos: Point,
 }
 
+/// One meeting room's furniture trio, grouped so the per-room structure is
+/// explicit instead of reconstructed by index arithmetic over two flat Vecs.
+/// `sofas[0]` is the north sofa, `sofas[1]` the south (the order the old flat
+/// `meeting_sofas` Vec was extended in); `table` is centered between them. A
+/// room always produces exactly 2 sofas + 1 table (see `compute::room_furniture`),
+/// so the fixed-size array encodes that invariant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct MeetingRoom {
+    pub sofas: [Point; 2],
+    pub table: Point,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Waypoint {
     pub pos: Point,
@@ -133,8 +145,11 @@ pub struct SceneLayout {
     pub door_threshold: Option<Point>,
     pub meeting_room: Option<Bounds>,
     pub pantry_room: Option<Bounds>,
-    pub meeting_sofas: Vec<Point>,
-    pub meeting_tables: Vec<Point>,
+    /// Meeting rooms in floor order (room 0 = `meeting_room`, room 1 =
+    /// `meeting_room_2` for the dense layout). Each carries its 2 sofas + table
+    /// grouped — consumers index `meeting_rooms[room_id]` rather than the old
+    /// `meeting_sofas[room_id*2 …]` / `meeting_tables[room_id]` flat arithmetic.
+    pub meeting_rooms: Vec<MeetingRoom>,
     pub room_walls: Vec<WallSegment>,
     pub top_margin: u16,
     pub pantry_table: Option<Point>,

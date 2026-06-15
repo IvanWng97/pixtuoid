@@ -98,8 +98,7 @@ use background::{
     paint_shadow, time_of_day_look, Ellipse,
 };
 use drawable::{
-    gateway_mascot_def, mascot_position, paint_drawable, pet_position,
-    Drawable, DrawableKind,
+    gateway_mascot_def, mascot_position, paint_drawable, pet_position, Drawable, DrawableKind,
 };
 use glass::{paint_glass_wall_h, paint_glass_wall_v, stitch_vertical_wall, WALL_THICK_H_PX};
 use palette::{agent_palette, recolor_frame};
@@ -652,7 +651,7 @@ fn enqueue_characters<'a>(
     // All 3 lounge-couch seat waypoints collapse to ONE chitchat venue (keyed
     // on the first couch's index) so the couch hosts a single group
     // conversation like the meeting room — without overloading the
-    // meeting-only `room_id` field (which indexes `meeting_tables`).
+    // meeting-only `room_id` field (which indexes `meeting_rooms`).
     let couch_group_idx = ctx
         .layout
         .waypoints
@@ -1179,56 +1178,50 @@ fn enqueue_gateway_mascot<'a>(
 /// (whose key is `sofa.y + 2`); the north sofa stays +2 so insertion order
 /// breaks the tie in its sitter's favor.
 fn enqueue_meeting_furniture<'a>(layout: &'a Layout, drawables: &mut Vec<Drawable<'a>>) {
-    let sofas_per_room = if layout.meeting_tables.len() > 1 {
-        2
-    } else {
-        layout.meeting_sofas.len()
-    };
-    for (room_idx, &table) in layout.meeting_tables.iter().enumerate() {
-        let sofa_start = room_idx * sofas_per_room;
-        let top_sofa = layout.meeting_sofas.get(sofa_start);
-        let bot_sofa = layout.meeting_sofas.get(sofa_start + 1);
-        if let (Some(&ts), Some(&bs)) = (top_sofa, bot_sofa) {
-            let rug_w = 18u16;
-            let rug_h =
-                bs.y.saturating_sub(ts.y)
-                    .saturating_add(8)
-                    .min(layout.buf_h.saturating_sub(table.y).saturating_add(8));
+    for room in &layout.meeting_rooms {
+        let table = room.table;
+        let [ts, bs] = room.sofas;
+        let rug_w = 18u16;
+        let rug_h =
+            bs.y.saturating_sub(ts.y)
+                .saturating_add(8)
+                .min(layout.buf_h.saturating_sub(table.y).saturating_add(8));
+        drawables.push(Drawable {
+            anchor_y: table.y.saturating_sub(rug_h / 2),
+            kind: DrawableKind::AreaRug {
+                pos: table,
+                width: rug_w,
+                height: rug_h,
+            },
+        });
+    }
+    for room in &layout.meeting_rooms {
+        for (i, sofa) in room.sofas.into_iter().enumerate() {
+            // sofas[0] is the north sofa, sofas[1] the south — the south sofa
+            // faces away (`mirrored`) and y-sorts +3 to occlude its sitter.
+            let mirrored = i % 2 != 0;
+            let faces_away = sofa.y >= room.table.y;
             drawables.push(Drawable {
-                anchor_y: table.y.saturating_sub(rug_h / 2),
-                kind: DrawableKind::AreaRug {
-                    pos: table,
-                    width: rug_w,
-                    height: rug_h,
+                anchor_y: sofa.y + if faces_away { 3 } else { 2 },
+                kind: DrawableKind::MeetingSofa {
+                    pos: sofa,
+                    mirrored,
                 },
             });
         }
     }
-    for (i, &sofa) in layout.meeting_sofas.iter().enumerate() {
-        let mirrored = i % 2 != 0;
-        let room_id = i / 2;
-        let table_y = layout.meeting_tables.get(room_id).map_or(sofa.y, |t| t.y);
-        let faces_away = sofa.y >= table_y;
-        drawables.push(Drawable {
-            anchor_y: sofa.y + if faces_away { 3 } else { 2 },
-            kind: DrawableKind::MeetingSofa {
-                pos: sofa,
-                mirrored,
-            },
-        });
-    }
-    for &table in &layout.meeting_tables {
+    for room in &layout.meeting_rooms {
         drawables.push(Drawable {
             // z-key = sprite south row, derived from the table (== +2 for the
             // 11×5 coffee-table sprite) so it can't drift from a visual edit.
             anchor_y: z_sort_row(
                 Anchor::Center,
-                table,
+                room.table,
                 crate::tui::layout::furniture_def(crate::tui::layout::Furniture::MeetingTable)
                     .visual
                     .h,
             ),
-            kind: DrawableKind::MeetingTable { pos: table },
+            kind: DrawableKind::MeetingTable { pos: room.table },
         });
     }
 }

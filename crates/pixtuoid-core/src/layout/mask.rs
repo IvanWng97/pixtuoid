@@ -5,8 +5,8 @@
 //! edges.
 
 use super::{
-    anchored_top_left, furniture_def, z_sort_row, Anchor, Furniture, PlantItem, PodDecorItem,
-    Point, Size, WallDecorItem, WallSegment, Waypoint, WaypointKind, OBSTACLE_PAD_PX,
+    anchored_top_left, furniture_def, z_sort_row, Anchor, Furniture, MeetingRoom, PlantItem,
+    PodDecorItem, Point, Size, WallDecorItem, WallSegment, Waypoint, WaypointKind, OBSTACLE_PAD_PX,
     PANTRY_FOOTPRINT_DEPTH, WALL_BAND_TO_TOP_MARGIN,
 };
 use crate::walkable::WalkableMask;
@@ -101,8 +101,7 @@ pub(super) fn build_walkable_mask(
     top_margin: u16,
     door: Option<Point>,
     home_desks: &[Point],
-    meeting_sofas: &[Point],
-    meeting_tables: &[Point],
+    meeting_rooms: &[MeetingRoom],
     pantry_table: Option<Point>,
     pantry_chairs: &[Point],
     waypoints: &[Waypoint],
@@ -211,18 +210,17 @@ pub(super) fn build_walkable_mask(
         }
     }
 
-    for sofa in meeting_sofas {
+    for room in meeting_rooms {
         // Sofa BODY footprint from the table (16 ON PURPOSE: 16 + 2·pad = the
         // 20px sprite X footprint, with the pad giving vertical sit clearance —
         // see the furniture_def row). Top-down rule: walk up to its sides.
         if let Some(Size { w, h }) = furniture_def(Furniture::MeetingSofaBody).footprint {
-            stamp_anchored(&mut mask, Anchor::Center, *sofa, w, h, OBSTACLE_PAD_PX);
+            for sofa in room.sofas {
+                stamp_anchored(&mut mask, Anchor::Center, sofa, w, h, OBSTACLE_PAD_PX);
+            }
         }
-    }
-
-    for t in meeting_tables {
         if let Some(Size { w, h }) = furniture_def(Furniture::MeetingTable).footprint {
-            stamp_anchored(&mut mask, Anchor::Center, *t, w, h, OBSTACLE_PAD_PX);
+            stamp_anchored(&mut mask, Anchor::Center, room.table, w, h, OBSTACLE_PAD_PX);
         }
     }
 
@@ -410,7 +408,6 @@ mod tests {
             96,
             20,
             None,
-            &[],
             &[],
             &[],
             None,

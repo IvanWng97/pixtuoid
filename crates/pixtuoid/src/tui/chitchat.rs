@@ -164,7 +164,7 @@ impl ActiveChitchat {
 /// The chitchat `wp_idx` a waypoint visitor groups under. The 3 lounge-couch
 /// seats collapse to ONE venue (the first couch's waypoint index) so they host
 /// a single group conversation like the meeting room — WITHOUT overloading the
-/// meeting-only `room_id` field (which indexes `meeting_tables`). Every other
+/// meeting-only `room_id` field (which indexes `meeting_rooms`). Every other
 /// waypoint keys on its own index. `couch_group_idx` is the first `Couch`
 /// waypoint's index, or `None` if the layout has no couch.
 pub fn venue_wp_idx(kind: WaypointKind, wp_idx: usize, couch_group_idx: Option<usize>) -> usize {

@@ -527,18 +527,15 @@ fn sofas_seat_three_people() {
     let center = l.couch_sprite_center.expect("couch sprite center recorded");
     assert_eq!(center.x, xs[1], "sprite center sits on the middle seat");
 
-    // 1 meeting room → 2 sofas (meeting_sofas center-points) → 3 seats each.
-    assert!(!l.meeting_sofas.is_empty(), "expected a meeting room");
+    // 1 meeting room → 2 sofas (per room) → 3 seats each.
+    assert!(!l.meeting_rooms.is_empty(), "expected a meeting room");
     let sofa_seats = l
         .waypoints
         .iter()
         .filter(|w| w.kind == WaypointKind::MeetingSofa)
         .count();
-    assert_eq!(
-        sofa_seats,
-        3 * l.meeting_sofas.len(),
-        "each meeting sofa seats 3"
-    );
+    let total_sofas: usize = l.meeting_rooms.iter().map(|r| r.sofas.len()).sum();
+    assert_eq!(sofa_seats, 3 * total_sofas, "each meeting sofa seats 3");
 }
 
 #[test]
@@ -575,7 +572,7 @@ fn meeting_slots_track_meeting_rooms() {
                     .any(|w| w.kind == WaypointKind::MeetingStand),
                 "seed {seed}: meeting room but no standing slot"
             );
-            let rooms = l.meeting_tables.len();
+            let rooms = l.meeting_rooms.len();
             for w in &sofa_slots {
                 let rid = w.room_id.expect("meeting slot has room_id");
                 assert!(
@@ -619,9 +616,10 @@ fn meeting_table_is_centered_between_its_two_sofas() {
             let Some(l) = SceneLayout::compute_with_seed(w, h, 8, seed) else {
                 continue;
             };
-            for (room_id, table) in l.meeting_tables.iter().enumerate() {
-                let north = l.meeting_sofas[2 * room_id];
-                let south = l.meeting_sofas[2 * room_id + 1];
+            for (room_id, room) in l.meeting_rooms.iter().enumerate() {
+                let table = room.table;
+                let north = room.sofas[0];
+                let south = room.sofas[1];
                 let gap_n = table.y.abs_diff(north.y);
                 let gap_s = south.y.abs_diff(table.y);
                 assert!(
@@ -644,7 +642,7 @@ fn meeting_slots_face_the_table() {
         let l = SceneLayout::compute_with_seed(160, 120, 8, seed).expect("fits");
         for w in &l.waypoints {
             let Some(room_id) = w.room_id else { continue };
-            let table = l.meeting_tables[room_id];
+            let table = l.meeting_rooms[room_id].table;
             match w.kind {
                 WaypointKind::MeetingSofa => {
                     let want = if w.pos.y < table.y {

@@ -226,14 +226,16 @@ pub(super) fn pet_position(
             false,
         ));
     }
-    for sofa in &layout.meeting_sofas {
-        spots.push((
-            Point {
-                x: sofa.x + 4,
-                y: sofa.y + 4,
-            },
-            false,
-        ));
+    for room in &layout.meeting_rooms {
+        for sofa in room.sofas {
+            spots.push((
+                Point {
+                    x: sofa.x + 4,
+                    y: sofa.y + 4,
+                },
+                false,
+            ));
+        }
     }
     if let Some(wp) = layout
         .waypoints
@@ -485,11 +487,13 @@ fn mascot_spots(layout: &Layout, state: DaemonState, home: Point) -> Vec<Point> 
                 y: wp.pos.y + 6,
             });
         }
-        for sofa in &layout.meeting_sofas {
-            spots.push(Point {
-                x: sofa.x + 4,
-                y: sofa.y + 4,
-            });
+        for room in &layout.meeting_rooms {
+            for sofa in room.sofas {
+                spots.push(Point {
+                    x: sofa.x + 4,
+                    y: sofa.y + 4,
+                });
+            }
         }
         if let Some(wp) = layout
             .waypoints
@@ -1140,7 +1144,7 @@ mod tests {
         // corridor centre on the RIGHT.
         layout.home_desks = vec![Point { x: 20, y: 30 }];
         layout.waypoints.clear();
-        layout.meeting_sofas.clear();
+        layout.meeting_rooms.clear();
         layout.corridor = Some(Bounds {
             x: 150,
             y: 40,
