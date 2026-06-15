@@ -49,15 +49,78 @@ fn sanitize(s: &str) -> String {
     s.chars().filter(|c| !c.is_control()).collect()
 }
 
-/// Pull `key=value` from a tracing-fmt line: the value runs to the next
-/// whitespace (drift breadcrumb fields are space-separated, no spaces in
-/// source/kind/name/tool), surrounding quotes stripped. `None` if absent.
-fn field<'a>(line: &'a str, key: &str) -> Option<&'a str> {
+/// The parsed fields of one `pixtuoid::drift` breadcrumb line, borrowed from it.
+struct DriftLine<'a> {
+    source: &'a str,
+    kind: &'a str,
+    /// The fields segment AFTER the `target:` marker — sample values are pulled
+    /// from here, so a span field of the same name (rendered BEFORE the target)
+    /// can't be picked up (R0615-08).
+    fields: &'a str,
+}
+
+/// Parse a warn-floor log line as a drift breadcrumb, anchored on the STRUCTURAL
+/// tracing-fmt `target:` marker rather than a loose `contains` (R0615-07/-08).
+/// `marker` is `"<TARGET>: "` (hoisted by the caller to avoid a per-line alloc).
+/// tracing-fmt renders the target verbatim after the level + any span list, so:
+/// (1) a line that merely MENTIONS the literal inside a field value isn't matched
+/// (the marker carries the `: ` the target position always has, and must be a
+/// standalone token, not the suffix of a longer `a::b::pixtuoid::drift` target);
+/// (2) fields are parsed only from the segment AFTER it, never an active-span
+/// field of the same name. `None` if not a drift line or source/kind is absent.
+/// Accepted residual: a non-drift line whose value literally embeds
+/// ` <TARGET>: source=… kind=… ` would still match — no in-tree code emits that.
+fn parse_drift_line<'a>(line: &'a str, marker: &str) -> Option<DriftLine<'a>> {
+    let at = line.find(marker)?;
+    if at != 0 && line.as_bytes()[at - 1] != b' ' {
+        return None; // suffix of a longer target, not our standalone token
+    }
+    let fields = &line[at + marker.len()..];
+    Some(DriftLine {
+        source: field_value(fields, "source")?,
+        kind: field_value(fields, "kind")?,
+        fields,
+    })
+}
+
+/// Pull a field value from a tracing-fmt fields segment. Handles the quoted form
+/// (`key="…"`, fmt's string-literal rendering) AND the unquoted Display form
+/// (`key=val`), INCLUDING a value containing spaces (a hostile wire name): an
+/// unquoted value runs to the next ` <ident>=` field boundary or the segment end,
+/// not merely the next whitespace (R0615-09). The key must START a field (segment
+/// start or space-preceded) so `name` can't match inside `displayName=`.
+fn field_value<'a>(seg: &'a str, key: &str) -> Option<&'a str> {
     let pat = format!("{key}=");
-    let start = line.find(&pat)? + pat.len();
-    let rest = &line[start..];
-    let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
-    Some(rest[..end].trim_matches('"'))
+    let mut from = 0;
+    let val_start = loop {
+        let abs = from + seg[from..].find(&pat)?;
+        if abs == 0 || seg.as_bytes()[abs - 1] == b' ' {
+            break abs + pat.len();
+        }
+        from = abs + pat.len();
+    };
+    let rest = &seg[val_start..];
+    if let Some(after_q) = rest.strip_prefix('"') {
+        Some(&after_q[..after_q.find('"').unwrap_or(after_q.len())])
+    } else {
+        Some(rest[..next_field_boundary(rest).unwrap_or(rest.len())].trim_end())
+    }
+}
+
+/// Index of the next ` <ident>=` field boundary in an unquoted value tail (so a
+/// spaced value is kept whole instead of truncated at its first space).
+fn next_field_boundary(s: &str) -> Option<usize> {
+    let b = s.as_bytes();
+    (0..b.len()).find(|&i| {
+        if b[i] != b' ' {
+            return false;
+        }
+        let mut j = i + 1;
+        while j < b.len() && (b[j].is_ascii_alphanumeric() || b[j] == b'_') {
+            j += 1;
+        }
+        j > i + 1 && j < b.len() && b[j] == b'='
+    })
 }
 
 fn push_sample(samples: &mut Vec<String>, v: Option<&str>) {
@@ -75,22 +138,23 @@ fn push_sample(samples: &mut Vec<String>, v: Option<&str>) {
 /// names ARE sanitized (they're untrusted wire content).
 pub fn scan_log_for_source(log: &str, source: &str) -> LogScanResult {
     let mut r = LogScanResult::default();
+    let marker = format!("{}: ", drift::TARGET);
     for line in log.lines() {
-        if !line.contains(drift::TARGET) || field(line, "source") != Some(source) {
-            continue;
-        }
-        let Some(kind) = field(line, "kind") else {
+        let Some(p) = parse_drift_line(line, &marker) else {
             continue;
         };
-        match kind {
+        if p.source != source {
+            continue;
+        }
+        match p.kind {
             "unknown_event" => {
                 r.unknown_event += 1;
-                push_sample(&mut r.samples, field(line, "name"));
+                push_sample(&mut r.samples, field_value(p.fields, "name"));
             }
             "missing_field" => r.missing_field += 1,
             "unknown_dispatch" => {
                 r.unknown_dispatch += 1;
-                push_sample(&mut r.samples, field(line, "tool"));
+                push_sample(&mut r.samples, field_value(p.fields, "tool"));
             }
             "shape_drift" => r.shape_drift += 1,
             _ => continue,
@@ -148,36 +212,53 @@ pub struct DoctorSourceRow {
     pub scan: LogScanResult,
 }
 
-/// Extract a `MAJOR.MINOR[.PATCH]` tuple from a version string (e.g. from
-/// `GitHub Copilot CLI 1.0.62.` → (1,0,62)) — the first dotted-number run.
-/// Tolerant: trailing/leading text ignored, missing patch = 0, parse failure =
-/// None (so a skew check silently no-ops rather than alarming on garbage).
+/// A dotted-run major at or above this looks like a YEAR/date token, not a semver
+/// major — used to skip a date prefix in favor of a real version (#307).
+const IMPLAUSIBLE_MAJOR: u64 = 1000;
+
+/// Extract a `MAJOR.MINOR[.PATCH]` tuple from a `--version` banner. Tolerant:
+/// surrounding text ignored, missing patch = 0, no dotted run = None (a skew
+/// check then silently no-ops rather than alarming on garbage). A bare integer
+/// (`2026`) is NOT a version (needs at least `MAJOR.MINOR`).
+///
+/// Banner-order robust (#307): a banner can print a dotted DATE/build token
+/// before the semver (`Built 2026.06.04 — v1.2.3`). Selection order:
+///   1. a `v`/`V`-prefixed run wins (an explicit version marker);
+///   2. else the first run with a plausible (< `IMPLAUSIBLE_MAJOR`) major,
+///      skipping a year-like date prefix;
+///   3. else the first run — so a genuine CalVer (`2026.06.04`, e.g. cursor)
+///      still parses rather than vanishing.
 pub fn parse_version(s: &str) -> Option<(u64, u64, u64)> {
     let bytes = s.as_bytes();
+    // (v_prefixed, (major, minor, patch)) for every dotted-number run.
+    let mut runs: Vec<(bool, (u64, u64, u64))> = Vec::new();
     let mut i = 0;
     while i < bytes.len() {
-        if bytes[i].is_ascii_digit() {
-            // Take the run of digits and dots starting here.
-            let start = i;
-            while i < bytes.len() && (bytes[i].is_ascii_digit() || bytes[i] == b'.') {
-                i += 1;
-            }
-            let run = &s[start..i];
-            let mut parts = run.split('.').filter(|p| !p.is_empty());
-            if let Some(major) = parts.next().and_then(|p| p.parse().ok()) {
-                let minor = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
-                let patch = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
-                // Require at least a MAJOR.MINOR to count as a version (a bare
-                // integer like a year/count is too ambiguous).
-                if run.contains('.') {
-                    return Some((major, minor, patch));
-                }
-            }
-        } else {
+        if !bytes[i].is_ascii_digit() {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        while i < bytes.len() && (bytes[i].is_ascii_digit() || bytes[i] == b'.') {
             i += 1;
         }
+        let run = &s[start..i];
+        if !run.contains('.') {
+            continue; // a bare integer is too ambiguous to be a version
+        }
+        let mut parts = run.split('.').filter(|p| !p.is_empty());
+        if let Some(major) = parts.next().and_then(|p| p.parse().ok()) {
+            let minor = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
+            let patch = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
+            let v_prefixed = start > 0 && matches!(bytes[start - 1], b'v' | b'V');
+            runs.push((v_prefixed, (major, minor, patch)));
+        }
     }
-    None
+    runs.iter()
+        .find(|(vp, _)| *vp)
+        .or_else(|| runs.iter().find(|(_, (maj, ..))| *maj < IMPLAUSIBLE_MAJOR))
+        .or_else(|| runs.first())
+        .map(|(_, v)| *v)
 }
 
 /// The version segment for a doctor row. Skew is flagged ONLY when both the
@@ -432,6 +513,50 @@ mod tests {
         assert_eq!(scan_log_for_source("", "copilot"), LogScanResult::default());
     }
 
+    // R0615-07: a non-drift line that merely MENTIONS the bare target string is
+    // NOT counted — the structural `target:` marker (with its `: `) gates it, not
+    // a loose `contains(TARGET)` (which the old scanner used). The crafted line
+    // carries `source=`/`kind=` so only the missing structural marker saves it.
+    #[test]
+    fn scan_ignores_a_body_mention_of_the_target_string() {
+        let line = "2026-06-15T00:00:00Z  WARN pixtuoid::source::manager: a pixtuoid::drift mention source=copilot kind=unknown_event name=X";
+        assert_eq!(scan_log_for_source(line, "copilot").total(), 0);
+    }
+
+    // R0615-08: a breadcrumb emitted inside a tracing SPAN that carries its OWN
+    // `source=` field — fmt renders span fields BEFORE the target, so parsing
+    // after the marker must pick the EVENT's source, never the span's. (No
+    // production code wraps a decoder in such a span today; this pins the parser
+    // so adding one later can't silently misattribute.)
+    #[test]
+    fn scan_parses_event_fields_not_a_span_field_of_the_same_name() {
+        let line = "2026-06-15T00:00:00Z  WARN decode{source=spanwrong}: pixtuoid::drift: source=copilot kind=\"unknown_event\" name=NewHook";
+        let r = scan_log_for_source(line, "copilot");
+        assert_eq!(r.unknown_event, 1, "event source must win");
+        assert!(
+            r.samples.contains(&"NewHook".to_string()),
+            "{:?}",
+            r.samples
+        );
+        // the span's value must NOT be attributed.
+        assert_eq!(scan_log_for_source(line, "spanwrong").total(), 0);
+    }
+
+    // R0615-09: a hostile wire name containing a SPACE is preserved whole in the
+    // sample, not truncated at the first space (an unquoted Display value runs to
+    // the next ` <ident>=` boundary or end-of-line).
+    #[test]
+    fn scan_preserves_a_spaced_sample_value() {
+        let line = "2026-06-15T00:00:00Z  WARN pixtuoid::drift: source=copilot kind=\"unknown_dispatch\" tool=My New Tool";
+        let r = scan_log_for_source(line, "copilot");
+        assert_eq!(r.unknown_dispatch, 1);
+        assert!(
+            r.samples.contains(&"My New Tool".to_string()),
+            "{:?}",
+            r.samples
+        );
+    }
+
     #[test]
     fn samples_are_sanitized_deduped_and_capped() {
         let log = capture(|| {
@@ -501,6 +626,22 @@ mod tests {
         assert_eq!(parse_version("codex 0.41.0 (abc)"), Some((0, 41, 0)));
         assert_eq!(parse_version("no version here"), None);
         assert_eq!(parse_version("2026"), None); // a bare integer is not a version
+    }
+
+    // #307: a banner that prints a dotted DATE/build token BEFORE the semver must
+    // not lock onto the date — the smarter extractor prefers a `v`-prefixed run,
+    // else the first plausible (non-year) major, else falls back (CalVer-safe).
+    #[test]
+    fn parse_version_is_banner_order_robust() {
+        // v-prefixed semver wins over a leading date.
+        assert_eq!(parse_version("Built 2026.06.04 — v1.2.3"), Some((1, 2, 3)));
+        // no `v`: skip the year-like major, take the first plausible run.
+        assert_eq!(parse_version("Built 2026.06.04 — 1.2.3"), Some((1, 2, 3)));
+        // a genuine CalVer with NO semver still parses (cursor's date style) —
+        // fallback rather than vanishing.
+        assert_eq!(parse_version("2026.06.04-5fd875e"), Some((2026, 6, 4)));
+        // the only anchored CLI today: its raw banner parses to its anchor.
+        assert_eq!(parse_version("GitHub Copilot CLI 1.0.62"), Some((1, 0, 62)));
     }
 
     #[test]
