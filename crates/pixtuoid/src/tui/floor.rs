@@ -315,6 +315,36 @@ mod tests {
     use std::time::Duration;
 
     #[test]
+    fn source_presence_projects_onto_the_ground_floor_only() {
+        // The gateway mascot is global, not per-floor — the projection carries
+        // source_presence onto floor 0 ONLY, so a multi-floor office renders Molty
+        // exactly once (a regression dropping the gate / flipping the index would
+        // duplicate him on every floor).
+        use pixtuoid_core::state::{DaemonPresence, DaemonState};
+        let mut scene = SceneState::uniform(16);
+        scene.floor_capacities[1] = 16; // a second floor exists
+        scene.source_presence.insert(
+            pixtuoid_core::source::openclaw::SOURCE_NAME.to_string(),
+            DaemonPresence {
+                state: DaemonState::Idle,
+                active_sessions: 0,
+                last_seen: SystemTime::UNIX_EPOCH,
+                entered_at: SystemTime::UNIX_EPOCH,
+                in_flight_run_keys: Default::default(),
+                current_pid: Some(1),
+            },
+        );
+        assert!(
+            !project_floor_scene(&scene, 0).source_presence.is_empty(),
+            "floor 0 carries the mascot"
+        );
+        assert!(
+            project_floor_scene(&scene, 1).source_presence.is_empty(),
+            "floor 1+ must NOT (render-once invariant)"
+        );
+    }
+
+    #[test]
     fn door_anim_excludes_arrived_entry_profiles() {
         use crate::tui::motion::MotionState;
         let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);

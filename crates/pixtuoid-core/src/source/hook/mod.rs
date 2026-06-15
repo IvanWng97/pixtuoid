@@ -405,6 +405,53 @@ mod tests {
         task.await.unwrap();
     }
 
+    #[tokio::test]
+    async fn handle_conn_routes_openclaw_presence_to_the_side_channel_only() {
+        use crate::source::openclaw::DaemonPresenceUpdate;
+        let (mut client, server) = tokio::io::duplex(4096);
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(8);
+        let (ptx, mut prx) = tokio::sync::mpsc::unbounded_channel::<DaemonPresenceUpdate>();
+
+        let task = tokio::spawn(handle_conn(server, tx, None, Some(ptx)));
+        // A shim-stamped OpenClaw presence line, then an ordinary CC agent line.
+        client
+            .write_all(
+                b"{\"_pixtuoid_source\":\"openclaw\",\"type\":\"gateway_start\",\"_pid\":4242}\n",
+            )
+            .await
+            .unwrap();
+        client
+            .write_all(
+                b"{\"hook_event_name\":\"SessionStart\",\"session_id\":\"s1\",\
+                  \"transcript_path\":\"/Users/me/.claude/projects/x/s1.jsonl\"}\n",
+            )
+            .await
+            .unwrap();
+        drop(client);
+
+        // The OpenClaw line → exactly one GatewayUp on the SIDE channel, and the
+        // AgentEvent channel never sees it (presence-only: zero AgentEvents).
+        let update = prx.recv().await.expect("one presence update");
+        assert!(matches!(
+            update,
+            DaemonPresenceUpdate::GatewayUp { pid: Some(4242) }
+        ));
+        assert!(
+            prx.try_recv().is_err(),
+            "the CC line must not reach presence"
+        );
+
+        // The CC line → exactly one SessionStart on the AgentEvent channel.
+        let (transport, ev) = rx.recv().await.expect("one agent event");
+        assert_eq!(transport, Transport::Hook);
+        assert!(matches!(ev, AgentEvent::SessionStart { .. }));
+        assert!(
+            rx.try_recv().is_err(),
+            "the openclaw line emits no AgentEvent"
+        );
+        task.await.unwrap();
+    }
+
     // The silent-loss path (R0612-02): the budget expires while the send loop
     // is parked on a full reducer channel, the timeout wrapper drops the
     // handle_conn future, and the payload's already-decoded remainder is

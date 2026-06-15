@@ -90,7 +90,10 @@ pub struct Target {
     /// `plugins.load.paths` entry points at. Takes the resolved shim path to bake
     /// into the entry module. `None` for single-file targets. Left in place on
     /// uninstall (the config un-merge disables loading) — an accepted residual
-    /// like opencode's stub. Written idempotently (only if content differs).
+    /// like opencode's stub. **Rewritten verbatim on every (re)install**, even
+    /// when the config merge is a semantic no-op — the deliberate refresh that
+    /// repairs a tampered/stale plugin file (`install_target` does an
+    /// unconditional write, NOT a content-diff).
     pub extra_artifacts: Option<ExtraArtifactsFn>,
 }
 
@@ -242,6 +245,7 @@ pub const OPENCLAW: Target = Target {
     // auto-detect fires whether or not we've installed (the opencode rationale).
     presence_probe: Some(crate::install::openclaw::detect_installed),
     extra_artifacts: Some(crate::install::openclaw::plugin_artifacts),
+    verify_schema: crate::install::openclaw::verify_schema,
 };
 
 pub const TARGETS: &[&Target] = &[

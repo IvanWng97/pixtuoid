@@ -339,13 +339,20 @@ pub fn paint_mascot_tooltip(
     scene_rect: Rect,
     theme: &crate::tui::theme::Theme,
 ) {
+    let text = mascot_tooltip_text(name, busy, active_sessions);
+    paint_simple_tooltip(f, &text, mx, my, scene_rect, theme);
+}
+
+/// The mascot tooltip's text (pure, unit-tested separately from the ratatui
+/// paint). Verb keys on the run state; the `>1` session count is a power-user
+/// garnish only.
+fn mascot_tooltip_text(name: &str, busy: bool, active_sessions: u32) -> String {
     let verb = if busy { "working" } else { "idle" };
-    let text = if active_sessions > 1 {
+    if active_sessions > 1 {
         format!(" {name} gateway · {verb} · {active_sessions} sessions ")
     } else {
         format!(" {name} gateway · {verb} ")
-    };
-    paint_simple_tooltip(f, &text, mx, my, scene_rect, theme);
+    }
 }
 
 /// Fit a label into `budget` chars without losing the `·xxxx` session-id
@@ -431,7 +438,29 @@ fn disambig_suffix(session_id: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::disambig_suffix;
+    use super::{disambig_suffix, mascot_tooltip_text};
+
+    #[test]
+    fn mascot_tooltip_verb_keys_on_run_state_not_session_count() {
+        // idle vs working keys on `busy`; the session count only shows as a >1
+        // garnish (one persistent session is the single-user norm, not "1 session").
+        assert_eq!(
+            mascot_tooltip_text("OpenClaw", false, 0),
+            " OpenClaw gateway · idle "
+        );
+        assert_eq!(
+            mascot_tooltip_text("OpenClaw", false, 1),
+            " OpenClaw gateway · idle "
+        );
+        assert_eq!(
+            mascot_tooltip_text("OpenClaw", true, 1),
+            " OpenClaw gateway · working "
+        );
+        assert_eq!(
+            mascot_tooltip_text("OpenClaw", true, 3),
+            " OpenClaw gateway · working · 3 sessions "
+        );
+    }
 
     #[test]
     fn uuid_ids_get_distinct_suffixes() {

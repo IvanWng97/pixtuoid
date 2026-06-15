@@ -213,6 +213,51 @@ pub fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
     })
 }
 
+/// Install-schema check (#314, the "silent-dead source" detector): verify our
+/// `openclaw.json` merge is still sound. The shim path lives in the SEPARATE
+/// plugin `index.js` (an `extra_artifact`), NOT this config, so the shim ref is
+/// `Unknown` — `verify_target` downgrades that to a soft note, false-positive-
+/// free. The HARD checks are the two config-level facts only WE write: the
+/// enabled `entries.pixtuoid` entry + its `load.paths` dir registration (a
+/// removed/disabled entry = the gateway silently never loads us). Per-source
+/// format knowledge stays here (invariant #3).
+pub fn verify_schema(content: &str) -> crate::install::verify::SchemaParse {
+    use crate::install::verify::{SchemaParse, ShimRef};
+    let Ok(root) = serde_json::from_str::<Value>(content) else {
+        return SchemaParse::broken("openclaw.json is not valid JSON — reconnect openclaw");
+    };
+    let entry = &root["plugins"]["entries"][PLUGIN_ID];
+    if entry.is_null() {
+        return SchemaParse::broken(
+            "the pixtuoid plugin entry is missing from openclaw.json — reconnect openclaw",
+        );
+    }
+    let mut issues = Vec::new();
+    if entry["enabled"] != json!(true) {
+        issues.push("the pixtuoid openclaw plugin is installed but disabled".into());
+    }
+    // `load.paths` must still point at our plugin dir (`…/plugins/pixtuoid`).
+    // Separator-tolerant so a Windows backslash path still matches.
+    let registered = root["plugins"]["load"]["paths"]
+        .as_array()
+        .is_some_and(|paths| {
+            paths.iter().any(|p| {
+                p.as_str().is_some_and(|s| {
+                    s.replace('\\', "/")
+                        .ends_with(&format!("plugins/{PLUGIN_ID}"))
+                })
+            })
+        });
+    if !registered {
+        issues
+            .push("openclaw.json `load.paths` no longer registers the pixtuoid plugin dir".into());
+    }
+    SchemaParse {
+        issues,
+        shim: ShimRef::Unknown,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

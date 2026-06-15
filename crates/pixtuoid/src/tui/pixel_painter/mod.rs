@@ -1118,8 +1118,12 @@ fn enqueue_pet<'a>(
 
 /// Enqueue any gateway mascots present in `source_presence` (only the ground
 /// floor carries the map, so a mascot shows once). Presence-gated: an absent
-/// entry — i.e. no OpenClaw connected — draws nothing, so the ~99% who don't
-/// run a gateway see a normal office. y-sorted at the mascot's south row.
+/// entry draws nothing, so the ~99% who don't run a gateway see a normal office.
+/// The runtime is responsible for KEEPING the map honest — a never-connected or
+/// panel-disconnected gateway has no live entry (the driver's presence
+/// connection-gate drops its hooks and the sweep walks any lingering entry out),
+/// so "entry present" tracks "connected + alive", not merely "a hook arrived".
+/// y-sorted at the mascot's south row.
 fn enqueue_gateway_mascot<'a>(
     ctx: &PixelCtx<'_>,
     drawables: &mut Vec<Drawable<'a>>,

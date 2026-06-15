@@ -551,6 +551,15 @@ pub(super) fn mascot_position(
         if down_age >= MASCOT_LEAVE_MS {
             return None; // gone
         }
+        // The walk-out `from` is reconstructed with the IDLE spot set even if the
+        // gateway was Busy at the instant of death. This is deliberate, NOT a bug:
+        // the mascot is STATELESS (position is a pure function of `now` + the
+        // presence timestamps — no retained per-frame state, see the module note),
+        // and `DaemonState` carries no prev-state, so on a `Down` presence Idle is
+        // the ONLY reconstructable wander. A direct Busy→Down (gateway killed
+        // mid-run) can therefore jump one frame before the 2.2s elevator leg
+        // re-lerps it — an accepted cosmetic edge on a rare path, not worth
+        // threading retained state through and breaking the stateless invariant.
         let spots = mascot_spots(layout, DaemonState::Idle, home);
         let down_we = presence
             .last_seen

@@ -257,16 +257,23 @@ async fn reducer_task(
                 match update {
                     Some(update) => {
                         let now = SystemTime::now();
-                        // Arm the instant abrupt-down watch on a fresh gateway pid.
-                        if let (DaemonPresenceUpdate::GatewayUp { pid: Some(pid) }, Some(ew)) =
-                            (&update, presence_exit_watch.as_ref())
-                        {
-                            ew.watch(*pid);
-                        }
-                        openclaw::apply_presence(&mut scene, update, now);
-                        if scene_tx.send(Arc::new(scene.clone())).is_err() {
-                            tracing::warn!("scene channel closed — renderer dropped");
-                            break;
+                        // CONNECTION GATE (mirrors the AgentEvent arm above): a
+                        // gateway DISCONNECTED in the Connection panel has its
+                        // presence hooks DROPPED — don't arm the exit watch, don't
+                        // apply, don't refresh. Any lingering presence entry is
+                        // walked out by the sweep-tick reconcile below.
+                        if connected.is_connected(openclaw::SOURCE_NAME) {
+                            // Arm the instant abrupt-down watch on a fresh gateway pid.
+                            if let (DaemonPresenceUpdate::GatewayUp { pid: Some(pid) }, Some(ew)) =
+                                (&update, presence_exit_watch.as_ref())
+                            {
+                                ew.watch(*pid);
+                            }
+                            openclaw::apply_presence(&mut scene, update, now);
+                            if scene_tx.send(Arc::new(scene.clone())).is_err() {
+                                tracing::warn!("scene channel closed — renderer dropped");
+                                break;
+                            }
                         }
                     }
                     None => presence_open = false,
@@ -283,6 +290,13 @@ async fn reducer_task(
                 let cur = connected.snapshot();
                 reducer.reconcile_connected(&mut scene, &cur, now);
                 reducer.tick(&mut scene, now);
+                // Presence reconcile: a panel-disconnected gateway must walk its
+                // mascot out too (the presence side-channel is separate from the
+                // AgentEvent connection gate). Drive its entry to Down so the
+                // existing walk-out + DOWN_REMOVE_MS removal lifecycle runs.
+                if !connected.is_connected(openclaw::SOURCE_NAME) {
+                    openclaw::mark_presence_down(&mut scene, openclaw::SOURCE_NAME, now);
+                }
                 // Decay stale daemon presence (busy→idle, up→down on silence).
                 openclaw::sweep_presence_ttl(&mut scene, now);
                 if scene_tx.send(Arc::new(scene.clone())).is_err() {
