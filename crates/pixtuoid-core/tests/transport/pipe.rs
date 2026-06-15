@@ -340,12 +340,9 @@ async fn claude_source_degrades_to_transcript_only_when_socket_busy() {
     )
     .unwrap();
 
-    let src = ClaudeCodeSource {
-        socket_path: std::path::PathBuf::from(&name),
-        projects_root: projects,
-        child_end_unclaims: None,
-        presence_tx: None,
-    };
+    let mut src = ClaudeCodeSource::default_paths();
+    src.socket_path = std::path::PathBuf::from(&name);
+    src.projects_root = projects;
     let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(32);
     let task = tokio::spawn(async move { Box::new(src).run(tx).await });
 

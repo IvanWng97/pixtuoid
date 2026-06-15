@@ -103,7 +103,13 @@ pub fn decode_openclaw_hook_payload(v: &Value) -> Result<Vec<DaemonPresenceUpdat
         .ok_or_else(|| anyhow!("openclaw payload missing type"))?;
     Ok(match event {
         "gateway_start" => vec![DaemonPresenceUpdate::GatewayUp {
-            pid: obj.get("_pid").and_then(|p| p.as_i64()).map(|p| p as i32),
+            // Checked narrowing: a crafted out-of-range `_pid` (e.g. 2^32+1) must
+            // NOT silently truncate to a valid pid (arming ExitWatch on PID 1) — an
+            // unrepresentable pid is dropped (None); the TTL backstop still covers it.
+            pid: obj
+                .get("_pid")
+                .and_then(|p| p.as_i64())
+                .and_then(|p| i32::try_from(p).ok()),
         }],
         "gateway_stop" => vec![DaemonPresenceUpdate::GatewayDown],
         "session_start" => vec![DaemonPresenceUpdate::SessionStarted],
@@ -327,6 +333,16 @@ mod tests {
     fn gateway_start_without_pid_is_gateway_up_none() {
         assert_eq!(
             decode(json!({"type": "gateway_start"})),
+            vec![DaemonPresenceUpdate::GatewayUp { pid: None }]
+        );
+    }
+
+    #[test]
+    fn gateway_start_out_of_range_pid_is_dropped_not_truncated() {
+        // A crafted out-of-i32 `_pid` (2^32+1) must NOT truncate to a valid pid
+        // (e.g. 1 = init) and arm ExitWatch against it — checked narrowing drops it.
+        assert_eq!(
+            decode(json!({"type": "gateway_start", "_pid": 4_294_967_297i64})),
             vec![DaemonPresenceUpdate::GatewayUp { pid: None }]
         );
     }

@@ -163,10 +163,6 @@ fn build_transcript_sources(
     if let Some(p) = projects_root {
         cc_src.projects_root = p;
     }
-    // OpenClaw hooks ride the shared socket ClaudeCodeSource binds; route its
-    // (presence-only) payloads to the daemon-fixture side channel.
-    cc_src.presence_tx = presence_tx;
-
     let ag_src = AntigravitySource::default_paths();
     let copilot_src = CopilotSource::default_paths();
 
@@ -185,7 +181,10 @@ fn build_transcript_sources(
     codex_src.child_end_unclaims = Some(child_end_unclaims);
 
     vec![
-        Box::new(cc_src) as Box<dyn DynSource>,
+        // OpenClaw hooks ride the shared socket ClaudeCodeSource binds; route its
+        // (presence-only) payloads to the daemon-fixture side channel (consumes
+        // cc_src last, after its other fields are set).
+        Box::new(cc_src.with_presence_tx(presence_tx)) as Box<dyn DynSource>,
         Box::new(ag_src),
         Box::new(codex_src),
         Box::new(copilot_src),

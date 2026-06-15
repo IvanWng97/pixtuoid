@@ -252,7 +252,13 @@ pub fn install_target(
                 std::fs::create_dir_all(dir)
                     .with_context(|| format!("creating plugin dir {}", dir.display()))?;
             }
-            std::fs::write(&p, c).with_context(|| format!("writing {}", p.display()))?;
+            // Atomic + symlink-safe (temp-in-dir → fsync → rename), NOT a plain
+            // `fs::write`: the rename REPLACES `p` rather than following a symlink
+            // planted at it, and a torn write can't leave a half-rendered plugin
+            // the gateway then fails to load. Reuses the ConfigLock write authority
+            // (each artifact is its own lock target — disjoint from the config
+            // lock taken below, so no self-deadlock).
+            io::write_config_atomic(&p, &c).with_context(|| format!("writing {}", p.display()))?;
         }
     }
     // The lock covers the WHOLE read→merge→backup→write round (lost-update
@@ -864,6 +870,12 @@ mod tests {
     // Claude JSON, Codex/CodeWhale TOML, Reasonix flat-JSON, opencode TS plugin.
     #[test]
     fn install_target_round_trips_every_registered_target() {
+        // Isolate OpenClaw's extra_artifacts (the plugin DIR resolves from
+        // openclaw_home(), NOT the config override) under a temp home, so the
+        // round-trip never writes to the real ~/.openclaw. nextest runs each test
+        // in its own process, so this env set can't race a sibling test.
+        let oc_home = tempfile::TempDir::new().unwrap();
+        std::env::set_var("OPENCLAW_STATE_DIR", oc_home.path());
         for t in target::TARGETS {
             let tmp = tempfile::TempDir::new().unwrap();
             let cfg = tmp.path().join("cfg");
@@ -909,6 +921,10 @@ mod tests {
     /// enabled). Covers all 6 formats e2e — the current test binary is the shim.
     #[test]
     fn verify_target_is_sound_after_a_real_install_for_every_target() {
+        // Isolate OpenClaw's extra_artifacts under a temp home (see the round-trip
+        // test) so this never writes to the real ~/.openclaw.
+        let oc_home = tempfile::TempDir::new().unwrap();
+        std::env::set_var("OPENCLAW_STATE_DIR", oc_home.path());
         let exe = std::env::current_exe().unwrap(); // a real, executable file
         for &t in target::TARGETS {
             let tmp = tempfile::TempDir::new().unwrap();

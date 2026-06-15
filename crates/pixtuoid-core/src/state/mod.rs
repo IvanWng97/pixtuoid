@@ -224,9 +224,27 @@ pub struct SceneState {
     pub agents: BTreeMap<AgentId, AgentSlot>,
     pub floor_capacities: [usize; MAX_FLOORS],
     /// Daemon-style sources (OpenClaw gateway) rendered as a wandering mascot,
-    /// keyed on the registry source name. Empty for an all-agent scene.
+    /// keyed on the registry source name. Empty for an all-agent scene. PRIVATE
+    /// (with `source_presence`/`source_presence_mut` accessors) on purpose: a new
+    /// pub field would be a semver-major break, and a pub mutable `BTreeMap` is a
+    /// leaky surface — the renderer reads via the accessor. `pub(crate)` so the
+    /// reducer/source modules still touch it directly while the field stays out
+    /// of the external public API (semver-invisible).
     #[serde(default)]
-    pub source_presence: BTreeMap<String, DaemonPresence>,
+    pub(crate) source_presence: BTreeMap<String, DaemonPresence>,
+}
+
+impl SceneState {
+    /// Daemon-presence map (the gateway mascots) — read access for the renderer.
+    pub fn source_presence(&self) -> &BTreeMap<String, DaemonPresence> {
+        &self.source_presence
+    }
+
+    /// Mutable daemon-presence map — for the reducer task's `apply_presence`
+    /// merge and the per-floor projection.
+    pub fn source_presence_mut(&mut self) -> &mut BTreeMap<String, DaemonPresence> {
+        &mut self.source_presence
+    }
 }
 
 impl Default for SceneState {

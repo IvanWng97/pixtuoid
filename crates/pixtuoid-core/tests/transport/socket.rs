@@ -434,12 +434,9 @@ async fn claude_source_degrades_to_transcript_only_when_socket_busy() {
     )
     .unwrap();
 
-    let src = ClaudeCodeSource {
-        socket_path: sock,
-        projects_root: projects,
-        child_end_unclaims: None,
-        presence_tx: None,
-    };
+    let mut src = ClaudeCodeSource::default_paths();
+    src.socket_path = sock;
+    src.projects_root = projects;
     let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(32);
     let task = tokio::spawn(async move { Box::new(src).run(tx).await });
 
@@ -482,12 +479,10 @@ async fn claude_source_tee_captures_child_ends_from_the_shared_socket() {
     std::fs::create_dir_all(&projects).unwrap();
 
     let unclaims = ChildEndUnclaims::new();
-    let src = ClaudeCodeSource {
-        socket_path: sock.clone(),
-        projects_root: projects,
-        child_end_unclaims: Some(unclaims.clone()),
-        presence_tx: None,
-    };
+    let mut src = ClaudeCodeSource::default_paths();
+    src.socket_path = sock.clone();
+    src.projects_root = projects;
+    src.child_end_unclaims = Some(unclaims.clone());
     let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(32);
     let task = tokio::spawn(async move { Box::new(src).run(tx).await });
     sleep(Duration::from_millis(50)).await;

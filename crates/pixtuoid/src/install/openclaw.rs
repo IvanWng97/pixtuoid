@@ -342,9 +342,15 @@ mod tests {
         );
         let paths = v["plugins"]["load"]["paths"].as_array().unwrap();
         assert!(
-            paths
-                .iter()
-                .any(|p| p.as_str().unwrap().ends_with("plugins/pixtuoid")),
+            paths.iter().any(|p| {
+                // Separator-tolerant: the dir is built with the OS separator, so on
+                // Windows the path ends `plugins\pixtuoid` (the merge writes the
+                // native form; verify_schema normalizes it the same way).
+                p.as_str()
+                    .unwrap()
+                    .replace('\\', "/")
+                    .ends_with("plugins/pixtuoid")
+            }),
             "load.paths points at the plugin dir"
         );
     }

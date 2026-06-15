@@ -1057,7 +1057,7 @@ fn gateway_scene_runs(
     runs: &[&str],
 ) -> SceneState {
     let mut s = SceneState::uniform(16);
-    s.source_presence.insert(
+    s.source_presence_mut().insert(
         pixtuoid_core::source::openclaw::SOURCE_NAME.to_string(),
         pixtuoid_core::state::DaemonPresence {
             state,

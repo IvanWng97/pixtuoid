@@ -1129,7 +1129,7 @@ fn enqueue_gateway_mascot<'a>(
     drawables: &mut Vec<Drawable<'a>>,
 ) -> Option<MascotFrame> {
     let mut hover = None;
-    for (source, presence) in &ctx.scene.source_presence {
+    for (source, presence) in ctx.scene.source_presence() {
         let Some((walk, rest)) = gateway_mascot_anims(source) else {
             continue;
         };

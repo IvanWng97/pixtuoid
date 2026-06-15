@@ -300,7 +300,7 @@ pub fn project_floor_scene(scene: &SceneState, floor_idx: usize) -> SceneState {
     // Daemon presences (the OpenClaw gateway mascot) are global, not per-desk —
     // carry them onto the GROUND floor only so the mascot renders exactly once.
     if floor_idx == 0 {
-        s.source_presence = scene.source_presence.clone();
+        *s.source_presence_mut() = scene.source_presence().clone();
     }
     s
 }
@@ -323,7 +323,7 @@ mod tests {
         use pixtuoid_core::state::{DaemonPresence, DaemonState};
         let mut scene = SceneState::uniform(16);
         scene.floor_capacities[1] = 16; // a second floor exists
-        scene.source_presence.insert(
+        scene.source_presence_mut().insert(
             pixtuoid_core::source::openclaw::SOURCE_NAME.to_string(),
             DaemonPresence {
                 state: DaemonState::Idle,
@@ -335,11 +335,11 @@ mod tests {
             },
         );
         assert!(
-            !project_floor_scene(&scene, 0).source_presence.is_empty(),
+            !project_floor_scene(&scene, 0).source_presence().is_empty(),
             "floor 0 carries the mascot"
         );
         assert!(
-            project_floor_scene(&scene, 1).source_presence.is_empty(),
+            project_floor_scene(&scene, 1).source_presence().is_empty(),
             "floor 1+ must NOT (render-once invariant)"
         );
     }

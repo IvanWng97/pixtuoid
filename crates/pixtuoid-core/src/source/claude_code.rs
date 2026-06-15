@@ -148,8 +148,11 @@ pub struct ClaudeCodeSource {
     /// The OpenClaw daemon-presence side channel (the gateway mascot). OpenClaw
     /// hooks ride this one shared socket; its payloads decode to presence deltas
     /// (no `AgentEvent`s), forwarded here for the reducer task. `None` disables it
-    /// (bare test construction). Set by `runtime/driver.rs`, like `child_end_unclaims`.
-    pub presence_tx: Option<crate::source::hook::PresenceSender>,
+    /// (bare test construction). Set via [`Self::with_presence_tx`] by
+    /// `runtime/driver.rs`. PRIVATE on purpose: a new pub field on this
+    /// externally-constructed source struct would be a semver-major break — the
+    /// additive builder keeps it non-breaking.
+    presence_tx: Option<crate::source::hook::PresenceSender>,
 }
 
 /// Resolve `CLAUDE_CONFIG_DIR` (an empty value is treated as unset). `pub` +
@@ -207,6 +210,17 @@ impl ClaudeCodeSource {
             child_end_unclaims: None,
             presence_tx: None,
         }
+    }
+
+    /// Wire the OpenClaw presence side-channel (the driver passes the sender).
+    /// A builder, not a pub field, so adding presence routing stays semver-
+    /// additive on this externally-constructed source.
+    pub fn with_presence_tx(
+        mut self,
+        presence_tx: Option<crate::source::hook::PresenceSender>,
+    ) -> Self {
+        self.presence_tx = presence_tx;
+        self
     }
 }
 

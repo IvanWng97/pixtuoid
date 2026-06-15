@@ -149,12 +149,9 @@ async fn claude_code_source_run_binds_socket_and_emits_events() {
     let transcript = project_dir.join("ses-cc.jsonl");
 
     let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(32);
-    let src = ClaudeCodeSource {
-        socket_path,
-        projects_root,
-        child_end_unclaims: None,
-        presence_tx: None,
-    };
+    let mut src = ClaudeCodeSource::default_paths();
+    src.socket_path = socket_path;
+    src.projects_root = projects_root;
     let handle = tokio::spawn(async move { Box::new(src).run(tx).await });
 
     tokio::time::sleep(Duration::from_millis(50)).await;
