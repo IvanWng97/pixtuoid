@@ -111,6 +111,32 @@ def test_upstream_parsers_extract_from_a_snippet() -> None:
     # A malformed schema → None (signals "restructured", handled as breaking upstream).
     check(d.upstream_copilot_events("not json") is None, "copilot bad json -> None")
 
+    # CC hook-event summary table — the MOST complex parser (anchors to the
+    # "| Event |" header + separator, extracts the backtick-quoted first cell).
+    # A wrong-but-non-None match here would silently miss a renamed event, so pin
+    # both a real table and the no-table -> None case.
+    cc_md = (
+        "| Event | When it fires |\n"
+        "|---|---|\n"
+        "| `PreToolUse` | before a tool call |\n"
+        "| `PostToolUse` | after a tool call |\n"
+    )
+    up = d.upstream_cc_hook_events(cc_md)
+    check(up is not None and {"PreToolUse", "PostToolUse"} <= up, f"cc table parse: {up}")
+    check(d.upstream_cc_hook_events("no table here") is None, "cc no table -> None")
+
+    # Reasonix Go consts: `Ident Event = "Wire"`.
+    reasonix_go = 'const (\n\tPreToolUse Event = "PreToolUse"\n\tStop Event = "Stop"\n)'
+    up = d.upstream_reasonix_hooks(reasonix_go)
+    check(up is not None and {"PreToolUse", "Stop"} <= up, f"reasonix consts parse: {up}")
+    check(d.upstream_reasonix_hooks("no consts here") is None, "reasonix none -> None")
+
+    # CodeWhale Rust enum → snake_case wire names (serde rename_all = snake_case).
+    codewhale_rs = "pub enum HookEvent {\n    SessionStart,\n    PreToolUse,\n}"
+    up = d.upstream_codewhale_hooks(codewhale_rs)
+    check(up is not None and {"session_start", "pre_tool_use"} <= up, f"codewhale enum parse: {up}")
+    check(d.upstream_codewhale_hooks("no enum here") is None, "codewhale none -> None")
+
 
 def main() -> int:
     for t in (
