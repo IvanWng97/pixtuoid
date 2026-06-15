@@ -21,6 +21,20 @@ const NAME_W: usize = 13;
 /// Char budget for the connection-state column.
 const CONN_W: usize = 15;
 
+/// The column header, kept as one fn so the "Live" position can't drift from the
+/// data row. The two trailing spaces before "Live" mirror the fixed 2-col
+/// `health_flag` slot each data row carries between the Connection and Live
+/// columns (see `connection_line`) — without them "Live" sits 2 cols left of its
+/// data. `live_header_aligns_with_the_live_data_column` pins the two together.
+fn column_header() -> String {
+    format!(
+        "  {:<18}{:<width$}  Live",
+        "CLI",
+        "Connection",
+        width = CONN_W
+    )
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(in crate::tui) fn paint_connection_panel(
     f: &mut ratatui::Frame<'_>,
@@ -51,15 +65,7 @@ pub(in crate::tui) fn paint_connection_panel(
 
     lines.push(Line::from(Span::styled(format!("  {socket_line}"), dim)));
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        format!(
-            "  {:<18}{:<width$}Live",
-            "CLI",
-            "Connection",
-            width = CONN_W
-        ),
-        dim,
-    )));
+    lines.push(Line::from(Span::styled(column_header(), dim)));
     for (i, row) in rows.iter().enumerate() {
         let li = live.get(i).cloned().unwrap_or_default();
         lines.push(connection_line(row, &li, selected == i, now, theme));
@@ -253,6 +259,46 @@ mod tests {
             .style
             .add_modifier
             .contains(Modifier::REVERSED));
+    }
+
+    // The "Live" header column must line up with where each data row's live span
+    // actually starts — the 2-col health_flag slot (#309) shifted the data right
+    // and the header has to match. Char-count == column here (all glyphs single-
+    // width BMP). Guards the regression both online lenses flagged on #315.
+    #[test]
+    fn live_header_aligns_with_the_live_data_column() {
+        let header = column_header();
+        let header_live_col = header.find("Live").expect("header has a Live column");
+
+        // health=None → blank 2-col flag; health=Some → `⚠ ` 2-col flag. Both keep
+        // the same width, so the live column is fixed regardless of health.
+        for health in [None, Some("install broken".to_string())] {
+            let r = ConnectionRow {
+                source_id: "claude",
+                label_prefix: "cc",
+                display_name: "Name",
+                state: ConnState::Connected,
+                config_path: None,
+                target: None,
+                health,
+            };
+            let line = connection_line(
+                &r,
+                &LiveInfo::default(),
+                false,
+                SystemTime::UNIX_EPOCH,
+                &NORMAL,
+            );
+            let n = line.spans.len();
+            let live_col: usize = line.spans[..n - 1]
+                .iter()
+                .map(|s| s.content.chars().count())
+                .sum();
+            assert_eq!(
+                header_live_col, live_col,
+                "header Live col must match data live col; header={header:?}"
+            );
+        }
     }
 
     #[test]
