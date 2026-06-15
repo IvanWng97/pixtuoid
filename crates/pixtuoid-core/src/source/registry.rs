@@ -125,6 +125,16 @@ pub struct SourceDescriptor {
     /// applied at `SessionStart` and reinforced idempotently by the JSONL
     /// label derivers.
     pub label_prefix: &'static str,
+    /// The CLI version this build's decoder + fixtures were last verified against
+    /// (a byte-real capture — the #294 pattern). `"unknown"` (NOT `""`, pinned by
+    /// `every_descriptor_has_a_verified_version`) where we have no fixed anchor;
+    /// `pixtuoid doctor` only flags version SKEW when this parses to a version.
+    /// Maintainers bump it when they re-capture against a newer CLI.
+    pub verified_version: &'static str,
+    /// argv to probe the installed CLI version, e.g. `&["claude", "--version"]`.
+    /// `None` = no probe (no stable CLI binary). `doctor` runs it best-effort; a
+    /// missing binary / parse failure degrades to "version: unknown".
+    pub version_probe: Option<&'static [&'static str]>,
     /// JSONL line decoder. `None` = a HOOK-ONLY source (no watchable
     /// transcript): the fixture harness then accepts a transcript-less,
     /// hook-payloads-only scenario for it — and ONLY for it.
@@ -153,6 +163,8 @@ pub fn descriptor_for(name: &str) -> Option<&'static SourceDescriptor> {
 const CLAUDE_CODE: SourceDescriptor = SourceDescriptor {
     name: claude_code::SOURCE_NAME,
     label_prefix: "cc",
+    verified_version: "unknown",
+    version_probe: Some(&["claude", "--version"]),
     line_decoder: Some(claude_code::decode_cc_line),
     hook: HookDecoding {
         // CC keys on the session UUID (== the transcript filename stem
@@ -178,6 +190,8 @@ const CLAUDE_CODE: SourceDescriptor = SourceDescriptor {
 const CODEX: SourceDescriptor = SourceDescriptor {
     name: codex::SOURCE_NAME,
     label_prefix: "cx",
+    verified_version: "unknown",
+    version_probe: Some(&["codex", "--version"]),
     line_decoder: Some(codex::decode_codex_line),
     hook: HookDecoding {
         id_key: IdKey::SessionId,
@@ -195,6 +209,8 @@ const CODEX: SourceDescriptor = SourceDescriptor {
 const ANTIGRAVITY: SourceDescriptor = SourceDescriptor {
     name: antigravity::SOURCE_NAME,
     label_prefix: "ag",
+    verified_version: "unknown",
+    version_probe: Some(&["agy", "--version"]),
     line_decoder: Some(antigravity::decode_ag_line),
     hook: HookDecoding {
         id_key: IdKey::TranscriptPathThenSessionId,
@@ -215,6 +231,8 @@ const ANTIGRAVITY: SourceDescriptor = SourceDescriptor {
 const REASONIX: SourceDescriptor = SourceDescriptor {
     name: reasonix::SOURCE_NAME,
     label_prefix: "rx",
+    verified_version: "unknown",
+    version_probe: Some(&["reasonix", "--version"]),
     line_decoder: None,
     hook: HookDecoding {
         id_key: IdKey::TranscriptPathThenSessionId, // inert: custom claims all
@@ -246,6 +264,8 @@ const REASONIX: SourceDescriptor = SourceDescriptor {
 const CODEWHALE: SourceDescriptor = SourceDescriptor {
     name: codewhale::SOURCE_NAME,
     label_prefix: "cw",
+    verified_version: "unknown",
+    version_probe: Some(&["codewhale", "--version"]),
     line_decoder: None,
     hook: HookDecoding {
         id_key: IdKey::TranscriptPathThenSessionId, // inert: custom claims all
@@ -273,6 +293,8 @@ const CODEWHALE: SourceDescriptor = SourceDescriptor {
 const OPENCODE: SourceDescriptor = SourceDescriptor {
     name: opencode::SOURCE_NAME,
     label_prefix: "oc",
+    verified_version: "unknown",
+    version_probe: Some(&["opencode", "--version"]),
     line_decoder: None,
     hook: HookDecoding {
         id_key: IdKey::TranscriptPathThenSessionId, // inert: custom claims all
@@ -308,6 +330,8 @@ const OPENCODE: SourceDescriptor = SourceDescriptor {
 const COPILOT: SourceDescriptor = SourceDescriptor {
     name: copilot::SOURCE_NAME,
     label_prefix: "cp",
+    verified_version: "1.0.62",
+    version_probe: Some(&["copilot", "--version"]),
     line_decoder: Some(copilot::decode_copilot_line),
     hook: HookDecoding {
         id_key: IdKey::TranscriptPathThenSessionId, // inert: no hook transport for this source
@@ -339,6 +363,8 @@ const COPILOT: SourceDescriptor = SourceDescriptor {
 const CURSOR: SourceDescriptor = SourceDescriptor {
     name: cursor::SOURCE_NAME,
     label_prefix: "cu",
+    verified_version: "unknown",
+    version_probe: Some(&["cursor-agent", "--version"]),
     line_decoder: None,
     hook: HookDecoding {
         id_key: IdKey::TranscriptPathThenSessionId, // inert: custom claims all
@@ -381,6 +407,21 @@ mod tests {
                 "source {:?} label_prefix {:?} must be exactly 2 chars",
                 d.name,
                 d.label_prefix
+            );
+        }
+    }
+
+    // `verified_version` must be non-empty — `"unknown"` is the sentinel, NOT
+    // `""` (an empty string would parse as no-version AND read as a blank column;
+    // `pixtuoid doctor` relies on the distinction). A new row must make a
+    // conscious choice rather than defaulting to "".
+    #[test]
+    fn every_descriptor_has_a_verified_version() {
+        for d in REGISTRY {
+            assert!(
+                !d.verified_version.is_empty(),
+                "source {:?} verified_version is empty — use \"unknown\", not \"\"",
+                d.name
             );
         }
     }

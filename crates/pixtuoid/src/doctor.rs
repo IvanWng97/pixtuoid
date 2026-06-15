@@ -3,9 +3,12 @@
 //! Surfaces the decode-drift breadcrumbs (`source/drift.rs`, structured under the
 //! `pixtuoid::drift` tracing target) that otherwise die in the warn-floor log
 //! nobody reads — the gap the Task→Agent rename exposed. For each registered
-//! source it reports: connected? hooks installed? and any drift recorded in the
-//! log (unknown events / missing fields / unknown dispatch / shape drift), with a
-//! sanitized sample of the distinctive new names so the user can report them.
+//! source it reports: connected? hooks installed? the installed CLI version
+//! (probed via `<cli> --version`) vs the `verified_version` anchor — flagging
+//! skew ("NEWER than verified, drift possible") where an anchor exists; and any
+//! drift recorded in the log (unknown events / missing fields / unknown dispatch
+//! / shape drift), with a sanitized sample of the distinctive new names so the
+//! user can report them.
 //!
 //! Strictly READ-ONLY: log file + config + install-state. It never writes config
 //! (re-connecting hooks stays the Connection panel's job) and never spawns the
@@ -104,7 +107,67 @@ pub struct DoctorSourceRow {
     pub connected: bool,
     pub has_target: bool,
     pub hooks_installed: bool,
+    /// The installed CLI version (raw probe output), if probeable.
+    pub installed_version: Option<String>,
+    /// The version this build's decoder was verified against (`"unknown"` = no
+    /// anchor), from the source's `SourceDescriptor`.
+    pub verified_version: &'static str,
     pub scan: LogScanResult,
+}
+
+/// Extract a `MAJOR.MINOR[.PATCH]` tuple from a version string (e.g. from
+/// `GitHub Copilot CLI 1.0.62.` → (1,0,62)) — the first dotted-number run.
+/// Tolerant: trailing/leading text ignored, missing patch = 0, parse failure =
+/// None (so a skew check silently no-ops rather than alarming on garbage).
+pub fn parse_version(s: &str) -> Option<(u64, u64, u64)> {
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i].is_ascii_digit() {
+            // Take the run of digits and dots starting here.
+            let start = i;
+            while i < bytes.len() && (bytes[i].is_ascii_digit() || bytes[i] == b'.') {
+                i += 1;
+            }
+            let run = &s[start..i];
+            let mut parts = run.split('.').filter(|p| !p.is_empty());
+            if let Some(major) = parts.next().and_then(|p| p.parse().ok()) {
+                let minor = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
+                let patch = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
+                // Require at least a MAJOR.MINOR to count as a version (a bare
+                // integer like a year/count is too ambiguous).
+                if run.contains('.') {
+                    return Some((major, minor, patch));
+                }
+            }
+        } else {
+            i += 1;
+        }
+    }
+    None
+}
+
+/// The version segment for a doctor row. Skew is flagged ONLY when both the
+/// installed and the (non-`unknown`) verified version parse — otherwise it just
+/// shows the installed version (still useful) with no alarm.
+pub fn version_status(installed: Option<&str>, verified: &str) -> String {
+    // Show the RAW probe string (what the CLI actually reports) — honest, not a
+    // lossy reformat (cursor's `2026.06.04-5fd875e` isn't semver). The skew
+    // check still parses internally.
+    let inst_disp = installed
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("unknown");
+    if verified == "unknown" {
+        return inst_disp.to_string();
+    }
+    let cmp = match (installed.and_then(parse_version), parse_version(verified)) {
+        (Some(i), Some(v)) if i > v => " — NEWER than verified, drift possible",
+        (Some(i), Some(v)) if i < v => " — older than verified",
+        (Some(_), Some(_)) => " — matches verified",
+        _ => "",
+    };
+    format!("{inst_disp} (verified {verified}{cmp})")
 }
 
 /// Render one row. Pure — the test seam (like `runtime::summarize`).
@@ -150,15 +213,33 @@ pub fn format_doctor_row(row: &DoctorSourceRow) -> String {
         };
         format!("DRIFT: {}{when}{samples}", parts.join(", "))
     };
+    let version = version_status(row.installed_version.as_deref(), row.verified_version);
     format!(
-        "  {}·{:<13} {:<13} hooks: {:<22} {}",
-        row.prefix, row.name, conn, hooks, drift
+        "  {}·{:<13} {:<12} hooks: {:<22} {:<34} {}",
+        row.prefix, row.name, conn, hooks, version, drift
     )
 }
 
-/// Run the diagnosis: read config + install-state + the log, print a per-source
-/// health table. Read-only. `log_path` is injected by `main` (it owns the
-/// log-path resolution, which lives in the bin crate, not the lib).
+/// Run a source's version-probe argv (from the static registry — never user
+/// input) and return the first non-empty output line, trimmed. Best-effort: a
+/// missing binary / nonzero exit / non-UTF8 → None ("version: unknown"). Checks
+/// stdout then stderr (some CLIs print `--version` to stderr).
+fn probe_version(argv: &'static [&'static str]) -> Option<String> {
+    let (cmd, args) = argv.split_first()?;
+    let output = std::process::Command::new(cmd).args(args).output().ok()?;
+    let first_line = |b: &[u8]| {
+        String::from_utf8_lossy(b)
+            .lines()
+            .map(str::trim)
+            .find(|l| !l.is_empty())
+            .map(str::to_string)
+    };
+    first_line(&output.stdout).or_else(|| first_line(&output.stderr))
+}
+
+/// Run the diagnosis: read config + install-state + the log, probe installed CLI
+/// versions, print a per-source health table. Read-only. `log_path` is injected
+/// by `main` (it owns the log-path resolution, which lives in the bin, not lib).
 pub fn run(log_path: &std::path::Path) -> anyhow::Result<()> {
     let mut warnings = Vec::new();
     let cfg = crate::config::load(&crate::config::config_path(), &mut warnings);
@@ -179,16 +260,16 @@ pub fn run(log_path: &std::path::Path) -> anyhow::Result<()> {
 
     let mut any_drift = false;
     for &src in REGISTERED_SOURCES {
-        let prefix = registry::descriptor_for(src)
-            .map(|d| d.label_prefix)
-            .unwrap_or("??");
+        let desc = registry::descriptor_for(src);
         let target = crate::install::target::by_source(src);
         let row = DoctorSourceRow {
-            prefix,
+            prefix: desc.map(|d| d.label_prefix).unwrap_or("??"),
             name: src,
             connected: connected.contains(src),
             has_target: target.is_some(),
             hooks_installed: target.map(crate::install::has_hooks).unwrap_or(false),
+            installed_version: desc.and_then(|d| d.version_probe).and_then(probe_version),
+            verified_version: desc.map(|d| d.verified_version).unwrap_or("unknown"),
             scan: scan_log_for_source(&log, src),
         };
         any_drift |= row.scan.total() > 0;
@@ -311,10 +392,13 @@ mod tests {
             connected: true,
             has_target: true,
             hooks_installed: true,
+            installed_version: Some("2.0.0".into()),
+            verified_version: "unknown",
             scan: LogScanResult::default(),
         };
         let c = format_doctor_row(&clean);
         assert!(c.contains("codex") && c.contains("connected") && c.contains("installed"));
+        assert!(c.contains("2.0.0"));
         assert!(c.contains("drift: none"));
 
         let drifted = DoctorSourceRow {
@@ -323,6 +407,8 @@ mod tests {
             connected: true,
             has_target: false, // transcript-only
             hooks_installed: false,
+            installed_version: Some("1.1.0".into()),
+            verified_version: "1.0.62",
             scan: LogScanResult {
                 missing_field: 3,
                 ..Default::default()
@@ -331,5 +417,34 @@ mod tests {
         let d = format_doctor_row(&drifted);
         assert!(d.contains("3 missing-field"));
         assert!(d.contains("n/a (transcript-only)"));
+        assert!(d.contains("NEWER than verified"), "skew flagged: {d}");
+    }
+
+    #[test]
+    fn parse_version_extracts_the_dotted_run() {
+        assert_eq!(parse_version("1.0.62"), Some((1, 0, 62)));
+        assert_eq!(
+            parse_version("GitHub Copilot CLI 1.0.62."),
+            Some((1, 0, 62))
+        );
+        assert_eq!(parse_version("v2.1"), Some((2, 1, 0))); // missing patch = 0
+        assert_eq!(parse_version("codex 0.41.0 (abc)"), Some((0, 41, 0)));
+        assert_eq!(parse_version("no version here"), None);
+        assert_eq!(parse_version("2026"), None); // a bare integer is not a version
+    }
+
+    #[test]
+    fn version_status_flags_skew_only_with_a_known_anchor() {
+        // unknown anchor → just the installed version (raw), no skew text.
+        let u = version_status(Some("3.4.5"), "unknown");
+        assert_eq!(u, "3.4.5");
+        assert!(!u.contains("verified"));
+        // newer / older / matches.
+        assert!(version_status(Some("1.1.0"), "1.0.62").contains("NEWER than verified"));
+        assert!(version_status(Some("1.0.0"), "1.0.62").contains("older than verified"));
+        assert!(version_status(Some("1.0.62"), "1.0.62").contains("matches verified"));
+        // un-probeable installed → shows unknown, no false skew.
+        let n = version_status(None, "1.0.62");
+        assert!(n.contains("unknown") && !n.contains("NEWER"));
     }
 }

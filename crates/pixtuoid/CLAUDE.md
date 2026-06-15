@@ -22,9 +22,11 @@ src/
 ├── cli.rs              clap subcommands (run / validate-pack / init-pack / doctor) — NO install-hooks/uninstall-hooks
 │                       (deleted; binding a source is the in-TUI Connection panel's job, `c`)
 ├── doctor.rs           `pixtuoid doctor` — read-only source self-diagnosis (connected? hooks
-│                       installed? + decode-drift counts scanned from the warn-floor log's
-│                       `pixtuoid::drift` breadcrumbs). Pure scan_log_for_source/format_doctor_row
-│                       (tested vs REAL fmt output); sanitizes untrusted sampled names (R0615-06)
+│                       installed? installed `<cli> --version` vs the registry's verified_version
+│                       anchor → skew flag; + decode-drift counts scanned from the warn-floor log's
+│                       `pixtuoid::drift` breadcrumbs). Pure scan_log_for_source/format_doctor_row/
+│                       parse_version/version_status (tested; scan vs REAL fmt output); sanitizes
+│                       untrusted sampled names (R0615-06). verified_version lives on SourceDescriptor
 ├── config.rs           AppConfig persistence (~/.config/pixtuoid/config.toml), XDG-aware
 ├── runtime/            mod.rs (RunConfig, boot-capacity math, headless summarize — all unit-tested;
 │                       ConnectedSources = the live `Arc<Mutex<HashSet<String>>>` connected-set,
