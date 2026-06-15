@@ -55,12 +55,12 @@ struct DriftLine<'a> {
     kind: &'a str,
     /// The fields segment AFTER the `target:` marker — sample values are pulled
     /// from here, so a span field of the same name (rendered BEFORE the target)
-    /// can't be picked up (R0615-08).
+    /// can't be picked up (R0615-09).
     fields: &'a str,
 }
 
 /// Parse a warn-floor log line as a drift breadcrumb, anchored on the STRUCTURAL
-/// tracing-fmt `target:` marker rather than a loose `contains` (R0615-07/-08).
+/// tracing-fmt `target:` marker rather than a loose `contains` (R0615-08/-09).
 /// `marker` is `"<TARGET>: "` (hoisted by the caller to avoid a per-line alloc).
 /// tracing-fmt renders the target verbatim after the level + any span list, so:
 /// (1) a line that merely MENTIONS the literal inside a field value isn't matched
@@ -513,7 +513,7 @@ mod tests {
         assert_eq!(scan_log_for_source("", "copilot"), LogScanResult::default());
     }
 
-    // R0615-07: a non-drift line that merely MENTIONS the bare target string is
+    // R0615-08: a non-drift line that merely MENTIONS the bare target string is
     // NOT counted — the structural `target:` marker (with its `: `) gates it, not
     // a loose `contains(TARGET)` (which the old scanner used). The crafted line
     // carries `source=`/`kind=` so only the missing structural marker saves it.
@@ -523,7 +523,18 @@ mod tests {
         assert_eq!(scan_log_for_source(line, "copilot").total(), 0);
     }
 
-    // R0615-08: a breadcrumb emitted inside a tracing SPAN that carries its OWN
+    // R0615-08: the space-guard rejects a LONGER target that merely SUFFIXES our
+    // token (`a::b::pixtuoid::drift`). Distinct from the body-mention path above:
+    // here the `pixtuoid::drift: ` marker IS present so `find` succeeds, but it's
+    // preceded by `:` (not a space), so the guard returns None. Carries valid
+    // source/kind so ONLY the guard prevents the (false) count.
+    #[test]
+    fn scan_rejects_a_longer_target_suffixing_our_token() {
+        let line = "2026-06-15T00:00:00Z  WARN myapp::pixtuoid::drift: source=copilot kind=\"unknown_event\" name=X";
+        assert_eq!(scan_log_for_source(line, "copilot").total(), 0);
+    }
+
+    // R0615-09: a breadcrumb emitted inside a tracing SPAN that carries its OWN
     // `source=` field — fmt renders span fields BEFORE the target, so parsing
     // after the marker must pick the EVENT's source, never the span's. (No
     // production code wraps a decoder in such a span today; this pins the parser
