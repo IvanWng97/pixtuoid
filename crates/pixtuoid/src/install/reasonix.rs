@@ -39,11 +39,13 @@ const SENTINEL_KEY: &str = "_pixtuoid";
 /// `every_registered_reasonix_event_decodes` below. PostLLMCall / PreCompact /
 /// SubagentStop are deliberately absent: per-model-turn noise, compaction
 /// internals, and a no-id subagent signal already covered by the parent's
-/// `task` PostToolUse.
+/// `task` PostToolUse. `PermissionRequest` (#302) is the structured approval
+/// gate → Waiting, fired alongside `Notification` (idempotent).
 const REASONIX_EVENTS: &[&str] = &[
     "SessionStart",
     "PreToolUse",
     "PostToolUse",
+    "PermissionRequest",
     "UserPromptSubmit",
     "Stop",
     "Notification",
@@ -152,6 +154,12 @@ fn managed_entry(hook_command: &str) -> Value {
         "timeout": 1000,
         "description": "pixtuoid visualizer"
     })
+}
+
+/// Install-schema verification (#309) — Reasonix's flat-JSON shape (shared with
+/// Cursor): `hooks.<event>` arrays of `{_pixtuoid, command}`.
+pub fn verify_schema(content: &str) -> crate::install::verify::SchemaParse {
+    crate::install::verify::flat_json_verify(content, REASONIX_EVENTS, SENTINEL_KEY)
 }
 
 fn json_merge_install(doc: Value, hook_command: &str) -> Value {

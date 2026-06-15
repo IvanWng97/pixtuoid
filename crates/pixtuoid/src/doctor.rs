@@ -49,15 +49,78 @@ fn sanitize(s: &str) -> String {
     s.chars().filter(|c| !c.is_control()).collect()
 }
 
-/// Pull `key=value` from a tracing-fmt line: the value runs to the next
-/// whitespace (drift breadcrumb fields are space-separated, no spaces in
-/// source/kind/name/tool), surrounding quotes stripped. `None` if absent.
-fn field<'a>(line: &'a str, key: &str) -> Option<&'a str> {
+/// The parsed fields of one `pixtuoid::drift` breadcrumb line, borrowed from it.
+struct DriftLine<'a> {
+    source: &'a str,
+    kind: &'a str,
+    /// The fields segment AFTER the `target:` marker — sample values are pulled
+    /// from here, so a span field of the same name (rendered BEFORE the target)
+    /// can't be picked up (R0615-09).
+    fields: &'a str,
+}
+
+/// Parse a warn-floor log line as a drift breadcrumb, anchored on the STRUCTURAL
+/// tracing-fmt `target:` marker rather than a loose `contains` (R0615-08/-09).
+/// `marker` is `"<TARGET>: "` (hoisted by the caller to avoid a per-line alloc).
+/// tracing-fmt renders the target verbatim after the level + any span list, so:
+/// (1) a line that merely MENTIONS the literal inside a field value isn't matched
+/// (the marker carries the `: ` the target position always has, and must be a
+/// standalone token, not the suffix of a longer `a::b::pixtuoid::drift` target);
+/// (2) fields are parsed only from the segment AFTER it, never an active-span
+/// field of the same name. `None` if not a drift line or source/kind is absent.
+/// Accepted residual: a non-drift line whose value literally embeds
+/// ` <TARGET>: source=… kind=… ` would still match — no in-tree code emits that.
+fn parse_drift_line<'a>(line: &'a str, marker: &str) -> Option<DriftLine<'a>> {
+    let at = line.find(marker)?;
+    if at != 0 && line.as_bytes()[at - 1] != b' ' {
+        return None; // suffix of a longer target, not our standalone token
+    }
+    let fields = &line[at + marker.len()..];
+    Some(DriftLine {
+        source: field_value(fields, "source")?,
+        kind: field_value(fields, "kind")?,
+        fields,
+    })
+}
+
+/// Pull a field value from a tracing-fmt fields segment. Handles the quoted form
+/// (`key="…"`, fmt's string-literal rendering) AND the unquoted Display form
+/// (`key=val`), INCLUDING a value containing spaces (a hostile wire name): an
+/// unquoted value runs to the next ` <ident>=` field boundary or the segment end,
+/// not merely the next whitespace (R0615-09). The key must START a field (segment
+/// start or space-preceded) so `name` can't match inside `displayName=`.
+fn field_value<'a>(seg: &'a str, key: &str) -> Option<&'a str> {
     let pat = format!("{key}=");
-    let start = line.find(&pat)? + pat.len();
-    let rest = &line[start..];
-    let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
-    Some(rest[..end].trim_matches('"'))
+    let mut from = 0;
+    let val_start = loop {
+        let abs = from + seg[from..].find(&pat)?;
+        if abs == 0 || seg.as_bytes()[abs - 1] == b' ' {
+            break abs + pat.len();
+        }
+        from = abs + pat.len();
+    };
+    let rest = &seg[val_start..];
+    if let Some(after_q) = rest.strip_prefix('"') {
+        Some(&after_q[..after_q.find('"').unwrap_or(after_q.len())])
+    } else {
+        Some(rest[..next_field_boundary(rest).unwrap_or(rest.len())].trim_end())
+    }
+}
+
+/// Index of the next ` <ident>=` field boundary in an unquoted value tail (so a
+/// spaced value is kept whole instead of truncated at its first space).
+fn next_field_boundary(s: &str) -> Option<usize> {
+    let b = s.as_bytes();
+    (0..b.len()).find(|&i| {
+        if b[i] != b' ' {
+            return false;
+        }
+        let mut j = i + 1;
+        while j < b.len() && (b[j].is_ascii_alphanumeric() || b[j] == b'_') {
+            j += 1;
+        }
+        j > i + 1 && j < b.len() && b[j] == b'='
+    })
 }
 
 fn push_sample(samples: &mut Vec<String>, v: Option<&str>) {
@@ -75,22 +138,23 @@ fn push_sample(samples: &mut Vec<String>, v: Option<&str>) {
 /// names ARE sanitized (they're untrusted wire content).
 pub fn scan_log_for_source(log: &str, source: &str) -> LogScanResult {
     let mut r = LogScanResult::default();
+    let marker = format!("{}: ", drift::TARGET);
     for line in log.lines() {
-        if !line.contains(drift::TARGET) || field(line, "source") != Some(source) {
-            continue;
-        }
-        let Some(kind) = field(line, "kind") else {
+        let Some(p) = parse_drift_line(line, &marker) else {
             continue;
         };
-        match kind {
+        if p.source != source {
+            continue;
+        }
+        match p.kind {
             "unknown_event" => {
                 r.unknown_event += 1;
-                push_sample(&mut r.samples, field(line, "name"));
+                push_sample(&mut r.samples, field_value(p.fields, "name"));
             }
             "missing_field" => r.missing_field += 1,
             "unknown_dispatch" => {
                 r.unknown_dispatch += 1;
-                push_sample(&mut r.samples, field(line, "tool"));
+                push_sample(&mut r.samples, field_value(p.fields, "tool"));
             }
             "shape_drift" => r.shape_drift += 1,
             _ => continue,
@@ -100,6 +164,92 @@ pub fn scan_log_for_source(log: &str, source: &str) -> LogScanResult {
         }
     }
     r
+}
+
+/// Source label-prefixes (e.g. `"cc"`) that have ANY decode-drift breadcrumb in
+/// the log — for the live footer nudge. Reuses `scan_log_for_source` (tested).
+pub fn drifted_sources(log: &str) -> Vec<String> {
+    REGISTERED_SOURCES
+        .iter()
+        .filter(|s| scan_log_for_source(log, s).total() > 0)
+        .filter_map(|s| registry::descriptor_for(s).map(|d| d.label_prefix.to_string()))
+        .collect()
+}
+
+/// Merge the source-death footer warning (HIGHEST priority — the office is
+/// partially frozen) with a passive decode-drift nudge. `None` when both clear.
+/// The footer (`run_tui`) sets this each frame; the drift list is throttle-scanned.
+pub fn footer_warning(source_death: Option<&str>, drifted: &[String]) -> Option<String> {
+    if let Some(d) = source_death {
+        return Some(d.to_string());
+    }
+    if drifted.is_empty() {
+        return None;
+    }
+    let prefixes = drifted
+        .iter()
+        .map(|p| format!("{p}·"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    // No leading `⚠` — the footer painter (`hud.rs` `" ⚠ {warn} "`) owns the
+    // glyph, same as the source-death message. Embedding one here double-prints
+    // it (`⚠ ⚠ decode drift`), a regression a snapshot caught.
+    Some(format!("decode drift: {prefixes} — run `pixtuoid doctor`"))
+}
+
+/// Per-source diagnostics rollup — the SHARED source of truth the Connection
+/// panel (the board), the boot preflight, and `run` (the CLI report) all read,
+/// so the surfaces can't drift apart and no check runs twice (the
+/// health-consolidation arc / #309). Scope is the CHEAP signals: install-schema
+/// soundness (#309) + decode drift. Version skew stays report-only (the
+/// `<cli> --version` probe, up to 5s each, is too costly for an interactive
+/// panel-open across N sources, and is advisory); live activity + transport
+/// death stay the panel's per-frame facets.
+#[derive(Debug, Default)]
+pub struct SourceDiagnostics {
+    /// #309 install-schema soundness — `Some` only when hooks are installed in
+    /// the target's config; `None` = not checked (no target / not installed).
+    pub install: Option<crate::install::verify::SchemaVerifyResult>,
+    /// Decode-drift tally from the warn-floor log.
+    pub drift: LogScanResult,
+}
+
+impl SourceDiagnostics {
+    /// A HARD install problem ⇒ the source is broken (zero sprites despite a
+    /// claimed connection). Soft notes + drift do NOT count as broken.
+    pub fn is_broken(&self) -> bool {
+        self.install.as_ref().is_some_and(|i| !i.is_sound())
+    }
+
+    /// The single worst issue as a one-line, glyph-prefixed summary for the
+    /// Connection panel detail + the boot warning. `None` = nothing to flag.
+    /// Priority: install-broken (hooks can't fire) > decode-drift.
+    pub fn summary(&self) -> Option<String> {
+        if let Some(i) = &self.install {
+            if !i.is_sound() {
+                return Some(format!("⚠ install broken: {}", i.issues.join("; ")));
+            }
+        }
+        let n = self.drift.total();
+        if n > 0 {
+            return Some(format!("⚠ {n} decode drift — run `pixtuoid doctor`"));
+        }
+        None
+    }
+}
+
+/// Compute the cheap per-source diagnostics given the warn-floor log text. The
+/// install check runs whenever the source's target has managed hooks installed
+/// (NOT gated on the connected flag — `run` reports a stale broken install even
+/// on a disconnected source; the boot warning gates on connected itself).
+pub fn diagnose(source: &str, log: &str) -> SourceDiagnostics {
+    let install = crate::install::target::by_source(source)
+        .filter(|t| crate::install::has_hooks(t))
+        .map(|t| crate::install::verify_target(t, None));
+    SourceDiagnostics {
+        install,
+        drift: scan_log_for_source(log, source),
+    }
 }
 
 /// One source's diagnosis row (plain data, so `format_doctor_row` is pure/tested).
@@ -115,38 +265,59 @@ pub struct DoctorSourceRow {
     /// anchor), from the source's `SourceDescriptor`.
     pub verified_version: &'static str,
     pub scan: LogScanResult,
+    /// Install-schema soundness (#309) — `Some` only when hooks are installed;
+    /// `None` = not checked (no target / not installed). A non-sound result is
+    /// surfaced in the `hooks:` column as "installed but BROKEN: …".
+    pub schema: Option<crate::install::verify::SchemaVerifyResult>,
 }
 
-/// Extract a `MAJOR.MINOR[.PATCH]` tuple from a version string (e.g. from
-/// `GitHub Copilot CLI 1.0.62.` → (1,0,62)) — the first dotted-number run.
-/// Tolerant: trailing/leading text ignored, missing patch = 0, parse failure =
-/// None (so a skew check silently no-ops rather than alarming on garbage).
+/// A dotted-run major at or above this looks like a YEAR/date token, not a semver
+/// major — used to skip a date prefix in favor of a real version (#307).
+const IMPLAUSIBLE_MAJOR: u64 = 1000;
+
+/// Extract a `MAJOR.MINOR[.PATCH]` tuple from a `--version` banner. Tolerant:
+/// surrounding text ignored, missing patch = 0, no dotted run = None (a skew
+/// check then silently no-ops rather than alarming on garbage). A bare integer
+/// (`2026`) is NOT a version (needs at least `MAJOR.MINOR`).
+///
+/// Banner-order robust (#307): a banner can print a dotted DATE/build token
+/// before the semver (`Built 2026.06.04 — v1.2.3`). Selection order:
+///   1. a `v`/`V`-prefixed run wins (an explicit version marker);
+///   2. else the first run with a plausible (< `IMPLAUSIBLE_MAJOR`) major,
+///      skipping a year-like date prefix;
+///   3. else the first run — so a genuine CalVer (`2026.06.04`, e.g. cursor)
+///      still parses rather than vanishing.
 pub fn parse_version(s: &str) -> Option<(u64, u64, u64)> {
     let bytes = s.as_bytes();
+    // (v_prefixed, (major, minor, patch)) for every dotted-number run.
+    let mut runs: Vec<(bool, (u64, u64, u64))> = Vec::new();
     let mut i = 0;
     while i < bytes.len() {
-        if bytes[i].is_ascii_digit() {
-            // Take the run of digits and dots starting here.
-            let start = i;
-            while i < bytes.len() && (bytes[i].is_ascii_digit() || bytes[i] == b'.') {
-                i += 1;
-            }
-            let run = &s[start..i];
-            let mut parts = run.split('.').filter(|p| !p.is_empty());
-            if let Some(major) = parts.next().and_then(|p| p.parse().ok()) {
-                let minor = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
-                let patch = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
-                // Require at least a MAJOR.MINOR to count as a version (a bare
-                // integer like a year/count is too ambiguous).
-                if run.contains('.') {
-                    return Some((major, minor, patch));
-                }
-            }
-        } else {
+        if !bytes[i].is_ascii_digit() {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        while i < bytes.len() && (bytes[i].is_ascii_digit() || bytes[i] == b'.') {
             i += 1;
         }
+        let run = &s[start..i];
+        if !run.contains('.') {
+            continue; // a bare integer is too ambiguous to be a version
+        }
+        let mut parts = run.split('.').filter(|p| !p.is_empty());
+        if let Some(major) = parts.next().and_then(|p| p.parse().ok()) {
+            let minor = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
+            let patch = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
+            let v_prefixed = start > 0 && matches!(bytes[start - 1], b'v' | b'V');
+            runs.push((v_prefixed, (major, minor, patch)));
+        }
     }
-    None
+    runs.iter()
+        .find(|(vp, _)| *vp)
+        .or_else(|| runs.iter().find(|(_, (maj, ..))| *maj < IMPLAUSIBLE_MAJOR))
+        .or_else(|| runs.first())
+        .map(|(_, v)| *v)
 }
 
 /// The version segment for a doctor row. Skew is flagged ONLY when both the
@@ -180,11 +351,17 @@ pub fn format_doctor_row(row: &DoctorSourceRow) -> String {
         "disconnected"
     };
     let hooks = if !row.has_target {
-        "n/a (transcript-only)"
-    } else if row.hooks_installed {
-        "installed"
+        "n/a (transcript-only)".to_string()
+    } else if !row.hooks_installed {
+        "NOT installed".to_string()
     } else {
-        "NOT installed"
+        // Installed — but is the install structurally SOUND (#309)? A non-sound
+        // result is the silent-dead case: connected, "installed", zero sprites.
+        match &row.schema {
+            Some(s) if !s.is_sound() => format!("installed but BROKEN: {}", s.issues.join("; ")),
+            Some(s) if !s.notes.is_empty() => format!("installed ({})", s.notes.join("; ")),
+            _ => "installed".to_string(),
+        }
     };
     let drift = if row.scan.total() == 0 {
         "drift: none".to_string()
@@ -282,6 +459,12 @@ fn probe_version(argv: &'static [&'static str]) -> Option<String> {
 pub fn run(log_path: &std::path::Path) -> anyhow::Result<()> {
     let mut warnings = Vec::new();
     let cfg = crate::config::load(&crate::config::config_path(), &mut warnings);
+    // `doctor` is a separate PROCESS from the running TUI, so it derives the
+    // connected-set fresh from config via the SAME `resolve_connected` the boot
+    // seeder uses (NOT the live in-process `ConnectedSources`, which it can't
+    // see). A snapshot diagnostic reading live on-disk state is the correct
+    // semantic — it can lag a just-made in-TUI toggle until that toggle persists,
+    // which it always does (persist-first; see `connect_source`/`disconnect_source`).
     let connected = crate::config::resolve_connected(&cfg, |src| {
         crate::install::target::by_source(src).map(crate::install::has_hooks)
     });
@@ -298,24 +481,38 @@ pub fn run(log_path: &std::path::Path) -> anyhow::Result<()> {
     out.push('\n');
 
     let mut any_drift = false;
+    let mut any_broken = false;
     for &src in REGISTERED_SOURCES {
         let desc = registry::descriptor_for(src);
         let target = crate::install::target::by_source(src);
+        let hooks_installed = target.map(crate::install::has_hooks).unwrap_or(false);
+        // ONE shared rollup (install soundness + drift) — the same `diagnose` the
+        // Connection panel + boot preflight read, so the report can't drift apart
+        // from the live surfaces.
+        let diag = diagnose(src, &log);
         let row = DoctorSourceRow {
             prefix: desc.map(|d| d.label_prefix).unwrap_or("??"),
             name: src,
             connected: connected.contains(src),
             has_target: target.is_some(),
-            hooks_installed: target.map(crate::install::has_hooks).unwrap_or(false),
+            hooks_installed,
             installed_version: desc.and_then(|d| d.version_probe).and_then(probe_version),
             verified_version: desc.map(|d| d.verified_version).unwrap_or("unknown"),
-            scan: scan_log_for_source(&log, src),
+            scan: diag.drift,
+            schema: diag.install,
         };
         any_drift |= row.scan.total() > 0;
+        any_broken |= row.schema.as_ref().is_some_and(|s| !s.is_sound());
         out.push_str(&format_doctor_row(&row));
         out.push('\n');
     }
 
+    if any_broken {
+        out.push_str(
+            "\n⚠ a connected source's hooks are INSTALLED BUT BROKEN — it renders no agents.\n   \
+             Reconnect it in the Connection panel (press c) to repair the install.\n",
+        );
+    }
     if any_drift {
         out.push_str(
             "\n⚠ decode drift recorded — your pixtuoid may predate a CLI's current wire format.\n   \
@@ -401,6 +598,61 @@ mod tests {
         assert_eq!(scan_log_for_source("", "copilot"), LogScanResult::default());
     }
 
+    // R0615-08: a non-drift line that merely MENTIONS the bare target string is
+    // NOT counted — the structural `target:` marker (with its `: `) gates it, not
+    // a loose `contains(TARGET)` (which the old scanner used). The crafted line
+    // carries `source=`/`kind=` so only the missing structural marker saves it.
+    #[test]
+    fn scan_ignores_a_body_mention_of_the_target_string() {
+        let line = "2026-06-15T00:00:00Z  WARN pixtuoid::source::manager: a pixtuoid::drift mention source=copilot kind=unknown_event name=X";
+        assert_eq!(scan_log_for_source(line, "copilot").total(), 0);
+    }
+
+    // R0615-08: the space-guard rejects a LONGER target that merely SUFFIXES our
+    // token (`a::b::pixtuoid::drift`). Distinct from the body-mention path above:
+    // here the `pixtuoid::drift: ` marker IS present so `find` succeeds, but it's
+    // preceded by `:` (not a space), so the guard returns None. Carries valid
+    // source/kind so ONLY the guard prevents the (false) count.
+    #[test]
+    fn scan_rejects_a_longer_target_suffixing_our_token() {
+        let line = "2026-06-15T00:00:00Z  WARN myapp::pixtuoid::drift: source=copilot kind=\"unknown_event\" name=X";
+        assert_eq!(scan_log_for_source(line, "copilot").total(), 0);
+    }
+
+    // R0615-09: a breadcrumb emitted inside a tracing SPAN that carries its OWN
+    // `source=` field — fmt renders span fields BEFORE the target, so parsing
+    // after the marker must pick the EVENT's source, never the span's. (No
+    // production code wraps a decoder in such a span today; this pins the parser
+    // so adding one later can't silently misattribute.)
+    #[test]
+    fn scan_parses_event_fields_not_a_span_field_of_the_same_name() {
+        let line = "2026-06-15T00:00:00Z  WARN decode{source=spanwrong}: pixtuoid::drift: source=copilot kind=\"unknown_event\" name=NewHook";
+        let r = scan_log_for_source(line, "copilot");
+        assert_eq!(r.unknown_event, 1, "event source must win");
+        assert!(
+            r.samples.contains(&"NewHook".to_string()),
+            "{:?}",
+            r.samples
+        );
+        // the span's value must NOT be attributed.
+        assert_eq!(scan_log_for_source(line, "spanwrong").total(), 0);
+    }
+
+    // R0615-09: a hostile wire name containing a SPACE is preserved whole in the
+    // sample, not truncated at the first space (an unquoted Display value runs to
+    // the next ` <ident>=` boundary or end-of-line).
+    #[test]
+    fn scan_preserves_a_spaced_sample_value() {
+        let line = "2026-06-15T00:00:00Z  WARN pixtuoid::drift: source=copilot kind=\"unknown_dispatch\" tool=My New Tool";
+        let r = scan_log_for_source(line, "copilot");
+        assert_eq!(r.unknown_dispatch, 1);
+        assert!(
+            r.samples.contains(&"My New Tool".to_string()),
+            "{:?}",
+            r.samples
+        );
+    }
+
     #[test]
     fn samples_are_sanitized_deduped_and_capped() {
         let log = capture(|| {
@@ -434,11 +686,16 @@ mod tests {
             installed_version: Some("2.0.0".into()),
             verified_version: "unknown",
             scan: LogScanResult::default(),
+            schema: Some(crate::install::verify::SchemaVerifyResult::default()),
         };
         let c = format_doctor_row(&clean);
         assert!(c.contains("codex") && c.contains("connected") && c.contains("installed"));
         assert!(c.contains("2.0.0"));
         assert!(c.contains("drift: none"));
+        assert!(
+            !c.contains("BROKEN"),
+            "a sound install must not say BROKEN: {c}"
+        );
 
         let drifted = DoctorSourceRow {
             prefix: "cp",
@@ -452,11 +709,108 @@ mod tests {
                 missing_field: 3,
                 ..Default::default()
             },
+            schema: None,
         };
         let d = format_doctor_row(&drifted);
         assert!(d.contains("3 missing-field"));
         assert!(d.contains("n/a (transcript-only)"));
         assert!(d.contains("NEWER than verified"), "skew flagged: {d}");
+    }
+
+    #[test]
+    fn format_row_flags_a_broken_install() {
+        let broken = DoctorSourceRow {
+            prefix: "rx",
+            name: "reasonix",
+            connected: true,
+            has_target: true,
+            hooks_installed: true,
+            installed_version: None,
+            verified_version: "unknown",
+            scan: LogScanResult::default(),
+            schema: Some(crate::install::verify::SchemaVerifyResult {
+                issues: vec!["shim binary missing: /old/pixtuoid-hook".into()],
+                notes: vec![],
+            }),
+        };
+        let b = format_doctor_row(&broken);
+        assert!(
+            b.contains("installed but BROKEN") && b.contains("shim binary missing"),
+            "{b}"
+        );
+    }
+
+    // --- SourceDiagnostics rollup (the shared panel/boot/report source of truth) ---
+
+    fn diag(
+        install: Option<crate::install::verify::SchemaVerifyResult>,
+        drift: LogScanResult,
+    ) -> SourceDiagnostics {
+        SourceDiagnostics { install, drift }
+    }
+
+    #[test]
+    fn diagnostics_healthy_has_no_summary_and_is_not_broken() {
+        let d = diag(
+            Some(crate::install::verify::SchemaVerifyResult::default()),
+            LogScanResult::default(),
+        );
+        assert!(!d.is_broken());
+        assert_eq!(d.summary(), None);
+    }
+
+    #[test]
+    fn diagnostics_broken_install_wins_over_drift() {
+        let d = diag(
+            Some(crate::install::verify::SchemaVerifyResult {
+                issues: vec!["shim binary missing: /x".into()],
+                notes: vec![],
+            }),
+            LogScanResult {
+                unknown_event: 2,
+                ..Default::default()
+            },
+        );
+        assert!(d.is_broken());
+        let s = d.summary().unwrap();
+        assert!(
+            s.contains("install broken") && s.contains("shim binary missing"),
+            "{s}"
+        );
+        assert!(!s.contains("decode drift"), "install-broken must win: {s}");
+    }
+
+    #[test]
+    fn diagnostics_drift_only_summarizes_when_install_is_sound() {
+        let d = diag(
+            Some(crate::install::verify::SchemaVerifyResult::default()),
+            LogScanResult {
+                missing_field: 3,
+                ..Default::default()
+            },
+        );
+        assert!(!d.is_broken());
+        assert!(d.summary().unwrap().contains("3 decode drift"));
+    }
+
+    #[test]
+    fn diagnostics_soft_notes_are_not_broken_and_do_not_summarize() {
+        let d = diag(
+            Some(crate::install::verify::SchemaVerifyResult {
+                issues: vec![],
+                notes: vec!["pixtuoid-hook not on PATH".into()],
+            }),
+            LogScanResult::default(),
+        );
+        assert!(!d.is_broken());
+        assert_eq!(d.summary(), None);
+    }
+
+    #[test]
+    fn diagnostics_no_install_check_is_not_broken() {
+        let d = diag(None, LogScanResult::default());
+        assert!(!d.is_broken());
+        assert_eq!(d.summary(), None);
     }
 
     #[test]
@@ -472,6 +826,22 @@ mod tests {
         assert_eq!(parse_version("2026"), None); // a bare integer is not a version
     }
 
+    // #307: a banner that prints a dotted DATE/build token BEFORE the semver must
+    // not lock onto the date — the smarter extractor prefers a `v`-prefixed run,
+    // else the first plausible (non-year) major, else falls back (CalVer-safe).
+    #[test]
+    fn parse_version_is_banner_order_robust() {
+        // v-prefixed semver wins over a leading date.
+        assert_eq!(parse_version("Built 2026.06.04 — v1.2.3"), Some((1, 2, 3)));
+        // no `v`: skip the year-like major, take the first plausible run.
+        assert_eq!(parse_version("Built 2026.06.04 — 1.2.3"), Some((1, 2, 3)));
+        // a genuine CalVer with NO semver still parses (cursor's date style) —
+        // fallback rather than vanishing.
+        assert_eq!(parse_version("2026.06.04-5fd875e"), Some((2026, 6, 4)));
+        // the only anchored CLI today: its raw banner parses to its anchor.
+        assert_eq!(parse_version("GitHub Copilot CLI 1.0.62"), Some((1, 0, 62)));
+    }
+
     #[test]
     fn version_status_flags_skew_only_with_a_known_anchor() {
         // unknown anchor → just the installed version (raw), no skew text.
@@ -485,6 +855,43 @@ mod tests {
         // un-probeable installed → shows unknown, no false skew.
         let n = version_status(None, "1.0.62");
         assert!(n.contains("unknown") && !n.contains("NEWER"));
+    }
+
+    #[test]
+    fn drifted_sources_and_footer_warning() {
+        let log = capture(|| {
+            drift::unknown_event("claude-code", "NewHook");
+            drift::missing_field("codex", "function_call", "name");
+        });
+        let mut d = drifted_sources(&log);
+        d.sort();
+        assert_eq!(d, vec!["cc".to_string(), "cx".to_string()]);
+        // source-death wins (the office is partially frozen).
+        assert_eq!(
+            footer_warning(Some("source 'x' died"), &d).as_deref(),
+            Some("source 'x' died")
+        );
+        // drift nudge when no death.
+        let w = footer_warning(None, &d).unwrap();
+        assert!(
+            w.contains("cc·") && w.contains("cx·") && w.contains("doctor"),
+            "{w}"
+        );
+        // The footer painter (`hud.rs` `" ⚠ {warn} "`) owns the warning glyph;
+        // neither the drift NOR the death message may embed its own or it
+        // double-prints (`⚠ ⚠ …`).
+        assert!(!w.contains('⚠'), "drift msg must not embed ⚠: {w}");
+        // Death tier: route the REAL `source_warning_message` output through the
+        // merge (not a literal) — if that producer ever embeds a glyph, this
+        // catches the same double-print at the death tier too.
+        let death = crate::tui::widgets::source_warning_message(&[
+            pixtuoid_core::source::manager::SourceDeath::new("claude-code", "x"),
+        ])
+        .unwrap();
+        let dw = footer_warning(Some(&death), &d).unwrap();
+        assert!(!dw.contains('⚠'), "death msg must not embed ⚠: {dw}");
+        // both clear → nothing.
+        assert_eq!(footer_warning(None, &[]), None);
     }
 
     #[test]

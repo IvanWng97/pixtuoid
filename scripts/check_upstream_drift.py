@@ -172,8 +172,9 @@ REASONIX_KNOWN_OMITTED = {"PostLLMCall", "PreCompact", "SubagentStop"}
 
 # Payload fields decode_rx_hook_payload reads — a renamed json tag upstream
 # silently zeroes the decode (`event`/`cwd` are load-bearing: a payload without
-# them is rejected as malformed).
-REASONIX_PAYLOAD_FIELDS = {"event", "cwd", "toolName", "toolArgs", "message"}
+# them is rejected as malformed; `subject` feeds the PermissionRequest→Waiting
+# reason, #302).
+REASONIX_PAYLOAD_FIELDS = {"event", "cwd", "toolName", "toolArgs", "subject", "message"}
 
 CODEWHALE_HOOK_URL = (
     "https://raw.githubusercontent.com/Hmbown/CodeWhale/main/"

@@ -8,6 +8,7 @@ pub mod openclaw;
 pub mod opencode;
 pub mod reasonix;
 pub mod target;
+pub mod verify;
 
 use std::path::PathBuf;
 
@@ -32,6 +33,96 @@ pub fn has_hooks(t: &'static Target) -> bool {
         Ok(c) => (t.merge_uninstall)(&c).map(|o| o.changed).unwrap_or(true),
         Err(_) => true,
     }
+}
+
+/// Verify a target's installed config is structurally SOUND (the silent-dead
+/// check, #309) — read-only, false-positive-free. Call only when hooks are
+/// claimed installed (`has_hooks(t)`). Returns the per-source `verify_schema`
+/// verdict (sentinel + event-set + target extras) PLUS the shim-on-disk check
+/// this (the only I/O) layer adds: an embedded absolute path is stat'd for
+/// exists+executable (HARD); a Claude/Unix bare name is a soft PATH note (a
+/// doctor-process PATH miss is not proof the CLI can't resolve it). `config`
+/// overrides the default path (tests + a `--config` round); `None` = the
+/// target's default — mirrors `install_target`.
+pub fn verify_target(t: &'static Target, config: Option<PathBuf>) -> verify::SchemaVerifyResult {
+    use verify::ShimRef;
+    let path = match config.map(Ok).unwrap_or_else(|| (t.default_config_path)()) {
+        Ok(p) => p,
+        Err(_) => {
+            return verify::SchemaVerifyResult {
+                issues: vec!["no config path resolves (no home dir)".into()],
+                notes: vec![],
+            }
+        }
+    };
+    let content = match io::read_config(&path) {
+        Ok(c) if c.trim().is_empty() => {
+            return verify::SchemaVerifyResult {
+                issues: vec!["config is empty — hooks are not installed".into()],
+                notes: vec![],
+            }
+        }
+        Ok(c) => c,
+        Err(_) => {
+            return verify::SchemaVerifyResult {
+                issues: vec![format!(
+                    "config unreadable: {}",
+                    verify::display_safe(&path)
+                )],
+                notes: vec![],
+            }
+        }
+    };
+    let parse = (t.verify_schema)(&content);
+    let mut issues = parse.issues;
+    let mut notes = Vec::new();
+    match parse.shim {
+        ShimRef::Absolute(p) => {
+            // `display_safe`: the path came from the user's hand-editable hook
+            // command, and these issues reach a real terminal (doctor stdout /
+            // boot eprintln) — strip control chars at the SOURCE so no surface
+            // can leak an ANSI/OSC escape (R0615-06 discipline; online review).
+            let shown = verify::display_safe(&p);
+            if !p.exists() {
+                issues.push(format!("shim binary missing: {shown}"));
+            } else if !is_executable(&p) {
+                issues.push(format!("shim binary not executable: {shown}"));
+            }
+        }
+        ShimRef::BareName => {
+            // Claude/Unix bare `pixtuoid-hook` relies on PATH; a doctor-process
+            // PATH miss is NOT proof the CLI can't resolve it → soft note only.
+            if !io::hook_on_path() {
+                notes.push(
+                    "pixtuoid-hook not on this process's PATH (the CLI's PATH may differ)".into(),
+                );
+            }
+        }
+        ShimRef::Unknown => {
+            // SOFT, not hard: we couldn't extract a path from the command, so we
+            // can't CONFIRM the shim exists — but we also can't prove it's broken
+            // (a future source with a novel-but-valid command shape lands here).
+            // False-positive-free wins: a note, never a "broken" verdict. The
+            // genuine no-hooks case is already a HARD issue from verify_schema's
+            // sentinel/event-set check, so this never masks a real break.
+            notes.push("could not read the shim path from the managed hook command".into());
+        }
+    }
+    verify::SchemaVerifyResult { issues, notes }
+}
+
+#[cfg(unix)]
+fn is_executable(p: &std::path::Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(p)
+        .map(|m| m.permissions().mode() & 0o111 != 0)
+        .unwrap_or(false)
+}
+
+#[cfg(not(unix))]
+fn is_executable(p: &std::path::Path) -> bool {
+    // Windows has no executable bit; the caller already confirmed existence.
+    p.exists()
 }
 
 /// A Windows drive-relative path (`C:foo.exe` — a drive prefix but no root).
@@ -295,6 +386,7 @@ mod tests {
                 changed: false,
             })
         },
+        verify_schema: |_| crate::install::verify::SchemaParse::broken("test fake"),
         needs_path_warning: false,
         needs_resolved_binary: false,
         post_install_note: None,
@@ -338,6 +430,7 @@ mod tests {
                 changed: !c.trim().is_empty(),
             })
         },
+        verify_schema: |_| crate::install::verify::SchemaParse::broken("test fake"),
         needs_path_warning: false,
         needs_resolved_binary: false,
         post_install_note: None,
@@ -367,6 +460,7 @@ mod tests {
                 changed: false,
             })
         },
+        verify_schema: |_| crate::install::verify::SchemaParse::broken("test fake"),
         needs_path_warning: false,
         needs_resolved_binary: false,
         post_install_note: None,
@@ -806,5 +900,113 @@ mod tests {
                 t.name
             );
         }
+    }
+
+    // --- verify_target (#309 install-schema soundness) ------------------------
+
+    /// A FRESH install of EVERY target, with a real executable as the shim, must
+    /// verify SOUND (sentinel + full event-set + shim exists/executable; CodeWhale
+    /// enabled). Covers all 6 formats e2e — the current test binary is the shim.
+    #[test]
+    fn verify_target_is_sound_after_a_real_install_for_every_target() {
+        let exe = std::env::current_exe().unwrap(); // a real, executable file
+        for &t in target::TARGETS {
+            let tmp = tempfile::TempDir::new().unwrap();
+            let cfg = tmp.path().join("cfg");
+            install_target(t, Some(cfg.clone()), Some(exe.clone())).unwrap();
+            let v = verify_target(t, Some(cfg));
+            assert!(
+                v.is_sound(),
+                "{}: a fresh install must verify sound, got issues {:?}",
+                t.name,
+                v.issues
+            );
+        }
+    }
+
+    #[test]
+    fn verify_target_flags_a_missing_shim_binary() {
+        // Embed an absolute path that does NOT exist → the shim-on-disk check fails.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cfg = tmp.path().join("settings.json");
+        let ghost = tmp.path().join("ghost-pixtuoid-hook");
+        install_target(&CLAUDE, Some(cfg.clone()), Some(ghost)).unwrap();
+        let v = verify_target(&CLAUDE, Some(cfg));
+        assert!(!v.is_sound());
+        assert!(
+            v.issues.iter().any(|i| i.contains("shim binary missing")),
+            "{:?}",
+            v.issues
+        );
+    }
+
+    #[test]
+    fn verify_target_flags_a_missing_event() {
+        // An older-pixtuoid install / an upstream schema change that orphaned an
+        // event: hand-remove one registered event → "missing hook entries".
+        let exe = std::env::current_exe().unwrap();
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cfg = tmp.path().join("settings.json");
+        install_target(&CLAUDE, Some(cfg.clone()), Some(exe)).unwrap();
+        let mut v: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&cfg).unwrap()).unwrap();
+        v["hooks"].as_object_mut().unwrap().remove("SessionEnd");
+        std::fs::write(&cfg, serde_json::to_string_pretty(&v).unwrap()).unwrap();
+        let res = verify_target(&CLAUDE, Some(cfg));
+        assert!(!res.is_sound());
+        assert!(
+            res.issues
+                .iter()
+                .any(|i| i.contains("missing hook entries") && i.contains("SessionEnd")),
+            "{:?}",
+            res.issues
+        );
+    }
+
+    // The user's scenario: after a DISCONNECT (uninstall), the doctor/health
+    // logic must NOT spuriously flag "broken". The protection is the `has_hooks`
+    // gate every caller (diagnose / boot preflight) applies — pin it, AND prove
+    // it's load-bearing (verify_target ALONE on an uninstalled config is broken).
+    #[test]
+    fn a_disconnected_source_is_gated_out_of_the_broken_check() {
+        let exe = std::env::current_exe().unwrap();
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cfg = tmp.path().join("settings.json");
+        install_target(&CLAUDE, Some(cfg.clone()), Some(exe)).unwrap();
+        uninstall_target(&CLAUDE, Some(cfg.clone())).unwrap();
+        let content = io::read_config(&cfg).unwrap();
+        // The has_hooks gate: an uninstalled config reports no managed entries, so
+        // diagnose/boot skip verify_target entirely → install = None → not broken.
+        assert!(
+            !(CLAUDE.merge_uninstall)(&content).unwrap().changed,
+            "uninstalled config must report no managed hooks (the has_hooks gate)"
+        );
+        // Load-bearing: verify_target UNGATED on that same config IS 'broken'
+        // (sentinel gone), so callers MUST gate on has_hooks — which they do.
+        assert!(
+            !verify_target(&CLAUDE, Some(cfg)).is_sound(),
+            "ungated verify of an uninstalled config is broken — the gate is what protects it"
+        );
+    }
+
+    #[test]
+    fn verify_target_flags_codewhale_disabled() {
+        // CodeWhale gates ALL hooks on [hooks].enabled — false-with-entries is a
+        // true silent-dead the sentinel/event-set checks would miss.
+        let exe = std::env::current_exe().unwrap();
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cfg = tmp.path().join("config.toml");
+        install_target(&target::CODEWHALE, Some(cfg.clone()), Some(exe)).unwrap();
+        let content = std::fs::read_to_string(&cfg)
+            .unwrap()
+            .replace("enabled = true", "enabled = false");
+        std::fs::write(&cfg, content).unwrap();
+        let v = verify_target(&target::CODEWHALE, Some(cfg));
+        assert!(!v.is_sound());
+        assert!(
+            v.issues.iter().any(|i| i.contains("enabled = false")),
+            "{:?}",
+            v.issues
+        );
     }
 }

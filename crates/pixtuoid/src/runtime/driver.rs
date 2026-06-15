@@ -53,6 +53,7 @@ async fn run_async(cfg: RunConfig) -> Result<()> {
         theme,
         pets,
         connected,
+        log_path,
     } = cfg;
     // The live, shared connected-source set: the reducer-task gate reads it, the
     // Connection panel mutates it. Seeded from the resolved boot flags.
@@ -135,6 +136,7 @@ async fn run_async(cfg: RunConfig) -> Result<()> {
             health_rx,
             socket_path,
             connected,
+            log_path,
         )
         .await
     }

@@ -158,6 +158,12 @@ struct SnapshotArgs {
     #[arg(long)]
     source_warning: Option<String>,
 
+    /// Force the decode-drift footer nudge (#308) for the given comma-separated
+    /// source label-prefixes (for screenshots), e.g. --drift-warning cc,cx.
+    /// Lower priority than --source-warning (source-death preempts it).
+    #[arg(long)]
+    drift_warning: Option<String>,
+
     /// Force the theme picker open at the given row index (for screenshots).
     #[arg(long)]
     theme_picker: Option<usize>,
@@ -452,13 +458,27 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    // Reuse the REAL formatter so the screenshot wording can't drift from
-    // production.
-    let warning_text = args.source_warning.as_deref().and_then(|src| {
+    // Reuse the REAL formatters so the screenshot wording can't drift from
+    // production. The drift nudge and the source-death warning share the footer
+    // channel; `footer_warning` merges them with death > drift priority — the
+    // same merge `run_tui` performs live.
+    let death_text = args.source_warning.as_deref().and_then(|src| {
         pixtuoid::tui::widgets::source_warning_message(&[
             pixtuoid_core::source::manager::SourceDeath::new(src, "forced for screenshot"),
         ])
     });
+    let drifted: Vec<String> = args
+        .drift_warning
+        .as_deref()
+        .map(|s| {
+            s.split(',')
+                .map(str::trim)
+                .filter(|p| !p.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+    let warning_text = pixtuoid::doctor::footer_warning(death_text.as_deref(), &drifted);
     let mut chitchat_state = std::collections::HashMap::new();
     let mut light = pixtuoid::tui::floor::LightingState::new();
     let mut motion: std::collections::HashMap<
@@ -492,6 +512,7 @@ fn main() -> Result<()> {
             state,
             config_path: cfg.map(PathBuf::from),
             target: None,
+            health: None,
         };
         let rows = vec![
             mk(

@@ -118,6 +118,47 @@ fn prune_managed_handlers(group: &mut toml::Value) {
     }
 }
 
+/// Install-schema verification (#309): every CODEX_EVENTS group still holds a
+/// sentinel-tagged handler, and the shim command (shell form,
+/// `PIXTUOID_SOURCE=codex '<abs>'` / `<abs> --source codex`) is read back for
+/// the on-disk check.
+pub fn verify_schema(content: &str) -> crate::install::verify::SchemaParse {
+    use crate::install::verify::{assemble, shell_shim_ref, SchemaParse, ShimRef};
+    let Ok(doc) = toml::from_str::<toml::Value>(content) else {
+        return SchemaParse::broken("config.toml no longer parses as TOML");
+    };
+    let hooks = doc.get("hooks").and_then(|h| h.as_table());
+    let mut missing = Vec::new();
+    let mut any = false;
+    let mut shim = ShimRef::Unknown;
+    for ev in CODEX_EVENTS {
+        let handler = hooks
+            .and_then(|h| h.get(*ev))
+            .and_then(|a| a.as_array())
+            .and_then(|groups| {
+                groups.iter().find_map(|g| {
+                    g.get("hooks")
+                        .and_then(|hs| hs.as_array())
+                        .and_then(|hs| hs.iter().find(|h| handler_is_managed(h)))
+                })
+            });
+        match handler {
+            Some(h) => {
+                any = true;
+                if shim == ShimRef::Unknown {
+                    shim = h
+                        .get("command")
+                        .and_then(|c| c.as_str())
+                        .map(shell_shim_ref)
+                        .unwrap_or(ShimRef::Unknown);
+                }
+            }
+            None => missing.push(*ev),
+        }
+    }
+    assemble(&missing, any, shim, vec![])
+}
+
 fn group_has_no_hooks(group: &toml::Value) -> bool {
     group
         .get("hooks")

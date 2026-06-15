@@ -35,7 +35,8 @@
 //! - A turn-end `Stop` decodes to `ActivityEnd { tool_use_id: None }`, which
 //!   the reducer also treats as resolving a stale `Waiting` (an approval
 //!   prompt BLOCKS the Reasonix turn, so Waiting-at-Stop can only be a denied
-//!   prompt that already resolved).
+//!   prompt that already resolved). This holds for BOTH Waiting producers —
+//!   `Notification` and `PermissionRequest` (#302) — they're the same gate.
 //! - Exit profile is CC-class: clean exits and `/new` rotations fire
 //!   `SessionEnd`; only SIGKILL/SIGTERM/terminal-close leave no signal and
 //!   fall to the generic stale-sweep (30-min idle). No Codex-style short
@@ -77,8 +78,10 @@ const SUBAGENT_TOOLS: &[&str] = &["task", "explore", "research", "review", "secu
 /// - `PostToolUse` → `Identity` + `ActivityEnd`
 /// - `Stop`        → `ActivityEnd` (turn end → idle debounce; NO Identity —
 ///   an end for an unknown agent proves nothing worth registering)
-/// - `Notification`→ `Identity` + `Waiting` (upstream's only producer is the
-///   approval gate)
+/// - `Notification`→ `Identity` + `Waiting` (a "needs attention" approval ping)
+/// - `PermissionRequest` → `Identity` + `Waiting` (the STRUCTURED approval gate
+///   — fires before the prompt with `toolName`+`subject`; fires alongside
+///   `Notification` for the same approval, both→Waiting is idempotent)
 /// - `SessionEnd`  → `SessionEnd`
 /// - anything else → bail (registered-vs-decoded drift must be loud, not a
 ///   silent drop — same contract as the CC/Codex arms)
@@ -175,6 +178,50 @@ pub fn decode_rx_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
                     agent_id,
                     // Capped at decode like CC's Notification arm (pitfall 3).
                     reason: ellipsize(msg, MAX_DECODED_FIELD_CHARS),
+                },
+            ])
+        }
+        // The STRUCTURED approval gate (`internal/hook/runner.go`:
+        // `PermissionRequest(name, subject, args)`) — fires BEFORE the prompt is
+        // shown, carrying the tool + subject, and fires ALONGSIDE `Notification`
+        // for the same approval (`internal/control/controller.go`). Both →
+        // Waiting is idempotent (the gated tool's PostToolUse/Stop resolves it,
+        // exactly like Notification). Richer than Notification's free-form
+        // `message`, so the reason is built from `toolName` + `subject`. NOT
+        // live-capturable: the gate never fires in headless `reasonix run`
+        // (auto-approve), the same reason Notification doesn't — decoded
+        // generously from source (the capture would refine the firing set, not
+        // the shape).
+        "PermissionRequest" => {
+            let tool = obj
+                .get("toolName")
+                .and_then(|s| s.as_str())
+                .filter(|s| !s.is_empty());
+            if tool.is_none() {
+                crate::source::drift::missing_field(SOURCE_NAME, "PermissionRequest", "toolName");
+            }
+            let subject = obj
+                .get("subject")
+                .and_then(|s| s.as_str())
+                .filter(|s| !s.is_empty());
+            // Pre-cap each component before concatenating (matching
+            // `rx_tool_detail` in this file) so an oversized `subject` can't
+            // force a large intermediate allocation; the outer `ellipsize` on
+            // the combined reason stays the authoritative cap.
+            let reason = match (tool, subject) {
+                (Some(t), Some(s)) => format!(
+                    "approval: {} {}",
+                    ellipsize(t, MAX_DECODED_FIELD_CHARS),
+                    ellipsize(s, MAX_DECODED_FIELD_CHARS),
+                ),
+                (Some(t), None) => format!("approval: {}", ellipsize(t, MAX_DECODED_FIELD_CHARS)),
+                (None, _) => "approval required".to_string(),
+            };
+            Ok(vec![
+                identity(),
+                AgentEvent::Waiting {
+                    agent_id,
+                    reason: ellipsize(&reason, MAX_DECODED_FIELD_CHARS),
                 },
             ])
         }
@@ -426,6 +473,57 @@ mod tests {
         assert!(matches!(ev, AgentEvent::SessionEnd { .. }));
     }
 
+    // #302: the structured approval gate → Waiting, reason built from the
+    // tool + subject the hook carries (runner.go: PermissionRequest(name,
+    // subject, args)).
+    #[test]
+    fn permission_request_maps_to_waiting_with_tool_and_subject() {
+        let ev = decode(json!({
+            "event": "PermissionRequest",
+            "cwd": "/r",
+            "toolName": "bash",
+            "subject": "rm -rf ./build",
+            "toolArgs": {"command": "rm -rf ./build"}
+        }));
+        assert!(matches!(ev, AgentEvent::Waiting { reason, .. }
+            if reason == "approval: bash rm -rf ./build"));
+    }
+
+    #[test]
+    fn permission_request_without_subject_uses_tool_only() {
+        let ev = decode(json!({
+            "event": "PermissionRequest", "cwd": "/r", "toolName": "write_file"
+        }));
+        assert!(matches!(ev, AgentEvent::Waiting { reason, .. }
+            if reason == "approval: write_file"));
+    }
+
+    #[test]
+    fn permission_request_without_tool_falls_back() {
+        // Degenerate (toolName is always set upstream) — graceful fallback, and
+        // a `missing_field` drift breadcrumb fires (verified by the count test
+        // below, not asserted here without a subscriber).
+        let ev = decode(json!({"event": "PermissionRequest", "cwd": "/r"}));
+        assert!(matches!(ev, AgentEvent::Waiting { reason, .. }
+            if reason == "approval required"));
+    }
+
+    #[test]
+    fn permission_request_reason_is_capped_at_the_decode_boundary() {
+        let long = "é".repeat(MAX_DECODED_FIELD_CHARS * 10);
+        let ev = decode(json!({
+            "event": "PermissionRequest", "cwd": "/r",
+            "toolName": "bash", "subject": long
+        }));
+        match &ev {
+            AgentEvent::Waiting { reason, .. } => {
+                assert_eq!(reason.chars().count(), MAX_DECODED_FIELD_CHARS + 1);
+                assert!(reason.ends_with('…'));
+            }
+            other => panic!("expected Waiting, got {other:?}"),
+        }
+    }
+
     #[test]
     fn all_events_for_one_cwd_share_one_agent_id() {
         // The coalescing contract, hook-only flavor: every event of a session
@@ -437,6 +535,7 @@ mod tests {
             json!({"event": "PreToolUse", "cwd": "/Users/dev/p", "toolName": "bash",
                    "toolArgs": {"command": "ls"}}),
             json!({"event": "PostToolUse", "cwd": "/Users/dev/p", "toolName": "bash"}),
+            json!({"event": "PermissionRequest", "cwd": "/Users/dev/p", "toolName": "bash", "subject": "ls"}),
             json!({"event": "Notification", "cwd": "/Users/dev/p", "message": "approval needed: bash ls"}),
             json!({"event": "Stop", "cwd": "/Users/dev/p"}),
             json!({"event": "SessionEnd", "cwd": "/Users/dev/p"}),
@@ -460,6 +559,7 @@ mod tests {
                    "toolArgs": {"command": "ls"}}),
             json!({"event": "PostToolUse", "cwd": "/Users/dev/p", "toolName": "bash"}),
             json!({"event": "Notification", "cwd": "/Users/dev/p", "message": "approval needed"}),
+            json!({"event": "PermissionRequest", "cwd": "/Users/dev/p", "toolName": "bash", "subject": "ls"}),
         ];
         for payload in payloads {
             let name = payload["event"].clone();

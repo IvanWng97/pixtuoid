@@ -95,6 +95,61 @@ fn parse_or_empty(content: &str) -> Result<Value> {
     serde_json::from_str(content).context("not valid JSON — refusing to overwrite")
 }
 
+/// Install-schema verification (#309): every registered EVENT still has a managed
+/// entry (sentinel-tagged), and the shim command is read back for the on-disk
+/// check. The command lives in the OUTER entry's `hooks[0].command` (Unix bare
+/// `pixtuoid-hook` → PATH-resolved soft check; explicit/Windows → absolute).
+pub fn verify_schema(content: &str) -> crate::install::verify::SchemaParse {
+    use crate::install::verify::{assemble, SchemaParse, ShimRef};
+    let Ok(doc) = serde_json::from_str::<Value>(content) else {
+        return SchemaParse::broken("settings.json no longer parses as JSON");
+    };
+    let hooks = doc.get("hooks").and_then(|h| h.as_object());
+    let mut missing = Vec::new();
+    let mut any = false;
+    let mut shim = ShimRef::Unknown;
+    for ev in EVENTS {
+        let managed: Option<&Value> = hooks
+            .and_then(|h| h.get(*ev))
+            .and_then(|a| a.as_array())
+            .and_then(|arr| arr.iter().find(|e| is_managed_entry(e)));
+        match managed {
+            Some(entry) => {
+                any = true;
+                if shim == ShimRef::Unknown {
+                    shim = claude_shim_ref(entry);
+                }
+            }
+            None => missing.push(*ev),
+        }
+    }
+    assemble(&missing, any, shim, vec![])
+}
+
+/// The shim command for a CC managed entry is the inner `hooks[0].command`:
+/// bare `pixtuoid-hook` (Unix, PATH-resolved) or an absolute path (Unix explicit
+/// single-quoted / Windows exec form).
+fn claude_shim_ref(entry: &Value) -> crate::install::verify::ShimRef {
+    use crate::install::verify::ShimRef;
+    let cmd = entry
+        .get("hooks")
+        .and_then(|h| h.as_array())
+        .and_then(|a| a.first())
+        .and_then(|h| h.get("command"))
+        .and_then(|c| c.as_str());
+    match cmd {
+        None => ShimRef::Unknown,
+        Some(c) => {
+            let c = c.trim().trim_matches('\'');
+            if c == "pixtuoid-hook" {
+                ShimRef::BareName
+            } else {
+                ShimRef::Absolute(std::path::PathBuf::from(c))
+            }
+        }
+    }
+}
+
 pub fn merge_install(content: &str, hook_cmd: &str) -> Result<MergeOutcome> {
     let doc = parse_or_empty(content)?;
     // Valid JSON but not an object (a top-level array/string/number) would be

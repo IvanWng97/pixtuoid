@@ -381,6 +381,9 @@ pub async fn run_tui(
     // toggle calls `connected.set(src, on)`, which the reducer task's reconciler
     // observes (gate + graceful evict). Shared `Arc<Mutex<…>>` with the reducer.
     connected: crate::runtime::ConnectedSources,
+    // The warn-floor log path — throttle-scanned for decode-drift breadcrumbs to
+    // drive the footer nudge (`main` owns the resolution; `None` = no surfacing).
+    log_path: Option<std::path::PathBuf>,
 ) -> Result<()> {
     let pack = embedded_pack::load_sprite_pack(pack_dir)?;
     let term = setup_terminal()?;
@@ -413,6 +416,19 @@ pub async fn run_tui(
         .unwrap_or(0);
     let mut dashboard_ui = dashboard::DashboardUi::default();
     let mut connection_ui = connection::ConnectionUi::default();
+    // Live decode-drift footer nudge: throttle-scan the warn-floor log (reusing
+    // doctor's tested scanner) at most every ~15s, NOT per frame.
+    let mut last_drift_scan: Option<std::time::Instant> = None;
+    let mut drifted_prefixes: Vec<String> = Vec::new();
+    // The Connection panel's cached rows carry a per-source HEALTH summary
+    // (install soundness + drift) computed on open/toggle; it scans the warn-floor
+    // log, so read it fresh at each (infrequent) rebuild. `""` when no log path.
+    let read_conn_log = || {
+        log_path
+            .as_deref()
+            .and_then(|p| std::fs::read_to_string(p).ok())
+            .unwrap_or_default()
+    };
 
     let tick = Duration::from_millis(33);
     let result: Result<()> = (async {
@@ -474,7 +490,26 @@ pub async fn run_tui(
             // Capture the health snapshot ONCE this frame — both the footer
             // warning and the Connection panel's per-source `dead` flag read it.
             let health = source_health.borrow_and_update().clone();
-            renderer.set_source_warning(widgets::source_warning_message(&health));
+            // Throttled drift re-scan (≤ every 15s) — reuse doctor's tested
+            // scanner; the source-death warning still preempts it in the merge.
+            // This is the ONE deliberate exception to "no scan-the-history": it
+            // derives a passive diagnostic nudge from the log artifact, NOT
+            // lifecycle state (the no-history rule guards the reducer). A counting
+            // tracing::Layer was rejected — it would add stateful blast radius to
+            // the single global file subscriber for a hint the 15s scan covers.
+            if let Some(lp) = &log_path {
+                let due = last_drift_scan.is_none_or(|t| t.elapsed().as_secs() >= 15);
+                if due {
+                    last_drift_scan = Some(std::time::Instant::now());
+                    drifted_prefixes = std::fs::read_to_string(lp)
+                        .map(|log| crate::doctor::drifted_sources(&log))
+                        .unwrap_or_default();
+                }
+            }
+            renderer.set_source_warning(crate::doctor::footer_warning(
+                widgets::source_warning_message(&health).as_deref(),
+                &drifted_prefixes,
+            ));
             // Mirror the dashboard frame: while open, rebuild the rows from the
             // live snapshot, re-anchor the selection by AgentId (an agent may
             // have exited), and keep it in the scroll viewport. Closed → push an
@@ -698,8 +733,10 @@ pub async fn run_tui(
                                     // Cached connection facet: FS reads + the
                                     // connected-set snapshot happen HERE (on open)
                                     // + after each toggle, never per frame.
-                                    connection_ui.rows =
-                                        connection::build_rows(&connected.snapshot());
+                                    connection_ui.rows = connection::build_rows(
+                                        &connected.snapshot(),
+                                        &read_conn_log(),
+                                    );
                                     connection_ui.selected = connection::move_selection(
                                         &connection_ui.rows,
                                         connection_ui.selected,
@@ -755,8 +792,10 @@ pub async fn run_tui(
                                                 target,
                                                 name,
                                             ));
-                                            connection_ui.rows =
-                                                connection::build_rows(&connected.snapshot());
+                                            connection_ui.rows = connection::build_rows(
+                                                &connected.snapshot(),
+                                                &read_conn_log(),
+                                            );
                                         }
                                         connection::ConnState::NoCli => {
                                             connection_ui.last_result = Some(hint);
@@ -778,8 +817,10 @@ pub async fn run_tui(
                                             target,
                                             name,
                                         ));
-                                        connection_ui.rows =
-                                            connection::build_rows(&connected.snapshot());
+                                        connection_ui.rows = connection::build_rows(
+                                            &connected.snapshot(),
+                                            &read_conn_log(),
+                                        );
                                     }
                                 }
                                 connection_ui.confirm = None;
@@ -1385,6 +1426,7 @@ mod dispatch_tests {
                 changed: false,
             })
         },
+        verify_schema: |_| crate::install::verify::SchemaParse::broken("test fake"),
         needs_path_warning: false,
         needs_resolved_binary: false,
         post_install_note: None,

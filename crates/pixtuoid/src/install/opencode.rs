@@ -142,6 +142,40 @@ pub fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
     })
 }
 
+/// Install-schema verification (#309): the managed plugin is a CODE artifact, so
+/// the checks are (1) our sentinel present, (2) the shim-path placeholder fully
+/// substituted, (3) the baked `HOOK_PATH` literal readable for the on-disk stat.
+/// There is no per-event config to check (the forwarded EventV2 set lives in the
+/// plugin's own code).
+pub fn verify_schema(content: &str) -> crate::install::verify::SchemaParse {
+    use crate::install::verify::{SchemaParse, ShimRef};
+    if !content.contains(SENTINEL) {
+        return SchemaParse::broken(
+            "the opencode plugin is missing or replaced (sentinel absent) — reconnect opencode",
+        );
+    }
+    if content.contains(HOOK_PLACEHOLDER) {
+        return SchemaParse::broken(
+            "the opencode plugin's shim-path placeholder was never substituted",
+        );
+    }
+    match extract_hook_path(content) {
+        Some(p) => SchemaParse {
+            issues: vec![],
+            shim: ShimRef::Absolute(p),
+        },
+        None => SchemaParse::broken("could not read HOOK_PATH from the opencode plugin"),
+    }
+}
+
+/// Pull the baked shim path back out of `const HOOK_PATH: string = "<json>"`.
+fn extract_hook_path(content: &str) -> Option<PathBuf> {
+    let line = content.lines().find(|l| l.contains("const HOOK_PATH"))?;
+    let literal = line.split_once('=')?.1.trim().trim_end_matches(';').trim();
+    let path: String = serde_json::from_str(literal).ok()?;
+    (!path.is_empty()).then(|| PathBuf::from(path))
+}
+
 fn render_plugin(hook_path: &str) -> Result<String> {
     // serde_json emits a double-quoted, escaped JSON string. JSON strings are a
     // subset of JS string literals EXCEPT U+2028/U+2029 (valid unescaped in JSON,
