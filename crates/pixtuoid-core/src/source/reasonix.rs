@@ -35,7 +35,8 @@
 //! - A turn-end `Stop` decodes to `ActivityEnd { tool_use_id: None }`, which
 //!   the reducer also treats as resolving a stale `Waiting` (an approval
 //!   prompt BLOCKS the Reasonix turn, so Waiting-at-Stop can only be a denied
-//!   prompt that already resolved).
+//!   prompt that already resolved). This holds for BOTH Waiting producers —
+//!   `Notification` and `PermissionRequest` (#302) — they're the same gate.
 //! - Exit profile is CC-class: clean exits and `/new` rotations fire
 //!   `SessionEnd`; only SIGKILL/SIGTERM/terminal-close leave no signal and
 //!   fall to the generic stale-sweep (30-min idle). No Codex-style short
