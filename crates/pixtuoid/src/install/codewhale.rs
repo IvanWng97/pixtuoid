@@ -33,11 +33,11 @@
 //!   per-event command's last token is the event name, not the binary, so a
 //!   Codex-style command-basename fallback wouldn't apply).
 //! - Comments/ordering are lost on the `toml::Value` round-trip (a backup is
-//!   taken) — same caveat as Codex; surfaced via `post_install_note`.
+//!   taken) — same caveat as Codex.
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 use toml::value::Table;
 
 use crate::install::io;
@@ -112,16 +112,8 @@ pub fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
     crate::install::hook_cmd::shell_hook_command(p, "codewhale")
 }
 
-fn parse_or_empty(content: &str) -> Result<toml::Value> {
-    if content.trim().is_empty() {
-        return Ok(toml::Value::Table(Table::new()));
-    }
-    // No file path here — the orchestrator wraps the error with the real path.
-    toml::from_str(content).context("not valid TOML — refusing to overwrite")
-}
-
 pub fn merge_install(content: &str, base_cmd: &str) -> Result<MergeOutcome> {
-    let doc = parse_or_empty(content)?;
+    let doc = crate::install::verify::parse_toml_or_empty(content)?;
     let merged = toml_merge_install(doc.clone(), base_cmd);
     let changed = merged != doc;
     Ok(MergeOutcome {
@@ -131,7 +123,7 @@ pub fn merge_install(content: &str, base_cmd: &str) -> Result<MergeOutcome> {
 }
 
 pub fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
-    let doc = parse_or_empty(content)?;
+    let doc = crate::install::verify::parse_toml_or_empty(content)?;
     let cleaned = toml_merge_uninstall(doc.clone());
     let changed = cleaned != doc;
     Ok(MergeOutcome {

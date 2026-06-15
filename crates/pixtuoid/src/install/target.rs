@@ -6,6 +6,17 @@ use anyhow::Result;
 /// the resolved shim path — see `Target::extra_artifacts`.
 pub type ExtraArtifactsFn = fn(hook_path: &Path) -> Result<Vec<(PathBuf, String)>>;
 
+/// How a target resolves the hook binary into its config.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BinaryStrategy {
+    /// Write the BARE name + rely on PATH (Claude). An unresolvable binary is
+    /// non-fatal (falls back to the bare name); warn if not on PATH.
+    BareNameOnPath,
+    /// EMBED the resolved absolute path (Codex/Reasonix/CodeWhale/opencode/
+    /// Cursor/OpenClaw). An unresolvable binary is FATAL.
+    EmbedAbsolute,
+}
+
 /// Result of a merge: the reserialized config plus whether anything *semantically*
 /// changed. `changed` is computed by comparing the PARSED document before and after
 /// the merge — NOT by byte-comparing serialized output, which always differs from a
@@ -38,8 +49,6 @@ pub struct Target {
     pub core_source: &'static str,
     /// Human-readable name for CLI output.
     pub display_name: &'static str,
-    /// Restart noun for the "→ start a new <noun> session" hint.
-    pub restart_noun: &'static str,
     /// Default config path (reads $HOME, hence a fn not a const). Errs when
     /// the path is home-anchored and no home dir resolves — writing into a
     /// CWD fallback would "succeed" with a file the CLI never reads.
@@ -66,18 +75,13 @@ pub struct Target {
     /// and the shim path extracted for `install::verify_target` to stat. Per-
     /// source format knowledge stays here (invariant #3), like the merge fns.
     pub verify_schema: fn(content: &str) -> crate::install::verify::SchemaParse,
-    /// True if the bare hook name must resolve on PATH (Claude writes the bare name).
-    pub needs_path_warning: bool,
-    /// True if `hook_command` EMBEDS the resolved binary path (Codex), so an
-    /// unresolvable binary is fatal. False for targets that write the bare name
-    /// and rely on PATH (Claude) — those fall back to the bare name rather than
-    /// aborting, so a fresh-machine install still succeeds (the PATH warning
-    /// covers the not-yet-on-PATH case).
-    pub needs_resolved_binary: bool,
-    /// Optional courtesy note printed after a successful install — e.g. Codex's
-    /// `config.toml` loses comments/ordering on the `toml::Value` round-trip.
-    /// Format-agnostic: the orchestrator just prints it, no per-target name-matching.
-    pub post_install_note: Option<&'static str>,
+    /// How this target resolves the hook binary into its config — encodes both
+    /// whether the bare name relies on PATH (warn if absent) and whether an
+    /// unresolvable binary is fatal. Claude = `BareNameOnPath` (soft, falls back
+    /// to the bare name so a fresh-machine install still succeeds + the PATH
+    /// warning covers the not-yet-on-PATH case); the embedders = `EmbedAbsolute`
+    /// (an unresolvable binary aborts the install).
+    pub binary_strategy: BinaryStrategy,
     /// Optional presence probe overriding the default config-file-exists check.
     /// Needed when the file we WRITE is not a file the CLI CREATES: Reasonix
     /// never writes `~/.reasonix/settings.json` itself (it is purely
@@ -104,7 +108,6 @@ pub const CLAUDE: Target = Target {
     name: "claude",
     core_source: pixtuoid_core::source::claude_code::SOURCE_NAME,
     display_name: "Claude Code",
-    restart_noun: "Claude Code",
     default_config_path: crate::install::claude::default_config_path,
     hook_command: crate::install::claude::hook_command,
     merge_install: crate::install::claude::merge_install,
@@ -113,9 +116,11 @@ pub const CLAUDE: Target = Target {
     // Unix: bare "pixtuoid-hook" relies on PATH — soft resolution (warn only).
     // Windows: exec form embeds the absolute path, so an unresolvable binary is
     // fatal (same as Codex) — the hook spawned without a shell can't PATH-search.
-    needs_path_warning: !cfg!(windows),
-    needs_resolved_binary: cfg!(windows),
-    post_install_note: None,
+    binary_strategy: if cfg!(windows) {
+        BinaryStrategy::EmbedAbsolute
+    } else {
+        BinaryStrategy::BareNameOnPath
+    },
     presence_probe: None,
     extra_artifacts: None,
 };
@@ -124,17 +129,12 @@ pub const CODEX: Target = Target {
     name: "codex",
     core_source: pixtuoid_core::source::codex::SOURCE_NAME,
     display_name: "Codex",
-    restart_noun: "Codex",
     default_config_path: crate::install::codex::default_config_path,
     hook_command: crate::install::codex::hook_command,
     merge_install: crate::install::codex::merge_install,
     merge_uninstall: crate::install::codex::merge_uninstall,
     verify_schema: crate::install::codex::verify_schema,
-    needs_path_warning: false,
-    needs_resolved_binary: true,
-    post_install_note: Some(
-        "note: comments and formatting in config.toml are not preserved (restore from the backup if needed).",
-    ),
+    binary_strategy: BinaryStrategy::EmbedAbsolute,
     presence_probe: None,
     extra_artifacts: None,
 };
@@ -143,15 +143,12 @@ pub const REASONIX: Target = Target {
     name: "reasonix",
     core_source: pixtuoid_core::source::reasonix::SOURCE_NAME,
     display_name: "Reasonix",
-    restart_noun: "Reasonix",
     default_config_path: crate::install::reasonix::default_config_path,
     hook_command: crate::install::reasonix::hook_command,
     merge_install: crate::install::reasonix::merge_install,
     merge_uninstall: crate::install::reasonix::merge_uninstall,
     verify_schema: crate::install::reasonix::verify_schema,
-    needs_path_warning: false,
-    needs_resolved_binary: true,
-    post_install_note: None,
+    binary_strategy: BinaryStrategy::EmbedAbsolute,
     presence_probe: Some(crate::install::reasonix::detect_installed),
     extra_artifacts: None,
 };
@@ -160,17 +157,12 @@ pub const CODEWHALE: Target = Target {
     name: "codewhale",
     core_source: pixtuoid_core::source::codewhale::SOURCE_NAME,
     display_name: "CodeWhale",
-    restart_noun: "CodeWhale",
     default_config_path: crate::install::codewhale::default_config_path,
     hook_command: crate::install::codewhale::hook_command,
     merge_install: crate::install::codewhale::merge_install,
     merge_uninstall: crate::install::codewhale::merge_uninstall,
     verify_schema: crate::install::codewhale::verify_schema,
-    needs_path_warning: false,
-    needs_resolved_binary: true,
-    post_install_note: Some(
-        "note: comments and formatting in config.toml are not preserved (restore from the backup if needed).",
-    ),
+    binary_strategy: BinaryStrategy::EmbedAbsolute,
     presence_probe: Some(crate::install::codewhale::detect_installed),
     extra_artifacts: None,
 };
@@ -179,23 +171,14 @@ pub const OPENCODE: Target = Target {
     name: "opencode",
     core_source: pixtuoid_core::source::opencode::SOURCE_NAME,
     display_name: "opencode",
-    restart_noun: "opencode",
     default_config_path: crate::install::opencode::default_config_path,
     hook_command: crate::install::opencode::hook_command,
     merge_install: crate::install::opencode::merge_install,
     merge_uninstall: crate::install::opencode::merge_uninstall,
     verify_schema: crate::install::opencode::verify_schema,
-    needs_path_warning: false,
     // The plugin embeds the absolute shim path (opencode runs it under Bun, no
     // PATH reliance), so an unresolvable binary is fatal.
-    needs_resolved_binary: true,
-    // The managed file is a CODE artifact wholly owned by pixtuoid, not a shared
-    // config — uninstall replaces it with a no-op stub (it can't be deleted via
-    // the write-only orchestrator); the sentinel-based probe still reports it
-    // correctly as removed. Noted so the residual isn't a surprise.
-    post_install_note: Some(
-        "note: uninstall replaces the plugin with a no-op stub at <config>/plugins/pixtuoid.ts rather than deleting it.",
-    ),
+    binary_strategy: BinaryStrategy::EmbedAbsolute,
     // The plugin file we WRITE is also a file opencode could otherwise lack on a
     // fresh install, and a post-uninstall stub still exists — so detect on the
     // `@pixtuoid-opencode-plugin` sentinel, not mere file existence.
@@ -207,15 +190,12 @@ pub const CURSOR: Target = Target {
     name: "cursor",
     core_source: pixtuoid_core::source::cursor::SOURCE_NAME,
     display_name: "Cursor CLI",
-    restart_noun: "Cursor",
     default_config_path: crate::install::cursor::default_config_path,
     hook_command: crate::install::cursor::hook_command,
     merge_install: crate::install::cursor::merge_install,
     merge_uninstall: crate::install::cursor::merge_uninstall,
     verify_schema: crate::install::cursor::verify_schema,
-    needs_path_warning: false,
-    needs_resolved_binary: true,
-    post_install_note: None,
+    binary_strategy: BinaryStrategy::EmbedAbsolute,
     // Cursor never creates ~/.cursor/hooks.json itself — probe ~/.cursor instead.
     presence_probe: Some(crate::install::cursor::detect_installed),
     extra_artifacts: None,
@@ -225,7 +205,6 @@ pub const OPENCLAW: Target = Target {
     name: "openclaw",
     core_source: pixtuoid_core::source::openclaw::SOURCE_NAME,
     display_name: "OpenClaw",
-    restart_noun: "OpenClaw gateway",
     // We MERGE openclaw.json (plugins.load.paths + plugins.entries.<id>.enabled +
     // the hooks.allowConversationAccess grant) AND write the plugin dir as an
     // extra artifact — the two-ownership split (confirmed by capture: `plugins
@@ -234,13 +213,9 @@ pub const OPENCLAW: Target = Target {
     hook_command: crate::install::openclaw::hook_command,
     merge_install: crate::install::openclaw::merge_install,
     merge_uninstall: crate::install::openclaw::merge_uninstall,
-    needs_path_warning: false,
     // The plugin bakes the absolute shim path (run under the gateway's Node, no
     // PATH reliance), so an unresolvable binary is fatal.
-    needs_resolved_binary: true,
-    post_install_note: Some(
-        "note: restart the OpenClaw gateway to load the plugin. Uninstall removes the openclaw.json entries (incl. the conversation-access grant) but leaves the plugin files — a harmless residual the gateway no longer loads.",
-    ),
+    binary_strategy: BinaryStrategy::EmbedAbsolute,
     // openclaw.json is created by OpenClaw itself; probe OpenClaw's own dir so
     // auto-detect fires whether or not we've installed (the opencode rationale).
     presence_probe: Some(crate::install::openclaw::detect_installed),
@@ -327,7 +302,6 @@ mod tests {
             name: "nohome",
             core_source: "nohome",
             display_name: "NoHome",
-            restart_noun: "NoHome",
             default_config_path: || Err(anyhow::anyhow!("cannot resolve the home directory")),
             hook_command: |_, _| Ok("x".into()),
             merge_install: |c, _| {
@@ -343,9 +317,7 @@ mod tests {
                 })
             },
             verify_schema: |_| crate::install::verify::SchemaParse::broken("test fake"),
-            needs_path_warning: false,
-            needs_resolved_binary: false,
-            post_install_note: None,
+            binary_strategy: BinaryStrategy::EmbedAbsolute,
             presence_probe: None,
             extra_artifacts: None,
         };

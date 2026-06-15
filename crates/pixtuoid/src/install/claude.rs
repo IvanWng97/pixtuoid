@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use pixtuoid_core::source::claude_code::claude_config_dir;
 use serde_json::{json, Map, Value};
 
@@ -43,7 +43,7 @@ pub fn default_config_path() -> Result<PathBuf> {
 ///
 /// Windows: exec form requires the absolute PE path (CC's shell-form entry goes
 /// through cmd.exe/PowerShell — unportable, PATHEXT-dependent). The orchestrator
-/// already hard-errors if resolution failed (`needs_resolved_binary: true` on
+/// already hard-errors if resolution failed (`BinaryStrategy::EmbedAbsolute` on
 /// Windows), so `resolved` is guaranteed to be an absolute path here.
 pub fn hook_command(resolved: &Path, explicit: bool) -> Result<String> {
     #[cfg(not(windows))]
@@ -84,15 +84,6 @@ pub fn hook_entry(cmd: &str, exec_form: bool) -> Value {
     } else {
         json!({ "type": "command", "command": cmd })
     }
-}
-
-fn parse_or_empty(content: &str) -> Result<Value> {
-    if content.trim().is_empty() {
-        return Ok(json!({}));
-    }
-    // No file path here — the orchestrator wraps the error with the real path
-    // (which may be a `--config` override, not the default settings.json).
-    serde_json::from_str(content).context("not valid JSON — refusing to overwrite")
 }
 
 /// Install-schema verification (#309): every registered EVENT still has a managed
@@ -151,7 +142,7 @@ fn claude_shim_ref(entry: &Value) -> crate::install::verify::ShimRef {
 }
 
 pub fn merge_install(content: &str, hook_cmd: &str) -> Result<MergeOutcome> {
-    let doc = parse_or_empty(content)?;
+    let doc = crate::install::verify::parse_json_or_empty(content)?;
     // Valid JSON but not an object (a top-level array/string/number) would be
     // silently discarded by `json_merge_install`'s `as_object().unwrap_or_default()`
     // — writing only our hooks and dropping the user's document. Refuse, mirroring
@@ -168,7 +159,7 @@ pub fn merge_install(content: &str, hook_cmd: &str) -> Result<MergeOutcome> {
 }
 
 pub fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
-    let doc = parse_or_empty(content)?;
+    let doc = crate::install::verify::parse_json_or_empty(content)?;
     let cleaned = json_merge_uninstall(doc.clone());
     let changed = cleaned != doc;
     Ok(MergeOutcome {

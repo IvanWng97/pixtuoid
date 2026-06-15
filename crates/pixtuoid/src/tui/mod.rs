@@ -1418,7 +1418,6 @@ mod dispatch_tests {
         name: "rollbacktest",
         core_source: "rollbacktest",
         display_name: "RollbackTest",
-        restart_noun: "RollbackTest",
         default_config_path: || Err(anyhow::anyhow!("forced install failure")),
         hook_command: |_, _| Ok(String::new()),
         merge_install: |c, _| {
@@ -1434,9 +1433,7 @@ mod dispatch_tests {
             })
         },
         verify_schema: |_| crate::install::verify::SchemaParse::broken("test fake"),
-        needs_path_warning: false,
-        needs_resolved_binary: false,
-        post_install_note: None,
+        binary_strategy: crate::install::target::BinaryStrategy::EmbedAbsolute,
         presence_probe: None,
         extra_artifacts: None,
     };

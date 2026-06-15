@@ -27,11 +27,12 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, Context, Result};
-use serde_json::{json, Map, Value};
+use anyhow::{anyhow, Result};
+use serde_json::{json, Value};
 
 use crate::install::io;
 use crate::install::target::MergeOutcome;
+use crate::install::verify;
 
 const SENTINEL_KEY: &str = "_pixtuoid";
 
@@ -110,22 +111,20 @@ pub fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
     crate::install::hook_cmd::shell_hook_command(p, "reasonix")
 }
 
-fn parse_or_empty(content: &str) -> Result<Value> {
-    if content.trim().is_empty() {
-        return Ok(json!({}));
-    }
-    // No file path here — the orchestrator wraps the error with the real path.
-    serde_json::from_str(content).context("not valid JSON — refusing to overwrite")
-}
-
 pub fn merge_install(content: &str, hook_cmd: &str) -> Result<MergeOutcome> {
-    let doc = parse_or_empty(content)?;
+    let doc = verify::parse_json_or_empty(content)?;
     // See claude.rs: a valid-JSON-but-non-object doc would be silently dropped
-    // by `json_merge_install`. Refuse rather than overwrite the user's content.
+    // by `flat_json_merge_install`. Refuse rather than overwrite the user's content.
     if !doc.is_object() && !doc.is_null() {
         anyhow::bail!("settings is valid JSON but not an object — refusing to overwrite");
     }
-    let merged = json_merge_install(doc.clone(), hook_cmd);
+    let merged = verify::flat_json_merge_install(
+        doc.clone(),
+        REASONIX_EVENTS,
+        SENTINEL_KEY,
+        managed_entry,
+        hook_cmd,
+    );
     let changed = merged != doc;
     Ok(MergeOutcome {
         content: serde_json::to_string_pretty(&merged)?,
@@ -134,17 +133,13 @@ pub fn merge_install(content: &str, hook_cmd: &str) -> Result<MergeOutcome> {
 }
 
 pub fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
-    let doc = parse_or_empty(content)?;
-    let cleaned = json_merge_uninstall(doc.clone());
+    let doc = verify::parse_json_or_empty(content)?;
+    let cleaned = verify::flat_json_merge_uninstall(doc.clone(), SENTINEL_KEY);
     let changed = cleaned != doc;
     Ok(MergeOutcome {
         content: serde_json::to_string_pretty(&cleaned)?,
         changed,
     })
-}
-
-fn is_managed_entry(entry: &Value) -> bool {
-    entry.get(SENTINEL_KEY).and_then(|v| v.as_bool()) == Some(true)
 }
 
 fn managed_entry(hook_command: &str) -> Value {
@@ -162,62 +157,25 @@ pub fn verify_schema(content: &str) -> crate::install::verify::SchemaParse {
     crate::install::verify::flat_json_verify(content, REASONIX_EVENTS, SENTINEL_KEY)
 }
 
-fn json_merge_install(doc: Value, hook_command: &str) -> Value {
-    let mut root: Map<String, Value> = doc.as_object().cloned().unwrap_or_default();
-    let hooks = root
-        .entry("hooks".to_string())
-        .or_insert_with(|| Value::Object(Map::new()));
-    if !hooks.is_object() {
-        *hooks = Value::Object(Map::new());
-    }
-    if let Value::Object(hooks_obj) = hooks {
-        for ev in REASONIX_EVENTS {
-            let list = hooks_obj
-                .entry((*ev).to_string())
-                .or_insert_with(|| Value::Array(vec![]));
-            if !list.is_array() {
-                *list = Value::Array(vec![]);
-            }
-            if let Value::Array(arr) = list {
-                arr.retain(|entry| !is_managed_entry(entry));
-                arr.push(managed_entry(hook_command));
-            }
-        }
-    }
-    Value::Object(root)
-}
-
-fn json_merge_uninstall(mut doc: Value) -> Value {
-    let Some(root) = doc.as_object_mut() else {
-        return doc;
-    };
-    let Some(Value::Object(hooks_obj)) = root.get_mut("hooks") else {
-        return doc;
-    };
-    for (_ev, list) in hooks_obj.iter_mut() {
-        if let Some(arr) = list.as_array_mut() {
-            arr.retain(|entry| !is_managed_entry(entry));
-        }
-    }
-    let to_remove: Vec<String> = hooks_obj
-        .iter()
-        .filter_map(|(k, v)| match v.as_array() {
-            Some(a) if a.is_empty() => Some(k.clone()),
-            _ => None,
-        })
-        .collect();
-    for k in to_remove {
-        hooks_obj.remove(&k);
-    }
-    if hooks_obj.is_empty() {
-        root.remove("hooks");
-    }
-    doc
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Thin wrappers over the shared flat-JSON merge so the existing per-shape
+    // tests below exercise Reasonix's events + entry shape against the common core.
+    fn json_merge_install(doc: Value, hook_command: &str) -> Value {
+        verify::flat_json_merge_install(
+            doc,
+            REASONIX_EVENTS,
+            SENTINEL_KEY,
+            managed_entry,
+            hook_command,
+        )
+    }
+
+    fn json_merge_uninstall(doc: Value) -> Value {
+        verify::flat_json_merge_uninstall(doc, SENTINEL_KEY)
+    }
 
     #[test]
     fn install_creates_flat_entries_for_all_events() {

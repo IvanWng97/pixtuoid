@@ -254,8 +254,6 @@ fn format_connect_result_renders_connected_plus_backup_and_path_notes() {
         outcome,
         config_path: PathBuf::from("/c"),
         backup,
-        restart_noun: "Claude",
-        post_note: None,
         path_warning,
     };
     // Both outcomes read as "connected" (the flag flip is the real action).
@@ -289,7 +287,6 @@ fn format_disconnect_result_renders_disconnected_plus_backup_note() {
         outcome: UninstallOutcome::Removed,
         config_path: PathBuf::from("/c"),
         removed_backup: Some(PathBuf::from("/c.bak")),
-        restart_noun: "Claude",
     };
     let s = format_disconnect_result(&removed, "Claude Code");
     assert!(s.contains("disconnected"), "{s}");
@@ -300,7 +297,6 @@ fn format_disconnect_result_renders_disconnected_plus_backup_note() {
         outcome: UninstallOutcome::NothingToRemove,
         config_path: PathBuf::from("/c"),
         removed_backup: None,
-        restart_noun: "Codex",
     };
     let s2 = format_disconnect_result(&nothing, "Codex");
     assert!(s2.contains("disconnected"), "{s2}");

@@ -14,7 +14,7 @@ use std::path::PathBuf;
 
 use anyhow::{bail, Context, Result};
 
-use target::{Target, BACKUP_SUFFIX};
+use target::{BinaryStrategy, Target, BACKUP_SUFFIX};
 
 /// Whether `t`'s config currently bears pixtuoid hooks — the migrate-default
 /// signal for an absent `[sources]` flag (see `config::resolve_connected`: a
@@ -143,7 +143,7 @@ fn is_drive_relative(p: &std::path::Path) -> bool {
 /// specific binary — writing the bare PATH-resolved name would discard their
 /// choice) and skips the PATH warning. Otherwise `locate` tries to find
 /// `pixtuoid-hook`; if that fails we only hard-error for targets that EMBED
-/// the path (`needs_resolved_binary`, e.g. Codex). Targets that write the
+/// the path (`BinaryStrategy::EmbedAbsolute`, e.g. Codex). Targets that write the
 /// bare name and rely on PATH (Claude) fall back to the bare name so a
 /// fresh-machine install still succeeds — the `path_warning` flag in the
 /// Sources panel covers the not-yet-on-PATH case. The env override is injected by the
@@ -197,7 +197,7 @@ fn resolve_hook_binary_from(
     }
     match locate() {
         Ok(p) => Ok((p, false)),
-        Err(e) if t.needs_resolved_binary => Err(e),
+        Err(e) if t.binary_strategy == BinaryStrategy::EmbedAbsolute => Err(e),
         Err(_) => Ok((PathBuf::from("pixtuoid-hook"), false)),
     }
 }
@@ -220,8 +220,6 @@ pub struct InstallReport {
     pub config_path: PathBuf,
     /// The backup taken this round (`None` on a no-op, or when one already exists).
     pub backup: Option<PathBuf>,
-    pub restart_noun: &'static str,
-    pub post_note: Option<&'static str>,
     /// True when the bare `pixtuoid-hook` isn't on PATH (Claude/Unix, no explicit
     /// hook). An install-time environment check, surfaced by the presenter.
     pub path_warning: bool,
@@ -279,14 +277,14 @@ pub fn install_target(
     // where pixtuoid-hook isn't on PATH would otherwise warn nothing). Skipped
     // when an explicit --hook-path was written: the absolute path is embedded,
     // so PATH resolution never happens.
-    let path_warning = t.needs_path_warning && !explicit_hook && !io::hook_on_path();
+    let path_warning = t.binary_strategy == BinaryStrategy::BareNameOnPath
+        && !explicit_hook
+        && !io::hook_on_path();
     if !outcome.changed {
         return Ok(InstallReport {
             outcome: InstallOutcome::AlreadyUpToDate,
             config_path: path,
             backup: None,
-            restart_noun: t.restart_noun,
-            post_note: t.post_install_note,
             path_warning,
         });
     }
@@ -296,8 +294,6 @@ pub fn install_target(
         outcome: InstallOutcome::Installed,
         config_path: path,
         backup,
-        restart_noun: t.restart_noun,
-        post_note: t.post_install_note,
         path_warning,
     })
 }
@@ -317,7 +313,6 @@ pub struct UninstallReport {
     /// The backup deleted on a successful removal (the install backup is no
     /// longer needed once the hooks are gone).
     pub removed_backup: Option<PathBuf>,
-    pub restart_noun: &'static str,
 }
 
 /// Remove pixtuoid hooks from `t`'s config, returning a structured report. The
@@ -336,7 +331,6 @@ pub fn uninstall_target(t: &Target, config: Option<PathBuf>) -> Result<Uninstall
             outcome: UninstallOutcome::NothingToRemove,
             config_path: path,
             removed_backup: None,
-            restart_noun: t.restart_noun,
         });
     }
     // Same lock scope as install_target: the whole read→merge→write round, all
@@ -354,7 +348,6 @@ pub fn uninstall_target(t: &Target, config: Option<PathBuf>) -> Result<Uninstall
             outcome: UninstallOutcome::NothingToRemove,
             config_path: path,
             removed_backup: None,
-            restart_noun: t.restart_noun,
         });
     }
     lock.write_atomic(&outcome.content)?;
@@ -363,7 +356,6 @@ pub fn uninstall_target(t: &Target, config: Option<PathBuf>) -> Result<Uninstall
         outcome: UninstallOutcome::Removed,
         config_path: path,
         removed_backup,
-        restart_noun: t.restart_noun,
     })
 }
 
@@ -377,7 +369,6 @@ mod tests {
         name: "fake",
         core_source: "fake",
         display_name: "Fake",
-        restart_noun: "Fake",
         default_config_path: || Ok(std::path::PathBuf::from("/nonexistent/fake")),
         hook_command: |_, _| Ok("x".into()),
         merge_install: |c, _| {
@@ -393,9 +384,7 @@ mod tests {
             })
         },
         verify_schema: |_| crate::install::verify::SchemaParse::broken("test fake"),
-        needs_path_warning: false,
-        needs_resolved_binary: false,
-        post_install_note: None,
+        binary_strategy: BinaryStrategy::EmbedAbsolute,
         presence_probe: None,
         extra_artifacts: None,
     };
@@ -421,7 +410,6 @@ mod tests {
         name: "fake2",
         core_source: "fake2",
         display_name: "Fake2",
-        restart_noun: "Fake2",
         default_config_path: || Ok(fake2_config_path()),
         hook_command: |_, _| Ok("x".into()),
         merge_install: |c, _| {
@@ -437,9 +425,7 @@ mod tests {
             })
         },
         verify_schema: |_| crate::install::verify::SchemaParse::broken("test fake"),
-        needs_path_warning: false,
-        needs_resolved_binary: false,
-        post_install_note: None,
+        binary_strategy: BinaryStrategy::EmbedAbsolute,
         presence_probe: None,
         extra_artifacts: None,
     };
@@ -451,7 +437,6 @@ mod tests {
         name: "fakedir",
         core_source: "fakedir",
         display_name: "FakeDir",
-        restart_noun: "FakeDir",
         default_config_path: || Ok(fake_dir_config_path()),
         hook_command: |_, _| Ok("x".into()),
         merge_install: |c, _| {
@@ -467,9 +452,7 @@ mod tests {
             })
         },
         verify_schema: |_| crate::install::verify::SchemaParse::broken("test fake"),
-        needs_path_warning: false,
-        needs_resolved_binary: false,
-        post_install_note: None,
+        binary_strategy: BinaryStrategy::EmbedAbsolute,
         presence_probe: None,
         extra_artifacts: None,
     };

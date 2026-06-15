@@ -22,6 +22,106 @@
 
 use std::path::PathBuf;
 
+use serde_json::{json, Map, Value};
+
+/// Parse JSON config content, treating empty/whitespace-only as the empty
+/// document (`{}`) — the shared rule every JSON target's merge relies on (never
+/// error on empty). The caller wraps the parse error with the real config path.
+pub fn parse_json_or_empty(content: &str) -> anyhow::Result<Value> {
+    if content.trim().is_empty() {
+        return Ok(json!({}));
+    }
+    use anyhow::Context;
+    serde_json::from_str(content).context("not valid JSON — refusing to overwrite")
+}
+
+/// Parse TOML config content, treating empty/whitespace-only as the empty
+/// document. Shared by the TOML targets (Codex/CodeWhale); same empty rule.
+pub fn parse_toml_or_empty(content: &str) -> anyhow::Result<toml::Value> {
+    if content.trim().is_empty() {
+        return Ok(toml::Value::Table(toml::value::Table::new()));
+    }
+    use anyhow::Context;
+    toml::from_str(content).context("not valid TOML — refusing to overwrite")
+}
+
+/// Merge managed flat-JSON hook entries into `doc` (Reasonix/Cursor share the
+/// IDENTICAL shape): for each `event`, drop any prior managed entry (keyed on
+/// `sentinel`) and push a fresh one built by `make_entry`. The per-target entry
+/// SHAPE (Reasonix carries `timeout`/`description`, Cursor is bare) stays the
+/// caller's `make_entry`, so this is shape-sharing, not a shared decoder. A
+/// non-object `hooks` / non-array event is coerced (defensive), matching the two
+/// callers' prior inline behavior. Caller-set extras (Cursor's `version`) are
+/// applied before the call and pass through untouched.
+pub fn flat_json_merge_install(
+    doc: Value,
+    events: &[&str],
+    sentinel: &str,
+    make_entry: impl Fn(&str) -> Value,
+    hook_command: &str,
+) -> Value {
+    let mut root: Map<String, Value> = doc.as_object().cloned().unwrap_or_default();
+    let hooks = root
+        .entry("hooks".to_string())
+        .or_insert_with(|| Value::Object(Map::new()));
+    if !hooks.is_object() {
+        *hooks = Value::Object(Map::new());
+    }
+    if let Value::Object(hooks_obj) = hooks {
+        for ev in events {
+            let list = hooks_obj
+                .entry((*ev).to_string())
+                .or_insert_with(|| Value::Array(vec![]));
+            if !list.is_array() {
+                *list = Value::Array(vec![]);
+            }
+            if let Value::Array(arr) = list {
+                arr.retain(|entry| !is_flat_managed(entry, sentinel));
+                arr.push(make_entry(hook_command));
+            }
+        }
+    }
+    Value::Object(root)
+}
+
+/// Remove managed flat-JSON hook entries (keyed on `sentinel`) from `doc`, then
+/// drop any event key whose array went empty and the `hooks` object if it
+/// emptied. The inverse of `flat_json_merge_install`, shared by Reasonix/Cursor.
+/// A target-specific key the install set (Cursor's `version`) is deliberately
+/// preserved — this only touches `hooks`.
+pub fn flat_json_merge_uninstall(mut doc: Value, sentinel: &str) -> Value {
+    let Some(root) = doc.as_object_mut() else {
+        return doc;
+    };
+    let Some(Value::Object(hooks_obj)) = root.get_mut("hooks") else {
+        return doc;
+    };
+    for (_ev, list) in hooks_obj.iter_mut() {
+        if let Some(arr) = list.as_array_mut() {
+            arr.retain(|entry| !is_flat_managed(entry, sentinel));
+        }
+    }
+    let to_remove: Vec<String> = hooks_obj
+        .iter()
+        .filter_map(|(k, v)| match v.as_array() {
+            Some(a) if a.is_empty() => Some(k.clone()),
+            _ => None,
+        })
+        .collect();
+    for k in to_remove {
+        hooks_obj.remove(&k);
+    }
+    if hooks_obj.is_empty() {
+        root.remove("hooks");
+    }
+    doc
+}
+
+/// A flat-JSON entry is managed iff `entry[sentinel] == true`.
+fn is_flat_managed(entry: &Value, sentinel: &str) -> bool {
+    entry.get(sentinel).and_then(|v| v.as_bool()) == Some(true)
+}
+
 /// How a managed hook command references the shim binary — extracted PURELY from
 /// the config content by a target's `verify_schema`; the filesystem check
 /// (exists/executable, or PATH lookup) is layered on by `install::verify_target`,
