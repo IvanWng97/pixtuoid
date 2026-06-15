@@ -434,6 +434,22 @@ mod tests {
             summarize(&scene)
         );
 
+        // a FAILED run (agent_end.success:false) → degraded (#317). Drains the
+        // in-flight run, so the subsequent GatewayDown still reads as down.
+        apply_presence(
+            &mut scene,
+            "openclaw",
+            DaemonPresenceUpdate::RunFailed {
+                run_key: "r".into(),
+            },
+            now,
+        );
+        assert!(
+            summarize(&scene).contains("daemons=[openclaw:degraded]"),
+            "got: {}",
+            summarize(&scene)
+        );
+
         // gateway_stop → down.
         apply_presence(
             &mut scene,
