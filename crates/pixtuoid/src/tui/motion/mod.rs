@@ -19,8 +19,9 @@ use pixtuoid_core::AgentId;
 use crate::tui::layout::{Layout, Point, WaypointKind};
 use crate::tui::pathfind::Router;
 use crate::tui::pose::{
-    aimless_wander_seed, cycle_ms_for, dwell_ms, est_wander_cycle_ms, is_aimless_cycle,
-    pick_aimless_dest, seated_dwell_ms, takes_trip, waypoint_index_for_cycle, WANDER_DWELL_EST_MS,
+    aimless_wander_seed, dwell_ms, est_wander_cycle_ms, is_aimless_cycle, pick_aimless_dest,
+    seated_dwell_ms, stale_resume_gap_ms, takes_trip, waypoint_index_for_cycle,
+    WANDER_DWELL_EST_MS,
 };
 use crate::tui::pose::{desk_leg_endpoint, octile_distance};
 
@@ -206,7 +207,7 @@ pub fn advance_wander(
     // below snaps it to the correct cycle analytically (O(1), no per-leg
     // routing) instead of the phase machine replaying the whole backlog one
     // transition per frame — the visible "fast-forward all the movement in a
-    // second" bug. The trigger (`cycle_ms_for`, 7–13 s) is a frame-cadence vs
+    // second" bug. The trigger (`stale_resume_gap_ms`, 7–13 s) is a frame-cadence vs
     // frozen-floor detector, NOT a dwell detector: on-screen, `advance_wander`
     // runs every frame even DURING a 40 s lounge dwell, so `last_advanced_at`
     // updates each ~33 ms and the gap never approaches 7 s — only an off-screen
@@ -219,7 +220,7 @@ pub fn advance_wander(
     let is_stale_resume = ms.last_advanced_at != SystemTime::UNIX_EPOCH
         && now
             .duration_since(ms.last_advanced_at)
-            .map(|d| d.as_millis() as u64 > cycle_ms_for(id))
+            .map(|d| d.as_millis() as u64 > stale_resume_gap_ms(id))
             .unwrap_or(false);
 
     if is_fresh || is_stale_resume {
@@ -229,7 +230,7 @@ pub fn advance_wander(
             .as_millis() as u64;
         // Use the estimated full cycle (matches idle_pose) so the bootstrapped
         // cycle_n agrees with what the stateless overlay derived for the same
-        // long-idle agent — NOT cycle_ms_for (the stale-resume sentinel).
+        // long-idle agent — NOT stale_resume_gap_ms (the stale-resume sentinel).
         let cycle = est_wander_cycle_ms(id);
 
         // Fast-forward `cycle_n` by integer division so destination selection

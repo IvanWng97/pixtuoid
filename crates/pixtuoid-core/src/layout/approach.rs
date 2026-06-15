@@ -143,7 +143,7 @@ const SEAT_APPROACH_SCAN: i32 = 14;
 /// [`half_extents`]. (NOT the mask footprint, now a shallow south strip.) `None`
 /// for kinds with no ground footprint (seats / wall decor) — those never reach
 /// the obstacle branch. The runtime-sized `Pantry` counter is its own clearance.
-fn approach_footprint(kind: Furniture, pantry_counter_size: Size) -> Option<Size> {
+fn approach_clearance_extent(kind: Furniture, pantry_counter_size: Size) -> Option<Size> {
     if matches!(kind, Furniture::Pantry) {
         return Some(pantry_counter_size);
     }
@@ -236,7 +236,8 @@ pub fn approach_point(
             }
         }
         return allowed.map(|(_, p)| p).unwrap_or(pos);
-    } else if let Some(Size { w: fw, h: fh }) = approach_footprint(kind, pantry_counter_size) {
+    } else if let Some(Size { w: fw, h: fh }) = approach_clearance_extent(kind, pantry_counter_size)
+    {
         // Obstacle: stand just off the footprint, on the reachable allowed side
         // nearest the home desk (== stand_point, plus the reachability filter).
         let (hx, hy) = (fw as i32 / 2, fh as i32 / 2);
@@ -390,7 +391,7 @@ mod tests {
                 WaypointKind::Couch | WaypointKind::MeetingSofa | WaypointKind::MeetingStand
             )
         };
-        // 160×120 (walkway 8 → no vending/printer) AND 160×150 (walkway ≥10 →
+        // 160×120 (cubicle_aisle 8 → no vending/printer) AND 160×150 (cubicle_aisle ≥10 →
         // vending + printer spawn) so the appliance stand cells are covered too.
         for (bw, bh) in [(160u16, 120u16), (160, 150)] {
             for seed in 0..5u64 {

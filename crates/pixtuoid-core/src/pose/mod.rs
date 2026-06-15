@@ -8,8 +8,10 @@
 //! binary side, since the router is terminal-rendering-adjacent.
 //!
 //! Variation knobs:
-//!  * `cycle_ms_for(agent_id)` — per-agent wander cycle length so the office
-//!    stops feeling clockwork-synchronized. Range 7..13s.
+//!  * `stale_resume_gap_ms(agent_id)` — per-agent off-screen-gap sentinel (NOT the
+//!    wander cycle; that's `est_wander_cycle_ms`): if `advance_wander` hasn't run
+//!    for this long the floor was off-screen/paused, so re-bootstrap analytically.
+//!    Range 7..13s, jittered so floors don't all re-bootstrap in lockstep.
 //!  * Waypoint choice XORs `agent_id` with the current cycle number, so each
 //!    cycle the same agent picks a (likely) different waypoint.
 
@@ -35,9 +37,9 @@ pub const THINKING_WINDOW_SECS: u64 = 20;
 /// in `tui::motion::advance_wander` (a few seconds, above on-screen frame
 /// cadence and below a floor-switch-away gap). NOT the wander dwell anymore —
 /// see `dwell_ms` / `seated_dwell_ms` for the absolute per-spot timeline.
-pub const WANDER_CYCLE_BASE_MS: u64 = 7_000;
+pub const STALE_RESUME_GAP_BASE_MS: u64 = 7_000;
 /// Maximum extra time added per agent — jitter range is `[0, RANGE)`.
-pub const WANDER_CYCLE_RANGE_MS: u64 = 6_000;
+pub const STALE_RESUME_GAP_RANGE_MS: u64 = 6_000;
 
 /// Stateless-overlay wander-timeline estimates. The render authority
 /// (`tui::motion::advance_wander`) drives the at-waypoint beat with the
@@ -72,10 +74,14 @@ pub fn walking_frame(elapsed_ms: u64) -> usize {
 /// actual walk completes when `physics::walk_arrived` returns true.
 pub const ENTRY_ANIMATION_MS: u64 = 4000;
 
-/// Deterministic wander-cycle length for one agent. Each agent picks a
-/// different speed so walkers don't move in lockstep.
-pub fn cycle_ms_for(agent_id: AgentId) -> u64 {
-    WANDER_CYCLE_BASE_MS + (agent_id.raw() >> 16) % WANDER_CYCLE_RANGE_MS
+/// Per-agent stale-resume gap (ms): the `now - last_advanced_at` threshold above
+/// which `tui::motion::advance_wander` treats the floor as off-screen/paused and
+/// re-bootstraps analytically instead of replaying the backlog one transition per
+/// frame. This is NOT the wander cycle length (`est_wander_cycle_ms` is) — it's a
+/// frame-cadence-vs-frozen-floor sentinel (7..13s), jittered per agent so floors
+/// don't re-bootstrap in lockstep.
+pub fn stale_resume_gap_ms(agent_id: AgentId) -> u64 {
+    STALE_RESUME_GAP_BASE_MS + (agent_id.raw() >> 16) % STALE_RESUME_GAP_RANGE_MS
 }
 
 /// Base dwell plus deterministic per-agent jitter within `window`. The `tag` is
@@ -146,7 +152,7 @@ pub fn takes_trip(agent_id: AgentId, cycle_n: u64) -> bool {
 }
 
 /// Per-(agent, cycle) decision: when the agent takes a trip, is it an
-/// aimless wander (random walkway point) or a directed visit to a named
+/// aimless wander (random cubicle_aisle point) or a directed visit to a named
 /// waypoint? Used by `idle_pose` AND by the snapshot example to find
 /// agent_ids whose cycle deterministically lands at a target waypoint.
 pub fn is_aimless_cycle(agent_id: AgentId, cycle_n: u64) -> bool {
@@ -189,7 +195,7 @@ pub enum Pose {
         frame: usize,
         carrying_coffee: bool,
     },
-    /// Standing at a random walkway point (not at any waypoint). The dest field
+    /// Standing at a random cubicle_aisle point (not at any waypoint). The dest field
     /// is the buf-pixel target the agent walked to. Used by aimless wander.
     AimlessAt {
         dest: Point,
@@ -353,7 +359,7 @@ pub fn pick_aimless_dest(layout: &SceneLayout, seed: u64, home_desk: Point) -> P
         // Pantry interior — snack break, coffee, chat.
         (layout.pantry_room.unwrap_or(window_strip), 25),
         // Main corridor — incidental traffic.
-        (layout.corridor.unwrap_or(layout.walkway), 20),
+        (layout.corridor.unwrap_or(layout.cubicle_aisle), 20),
         // Cubicle band (pod aisles) — within own area, stretching.
         (layout.cubicle_band, 15),
         // Meeting room — occasional drift-in.
@@ -385,11 +391,11 @@ pub fn pick_aimless_dest(layout: &SceneLayout, seed: u64, home_desk: Point) -> P
     // Fallback — randomised point along the corridor's x-range so multiple
     // fallback agents spread out instead of clustering. The midline is NOT
     // guaranteed open (vending / printer / water-cooler / trash footprints
-    // sit in the walkway band), so scan outward from the jittered x for the
+    // sit in the cubicle_aisle band), so scan outward from the jittered x for the
     // nearest walkable midline cell — everywhere else this function's
     // contract is "returns a walkable pixel". Bounded by the corridor width
     // and purely (layout, seed)-deterministic, like the probes above.
-    let c = layout.corridor.unwrap_or(layout.walkway);
+    let c = layout.corridor.unwrap_or(layout.cubicle_aisle);
     let x_jitter = (seed as u16) % c.width.max(1);
     let base_x = c.x + x_jitter;
     let mid_y = c.y + c.height / 2;

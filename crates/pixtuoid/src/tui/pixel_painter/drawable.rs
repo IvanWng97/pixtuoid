@@ -29,7 +29,7 @@ use super::effects::{
 };
 use super::epoch_ms;
 use super::furniture::{
-    paint_area_rug, paint_coffee_table, paint_pantry_chair, paint_pantry_table, paint_side_table,
+    paint_area_rug, paint_meeting_table, paint_pantry_chair, paint_pantry_table, paint_side_table,
 };
 use super::paint_character_at;
 use crate::tui::frame_cache::FrameCache;
@@ -226,7 +226,7 @@ pub(super) fn pet_position(
             false,
         ));
     }
-    for room in &layout.meeting_rooms {
+    for room in &layout.meeting_furniture {
         for sofa in room.sofas {
             spots.push((
                 Point {
@@ -487,7 +487,7 @@ fn mascot_spots(layout: &Layout, state: DaemonState, home: Point) -> Vec<Point> 
                 y: wp.pos.y + 6,
             });
         }
-        for room in &layout.meeting_rooms {
+        for room in &layout.meeting_furniture {
             for sofa in room.sofas {
                 spots.push(Point {
                     x: sofa.x + 4,
@@ -787,7 +787,7 @@ pub(super) fn paint_drawable(
             let Size { w, h } =
                 crate::tui::layout::furniture_def(crate::tui::layout::Furniture::MeetingTable)
                     .visual;
-            paint_coffee_table(buf, pos.x, pos.y, w, h, theme);
+            paint_meeting_table(buf, pos.x, pos.y, w, h, theme);
         }
         DrawableKind::AreaRug { pos, width, height } => {
             paint_area_rug(buf, pos.x, pos.y, *width, *height, theme);
@@ -1144,7 +1144,7 @@ mod tests {
         // corridor centre on the RIGHT.
         layout.home_desks = vec![Point { x: 20, y: 30 }];
         layout.waypoints.clear();
-        layout.meeting_rooms.clear();
+        layout.meeting_furniture.clear();
         layout.corridor = Some(Bounds {
             x: 150,
             y: 40,

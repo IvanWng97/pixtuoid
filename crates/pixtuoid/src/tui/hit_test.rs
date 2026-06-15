@@ -183,7 +183,7 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
     }
 
     // Meeting sofas (20px sprite, centred on the sofa point) + tables, per room.
-    for room in &layout.meeting_rooms {
+    for room in &layout.meeting_furniture {
         for sofa in room.sofas {
             let Size { w, h } = visual(Furniture::MeetingSofaBody); // full 20px sprite, not the 16px footprint
             if hit(
@@ -445,7 +445,7 @@ mod tests {
     #[test]
     fn furniture_hit_test_finds_meeting_table() {
         let layout = Layout::compute(160, 200, 4).expect("layout");
-        let table = layout.meeting_rooms.first().expect("room").table;
+        let table = layout.meeting_furniture.first().expect("room").table;
         let cell_y = table.y / 2;
         assert_eq!(
             hit_test_furniture(&layout, table.x, cell_y),
@@ -457,9 +457,9 @@ mod tests {
     fn furniture_hit_test_respects_floor_seed() {
         // seed=1 → Lounge variant (no meeting room)
         let layout1 = Layout::compute_with_seed(160, 200, 4, 1).expect("layout");
-        assert!(layout1.meeting_rooms.is_empty());
+        assert!(layout1.meeting_furniture.is_empty());
         let layout0 = Layout::compute(160, 200, 4).expect("layout");
-        if let Some(room) = layout0.meeting_rooms.first() {
+        if let Some(room) = layout0.meeting_furniture.first() {
             let table = room.table;
             let cell_y = table.y / 2;
             assert_ne!(

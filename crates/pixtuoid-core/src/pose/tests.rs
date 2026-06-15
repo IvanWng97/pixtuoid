@@ -439,19 +439,23 @@ fn entry_window_fall_through_uses_state_driven_pose() {
 }
 
 #[test]
-fn cycle_ms_for_varies_across_agents() {
+fn stale_resume_gap_ms_varies_across_agents() {
     // Sanity: a handful of different agent ids should not all map to the
     // same cycle length.
     let ids: Vec<AgentId> = (0..10)
         .map(|i| AgentId::from_transcript_path(&format!("/p/{i}.jsonl")))
         .collect();
-    let cycles: std::collections::HashSet<u64> = ids.iter().map(|id| cycle_ms_for(*id)).collect();
+    let cycles: std::collections::HashSet<u64> =
+        ids.iter().map(|id| stale_resume_gap_ms(*id)).collect();
     assert!(
         cycles.len() >= 3,
         "expected multiple distinct cycle lengths, got {cycles:?}"
     );
     for c in &cycles {
-        assert!(*c >= WANDER_CYCLE_BASE_MS && *c < WANDER_CYCLE_BASE_MS + WANDER_CYCLE_RANGE_MS);
+        assert!(
+            *c >= STALE_RESUME_GAP_BASE_MS
+                && *c < STALE_RESUME_GAP_BASE_MS + STALE_RESUME_GAP_RANGE_MS
+        );
     }
 }
 
@@ -773,7 +777,7 @@ fn aimless_fallback_scans_the_midline_for_a_walkable_cell() {
     // Force the fallback (only ONE walkable pixel in the whole mask — the 32
     // zone probes virtually never hit it) and require a walkable result.
     let mut l = layout();
-    let c = l.corridor.unwrap_or(l.walkway);
+    let c = l.corridor.unwrap_or(l.cubicle_aisle);
     let mid_y = c.y + c.height / 2;
     let open = Point {
         x: c.x + c.width - 2,

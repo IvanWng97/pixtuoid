@@ -651,7 +651,7 @@ fn enqueue_characters<'a>(
     // All 3 lounge-couch seat waypoints collapse to ONE chitchat venue (keyed
     // on the first couch's index) so the couch hosts a single group
     // conversation like the meeting room — without overloading the
-    // meeting-only `room_id` field (which indexes `meeting_rooms`).
+    // meeting-only `room_id` field (which indexes `meeting_furniture`).
     let couch_group_idx = ctx
         .layout
         .waypoints
@@ -1178,7 +1178,7 @@ fn enqueue_gateway_mascot<'a>(
 /// (whose key is `sofa.y + 2`); the north sofa stays +2 so insertion order
 /// breaks the tie in its sitter's favor.
 fn enqueue_meeting_furniture<'a>(layout: &'a Layout, drawables: &mut Vec<Drawable<'a>>) {
-    for room in &layout.meeting_rooms {
+    for room in &layout.meeting_furniture {
         let table = room.table;
         let [ts, bs] = room.sofas;
         let rug_w = 18u16;
@@ -1195,7 +1195,7 @@ fn enqueue_meeting_furniture<'a>(layout: &'a Layout, drawables: &mut Vec<Drawabl
             },
         });
     }
-    for room in &layout.meeting_rooms {
+    for room in &layout.meeting_furniture {
         for (i, sofa) in room.sofas.into_iter().enumerate() {
             // sofas[0] is the north sofa, sofas[1] the south — the south sofa
             // faces away (`mirrored`) and y-sorts +3 to occlude its sitter.
@@ -1210,7 +1210,7 @@ fn enqueue_meeting_furniture<'a>(layout: &'a Layout, drawables: &mut Vec<Drawabl
             });
         }
     }
-    for room in &layout.meeting_rooms {
+    for room in &layout.meeting_furniture {
         drawables.push(Drawable {
             // z-key = sprite south row, derived from the table (== +2 for the
             // 11×5 coffee-table sprite) so it can't drift from a visual edit.

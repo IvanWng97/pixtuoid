@@ -221,7 +221,7 @@ fn octant_offset(turn: f32) -> (i32, i32) {
 }
 
 /// Office corridor runner — a darker wood strip with subtle lighter stripes,
-/// painted along the walkway band so the eye traces a path connecting the
+/// painted along the cubicle_aisle band so the eye traces a path connecting the
 /// door, meeting room, pantry, cubicles, and lounge. Just texture over the
 /// floor — walls and decor paint on top.
 pub(in crate::tui::pixel_painter) fn paint_corridor_runner(

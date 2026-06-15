@@ -229,11 +229,11 @@ fn compute_returns_none_at_exact_boundary() {
 #[test]
 fn compute_zones_are_ordered_top_to_bottom_and_nonoverlapping() {
     let l = SceneLayout::compute(120, 80, 6).expect("fits");
-    assert!(l.cubicle_band.y < l.walkway.y);
+    assert!(l.cubicle_band.y < l.cubicle_aisle.y);
     let c_bot = l.cubicle_band.y + l.cubicle_band.height;
-    assert!(c_bot <= l.walkway.y, "cubicle overlaps walkway");
+    assert!(c_bot <= l.cubicle_aisle.y, "cubicle overlaps cubicle_aisle");
     // Walkway runs to the baseboard now that lounge_band is gone.
-    let w_bot = l.walkway.y + l.walkway.height;
+    let w_bot = l.cubicle_aisle.y + l.cubicle_aisle.height;
     assert!(w_bot <= l.buf_h);
 }
 
@@ -341,9 +341,9 @@ fn pod_decor_south_edge_stays_inside_the_band_and_spilling_slots_are_skipped() {
     // The vertical twin of the east clamp above: the LAST POD ROW's
     // vertical-aisle slot center (pod_origin_y + pod_h/2) can sit close
     // enough to the cubicle band's bottom edge that a tall CENTERED visual
-    // crosses into the walkway — at 200x116 seed 2 a PhoneBooth's 12px
+    // crosses into the cubicle_aisle — at 200x116 seed 2 a PhoneBooth's 12px
     // visual lands 3px past the band bottom, and its south-anchored 3-row
-    // footprint blocks a walkway patch. Same anchoring math as the painter's
+    // footprint blocks a cubicle_aisle patch. Same anchoring math as the painter's
     // centered blit (pos - h/2 .. pos - h/2 + h); spilling slots are skipped
     // (kind cycle still advances) and the floor degrades to fewer decor
     // pieces, mirroring the east clamp. The 34-41 widths pin the corner
@@ -361,7 +361,7 @@ fn pod_decor_south_edge_stays_inside_the_band_and_spilling_slots_are_skipped() {
                     assert!(
                         south <= band_bottom,
                         "{w}x{h} seed {seed}: {:?} decor at y={} (south edge {south}) \
-                         crosses the band's bottom edge {band_bottom} into the walkway",
+                         crosses the band's bottom edge {band_bottom} into the cubicle_aisle",
                         item.kind,
                         item.pos.y
                     );
@@ -422,7 +422,7 @@ fn every_waypoint_kind_is_placed_in_some_layout() {
     // declared kind actually gets a placement site). This sweep is that guard.
     //
     // The sizes MUST span small→large: `VendingMachine`/`Printer` are
-    // corridor-height-gated (`walkway.height >= …` in `compute_waypoints`), so
+    // corridor-height-gated (`cubicle_aisle.height >= …` in `compute_waypoints`), so
     // they only appear at large terminals; a single 192×80 seed would falsely
     // "fail" for them.
     use std::collections::HashSet;
@@ -528,18 +528,18 @@ fn sofas_seat_three_people() {
     assert_eq!(center.x, xs[1], "sprite center sits on the middle seat");
 
     // 1 meeting room → 2 sofas (per room) → 3 seats each.
-    assert!(!l.meeting_rooms.is_empty(), "expected a meeting room");
+    assert!(!l.meeting_furniture.is_empty(), "expected a meeting room");
     let sofa_seats = l
         .waypoints
         .iter()
         .filter(|w| w.kind == WaypointKind::MeetingSofa)
         .count();
-    let total_sofas: usize = l.meeting_rooms.iter().map(|r| r.sofas.len()).sum();
+    let total_sofas: usize = l.meeting_furniture.iter().map(|r| r.sofas.len()).sum();
     assert_eq!(sofa_seats, 3 * total_sofas, "each meeting sofa seats 3");
 }
 
 #[test]
-fn meeting_slots_track_meeting_rooms() {
+fn meeting_slots_track_meeting_furniture() {
     // Across every floor variant, a meeting slot exists iff a meeting
     // room exists, every slot carries a valid room_id, and a dual-meeting
     // floor produces slots for both rooms.
@@ -572,7 +572,7 @@ fn meeting_slots_track_meeting_rooms() {
                     .any(|w| w.kind == WaypointKind::MeetingStand),
                 "seed {seed}: meeting room but no standing slot"
             );
-            let rooms = l.meeting_rooms.len();
+            let rooms = l.meeting_furniture.len();
             for w in &sofa_slots {
                 let rid = w.room_id.expect("meeting slot has room_id");
                 assert!(
@@ -616,7 +616,7 @@ fn meeting_table_is_centered_between_its_two_sofas() {
             let Some(l) = SceneLayout::compute_with_seed(w, h, 8, seed) else {
                 continue;
             };
-            for (room_id, room) in l.meeting_rooms.iter().enumerate() {
+            for (room_id, room) in l.meeting_furniture.iter().enumerate() {
                 let table = room.table;
                 let north = room.sofas[0];
                 let south = room.sofas[1];
@@ -642,7 +642,7 @@ fn meeting_slots_face_the_table() {
         let l = SceneLayout::compute_with_seed(160, 120, 8, seed).expect("fits");
         for w in &l.waypoints {
             let Some(room_id) = w.room_id else { continue };
-            let table = l.meeting_rooms[room_id].table;
+            let table = l.meeting_furniture[room_id].table;
             match w.kind {
                 WaypointKind::MeetingSofa => {
                     let want = if w.pos.y < table.y {

@@ -97,7 +97,7 @@ pub struct WalkProfile {
 ///
 /// Uses bits 24..34 of the agent's hash (10 bits → 1024 buckets), mapping
 /// linearly to [0.85, 1.20]. Disjoint from `personality_for` (bits 0..14) and
-/// from the low-16 bits used by `cycle_ms_for`.
+/// from the low-16 bits used by `stale_resume_gap_ms`.
 pub fn speed_mult(agent_id: AgentId) -> f32 {
     // Finalize with splitmix64 before slicing so distinct agents get distinct
     // speeds (raw FNV-1a doesn't avalanche the high bits — see `splitmix64`).

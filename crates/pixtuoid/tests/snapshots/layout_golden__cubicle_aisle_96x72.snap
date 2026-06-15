@@ -1,7 +1,7 @@
 ---
 source: crates/pixtuoid/tests/layout_golden.rs
-assertion_line: 39
-expression: l.walkway
+assertion_line: 44
+expression: l.cubicle_aisle
 ---
 Bounds {
     x: 27,

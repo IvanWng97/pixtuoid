@@ -255,7 +255,9 @@ pub fn diagnose(source: &str, log: &str) -> SourceDiagnostics {
 /// One source's diagnosis row (plain data, so `format_doctor_row` is pure/tested).
 pub struct DoctorSourceRow {
     pub prefix: &'static str,
-    pub name: &'static str,
+    /// The REGISTERED_SOURCES id (e.g. "claude-code"), NOT a display name — it's
+    /// the registry key, distinct from `install::Target.name`/`display_name`.
+    pub source_id: &'static str,
     pub connected: bool,
     pub has_target: bool,
     pub hooks_installed: bool,
@@ -415,7 +417,7 @@ pub fn format_doctor_row(row: &DoctorSourceRow) -> String {
         "  {} {}\u{b7}{:<13} {:<12} {:<15} {}",
         verdict_glyph(row),
         row.prefix,
-        row.name,
+        row.source_id,
         conn,
         state,
         version
@@ -535,7 +537,7 @@ pub fn run(log_path: &std::path::Path) -> anyhow::Result<()> {
         let diag = diagnose(src, &log);
         let row = DoctorSourceRow {
             prefix: desc.map(|d| d.label_prefix).unwrap_or("??"),
-            name: src,
+            source_id: src,
             connected: connected.contains(src),
             has_target: target.is_some(),
             hooks_installed,
@@ -546,7 +548,7 @@ pub fn run(log_path: &std::path::Path) -> anyhow::Result<()> {
         };
         any_drift |= row.scan.total() > 0;
         if row_broken(&row) {
-            broken.push(format!("{}\u{b7}{}", row.prefix, row.name));
+            broken.push(format!("{}\u{b7}{}", row.prefix, row.source_id));
         }
         out.push_str(&format_doctor_row(&row));
         out.push('\n');
@@ -731,7 +733,7 @@ mod tests {
     fn format_row_clean_vs_drift_and_transcript_only() {
         let clean = DoctorSourceRow {
             prefix: "cx",
-            name: "codex",
+            source_id: "codex",
             connected: true,
             has_target: true,
             hooks_installed: true,
@@ -753,7 +755,7 @@ mod tests {
 
         let drifted = DoctorSourceRow {
             prefix: "cp",
-            name: "copilot",
+            source_id: "copilot",
             connected: true,
             has_target: false, // transcript-only
             hooks_installed: false,
@@ -783,7 +785,7 @@ mod tests {
     fn format_row_flags_a_broken_install() {
         let broken = DoctorSourceRow {
             prefix: "rx",
-            name: "reasonix",
+            source_id: "reasonix",
             connected: true,
             has_target: true,
             hooks_installed: true,

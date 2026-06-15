@@ -5,7 +5,7 @@
 //! edges.
 
 use super::{
-    anchored_top_left, furniture_def, z_sort_row, Anchor, Furniture, MeetingRoom, PlantItem,
+    anchored_top_left, furniture_def, z_sort_row, Anchor, Furniture, MeetingFurniture, PlantItem,
     PodDecorItem, Point, Size, WallDecorItem, WallSegment, Waypoint, WaypointKind, OBSTACLE_PAD_PX,
     PANTRY_FOOTPRINT_DEPTH, WALL_BAND_TO_TOP_MARGIN,
 };
@@ -101,7 +101,7 @@ pub(super) fn build_walkable_mask(
     top_margin: u16,
     door: Option<Point>,
     home_desks: &[Point],
-    meeting_rooms: &[MeetingRoom],
+    meeting_furniture: &[MeetingFurniture],
     pantry_table: Option<Point>,
     pantry_chairs: &[Point],
     waypoints: &[Waypoint],
@@ -210,7 +210,7 @@ pub(super) fn build_walkable_mask(
         }
     }
 
-    for room in meeting_rooms {
+    for room in meeting_furniture {
         // Sofa BODY footprint from the table (16 ON PURPOSE: 16 + 2·pad = the
         // 20px sprite X footprint, with the pad giving vertical sit clearance —
         // see the furniture_def row). Top-down rule: walk up to its sides.

@@ -68,7 +68,8 @@ fn path_len_multi_segment_sums() {
 use crate::tui::layout::Layout;
 use crate::tui::pathfind::Router;
 use crate::tui::pose::{
-    cycle_ms_for, dwell_ms, est_wander_cycle_ms, seated_dwell_ms, takes_trip, WANDER_DWELL_EST_MS,
+    dwell_ms, est_wander_cycle_ms, seated_dwell_ms, stale_resume_gap_ms, takes_trip,
+    WANDER_DWELL_EST_MS,
 };
 use pixtuoid_core::state::ActivityState;
 use pixtuoid_core::walkable::{OccupancyOverlay, WalkableMask};
@@ -176,7 +177,7 @@ fn current_dwell_dur(motion: &HashMap<AgentId, MotionState>, id: AgentId) -> u64
         .map_or(WANDER_DWELL_EST_MS, |k| dwell_ms(k, id))
 }
 
-/// Poll `advance_wander` in ~1 s steps (well under the `cycle_ms_for`
+/// Poll `advance_wander` in ~1 s steps (well under the `stale_resume_gap_ms`
 /// stale-resume trigger, so a long seated/dwell beat is crossed exactly as
 /// real per-frame rendering would, never looking like an off-screen gap)
 /// until the agent's phase is no longer `from_phase`. Returns the new `now`.
@@ -726,7 +727,7 @@ fn idempotent_same_now_does_not_mutate_state() {
 // -----------------------------------------------------------------------
 // T11: Bootstrap — agent idle for N cycles before first render. cycle_n is
 //      fast-forwarded by the ESTIMATED cycle (matches idle_pose), not the
-//      stale-resume sentinel cycle_ms_for.
+//      stale-resume sentinel stale_resume_gap_ms.
 // -----------------------------------------------------------------------
 #[test]
 fn bootstrap_fast_forwards_cycle_n() {
@@ -755,7 +756,7 @@ fn bootstrap_fast_forwards_cycle_n() {
 // -----------------------------------------------------------------------
 // T12: Stale resume — a floor off-screen (motion frozen) must resync
 //      analytically on return instead of replaying the backlog one phase per
-//      frame. Trigger: gap > cycle_ms_for; fast-forward divides by est cycle.
+//      frame. Trigger: gap > stale_resume_gap_ms; fast-forward divides by est cycle.
 // -----------------------------------------------------------------------
 #[test]
 fn stale_resume_resyncs_without_replay() {
@@ -795,7 +796,7 @@ fn stale_resume_resyncs_without_replay() {
 
     // Floor goes off-screen for ~20 cycles; advance_wander is NOT called.
     // The gap dwarfs the stale trigger; a SINGLE call on return must resync.
-    assert!(20 * est_cycle > cycle_ms_for(trip_id));
+    assert!(20 * est_cycle > stale_resume_gap_ms(trip_id));
     let resume = t1 + Duration::from_millis(20 * est_cycle);
     advance_wander(&slot, resume, &l, &mut router, &overlay, &mut motion);
 
@@ -862,7 +863,7 @@ fn long_dwell_never_trips_stale_resume_on_screen() {
 
     // Sample every 33 ms across (almost) the full dwell window. Even for a 40 s
     // sofa lounge the per-frame gap stays ~33 ms, so the stale-resume (gap >
-    // cycle_ms_for) must never fire — the agent must NOT snap to Seated.
+    // stale_resume_gap_ms) must never fire — the agent must NOT snap to Seated.
     // Base the window on the ACTUAL AtWaypoint phase start (the poll-observed
     // `t2` can lag the real transition by up to one 1 s step), leaving a 2 s
     // margin so we stop before the dwell genuinely ends.

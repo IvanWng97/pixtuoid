@@ -41,7 +41,7 @@ fn layout_standard_96x72_room_walls() {
 fn layout_standard_96x72_zones() {
     let l = SceneLayout::compute(96, 72, 4).unwrap();
     insta::assert_debug_snapshot!("cubicle_band_96x72", l.cubicle_band);
-    insta::assert_debug_snapshot!("walkway_96x72", l.walkway);
+    insta::assert_debug_snapshot!("cubicle_aisle_96x72", l.cubicle_aisle);
     insta::assert_debug_snapshot!("pantry_96x72", l.pantry_room);
 }
 
@@ -139,7 +139,12 @@ fn floor_variant_hash_gives_unique_layouts_per_floor() {
         .map(|i| {
             let seed = i.wrapping_mul(FLOOR_SEED_MULTIPLIER);
             let l = SceneLayout::compute_with_seed(192, 160, 4, seed).unwrap();
-            (l.meeting_room, l.pantry_room, l.meeting_rooms, l.home_desks)
+            (
+                l.meeting_room,
+                l.pantry_room,
+                l.meeting_furniture,
+                l.home_desks,
+            )
         })
         .collect();
 

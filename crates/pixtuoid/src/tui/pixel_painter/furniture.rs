@@ -12,7 +12,7 @@ use crate::tui::layout::Bounds;
 /// Low coffee table in front of the lounge couch. Wood top with darker
 /// trim along the front edge so it reads as a real piece of furniture,
 /// not just a brown rectangle.
-pub(super) fn paint_coffee_table(
+pub(super) fn paint_meeting_table(
     buf: &mut RgbBuffer,
     cx: u16,
     cy: u16,
