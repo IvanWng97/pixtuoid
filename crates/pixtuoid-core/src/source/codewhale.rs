@@ -172,7 +172,10 @@ pub fn decode_cw_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
             agent_id,
             as_child: false,
         }]),
-        other => bail!("unsupported codewhale hook event: {other}"),
+        other => {
+            crate::source::drift::unknown_event(SOURCE_NAME, other);
+            bail!("unsupported codewhale hook event: {other}")
+        }
     }
 }
 

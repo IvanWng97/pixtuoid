@@ -81,7 +81,17 @@ pub fn decode_ag_line(transcript_path: &str, source: &str, v: Value) -> Result<V
                 let Some(tc_obj) = tc.as_object() else {
                     continue;
                 };
-                let name = tc_obj.get("name").and_then(|s| s.as_str()).unwrap_or("?");
+                let name = tc_obj
+                    .get("name")
+                    .and_then(|s| s.as_str())
+                    .unwrap_or_else(|| {
+                        crate::source::drift::missing_field(
+                            SOURCE_NAME,
+                            "PLANNER_RESPONSE",
+                            "name",
+                        );
+                        "?"
+                    });
                 let args = tc_obj.get("args");
                 out.push(decode_ag_tool_call(agent_id, name, args, step_index, i));
             }

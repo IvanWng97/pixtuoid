@@ -101,13 +101,15 @@ mod tests {
             TARGET,
             "unknown_event",
             "MysteryHookZ",
+            "codex", // source for unknown_event
             "missing_field",
             "toolNameZ",
-            "copilot",
+            "copilot", // source for missing_field
             "unknown_dispatch",
             "DelegateZ",
             "shape_drift",
             "registry-missing-pidZ",
+            "claude-code", // source for unknown_dispatch + shape_drift
         ] {
             assert!(
                 out.contains(needle),
