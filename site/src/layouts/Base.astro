@@ -1,4 +1,14 @@
 ---
+// Self-hosted fonts (@fontsource): bundled into the build + served same-origin,
+// so no Google Fonts round-trip on load — faster LCP, a CSP with no external
+// font origins, no third-party tracking, and they actually load behind the GFW.
+// Family names ('Jersey 10' / 'JetBrains Mono' / 'Lora') match global.css as-is.
+import '@fontsource/jersey-10/400.css';
+import '@fontsource/jetbrains-mono/400.css';
+import '@fontsource/jetbrains-mono/500.css';
+import '@fontsource/jetbrains-mono/700.css';
+import '@fontsource/lora/400.css';
+import '@fontsource/lora/500.css';
 import '../styles/global.css';
 import { asset, THEMES } from '../consts';
 
@@ -6,12 +16,16 @@ interface Props {
   title?: string;
   description?: string;
   preloadImage?: string;
+  // schema.org JSON-LD for this page (e.g. the homepage's SoftwareApplication).
+  // Rendered verbatim as an `application/ld+json` block when present.
+  jsonLd?: Record<string, unknown>;
 }
 
 const {
   title = 'pixtuoid — your coding agents, alive in a pixel office',
   description = 'A terminal-native pixel-art office that visualizes your AI coding agents (Claude Code, Codex, and more) as little animated coworkers — day/night lighting, weather, themes, and pets included.',
   preloadImage,
+  jsonLd,
 } = Astro.props;
 
 // Absolute URLs for crawlers (Astro.site is the deploy origin).
@@ -21,6 +35,11 @@ const ogImage = new URL(asset('demos/hero-poster.png'), SITE).href;
 // the static build, so /config no longer self-declares the homepage as canonical.
 const canonical = new URL(Astro.url.pathname, SITE).href;
 const version = __PIXTUOID_VERSION__; // from the workspace Cargo.toml at build
+
+// Escape `<` so no string value can break out of the <script> block (a `</script`
+// or `<!--` in serialized JSON would otherwise close it). Defense-in-depth: every
+// value is a build-time constant today, but the jsonLd prop is typed open.
+const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : null;
 ---
 
 <!doctype html>
@@ -38,7 +57,7 @@ const version = __PIXTUOID_VERSION__; // from the workspace Cargo.toml at build
     }
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; base-uri 'self'; object-src 'none'; img-src 'self' data:; media-src 'self'; font-src 'self' https://fonts.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; script-src 'self' 'unsafe-inline'; connect-src 'self'; form-action 'self'"
+      content="default-src 'self'; base-uri 'self'; object-src 'none'; img-src 'self' data:; media-src 'self'; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; form-action 'self'"
     />
     <title>{title}</title>
     <meta name="description" content={description} />
@@ -62,13 +81,16 @@ const version = __PIXTUOID_VERSION__; // from the workspace Cargo.toml at build
     <meta property="og:image" content={ogImage} />
     <meta name="twitter:card" content="summary_large_image" />
 
-    <!-- Fonts: Jersey 10 (pixel display, single weight) + JetBrains Mono (UI/code) + Lora (warm body) -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Jersey+10&family=JetBrains+Mono:wght@400;500;700&family=Lora:wght@400;500&display=swap"
-      rel="stylesheet"
-    />
+    {
+      /* schema.org structured data — the homepage passes a SoftwareApplication
+        so search engines can render a rich result for the tool. */
+    }
+    {jsonLdSafe && <script type="application/ld+json" is:inline set:html={jsonLdSafe} />}
+
+    {
+      /* Fonts are self-hosted via @fontsource (imported in the frontmatter), so
+        there is no Google Fonts <link> to preconnect to or render-block on. */
+    }
 
     <!-- No-FOUC theme init: ?theme= override → saved choice → system → day -->
     <script is:inline>

@@ -3,6 +3,7 @@ import { defineConfig } from 'astro/config';
 import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { posix } from 'node:path';
+import sitemap from '@astrojs/sitemap';
 import rehypeMermaid from 'rehype-mermaid';
 
 // Single-source the displayed version from the workspace Cargo.toml so the boot
@@ -176,5 +177,10 @@ export default defineConfig({
       rehypeRepoLinks, // after mermaid so it walks the final tree
     ],
   },
+  // Sitemap respects `site` + `base`, so emitted URLs carry the /pixtuoid
+  // prefix → submit /pixtuoid/sitemap-index.xml to Search Console (this is a
+  // project page, so a repo-local robots.txt would serve under /pixtuoid/ and
+  // crawlers only read robots.txt from the origin root — see the PR notes).
+  integrations: [sitemap()],
   vite: { define: { __PIXTUOID_VERSION__: JSON.stringify(version) } },
 });
