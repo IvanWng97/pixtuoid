@@ -348,16 +348,17 @@ mod tests {
     #[test]
     fn expand_tilde_home_some_expands_leading_tilde_only() {
         let home = Path::new("/home/u");
+        // The home-join uses the PLATFORM separator (`\` on Windows), exactly like
+        // OpenClaw's Node `path.join`, so compute the expected via `join` rather than
+        // hardcoding a `/` (that mismatch is what windows-test caught).
+        let home_claw = home.join("claw").to_string_lossy().into_owned();
         // bare `~` → the home itself.
-        assert_eq!(expand_tilde("~", Some(home)), "/home/u");
+        assert_eq!(expand_tilde("~", Some(home)), home.to_string_lossy());
         // `~/x` and `~\x` (Windows form) → home-joined.
-        assert_eq!(expand_tilde("~/claw", Some(home)), "/home/u/claw");
-        assert_eq!(
-            expand_tilde(r"~\claw", Some(home)),
-            Path::new("/home/u").join("claw").to_string_lossy()
-        );
+        assert_eq!(expand_tilde("~/claw", Some(home)), home_claw);
+        assert_eq!(expand_tilde(r"~\claw", Some(home)), home_claw);
         // trims first, THEN expands.
-        assert_eq!(expand_tilde("  ~/claw  ", Some(home)), "/home/u/claw");
+        assert_eq!(expand_tilde("  ~/claw  ", Some(home)), home_claw);
         // a leading `~` WITHOUT a separator (`~foo`) is NOT a home-prefix → verbatim
         // (matches OpenClaw's `^~(?=$|[/\\])` anchor).
         assert_eq!(expand_tilde("~foo", Some(home)), "~foo");
