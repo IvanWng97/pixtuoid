@@ -178,13 +178,38 @@ fn plugin_dir() -> Result<PathBuf> {
 /// With `OPENCLAW_STATE_DIR` set that dir IS the state dir; else probe both the
 /// modern `.openclaw` and the legacy `.clawdbot` under the effective home.
 pub fn detect_installed() -> bool {
-    if let Some(d) = io::nonempty_env("OPENCLAW_STATE_DIR") {
-        return PathBuf::from(d).exists();
+    // Normalize the SAME env vars the SAME way `openclaw_state_dir()` does (#342/#344):
+    // `~`-expand `OPENCLAW_STATE_DIR`/`OPENCLAW_HOME` against the same home base. Without
+    // this, a `~`-prefixed override would install into the EXPANDED dir but probe the
+    // literal `~/…` → `false` → the Sources panel never offers the OpenClaw it just
+    // installed into (the install/detect asymmetry).
+    let home = pixtuoid_core::platform::home_first_dir();
+    resolve_openclaw_detect(
+        io::nonempty_env("OPENCLAW_STATE_DIR").map(|v| io::expand_tilde(&v, home.as_deref())),
+        io::nonempty_env("OPENCLAW_HOME").map(|v| io::expand_tilde(&v, home.as_deref())),
+        home,
+        |p| p.exists(),
+    )
+}
+
+/// Pure core for [`detect_installed`] — parallels [`resolve_openclaw_state_dir`] but
+/// answers "does ANY OpenClaw state dir exist" (a presence PROBE) instead of picking
+/// one: `OPENCLAW_STATE_DIR` points AT the dir; else probe both `.openclaw` and the
+/// legacy `.clawdbot` under the effective home (`OPENCLAW_HOME` override else the OS
+/// home). Inputs are injected so the precedence is unit-testable without env/FS.
+fn resolve_openclaw_detect(
+    state_dir_env: Option<PathBuf>,
+    openclaw_home_env: Option<PathBuf>,
+    os_home_first: Option<PathBuf>,
+    exists: impl Fn(&Path) -> bool,
+) -> bool {
+    if let Some(d) = state_dir_env {
+        return exists(&d);
     }
-    let home = io::nonempty_env("OPENCLAW_HOME")
-        .map(PathBuf::from)
-        .or_else(pixtuoid_core::platform::home_first_dir);
-    home.is_some_and(|h| h.join(".openclaw").exists() || h.join(".clawdbot").exists())
+    let Some(home) = openclaw_home_env.or(os_home_first) else {
+        return false;
+    };
+    exists(&home.join(".openclaw")) || exists(&home.join(".clawdbot"))
 }
 
 /// The shim's absolute path, baked into the plugin (the gateway runs it under
@@ -427,6 +452,48 @@ mod tests {
             legacy
         );
         assert_eq!(resolve_openclaw_config_path(None, state, |_| false), modern);
+    }
+
+    #[test]
+    fn openclaw_detect_probes_the_same_resolved_dirs_as_install() {
+        // The detect probe must agree with openclaw_state_dir()'s resolution (#344):
+        // an env override (already `~`-expanded at the call site, like the write path)
+        // is probed at the EXPANDED location, never the literal `~/…`.
+        let home = PathBuf::from("/home/u");
+        // OPENCLAW_STATE_DIR points AT the dir → probed directly, home ignored.
+        assert!(resolve_openclaw_detect(
+            Some(home.join("claw")),
+            None,
+            None,
+            |q| q == home.join("claw"),
+        ));
+        assert!(!resolve_openclaw_detect(
+            Some(home.join("claw")),
+            None,
+            None,
+            |_| false
+        ));
+        // No state-dir override: OPENCLAW_HOME wins over the OS home, and BOTH the
+        // modern `.openclaw` and the legacy `.clawdbot` are probed under it.
+        let claw_home = PathBuf::from("/expanded/claw");
+        assert!(resolve_openclaw_detect(
+            None,
+            Some(claw_home.clone()),
+            Some(home.clone()),
+            |q| q == claw_home.join(".clawdbot"),
+        ));
+        // OPENCLAW_HOME unset → the OS HOME-first home is probed.
+        assert!(resolve_openclaw_detect(
+            None,
+            None,
+            Some(home.clone()),
+            |q| q == home.join(".openclaw")
+        ));
+        // Nothing resolves (no home at all) → not present, and `exists` is never
+        // consulted (no panic).
+        assert!(!resolve_openclaw_detect(None, None, None, |_| panic!(
+            "exists() must not be consulted when no home resolves"
+        )));
     }
 
     #[test]
