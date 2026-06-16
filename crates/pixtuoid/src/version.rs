@@ -58,6 +58,10 @@ pub fn release_notes(version: &str) -> Option<&'static [&'static str]> {
         // anchoring on a marker is whitespace-independent — matching the `match`
         // brace would silently break if the indentation ever shifted.
         // [bump-inject-here]
+        "0.10.0" => Some(&[
+            "`pixtuoid doctor` now flags an OpenClaw plugin whose files went missing — a source that would silently never load is reported broken instead of healthy",
+            "Smoother Sources panel — connecting or disconnecting a CLI no longer hitches the office while it writes hook config",
+        ]),
         "0.9.0" => Some(&[
             "OpenClaw gateway visualized as a presence-gated wandering lobster mascot whose motion tracks the daemon (idle ambles, busy shuttles, down walks out); connect it in the Sources panel (press s)",
             "Cursor CLI sessions now visualized (cu·) — connect it in the Sources panel",
