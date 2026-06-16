@@ -1,6 +1,8 @@
 //! Reasonix hook install target.
 //!
-//! Writes the GLOBAL `~/.reasonix/settings.json` — project-scope
+//! Writes the GLOBAL `<reasonix-home>/settings.json` (`~/.reasonix/settings.json`
+//! on macOS/Linux, **`%APPDATA%\reasonix\settings.json` on Windows** — see
+//! `default_config_path`/`reasonix_home`) — project-scope
 //! (`<repo>/.reasonix/settings.json`) hooks only load after the user runs
 //! `/hooks trust`, so a project-scope install would silently never fire
 //! (`internal/hook/trust.go` @v1.2.0). The schema is Reasonix's own, FLAT
@@ -53,20 +55,64 @@ const REASONIX_EVENTS: &[&str] = &[
     "SessionEnd",
 ];
 
+/// The GLOBAL `settings.json` Reasonix actually reads, under its `ReasonixHomeDir`.
+/// Reasonix's home is **platform-ASYMMETRIC** (`docs/CONFIG_PATHS.md` +
+/// `internal/config/config.go::reasonixHomeDir`): `REASONIX_HOME` (verbatim) wins;
+/// else macOS/Linux = `~/.reasonix`, but **Windows = `%APPDATA%\reasonix`**
+/// (Go's `os.UserConfigDir()/reasonix`, NOT `%USERPROFILE%\.reasonix`). Global
+/// hooks live at `<reasonix-home>/settings.json`. Writing `~/.reasonix/settings.json`
+/// on Windows (pixtuoid's generic USERPROFILE-first path) lands the hooks where
+/// Reasonix never reads → installed, but no sprite — the same class as
+/// CodeWhale/OpenClaw but on the %APPDATA% (config-dir) axis, not HOME-vs-USERPROFILE.
 pub fn default_config_path() -> Result<PathBuf> {
-    // Checked: with no resolvable home dir, writing `./.reasonix/settings.json`
-    // would "succeed" while the GLOBAL-scope loader never reads it.
-    io::home_relative_checked(".reasonix/settings.json")
+    reasonix_home()
+        .map(|h| h.join("settings.json"))
+        .ok_or_else(|| {
+            anyhow!(
+                "cannot resolve Reasonix's home (REASONIX_HOME/HOME/USERPROFILE unset); \
+                 pass --config <path>"
+            )
+        })
+}
+
+/// Reasonix's `ReasonixHomeDir`: `REASONIX_HOME` (verbatim) → Windows
+/// `%APPDATA%\reasonix` (`user_config_dir()/reasonix`) → else `<home>/.reasonix`.
+fn reasonix_home() -> Option<PathBuf> {
+    resolve_reasonix_home(
+        io::nonempty_env("REASONIX_HOME"),
+        cfg!(windows),
+        user_config_dir(),
+        io::user_home(),
+    )
+}
+
+/// Pure core for [`reasonix_home`] — the `REASONIX_HOME` override, the platform
+/// flag, the resolved Windows config dir (`%APPDATA%`), and the OS home are all
+/// injected so BOTH platform arms unit-test on any host.
+fn resolve_reasonix_home(
+    reasonix_home_env: Option<String>,
+    windows: bool,
+    windows_config_dir: PathBuf,
+    unix_home: Option<String>,
+) -> Option<PathBuf> {
+    if let Some(h) = reasonix_home_env {
+        return Some(PathBuf::from(h));
+    }
+    if windows {
+        return Some(windows_config_dir.join("reasonix"));
+    }
+    unix_home.map(|h| PathBuf::from(h).join(".reasonix"))
 }
 
 /// Presence probe for auto-detection. The default file-exists check on
 /// `default_config_path` would NEVER fire: Reasonix itself never creates
-/// `~/.reasonix/settings.json` (it is purely user-authored; `readSettings`
-/// just returns nil when missing). What a real install does create is the v2
-/// config dir — `os.UserConfigDir()/reasonix` (sessions/config live there) —
-/// and hook/trust users additionally have `~/.reasonix`. Probe both.
+/// `settings.json` (it is purely user-authored; `readSettings` just returns nil
+/// when missing). What a real install does create is the Reasonix home dir
+/// (`reasonix_home` — `%APPDATA%\reasonix` on Windows, `~/.reasonix` elsewhere,
+/// honoring `REASONIX_HOME`); hook/trust users additionally have a `~/.reasonix`
+/// even on Windows. Probe both.
 pub fn detect_installed() -> bool {
-    user_config_dir().join("reasonix").exists() || io::home_relative(".reasonix").exists()
+    reasonix_home().is_some_and(|d| d.exists()) || io::home_relative(".reasonix").exists()
 }
 
 /// Rust mapping of Go's `os.UserConfigDir()` for the platforms we ship:
@@ -175,6 +221,46 @@ mod tests {
 
     fn json_merge_uninstall(doc: Value) -> Value {
         verify::flat_json_merge_uninstall(doc, SENTINEL_KEY)
+    }
+
+    #[test]
+    fn reasonix_home_is_appdata_on_windows_but_dot_reasonix_elsewhere() {
+        // The platform asymmetry (docs/CONFIG_PATHS.md): Windows = %APPDATA%\reasonix,
+        // macOS/Linux = ~/.reasonix. The Windows arm was the bug — pixtuoid wrote
+        // %USERPROFILE%\.reasonix while Reasonix reads %APPDATA%\reasonix.
+        let appdata = PathBuf::from(r"C:\Users\me\AppData\Roaming");
+        // Windows → <%APPDATA%>/reasonix (the injected config dir), NOT <home>/.reasonix.
+        assert_eq!(
+            resolve_reasonix_home(None, true, appdata.clone(), Some(r"C:\Users\me".into())),
+            Some(appdata.join("reasonix"))
+        );
+        // Non-Windows → <home>/.reasonix (config dir ignored).
+        assert_eq!(
+            resolve_reasonix_home(None, false, appdata, Some("/home/u".into())),
+            Some(PathBuf::from("/home/u").join(".reasonix"))
+        );
+        // Non-Windows with no home → None (installer surfaces "pass --config").
+        assert_eq!(
+            resolve_reasonix_home(None, false, PathBuf::from("/ignored"), None),
+            None
+        );
+    }
+
+    #[test]
+    fn reasonix_home_env_override_wins_verbatim_on_both_platforms() {
+        // REASONIX_HOME is the home dir VERBATIM (docs: "override Reasonix home"),
+        // beating the platform default on either OS; settings.json joins onto it.
+        for windows in [true, false] {
+            assert_eq!(
+                resolve_reasonix_home(
+                    Some("/custom/rx".into()),
+                    windows,
+                    PathBuf::from(r"C:\AppData"),
+                    Some("/home/u".into()),
+                ),
+                Some(PathBuf::from("/custom/rx"))
+            );
+        }
     }
 
     #[test]
