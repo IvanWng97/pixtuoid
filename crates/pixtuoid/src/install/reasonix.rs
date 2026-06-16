@@ -68,9 +68,10 @@ pub fn default_config_path() -> Result<PathBuf> {
     reasonix_home()
         .map(|h| h.join("settings.json"))
         .ok_or_else(|| {
+            // Reachable ONLY on non-Windows with no `HOME` (the Windows arm always
+            // resolves via `user_config_dir()`), so `USERPROFILE` is not named here.
             anyhow!(
-                "cannot resolve Reasonix's home (REASONIX_HOME/HOME/USERPROFILE unset); \
-                 pass --config <path>"
+                "cannot resolve Reasonix's home (REASONIX_HOME/HOME unset); pass --config <path>"
             )
         })
 }
@@ -88,7 +89,12 @@ fn reasonix_home() -> Option<PathBuf> {
 
 /// Pure core for [`reasonix_home`] — the `REASONIX_HOME` override, the platform
 /// flag, the resolved Windows config dir (`%APPDATA%`), and the OS home are all
-/// injected so BOTH platform arms unit-test on any host.
+/// injected so BOTH platform arms unit-test on any host. The Windows arm ALWAYS
+/// returns `Some` (`user_config_dir()` falls `%APPDATA%`→`<home>/AppData/Roaming`,
+/// so it never fails) — deliberately MORE lenient than Go's `os.UserConfigDir`,
+/// which ERRORS when `%APPDATA%` is unset. Harmless: that case means Reasonix
+/// itself resolves no home (it can't read the file either), and the computed
+/// `<home>/AppData/Roaming/reasonix` is exactly the canonical `%APPDATA%` default.
 fn resolve_reasonix_home(
     reasonix_home_env: Option<String>,
     windows: bool,

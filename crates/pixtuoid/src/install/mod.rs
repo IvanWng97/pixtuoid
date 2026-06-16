@@ -882,7 +882,7 @@ mod tests {
     #[test]
     fn install_target_round_trips_every_registered_target() {
         // Isolate OpenClaw's extra_artifacts (the plugin DIR resolves from
-        // openclaw_home(), NOT the config override) under a temp home, so the
+        // openclaw_state_dir(), NOT the config override) under a temp home, so the
         // round-trip never writes to the real ~/.openclaw. nextest runs each test
         // in its own process, so this env set can't race a sibling test.
         let oc_home = tempfile::TempDir::new().unwrap();
