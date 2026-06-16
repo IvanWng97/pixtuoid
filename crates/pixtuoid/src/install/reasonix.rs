@@ -76,11 +76,12 @@ pub fn default_config_path() -> Result<PathBuf> {
         })
 }
 
-/// Reasonix's `ReasonixHomeDir`: `REASONIX_HOME` (verbatim) → Windows
+/// Reasonix's `ReasonixHomeDir`: `REASONIX_HOME` (TRIMMED — `cleanEnvDir` does
+/// `TrimSpace` + `filepath.Clean`, NO `~`-expand, so `home: None`, #342) → Windows
 /// `%APPDATA%\reasonix` (`user_config_dir()/reasonix`) → else `<home>/.reasonix`.
 fn reasonix_home() -> Option<PathBuf> {
     resolve_reasonix_home(
-        io::nonempty_env("REASONIX_HOME"),
+        io::nonempty_env("REASONIX_HOME").map(|v| io::expand_tilde(&v, None)),
         cfg!(windows),
         user_config_dir(),
         io::user_home(),

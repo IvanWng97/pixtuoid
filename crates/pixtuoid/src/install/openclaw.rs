@@ -88,10 +88,15 @@ const PACKAGE: &str = r#"{
 /// `.clawdbot` exists (OpenClaw's `resolveStateDir` legacy fallback — the same
 /// "don't shadow the user's real config" rule as CodeWhale's `.deepseek`).
 fn openclaw_state_dir() -> Result<PathBuf> {
+    // OpenClaw `~`-expands OPENCLAW_STATE_DIR + OPENCLAW_HOME against its OS home
+    // (resolveRawHomeDir/resolveUserPath, #342), so mirror that before the path
+    // logic; the same `home_first_dir()` is both the expansion base and the OS-home
+    // fallback.
+    let home = pixtuoid_core::platform::home_first_dir();
     resolve_openclaw_state_dir(
-        io::nonempty_env("OPENCLAW_STATE_DIR"),
-        io::nonempty_env("OPENCLAW_HOME"),
-        pixtuoid_core::platform::home_first_dir(),
+        io::nonempty_env("OPENCLAW_STATE_DIR").map(|v| io::expand_tilde(&v, home.as_deref())),
+        io::nonempty_env("OPENCLAW_HOME").map(|v| io::expand_tilde(&v, home.as_deref())),
+        home,
         |p| p.exists(),
     )
 }
@@ -135,8 +140,10 @@ fn resolve_openclaw_state_dir(
 /// the legacy `clawdbot.json`, else `openclaw.json` for a fresh install (never
 /// shadow a real `clawdbot.json` the gateway still reads).
 pub fn default_config_path() -> Result<PathBuf> {
+    // OPENCLAW_CONFIG_PATH is `~`-expanded too (resolveUserPath, #342).
+    let home = pixtuoid_core::platform::home_first_dir();
     Ok(resolve_openclaw_config_path(
-        io::nonempty_env("OPENCLAW_CONFIG_PATH"),
+        io::nonempty_env("OPENCLAW_CONFIG_PATH").map(|v| io::expand_tilde(&v, home.as_deref())),
         openclaw_state_dir()?,
         |p| p.exists(),
     ))

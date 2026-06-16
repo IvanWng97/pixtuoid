@@ -97,10 +97,12 @@ const CODEWHALE_EVENTS: &[(&str, bool)] = &[
 /// absolute override is well-defined. (Upstream additionally rejects `..`; we keep
 /// the value verbatim — a user-set env override is trusted input.)
 pub fn default_config_path() -> Result<PathBuf> {
+    // CodeWhale only TRIMS its overrides (`val.trim()` / `normalize_config_file_path`)
+    // — it does NOT `~`-expand — so pass `home: None` (trim-only, #342).
     resolve_config_path(
-        io::nonempty_env("CODEWHALE_CONFIG_PATH"),
-        io::nonempty_env("DEEPSEEK_CONFIG_PATH"),
-        io::nonempty_env("CODEWHALE_HOME"),
+        io::nonempty_env("CODEWHALE_CONFIG_PATH").map(|v| io::expand_tilde(&v, None)),
+        io::nonempty_env("DEEPSEEK_CONFIG_PATH").map(|v| io::expand_tilde(&v, None)),
+        io::nonempty_env("CODEWHALE_HOME").map(|v| io::expand_tilde(&v, None)),
         pixtuoid_core::platform::home_first_dir(),
         |p| p.exists(),
     )
@@ -163,7 +165,7 @@ fn resolve_config_path(
 /// Windows shell probes the dirs CodeWhale actually uses.
 pub fn detect_installed() -> bool {
     let os_home = pixtuoid_core::platform::home_first_dir();
-    let modern = match io::nonempty_env("CODEWHALE_HOME") {
+    let modern = match io::nonempty_env("CODEWHALE_HOME").map(|v| io::expand_tilde(&v, None)) {
         Some(h) => Some(PathBuf::from(h)),
         None => os_home.as_ref().map(|h| h.join(".codewhale")),
     };
