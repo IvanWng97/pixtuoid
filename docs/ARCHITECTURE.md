@@ -28,40 +28,61 @@ Dependency direction is one-way: `pixtuoid → pixtuoid-core`. The `Renderer` tr
 is the inversion point that keeps the core terminal-free (so the same pixel pass
 can drive a PNG/GIF export, not just the terminal).
 
+A **`Source`** is one of two classes (`source/registry.rs`'s `SourceKind`):
+
+- an **Agent** — a transcript- or hook-bearing coding CLI (Claude Code, Codex,
+  Cursor, …) that produces `AgentEvent`s → `SceneState::agents` → a **desk
+  sprite**; or
+- a **Daemon** — a long-running gateway with no transcript and no desk that
+  produces `DaemonPresenceUpdate`s → `SceneState::daemons` → a single
+  **presence-gated wandering mascot** whose *motion* encodes the daemon's
+  liveness.
+
+The OpenClaw gateway is the first daemon — it ambles the office floor as a
+lobster (idle), shuttles when a turn is in flight (busy), turns a sickly red
+when its model backend is failing (degraded), and walks out when it goes down.
+The two classes share the socket and the registry but never the reducer: the
+daemon lane below is deliberately `AgentId`-free.
+
 ## Data flow
 
 ```mermaid
 flowchart TB
   accTitle: pixtuoid data flow
-  accDescr: A hook or transcript event flows from Claude Code / Codex through the pixtuoid-hook shim and pixtuoid-core (socket listener, decoder, Transport-tagged reducer, scene state) into the pixtuoid TUI renderer's terminal-agnostic pixel pass and half-block flush.
-  CC["Claude Code / Codex"]
+  accDescr: A hook or transcript event flows from a coding agent (Claude Code, Codex) through the pixtuoid-hook shim into pixtuoid-core, where a HookRouter demuxes agent payloads to the Transport-tagged reducer and SceneState.agents. A daemon gateway (OpenClaw) shares the same shim and socket but is routed instead to apply_presence and SceneState.daemons over a sibling channel that bypasses the reducer. The pixtuoid TUI renderer then paints the whole scene through a terminal-agnostic pixel pass and a half-block flush.
+  CC["Claude Code / Codex<br/>(agent source)"]
+  OC["OpenClaw gateway<br/>(daemon source)"]
 
   subgraph hook["pixtuoid-hook (shim)"]
     SH["enrich + forward<br/>200ms timeout · exit 0"]
   end
 
   subgraph core["pixtuoid-core (headless)"]
-    L["HookSocketListener<br/>(Unix socket / named pipe)"]
+    L["HookRouter<br/>(shared socket: Unix / named pipe)"]
     D["decode_hook_payload"]
     J["JsonlWatcher · walk_jsonl"]
     R["Reducer::apply<br/>(Transport-tagged)"]
-    S["SceneState"]
-    L --> D
+    AP["apply_presence<br/>(AgentId-free · bypasses Reducer)"]
+    S["SceneState<br/>agents + daemons"]
+    L -->|agent payload| D
+    L -.->|"daemon payload<br/>is_daemon()"| AP
     D -->|"(Hook, AgentEvent)"| R
     J -->|"(Jsonl, AgentEvent)"| R
     R --> S
+    AP -.->|"PresenceMsg{source, delta}<br/>sibling channel"| S
     R -.->|"scope tree:<br/>cascade ↓ · liveness ↑"| R
   end
 
   subgraph bin["pixtuoid (binary · TUI)"]
     W["watch&lt;Arc&lt;SceneState&gt;&gt;"]
     TR["TuiRenderer"]
-    PX["render_to_rgb_buffer<br/>(terminal-agnostic)"]
+    PX["render_to_rgb_buffer<br/>(desks + mascots)"]
     FL["flush · ½-block cells"]
     W --> TR --> PX --> FL
   end
 
   CC -->|hook event| SH
+  OC -->|hook event| SH
   SH --> L
   CC -.->|writes transcript JSONL| J
   S -. Arc per mutation .-> W
@@ -92,6 +113,19 @@ flowchart TB
    `flush_buffer_to_term` compresses pairs of pixel rows into half-block (`▀`)
    terminal cells.
 
+**The daemon lane (the OpenClaw gateway).** A daemon source creates no
+`AgentSlot` and writes no transcript, so it skips the whole agent pipeline. The
+**`HookRouter`** at the shared socket reads each payload's source: an agent's
+goes to `decode_hook_payload`; a daemon's (`is_daemon()`) is decoded by the
+source's own `presence_decoder` into `DaemonPresenceUpdate`s and pushed onto a
+**sibling channel** as `PresenceMsg { source, delta }` (invariant #2 — NOT the
+one `AgentEvent` channel). The reducer task merges those via **`apply_presence`**
+— which is `AgentId`-free and never touches `Reducer::apply` — into
+`SceneState::daemons`. The render pass then draws one mascot per live daemon,
+its motion encoding the `DaemonState` (`Idle` / `Busy` / `Degraded` / `Down`).
+A daemon has no per-session pid, so *silence* is its abrupt-down signal (a TTL
+sweep), while the gateway's own process pid is armed for instant `ExitWatch`.
+
 ## Seams & invariants
 
 These are load-bearing — see `CLAUDE.md` and the nested guides before changing them.
@@ -103,6 +137,14 @@ These are load-bearing — see `CLAUDE.md` and the nested guides before changing
   documented exception: no `Source` impl and no runtime wiring; its registry
   row sets `line_decoder: None` and supplies a custom hook decoder, and it
   ships an install `Target` instead (bound via the in-TUI Sources panel).
+- **A `Source` is an `Agent` or a `Daemon`** (`SourceKind`). A daemon (the
+  OpenClaw gateway is the first) earns a presence-gated wandering mascot, not a
+  desk: its deltas ride a **sibling channel** (`PresenceMsg { source, delta }`,
+  invariant #2 — NOT the one `AgentEvent` channel) and merge via `apply_presence`,
+  never `Reducer::apply` (which is `AgentId`-pure). The `HookRouter` demux and
+  the daemon-sweep loop both dispatch on this enum, so a **second daemon is one
+  registry `Daemon` row + one mascot arm + one badge arm** — no `handle_conn`
+  edit and no new reducer arm.
 - **Cross-source facts live in ONE registry row** (`source/registry.rs`,
   internal): each CLI's `SourceDescriptor` carries its label prefix, JSONL
   decoder, hook keying (`transcript_path` vs `session_id`, plus an optional
