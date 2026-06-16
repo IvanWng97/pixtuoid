@@ -27,6 +27,13 @@ use crate::grid::Grid;
 /// `struct_missing`.
 pub type WalkableMask = Grid<bool>;
 
+// Obstacle ops on the concrete `Grid<bool>` instantiation. ACCEPTED RESIDUAL of
+// the alias form (review LOW): these become visible on EVERY `Grid<bool>`,
+// including `ReachSet`'s private inner grid where `is_walkable`/`mark_blocked`
+// are semantically off — but that grid is private (no external surface) and the
+// methods are never called there, so the leak is harmless. An extension trait
+// would scope them at the cost of an import at every call site (the churn the
+// alias exists to avoid); not worth it.
 impl Grid<bool> {
     /// Create a fully-open mask. Caller fills obstacles via `mark_blocked`.
     pub fn new_open(width: u16, height: u16) -> Self {

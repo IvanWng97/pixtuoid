@@ -481,10 +481,10 @@ mod tests {
     // must take the AgentEvent path and NEVER the presence side channel, EVEN
     // with `presence_tx` active. The whole daemon demux rests on
     // `presence_decoder_for` returning None for every agent source (so the
-    // `continue` at the daemon arm is unreachable for them); without this
-    // negative pin, a future dual-natured source — or a reorder that moved the
-    // `_pid` peek above the demux `continue` — could silently cross-route an
-    // agent payload into presence with no failing test.
+    // daemon arm's `continue` is unreachable for them); this pins that invariant
+    // from the other side — it FAILS the moment an agent source gains a presence
+    // decoder (a dual-natured source), the silent cross-route no other test
+    // catches.
     #[tokio::test]
     async fn handle_conn_agent_source_with_pid_never_routes_to_presence() {
         let (mut client, server) = tokio::io::duplex(4096);

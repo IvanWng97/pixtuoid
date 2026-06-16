@@ -1,0 +1,31 @@
+name: review-disposition
+
+# The bot-finding disposition harvester (scripts/check_review_disposition.py) is
+# advisory tooling whose ONLY correctness guard is its selftest, which pins the
+# claude[bot] inline-comment parsers (severity + `Bot-findings-adjudicated:`
+# marker). A parser regression = the harvester silently finds nothing — a false
+# "no drops", the exact failure mode it exists to catch. Mirror the
+# upstream-drift pattern: run the selftest on PRs that touch the script, so a
+# regression can't merge unnoticed. (The live `gh`-driven PR audit stays a
+# manual `just review-disposition <PR>` — it needs a PR number + network and
+# must never gate a PR.)
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "scripts/check_review_disposition*.py"
+      - ".github/workflows/review-disposition.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  selftest:
+    name: review-disposition selftest
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - name: Self-test the disposition harvester
+        run: python3 scripts/check_review_disposition_selftest.py
