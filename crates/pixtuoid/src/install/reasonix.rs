@@ -97,13 +97,13 @@ fn reasonix_home() -> Option<PathBuf> {
 /// itself resolves no home (it can't read the file either), and the computed
 /// `<home>/AppData/Roaming/reasonix` is exactly the canonical `%APPDATA%` default.
 fn resolve_reasonix_home(
-    reasonix_home_env: Option<String>,
+    reasonix_home_env: Option<PathBuf>,
     windows: bool,
     windows_config_dir: PathBuf,
     unix_home: Option<String>,
 ) -> Option<PathBuf> {
     if let Some(h) = reasonix_home_env {
-        return Some(PathBuf::from(h));
+        return Some(h);
     }
     if windows {
         return Some(windows_config_dir.join("reasonix"));

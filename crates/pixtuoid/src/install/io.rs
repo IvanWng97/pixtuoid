@@ -38,19 +38,22 @@ pub fn nonempty_env(name: &str) -> Option<String> {
 /// do exactly this `^~(?=$|[/\\])` replace). Pass `home: None` for CLIs that only
 /// TRIM and never `~`-expand (CodeWhale, Reasonix) — expanding there would DIVERGE
 /// from a CLI that takes the value verbatim. A value without a leading `~`-segment
-/// (or `home: None`) is returned as the trimmed verbatim string, so an absolute
-/// override is untouched. Returns a `String` to keep the env contracts'
-/// `Option<String>` shape; the join goes through `to_string_lossy` (a non-UTF-8
-/// home is astronomically rare and only loses fidelity, never correctness).
-pub fn expand_tilde(value: &str, home: Option<&Path>) -> String {
+/// (or `home: None`) is the trimmed verbatim path, so an absolute override is
+/// untouched.
+///
+/// Returns a [`PathBuf`], NOT a `String`: paths stay in path-land end-to-end so
+/// comparisons are STRUCTURAL (component-wise), never byte-wise on a `/`-vs-`\`
+/// string — the recurring `windows-test` failure mode. The join also preserves the
+/// home's `OsString` (no lossy round-trip).
+pub fn expand_tilde(value: &str, home: Option<&Path>) -> PathBuf {
     let v = value.trim();
     match home {
-        Some(home) if v == "~" => home.to_string_lossy().into_owned(),
+        Some(home) if v == "~" => home.to_path_buf(),
         Some(home) => match v.strip_prefix("~/").or_else(|| v.strip_prefix("~\\")) {
-            Some(rest) => home.join(rest).to_string_lossy().into_owned(),
-            None => v.to_string(),
+            Some(rest) => home.join(rest),
+            None => PathBuf::from(v),
         },
-        None => v.to_string(),
+        None => PathBuf::from(v),
     }
 }
 
@@ -348,31 +351,30 @@ mod tests {
     #[test]
     fn expand_tilde_home_some_expands_leading_tilde_only() {
         let home = Path::new("/home/u");
-        // The home-join uses the PLATFORM separator (`\` on Windows), exactly like
-        // OpenClaw's Node `path.join`, so compute the expected via `join` rather than
-        // hardcoding a `/` (that mismatch is what windows-test caught).
-        let home_claw = home.join("claw").to_string_lossy().into_owned();
+        // PathBuf == PathBuf is STRUCTURAL: both sides built via `join` use the same
+        // platform separator, so this is correct on Windows AND Unix — no hardcoded
+        // `/` to drift from `\` (the windows-test trap).
         // bare `~` → the home itself.
-        assert_eq!(expand_tilde("~", Some(home)), home.to_string_lossy());
+        assert_eq!(expand_tilde("~", Some(home)), home.to_path_buf());
         // `~/x` and `~\x` (Windows form) → home-joined.
-        assert_eq!(expand_tilde("~/claw", Some(home)), home_claw);
-        assert_eq!(expand_tilde(r"~\claw", Some(home)), home_claw);
+        assert_eq!(expand_tilde("~/claw", Some(home)), home.join("claw"));
+        assert_eq!(expand_tilde(r"~\claw", Some(home)), home.join("claw"));
         // trims first, THEN expands.
-        assert_eq!(expand_tilde("  ~/claw  ", Some(home)), home_claw);
+        assert_eq!(expand_tilde("  ~/claw  ", Some(home)), home.join("claw"));
         // a leading `~` WITHOUT a separator (`~foo`) is NOT a home-prefix → verbatim
         // (matches OpenClaw's `^~(?=$|[/\\])` anchor).
-        assert_eq!(expand_tilde("~foo", Some(home)), "~foo");
+        assert_eq!(expand_tilde("~foo", Some(home)), PathBuf::from("~foo"));
         // an absolute path is untouched (no leading `~`).
-        assert_eq!(expand_tilde("/abs/x", Some(home)), "/abs/x");
+        assert_eq!(expand_tilde("/abs/x", Some(home)), PathBuf::from("/abs/x"));
     }
 
     #[test]
     fn expand_tilde_home_none_trims_only_never_expands() {
         // CodeWhale/Reasonix: trim, but a leading `~` stays VERBATIM (they don't
         // home-expand, so expanding would diverge from a verbatim-taking CLI).
-        assert_eq!(expand_tilde("  /abs/x  ", None), "/abs/x");
-        assert_eq!(expand_tilde("~/claw", None), "~/claw");
-        assert_eq!(expand_tilde("~", None), "~");
+        assert_eq!(expand_tilde("  /abs/x  ", None), PathBuf::from("/abs/x"));
+        assert_eq!(expand_tilde("~/claw", None), PathBuf::from("~/claw"));
+        assert_eq!(expand_tilde("~", None), PathBuf::from("~"));
     }
 
     // rename_with_retry: the retry loop's Windows sharing-violation path is not

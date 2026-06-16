@@ -116,21 +116,21 @@ pub fn default_config_path() -> Result<PathBuf> {
 /// `.deepseek` dir lives under the OS home REGARDLESS of `CODEWHALE_HOME`
 /// (`legacy_deepseek_home` ignores it).
 fn resolve_config_path(
-    codewhale_config_env: Option<String>,
-    deepseek_config_env: Option<String>,
-    codewhale_home_env: Option<String>,
+    codewhale_config_env: Option<PathBuf>,
+    deepseek_config_env: Option<PathBuf>,
+    codewhale_home_env: Option<PathBuf>,
     os_home: Option<PathBuf>,
     exists: impl Fn(&Path) -> bool,
 ) -> Result<PathBuf> {
     if let Some(p) = codewhale_config_env {
-        return Ok(PathBuf::from(p));
+        return Ok(p);
     }
     if let Some(p) = deepseek_config_env {
-        return Ok(PathBuf::from(p));
+        return Ok(p);
     }
     // Modern app dir: CODEWHALE_HOME verbatim, else <os_home>/.codewhale.
     let modern_dir = match (codewhale_home_env, &os_home) {
-        (Some(h), _) => PathBuf::from(h),
+        (Some(h), _) => h,
         (None, Some(home)) => home.join(".codewhale"),
         (None, None) => {
             return Err(anyhow!(
@@ -166,7 +166,7 @@ fn resolve_config_path(
 pub fn detect_installed() -> bool {
     let os_home = pixtuoid_core::platform::home_first_dir();
     let modern = match io::nonempty_env("CODEWHALE_HOME").map(|v| io::expand_tilde(&v, None)) {
-        Some(h) => Some(PathBuf::from(h)),
+        Some(h) => Some(h),
         None => os_home.as_ref().map(|h| h.join(".codewhale")),
     };
     let legacy = os_home.map(|h| h.join(".deepseek"));

@@ -105,23 +105,20 @@ fn openclaw_state_dir() -> Result<PathBuf> {
 /// and the existence check are injected so the precedence is unit-testable without
 /// env/FS mutation.
 fn resolve_openclaw_state_dir(
-    state_dir_env: Option<String>,
-    openclaw_home_env: Option<String>,
+    state_dir_env: Option<PathBuf>,
+    openclaw_home_env: Option<PathBuf>,
     os_home_first: Option<PathBuf>,
     exists: impl Fn(&Path) -> bool,
 ) -> Result<PathBuf> {
     if let Some(d) = state_dir_env {
-        return Ok(PathBuf::from(d));
+        return Ok(d);
     }
-    let home = openclaw_home_env
-        .map(PathBuf::from)
-        .or(os_home_first)
-        .ok_or_else(|| {
-            anyhow!(
-                "cannot resolve OpenClaw's home (OPENCLAW_STATE_DIR/OPENCLAW_HOME/HOME/USERPROFILE \
+    let home = openclaw_home_env.or(os_home_first).ok_or_else(|| {
+        anyhow!(
+            "cannot resolve OpenClaw's home (OPENCLAW_STATE_DIR/OPENCLAW_HOME/HOME/USERPROFILE \
                  unset); pass --config <path>"
-            )
-        })?;
+        )
+    })?;
     let modern = home.join(".openclaw");
     if exists(&modern) {
         return Ok(modern);
@@ -152,12 +149,12 @@ pub fn default_config_path() -> Result<PathBuf> {
 /// Pure core for [`default_config_path`] — the override + resolved state dir +
 /// existence check injected.
 fn resolve_openclaw_config_path(
-    config_path_env: Option<String>,
+    config_path_env: Option<PathBuf>,
     state_dir: PathBuf,
     exists: impl Fn(&Path) -> bool,
 ) -> PathBuf {
     if let Some(p) = config_path_env {
-        return PathBuf::from(p);
+        return p;
     }
     let modern = state_dir.join("openclaw.json");
     if exists(&modern) {
