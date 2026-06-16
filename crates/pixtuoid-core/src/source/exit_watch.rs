@@ -620,6 +620,15 @@ mod tests {
 
         use super::ExitWatch;
 
+        /// Liveness ceiling for the real-process `live::` tests. Generous
+        /// enough to absorb `cargo llvm-cov` instrumentation + full-parallel
+        /// scheduling jitter on CI — the coverage job intermittently flaked
+        /// `drop_stops_cleanly` at 3s, where the watcher thread's post-`Drop`
+        /// kqueue/pidfd wake just hadn't been scheduled yet. It is a liveness
+        /// bound, NOT a latency assertion: a true hang is still failed by
+        /// nextest's 180s slow-timeout, so a wider deadline doesn't weaken it.
+        const LIVE_PID_DEADLINE: Duration = Duration::from_secs(10);
+
         fn sleeper() -> Child {
             Command::new("sleep").arg("30").spawn().unwrap()
         }
@@ -674,7 +683,7 @@ mod tests {
             watch.watch(pid);
             kill_and_reap(&mut child);
             assert!(
-                wait_for_pid(&mut rx, pid, Duration::from_secs(3)).await,
+                wait_for_pid(&mut rx, pid, LIVE_PID_DEADLINE).await,
                 "a watched process dying must surface its pid on the exit channel"
             );
         }
@@ -694,7 +703,7 @@ mod tests {
             let watch = ExitWatch::spawn(tx).expect("backend must init on macOS/Linux");
             watch.watch(pid);
             assert!(
-                wait_for_pid(&mut rx, pid, Duration::from_secs(3)).await,
+                wait_for_pid(&mut rx, pid, LIVE_PID_DEADLINE).await,
                 "watching an already-dead pid must synthesize its exit (ESRCH path)"
             );
         }
@@ -709,7 +718,7 @@ mod tests {
             watch.watch(pid);
             kill_and_reap(&mut child);
             assert!(
-                wait_for_pid(&mut rx, pid, Duration::from_secs(3)).await,
+                wait_for_pid(&mut rx, pid, LIVE_PID_DEADLINE).await,
                 "the first exit must arrive"
             );
             assert_no_pid_within(
@@ -735,14 +744,14 @@ mod tests {
             watch.watch(pid);
             kill_and_reap(&mut child);
             assert!(
-                wait_for_pid(&mut rx, pid, Duration::from_secs(3)).await,
+                wait_for_pid(&mut rx, pid, LIVE_PID_DEADLINE).await,
                 "a bogus registration must not break later real watches"
             );
         }
 
         /// Drop sets `closed` + wakes: the thread must exit, observable as
-        /// the channel closing (the thread owns the only sender). The later
-        /// kill exercises the dead machinery for no-panic.
+        /// the channel closing (the thread owns the only sender). The kill
+        /// also exercises the post-Drop machinery for no-panic.
         #[tokio::test]
         async fn drop_stops_cleanly() {
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
@@ -750,15 +759,18 @@ mod tests {
             let mut child = sleeper();
             watch.watch(child.id() as i32);
             drop(watch);
-            let closed = tokio::time::timeout(Duration::from_secs(3), async {
+            let closed = tokio::time::timeout(LIVE_PID_DEADLINE, async {
                 while rx.recv().await.is_some() {}
             })
             .await;
+            // Reap BEFORE asserting: were the drop slow enough for the assert
+            // to fire, a trailing reap would be skipped and the sleeper would
+            // leak (the nextest LEAK that paired with this test's flake).
+            kill_and_reap(&mut child);
             assert!(
                 closed.is_ok(),
                 "dropping the ExitWatch must stop the thread (its sender must drop)"
             );
-            kill_and_reap(&mut child);
         }
     }
 }
