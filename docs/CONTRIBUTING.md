@@ -95,6 +95,16 @@ git tag v0.5.1 && git push origin v0.5.1    # fires release.yml → build + crat
 - AI-authored PRs get the `needs-human-verify` label and a human visual check before merge.
 - Track every consciously-deferred finding as a GitHub issue (`gh issue create`) before moving on.
 - Review verdicts on recurring claims live in [`REVIEW-LEDGER.md`](REVIEW-LEDGER.md) — check it before re-arguing a finding that smells familiar.
+- **Disposition sweep — every `claude[bot]` MEDIUM+ inline finding reaches a terminal state before merge.** Record each in a `Bot-findings-adjudicated:` block in a review-round (or the squash) commit message, one line per finding naming its file + terminal state:
+
+  ```
+  Bot-findings-adjudicated:
+  - MEDIUM crates/pixtuoid/src/tui/mod.rs → FIXED (block_in_place off the executor)
+  - HIGH  crates/pixtuoid/src/install/mod.rs → ISSUE-FILED #332
+  - MEDIUM crates/.../foo.rs → REFUTED-design (cites the <name> sharp edge)
+  ```
+
+  This is the mechanical channel that makes "no findings dropped" *verifiable* rather than inferred-from-absence — a MEDIUM+ finding once reached merge with no terminal state at all (#283 → became the #330 fix). `just review-disposition <PR#>` lists a PR's MEDIUM+ bot findings and flags any whose file no marker line covers (advisory, `gh`-driven; run it during the sweep). The terminal states are the ledger's verdict vocabulary: FIXED / REFUTED-with-trace / ISSUE-FILED #N / ACCEPTED-residual (WHY documented).
 
 ### Recurring pitfalls (this codebase's review history, distilled)
 

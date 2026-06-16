@@ -432,3 +432,20 @@ setup-tools:
 [doc('Self-test the upstream-drift watcher (parsers + fetch classifier)')]
 drift-selftest:
     python3 scripts/check_upstream_drift_selftest.py
+
+# Audit one or more PRs' claude[bot] MEDIUM+ inline findings for a disposition
+# trace (a `Bot-findings-adjudicated:` marker — see CONTRIBUTING.md). ADVISORY:
+# run during the merge disposition sweep to catch the #283 class (a MEDIUM+
+# finding that reached merge with no terminal state). Needs `gh` auth.
+[group('meta')]
+[doc('Audit PRs for un-adjudicated claude[bot] MEDIUM+ findings (#335)')]
+review-disposition *prs:
+    python3 scripts/check_review_disposition.py {{prs}}
+
+# Self-test the review-disposition harvester — its parsers + assessor, pinned to
+# the real claude[bot] comment shapes. A regex regression is a silent
+# disposition hole (finds nothing → false "no drops"). Pure Python, no network.
+[group('meta')]
+[doc('Self-test the review-disposition harvester (parsers + assessor)')]
+review-disposition-selftest:
+    python3 scripts/check_review_disposition_selftest.py
