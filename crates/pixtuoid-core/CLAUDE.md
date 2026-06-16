@@ -98,10 +98,13 @@ src/
 │                       codex_home() (honors CODEX_HOME when it points at an existing dir, else
 │                       <home>/.codex — codex's own precedence; routes BOTH CodexSource::
 │                       default_paths and the installer's config.toml path, so they can't disagree) +
-│                       codewhale_home() (HOME-FIRST then USERPROFILE on Windows — the OPPOSITE of
-│                       user_home(), mirroring CodeWhale's own effective_home_dir; a HOME-exporting
-│                       Windows shell (Git Bash/MSYS2) would otherwise have the installer write hooks
-│                       where CodeWhale never reads → installed-but-no-sprite. Installer-only consumer)
+│                       home_first_dir() (HOME-FIRST then USERPROFILE on Windows — the OPPOSITE of
+│                       user_home(); the shared resolver for the CLIs that hand-roll $HOME-first home
+│                       resolution: CodeWhale (config::effective_home_dir) + OpenClaw (infra/home-dir.ts
+│                       resolveRawOsHomeDir). A HOME-exporting Windows shell (Git Bash/MSYS2) would
+│                       otherwise have the installer write hooks where the CLI never reads →
+│                       installed-but-no-sprite. Installer-only consumers; every OTHER CLI uses a
+│                       USERPROFILE-first stdlib home so they correctly use user_home())
 ├── pose/               pure state→pose derivation + wander state machine (no terminal deps);
 │                       mod.rs (production) + tests.rs sibling.
 │                       ENTRY_ANIMATION_MS is demoted: not a duration knob, only the spawn-window

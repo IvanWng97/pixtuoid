@@ -73,13 +73,45 @@ const PACKAGE: &str = r#"{
 }
 "#;
 
-/// OpenClaw's home: `OPENCLAW_STATE_DIR` if set, else `~/.openclaw` (errs when no
-/// home resolves — same contract as the other home-anchored targets).
+/// OpenClaw's state dir (holds `openclaw.json` + `plugins/`), mirroring its own
+/// `config/paths.ts::resolveStateDir` + `infra/home-dir.ts::resolveRawOsHomeDir`:
+/// the `OPENCLAW_STATE_DIR` override wins; else the state dir is
+/// `<effective-home>/.openclaw`, where the effective home is `OPENCLAW_HOME`, then
+/// **`$HOME`, then `%USERPROFILE%`** — i.e. **HOME-FIRST** (like CodeWhale), NOT
+/// pixtuoid's generic `USERPROFILE`-first `io::home_relative`. A Windows user who
+/// exports `HOME` (Git Bash / MSYS2 / Cygwin) has the gateway read
+/// `%HOME%\.openclaw\`, so writing our plugin/config to `%USERPROFILE%\.openclaw\`
+/// would leave it where the gateway never loads it (no lobster). The HOME-vs-
+/// USERPROFILE half is shared with CodeWhale via [`pixtuoid_core::platform::home_first_dir`];
+/// the `OPENCLAW_HOME` override layers on top (OpenClaw-specific).
 fn openclaw_home() -> Result<PathBuf> {
-    if let Some(d) = io::nonempty_env("OPENCLAW_STATE_DIR") {
+    resolve_openclaw_home(
+        io::nonempty_env("OPENCLAW_STATE_DIR"),
+        io::nonempty_env("OPENCLAW_HOME"),
+        pixtuoid_core::platform::home_first_dir(),
+    )
+}
+
+/// Pure core for [`openclaw_home`] — every env input + the resolved OS home are
+/// injected so the precedence is unit-testable without env mutation.
+fn resolve_openclaw_home(
+    state_dir_env: Option<String>,
+    openclaw_home_env: Option<String>,
+    os_home_first: Option<PathBuf>,
+) -> Result<PathBuf> {
+    if let Some(d) = state_dir_env {
         return Ok(PathBuf::from(d));
     }
-    io::home_relative_checked(".openclaw")
+    let home = openclaw_home_env
+        .map(PathBuf::from)
+        .or(os_home_first)
+        .ok_or_else(|| {
+            anyhow!(
+                "cannot resolve OpenClaw's home (OPENCLAW_STATE_DIR/OPENCLAW_HOME/HOME/USERPROFILE \
+                 unset); pass --config <path>"
+            )
+        })?;
+    Ok(home.join(".openclaw"))
 }
 
 /// The config file we merge into: `<openclaw-home>/openclaw.json`.
@@ -261,6 +293,48 @@ pub fn verify_schema(content: &str) -> crate::install::verify::SchemaParse {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn openclaw_home_state_dir_override_wins_outright() {
+        // OPENCLAW_STATE_DIR is OpenClaw's own state-dir override (resolveStateDir)
+        // — it points AT the dir (no `.openclaw` join) and beats home + override.
+        let p = resolve_openclaw_home(
+            Some("/custom/state".into()),
+            Some("/ignored/home".into()),
+            Some(PathBuf::from("/ignored/oshome")),
+        )
+        .unwrap();
+        assert_eq!(p, PathBuf::from("/custom/state"));
+    }
+
+    #[test]
+    fn openclaw_home_honors_openclaw_home_then_os_home_first() {
+        // No state-dir override → OPENCLAW_HOME wins over the OS home (mirrors
+        // resolveEffectiveHomeDir honoring OPENCLAW_HOME before OS homes), and the
+        // `.openclaw` state dir is joined onto it.
+        let p = resolve_openclaw_home(
+            None,
+            Some(r"D:\claw".into()),
+            Some(PathBuf::from(r"C:\Users\me")),
+        )
+        .unwrap();
+        assert_eq!(p, PathBuf::from(r"D:\claw").join(".openclaw"));
+        // No OPENCLAW_HOME → the OS HOME-first home (home_first_dir) is used.
+        let p = resolve_openclaw_home(None, None, Some(PathBuf::from(r"C:\Users\me"))).unwrap();
+        assert_eq!(p, PathBuf::from(r"C:\Users\me").join(".openclaw"));
+    }
+
+    #[test]
+    fn openclaw_home_errors_when_nothing_resolves() {
+        // No override, no OPENCLAW_HOME, and home_first_dir returned None (no
+        // HOME/USERPROFILE) → the actionable "pass --config" error, like the other
+        // home-anchored targets.
+        let err = resolve_openclaw_home(None, None, None).unwrap_err();
+        assert!(
+            err.to_string().contains("pass --config"),
+            "unresolvable home must surface the actionable error: {err}"
+        );
+    }
 
     /// Internal drift defense (#3): the events we REGISTER (the plugin's HOOKS
     /// array) must equal the events we DECODE (`decode_openclaw_hook_payload`
