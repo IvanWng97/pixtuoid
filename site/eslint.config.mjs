@@ -1,4 +1,7 @@
-// Flat config: JS + TypeScript + Astro (with a11y), Prettier-compatible.
+// Flat config: JS + TypeScript + Astro, Prettier-compatible.
+// Accessibility is enforced at runtime against the built pages by Lighthouse CI
+// (lighthouserc.json), not statically here — eslint-plugin-jsx-a11y was dropped
+// because its latest release (6.10.2) caps at eslint 9 and blocked eslint 10.
 import js from '@eslint/js';
 import globals from 'globals';
 import tseslint from 'typescript-eslint';
@@ -10,7 +13,6 @@ export default [
   js.configs.recommended,
   ...tseslint.configs.recommended,
   ...astro.configs.recommended,
-  ...astro.configs['jsx-a11y-recommended'],
   {
     languageOptions: {
       globals: { ...globals.browser, __PIXTUOID_VERSION__: 'readonly' },

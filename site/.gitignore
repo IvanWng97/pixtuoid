@@ -4,6 +4,8 @@ dist/
 node_modules/
 # astro
 .astro/
+# lighthouse ci reports
+.lighthouseci/
 # env
 .env
 .env.production

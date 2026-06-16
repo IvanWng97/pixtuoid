@@ -15,7 +15,8 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "verify": "npm run format:check && npm run lint && npm run check && npm run build"
+    "verify": "npm run format:check && npm run lint && npm run check && npm run build",
+    "lighthouse": "lhci autorun"
   },
   "dependencies": {
     "@astrojs/sitemap": "^3.7.3",
@@ -26,12 +27,12 @@
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.4",
-    "@eslint/js": "^9.39.0",
+    "@eslint/js": "^10.0.1",
+    "@lhci/cli": "^0.15.1",
     "@types/node": "^22.19.21",
-    "eslint": "^9.39.0",
+    "eslint": "^10.5.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-astro": "^1.7.0",
-    "eslint-plugin-jsx-a11y": "^6.10.2",
     "globals": "^17.6.0",
     "mermaid": "^11.15.0",
     "playwright": "^1.61.0",
