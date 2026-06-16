@@ -77,18 +77,19 @@ const CODEWHALE_EVENTS: &[(&str, bool)] = &[
 ///    config is `.deepseek/config.toml` would make CodeWhale PREFER our
 ///    near-empty file and drop the user's provider/key config).
 ///
-/// The home dir comes from [`pixtuoid_core::platform::codewhale_home`] —
+/// The home dir comes from [`pixtuoid_core::platform::home_first_dir`] —
 /// `HOME`-FIRST, then `USERPROFILE` on Windows — NOT pixtuoid's generic
-/// `USERPROFILE`-first `io::home_relative_checked`: a Windows user who exports
-/// `HOME` (Git Bash / MSYS2 / Cygwin) has CodeWhale read `%HOME%\.codewhale\
-/// config.toml`, so writing to `%USERPROFILE%\.codewhale\` would leave the hooks
-/// in a file CodeWhale never loads (installed, but no sprite). See the
-/// `codewhale_home` doc for the WHY.
+/// `USERPROFILE`-first `io::home_relative_checked`: CodeWhale's own
+/// `effective_home_dir` is `$HOME ?? dirs::home_dir()`, so a Windows user who
+/// exports `HOME` (Git Bash / MSYS2 / Cygwin) has CodeWhale read
+/// `%HOME%\.codewhale\config.toml`; writing to `%USERPROFILE%\.codewhale\` would
+/// leave the hooks in a file CodeWhale never loads (installed, but no sprite). See
+/// the `home_first_dir` doc for the WHY (OpenClaw shares this resolver).
 pub fn default_config_path() -> Result<PathBuf> {
     resolve_config_path(
         io::nonempty_env("CODEWHALE_CONFIG_PATH"),
         io::nonempty_env("DEEPSEEK_CONFIG_PATH"),
-        pixtuoid_core::platform::codewhale_home(),
+        pixtuoid_core::platform::home_first_dir(),
         |p| p.exists(),
     )
 }
@@ -127,10 +128,10 @@ fn resolve_config_path(
 /// `~/.deepseek` layout puts config elsewhere — so probe the state dirs
 /// (created by CodeWhale on first launch) rather than the file we write.
 /// Resolves the home dir the SAME way CodeWhale does (HOME-first) via
-/// [`pixtuoid_core::platform::codewhale_home`], so a `HOME`-exporting Windows
+/// [`pixtuoid_core::platform::home_first_dir`], so a `HOME`-exporting Windows
 /// shell probes the dir CodeWhale actually uses.
 pub fn detect_installed() -> bool {
-    pixtuoid_core::platform::codewhale_home()
+    pixtuoid_core::platform::home_first_dir()
         .is_some_and(|home| home.join(".codewhale").exists() || home.join(".deepseek").exists())
 }
 

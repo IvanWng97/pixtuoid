@@ -197,6 +197,51 @@ pub fn footer_warning(source_death: Option<&str>, drifted: &[String]) -> Option<
     Some(format!("decode drift: {prefixes} — run `pixtuoid doctor`"))
 }
 
+/// Windows-only advisory for the "installed but no sprite" path-split class
+/// (CodeWhale / OpenClaw, #census-266-style): when `HOME` is set and differs from
+/// `%USERPROFILE%`, a source whose CLI resolves its home differently than pixtuoid
+/// did may have its hooks written where the CLI never reads. pixtuoid already
+/// mirrors the HOME-first CLIs (`platform::home_first_dir`), so this is a SAFETY
+/// NET — it surfaces the one host condition under which any residual resolver
+/// mismatch (a closed-source CLI verified only by convention, or a future source)
+/// would bite, and points a troubleshooting user straight at it. `None` on
+/// non-Windows or when the two homes are equivalent (the common case, where
+/// nothing can diverge). Pure (env + platform injected) so it unit-tests on any
+/// host.
+pub fn home_split_advisory(
+    is_windows: bool,
+    home: Option<&str>,
+    userprofile: Option<&str>,
+) -> Option<String> {
+    if !is_windows {
+        return None;
+    }
+    let home = home.map(str::trim).filter(|s| !s.is_empty())?;
+    let up = userprofile.map(str::trim).filter(|s| !s.is_empty())?;
+    if win_path_eq(home, up) {
+        return None;
+    }
+    // Sanitized: HOME/USERPROFILE are user-controlled env values surfaced in the
+    // report (same discipline as the config-warning lines).
+    Some(format!(
+        "⚠ Windows: HOME ({}) differs from USERPROFILE ({}). pixtuoid resolves \
+         CodeWhale/OpenClaw HOME-first to match their CLIs — but if a source's \
+         sprite is missing, confirm its hook config landed under the home that \
+         CLI actually reads.",
+        sanitize(home),
+        sanitize(up)
+    ))
+}
+
+/// Windows path equivalence for the home-split check: case-insensitive (NTFS),
+/// `\`/`/` agnostic, trailing-separator agnostic. A `/c/Users/me`-vs-`C:\Users\me`
+/// split is a REAL divergence (different roots), so this only collapses cosmetic
+/// differences, never a POSIX-form HOME vs a native USERPROFILE.
+fn win_path_eq(a: &str, b: &str) -> bool {
+    let norm = |s: &str| s.replace('\\', "/").trim_end_matches('/').to_lowercase();
+    norm(a) == norm(b)
+}
+
 /// Per-source diagnostics rollup — the SHARED source of truth the Connection
 /// panel (the board), the boot preflight, and `run` (the CLI report) all read,
 /// so the surfaces can't drift apart and no check runs twice (the
@@ -575,6 +620,15 @@ pub fn run(log_path: &std::path::Path) -> anyhow::Result<()> {
     } else {
         out.push_str(" · ✓ no decode drift\n");
     }
+    // Windows safety net: a HOME≠USERPROFILE shell is the one host condition under
+    // which a CLI's home-resolution could land hooks where pixtuoid didn't write.
+    if let Some(adv) = home_split_advisory(
+        cfg!(windows),
+        std::env::var("HOME").ok().as_deref(),
+        std::env::var("USERPROFILE").ok().as_deref(),
+    ) {
+        out.push_str(&format!("\n{adv}\n"));
+    }
     print!("{out}");
     Ok(())
 }
@@ -617,6 +671,35 @@ mod tests {
         tracing::subscriber::with_default(sub, f);
         let bytes = buf.0.lock().unwrap().clone();
         String::from_utf8(bytes).unwrap()
+    }
+
+    #[test]
+    fn home_split_advisory_fires_only_on_windows_with_a_real_home_split() {
+        // Windows + HOME≠USERPROFILE → advisory (the bug's host condition).
+        let a = home_split_advisory(true, Some(r"C:\msys\home\me"), Some(r"C:\Users\me"));
+        assert!(a.is_some());
+        let a = a.unwrap();
+        assert!(a.contains("HOME") && a.contains("USERPROFILE") && a.contains("sprite"));
+
+        // Non-Windows → never (Unix uses HOME on both sides, no split possible).
+        assert!(home_split_advisory(false, Some("/home/a"), Some("/home/b")).is_none());
+
+        // Windows but HOME unset / empty → nothing can diverge.
+        assert!(home_split_advisory(true, None, Some(r"C:\Users\me")).is_none());
+        assert!(home_split_advisory(true, Some("  "), Some(r"C:\Users\me")).is_none());
+        // USERPROFILE unset → no comparison to make.
+        assert!(home_split_advisory(true, Some(r"C:\Users\me"), None).is_none());
+    }
+
+    #[test]
+    fn home_split_advisory_ignores_cosmetic_path_differences() {
+        // Same dir, different slash / case / trailing sep → NOT a split.
+        assert!(home_split_advisory(true, Some(r"C:\Users\Me"), Some(r"c:/users/me/")).is_none());
+        // But a POSIX-form HOME vs a native USERPROFILE IS a real split (Git Bash).
+        assert!(home_split_advisory(true, Some("/c/Users/me"), Some(r"C:\Users\me")).is_some());
+        // win_path_eq directly.
+        assert!(win_path_eq(r"C:\a\b", "c:/a/b/"));
+        assert!(!win_path_eq("/c/a/b", r"C:\a\b"));
     }
 
     #[test]
