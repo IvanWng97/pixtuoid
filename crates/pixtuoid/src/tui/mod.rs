@@ -736,10 +736,21 @@ pub async fn run_tui(
                                     // Cached connection facet: FS reads + the
                                     // connected-set snapshot happen HERE (on open)
                                     // + after each toggle, never per frame.
-                                    connection_ui.rows = connection::build_rows(
-                                        &connected.snapshot(),
-                                        &read_conn_log(),
-                                    );
+                                    // Off the executor: `build_rows` does FS probes
+                                    // + per-source `diagnose` config reads, and the
+                                    // toggle sites below take an advisory flock +
+                                    // fsync. `block_in_place` yields this tokio
+                                    // worker for the duration so the input/render
+                                    // tasks aren't starved under lock contention
+                                    // (census #266 escape #1; valid here because
+                                    // run_tui runs on the multi-thread runtime). All
+                                    // 5 panel-I/O sites are wrapped the same way.
+                                    connection_ui.rows = tokio::task::block_in_place(|| {
+                                        connection::build_rows(
+                                            &connected.snapshot(),
+                                            &read_conn_log(),
+                                        )
+                                    });
                                     connection_ui.selected = connection::move_selection(
                                         &connection_ui.rows,
                                         connection_ui.selected,
@@ -788,17 +799,26 @@ pub async fn run_tui(
                                         // reversible): flip the flag, open the live
                                         // gate, and install hooks for richer signal.
                                         connection::ConnState::Disconnected => {
-                                            connection_ui.last_result = Some(connect_source(
-                                                &config_path,
-                                                &connected,
-                                                source_id,
-                                                target,
-                                                name,
-                                            ));
-                                            connection_ui.rows = connection::build_rows(
-                                                &connected.snapshot(),
-                                                &read_conn_log(),
-                                            );
+                                            // block_in_place: connect_source takes a
+                                            // flock + fsync + FS reads (see the open
+                                            // site) — keep it off the executor.
+                                            connection_ui.last_result =
+                                                Some(tokio::task::block_in_place(|| {
+                                                    connect_source(
+                                                        &config_path,
+                                                        &connected,
+                                                        source_id,
+                                                        target,
+                                                        name,
+                                                    )
+                                                }));
+                                            connection_ui.rows =
+                                                tokio::task::block_in_place(|| {
+                                                    connection::build_rows(
+                                                        &connected.snapshot(),
+                                                        &read_conn_log(),
+                                                    )
+                                                });
                                         }
                                         connection::ConnState::NoCli => {
                                             connection_ui.last_result = Some(hint);
@@ -813,17 +833,24 @@ pub async fn run_tui(
                                         .get(idx)
                                         .map(|r| (r.target, r.source_id, r.display_name));
                                     if let Some((target, source_id, name)) = action {
-                                        connection_ui.last_result = Some(disconnect_source(
-                                            &config_path,
-                                            &connected,
-                                            source_id,
-                                            target,
-                                            name,
-                                        ));
-                                        connection_ui.rows = connection::build_rows(
-                                            &connected.snapshot(),
-                                            &read_conn_log(),
-                                        );
+                                        // block_in_place: uninstall_target takes a
+                                        // flock + fsync + FS reads — off the executor.
+                                        connection_ui.last_result =
+                                            Some(tokio::task::block_in_place(|| {
+                                                disconnect_source(
+                                                    &config_path,
+                                                    &connected,
+                                                    source_id,
+                                                    target,
+                                                    name,
+                                                )
+                                            }));
+                                        connection_ui.rows = tokio::task::block_in_place(|| {
+                                            connection::build_rows(
+                                                &connected.snapshot(),
+                                                &read_conn_log(),
+                                            )
+                                        });
                                     }
                                 }
                                 connection_ui.confirm = None;
