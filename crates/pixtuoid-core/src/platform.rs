@@ -67,6 +67,41 @@ fn resolve_codex_home(codex_home_env: Option<String>, home: String) -> PathBuf {
     PathBuf::from(home).join(".codex")
 }
 
+/// CodeWhale's home dir, mirroring its OWN `config::effective_home_dir`:
+/// `HOME`-FIRST, then `dirs::home_dir()` (which is `%USERPROFILE%` on Windows).
+/// This is the OPPOSITE precedence to pixtuoid's generic [`user_home`], which is
+/// `USERPROFILE`-first on Windows (so the JSONL watcher never joins onto Git
+/// Bash's POSIX-form `HOME`). The divergence is load-bearing: a Windows user who
+/// exports `HOME` (Git Bash / MSYS2 / Cygwin) has CodeWhale read its config under
+/// `%HOME%\.codewhale\`, so pixtuoid writing hooks to `%USERPROFILE%\.codewhale\`
+/// would land them in a file the CLI never loads — installed, but no sprite. The
+/// installer resolves the CodeWhale config path through THIS, so the hooks reach
+/// the file CodeWhale actually reads on every shell. `None` when nothing resolves
+/// (the installer maps it to its "pass --config" error). Hook-only source, so the
+/// installer is the only consumer (no watcher counterpart, unlike [`codex_home`]).
+pub fn codewhale_home() -> Option<PathBuf> {
+    resolve_codewhale_home(
+        cfg!(windows),
+        std::env::var("HOME").ok(),
+        std::env::var("USERPROFILE").ok(),
+    )
+    .map(PathBuf::from)
+}
+
+/// Pure precedence core (`HOME`-first, then `USERPROFILE` on Windows), separated
+/// so the Windows arm is unit-testable on any host. Empty/whitespace counts as
+/// unset. Unix with no `HOME` → `None`: we deliberately don't reach for
+/// `dirs::home_dir`'s getpwuid fallback (HOME is effectively always set on Unix,
+/// and the installer already errors helpfully when no home resolves).
+fn resolve_codewhale_home(
+    windows: bool,
+    home: Option<String>,
+    userprofile: Option<String>,
+) -> Option<String> {
+    let nonempty = |v: Option<String>| v.filter(|s| !s.trim().is_empty());
+    nonempty(home).or_else(|| if windows { nonempty(userprofile) } else { None })
+}
+
 /// Pure mapping of Go's `os.UserConfigDir()` for the platforms we ship, with
 /// the OS and env values injected so every arm (incl. macOS) is unit-testable
 /// on any host — the runtime `cfg!(target_os)` if-else couldn't test its
@@ -266,6 +301,61 @@ mod tests {
             tmp
         );
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn codewhale_home_is_home_first_then_userprofile_on_windows() {
+        // HOME wins on Windows when set — this is the WHOLE point: CodeWhale's
+        // effective_home_dir is HOME-first, so the installer must mirror it.
+        assert_eq!(
+            resolve_codewhale_home(true, s(r"C:\Users\me"), s(r"C:\Users\other")),
+            s(r"C:\Users\me")
+        );
+        // Windows, HOME unset → USERPROFILE (== dirs::home_dir()), which is why
+        // the native cmd/PowerShell case (HOME unset) was always correct.
+        assert_eq!(
+            resolve_codewhale_home(true, None, s(r"C:\Users\me")),
+            s(r"C:\Users\me")
+        );
+        // empty/whitespace HOME is unset → falls to USERPROFILE on Windows.
+        assert_eq!(
+            resolve_codewhale_home(true, s("  "), s(r"C:\Users\me")),
+            s(r"C:\Users\me")
+        );
+        // neither set → None (installer maps to the "pass --config" error).
+        assert_eq!(resolve_codewhale_home(true, None, None), None);
+    }
+
+    #[test]
+    fn codewhale_home_is_home_only_on_unix() {
+        // Unix: HOME only; USERPROFILE is ignored, and no HOME → None.
+        assert_eq!(
+            resolve_codewhale_home(false, s("/Users/me"), s(r"C:\ignored")),
+            s("/Users/me")
+        );
+        assert_eq!(resolve_codewhale_home(false, None, s(r"C:\ignored")), None);
+        assert_eq!(resolve_codewhale_home(false, s(""), None), None);
+    }
+
+    #[test]
+    fn codewhale_home_diverges_from_generic_user_home_on_windows_with_home_set() {
+        // The regression guard for the actual Windows "installed but no sprite"
+        // bug: with HOME set on Windows, the GENERIC resolver picks USERPROFILE
+        // but CodeWhale (and therefore codewhale_home) picks HOME. The CodeWhale
+        // installer MUST use the latter or the hooks land in a file CodeWhale
+        // never reads.
+        let home = s("/c/Users/me");
+        let userprofile = s(r"C:\Users\me");
+        assert_eq!(
+            resolve_user_home_opt(true, userprofile.clone(), home.clone()),
+            userprofile,
+            "generic resolver is USERPROFILE-first on Windows"
+        );
+        assert_eq!(
+            resolve_codewhale_home(true, home.clone(), userprofile),
+            home,
+            "CodeWhale resolver is HOME-first — the two MUST diverge here"
+        );
     }
 
     #[test]
