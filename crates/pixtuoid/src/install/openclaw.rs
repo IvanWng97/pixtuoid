@@ -83,21 +83,27 @@ const PACKAGE: &str = r#"{
 /// `%HOME%\.openclaw\`, so writing our plugin/config to `%USERPROFILE%\.openclaw\`
 /// would leave it where the gateway never loads it (no lobster). The HOME-vs-
 /// USERPROFILE half is shared with CodeWhale via [`pixtuoid_core::platform::home_first_dir`];
-/// the `OPENCLAW_HOME` override layers on top (OpenClaw-specific).
-fn openclaw_home() -> Result<PathBuf> {
-    resolve_openclaw_home(
+/// the `OPENCLAW_HOME` override layers on top (OpenClaw-specific). The legacy
+/// pre-rebrand `.clawdbot` dir is preferred when `.openclaw` is absent and
+/// `.clawdbot` exists (OpenClaw's `resolveStateDir` legacy fallback — the same
+/// "don't shadow the user's real config" rule as CodeWhale's `.deepseek`).
+fn openclaw_state_dir() -> Result<PathBuf> {
+    resolve_openclaw_state_dir(
         io::nonempty_env("OPENCLAW_STATE_DIR"),
         io::nonempty_env("OPENCLAW_HOME"),
         pixtuoid_core::platform::home_first_dir(),
+        |p| p.exists(),
     )
 }
 
-/// Pure core for [`openclaw_home`] — every env input + the resolved OS home are
-/// injected so the precedence is unit-testable without env mutation.
-fn resolve_openclaw_home(
+/// Pure core for [`openclaw_state_dir`] — every env input, the resolved OS home,
+/// and the existence check are injected so the precedence is unit-testable without
+/// env/FS mutation.
+fn resolve_openclaw_state_dir(
     state_dir_env: Option<String>,
     openclaw_home_env: Option<String>,
     os_home_first: Option<PathBuf>,
+    exists: impl Fn(&Path) -> bool,
 ) -> Result<PathBuf> {
     if let Some(d) = state_dir_env {
         return Ok(PathBuf::from(d));
@@ -111,24 +117,70 @@ fn resolve_openclaw_home(
                  unset); pass --config <path>"
             )
         })?;
-    Ok(home.join(".openclaw"))
+    let modern = home.join(".openclaw");
+    if exists(&modern) {
+        return Ok(modern);
+    }
+    let legacy = home.join(".clawdbot");
+    if exists(&legacy) {
+        return Ok(legacy);
+    }
+    Ok(modern)
 }
 
-/// The config file we merge into: `<openclaw-home>/openclaw.json`.
+/// The config file we merge into, mirroring OpenClaw's `resolveConfigPath`: the
+/// `OPENCLAW_CONFIG_PATH` override (a FULL config-file path, assumed absolute — see
+/// the CodeWhale note on why a relative override can't be reconciled across
+/// processes) wins; else prefer an existing `openclaw.json` in the state dir, then
+/// the legacy `clawdbot.json`, else `openclaw.json` for a fresh install (never
+/// shadow a real `clawdbot.json` the gateway still reads).
 pub fn default_config_path() -> Result<PathBuf> {
-    Ok(openclaw_home()?.join("openclaw.json"))
+    Ok(resolve_openclaw_config_path(
+        io::nonempty_env("OPENCLAW_CONFIG_PATH"),
+        openclaw_state_dir()?,
+        |p| p.exists(),
+    ))
 }
 
-/// The wholly-owned plugin dir: `<openclaw-home>/plugins/pixtuoid`.
+/// Pure core for [`default_config_path`] — the override + resolved state dir +
+/// existence check injected.
+fn resolve_openclaw_config_path(
+    config_path_env: Option<String>,
+    state_dir: PathBuf,
+    exists: impl Fn(&Path) -> bool,
+) -> PathBuf {
+    if let Some(p) = config_path_env {
+        return PathBuf::from(p);
+    }
+    let modern = state_dir.join("openclaw.json");
+    if exists(&modern) {
+        return modern;
+    }
+    let legacy = state_dir.join("clawdbot.json");
+    if exists(&legacy) {
+        return legacy;
+    }
+    modern
+}
+
+/// The wholly-owned plugin dir: `<state-dir>/plugins/pixtuoid`.
 fn plugin_dir() -> Result<PathBuf> {
-    Ok(openclaw_home()?.join("plugins").join(PLUGIN_ID))
+    Ok(openclaw_state_dir()?.join("plugins").join(PLUGIN_ID))
 }
 
-/// Auto-detect probe: is OpenClaw present (its home dir exists), so the
+/// Auto-detect probe: is OpenClaw present (its state dir exists), so the
 /// Sources panel OFFERS it? Probe OpenClaw's OWN dir, NOT our plugin/config —
 /// keying on our artifact would chicken-and-egg (opencode/Reasonix rationale).
+/// With `OPENCLAW_STATE_DIR` set that dir IS the state dir; else probe both the
+/// modern `.openclaw` and the legacy `.clawdbot` under the effective home.
 pub fn detect_installed() -> bool {
-    openclaw_home().map(|d| d.exists()).unwrap_or(false)
+    if let Some(d) = io::nonempty_env("OPENCLAW_STATE_DIR") {
+        return PathBuf::from(d).exists();
+    }
+    let home = io::nonempty_env("OPENCLAW_HOME")
+        .map(PathBuf::from)
+        .or_else(pixtuoid_core::platform::home_first_dir);
+    home.is_some_and(|h| h.join(".openclaw").exists() || h.join(".clawdbot").exists())
 }
 
 /// The shim's absolute path, baked into the plugin (the gateway runs it under
@@ -295,41 +347,90 @@ mod tests {
     use super::*;
 
     #[test]
-    fn openclaw_home_state_dir_override_wins_outright() {
+    fn openclaw_state_dir_override_wins_outright() {
         // OPENCLAW_STATE_DIR is OpenClaw's own state-dir override (resolveStateDir)
-        // — it points AT the dir (no `.openclaw` join) and beats home + override.
-        let p = resolve_openclaw_home(
+        // — it points AT the dir (no `.openclaw` join) and beats home + override;
+        // `exists` is never consulted.
+        let p = resolve_openclaw_state_dir(
             Some("/custom/state".into()),
             Some("/ignored/home".into()),
             Some(PathBuf::from("/ignored/oshome")),
+            |_| panic!("exists() must not be consulted when OPENCLAW_STATE_DIR is set"),
         )
         .unwrap();
         assert_eq!(p, PathBuf::from("/custom/state"));
     }
 
     #[test]
-    fn openclaw_home_honors_openclaw_home_then_os_home_first() {
+    fn openclaw_state_dir_honors_openclaw_home_then_os_home_first() {
         // No state-dir override → OPENCLAW_HOME wins over the OS home (mirrors
         // resolveEffectiveHomeDir honoring OPENCLAW_HOME before OS homes), and the
-        // `.openclaw` state dir is joined onto it.
-        let p = resolve_openclaw_home(
+        // `.openclaw` state dir is joined onto it (no legacy → modern).
+        let p = resolve_openclaw_state_dir(
             None,
             Some(r"D:\claw".into()),
             Some(PathBuf::from(r"C:\Users\me")),
+            |_| false,
         )
         .unwrap();
         assert_eq!(p, PathBuf::from(r"D:\claw").join(".openclaw"));
         // No OPENCLAW_HOME → the OS HOME-first home (home_first_dir) is used.
-        let p = resolve_openclaw_home(None, None, Some(PathBuf::from(r"C:\Users\me"))).unwrap();
+        let p =
+            resolve_openclaw_state_dir(None, None, Some(PathBuf::from(r"C:\Users\me")), |_| false)
+                .unwrap();
         assert_eq!(p, PathBuf::from(r"C:\Users\me").join(".openclaw"));
     }
 
     #[test]
-    fn openclaw_home_errors_when_nothing_resolves() {
+    fn openclaw_state_dir_prefers_legacy_clawdbot_only_when_modern_absent() {
+        // Mirror resolveStateDir's legacy fallback: .openclaw wins when it exists;
+        // .clawdbot is used ONLY when .openclaw is absent and .clawdbot exists; else
+        // a fresh install lands in .openclaw (never shadow a real .clawdbot).
+        let home = PathBuf::from("/home/u");
+        let modern = home.join(".openclaw");
+        let legacy = home.join(".clawdbot");
+        // .openclaw exists → .openclaw (even if .clawdbot also exists).
+        let p =
+            resolve_openclaw_state_dir(None, None, Some(home.clone()), |q| q == modern).unwrap();
+        assert_eq!(p, modern);
+        // only .clawdbot exists → .clawdbot.
+        let p =
+            resolve_openclaw_state_dir(None, None, Some(home.clone()), |q| q == legacy).unwrap();
+        assert_eq!(p, legacy);
+        // neither exists → .openclaw (fresh install).
+        let p = resolve_openclaw_state_dir(None, None, Some(home), |_| false).unwrap();
+        assert_eq!(p, modern);
+    }
+
+    #[test]
+    fn openclaw_config_path_override_and_legacy_file_preference() {
+        let state = PathBuf::from("/home/u/.openclaw");
+        let modern = state.join("openclaw.json");
+        let legacy = state.join("clawdbot.json");
+        // OPENCLAW_CONFIG_PATH wins verbatim — exists() never consulted.
+        let p = resolve_openclaw_config_path(Some("/custom/oc.json".into()), state.clone(), |_| {
+            panic!("exists() must not be consulted when OPENCLAW_CONFIG_PATH is set")
+        });
+        assert_eq!(p, PathBuf::from("/custom/oc.json"));
+        // No override: prefer existing openclaw.json, then legacy clawdbot.json,
+        // else openclaw.json for a fresh install.
+        assert_eq!(
+            resolve_openclaw_config_path(None, state.clone(), |q| q == modern),
+            modern
+        );
+        assert_eq!(
+            resolve_openclaw_config_path(None, state.clone(), |q| q == legacy),
+            legacy
+        );
+        assert_eq!(resolve_openclaw_config_path(None, state, |_| false), modern);
+    }
+
+    #[test]
+    fn openclaw_state_dir_errors_when_nothing_resolves() {
         // No override, no OPENCLAW_HOME, and home_first_dir returned None (no
         // HOME/USERPROFILE) → the actionable "pass --config" error, like the other
         // home-anchored targets.
-        let err = resolve_openclaw_home(None, None, None).unwrap_err();
+        let err = resolve_openclaw_state_dir(None, None, None, |_| false).unwrap_err();
         assert!(
             err.to_string().contains("pass --config"),
             "unresolvable home must surface the actionable error: {err}"

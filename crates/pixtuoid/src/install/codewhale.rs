@@ -68,39 +68,54 @@ const CODEWHALE_EVENTS: &[(&str, bool)] = &[
 ];
 
 /// The config CodeWhale actually reads, mirroring its own
-/// `config::resolve_config_path` + `default_config_path`:
+/// `config::resolve_config_path` + `default_config_path` + `codewhale_home`:
 /// 1. the `CODEWHALE_CONFIG_PATH` / `DEEPSEEK_CONFIG_PATH` env overrides (each a
 ///    FULL config-file path) win, in that order;
-/// 2. else prefer `<home>/.codewhale/config.toml`, the legacy
+/// 2. else the home base is `CODEWHALE_HOME` (CodeWhale's `codewhale_home` honors
+///    it FIRST, before its OS home), else [`pixtuoid_core::platform::home_first_dir`];
+/// 3. under that home, prefer `<home>/.codewhale/config.toml`, the legacy
 ///    `<home>/.deepseek/config.toml` when only that exists, else the modern path
 ///    for a fresh install (writing a fresh `.codewhale/config.toml` when the real
-///    config is `.deepseek/config.toml` would make CodeWhale PREFER our
-///    near-empty file and drop the user's provider/key config).
+///    config is `.deepseek/config.toml` would make CodeWhale PREFER our near-empty
+///    file and drop the user's provider/key config).
 ///
-/// The home dir comes from [`pixtuoid_core::platform::home_first_dir`] —
-/// `HOME`-FIRST, then `USERPROFILE` on Windows — NOT pixtuoid's generic
-/// `USERPROFILE`-first `io::home_relative_checked`: CodeWhale's own
-/// `effective_home_dir` is `$HOME ?? dirs::home_dir()`, so a Windows user who
-/// exports `HOME` (Git Bash / MSYS2 / Cygwin) has CodeWhale read
+/// The OS home comes from `home_first_dir` — `HOME`-FIRST, then `USERPROFILE` on
+/// Windows — NOT pixtuoid's generic `USERPROFILE`-first `io::home_relative_checked`:
+/// CodeWhale's own `effective_home_dir` is `$HOME ?? dirs::home_dir()`, so a
+/// Windows user who exports `HOME` (Git Bash / MSYS2 / Cygwin) has CodeWhale read
 /// `%HOME%\.codewhale\config.toml`; writing to `%USERPROFILE%\.codewhale\` would
 /// leave the hooks in a file CodeWhale never loads (installed, but no sprite). See
-/// the `home_first_dir` doc for the WHY (OpenClaw shares this resolver).
+/// the `home_first_dir` doc for the WHY (OpenClaw shares that resolver).
+///
+/// SCOPE: the `*_CONFIG_PATH` overrides are honored verbatim and ASSUMED ABSOLUTE
+/// (the documented contract). A RELATIVE override is deliberately NOT made to
+/// agree with CodeWhale's `normalize_config_file_path` (which resolves it against
+/// `current_dir`): the installer and CodeWhale run in DIFFERENT working dirs, so a
+/// cwd-relative value can't be reconciled between the two processes — only an
+/// absolute override is well-defined. (Upstream additionally rejects `..`; we keep
+/// the value verbatim — a user-set env override is trusted input.)
 pub fn default_config_path() -> Result<PathBuf> {
     resolve_config_path(
         io::nonempty_env("CODEWHALE_CONFIG_PATH"),
         io::nonempty_env("DEEPSEEK_CONFIG_PATH"),
+        io::nonempty_env("CODEWHALE_HOME"),
         pixtuoid_core::platform::home_first_dir(),
         |p| p.exists(),
     )
 }
 
-/// Pure core for [`default_config_path`] — env overrides, the resolved home, and
-/// the existence check are all injected so every arm unit-tests without env/FS
-/// mutation.
+/// Pure core for [`default_config_path`] — env overrides, the resolved OS home,
+/// and the existence check are all injected so every arm unit-tests without
+/// env/FS mutation. Faithful to CodeWhale's `codewhale_home` + `default_config_path`:
+/// `codewhale_home_env` (= `CODEWHALE_HOME`) is the `.codewhale`-equivalent app dir
+/// VERBATIM (no `.codewhale` join — that's how CodeWhale uses it), while the legacy
+/// `.deepseek` dir lives under the OS home REGARDLESS of `CODEWHALE_HOME`
+/// (`legacy_deepseek_home` ignores it).
 fn resolve_config_path(
     codewhale_config_env: Option<String>,
     deepseek_config_env: Option<String>,
-    home: Option<PathBuf>,
+    codewhale_home_env: Option<String>,
+    os_home: Option<PathBuf>,
     exists: impl Fn(&Path) -> bool,
 ) -> Result<PathBuf> {
     if let Some(p) = codewhale_config_env {
@@ -109,16 +124,29 @@ fn resolve_config_path(
     if let Some(p) = deepseek_config_env {
         return Ok(PathBuf::from(p));
     }
-    let home = home.ok_or_else(|| {
-        anyhow!("cannot resolve the home directory (HOME/USERPROFILE unset); pass --config <path>")
-    })?;
-    let modern = home.join(".codewhale").join("config.toml");
+    // Modern app dir: CODEWHALE_HOME verbatim, else <os_home>/.codewhale.
+    let modern_dir = match (codewhale_home_env, &os_home) {
+        (Some(h), _) => PathBuf::from(h),
+        (None, Some(home)) => home.join(".codewhale"),
+        (None, None) => {
+            return Err(anyhow!(
+                "cannot resolve CodeWhale's home (CODEWHALE_CONFIG_PATH/DEEPSEEK_CONFIG_PATH/\
+                 CODEWHALE_HOME/HOME/USERPROFILE unset); pass --config <path>"
+            ));
+        }
+    };
+    let modern = modern_dir.join("config.toml");
     if exists(&modern) {
         return Ok(modern);
     }
-    let legacy = home.join(".deepseek").join("config.toml");
-    if exists(&legacy) {
-        return Ok(legacy);
+    // Legacy .deepseek is anchored to the OS home only (CodeWhale's
+    // legacy_deepseek_home ignores CODEWHALE_HOME), so check it only when the OS
+    // home resolves; never shadow a real .deepseek config with a fresh .codewhale.
+    if let Some(home) = &os_home {
+        let legacy = home.join(".deepseek").join("config.toml");
+        if exists(&legacy) {
+            return Ok(legacy);
+        }
     }
     Ok(modern)
 }
@@ -127,12 +155,18 @@ fn resolve_config_path(
 /// a fresh install while the product-state dir exists, and the legacy
 /// `~/.deepseek` layout puts config elsewhere — so probe the state dirs
 /// (created by CodeWhale on first launch) rather than the file we write.
-/// Resolves the home dir the SAME way CodeWhale does (HOME-first) via
-/// [`pixtuoid_core::platform::home_first_dir`], so a `HOME`-exporting Windows
-/// shell probes the dir CodeWhale actually uses.
+/// Resolves the dirs the SAME way CodeWhale does: the modern app dir is
+/// `CODEWHALE_HOME` (verbatim) else `<HOME-first home>/.codewhale`, and the legacy
+/// `.deepseek` lives under that OS home — so a `HOME`-exporting (or `CODEWHALE_HOME`)
+/// Windows shell probes the dirs CodeWhale actually uses.
 pub fn detect_installed() -> bool {
-    pixtuoid_core::platform::home_first_dir()
-        .is_some_and(|home| home.join(".codewhale").exists() || home.join(".deepseek").exists())
+    let os_home = pixtuoid_core::platform::home_first_dir();
+    let modern = match io::nonempty_env("CODEWHALE_HOME") {
+        Some(h) => Some(PathBuf::from(h)),
+        None => os_home.as_ref().map(|h| h.join(".codewhale")),
+    };
+    let legacy = os_home.map(|h| h.join(".deepseek"));
+    modern.is_some_and(|d| d.exists()) || legacy.is_some_and(|d| d.exists())
 }
 
 /// The BASE hook command (no `--event` — `merge_install` appends the per-event
@@ -319,17 +353,53 @@ mod tests {
         let p = resolve_config_path(
             Some("/custom/cw.toml".into()),
             Some("/custom/ds.toml".into()),
+            Some("/ignored/home".into()),
             Some(PathBuf::from("/home/u")),
             |_| panic!("exists() must not be consulted when an env override is set"),
         )
         .unwrap();
         assert_eq!(p, PathBuf::from("/custom/cw.toml"));
         // DEEPSEEK_CONFIG_PATH is the second-priority override.
-        let p = resolve_config_path(None, Some("/custom/ds.toml".into()), None, |_| {
+        let p = resolve_config_path(None, Some("/custom/ds.toml".into()), None, None, |_| {
             panic!("exists() must not be consulted when an env override is set")
         })
         .unwrap();
         assert_eq!(p, PathBuf::from("/custom/ds.toml"));
+    }
+
+    #[test]
+    fn config_path_codewhale_home_is_the_app_dir_verbatim() {
+        // CODEWHALE_HOME is the .codewhale-EQUIVALENT dir (no .codewhale join), and
+        // it does NOT move the legacy .deepseek (which stays under the OS home —
+        // CodeWhale's legacy_deepseek_home ignores CODEWHALE_HOME).
+        let cw_home = "/custom/cwhome";
+        let os_home = PathBuf::from("/home/u");
+        let modern = PathBuf::from(cw_home).join("config.toml");
+        let legacy = os_home.join(".deepseek").join("config.toml");
+        // modern (CODEWHALE_HOME/config.toml) exists → modern, NOT cwhome/.codewhale.
+        let p = resolve_config_path(
+            None,
+            None,
+            Some(cw_home.into()),
+            Some(os_home.clone()),
+            |q| q == modern,
+        )
+        .unwrap();
+        assert_eq!(p, modern);
+        // modern absent, OS-home .deepseek present → legacy (anchored to OS home,
+        // unaffected by CODEWHALE_HOME) — never shadow a real .deepseek config.
+        let p = resolve_config_path(
+            None,
+            None,
+            Some(cw_home.into()),
+            Some(os_home.clone()),
+            |q| q == legacy,
+        )
+        .unwrap();
+        assert_eq!(p, legacy);
+        // CODEWHALE_HOME set but no OS home → modern only (legacy uncheckable).
+        let p = resolve_config_path(None, None, Some(cw_home.into()), None, |_| false).unwrap();
+        assert_eq!(p, modern);
     }
 
     #[test]
@@ -338,19 +408,19 @@ mod tests {
         let modern = home.join(".codewhale").join("config.toml");
         let legacy = home.join(".deepseek").join("config.toml");
         // modern exists → modern.
-        let p = resolve_config_path(None, None, Some(home.clone()), |q| q == modern).unwrap();
+        let p = resolve_config_path(None, None, None, Some(home.clone()), |q| q == modern).unwrap();
         assert_eq!(p, modern);
         // only legacy exists → legacy (don't shadow the user's real config).
-        let p = resolve_config_path(None, None, Some(home.clone()), |q| q == legacy).unwrap();
+        let p = resolve_config_path(None, None, None, Some(home.clone()), |q| q == legacy).unwrap();
         assert_eq!(p, legacy);
         // neither exists → modern (a fresh install creates it there).
-        let p = resolve_config_path(None, None, Some(home), |_| false).unwrap();
+        let p = resolve_config_path(None, None, None, Some(home), |_| false).unwrap();
         assert_eq!(p, modern);
     }
 
     #[test]
     fn config_path_errors_when_no_home_and_no_override() {
-        let err = resolve_config_path(None, None, None, |_| false).unwrap_err();
+        let err = resolve_config_path(None, None, None, None, |_| false).unwrap_err();
         assert!(
             err.to_string().contains("pass --config"),
             "no home + no override must surface the actionable error: {err}"
