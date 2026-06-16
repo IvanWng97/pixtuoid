@@ -40,6 +40,17 @@ def run() -> int:
     check("extract paths", {f.path for f in findings} == {"a.rs", "b.rs"})
     check("extract keeps null line", any(f.line is None for f in findings))
 
+    # _strip_control (#339): control chars in the bot body/path are stripped at the
+    # construction boundary so the printed report can't emit a terminal escape.
+    check("strip_control removes ESC/OSC/DEL/C1",
+          m._strip_control("a\x1b[31mb\x07c\x7fd\x9ee") == "a[31mbcde")
+    check("strip_control keeps printable + unicode", m._strip_control("café ▪ ✓") == "café ▪ ✓")
+    hostile = [{"user": {"login": "claude[bot]"}, "path": "x\x1b[2J.rs", "line": 1,
+                "body": "**MEDIUM — \x1b]0;pwned\x07evil\x1b[0m title**"}]
+    hf = m.extract_findings(hostile)[0]
+    check("finding.title has no control chars", all(ord(ch) >= 0x20 and ord(ch) != 0x7f for ch in hf.title))
+    check("finding.path has no control chars", "\x1b" not in hf.path)
+
     # parse_marker_lines — the Bot-findings-adjudicated: block, ended by prose.
     body = (
         "fix(install): address #316 bot findings\n\n"

@@ -52,6 +52,14 @@ class Finding:
     title: str
 
 
+def _strip_control(s: str) -> str:
+    """Drop C0/C1 control chars + DEL so untrusted bot-comment text / paths can't
+    emit a terminal escape (ANSI/OSC) when this report is printed — the Python
+    twin of the Rust side's `verify::display_safe` sanitize-at-the-boundary rule
+    (R0615-06). Applied where findings are constructed, not at each print site."""
+    return "".join(ch for ch in s if not (ord(ch) < 0x20 or 0x7F <= ord(ch) <= 0x9F))
+
+
 def severity_of(body: str) -> str | None:
     """The MEDIUM+/LOW severity a bot comment body leads with, or None."""
     m = _SEVERITY.search(body or "")
@@ -61,7 +69,7 @@ def severity_of(body: str) -> str | None:
 def title_of(body: str) -> str:
     """A one-line title for display: the bold heading, control chars stripped."""
     first = (body or "").strip().splitlines()[0] if (body or "").strip() else ""
-    return first.replace("*", "").strip()[:120]
+    return _strip_control(first.replace("*", "").strip())[:120]
 
 
 def extract_findings(comments: list[dict]) -> list[Finding]:
@@ -77,7 +85,7 @@ def extract_findings(comments: list[dict]) -> list[Finding]:
         out.append(
             Finding(
                 severity=sev,
-                path=c.get("path", "") or "",
+                path=_strip_control(c.get("path", "") or ""),
                 line=c.get("line"),
                 title=title_of(c.get("body", "")),
             )
