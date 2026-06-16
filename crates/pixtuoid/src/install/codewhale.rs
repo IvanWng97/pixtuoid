@@ -2,7 +2,9 @@
 //!
 //! Writes the GLOBAL CodeWhale config (`~/.codewhale/config.toml`, or the
 //! legacy `~/.deepseek/config.toml` when that is the file CodeWhale actually
-//! reads — mirroring its own `default_config_path` resolution @0.8.59). The
+//! reads, or a `CODEWHALE_HOME`/`*_CONFIG_PATH` override — mirroring its own
+//! `resolve_config_path` + `default_config_path` resolution; see
+//! `default_config_path` below). The
 //! `[hooks]` table holds a single `hooks` ARRAY of `{event, command}` entries
 //! (NOT Codex's per-event group keys, NOT Claude's nested `{matcher, hooks}`):
 //!
