@@ -108,6 +108,34 @@ pub fn verify_target(t: &'static Target, config: Option<PathBuf>) -> verify::Sch
             notes.push("could not read the shim path from the managed hook command".into());
         }
     }
+    // Wholly-owned extra artifacts (the OpenClaw plugin DIR): the config merge can
+    // verify clean while the plugin FILES the gateway actually loads are
+    // missing/clobbered — the exact silent-dead class doctor exists to catch, and
+    // the config-level `verify_schema` is blind to it (#332). Stat each artifact
+    // path: a missing file is a HARD break (like a missing shim). The artifact
+    // PATHS are independent of the baked shim path (only the entry-module CONTENT
+    // bakes it), so a placeholder hook arg yields the real install locations
+    // WITHOUT resolving the binary — a read-only doctor check must not hard-error
+    // just because pixtuoid-hook isn't locatable. Calling the SAME fn install uses
+    // means the verified path set can never drift from the writer's.
+    if let Some(make) = t.extra_artifacts {
+        match make(std::path::Path::new("pixtuoid-hook")) {
+            Ok(arts) => {
+                for (p, _) in arts {
+                    if !p.exists() {
+                        issues.push(format!(
+                            "plugin artifact missing: {}",
+                            verify::display_safe(&p)
+                        ));
+                    }
+                }
+            }
+            // Couldn't even compute the paths (e.g. no home dir) — can't confirm,
+            // so a soft note, never a spurious "broken" (the config path would have
+            // failed to resolve first anyway).
+            Err(e) => notes.push(format!("could not resolve plugin artifact paths: {e}")),
+        }
+    }
     verify::SchemaVerifyResult { issues, notes }
 }
 
@@ -362,7 +390,7 @@ pub fn uninstall_target(t: &Target, config: Option<PathBuf>) -> Result<Uninstall
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::install::target::{MergeOutcome, Target, CLAUDE, CODEX};
+    use crate::install::target::{MergeOutcome, Target, CLAUDE, CODEX, OPENCLAW};
 
     // A second fake target for "both present" rows (avoids depending on Phase 2's CODEX).
     static FAKE: Target = Target {
@@ -934,6 +962,34 @@ mod tests {
         assert!(!v.is_sound());
         assert!(
             v.issues.iter().any(|i| i.contains("shim binary missing")),
+            "{:?}",
+            v.issues
+        );
+    }
+
+    #[test]
+    fn verify_target_flags_missing_extra_artifacts() {
+        // OpenClaw's config can verify clean while the wholly-owned plugin DIR the
+        // gateway actually loads is missing/clobbered — the silent-dead class the
+        // config-level check is blind to (#332). Install, then delete the plugin
+        // dir → verify must report broken (the gateway would never load us).
+        let oc_home = tempfile::TempDir::new().unwrap();
+        std::env::set_var("OPENCLAW_STATE_DIR", oc_home.path());
+        let exe = std::env::current_exe().unwrap();
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cfg = tmp.path().join("openclaw.json");
+        install_target(&OPENCLAW, Some(cfg.clone()), Some(exe)).unwrap();
+        // Sanity: a complete install (config + plugin dir present) verifies sound.
+        assert!(verify_target(&OPENCLAW, Some(cfg.clone())).is_sound());
+        // The plugin dir vanishes (a manual delete / a stale uninstall / a clobber)
+        // while openclaw.json still registers it — config sound, artifacts gone.
+        std::fs::remove_dir_all(oc_home.path().join("plugins")).unwrap();
+        let v = verify_target(&OPENCLAW, Some(cfg));
+        assert!(!v.is_sound(), "missing plugin artifacts must break verify");
+        assert!(
+            v.issues
+                .iter()
+                .any(|i| i.contains("plugin artifact missing")),
             "{:?}",
             v.issues
         );

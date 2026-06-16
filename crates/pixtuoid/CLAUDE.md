@@ -82,7 +82,10 @@ src/
 │                       verify.rs (the #309 install-schema verifier: SchemaParse/SchemaVerifyResult/ShimRef +
 │                         shared helpers shell_shim_ref (4 shell targets) / flat_json_verify (reasonix+cursor) /
 │                         assemble; install::verify_target(t, config) = the I/O wrapper that reads the config +
-│                         calls verify_schema + stats the shim. ONLY call when has_hooks(t) — the load-bearing gate
+│                         calls verify_schema + stats the shim + (for `extra_artifacts` targets like OpenClaw)
+│                         stats each wholly-owned plugin file for existence — a missing one is a HARD break, the
+│                         silent-dead class the config check is blind to (#332; paths are hook-path-independent so a
+│                         placeholder arg yields the install locations without resolving the binary). ONLY call when has_hooks(t) — the load-bearing gate
 │                         (an uninstalled config verifies "broken"; a disconnect removes hooks → has_hooks=false →
 │                         never called → never a false broken)),
 │                       claude.rs / codex.rs / reasonix.rs / codewhale.rs / opencode.rs (per-target hook_command + config path;
