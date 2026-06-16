@@ -18,6 +18,10 @@
     "verify": "npm run format:check && npm run lint && npm run check && npm run build"
   },
   "dependencies": {
+    "@astrojs/sitemap": "^3.7.3",
+    "@fontsource/jersey-10": "^5.2.8",
+    "@fontsource/jetbrains-mono": "^5.2.8",
+    "@fontsource/lora": "^5.2.8",
     "astro": "^6.1.10"
   },
   "devDependencies": {

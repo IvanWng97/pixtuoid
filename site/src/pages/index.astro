@@ -10,10 +10,31 @@ import SupportedTools from '../components/SupportedTools.astro';
 import Install from '../components/Install.astro';
 import Elevator from '../components/Elevator.astro';
 import Footer from '../components/Footer.astro';
-import { asset } from '../consts';
+import { asset, REPO, CRATES } from '../consts';
+
+// Homepage structured data: a free cross-platform developer tool. Search
+// engines use this for a rich result; the version is single-sourced from the
+// workspace Cargo.toml at build (same define as everywhere else).
+const SITE = Astro.site ?? new URL('https://ivanwng97.github.io');
+const softwareJsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'SoftwareApplication',
+  name: 'pixtuoid',
+  description:
+    'A terminal-native pixel-art office that visualizes your AI coding agents (Claude Code, Codex, and more) as animated coworkers.',
+  applicationCategory: 'DeveloperApplication',
+  operatingSystem: 'macOS, Linux, Windows',
+  url: new URL(asset(''), SITE).href,
+  downloadUrl: CRATES,
+  softwareVersion: __PIXTUOID_VERSION__,
+  license: 'https://opensource.org/licenses/MIT',
+  codeRepository: REPO,
+  author: { '@type': 'Person', name: 'Ivan Wang', url: REPO },
+  offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
+};
 ---
 
-<Base preloadImage={asset('demos/hero-poster.png')}>
+<Base preloadImage={asset('demos/hero-poster.png')} jsonLd={softwareJsonLd}>
   <span id="top"></span>
   <Nav />
   <Elevator />
