@@ -475,6 +475,53 @@ mod tests {
         task.await.unwrap();
     }
 
+    // The INVERSE of the routing test above (census #266 arch-drift seam #1): an
+    // AGENT source that is shim-stamped `_pixtuoid_source` AND carries `_pid`
+    // (opencode/CodeWhale do — three producers write `_pid` at this one socket)
+    // must take the AgentEvent path and NEVER the presence side channel, EVEN
+    // with `presence_tx` active. The whole daemon demux rests on
+    // `presence_decoder_for` returning None for every agent source (so the
+    // `continue` at the daemon arm is unreachable for them); without this
+    // negative pin, a future dual-natured source — or a reorder that moved the
+    // `_pid` peek above the demux `continue` — could silently cross-route an
+    // agent payload into presence with no failing test.
+    #[tokio::test]
+    async fn handle_conn_agent_source_with_pid_never_routes_to_presence() {
+        let (mut client, server) = tokio::io::duplex(4096);
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(8);
+        let (ptx, mut prx) =
+            tokio::sync::mpsc::unbounded_channel::<crate::source::daemon::PresenceMsg>();
+
+        // Spawn with the presence channel ACTIVE so the demux block is entered.
+        let task = tokio::spawn(handle_conn(server, tx, None, Some(ptx)));
+        // A shim-stamped opencode `session.created` carrying `_pid` — an AGENT
+        // source (presence_decoder_for("opencode") == None), so it must fall
+        // through to the agent arm.
+        client
+            .write_all(
+                b"{\"_pixtuoid_source\":\"opencode\",\"type\":\"session.created\",\
+                  \"properties\":{\"info\":{\"id\":\"ses_neg\",\"directory\":\"/repo\"}},\
+                  \"_pid\":5555}\n",
+            )
+            .await
+            .unwrap();
+        drop(client);
+
+        // It decodes to a SessionStart on the AgentEvent channel...
+        let (transport, ev) = rx.recv().await.expect("agent event arrived");
+        assert_eq!(transport, Transport::Hook);
+        assert!(
+            matches!(ev, AgentEvent::SessionStart { .. }),
+            "opencode session.created decodes to SessionStart, got {ev:?}"
+        );
+        // ...and NOTHING ever reaches the presence channel.
+        assert!(
+            prx.try_recv().is_err(),
+            "an agent-source payload with _pid must NOT route to presence"
+        );
+        task.await.unwrap();
+    }
+
     // The silent-loss path (R0612-02): the budget expires while the send loop
     // is parked on a full reducer channel, the timeout wrapper drops the
     // handle_conn future, and the payload's already-decoded remainder is
