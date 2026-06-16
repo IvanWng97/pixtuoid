@@ -13,6 +13,7 @@
 use std::collections::VecDeque;
 
 use super::Point;
+use crate::grid::Grid;
 use crate::walkable::WalkableMask;
 
 /// Coarse-cell edge in px. MUST equal `tui::pathfind::CELL_SIZE` (asserted there).
@@ -83,9 +84,9 @@ fn snap_seed(mask: &WalkableMask, seed: Point, cell_w: u16, cell_h: u16) -> Opti
 /// connectivity-tested, so this set covers the whole walkable area.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ReachSet {
-    cell_w: u16,
-    cell_h: u16,
-    reachable: Vec<bool>,
+    /// Coarse-cell reachability (`grid.width`/`height` are the cell dims, =
+    /// `mask.{width,height} / REACH_CELL_SIZE`).
+    grid: Grid<bool>,
 }
 
 impl ReachSet {
@@ -95,18 +96,13 @@ impl ReachSet {
     pub fn from_mask(mask: &WalkableMask, seed: Point) -> ReachSet {
         let cell_w = mask.width / REACH_CELL_SIZE;
         let cell_h = mask.height / REACH_CELL_SIZE;
-        let mut reachable = vec![false; cell_w as usize * cell_h as usize];
+        let mut grid = Grid::filled(cell_w, cell_h, false);
         if cell_w == 0 || cell_h == 0 {
-            return ReachSet {
-                cell_w,
-                cell_h,
-                reachable,
-            };
+            return ReachSet { grid };
         }
-        let idx = |cx: u16, cy: u16| cy as usize * cell_w as usize + cx as usize;
         if let Some(start) = snap_seed(mask, seed, cell_w, cell_h) {
             let mut q = VecDeque::new();
-            reachable[idx(start.0, start.1)] = true;
+            grid.set(start.0, start.1, true);
             q.push_back(start);
             while let Some((cx, cy)) = q.pop_front() {
                 for (dx, dy) in NEIGHBORS_8 {
@@ -116,21 +112,17 @@ impl ReachSet {
                         continue;
                     }
                     let (nx, ny) = (nx as u16, ny as u16);
-                    if nx >= cell_w || ny >= cell_h || reachable[idx(nx, ny)] {
+                    if nx >= cell_w || ny >= cell_h || grid.get_or(nx, ny, false) {
                         continue;
                     }
                     if coarse_cell_walkable(mask, nx, ny) {
-                        reachable[idx(nx, ny)] = true;
+                        grid.set(nx, ny, true);
                         q.push_back((nx, ny));
                     }
                 }
             }
         }
-        ReachSet {
-            cell_w,
-            cell_h,
-            reachable,
-        }
+        ReachSet { grid }
     }
 
     /// Is the coarse cell containing pixel `p` in the reachable component?
@@ -141,12 +133,8 @@ impl ReachSet {
     /// `reaches(p) ⇒ A* can route to p`. So `approach_point` can safely drop any
     /// side `reaches` rejects — it will never pick an unroutable one.
     pub fn reaches(&self, p: Point) -> bool {
-        let cx = p.x / REACH_CELL_SIZE;
-        let cy = p.y / REACH_CELL_SIZE;
-        if cx >= self.cell_w || cy >= self.cell_h {
-            return false;
-        }
-        self.reachable[cy as usize * self.cell_w as usize + cx as usize]
+        self.grid
+            .get_or(p.x / REACH_CELL_SIZE, p.y / REACH_CELL_SIZE, false)
     }
 }
 
@@ -213,8 +201,16 @@ mod tests {
         // Nothing is reachable — the seed could not snap into any component.
         assert!(!r.reaches(Point { x: 8, y: 8 }), "seed cell is blocked");
         assert!(!r.reaches(Point { x: 50, y: 50 }), "open area never seeded");
+        let all_unreachable = (0..r.grid.height).all(|cy| {
+            (0..r.grid.width).all(|cx| {
+                !r.reaches(Point {
+                    x: cx * REACH_CELL_SIZE,
+                    y: cy * REACH_CELL_SIZE,
+                })
+            })
+        });
         assert!(
-            r.reachable.iter().all(|&b| !b),
+            all_unreachable,
             "no-snap seed must yield an all-unreachable set"
         );
     }
@@ -244,8 +240,9 @@ mod tests {
         // an empty reachable grid) instead of indexing into a 0-width grid.
         let r = ReachSet::from_mask(&WalkableMask::new_open(3, 64), Point { x: 0, y: 0 });
         assert!(!r.reaches(Point { x: 0, y: 0 }));
-        assert_eq!(r.cell_w, 0, "width < cell size collapses cell_w to 0");
-        assert!(r.reachable.is_empty(), "degenerate mask has no cells");
+        // width < cell size collapses the cell width to 0 → a 0-column grid, so
+        // no cell is addressable and every query is unreachable (asserted above).
+        assert_eq!(r.grid.width, 0, "degenerate mask has a 0-width cell grid");
     }
 
     #[test]

@@ -16,23 +16,21 @@
 //!
 //! Coordinates are `(x, y)` u16 pixel positions; origin top-left.
 
-/// Static obstacle mask sized `width × height` pixels.
-#[derive(Debug, Clone)]
-pub struct WalkableMask {
-    pub width: u16,
-    pub height: u16,
-    bits: Vec<bool>,
-}
+use crate::grid::Grid;
 
-impl WalkableMask {
+/// Static obstacle mask sized `width × height` pixels — a `Grid<bool>`
+/// (`true` = open floor, `false` = obstacle). An ALIAS, not a wrapper: the
+/// mask's dims ARE the grid's `pub width`/`height` (no mirrored fields), and
+/// the obstacle ops live in the `impl Grid<bool>` below. This is the clean
+/// endpoint of the #333 `Grid<T>` extraction — it landed in the 0.10.0 break
+/// because removing the old `pub struct WalkableMask` is a cargo-semver-checks
+/// `struct_missing`.
+pub type WalkableMask = Grid<bool>;
+
+impl Grid<bool> {
     /// Create a fully-open mask. Caller fills obstacles via `mark_blocked`.
     pub fn new_open(width: u16, height: u16) -> Self {
-        let total = (width as usize) * (height as usize);
-        Self {
-            width,
-            height,
-            bits: vec![true; total],
-        }
+        Grid::filled(width, height, true)
     }
 
     /// Mark a rect (with `pad` extra pixels on each side) as blocked.
@@ -43,9 +41,8 @@ impl WalkableMask {
         let min_y = y.saturating_sub(pad);
         let max_y = y.saturating_add(h).saturating_add(pad).min(self.height);
         for yy in min_y..max_y {
-            let row = (yy as usize) * (self.width as usize);
             for xx in min_x..max_x {
-                self.bits[row + (xx as usize)] = false;
+                self.set(xx, yy, false);
             }
         }
     }
@@ -55,9 +52,8 @@ impl WalkableMask {
         let max_x = x.saturating_add(w).min(self.width);
         let max_y = y.saturating_add(h).min(self.height);
         for yy in y..max_y {
-            let row = (yy as usize) * (self.width as usize);
             for xx in x..max_x {
-                self.bits[row + (xx as usize)] = true;
+                self.set(xx, yy, true);
             }
         }
     }
@@ -65,11 +61,7 @@ impl WalkableMask {
     /// O(1) walkability lookup. Out-of-bounds queries return `false` so
     /// routers can probe near the edges without bounds checks.
     pub fn is_walkable(&self, x: u16, y: u16) -> bool {
-        if x >= self.width || y >= self.height {
-            return false;
-        }
-        let idx = (y as usize) * (self.width as usize) + (x as usize);
-        self.bits[idx]
+        self.get_or(x, y, false)
     }
 }
 

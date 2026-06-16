@@ -1,5 +1,6 @@
 //! pixtuoid-core: headless logic for the pixtuoid TUI.
 
+pub mod grid;
 pub mod id;
 pub mod layout;
 pub mod physics;
@@ -11,6 +12,7 @@ pub mod sprite;
 pub mod state;
 pub mod walkable;
 
+pub use grid::Grid;
 pub use id::AgentId;
 pub use render::Renderer;
 pub use source::{AgentEvent, Source, TaggedReceiver, TaggedSender, ToolDetail, Transport};

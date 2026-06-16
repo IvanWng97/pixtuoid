@@ -107,7 +107,9 @@ src/
 │                       dwell_ms(kind,id) [sofa/meeting 20-40s, pantry 10-18s, vending 4-8s],
 │                       seated_dwell_ms(id) [desk 15-30s], est_wander_cycle_ms(id) — for tui::motion
 │                       (render authority) + idle_pose (stateless overlay, fixed WANDER_*_EST_MS).
-├── walkable.rs         WalkableMask (static bool grid) + OccupancyOverlay (dynamic per-frame)
+├── grid.rs             Grid<T> — a width×height row-major Vec<T> with checked get/set/get_or
+│                       (the ONE y*w+x indexing + edge-clamp; WalkableMask = Grid<bool>, ReachSet wraps one)
+├── walkable.rs         WalkableMask = Grid<bool> (static obstacle mask) + OccupancyOverlay (dynamic per-frame)
 └── tests/              one integration test per concern
 ```
 
