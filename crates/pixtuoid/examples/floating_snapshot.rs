@@ -1,16 +1,16 @@
-//! Render ONE frame of the `pixtuoid float` office to a PNG — visual verification for
-//! the float window (the desktop-window twin of the `snapshot` example, which captures
-//! the half-block TUI). It drives the SAME `float::offscreen::OfficeRenderer` the live
+//! Render ONE frame of the `pixtuoid floating` office to a PNG — visual verification for
+//! the floating window (the desktop-window twin of the `snapshot` example, which captures
+//! the half-block TUI). It drives the SAME `floating::offscreen::OfficeRenderer` the live
 //! window uses, so the PNG is byte-faithful to what the window blits (full-resolution
 //! `RgbBuffer`, NOT a ▀-compressed terminal grab).
 //!
 //! Usage:
-//!   cargo run --release --example float_snapshot -- <out.png> [WxH] [--theme <name>]
-//! e.g. `... -- /tmp/float.png 720x480` (Retina default), `... -- /tmp/f.png 360x240`.
+//!   cargo run --release --example floating_snapshot -- <out.png> [WxH] [--theme <name>]
+//! e.g. `... -- /tmp/floating.png 720x480` (Retina default), `... -- /tmp/f.png 360x240`.
 
 use anyhow::{anyhow, Context, Result};
 use image::{Rgb as ImgRgb, RgbImage};
-use pixtuoid::float::offscreen::OfficeRenderer;
+use pixtuoid::floating::offscreen::OfficeRenderer;
 use pixtuoid::tui::floor::FloorMeta;
 use pixtuoid::tui::theme::theme_by_name;
 use pixtuoid_core::state::SceneState;
@@ -19,7 +19,7 @@ fn main() -> Result<()> {
     let mut args = std::env::args().skip(1);
     let out = args
         .next()
-        .ok_or_else(|| anyhow!("usage: float_snapshot <out.png> [WxH] [--theme <name>]"))?;
+        .ok_or_else(|| anyhow!("usage: floating_snapshot <out.png> [WxH] [--theme <name>]"))?;
 
     let mut size = (720u16, 480u16); // Retina default (360x240 logical @2x)
     let mut theme_name = "normal".to_string();
@@ -55,7 +55,7 @@ fn main() -> Result<()> {
     // surfaces a polish pass cares about. (Agents ride the live scene; not needed here.)
     let scene = SceneState::new([8; pixtuoid_core::state::MAX_FLOORS]);
     let mut renderer = OfficeRenderer::new();
-    // Mirror float::window: render the office at window/SCALE, then nearest-neighbor
+    // Mirror floating::window: render the office at window/SCALE, then nearest-neighbor
     // upscale — so the PNG is byte-faithful to what the live window blits at this size.
     let (win_w, win_h) = (size.0 as u32, size.1 as u32);
     let scale = (win_h as f64 / 180.0).round().max(1.0) as u32; // window::OFFICE_TARGET_H

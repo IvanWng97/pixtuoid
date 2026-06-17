@@ -55,7 +55,7 @@ pub enum Cmd {
     },
     /// Render the live office in a frameless, always-on-top desktop window
     /// (no TUI). Shares the same source flags as `run`.
-    Float {
+    Floating {
         #[arg(long, value_parser = parse_nonempty_path)]
         socket: Option<PathBuf>,
         #[arg(long)]
@@ -239,11 +239,12 @@ mod tests {
     }
 
     #[test]
-    fn float_subcommand_parses_with_shared_run_flags() {
-        let cli = Cli::try_parse_from(["pixtuoid", "float", "--projects-root", "/tmp/p"]).unwrap();
+    fn floating_subcommand_parses_with_shared_run_flags() {
+        let cli =
+            Cli::try_parse_from(["pixtuoid", "floating", "--projects-root", "/tmp/p"]).unwrap();
         assert!(matches!(
             cli.cmd,
-            Some(Cmd::Float {
+            Some(Cmd::Floating {
                 projects_root: Some(_),
                 ..
             })
@@ -251,8 +252,8 @@ mod tests {
     }
 
     #[test]
-    fn float_subcommand_rejects_empty_socket() {
-        // The shared `parse_nonempty_path` guard applies to float's --socket too.
-        assert!(Cli::try_parse_from(["pixtuoid", "float", "--socket", "  "]).is_err());
+    fn floating_subcommand_rejects_empty_socket() {
+        // The shared `parse_nonempty_path` guard applies to floating's --socket too.
+        assert!(Cli::try_parse_from(["pixtuoid", "floating", "--socket", "  "]).is_err());
     }
 }

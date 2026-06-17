@@ -49,12 +49,12 @@ pub struct AppConfig {
         skip_serializing_if = "BTreeMap::is_empty"
     )]
     pub sources: BTreeMap<String, bool>,
-    /// `pixtuoid float` desktop-window geometry — a single `[float]` table
-    /// (size/position/opacity). Absent ⇒ defaults from [`resolve_float`]. Keep
+    /// `pixtuoid floating` desktop-window geometry — a single `[floating]` table
+    /// (size/position/opacity). Absent ⇒ defaults from [`resolve_floating`]. Keep
     /// BEFORE `pets`: it's a `[table]`, and the `[[pets]]` array-of-tables must
     /// stay last (a table written after an AoT would re-parent under it).
-    #[serde(rename = "float", default, skip_serializing_if = "Option::is_none")]
-    pub float: Option<FloatConfigRaw>,
+    #[serde(rename = "floating", default, skip_serializing_if = "Option::is_none")]
+    pub floating: Option<FloatingConfigRaw>,
     /// The office's pets — one `[[pets]]` stanza each (`kind` + optional
     /// `name`). Absent = all kinds with default names; `pets = []` = no pets;
     /// an unknown `kind` is warn-skipped (non-fatal). Resolved into the runtime
@@ -68,17 +68,17 @@ pub struct AppConfig {
     pub pets: Option<Vec<PetEntry>>,
 }
 
-/// Default `pixtuoid float` window size (logical px) + the minimum below which the
-/// half-block office art is unreadable — `resolve_float` clamps up to it.
-pub const FLOAT_DEFAULT_W: u32 = 360;
-pub const FLOAT_DEFAULT_H: u32 = 240;
-pub const FLOAT_MIN_W: u32 = 240;
-pub const FLOAT_MIN_H: u32 = 160;
+/// Default `pixtuoid floating` window size (logical px) + the minimum below which the
+/// half-block office art is unreadable — `resolve_floating` clamps up to it.
+pub const FLOATING_DEFAULT_W: u32 = 360;
+pub const FLOATING_DEFAULT_H: u32 = 240;
+pub const FLOATING_MIN_W: u32 = 240;
+pub const FLOATING_MIN_H: u32 = 160;
 
-/// Raw `[float]` table as parsed — every field optional so a partial table (or an
-/// absent one) is valid; [`resolve_float`] fills defaults + clamps.
+/// Raw `[floating]` table as parsed — every field optional so a partial table (or an
+/// absent one) is valid; [`resolve_floating`] fills defaults + clamps.
 #[derive(Debug, Default, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct FloatConfigRaw {
+pub struct FloatingConfigRaw {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub width: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -91,11 +91,11 @@ pub struct FloatConfigRaw {
     pub opacity: Option<f32>,
 }
 
-/// Resolved float-window geometry: defaults applied, size clamped up to the legible
+/// Resolved floating-window geometry: defaults applied, size clamped up to the legible
 /// minimum, opacity clamped to `[0.2, 1.0]` (fully transparent / over-opaque are both
 /// useless). Position stays `Option` — `None` lets the OS place the window.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct FloatConfig {
+pub struct FloatingConfig {
     pub width: u32,
     pub height: u32,
     pub x: Option<i32>,
@@ -103,11 +103,11 @@ pub struct FloatConfig {
     pub opacity: f32,
 }
 
-pub fn resolve_float(config: &AppConfig) -> FloatConfig {
-    let raw = config.float.clone().unwrap_or_default();
-    FloatConfig {
-        width: raw.width.unwrap_or(FLOAT_DEFAULT_W).max(FLOAT_MIN_W),
-        height: raw.height.unwrap_or(FLOAT_DEFAULT_H).max(FLOAT_MIN_H),
+pub fn resolve_floating(config: &AppConfig) -> FloatingConfig {
+    let raw = config.floating.clone().unwrap_or_default();
+    FloatingConfig {
+        width: raw.width.unwrap_or(FLOATING_DEFAULT_W).max(FLOATING_MIN_W),
+        height: raw.height.unwrap_or(FLOATING_DEFAULT_H).max(FLOATING_MIN_H),
         x: raw.x,
         y: raw.y,
         opacity: raw.opacity.unwrap_or(1.0).clamp(0.2, 1.0),
@@ -266,10 +266,10 @@ pub fn save_source_connected(path: &Path, source_id: &'static str, connected: bo
     })
 }
 
-/// Persist the `pixtuoid float` window geometry into the `[float]` table (size always;
+/// Persist the `pixtuoid floating` window geometry into the `[floating]` table (size always;
 /// position when the OS reported it). Same `toml_edit` ConfigLock round as
 /// `save_source_connected`, so the user's other settings + hand-formatting survive.
-pub fn save_float(
+pub fn save_floating(
     path: &Path,
     width: u32,
     height: u32,
@@ -277,13 +277,13 @@ pub fn save_float(
     y: Option<i32>,
 ) -> Result<()> {
     update_config(path, |doc| {
-        doc["float"]["width"] = toml_edit::value(width as i64);
-        doc["float"]["height"] = toml_edit::value(height as i64);
+        doc["floating"]["width"] = toml_edit::value(width as i64);
+        doc["floating"]["height"] = toml_edit::value(height as i64);
         if let Some(x) = x {
-            doc["float"]["x"] = toml_edit::value(x as i64);
+            doc["floating"]["x"] = toml_edit::value(x as i64);
         }
         if let Some(y) = y {
-            doc["float"]["y"] = toml_edit::value(y as i64);
+            doc["floating"]["y"] = toml_edit::value(y as i64);
         }
     })
 }
@@ -1236,37 +1236,38 @@ mod tests {
     }
 
     #[test]
-    fn float_config_defaults_and_explicit_roundtrip() {
-        // Absent [float] → defaults, OS-placed (x/y None), opaque.
+    fn floating_config_defaults_and_explicit_roundtrip() {
+        // Absent [floating] → defaults, OS-placed (x/y None), opaque.
         let cfg: AppConfig = toml::from_str("theme = \"normal\"\n").unwrap();
-        let f = resolve_float(&cfg);
-        assert_eq!((f.width, f.height), (FLOAT_DEFAULT_W, FLOAT_DEFAULT_H));
+        let f = resolve_floating(&cfg);
+        assert_eq!((f.width, f.height), (FLOATING_DEFAULT_W, FLOATING_DEFAULT_H));
         assert_eq!((f.x, f.y), (None, None));
         assert!((f.opacity - 1.0).abs() < f32::EPSILON);
         // Explicit values parse through.
-        let cfg: AppConfig =
-            toml::from_str("[float]\nwidth = 480\nheight = 300\nx = 10\ny = 20\nopacity = 0.8\n")
-                .unwrap();
-        let f = resolve_float(&cfg);
+        let cfg: AppConfig = toml::from_str(
+            "[floating]\nwidth = 480\nheight = 300\nx = 10\ny = 20\nopacity = 0.8\n",
+        )
+        .unwrap();
+        let f = resolve_floating(&cfg);
         assert_eq!(
             (f.width, f.height, f.x, f.y),
             (480, 300, Some(10), Some(20))
         );
         assert!((f.opacity - 0.8).abs() < 1e-6);
-        // An absent [float] is omitted on serialize (skip_serializing_if + None).
+        // An absent [floating] is omitted on serialize (skip_serializing_if + None).
         assert!(!toml::to_string(&AppConfig::default())
             .unwrap()
-            .contains("[float]"));
+            .contains("[floating]"));
     }
 
     #[test]
-    fn save_float_roundtrips_geometry_and_preserves_other_settings() {
+    fn save_floating_roundtrips_geometry_and_preserves_other_settings() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.toml");
         std::fs::write(&path, "theme = \"normal\"\n").unwrap();
-        save_float(&path, 480, 320, Some(12), Some(34)).unwrap();
+        save_floating(&path, 480, 320, Some(12), Some(34)).unwrap();
         let cfg = load(&path, &mut Vec::new());
-        let f = resolve_float(&cfg);
+        let f = resolve_floating(&cfg);
         assert_eq!(
             (f.width, f.height, f.x, f.y),
             (480, 320, Some(12), Some(34))
@@ -1276,16 +1277,16 @@ mod tests {
     }
 
     #[test]
-    fn float_size_clamps_to_legible_min_and_opacity_is_bounded() {
+    fn floating_size_clamps_to_legible_min_and_opacity_is_bounded() {
         // Below-min size clamps UP so the office stays legible; over-opacity clamps to 1.0.
         let cfg: AppConfig =
-            toml::from_str("[float]\nwidth = 1\nheight = 1\nopacity = 9.0\n").unwrap();
-        let f = resolve_float(&cfg);
-        assert_eq!((f.width, f.height), (FLOAT_MIN_W, FLOAT_MIN_H));
+            toml::from_str("[floating]\nwidth = 1\nheight = 1\nopacity = 9.0\n").unwrap();
+        let f = resolve_floating(&cfg);
+        assert_eq!((f.width, f.height), (FLOATING_MIN_W, FLOATING_MIN_H));
         assert!((f.opacity - 1.0).abs() < f32::EPSILON);
         // Opacity floors at 0.2 (a fully-transparent window is useless).
-        let cfg: AppConfig = toml::from_str("[float]\nopacity = 0.0\n").unwrap();
-        assert!((resolve_float(&cfg).opacity - 0.2).abs() < 1e-6);
+        let cfg: AppConfig = toml::from_str("[floating]\nopacity = 0.0\n").unwrap();
+        assert!((resolve_floating(&cfg).opacity - 0.2).abs() < 1e-6);
     }
 
     #[test]

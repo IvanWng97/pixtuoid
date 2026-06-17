@@ -1,14 +1,14 @@
-//! The `winit` + `softbuffer` window for `pixtuoid float`.
+//! The `winit` + `softbuffer` window for `pixtuoid floating`.
 //!
-//! `FloatApp` is the `ApplicationHandler`: on `Resumed` it creates ONE frameless,
+//! `FloatingApp` is the `ApplicationHandler`: on `Resumed` it creates ONE frameless,
 //! always-on-top window + a `softbuffer` surface; it renders the latest `watch`ed scene
 //! to a DOWNSCALED office `RgbBuffer` via [`OfficeRenderer`] (~window/SCALE) then
 //! nearest-neighbor upscales it into the surface (CPU, `0x00RRGGBB`) so the pixel-art
 //! office stays chunky/legible instead of 1:1-tiny. Redraw is event-driven (a
-//! `FloatEvent::SceneChanged` from the pipeline
+//! `FloatingEvent::SceneChanged` from the pipeline
 //! bridge) plus a ~30fps animation tick WHILE agents are present (motion is time-driven);
 //! it idles to zero frames when the office is empty. Platform glue — codecov-ignored like
-//! `driver.rs`; the testable render seam is `float::offscreen`.
+//! `driver.rs`; the testable render seam is `floating::offscreen`.
 
 use std::num::NonZeroU32;
 use std::path::PathBuf;
@@ -27,22 +27,22 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow};
 use winit::window::{ResizeDirection, Window, WindowId, WindowLevel};
 
 use super::offscreen::OfficeRenderer;
-use crate::config::{self, FloatConfig};
+use crate::config::{self, FloatingConfig};
 use crate::tui::floor::FloorMeta;
 use crate::tui::theme::Theme;
 
 /// Wake reasons delivered to the winit loop from the background tokio pipeline.
 #[derive(Debug, Clone, Copy)]
-pub enum FloatEvent {
+pub enum FloatingEvent {
     /// The reducer published a new scene — repaint.
     SceneChanged,
 }
 
-/// The float window app: window + surface (created lazily on `Resumed`), the office
+/// The floating window app: window + surface (created lazily on `Resumed`), the office
 /// renderer (owns cross-frame caches), the live scene receiver, and the per-floor desk
 /// capacity atomics it keeps in sync with the rendered office.
-pub struct FloatApp {
-    cfg: FloatConfig,
+pub struct FloatingApp {
+    cfg: FloatingConfig,
     theme: &'static Theme,
     pack: Pack,
     config_path: PathBuf,
@@ -65,10 +65,10 @@ pub struct FloatApp {
 /// Click within this many physical px of the bottom-right corner = resize, else move.
 const RESIZE_CORNER_PX: f64 = 18.0;
 
-impl FloatApp {
+impl FloatingApp {
     #[allow(clippy::too_many_arguments)] // flat construction inputs; bundling adds no clarity
     pub fn new(
-        cfg: FloatConfig,
+        cfg: FloatingConfig,
         theme: &'static Theme,
         pack: Pack,
         config_path: PathBuf,
@@ -93,7 +93,7 @@ impl FloatApp {
         }
     }
 
-    /// Persist the current window geometry into `[float]` (best-effort — a save error
+    /// Persist the current window geometry into `[floating]` (best-effort — a save error
     /// must not block quitting). Size is stored LOGICAL (HiDPI-stable); position PHYSICAL.
     fn persist_geometry(&self) {
         let Some(window) = &self.window else {
@@ -101,14 +101,14 @@ impl FloatApp {
         };
         let logical = window.inner_size().to_logical::<f64>(window.scale_factor());
         let pos = window.outer_position().ok();
-        if let Err(e) = config::save_float(
+        if let Err(e) = config::save_floating(
             &self.config_path,
             logical.width.round() as u32,
             logical.height.round() as u32,
             pos.map(|p| p.x),
             pos.map(|p| p.y),
         ) {
-            tracing::warn!("pixtuoid float: could not persist window geometry: {e}");
+            tracing::warn!("pixtuoid floating: could not persist window geometry: {e}");
         }
     }
 
@@ -195,7 +195,7 @@ fn office_scale(win_h: u32) -> u32 {
 
 /// Sync the per-floor desk-capacity atomics to the office layout at `buf_w`×`buf_h` —
 /// the authority is the layout's `home_desks` count (mirrors the TUI's per-frame sync,
-/// `tui/mod.rs`). `store` (not `fetch_max`): float tracks its window exactly, so a shrink
+/// `tui/mod.rs`). `store` (not `fetch_max`): floating tracks its window exactly, so a shrink
 /// lowers capacity (excess agents become invisible-but-alive, like the TUI on shrink).
 fn sync_floor_caps(floor_caps: &[AtomicUsize; MAX_FLOORS], buf_w: u16, buf_h: u16) {
     use pixtuoid_core::layout::{SceneLayout, MAX_VISIBLE_DESKS};
@@ -208,7 +208,7 @@ fn sync_floor_caps(floor_caps: &[AtomicUsize; MAX_FLOORS], buf_w: u16, buf_h: u1
     }
 }
 
-impl ApplicationHandler<FloatEvent> for FloatApp {
+impl ApplicationHandler<FloatingEvent> for FloatingApp {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_some() {
             return; // already created — a re-resume must not spawn a second window
@@ -223,8 +223,8 @@ impl ApplicationHandler<FloatEvent> for FloatApp {
                 self.cfg.height as f64,
             ))
             .with_min_inner_size(LogicalSize::new(
-                config::FLOAT_MIN_W as f64,
-                config::FLOAT_MIN_H as f64,
+                config::FLOATING_MIN_W as f64,
+                config::FLOATING_MIN_H as f64,
             ));
         // Restore the saved position (physical px); else the OS places it.
         if let (Some(x), Some(y)) = (self.cfg.x, self.cfg.y) {
@@ -244,7 +244,7 @@ impl ApplicationHandler<FloatEvent> for FloatApp {
         let window = match event_loop.create_window(attrs) {
             Ok(w) => Rc::new(w),
             Err(e) => {
-                tracing::error!("pixtuoid float: failed to create window: {e}");
+                tracing::error!("pixtuoid floating: failed to create window: {e}");
                 event_loop.exit();
                 return;
             }
@@ -252,7 +252,7 @@ impl ApplicationHandler<FloatEvent> for FloatApp {
         let context = match softbuffer::Context::new(window.clone()) {
             Ok(c) => c,
             Err(e) => {
-                tracing::error!("pixtuoid float: failed to create softbuffer context: {e}");
+                tracing::error!("pixtuoid floating: failed to create softbuffer context: {e}");
                 event_loop.exit();
                 return;
             }
@@ -260,7 +260,7 @@ impl ApplicationHandler<FloatEvent> for FloatApp {
         let surface = match softbuffer::Surface::new(&context, window.clone()) {
             Ok(s) => s,
             Err(e) => {
-                tracing::error!("pixtuoid float: failed to create softbuffer surface: {e}");
+                tracing::error!("pixtuoid floating: failed to create softbuffer surface: {e}");
                 event_loop.exit();
                 return;
             }
@@ -274,9 +274,9 @@ impl ApplicationHandler<FloatEvent> for FloatApp {
         self.surface = Some(surface);
     }
 
-    fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: FloatEvent) {
+    fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: FloatingEvent) {
         match event {
-            FloatEvent::SceneChanged => {
+            FloatingEvent::SceneChanged => {
                 if let Some(window) = &self.window {
                     window.request_redraw();
                 }

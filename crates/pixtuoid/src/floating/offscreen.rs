@@ -1,9 +1,9 @@
-//! Headless office → `RgbBuffer` rendering for the `pixtuoid float` desktop window.
+//! Headless office → `RgbBuffer` rendering for the `pixtuoid floating` desktop window.
 //!
 //! This renders the office to a raw pixel `RgbBuffer` via `render_to_rgb_buffer` — NOT the
 //! half-block terminal emulation `examples/snapshot.rs` saves (snapshot writes the ratatui
-//! `TestBackend` → a ▀-compressed PNG via `save_backend_as_png`). A float-only seam: no
-//! `draw_scene`, no `Terminal`, no shared output with snapshot. `float::window` renders at
+//! `TestBackend` → a ▀-compressed PNG via `save_backend_as_png`). A floating-only seam: no
+//! `draw_scene`, no `Terminal`, no shared output with snapshot. `floating::window` renders at
 //! a DOWNSCALED buffer (~window/SCALE) and nearest-neighbor upscales it, so the pixel-art
 //! office stays chunky/legible instead of 8×12-px-tiny at 1:1. This module just paints the
 //! buffer at whatever dims it's handed. It mirrors `tui_renderer::render_transition_floor`
@@ -50,7 +50,7 @@ impl OfficeRenderer {
 
     /// Render `scene`'s floor (per `floor_meta`) into the owned buffer at `buf_w`×`buf_h`
     /// PIXELS — the caller maps window px → cells → pixels (`buf_w = cols`,
-    /// `buf_h = rows * 2`, the half-block 1:2 cell aspect; float has no footer row to
+    /// `buf_h = rows * 2`, the half-block 1:2 cell aspect; floating has no footer row to
     /// subtract, unlike `draw_scene`). Returns the rendered buffer (a borrow of the
     /// reused allocation). On a too-small / uncomputable layout it returns the buffer
     /// unchanged — never panics.
@@ -125,7 +125,7 @@ mod tests {
     #[test]
     fn renders_a_sized_nonblank_office_buffer() {
         // A fresh empty office still paints floor/walls/windows → never all-black, and the
-        // buffer is sized to the requested pixel dims. Pins the float render seam end-to-end.
+        // buffer is sized to the requested pixel dims. Pins the floating render seam end-to-end.
         let scene = SceneState::new([8; pixtuoid_core::state::MAX_FLOORS]);
         let pack = crate::tui::embedded_pack::load_sprite_pack(None).expect("embedded pack loads");
         let theme = crate::tui::theme::theme_by_name("normal").expect("normal theme exists");

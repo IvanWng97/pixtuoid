@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use anyhow::Result;
 use clap::Parser;
 use pixtuoid::cli::{Cli, Cmd};
-use pixtuoid::{config, doctor, float, init_pack, install, runtime, validate};
+use pixtuoid::{config, doctor, floating, init_pack, install, runtime, validate};
 use tracing_subscriber::EnvFilter;
 
 fn main() -> Result<()> {
@@ -34,11 +34,11 @@ fn main() -> Result<()> {
     //     `warn`; $RUST_LOG, $PIXTUOID_LOG, or --log-level raise/shape it.
     //     Crash reporting is handled separately by the panic hook.
     //   Non-TUI (--headless, validate-pack, init-pack): stderr.
-    //   `float`: file-log like the TUI — it's a long-running GUI; tracing spam
+    //   `floating`: file-log like the TUI — it's a long-running GUI; tracing spam
     //     into the launching terminal would be noise (config warnings still
     //     eprintln to that terminal via build_run_config before the window opens).
     let tui_active = matches!(&cmd, Cmd::Run { headless, .. } if !*headless)
-        || matches!(&cmd, Cmd::Float { .. });
+        || matches!(&cmd, Cmd::Floating { .. });
     let wants_verbose = matches!(log_level, "debug" | "trace");
     // The env var's VALUE is the log file path — an empty value would
     // "enable" file mode with an unopenable path; treat it as unset.
@@ -118,13 +118,13 @@ fn main() -> Result<()> {
             )?;
             runtime::run(rc)
         }
-        Cmd::Float {
+        Cmd::Floating {
             socket,
             projects_root,
             codex_sessions_root,
             pack_dir,
         } => {
-            // Float reuses the TUI run prelude (theme/pack/pets/sources/log) but is
+            // Floating reuses the TUI run prelude (theme/pack/pets/sources/log) but is
             // never headless and has no desk cap — capacity is seeded from the window.
             let rc = build_run_config(
                 cli_theme.as_deref(),
@@ -135,7 +135,7 @@ fn main() -> Result<()> {
                 None,
                 false,
             )?;
-            float::run(rc)
+            floating::run(rc)
         }
         Cmd::ValidatePack { pack_dir } => validate::validate_pack(&pack_dir),
         Cmd::InitPack { dest, force } => init_pack::init_pack(&dest, force),
@@ -144,7 +144,7 @@ fn main() -> Result<()> {
 }
 
 /// Resolve the shared [`runtime::RunConfig`] from CLI args + the on-disk config —
-/// the common prelude for `run` (TUI) and `float` (window). On a non-headless
+/// the common prelude for `run` (TUI) and `floating` (window). On a non-headless
 /// launch it also surfaces config warnings + the broken-install preflight to
 /// stderr (visible in the launching terminal / pre-altscreen scrollback, #87/#309).
 #[allow(clippy::too_many_arguments)]

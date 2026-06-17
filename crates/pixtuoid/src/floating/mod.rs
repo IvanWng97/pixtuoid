@@ -1,4 +1,4 @@
-//! `pixtuoid float` — the frameless, always-on-top desktop window that renders the
+//! `pixtuoid floating` — the frameless, always-on-top desktop window that renders the
 //! live office (every agent across every connected CLI) without opening the TUI.
 //!
 //! A binary-only front-end on the shared engine: it runs the SAME
@@ -27,9 +27,9 @@ use winit::event_loop::EventLoop;
 use crate::config;
 use crate::runtime::driver::{build_source_set, reducer_task};
 use crate::runtime::{boot_capacities_for, ConnectedSources, RunConfig};
-use window::{FloatApp, FloatEvent};
+use window::{FloatingApp, FloatingEvent};
 
-/// Open the float window and drive it until the user closes it.
+/// Open the floating window and drive it until the user closes it.
 ///
 /// `winit`'s event loop must own the main thread, so the source pipeline runs on a
 /// background tokio runtime (spawned, NEVER `block_on` — that would stall the window),
@@ -49,14 +49,14 @@ pub fn run(cfg: RunConfig) -> Result<()> {
     } = cfg;
 
     let app_config = config::load(&config_path, &mut Vec::new());
-    let float_cfg = config::resolve_float(&app_config);
+    let floating_cfg = config::resolve_floating(&app_config);
     let pack = crate::tui::embedded_pack::load_sprite_pack(pack_dir)
-        .context("loading the sprite pack for the float window")?;
+        .context("loading the sprite pack for the floating window")?;
 
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
-        .context("building the float tokio runtime")?;
+        .context("building the floating tokio runtime")?;
     // Enter the runtime on the main thread so the source set's internal `tokio::spawn`s
     // (presence watch, source manager) have a runtime context. We never `block_on` here.
     let _guard = rt.enter();
@@ -77,7 +77,8 @@ pub fn run(cfg: RunConfig) -> Result<()> {
     // Boot capacity from the WINDOW, not crossterm: the office canvas is the window
     // pixels (buf_w = cols, buf_h = rows*2), so cols = width, rows = height/2. Refined to
     // the exact layout on the first redraw (window::sync_floor_caps).
-    let boot_caps = boot_capacities_for(float_cfg.width as u16, (float_cfg.height / 2) as u16);
+    let boot_caps =
+        boot_capacities_for(floating_cfg.width as u16, (floating_cfg.height / 2) as u16);
     let (scene_tx, scene_rx) = watch::channel(Arc::new(SceneState::new(boot_caps)));
     let floor_caps: Arc<[AtomicUsize; MAX_FLOORS]> =
         Arc::new(std::array::from_fn(|i| AtomicUsize::new(boot_caps[i])));
@@ -98,14 +99,14 @@ pub fn run(cfg: RunConfig) -> Result<()> {
     let _source_handles = manager.spawn_with_health(tx, health_tx);
 
     // --- the window event loop (main thread) ---
-    let mut builder = EventLoop::<FloatEvent>::with_user_event();
+    let mut builder = EventLoop::<FloatingEvent>::with_user_event();
     #[cfg(target_os = "macos")]
     {
         // Accessory: no Dock icon, doesn't steal focus — an ambient companion.
         use winit::platform::macos::{ActivationPolicy, EventLoopBuilderExtMacOS};
         builder.with_activation_policy(ActivationPolicy::Accessory);
     }
-    let event_loop = builder.build().context("building the float event loop")?;
+    let event_loop = builder.build().context("building the floating event loop")?;
     let proxy = event_loop.create_proxy();
 
     // Bridge: a new scene → a repaint. Breaks cleanly when the window closes
@@ -114,26 +115,26 @@ pub fn run(cfg: RunConfig) -> Result<()> {
         let mut scene_rx = scene_rx.clone();
         rt.spawn(async move {
             while scene_rx.changed().await.is_ok() {
-                if proxy.send_event(FloatEvent::SceneChanged).is_err() {
+                if proxy.send_event(FloatingEvent::SceneChanged).is_err() {
                     break;
                 }
             }
         });
     }
-    // Source deaths have no footer in float — log them (the office partially freezes).
+    // Source deaths have no footer in floating — log them (the office partially freezes).
     {
         let mut health_rx = health_rx;
         rt.spawn(async move {
             while health_rx.changed().await.is_ok() {
                 for death in health_rx.borrow().iter() {
-                    tracing::warn!("pixtuoid float: source exited: {death:?}");
+                    tracing::warn!("pixtuoid floating: source exited: {death:?}");
                 }
             }
         });
     }
 
-    let mut app = FloatApp::new(
-        float_cfg,
+    let mut app = FloatingApp::new(
+        floating_cfg,
         theme,
         pack,
         config_path,
@@ -143,6 +144,6 @@ pub fn run(cfg: RunConfig) -> Result<()> {
     );
     event_loop
         .run_app(&mut app)
-        .context("running the float window event loop")?;
+        .context("running the floating window event loop")?;
     Ok(())
 }

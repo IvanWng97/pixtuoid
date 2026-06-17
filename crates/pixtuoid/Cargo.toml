@@ -35,7 +35,7 @@ chrono             = { version = "0.4", default-features = false, features = ["c
 # transitions and dim overlays vs naive sRGB linear blend.
 palette            = { version = "0.7", default-features = false, features = ["std"] }
 open               = "5"
-# The `pixtuoid float` desktop window (binary-only — pixtuoid-core stays window-free,
+# The `pixtuoid floating` desktop window (binary-only — pixtuoid-core stays window-free,
 # invariant #1). winit = the frameless always-on-top window + main-thread event loop;
 # softbuffer = CPU blit of the office RgbBuffer into it (no GPU). Both rust-windowing,
 # share raw-window-handle 0.6, MSRV ≤ 1.89.

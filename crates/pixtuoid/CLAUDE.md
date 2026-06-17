@@ -19,7 +19,7 @@ src/
 │                       debug|trace, or $PIXTUOID_LOG raise verbosity — plain --log-level info
 │                       is indistinguishable from the default and floors to warn); non-TUI
 │                       modes log to stderr; install failure eprintlns pre-altscreen
-├── cli.rs              clap subcommands (run / float / validate-pack / init-pack / doctor) — NO install-hooks/uninstall-hooks
+├── cli.rs              clap subcommands (run / floating / validate-pack / init-pack / doctor) — NO install-hooks/uninstall-hooks
 │                       (deleted; binding a source is the in-TUI Sources panel's job, `s`)
 ├── doctor.rs           `pixtuoid doctor` — read-only source self-diagnosis (connected? hooks
 │                       installed? installed `<cli> --version` vs the registry's verified_version
@@ -117,21 +117,21 @@ src/
 │                         .lock file is deliberately never unlinked, and even a no-op
 │                         re-install creates it: the lock must be taken BEFORE the read
 │                         that detects "nothing changed".)
-├── float/              `pixtuoid float` — the frameless, always-on-top DESKTOP WINDOW (winit + softbuffer,
-│                       binary-only; pixtuoid-core stays window-free, invariant #1). ALL float-only source
+├── floating/           `pixtuoid floating` — the frameless, always-on-top DESKTOP WINDOW (winit + softbuffer,
+│                       binary-only; pixtuoid-core stays window-free, invariant #1). ALL floating-only source
 │                       lives here: mod.rs (run: reuses the SAME pipeline as the TUI — build_source_set [the
 │                       ONE source-construction site] + reducer_task, both relaxed to pub(crate) — spawned on
 │                       a bg runtime, NEVER block_on [winit owns the main thread]; an EventLoopProxy bridges
 │                       scene changes → redraw), offscreen.rs (OfficeRenderer — the headless render seam over
-│                       render_to_rgb_buffer; moved here from tui/ as it's float-only; the testable unit),
-│                       window.rs (FloatApp ApplicationHandler: renders the office at a DOWNSCALED buffer
+│                       render_to_rgb_buffer; moved here from tui/ as it's floating-only; the testable unit),
+│                       window.rs (FloatingApp ApplicationHandler: renders the office at a DOWNSCALED buffer
 │                       [~window/SCALE, OFFICE_TARGET_H≈180] then nearest-neighbor UPSCALES into the surface —
 │                       a 1:1 blit renders 8×12 sprites unreadably tiny; ~30fps tick WHILE agents present, else
-│                       idle 0fps; left-press drag / corner resize; persists [float] geometry on close;
+│                       idle 0fps; left-press drag / corner resize; persists [floating] geometry on close;
 │                       floor_caps synced to the rendered layout's home-desk count so no agent is stranded
 │                       off-screen; macOS Accessory + shadow, #[cfg(windows)] skip-taskbar; opacity = honest v1
 │                       no-op, winit has none + softbuffer is opaque → wgpu/native deferred). Visual check:
-│                       `examples/float_snapshot.rs` (the float twin of the `snapshot` example).
+│                       `examples/floating_snapshot.rs` (the floating twin of the `snapshot` example).
 └── tui/                ratatui App + TuiRenderer (Renderer trait impl) — see src/tui/CLAUDE.md
 
 sprites/                character/environment packs (NOT under pixtuoid-hook):
