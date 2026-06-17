@@ -106,7 +106,9 @@ pub fn run(cfg: RunConfig) -> Result<()> {
         use winit::platform::macos::{ActivationPolicy, EventLoopBuilderExtMacOS};
         builder.with_activation_policy(ActivationPolicy::Accessory);
     }
-    let event_loop = builder.build().context("building the floating event loop")?;
+    let event_loop = builder
+        .build()
+        .context("building the floating event loop")?;
     let proxy = event_loop.create_proxy();
 
     // Bridge: a new scene → a repaint. Breaks cleanly when the window closes

@@ -1240,7 +1240,10 @@ mod tests {
         // Absent [floating] → defaults, OS-placed (x/y None), opaque.
         let cfg: AppConfig = toml::from_str("theme = \"normal\"\n").unwrap();
         let f = resolve_floating(&cfg);
-        assert_eq!((f.width, f.height), (FLOATING_DEFAULT_W, FLOATING_DEFAULT_H));
+        assert_eq!(
+            (f.width, f.height),
+            (FLOATING_DEFAULT_W, FLOATING_DEFAULT_H)
+        );
         assert_eq!((f.x, f.y), (None, None));
         assert!((f.opacity - 1.0).abs() < f32::EPSILON);
         // Explicit values parse through.
