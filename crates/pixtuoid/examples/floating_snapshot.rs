@@ -11,8 +11,8 @@
 use anyhow::{anyhow, Context, Result};
 use image::{Rgb as ImgRgb, RgbImage};
 use pixtuoid::floating::offscreen::OfficeRenderer;
-use pixtuoid::tui::floor::FloorMeta;
-use pixtuoid::tui::theme::theme_by_name;
+use pixtuoid::scene::floor::FloorMeta;
+use pixtuoid::scene::theme::theme_by_name;
 use pixtuoid_core::state::SceneState;
 
 fn main() -> Result<()> {
@@ -48,7 +48,7 @@ fn main() -> Result<()> {
 
     let theme =
         theme_by_name(&theme_name).ok_or_else(|| anyhow!("unknown --theme {theme_name:?}"))?;
-    let pack = pixtuoid::tui::embedded_pack::load_sprite_pack(None)?;
+    let pack = pixtuoid::scene::embedded_pack::load_sprite_pack(None)?;
     let now = std::time::SystemTime::now();
 
     // Empty office: shows the layout / walls / windows / desks / pantry / corridor — the

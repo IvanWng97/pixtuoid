@@ -65,9 +65,9 @@ fn path_len_multi_segment_sums() {
 // advance_wander tests
 // =========================================================================
 
-use crate::tui::layout::Layout;
-use crate::tui::pathfind::Router;
-use crate::tui::pose::{
+use crate::scene::layout::Layout;
+use crate::scene::pathfind::Router;
+use crate::scene::pose::{
     dwell_ms, est_wander_cycle_ms, seated_dwell_ms, stale_resume_gap_ms, takes_trip,
     WANDER_DWELL_EST_MS,
 };

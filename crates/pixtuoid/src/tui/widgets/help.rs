@@ -6,7 +6,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
 use super::{borderless_panel, centered_in, to_color};
-use crate::tui::theme::Theme;
+use crate::scene::theme::Theme;
 
 const SHORTCUTS: &[(&str, &str)] = &[
     ("q", "quit"),
@@ -25,7 +25,7 @@ const SHORTCUTS: &[(&str, &str)] = &[
     ("Enter / Esc", "dismiss popup"),
 ];
 
-pub(in crate::tui) fn paint_help_overlay(f: &mut ratatui::Frame<'_>, bounds: Rect, theme: &Theme) {
+pub(crate) fn paint_help_overlay(f: &mut ratatui::Frame<'_>, bounds: Rect, theme: &Theme) {
     // Borderless: a title row + 1 lead-blank + the shortcut rows (no top/bottom
     // border). Title is drawn by `borderless_panel`; content fills below it.
     let area = centered_in(
@@ -70,7 +70,7 @@ mod tests {
     fn render_at(w: u16, h: u16) {
         let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
         term.draw(|f| {
-            paint_help_overlay(f, Rect::new(0, 0, w, h), &crate::tui::theme::NORMAL);
+            paint_help_overlay(f, Rect::new(0, 0, w, h), &crate::scene::theme::NORMAL);
         })
         .unwrap();
     }

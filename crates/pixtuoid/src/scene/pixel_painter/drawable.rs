@@ -32,10 +32,10 @@ use super::furniture::{
     paint_area_rug, paint_meeting_table, paint_pantry_chair, paint_pantry_table, paint_side_table,
 };
 use super::paint_character_at;
-use crate::tui::frame_cache::FrameCache;
-use crate::tui::layout::{Layout, Point, Size, DESK_H, DESK_W};
-use crate::tui::pathfind::{find_path, snap_point_to_walkable};
-use crate::tui::pet::PetKind;
+use crate::scene::frame_cache::FrameCache;
+use crate::scene::layout::{Layout, Point, Size, DESK_H, DESK_W};
+use crate::scene::pathfind::{find_path, snap_point_to_walkable};
+use crate::scene::pet::PetKind;
 use pixtuoid_core::walkable::OccupancyOverlay;
 
 pub(super) struct Drawable<'a> {
@@ -110,7 +110,7 @@ pub(super) enum DrawableKind<'a> {
         pos: Point,
     },
     Plant {
-        kind: crate::tui::layout::PlantKind,
+        kind: crate::scene::layout::PlantKind,
         pos: Point,
     },
     /// Aisle decor item between desk pods (plant / whiteboard / TV /
@@ -118,7 +118,7 @@ pub(super) enum DrawableKind<'a> {
     /// walkable mask; phone booth + standing desk additionally exist
     /// as waypoints so agents can wander to them.
     PodDecorItem {
-        kind: crate::tui::layout::PodDecor,
+        kind: crate::scene::layout::PodDecor,
         pos: Point,
     },
     FloorLamp {
@@ -134,7 +134,7 @@ pub(super) enum DrawableKind<'a> {
         frame_idx: usize,
     },
     WallDecor {
-        kind: crate::tui::layout::WallDecor,
+        kind: crate::scene::layout::WallDecor,
         pos: Point,
     },
     VendingMachine {
@@ -216,7 +216,7 @@ pub(super) fn pet_position(
     if let Some(wp) = layout
         .waypoints
         .iter()
-        .find(|w| matches!(w.kind, crate::tui::layout::WaypointKind::Pantry))
+        .find(|w| matches!(w.kind, crate::scene::layout::WaypointKind::Pantry))
     {
         spots.push((
             Point {
@@ -240,7 +240,7 @@ pub(super) fn pet_position(
     if let Some(wp) = layout
         .waypoints
         .iter()
-        .find(|w| matches!(w.kind, crate::tui::layout::WaypointKind::Couch))
+        .find(|w| matches!(w.kind, crate::scene::layout::WaypointKind::Couch))
     {
         spots.push((
             Point {
@@ -480,7 +480,7 @@ fn mascot_spots(layout: &Layout, state: DaemonState, home: Point) -> Vec<Point> 
         if let Some(wp) = layout
             .waypoints
             .iter()
-            .find(|w| matches!(w.kind, crate::tui::layout::WaypointKind::Pantry))
+            .find(|w| matches!(w.kind, crate::scene::layout::WaypointKind::Pantry))
         {
             spots.push(Point {
                 x: wp.pos.x + 4,
@@ -498,7 +498,7 @@ fn mascot_spots(layout: &Layout, state: DaemonState, home: Point) -> Vec<Point> 
         if let Some(wp) = layout
             .waypoints
             .iter()
-            .find(|w| matches!(w.kind, crate::tui::layout::WaypointKind::Couch))
+            .find(|w| matches!(w.kind, crate::scene::layout::WaypointKind::Couch))
         {
             spots.push(Point {
                 x: wp.pos.x + 4,
@@ -646,7 +646,7 @@ pub(super) fn paint_drawable(
     pack: &Pack,
     cache: &mut FrameCache,
     now: SystemTime,
-    theme: &crate::tui::theme::Theme,
+    theme: &crate::scene::theme::Theme,
 ) {
     match &d.kind {
         DrawableKind::DeskCubicle {
@@ -785,7 +785,7 @@ pub(super) fn paint_drawable(
             // Sprite size from the table (== footprint for the meeting table) so
             // the painted meeting table can't drift from the masked obstacle.
             let Size { w, h } =
-                crate::tui::layout::furniture_def(crate::tui::layout::Furniture::MeetingTable)
+                crate::scene::layout::furniture_def(crate::scene::layout::Furniture::MeetingTable)
                     .visual;
             paint_meeting_table(buf, pos.x, pos.y, w, h, theme);
         }
@@ -1016,7 +1016,7 @@ fn paint_desk_coffee(
     has_coffee: bool,
     coffee_steam: bool,
     now: SystemTime,
-    theme: &crate::tui::theme::Theme,
+    theme: &crate::scene::theme::Theme,
 ) {
     if !has_coffee {
         return;
@@ -1107,14 +1107,14 @@ mod tests {
     }
 
     fn test_pack() -> Pack {
-        crate::tui::embedded_pack::load_sprite_pack(None).expect("embedded pack")
+        crate::scene::embedded_pack::load_sprite_pack(None).expect("embedded pack")
     }
 
     #[test]
     fn pet_rest_picks_sleep_anim_when_all_idle() {
         // frac >= 0.35 (rest phase) AND all_idle => the sleep anim is selected
         // regardless of whether the rest spot is an idle desk.
-        let layout = crate::tui::layout::Layout::compute(160, 200, 4).expect("layout fits");
+        let layout = crate::scene::layout::Layout::compute(160, 200, 4).expect("layout fits");
         let pack = test_pack();
         // elapsed % 40_000 == 20_000 → frac = 0.5 (rest phase).
         let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(20_000);
@@ -1138,7 +1138,7 @@ mod tests {
         // (x>=120) pockets are unreachable from each other on the coarse grid.
         mask.mark_blocked(80, 0, 40, h, 0);
         let reachable = ReachSet::from_mask(&mask, Point { x: 20, y: 20 });
-        let mut layout = crate::tui::layout::Layout::compute(w, h, 4).expect("layout fits");
+        let mut layout = crate::scene::layout::Layout::compute(w, h, 4).expect("layout fits");
         // Override geometry: exactly two spots, one per pocket. The desk spot
         // resolves to (desk.x+DESK_W+1, desk.y+DESK_H+2) on the LEFT; the
         // corridor centre on the RIGHT.
@@ -1209,8 +1209,8 @@ mod tests {
         );
     }
 
-    fn theme() -> &'static crate::tui::theme::Theme {
-        crate::tui::theme::theme_by_name("normal").expect("theme")
+    fn theme() -> &'static crate::scene::theme::Theme {
+        crate::scene::theme::theme_by_name("normal").expect("theme")
     }
 
     #[test]

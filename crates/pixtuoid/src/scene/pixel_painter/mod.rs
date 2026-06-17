@@ -20,17 +20,17 @@ use pixtuoid_core::state::{ActivityState, FloorLocalDeskIndex};
 use pixtuoid_core::walkable::OccupancyOverlay;
 use pixtuoid_core::{AgentSlot, SceneState};
 
-use crate::tui::chitchat::{self, ActiveChitchat, ChitchatBubble};
-use crate::tui::floor::LightingState;
-use crate::tui::frame_cache::FrameCache;
-use crate::tui::layout::{
+use crate::scene::chitchat::{self, ActiveChitchat, ChitchatBubble};
+use crate::scene::floor::LightingState;
+use crate::scene::frame_cache::FrameCache;
+use crate::scene::layout::{
     z_sort_row, Anchor, Layout, PlantItem, PodDecorItem, Point, Size, WallDecorItem, WallSegment,
     DESK_H, DESK_W, ELEVATOR_H, ELEVATOR_W,
 };
-use crate::tui::motion::MotionState;
-use crate::tui::pathfind::Router;
-use crate::tui::pet::PetFrame;
-use crate::tui::pose::{self, Pose};
+use crate::scene::motion::MotionState;
+use crate::scene::pathfind::Router;
+use crate::scene::pet::PetFrame;
+use crate::scene::pose::{self, Pose};
 
 /// Milliseconds since the Unix epoch for `now` (0 if the clock is before it).
 /// The wall-clock decode the pixel-pass animation timers share — was hand-rolled
@@ -86,8 +86,8 @@ mod glass;
 mod palette;
 mod seat;
 
-pub(in crate::tui) use anchors::character_anchor;
-pub(in crate::tui) use anchors::walking_position;
+pub(crate) use anchors::character_anchor;
+pub(crate) use anchors::walking_position;
 use anchors::{
     back_couch_anchor, compute_door_frame_idx, seated_anchor, standing_at_desk_anchor,
     walking_anchor, waypoint_anchor, waypoint_rank_offset_x, with_breath, CHARACTER_SPRITE_W,
@@ -158,7 +158,7 @@ fn center_pin_south_offset(h: u16) -> u16 {
 /// lamp's visual height changes (locked by a unit test).
 fn floor_lamp_south_offset() -> u16 {
     center_pin_south_offset(
-        crate::tui::layout::furniture_def(crate::tui::layout::Furniture::FloorLamp)
+        crate::scene::layout::furniture_def(crate::scene::layout::Furniture::FloorLamp)
             .visual
             .h,
     )
@@ -183,16 +183,16 @@ pub struct PixelCtx<'a> {
     /// from `DrawCtx.door_anim_max_ms`. Used by `compute_door_frame_idx`
     /// instead of the old hardcoded `ENTRY_ANIMATION_MS`.
     pub door_anim_max_ms: u64,
-    pub theme: &'a crate::tui::theme::Theme,
-    pub floor: crate::tui::floor::FloorMeta,
-    pub active_pet: Option<&'a crate::tui::renderer::PetState>,
+    pub theme: &'a crate::scene::theme::Theme,
+    pub floor: crate::scene::floor::FloorMeta,
+    pub active_pet: Option<&'a crate::scene::pet::PetState>,
     /// The pet on this floor (kind drives the sprite; name is unused here — the
     /// pixel pass doesn't render the name, the tooltip does).
-    pub floor_pet: Option<&'a crate::tui::pet::Pet>,
-    pub chitchat_state: &'a mut HashMap<crate::tui::chitchat::VenueKey, ActiveChitchat>,
+    pub floor_pet: Option<&'a crate::scene::pet::Pet>,
+    pub chitchat_state: &'a mut HashMap<crate::scene::chitchat::VenueKey, ActiveChitchat>,
     pub coffee_holders: &'a std::collections::HashSet<pixtuoid_core::AgentId>,
     pub coffee_fetched_at: &'a HashMap<pixtuoid_core::AgentId, SystemTime>,
-    pub light: &'a mut crate::tui::floor::LightingState,
+    pub light: &'a mut crate::scene::floor::LightingState,
     /// When set, composite the walkable / approach / route debug layer over the
     /// finished scene (the live `w` toggle). Off by default; transient.
     pub debug_walkable: bool,
@@ -412,7 +412,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
         );
     }
     for wp in &ctx.layout.waypoints {
-        use crate::tui::layout::WaypointKind;
+        use crate::scene::layout::WaypointKind;
         // Couch shadow is emitted once below (3 seat waypoints; per-seat
         // shadows would overlap). Printer is handled just after — its 4px-tall
         // sprite's south is pos.y+1, so the generic +2 would float 1px below.
@@ -435,7 +435,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
         .layout
         .waypoints
         .iter()
-        .filter(|w| w.kind == crate::tui::layout::WaypointKind::Printer)
+        .filter(|w| w.kind == crate::scene::layout::WaypointKind::Printer)
     {
         // Flush against the printer's sprite south (pos.y+1).
         paint_shadow(
@@ -468,7 +468,11 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
         // uses, off the same height (Succulent/Flower were floating at a fixed
         // +3 that only suited the taller Ficus/Tall).
         let cy = pos.y
-            + center_pin_south_offset(crate::tui::layout::furniture_def(kind.furniture()).visual.h);
+            + center_pin_south_offset(
+                crate::scene::layout::furniture_def(kind.furniture())
+                    .visual
+                    .h,
+            );
         paint_shadow(
             ctx.buf,
             Ellipse {
@@ -513,7 +517,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
                 a,
                 ctx.now,
                 ctx.layout,
-                &mut crate::tui::pose::RouteCtx {
+                &mut crate::scene::pose::RouteCtx {
                     router: &mut *ctx.router,
                     overlay: &*ctx.overlay,
                     history: &mut *ctx.history,
@@ -656,7 +660,7 @@ fn enqueue_characters<'a>(
         .layout
         .waypoints
         .iter()
-        .position(|w| w.kind == crate::tui::layout::WaypointKind::Couch);
+        .position(|w| w.kind == crate::scene::layout::WaypointKind::Couch);
     // The pack's character sprite width (8 for the bundled pack, 10 for the
     // robot pack). All character poses share one width, so resolve it ONCE from
     // a reference pose and center every anchor on it — a non-8-wide pack would
@@ -675,7 +679,7 @@ fn enqueue_characters<'a>(
             agent,
             ctx.now,
             ctx.layout,
-            &mut crate::tui::pose::RouteCtx {
+            &mut crate::scene::pose::RouteCtx {
                 router: &mut *ctx.router,
                 overlay: &*ctx.overlay,
                 history: &mut *ctx.history,
@@ -780,7 +784,7 @@ fn enqueue_characters<'a>(
                     let rank = *wp_rank.entry(wp).or_insert(0);
                     wp_rank.insert(wp, rank + 1);
                     let dx = waypoint_rank_offset_x(kind, rank);
-                    use crate::tui::layout::WaypointKind;
+                    use crate::scene::layout::WaypointKind;
                     // Render anchor: the cell the agent occupies. For obstacles
                     // this is the side stand cell (side-aware); for seats it is
                     // `wp.pos` (the sprite sits ON the furniture) — the walk-in
@@ -1007,7 +1011,7 @@ fn enqueue_desk_cubicles<'a>(
         let Size {
             w: desk_fp_w,
             h: desk_fp_h,
-        } = crate::tui::layout::desk_furniture_def()
+        } = crate::scene::layout::desk_furniture_def()
             .footprint
             .unwrap_or(Size {
                 w: DESK_W,
@@ -1217,7 +1221,7 @@ fn enqueue_meeting_furniture<'a>(layout: &'a Layout, drawables: &mut Vec<Drawabl
             anchor_y: z_sort_row(
                 Anchor::Center,
                 room.table,
-                crate::tui::layout::furniture_def(crate::tui::layout::Furniture::MeetingTable)
+                crate::scene::layout::furniture_def(crate::scene::layout::Furniture::MeetingTable)
                     .visual
                     .h,
             ),
@@ -1237,7 +1241,7 @@ fn enqueue_lounge_pantry_appliances<'a>(layout: &'a Layout, drawables: &mut Vec<
             anchor_y: z_sort_row(
                 Anchor::Center,
                 table,
-                crate::tui::layout::furniture_def(crate::tui::layout::Furniture::PantryTable)
+                crate::scene::layout::furniture_def(crate::scene::layout::Furniture::PantryTable)
                     .visual
                     .h,
             ),
@@ -1249,7 +1253,7 @@ fn enqueue_lounge_pantry_appliances<'a>(layout: &'a Layout, drawables: &mut Vec<
             anchor_y: z_sort_row(
                 Anchor::Center,
                 *chair,
-                crate::tui::layout::furniture_def(crate::tui::layout::Furniture::PantryChair)
+                crate::scene::layout::furniture_def(crate::scene::layout::Furniture::PantryChair)
                     .visual
                     .h,
             ),
@@ -1276,7 +1280,7 @@ fn enqueue_lounge_pantry_appliances<'a>(layout: &'a Layout, drawables: &mut Vec<
             anchor_y: z_sort_row(
                 Anchor::Center,
                 center,
-                crate::tui::layout::furniture_def(crate::tui::layout::Furniture::Couch)
+                crate::scene::layout::furniture_def(crate::scene::layout::Furniture::Couch)
                     .visual
                     .h,
             ),
@@ -1287,8 +1291,8 @@ fn enqueue_lounge_pantry_appliances<'a>(layout: &'a Layout, drawables: &mut Vec<
                 anchor_y: z_sort_row(
                     Anchor::Center,
                     table,
-                    crate::tui::layout::furniture_def(
-                        crate::tui::layout::Furniture::LoungeSideTable,
+                    crate::scene::layout::furniture_def(
+                        crate::scene::layout::Furniture::LoungeSideTable,
                     )
                     .visual
                     .h,
@@ -1299,7 +1303,7 @@ fn enqueue_lounge_pantry_appliances<'a>(layout: &'a Layout, drawables: &mut Vec<
     }
 
     for wp in &layout.waypoints {
-        use crate::tui::layout::{furniture_def, WaypointKind};
+        use crate::scene::layout::{furniture_def, WaypointKind};
         // y-sort baseline = the sprite's south row (these appliances are
         // center-pinned at `pos`). Read the VISUAL height, not the (shallow)
         // footprint, so an overhang would still sort by what's painted.
@@ -1341,7 +1345,7 @@ fn enqueue_lounge_pantry_appliances<'a>(layout: &'a Layout, drawables: &mut Vec<
 /// blocking the aisle).
 fn enqueue_pod_decor_and_plants<'a>(layout: &'a Layout, drawables: &mut Vec<Drawable<'a>>) {
     for &PodDecorItem { kind, pos } in &layout.pod_decor {
-        let Size { h, .. } = crate::tui::layout::furniture_def(kind.furniture()).visual;
+        let Size { h, .. } = crate::scene::layout::furniture_def(kind.furniture()).visual;
         drawables.push(Drawable {
             anchor_y: z_sort_row(Anchor::Center, pos, h),
             kind: DrawableKind::PodDecorItem { kind, pos },
@@ -1352,7 +1356,9 @@ fn enqueue_pod_decor_and_plants<'a>(layout: &'a Layout, drawables: &mut Vec<Draw
             anchor_y: z_sort_row(
                 Anchor::Center,
                 pos,
-                crate::tui::layout::furniture_def(kind.furniture()).visual.h,
+                crate::scene::layout::furniture_def(kind.furniture())
+                    .visual
+                    .h,
             ),
             kind: DrawableKind::Plant { kind, pos },
         });
@@ -1405,7 +1411,7 @@ fn enqueue_floor_fixtures<'a>(
 /// agent set, so it carries no character lifetime.
 fn enqueue_wall_decor<'a>(layout: &'a Layout, drawables: &mut Vec<Drawable<'a>>) {
     for &WallDecorItem { kind, pos } in &layout.wall_decor {
-        let Size { h, .. } = crate::tui::layout::furniture_def(kind.furniture()).visual;
+        let Size { h, .. } = crate::scene::layout::furniture_def(kind.furniture()).visual;
         drawables.push(Drawable {
             anchor_y: z_sort_row(Anchor::TopLeft, pos, h),
             kind: DrawableKind::WallDecor { kind, pos },

@@ -14,10 +14,10 @@ use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_core::{AgentId, SceneState};
 
 use super::palette::blend_over;
-use crate::tui::layout::{
+use crate::scene::layout::{
     desk_walk_anchor, furniture_def, Facing, Furniture, Layout, Point, Size, WaypointKind,
 };
-use crate::tui::motion::MotionState;
+use crate::scene::motion::MotionState;
 
 const BLOCKED: Rgb = Rgb {
     r: 220,
@@ -228,7 +228,7 @@ fn line(buf: &mut RgbBuffer, a: Point, b: Point, c: Rgb) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tui::layout::SceneLayout;
+    use crate::scene::layout::SceneLayout;
 
     fn greenish(c: Rgb) -> bool {
         c.g > c.r && c.g > c.b
@@ -374,7 +374,7 @@ mod tests {
     // also exercises tint's out-of-bounds guard (63).
     #[test]
     fn paint_routes_draws_frozen_paths_and_skips_the_rest() {
-        use crate::tui::motion::{MotionState, WalkPathSnapshot};
+        use crate::scene::motion::{MotionState, WalkPathSnapshot};
         use std::collections::HashMap;
 
         let mut scene = SceneState::uniform(8);

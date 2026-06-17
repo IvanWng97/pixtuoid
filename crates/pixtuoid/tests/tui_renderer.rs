@@ -6,7 +6,7 @@
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
-use pixtuoid::tui::embedded_pack::load_sprite_pack;
+use pixtuoid::scene::embedded_pack::load_sprite_pack;
 use pixtuoid::tui::tui_renderer::TuiRenderer;
 use pixtuoid_core::state::ActivityState;
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex, Renderer, SceneState};
@@ -49,10 +49,10 @@ fn tui_renderer_render_paints_a_full_frame() {
     let terminal = Terminal::new(backend).expect("terminal");
     let mut renderer = TuiRenderer::new(
         terminal,
-        &pixtuoid::tui::theme::NORMAL,
-        pixtuoid::tui::pet::PetKind::ALL
+        &pixtuoid::scene::theme::NORMAL,
+        pixtuoid::scene::pet::PetKind::ALL
             .iter()
-            .map(|&k| pixtuoid::tui::pet::Pet::defaulted(k))
+            .map(|&k| pixtuoid::scene::pet::Pet::defaulted(k))
             .collect(),
     );
     let pack = load_sprite_pack(None).expect("pack");
@@ -127,10 +127,10 @@ fn tui_renderer_transition_paints_pets_and_coffee() {
     let terminal = Terminal::new(backend).expect("terminal");
     let mut renderer = TuiRenderer::new(
         terminal,
-        &pixtuoid::tui::theme::NORMAL,
-        pixtuoid::tui::pet::PetKind::ALL
+        &pixtuoid::scene::theme::NORMAL,
+        pixtuoid::scene::pet::PetKind::ALL
             .iter()
-            .map(|&k| pixtuoid::tui::pet::Pet::defaulted(k))
+            .map(|&k| pixtuoid::scene::pet::Pet::defaulted(k))
             .collect(),
     );
     let pack = load_sprite_pack(None).expect("pack");
@@ -141,8 +141,8 @@ fn tui_renderer_transition_paints_pets_and_coffee() {
     // Set an active pet on floor 0 (carried through the transition).
     renderer.set_active_pet(Some(pixtuoid::tui::renderer::PetState {
         petted_at: now,
-        pet_pos: pixtuoid::tui::layout::Point { x: 20, y: 20 },
-        kind: pixtuoid::tui::pet::PetKind::Cat,
+        pet_pos: pixtuoid::scene::layout::Point { x: 20, y: 20 },
+        kind: pixtuoid::scene::pet::PetKind::Cat,
         floor_idx: 0,
     }));
 
@@ -192,10 +192,10 @@ fn set_version_popup_records_timestamp_on_edge() {
     let terminal = Terminal::new(backend).expect("terminal");
     let mut renderer = TuiRenderer::new(
         terminal,
-        &pixtuoid::tui::theme::NORMAL,
-        pixtuoid::tui::pet::PetKind::ALL
+        &pixtuoid::scene::theme::NORMAL,
+        pixtuoid::scene::pet::PetKind::ALL
             .iter()
-            .map(|&k| pixtuoid::tui::pet::Pet::defaulted(k))
+            .map(|&k| pixtuoid::scene::pet::Pet::defaulted(k))
             .collect(),
     );
 
@@ -241,10 +241,10 @@ fn version_popup_animation_starts_small_then_grows() {
     let terminal = Terminal::new(backend).expect("terminal");
     let mut renderer = TuiRenderer::new(
         terminal,
-        &pixtuoid::tui::theme::NORMAL,
-        pixtuoid::tui::pet::PetKind::ALL
+        &pixtuoid::scene::theme::NORMAL,
+        pixtuoid::scene::pet::PetKind::ALL
             .iter()
-            .map(|&k| pixtuoid::tui::pet::Pet::defaulted(k))
+            .map(|&k| pixtuoid::scene::pet::Pet::defaulted(k))
             .collect(),
     );
 
@@ -296,10 +296,10 @@ fn dismiss_mid_entrance_does_not_snap_to_full() {
     let terminal = Terminal::new(backend).expect("terminal");
     let mut renderer = TuiRenderer::new(
         terminal,
-        &pixtuoid::tui::theme::NORMAL,
-        pixtuoid::tui::pet::PetKind::ALL
+        &pixtuoid::scene::theme::NORMAL,
+        pixtuoid::scene::pet::PetKind::ALL
             .iter()
-            .map(|&k| pixtuoid::tui::pet::Pet::defaulted(k))
+            .map(|&k| pixtuoid::scene::pet::Pet::defaulted(k))
             .collect(),
     );
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
@@ -366,10 +366,10 @@ fn cancel_transition_lands_on_destination_floor() {
     let terminal = Terminal::new(backend).expect("terminal");
     let mut renderer = TuiRenderer::new(
         terminal,
-        &pixtuoid::tui::theme::NORMAL,
-        pixtuoid::tui::pet::PetKind::ALL
+        &pixtuoid::scene::theme::NORMAL,
+        pixtuoid::scene::pet::PetKind::ALL
             .iter()
-            .map(|&k| pixtuoid::tui::pet::Pet::defaulted(k))
+            .map(|&k| pixtuoid::scene::pet::Pet::defaulted(k))
             .collect(),
     );
     let pack = load_sprite_pack(None).expect("pack");
@@ -399,10 +399,10 @@ fn make_renderer() -> TuiRenderer<TestBackend> {
     let terminal = Terminal::new(backend).expect("terminal");
     TuiRenderer::new(
         terminal,
-        &pixtuoid::tui::theme::NORMAL,
-        pixtuoid::tui::pet::PetKind::ALL
+        &pixtuoid::scene::theme::NORMAL,
+        pixtuoid::scene::pet::PetKind::ALL
             .iter()
-            .map(|&k| pixtuoid::tui::pet::Pet::defaulted(k))
+            .map(|&k| pixtuoid::scene::pet::Pet::defaulted(k))
             .collect(),
     )
 }

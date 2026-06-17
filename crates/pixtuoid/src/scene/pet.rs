@@ -1,6 +1,6 @@
 use std::time::SystemTime;
 
-use crate::tui::layout::{Point, Size};
+use crate::scene::layout::{Point, Size};
 
 /// Duration (ms) the pet stays frozen in place after being petted.
 pub const PET_DURATION_MS: u64 = 2000;

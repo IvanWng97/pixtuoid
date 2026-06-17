@@ -10,14 +10,14 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph};
 
 use super::to_color;
-use crate::tui::theme::Theme;
+use crate::scene::theme::Theme;
 
 /// Uniform inner padding for every borderless popup — the breathing room that
 /// stands in for the removed border. Shared (re-exported via `widgets`) so the
 /// version-popup click-rect math derives its offsets from the SAME constants the
 /// painter insets by, and can't drift.
-pub(in crate::tui) const PANEL_PAD_X: u16 = 2;
-pub(in crate::tui) const PANEL_PAD_Y: u16 = 1;
+pub(crate) const PANEL_PAD_X: u16 = 2;
+pub(crate) const PANEL_PAD_Y: u16 = 1;
 
 /// Paint a borderless panel over `area`: `Clear`, a solid background fill, a
 /// uniform `PANEL_PAD_*` inset, and — when `title` is set and there's room — a
@@ -25,7 +25,7 @@ pub(in crate::tui) const PANEL_PAD_Y: u16 = 1;
 /// content `Rect` (the padded region, below the title row when one is drawn). No
 /// borders are ever drawn; the bg fill + `Clear` + padding keep text legible and
 /// off the panel edges.
-pub(in crate::tui) fn borderless_panel(
+pub(crate) fn borderless_panel(
     f: &mut ratatui::Frame<'_>,
     area: Rect,
     title: Option<&str>,
@@ -78,7 +78,12 @@ mod tests {
     fn render_to_string(w: u16, h: u16, title: Option<&str>) -> String {
         let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
         term.draw(|f| {
-            borderless_panel(f, Rect::new(0, 0, w, h), title, &crate::tui::theme::NORMAL);
+            borderless_panel(
+                f,
+                Rect::new(0, 0, w, h),
+                title,
+                &crate::scene::theme::NORMAL,
+            );
         })
         .unwrap();
         let buf = term.backend().buffer().clone();
@@ -112,7 +117,7 @@ mod tests {
                 f,
                 Rect::new(0, 0, 20, 6),
                 Some("X"),
-                &crate::tui::theme::NORMAL,
+                &crate::scene::theme::NORMAL,
             );
         })
         .unwrap();
@@ -127,7 +132,12 @@ mod tests {
         assert_eq!(inner.height, 6 - PANEL_PAD_Y * 2 - 1);
         // Untitled: the padded region with no title row.
         term.draw(|f| {
-            inner = borderless_panel(f, Rect::new(0, 0, 20, 6), None, &crate::tui::theme::NORMAL);
+            inner = borderless_panel(
+                f,
+                Rect::new(0, 0, 20, 6),
+                None,
+                &crate::scene::theme::NORMAL,
+            );
         })
         .unwrap();
         assert_eq!(inner.y, PANEL_PAD_Y);

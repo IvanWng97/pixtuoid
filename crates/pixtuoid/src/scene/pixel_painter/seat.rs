@@ -29,7 +29,7 @@ pub(super) fn paint_character_at(
         return;
     };
     let cached = cache.get_or_make(
-        crate::tui::frame_cache::FrameKey {
+        crate::scene::frame_cache::FrameKey {
             agent_id: agent.agent_id,
             anim_name,
             frame_idx,
@@ -57,8 +57,8 @@ pub(super) fn paint_character_at(
 /// `seated`); a meeting stand faces inward (west stander marked `Facing::East` is
 /// mirrored). Extracted so the facing→sprite mapping is unit-testable.
 pub(super) fn seat_sprite(
-    kind: crate::tui::layout::WaypointKind,
-    facing: crate::tui::layout::Facing,
+    kind: crate::scene::layout::WaypointKind,
+    facing: crate::scene::layout::Facing,
 ) -> (&'static str, bool) {
     SeatView::of(kind, facing).seated_sprite()
 }
@@ -98,10 +98,10 @@ impl SeatView {
     /// The view a `kind` occupant looks in, from its seat `facing`. The ONE place
     /// a seat's orientation is decided — extend HERE to add a seatable furniture.
     pub(super) fn of(
-        kind: crate::tui::layout::WaypointKind,
-        facing: crate::tui::layout::Facing,
+        kind: crate::scene::layout::WaypointKind,
+        facing: crate::scene::layout::Facing,
     ) -> Self {
-        use crate::tui::layout::{Facing, WaypointKind};
+        use crate::scene::layout::{Facing, WaypointKind};
         match kind {
             // Couch + sofa: North looks at the window/back wall (back view); the
             // other seats face the viewer across the table.

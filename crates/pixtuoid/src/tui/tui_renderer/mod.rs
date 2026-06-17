@@ -23,11 +23,11 @@ use ratatui::Terminal;
 
 use ratatui::layout::Rect;
 
-use crate::tui::floor::{num_floors, project_floor_scene, FloorCtx, FloorMeta, FloorTransition};
-use crate::tui::layout::{Layout, MAX_VISIBLE_DESKS};
-use crate::tui::pathfind::Router;
-use crate::tui::pet::PetFrame;
-use crate::tui::pixel_painter::{render_to_rgb_buffer, PixelCtx};
+use crate::scene::floor::{num_floors, project_floor_scene, FloorCtx, FloorMeta, FloorTransition};
+use crate::scene::layout::{Layout, MAX_VISIBLE_DESKS};
+use crate::scene::pathfind::Router;
+use crate::scene::pet::PetFrame;
+use crate::scene::pixel_painter::{render_to_rgb_buffer, PixelCtx};
 use crate::tui::renderer::{draw_scene, flush_buffer_to_term_at_offset, DrawCtx, PetState};
 
 pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
@@ -39,7 +39,7 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     mouse_pos: Option<(u16, u16)>,
     pinned_agent: Option<pixtuoid_core::AgentId>,
     pub ticker: crate::tui::renderer::TickerQueue,
-    theme: &'static crate::tui::theme::Theme,
+    theme: &'static crate::scene::theme::Theme,
     theme_picker: Option<usize>,
     cached_layout: Option<Layout>,
     active_pet: Option<PetState>,
@@ -48,10 +48,10 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     /// at startup by `config::resolve_pets`. `select_pet_for_floor` picks one
     /// per floor; the picked `&Pet` flows into `DrawCtx.floor_pet`. Replaces the
     /// former `enabled_pets: Vec<PetKind>` + `pet_names: HashMap` pair.
-    pets: Vec<crate::tui::pet::Pet>,
+    pets: Vec<crate::scene::pet::Pet>,
     chitchat_state: std::collections::HashMap<
-        crate::tui::chitchat::VenueKey,
-        crate::tui::chitchat::ActiveChitchat,
+        crate::scene::chitchat::VenueKey,
+        crate::scene::chitchat::ActiveChitchat,
     >,
     /// Persistent set of agents that have visited the pantry and carry a
     /// coffee cup back to their desk. Replaces the stateless
@@ -101,8 +101,8 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
 impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     pub fn new(
         terminal: Terminal<B>,
-        theme: &'static crate::tui::theme::Theme,
-        pets: Vec<crate::tui::pet::Pet>,
+        theme: &'static crate::scene::theme::Theme,
+        pets: Vec<crate::scene::pet::Pet>,
     ) -> Self {
         Self {
             terminal,
@@ -206,7 +206,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     /// Read a floor's pose history (test harness only) — used to assert that
     /// departed agents are evicted on every floor.
     #[cfg(test)]
-    pub fn floor_history(&self, floor: usize) -> Option<&crate::tui::pose::PoseHistory> {
+    pub fn floor_history(&self, floor: usize) -> Option<&crate::scene::pose::PoseHistory> {
         self.floor_ctxs.get(floor).map(|f| &f.history)
     }
 
@@ -216,7 +216,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     pub fn floor_motion(
         &self,
         floor: usize,
-    ) -> Option<&std::collections::HashMap<pixtuoid_core::AgentId, crate::tui::motion::MotionState>>
+    ) -> Option<&std::collections::HashMap<pixtuoid_core::AgentId, crate::scene::motion::MotionState>>
     {
         self.floor_ctxs.get(floor).map(|f| &f.motion)
     }
@@ -286,11 +286,11 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         &self.floor_bufs[self.current_floor]
     }
 
-    pub fn set_theme(&mut self, theme: &'static crate::tui::theme::Theme) {
+    pub fn set_theme(&mut self, theme: &'static crate::scene::theme::Theme) {
         if !std::ptr::eq(self.theme, theme) {
             self.theme = theme;
             for ctx in &mut self.floor_ctxs {
-                ctx.cache = crate::tui::frame_cache::FrameCache::new();
+                ctx.cache = crate::scene::frame_cache::FrameCache::new();
             }
         }
     }
@@ -328,7 +328,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     /// animation continues from its current visual position rather than
     /// snapping to 0 or 1 and re-animating from scratch.
     pub fn version_popup_scale(&self, now: SystemTime) -> f32 {
-        use crate::tui::anim::{eased_progress, Easing};
+        use crate::scene::anim::{eased_progress, Easing};
         match (self.version_popup, self.version_popup_started_at) {
             (true, Some(start)) => {
                 let progress = eased_progress(start, 200, Easing::EaseOutCubic, now);
@@ -501,8 +501,8 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             .active_pet
             .as_ref()
             .filter(|p| p.floor_idx == to_floor && p.is_active(now));
-        let from_pet = crate::tui::pet::select_pet_for_floor(from_meta.floor_seed, &self.pets);
-        let to_pet = crate::tui::pet::select_pet_for_floor(to_meta.floor_seed, &self.pets);
+        let from_pet = crate::scene::pet::select_pet_for_floor(from_meta.floor_seed, &self.pets);
+        let to_pet = crate::scene::pet::select_pet_for_floor(to_meta.floor_seed, &self.pets);
 
         let from_carriers = render_transition_floor(
             &from_scene,
@@ -673,7 +673,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> Renderer for TuiRenderer<B> {
         self.ticker.update(scene);
 
         // Compute how many floors the current scene needs.
-        let nf = num_floors(scene).min(crate::tui::floor::MAX_FLOORS);
+        let nf = num_floors(scene).min(crate::scene::floor::MAX_FLOORS);
 
         // Grow vectors if needed.
         while self.floor_bufs.len() < nf {
@@ -763,7 +763,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> Renderer for TuiRenderer<B> {
             // (self.floor_ctxs) above, so the field-split borrow is fine (same
             // as `&self.ticker`/`&self.coffee_holders` here). The picked `&Pet`
             // carries the name, so the tooltip needs no separate map.
-            floor_pet: crate::tui::pet::select_pet_for_floor(floor_meta.floor_seed, &self.pets),
+            floor_pet: crate::scene::pet::select_pet_for_floor(floor_meta.floor_seed, &self.pets),
             chitchat_state: &mut self.chitchat_state,
             chitchat_bubbles: Vec::new(),
             coffee_holders: &self.coffee_holders,
@@ -828,13 +828,13 @@ fn render_transition_floor(
     buf_w: u16,
     buf_h: u16,
     active_pet: Option<&PetState>,
-    floor_pet: Option<&crate::tui::pet::Pet>,
-    theme: &'static crate::tui::theme::Theme,
+    floor_pet: Option<&crate::scene::pet::Pet>,
+    theme: &'static crate::scene::theme::Theme,
     coffee_holders: &std::collections::HashSet<pixtuoid_core::AgentId>,
     coffee_fetched_at: &std::collections::HashMap<pixtuoid_core::AgentId, SystemTime>,
     chitchat_state: &mut std::collections::HashMap<
-        crate::tui::chitchat::VenueKey,
-        crate::tui::chitchat::ActiveChitchat,
+        crate::scene::chitchat::VenueKey,
+        crate::scene::chitchat::ActiveChitchat,
     >,
     pack: &Pack,
     now: SystemTime,

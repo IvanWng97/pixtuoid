@@ -16,14 +16,14 @@ use pixtuoid_core::state::AgentSlot;
 use pixtuoid_core::walkable::OccupancyOverlay;
 use pixtuoid_core::AgentId;
 
-use crate::tui::layout::{Layout, Point, WaypointKind};
-use crate::tui::pathfind::Router;
-use crate::tui::pose::{
+use crate::scene::layout::{Layout, Point, WaypointKind};
+use crate::scene::pathfind::Router;
+use crate::scene::pose::{
     aimless_wander_seed, dwell_ms, est_wander_cycle_ms, is_aimless_cycle, pick_aimless_dest,
     seated_dwell_ms, stale_resume_gap_ms, takes_trip, waypoint_index_for_cycle,
     WANDER_DWELL_EST_MS,
 };
-use crate::tui::pose::{desk_leg_endpoint, octile_distance};
+use crate::scene::pose::{desk_leg_endpoint, octile_distance};
 
 /// Frozen A* polyline for one in-flight walk leg.
 ///
@@ -510,7 +510,7 @@ pub fn octile_path_len(path: &[Point]) -> u32 {
 /// Octile length of the settle segment `approach → seat`, or 0 when there is no
 /// seat (obstacle/aimless). Added to a wander leg's profile length so its
 /// DURATION covers the full walk including the short sit-down/stand-up settle.
-pub(in crate::tui) fn settle_len(approach: Point, seat: Option<Point>) -> u32 {
+pub(crate) fn settle_len(approach: Point, seat: Option<Point>) -> u32 {
     seat.map_or(0, |s| octile_distance(approach, s))
 }
 

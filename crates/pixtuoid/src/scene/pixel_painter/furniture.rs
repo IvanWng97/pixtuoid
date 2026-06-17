@@ -7,7 +7,7 @@
 
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
-use crate::tui::layout::Bounds;
+use crate::scene::layout::Bounds;
 
 /// Low meeting-room table between the sofas. Wood top with darker
 /// trim along the front edge so it reads as a real piece of furniture,
@@ -18,7 +18,7 @@ pub(super) fn paint_meeting_table(
     cy: u16,
     w: u16,
     h: u16,
-    theme: &crate::tui::theme::Theme,
+    theme: &crate::scene::theme::Theme,
 ) {
     let top = theme.furniture.wood_top;
     let trim = theme.furniture.wood_trim;
@@ -43,7 +43,7 @@ pub(super) fn paint_area_rug(
     cy: u16,
     w: u16,
     h: u16,
-    theme: &crate::tui::theme::Theme,
+    theme: &crate::scene::theme::Theme,
 ) {
     let rug_field = theme.furniture.rug_field;
     let rug_trim = theme.furniture.rug_trim;
@@ -79,7 +79,7 @@ pub(super) fn paint_side_table(
     buf: &mut RgbBuffer,
     cx: u16,
     cy: u16,
-    theme: &crate::tui::theme::Theme,
+    theme: &crate::scene::theme::Theme,
 ) {
     let top = theme.furniture.wood_top;
     let trim = theme.furniture.wood_trim;
@@ -87,9 +87,10 @@ pub(super) fn paint_side_table(
     let mag_trim = theme.furniture.magazine_trim;
     // Sprite dimensions from the one furniture table (== the mask footprint for
     // the side table) so the painted block can't drift from the blocked ground.
-    let (w, h) = crate::tui::layout::furniture_def(crate::tui::layout::Furniture::LoungeSideTable)
-        .footprint
-        .map_or((7, 4), |s| (s.w as i32, s.h as i32));
+    let (w, h) =
+        crate::scene::layout::furniture_def(crate::scene::layout::Furniture::LoungeSideTable)
+            .footprint
+            .map_or((7, 4), |s| (s.w as i32, s.h as i32));
     for dy in 0..h {
         for dx in 0..w {
             let px = cx as i32 - w / 2 + dx;
@@ -125,11 +126,11 @@ pub(super) fn paint_pantry_table(
     buf: &mut RgbBuffer,
     cx: u16,
     cy: u16,
-    theme: &crate::tui::theme::Theme,
+    theme: &crate::scene::theme::Theme,
 ) {
     let top = theme.furniture.wood_top;
     let trim = theme.furniture.wood_trim;
-    let (w, h) = crate::tui::layout::furniture_def(crate::tui::layout::Furniture::PantryTable)
+    let (w, h) = crate::scene::layout::furniture_def(crate::scene::layout::Furniture::PantryTable)
         .footprint
         .map_or((7, 4), |s| (s.w as i32, s.h as i32));
     for dy in 0..h {
@@ -153,7 +154,7 @@ pub(super) fn paint_pantry_chair(
     buf: &mut RgbBuffer,
     cx: u16,
     cy: u16,
-    theme: &crate::tui::theme::Theme,
+    theme: &crate::scene::theme::Theme,
 ) {
     let seat = theme.furniture.chair_seat;
     let trim = theme.furniture.chair_trim;
@@ -175,7 +176,7 @@ pub(super) fn paint_pantry_chair(
 pub(super) fn paint_notice_board(
     buf: &mut RgbBuffer,
     mr: Bounds,
-    theme: &crate::tui::theme::Theme,
+    theme: &crate::scene::theme::Theme,
 ) {
     if !(mr.height > 20 && mr.width > 15) {
         return;
@@ -197,7 +198,7 @@ pub(super) fn paint_notice_board(
 }
 
 /// Small doormat at the meeting-room entrance (4×5 bordered rug, cubicle side).
-pub(super) fn paint_doormat(buf: &mut RgbBuffer, mr: Bounds, theme: &crate::tui::theme::Theme) {
+pub(super) fn paint_doormat(buf: &mut RgbBuffer, mr: Bounds, theme: &crate::scene::theme::Theme) {
     if mr.width <= 10 {
         return;
     }
@@ -221,7 +222,7 @@ pub(super) fn paint_doormat(buf: &mut RgbBuffer, mr: Bounds, theme: &crate::tui:
 pub(super) fn paint_water_cooler(
     buf: &mut RgbBuffer,
     pr: Bounds,
-    theme: &crate::tui::theme::Theme,
+    theme: &crate::scene::theme::Theme,
 ) {
     if !(pr.height > 25 && pr.width > 12) {
         return;

@@ -18,7 +18,7 @@ use std::collections::{BinaryHeap, HashMap};
 
 use pixtuoid_core::walkable::{OccupancyOverlay, WalkableMask};
 
-use crate::tui::layout::{Bounds, Point};
+use crate::scene::layout::{Bounds, Point};
 
 /// Cell size in pixels. Smaller = more accurate paths, more work per query.
 /// 4 px gives a ~40×60 grid on a typical 160×240 buffer — A* finishes in
@@ -459,7 +459,7 @@ fn simplify_polyline(pts: Vec<Point>) -> Vec<Point> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tui::layout::{Layout, WallSegment};
+    use crate::scene::layout::{Layout, WallSegment};
 
     fn make_layout() -> Layout {
         Layout::compute(160, 200, 4).expect("layout fits")
@@ -504,7 +504,7 @@ mod tests {
         let pantry = l
             .waypoints
             .iter()
-            .find(|w| w.kind == crate::tui::layout::WaypointKind::Pantry)
+            .find(|w| w.kind == crate::scene::layout::WaypointKind::Pantry)
             .expect("pantry wp")
             .pos;
         let path = find_path(&l.walkable, &overlay, None, from, pantry).expect("path");
@@ -538,10 +538,10 @@ mod tests {
         let to = Point { x: wall_x + 12, y };
         let path = find_path(&l.walkable, &overlay, None, from, to)
             .expect("rooms stay connected through the door gap");
-        let direct = crate::tui::pose::octile_distance(from, to);
+        let direct = crate::scene::pose::octile_distance(from, to);
         let routed: u32 = path
             .windows(2)
-            .map(|w| crate::tui::pose::octile_distance(w[0], w[1]))
+            .map(|w| crate::scene::pose::octile_distance(w[0], w[1]))
             .sum();
         // A straight crossing is ~24px; detouring through the mid door is far
         // longer. A passable wall would yield a near-straight path (≈ direct).
@@ -563,7 +563,7 @@ mod tests {
         // printer, which also pins the INTER_POD_AISLE_X width: narrow the aisle
         // and the decor disconnects the grid here). Across seeds × sizes incl. the
         // 96×70 floor. It caught the narrow-meeting-room teleport (now gated).
-        use crate::tui::layout::MAX_VISIBLE_DESKS;
+        use crate::scene::layout::MAX_VISIBLE_DESKS;
         let overlay = OccupancyOverlay::new();
         let sizes = [
             (96u16, 70u16),
@@ -606,7 +606,7 @@ mod tests {
         // exists, approach_point returns the `wp.pos` sentinel (NO fallback — the
         // wander skips the furniture), which isn't a real destination, so we
         // exclude it below.
-        use crate::tui::layout::MAX_VISIBLE_DESKS;
+        use crate::scene::layout::MAX_VISIBLE_DESKS;
         use pixtuoid_core::layout::approach_point;
         let overlay = OccupancyOverlay::new();
         for (w, h) in [
@@ -654,7 +654,7 @@ mod tests {
         // approach_point simply won't pick those.) Pins the core↔router
         // coarsening agreement on REAL layouts, not just synthetic masks, so
         // approach_point can never select an unroutable approach side.
-        use crate::tui::layout::MAX_VISIBLE_DESKS;
+        use crate::scene::layout::MAX_VISIBLE_DESKS;
         let overlay = OccupancyOverlay::new();
         for (w, h) in [(160u16, 120u16), (200, 80), (96, 70)] {
             for seed in 0..3u64 {

@@ -14,10 +14,10 @@ use pixtuoid_core::state::{AgentSlot, GlobalDeskIndex, SceneState};
 use pixtuoid_core::walkable::OccupancyOverlay;
 use pixtuoid_core::AgentId;
 
-use crate::tui::frame_cache::FrameCache;
-use crate::tui::motion::MotionState;
-use crate::tui::pathfind::AStarRouter;
-use crate::tui::pose::PoseHistory;
+use crate::scene::frame_cache::FrameCache;
+use crate::scene::motion::MotionState;
+use crate::scene::pathfind::AStarRouter;
+use crate::scene::pose::PoseHistory;
 
 pub use pixtuoid_core::state::MAX_FLOORS;
 
@@ -230,10 +230,10 @@ impl FloorTransition {
 
     /// Progress ratio 0.0 → 1.0 with ease-in-out curve.
     pub fn t(&self, now: SystemTime) -> f32 {
-        crate::tui::anim::eased_progress(
+        crate::scene::anim::eased_progress(
             self.started_at,
             self.duration_ms as u32,
-            crate::tui::anim::Easing::EaseInOutCubic,
+            crate::scene::anim::Easing::EaseInOutCubic,
             now,
         )
     }
@@ -346,7 +346,7 @@ mod tests {
 
     #[test]
     fn door_anim_excludes_arrived_entry_profiles() {
-        use crate::tui::motion::MotionState;
+        use crate::scene::motion::MotionState;
         let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
         let id = AgentId::from_transcript_path("/p/door.jsonl");
         let mut fctx = FloorCtx::new();

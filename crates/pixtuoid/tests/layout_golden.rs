@@ -132,7 +132,7 @@ fn layout_dense_seed6_room_walls() {
 
 #[test]
 fn floor_variant_hash_gives_unique_layouts_per_floor() {
-    use pixtuoid::tui::floor::FLOOR_SEED_MULTIPLIER;
+    use pixtuoid::scene::floor::FLOOR_SEED_MULTIPLIER;
     use std::collections::HashSet;
 
     let signatures: HashSet<_> = (0u64..5)

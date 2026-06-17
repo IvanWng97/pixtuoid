@@ -6,11 +6,11 @@ use std::time::SystemTime;
 
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
-use crate::tui::pixel_painter::palette::{blend_rgb, lerp_rgb};
-use crate::tui::theme::Theme;
+use crate::scene::pixel_painter::palette::{blend_rgb, lerp_rgb};
+use crate::scene::theme::Theme;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(in crate::tui::pixel_painter) enum Weather {
+pub(in crate::scene::pixel_painter) enum Weather {
     Clear,
     Rain,
     Storm,
@@ -27,7 +27,7 @@ impl Weather {
     /// (site/src/weather.json) mirrors it; the bridge is the
     /// `weather_gallery_manifest_matches_the_weather_enum` test, which fails on
     /// any add/rename here until the manifest (+ gen-media art) follows.
-    pub(in crate::tui::pixel_painter) const ALL: [Weather; 8] = [
+    pub(in crate::scene::pixel_painter) const ALL: [Weather; 8] = [
         Weather::Clear,
         Weather::Rain,
         Weather::Storm,
@@ -39,7 +39,7 @@ impl Weather {
     ];
 
     /// Lowercase CLI name (`Weather::Rain` → `"rain"`).
-    pub(in crate::tui::pixel_painter) const fn name(self) -> &'static str {
+    pub(in crate::scene::pixel_painter) const fn name(self) -> &'static str {
         match self {
             Weather::Clear => "clear",
             Weather::Rain => "rain",
@@ -53,7 +53,7 @@ impl Weather {
     }
 
     /// Parse a CLI name (case-insensitive) back to a variant.
-    pub(in crate::tui::pixel_painter) fn from_name(s: &str) -> Option<Weather> {
+    pub(in crate::scene::pixel_painter) fn from_name(s: &str) -> Option<Weather> {
         let s = s.trim().to_ascii_lowercase();
         Weather::ALL.into_iter().find(|w| w.name() == s)
     }
@@ -69,11 +69,11 @@ thread_local! {
     static WEATHER_OVERRIDE: Cell<Option<Weather>> = const { Cell::new(None) };
 }
 
-pub(in crate::tui::pixel_painter) fn set_weather_override(w: Option<Weather>) {
+pub(in crate::scene::pixel_painter) fn set_weather_override(w: Option<Weather>) {
     WEATHER_OVERRIDE.with(|c| c.set(w));
 }
 
-pub(in crate::tui::pixel_painter) fn weather_state(now: SystemTime) -> Weather {
+pub(in crate::scene::pixel_painter) fn weather_state(now: SystemTime) -> Weather {
     if let Some(forced) = WEATHER_OVERRIDE.with(Cell::get) {
         return forced;
     }
@@ -113,13 +113,13 @@ pub(in crate::tui::pixel_painter) fn weather_state(now: SystemTime) -> Weather {
 ///   weather rendered an identical pitch-black night; now a clear/snowy night
 ///   reads brighter than a storm night.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(in crate::tui::pixel_painter) struct WeatherLight {
+pub(in crate::scene::pixel_painter) struct WeatherLight {
     pub intensity: f32,
     pub beam_strength: f32,
     pub night_sky: f32,
 }
 
-pub(in crate::tui::pixel_painter) fn weather_light(w: Weather) -> WeatherLight {
+pub(in crate::scene::pixel_painter) fn weather_light(w: Weather) -> WeatherLight {
     // (intensity, beam_strength, night_sky)
     //
     // `night_sky` was dialed down ~35% from its original tuning (Clear 0.55→0.35,
@@ -170,29 +170,29 @@ pub(in crate::tui::pixel_painter) fn weather_light(w: Weather) -> WeatherLight {
     }
 }
 
-pub(in crate::tui::pixel_painter) fn sunset_strength(now: SystemTime) -> f32 {
+pub(in crate::scene::pixel_painter) fn sunset_strength(now: SystemTime) -> f32 {
     let h = super::local_hour_frac(now);
-    crate::tui::pixel_painter::palette::bell(h, 18.0, 1.5)
-        .max(crate::tui::pixel_painter::palette::bell(h, 6.5, 1.0))
+    crate::scene::pixel_painter::palette::bell(h, 18.0, 1.5)
+        .max(crate::scene::pixel_painter::palette::bell(h, 6.5, 1.0))
 }
 
 /// Window glass color + spill intensity + spill slant for the current local
 /// hour. `spill_slant` is x-shift per row going down: positive = rightward
 /// (morning sun in the east), negative = leftward (evening sun in the west).
 /// `darkness` is 1 - daylight, used to drive artificial-light effects.
-pub(in crate::tui::pixel_painter) struct TimeOfDayLook {
-    pub(in crate::tui::pixel_painter) glass_a: Rgb,
-    pub(in crate::tui::pixel_painter) glass_b: Rgb,
-    pub(in crate::tui::pixel_painter) spill_strength: f32,
-    pub(in crate::tui::pixel_painter) spill_slant: f32,
-    pub(in crate::tui::pixel_painter) darkness: f32,
+pub(in crate::scene::pixel_painter) struct TimeOfDayLook {
+    pub(in crate::scene::pixel_painter) glass_a: Rgb,
+    pub(in crate::scene::pixel_painter) glass_b: Rgb,
+    pub(in crate::scene::pixel_painter) spill_strength: f32,
+    pub(in crate::scene::pixel_painter) spill_slant: f32,
+    pub(in crate::scene::pixel_painter) darkness: f32,
     /// Raw twilight bell (dawn ~6.5 / dusk ~18.5), pre-atmosphere. Exposed so
     /// the window painter reads it instead of re-decoding the local hour and
     /// recomputing the identical expression per window per frame.
-    pub(in crate::tui::pixel_painter) twilight: f32,
+    pub(in crate::scene::pixel_painter) twilight: f32,
 }
 
-pub(in crate::tui::pixel_painter) fn time_of_day_look(
+pub(in crate::scene::pixel_painter) fn time_of_day_look(
     now: SystemTime,
     theme: &Theme,
 ) -> TimeOfDayLook {
@@ -211,8 +211,8 @@ pub(in crate::tui::pixel_painter) fn time_of_day_look(
 
     // Twilight bell at dawn (~6.5) and dusk (~18.5) — adds orange/pink
     // tint that the cyan↔dark-blue base doesn't capture.
-    let twilight = crate::tui::pixel_painter::palette::bell(h, 6.5, 1.5)
-        .max(crate::tui::pixel_painter::palette::bell(h, 18.5, 1.5));
+    let twilight = crate::scene::pixel_painter::palette::bell(h, 6.5, 1.5)
+        .max(crate::scene::pixel_painter::palette::bell(h, 18.5, 1.5));
 
     // Atmospheric attenuation makes the sky base + twilight blaze respond
     // to outdoor weather. Storm at noon shouldn't read as full day-blue
@@ -279,14 +279,14 @@ pub(in crate::tui::pixel_painter) fn time_of_day_look(
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::tui::pixel_painter) enum WallSide {
+pub(in crate::scene::pixel_painter) enum WallSide {
     East,
     South,
     West,
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(in crate::tui::pixel_painter) struct SunSpot {
+pub(in crate::scene::pixel_painter) struct SunSpot {
     pub wall: WallSide,
     /// 0.0..=1.0 along the wall (left→right for South, top→bottom for East/West).
     pub along: f32,
@@ -302,7 +302,7 @@ pub(in crate::tui::pixel_painter) struct SunSpot {
 /// `time_of_day_look`. Returns `None` outside the extended daylight
 /// window 5:30–19:30; the extra 30 minutes on each end carry a fade-in
 /// / fade-out ramp so the sun spot doesn't pop on/off at the boundary.
-pub(in crate::tui::pixel_painter) fn sun_on_wall(now: SystemTime) -> Option<SunSpot> {
+pub(in crate::scene::pixel_painter) fn sun_on_wall(now: SystemTime) -> Option<SunSpot> {
     use chrono::Timelike;
     const SUN_RAMP_HOURS: f32 = 0.5;
     const LOWER: f32 = 6.0 - SUN_RAMP_HOURS;
@@ -345,7 +345,7 @@ pub(in crate::tui::pixel_painter) fn sun_on_wall(now: SystemTime) -> Option<SunS
 /// Multiplicative dim applied to floor pixels at night. Pulls everything
 /// toward a dark navy so the artificial-light pools have something to
 /// stand out against. `strength` is 0..1 (no dim..full dim).
-pub(in crate::tui::pixel_painter) fn dim_floor_overlay(
+pub(in crate::scene::pixel_painter) fn dim_floor_overlay(
     buf: &mut RgbBuffer,
     top_y: u16,
     bottom_y: u16,
@@ -370,7 +370,7 @@ pub(in crate::tui::pixel_painter) fn dim_floor_overlay(
 /// `strength` is `day_eff`-driven (0 at night / full-dark weather, full at clear
 /// noon), so cloudy days lift proportionally less. Sun enters regardless of
 /// occupancy, so — unlike the dim — this is NOT scaled by the empty-floor boost.
-pub(in crate::tui::pixel_painter) fn daylight_floor_overlay(
+pub(in crate::scene::pixel_painter) fn daylight_floor_overlay(
     buf: &mut RgbBuffer,
     top_y: u16,
     bottom_y: u16,
@@ -481,7 +481,7 @@ mod tests {
     // tests green but fail here.
     #[test]
     fn time_of_day_look_night_darkness_tracks_weather() {
-        let theme = crate::tui::theme::ALL_THEMES[0];
+        let theme = crate::scene::theme::ALL_THEMES[0];
         let (mut clear_t, mut storm_t) = (None, None);
         for day in 1..=28u32 {
             let t = night_on(day);

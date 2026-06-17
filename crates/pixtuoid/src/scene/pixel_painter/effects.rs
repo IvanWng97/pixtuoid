@@ -5,8 +5,8 @@ use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
 use super::epoch_ms;
 use super::palette::blend_rgb;
-use crate::tui::layout::Point;
-use crate::tui::theme::Theme;
+use crate::scene::layout::Point;
+use crate::scene::theme::Theme;
 
 pub(super) fn paint_screen_glow(
     buf: &mut RgbBuffer,
@@ -203,7 +203,7 @@ mod tests {
     use std::time::Duration;
 
     fn theme() -> &'static Theme {
-        crate::tui::theme::theme_by_name("normal").expect("normal theme")
+        crate::scene::theme::theme_by_name("normal").expect("normal theme")
     }
 
     fn render(head: Point, phase_ms: u64) -> RgbBuffer {

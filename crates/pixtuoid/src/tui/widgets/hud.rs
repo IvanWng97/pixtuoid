@@ -13,17 +13,17 @@ use crate::tui::renderer::clip_widget_rect;
 
 /// The two colors that characterize a theme in the picker swatch: its
 /// accent (`neon_brand`) and its dominant office surface (`carpet_base`).
-fn theme_swatch(t: &crate::tui::theme::Theme) -> (Color, Color) {
+fn theme_swatch(t: &crate::scene::theme::Theme) -> (Color, Color) {
     (to_color(t.ui.neon_brand), to_color(t.surface.carpet_base))
 }
 
-pub(in crate::tui) fn paint_theme_picker(
+pub(crate) fn paint_theme_picker(
     f: &mut ratatui::Frame<'_>,
     selected: usize,
     bounds: Rect,
-    theme: &crate::tui::theme::Theme,
+    theme: &crate::scene::theme::Theme,
 ) {
-    use crate::tui::theme;
+    use crate::scene::theme;
     use ratatui::style::Modifier;
     use ratatui::text::{Line, Span as TSpan};
 
@@ -92,11 +92,11 @@ pub fn source_warning_message(
     }
 }
 
-pub(in crate::tui) fn paint_footer(
+pub(crate) fn paint_footer(
     f: &mut ratatui::Frame<'_>,
     scene: &SceneState,
     full_rect: Rect,
-    theme: &crate::tui::theme::Theme,
+    theme: &crate::scene::theme::Theme,
     floor_info: Option<crate::tui::renderer::FloorInfo>,
     source_warning: Option<&str>,
 ) {
@@ -136,7 +136,7 @@ enum SegRole {
 }
 
 impl SegRole {
-    fn color(self, theme: &crate::tui::theme::Theme) -> Color {
+    fn color(self, theme: &crate::scene::theme::Theme) -> Color {
         match self {
             SegRole::Neutral | SegRole::Idle => to_color(theme.ui.label_idle),
             SegRole::Active => to_color(theme.ui.label_active),
@@ -289,7 +289,7 @@ fn status_segments(
 /// that locks the exact footer wording, byte-identical to the colored
 /// `build_status_spans` content. Production paints via `build_status_spans`.
 #[cfg(test)]
-pub(in crate::tui) fn build_status_summary(
+pub(crate) fn build_status_summary(
     scene: &SceneState,
     term_width: u16,
     floor_info: Option<crate::tui::renderer::FloorInfo>,
@@ -303,11 +303,11 @@ pub(in crate::tui) fn build_status_summary(
 
 /// Colored footer — same segments as `build_status_summary`, each tinted by
 /// its state role so active/waiting/idle counts scan by hue.
-pub(in crate::tui) fn build_status_spans<'a>(
+pub(crate) fn build_status_spans<'a>(
     scene: &SceneState,
     term_width: u16,
     floor_info: Option<crate::tui::renderer::FloorInfo>,
-    theme: &crate::tui::theme::Theme,
+    theme: &crate::scene::theme::Theme,
     source_warning: Option<&str>,
 ) -> Vec<Span<'a>> {
     status_segments(scene, term_width, floor_info, source_warning)
@@ -316,13 +316,13 @@ pub(in crate::tui) fn build_status_spans<'a>(
         .collect()
 }
 
-pub(in crate::tui) fn paint_wall_display(
+pub(crate) fn paint_wall_display(
     f: &mut ratatui::Frame<'_>,
     scene: &SceneState,
     scene_rect: Rect,
     now: SystemTime,
     ticker: &TickerQueue,
-    theme: &crate::tui::theme::Theme,
+    theme: &crate::scene::theme::Theme,
 ) {
     use ratatui::style::Modifier;
     use ratatui::text::Line;
@@ -410,7 +410,7 @@ pub(in crate::tui) fn paint_wall_display(
 }
 
 /// URL shown on the "More details" line and opened on click.
-pub(in crate::tui) const VERSION_POPUP_URL: &str = "https://github.com/IvanWng97/pixtuoid/releases";
+pub(crate) const VERSION_POPUP_URL: &str = "https://github.com/IvanWng97/pixtuoid/releases";
 /// Prefix rendered before the URL. Its byte-length determines the URL's
 /// click-rect x-offset; keep `paint_version_popup` and
 /// `version_popup_url_rect` consistent by using this constant.
@@ -440,12 +440,12 @@ fn version_popup_envelope(bounds: Rect, notes_len: usize, scale: f32) -> Rect {
     }
 }
 
-pub(in crate::tui) fn paint_version_popup(
+pub(crate) fn paint_version_popup(
     f: &mut ratatui::Frame<'_>,
     version: &str,
     notes: &[&str],
     bounds: Rect,
-    theme: &crate::tui::theme::Theme,
+    theme: &crate::scene::theme::Theme,
     scale: f32,
 ) {
     use ratatui::style::Modifier;
@@ -488,11 +488,7 @@ pub(in crate::tui) fn paint_version_popup(
 /// Returns None if the popup would be too small to render. Mirrors the
 /// geometry inside `paint_version_popup` (kept in sync by sharing the same
 /// width calculation).
-pub(in crate::tui) fn version_popup_url_rect(
-    notes_len: usize,
-    bounds: Rect,
-    scale: f32,
-) -> Option<Rect> {
+pub(crate) fn version_popup_url_rect(notes_len: usize, bounds: Rect, scale: f32) -> Option<Rect> {
     let scale = scale.clamp(0.0, 1.0);
     if scale < 0.7 {
         return None; // URL not clickable until popup reaches 70% scale
@@ -537,12 +533,12 @@ pub(in crate::tui) fn version_popup_url_rect(
     })
 }
 
-pub(in crate::tui) fn paint_elevator_indicator(
+pub(crate) fn paint_elevator_indicator(
     f: &mut ratatui::Frame<'_>,
-    door: crate::tui::layout::Point,
+    door: crate::scene::layout::Point,
     current_floor: usize,
     scene_rect: Rect,
-    theme: &crate::tui::theme::Theme,
+    theme: &crate::scene::theme::Theme,
 ) {
     use ratatui::style::Modifier;
     use ratatui::text::Line;
@@ -604,7 +600,7 @@ mod hud_tests {
         use ratatui::Terminal;
         let mut term = Terminal::new(TestBackend::new(24, 30)).unwrap();
         term.draw(|f| {
-            paint_theme_picker(f, 0, Rect::new(0, 0, 24, 30), &crate::tui::theme::NORMAL);
+            paint_theme_picker(f, 0, Rect::new(0, 0, 24, 30), &crate::scene::theme::NORMAL);
         })
         .unwrap();
         // Reaching here without a panic is the assertion.
@@ -612,7 +608,7 @@ mod hud_tests {
 
     #[test]
     fn theme_swatch_distinguishes_themes() {
-        use crate::tui::theme;
+        use crate::scene::theme;
         // Each theme's (accent, surface) pair should reflect that theme's
         // own palette, not the currently-active one — so the picker rows
         // preview distinct colors.
@@ -718,7 +714,7 @@ mod hud_tests {
                 "1.2.3",
                 &["note a", "note b"],
                 Rect::new(0, 0, 80, 30),
-                &crate::tui::theme::NORMAL,
+                &crate::scene::theme::NORMAL,
                 0.0, // fully dismissed
             );
         })
@@ -738,8 +734,8 @@ mod hud_tests {
     fn elevator_indicator_centers_by_display_columns_not_bytes() {
         use ratatui::backend::TestBackend;
         use ratatui::Terminal;
-        let theme = &crate::tui::theme::NORMAL;
-        let door = crate::tui::layout::Point { x: 20, y: 10 };
+        let theme = &crate::scene::theme::NORMAL;
+        let door = crate::scene::layout::Point { x: 20, y: 10 };
         let mut term = Terminal::new(TestBackend::new(80, 30)).unwrap();
         term.draw(|f| {
             paint_elevator_indicator(f, door, 1, Rect::new(0, 0, 80, 30), theme);

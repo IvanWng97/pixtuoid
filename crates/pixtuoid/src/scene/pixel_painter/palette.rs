@@ -11,7 +11,7 @@ use pixtuoid_core::sprite::format::RECOLOR_KEYS;
 use pixtuoid_core::sprite::{Frame, Palette, Pixel, Rgb, RgbBuffer};
 use pixtuoid_core::AgentSlot;
 
-use crate::tui::pose;
+use crate::scene::pose;
 
 /// A complete shirt + pants combo. We pick *outfits* per agent rather
 /// than independent shirt and pants colors so the result is always a
@@ -352,7 +352,7 @@ pub(super) fn agent_palette(base: &Palette, agent: &AgentSlot, glow_tint: Option
 /// Returns `None` for non-Active states (no glow).
 pub(super) fn tool_glow_tint(
     agent: &AgentSlot,
-    glow: &crate::tui::theme::ToolGlowColors,
+    glow: &crate::scene::theme::ToolGlowColors,
 ) -> Option<Rgb> {
     use pixtuoid_core::state::ActivityState;
     let detail = match &agent.state {

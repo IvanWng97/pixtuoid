@@ -9,12 +9,12 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Padding, Paragraph};
 
 use super::{compact_hms, to_color};
-use crate::tui::layout::{Layout, DESK_W};
-use crate::tui::pet::PetKind;
-use crate::tui::pixel_painter::character_anchor;
-use crate::tui::pose;
+use crate::scene::layout::{Layout, DESK_W};
+use crate::scene::pet::PetKind;
+use crate::scene::pixel_painter::character_anchor;
+use crate::scene::pose;
+use crate::scene::theme::Theme;
 use crate::tui::renderer::clip_widget_rect;
-use crate::tui::theme::Theme;
 
 /// Borderless tooltip frame shared by every hover/click tooltip. No outline
 /// (the whole UI dropped popup borders) — a solid `tooltip_bg` fill plus a
@@ -58,7 +58,7 @@ pub(crate) fn paint_label_widgets(
     rctx: &mut pose::RouteCtx<'_>,
     scene_rect: Rect,
     hovered: Option<AgentId>,
-    theme: &crate::tui::theme::Theme,
+    theme: &crate::scene::theme::Theme,
 ) {
     let agents: Vec<_> = scene.agents.values().cloned().collect();
     let mut label_counts: HashMap<&str, usize> = HashMap::new();
@@ -128,7 +128,7 @@ pub(crate) fn paint_hover_tooltip(
     my: u16,
     scene_rect: Rect,
     now: SystemTime,
-    theme: &crate::tui::theme::Theme,
+    theme: &crate::scene::theme::Theme,
 ) {
     let Some(agent) = scene.agents.get(&agent_id) else {
         return;
@@ -230,7 +230,7 @@ fn paint_simple_tooltip(
     mx: u16,
     my: u16,
     scene_rect: Rect,
-    theme: &crate::tui::theme::Theme,
+    theme: &crate::scene::theme::Theme,
 ) {
     let line = Line::from(Span::styled(
         text,
@@ -272,7 +272,7 @@ pub(crate) fn paint_coffee_tooltip(
     mx: u16,
     my: u16,
     scene_rect: Rect,
-    theme: &crate::tui::theme::Theme,
+    theme: &crate::scene::theme::Theme,
 ) {
     paint_simple_tooltip(f, " \u{2615} Buy Ivan a coffee ", mx, my, scene_rect, theme);
 }
@@ -283,7 +283,7 @@ pub(crate) fn paint_furniture_tooltip(
     mx: u16,
     my: u16,
     scene_rect: Rect,
-    theme: &crate::tui::theme::Theme,
+    theme: &crate::scene::theme::Theme,
 ) {
     let text = format!(" {} ", label);
     paint_simple_tooltip(f, &text, mx, my, scene_rect, theme);
@@ -301,7 +301,7 @@ pub(crate) fn paint_pet_tooltip(
     mx: u16,
     my: u16,
     scene_rect: Rect,
-    theme: &crate::tui::theme::Theme,
+    theme: &crate::scene::theme::Theme,
 ) {
     // The state strings (cooldown reaction / sleeping / pet-me) are NOT user-
     // configurable; only the idle/walk label is the pet's NAME, which the caller
@@ -338,7 +338,7 @@ pub fn paint_mascot_tooltip(
     mx: u16,
     my: u16,
     scene_rect: Rect,
-    theme: &crate::tui::theme::Theme,
+    theme: &crate::scene::theme::Theme,
 ) {
     let text = mascot_tooltip_text(name, busy, degraded, active_sessions);
     paint_simple_tooltip(f, &text, mx, my, scene_rect, theme);
@@ -392,9 +392,9 @@ pub(super) fn truncate_label(label: &str, budget: usize) -> std::borrow::Cow<'_,
 /// line of text, positioned above the agent's sprite head.
 pub fn paint_chitchat_bubbles(
     f: &mut ratatui::Frame<'_>,
-    bubbles: &[crate::tui::chitchat::ChitchatBubble],
+    bubbles: &[crate::scene::chitchat::ChitchatBubble],
     scene_rect: Rect,
-    theme: &crate::tui::theme::Theme,
+    theme: &crate::scene::theme::Theme,
 ) {
     for bubble in bubbles {
         let text = format!(" {} ", bubble.text);

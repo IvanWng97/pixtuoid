@@ -20,7 +20,7 @@ use pixtuoid_core::state::AgentSlot;
 use pixtuoid_core::walkable::OccupancyOverlay;
 use pixtuoid_core::AgentId;
 
-use crate::tui::motion::{
+use crate::scene::motion::{
     advance_wander, octile_path_len, settle_len, MotionState, WalkLeg, WalkPathSnapshot,
     WanderPhase,
 };
@@ -33,8 +33,8 @@ pub use pixtuoid_core::pose::{
     TYPING_FRAME_MS, WALKING_FRAMES, WALKING_FRAME_MS, WANDER_DWELL_EST_MS, WANDER_WALK_EST_MS,
 };
 
-use crate::tui::layout::{desk_walk_anchor, Layout, Point, WaypointKind};
-use crate::tui::pathfind::Router;
+use crate::scene::layout::{desk_walk_anchor, Layout, Point, WaypointKind};
+use crate::scene::pathfind::Router;
 
 /// The per-frame routing engine state threaded through pose derivation,
 /// character anchoring, hit-testing and label placement. `now`/`layout` stay
@@ -114,7 +114,7 @@ const SNAP_BACK_MIN_DIST: i32 = 8;
 /// chair (≈ footprint centre) all three allowed sides are within reach, so the
 /// approach cell sits directly off the seat and the settle glide is a short
 /// straight hop onto the chair.
-pub(in crate::tui) fn desk_approach_cell(desk: Point, layout: &Layout) -> Option<Point> {
+pub(crate) fn desk_approach_cell(desk: Point, layout: &Layout) -> Option<Point> {
     use pixtuoid_core::layout::{approach_point, desk_walk_anchor, Facing, Furniture};
     let chair = desk_walk_anchor(desk);
     let cell = approach_point(
@@ -154,7 +154,7 @@ pub(in crate::tui) fn desk_approach_cell(desk: Point, layout: &Layout) -> Option
 /// the approach cell + settle like the rest, run by pure physics with a brisk
 /// profile — no fixed-time compression). The ONLY non-caller is a mid-wander EXIT:
 /// there the agent departs from its live wander position, not the chair.
-pub(in crate::tui) fn desk_leg_endpoint(desk: Point, layout: &Layout) -> (Point, Option<Point>) {
+pub(crate) fn desk_leg_endpoint(desk: Point, layout: &Layout) -> (Point, Option<Point>) {
     let chair = pixtuoid_core::layout::desk_walk_anchor(desk);
     match desk_approach_cell(desk, layout) {
         Some(approach) => (approach, Some(chair)),
@@ -880,9 +880,9 @@ fn route_walking_pose(
 /// rendering side has its own `walking_position` in renderer.rs that
 /// also applies vertical breathing; this one is for history-tracking
 /// only (we want the deterministic position, not the breath offset).
-use crate::tui::pixel_painter::walking_position;
+use crate::scene::pixel_painter::walking_position;
 
-pub(in crate::tui) fn octile_distance(a: Point, b: Point) -> u32 {
+pub(crate) fn octile_distance(a: Point, b: Point) -> u32 {
     let dx = (a.x as i32 - b.x as i32).unsigned_abs();
     let dy = (a.y as i32 - b.y as i32).unsigned_abs();
     14 * dx.min(dy) + 10 * (dx.max(dy) - dx.min(dy))

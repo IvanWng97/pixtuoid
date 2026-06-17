@@ -10,7 +10,7 @@ use std::time::SystemTime;
 
 use pixtuoid_core::AgentId;
 
-use crate::tui::layout::{Point, WaypointKind};
+use crate::scene::layout::{Point, WaypointKind};
 
 /// Total duration of a single chitchat exchange (4 turns + silent gap).
 pub const CHITCHAT_TOTAL_MS: u64 = 6_000;

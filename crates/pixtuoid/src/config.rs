@@ -340,8 +340,8 @@ pub fn resolve_theme(
     config: &AppConfig,
     cli_theme: Option<&str>,
     warnings: &mut Vec<String>,
-) -> Result<&'static crate::tui::theme::Theme> {
-    use crate::tui::theme::{theme_by_name, ALL_THEMES, NORMAL};
+) -> Result<&'static crate::scene::theme::Theme> {
+    use crate::scene::theme::{theme_by_name, ALL_THEMES, NORMAL};
 
     // Validate the config theme even when the CLI overrides it — the warn is
     // the only signal that a persisted theme in config.toml has gone stale.
@@ -370,8 +370,8 @@ pub fn resolve_theme(
 /// `name` is trimmed; empty/absent → [`PetKind::default_name`]. Resolving HERE
 /// (once, at startup) means the render path reads `pet.name` directly — no
 /// per-frame lookup, no parallel kind→name map to keep in sync.
-pub fn resolve_pets(config: &AppConfig, warnings: &mut Vec<String>) -> Vec<crate::tui::pet::Pet> {
-    use crate::tui::pet::{Pet, PetKind};
+pub fn resolve_pets(config: &AppConfig, warnings: &mut Vec<String>) -> Vec<crate::scene::pet::Pet> {
+    use crate::scene::pet::{Pet, PetKind};
 
     match &config.pets {
         None => PetKind::ALL.iter().map(|&k| Pet::defaulted(k)).collect(),
@@ -670,7 +670,7 @@ mod tests {
         let err = resolve_theme(&cfg, Some("definitely-not-a-theme"), &mut Vec::new()).unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("unknown theme"), "got: {msg}");
-        for t in crate::tui::theme::ALL_THEMES {
+        for t in crate::scene::theme::ALL_THEMES {
             assert!(
                 msg.contains(t.name),
                 "should list every valid theme, missing {:?} in: {msg}",
@@ -855,7 +855,7 @@ mod tests {
     fn pets_absent_returns_all_with_default_names() {
         let cfg = AppConfig::default();
         let pets = resolve_pets(&cfg, &mut Vec::new());
-        assert_eq!(pets.len(), crate::tui::pet::PetKind::ALL.len());
+        assert_eq!(pets.len(), crate::scene::pet::PetKind::ALL.len());
         for pet in &pets {
             assert_eq!(pet.name, pet.kind.default_name());
         }
@@ -887,7 +887,7 @@ mod tests {
         };
         let pets = resolve_pets(&cfg, &mut Vec::new());
         assert_eq!(pets.len(), 1);
-        assert_eq!(pets[0].kind, crate::tui::pet::PetKind::Cat);
+        assert_eq!(pets[0].kind, crate::scene::pet::PetKind::Cat);
         assert_eq!(pets[0].name, "Office Cat");
     }
 
@@ -926,8 +926,8 @@ mod tests {
         };
         let pets = resolve_pets(&cfg, &mut Vec::new());
         let name = |k| pets.iter().find(|p| p.kind == k).map(|p| p.name.as_str());
-        assert_eq!(name(crate::tui::pet::PetKind::Cat), Some("Whiskers"));
-        assert_eq!(name(crate::tui::pet::PetKind::Dog), Some("Rex"));
+        assert_eq!(name(crate::scene::pet::PetKind::Cat), Some("Whiskers"));
+        assert_eq!(name(crate::scene::pet::PetKind::Dog), Some("Rex"));
     }
 
     #[test]
@@ -959,8 +959,8 @@ mod tests {
         };
         let pets = resolve_pets(&cfg, &mut Vec::new());
         let name = |k| pets.iter().find(|p| p.kind == k).map(|p| p.name.as_str());
-        assert_eq!(name(crate::tui::pet::PetKind::Cat), Some("Mittens"));
-        assert_eq!(name(crate::tui::pet::PetKind::Dog), Some("Office Dog"));
+        assert_eq!(name(crate::scene::pet::PetKind::Cat), Some("Mittens"));
+        assert_eq!(name(crate::scene::pet::PetKind::Dog), Some("Office Dog"));
     }
 
     #[test]
@@ -991,8 +991,8 @@ mod tests {
         let pets = resolve_pets(&cfg, &mut Vec::new());
         assert_eq!(pets.len(), 2);
         let name = |k| pets.iter().find(|p| p.kind == k).map(|p| p.name.as_str());
-        assert_eq!(name(crate::tui::pet::PetKind::Cat), Some("Luna"));
-        assert_eq!(name(crate::tui::pet::PetKind::Dog), Some("Office Dog"));
+        assert_eq!(name(crate::scene::pet::PetKind::Cat), Some("Luna"));
+        assert_eq!(name(crate::scene::pet::PetKind::Dog), Some("Office Dog"));
     }
 
     #[test]
@@ -1070,7 +1070,7 @@ mod tests {
             1,
             "the kindless stanza is skipped, the cat kept"
         );
-        assert_eq!(pets[0].kind, crate::tui::pet::PetKind::Cat);
+        assert_eq!(pets[0].kind, crate::scene::pet::PetKind::Cat);
     }
 
     // --- data safety: malformed-config refusal + one-time backup (#3) ---------

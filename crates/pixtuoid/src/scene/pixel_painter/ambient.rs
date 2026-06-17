@@ -10,13 +10,13 @@ use std::time::{Duration, SystemTime};
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_core::state::FloorLocalDeskIndex;
 
-use crate::tui::layout::Layout;
-use crate::tui::pixel_painter::background::{
+use crate::scene::layout::Layout;
+use crate::scene::pixel_painter::background::{
     sun_on_wall, time_of_day_look, weather_light, weather_state, window_spill_columns, WallSide,
 };
-use crate::tui::pixel_painter::palette::blend_rgb;
-use crate::tui::pixel_painter::PixelCtx;
-use crate::tui::theme::Theme;
+use crate::scene::pixel_painter::palette::blend_rgb;
+use crate::scene::pixel_painter::PixelCtx;
+use crate::scene::theme::Theme;
 
 pub(super) struct SunbeamColumn {
     pub x: u16,
@@ -113,7 +113,7 @@ pub(super) struct CeilingHalo {
 /// at a glance. Painted only on dark themes; on light themes the warm
 /// tint reads as grime, not glow, so we short-circuit.
 pub(super) fn paint_ceiling_halos(buf: &mut RgbBuffer, theme: &Theme, halos: &[CeilingHalo]) {
-    use crate::tui::theme::ThemeKind;
+    use crate::scene::theme::ThemeKind;
     if theme.kind != ThemeKind::Dark {
         return;
     }
@@ -180,7 +180,7 @@ fn collect_ceiling_halos(
         // (the `_ => glow.default` fallback always yields Some). Kept as a
         // total binding; not a missing-coverage target.
         let Some(color) =
-            crate::tui::pixel_painter::palette::tool_glow_tint(agent, &ctx.theme.tool_glow)
+            crate::scene::pixel_painter::palette::tool_glow_tint(agent, &ctx.theme.tool_glow)
         else {
             continue;
         };
@@ -367,7 +367,7 @@ mod tests {
     #[test]
     fn ceiling_halo_painted_on_dark_theme() {
         let mut buf = RgbBuffer::filled(160, 90, Rgb { r: 0, g: 0, b: 0 });
-        let theme = &crate::tui::theme::CYBERPUNK;
+        let theme = &crate::scene::theme::CYBERPUNK;
         let halos = vec![CeilingHalo {
             x: 50,
             y: 10,
@@ -386,7 +386,7 @@ mod tests {
     #[test]
     fn ceiling_halo_skipped_on_light_theme() {
         let mut buf = RgbBuffer::filled(160, 90, Rgb { r: 0, g: 0, b: 0 });
-        let theme = &crate::tui::theme::NORMAL;
+        let theme = &crate::scene::theme::NORMAL;
         let halos = vec![CeilingHalo {
             x: 50,
             y: 10,
@@ -431,10 +431,10 @@ mod tests {
     // all (no spot). Verifies the multiply, the faint-beam path, and the early-out.
     #[test]
     fn sun_spot_scales_with_beam_strength() {
-        use crate::tui::pixel_painter::background::Weather;
+        use crate::scene::pixel_painter::background::Weather;
         use chrono::TimeZone;
-        let theme = &crate::tui::theme::NORMAL;
-        let layout = crate::tui::layout::Layout::compute(192, 80, 4).expect("layout fits");
+        let theme = &crate::scene::theme::NORMAL;
+        let layout = crate::scene::layout::Layout::compute(192, 80, 4).expect("layout fits");
         // 07:00 → East-wall spot. Weather varies by day at a fixed hour, so
         // search days for each weather (TZ-independent).
         let morning = |day: u32| -> SystemTime {
@@ -493,10 +493,10 @@ mod tests {
     // pattern as the beam-strength test above.
     #[test]
     fn sun_spot_zero_intensity_at_hour_edge_leaves_buffer_untouched() {
-        use crate::tui::pixel_painter::background::Weather;
+        use crate::scene::pixel_painter::background::Weather;
         use chrono::TimeZone;
-        let theme = &crate::tui::theme::NORMAL;
-        let layout = crate::tui::layout::Layout::compute(192, 80, 4).expect("layout fits");
+        let theme = &crate::scene::theme::NORMAL;
+        let layout = crate::scene::layout::Layout::compute(192, 80, 4).expect("layout fits");
         // 19:30 local → West-wall spot at the upper boundary (boundary_fade=0).
         let dusk_edge = |day: u32| -> SystemTime {
             chrono::Local
@@ -550,9 +550,9 @@ mod tests {
     #[test]
     fn ceiling_halo_near_edge_does_not_panic() {
         let mut buf = RgbBuffer::filled(6, 4, Rgb { r: 0, g: 0, b: 0 });
-        let theme = &crate::tui::theme::CYBERPUNK; // Dark theme so halos paint.
-                                                   // Halo centred at the bottom-right corner: the 5×2 stamp runs off both
-                                                   // edges, exercising the clamp.
+        let theme = &crate::scene::theme::CYBERPUNK; // Dark theme so halos paint.
+                                                     // Halo centred at the bottom-right corner: the 5×2 stamp runs off both
+                                                     // edges, exercising the clamp.
         let halos = vec![CeilingHalo {
             x: 5,
             y: 0,
@@ -573,8 +573,8 @@ mod tests {
     #[test]
     fn dust_motes_clamp_to_a_tiny_buffer() {
         use chrono::TimeZone;
-        let theme = &crate::tui::theme::NORMAL;
-        let layout = crate::tui::layout::Layout::compute(192, 80, 4).expect("layout fits");
+        let theme = &crate::scene::theme::NORMAL;
+        let layout = crate::scene::layout::Layout::compute(192, 80, 4).expect("layout fits");
         // 07:00 Clear morning → sun up + full beam.
         let now = (1..=60u32)
             .map(|day| -> SystemTime {
@@ -584,7 +584,7 @@ mod tests {
                     .unwrap()
                     .into()
             })
-            .find(|t| weather_state(*t) == crate::tui::pixel_painter::background::Weather::Clear)
+            .find(|t| weather_state(*t) == crate::scene::pixel_painter::background::Weather::Clear)
             .expect("a clear morning");
         // Buffer far smaller than the layout's spill columns → every mote put is
         // out of bounds and clamped. The assertion is simply "no panic".
@@ -598,9 +598,9 @@ mod tests {
     #[test]
     fn sun_spot_zero_wall_band_returns_early() {
         use chrono::TimeZone;
-        let theme = &crate::tui::theme::NORMAL;
+        let theme = &crate::scene::theme::NORMAL;
         // top_margin == WALL_BAND_TO_TOP_MARGIN → wall_band_h saturating_sub to 0.
-        let mut layout = crate::tui::layout::Layout::compute(192, 80, 4).expect("layout fits");
+        let mut layout = crate::scene::layout::Layout::compute(192, 80, 4).expect("layout fits");
         layout.top_margin = pixtuoid_core::layout::WALL_BAND_TO_TOP_MARGIN;
         // 07:00 → East wall spot with a real beam under Clear, so execution
         // reaches the wall_band_h==0 guard rather than an earlier return.
@@ -612,7 +612,7 @@ mod tests {
                     .unwrap()
                     .into()
             })
-            .find(|t| weather_state(*t) == crate::tui::pixel_painter::background::Weather::Clear)
+            .find(|t| weather_state(*t) == crate::scene::pixel_painter::background::Weather::Clear)
             .expect("a clear morning");
         let fill = Rgb {
             r: 20,

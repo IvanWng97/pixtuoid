@@ -11,7 +11,8 @@ live in nested `CLAUDE.md` files**, auto-loaded when you touch those trees:
 - [`crates/pixtuoid-core/CLAUDE.md`](crates/pixtuoid-core/CLAUDE.md) — the headless lib: sources, reducer/state, sprites, layout, physics, pose.
   - [`crates/pixtuoid-core/tests/CLAUDE.md`](crates/pixtuoid-core/tests/CLAUDE.md) — the integration-test layout (8 test binaries: six grouped + two flat publish-excluded; parity twins) + add-a-CLI test steps.
 - [`crates/pixtuoid/CLAUDE.md`](crates/pixtuoid/CLAUDE.md) — the binary: install, runtime, cli, config, multi-floor, embedded pack.
-- [`crates/pixtuoid/src/tui/CLAUDE.md`](crates/pixtuoid/src/tui/CLAUDE.md) — the terminal renderer: draw_scene, pixel painter, harness, widgets, themes, motion/pose authority, pathfinding.
+  - [`crates/pixtuoid/src/scene/CLAUDE.md`](crates/pixtuoid/src/scene/CLAUDE.md) — the backend-agnostic render+sim engine: pixel painter (render_to_rgb_buffer), layout, pose/motion authority, pathfinding, the theme MODEL, weather/ambient, pets, chitchat, frame_cache, embedded_pack.
+  - [`crates/pixtuoid/src/tui/CLAUDE.md`](crates/pixtuoid/src/tui/CLAUDE.md) — the terminal painter (over scene/): draw_scene flush, harness, widgets, the theme-PICKER ui, Sources panel, dashboard, hit_test, version popup.
 
 **Read the nested guide for the crate you're editing.** Many things that look
 like a bug are documented, load-bearing design — the "Known sharp edges"
@@ -32,7 +33,8 @@ crates/
 ├── pixtuoid-core/   headless lib — no terminal deps (ratatui/crossterm forbidden)
 │                    source/ state/ sprite/ render/ layout/ physics.rs pose/ walkable.rs
 ├── pixtuoid/        binary — ratatui + crossterm + tokio + clap
-│                    cli.rs config.rs runtime/ install/ tui/ sprites/ (character packs;
+│                    cli.rs config.rs runtime/ install/ scene/ (backend-agnostic render+sim engine)
+│                    tui/ floating/ (two thin painters over scene/) sprites/ (character packs;
 │                    default pack embedded via include_str!)
 └── pixtuoid-hook/   tiny shim CC invokes — stdin JSON → Unix socket / Windows named
                      pipe (transport.rs), 200ms send bound
@@ -164,12 +166,12 @@ full WHY lives in the nested `CLAUDE.md` for the owning crate.
 - Subagent clean-exit ladder: b1 drain / SubagentStop hooks / child-ledger re-links / the un-claim side-channel.
 - `AgentSlot.state_started_at` is `SystemTime` (process-local; the whole `SceneState` tree is `Serialize`/`Deserialize` for debug dumps + the snapshot golden, NOT a stable wire contract — the v2-daemon consumer is closed out-of-scope, #279/#280/#281); `ActivityState::Active` ≠ "tool executing" (debounced via `ACTIVE_GRACE_WINDOW`).
 
-**`pixtuoid` / `tui`** ([binary](crates/pixtuoid/CLAUDE.md), [tui](crates/pixtuoid/src/tui/CLAUDE.md)):
-- `draw_scene` is called through `TuiRenderer` (owns cross-frame state, returns the cached `Layout`).
-- `recolor_frame` substitutes by RGB equality (palette keys must map to unique RGBs).
+**`pixtuoid` — engine `scene` + painters `tui`/`floating`** ([binary](crates/pixtuoid/CLAUDE.md), [scene engine](crates/pixtuoid/src/scene/CLAUDE.md), [tui painter](crates/pixtuoid/src/tui/CLAUDE.md)). The backend-agnostic render+sim engine moved OUT of `tui` INTO `scene` (`render_to_rgb_buffer`, layout, pose/motion, pathfind, theme model, pets, chitchat, …); `tui` and `floating` are sibling thin painters over it.
+- `draw_scene` is called through `TuiRenderer` (owns cross-frame state, returns the cached `Layout`) — it's the terminal flush in `tui::renderer`, delegating the world render to `scene::pixel_painter::render_to_rgb_buffer`.
+- `recolor_frame` (`scene::pixel_painter::palette`) substitutes by RGB equality (palette keys must map to unique RGBs).
 - Terminal cell aspect drives sprite design (~16×16 px ceiling; bundled pack maxes at 8×12).
-- EXIT walks are time-compressed to fit the GC window; snap-back runs pure physics (`SNAP_BACK_MS` is only the ARM window); entry/wander are uncompressed.
-- A walk leg's A\* polyline is frozen once per leg, not re-routed per frame.
+- EXIT walks are time-compressed to fit the GC window; snap-back runs pure physics (`SNAP_BACK_MS` is only the ARM window); entry/wander are uncompressed (`scene::pose`/`scene::motion`).
+- A walk leg's A\* polyline is frozen once per leg, not re-routed per frame (`scene::motion`).
 
 ## Things NOT to do
 
@@ -187,7 +189,7 @@ full WHY lives in the nested `CLAUDE.md` for the owning crate.
 
 ## Where to look
 
-- "How does a CC tool call become a moving sprite?" → `runtime/driver.rs::run_async` → `SourceManager::spawn` → source → decoder → `reducer::Reducer::apply` → `watch` channel → `TuiRenderer::render` → `render_to_rgb_buffer` → `draw_scene`. First half in `pixtuoid-core`, render half in `pixtuoid/tui`.
+- "How does a CC tool call become a moving sprite?" → `runtime/driver.rs::run_async` → `SourceManager::spawn` → source → decoder → `reducer::Reducer::apply` → `watch` channel → `TuiRenderer::render` → `scene::pixel_painter::render_to_rgb_buffer` (the world render) → `tui::renderer::draw_scene` (the terminal flush). First half in `pixtuoid-core`; the world render in `pixtuoid/scene`; the terminal flush in `pixtuoid/tui`.
 - Architecture overview + data-flow diagram: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Area-specific entries (layout, sources, install, themes, motion, weather, pets, …) are in the nested guides.
 
 ## When refactoring

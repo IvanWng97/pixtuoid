@@ -15,8 +15,8 @@ use pixtuoid_core::source::registry::descriptor_for;
 use pixtuoid_core::AgentId;
 
 use super::{centered_in, marquee_or_truncate, to_color};
+use crate::scene::theme::Theme;
 use crate::tui::dashboard::{DashboardRow, RowState, DASHBOARD_VIEWPORT_ROWS};
-use crate::tui::theme::Theme;
 
 /// Char budget for the tree-prefix + label column (name only — source is in the badge now).
 const LABEL_W: usize = 32;
@@ -25,7 +25,7 @@ const STATE_W: usize = 28;
 /// Popup width (clamped to the terminal by `centered_in`).
 const POPUP_W: u16 = 76;
 
-pub(in crate::tui) fn paint_dashboard(
+pub(crate) fn paint_dashboard(
     f: &mut ratatui::Frame<'_>,
     rows: &[DashboardRow],
     selected: Option<AgentId>,
@@ -177,7 +177,7 @@ fn dashboard_line(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tui::theme::NORMAL;
+    use crate::scene::theme::NORMAL;
     use pixtuoid_core::AgentId;
     use std::sync::Arc;
 
@@ -329,7 +329,7 @@ mod tests {
     #[test]
     fn every_registry_source_has_a_non_fallback_badge_color() {
         use pixtuoid_core::source::registry::REGISTRY;
-        let theme = &crate::tui::theme::NORMAL;
+        let theme = &crate::scene::theme::NORMAL;
         let fallback = to_color(theme.ui.label_idle);
         for d in REGISTRY {
             let row = make_row(d.name, RowState::Idle, "x");

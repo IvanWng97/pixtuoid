@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use pixtuoid::tui::frame_cache::{FrameCache, FrameKey};
+use pixtuoid::scene::frame_cache::{FrameCache, FrameKey};
 use pixtuoid_core::sprite::{Frame, Rgb};
 use pixtuoid_core::state::ActivityState;
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex, SceneState};

@@ -17,12 +17,12 @@ use pixtuoid_core::sprite::{format::Pack, Rgb, RgbBuffer};
 use pixtuoid_core::state::SceneState;
 use pixtuoid_core::AgentId;
 
-use crate::tui::chitchat::{ActiveChitchat, VenueKey};
-use crate::tui::floor::{FloorCtx, FloorMeta};
-use crate::tui::layout::{Layout, MAX_VISIBLE_DESKS};
-use crate::tui::pathfind::Router;
-use crate::tui::pixel_painter::{render_to_rgb_buffer, PixelCtx};
-use crate::tui::theme::Theme;
+use crate::scene::chitchat::{ActiveChitchat, VenueKey};
+use crate::scene::floor::{FloorCtx, FloorMeta};
+use crate::scene::layout::{Layout, MAX_VISIBLE_DESKS};
+use crate::scene::pathfind::Router;
+use crate::scene::pixel_painter::{render_to_rgb_buffer, PixelCtx};
+use crate::scene::theme::Theme;
 
 /// Owns everything needed to render the live office to a reusable `RgbBuffer` across
 /// frames: the per-floor render caches (`FloorCtx`) plus the persistent office state
@@ -64,7 +64,7 @@ impl OfficeRenderer {
         buf_w: u16,
         buf_h: u16,
         floor_meta: FloorMeta,
-        floor_pet: Option<&crate::tui::pet::Pet>,
+        floor_pet: Option<&crate::scene::pet::Pet>,
     ) -> &RgbBuffer {
         self.buf
             .ensure_size(buf_w, buf_h, theme.surface.bg_fallback);
@@ -127,8 +127,9 @@ mod tests {
         // A fresh empty office still paints floor/walls/windows → never all-black, and the
         // buffer is sized to the requested pixel dims. Pins the floating render seam end-to-end.
         let scene = SceneState::new([8; pixtuoid_core::state::MAX_FLOORS]);
-        let pack = crate::tui::embedded_pack::load_sprite_pack(None).expect("embedded pack loads");
-        let theme = crate::tui::theme::theme_by_name("normal").expect("normal theme exists");
+        let pack =
+            crate::scene::embedded_pack::load_sprite_pack(None).expect("embedded pack loads");
+        let theme = crate::scene::theme::theme_by_name("normal").expect("normal theme exists");
         let now = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
         let mut renderer = OfficeRenderer::new();
         let buf = renderer.render(

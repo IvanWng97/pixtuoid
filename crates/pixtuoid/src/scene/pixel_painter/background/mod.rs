@@ -40,8 +40,8 @@ fn local_hour_frac(now: std::time::SystemTime) -> f32 {
     local.hour() as f32 + local.minute() as f32 / 60.0
 }
 
-use crate::tui::layout::{Layout, ELEVATOR_W};
-use crate::tui::theme::Theme;
+use crate::scene::layout::{Layout, ELEVATOR_W};
+use crate::scene::theme::Theme;
 
 /// Floor-to-ceiling window stride. Mirrors `paint_floor_and_walls` —
 /// kept in sync so `window_spill_columns` returns the same x positions
@@ -239,7 +239,7 @@ fn skyline_haze(w: Weather) -> Option<(Rgb, f32)> {
 /// Elevator-door windows are excluded — mirroring the `overlaps_door`
 /// guard in `paint_floor_and_walls`. Used by `paint_dust_motes` so the
 /// motes drift through the same warm spill the floor pass paints.
-pub(in crate::tui::pixel_painter) fn window_spill_columns(layout: &Layout) -> Vec<SunbeamColumn> {
+pub(in crate::scene::pixel_painter) fn window_spill_columns(layout: &Layout) -> Vec<SunbeamColumn> {
     let top_wall_h = layout
         .top_margin
         .saturating_sub(pixtuoid_core::layout::WALL_BAND_TO_TOP_MARGIN);
@@ -1089,7 +1089,7 @@ mod tests {
             "quiet 1 s later"
         );
 
-        let theme = crate::tui::theme::theme_by_name("normal").expect("theme");
+        let theme = crate::scene::theme::theme_by_name("normal").expect("theme");
         let render_lum = |now: SystemTime| -> u64 {
             let look = time_of_day_look(now, theme);
             let mut buf = RgbBuffer::filled(40, 40, Rgb { r: 8, g: 8, b: 10 });
@@ -1132,7 +1132,7 @@ mod tests {
     // render must not panic and the in-bounds rows must still paint.
     #[test]
     fn short_buffer_clamps_spill_and_window_without_panic() {
-        let theme = crate::tui::theme::theme_by_name("normal").expect("theme");
+        let theme = crate::scene::theme::theme_by_name("normal").expect("theme");
         let top_wall_h = 18u16;
         // buf_h sits just above top_wall_h so the spill (SPILL_DEPTH rows below
         // the wall band) and the window glass both straddle the bottom edge.

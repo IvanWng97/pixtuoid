@@ -5,10 +5,10 @@ use std::time::SystemTime;
 
 use pixtuoid_core::{AgentId, SceneState};
 
-use crate::tui::layout::{Layout, Size};
-use crate::tui::pet::PetKind;
-use crate::tui::pixel_painter::character_anchor;
-use crate::tui::pose;
+use crate::scene::layout::{Layout, Size};
+use crate::scene::pet::PetKind;
+use crate::scene::pixel_painter::character_anchor;
+use crate::scene::pose;
 
 /// Hit-test the mouse cursor against each agent's current sprite footprint.
 /// Returns the agent under `(mx, my)` (in terminal cell coordinates), or
@@ -92,7 +92,7 @@ pub fn hit_test_coffee_machine(layout: &Layout, mx: u16, my: u16) -> bool {
     let pantry_wp = layout
         .waypoints
         .iter()
-        .find(|w| matches!(w.kind, crate::tui::layout::WaypointKind::Pantry));
+        .find(|w| matches!(w.kind, crate::scene::layout::WaypointKind::Pantry));
     let Some(wp) = pantry_wp else {
         return false;
     };
@@ -115,7 +115,7 @@ pub fn hit_test_coffee_machine(layout: &Layout, mx: u16, my: u16) -> bool {
 /// The coffee machine is handled separately for its click-to-open
 /// behavior — this function covers the remaining decorations.
 pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static str> {
-    use crate::tui::layout::{
+    use crate::scene::layout::{
         furniture_def, Furniture, PlantItem, PlantKind, PodDecor, PodDecorItem, WallDecor,
         WallDecorItem, WaypointKind, DESK_H, DESK_W, ELEVATOR_H, ELEVATOR_W,
     };
@@ -348,7 +348,7 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
 /// the sprite's footprint.
 pub fn hit_test_pet(
     kind: PetKind,
-    pet_pos: crate::tui::layout::Point,
+    pet_pos: crate::scene::layout::Point,
     anim_name: &str,
     mx: u16,
     my: u16,
@@ -363,7 +363,7 @@ pub fn hit_test_pet(
 /// True if `(mx, my)` (terminal cell coords) falls on the gateway mascot's
 /// 14×12 sprite, centered at `pos` (pixel coords). The lobster is symmetric and
 /// a single sprite size, so no per-anim hitbox is needed.
-pub fn hit_test_mascot(pos: crate::tui::layout::Point, mx: u16, my: u16) -> bool {
+pub fn hit_test_mascot(pos: crate::scene::layout::Point, mx: u16, my: u16) -> bool {
     const W: u16 = 14;
     const H: u16 = 12;
     let tl_x = pos.x.saturating_sub(W / 2);
@@ -388,7 +388,7 @@ mod tests {
         let pantry_wp = layout
             .waypoints
             .iter()
-            .find(|w| w.kind == crate::tui::layout::WaypointKind::Pantry)
+            .find(|w| w.kind == crate::scene::layout::WaypointKind::Pantry)
             .expect("pantry");
         let Size { w: cw, h: ch } = layout.pantry_counter_size;
         let sprite_x = pantry_wp.pos.x.saturating_sub(cw / 2);
@@ -471,7 +471,7 @@ mod tests {
 
     #[test]
     fn cat_hit_test_inside_sit_sprite() {
-        use crate::tui::layout::Point;
+        use crate::scene::layout::Point;
         // cat_sit is 6x6. Center at (50, 80).
         // Top-left pixel: (50-3, 80-3) = (47, 77).
         // cell_y for my=39 → 78, which is inside [77..83).
@@ -482,7 +482,7 @@ mod tests {
 
     #[test]
     fn cat_hit_test_outside_returns_false() {
-        use crate::tui::layout::Point;
+        use crate::scene::layout::Point;
         let pos = Point { x: 50, y: 80 };
         // Way outside the 6x6 sprite.
         assert!(!hit_test_pet(PetKind::Cat, pos, "cat_sit", 10, 10));
@@ -490,7 +490,7 @@ mod tests {
 
     #[test]
     fn mascot_hit_test_inside_and_outside() {
-        use crate::tui::layout::Point;
+        use crate::scene::layout::Point;
         // 14x12 sprite centered at (50, 80) → top-left pixel (43, 74).
         let pos = Point { x: 50, y: 80 };
         // cell my=39 → pixel 78 ∈ [74..86); mx=50 ∈ [43..57).
@@ -593,11 +593,11 @@ mod tests {
 
     #[test]
     fn furniture_hit_test_ficus_via_synthetic_plant() {
-        use crate::tui::layout::Point;
+        use crate::scene::layout::Point;
         let mut layout = Layout::compute(160, 200, 4).expect("layout");
         let pos = Point { x: 40, y: 40 };
-        layout.plants.push(crate::tui::layout::PlantItem {
-            kind: crate::tui::layout::PlantKind::Ficus,
+        layout.plants.push(crate::scene::layout::PlantItem {
+            kind: crate::scene::layout::PlantKind::Ficus,
             pos,
         });
         // Plants are center-anchored on `pos`; hover the center cell.
@@ -606,13 +606,13 @@ mod tests {
 
     #[test]
     fn furniture_hit_test_bulletin_board_via_synthetic_wall_decor() {
-        use crate::tui::layout::Point;
+        use crate::scene::layout::Point;
         let mut layout = Layout::compute(160, 200, 4).expect("layout");
         // Wall decor is TOP-LEFT anchored at `pos` (not centered). Place it in
         // open space so no earlier furniture arm shadows it.
         let pos = Point { x: 60, y: 30 };
-        layout.wall_decor.push(crate::tui::layout::WallDecorItem {
-            kind: crate::tui::layout::WallDecor::BulletinBoard,
+        layout.wall_decor.push(crate::scene::layout::WallDecorItem {
+            kind: crate::scene::layout::WallDecor::BulletinBoard,
             pos,
         });
         assert_eq!(
@@ -623,7 +623,7 @@ mod tests {
 
     #[test]
     fn cat_hit_test_sleep_smaller_box() {
-        use crate::tui::layout::Point;
+        use crate::scene::layout::Point;
         // cat_sleep is 6x4. Center at (50, 80).
         // Top-left: (47, 78). Bottom-right: (53, 82).
         let pos = Point { x: 50, y: 80 };

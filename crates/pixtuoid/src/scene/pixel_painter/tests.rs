@@ -76,7 +76,7 @@ fn glass_wall_h_back_cap_composites_over_a_character_behind_it() {
     // by the translucent glass. Stand in for that character with a vivid
     // warm pixel inside the cap band; the glass must shift it toward the
     // cool tone (red drops, blue rises) rather than leave it untouched.
-    let theme = crate::tui::theme::theme_by_name("normal").expect("theme");
+    let theme = crate::scene::theme::theme_by_name("normal").expect("theme");
     let y_top = 20u16;
     // Place the stand-in at the REAL northmost row a routed walker's feet
     // can reach: footprint top `y_top` minus (OBSTACLE_PAD_PX=2 + 1) = the
@@ -113,7 +113,7 @@ fn glass_wall_h_back_cap_composites_over_a_character_behind_it() {
 
 #[test]
 fn seat_sprite_maps_facing_to_sprite_and_flip() {
-    use crate::tui::layout::{Facing, WaypointKind};
+    use crate::scene::layout::{Facing, WaypointKind};
     // Lounge couch always looks at the window (Facing::North) → back view.
     assert_eq!(
         seat_sprite(WaypointKind::Couch, Facing::North),
@@ -324,7 +324,7 @@ fn tool_glow_tint_maps_known_tools() {
         },
     );
     let idle_slot = make_slot(id, ActivityState::Idle);
-    let glow = &crate::tui::theme::NORMAL.tool_glow;
+    let glow = &crate::scene::theme::NORMAL.tool_glow;
     let edit_tint = palette::tool_glow_tint(&edit_slot, glow);
     let bash_tint = palette::tool_glow_tint(&bash_slot, glow);
     let idle_tint = palette::tool_glow_tint(&idle_slot, glow);
@@ -524,7 +524,7 @@ fn pet_z_anchor_tracks_the_selected_anim_sprite_height() {
     // one row NORTH of the walk/sit sprites — a literal +2 painted a sleeping
     // pet OVER a character whose feet land on pos.y+1. Reads the REAL embedded
     // heights so a pet-sprite resize surfaces HERE, not as a z-order bug.
-    let pack = crate::tui::embedded_pack::load_sprite_pack(None).expect("embedded pack");
+    let pack = crate::scene::embedded_pack::load_sprite_pack(None).expect("embedded pack");
     let pos = Point { x: 40, y: 30 };
     let anim_h = |name: &str| {
         pack.animation(name)
@@ -532,7 +532,7 @@ fn pet_z_anchor_tracks_the_selected_anim_sprite_height() {
             .map(|f| f.height)
             .unwrap_or_else(|| panic!("missing pet anim {name}"))
     };
-    for &kind in crate::tui::pet::PetKind::ALL {
+    for &kind in crate::scene::pet::PetKind::ALL {
         let sleep_h = anim_h(kind.sleep_anim());
         let sleep = z_sort_row(Anchor::Center, pos, sleep_h);
         let walk = z_sort_row(Anchor::Center, pos, anim_h(kind.walk_anim()));
@@ -560,7 +560,7 @@ fn floor_lamp_south_offset_is_the_base_row() {
 
 #[test]
 fn waypoint_depth_baseline_is_center_pinned_sprite_south() {
-    use crate::tui::layout::{furniture_def, WaypointKind};
+    use crate::scene::layout::{furniture_def, WaypointKind};
     // These appliances are center-pinned, so the z-sort key is the sprite's
     // south ROW = pos.y + footprint.h/2 - 1 (NOT +h/2 — that overshoots by
     // one and lets the sprite paint over a character just in front). Lock
@@ -585,7 +585,7 @@ fn desk_walk_anchor_settles_exactly_on_the_seat() {
     // sprite anchor — zero pop on arrival. This identity is the contract
     // that lets desk_walk_anchor stay a pure fn instead of a side-probe; if
     // seated_anchor or walking_anchor ever change, this fails loudly.
-    use crate::tui::layout::desk_walk_anchor;
+    use crate::scene::layout::desk_walk_anchor;
     for desk in [
         Point { x: 40, y: 30 },
         Point { x: 100, y: 60 },
@@ -658,7 +658,7 @@ fn settle_view_matches_the_seated_view_for_every_seat() {
     // the "sit facing the wrong way then snap" bug cannot recur, for current
     // OR future seatable furniture (matched generically by having a settle
     // foot-cell, not a hardcoded kind list).
-    use crate::tui::layout::{Facing, WaypointKind, MAX_VISIBLE_DESKS};
+    use crate::scene::layout::{Facing, WaypointKind, MAX_VISIBLE_DESKS};
     let l = Layout::compute(192, 158, MAX_VISIBLE_DESKS).expect("fits");
     let seats: Vec<_> = l
         .waypoints
@@ -726,7 +726,7 @@ fn settle_seat_view_recognizes_the_home_desk() {
     // = desk_walk_anchor) is a settle target, so the arrival glide onto it goes
     // through SeatView::Front (front-facing, stable z-key) — same path as the
     // sofas, no front-cross.
-    use crate::tui::layout::MAX_VISIBLE_DESKS;
+    use crate::scene::layout::MAX_VISIBLE_DESKS;
     use pixtuoid_core::layout::{desk_walk_anchor, Furniture};
     let l = Layout::compute(192, 158, MAX_VISIBLE_DESKS).expect("fits");
     let desk = *l.home_desks.first().expect("at least one home desk");
@@ -763,7 +763,7 @@ fn desk_settle_z_key_matches_the_seated_arm() {
                 seated_arm_z,
                 "desk settle z-key must equal the SeatedIdle/Typing arm z-key"
             );
-            let fp_h = crate::tui::layout::desk_furniture_def()
+            let fp_h = crate::scene::layout::desk_furniture_def()
                 .footprint
                 .expect("desk footprint")
                 .h;
@@ -785,7 +785,7 @@ fn sit_arc_z_key_is_stable_and_on_the_right_side_of_its_furniture() {
     // the correct side of the furniture for every seat — behind a back-view
     // sofa/couch, on top of (tie with) a front sofa, and in front of the
     // meeting table for a stand.
-    use crate::tui::layout::{
+    use crate::scene::layout::{
         furniture_def, z_sort_row, Anchor, Facing, Furniture, WaypointKind, MAX_VISIBLE_DESKS,
     };
     let l = Layout::compute(192, 158, MAX_VISIBLE_DESKS).expect("fits");
@@ -868,7 +868,7 @@ fn desk_occupant_always_sorts_behind_its_desk() {
     // edit can never drift the agent in front of its own desk (no flicker,
     // matching the wander seats — the z-order GUARANTEE is unified even though
     // the render code is intentionally not).
-    let fp_h = crate::tui::layout::desk_furniture_def()
+    let fp_h = crate::scene::layout::desk_furniture_def()
         .footprint
         .expect("desk has a footprint")
         .h;
@@ -898,7 +898,7 @@ fn desk_z_key_is_footprint_front_plus_overhang() {
     // waypoint/wall baselines), not a bare sprite-bottom literal. Equals
     // the historical `desk.y + 8` (6 + 2). Locks the relationship so a
     // footprint or overhang edit surfaces here, not as a layering bug.
-    let fp_h = crate::tui::layout::desk_furniture_def()
+    let fp_h = crate::scene::layout::desk_furniture_def()
         .footprint
         .expect("desk has a footprint")
         .h;
@@ -911,7 +911,7 @@ fn every_pod_occludes_via_overhang() {
     // sprite is TALLER than its shallow south-anchored ground footprint, so a
     // walker parks deep behind it and the overhang's own y-sort hides them.
     // Exhaustive over PodDecor::ALL so a new pod kind is forced through this.
-    use crate::tui::layout::{furniture_def, PodDecor, Size};
+    use crate::scene::layout::{furniture_def, PodDecor, Size};
     assert_eq!(
         PodDecor::ALL.len(),
         5,
@@ -1145,7 +1145,7 @@ fn sunset_strength_varies_across_day() {
 #[test]
 fn waypoint_rank_offset_x_decollision_table() {
     use super::anchors::waypoint_rank_offset_x;
-    use crate::tui::layout::WaypointKind;
+    use crate::scene::layout::WaypointKind;
     // rank 0 = first arrival, no offset, for every kind.
     assert_eq!(waypoint_rank_offset_x(WaypointKind::Couch, 0), 0);
     assert_eq!(waypoint_rank_offset_x(WaypointKind::Pantry, 0), 0);
@@ -1172,7 +1172,7 @@ fn waypoint_rank_offset_x_decollision_table() {
 #[test]
 fn tool_glow_tint_maps_delegation_search_and_unknown_tokens() {
     let id = pixtuoid_core::AgentId::from_transcript_path("/g.jsonl");
-    let glow = &crate::tui::theme::NORMAL.tool_glow;
+    let glow = &crate::scene::theme::NORMAL.tool_glow;
     let active = |detail: &str| {
         make_slot(
             id,
@@ -1211,7 +1211,7 @@ fn tool_glow_tint_maps_delegation_search_and_unknown_tokens() {
 
 #[test]
 fn seat_view_of_obstacle_kinds_is_upright_unflipped() {
-    use crate::tui::layout::{Facing, WaypointKind};
+    use crate::scene::layout::{Facing, WaypointKind};
     // The non-seat obstacle kinds dispatch directly in production and never
     // reach a seated render through SeatView, but the explicit arm maps them to
     // the upright default (Side { flip: false }) for totality.
@@ -1234,7 +1234,7 @@ fn seat_view_of_obstacle_kinds_is_upright_unflipped() {
 
 #[test]
 fn paint_character_at_missing_anim_is_a_noop() {
-    let pack = crate::tui::embedded_pack::load_sprite_pack(None).expect("embedded pack");
+    let pack = crate::scene::embedded_pack::load_sprite_pack(None).expect("embedded pack");
     let mut cache = FrameCache::new();
     let id = pixtuoid_core::AgentId::from_transcript_path("/c.jsonl");
     let slot = make_slot(id, ActivityState::Idle);
@@ -1269,7 +1269,7 @@ fn glass_wall_h_clamps_below_buffer_bottom() {
     // y_top near the buffer bottom → the cap+face row span exceeds the height,
     // so the per-row `y >= bh continue` fires. Must not panic; in-bounds rows
     // still paint.
-    let theme = crate::tui::theme::theme_by_name("normal").expect("theme");
+    let theme = crate::scene::theme::theme_by_name("normal").expect("theme");
     let bh = 16u16;
     let mut buf = RgbBuffer::filled(40, bh, Rgb { r: 0, g: 0, b: 0 });
     paint_glass_wall_h(&mut buf, theme, 0, 39, bh - 1);
@@ -1289,7 +1289,7 @@ fn glass_wall_h_clamps_below_buffer_bottom() {
 fn glass_wall_v_clamps_past_right_edge() {
     // x_left == bw-1 → x_left+dx for dx>=1 exceeds the width, exercising the
     // `x >= bw continue`. Must not panic.
-    let theme = crate::tui::theme::theme_by_name("normal").expect("theme");
+    let theme = crate::scene::theme::theme_by_name("normal").expect("theme");
     let bw = 12u16;
     let mut buf = RgbBuffer::filled(bw, 40, Rgb { r: 0, g: 0, b: 0 });
     paint_glass_wall_v(&mut buf, theme, bw - 1, 5, 20);
@@ -1348,9 +1348,9 @@ fn furniture_room_decor_too_small_bounds_are_noops() {
     use super::furniture::{
         paint_doormat, paint_notice_board, paint_trash_bin, paint_water_cooler,
     };
-    let theme = crate::tui::theme::theme_by_name("normal").expect("theme");
+    let theme = crate::scene::theme::theme_by_name("normal").expect("theme");
     let bg = Rgb { r: 9, g: 9, b: 9 };
-    let small = crate::tui::layout::Bounds {
+    let small = crate::scene::layout::Bounds {
         x: 2,
         y: 2,
         width: 8,
@@ -1376,10 +1376,10 @@ fn furniture_room_decor_large_bounds_paint() {
     use super::furniture::{
         paint_doormat, paint_notice_board, paint_trash_bin, paint_water_cooler,
     };
-    let theme = crate::tui::theme::theme_by_name("normal").expect("theme");
+    let theme = crate::scene::theme::theme_by_name("normal").expect("theme");
     let bg = Rgb { r: 9, g: 9, b: 9 };
     // A generous room: width 40, height 40, well above every guard threshold.
-    let big = crate::tui::layout::Bounds {
+    let big = crate::scene::layout::Bounds {
         x: 4,
         y: 4,
         width: 40,
@@ -1402,7 +1402,7 @@ fn furniture_room_decor_large_bounds_paint() {
 #[test]
 fn furniture_corner_clip_does_not_panic() {
     use super::furniture::{paint_area_rug, paint_pantry_table, paint_side_table};
-    let theme = crate::tui::theme::theme_by_name("normal").expect("theme");
+    let theme = crate::scene::theme::theme_by_name("normal").expect("theme");
     // Centre each piece near the (0,0) corner so part of the sprite has a
     // negative px/py, exercising the `< 0` / out-of-range `continue` clamps.
     let mut buf = RgbBuffer::filled(40, 40, Rgb { r: 0, g: 0, b: 0 });

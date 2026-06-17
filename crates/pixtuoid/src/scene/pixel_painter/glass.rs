@@ -34,7 +34,7 @@ const GLASS_SEAM_STRIDE: u16 = 16;
 // a bare 6) so retuning the wall face thickness moves the cap with it.
 const GLASS_CAP_PX: u16 = WALL_THICK_H_PX;
 
-fn glass_tones(theme: &crate::tui::theme::Theme) -> (Rgb, Rgb, Rgb) {
+fn glass_tones(theme: &crate::scene::theme::Theme) -> (Rgb, Rgb, Rgb) {
     let tl = theme.office.room_wall_trim_light;
     (
         Rgb {
@@ -95,7 +95,7 @@ pub(super) fn stitch_vertical_wall(
 /// soft bottom edge, seam glints every `GLASS_SEAM_STRIDE` px.
 pub(super) fn paint_glass_wall_h(
     buf: &mut RgbBuffer,
-    theme: &crate::tui::theme::Theme,
+    theme: &crate::scene::theme::Theme,
     x0: u16,
     x1: u16,
     y_top: u16,
@@ -132,7 +132,7 @@ pub(super) fn paint_glass_wall_h(
 /// soft right edge, seam glints every `GLASS_SEAM_STRIDE` px.
 pub(super) fn paint_glass_wall_v(
     buf: &mut RgbBuffer,
-    theme: &crate::tui::theme::Theme,
+    theme: &crate::scene::theme::Theme,
     x_left: u16,
     y_top: u16,
     y_bot: u16,

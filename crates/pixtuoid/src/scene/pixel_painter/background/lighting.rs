@@ -5,13 +5,13 @@ use std::time::SystemTime;
 
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
-use crate::tui::pixel_painter::epoch_ms;
-use crate::tui::pixel_painter::palette::blend_rgb;
-use crate::tui::theme::Theme;
+use crate::scene::pixel_painter::epoch_ms;
+use crate::scene::pixel_painter::palette::blend_rgb;
+use crate::scene::theme::Theme;
 
 /// An axis-aligned ellipse for the radial floor pools (light + shadow).
 #[derive(Clone, Copy)]
-pub(in crate::tui::pixel_painter) struct Ellipse {
+pub(in crate::scene::pixel_painter) struct Ellipse {
     pub cx: u16,
     pub cy: u16,
     pub half_w: u16,
@@ -46,7 +46,7 @@ fn paint_ellipse_blend(buf: &mut RgbBuffer, e: Ellipse, strength: f32, color: Rg
 }
 
 /// Elliptical "ceiling fluorescent" pool of pale warm light on the floor.
-pub(in crate::tui::pixel_painter) fn paint_ceiling_pool(
+pub(in crate::scene::pixel_painter) fn paint_ceiling_pool(
     buf: &mut RgbBuffer,
     ellipse: Ellipse,
     strength: f32,
@@ -56,7 +56,7 @@ pub(in crate::tui::pixel_painter) fn paint_ceiling_pool(
 }
 
 /// Warm radial halo around the floor lamp — only visible at night.
-pub(in crate::tui::pixel_painter) fn paint_floor_lamp_halo(
+pub(in crate::scene::pixel_painter) fn paint_floor_lamp_halo(
     buf: &mut RgbBuffer,
     cx: u16,
     cy: u16,
@@ -90,7 +90,7 @@ pub(in crate::tui::pixel_painter) fn paint_floor_lamp_halo(
 
 /// Neon sign panel — dark background with colored glow border, painted in
 /// the wall band. The ratatui text widget renders on top with bright colors.
-pub(in crate::tui::pixel_painter) fn paint_neon_panel(
+pub(in crate::scene::pixel_painter) fn paint_neon_panel(
     buf: &mut RgbBuffer,
     x: u16,
     y: u16,
@@ -133,7 +133,7 @@ pub(in crate::tui::pixel_painter) fn paint_neon_panel(
 /// 7x7 clock face with a circular rim. Hands quantize to 8 cardinal/inter-
 /// cardinal directions and are drawn as multi-pixel rays from the center
 /// (hour 1 px, minute 2 px) so they read clearly at this size.
-pub(in crate::tui::pixel_painter) fn paint_clock(
+pub(in crate::scene::pixel_painter) fn paint_clock(
     buf: &mut RgbBuffer,
     x: u16,
     y: u16,
@@ -224,9 +224,9 @@ fn octant_offset(turn: f32) -> (i32, i32) {
 /// painted along the cubicle_aisle band so the eye traces a path connecting the
 /// door, meeting room, pantry, cubicles, and lounge. Just texture over the
 /// floor — walls and decor paint on top.
-pub(in crate::tui::pixel_painter) fn paint_corridor_runner(
+pub(in crate::scene::pixel_painter) fn paint_corridor_runner(
     buf: &mut RgbBuffer,
-    rect: crate::tui::layout::Bounds,
+    rect: crate::scene::layout::Bounds,
     theme: &Theme,
 ) {
     let runner_base = theme.office.runner_base;
@@ -258,7 +258,7 @@ pub(in crate::tui::pixel_painter) fn paint_corridor_runner(
 /// on the floor instead of hovering in mid-air. `strength` 0..1 controls
 /// the darken amount at the center; falls off quadratically to 0 at edge.
 /// Soft elliptical contact shadow under furniture / characters.
-pub(in crate::tui::pixel_painter) fn paint_shadow(
+pub(in crate::scene::pixel_painter) fn paint_shadow(
     buf: &mut RgbBuffer,
     ellipse: Ellipse,
     strength: f32,
@@ -275,7 +275,7 @@ mod tests {
     // leave the buffer untouched — the guard at the top of paint_ellipse_blend.
     #[test]
     fn ellipse_blend_degenerate_is_a_noop() {
-        let theme = &crate::tui::theme::NORMAL;
+        let theme = &crate::scene::theme::NORMAL;
         let fill = Rgb {
             r: 30,
             g: 30,
@@ -323,7 +323,7 @@ mod tests {
     // degenerate test above isn't passing vacuously.
     #[test]
     fn ellipse_blend_paints_when_valid() {
-        let theme = &crate::tui::theme::NORMAL;
+        let theme = &crate::scene::theme::NORMAL;
         let fill = Rgb {
             r: 30,
             g: 30,
@@ -349,7 +349,7 @@ mod tests {
     // without panicking (RgbBuffer::put has no internal bounds guard).
     #[test]
     fn neon_panel_off_edge_does_not_panic() {
-        let theme = &crate::tui::theme::NORMAL;
+        let theme = &crate::scene::theme::NORMAL;
         let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(5);
         let mut buf = RgbBuffer::filled(10, 10, Rgb { r: 0, g: 0, b: 0 });
         // x=8, w=6 → px reaches 13 (>= width 10); y=8, h=5 → py reaches 12.

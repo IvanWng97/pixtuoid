@@ -115,7 +115,7 @@ fn walk_leg_freezes_path_against_midleg_reroute() {
         &slot1,
         now,
         &l,
-        &mut crate::tui::pose::RouteCtx {
+        &mut crate::scene::pose::RouteCtx {
             router: &mut router,
             overlay: &overlay,
             history: &mut history,
@@ -131,7 +131,7 @@ fn walk_leg_freezes_path_against_midleg_reroute() {
         &slot2,
         later,
         &l,
-        &mut crate::tui::pose::RouteCtx {
+        &mut crate::scene::pose::RouteCtx {
             router: &mut router,
             overlay: &overlay,
             history: &mut history,
@@ -215,7 +215,7 @@ fn snap_back_walks_from_history_when_state_just_flipped() {
         &slot,
         now,
         &l,
-        &mut crate::tui::pose::RouteCtx {
+        &mut crate::scene::pose::RouteCtx {
             router: &mut router,
             overlay: &overlay,
             history: &mut history,
@@ -275,7 +275,7 @@ fn snap_back_origin_is_frozen_across_frames() {
             &slot,
             t,
             &l,
-            &mut crate::tui::pose::RouteCtx {
+            &mut crate::scene::pose::RouteCtx {
                 router: &mut router,
                 overlay: &overlay,
                 history: &mut history,
@@ -350,7 +350,7 @@ fn snap_back_cornered_leg_freezes_path_no_reroute() {
         &slot,
         now,
         &l,
-        &mut crate::tui::pose::RouteCtx {
+        &mut crate::scene::pose::RouteCtx {
             router: &mut router,
             overlay: &overlay,
             history: &mut history,
@@ -369,7 +369,7 @@ fn snap_back_cornered_leg_freezes_path_no_reroute() {
         &slot,
         later,
         &l,
-        &mut crate::tui::pose::RouteCtx {
+        &mut crate::scene::pose::RouteCtx {
             router: &mut router,
             overlay: &overlay,
             history: &mut history,
@@ -443,7 +443,7 @@ fn snap_back_derive_is_idempotent_within_a_frame() {
             &slot,
             t,
             &l,
-            &mut crate::tui::pose::RouteCtx {
+            &mut crate::scene::pose::RouteCtx {
                 router: &mut router,
                 overlay: &overlay,
                 history: &mut history,
@@ -464,7 +464,7 @@ fn snap_back_derive_is_idempotent_within_a_frame() {
                 &slot,
                 t,
                 &l,
-                &mut crate::tui::pose::RouteCtx {
+                &mut crate::scene::pose::RouteCtx {
                     router: &mut router,
                     overlay: &overlay,
                     history: &mut history,
@@ -499,8 +499,8 @@ fn wander_derive_is_idempotent_within_a_frame() {
     // wander, deriving character_anchor 4x per frame, asserting the anchor is
     // stable within each frame (its advance_wander step is guarded by
     // last_advanced_at).
-    use crate::tui::pathfind::AStarRouter;
-    use crate::tui::pixel_painter::character_anchor;
+    use crate::scene::pathfind::AStarRouter;
+    use crate::scene::pixel_painter::character_anchor;
 
     let now0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let l = layout();
@@ -525,7 +525,7 @@ fn wander_derive_is_idempotent_within_a_frame() {
             &slot,
             &l,
             t,
-            &mut crate::tui::pose::RouteCtx {
+            &mut crate::scene::pose::RouteCtx {
                 router: &mut router,
                 overlay: &overlay,
                 history: &mut history,
@@ -537,7 +537,7 @@ fn wander_derive_is_idempotent_within_a_frame() {
                 &slot,
                 &l,
                 t,
-                &mut crate::tui::pose::RouteCtx {
+                &mut crate::scene::pose::RouteCtx {
                     router: &mut router,
                     overlay: &overlay,
                     history: &mut history,
@@ -583,7 +583,7 @@ fn snap_back_long_distance_renders_past_window_by_physics() {
             &slot,
             t,
             &l,
-            &mut crate::tui::pose::RouteCtx {
+            &mut crate::scene::pose::RouteCtx {
                 router: &mut router,
                 overlay: &overlay,
                 history: &mut history,
@@ -646,7 +646,7 @@ fn snap_back_routes_via_the_approach_cell_then_settles_onto_the_chair() {
         &slot,
         now,
         &l,
-        &mut crate::tui::pose::RouteCtx {
+        &mut crate::scene::pose::RouteCtx {
             router: &mut router,
             overlay: &overlay,
             history: &mut history,
@@ -696,7 +696,7 @@ fn snap_back_skipped_when_prev_within_min_distance() {
         &slot,
         now,
         &l,
-        &mut crate::tui::pose::RouteCtx {
+        &mut crate::scene::pose::RouteCtx {
             router: &mut router,
             overlay: &overlay,
             history: &mut history,
@@ -732,7 +732,7 @@ fn snap_back_skipped_after_900ms_window() {
         &slot,
         now,
         &l,
-        &mut crate::tui::pose::RouteCtx {
+        &mut crate::scene::pose::RouteCtx {
             router: &mut router,
             overlay: &overlay,
             history: &mut history,
@@ -758,7 +758,7 @@ fn snap_back_skipped_without_recent_history() {
         &slot,
         now,
         &l,
-        &mut crate::tui::pose::RouteCtx {
+        &mut crate::scene::pose::RouteCtx {
             router: &mut router,
             overlay: &overlay,
             history: &mut history,
@@ -795,7 +795,7 @@ fn multi_segment_path_maps_t_to_segment_via_octile_distance() {
         &slot,
         now,
         &l,
-        &mut crate::tui::pose::RouteCtx {
+        &mut crate::scene::pose::RouteCtx {
             router: &mut router,
             overlay: &overlay,
             history: &mut history,
@@ -861,7 +861,7 @@ fn at_waypoint_pose_records_position_to_history() {
         &slot,
         now,
         &l,
-        &mut crate::tui::pose::RouteCtx {
+        &mut crate::scene::pose::RouteCtx {
             router: &mut router,
             overlay: &overlay,
             history: &mut history,
@@ -889,7 +889,7 @@ fn delegates_to_derive_for_oob_desk() {
         &slot,
         now,
         &l,
-        &mut crate::tui::pose::RouteCtx {
+        &mut crate::scene::pose::RouteCtx {
             router: &mut router,
             overlay: &overlay,
             history: &mut history,
@@ -956,7 +956,7 @@ fn snap_back_progress_is_physics_eased_not_linear() {
         &slot,
         now,
         &l,
-        &mut crate::tui::pose::RouteCtx {
+        &mut crate::scene::pose::RouteCtx {
             router: &mut router,
             overlay: &overlay,
             history: &mut history,
@@ -991,7 +991,7 @@ fn snap_back_progress_is_physics_eased_not_linear() {
         &slot_q,
         quarter_now,
         &l,
-        &mut crate::tui::pose::RouteCtx {
+        &mut crate::scene::pose::RouteCtx {
             router: &mut router,
             overlay: &overlay,
             history: &mut history2,
@@ -1039,7 +1039,7 @@ fn snap_back_profile_stored_in_motion_state() {
         &slot,
         now,
         &l,
-        &mut crate::tui::pose::RouteCtx {
+        &mut crate::scene::pose::RouteCtx {
             router: &mut router,
             overlay: &overlay,
             history: &mut history,
@@ -1060,7 +1060,7 @@ fn snap_back_profile_stored_in_motion_state() {
         &slot2,
         t2,
         &l,
-        &mut crate::tui::pose::RouteCtx {
+        &mut crate::scene::pose::RouteCtx {
             router: &mut router,
             overlay: &overlay,
             history: &mut history,
@@ -1105,7 +1105,7 @@ fn snap_back_rearms_on_new_state_transition() {
         &slot0,
         t0,
         &l,
-        &mut crate::tui::pose::RouteCtx {
+        &mut crate::scene::pose::RouteCtx {
             router: &mut router,
             overlay: &overlay,
             history: &mut history,
@@ -1134,7 +1134,7 @@ fn snap_back_rearms_on_new_state_transition() {
         &slot1,
         now1,
         &l,
-        &mut crate::tui::pose::RouteCtx {
+        &mut crate::scene::pose::RouteCtx {
             router: &mut router,
             overlay: &overlay,
             history: &mut history,
@@ -1252,7 +1252,7 @@ fn entry_duration_scales_with_path_longer_desk_takes_longer() {
         &near,
         now,
         &l,
-        &mut crate::tui::pose::RouteCtx {
+        &mut crate::scene::pose::RouteCtx {
             router: &mut router_n,
             overlay: &overlay,
             history: &mut hist_near,
@@ -1263,7 +1263,7 @@ fn entry_duration_scales_with_path_longer_desk_takes_longer() {
         &far,
         now,
         &l,
-        &mut crate::tui::pose::RouteCtx {
+        &mut crate::scene::pose::RouteCtx {
             router: &mut router_f,
             overlay: &overlay,
             history: &mut hist_far,
@@ -1316,7 +1316,7 @@ fn nearer_desk_arrives_before_farther_desk() {
         &near,
         now,
         &l,
-        &mut crate::tui::pose::RouteCtx {
+        &mut crate::scene::pose::RouteCtx {
             router: &mut router_n,
             overlay: &overlay,
             history: &mut hist_near,
@@ -1327,7 +1327,7 @@ fn nearer_desk_arrives_before_farther_desk() {
         &far,
         now,
         &l,
-        &mut crate::tui::pose::RouteCtx {
+        &mut crate::scene::pose::RouteCtx {
             router: &mut router_f,
             overlay: &overlay,
             history: &mut hist_far,
@@ -1351,7 +1351,7 @@ fn nearer_desk_arrives_before_farther_desk() {
         &near,
         t1,
         &l,
-        &mut crate::tui::pose::RouteCtx {
+        &mut crate::scene::pose::RouteCtx {
             router: &mut router_n,
             overlay: &overlay,
             history: &mut hist_near,
@@ -1362,7 +1362,7 @@ fn nearer_desk_arrives_before_farther_desk() {
         &far,
         t1,
         &l,
-        &mut crate::tui::pose::RouteCtx {
+        &mut crate::scene::pose::RouteCtx {
             router: &mut router_f,
             overlay: &overlay,
             history: &mut hist_far,
@@ -1404,7 +1404,7 @@ fn five_same_created_at_agents_have_distinct_entry_durations() {
             &slot,
             now,
             &l,
-            &mut crate::tui::pose::RouteCtx {
+            &mut crate::scene::pose::RouteCtx {
                 router: &mut router,
                 overlay: &overlay,
                 history: &mut hist,
@@ -1444,7 +1444,7 @@ fn exit_profile_snapshotted_once_not_on_subsequent_calls() {
         &slot,
         now,
         &l,
-        &mut crate::tui::pose::RouteCtx {
+        &mut crate::scene::pose::RouteCtx {
             router: &mut router,
             overlay: &overlay,
             history: &mut hist,
@@ -1463,7 +1463,7 @@ fn exit_profile_snapshotted_once_not_on_subsequent_calls() {
         &slot,
         t1,
         &l,
-        &mut crate::tui::pose::RouteCtx {
+        &mut crate::scene::pose::RouteCtx {
             router: &mut router,
             overlay: &overlay,
             history: &mut hist,
@@ -1515,7 +1515,7 @@ fn exit_far_completes_before_grace_window_no_vanish() {
     let overlay = pixtuoid_core::walkable::OccupancyOverlay::new();
     let mut hist = PoseHistory::new();
     let mut motion = HashMap::new();
-    match derive_with_routing(&slot, now, &l, &mut crate::tui::pose::RouteCtx { router: &mut router, overlay: &overlay, history: &mut hist, motion: &mut motion }) {
+    match derive_with_routing(&slot, now, &l, &mut crate::scene::pose::RouteCtx { router: &mut router, overlay: &overlay, history: &mut hist, motion: &mut motion }) {
             // Reached the door (Walking at the end of the path) or already
             // arrived (None, GC imminent). Either way: NOT stuck mid-corridor.
             Some(Pose::Walking { t_x1000, .. }) => assert!(
@@ -1555,7 +1555,7 @@ fn exit_uses_commute_speed_faster_than_wander() {
         &slot,
         now,
         &l,
-        &mut crate::tui::pose::RouteCtx {
+        &mut crate::scene::pose::RouteCtx {
             router: &mut router,
             overlay: &overlay,
             history: &mut hist,
@@ -1607,7 +1607,7 @@ fn exit_with_no_door_does_not_vanish() {
         &slot,
         now,
         &l,
-        &mut crate::tui::pose::RouteCtx {
+        &mut crate::scene::pose::RouteCtx {
             router: &mut router,
             overlay: &overlay,
             history: &mut hist,
@@ -1656,8 +1656,8 @@ fn max_anchor_step(
     frames: u64,
     churn: bool,
 ) -> (i32, usize) {
-    use crate::tui::pathfind::AStarRouter;
-    use crate::tui::pixel_painter::character_anchor;
+    use crate::scene::pathfind::AStarRouter;
+    use crate::scene::pixel_painter::character_anchor;
 
     let mut router = AStarRouter::new();
     router.set_preferred_zone(l.corridor);
@@ -1688,7 +1688,7 @@ fn max_anchor_step(
             slot,
             l,
             now,
-            &mut crate::tui::pose::RouteCtx {
+            &mut crate::scene::pose::RouteCtx {
                 router: &mut router,
                 overlay: &overlay,
                 history: &mut history,
@@ -1788,7 +1788,7 @@ fn desk_entry_routes_around_the_desk_then_settles_onto_the_chair() {
         &slot,
         now,
         &l,
-        &mut crate::tui::pose::RouteCtx {
+        &mut crate::scene::pose::RouteCtx {
             router: &mut router,
             overlay: &overlay,
             history: &mut history,
@@ -1829,7 +1829,7 @@ fn wander_legs_approach_the_desk_via_an_allowed_side_not_through_the_front() {
     // on every wander cycle. Every desk-touching leg must instead route via
     // `desk_leg_endpoint` (a reachable N/E/W approach cell) and SETTLE onto the
     // chair, exactly like entry. This pins both legs.
-    use crate::tui::pathfind::AStarRouter;
+    use crate::scene::pathfind::AStarRouter;
     use pixtuoid_core::layout::desk_walk_anchor;
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let l = layout();
@@ -1867,7 +1867,7 @@ fn wander_legs_approach_the_desk_via_an_allowed_side_not_through_the_front() {
             &slot,
             t,
             &l,
-            &mut crate::tui::pose::RouteCtx {
+            &mut crate::scene::pose::RouteCtx {
                 router: &mut router,
                 overlay: &overlay,
                 history: &mut history,
@@ -1966,7 +1966,7 @@ fn exit_from_desk_rises_off_the_chair_via_the_approach_cell() {
         &slot,
         now,
         &l,
-        &mut crate::tui::pose::RouteCtx {
+        &mut crate::scene::pose::RouteCtx {
             router: &mut router,
             overlay: &overlay,
             history: &mut history,
@@ -2032,8 +2032,8 @@ fn wander_interrupted_by_active_does_not_teleport() {
     // A coffee run interrupted by real work: while the agent is mid-walk to
     // a waypoint its state flips Idle→Active. It must snap-back to the desk
     // as a continuous walk, never an instant teleport.
-    use crate::tui::pathfind::AStarRouter;
-    use crate::tui::pixel_painter::character_anchor;
+    use crate::scene::pathfind::AStarRouter;
+    use crate::scene::pixel_painter::character_anchor;
 
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let l = layout();
@@ -2053,7 +2053,7 @@ fn wander_interrupted_by_active_does_not_teleport() {
     let mut motion: HashMap<AgentId, MotionState> = HashMap::new();
     let seated = {
         // Reference: the desk seated anchor — used to detect "far from desk".
-        use crate::tui::pixel_painter::character_anchor as ca;
+        use crate::scene::pixel_painter::character_anchor as ca;
         let mut r2 = AStarRouter::new();
         let o2 = pixtuoid_core::walkable::OccupancyOverlay::new();
         let mut h2 = PoseHistory::new();
@@ -2062,7 +2062,7 @@ fn wander_interrupted_by_active_does_not_teleport() {
             &idle,
             &l,
             now,
-            &mut crate::tui::pose::RouteCtx {
+            &mut crate::scene::pose::RouteCtx {
                 router: &mut r2,
                 overlay: &o2,
                 history: &mut h2,
@@ -2082,7 +2082,7 @@ fn wander_interrupted_by_active_does_not_teleport() {
             &idle,
             &l,
             t,
-            &mut crate::tui::pose::RouteCtx {
+            &mut crate::scene::pose::RouteCtx {
                 router: &mut router,
                 overlay: &overlay,
                 history: &mut history,
@@ -2118,7 +2118,7 @@ fn wander_interrupted_by_active_does_not_teleport() {
             &active,
             &l,
             t,
-            &mut crate::tui::pose::RouteCtx {
+            &mut crate::scene::pose::RouteCtx {
                 router: &mut router,
                 overlay: &overlay,
                 history: &mut history,
@@ -2147,8 +2147,8 @@ fn floor_offscreen_then_resume_does_not_replay() {
     // (the "fast-forward all the movement in a second" bug). Modeled by
     // rendering a warm-up window, SKIPPING a long gap (no calls = frozen
     // motion), then resuming and asserting per-frame continuity.
-    use crate::tui::pathfind::AStarRouter;
-    use crate::tui::pixel_painter::character_anchor;
+    use crate::scene::pathfind::AStarRouter;
+    use crate::scene::pixel_painter::character_anchor;
 
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let l = layout();
@@ -2174,7 +2174,7 @@ fn floor_offscreen_then_resume_does_not_replay() {
             &slot,
             &l,
             t,
-            &mut crate::tui::pose::RouteCtx {
+            &mut crate::scene::pose::RouteCtx {
                 router: &mut router,
                 overlay: &overlay,
                 history: &mut history,
@@ -2193,7 +2193,7 @@ fn floor_offscreen_then_resume_does_not_replay() {
             &slot,
             &l,
             t,
-            &mut crate::tui::pose::RouteCtx {
+            &mut crate::scene::pose::RouteCtx {
                 router: &mut router,
                 overlay: &overlay,
                 history: &mut history,
@@ -2220,8 +2220,8 @@ fn exit_while_wandering_does_not_teleport_to_desk() {
     // A session ending while the agent is out on a wander trip (e.g. at the
     // pantry) must not snap the sprite back to its desk before the exit
     // walk. The exit should begin from the agent's CURRENT position.
-    use crate::tui::pathfind::AStarRouter;
-    use crate::tui::pixel_painter::character_anchor;
+    use crate::scene::pathfind::AStarRouter;
+    use crate::scene::pixel_painter::character_anchor;
 
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     // Real-sized floor (not the tiny 120×96 `layout()`): in the tiny room the
@@ -2254,7 +2254,7 @@ fn exit_while_wandering_does_not_teleport_to_desk() {
             &idle,
             &l,
             now,
-            &mut crate::tui::pose::RouteCtx {
+            &mut crate::scene::pose::RouteCtx {
                 router: &mut r2,
                 overlay: &o2,
                 history: &mut h2,
@@ -2273,7 +2273,7 @@ fn exit_while_wandering_does_not_teleport_to_desk() {
             &idle,
             &l,
             t,
-            &mut crate::tui::pose::RouteCtx {
+            &mut crate::scene::pose::RouteCtx {
                 router: &mut router,
                 overlay: &overlay,
                 history: &mut history,
@@ -2304,7 +2304,7 @@ fn exit_while_wandering_does_not_teleport_to_desk() {
         &exiting,
         &l,
         t_next,
-        &mut crate::tui::pose::RouteCtx {
+        &mut crate::scene::pose::RouteCtx {
             router: &mut router,
             overlay: &overlay,
             history: &mut history,
@@ -2329,7 +2329,7 @@ fn exit_while_wandering_does_not_teleport_to_desk() {
             &exiting,
             &l,
             t,
-            &mut crate::tui::pose::RouteCtx {
+            &mut crate::scene::pose::RouteCtx {
                 router: &mut router,
                 overlay: &overlay,
                 history: &mut history,
@@ -2488,7 +2488,7 @@ fn frozen_leg_anchor_continuous_across_router_shape_change() {
             &slot,
             t,
             &l,
-            &mut crate::tui::pose::RouteCtx {
+            &mut crate::scene::pose::RouteCtx {
                 router: &mut router,
                 overlay: &overlay,
                 history: &mut history,
@@ -2521,8 +2521,8 @@ fn multiple_agents_share_overlay_without_teleport() {
     // enough that this scenario does not by itself reproduce the freeze
     // regression — `frozen_leg_anchor_continuous_across_router_shape_change`
     // is the freeze-specific guard (it fails when the freeze is reverted).
-    use crate::tui::pathfind::AStarRouter;
-    use crate::tui::pixel_painter::character_anchor;
+    use crate::scene::pathfind::AStarRouter;
+    use crate::scene::pixel_painter::character_anchor;
 
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let l = layout();
@@ -2563,7 +2563,7 @@ fn multiple_agents_share_overlay_without_teleport() {
                 s,
                 &l,
                 t,
-                &mut crate::tui::pose::RouteCtx {
+                &mut crate::scene::pose::RouteCtx {
                     router: &mut router,
                     overlay: &overlay,
                     history: &mut history,
@@ -2636,7 +2636,7 @@ fn no_door_exiting_walking_pose_routes_via_settle_none() {
         &slot,
         now,
         &l,
-        &mut crate::tui::pose::RouteCtx {
+        &mut crate::scene::pose::RouteCtx {
             router: &mut router,
             overlay: &overlay,
             history: &mut history,
@@ -2688,7 +2688,7 @@ fn route_walking_pose_straight_leg_records_lerp_and_clears_walk_path() {
         &slot,
         now,
         &l,
-        &mut crate::tui::pose::RouteCtx {
+        &mut crate::scene::pose::RouteCtx {
             router: &mut router,
             overlay: &overlay,
             history: &mut history,
@@ -2759,7 +2759,7 @@ fn route_walking_pose_coincident_path_returns_input_pose() {
         &slot,
         now,
         &l,
-        &mut crate::tui::pose::RouteCtx {
+        &mut crate::scene::pose::RouteCtx {
             router: &mut router,
             overlay: &overlay,
             history: &mut history,
@@ -2796,7 +2796,7 @@ fn route_walking_pose_records_at_waypoint_and_aimless_history() {
         &slot,
         now,
         &l,
-        &mut crate::tui::pose::RouteCtx {
+        &mut crate::scene::pose::RouteCtx {
             router: &mut router,
             overlay: &overlay,
             history: &mut history,
@@ -2822,7 +2822,7 @@ fn route_walking_pose_records_at_waypoint_and_aimless_history() {
         &slot,
         later,
         &l,
-        &mut crate::tui::pose::RouteCtx {
+        &mut crate::scene::pose::RouteCtx {
             router: &mut router,
             overlay: &overlay,
             history: &mut history,
@@ -2850,7 +2850,7 @@ fn snap_back_profile_length_measures_the_routed_polyline() {
     let l = layout();
     let slot = active_slot(now, now - Duration::from_secs(60));
     let desk = l.home_desks[0];
-    let (snap_target, chair_settle) = crate::tui::pose::desk_leg_endpoint(desk, &l);
+    let (snap_target, chair_settle) = crate::scene::pose::desk_leg_endpoint(desk, &l);
     let prev = Point {
         x: desk.x + 50,
         y: desk.y + 30,
@@ -2871,7 +2871,7 @@ fn snap_back_profile_length_measures_the_routed_polyline() {
         &slot,
         now,
         &l,
-        &mut crate::tui::pose::RouteCtx {
+        &mut crate::scene::pose::RouteCtx {
             router: &mut router,
             overlay: &overlay,
             history: &mut history,

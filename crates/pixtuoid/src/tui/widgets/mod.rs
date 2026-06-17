@@ -15,7 +15,7 @@ pub(super) use hud::{
     paint_elevator_indicator, paint_footer, paint_theme_picker, paint_version_popup,
     paint_wall_display, version_popup_url_rect, VERSION_POPUP_URL,
 };
-pub(in crate::tui) use panel::{borderless_panel, PANEL_PAD_X, PANEL_PAD_Y};
+pub(crate) use panel::{borderless_panel, PANEL_PAD_X, PANEL_PAD_Y};
 // `pub`: the snapshot example reuses the real formatter for its
 // --source-warning screenshots so the wording cannot drift from production
 // (the pixtuoid lib target is not a semver surface).
@@ -637,7 +637,7 @@ mod tests {
     // so concatenating the spans must equal build_status_summary exactly.
     #[test]
     fn status_spans_text_matches_summary_across_tiers() {
-        let theme = &crate::tui::theme::NORMAL;
+        let theme = &crate::scene::theme::NORMAL;
         let s = scene_of(vec![
             active_with("Edit src/a.rs", "a"),
             waiting("b"),
@@ -662,7 +662,7 @@ mod tests {
 
     #[test]
     fn status_spans_color_code_state_segments() {
-        let theme = &crate::tui::theme::NORMAL;
+        let theme = &crate::scene::theme::NORMAL;
         let s = scene_of(vec![
             active_with("Edit src/a.rs", "a"),
             waiting("b"),

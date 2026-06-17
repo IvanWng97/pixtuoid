@@ -11,8 +11,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
 use super::{borderless_panel, centered_in, marquee_or_truncate, marquee_window, to_color};
+use crate::scene::theme::Theme;
 use crate::tui::connection::{no_action_hint, ConnState, ConnectionRow, LiveInfo};
-use crate::tui::theme::Theme;
 
 /// Popup width (clamped to the terminal by `centered_in`).
 const CONNECTION_POPUP_W: u16 = 66;
@@ -36,7 +36,7 @@ fn column_header() -> String {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(in crate::tui) fn paint_connection_panel(
+pub(crate) fn paint_connection_panel(
     f: &mut ratatui::Frame<'_>,
     rows: &[ConnectionRow],
     live: &[LiveInfo],
@@ -227,8 +227,8 @@ fn fmt_age(d: Duration) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scene::theme::NORMAL;
     use crate::tui::connection::{RowFacts, RowInput};
-    use crate::tui::theme::NORMAL;
 
     fn row(source_id: &'static str, label_prefix: &'static str, state: ConnState) -> ConnectionRow {
         ConnectionRow {

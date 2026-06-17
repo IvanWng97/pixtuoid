@@ -4,8 +4,8 @@
 //! that the unit-level `advance_wander` tests can't reach — and asserts an
 //! off-screen floor freezes while hidden and resyncs (no replay) on return.
 use super::*;
-use crate::tui::layout::Point;
-use crate::tui::pet::PetKind;
+use crate::scene::layout::Point;
+use crate::scene::pet::PetKind;
 use pixtuoid_core::state::{ActivityState, AgentSlot, GlobalDeskIndex, SceneState};
 use pixtuoid_core::AgentId;
 use ratatui::backend::TestBackend;
@@ -57,16 +57,16 @@ fn render_until_settled<B: Backend<Error: Send + Sync + 'static>>(
 // ---- shared helpers -------------------------------------------------
 
 fn pack() -> Pack {
-    crate::tui::embedded_pack::load_sprite_pack(None).expect("embedded pack")
+    crate::scene::embedded_pack::load_sprite_pack(None).expect("embedded pack")
 }
 fn t0() -> SystemTime {
     SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000)
 }
-fn normal_theme() -> &'static crate::tui::theme::Theme {
-    crate::tui::theme::theme_by_name("normal").expect("normal theme")
+fn normal_theme() -> &'static crate::scene::theme::Theme {
+    crate::scene::theme::theme_by_name("normal").expect("normal theme")
 }
-fn dark_theme() -> &'static crate::tui::theme::Theme {
-    crate::tui::theme::theme_by_name("cyberpunk").expect("cyberpunk theme")
+fn dark_theme() -> &'static crate::scene::theme::Theme {
+    crate::scene::theme::theme_by_name("cyberpunk").expect("cyberpunk theme")
 }
 /// Build a renderer with the given pet KINDS, each using its default name.
 fn build(cols: u16, rows: u16, kinds: Vec<PetKind>) -> TuiRenderer<TestBackend> {
@@ -75,12 +75,12 @@ fn build(cols: u16, rows: u16, kinds: Vec<PetKind>) -> TuiRenderer<TestBackend> 
         rows,
         kinds
             .into_iter()
-            .map(crate::tui::pet::Pet::defaulted)
+            .map(crate::scene::pet::Pet::defaulted)
             .collect(),
     )
 }
 /// Build a renderer with fully-specified pets (kind + custom name).
-fn build_pets(cols: u16, rows: u16, pets: Vec<crate::tui::pet::Pet>) -> TuiRenderer<TestBackend> {
+fn build_pets(cols: u16, rows: u16, pets: Vec<crate::scene::pet::Pet>) -> TuiRenderer<TestBackend> {
     TuiRenderer::new(
         Terminal::new(TestBackend::new(cols, rows)).expect("test backend"),
         normal_theme(),
@@ -159,8 +159,8 @@ fn region_diff(a: &RgbBuffer, b: &RgbBuffer, x0: u16, y0: u16, w: u16, h: u16) -
 
 #[test]
 fn offscreen_floor_freezes_and_resyncs_on_return() {
-    let pack = crate::tui::embedded_pack::load_sprite_pack(None).expect("embedded pack");
-    let theme = crate::tui::theme::ALL_THEMES[0];
+    let pack = crate::scene::embedded_pack::load_sprite_pack(None).expect("embedded pack");
+    let theme = crate::scene::theme::ALL_THEMES[0];
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
 
     // Two-floor scene: a long-idle (wandering) agent on floor 0, plus a
@@ -937,7 +937,7 @@ fn pet_walk_never_clips_through_furniture() {
                     // corner-graze) and would hold the pet to a higher bar than
                     // the agents.
                     assert!(
-                        crate::tui::pathfind::point_in_walkable_cell(&layout.walkable, pos),
+                        crate::scene::pathfind::point_in_walkable_cell(&layout.walkable, pos),
                         "walking pet at ({},{}) is in a blocked routing cell (cycle={cycle} step={step})",
                         pos.x,
                         pos.y
@@ -1317,7 +1317,7 @@ fn furniture_hit_test_resolves_against_rendered_layout() {
 
 #[test]
 fn coffee_machine_hit_test_resolves_on_pantry() {
-    use crate::tui::layout::WaypointKind;
+    use crate::scene::layout::WaypointKind;
     let scene = scene_with(vec![idle("/cm/0.jsonl", 0, t0())], 16);
     let mut r = build(140, 48, vec![]);
     r.render(&scene, &pack(), t0()).unwrap();
@@ -1605,7 +1605,7 @@ fn pet_tooltip_on_hover() {
 #[test]
 fn pet_tooltip_shows_custom_name() {
     let scene = scene_with(vec![active("/tt/cn.jsonl", 0, "Edit", t0())], 16);
-    let cat = crate::tui::pet::Pet {
+    let cat = crate::scene::pet::Pet {
         kind: PetKind::Cat,
         name: "Luna".to_string(),
     };
@@ -1776,8 +1776,8 @@ fn meeting_room_fills_and_hosts_group_chitchat() {
         .filter(|w| {
             matches!(
                 w.kind,
-                crate::tui::layout::WaypointKind::MeetingSofa
-                    | crate::tui::layout::WaypointKind::MeetingStand
+                crate::scene::layout::WaypointKind::MeetingSofa
+                    | crate::scene::layout::WaypointKind::MeetingStand
             )
         })
         .count();
@@ -1809,7 +1809,7 @@ fn meeting_room_fills_and_hosts_group_chitchat() {
             // conversation — exercising slots → sit/stand sprites → venue-keyed
             // chat → bubble widget end to end.
             let text = region_text(r.frame_buffer(), mr.x, cell_y0, mr.width + 6, cell_h);
-            if crate::tui::chitchat::CHITCHAT_LINES
+            if crate::scene::chitchat::CHITCHAT_LINES
                 .iter()
                 .any(|l| text.contains(l))
             {
@@ -1913,10 +1913,10 @@ fn meeting_glass_partition_connects_at_window_and_corner() {
 // by synthetic-layout unit tests (compute never emits those two kinds).
 #[test]
 fn furniture_hit_test_covers_every_kind_on_real_layouts() {
-    use crate::tui::hit_test::hit_test_furniture;
-    use crate::tui::layout::{
+    use crate::scene::layout::{
         Layout, PlantKind, PodDecor, WallDecor, WaypointKind, MAX_VISIBLE_DESKS,
     };
+    use crate::tui::hit_test::hit_test_furniture;
     use std::collections::HashSet;
 
     // Scan the WHOLE cell grid and collect every label hit_test_furniture
@@ -2605,7 +2605,7 @@ fn dash_popup(buf: &ratatui::buffer::Buffer) -> String {
     // The popup is borderless (no `│` to key on) but is the only region painted
     // with the UI `tooltip_bg` fill, so isolate it by background color. (The
     // pixel office never produces this exact chrome RGB.)
-    let tb = crate::tui::theme::NORMAL.ui.tooltip_bg;
+    let tb = crate::scene::theme::NORMAL.ui.tooltip_bg;
     let bg = ratatui::style::Color::Rgb(tb.r, tb.g, tb.b);
     let area = buf.area;
     let mut out = String::new();
