@@ -25,9 +25,9 @@ use crate::tui::theme::Theme;
 
 /// Owns everything needed to render the live office to a reusable `RgbBuffer` across
 /// frames: the per-floor render caches (`FloorCtx`) plus the persistent office state
-/// the pixel pass reads and updates (`coffee_holders`/`coffee_fetched_at` for desk cups
-/// + steam, `chitchat` for group speech bubbles). One per window — keeping it alive
-/// across frames is what keeps motion/pose continuous (no walk-flash).
+/// the pixel pass reads and updates (`coffee_holders`/`coffee_fetched_at` drive desk
+/// cups + steam; `chitchat` drives group speech bubbles). One per window — keeping it
+/// alive across frames is what keeps motion/pose continuous (no walk-flash).
 pub struct OfficeRenderer {
     floor: FloorCtx,
     buf: RgbBuffer,
@@ -53,6 +53,7 @@ impl OfficeRenderer {
     /// subtract, unlike `draw_scene`). Returns the rendered buffer (a borrow of the
     /// reused allocation). On a too-small / uncomputable layout it returns the buffer
     /// unchanged — never panics.
+    #[allow(clippy::too_many_arguments)] // the render inputs are genuinely flat (scene/pack/theme/clock/size/floor)
     pub fn render(
         &mut self,
         scene: &SceneState,

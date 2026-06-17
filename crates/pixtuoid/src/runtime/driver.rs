@@ -149,7 +149,7 @@ async fn run_async(cfg: RunConfig) -> Result<()> {
 /// Codex's sessions root), so this stays imperative rather than a registry-driven
 /// loop — invariant #3's per-source-typed seam. Hook-only sources + the daemon
 /// (OpenClaw) are absent by design — they ride the router's shared socket.
-fn build_source_set(
+pub(crate) fn build_source_set(
     socket_path: PathBuf,
     projects_root: Option<PathBuf>,
     codex_sessions_root: Option<PathBuf>,
@@ -210,7 +210,7 @@ fn event_source<'a>(scene: &'a SceneState, ev: &'a AgentEvent) -> Option<&'a str
     }
 }
 
-async fn reducer_task(
+pub(crate) async fn reducer_task(
     mut rx: TaggedReceiver,
     scene_tx: watch::Sender<Arc<SceneState>>,
     floor_caps: Arc<[AtomicUsize; MAX_FLOORS]>,

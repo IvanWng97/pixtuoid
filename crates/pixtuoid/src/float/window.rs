@@ -1,22 +1,26 @@
 //! The `winit` + `softbuffer` window for `pixtuoid float`.
 //!
 //! `FloatApp` is the `ApplicationHandler`: on `Resumed` it creates ONE frameless,
-//! always-on-top window + a `softbuffer` surface; on `RedrawRequested` it renders the
-//! current scene to a full-resolution office `RgbBuffer` via [`OfficeRenderer`] and
-//! blits it (CPU, `0x00RRGGBB`). Platform glue — codecov-ignored like `driver.rs`; the
-//! testable render seam is `tui::offscreen`. The live source pipeline (Task 5) replaces
-//! the static empty `scene`; for now it proves the window + render path end-to-end.
+//! always-on-top window + a `softbuffer` surface; it renders the latest `watch`ed scene
+//! to a full-resolution office `RgbBuffer` via [`OfficeRenderer`] and blits it (CPU,
+//! `0x00RRGGBB`). Redraw is event-driven (a `FloatEvent::SceneChanged` from the pipeline
+//! bridge) plus a ~30fps animation tick WHILE agents are present (motion is time-driven);
+//! it idles to zero frames when the office is empty. Platform glue — codecov-ignored like
+//! `driver.rs`; the testable render seam is `tui::offscreen`.
 
 use std::num::NonZeroU32;
 use std::rc::Rc;
-use std::time::SystemTime;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+use std::time::{Duration, Instant, SystemTime};
 
 use pixtuoid_core::sprite::format::Pack;
-use pixtuoid_core::state::SceneState;
+use pixtuoid_core::state::{SceneState, MAX_FLOORS};
+use tokio::sync::watch;
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
 use winit::event::WindowEvent;
-use winit::event_loop::ActiveEventLoop;
+use winit::event_loop::{ActiveEventLoop, ControlFlow};
 use winit::window::{Window, WindowId, WindowLevel};
 
 use crate::config::{self, FloatConfig};
@@ -24,16 +28,26 @@ use crate::tui::floor::FloorMeta;
 use crate::tui::offscreen::OfficeRenderer;
 use crate::tui::theme::Theme;
 
+/// Wake reasons delivered to the winit loop from the background tokio pipeline.
+#[derive(Debug, Clone, Copy)]
+pub enum FloatEvent {
+    /// The reducer published a new scene — repaint.
+    SceneChanged,
+}
+
 /// The float window app: window + surface (created lazily on `Resumed`), the office
-/// renderer (owns cross-frame caches), and the scene to draw.
+/// renderer (owns cross-frame caches), the live scene receiver, and the per-floor desk
+/// capacity atomics it keeps in sync with the rendered office.
 pub struct FloatApp {
     cfg: FloatConfig,
     theme: &'static Theme,
     pack: Pack,
     renderer: OfficeRenderer,
-    /// The office to render. Static empty office for now; the live pipeline replaces
-    /// this with the latest `watch`ed scene in Task 5.
-    scene: SceneState,
+    scene_rx: watch::Receiver<Arc<SceneState>>,
+    floor_caps: Arc<[AtomicUsize; MAX_FLOORS]>,
+    /// The buffer size the capacity atomics were last synced for — capacity only changes
+    /// with the window size, so re-sync only on a size change (not every frame).
+    last_caps_size: Option<(u16, u16)>,
     window: Option<Rc<Window>>,
     // softbuffer's `Context` must outlive the `Surface` it spawned, so keep both.
     context: Option<softbuffer::Context<Rc<Window>>>,
@@ -41,20 +55,28 @@ pub struct FloatApp {
 }
 
 impl FloatApp {
-    pub fn new(cfg: FloatConfig, theme: &'static Theme, pack: Pack) -> Self {
+    pub fn new(
+        cfg: FloatConfig,
+        theme: &'static Theme,
+        pack: Pack,
+        scene_rx: watch::Receiver<Arc<SceneState>>,
+        floor_caps: Arc<[AtomicUsize; MAX_FLOORS]>,
+    ) -> Self {
         Self {
             cfg,
             theme,
             pack,
             renderer: OfficeRenderer::new(),
-            scene: SceneState::new([0; pixtuoid_core::state::MAX_FLOORS]),
+            scene_rx,
+            floor_caps,
+            last_caps_size: None,
             window: None,
             context: None,
             surface: None,
         }
     }
 
-    /// Render the current scene at the window's physical pixel size and blit it.
+    /// Render the latest scene at the window's physical pixel size and blit it.
     fn redraw(&mut self) {
         // Clone the Rc to release the `self.window` borrow before touching `self.surface`.
         let Some(window) = self.window.clone() else {
@@ -69,8 +91,17 @@ impl FloatApp {
         // scaling. The size-adaptive layout fills whatever dims it's given.
         let buf_w = size.width.min(u16::MAX as u32) as u16;
         let buf_h = size.height.min(u16::MAX as u32) as u16;
+        // Keep the reducer's desk capacity in lockstep with the office actually rendered
+        // at this size (authority = the layout's home-desk count, same as the TUI). Only
+        // on a size change — capacity is otherwise size-invariant.
+        if self.last_caps_size != Some((buf_w, buf_h)) {
+            sync_floor_caps(&self.floor_caps, buf_w, buf_h);
+            self.last_caps_size = Some((buf_w, buf_h));
+        }
+        // Arc clone releases the watch borrow before the (mutable) renderer borrow.
+        let scene = self.scene_rx.borrow().clone();
         let office = self.renderer.render(
-            &self.scene,
+            &scene,
             &self.pack,
             self.theme,
             SystemTime::now(),
@@ -95,9 +126,8 @@ impl FloatApp {
         let Ok(mut sb) = surface.buffer_mut() else {
             return;
         };
-        // Defensive: blit the overlap. The office buffer is sized to (buf_w, buf_h) and
-        // the surface to (nw, nh) = the same physical size, so this is a full copy; the
-        // `min` only guards a transient resize race.
+        // The office buffer and the surface are both (buf_w, buf_h) physical px, so this
+        // is a full copy; the `min` only guards a transient resize race.
         let n = sb.len().min(frame.len());
         sb[..n].copy_from_slice(&frame[..n]);
         window.pre_present_notify();
@@ -105,7 +135,22 @@ impl FloatApp {
     }
 }
 
-impl ApplicationHandler for FloatApp {
+/// Sync the per-floor desk-capacity atomics to the office layout at `buf_w`×`buf_h` —
+/// the authority is the layout's `home_desks` count (mirrors the TUI's per-frame sync,
+/// `tui/mod.rs`). `store` (not `fetch_max`): float tracks its window exactly, so a shrink
+/// lowers capacity (excess agents become invisible-but-alive, like the TUI on shrink).
+fn sync_floor_caps(floor_caps: &[AtomicUsize; MAX_FLOORS], buf_w: u16, buf_h: u16) {
+    use pixtuoid_core::layout::{SceneLayout, MAX_VISIBLE_DESKS};
+    for (floor_idx, cap) in floor_caps.iter().enumerate() {
+        let seed = (floor_idx as u64).wrapping_mul(crate::tui::floor::FLOOR_SEED_MULTIPLIER);
+        let capacity = SceneLayout::compute_with_seed(buf_w, buf_h, MAX_VISIBLE_DESKS, seed)
+            .map(|l| l.home_desks.len())
+            .unwrap_or(0);
+        cap.store(capacity, Ordering::Relaxed);
+    }
+}
+
+impl ApplicationHandler<FloatEvent> for FloatApp {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_some() {
             return; // already created — a re-resume must not spawn a second window
@@ -153,6 +198,16 @@ impl ApplicationHandler for FloatApp {
         self.surface = Some(surface);
     }
 
+    fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: FloatEvent) {
+        match event {
+            FloatEvent::SceneChanged => {
+                if let Some(window) = &self.window {
+                    window.request_redraw();
+                }
+            }
+        }
+    }
+
     fn window_event(
         &mut self,
         event_loop: &ActiveEventLoop,
@@ -168,6 +223,22 @@ impl ApplicationHandler for FloatApp {
                 }
             }
             _ => {}
+        }
+    }
+
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        // Agents animate continuously (walk/breathe — time-driven), so tick ~30fps WHILE
+        // any agent is present; idle to zero frames (event-driven only) when empty.
+        let animating = !self.scene_rx.borrow().agents.is_empty();
+        if animating {
+            event_loop.set_control_flow(ControlFlow::WaitUntil(
+                Instant::now() + Duration::from_millis(33),
+            ));
+            if let Some(window) = &self.window {
+                window.request_redraw();
+            }
+        } else {
+            event_loop.set_control_flow(ControlFlow::Wait);
         }
     }
 }

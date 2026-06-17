@@ -4,7 +4,7 @@
 //! spawn, Ctrl-C loop) lives in `driver.rs`, which is excluded from coverage
 //! (issue #103).
 
-mod driver;
+pub(crate) mod driver;
 
 pub use driver::run;
 
