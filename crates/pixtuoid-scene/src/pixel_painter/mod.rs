@@ -590,7 +590,9 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
 
     // Ceiling halos gate on `seated_agents` so a tool-glow halo never floats
     // above an empty desk while its Active occupant is mid-walk (entry/snap).
-    ambient::paint_ambient(ctx, &seated_agents);
+    // `look` was already computed once per frame above — forward it so the
+    // ambient sub-passes don't recompute `time_of_day_look(now, theme)`.
+    ambient::paint_ambient(ctx, &look, &seated_agents);
 
     // --- Build the y-sortable middle pass -------------------------------
     //

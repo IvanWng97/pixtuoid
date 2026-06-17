@@ -309,6 +309,14 @@ pub(super) fn paint_floor_and_walls(
     // `window_spill_columns` so motes drift through the same x columns.
     let window_y: u16 = 1;
     let window_h: u16 = top_wall_h.saturating_sub(2).max(8);
+    // Window-invariant glass colors: `lit_colors` / `building` / `sky_row`
+    // depend only on `look` + `theme` + the (fixed-across-the-loop) window
+    // height, NOT on the per-window x / window_idx / altitude — so they're
+    // identical for every window in this frame. Compute them ONCE here and pass
+    // by reference, instead of recomputing (3 + 1 + glass_h `mix_lab` calls and
+    // a Vec alloc) inside every window. (The per-window skyline-height math —
+    // alt_shrink/min_bh/max_bh — stays in the fn: it uses `altitude`.)
+    let (lit_colors, building, sky_row) = window_glass_invariants(window_h, look, theme);
     let mut x = 3u16;
     let mut idx: u32 = 0;
     while x + WINDOW_W + 2 <= buf_w {
@@ -328,9 +336,11 @@ pub(super) fn paint_floor_and_walls(
                 look,
                 idx as u16,
                 now,
-                theme,
                 weather,
                 altitude,
+                &lit_colors,
+                building,
+                &sky_row,
             );
             // look.spill_strength already includes atmospheric attenuation
             // (time_of_day_look multiplies by atmo.intensity), so heavy
@@ -548,26 +558,20 @@ fn wash_glass(buf: &mut RgbBuffer, x0: u16, y0: u16, w: u16, h: u16, color: Rgb,
     }
 }
 
-/// Floor-to-ceiling window with frame, mullion, and a procedural city view
-/// inside the glass. Sky gradient at top blends with time-of-day glass
-/// colors; the lower portion shows building silhouettes whose "windows"
-/// (1-pixel dots) light up at night and twinkle on a per-dot cycle so the
-/// skyline reads as alive instead of stamped.
-#[allow(clippy::too_many_arguments)]
-fn paint_floor_to_ceiling_window(
-    buf: &mut RgbBuffer,
-    x: u16,
-    y: u16,
-    w: u16,
+/// Window-invariant glass colors, computed ONCE per frame in
+/// `paint_floor_and_walls` and shared by every window. `lit_colors` (city-dot
+/// hues) and `building` (silhouette fill) are functions of `look.darkness` plus
+/// the theme; `sky_row` (the per-row sky gradient) is a function of the window
+/// HEIGHT plus the `look` glass colors. All windows in a frame share the same
+/// height, `look`, and theme, so these are identical across the loop — hoisting
+/// them out of the per-window loop is byte-identical, just fewer redundant
+/// `mix_lab` calls. The per-window skyline-HEIGHT math is NOT here: it rides
+/// `altitude` and stays inside `paint_floor_to_ceiling_window`.
+fn window_glass_invariants(
     h: u16,
-    frame: Rgb,
     look: &TimeOfDayLook,
-    window_idx: u16,
-    now: SystemTime,
     theme: &Theme,
-    weather: Weather,
-    altitude: f32,
-) {
+) -> ([Rgb; 3], Rgb, Vec<Rgb>) {
     let building_dark = theme.office.building_dark;
     let building_light = theme.office.building_light;
     let cw = theme.office.city_lit_windows;
@@ -585,6 +589,42 @@ fn paint_floor_to_ceiling_window(
     ];
     let building = mix_lab(building_light, building_dark, look.darkness);
 
+    let glass_h = h.saturating_sub(2);
+    let sky_norm = (glass_h as f32) * 0.7;
+    let sky_row: Vec<Rgb> = (0..glass_h)
+        .map(|gy| {
+            let sky_t = (gy as f32 / sky_norm).min(1.0);
+            mix_lab(look.glass_b, look.glass_a, sky_t)
+        })
+        .collect();
+
+    (lit_colors, building, sky_row)
+}
+
+/// Floor-to-ceiling window with frame, mullion, and a procedural city view
+/// inside the glass. Sky gradient at top blends with time-of-day glass
+/// colors; the lower portion shows building silhouettes whose "windows"
+/// (1-pixel dots) light up at night and twinkle on a per-dot cycle so the
+/// skyline reads as alive instead of stamped. `lit_colors` / `building` /
+/// `sky_row` are window-invariant (see `window_glass_invariants`) and passed in
+/// by reference so they're computed once per frame, not once per window.
+#[allow(clippy::too_many_arguments)]
+fn paint_floor_to_ceiling_window(
+    buf: &mut RgbBuffer,
+    x: u16,
+    y: u16,
+    w: u16,
+    h: u16,
+    frame: Rgb,
+    look: &TimeOfDayLook,
+    window_idx: u16,
+    now: SystemTime,
+    weather: Weather,
+    altitude: f32,
+    lit_colors: &[Rgb; 3],
+    building: Rgb,
+    sky_row: &[Rgb],
+) {
     // Skyline silhouette as a 0..15 PATTERN; the actual pixel height is
     // computed per-window so the skyline auto-scales with the glass
     // height. On a 12-px-tall window the buildings are 3..7 px, on a
@@ -598,13 +638,6 @@ fn paint_floor_to_ceiling_window(
         .saturating_sub(alt_shrink)
         .max(min_bh + 3);
     let bh_range = max_bh.saturating_sub(min_bh);
-    let sky_norm = (glass_h as f32) * 0.7;
-    let sky_row: Vec<Rgb> = (0..glass_h)
-        .map(|gy| {
-            let sky_t = (gy as f32 / sky_norm).min(1.0);
-            mix_lab(look.glass_b, look.glass_a, sky_t)
-        })
-        .collect();
 
     for dy in 0..h {
         for dx in 0..w {
@@ -1080,6 +1113,7 @@ mod tests {
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let render_lum = |now: SystemTime| -> u64 {
             let look = time_of_day_look(now, theme);
+            let (lit_colors, building, sky_row) = window_glass_invariants(30, &look, theme);
             let mut buf = RgbBuffer::filled(40, 40, Rgb { r: 8, g: 8, b: 10 });
             paint_floor_to_ceiling_window(
                 &mut buf,
@@ -1091,9 +1125,11 @@ mod tests {
                 &look,
                 0,
                 now,
-                theme,
                 Weather::Storm,
                 0.0,
+                &lit_colors,
+                building,
+                &sky_row,
             );
             // Sum luminance over the glass interior (inside the 1px frame).
             let mut sum = 0u64;

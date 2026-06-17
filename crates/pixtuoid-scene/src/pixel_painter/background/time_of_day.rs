@@ -351,6 +351,12 @@ pub(in crate::pixel_painter) fn dim_floor_overlay(
 ) {
     let night_tint = theme.lighting.night_tint;
     let s = strength.clamp(0.0, 0.55);
+    // Skip the full-floor blend on a clear-sky day (s == 0): blend_rgb(cur, _, 0.0)
+    // is a per-pixel no-op, so the early return is byte-identical (mirrors
+    // daylight_floor_overlay) and saves a full floor-area pass every clear daytime frame.
+    if s <= 0.0 {
+        return;
+    }
     for y in top_y..bottom_y.min(buf.height) {
         for x in 0..buf.width {
             let cur = buf.get(x, y);

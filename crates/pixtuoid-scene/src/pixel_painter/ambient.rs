@@ -12,7 +12,7 @@ use pixtuoid_core::state::FloorLocalDeskIndex;
 
 use crate::layout::Layout;
 use crate::pixel_painter::background::{
-    sun_on_wall, time_of_day_look, weather_light, weather_state, window_spill_columns, WallSide,
+    sun_on_wall, weather_light, weather_state, window_spill_columns, TimeOfDayLook, WallSide,
 };
 use crate::pixel_painter::palette::blend_rgb;
 use crate::pixel_painter::PixelCtx;
@@ -86,15 +86,20 @@ pub(super) fn dust_mote_positions(
 
 pub(super) fn paint_ambient(
     ctx: &mut PixelCtx<'_>,
+    look: &TimeOfDayLook,
     seated_agents: &std::collections::HashMap<FloorLocalDeskIndex, bool>,
 ) {
-    paint_sun_spot(ctx.buf, ctx.theme, ctx.layout, ctx.now);
+    // `look` is the per-frame `time_of_day_look(ctx.now, ctx.theme)` already
+    // computed once in `render_to_rgb_buffer` — forwarded so the sub-passes
+    // read its `spill_strength` instead of recomputing the identical value.
+    paint_sun_spot(ctx.buf, ctx.theme, ctx.layout, ctx.now, look);
     paint_dust_motes(
         ctx.buf,
         ctx.theme,
         ctx.layout,
         ctx.floor.floor_seed,
         ctx.now,
+        look,
     );
     let halos = collect_ceiling_halos(ctx, seated_agents);
     paint_ceiling_halos(ctx.buf, ctx.theme, &halos);
@@ -204,6 +209,7 @@ pub(super) fn paint_dust_motes(
     layout: &Layout,
     floor_seed: u64,
     now: SystemTime,
+    look: &TimeOfDayLook,
 ) {
     if sun_on_wall(now).is_none() {
         return;
@@ -211,12 +217,12 @@ pub(super) fn paint_dust_motes(
     // Dust motes scatter the direct beam; their density rides `beam_strength`
     // (full under clear sky, faint through thin cloud/haze/snow-glare, zero
     // under thick overcast/rain/storm). `look.spill_strength` adds the daylight
-    // ramp so they also fade in/out with the hour.
+    // ramp so they also fade in/out with the hour. `look` is the per-frame
+    // value forwarded from `render_to_rgb_buffer` (was recomputed here).
     let beam = weather_light(weather_state(now)).beam_strength;
     if beam <= 0.0 {
         return;
     }
-    let look = time_of_day_look(now, theme);
     let visibility = look.spill_strength * beam;
     if visibility <= 0.0 {
         return;
@@ -234,7 +240,13 @@ pub(super) fn paint_dust_motes(
     }
 }
 
-pub(super) fn paint_sun_spot(buf: &mut RgbBuffer, theme: &Theme, layout: &Layout, now: SystemTime) {
+pub(super) fn paint_sun_spot(
+    buf: &mut RgbBuffer,
+    theme: &Theme,
+    layout: &Layout,
+    now: SystemTime,
+    look: &TimeOfDayLook,
+) {
     let Some(spot) = sun_on_wall(now) else {
         return;
     };
@@ -253,7 +265,8 @@ pub(super) fn paint_sun_spot(buf: &mut RgbBuffer, theme: &Theme, layout: &Layout
     if beam <= 0.0 {
         return;
     }
-    let look = time_of_day_look(now, theme);
+    // `look` is the per-frame `time_of_day_look(now, theme)` forwarded from
+    // `render_to_rgb_buffer` (was recomputed here for the identical value).
     let effective_intensity = spot.intensity * look.spill_strength * beam;
     if effective_intensity <= 0.0 {
         return;
@@ -335,6 +348,10 @@ pub(super) fn paint_sun_spot(buf: &mut RgbBuffer, theme: &Theme, layout: &Layout
 #[cfg(test)]
 mod tests {
     use super::*;
+    // The paint passes now take the per-frame `look` by reference (computed once
+    // in `render_to_rgb_buffer`); tests build it the same way the production
+    // caller does, so the asserted output is unchanged.
+    use crate::pixel_painter::background::time_of_day_look;
 
     #[test]
     fn dust_mote_positions_deterministic_per_seed() {
@@ -459,7 +476,7 @@ mod tests {
                     b: 24,
                 },
             );
-            paint_sun_spot(&mut buf, theme, &layout, now);
+            paint_sun_spot(&mut buf, theme, &layout, now, &time_of_day_look(now, theme));
             let mut sum = 0u64;
             for y in 0..buf.height {
                 for x in 0..buf.width {
@@ -531,7 +548,7 @@ mod tests {
             b: 24,
         };
         let mut buf = RgbBuffer::filled(192, 80, fill);
-        paint_sun_spot(&mut buf, theme, &layout, now);
+        paint_sun_spot(&mut buf, theme, &layout, now, &time_of_day_look(now, theme));
         for y in 0..buf.height {
             for x in 0..buf.width {
                 assert_eq!(
@@ -590,7 +607,14 @@ mod tests {
         // out of bounds and clamped. The assertion is simply "no panic".
         let fill = Rgb { r: 0, g: 0, b: 0 };
         let mut buf = RgbBuffer::filled(1, 1, fill);
-        paint_dust_motes(&mut buf, theme, &layout, 7, now);
+        paint_dust_motes(
+            &mut buf,
+            theme,
+            &layout,
+            7,
+            now,
+            &time_of_day_look(now, theme),
+        );
     }
 
     // wall_band_h == 0 (a degenerate tiny top margin) makes paint_sun_spot
@@ -620,7 +644,13 @@ mod tests {
             b: 24,
         };
         let mut buf = RgbBuffer::filled(layout.buf_w, layout.buf_h, fill);
-        paint_sun_spot(&mut buf, theme, &layout, clear_morning);
+        paint_sun_spot(
+            &mut buf,
+            theme,
+            &layout,
+            clear_morning,
+            &time_of_day_look(clear_morning, theme),
+        );
         // wall_band_h == 0 → nothing painted.
         for y in 0..buf.height {
             for x in 0..buf.width {

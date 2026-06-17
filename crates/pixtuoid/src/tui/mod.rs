@@ -904,6 +904,18 @@ pub async fn run_tui(
                             }
                         }
                     }
+                    Event::Mouse(_)
+                        if theme_picker.is_some() || dashboard_ui.open || connection_ui.open =>
+                    {
+                        // The dashboard / Sources panel / theme picker are modal for
+                        // the mouse too: they paint centered over the scene, so swallow
+                        // every mouse event — a click on an exposed scene edge (the
+                        // top-left branding region, the coffee machine) must not fall
+                        // through to launch a browser or pin a hidden agent (the same
+                        // phantom-click class the help/version guards above prevent).
+                        // Inert by design: these modals have explicit close keys
+                        // (Tab / s / t / Esc), so a click does NOT dismiss them.
+                    }
                     Event::Mouse(m) => match m.kind {
                         MouseEventKind::Moved | MouseEventKind::Drag(_) => {
                             renderer.set_mouse_pos(Some((m.column, m.row)));
