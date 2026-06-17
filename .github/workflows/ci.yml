@@ -180,7 +180,7 @@ jobs:
           NEXTEST_PROFILE: ci
       - name: Upload test results to Codecov
         if: always()
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         with:
           files: target/nextest/ci/junit.xml
           report-type: test_results
