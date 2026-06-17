@@ -7,15 +7,41 @@
 //! `winit` + `softbuffer` window instead of half-block terminal cells. `pixtuoid-core`
 //! stays window-free (invariant #1) — all windowing lives here.
 
-use anyhow::Result;
+mod window;
 
+use anyhow::{Context, Result};
+use winit::event_loop::EventLoop;
+
+use crate::config;
 use crate::runtime::RunConfig;
 
 /// Open the float window and drive it until the user closes it.
 ///
-/// Stub: the window + live pipeline land in the next tasks. Takes the resolved
-/// [`RunConfig`] (theme/pack/sources/socket — same as the TUI run) so the window can
-/// reuse the engine wiring verbatim.
-pub fn run(_cfg: RunConfig) -> Result<()> {
+/// Takes the resolved [`RunConfig`] (theme/pack/sources/socket — same as the TUI run)
+/// so the window reuses the engine wiring. The `[float]` geometry is re-resolved from
+/// the on-disk config here (the warnings were already surfaced by `build_run_config`).
+///
+/// NOTE: `winit`'s event loop must own the main thread, so this BLOCKS until the window
+/// closes. The live source pipeline (Task 5) is spawned onto a background runtime — it
+/// must never `block_on` here.
+pub fn run(cfg: RunConfig) -> Result<()> {
+    let app_config = config::load(&cfg.config_path, &mut Vec::new());
+    let float_cfg = config::resolve_float(&app_config);
+    let pack = crate::tui::embedded_pack::load_sprite_pack(cfg.pack_dir.clone())
+        .context("loading the sprite pack for the float window")?;
+    let mut app = window::FloatApp::new(float_cfg, cfg.theme, pack);
+
+    let mut builder = EventLoop::builder();
+    #[cfg(target_os = "macos")]
+    {
+        // Accessory: no Dock icon, doesn't steal focus from the editor — the float
+        // window is an ambient companion, not a foreground app.
+        use winit::platform::macos::{ActivationPolicy, EventLoopBuilderExtMacOS};
+        builder.with_activation_policy(ActivationPolicy::Accessory);
+    }
+    let event_loop = builder.build().context("building the float event loop")?;
+    event_loop
+        .run_app(&mut app)
+        .context("running the float window event loop")?;
     Ok(())
 }
