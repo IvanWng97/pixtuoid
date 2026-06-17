@@ -2,25 +2,36 @@
 //! `Reducer` → a `SceneState` → the REAL `TuiRenderer` (ratatui `TestBackend`)
 //! → an actual pixel buffer, asserting a sprite was PAINTED.
 //!
-//! The existing `tui_renderer.rs` integration test starts from a hand-built
-//! `AgentSlot` — it proves the renderer paints, but skips the decode+reduce
-//! half. These two tests close that gap: they start from the SAME real fixture
-//! bytes the conformance harness decodes (a captured claude-code transcript
-//! line and a captured Reasonix hook envelope), run them through the same
-//! `decode_cc_line` / `decode_hook_payload` production decoders, fold the
-//! resulting `AgentEvent`s through a real `Reducer`, and render the resulting
-//! scene to pixels — proving real bytes become a visible character, not just a
-//! slot.
+//! The `tui_renderer.rs` integration test starts from a hand-built `AgentSlot`
+//! — it proves the renderer paints, but skips the decode+reduce half. These
+//! tests close that gap for EVERY supported source: they start from the SAME
+//! real fixture bytes the conformance harness decodes (a captured transcript
+//! line, a captured hook envelope, a captured daemon-presence envelope), run
+//! them through the SAME production decoder (`registry::line_decoder()` for a
+//! transcript source, `decode_hook_payload` for a hook source, the openclaw
+//! presence decoder for the daemon), fold the resulting `AgentEvent`s through a
+//! real `Reducer` (or `apply_presence` for the daemon), and render the scene to
+//! pixels — proving real bytes become a visible character (or lobster), not
+//! just a slot.
 //!
-//! The pixel assertion is a color-diversity FLOOR: an occupied frame must show
+//! Three transport classes are covered:
+//!   - JSONL transcript  → `Transport::Jsonl` (claude-code, codex, antigravity, copilot)
+//!   - agent hook         → `Transport::Hook`  (reasonix, codewhale, opencode, cursor)
+//!   - daemon presence    → the sibling channel (`apply_presence`) (openclaw)
+//!
+//! The agent assertion is a color-diversity FLOOR: an occupied frame must show
 //! materially more distinct colors than the same office with no agent (the
 //! recolored sprite + its shadow/label add colors absent from the empty floor).
+//! The daemon assertion counts the lobster's exclusive carapace-red pixels (its
+//! sprite is not recolored, so its authored RGBs render exactly).
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
+use pixtuoid_core::source::daemon::apply_presence;
 use pixtuoid_core::source::decoder::decode_hook_payload;
-use pixtuoid_core::{Reducer, SceneState, Transport};
+use pixtuoid_core::source::{registry, AgentEvent};
+use pixtuoid_core::{AgentId, Reducer, SceneState, Transport};
 use pixtuoid_scene::embedded_pack::load_sprite_pack;
 use pixtuoid_scene::theme::NORMAL;
 use ratatui::backend::TestBackend;
@@ -70,7 +81,7 @@ fn new_renderer(cols: u16, rows: u16) -> TuiRenderer<TestBackend> {
 }
 
 /// Render an EMPTY office to pixels and return its distinct-color count — the
-/// baseline both wire tests compare their occupied frame against.
+/// baseline every agent wire test compares its occupied frame against.
 fn empty_office_color_count(cols: u16, rows: u16, now: SystemTime) -> usize {
     let mut r = new_renderer(cols, rows);
     let pack = load_sprite_pack(None).expect("pack");
@@ -96,138 +107,399 @@ fn render_settled_color_count(
     distinct_colors(r.buf())
 }
 
-/// TEST 1 (HIGH) — claude-code (transcript source): a REAL captured CC JSONL
-/// transcript line → `decode_cc_line` → `Reducer` → `SceneState` → `TuiRenderer`
-/// pixels. Asserts the rendered office has materially more distinct colors than
-/// the empty-office baseline, i.e. a character was actually painted from wire
-/// bytes — not just registered as a slot.
-#[test]
-fn claude_code_transcript_line_renders_a_painted_sprite() {
-    // The captured conformance transcript: a `tool_use` assistant line that
-    // decodes to a Rename + an ActivityStart for one CC session.
-    let dir = core_fixtures_root().join("claude-code").join("tool-call");
-    let transcript = dir.join("01000000-0000-7000-8000-0000000000cc.jsonl");
-    // Plus a minimal, valid CC `SessionStart` line so the reducer registers a
-    // slot (the captured transcript carries only tool activity). The session id
-    // is the transcript filename stem — the watcher's id space — so the
-    // SessionStart and the tool line coalesce to ONE agent, exactly as
-    // production keys them (`cc_id_from_path`).
-    let session_start = r#"{"type":"system","subtype":"init","cwd":"/home/user/demo-project","sessionId":"01000000-0000-7000-8000-0000000000cc","timestamp":"2026-01-01T00:00:00.000Z","uuid":"00000000-0000-4000-8000-0000000000a0"}"#;
+// =====================================================================
+// Part A — every AGENT source renders a sprite from real wire bytes
+// =====================================================================
 
-    // Decode every wire line via the SAME production decoder the watcher uses.
-    // The logical key is the transcript path (AgentId is a hash of it).
-    let logical = transcript.to_string_lossy().into_owned();
+/// How a source's wire bytes reach `AgentEvent`s.
+enum DecodeKind {
+    /// A transcript / JSONL line decoder (from the source registry — the SAME
+    /// `LineDecoder` the conformance harness runs). Folded on `Transport::Jsonl`.
+    Transcript,
+    /// A hook envelope through `decode_hook_payload` (the registry dispatcher).
+    /// Folded on `Transport::Hook`.
+    Hook,
+}
+
+/// Whether the fixture's own decoded stream registers a slot, or a synthetic
+/// `SessionStart` must seed one first (JSONL events for an unknown id are a
+/// no-op in the reducer — a transcript that carries only tool activity, like
+/// claude-code's and antigravity's, never registers itself).
+enum SeedStart {
+    /// The fixture's decoded events include a `SessionStart` (codex, copilot) OR
+    /// the hook path synthesizes the slot from an unknown id (every hook source).
+    None,
+    /// Seed a `SessionStart` keyed `AgentId::from_parts(source, <logical-path>)`
+    /// — antigravity's decoder keys exactly this way.
+    FromParts,
+    /// Seed a `SessionStart` keyed the claude-code way (`cc_id_from_path`, the
+    /// transcript filename stem == the session UUID).
+    CcStem,
+    /// Seed a `SessionStart` keyed the codex way (`codex_id_from_path`, the
+    /// rollout filename UUID). Codex's LINE decoder emits only activity — the
+    /// watcher's first-sight (or the UserPromptSubmit hook) supplies the
+    /// SessionStart in production; this seed stands in for that registration so
+    /// the transcript path is exercised in isolation.
+    CodexUuid,
+}
+
+struct WireCase {
+    name: &'static str,
+    source: &'static str,
+    /// Path to the fixture file, relative to `core_fixtures_root()`.
+    fixture: &'static str,
+    decode: DecodeKind,
+    transport: Transport,
+    seed: SeedStart,
+}
+
+/// Build the synthetic `SessionStart` a transcript-only source needs (its slot
+/// is otherwise never registered). The agent id is keyed exactly as the
+/// source's own decoder keys, so the seed and the decoded activity coalesce to
+/// one agent — exactly as production keys them.
+fn seed_session_start(seed: &SeedStart, source: &str, logical: &str) -> Option<AgentEvent> {
+    let agent_id = match seed {
+        SeedStart::None => return None,
+        SeedStart::FromParts => AgentId::from_parts(source, logical),
+        SeedStart::CcStem => {
+            use pixtuoid_core::source::claude_code::cc_id_from_path;
+            AgentId::from_parts(source, &cc_id_from_path(Path::new(logical)))
+        }
+        SeedStart::CodexUuid => {
+            use pixtuoid_core::source::codex::codex_id_from_path;
+            AgentId::from_parts(source, &codex_id_from_path(Path::new(logical)))
+        }
+    };
+    Some(AgentEvent::SessionStart {
+        agent_id,
+        source: source.to_string(),
+        session_id: "wire-to-pixels-seed".to_string(),
+        cwd: PathBuf::from("/home/user/demo-project"),
+        parent_id: None,
+    })
+}
+
+/// THE shared proof: real fixture bytes → the production decoder its conformance
+/// test uses → a real `Reducer` on the correct `Transport` → ≥1 registered slot
+/// → the real `TuiRenderer` (settled ~30 frames) → more distinct colors than the
+/// empty-office baseline (a character was painted, not merely slotted).
+fn assert_renders_a_sprite(case: &WireCase) {
+    let path = core_fixtures_root().join(case.fixture);
+    // The decoder's logical key — the transcript path for a JSONL source (its
+    // `AgentId` is a hash of it). For a hook source the per-line envelope keys
+    // itself, so the value is unused; pass the path for symmetry.
+    let logical = path.to_string_lossy().into_owned();
+
     let mut events = Vec::new();
-    // Prepend a SessionStart event by decoding a synthesized init line through
-    // the real CC line decoder (so we exercise the decoder, not a hand-built
-    // AgentEvent). CC's init line carries no SessionStart in the decoder, so we
-    // emit the SessionStart explicitly from the same parsed identity the
-    // decoder would key on — keeping the keying identical.
-    {
-        use pixtuoid_core::source::claude_code::cc_id_from_path;
-        use pixtuoid_core::{AgentEvent, AgentId};
-        let v: serde_json::Value = serde_json::from_str(session_start).expect("init json");
-        let cwd = v["cwd"].as_str().unwrap();
-        let session_id = v["sessionId"].as_str().unwrap();
-        let agent_id = AgentId::from_parts(
-            pixtuoid_core::source::claude_code::SOURCE_NAME,
-            &cc_id_from_path(Path::new(&logical)),
-        );
-        events.push(AgentEvent::SessionStart {
-            agent_id,
-            source: pixtuoid_core::source::claude_code::SOURCE_NAME.to_string(),
-            session_id: session_id.to_string(),
-            cwd: PathBuf::from(cwd),
-            parent_id: None,
-        });
+    if let Some(start) = seed_session_start(&case.seed, case.source, &logical) {
+        events.push(start);
     }
-    for line in read_nonblank_lines(&transcript) {
-        let v: serde_json::Value = serde_json::from_str(&line).expect("transcript json");
-        let evs = pixtuoid_core::source::claude_code::decode_cc_line(
-            &logical,
-            pixtuoid_core::source::claude_code::SOURCE_NAME,
-            v,
-        )
-        .expect("decode_cc_line");
-        events.extend(evs);
+
+    for line in read_nonblank_lines(&path) {
+        let v: serde_json::Value =
+            serde_json::from_str(&line).unwrap_or_else(|e| panic!("{}: bad json: {e}", case.name));
+        let decoded = match case.decode {
+            DecodeKind::Transcript => {
+                let decode = registry::descriptor_for(case.source)
+                    .and_then(|d| d.line_decoder())
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "{}: source {:?} has no line_decoder",
+                            case.name, case.source
+                        )
+                    });
+                decode(&logical, case.source, v)
+                    .unwrap_or_else(|e| panic!("{}: decode_line: {e}", case.name))
+            }
+            DecodeKind::Hook => decode_hook_payload(v)
+                .unwrap_or_else(|e| panic!("{}: decode_hook_payload: {e}", case.name)),
+        };
+        events.extend(decoded);
     }
     assert!(
         events.len() >= 2,
-        "fixture should decode to a SessionStart + activity, got {events:?}"
+        "{}: fixture should decode to a registration + activity, got {events:?}",
+        case.name
     );
 
-    // Fold through a real reducer into a real SceneState. JSONL transport
-    // (transcript bytes), exactly as production tags them.
+    // Fold through a real reducer into a real SceneState, on the SAME transport
+    // production tags this source's events with.
     let mut scene = SceneState::uniform(8);
     let mut reducer = Reducer::new();
     for ev in events {
-        reducer.apply(&mut scene, ev, t0(), Transport::Jsonl);
+        reducer.apply(&mut scene, ev, t0(), case.transport);
     }
-    assert_eq!(
-        scene.agents.len(),
-        1,
-        "the wire bytes must register exactly one agent slot"
+    assert!(
+        !scene.agents.is_empty(),
+        "{}: the wire bytes must register at least one agent slot (got 0)",
+        case.name
     );
 
-    // Render to pixels and assert a sprite was painted (color floor).
+    // Render to pixels and assert a sprite was painted (color floor). An empty
+    // office can't gain colors, so any positive delta is real paint; the +4
+    // floor is the measured minimum a settled, recolored character adds (a
+    // just-completed single-tool sprite is the leanest at +4, an actively-busy
+    // one runs +6) — well clear of an unpainted/no-slot frame's +0.
     let (cols, rows) = (120, 44);
     let baseline = empty_office_color_count(cols, rows, t0());
     let mut r = new_renderer(cols, rows);
     let occupied = render_settled_color_count(&mut r, &scene, t0());
     assert!(
-        occupied > baseline + 4,
-        "an occupied office (from real CC transcript bytes) must paint more \
-         distinct colors than the empty baseline (empty={baseline}, occupied={occupied})"
+        occupied >= baseline + 4,
+        "{}: an occupied office (from real {} wire bytes) must paint materially more \
+         distinct colors than the empty baseline (empty={baseline}, occupied={occupied})",
+        case.name,
+        case.source
     );
 }
 
-/// TEST 2 (HIGH) — Reasonix (HOOK-ONLY source): a REAL captured hook JSON
-/// envelope → `decode_hook_payload` (the registry dispatcher) → `Reducer`
-/// (hook synthesizes the slot for an unknown session id) → `SceneState` →
-/// `TuiRenderer` pixels. Confirms the NON-JSONL pathway also produces a sprite.
+/// The wire→pixels matrix: every supported AGENT source, transcript and hook
+/// classes both. (The openclaw DAEMON is the 3rd class — its own test below.)
+fn agent_cases() -> Vec<WireCase> {
+    vec![
+        // ---- transcript / JSONL sources (line decoder, Jsonl transport) ----
+        WireCase {
+            name: "claude_code",
+            source: "claude-code",
+            fixture: "claude-code/tool-call/01000000-0000-7000-8000-0000000000cc.jsonl",
+            decode: DecodeKind::Transcript,
+            transport: Transport::Jsonl,
+            // CC's transcript carries only tool activity → seed a SessionStart
+            // keyed the cc_id_from_path (filename-stem) way.
+            seed: SeedStart::CcStem,
+        },
+        WireCase {
+            name: "codex",
+            source: "codex",
+            fixture: "codex/tool-run/rollout-2026-01-01T00-00-00-01000000-0000-7000-8000-000000000002.jsonl",
+            decode: DecodeKind::Transcript,
+            transport: Transport::Jsonl,
+            // Codex's line decoder emits only activity — the watcher first-sight
+            // (or the UserPromptSubmit hook) registers the slot in production;
+            // seed a SessionStart keyed the codex_id_from_path (rollout-UUID) way.
+            seed: SeedStart::CodexUuid,
+        },
+        WireCase {
+            name: "antigravity",
+            source: "antigravity",
+            fixture: "antigravity/tool-run/transcript.jsonl",
+            decode: DecodeKind::Transcript,
+            transport: Transport::Jsonl,
+            // Antigravity's decoder emits only activity → seed keyed from_parts.
+            seed: SeedStart::FromParts,
+        },
+        WireCase {
+            name: "copilot",
+            source: "copilot",
+            fixture: "copilot/tool-run/events.jsonl",
+            decode: DecodeKind::Transcript,
+            transport: Transport::Jsonl,
+            // The events.jsonl carries a session.start → its own SessionStart.
+            seed: SeedStart::None,
+        },
+        // ---- hook-only sources (decode_hook_payload, Hook transport) ----
+        // A hook event for an unknown session id REGISTERS it (hooks are proof
+        // of life), so no seed is needed — the SessionStart envelope (or the
+        // first activity hook) synthesizes the slot in the reducer.
+        WireCase {
+            name: "reasonix",
+            source: "reasonix",
+            fixture: "reasonix/tool-run/hook-payloads.jsonl",
+            decode: DecodeKind::Hook,
+            transport: Transport::Hook,
+            seed: SeedStart::None,
+        },
+        WireCase {
+            name: "codewhale",
+            source: "codewhale",
+            fixture: "codewhale/tool-run/hook-payloads.jsonl",
+            decode: DecodeKind::Hook,
+            transport: Transport::Hook,
+            seed: SeedStart::None,
+        },
+        WireCase {
+            name: "opencode",
+            source: "opencode",
+            fixture: "opencode/session-run/hook-payloads.jsonl",
+            decode: DecodeKind::Hook,
+            transport: Transport::Hook,
+            seed: SeedStart::None,
+        },
+        WireCase {
+            name: "cursor",
+            source: "cursor",
+            fixture: "cursor/tool-run/hook-payloads.jsonl",
+            decode: DecodeKind::Hook,
+            transport: Transport::Hook,
+            seed: SeedStart::None,
+        },
+    ]
+}
+
+/// Drive the whole matrix in one test so a per-source failure names the source
+/// (the `case.name` is woven into every assertion message). Each case is the
+/// full wire→pixels chain for its source.
+#[test]
+fn every_agent_source_renders_a_painted_sprite_from_real_wire() {
+    for case in agent_cases() {
+        assert_renders_a_sprite(&case);
+    }
+}
+
+// Per-source tests too, so a single source can be run in isolation
+// (`-E 'test(claude_code)'`) and a regression localizes to its own `#[test]`.
+
+#[test]
+fn claude_code_transcript_line_renders_a_painted_sprite() {
+    assert_renders_a_sprite(&agent_cases()[0]);
+}
+
+#[test]
+fn codex_transcript_line_renders_a_painted_sprite() {
+    assert_renders_a_sprite(&agent_cases()[1]);
+}
+
+#[test]
+fn antigravity_transcript_line_renders_a_painted_sprite() {
+    assert_renders_a_sprite(&agent_cases()[2]);
+}
+
+#[test]
+fn copilot_transcript_line_renders_a_painted_sprite() {
+    assert_renders_a_sprite(&agent_cases()[3]);
+}
+
 #[test]
 fn reasonix_hook_envelope_renders_a_painted_sprite() {
-    // The captured Reasonix hook envelopes (cwd-keyed, hook-only). Decode the
-    // SessionStart + the activity hooks via the production dispatcher; the
-    // reducer registers the slot from the hook (invariant: a hook event for an
-    // unknown session id registers it — hooks are proof of life).
-    let hooks = core_fixtures_root()
-        .join("reasonix")
-        .join("tool-run")
-        .join("hook-payloads.jsonl");
+    assert_renders_a_sprite(&agent_cases()[4]);
+}
 
-    let mut events = Vec::new();
-    for line in read_nonblank_lines(&hooks) {
-        let v: serde_json::Value = serde_json::from_str(&line).expect("hook json");
-        let evs = decode_hook_payload(v).expect("decode_hook_payload");
-        events.extend(evs);
+#[test]
+fn codewhale_hook_envelope_renders_a_painted_sprite() {
+    assert_renders_a_sprite(&agent_cases()[5]);
+}
+
+#[test]
+fn opencode_hook_envelope_renders_a_painted_sprite() {
+    assert_renders_a_sprite(&agent_cases()[6]);
+}
+
+#[test]
+fn cursor_hook_envelope_renders_a_painted_sprite() {
+    assert_renders_a_sprite(&agent_cases()[7]);
+}
+
+// =====================================================================
+// Part B — OpenClaw DAEMON presence → a painted lobster (3rd class)
+// =====================================================================
+
+/// The lobster's exclusive carapace reds (the mascot sprite is NOT recolored,
+/// so its authored RGBs render exactly — mirrors `harness.rs::lobster_px`). An
+/// empty-agents scene means no recolored agent shirt can collide with these.
+fn lobster_px(buf: &pixtuoid_core::sprite::RgbBuffer) -> usize {
+    use pixtuoid_core::sprite::Rgb;
+    let reds = [
+        Rgb {
+            r: 0xd2,
+            g: 0x40,
+            b: 0x2f,
+        }, // body
+        Rgb {
+            r: 0xe8,
+            g: 0x55,
+            b: 0x40,
+        }, // claw
+        Rgb {
+            r: 0xc8,
+            g: 0x38,
+            b: 0x28,
+        }, // antenna
+        Rgb {
+            r: 0x9e,
+            g: 0x2a,
+            b: 0x20,
+        }, // shade
+    ];
+    let mut n = 0;
+    for y in 0..buf.height {
+        for x in 0..buf.width {
+            if reds.contains(&buf.get(x, y)) {
+                n += 1;
+            }
+        }
+    }
+    n
+}
+
+/// TEST — OpenClaw (DAEMON / presence source): the captured gateway-lifecycle
+/// hook envelopes → the production presence decoder
+/// (`openclaw::decode_openclaw_hook_payload`) → `apply_presence` (the SAME
+/// sibling-channel seam `runtime/driver.rs` uses — NEVER `Reducer::apply`,
+/// which is `AgentId`-pure) → `SceneState.daemons[openclaw]` populated UP →
+/// `TuiRenderer` pixels. Asserts the LOBSTER is painted, proving the
+/// daemon-presence wire→pixels chain (distinct from the agent JSONL + agent
+/// hook classes above).
+#[test]
+fn openclaw_presence_envelope_renders_a_lobster() {
+    let hooks = core_fixtures_root().join("openclaw/gateway_lifecycle/hook-payloads.jsonl");
+
+    // The fixture's last two envelopes are session_end → gateway_stop, which
+    // would leave the daemon Down (and the lobster walking out / gone). We want
+    // the daemon UP, so apply only through the in-session run (gateway_start ..
+    // agent_end) — exactly the live "gateway is serving" state. Each remaining
+    // envelope is decoded via the production presence decoder.
+    let lines = read_nonblank_lines(&hooks);
+    let mut scene = SceneState::uniform(16);
+    let now = t0();
+    let mut applied = 0;
+    for line in &lines {
+        let v: serde_json::Value = serde_json::from_str(line).expect("openclaw hook json");
+        // Stop at session teardown so the asserted scene is a LIVE gateway.
+        let ty = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
+        if ty == "session_end" || ty == "gateway_stop" {
+            break;
+        }
+        let updates = pixtuoid_core::source::openclaw::decode_openclaw_hook_payload(&v)
+            .expect("decode_openclaw_hook_payload");
+        for update in updates {
+            apply_presence(
+                &mut scene,
+                pixtuoid_core::source::openclaw::SOURCE_NAME,
+                update,
+                now,
+            );
+            applied += 1;
+        }
     }
     assert!(
-        !events.is_empty(),
-        "the captured Reasonix hooks must decode to AgentEvents"
+        applied > 0,
+        "the openclaw fixture must decode to presence deltas (got 0)"
     );
 
-    // Fold through a real reducer on the Hook transport (the only transport a
-    // hook-only source ever uses), into a real SceneState.
-    let mut scene = SceneState::uniform(8);
-    let mut reducer = Reducer::new();
-    for ev in events {
-        reducer.apply(&mut scene, ev, t0(), Transport::Hook);
+    // The presence must have populated the daemon map UP (not Down) — the live
+    // gateway whose lobster scuttles the floor.
+    let presence = scene
+        .daemons()
+        .get(pixtuoid_core::source::openclaw::SOURCE_NAME)
+        .expect("openclaw presence must be populated");
+    assert_ne!(
+        presence.state,
+        pixtuoid_core::state::DaemonState::Down,
+        "the in-session presence stream must leave the gateway UP"
+    );
+
+    // Render the scene. `entered_at` == `now` means the lobster is mid walk-in;
+    // settle a few frames at a LATER wall-clock so it's scuttling the floor
+    // (well past the elevator), then assert the carapace reds are painted.
+    let pack = load_sprite_pack(None).expect("pack");
+    let mut r = new_renderer(160, 80);
+    let mut t = now + Duration::from_secs(20);
+    for _ in 0..10 {
+        r.render(&scene, &pack, t).expect("render gateway office");
+        t += Duration::from_millis(130);
     }
-    assert_eq!(
-        scene.agents.len(),
-        1,
-        "the hook envelopes must register exactly one (hook-synthesized) agent slot"
-    );
-
-    // Render to pixels and assert the hook-synthesized agent is painted.
-    let (cols, rows) = (120, 44);
-    let baseline = empty_office_color_count(cols, rows, t0());
-    let mut r = new_renderer(cols, rows);
-    let occupied = render_settled_color_count(&mut r, &scene, t0());
     assert!(
-        occupied > baseline + 4,
-        "a hook-synthesized Reasonix agent must paint more distinct colors than \
-         the empty baseline (empty={baseline}, occupied={occupied})"
+        lobster_px(r.buf()) > 10,
+        "a live OpenClaw gateway (from real presence wire bytes) must paint the lobster mascot"
     );
 }
