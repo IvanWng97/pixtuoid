@@ -442,10 +442,6 @@ pub(super) fn degraded_frame(frame: &Frame) -> Frame {
 
 // --- Color math primitives -----------------------------------------------
 
-pub(super) fn lerp_rgb(a: Rgb, b: Rgb, t: f32) -> Rgb {
-    mix_lab(a, b, t)
-}
-
 /// Bell curve centered at `c` with half-width `w` (so the bell is 0 at
 /// `c ± w` and 1 at `c`). Used for dawn/dusk twilight tint.
 pub(super) fn bell(x: f32, c: f32, w: f32) -> f32 {

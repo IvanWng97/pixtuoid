@@ -6,7 +6,7 @@ use std::time::SystemTime;
 
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
-use crate::pixel_painter::palette::{blend_rgb, lerp_rgb};
+use crate::pixel_painter::palette::{blend_rgb, mix_lab};
 use crate::theme::Theme;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -239,15 +239,15 @@ pub(in crate::pixel_painter) fn time_of_day_look(now: SystemTime, theme: &Theme)
     // clear/snowy night shows faintly lit (moonlit) glass while a storm night
     // stays near-black. Subtle (≤ ~0.10 for the brightest skies).
     let night_lift = night_glow * 0.18;
-    let glass_night_a = lerp_rgb(night_a, day_a, night_lift);
-    let glass_night_b = lerp_rgb(night_b, day_b, night_lift);
-    let glass_a = lerp_rgb(
-        lerp_rgb(glass_night_a, day_a, day_eff),
+    let glass_night_a = mix_lab(night_a, day_a, night_lift);
+    let glass_night_b = mix_lab(night_b, day_b, night_lift);
+    let glass_a = mix_lab(
+        mix_lab(glass_night_a, day_a, day_eff),
         twilight_a,
         twilight_eff * 0.5,
     );
-    let glass_b = lerp_rgb(
-        lerp_rgb(glass_night_b, day_b, day_eff),
+    let glass_b = mix_lab(
+        mix_lab(glass_night_b, day_b, day_eff),
         twilight_b,
         twilight_eff * 0.5,
     );

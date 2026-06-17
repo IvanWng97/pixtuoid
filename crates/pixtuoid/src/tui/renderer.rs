@@ -2,7 +2,8 @@
 //! flush, and label/tooltip/notice widget overlays.
 //!
 //! The pure-pixel pass (floor/walls/decor/characters -> `RgbBuffer`) lives
-//! in `tui::pixel_painter`. This file is the integrator that calls into
+//! in the `pixtuoid_scene::pixel_painter` engine crate. This file is the
+//! integrator that calls into
 //! that pipeline and then hands the buffer to ratatui. Terminal lifecycle
 //! (raw mode + alternate screen) lives with the event loop in `tui/mod.rs`.
 //!

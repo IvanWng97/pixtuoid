@@ -25,7 +25,7 @@ use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
 use super::ambient::SunbeamColumn;
 use super::epoch_ms;
-use super::palette::{blend, blend_rgb, lerp_rgb};
+use super::palette::{blend, blend_rgb, mix_lab};
 
 /// Fractional local hour (`hour + minute/60`, in `0.0..24.0`) for `now`, decoded
 /// via chrono. Shared by the day-ramp / sunset / window-look timers. NB:
@@ -560,11 +560,11 @@ fn paint_floor_to_ceiling_window(
     // (the old 0.5 floor kept buildings ~50% lit even at noon).
     let lit_strength = look.darkness.max(0.12).clamp(0.0, 1.0);
     let lit_colors: [Rgb; 3] = [
-        lerp_rgb(dark_window, cw[0], lit_strength),
-        lerp_rgb(dark_window, cw[1], lit_strength),
-        lerp_rgb(dark_window, cw[2], lit_strength),
+        mix_lab(dark_window, cw[0], lit_strength),
+        mix_lab(dark_window, cw[1], lit_strength),
+        mix_lab(dark_window, cw[2], lit_strength),
     ];
-    let building = lerp_rgb(building_light, building_dark, look.darkness);
+    let building = mix_lab(building_light, building_dark, look.darkness);
 
     // Skyline silhouette as a 0..15 PATTERN; the actual pixel height is
     // computed per-window so the skyline auto-scales with the glass
@@ -583,7 +583,7 @@ fn paint_floor_to_ceiling_window(
     let sky_row: Vec<Rgb> = (0..glass_h)
         .map(|gy| {
             let sky_t = (gy as f32 / sky_norm).min(1.0);
-            lerp_rgb(look.glass_b, look.glass_a, sky_t)
+            mix_lab(look.glass_b, look.glass_a, sky_t)
         })
         .collect();
 

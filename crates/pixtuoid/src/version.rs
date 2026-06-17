@@ -96,11 +96,8 @@ pub fn release_notes(version: &str) -> Option<&'static [&'static str]> {
             "Diagnostics you can see — source-death footer warnings, config warnings on stderr, an always-on log file",
             "New project site — live demos, architecture & contributing docs, weather gallery",
         ]),
-        // LIVING DRAFT — 0.6.0 is the open breaking-dev window: the version is
-        // bumped at window START so the CI semver gate admits the batched
-        // breaking changes (#145, #131, …); the tag/publish only happens when
-        // the window stabilizes. Re-curate from `git log v0.5.0..HEAD` before
-        // tagging.
+        // 0.6.0 shipped to crates.io/homebrew but its npm launcher failed, so
+        // 0.6.1 (above) superseded it as the first fully-published release.
         "0.6.0" => Some(&[
             "Windows support — native hook transport, installer, and release builds",
             "Install via npm — `npm i -g pixtuoid` now works on macOS, Linux & Windows",
