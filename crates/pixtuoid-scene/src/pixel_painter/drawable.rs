@@ -185,6 +185,16 @@ pub(super) enum DrawableKind<'a> {
 /// from each other. Pantry and the lounge couch share the SAME `+(4,6)` offset
 /// (both are corner appliances the creature stands beside), so `corner_visit_spot`
 /// serves both; the desk and the meeting sofa have their own offsets.
+///
+/// Only the FURNITURE-GEOMETRY offset is shared here — these are derived from the
+/// `DESK_W`/`DESK_H` consts, NOT from any creature's sprite, and both creatures
+/// then `walk_between` + `snap_point_to_walkable` to a "near this furniture"
+/// target (no pixel-precise stand pose), so a sprite's footprint never enters
+/// the math. The creature-specific spot SELECTION stays DELIBERATELY separate and
+/// must NOT be folded in: `pet_position` gathers every spot + an `is_idle` bool +
+/// the corridor, while `mascot_spots` gathers conditionally on `DaemonState`
+/// (Busy → desks, Idle → social) with no corridor. They share where-beside-the-
+/// furniture, not which-furniture-when — two different domains.
 fn desk_visit_spot(desk: Point) -> Point {
     Point {
         x: desk.x + DESK_W + 1,
