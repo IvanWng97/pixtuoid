@@ -279,11 +279,23 @@ pub fn save_floating(
     update_config(path, |doc| {
         doc["floating"]["width"] = toml_edit::value(width as i64);
         doc["floating"]["height"] = toml_edit::value(height as i64);
-        if let Some(x) = x {
-            doc["floating"]["x"] = toml_edit::value(x as i64);
-        }
-        if let Some(y) = y {
-            doc["floating"]["y"] = toml_edit::value(y as i64);
+        // Set-or-CLEAR x/y: a `None` means the OS couldn't report the window position
+        // (`outer_position()` returned `Err` — ALWAYS on Wayland, or a transient at close).
+        // Persisting the OLD coords would (1) leave width/height/x/y internally inconsistent
+        // (new size, stale position) and (2) restore a stale/offscreen spot next launch — so
+        // drop the keys instead and let the OS place the window.
+        for (key, val) in [("x", x), ("y", y)] {
+            match val {
+                Some(v) => doc["floating"][key] = toml_edit::value(v as i64),
+                // `as_table_like_mut` (not `as_table_mut`): save_floating serializes
+                // `floating` as an INLINE table (`floating = { … }`), so the standard-table
+                // accessor returns None and the key would never drop.
+                None => {
+                    if let Some(t) = doc["floating"].as_table_like_mut() {
+                        t.remove(key);
+                    }
+                }
+            }
         }
     })
 }
@@ -1276,6 +1288,24 @@ mod tests {
             (480, 320, Some(12), Some(34))
         );
         // toml_edit preserves the user's other settings (not an all-or-nothing rewrite).
+        assert_eq!(cfg.theme.as_deref(), Some("normal"));
+    }
+
+    #[test]
+    fn save_floating_clears_stale_position_when_os_cannot_report_it() {
+        // A `None` x/y (outer_position() Err — always on Wayland) must DROP the prior coords,
+        // not leave them: a new size + stale position would restore an offscreen window.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "theme = \"normal\"\n").unwrap();
+        save_floating(&path, 480, 320, Some(12), Some(34)).unwrap();
+        // A later save where the OS can't report position: size updates, x/y are cleared.
+        save_floating(&path, 500, 360, None, None).unwrap();
+        let cfg = load(&path, &mut Vec::new());
+        let f = resolve_floating(&cfg);
+        assert_eq!((f.width, f.height), (500, 360));
+        assert_eq!((f.x, f.y), (None, None), "stale position keys were dropped");
+        // Unrelated settings still survive the rewrite.
         assert_eq!(cfg.theme.as_deref(), Some("normal"));
     }
 
