@@ -266,6 +266,28 @@ pub fn save_source_connected(path: &Path, source_id: &'static str, connected: bo
     })
 }
 
+/// Persist the `pixtuoid float` window geometry into the `[float]` table (size always;
+/// position when the OS reported it). Same `toml_edit` ConfigLock round as
+/// `save_source_connected`, so the user's other settings + hand-formatting survive.
+pub fn save_float(
+    path: &Path,
+    width: u32,
+    height: u32,
+    x: Option<i32>,
+    y: Option<i32>,
+) -> Result<()> {
+    update_config(path, |doc| {
+        doc["float"]["width"] = toml_edit::value(width as i64);
+        doc["float"]["height"] = toml_edit::value(height as i64);
+        if let Some(x) = x {
+            doc["float"]["x"] = toml_edit::value(x as i64);
+        }
+        if let Some(y) = y {
+            doc["float"]["y"] = toml_edit::value(y as i64);
+        }
+    })
+}
+
 /// Resolve the runtime connected-set the office gates its sprites on. An
 /// explicit `[sources]` flag wins; an absent id MIGRATES: a source with an
 /// install target is connected iff its hooks are already installed, and a
@@ -1235,6 +1257,22 @@ mod tests {
         assert!(!toml::to_string(&AppConfig::default())
             .unwrap()
             .contains("[float]"));
+    }
+
+    #[test]
+    fn save_float_roundtrips_geometry_and_preserves_other_settings() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "theme = \"normal\"\n").unwrap();
+        save_float(&path, 480, 320, Some(12), Some(34)).unwrap();
+        let cfg = load(&path, &mut Vec::new());
+        let f = resolve_float(&cfg);
+        assert_eq!(
+            (f.width, f.height, f.x, f.y),
+            (480, 320, Some(12), Some(34))
+        );
+        // toml_edit preserves the user's other settings (not an all-or-nothing rewrite).
+        assert_eq!(cfg.theme.as_deref(), Some("normal"));
     }
 
     #[test]

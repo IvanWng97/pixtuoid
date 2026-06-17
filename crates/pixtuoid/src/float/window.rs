@@ -9,6 +9,7 @@
 //! `driver.rs`; the testable render seam is `tui::offscreen`.
 
 use std::num::NonZeroU32;
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -18,10 +19,10 @@ use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::state::{SceneState, MAX_FLOORS};
 use tokio::sync::watch;
 use winit::application::ApplicationHandler;
-use winit::dpi::LogicalSize;
-use winit::event::WindowEvent;
+use winit::dpi::{LogicalSize, PhysicalPosition};
+use winit::event::{ElementState, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow};
-use winit::window::{Window, WindowId, WindowLevel};
+use winit::window::{ResizeDirection, Window, WindowId, WindowLevel};
 
 use crate::config::{self, FloatConfig};
 use crate::tui::floor::FloorMeta;
@@ -42,23 +43,30 @@ pub struct FloatApp {
     cfg: FloatConfig,
     theme: &'static Theme,
     pack: Pack,
+    config_path: PathBuf,
     renderer: OfficeRenderer,
     scene_rx: watch::Receiver<Arc<SceneState>>,
     floor_caps: Arc<[AtomicUsize; MAX_FLOORS]>,
     /// The buffer size the capacity atomics were last synced for — capacity only changes
     /// with the window size, so re-sync only on a size change (not every frame).
     last_caps_size: Option<(u16, u16)>,
+    /// Latest cursor position (physical px) — for the corner resize hit-test on click.
+    cursor: PhysicalPosition<f64>,
     window: Option<Rc<Window>>,
     // softbuffer's `Context` must outlive the `Surface` it spawned, so keep both.
     context: Option<softbuffer::Context<Rc<Window>>>,
     surface: Option<softbuffer::Surface<Rc<Window>, Rc<Window>>>,
 }
 
+/// Click within this many physical px of the bottom-right corner = resize, else move.
+const RESIZE_CORNER_PX: f64 = 18.0;
+
 impl FloatApp {
     pub fn new(
         cfg: FloatConfig,
         theme: &'static Theme,
         pack: Pack,
+        config_path: PathBuf,
         scene_rx: watch::Receiver<Arc<SceneState>>,
         floor_caps: Arc<[AtomicUsize; MAX_FLOORS]>,
     ) -> Self {
@@ -66,13 +74,34 @@ impl FloatApp {
             cfg,
             theme,
             pack,
+            config_path,
             renderer: OfficeRenderer::new(),
             scene_rx,
             floor_caps,
             last_caps_size: None,
+            cursor: PhysicalPosition::new(0.0, 0.0),
             window: None,
             context: None,
             surface: None,
+        }
+    }
+
+    /// Persist the current window geometry into `[float]` (best-effort — a save error
+    /// must not block quitting). Size is stored LOGICAL (HiDPI-stable); position PHYSICAL.
+    fn persist_geometry(&self) {
+        let Some(window) = &self.window else {
+            return;
+        };
+        let logical = window.inner_size().to_logical::<f64>(window.scale_factor());
+        let pos = window.outer_position().ok();
+        if let Err(e) = config::save_float(
+            &self.config_path,
+            logical.width.round() as u32,
+            logical.height.round() as u32,
+            pos.map(|p| p.x),
+            pos.map(|p| p.y),
+        ) {
+            tracing::warn!("pixtuoid float: could not persist window geometry: {e}");
         }
     }
 
@@ -155,7 +184,7 @@ impl ApplicationHandler<FloatEvent> for FloatApp {
         if self.window.is_some() {
             return; // already created — a re-resume must not spawn a second window
         }
-        let attrs = Window::default_attributes()
+        let mut attrs = Window::default_attributes()
             .with_title("pixtuoid")
             .with_decorations(false)
             .with_resizable(true)
@@ -168,6 +197,21 @@ impl ApplicationHandler<FloatEvent> for FloatApp {
                 config::FLOAT_MIN_W as f64,
                 config::FLOAT_MIN_H as f64,
             ));
+        // Restore the saved position (physical px); else the OS places it.
+        if let (Some(x), Some(y)) = (self.cfg.x, self.cfg.y) {
+            attrs = attrs.with_position(PhysicalPosition::new(x, y));
+        }
+        #[cfg(target_os = "macos")]
+        {
+            use winit::platform::macos::WindowAttributesExtMacOS;
+            attrs = attrs.with_has_shadow(true).with_titlebar_hidden(true);
+        }
+        #[cfg(target_os = "windows")]
+        {
+            // No taskbar button — it's an ambient overlay, not a primary window.
+            use winit::platform::windows::WindowAttributesExtWindows;
+            attrs = attrs.with_skip_taskbar(true);
+        }
         let window = match event_loop.create_window(attrs) {
             Ok(w) => Rc::new(w),
             Err(e) => {
@@ -192,6 +236,9 @@ impl ApplicationHandler<FloatEvent> for FloatApp {
                 return;
             }
         };
+        // `cfg.opacity` is parsed + clamped but NOT applied in v1: winit 0.30 exposes no
+        // per-window opacity, and softbuffer writes opaque XRGB (no alpha). Honest no-op —
+        // real translucency needs a native shim or a wgpu surface (deferred, see spec §11).
         window.request_redraw();
         self.window = Some(window);
         self.context = Some(context);
@@ -215,11 +262,34 @@ impl ApplicationHandler<FloatEvent> for FloatApp {
         event: WindowEvent,
     ) {
         match event {
-            WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::CloseRequested => {
+                self.persist_geometry();
+                event_loop.exit();
+            }
             WindowEvent::RedrawRequested => self.redraw(),
             WindowEvent::Resized(_) => {
                 if let Some(window) = &self.window {
                     window.request_redraw();
+                }
+            }
+            WindowEvent::CursorMoved { position, .. } => self.cursor = position,
+            WindowEvent::MouseInput {
+                state: ElementState::Pressed,
+                button: MouseButton::Left,
+                ..
+            } => {
+                // Frameless: a left-press drags the window, EXCEPT near the bottom-right
+                // corner, which resizes (the OS takes over until release). Errors are
+                // non-fatal (some platforms refuse outside a real press).
+                if let Some(window) = &self.window {
+                    let size = window.inner_size();
+                    let near_corner = self.cursor.x >= size.width as f64 - RESIZE_CORNER_PX
+                        && self.cursor.y >= size.height as f64 - RESIZE_CORNER_PX;
+                    let _ = if near_corner {
+                        window.drag_resize_window(ResizeDirection::SouthEast)
+                    } else {
+                        window.drag_window()
+                    };
                 }
             }
             _ => {}

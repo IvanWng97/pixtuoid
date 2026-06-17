@@ -130,7 +130,7 @@ pub fn run(cfg: RunConfig) -> Result<()> {
         });
     }
 
-    let mut app = FloatApp::new(float_cfg, theme, pack, scene_rx, floor_caps);
+    let mut app = FloatApp::new(float_cfg, theme, pack, config_path, scene_rx, floor_caps);
     event_loop
         .run_app(&mut app)
         .context("running the float window event loop")?;
