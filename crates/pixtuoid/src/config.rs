@@ -117,24 +117,15 @@ pub fn resolve_floating(config: &AppConfig) -> FloatingConfig {
 pub fn resolve_pack_dir(config: &AppConfig, cli_pack_dir: Option<PathBuf>) -> Option<PathBuf> {
     cli_pack_dir.or_else(|| {
         config.pack_dir.as_ref().map(|p| {
-            PathBuf::from(expand_tilde(
-                p,
-                pixtuoid_core::platform::user_home_opt().as_deref(),
-            ))
+            // Delegate to the ONE tilde-expander (`install::io::expand_tilde`): it
+            // handles `~/` AND `~\` (Windows), trims, and stays in PathBuf-land, so
+            // a `pack-dir` override expands the SAME way a config-location override
+            // does. The previous local copy only knew `~/` and round-tripped through
+            // `String` → `--pack-dir ~\packs` silently never expanded on Windows.
+            let home = pixtuoid_core::platform::user_home_opt();
+            crate::install::io::expand_tilde(p, home.as_deref().map(Path::new))
         })
     })
-}
-
-/// Expand a leading `~` (current user's home) in a path string. Only `~` alone
-/// and a `~/`-prefixed path are expanded — `~user/...` is left untouched (we
-/// don't resolve other users' homes) and a non-leading `~` is never replaced.
-/// With no `home`, the input is returned unchanged.
-fn expand_tilde(p: &str, home: Option<&str>) -> String {
-    match home {
-        Some(h) if p == "~" => h.to_string(),
-        Some(h) if p.starts_with("~/") => format!("{h}{}", &p[1..]),
-        _ => p.to_string(),
-    }
 }
 
 pub fn config_path() -> PathBuf {
@@ -594,22 +585,6 @@ mod tests {
     }
 
     #[test]
-    fn expand_tilde_only_expands_leading_current_user_home() {
-        let home = Some("/Users/x");
-        // ~ alone and ~/ prefix expand.
-        assert_eq!(expand_tilde("~", home), "/Users/x");
-        assert_eq!(expand_tilde("~/packs/robot", home), "/Users/x/packs/robot");
-        // ~user/ is another user's home — leave it alone (don't produce /Users/xuser/).
-        assert_eq!(expand_tilde("~user/p", home), "~user/p");
-        // A non-leading ~ must never be replaced.
-        assert_eq!(expand_tilde("rel/~/x", home), "rel/~/x");
-        // Absolute / relative paths pass through untouched.
-        assert_eq!(expand_tilde("/abs/p", home), "/abs/p");
-        // No HOME → input returned unchanged.
-        assert_eq!(expand_tilde("~/p", None), "~/p");
-    }
-
-    #[test]
     fn load_malformed_returns_defaults() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.toml");
@@ -847,12 +822,12 @@ mod tests {
             ..AppConfig::default()
         };
         let result = resolve_pack_dir(&cfg, None);
-        // Expectation derives from the SAME helper production uses
-        // (user_home(), USERPROFILE-first on Windows) — pinning raw $HOME
-        // here diverges under the Windows runner's Git Bash.
+        // Build the expectation with the SAME `.join()` the impl uses
+        // (install::io::expand_tilde) so the comparison is STRUCTURAL — a
+        // hardcoded `/` would drift from `\` under the Windows runner's Git Bash.
         match pixtuoid_core::platform::user_home_opt() {
             Some(home) => {
-                assert_eq!(result, Some(PathBuf::from(format!("{home}/my-pack"))));
+                assert_eq!(result, Some(PathBuf::from(home).join("my-pack")));
             }
             None => assert_eq!(result, Some(PathBuf::from("~/my-pack"))),
         }
