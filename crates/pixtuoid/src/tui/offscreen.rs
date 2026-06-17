@@ -63,6 +63,7 @@ impl OfficeRenderer {
         buf_w: u16,
         buf_h: u16,
         floor_meta: FloorMeta,
+        floor_pet: Option<&crate::tui::pet::Pet>,
     ) -> &RgbBuffer {
         self.buf
             .ensure_size(buf_w, buf_h, theme.surface.bg_fallback);
@@ -86,8 +87,10 @@ impl OfficeRenderer {
             door_anim_max_ms: self.floor.door_anim_max_ms,
             theme,
             floor: floor_meta,
+            // active_pet is the click-to-pet heart animation — needs window pointer
+            // hit-testing (deferred); the WANDERING floor pet is wired.
             active_pet: None,
-            floor_pet: None,
+            floor_pet,
             chitchat_state: &mut self.chitchat,
             coffee_holders: &self.coffee_holders,
             coffee_fetched_at: &self.coffee_fetched_at,
@@ -127,7 +130,16 @@ mod tests {
         let theme = crate::tui::theme::theme_by_name("normal").expect("normal theme exists");
         let now = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
         let mut renderer = OfficeRenderer::new();
-        let buf = renderer.render(&scene, &pack, theme, now, 160, 96, FloorMeta::ground());
+        let buf = renderer.render(
+            &scene,
+            &pack,
+            theme,
+            now,
+            160,
+            96,
+            FloorMeta::ground(),
+            None,
+        );
         assert_eq!((buf.width, buf.height), (160, 96));
         assert!(
             buf.pixels.iter().any(|p| *p != Rgb { r: 0, g: 0, b: 0 }),

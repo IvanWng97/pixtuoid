@@ -44,6 +44,8 @@ pub struct FloatApp {
     theme: &'static Theme,
     pack: Pack,
     config_path: PathBuf,
+    /// The configured office pets — one is selected per floor (v1 shows floor 0's).
+    pets: Vec<crate::tui::pet::Pet>,
     renderer: OfficeRenderer,
     scene_rx: watch::Receiver<Arc<SceneState>>,
     floor_caps: Arc<[AtomicUsize; MAX_FLOORS]>,
@@ -62,11 +64,13 @@ pub struct FloatApp {
 const RESIZE_CORNER_PX: f64 = 18.0;
 
 impl FloatApp {
+    #[allow(clippy::too_many_arguments)] // flat construction inputs; bundling adds no clarity
     pub fn new(
         cfg: FloatConfig,
         theme: &'static Theme,
         pack: Pack,
         config_path: PathBuf,
+        pets: Vec<crate::tui::pet::Pet>,
         scene_rx: watch::Receiver<Arc<SceneState>>,
         floor_caps: Arc<[AtomicUsize; MAX_FLOORS]>,
     ) -> Self {
@@ -75,6 +79,7 @@ impl FloatApp {
             theme,
             pack,
             config_path,
+            pets,
             renderer: OfficeRenderer::new(),
             scene_rx,
             floor_caps,
@@ -129,6 +134,8 @@ impl FloatApp {
         }
         // Arc clone releases the watch borrow before the (mutable) renderer borrow.
         let scene = self.scene_rx.borrow().clone();
+        let floor_meta = FloorMeta::ground();
+        let floor_pet = crate::tui::pet::select_pet_for_floor(floor_meta.floor_seed, &self.pets);
         let office = self.renderer.render(
             &scene,
             &self.pack,
@@ -136,7 +143,8 @@ impl FloatApp {
             SystemTime::now(),
             buf_w,
             buf_h,
-            FloorMeta::ground(),
+            floor_meta,
+            floor_pet,
         );
         // Collect into a local (release the `self.renderer` borrow) before borrowing
         // `self.surface`. softbuffer wants `0x00RRGGBB` (alpha byte ignored).
