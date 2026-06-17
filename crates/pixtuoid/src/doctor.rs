@@ -43,11 +43,9 @@ impl LogScanResult {
 
 const SAMPLE_CAP: usize = 5;
 
-/// Strip control chars from an untrusted wire value before it reaches stdout
-/// (the same discipline as the headless `sanitize_line`; R0615-06).
-fn sanitize(s: &str) -> String {
-    s.chars().filter(|c| !c.is_control()).collect()
-}
+// Strip control chars from an untrusted wire value before it reaches stdout
+// (R0615-06) — the one canonical `crate::strip_control_chars`.
+use crate::strip_control_chars as sanitize;
 
 /// The parsed fields of one `pixtuoid::drift` breadcrumb line, borrowed from it.
 struct DriftLine<'a> {

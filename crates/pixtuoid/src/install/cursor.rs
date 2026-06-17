@@ -35,8 +35,7 @@ use serde_json::{json, Map, Value};
 use crate::install::io;
 use crate::install::target::MergeOutcome;
 use crate::install::verify;
-
-const SENTINEL_KEY: &str = "_pixtuoid";
+use crate::install::SENTINEL_KEY;
 
 /// Events we register == events we decode (`source/cursor.rs`), enforced by
 /// `every_registered_cursor_event_decodes` below. The camelCase names are

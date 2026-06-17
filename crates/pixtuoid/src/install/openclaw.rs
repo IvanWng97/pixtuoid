@@ -236,17 +236,7 @@ pub fn plugin_artifacts(hook_path: &Path) -> Result<Vec<(PathBuf, String)>> {
 }
 
 fn render_plugin(hook_path: &str) -> Result<String> {
-    let json = serde_json::to_string(hook_path)
-        .context("serializing the hook path into the openclaw plugin")?;
-    Ok(PLUGIN_TEMPLATE.replace(HOOK_PLACEHOLDER, &json))
-}
-
-fn parse_or_empty(content: &str) -> Result<Value> {
-    if content.trim().is_empty() {
-        Ok(json!({}))
-    } else {
-        serde_json::from_str(content).context("parsing openclaw.json")
-    }
+    crate::install::verify::bake_hook_path(PLUGIN_TEMPLATE, HOOK_PLACEHOLDER, hook_path, "openclaw")
 }
 
 fn obj_mut<'a>(v: &'a mut Value, key: &str) -> Result<&'a mut serde_json::Map<String, Value>> {
@@ -267,7 +257,8 @@ pub fn merge_install(content: &str, _hook_cmd: &str) -> Result<MergeOutcome> {
         .to_str()
         .ok_or_else(|| anyhow!("plugin dir path is non-UTF-8: {}", dir.display()))?
         .to_string();
-    let mut root = parse_or_empty(content)?;
+    let mut root =
+        crate::install::verify::parse_json_or_empty(content).context("parsing openclaw.json")?;
     let before = root.clone();
     {
         let root_obj = obj_mut(&mut root, "root")?;
@@ -304,7 +295,8 @@ pub fn merge_install(content: &str, _hook_cmd: &str) -> Result<MergeOutcome> {
 pub fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
     let dir = plugin_dir()?;
     let dir_str = dir.to_str().map(str::to_string);
-    let mut root = parse_or_empty(content)?;
+    let mut root =
+        crate::install::verify::parse_json_or_empty(content).context("parsing openclaw.json")?;
     let before = root.clone();
     if let Some(plugins) = root.get_mut("plugins").and_then(Value::as_object_mut) {
         if let Some(paths) = plugins

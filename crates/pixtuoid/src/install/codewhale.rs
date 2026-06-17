@@ -44,8 +44,7 @@ use toml::value::Table;
 
 use crate::install::io;
 use crate::install::target::MergeOutcome;
-
-const SENTINEL_KEY: &str = "_pixtuoid";
+use crate::install::SENTINEL_KEY;
 
 /// Events we register == events we decode (`source/codewhale.rs`), enforced by
 /// `every_registered_codewhale_event_decodes` below. The `bool` is `env_mode`:

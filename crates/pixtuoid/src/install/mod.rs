@@ -16,6 +16,12 @@ use anyhow::{bail, Context, Result};
 
 use target::{BinaryStrategy, Target, BACKUP_SUFFIX};
 
+/// The idempotency sentinel stamped on every hook entry pixtuoid installs — the
+/// five JSON/TOML-config targets (Claude/Codex/CodeWhale/Cursor/Reasonix)
+/// install/uninstall/detect key on this, not the command shape. (opencode and
+/// openclaw are code artifacts and use their own plugin-file sentinel.)
+pub(crate) const SENTINEL_KEY: &str = "_pixtuoid";
+
 /// Whether `t`'s config currently bears pixtuoid hooks — the migrate-default
 /// signal for an absent `[sources]` flag (see `config::resolve_connected`: a
 /// target-bearing source is connected iff its hooks are installed). A dry-run
@@ -216,8 +222,10 @@ fn resolve_hook_binary_from(
             p
         };
         if !p.exists() {
-            println!(
-                "warning: {origin} {} does not exist yet; the hook will fail until it does",
+            // tracing, not println!: install runs under the TUI alt-screen
+            // (the Sources panel), where a stdout write corrupts the frame.
+            tracing::warn!(
+                "{origin} {} does not exist yet; the hook will fail until it does",
                 p.display()
             );
         }

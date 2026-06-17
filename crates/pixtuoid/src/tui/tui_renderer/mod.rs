@@ -32,6 +32,21 @@ use pixtuoid_scene::pathfind::Router;
 use pixtuoid_scene::pet::PetFrame;
 use pixtuoid_scene::pixel_painter::{render_to_rgb_buffer, PixelCtx};
 
+/// `FloorInfo` for a 1-based floor index, or `None` when there is only one floor
+/// (no elevator indicator). The one source behind both the normal and the
+/// floor-transition draw paths (was a closure duplicated byte-for-byte in each).
+fn floor_info_for(
+    current_idx: usize,
+    nf: usize,
+    total_agents: usize,
+) -> Option<crate::tui::renderer::FloorInfo> {
+    (nf > 1).then(|| crate::tui::renderer::FloorInfo {
+        current: current_idx + 1,
+        total_floors: nf,
+        total_agents,
+    })
+}
+
 pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     pub terminal: Terminal<B>,
     floor_bufs: Vec<RgbBuffer>,
@@ -418,18 +433,6 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         }) else {
             return Ok(());
         };
-        let make_floor_info = |current_idx: usize| {
-            if nf > 1 {
-                Some(crate::tui::renderer::FloorInfo {
-                    current: current_idx + 1,
-                    total_floors: nf,
-                    total_agents: scene.agents.len(),
-                })
-            } else {
-                None
-            }
-        };
-
         // Build floor-scoped scenes for both floors.
         let from_scene = project_floor_scene(scene, from_floor);
         let to_scene = project_floor_scene(scene, to_floor);
@@ -584,7 +587,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         // slide so the per-floor agent count in the footer matches the
         // label (otherwise users see "F1/3 ... 5 agents" with floor 2's
         // count for ~400 ms).
-        let transition_floor_info = make_floor_info(to_floor);
+        let transition_floor_info = floor_info_for(to_floor, nf, scene.agents.len());
 
         self.terminal.draw(|f| {
             let actual_full = f.area();
@@ -708,18 +711,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> Renderer for TuiRenderer<B> {
             self.current_floor = nf.saturating_sub(1);
         }
 
-        let make_floor_info = |current_idx: usize| {
-            if nf > 1 {
-                Some(crate::tui::renderer::FloorInfo {
-                    current: current_idx + 1,
-                    total_floors: nf,
-                    total_agents: scene.agents.len(),
-                })
-            } else {
-                None
-            }
-        };
-        let floor_info = make_floor_info(self.current_floor);
+        let floor_info = floor_info_for(self.current_floor, nf, scene.agents.len());
 
         // --- Transition path: composite two floors sliding in/out ----------
         if self.transition.is_some() {

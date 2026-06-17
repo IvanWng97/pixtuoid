@@ -206,21 +206,29 @@ fn env_payload_from(
     map
 }
 
+/// The value of `--<flag> <val>` or `--<flag>=<val>` in argv (first match wins),
+/// or `None` if absent or empty. Total + panic-free per invariant #5 — the one
+/// scanner behind `event_from_argv` / `source_from_argv`.
+fn flag_from_argv(args: &[String], flag: &str) -> Option<String> {
+    let eq_prefix = format!("{flag}=");
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        if let Some(val) = arg.strip_prefix(&eq_prefix) {
+            return Some(val).filter(|s| !s.is_empty()).map(str::to_string);
+        }
+        if arg == flag {
+            return it.next().filter(|s| !s.is_empty()).cloned();
+        }
+    }
+    None
+}
+
 /// The baked event name from `--event <name>` (or `--event=<name>`) in argv —
 /// CodeWhale's env-mode trigger. Absent or empty → `None` (the shim reads its
 /// payload from stdin, the unchanged CC/Codex/Reasonix path). Total + panic-free
 /// per invariant #5, mirroring `source_from_argv`.
 fn event_from_argv(args: &[String]) -> Option<String> {
-    let mut it = args.iter();
-    while let Some(arg) = it.next() {
-        if let Some(val) = arg.strip_prefix("--event=") {
-            return Some(val).filter(|s| !s.is_empty()).map(str::to_string);
-        }
-        if arg == "--event" {
-            return it.next().filter(|s| !s.is_empty()).cloned();
-        }
-    }
-    None
+    flag_from_argv(args, "--event")
 }
 
 /// The trusted CLI source from `--source <name>` (or `--source=<name>`) in argv.
@@ -231,16 +239,7 @@ fn event_from_argv(args: &[String]) -> Option<String> {
 /// `PIXTUOID_SOURCE` env var (the unchanged Unix install form). Total + panic-free
 /// per invariant #5 (the shim must never block CC).
 fn source_from_argv(args: &[String]) -> Option<String> {
-    let mut it = args.iter();
-    while let Some(arg) = it.next() {
-        if let Some(val) = arg.strip_prefix("--source=") {
-            return Some(val).filter(|s| !s.is_empty()).map(str::to_string);
-        }
-        if arg == "--source" {
-            return it.next().filter(|s| !s.is_empty()).cloned();
-        }
-    }
-    None
+    flag_from_argv(args, "--source")
 }
 
 /// Stamp the shim timestamp and, when a source is resolved, the trusted CLI

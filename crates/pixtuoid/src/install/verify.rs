@@ -35,6 +35,27 @@ pub fn parse_json_or_empty(content: &str) -> anyhow::Result<Value> {
     serde_json::from_str(content).context("not valid JSON — refusing to overwrite")
 }
 
+/// Bake `hook_path` (JSON-escaped) into a plugin `template` at `placeholder` —
+/// the shared renderer for the code-artifact targets (opencode `.ts`, openclaw
+/// `.js`). serde_json emits a double-quoted, escaped JSON string; JSON strings
+/// are a subset of JS string literals EXCEPT U+2028/U+2029 (valid unescaped in
+/// JSON, line terminators in JS) — neither occurs in a real filesystem path, so
+/// the result is a valid JS literal for any path the resolver hands us.
+/// Serializing a `&str` is infallible in practice, but propagate the error
+/// rather than default to a broken empty path if it ever weren't. `what` names
+/// the target for the error context.
+pub fn bake_hook_path(
+    template: &str,
+    placeholder: &str,
+    hook_path: &str,
+    what: &str,
+) -> anyhow::Result<String> {
+    use anyhow::Context;
+    let json = serde_json::to_string(hook_path)
+        .with_context(|| format!("serializing the hook path into the {what} plugin"))?;
+    Ok(template.replace(placeholder, &json))
+}
+
 /// Parse TOML config content, treating empty/whitespace-only as the empty
 /// document. Shared by the TOML targets (Codex/CodeWhale); same empty rule.
 pub fn parse_toml_or_empty(content: &str) -> anyhow::Result<toml::Value> {
@@ -185,11 +206,7 @@ impl SchemaVerifyResult {
 /// Sources panel is already safe (ratatui renders control bytes as literals),
 /// but source-sanitizing it too is harmless + future-proof.
 pub fn display_safe(p: &std::path::Path) -> String {
-    p.display()
-        .to_string()
-        .chars()
-        .filter(|c| !c.is_control())
-        .collect()
+    crate::strip_control_chars(&p.display().to_string())
 }
 
 /// Assemble a `SchemaParse` from a per-target scan: the registered events that

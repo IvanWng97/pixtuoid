@@ -220,7 +220,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     }
 
     let buf_w = scene_rect.width;
-    let buf_h = scene_rect.height * 2;
+    let buf_h = scene_rect.height.saturating_mul(2);
     ctx.buf.ensure_size(buf_w, buf_h, theme.surface.bg_fallback);
     use pixtuoid_scene::layout::MAX_VISIBLE_DESKS;
     // Always compute maximum layout capacity — floor overflow handles the rest.

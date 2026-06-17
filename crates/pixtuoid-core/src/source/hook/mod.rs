@@ -55,9 +55,10 @@ impl std::error::Error for SocketBusy {}
 pub struct HookSocketListener {
     inner: imp::Listener,
     path: PathBuf,
-    /// Optional hook-supplied-pid liveness (CodeWhale). Set via
-    /// `with_pid_watch`; a builder field rather than a `run` parameter so
-    /// `run`'s public signature stays put (no semver break on pixtuoid-core).
+    /// Optional hook-supplied-pid liveness (CodeWhale + opencode — both stamp
+    /// `_pid`). Set via `with_pid_watch`; a builder field rather than a `run`
+    /// parameter so `run`'s public signature stays put (no semver break on
+    /// pixtuoid-core).
     pid_watch: Option<HookPidWatch>,
     /// Optional presence side-channel for the daemon fixture (OpenClaw): its
     /// payloads decode to presence deltas sent here (they yield no `AgentEvent`s).

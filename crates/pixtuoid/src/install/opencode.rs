@@ -32,7 +32,7 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 
 use crate::install::io;
 use crate::install::target::MergeOutcome;
@@ -67,13 +67,15 @@ fn opencode_config_dir() -> Result<PathBuf> {
 /// then `$XDG_CONFIG_HOME/opencode`, then `<home>/.config/opencode`. Errs only when
 /// none resolve (no home) — same contract as the home-anchored targets.
 fn config_dir_from(oc: Option<&str>, xdg: Option<&str>, home: Option<&str>) -> Result<PathBuf> {
-    if let Some(dir) = oc.filter(|s| !s.is_empty()) {
+    // Trim-aware empty check (io::nonempty's policy) — a whitespace-only env
+    // override is unset, not a path made of spaces.
+    if let Some(dir) = oc.filter(|s| !s.trim().is_empty()) {
         return Ok(PathBuf::from(dir));
     }
-    if let Some(xdg) = xdg.filter(|s| !s.is_empty()) {
+    if let Some(xdg) = xdg.filter(|s| !s.trim().is_empty()) {
         return Ok(PathBuf::from(xdg).join("opencode"));
     }
-    home.filter(|s| !s.is_empty())
+    home.filter(|s| !s.trim().is_empty())
         .map(|h| PathBuf::from(h).join(".config").join("opencode"))
         .ok_or_else(|| {
             anyhow!(
@@ -177,15 +179,7 @@ fn extract_hook_path(content: &str) -> Option<PathBuf> {
 }
 
 fn render_plugin(hook_path: &str) -> Result<String> {
-    // serde_json emits a double-quoted, escaped JSON string. JSON strings are a
-    // subset of JS string literals EXCEPT U+2028/U+2029 (valid unescaped in JSON,
-    // line terminators in JS) — neither occurs in a real filesystem path, so this
-    // is a valid JS literal for any path the resolver hands us. Serializing a
-    // `&str` is infallible in practice, but propagate the error rather than
-    // default to a broken `HOOK_PATH = ""` if it ever weren't.
-    let json = serde_json::to_string(hook_path)
-        .context("serializing the hook path into the opencode plugin")?;
-    Ok(PLUGIN_TEMPLATE.replace(HOOK_PLACEHOLDER, &json))
+    crate::install::verify::bake_hook_path(PLUGIN_TEMPLATE, HOOK_PLACEHOLDER, hook_path, "opencode")
 }
 
 #[cfg(test)]

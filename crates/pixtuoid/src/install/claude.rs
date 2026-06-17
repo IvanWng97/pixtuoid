@@ -6,8 +6,7 @@ use serde_json::{json, Map, Value};
 
 use crate::install::io;
 use crate::install::target::MergeOutcome;
-
-const SENTINEL_KEY: &str = "_pixtuoid";
+use crate::install::SENTINEL_KEY;
 
 /// Legacy sentinel keys from previous tool names. Entries tagged with any of
 /// these are stripped on install/uninstall so a v0.3.x → v0.4.x upgrade does

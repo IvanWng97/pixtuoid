@@ -15,6 +15,13 @@ pub(crate) fn splitmix64(z: u64) -> u64 {
     z ^ (z >> 31)
 }
 
+/// FNV-1a 64-bit constants. Open-coded by [`AgentId::from_parts`] (string-id
+/// hashing, with a domain separator) and `WalkableMask::signature` (geometry
+/// hashing over sorted rects) — the same primitive over different inputs, so
+/// they share the magic numbers, not a streaming hasher.
+pub(crate) const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
+pub(crate) const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+
 impl AgentId {
     /// Test/example opaque-id factory — mints a stable, distinct `AgentId`
     /// from a string by calling `from_parts("claude-code",
@@ -40,18 +47,18 @@ impl AgentId {
     /// hashed so two sources with the same `opaque_id` produce distinct
     /// `AgentId`s (no cross-source collisions).
     pub fn from_parts(source: &str, opaque_id: &str) -> Self {
-        let mut hash: u64 = 0xcbf29ce484222325;
+        let mut hash: u64 = FNV_OFFSET_BASIS;
         for b in source.as_bytes() {
             hash ^= *b as u64;
-            hash = hash.wrapping_mul(0x100000001b3);
+            hash = hash.wrapping_mul(FNV_PRIME);
         }
         // Domain separator between source and opaque id so e.g. source="a",
         // opaque="bc" doesn't collide with source="ab", opaque="c".
         hash ^= 0xff;
-        hash = hash.wrapping_mul(0x100000001b3);
+        hash = hash.wrapping_mul(FNV_PRIME);
         for b in opaque_id.as_bytes() {
             hash ^= *b as u64;
-            hash = hash.wrapping_mul(0x100000001b3);
+            hash = hash.wrapping_mul(FNV_PRIME);
         }
         AgentId(hash)
     }

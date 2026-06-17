@@ -4,8 +4,7 @@ use anyhow::{anyhow, Result};
 use toml::value::Table;
 
 use crate::install::target::MergeOutcome;
-
-const SENTINEL_KEY: &str = "_pixtuoid";
+use crate::install::SENTINEL_KEY;
 
 const CODEX_EVENTS: &[&str] = &[
     "SessionStart",

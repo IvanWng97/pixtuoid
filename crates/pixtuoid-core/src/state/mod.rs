@@ -255,11 +255,7 @@ impl SceneState {
 
 impl Default for SceneState {
     fn default() -> Self {
-        Self {
-            agents: BTreeMap::new(),
-            floor_capacities: [0; MAX_FLOORS],
-            daemons: BTreeMap::new(),
-        }
+        Self::new([0; MAX_FLOORS])
     }
 }
 
