@@ -35,6 +35,10 @@ pub struct OfficeRenderer {
     chitchat: HashMap<VenueKey, ActiveChitchat>,
     coffee_holders: HashSet<AgentId>,
     coffee_fetched_at: HashMap<AgentId, SystemTime>,
+    /// The layout the LAST `render` computed — captured so `labels` can build the
+    /// name-badge overlay against the SAME geometry the sprite pass used (labels
+    /// align 1:1 with the painted characters). `None` before the first render.
+    last_layout: Option<Layout>,
 }
 
 impl OfficeRenderer {
@@ -45,6 +49,7 @@ impl OfficeRenderer {
             chitchat: HashMap::new(),
             coffee_holders: HashSet::new(),
             coffee_fetched_at: HashMap::new(),
+            last_layout: None,
         }
     }
 
@@ -74,6 +79,10 @@ impl OfficeRenderer {
             return &self.buf;
         };
         self.floor.router.set_preferred_zone(layout.corridor);
+        // Capture the layout for `labels` BEFORE the render borrow — `labels` rebuilds
+        // the name-badge overlay against this exact geometry. Clone so the borrow is
+        // released (SceneLayout is Clone).
+        self.last_layout = Some(layout.clone());
         let result = render_to_rgb_buffer(&mut PixelCtx {
             scene,
             layout: &layout,
@@ -110,11 +119,91 @@ impl OfficeRenderer {
         self.floor.recompute_door_anim_max_ms(now);
         &self.buf
     }
+
+    /// Build the name-badge overlay for the LAST rendered frame (call right after `render`).
+    /// Uses the SAME layout + per-floor route state the sprite pass used, so labels align 1:1
+    /// with the painted characters. Floating has no agent-hover yet → `hovered = None`.
+    pub fn labels(
+        &mut self,
+        scene: &SceneState,
+        now: SystemTime,
+    ) -> Vec<crate::scene::overlay::LabelElement> {
+        let Some(layout) = self.last_layout.as_ref() else {
+            return Vec::new();
+        };
+        let mut rctx = crate::scene::pose::RouteCtx {
+            router: &mut self.floor.router,
+            overlay: &self.floor.overlay,
+            history: &mut self.floor.history,
+            motion: &mut self.floor.motion,
+        };
+        crate::scene::overlay::build_overlay(scene, layout, now, &mut rctx, None)
+    }
 }
 
 impl Default for OfficeRenderer {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// The bundled character sprite width (px). `CHARACTER_SPRITE_W` is `pub(super)` to
+/// `scene::pixel_painter` (not re-exported through `scene::layout`), so the floating
+/// painter uses the literal — labels only center ±half a glyph, so ±1px on a non-8-wide
+/// custom pack is cosmetically irrelevant (same rationale as `character_anchor`).
+const FLOATING_SPRITE_W: i32 = 8;
+
+/// Paint name badges into the upscaled `u32` surface (`0x00RRGGBB`). Each label's `anchor_px`
+/// is office-buffer space → multiply by `scale` for screen space; the badge is centered
+/// horizontally over the anchor and sits just above the head. Crisp 8px text (drawn at native
+/// surface res, not upscaled) keeps it proportional to the chunky sprites. Shared by the live
+/// window (`window::redraw`) and the `floating_snapshot` verify example, so both blit identically.
+pub fn paint_labels_into_surface(
+    sb: &mut [u32],
+    win_w: usize,
+    win_h: usize,
+    labels: &[crate::scene::overlay::LabelElement],
+    scale: i32,
+    theme: &Theme,
+) {
+    use crate::scene::overlay::LabelTone;
+    for el in labels {
+        let rgb = if el.hovered {
+            Rgb {
+                r: 240,
+                g: 240,
+                b: 240,
+            }
+        } else {
+            match el.tone {
+                LabelTone::Exiting => theme.ui.label_exiting,
+                LabelTone::Active => theme.ui.label_active,
+                LabelTone::Waiting => theme.ui.label_waiting,
+                LabelTone::Idle => theme.ui.label_idle,
+            }
+        };
+        let color = (rgb.r as u32) << 16 | (rgb.g as u32) << 8 | rgb.b as u32;
+        let text = if el.hovered {
+            format!("\u{25b8}{}", el.text)
+        } else {
+            format!("\u{25cf}{}", el.text)
+        };
+        let tw = crate::scene::font::text_width(&text, 1);
+        // anchor_px is the sprite TOP-LEFT in office space; center the badge over the sprite
+        // and lift it one glyph-height (8px) + a 2px gap above the head.
+        let cx = el.anchor_px.x as i32 * scale + (FLOATING_SPRITE_W * scale) / 2 - tw / 2;
+        let cy = el.anchor_px.y as i32 * scale - 10;
+        let mut put = |x: i32, y: i32, c: u32| {
+            if x >= 0 && y >= 0 && (x as usize) < win_w && (y as usize) < win_h {
+                sb[y as usize * win_w + x as usize] = c;
+            }
+        };
+        // A 1px near-black drop-shadow under the badge — the text draws straight over the
+        // office (no cell background like the TUI), so a shadow keeps it legible over bright
+        // windows / plants / furniture. Floating-painter-only (the tui surface has cell bg).
+        const SHADOW: u32 = 0x0000_0000;
+        crate::scene::font::draw_text(&text, cx + 1, cy + 1, 1, |x, y| put(x, y, SHADOW));
+        crate::scene::font::draw_text(&text, cx, cy, 1, |x, y| put(x, y, color));
     }
 }
 
@@ -153,6 +242,25 @@ mod tests {
                 .iter()
                 .any(|p| *p != Rgb { r: 0, g: 0, b: 0 } && *p != bg),
             "the painter draws office content beyond the cleared background"
+        );
+    }
+
+    #[test]
+    fn paint_labels_writes_glyph_pixels_into_the_surface() {
+        use crate::scene::layout::Point;
+        use crate::scene::overlay::{LabelElement, LabelTone};
+        let theme = crate::scene::theme::theme_by_name("normal").expect("normal theme exists");
+        let mut sb = vec![0u32; 100 * 100];
+        let labels = vec![LabelElement {
+            anchor_px: Point { x: 20, y: 20 },
+            text: "cc".into(),
+            tone: LabelTone::Active,
+            hovered: false,
+        }];
+        paint_labels_into_surface(&mut sb, 100, 100, &labels, 2, theme);
+        assert!(
+            sb.iter().any(|&px| px != 0),
+            "the badge text must paint at least one pixel"
         );
     }
 }

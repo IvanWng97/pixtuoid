@@ -180,6 +180,17 @@ impl FloatingApp {
                 sb[dst_row + wx] = opx[src_row + (wx / scale).min(ow - 1)];
             }
         }
+        // Name badges, drawn POST-upscale at native surface res (crisp 8px text proportional
+        // to the chunky sprites) using the same layout/route state the office pass just used.
+        let labels = self.renderer.labels(&scene, SystemTime::now());
+        super::offscreen::paint_labels_into_surface(
+            &mut sb,
+            win_w,
+            win_h,
+            &labels,
+            scale as i32,
+            self.theme,
+        );
         window.pre_present_notify();
         let _ = sb.present();
     }

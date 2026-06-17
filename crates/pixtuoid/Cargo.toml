@@ -35,6 +35,9 @@ chrono             = { version = "0.4", default-features = false, features = ["c
 # transitions and dim overlays vs naive sRGB linear blend.
 palette            = { version = "0.7", default-features = false, features = ["std"] }
 open               = "5"
+# Tiny bitmap-font crate: the floating window rasterizes name-badge labels as crisp
+# 8px text (scene::font), so it's a production dependency, not dev-only.
+font8x8            = "0.3.1"
 # The `pixtuoid floating` desktop window (binary-only — pixtuoid-core stays window-free,
 # invariant #1). winit = the frameless always-on-top window + main-thread event loop;
 # softbuffer = CPU blit of the office RgbBuffer into it (no GPU). Both rust-windowing,
@@ -54,7 +57,6 @@ tempfile = "3"
 tokio    = { workspace = true, features = ["test-util"] }
 image    = { version = "0.25", default-features = false, features = ["png", "gif"] }
 insta    = "1"
-font8x8 = "0.3.1"
 
 [[example]]
 name = "snapshot"

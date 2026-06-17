@@ -34,8 +34,10 @@ tui/
 ├── widgets/        ratatui widget paint fns, split into sub-modules:
 │                   mod.rs (TickerQueue, marquee_window/marquee_or_truncate, shared helpers + PANEL_PAD_*),
 │                   hud.rs (footer, wall display, elevator indicator, theme PICKER ui + theme_swatch,
-│                   version popup paint + url-rect), tooltip.rs (hover, cat, coffee, furniture, labels,
-│                   chitchat bubbles), help.rs (paint_help_overlay), dashboard.rs (paint_dashboard — the
+│                   version popup paint + url-rect), tooltip.rs (hover, cat, coffee, furniture, labels —
+│                   paint_label_widgets consumes the shared scene::overlay::build_overlay MODEL, the floating
+│                   window paints the SAME model its own way; chitchat bubbles), help.rs (paint_help_overlay),
+│                   dashboard.rs (paint_dashboard — the
 │                   agent-dashboard popup PAINTER), panel.rs (borderless_panel — the shared popup frame),
 │                   connection.rs (paint_connection_panel — the Sources-panel PAINTER)
 ├── hit_test.rs     mouse hit-test: agent hover, coffee machine click, furniture tooltips, pet

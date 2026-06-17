@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::time::SystemTime;
 
 use pixtuoid_core::state::ActivityState;
@@ -10,8 +9,8 @@ use ratatui::widgets::{Block, Padding, Paragraph};
 
 use super::{compact_hms, to_color};
 use crate::scene::layout::{Layout, DESK_W};
+use crate::scene::overlay::LabelTone;
 use crate::scene::pet::PetKind;
-use crate::scene::pixel_painter::character_anchor;
 use crate::scene::pose;
 use crate::scene::theme::Theme;
 use crate::tui::renderer::clip_widget_rect;
@@ -60,45 +59,26 @@ pub(crate) fn paint_label_widgets(
     hovered: Option<AgentId>,
     theme: &crate::scene::theme::Theme,
 ) {
-    let agents: Vec<_> = scene.agents.values().cloned().collect();
-    let mut label_counts: HashMap<&str, usize> = HashMap::new();
-    for agent in &agents {
-        *label_counts.entry(&*agent.label).or_insert(0) += 1;
-    }
-    for agent in &agents {
-        let Some(anchor) = character_anchor(agent, layout, now, rctx) else {
-            continue;
-        };
-        let lx = scene_rect.x + anchor.x.saturating_sub(2);
-        let ly = scene_rect.y + (anchor.y / 2).saturating_sub(1);
-        let needs_disambig = label_counts.get(&*agent.label).copied().unwrap_or(0) > 1
-            && agent.session_id.chars().count() >= 4;
-        let raw: std::borrow::Cow<'_, str> = if needs_disambig {
-            let id4 = disambig_suffix(&agent.session_id);
-            std::borrow::Cow::Owned(format!("{}·{id4}", agent.label))
-        } else {
-            std::borrow::Cow::Borrowed(&*agent.label)
-        };
-        let display = truncate_label(&raw, (DESK_W + 4) as usize);
-        let is_hovered = hovered == Some(agent.agent_id);
-        let label_color = if is_hovered {
+    for el in crate::scene::overlay::build_overlay(scene, layout, now, rctx, hovered) {
+        let lx = scene_rect.x + el.anchor_px.x.saturating_sub(2);
+        let ly = scene_rect.y + (el.anchor_px.y / 2).saturating_sub(1);
+        let label_color = if el.hovered {
             Color::White
-        } else if agent.exiting_at.is_some() {
-            to_color(theme.ui.label_exiting)
         } else {
-            match &agent.state {
-                ActivityState::Active { .. } => to_color(theme.ui.label_active),
-                ActivityState::Waiting { .. } => to_color(theme.ui.label_waiting),
-                ActivityState::Idle => to_color(theme.ui.label_idle),
+            match el.tone {
+                LabelTone::Exiting => to_color(theme.ui.label_exiting),
+                LabelTone::Active => to_color(theme.ui.label_active),
+                LabelTone::Waiting => to_color(theme.ui.label_waiting),
+                LabelTone::Idle => to_color(theme.ui.label_idle),
             }
         };
-        let text = if is_hovered {
-            format!("▸{}", display)
+        let text = if el.hovered {
+            format!("▸{}", el.text)
         } else {
-            format!("●{}", display)
+            format!("●{}", el.text)
         };
         let mut style = Style::default().fg(label_color);
-        if is_hovered {
+        if el.hovered {
             style = style.add_modifier(ratatui::style::Modifier::BOLD);
         }
         let para = Paragraph::new(Span::styled(text, style));
@@ -364,29 +344,6 @@ fn mascot_tooltip_text(name: &str, busy: bool, degraded: bool, active_sessions: 
     }
 }
 
-/// Fit a label into `budget` chars without losing the `·xxxx` session-id
-/// disambiguation suffix that the reducer appends to colliding cwds.
-/// Truncates from the base (left side of the `·`), not from the suffix —
-/// otherwise the disambig becomes useless ("TikTok-Android·a" tells us
-/// nothing the base alone wouldn't).
-pub(super) fn truncate_label(label: &str, budget: usize) -> std::borrow::Cow<'_, str> {
-    use std::borrow::Cow;
-    if label.chars().count() <= budget {
-        return Cow::Borrowed(label);
-    }
-    if let Some(sep_byte) = label.rfind('\u{00b7}') {
-        let suffix = &label[sep_byte..];
-        let suffix_len = suffix.chars().count();
-        if suffix_len < budget {
-            let base = &label[..sep_byte];
-            let base_take = budget - suffix_len;
-            let truncated: String = base.chars().take(base_take).collect();
-            return Cow::Owned(format!("{truncated}{suffix}"));
-        }
-    }
-    Cow::Owned(label.chars().take(budget).collect())
-}
-
 /// Paint chitchat speech bubbles above agents who are chatting at a
 /// social waypoint. Each bubble is a small Paragraph with the speaker's
 /// line of text, positioned above the agent's sprite head.
@@ -428,26 +385,9 @@ pub fn paint_chitchat_bubbles(
     }
 }
 
-/// 4-hex-char disambiguation suffix, hashed from the whole `session_id` —
-/// shape-agnostic where any SLICE of the id is not: a session_id can be a
-/// UUID (CC/Codex — head and tail both unique), a normalized full transcript
-/// path (Antigravity — constant head, varying stem tail), or a raw cwd
-/// (Reasonix — labels collide exactly when BASENAMES collide, so head AND
-/// tail are both constant: `/x/app` vs `/y/app`). Only a digest of the full
-/// string distinguishes every shape. Hashing also sidesteps byte-slice
-/// panics on multi-byte ids (e.g. `/naïveté/app`) by construction.
-/// (`DefaultHasher` is deterministic within a process — the suffix is a
-/// per-frame display aid, not a persisted identifier.)
-fn disambig_suffix(session_id: &str) -> String {
-    use std::hash::{Hash, Hasher};
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    session_id.hash(&mut h);
-    format!("{:04x}", h.finish() & 0xffff)
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{disambig_suffix, mascot_tooltip_text};
+    use super::mascot_tooltip_text;
 
     #[test]
     fn mascot_tooltip_verb_keys_on_run_state_not_session_count() {
@@ -488,39 +428,5 @@ mod tests {
             mascot_tooltip_text("OpenClaw", true, true, 3),
             " OpenClaw gateway · model error · 3 sessions "
         );
-    }
-
-    #[test]
-    fn uuid_ids_get_distinct_suffixes() {
-        let a = disambig_suffix("c0f7fb3f-dc9c-47c3-840d-f775dd2855a3");
-        let b = disambig_suffix("019ea57d-7fa7-7812-b864-bdcb9b6c7e17");
-        assert_ne!(a, b);
-        assert_eq!(a.len(), 4);
-    }
-
-    #[test]
-    fn ag_full_path_ids_get_distinct_suffixes() {
-        // Antigravity session_ids are normalized full transcript paths: two
-        // same-cwd sessions share the whole prefix; only the stem differs.
-        let a = disambig_suffix("/users/me/.gravity/sessions/proj/alpha-01.jsonl");
-        let b = disambig_suffix("/users/me/.gravity/sessions/proj/beta-02.jsonl");
-        assert_ne!(a, b);
-    }
-
-    #[test]
-    fn rx_cwd_ids_with_colliding_basenames_get_distinct_suffixes() {
-        // The Reasonix shape that defeats ANY slice of the id: labels collide
-        // exactly when basenames collide, so both the head and the tail are
-        // constant across the collision (`/work/client-x/app` vs `-y/app`).
-        let a = disambig_suffix("/work/client-x/app");
-        let b = disambig_suffix("/work/client-y/app");
-        assert_ne!(a, b);
-    }
-
-    #[test]
-    fn multibyte_ids_are_safe_and_deterministic() {
-        let a = disambig_suffix("/naïveté/app");
-        assert_eq!(a, disambig_suffix("/naïveté/app"));
-        assert_eq!(a.len(), 4);
     }
 }

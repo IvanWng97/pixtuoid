@@ -131,7 +131,9 @@ src/
 │                       ONE source-construction site] + reducer_task, both relaxed to pub(crate) — spawned on
 │                       a bg runtime, NEVER block_on [winit owns the main thread]; an EventLoopProxy bridges
 │                       scene changes → redraw), offscreen.rs (OfficeRenderer — the headless render seam over
-│                       render_to_rgb_buffer; moved here from tui/ as it's floating-only; the testable unit),
+│                       render_to_rgb_buffer; moved here from tui/ as it's floating-only; the testable unit;
+│                       also OfficeRenderer::labels + paint_labels_into_surface — agent name badges from the
+│                       shared scene::overlay model, 8px scene::font glyphs blitted POST-upscale with a shadow),
 │                       window.rs (FloatingApp ApplicationHandler: renders the office at a DOWNSCALED buffer
 │                       [~window/SCALE, OFFICE_TARGET_H≈180] then nearest-neighbor UPSCALES into the surface —
 │                       a 1:1 blit renders 8×12 sprites unreadably tiny; ~30fps tick WHILE agents present, else

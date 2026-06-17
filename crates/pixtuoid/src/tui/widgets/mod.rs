@@ -217,36 +217,6 @@ mod tests {
     use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex};
     use std::path::PathBuf;
     use std::sync::Arc;
-    use tooltip::truncate_label;
-
-    #[test]
-    fn truncate_label_passes_short_labels_through() {
-        assert_eq!(truncate_label("hello", 16), "hello");
-    }
-
-    #[test]
-    fn truncate_label_preserves_disambig_suffix() {
-        let out = truncate_label("TikTok-Android\u{00b7}a09a", 16);
-        assert_eq!(out.chars().count(), 16);
-        assert!(out.ends_with("\u{00b7}a09a"), "suffix lost: {out}");
-        assert!(out.starts_with("TikTok"), "base over-truncated: {out}");
-    }
-
-    #[test]
-    fn truncate_label_falls_back_to_plain_truncate_when_no_separator() {
-        let out = truncate_label("a-very-long-project-name", 8);
-        assert_eq!(out, "a-very-l");
-    }
-
-    #[test]
-    fn truncate_label_plain_take_when_suffix_exceeds_budget() {
-        // The disambig suffix ("·abcdefgh") is longer than budget=4, so the
-        // suffix-preserving branch can't fit and it falls through to a plain
-        // budget-char take from the front.
-        let out = truncate_label("x\u{00b7}abcdefgh", 4);
-        assert_eq!(out.chars().count(), 4);
-        assert_eq!(out, "x\u{00b7}ab");
-    }
 
     // --- marquee_window ----------------------------------------------------
 
