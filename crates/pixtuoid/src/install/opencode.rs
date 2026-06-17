@@ -285,6 +285,13 @@ mod tests {
             config_dir_from(Some(""), Some(""), Some("/home/u")).unwrap(),
             PathBuf::from("/home/u/.config/opencode")
         );
+        // WHITESPACE-only env values are ALSO unset — the trim-aware check mirrors
+        // io::nonempty's policy (a value of all spaces can't be a real path), so it
+        // falls through rather than producing a literal "   " path.
+        assert_eq!(
+            config_dir_from(Some("   "), Some("   "), Some("/home/u")).unwrap(),
+            PathBuf::from("/home/u/.config/opencode")
+        );
         // No home anywhere → a hard error (never a CWD-relative file).
         assert!(config_dir_from(None, None, None).is_err());
     }
