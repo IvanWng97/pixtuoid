@@ -115,7 +115,11 @@ src/
 │                       seated_dwell_ms(id) [desk 15-30s], est_wander_cycle_ms(id) — for pixtuoid_scene::motion
 │                       (render authority) + idle_pose (stateless overlay, fixed WANDER_*_EST_MS).
 ├── grid.rs             Grid<T> — a width×height row-major Vec<T> with checked get/set/get_or
-│                       (the ONE y*w+x indexing + edge-clamp; WalkableMask = Grid<bool>, ReachSet wraps one)
+│                       (the ONE y*w+x indexing + edge-clamp; WalkableMask = Grid<bool>, ReachSet wraps one;
+│                       sprite::Frame = newtype(Grid<Pixel>) + sprite::RgbBuffer = newtype(Grid<Rgb>), Deref to
+│                       Grid so .width/.height/as_slice are transparent — but RgbBuffer keeps its OWN inherent
+│                       unchecked get/put (shadow Grid's checked get via Deref) for the blit hot path; don't
+│                       "simplify" them to Grid::get)
 ├── walkable.rs         WalkableMask = Grid<bool> (static obstacle mask) + OccupancyOverlay (dynamic per-frame)
 └── tests/              one integration test per concern
 ```
