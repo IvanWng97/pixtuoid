@@ -33,6 +33,15 @@ by reading actual code — no guessing, no "this might be an issue."
 6. **Stale docs**: if the PR changes module structure, architecture, or public API without
    updating CLAUDE.md/README.md.
 
+7. **Duplication / DRY**: for each new fn, type, helper, or const the diff adds, search the
+   tree (`grep -rn` / `rg`) for a pre-existing implementation of the same behavior — a
+   diff-scoped read CANNOT see this, you MUST look OUTSIDE the diff. Flag a second copy that
+   should delegate to the canonical one, especially when the two can DIVERGE (the real cost):
+   two `expand_tilde`s drifted apart into a Windows `~\` bug; `lerp_rgb` was a no-op wrapper
+   renaming `mix_lab` (a cheap-sounding name over an expensive call — a lying wrapper is the
+   same finding); `Frame`/`RgbBuffer` each re-hand-rolled `Grid<T>`'s row-major buffer. This is
+   the ONE check that requires searching the codebase, not just reading the diff.
+
 ### Do NOT flag
 
 - Formatting or style (rustfmt enforced in CI)

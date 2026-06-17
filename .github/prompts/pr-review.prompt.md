@@ -81,6 +81,19 @@ Judge as a demanding critic:
    keys with disjoint key-spaces) — consolidate shared IDENTITY, not shared
    TOPIC. (The `[pet-names]` lesson, PR #86 — backtest-validated, controls
    included: docs/review-metrics/mining-2026-06.md.)
+6. Duplication / DRY sweep on every NEW fn, type, helper, or const the diff
+   introduces: `grep -rn`/`rg` the WHOLE tree for a pre-existing implementation
+   of the same behavior. A diff shows only what's ADDED, so this is the one
+   check that REQUIRES searching outside the diff — a second copy is invisible
+   to a diff-scoped read by construction. Flag a new symbol whose body already
+   exists elsewhere as "delegate, don't re-implement", weighting the finding by
+   DIVERGENCE RISK (the two copies drifting apart is the real cost, not the
+   line count). Distinct from #5: that is data-shape identity; this is
+   behavioral/logic duplication. Smell-audit incidents a year of reviews
+   missed: two `expand_tilde`s drifted into a Windows `~\` bug; `lerp_rgb` was a
+   no-op wrapper renaming `mix_lab` (a cheap-sounding name fronting an expensive
+   call — a LYING wrapper is the same finding); `Frame`/`RgbBuffer` each
+   re-hand-rolled `Grid<T>`'s row-major buffer.
 
 [the five hard requirements]
 Your final message is the report.
@@ -150,7 +163,15 @@ spend and doubles as protocol step 8's ledger-blind calibration — alongside
 the ledger-routed treatment arm. Once the rate is recorded, delete this
 A/B clause: routing alone is the steady state. Whole-codebase reviews also
 carry a SYSTEM lens — module decomposition still right, dependency
-directions clean, cross-PR composition seams — because architecture erodes
-BETWEEN PRs, not within them (no per-PR lens can see it; the census's
-"emergent cross-PR composition" bucket — a NON-escape class precisely
-because no per-PR review could have caught it — is its bug-shaped form).
+directions clean, cross-PR composition seams, AND a DRY/duplication census —
+because architecture (and duplication) erodes BETWEEN PRs, not within them
+(no per-PR lens can see it; the census's "emergent cross-PR composition"
+bucket — a NON-escape class precisely because no per-PR review could have
+caught it — is its bug-shaped form). The duplication census greps for N
+implementations of ONE concept (a helper, type-shape, or constant
+re-hand-rolled in K places) — each PR was locally clean, so only the
+whole-tree pass sees the K copies; weight each cluster by divergence risk
+(silently-drifted copies are the bug-shaped form, like the two `expand_tilde`s
+that split into a Windows bug). Live cases a year of per-PR + whole-codebase
+reviews missed until a burden-flipped smell pass found them: `Frame`/`RgbBuffer`
+vs `Grid<T>`, the two `expand_tilde`s, `lerp_rgb` fronting `mix_lab`.
