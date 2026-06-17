@@ -351,6 +351,16 @@ mod tests {
         // a leading `~` WITHOUT a separator (`~foo`) is NOT a home-prefix → verbatim
         // (matches OpenClaw's `^~(?=$|[/\\])` anchor).
         assert_eq!(expand_tilde("~foo", Some(home)), PathBuf::from("~foo"));
+        // `~user/...` is ANOTHER user's home — we never resolve it → verbatim.
+        assert_eq!(
+            expand_tilde("~user/p", Some(home)),
+            PathBuf::from("~user/p")
+        );
+        // a NON-leading `~` is never replaced.
+        assert_eq!(
+            expand_tilde("rel/~/x", Some(home)),
+            PathBuf::from("rel/~/x")
+        );
         // an absolute path is untouched (no leading `~`).
         assert_eq!(expand_tilde("/abs/x", Some(home)), PathBuf::from("/abs/x"));
     }

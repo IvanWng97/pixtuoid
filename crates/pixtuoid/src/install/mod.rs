@@ -891,8 +891,12 @@ mod tests {
     fn install_target_round_trips_every_registered_target() {
         // Isolate OpenClaw's extra_artifacts (the plugin DIR resolves from
         // openclaw_state_dir(), NOT the config override) under a temp home, so the
-        // round-trip never writes to the real ~/.openclaw. nextest runs each test
-        // in its own process, so this env set can't race a sibling test.
+        // round-trip never writes to the real ~/.openclaw. TEST_ENV_LOCK serializes
+        // the process-global OPENCLAW_STATE_DIR set so a sibling env-mutating test
+        // can't clobber it under plain `cargo test` (nextest isolates per-process).
+        let _env = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let oc_home = tempfile::TempDir::new().unwrap();
         std::env::set_var("OPENCLAW_STATE_DIR", oc_home.path());
         for t in target::TARGETS {
@@ -942,6 +946,9 @@ mod tests {
     fn verify_target_is_sound_after_a_real_install_for_every_target() {
         // Isolate OpenClaw's extra_artifacts under a temp home (see the round-trip
         // test) so this never writes to the real ~/.openclaw.
+        let _env = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let oc_home = tempfile::TempDir::new().unwrap();
         std::env::set_var("OPENCLAW_STATE_DIR", oc_home.path());
         let exe = std::env::current_exe().unwrap(); // a real, executable file
@@ -981,6 +988,9 @@ mod tests {
         // gateway actually loads is missing/clobbered — the silent-dead class the
         // config-level check is blind to (#332). Install, then delete the plugin
         // dir → verify must report broken (the gateway would never load us).
+        let _env = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let oc_home = tempfile::TempDir::new().unwrap();
         std::env::set_var("OPENCLAW_STATE_DIR", oc_home.path());
         let exe = std::env::current_exe().unwrap();

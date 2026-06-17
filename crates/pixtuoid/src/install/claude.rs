@@ -6,6 +6,7 @@ use serde_json::{json, Map, Value};
 
 use crate::install::io;
 use crate::install::target::MergeOutcome;
+use crate::install::verify;
 use crate::install::SENTINEL_KEY;
 
 /// Legacy sentinel keys from previous tool names. Entries tagged with any of
@@ -48,9 +49,7 @@ pub fn hook_command(resolved: &Path, explicit: bool) -> Result<String> {
     #[cfg(not(windows))]
     {
         if explicit {
-            let p = resolved.to_str().ok_or_else(|| {
-                anyhow::anyhow!("pixtuoid-hook path is not valid UTF-8: {resolved:?}")
-            })?;
+            let p = verify::hook_path_str(resolved)?;
             return Ok(crate::install::hook_cmd::unix::shell_single_quote(p));
         }
         Ok("pixtuoid-hook".to_string())
@@ -58,10 +57,7 @@ pub fn hook_command(resolved: &Path, explicit: bool) -> Result<String> {
     #[cfg(windows)]
     {
         let _ = explicit; // exec form always embeds the absolute path
-        resolved
-            .to_str()
-            .map(|s| s.to_string())
-            .ok_or_else(|| anyhow::anyhow!("pixtuoid-hook path is not valid UTF-8: {resolved:?}"))
+        verify::hook_path_str(resolved).map(str::to_string)
     }
 }
 
