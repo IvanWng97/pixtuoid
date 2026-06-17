@@ -2,11 +2,13 @@
 //!
 //! `FloatApp` is the `ApplicationHandler`: on `Resumed` it creates ONE frameless,
 //! always-on-top window + a `softbuffer` surface; it renders the latest `watch`ed scene
-//! to a full-resolution office `RgbBuffer` via [`OfficeRenderer`] and blits it (CPU,
-//! `0x00RRGGBB`). Redraw is event-driven (a `FloatEvent::SceneChanged` from the pipeline
+//! to a DOWNSCALED office `RgbBuffer` via [`OfficeRenderer`] (~window/SCALE) then
+//! nearest-neighbor upscales it into the surface (CPU, `0x00RRGGBB`) so the pixel-art
+//! office stays chunky/legible instead of 1:1-tiny. Redraw is event-driven (a
+//! `FloatEvent::SceneChanged` from the pipeline
 //! bridge) plus a ~30fps animation tick WHILE agents are present (motion is time-driven);
 //! it idles to zero frames when the office is empty. Platform glue — codecov-ignored like
-//! `driver.rs`; the testable render seam is `tui::offscreen`.
+//! `driver.rs`; the testable render seam is `float::offscreen`.
 
 use std::num::NonZeroU32;
 use std::path::PathBuf;
@@ -24,9 +26,9 @@ use winit::event::{ElementState, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow};
 use winit::window::{ResizeDirection, Window, WindowId, WindowLevel};
 
+use super::offscreen::OfficeRenderer;
 use crate::config::{self, FloatConfig};
 use crate::tui::floor::FloorMeta;
-use crate::tui::offscreen::OfficeRenderer;
 use crate::tui::theme::Theme;
 
 /// Wake reasons delivered to the winit loop from the background tokio pipeline.
@@ -110,24 +112,26 @@ impl FloatApp {
         }
     }
 
-    /// Render the latest scene at the window's physical pixel size and blit it.
+    /// Render the latest scene to a DOWNSCALED office buffer, then nearest-neighbor
+    /// upscale it into the window. The pixel-art office is tiny at 1:1 (8×12 sprites),
+    /// so a native blit looks sparse + miniature; rendering at ~1/SCALE and blowing it
+    /// back up keeps the sprites chunky + legible, like the TUI's half-block view.
     fn redraw(&mut self) {
         // Clone the Rc to release the `self.window` borrow before touching `self.surface`.
         let Some(window) = self.window.clone() else {
             return;
         };
         let size = window.inner_size();
-        let (Some(nw), Some(nh)) = (NonZeroU32::new(size.width), NonZeroU32::new(size.height))
-        else {
+        let (win_w, win_h) = (size.width, size.height);
+        let (Some(nw), Some(nh)) = (NonZeroU32::new(win_w), NonZeroU32::new(win_h)) else {
             return; // a 0-area window: nothing to draw
         };
-        // The office buffer IS the window canvas: render at physical px → 1:1 blit, no
-        // scaling. The size-adaptive layout fills whatever dims it's given.
-        let buf_w = size.width.min(u16::MAX as u32) as u16;
-        let buf_h = size.height.min(u16::MAX as u32) as u16;
-        // Keep the reducer's desk capacity in lockstep with the office actually rendered
-        // at this size (authority = the layout's home-desk count, same as the TUI). Only
-        // on a size change — capacity is otherwise size-invariant.
+        // Office buffer = window / SCALE (kept ~OFFICE_TARGET_H tall → chunky sprites).
+        let scale = office_scale(win_h);
+        let buf_w = (win_w / scale).clamp(1, u16::MAX as u32) as u16;
+        let buf_h = (win_h / scale).clamp(1, u16::MAX as u32) as u16;
+        // Keep the reducer's desk capacity in lockstep with the office actually rendered at
+        // this BUFFER size (authority = the layout's home-desk count, same as the TUI).
         if self.last_caps_size != Some((buf_w, buf_h)) {
             sync_floor_caps(&self.floor_caps, buf_w, buf_h);
             self.last_caps_size = Some((buf_w, buf_h));
@@ -146,9 +150,9 @@ impl FloatApp {
             floor_meta,
             floor_pet,
         );
-        // Collect into a local (release the `self.renderer` borrow) before borrowing
-        // `self.surface`. softbuffer wants `0x00RRGGBB` (alpha byte ignored).
-        let frame: Vec<u32> = office
+        // Collect office pixels (release the `self.renderer` borrow) as `0x00RRGGBB`.
+        let (ow, oh) = (office.width as usize, office.height as usize);
+        let opx: Vec<u32> = office
             .pixels
             .iter()
             .map(|p| (p.r as u32) << 16 | (p.g as u32) << 8 | p.b as u32)
@@ -163,13 +167,30 @@ impl FloatApp {
         let Ok(mut sb) = surface.buffer_mut() else {
             return;
         };
-        // The office buffer and the surface are both (buf_w, buf_h) physical px, so this
-        // is a full copy; the `min` only guards a transient resize race.
-        let n = sb.len().min(frame.len());
-        sb[..n].copy_from_slice(&frame[..n]);
+        // Nearest-neighbor upscale opx (ow×oh) → the window (win_w×win_h). Source indices
+        // are clamped so the integer-division remainder edge repeats the last office pixel.
+        let (win_w, win_h, scale) = (win_w as usize, win_h as usize, scale as usize);
+        if ow == 0 || oh == 0 || sb.len() < win_w * win_h {
+            return; // nothing rendered / a transient resize race — skip this frame
+        }
+        for wy in 0..win_h {
+            let src_row = (wy / scale).min(oh - 1) * ow;
+            let dst_row = wy * win_w;
+            for wx in 0..win_w {
+                sb[dst_row + wx] = opx[src_row + (wx / scale).min(ow - 1)];
+            }
+        }
         window.pre_present_notify();
         let _ = sb.present();
     }
+}
+
+/// Integer upscale factor: render the office at `win_h / SCALE` so the buffer stays around
+/// `OFFICE_TARGET_H` px tall, keeping pixel-art sprites chunky + legible (a native 1:1 blit
+/// renders 8×12 sprites at 8×12 px — unreadably tiny). Min 1 (never downscale-and-blur).
+fn office_scale(win_h: u32) -> u32 {
+    const OFFICE_TARGET_H: u32 = 180;
+    (win_h as f64 / OFFICE_TARGET_H as f64).round().max(1.0) as u32
 }
 
 /// Sync the per-floor desk-capacity atomics to the office layout at `buf_w`×`buf_h` —

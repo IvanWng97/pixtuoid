@@ -5,10 +5,11 @@
 //! `source → reducer → SceneState` pipeline the TUI uses (reusing
 //! `runtime::driver::build_source_set` — the ONE source-construction site — and
 //! `reducer_task`), but presents each frame as a full-resolution
-//! [`crate::tui::offscreen::OfficeRenderer`] `RgbBuffer` blitted into a `winit` +
+//! [`offscreen::OfficeRenderer`] `RgbBuffer` blitted into a `winit` +
 //! `softbuffer` window instead of half-block terminal cells. `pixtuoid-core` stays
 //! window-free (invariant #1) — all windowing lives here.
 
+pub mod offscreen;
 mod window;
 
 use std::sync::atomic::AtomicUsize;

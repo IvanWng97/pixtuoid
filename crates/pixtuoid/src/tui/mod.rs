@@ -8,7 +8,6 @@ pub mod frame_cache;
 pub mod hit_test;
 pub mod layout;
 pub mod motion;
-pub mod offscreen;
 pub mod pathfind;
 pub mod pet;
 pub mod pixel_painter;

@@ -1,12 +1,13 @@
 //! Headless office → `RgbBuffer` rendering for the `pixtuoid float` desktop window.
 //!
-//! Float blits the FULL-RESOLUTION pixel office (the `render_to_rgb_buffer` output)
-//! straight into a window — NOT the half-block terminal emulation `examples/snapshot.rs`
-//! saves (snapshot writes the ratatui `TestBackend` → a ▀-compressed PNG via
-//! `save_backend_as_png`; the raw `RgbBuffer` is crisper). So this is a float-only seam
-//! over `render_to_rgb_buffer`: no `draw_scene`, no `Terminal`, and no shared output with
-//! snapshot. It mirrors the body of `tui_renderer::render_transition_floor` — the
-//! established headless pixel pattern — owning the per-frame caches plus the persistent
+//! This renders the office to a raw pixel `RgbBuffer` via `render_to_rgb_buffer` — NOT the
+//! half-block terminal emulation `examples/snapshot.rs` saves (snapshot writes the ratatui
+//! `TestBackend` → a ▀-compressed PNG via `save_backend_as_png`). A float-only seam: no
+//! `draw_scene`, no `Terminal`, no shared output with snapshot. `float::window` renders at
+//! a DOWNSCALED buffer (~window/SCALE) and nearest-neighbor upscales it, so the pixel-art
+//! office stays chunky/legible instead of 8×12-px-tiny at 1:1. This module just paints the
+//! buffer at whatever dims it's handed. It mirrors `tui_renderer::render_transition_floor`
+//! (the established headless pixel pattern), owning the per-frame caches plus the persistent
 //! office state (coffee cups, group chitchat) across frames so motion stays continuous.
 
 use std::collections::{HashMap, HashSet};
@@ -141,9 +142,16 @@ mod tests {
             None,
         );
         assert_eq!((buf.width, buf.height), (160, 96));
+        // Assert PAINTED content, not the pre-fill: `ensure_size` fills the buffer with
+        // `bg_fallback` (non-black) BEFORE the painter runs, so "any non-black pixel" would
+        // pass even if the painter no-op'd. Require a pixel that is neither black NOR
+        // `bg_fallback` → the floor/walls/windows pass actually ran.
+        let bg = theme.surface.bg_fallback;
         assert!(
-            buf.pixels.iter().any(|p| *p != Rgb { r: 0, g: 0, b: 0 }),
-            "the office paints a non-black background"
+            buf.pixels
+                .iter()
+                .any(|p| *p != Rgb { r: 0, g: 0, b: 0 } && *p != bg),
+            "the painter draws office content beyond the cleared background"
         );
     }
 }

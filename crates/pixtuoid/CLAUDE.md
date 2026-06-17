@@ -118,16 +118,20 @@ src/
 │                         re-install creates it: the lock must be taken BEFORE the read
 │                         that detects "nothing changed".)
 ├── float/              `pixtuoid float` — the frameless, always-on-top DESKTOP WINDOW (winit + softbuffer,
-│                       binary-only; pixtuoid-core stays window-free, invariant #1). mod.rs (run: reuses the
-│                       SAME pipeline as the TUI — build_source_set [the ONE source-construction site] +
-│                       reducer_task, both relaxed to pub(crate) — spawned on a bg runtime, NEVER block_on
-│                       [winit owns the main thread]; an EventLoopProxy bridges scene changes → redraw),
-│                       window.rs (FloatApp ApplicationHandler: blits the full-res office RgbBuffer from
-│                       tui::offscreen::OfficeRenderer; ~30fps tick WHILE agents present, else idle 0fps;
-│                       left-press drag / corner resize; persists [float] geometry on close; floor_caps
-│                       synced to the rendered layout's home-desk count so no agent is stranded off-screen;
-│                       macOS Accessory + shadow, #[cfg(windows)] skip-taskbar; opacity = honest v1 no-op,
-│                       winit has none + softbuffer is opaque → wgpu/native deferred)
+│                       binary-only; pixtuoid-core stays window-free, invariant #1). ALL float-only source
+│                       lives here: mod.rs (run: reuses the SAME pipeline as the TUI — build_source_set [the
+│                       ONE source-construction site] + reducer_task, both relaxed to pub(crate) — spawned on
+│                       a bg runtime, NEVER block_on [winit owns the main thread]; an EventLoopProxy bridges
+│                       scene changes → redraw), offscreen.rs (OfficeRenderer — the headless render seam over
+│                       render_to_rgb_buffer; moved here from tui/ as it's float-only; the testable unit),
+│                       window.rs (FloatApp ApplicationHandler: renders the office at a DOWNSCALED buffer
+│                       [~window/SCALE, OFFICE_TARGET_H≈180] then nearest-neighbor UPSCALES into the surface —
+│                       a 1:1 blit renders 8×12 sprites unreadably tiny; ~30fps tick WHILE agents present, else
+│                       idle 0fps; left-press drag / corner resize; persists [float] geometry on close;
+│                       floor_caps synced to the rendered layout's home-desk count so no agent is stranded
+│                       off-screen; macOS Accessory + shadow, #[cfg(windows)] skip-taskbar; opacity = honest v1
+│                       no-op, winit has none + softbuffer is opaque → wgpu/native deferred). Visual check:
+│                       `examples/float_snapshot.rs` (the float twin of the `snapshot` example).
 └── tui/                ratatui App + TuiRenderer (Renderer trait impl) — see src/tui/CLAUDE.md
 
 sprites/                character/environment packs (NOT under pixtuoid-hook):
