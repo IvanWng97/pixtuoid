@@ -937,6 +937,179 @@ mod tests {
         }
     }
 
+    // --- is_present / config_present detect⇄install symmetry (Test 3) ---------
+
+    // The detect⇄install relationship, pinned per detection mechanism. The
+    // spec's literal false→true→false does NOT hold in production: uninstall
+    // PRESERVES the user's file/dir (the un-merge rule, see the preserve test
+    // below), so detection stays TRUE after uninstall — asserting otherwise
+    // would contradict the code. So this pins the REAL, deterministic arms:
+    //   * config_present targets (CLAUDE/CODEX — no presence_probe): the config
+    //     FILE is absent before any write and present after `install_target`
+    //     writes it (the exact file `config_present` checks). After uninstall it
+    //     is preserved → stays present.
+    //   * the OpenClaw presence_probe: `is_present` is FALSE before install (an
+    //     isolated, empty OPENCLAW_STATE_DIR) and TRUE after — install creates
+    //     the state dir the probe detects (the install-creates-the-detectable
+    //     symmetry; an install that wrote hooks nowhere the probe looks would be
+    //     installed-but-invisible).
+    #[test]
+    fn config_present_target_file_is_absent_before_then_present_after_install() {
+        use crate::install::target::config_present;
+        // CLAUDE + CODEX are the only `presence_probe: None` (config_present)
+        // targets — drive both through the real install_target. A controlled
+        // config override lets us assert against the very file config_present
+        // reads, without touching the real ~/.claude / ~/.codex.
+        for t in [&CLAUDE, &CODEX] {
+            let tmp = tempfile::TempDir::new().unwrap();
+            let cfg = tmp.path().join("cfg");
+            assert!(
+                !config_present(&cfg),
+                "{}: config_present must be FALSE before any write",
+                t.name
+            );
+            install_target(
+                t,
+                Some(cfg.clone()),
+                Some(PathBuf::from("/fake/pixtuoid-hook")),
+            )
+            .unwrap();
+            assert!(
+                config_present(&cfg),
+                "{}: config_present must be TRUE after install writes the config",
+                t.name
+            );
+            // Uninstall un-merges hooks but PRESERVES the file → still present.
+            uninstall_target(t, Some(cfg.clone())).unwrap();
+            assert!(
+                config_present(&cfg),
+                "{}: uninstall preserves the user's config file → still present",
+                t.name
+            );
+        }
+    }
+
+    #[test]
+    fn openclaw_is_present_is_false_before_then_true_after_install() {
+        use crate::install::target::is_present;
+        // TEST_ENV_LOCK serializes the process-global OPENCLAW_STATE_DIR set
+        // (the sibling pattern). Point it at a NON-EXISTENT dir so the probe
+        // starts FALSE — install then creates it.
+        let _env = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let oc_home = tempfile::TempDir::new().unwrap();
+        let state = oc_home.path().join("ocstate"); // not yet created
+        std::env::set_var("OPENCLAW_STATE_DIR", &state);
+
+        assert!(
+            !is_present(&OPENCLAW),
+            "OpenClaw must be undetected before install (empty isolated state dir)"
+        );
+
+        let exe = std::env::current_exe().unwrap();
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cfg = tmp.path().join("openclaw.json");
+        install_target(&OPENCLAW, Some(cfg), Some(exe)).unwrap();
+
+        assert!(
+            is_present(&OPENCLAW),
+            "install must create the state dir the presence probe detects \
+             (detect⇄install symmetry — else installed-but-invisible)"
+        );
+        std::env::remove_var("OPENCLAW_STATE_DIR");
+    }
+
+    // --- preserve rule: uninstall un-merges, never DELETES the file (Test 4) --
+
+    #[test]
+    fn uninstall_preserves_the_config_file_even_when_it_merges_to_empty() {
+        // Codex installed ALONE: the config holds only our managed hook entry,
+        // so uninstall un-merges to an effectively EMPTY TOML doc — the exact
+        // case where a naive "delete if empty" would lose the user's file. The
+        // documented rule is "un-merge, never delete": the file must still EXIST
+        // after uninstall (so the user keeps their otherwise-empty-but-real
+        // config and any future hand edits/comments survive).
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cfg = tmp.path().join("config.toml");
+
+        let r = install_target(
+            &CODEX,
+            Some(cfg.clone()),
+            Some(PathBuf::from("/fake/pixtuoid-hook")),
+        )
+        .unwrap();
+        assert!(matches!(r.outcome, InstallOutcome::Installed));
+        assert!(cfg.exists());
+
+        let u = uninstall_target(&CODEX, Some(cfg.clone())).unwrap();
+        assert!(
+            matches!(u.outcome, UninstallOutcome::Removed),
+            "uninstall must have removed the managed entry (the merge produced a change)"
+        );
+        assert!(
+            cfg.exists(),
+            "uninstall must PRESERVE the config file (un-merge, never delete)"
+        );
+        // And the file no longer bears our sentinel — un-merged, not just left as-is.
+        let content = io::read_config(&cfg).unwrap();
+        assert!(
+            !content.contains(SENTINEL_KEY),
+            "the managed hook entry must be un-merged out: {content:?}"
+        );
+    }
+
+    // --- data-safety: a malformed pre-existing config Errs, no data loss (Test 5)
+
+    #[test]
+    fn install_on_a_malformed_config_errors_without_rewriting_or_backing_up() {
+        // The config-preserve / no-data-loss invariant: install reads the
+        // existing config, the merge step PARSES it, and a parse failure must
+        // bubble OUT of install_target BEFORE any backup_once / write_atomic —
+        // so the user's (malformed but possibly recoverable) bytes are left
+        // EXACTLY as they were, and no .pixtuoid.bak is minted.
+        for (t, malformed) in [
+            (&CODEX, "this is = = not valid toml [[["),
+            (&CLAUDE, "{ not valid json,,, "),
+        ] {
+            let tmp = tempfile::TempDir::new().unwrap();
+            let cfg = tmp.path().join("cfg");
+            std::fs::write(&cfg, malformed).unwrap();
+            let before = std::fs::read_to_string(&cfg).unwrap();
+
+            let err = install_target(
+                t,
+                Some(cfg.clone()),
+                Some(PathBuf::from("/fake/pixtuoid-hook")),
+            )
+            .unwrap_err();
+            // The merge guard's message — "refusing to overwrite" — proves the
+            // error came from the parse step, not a downstream write failure.
+            let msg = format!("{err:#}");
+            assert!(
+                msg.contains("refusing to overwrite"),
+                "{}: the error must come from the parse guard, got: {msg}",
+                t.name
+            );
+
+            // No data loss: the file is byte-for-byte unchanged...
+            assert_eq!(
+                std::fs::read_to_string(&cfg).unwrap(),
+                before,
+                "{}: a malformed config must NOT be rewritten/truncated",
+                t.name
+            );
+            // ...and no backup was written (the .lock sidecar may exist — the
+            // lock is taken before the read by design — but the BACKUP is not).
+            let bak = tmp.path().join(format!("cfg.{BACKUP_SUFFIX}"));
+            assert!(
+                !bak.exists(),
+                "{}: a failed install must NOT mint a {BACKUP_SUFFIX} backup",
+                t.name
+            );
+        }
+    }
+
     // --- verify_target (#309 install-schema soundness) ------------------------
 
     /// A FRESH install of EVERY target, with a real executable as the shim, must
