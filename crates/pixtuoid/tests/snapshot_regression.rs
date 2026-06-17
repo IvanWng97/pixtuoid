@@ -84,7 +84,7 @@ fn render_pixel_hash(now: SystemTime) -> u64 {
     draw_scene(&mut term, &scene, &pack, now, &mut draw_ctx).expect("render");
 
     let mut hasher = DefaultHasher::new();
-    for px in &draw_ctx.buf.pixels {
+    for px in draw_ctx.buf.as_slice() {
         px.r.hash(&mut hasher);
         px.g.hash(&mut hasher);
         px.b.hash(&mut hasher);
@@ -138,7 +138,7 @@ fn render_produces_distinct_wall_band_and_floor_regions() {
     // Non-trivial color diversity — guards against an "all black" render or
     // a paint pass that collapsed every pixel to one color.
     let mut colors = std::collections::HashSet::new();
-    for px in &buf.pixels {
+    for px in buf.as_slice() {
         colors.insert((px.r, px.g, px.b));
     }
     assert!(
@@ -163,7 +163,7 @@ fn render_produces_distinct_wall_band_and_floor_regions() {
         let mut n = 0u64;
         for y in y0..y1 {
             for x in 0..w {
-                let p = buf.pixels[y * w + x];
+                let p = buf.as_slice()[y * w + x];
                 r += p.r as u64;
                 g += p.g as u64;
                 b += p.b as u64;
@@ -200,7 +200,7 @@ fn render_changes_when_an_agent_state_changes() {
     make_draw_ctx!(draw_ctx);
     draw_scene(&mut term, &scene_idle, &pack, now, &mut draw_ctx).expect("render");
     let mut hasher = DefaultHasher::new();
-    for px in &draw_ctx.buf.pixels {
+    for px in draw_ctx.buf.as_slice() {
         px.r.hash(&mut hasher);
         px.g.hash(&mut hasher);
         px.b.hash(&mut hasher);

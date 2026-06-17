@@ -379,54 +379,103 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
                 }
             }
         }
-        if let Some(idx) = theme_picker {
-            paint_theme_picker(f, idx, actual_full, theme);
-        }
-        if ctx.dashboard_open {
-            paint_dashboard(
-                f,
-                ctx.dashboard_rows,
-                ctx.dashboard_selected,
-                ctx.dashboard_scroll,
-                now,
-                actual_full,
-                theme,
-            );
-        }
-        if ctx.connection_open {
-            paint_connection_panel(
-                f,
-                ctx.connection_rows,
-                ctx.connection_live,
-                ctx.connection_selected,
-                ctx.connection_confirm,
-                ctx.connection_result,
-                ctx.connection_socket_line,
-                now,
-                actual_full,
-                theme,
-            );
-        }
-        if ctx.popup_scale > 0.0 {
-            if let Some(notes) = crate::version::release_notes(env!("CARGO_PKG_VERSION")) {
-                paint_version_popup(
-                    f,
-                    env!("CARGO_PKG_VERSION"),
-                    notes,
-                    actual_full,
-                    theme,
-                    ctx.popup_scale,
-                );
-            }
-        }
-        if ctx.help_open {
-            // Center in actual_full (not actual_scene) so the overlay sits
-            // at the same vertical center as the theme picker / version
-            // popup, which both use actual_full.
-            paint_help_overlay(f, actual_full, theme);
-        }
+        paint_overlays(
+            f,
+            theme_picker,
+            ctx.dashboard_open,
+            ctx.dashboard_rows,
+            ctx.dashboard_selected,
+            ctx.dashboard_scroll,
+            ctx.connection_open,
+            ctx.connection_rows,
+            ctx.connection_live,
+            ctx.connection_selected,
+            ctx.connection_confirm,
+            ctx.connection_result,
+            ctx.connection_socket_line,
+            ctx.popup_scale,
+            ctx.help_open,
+            now,
+            actual_full,
+            theme,
+        );
     })?;
     Ok(Some(layout))
+}
+
+/// The modal-overlay dispatch shared by `draw_scene` (normal path) and
+/// `render_transition_floor` (the floor-slide path): theme picker → dashboard →
+/// Sources panel → version popup → help, each gated by its own state and drawn
+/// at the same `bounds` (the full terminal area). Centralized so the two draw
+/// paths can't drift in ordering or args; behavior-identical to the inlined
+/// blocks it replaced.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn paint_overlays(
+    f: &mut ratatui::Frame<'_>,
+    theme_picker: Option<usize>,
+    dashboard_open: bool,
+    dashboard_rows: &[DashboardRow],
+    dashboard_selected: Option<pixtuoid_core::AgentId>,
+    dashboard_scroll: usize,
+    connection_open: bool,
+    connection_rows: &[crate::tui::connection::ConnectionRow],
+    connection_live: &[crate::tui::connection::LiveInfo],
+    connection_selected: usize,
+    connection_confirm: Option<usize>,
+    connection_result: Option<&str>,
+    connection_socket_line: &str,
+    popup_scale: f32,
+    help_open: bool,
+    now: SystemTime,
+    bounds: Rect,
+    theme: &pixtuoid_scene::theme::Theme,
+) {
+    if let Some(idx) = theme_picker {
+        paint_theme_picker(f, idx, bounds, theme);
+    }
+    if dashboard_open {
+        paint_dashboard(
+            f,
+            dashboard_rows,
+            dashboard_selected,
+            dashboard_scroll,
+            now,
+            bounds,
+            theme,
+        );
+    }
+    if connection_open {
+        paint_connection_panel(
+            f,
+            connection_rows,
+            connection_live,
+            connection_selected,
+            connection_confirm,
+            connection_result,
+            connection_socket_line,
+            now,
+            bounds,
+            theme,
+        );
+    }
+    if popup_scale > 0.0 {
+        if let Some(notes) = crate::version::release_notes(env!("CARGO_PKG_VERSION")) {
+            paint_version_popup(
+                f,
+                env!("CARGO_PKG_VERSION"),
+                notes,
+                bounds,
+                theme,
+                popup_scale,
+            );
+        }
+    }
+    if help_open {
+        // Center in `bounds` (the full terminal area, not the scene rect) so the
+        // overlay sits at the same vertical center as the theme picker / version
+        // popup, which both use the full area.
+        paint_help_overlay(f, bounds, theme);
+    }
 }
 
 pub(super) fn flush_buffer_to_term_at_offset(
@@ -455,8 +504,8 @@ pub(super) fn flush_buffer_to_term_at_offset(
             }
             let py_top = cy * 2;
             let py_bot = cy * 2 + 1;
-            let fg = buf.pixels[py_top * w + cx];
-            let bg = buf.pixels[py_bot * w + cx];
+            let fg = buf.as_slice()[py_top * w + cx];
+            let bg = buf.as_slice()[py_bot * w + cx];
             let cell = &mut term_buf[(x, y)];
             cell.set_symbol("\u{2580}");
             cell.fg = Color::Rgb(fg.r, fg.g, fg.b);

@@ -345,10 +345,10 @@ fn recolor_frame_substitutes_bhs_pixels() {
     agent_pal.insert('S', Some(Rgb { r: 0, g: 0, b: 200 })); // blue skin
 
     // Frame: 1 pixel per palette key + 1 unrelated pixel + 1 transparent.
-    let frame = Frame {
-        width: 5,
-        height: 1,
-        pixels: vec![
+    let frame = Frame::from_pixels(
+        5,
+        1,
+        vec![
             Some(Rgb {
                 r: 10,
                 g: 20,
@@ -371,33 +371,33 @@ fn recolor_frame_substitutes_bhs_pixels() {
             }), // unrelated     → unchanged
             None, // transparent   → unchanged
         ],
-    };
+    );
 
     let out = recolor_frame(&frame, &agent_pal, &base);
     assert_eq!(out.width, 5);
     assert_eq!(out.height, 1);
-    assert_eq!(out.pixels[0], Some(Rgb { r: 200, g: 0, b: 0 }));
-    assert_eq!(out.pixels[1], Some(Rgb { r: 0, g: 200, b: 0 }));
-    assert_eq!(out.pixels[2], Some(Rgb { r: 0, g: 0, b: 200 }));
+    assert_eq!(out.as_slice()[0], Some(Rgb { r: 200, g: 0, b: 0 }));
+    assert_eq!(out.as_slice()[1], Some(Rgb { r: 0, g: 200, b: 0 }));
+    assert_eq!(out.as_slice()[2], Some(Rgb { r: 0, g: 0, b: 200 }));
     assert_eq!(
-        out.pixels[3],
+        out.as_slice()[3],
         Some(Rgb {
             r: 123,
             g: 45,
             b: 67
         })
     );
-    assert_eq!(out.pixels[4], None);
+    assert_eq!(out.as_slice()[4], None);
 }
 
 #[test]
 fn recolor_frame_handles_palette_with_no_overrides() {
     // If agent palette equals base, frame must come back identical.
     let base = base_palette();
-    let frame = Frame {
-        width: 3,
-        height: 1,
-        pixels: vec![
+    let frame = Frame::from_pixels(
+        3,
+        1,
+        vec![
             Some(Rgb {
                 r: 10,
                 g: 20,
@@ -414,9 +414,9 @@ fn recolor_frame_handles_palette_with_no_overrides() {
                 b: 90,
             }),
         ],
-    };
+    );
     let out = recolor_frame(&frame, &base, &base);
-    assert_eq!(out.pixels, frame.pixels);
+    assert_eq!(out.as_slice(), frame.as_slice());
 }
 
 /// Helper — build a minimal Drawable for sort-order tests. Uses the

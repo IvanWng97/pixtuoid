@@ -38,6 +38,20 @@ impl Easing {
     }
 }
 
+/// Milliseconds elapsed from `since` to `now`, saturating to `0` on a backward
+/// clock (`now < since`). The scene-wide replacement for the hand-rolled
+/// `now.duration_since(since).unwrap_or(Duration::ZERO).as_millis() as u64`
+/// chain — byte-identical to it (a backward clock yields `0` either way).
+///
+/// NB: this is the SATURATE-to-0 semantics. The `.ok()?`/`.ok()` sites that
+/// deliberately SKIP or return `None` on a backward clock (different meaning)
+/// keep their own form — don't migrate those here.
+pub(crate) fn elapsed_ms(now: SystemTime, since: SystemTime) -> u64 {
+    now.duration_since(since)
+        .unwrap_or(Duration::ZERO)
+        .as_millis() as u64
+}
+
 /// Compute the eased progress of an animation `[0.0, 1.0]` given its
 /// `started_at` wall-clock time, total `duration_ms`, and `easing` curve.
 ///
@@ -169,6 +183,17 @@ mod tests {
             eased_progress(start, 0, Easing::EaseOutCubic, start),
             1.0
         ));
+    }
+
+    #[test]
+    fn elapsed_ms_counts_forward_and_saturates_backward() {
+        let since = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+        // Forward: plain ms difference.
+        assert_eq!(elapsed_ms(since + Duration::from_millis(250), since), 250);
+        // Same instant: zero.
+        assert_eq!(elapsed_ms(since, since), 0);
+        // Backward clock (now < since): saturates to 0, never panics/underflows.
+        assert_eq!(elapsed_ms(since - Duration::from_secs(5), since), 0);
     }
 
     #[test]

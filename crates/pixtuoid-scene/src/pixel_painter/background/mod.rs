@@ -529,6 +529,25 @@ fn paint_streaks(
     }
 }
 
+/// Wash a flat translucent color over the glass INTERIOR — the inset rect
+/// `(x0+1 .. x0+w-1, y0+1 .. y0+h-1)`, one `blend_rgb(cur, color, alpha)` per
+/// in-bounds cell. The shared body of the Fog / Overcast / Smog weather arms,
+/// carrying their EXACT offset math (`1..h-1`/`1..w-1`, raw `x0+dx`/`y0+dy`, the
+/// `px < buf.width && py < buf.height` guard). NOT the streaks' `x+1/y+1` inset —
+/// keep it byte-identical to the hand-rolled fog/overcast/smog loops (#92-class).
+fn wash_glass(buf: &mut RgbBuffer, x0: u16, y0: u16, w: u16, h: u16, color: Rgb, alpha: f32) {
+    for dy in 1..h.saturating_sub(1) {
+        for dx in 1..w.saturating_sub(1) {
+            let px = x0 + dx;
+            let py = y0 + dy;
+            if px < buf.width && py < buf.height {
+                let cur = buf.get(px, py);
+                buf.put(px, py, blend_rgb(cur, color, alpha));
+            }
+        }
+    }
+}
+
 /// Floor-to-ceiling window with frame, mullion, and a procedural city view
 /// inside the glass. Sky gradient at top blends with time-of-day glass
 /// colors; the lower portion shows building silhouettes whose "windows"
@@ -771,54 +790,32 @@ fn paint_floor_to_ceiling_window(
             },
             elapsed_ms,
         ),
-        Weather::Fog => {
-            for dy in 1..h.saturating_sub(1) {
-                for dx in 1..w.saturating_sub(1) {
-                    let px = x + dx;
-                    let py = y + dy;
-                    if px < buf.width && py < buf.height {
-                        let cur = buf.get(px, py);
-                        buf.put(
-                            px,
-                            py,
-                            blend_rgb(
-                                cur,
-                                Rgb {
-                                    r: 160,
-                                    g: 165,
-                                    b: 175,
-                                },
-                                0.25,
-                            ),
-                        );
-                    }
-                }
-            }
-        }
-        Weather::Overcast => {
-            for dy in 1..h.saturating_sub(1) {
-                for dx in 1..w.saturating_sub(1) {
-                    let px = x + dx;
-                    let py = y + dy;
-                    if px < buf.width && py < buf.height {
-                        let cur = buf.get(px, py);
-                        buf.put(
-                            px,
-                            py,
-                            blend_rgb(
-                                cur,
-                                Rgb {
-                                    r: 100,
-                                    g: 105,
-                                    b: 110,
-                                },
-                                0.2,
-                            ),
-                        );
-                    }
-                }
-            }
-        }
+        Weather::Fog => wash_glass(
+            buf,
+            x,
+            y,
+            w,
+            h,
+            Rgb {
+                r: 160,
+                g: 165,
+                b: 175,
+            },
+            0.25,
+        ),
+        Weather::Overcast => wash_glass(
+            buf,
+            x,
+            y,
+            w,
+            h,
+            Rgb {
+                r: 100,
+                g: 105,
+                b: 110,
+            },
+            0.2,
+        ),
         Weather::Windy => paint_streaks(
             buf,
             &StreakSpec {
@@ -854,28 +851,19 @@ fn paint_floor_to_ceiling_window(
             // Warm-yellow desaturated haze across the full glass. Heavier
             // than Fog and noticeably warmer — pulls the city behind a
             // sodium-lit veil.
-            for dy in 1..h.saturating_sub(1) {
-                for dx in 1..w.saturating_sub(1) {
-                    let px = x + dx;
-                    let py = y + dy;
-                    if px < buf.width && py < buf.height {
-                        let cur = buf.get(px, py);
-                        buf.put(
-                            px,
-                            py,
-                            blend_rgb(
-                                cur,
-                                Rgb {
-                                    r: 180,
-                                    g: 160,
-                                    b: 110,
-                                },
-                                0.30,
-                            ),
-                        );
-                    }
-                }
-            }
+            wash_glass(
+                buf,
+                x,
+                y,
+                w,
+                h,
+                Rgb {
+                    r: 180,
+                    g: 160,
+                    b: 110,
+                },
+                0.30,
+            )
         }
         Weather::Clear => {}
     }

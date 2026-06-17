@@ -257,6 +257,22 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         self.coffee_fetched_at.insert(id, fetched_at);
     }
 
+    /// Persist newly detected coffee carriers. `coffee_holders.insert` returns
+    /// `true` only on the EDGE (first time this agent enters the set for this
+    /// pantry trip), and only then do we stamp `coffee_fetched_at` (the steam
+    /// window anchor). Shared by the normal and floor-transition draw paths.
+    fn record_coffee_carriers(
+        &mut self,
+        carriers: impl IntoIterator<Item = pixtuoid_core::AgentId>,
+        now: SystemTime,
+    ) {
+        for id in carriers {
+            if self.coffee_holders.insert(id) {
+                self.coffee_fetched_at.insert(id, now);
+            }
+        }
+    }
+
     pub fn cached_layout(&self) -> Option<&Layout> {
         self.cached_layout.as_ref()
     }
@@ -603,51 +619,26 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             flush_buffer_to_term_at_offset(f, from_buf, actual_scene, from_offset);
             flush_buffer_to_term_at_offset(f, to_buf, actual_scene, to_offset);
 
-            if let Some(idx) = theme_picker {
-                crate::tui::renderer::paint_theme_picker(f, idx, actual_full, theme);
-            }
-            if dashboard_open {
-                crate::tui::renderer::paint_dashboard(
-                    f,
-                    &dashboard_rows,
-                    dashboard_selected,
-                    dashboard_scroll,
-                    now,
-                    actual_full,
-                    theme,
-                );
-            }
-            if connection_open {
-                crate::tui::renderer::paint_connection_panel(
-                    f,
-                    &connection_rows,
-                    &connection_live,
-                    connection_selected,
-                    connection_confirm,
-                    connection_result.as_deref(),
-                    &connection_socket_line,
-                    now,
-                    actual_full,
-                    theme,
-                );
-            }
-            if popup_scale > 0.0 {
-                if let Some(notes) = crate::version::release_notes(env!("CARGO_PKG_VERSION")) {
-                    crate::tui::renderer::paint_version_popup(
-                        f,
-                        env!("CARGO_PKG_VERSION"),
-                        notes,
-                        actual_full,
-                        theme,
-                        popup_scale,
-                    );
-                }
-            }
-            if help_open {
-                // actual_full (not actual_scene) to match the theme
-                // picker / version popup centering on this path too.
-                crate::tui::renderer::paint_help_overlay(f, actual_full, theme);
-            }
+            crate::tui::renderer::paint_overlays(
+                f,
+                theme_picker,
+                dashboard_open,
+                &dashboard_rows,
+                dashboard_selected,
+                dashboard_scroll,
+                connection_open,
+                &connection_rows,
+                &connection_live,
+                connection_selected,
+                connection_confirm,
+                connection_result.as_deref(),
+                &connection_socket_line,
+                popup_scale,
+                help_open,
+                now,
+                actual_full,
+                theme,
+            );
         })?;
 
         self.last_popup_scale = popup_scale;
@@ -657,14 +648,9 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         // last frame's location during the transition.
         self.last_pet_pos = None;
         // Persist coffee carriers detected on EITHER floor during the slide,
-        // same EDGE logic as the normal path (insert returns true once per
-        // pantry trip). Without this a coffee run that completes
-        // mid-transition loses its cup.
-        for id in from_carriers.into_iter().chain(to_carriers) {
-            if self.coffee_holders.insert(id) {
-                self.coffee_fetched_at.insert(id, now);
-            }
-        }
+        // same EDGE logic as the normal path. Without this a coffee run that
+        // completes mid-transition loses its cup.
+        self.record_coffee_carriers(from_carriers.into_iter().chain(to_carriers), now);
         Ok(())
     }
 }
@@ -788,14 +774,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> Renderer for TuiRenderer<B> {
         drop(draw_ctx);
         // Recompute door_anim_max_ms from the motion map for the NEXT frame.
         self.floor_ctxs[self.current_floor].recompute_door_anim_max_ms(now);
-        // Persist newly detected coffee carriers. The `insert` returns
-        // `true` only on the EDGE (first time this agent enters the set
-        // for this pantry trip).
-        for id in new_coffee_carriers {
-            if self.coffee_holders.insert(id) {
-                self.coffee_fetched_at.insert(id, now);
-            }
-        }
+        self.record_coffee_carriers(new_coffee_carriers, now);
         if let Ok(ref layout_opt) = result {
             self.cached_layout = layout_opt.clone();
             // Ok(None) = draw_scene painted footer-only (compute failed at this

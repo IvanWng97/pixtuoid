@@ -7,6 +7,21 @@ use std::time::Duration;
 
 pub const WRITE_TIMEOUT: Duration = Duration::from_millis(200);
 
+/// Arm the send-timeout watchdog: a thread that hard-exits the process after
+/// `WRITE_TIMEOUT`, bounding the whole connect+write phase on BOTH platforms
+/// (invariant #5: never block CC — exit(0)-on-timeout IS the contract). Uses
+/// `Builder::spawn` (not `thread::spawn`) so OS thread exhaustion degrades to
+/// dropping the event instead of an abort. Returns `false` if the thread can't
+/// be spawned, so the caller bails before entering its connect/retry path.
+fn spawn_timeout_watchdog() -> bool {
+    std::thread::Builder::new()
+        .spawn(|| {
+            std::thread::sleep(WRITE_TIMEOUT);
+            std::process::exit(0);
+        })
+        .is_ok()
+}
+
 #[cfg(unix)]
 pub fn send_line(endpoint: &str, line: &[u8]) {
     use std::io::Write;
@@ -17,16 +32,10 @@ pub fn send_line(endpoint: &str, line: &[u8]) {
     // Bound the WHOLE connect+write phase the way the Windows arm below
     // does: a watchdog thread that hard-exits the process — after stdin is
     // consumed this send is the shim's only job (see main), and
-    // exit(0)-on-timeout IS the contract (never block CC, spec §2).
-    // Builder::spawn (not thread::spawn) so OS thread exhaustion degrades to
-    // dropping the event instead of an abort. The write timeout stays as a
-    // second layer: it usually errors out of a stalled write before the
-    // watchdog has to shoot the process.
-    let watchdog = std::thread::Builder::new().spawn(|| {
-        std::thread::sleep(WRITE_TIMEOUT);
-        std::process::exit(0);
-    });
-    if watchdog.is_err() {
+    // exit(0)-on-timeout IS the contract (never block CC, spec §2). The write
+    // timeout stays as a second layer: it usually errors out of a stalled write
+    // before the watchdog has to shoot the process.
+    if !spawn_timeout_watchdog() {
         return;
     }
     if let Ok(mut s) = std::os::unix::net::UnixStream::connect(endpoint) {
@@ -44,15 +53,10 @@ pub fn send_line(endpoint: &str, line: &[u8]) {
     // and exit(0)-on-timeout IS the contract (never block CC, spec §2).
     // The daemon's 1MiB pipe in-buffer covers the shim's capped stdin
     // (`STDIN_CAP = 1MiB − STAMP_HEADROOM` in main.rs) PLUS the stamps +
-    // newline, so a write that gets through open() never stalls on quota.
-    // Builder::spawn (not thread::spawn) so OS thread exhaustion degrades to
-    // dropping the event instead of an abort — and we must NOT enter the
-    // retry loop watchdog-less, or the 231 retry becomes unbounded.
-    let watchdog = std::thread::Builder::new().spawn(|| {
-        std::thread::sleep(WRITE_TIMEOUT);
-        std::process::exit(0);
-    });
-    if watchdog.is_err() {
+    // newline, so a write that gets through open() never stalls on quota. We
+    // must NOT enter the retry loop watchdog-less, or the 231 retry becomes
+    // unbounded.
+    if !spawn_timeout_watchdog() {
         return;
     }
     loop {

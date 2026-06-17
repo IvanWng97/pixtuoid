@@ -83,7 +83,7 @@ fn render_hash(scene: &SceneState, now: SystemTime, theme: &Theme, floor: FloorM
     draw_scene(&mut term, scene, &pack, now, &mut draw_ctx).unwrap();
 
     let mut hasher = DefaultHasher::new();
-    for px in &draw_ctx.buf.pixels {
+    for px in draw_ctx.buf.as_slice() {
         px.r.hash(&mut hasher);
         px.g.hash(&mut hasher);
         px.b.hash(&mut hasher);

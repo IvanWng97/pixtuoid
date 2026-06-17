@@ -13,6 +13,39 @@ use pixtuoid_scene::embedded_pack::load_sprite_pack;
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 
+/// Build an `AgentSlot` for these render tests — fills the boilerplate fields
+/// (source `claude-code`, cwd `/demo`, created/last-event `now - 60s`, zeroed
+/// counters, no parent/exit) so each call site only varies what it cares about.
+fn agent_slot(
+    id: AgentId,
+    session: &str,
+    label: &str,
+    desk: GlobalDeskIndex,
+    floor: usize,
+    state: ActivityState,
+    now: SystemTime,
+) -> AgentSlot {
+    AgentSlot {
+        agent_id: id,
+        source: std::sync::Arc::from("claude-code"),
+        session_id: std::sync::Arc::from(session),
+        cwd: std::sync::Arc::from(PathBuf::from("/demo").as_path()),
+        label: std::sync::Arc::from(label),
+        state,
+        state_started_at: now,
+        created_at: now - Duration::from_secs(60),
+        last_event_at: now - Duration::from_secs(60),
+        exiting_at: None,
+        pending_idle_at: None,
+        desk_index: desk,
+        floor_idx: floor,
+        tool_call_count: 0,
+        active_ms: 0,
+        unknown_cwd: false,
+        parent_id: None,
+    }
+}
+
 #[test]
 fn tui_renderer_render_paints_a_full_frame() {
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_716_286_800);
@@ -20,29 +53,18 @@ fn tui_renderer_render_paints_a_full_frame() {
     let id = AgentId::from_transcript_path("/demo/a.jsonl");
     scene.agents.insert(
         id,
-        AgentSlot {
-            agent_id: id,
-            source: std::sync::Arc::from("claude-code"),
-            session_id: std::sync::Arc::from("s-1"),
-            cwd: std::sync::Arc::from(PathBuf::from("/demo").as_path()),
-            label: std::sync::Arc::from("demo"),
-            state: ActivityState::Active {
+        agent_slot(
+            id,
+            "s-1",
+            "demo",
+            GlobalDeskIndex(0),
+            0,
+            ActivityState::Active {
                 tool_use_id: Some(std::sync::Arc::from("t1")),
                 detail: Some(std::sync::Arc::from("Write")),
             },
-            state_started_at: now,
-            created_at: now - Duration::from_secs(60),
-            last_event_at: now - Duration::from_secs(60),
-            exiting_at: None,
-            pending_idle_at: None,
-
-            desk_index: GlobalDeskIndex(0),
-            floor_idx: 0,
-            tool_call_count: 0,
-            active_ms: 0,
-            unknown_cwd: false,
-            parent_id: None,
-        },
+            now,
+        ),
     );
 
     let backend = TestBackend::new(96, 36);
@@ -71,7 +93,7 @@ fn tui_renderer_render_paints_a_full_frame() {
     // And it should contain something (non-trivial color diversity), proving
     // the trait method actually triggered the paint pipeline.
     let mut colors = std::collections::HashSet::new();
-    for px in &buf.pixels {
+    for px in buf.as_slice() {
         colors.insert((px.r, px.g, px.b));
     }
     assert!(
@@ -101,25 +123,15 @@ fn tui_renderer_transition_paints_pets_and_coffee() {
         let id = AgentId::from_transcript_path(&format!("/demo/{name}.jsonl"));
         scene.agents.insert(
             id,
-            AgentSlot {
-                agent_id: id,
-                source: std::sync::Arc::from("claude-code"),
-                session_id: std::sync::Arc::from(format!("s-{i}").as_str()),
-                cwd: std::sync::Arc::from(PathBuf::from("/demo").as_path()),
-                label: std::sync::Arc::from(*name),
-                state: ActivityState::Idle,
-                state_started_at: now,
-                created_at: now - Duration::from_secs(60),
-                last_event_at: now - Duration::from_secs(60),
-                exiting_at: None,
-                pending_idle_at: None,
-                desk_index: GlobalDeskIndex(i * 8),
-                floor_idx: i,
-                tool_call_count: 0,
-                active_ms: 0,
-                unknown_cwd: false,
-                parent_id: None,
-            },
+            agent_slot(
+                id,
+                &format!("s-{i}"),
+                name,
+                GlobalDeskIndex(i * 8),
+                i,
+                ActivityState::Idle,
+                now,
+            ),
         );
     }
 
@@ -174,7 +186,7 @@ fn tui_renderer_transition_paints_pets_and_coffee() {
     // dedicated pet/coffee tests.
     let buf = renderer.buf();
     let nonzero = buf
-        .pixels
+        .as_slice()
         .iter()
         .filter(|p| p.r != 0 || p.g != 0 || p.b != 0)
         .count();
@@ -340,25 +352,15 @@ fn cancel_transition_lands_on_destination_floor() {
         let id = AgentId::from_transcript_path(&format!("/demo/{name}.jsonl"));
         scene.agents.insert(
             id,
-            AgentSlot {
-                agent_id: id,
-                source: std::sync::Arc::from("claude-code"),
-                session_id: std::sync::Arc::from(format!("s-{i}").as_str()),
-                cwd: std::sync::Arc::from(PathBuf::from("/demo").as_path()),
-                label: std::sync::Arc::from(*name),
-                state: ActivityState::Idle,
-                state_started_at: now,
-                created_at: now - Duration::from_secs(60),
-                last_event_at: now - Duration::from_secs(60),
-                exiting_at: None,
-                pending_idle_at: None,
-                desk_index: GlobalDeskIndex(i * 8),
-                floor_idx: i,
-                tool_call_count: 0,
-                active_ms: 0,
-                unknown_cwd: false,
-                parent_id: None,
-            },
+            agent_slot(
+                id,
+                &format!("s-{i}"),
+                name,
+                GlobalDeskIndex(i * 8),
+                i,
+                ActivityState::Idle,
+                now,
+            ),
         );
     }
 

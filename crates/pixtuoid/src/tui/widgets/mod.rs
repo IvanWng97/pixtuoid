@@ -38,6 +38,15 @@ fn to_color(c: Rgb) -> Color {
     Color::Rgb(c.r, c.g, c.b)
 }
 
+/// The badge color for a source's 2-char label prefix — shared by the dashboard
+/// and Sources-panel row painters. Resolves via `SourceColors::by_prefix`,
+/// falling back to `label_idle` for an unknown prefix (the same fallback the
+/// inlined `match` arms used). Never reversed at the call sites: a low-luminance
+/// hue inverted vanishes against the highlight bg.
+fn badge_color_for(tag: &str, theme: &pixtuoid_scene::theme::Theme) -> Color {
+    to_color(theme.source.by_prefix(tag).unwrap_or(theme.ui.label_idle))
+}
+
 /// A `desired_w × desired_h` rect clamped to `bounds` and centered within it,
 /// anchored off `bounds`'s origin (not 0,0) so a non-zero-origin bounds rect
 /// positions correctly. Shared by the keyboard-help and theme-picker overlays.

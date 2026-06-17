@@ -118,9 +118,7 @@ pub fn detect_installed() -> bool {
 ///
 /// Err on non-UTF-8 (prevents the to_string_lossy dead-hook).
 pub fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
-    let p = resolved
-        .to_str()
-        .ok_or_else(|| anyhow!("pixtuoid-hook path is non-UTF-8: {}", resolved.display()))?;
+    let p = verify::hook_path_str(resolved)?;
     crate::install::hook_cmd::shell_hook_command(p, "cursor")
 }
 

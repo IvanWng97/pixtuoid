@@ -21,10 +21,10 @@ fn parses_two_frame_mini_sprite() {
     assert_eq!(frames.len(), 2);
     assert_eq!(frames[0].width, 4);
     assert_eq!(frames[0].height, 2);
-    assert_eq!(frames[0].pixels[0], Some(Rgb { r: 1, g: 2, b: 3 }));
-    assert_eq!(frames[0].pixels[1], None);
-    assert_eq!(frames[0].pixels[2], Some(Rgb { r: 4, g: 5, b: 6 }));
-    assert_eq!(frames[0].pixels[3], None);
+    assert_eq!(frames[0].as_slice()[0], Some(Rgb { r: 1, g: 2, b: 3 }));
+    assert_eq!(frames[0].as_slice()[1], None);
+    assert_eq!(frames[0].as_slice()[2], Some(Rgb { r: 4, g: 5, b: 6 }));
+    assert_eq!(frames[0].as_slice()[3], None);
 }
 
 #[test]

@@ -495,48 +495,17 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
         );
     }
 
-    // Per-desk "is the occupant actually seated right now" map (pose is
-    // SeatedTyping/Thinking, not walking in / snapping back). Built ONCE here
-    // (before the ambient pass) and reused by the desk-cubicle screen glow
-    // below — so the ceiling halo and the screen glow share one gate and one
-    // pose derivation (no double A*).
-    let seated_agents: HashMap<FloorLocalDeskIndex, bool> = agents
-        .iter()
-        .filter(|a| {
-            ctx.layout
-                .home_desk(a.desk_index.single_floor_local())
-                .is_some()
-                && a.exiting_at.is_none()
-        })
-        .map(|a| {
-            let p = pose::derive_with_routing(
-                a,
-                ctx.now,
-                ctx.layout,
-                &mut crate::pose::RouteCtx {
-                    router: &mut *ctx.router,
-                    overlay: &*ctx.overlay,
-                    history: &mut *ctx.history,
-                    motion: &mut *ctx.motion,
-                },
-            );
-            let seated = matches!(p, Some(Pose::SeatedTyping { .. } | Pose::SeatedThinking));
-            (a.desk_index.single_floor_local(), seated)
-        })
-        .collect();
-
-    // Ceiling halos gate on `seated_agents` so a tool-glow halo never floats
-    // above an empty desk while its Active occupant is mid-walk (entry/snap).
-    ambient::paint_ambient(ctx, &seated_agents);
-
-    // Build per-frame occupancy from STATIONARY agent positions only.
-    // Walkers are deliberately excluded — their position interpolates
-    // every frame, which would change the overlay signature every frame,
-    // wipe the path cache, recompute A*, and snap walkers to new path
-    // segments (the visible "flash"). Sitters at desks are already
-    // covered by the static desk mask. Only waypoint visitors
-    // contribute here — they have stable positions across frames,
-    // so the signature is stable and the cache hits.
+    // Build per-frame occupancy from STATIONARY agent positions only — BEFORE
+    // the seated prepass, since the single per-agent `derive_with_routing` below
+    // routes Walking poses against THIS overlay (it used to run after the prepass,
+    // which then re-derived each agent a second time inside `enqueue_characters`).
+    // Walkers are deliberately excluded — their position interpolates every frame,
+    // which would change the overlay signature every frame, wipe the path cache,
+    // recompute A*, and snap walkers to new path segments (the visible "flash").
+    // Sitters at desks are already covered by the static desk mask. Only waypoint
+    // visitors contribute here — they have stable positions across frames, so the
+    // signature is stable and the cache hits. Reads only the STATELESS `pose::derive`
+    // + stand_point (no dependency on the seated map / ambient), so it's safe up here.
     ctx.overlay.clear();
     for agent in &agents {
         let Some(pose) = pose::derive(agent, ctx.now, ctx.layout) else {
@@ -566,6 +535,63 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
         }
     }
 
+    // Derive every home-desk agent's routed pose ONCE per frame. This is the
+    // AUTHORITATIVE pose derivation — it runs the advance_wander / walk_path /
+    // history side effects exactly once; `enqueue_characters` later just looks the
+    // cached pose up by agent_id instead of re-deriving (the old double-A*). The
+    // `exiting_at` filter is INTENTIONALLY absent: exiting agents are never
+    // SeatedTyping/Thinking (so `seated_agents` is unchanged), but their pose is
+    // needed for the character enqueue. Only the home_desk filter remains (a
+    // deskless agent can't render anyway).
+    let poses: HashMap<pixtuoid_core::AgentId, Option<Pose>> = agents
+        .iter()
+        .filter(|a| {
+            ctx.layout
+                .home_desk(a.desk_index.single_floor_local())
+                .is_some()
+        })
+        .map(|a| {
+            let p = pose::derive_with_routing(
+                a,
+                ctx.now,
+                ctx.layout,
+                &mut crate::pose::RouteCtx {
+                    router: &mut *ctx.router,
+                    overlay: &*ctx.overlay,
+                    history: &mut *ctx.history,
+                    motion: &mut *ctx.motion,
+                },
+            );
+            (a.agent_id, p)
+        })
+        .collect();
+
+    // Per-desk "is the occupant actually seated right now" map (pose is
+    // SeatedTyping/Thinking, not walking in / snapping back), derived from the
+    // cached poses so the desk-cubicle screen glow + ceiling halos share one gate
+    // and one pose derivation (no double A*). Exiting agents are absent from the
+    // seated set by construction (their pose is Walking, not Seated).
+    let seated_agents: HashMap<FloorLocalDeskIndex, bool> = agents
+        .iter()
+        .filter(|a| {
+            ctx.layout
+                .home_desk(a.desk_index.single_floor_local())
+                .is_some()
+                && a.exiting_at.is_none()
+        })
+        .map(|a| {
+            let seated = matches!(
+                poses.get(&a.agent_id),
+                Some(Some(Pose::SeatedTyping { .. } | Pose::SeatedThinking))
+            );
+            (a.desk_index.single_floor_local(), seated)
+        })
+        .collect();
+
+    // Ceiling halos gate on `seated_agents` so a tool-glow halo never floats
+    // above an empty desk while its Active occupant is mid-walk (entry/snap).
+    ambient::paint_ambient(ctx, &seated_agents);
+
     // --- Build the y-sortable middle pass -------------------------------
     //
     // Every entity gets an `anchor_y` representing its front-facing /
@@ -587,8 +613,13 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
     let resolved_pet_pos = enqueue_pet(ctx, &agents, &mut drawables);
     let resolved_mascot_pos = enqueue_gateway_mascot(ctx, &mut drawables);
 
-    let waypoint_visitors =
-        enqueue_characters(ctx, &agents, &mut drawables, &mut new_coffee_carriers);
+    let waypoint_visitors = enqueue_characters(
+        ctx,
+        &agents,
+        &poses,
+        &mut drawables,
+        &mut new_coffee_carriers,
+    );
 
     enqueue_room_walls_h(ctx.layout, &mut drawables);
 
@@ -633,9 +664,10 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
 }
 
 /// All character sprites — the y-sorted middle pass's main subject. For each
-/// agent it derives the routed pose (entry/exit/wander/seated via the motion
-/// authority in `derive_with_routing`, which reads/writes ctx.router/overlay/
-/// history/motion) and enqueues the sprite at the feet anchor. Returns the
+/// agent it looks up the routed pose (entry/exit/wander/seated) from `poses` —
+/// the cached map the authoritative `derive_with_routing` prepass built ONCE this
+/// frame (so the advance_wander / walk_path / history side effects run exactly
+/// once, not twice) — and enqueues the sprite at the feet anchor. Returns the
 /// waypoint visitors (for the chitchat venues) and pushes any agent seen
 /// carrying coffee this frame into `new_coffee_carriers`. The Character
 /// drawable borrows the agent, so this is the ONE phase tied to the agent
@@ -643,6 +675,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
 fn enqueue_characters<'a>(
     ctx: &mut PixelCtx<'_>,
     agents: &'a [AgentSlot],
+    poses: &HashMap<pixtuoid_core::AgentId, Option<Pose>>,
     drawables: &mut Vec<Drawable<'a>>,
     new_coffee_carriers: &mut Vec<pixtuoid_core::AgentId>,
 ) -> Vec<chitchat::Visitor> {
@@ -671,17 +704,10 @@ fn enqueue_characters<'a>(
         let Some(desk) = ctx.layout.home_desk(agent.desk_index.single_floor_local()) else {
             continue;
         };
-        let Some(p) = pose::derive_with_routing(
-            agent,
-            ctx.now,
-            ctx.layout,
-            &mut crate::pose::RouteCtx {
-                router: &mut *ctx.router,
-                overlay: &*ctx.overlay,
-                history: &mut *ctx.history,
-                motion: &mut *ctx.motion,
-            },
-        ) else {
+        // Look up the pose the authoritative prepass already derived (one
+        // derive_with_routing per agent per frame) instead of re-deriving — the
+        // prepass ran the advance_wander/walk_path/history side effects once.
+        let Some(p) = poses.get(&agent.agent_id).copied().flatten() else {
             continue;
         };
         match p {

@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use toml::value::Table;
 
 use crate::install::target::MergeOutcome;
@@ -54,9 +54,7 @@ pub fn default_config_path() -> Result<PathBuf> {
 pub fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
     // `_explicit` is Claude's bare-name-vs-absolute switch — Codex always
     // embeds the absolute path, so the flag changes nothing here.
-    let p = resolved
-        .to_str()
-        .ok_or_else(|| anyhow!("pixtuoid-hook path is non-UTF-8: {}", resolved.display()))?;
+    let p = crate::install::verify::hook_path_str(resolved)?;
     // One OS fork for the cmd.exe-shelling strategy lives in
     // hook_cmd::shell_hook_command (Unix env-prefix form / Windows bare
     // `<path> --source codex`), shared with Reasonix so the platform halves can't

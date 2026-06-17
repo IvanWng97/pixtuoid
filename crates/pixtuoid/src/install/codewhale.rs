@@ -184,9 +184,7 @@ pub fn detect_installed() -> bool {
 pub fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
     // `_explicit` is Claude's bare-name-vs-absolute switch — CodeWhale always
     // embeds the absolute path, so the flag changes nothing here.
-    let p = resolved
-        .to_str()
-        .ok_or_else(|| anyhow!("pixtuoid-hook path is non-UTF-8: {}", resolved.display()))?;
+    let p = crate::install::verify::hook_path_str(resolved)?;
     crate::install::hook_cmd::shell_hook_command(p, "codewhale")
 }
 

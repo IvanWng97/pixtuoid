@@ -224,10 +224,7 @@ pub fn advance_wander(
             .unwrap_or(false);
 
     if is_fresh || is_stale_resume {
-        let elapsed_idle = now
-            .duration_since(slot.state_started_at)
-            .unwrap_or(Duration::ZERO)
-            .as_millis() as u64;
+        let elapsed_idle = crate::anim::elapsed_ms(now, slot.state_started_at);
         // Use the estimated full cycle (matches idle_pose) so the bootstrapped
         // cycle_n agrees with what the stateless overlay derived for the same
         // long-idle agent — NOT stale_resume_gap_ms (the stale-resume sentinel).
@@ -252,10 +249,7 @@ pub fn advance_wander(
     let may_transition = now > ms.last_advanced_at;
 
     // ---- PHASE MACHINE -----------------------------------------------------
-    let elapsed_phase = now
-        .duration_since(ms.wander_phase_started_at)
-        .unwrap_or(Duration::ZERO)
-        .as_millis() as u64;
+    let elapsed_phase = crate::anim::elapsed_ms(now, ms.wander_phase_started_at);
 
     // Absolute per-spot timeline (the render authority). Seated-at-desk beat is
     // a long, per-agent dwell; the at-waypoint beat is keyed on the spot kind so
@@ -313,37 +307,30 @@ pub fn advance_wander(
         }
 
         WanderPhase::WalkingOut => {
-            let profile = match &ms.wander_profile {
-                Some(p) => p,
-                None => {
-                    // Should be unreachable: a WalkingOut phase always has a
-                    // profile snapshotted at the Seated→WalkingOut transition.
-                    // Log + recover (project convention: never freeze silently).
-                    tracing::warn!(
-                        agent_id = ?slot.agent_id,
-                        "wander walk profile missing in WalkingOut — recovering"
-                    );
-                    return (WanderPhase::WalkingOut, 0);
+            match poll_walk_leg(
+                slot,
+                ms,
+                WanderPhase::WalkingOut,
+                elapsed_phase,
+                may_transition,
+            ) {
+                WalkLegStatus::Missing => return (WanderPhase::WalkingOut, 0),
+                WalkLegStatus::InFlight(t) => (WanderPhase::WalkingOut, t),
+                WalkLegStatus::Arrived {
+                    t_x1000,
+                    walk_total,
+                } => {
+                    // Divergent on-arrival: snapshot the walk-back profile (the
+                    // overlay may differ now) and store it for the AtWaypoint →
+                    // WalkingBack transition. `t_x1000` is 1000 at arrival (the
+                    // walk-out leg's terminal progress) — preserves the old
+                    // hardcoded `1000` return byte-for-byte.
+                    let back = snapshot_back_profile(slot, ms, layout, router, overlay);
+                    ms.wander_phase = WanderPhase::AtWaypoint;
+                    ms.wander_profile = Some(back);
+                    advance_phase_clock(ms, walk_total, now);
+                    (WanderPhase::AtWaypoint, t_x1000)
                 }
-            };
-            let t_x1000 = pixtuoid_core::physics::walk_progress(profile, elapsed_phase);
-
-            if may_transition && walk_arrived(profile, elapsed_phase) {
-                let walk_total = profile.duration_ms + profile.pause_ms;
-                // Snapshot the walk-back profile (overlay may differ now).
-                let back = snapshot_back_profile(slot, ms, layout, router, overlay);
-
-                ms.wander_phase = WanderPhase::AtWaypoint;
-                ms.wander_phase_started_at = ms
-                    .wander_phase_started_at
-                    .checked_add(Duration::from_millis(walk_total))
-                    .unwrap_or(now);
-                // Store back profile for use at AtWaypoint → WalkingBack transition.
-                ms.wander_profile = Some(back);
-
-                (WanderPhase::AtWaypoint, 1000)
-            } else {
-                (WanderPhase::WalkingOut, t_x1000)
             }
         }
 
@@ -366,41 +353,31 @@ pub fn advance_wander(
         }
 
         WanderPhase::WalkingBack => {
-            let profile = match &ms.wander_profile {
-                Some(p) => p,
-                None => {
-                    // Should be unreachable: a WalkingBack phase always has a
-                    // profile snapshotted at the AtWaypoint→WalkingBack
-                    // transition. Log + recover (never freeze silently).
-                    tracing::warn!(
-                        agent_id = ?slot.agent_id,
-                        "wander walk profile missing in WalkingBack — recovering"
-                    );
-                    return (WanderPhase::WalkingBack, 0);
+            match poll_walk_leg(
+                slot,
+                ms,
+                WanderPhase::WalkingBack,
+                elapsed_phase,
+                may_transition,
+            ) {
+                WalkLegStatus::Missing => return (WanderPhase::WalkingBack, 0),
+                WalkLegStatus::InFlight(t) => (WanderPhase::WalkingBack, t),
+                WalkLegStatus::Arrived { walk_total, .. } => {
+                    // Divergent on-arrival: a cycle completed — advance the cycle
+                    // counter and clear the trip fields.
+                    ms.wander_cycle_n += 1;
+                    ms.wander_profile = None;
+                    ms.wander_dest_kind = None;
+                    ms.wander_dest_wp_idx = None;
+                    // Clear the seat too (symmetry with the sibling dest fields):
+                    // the Seated arm never reads it and the next WalkingOut overwrites
+                    // it, but leaving it stale invites a future Seated-phase reader to
+                    // mistake it for "currently on a seat".
+                    ms.wander_seat = None;
+                    ms.wander_phase = WanderPhase::Seated;
+                    advance_phase_clock(ms, walk_total, now);
+                    (WanderPhase::Seated, 0)
                 }
-            };
-            let t_x1000 = pixtuoid_core::physics::walk_progress(profile, elapsed_phase);
-
-            if may_transition && walk_arrived(profile, elapsed_phase) {
-                let walk_total = profile.duration_ms + profile.pause_ms;
-                ms.wander_cycle_n += 1;
-                ms.wander_profile = None;
-                ms.wander_dest_kind = None;
-                ms.wander_dest_wp_idx = None;
-                // Clear the seat too (symmetry with the sibling dest fields):
-                // the Seated arm never reads it and the next WalkingOut overwrites
-                // it, but leaving it stale invites a future Seated-phase reader to
-                // mistake it for "currently on a seat".
-                ms.wander_seat = None;
-                ms.wander_phase = WanderPhase::Seated;
-                ms.wander_phase_started_at = ms
-                    .wander_phase_started_at
-                    .checked_add(Duration::from_millis(walk_total))
-                    .unwrap_or(now);
-
-                (WanderPhase::Seated, 0)
-            } else {
-                (WanderPhase::WalkingBack, t_x1000)
             }
         }
     };
@@ -411,6 +388,69 @@ pub fn advance_wander(
     }
 
     result
+}
+
+/// Status of an in-flight wander walk leg (`WalkingOut` / `WalkingBack`) for the
+/// current frame, the result of the scaffold those two arms share.
+enum WalkLegStatus {
+    /// The phase profile is missing (should be unreachable — it is snapshotted at
+    /// the entering transition). The caller logs + recovers in place.
+    Missing,
+    /// Still walking: the physics progress `t_x1000` (0..1000).
+    InFlight(u16),
+    /// The walk (incl. its pause) has completed. `walk_total` = `duration_ms +
+    /// pause_ms` for the shared phase-clock advance; `t_x1000` is the progress at
+    /// arrival (1000), exposed for completeness.
+    Arrived { t_x1000: u16, walk_total: u64 },
+}
+
+/// The scaffold the `WalkingOut` and `WalkingBack` arms share: read the phase
+/// profile (warn on the unreachable missing case), compute physics progress, and
+/// classify the leg as in-flight or arrived. The arms run their OWN divergent
+/// on-arrival cleanup (WalkingOut: snapshot the back profile; WalkingBack: bump
+/// the cycle + clear trip fields incl. `wander_seat`) — only the read/progress/
+/// arrival check is factored here.
+fn poll_walk_leg(
+    slot: &AgentSlot,
+    ms: &MotionState,
+    phase: WanderPhase,
+    elapsed_phase: u64,
+    may_transition: bool,
+) -> WalkLegStatus {
+    let profile = match &ms.wander_profile {
+        Some(p) => p,
+        None => {
+            // Should be unreachable: an in-flight phase always has a profile
+            // snapshotted at its entering transition. Log + recover (project
+            // convention: never freeze silently).
+            tracing::warn!(
+                agent_id = ?slot.agent_id,
+                ?phase,
+                "wander walk profile missing — recovering"
+            );
+            return WalkLegStatus::Missing;
+        }
+    };
+    let t_x1000 = pixtuoid_core::physics::walk_progress(profile, elapsed_phase);
+    if may_transition && walk_arrived(profile, elapsed_phase) {
+        WalkLegStatus::Arrived {
+            t_x1000,
+            walk_total: profile.duration_ms + profile.pause_ms,
+        }
+    } else {
+        WalkLegStatus::InFlight(t_x1000)
+    }
+}
+
+/// Advance the phase clock by `walk_total` ms from its current anchor (so the
+/// next phase starts exactly when this one's wall-time budget elapsed), falling
+/// back to `now` if the add overflows. The shared clock-advance both wander walk
+/// arms run after their divergent on-arrival cleanup.
+fn advance_phase_clock(ms: &mut MotionState, walk_total: u64, now: SystemTime) {
+    ms.wander_phase_started_at = ms
+        .wander_phase_started_at
+        .checked_add(Duration::from_millis(walk_total))
+        .unwrap_or(now);
 }
 
 /// Pick the wander destination for a given agent and cycle. Mirrors the same

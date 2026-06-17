@@ -25,22 +25,31 @@ pub struct Cli {
     pub theme: Option<String>,
 }
 
+/// The source-input flags shared VERBATIM by `run` and `floating` (the two
+/// commands that wire sources → reducer → renderer). Flattened in via
+/// `#[command(flatten)]` so the four flags can't drift between the two commands.
+#[derive(Debug, clap::Args)]
+pub struct SourceArgs {
+    /// Empty/whitespace is rejected: an explicit override deserves a loud
+    /// answer, and bind("") would strand a relative `.lock` in the CWD.
+    #[arg(long, value_parser = parse_nonempty_path)]
+    pub socket: Option<PathBuf>,
+    #[arg(long)]
+    pub projects_root: Option<PathBuf>,
+    /// Override the Codex sessions root (default ~/.codex/sessions).
+    /// Point at a temp dir to replay fixtures into a headless run.
+    #[arg(long)]
+    pub codex_sessions_root: Option<PathBuf>,
+    #[arg(long)]
+    pub pack_dir: Option<PathBuf>,
+}
+
 #[derive(Debug, Subcommand)]
 pub enum Cmd {
     /// Run the TUI (default if no subcommand given).
     Run {
-        /// Empty/whitespace is rejected: an explicit override deserves a loud
-        /// answer, and bind("") would strand a relative `.lock` in the CWD.
-        #[arg(long, value_parser = parse_nonempty_path)]
-        socket: Option<PathBuf>,
-        #[arg(long)]
-        projects_root: Option<PathBuf>,
-        /// Override the Codex sessions root (default ~/.codex/sessions).
-        /// Point at a temp dir to replay fixtures into a headless run.
-        #[arg(long)]
-        codex_sessions_root: Option<PathBuf>,
-        #[arg(long)]
-        pack_dir: Option<PathBuf>,
+        #[command(flatten)]
+        source: SourceArgs,
         /// Cap desks per floor, ≥ 1 (auto-computed from terminal size if
         /// unset). 0 is rejected: it would permanently zero every floor's
         /// capacity and silently drop every agent (the boot atomics only
@@ -56,15 +65,8 @@ pub enum Cmd {
     /// Render the live office in a frameless, always-on-top desktop window
     /// (no TUI). Shares the same source flags as `run`.
     Floating {
-        #[arg(long, value_parser = parse_nonempty_path)]
-        socket: Option<PathBuf>,
-        #[arg(long)]
-        projects_root: Option<PathBuf>,
-        /// Override the Codex sessions root (default ~/.codex/sessions).
-        #[arg(long)]
-        codex_sessions_root: Option<PathBuf>,
-        #[arg(long)]
-        pack_dir: Option<PathBuf>,
+        #[command(flatten)]
+        source: SourceArgs,
     },
     /// Validate a custom sprite pack directory.
     ValidatePack {
@@ -118,10 +120,12 @@ impl Cli {
         let level = self.log_level;
         let theme = self.theme;
         let cmd = self.cmd.unwrap_or(Cmd::Run {
-            socket: None,
-            projects_root: None,
-            codex_sessions_root: None,
-            pack_dir: None,
+            source: SourceArgs {
+                socket: None,
+                projects_root: None,
+                codex_sessions_root: None,
+                pack_dir: None,
+            },
             max_desks: None,
             headless: false,
         });
@@ -245,8 +249,10 @@ mod tests {
         assert!(matches!(
             cli.cmd,
             Some(Cmd::Floating {
-                projects_root: Some(_),
-                ..
+                source: SourceArgs {
+                    projects_root: Some(_),
+                    ..
+                },
             })
         ));
     }

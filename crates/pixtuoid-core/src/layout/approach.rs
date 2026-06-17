@@ -33,6 +33,15 @@ const STAND_SCAN: i32 = 4;
 /// stays separate.
 const CARDINAL_DIRS: [(i32, i32); 4] = [(0, -1), (0, 1), (-1, 0), (1, 0)];
 
+/// Squared Euclidean distance between two cells (computed in `i64` to avoid
+/// `u16` overflow before squaring). Used to pick the candidate stand/approach
+/// cell nearest the agent's `origin`; never sqrt'd, only compared.
+fn squared_distance(from: Point, to: Point) -> u64 {
+    let ex = from.x as i64 - to.x as i64;
+    let ey = from.y as i64 - to.y as i64;
+    (ex * ex + ey * ey) as u64
+}
+
 /// Ground-footprint `(w, h)` the walkable mask stamps for a waypoint, or
 /// `None` for slots that add no obstacle (meeting sofa/stand sit on the
 /// sofa/table furniture, already stamped elsewhere). Reads [`furniture_def`]
@@ -118,13 +127,14 @@ pub fn stand_point(
             if cx < 0 || cy < 0 {
                 break;
             }
-            let (cx, cy) = (cx as u16, cy as u16);
-            if mask.is_walkable(cx, cy) {
-                let ex = cx as i64 - origin.x as i64;
-                let ey = cy as i64 - origin.y as i64;
-                let d2 = (ex * ex + ey * ey) as u64;
+            let c = Point {
+                x: cx as u16,
+                y: cy as u16,
+            };
+            if mask.is_walkable(c.x, c.y) {
+                let d2 = squared_distance(c, origin);
                 if best.is_none_or(|(bd, _)| d2 < bd) {
-                    best = Some((d2, Point { x: cx, y: cy }));
+                    best = Some((d2, c));
                 }
                 break; // first walkable cell on this side wins
             }
@@ -221,9 +231,7 @@ pub fn approach_point(
                 if mask.is_walkable(c.x, c.y) {
                     entered = true;
                     if reachable.reaches(c) {
-                        let ex = c.x as i64 - origin.x as i64;
-                        let ey = c.y as i64 - origin.y as i64;
-                        let d2 = (ex * ex + ey * ey) as u64;
+                        let d2 = squared_distance(c, origin);
                         if allowed.is_none_or(|(b, _)| d2 < b) {
                             allowed = Some((d2, c));
                         }
@@ -259,9 +267,7 @@ pub fn approach_point(
                 };
                 if mask.is_walkable(c.x, c.y) {
                     if reachable.reaches(c) {
-                        let ex = c.x as i64 - origin.x as i64;
-                        let ey = c.y as i64 - origin.y as i64;
-                        let d2 = (ex * ex + ey * ey) as u64;
+                        let d2 = squared_distance(c, origin);
                         if best.is_none_or(|(bd, _)| d2 < bd) {
                             best = Some((d2, c));
                         }

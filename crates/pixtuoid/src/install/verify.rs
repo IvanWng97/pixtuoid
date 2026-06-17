@@ -56,6 +56,17 @@ pub fn bake_hook_path(
     Ok(template.replace(placeholder, &json))
 }
 
+/// The shim path as `&str`, or a uniform non-UTF-8 error — the ONE helper every
+/// target's `hook_command` shares so the error wording can't drift (the shell
+/// targets feed the `&str` into `hook_cmd::shell_hook_command`; the embed
+/// targets `.map(str::to_string)` it). A non-UTF-8 path is rejected rather than
+/// `to_string_lossy`'d into a silently-dead hook.
+pub fn hook_path_str(p: &std::path::Path) -> anyhow::Result<&str> {
+    use anyhow::anyhow;
+    p.to_str()
+        .ok_or_else(|| anyhow!("pixtuoid-hook path is non-UTF-8: {}", p.display()))
+}
+
 /// Parse TOML config content, treating empty/whitespace-only as the empty
 /// document. Shared by the TOML targets (Codex/CodeWhale); same empty rule.
 pub fn parse_toml_or_empty(content: &str) -> anyhow::Result<toml::Value> {
@@ -357,6 +368,33 @@ mod tests {
         let got = display_safe(hostile);
         assert!(!got.chars().any(|c| c.is_control()), "{got:?}");
         assert!(got.contains("hook") && got.contains("/x/"), "{got:?}");
+    }
+
+    #[test]
+    fn hook_path_str_returns_utf8_path() {
+        let p = std::path::Path::new("/opt/bin/pixtuoid-hook");
+        assert_eq!(hook_path_str(p).unwrap(), "/opt/bin/pixtuoid-hook");
+    }
+
+    #[test]
+    fn hook_path_str_rejects_non_utf8() {
+        // A non-UTF-8 OsStr must be an Err, not a lossy-decoded dead hook.
+        let bad = non_utf8_path();
+        let err = hook_path_str(&bad).unwrap_err().to_string();
+        assert!(err.contains("non-UTF-8"), "{err}");
+    }
+
+    #[cfg(unix)]
+    fn non_utf8_path() -> std::path::PathBuf {
+        use std::os::unix::ffi::OsStrExt;
+        std::path::PathBuf::from(std::ffi::OsStr::from_bytes(b"/x/\xff\xfehook"))
+    }
+
+    #[cfg(windows)]
+    fn non_utf8_path() -> std::path::PathBuf {
+        use std::os::windows::ffi::OsStringExt;
+        // An unpaired surrogate (0xD800) is valid UTF-16 to the OS but not UTF-8.
+        std::ffi::OsString::from_wide(&[0x005C, 0x0078, 0xD800, 0x0068]).into()
     }
 
     #[test]

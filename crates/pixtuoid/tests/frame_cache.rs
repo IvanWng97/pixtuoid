@@ -25,15 +25,15 @@ fn key(id: AgentId, anim_name: &'static str, frame_idx: usize, flip_x: bool) -> 
 }
 
 fn dummy_frame(seed: u8) -> Frame {
-    Frame {
-        width: 1,
-        height: 1,
-        pixels: vec![Some(Rgb {
+    Frame::from_pixels(
+        1,
+        1,
+        vec![Some(Rgb {
             r: seed,
             g: seed,
             b: seed,
         })],
-    }
+    )
 }
 
 fn make_slot(id: AgentId) -> AgentSlot {
@@ -75,7 +75,7 @@ fn get_or_make_caches_by_full_key() {
         })
         .clone();
     assert_eq!(compute_calls.get(), 1);
-    assert_eq!(f1.pixels[0], Some(Rgb { r: 1, g: 1, b: 1 }));
+    assert_eq!(f1.as_slice()[0], Some(Rgb { r: 1, g: 1, b: 1 }));
 
     // Same key — must hit.
     let f2 = cache
@@ -89,7 +89,7 @@ fn get_or_make_caches_by_full_key() {
         1,
         "second lookup with same key must not recompute"
     );
-    assert_eq!(f2.pixels[0], Some(Rgb { r: 1, g: 1, b: 1 }));
+    assert_eq!(f2.as_slice()[0], Some(Rgb { r: 1, g: 1, b: 1 }));
 
     // Different frame_idx — distinct entry.
     cache.get_or_make(key(id, "walking", 1, false), || {

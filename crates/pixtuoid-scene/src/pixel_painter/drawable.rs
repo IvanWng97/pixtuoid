@@ -180,6 +180,34 @@ pub(super) enum DrawableKind<'a> {
     },
 }
 
+/// Visit-spot anchors for the wandering creatures (pet + gateway mascot). Each
+/// owns ONE furniture's offset so `pet_position` and `mascot_spots` can't drift
+/// from each other. Pantry and the lounge couch share the SAME `+(4,6)` offset
+/// (both are corner appliances the creature stands beside), so `corner_visit_spot`
+/// serves both; the desk and the meeting sofa have their own offsets.
+fn desk_visit_spot(desk: Point) -> Point {
+    Point {
+        x: desk.x + DESK_W + 1,
+        y: desk.y + DESK_H + 2,
+    }
+}
+
+/// Pantry / lounge-couch visit anchor (identical `+(4,6)` offset for both).
+fn corner_visit_spot(p: Point) -> Point {
+    Point {
+        x: p.x + 4,
+        y: p.y + 6,
+    }
+}
+
+/// Meeting-sofa visit anchor.
+fn sofa_visit_spot(sofa: Point) -> Point {
+    Point {
+        x: sofa.x + 4,
+        y: sofa.y + 4,
+    }
+}
+
 /// Pet roaming the whole office. Each 40s cycle picks a destination
 /// from all available spots (desks, pantry, meeting sofas, lounge
 /// couch, corridor), walks there from the previous spot, then sits or
@@ -206,10 +234,7 @@ pub(super) fn pet_position(
     let mut spots: Vec<(Point, bool)> = Vec::new();
     for (i, desk) in layout.home_desks.iter().enumerate() {
         spots.push((
-            Point {
-                x: desk.x + DESK_W + 1,
-                y: desk.y + DESK_H + 2,
-            },
+            desk_visit_spot(*desk),
             idle_desk_indices.contains(&FloorLocalDeskIndex(i)),
         ));
     }
@@ -218,23 +243,11 @@ pub(super) fn pet_position(
         .iter()
         .find(|w| matches!(w.kind, crate::layout::WaypointKind::Pantry))
     {
-        spots.push((
-            Point {
-                x: wp.pos.x + 4,
-                y: wp.pos.y + 6,
-            },
-            false,
-        ));
+        spots.push((corner_visit_spot(wp.pos), false));
     }
     for room in &layout.meeting_furniture {
         for sofa in room.sofas {
-            spots.push((
-                Point {
-                    x: sofa.x + 4,
-                    y: sofa.y + 4,
-                },
-                false,
-            ));
+            spots.push((sofa_visit_spot(sofa), false));
         }
     }
     if let Some(wp) = layout
@@ -242,13 +255,7 @@ pub(super) fn pet_position(
         .iter()
         .find(|w| matches!(w.kind, crate::layout::WaypointKind::Couch))
     {
-        spots.push((
-            Point {
-                x: wp.pos.x + 4,
-                y: wp.pos.y + 6,
-            },
-            false,
-        ));
+        spots.push((corner_visit_spot(wp.pos), false));
     }
     if let Some(corridor) = layout.corridor {
         spots.push((
@@ -438,10 +445,7 @@ fn mascot_spots(layout: &Layout, state: DaemonState, home: Point) -> Vec<Point> 
     let mut spots = vec![home];
     if state == DaemonState::Busy {
         for desk in &layout.home_desks {
-            spots.push(Point {
-                x: desk.x + DESK_W + 1,
-                y: desk.y + DESK_H + 2,
-            });
+            spots.push(desk_visit_spot(*desk));
         }
     } else {
         if let Some(wp) = layout
@@ -449,17 +453,11 @@ fn mascot_spots(layout: &Layout, state: DaemonState, home: Point) -> Vec<Point> 
             .iter()
             .find(|w| matches!(w.kind, crate::layout::WaypointKind::Pantry))
         {
-            spots.push(Point {
-                x: wp.pos.x + 4,
-                y: wp.pos.y + 6,
-            });
+            spots.push(corner_visit_spot(wp.pos));
         }
         for room in &layout.meeting_furniture {
             for sofa in room.sofas {
-                spots.push(Point {
-                    x: sofa.x + 4,
-                    y: sofa.y + 4,
-                });
+                spots.push(sofa_visit_spot(sofa));
             }
         }
         if let Some(wp) = layout
@@ -467,10 +465,7 @@ fn mascot_spots(layout: &Layout, state: DaemonState, home: Point) -> Vec<Point> 
             .iter()
             .find(|w| matches!(w.kind, crate::layout::WaypointKind::Couch))
         {
-            spots.push(Point {
-                x: wp.pos.x + 4,
-                y: wp.pos.y + 6,
-            });
+            spots.push(corner_visit_spot(wp.pos));
         }
     }
     spots

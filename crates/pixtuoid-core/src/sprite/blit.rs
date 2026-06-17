@@ -29,7 +29,7 @@ pub fn blit_frame_outlined(
             return false;
         }
         let i = (fy as usize) * (frame.width as usize) + (fx as usize);
-        frame.pixels[i].is_some()
+        frame.as_slice()[i].is_some()
     };
 
     for fy in 0..h {
@@ -122,7 +122,7 @@ pub fn blit_frame(frame: &Frame, dst_x: u16, dst_y: u16, dst: &mut RgbBuffer) {
     for fy in 0..frame.height {
         for fx in 0..frame.width {
             let i = (fy as usize) * (frame.width as usize) + (fx as usize);
-            let Some(rgb) = frame.pixels[i] else {
+            let Some(rgb) = frame.as_slice()[i] else {
                 continue;
             };
             let x = dst_x.saturating_add(fx);
@@ -157,8 +157,8 @@ pub fn half_block_cells(buf: &RgbBuffer) -> Vec<Vec<HalfCell>> {
         let py_bot = (py_top + 1).min(h - 1);
         let mut row = Vec::with_capacity(w);
         for x in 0..w {
-            let fg = buf.pixels[py_top * w + x];
-            let bg = buf.pixels[py_bot * w + x];
+            let fg = buf.as_slice()[py_top * w + x];
+            let bg = buf.as_slice()[py_bot * w + x];
             row.push(HalfCell { fg, bg });
         }
         out.push(row);

@@ -354,6 +354,45 @@ pub fn teardown_terminal(term: &mut Term) -> Result<()> {
     Ok(())
 }
 
+/// Decide whether the version popup shows this boot, persisting the current
+/// version so the popup shows at most once per upgrade regardless of how the run
+/// exits. Re-loads the config post-altscreen for `last_seen_version` only — any
+/// config warning was already surfaced by `main`'s pre-altscreen pass.
+/// A corrupted/hand-edited `last_seen_version` is overwritten so the popup can't
+/// be silently disabled forever.
+fn resolve_version_popup(config_path: &std::path::Path) -> bool {
+    let current_ver = env!("CARGO_PKG_VERSION");
+    let cfg = crate::config::load(config_path, &mut Vec::new());
+    let decision = crate::version::boot_decision(current_ver, cfg.last_seen_version.as_deref());
+    if decision.should_persist {
+        if let Err(e) = crate::config::save_version(config_path, current_ver) {
+            tracing::warn!("failed to persist version: {e}");
+        }
+    }
+    decision.should_show_popup
+}
+
+/// The throttled (≤ every 15s) decode-drift re-scan that drives the footer
+/// nudge: reuses doctor's tested scanner over the warn-floor log. The ONE
+/// deliberate exception to "no scan-the-history" — it derives a passive
+/// diagnostic nudge from the log artifact, NOT lifecycle state. Mutates
+/// `last_scan` (the throttle stamp) and `out` (the drifted prefixes) exactly as
+/// the inlined loop did; a `None` log path is a no-op (headless = no surfacing).
+fn rescan_drift(
+    log_path: &Option<std::path::PathBuf>,
+    last_scan: &mut Option<Instant>,
+    out: &mut Vec<String>,
+) {
+    let Some(lp) = log_path else { return };
+    let due = last_scan.is_none_or(|t| t.elapsed().as_secs() >= 15);
+    if due {
+        *last_scan = Some(Instant::now());
+        *out = std::fs::read_to_string(lp)
+            .map(|log| crate::doctor::drifted_sources(&log))
+            .unwrap_or_default();
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn run_tui(
     mut scene_rx: SceneRx,
@@ -380,24 +419,7 @@ pub async fn run_tui(
     let pack = embedded_pack::load_sprite_pack(pack_dir)?;
     let term = setup_terminal()?;
     let mut renderer = TuiRenderer::new(term, theme, pets);
-    let mut version_popup = {
-        let current_ver = env!("CARGO_PKG_VERSION");
-        // Post-altscreen re-load for last_seen_version only — any config
-        // warning was already surfaced by main's pre-altscreen pass.
-        let cfg = crate::config::load(&config_path, &mut Vec::new());
-        let decision = crate::version::boot_decision(current_ver, cfg.last_seen_version.as_deref());
-        // Persist the current version immediately so the popup shows at
-        // most once per upgrade, regardless of how the user exits this run
-        // (Enter to dismiss, Esc/q/Ctrl+C to quit, or terminal close).
-        // Also overwrites a corrupted/hand-edited last_seen_version so the
-        // popup can't be silently disabled forever.
-        if decision.should_persist {
-            if let Err(e) = crate::config::save_version(&config_path, current_ver) {
-                tracing::warn!("failed to persist version: {e}");
-            }
-        }
-        decision.should_show_popup
-    };
+    let mut version_popup = resolve_version_popup(&config_path);
     let mut last_layout_sig: Option<(u16, u16)> = None;
     let mut paused = false;
     let mut frozen_now: Option<SystemTime> = None;
@@ -489,15 +511,7 @@ pub async fn run_tui(
             // lifecycle state (the no-history rule guards the reducer). A counting
             // tracing::Layer was rejected — it would add stateful blast radius to
             // the single global file subscriber for a hint the 15s scan covers.
-            if let Some(lp) = &log_path {
-                let due = last_drift_scan.is_none_or(|t| t.elapsed().as_secs() >= 15);
-                if due {
-                    last_drift_scan = Some(std::time::Instant::now());
-                    drifted_prefixes = std::fs::read_to_string(lp)
-                        .map(|log| crate::doctor::drifted_sources(&log))
-                        .unwrap_or_default();
-                }
-            }
+            rescan_drift(&log_path, &mut last_drift_scan, &mut drifted_prefixes);
             renderer.set_source_warning(crate::doctor::footer_warning(
                 widgets::source_warning_message(&health).as_deref(),
                 &drifted_prefixes,
@@ -563,17 +577,12 @@ pub async fn run_tui(
             // layout's capacity become invisible but stay alive; they
             // reappear when the terminal grows back.
             if let Some(layout) = renderer.cached_layout() {
-                use pixtuoid_core::layout::{SceneLayout, MAX_VISIBLE_DESKS};
                 use pixtuoid_core::state::MAX_FLOORS;
                 let buf_w = layout.buf_w;
                 let buf_h = layout.buf_h;
                 for floor_idx in 0..MAX_FLOORS {
-                    let seed = (floor_idx as u64)
-                        .wrapping_mul(pixtuoid_scene::floor::FLOOR_SEED_MULTIPLIER);
-                    let mut capacity =
-                        SceneLayout::compute_with_seed(buf_w, buf_h, MAX_VISIBLE_DESKS, seed)
-                            .map(|l| l.home_desks.len())
-                            .unwrap_or(0);
+                    let seed = pixtuoid_scene::floor::floor_seed(floor_idx);
+                    let mut capacity = pixtuoid_scene::floor::floor_capacity(buf_w, buf_h, seed);
                     if let Some(cap) = desk_cap {
                         capacity = capacity.min(cap);
                     }

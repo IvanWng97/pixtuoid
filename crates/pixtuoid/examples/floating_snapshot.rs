@@ -153,7 +153,7 @@ fn main() -> Result<()> {
         let oy = (wy / scale).min(bh - 1);
         for wx in 0..win_w {
             let ox = (wx / scale).min(bw - 1);
-            let p = buf.pixels[(oy * bw + ox) as usize];
+            let p = buf.as_slice()[(oy * bw + ox) as usize];
             sb[wy as usize * ww + wx as usize] =
                 (p.r as u32) << 16 | (p.g as u32) << 8 | p.b as u32;
         }

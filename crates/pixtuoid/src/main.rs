@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use clap::Parser;
-use pixtuoid::cli::{Cli, Cmd};
+use pixtuoid::cli::{Cli, Cmd, SourceArgs};
 use pixtuoid::{config, doctor, floating, init_pack, install, runtime, validate};
 use tracing_subscriber::EnvFilter;
 
@@ -100,41 +100,17 @@ fn main() -> Result<()> {
 
     match cmd {
         Cmd::Run {
-            socket,
-            projects_root,
-            codex_sessions_root,
-            pack_dir,
+            source,
             max_desks: cli_max_desks,
             headless,
         } => {
-            let rc = build_run_config(
-                cli_theme.as_deref(),
-                socket,
-                projects_root,
-                codex_sessions_root,
-                pack_dir,
-                cli_max_desks,
-                headless,
-            )?;
+            let rc = build_run_config(cli_theme.as_deref(), source, cli_max_desks, headless)?;
             runtime::run(rc)
         }
-        Cmd::Floating {
-            socket,
-            projects_root,
-            codex_sessions_root,
-            pack_dir,
-        } => {
+        Cmd::Floating { source } => {
             // Floating reuses the TUI run prelude (theme/pack/pets/sources/log) but is
             // never headless and has no desk cap — capacity is seeded from the window.
-            let rc = build_run_config(
-                cli_theme.as_deref(),
-                socket,
-                projects_root,
-                codex_sessions_root,
-                pack_dir,
-                None,
-                false,
-            )?;
+            let rc = build_run_config(cli_theme.as_deref(), source, None, false)?;
             floating::run(rc)
         }
         Cmd::ValidatePack { pack_dir } => validate::validate_pack(&pack_dir),
@@ -147,16 +123,18 @@ fn main() -> Result<()> {
 /// the common prelude for `run` (TUI) and `floating` (window). On a non-headless
 /// launch it also surfaces config warnings + the broken-install preflight to
 /// stderr (visible in the launching terminal / pre-altscreen scrollback, #87/#309).
-#[allow(clippy::too_many_arguments)]
 fn build_run_config(
     cli_theme: Option<&str>,
-    socket: Option<PathBuf>,
-    projects_root: Option<PathBuf>,
-    codex_sessions_root: Option<PathBuf>,
-    pack_dir: Option<PathBuf>,
+    source: SourceArgs,
     cli_max_desks: Option<usize>,
     headless: bool,
 ) -> Result<runtime::RunConfig> {
+    let SourceArgs {
+        socket,
+        projects_root,
+        codex_sessions_root,
+        pack_dir,
+    } = source;
     let cfg_path = config::config_path();
     let mut cfg_warnings = Vec::new();
     let cfg = config::load(&cfg_path, &mut cfg_warnings);

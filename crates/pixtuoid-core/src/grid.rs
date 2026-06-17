@@ -29,6 +29,33 @@ impl<T: Clone> Grid<T> {
 }
 
 impl<T> Grid<T> {
+    /// The flat row-major cell data, `width * height` long.
+    #[inline]
+    pub fn as_slice(&self) -> &[T] {
+        &self.data
+    }
+
+    /// The flat row-major cell data, mutable.
+    #[inline]
+    pub fn as_mut_slice(&mut self) -> &mut [T] {
+        &mut self.data
+    }
+
+    /// Build from an existing row-major `Vec<T>`. CHECKED: the data length must
+    /// equal `width * height`.
+    pub fn from_vec(width: u16, height: u16, data: Vec<T>) -> Self {
+        assert_eq!(
+            data.len(),
+            width as usize * height as usize,
+            "Grid::from_vec length mismatch"
+        );
+        Self {
+            width,
+            height,
+            data,
+        }
+    }
+
     /// Row-major flat index of `(x, y)`, or `None` out of bounds.
     #[inline]
     fn index(&self, x: u16, y: u16) -> Option<usize> {
@@ -60,6 +87,24 @@ impl<T: Copy> Grid<T> {
     #[inline]
     pub fn get_or(&self, x: u16, y: u16, default: T) -> T {
         self.get(x, y).copied().unwrap_or(default)
+    }
+
+    /// Resize and fill in one shot, reusing the existing allocation when
+    /// possible (cheaper than rebuilding once per frame): when the dims are
+    /// unchanged every cell is overwritten with `fill` in place; otherwise the
+    /// dims are set, the data cleared, and refilled to the new total.
+    pub fn resize_fill(&mut self, width: u16, height: u16, fill: T) {
+        let total = (width as usize) * (height as usize);
+        if self.width == width && self.height == height {
+            for p in &mut self.data {
+                *p = fill;
+            }
+            return;
+        }
+        self.width = width;
+        self.height = height;
+        self.data.clear();
+        self.data.resize(total, fill);
     }
 }
 
@@ -93,5 +138,36 @@ mod tests {
         let g = Grid::filled(2, 2, true);
         assert!(g.get_or(0, 0, false));
         assert!(!g.get_or(9, 9, false));
+    }
+
+    #[test]
+    fn from_vec_round_trips_through_as_slice() {
+        let data = vec![1u8, 2, 3, 4, 5, 6];
+        let g = Grid::from_vec(3, 2, data.clone());
+        assert_eq!(g.width, 3);
+        assert_eq!(g.height, 2);
+        assert_eq!(g.as_slice(), data.as_slice());
+        assert_eq!(g.get(2, 1), Some(&6));
+    }
+
+    #[test]
+    fn as_mut_slice_mutates_in_place() {
+        let mut g = Grid::from_vec(2, 2, vec![0u8, 0, 0, 0]);
+        g.as_mut_slice()[3] = 9;
+        assert_eq!(g.get(1, 1), Some(&9));
+        assert_eq!(g.as_slice(), &[0, 0, 0, 9]);
+    }
+
+    #[test]
+    fn resize_fill_reuses_on_same_dims_and_grows_otherwise() {
+        // Same dims: overwrite every cell in place.
+        let mut g = Grid::from_vec(2, 2, vec![1u8, 2, 3, 4]);
+        g.resize_fill(2, 2, 7);
+        assert_eq!(g.as_slice(), &[7, 7, 7, 7]);
+        // Grow: new dims + refill.
+        g.resize_fill(3, 2, 5);
+        assert_eq!(g.width, 3);
+        assert_eq!(g.height, 2);
+        assert_eq!(g.as_slice(), &[5, 5, 5, 5, 5, 5]);
     }
 }

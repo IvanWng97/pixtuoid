@@ -45,10 +45,16 @@ impl FrameCache {
             .retain(|k, _| scene.agents.contains_key(&k.agent_id));
     }
 
+    /// Test-only inspection seam (entry count). `#[doc(hidden)]`: not part of the
+    /// rendering API — the cache is opaque to consumers; only the unit tests read it.
+    #[doc(hidden)]
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
+    /// Test-only inspection seam (paired with `len` so clippy's `len_without_is_empty`
+    /// is satisfied). `#[doc(hidden)]` for the same reason as `len`.
+    #[doc(hidden)]
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
@@ -59,11 +65,7 @@ mod tests {
     use super::*;
 
     fn dummy_frame() -> Frame {
-        Frame {
-            width: 1,
-            height: 1,
-            pixels: vec![None],
-        }
+        Frame::from_pixels(1, 1, vec![None])
     }
 
     fn key() -> FrameKey {

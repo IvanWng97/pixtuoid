@@ -10,7 +10,9 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
-use super::{borderless_panel, centered_in, marquee_or_truncate, marquee_window, to_color};
+use super::{
+    badge_color_for, borderless_panel, centered_in, marquee_or_truncate, marquee_window, to_color,
+};
 use crate::tui::connection::{no_action_hint, ConnState, ConnectionRow, LiveInfo};
 use pixtuoid_scene::theme::Theme;
 
@@ -134,18 +136,7 @@ fn connection_line(
     // Badge: source color, NEVER reversed (a low-luminance hue inverted vanishes
     // against the highlight bg). Same mapping as the dashboard's badge.
     let badge_tag = row.label_prefix;
-    let badge_color = to_color(match badge_tag {
-        "cc" => theme.source.claude_code,
-        "cx" => theme.source.codex,
-        "rx" => theme.source.reasonix,
-        "ag" => theme.source.antigravity,
-        "cw" => theme.source.codewhale,
-        "oc" => theme.source.opencode,
-        "cp" => theme.source.copilot,
-        "cu" => theme.source.cursor,
-        "ok" => theme.source.openclaw,
-        _ => theme.ui.label_idle,
-    });
+    let badge_color = badge_color_for(badge_tag, theme);
 
     let base = if is_selected {
         Style::default().add_modifier(Modifier::REVERSED)

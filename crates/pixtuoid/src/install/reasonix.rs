@@ -155,9 +155,7 @@ fn user_config_dir() -> PathBuf {
 pub fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
     // `_explicit` is Claude's bare-name-vs-absolute switch — Reasonix always
     // embeds the absolute path, so the flag changes nothing here.
-    let p = resolved
-        .to_str()
-        .ok_or_else(|| anyhow!("pixtuoid-hook path is non-UTF-8: {}", resolved.display()))?;
+    let p = verify::hook_path_str(resolved)?;
     // Same OS fork as Codex, in one place (hook_cmd::shell_hook_command): Unix
     // env-prefix form / Windows bare `<path> --source reasonix`.
     crate::install::hook_cmd::shell_hook_command(p, "reasonix")

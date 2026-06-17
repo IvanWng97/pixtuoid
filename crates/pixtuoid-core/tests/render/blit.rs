@@ -12,11 +12,7 @@ fn t() -> Pixel {
 
 #[test]
 fn blit_writes_opaque_pixels_and_skips_transparent() {
-    let frame = Frame {
-        width: 2,
-        height: 2,
-        pixels: vec![px(10, 0, 0), t(), t(), px(0, 0, 30)],
-    };
+    let frame = Frame::from_pixels(2, 2, vec![px(10, 0, 0), t(), t(), px(0, 0, 30)]);
     let mut buf = RgbBuffer::filled(
         4,
         4,
@@ -58,11 +54,7 @@ fn blit_writes_opaque_pixels_and_skips_transparent() {
 
 #[test]
 fn blit_ignores_out_of_bounds() {
-    let frame = Frame {
-        width: 3,
-        height: 3,
-        pixels: vec![px(1, 1, 1); 9],
-    };
+    let frame = Frame::from_pixels(3, 3, vec![px(1, 1, 1); 9]);
     let mut buf = RgbBuffer::filled(2, 2, Rgb { r: 0, g: 0, b: 0 });
     blit_frame(&frame, 1, 1, &mut buf);
     assert_eq!(buf.get(1, 1), Rgb { r: 1, g: 1, b: 1 });
@@ -70,10 +62,10 @@ fn blit_ignores_out_of_bounds() {
 
 #[test]
 fn half_block_cells_pairs_rows() {
-    let buf = RgbBuffer {
-        width: 2,
-        height: 4,
-        pixels: vec![
+    let buf = RgbBuffer::from_pixels(
+        2,
+        4,
+        vec![
             Rgb { r: 1, g: 0, b: 0 },
             Rgb { r: 2, g: 0, b: 0 },
             Rgb { r: 3, g: 0, b: 0 },
@@ -83,7 +75,7 @@ fn half_block_cells_pairs_rows() {
             Rgb { r: 7, g: 0, b: 0 },
             Rgb { r: 8, g: 0, b: 0 },
         ],
-    };
+    );
     let cells = half_block_cells(&buf);
     assert_eq!(cells.len(), 2);
     assert_eq!(cells[0].len(), 2);
@@ -121,11 +113,11 @@ fn half_block_cells_pairs_rows() {
 fn outlined_blit_paints_halo_around_silhouette() {
     // A simple 3x3 sprite that's opaque only in the center pixel.
     // Outline should be painted at all 4 cardinal neighbors of the center.
-    let frame = Frame {
-        width: 3,
-        height: 3,
-        pixels: vec![t(), t(), t(), t(), px(200, 0, 0), t(), t(), t(), t()],
-    };
+    let frame = Frame::from_pixels(
+        3,
+        3,
+        vec![t(), t(), t(), t(), px(200, 0, 0), t(), t(), t(), t()],
+    );
     let mut buf = RgbBuffer::filled(5, 5, Rgb { r: 0, g: 0, b: 0 });
     blit_frame_outlined(
         &frame,
@@ -182,11 +174,11 @@ fn outlined_blit_paints_halo_around_silhouette() {
 #[test]
 fn outlined_blit_does_not_outline_interior_opaque_pixels() {
     // Fully-opaque 2x2 sprite — no transparent pixels, so no internal outline.
-    let frame = Frame {
-        width: 2,
-        height: 2,
-        pixels: vec![px(100, 0, 0), px(100, 0, 0), px(100, 0, 0), px(100, 0, 0)],
-    };
+    let frame = Frame::from_pixels(
+        2,
+        2,
+        vec![px(100, 0, 0), px(100, 0, 0), px(100, 0, 0), px(100, 0, 0)],
+    );
     let mut buf = RgbBuffer::filled(4, 4, Rgb { r: 0, g: 0, b: 0 });
     blit_frame_outlined(
         &frame,
@@ -322,15 +314,15 @@ fn half_block_cells_on_empty_buffers_returns_empty_grid() {
 
 #[test]
 fn half_block_cells_pads_odd_height_with_repeated_row() {
-    let buf = RgbBuffer {
-        width: 1,
-        height: 3,
-        pixels: vec![
+    let buf = RgbBuffer::from_pixels(
+        1,
+        3,
+        vec![
             Rgb { r: 1, g: 0, b: 0 },
             Rgb { r: 2, g: 0, b: 0 },
             Rgb { r: 3, g: 0, b: 0 },
         ],
-    };
+    );
     let cells = half_block_cells(&buf);
     assert_eq!(cells.len(), 2);
     assert_eq!(

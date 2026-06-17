@@ -340,37 +340,43 @@ pub(crate) fn make_tool_detail(source: &str, tool_name: &str, input: Option<&Val
         // `target` (the file/cmd descriptor) is only meaningful on the Generic
         // branch, so derive it here lazily — no wasted alloc on the dispatch
         // path, and callers can't pass a `target` computed from a different
-        // `input` than the one used for detection.
-        ToolDetail::Generic {
-            // tool_name is wire/transcript content like the target — capped
-            // in the display (the raw name still drives the target-key match
-            // above; legitimate names are far shorter than the cap).
-            display: format!(
-                "{}{}",
-                ellipsize(tool_name, MAX_DECODED_FIELD_CHARS),
-                describe_tool_target(tool_name, input)
-            ),
-        }
+        // `input` than the one used for detection. CC's per-key dispatch lives
+        // in `describe_tool_target`; the format-agnostic last-mile assembly is
+        // shared in `generic_tool_display` so the per-source generic fallbacks
+        // can't drift.
+        generic_tool_display(tool_name, describe_tool_target(tool_name, input))
     }
 }
 
-pub(crate) fn describe_tool_target(tool: &str, input: Option<&Value>) -> String {
-    let Some(input) = input else {
-        return String::new();
-    };
+/// The format-agnostic Generic-tool fallback display, shared by every source's
+/// `*_tool_detail` so the cap policy can't drift between them. `tool` is wire
+/// content (capped at [`MAX_DECODED_FIELD_CHARS`]); `target` is the per-source
+/// file/cmd descriptor (capped at [`MAX_TOOL_TARGET_CHARS`] and rendered as a
+/// `: …` suffix). The per-source DISPATCH (which tool maps to which specialized
+/// `ToolDetail`, and which input keys carry the target) stays in each source's
+/// own fn — only this last-mile string assembly is shared.
+pub(crate) fn generic_tool_display(tool: &str, target: Option<&str>) -> ToolDetail {
+    let suffix = target
+        .map(|t| format!(": {}", ellipsize(t, MAX_TOOL_TARGET_CHARS)))
+        .unwrap_or_default();
+    ToolDetail::Generic {
+        display: format!("{}{suffix}", ellipsize(tool, MAX_DECODED_FIELD_CHARS)),
+    }
+}
+
+/// CC's per-tool target key dispatch: the raw `file/cmd` descriptor for the
+/// Generic display, or `None` for a tool with no keyed target. The cap +
+/// `: …` formatting is applied by [`generic_tool_display`], so this returns
+/// the raw borrowed string (per-source knowledge stays here, assembly is
+/// shared).
+pub(crate) fn describe_tool_target<'a>(tool: &str, input: Option<&'a Value>) -> Option<&'a str> {
     let key = match tool {
         "Write" | "Edit" | "MultiEdit" | "Read" => "file_path",
         "Bash" => "command",
         "Grep" | "Glob" => "pattern",
-        _ => "",
+        _ => return None,
     };
-    if key.is_empty() {
-        return String::new();
-    }
-    let Some(s) = input.get(key).and_then(|v| v.as_str()) else {
-        return String::new();
-    };
-    format!(": {}", ellipsize(s, MAX_TOOL_TARGET_CHARS))
+    input?.get(key).and_then(|v| v.as_str())
 }
 
 /// Tighter cap for the tool-target descriptor (the `: file/cmd` suffix on a

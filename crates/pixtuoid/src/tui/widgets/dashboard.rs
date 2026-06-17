@@ -14,7 +14,7 @@ use ratatui::widgets::Paragraph;
 use pixtuoid_core::source::registry::descriptor_for;
 use pixtuoid_core::AgentId;
 
-use super::{centered_in, marquee_or_truncate, to_color};
+use super::{badge_color_for, centered_in, marquee_or_truncate, to_color};
 use crate::tui::dashboard::{DashboardRow, RowState, DASHBOARD_VIEWPORT_ROWS};
 use pixtuoid_scene::theme::Theme;
 
@@ -149,18 +149,7 @@ fn dashboard_line(
     // inverted becomes invisible against the highlight background.
     let badge_tag = descriptor_for(row.source.as_ref()).map_or("??", |d| d.label_prefix);
     let badge_text = format!("[{badge_tag:<2}]");
-    let badge_color = to_color(match badge_tag {
-        "cc" => theme.source.claude_code,
-        "cx" => theme.source.codex,
-        "rx" => theme.source.reasonix,
-        "ag" => theme.source.antigravity,
-        "cw" => theme.source.codewhale,
-        "oc" => theme.source.opencode,
-        "cp" => theme.source.copilot,
-        "cu" => theme.source.cursor,
-        "ok" => theme.source.openclaw,
-        _ => theme.ui.label_idle,
-    });
+    let badge_color = badge_color_for(badge_tag, theme);
 
     Line::from(vec![
         Span::styled(badge_text, Style::default().fg(badge_color)),

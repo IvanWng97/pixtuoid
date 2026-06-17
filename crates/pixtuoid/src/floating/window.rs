@@ -154,7 +154,7 @@ impl FloatingApp {
         // Collect office pixels (release the `self.renderer` borrow) as `0x00RRGGBB`.
         let (ow, oh) = (office.width as usize, office.height as usize);
         let opx: Vec<u32> = office
-            .pixels
+            .as_slice()
             .iter()
             .map(|p| (p.r as u32) << 16 | (p.g as u32) << 8 | p.b as u32)
             .collect();
@@ -202,12 +202,9 @@ impl FloatingApp {
 /// `tui/mod.rs`). `store` (not `fetch_max`): floating tracks its window exactly, so a shrink
 /// lowers capacity (excess agents become invisible-but-alive, like the TUI on shrink).
 fn sync_floor_caps(floor_caps: &[AtomicUsize; MAX_FLOORS], buf_w: u16, buf_h: u16) {
-    use pixtuoid_core::layout::{SceneLayout, MAX_VISIBLE_DESKS};
     for (floor_idx, cap) in floor_caps.iter().enumerate() {
-        let seed = (floor_idx as u64).wrapping_mul(pixtuoid_scene::floor::FLOOR_SEED_MULTIPLIER);
-        let capacity = SceneLayout::compute_with_seed(buf_w, buf_h, MAX_VISIBLE_DESKS, seed)
-            .map(|l| l.home_desks.len())
-            .unwrap_or(0);
+        let seed = pixtuoid_scene::floor::floor_seed(floor_idx);
+        let capacity = pixtuoid_scene::floor::floor_capacity(buf_w, buf_h, seed);
         cap.store(capacity, Ordering::Relaxed);
     }
 }

@@ -157,11 +157,7 @@ fn rows_to_frame(rows: Vec<Vec<Pixel>>) -> Result<Frame> {
     let height = rows.len() as u16;
     let width = w as u16;
     let pixels = rows.into_iter().flatten().collect();
-    Ok(Frame {
-        width,
-        height,
-        pixels,
-    })
+    Ok(Frame::from_pixels(width, height, pixels))
 }
 
 #[derive(Debug, Deserialize)]

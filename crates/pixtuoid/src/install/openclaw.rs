@@ -33,8 +33,9 @@ use crate::install::target::MergeOutcome;
 /// The plugin id — the key under `plugins.entries` and `plugins.load.paths`'s dir.
 const PLUGIN_ID: &str = "pixtuoid";
 /// First-line marker in the rendered entry module (provenance; not load-bearing
-/// for detection, which keys on OpenClaw's own dirs).
-#[allow(dead_code)]
+/// for detection, which keys on OpenClaw's own dirs). Only the test suite reads
+/// it, so it's test-only.
+#[cfg(test)]
 const SENTINEL: &str = "@pixtuoid-openclaw-plugin";
 /// Placeholder for the baked shim path in the bundled entry module.
 const HOOK_PLACEHOLDER: &str = "{{HOOK_PATH_JSON}}";
@@ -215,10 +216,7 @@ fn resolve_openclaw_detect(
 /// The shim's absolute path, baked into the plugin (the gateway runs it under
 /// Node, no PATH reliance). Err on non-UTF-8 like opencode/Codex.
 pub fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
-    resolved
-        .to_str()
-        .map(str::to_string)
-        .ok_or_else(|| anyhow!("pixtuoid-hook path is non-UTF-8: {}", resolved.display()))
+    crate::install::verify::hook_path_str(resolved).map(str::to_string)
 }
 
 /// The wholly-owned plugin dir files (manifest + package.json + entry module).

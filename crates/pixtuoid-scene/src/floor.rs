@@ -7,7 +7,7 @@
 //! own router, overlay, pose history, and frame cache.
 
 use std::collections::HashMap;
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 
 use pixtuoid_core::physics::{walk_arrived, WalkProfile};
 use pixtuoid_core::state::{AgentSlot, GlobalDeskIndex, SceneState};
@@ -24,6 +24,29 @@ pub use pixtuoid_core::state::MAX_FLOORS;
 /// Fibonacci hash multiplier for floor seed derivation. Used in both
 /// `FloorMeta::for_floor` and the TUI auto-compute loop.
 pub const FLOOR_SEED_MULTIPLIER: u64 = 0x9e37_79b9_7f4a_7c15;
+
+/// Derive a floor's layout seed from its index — `floor_idx * FLOOR_SEED_MULTIPLIER`
+/// (Fibonacci hash). The ONE definition the engine and every binary call site
+/// (boot-capacity seeding, the per-frame `compute_with_seed`, `FloorMeta`) share,
+/// so a floor's look + capacity can't drift between paths.
+pub fn floor_seed(floor_idx: usize) -> u64 {
+    (floor_idx as u64).wrapping_mul(FLOOR_SEED_MULTIPLIER)
+}
+
+/// How many home desks a floor of buffer size `buf_w × buf_h` with `floor_seed`
+/// fits — the auto-capacity the boot seeding + `fetch_max` growth read. Returns
+/// `0` when the buffer is too small for even one cubicle (`compute_with_seed`
+/// returns `None`), matching the existing `unwrap_or(0)` capacity callers.
+pub fn floor_capacity(buf_w: u16, buf_h: u16, floor_seed: u64) -> usize {
+    crate::layout::SceneLayout::compute_with_seed(
+        buf_w,
+        buf_h,
+        crate::layout::MAX_VISIBLE_DESKS,
+        floor_seed,
+    )
+    .map(|l| l.home_desks.len())
+    .unwrap_or(0)
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct FloorMeta {
@@ -43,7 +66,7 @@ impl FloorMeta {
         Self {
             floor_idx,
             altitude,
-            floor_seed: (floor_idx as u64).wrapping_mul(FLOOR_SEED_MULTIPLIER),
+            floor_seed: floor_seed(floor_idx),
             // Indoor lighting is uniform across floors — building interiors
             // share the same overhead lighting regardless of altitude. The
             // `altitude` field still drives skyline depth in the windows.
@@ -109,10 +132,7 @@ impl FloorCtx {
         // entry is (started_at, profile); exit is (started_at, profile, from).
         // Take the two shared fields so one closure handles both shapes.
         let in_flight = |started_at: SystemTime, p: &WalkProfile| -> u64 {
-            let elapsed = now
-                .duration_since(started_at)
-                .unwrap_or(Duration::ZERO)
-                .as_millis() as u64;
+            let elapsed = crate::anim::elapsed_ms(now, started_at);
             if walk_arrived(p, elapsed) {
                 0
             } else {
@@ -184,7 +204,7 @@ impl LightingState {
     pub fn tick(&mut self, empty: bool, now: SystemTime) -> f32 {
         let target = if empty {
             let since = *self.empty_since.get_or_insert(now);
-            let elapsed = now.duration_since(since).unwrap_or_default().as_millis() as u64;
+            let elapsed = crate::anim::elapsed_ms(now, since);
             if elapsed >= Self::EMPTY_DEBOUNCE_MS {
                 Self::MIN_LEVEL
             } else {

@@ -32,6 +32,7 @@ impl AgentId {
     /// on it heavily — `normalize_path_key` makes every expectation they build
     /// platform-consistent by construction. Do not call this in production
     /// decode paths; use `from_parts(source, &cc_id_from_path(path))` instead.
+    #[doc(hidden)]
     pub fn from_transcript_path(path: &str) -> Self {
         Self::from_parts(
             "claude-code",

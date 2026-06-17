@@ -252,7 +252,7 @@ mod tests {
         // `bg_fallback` → the floor/walls/windows pass actually ran.
         let bg = theme.surface.bg_fallback;
         assert!(
-            buf.pixels
+            buf.as_slice()
                 .iter()
                 .any(|p| *p != Rgb { r: 0, g: 0, b: 0 } && *p != bg),
             "the painter draws office content beyond the cleared background"

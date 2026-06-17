@@ -54,7 +54,7 @@
 use anyhow::{anyhow, bail, Result};
 use serde_json::Value;
 
-use crate::source::decoder::{ellipsize, MAX_DECODED_FIELD_CHARS, MAX_TOOL_TARGET_CHARS};
+use crate::source::decoder::{ellipsize, generic_tool_display, MAX_DECODED_FIELD_CHARS};
 use crate::source::{AgentEvent, ToolDetail};
 use crate::AgentId;
 
@@ -256,21 +256,15 @@ fn rx_tool_detail(tool: &str, args: Option<&Value>) -> ToolDetail {
     if SUBAGENT_TOOLS.contains(&tool) {
         return ToolDetail::Task;
     }
-    let target = args
-        .and_then(|a| {
-            ["command", "path", "pattern", "url"]
-                .iter()
-                .find_map(|k| a.get(k).and_then(|v| v.as_str()))
-        })
-        .map(|s| format!(": {}", ellipsize(s, MAX_TOOL_TARGET_CHARS)))
-        .unwrap_or_default();
-    // Cap BOTH fields at the decode boundary, matching `make_tool_detail` (pitfall
-    // 3: content-derived strings are capped where they ENTER the system). The tool
-    // NAME is a content field → `MAX_DECODED_FIELD_CHARS`; the `: target` descriptor
-    // suffix → `MAX_TOOL_TARGET_CHARS`. (Wire content from the hook payload.)
-    ToolDetail::Generic {
-        display: format!("{}{target}", ellipsize(tool, MAX_DECODED_FIELD_CHARS)),
-    }
+    let target = args.and_then(|a| {
+        ["command", "path", "pattern", "url"]
+            .iter()
+            .find_map(|k| a.get(k).and_then(|v| v.as_str()))
+    });
+    // Per-source target keys above; the shared last-mile assembly (name +
+    // `: target`, each capped at the decode boundary — pitfall 3) lives in
+    // `generic_tool_display`.
+    generic_tool_display(tool, target)
 }
 
 #[cfg(test)]

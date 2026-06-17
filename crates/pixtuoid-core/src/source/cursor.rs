@@ -63,7 +63,7 @@
 use anyhow::{anyhow, bail, Result};
 use serde_json::Value;
 
-use crate::source::decoder::{ellipsize, MAX_DECODED_FIELD_CHARS, MAX_TOOL_TARGET_CHARS};
+use crate::source::decoder::generic_tool_display;
 use crate::source::{AgentEvent, ToolDetail};
 use crate::AgentId;
 
@@ -204,22 +204,20 @@ fn cursor_tool_detail(tool: &str, args: Option<&Value>) -> ToolDetail {
     if tool == "Task" || has_subagent_type {
         return ToolDetail::Task;
     }
-    let target = args
-        .and_then(|a| {
-            ["command", "file_path", "path", "pattern", "url"]
-                .iter()
-                .find_map(|k| a.get(k).and_then(|v| v.as_str()))
-        })
-        .map(|s| format!(": {}", ellipsize(s, MAX_TOOL_TARGET_CHARS)))
-        .unwrap_or_default();
-    ToolDetail::Generic {
-        display: format!("{}{target}", ellipsize(tool, MAX_DECODED_FIELD_CHARS)),
-    }
+    let target = args.and_then(|a| {
+        ["command", "file_path", "path", "pattern", "url"]
+            .iter()
+            .find_map(|k| a.get(k).and_then(|v| v.as_str()))
+    });
+    // Per-source target keys above; the shared last-mile assembly (name +
+    // `: target` with the matching caps) lives in `generic_tool_display`.
+    generic_tool_display(tool, target)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::source::decoder::MAX_DECODED_FIELD_CHARS;
     use serde_json::json;
 
     fn decode_all(v: Value) -> Vec<AgentEvent> {

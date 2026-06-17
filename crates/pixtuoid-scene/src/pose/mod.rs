@@ -264,10 +264,7 @@ pub fn derive_with_routing(
         let profile = &e.profile;
         let stored_from = e.from;
 
-        let elapsed_ms = now
-            .duration_since(started_at)
-            .unwrap_or(Duration::ZERO)
-            .as_millis() as u64;
+        let elapsed_ms = crate::anim::elapsed_ms(now, started_at);
 
         // Compress the exit walk so it REACHES the door before the reducer's
         // EXIT_GRACE_WINDOW reaps the slot. Physics exit duration for far/slow
@@ -354,10 +351,7 @@ pub fn derive_with_routing(
         }
 
         if let Some((started_at, ref profile)) = mstate.entry.clone() {
-            let elapsed_ms = now
-                .duration_since(started_at)
-                .unwrap_or(Duration::ZERO)
-                .as_millis() as u64;
+            let elapsed_ms = crate::anim::elapsed_ms(now, started_at);
 
             if !walk_arrived(profile, elapsed_ms) {
                 let t_x1000 = walk_progress(profile, elapsed_ms);
@@ -427,19 +421,9 @@ pub fn derive_with_routing(
                 // desk-touching legs share `desk_leg_endpoint`. The profile in
                 // advance_wander adds the same chair-glide so duration matches.
                 let (from, chair_settle) = desk_leg_endpoint(desk_point, layout);
-                let settle = match (chair_settle, seat) {
-                    (Some(chair), Some(s)) => Settle::Both {
-                        start: chair,
-                        end: s,
-                    },
-                    (Some(chair), None) => Settle::Start(chair),
-                    (None, Some(s)) => Settle::End(s),
-                    (None, None) => Settle::None,
-                };
-                let elapsed_phase = now
-                    .duration_since(ms.wander_phase_started_at)
-                    .unwrap_or(Duration::ZERO)
-                    .as_millis() as u64;
+                // Rise off the desk chair (start), glide onto the waypoint seat (end).
+                let settle = settle_from_pair(chair_settle, seat);
+                let elapsed_phase = crate::anim::elapsed_ms(now, ms.wander_phase_started_at);
                 let frame = walking_frame(elapsed_phase);
                 return route_walking_pose(
                     slot,
@@ -493,19 +477,9 @@ pub fn derive_with_routing(
                 // settle (stand up off it). Shares `desk_leg_endpoint` with the
                 // entry/walk-out legs; advance_wander adds the matching glide len.
                 let (snap_target, chair_settle) = desk_leg_endpoint(desk_point, layout);
-                let settle = match (seat, chair_settle) {
-                    (Some(s), Some(chair)) => Settle::Both {
-                        start: s,
-                        end: chair,
-                    },
-                    (Some(s), None) => Settle::Start(s),
-                    (None, Some(chair)) => Settle::End(chair),
-                    (None, None) => Settle::None,
-                };
-                let elapsed_phase = now
-                    .duration_since(wander_phase_started_at)
-                    .unwrap_or(Duration::ZERO)
-                    .as_millis() as u64;
+                // Rise off the waypoint seat (start), glide onto the desk chair (end).
+                let settle = settle_from_pair(seat, chair_settle);
+                let elapsed_phase = crate::anim::elapsed_ms(now, wander_phase_started_at);
                 let frame = walking_frame(elapsed_phase);
                 return route_walking_pose(
                     slot,
@@ -555,10 +529,7 @@ pub fn derive_with_routing(
         raw,
         Pose::SeatedIdle | Pose::SeatedThinking | Pose::SeatedTyping { .. } | Pose::StandingAtDesk
     );
-    let since_state = now
-        .duration_since(slot.state_started_at)
-        .unwrap_or(Duration::ZERO)
-        .as_millis() as u64;
+    let since_state = crate::anim::elapsed_ms(now, slot.state_started_at);
     let mut final_settle = Settle::None;
     let pose = if desk_pose {
         let ms_entry = motion
@@ -630,10 +601,7 @@ pub fn derive_with_routing(
                 profile,
                 from: snap_prev,
             }) if started_at == slot.state_started_at => {
-                let elapsed_ms = now
-                    .duration_since(started_at)
-                    .unwrap_or(Duration::ZERO)
-                    .as_millis() as u64;
+                let elapsed_ms = crate::anim::elapsed_ms(now, started_at);
                 // PURE physics — no time-compression. Snap-back's higher accel
                 // (WALK_ACCEL_SNAPBACK) keeps the urgent return brisk on its own, so
                 // we render the eased walk to completion by `walk_arrived` rather than
@@ -716,6 +684,20 @@ enum Settle {
     End(Point),
     Start(Point),
     Both { start: Point, end: Point },
+}
+
+/// Collapse a leg's `(start_settle, end_settle)` pair into a single [`Settle`].
+/// The wander legs both rise off one seat and glide onto another, so the
+/// presence of each end decides `Both`/`Start`/`End`/`None`. Argument order
+/// encodes direction: `start` = the seat to rise OFF (prepended), `end` = the
+/// seat to glide ONTO (appended).
+fn settle_from_pair(start: Option<Point>, end: Option<Point>) -> Settle {
+    match (start, end) {
+        (Some(start), Some(end)) => Settle::Both { start, end },
+        (Some(start), None) => Settle::Start(start),
+        (None, Some(end)) => Settle::End(end),
+        (None, None) => Settle::None,
+    }
 }
 
 fn route_walking_pose(
