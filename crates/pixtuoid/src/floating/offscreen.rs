@@ -147,6 +147,16 @@ impl Default for OfficeRenderer {
     }
 }
 
+/// Integer upscale factor: render the office at `win_h / SCALE` so the buffer stays around
+/// `OFFICE_TARGET_H` px tall, keeping pixel-art sprites chunky + legible (a native 1:1 blit
+/// renders 8×12 sprites at 8×12 px — unreadably tiny). Min 1 (never downscale-and-blur).
+/// Shared by `window::redraw` and the `floating_snapshot` example so their downscale —
+/// and thus the label `anchor_px × scale` placement — can't drift.
+pub fn office_scale(win_h: u32) -> u32 {
+    const OFFICE_TARGET_H: u32 = 180;
+    (win_h as f64 / OFFICE_TARGET_H as f64).round().max(1.0) as u32
+}
+
 /// The bundled character sprite width (px). `CHARACTER_SPRITE_W` is `pub(super)` to
 /// `scene::pixel_painter` (not re-exported through `scene::layout`), so the floating
 /// painter uses the literal — labels only center ±half a glyph, so ±1px on a non-8-wide
@@ -183,6 +193,10 @@ pub fn paint_labels_into_surface(
             }
         };
         let color = (rgb.r as u32) << 16 | (rgb.g as u32) << 8 | rgb.b as u32;
+        // `\u{25cf}` (●) is in `scene::font`; `\u{25b8}` (▸) is NOT yet — the hovered branch
+        // is dead today (`labels()` passes `hovered: None`, floating has no agent-hover). If
+        // floating hover is ever wired, add a ▸ bitmap to `font::custom_glyph` first (its
+        // absence currently renders a blank gap, not the marker).
         let text = if el.hovered {
             format!("\u{25b8}{}", el.text)
         } else {

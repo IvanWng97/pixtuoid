@@ -141,7 +141,7 @@ fn main() -> Result<()> {
     // Mirror floating::window EXACTLY: render the office at window/SCALE, nearest-neighbor
     // upscale into a `u32` surface, then blit the name badges — so the PNG is byte-faithful.
     let (win_w, win_h) = (size.0 as u32, size.1 as u32);
-    let scale = (win_h as f64 / 180.0).round().max(1.0) as u32; // window::OFFICE_TARGET_H
+    let scale = pixtuoid::floating::offscreen::office_scale(win_h); // shared with the live window
     let ow = (win_w / scale).max(1).min(u16::MAX as u32) as u16;
     let oh = (win_h / scale).max(1).min(u16::MAX as u32) as u16;
     let buf = renderer.render(&scene, &pack, theme, now, ow, oh, FloorMeta::ground(), None);

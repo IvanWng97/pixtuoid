@@ -127,7 +127,7 @@ impl FloatingApp {
             return; // a 0-area window: nothing to draw
         };
         // Office buffer = window / SCALE (kept ~OFFICE_TARGET_H tall → chunky sprites).
-        let scale = office_scale(win_h);
+        let scale = super::offscreen::office_scale(win_h);
         let buf_w = (win_w / scale).clamp(1, u16::MAX as u32) as u16;
         let buf_h = (win_h / scale).clamp(1, u16::MAX as u32) as u16;
         // Keep the reducer's desk capacity in lockstep with the office actually rendered at
@@ -194,14 +194,6 @@ impl FloatingApp {
         window.pre_present_notify();
         let _ = sb.present();
     }
-}
-
-/// Integer upscale factor: render the office at `win_h / SCALE` so the buffer stays around
-/// `OFFICE_TARGET_H` px tall, keeping pixel-art sprites chunky + legible (a native 1:1 blit
-/// renders 8×12 sprites at 8×12 px — unreadably tiny). Min 1 (never downscale-and-blur).
-fn office_scale(win_h: u32) -> u32 {
-    const OFFICE_TARGET_H: u32 = 180;
-    (win_h as f64 / OFFICE_TARGET_H as f64).round().max(1.0) as u32
 }
 
 /// Sync the per-floor desk-capacity atomics to the office layout at `buf_w`×`buf_h` —
