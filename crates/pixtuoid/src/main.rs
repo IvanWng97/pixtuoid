@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use anyhow::Result;
 use clap::Parser;
 use pixtuoid::cli::{Cli, Cmd};
-use pixtuoid::{config, doctor, init_pack, install, runtime, validate};
+use pixtuoid::{config, doctor, float, init_pack, install, runtime, validate};
 use tracing_subscriber::EnvFilter;
 
 fn main() -> Result<()> {
@@ -34,7 +34,11 @@ fn main() -> Result<()> {
     //     `warn`; $RUST_LOG, $PIXTUOID_LOG, or --log-level raise/shape it.
     //     Crash reporting is handled separately by the panic hook.
     //   Non-TUI (--headless, validate-pack, init-pack): stderr.
-    let tui_active = matches!(&cmd, Cmd::Run { headless, .. } if !*headless);
+    //   `float`: file-log like the TUI — it's a long-running GUI; tracing spam
+    //     into the launching terminal would be noise (config warnings still
+    //     eprintln to that terminal via build_run_config before the window opens).
+    let tui_active = matches!(&cmd, Cmd::Run { headless, .. } if !*headless)
+        || matches!(&cmd, Cmd::Float { .. });
     let wants_verbose = matches!(log_level, "debug" | "trace");
     // The env var's VALUE is the log file path — an empty value would
     // "enable" file mode with an unopenable path; treat it as unset.
@@ -103,83 +107,121 @@ fn main() -> Result<()> {
             max_desks: cli_max_desks,
             headless,
         } => {
-            let cfg_path = config::config_path();
-            let mut cfg_warnings = Vec::new();
-            let cfg = config::load(&cfg_path, &mut cfg_warnings);
-            let theme = config::resolve_theme(&cfg, cli_theme.as_deref(), &mut cfg_warnings)?;
-            // The config seam's twin of the clap range(1..) guard: a config
-            // max-desks = 0 is ignored with a collected warning (eager `.or`
-            // argument on purpose — the warning must fire even when the CLI
-            // flag overrides, same as the stale-config-theme warn above).
-            let desk_cap = cli_max_desks.or(config::resolve_max_desks(&cfg, &mut cfg_warnings));
-            let pack_dir = config::resolve_pack_dir(&cfg, pack_dir);
-            let pets = config::resolve_pets(&cfg, &mut cfg_warnings);
-            // The connected-source set the office gates sprites on: explicit
-            // `[sources]` flags win; an absent flag migrates from the current
-            // install state (a target-bearing source connected iff its hooks are
-            // installed; a no-target source like Antigravity connected). The
-            // probe joins the registry id → install target via `by_source`.
-            let connected = config::resolve_connected(&cfg, |src| {
-                install::target::by_source(src).map(install::has_hooks)
-            });
-            // Config problems must reach the user's eyes, not only the log
-            // file (#87): print to stderr BEFORE the alternate screen takes
-            // the terminal (visible again in scrollback after exit — the
-            // crash hook's channel). Headless already has a stderr tracing
-            // subscriber, so the warns above reached stderr there; printing
-            // again would duplicate them.
-            if !headless {
-                for w in &cfg_warnings {
-                    eprintln!("⚠ pixtuoid: {w}");
-                }
-                // Pre-flight (#309): a CONNECTED source whose hooks are installed
-                // but structurally BROKEN renders zero sprites with no other hint.
-                // Warn here (the config-warning channel) so the fully-passive user
-                // who never opens the Sources panel or runs `doctor` still
-                // learns. Static state, so a boot eprintln — NOT the live footer.
-                // Routed through the SHARED `doctor::diagnose` rollup (empty log =
-                // skip the drift scan; boot warns on broken installs only) so this
-                // surface can't drift from the panel + the CLI report. `diagnose`
-                // gates the install check on `has_hooks` internally.
-                // Iterates TARGETS, not REGISTERED_SOURCES: only an install-bearing
-                // source can be install-BROKEN — transcript-only sources (Antigravity,
-                // Copilot) have no schema to verify, so the asymmetry is correct.
-                for &t in install::target::TARGETS {
-                    if !connected.contains(t.core_source) {
-                        continue;
-                    }
-                    let diag = doctor::diagnose(t.core_source, "");
-                    if diag.is_broken() {
-                        let issues = diag
-                            .install
-                            .as_ref()
-                            .map(|v| v.issues.join("; "))
-                            .unwrap_or_default();
-                        eprintln!(
-                            "⚠ pixtuoid: {} hooks are installed but BROKEN: {issues} — \
-                             reconnect in the Sources panel (press s)",
-                            t.core_source
-                        );
-                    }
-                }
-            }
-            runtime::run(runtime::RunConfig {
+            let rc = build_run_config(
+                cli_theme.as_deref(),
                 socket,
                 projects_root,
                 codex_sessions_root,
                 pack_dir,
-                desk_cap,
+                cli_max_desks,
                 headless,
-                config_path: cfg_path,
-                theme,
-                pets,
-                connected,
-                log_path: Some(log_file_path()),
-            })
+            )?;
+            runtime::run(rc)
+        }
+        Cmd::Float {
+            socket,
+            projects_root,
+            codex_sessions_root,
+            pack_dir,
+        } => {
+            // Float reuses the TUI run prelude (theme/pack/pets/sources/log) but is
+            // never headless and has no desk cap — capacity is seeded from the window.
+            let rc = build_run_config(
+                cli_theme.as_deref(),
+                socket,
+                projects_root,
+                codex_sessions_root,
+                pack_dir,
+                None,
+                false,
+            )?;
+            float::run(rc)
         }
         Cmd::ValidatePack { pack_dir } => validate::validate_pack(&pack_dir),
         Cmd::InitPack { dest, force } => init_pack::init_pack(&dest, force),
         Cmd::Doctor => doctor::run(&log_file_path()),
+    }
+}
+
+/// Resolve the shared [`runtime::RunConfig`] from CLI args + the on-disk config —
+/// the common prelude for `run` (TUI) and `float` (window). On a non-headless
+/// launch it also surfaces config warnings + the broken-install preflight to
+/// stderr (visible in the launching terminal / pre-altscreen scrollback, #87/#309).
+#[allow(clippy::too_many_arguments)]
+fn build_run_config(
+    cli_theme: Option<&str>,
+    socket: Option<PathBuf>,
+    projects_root: Option<PathBuf>,
+    codex_sessions_root: Option<PathBuf>,
+    pack_dir: Option<PathBuf>,
+    cli_max_desks: Option<usize>,
+    headless: bool,
+) -> Result<runtime::RunConfig> {
+    let cfg_path = config::config_path();
+    let mut cfg_warnings = Vec::new();
+    let cfg = config::load(&cfg_path, &mut cfg_warnings);
+    let theme = config::resolve_theme(&cfg, cli_theme, &mut cfg_warnings)?;
+    // The config seam's twin of the clap range(1..) guard: a config max-desks = 0
+    // is ignored with a collected warning (eager `.or` argument on purpose — the
+    // warning must fire even when the CLI flag overrides).
+    let desk_cap = cli_max_desks.or(config::resolve_max_desks(&cfg, &mut cfg_warnings));
+    let pack_dir = config::resolve_pack_dir(&cfg, pack_dir);
+    let pets = config::resolve_pets(&cfg, &mut cfg_warnings);
+    // The connected-source set the office gates sprites on: explicit `[sources]`
+    // flags win; an absent flag migrates from the install state (target-bearing
+    // source connected iff its hooks are installed; a no-target source connected).
+    let connected = config::resolve_connected(&cfg, |src| {
+        install::target::by_source(src).map(install::has_hooks)
+    });
+    if !headless {
+        // Config problems must reach the user's eyes, not only the log file (#87):
+        // stderr BEFORE any alternate screen / window. Headless already has a
+        // stderr tracing subscriber, so re-printing there would duplicate.
+        for w in &cfg_warnings {
+            eprintln!("⚠ pixtuoid: {w}");
+        }
+        warn_broken_installs(&connected);
+    }
+    Ok(runtime::RunConfig {
+        socket,
+        projects_root,
+        codex_sessions_root,
+        pack_dir,
+        desk_cap,
+        headless,
+        config_path: cfg_path,
+        theme,
+        pets,
+        connected,
+        log_path: Some(log_file_path()),
+    })
+}
+
+/// Boot preflight (#309): warn (stderr) when a CONNECTED source's hooks are
+/// installed but structurally BROKEN — it would render zero sprites with no other
+/// hint, so the fully-passive user who never opens the Sources panel still learns.
+/// Routed through the SHARED `doctor::diagnose` rollup (empty log = skip the drift
+/// scan; warns on broken installs only) so this surface can't drift from the panel
+/// + the CLI report. Iterates TARGETS, not REGISTERED_SOURCES: only an
+/// install-bearing source can be install-BROKEN.
+fn warn_broken_installs(connected: &std::collections::HashSet<String>) {
+    for &t in install::target::TARGETS {
+        if !connected.contains(t.core_source) {
+            continue;
+        }
+        let diag = doctor::diagnose(t.core_source, "");
+        if diag.is_broken() {
+            let issues = diag
+                .install
+                .as_ref()
+                .map(|v| v.issues.join("; "))
+                .unwrap_or_default();
+            eprintln!(
+                "⚠ pixtuoid: {} hooks are installed but BROKEN: {issues} — \
+                 reconnect in the Sources panel (press s)",
+                t.core_source
+            );
+        }
     }
 }
 

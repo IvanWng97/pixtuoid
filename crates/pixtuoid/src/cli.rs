@@ -53,6 +53,19 @@ pub enum Cmd {
         #[arg(long, default_value_t = false)]
         headless: bool,
     },
+    /// Render the live office in a frameless, always-on-top desktop window
+    /// (no TUI). Shares the same source flags as `run`.
+    Float {
+        #[arg(long, value_parser = parse_nonempty_path)]
+        socket: Option<PathBuf>,
+        #[arg(long)]
+        projects_root: Option<PathBuf>,
+        /// Override the Codex sessions root (default ~/.codex/sessions).
+        #[arg(long)]
+        codex_sessions_root: Option<PathBuf>,
+        #[arg(long)]
+        pack_dir: Option<PathBuf>,
+    },
     /// Validate a custom sprite pack directory.
     ValidatePack {
         /// Path to the pack directory (must contain pack.toml).
@@ -223,5 +236,23 @@ mod tests {
         assert_eq!(level, LogLevel::Debug);
         assert_eq!(theme.as_deref(), Some("cyberpunk"));
         assert!(matches!(cmd, Cmd::ValidatePack { .. }));
+    }
+
+    #[test]
+    fn float_subcommand_parses_with_shared_run_flags() {
+        let cli = Cli::try_parse_from(["pixtuoid", "float", "--projects-root", "/tmp/p"]).unwrap();
+        assert!(matches!(
+            cli.cmd,
+            Some(Cmd::Float {
+                projects_root: Some(_),
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn float_subcommand_rejects_empty_socket() {
+        // The shared `parse_nonempty_path` guard applies to float's --socket too.
+        assert!(Cli::try_parse_from(["pixtuoid", "float", "--socket", "  "]).is_err());
     }
 }
