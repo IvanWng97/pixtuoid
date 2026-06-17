@@ -12,7 +12,7 @@ keywords.workspace     = true
 categories.workspace   = true
 
 [dependencies]
-pixtuoid-core = { path = "../pixtuoid-core", version = "0.10.0" }
+pixtuoid-core = { path = "../pixtuoid-core", version = "0.11.0" }
 anyhow        = { workspace = true }
 tracing       = { workspace = true }
 # clock feature gives us Local::now() w/ system timezone for the wall clock.
