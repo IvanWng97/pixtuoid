@@ -61,6 +61,7 @@ pub fn release_notes(version: &str) -> Option<&'static [&'static str]> {
         "0.10.0" => Some(&[
             "`pixtuoid doctor` now flags an OpenClaw plugin whose files went missing — a source that would silently never load is reported broken instead of healthy",
             "Smoother Sources panel — connecting or disconnecting a CLI no longer hitches the office while it writes hook config",
+            "Windows: agent hooks now install to the exact path each CLI reads — CodeWhale, OpenClaw, Reasonix and Cursor sessions show up reliably (no more installed-but-invisible)",
         ]),
         "0.9.0" => Some(&[
             "OpenClaw gateway visualized as a presence-gated wandering lobster mascot whose motion tracks the daemon (idle ambles, busy shuttles, down walks out); connect it in the Sources panel (press s)",
