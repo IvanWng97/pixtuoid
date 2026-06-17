@@ -84,7 +84,7 @@ fn reasonix_home() -> Option<PathBuf> {
         io::nonempty_env("REASONIX_HOME").map(|v| io::expand_tilde(&v, None)),
         cfg!(windows),
         user_config_dir(),
-        io::user_home(),
+        pixtuoid_core::platform::user_home_opt(),
     )
 }
 

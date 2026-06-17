@@ -4,19 +4,6 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
 
-/// The user's home dir — `USERPROFILE`-first on Windows (HOME is normally
-/// unset there; Git Bash's exported HOME is POSIX-form and unusable), `HOME`
-/// on Unix. `None` when nothing is set: call sites keep their own fallbacks.
-/// An empty value counts as unset.
-///
-/// Thin adapter over `pixtuoid_core::platform`: the USERPROFILE-vs-HOME rule
-/// lives there (one authority, shared with core's `String`-returning
-/// `user_home`); this just keeps the installer's `Option`/empty-is-unset
-/// contract that the call sites here depend on.
-pub fn user_home() -> Option<String> {
-    pixtuoid_core::platform::user_home_opt()
-}
-
 /// The ONE empty-as-unset filter for env values, trim-based: empty means
 /// unset (the #172 RUST_LOG policy; the XDG basedir spec says the same), and
 /// a whitespace-only value can never be the absolute path the env contracts
@@ -63,14 +50,14 @@ pub fn expand_tilde(value: &str, home: Option<&Path>) -> PathBuf {
 /// [`home_relative_checked`] — installing into `./.reasonix/...` produces a
 /// file the CLI's global-scope loader never reads.
 pub fn home_relative(rel: &str) -> PathBuf {
-    let home = user_home().unwrap_or_else(|| ".".into());
+    let home = pixtuoid_core::platform::user_home_opt().unwrap_or_else(|| ".".into());
     PathBuf::from(home).join(rel)
 }
 
 /// Resolve a `$HOME`-relative path, hard-erroring when no home dir is
 /// resolvable (instead of `home_relative`'s CWD fallback).
 pub fn home_relative_checked(rel: &str) -> Result<PathBuf> {
-    checked_home_join(user_home(), rel)
+    checked_home_join(pixtuoid_core::platform::user_home_opt(), rel)
 }
 
 fn checked_home_join(home: Option<String>, rel: &str) -> Result<PathBuf> {
@@ -666,28 +653,6 @@ mod tests {
         assert_eq!(remove_backup(&p, "pixtuoid.bak").unwrap(), Some(b1.clone()));
         assert!(!b1.exists());
         assert_eq!(remove_backup(&p, "pixtuoid.bak").unwrap(), None);
-    }
-
-    #[test]
-    fn user_home_is_none_when_no_home_vars() {
-        // The USERPROFILE-vs-HOME rule (and the Option/empty=unset contract this
-        // adapter keeps) now lives in ONE place: pixtuoid_core::platform. Pin the
-        // installer-relevant semantics against that pure seam — testable on macOS.
-        use pixtuoid_core::platform::resolve_user_home_opt;
-        assert_eq!(resolve_user_home_opt(true, None, None), None);
-        assert_eq!(resolve_user_home_opt(false, None, None), None);
-    }
-
-    #[test]
-    fn user_home_userprofile_wins_on_windows_home_wins_on_unix() {
-        use pixtuoid_core::platform::resolve_user_home_opt;
-        let up = Some(r"C:\Users\me".to_string());
-        let posix = Some("/c/Users/me".to_string());
-        assert_eq!(resolve_user_home_opt(true, up.clone(), posix.clone()), up);
-        assert_eq!(
-            resolve_user_home_opt(false, up, Some("/Users/me".into())),
-            Some("/Users/me".into())
-        );
     }
 
     #[test]

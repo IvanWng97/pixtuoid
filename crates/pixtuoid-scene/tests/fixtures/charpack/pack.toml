@@ -1,0 +1,60 @@
+# Skeleton sprite pack — copy this directory and customize.
+#
+# Required animations: seated, typing (2 frames), standing,
+# walking (2 frames), walking_back (2 frames), seated_sleeping,
+# seated_sleeping_alt, holding_coffee, back_couch.
+#
+# Palette keys B/H/S are recolored per-agent for visual identity.
+# Each key MUST map to a unique RGB — recolor substitutes by RGB equality.
+# '.' is always transparent.
+
+[pack]
+name = "skeleton"
+version = "0.1.0"
+
+[palette]
+"." = "transparent"
+B = "#4488cc"       # Body / shirt — recolored per agent
+H = "#443322"       # Hair — recolored per agent
+S = "#e8c090"       # Skin — recolored per agent
+P = "#334455"       # Pants
+W = "#ffffff"       # White accent
+
+# All required animations use the same placeholder sprite.
+# Replace each with a purpose-drawn sprite for your pack.
+
+[animations.seated]
+frames = ["placeholder.sprite"]
+frame_ms = 500
+
+[animations.typing]
+frames = ["placeholder.sprite", "placeholder.sprite"]
+frame_ms = 400
+
+[animations.standing]
+frames = ["placeholder.sprite"]
+frame_ms = 500
+
+[animations.walking]
+frames = ["placeholder.sprite", "placeholder.sprite"]
+frame_ms = 200
+
+[animations.walking_back]
+frames = ["placeholder.sprite", "placeholder.sprite"]
+frame_ms = 200
+
+[animations.seated_sleeping]
+frames = ["placeholder.sprite"]
+frame_ms = 500
+
+[animations.seated_sleeping_alt]
+frames = ["placeholder.sprite"]
+frame_ms = 500
+
+[animations.holding_coffee]
+frames = ["placeholder.sprite"]
+frame_ms = 500
+
+[animations.back_couch]
+frames = ["placeholder.sprite"]
+frame_ms = 500

@@ -10,7 +10,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph};
 
 use super::to_color;
-use crate::scene::theme::Theme;
+use pixtuoid_scene::theme::Theme;
 
 /// Uniform inner padding for every borderless popup — the breathing room that
 /// stands in for the removed border. Shared (re-exported via `widgets`) so the
@@ -82,7 +82,7 @@ mod tests {
                 f,
                 Rect::new(0, 0, w, h),
                 title,
-                &crate::scene::theme::NORMAL,
+                &pixtuoid_scene::theme::NORMAL,
             );
         })
         .unwrap();
@@ -117,7 +117,7 @@ mod tests {
                 f,
                 Rect::new(0, 0, 20, 6),
                 Some("X"),
-                &crate::scene::theme::NORMAL,
+                &pixtuoid_scene::theme::NORMAL,
             );
         })
         .unwrap();
@@ -136,7 +136,7 @@ mod tests {
                 f,
                 Rect::new(0, 0, 20, 6),
                 None,
-                &crate::scene::theme::NORMAL,
+                &pixtuoid_scene::theme::NORMAL,
             );
         })
         .unwrap();

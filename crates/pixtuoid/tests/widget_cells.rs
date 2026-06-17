@@ -10,11 +10,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use pixtuoid::scene::embedded_pack::load_sprite_pack;
-use pixtuoid::scene::theme;
 use pixtuoid::tui::renderer::draw_scene;
 use pixtuoid_core::state::ActivityState;
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex, SceneState};
+use pixtuoid_scene::embedded_pack::load_sprite_pack;
+use pixtuoid_scene::theme;
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
 use ratatui::Terminal;
@@ -180,8 +180,8 @@ fn branding_visible_in_wall_display() {
 
 #[test]
 fn chitchat_bubble_text_appears_in_buffer() {
-    use pixtuoid::scene::chitchat::ChitchatBubble;
-    use pixtuoid::scene::layout::Point;
+    use pixtuoid_scene::chitchat::ChitchatBubble;
+    use pixtuoid_scene::layout::Point;
 
     let w = 60u16;
     let h = 30u16;

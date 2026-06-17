@@ -2,6 +2,7 @@
 resolver = "2"
 members  = [
     "crates/pixtuoid-core",
+    "crates/pixtuoid-scene",
     "crates/pixtuoid",
     "crates/pixtuoid-hook",
 ]

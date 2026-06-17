@@ -79,7 +79,7 @@ fn cursor_config_dir() -> Option<PathBuf> {
         io::nonempty_env("CURSOR_CONFIG_DIR"),
         io::nonempty_env("XDG_CONFIG_HOME"),
         cfg!(all(unix, not(target_os = "macos"))),
-        io::user_home(),
+        pixtuoid_core::platform::user_home_opt(),
     )
 }
 

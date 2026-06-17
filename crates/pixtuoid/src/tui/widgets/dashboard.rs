@@ -15,8 +15,8 @@ use pixtuoid_core::source::registry::descriptor_for;
 use pixtuoid_core::AgentId;
 
 use super::{centered_in, marquee_or_truncate, to_color};
-use crate::scene::theme::Theme;
 use crate::tui::dashboard::{DashboardRow, RowState, DASHBOARD_VIEWPORT_ROWS};
+use pixtuoid_scene::theme::Theme;
 
 /// Char budget for the tree-prefix + label column (name only — source is in the badge now).
 const LABEL_W: usize = 32;
@@ -177,8 +177,8 @@ fn dashboard_line(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::scene::theme::NORMAL;
     use pixtuoid_core::AgentId;
+    use pixtuoid_scene::theme::NORMAL;
     use std::sync::Arc;
 
     fn make_row(source: &str, state: RowState, label: &str) -> DashboardRow {
@@ -329,7 +329,7 @@ mod tests {
     #[test]
     fn every_registry_source_has_a_non_fallback_badge_color() {
         use pixtuoid_core::source::registry::REGISTRY;
-        let theme = &crate::scene::theme::NORMAL;
+        let theme = &pixtuoid_scene::theme::NORMAL;
         let fallback = to_color(theme.ui.label_idle);
         for d in REGISTRY {
             let row = make_row(d.name, RowState::Idle, "x");

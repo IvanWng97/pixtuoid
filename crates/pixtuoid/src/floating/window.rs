@@ -28,8 +28,8 @@ use winit::window::{ResizeDirection, Window, WindowId, WindowLevel};
 
 use super::offscreen::OfficeRenderer;
 use crate::config::{self, FloatingConfig};
-use crate::scene::floor::FloorMeta;
-use crate::scene::theme::Theme;
+use pixtuoid_scene::floor::FloorMeta;
+use pixtuoid_scene::theme::Theme;
 
 /// Wake reasons delivered to the winit loop from the background tokio pipeline.
 #[derive(Debug, Clone, Copy)]
@@ -47,7 +47,7 @@ pub struct FloatingApp {
     pack: Pack,
     config_path: PathBuf,
     /// The configured office pets — one is selected per floor (v1 shows floor 0's).
-    pets: Vec<crate::scene::pet::Pet>,
+    pets: Vec<pixtuoid_scene::pet::Pet>,
     renderer: OfficeRenderer,
     scene_rx: watch::Receiver<Arc<SceneState>>,
     floor_caps: Arc<[AtomicUsize; MAX_FLOORS]>,
@@ -72,7 +72,7 @@ impl FloatingApp {
         theme: &'static Theme,
         pack: Pack,
         config_path: PathBuf,
-        pets: Vec<crate::scene::pet::Pet>,
+        pets: Vec<pixtuoid_scene::pet::Pet>,
         scene_rx: watch::Receiver<Arc<SceneState>>,
         floor_caps: Arc<[AtomicUsize; MAX_FLOORS]>,
     ) -> Self {
@@ -139,7 +139,8 @@ impl FloatingApp {
         // Arc clone releases the watch borrow before the (mutable) renderer borrow.
         let scene = self.scene_rx.borrow().clone();
         let floor_meta = FloorMeta::ground();
-        let floor_pet = crate::scene::pet::select_pet_for_floor(floor_meta.floor_seed, &self.pets);
+        let floor_pet =
+            pixtuoid_scene::pet::select_pet_for_floor(floor_meta.floor_seed, &self.pets);
         let office = self.renderer.render(
             &scene,
             &self.pack,
@@ -203,7 +204,7 @@ impl FloatingApp {
 fn sync_floor_caps(floor_caps: &[AtomicUsize; MAX_FLOORS], buf_w: u16, buf_h: u16) {
     use pixtuoid_core::layout::{SceneLayout, MAX_VISIBLE_DESKS};
     for (floor_idx, cap) in floor_caps.iter().enumerate() {
-        let seed = (floor_idx as u64).wrapping_mul(crate::scene::floor::FLOOR_SEED_MULTIPLIER);
+        let seed = (floor_idx as u64).wrapping_mul(pixtuoid_scene::floor::FLOOR_SEED_MULTIPLIER);
         let capacity = SceneLayout::compute_with_seed(buf_w, buf_h, MAX_VISIBLE_DESKS, seed)
             .map(|l| l.home_desks.len())
             .unwrap_or(0);

@@ -17,6 +17,7 @@ path = "src/main.rs"
 
 [dependencies]
 pixtuoid-core  = { path = "../pixtuoid-core", version = "0.10.0" }
+pixtuoid-scene = { path = "../pixtuoid-scene", version = "0.10.0" }
 tokio              = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "sync", "time", "net", "fs", "io-util"] }
 ratatui            = { workspace = true }
 crossterm          = { workspace = true }
@@ -31,13 +32,7 @@ tracing-subscriber = { workspace = true }
 which              = "8"
 # clock feature gives us Local::now() w/ system timezone for the wall clock.
 chrono             = { version = "0.4", default-features = false, features = ["clock"] }
-# palette gives Lab-space color blending — perceptually-correct twilight
-# transitions and dim overlays vs naive sRGB linear blend.
-palette            = { version = "0.7", default-features = false, features = ["std"] }
 open               = "5"
-# Tiny bitmap-font crate: the floating window rasterizes name-badge labels as crisp
-# 8px text (scene::font), so it's a production dependency, not dev-only.
-font8x8            = "0.3.1"
 # The `pixtuoid floating` desktop window (binary-only — pixtuoid-core stays window-free,
 # invariant #1). winit = the frameless always-on-top window + main-thread event loop;
 # softbuffer = CPU blit of the office RgbBuffer into it (no GPU). Both rust-windowing,

@@ -15,10 +15,10 @@ use std::time::{Duration, SystemTime};
 use anyhow::{anyhow, Context, Result};
 use image::{Rgb as ImgRgb, RgbImage};
 use pixtuoid::floating::offscreen::{paint_labels_into_surface, OfficeRenderer};
-use pixtuoid::scene::floor::FloorMeta;
-use pixtuoid::scene::theme::theme_by_name;
 use pixtuoid_core::state::{ActivityState, SceneState};
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex};
+use pixtuoid_scene::floor::FloorMeta;
+use pixtuoid_scene::theme::theme_by_name;
 
 /// A few demo agents at desks 0..n with varied states + a deliberate label collision
 /// (two `cc`) so the snapshot exercises every label tone AND the `·<id4>` disambiguation.
@@ -130,7 +130,7 @@ fn main() -> Result<()> {
 
     let theme =
         theme_by_name(&theme_name).ok_or_else(|| anyhow!("unknown --theme {theme_name:?}"))?;
-    let pack = pixtuoid::scene::embedded_pack::load_sprite_pack(None)?;
+    let pack = pixtuoid_scene::embedded_pack::load_sprite_pack(None)?;
     let now = std::time::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
 
     // Empty office (default) shows the layout / walls / windows / desks; `--agents N` seats

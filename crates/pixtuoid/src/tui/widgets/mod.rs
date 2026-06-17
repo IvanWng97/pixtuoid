@@ -607,7 +607,7 @@ mod tests {
     // so concatenating the spans must equal build_status_summary exactly.
     #[test]
     fn status_spans_text_matches_summary_across_tiers() {
-        let theme = &crate::scene::theme::NORMAL;
+        let theme = &pixtuoid_scene::theme::NORMAL;
         let s = scene_of(vec![
             active_with("Edit src/a.rs", "a"),
             waiting("b"),
@@ -632,7 +632,7 @@ mod tests {
 
     #[test]
     fn status_spans_color_code_state_segments() {
-        let theme = &crate::scene::theme::NORMAL;
+        let theme = &pixtuoid_scene::theme::NORMAL;
         let s = scene_of(vec![
             active_with("Edit src/a.rs", "a"),
             waiting("b"),

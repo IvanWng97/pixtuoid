@@ -10,9 +10,9 @@ live in nested `CLAUDE.md` files**, auto-loaded when you touch those trees:
 
 - [`crates/pixtuoid-core/CLAUDE.md`](crates/pixtuoid-core/CLAUDE.md) — the headless lib: sources, reducer/state, sprites, layout, physics, pose.
   - [`crates/pixtuoid-core/tests/CLAUDE.md`](crates/pixtuoid-core/tests/CLAUDE.md) — the integration-test layout (8 test binaries: six grouped + two flat publish-excluded; parity twins) + add-a-CLI test steps.
+- [`crates/pixtuoid-scene/CLAUDE.md`](crates/pixtuoid-scene/CLAUDE.md) — the backend-agnostic render+sim engine CRATE (`pixtuoid-core ← pixtuoid-scene ← pixtuoid`): pixel painter (render_to_rgb_buffer), layout, pose/motion authority, pathfinding, the theme MODEL, weather/ambient, pets, chitchat, frame_cache, embedded_pack.
 - [`crates/pixtuoid/CLAUDE.md`](crates/pixtuoid/CLAUDE.md) — the binary: install, runtime, cli, config, multi-floor, embedded pack.
-  - [`crates/pixtuoid/src/scene/CLAUDE.md`](crates/pixtuoid/src/scene/CLAUDE.md) — the backend-agnostic render+sim engine: pixel painter (render_to_rgb_buffer), layout, pose/motion authority, pathfinding, the theme MODEL, weather/ambient, pets, chitchat, frame_cache, embedded_pack.
-  - [`crates/pixtuoid/src/tui/CLAUDE.md`](crates/pixtuoid/src/tui/CLAUDE.md) — the terminal painter (over scene/): draw_scene flush, harness, widgets, the theme-PICKER ui, Sources panel, dashboard, hit_test, version popup.
+  - [`crates/pixtuoid/src/tui/CLAUDE.md`](crates/pixtuoid/src/tui/CLAUDE.md) — the terminal painter (over the `pixtuoid-scene` crate): draw_scene flush, harness, widgets, the theme-PICKER ui, Sources panel, dashboard, hit_test, version popup.
 
 **Read the nested guide for the crate you're editing.** Many things that look
 like a bug are documented, load-bearing design — the "Known sharp edges"
@@ -22,20 +22,25 @@ section in each nested file (indexed below) explains why.
 
 Terminal-native, multi-agent pixel-art visualizer for AI coding agents. Each
 running CC (Claude Code) session shows up as an animated half-block sprite in
-an ASCII office. Rust workspace of three crates. User-facing overview:
+an ASCII office. Rust workspace of four crates. User-facing overview:
 [`README.md`](README.md). (Design specs live locally under
 `docs/superpowers/`, unversioned.)
 
 ## Layout (workspace)
 
 ```
-crates/
+crates/                 DAG: pixtuoid-core ← pixtuoid-scene ← pixtuoid (+ standalone pixtuoid-hook)
 ├── pixtuoid-core/   headless lib — no terminal deps (ratatui/crossterm forbidden)
 │                    source/ state/ sprite/ render/ layout/ physics.rs pose/ walkable.rs
-├── pixtuoid/        binary — ratatui + crossterm + tokio + clap
-│                    cli.rs config.rs runtime/ install/ scene/ (backend-agnostic render+sim engine)
-│                    tui/ floating/ (two thin painters over scene/) sprites/ (character packs;
-│                    default pack embedded via include_str!)
+├── pixtuoid-scene/  backend-agnostic render+sim ENGINE crate — terminal AND window-free BY CRATE
+│                    BOUNDARY (no ratatui/crossterm/winit/softbuffer in its Cargo.toml; just arch enforces)
+│                    pixel_painter/ (render_to_rgb_buffer) layout/ pose/ motion/ pathfind/ floor/ theme/
+│                    pet/ chitchat/ frame_cache/ anim/ overlay/ font/ embedded_pack/ (default pack at
+│                    sprites/default/, own build.rs); depends on pixtuoid-core
+├── pixtuoid/        binary — ratatui + crossterm + winit + tokio + clap; depends on pixtuoid-scene
+│                    cli.rs config.rs runtime/ install/ tui/ floating/ (two thin painters over the
+│                    pixtuoid-scene crate; neither depends on the other) sprites/ (skeleton embedded via
+│                    include_str!, robot --pack-dir-loadable)
 └── pixtuoid-hook/   tiny shim CC invokes — stdin JSON → Unix socket / Windows named
                      pipe (transport.rs), 200ms send bound
 scripts/             gen-media.py + media.json (the ONE manifest-driven driver for ALL
@@ -143,7 +148,7 @@ and stays a human step. See
 
 These are load-bearing; don't break them without updating the spec.
 
-1. **`pixtuoid-core` has no terminal dependencies.** No `ratatui`, no `crossterm`, no `stdout` writes. If you need one, the abstraction belongs behind the `Renderer` trait.
+1. **`pixtuoid-core` has no terminal dependencies.** No `ratatui`, no `crossterm`, no `stdout` writes. If you need one, the abstraction belongs behind the `Renderer` trait. **`pixtuoid-scene` (the render+sim engine) is ALSO terminal- AND window-free** — and now COMPILER-enforced by the crate boundary: `ratatui`/`crossterm`/`winit`/`softbuffer` aren't in its `Cargo.toml`, so reaching for one won't compile. `just arch` covers BOTH crates. Terminal/window code lives in the `pixtuoid` binary's painters (`tui/`, `floating/`).
 2. **Events flow through ONE channel** typed `mpsc::Sender<(Transport, AgentEvent)>`. The `Transport` tag is load-bearing — the reducer uses it for hook-wins dedup. Do not hardcode `Transport::Hook` on the consumer side; the producer tags its own events.
 3. **`Source` trait is the only seam for adding a transcript-bearing agent CLI.** Per-source format knowledge lives in the source's own decoder fn, not a shared decoder. A **hook-only** CLI (Reasonix) is the documented exception — see `crates/pixtuoid-core/CLAUDE.md` "multi-source decoding".
 4. **Hook install writes through symlinks.** `install::install_target`/`uninstall_target` (driven by the in-TUI Sources panel `s` — there is no `install-hooks` CLI) go through `resolve_symlink` in `install/io.rs`, critical for stow-managed `~/.claude/settings.json`; on Windows `write_config_atomic` keeps a bounded rename-retry (sharing violations are a platform reality).
@@ -166,12 +171,12 @@ full WHY lives in the nested `CLAUDE.md` for the owning crate.
 - Subagent clean-exit ladder: b1 drain / SubagentStop hooks / child-ledger re-links / the un-claim side-channel.
 - `AgentSlot.state_started_at` is `SystemTime` (process-local; the whole `SceneState` tree is `Serialize`/`Deserialize` for debug dumps + the snapshot golden, NOT a stable wire contract — the v2-daemon consumer is closed out-of-scope, #279/#280/#281); `ActivityState::Active` ≠ "tool executing" (debounced via `ACTIVE_GRACE_WINDOW`).
 
-**`pixtuoid` — engine `scene` + painters `tui`/`floating`** ([binary](crates/pixtuoid/CLAUDE.md), [scene engine](crates/pixtuoid/src/scene/CLAUDE.md), [tui painter](crates/pixtuoid/src/tui/CLAUDE.md)). The backend-agnostic render+sim engine moved OUT of `tui` INTO `scene` (`render_to_rgb_buffer`, layout, pose/motion, pathfind, theme model, pets, chitchat, …); `tui` and `floating` are sibling thin painters over it.
-- `draw_scene` is called through `TuiRenderer` (owns cross-frame state, returns the cached `Layout`) — it's the terminal flush in `tui::renderer`, delegating the world render to `scene::pixel_painter::render_to_rgb_buffer`.
-- `recolor_frame` (`scene::pixel_painter::palette`) substitutes by RGB equality (palette keys must map to unique RGBs).
+**`pixtuoid-scene` engine + `pixtuoid` painters `tui`/`floating`** ([scene engine crate](crates/pixtuoid-scene/CLAUDE.md), [binary](crates/pixtuoid/CLAUDE.md), [tui painter](crates/pixtuoid/src/tui/CLAUDE.md)). The backend-agnostic render+sim engine is its OWN crate `pixtuoid-scene` (`render_to_rgb_buffer`, layout, pose/motion, pathfind, theme model, pets, chitchat, …), sitting between `pixtuoid-core` and the binary; `tui` and `floating` (in the `pixtuoid` binary) are sibling thin painters over it.
+- `draw_scene` is called through `TuiRenderer` (owns cross-frame state, returns the cached `Layout`) — it's the terminal flush in the binary's `tui::renderer`, delegating the world render to `pixtuoid_scene::pixel_painter::render_to_rgb_buffer`.
+- `recolor_frame` (`pixtuoid_scene::pixel_painter::palette`) substitutes by RGB equality (palette keys must map to unique RGBs).
 - Terminal cell aspect drives sprite design (~16×16 px ceiling; bundled pack maxes at 8×12).
-- EXIT walks are time-compressed to fit the GC window; snap-back runs pure physics (`SNAP_BACK_MS` is only the ARM window); entry/wander are uncompressed (`scene::pose`/`scene::motion`).
-- A walk leg's A\* polyline is frozen once per leg, not re-routed per frame (`scene::motion`).
+- EXIT walks are time-compressed to fit the GC window; snap-back runs pure physics (`SNAP_BACK_MS` is only the ARM window); entry/wander are uncompressed (`pixtuoid_scene::pose`/`pixtuoid_scene::motion`).
+- A walk leg's A\* polyline is frozen once per leg, not re-routed per frame (`pixtuoid_scene::motion`).
 
 ## Things NOT to do
 
@@ -189,7 +194,7 @@ full WHY lives in the nested `CLAUDE.md` for the owning crate.
 
 ## Where to look
 
-- "How does a CC tool call become a moving sprite?" → `runtime/driver.rs::run_async` → `SourceManager::spawn` → source → decoder → `reducer::Reducer::apply` → `watch` channel → `TuiRenderer::render` → `scene::pixel_painter::render_to_rgb_buffer` (the world render) → `tui::renderer::draw_scene` (the terminal flush). First half in `pixtuoid-core`; the world render in `pixtuoid/scene`; the terminal flush in `pixtuoid/tui`.
+- "How does a CC tool call become a moving sprite?" → `runtime/driver.rs::run_async` → `SourceManager::spawn` → source → decoder → `reducer::Reducer::apply` → `watch` channel → `TuiRenderer::render` → `pixtuoid_scene::pixel_painter::render_to_rgb_buffer` (the world render) → `tui::renderer::draw_scene` (the terminal flush). First half in `pixtuoid-core`; the world render in the `pixtuoid-scene` crate; the terminal flush in `pixtuoid`'s `tui`.
 - Architecture overview + data-flow diagram: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Area-specific entries (layout, sources, install, themes, motion, weather, pets, …) are in the nested guides.
 
 ## When refactoring

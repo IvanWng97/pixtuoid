@@ -8,10 +8,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use pixtuoid::scene::frame_cache::{FrameCache, FrameKey};
 use pixtuoid_core::sprite::{Frame, Rgb};
 use pixtuoid_core::state::ActivityState;
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex, SceneState};
+use pixtuoid_scene::frame_cache::{FrameCache, FrameKey};
 
 /// Build a glow-less frame key (no test here varies glow_tint).
 fn key(id: AgentId, anim_name: &'static str, frame_idx: usize, flip_x: bool) -> FrameKey {

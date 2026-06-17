@@ -1,0 +1,15 @@
+# Placeholder sprite — replace with your own art.
+# 8 wide × 12 tall. B=body, H=hair, S=skin, P=pants, .=transparent
+@frame 0
+. . H H H H . .
+. H H H H H H .
+. . S S S S . .
+. . S S S S . .
+. B B B B B B .
+. B B B B B B .
+. B B B B B B .
+. B B B B B B .
+. . P P P P . .
+. . P P P P . .
+. . P . . P . .
+. . P . . P . .

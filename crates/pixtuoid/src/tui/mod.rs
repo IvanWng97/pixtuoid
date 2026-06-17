@@ -25,7 +25,7 @@ use ratatui::Terminal;
 use tui_renderer::TuiRenderer;
 
 use crate::runtime::SceneRx;
-use crate::scene::{embedded_pack, floor, pet, theme};
+use pixtuoid_scene::{embedded_pack, floor, pet, theme};
 
 /// The modal + floor state the key dispatcher needs. Pulled out so the dispatch
 /// decision is a pure function of (key, state) and can be unit-tested without a
@@ -568,8 +568,8 @@ pub async fn run_tui(
                 let buf_w = layout.buf_w;
                 let buf_h = layout.buf_h;
                 for floor_idx in 0..MAX_FLOORS {
-                    let seed =
-                        (floor_idx as u64).wrapping_mul(crate::scene::floor::FLOOR_SEED_MULTIPLIER);
+                    let seed = (floor_idx as u64)
+                        .wrapping_mul(pixtuoid_scene::floor::FLOOR_SEED_MULTIPLIER);
                     let mut capacity =
                         SceneLayout::compute_with_seed(buf_w, buf_h, MAX_VISIBLE_DESKS, seed)
                             .map(|l| l.home_desks.len())
@@ -601,7 +601,7 @@ pub async fn run_tui(
                             connection_open: connection_ui.open,
                             connection_confirm: connection_ui.confirm.is_some(),
                             n_themes: theme::ALL_THEMES.len(),
-                            n_floors: crate::scene::floor::num_floors(&snapshot),
+                            n_floors: pixtuoid_scene::floor::num_floors(&snapshot),
                             current_floor: renderer.current_floor(),
                             in_transition: renderer.transition().is_some(),
                         };
@@ -907,7 +907,7 @@ pub async fn run_tui(
                                 renderer::hit_test_coffee_machine(layout, m.column, m.row)
                             }) {
                                 let _ = open::that("https://buymeacoffee.com/IvanWng97");
-                            } else if let Some(crate::scene::pet::PetFrame {
+                            } else if let Some(pixtuoid_scene::pet::PetFrame {
                                 pos: pet_pos,
                                 anim,
                                 kind,

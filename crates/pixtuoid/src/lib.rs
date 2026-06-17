@@ -9,7 +9,6 @@ pub mod floating;
 pub mod init_pack;
 pub mod install;
 pub mod runtime;
-pub mod scene;
 pub mod tui;
 pub mod validate;
 pub mod version;

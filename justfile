@@ -51,7 +51,7 @@ machete:
 deny:
     cargo deny check bans licenses sources
 
-# Architecture invariant #1, mechanized: pixtuoid-core must stay terminal-free.
+# Architecture invariant #1, mechanized: pixtuoid-core + pixtuoid-scene stay terminal/window-free.
 # The other five invariants have test/bridge backstops; this one was
 # review-enforced only until the KB pilot's gap-closure audit (2026-06-12,
 # follow-on to the #261-#271 arc).
@@ -59,10 +59,16 @@ deny:
 arch:
     #!/usr/bin/env bash
     set -euo pipefail
-    if cargo tree -p pixtuoid-core --edges normal --prefix none | grep -qE '^(ratatui|crossterm)'; then
-        echo "ARCH VIOLATION: pixtuoid-core depends on a terminal crate (CLAUDE.md invariant #1)"; exit 1
-    fi
-    echo "arch: pixtuoid-core is terminal-free"
+    # The backend-agnostic layers — neither may pull a terminal (ratatui/crossterm)
+    # OR window (winit/softbuffer) crate; the tui + floating painters own those. The
+    # crate boundary already makes this a COMPILER fact; this pins it at the dep-tree
+    # level too (a transitive pull-in via a feature would slip past the boundary).
+    for crate in pixtuoid-core pixtuoid-scene; do
+        if cargo tree -p "$crate" --edges normal --prefix none | grep -qE '^(ratatui|crossterm|winit|softbuffer)'; then
+            echo "ARCH VIOLATION: $crate depends on a terminal/window crate (CLAUDE.md invariant #1)"; exit 1
+        fi
+    done
+    echo "arch: pixtuoid-core + pixtuoid-scene are terminal/window-free"
 
 # Fast, independent lint checks in parallel (fmt + machete + deny + arch).
 [group('rust')]

@@ -13,7 +13,7 @@ use crate::tui::renderer::clip_widget_rect;
 
 /// The two colors that characterize a theme in the picker swatch: its
 /// accent (`neon_brand`) and its dominant office surface (`carpet_base`).
-fn theme_swatch(t: &crate::scene::theme::Theme) -> (Color, Color) {
+fn theme_swatch(t: &pixtuoid_scene::theme::Theme) -> (Color, Color) {
     (to_color(t.ui.neon_brand), to_color(t.surface.carpet_base))
 }
 
@@ -21,9 +21,9 @@ pub(crate) fn paint_theme_picker(
     f: &mut ratatui::Frame<'_>,
     selected: usize,
     bounds: Rect,
-    theme: &crate::scene::theme::Theme,
+    theme: &pixtuoid_scene::theme::Theme,
 ) {
-    use crate::scene::theme;
+    use pixtuoid_scene::theme;
     use ratatui::style::Modifier;
     use ratatui::text::{Line, Span as TSpan};
 
@@ -96,7 +96,7 @@ pub(crate) fn paint_footer(
     f: &mut ratatui::Frame<'_>,
     scene: &SceneState,
     full_rect: Rect,
-    theme: &crate::scene::theme::Theme,
+    theme: &pixtuoid_scene::theme::Theme,
     floor_info: Option<crate::tui::renderer::FloorInfo>,
     source_warning: Option<&str>,
 ) {
@@ -136,7 +136,7 @@ enum SegRole {
 }
 
 impl SegRole {
-    fn color(self, theme: &crate::scene::theme::Theme) -> Color {
+    fn color(self, theme: &pixtuoid_scene::theme::Theme) -> Color {
         match self {
             SegRole::Neutral | SegRole::Idle => to_color(theme.ui.label_idle),
             SegRole::Active => to_color(theme.ui.label_active),
@@ -307,7 +307,7 @@ pub(crate) fn build_status_spans<'a>(
     scene: &SceneState,
     term_width: u16,
     floor_info: Option<crate::tui::renderer::FloorInfo>,
-    theme: &crate::scene::theme::Theme,
+    theme: &pixtuoid_scene::theme::Theme,
     source_warning: Option<&str>,
 ) -> Vec<Span<'a>> {
     status_segments(scene, term_width, floor_info, source_warning)
@@ -322,7 +322,7 @@ pub(crate) fn paint_wall_display(
     scene_rect: Rect,
     now: SystemTime,
     ticker: &TickerQueue,
-    theme: &crate::scene::theme::Theme,
+    theme: &pixtuoid_scene::theme::Theme,
 ) {
     use ratatui::style::Modifier;
     use ratatui::text::Line;
@@ -445,7 +445,7 @@ pub(crate) fn paint_version_popup(
     version: &str,
     notes: &[&str],
     bounds: Rect,
-    theme: &crate::scene::theme::Theme,
+    theme: &pixtuoid_scene::theme::Theme,
     scale: f32,
 ) {
     use ratatui::style::Modifier;
@@ -535,10 +535,10 @@ pub(crate) fn version_popup_url_rect(notes_len: usize, bounds: Rect, scale: f32)
 
 pub(crate) fn paint_elevator_indicator(
     f: &mut ratatui::Frame<'_>,
-    door: crate::scene::layout::Point,
+    door: pixtuoid_scene::layout::Point,
     current_floor: usize,
     scene_rect: Rect,
-    theme: &crate::scene::theme::Theme,
+    theme: &pixtuoid_scene::theme::Theme,
 ) {
     use ratatui::style::Modifier;
     use ratatui::text::Line;
@@ -600,7 +600,12 @@ mod hud_tests {
         use ratatui::Terminal;
         let mut term = Terminal::new(TestBackend::new(24, 30)).unwrap();
         term.draw(|f| {
-            paint_theme_picker(f, 0, Rect::new(0, 0, 24, 30), &crate::scene::theme::NORMAL);
+            paint_theme_picker(
+                f,
+                0,
+                Rect::new(0, 0, 24, 30),
+                &pixtuoid_scene::theme::NORMAL,
+            );
         })
         .unwrap();
         // Reaching here without a panic is the assertion.
@@ -608,7 +613,7 @@ mod hud_tests {
 
     #[test]
     fn theme_swatch_distinguishes_themes() {
-        use crate::scene::theme;
+        use pixtuoid_scene::theme;
         // Each theme's (accent, surface) pair should reflect that theme's
         // own palette, not the currently-active one — so the picker rows
         // preview distinct colors.
@@ -714,7 +719,7 @@ mod hud_tests {
                 "1.2.3",
                 &["note a", "note b"],
                 Rect::new(0, 0, 80, 30),
-                &crate::scene::theme::NORMAL,
+                &pixtuoid_scene::theme::NORMAL,
                 0.0, // fully dismissed
             );
         })
@@ -734,8 +739,8 @@ mod hud_tests {
     fn elevator_indicator_centers_by_display_columns_not_bytes() {
         use ratatui::backend::TestBackend;
         use ratatui::Terminal;
-        let theme = &crate::scene::theme::NORMAL;
-        let door = crate::scene::layout::Point { x: 20, y: 10 };
+        let theme = &pixtuoid_scene::theme::NORMAL;
+        let door = pixtuoid_scene::layout::Point { x: 20, y: 10 };
         let mut term = Terminal::new(TestBackend::new(80, 30)).unwrap();
         term.draw(|f| {
             paint_elevator_indicator(f, door, 1, Rect::new(0, 0, 80, 30), theme);

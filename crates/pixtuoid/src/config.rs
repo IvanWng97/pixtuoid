@@ -116,10 +116,12 @@ pub fn resolve_floating(config: &AppConfig) -> FloatingConfig {
 
 pub fn resolve_pack_dir(config: &AppConfig, cli_pack_dir: Option<PathBuf>) -> Option<PathBuf> {
     cli_pack_dir.or_else(|| {
-        config
-            .pack_dir
-            .as_ref()
-            .map(|p| PathBuf::from(expand_tilde(p, crate::install::io::user_home().as_deref())))
+        config.pack_dir.as_ref().map(|p| {
+            PathBuf::from(expand_tilde(
+                p,
+                pixtuoid_core::platform::user_home_opt().as_deref(),
+            ))
+        })
     })
 }
 
@@ -145,7 +147,7 @@ pub fn config_path() -> PathBuf {
     if let Some(base) = xdg {
         return PathBuf::from(base).join("pixtuoid").join("config.toml");
     }
-    if let Some(home) = crate::install::io::user_home() {
+    if let Some(home) = pixtuoid_core::platform::user_home_opt() {
         return PathBuf::from(home)
             .join(".config")
             .join("pixtuoid")
@@ -352,8 +354,8 @@ pub fn resolve_theme(
     config: &AppConfig,
     cli_theme: Option<&str>,
     warnings: &mut Vec<String>,
-) -> Result<&'static crate::scene::theme::Theme> {
-    use crate::scene::theme::{theme_by_name, ALL_THEMES, NORMAL};
+) -> Result<&'static pixtuoid_scene::theme::Theme> {
+    use pixtuoid_scene::theme::{theme_by_name, ALL_THEMES, NORMAL};
 
     // Validate the config theme even when the CLI overrides it — the warn is
     // the only signal that a persisted theme in config.toml has gone stale.
@@ -382,8 +384,11 @@ pub fn resolve_theme(
 /// `name` is trimmed; empty/absent → [`PetKind::default_name`]. Resolving HERE
 /// (once, at startup) means the render path reads `pet.name` directly — no
 /// per-frame lookup, no parallel kind→name map to keep in sync.
-pub fn resolve_pets(config: &AppConfig, warnings: &mut Vec<String>) -> Vec<crate::scene::pet::Pet> {
-    use crate::scene::pet::{Pet, PetKind};
+pub fn resolve_pets(
+    config: &AppConfig,
+    warnings: &mut Vec<String>,
+) -> Vec<pixtuoid_scene::pet::Pet> {
+    use pixtuoid_scene::pet::{Pet, PetKind};
 
     match &config.pets {
         None => PetKind::ALL.iter().map(|&k| Pet::defaulted(k)).collect(),
@@ -513,8 +518,9 @@ mod tests {
 
     // config_path reads process-global env, so save+restore both vars and drive
     // the three branches in one test. The TEST_ENV_LOCK serializes against the
-    // other env-mutating test in this binary (embedded_pack's XDG test) so they
-    // can't race under plain `cargo test`.
+    // binary's OTHER env-mutating tests (the install/* HOME/USERPROFILE tests) so
+    // they can't race under plain `cargo test`. (The embedded_pack XDG test that
+    // used to share this lock moved to the pixtuoid-scene crate, which has its own.)
     #[test]
     fn config_path_xdg_home_and_relative_branches() {
         let _env = crate::TEST_ENV_LOCK
@@ -682,7 +688,7 @@ mod tests {
         let err = resolve_theme(&cfg, Some("definitely-not-a-theme"), &mut Vec::new()).unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("unknown theme"), "got: {msg}");
-        for t in crate::scene::theme::ALL_THEMES {
+        for t in pixtuoid_scene::theme::ALL_THEMES {
             assert!(
                 msg.contains(t.name),
                 "should list every valid theme, missing {:?} in: {msg}",
@@ -844,7 +850,7 @@ mod tests {
         // Expectation derives from the SAME helper production uses
         // (user_home(), USERPROFILE-first on Windows) — pinning raw $HOME
         // here diverges under the Windows runner's Git Bash.
-        match crate::install::io::user_home() {
+        match pixtuoid_core::platform::user_home_opt() {
             Some(home) => {
                 assert_eq!(result, Some(PathBuf::from(format!("{home}/my-pack"))));
             }
@@ -867,7 +873,7 @@ mod tests {
     fn pets_absent_returns_all_with_default_names() {
         let cfg = AppConfig::default();
         let pets = resolve_pets(&cfg, &mut Vec::new());
-        assert_eq!(pets.len(), crate::scene::pet::PetKind::ALL.len());
+        assert_eq!(pets.len(), pixtuoid_scene::pet::PetKind::ALL.len());
         for pet in &pets {
             assert_eq!(pet.name, pet.kind.default_name());
         }
@@ -899,7 +905,7 @@ mod tests {
         };
         let pets = resolve_pets(&cfg, &mut Vec::new());
         assert_eq!(pets.len(), 1);
-        assert_eq!(pets[0].kind, crate::scene::pet::PetKind::Cat);
+        assert_eq!(pets[0].kind, pixtuoid_scene::pet::PetKind::Cat);
         assert_eq!(pets[0].name, "Office Cat");
     }
 
@@ -938,8 +944,8 @@ mod tests {
         };
         let pets = resolve_pets(&cfg, &mut Vec::new());
         let name = |k| pets.iter().find(|p| p.kind == k).map(|p| p.name.as_str());
-        assert_eq!(name(crate::scene::pet::PetKind::Cat), Some("Whiskers"));
-        assert_eq!(name(crate::scene::pet::PetKind::Dog), Some("Rex"));
+        assert_eq!(name(pixtuoid_scene::pet::PetKind::Cat), Some("Whiskers"));
+        assert_eq!(name(pixtuoid_scene::pet::PetKind::Dog), Some("Rex"));
     }
 
     #[test]
@@ -971,8 +977,8 @@ mod tests {
         };
         let pets = resolve_pets(&cfg, &mut Vec::new());
         let name = |k| pets.iter().find(|p| p.kind == k).map(|p| p.name.as_str());
-        assert_eq!(name(crate::scene::pet::PetKind::Cat), Some("Mittens"));
-        assert_eq!(name(crate::scene::pet::PetKind::Dog), Some("Office Dog"));
+        assert_eq!(name(pixtuoid_scene::pet::PetKind::Cat), Some("Mittens"));
+        assert_eq!(name(pixtuoid_scene::pet::PetKind::Dog), Some("Office Dog"));
     }
 
     #[test]
@@ -1003,8 +1009,8 @@ mod tests {
         let pets = resolve_pets(&cfg, &mut Vec::new());
         assert_eq!(pets.len(), 2);
         let name = |k| pets.iter().find(|p| p.kind == k).map(|p| p.name.as_str());
-        assert_eq!(name(crate::scene::pet::PetKind::Cat), Some("Luna"));
-        assert_eq!(name(crate::scene::pet::PetKind::Dog), Some("Office Dog"));
+        assert_eq!(name(pixtuoid_scene::pet::PetKind::Cat), Some("Luna"));
+        assert_eq!(name(pixtuoid_scene::pet::PetKind::Dog), Some("Office Dog"));
     }
 
     #[test]
@@ -1082,7 +1088,7 @@ mod tests {
             1,
             "the kindless stanza is skipped, the cat kept"
         );
-        assert_eq!(pets[0].kind, crate::scene::pet::PetKind::Cat);
+        assert_eq!(pets[0].kind, pixtuoid_scene::pet::PetKind::Cat);
     }
 
     // --- data safety: malformed-config refusal + one-time backup (#3) ---------

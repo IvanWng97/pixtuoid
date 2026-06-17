@@ -9,24 +9,32 @@ How a running coding-agent session becomes a moving sprite in the office.
 
 ## The shape of it
 
-pixtuoid is a Cargo workspace of **three crates** wired as a strict
+pixtuoid is a Cargo workspace of **four crates** wired as a strict
 **producer → reducer → renderer** pipeline:
 
 - **`pixtuoid-core`** — the headless library. It has **no terminal dependencies**
   (no `ratatui`, no `crossterm`); everything terminal-specific sits behind the
   `Renderer` trait. Owns sources, the reducer + scene state, layout/physics/pose,
   and the sprite format.
-- **`pixtuoid`** — the binary: `clap` CLI, `tokio` runtime wiring, and the TUI
-  renderer (`ratatui` + `crossterm`).
+- **`pixtuoid-scene`** — the backend-agnostic render + simulation **engine**: the
+  office world itself (`render_to_rgb_buffer`, layout geometry, pose/motion/
+  pathfinding, the theme model, pets, chitchat, the embedded default pack). It is
+  terminal- AND window-free **by crate boundary** (no `ratatui`/`crossterm`/
+  `winit`/`softbuffer` in its `Cargo.toml` — compiler-enforced, not just a lint).
+  Depends on `pixtuoid-core`.
+- **`pixtuoid`** — the binary: `clap` CLI, `tokio` runtime wiring, and the two
+  thin painters over the engine — the TUI renderer (`ratatui` + `crossterm`) and
+  the `floating` desktop window (`winit` + `softbuffer`). Depends on
+  `pixtuoid-scene`.
 - **`pixtuoid-hook`** — a tiny shim Claude Code invokes per hook event. It depends
-  on neither other crate; it reads stdin JSON, forwards it over a local IPC
+  on no other crate; it reads stdin JSON, forwards it over a local IPC
   endpoint — a Unix socket on macOS/Linux, a named pipe on Windows (selected in
   `pixtuoid-hook/src/transport.rs`) — and **always exits 0** so it can never
   block your agent.
 
-Dependency direction is one-way: `pixtuoid → pixtuoid-core`. The `Renderer` trait
-is the inversion point that keeps the core terminal-free (so the same pixel pass
-can drive a PNG/GIF export, not just the terminal).
+Dependency direction is one-way: `pixtuoid-core ← pixtuoid-scene ← pixtuoid`. The
+`Renderer` trait is the inversion point that keeps the core terminal-free (so the
+same pixel pass can drive a PNG/GIF export, not just the terminal).
 
 A **`Source`** is one of two classes (`source/registry.rs`'s `SourceKind`):
 
@@ -108,8 +116,9 @@ flowchart TB
    updates a `SceneState`, runs garbage-collection/stale sweeps on a 1 Hz tick,
    and delegates single-slot transitions to the FSM. After every change it
    publishes a fresh `Arc<SceneState>` on a `watch` channel.
-4. **Render.** `TuiRenderer` borrows the latest scene (O(1), no lock) and paints
-   it through **`render_to_rgb_buffer`** — a *terminal-agnostic* pixel pass — then
+4. **Render.** `TuiRenderer` (in the binary) borrows the latest scene (O(1), no
+   lock) and paints it through **`pixtuoid_scene::pixel_painter::render_to_rgb_buffer`**
+   — a *terminal-agnostic* pixel pass that lives in the engine crate — then
    `flush_buffer_to_term` compresses pairs of pixel rows into half-block (`▀`)
    terminal cells.
 

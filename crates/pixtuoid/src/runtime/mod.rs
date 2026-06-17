@@ -46,8 +46,8 @@ pub struct RunConfig {
     pub desk_cap: Option<usize>,
     pub headless: bool,
     pub config_path: PathBuf,
-    pub theme: &'static crate::scene::theme::Theme,
-    pub pets: Vec<crate::scene::pet::Pet>,
+    pub theme: &'static pixtuoid_scene::theme::Theme,
+    pub pets: Vec<pixtuoid_scene::pet::Pet>,
     /// The resolved set of CONNECTED source ids (registry names). Seeded at boot
     /// from `config::resolve_connected`; the runtime wraps it in a shared
     /// [`ConnectedSources`] the reducer gate reads and the Sources panel
@@ -98,7 +98,7 @@ impl ConnectedSources {
 /// silently dropped during the boot race before the first TUI frame.
 pub(crate) fn boot_capacities_for(cols: u16, rows: u16) -> [usize; MAX_FLOORS] {
     std::array::from_fn(|i| {
-        let seed = (i as u64).wrapping_mul(crate::scene::floor::FLOOR_SEED_MULTIPLIER);
+        let seed = (i as u64).wrapping_mul(pixtuoid_scene::floor::FLOOR_SEED_MULTIPLIER);
         let cap = capacity_for_terminal(cols, rows, seed);
         if cap == 0 {
             FALLBACK_DESKS
@@ -208,7 +208,7 @@ mod tests {
     use std::time::SystemTime;
 
     fn floor_seed(i: u64) -> u64 {
-        i.wrapping_mul(crate::scene::floor::FLOOR_SEED_MULTIPLIER)
+        i.wrapping_mul(pixtuoid_scene::floor::FLOOR_SEED_MULTIPLIER)
     }
 
     #[test]

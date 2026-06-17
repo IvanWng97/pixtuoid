@@ -139,7 +139,7 @@ fn missing_animation_returns_none() {
 
 #[test]
 fn default_pack_loads_with_required_animations() {
-    let pack = load_pack(Path::new("../pixtuoid/sprites/default")).unwrap();
+    let pack = load_pack(Path::new("../pixtuoid-scene/sprites/default")).unwrap();
     for name in &[
         "seated",
         "typing",
@@ -167,7 +167,7 @@ fn default_pack_loads_with_required_animations() {
 
 #[test]
 fn default_pack_passes_validation() {
-    let pack = load_pack(Path::new("../pixtuoid/sprites/default")).unwrap();
+    let pack = load_pack(Path::new("../pixtuoid-scene/sprites/default")).unwrap();
     let report = validate_pack_animations(&pack);
     assert!(
         report.missing_required.is_empty(),

@@ -20,13 +20,13 @@ use ratatui::layout::Rect;
 use ratatui::style::Color;
 use ratatui::Terminal;
 
-use crate::scene::frame_cache::FrameCache;
-use crate::scene::layout::Layout;
-use crate::scene::motion::MotionState;
-use crate::scene::pathfind::Router;
-use crate::scene::pet::PetFrame;
-use crate::scene::pixel_painter::{render_to_rgb_buffer, MascotFrame, PixelCtx};
-use crate::scene::pose;
+use pixtuoid_scene::frame_cache::FrameCache;
+use pixtuoid_scene::layout::Layout;
+use pixtuoid_scene::motion::MotionState;
+use pixtuoid_scene::pathfind::Router;
+use pixtuoid_scene::pet::PetFrame;
+use pixtuoid_scene::pixel_painter::{render_to_rgb_buffer, MascotFrame, PixelCtx};
+use pixtuoid_scene::pose;
 
 // Re-exports so tui_renderer.rs and tui/mod.rs import from one place.
 use crate::tui::dashboard::DashboardRow;
@@ -43,7 +43,7 @@ pub(super) use crate::tui::widgets::{
     paint_version_popup, paint_wall_display,
 };
 
-pub use crate::scene::pet::PetState;
+pub use pixtuoid_scene::pet::PetState;
 
 /// Multi-floor display state. Combines the navigation breadcrumb
 /// (current/total) with the global agent count so a renderer never sees
@@ -76,21 +76,21 @@ pub struct DrawCtx<'a> {
     /// Per-floor lighting fade state. Advanced inside the pixel pass and
     /// read by the indoor-light helpers. Borrowed mutably from the
     /// matching `FloorCtx`.
-    pub light: &'a mut crate::scene::floor::LightingState,
+    pub light: &'a mut pixtuoid_scene::floor::LightingState,
     pub mouse_pos: Option<(u16, u16)>,
     pub pinned_agent: Option<pixtuoid_core::AgentId>,
     /// Live walkable/approach/route debug layer toggle (`w`). Threaded into the
     /// pixel pass; off by default, transient (not persisted to config).
     pub debug_walkable: bool,
     pub ticker: &'a TickerQueue,
-    pub theme: &'a crate::scene::theme::Theme,
+    pub theme: &'a pixtuoid_scene::theme::Theme,
     pub theme_picker: Option<usize>,
     /// Multi-floor display state. `Some` iff there's more than one floor.
     /// Carries both the navigation breadcrumb (`current/total_floors`) and
     /// the system-wide agent count so the footer can render `n/total` and
     /// the elevator indicator can highlight the active floor.
     pub floor_info: Option<FloorInfo>,
-    pub floor: crate::scene::floor::FloorMeta,
+    pub floor: pixtuoid_scene::floor::FloorMeta,
     pub active_pet: Option<&'a PetState>,
     pub last_pet_pos: Option<PetFrame>,
     /// The gateway mascot's frame this render (for hover identity). Set from the
@@ -100,12 +100,12 @@ pub struct DrawCtx<'a> {
     /// `None` when no pets are configured or none maps to this floor seed.
     /// Replaces the former `floor_pet_kind` + `pet_names` pair: the name rides
     /// along, so the tooltip reads `floor_pet.name` directly (no lookup).
-    pub floor_pet: Option<&'a crate::scene::pet::Pet>,
+    pub floor_pet: Option<&'a pixtuoid_scene::pet::Pet>,
     pub chitchat_state: &'a mut std::collections::HashMap<
-        crate::scene::chitchat::VenueKey,
-        crate::scene::chitchat::ActiveChitchat,
+        pixtuoid_scene::chitchat::VenueKey,
+        pixtuoid_scene::chitchat::ActiveChitchat,
     >,
-    pub chitchat_bubbles: Vec<crate::scene::chitchat::ChitchatBubble>,
+    pub chitchat_bubbles: Vec<pixtuoid_scene::chitchat::ChitchatBubble>,
     pub coffee_holders: &'a std::collections::HashSet<pixtuoid_core::AgentId>,
     pub coffee_fetched_at:
         &'a std::collections::HashMap<pixtuoid_core::AgentId, std::time::SystemTime>,
@@ -221,7 +221,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     let buf_w = scene_rect.width;
     let buf_h = scene_rect.height * 2;
     ctx.buf.ensure_size(buf_w, buf_h, theme.surface.bg_fallback);
-    use crate::scene::layout::MAX_VISIBLE_DESKS;
+    use pixtuoid_scene::layout::MAX_VISIBLE_DESKS;
     // Always compute maximum layout capacity — floor overflow handles the rest.
     let Some(layout) = Layout::compute_with_seed(buf_w, buf_h, MAX_VISIBLE_DESKS, floor.floor_seed)
     else {
@@ -268,7 +268,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
             scene,
             &layout,
             now,
-            &mut crate::scene::pose::RouteCtx {
+            &mut pixtuoid_scene::pose::RouteCtx {
                 router: &mut *ctx.router,
                 overlay: &*ctx.overlay,
                 history: &mut *ctx.history,
@@ -295,7 +295,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
             scene,
             &layout,
             now,
-            &mut crate::scene::pose::RouteCtx {
+            &mut pixtuoid_scene::pose::RouteCtx {
                 router: &mut *ctx.router,
                 overlay: &*ctx.overlay,
                 history: &mut *ctx.history,

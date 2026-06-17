@@ -11,18 +11,18 @@
 macro_rules! make_draw_ctx {
     ($name:ident $(, $key:ident : $val:expr)* ) => {
         let mut _buf = pixtuoid_core::sprite::RgbBuffer::filled(0, 0, pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 });
-        let mut _cache = pixtuoid::scene::frame_cache::FrameCache::new();
-        let mut _router = pixtuoid::scene::pathfind::AStarRouter::new();
+        let mut _cache = pixtuoid_scene::frame_cache::FrameCache::new();
+        let mut _router = pixtuoid_scene::pathfind::AStarRouter::new();
         let mut _overlay = pixtuoid_core::walkable::OccupancyOverlay::new();
-        let mut _history = pixtuoid::scene::pose::PoseHistory::new();
-        let mut _motion: std::collections::HashMap<pixtuoid_core::AgentId, pixtuoid::scene::motion::MotionState> = std::collections::HashMap::new();
-        let mut _light = pixtuoid::scene::floor::LightingState::new();
+        let mut _history = pixtuoid_scene::pose::PoseHistory::new();
+        let mut _motion: std::collections::HashMap<pixtuoid_core::AgentId, pixtuoid_scene::motion::MotionState> = std::collections::HashMap::new();
+        let mut _light = pixtuoid_scene::floor::LightingState::new();
         let _ticker = pixtuoid::tui::renderer::TickerQueue::new();
         let mut _chitchat_state = std::collections::HashMap::new();
 
         // Defaults
-        let mut _theme: &pixtuoid::scene::theme::Theme = &pixtuoid::scene::theme::NORMAL;
-        let mut _floor = pixtuoid::scene::floor::FloorMeta::ground();
+        let mut _theme: &pixtuoid_scene::theme::Theme = &pixtuoid_scene::theme::NORMAL;
+        let mut _floor = pixtuoid_scene::floor::FloorMeta::ground();
         let mut _floor_info: Option<pixtuoid::tui::renderer::FloorInfo> = None;
 
         // Apply overrides

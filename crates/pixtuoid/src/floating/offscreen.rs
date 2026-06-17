@@ -17,12 +17,12 @@ use pixtuoid_core::sprite::{format::Pack, Rgb, RgbBuffer};
 use pixtuoid_core::state::SceneState;
 use pixtuoid_core::AgentId;
 
-use crate::scene::chitchat::{ActiveChitchat, VenueKey};
-use crate::scene::floor::{FloorCtx, FloorMeta};
-use crate::scene::layout::{Layout, MAX_VISIBLE_DESKS};
-use crate::scene::pathfind::Router;
-use crate::scene::pixel_painter::{render_to_rgb_buffer, PixelCtx};
-use crate::scene::theme::Theme;
+use pixtuoid_scene::chitchat::{ActiveChitchat, VenueKey};
+use pixtuoid_scene::floor::{FloorCtx, FloorMeta};
+use pixtuoid_scene::layout::{Layout, MAX_VISIBLE_DESKS};
+use pixtuoid_scene::pathfind::Router;
+use pixtuoid_scene::pixel_painter::{render_to_rgb_buffer, PixelCtx};
+use pixtuoid_scene::theme::Theme;
 
 /// Owns everything needed to render the live office to a reusable `RgbBuffer` across
 /// frames: the per-floor render caches (`FloorCtx`) plus the persistent office state
@@ -69,7 +69,7 @@ impl OfficeRenderer {
         buf_w: u16,
         buf_h: u16,
         floor_meta: FloorMeta,
-        floor_pet: Option<&crate::scene::pet::Pet>,
+        floor_pet: Option<&pixtuoid_scene::pet::Pet>,
     ) -> &RgbBuffer {
         self.buf
             .ensure_size(buf_w, buf_h, theme.surface.bg_fallback);
@@ -127,17 +127,17 @@ impl OfficeRenderer {
         &mut self,
         scene: &SceneState,
         now: SystemTime,
-    ) -> Vec<crate::scene::overlay::LabelElement> {
+    ) -> Vec<pixtuoid_scene::overlay::LabelElement> {
         let Some(layout) = self.last_layout.as_ref() else {
             return Vec::new();
         };
-        let mut rctx = crate::scene::pose::RouteCtx {
+        let mut rctx = pixtuoid_scene::pose::RouteCtx {
             router: &mut self.floor.router,
             overlay: &self.floor.overlay,
             history: &mut self.floor.history,
             motion: &mut self.floor.motion,
         };
-        crate::scene::overlay::build_overlay(scene, layout, now, &mut rctx, None)
+        pixtuoid_scene::overlay::build_overlay(scene, layout, now, &mut rctx, None)
     }
 }
 
@@ -172,11 +172,11 @@ pub fn paint_labels_into_surface(
     sb: &mut [u32],
     win_w: usize,
     win_h: usize,
-    labels: &[crate::scene::overlay::LabelElement],
+    labels: &[pixtuoid_scene::overlay::LabelElement],
     scale: i32,
     theme: &Theme,
 ) {
-    use crate::scene::overlay::LabelTone;
+    use pixtuoid_scene::overlay::LabelTone;
     for el in labels {
         let rgb = if el.hovered {
             Rgb {
@@ -202,7 +202,7 @@ pub fn paint_labels_into_surface(
         } else {
             format!("\u{25cf}{}", el.text)
         };
-        let tw = crate::scene::font::text_width(&text, 1);
+        let tw = pixtuoid_scene::font::text_width(&text, 1);
         // anchor_px is the sprite TOP-LEFT in office space; center the badge over the sprite
         // and lift it one glyph-height (8px) + a 2px gap above the head.
         let cx = el.anchor_px.x as i32 * scale + (FLOATING_SPRITE_W * scale) / 2 - tw / 2;
@@ -216,8 +216,8 @@ pub fn paint_labels_into_surface(
         // office (no cell background like the TUI), so a shadow keeps it legible over bright
         // windows / plants / furniture. Floating-painter-only (the tui surface has cell bg).
         const SHADOW: u32 = 0x0000_0000;
-        crate::scene::font::draw_text(&text, cx + 1, cy + 1, 1, |x, y| put(x, y, SHADOW));
-        crate::scene::font::draw_text(&text, cx, cy, 1, |x, y| put(x, y, color));
+        pixtuoid_scene::font::draw_text(&text, cx + 1, cy + 1, 1, |x, y| put(x, y, SHADOW));
+        pixtuoid_scene::font::draw_text(&text, cx, cy, 1, |x, y| put(x, y, color));
     }
 }
 
@@ -231,8 +231,8 @@ mod tests {
         // buffer is sized to the requested pixel dims. Pins the floating render seam end-to-end.
         let scene = SceneState::new([8; pixtuoid_core::state::MAX_FLOORS]);
         let pack =
-            crate::scene::embedded_pack::load_sprite_pack(None).expect("embedded pack loads");
-        let theme = crate::scene::theme::theme_by_name("normal").expect("normal theme exists");
+            pixtuoid_scene::embedded_pack::load_sprite_pack(None).expect("embedded pack loads");
+        let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
         let now = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
         let mut renderer = OfficeRenderer::new();
         let buf = renderer.render(
@@ -261,9 +261,9 @@ mod tests {
 
     #[test]
     fn paint_labels_writes_glyph_pixels_into_the_surface() {
-        use crate::scene::layout::Point;
-        use crate::scene::overlay::{LabelElement, LabelTone};
-        let theme = crate::scene::theme::theme_by_name("normal").expect("normal theme exists");
+        use pixtuoid_scene::layout::Point;
+        use pixtuoid_scene::overlay::{LabelElement, LabelTone};
+        let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
         let mut sb = vec![0u32; 100 * 100];
         let labels = vec![LabelElement {
             anchor_px: Point { x: 20, y: 20 },

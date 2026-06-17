@@ -30,10 +30,10 @@ pub(crate) fn user_home() -> String {
 
 /// `Option` variant of [`user_home`]: the SAME USERPROFILE-vs-HOME rule, but
 /// with no host-level fallback — `None` when nothing is set so a caller can
-/// supply its own (e.g. the installer's `install::io::user_home`, which keeps
-/// its empty-string-is-unset contract by delegating here). This is the one
-/// place that knows the precedence; both the `String` and `Option` shapes are
-/// derived from [`resolve_user_home_opt`].
+/// supply its own (the installer's config/install call sites call this directly
+/// and keep their own per-call fallbacks). This is the one place that knows the
+/// precedence; both the `String` and `Option` shapes are derived from
+/// [`resolve_user_home_opt`].
 pub fn user_home_opt() -> Option<String> {
     resolve_user_home_opt(
         cfg!(windows),
@@ -162,8 +162,8 @@ fn resolve_home(
 /// The single USERPROFILE-vs-HOME precedence, in its purest form: USERPROFILE
 /// then HOME on Windows, HOME only on Unix, with empty strings treated as
 /// unset and `None` when nothing resolves. Both [`resolve_home`] (String, with
-/// a host fallback) and `install::io::user_home` (caller-supplied fallback)
-/// derive from this — pure, so the Windows arm is unit-testable on any host.
+/// a host fallback) and [`user_home_opt`] (the `Option` shape the installer
+/// calls) derive from this — pure, so the Windows arm is unit-testable on any host.
 pub fn resolve_user_home_opt(
     windows: bool,
     userprofile: Option<String>,

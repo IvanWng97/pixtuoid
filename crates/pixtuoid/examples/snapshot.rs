@@ -11,14 +11,14 @@ use anyhow::{Context as _, Result};
 use clap::Parser;
 use image::codecs::gif::{GifEncoder, Repeat};
 use image::{Delay, Frame as GifFrame, Rgb as ImgRgb, RgbImage, Rgba, RgbaImage};
-use pixtuoid::scene::embedded_pack::load_sprite_pack;
-use pixtuoid::scene::frame_cache::FrameCache;
 use pixtuoid::tui::renderer::{draw_scene, DrawCtx, TickerQueue};
 use pixtuoid_core::source::jsonl::JsonlWatcher;
 use pixtuoid_core::source::AgentEvent;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_core::state::ActivityState;
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex, Reducer, SceneState, Transport};
+use pixtuoid_scene::embedded_pack::load_sprite_pack;
+use pixtuoid_scene::frame_cache::FrameCache;
 use ratatui::backend::TestBackend;
 use ratatui::style::Color;
 use ratatui::Terminal;
@@ -308,7 +308,7 @@ fn main() -> Result<()> {
     // Force-weather override (screenshot/gallery only) — set once; the
     // thread-local it sets is honored by every weather derivation on this
     // thread, including each frame of the GIF path.
-    if let Err(valid) = pixtuoid::scene::pixel_painter::force_weather(args.weather.as_deref()) {
+    if let Err(valid) = pixtuoid_scene::pixel_painter::force_weather(args.weather.as_deref()) {
         anyhow::bail!(
             "unknown --weather {:?}; valid: {}",
             args.weather.unwrap_or_default(),
@@ -382,13 +382,13 @@ fn main() -> Result<()> {
     let mut buf = RgbBuffer::filled(0, 0, Rgb { r: 0, g: 0, b: 0 });
     let pack = load_sprite_pack(args.pack_dir.clone())?;
     let mut cache = FrameCache::new();
-    let mut router = pixtuoid::scene::pathfind::AStarRouter::new();
+    let mut router = pixtuoid_scene::pathfind::AStarRouter::new();
     let mut overlay = pixtuoid_core::walkable::OccupancyOverlay::new();
-    let mut history = pixtuoid::scene::pose::PoseHistory::new();
+    let mut history = pixtuoid_scene::pose::PoseHistory::new();
     // Fail loudly like --weather above — a typo'd theme silently rendering
     // NORMAL would put wrong-palette art into the docs/site screenshot pipelines.
-    let theme = pixtuoid::scene::theme::theme_by_name(&args.theme).ok_or_else(|| {
-        let valid: Vec<&str> = pixtuoid::scene::theme::ALL_THEMES
+    let theme = pixtuoid_scene::theme::theme_by_name(&args.theme).ok_or_else(|| {
+        let valid: Vec<&str> = pixtuoid_scene::theme::ALL_THEMES
             .iter()
             .map(|t| t.name)
             .collect();
@@ -401,10 +401,10 @@ fn main() -> Result<()> {
     let ticker = TickerQueue::new();
 
     let navigations = parse_navigations(&args.navigate_at)?;
-    let pet_vec: Vec<pixtuoid::scene::pet::Pet> = match args.pets.as_deref() {
+    let pet_vec: Vec<pixtuoid_scene::pet::Pet> = match args.pets.as_deref() {
         None => vec![],
         Some(kind_str) => {
-            use pixtuoid::scene::pet::{Pet, PetKind};
+            use pixtuoid_scene::pet::{Pet, PetKind};
             let kind = match kind_str {
                 "cat" => PetKind::Cat,
                 "dog" => PetKind::Dog,
@@ -489,10 +489,10 @@ fn main() -> Result<()> {
         .unwrap_or_default();
     let warning_text = pixtuoid::doctor::footer_warning(death_text.as_deref(), &drifted);
     let mut chitchat_state = std::collections::HashMap::new();
-    let mut light = pixtuoid::scene::floor::LightingState::new();
+    let mut light = pixtuoid_scene::floor::LightingState::new();
     let mut motion: std::collections::HashMap<
         pixtuoid_core::AgentId,
-        pixtuoid::scene::motion::MotionState,
+        pixtuoid_scene::motion::MotionState,
     > = std::collections::HashMap::new();
     // Static snapshots have no time to animate the fade — snap straight
     // to the steady-state level for the chosen scene.
@@ -609,7 +609,7 @@ fn main() -> Result<()> {
         theme_picker: args.theme_picker,
         floor_info: None,
         floor: {
-            let mut m = pixtuoid::scene::floor::FloorMeta::ground();
+            let mut m = pixtuoid_scene::floor::FloorMeta::ground();
             m.floor_seed = args.floor_seed;
             m
         },
@@ -688,7 +688,7 @@ fn debug_paint_walkable_overlay(
     term: &mut Terminal<TestBackend>,
     scene: &SceneState,
 ) -> Result<()> {
-    use pixtuoid::scene::layout::SceneLayout;
+    use pixtuoid_scene::layout::SceneLayout;
 
     let size = term.size()?;
     let scene_w = size.width;
@@ -769,7 +769,7 @@ fn debug_paint_walkable_overlay(
     Ok(())
 }
 
-fn compute_reachable(layout: &pixtuoid::scene::layout::SceneLayout) -> Vec<bool> {
+fn compute_reachable(layout: &pixtuoid_scene::layout::SceneLayout) -> Vec<bool> {
     use std::collections::VecDeque;
     let w = layout.buf_w as usize;
     let h = layout.buf_h as usize;
@@ -807,7 +807,7 @@ fn compute_reachable(layout: &pixtuoid::scene::layout::SceneLayout) -> Vec<bool>
 
 fn is_reachable(
     mask: &[bool],
-    layout: &pixtuoid::scene::layout::SceneLayout,
+    layout: &pixtuoid_scene::layout::SceneLayout,
     x: u16,
     y: u16,
 ) -> bool {
@@ -1463,7 +1463,7 @@ fn anim_scene(
 fn compute_crop_rect(
     args: &SnapshotArgs,
     scene: &SceneState,
-    history: &pixtuoid::scene::pose::PoseHistory,
+    history: &pixtuoid_scene::pose::PoseHistory,
     cols: u16,
     rows: u16,
     now: SystemTime,
@@ -1472,8 +1472,7 @@ fn compute_crop_rect(
 
     // Fail loudly like --theme/--weather above — a typo'd crop target silently
     // writing the full uncropped PNG defeats the point of the flag.
-    let target_pixel: pixtuoid::scene::layout::Point = if let Some(ref agent_label) =
-        args.crop_agent
+    let target_pixel: pixtuoid_scene::layout::Point = if let Some(ref agent_label) = args.crop_agent
     {
         let slot = scene
             .agents
@@ -1594,7 +1593,7 @@ fn save_backend_as_png(
             } else if symbol.trim().is_empty() {
                 fill_rect(&mut img, x0, y0, CELL_W, CELL_H, bg);
             } else if let Some(rows) =
-                pixtuoid::scene::font::glyph8x8(symbol.chars().next().unwrap_or(' '))
+                pixtuoid_scene::font::glyph8x8(symbol.chars().next().unwrap_or(' '))
             {
                 fill_rect(&mut img, x0, y0, CELL_W, CELL_H, bg);
                 blit_glyph_cell(rows, x0, y0, |px, py| {
@@ -1649,7 +1648,7 @@ fn cells_to_rgba(
             } else if symbol.trim().is_empty() {
                 fill_rgba_rect(&mut rgba, x0, y0, CELL_W, CELL_H, bg);
             } else if let Some(rows) =
-                pixtuoid::scene::font::glyph8x8(symbol.chars().next().unwrap_or(' '))
+                pixtuoid_scene::font::glyph8x8(symbol.chars().next().unwrap_or(' '))
             {
                 fill_rgba_rect(&mut rgba, x0, y0, CELL_W, CELL_H, bg);
                 let fg_rgba = Rgba([fg[0], fg[1], fg[2], 255]);
@@ -1709,9 +1708,9 @@ fn save_renderer_gif(
     rows: u16,
     fps: u64,
     duration_secs: u64,
-    theme: &'static pixtuoid::scene::theme::Theme,
+    theme: &'static pixtuoid_scene::theme::Theme,
     navigations: &[(u64, usize)],
-    pets: Vec<pixtuoid::scene::pet::Pet>,
+    pets: Vec<pixtuoid_scene::pet::Pet>,
 ) -> Result<()> {
     use pixtuoid_core::render::Renderer as _;
     let frame_count = (duration_secs * fps) as usize;
@@ -1757,12 +1756,12 @@ fn save_as_gif(
     rows: u16,
     buf: &mut RgbBuffer,
     cache: &mut FrameCache,
-    router: &mut pixtuoid::scene::pathfind::AStarRouter,
+    router: &mut pixtuoid_scene::pathfind::AStarRouter,
     overlay: &mut pixtuoid_core::walkable::OccupancyOverlay,
-    history: &mut pixtuoid::scene::pose::PoseHistory,
+    history: &mut pixtuoid_scene::pose::PoseHistory,
     fps: u64,
     duration_secs: u64,
-    theme: &pixtuoid::scene::theme::Theme,
+    theme: &pixtuoid_scene::theme::Theme,
     floor_seed: u64,
     skip_ms: u64,
     debug_walkable: bool,
@@ -1782,10 +1781,10 @@ fn save_as_gif(
     encoder.set_repeat(Repeat::Infinite)?;
 
     let mut chitchat_state = std::collections::HashMap::new();
-    let mut light = pixtuoid::scene::floor::LightingState::new();
+    let mut light = pixtuoid_scene::floor::LightingState::new();
     let mut motion: std::collections::HashMap<
         pixtuoid_core::AgentId,
-        pixtuoid::scene::motion::MotionState,
+        pixtuoid_scene::motion::MotionState,
     > = std::collections::HashMap::new();
     for i in 0..(skip_frames + frame_count) {
         let now = start_now + Duration::from_millis(i as u64 * frame_ms);
@@ -1806,7 +1805,7 @@ fn save_as_gif(
             theme_picker: None,
             floor_info: None,
             floor: {
-                let mut m = pixtuoid::scene::floor::FloorMeta::ground();
+                let mut m = pixtuoid_scene::floor::FloorMeta::ground();
                 m.floor_seed = floor_seed;
                 m
             },
@@ -2044,7 +2043,7 @@ mod tests {
     fn crop_rect_centers_on_the_pantry_waypoint() {
         let now = SystemTime::now();
         let scene = sample_scene(now, 12, 12);
-        let history = pixtuoid::scene::pose::PoseHistory::new();
+        let history = pixtuoid_scene::pose::PoseHistory::new();
         let args = crop_args(&["--crop-furniture", "pantry"]);
         let rect = compute_crop_rect(&args, &scene, &history, 192, 64, now)
             .unwrap()
@@ -2065,7 +2064,7 @@ mod tests {
     fn crop_rect_without_flags_is_none() {
         let now = SystemTime::now();
         let scene = sample_scene(now, 12, 12);
-        let history = pixtuoid::scene::pose::PoseHistory::new();
+        let history = pixtuoid_scene::pose::PoseHistory::new();
         let args = crop_args(&[]);
         assert!(compute_crop_rect(&args, &scene, &history, 192, 64, now)
             .unwrap()
@@ -2076,7 +2075,7 @@ mod tests {
     fn crop_rect_fails_loudly_on_typos_and_unknown_agents() {
         let now = SystemTime::now();
         let scene = sample_scene(now, 12, 12);
-        let history = pixtuoid::scene::pose::PoseHistory::new();
+        let history = pixtuoid_scene::pose::PoseHistory::new();
 
         let typo = crop_args(&["--crop-furniture", "fridge"]);
         let err = compute_crop_rect(&typo, &scene, &history, 192, 64, now).unwrap_err();

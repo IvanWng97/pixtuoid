@@ -281,7 +281,7 @@ jobs:
             done
             printf '%s\n' "$out"; echo "::error::$crate failed after 3 attempts — index-propagation race, or an unsatisfiable dependency requirement"; return 1
           }
-          for crate in pixtuoid-core pixtuoid-hook pixtuoid; do
+          for crate in pixtuoid-core pixtuoid-scene pixtuoid-hook pixtuoid; do
             publish_one "$crate"
           done
 

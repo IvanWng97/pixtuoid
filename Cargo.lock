@@ -2186,12 +2186,11 @@ dependencies = [
  "chrono",
  "clap",
  "crossterm",
- "font8x8",
  "image",
  "insta",
  "open",
- "palette",
  "pixtuoid-core",
+ "pixtuoid-scene",
  "ratatui",
  "serde",
  "serde_json",
@@ -2234,6 +2233,20 @@ dependencies = [
  "libc",
  "serde_json",
  "tokio",
+]
+
+[[package]]
+name = "pixtuoid-scene"
+version = "0.10.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "font8x8",
+ "palette",
+ "pixtuoid-core",
+ "serde_json",
+ "tempfile",
+ "tracing",
 ]
 
 [[package]]

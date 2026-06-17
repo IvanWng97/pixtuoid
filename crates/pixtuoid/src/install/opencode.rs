@@ -59,7 +59,7 @@ fn opencode_config_dir() -> Result<PathBuf> {
     config_dir_from(
         io::nonempty_env("OPENCODE_CONFIG_DIR").as_deref(),
         io::nonempty_env("XDG_CONFIG_HOME").as_deref(),
-        io::user_home().as_deref(),
+        pixtuoid_core::platform::user_home_opt().as_deref(),
     )
 }
 

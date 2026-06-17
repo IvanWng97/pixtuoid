@@ -13,12 +13,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use pixtuoid::scene::embedded_pack::load_sprite_pack;
-use pixtuoid::scene::floor::FloorMeta;
-use pixtuoid::scene::theme::{self, Theme};
 use pixtuoid::tui::renderer::draw_scene;
 use pixtuoid_core::state::ActivityState;
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex, SceneState};
+use pixtuoid_scene::embedded_pack::load_sprite_pack;
+use pixtuoid_scene::floor::FloorMeta;
+use pixtuoid_scene::theme::{self, Theme};
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 

@@ -375,7 +375,7 @@ fn crash_log_path() -> PathBuf {
     if let Some(state) = pixtuoid::install::io::nonempty_env("XDG_STATE_HOME") {
         return PathBuf::from(format!("{state}/pixtuoid/crash.log"));
     }
-    if let Some(home) = pixtuoid::install::io::user_home() {
+    if let Some(home) = pixtuoid_core::platform::user_home_opt() {
         return PathBuf::from(home)
             .join(".cache")
             .join("pixtuoid")
@@ -407,7 +407,7 @@ fn log_file_path() -> PathBuf {
     if let Some(state) = pixtuoid::install::io::nonempty_env("XDG_STATE_HOME") {
         return PathBuf::from(format!("{state}/pixtuoid/log"));
     }
-    if let Some(home) = pixtuoid::install::io::user_home() {
+    if let Some(home) = pixtuoid_core::platform::user_home_opt() {
         return PathBuf::from(home)
             .join(".cache")
             .join("pixtuoid")

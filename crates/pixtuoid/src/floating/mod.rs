@@ -50,7 +50,7 @@ pub fn run(cfg: RunConfig) -> Result<()> {
 
     let app_config = config::load(&config_path, &mut Vec::new());
     let floating_cfg = config::resolve_floating(&app_config);
-    let pack = crate::scene::embedded_pack::load_sprite_pack(pack_dir)
+    let pack = pixtuoid_scene::embedded_pack::load_sprite_pack(pack_dir)
         .context("loading the sprite pack for the floating window")?;
 
     let rt = tokio::runtime::Builder::new_multi_thread()

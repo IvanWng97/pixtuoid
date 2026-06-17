@@ -8,12 +8,12 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Padding, Paragraph};
 
 use super::{compact_hms, to_color};
-use crate::scene::layout::{Layout, DESK_W};
-use crate::scene::overlay::LabelTone;
-use crate::scene::pet::PetKind;
-use crate::scene::pose;
-use crate::scene::theme::Theme;
 use crate::tui::renderer::clip_widget_rect;
+use pixtuoid_scene::layout::{Layout, DESK_W};
+use pixtuoid_scene::overlay::LabelTone;
+use pixtuoid_scene::pet::PetKind;
+use pixtuoid_scene::pose;
+use pixtuoid_scene::theme::Theme;
 
 /// Borderless tooltip frame shared by every hover/click tooltip. No outline
 /// (the whole UI dropped popup borders) — a solid `tooltip_bg` fill plus a
@@ -57,9 +57,9 @@ pub(crate) fn paint_label_widgets(
     rctx: &mut pose::RouteCtx<'_>,
     scene_rect: Rect,
     hovered: Option<AgentId>,
-    theme: &crate::scene::theme::Theme,
+    theme: &pixtuoid_scene::theme::Theme,
 ) {
-    for el in crate::scene::overlay::build_overlay(scene, layout, now, rctx, hovered) {
+    for el in pixtuoid_scene::overlay::build_overlay(scene, layout, now, rctx, hovered) {
         let lx = scene_rect.x + el.anchor_px.x.saturating_sub(2);
         let ly = scene_rect.y + (el.anchor_px.y / 2).saturating_sub(1);
         let label_color = if el.hovered {
@@ -108,7 +108,7 @@ pub(crate) fn paint_hover_tooltip(
     my: u16,
     scene_rect: Rect,
     now: SystemTime,
-    theme: &crate::scene::theme::Theme,
+    theme: &pixtuoid_scene::theme::Theme,
 ) {
     let Some(agent) = scene.agents.get(&agent_id) else {
         return;
@@ -210,7 +210,7 @@ fn paint_simple_tooltip(
     mx: u16,
     my: u16,
     scene_rect: Rect,
-    theme: &crate::scene::theme::Theme,
+    theme: &pixtuoid_scene::theme::Theme,
 ) {
     let line = Line::from(Span::styled(
         text,
@@ -252,7 +252,7 @@ pub(crate) fn paint_coffee_tooltip(
     mx: u16,
     my: u16,
     scene_rect: Rect,
-    theme: &crate::scene::theme::Theme,
+    theme: &pixtuoid_scene::theme::Theme,
 ) {
     paint_simple_tooltip(f, " \u{2615} Buy Ivan a coffee ", mx, my, scene_rect, theme);
 }
@@ -263,7 +263,7 @@ pub(crate) fn paint_furniture_tooltip(
     mx: u16,
     my: u16,
     scene_rect: Rect,
-    theme: &crate::scene::theme::Theme,
+    theme: &pixtuoid_scene::theme::Theme,
 ) {
     let text = format!(" {} ", label);
     paint_simple_tooltip(f, &text, mx, my, scene_rect, theme);
@@ -281,7 +281,7 @@ pub(crate) fn paint_pet_tooltip(
     mx: u16,
     my: u16,
     scene_rect: Rect,
-    theme: &crate::scene::theme::Theme,
+    theme: &pixtuoid_scene::theme::Theme,
 ) {
     // The state strings (cooldown reaction / sleeping / pet-me) are NOT user-
     // configurable; only the idle/walk label is the pet's NAME, which the caller
@@ -318,7 +318,7 @@ pub fn paint_mascot_tooltip(
     mx: u16,
     my: u16,
     scene_rect: Rect,
-    theme: &crate::scene::theme::Theme,
+    theme: &pixtuoid_scene::theme::Theme,
 ) {
     let text = mascot_tooltip_text(name, busy, degraded, active_sessions);
     paint_simple_tooltip(f, &text, mx, my, scene_rect, theme);
@@ -349,9 +349,9 @@ fn mascot_tooltip_text(name: &str, busy: bool, degraded: bool, active_sessions: 
 /// line of text, positioned above the agent's sprite head.
 pub fn paint_chitchat_bubbles(
     f: &mut ratatui::Frame<'_>,
-    bubbles: &[crate::scene::chitchat::ChitchatBubble],
+    bubbles: &[pixtuoid_scene::chitchat::ChitchatBubble],
     scene_rect: Rect,
-    theme: &crate::scene::theme::Theme,
+    theme: &pixtuoid_scene::theme::Theme,
 ) {
     for bubble in bubbles {
         let text = format!(" {} ", bubble.text);
