@@ -1518,6 +1518,7 @@ fn onboarding_overlay_renders_roster_and_hint() {
         ],
         selected: 0,
         elapsed_ms: 100_000,
+        dim: 0.4,
     });
     r.render(&scene, &pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
@@ -1560,6 +1561,7 @@ fn onboarding_dims_the_office_buffer() {
         }],
         selected: 0,
         elapsed_ms: 100_000,
+        dim: 0.4,
     });
     dimmed.render(&scene, &pack(), t0()).unwrap();
     let dim = avg_lum(dimmed.buf(), 0, 0, dimmed.buf().width, dimmed.buf().height);

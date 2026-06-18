@@ -196,11 +196,6 @@ pub(crate) fn scene_rect(full: Rect) -> Rect {
 //     + bulletin notice + footer. Terminal-specific, runs inside
 //     `term.draw`.
 
-/// Brightness fraction the office dims to behind the onboarding overlay (0 =
-/// black, 1 = unchanged), and the ramp time to reach it as the overlay opens.
-const ONBOARDING_DIM_FLOOR: f32 = 0.4;
-const ONBOARDING_DIM_RAMP_MS: u64 = 450;
-
 pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     term: &mut Terminal<B>,
     scene: &SceneState,
@@ -290,19 +285,17 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         )
     });
 
-    // Modal backdrop: while onboarding is open, DIM the office — the room "lowers
-    // the lights" so the welcome card pops. Ramped down over ~450ms as the overlay
-    // opens (instant restore on close); the card itself paints opaque on top.
-    if ctx.onboarding.open {
-        let t = (ctx.onboarding.elapsed_ms.min(ONBOARDING_DIM_RAMP_MS) as f32)
-            / ONBOARDING_DIM_RAMP_MS as f32;
-        let factor = 1.0 - t * (1.0 - ONBOARDING_DIM_FLOOR);
-        if factor < 0.999 {
-            for px in ctx.buf.as_mut_slice() {
-                px.r = (px.r as f32 * factor) as u8;
-                px.g = (px.g as f32 * factor) as u8;
-                px.b = (px.b as f32 * factor) as u8;
-            }
+    // Modal backdrop: DIM the office by the loop-computed `onboarding.dim` (ramps
+    // in on open, back out on the close fade) — the room "lowers the lights" so the
+    // welcome card pops. The card (`onboarding.open`) is decoupled from the dim, so
+    // the office keeps fading back up for a beat AFTER the card is gone. The card
+    // itself paints opaque on top.
+    if ctx.onboarding.dim < 0.999 {
+        let factor = ctx.onboarding.dim;
+        for px in ctx.buf.as_mut_slice() {
+            px.r = (px.r as f32 * factor) as u8;
+            px.g = (px.g as f32 * factor) as u8;
+            px.b = (px.b as f32 * factor) as u8;
         }
     }
 

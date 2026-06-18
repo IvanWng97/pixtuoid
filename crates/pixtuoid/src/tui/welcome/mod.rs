@@ -80,16 +80,58 @@ impl WelcomeUi {
     }
 }
 
-/// The per-frame render snapshot the event loop hands the renderer — the four
-/// values always travel together (open flag + roster snapshot + cursor + the
-/// elapsed-ms clock that drives the typewriter), so they're bundled rather than
-/// threaded as four parallel fields/params through `TuiRenderer` → `DrawCtx` →
-/// `paint_overlays`. The model (`WelcomeUi`) holds no clock; the loop stamps
-/// `elapsed_ms` from when the overlay opened.
-#[derive(Debug, Clone, Default)]
+/// The per-frame render snapshot the event loop hands the renderer — these values
+/// always travel together, so they're bundled rather than threaded as parallel
+/// fields/params through `TuiRenderer` → `DrawCtx` → `paint_overlays`. The model
+/// (`WelcomeUi`) holds no clock; the loop stamps `elapsed_ms` from when the overlay
+/// opened and resolves `dim` via the ramp helpers below. `open` (paint the CARD)
+/// is decoupled from `dim` (the office backdrop) so the CLOSE fade-out keeps dimming
+/// the office for a beat AFTER the card is gone.
+#[derive(Debug, Clone)]
 pub struct OnboardingFrame {
+    /// Paint the welcome card. False during the close fade-out (card gone, office
+    /// still fading back up).
     pub open: bool,
     pub rows: Vec<WelcomeRow>,
     pub selected: usize,
     pub elapsed_ms: u64,
+    /// Office brightness multiplier for the modal backdrop: 1.0 = no dim,
+    /// `DIM_FLOOR` = fully dimmed. Computed by the loop (`dim_opening`/`dim_closing`).
+    pub dim: f32,
+}
+
+impl Default for OnboardingFrame {
+    fn default() -> Self {
+        // `dim: 1.0` (NOT the f32 default 0.0, which would render the office black).
+        Self {
+            open: false,
+            rows: Vec::new(),
+            selected: 0,
+            elapsed_ms: 0,
+            dim: 1.0,
+        }
+    }
+}
+
+/// Office brightness the backdrop dims to (0 = black, 1 = unchanged) and the ramp
+/// times — in over `DIM_RAMP_MS` as the overlay opens, back out over the shorter
+/// `DIM_FADE_OUT_MS` on close ("lights up" a touch quicker than they went down).
+pub const DIM_FLOOR: f32 = 0.4;
+pub const DIM_RAMP_MS: u64 = 450;
+pub const DIM_FADE_OUT_MS: u64 = 300;
+
+/// Dim factor `elapsed_ms` after the overlay OPENED — ramps `1.0 → DIM_FLOOR`.
+pub fn dim_opening(elapsed_ms: u64) -> f32 {
+    let t = elapsed_ms.min(DIM_RAMP_MS) as f32 / DIM_RAMP_MS as f32;
+    1.0 - t * (1.0 - DIM_FLOOR)
+}
+
+/// Dim factor `elapsed_ms` into the CLOSE fade — ramps `DIM_FLOOR → 1.0`, then
+/// `None` once fully restored (the caller drops the closing state at `None`).
+pub fn dim_closing(elapsed_ms: u64) -> Option<f32> {
+    if elapsed_ms >= DIM_FADE_OUT_MS {
+        return None;
+    }
+    let t = elapsed_ms as f32 / DIM_FADE_OUT_MS as f32;
+    Some(DIM_FLOOR + t * (1.0 - DIM_FLOOR))
 }

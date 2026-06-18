@@ -612,6 +612,7 @@ fn main() -> Result<()> {
             ],
             selected: 0,
             elapsed_ms: 100_000,
+            dim: pixtuoid::tui::welcome::dim_opening(100_000),
         }
     } else {
         pixtuoid::tui::welcome::OnboardingFrame::default()

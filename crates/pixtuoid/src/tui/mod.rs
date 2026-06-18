@@ -468,6 +468,9 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
     };
     let mut onboarding_ui = welcome::WelcomeUi::from_detected(&detected_clis);
     let mut onboarding_opened_at: Option<Instant> = (!onboarding_ui.is_empty()).then(Instant::now);
+    // Set on confirm/skip: the close fade-out — the office dims back UP over
+    // `welcome::DIM_FADE_OUT_MS` after the card is gone, then clears to fully live.
+    let mut onboarding_closing_at: Option<Instant> = None;
 
     // The "what's new in vX" version popup yields to onboarding ONLY when the
     // overlay actually takes the screen (a fresh install WITH detected CLIs): both
@@ -628,17 +631,34 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                     String::new(),
                 );
             }
-            // Onboarding frame: rebuilt each tick while open so the painter's
-            // `elapsed_ms` (since the overlay opened) advances the typewriter.
-            renderer.set_onboarding_frame(match onboarding_opened_at {
-                Some(opened) => welcome::OnboardingFrame {
+            // Onboarding frame: while OPEN, paint the card + dim ramps in (the
+            // painter's `elapsed_ms` drives the typewriter). While CLOSING, the card
+            // is gone but the office keeps fading back UP for a beat; once the fade
+            // completes, drop the closing state to fully live.
+            let onboarding_frame = if let Some(opened) = onboarding_opened_at {
+                let e = opened.elapsed().as_millis() as u64;
+                welcome::OnboardingFrame {
                     open: true,
                     rows: onboarding_ui.rows.clone(),
                     selected: onboarding_ui.selected,
-                    elapsed_ms: opened.elapsed().as_millis() as u64,
-                },
-                None => welcome::OnboardingFrame::default(),
-            });
+                    elapsed_ms: e,
+                    dim: welcome::dim_opening(e),
+                }
+            } else if let Some(closing) = onboarding_closing_at {
+                match welcome::dim_closing(closing.elapsed().as_millis() as u64) {
+                    Some(dim) => welcome::OnboardingFrame {
+                        dim,
+                        ..Default::default()
+                    },
+                    None => {
+                        onboarding_closing_at = None;
+                        welcome::OnboardingFrame::default()
+                    }
+                }
+            } else {
+                welcome::OnboardingFrame::default()
+            };
+            renderer.set_onboarding_frame(onboarding_frame);
             renderer.render(&snapshot, &pack, now)?;
 
             // Auto-compute per-floor desk capacity from the current
@@ -963,6 +983,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                                     }
                                 }
                                 onboarding_opened_at = None;
+                                onboarding_closing_at = Some(Instant::now());
                             }
                             KeyAction::OnboardingSkip => {
                                 // Skip = mark onboarding done WITHOUT changing any
@@ -987,6 +1008,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                                     }
                                 }
                                 onboarding_opened_at = None;
+                                onboarding_closing_at = Some(Instant::now());
                             }
                         }
                     }
