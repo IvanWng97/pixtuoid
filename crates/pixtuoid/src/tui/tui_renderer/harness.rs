@@ -1536,6 +1536,40 @@ fn onboarding_overlay_renders_roster_and_hint() {
     );
 }
 
+#[test]
+fn onboarding_dims_the_office_buffer() {
+    use crate::tui::welcome::{OnboardingFrame, WelcomeRow};
+    let scene = scene_with(vec![idle("/dim/0.jsonl", 0, t0())], 16);
+
+    // Baseline: onboarding closed → full-brightness office.
+    let mut base = build(100, 40, vec![]);
+    base.render(&scene, &pack(), t0()).unwrap();
+    let bright = avg_lum(base.buf(), 0, 0, base.buf().width, base.buf().height);
+
+    // Same scene, onboarding open + fully ramped (large elapsed) → the office
+    // pixel buffer is dimmed as the modal backdrop (the card paints on the cell
+    // layer, not the buffer, so this measures the office only).
+    let mut dimmed = build(100, 40, vec![]);
+    dimmed.set_onboarding_frame(OnboardingFrame {
+        open: true,
+        rows: vec![WelcomeRow {
+            source_id: "codex",
+            label_prefix: "cx",
+            display_name: "Codex".into(),
+            checked: true,
+        }],
+        selected: 0,
+        elapsed_ms: 100_000,
+    });
+    dimmed.render(&scene, &pack(), t0()).unwrap();
+    let dim = avg_lum(dimmed.buf(), 0, 0, dimmed.buf().width, dimmed.buf().height);
+
+    assert!(
+        dim < bright * 0.6,
+        "onboarding should dim the office buffer: dim={dim} vs bright={bright}"
+    );
+}
+
 // ===================================================================
 // Footer / HUD (rendered text)
 // ===================================================================

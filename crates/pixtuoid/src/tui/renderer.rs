@@ -195,6 +195,12 @@ pub(crate) fn scene_rect(full: Rect) -> Rect {
 //   * `flush_to_terminal` -- ratatui half-block compression + label overlay
 //     + bulletin notice + footer. Terminal-specific, runs inside
 //     `term.draw`.
+
+/// Brightness fraction the office dims to behind the onboarding overlay (0 =
+/// black, 1 = unchanged), and the ramp time to reach it as the overlay opens.
+const ONBOARDING_DIM_FLOOR: f32 = 0.4;
+const ONBOARDING_DIM_RAMP_MS: u64 = 450;
+
 pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     term: &mut Terminal<B>,
     scene: &SceneState,
@@ -283,6 +289,22 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
             my,
         )
     });
+
+    // Modal backdrop: while onboarding is open, DIM the office — the room "lowers
+    // the lights" so the welcome card pops. Ramped down over ~450ms as the overlay
+    // opens (instant restore on close); the card itself paints opaque on top.
+    if ctx.onboarding.open {
+        let t = (ctx.onboarding.elapsed_ms.min(ONBOARDING_DIM_RAMP_MS) as f32)
+            / ONBOARDING_DIM_RAMP_MS as f32;
+        let factor = 1.0 - t * (1.0 - ONBOARDING_DIM_FLOOR);
+        if factor < 0.999 {
+            for px in ctx.buf.as_mut_slice() {
+                px.r = (px.r as f32 * factor) as u8;
+                px.g = (px.g as f32 * factor) as u8;
+                px.b = (px.b as f32 * factor) as u8;
+            }
+        }
+    }
 
     let buf = &ctx.buf;
     let ticker = ctx.ticker;

@@ -456,13 +456,27 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
     let pack = embedded_pack::load_sprite_pack(pack_dir)?;
     let term = setup_terminal()?;
     let mut renderer = TuiRenderer::new(term, theme, pets);
-    // A brand-new install shows ONBOARDING, not the "what's new in vX" version
-    // popup: on first run everything is "new", so the popup is noise — and both are
-    // centered borderless cards, so showing both would visually overlap. Still call
-    // the resolver so it STAMPS `last_seen_version` (the popup won't pop on later
-    // launches either — onboarding is the one-and-only welcome), then force it off.
-    // Upgraders (not first_run) get the version popup as usual.
-    let mut version_popup = if first_run {
+    // First-run onboarding "move-in" overlay (TOP of the modal precedence chain).
+    // The roster is built only on first run; if no agent CLIs are detected there's
+    // nothing to connect, so it stays closed and the office shows normally. The
+    // overlay is "open" exactly while `onboarding_opened_at` is `Some` (also the
+    // clock its painter's typewriter reads); confirm/skip clears it to `None`.
+    let detected_clis = if first_run {
+        crate::sources::detect()
+    } else {
+        Vec::new()
+    };
+    let mut onboarding_ui = welcome::WelcomeUi::from_detected(&detected_clis);
+    let mut onboarding_opened_at: Option<Instant> = (!onboarding_ui.is_empty()).then(Instant::now);
+
+    // The "what's new in vX" version popup yields to onboarding ONLY when the
+    // overlay actually takes the screen (a fresh install WITH detected CLIs): both
+    // are centered cards, and it's noise to a first-time user. Suppress + still
+    // STAMP `last_seen_version` (so it won't pop later — onboarding is the one
+    // welcome). Gating on the overlay SHOWING (not bare `first_run`) is load-bearing:
+    // a no-CLI first-run user gets the version popup normally, incl. on a later
+    // upgrade (otherwise `first_run` stays true forever and would mute it for good).
+    let mut version_popup = if onboarding_opened_at.is_some() {
         let _ = resolve_version_popup(&config_path);
         false
     } else {
@@ -478,18 +492,6 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
         .unwrap_or(0);
     let mut dashboard_ui = dashboard::DashboardUi::default();
     let mut connection_ui = connection::ConnectionUi::default();
-    // First-run onboarding "move-in" overlay (TOP of the modal precedence chain).
-    // The roster is built only on first run; if no agent CLIs are detected there's
-    // nothing to connect, so it stays closed and the office shows normally. The
-    // overlay is "open" exactly while `onboarding_opened_at` is `Some` (also the
-    // clock its painter's typewriter reads); confirm/skip clears it to `None`.
-    let detected_clis = if first_run {
-        crate::sources::detect()
-    } else {
-        Vec::new()
-    };
-    let mut onboarding_ui = welcome::WelcomeUi::from_detected(&detected_clis);
-    let mut onboarding_opened_at: Option<Instant> = (!onboarding_ui.is_empty()).then(Instant::now);
     // Live decode-drift footer nudge: throttle-scan the warn-floor log (reusing
     // doctor's tested scanner) at most every ~15s, NOT per frame.
     let mut last_drift_scan: Option<std::time::Instant> = None;
@@ -937,13 +939,28 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                                 // Blocking ConfigLock I/O → block_in_place (run_tui
                                 // is on the multi-thread runtime, like the panel).
                                 let choices = onboarding_ui.decisions();
-                                tokio::task::block_in_place(|| {
-                                    crate::sources::apply_choices(&config_path, &choices);
+                                let outcomes = tokio::task::block_in_place(|| {
+                                    crate::sources::apply_choices(&config_path, &choices)
                                 });
-                                // Reflect into the LIVE connected-set so the office is
-                                // ready to show these sources THIS session.
-                                for (sid, on) in &choices {
-                                    connected.set(sid, *on);
+                                // Reflect each into the LIVE connected-set off its
+                                // ACTUAL outcome (a failed connect must NOT go live),
+                                // and surface any failure to the warn-floor log (doctor
+                                // + the footer drift nudge read it) — a hook install
+                                // that errors here would otherwise be silently lost.
+                                use crate::sources::ChangeOutcome;
+                                for (id, oc) in &outcomes {
+                                    match oc {
+                                        ChangeOutcome::Connected => connected.set(id, true),
+                                        ChangeOutcome::Disconnected | ChangeOutcome::NoOp => {
+                                            connected.set(id, false)
+                                        }
+                                        ChangeOutcome::Failed(e) => {
+                                            connected.set(id, false);
+                                            tracing::warn!(
+                                                "onboarding: {id} failed to connect: {e}"
+                                            );
+                                        }
+                                    }
                                 }
                                 onboarding_opened_at = None;
                             }
@@ -959,9 +976,16 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                                     .iter()
                                     .map(|r| (r.source_id, snap.contains(r.source_id)))
                                     .collect();
-                                tokio::task::block_in_place(|| {
-                                    crate::sources::apply_choices(&config_path, &freeze);
+                                let outcomes = tokio::task::block_in_place(|| {
+                                    crate::sources::apply_choices(&config_path, &freeze)
                                 });
+                                for (id, oc) in &outcomes {
+                                    if let crate::sources::ChangeOutcome::Failed(e) = oc {
+                                        tracing::warn!(
+                                            "onboarding(skip): {id} persist failed: {e}"
+                                        );
+                                    }
+                                }
                                 onboarding_opened_at = None;
                             }
                         }
