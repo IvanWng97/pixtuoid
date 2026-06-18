@@ -277,4 +277,82 @@ mod tests {
             "the badge text must paint at least one pixel"
         );
     }
+
+    #[test]
+    fn office_scale_keeps_the_office_chunky_and_never_zero() {
+        // Downscale so the office buffer stays ~OFFICE_TARGET_H (180px) tall.
+        assert_eq!(office_scale(180), 1);
+        assert_eq!(office_scale(360), 2);
+        assert_eq!(office_scale(720), 4);
+        // A short window still renders at scale 1 — never 0 (redraw divides by it).
+        assert_eq!(office_scale(90), 1);
+        assert_eq!(office_scale(0), 1);
+    }
+
+    #[test]
+    fn paint_labels_covers_every_tone_and_the_hovered_branch() {
+        use pixtuoid_scene::layout::Point;
+        use pixtuoid_scene::overlay::{LabelElement, LabelTone};
+        let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
+        // Each tone maps to a distinct theme color and still paints the badge text.
+        for tone in [
+            LabelTone::Active,
+            LabelTone::Waiting,
+            LabelTone::Idle,
+            LabelTone::Exiting,
+        ] {
+            let mut sb = vec![0u32; 100 * 100];
+            let labels = vec![LabelElement {
+                anchor_px: Point { x: 20, y: 20 },
+                text: "cc".into(),
+                tone,
+                hovered: false,
+            }];
+            paint_labels_into_surface(&mut sb, 100, 100, &labels, 2, theme);
+            assert!(
+                sb.iter().any(|&px| px != 0),
+                "tone {tone:?} must paint the badge text"
+            );
+        }
+        // The hovered branch (white text + the ▸-marker format) is dead in floating today
+        // (labels() passes hovered: None) — covered here so a future hover-wire can't regress
+        // the color/format arms. The ▸ glyph is absent in the font (blank gap), but the text paints.
+        let mut sb = vec![0u32; 100 * 100];
+        let labels = vec![LabelElement {
+            anchor_px: Point { x: 20, y: 20 },
+            text: "cc".into(),
+            tone: LabelTone::Active,
+            hovered: true,
+        }];
+        paint_labels_into_surface(&mut sb, 100, 100, &labels, 2, theme);
+        assert!(
+            sb.iter().any(|&px| px != 0),
+            "a hovered badge still paints its label text"
+        );
+    }
+
+    #[test]
+    fn labels_is_empty_before_render_then_built_from_the_cached_layout() {
+        let scene = SceneState::new([8; pixtuoid_core::state::MAX_FLOORS]);
+        let pack =
+            pixtuoid_scene::embedded_pack::load_sprite_pack(None).expect("embedded pack loads");
+        let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
+        let now = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        let mut renderer = OfficeRenderer::new();
+        // No frame rendered yet → no cached layout → the guard returns empty.
+        assert!(renderer.labels(&scene, now).is_empty());
+        // After a render, labels() drives build_overlay off the SAME cached layout the sprite
+        // pass used; an empty office has no agent badges, but the build path still runs.
+        renderer.render(
+            &scene,
+            &pack,
+            theme,
+            now,
+            160,
+            96,
+            FloorMeta::ground(),
+            None,
+        );
+        assert!(renderer.labels(&scene, now).is_empty());
+    }
 }
