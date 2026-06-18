@@ -201,7 +201,7 @@ fn offscreen_floor_freezes_and_resyncs_on_return() {
     let frozen_at = r
         .floor_motion(0)
         .and_then(|m| m.get(&a))
-        .map(|ms| ms.last_advanced_at)
+        .map(|ms| ms.wander.last_advanced_at)
         .expect("floor-0 motion present");
 
     // ~30 s on floor 1 — floor 0 must NOT be advanced.
@@ -212,7 +212,7 @@ fn offscreen_floor_freezes_and_resyncs_on_return() {
     let still_frozen = r
         .floor_motion(0)
         .and_then(|m| m.get(&a))
-        .map(|ms| ms.last_advanced_at)
+        .map(|ms| ms.wander.last_advanced_at)
         .expect("floor-0 motion present");
     assert_eq!(
         frozen_at, still_frozen,
@@ -226,14 +226,14 @@ fn offscreen_floor_freezes_and_resyncs_on_return() {
 
     // RESYNC: the stale-resume must re-anchor the phase clock to ~now
     // (clean Seated start) instead of replaying ~30 s of backlogged cycles
-    // one transition per frame. wander_phase_started_at would be far in the
+    // one transition per frame. wander.phase_started_at would be far in the
     // past if it replayed.
     let ms = r
         .floor_motion(0)
         .and_then(|m| m.get(&a))
         .expect("floor-0 motion present");
     assert!(
-            ms.wander_phase_started_at >= back_at,
+            ms.wander.phase_started_at >= back_at,
             "floor-0 agent must resync its wander clock on return (got an anchor before the switch-back ⇒ replay)"
         );
 }

@@ -13,13 +13,13 @@ fn motion_state_new_default_fields() {
     assert!(ms.entry.is_none());
     assert!(ms.exit.is_none());
     assert!(ms.snap_back.is_none());
-    assert_eq!(ms.wander_cycle_n, 0);
-    assert_eq!(ms.wander_phase, WanderPhase::Seated);
-    assert_eq!(ms.wander_phase_started_at, SystemTime::UNIX_EPOCH);
-    assert_eq!(ms.last_advanced_at, SystemTime::UNIX_EPOCH);
-    assert!(ms.wander_profile.is_none());
-    assert!(ms.wander_dest_kind.is_none());
-    assert!(ms.wander_dest_wp_idx.is_none());
+    assert_eq!(ms.wander.cycle_n, 0);
+    assert_eq!(ms.wander.phase, WanderPhase::Seated);
+    assert_eq!(ms.wander.phase_started_at, SystemTime::UNIX_EPOCH);
+    assert_eq!(ms.wander.last_advanced_at, SystemTime::UNIX_EPOCH);
+    assert!(ms.wander.profile.is_none());
+    assert!(ms.wander.dest_kind.is_none());
+    assert!(ms.wander.dest_wp_idx.is_none());
     assert!(ms.walk_path.is_none());
 }
 
@@ -173,7 +173,7 @@ fn trip_agent(prefix: &str) -> AgentId {
 fn current_dwell_dur(motion: &HashMap<AgentId, MotionState>, id: AgentId) -> u64 {
     motion
         .get(&id)
-        .and_then(|ms| ms.wander_dest_kind)
+        .and_then(|ms| ms.wander.dest_kind)
         .map_or(WANDER_DWELL_EST_MS, |k| dwell_ms(k, id))
 }
 
@@ -195,7 +195,7 @@ fn advance_until_leaves(
 ) -> SystemTime {
     const STEP_MS: u64 = 1_000;
     let start = now;
-    while motion.get(&slot.agent_id).map(|m| m.wander_phase) == Some(from_phase) {
+    while motion.get(&slot.agent_id).map(|m| m.wander.phase) == Some(from_phase) {
         let elapsed = now
             .duration_since(start)
             .unwrap_or(Duration::ZERO)
@@ -226,11 +226,11 @@ fn fresh_idle_inits_to_seated_phase() {
 
     let ms = motion.get(&slot.agent_id).expect("state inserted");
     assert!(
-        matches!(ms.wander_phase, WanderPhase::Seated),
+        matches!(ms.wander.phase, WanderPhase::Seated),
         "fresh idle should init to Seated, got {:?}",
-        ms.wander_phase
+        ms.wander.phase
     );
-    assert_eq!(ms.wander_cycle_n, 0);
+    assert_eq!(ms.wander.cycle_n, 0);
 }
 
 // -----------------------------------------------------------------------
@@ -265,12 +265,12 @@ fn seated_transitions_to_walking_out_on_trip_cycle() {
 
     let ms = motion.get(&trip_id).expect("state present");
     assert!(
-        matches!(ms.wander_phase, WanderPhase::WalkingOut),
+        matches!(ms.wander.phase, WanderPhase::WalkingOut),
         "after seated dwell on trip cycle, expected WalkingOut, got {:?}",
-        ms.wander_phase
+        ms.wander.phase
     );
     assert!(
-        ms.wander_profile.is_some(),
+        ms.wander.profile.is_some(),
         "walk-out profile must be snapshotted"
     );
 }
@@ -305,7 +305,7 @@ fn non_trip_cycle_stays_seated() {
         advance_wander(&slot, t, &l, &mut router, &overlay, &mut motion);
         assert!(
             matches!(
-                motion.get(&stay_id).unwrap().wander_phase,
+                motion.get(&stay_id).unwrap().wander.phase,
                 WanderPhase::Seated
             ),
             "non-trip cycle must stay Seated"
@@ -346,7 +346,7 @@ fn walking_out_transitions_to_at_waypoint_on_arrival() {
         60_000,
     );
     assert!(matches!(
-        motion.get(&trip_id).unwrap().wander_phase,
+        motion.get(&trip_id).unwrap().wander.phase,
         WanderPhase::WalkingOut
     ));
     // → AtWaypoint (short walk, arrives within a couple of 1 s steps)
@@ -363,9 +363,9 @@ fn walking_out_transitions_to_at_waypoint_on_arrival() {
 
     let ms = motion.get(&trip_id).expect("state");
     assert!(
-        matches!(ms.wander_phase, WanderPhase::AtWaypoint),
+        matches!(ms.wander.phase, WanderPhase::AtWaypoint),
         "expected AtWaypoint after walk-out arrival, got {:?}",
-        ms.wander_phase
+        ms.wander.phase
     );
 }
 
@@ -411,7 +411,7 @@ fn at_waypoint_transitions_to_walking_back_after_dwell() {
         20_000,
     );
     assert!(matches!(
-        motion.get(&trip_id).unwrap().wander_phase,
+        motion.get(&trip_id).unwrap().wander.phase,
         WanderPhase::AtWaypoint
     ));
     // Cross the (long) per-spot dwell.
@@ -428,12 +428,12 @@ fn at_waypoint_transitions_to_walking_back_after_dwell() {
 
     let ms = motion.get(&trip_id).expect("state");
     assert!(
-        matches!(ms.wander_phase, WanderPhase::WalkingBack),
+        matches!(ms.wander.phase, WanderPhase::WalkingBack),
         "expected WalkingBack after dwell, got {:?}",
-        ms.wander_phase
+        ms.wander.phase
     );
     assert!(
-        ms.wander_profile.is_some(),
+        ms.wander.profile.is_some(),
         "walk-back profile must be snapshotted"
     );
 }
@@ -502,11 +502,11 @@ fn walking_back_arrival_increments_cycle_n_and_resets_to_seated() {
 
     let ms = motion.get(&trip_id).expect("state");
     assert!(
-        matches!(ms.wander_phase, WanderPhase::Seated),
+        matches!(ms.wander.phase, WanderPhase::Seated),
         "completed cycle must reset to Seated, got {:?}",
-        ms.wander_phase
+        ms.wander.phase
     );
-    assert_eq!(ms.wander_cycle_n, 1, "cycle_n must increment once");
+    assert_eq!(ms.wander.cycle_n, 1, "cycle_n must increment once");
 }
 
 // -----------------------------------------------------------------------
@@ -655,10 +655,10 @@ fn arrival_pause_holds_walking_out_phase() {
         WanderPhase::Seated,
         60_000,
     );
-    let out_started = motion.get(&trip_id).unwrap().wander_phase_started_at;
+    let out_started = motion.get(&trip_id).unwrap().wander.phase_started_at;
     let actual_profile = motion
         .get(&trip_id)
-        .and_then(|ms| ms.wander_profile.as_ref())
+        .and_then(|ms| ms.wander.profile.as_ref())
         .expect("profile snapshotted");
     let actual_mid_elapsed = actual_profile.duration_ms + actual_profile.pause_ms / 2;
 
@@ -669,7 +669,7 @@ fn arrival_pause_holds_walking_out_phase() {
     advance_wander(&slot, mid, &l, &mut router, &overlay, &mut motion);
     assert!(
         matches!(
-            motion.get(&trip_id).unwrap().wander_phase,
+            motion.get(&trip_id).unwrap().wander.phase,
             WanderPhase::WalkingOut
         ),
         "must stay WalkingOut during arrival pause"
@@ -707,7 +707,7 @@ fn idempotent_same_now_does_not_mutate_state() {
 
     let (phase_before, cycle_before) = {
         let ms = motion.get(&trip_id).unwrap();
-        (ms.wander_phase, ms.wander_cycle_n)
+        (ms.wander.phase, ms.wander.cycle_n)
     };
 
     // Call again with the SAME `now` (t1) — must NOT mutate.
@@ -715,11 +715,11 @@ fn idempotent_same_now_does_not_mutate_state() {
 
     let ms = motion.get(&trip_id).unwrap();
     assert_eq!(
-        ms.wander_phase, phase_before,
+        ms.wander.phase, phase_before,
         "2nd call with same now must not change phase"
     );
     assert_eq!(
-        ms.wander_cycle_n, cycle_before,
+        ms.wander.cycle_n, cycle_before,
         "2nd call with same now must not change cycle_n"
     );
 }
@@ -748,7 +748,7 @@ fn bootstrap_fast_forwards_cycle_n() {
 
     let ms = motion.get(&id).expect("state present");
     assert_eq!(
-        ms.wander_cycle_n, 10,
+        ms.wander.cycle_n, 10,
         "bootstrap: elapsed = 10*est_cycle => cycle_n must equal exactly 10"
     );
 }
@@ -788,7 +788,7 @@ fn stale_resume_resyncs_without_replay() {
     );
     assert!(
         matches!(
-            motion.get(&trip_id).unwrap().wander_phase,
+            motion.get(&trip_id).unwrap().wander.phase,
             WanderPhase::WalkingOut
         ),
         "precondition: agent should be WalkingOut before the gap"
@@ -802,14 +802,14 @@ fn stale_resume_resyncs_without_replay() {
 
     let ms = motion.get(&trip_id).unwrap();
     assert!(
-        matches!(ms.wander_phase, WanderPhase::Seated),
+        matches!(ms.wander.phase, WanderPhase::Seated),
         "stale resume must resync to Seated (no per-frame replay), got {:?}",
-        ms.wander_phase
+        ms.wander.phase
     );
     assert!(
-        ms.wander_cycle_n >= 18,
+        ms.wander.cycle_n >= 18,
         "stale resume must fast-forward cycle_n across the gap, got {}",
-        ms.wander_cycle_n
+        ms.wander.cycle_n
     );
 }
 
@@ -857,7 +857,7 @@ fn long_dwell_never_trips_stale_resume_on_screen() {
         20_000,
     );
     assert!(matches!(
-        motion.get(&trip_id).unwrap().wander_phase,
+        motion.get(&trip_id).unwrap().wander.phase,
         WanderPhase::AtWaypoint
     ));
 
@@ -867,7 +867,7 @@ fn long_dwell_never_trips_stale_resume_on_screen() {
     // Base the window on the ACTUAL AtWaypoint phase start (the poll-observed
     // `t2` can lag the real transition by up to one 1 s step), leaving a 2 s
     // margin so we stop before the dwell genuinely ends.
-    let at_wp_start = motion.get(&trip_id).unwrap().wander_phase_started_at;
+    let at_wp_start = motion.get(&trip_id).unwrap().wander.phase_started_at;
     let dwell_dur = current_dwell_dur(&motion, trip_id);
     let mut t = t2;
     let end = at_wp_start + Duration::from_millis(dwell_dur.saturating_sub(2_000));
@@ -876,7 +876,7 @@ fn long_dwell_never_trips_stale_resume_on_screen() {
         advance_wander(&slot, t, &l, &mut router, &overlay, &mut motion);
         assert!(
             !matches!(
-                motion.get(&trip_id).unwrap().wander_phase,
+                motion.get(&trip_id).unwrap().wander.phase,
                 WanderPhase::Seated
             ),
             "long on-screen dwell wrongly tripped stale-resume (snapped to Seated mid-dwell)"
@@ -884,7 +884,7 @@ fn long_dwell_never_trips_stale_resume_on_screen() {
     }
     assert!(
         matches!(
-            motion.get(&trip_id).unwrap().wander_phase,
+            motion.get(&trip_id).unwrap().wander.phase,
             WanderPhase::AtWaypoint
         ),
         "agent should still be AtWaypoint just before the dwell ends"
@@ -936,7 +936,7 @@ fn wander_dest_for_pantry_is_the_home_desk_stand_point() {
     let _ = now;
 
     let ms = motion.get(&slot.agent_id).expect("state");
-    assert_eq!(ms.wander_dest_kind, Some(WaypointKind::Pantry));
+    assert_eq!(ms.wander.dest_kind, Some(WaypointKind::Pantry));
     let desk = l.home_desks[0];
     let expected = pixtuoid_core::layout::approach_point(
         WaypointKind::Pantry.furniture(),
@@ -948,14 +948,14 @@ fn wander_dest_for_pantry_is_the_home_desk_stand_point() {
         &l.reachable,
     );
     assert_eq!(
-        ms.wander_dest, expected,
+        ms.wander.dest, expected,
         "motion dest must equal the home-desk approach_point (core↔tui mirror)"
     );
 }
 
 // -----------------------------------------------------------------------
 // Missing-profile recover: a WalkingOut / WalkingBack phase with a
-// `wander_profile == None` is "shouldn't happen", but the convention is to
+// `wander.profile == None` is "shouldn't happen", but the convention is to
 // warn + recover (never freeze silently). Drive that arm directly by
 // pre-inserting a corrupt MotionState and asserting advance_wander returns
 // `(phase, 0)` without panicking.
@@ -971,10 +971,10 @@ fn corrupt_walking_state(
     phase: WanderPhase,
 ) {
     let mut ms = MotionState::new(id);
-    ms.wander_phase = phase;
-    ms.wander_profile = None;
-    ms.wander_phase_started_at = now;
-    ms.last_advanced_at = now - Duration::from_millis(33);
+    ms.wander.phase = phase;
+    ms.wander.profile = None;
+    ms.wander.phase_started_at = now;
+    ms.wander.last_advanced_at = now - Duration::from_millis(33);
     motion.insert(id, ms);
 }
 
@@ -1064,12 +1064,12 @@ fn at_waypoint_resnapshots_back_profile_when_missing() {
         20_000,
     );
     assert!(matches!(
-        motion.get(&trip_id).unwrap().wander_phase,
+        motion.get(&trip_id).unwrap().wander.phase,
         WanderPhase::AtWaypoint
     ));
 
     // Simulate the back profile going missing during the dwell.
-    motion.get_mut(&trip_id).unwrap().wander_profile = None;
+    motion.get_mut(&trip_id).unwrap().wander.profile = None;
 
     // Cross the per-spot dwell — the AtWaypoint arm must re-snapshot the back
     // profile rather than freeze.
@@ -1086,12 +1086,12 @@ fn at_waypoint_resnapshots_back_profile_when_missing() {
 
     let ms = motion.get(&trip_id).expect("state");
     assert_eq!(
-        ms.wander_phase,
+        ms.wander.phase,
         WanderPhase::WalkingBack,
         "must transition to WalkingBack after the dwell"
     );
     assert!(
-        ms.wander_profile.is_some(),
+        ms.wander.profile.is_some(),
         "the back profile must be freshly re-snapshotted, not left None"
     );
 }

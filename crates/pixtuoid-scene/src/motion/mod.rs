@@ -66,6 +66,42 @@ pub struct WalkLeg {
     pub from: Point,
 }
 
+/// The elastic cyclic-wander timeline state machine for one agent (desk → waypoint
+/// → desk, repeating). The nine fields are one unit: `advance_wander` transitions
+/// them together, and the whole thing is idempotent per `now` via `last_advanced_at`.
+/// (Was nine flat `wander_*` / `last_advanced_at` fields on `MotionState`.)
+#[derive(Debug, Clone)]
+pub struct WanderState {
+    /// Monotonically increasing wander cycle counter, incremented each time
+    /// `WalkingBack` completes — selects the waypoint destination (mirrors
+    /// `core::pose`'s `cycle_n` derivation).
+    pub cycle_n: u64,
+    /// Current phase of the wander cycle.
+    pub phase: WanderPhase,
+    /// Wall-clock instant the current phase began (reset every transition, so each
+    /// leg has its own clock). Sentinel `UNIX_EPOCH` ⇒ a fresh agent `advance_wander`
+    /// bootstraps.
+    pub phase_started_at: SystemTime,
+    /// Walk profile for the current out-/back-leg, snapshotted at the phase
+    /// transition. `None` while `Seated` or `AtWaypoint`.
+    pub profile: Option<WalkProfile>,
+    /// Destination pixel of the current trip. Reset on each new `WalkingOut`.
+    pub dest: Point,
+    /// Kind of the current wander waypoint, if it is a named waypoint.
+    pub dest_kind: Option<WaypointKind>,
+    /// Index into `layout.waypoints` for the current destination, if named.
+    pub dest_wp_idx: Option<usize>,
+    /// Seat foot cell `S` for the current waypoint (where the seated sprite
+    /// renders), when it's an occupied seat. `Some` ⇒ the walk SETTLES from the
+    /// approach point `dest` onto `S` (and rises from `S` on the way back) so
+    /// arrival/departure don't pop; `None` for obstacles/aimless (stands AT `dest`).
+    pub seat: Option<Point>,
+    /// Last `now` at which `advance_wander` performed a transition — idempotency:
+    /// `now <= last_advanced_at` ⇒ a no-op on mutable state. Sentinel `UNIX_EPOCH`
+    /// ⇒ never advanced.
+    pub last_advanced_at: SystemTime,
+}
+
 /// Per-agent walk-timing state owned by the TUI layer.
 ///
 /// One `MotionState` exists per live agent (per floor). Fields are `Option`
@@ -90,40 +126,11 @@ pub struct MotionState {
     /// `exit`).
     pub snap_back: Option<WalkLeg>,
 
-    // --- cyclic wander state ---
-    /// Monotonically increasing wander cycle counter. Incremented each time
-    /// `WalkingBack` completes. Determines which waypoint destination is
-    /// selected (mirrors `core::pose`'s `cycle_n` derivation).
-    pub wander_cycle_n: u64,
-    /// Current phase of the wander cycle.
-    pub wander_phase: WanderPhase,
-    /// Wall-clock instant the current phase began. Every phase transition
-    /// resets this so each leg has its own independent clock.
-    /// Sentinel `UNIX_EPOCH` signals a fresh agent; `advance_wander`
-    /// detects this to bootstrap the wander clock.
-    pub wander_phase_started_at: SystemTime,
-    /// Walk profile for the current out- or back-leg, snapshotted at the
-    /// phase transition. `None` while `Seated` or `AtWaypoint`.
-    pub wander_profile: Option<WalkProfile>,
-    /// Destination pixel of the current wander trip (desk→waypoint→desk).
-    /// Reset on each new `WalkingOut` phase.
-    pub wander_dest: Point,
-    /// Kind of the current wander waypoint, if it is a named waypoint.
-    pub wander_dest_kind: Option<WaypointKind>,
-    /// Index into `layout.waypoints` for the current wander destination,
-    /// if it is a named waypoint.
-    pub wander_dest_wp_idx: Option<usize>,
-    /// Seat foot cell `S` for the current wander waypoint (where the seated
-    /// sprite renders), when it's an occupied seat. `Some` ⇒ the walk SETTLES
-    /// from the approach point `wander_dest` onto `S` (and rises from `S` on the
-    /// way back), so the arrival/departure don't pop; `None` for obstacles /
-    /// aimless (the agent stands AT `wander_dest`).
-    pub wander_seat: Option<Point>,
-    /// Last `now` at which `advance_wander` performed a transition. Used for
-    /// idempotency: when `now <= last_advanced_at`, the call is a no-op on
-    /// mutable state (computes pose from existing phase state only).
-    /// Sentinel `UNIX_EPOCH` means the agent has never been advanced.
-    pub last_advanced_at: SystemTime,
+    /// The elastic cyclic-wander timeline state machine — all nine values move as
+    /// a unit (`advance_wander` transitions them together, idempotent per `now`
+    /// via `wander.last_advanced_at`). See [`WanderState`]. (Was nine flat
+    /// `wander_*` / `last_advanced_at` fields.)
+    pub wander: WanderState,
 
     /// Frozen A* polyline for the current walk leg (entry/exit/wander/snap-back).
     /// `None` while not walking. Re-snapshotted when the leg's `(from, to)`
@@ -135,7 +142,7 @@ impl MotionState {
     /// Construct a fresh `MotionState` for `agent_id`.
     ///
     /// All optional fields are `None`; wander starts in `Seated` phase with
-    /// both `wander_phase_started_at` and `last_advanced_at` set to
+    /// both `wander.phase_started_at` and `wander.last_advanced_at` set to
     /// `SystemTime::UNIX_EPOCH` so `advance_wander` can detect a bootstrap
     /// agent on the first call via the epoch sentinel.
     pub fn new(agent_id: AgentId) -> Self {
@@ -144,16 +151,18 @@ impl MotionState {
             entry: None,
             exit: None,
             snap_back: None,
-            wander_cycle_n: 0,
-            wander_phase: WanderPhase::Seated,
-            wander_phase_started_at: SystemTime::UNIX_EPOCH,
-            wander_profile: None,
-            // Placeholder — replaced on first WalkingOut transition.
-            wander_dest: Point { x: 0, y: 0 },
-            wander_dest_kind: None,
-            wander_dest_wp_idx: None,
-            wander_seat: None,
-            last_advanced_at: SystemTime::UNIX_EPOCH,
+            wander: WanderState {
+                cycle_n: 0,
+                phase: WanderPhase::Seated,
+                phase_started_at: SystemTime::UNIX_EPOCH,
+                profile: None,
+                // Placeholder — replaced on first WalkingOut transition.
+                dest: Point { x: 0, y: 0 },
+                dest_kind: None,
+                dest_wp_idx: None,
+                seat: None,
+                last_advanced_at: SystemTime::UNIX_EPOCH,
+            },
             walk_path: None,
         }
     }
@@ -162,16 +171,16 @@ impl MotionState {
 /// Advance the wander state machine by one frame for the given idle agent.
 ///
 /// # Idempotency (Correction F)
-/// Phase transitions (re-anchor `wander_phase_started_at`, increment
-/// `wander_cycle_n`, snapshot a new leg profile) are performed ONLY when
-/// `now > last_advanced_at`. When `now <= last_advanced_at` the function
+/// Phase transitions (re-anchor `wander.phase_started_at`, increment
+/// `wander.cycle_n`, snapshot a new leg profile) are performed ONLY when
+/// `now > wander.last_advanced_at`. When `now <= wander.last_advanced_at` the function
 /// computes the pose from the existing phase state WITHOUT mutating any
 /// wander fields — safe to call 2+ times per frame (seated-overlay pass +
 /// character loop + `character_anchor`).
 ///
 /// # Bootstrap catch-up (Correction M)
 /// On first call for a fresh Idle slot (detected via epoch sentinel on
-/// `wander_phase_started_at`), `cycle_n` is fast-forwarded by integer
+/// `wander.phase_started_at`), `cycle_n` is fast-forwarded by integer
 /// division so destination selection is consistent with what core's
 /// stateless `idle_pose` would have derived for an agent that was Idle
 /// before the first render.
@@ -190,12 +199,13 @@ pub fn advance_wander(
     let ms = motion.entry(id).or_insert_with(|| MotionState::new(id));
 
     // ---- INIT / BOOTSTRAP --------------------------------------------------
-    // A fresh MotionState has `wander_phase_started_at == UNIX_EPOCH`, which
+    // A fresh MotionState has `wander.phase_started_at == UNIX_EPOCH`, which
     // is guaranteed to be less than any real `state_started_at`. We also
     // re-seed when the slot (re-)entered Idle after a different state (the
     // stored phase_started predates state_started_at by more than 1 ms).
     let is_fresh = ms
-        .wander_phase_started_at
+        .wander
+        .phase_started_at
         .checked_add(Duration::from_millis(1))
         .map(|t| t <= slot.state_started_at)
         .unwrap_or(true);
@@ -217,9 +227,9 @@ pub fn advance_wander(
     // (clock stepped backward — NTP/suspend). The per-frame render clock is
     // monotone so this is unreachable in practice; treating a backward step as
     // "not stale" avoids snapping every agent to Seated on a tiny clock adjust.
-    let is_stale_resume = ms.last_advanced_at != SystemTime::UNIX_EPOCH
+    let is_stale_resume = ms.wander.last_advanced_at != SystemTime::UNIX_EPOCH
         && now
-            .duration_since(ms.last_advanced_at)
+            .duration_since(ms.wander.last_advanced_at)
             .map(|d| d.as_millis() as u64 > stale_resume_gap_ms(id))
             .unwrap_or(false);
 
@@ -238,18 +248,18 @@ pub fn advance_wander(
         // transition per frame on the first few frames — a desk↔waypoint
         // teleport. The agent was unobserved before this frame, so starting
         // fresh-Seated is equally valid and leaves no dangling walk profile.
-        ms.wander_phase = WanderPhase::Seated;
-        ms.wander_profile = None;
-        ms.wander_cycle_n = elapsed_idle / cycle;
-        ms.wander_phase_started_at = now;
+        ms.wander.phase = WanderPhase::Seated;
+        ms.wander.profile = None;
+        ms.wander.cycle_n = elapsed_idle / cycle;
+        ms.wander.phase_started_at = now;
     }
 
     // ---- IDEMPOTENCY CHECK (Correction F) ----------------------------------
     // Transitions mutate wander state; we must only do them once per unique `now`.
-    let may_transition = now > ms.last_advanced_at;
+    let may_transition = now > ms.wander.last_advanced_at;
 
     // ---- PHASE MACHINE -----------------------------------------------------
-    let elapsed_phase = crate::anim::elapsed_ms(now, ms.wander_phase_started_at);
+    let elapsed_phase = crate::anim::elapsed_ms(now, ms.wander.phase_started_at);
 
     // Absolute per-spot timeline (the render authority). Seated-at-desk beat is
     // a long, per-agent dwell; the at-waypoint beat is keyed on the spot kind so
@@ -257,18 +267,20 @@ pub fn advance_wander(
     // kind) fall back to the average dwell estimate.
     let seated_dur = seated_dwell_ms(id);
     let dwell_dur = ms
-        .wander_dest_kind
+        .wander
+        .dest_kind
         .map_or(WANDER_DWELL_EST_MS, |k| dwell_ms(k, id));
 
-    let result = match ms.wander_phase {
+    let result = match ms.wander.phase {
         WanderPhase::Seated => {
             if may_transition && elapsed_phase >= seated_dur {
                 // Check whether this cycle is a trip.
-                if !takes_trip(id, ms.wander_cycle_n) || layout.waypoints.is_empty() {
+                if !takes_trip(id, ms.wander.cycle_n) || layout.waypoints.is_empty() {
                     // Non-trip: skip forward one cycle in Seated.
-                    ms.wander_cycle_n += 1;
-                    ms.wander_phase_started_at = ms
-                        .wander_phase_started_at
+                    ms.wander.cycle_n += 1;
+                    ms.wander.phase_started_at = ms
+                        .wander
+                        .phase_started_at
                         .checked_add(Duration::from_millis(seated_dur))
                         .unwrap_or(now);
                 } else {
@@ -279,11 +291,11 @@ pub fn advance_wander(
                     let desk_pt = layout.home_desk(slot.desk_index.single_floor_local());
                     let origin = desk_pt.unwrap_or(Point { x: 0, y: 0 });
                     let (dest, dest_kind, wp_idx, seat) =
-                        pick_wander_dest(id, ms.wander_cycle_n, layout, origin);
-                    ms.wander_dest = dest;
-                    ms.wander_dest_kind = dest_kind;
-                    ms.wander_dest_wp_idx = wp_idx;
-                    ms.wander_seat = seat;
+                        pick_wander_dest(id, ms.wander.cycle_n, layout, origin);
+                    ms.wander.dest = dest;
+                    ms.wander.dest_kind = dest_kind;
+                    ms.wander.dest_wp_idx = wp_idx;
+                    ms.wander.seat = seat;
 
                     let desk = desk_pt.unwrap_or(dest);
                     // Leave via the desk approach cell (rise off the chair),
@@ -294,16 +306,17 @@ pub fn advance_wander(
                     let path = router.route(&layout.walkable, overlay, from, dest);
                     let desk_glide = settle_len(from, chair_settle);
                     let len = (octile_path_len(&path) + desk_glide + settle_len(dest, seat)).max(1);
-                    ms.wander_profile = Some(walk_profile(len, WalkIntent::WanderOut, id));
+                    ms.wander.profile = Some(walk_profile(len, WalkIntent::WanderOut, id));
 
-                    ms.wander_phase = WanderPhase::WalkingOut;
-                    ms.wander_phase_started_at = ms
-                        .wander_phase_started_at
+                    ms.wander.phase = WanderPhase::WalkingOut;
+                    ms.wander.phase_started_at = ms
+                        .wander
+                        .phase_started_at
                         .checked_add(Duration::from_millis(seated_dur))
                         .unwrap_or(now);
                 }
             }
-            (ms.wander_phase, 0)
+            (ms.wander.phase, 0)
         }
 
         WanderPhase::WalkingOut => {
@@ -326,8 +339,8 @@ pub fn advance_wander(
                     // walk-out leg's terminal progress) — preserves the old
                     // hardcoded `1000` return byte-for-byte.
                     let back = snapshot_back_profile(slot, ms, layout, router, overlay);
-                    ms.wander_phase = WanderPhase::AtWaypoint;
-                    ms.wander_profile = Some(back);
+                    ms.wander.phase = WanderPhase::AtWaypoint;
+                    ms.wander.profile = Some(back);
                     advance_phase_clock(ms, walk_total, now);
                     (WanderPhase::AtWaypoint, t_x1000)
                 }
@@ -338,18 +351,19 @@ pub fn advance_wander(
             if may_transition && elapsed_phase >= dwell_dur {
                 // Use the back-leg profile already snapshotted at WalkingOut arrival.
                 // If somehow missing (shouldn't happen), re-snapshot now.
-                if ms.wander_profile.is_none() {
+                if ms.wander.profile.is_none() {
                     let back = snapshot_back_profile(slot, ms, layout, router, overlay);
-                    ms.wander_profile = Some(back);
+                    ms.wander.profile = Some(back);
                 }
 
-                ms.wander_phase = WanderPhase::WalkingBack;
-                ms.wander_phase_started_at = ms
-                    .wander_phase_started_at
+                ms.wander.phase = WanderPhase::WalkingBack;
+                ms.wander.phase_started_at = ms
+                    .wander
+                    .phase_started_at
                     .checked_add(Duration::from_millis(dwell_dur))
                     .unwrap_or(now);
             }
-            (ms.wander_phase, 0)
+            (ms.wander.phase, 0)
         }
 
         WanderPhase::WalkingBack => {
@@ -365,16 +379,16 @@ pub fn advance_wander(
                 WalkLegStatus::Arrived { walk_total, .. } => {
                     // Divergent on-arrival: a cycle completed — advance the cycle
                     // counter and clear the trip fields.
-                    ms.wander_cycle_n += 1;
-                    ms.wander_profile = None;
-                    ms.wander_dest_kind = None;
-                    ms.wander_dest_wp_idx = None;
+                    ms.wander.cycle_n += 1;
+                    ms.wander.profile = None;
+                    ms.wander.dest_kind = None;
+                    ms.wander.dest_wp_idx = None;
                     // Clear the seat too (symmetry with the sibling dest fields):
                     // the Seated arm never reads it and the next WalkingOut overwrites
                     // it, but leaving it stale invites a future Seated-phase reader to
                     // mistake it for "currently on a seat".
-                    ms.wander_seat = None;
-                    ms.wander_phase = WanderPhase::Seated;
+                    ms.wander.seat = None;
+                    ms.wander.phase = WanderPhase::Seated;
                     advance_phase_clock(ms, walk_total, now);
                     (WanderPhase::Seated, 0)
                 }
@@ -384,7 +398,7 @@ pub fn advance_wander(
 
     // Record that transitions have been applied for this `now` (idempotency).
     if may_transition {
-        ms.last_advanced_at = now;
+        ms.wander.last_advanced_at = now;
     }
 
     result
@@ -408,7 +422,7 @@ enum WalkLegStatus {
 /// profile (warn on the unreachable missing case), compute physics progress, and
 /// classify the leg as in-flight or arrived. The arms run their OWN divergent
 /// on-arrival cleanup (WalkingOut: snapshot the back profile; WalkingBack: bump
-/// the cycle + clear trip fields incl. `wander_seat`) — only the read/progress/
+/// the cycle + clear trip fields incl. `wander.seat`) — only the read/progress/
 /// arrival check is factored here.
 fn poll_walk_leg(
     slot: &AgentSlot,
@@ -417,7 +431,7 @@ fn poll_walk_leg(
     elapsed_phase: u64,
     may_transition: bool,
 ) -> WalkLegStatus {
-    let profile = match &ms.wander_profile {
+    let profile = match &ms.wander.profile {
         Some(p) => p,
         None => {
             // Should be unreachable: an in-flight phase always has a profile
@@ -447,8 +461,9 @@ fn poll_walk_leg(
 /// back to `now` if the add overflows. The shared clock-advance both wander walk
 /// arms run after their divergent on-arrival cleanup.
 fn advance_phase_clock(ms: &mut MotionState, walk_total: u64, now: SystemTime) {
-    ms.wander_phase_started_at = ms
-        .wander_phase_started_at
+    ms.wander.phase_started_at = ms
+        .wander
+        .phase_started_at
         .checked_add(Duration::from_millis(walk_total))
         .unwrap_or(now);
 }
@@ -504,8 +519,8 @@ fn pick_wander_dest(
     }
 }
 
-/// Snapshot the WanderBack `WalkProfile`: route `wander_dest → desk approach
-/// cell`, add the seat-rise (`settle_len(wander_dest, wander_seat)`) and the
+/// Snapshot the WanderBack `WalkProfile`: route `wander.dest → desk approach
+/// cell`, add the seat-rise (`settle_len(wander.dest, wander.seat)`) and the
 /// chair-glide settle, then freeze a `WanderBack` profile over that full
 /// polyline length (no pop on arrival).
 ///
@@ -523,15 +538,15 @@ fn snapshot_back_profile(
 ) -> WalkProfile {
     let desk = layout
         .home_desk(slot.desk_index.single_floor_local())
-        .unwrap_or(ms.wander_dest);
+        .unwrap_or(ms.wander.dest);
     // Arrive via the desk approach cell (glide onto the chair), mirroring pose's
     // WalkingBack leg; add the chair-glide so the profile covers the full
     // polyline (no pop on arrival).
     let (snap_to, chair_settle) = desk_leg_endpoint(desk, layout);
-    let back_path = router.route(&layout.walkable, overlay, ms.wander_dest, snap_to);
+    let back_path = router.route(&layout.walkable, overlay, ms.wander.dest, snap_to);
     let desk_glide = settle_len(snap_to, chair_settle);
     let back_len =
-        (octile_path_len(&back_path) + settle_len(ms.wander_dest, ms.wander_seat) + desk_glide)
+        (octile_path_len(&back_path) + settle_len(ms.wander.dest, ms.wander.seat) + desk_glide)
             .max(1);
     walk_profile(back_len, WalkIntent::WanderBack, slot.agent_id)
 }
