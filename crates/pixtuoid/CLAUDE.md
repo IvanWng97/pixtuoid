@@ -25,18 +25,26 @@ src/
 │                       is indistinguishable from the default and floors to warn); non-TUI
 │                       modes log to stderr; install failure eprintlns pre-altscreen
 ├── cli.rs              clap subcommands (run / floating / validate-pack / init-pack / doctor / sources / connect /
-│                       disconnect). The OLD install-hooks/uninstall-hooks CLI stays deleted (#284 removed the
+│                       disconnect / setup). The OLD install-hooks/uninstall-hooks CLI stays deleted (#284 removed the
 │                       interactive ORCHESTRATION — plan_targets/interactive_pick); `connect <ids>`/`disconnect <ids>`/
 │                       `sources [set <ids>]` are the SCRIPTABLE surface (Raycast/automation), a second presenter over
-│                       crate::sources (see the scriptable-vs-interactive sharp edge); the in-TUI Sources panel (`s`)
-│                       remains the INTERACTIVE one. Presenters live in main.rs (run_sources_list/run_sources_set/
-│                       run_change, codecov-excluded like doctor::run)
+│                       crate::sources (see the scriptable-vs-interactive sharp edge); `setup [--yes]` is the headless
+│                       onboarding twin (dry-run preview / apply); the in-TUI Sources panel (`s`) remains the
+│                       INTERACTIVE one. Presenters live in main.rs (run_sources_list/run_sources_set/run_change/
+│                       run_setup, codecov-excluded like doctor::run)
+├── setup.rs            first-run detection for onboarding: the PURE `is_first_run(cfg, path) = !path.exists() ||
+│                       cfg.sources.is_empty()` (mirrors resolve_connected's migrate condition; unit-tested). `pub`
+│                       because main.rs (a separate crate) computes RunConfig.first_run from it. The cinematic overlay
+│                       lives in tui/welcome + widgets/welcome; the headless `setup [--yes]` presenter is main::run_setup
 ├── sources.rs          the TUI-free source-control CORE (detect/connect/disconnect/reconcile_to/status + the
 │                       SourceStatus serde DTO = the Raycast --json contract, pinned by a test). connect/disconnect
 │                       are the PERSISTED half (save the [sources] flag + install/uninstall hooks + rollback) — the
 │                       in-TUI panel (tui::connect_source/disconnect_source) delegates here and adds the one live-gate
 │                       line (connected.set) a separate CLI process can't; reconcile_to = the declarative `sources set`
-│                       (connected set = exactly the args). OWNS the source-status MODEL relocated from tui::connection
+│                       (connected set = exactly the args). `apply_choices(cfg, &[(id,bool)])` = the onboarding apply
+│                       (connect checked / disconnect unchecked), SCOPED to the ids passed so a migrate-default like
+│                       antigravity is never disconnected (the reason it's NOT the declarative reconcile_to); shares
+│                       `apply_one` with reconcile_to. OWNS the source-status MODEL relocated from tui::connection
 │                       (ConnState/ConnectionRow/build_rows*, re-exported back so the panel/harness are unchanged)
 ├── doctor.rs           `pixtuoid doctor` — read-only source self-diagnosis (connected? hooks
 │                       installed? installed `<cli> --version` vs the registry's verified_version
