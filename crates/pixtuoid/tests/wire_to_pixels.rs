@@ -126,8 +126,10 @@ enum DecodeKind {
 /// no-op in the reducer — a transcript that carries only tool activity, like
 /// claude-code's and antigravity's, never registers itself).
 enum SeedStart {
-    /// The fixture's decoded events include a `SessionStart` (codex, copilot) OR
-    /// the hook path synthesizes the slot from an unknown id (every hook source).
+    /// The fixture's decoded events include a `SessionStart` (copilot) OR the
+    /// hook path synthesizes the slot from an unknown id (every hook source).
+    /// (Codex is NOT here — its line decoder emits only activity, so it uses
+    /// `CodexUuid` below.)
     None,
     /// Seed a `SessionStart` keyed `AgentId::from_parts(source, <logical-path>)`
     /// — antigravity's decoder keys exactly this way.
