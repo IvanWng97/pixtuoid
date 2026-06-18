@@ -3,6 +3,7 @@ pub mod dashboard;
 pub mod hit_test;
 pub mod renderer;
 pub mod tui_renderer;
+pub mod welcome;
 pub mod widgets;
 
 use std::io::{stdout, Stdout};

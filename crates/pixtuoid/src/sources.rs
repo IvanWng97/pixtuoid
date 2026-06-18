@@ -224,25 +224,51 @@ pub fn reconcile_to_with(
     let current = config::resolve_connected(&app, has_hooks);
     plan_reconcile(&current, desired)
         .into_iter()
-        .map(|(sid, action)| {
-            let outcome = match action {
-                Action::Connect => match connect(cfg, sid) {
-                    Ok(_) => ChangeOutcome::Connected,
-                    Err(e) => ChangeOutcome::Failed(format!("{e:#}")),
-                },
-                Action::Disconnect => match disconnect(cfg, sid) {
-                    // The flag IS disconnected; surface a folded hook-removal
-                    // failure so a declarative `sources set` doesn't hide stale
-                    // hooks behind a clean "disconnected" (mirrors the panel).
-                    Ok(DisconnectOutcome::HookRemovalFailed(e)) => {
-                        ChangeOutcome::Failed(format!("hooks not removed: {e}"))
-                    }
-                    Ok(_) => ChangeOutcome::Disconnected,
-                    Err(e) => ChangeOutcome::Failed(format!("{e:#}")),
-                },
-                Action::NoOp => ChangeOutcome::NoOp,
+        .map(|(sid, action)| (sid.to_string(), apply_one(cfg, sid, action)))
+        .collect()
+}
+
+/// Apply ONE planned action and map it to a reportable `ChangeOutcome`. The single
+/// connect/disconnect→outcome mapping shared by `reconcile_to` (declarative) and
+/// `apply_choices` (the explicit onboarding list) so the folded-hook-removal-
+/// failure surfacing can't drift between them.
+fn apply_one(cfg: &Path, sid: &'static str, action: Action) -> ChangeOutcome {
+    match action {
+        Action::Connect => match connect(cfg, sid) {
+            Ok(_) => ChangeOutcome::Connected,
+            Err(e) => ChangeOutcome::Failed(format!("{e:#}")),
+        },
+        Action::Disconnect => match disconnect(cfg, sid) {
+            // The flag IS disconnected; surface a folded hook-removal failure so a
+            // caller doesn't hide stale hooks behind a clean "disconnected".
+            Ok(DisconnectOutcome::HookRemovalFailed(e)) => {
+                ChangeOutcome::Failed(format!("hooks not removed: {e}"))
+            }
+            Ok(_) => ChangeOutcome::Disconnected,
+            Err(e) => ChangeOutcome::Failed(format!("{e:#}")),
+        },
+        Action::NoOp => ChangeOutcome::NoOp,
+    }
+}
+
+/// Apply an EXPLICIT per-source decision list (the first-run onboarding apply):
+/// connect each `true` id, disconnect each `false` id. Unlike `reconcile_to` (which
+/// is declarative over EVERY registered source and would disconnect the complement),
+/// this touches ONLY the ids passed — so a migrate-defaulted source absent from the
+/// list (e.g. `antigravity`, which is connected-by-default and never appears in
+/// `detect()`) is left exactly as it was, never surprise-disconnected. Each write
+/// makes `[sources]` non-empty, so the first-run gate (`setup::is_first_run`) closes.
+/// Idempotent: connect/disconnect no-op at the install layer when already in state.
+pub fn apply_choices(cfg: &Path, choices: &[(&'static str, bool)]) -> Vec<(String, ChangeOutcome)> {
+    choices
+        .iter()
+        .map(|&(sid, want)| {
+            let action = if want {
+                Action::Connect
+            } else {
+                Action::Disconnect
             };
-            (sid.to_string(), outcome)
+            (sid.to_string(), apply_one(cfg, sid, action))
         })
         .collect()
 }
@@ -599,6 +625,31 @@ mod tests {
             "not connected → no change"
         );
         // The flag was actually written.
+        let app = config::load(&cfg, &mut Vec::new());
+        assert_eq!(app.sources.get("antigravity"), Some(&false));
+    }
+
+    #[test]
+    fn apply_choices_writes_only_the_listed_sources() {
+        // The onboarding apply is SCOPED to the ids passed — a source absent from
+        // the list is never touched (the "antigravity stays at its migrate default"
+        // property that a declarative reconcile_to would break). Drive only the
+        // no-target source so there's no agent-config I/O.
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = dir.path().join("config.toml");
+
+        let outcomes: std::collections::HashMap<_, _> =
+            apply_choices(&cfg, &[("antigravity", true)])
+                .into_iter()
+                .collect();
+        assert_eq!(outcomes["antigravity"], ChangeOutcome::Connected);
+
+        let app = config::load(&cfg, &mut Vec::new());
+        assert_eq!(app.sources.get("antigravity"), Some(&true), "listed → written");
+        assert_eq!(app.sources.get("codex"), None, "unlisted → untouched");
+
+        // Unchecked (the uncheck / skip-freeze path) persists false.
+        apply_choices(&cfg, &[("antigravity", false)]);
         let app = config::load(&cfg, &mut Vec::new());
         assert_eq!(app.sources.get("antigravity"), Some(&false));
     }
