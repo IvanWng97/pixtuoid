@@ -281,7 +281,25 @@ jobs:
         with:
           node-version: 22
       - name: Install ffmpeg
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+        # apt mirrors on hosted runners intermittently STALL — the bare one-liner
+        # hung past the job timeout → smoke "cancelled" (hit ~3×). Bound each fetch
+        # (http/https Timeout) so a dead mirror fails FAST instead of hanging, let
+        # apt retry transient fetches (Acquire::Retries), and retry the whole
+        # install up to 3× with backoff (apt fails on its OWN timeout, releasing the
+        # dpkg lock, so a retry is safe — no SIGKILL). --no-install-recommends trims it.
+        run: |
+          apt_opts=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
+          for attempt in 1 2 3; do
+            if sudo apt-get update "${apt_opts[@]}" \
+              && sudo apt-get install -y --no-install-recommends "${apt_opts[@]}" ffmpeg; then
+              ffmpeg -version | head -n1
+              exit 0
+            fi
+            echo "ffmpeg install attempt $attempt failed; retrying in $((attempt * 15))s..." >&2
+            sleep "$((attempt * 15))"
+          done
+          echo "ffmpeg install failed after 3 attempts" >&2
+          exit 1
       - name: Set up Python virtual environment
         run: |
           python3 -m venv .venv
