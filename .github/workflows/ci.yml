@@ -292,7 +292,9 @@ jobs:
           for attempt in 1 2 3; do
             if sudo apt-get update "${apt_opts[@]}" \
               && sudo apt-get install -y --no-install-recommends "${apt_opts[@]}" ffmpeg; then
-              ffmpeg -version | head -n1
+              # No `| head` — under `set -o pipefail` a closed pipe could SIGPIPE
+              # ffmpeg and fail this success path. The full banner is fine in logs.
+              ffmpeg -version
               exit 0
             fi
             echo "ffmpeg install attempt $attempt failed; retrying in $((attempt * 15))s..." >&2
