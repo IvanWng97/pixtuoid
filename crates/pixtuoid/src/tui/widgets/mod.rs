@@ -7,9 +7,11 @@ mod help;
 mod hud;
 mod panel;
 mod tooltip;
+mod welcome;
 
 pub(super) use connection::paint_connection_panel;
 pub(super) use dashboard::paint_dashboard;
+pub(super) use welcome::paint_welcome;
 pub(super) use help::paint_help_overlay;
 pub(super) use hud::{
     paint_elevator_indicator, paint_footer, paint_theme_picker, paint_version_popup,

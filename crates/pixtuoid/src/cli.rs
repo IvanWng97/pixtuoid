@@ -112,6 +112,16 @@ pub enum Cmd {
         #[arg(long)]
         json: bool,
     },
+    /// First-run setup: detect installed agent CLIs and connect them — the headless
+    /// twin of the in-TUI onboarding (for Raycast / CI / scripting). Without
+    /// `--yes` it's a DRY RUN that only prints what it would connect (writing to
+    /// another tool's config is opt-in).
+    Setup {
+        /// Apply: actually connect the detected CLIs (install their hooks). Without
+        /// it, `setup` only previews the detected set.
+        #[arg(long)]
+        yes: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -360,5 +370,13 @@ mod tests {
         assert!(matches!(c.cmd, Some(Cmd::Connect { .. })));
         let d = Cli::try_parse_from(["pixtuoid", "disconnect", "codex", "--json"]).unwrap();
         assert!(matches!(d.cmd, Some(Cmd::Disconnect { json: true, .. })));
+    }
+
+    #[test]
+    fn setup_defaults_to_dry_run_and_takes_yes() {
+        let dry = Cli::try_parse_from(["pixtuoid", "setup"]).unwrap();
+        assert!(matches!(dry.cmd, Some(Cmd::Setup { yes: false })));
+        let apply = Cli::try_parse_from(["pixtuoid", "setup", "--yes"]).unwrap();
+        assert!(matches!(apply.cmd, Some(Cmd::Setup { yes: true })));
     }
 }

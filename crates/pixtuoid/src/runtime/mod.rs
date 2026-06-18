@@ -57,6 +57,10 @@ pub struct RunConfig {
     /// throttle-scans it for decode-drift breadcrumbs → the footer nudge. `None`
     /// in headless / when no log file (then no footer drift surfacing).
     pub log_path: Option<PathBuf>,
+    /// First launch ever (no `[sources]` flags persisted yet) — the TUI plays the
+    /// one-time onboarding "move-in" overlay. Computed by `main` via
+    /// `setup::is_first_run`; ignored by headless + `floating`.
+    pub first_run: bool,
 }
 
 /// A live, shared set of connected source ids — the runtime mirror of the

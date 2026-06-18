@@ -14,7 +14,7 @@ mod tests;
 
 /// One roster row = one DETECTED agent CLI the user can opt into connecting.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct WelcomeRow {
+pub struct WelcomeRow {
     pub source_id: &'static str,
     /// 2-char badge id (`cc`/`cx`/…) — the same one the dashboard/panel render.
     pub label_prefix: &'static str,
@@ -26,7 +26,7 @@ pub(crate) struct WelcomeRow {
 /// Built once when the overlay opens (from `sources::detect()`), then driven by
 /// key input until the user confirms (apply) or skips.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct WelcomeUi {
+pub struct WelcomeUi {
     pub rows: Vec<WelcomeRow>,
     pub selected: usize,
 }
@@ -78,4 +78,18 @@ impl WelcomeUi {
     pub fn decisions(&self) -> Vec<(&'static str, bool)> {
         self.rows.iter().map(|r| (r.source_id, r.checked)).collect()
     }
+}
+
+/// The per-frame render snapshot the event loop hands the renderer — the four
+/// values always travel together (open flag + roster snapshot + cursor + the
+/// elapsed-ms clock that drives the typewriter), so they're bundled rather than
+/// threaded as four parallel fields/params through `TuiRenderer` → `DrawCtx` →
+/// `paint_overlays`. The model (`WelcomeUi`) holds no clock; the loop stamps
+/// `elapsed_ms` from when the overlay opened.
+#[derive(Debug, Clone, Default)]
+pub struct OnboardingFrame {
+    pub open: bool,
+    pub rows: Vec<WelcomeRow>,
+    pub selected: usize,
+    pub elapsed_ms: u64,
 }

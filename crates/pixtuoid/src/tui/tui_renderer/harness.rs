@@ -1493,6 +1493,49 @@ fn help_overlay_renders_shortcuts() {
     );
 }
 
+#[test]
+fn onboarding_overlay_renders_roster_and_hint() {
+    use crate::tui::welcome::{OnboardingFrame, WelcomeRow};
+    let scene = scene_with(vec![idle("/onboard/0.jsonl", 0, t0())], 16);
+    let mut r = build(100, 40, vec![]);
+    // A two-CLI roster; a large elapsed so the typewriter + every staggered row
+    // + the key hint are all fully revealed.
+    r.set_onboarding_frame(OnboardingFrame {
+        open: true,
+        rows: vec![
+            WelcomeRow {
+                source_id: "codex",
+                label_prefix: "cx",
+                display_name: "Codex".into(),
+                checked: true,
+            },
+            WelcomeRow {
+                source_id: "claude-code",
+                label_prefix: "cc",
+                display_name: "Claude Code".into(),
+                checked: false,
+            },
+        ],
+        selected: 0,
+        elapsed_ms: 100_000,
+    });
+    r.render(&scene, &pack(), t0()).unwrap();
+    let text = frame_text(r.frame_buffer());
+    assert!(
+        text.contains("Welcome to pixtuoid"),
+        "onboarding title; frame:\n{text}"
+    );
+    assert!(text.contains("Codex"), "checked roster row; frame:\n{text}");
+    assert!(
+        text.contains("Claude Code"),
+        "unchecked roster row; frame:\n{text}"
+    );
+    assert!(
+        text.contains("space toggle") && text.contains("esc skip"),
+        "key hint shown once rows are in; frame:\n{text}"
+    );
+}
+
 // ===================================================================
 // Footer / HUD (rendered text)
 // ===================================================================

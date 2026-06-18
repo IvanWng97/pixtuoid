@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use anyhow::Result;
 use clap::Parser;
 use pixtuoid::cli::{Cli, Cmd, SourceArgs, SourcesAction};
-use pixtuoid::{config, doctor, floating, init_pack, install, runtime, sources, validate};
+use pixtuoid::{config, doctor, floating, init_pack, install, runtime, setup, sources, validate};
 use tracing_subscriber::EnvFilter;
 
 fn main() -> Result<()> {
@@ -136,7 +136,41 @@ fn main() -> Result<()> {
                 _ => Ok("disconnected".to_string()),
             })
         }
+        Cmd::Setup { yes } => run_setup(yes),
     }
+}
+
+/// `pixtuoid setup [--yes]` — the headless onboarding twin (Raycast / CI /
+/// scripting). Detects installed agent CLIs and connects them via the SAME
+/// `sources::apply_choices` the in-TUI onboarding uses. Without `--yes` it is a
+/// DRY RUN (prints the detected set only) — writing to another tool's config is
+/// opt-in. Exits non-zero if any connect fails (a `$?`-checking caller's signal).
+fn run_setup(yes: bool) -> Result<()> {
+    let detected = sources::detect();
+    if detected.is_empty() {
+        println!("No agent CLIs detected on this machine \u{2014} nothing to set up.");
+        return Ok(());
+    }
+    if !yes {
+        println!("Detected agent CLIs (run `pixtuoid setup --yes` to connect):");
+        for sid in &detected {
+            println!("  {sid}");
+        }
+        return Ok(());
+    }
+    let cfg = config::config_path();
+    let choices: Vec<(&'static str, bool)> = detected.iter().map(|&s| (s, true)).collect();
+    let mut any_failed = false;
+    for (id, oc) in sources::apply_choices(&cfg, &choices) {
+        if matches!(oc, sources::ChangeOutcome::Failed(_)) {
+            any_failed = true;
+        }
+        println!("{id}: {}", oc.as_wire());
+    }
+    if any_failed {
+        anyhow::bail!("one or more sources failed to connect (see the rows above)");
+    }
+    Ok(())
 }
 
 /// `pixtuoid sources [--json]` — print every source's connection state. Read-only.
@@ -257,6 +291,9 @@ fn build_run_config(
     let cfg_path = config::config_path();
     let mut cfg_warnings = Vec::new();
     let cfg = config::load(&cfg_path, &mut cfg_warnings);
+    // First launch ever (no `[sources]` flags yet) → the TUI plays onboarding.
+    // Computed from the same migrate condition `resolve_connected` uses below.
+    let first_run = setup::is_first_run(&cfg, &cfg_path);
     let theme = config::resolve_theme(&cfg, cli_theme, &mut cfg_warnings)?;
     // The config seam's twin of the clap range(1..) guard: a config max-desks = 0
     // is ignored with a collected warning (eager `.or` argument on purpose — the
@@ -291,6 +328,7 @@ fn build_run_config(
         pets,
         connected,
         log_path: Some(log_file_path()),
+        first_run,
     })
 }
 

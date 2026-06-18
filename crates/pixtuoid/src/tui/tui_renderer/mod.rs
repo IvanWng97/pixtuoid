@@ -113,6 +113,11 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     connection_confirm: Option<usize>,
     connection_result: Option<String>,
     connection_socket_line: String,
+    /// First-run onboarding overlay frame, pushed by the event loop via
+    /// `set_onboarding_frame` (the four values bundled in one `OnboardingFrame` —
+    /// they always move together). Kept here, disjoint from the floor buffers, for
+    /// borrow-free `DrawCtx` assembly.
+    onboarding: crate::tui::welcome::OnboardingFrame,
 }
 
 impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
@@ -157,6 +162,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             connection_confirm: None,
             connection_result: None,
             connection_socket_line: String::new(),
+            onboarding: crate::tui::welcome::OnboardingFrame::default(),
         }
     }
 
@@ -198,6 +204,13 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         self.connection_confirm = confirm;
         self.connection_result = result;
         self.connection_socket_line = socket_line;
+    }
+
+    /// Mirror the first-run onboarding frame the event loop built this tick
+    /// (`OnboardingFrame::elapsed_ms` is the time since the overlay opened, which
+    /// drives the painter's typewriter).
+    pub fn set_onboarding_frame(&mut self, frame: crate::tui::welcome::OnboardingFrame) {
+        self.onboarding = frame;
     }
 
     pub fn help_open(&self) -> bool {
@@ -599,6 +612,9 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         let connection_confirm = self.connection_confirm;
         let connection_result = self.connection_result.clone();
         let connection_socket_line = self.connection_socket_line.clone();
+        // Onboarding can't be opened mid-slide (it's first-run only), but clone its
+        // frame for the brief transition so the overlay survives a floor change.
+        let onboarding = self.onboarding.clone();
         // Floor label tracks the destination floor for the duration of the
         // slide so the per-floor agent count in the footer matches the
         // label (otherwise users see "F1/3 ... 5 agents" with floor 2's
@@ -635,6 +651,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                 &connection_socket_line,
                 popup_scale,
                 help_open,
+                &onboarding,
                 now,
                 actual_full,
                 theme,
@@ -764,6 +781,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> Renderer for TuiRenderer<B> {
             connection_confirm: self.connection_confirm,
             connection_result: self.connection_result.as_deref(),
             connection_socket_line: self.connection_socket_line.as_str(),
+            onboarding: &self.onboarding,
         };
         let result = draw_scene(&mut self.terminal, &floor_scene, pack, now, &mut draw_ctx);
         self.last_pet_pos = draw_ctx.last_pet_pos;
