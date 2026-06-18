@@ -286,12 +286,14 @@ jobs:
         # (http/https Timeout) so a dead mirror fails FAST instead of hanging, let
         # apt retry transient fetches (Acquire::Retries), and retry the whole
         # install up to 3× with backoff (apt fails on its OWN timeout, releasing the
-        # dpkg lock, so a retry is safe — no SIGKILL). --no-install-recommends trims it.
+        # dpkg lock, so a retry is safe — no SIGKILL). Install the FULL ffmpeg (no
+        # --no-install-recommends): the trim isn't part of the fix and would make a
+        # future gen-check op silently depend on the recommends set being present.
         run: |
           apt_opts=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
           for attempt in 1 2 3; do
             if sudo apt-get update "${apt_opts[@]}" \
-              && sudo apt-get install -y --no-install-recommends "${apt_opts[@]}" ffmpeg; then
+              && sudo apt-get install -y "${apt_opts[@]}" ffmpeg; then
               # No `| head` — under `set -o pipefail` a closed pipe could SIGPIPE
               # ffmpeg and fail this success path. The full banner is fine in logs.
               ffmpeg -version
