@@ -26,9 +26,12 @@ ignore:
   - "scripts/"
   - "docs/"
   - "*.md"
-  # Not coverable headlessly — exercising these needs a real TTY / OS:
-  - "crates/pixtuoid/src/main.rs"            # binary entry: terminal raw-mode, crash hook, signal handling
-  - "crates/pixtuoid/src/tui/mod.rs"         # crossterm event loop + terminal lifecycle: reads/writes the real TTY
-  - "crates/pixtuoid/src/runtime/driver.rs"  # async glue: tokio runtime + block_on + ctrl_c + socket bind (#103)
+  # Not coverable headlessly — exercising these needs a real TTY / OS / display:
+  - "crates/pixtuoid/src/main.rs"               # binary entry: terminal raw-mode, crash hook, signal handling
+  - "crates/pixtuoid/src/tui/mod.rs"            # crossterm event loop + terminal lifecycle: reads/writes the real TTY
+  - "crates/pixtuoid/src/runtime/driver.rs"     # async glue: tokio runtime + block_on + ctrl_c + socket bind (#103)
+  - "crates/pixtuoid/src/floating/mod.rs"       # floating run(): tokio runtime + winit EventLoop glue (the floating twin of driver.rs)
+  - "crates/pixtuoid/src/floating/window.rs"    # winit ApplicationHandler: creates the real OS window + softbuffer surface
+  # The testable floating logic IS counted: offscreen.rs (render seam) + geometry.rs (window/monitor rect math).
   # Keeps the % honest: "of the code we CAN test headlessly, X% is tested",
   # rather than dragging the number down with paths no test can reach.

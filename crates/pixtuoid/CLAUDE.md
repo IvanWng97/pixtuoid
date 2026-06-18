@@ -140,7 +140,13 @@ src/
 │                       left-press drag / corner resize; persists [floating] geometry on close;
 │                       floor_caps synced to the rendered layout's home-desk count so no agent is stranded
 │                       off-screen; macOS Accessory + shadow, #[cfg(windows)] skip-taskbar; opacity = honest v1
-│                       no-op, winit has none + softbuffer is opaque → wgpu/native deferred). Visual check:
+│                       no-op, winit has none + softbuffer is opaque → wgpu/native deferred),
+│                       geometry.rs (the pure window/monitor rect math extracted OUT of window.rs so it's
+│                       unit-testable: window_visible_on_monitors = the off-screen-recovery AABB overlap +
+│                       empty-monitor-list guard; near_resize_corner = the drag-vs-resize hit-test).
+│                       **mod.rs + window.rs are codecov-IGNORED** (winit `EventLoop`/`ApplicationHandler` +
+│                       tokio glue, the floating twin of driver.rs — need a real display); the floating crate's
+│                       TESTED surface is offscreen.rs (render seam) + geometry.rs (rect math). Visual check:
 │                       `examples/floating_snapshot.rs` (the floating twin of the `snapshot` example).
 └── tui/                ratatui App + TuiRenderer (Renderer trait impl) — the half-block flush + widgets +
                         event loop, a thin painter over the pixtuoid-scene crate (the engine is its own crate now) — see src/tui/CLAUDE.md

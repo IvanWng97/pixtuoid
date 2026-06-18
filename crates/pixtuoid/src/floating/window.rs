@@ -9,8 +9,9 @@
 //! bridge) plus a ~30fps animation tick WHILE agents are present (motion is time-driven);
 //! when the office is empty it drops to a slow ~1fps ambient tick (keeping the time-driven
 //! clock/weather/lightning/day-night/pet alive without the 30fps cost), never fully idle.
-//! Platform glue — codecov-ignored like `driver.rs`; the testable render seam is
-//! `floating::offscreen`.
+//! Platform glue — codecov-ignored like `driver.rs`; the testable seams are
+//! `floating::offscreen` (render) and `floating::geometry` (the window/monitor rect math
+//! pulled out of here: off-screen-recovery overlap + the corner-resize hit-test).
 
 use std::num::NonZeroU32;
 use std::path::PathBuf;
@@ -219,30 +220,16 @@ fn sync_floor_caps(floor_caps: &[AtomicUsize; MAX_FLOORS], buf_w: u16, buf_h: u1
 }
 
 /// Does the saved window rect `(x, y, w, h)` overlap ANY currently-connected monitor?
-///
-/// Guards against restoring onto a now-disconnected monitor (the off-screen-unrecoverable
-/// case). The saved position is physical px (per `persist_geometry`) and monitor
-/// position/size are physical px, so they compare directly; `w`/`h` are the saved LOGICAL
-/// dims used here only as an approximate extent — a few px of HiDPI slop is irrelevant for
-/// an on/off-screen test. Defensive: an EMPTY monitor list (winit reports none) returns
-/// `true` so we still honor the saved position rather than second-guessing the OS.
+/// Thin winit binding over the pure [`super::geometry::window_visible_on_monitors`] (the
+/// overlap logic + empty-list guard is unit-tested there; this just pulls the monitor rects).
 fn position_on_a_monitor(event_loop: &ActiveEventLoop, x: i32, y: i32, w: u32, h: u32) -> bool {
-    let mut any_monitor = false;
-    let (win_l, win_t) = (x as i64, y as i64);
-    let (win_r, win_b) = (win_l + w as i64, win_t + h as i64);
-    for monitor in event_loop.available_monitors() {
-        any_monitor = true;
-        let pos = monitor.position();
-        let size = monitor.size();
-        let (mon_l, mon_t) = (pos.x as i64, pos.y as i64);
-        let (mon_r, mon_b) = (mon_l + size.width as i64, mon_t + size.height as i64);
-        // Standard axis-aligned-rect overlap (any non-empty intersection counts as on-screen).
-        if win_l < mon_r && win_r > mon_l && win_t < mon_b && win_b > mon_t {
-            return true;
-        }
-    }
-    // No monitor overlapped — but if winit reported NONE, don't override the OS.
-    !any_monitor
+    super::geometry::window_visible_on_monitors(
+        (x, y, w, h),
+        event_loop.available_monitors().map(|m| {
+            let (pos, size) = (m.position(), m.size());
+            (pos.x, pos.y, size.width, size.height)
+        }),
+    )
 }
 
 impl ApplicationHandler<FloatingEvent> for FloatingApp {
@@ -354,8 +341,11 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
                 // non-fatal (some platforms refuse outside a real press).
                 if let Some(window) = &self.window {
                     let size = window.inner_size();
-                    let near_corner = self.cursor.x >= size.width as f64 - RESIZE_CORNER_PX
-                        && self.cursor.y >= size.height as f64 - RESIZE_CORNER_PX;
+                    let near_corner = super::geometry::near_resize_corner(
+                        (self.cursor.x, self.cursor.y),
+                        (size.width, size.height),
+                        RESIZE_CORNER_PX,
+                    );
                     let _ = if near_corner {
                         window.drag_resize_window(ResizeDirection::SouthEast)
                     } else {
