@@ -131,70 +131,61 @@ fn toggle_pin<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
     }
 }
 
-/// Connect a source from the panel: PERSIST the intent FIRST (so it survives
-/// restart), then — only if that succeeded — open the live gate (`connected.set`
-/// → the reducer task's reconciler stops evicting it + its events flow) and, for
-/// target-bearing sources, install its hooks. If the persist fails we abort
-/// loudly and flip NOTHING: opening a gate the next restart can't remember would
-/// silently re-evict the sprites the user just connected. Returns the panel result.
+/// Connect a source from the panel: delegate the persist + install + rollback to
+/// the shared `crate::sources::connect` core, then — only on success — open the
+/// live gate (`connected.set` → the reducer task's reconciler stops evicting it +
+/// its events flow). The core persists the flag FIRST and rolls it back if the
+/// install fails, so on `Err` the gate was never opened (no shown-but-broken
+/// source surviving a restart). The panel adds the live-gate line the CLI omits.
 fn connect_source(
     config_path: &std::path::Path,
     connected: &crate::runtime::ConnectedSources,
-    source_id: &'static str,
-    target: Option<&'static crate::install::target::Target>,
+    source_id: &str,
     display_name: &str,
 ) -> String {
-    if let Err(e) = crate::config::save_source_connected(config_path, source_id, true) {
-        tracing::warn!("failed to persist connection for {source_id}: {e:#}");
-        return format!(
-            "{display_name}: connect failed \u{2014} couldn't save config \u{2014} {e:#}"
-        );
-    }
-    connected.set(source_id, true);
-    match target {
-        Some(t) => match crate::install::install_target(t, None, None) {
-            Ok(r) => connection::format_connect_result(&r, display_name),
-            // The hooks did NOT install — roll back the flag + gate so the next
-            // restart doesn't honor a persisted "connected" with no integration
-            // behind it (a hook-only source would show connected yet never
-            // produce an agent). The rollback save writes the same path the
-            // first save just succeeded on, so it's reliable.
-            Err(e) => {
-                let _ = crate::config::save_source_connected(config_path, source_id, false);
-                connected.set(source_id, false);
-                format!("{display_name}: connect failed \u{2014} {e:#}")
+    match crate::sources::connect(config_path, source_id) {
+        Ok(outcome) => {
+            connected.set(source_id, true);
+            match outcome {
+                crate::sources::ConnectOutcome::Installed(r) => {
+                    connection::format_connect_result(&r, display_name)
+                }
+                crate::sources::ConnectOutcome::FlagOnly => {
+                    format!("\u{2713} {display_name} connected")
+                }
             }
-        },
-        None => format!("\u{2713} {display_name} connected"),
+        }
+        Err(e) => format!("{display_name}: connect failed \u{2014} {e:#}"),
     }
 }
 
-/// Disconnect a source from the panel: PERSIST the intent FIRST, then — only if
-/// that succeeded — close the live gate (`connected.set(false)` → the reducer
-/// task's reconciler walks its characters out on the next tick) and remove its
-/// hooks. Same persist-or-abort rule as connect: a runtime hide the next restart
-/// reverts (the saved flag still says connected) is a lie, so on a persist
-/// failure flip NOTHING and report it. Returns the panel result.
+/// Disconnect a source from the panel: delegate to `crate::sources::disconnect`
+/// (persist the flag false FIRST, then remove hooks), then close the live gate.
+/// The core reserves `Err` for the persist-failure abort (flip NOTHING — a
+/// runtime hide the next restart reverts is a lie); a hook-removal failure is
+/// folded into the `Ok` outcome, so the gate STILL closes (the flag is false).
 fn disconnect_source(
     config_path: &std::path::Path,
     connected: &crate::runtime::ConnectedSources,
-    source_id: &'static str,
-    target: Option<&'static crate::install::target::Target>,
+    source_id: &str,
     display_name: &str,
 ) -> String {
-    if let Err(e) = crate::config::save_source_connected(config_path, source_id, false) {
-        tracing::warn!("failed to persist disconnection for {source_id}: {e:#}");
-        return format!(
-            "{display_name}: disconnect failed \u{2014} couldn't save config \u{2014} {e:#}"
-        );
-    }
-    connected.set(source_id, false);
-    match target {
-        Some(t) => match crate::install::uninstall_target(t, None) {
-            Ok(r) => connection::format_disconnect_result(&r, display_name),
-            Err(e) => format!("{display_name}: disconnect failed \u{2014} {e:#}"),
-        },
-        None => format!("\u{2713} {display_name} disconnected"),
+    match crate::sources::disconnect(config_path, source_id) {
+        Ok(outcome) => {
+            connected.set(source_id, false);
+            match outcome {
+                crate::sources::DisconnectOutcome::Uninstalled(r) => {
+                    connection::format_disconnect_result(&r, display_name)
+                }
+                crate::sources::DisconnectOutcome::FlagOnly => {
+                    format!("\u{2713} {display_name} disconnected")
+                }
+                crate::sources::DisconnectOutcome::HookRemovalFailed(e) => {
+                    format!("{display_name}: disconnected, but hook removal failed \u{2014} {e}")
+                }
+            }
+        }
+        Err(e) => format!("{display_name}: disconnect failed \u{2014} {e:#}"),
     }
 }
 
@@ -780,13 +771,12 @@ pub async fn run_tui(
                                     connection_ui.rows.get(connection_ui.selected).map(|r| {
                                         (
                                             r.state,
-                                            r.target,
                                             r.source_id,
                                             r.display_name,
                                             connection::no_action_hint(r),
                                         )
                                     });
-                                if let Some((state, target, source_id, name, hint)) = action {
+                                if let Some((state, source_id, name, hint)) = action {
                                     match state {
                                         // Bound → arm the disconnect confirm (it
                                         // removes hooks + walks characters out).
@@ -806,7 +796,6 @@ pub async fn run_tui(
                                                         &config_path,
                                                         &connected,
                                                         source_id,
-                                                        target,
                                                         name,
                                                     )
                                                 }));
@@ -829,9 +818,9 @@ pub async fn run_tui(
                                     let action = connection_ui
                                         .rows
                                         .get(idx)
-                                        .map(|r| (r.target, r.source_id, r.display_name));
-                                    if let Some((target, source_id, name)) = action {
-                                        // block_in_place: uninstall_target takes a
+                                        .map(|r| (r.source_id, r.display_name));
+                                    if let Some((source_id, name)) = action {
+                                        // block_in_place: disconnect takes a
                                         // flock + fsync + FS reads — off the executor.
                                         connection_ui.last_result =
                                             Some(tokio::task::block_in_place(|| {
@@ -839,7 +828,6 @@ pub async fn run_tui(
                                                     &config_path,
                                                     &connected,
                                                     source_id,
-                                                    target,
                                                     name,
                                                 )
                                             }));
@@ -1402,7 +1390,7 @@ mod dispatch_tests {
         let cfg = tmp.path().join("config.toml");
         let connected = crate::runtime::ConnectedSources::default();
 
-        let res = connect_source(&cfg, &connected, "antigravity", None, "Antigravity");
+        let res = connect_source(&cfg, &connected, "antigravity", "Antigravity");
         assert!(res.contains("connected"), "result: {res}");
         assert!(connected.is_connected("antigravity"), "gate opened");
         let written = std::fs::read_to_string(&cfg).unwrap();
@@ -1420,7 +1408,7 @@ mod dispatch_tests {
             std::iter::once("antigravity".to_string()).collect(),
         );
 
-        let res = disconnect_source(&cfg, &connected, "antigravity", None, "Antigravity");
+        let res = disconnect_source(&cfg, &connected, "antigravity", "Antigravity");
         assert!(res.contains("disconnected"), "result: {res}");
         assert!(!connected.is_connected("antigravity"), "gate closed");
         let written = std::fs::read_to_string(&cfg).unwrap();
@@ -1440,7 +1428,7 @@ mod dispatch_tests {
         let cfg = blocker.join("config.toml");
         let connected = crate::runtime::ConnectedSources::default();
 
-        let res = connect_source(&cfg, &connected, "antigravity", None, "Antigravity");
+        let res = connect_source(&cfg, &connected, "antigravity", "Antigravity");
         assert!(res.contains("failed"), "must report the failure: {res}");
         assert!(
             !connected.is_connected("antigravity"),
@@ -1448,59 +1436,7 @@ mod dispatch_tests {
         );
     }
 
-    // A target whose install ALWAYS fails (its default_config_path errs, so
-    // install_target bails before any FS) — to exercise connect_source's
-    // install-failure rollback deterministically + cross-platform.
-    static FAIL_TARGET: crate::install::target::Target = crate::install::target::Target {
-        name: "rollbacktest",
-        core_source: "rollbacktest",
-        display_name: "RollbackTest",
-        default_config_path: || Err(anyhow::anyhow!("forced install failure")),
-        hook_command: |_, _| Ok(String::new()),
-        merge_install: |c, _| {
-            Ok(crate::install::target::MergeOutcome {
-                content: c.to_string(),
-                changed: false,
-            })
-        },
-        merge_uninstall: |c| {
-            Ok(crate::install::target::MergeOutcome {
-                content: c.to_string(),
-                changed: false,
-            })
-        },
-        verify_schema: |_| crate::install::verify::SchemaParse::broken("test fake"),
-        binary_strategy: crate::install::target::BinaryStrategy::EmbedAbsolute,
-        presence_probe: None,
-        extra_artifacts: None,
-    };
-
-    #[test]
-    fn connect_source_rolls_back_gate_and_flag_when_install_target_fails() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let cfg = tmp.path().join("config.toml");
-        let connected = crate::runtime::ConnectedSources::default();
-
-        // Save succeeds (writable cfg) so the gate opens, THEN install_target
-        // fails → connect_source must undo both.
-        let res = connect_source(
-            &cfg,
-            &connected,
-            "rollbacktest",
-            Some(&FAIL_TARGET),
-            "RollbackTest",
-        );
-        assert!(res.contains("failed"), "must report the failure: {res}");
-        assert!(
-            !connected.is_connected("rollbacktest"),
-            "install failure must roll the gate back closed"
-        );
-        // The persisted flag is rolled back to false too (no shown-but-broken
-        // source surviving the next restart).
-        let written = std::fs::read_to_string(&cfg).unwrap();
-        assert!(
-            written.contains("rollbacktest") && written.contains("false"),
-            "the flag was rolled back to false: {written}"
-        );
-    }
+    // The install-failure rollback is now tested at the core
+    // (`sources::connect_target_rolls_the_flag_back_when_install_fails`) — the
+    // panel just delegates to `crate::sources::connect`.
 }

@@ -116,16 +116,17 @@ fn main() -> Result<()> {
         Cmd::ValidatePack { pack_dir } => validate::validate_pack(&pack_dir),
         Cmd::InitPack { dest, force } => init_pack::init_pack(&dest, force),
         Cmd::Doctor => doctor::run(&log_file_path()),
-        Cmd::Sources {
-            action: None,
-            json,
-        } => run_sources_list(json),
+        Cmd::Sources { action: None, json } => run_sources_list(json),
         Cmd::Sources {
             action: Some(SourcesAction::Set { ids, json }),
             ..
         } => run_sources_set(&ids, json),
-        Cmd::Connect { ids, json } => run_change(&ids, json, sources::connect),
-        Cmd::Disconnect { ids, json } => run_change(&ids, json, sources::disconnect),
+        Cmd::Connect { ids, json } => run_change(&ids, json, "connected", |c, i| {
+            sources::connect(c, i).map(|_| ())
+        }),
+        Cmd::Disconnect { ids, json } => run_change(&ids, json, "disconnected", |c, i| {
+            sources::disconnect(c, i).map(|_| ())
+        }),
     }
 }
 
@@ -170,11 +171,14 @@ fn run_sources_set(ids: &[String], json: bool) -> Result<()> {
 }
 
 /// Shared `connect`/`disconnect` presenter: validate all ids up front, then apply
-/// each, reporting per-source. `op` is `sources::connect` or `sources::disconnect`.
+/// each, reporting per-source. `ok_label` is the success token ("connected" /
+/// "disconnected"); `op` wraps `sources::connect`/`disconnect` (whose rich
+/// outcome the CLI doesn't surface — success/failure is enough).
 fn run_change(
     ids: &[String],
     json: bool,
-    op: fn(&Path, &str) -> Result<sources::ChangeOutcome>,
+    ok_label: &str,
+    op: impl Fn(&Path, &str) -> Result<()>,
 ) -> Result<()> {
     let cfg = config::config_path();
     let sids: Vec<&'static str> = ids
@@ -185,8 +189,8 @@ fn run_change(
         .into_iter()
         .map(|sid| {
             let token = match op(&cfg, sid) {
-                Ok(oc) => oc.as_wire(),
-                Err(e) => sources::ChangeOutcome::Failed(format!("{e:#}")).as_wire(),
+                Ok(()) => ok_label.to_string(),
+                Err(e) => format!("failed: {e:#}"),
             };
             (sid.to_string(), token)
         })

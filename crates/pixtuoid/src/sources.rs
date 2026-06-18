@@ -21,6 +21,7 @@ use crate::config;
 use crate::install::{
     self,
     target::{by_source, is_present, Target},
+    InstallReport, UninstallReport,
 };
 
 /// Outcome of a single connect/disconnect, so a batch (`reconcile_to`) can
@@ -78,53 +79,88 @@ pub fn registered_id(id: &str) -> Result<&'static str> {
         })
 }
 
-/// Connect a source: PERSIST the `[sources]` flag FIRST (so it survives
-/// restart), then — only for a target-bearing source — install its hooks,
-/// rolling the flag back if the install fails (a persisted "connected" with no
-/// integration behind it would show connected yet never produce an agent). The
-/// panel's `connect_source` adds `connected.set(..)` on top for the live gate.
-/// `target_config` overrides the target's config path (tests / advanced use);
-/// `None` = the target's own default.
-pub fn connect(cfg: &Path, id: &str) -> Result<ChangeOutcome> {
-    connect_with(cfg, id, None)
+/// Result of a successful single connect — carries the `InstallReport` for a
+/// target-bearing source so the panel can render its rich notes (backup / PATH
+/// warning); `FlagOnly` for a no-target (JSONL-only) source.
+#[derive(Debug)]
+pub enum ConnectOutcome {
+    FlagOnly,
+    Installed(InstallReport),
 }
 
-pub fn connect_with(cfg: &Path, id: &str, target_config: Option<PathBuf>) -> Result<ChangeOutcome> {
+/// Result of a single disconnect whose FLAG was persisted false (the user IS
+/// disconnected). `Err` from `disconnect` is reserved for the persist-failure
+/// abort; a failed hook removal is folded in here (harmless stale hooks remain
+/// behind the now-closed gate), so the gate still closes — mirroring the original
+/// panel asymmetry (connect rolls back on install failure; disconnect does not).
+#[derive(Debug)]
+pub enum DisconnectOutcome {
+    FlagOnly,
+    Uninstalled(UninstallReport),
+    /// Flag persisted false, but removing the hooks errored. Carries the message.
+    HookRemovalFailed(String),
+}
+
+/// Connect a source: PERSIST the `[sources]` flag FIRST (so it survives restart),
+/// then — only for a target-bearing source — install its hooks, rolling the flag
+/// back if the install fails (a persisted "connected" with no integration behind
+/// it would show connected yet never produce an agent). The panel's
+/// `connect_source` adds `connected.set(..)` on top for the live gate; the CLI
+/// and onboarding don't (a separate process has no live set).
+pub fn connect(cfg: &Path, id: &str) -> Result<ConnectOutcome> {
     let sid = registered_id(id)?;
+    connect_target(cfg, sid, by_source(sid), None)
+}
+
+/// The persist + install + rollback core, with the `target` passed EXPLICITLY so
+/// tests can inject a deterministic-fail fake (`connect` resolves it from the
+/// registry). `target_config` overrides the target's config path.
+fn connect_target(
+    cfg: &Path,
+    sid: &'static str,
+    target: Option<&Target>,
+    target_config: Option<PathBuf>,
+) -> Result<ConnectOutcome> {
     config::save_source_connected(cfg, sid, true)?;
-    match by_source(sid) {
+    match target {
         Some(t) => match install::install_target(t, target_config, None) {
-            Ok(_) => Ok(ChangeOutcome::Connected),
+            Ok(r) => Ok(ConnectOutcome::Installed(r)),
             Err(e) => {
-                // Roll back the flag so the next launch doesn't honor a
-                // "connected" with no hooks behind it. The rollback writes the
-                // same path the first save just succeeded on, so it's reliable.
+                // Roll the flag back so the next launch doesn't honor a
+                // "connected" with no hooks behind it (the same path the first
+                // save just succeeded on, so it's reliable).
                 let _ = config::save_source_connected(cfg, sid, false);
                 Err(e)
             }
         },
-        None => Ok(ChangeOutcome::Connected),
+        None => Ok(ConnectOutcome::FlagOnly),
     }
 }
 
 /// Disconnect a source: persist the flag false FIRST, then remove its hooks
-/// (target-bearing only). Unlike connect there is no rollback — a failed
-/// uninstall still leaves the user disconnected (the safer direction).
-pub fn disconnect(cfg: &Path, id: &str) -> Result<ChangeOutcome> {
-    disconnect_with(cfg, id, None)
+/// (target-bearing only). No rollback — a failed uninstall still leaves the user
+/// disconnected (the safer direction).
+pub fn disconnect(cfg: &Path, id: &str) -> Result<DisconnectOutcome> {
+    let sid = registered_id(id)?;
+    disconnect_target(cfg, sid, by_source(sid), None)
 }
 
-pub fn disconnect_with(
+fn disconnect_target(
     cfg: &Path,
-    id: &str,
+    sid: &'static str,
+    target: Option<&Target>,
     target_config: Option<PathBuf>,
-) -> Result<ChangeOutcome> {
-    let sid = registered_id(id)?;
+) -> Result<DisconnectOutcome> {
+    // `?` here = the persist-failure abort (flip nothing). Past it, the flag is
+    // false, so a hook-removal error folds into the outcome rather than erroring.
     config::save_source_connected(cfg, sid, false)?;
-    if let Some(t) = by_source(sid) {
-        install::uninstall_target(t, target_config)?;
-    }
-    Ok(ChangeOutcome::Disconnected)
+    Ok(match target {
+        Some(t) => match install::uninstall_target(t, target_config) {
+            Ok(r) => DisconnectOutcome::Uninstalled(r),
+            Err(e) => DisconnectOutcome::HookRemovalFailed(format!("{e:#}")),
+        },
+        None => DisconnectOutcome::FlagOnly,
+    })
 }
 
 /// What `reconcile_to` should do to one source. Pure — see `plan_reconcile`.
@@ -181,14 +217,17 @@ pub fn reconcile_to_with(
     plan_reconcile(&current, desired)
         .into_iter()
         .map(|(sid, action)| {
-            let outcome =
-                match action {
-                    Action::Connect => connect(cfg, sid)
-                        .unwrap_or_else(|e| ChangeOutcome::Failed(format!("{e:#}"))),
-                    Action::Disconnect => disconnect(cfg, sid)
-                        .unwrap_or_else(|e| ChangeOutcome::Failed(format!("{e:#}"))),
-                    Action::NoOp => ChangeOutcome::NoOp,
-                };
+            let outcome = match action {
+                Action::Connect => match connect(cfg, sid) {
+                    Ok(_) => ChangeOutcome::Connected,
+                    Err(e) => ChangeOutcome::Failed(format!("{e:#}")),
+                },
+                Action::Disconnect => match disconnect(cfg, sid) {
+                    Ok(_) => ChangeOutcome::Disconnected,
+                    Err(e) => ChangeOutcome::Failed(format!("{e:#}")),
+                },
+                Action::NoOp => ChangeOutcome::NoOp,
+            };
             (sid.to_string(), outcome)
         })
         .collect()
@@ -381,10 +420,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let cfg = dir.path().join("config.toml");
 
-        assert_eq!(
+        assert!(matches!(
             connect(&cfg, "antigravity").unwrap(),
-            ChangeOutcome::Connected
-        );
+            ConnectOutcome::FlagOnly
+        ));
         let app = config::load(&cfg, &mut Vec::new());
         assert_eq!(
             app.sources.get("antigravity"),
@@ -392,15 +431,58 @@ mod tests {
             "flag persisted true"
         );
 
-        assert_eq!(
+        assert!(matches!(
             disconnect(&cfg, "antigravity").unwrap(),
-            ChangeOutcome::Disconnected
-        );
+            DisconnectOutcome::FlagOnly
+        ));
         let app = config::load(&cfg, &mut Vec::new());
         assert_eq!(
             app.sources.get("antigravity"),
             Some(&false),
             "flag persisted false"
+        );
+    }
+
+    // A target whose install ALWAYS fails (its `default_config_path` errs, so
+    // `install_target` bails before any FS) — exercises `connect_target`'s
+    // install-failure rollback deterministically + cross-platform.
+    static FAIL_TARGET: Target = Target {
+        name: "rollbacktest",
+        core_source: "rollbacktest",
+        display_name: "RollbackTest",
+        default_config_path: || Err(anyhow::anyhow!("forced install failure")),
+        hook_command: |_, _| Ok(String::new()),
+        merge_install: |c, _| {
+            Ok(crate::install::target::MergeOutcome {
+                content: c.to_string(),
+                changed: false,
+            })
+        },
+        merge_uninstall: |c| {
+            Ok(crate::install::target::MergeOutcome {
+                content: c.to_string(),
+                changed: false,
+            })
+        },
+        verify_schema: |_| crate::install::verify::SchemaParse::broken("test fake"),
+        binary_strategy: crate::install::target::BinaryStrategy::EmbedAbsolute,
+        presence_probe: None,
+        extra_artifacts: None,
+    };
+
+    #[test]
+    fn connect_target_rolls_the_flag_back_when_install_fails() {
+        // Persist succeeds (writable cfg), THEN install_target fails → the flag
+        // must roll back to false (no shown-but-broken source after a restart).
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = dir.path().join("config.toml");
+        let err = connect_target(&cfg, "rollbacktest", Some(&FAIL_TARGET), None).unwrap_err();
+        assert!(err.to_string().contains("forced install failure"), "{err}");
+        let app = config::load(&cfg, &mut Vec::new());
+        assert_eq!(
+            app.sources.get("rollbacktest"),
+            Some(&false),
+            "the flag was rolled back to false"
         );
     }
 
