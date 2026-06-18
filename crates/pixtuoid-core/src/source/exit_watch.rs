@@ -627,6 +627,10 @@ mod tests {
         /// kqueue/pidfd wake just hadn't been scheduled yet. It is a liveness
         /// bound, NOT a latency assertion: a true hang is still failed by
         /// nextest's 180s slow-timeout, so a wider deadline doesn't weaken it.
+        /// The deadline alone wasn't enough (it still flaked at 10s under
+        /// instrumentation), so these `live::*` tests ALSO run isolated via a
+        /// `threads-required = "num-cpus"` override in `.config/nextest.toml`,
+        /// keeping the watcher thread off a contended scheduler.
         const LIVE_PID_DEADLINE: Duration = Duration::from_secs(10);
 
         fn sleeper() -> Child {
