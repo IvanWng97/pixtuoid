@@ -456,7 +456,18 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
     let pack = embedded_pack::load_sprite_pack(pack_dir)?;
     let term = setup_terminal()?;
     let mut renderer = TuiRenderer::new(term, theme, pets);
-    let mut version_popup = resolve_version_popup(&config_path);
+    // A brand-new install shows ONBOARDING, not the "what's new in vX" version
+    // popup: on first run everything is "new", so the popup is noise — and both are
+    // centered borderless cards, so showing both would visually overlap. Still call
+    // the resolver so it STAMPS `last_seen_version` (the popup won't pop on later
+    // launches either — onboarding is the one-and-only welcome), then force it off.
+    // Upgraders (not first_run) get the version popup as usual.
+    let mut version_popup = if first_run {
+        let _ = resolve_version_popup(&config_path);
+        false
+    } else {
+        resolve_version_popup(&config_path)
+    };
     let mut last_layout_sig: Option<(u16, u16)> = None;
     let mut paused = false;
     let mut frozen_now: Option<SystemTime> = None;
@@ -1238,7 +1249,10 @@ mod dispatch_tests {
             dispatch_key(KeyCode::Enter, NONE, on),
             KeyAction::OnboardingConfirm
         );
-        assert_eq!(dispatch_key(KeyCode::Esc, NONE, on), KeyAction::OnboardingSkip);
+        assert_eq!(
+            dispatch_key(KeyCode::Esc, NONE, on),
+            KeyAction::OnboardingSkip
+        );
         // The quit chord still escapes; every other key is SWALLOWED (it must not
         // leak to the help / connection handlers flagged open underneath).
         assert_eq!(dispatch_key(KeyCode::Char('c'), CTRL, on), KeyAction::Quit);

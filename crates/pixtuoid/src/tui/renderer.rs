@@ -138,8 +138,8 @@ pub struct DrawCtx<'a> {
     pub connection_confirm: Option<usize>,
     pub connection_result: Option<&'a str>,
     pub connection_socket_line: &'a str,
-    /// First-run onboarding overlay frame (borrowed from `TuiRenderer`): open flag
-    /// + roster snapshot + selection + elapsed-ms clock. Modal and TOP of the
+    /// First-run onboarding overlay frame (borrowed from `TuiRenderer`): the open
+    /// flag, roster snapshot, selection, and elapsed-ms clock. Modal and TOP of the
     /// precedence chain — painted last (topmost).
     pub onboarding: &'a crate::tui::welcome::OnboardingFrame,
 }

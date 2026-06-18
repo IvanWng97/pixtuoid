@@ -9,7 +9,10 @@ fn from_detected_pre_checks_every_row_and_resolves_badges() {
     let row = &ui.rows[0];
     assert_eq!(row.source_id, "codex");
     assert_eq!(row.label_prefix, "cx", "badge resolves from the registry");
-    assert_eq!(row.display_name, "Codex", "name resolves from the install target");
+    assert_eq!(
+        row.display_name, "Codex",
+        "name resolves from the install target"
+    );
     assert!(row.checked, "all rows pre-checked on first run");
     assert_eq!(ui.selected, 0);
 }
@@ -47,6 +50,6 @@ fn toggle_flips_only_the_selected_row_and_feeds_decisions() {
     ui.move_down(); // select claude-code
     ui.toggle_selected(); // uncheck it
     let decisions: std::collections::HashMap<_, _> = ui.decisions().into_iter().collect();
-    assert_eq!(decisions["codex"], true, "untouched row stays checked");
-    assert_eq!(decisions["claude-code"], false, "selected row toggled off");
+    assert!(decisions["codex"], "untouched row stays checked");
+    assert!(!decisions["claude-code"], "selected row toggled off");
 }

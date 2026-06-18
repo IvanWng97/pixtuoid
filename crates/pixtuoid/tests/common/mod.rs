@@ -70,6 +70,7 @@ macro_rules! make_draw_ctx {
             connection_confirm: None,
             connection_result: None,
             connection_socket_line: "",
+            onboarding: &pixtuoid::tui::welcome::OnboardingFrame::default(),
         };
     };
 

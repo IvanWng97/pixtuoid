@@ -645,7 +645,11 @@ mod tests {
         assert_eq!(outcomes["antigravity"], ChangeOutcome::Connected);
 
         let app = config::load(&cfg, &mut Vec::new());
-        assert_eq!(app.sources.get("antigravity"), Some(&true), "listed → written");
+        assert_eq!(
+            app.sources.get("antigravity"),
+            Some(&true),
+            "listed → written"
+        );
         assert_eq!(app.sources.get("codex"), None, "unlisted → untouched");
 
         // Unchecked (the uncheck / skip-freeze path) persists false.
