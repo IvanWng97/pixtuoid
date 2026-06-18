@@ -28,12 +28,19 @@ use tui_renderer::TuiRenderer;
 use crate::runtime::SceneRx;
 use pixtuoid_scene::{embedded_pack, floor, pet, theme};
 
-/// The modal + floor state the key dispatcher needs. Pulled out so the dispatch
-/// decision is a pure function of (key, state) and can be unit-tested without a
-/// TTY — the crossterm `read()` and all renderer/config side effects stay in the
-/// event loop. The modal priority is help > version-popup > theme-picker > normal.
+/// Which overlay (if any) currently owns input, plus the one count the picker
+/// needs. The two together drive the modal precedence chain (onboarding > help >
+/// version > connection > dashboard > theme-picker > normal); when one is open it
+/// swallows keys and the normal-scene bindings are suspended.
+///
+/// Pulled out (with [`FloorNav`]) so the dispatch decision is a pure function of
+/// (key, state) and can be unit-tested without a TTY — the crossterm `read()` and
+/// all renderer/config side effects stay in the event loop. Modal state and floor
+/// navigation are ORTHOGONAL, so they're separate arguments to [`dispatch_key`]
+/// rather than one bundle: a key is gated by the modals first, and only the
+/// normal-scene floor keys ever read [`FloorNav`].
 #[derive(Clone, Copy)]
-struct KeyCtx {
+struct ModalState {
     /// First-run onboarding overlay open — the TOP of the modal precedence chain.
     onboarding_open: bool,
     help_open: bool,
@@ -45,6 +52,13 @@ struct KeyCtx {
     /// open-connection dispatch into the armed (y/n only) vs unarmed (nav/toggle) sub-tiers.
     connection_confirm: bool,
     n_themes: usize,
+}
+
+/// Floor-navigation state the normal-scene PageUp/PageDown arms read to clamp a
+/// move (can't go past the ends, and a slide already in flight blocks a new one).
+/// Independent of [`ModalState`] — see its doc.
+#[derive(Clone, Copy)]
+struct FloorNav {
     n_floors: usize,
     current_floor: usize,
     in_transition: bool,
@@ -218,10 +232,15 @@ fn should_dispatch_key(kind: KeyEventKind) -> bool {
 /// Pure key-dispatch: resolve a key press to a `KeyAction` given the current
 /// modal + floor state. Modal precedence (highest first): help overlay,
 /// version popup, theme picker, then the normal scene.
-fn dispatch_key(code: KeyCode, mods: KeyModifiers, ctx: KeyCtx) -> KeyAction {
+fn dispatch_key(
+    code: KeyCode,
+    mods: KeyModifiers,
+    modal: ModalState,
+    floor: FloorNav,
+) -> KeyAction {
     // Onboarding is modal and the TOP of the precedence chain — it swallows every
     // other key (no other overlay can open while it's up) except the quit chord.
-    if ctx.onboarding_open {
+    if modal.onboarding_open {
         return match (code, mods) {
             _ if is_quit_chord(code, mods) => KeyAction::Quit,
             (KeyCode::Up, _) | (KeyCode::Char('k'), _) => KeyAction::OnboardingUp,
@@ -232,7 +251,7 @@ fn dispatch_key(code: KeyCode, mods: KeyModifiers, ctx: KeyCtx) -> KeyAction {
             _ => KeyAction::None,
         };
     }
-    if ctx.help_open {
+    if modal.help_open {
         return match (code, mods) {
             (KeyCode::Enter, _) | (KeyCode::Esc, _) | (KeyCode::Char('?'), _) => {
                 KeyAction::CloseHelp
@@ -241,7 +260,7 @@ fn dispatch_key(code: KeyCode, mods: KeyModifiers, ctx: KeyCtx) -> KeyAction {
             _ => KeyAction::None,
         };
     }
-    if ctx.version_popup {
+    if modal.version_popup {
         return match (code, mods) {
             (KeyCode::Enter, _) => KeyAction::DismissVersionPopup,
             (KeyCode::Esc, _) => KeyAction::Quit,
@@ -249,10 +268,10 @@ fn dispatch_key(code: KeyCode, mods: KeyModifiers, ctx: KeyCtx) -> KeyAction {
             _ => KeyAction::None,
         };
     }
-    if ctx.connection_open {
+    if modal.connection_open {
         // Armed sub-tier: a uninstall is awaiting confirmation — only y/n/Esc
         // (and the quit chord) act; nav/action keys are swallowed.
-        if ctx.connection_confirm {
+        if modal.connection_confirm {
             return match (code, mods) {
                 _ if is_quit_chord(code, mods) => KeyAction::Quit,
                 (KeyCode::Char('y'), _) => KeyAction::ConnectionConfirm,
@@ -270,7 +289,7 @@ fn dispatch_key(code: KeyCode, mods: KeyModifiers, ctx: KeyCtx) -> KeyAction {
             _ => KeyAction::None,
         };
     }
-    if ctx.dashboard_open {
+    if modal.dashboard_open {
         return match (code, mods) {
             _ if is_quit_chord(code, mods) => KeyAction::Quit,
             (KeyCode::Esc, _) | (KeyCode::Tab, _) => KeyAction::DashboardClose,
@@ -283,11 +302,11 @@ fn dispatch_key(code: KeyCode, mods: KeyModifiers, ctx: KeyCtx) -> KeyAction {
             _ => KeyAction::None,
         };
     }
-    if let Some(idx) = ctx.theme_picker {
+    if let Some(idx) = modal.theme_picker {
         return match code {
             KeyCode::Up | KeyCode::Char('k') => KeyAction::ThemePreview(idx.saturating_sub(1)),
             KeyCode::Down | KeyCode::Char('j') => {
-                KeyAction::ThemePreview((idx + 1).min(ctx.n_themes.saturating_sub(1)))
+                KeyAction::ThemePreview((idx + 1).min(modal.n_themes.saturating_sub(1)))
             }
             KeyCode::Enter => KeyAction::ThemeCommit(idx),
             KeyCode::Esc => KeyAction::ThemeCancel,
@@ -311,15 +330,15 @@ fn dispatch_key(code: KeyCode, mods: KeyModifiers, ctx: KeyCtx) -> KeyAction {
         #[cfg(debug_assertions)]
         KeyCode::Char('w') => KeyAction::ToggleWalkableDebug,
         KeyCode::PageUp | KeyCode::Up | KeyCode::Char('k') => {
-            if ctx.current_floor + 1 < ctx.n_floors && !ctx.in_transition {
-                KeyAction::NavigateFloor(ctx.current_floor + 1)
+            if floor.current_floor + 1 < floor.n_floors && !floor.in_transition {
+                KeyAction::NavigateFloor(floor.current_floor + 1)
             } else {
                 KeyAction::None
             }
         }
         KeyCode::PageDown | KeyCode::Down | KeyCode::Char('j') => {
-            if ctx.current_floor > 0 && !ctx.in_transition {
-                KeyAction::NavigateFloor(ctx.current_floor - 1)
+            if floor.current_floor > 0 && !floor.in_transition {
+                KeyAction::NavigateFloor(floor.current_floor - 1)
             } else {
                 KeyAction::None
             }
@@ -687,7 +706,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                     // keystroke; without this guard every key double-fires
                     // there (e.g. `p` pauses then instantly unpauses).
                     Event::Key(k) if should_dispatch_key(k.kind) => {
-                        let ctx = KeyCtx {
+                        let modal = ModalState {
                             onboarding_open: onboarding_opened_at.is_some(),
                             help_open: renderer.help_open(),
                             version_popup,
@@ -696,11 +715,13 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                             connection_open: connection_ui.open,
                             connection_confirm: connection_ui.confirm.is_some(),
                             n_themes: theme::ALL_THEMES.len(),
+                        };
+                        let floor = FloorNav {
                             n_floors: pixtuoid_scene::floor::num_floors(&snapshot),
                             current_floor: renderer.current_floor(),
                             in_transition: renderer.transition().is_some(),
                         };
-                        match dispatch_key(k.code, k.modifiers, ctx) {
+                        match dispatch_key(k.code, k.modifiers, modal, floor) {
                             KeyAction::None => {}
                             KeyAction::Quit => quit = true,
                             KeyAction::TogglePause => paused = !paused,
@@ -1143,15 +1164,15 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
 
 #[cfg(test)]
 mod dispatch_tests {
-    use super::{connect_source, disconnect_source, dispatch_key, KeyAction, KeyCtx};
+    use super::{connect_source, disconnect_source, dispatch_key, FloorNav, KeyAction, ModalState};
     use crossterm::event::{KeyCode, KeyModifiers};
 
     const NONE: KeyModifiers = KeyModifiers::NONE;
     const CTRL: KeyModifiers = KeyModifiers::CONTROL;
 
-    // Default: normal scene, mid-stack floor (1 of 3), no transition.
-    fn ctx() -> KeyCtx {
-        KeyCtx {
+    // Default: no overlay open, theme-picker count of 6.
+    fn modal() -> ModalState {
+        ModalState {
             onboarding_open: false,
             help_open: false,
             version_popup: false,
@@ -1160,6 +1181,12 @@ mod dispatch_tests {
             connection_open: false,
             connection_confirm: false,
             n_themes: 6,
+        }
+    }
+
+    // Default: normal scene, mid-stack floor (1 of 3), no transition.
+    fn nav() -> FloorNav {
+        FloorNav {
             n_floors: 3,
             current_floor: 1,
             in_transition: false,
@@ -1169,34 +1196,37 @@ mod dispatch_tests {
     #[test]
     fn normal_quit_pause_picker_help() {
         assert_eq!(
-            dispatch_key(KeyCode::Char('q'), NONE, ctx()),
+            dispatch_key(KeyCode::Char('q'), NONE, modal(), nav()),
             KeyAction::Quit
         );
         assert_eq!(
-            dispatch_key(KeyCode::Char('c'), CTRL, ctx()),
+            dispatch_key(KeyCode::Char('c'), CTRL, modal(), nav()),
             KeyAction::Quit
         );
-        assert_eq!(dispatch_key(KeyCode::Esc, NONE, ctx()), KeyAction::Quit);
         assert_eq!(
-            dispatch_key(KeyCode::Char('p'), NONE, ctx()),
+            dispatch_key(KeyCode::Esc, NONE, modal(), nav()),
+            KeyAction::Quit
+        );
+        assert_eq!(
+            dispatch_key(KeyCode::Char('p'), NONE, modal(), nav()),
             KeyAction::TogglePause
         );
         assert_eq!(
-            dispatch_key(KeyCode::Char('t'), NONE, ctx()),
+            dispatch_key(KeyCode::Char('t'), NONE, modal(), nav()),
             KeyAction::OpenThemePicker
         );
         assert_eq!(
-            dispatch_key(KeyCode::Char('?'), NONE, ctx()),
+            dispatch_key(KeyCode::Char('?'), NONE, modal(), nav()),
             KeyAction::ToggleHelp
         );
         // `w` only maps in debug builds; in release it falls through to None.
         #[cfg(debug_assertions)]
         assert_eq!(
-            dispatch_key(KeyCode::Char('w'), NONE, ctx()),
+            dispatch_key(KeyCode::Char('w'), NONE, modal(), nav()),
             KeyAction::ToggleWalkableDebug
         );
         assert_eq!(
-            dispatch_key(KeyCode::Char('x'), NONE, ctx()),
+            dispatch_key(KeyCode::Char('x'), NONE, modal(), nav()),
             KeyAction::None
         );
     }
@@ -1205,31 +1235,46 @@ mod dispatch_tests {
     fn floor_nav_guards() {
         // Mid-stack: up and down both valid.
         for code in [KeyCode::PageUp, KeyCode::Up, KeyCode::Char('k')] {
-            assert_eq!(dispatch_key(code, NONE, ctx()), KeyAction::NavigateFloor(2));
+            assert_eq!(
+                dispatch_key(code, NONE, modal(), nav()),
+                KeyAction::NavigateFloor(2)
+            );
         }
         for code in [KeyCode::PageDown, KeyCode::Down, KeyCode::Char('j')] {
-            assert_eq!(dispatch_key(code, NONE, ctx()), KeyAction::NavigateFloor(0));
+            assert_eq!(
+                dispatch_key(code, NONE, modal(), nav()),
+                KeyAction::NavigateFloor(0)
+            );
         }
         // Top floor: no up.
-        let top = KeyCtx {
+        let top = FloorNav {
             current_floor: 2,
-            ..ctx()
+            ..nav()
         };
-        assert_eq!(dispatch_key(KeyCode::Up, NONE, top), KeyAction::None);
-        // Bottom floor: no down.
-        let bottom = KeyCtx {
-            current_floor: 0,
-            ..ctx()
-        };
-        assert_eq!(dispatch_key(KeyCode::Down, NONE, bottom), KeyAction::None);
-        // A transition in flight blocks navigation in both directions.
-        let mid_trans = KeyCtx {
-            in_transition: true,
-            ..ctx()
-        };
-        assert_eq!(dispatch_key(KeyCode::Up, NONE, mid_trans), KeyAction::None);
         assert_eq!(
-            dispatch_key(KeyCode::Down, NONE, mid_trans),
+            dispatch_key(KeyCode::Up, NONE, modal(), top),
+            KeyAction::None
+        );
+        // Bottom floor: no down.
+        let bottom = FloorNav {
+            current_floor: 0,
+            ..nav()
+        };
+        assert_eq!(
+            dispatch_key(KeyCode::Down, NONE, modal(), bottom),
+            KeyAction::None
+        );
+        // A transition in flight blocks navigation in both directions.
+        let mid_trans = FloorNav {
+            in_transition: true,
+            ..nav()
+        };
+        assert_eq!(
+            dispatch_key(KeyCode::Up, NONE, modal(), mid_trans),
+            KeyAction::None
+        );
+        assert_eq!(
+            dispatch_key(KeyCode::Down, NONE, modal(), mid_trans),
             KeyAction::None
         );
     }
@@ -1237,131 +1282,170 @@ mod dispatch_tests {
     #[test]
     fn help_overlay_has_priority_and_dismisses() {
         // help wins even when the version popup is also flagged.
-        let c = KeyCtx {
+        let c = ModalState {
             help_open: true,
             version_popup: true,
             theme_picker: Some(2),
-            ..ctx()
+            ..modal()
         };
-        assert_eq!(dispatch_key(KeyCode::Enter, NONE, c), KeyAction::CloseHelp);
-        assert_eq!(dispatch_key(KeyCode::Esc, NONE, c), KeyAction::CloseHelp);
         assert_eq!(
-            dispatch_key(KeyCode::Char('?'), NONE, c),
+            dispatch_key(KeyCode::Enter, NONE, c, nav()),
             KeyAction::CloseHelp
         );
-        assert_eq!(dispatch_key(KeyCode::Char('q'), NONE, c), KeyAction::Quit);
-        assert_eq!(dispatch_key(KeyCode::Char('c'), CTRL, c), KeyAction::Quit);
+        assert_eq!(
+            dispatch_key(KeyCode::Esc, NONE, c, nav()),
+            KeyAction::CloseHelp
+        );
+        assert_eq!(
+            dispatch_key(KeyCode::Char('?'), NONE, c, nav()),
+            KeyAction::CloseHelp
+        );
+        assert_eq!(
+            dispatch_key(KeyCode::Char('q'), NONE, c, nav()),
+            KeyAction::Quit
+        );
+        assert_eq!(
+            dispatch_key(KeyCode::Char('c'), CTRL, c, nav()),
+            KeyAction::Quit
+        );
         // Up does not leak to the floor-nav / picker handlers while help is open.
-        assert_eq!(dispatch_key(KeyCode::Up, NONE, c), KeyAction::None);
+        assert_eq!(dispatch_key(KeyCode::Up, NONE, c, nav()), KeyAction::None);
     }
 
     #[test]
     fn onboarding_is_top_precedence_and_maps_its_keys() {
         // Onboarding sits ABOVE every other overlay (help/version/connection all
         // flagged) — the version-popup-lockstep precedence class.
-        let on = KeyCtx {
+        let on = ModalState {
             onboarding_open: true,
             help_open: true,
             version_popup: true,
             connection_open: true,
-            ..ctx()
+            ..modal()
         };
-        assert_eq!(dispatch_key(KeyCode::Up, NONE, on), KeyAction::OnboardingUp);
         assert_eq!(
-            dispatch_key(KeyCode::Char('k'), NONE, on),
+            dispatch_key(KeyCode::Up, NONE, on, nav()),
             KeyAction::OnboardingUp
         );
         assert_eq!(
-            dispatch_key(KeyCode::Down, NONE, on),
+            dispatch_key(KeyCode::Char('k'), NONE, on, nav()),
+            KeyAction::OnboardingUp
+        );
+        assert_eq!(
+            dispatch_key(KeyCode::Down, NONE, on, nav()),
             KeyAction::OnboardingDown
         );
         assert_eq!(
-            dispatch_key(KeyCode::Char('j'), NONE, on),
+            dispatch_key(KeyCode::Char('j'), NONE, on, nav()),
             KeyAction::OnboardingDown
         );
         assert_eq!(
-            dispatch_key(KeyCode::Char(' '), NONE, on),
+            dispatch_key(KeyCode::Char(' '), NONE, on, nav()),
             KeyAction::OnboardingToggle
         );
         assert_eq!(
-            dispatch_key(KeyCode::Enter, NONE, on),
+            dispatch_key(KeyCode::Enter, NONE, on, nav()),
             KeyAction::OnboardingConfirm
         );
         assert_eq!(
-            dispatch_key(KeyCode::Esc, NONE, on),
+            dispatch_key(KeyCode::Esc, NONE, on, nav()),
             KeyAction::OnboardingSkip
         );
         // The quit chord still escapes; every other key is SWALLOWED (it must not
         // leak to the help / connection handlers flagged open underneath).
-        assert_eq!(dispatch_key(KeyCode::Char('c'), CTRL, on), KeyAction::Quit);
-        assert_eq!(dispatch_key(KeyCode::Char('s'), NONE, on), KeyAction::None);
-        assert_eq!(dispatch_key(KeyCode::Char('?'), NONE, on), KeyAction::None);
-        assert_eq!(dispatch_key(KeyCode::Char('t'), NONE, on), KeyAction::None);
+        assert_eq!(
+            dispatch_key(KeyCode::Char('c'), CTRL, on, nav()),
+            KeyAction::Quit
+        );
+        assert_eq!(
+            dispatch_key(KeyCode::Char('s'), NONE, on, nav()),
+            KeyAction::None
+        );
+        assert_eq!(
+            dispatch_key(KeyCode::Char('?'), NONE, on, nav()),
+            KeyAction::None
+        );
+        assert_eq!(
+            dispatch_key(KeyCode::Char('t'), NONE, on, nav()),
+            KeyAction::None
+        );
     }
 
     #[test]
     fn version_popup_enter_dismisses_esc_quits() {
-        let c = KeyCtx {
+        let c = ModalState {
             version_popup: true,
-            ..ctx()
+            ..modal()
         };
         assert_eq!(
-            dispatch_key(KeyCode::Enter, NONE, c),
+            dispatch_key(KeyCode::Enter, NONE, c, nav()),
             KeyAction::DismissVersionPopup
         );
-        assert_eq!(dispatch_key(KeyCode::Esc, NONE, c), KeyAction::Quit);
-        assert_eq!(dispatch_key(KeyCode::Char('q'), NONE, c), KeyAction::Quit);
-        assert_eq!(dispatch_key(KeyCode::Char('c'), CTRL, c), KeyAction::Quit);
+        assert_eq!(dispatch_key(KeyCode::Esc, NONE, c, nav()), KeyAction::Quit);
+        assert_eq!(
+            dispatch_key(KeyCode::Char('q'), NONE, c, nav()),
+            KeyAction::Quit
+        );
+        assert_eq!(
+            dispatch_key(KeyCode::Char('c'), CTRL, c, nav()),
+            KeyAction::Quit
+        );
         // A floor key while the popup is up is swallowed, not navigated.
-        assert_eq!(dispatch_key(KeyCode::Up, NONE, c), KeyAction::None);
+        assert_eq!(dispatch_key(KeyCode::Up, NONE, c, nav()), KeyAction::None);
     }
 
     #[test]
     fn theme_picker_preview_commit_cancel_and_clamps() {
-        let c = KeyCtx {
+        let c = ModalState {
             theme_picker: Some(2),
-            ..ctx()
+            ..modal()
         };
         assert_eq!(
-            dispatch_key(KeyCode::Up, NONE, c),
+            dispatch_key(KeyCode::Up, NONE, c, nav()),
             KeyAction::ThemePreview(1)
         );
         assert_eq!(
-            dispatch_key(KeyCode::Char('k'), NONE, c),
+            dispatch_key(KeyCode::Char('k'), NONE, c, nav()),
             KeyAction::ThemePreview(1)
         );
         assert_eq!(
-            dispatch_key(KeyCode::Down, NONE, c),
+            dispatch_key(KeyCode::Down, NONE, c, nav()),
             KeyAction::ThemePreview(3)
         );
         assert_eq!(
-            dispatch_key(KeyCode::Char('j'), NONE, c),
+            dispatch_key(KeyCode::Char('j'), NONE, c, nav()),
             KeyAction::ThemePreview(3)
         );
         assert_eq!(
-            dispatch_key(KeyCode::Enter, NONE, c),
+            dispatch_key(KeyCode::Enter, NONE, c, nav()),
             KeyAction::ThemeCommit(2)
         );
-        assert_eq!(dispatch_key(KeyCode::Esc, NONE, c), KeyAction::ThemeCancel);
+        assert_eq!(
+            dispatch_key(KeyCode::Esc, NONE, c, nav()),
+            KeyAction::ThemeCancel
+        );
         // q does NOT quit while the picker is open (must Esc/Enter out first).
-        assert_eq!(dispatch_key(KeyCode::Char('q'), NONE, c), KeyAction::None);
+        assert_eq!(
+            dispatch_key(KeyCode::Char('q'), NONE, c, nav()),
+            KeyAction::None
+        );
 
         // Clamp at the ends.
-        let lo = KeyCtx {
+        let lo = ModalState {
             theme_picker: Some(0),
-            ..ctx()
+            ..modal()
         };
         assert_eq!(
-            dispatch_key(KeyCode::Up, NONE, lo),
+            dispatch_key(KeyCode::Up, NONE, lo, nav()),
             KeyAction::ThemePreview(0)
         );
-        let hi = KeyCtx {
+        let hi = ModalState {
             theme_picker: Some(5),
             n_themes: 6,
-            ..ctx()
+            ..modal()
         };
         assert_eq!(
-            dispatch_key(KeyCode::Down, NONE, hi),
+            dispatch_key(KeyCode::Down, NONE, hi, nav()),
             KeyAction::ThemePreview(5)
         );
     }
@@ -1377,79 +1461,88 @@ mod dispatch_tests {
     #[test]
     fn tab_toggles_dashboard_from_normal_scene() {
         assert_eq!(
-            dispatch_key(KeyCode::Tab, NONE, ctx()),
+            dispatch_key(KeyCode::Tab, NONE, modal(), nav()),
             KeyAction::ToggleDashboard
         );
     }
 
     #[test]
     fn dashboard_tier_maps_nav_fold_jump_close() {
-        let d = KeyCtx {
+        let d = ModalState {
             dashboard_open: true,
-            ..ctx()
+            ..modal()
         };
-        assert_eq!(dispatch_key(KeyCode::Up, NONE, d), KeyAction::DashboardUp);
         assert_eq!(
-            dispatch_key(KeyCode::Char('k'), NONE, d),
+            dispatch_key(KeyCode::Up, NONE, d, nav()),
             KeyAction::DashboardUp
         );
         assert_eq!(
-            dispatch_key(KeyCode::Down, NONE, d),
+            dispatch_key(KeyCode::Char('k'), NONE, d, nav()),
+            KeyAction::DashboardUp
+        );
+        assert_eq!(
+            dispatch_key(KeyCode::Down, NONE, d, nav()),
             KeyAction::DashboardDown
         );
         assert_eq!(
-            dispatch_key(KeyCode::Char('j'), NONE, d),
+            dispatch_key(KeyCode::Char('j'), NONE, d, nav()),
             KeyAction::DashboardDown
         );
         assert_eq!(
-            dispatch_key(KeyCode::Left, NONE, d),
+            dispatch_key(KeyCode::Left, NONE, d, nav()),
             KeyAction::DashboardFoldLeft
         );
         assert_eq!(
-            dispatch_key(KeyCode::Char('h'), NONE, d),
+            dispatch_key(KeyCode::Char('h'), NONE, d, nav()),
             KeyAction::DashboardFoldLeft
         );
         assert_eq!(
-            dispatch_key(KeyCode::Right, NONE, d),
+            dispatch_key(KeyCode::Right, NONE, d, nav()),
             KeyAction::DashboardFoldRight
         );
         assert_eq!(
-            dispatch_key(KeyCode::Char('l'), NONE, d),
+            dispatch_key(KeyCode::Char('l'), NONE, d, nav()),
             KeyAction::DashboardFoldRight
         );
         assert_eq!(
-            dispatch_key(KeyCode::Char('z'), NONE, d),
+            dispatch_key(KeyCode::Char('z'), NONE, d, nav()),
             KeyAction::DashboardFoldAll
         );
         assert_eq!(
-            dispatch_key(KeyCode::Enter, NONE, d),
+            dispatch_key(KeyCode::Enter, NONE, d, nav()),
             KeyAction::DashboardJump
         );
         assert_eq!(
-            dispatch_key(KeyCode::Esc, NONE, d),
+            dispatch_key(KeyCode::Esc, NONE, d, nav()),
             KeyAction::DashboardClose
         );
         assert_eq!(
-            dispatch_key(KeyCode::Tab, NONE, d),
+            dispatch_key(KeyCode::Tab, NONE, d, nav()),
             KeyAction::DashboardClose
         );
     }
 
     #[test]
     fn dashboard_modal_passes_quit_chord_but_swallows_other_keys() {
-        let d = KeyCtx {
+        let d = ModalState {
             dashboard_open: true,
-            ..ctx()
+            ..modal()
         };
-        assert_eq!(dispatch_key(KeyCode::Char('q'), NONE, d), KeyAction::Quit);
-        assert_eq!(dispatch_key(KeyCode::Char('c'), CTRL, d), KeyAction::Quit);
         assert_eq!(
-            dispatch_key(KeyCode::Char('p'), NONE, d),
+            dispatch_key(KeyCode::Char('q'), NONE, d, nav()),
+            KeyAction::Quit
+        );
+        assert_eq!(
+            dispatch_key(KeyCode::Char('c'), CTRL, d, nav()),
+            KeyAction::Quit
+        );
+        assert_eq!(
+            dispatch_key(KeyCode::Char('p'), NONE, d, nav()),
             KeyAction::None,
             "modal swallows pause"
         );
         assert_eq!(
-            dispatch_key(KeyCode::Char('t'), NONE, d),
+            dispatch_key(KeyCode::Char('t'), NONE, d, nav()),
             KeyAction::None,
             "modal swallows theme picker"
         );
@@ -1458,100 +1551,124 @@ mod dispatch_tests {
     #[test]
     fn tab_swallowed_while_other_overlays_open() {
         // help / version / theme-picker tiers precede the normal Tab binding.
-        let h = KeyCtx {
+        let h = ModalState {
             help_open: true,
-            ..ctx()
+            ..modal()
         };
-        assert_eq!(dispatch_key(KeyCode::Tab, NONE, h), KeyAction::None);
-        let v = KeyCtx {
+        assert_eq!(dispatch_key(KeyCode::Tab, NONE, h, nav()), KeyAction::None);
+        let v = ModalState {
             version_popup: true,
-            ..ctx()
+            ..modal()
         };
-        assert_eq!(dispatch_key(KeyCode::Tab, NONE, v), KeyAction::None);
-        let p = KeyCtx {
+        assert_eq!(dispatch_key(KeyCode::Tab, NONE, v, nav()), KeyAction::None);
+        let p = ModalState {
             theme_picker: Some(0),
-            ..ctx()
+            ..modal()
         };
-        assert_eq!(dispatch_key(KeyCode::Tab, NONE, p), KeyAction::None);
+        assert_eq!(dispatch_key(KeyCode::Tab, NONE, p, nav()), KeyAction::None);
     }
 
     #[test]
     fn s_opens_sources_panel_from_normal_scene() {
         assert_eq!(
-            dispatch_key(KeyCode::Char('s'), NONE, ctx()),
+            dispatch_key(KeyCode::Char('s'), NONE, modal(), nav()),
             KeyAction::ToggleConnection
         );
         // Bare `c` is now UNbound (the panel moved to `s`); Ctrl+C stays quit.
         assert_eq!(
-            dispatch_key(KeyCode::Char('c'), NONE, ctx()),
+            dispatch_key(KeyCode::Char('c'), NONE, modal(), nav()),
             KeyAction::None
         );
         assert_eq!(
-            dispatch_key(KeyCode::Char('c'), CTRL, ctx()),
+            dispatch_key(KeyCode::Char('c'), CTRL, modal(), nav()),
             KeyAction::Quit
         );
     }
 
     #[test]
     fn connection_tier_maps_nav_toggle_close() {
-        let s = KeyCtx {
+        let s = ModalState {
             connection_open: true,
-            ..ctx()
+            ..modal()
         };
-        assert_eq!(dispatch_key(KeyCode::Up, NONE, s), KeyAction::ConnectionUp);
         assert_eq!(
-            dispatch_key(KeyCode::Char('k'), NONE, s),
+            dispatch_key(KeyCode::Up, NONE, s, nav()),
             KeyAction::ConnectionUp
         );
         assert_eq!(
-            dispatch_key(KeyCode::Down, NONE, s),
+            dispatch_key(KeyCode::Char('k'), NONE, s, nav()),
+            KeyAction::ConnectionUp
+        );
+        assert_eq!(
+            dispatch_key(KeyCode::Down, NONE, s, nav()),
             KeyAction::ConnectionDown
         );
         assert_eq!(
-            dispatch_key(KeyCode::Char('j'), NONE, s),
+            dispatch_key(KeyCode::Char('j'), NONE, s, nav()),
             KeyAction::ConnectionDown
         );
         // `t` is the single connect/disconnect toggle (replaced i/u, then Enter).
         assert_eq!(
-            dispatch_key(KeyCode::Char('t'), NONE, s),
+            dispatch_key(KeyCode::Char('t'), NONE, s, nav()),
             KeyAction::ConnectionToggle
         );
         // The old install/uninstall keys + Enter are unbound in the panel now.
-        assert_eq!(dispatch_key(KeyCode::Char('i'), NONE, s), KeyAction::None);
-        assert_eq!(dispatch_key(KeyCode::Char('u'), NONE, s), KeyAction::None);
-        assert_eq!(dispatch_key(KeyCode::Enter, NONE, s), KeyAction::None);
         assert_eq!(
-            dispatch_key(KeyCode::Char('s'), NONE, s),
+            dispatch_key(KeyCode::Char('i'), NONE, s, nav()),
+            KeyAction::None
+        );
+        assert_eq!(
+            dispatch_key(KeyCode::Char('u'), NONE, s, nav()),
+            KeyAction::None
+        );
+        assert_eq!(
+            dispatch_key(KeyCode::Enter, NONE, s, nav()),
+            KeyAction::None
+        );
+        assert_eq!(
+            dispatch_key(KeyCode::Char('s'), NONE, s, nav()),
             KeyAction::ConnectionClose
         );
         assert_eq!(
-            dispatch_key(KeyCode::Esc, NONE, s),
+            dispatch_key(KeyCode::Esc, NONE, s, nav()),
             KeyAction::ConnectionClose
         );
         // Quit chord passes through; unarmed swallows y/n.
-        assert_eq!(dispatch_key(KeyCode::Char('q'), NONE, s), KeyAction::Quit);
-        assert_eq!(dispatch_key(KeyCode::Char('c'), CTRL, s), KeyAction::Quit);
-        assert_eq!(dispatch_key(KeyCode::Char('y'), NONE, s), KeyAction::None);
-        assert_eq!(dispatch_key(KeyCode::Char('n'), NONE, s), KeyAction::None);
+        assert_eq!(
+            dispatch_key(KeyCode::Char('q'), NONE, s, nav()),
+            KeyAction::Quit
+        );
+        assert_eq!(
+            dispatch_key(KeyCode::Char('c'), CTRL, s, nav()),
+            KeyAction::Quit
+        );
+        assert_eq!(
+            dispatch_key(KeyCode::Char('y'), NONE, s, nav()),
+            KeyAction::None
+        );
+        assert_eq!(
+            dispatch_key(KeyCode::Char('n'), NONE, s, nav()),
+            KeyAction::None
+        );
     }
 
     #[test]
     fn connection_armed_tier_maps_yn_and_swallows_nav() {
-        let s = KeyCtx {
+        let s = ModalState {
             connection_open: true,
             connection_confirm: true,
-            ..ctx()
+            ..modal()
         };
         assert_eq!(
-            dispatch_key(KeyCode::Char('y'), NONE, s),
+            dispatch_key(KeyCode::Char('y'), NONE, s, nav()),
             KeyAction::ConnectionConfirm
         );
         assert_eq!(
-            dispatch_key(KeyCode::Char('n'), NONE, s),
+            dispatch_key(KeyCode::Char('n'), NONE, s, nav()),
             KeyAction::ConnectionCancelConfirm
         );
         assert_eq!(
-            dispatch_key(KeyCode::Esc, NONE, s),
+            dispatch_key(KeyCode::Esc, NONE, s, nav()),
             KeyAction::ConnectionCancelConfirm
         );
         // Armed swallows navigation + action keys.
@@ -1561,31 +1678,40 @@ mod dispatch_tests {
             KeyCode::Char('i'),
             KeyCode::Char('u'),
         ] {
-            assert_eq!(dispatch_key(k, NONE, s), KeyAction::None);
+            assert_eq!(dispatch_key(k, NONE, s, nav()), KeyAction::None);
         }
         // Quit chord still quits even while armed.
-        assert_eq!(dispatch_key(KeyCode::Char('c'), CTRL, s), KeyAction::Quit);
+        assert_eq!(
+            dispatch_key(KeyCode::Char('c'), CTRL, s, nav()),
+            KeyAction::Quit
+        );
     }
 
     #[test]
     fn connection_precedence_help_version_win_and_connection_swallows_tab() {
         // help / version tiers precede the connection tier — bare `c` does nothing.
-        let h = KeyCtx {
+        let h = ModalState {
             help_open: true,
-            ..ctx()
+            ..modal()
         };
-        assert_eq!(dispatch_key(KeyCode::Char('c'), NONE, h), KeyAction::None);
-        let v = KeyCtx {
+        assert_eq!(
+            dispatch_key(KeyCode::Char('c'), NONE, h, nav()),
+            KeyAction::None
+        );
+        let v = ModalState {
             version_popup: true,
-            ..ctx()
+            ..modal()
         };
-        assert_eq!(dispatch_key(KeyCode::Char('c'), NONE, v), KeyAction::None);
+        assert_eq!(
+            dispatch_key(KeyCode::Char('c'), NONE, v, nav()),
+            KeyAction::None
+        );
         // connection precedes dashboard: with connection open, Tab is swallowed.
-        let s = KeyCtx {
+        let s = ModalState {
             connection_open: true,
-            ..ctx()
+            ..modal()
         };
-        assert_eq!(dispatch_key(KeyCode::Tab, NONE, s), KeyAction::None);
+        assert_eq!(dispatch_key(KeyCode::Tab, NONE, s, nav()), KeyAction::None);
     }
 
     // --- connect/disconnect persist-or-abort (no-target Antigravity path) ------
