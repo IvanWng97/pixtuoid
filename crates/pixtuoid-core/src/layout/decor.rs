@@ -596,8 +596,8 @@ pub const SEAT_RENDER_Y_OFF: u16 = 7;
 /// The `walking_anchor(desk_walk_anchor(d)) == seated_anchor(d)` identity is
 /// locked by a tui-side test; if `DESK_W` or those anchors change they move
 /// together (X tracks `DESK_W`; `8` is the character sprite width).
-pub const DESK_WALK_X_OFF: u16 = (DESK_W - 8) / 2 + 4;
-pub const DESK_WALK_Y_OFF: u16 = 4;
+pub(crate) const DESK_WALK_X_OFF: u16 = (DESK_W - 8) / 2 + 4;
+pub(crate) const DESK_WALK_Y_OFF: u16 = 4;
 
 /// The cell an agent walks to/from for its home `desk` (top-left Point). The
 /// single source for what were ~10 scattered `desk + (6, 4)` literals across the

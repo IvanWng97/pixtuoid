@@ -5,7 +5,7 @@
 
 use std::time::Duration;
 
-pub const WRITE_TIMEOUT: Duration = Duration::from_millis(200);
+pub(crate) const WRITE_TIMEOUT: Duration = Duration::from_millis(200);
 
 /// Arm the send-timeout watchdog: a thread that hard-exits the process after
 /// `WRITE_TIMEOUT`, bounding the whole connect+write phase on BOTH platforms
@@ -23,7 +23,7 @@ fn spawn_timeout_watchdog() -> bool {
 }
 
 #[cfg(unix)]
-pub fn send_line(endpoint: &str, line: &[u8]) {
+pub(crate) fn send_line(endpoint: &str, line: &[u8]) {
     use std::io::Write;
     // `UnixStream::connect` has no timeout knob — a missing daemon fails
     // fast (NotFound/ConnectionRefused), but a backlog-saturated listener
@@ -45,7 +45,7 @@ pub fn send_line(endpoint: &str, line: &[u8]) {
 }
 
 #[cfg(windows)]
-pub fn send_line(endpoint: &str, line: &[u8]) {
+pub(crate) fn send_line(endpoint: &str, line: &[u8]) {
     use std::io::Write;
     // Named pipes have no SO_SNDTIMEO equivalent for sync writes, so the
     // 200ms invariant is enforced by a watchdog thread that hard-exits the

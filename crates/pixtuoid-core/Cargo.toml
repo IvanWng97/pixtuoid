@@ -18,6 +18,9 @@ categories.workspace   = true
 # build-verify, NOT cargo test on an extracted crate — so it must be excluded too).
 exclude                = ["tests/socket_path_parity.rs", "tests/supported_sources_manifest.rs"]
 
+[lints]
+workspace = true
+
 [features]
 default       = []
 test-renderer = []

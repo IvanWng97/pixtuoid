@@ -19,6 +19,14 @@ homepage     = "https://github.com/IvanWng97/pixtuoid"
 keywords     = ["terminal", "tui", "pixel-art", "ai-agents", "claude"]
 categories   = ["command-line-utilities", "visualization"]
 
+# Workspace-wide lints, inherited by every crate via `[lints] workspace = true`.
+# `unreachable_pub` forces every `pub` in a private module tree down to
+# `pub(crate)` — so a layer-internal item can't silently leak as crate API. It's
+# warn here; CI's `cargo clippy -- -D warnings` (just clippy) makes it a hard
+# gate. Semver-neutral: cargo-semver-checks never sees an unreachable item.
+[workspace.lints.rust]
+unreachable_pub = "warn"
+
 [profile.release]
 lto           = true
 codegen-units = 1

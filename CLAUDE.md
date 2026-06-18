@@ -136,6 +136,7 @@ and stays a human step. See
 - **No comments unless WHY.** Comment only what a future reader can't tell from the code (a workaround, a non-obvious constraint, a surprising invariant).
 - **Errors propagate via `anyhow::Result` in app code, `thiserror` in core** if a typed error becomes load-bearing. The hook listener and JSONL watcher log + continue on malformed input — they never panic.
 - **No `unwrap()` in non-test code.** Tests can unwrap freely.
+- **Layer-internal items stay `pub(crate)`, not `pub`.** `unreachable_pub` is `warn` in `[workspace.lints.rust]` and CI's `just clippy` (`-D warnings`) makes it a hard gate — a `pub` item in a private module tree fails the build. Reserve bare `pub` for genuinely cross-crate API (and in `pixtuoid-core`, only those reach the semver surface). The lint is the mechanical enforcement of "the install/uninstall entry points are `pub(crate)`, `crate::sources` is the only caller" and every other inter-layer seam.
 - **No scan-the-history logic.** Keep persistent state (a set, a map, a bool) updated as events arrive; never derive state by scanning backward through time.
 - **Match the surrounding shell** (zsh interactive / POSIX sh); `shellcheck` any `.sh` you touch. **macOS first**: BSD CLI, brew, launchd.
 - **Keep docs current.** A change that alters module structure, architecture, workflow, or public API updates the relevant `CLAUDE.md` + `README.md` in the same commit.

@@ -11,6 +11,9 @@ homepage.workspace     = true
 keywords.workspace     = true
 categories.workspace   = true
 
+[lints]
+workspace = true
+
 [dependencies]
 pixtuoid-core = { path = "../pixtuoid-core", version = "0.11.0" }
 anyhow        = { workspace = true }

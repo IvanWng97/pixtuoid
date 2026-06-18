@@ -309,7 +309,7 @@ pub(crate) fn paint_pet_tooltip(
 /// (the multi-tenant power-user case). Plain text (no emoji) to keep
 /// `paint_simple_tooltip`'s width math exact.
 #[allow(clippy::too_many_arguments)]
-pub fn paint_mascot_tooltip(
+pub(crate) fn paint_mascot_tooltip(
     f: &mut ratatui::Frame<'_>,
     name: &str,
     busy: bool,

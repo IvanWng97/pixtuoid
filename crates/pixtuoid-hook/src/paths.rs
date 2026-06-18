@@ -7,7 +7,7 @@
 //! arrive. If you move or rename this file, that test breaks loudly — fix the
 //! `#[path]` there, don't drop the parity pin.
 
-pub fn default_socket_path() -> String {
+pub(crate) fn default_socket_path() -> String {
     if let Ok(p) = std::env::var("PIXTUOID_SOCKET") {
         // Set-but-empty/whitespace = unset (the #172 RUST_LOG policy):
         // honored verbatim, "" would make the daemon's bind fail fatally and

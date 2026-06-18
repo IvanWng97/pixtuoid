@@ -27,11 +27,11 @@ mod arc_str_serde {
 
     use serde::{Deserialize, Deserializer, Serializer};
 
-    pub fn serialize<S: Serializer>(v: &Arc<str>, s: S) -> Result<S::Ok, S::Error> {
+    pub(crate) fn serialize<S: Serializer>(v: &Arc<str>, s: S) -> Result<S::Ok, S::Error> {
         s.serialize_str(v)
     }
 
-    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Arc<str>, D::Error> {
+    pub(crate) fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Arc<str>, D::Error> {
         Ok(Arc::from(String::deserialize(d)?.as_str()))
     }
 }
@@ -41,11 +41,13 @@ mod opt_arc_str_serde {
 
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-    pub fn serialize<S: Serializer>(v: &Option<Arc<str>>, s: S) -> Result<S::Ok, S::Error> {
+    pub(crate) fn serialize<S: Serializer>(v: &Option<Arc<str>>, s: S) -> Result<S::Ok, S::Error> {
         v.as_deref().serialize(s)
     }
 
-    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Arc<str>>, D::Error> {
+    pub(crate) fn deserialize<'de, D: Deserializer<'de>>(
+        d: D,
+    ) -> Result<Option<Arc<str>>, D::Error> {
         Ok(Option::<String>::deserialize(d)?.map(|s| Arc::from(s.as_str())))
     }
 }
@@ -56,12 +58,12 @@ mod arc_path_serde {
 
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-    pub fn serialize<S: Serializer>(v: &Arc<Path>, s: S) -> Result<S::Ok, S::Error> {
+    pub(crate) fn serialize<S: Serializer>(v: &Arc<Path>, s: S) -> Result<S::Ok, S::Error> {
         let p: &Path = v;
         p.serialize(s)
     }
 
-    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Arc<Path>, D::Error> {
+    pub(crate) fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Arc<Path>, D::Error> {
         Ok(Arc::from(PathBuf::deserialize(d)?.as_path()))
     }
 }

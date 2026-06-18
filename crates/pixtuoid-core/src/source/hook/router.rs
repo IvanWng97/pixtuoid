@@ -25,7 +25,7 @@ use super::{HookPidWatch, HookSocketListener, PresenceSender, SocketBusy};
 
 /// Infrastructure name — NOT a registered source (no descriptor/badge). Used by
 /// `spawn_with_health` to attribute a fatal bind error in the footer.
-pub const SOURCE_NAME: &str = "hook-router";
+pub(crate) const SOURCE_NAME: &str = "hook-router";
 
 /// Producer half of the #246 child-end un-claim side-channel (see
 /// `ChildEndUnclaims` for the WHY). Interposed between the hook listener and the

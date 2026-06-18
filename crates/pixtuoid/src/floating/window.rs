@@ -36,7 +36,7 @@ use pixtuoid_scene::theme::Theme;
 
 /// Wake reasons delivered to the winit loop from the background tokio pipeline.
 #[derive(Debug, Clone, Copy)]
-pub enum FloatingEvent {
+pub(crate) enum FloatingEvent {
     /// The reducer published a new scene — repaint.
     SceneChanged,
 }
@@ -44,7 +44,7 @@ pub enum FloatingEvent {
 /// The floating window app: window + surface (created lazily on `Resumed`), the office
 /// renderer (owns cross-frame caches), the live scene receiver, and the per-floor desk
 /// capacity atomics it keeps in sync with the rendered office.
-pub struct FloatingApp {
+pub(crate) struct FloatingApp {
     cfg: FloatingConfig,
     theme: &'static Theme,
     pack: Pack,
@@ -77,7 +77,7 @@ const IDLE_AMBIENT_FPS: u64 = 1;
 
 impl FloatingApp {
     #[allow(clippy::too_many_arguments)] // flat construction inputs; bundling adds no clarity
-    pub fn new(
+    pub(crate) fn new(
         cfg: FloatingConfig,
         theme: &'static Theme,
         pack: Pack,

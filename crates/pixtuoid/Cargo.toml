@@ -11,6 +11,9 @@ homepage.workspace     = true
 keywords.workspace     = true
 categories.workspace   = true
 
+[lints]
+workspace = true
+
 [[bin]]
 name = "pixtuoid"
 path = "src/main.rs"
