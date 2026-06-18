@@ -51,6 +51,18 @@ Every section gets an answer; "n/a" counts only with a reason.
    the `beautify-decoration` loop. Verification steps are blocking plan
    items, not checkboxes — PR #61 shipped five walk regressions behind an
    unchecked "live run" checkbox.
+8. **Layering / orchestration boundary** — if the change adds or crosses a
+   layer seam (a mechanism/foundation layer with an orchestrator over it,
+   like `install` ← `sources`), name the ONE orchestration entry point and
+   design the lower layer's mechanism API as `pub(crate)`, never `pub`:
+   callers reach it ONLY through the orchestrator, never directly. Do NOT
+   expose an underlayer/foundation API as crate-public so something can call
+   it around the facade — that is a design leak `unreachable_pub` can't catch
+   once the module itself is reachable, so the plan is where the
+   single-gateway shape is decided (install/uninstall route SOLELY through
+   `crate::sources`; the plan states "no second caller" and which existing
+   direct calls collapse into the orchestrator). A new public seam on a lower
+   layer needs a one-line justification of why the orchestrator can't own it.
 
 ## The contract with review
 

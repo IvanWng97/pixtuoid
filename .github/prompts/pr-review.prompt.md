@@ -94,6 +94,19 @@ Judge as a demanding critic:
    no-op wrapper renaming `mix_lab` (a cheap-sounding name fronting an expensive
    call — a LYING wrapper is the same finding); `Frame`/`RgbBuffer` each
    re-hand-rolled `Grid<T>`'s row-major buffer.
+7. Layering / orchestration boundary: when the diff adds a call into a
+   lower/mechanism layer (config-write, install, FS, a foundation helper) or
+   newly exposes one, check it routes THROUGH the layer's designated
+   orchestrator, not around it. Flag (a) a NEW `pub` item that exposes a
+   foundation/underlayer seam the orchestrator should own, and (b) a NEW call
+   site that reaches the mechanism directly instead of the facade. The
+   single-gateway rule: install/uninstall are `pub(crate)`, `crate::sources`
+   is the SOLE caller — a second direct caller (or a `pub` that invites one)
+   is the finding, even when it compiles cleanly. `unreachable_pub` (CI
+   `-D warnings`) is the mechanical half — a `pub` in a PRIVATE module tree;
+   this lens owns the half the lint can't see: a reachable-but-should-be-
+   funnelled API, where the right fix is "demote to `pub(crate)` and call the
+   orchestrator," not "leave it public."
 
 [the five hard requirements]
 Your final message is the report.
