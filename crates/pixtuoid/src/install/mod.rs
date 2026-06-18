@@ -262,10 +262,11 @@ pub struct InstallReport {
 }
 
 /// Install pixtuoid hooks into `t`'s config, returning a structured report.
-/// This is the pure core behind the TUI Sources panel's connect action —
-/// the ONLY install path. The ConfigLock round (read→merge→backup→write) is
-/// the load-bearing write authority (invariant #4); it stays intact here.
-pub fn install_target(
+/// The ConfigLock round (read→merge→backup→write) is the load-bearing write
+/// authority (invariant #4); it stays intact here. **`pub(crate)`: the ONLY
+/// caller is `crate::sources::connect_target`** — the install trigger is not a
+/// public API; everything binds a source through `crate::sources`.
+pub(crate) fn install_target(
     t: &Target,
     config: Option<PathBuf>,
     hook_path: Option<PathBuf>,
@@ -355,7 +356,9 @@ pub struct UninstallReport {
 /// pure core behind the TUI Sources panel's disconnect action. Same lock
 /// scope + the load-bearing "never rewrite/delete-backup on a semantic no-op"
 /// rule as before.
-pub fn uninstall_target(t: &Target, config: Option<PathBuf>) -> Result<UninstallReport> {
+/// Remove pixtuoid hooks from `t`'s config. **`pub(crate)`: the ONLY caller is
+/// `crate::sources::disconnect_target`** — go through `crate::sources`.
+pub(crate) fn uninstall_target(t: &Target, config: Option<PathBuf>) -> Result<UninstallReport> {
     let path = config
         .map(Ok)
         .unwrap_or_else(|| (t.default_config_path)())?;
