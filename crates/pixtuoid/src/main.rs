@@ -124,17 +124,18 @@ fn main() -> Result<()> {
         Cmd::Connect { ids, json } => run_change(&ids, json, |c, i| {
             sources::connect(c, i).map(|_| "connected".to_string())
         }),
-        // Surface a folded hook-removal failure (the flag IS disconnected; the
-        // hooks weren't removed) so the scriptable surface matches the panel,
-        // rather than reporting a clean "disconnected".
-        Cmd::Disconnect { ids, json } => run_change(&ids, json, |c, i| {
-            sources::disconnect(c, i).map(|oc| match oc {
-                sources::DisconnectOutcome::HookRemovalFailed(e) => {
-                    format!("disconnected (hook removal failed: {e})")
-                }
-                _ => "disconnected".to_string(),
+        // A folded hook-removal failure is a PARTIAL failure (the flag IS
+        // disconnected, but hooks remain) — surface it AND signal it via a
+        // non-zero exit (run_change treats an Err op as failed), so a $?-checking
+        // script isn't told a clean "disconnected".
+        Cmd::Disconnect { ids, json } => {
+            run_change(&ids, json, |c, i| match sources::disconnect(c, i)? {
+                sources::DisconnectOutcome::HookRemovalFailed(e) => Err(anyhow::anyhow!(
+                    "disconnected, but hook removal failed: {e}"
+                )),
+                _ => Ok("disconnected".to_string()),
             })
-        }),
+        }
     }
 }
 
@@ -171,16 +172,25 @@ fn run_sources_set(ids: &[String], json: bool) -> Result<()> {
         .iter()
         .map(|id| sources::registered_id(id).map(String::from))
         .collect::<Result<_>>()?;
-    let out: Vec<(String, String)> = sources::reconcile_to(&cfg, &desired)
+    let outcomes = sources::reconcile_to(&cfg, &desired);
+    let any_failed = outcomes
+        .iter()
+        .any(|(_, oc)| matches!(oc, sources::ChangeOutcome::Failed(_)));
+    let out: Vec<(String, String)> = outcomes
         .into_iter()
         .map(|(id, oc)| (id, oc.as_wire()))
         .collect();
-    emit_outcomes(&out, json)
+    emit_outcomes(&out, json)?;
+    if any_failed {
+        anyhow::bail!("one or more sources failed (see the rows above)");
+    }
+    Ok(())
 }
 
 /// Shared `connect`/`disconnect` presenter: validate all ids up front, then apply
-/// each, reporting per-source. `op` returns the SUCCESS token (so the disconnect
-/// path can fold a hook-removal warning into it); an `Err` becomes `failed: …`.
+/// each, reporting per-source. `op` returns the SUCCESS token; an `Err` becomes a
+/// `failed: …` row AND makes the whole command exit non-zero (after emitting all
+/// rows) so a `$?`-checking shell/CI/onboarding caller gets a real error signal.
 fn run_change(
     ids: &[String],
     json: bool,
@@ -191,17 +201,25 @@ fn run_change(
         .iter()
         .map(|id| sources::registered_id(id))
         .collect::<Result<_>>()?;
+    let mut any_failed = false;
     let out: Vec<(String, String)> = sids
         .into_iter()
         .map(|sid| {
             let token = match op(&cfg, sid) {
                 Ok(t) => t,
-                Err(e) => format!("failed: {e:#}"),
+                Err(e) => {
+                    any_failed = true;
+                    format!("failed: {e:#}")
+                }
             };
             (sid.to_string(), token)
         })
         .collect();
-    emit_outcomes(&out, json)
+    emit_outcomes(&out, json)?;
+    if any_failed {
+        anyhow::bail!("one or more sources failed (see the rows above)");
+    }
+    Ok(())
 }
 
 /// Print a `[(id, outcome)]` batch as a table or a JSON array of `{id, outcome}`.
