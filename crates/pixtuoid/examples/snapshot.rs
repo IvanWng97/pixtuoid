@@ -191,6 +191,12 @@ struct SnapshotArgs {
     #[arg(long, conflicts_with_all = ["anim", "gif", "live", "empty", "pets", "dashboard"])]
     connection: bool,
 
+    /// Render with the first-run onboarding "move-in" overlay open (fully revealed)
+    /// over a representative roster. Drives the onboarding demo image + the
+    /// borderless/typewriter visual check.
+    #[arg(long, conflicts_with_all = ["anim", "gif", "live", "empty", "pets", "dashboard", "connection"])]
+    onboarding: bool,
+
     /// Animation-verification mode: render ONE agent walking to + settling at a
     /// chosen furniture, so the approach→settle reads correctly (no pop, no
     /// teleport) BEFORE human verify. One of: couch | sofa | stand | pantry |
@@ -589,6 +595,27 @@ fn main() -> Result<()> {
     } else {
         (Vec::new(), Vec::new(), String::new())
     };
+    let onboarding_frame = if args.onboarding {
+        use pixtuoid::tui::welcome::WelcomeRow;
+        let mk = |source_id, label_prefix, display_name: &str, checked| WelcomeRow {
+            source_id,
+            label_prefix,
+            display_name: display_name.to_string(),
+            checked,
+        };
+        pixtuoid::tui::welcome::OnboardingFrame {
+            open: true,
+            rows: vec![
+                mk("claude-code", "cc", "Claude Code", true),
+                mk("codex", "cx", "Codex", true),
+                mk("cursor", "cu", "Cursor CLI", false),
+            ],
+            selected: 0,
+            elapsed_ms: 100_000,
+        }
+    } else {
+        pixtuoid::tui::welcome::OnboardingFrame::default()
+    };
     let mut draw_ctx = DrawCtx {
         buf: &mut buf,
         cache: &mut cache,
@@ -636,6 +663,7 @@ fn main() -> Result<()> {
         connection_confirm: None,
         connection_result: None,
         connection_socket_line: &connection_socket_line,
+        onboarding: &onboarding_frame,
     };
     draw_scene(&mut term, &scene, &pack, now, &mut draw_ctx)?;
 
@@ -1832,6 +1860,7 @@ fn save_as_gif(
             connection_confirm: None,
             connection_result: None,
             connection_socket_line: "",
+            onboarding: &pixtuoid::tui::welcome::OnboardingFrame::default(),
         };
         draw_scene(term, scene, pack, now, &mut draw_ctx)?;
         if i < skip_frames {

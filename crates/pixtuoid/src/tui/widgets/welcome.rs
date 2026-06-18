@@ -18,7 +18,7 @@ const TYPE_MS_PER_CHAR: u64 = 38;
 /// After the subtitle finishes, roster rows fade in one every `ROW_STAGGER_MS`.
 const ROW_LEAD_MS: u64 = 140;
 const ROW_STAGGER_MS: u64 = 110;
-const SUBTITLE: &str = "Let's move your agents in \u{2014} pick who walks in:";
+const SUBTITLE: &str = "Let's move your agents in. Pick who walks in:";
 
 /// `elapsed_ms` since the overlay opened (the event loop's clock). Returns the
 /// number of subtitle chars revealed and whether typing is still in progress.
@@ -44,7 +44,7 @@ pub(crate) fn paint_welcome(
     if area.width < 4 || area.height < 3 {
         return;
     }
-    let inner = borderless_panel(f, area, Some("Welcome to pixtuoid \u{1F99E}"), theme);
+    let inner = borderless_panel(f, area, Some("Welcome to pixtuoid"), theme);
     let bg = Style::default().bg(to_color(theme.ui.tooltip_bg));
     let dim = Style::default().fg(to_color(theme.ui.label_idle));
     let bright = Style::default().fg(to_color(theme.ui.neon_brand));
@@ -74,7 +74,8 @@ pub(crate) fn paint_welcome(
         }
         let is_sel = i == selected;
         let badge = format!("[{:<2}]", row.label_prefix);
-        let check = if row.checked { "[\u{2713}]" } else { "[ ]" };
+        // `[x]`/`[ ]` (not a check glyph) so the checkbox is legible in any font.
+        let check = if row.checked { "[x]" } else { "[ ]" };
         let mut name_style = if row.checked {
             Style::default().fg(to_color(theme.ui.label_active))
         } else {
