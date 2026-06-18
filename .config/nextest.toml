@@ -25,17 +25,3 @@ path = "junit.xml"
 [[profile.default.overrides]]
 filter = 'test(_exits_zero_without_blocking) | test(_within_watchdog_bound)'
 threads-required = "num-cpus"
-
-# The `exit_watch::tests::live::*` tests spawn a real child, watch its pid via
-# kqueue/pidfd, and assert the watcher THREAD wakes within LIVE_PID_DEADLINE (10s).
-# That deadline is a liveness bound, not a latency one — but under the fully-
-# parallel suite the watcher thread can be SCHEDULER-STARVED past it, and the
-# `coverage` job's `cargo llvm-cov` instrumentation (~2-3× slower) makes the
-# starvation likely: `drop_stops_cleanly` flaked there on main even AFTER #325
-# widened the deadline 3s→10s (a deadline bump can't fix CPU contention). Same
-# fix + same rationale as the shim block above — give them the machine so the
-# watcher thread is never starved. NOT a retry (#161's no-retries stance holds);
-# inherited by `ci`. The macOS/Linux `mod live` gate means Windows matches none.
-[[profile.default.overrides]]
-filter = 'test(exit_watch::tests::live)'
-threads-required = "num-cpus"

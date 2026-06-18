@@ -493,6 +493,21 @@ mod imp {
         // stays aligned with the fds snapshot taken before any mutation).
         let mut watched: Vec<(i32, OwnedFd)> = Vec::new();
         loop {
+            // Re-check `closed` BEFORE blocking in poll(). `Drop` sets `closed`
+            // then writes a wake byte, but `drain_pipe` below drains the pipe
+            // unconditionally — so a Drop landing after the post-poll `closed`
+            // check (further down) but before that drain has its wake byte
+            // EATEN, leaving `closed = true` with an empty pipe. Without this
+            // top check the thread would re-enter poll() and block on a still-
+            // live watched pid until it exits (or forever) — the self-pipe
+            // lost-wakeup that flaked `drop_stops_cleanly` on the Linux CI.
+            // SeqCst pairs with Drop's store-before-wake: if the drain consumed
+            // the byte, this load is guaranteed to observe `true`. (macOS is
+            // immune — its EVFILT_USER trigger is consumed by kevent() itself,
+            // no separate drain to eat it.)
+            if shared.closed.load(Ordering::SeqCst) {
+                return;
+            }
             let mut fds: Vec<libc::pollfd> = Vec::with_capacity(watched.len() + 1);
             fds.push(libc::pollfd {
                 fd: pipe_rd,
@@ -627,10 +642,6 @@ mod tests {
         /// kqueue/pidfd wake just hadn't been scheduled yet. It is a liveness
         /// bound, NOT a latency assertion: a true hang is still failed by
         /// nextest's 180s slow-timeout, so a wider deadline doesn't weaken it.
-        /// The deadline alone wasn't enough (it still flaked at 10s under
-        /// instrumentation), so these `live::*` tests ALSO run isolated via a
-        /// `threads-required = "num-cpus"` override in `.config/nextest.toml`,
-        /// keeping the watcher thread off a contended scheduler.
         const LIVE_PID_DEADLINE: Duration = Duration::from_secs(10);
 
         fn sleeper() -> Child {
@@ -756,25 +767,35 @@ mod tests {
         /// Drop sets `closed` + wakes: the thread must exit, observable as
         /// the channel closing (the thread owns the only sender). The kill
         /// also exercises the post-Drop machinery for no-panic.
+        ///
+        /// Looped to STRESS the `watch()`-then-`drop()` wake race: on Linux a
+        /// Drop landing between the watcher thread's post-poll `closed` check
+        /// and its unconditional `drain_pipe` could have its wake byte EATEN by
+        /// that drain, stranding the thread in `poll()` on the still-live child
+        /// until LIVE_PID_DEADLINE (the self-pipe lost-wakeup the top-of-loop
+        /// `closed` re-check fixes). One unfixed iteration hangs the whole test;
+        /// fixed, every iteration closes in ms.
         #[tokio::test]
         async fn drop_stops_cleanly() {
-            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-            let watch = ExitWatch::spawn(tx).expect("backend must init on macOS/Linux");
-            let mut child = sleeper();
-            watch.watch(child.id() as i32);
-            drop(watch);
-            let closed = tokio::time::timeout(LIVE_PID_DEADLINE, async {
-                while rx.recv().await.is_some() {}
-            })
-            .await;
-            // Reap BEFORE asserting: were the drop slow enough for the assert
-            // to fire, a trailing reap would be skipped and the sleeper would
-            // leak (the nextest LEAK that paired with this test's flake).
-            kill_and_reap(&mut child);
-            assert!(
-                closed.is_ok(),
-                "dropping the ExitWatch must stop the thread (its sender must drop)"
-            );
+            for _ in 0..50 {
+                let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+                let watch = ExitWatch::spawn(tx).expect("backend must init on macOS/Linux");
+                let mut child = sleeper();
+                watch.watch(child.id() as i32);
+                drop(watch);
+                let closed = tokio::time::timeout(LIVE_PID_DEADLINE, async {
+                    while rx.recv().await.is_some() {}
+                })
+                .await;
+                // Reap BEFORE asserting: were the drop slow enough for the assert
+                // to fire, a trailing reap would be skipped and the sleeper would
+                // leak (the nextest LEAK that paired with this test's flake).
+                kill_and_reap(&mut child);
+                assert!(
+                    closed.is_ok(),
+                    "dropping the ExitWatch must stop the thread (its sender must drop)"
+                );
+            }
         }
     }
 }
