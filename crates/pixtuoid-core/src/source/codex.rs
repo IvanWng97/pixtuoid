@@ -629,6 +629,29 @@ mod tests {
     }
 
     #[test]
+    fn function_call_without_name_falls_back_to_tool_label() {
+        // A `function_call` with non-escalated `arguments` but NO `name` key
+        // exercises codex_tool_start's unwrap_or_else fallback (lines 212-214):
+        // it substitutes the literal "tool", which make_tool_detail turns into
+        // ToolDetail::Generic { display: "tool" }. Every other function_call
+        // test/fixture supplies a name, so this is the only coverage of the
+        // missing-`name` branch. The `arguments` keep needs_approval false (no
+        // escalation) so routing reaches codex_tool_start, not the Waiting arm.
+        use crate::source::ToolDetail;
+        let out = ev(json!({
+            "type": "response_item",
+            "payload": { "type": "function_call", "arguments": r#"{"cmd":"ls"}"# }
+        }));
+        match out.as_slice() {
+            [AgentEvent::ActivityStart {
+                detail: Some(ToolDetail::Generic { display }),
+                ..
+            }] => assert_eq!(display, "tool"),
+            other => panic!("expected one Generic-detail ActivityStart, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn codex_session_ended_is_always_false() {
         // Codex writes no end marker — the checker always defers to the
         // mtime window + stale-sweep.

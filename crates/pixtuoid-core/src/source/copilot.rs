@@ -523,6 +523,165 @@ mod tests {
             .is_empty());
     }
 
+    // ── drift fallbacks + missing-id early returns (the un-happy-path arms) ──
+
+    #[test]
+    fn session_start_without_session_id_registers_root_with_empty_id() {
+        // `data` is present but carries NO `sessionId` → the missing-field drift
+        // fallback yields an empty session_id (NOT the path-derived id), and the
+        // agent is still the path-derived root. Falsifiable: a wrong fallback
+        // (e.g. reusing the root uuid) would change session_id.
+        let line = r#"{"type":"session.start","data":{"version":1},"id":"x","timestamp":"t","parentId":null}"#;
+        match &decode(line)[..] {
+            [AgentEvent::SessionStart {
+                agent_id,
+                source,
+                session_id,
+                cwd,
+                parent_id,
+            }] => {
+                assert_eq!(*agent_id, root());
+                assert_eq!(source, "copilot");
+                assert_eq!(session_id, "", "missing sessionId → empty fallback");
+                assert_eq!(cwd, Path::new(""), "no context.cwd → empty path");
+                assert_eq!(*parent_id, None);
+            }
+            other => panic!("expected one SessionStart, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tool_execution_start_with_data_but_no_tool_call_id_is_ignored() {
+        // `data` present (so the line passes the no-data early return at 135) but
+        // WITHOUT `toolCallId` → the call-id early return at 137 drops the line.
+        // Distinct from the already-covered missing-`data` case.
+        let line = r#"{"type":"tool.execution_start","data":{"toolName":"view"},"id":"x","timestamp":"t","parentId":null}"#;
+        assert!(
+            decode(line).is_empty(),
+            "no toolCallId → no ActivityStart (can't key the tool)"
+        );
+    }
+
+    #[test]
+    fn tool_execution_complete_with_data_but_no_tool_call_id_is_ignored() {
+        let line = r#"{"type":"tool.execution_complete","data":{"success":true},"id":"x","timestamp":"t","parentId":null}"#;
+        assert!(
+            decode(line).is_empty(),
+            "no toolCallId → no ActivityEnd (can't key the tool)"
+        );
+    }
+
+    #[test]
+    fn tool_execution_start_without_tool_name_still_emits_activity_start_keyed_on_call_id() {
+        // `toolCallId` present but `toolName` ABSENT → the missing-field drift
+        // fallback gives an empty name; "" is NOT "task", so make_tool_detail("")
+        // runs and the ActivityStart is still emitted keyed on the call id (NOT a
+        // Task detail). Falsifiable: an early-return on missing toolName would
+        // yield an empty Vec; treating "" as task would flip is_task().
+        let line = r#"{"type":"tool.execution_start","data":{"toolCallId":"tc1","arguments":{}},"id":"x","timestamp":"t","parentId":null}"#;
+        match &decode(line)[..] {
+            [AgentEvent::ActivityStart {
+                agent_id,
+                tool_use_id,
+                detail: Some(d),
+            }] => {
+                assert_eq!(*agent_id, root());
+                assert_eq!(tool_use_id.as_deref(), Some("tc1"));
+                assert!(!d.is_task(), "an empty tool name is NOT the task dispatch");
+            }
+            other => panic!("expected one ActivityStart, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn session_task_complete_ends_root_activity_with_no_tool_id() {
+        // A finished task/turn settles the root toward idle: an ActivityEnd for
+        // the ROOT with NO tool_use_id (un-keyed, settles whatever was active).
+        let line = r#"{"type":"session.task_complete","data":{},"id":"x","timestamp":"t","parentId":null}"#;
+        match &decode(line)[..] {
+            [AgentEvent::ActivityEnd {
+                agent_id,
+                tool_use_id,
+            }] => {
+                assert_eq!(*agent_id, root());
+                assert!(tool_use_id.is_none(), "the root settle carries no tool id");
+            }
+            other => panic!("expected one root ActivityEnd, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn subagent_started_without_any_child_key_is_ignored() {
+        // Neither a non-empty envelope `agentId` NOR a `data.toolCallId` → the
+        // child is un-keyable, so the line is dropped (NOT registered against
+        // root). Falsifiable: a fallback to root would emit a SessionStart.
+        let line = r#"{"type":"subagent.started","data":{"agentDisplayName":"X"},"id":"x","timestamp":"t","parentId":null}"#;
+        assert!(
+            decode(line).is_empty(),
+            "un-keyable child → no SessionStart/Rename"
+        );
+        // An empty-string envelope agentId is filtered the same way (the
+        // `.filter(|s| !s.is_empty())` guard), so it too drops with no toolCallId.
+        let empty_aid = r#"{"type":"subagent.started","data":{"agentDisplayName":"X"},"id":"x","timestamp":"t","parentId":null,"agentId":""}"#;
+        assert!(
+            decode(empty_aid).is_empty(),
+            "an empty agentId is not a usable key"
+        );
+    }
+
+    #[test]
+    fn subagent_completed_without_any_child_key_is_ignored() {
+        // Shared `completed | failed` arm: no envelope `agentId`, `data` lacks
+        // `toolCallId` → un-keyable → no child SessionEnd.
+        let completed = r#"{"type":"subagent.completed","data":{"agentName":"rom"},"id":"x","timestamp":"t","parentId":null}"#;
+        assert!(
+            decode(completed).is_empty(),
+            "un-keyable completed child → no SessionEnd"
+        );
+        let failed = r#"{"type":"subagent.failed","data":{"agentName":"rom"},"id":"x","timestamp":"t","parentId":null}"#;
+        assert!(
+            decode(failed).is_empty(),
+            "the failed arm shares the same keying gate"
+        );
+    }
+
+    #[test]
+    fn copilot_home_honors_non_empty_env_override() {
+        // COPILOT_HOME set non-empty → the `Some(v)` arm uses it verbatim; unset
+        // → the `~/.copilot` fallback. Env-mutating → take the process-global
+        // guard (the env-mutating-test convention) and restore the prior value.
+        let _env = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var_os("COPILOT_HOME");
+
+        std::env::set_var("COPILOT_HOME", "/custom/cp");
+        assert_eq!(
+            copilot_home(),
+            PathBuf::from("/custom/cp"),
+            "a non-empty COPILOT_HOME is used verbatim"
+        );
+
+        // Set-but-empty is treated as unset (the `.filter(|v| !v.is_empty())`),
+        // so it falls through to the `<home>/.copilot` default.
+        std::env::set_var("COPILOT_HOME", "");
+        assert!(
+            copilot_home().ends_with(".copilot"),
+            "empty COPILOT_HOME → ~/.copilot fallback"
+        );
+
+        std::env::remove_var("COPILOT_HOME");
+        assert!(
+            copilot_home().ends_with(".copilot"),
+            "unset COPILOT_HOME → ~/.copilot fallback"
+        );
+
+        match saved {
+            Some(v) => std::env::set_var("COPILOT_HOME", v),
+            None => std::env::remove_var("COPILOT_HOME"),
+        }
+    }
+
     #[test]
     fn session_ended_marker_is_anchored_on_the_type_field() {
         // Real compact on-disk shape → ended.

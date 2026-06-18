@@ -606,6 +606,115 @@ command = "echo hi"
         assert!(hook_command(bad, false).is_err());
     }
 
+    #[test]
+    fn verify_schema_reports_broken_on_unparseable_toml() {
+        use crate::install::verify::ShimRef;
+        // verify_schema parses with `toml::from_str` DIRECTLY (a separate path
+        // from merge_install's parse_toml_or_empty), so a malformed config must
+        // hit the early-return broken arm.
+        let res = verify_schema("not = = toml");
+        assert_eq!(res.shim, ShimRef::Unknown);
+        assert!(
+            res.issues
+                .iter()
+                .any(|i| i.contains("no longer parses as TOML")),
+            "unparseable TOML must surface the parse-broken issue, got {:?}",
+            res.issues
+        );
+    }
+
+    #[test]
+    fn verify_schema_flags_partial_install_missing_events() {
+        use crate::install::verify::ShimRef;
+        // A managed entry for ONE event but not the rest → the None arm pushes the
+        // absent events and assemble renders a "missing hook entries for: …" issue.
+        let cfg = "[hooks]\nenabled = true\n\n[[hooks.hooks]]\nevent = \"session_start\"\ncommand = \"x\"\n_pixtuoid = true\n";
+        let res = verify_schema(cfg);
+        let joined = res.issues.join(" | ");
+        assert!(
+            joined.contains("missing hook entries for"),
+            "a partial install must report missing events, got {:?}",
+            res.issues
+        );
+        assert!(
+            joined.contains("tool_call_before"),
+            "tool_call_before is a registered-but-absent event and must be listed, got {:?}",
+            res.issues
+        );
+        // One managed entry WAS present → not the "no managed entries" verdict.
+        assert!(
+            !joined.contains("_pixtuoid` sentinel is absent"),
+            "a present sentinel entry must NOT trip the no-managed-entries issue"
+        );
+        // The present entry's command is a bare scalar → shim resolves off it,
+        // not Unknown (proves the Some arm extracted the shim).
+        assert_ne!(res.shim, ShimRef::Unknown);
+    }
+
+    #[test]
+    fn verify_schema_flags_enabled_false_and_passes_full_install() {
+        use crate::install::verify::ShimRef;
+        // (1) A complete managed install must verify clean: no issues, a real shim.
+        let full = merge_install("", BASE).unwrap().content;
+        let sound = verify_schema(&full);
+        assert!(
+            sound.issues.is_empty(),
+            "a full install must be issue-free, got {:?}",
+            sound.issues
+        );
+        assert_ne!(
+            sound.shim,
+            ShimRef::Unknown,
+            "a full install must resolve a shim ref from its managed commands"
+        );
+
+        // (2) Flip [hooks].enabled to false on that same complete install — every
+        // event is still present (no `missing` issue), but the enabled=false gate
+        // is the silent-dead the other checks miss.
+        let disabled = full.replacen("enabled = true", "enabled = false", 1);
+        assert!(
+            disabled.contains("enabled = false"),
+            "the test fixture must actually flip the flag"
+        );
+        let res = verify_schema(&disabled);
+        let joined = res.issues.join(" | ");
+        assert!(
+            joined.contains("enabled = false"),
+            "enabled=false must be flagged, got {:?}",
+            res.issues
+        );
+        assert!(
+            joined.contains("none fire"),
+            "the enabled=false issue must explain that no hooks fire, got {:?}",
+            res.issues
+        );
+        // The events are all still present, so the missing-events issue must NOT appear.
+        assert!(
+            !joined.contains("missing hook entries for"),
+            "a complete-but-disabled install reports the gate, not missing events"
+        );
+    }
+
+    #[test]
+    fn install_coerces_inner_non_array_hooks_key() {
+        // [hooks] is a real TABLE but its nested `hooks` key is a scalar string —
+        // hits the INNER coercion (line 295), distinct from the OUTER coercion the
+        // `hooks = "garbage"` test exercises. Without the coercion the as_array_mut
+        // guard is skipped and zero entries are written.
+        let out = merge_install("[hooks]\nhooks = \"garbage\"\n", BASE).unwrap();
+        let v = parse(&out.content);
+        assert!(v["hooks"].is_table());
+        assert!(
+            v["hooks"]["hooks"].is_array(),
+            "the scalar `hooks` key must be coerced to an array"
+        );
+        assert_eq!(
+            v["hooks"]["hooks"].as_array().unwrap().len(),
+            CODEWHALE_EVENTS.len(),
+            "after coercion every managed event must be written"
+        );
+    }
+
     // Internal-consistency guard (mirror of the CC/Codex/Reasonix ones): every
     // hook event we REGISTER with CodeWhale must have a decoder arm, else it
     // arrives at the shared socket and the decoder bails — silently dropped.

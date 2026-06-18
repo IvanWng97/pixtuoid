@@ -361,6 +361,81 @@ mod tests {
     }
 
     #[test]
+    fn shell_shim_ref_windows_empty_path_is_unknown() {
+        // Leading space: the substring before ` --source ` trims to empty → the
+        // Windows arm must return Unknown, not Absolute("").
+        assert_eq!(shell_shim_ref(" --source reasonix"), ShimRef::Unknown);
+    }
+
+    #[test]
+    fn shell_shim_ref_unix_empty_quoted_token_is_unknown() {
+        // The last whitespace token is `''`, which trims (of single-quotes) to
+        // empty → Unknown, not Absolute("").
+        assert_eq!(shell_shim_ref("PIXTUOID_SOURCE=codex ''"), ShimRef::Unknown);
+    }
+
+    #[test]
+    fn flat_json_merge_uninstall_returns_non_object_unchanged() {
+        // The defensive `else { return doc }` arm: a non-object document root is
+        // passed through untouched (the real callers only feed objects).
+        let arr = json!([1, 2, 3]);
+        assert_eq!(flat_json_merge_uninstall(arr.clone(), "_pixtuoid"), arr);
+        let scalar = json!(42);
+        assert_eq!(
+            flat_json_merge_uninstall(scalar.clone(), "_pixtuoid"),
+            scalar
+        );
+    }
+
+    #[test]
+    fn schema_parse_broken_sets_issue_and_unknown_shim() {
+        let p = SchemaParse::broken("boom");
+        assert_eq!(p.issues, vec!["boom".to_string()]);
+        assert_eq!(p.shim, ShimRef::Unknown);
+    }
+
+    #[test]
+    fn flat_json_verify_reports_broken_on_invalid_json() {
+        let p = flat_json_verify("{not json", &["PreToolUse"], "_pixtuoid");
+        assert_eq!(p.shim, ShimRef::Unknown);
+        assert!(
+            p.issues
+                .iter()
+                .any(|i| i.contains("no longer parses as JSON")),
+            "{:?}",
+            p.issues
+        );
+    }
+
+    #[test]
+    fn flat_json_verify_flags_event_missing_a_managed_entry() {
+        // A config with a managed entry for PreToolUse only, queried for two
+        // events → PostToolUse is reported missing, and the present entry's
+        // command yields an Absolute shim.
+        let content = json!({
+            "hooks": {
+                "PreToolUse": [{
+                    "_pixtuoid": true,
+                    "command": "PIXTUOID_SOURCE=reasonix '/opt/pixtuoid-hook'"
+                }]
+            }
+        })
+        .to_string();
+        let p = flat_json_verify(&content, &["PreToolUse", "PostToolUse"], "_pixtuoid");
+        assert!(
+            p.issues
+                .iter()
+                .any(|i| i.contains("missing hook entries for") && i.contains("PostToolUse")),
+            "{:?}",
+            p.issues
+        );
+        assert_eq!(
+            p.shim,
+            ShimRef::Absolute(PathBuf::from("/opt/pixtuoid-hook"))
+        );
+    }
+
+    #[test]
     fn display_safe_strips_control_chars_from_a_hostile_path() {
         // A shim path crafted (via a hand-edited hook command) with an ANSI/OSC
         // escape must not reach a real terminal raw.

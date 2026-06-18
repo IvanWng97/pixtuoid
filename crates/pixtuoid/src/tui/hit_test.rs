@@ -635,4 +635,137 @@ mod tests {
         // cell_y for my=40 → 80, inside [78..82).
         assert!(hit_test_pet(PetKind::Cat, pos, "cat_sleep", 50, 40));
     }
+
+    // --- hit_test_coffee_machine: the missing-pantry guard + small-counter box --
+
+    // The Pantry-waypoint early-return: with the Pantry waypoint removed,
+    // `hit_test_coffee_machine` must be false EVERYWHERE — and specifically at
+    // the coords that DO hit while the waypoint is present. That second probe
+    // proves the false comes from the missing-pantry guard, not an off-counter
+    // miss (it would pass even if the early return were deleted, were it any
+    // other coordinate).
+    #[test]
+    fn coffee_machine_returns_false_when_no_pantry_waypoint() {
+        let mut layout = Layout::compute(160, 200, 4).expect("layout");
+        let wp = *layout
+            .waypoints
+            .iter()
+            .find(|w| w.kind == pixtuoid_scene::layout::WaypointKind::Pantry)
+            .expect("pantry");
+        // Mirror the existing true-test geometry to land squarely on the machine.
+        let Size { w: cw, h: ch } = layout.pantry_counter_size;
+        let sprite_x = wp.pos.x.saturating_sub(cw / 2);
+        let sprite_y = wp.pos.y.saturating_sub(ch / 2);
+        let mid_x = if cw >= 32 {
+            sprite_x + 14
+        } else {
+            sprite_x + 10
+        };
+        let mid_cell_y = (sprite_y + ch / 2) / 2;
+        // Sanity: the chosen coords ARE a hit while the waypoint is present.
+        assert!(
+            hit_test_coffee_machine(&layout, mid_x, mid_cell_y),
+            "precondition: coffee machine area should hit with the Pantry waypoint present"
+        );
+        // Drop the Pantry waypoint → the early return must make EVERY probe false.
+        layout
+            .waypoints
+            .retain(|w| !matches!(w.kind, pixtuoid_scene::layout::WaypointKind::Pantry));
+        assert!(
+            !hit_test_coffee_machine(&layout, mid_x, mid_cell_y),
+            "no Pantry waypoint ⇒ the early return must yield false at the machine coords"
+        );
+        assert!(!hit_test_coffee_machine(&layout, 0, 0));
+    }
+
+    // The small-counter branch (cw < 32 ⇒ box x-offsets [8,13)). x+10 is inside
+    // that small box; x+15 is OUTSIDE it but WOULD be inside the large branch's
+    // [11,18) box — so the false at x+15 falsifies any mutation that drops the
+    // cw>=32 split (e.g. always taking the large offsets).
+    #[test]
+    fn coffee_machine_small_counter_uses_8_13_offsets() {
+        let mut layout = Layout::compute(160, 200, 4).expect("layout");
+        let wp = *layout
+            .waypoints
+            .iter()
+            .find(|w| w.kind == pixtuoid_scene::layout::WaypointKind::Pantry)
+            .expect("pantry");
+        let h = layout.pantry_counter_size.h;
+        layout.pantry_counter_size = Size { w: 20, h };
+        let sprite_x = wp.pos.x.saturating_sub(20 / 2);
+        let sprite_y = wp.pos.y.saturating_sub(h / 2);
+        let cell_y = (sprite_y + h / 2) / 2;
+        assert!(
+            hit_test_coffee_machine(&layout, sprite_x + 10, cell_y),
+            "x+10 is inside the small-counter [8,13) box"
+        );
+        assert!(
+            !hit_test_coffee_machine(&layout, sprite_x + 15, cell_y),
+            "x+15 is outside [8,13) — a hit here means the cw>=32 split was dropped"
+        );
+    }
+
+    // --- hit_test_furniture: Option/Vec arms not produced at harness sizes -----
+    // couch_sprite_center, floor_lamp, the PodDecor::Tv label arm, and
+    // lounge_side_table aren't all reachable from `compute_with_seed` at the
+    // tested sizes, so place each synthetically in open floor (probed None first)
+    // and hit its center; the +offset misses pin each box's literal width.
+
+    #[test]
+    fn furniture_hit_test_finds_lounge_sofa_via_synthetic_center() {
+        use pixtuoid_scene::layout::Point;
+        let mut layout = Layout::compute(160, 200, 4).expect("layout");
+        let c = Point { x: 40, y: 50 };
+        layout.couch_sprite_center = Some(c);
+        assert_eq!(
+            hit_test_furniture(&layout, c.x, c.y / 2),
+            Some("Lounge Sofa")
+        );
+        // 30px right of center is outside the 20-wide hover box.
+        assert_ne!(
+            hit_test_furniture(&layout, c.x + 30, c.y / 2),
+            Some("Lounge Sofa")
+        );
+    }
+
+    #[test]
+    fn furniture_hit_test_finds_floor_lamp_via_synthetic() {
+        use pixtuoid_scene::layout::Point;
+        let mut layout = Layout::compute(160, 200, 4).expect("layout");
+        let p = Point { x: 40, y: 40 };
+        layout.floor_lamp = Some(p);
+        assert_eq!(
+            hit_test_furniture(&layout, p.x, p.y / 2),
+            Some("Floor Lamp")
+        );
+    }
+
+    #[test]
+    fn furniture_hit_test_finds_tv_stand_via_synthetic_pod_decor() {
+        use pixtuoid_scene::layout::{PodDecor, PodDecorItem, Point};
+        let mut layout = Layout::compute(160, 200, 4).expect("layout");
+        let p = Point { x: 50, y: 40 };
+        layout.pod_decor.push(PodDecorItem {
+            kind: PodDecor::Tv,
+            pos: p,
+        });
+        assert_eq!(hit_test_furniture(&layout, p.x, p.y / 2), Some("TV Stand"));
+    }
+
+    #[test]
+    fn furniture_hit_test_finds_side_table_via_synthetic() {
+        use pixtuoid_scene::layout::Point;
+        let mut layout = Layout::compute(160, 200, 4).expect("layout");
+        let t = Point { x: 30, y: 90 };
+        layout.lounge_side_table = Some(t);
+        assert_eq!(
+            hit_test_furniture(&layout, t.x, t.y / 2),
+            Some("Side Table")
+        );
+        // 6px right of center is outside the 7-wide box (tl = t.x-3, [x-3..x+4)).
+        assert_ne!(
+            hit_test_furniture(&layout, t.x + 6, t.y / 2),
+            Some("Side Table")
+        );
+    }
 }

@@ -534,6 +534,22 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&p).unwrap(), "{\"a\":1}");
     }
 
+    #[test]
+    fn lock_config_creates_missing_parent_dir() {
+        // The .lock file lives beside the target, so a config under a not-yet-
+        // existing parent (a fresh `~/.config/pixtuoid/` on first install) must
+        // get its parent created before the lock open — else OpenOptions::open
+        // errors NotFound. Every other lock_config test pre-creates the parent
+        // (TempDir root), so this is the only one that fails if the
+        // create_dir_all (or its `if let Some(parent)` guard) is dropped.
+        let dir = TempDir::new().unwrap();
+        let parent = dir.path().join("sub/nested");
+        assert!(!parent.exists(), "precondition: parent must not exist yet");
+        let p = parent.join("settings.json");
+        let _guard = lock_config(&p).expect("lock_config must create the missing parent");
+        assert!(parent.is_dir(), "the missing parent chain was created");
+    }
+
     #[cfg(unix)]
     #[test]
     fn lock_config_resolves_symlinks_to_the_real_target() {

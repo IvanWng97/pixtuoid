@@ -592,6 +592,183 @@ mod tests {
         );
     }
 
+    // The pid-bind loop in handle_conn (line 263-268): a payload carrying a
+    // shim-stamped `_pid` that decodes to a SessionStart binds that agent to the
+    // pid through the LIVE HookPidWatch, so killing the pid ends the slot. The
+    // pid_watch.rs suite calls `note()` directly — this drives the bind THROUGH
+    // the socket loop end-to-end (peek `_pid` → decode → pid_bind_target →
+    // note). Platform-gated like the pid_watch test (no exit-watch backend on
+    // Windows / pre-5.3 Linux → spawn returns None → no-op).
+    #[tokio::test]
+    async fn handle_conn_binds_pid_from_payload_so_killing_it_ends_the_agent() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(8);
+        let Some(watch) = HookPidWatch::spawn(tx.clone()) else {
+            return; // no exit-watch backend on this platform — nothing to assert
+        };
+        let mut child = std::process::Command::new("sleep")
+            .arg("60")
+            .spawn()
+            .expect("spawn a child to watch");
+        let pid = child.id();
+
+        let (mut client, server) = tokio::io::duplex(4096);
+        let task = tokio::spawn(handle_conn(server, tx, Some(watch), None));
+        // A CodeWhale env-mode envelope: `session_start` decodes to a SessionStart
+        // keyed on the cwd, stamped with the child's `_pid`. pid_bind_target binds
+        // that agent id to the pid via the live watch.
+        let line = format!(
+            "{{\"_pixtuoid_source\":\"codewhale\",\"event\":\"session_start\",\
+             \"cwd\":\"/repo\",\"_pid\":{pid}}}\n"
+        );
+        client.write_all(line.as_bytes()).await.unwrap();
+
+        // Drain the SessionStart so it doesn't race the SessionEnd on the channel.
+        let (_, ev) = rx.recv().await.expect("the SessionStart from the payload");
+        assert!(matches!(ev, AgentEvent::SessionStart { .. }), "got {ev:?}");
+
+        drop(client); // EOF ends the conn loop
+        task.await.unwrap();
+
+        // Killing the bound pid must end EXACTLY the cwd-keyed agent. Falsifiable:
+        // if line 266's note() were dropped, no SessionEnd ever arrives.
+        child.kill().expect("kill the watched child");
+        let _ = child.wait();
+        let expected = AgentId::from_parts("codewhale", "/repo");
+        let (transport, ev) = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+            .await
+            .expect("a SessionEnd within 5s of the watched pid dying")
+            .expect("channel still open");
+        assert_eq!(transport, Transport::Hook);
+        assert!(
+            matches!(ev, AgentEvent::SessionEnd { agent_id, as_child: false } if agent_id == expected),
+            "the payload-bound agent must end when its pid dies, got {ev:?}"
+        );
+    }
+
+    // The decode-error arm (line 280): a syntactically-valid JSON object whose
+    // hook_event_name is unsupported reaches decode's `other =>` bail, warn!s
+    // "hook decode error", and the loop CONTINUES emitting nothing. Distinct
+    // from the malformed-JSON path (the socket test covers that) — this is
+    // valid-JSON-but-undecodable. A following valid SessionStart still decodes,
+    // proving the bogus line is dropped, not fallen-through.
+    #[tokio::test]
+    async fn handle_conn_skips_valid_json_with_unsupported_event_and_emits_nothing() {
+        let (mut client, server) = tokio::io::duplex(4096);
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(8);
+        let (logs, _guard) = capture_warns();
+
+        let task = tokio::spawn(handle_conn(server, tx, None, None));
+        client
+            .write_all(b"{\"hook_event_name\":\"BogusEvent\",\"session_id\":\"s1\"}\n")
+            .await
+            .unwrap();
+        client
+            .write_all(
+                b"{\"hook_event_name\":\"SessionStart\",\"session_id\":\"s2\",\
+                  \"transcript_path\":\"/Users/me/.claude/projects/x/s2.jsonl\"}\n",
+            )
+            .await
+            .unwrap();
+        drop(client);
+        task.await.unwrap();
+
+        // EXACTLY one event — the SessionStart; the bogus line emitted nothing.
+        let (_, ev) = rx.try_recv().expect("the valid SessionStart");
+        assert!(matches!(ev, AgentEvent::SessionStart { .. }), "got {ev:?}");
+        assert!(
+            rx.try_recv().is_err(),
+            "the unsupported-event line must emit no AgentEvent"
+        );
+        assert!(
+            logs.contents().contains("hook decode error"),
+            "the bail must log a decode error: {:?}",
+            logs.contents()
+        );
+    }
+
+    // The empty/whitespace-line skip (line 200): a blank line short-circuits
+    // BEFORE serde_json::from_str, so it does NOT log the "malformed hook line
+    // skipped" warning that from_str("") would otherwise trigger. Falsifiable:
+    // deleting the trim().is_empty() guard makes the blank line hit from_str →
+    // Err → that warn, flipping the absence assertion.
+    #[tokio::test]
+    async fn handle_conn_silently_skips_blank_lines_without_a_malformed_warning() {
+        let (mut client, server) = tokio::io::duplex(4096);
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(8);
+        let (logs, _guard) = capture_warns();
+
+        let task = tokio::spawn(handle_conn(server, tx, None, None));
+        client.write_all(b"   \n").await.unwrap();
+        client
+            .write_all(
+                b"{\"hook_event_name\":\"SessionStart\",\"session_id\":\"s1\",\
+                  \"transcript_path\":\"/Users/me/.claude/projects/x/s1.jsonl\"}\n",
+            )
+            .await
+            .unwrap();
+        drop(client);
+        task.await.unwrap();
+
+        let (_, ev) = rx.try_recv().expect("the valid SessionStart");
+        assert!(matches!(ev, AgentEvent::SessionStart { .. }), "got {ev:?}");
+        assert!(
+            rx.try_recv().is_err(),
+            "only the SessionStart, the blank line produces nothing"
+        );
+        assert!(
+            !logs.contents().contains("malformed hook line skipped"),
+            "a blank line must skip before from_str — no malformed warning: {:?}",
+            logs.contents()
+        );
+    }
+
+    // The daemon-presence decode-error arm (line 232): when presence_decoder_for
+    // returns Some but decode(&v) errs (an openclaw payload missing `type`), it
+    // warn!s AND still `continue`s — the malformed daemon line must NOT fall
+    // through to the agent arms. Falsifiable: if the Err arm omitted `continue`,
+    // the openclaw line would reach decode_hook_payload below. A following valid
+    // CC line still decodes on the agent channel, proving only the daemon line
+    // was short-circuited.
+    #[tokio::test]
+    async fn handle_conn_malformed_openclaw_presence_continues_without_falling_through() {
+        let (mut client, server) = tokio::io::duplex(4096);
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(8);
+        let (ptx, mut prx) =
+            tokio::sync::mpsc::unbounded_channel::<crate::source::daemon::PresenceMsg>();
+
+        let task = tokio::spawn(handle_conn(server, tx, None, Some(ptx)));
+        // An openclaw payload that is an object but lacks `type` — its decoder
+        // errs, so the demux warns + continues (zero presence msgs).
+        client
+            .write_all(b"{\"_pixtuoid_source\":\"openclaw\"}\n")
+            .await
+            .unwrap();
+        client
+            .write_all(
+                b"{\"hook_event_name\":\"SessionStart\",\"session_id\":\"s1\",\
+                  \"transcript_path\":\"/Users/me/.claude/projects/x/s1.jsonl\"}\n",
+            )
+            .await
+            .unwrap();
+        drop(client);
+        task.await.unwrap();
+
+        // The malformed openclaw line produced NO presence delta...
+        assert!(
+            prx.try_recv().is_err(),
+            "a daemon decode failure must emit no presence message"
+        );
+        // ...and the only agent event is the SessionStart (it did NOT fall
+        // through to the agent arms, which would have errored differently).
+        let (transport, ev) = rx.try_recv().expect("the valid CC SessionStart");
+        assert_eq!(transport, Transport::Hook);
+        assert!(matches!(ev, AgentEvent::SessionStart { .. }), "got {ev:?}");
+        assert!(
+            rx.try_recv().is_err(),
+            "the malformed openclaw line emits no AgentEvent"
+        );
+    }
+
     #[tokio::test]
     async fn channel_closed_shutdown_leaves_no_breadcrumb() {
         let (mut client, server) = tokio::io::duplex(4096);

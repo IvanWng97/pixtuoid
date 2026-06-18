@@ -493,6 +493,33 @@ mod tests {
         extra_artifacts: None,
     };
 
+    // FAKE_NO_HOME: default_config_path returns Err (no home dir resolves) and
+    // there's no config override → exercises has_hooks's `let Ok(path) = … else`
+    // early-return and verify_target's matching `Err(_)` arm.
+    static FAKE_NO_HOME: Target = Target {
+        name: "fakenohome",
+        core_source: "fakenohome",
+        display_name: "FakeNoHome",
+        default_config_path: || Err(anyhow::anyhow!("no home dir")),
+        hook_command: |_, _| Ok("x".into()),
+        merge_install: |c, _| {
+            Ok(MergeOutcome {
+                content: c.to_string(),
+                changed: false,
+            })
+        },
+        merge_uninstall: |c| {
+            Ok(MergeOutcome {
+                content: c.to_string(),
+                changed: false,
+            })
+        },
+        verify_schema: |_| crate::install::verify::SchemaParse::broken("test fake"),
+        binary_strategy: BinaryStrategy::EmbedAbsolute,
+        presence_probe: None,
+        extra_artifacts: None,
+    };
+
     /// A platform-absolute fixture path: `/x/hook` is DRIVE-RELATIVE on
     /// Windows, so the absolutization would rewrite it there.
     fn abs_fixture(unix: &str, windows: &str) -> PathBuf {
@@ -716,6 +743,26 @@ mod tests {
         std::fs::write(&path, "   \n").unwrap();
         assert!(!has_hooks(&FAKE2));
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn verify_target_and_has_hooks_handle_unresolvable_config_path() {
+        // A target whose default_config_path Errs (no home dir) and no `config`
+        // override: has_hooks's `let Ok(path) = … else { return false }` fires →
+        // no config to bear hooks; verify_target's matching `Err(_)` arm fires →
+        // a single, specific "no config path resolves" issue (so NOT sound). No FS
+        // or env needed — the Err comes straight from the fn pointer.
+        assert!(
+            !has_hooks(&FAKE_NO_HOME),
+            "no resolvable config path → no hooks"
+        );
+        let v = verify_target(&FAKE_NO_HOME, None);
+        assert!(!v.is_sound());
+        assert_eq!(
+            v.issues,
+            vec!["no config path resolves (no home dir)".to_string()]
+        );
+        assert!(v.notes.is_empty(), "the early return emits no notes");
     }
 
     // --- install_target: CLAUDE sentinel write + backup ----------------------
@@ -1150,6 +1197,66 @@ mod tests {
         assert!(!v.is_sound());
         assert!(
             v.issues.iter().any(|i| i.contains("shim binary missing")),
+            "{:?}",
+            v.issues
+        );
+    }
+
+    // The empty-config arm of verify_target (a config FILE that exists but is
+    // whitespace-only): distinct from has_hooks's empty→false — verify returns a
+    // specific "config is empty" issue and short-circuits BEFORE verify_schema.
+    #[test]
+    fn verify_target_flags_an_empty_config_as_not_installed() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cfg = tmp.path().join("settings.json");
+        std::fs::write(&cfg, "   \n").unwrap();
+        let v = verify_target(&CLAUDE, Some(cfg));
+        assert!(!v.is_sound());
+        assert!(
+            v.issues.iter().any(|i| i.contains("config is empty")),
+            "{:?}",
+            v.issues
+        );
+    }
+
+    // The unreadable-config arm: the path EXISTS (so read_config's missing-file
+    // early-Ok doesn't apply) but is a DIRECTORY → File::open + read_to_string
+    // errors → the `Err(_)` arm pushes "config unreadable: <path>".
+    #[test]
+    fn verify_target_flags_an_unreadable_config() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let dir = tmp.path().join("cfgdir");
+        std::fs::create_dir_all(&dir).unwrap();
+        let v = verify_target(&CLAUDE, Some(dir));
+        assert!(!v.is_sound());
+        assert!(
+            v.issues.iter().any(|i| i.contains("config unreadable")),
+            "{:?}",
+            v.issues
+        );
+    }
+
+    // The shim-EXISTS-but-not-executable arm (line 94 in mod.rs), distinct from
+    // the missing-shim arm above. CODEX embeds an ABSOLUTE shim path (its hook
+    // command is `PIXTUOID_SOURCE=codex '<abs>'` → ShimRef::Absolute), so a shim
+    // file present with no exec bits trips `else if !is_executable(&p)`.
+    #[cfg(unix)]
+    #[test]
+    fn verify_target_flags_a_non_executable_shim() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cfg = tmp.path().join("config.toml");
+        let shim = tmp.path().join("hook");
+        std::fs::write(&shim, b"#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        install_target(&CODEX, Some(cfg.clone()), Some(shim)).unwrap();
+        let v = verify_target(&CODEX, Some(cfg));
+        assert!(!v.is_sound());
+        assert!(
+            v.issues
+                .iter()
+                .any(|i| i.contains("shim binary not executable")),
             "{:?}",
             v.issues
         );

@@ -293,6 +293,36 @@ mod tests {
         }
     }
 
+    // The `ConnState::NoCli` arm: the connection cell is the `—` glyph + "no CLI"
+    // text. Existing tests only ever build Connected/Disconnected rows, so this
+    // arm never ran — a mutation swapping its glyph or text would slip past them.
+    #[test]
+    fn connection_line_no_cli_state_renders_no_cli_cell() {
+        let r = row("some-cli", "xx", ConnState::NoCli);
+        let line = connection_line(
+            &r,
+            &LiveInfo::default(),
+            false,
+            SystemTime::UNIX_EPOCH,
+            &NORMAL,
+        );
+        let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(text.contains("no CLI"), "NoCli cell text missing: {text:?}");
+        assert!(
+            text.contains('\u{2014}'),
+            "NoCli em-dash glyph missing: {text:?}"
+        );
+        // Pin the arm: it must NOT render the Connected/Disconnected state words.
+        assert!(
+            !text.contains("connected"),
+            "NoCli must not say connected: {text:?}"
+        );
+        assert!(
+            !text.contains("disconnected"),
+            "NoCli must not say disconnected: {text:?}"
+        );
+    }
+
     #[test]
     fn connection_line_renders_state_and_live_text() {
         let r = row("claude", "cc", ConnState::Connected);

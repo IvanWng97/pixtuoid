@@ -388,6 +388,208 @@ pub fn paint_chitchat_bubbles(
 #[cfg(test)]
 mod tests {
     use super::mascot_tooltip_text;
+    use pixtuoid_scene::theme;
+    use ratatui::backend::TestBackend;
+    use ratatui::layout::Rect;
+    use ratatui::Terminal;
+
+    /// Join the whole TestBackend buffer into one string (newline-free) so a
+    /// `.contains` probe finds text regardless of which cell the box landed in.
+    fn buffer_text(term: &Terminal<TestBackend>) -> String {
+        let buf = term.backend().buffer();
+        let area = buf.area;
+        let mut out = String::new();
+        for y in 0..area.height {
+            for x in 0..area.width {
+                out.push_str(buf[(x, y)].symbol());
+            }
+        }
+        out
+    }
+
+    /// Row index (y) of the first row whose joined text contains `needle`, if any.
+    fn row_of(term: &Terminal<TestBackend>, needle: &str) -> Option<u16> {
+        let buf = term.backend().buffer();
+        let area = buf.area;
+        for y in 0..area.height {
+            let row: String = (0..area.width).map(|x| buf[(x, y)].symbol()).collect();
+            if row.contains(needle) {
+                return Some(y);
+            }
+        }
+        None
+    }
+
+    #[test]
+    fn mascot_tooltip_paints_gateway_verb_into_buffer() {
+        // The pure text fn is unit-tested above; this pins the ratatui paint glue
+        // — the right name + verb actually reach the buffer, and `degraded` wins.
+        let mut term = Terminal::new(TestBackend::new(60, 8)).unwrap();
+        term.draw(|f| {
+            super::paint_mascot_tooltip(
+                f,
+                "OpenClaw",
+                true,
+                false,
+                1,
+                10,
+                3,
+                f.area(),
+                &theme::NORMAL,
+            )
+        })
+        .unwrap();
+        let busy = buffer_text(&term);
+        assert!(
+            busy.contains("OpenClaw gateway"),
+            "busy paint should render the gateway name+verb, got: {busy:?}"
+        );
+        assert!(
+            busy.contains("working"),
+            "busy=true should render the 'working' verb, got: {busy:?}"
+        );
+
+        let mut term2 = Terminal::new(TestBackend::new(60, 8)).unwrap();
+        term2
+            .draw(|f| {
+                super::paint_mascot_tooltip(
+                    f,
+                    "OpenClaw",
+                    true,
+                    true,
+                    1,
+                    10,
+                    3,
+                    f.area(),
+                    &theme::NORMAL,
+                )
+            })
+            .unwrap();
+        let degraded = buffer_text(&term2);
+        assert!(
+            degraded.contains("model error"),
+            "degraded should render 'model error', got: {degraded:?}"
+        );
+        assert!(
+            !degraded.contains("working"),
+            "degraded must override busy → no 'working' verb, got: {degraded:?}"
+        );
+    }
+
+    #[test]
+    fn pet_tooltip_shows_pet_me_on_sit_anim() {
+        // The sit arm (not on cooldown, sitting) is the only branch the render
+        // harness never exercises (it covers cooldown purr/woof + sleep).
+        use pixtuoid_scene::pet::PetKind;
+        let kind = PetKind::Dog;
+        let sit = kind.sit_anim();
+        let mut term = Terminal::new(TestBackend::new(40, 8)).unwrap();
+        term.draw(|f| {
+            super::paint_pet_tooltip(f, kind, sit, false, "Rex", 10, 3, f.area(), &theme::NORMAL)
+        })
+        .unwrap();
+        let text = buffer_text(&term);
+        assert!(
+            text.contains("Pet me!"),
+            "sit anim + not-on-cooldown should render 'Pet me!', got: {text:?}"
+        );
+        assert!(
+            !text.contains("woof"),
+            "sit arm must not fall through to the cooldown woof, got: {text:?}"
+        );
+        assert!(
+            !text.contains("sleeping"),
+            "sit arm must not be the sleep arm, got: {text:?}"
+        );
+    }
+
+    #[test]
+    fn hover_tooltip_fresh_agent_shows_dashes_for_active_pct() {
+        // A <5s-old agent shows the literal `--%` active percentage instead of a
+        // computed N% (the fresh-agent branch, line 149).
+        use std::path::Path;
+        use std::sync::Arc;
+        use std::time::{Duration, SystemTime};
+
+        use pixtuoid_core::state::{ActivityState, AgentSlot, GlobalDeskIndex};
+        use pixtuoid_core::{AgentId, SceneState};
+
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_716_286_800);
+        let id = AgentId::from_transcript_path("/fresh/0.jsonl");
+        let slot = AgentSlot {
+            agent_id: id,
+            source: Arc::from("claude-code"),
+            session_id: Arc::from("s"),
+            cwd: Arc::from(Path::new("/repo")),
+            label: Arc::from("fresh"),
+            state: ActivityState::Idle,
+            state_started_at: now,
+            // 2s < the 5s freshness floor → `--%`.
+            created_at: now - Duration::from_secs(2),
+            last_event_at: now,
+            exiting_at: None,
+            pending_idle_at: None,
+            desk_index: GlobalDeskIndex(0),
+            floor_idx: 0,
+            tool_call_count: 0,
+            active_ms: 0,
+            unknown_cwd: false,
+            parent_id: None,
+        };
+        let mut scene = SceneState::uniform(12);
+        scene.agents.insert(id, slot);
+
+        let mut term = Terminal::new(TestBackend::new(60, 24)).unwrap();
+        term.draw(|f| {
+            super::paint_hover_tooltip(f, &scene, id, 20, 10, f.area(), now, &theme::NORMAL)
+        })
+        .unwrap();
+        let text = buffer_text(&term);
+        assert!(
+            text.contains("--%"),
+            "fresh (<5s) agent should show the literal --% active, got: {text:?}"
+        );
+        assert!(
+            !text.contains("0%"),
+            "fresh agent must not compute a numeric percentage, got: {text:?}"
+        );
+    }
+
+    #[test]
+    fn simple_tooltip_flips_below_when_cursor_near_top() {
+        // Near the top edge (my < tip_h) the box must float BELOW the cursor; well
+        // below the top it floats ABOVE. The probe substring tags its row.
+        let scene = Rect {
+            x: 0,
+            y: 0,
+            width: 40,
+            height: 24,
+        };
+
+        // Box height is 3 (1 content line wrapped in `Padding::uniform(1)`), so
+        // the content row = box-top + 1.
+        // my=0, flip-below: box-top = my+1 = 1 → content at row 2 (NOT row 1,
+        // which is where it lands if the flip-below branch is removed).
+        let mut top = Terminal::new(TestBackend::new(40, 24)).unwrap();
+        top.draw(|f| super::paint_simple_tooltip(f, " PROBE ", 5, 0, scene, &theme::NORMAL))
+            .unwrap();
+        let top_y = row_of(&top, "PROBE").expect("PROBE rendered when cursor at top");
+        assert_eq!(
+            top_y, 2,
+            "cursor at the top edge → box flips below (top=my+1=1, content row 2)"
+        );
+
+        // my=20, no flip: box-top = my - tip_h = 17 → content at row 18 (above
+        // the cursor). Falsifiable against the flip-below path firing here too.
+        let mut low = Terminal::new(TestBackend::new(40, 24)).unwrap();
+        low.draw(|f| super::paint_simple_tooltip(f, " PROBE ", 5, 20, scene, &theme::NORMAL))
+            .unwrap();
+        let low_y = row_of(&low, "PROBE").expect("PROBE rendered when cursor low");
+        assert_eq!(
+            low_y, 18,
+            "cursor well below the top → box floats above (top=my-3=17, content row 18)"
+        );
+    }
 
     #[test]
     fn mascot_tooltip_verb_keys_on_run_state_not_session_count() {

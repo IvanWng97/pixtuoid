@@ -1334,4 +1334,374 @@ mod tests {
             "sleep anim must add floating z's above the pet (sleep={sleep}, sit={sit})"
         );
     }
+
+    #[test]
+    fn gateway_mascot_def_maps_openclaw_and_rejects_others() {
+        // The openclaw source resolves to its lobster sprite + tooltip name; every
+        // other source name hits the `_ => None` arm (no mascot).
+        let def = gateway_mascot_def(pixtuoid_core::source::openclaw::SOURCE_NAME)
+            .expect("openclaw must have a mascot def");
+        assert_eq!(def.walk, "lobster_walk");
+        assert_eq!(def.rest, "lobster_rest");
+        assert_eq!(def.display_name, "OpenClaw");
+        assert!(
+            gateway_mascot_def("codex").is_none(),
+            "codex is not a gateway → no mascot"
+        );
+        assert!(
+            gateway_mascot_def("some-other").is_none(),
+            "unknown source → no mascot"
+        );
+    }
+
+    #[test]
+    fn mascot_elevator_falls_back_to_corridor_top_when_no_door() {
+        // With BOTH door fields absent, mascot_elevator takes the corridor-top
+        // centre fallback (430-434): (corridor.x + width/2, corridor.y), then snaps
+        // to walkable. A normal layout always has a door_threshold, so this is the
+        // only path that exercises the `or_else` branch.
+        let mut layout = crate::layout::Layout::compute(160, 120, 4).expect("layout fits");
+        layout.door = None;
+        layout.door_threshold = None;
+        let corridor = layout.corridor.expect("compute gives a corridor");
+        let raw = Point {
+            x: corridor.x + corridor.width / 2,
+            y: corridor.y,
+        };
+        let expected = snap_point_to_walkable(&layout.walkable, raw)
+            .expect("corridor-top centre must snap to a walkable cell");
+        assert_eq!(
+            mascot_elevator(&layout),
+            Some(expected),
+            "no door → snapped corridor-top centre, not None and not a door cell"
+        );
+    }
+
+    #[test]
+    fn mascot_wander_empty_spots_returns_home_and_cycle0_starts_from_home() {
+        // (a) The empty-spots guard (496) returns the home beat, not walking.
+        // (b) Cycle 0 forces prev=home (502) so leg 0 joins the enter walk pop-free:
+        //     the walking position equals walk_between(home → hash_pick(spots, seed+1)).
+        let layout = crate::layout::Layout::compute(160, 200, 4).expect("layout fits");
+        let home = mascot_home(&layout).expect("home beat");
+
+        // (a) empty guard.
+        assert_eq!(
+            mascot_wander(&layout, 9_000, 7, &[], home, MASCOT_IDLE_CYCLE_MS),
+            (home, false),
+            "no spots → rest at home"
+        );
+
+        // (b) cycle 0 origin == home. Pick a we_ms inside the walking fraction of
+        // cycle 0 (frac < MASCOT_WALK_FRAC) so the walk_between is exercised.
+        let spots = mascot_spots(&layout, DaemonState::Idle, home);
+        assert!(
+            spots.len() >= 2,
+            "idle spots must include home + social spots"
+        );
+        let cycle_ms = MASCOT_IDLE_CYCLE_MS;
+        let we_ms = (cycle_ms as f32 * 0.2) as u64; // frac 0.2 < 0.45 → walking
+        let seed = 3u64;
+        let frac = (we_ms % cycle_ms) as f32 / cycle_ms as f32;
+        let t = (frac / MASCOT_WALK_FRAC).clamp(0.0, 1.0);
+        // cycle == 0 → dest = hash_pick(spots, seed+0+1); prev forced to home.
+        let dest = hash_pick(&spots, seed.wrapping_add(0).wrapping_add(1));
+        let expected = walk_between(&layout, home, dest, t);
+        let (pos, walking) = mascot_wander(&layout, we_ms, seed, &spots, home, cycle_ms);
+        assert!(walking, "frac < walk_frac → walking");
+        assert_eq!(
+            pos, expected,
+            "cycle 0 leg must originate from home, not from a hash-picked prev spot"
+        );
+    }
+
+    fn idle_presence(now: SystemTime, age_ms: u64) -> DaemonPresence {
+        DaemonPresence {
+            state: DaemonState::Idle,
+            active_sessions: 0,
+            last_seen: now,
+            entered_at: now - std::time::Duration::from_millis(age_ms),
+            in_flight_run_keys: std::collections::HashSet::new(),
+            current_pid: Some(1),
+        }
+    }
+
+    #[test]
+    fn mascot_position_walks_in_from_elevator_during_enter_window() {
+        // age < MASCOT_ENTER_MS → the walk-in arm (559-563) lerps elevator→home at
+        // t = age/2200. age=0 lands exactly at the elevator; age≈half lands midway
+        // (distinct from both endpoints).
+        let layout = crate::layout::Layout::compute(160, 120, 4).expect("layout fits");
+        let elevator = mascot_elevator(&layout).expect("elevator");
+        let home = mascot_home(&layout).expect("home");
+        let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(20_000);
+        let seed = 0u64;
+
+        // age = 0 → at the elevator, walk anim.
+        let p0 = idle_presence(now, 0);
+        let (pos0, anim0, _) =
+            mascot_position(&layout, &p0, "lobster_walk", "lobster_rest", now, seed)
+                .expect("walk-in position");
+        assert_eq!(anim0, "lobster_walk", "enter window → walk anim");
+        assert_eq!(
+            pos0,
+            walk_between(&layout, elevator, home, 0.0),
+            "age 0 → exactly at the elevator end"
+        );
+
+        // age = 1100 (half the 2200 window) → midway along elevator→home.
+        let age = 1_100u64;
+        let p_mid = idle_presence(now, age);
+        let (pos_mid, anim_mid, _) =
+            mascot_position(&layout, &p_mid, "lobster_walk", "lobster_rest", now, seed)
+                .expect("walk-in mid position");
+        assert_eq!(anim_mid, "lobster_walk");
+        let t = age as f32 / MASCOT_ENTER_MS as f32;
+        assert_eq!(
+            pos_mid,
+            walk_between(&layout, elevator, home, t),
+            "mid enter → the elevator→home interpolation"
+        );
+        // Sanity: midway is genuinely off both endpoints (so the lerp is live, not a
+        // degenerate where elevator==home).
+        assert_ne!(
+            elevator, home,
+            "elevator and home must differ for a real walk-in"
+        );
+    }
+
+    #[test]
+    fn mascot_position_degraded_uses_slower_wander_cycle() {
+        // The Degraded arm (569) selects MASCOT_DEGRADED_CYCLE_MS (14000), slower
+        // than Idle's 9000. Pick a `now` where the two cycles land the mascot in
+        // DIFFERENT wander phases so the rendered anim/pos differs. A mutant mapping
+        // Degraded → 9000 would make the two results identical.
+        let layout = crate::layout::Layout::compute(160, 200, 4).expect("layout fits");
+        // Fixed entry anchor; we vary `now` so `age = now - entered_at` actually
+        // grows (an entered_at pinned at `now - k` would make age constant).
+        let entered_at = SystemTime::UNIX_EPOCH;
+        let seed = 0u64;
+
+        // Both presences identical except `state`; both well past the enter window.
+        let mk = |state: DaemonState, now: SystemTime| DaemonPresence {
+            state,
+            active_sessions: 0,
+            last_seen: now,
+            entered_at,
+            in_flight_run_keys: std::collections::HashSet::new(),
+            current_pid: Some(1),
+        };
+
+        // Search for an `age` (we_ms = age - ENTER) where Idle's 9000-cycle and
+        // Degraded's 14000-cycle frac fall in DIFFERENT bands (one walking, one
+        // resting) → the two anims must differ.
+        let mut found = None;
+        for age in (MASCOT_ENTER_MS..(MASCOT_ENTER_MS + 14_000)).step_by(100) {
+            let we = age - MASCOT_ENTER_MS;
+            let frac_idle = (we % MASCOT_IDLE_CYCLE_MS) as f32 / MASCOT_IDLE_CYCLE_MS as f32;
+            let frac_deg = (we % MASCOT_DEGRADED_CYCLE_MS) as f32 / MASCOT_DEGRADED_CYCLE_MS as f32;
+            let idle_walking = frac_idle < MASCOT_WALK_FRAC;
+            let deg_walking = frac_deg < MASCOT_WALK_FRAC;
+            if idle_walking != deg_walking {
+                found = Some(entered_at + std::time::Duration::from_millis(age));
+                break;
+            }
+        }
+        let now = found.expect("a tick where idle vs degraded phases diverge must exist");
+
+        let idle = mk(DaemonState::Idle, now);
+        let degraded = mk(DaemonState::Degraded, now);
+        let (_, idle_anim, _) =
+            mascot_position(&layout, &idle, "lobster_walk", "lobster_rest", now, seed)
+                .expect("idle pos");
+        let (_, deg_anim, _) = mascot_position(
+            &layout,
+            &degraded,
+            "lobster_walk",
+            "lobster_rest",
+            now,
+            seed,
+        )
+        .expect("degraded pos");
+        assert_ne!(
+            idle_anim, deg_anim,
+            "degraded's slower cycle must put the mascot in a different phase than idle at this tick"
+        );
+    }
+
+    #[test]
+    fn vending_machine_paints_panel_drinks_and_trim_cells() {
+        // The 4×6 vending block maps each (dx,dy) cell to a specific theme appliance
+        // color. Pin the per-cell mapping at the exact vx/vy-relative positions.
+        let pack = test_pack();
+        let mut cache = FrameCache::new();
+        let now = SystemTime::UNIX_EPOCH;
+        let th = theme();
+        let pos = Point { x: 30, y: 30 };
+        let bg = Rgb { r: 1, g: 2, b: 3 };
+        let mut buf = RgbBuffer::filled(80, 80, bg);
+        let d = Drawable {
+            anchor_y: pos.y,
+            kind: DrawableKind::VendingMachine { pos },
+        };
+        paint_drawable(&d, &mut buf, &pack, &mut cache, now, th);
+        let vx = pos.x - 2;
+        let vy = pos.y - 3;
+        // dy==0 row → panel.
+        assert_eq!(
+            buf.get(vx, vy),
+            th.appliance.vending_panel,
+            "top row = panel"
+        );
+        // dy==1,dx==1 → drinks[0] (idx = (dy-1)*2 + (dx-1) = 0).
+        assert_eq!(
+            buf.get(vx + 1, vy + 1),
+            th.appliance.vending_drinks[0],
+            "first drink slot = drinks[0]"
+        );
+        // dy==4,dx==2 → trim.
+        assert_eq!(
+            buf.get(vx + 2, vy + 4),
+            th.appliance.vending_trim,
+            "the (2,4) cell = trim"
+        );
+        // dy==5 → dark base row.
+        assert_eq!(
+            buf.get(vx, vy + 5),
+            th.appliance.vending_dark,
+            "bottom row = dark"
+        );
+        // A plain body cell (dy==2, dx==0) → body.
+        assert_eq!(
+            buf.get(vx, vy + 2),
+            th.appliance.vending_body,
+            "a non-special cell = body"
+        );
+    }
+
+    #[test]
+    fn printer_paints_glass_paper_and_tray_cells() {
+        // The 5×4 printer block maps each (dx,dy) to a specific appliance color.
+        let pack = test_pack();
+        let mut cache = FrameCache::new();
+        let now = SystemTime::UNIX_EPOCH;
+        let th = theme();
+        let pos = Point { x: 30, y: 30 };
+        let bg = Rgb { r: 4, g: 5, b: 6 };
+        let mut buf = RgbBuffer::filled(80, 80, bg);
+        let d = Drawable {
+            anchor_y: pos.y,
+            kind: DrawableKind::Printer { pos },
+        };
+        paint_drawable(&d, &mut buf, &pack, &mut cache, now, th);
+        let px0 = pos.x - 2;
+        let py0 = pos.y - 2;
+        // dy==0, dx in 1..=3 → glass.
+        assert_eq!(
+            buf.get(px0 + 2, py0),
+            th.appliance.printer_glass,
+            "top-centre = glass"
+        );
+        // dy==0, dx==0 → top_dark.
+        assert_eq!(
+            buf.get(px0, py0),
+            th.appliance.printer_top,
+            "top-corner = top_dark"
+        );
+        // dy==3, dx in 1..=3 → paper.
+        assert_eq!(
+            buf.get(px0 + 2, py0 + 3),
+            th.appliance.printer_paper,
+            "bottom-centre = paper"
+        );
+        // dx==0, mid row (dy==1) → tray (the dx==0||dx==4 side arm).
+        assert_eq!(
+            buf.get(px0, py0 + 1),
+            th.appliance.printer_tray,
+            "side column = tray"
+        );
+        // an interior body cell (dy==1, dx==2) → body_white.
+        assert_eq!(
+            buf.get(px0 + 2, py0 + 1),
+            th.appliance.printer_body,
+            "interior = body"
+        );
+    }
+
+    #[test]
+    fn gateway_mascot_missing_anim_is_a_noop() {
+        // A GatewayMascot whose anim_name is absent early-returns (913-914) and
+        // paints nothing — the exact analogue of pet_drawable_missing_anim_is_a_noop.
+        let pack = test_pack();
+        let mut cache = FrameCache::new();
+        let now = SystemTime::UNIX_EPOCH;
+        let bg = Rgb { r: 7, g: 8, b: 9 };
+        let mut buf = RgbBuffer::filled(60, 60, bg);
+        let d = Drawable {
+            anchor_y: 30,
+            kind: DrawableKind::GatewayMascot {
+                pos: Point { x: 30, y: 30 },
+                anim_name: "nonexistent_anim",
+                frame_idx: 0,
+                run_count: 0,
+                degraded: false,
+            },
+        };
+        paint_drawable(&d, &mut buf, &pack, &mut cache, now, theme());
+        for y in 0..buf.height {
+            for x in 0..buf.width {
+                assert_eq!(buf.get(x, y), bg, "missing mascot anim must paint nothing");
+            }
+        }
+    }
+
+    #[test]
+    fn gateway_mascot_degraded_renders_distinct_pixels() {
+        // degraded:true blits palette::degraded_frame (a sickly-red tinted copy) at
+        // 923 instead of the raw frame at 925 — so the rendered buffer differs
+        // pixel-for-pixel from the degraded:false render.
+        let pack = test_pack();
+        let mut cache = FrameCache::new();
+        let now = SystemTime::UNIX_EPOCH;
+        let pos = Point { x: 30, y: 30 };
+        let def = gateway_mascot_def(pixtuoid_core::source::openclaw::SOURCE_NAME)
+            .expect("openclaw mascot def");
+        let black = Rgb { r: 0, g: 0, b: 0 };
+        let mut render = |degraded: bool| {
+            let mut buf = RgbBuffer::filled(80, 80, black);
+            let d = Drawable {
+                anchor_y: pos.y,
+                kind: DrawableKind::GatewayMascot {
+                    pos,
+                    anim_name: def.rest,
+                    frame_idx: 0,
+                    run_count: 0,
+                    degraded,
+                },
+            };
+            paint_drawable(&d, &mut buf, &pack, &mut cache, now, theme());
+            buf
+        };
+        let plain = render(false);
+        let degraded = render(true);
+        // Both must actually paint something (else the "differs" test is vacuous).
+        let mut plain_painted = false;
+        let mut differs = false;
+        for y in 0..80u16 {
+            for x in 0..80u16 {
+                let pp = plain.get(x, y);
+                if pp != black {
+                    plain_painted = true;
+                }
+                if pp != degraded.get(x, y) {
+                    differs = true;
+                }
+            }
+        }
+        assert!(plain_painted, "the plain lobster must actually render");
+        assert!(
+            differs,
+            "the degraded lobster must render distinct (tinted) pixels vs the plain one"
+        );
+    }
 }

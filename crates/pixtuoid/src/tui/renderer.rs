@@ -591,4 +591,114 @@ mod tests {
         };
         assert_eq!(clip_widget_rect(r, b), None);
     }
+
+    // A zero-HEIGHT rect that sits STRICTLY inside both entry guards (its x/y are
+    // well inside `bounds`, and `rect.x + rect.width > bounds.x`,
+    // `rect.y + rect.height == rect.y > bounds.y`) clears lines 149/152 and is
+    // only rejected by the line-160 collapse guard (`bot <= y`). The existing
+    // zero-SIZE test uses a zero-WIDTH rect, which exits early at line 152, so it
+    // never reaches 160.
+    #[test]
+    fn clip_widget_rect_zero_height_inside_bounds_returns_none() {
+        let zero_h = Rect {
+            x: 2,
+            y: 2,
+            width: 4,
+            height: 0,
+        };
+        let b = Rect {
+            x: 0,
+            y: 0,
+            width: 80,
+            height: 24,
+        };
+        assert_eq!(clip_widget_rect(zero_h, b), None);
+
+        // Mutation-killer: a non-degenerate rect at the SAME position still
+        // clips to itself. If the line-160 guard were deleted (so `zero_h`
+        // returned `Some` with height 0), this pair would still pass — so the
+        // first assert is what pins the guard, and this one pins that the guard
+        // doesn't over-reject a real rect.
+        let inside = Rect {
+            x: 2,
+            y: 2,
+            width: 4,
+            height: 3,
+        };
+        assert_eq!(clip_widget_rect(inside, b), Some(inside));
+    }
+
+    fn rgb(r: u8, g: u8, b: u8) -> pixtuoid_core::sprite::Rgb {
+        pixtuoid_core::sprite::Rgb { r, g, b }
+    }
+
+    /// The cell symbol a flushed half-block carries (upper-half block).
+    const HALF_BLOCK: &str = "\u{2580}";
+
+    // Lines 499-500: columns whose terminal x falls past the scene rect's right
+    // edge are skipped (a buffer wider than the rect). Deleting the `continue`
+    // would paint half-blocks past the rect onto the footer column band.
+    #[test]
+    fn flush_skips_columns_past_scene_right_edge() {
+        let mut term =
+            Terminal::new(ratatui::backend::TestBackend::new(10, 6)).expect("test backend");
+        // buf is WIDER (6) than the scene rect (width 4); cell_rows = 4/2 = 2.
+        let buf = RgbBuffer::filled(6, 4, rgb(10, 20, 30));
+        let rect = Rect {
+            x: 0,
+            y: 0,
+            width: 4,
+            height: 2,
+        };
+        term.draw(|f| flush_buffer_to_term_at_offset(f, &buf, rect, 0))
+            .expect("draw");
+        let term_buf = term.backend().buffer();
+        // In-rect columns 0..4 carry the half-block.
+        for x in 0..4u16 {
+            assert_eq!(
+                term_buf.cell((x, 0)).unwrap().symbol(),
+                HALF_BLOCK,
+                "column {x} is inside the rect and must be painted"
+            );
+        }
+        // Columns 4 and 5 (the buffer overhang) are left untouched.
+        for x in 4..6u16 {
+            assert_ne!(
+                term_buf.cell((x, 0)).unwrap().symbol(),
+                HALF_BLOCK,
+                "column {x} is past the rect's right edge and must be skipped"
+            );
+        }
+    }
+
+    // Lines 502-503: cells whose x/y fall outside the actual terminal buffer are
+    // skipped (a scene rect larger than the frame, a resize race). Deleting the
+    // `continue` would index `term_buf[(x, y)]` out of bounds and panic.
+    #[test]
+    fn flush_skips_cells_past_terminal_bounds() {
+        let mut term =
+            Terminal::new(ratatui::backend::TestBackend::new(4, 3)).expect("test backend");
+        // buf 8x8 (cell_rows = 4) flushed into a rect that EXCEEDS the 4x3 backend.
+        let buf = RgbBuffer::filled(8, 8, rgb(40, 50, 60));
+        let rect = Rect {
+            x: 0,
+            y: 0,
+            width: 8,
+            height: 6,
+        };
+        // The draw must not panic despite the oversized rect.
+        term.draw(|f| flush_buffer_to_term_at_offset(f, &buf, rect, 0))
+            .expect("draw must not panic on an oversized rect");
+        let term_buf = term.backend().buffer();
+        // Exactly the in-bounds intersection (0..4 × 0..3) is painted.
+        for y in 0..3u16 {
+            for x in 0..4u16 {
+                assert_eq!(
+                    term_buf.cell((x, y)).unwrap().symbol(),
+                    HALF_BLOCK,
+                    "in-bounds cell ({x},{y}) must be painted"
+                );
+            }
+        }
+    }
 }

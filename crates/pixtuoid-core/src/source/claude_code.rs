@@ -420,6 +420,40 @@ mod tests {
         assert!(matches!(decode_cc_hook_custom(&json!("nope")), Ok(None)));
     }
 
+    // When the SubagentStop transcript STEM disagrees with the prefixed wire
+    // `agent_id`, the stem wins (it is the watcher's authoritative key) and a
+    // shape-drift breadcrumb fires. No fixture makes the two disagree — every
+    // captured payload has stem == `agent-<wire>`. A mutation that dropped the
+    // path_key branch (keeping the prefixed form) would key on `agent-abc`.
+    #[test]
+    fn subagent_stop_keys_on_stem_when_it_disagrees_with_prefixed_wire_id() {
+        let evs = decode_cc_hook_custom(&json!({
+            "hook_event_name": "SubagentStop",
+            "session_id": "s",
+            "agent_id": "abc",
+            "agent_transcript_path": "/p/q/01-deadbeef/subagents/agent-zzz.jsonl"
+        }))
+        .unwrap()
+        .unwrap();
+        assert_eq!(evs.len(), 1, "SubagentStop emits exactly one event");
+        match &evs[0] {
+            AgentEvent::SessionEnd { agent_id, as_child } => {
+                assert!(*as_child, "a SubagentStop end is stamped as_child");
+                assert_eq!(
+                    *agent_id,
+                    AgentId::from_parts(SOURCE_NAME, "agent-zzz"),
+                    "the transcript STEM agent-zzz must win over the prefixed wire id agent-abc"
+                );
+                assert_ne!(
+                    *agent_id,
+                    AgentId::from_parts(SOURCE_NAME, "agent-abc"),
+                    "the prefixed wire id must NOT be the key when the stem differs"
+                );
+            }
+            other => panic!("expected SessionEnd, got {other:?}"),
+        }
+    }
+
     // A present agent_transcript_path whose stem is EMPTY (degenerate path)
     // must fall back to the prefixed wire id, never mint AgentId("").
     #[test]
@@ -712,6 +746,128 @@ mod tests {
             out.is_empty(),
             "slash-command content must not emit lifecycle events: {out:?}"
         );
+    }
+
+    // A transcript line whose top-level JSON value is NOT an object (a bare
+    // array or string) must decode to NOTHING — the `as_object()` guard at the
+    // top of decode_cc_line returns early. Real transcripts are line-delimited
+    // objects, but a corrupt/foreign line must never panic or synthesize.
+    #[test]
+    fn decode_cc_line_non_object_value_decodes_to_nothing() {
+        let path = "/x/.claude/projects/p/s.jsonl";
+        assert!(
+            decode_cc_line(path, "claude-code", serde_json::json!([1, 2, 3]))
+                .unwrap()
+                .is_empty(),
+            "a bare array line must emit no events"
+        );
+        assert!(
+            decode_cc_line(path, "claude-code", serde_json::json!("raw string line"))
+                .unwrap()
+                .is_empty(),
+            "a bare string line must emit no events"
+        );
+    }
+
+    // An assistant tool_use block missing its `name` field substitutes "?"
+    // (and fires a missing_field drift breadcrumb), still emitting exactly one
+    // ActivityStart whose detail is the "?"-derived Generic ToolDetail. A
+    // mutation that changed the "?" fallback or skipped the block would fail.
+    #[test]
+    fn tool_use_without_name_emits_activity_start_with_question_mark_detail() {
+        let out = decode_cc_line(
+            "/x/.claude/projects/p/s.jsonl",
+            "claude-code",
+            json!({"type":"assistant","message":{"content":[{"type":"tool_use","id":"tu1"}]}}),
+        )
+        .unwrap();
+        assert_eq!(out.len(), 1, "one tool_use block → one ActivityStart");
+        match &out[0] {
+            AgentEvent::ActivityStart {
+                tool_use_id,
+                detail,
+                ..
+            } => {
+                assert_eq!(tool_use_id.as_deref(), Some("tu1"));
+                assert_eq!(
+                    detail.as_ref(),
+                    Some(&make_tool_detail(SOURCE_NAME, "?", None)),
+                    "a name-less tool_use substitutes the \"?\" fallback name"
+                );
+            }
+            other => panic!("expected ActivityStart, got {other:?}"),
+        }
+    }
+
+    // The assistant content-array loop skips a non-object element AND a block
+    // whose type != "tool_use", so a mixed array yields ONLY the real tool_use
+    // ActivityStart. A mutation removing either `continue` would panic or emit
+    // extra/garbage events.
+    #[test]
+    fn assistant_content_skips_non_object_and_non_tool_use_blocks() {
+        let out = decode_cc_line(
+            "/x/.claude/projects/p/s.jsonl",
+            "claude-code",
+            json!({"type":"assistant","message":{"content":[
+                42,
+                {"type":"text","text":"hi"},
+                {"type":"tool_use","id":"tu","name":"Read","input":{"file_path":"/a"}}
+            ]}}),
+        )
+        .unwrap();
+        assert_eq!(
+            out.len(),
+            1,
+            "only the real tool_use block decodes; the int + text block are skipped: {out:?}"
+        );
+        match &out[0] {
+            AgentEvent::ActivityStart {
+                tool_use_id,
+                detail,
+                ..
+            } => {
+                assert_eq!(tool_use_id.as_deref(), Some("tu"));
+                assert_eq!(
+                    detail.as_ref(),
+                    Some(&make_tool_detail(
+                        SOURCE_NAME,
+                        "Read",
+                        Some(&json!({"file_path":"/a"}))
+                    )),
+                    "the surviving block is the Read tool_use"
+                );
+            }
+            other => panic!("expected ActivityStart, got {other:?}"),
+        }
+    }
+
+    // The user content-array loop skips a non-object element AND a block whose
+    // type != "tool_result", so a mixed array yields ONLY the real tool_result
+    // ActivityEnd. A mutation removing either `continue` would panic or emit
+    // extra/garbage events.
+    #[test]
+    fn user_content_skips_non_object_and_non_tool_result_blocks() {
+        let out = decode_cc_line(
+            "/x/.claude/projects/p/s.jsonl",
+            "claude-code",
+            json!({"type":"user","message":{"content":[
+                "str",
+                {"type":"text","text":"hi"},
+                {"type":"tool_result","tool_use_id":"tu"}
+            ]}}),
+        )
+        .unwrap();
+        assert_eq!(
+            out.len(),
+            1,
+            "only the real tool_result block decodes; the string + text block are skipped: {out:?}"
+        );
+        match &out[0] {
+            AgentEvent::ActivityEnd { tool_use_id, .. } => {
+                assert_eq!(tool_use_id.as_deref(), Some("tu"));
+            }
+            other => panic!("expected ActivityEnd, got {other:?}"),
+        }
     }
 }
 

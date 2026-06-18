@@ -336,6 +336,50 @@ async fn bind_respects_lock_arbitration_even_without_a_socket_file() {
     );
 }
 
+// The post-lock belt-and-braces probe (unix.rs lines 86-97): a LOCK-LESS live
+// owner — an older pixtuoid mid-upgrade, or a squatter — holds the socket open
+// but never acquired the `<sock>.lock` sibling. A fresh bind THEN acquires that
+// free lock (so the lock arbiter alone would say "stale, reclaim"), but the
+// socket file still exists, so it connect-probes before reclaiming: a SUCCESSFUL
+// connect (`Ok(_stream) => true`) proves a live owner and bind defers via
+// SocketBusy rather than stealing. This is the ONLY busy path that reaches the
+// connect probe — every other busy test trips the lock try-lock first.
+#[tokio::test]
+async fn bind_defers_to_a_lockless_live_listener_via_the_connect_probe() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("pixtuoid.sock");
+
+    // A RAW tokio listener creates the socket file and NOTHING else — crucially
+    // no `.lock` sibling — emulating a lock-protocol-unaware live owner. It need
+    // never call accept(): the OS backlogs (or accepts) the probe connect.
+    let _raw = tokio::net::UnixListener::bind(&path).unwrap();
+    assert!(
+        !dir.path().join("pixtuoid.sock.lock").exists(),
+        "premise: a raw listener creates no lock sibling, so bind will acquire the lock freely"
+    );
+
+    let err = HookSocketListener::bind(path.clone())
+        .await
+        .err()
+        .expect("a lock-less but LIVE listener must be deferred to, not reclaimed");
+    assert!(
+        err.downcast_ref::<pixtuoid_core::source::hook::SocketBusy>()
+            .is_some(),
+        "the connect-probe-detected live owner must defer via the typed SocketBusy: {err:#}"
+    );
+
+    // The probe must defer, never unlink: the raw owner's socket file survives.
+    // (A regression flipping `Ok(_stream) => true` to `false` would make bind
+    // reclaim — remove_file then bind — yielding Ok and a different inode.)
+    assert!(
+        path.exists(),
+        "the deferring probe must NOT unlink the live owner's socket file"
+    );
+    let mut s = UnixStream::connect(&path).await.unwrap();
+    s.shutdown().await.unwrap();
+    drop(_raw);
+}
+
 #[tokio::test]
 async fn listener_handles_concurrent_connections() {
     let dir = TempDir::new().unwrap();

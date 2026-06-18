@@ -1058,4 +1058,175 @@ mod tests {
         assert_eq!(first_sanitized_line(b""), None);
         assert_eq!(first_sanitized_line(b"   \n  \n"), None);
     }
+
+    // R0615-09 / field_value loop-back (97-98): `name=` inside `displayName=` is a
+    // FALSE match (not field-start) and must be skipped so the loop advances to the
+    // real `name=` field. Without the boundary guard, `displayName=foo` would be
+    // mis-picked → the sample would be "foo", not "Real".
+    #[test]
+    fn scan_does_not_pick_name_inside_displayname() {
+        let line = "2026-06-15T00:00:00Z  WARN pixtuoid::drift: source=copilot kind=\"unknown_event\" displayName=foo name=Real";
+        let r = scan_log_for_source(line, "copilot");
+        assert_eq!(r.unknown_event, 1, "line:\n{line}");
+        assert!(r.samples.contains(&"Real".to_string()), "{:?}", r.samples);
+        assert!(!r.samples.contains(&"foo".to_string()), "{:?}", r.samples);
+    }
+
+    // push_sample's None arm (130): an `unknown_event` breadcrumb with NO `name=`
+    // field still counts (parse_drift_line needs only source+kind) but contributes
+    // no sample — field_value returns None → push_sample no-ops.
+    #[test]
+    fn scan_unknown_event_without_a_name_field_counts_but_samples_none() {
+        let line =
+            "2026-06-15T00:00:00Z  WARN pixtuoid::drift: source=copilot kind=\"unknown_event\"";
+        let r = scan_log_for_source(line, "copilot");
+        assert_eq!(r.unknown_event, 1, "line:\n{line}");
+        assert!(r.samples.is_empty(), "{:?}", r.samples);
+    }
+
+    // scan_log_for_source `_ => continue` arm (158): a well-formed drift line whose
+    // kind is none of the four known kinds is silently ignored — no count, no sample.
+    #[test]
+    fn scan_ignores_an_unknown_drift_kind() {
+        let line =
+            "2026-06-15T00:00:00Z  WARN pixtuoid::drift: source=copilot kind=\"bogus_kind\" name=X";
+        let r = scan_log_for_source(line, "copilot");
+        assert_eq!(r.total(), 0, "line:\n{line}");
+        assert!(r.samples.is_empty(), "{:?}", r.samples);
+        assert!(
+            r.last_ts.is_none(),
+            "an ignored kind must not stamp last_ts"
+        );
+    }
+
+    // parse_version skip arm (355→360 without push): a dotted run whose major
+    // overflows u64 is DROPPED (not pushed), so the next valid run is selected; a
+    // pure-overflow banner with no fallback run yields None.
+    #[test]
+    fn parse_version_skips_a_run_with_an_overflowing_major() {
+        // 23-digit major overflows u64 → that run is dropped → the v-run wins.
+        assert_eq!(
+            parse_version("99999999999999999999999.0 v1.2.3"),
+            Some((1, 2, 3))
+        );
+        // No fallback run → the overflowing run is the only one → None.
+        assert_eq!(parse_version("99999999999999999999999.0"), None);
+    }
+
+    // verdict_glyph en-dash branch (404→405): a CLEAN transcript-only row (no target,
+    // no drift, not broken) renders `–`, distinct from the existing transcript-only
+    // test row which carries drift (→ `⚠`).
+    #[test]
+    fn verdict_glyph_dash_for_clean_transcript_only_row() {
+        let row = DoctorSourceRow {
+            prefix: "cp",
+            source_id: "copilot",
+            connected: true,
+            has_target: false,
+            hooks_installed: false,
+            installed_version: None,
+            verified_version: "unknown",
+            scan: LogScanResult::default(),
+            schema: None,
+        };
+        let s = format_doctor_row(&row);
+        assert!(
+            s.starts_with("  \u{2013}"),
+            "clean transcript-only leads with –: {s}"
+        );
+        assert!(s.contains("transcript-only"), "{s}");
+        assert!(!s.contains('\n'), "a clean row is a single line: {s}");
+    }
+
+    // verdict_glyph circle branch (406→407) + format state "not installed" (453→454):
+    // a row with a target but no installed hooks, clean scan/schema → `○` + "not
+    // installed". connected:false also covers the "disconnected" label (448→449).
+    #[test]
+    fn row_installable_but_not_installed_shows_circle_and_not_installed() {
+        let row = DoctorSourceRow {
+            prefix: "cc",
+            source_id: "claude-code",
+            connected: false,
+            has_target: true,
+            hooks_installed: false,
+            installed_version: None,
+            verified_version: "unknown",
+            scan: LogScanResult::default(),
+            schema: None,
+        };
+        let s = format_doctor_row(&row);
+        assert!(
+            s.starts_with("  \u{25cb}"),
+            "installable-not-installed leads with ○: {s}"
+        );
+        assert!(s.contains("not installed"), "{s}");
+        assert!(
+            s.contains("disconnected"),
+            "connected:false → disconnected: {s}"
+        );
+        assert!(!s.contains('\n'), "no problem → single line: {s}");
+    }
+
+    // format_doctor_row soft-note continuation (477→478): a SOUND schema (no issues)
+    // with non-empty notes emits a `↳ note: …` line but stays a `✓` healthy verdict,
+    // never "broken".
+    #[test]
+    fn format_row_emits_note_continuation_for_sound_schema_with_notes() {
+        let row = DoctorSourceRow {
+            prefix: "cw",
+            source_id: "codewhale",
+            connected: true,
+            has_target: true,
+            hooks_installed: true,
+            installed_version: Some("1.0.0".into()),
+            verified_version: "unknown",
+            scan: LogScanResult::default(),
+            schema: Some(crate::install::verify::SchemaVerifyResult {
+                issues: vec![],
+                notes: vec!["pixtuoid-hook not on PATH".into()],
+            }),
+        };
+        let s = format_doctor_row(&row);
+        assert!(s.starts_with("  \u{2713}"), "sound-with-notes still ✓: {s}");
+        assert!(
+            s.contains("\n       \u{21b3} note: pixtuoid-hook not on PATH"),
+            "note on its own ↳ line: {s}"
+        );
+        assert!(
+            !s.to_lowercase().contains("broken"),
+            "a note is not broken: {s}"
+        );
+    }
+
+    // drift_detail kind-branches (417/423/426) + samples join (436) + when=last_ts:
+    // a row carrying every drift kind, samples, and a timestamp renders the full
+    // detail line. The existing format test only exercises missing-field (419-421).
+    #[test]
+    fn format_row_drift_detail_covers_all_kinds_samples_and_last_ts() {
+        let row = DoctorSourceRow {
+            prefix: "cp",
+            source_id: "copilot",
+            connected: true,
+            has_target: false,
+            hooks_installed: false,
+            installed_version: None,
+            verified_version: "unknown",
+            scan: LogScanResult {
+                unknown_event: 2,
+                missing_field: 0,
+                unknown_dispatch: 1,
+                shape_drift: 1,
+                samples: vec!["NewHook".into(), "MyTool".into()],
+                last_ts: Some("2026-06-15T00:00:00Z".into()),
+            },
+            schema: None,
+        };
+        let s = format_doctor_row(&row);
+        assert!(
+            s.contains("decode drift: 2 unknown-event, 1 unknown-dispatch, 1 shape-drift"),
+            "{s}"
+        );
+        assert!(s.contains("(last 2026-06-15T00:00:00Z)"), "{s}");
+        assert!(s.contains("[NewHook, MyTool]"), "{s}");
+    }
 }

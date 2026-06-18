@@ -197,6 +197,22 @@ mod tests {
         assert!(release_notes("9.9.9").is_none());
     }
 
+    /// Every SHIPPED historical version must keep a non-empty `release_notes`
+    /// arm — those arms back the upgrade popup, which `boot_decision` gates on
+    /// `release_notes(current).is_some()`. An empty/absent slice renders a
+    /// blank popup, so this fails if any arm is deleted or returns `Some(&[])`.
+    /// (No exact-prose assertions — that would be brittle to copy edits.)
+    #[test]
+    fn release_notes_present_for_every_shipped_version() {
+        for v in [
+            "0.4.1", "0.5.0", "0.6.0", "0.6.1", "0.7.0", "0.8.0", "0.9.0", "0.10.0",
+        ] {
+            let notes =
+                release_notes(v).unwrap_or_else(|| panic!("missing release_notes arm for {v}"));
+            assert!(!notes.is_empty(), "empty release_notes for {v}");
+        }
+    }
+
     /// Guards against a silent regression: bumping `Cargo.toml` without
     /// adding a matching `release_notes` arm would make the popup
     /// permanently invisible for the new release. This test fails fast.

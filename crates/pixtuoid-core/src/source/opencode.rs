@@ -635,6 +635,62 @@ mod tests {
     }
 
     #[test]
+    fn tool_part_event_without_a_part_object_is_skipped() {
+        // A message.part.updated carrying a sessionID but NO `part` (or a scalar
+        // part) is a benign skip — not the missing-sessionID error path, and not
+        // an activity event. Distinguishes the part-missing skip (line 180) from
+        // the missing-sessionID bail.
+        assert!(
+            decode_all(json!({
+                "type": "message.part.updated",
+                "properties": {"sessionID": "ses_x"}
+            }))
+            .is_empty(),
+            "a part-less message.part.updated must skip, not error"
+        );
+        // A non-object part (`part.as_object()` is None) takes the same branch.
+        assert!(
+            decode_oc_hook_payload(&json!({
+                "type": "message.part.updated",
+                "properties": {"sessionID": "ses_x", "part": 42}
+            }))
+            .expect("scalar part is a skip, not an error")
+            .is_empty(),
+            "a scalar `part` must skip, not error"
+        );
+    }
+
+    #[test]
+    fn running_tool_part_without_a_tool_field_degrades_to_question_mark_detail() {
+        // status==running but the part has NO `tool` key: the unwrap_or_else
+        // drift fallback substitutes "?" as the tool name and still builds a
+        // real ActivityStart (Identity + ActivityStart), keyed on the callID.
+        let events = decode_all(json!({
+            "type": "message.part.updated",
+            "properties": {
+                "sessionID": "ses_x",
+                "part": {"type": "tool", "callID": "call_x", "state": {"status": "running"}}
+            }
+        }));
+        assert_eq!(events.len(), 2, "Identity + ActivityStart");
+        match &events[1] {
+            AgentEvent::ActivityStart {
+                tool_use_id,
+                detail,
+                ..
+            } => {
+                assert_eq!(tool_use_id.as_deref(), Some("call_x"));
+                assert_eq!(
+                    detail.as_ref().unwrap().display(),
+                    "?",
+                    "a tool-less running part degrades to the \"?\" display"
+                );
+            }
+            other => panic!("expected ActivityStart, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn long_tool_target_is_truncated_at_the_decode_boundary() {
         let long = "x".repeat(MAX_TOOL_TARGET_CHARS * 3);
         let ev = decode(json!({"type": "message.part.updated", "properties": {

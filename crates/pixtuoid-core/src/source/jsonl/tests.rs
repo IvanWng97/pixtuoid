@@ -2016,3 +2016,362 @@ async fn park_if_truncated_below_cursor_lands_exactly_at_new_eof() {
         "a cursor at/below the file length must be untouched"
     );
 }
+
+/// `scan_root`'s read_dir Err arm: an unreadable/nonexistent watched root
+/// latches the failure (`FailureLatch::on_failure()` true → warn once) and
+/// discovers no sessions. A mutant that swallowed the Err and read an empty
+/// dir would leave the latch quiet AND would never recover-report below.
+#[tokio::test]
+async fn scan_root_on_unreadable_root_latches_failure_and_emits_nothing() {
+    let bad: PathBuf = std::env::temp_dir().join(format!("pixtuoid-no-such-{}", uuid_like()));
+    assert!(!bad.exists(), "fixture: the bad root must not exist");
+    let cursors = Arc::new(Mutex::new(HashMap::new()));
+    let seen = Arc::new(Mutex::new(HashMap::new()));
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(32);
+    let source: Arc<str> = Arc::from("test");
+    let live = Arc::new(Mutex::new(HashSet::new()));
+    let ctx = WatchCtx {
+        source: &source,
+        cursors: &cursors,
+        seen: &seen,
+        tx: &tx,
+        window: Duration::from_secs(3600),
+        live: &live,
+    };
+
+    let mut health = FailureLatch::default();
+    scan_root(&bad, t_decoders(), &ctx, &mut health).await;
+    drop(tx);
+    let events = drain_events(&mut rx);
+    assert!(
+        events.is_empty(),
+        "an unreadable root discovers no sessions, got {events:?}"
+    );
+    // The Err arm fired on_failure() — so a FRESH on_failure() is now QUIET
+    // (the latch is already in the failed state). A swallow-the-Err mutant
+    // would never have set the failed state, so this on_failure() would
+    // report true.
+    assert!(
+        !health.on_failure(),
+        "scan_root's Err arm must have already latched the failure"
+    );
+}
+
+/// `scan_root`'s recovery arm (line 54): read_dir succeeds after a prior
+/// failure → `on_success()` true → "readable again". The bad→good
+/// composition still registers the real transcript, and the latch's
+/// recovery edge is consumed exactly once (a follow-up on_success is quiet).
+#[tokio::test]
+async fn scan_root_recovers_after_a_failed_root_reports_success_once() {
+    let cursors = Arc::new(Mutex::new(HashMap::new()));
+    let seen = Arc::new(Mutex::new(HashMap::new()));
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(32);
+    let source: Arc<str> = Arc::from("test");
+    let live = Arc::new(Mutex::new(HashSet::new()));
+
+    let good = tempfile::tempdir().unwrap();
+    let real = good.path().join("real.jsonl");
+    tokio::fs::write(&real, "{\"type\":\"assistant\",\"cwd\":\"/r\"}\n")
+        .await
+        .unwrap();
+
+    let ctx = WatchCtx {
+        source: &source,
+        cursors: &cursors,
+        seen: &seen,
+        tx: &tx,
+        window: Duration::from_secs(3600),
+        live: &live,
+    };
+
+    let mut health = FailureLatch::default();
+    // Pass 1: a bad root latches the failure.
+    let bad: PathBuf = std::env::temp_dir().join(format!("pixtuoid-no-such-{}", uuid_like()));
+    scan_root(&bad, t_decoders(), &ctx, &mut health).await;
+    assert!(rx.try_recv().is_err(), "the bad root emits nothing");
+
+    // Pass 2: the good root recovers — scan_root's Ok arm consumed the
+    // latch's recovery edge AND the real transcript registered.
+    scan_root(good.path(), t_decoders(), &ctx, &mut health).await;
+    drop(tx);
+    let events = drain_events(&mut rx);
+    let expected = AgentId::from_parts("test", &default_id_from_path(&real));
+    assert!(
+        events.iter().any(|(_, e)| matches!(
+            e,
+            AgentEvent::SessionStart { agent_id, .. } if *agent_id == expected
+        )),
+        "the recovered root must register the real transcript, got {events:?}"
+    );
+    // scan_root's Ok arm already called on_success() → a fresh on_success()
+    // is now quiet (the recovery edge was consumed inside the good scan).
+    assert!(
+        !health.on_success(),
+        "scan_root's Ok arm must have already reported the recovery"
+    );
+    // And a NEW failure after that recovery reports again (the latch is back
+    // in the clean state, proving the recovery edge truly fired).
+    assert!(
+        health.on_failure(),
+        "a failure after the consumed recovery must report again"
+    );
+}
+
+/// `walk_jsonl`'s directory-recursion arm (lines 110-116): when the entry is
+/// a real directory it read_dirs and Box::pins walk_jsonl over each child, so
+/// a nested transcript registers and is tracked. A mutant that `return`ed on
+/// is_dir without recursing would emit nothing.
+#[tokio::test]
+async fn walk_jsonl_recurses_into_a_subdirectory_and_registers_nested_transcripts() {
+    let dir = tempfile::tempdir().unwrap();
+    let day = dir.path().join("day");
+    tokio::fs::create_dir_all(&day).await.unwrap();
+    let nested = day.join("ses.jsonl");
+    tokio::fs::write(&nested, "{\"type\":\"assistant\",\"cwd\":\"/r\"}\n")
+        .await
+        .unwrap();
+    let cursors = Arc::new(Mutex::new(HashMap::new()));
+    let seen = Arc::new(Mutex::new(HashMap::new()));
+
+    // Pass the DIRECTORY path to walk_jsonl — the recursion descends to the
+    // nested transcript.
+    let events = walk_once(
+        dir.path(),
+        Duration::from_secs(3600),
+        t_ended,
+        &cursors,
+        &seen,
+    )
+    .await;
+    let expected = AgentId::from_parts("test", &default_id_from_path(&nested));
+    assert!(
+        events.iter().any(|(_, e)| matches!(
+            e,
+            AgentEvent::SessionStart { agent_id, .. } if *agent_id == expected
+        )),
+        "the nested transcript must register through the directory recursion, got {events:?}"
+    );
+    assert!(
+        cursors.lock().await.contains_key(&nested),
+        "the nested transcript's cursor must be tracked"
+    );
+}
+
+/// `walk_jsonl`'s extension guard (lines 118-119): a recent, live file whose
+/// extension is not `jsonl` is returned without tracking. A mutant dropping
+/// the check would register/seed a foreign file.
+#[tokio::test]
+async fn walk_jsonl_skips_a_non_jsonl_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("foo.txt");
+    // A recent, JSON-bearing, live file — only the extension disqualifies it.
+    tokio::fs::write(&path, "{\"type\":\"assistant\",\"cwd\":\"/r\"}\n")
+        .await
+        .unwrap();
+    let cursors = Arc::new(Mutex::new(HashMap::new()));
+    let seen = Arc::new(Mutex::new(HashMap::new()));
+
+    let events = walk_once(&path, Duration::from_secs(3600), t_ended, &cursors, &seen).await;
+    assert!(
+        events.is_empty(),
+        "a non-.jsonl file must emit nothing, got {events:?}"
+    );
+    assert!(
+        cursors.lock().await.is_empty(),
+        "a non-.jsonl file must never be tracked"
+    );
+}
+
+/// `walk_jsonl`'s symlink_metadata Err arm (line 102): a path that cannot be
+/// stat'd (never created) returns immediately, emitting nothing and tracking
+/// nothing. A mutant that unwrapped or proceeded past the stat would panic or
+/// register a phantom.
+#[tokio::test]
+async fn walk_jsonl_on_a_missing_path_is_a_silent_no_op() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("ghost.jsonl"); // never written
+    assert!(!path.exists(), "fixture: the path must not exist");
+    let cursors = Arc::new(Mutex::new(HashMap::new()));
+    let seen = Arc::new(Mutex::new(HashMap::new()));
+
+    let events = walk_once(&path, Duration::from_secs(3600), t_ended, &cursors, &seen).await;
+    assert!(
+        events.is_empty(),
+        "a missing path must emit nothing, got {events:?}"
+    );
+    assert!(
+        !cursors.lock().await.contains_key(&path),
+        "a missing path must never be tracked"
+    );
+}
+
+/// `walk_jsonl`'s truncation arm (lines 162-171): a KNOWN file whose stored
+/// cursor exceeds the current file_len (a live truncate-rewrite resync) RESETS
+/// the cursor to 0 and emits nothing this pass — distinct from the exit-path
+/// park, which lands at file_len. A park-at-EOF mutant would leave the cursor
+/// at file_len, not 0.
+#[tokio::test]
+async fn walk_jsonl_resets_cursor_to_zero_when_known_file_truncated_below_cursor() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("resync.jsonl");
+    tokio::fs::write(&path, "{\"type\":\"assistant\"}\n")
+        .await
+        .unwrap();
+    let file_len = tokio::fs::metadata(&path).await.unwrap().len();
+    assert!(
+        file_len < 999,
+        "fixture: the file must be shorter than the seeded cursor"
+    );
+
+    // KNOWN (cursor present) at a cursor far above the current file length,
+    // and `seen` claimed so it takes the normal-walk truncation arm (the
+    // first-sight gate is skipped for a known file).
+    let cursors = Arc::new(Mutex::new(HashMap::from([(path.clone(), 999u64)])));
+    let seen = Arc::new(Mutex::new(HashMap::from([(path.clone(), true)])));
+
+    let events = walk_once(&path, Duration::from_secs(3600), t_ended, &cursors, &seen).await;
+    assert!(
+        events.is_empty(),
+        "the truncation resync emits nothing this pass, got {events:?}"
+    );
+    assert_eq!(
+        cursors.lock().await.get(&path).copied(),
+        Some(0),
+        "the normal-walk truncation arm must RESET the cursor to 0 (not park at EOF)"
+    );
+}
+
+/// `walk_jsonl`'s per-line decode-error arm (line 347): a line whose decoder
+/// returns Err is warn-logged and skipped — the read continues and the cursor
+/// still advances to the safe newline, so the benign line's first-sight
+/// registration still fires. A `?`-propagating mutant would abort the whole
+/// read, leaving the cursor short and dropping the registration.
+#[tokio::test]
+async fn walk_jsonl_skips_a_line_whose_decoder_errors_and_advances_cursor() {
+    fn err_decode(_t: &str, _s: &str, v: serde_json::Value) -> Result<Vec<AgentEvent>> {
+        if v.get("boom").is_some() {
+            anyhow::bail!("boom");
+        }
+        Ok(vec![])
+    }
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("badline.jsonl");
+    let body = "{\"boom\":1}\n{\"type\":\"assistant\",\"cwd\":\"/r\"}\n";
+    tokio::fs::write(&path, body).await.unwrap();
+    let file_len = body.len() as u64;
+    let cursors = Arc::new(Mutex::new(HashMap::new()));
+    let seen = Arc::new(Mutex::new(HashMap::new()));
+
+    let events = walk_once_with(
+        &path,
+        Duration::from_secs(3600),
+        err_decode,
+        t_ended,
+        &cursors,
+        &seen,
+    )
+    .await;
+    let expected = AgentId::from_parts("test", &default_id_from_path(&path));
+    assert!(
+        events.iter().any(|(_, e)| matches!(
+            e,
+            AgentEvent::SessionStart { agent_id, .. } if *agent_id == expected
+        )),
+        "the erroring line is non-fatal; first-sight registration must still run, got {events:?}"
+    );
+    assert_eq!(
+        cursors.lock().await.get(&path).copied(),
+        Some(file_len),
+        "the cursor must advance to EOF despite the decode error"
+    );
+}
+
+/// `oversized_body` variant producing raw BYTES, so a non-UTF8 fragment can be
+/// interleaved into the Task-scan window (a String can't hold `\xff`).
+fn oversized_body_bytes(tail_chunks: &[Vec<u8>]) -> Vec<u8> {
+    let mut full = Vec::from(CC_HEAD_LINE_BYTES);
+    while full.len() <= (1usize << 20) + 4096 {
+        full.extend_from_slice(FILLER_LINE_BYTES);
+    }
+    for c in tail_chunks {
+        full.extend_from_slice(c);
+    }
+    full
+}
+
+const CC_HEAD_LINE_BYTES: &[u8] = b"{\"type\":\"assistant\",\"cwd\":\"/repo/head\"}\n";
+const FILLER_LINE_BYTES: &[u8] = b"{\"type\":\"assistant\"}\n";
+
+/// `scan_pending_tasks`' line loop (lines 557-565): an empty line is skipped
+/// and a non-UTF8 line is skipped before decode, so a corrupt fragment in the
+/// oversized tail window can't break Task seeding — a complete dispatch after
+/// them still seeds. A mutant that decoded the empty/non-utf8 line would panic
+/// or drop out of the loop, losing the dispatch.
+#[tokio::test]
+async fn task_scan_skips_empty_and_non_utf8_lines_and_still_seeds_a_dispatch() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("deleg-garbage.jsonl");
+    let full = oversized_body_bytes(&[
+        b"\n".to_vec(),                      // empty line (561)
+        b"\xff\xfe garbage \xff\n".to_vec(), // non-UTF8 line (564)
+        cc_task_dispatch_line("tu_x").into_bytes(),
+    ]);
+    tokio::fs::write(&path, &full).await.unwrap();
+    let cursors = Arc::new(Mutex::new(HashMap::new()));
+    let seen = Arc::new(Mutex::new(HashMap::new()));
+
+    let events = walk_oversized_cc(&path, Duration::from_secs(3600), &cursors, &seen).await;
+    assert_eq!(
+        task_start_tuids(&events),
+        vec!["tu_x".to_string()],
+        "the garbage lines must be skipped and the valid dispatch still seed, got {events:?}"
+    );
+}
+
+/// `scan_pending_tasks`' decode-error arm (lines 566-571): a line that parses
+/// as JSON but whose decoder returns Err is debug-logged and skipped
+/// (`continue`), not fatal to the rest of the Task scan — a valid dispatch
+/// later in the window still seeds. A `?`/unwrap mutant would abort the scan
+/// and seed nothing.
+#[tokio::test]
+async fn task_scan_skips_a_decoder_error_line_and_still_seeds_a_later_dispatch() {
+    fn deco(t: &str, s: &str, v: serde_json::Value) -> Result<Vec<AgentEvent>> {
+        if v.get("boom").is_some() {
+            anyhow::bail!("x");
+        }
+        crate::source::claude_code::decode_cc_line(t, s, v)
+    }
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("deleg-decode-err.jsonl");
+    let full = oversized_body(&["{\"boom\":1}\n".to_string(), cc_task_dispatch_line("tu_y")]);
+    tokio::fs::write(&path, &full).await.unwrap();
+    let cursors = Arc::new(Mutex::new(HashMap::new()));
+    let seen = Arc::new(Mutex::new(HashMap::new()));
+
+    let events = walk_once_with(
+        &path,
+        Duration::from_secs(3600),
+        deco,
+        t_ended,
+        &cursors,
+        &seen,
+    )
+    .await;
+    assert_eq!(
+        task_start_tuids(&events),
+        vec!["tu_y".to_string()],
+        "the decoder-error line must be skipped and the valid dispatch still seed, got {events:?}"
+    );
+}
+
+/// A cheap unique-ish suffix for nonexistent-path fixtures (no uuid dep here).
+fn uuid_like() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    format!("{nanos}-{:p}", &nanos)
+}

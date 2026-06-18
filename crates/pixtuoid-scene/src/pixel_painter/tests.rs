@@ -1207,6 +1207,97 @@ fn tool_glow_tint_maps_delegation_search_and_unknown_tokens() {
     );
 }
 
+// --- degraded_pixel / degraded_frame (#317 unwell gateway) -------------
+
+#[test]
+fn degraded_pixel_desaturates_reddens_and_dims() {
+    // Hand-traced through the three blend stages for a pure-white input:
+    //   lum=255 → gray={255,255,255}; desat (0.55)={255,255,255};
+    //   tinted (0.45 toward {150,40,40})={208,158,158};
+    //   dim (0.18 toward black, ×0.82)={171,130,130}.
+    // The exact-equality assert is the mutation-killer: a dropped blend
+    // stage or a wrong factor changes the bytes.
+    assert_eq!(
+        palette::degraded_pixel(Rgb {
+            r: 255,
+            g: 255,
+            b: 255
+        }),
+        Rgb {
+            r: 171,
+            g: 130,
+            b: 130
+        },
+    );
+    // Property: a pure-green input has r==b==0 going in; the red bias (toward
+    // {150,40,40}) lifts the red channel ABOVE the blue channel, and both end
+    // strictly above their input 0 — so red > blue is a falsifiable witness of
+    // the red tint (drop the red-bias stage and the desaturate-only result has
+    // r == b for a symmetric-in-r/b input). The green channel, though dragged
+    // down by desaturate+dim, is also dimmed below its 255 max.
+    let out = palette::degraded_pixel(Rgb { r: 0, g: 255, b: 0 });
+    assert!(
+        out.r > out.b,
+        "red bias must lift r above b for a pure-green input: {out:?}"
+    );
+    assert!(
+        out.r > 0,
+        "the red bias must raise r above the input's 0: {out:?}"
+    );
+    assert!(
+        out.g < 255 && out.r < 255 && out.b < 255,
+        "every channel dimmed below its bright max: {out:?}"
+    );
+}
+
+#[test]
+fn degraded_frame_transforms_opaque_pixels_and_preserves_transparency_and_dims() {
+    // Mirrors recolor_frame_substitutes_bhs_pixels' shape: a 2×1 frame with
+    // one opaque + one transparent pixel.
+    let frame = Frame::from_pixels(
+        2,
+        1,
+        vec![
+            Some(Rgb {
+                r: 255,
+                g: 255,
+                b: 255,
+            }),
+            None,
+        ],
+    );
+    let out = palette::degraded_frame(&frame);
+    assert_eq!(out.width, 2);
+    assert_eq!(out.height, 1);
+    // Opaque pixel runs through degraded_pixel (the {255,255,255}→{171,130,130}
+    // transform proven above).
+    assert_eq!(
+        out.as_slice()[0],
+        Some(palette::degraded_pixel(Rgb {
+            r: 255,
+            g: 255,
+            b: 255
+        }))
+    );
+    assert_eq!(
+        out.as_slice()[0],
+        Some(Rgb {
+            r: 171,
+            g: 130,
+            b: 130
+        })
+    );
+    // Transparency preserved — the falsifiable branch: a mutant dropping the
+    // .map None-arm (or recoloring transparent pixels) fails here.
+    assert_eq!(
+        out.as_slice()[1],
+        None,
+        "transparent pixel must stay transparent"
+    );
+    // Identity-mutant guard: the opaque pixel actually changed.
+    assert_ne!(out.as_slice()[0], frame.as_slice()[0]);
+}
+
 // --- SeatView::of obstacle (upright) arm -------------------------------
 
 #[test]
@@ -1410,6 +1501,81 @@ fn furniture_corner_clip_does_not_panic() {
     paint_side_table(&mut buf, 1, 1, theme);
     paint_pantry_table(&mut buf, 1, 1, theme);
     // No panic reaching here is the assertion (negative coords are clipped).
+}
+
+#[test]
+fn force_weather_sets_known_clears_none_and_errs_on_unknown() {
+    // The public `--weather` override entry point. Three arms:
+    //   Some(known, case-insensitive) → Ok + override SET (observable through
+    //     the single weather_state chokepoint, which all weather derivation
+    //     funnels through);
+    //   None → Ok + override CLEARED (time-based selection restored);
+    //   Some(unknown) → Err(weather_names()) WITHOUT touching the override.
+    // The override is a thread-local Cell, so all asserts run on one thread
+    // and we reset to None at the very end so the override can't leak into the
+    // time-based weather_state_* sibling tests sharing this thread.
+    //
+    // Sentinel time whose natural (un-forced) weather is NOT Storm — so a
+    // mutant that drops the set_weather_override call (leaving the time-based
+    // value) is caught by the observed-weather assert, not just the Ok/Err
+    // return value.
+    let t = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(10_000);
+    force_weather(None).expect("clear is Ok");
+    let natural = background::weather_state(t);
+
+    // Known name → Ok, and weather_state now FORCES that exact variant.
+    assert!(force_weather(Some("storm")).is_ok(), "known name → Ok");
+    assert_eq!(
+        background::weather_state(t),
+        background::Weather::Storm,
+        "force_weather(storm) must drive weather_state to Storm",
+    );
+    // Forcing pins it regardless of time (the override bypasses time selection).
+    assert_eq!(
+        background::weather_state(t + std::time::Duration::from_secs(987_654)),
+        background::Weather::Storm,
+        "the override must ignore the clock",
+    );
+
+    // Case-insensitive Ok arm → same forced variant.
+    assert!(
+        force_weather(Some("STORM")).is_ok(),
+        "case-insensitive → Ok"
+    );
+    assert_eq!(background::weather_state(t), background::Weather::Storm);
+
+    // A different known name re-targets the override (proves set, not stuck).
+    assert!(force_weather(Some("snow")).is_ok());
+    assert_eq!(
+        background::weather_state(t),
+        background::Weather::Snow,
+        "a second known name must re-set the override",
+    );
+
+    // Unknown name → Err carrying the canonical names, and the override is
+    // UNTOUCHED (weather_state still reads the previously-forced Snow).
+    let err = force_weather(Some("not-a-weather")).expect_err("unknown → Err");
+    assert_eq!(
+        err,
+        weather_names(),
+        "Err payload must be the canonical weather names",
+    );
+    assert_eq!(
+        background::weather_state(t),
+        background::Weather::Snow,
+        "an unknown name must NOT touch the override",
+    );
+
+    // None → Ok and the override is CLEARED (natural time-based value back).
+    assert!(force_weather(None).is_ok(), "None → Ok");
+    assert_eq!(
+        background::weather_state(t),
+        natural,
+        "None must restore the clock-based selection",
+    );
+
+    // Reset so the override can't leak into sibling time-based weather tests.
+    force_weather(None).expect("reset");
 }
 
 #[test]

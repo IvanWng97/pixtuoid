@@ -394,6 +394,117 @@ fn per_floor_layout_seeds_differ() {
     );
 }
 
+// `invalidate_routes` drops every floor's A* path cache. Its only production
+// caller is the codecov-ignored resize handler in tui/mod.rs, so the loop body
+// is never exercised under coverage. Warm up a wandering agent so the router
+// populates its (from,to) path cache, then assert invalidate empties it.
+#[test]
+fn invalidate_routes_clears_every_floor_router_cache() {
+    // Long-idle agents wander; a WalkingOut/WalkingBack leg drives
+    // route_walking_pose → AStarRouter::route, populating the (from,to) cache.
+    // Several agents + a multi-second timeline guarantee at least one walk leg
+    // (a fresh agent bootstraps Seated@now, then sits seated_dwell_ms 15-30s
+    // before its first walk-out).
+    let agents = (0..8)
+        .map(|i| {
+            idle(
+                &format!("/inv/{i}.jsonl"),
+                i,
+                t0() - Duration::from_secs(120),
+            )
+        })
+        .collect();
+    let scene = scene_with(agents, 16);
+    let mut r = build(120, 60, vec![]);
+    let mut now = t0();
+    // Advance up to ~60s of render time; bail out as soon as the router caches.
+    for _ in 0..120 {
+        r.render(&scene, &pack(), now).expect("render");
+        if !r.floor_ctxs[0].router.is_empty() {
+            break;
+        }
+        now += Duration::from_millis(500);
+    }
+    assert!(
+        !r.floor_ctxs[0].router.is_empty(),
+        "a warmed-up wandering agent should have populated the A* path cache"
+    );
+
+    r.invalidate_routes();
+    assert!(
+        r.floor_ctxs[0].router.is_empty(),
+        "invalidate_routes must drop every floor's cached A* paths"
+    );
+    assert_eq!(
+        r.floor_ctxs[0].router.len(),
+        0,
+        "cache is empty after invalidate"
+    );
+}
+
+// `render_transition_floor`'s `compute_with_seed(...) else { return Vec::new() }`
+// guard — the transition twin of the normal-path Ok(None) branch. A 30-col
+// terminal passes `render_transition`'s 20×12 scene gate (scene_rect 30×39) but
+// buf_w=30 < the office MIN_W=34, so compute_with_seed returns None and the
+// floor paints nothing (no render_to_rgb_buffer, no coffee carriers). Mutating
+// away the None-guard would paint over the bg-fallback fill (or panic on the
+// missing layout), flipping this assertion.
+#[test]
+fn transition_at_narrow_terminal_paints_no_agents_no_panic() {
+    let cap = 16;
+    // A floor-0 agent (coffee carrier would-be) + a floor-1 occupant so
+    // num_floors==2 and navigate_floor(1) has a destination.
+    let scene = scene_with(
+        vec![
+            idle("/narrow/0.jsonl", 0, t0() - Duration::from_secs(120)),
+            slot(
+                AgentId::from_transcript_path("/narrow/1.jsonl"),
+                1,
+                cap,
+                t0(),
+            ),
+        ],
+        cap,
+    );
+    // 30 cols: scene_rect 30×39 passes the 20×12 transition gate; buf_w=30<34
+    // fails compute_with_seed's office minimum.
+    let mut r = TuiRenderer::new(
+        Terminal::new(TestBackend::new(30, 40)).expect("test backend"),
+        normal_theme(),
+        vec![],
+    );
+    let mut now = t0();
+    r.render(&scene, &pack(), now).expect("render at 30 cols");
+    r.navigate_floor(1, now);
+    assert!(r.transition().is_some(), "navigation begins a transition");
+    // Render ONE in-flight transition frame (slide still active).
+    now += Duration::from_millis(33);
+    r.render(&scene, &pack(), now)
+        .expect("transition render at a narrow terminal must not panic");
+    assert!(
+        r.transition().is_some(),
+        "the slide is still active this frame"
+    );
+
+    // The from-floor buffer was ensure_size'd to the theme's bg-fallback, then
+    // render_transition_floor returned early (no layout) ⇒ it stays uniform.
+    let bg = normal_theme().surface.bg_fallback;
+    let from = r.floor_buf(0).expect("floor-0 buffer allocated");
+    let non_bg = (0..from.height)
+        .flat_map(|y| (0..from.width).map(move |x| (x, y)))
+        .filter(|&(x, y)| from.get(x, y) != bg)
+        .count();
+    assert_eq!(
+        non_bg, 0,
+        "compute failed at 30 cols ⇒ no scene/agents painted, buffer stays bg-fallback ({non_bg} stray pixels)"
+    );
+    // No pantry trip could have completed against a None layout.
+    assert!(
+        !r.coffee_holders_contains(AgentId::from_transcript_path("/narrow/0.jsonl")),
+        "a skipped transition floor records no coffee carriers"
+    );
+}
+
 // ===================================================================
 // Theme / palette
 // ===================================================================
@@ -411,6 +522,28 @@ fn theme_switch_recolors_floor() {
     assert!(
         d > 5_000,
         "switching to a different theme must recolor the floor (diff={d})"
+    );
+}
+
+// The `ptr::eq` guard in `set_theme`: calling it with the SAME &'static theme
+// the renderer already holds must NOT flush the frame cache, so the next frame
+// is byte-identical. This is the false branch twin of `theme_switch_recolors_floor`
+// (the true branch); together they pin both arms of the guard — a mutant that
+// always-flushes fails here, one that never-flushes fails there.
+#[test]
+fn set_theme_with_same_theme_is_a_noop() {
+    let scene = scene_with(vec![idle("/t/same.jsonl", 0, t0())], 16);
+    let mut r = build(100, 40, vec![]); // built with normal_theme()
+    let now = t0();
+    r.render(&scene, &pack(), now).unwrap();
+    let before = r.buf().clone();
+    // The SAME &'static pointer the renderer holds ⇒ ptr::eq is true ⇒ skip.
+    r.set_theme(normal_theme());
+    r.render(&scene, &pack(), now).unwrap();
+    let d = region_diff(&before, r.buf(), 0, 0, before.width, before.height);
+    assert_eq!(
+        d, 0,
+        "re-setting the identical theme must not recolor (cache not flushed), diff={d}"
     );
 }
 
@@ -1262,6 +1395,83 @@ fn gateway_mascot_wanders_over_time() {
         tops.len() >= 2,
         "the lobster should wander to ≥2 distinct positions, saw {}",
         tops.len()
+    );
+}
+
+/// Bounding box (in PIXEL coords) of the lobster's carapace reds, or `None` if
+/// the lobster isn't on screen. Reuses the `lobster_px` red set.
+fn lobster_red_bbox(buf: &RgbBuffer) -> Option<(u16, u16, u16, u16)> {
+    let reds = [
+        pixtuoid_core::sprite::Rgb {
+            r: 0xd2,
+            g: 0x40,
+            b: 0x2f,
+        },
+        pixtuoid_core::sprite::Rgb {
+            r: 0xe8,
+            g: 0x55,
+            b: 0x40,
+        },
+        pixtuoid_core::sprite::Rgb {
+            r: 0xc8,
+            g: 0x38,
+            b: 0x28,
+        },
+        pixtuoid_core::sprite::Rgb {
+            r: 0x9e,
+            g: 0x2a,
+            b: 0x20,
+        },
+    ];
+    let (mut x0, mut y0, mut x1, mut y1) = (u16::MAX, u16::MAX, 0u16, 0u16);
+    let mut any = false;
+    for y in 0..buf.height {
+        for x in 0..buf.width {
+            if reds.contains(&buf.get(x, y)) {
+                any = true;
+                x0 = x0.min(x);
+                y0 = y0.min(y);
+                x1 = x1.max(x);
+                y1 = y1.max(y);
+            }
+        }
+    }
+    any.then_some((x0, y0, x1, y1))
+}
+
+#[test]
+fn gateway_mascot_tooltip_on_hover() {
+    // entered_at well in the past ⇒ steady wander (a stable lobster to aim at).
+    let scene = gateway_scene(
+        pixtuoid_core::state::DaemonState::Idle,
+        t0() - Duration::from_secs(20),
+        t0(),
+        0,
+    );
+    // vec![] = no pet, so the pet hover arm is skipped and the mascot arm runs.
+    let mut r = build(160, 80, vec![]);
+    r.render(&scene, &pack(), t0()).unwrap();
+
+    // Before any hover, no gateway tooltip text is painted.
+    assert!(
+        !frame_text(r.frame_buffer()).contains("gateway"),
+        "no hover ⇒ no mascot tooltip"
+    );
+
+    // Center of the lobster's red bbox (pixel coords) → terminal cell.
+    let (x0, y0, x1, y1) = lobster_red_bbox(r.buf()).expect("lobster on screen");
+    let cx = (x0 + x1) / 2;
+    let cy_px = (y0 + y1) / 2;
+    // The 14px-wide hitbox tolerates the approximate center; half-block ⇒ /2.
+    r.set_mouse_pos(Some((cx, cy_px / 2)));
+    r.render(&scene, &pack(), t0()).unwrap();
+
+    // The mascot tooltip reads " <name> gateway · idle " — the literal "gateway"
+    // is exclusive to the mascot arm (pet/coffee/furniture tooltips never say it),
+    // so this distinguishes the mascot branch from the other fallthroughs.
+    assert!(
+        frame_text(r.frame_buffer()).contains("gateway"),
+        "hovering the lobster shows the gateway mascot tooltip"
     );
 }
 
@@ -2550,6 +2760,191 @@ fn connection_panel_armed_shows_confirm_prompt() {
         "armed confirm prompt missing:\n{text}"
     );
     assert!(text.contains("Codex"), "armed target name missing:\n{text}");
+}
+
+// Selected row is Disconnected (no health/confirm/result) → the detail line
+// surfaces the connect ACTION, not a (meaningless-until-bound) install path.
+#[test]
+fn connection_panel_disconnected_selected_shows_connect_hint() {
+    use crate::tui::connection::{ConnState, ConnectionRow, LiveInfo};
+    let mut r = build(120, 44, vec![]);
+    let scene = scene_with(vec![], 16);
+    let rows = vec![ConnectionRow {
+        source_id: "antigravity",
+        label_prefix: "ag",
+        display_name: "Antigravity",
+        state: ConnState::Disconnected,
+        config_path: None,
+        target: None,
+        health: None,
+    }];
+    r.set_connection_frame(
+        true,
+        rows,
+        vec![LiveInfo::default()],
+        0,
+        None,
+        None,
+        "socket  /tmp/p.sock  (listening)".into(),
+    );
+    r.render(&scene, &pack(), t0()).unwrap();
+    let text = frame_text(r.frame_buffer());
+    assert!(
+        text.contains("press t to connect"),
+        "disconnected detail hint missing:\n{text}"
+    );
+    assert!(
+        !text.contains("installed at"),
+        "a disconnected row must NOT show an install path:\n{text}"
+    );
+}
+
+// Selected row is NoCli → the detail line is `no_action_hint` = "<name> not
+// detected on this machine" (explains why it can't be bound).
+#[test]
+fn connection_panel_no_cli_selected_shows_not_detected_hint() {
+    use crate::tui::connection::{ConnState, ConnectionRow, LiveInfo};
+    let mut r = build(120, 44, vec![]);
+    let scene = scene_with(vec![], 16);
+    let rows = vec![ConnectionRow {
+        source_id: "codex",
+        label_prefix: "cx",
+        display_name: "Codex",
+        state: ConnState::NoCli,
+        config_path: None,
+        target: None,
+        health: None,
+    }];
+    r.set_connection_frame(
+        true,
+        rows,
+        vec![LiveInfo::default()],
+        0,
+        None,
+        None,
+        "socket  /tmp/p.sock  (listening)".into(),
+    );
+    r.render(&scene, &pack(), t0()).unwrap();
+    let text = frame_text(r.frame_buffer());
+    assert!(
+        text.contains("not detected on this machine"),
+        "no-CLI detail hint missing:\n{text}"
+    );
+    assert!(
+        text.contains("Codex"),
+        "no-CLI hint must name the CLI:\n{text}"
+    );
+}
+
+// Selected Connected row WITHOUT a known config_path → detail is the bare
+// "connected" fallback, NOT the "installed at: <path>" arm. Distinguishes the
+// `None` config_path branch from the `Some(p)` branch (covered elsewhere).
+#[test]
+fn connection_panel_connected_without_config_path_shows_connected() {
+    use crate::tui::connection::{ConnState, ConnectionRow, LiveInfo};
+    let mut r = build(120, 44, vec![]);
+    let scene = scene_with(vec![], 16);
+    let rows = vec![ConnectionRow {
+        source_id: "claude",
+        label_prefix: "cc",
+        display_name: "Claude Code",
+        state: ConnState::Connected,
+        config_path: None,
+        target: None,
+        health: None,
+    }];
+    r.set_connection_frame(
+        true,
+        rows,
+        vec![LiveInfo::default()],
+        0,
+        None,
+        None,
+        "socket  /tmp/p.sock  (listening)".into(),
+    );
+    r.render(&scene, &pack(), t0()).unwrap();
+    let text = frame_text(r.frame_buffer());
+    assert!(
+        text.contains("connected"),
+        "connected fallback detail missing:\n{text}"
+    );
+    assert!(
+        !text.contains("installed at"),
+        "no config_path → must NOT show an install path:\n{text}"
+    );
+}
+
+// `last_result` (a post-action result string) preempts the per-state install
+// hint: even with a Connected row whose config_path WOULD render "installed
+// at:", the result string wins (it's higher precedence than the per-state arm).
+#[test]
+fn connection_panel_last_result_overrides_per_state_detail() {
+    use crate::tui::connection::{ConnState, ConnectionRow, LiveInfo};
+    let mut r = build(120, 44, vec![]);
+    let scene = scene_with(vec![], 16);
+    let rows = vec![ConnectionRow {
+        source_id: "claude",
+        label_prefix: "cc",
+        display_name: "Claude Code",
+        state: ConnState::Connected,
+        config_path: Some(std::path::PathBuf::from("~/.claude/settings.json")),
+        target: None,
+        health: None,
+    }];
+    r.set_connection_frame(
+        true,
+        rows,
+        vec![LiveInfo::default()],
+        0,
+        None,
+        Some("X-RESULT-SENTINEL".to_string()),
+        "socket  /tmp/p.sock  (listening)".into(),
+    );
+    r.render(&scene, &pack(), t0()).unwrap();
+    let text = frame_text(r.frame_buffer());
+    assert!(
+        text.contains("X-RESULT-SENTINEL"),
+        "last_result string must render in the detail line:\n{text}"
+    );
+    assert!(
+        !text.contains("installed at"),
+        "last_result must PREEMPT the per-state install hint:\n{text}"
+    );
+}
+
+// Empty rows (selected index out of range), no confirm/result → the detail
+// `else` branch yields an empty string. The panel still paints its title /
+// socket / footer; no stale per-state hint leaks in.
+#[test]
+fn connection_panel_empty_rows_renders_panel_with_blank_detail() {
+    use crate::tui::connection::LiveInfo;
+    let mut r = build(120, 44, vec![]);
+    let scene = scene_with(vec![], 16);
+    r.set_connection_frame(
+        true,
+        vec![],
+        Vec::<LiveInfo>::new(),
+        0,
+        None,
+        None,
+        "socket  /tmp/p.sock  (listening)".into(),
+    );
+    r.render(&scene, &pack(), t0()).unwrap();
+    let text = frame_text(r.frame_buffer());
+    assert!(text.contains("Sources"), "title missing:\n{text}");
+    assert!(text.contains("j/k move"), "footer missing:\n{text}");
+    assert!(
+        !text.contains("installed at"),
+        "empty rows → blank detail, no install hint:\n{text}"
+    );
+    assert!(
+        !text.contains("press t to connect"),
+        "empty rows → blank detail, no connect hint:\n{text}"
+    );
+    assert!(
+        !text.contains("not detected"),
+        "empty rows → blank detail, no no-CLI hint:\n{text}"
+    );
 }
 
 #[test]

@@ -752,6 +752,31 @@ mod tests {
     }
 
     #[test]
+    fn session_ended_resurrects_from_down() {
+        // The SessionEnded arm ALSO carries the "any event ⇒ up" resurrect — the
+        // sibling test exercises it only via SessionStarted. From a Down entry
+        // (active_sessions already zeroed by enter_down) a session_end resurrects
+        // to Idle, and the saturating_sub of a never-seen session must not
+        // underflow on the pre-attach miss.
+        for src in SOURCES {
+            let mut s = SceneState::default();
+            apply_presence(&mut s, src, DaemonPresenceUpdate::GatewayDown, ms(0));
+            assert_eq!(st(&s, src), DaemonState::Down);
+            apply_presence(&mut s, src, DaemonPresenceUpdate::SessionEnded, ms(1));
+            assert_eq!(
+                st(&s, src),
+                DaemonState::Idle,
+                "a session_end event implies up (resurrects from Down)"
+            );
+            assert_eq!(
+                sessions(&s, src),
+                0,
+                "saturating — the pre-attach session_start miss must not underflow"
+            );
+        }
+    }
+
+    #[test]
     fn entered_at_reanchors_on_resurrection_but_not_on_idle_busy() {
         for src in SOURCES {
             let mut s = SceneState::default();
@@ -907,6 +932,23 @@ mod tests {
                 "silence past the TTL takes even a Degraded daemon down"
             );
         }
+    }
+
+    #[test]
+    fn sweep_on_an_unknown_source_is_a_noop() {
+        // The `let Some(p) = map.get_mut(source) else { return }` guard: a sweep
+        // tick for a source with NO presence entry must not mint a phantom
+        // Down/Idle entry (a mutation to or_insert_with would). The map is empty
+        // before and stays empty after, even far past every TTL.
+        let ttl = PresenceTtl::DEFAULT;
+        let mut s = SceneState::default();
+        assert!(s.daemons().is_empty());
+        sweep_presence_ttl(&mut s, "never-seen", ttl, ms(ttl.presence_ttl_ms + 1));
+        assert!(
+            s.daemons().is_empty(),
+            "sweeping an unknown source mints no phantom entry"
+        );
+        assert!(!s.daemons().contains_key("never-seen"));
     }
 
     #[test]

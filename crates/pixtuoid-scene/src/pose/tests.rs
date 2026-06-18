@@ -2896,3 +2896,94 @@ fn snap_back_profile_length_measures_the_routed_polyline() {
         "armed profile must cover the routed polyline (+ chair settle), not the straight line"
     );
 }
+
+#[test]
+fn route_walking_pose_t_overshoot_snaps_to_final_segment() {
+    // The "past the last segment — snap to final" fall-through (mod.rs:849-857)
+    // fires only when `traveled` exceeds the summed leg lengths, which in-tree
+    // callers never do (they pass t_x1000<=1000). Driving the private fn with an
+    // out-of-range t_x1000=2000 makes traveled = 2*total > total, so the segment
+    // loop never returns and the final-segment arm runs: it returns the LAST
+    // segment (second_to_last → last) at t_x1000=1000 and records path[last].
+    let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let l = layout();
+    let slot = unit_slot(now);
+    let a = Point { x: 10, y: 10 };
+    let b = Point { x: 30, y: 10 };
+    let c = Point { x: 30, y: 30 };
+
+    let overlay = pixtuoid_core::walkable::OccupancyOverlay::new();
+    let mut history = PoseHistory::new();
+    let mut router = StubRouter::corners(vec![a, b, c]);
+    let mut motion: HashMap<AgentId, MotionState> = HashMap::new();
+
+    let out = route_walking_pose(
+        &slot,
+        now,
+        &l,
+        &mut crate::pose::RouteCtx {
+            router: &mut router,
+            overlay: &overlay,
+            history: &mut history,
+            motion: &mut motion,
+        },
+        Pose::Walking {
+            from: a,
+            to: c,
+            t_x1000: 2000,
+            frame: 0,
+            carrying_coffee: false,
+        },
+        Settle::None,
+    );
+
+    match out {
+        Some(Pose::Walking {
+            from, to, t_x1000, ..
+        }) => {
+            assert_eq!(from, b, "snap-to-final uses path[last-1] as `from`");
+            assert_eq!(to, c, "snap-to-final uses path[last] as `to`");
+            assert_eq!(
+                t_x1000, 1000,
+                "snap-to-final pins t_x1000 to the segment end"
+            );
+        }
+        other => panic!("expected final-segment Walking, got {other:?}"),
+    }
+    assert_eq!(
+        history.recent(slot.agent_id, 1_000, now),
+        Some(c),
+        "snap-to-final records the final polyline point to history"
+    );
+}
+
+#[test]
+fn settle_from_pair_both_none_is_settle_none() {
+    // settle_from_pair's (None, None) => Settle::None arm (mod.rs:699) is
+    // unreachable from the wander orchestration (which always supplies at least
+    // one seat). The pure fn is private but visible via `use super::*`, so call
+    // it directly and pin all four arms — a mutant collapsing any arm to the
+    // wrong variant fails here.
+    let p = Point { x: 1, y: 1 };
+    let q = Point { x: 2, y: 2 };
+
+    assert!(
+        matches!(settle_from_pair(None, None), Settle::None),
+        "(None, None) collapses to Settle::None"
+    );
+    assert!(
+        matches!(settle_from_pair(Some(p), None), Settle::Start(s) if s == p),
+        "(Some, None) collapses to Settle::Start(start)"
+    );
+    assert!(
+        matches!(settle_from_pair(None, Some(q)), Settle::End(e) if e == q),
+        "(None, Some) collapses to Settle::End(end)"
+    );
+    assert!(
+        matches!(
+            settle_from_pair(Some(p), Some(q)),
+            Settle::Both { start, end } if start == p && end == q
+        ),
+        "(Some, Some) collapses to Settle::Both start,end"
+    );
+}
