@@ -118,14 +118,22 @@ fn main() -> Result<()> {
         Cmd::Doctor => doctor::run(&log_file_path()),
         Cmd::Sources { action: None, json } => run_sources_list(json),
         Cmd::Sources {
-            action: Some(SourcesAction::Set { ids, json }),
-            ..
+            action: Some(SourcesAction::Set { ids }),
+            json,
         } => run_sources_set(&ids, json),
-        Cmd::Connect { ids, json } => run_change(&ids, json, "connected", |c, i| {
-            sources::connect(c, i).map(|_| ())
+        Cmd::Connect { ids, json } => run_change(&ids, json, |c, i| {
+            sources::connect(c, i).map(|_| "connected".to_string())
         }),
-        Cmd::Disconnect { ids, json } => run_change(&ids, json, "disconnected", |c, i| {
-            sources::disconnect(c, i).map(|_| ())
+        // Surface a folded hook-removal failure (the flag IS disconnected; the
+        // hooks weren't removed) so the scriptable surface matches the panel,
+        // rather than reporting a clean "disconnected".
+        Cmd::Disconnect { ids, json } => run_change(&ids, json, |c, i| {
+            sources::disconnect(c, i).map(|oc| match oc {
+                sources::DisconnectOutcome::HookRemovalFailed(e) => {
+                    format!("disconnected (hook removal failed: {e})")
+                }
+                _ => "disconnected".to_string(),
+            })
         }),
     }
 }
@@ -171,14 +179,12 @@ fn run_sources_set(ids: &[String], json: bool) -> Result<()> {
 }
 
 /// Shared `connect`/`disconnect` presenter: validate all ids up front, then apply
-/// each, reporting per-source. `ok_label` is the success token ("connected" /
-/// "disconnected"); `op` wraps `sources::connect`/`disconnect` (whose rich
-/// outcome the CLI doesn't surface — success/failure is enough).
+/// each, reporting per-source. `op` returns the SUCCESS token (so the disconnect
+/// path can fold a hook-removal warning into it); an `Err` becomes `failed: …`.
 fn run_change(
     ids: &[String],
     json: bool,
-    ok_label: &str,
-    op: impl Fn(&Path, &str) -> Result<()>,
+    op: impl Fn(&Path, &str) -> Result<String>,
 ) -> Result<()> {
     let cfg = config::config_path();
     let sids: Vec<&'static str> = ids
@@ -189,7 +195,7 @@ fn run_change(
         .into_iter()
         .map(|sid| {
             let token = match op(&cfg, sid) {
-                Ok(()) => ok_label.to_string(),
+                Ok(t) => t,
                 Err(e) => format!("failed: {e:#}"),
             };
             (sid.to_string(), token)

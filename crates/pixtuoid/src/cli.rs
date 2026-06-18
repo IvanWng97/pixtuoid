@@ -89,8 +89,10 @@ pub enum Cmd {
     Sources {
         #[command(subcommand)]
         action: Option<SourcesAction>,
-        /// Emit machine-readable JSON instead of a table (for the list).
-        #[arg(long)]
+        /// Emit machine-readable JSON instead of a table. `global` so it's
+        /// honored both before and after `set` (`sources --json set …` ==
+        /// `sources set … --json`) — the natural Raycast/script form.
+        #[arg(long, global = true)]
         json: bool,
     },
     /// Connect one or more sources: install their hooks + persist the choice.
@@ -115,12 +117,11 @@ pub enum Cmd {
 #[derive(Debug, Subcommand)]
 pub enum SourcesAction {
     /// Make the connected set EXACTLY these ids (declarative — everything else
-    /// disconnects). Backs the Raycast multi-select checkbox-form.
+    /// disconnects). Backs the Raycast multi-select checkbox-form. `--json` is
+    /// the global flag on `sources` (works before or after `set`).
     Set {
         #[arg(required = true)]
         ids: Vec<String>,
-        #[arg(long)]
-        json: bool,
     },
 }
 
@@ -318,10 +319,32 @@ mod tests {
         let cli = Cli::try_parse_from(["pixtuoid", "sources", "set", "codex", "cursor"]).unwrap();
         match cli.cmd {
             Some(Cmd::Sources {
-                action: Some(SourcesAction::Set { ids, .. }),
+                action: Some(SourcesAction::Set { ids }),
                 ..
             }) => assert_eq!(ids, vec!["codex".to_string(), "cursor".to_string()]),
             other => panic!("expected sources set, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn sources_json_is_global_across_the_set_subcommand() {
+        // --json must bind the same flag whether it precedes OR follows `set`
+        // (the natural Raycast/script form) — the global-arg fix.
+        for args in [
+            ["pixtuoid", "sources", "--json", "set", "codex"],
+            ["pixtuoid", "sources", "set", "codex", "--json"],
+        ] {
+            let cli = Cli::try_parse_from(args).unwrap();
+            assert!(
+                matches!(
+                    cli.cmd,
+                    Some(Cmd::Sources {
+                        action: Some(SourcesAction::Set { .. }),
+                        json: true
+                    })
+                ),
+                "args {args:?} must parse json=true"
+            );
         }
     }
 

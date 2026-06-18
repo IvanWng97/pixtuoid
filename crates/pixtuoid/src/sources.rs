@@ -107,6 +107,14 @@ pub enum DisconnectOutcome {
 /// it would show connected yet never produce an agent). The panel's
 /// `connect_source` adds `connected.set(..)` on top for the live gate; the CLI
 /// and onboarding don't (a separate process has no live set).
+///
+/// **Honors the explicit id — it does NOT gate on CLI presence.** Unlike the
+/// in-TUI panel (which renders an absent CLI as `NoCli` and refuses the toggle),
+/// `connect`/`reconcile_to` install for any registered id even if that CLI isn't
+/// installed yet — pre-provisioning for automation/onboarding where the caller
+/// stated intent. (`detect()` returns only PRESENT CLIs, so onboarding offers
+/// only installed ones; a `connect <absent-cli>` is a deliberate user/script
+/// choice that materializes that CLI's config dir.)
 pub fn connect(cfg: &Path, id: &str) -> Result<ConnectOutcome> {
     let sid = registered_id(id)?;
     connect_target(cfg, sid, by_source(sid), None)
@@ -223,6 +231,12 @@ pub fn reconcile_to_with(
                     Err(e) => ChangeOutcome::Failed(format!("{e:#}")),
                 },
                 Action::Disconnect => match disconnect(cfg, sid) {
+                    // The flag IS disconnected; surface a folded hook-removal
+                    // failure so a declarative `sources set` doesn't hide stale
+                    // hooks behind a clean "disconnected" (mirrors the panel).
+                    Ok(DisconnectOutcome::HookRemovalFailed(e)) => {
+                        ChangeOutcome::Failed(format!("hooks not removed: {e}"))
+                    }
                     Ok(_) => ChangeOutcome::Disconnected,
                     Err(e) => ChangeOutcome::Failed(format!("{e:#}")),
                 },
@@ -483,6 +497,24 @@ mod tests {
             app.sources.get("rollbacktest"),
             Some(&false),
             "the flag was rolled back to false"
+        );
+    }
+
+    #[test]
+    fn disconnect_target_folds_a_hook_removal_failure_into_the_outcome() {
+        // FAIL_TARGET's uninstall errs (default_config_path errs) → the flag is
+        // STILL persisted false (disconnect's primary semantics hold), and the
+        // error is FOLDED into HookRemovalFailed (Err is reserved for the
+        // persist-abort) so the gate still closes + the CLI/panel can surface it.
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = dir.path().join("config.toml");
+        let outcome = disconnect_target(&cfg, "rollbacktest", Some(&FAIL_TARGET), None).unwrap();
+        assert!(matches!(outcome, DisconnectOutcome::HookRemovalFailed(_)));
+        let app = config::load(&cfg, &mut Vec::new());
+        assert_eq!(
+            app.sources.get("rollbacktest"),
+            Some(&false),
+            "the flag is persisted false even though hook removal failed"
         );
     }
 
