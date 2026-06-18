@@ -384,29 +384,47 @@ fn rescan_drift(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-pub async fn run_tui(
-    mut scene_rx: SceneRx,
-    pack_dir: Option<std::path::PathBuf>,
-    floor_caps: Arc<[std::sync::atomic::AtomicUsize; pixtuoid_core::state::MAX_FLOORS]>,
-    theme: &'static theme::Theme,
-    config_path: std::path::PathBuf,
-    desk_cap: Option<usize>,
-    pets: Vec<pet::Pet>,
-    mut source_health: tokio::sync::watch::Receiver<
-        Vec<pixtuoid_core::source::manager::SourceDeath>,
-    >,
-    // The resolved hook socket (Unix) / named pipe (Windows) the daemon bound,
-    // shown in the Sources panel's connection line.
-    socket_path: std::path::PathBuf,
-    // The live connected-source set — the Sources panel's mutation seam: a
-    // toggle calls `connected.set(src, on)`, which the reducer task's reconciler
-    // observes (gate + graceful evict). Shared `Arc<Mutex<…>>` with the reducer.
-    connected: crate::runtime::ConnectedSources,
-    // The warn-floor log path — throttle-scanned for decode-drift breadcrumbs to
-    // drive the footer nudge (`main` owns the resolution; `None` = no surfacing).
-    log_path: Option<std::path::PathBuf>,
-) -> Result<()> {
+/// The bundled inputs to [`run_tui`] — the runtime (`driver.rs`) builds it once
+/// and hands it over. Grouping these into a named struct kills the positional-arg
+/// transposition hazard (it had grown to 11 args of mostly `Option`/`PathBuf`/
+/// `bool`, several interchangeable by type) and gives new features a named home
+/// instead of another positional argument.
+pub(crate) struct TuiSession {
+    pub scene_rx: SceneRx,
+    pub pack_dir: Option<std::path::PathBuf>,
+    pub floor_caps: Arc<[std::sync::atomic::AtomicUsize; pixtuoid_core::state::MAX_FLOORS]>,
+    pub theme: &'static theme::Theme,
+    pub config_path: std::path::PathBuf,
+    pub desk_cap: Option<usize>,
+    pub pets: Vec<pet::Pet>,
+    pub source_health:
+        tokio::sync::watch::Receiver<Vec<pixtuoid_core::source::manager::SourceDeath>>,
+    /// The resolved hook socket (Unix) / named pipe (Windows) the daemon bound,
+    /// shown in the Sources panel's connection line.
+    pub socket_path: std::path::PathBuf,
+    /// The live connected-source set — the Sources panel's mutation seam: a
+    /// toggle calls `connected.set(src, on)`, which the reducer task's reconciler
+    /// observes (gate + graceful evict). Shared `Arc<Mutex<…>>` with the reducer.
+    pub connected: crate::runtime::ConnectedSources,
+    /// The warn-floor log path — throttle-scanned for decode-drift breadcrumbs to
+    /// drive the footer nudge (`main` owns the resolution; `None` = no surfacing).
+    pub log_path: Option<std::path::PathBuf>,
+}
+
+pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
+    let TuiSession {
+        mut scene_rx,
+        pack_dir,
+        floor_caps,
+        theme,
+        config_path,
+        desk_cap,
+        pets,
+        mut source_health,
+        socket_path,
+        connected,
+        log_path,
+    } = session;
     let pack = embedded_pack::load_sprite_pack(pack_dir)?;
     let term = setup_terminal()?;
     let mut renderer = TuiRenderer::new(term, theme, pets);

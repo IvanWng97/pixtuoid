@@ -123,7 +123,7 @@ async fn run_async(cfg: RunConfig) -> Result<()> {
     if headless {
         headless_loop(scene_rx, health_rx).await
     } else {
-        crate::tui::run_tui(
+        crate::tui::run_tui(crate::tui::TuiSession {
             scene_rx,
             pack_dir,
             floor_caps,
@@ -131,11 +131,11 @@ async fn run_async(cfg: RunConfig) -> Result<()> {
             config_path,
             desk_cap,
             pets,
-            health_rx,
+            source_health: health_rx,
             socket_path,
             connected,
             log_path,
-        )
+        })
         .await
     }
 }
