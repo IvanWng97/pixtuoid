@@ -4,8 +4,8 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use clap::Parser;
-use pixtuoid::cli::{Cli, Cmd, SourceArgs};
-use pixtuoid::{config, doctor, floating, init_pack, install, runtime, validate};
+use pixtuoid::cli::{Cli, Cmd, SourceArgs, SourcesAction};
+use pixtuoid::{config, doctor, floating, init_pack, install, runtime, sources, validate};
 use tracing_subscriber::EnvFilter;
 
 fn main() -> Result<()> {
@@ -116,7 +116,98 @@ fn main() -> Result<()> {
         Cmd::ValidatePack { pack_dir } => validate::validate_pack(&pack_dir),
         Cmd::InitPack { dest, force } => init_pack::init_pack(&dest, force),
         Cmd::Doctor => doctor::run(&log_file_path()),
+        Cmd::Sources {
+            action: None,
+            json,
+        } => run_sources_list(json),
+        Cmd::Sources {
+            action: Some(SourcesAction::Set { ids, json }),
+            ..
+        } => run_sources_set(&ids, json),
+        Cmd::Connect { ids, json } => run_change(&ids, json, sources::connect),
+        Cmd::Disconnect { ids, json } => run_change(&ids, json, sources::disconnect),
     }
+}
+
+/// `pixtuoid sources [--json]` — print every source's connection state. Read-only.
+fn run_sources_list(json: bool) -> Result<()> {
+    let cfg = config::config_path();
+    let log = std::fs::read_to_string(log_file_path()).unwrap_or_default();
+    let rows = sources::status(&cfg, &log);
+    if json {
+        println!("{}", serde_json::to_string_pretty(&rows)?);
+    } else {
+        for r in &rows {
+            let (mark, state) = if r.connected {
+                ('\u{25cf}', "connected") // ●
+            } else if r.cli_present {
+                ('\u{25cb}', "disconnected") // ○
+            } else {
+                ('\u{00b7}', "not installed") // ·
+            };
+            println!("{mark} {:<16} {state}", r.id);
+            if let Some(h) = &r.health {
+                println!("    {h}");
+            }
+        }
+    }
+    Ok(())
+}
+
+/// `pixtuoid sources set <ids>` — declarative reconcile (connected set = exactly these).
+fn run_sources_set(ids: &[String], json: bool) -> Result<()> {
+    let cfg = config::config_path();
+    // Validate every id up front so a typo can't partially apply.
+    let desired: std::collections::HashSet<String> = ids
+        .iter()
+        .map(|id| sources::registered_id(id).map(String::from))
+        .collect::<Result<_>>()?;
+    let out: Vec<(String, String)> = sources::reconcile_to(&cfg, &desired)
+        .into_iter()
+        .map(|(id, oc)| (id, oc.as_wire()))
+        .collect();
+    emit_outcomes(&out, json)
+}
+
+/// Shared `connect`/`disconnect` presenter: validate all ids up front, then apply
+/// each, reporting per-source. `op` is `sources::connect` or `sources::disconnect`.
+fn run_change(
+    ids: &[String],
+    json: bool,
+    op: fn(&Path, &str) -> Result<sources::ChangeOutcome>,
+) -> Result<()> {
+    let cfg = config::config_path();
+    let sids: Vec<&'static str> = ids
+        .iter()
+        .map(|id| sources::registered_id(id))
+        .collect::<Result<_>>()?;
+    let out: Vec<(String, String)> = sids
+        .into_iter()
+        .map(|sid| {
+            let token = match op(&cfg, sid) {
+                Ok(oc) => oc.as_wire(),
+                Err(e) => sources::ChangeOutcome::Failed(format!("{e:#}")).as_wire(),
+            };
+            (sid.to_string(), token)
+        })
+        .collect();
+    emit_outcomes(&out, json)
+}
+
+/// Print a `[(id, outcome)]` batch as a table or a JSON array of `{id, outcome}`.
+fn emit_outcomes(out: &[(String, String)], json: bool) -> Result<()> {
+    if json {
+        let rows: Vec<serde_json::Value> = out
+            .iter()
+            .map(|(id, outcome)| serde_json::json!({ "id": id, "outcome": outcome }))
+            .collect();
+        println!("{}", serde_json::to_string_pretty(&rows)?);
+    } else {
+        for (id, outcome) in out {
+            println!("{id}: {outcome}");
+        }
+    }
+    Ok(())
 }
 
 /// Resolve the shared [`runtime::RunConfig`] from CLI args + the on-disk config —

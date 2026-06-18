@@ -84,6 +84,44 @@ pub enum Cmd {
     /// Diagnose source health: connection, hooks, and decode drift recorded in
     /// the log. Read-only.
     Doctor,
+    /// List agent sources + their connection state, or apply a set. The
+    /// scriptable twin of the in-TUI Sources panel (Raycast / automation).
+    Sources {
+        #[command(subcommand)]
+        action: Option<SourcesAction>,
+        /// Emit machine-readable JSON instead of a table (for the list).
+        #[arg(long)]
+        json: bool,
+    },
+    /// Connect one or more sources: install their hooks + persist the choice.
+    /// A running office reflects it on its next launch.
+    Connect {
+        /// Source ids, e.g. `claude-code codex`.
+        #[arg(required = true)]
+        ids: Vec<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Disconnect one or more sources: remove their hooks + persist the choice.
+    Disconnect {
+        /// Source ids, e.g. `codex cursor`.
+        #[arg(required = true)]
+        ids: Vec<String>,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum SourcesAction {
+    /// Make the connected set EXACTLY these ids (declarative — everything else
+    /// disconnects). Backs the Raycast multi-select checkbox-form.
+    Set {
+        #[arg(required = true)]
+        ids: Vec<String>,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 /// `--log-level` values. A typed enum (not a free `String`) so a typo like
@@ -261,5 +299,43 @@ mod tests {
     fn floating_subcommand_rejects_empty_socket() {
         // The shared `parse_nonempty_path` guard applies to floating's --socket too.
         assert!(Cli::try_parse_from(["pixtuoid", "floating", "--socket", "  "]).is_err());
+    }
+
+    #[test]
+    fn sources_list_parses_with_json() {
+        let cli = Cli::try_parse_from(["pixtuoid", "sources", "--json"]).unwrap();
+        assert!(matches!(
+            cli.cmd,
+            Some(Cmd::Sources {
+                action: None,
+                json: true
+            })
+        ));
+    }
+
+    #[test]
+    fn sources_set_parses_its_ids() {
+        let cli = Cli::try_parse_from(["pixtuoid", "sources", "set", "codex", "cursor"]).unwrap();
+        match cli.cmd {
+            Some(Cmd::Sources {
+                action: Some(SourcesAction::Set { ids, .. }),
+                ..
+            }) => assert_eq!(ids, vec!["codex".to_string(), "cursor".to_string()]),
+            other => panic!("expected sources set, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn connect_requires_at_least_one_id() {
+        // `required = true` on the ids vec — a bare `connect` is a parse error.
+        assert!(Cli::try_parse_from(["pixtuoid", "connect"]).is_err());
+    }
+
+    #[test]
+    fn connect_and_disconnect_parse_multiple_ids() {
+        let c = Cli::try_parse_from(["pixtuoid", "connect", "claude-code", "codex"]).unwrap();
+        assert!(matches!(c.cmd, Some(Cmd::Connect { .. })));
+        let d = Cli::try_parse_from(["pixtuoid", "disconnect", "codex", "--json"]).unwrap();
+        assert!(matches!(d.cmd, Some(Cmd::Disconnect { json: true, .. })));
     }
 }
