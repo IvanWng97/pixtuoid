@@ -594,14 +594,14 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                     dashboard_ui.scroll,
                     dashboard::DASHBOARD_VIEWPORT_ROWS,
                 );
-                renderer.set_dashboard_frame(
-                    true,
+                renderer.set_dashboard_frame(dashboard::DashboardFrame {
+                    open: true,
                     rows,
-                    dashboard_ui.selected,
-                    dashboard_ui.scroll,
-                );
+                    selected: dashboard_ui.selected,
+                    scroll: dashboard_ui.scroll,
+                });
             } else {
-                renderer.set_dashboard_frame(false, Vec::new(), dashboard_ui.selected, 0);
+                renderer.set_dashboard_frame(dashboard::DashboardFrame::default());
             }
             // Mirror the Connection frame: the HOOK facet (`connection_ui.rows`) is cached
             // (rebuilt on open + after actions, NOT per frame — it does FS reads);
@@ -611,25 +611,17 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                     connection::move_selection(&connection_ui.rows, connection_ui.selected, 0);
                 let live = connection::live_view(now, &connection_ui.rows, &snapshot, &health);
                 let socket_line = format!("socket  {}  (listening)", socket_path.display());
-                renderer.set_connection_frame(
-                    true,
-                    connection_ui.rows.clone(),
+                renderer.set_connection_frame(connection::ConnectionFrame {
+                    open: true,
+                    rows: connection_ui.rows.clone(),
                     live,
-                    connection_ui.selected,
-                    connection_ui.confirm,
-                    connection_ui.last_result.clone(),
+                    selected: connection_ui.selected,
+                    confirm: connection_ui.confirm,
+                    result: connection_ui.last_result.clone(),
                     socket_line,
-                );
+                });
             } else {
-                renderer.set_connection_frame(
-                    false,
-                    Vec::new(),
-                    Vec::new(),
-                    0,
-                    None,
-                    None,
-                    String::new(),
-                );
+                renderer.set_connection_frame(connection::ConnectionFrame::default());
             }
             // Onboarding frame: while OPEN, paint the card + dim ramps in (the
             // painter's `elapsed_ms` drives the typewriter). While CLOSING, the card

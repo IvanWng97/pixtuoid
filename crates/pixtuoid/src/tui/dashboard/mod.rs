@@ -19,6 +19,18 @@ pub const AUTO_COLLAPSE_THRESHOLD: usize = 5;
 /// can't disagree.
 pub const DASHBOARD_VIEWPORT_ROWS: usize = 16;
 
+/// The per-tick dashboard render frame the event loop hands the renderer via
+/// `set_dashboard_frame` — one snapshot (always built, set, and read as a unit),
+/// so it rides as a struct rather than four parallel `dashboard_*` fields/params
+/// through `TuiRenderer` → `DrawCtx` → `paint_overlays`. Mirrors `OnboardingFrame`.
+#[derive(Debug, Clone, Default)]
+pub struct DashboardFrame {
+    pub open: bool,
+    pub rows: Vec<DashboardRow>,
+    pub selected: Option<AgentId>,
+    pub scroll: usize,
+}
+
 /// The activity shown on a row, distilled from `ActivityState`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RowState {

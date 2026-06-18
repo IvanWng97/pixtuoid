@@ -617,6 +617,21 @@ fn main() -> Result<()> {
     } else {
         pixtuoid::tui::welcome::OnboardingFrame::default()
     };
+    let dashboard_frame = pixtuoid::tui::dashboard::DashboardFrame {
+        open: args.dashboard,
+        rows: dash_rows,
+        selected: dash_selected,
+        scroll: 0,
+    };
+    let connection_frame = pixtuoid::tui::connection::ConnectionFrame {
+        open: args.connection,
+        rows: connection_rows,
+        live: connection_live,
+        selected: 0,
+        confirm: None,
+        result: None,
+        socket_line: connection_socket_line,
+    };
     let mut draw_ctx = DrawCtx {
         buf: &mut buf,
         cache: &mut cache,
@@ -653,17 +668,8 @@ fn main() -> Result<()> {
         popup_scale: if args.popup { 1.0 } else { 0.0 },
         help_open: args.help_open,
         source_warning: warning_text.as_deref(),
-        dashboard_open: args.dashboard,
-        dashboard_rows: &dash_rows,
-        dashboard_selected: dash_selected,
-        dashboard_scroll: 0,
-        connection_open: args.connection,
-        connection_rows: &connection_rows,
-        connection_live: &connection_live,
-        connection_selected: 0,
-        connection_confirm: None,
-        connection_result: None,
-        connection_socket_line: &connection_socket_line,
+        dashboard: &dashboard_frame,
+        connection: &connection_frame,
         onboarding: &onboarding_frame,
     };
     draw_scene(&mut term, &scene, &pack, now, &mut draw_ctx)?;
@@ -1850,17 +1856,8 @@ fn save_as_gif(
             popup_scale: 0.0,
             help_open: false,
             source_warning: None,
-            dashboard_open: false,
-            dashboard_rows: &[],
-            dashboard_selected: None,
-            dashboard_scroll: 0,
-            connection_open: false,
-            connection_rows: &[],
-            connection_live: &[],
-            connection_selected: 0,
-            connection_confirm: None,
-            connection_result: None,
-            connection_socket_line: "",
+            dashboard: &pixtuoid::tui::dashboard::DashboardFrame::default(),
+            connection: &pixtuoid::tui::connection::ConnectionFrame::default(),
             onboarding: &pixtuoid::tui::welcome::OnboardingFrame::default(),
         };
         draw_scene(term, scene, pack, now, &mut draw_ctx)?;

@@ -30,7 +30,6 @@ use pixtuoid_scene::pixel_painter::{render_to_rgb_buffer, MascotFrame, PixelCtx}
 use pixtuoid_scene::pose;
 
 // Re-exports so tui_renderer.rs and tui/mod.rs import from one place.
-use crate::tui::dashboard::DashboardRow;
 pub(crate) use crate::tui::hit_test::hit_test_agent;
 pub use crate::tui::hit_test::{
     hit_test_coffee_machine, hit_test_from_tui, hit_test_furniture, hit_test_mascot, hit_test_pet,
@@ -119,25 +118,14 @@ pub struct DrawCtx<'a> {
     pub help_open: bool,
     /// Footer warning when a source has died (#157); `None` while healthy.
     pub source_warning: Option<&'a str>,
-    /// Agent dashboard overlay: open flag + the pre-built row snapshot
-    /// (borrowed from `TuiRenderer`, disjoint from the floor borrows) +
-    /// selection/scroll. Painted last, modal, mutually exclusive with the
-    /// theme picker by dispatch precedence.
-    pub dashboard_open: bool,
-    pub dashboard_rows: &'a [DashboardRow],
-    pub dashboard_selected: Option<pixtuoid_core::AgentId>,
-    pub dashboard_scroll: usize,
-    /// Sources panel overlay: open flag + the cached hook-facet rows (borrowed
-    /// from `TuiRenderer`) + the per-frame live facet aligned to them, plus
-    /// selection / armed-confirm / last-action result / socket line. Modal,
-    /// mutually exclusive with the other overlays by dispatch precedence.
-    pub connection_open: bool,
-    pub connection_rows: &'a [crate::tui::connection::ConnectionRow],
-    pub connection_live: &'a [crate::tui::connection::LiveInfo],
-    pub connection_selected: usize,
-    pub connection_confirm: Option<usize>,
-    pub connection_result: Option<&'a str>,
-    pub connection_socket_line: &'a str,
+    /// Agent dashboard overlay frame (borrowed from `TuiRenderer`, disjoint from
+    /// the floor borrows). Modal, mutually exclusive with the theme picker by
+    /// dispatch precedence; painted last.
+    pub dashboard: &'a crate::tui::dashboard::DashboardFrame,
+    /// Sources panel overlay frame (borrowed from `TuiRenderer`): the cached
+    /// hook-facet rows + the per-frame live facet + selection / armed-confirm /
+    /// last-action result / socket line. Modal, mutually exclusive with the others.
+    pub connection: &'a crate::tui::connection::ConnectionFrame,
     /// First-run onboarding overlay frame (borrowed from `TuiRenderer`): the open
     /// flag, roster snapshot, selection, and elapsed-ms clock. Modal and TOP of the
     /// precedence chain — painted last (topmost).
@@ -401,17 +389,8 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         paint_overlays(
             f,
             theme_picker,
-            ctx.dashboard_open,
-            ctx.dashboard_rows,
-            ctx.dashboard_selected,
-            ctx.dashboard_scroll,
-            ctx.connection_open,
-            ctx.connection_rows,
-            ctx.connection_live,
-            ctx.connection_selected,
-            ctx.connection_confirm,
-            ctx.connection_result,
-            ctx.connection_socket_line,
+            ctx.dashboard,
+            ctx.connection,
             ctx.popup_scale,
             ctx.help_open,
             ctx.onboarding,
@@ -433,17 +412,8 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
 pub(super) fn paint_overlays(
     f: &mut ratatui::Frame<'_>,
     theme_picker: Option<usize>,
-    dashboard_open: bool,
-    dashboard_rows: &[DashboardRow],
-    dashboard_selected: Option<pixtuoid_core::AgentId>,
-    dashboard_scroll: usize,
-    connection_open: bool,
-    connection_rows: &[crate::tui::connection::ConnectionRow],
-    connection_live: &[crate::tui::connection::LiveInfo],
-    connection_selected: usize,
-    connection_confirm: Option<usize>,
-    connection_result: Option<&str>,
-    connection_socket_line: &str,
+    dashboard: &crate::tui::dashboard::DashboardFrame,
+    connection: &crate::tui::connection::ConnectionFrame,
     popup_scale: f32,
     help_open: bool,
     onboarding: &crate::tui::welcome::OnboardingFrame,
@@ -454,26 +424,26 @@ pub(super) fn paint_overlays(
     if let Some(idx) = theme_picker {
         paint_theme_picker(f, idx, bounds, theme);
     }
-    if dashboard_open {
+    if dashboard.open {
         paint_dashboard(
             f,
-            dashboard_rows,
-            dashboard_selected,
-            dashboard_scroll,
+            &dashboard.rows,
+            dashboard.selected,
+            dashboard.scroll,
             now,
             bounds,
             theme,
         );
     }
-    if connection_open {
+    if connection.open {
         paint_connection_panel(
             f,
-            connection_rows,
-            connection_live,
-            connection_selected,
-            connection_confirm,
-            connection_result,
-            connection_socket_line,
+            &connection.rows,
+            &connection.live,
+            connection.selected,
+            connection.confirm,
+            connection.result.as_deref(),
+            &connection.socket_line,
             now,
             bounds,
             theme,

@@ -2680,7 +2680,7 @@ fn dashboard_popup_renders_labels_states_and_live_tool() {
 
     let rows = build_dashboard_rows(&scene, &DashboardFolds::default());
     let first = rows[0].agent_id;
-    r.set_dashboard_frame(true, rows, Some(first), 0);
+    r.set_dashboard_frame_parts(true, rows, Some(first), 0);
     r.render(&scene, &pack(), t0()).unwrap();
 
     let text = frame_text(r.frame_buffer());
@@ -2731,7 +2731,7 @@ fn connection_panel_renders_both_facets_borderless() {
             dead: false,
         },
     ];
-    r.set_connection_frame(
+    r.set_connection_frame_parts(
         true,
         rows,
         live,
@@ -2784,7 +2784,7 @@ fn connection_panel_health_flag_and_detail_preempt_the_install_path() {
         target: None,
         health: Some("install broken: shim binary missing".into()), // NO ⚠ prefix
     }];
-    r.set_connection_frame(
+    r.set_connection_frame_parts(
         true,
         rows,
         vec![LiveInfo::default()],
@@ -2823,7 +2823,7 @@ fn connection_panel_armed_shows_confirm_prompt() {
         target: None,
         health: None,
     }];
-    r.set_connection_frame(
+    r.set_connection_frame_parts(
         true,
         rows,
         vec![LiveInfo::default()],
@@ -2857,7 +2857,7 @@ fn connection_panel_disconnected_selected_shows_connect_hint() {
         target: None,
         health: None,
     }];
-    r.set_connection_frame(
+    r.set_connection_frame_parts(
         true,
         rows,
         vec![LiveInfo::default()],
@@ -2894,7 +2894,7 @@ fn connection_panel_no_cli_selected_shows_not_detected_hint() {
         target: None,
         health: None,
     }];
-    r.set_connection_frame(
+    r.set_connection_frame_parts(
         true,
         rows,
         vec![LiveInfo::default()],
@@ -2932,7 +2932,7 @@ fn connection_panel_connected_without_config_path_shows_connected() {
         target: None,
         health: None,
     }];
-    r.set_connection_frame(
+    r.set_connection_frame_parts(
         true,
         rows,
         vec![LiveInfo::default()],
@@ -2970,7 +2970,7 @@ fn connection_panel_last_result_overrides_per_state_detail() {
         target: None,
         health: None,
     }];
-    r.set_connection_frame(
+    r.set_connection_frame_parts(
         true,
         rows,
         vec![LiveInfo::default()],
@@ -2999,7 +2999,7 @@ fn connection_panel_empty_rows_renders_panel_with_blank_detail() {
     use crate::tui::connection::LiveInfo;
     let mut r = build(120, 44, vec![]);
     let scene = scene_with(vec![], 16);
-    r.set_connection_frame(
+    r.set_connection_frame_parts(
         true,
         vec![],
         Vec::<LiveInfo>::new(),
@@ -3044,7 +3044,7 @@ fn dashboard_collapsed_big_tree_shows_badge_and_hides_children() {
     let scene = scene_with(agents, 16);
 
     let rows = build_dashboard_rows(&scene, &DashboardFolds::default());
-    r.set_dashboard_frame(true, rows, Some(root_id), 0);
+    r.set_dashboard_frame_parts(true, rows, Some(root_id), 0);
     r.render(&scene, &pack(), t0()).unwrap();
 
     let text = frame_text(r.frame_buffer());
@@ -3067,7 +3067,7 @@ fn dashboard_collapsed_big_tree_shows_badge_and_hides_children() {
 fn dashboard_closed_paints_no_popup() {
     let mut r = build(120, 44, vec![]);
     let scene = scene_with(vec![idle("/h/a.jsonl", 0, t0())], 16);
-    r.set_dashboard_frame(false, Vec::new(), None, 0);
+    r.set_dashboard_frame_parts(false, Vec::new(), None, 0);
     r.render(&scene, &pack(), t0()).unwrap();
 
     let text = frame_text(r.frame_buffer());
@@ -3123,7 +3123,7 @@ fn dashboard_renders_waiting_reason_and_active_without_detail() {
     let scene = scene_with(vec![w, a], 16);
 
     let rows = build_dashboard_rows(&scene, &DashboardFolds::default());
-    r.set_dashboard_frame(true, rows, None, 0);
+    r.set_dashboard_frame_parts(true, rows, None, 0);
     r.render(&scene, &pack(), t0()).unwrap();
 
     let popup = dash_popup(r.frame_buffer());
@@ -3154,7 +3154,7 @@ fn dashboard_scrolls_to_keep_a_deep_selection_visible() {
     let rows = build_dashboard_rows(&scene, &DashboardFolds::default());
     let row18 = rows[18].agent_id;
     let mut r = build(120, 44, vec![]);
-    r.set_dashboard_frame(true, rows, Some(row18), 0);
+    r.set_dashboard_frame_parts(true, rows, Some(row18), 0);
     r.render(&scene, &pack(), t0()).unwrap();
 
     let buf = r.frame_buffer();
@@ -3176,7 +3176,7 @@ fn dashboard_scrolls_to_keep_a_deep_selection_visible() {
 fn dashboard_empty_scene_shows_placeholder() {
     let mut r = build(120, 44, vec![]);
     let scene = scene_with(vec![], 16);
-    r.set_dashboard_frame(true, Vec::new(), None, 0);
+    r.set_dashboard_frame_parts(true, Vec::new(), None, 0);
     r.render(&scene, &pack(), t0()).unwrap();
     assert!(
         frame_text(r.frame_buffer()).contains("No active agents"),
@@ -3206,7 +3206,7 @@ fn dashboard_badge_text_present_for_cc_and_cx() {
     let scene = scene_with(vec![cc_slot, cx_slot], 16);
 
     let rows = build_dashboard_rows(&scene, &DashboardFolds::default());
-    r.set_dashboard_frame(true, rows, None, 0);
+    r.set_dashboard_frame_parts(true, rows, None, 0);
     r.render(&scene, &pack(), t0()).unwrap();
 
     let popup = dash_popup(r.frame_buffer());
@@ -3227,7 +3227,7 @@ fn dashboard_overflow_cue_appears_below_when_more_than_viewport() {
     let scene = scene_with(agents, 32);
     let rows = build_dashboard_rows(&scene, &DashboardFolds::default());
     let mut r = build(120, 44, vec![]);
-    r.set_dashboard_frame(true, rows, None, 0);
+    r.set_dashboard_frame_parts(true, rows, None, 0);
     r.render(&scene, &pack(), t0()).unwrap();
 
     let popup = dash_popup(r.frame_buffer());
@@ -3249,7 +3249,7 @@ fn dashboard_overflow_cue_absent_when_all_visible() {
     let scene = scene_with(agents, 16);
     let rows = build_dashboard_rows(&scene, &DashboardFolds::default());
     let mut r = build(120, 44, vec![]);
-    r.set_dashboard_frame(true, rows, None, 0);
+    r.set_dashboard_frame_parts(true, rows, None, 0);
     r.render(&scene, &pack(), t0()).unwrap();
 
     let popup = dash_popup(r.frame_buffer());
@@ -3274,7 +3274,7 @@ fn dashboard_overflow_cue_keeps_a_bottom_navigated_selection_visible() {
     let rows = build_dashboard_rows(&scene, &DashboardFolds::default());
     let row20 = rows[20].agent_id;
     let mut r = build(120, 44, vec![]);
-    r.set_dashboard_frame(true, rows, Some(row20), 0);
+    r.set_dashboard_frame_parts(true, rows, Some(row20), 0);
     r.render(&scene, &pack(), t0()).unwrap();
     let popup = dash_popup(r.frame_buffer());
     assert!(
@@ -3303,7 +3303,7 @@ fn dashboard_overflow_no_blank_line_when_selection_is_last_row() {
     let rows = build_dashboard_rows(&scene, &DashboardFolds::default());
     let last = rows[16].agent_id;
     let mut r = build(120, 44, vec![]);
-    r.set_dashboard_frame(true, rows, Some(last), 0);
+    r.set_dashboard_frame_parts(true, rows, Some(last), 0);
     r.render(&scene, &pack(), t0()).unwrap();
     let popup = dash_popup(r.frame_buffer());
     assert!(

@@ -47,6 +47,25 @@ fn floor_info_for(
     })
 }
 
+/// The version popup's animation state machine — the four values move as a unit
+/// (`set_version_popup` stamps `open` + `started_at` + `scale_at_edge` together;
+/// `version_popup_scale` reads all three; `last_scale` caches the per-frame
+/// result). Internal to `TuiRenderer`; only the computed scale reaches `DrawCtx`.
+#[derive(Debug, Default)]
+struct PopupState {
+    /// In its "shown" state — drives the scale toward 1.0 (vs 0.0 when hidden).
+    open: bool,
+    /// When the last visible↔hidden edge happened — the animation clock.
+    started_at: Option<SystemTime>,
+    /// Scale captured at that edge so an interrupted animation continues from its
+    /// current position instead of snapping back to the start/end.
+    scale_at_edge: f32,
+    /// Scale computed during the most recent `render()`; the mouse handler reads
+    /// this instead of recomputing with a fresh `SystemTime`, so click geometry
+    /// stays in sync with what was painted.
+    last_scale: f32,
+}
+
 pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     pub terminal: Terminal<B>,
     floor_bufs: Vec<RgbBuffer>,
@@ -76,8 +95,9 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     coffee_holders: std::collections::HashSet<pixtuoid_core::AgentId>,
     /// Timestamp when each agent first returned with coffee (for steam).
     coffee_fetched_at: std::collections::HashMap<pixtuoid_core::AgentId, SystemTime>,
-    version_popup: bool,
-    version_popup_started_at: Option<SystemTime>,
+    /// The version popup's animation state machine (open flag + edge clock +
+    /// edge-scale + last-rendered-scale all move as a unit — see `PopupState`).
+    popup: PopupState,
     help_open: bool,
     /// Footer warning when a source has died (#157); `None` while healthy.
     /// Set per-frame from the runtime's health channel, like the popup state.
@@ -85,34 +105,16 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     /// Live walkable/approach/route debug layer toggle (`w`). Off by default,
     /// transient (not persisted).
     debug_walkable: bool,
-    /// Scale captured at the moment of the last visible↔hidden edge so that
-    /// an interrupted animation continues from its current position instead
-    /// of snapping back to the start/end.
-    version_popup_scale_at_edge: f32,
-    /// Scale computed during the most recent `render()` call. The mouse
-    /// handler reads this instead of re-computing with a fresh `SystemTime`
-    /// so both sides always agree on whether the popup is above a threshold.
-    last_popup_scale: f32,
     /// Agent-dashboard frame mirror, pushed each tick by the event loop via
-    /// `set_dashboard_frame` (rows pre-built from the live snapshot). Kept here
-    /// — disjoint from the floor buffers — so the painter can borrow it into
-    /// the `DrawCtx` without fighting the `floor_ctxs` / `floor_bufs` borrows.
-    dashboard_open: bool,
-    dashboard_rows: Vec<crate::tui::dashboard::DashboardRow>,
-    dashboard_selected: Option<pixtuoid_core::AgentId>,
-    dashboard_scroll: usize,
-    /// Connection-panel frame mirror, pushed each tick by the event loop via
-    /// `set_connection_frame`. The HOOK facet (`connection_rows`) is cached by the event
-    /// loop (rebuilt on open + after actions); the LIVE facet (`connection_live`) is
-    /// recomputed per frame from the scene snapshot. Both kept here — disjoint
-    /// from the floor buffers — for borrow-free `DrawCtx` assembly.
-    connection_open: bool,
-    connection_rows: Vec<crate::tui::connection::ConnectionRow>,
-    connection_live: Vec<crate::tui::connection::LiveInfo>,
-    connection_selected: usize,
-    connection_confirm: Option<usize>,
-    connection_result: Option<String>,
-    connection_socket_line: String,
+    /// `set_dashboard_frame` (one snapshot, rows pre-built from the live scene).
+    /// Kept here — disjoint from the floor buffers — so the painter can borrow it
+    /// into the `DrawCtx` without fighting the `floor_ctxs` / `floor_bufs` borrows.
+    dashboard: crate::tui::dashboard::DashboardFrame,
+    /// Sources-panel frame mirror, pushed each tick via `set_connection_frame`.
+    /// One snapshot the painter reads: the event loop builds the HOOK facet
+    /// (`rows`, cached on open/after-actions) + the LIVE facet (`live`, per-frame)
+    /// then hands both over together. Disjoint from the floor buffers.
+    connection: crate::tui::connection::ConnectionFrame,
     /// First-run onboarding overlay frame, pushed by the event loop via
     /// `set_onboarding_frame` (the four values bundled in one `OnboardingFrame` —
     /// they always move together). Kept here, disjoint from the floor buffers, for
@@ -144,50 +146,51 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             chitchat_state: std::collections::HashMap::new(),
             coffee_holders: std::collections::HashSet::new(),
             coffee_fetched_at: std::collections::HashMap::new(),
-            version_popup: false,
-            version_popup_started_at: None,
+            popup: PopupState::default(),
             help_open: false,
             source_warning: None,
             debug_walkable: false,
-            version_popup_scale_at_edge: 0.0,
-            last_popup_scale: 0.0,
-            dashboard_open: false,
-            dashboard_rows: Vec::new(),
-            dashboard_selected: None,
-            dashboard_scroll: 0,
-            connection_open: false,
-            connection_rows: Vec::new(),
-            connection_live: Vec::new(),
-            connection_selected: 0,
-            connection_confirm: None,
-            connection_result: None,
-            connection_socket_line: String::new(),
+            dashboard: Default::default(),
+            connection: Default::default(),
             onboarding: crate::tui::welcome::OnboardingFrame::default(),
         }
     }
 
-    /// Mirror the dashboard frame the event loop built this tick. Pushing a
-    /// pre-built row snapshot (a cheap clone — `AgentId` is `Copy`, strings are
-    /// `Arc`) rather than the whole `DashboardUi` avoids cloning the fold
-    /// `HashSet`s every frame.
-    pub fn set_dashboard_frame(
+    /// Mirror the dashboard frame the event loop built this tick (a pre-built row
+    /// snapshot — a cheap clone, `AgentId` is `Copy`, strings are `Arc` — rather
+    /// than the whole `DashboardUi`, avoiding a per-frame clone of the fold sets).
+    pub fn set_dashboard_frame(&mut self, frame: crate::tui::dashboard::DashboardFrame) {
+        self.dashboard = frame;
+    }
+
+    /// Mirror the Sources-panel frame the event loop built this tick (the cached
+    /// HOOK facet `rows` + the per-frame LIVE facet `live`, handed over together).
+    pub fn set_connection_frame(&mut self, frame: crate::tui::connection::ConnectionFrame) {
+        self.connection = frame;
+    }
+
+    /// Test seam: build + push a `DashboardFrame` from positional parts so the
+    /// harness fixtures stay terse. Production uses `set_dashboard_frame`.
+    #[cfg(test)]
+    pub fn set_dashboard_frame_parts(
         &mut self,
         open: bool,
         rows: Vec<crate::tui::dashboard::DashboardRow>,
         selected: Option<pixtuoid_core::AgentId>,
         scroll: usize,
     ) {
-        self.dashboard_open = open;
-        self.dashboard_rows = rows;
-        self.dashboard_selected = selected;
-        self.dashboard_scroll = scroll;
+        self.dashboard = crate::tui::dashboard::DashboardFrame {
+            open,
+            rows,
+            selected,
+            scroll,
+        };
     }
 
-    /// Mirror the Connection-panel frame the event loop built this tick. `rows` is
-    /// the cached hook facet (cloned only on open / after an action); `live` is
-    /// the per-frame connection facet aligned to it.
+    /// Test seam: build + push a `ConnectionFrame` from positional parts.
+    #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
-    pub fn set_connection_frame(
+    pub fn set_connection_frame_parts(
         &mut self,
         open: bool,
         rows: Vec<crate::tui::connection::ConnectionRow>,
@@ -197,13 +200,15 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         result: Option<String>,
         socket_line: String,
     ) {
-        self.connection_open = open;
-        self.connection_rows = rows;
-        self.connection_live = live;
-        self.connection_selected = selected;
-        self.connection_confirm = confirm;
-        self.connection_result = result;
-        self.connection_socket_line = socket_line;
+        self.connection = crate::tui::connection::ConnectionFrame {
+            open,
+            rows,
+            live,
+            selected,
+            confirm,
+            result,
+            socket_line,
+        };
     }
 
     /// Mirror the first-run onboarding frame the event loop built this tick
@@ -351,17 +356,17 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     }
 
     pub fn set_version_popup(&mut self, v: bool, now: SystemTime) {
-        if v != self.version_popup {
+        if v != self.popup.open {
             // Capture current scale so the new animation starts from the
             // visible position (no snap-back when interrupting mid-animation).
-            self.version_popup_scale_at_edge = self.version_popup_scale(now);
-            self.version_popup_started_at = Some(now);
-            self.version_popup = v;
+            self.popup.scale_at_edge = self.version_popup_scale(now);
+            self.popup.started_at = Some(now);
+            self.popup.open = v;
         }
     }
 
     pub fn version_popup_started_at(&self) -> Option<SystemTime> {
-        self.version_popup_started_at
+        self.popup.started_at
     }
 
     /// Compute the entrance/dismissal scale for the version popup based on
@@ -376,17 +381,16 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     /// snapping to 0 or 1 and re-animating from scratch.
     pub fn version_popup_scale(&self, now: SystemTime) -> f32 {
         use pixtuoid_scene::anim::{eased_progress, Easing};
-        match (self.version_popup, self.version_popup_started_at) {
+        match (self.popup.open, self.popup.started_at) {
             (true, Some(start)) => {
                 let progress = eased_progress(start, 200, Easing::EaseOutCubic, now);
                 // Lerp from the scale at edge time to the target (1.0)
-                self.version_popup_scale_at_edge
-                    + (1.0 - self.version_popup_scale_at_edge) * progress
+                self.popup.scale_at_edge + (1.0 - self.popup.scale_at_edge) * progress
             }
             (false, Some(start)) => {
                 let progress = eased_progress(start, 120, Easing::EaseInQuad, now);
                 // Lerp from the scale at edge time to the target (0.0)
-                self.version_popup_scale_at_edge * (1.0 - progress)
+                self.popup.scale_at_edge * (1.0 - progress)
             }
             (true, None) => 1.0,
             (false, None) => 0.0,
@@ -397,7 +401,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     /// Prefer this over calling `version_popup_scale(SystemTime::now())` in
     /// the mouse handler to keep click geometry in sync with what was painted.
     pub fn last_popup_scale(&self) -> f32 {
-        self.last_popup_scale
+        self.popup.last_scale
     }
 
     pub fn set_active_pet(&mut self, pet: Option<PetState>) {
@@ -481,7 +485,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             // layout / pet / popup left over from a larger prior frame.
             self.cached_layout = None;
             self.last_pet_pos = None;
-            self.last_popup_scale = 0.0;
+            self.popup.last_scale = 0.0;
             return Ok(());
         }
 
@@ -596,22 +600,11 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         let theme_picker = self.theme_picker;
         let source_warning = self.source_warning.clone();
         let help_open = self.help_open;
-        // Dashboard can be opened mid floor-slide (Tab isn't transition-gated),
-        // so paint it here too. Clone the rows for the brief transition frames
-        // rather than thread a disjoint borrow through the split_at_mut buffers.
-        let dashboard_open = self.dashboard_open;
-        let dashboard_rows = self.dashboard_rows.clone();
-        let dashboard_selected = self.dashboard_selected;
-        let dashboard_scroll = self.dashboard_scroll;
-        // Sources panel can likewise be opened mid-slide (`s` isn't gated); clone
-        // its frame for the brief transition.
-        let connection_open = self.connection_open;
-        let connection_rows = self.connection_rows.clone();
-        let connection_live = self.connection_live.clone();
-        let connection_selected = self.connection_selected;
-        let connection_confirm = self.connection_confirm;
-        let connection_result = self.connection_result.clone();
-        let connection_socket_line = self.connection_socket_line.clone();
+        // Dashboard + Sources panel can be opened mid floor-slide (Tab / `s` aren't
+        // transition-gated), so paint them here too. Clone their frames for the brief
+        // transition rather than thread disjoint borrows through the split_at_mut buffers.
+        let dashboard = self.dashboard.clone();
+        let connection = self.connection.clone();
         // Onboarding can't be opened mid-slide (it's first-run only), but clone its
         // frame for the brief transition so the overlay survives a floor change.
         let onboarding = self.onboarding.clone();
@@ -638,17 +631,8 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             crate::tui::renderer::paint_overlays(
                 f,
                 theme_picker,
-                dashboard_open,
-                &dashboard_rows,
-                dashboard_selected,
-                dashboard_scroll,
-                connection_open,
-                &connection_rows,
-                &connection_live,
-                connection_selected,
-                connection_confirm,
-                connection_result.as_deref(),
-                &connection_socket_line,
+                &dashboard,
+                &connection,
                 popup_scale,
                 help_open,
                 &onboarding,
@@ -658,7 +642,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             );
         })?;
 
-        self.last_popup_scale = popup_scale;
+        self.popup.last_scale = popup_scale;
         self.cached_layout = None;
         // The pet isn't rendered to a single interactable position mid-slide;
         // clear the stale position so the mouse handler can't "pet" a ghost at
@@ -770,17 +754,8 @@ impl<B: Backend<Error: Send + Sync + 'static>> Renderer for TuiRenderer<B> {
             popup_scale,
             help_open: self.help_open,
             source_warning: self.source_warning.as_deref(),
-            dashboard_open: self.dashboard_open,
-            dashboard_rows: self.dashboard_rows.as_slice(),
-            dashboard_selected: self.dashboard_selected,
-            dashboard_scroll: self.dashboard_scroll,
-            connection_open: self.connection_open,
-            connection_rows: self.connection_rows.as_slice(),
-            connection_live: self.connection_live.as_slice(),
-            connection_selected: self.connection_selected,
-            connection_confirm: self.connection_confirm,
-            connection_result: self.connection_result.as_deref(),
-            connection_socket_line: self.connection_socket_line.as_str(),
+            dashboard: &self.dashboard,
+            connection: &self.connection,
             onboarding: &self.onboarding,
         };
         let result = draw_scene(&mut self.terminal, &floor_scene, pack, now, &mut draw_ctx);
@@ -799,13 +774,13 @@ impl<B: Backend<Error: Send + Sync + 'static>> Renderer for TuiRenderer<B> {
             // size): no popup was drawn, so zero the popup-click hit-box rather
             // than leave a stale scale the mouse handler reads as "popup on
             // screen". Mirrors the too-small early-return + the transition path.
-            self.last_popup_scale = if layout_opt.is_some() {
+            self.popup.last_scale = if layout_opt.is_some() {
                 popup_scale
             } else {
                 0.0
             };
         } else {
-            self.last_popup_scale = 0.0;
+            self.popup.last_scale = 0.0;
         }
         result.map(|_| ())
     }

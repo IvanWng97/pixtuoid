@@ -37,6 +37,24 @@ pub struct LiveInfo {
     pub dead: bool,
 }
 
+/// The per-tick Sources-panel render frame the event loop hands the renderer via
+/// `set_connection_frame` — one snapshot the painter reads. The event loop builds
+/// the cached HOOK facet (`rows`) + the per-frame LIVE facet (`live`) then hands
+/// both over together, so they ride as one struct rather than seven parallel
+/// `connection_*` fields/params through `TuiRenderer` → `DrawCtx` → `paint_overlays`.
+/// (The two-facet BUILD lifecycle is unchanged — this bundles only the snapshot the
+/// renderer mirrors.) Mirrors `OnboardingFrame`.
+#[derive(Debug, Clone, Default)]
+pub struct ConnectionFrame {
+    pub open: bool,
+    pub rows: Vec<ConnectionRow>,
+    pub live: Vec<LiveInfo>,
+    pub selected: usize,
+    pub confirm: Option<usize>,
+    pub result: Option<String>,
+    pub socket_line: String,
+}
+
 /// Session-persistent Connection UI state, owned by the event loop. Only `open`
 /// flips on close, so the cached rows + selection survive close/reopen.
 #[derive(Debug, Default)]
