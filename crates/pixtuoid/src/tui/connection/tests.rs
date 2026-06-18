@@ -9,6 +9,10 @@ use pixtuoid_core::source::manager::SourceDeath;
 use pixtuoid_core::state::{ActivityState, AgentSlot, GlobalDeskIndex};
 use pixtuoid_core::AgentId;
 
+// `Target` moved with the status model to `crate::sources`; import it directly
+// (these row tests exercise the re-exported `build_rows`/`build_rows_from`).
+use crate::install::target::Target;
+
 fn claude_target() -> &'static Target {
     crate::install::target::by_name("claude").expect("claude target registered")
 }

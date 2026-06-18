@@ -12,48 +12,19 @@
 //! for target-bearing sources, removes its hooks. Users bind/unbind a source;
 //! they never think in terms of hooks vs JSONL.
 
-use std::collections::HashSet;
-use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
 use pixtuoid_core::source::manager::SourceDeath;
 use pixtuoid_core::state::SceneState;
 
-use crate::install::target::{self, Target};
 use crate::install::{InstallOutcome, InstallReport, UninstallOutcome, UninstallReport};
 
-/// Connection state for one CLI row — the single facet the toggle acts on.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ConnState {
-    /// Bound: this source's events flow and its characters show. Toggle disconnects.
-    Connected,
-    /// Unbound: the gate is closed; no characters. Toggle connects.
-    Disconnected,
-    /// A target-bearing CLI that isn't installed on this machine — nothing to bind to.
-    NoCli,
-}
-
-/// One row in the Connection list = one agent CLI.
-#[derive(Debug, Clone)]
-pub struct ConnectionRow {
-    /// The core source id (registry `SourceDescriptor.name`, e.g. "claude-code")
-    /// — the unifying key; joined to an install target via `Target.core_source`.
-    pub source_id: &'static str,
-    /// 2-char badge id (`cc`/`cx`/…), from the source descriptor.
-    pub label_prefix: &'static str,
-    pub display_name: &'static str,
-    pub state: ConnState,
-    /// The config the hooks live in; `None` for no-target (JSONL-only) rows.
-    pub config_path: Option<PathBuf>,
-    /// The install target backing this row; `None` ⇒ connect/disconnect is a
-    /// flag-only flip (Antigravity — no hooks to write).
-    pub target: Option<&'static Target>,
-    /// Cached HEALTH summary (the consolidation arc): a one-line `⚠ …` verdict
-    /// from `doctor::diagnose(..).summary()` — install-broken (#309) > decode
-    /// drift — computed on row build for CONNECTED rows only (`None` = healthy /
-    /// not connected). Shown in the detail line ABOVE the benign per-state hint.
-    pub health: Option<String>,
-}
+// The source-status MODEL (rows, state, builders) lives in `crate::sources` (the
+// TUI-free control core shared by the panel, the CLI, and onboarding). Re-export
+// it here so this module + the painter + harness keep their `connection::…` paths.
+pub use crate::sources::{
+    build_rows, build_rows_from, ConnState, ConnectionRow, RowFacts, RowInput,
+};
 
 /// Live-connection facet, derived per frame from the scene snapshot. Aligned by
 /// index to `ConnectionUi.rows`.
@@ -82,110 +53,6 @@ pub struct ConnectionUi {
     /// `Some(row_idx)` ⇒ a disconnect is armed on that row, awaiting y/n.
     pub confirm: Option<usize>,
     pub last_result: Option<String>,
-}
-
-/// Per-target filesystem facts, injected so `build_rows_from` is pure (the FS
-/// reads — `is_present`/`default_config_path` — happen in `build_rows`). `Some`
-/// exactly when the row has an install target.
-#[derive(Debug, Clone)]
-pub struct RowFacts {
-    pub present: bool,
-    pub config_path: Option<PathBuf>,
-}
-
-/// One pure input row for `build_rows_from`.
-#[derive(Debug, Clone)]
-pub struct RowInput {
-    pub source_id: &'static str,
-    pub label_prefix: &'static str,
-    pub target: Option<&'static Target>,
-    pub facts: Option<RowFacts>,
-    /// Whether this source is in the live connected-set (the persisted intent).
-    pub connected: bool,
-    /// Cached health summary for this row (see `ConnectionRow.health`) — injected
-    /// so `build_rows_from` stays pure (the I/O — log scan + install verify —
-    /// happens in `build_rows`).
-    pub health: Option<String>,
-}
-
-/// Title-case the no-target sources (the registry deliberately omits display
-/// names). Target-bearing rows use `Target.display_name`.
-fn display_name_for(source_id: &'static str) -> &'static str {
-    match source_id {
-        "antigravity" => "Antigravity",
-        "copilot" => "Copilot CLI",
-        other => other,
-    }
-}
-
-/// Pure row builder over injected facts — the testable core of `build_rows`.
-/// A target-bearing CLI that isn't present is `NoCli` (nothing to bind to, even
-/// if a stale flag says connected); otherwise the connected-set is authoritative.
-pub fn build_rows_from(inputs: Vec<RowInput>) -> Vec<ConnectionRow> {
-    inputs
-        .into_iter()
-        .map(|input| {
-            let absent_cli = matches!(
-                (&input.target, &input.facts),
-                (Some(_), Some(f)) if !f.present
-            );
-            let state = if absent_cli {
-                ConnState::NoCli
-            } else if input.connected {
-                ConnState::Connected
-            } else {
-                ConnState::Disconnected
-            };
-            ConnectionRow {
-                source_id: input.source_id,
-                label_prefix: input.label_prefix,
-                display_name: input
-                    .target
-                    .map_or_else(|| display_name_for(input.source_id), |t| t.display_name),
-                state,
-                config_path: input.facts.and_then(|f| f.config_path),
-                target: input.target,
-                health: input.health,
-            }
-        })
-        .collect()
-}
-
-/// Build the cached connection-facet rows from the registry + install targets +
-/// the live connected-set. Performs filesystem reads (`is_present`/
-/// `default_config_path`) AND, for connected rows, the health rollup
-/// (`doctor::diagnose` — install verify + a per-source log scan over `log`) —
-/// call on open + after each toggle, NEVER per frame. `log` is the warn-floor
-/// log text (`""` when none); health is computed only for CONNECTED rows (a
-/// disconnected source's stale drift/soundness isn't actionable here).
-pub fn build_rows(connected: &HashSet<String>, log: &str) -> Vec<ConnectionRow> {
-    use pixtuoid_core::source::registry::REGISTRY;
-    let inputs = REGISTRY
-        .iter()
-        .map(|d| {
-            // Join on the SOURCE id via `core_source`, NOT `by_name`: the Claude
-            // target is named "claude" but its source is "claude-code", so
-            // `by_name(d.name)` would miss it and render the flagship CLI as a
-            // non-actionable JSONL row.
-            let target = target::by_source(d.name);
-            let facts = target.map(|t| RowFacts {
-                present: target::is_present(t),
-                config_path: (t.default_config_path)().ok(),
-            });
-            let connected = connected.contains(d.name);
-            RowInput {
-                source_id: d.name,
-                label_prefix: d.label_prefix,
-                target,
-                facts,
-                connected,
-                health: connected
-                    .then(|| crate::doctor::diagnose(d.name, log).summary())
-                    .flatten(),
-            }
-        })
-        .collect();
-    build_rows_from(inputs)
 }
 
 /// The live facet for one source, derived purely from the scene snapshot +
