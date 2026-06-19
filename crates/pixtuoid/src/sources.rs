@@ -65,6 +65,14 @@ pub struct SourceStatus {
     pub connected: bool,
     pub cli_present: bool,
     /// A health/issue summary (install-broken / decode-drift), or `null` when n/a.
+    // Generates `health?: string | null`, kept OPTIONAL on purpose. The wire always
+    // emits `health` (no `skip_serializing_if`; pinned by `source_status_json_shape`),
+    // so the `?` is a harmless SUPERSET, and the consumer only does `if (s.health)`
+    // — identical for optional vs required. The one schemars knob to force `required`
+    // (`schemars(required)`) STRIPS the `| null` → the WRONG `health: string` (the
+    // wire CAN be null), the very "mis-specified nullability" pitfall
+    // PARALLEL-DELIVERY.md names. So nullable is preserved (it matters); optional is
+    // kept (it doesn't).
     pub health: Option<String>,
 }
 
