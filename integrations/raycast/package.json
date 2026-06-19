@@ -5,6 +5,7 @@
   "description": "Manage which AI coding-agent CLIs feed your Pixtuoid office, and launch the floating window — without leaving Raycast.",
   "icon": "pixtuoid.png",
   "author": "IvanWng97",
+  "platforms": ["macOS"],
   "categories": ["Developer Tools"],
   "license": "MIT",
   "commands": [
