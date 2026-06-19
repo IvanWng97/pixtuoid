@@ -20,5 +20,4 @@ export interface SourceStatus {
    */
   health?: string | null;
   id: string;
-  [k: string]: unknown;
 }

@@ -245,7 +245,7 @@ gen-readme:
 
 # Regenerate the --json contract chain after changing `SourceStatus`: re-emit the
 # JSON Schema from the Rust serde type, then regenerate the Raycast TS type from
-# it. The two freshness gates (the `source_status_schema` test in `just test`, and
+# it. The two freshness gates (the `source_status_schema_matches…` golden test in `just test`, and
 # the raycast CI's `gen:contract` diff) FAIL until you run this — so the Rust
 # producer and the TS consumer can't hand-drift. Needs raycast deps installed
 # (`npm --prefix integrations/raycast ci`).

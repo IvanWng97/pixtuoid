@@ -54,7 +54,11 @@ impl ChangeOutcome {
 /// Deliberately a flat DTO, NOT the internal `ConnectionRow` (whose shape is a
 /// UI concern free to change).
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
-#[cfg_attr(test, derive(schemars::JsonSchema))]
+// `deny_unknown_fields` stamps `additionalProperties: false` into the emitted
+// schema so the generated TS type has NO `[k: string]: unknown` index signature —
+// then a renamed/typo'd field in the consumer is a `tsc` error, not silently
+// `unknown`. Matches the wire reality: the CLI never emits extra keys.
+#[cfg_attr(test, derive(schemars::JsonSchema), schemars(deny_unknown_fields))]
 pub struct SourceStatus {
     pub id: String,
     pub display_name: String,
