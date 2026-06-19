@@ -1,0 +1,37 @@
+name: raycast
+
+on:
+  # PR-only gate for the self-contained Raycast extension (integrations/raycast/).
+  # Runs the toolchain checks that work on a Linux runner — tsc + ESLint. The full
+  # `ray build`/`ray lint` (manifest + icon validation, the Prettier pass) needs the
+  # macOS Raycast app and is run locally before publishing to the store, so it isn't
+  # gated here. The CLI --json contract this consumes is pinned on the Rust side by
+  # `crates/pixtuoid/src/sources.rs::source_status_json_shape`.
+  pull_request:
+    paths: ['integrations/raycast/**', '.github/workflows/raycast.yml']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: raycast-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: types · lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: integrations/raycast
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: integrations/raycast/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npx eslint .

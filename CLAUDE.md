@@ -60,6 +60,12 @@ scripts/             gen-media.py + media.json (the ONE manifest-driven driver f
                      review-metrics.py (review-economics collector)
 site/                Astro landing page → GitHub Pages; self-contained Node project,
                      own CI; `just site-{setup,dev,check,fmt}` → see site/README.md
+integrations/raycast/  Raycast extension (TypeScript, self-contained Node project; NOT Rust):
+                     `Manage Sources` (connect/disconnect over `pixtuoid sources|connect|disconnect
+                     --json`) + `Start Floating` commands. A thin shell over the CLI `--json`
+                     contract — does NOT bundle the binary; resolves it via login-shell PATH +
+                     a binary-path preference. Own CI (.github/workflows/raycast.yml: tsc + eslint;
+                     `ray build`/`ray lint` need the macOS app, run before store publish). See its README.
 ```
 
 ## Build & test
