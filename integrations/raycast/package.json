@@ -4,7 +4,7 @@
   "title": "Pixtuoid",
   "description": "Manage which AI coding-agent CLIs feed your Pixtuoid office, and launch the floating window — without leaving Raycast.",
   "icon": "pixtuoid.png",
-  "author": "ivanwng97",
+  "author": "IvanWng97",
   "categories": ["Developer Tools"],
   "license": "MIT",
   "commands": [
@@ -13,14 +13,16 @@
       "title": "Manage Sources",
       "subtitle": "Pixtuoid",
       "description": "List every agent CLI Pixtuoid knows about and connect/disconnect each one.",
-      "mode": "view"
+      "mode": "view",
+      "keywords": ["agents", "ai", "claude", "codex", "cursor", "copilot", "office"]
     },
     {
       "name": "start-floating",
       "title": "Start Floating Window",
       "subtitle": "Pixtuoid",
       "description": "Open the Pixtuoid floating desktop window.",
-      "mode": "no-view"
+      "mode": "no-view",
+      "keywords": ["office", "desktop", "overlay", "pixel"]
     }
   ],
   "preferences": [
