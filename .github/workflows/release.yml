@@ -401,6 +401,11 @@ jobs:
       # publishing needs npm >= 11.5.1. Now LOAD-BEARING — NODE_AUTH_TOKEN is
       # gone, so OIDC is the only auth path; without this upgrade trusted
       # publishing silently won't engage and the publish fails unauthenticated.
+      # (registry-url above STAYS: it sets the publish registry AND is what
+      # triggers npm's OIDC detection. setup-node writes an .npmrc authToken
+      # that's now empty — npm ignores it when a trusted publisher is
+      # configured; if OIDC ever fails to engage, drop registry-url so no
+      # token line is written at all.)
       # Pinned EXACTLY (not @11): the publish path is irreversible, so what
       # runs must not float with the registry at release time; bump
       # deliberately (and drop this line once node's bundled npm >= 11.5.1).

@@ -68,6 +68,12 @@ just bump 0.5.1                             # bump + draft notes + preflight →
 git tag v0.5.1 && git push origin v0.5.1    # fires release.yml → build + crates.io + homebrew
 ```
 
+Publishing to crates.io + npm uses **OIDC trusted publishing** — CI carries no
+standing registry tokens. The per-crate (crates.io) and per-package (npm)
+Trusted Publishers, scoped to the `release.yml` workflow, must already be
+configured before the tag is pushed, or that target's publish step fails. See
+[#216](https://github.com/IvanWng97/pixtuoid/issues/216).
+
 ## Conventions (the short version — see [`CLAUDE.md`](../CLAUDE.md) for the full set)
 
 - **TDD first** — failing test → minimal impl. Don't add code without a test that exercises it.
