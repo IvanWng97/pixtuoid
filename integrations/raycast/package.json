@@ -12,7 +12,6 @@
     {
       "name": "manage-sources",
       "title": "Manage Sources",
-      "subtitle": "Pixtuoid",
       "description": "List every agent CLI Pixtuoid knows about and connect/disconnect each one.",
       "mode": "view",
       "keywords": ["agents", "ai", "claude", "codex", "cursor", "copilot", "office"]
@@ -20,7 +19,6 @@
     {
       "name": "start-floating",
       "title": "Start Floating Window",
-      "subtitle": "Pixtuoid",
       "description": "Open the Pixtuoid floating desktop window.",
       "mode": "no-view",
       "keywords": ["office", "desktop", "overlay", "pixel"]

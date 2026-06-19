@@ -82,7 +82,7 @@ export default function ManageSources() {
                 shortcut={{ modifiers: ["cmd"], key: "r" }}
                 onAction={() => revalidate()}
               />
-              <Action.OpenInBrowser title="Open Pixtuoid on GitHub" url={REPO_URL} />
+              <Action.OpenInBrowser icon={Icon.Globe} title="Open Pixtuoid on GitHub" url={REPO_URL} />
               <Action
                 title="Open Extension Preferences"
                 icon={Icon.Gear}
@@ -116,7 +116,7 @@ function ErrorView({ error, onRetry }: { error: Error; onRetry: () => void }) {
             ) : (
               <Action title="Try Again" icon={Icon.ArrowClockwise} onAction={onRetry} />
             )}
-            <Action.OpenInBrowser title="Installation Docs" url={`${REPO_URL}#install`} />
+            <Action.OpenInBrowser icon={Icon.Globe} title="Installation Docs" url={`${REPO_URL}#install`} />
           </ActionPanel>
         }
       />
