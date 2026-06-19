@@ -56,6 +56,9 @@ pub(super) fn dust_mote_positions(
         let mut s = floor_seed
             .wrapping_add((col.x as u64).wrapping_mul(0xbf58_476d_1ce4_e5b9))
             .wrapping_add((i as u64).wrapping_mul(0x94d0_49bb_1331_11eb));
+        // splitmix64 finalizer over the per-(column, mote) seed, open-coded by
+        // deliberate choice (see `strike_offset` in background/mod.rs for the
+        // cross-crate-copy rationale).
         s = (s ^ (s >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
         s = (s ^ (s >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
         s ^= s >> 31;

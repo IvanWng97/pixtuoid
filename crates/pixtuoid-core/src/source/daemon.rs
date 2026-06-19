@@ -125,15 +125,20 @@ impl DaemonPresence {
         self.in_flight_run_keys.clear();
     }
 
-    /// Transition to `Down` + clear the live-work pair — the daemon mirror of
-    /// `fsm::accumulate_active_ms`-style single-owner transitions, so a future
-    /// must-clear-on-down field (e.g. a #317 degraded-reason) can't be forgotten
-    /// at one of the four down sites. Does NOT touch `last_seen`: the
-    /// `apply_presence` callers ride its top-level stamp, and the sweep /
-    /// `mark_presence_down` re-anchor it explicitly for the walk-out timer.
+    /// Transition to `Down` + clear the live-work pair AND the armed pid — the
+    /// daemon mirror of `fsm::accumulate_active_ms`-style single-owner
+    /// transitions, so a must-clear-on-down field can't be forgotten at one of
+    /// the four down sites. `current_pid` is cleared because a Down daemon has no
+    /// live gateway pid: leaving it set strands the binding on the dead pid, so a
+    /// reconnect-as-a-new-pid whose `gateway_start` is missed can't re-adopt via
+    /// `PidSeen` (None-only) and the instant abrupt-down rung silently disarms on
+    /// the SECOND cycle until the 5-min presence sweep. Does NOT touch
+    /// `last_seen`: the `apply_presence` callers ride its top-level stamp, and the
+    /// sweep / `mark_presence_down` re-anchor it explicitly for the walk-out timer.
     fn enter_down(&mut self) {
         self.state = DaemonState::Down;
         self.clear_concurrency();
+        self.current_pid = None;
     }
 }
 
@@ -211,7 +216,9 @@ pub fn apply_presence(
         // Pure pid adoption (#318): bootstrap `current_pid` for a live daemon we
         // never saw `gateway_start` for (mid-attach / reconnect-while-alive), so
         // the abrupt-down exit watch can arm. ONLY when None — `GatewayUp` owns
-        // restart-rebinds, so this never clobbers a known pid. No state change.
+        // restart-rebinds, so this never clobbers a known LIVE pid; `enter_down`
+        // clears `current_pid` so a reconnect after a Down re-adopts here. No
+        // state change.
         PidSeen { pid } => {
             if p.current_pid.is_none() {
                 p.current_pid = Some(pid);
@@ -698,6 +705,38 @@ mod tests {
             None
         );
         assert_eq!(PidExited { pid: 3 }.armable_pid(), None);
+    }
+
+    #[test]
+    fn pid_seen_re_adopts_after_an_abrupt_down_so_the_second_cycle_arms() {
+        // #318 fixed the FIRST (None) adoption, but an abrupt-down must also let
+        // the rung RE-arm. After PidExited takes the daemon Down, a reconnect as a
+        // NEW pid whose gateway_start is missed is learned only via PidSeen — which
+        // must adopt it (current_pid was stranded on the dead pid before this fix),
+        // so the next PidExited takes the daemon down INSTANTLY rather than waiting
+        // for the 5-min presence_ttl sweep.
+        use DaemonPresenceUpdate::*;
+        for src in SOURCES {
+            let mut s = SceneState::default();
+            up(&mut s, src, 100, 0); // P1 live
+            apply_presence(&mut s, src, PidExited { pid: 100 }, ms(1)); // P1 dies → Down
+            assert_eq!(st(&s, src), DaemonState::Down);
+            // Reconnect as P2; gateway_start missed → only a normal event + PidSeen.
+            apply_presence(&mut s, src, PidSeen { pid: 200 }, ms(2));
+            apply_presence(&mut s, src, SessionStarted, ms(3)); // any event ⇒ up
+            assert_eq!(
+                s.daemons()[src].current_pid,
+                Some(200),
+                "PidSeen must re-adopt the live pid after a Down"
+            );
+            // P2 dying now takes the daemon down instantly (the rung re-armed).
+            apply_presence(&mut s, src, PidExited { pid: 200 }, ms(4));
+            assert_eq!(
+                st(&s, src),
+                DaemonState::Down,
+                "the second-cycle PidExited re-armed the instant abrupt-down rung"
+            );
+        }
     }
 
     #[test]

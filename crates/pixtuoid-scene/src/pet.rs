@@ -24,9 +24,10 @@ impl PetState {
     }
 
     pub fn elapsed_ms(&self, now: SystemTime) -> u64 {
-        now.duration_since(self.petted_at)
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(0)
+        // Delegate to the crate's saturate-to-0 helper (byte-identical). `is_active`
+        // above keeps its own form: its backward-clock fallback is `PET_DURATION_MS+1`
+        // (treat-as-expired), the deliberate variant anim.rs says not to migrate.
+        crate::anim::elapsed_ms(now, self.petted_at)
     }
 }
 

@@ -31,7 +31,7 @@ pub type SceneRx = watch::Receiver<Arc<SceneState>>;
 /// Fallback desk capacity when the terminal cannot be queried (e.g.
 /// headless mode). The real capacity is computed from terminal size in
 /// `compute_boot_capacities` before the first TUI frame.
-const FALLBACK_DESKS: usize = 16;
+pub(crate) const FALLBACK_DESKS: usize = 16;
 
 /// The startup inputs shared by `run` + `run_async`. Bundled so a new boot
 /// flag is one struct field, not a fourth copy of the arg list to thread
@@ -315,10 +315,6 @@ mod tests {
         assert_eq!(caps, [FALLBACK_DESKS; MAX_FLOORS]);
     }
 
-    // Regression: an explicit --max-desks must CLAMP each floor to the real
-    // layout capacity, never seed a floor ABOVE it. The boot atomics grow via
-    // fetch_max only, so an over-seed (the old `[cap; MAX_FLOORS]` path) strands
-    // agents on non-existent desks on small terminals until the terminal grows.
     #[test]
     fn summarize_reports_each_activity_state() {
         use pixtuoid_core::source::AgentEvent;
@@ -506,6 +502,10 @@ mod tests {
         assert!(out.contains("needs [2J approval"), "got: {out}");
     }
 
+    // Regression: an explicit --max-desks must CLAMP each floor to the real
+    // layout capacity, never seed a floor ABOVE it. The boot atomics grow via
+    // fetch_max only, so an over-seed (the old `[cap; MAX_FLOORS]` path) strands
+    // agents on non-existent desks on small terminals until the terminal grows.
     #[test]
     fn explicit_cap_clamps_to_layout_capacity_not_above() {
         let base = boot_capacities_for(192, 48);

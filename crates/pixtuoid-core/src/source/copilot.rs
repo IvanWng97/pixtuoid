@@ -36,7 +36,9 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use serde_json::Value;
 
-use crate::source::decoder::{cwd_basename_label, make_tool_detail};
+use crate::source::decoder::{
+    cwd_basename_label, ellipsize, make_tool_detail, MAX_DECODED_FIELD_CHARS,
+};
 use crate::source::jsonl::JsonlWatcher;
 use crate::source::{AgentEvent, Source, TaggedSender, ToolDetail};
 use crate::AgentId;
@@ -172,7 +174,10 @@ pub fn decode_copilot_line(
             let reason = data
                 .and_then(|d| d.get("permissionRequest"))
                 .and_then(|p| str_at(p, "kind"))
-                .map(|k| format!("permission: {k}"))
+                // Cap at the decode boundary like every other content-derived
+                // Waiting reason (opencode/reasonix) — `kind` is read raw off
+                // events.jsonl and persists in the slot + headless summary.
+                .map(|k| ellipsize(&format!("permission: {k}"), MAX_DECODED_FIELD_CHARS))
                 .unwrap_or_else(|| "permission".to_string());
             vec![AgentEvent::Waiting {
                 agent_id: acting,
@@ -447,6 +452,25 @@ mod tests {
                 "a line with envelope agentId must attribute to the CHILD, not root"
             ),
             other => panic!("expected child ActivityStart, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn permission_requested_reason_is_capped_at_the_decode_boundary() {
+        // `kind` is read raw off events.jsonl and stored in a persistent slot
+        // field + the headless summary; like every other content-derived Waiting
+        // reason it must be ellipsize-capped at the decode boundary (CONTRIBUTING
+        // pitfall 3 / R0612-06), not left unbounded.
+        use crate::source::decoder::MAX_DECODED_FIELD_CHARS;
+        let kind = "x".repeat(MAX_DECODED_FIELD_CHARS * 4);
+        let line = format!(
+            r#"{{"type":"permission.requested","data":{{"permissionRequest":{{"kind":"{kind}"}}}},"id":"a","timestamp":"t","parentId":null}}"#
+        );
+        match &decode(&line)[..] {
+            [AgentEvent::Waiting { reason, .. }] => {
+                assert_eq!(reason.chars().count(), MAX_DECODED_FIELD_CHARS + 1);
+            }
+            other => panic!("expected Waiting, got {other:?}"),
         }
     }
 

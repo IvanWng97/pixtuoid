@@ -82,6 +82,8 @@ pub(in crate::pixel_painter) fn weather_state(now: SystemTime) -> Weather {
         .map(|d| d.as_secs())
         .unwrap_or(0);
     let cycle = secs / 600;
+    // splitmix64 finalizer, open-coded by deliberate choice (see `strike_offset`
+    // in background/mod.rs for the cross-crate-copy rationale).
     let mut h = cycle.wrapping_add(0x9e37_79b9_7f4a_7c15);
     h = (h ^ (h >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
     h = (h ^ (h >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);

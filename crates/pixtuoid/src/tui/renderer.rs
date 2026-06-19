@@ -32,7 +32,8 @@ use pixtuoid_scene::pose;
 // Re-exports so tui_renderer.rs and tui/mod.rs import from one place.
 pub(crate) use crate::tui::hit_test::hit_test_agent;
 pub use crate::tui::hit_test::{
-    hit_test_coffee_machine, hit_test_from_tui, hit_test_furniture, hit_test_mascot, hit_test_pet,
+    hit_test_branding, hit_test_coffee_machine, hit_test_from_tui, hit_test_furniture,
+    hit_test_mascot, hit_test_pet,
 };
 pub(crate) use crate::tui::widgets::paint_hover_tooltip;
 pub use crate::tui::widgets::TickerQueue;

@@ -27,7 +27,7 @@ use winit::event_loop::EventLoop;
 
 use crate::config;
 use crate::runtime::driver::{build_source_set, reducer_task};
-use crate::runtime::{boot_capacities_for, ConnectedSources, RunConfig};
+use crate::runtime::{ConnectedSources, RunConfig};
 use window::{FloatingApp, FloatingEvent};
 
 /// Open the floating window and drive it until the user closes it.
@@ -75,11 +75,11 @@ pub fn run(cfg: RunConfig) -> Result<()> {
         Some(presence_tx),
     );
     let (tx, rx) = mpsc::channel::<(Transport, AgentEvent)>(256);
-    // Boot capacity from the WINDOW, not crossterm: the office canvas is the window
-    // pixels (buf_w = cols, buf_h = rows*2), so cols = width, rows = height/2. Refined to
-    // the exact layout on the first redraw (window::sync_floor_caps).
-    let boot_caps =
-        boot_capacities_for(floating_cfg.width as u16, (floating_cfg.height / 2) as u16);
+    // Boot capacity from the WINDOW at the SAME geometry the window renders (office
+    // buffer = window / office_scale, no footer) so the boot seed and the first redraw
+    // (window::sync_floor_caps) agree — reusing the TUI's footer-subtracting,
+    // scale-ignorant boot_capacities_for over-seeds and can strand a boot-race agent.
+    let boot_caps = offscreen::boot_capacities_for_window(floating_cfg.width, floating_cfg.height);
     let (scene_tx, scene_rx) = watch::channel(Arc::new(SceneState::new(boot_caps)));
     let floor_caps: Arc<[AtomicUsize; MAX_FLOORS]> =
         Arc::new(std::array::from_fn(|i| AtomicUsize::new(boot_caps[i])));

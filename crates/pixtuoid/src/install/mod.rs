@@ -278,24 +278,6 @@ pub(crate) fn install_target(
     let (binary, explicit_hook) =
         resolve_hook_binary_from(t, hook_path, env_hook, io::default_hook_binary)?;
     let hook_cmd = (t.hook_command)(&binary, explicit_hook)?;
-    // Wholly-owned extra artifacts (the OpenClaw plugin dir) — written before the
-    // config merge so a re-install refreshes them even when the config is a no-op.
-    // The shim's resolved path is baked into the entry module.
-    if let Some(make) = t.extra_artifacts {
-        for (p, c) in make(&binary)? {
-            if let Some(dir) = p.parent() {
-                std::fs::create_dir_all(dir)
-                    .with_context(|| format!("creating plugin dir {}", dir.display()))?;
-            }
-            // Atomic + symlink-safe (temp-in-dir → fsync → rename), NOT a plain
-            // `fs::write`: the rename REPLACES `p` rather than following a symlink
-            // planted at it, and a torn write can't leave a half-rendered plugin
-            // the gateway then fails to load. Reuses the ConfigLock write authority
-            // (each artifact is its own lock target — disjoint from the config
-            // lock taken below, so no self-deadlock).
-            io::write_config_atomic(&p, &c).with_context(|| format!("writing {}", p.display()))?;
-        }
-    }
     // The lock covers the WHOLE read→merge→backup→write round (lost-update
     // TOCTOU: two concurrent pixtuoid runs would otherwise interleave
     // read(A)→write(B)→write(A) and A's rename clobbers B's change). Residual:
@@ -307,8 +289,31 @@ pub(crate) fn install_target(
     // lock and read would otherwise split the round across two files (see
     // ConfigLock::read).
     let content = lock.read()?;
+    // Merge FIRST so a present-but-malformed config bails (merge_install's
+    // parse_*_or_empty "refusing to overwrite") BEFORE we touch the filesystem —
+    // else the wholly-owned extra artifacts below were left on disk as orphan
+    // plugin files registered nowhere (a partial install).
     let outcome = (t.merge_install)(&content, &hook_cmd)
         .with_context(|| format!("processing {}", path.display()))?;
+    // Wholly-owned extra artifacts (the OpenClaw plugin dir) — written before the
+    // config WRITE so a re-install refreshes them even when the merge is a no-op
+    // (heals a deleted plugin file), but only AFTER the merge confirmed the config
+    // parses. The shim's resolved path is baked into the entry module.
+    if let Some(make) = t.extra_artifacts {
+        for (p, c) in make(&binary)? {
+            if let Some(dir) = p.parent() {
+                std::fs::create_dir_all(dir)
+                    .with_context(|| format!("creating plugin dir {}", dir.display()))?;
+            }
+            // Atomic + symlink-safe (temp-in-dir → fsync → rename), NOT a plain
+            // `fs::write`: the rename REPLACES `p` rather than following a symlink
+            // planted at it, and a torn write can't leave a half-rendered plugin
+            // the gateway then fails to load. Reuses the ConfigLock write authority
+            // (each artifact is its own lock target — disjoint from the config lock
+            // held here, consistent lock order config→artifact, so no self-deadlock).
+            io::write_config_atomic(&p, &c).with_context(|| format!("writing {}", p.display()))?;
+        }
+    }
     // The PATH check is an install-time environment check, independent of whether
     // the file content changed — always surface it (a no-op re-install on a box
     // where pixtuoid-hook isn't on PATH would otherwise warn nothing). Skipped
@@ -1158,6 +1163,45 @@ mod tests {
                 t.name
             );
         }
+    }
+
+    #[test]
+    fn install_on_a_malformed_config_leaves_no_orphan_extra_artifacts() {
+        // OpenClaw is the ONLY target with extra_artifacts (a wholly-owned plugin
+        // dir). A present-but-malformed config must bail BEFORE those files are
+        // written — else a partial install strands orphan plugin files registered
+        // nowhere. Env-isolated like the round-trip test (the plugin dir resolves
+        // from OPENCLAW_STATE_DIR, NOT the config override).
+        let _env = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let oc_home = tempfile::TempDir::new().unwrap();
+        std::env::set_var("OPENCLAW_STATE_DIR", oc_home.path());
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cfg = tmp.path().join("openclaw.json");
+        std::fs::write(&cfg, "{ not valid json,,, ").unwrap();
+        let before = std::fs::read_to_string(&cfg).unwrap();
+
+        let err = install_target(
+            &OPENCLAW,
+            Some(cfg.clone()),
+            Some(PathBuf::from("/fake/pixtuoid-hook")),
+        )
+        .unwrap_err();
+        assert!(
+            format!("{err:#}").contains("refusing to overwrite"),
+            "the bail must come from the parse guard, got: {err:#}"
+        );
+        // The malformed config is byte-for-byte preserved...
+        assert_eq!(std::fs::read_to_string(&cfg).unwrap(), before);
+        // ...and NO orphan plugin artifacts were written under the state dir.
+        assert!(
+            !oc_home.path().join("plugins").exists(),
+            "a malformed-config bail must not leave orphan plugin artifacts on disk"
+        );
+
+        std::env::remove_var("OPENCLAW_STATE_DIR");
     }
 
     // --- verify_target (#309 install-schema soundness) ------------------------

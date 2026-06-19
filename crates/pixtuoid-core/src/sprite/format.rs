@@ -107,10 +107,21 @@ mod tests {
         let err = validate_recolor_palette(&bad).unwrap_err();
         assert!(format!("{err:#}").contains("share RGB"), "{err:#}");
 
-        // A NON-recolor key sharing a color is fine — recolor doesn't substitute it.
+        // A NON-recolor key sharing a recolor key's RGB is REJECTED: `recolor_frame`
+        // substitutes by RGB equality over EVERY pixel, so an 'X' pixel equal to
+        // 'B' would get swapped to the agent's shirt color (artifacts). The load
+        // guard must cover this, not just recolor-vs-recolor — else a custom
+        // `--pack-dir` pack ships artifacts while `validate-pack` prints OK.
         let mut other = ok.clone();
-        other.insert('X', red);
-        assert!(validate_recolor_palette(&other).is_ok());
+        other.insert('X', red); // collides with the recolor base 'B'
+        let err = validate_recolor_palette(&other).unwrap_err();
+        assert!(format!("{err:#}").contains("share RGB"), "{err:#}");
+
+        // A non-recolor key with its OWN distinct color, or a transparent one, is fine.
+        let mut fine = ok.clone();
+        fine.insert('X', Some(Rgb { r: 1, g: 2, b: 3 }));
+        fine.insert('q', None);
+        assert!(validate_recolor_palette(&fine).is_ok());
     }
 }
 
@@ -302,16 +313,37 @@ pub fn load_pack_from_strings(pack_toml: &str, frames: &[(&str, &str)]) -> Resul
 /// violate it undetectably — the embedded pack is also test-pinned.
 pub const RECOLOR_KEYS: [char; 4] = ['B', 'H', 'S', 'P'];
 
-/// Fail a pack whose recolor keys collide on an RGB. Only the colored
-/// (`Some(rgb)`) recolor keys participate — a transparent key isn't substituted.
+/// Fail a pack where `recolor_frame`'s by-RGB substitution would be ambiguous.
+/// `recolor_frame` swaps EVERY opaque pixel whose RGB equals a recolor key's base
+/// color, so the guard must reject BOTH (a) two recolor keys sharing an RGB (one
+/// would silently fail) AND (b) any opaque NON-recolor key sharing a recolor
+/// base's RGB (its pixels would be recolored to the agent's color — artifacts).
+/// Only opaque (`Some(rgb)`) keys participate; a transparent key isn't substituted.
 fn validate_recolor_palette(palette: &Palette) -> Result<()> {
-    let mut seen: HashMap<Rgb, char> = HashMap::new();
+    // First map each recolor base RGB → its key, rejecting recolor-vs-recolor
+    // collisions as we go.
+    let mut recolor_rgb: HashMap<Rgb, char> = HashMap::new();
     for key in RECOLOR_KEYS {
         if let Some(Some(rgb)) = palette.get(key) {
-            if let Some(prev) = seen.insert(rgb, key) {
+            if let Some(prev) = recolor_rgb.insert(rgb, key) {
                 bail!(
                     "palette recolor keys '{prev}' and '{key}' share RGB {rgb:?}; \
                      per-agent recoloring substitutes by color and needs them distinct"
+                );
+            }
+        }
+    }
+    // Then reject any opaque non-recolor key colliding with a recolor base.
+    for (key, pixel) in palette.iter() {
+        if RECOLOR_KEYS.contains(&key) {
+            continue;
+        }
+        if let Some(rgb) = pixel {
+            if let Some(&base) = recolor_rgb.get(&rgb) {
+                bail!(
+                    "non-recolor palette key '{key}' and recolor key '{base}' share RGB \
+                     {rgb:?}; per-agent recoloring substitutes by color and would recolor \
+                     '{key}' too — give it a distinct color"
                 );
             }
         }

@@ -308,18 +308,49 @@ pub fn shell_shim_ref(command: &str) -> ShimRef {
             ShimRef::Absolute(PathBuf::from(p))
         };
     }
-    // Unix env-prefix form: the path is the LAST whitespace token, single-quoted.
-    match head.split_whitespace().next_back() {
-        Some(tok) => {
-            let p = tok.trim_matches('\'');
+    // Unix env-prefix form `PIXTUOID_SOURCE=<src> '<path>'`: the path is the LAST
+    // argument, POSIX single-quoted by `hook_cmd::unix::shell_single_quote`. The
+    // source name carries no quote/space, so the FIRST `'` opens the path token
+    // and the LAST `'` closes it — decode that span by REVERSING the single-quote
+    // escaping (`'\''` → `'`) rather than splitting on whitespace, which would
+    // truncate a spaced path to its last segment and false-flag the shim missing
+    // (the R0615-09/#311 doctor::field truncation twin).
+    match (head.find('\''), head.rfind('\'')) {
+        (Some(start), Some(end)) if end > start => {
+            let p = posix_unquote(&head[start..=end]);
             if p.is_empty() {
                 ShimRef::Unknown
             } else {
                 ShimRef::Absolute(PathBuf::from(p))
             }
         }
-        None => ShimRef::Unknown,
+        // Unquoted fallback (legacy / hand-edited): last whitespace token.
+        _ => match head.split_whitespace().next_back() {
+            Some(tok) if !tok.is_empty() => ShimRef::Absolute(PathBuf::from(tok)),
+            _ => ShimRef::Unknown,
+        },
     }
+}
+
+/// Reverse `hook_cmd::unix::shell_single_quote` over a span that STARTS and ENDS
+/// on a `'`: walk it tracking quote state, so a literal `'\''` (close, escaped
+/// quote, reopen) decodes to a single `'` and an in-quote space stays literal.
+fn posix_unquote(span: &str) -> String {
+    let mut out = String::new();
+    let mut in_quote = false;
+    let mut chars = span.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '\'' => in_quote = !in_quote,
+            '\\' if !in_quote => {
+                if let Some(escaped) = chars.next() {
+                    out.push(escaped);
+                }
+            }
+            _ => out.push(c),
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -331,6 +362,42 @@ mod tests {
         assert_eq!(
             shell_shim_ref("PIXTUOID_SOURCE=codex '/opt/pixtuoid-hook'"),
             ShimRef::Absolute(PathBuf::from("/opt/pixtuoid-hook"))
+        );
+    }
+
+    #[test]
+    fn shell_shim_ref_unix_recovers_spaced_single_quoted_path() {
+        // The writer single-quotes the path (`shell_single_quote`) so a home dir
+        // with a space round-trips through the shell. A whitespace-split reader
+        // would truncate `'/Users/Jane Doe/…'` to `Doe/…'` → a bogus relative
+        // path that never `.exists()` → a FALSE "shim binary missing" on every
+        // boot preflight / `doctor` / Sources panel. The R0615-09 (#311)
+        // doctor::field truncation twin.
+        assert_eq!(
+            shell_shim_ref("PIXTUOID_SOURCE=codex '/Users/Jane Doe/bin/pixtuoid-hook'"),
+            ShimRef::Absolute(PathBuf::from("/Users/Jane Doe/bin/pixtuoid-hook"))
+        );
+    }
+
+    #[test]
+    fn shell_shim_ref_unix_recovers_spaced_path_with_event_tail() {
+        // CodeWhale's ` --event` tail is stripped first, then the spaced path
+        // recovers — the two fixes compose.
+        assert_eq!(
+            shell_shim_ref(
+                "PIXTUOID_SOURCE=codewhale '/Users/Jane Doe/hook' --event session_start"
+            ),
+            ShimRef::Absolute(PathBuf::from("/Users/Jane Doe/hook"))
+        );
+    }
+
+    #[test]
+    fn shell_shim_ref_unix_recovers_path_with_embedded_single_quote() {
+        // `shell_single_quote("/U/O'B/hook")` == `'/U/O'\''B/hook'`; the reader
+        // reverses the POSIX `'\''` escaping, not just spaces.
+        assert_eq!(
+            shell_shim_ref(r#"PIXTUOID_SOURCE=codex '/U/O'\''B/hook'"#),
+            ShimRef::Absolute(PathBuf::from("/U/O'B/hook"))
         );
     }
 

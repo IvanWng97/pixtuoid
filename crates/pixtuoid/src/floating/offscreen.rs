@@ -157,6 +157,33 @@ pub fn office_scale(win_h: u32) -> u32 {
     (win_h as f64 / OFFICE_TARGET_H as f64).round().max(1.0) as u32
 }
 
+/// Per-floor boot desk-capacities for the FLOATING window. Mirrors
+/// `window::sync_floor_caps`'s geometry EXACTLY — the office buffer is
+/// `window / office_scale`, with NO footer row — so the boot seed and the first
+/// redraw AGREE. The TUI's `runtime::boot_capacities_for` instead subtracts a
+/// footer row AND ignores the window upscale, so reusing it here OVER-seeds: in
+/// the sub-frame boot race before the first redraw, a `SessionStart` could land
+/// at a `desk_index` the smaller real layout lacks (immutable → invisible-but-
+/// alive until a resize). A floor whose layout rejects the size falls back to
+/// `FALLBACK_DESKS`, matching the TUI boot helper.
+pub fn boot_capacities_for_window(
+    win_w: u32,
+    win_h: u32,
+) -> [usize; pixtuoid_core::state::MAX_FLOORS] {
+    let scale = office_scale(win_h);
+    let buf_w = (win_w / scale).clamp(1, u16::MAX as u32) as u16;
+    let buf_h = (win_h / scale).clamp(1, u16::MAX as u32) as u16;
+    std::array::from_fn(|i| {
+        let seed = pixtuoid_scene::floor::floor_seed(i);
+        let cap = pixtuoid_scene::floor::floor_capacity(buf_w, buf_h, seed);
+        if cap == 0 {
+            crate::runtime::FALLBACK_DESKS
+        } else {
+            cap
+        }
+    })
+}
+
 /// The bundled character sprite width (px). `CHARACTER_SPRITE_W` is `pub(super)` to
 /// `scene::pixel_painter` (not re-exported through `scene::layout`), so the floating
 /// painter uses the literal — labels only center ±half a glyph, so ±1px on a non-8-wide
@@ -268,6 +295,44 @@ mod tests {
         // A short window still renders at scale 1 — never 0 (redraw divides by it).
         assert_eq!(office_scale(90), 1);
         assert_eq!(office_scale(0), 1);
+    }
+
+    #[test]
+    fn boot_capacities_for_window_match_the_first_redraw_geometry_not_the_tui_overseed() {
+        // A 4x-upscaled window (720px tall → office_scale 4): the boot seed must
+        // match what the first redraw's `sync_floor_caps` stores — `floor_capacity`
+        // at the DOWNSCALED buffer (win/scale), no footer — not the full-window
+        // over-seed the TUI helper produces.
+        let (w, h) = (1280u32, 720u32);
+        let scale = office_scale(h);
+        let buf_w = (w / scale) as u16;
+        let buf_h = (h / scale) as u16;
+        let boot = boot_capacities_for_window(w, h);
+        for (i, &got) in boot.iter().enumerate() {
+            let cap = pixtuoid_scene::floor::floor_capacity(
+                buf_w,
+                buf_h,
+                pixtuoid_scene::floor::floor_seed(i),
+            );
+            let want = if cap == 0 {
+                crate::runtime::FALLBACK_DESKS
+            } else {
+                cap
+            };
+            assert_eq!(
+                got, want,
+                "floor {i} boot cap must match the rendered geometry"
+            );
+        }
+        // The old TUI helper (footer subtraction + no office_scale) over-seeds the
+        // ground floor — the bug this fix removes.
+        let overseed = crate::runtime::boot_capacities_for(w as u16, (h / 2) as u16);
+        assert!(
+            overseed[0] >= boot[0],
+            "TUI helper over-seeds ({} vs {})",
+            overseed[0],
+            boot[0]
+        );
     }
 
     #[test]

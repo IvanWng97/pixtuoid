@@ -1092,7 +1092,12 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                         }
                         MouseEventKind::Down(MouseButton::Left) => {
                             renderer.set_mouse_pos(Some((m.column, m.row)));
-                            if m.row <= 1 && m.column >= 1 && m.column < 31 {
+                            // Gate on cached_layout (the wall display only paints
+                            // with a layout) so a too-small frame / floor-slide
+                            // transition can't phantom-launch — mirrors the arms below.
+                            if renderer.cached_layout().is_some()
+                                && renderer::hit_test_branding(m.column, m.row)
+                            {
                                 let _ = open::that("https://github.com/IvanWng97/pixtuoid");
                             } else if renderer.cached_layout().is_some_and(|layout| {
                                 renderer::hit_test_coffee_machine(layout, m.column, m.row)

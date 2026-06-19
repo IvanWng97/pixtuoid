@@ -18,7 +18,9 @@ export interface SourceStatus {
 }
 
 /** A row of `pixtuoid connect|disconnect <id> --json` (`run_change`).
- *  `outcome` ∈ `"connected" | "disconnected" | "no_op" | "failed: <msg>"`. */
+ *  `outcome` ∈ `"connected" | "disconnected" | "failed: <msg>"` for these two
+ *  single-id commands. (`run_change` also emits `"no_op"`, but only via
+ *  `pixtuoid sources set` — the declarative reconcile this extension never calls.) */
 export interface OutcomeRow {
   id: string;
   outcome: string;

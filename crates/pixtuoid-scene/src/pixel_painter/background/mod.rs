@@ -78,6 +78,12 @@ fn lightning_envelope(since_strike_ms: u64) -> f32 {
 /// offset in `[0, PERIOD - FLASH)` (keeping the whole flash inside the bucket),
 /// so inter-strike gaps wander over ~0..2·PERIOD while averaging one PERIOD.
 /// splitmix64 (same mixer as `weather_state`) for a well-distributed offset.
+//
+// The two-multiply-xor finalizer is `pixtuoid_core::id::splitmix64`, open-coded
+// here (and in `time_of_day::weather_state` + `ambient::dust_mote_positions`) by
+// DELIBERATE choice: the canonical fn is `pub(crate)` to `pixtuoid-core`, and a
+// frozen published mixer (constants never change) isn't worth widening core's
+// semver surface to share across the crate boundary. Nothing to drift.
 fn strike_offset(bucket: u64) -> u64 {
     let mut h = bucket.wrapping_add(0x9e37_79b9_7f4a_7c15);
     h = (h ^ (h >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
