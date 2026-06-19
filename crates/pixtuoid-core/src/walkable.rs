@@ -210,3 +210,69 @@ mod tests {
         assert_eq!(a.signature(), b.signature());
     }
 }
+
+// Property-based generalizations of the `WalkableMask` example tests above: the
+// hand-picked cases pin a few points; these falsify the same invariants across
+// thousands of generated dims/rects/pads — exercising the saturating-arithmetic
+// clip path (overflowing + out-of-bounds rects, zero-size rects, edge queries)
+// the example cases can't reach. All three are provably true from the impl, so a
+// failure means a real regression, not flake.
+#[cfg(test)]
+mod prop {
+    use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        // An OPEN mask is walkable at EXACTLY the in-bounds cells, and `is_walkable`
+        // never panics for any query — routers probe near/over the edges unchecked.
+        // (Generalizes `out_of_bounds_query_is_not_walkable` + `new_open_is_all_walkable`.)
+        #[test]
+        fn open_mask_is_walkable_iff_in_bounds(
+            w in 1u16..=256, h in 1u16..=256, x in 0u16..512, y in 0u16..512,
+        ) {
+            let m = WalkableMask::new_open(w, h);
+            prop_assert_eq!(m.is_walkable(x, y), x < w && y < h);
+        }
+
+        // `mark_blocked` clips, so it NEVER panics for any rect/pad — including
+        // out-of-bounds and arithmetic-overflowing ones (the documented "caller
+        // needn't bounds-check" contract). The result blocks EXACTLY its clipped,
+        // padded rect: nothing outside is touched, nothing inside is missed.
+        // (Generalizes `mark_blocked_pads_and_clips`.)
+        #[test]
+        fn mark_blocked_blocks_exactly_its_clipped_padded_rect(
+            w in 1u16..=48, h in 1u16..=48,
+            x in 0u16..160, y in 0u16..160, rw in 0u16..160, rh in 0u16..160, pad in 0u16..24,
+        ) {
+            let mut m = WalkableMask::new_open(w, h);
+            m.mark_blocked(x, y, rw, rh, pad); // must not panic for any input
+            let min_x = x.saturating_sub(pad);
+            let max_x = x.saturating_add(rw).saturating_add(pad).min(w);
+            let min_y = y.saturating_sub(pad);
+            let max_y = y.saturating_add(rh).saturating_add(pad).min(h);
+            for yy in 0..h {
+                for xx in 0..w {
+                    let blocked = (min_x..max_x).contains(&xx) && (min_y..max_y).contains(&yy);
+                    prop_assert_eq!(m.is_walkable(xx, yy), !blocked, "cell ({}, {})", xx, yy);
+                }
+            }
+        }
+
+        // Carving the whole mask walkable after any block fully restores it — a door
+        // cutout can always re-open ground. (Generalizes `mark_walkable_carves_a_cutout`.)
+        #[test]
+        fn mark_walkable_over_the_whole_mask_restores_walkability(
+            w in 1u16..=48, h in 1u16..=48,
+            x in 0u16..96, y in 0u16..96, rw in 0u16..96, rh in 0u16..96, pad in 0u16..16,
+        ) {
+            let mut m = WalkableMask::new_open(w, h);
+            m.mark_blocked(x, y, rw, rh, pad);
+            m.mark_walkable(0, 0, w, h);
+            for yy in 0..h {
+                for xx in 0..w {
+                    prop_assert!(m.is_walkable(xx, yy));
+                }
+            }
+        }
+    }
+}
