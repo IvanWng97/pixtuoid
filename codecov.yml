@@ -15,8 +15,36 @@ coverage:
         threshold: 5%
         informational: true
 
+# Per-crate coverage VIEWS over the one workspace upload (a virtual split — no
+# extra CI jobs / flags / uploads). Turns the single blended % into the DAG's
+# topology (pixtuoid-core ← pixtuoid-scene ← pixtuoid + the standalone hook), so a
+# regression in one crate can't hide behind the binary's untestable TTY paths the
+# `ignore` list already drops. Non-blocking (`informational`) to match the
+# top-level statuses — these are a lens, not a gate. The global `ignore` above
+# still applies, so the `pixtuoid` view counts only its headless-testable files.
+component_management:
+  default_rules:
+    statuses:
+      - type: project
+        target: auto
+        threshold: 5%
+        informational: true
+  individual_components:
+    - component_id: core
+      name: pixtuoid-core
+      paths: ["crates/pixtuoid-core/**"]
+    - component_id: scene
+      name: pixtuoid-scene
+      paths: ["crates/pixtuoid-scene/**"]
+    - component_id: binary
+      name: pixtuoid
+      paths: ["crates/pixtuoid/**"]
+    - component_id: hook
+      name: pixtuoid-hook
+      paths: ["crates/pixtuoid-hook/**"]
+
 comment:
-  layout: "condensed_header, diff, files"
+  layout: "condensed_header, diff, components, files"
   behavior: default
   require_changes: true
   require_base: false
