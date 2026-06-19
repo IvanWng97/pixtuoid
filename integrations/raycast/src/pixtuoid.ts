@@ -52,7 +52,7 @@ function isExecutable(p: string): boolean {
   }
 }
 
-let cached: string | undefined;
+let cachedAutoDetect: string | undefined;
 
 /**
  * Resolve the pixtuoid binary. Raycast runs extensions in a Node subprocess
@@ -61,17 +61,19 @@ let cached: string | undefined;
  *   1. the `binaryPath` preference (validated), else
  *   2. the user's LOGIN SHELL `command -v pixtuoid` (their real PATH), else
  *   3. the common install locations.
- * Cached per command run (a process is one command in Raycast).
+ * The preference is re-read every call (synchronous + free) so changing it +
+ * Refresh takes effect immediately; only the EXPENSIVE auto-detect (a login-
+ * shell spawn + fs probes) is memoized for the process's life.
  */
 export async function resolveBinary(): Promise<string> {
-  if (cached) return cached;
-
   const { binaryPath } = getPreferenceValues<Preferences>();
   if (binaryPath && binaryPath.trim()) {
     const p = expandTilde(binaryPath.trim());
-    if (isExecutable(p)) return (cached = p);
+    if (isExecutable(p)) return p;
     throw new BinaryNotFoundError();
   }
+
+  if (cachedAutoDetect) return cachedAutoDetect;
 
   const shell = process.env.SHELL || "/bin/zsh";
   try {
@@ -79,7 +81,7 @@ export async function resolveBinary(): Promise<string> {
       timeout: 5000,
     });
     const p = stdout.trim();
-    if (p && isExecutable(p)) return (cached = p);
+    if (p && isExecutable(p)) return (cachedAutoDetect = p);
   } catch {
     // Login-shell resolution failed (e.g. non-interactive guard) — fall through.
   }
@@ -91,7 +93,7 @@ export async function resolveBinary(): Promise<string> {
     join(homedir(), ".local", "bin", "pixtuoid"),
   ];
   for (const c of candidates) {
-    if (isExecutable(c)) return (cached = c);
+    if (isExecutable(c)) return (cachedAutoDetect = c);
   }
 
   throw new BinaryNotFoundError();
