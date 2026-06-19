@@ -96,7 +96,7 @@ jobs:
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
       - uses: taiki-e/install-action@v2
         with:
-          tool: lychee
+          tool: lychee@0.24.2
       - uses: extractions/setup-just@v4
       - run: just shfmt-check
       - run: just actionlint
