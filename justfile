@@ -58,6 +58,17 @@ shfmt-fix:
 actionlint:
     actionlint
 
+# Offline link + anchor check (lychee) over the repo's OWN markdown: every
+# relative cross-link between the nested CLAUDE.md/AGENTS.md guides + docs/ must
+# resolve, and `#anchor` fragments must exist. Directory-walk mode respects
+# .gitignore (vendored node_modules etc. auto-skipped); `--offline` = no network,
+# so it's deterministic + flake-free. External-URL decay is deliberately NOT
+# gated here (it's flaky on the PR path). Gated via `lint`; CI `hygiene` runs it.
+[group('rust')]
+[doc('Offline link + anchor check (lychee) over the repo markdown — no network, .gitignore-aware')]
+links:
+    lychee --offline --include-fragments .
+
 # Clippy across the workspace, warnings denied.
 [group('rust')]
 clippy:
@@ -95,7 +106,7 @@ arch:
     done
     echo "arch: pixtuoid-core + pixtuoid-scene are terminal/window-free"
 
-# Fast, independent lint checks in parallel (fmt + machete + deny + arch + shfmt + actionlint).
+# Fast, independent lint checks in parallel (fmt + machete + deny + arch + shfmt + actionlint + links).
 [group('rust')]
 lint:
     #!/usr/bin/env bash
@@ -110,6 +121,7 @@ lint:
     run arch    just arch                & pids+=($!)
     run shfmt   just shfmt-check         & pids+=($!)
     run actions just actionlint          & pids+=($!)
+    run links   just links               & pids+=($!)
     for p in "${pids[@]}"; do wait "$p" || fail=1; done
     [[ $fail -eq 0 ]]
 
@@ -460,7 +472,7 @@ verify: preflight site-check gen-check
 setup-tools:
     #!/usr/bin/env bash
     set -euo pipefail
-    tools=(cargo-nextest cargo-machete cargo-deny cargo-hack cargo-semver-checks cargo-edit)
+    tools=(cargo-nextest cargo-machete cargo-deny cargo-hack cargo-semver-checks cargo-edit lychee)
     if command -v cargo-binstall &>/dev/null; then
         cargo binstall -y "${tools[@]}"
     else

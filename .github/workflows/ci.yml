@@ -82,20 +82,25 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
-      # shfmt + actionlint are Go binaries (not crates) — install via the runner's
-      # preinstalled Go, pinned to match `just setup-tools`. This ONE lightweight
-      # job is the home for the non-Rust hygiene linters (link checkers join it as
-      # they land): single Go/Rust binaries that need no Rust toolchain, so they
-      # share a job instead of one boilerplate job each. actionlint shells out to
-      # shellcheck (preinstalled on the runner) for its `run:`-block checks.
+      # The ONE lightweight home for the non-Rust hygiene linters — single Go/Rust
+      # binaries that need no Rust toolchain, so they share a job instead of one
+      # boilerplate job each. shfmt + actionlint via the runner's preinstalled Go
+      # (pinned to `just setup-tools`); lychee via taiki-e/install-action (the
+      # repo's prebuilt-tool installer). actionlint shells out to shellcheck
+      # (preinstalled on the runner) for its `run:`-block checks; lychee runs
+      # `--offline` so the link check needs no network.
       - name: Install shfmt + actionlint
         run: |
           go install mvdan.cc/sh/v3/cmd/shfmt@v3.13.1
           go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: lychee
       - uses: extractions/setup-just@v4
       - run: just shfmt-check
       - run: just actionlint
+      - run: just links
 
   msrv:
     name: msrv
