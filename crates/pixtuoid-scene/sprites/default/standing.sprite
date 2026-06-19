@@ -1,6 +1,7 @@
 # 8x12 standing pose. Shirt (B) on top, pants (P) below the waist, hands (S)
-# at sides for arm definition. Two-tone body breaks the previously-monotone
-# silhouette.
+# at the ARM-ENDS (the bottom corners of the shirt block) so the arms read as
+# hanging at the sides — was a lone skin pixel beside each hip, which floated.
+# Two-tone body breaks the previously-monotone silhouette.
 @frame 0
 . n H H H H n .
 n H H H H H H n
@@ -10,7 +11,7 @@ H S e S S e S H
 . n S S S S n .
 . B B B B B B .
 B B B B B B B B
-B B B B B B B B
+S B B B B B B S
 . P P P P P P .
-. S P P P P S .
+. P P P P P P .
 . P . . . . P .
