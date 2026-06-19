@@ -26,7 +26,7 @@ export interface ThemeShot {
 // the live count, the retint, and the render script all pick it up. No component edits.
 export const THEMES: ThemeShot[] = themesData as ThemeShot[];
 
-export interface WeatherShot {
+interface WeatherShot {
   id: string; // matches `--weather <id>` + public/demos/weather_<id>.png
   name: string;
   blurb: string;
@@ -37,7 +37,7 @@ export interface WeatherShot {
 // loop from this file; astro.config fails the build if any id lacks its
 // weather_<id>.png); the manifest↔Rust-enum edge is guarded by the
 // `weather_gallery_manifest_matches_the_weather_enum` unit test in pixtuoid.
-export const WEATHERS: WeatherShot[] = weatherData as WeatherShot[];
+const WEATHERS: WeatherShot[] = weatherData as WeatherShot[];
 
 export interface ShowcaseVariant {
   id: string;

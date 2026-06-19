@@ -1,0 +1,10 @@
+{
+  // `mermaid` is a TRANSITIVE build-time dependency: rehype-mermaid (in
+  // astro.config.mjs) → mermaid-isomorphic → mermaid renders the /architecture
+  // ```mermaid block into an inline SVG at build time (the reason site CI
+  // installs Chromium). It is declared DIRECTLY here to PIN the mermaid version
+  // that produces that SVG — the output feeds the site's visual gates, so the
+  // pin is load-bearing — which means it is never `import`ed in our own source
+  // and knip can't trace it through the rehype plugin. Keep the pin; mark it used.
+  "ignoreDependencies": ["mermaid"],
+}

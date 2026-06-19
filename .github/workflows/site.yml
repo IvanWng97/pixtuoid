@@ -47,6 +47,10 @@ jobs:
       - run: npm run format:check
       - run: npm run lint
       - run: npm run check
+      # knip: unused files / exports / dependencies in the Astro project (catches
+      # an orphaned component or stale dep tsc/eslint can't see). Mirrors the
+      # `verify` script; runs before build for fast feedback.
+      - run: npm run knip
       - run: npm run build
       # Lighthouse CI: gate a11y / SEO / best-practices (perf advisory) against
       # the built pages — serves dist via `astro preview` (honors the /pixtuoid
