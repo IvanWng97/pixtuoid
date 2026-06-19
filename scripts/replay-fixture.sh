@@ -14,8 +14,14 @@ fixture="${1:?usage: replay-fixture.sh <rollout.jsonl> [delay_secs]}"
 delay="${2:-3}"
 bin="${PIXTUOID_BIN:-pixtuoid}"
 
-[ -f "$fixture" ] || { echo "no such fixture: $fixture" >&2; exit 1; }
-command -v "$bin" >/dev/null 2>&1 || { echo "binary not found: $bin (set PIXTUOID_BIN)" >&2; exit 1; }
+[ -f "$fixture" ] || {
+    echo "no such fixture: $fixture" >&2
+    exit 1
+}
+command -v "$bin" >/dev/null 2>&1 || {
+    echo "binary not found: $bin (set PIXTUOID_BIN)" >&2
+    exit 1
+}
 
 root="$(mktemp -d)"
 proj="$(mktemp -d)"
@@ -24,7 +30,7 @@ hpid=""
 cleanup() {
     if [ -n "$hpid" ]; then
         kill "$hpid" 2>/dev/null || true
-        wait "$hpid" 2>/dev/null || true  # reap quietly (suppress "Terminated")
+        wait "$hpid" 2>/dev/null || true # reap quietly (suppress "Terminated")
     fi
     rm -rf "$root" "$proj" "$out"
     return 0
@@ -39,7 +45,7 @@ file="$root/replay/rollout-2026-01-01T00-00-00-0a0a0a0a-0b0b-0c0c-0d0d-0e0e0e0e0
 "$bin" run --headless --codex-sessions-root "$root" --projects-root "$proj" \
     --log-level error >"$out" 2>&1 &
 hpid=$!
-sleep 2  # let the watcher bind/seed before the first append
+sleep 2 # let the watcher bind/seed before the first append
 
 echo "replaying $(basename "$fixture") (1 line / ${delay}s) into a hermetic headless run..." >&2
 # `|| [ -n "$line" ]` so a final line without a trailing newline is still processed.

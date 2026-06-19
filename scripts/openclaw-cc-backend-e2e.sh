@@ -157,8 +157,8 @@ for _ in $(seq 1 480); do
 done
 
 echo "--- combined timeline (backend cc· + the gateway daemon) ---"
-grep -F "$WS_LABEL" "$PIXLOG" | grep -E 'daemons=\[openclaw:(busy|idle)\]' \
-    | sed 's/:active([^)]*)//g' | tail -4 | sed 's/^/  /'
+grep -F "$WS_LABEL" "$PIXLOG" | grep -E 'daemons=\[openclaw:(busy|idle)\]' |
+    sed 's/:active([^)]*)//g' | tail -4 | sed 's/^/  /'
 echo "--- backend agent reply ---"
 sed 's/^/  /' "$AGENTLOG" | tail -4
 

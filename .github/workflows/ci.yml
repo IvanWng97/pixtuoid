@@ -76,6 +76,24 @@ jobs:
       - uses: extractions/setup-just@v4
       - run: just machete
 
+  hygiene:
+    name: shell hygiene
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      # shfmt is a Go binary (not a crate) — install via the runner's preinstalled
+      # Go, pinned to match `just setup-tools`. This ONE lightweight job is the
+      # home for the non-Rust hygiene linters (actionlint / workflow + link
+      # checkers join it as they land): they're single Go/Rust binaries that need
+      # no Rust toolchain, so they share a job instead of one boilerplate job each.
+      - name: Install shfmt
+        run: |
+          go install mvdan.cc/sh/v3/cmd/shfmt@v3.13.1
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+      - uses: extractions/setup-just@v4
+      - run: just shfmt-check
+
   msrv:
     name: msrv
     runs-on: ubuntu-latest

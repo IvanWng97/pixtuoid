@@ -33,6 +33,21 @@ fmt-check:
 fmt:
     cargo fmt --all
 
+# Shell-format check (shfmt) — the `.sh` analog of `fmt-check`, gated via `lint`.
+# Pairs with the shellcheck house rule: shellcheck lints, shfmt formats. Covers
+# scripts/ + the git hooks. `-i 4` (4-space) matches the prevailing style; no
+# `-ci` so case bodies stay un-indented as written.
+[group('rust')]
+[doc('Shell-format check (shfmt) over scripts/ + .githooks/ — the .sh analog of fmt-check')]
+shfmt-check:
+    shfmt -i 4 -d scripts/*.sh .githooks/*
+
+# Apply shell formatting in place (the `.sh` analog of `fmt`).
+[group('rust')]
+[doc('Apply shfmt formatting in place over scripts/ + .githooks/')]
+shfmt-fix:
+    shfmt -i 4 -w scripts/*.sh .githooks/*
+
 # Clippy across the workspace, warnings denied.
 [group('rust')]
 clippy:
@@ -70,7 +85,7 @@ arch:
     done
     echo "arch: pixtuoid-core + pixtuoid-scene are terminal/window-free"
 
-# Fast, independent lint checks in parallel (fmt + machete + deny + arch).
+# Fast, independent lint checks in parallel (fmt + machete + deny + arch + shfmt).
 [group('rust')]
 lint:
     #!/usr/bin/env bash
@@ -83,6 +98,7 @@ lint:
     run machete cargo machete           & pids+=($!)
     run deny    just deny                & pids+=($!)
     run arch    just arch                & pids+=($!)
+    run shfmt   just shfmt-check         & pids+=($!)
     for p in "${pids[@]}"; do wait "$p" || fail=1; done
     [[ $fail -eq 0 ]]
 
@@ -440,6 +456,16 @@ setup-tools:
         echo "cargo-binstall not found — compiling from source (slow)." >&2
         echo "brew install cargo-binstall (or cargo install cargo-binstall) to grab prebuilt binaries instead." >&2
         cargo install "${tools[@]}"
+    fi
+    # Non-cargo lint tools that `just lint` gates on (shfmt = a Go binary, not a
+    # crate). brew on macOS; elsewhere point at the install docs rather than
+    # silently leaving `just lint` unable to run.
+    if ! command -v shfmt &>/dev/null; then
+        if command -v brew &>/dev/null; then
+            brew install shfmt
+        else
+            echo "shfmt not found — install it (https://github.com/mvdan/sh); \`just lint\` needs it." >&2
+        fi
     fi
 
 # Self-test the upstream-drift watcher — its ONLY test. A regex-parser regression
