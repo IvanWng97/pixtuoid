@@ -78,6 +78,7 @@ Press `s` to open the **Sources** panel and connect your agent CLI (Claude Code,
 |---|---|---|
 | 🏢 | **Multi-agent office** | Each agent session gets a desk; overflow agents auto-fill new floors |
 | 🛗 | **Multi-floor office** | PageUp/PageDown/↑↓/jk to navigate floors with slide transition |
+| 🪟 | **Floating desktop window** | `pixtuoid floating` opens a frameless, always-on-top desktop window of the office — not just a terminal TUI |
 | 🎭 | **Animated characters** | Typing, waiting (`?`), sleeping (z's), walking with A\*-routed pathfinding |
 | 💡 | **Per-tool monitor glow** | Edit = blue, Bash = orange, Read = cyan — scannable at a glance |
 | 🎨 | **Per-agent identity** | Deterministic shirt/hair/skin palette from session hash, 16 curated outfits |
@@ -132,7 +133,7 @@ Agent CLIs emit events two ways — a hook shim (a 200ms fire-and-forget write t
 
 ## Contributing
 
-PRs welcome — especially new themes and `Source` adapters for other agent CLIs (Cursor, and more). See **[CONTRIBUTING.md](docs/CONTRIBUTING.md)** for the build/test workflow, conventions, the review process, and how to add a new agent CLI. Architecture and the load-bearing invariants live in [`CLAUDE.md`](CLAUDE.md).
+PRs welcome — especially new themes, sprite/decoration polish, and `Source` adapters for agent CLIs we don't support yet (the nine already wired up are in [Supported Tools](#supported-tools)). See **[CONTRIBUTING.md](docs/CONTRIBUTING.md)** for the build/test workflow, conventions, the review process, and how to add a new agent CLI. Architecture and the load-bearing invariants live in [`CLAUDE.md`](CLAUDE.md).
 
 ## Acknowledgments
 

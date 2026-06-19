@@ -18,6 +18,14 @@
     }
   },
   {
+    "icon": "🪟",
+    "name": "Floating desktop window",
+    "desc": "`pixtuoid floating` opens a frameless, always-on-top desktop window of the office — not just a terminal TUI",
+    "card": {
+      "blurb": "Pop the office out of the terminal into a frameless, always-on-top desktop window — the same living office, hovering over your other windows."
+    }
+  },
+  {
     "icon": "🎭",
     "name": "Animated characters",
     "desc": "Typing, waiting (`?`), sleeping (z's), walking with A\\*-routed pathfinding"

@@ -9,10 +9,10 @@ the two that changed something user-visible.
 Binding a CLI is now done live in the in-TUI **Sources panel**: launch
 `pixtuoid`, press `s`, and connect (or disconnect) each agent CLI — its
 characters appear when you connect and walk out when you disconnect, no restart.
-`pixtuoid run` is the only subcommand left (plus `validate-pack` / `init-pack`).
 
-If you scripted `pixtuoid install-hooks`, replace it with the panel — there is no
-non-interactive equivalent (hooks are installed/removed through the panel toggle).
+If you scripted `pixtuoid install-hooks`, replace it with the panel — or, for
+automation, the scriptable `pixtuoid connect` / `disconnect` / `sources`
+subcommands added later (the same surface the Raycast extension drives).
 This release also adds two new sources you can connect there: **CodeWhale**
 (`cw·`) and **opencode** (`oc·`).
 
@@ -40,7 +40,7 @@ This release also adds two new sources you can connect there: **CodeWhale**
    # or: cargo install pixtuoid pixtuoid-hook
    ```
 
-2. **Re-register hooks**: launch `pixtuoid`, press `s` to open the Connection
+2. **Re-register hooks**: launch `pixtuoid`, press `s` to open the Sources
    panel, and connect your agent CLI (this replaces any old `ascii-agents-hook`
    entries automatically). The old `pixtuoid install-hooks` subcommand is gone —
    binding a source is now done live inside the TUI.
