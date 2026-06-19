@@ -52,7 +52,8 @@ the producer is the join point; it merges first, consumers verify against it.
 A contract-first spec is authored, reviewed, and **agreed before implementation
 code** (APIs You Won't Hate). But a frozen shape plus generated mocks is only
 half the discipline — **~75% of APIs don't conform to their own spec**
-(totalshiftleft, APIContext). Make "can't drift" mechanical in three layers:
+(APIContext, 650M API calls across 10k+ endpoints). Make "can't drift"
+mechanical in three layers:
 
 1. **Govern the spec in CI.** Lint structure/style against a house style guide
    (Spectral); detect breaking diffs on every PR — removed fields, type changes,
@@ -64,7 +65,8 @@ half the discipline — **~75% of APIs don't conform to their own spec**
    against all registered subgraphs and runs usage checks before publish).
 3. **Verify runtime conformance.** Lint + diff prove the *spec* is compatible,
    not that the *code* matches it. Close the gap with response-vs-schema checks
-   against the running producer (Dredd / Schemathesis / Prism).
+   against the running producer (Dredd / Schemathesis / Prism) — the defense-in-
+   depth a registry-only gate misses (totalshiftleft).
 
 **Codegen-from-one-source is the load-bearing guard.** Generate typed SDKs from
 the one spec and regenerate in CI, so a producer's breaking change becomes a
@@ -235,8 +237,8 @@ versions already in prod — no coordinated release window.
 ## Pitfalls (the ones that bite)
 
 - **Mocks without runtime contract testing give false safety** — pair generated
-  mocks with Dredd/Pact/Specmatic, or ~70% of contract drift passes CI because
-  tests mock instead of hitting the real backend (totalshiftleft).
+  mocks with Dredd/Pact/Specmatic; without a runtime contract test, mock-backed
+  tests keep passing CI while the real backend has already drifted.
 - **Codegen is garbage-in-garbage-out** — the compile-time guard only enforces
   what the spec faithfully encodes; mis-specified nullability silently produces
   wrong-but-compiling clients. Keep a runtime-validation layer (e.g. Zod from the
@@ -272,7 +274,8 @@ versions already in prod — no coordinated release window.
 ## Sources
 
 - APIs You Won't Hate — *A Developer's Guide to API Design-First* — https://apisyouwonthate.com/blog/a-developers-guide-to-api-design-first/
-- totalshiftleft — *API schema validation: catching drift* (~75% non-conformance; defense in depth) — https://totalshiftleft.ai/blog/api-schema-validation-catching-drift
+- APIContext — *OpenAPI Specifications in the Real World* (650M calls / 10k+ endpoints; ~75% of APIs don't conform to their spec — "API drift") — https://apicontext.com/resources/api-drift-white-paper/
+- totalshiftleft — *API schema validation: catching drift* (the runtime-conformance gate; defense in depth) — https://totalshiftleft.ai/blog/api-schema-validation-catching-drift
 - hey-api/openapi-ts — typed SDKs + Zod from one spec, compile-time break detection — https://github.com/hey-api/hey-api
 - brandur.org — *The state of Stripe API library codegen* (one source → OpenAPI → many SDKs) — https://brandur.org/fragments/stripe-codegen
 - Buf — *Detecting breaking changes* + *Consuming generated SDKs* (BSR, FILE/PACKAGE/WIRE) — https://buf.build/docs/breaking/ · https://buf.build/docs/bsr/generated-sdks/
