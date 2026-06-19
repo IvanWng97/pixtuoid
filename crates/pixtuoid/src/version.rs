@@ -59,6 +59,9 @@ pub fn release_notes(version: &str) -> Option<&'static [&'static str]> {
         // brace would silently break if the indentation ever shifted.
         // [bump-inject-here]
         "0.11.0" => Some(&[
+            "Pop the office out of the terminal — new `pixtuoid floating` opens a frameless, always-on-top desktop window of the same animated office",
+            "First launch greets you with a cinematic move-in and helps you connect your installed agent CLIs; `pixtuoid setup` is the headless twin for scripting and CI",
+            "Drive pixtuoid from Raycast — a new extension manages your sources, backed by scriptable `sources` / `connect` / `disconnect --json` commands",
             "Windows: a `~`-prefixed `--pack-dir` / `pack-dir` now expands to your home directory (no more literal `~` in the path)",
             "Internals tidied — a large code-quality pass (deduplication and a unified pixel-buffer type); the office renders identically, just leaner under the hood",
         ]),
