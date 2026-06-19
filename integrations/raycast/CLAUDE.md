@@ -25,7 +25,7 @@ UIs. No server, no state of its own — every fact comes from the CLI's JSON.
 `SourceStatus` is **generated**, not hand-typed. The Rust serde type
 (`crates/pixtuoid/src/sources.rs`) emits a committed JSON Schema
 (`contract/source-status.schema.json`, via its `schemars` derive + the
-`source_status_schema` golden test); `npm run gen:contract`
+`source_status_schema_matches_the_committed_contract` golden test); `npm run gen:contract`
 (json-schema-to-typescript) regenerates `src/contract.ts` from that schema; and
 `pixtuoid.ts` re-exports the generated type (`export type { SourceStatus }`). So
 a producer shape change **can't hand-drift** — three gates catch it: the Rust
