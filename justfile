@@ -48,6 +48,16 @@ shfmt-check:
 shfmt-fix:
     shfmt -i 4 -w scripts/*.sh .githooks/*
 
+# Lint the GitHub Actions workflows (actionlint): YAML schema, expression types,
+# action input/output names, runner labels, AND shellcheck over every `run:`
+# block (so a shell bug inside a workflow is caught at author time, not on a red
+# main). Gated via `lint`; the CI `hygiene` job runs it too. Needs shellcheck on
+# PATH for the run-block checks (the house-rule tool — already required).
+[group('rust')]
+[doc('Lint the GitHub Actions workflows (actionlint + shellcheck over run: blocks)')]
+actionlint:
+    actionlint
+
 # Clippy across the workspace, warnings denied.
 [group('rust')]
 clippy:
@@ -85,7 +95,7 @@ arch:
     done
     echo "arch: pixtuoid-core + pixtuoid-scene are terminal/window-free"
 
-# Fast, independent lint checks in parallel (fmt + machete + deny + arch + shfmt).
+# Fast, independent lint checks in parallel (fmt + machete + deny + arch + shfmt + actionlint).
 [group('rust')]
 lint:
     #!/usr/bin/env bash
@@ -99,6 +109,7 @@ lint:
     run deny    just deny                & pids+=($!)
     run arch    just arch                & pids+=($!)
     run shfmt   just shfmt-check         & pids+=($!)
+    run actions just actionlint          & pids+=($!)
     for p in "${pids[@]}"; do wait "$p" || fail=1; done
     [[ $fail -eq 0 ]]
 
@@ -457,16 +468,19 @@ setup-tools:
         echo "brew install cargo-binstall (or cargo install cargo-binstall) to grab prebuilt binaries instead." >&2
         cargo install "${tools[@]}"
     fi
-    # Non-cargo lint tools that `just lint` gates on (shfmt = a Go binary, not a
-    # crate). brew on macOS; elsewhere point at the install docs rather than
-    # silently leaving `just lint` unable to run.
-    if ! command -v shfmt &>/dev/null; then
+    # Non-cargo lint tools that `just lint` gates on (Go binaries, not crates:
+    # shfmt formats shell, actionlint lints the workflows). brew on macOS;
+    # elsewhere point at the install docs rather than silently leaving `just
+    # lint` unable to run. (actionlint also shells out to `shellcheck`, the
+    # house-rule tool, for its run-block checks.)
+    for t in shfmt actionlint; do
+        command -v "$t" &>/dev/null && continue
         if command -v brew &>/dev/null; then
-            brew install shfmt
+            brew install "$t"
         else
-            echo "shfmt not found — install it (https://github.com/mvdan/sh); \`just lint\` needs it." >&2
+            echo "$t not found — install it via your package manager; \`just lint\` needs it." >&2
         fi
-    fi
+    done
 
 # Self-test the upstream-drift watcher — its ONLY test. A regex-parser regression
 # is a silent monitor death (the script returns empty / raises, the weekly job

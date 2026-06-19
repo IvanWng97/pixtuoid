@@ -209,7 +209,7 @@ jobs:
       - name: Generate checksums
         run: |
           cd artifacts
-          sha256sum *.tar.gz *.deb *.zip > sha256sums.txt
+          sha256sum -- *.tar.gz *.deb *.zip > sha256sums.txt
 
       - name: Generate changelog
         id: changelog
@@ -353,7 +353,7 @@ jobs:
                 To start visualizing your AI coding sessions:
                   pixtuoid
 
-                Then press `s` to open the Sources panel and connect your
+                Then press \`s\` to open the Sources panel and connect your
                 CLI (Claude Code, Codex, ...). Disconnect there before
                 uninstalling to remove its hooks.
               EOS

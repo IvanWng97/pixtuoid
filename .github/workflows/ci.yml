@@ -77,22 +77,25 @@ jobs:
       - run: just machete
 
   hygiene:
-    name: shell hygiene
+    name: hygiene
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
-      # shfmt is a Go binary (not a crate) — install via the runner's preinstalled
-      # Go, pinned to match `just setup-tools`. This ONE lightweight job is the
-      # home for the non-Rust hygiene linters (actionlint / workflow + link
-      # checkers join it as they land): they're single Go/Rust binaries that need
-      # no Rust toolchain, so they share a job instead of one boilerplate job each.
-      - name: Install shfmt
+      # shfmt + actionlint are Go binaries (not crates) — install via the runner's
+      # preinstalled Go, pinned to match `just setup-tools`. This ONE lightweight
+      # job is the home for the non-Rust hygiene linters (link checkers join it as
+      # they land): single Go/Rust binaries that need no Rust toolchain, so they
+      # share a job instead of one boilerplate job each. actionlint shells out to
+      # shellcheck (preinstalled on the runner) for its `run:`-block checks.
+      - name: Install shfmt + actionlint
         run: |
           go install mvdan.cc/sh/v3/cmd/shfmt@v3.13.1
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
       - uses: extractions/setup-just@v4
       - run: just shfmt-check
+      - run: just actionlint
 
   msrv:
     name: msrv
