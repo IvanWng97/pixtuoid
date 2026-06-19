@@ -1,0 +1,23 @@
+---
+import { getCollection, render } from 'astro:content';
+import Docs from '../layouts/Docs.astro';
+
+// Rendered from docs/PARALLEL-DELIVERY.md (the single source) — there's one entry.
+const [entry] = await getCollection('parallelDelivery');
+if (!entry) {
+  throw new Error(
+    'parallel-delivery.astro: the "parallelDelivery" collection is empty — is docs/PARALLEL-DELIVERY.md present and matched by the glob loader in content.config.ts?'
+  );
+}
+const { Content, headings } = await render(entry);
+---
+
+<Docs
+  title="Parallel delivery — pixtuoid"
+  description="Shipping one cross-cutting change across many areas in parallel: contract-first → fan-out → join, codegen from one source, affected-graph CI, and AI-agent orchestration — mapped to a server/Android/iOS/Lynx monorepo."
+  headings={headings}
+  current="parallel-delivery"
+  sourcePath="docs/PARALLEL-DELIVERY.md"
+>
+  <Content />
+</Docs>

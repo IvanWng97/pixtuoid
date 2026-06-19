@@ -28,16 +28,17 @@ npm run build      # astro build → dist/
 
 From the repo root the same gate is `just site-check` (and `just site-fmt`).
 
-> **Cross-boundary build inputs.** The site reads six files from _outside_ `site/`
+> **Cross-boundary build inputs.** The site reads seven files from _outside_ `site/`
 > at build time: the workspace `Cargo.toml` (displayed version, via `vite.define` in
 > `astro.config.mjs`), `docs/CONFIGURATION.md` (rendered as `/config`),
 > `docs/ARCHITECTURE.md` (rendered as `/architecture` — its Mermaid diagram becomes an
 > inline SVG at build via rehype-mermaid, which is why CI installs Chromium),
 > `docs/CONTRIBUTING.md` (rendered as `/contributing`), `docs/MIGRATION.md`
-> (rendered as `/migration`), and `docs/KNOWLEDGE-ENGINEERING.md` (rendered as
-> `/knowledge-base`).
+> (rendered as `/migration`), `docs/KNOWLEDGE-ENGINEERING.md` (rendered as
+> `/knowledge-base` — the route slug kept from its `KNOWLEDGE-BASE.md` days, no link
+> rot), and `docs/PARALLEL-DELIVERY.md` (rendered as `/parallel-delivery`).
 > Renaming/moving any of them — or breaking the diagram's Mermaid syntax — fails
-> `astro build`; all six are in the `site.yml` / `pages.yml` path filters so a
+> `astro build`; all seven are in the `site.yml` / `pages.yml` path filters so a
 > change re-runs CI + redeploys. The root `README.md`'s Features table and install
 > commands are sourced from `src/features.json` / `src/install.json` (see below);
 > drift is gated by the `readme` job in `.github/workflows/ci.yml` (`just gen-readme-check`)

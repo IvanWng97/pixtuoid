@@ -21,4 +21,7 @@ export const collections = {
   knowledgeBase: defineCollection({
     loader: glob({ pattern: 'KNOWLEDGE-ENGINEERING.md', base: '../docs' }),
   }),
+  parallelDelivery: defineCollection({
+    loader: glob({ pattern: 'PARALLEL-DELIVERY.md', base: '../docs' }),
+  }),
 };

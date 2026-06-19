@@ -7,7 +7,7 @@ on:
   # site silently lags its own source.
   push:
     branches: [main]
-    paths: ['site/**', 'Cargo.toml', 'docs/CONFIGURATION.md', 'docs/ARCHITECTURE.md', 'docs/CONTRIBUTING.md', 'docs/MIGRATION.md', 'docs/KNOWLEDGE-ENGINEERING.md', '.github/workflows/pages.yml']
+    paths: ['site/**', 'Cargo.toml', 'docs/CONFIGURATION.md', 'docs/ARCHITECTURE.md', 'docs/CONTRIBUTING.md', 'docs/MIGRATION.md', 'docs/KNOWLEDGE-ENGINEERING.md', 'docs/PARALLEL-DELIVERY.md', '.github/workflows/pages.yml']
   workflow_dispatch:
 
 permissions:

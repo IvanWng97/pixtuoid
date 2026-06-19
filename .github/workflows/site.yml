@@ -9,7 +9,7 @@ on:
   # (the mermaid block renders to an inline SVG at build). README drift from
   # site/src/*.json is gated by ci.yml's `readme` job — so README.md is NOT here.
   pull_request:
-    paths: ['site/**', 'Cargo.toml', 'docs/CONFIGURATION.md', 'docs/ARCHITECTURE.md', 'docs/CONTRIBUTING.md', 'docs/MIGRATION.md', 'docs/KNOWLEDGE-ENGINEERING.md', '.github/workflows/site.yml', '.github/workflows/pages.yml']
+    paths: ['site/**', 'Cargo.toml', 'docs/CONFIGURATION.md', 'docs/ARCHITECTURE.md', 'docs/CONTRIBUTING.md', 'docs/MIGRATION.md', 'docs/KNOWLEDGE-ENGINEERING.md', 'docs/PARALLEL-DELIVERY.md', '.github/workflows/site.yml', '.github/workflows/pages.yml']
 
 permissions:
   contents: read
