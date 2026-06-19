@@ -243,6 +243,18 @@ gen: gen-readme gen-media
 gen-readme:
     node scripts/gen-readme.mjs
 
+# Regenerate the --json contract chain after changing `SourceStatus`: re-emit the
+# JSON Schema from the Rust serde type, then regenerate the Raycast TS type from
+# it. The two freshness gates (the `source_status_schema` test in `just test`, and
+# the raycast CI's `gen:contract` diff) FAIL until you run this — so the Rust
+# producer and the TS consumer can't hand-drift. Needs raycast deps installed
+# (`npm --prefix integrations/raycast ci`).
+[group('gen')]
+[doc('Regenerate the --json contract: SourceStatus JSON Schema (Rust) + the Raycast TS type')]
+gen-contract:
+    UPDATE_CONTRACT_SCHEMA=1 cargo test -p pixtuoid --lib source_status_schema_matches_the_committed_contract
+    npm --prefix integrations/raycast run gen:contract
+
 # Fail if the committed README drifted from site/src/{features,sources,install}.json.
 # Pure node:builtins — no npm ci. ci.yml runs this on every PR (the `readme` job),
 # and gen-check composes it.

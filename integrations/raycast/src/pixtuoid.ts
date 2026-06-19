@@ -4,18 +4,17 @@ import { accessSync, constants } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
+// `SourceStatus` is GENERATED from the Rust serde type via a committed JSON
+// Schema — no more hand-mirroring. Source of truth: crates/pixtuoid/src/sources.rs
+// (its schema test emits contract/source-status.schema.json); regenerate this
+// type with `npm run gen:contract`. See ../../docs/PARALLEL-DELIVERY.md.
+import type { SourceStatus } from "./contract";
 
 const pExecFile = promisify(execFile);
 
-/** A row of `pixtuoid sources --json` — the stable wire contract pinned by the
- *  binary's `source_status_json_shape` test. Mirror changes there here. */
-export interface SourceStatus {
-  id: string;
-  display_name: string;
-  connected: boolean;
-  cli_present: boolean;
-  health: string | null;
-}
+/** A row of `pixtuoid sources --json`. The shape is the generated, schema-backed
+ *  contract above — re-exported so command UIs import it from here. */
+export type { SourceStatus };
 
 /** A row of `pixtuoid connect|disconnect <id> --json` (`run_change`).
  *  `outcome` ∈ `"connected" | "disconnected" | "failed: <msg>"` for these two

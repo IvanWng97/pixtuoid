@@ -20,17 +20,24 @@ A login-shell-resolved shell over the CLI — it does **not** bundle the binary
 CLI bridge; `manage-sources.tsx` / `start-floating.tsx` are the Raycast command
 UIs. No server, no state of its own — every fact comes from the CLI's JSON.
 
-## The contract is the coupling (read this first)
+## The contract is GENERATED, not hand-mirrored (read this first)
 
-`src/pixtuoid.ts`'s `SourceStatus` / `OutcomeRow` interfaces **mirror** the Rust
-`--json` output. The Rust side pins that shape with the
-`source_status_json_shape` test (`crates/pixtuoid/src/sources.rs`) — **mirror any
-change there here, and vice versa.** This hand-mirrored interface is a known
-drift risk (two copies of one shape); the principled fix is to *generate* the
-`.d.ts` from the serde types (`schemars` → JSON Schema → codegen) so a producer
-change becomes a compile error here — tracked as a future improvement in
-[`PARALLEL-DELIVERY.md`](../../docs/PARALLEL-DELIVERY.md) ("the contract should
-emit a schema, not be hand-mirrored").
+`SourceStatus` is **generated**, not hand-typed. The Rust serde type
+(`crates/pixtuoid/src/sources.rs`) emits a committed JSON Schema
+(`contract/source-status.schema.json`, via its `schemars` derive + the
+`source_status_schema` golden test); `npm run gen:contract`
+(json-schema-to-typescript) regenerates `src/contract.ts` from that schema; and
+`pixtuoid.ts` re-exports the generated type (`export type { SourceStatus }`). So
+a producer shape change **can't hand-drift** — three gates catch it: the Rust
+struct↔schema golden test (`just test`), the schema↔TS-type freshness check
+(raycast CI regenerates `contract.ts` and `git diff --exit-code`s it), and the
+TS-type↔usage `tsc --noEmit` pass. **After changing `SourceStatus`, run
+`just gen-contract`** (re-emits the schema + the TS type) and commit both.
+`src/contract.ts` is generated — eslint/prettier-ignored, never hand-edit it.
+This is `PARALLEL-DELIVERY.md`'s "codegen-from-one-source" applied to pixtuoid
+itself. (`OutcomeRow` stays hand-typed — it's `{id, outcome: string}`, a
+free-form token, not worth a schema; the `source_status_json_shape` byte test
+still pins the exact wire JSON.)
 
 ## Sharp edges (don't be surprised by these)
 

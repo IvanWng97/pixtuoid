@@ -165,14 +165,15 @@ one monorepo. The cross-area contract is **`pixtuoid … --json`** (the
   render output) it freezes the shape with **golden / snapshot tests** whose
   regeneration forces a reviewable PR diff (`gen-check` stills, the snapshot
   golden). That snapshot-as-gate is exactly the parallel-safety mechanism above.
-- **Honest gap (the textbook fix):** the `--json` shape is *hand-mirrored* into
-  the Raycast TS (`SourceStatus` typed by hand in `integrations/raycast/src/`).
-  That is the hand-sync drift the research warns against — the principled upgrade
-  is to *emit* a schema from the serde types (`schemars` → JSON Schema → generate
-  the `.d.ts` / Zod) and CI-typecheck the extension against it, so a producer
-  change becomes a compile error in the extension. The lighter pin (a Rust shape
-  test + a hand-mirror) is the pragmatic tier; name the gap rather than pretend
-  the `--json` output alone makes drift impossible.
+- **Codegen-from-one-source, applied:** the `--json` `SourceStatus` type is
+  **generated, not hand-mirrored**. A `schemars` derive on the Rust serde type
+  emits a committed JSON Schema (`integrations/raycast/contract/source-status.schema.json`,
+  freshness-gated by a Rust golden test), and the Raycast extension generates its
+  TS type from that schema (`json-schema-to-typescript`, CI-checked fresh by a
+  regenerate-and-`git diff` step). So a producer shape change is a **compile error
+  in the consumer** — exactly the load-bearing guard above, dogfooded. (The
+  earlier tier — a Rust byte-shape test + a hand-typed mirror — is what this
+  replaced; `OutcomeRow`, a `{id, outcome: string}` token, stays hand-typed.)
 - **Per-area gates** (each verifies independently): Rust → `just preflight` +
   `semver` + `gen-check`; site → `just site-check`; raycast → `tsc --noEmit` +
   `eslint`. Scoped per-area `CLAUDE.md`/`AGENTS.md` keep each agent on its own

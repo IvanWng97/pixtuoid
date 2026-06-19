@@ -51,6 +51,10 @@ windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }
 
 [dev-dependencies]
 tempfile = "3"
+# Emits the SourceStatus JSON Schema (the Raycast --json contract) — test/gen
+# only, so the `JsonSchema` derive is `cfg_attr(test)` and this stays a dev-dep
+# (no production-binary impact). See sources.rs + `just gen-contract`.
+schemars = "1"
 # test-util: paused-clock signal-arm tests in runtime/driver.rs (headless_loop).
 tokio    = { workspace = true, features = ["test-util"] }
 image    = { version = "0.25", default-features = false, features = ["png", "gif"] }

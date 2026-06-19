@@ -43,6 +43,7 @@
     "@types/node": "^22.13.10",
     "@types/react": "^19.0.10",
     "eslint": "^9.22.0",
+    "json-schema-to-typescript": "^15.0.4",
     "prettier": "^3.5.3",
     "typescript": "^5.8.2"
   },
@@ -51,6 +52,7 @@
     "dev": "ray develop",
     "lint": "ray lint",
     "fix-lint": "ray lint --fix",
+    "gen:contract": "json2ts -i contract/source-status.schema.json -o src/contract.ts",
     "publish": "npx @raycast/api@latest publish"
   }
 }

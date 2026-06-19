@@ -54,6 +54,7 @@ impl ChangeOutcome {
 /// Deliberately a flat DTO, NOT the internal `ConnectionRow` (whose shape is a
 /// UI concern free to change).
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct SourceStatus {
     pub id: String,
     pub display_name: String,
@@ -600,6 +601,34 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&s).unwrap(),
             r#"{"id":"codex","display_name":"Codex","connected":true,"cli_present":true,"health":null}"#
+        );
+    }
+
+    #[test]
+    fn source_status_schema_matches_the_committed_contract() {
+        // The Raycast extension GENERATES its SourceStatus type from this committed
+        // JSON Schema (`integrations/raycast/contract/source-status.schema.json`),
+        // so the two can't hand-drift. This test fails if the struct changes
+        // without the schema being regenerated — regenerate with
+        // `just gen-contract` (UPDATE_CONTRACT_SCHEMA=1), then the raycast
+        // `gen:contract` + tsc catches any consumer break.
+        let schema = schemars::schema_for!(SourceStatus);
+        let generated = serde_json::to_string_pretty(&schema).unwrap() + "\n";
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../integrations/raycast/contract/source-status.schema.json"
+        );
+        if std::env::var_os("UPDATE_CONTRACT_SCHEMA").is_some() {
+            let p = std::path::Path::new(path);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, &generated).unwrap();
+        }
+        let committed = std::fs::read_to_string(path).unwrap_or_default();
+        assert_eq!(
+            generated, committed,
+            "SourceStatus schema drifted from the committed contract \
+             (integrations/raycast/contract/source-status.schema.json). \
+             Run `just gen-contract`, then regen + commit the raycast .d.ts."
         );
     }
 
