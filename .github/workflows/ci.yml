@@ -267,6 +267,25 @@ jobs:
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
+  snapshots:
+    name: snapshot hygiene
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: v1-rust # see the clippy job's note
+      - uses: taiki-e/install-action@cargo-nextest
+      - uses: taiki-e/install-action@cargo-insta
+      - uses: extractions/setup-just@v4
+      # Runs the suite under nextest and fails on a pending OR unreferenced
+      # (orphan) snapshot — the rot plain `cargo test` can't see. Separate from
+      # the coverage job because cargo-insta needs an UNinstrumented run to track
+      # which snapshots were referenced.
+      - run: just snapshots
+
   smoke:
     name: smoke
     # No `needs:` — smoke builds the release binary + renders + pixel-diffs; it

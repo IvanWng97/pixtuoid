@@ -133,7 +133,8 @@ Never pipe `preflight` through `tail`/`head` — the exit code becomes the
 pipe's and a real failure reads as green; redirect to a file and `echo $?`.
 CI-only gates: semver (pixtuoid-core only — the binary's lib target is not a
 semver surface), coverage/smoke, gen-check, gen-readme-check, npm-check,
-check-windows (cross-lint for msvc on every PR).
+check-windows (cross-lint for msvc on every PR), snapshots (`cargo insta` —
+fails on a pending OR orphan `.snap`, the rot plain `cargo test` can't see).
 
 **Release:** `just bump X.Y.Z` rewrites every version number, drafts
 `release_notes()`, runs preflight, and commits on a release branch — it

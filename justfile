@@ -188,6 +188,18 @@ semver:
 coverage:
     cargo llvm-cov nextest --workspace --features {{ features }} --lcov --output-path lcov.info --profile ci
 
+# Snapshot hygiene (cargo-insta): runs the suite under nextest and FAILS on a
+# pending (un-accepted `.snap.new`) OR unreferenced (orphan `.snap` — e.g. a
+# deleted test's leftover) snapshot. This is the gap plain `cargo test` misses:
+# a CHANGED snapshot already fails its own assertion, but an ORPHAN one rots
+# silently. CI-only in practice (a second full test run, like coverage/semver) —
+# NOT in preflight; run it after adding/removing an insta-snapshot test. Needs
+# cargo-insta + cargo-nextest.
+[group('rust')]
+[doc('Snapshot hygiene (cargo-insta): fail on pending OR orphan snapshots — CI-only')]
+snapshots:
+    cargo insta test --check --unreferenced=reject --test-runner nextest --workspace --features {{ features }}
+
 # Never-panic fuzz the per-source decoders over a JSONL corpus DIR (on-demand;
 # not in preflight/CI — points at local or public real sessions, not committed
 # data). Auto-routes each line to the CC / Codex / hook decoder by its shape;
@@ -472,7 +484,7 @@ verify: preflight site-check gen-check
 setup-tools:
     #!/usr/bin/env bash
     set -euo pipefail
-    tools=(cargo-nextest cargo-machete cargo-deny cargo-hack cargo-semver-checks cargo-edit lychee)
+    tools=(cargo-nextest cargo-machete cargo-deny cargo-hack cargo-semver-checks cargo-edit cargo-insta lychee)
     if command -v cargo-binstall &>/dev/null; then
         cargo binstall -y "${tools[@]}"
     else
