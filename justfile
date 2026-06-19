@@ -200,6 +200,25 @@ coverage:
 snapshots:
     cargo insta test --check --unreferenced=reject --test-runner nextest --workspace --features {{ features }}
 
+# Mutation testing (cargo-mutants): inject bugs into the CHANGED lines and check
+# the tests catch them — the "do your assertions have TEETH?" dimension that
+# line/region coverage can't see (a covered-but-toothless assertion). DIFF-scoped
+# (`--in-diff` vs `$MUTANTS_BASE`, default origin/main) so cost scales with the
+# change, not the ~6,900-mutant tree; reads `.cargo/mutants.toml` (nextest + the
+# untestable/timing exclusions). ADVISORY — CI runs it NON-blocking; a surviving
+# mutant is a hint to strengthen a test, not a merge gate. Run on a
+# reducer/decoder/layout PR; forwards args (e.g. `just mutants --list`). Needs
+# cargo-mutants + nextest.
+[group('rust')]
+[doc('Mutation-test the diff vs origin/main (cargo-mutants --in-diff) — advisory')]
+mutants *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    base="${MUTANTS_BASE:-origin/main}"
+    mkdir -p target
+    git diff "$base...HEAD" > target/mutants.diff
+    cargo mutants --in-diff target/mutants.diff --features {{ features }} {{ args }}
+
 # Never-panic fuzz the per-source decoders over a JSONL corpus DIR (on-demand;
 # not in preflight/CI — points at local or public real sessions, not committed
 # data). Auto-routes each line to the CC / Codex / hook decoder by its shape;

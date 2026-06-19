@@ -1,0 +1,21 @@
+# cargo-mutants config (see `just mutants`). Mutation testing injects bugs and
+# checks the tests catch them — the "do your assertions have teeth?" dimension
+# that line/region coverage can't see. Use the project's runner (nextest) and
+# exclude paths where a surviving mutant is NOISE, not a real gap, so the
+# advisory signal stays high.
+test_tool = "nextest"
+
+exclude_globs = [
+    # Untestable painter / async + winit glue — the SAME set codecov.yml ignores.
+    # No headless test can kill a mutant here, so every mutant "survives" = noise.
+    "crates/pixtuoid/src/main.rs",
+    "crates/pixtuoid/src/tui/mod.rs",
+    "crates/pixtuoid/src/runtime/driver.rs",
+    "crates/pixtuoid/src/floating/mod.rs",
+    "crates/pixtuoid/src/floating/window.rs",
+    # Timing / FFI liveness probes: their tests assert wall-clock + OS behavior and
+    # flake under mutation load — a "survivor" here is a flaked test, not a missing
+    # assertion (this repo is flake-averse; #352-#354).
+    "crates/pixtuoid-core/src/source/exit_watch.rs",
+    "crates/pixtuoid-core/src/source/fd_probe.rs",
+]
