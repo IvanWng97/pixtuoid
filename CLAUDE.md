@@ -14,6 +14,12 @@ live in nested `CLAUDE.md` files**, auto-loaded when you touch those trees:
 - [`crates/pixtuoid/CLAUDE.md`](crates/pixtuoid/CLAUDE.md) — the binary: install, runtime, cli, config, multi-floor, embedded pack.
   - [`crates/pixtuoid/src/tui/CLAUDE.md`](crates/pixtuoid/src/tui/CLAUDE.md) — the terminal painter (over the `pixtuoid-scene` crate): draw_scene flush, harness, widgets, the theme-PICKER ui, Sources panel, dashboard, hit_test, version popup.
 
+The NON-Rust **consumers** of the `--json` contract have their own guides (their
+gates are `tsc`/`eslint` / `just site-check`, NOT cargo — the Rust house rules
+above don't apply there):
+- [`integrations/raycast/CLAUDE.md`](integrations/raycast/CLAUDE.md) — the Raycast TS extension.
+- [`site/CLAUDE.md`](site/CLAUDE.md) — the Astro landing page.
+
 **Read the nested guide for the crate you're editing.** Many things that look
 like a bug are documented, load-bearing design — the "Known sharp edges"
 section in each nested file (indexed below) explains why.
@@ -149,7 +155,7 @@ and stays a human step. See
 - **Every review adjudication leaves a trace** in [`docs/REVIEW-LEDGER.md`](docs/REVIEW-LEDGER.md) (premise-anchored protocol in its header; economics in `docs/review-metrics/`). A finding refuted as "deliberate design" MUST cite an existing sharp edge or add one in the same change.
 - **Track every deferred finding as a GitHub issue** BEFORE moving on — problem, why deferred, fix sketch. A deferred finding with no issue is a silently-dropped finding. (Verify it's real first — see "Don't blindly accept reviewer findings".)
 - **Sprite changes require visual verification** — render, crop, read the PNG, self-critique until it reads at half-block scale; commit messages carry the iteration history. Full checklist: `.claude/skills/beautify-decoration/SKILL.md`.
-- **Periodic context-file audits also distill memory**: each `/revise-claude-md`-style audit sweeps recent session memories for promote-to-repo candidates (the memory layer of [`docs/KNOWLEDGE-BASE.md`](docs/KNOWLEDGE-BASE.md)).
+- **Periodic context-file audits also distill memory**: each `/revise-claude-md`-style audit sweeps recent session memories for promote-to-repo candidates (the memory layer of [`docs/KNOWLEDGE-ENGINEERING.md`](docs/KNOWLEDGE-ENGINEERING.md)).
 
 ## Architecture invariants
 
@@ -203,6 +209,7 @@ full WHY lives in the nested `CLAUDE.md` for the owning crate.
 
 - "How does a CC tool call become a moving sprite?" → `runtime/driver.rs::run_async` → `SourceManager::spawn` → source → decoder → `reducer::Reducer::apply` → `watch` channel → `TuiRenderer::render` → `pixtuoid_scene::pixel_painter::render_to_rgb_buffer` (the world render) → `tui::renderer::draw_scene` (the terminal flush). First half in `pixtuoid-core`; the world render in the `pixtuoid-scene` crate; the terminal flush in `pixtuoid`'s `tui`.
 - Architecture overview + data-flow diagram: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Area-specific entries (layout, sources, install, themes, motion, weather, pets, …) are in the nested guides.
+- "How do I ship one change that spans the Rust lib + the site + the Raycast extension in parallel?" → [`docs/PARALLEL-DELIVERY.md`](docs/PARALLEL-DELIVERY.md) (the contract-first → fan-out → join model; the `--json` shape is the contract, the per-area `CLAUDE.md`/`AGENTS.md` scope each worker/agent). How lessons persist across agent runs so the next change is cheaper: [`docs/KNOWLEDGE-ENGINEERING.md`](docs/KNOWLEDGE-ENGINEERING.md).
 
 ## When refactoring
 

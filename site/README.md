@@ -34,7 +34,7 @@ From the repo root the same gate is `just site-check` (and `just site-fmt`).
 > `docs/ARCHITECTURE.md` (rendered as `/architecture` — its Mermaid diagram becomes an
 > inline SVG at build via rehype-mermaid, which is why CI installs Chromium),
 > `docs/CONTRIBUTING.md` (rendered as `/contributing`), `docs/MIGRATION.md`
-> (rendered as `/migration`), and `docs/KNOWLEDGE-BASE.md` (rendered as
+> (rendered as `/migration`), and `docs/KNOWLEDGE-ENGINEERING.md` (rendered as
 > `/knowledge-base`).
 > Renaming/moving any of them — or breaking the diagram's Mermaid syntax — fails
 > `astro build`; all six are in the `site.yml` / `pages.yml` path filters so a

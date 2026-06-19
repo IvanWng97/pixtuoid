@@ -1,4 +1,4 @@
-# The knowledge base
+# Knowledge engineering
 
 How this repo stops paying for the same lesson twice — and what we measured
 when we tested whether it works.

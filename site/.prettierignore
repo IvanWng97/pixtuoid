@@ -4,3 +4,7 @@ node_modules
 package-lock.json
 # generated/binary demo assets — never reformat
 public/demos
+# agent guides are docs, not site source — kept consistent with the other
+# CLAUDE.md/AGENTS.md files (all outside site/, so naturally prettier-exempt)
+CLAUDE.md
+AGENTS.md

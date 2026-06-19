@@ -74,5 +74,5 @@ plan stage, not just a bug in the code: the orchestrator records it as a
 `plan-miss:` line in the review-round commit message and carries it into
 the squash body — the channel the review-history census already harvests —
 so each census can compute the rate (the conveyor's merge gate in
-`docs/KNOWLEDGE-BASE.md`; first measurement in
+`docs/KNOWLEDGE-ENGINEERING.md`; first measurement in
 `docs/review-metrics/phase3-onboarding-2026-06.md`, design in issue #264).
