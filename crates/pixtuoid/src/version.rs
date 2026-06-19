@@ -58,6 +58,10 @@ pub fn release_notes(version: &str) -> Option<&'static [&'static str]> {
         // anchoring on a marker is whitespace-independent — matching the `match`
         // brace would silently break if the indentation ever shifted.
         // [bump-inject-here]
+        "0.11.1" => Some(&[
+            "Maintenance release — the animated office is unchanged from 0.11.0; documentation polish across the site and READMEs, plus a supply-chain hardening of how pixtuoid ships",
+            "Releases now publish to crates.io and npm via OIDC trusted publishing — no long-lived API tokens, so every build is provenance-attested from this tag forward",
+        ]),
         "0.11.0" => Some(&[
             "Pop the office out of the terminal — new `pixtuoid floating` opens a frameless, always-on-top desktop window of the same animated office",
             "First launch greets you with a cinematic move-in and helps you connect your installed agent CLIs; `pixtuoid setup` is the headless twin for scripting and CI",
