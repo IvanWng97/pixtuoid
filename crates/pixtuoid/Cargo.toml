@@ -51,6 +51,10 @@ windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }
 
 [dev-dependencies]
 tempfile = "3"
+# End-to-end CLI golden for `sources --json` (the Raycast contract): runs the real
+# binary in an isolated empty HOME and pins its stdout JSON order-insensitively.
+# Goldens update with SNAPSHOTS=overwrite. See tests/cli_json.rs.
+snapbox  = { version = "1", features = ["json"] }
 # Emits the SourceStatus JSON Schema (the Raycast --json contract) — test/gen
 # only, so the `JsonSchema` derive is `cfg_attr(test)` and this stays a dev-dep
 # (no production-binary impact). See sources.rs + `just gen-contract`.

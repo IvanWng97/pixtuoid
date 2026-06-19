@@ -1,0 +1,65 @@
+[
+  {
+    "cli_present": false,
+    "connected": false,
+    "display_name": "Claude Code",
+    "health": null,
+    "id": "claude-code"
+  },
+  {
+    "cli_present": false,
+    "connected": false,
+    "display_name": "Codex",
+    "health": null,
+    "id": "codex"
+  },
+  {
+    "cli_present": true,
+    "connected": true,
+    "display_name": "Antigravity",
+    "health": null,
+    "id": "antigravity"
+  },
+  {
+    "cli_present": false,
+    "connected": false,
+    "display_name": "Reasonix",
+    "health": null,
+    "id": "reasonix"
+  },
+  {
+    "cli_present": false,
+    "connected": false,
+    "display_name": "CodeWhale",
+    "health": null,
+    "id": "codewhale"
+  },
+  {
+    "cli_present": false,
+    "connected": false,
+    "display_name": "opencode",
+    "health": null,
+    "id": "opencode"
+  },
+  {
+    "cli_present": true,
+    "connected": true,
+    "display_name": "Copilot CLI",
+    "health": null,
+    "id": "copilot"
+  },
+  {
+    "cli_present": false,
+    "connected": false,
+    "display_name": "Cursor CLI",
+    "health": null,
+    "id": "cursor"
+  },
+  {
+    "cli_present": false,
+    "connected": false,
+    "display_name": "OpenClaw",
+    "health": null,
+    "id": "openclaw"
+  }
+]
