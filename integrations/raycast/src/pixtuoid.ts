@@ -101,8 +101,22 @@ export async function resolveBinary(): Promise<string> {
  *  source id can never be interpreted as a shell token). Returns stdout. */
 async function runPixtuoid(args: string[]): Promise<string> {
   const bin = await resolveBinary();
-  const { stdout } = await pExecFile(bin, args, { timeout: 20000 });
-  return stdout;
+  try {
+    const { stdout } = await pExecFile(bin, args, { timeout: 20000 });
+    return stdout;
+  } catch (e) {
+    // `connect`/`disconnect --json` print their outcome rows (INCLUDING a
+    // `failed: <msg>` row) to stdout AND exit non-zero when any op failed, so
+    // promisified execFile rejects — but it attaches the child's stdout to the
+    // error. Recover that JSON array so the caller can render the precise
+    // per-source outcome; a genuine failure (missing binary, panic, non-JSON
+    // output) has no JSON-array stdout and still rethrows.
+    const stdout = (e as { stdout?: unknown }).stdout;
+    if (typeof stdout === "string" && stdout.trim().startsWith("[")) {
+      return stdout;
+    }
+    throw e;
+  }
 }
 
 export async function getSources(): Promise<SourceStatus[]> {
@@ -116,13 +130,27 @@ export async function toggleSource(id: string, connected: boolean): Promise<Outc
   const cmd = connected ? "disconnect" : "connect";
   const out = await runPixtuoid([cmd, id, "--json"]);
   const rows = JSON.parse(out) as OutcomeRow[];
-  return rows[0];
+  const row = rows[0];
+  // The CLI emits exactly one row per requested id; an empty array means the
+  // change was NOT applied — surface it as an error, never a silent success.
+  if (!row) {
+    throw new Error(`pixtuoid ${cmd} ${id} returned no outcome`);
+  }
+  return row;
 }
 
 /** Spawn `pixtuoid floating` DETACHED so the desktop window outlives Raycast
- *  (which closes as soon as the no-view command returns). */
+ *  (which closes as soon as the no-view command returns). Resolves once the
+ *  child has actually spawned; rejects on a spawn failure (ENOENT/EACCES) —
+ *  without the `error` listener that failure would be an UNCATCHABLE event. */
 export async function startFloating(): Promise<void> {
   const bin = await resolveBinary();
-  const child = spawn(bin, ["floating"], { detached: true, stdio: "ignore" });
-  child.unref();
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(bin, ["floating"], { detached: true, stdio: "ignore" });
+    child.once("error", reject);
+    child.once("spawn", () => {
+      child.unref();
+      resolve();
+    });
+  });
 }

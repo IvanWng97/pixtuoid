@@ -4,7 +4,7 @@ import { BinaryNotFoundError, startFloating } from "./pixtuoid";
 export default async function StartFloating() {
   try {
     await startFloating();
-    await showHUD("🪟 Started the Pixtuoid floating window");
+    await showHUD("🪟 Opening the Pixtuoid floating window…");
   } catch (e) {
     if (e instanceof BinaryNotFoundError) {
       await showToast({
