@@ -157,22 +157,34 @@ pub fn office_scale(win_h: u32) -> u32 {
     (win_h as f64 / OFFICE_TARGET_H as f64).round().max(1.0) as u32
 }
 
-/// Per-floor boot desk-capacities for the FLOATING window. Mirrors
-/// `window::sync_floor_caps`'s geometry EXACTLY — the office buffer is
-/// `window / office_scale`, with NO footer row — so the boot seed and the first
-/// redraw AGREE. The TUI's `runtime::boot_capacities_for` instead subtracts a
-/// footer row AND ignores the window upscale, so reusing it here OVER-seeds: in
-/// the sub-frame boot race before the first redraw, a `SessionStart` could land
-/// at a `desk_index` the smaller real layout lacks (immutable → invisible-but-
-/// alive until a resize). A floor whose layout rejects the size falls back to
-/// `FALLBACK_DESKS`, matching the TUI boot helper.
-pub fn boot_capacities_for_window(
-    win_w: u32,
-    win_h: u32,
-) -> [usize; pixtuoid_core::state::MAX_FLOORS] {
+/// The window→office-buffer projection for a `win_w`×`win_h` px window: the
+/// integer `office_scale` plus the downscaled buffer dims (`window / scale`,
+/// clamped non-zero, NO footer row). The ONE place this geometry lives — shared
+/// by `window::redraw` (which needs `scale` for the upscale blit and the buffer
+/// dims for `sync_floor_caps` + the render) and the boot seed
+/// (`boot_capacities_for_window`) — so the desk capacity they derive can't drift
+/// on an `office_scale`/clamp change.
+pub(crate) fn window_buffer_geometry(win_w: u32, win_h: u32) -> (u32, u16, u16) {
     let scale = office_scale(win_h);
     let buf_w = (win_w / scale).clamp(1, u16::MAX as u32) as u16;
     let buf_h = (win_h / scale).clamp(1, u16::MAX as u32) as u16;
+    (scale, buf_w, buf_h)
+}
+
+/// Per-floor boot desk-capacities for the FLOATING window. Uses the SAME
+/// `window_buffer_geometry` the first redraw's `window::sync_floor_caps` does —
+/// the office buffer is `window / office_scale` with NO footer row — so the boot
+/// seed and the first redraw AGREE. The TUI's `runtime::boot_capacities_for`
+/// instead subtracts a footer row AND ignores the window upscale, so reusing it
+/// here OVER-seeds: in the sub-frame boot race before the first redraw, a
+/// `SessionStart` could land at a `desk_index` the smaller real layout lacks
+/// (immutable → invisible-but-alive until a resize). A floor whose layout rejects
+/// the size falls back to `FALLBACK_DESKS`, matching the TUI boot helper.
+pub(crate) fn boot_capacities_for_window(
+    win_w: u32,
+    win_h: u32,
+) -> [usize; pixtuoid_core::state::MAX_FLOORS] {
+    let (_scale, buf_w, buf_h) = window_buffer_geometry(win_w, win_h);
     std::array::from_fn(|i| {
         let seed = pixtuoid_scene::floor::floor_seed(i);
         let cap = pixtuoid_scene::floor::floor_capacity(buf_w, buf_h, seed);

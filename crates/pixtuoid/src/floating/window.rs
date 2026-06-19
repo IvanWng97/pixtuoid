@@ -137,9 +137,8 @@ impl FloatingApp {
             return; // a 0-area window: nothing to draw
         };
         // Office buffer = window / SCALE (kept ~OFFICE_TARGET_H tall → chunky sprites).
-        let scale = super::offscreen::office_scale(win_h);
-        let buf_w = (win_w / scale).clamp(1, u16::MAX as u32) as u16;
-        let buf_h = (win_h / scale).clamp(1, u16::MAX as u32) as u16;
+        // The ONE projection helper, shared with the boot seed so the two can't drift.
+        let (scale, buf_w, buf_h) = super::offscreen::window_buffer_geometry(win_w, win_h);
         // Keep the reducer's desk capacity in lockstep with the office actually rendered at
         // this BUFFER size (authority = the layout's home-desk count, same as the TUI).
         if self.last_caps_size != Some((buf_w, buf_h)) {
