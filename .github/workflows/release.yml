@@ -248,17 +248,21 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
-      # OIDC prep for crates.io Trusted Publishing (#216): unused until the
-      # Trusted Publisher is configured on crates.io, then the
-      # CARGO_REGISTRY_TOKEN secret can be dropped.
+      # crates.io Trusted Publishing (#216): cargo has NO native OIDC, so the
+      # auth step below exchanges this id-token claim for a short-lived,
+      # auto-revoked crates.io token. The standing CARGO_REGISTRY_TOKEN secret
+      # is gone — this claim is the only credential.
       id-token: write
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: Authenticate to crates.io (OIDC trusted publishing)
+        id: auth
+        uses: rust-lang/crates-io-auth-action@v1
       - name: Publish crates (in dependency order)
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
         run: |
           set -euo pipefail
           # Publish in dependency order. Idempotent: swallow "already on crates.io"
@@ -393,11 +397,10 @@ jobs:
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
-      # OIDC prep for npm Trusted Publishing (#216): node 22 bundles npm 10.x,
-      # but OIDC publishing needs npm >= 11.5.1 — without this, trusted
-      # publishing would silently not engage and fall back to the token.
-      # Harmless while NODE_AUTH_TOKEN is still configured; required once the
-      # per-package Trusted Publishers exist and the token is dropped.
+      # npm Trusted Publishing (#216): node 22 bundles npm 10.x, but native OIDC
+      # publishing needs npm >= 11.5.1. Now LOAD-BEARING — NODE_AUTH_TOKEN is
+      # gone, so OIDC is the only auth path; without this upgrade trusted
+      # publishing silently won't engage and the publish fails unauthenticated.
       # Pinned EXACTLY (not @11): the publish path is irreversible, so what
       # runs must not float with the registry at release time; bump
       # deliberately (and drop this line once node's bundled npm >= 11.5.1).
@@ -440,8 +443,6 @@ jobs:
         run: node npm/generate.mjs --version "${GITHUB_REF_NAME#v}" --artifacts npm/dist
 
       - name: Publish (platform packages first, launcher last)
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
           VERSION="${GITHUB_REF_NAME#v}"
