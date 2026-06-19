@@ -21,7 +21,7 @@ does **not** bundle the binary.
 Install the `pixtuoid` binary with any of:
 
 ```sh
-cargo install pixtuoid
+cargo install pixtuoid pixtuoid-hook
 npm i -g pixtuoid
 brew install ivanwng97/pixtuoid/pixtuoid
 ```
