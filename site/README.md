@@ -18,11 +18,12 @@ npm run dev        # http://localhost:4321/pixtuoid/   ·  just site-dev
 ## Quality gates
 
 ```sh
-npm run verify     # format:check → lint → astro check → build  (== site CI)
+npm run verify     # format:check → lint → astro check → knip → build  (== site CI)
 # individually:
 npm run format     # prettier --write .
 npm run lint       # eslint .
 npm run check       # astro check (types + templates)
+npm run knip       # unused files / exports / dependencies
 npm run build      # astro build → dist/
 ```
 
