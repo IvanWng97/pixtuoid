@@ -54,6 +54,13 @@ def run() -> int:
     )
     check("skips header + separator", all(s not in ("slug", "---") for s, _, _ in rows))
 
+    # duplicate_slugs: names a slug repeated across rows (the citation-key clash).
+    check(
+        "duplicate_slugs finds the repeat",
+        m.duplicate_slugs([("a", "core", "edge"), ("a", "scene", "qa"), ("b", "bin", "edge")]) == ["a"],
+    )
+    check("duplicate_slugs clean -> []", m.duplicate_slugs([("a", "core", "edge"), ("b", "bin", "edge")]) == [])
+
     # ledger_citations: every [edge:<slug>] tag, nothing else.
     led = "row cites [edge:core-foo] and [edge:bin-max-desks-no-default]; not [issue:1] or `code`."
     cites = m.ledger_citations(led)

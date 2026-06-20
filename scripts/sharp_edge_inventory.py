@@ -74,9 +74,25 @@ def ledger_citations(ledger_md: str) -> "list[str]":
     return _CITE.findall(ledger_md)
 
 
+def duplicate_slugs(rows: "list[tuple[str, str, str]]") -> "list[str]":
+    """Slugs that appear on more than one inventory row — the slug is the citation
+    key, so a duplicate is ambiguous (and would otherwise surface only as a
+    misleading count DRIFT)."""
+    counts = Counter(slug for slug, _, _ in rows)
+    return sorted(slug for slug, n in counts.items() if n > 1)
+
+
 def check() -> "list[str]":
     problems: list[str] = []
     rows = inventory_rows(INVENTORY.read_text())
+
+    # A duplicate slug is named explicitly (else it only shows as a confusing
+    # per-file count DRIFT) — the slug is the ledger's citation key, must be unique.
+    for slug in duplicate_slugs(rows):
+        problems.append(
+            f"DUPLICATE SLUG: `{slug}` appears on multiple inventory rows — "
+            "the slug is the citation key and must be unique"
+        )
 
     # Count parity applies ONLY to `edge` rows (qa/alias have no `- **` bullet).
     edge_per_file = Counter(fk for _, fk, kind in rows if kind == "edge")
