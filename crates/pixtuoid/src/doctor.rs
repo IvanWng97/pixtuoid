@@ -568,20 +568,20 @@ pub fn run(log_path: &std::path::Path) -> anyhow::Result<()> {
     // the #1 silent failure is a non-truecolor terminal rendering approximated
     // colors. Surface the detected $TERM/$COLORTERM so a "colors look wrong over
     // ssh/tmux" report is self-diagnosable. ENV values are untrusted → sanitized.
-    let term_var = std::env::var("TERM").unwrap_or_default();
-    let colorterm = std::env::var("COLORTERM").unwrap_or_default();
-    let shown = |v: &str| {
-        if v.is_empty() {
-            "(unset)".to_string()
-        } else {
-            sanitize(v)
-        }
+    // Read each var ONCE as an Option so display and the truecolor verdict share
+    // it, and an unset var is a genuine `None` (not `Some("")`) — matching
+    // `colorterm_is_truecolor`'s documented contract.
+    let term_var = std::env::var("TERM").ok();
+    let colorterm = std::env::var("COLORTERM").ok();
+    let shown = |v: &Option<String>| match v.as_deref() {
+        Some(s) if !s.is_empty() => sanitize(s),
+        _ => "(unset)".to_string(),
     };
     out.push_str(&format!(
         "terminal: TERM={} COLORTERM={} truecolor={}\n",
         shown(&term_var),
         shown(&colorterm),
-        if crate::term::colorterm_is_truecolor(Some(&colorterm)) {
+        if crate::term::colorterm_is_truecolor(colorterm.as_deref()) {
             "yes"
         } else {
             "not advertised"
