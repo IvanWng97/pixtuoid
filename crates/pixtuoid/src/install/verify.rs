@@ -291,9 +291,7 @@ pub fn flat_json_verify(content: &str, events: &[&str], sentinel: &str) -> Schem
 /// `<abs> --source <source>` (bare), either with an optional trailing
 /// ` --event <name>` (CodeWhale). Returns `Absolute` for a real path, `Unknown`
 /// if nothing path-like can be peeled out. Mirrors the read-back
-/// `codex::command_basename_is_hook` already does. The single-quoted Unix arm is
-/// tried BEFORE the ` --source ` split because a Unix path may itself contain
-/// " --source " — the quote unambiguously bounds it, so it wins.
+/// `codex::command_basename_is_hook` already does.
 pub fn shell_shim_ref(command: &str) -> ShimRef {
     // Strip a trailing ` --event <name>` (CodeWhale bakes one per entry).
     let head = match command.split_once(" --event ") {
@@ -301,20 +299,24 @@ pub fn shell_shim_ref(command: &str) -> ShimRef {
         None => command,
     };
     // Unix env-prefix form `PIXTUOID_SOURCE=<src> '<path>'`: the path is POSIX
-    // single-quoted by `hook_cmd::unix::shell_single_quote`. The source name carries
-    // no quote/space, so the FIRST `'` opens the path token and the LAST `'` closes
-    // it — decode that span by REVERSING the escaping (`'\''` → `'`) rather than
-    // splitting on whitespace, which would truncate a spaced path (the R0615-09/#311
-    // truncation twin). Checked FIRST so a quoted path containing " --source "
-    // isn't mis-split by the Windows arm below.
-    if let (Some(start), Some(end)) = (head.find('\''), head.rfind('\'')) {
-        if end > start {
-            let p = posix_unquote(&head[start..=end]);
-            return if p.is_empty() {
-                ShimRef::Unknown
-            } else {
-                ShimRef::Absolute(PathBuf::from(p))
-            };
+    // single-quoted by `hook_cmd::unix::shell_single_quote`, so `head` ENDS with the
+    // closing `'`. A Windows bare path (`<abs> --source <src>`) never ends in a quote
+    // even when it CONTAINS apostrophes (`C:\O'Brien\…`) — so the trailing-quote test
+    // discriminates the two forms unambiguously: it neither mis-splits a Unix path
+    // that contains " --source " NOR mis-quotes a Windows path with 2+ apostrophes.
+    // Decode the span by REVERSING the escaping (`'\''` → `'`) rather than splitting
+    // on whitespace, which would truncate a spaced path (the R0615-09/#311 twin).
+    if head.ends_with('\'') {
+        if let Some(start) = head.find('\'') {
+            let end = head.len() - 1; // the closing `'` (a 1-byte apostrophe)
+            if start < end {
+                let p = posix_unquote(&head[start..=end]);
+                return if p.is_empty() {
+                    ShimRef::Unknown
+                } else {
+                    ShimRef::Absolute(PathBuf::from(p))
+                };
+            }
         }
     }
     // Windows bare form: `<abs> --source <source>` (unquoted).
@@ -376,6 +378,23 @@ mod tests {
         assert_eq!(
             shell_shim_ref("PIXTUOID_SOURCE=codex '/opt/my --source dir/pixtuoid-hook'"),
             ShimRef::Absolute(PathBuf::from("/opt/my --source dir/pixtuoid-hook"))
+        );
+    }
+
+    #[test]
+    fn shell_shim_ref_windows_bare_path_with_apostrophes_is_not_mis_quoted() {
+        // A Windows bare path may CONTAIN apostrophes (`C:\Bob's O'Brien\…`) but never
+        // ENDS in one, so the trailing-quote discriminator routes it to the ` --source `
+        // split, NOT the Unix single-quote arm. (The arm-order reorder regressed this;
+        // the ends-with-quote test fixes both this and the Unix " --source " case.)
+        assert_eq!(
+            shell_shim_ref(r"C:\Bob's O'Brien\pixtuoid-hook.exe --source reasonix"),
+            ShimRef::Absolute(PathBuf::from(r"C:\Bob's O'Brien\pixtuoid-hook.exe"))
+        );
+        // …and with CodeWhale's trailing ` --event` tail.
+        assert_eq!(
+            shell_shim_ref(r"C:\O'Brien\hook.exe --source codewhale --event session_start"),
+            ShimRef::Absolute(PathBuf::from(r"C:\O'Brien\hook.exe"))
         );
     }
 
