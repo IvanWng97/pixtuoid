@@ -39,16 +39,20 @@ def run() -> int:
         m.count_sharp_edges("## Sharp edges\n- **a** x\n- **b** y\n") == 2,
     )
 
-    # inventory_rows: data rows only (backtick slug + file key); header/separator skipped.
+    # inventory_rows: (slug, file, kind) from data rows only; header/separator skipped.
     inv = (
-        "| slug | file | last cited | headline |\n"
-        "|---|---|---|---|\n"
-        "| `core-foo` | core | — | Foo |\n"
-        "| `scene-bar` | scene | #2 | Bar |\n"
+        "| slug | file | kind | last cited | headline |\n"
+        "|---|---|---|---|---|\n"
+        "| `core-foo` | core | edge | — | Foo |\n"
+        "| `scene-bar` | scene | qa | #2 | Bar |\n"
+        "| `tui-old` | scene | alias | — | retired → scene-bar |\n"
     )
     rows = m.inventory_rows(inv)
-    check("parses 2 data rows", rows == [("core-foo", "core"), ("scene-bar", "scene")])
-    check("skips header + separator", all(s not in ("slug", "---") for s, _ in rows))
+    check(
+        "parses 3 rows with kind",
+        rows == [("core-foo", "core", "edge"), ("scene-bar", "scene", "qa"), ("tui-old", "scene", "alias")],
+    )
+    check("skips header + separator", all(s not in ("slug", "---") for s, _, _ in rows))
 
     # ledger_citations: every [edge:<slug>] tag, nothing else.
     led = "row cites [edge:core-foo] and [edge:bin-max-desks-no-default]; not [issue:1] or `code`."

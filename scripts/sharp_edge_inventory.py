@@ -32,11 +32,15 @@ FILE_MAP = {
     "bin": "crates/pixtuoid/CLAUDE.md",
     "tui": "crates/pixtuoid/src/tui/CLAUDE.md",
 }
+# `qa`/`alias` rows may also point at the workspace root guide (no countable
+# bullets there); only `edge` rows are count-parity'd against FILE_MAP.
+QA_FILES = set(FILE_MAP) | {"root"}
 INVENTORY = Path("docs/review-metrics/sharp-edge-inventory.md")
 LEDGER = Path("docs/REVIEW-LEDGER.md")
 
 _SECTION_HDR = re.compile(r"^## (Known sharp edges|Sharp edges)\b")
-_ROW = re.compile(r"^\|\s*`([a-z0-9-]+)`\s*\|\s*(\w+)\s*\|")
+# | `<slug>` | <file> | <kind> | …
+_ROW = re.compile(r"^\|\s*`([a-z0-9-]+)`\s*\|\s*(\w+)\s*\|\s*(\w+)\s*\|")
 _CITE = re.compile(r"\[edge:([a-z0-9-]+)\]")
 
 
@@ -56,9 +60,13 @@ def count_sharp_edges(claude_md: str) -> int:
     return n
 
 
-def inventory_rows(inventory_md: str) -> "list[tuple[str, str]]":
-    """The (slug, file-key) pairs from the inventory table's data rows."""
-    return [(m.group(1), m.group(2)) for line in inventory_md.splitlines() if (m := _ROW.match(line))]
+def inventory_rows(inventory_md: str) -> "list[tuple[str, str, str]]":
+    """The (slug, file-key, kind) triples from the inventory table's data rows."""
+    return [
+        (m.group(1), m.group(2), m.group(3))
+        for line in inventory_md.splitlines()
+        if (m := _ROW.match(line))
+    ]
 
 
 def ledger_citations(ledger_md: str) -> "list[str]":
@@ -69,21 +77,27 @@ def ledger_citations(ledger_md: str) -> "list[str]":
 def check() -> "list[str]":
     problems: list[str] = []
     rows = inventory_rows(INVENTORY.read_text())
-    per_file = Counter(fk for _, fk in rows)
 
+    # Count parity applies ONLY to `edge` rows (qa/alias have no `- **` bullet).
+    edge_per_file = Counter(fk for _, fk, kind in rows if kind == "edge")
     for fk, path in FILE_MAP.items():
         actual = count_sharp_edges(Path(path).read_text())
-        listed = per_file.get(fk, 0)
+        listed = edge_per_file.get(fk, 0)
         if actual != listed:
             problems.append(
                 f"DRIFT: {path} has {actual} sharp-edge bullet(s) but the inventory "
-                f"lists {listed} for `{fk}` — update {INVENTORY}"
+                f"lists {listed} `edge` row(s) for `{fk}` — update {INVENTORY}"
             )
-    for slug, fk in rows:
-        if fk not in FILE_MAP:
-            problems.append(f"BAD FILE KEY: inventory slug `{slug}` names unknown guide `{fk}`")
 
-    slugs = {s for s, _ in rows}
+    for slug, fk, kind in rows:
+        allowed = FILE_MAP if kind == "edge" else QA_FILES
+        if fk not in allowed:
+            problems.append(
+                f"BAD FILE KEY: inventory `{kind}` slug `{slug}` names unknown guide `{fk}`"
+            )
+
+    # Orphan check resolves against EVERY slug (edge + qa + alias).
+    slugs = {s for s, _, _ in rows}
     for cited in sorted(set(ledger_citations(LEDGER.read_text()))):
         if cited not in slugs:
             problems.append(
@@ -106,10 +120,10 @@ def main() -> int:
         for p in problems:
             print(f"  ✗ {p}")
         return 1
-    rows = inventory_rows(INVENTORY.read_text())
+    kinds = Counter(kind for _, _, kind in inventory_rows(INVENTORY.read_text()))
     print(
-        f"sharp-edge inventory: in sync ({len(rows)} edges across {len(FILE_MAP)} guides; "
-        "ledger citations resolve)"
+        f"sharp-edge inventory: in sync ({kinds['edge']} edges / {kinds['qa']} qa / "
+        f"{kinds['alias']} alias across {len(FILE_MAP)} guides; ledger citations resolve)"
     )
     return 0
 
