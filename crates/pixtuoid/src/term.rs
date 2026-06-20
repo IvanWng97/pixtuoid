@@ -15,9 +15,26 @@ pub fn colorterm_is_truecolor(colorterm: Option<&str>) -> bool {
     matches!(colorterm, Some(v) if v.contains("truecolor") || v.contains("24bit"))
 }
 
-/// The live `$COLORTERM`-based verdict for the running process.
-pub fn truecolor_supported() -> bool {
-    colorterm_is_truecolor(std::env::var("COLORTERM").ok().as_deref())
+/// The `pixtuoid doctor` `terminal:` line — `$TERM` / `$COLORTERM` and the
+/// truecolor verdict. Pure (takes the env values as `Option`s, `None` = unset) so
+/// the row logic is unit-testable on its own (and `doctor::run` returns its report
+/// string, so it's covered end-to-end too). Untrusted env values are stripped of
+/// control chars before display.
+pub fn terminal_diagnostic_row(term: Option<&str>, colorterm: Option<&str>) -> String {
+    let shown = |v: Option<&str>| match v {
+        Some(s) if !s.is_empty() => crate::strip_control_chars(s),
+        _ => "(unset)".to_string(),
+    };
+    format!(
+        "terminal: TERM={} COLORTERM={} truecolor={}",
+        shown(term),
+        shown(colorterm),
+        if colorterm_is_truecolor(colorterm) {
+            "yes"
+        } else {
+            "not advertised"
+        },
+    )
 }
 
 #[cfg(test)]
@@ -39,5 +56,26 @@ mod tests {
         assert!(!colorterm_is_truecolor(Some("256color")));
         // Case-sensitive: only the conventional lowercase tokens count.
         assert!(!colorterm_is_truecolor(Some("TrueColor")));
+    }
+
+    #[test]
+    fn terminal_row_renders_each_state() {
+        let yes = terminal_diagnostic_row(Some("xterm-256color"), Some("truecolor"));
+        assert!(yes.contains("TERM=xterm-256color"));
+        assert!(yes.contains("COLORTERM=truecolor"));
+        assert!(yes.contains("truecolor=yes"));
+
+        // Unset ($COLORTERM = None) and set-but-empty both read as "(unset)" and a
+        // "not advertised" verdict.
+        for ct in [None, Some("")] {
+            let row = terminal_diagnostic_row(None, ct);
+            assert!(row.contains("TERM=(unset)"), "{row}");
+            assert!(row.contains("COLORTERM=(unset)"), "{row}");
+            assert!(row.contains("truecolor=not advertised"), "{row}");
+        }
+
+        // Untrusted env values are control-char-stripped before display.
+        let sanitized = terminal_diagnostic_row(Some("a\x1b[31mb"), Some("truecolor"));
+        assert!(!sanitized.contains('\u{1b}'), "{sanitized}");
     }
 }

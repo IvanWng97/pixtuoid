@@ -27,7 +27,7 @@ fn main() -> Result<()> {
             ..
         }
     ) && std::io::IsTerminal::is_terminal(&std::io::stderr())
-        && !pixtuoid::term::truecolor_supported()
+        && !pixtuoid::term::colorterm_is_truecolor(std::env::var("COLORTERM").ok().as_deref())
     {
         eprintln!(
             "⚠ pixtuoid: your terminal does not advertise COLORTERM=truecolor — the \
@@ -140,7 +140,7 @@ fn main() -> Result<()> {
         }
         Cmd::ValidatePack { pack_dir } => validate::validate_pack(&pack_dir),
         Cmd::InitPack { dest, force } => init_pack::init_pack(&dest, force),
-        Cmd::Doctor => doctor::run(&log_file_path()),
+        Cmd::Doctor => doctor::run(&log_file_path()).map(|report| print!("{report}")),
         Cmd::Sources { action: None, json } => run_sources_list(json),
         Cmd::Sources {
             action: Some(SourcesAction::Set { ids }),

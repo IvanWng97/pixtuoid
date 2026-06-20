@@ -35,10 +35,14 @@ src/
 │                       capture them); main.rs dispatches both as plain arms (tracing → stderr, so stdout stays clean). The
 │                       five PathBuf args carry `value_hint` so completions path-complete. Presenters live in main.rs
 │                       (run_sources_list/run_sources_set/run_change/run_setup, codecov-excluded like doctor::run)
-├── term.rs             truecolor preflight: pure `colorterm_is_truecolor($COLORTERM)` (the S-Lang/terminfo `truecolor`/
-│                       `24bit` convention) + `truecolor_supported()`. main.rs WARN-ONLY (never gates on Unix — many
-│                       truecolor terminals omit COLORTERM) on a non-windows Run-TUI tty; `doctor` prints a `terminal:`
-│                       row. Windows hard-gates VT separately (tui/mod). `floating` is exempt (softbuffer = real RGB px)
+├── term.rs             truecolor preflight (BOTH fns PURE + unit-tested — main.rs is the untestable presenter,
+│                       so the policy lives here; `doctor::run` returns its report String so it's tested too):
+│                       `colorterm_is_truecolor($COLORTERM)` (the
+│                       S-Lang/terminfo `truecolor`/`24bit` convention) + `terminal_diagnostic_row(term, colorterm)` (the
+│                       `doctor` `terminal:` line; env values sanitized). main.rs WARN-ONLY (never gates on Unix — many
+│                       truecolor terminals omit COLORTERM; the env read is INLINED at the excluded main.rs call site, no
+│                       untestable wrapper to mutate) on a non-windows Run-TUI tty. Windows hard-gates VT separately
+│                       (tui/mod). `floating` is exempt (softbuffer = real RGB px). #397 = terminfo Tc/RGB follow-up
 ├── setup.rs            first-run detection for onboarding: the PURE `is_first_run(cfg, path) = !path.exists() ||
 │                       cfg.sources.is_empty()` (mirrors resolve_connected's migrate condition; unit-tested). `pub`
 │                       because main.rs (a separate crate) computes RunConfig.first_run from it. The cinematic overlay
