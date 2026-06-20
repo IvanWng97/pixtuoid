@@ -67,7 +67,6 @@ jobs:
             gh issue create \
               --title "Re-run the review-history census" \
               --label census \
-              --label "priority: low" \
               --body-file census-body.md
           fi
 
