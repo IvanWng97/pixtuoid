@@ -550,6 +550,21 @@ census-reminder:
 census-reminder-selftest:
     python3 scripts/census_reminder_selftest.py
 
+# Validate docs/review-metrics/sharp-edge-inventory.md against the CLAUDE.md sharp
+# edges (per-file count parity) + the ledger's [edge:<slug>] citations. A sharp
+# edge can't be added/removed from a CLAUDE.md without updating the inventory (the
+# census sharp-edge leg counts against it). Gated in the CI hygiene job. Pure, no network.
+[group('meta')]
+[doc('Validate the sharp-edge inventory vs CLAUDE.md + the ledger (#386)')]
+sharp-edge-inventory:
+    python3 scripts/sharp_edge_inventory.py
+
+# Self-test the sharp-edge-inventory parsers (count/rows/citation regexes).
+[group('meta')]
+[doc('Self-test the sharp-edge-inventory validator (parsers)')]
+sharp-edge-inventory-selftest:
+    python3 scripts/sharp_edge_inventory_selftest.py
+
 # Audit one or more PRs' claude[bot] MEDIUM+ inline findings for a disposition
 # trace (a `Bot-findings-adjudicated:` marker — see CONTRIBUTING.md). ADVISORY:
 # run during the merge disposition sweep to catch the #283 class (a MEDIUM+

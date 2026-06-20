@@ -63,10 +63,14 @@ found LLM-generated context files *reduced* agent success in 5 of 8 settings
 while raising cost ~20%; the converged practice is a ~100–300 line **map,
 not a manual**. **Counter:** size budgets, citation tracking (a sharp edge
 no review has cited across **two consecutive censuses** is a demotion
-candidate — counted against the **full** `CLAUDE.md` sharp-edge set, not a
-sampled subset, or a topic-concentrated review window manufactures false
-staleness; census #3 widened the inventory and re-anchored the clock rather
-than demote on the skew, #386), periodic audits.
+candidate — counted against the **full** `CLAUDE.md` sharp-edge set so a
+topic-concentrated review window can't manufacture false staleness; the canonical
+set is the committed
+[`sharp-edge-inventory.md`](review-metrics/sharp-edge-inventory.md) — each edge
+has a stable slug the ledger cites as `[edge:<slug>]`, and `just
+sharp-edge-inventory` keeps it in lockstep with the guides + harvests citations
+mechanically, so the census leg is a script run, not a hand-count, #386), periodic
+audits.
 
 ### Retrieval (knowledge computed on demand, never stored)
 

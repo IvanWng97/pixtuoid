@@ -30,9 +30,12 @@ and the HEAD it was rendered at.
 5. **Every NEW design-intent refutation MUST cite an existing sharp edge**
    (workspace or nested `CLAUDE.md`, or an in-code WHY doc) **or add one in
    the same PR**. No undocumented refutations enter this ledger. **Tag a cited
-   sharp edge `[edge:<slug>]`** (its kebab-name from the owning `CLAUDE.md`) in
-   the mechanism column, so the census's sharp-edge-citation leg harvests
-   citations mechanically instead of by hand-reading every anchor (#386).
+   sharp edge `[edge:<slug>]`** in the mechanism column — the slug is the
+   canonical one in
+   [`review-metrics/sharp-edge-inventory.md`](review-metrics/sharp-edge-inventory.md)
+   (CI's `just sharp-edge-inventory` rejects a tag that doesn't resolve there), so
+   the census's sharp-edge-citation leg harvests citations mechanically instead of
+   by hand-reading every anchor (#386).
 6. **Append-only.** A flipped verdict appends a superseding row that links the
    old one; the old row is never edited or deleted.
 7. **After adjudication, append**: a new dated `##` section, one row per

@@ -101,6 +101,10 @@ jobs:
       - run: just shfmt-check
       - run: just actionlint
       - run: just links
+      # The sharp-edge inventory must stay in lockstep with the CLAUDE.md sharp
+      # edges (the census's citation leg counts against it) — #386.
+      - run: just sharp-edge-inventory-selftest
+      - run: just sharp-edge-inventory
 
   msrv:
     name: msrv

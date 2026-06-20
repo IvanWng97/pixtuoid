@@ -1,0 +1,118 @@
+#!/usr/bin/env python3
+"""Keep `docs/review-metrics/sharp-edge-inventory.md` in lockstep with the
+CLAUDE.md sharp edges, and validate the ledger's `[edge:<slug>]` citations.
+
+The review-history census's sharp-edge-citation leg counts ledger citations
+against a canonical slug set. This makes that set a COMMITTED artifact (the
+inventory) instead of an ad-hoc per-census harvest (#386), and guards it two ways
+— the `supported_sources_manifest` bridge-test pattern:
+
+  1. **Per-file count parity** — each nested CLAUDE.md's "Known sharp edges"
+     bullet count must equal the inventory rows for that guide, so a sharp edge
+     can't be added/removed from a CLAUDE.md without updating the inventory (the
+     silent-drift the leg would otherwise mis-measure).
+  2. **No orphan citations** — every `[edge:<slug>]` in REVIEW-LEDGER.md must
+     resolve to an inventory slug (a typo / a removed edge is a dangling cite).
+
+Pure parsers + a thin I/O `main`; offline. Run: `python3 scripts/sharp_edge_inventory.py`
+(exit 0 = in sync) or `--selftest`.
+"""
+
+import argparse
+import re
+import sys
+from collections import Counter
+from pathlib import Path
+
+# inventory `file` key → the guide it indexes.
+FILE_MAP = {
+    "core": "crates/pixtuoid-core/CLAUDE.md",
+    "tests": "crates/pixtuoid-core/tests/CLAUDE.md",
+    "scene": "crates/pixtuoid-scene/CLAUDE.md",
+    "bin": "crates/pixtuoid/CLAUDE.md",
+    "tui": "crates/pixtuoid/src/tui/CLAUDE.md",
+}
+INVENTORY = Path("docs/review-metrics/sharp-edge-inventory.md")
+LEDGER = Path("docs/REVIEW-LEDGER.md")
+
+_SECTION_HDR = re.compile(r"^## (Known sharp edges|Sharp edges)\b")
+_ROW = re.compile(r"^\|\s*`([a-z0-9-]+)`\s*\|\s*(\w+)\s*\|")
+_CITE = re.compile(r"\[edge:([a-z0-9-]+)\]")
+
+
+def count_sharp_edges(claude_md: str) -> int:
+    """Formal sharp-edge bullets = the `- **…**` lines under the
+    "Known sharp edges"/"Sharp edges" `##` header, up to the next `##`."""
+    in_section = False
+    n = 0
+    for line in claude_md.splitlines():
+        if _SECTION_HDR.match(line):
+            in_section = True
+            continue
+        if in_section and line.startswith("## "):
+            break
+        if in_section and line.startswith("- **"):
+            n += 1
+    return n
+
+
+def inventory_rows(inventory_md: str) -> "list[tuple[str, str]]":
+    """The (slug, file-key) pairs from the inventory table's data rows."""
+    return [(m.group(1), m.group(2)) for line in inventory_md.splitlines() if (m := _ROW.match(line))]
+
+
+def ledger_citations(ledger_md: str) -> "list[str]":
+    """Every `[edge:<slug>]` tag in the ledger."""
+    return _CITE.findall(ledger_md)
+
+
+def check() -> "list[str]":
+    problems: list[str] = []
+    rows = inventory_rows(INVENTORY.read_text())
+    per_file = Counter(fk for _, fk in rows)
+
+    for fk, path in FILE_MAP.items():
+        actual = count_sharp_edges(Path(path).read_text())
+        listed = per_file.get(fk, 0)
+        if actual != listed:
+            problems.append(
+                f"DRIFT: {path} has {actual} sharp-edge bullet(s) but the inventory "
+                f"lists {listed} for `{fk}` — update {INVENTORY}"
+            )
+    for slug, fk in rows:
+        if fk not in FILE_MAP:
+            problems.append(f"BAD FILE KEY: inventory slug `{slug}` names unknown guide `{fk}`")
+
+    slugs = {s for s, _ in rows}
+    for cited in sorted(set(ledger_citations(LEDGER.read_text()))):
+        if cited not in slugs:
+            problems.append(
+                f"ORPHAN CITATION: {LEDGER} cites [edge:{cited}] but no such slug is in "
+                f"the inventory (typo, or a removed edge)"
+            )
+    return problems
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description="Validate the sharp-edge inventory vs CLAUDE.md + the ledger.")
+    ap.add_argument("--selftest", action="store_true", help="run pure-fn tests, no I/O")
+    if ap.parse_args().selftest:
+        import sharp_edge_inventory_selftest as st
+
+        return st.run()
+    problems = check()
+    if problems:
+        print("sharp-edge inventory: OUT OF SYNC")
+        for p in problems:
+            print(f"  ✗ {p}")
+        return 1
+    rows = inventory_rows(INVENTORY.read_text())
+    print(
+        f"sharp-edge inventory: in sync ({len(rows)} edges across {len(FILE_MAP)} guides; "
+        "ledger citations resolve)"
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
