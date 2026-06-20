@@ -45,7 +45,9 @@ jobs:
         shell: bash
         run: |
           set +e
-          latest=$(gh pr list --state merged --limit 1 --json number --jq '.[0].number')
+          # max-by-number, NOT `--limit 1`: `gh pr list`'s sort order isn't a
+          # guaranteed max-by-PR-number, so take the explicit max over a recent window.
+          latest=$(gh pr list --state merged --limit 100 --json number --jq 'max_by(.number).number')
           python3 scripts/census_reminder.py --latest-pr "$latest" > census-body.md
           echo "exit=$?" >> "$GITHUB_OUTPUT"
 
@@ -55,7 +57,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh label create census --color 0E8A16 \
+          gh label create census --color 006B75 \
             --description "Recurring review-history census cadence" 2>/dev/null || true
           num=$(gh issue list --label census --state open \
             --json number --jq '.[0].number // empty')

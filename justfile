@@ -540,7 +540,7 @@ drift-selftest:
 [group('meta')]
 [doc('Check whether a review-history census is due (merged-PR backlog)')]
 census-reminder:
-    python3 scripts/census_reminder.py --latest-pr "$(gh pr list --state merged --limit 1 --json number --jq '.[0].number')"
+    python3 scripts/census_reminder.py --latest-pr "$(gh pr list --state merged --limit 100 --json number --jq 'max_by(.number).number')"
 
 # Self-test the census-reminder parser — a regex/off-by-one regression silently
 # mis-files (or never files) a census, the upstream-drift silent-death class.
