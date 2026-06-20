@@ -877,7 +877,10 @@ squash, no per-candidate seam/claim survived — so they re-enter the candidate
 pool with no demote credit, which is exactly why the convention now requires a
 row for BOTH outcomes at adjudication time (CONTRIBUTING.md / pr-review.prompt.md).
 Confirmed rows are regression anchors: verify the cited mechanism still holds at
-the anchor paths.
+the anchor paths. **Backfill ID convention:** the `R0620-364-*` IDs carry the
+BACKFILL date (June 20), while the section header and the `date` column record the
+ORIGINAL review date (2026-06-18) — so an ID prefix may legitimately lead its row
+`date` on a backfilled section.
 
 | ID | seam | claim | verdict | mechanism / anchor | tier | HEAD | date |
 |---|---|---|---|---|---|---|---|
