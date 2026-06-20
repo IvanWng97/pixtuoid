@@ -42,6 +42,8 @@ open               = "5"
 # share raw-window-handle 0.6, MSRV ≤ 1.89.
 winit              = "0.30"
 softbuffer         = "0.4"
+clap_complete = "4.6.5"
+clap_mangen = "0.3.0"
 
 # GetShortPathNameW for the Codex/Reasonix Windows hook path: resolve a
 # space/metacharacter-bearing install path to its DOS 8.3 short form so cmd.exe /C

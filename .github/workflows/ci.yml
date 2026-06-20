@@ -219,6 +219,38 @@ jobs:
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
+  macos-test:
+    name: macos-test
+    # macOS is the primary dev/user platform (BSD CLI / launchd / ~/.config /
+    # ~/.claude path behavior diverges from Linux) yet was previously untested in
+    # CI — the homebrew-core submission was the first macOS build. macos-14 = Apple
+    # Silicon (the modern default); the winit/softbuffer `floating` deps build
+    # against the bundled SDK.
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: v1-rust # see the clippy job's note
+      - uses: extractions/setup-just@v4
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@cargo-nextest
+      - run: just test
+        env:
+          NEXTEST_PROFILE: ci
+      - name: Upload test results to Codecov
+        if: always()
+        uses: codecov/codecov-action@v7
+        with:
+          files: target/nextest/ci/junit.xml
+          report-type: test_results
+          flags: macos
+          fail_ci_if_error: false
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
   semver:
     name: semver-checks
     runs-on: ubuntu-latest

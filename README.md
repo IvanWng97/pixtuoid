@@ -131,6 +131,15 @@ Agent CLIs emit events two ways — a hook shim (a 200ms fire-and-forget write t
 
 **[Full architecture with diagrams →](https://ivanwng97.github.io/pixtuoid/architecture)** · single source: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 
+## Privacy & Security
+
+pixtuoid is **local-only and telemetry-free** — it makes no network connections,
+ships no analytics or "phone home", and reads your agent transcripts read-only to
+animate the office. Your session data never leaves your machine. The dependency
+set is audited for advisories daily (`cargo-deny`). For the trust boundaries (the
+hook shim, the owner-only socket, and how hook installation edits another tool's
+config), see **[SECURITY.md](SECURITY.md)**.
+
 ## Contributing
 
 PRs welcome — especially new themes, sprite/decoration polish, and `Source` adapters for agent CLIs we don't support yet (the nine already wired up are in [Supported Tools](#supported-tools)). See **[CONTRIBUTING.md](docs/CONTRIBUTING.md)** for the build/test workflow, conventions, the review process, and how to add a new agent CLI. Architecture and the load-bearing invariants live in [`CLAUDE.md`](CLAUDE.md).

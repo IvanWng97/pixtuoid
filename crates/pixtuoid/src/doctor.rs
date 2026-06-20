@@ -560,6 +560,33 @@ pub fn run(log_path: &std::path::Path) -> anyhow::Result<()> {
 
     let mut out = String::from("pixtuoid doctor — source health\n");
     out.push_str(&format!("log: {}\n", log_path.display()));
+    out.push_str(&format!(
+        "config: {}\n",
+        crate::config::config_path().display()
+    ));
+    // Terminal capability: the pixel-art office needs a 24-bit-color terminal, and
+    // the #1 silent failure is a non-truecolor terminal rendering approximated
+    // colors. Surface the detected $TERM/$COLORTERM so a "colors look wrong over
+    // ssh/tmux" report is self-diagnosable. ENV values are untrusted → sanitized.
+    let term_var = std::env::var("TERM").unwrap_or_default();
+    let colorterm = std::env::var("COLORTERM").unwrap_or_default();
+    let shown = |v: &str| {
+        if v.is_empty() {
+            "(unset)".to_string()
+        } else {
+            sanitize(v)
+        }
+    };
+    out.push_str(&format!(
+        "terminal: TERM={} COLORTERM={} truecolor={}\n",
+        shown(&term_var),
+        shown(&colorterm),
+        if crate::term::colorterm_is_truecolor(Some(&colorterm)) {
+            "yes"
+        } else {
+            "not advertised"
+        },
+    ));
     // Surface config-load warnings IN the report — a malformed config makes every
     // source read disconnected, and a diagnostic tool must say WHY rather than
     // silently swallow it. Sanitized: a warning can interpolate config content.

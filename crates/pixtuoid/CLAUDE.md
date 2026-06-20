@@ -25,13 +25,20 @@ src/
 │                       is indistinguishable from the default and floors to warn); non-TUI
 │                       modes log to stderr; install failure eprintlns pre-altscreen
 ├── cli.rs              clap subcommands (run / floating / validate-pack / init-pack / doctor / sources / connect /
-│                       disconnect / setup). The OLD install-hooks/uninstall-hooks CLI stays deleted (#284 removed the
-│                       interactive ORCHESTRATION — plan_targets/interactive_pick); `connect <ids>`/`disconnect <ids>`/
-│                       `sources [set <ids>]` are the SCRIPTABLE surface (Raycast/automation), a second presenter over
-│                       crate::sources (see the scriptable-vs-interactive sharp edge); `setup [--yes]` is the headless
-│                       onboarding twin (dry-run preview / apply); the in-TUI Sources panel (`s`) remains the
-│                       INTERACTIVE one. Presenters live in main.rs (run_sources_list/run_sources_set/run_change/
-│                       run_setup, codecov-excluded like doctor::run)
+│                       disconnect / setup / completions / man). The OLD install-hooks/uninstall-hooks CLI stays deleted
+│                       (#284 removed the interactive ORCHESTRATION — plan_targets/interactive_pick); `connect <ids>`/
+│                       `disconnect <ids>`/`sources [set <ids>]` are the SCRIPTABLE surface (Raycast/automation), a second
+│                       presenter over crate::sources (see the scriptable-vs-interactive sharp edge); `setup [--yes]` is
+│                       the headless onboarding twin (dry-run preview / apply); the in-TUI Sources panel (`s`) remains the
+│                       INTERACTIVE one. `completions <shell>` (clap_complete) + hidden `man` (clap_mangen) emit to stdout
+│                       from the SAME derived Cli tree as `--help` (homebrew `generate_completions_from_executable` / `man`
+│                       capture them); main.rs dispatches both as plain arms (tracing → stderr, so stdout stays clean). The
+│                       five PathBuf args carry `value_hint` so completions path-complete. Presenters live in main.rs
+│                       (run_sources_list/run_sources_set/run_change/run_setup, codecov-excluded like doctor::run)
+├── term.rs             truecolor preflight: pure `colorterm_is_truecolor($COLORTERM)` (the S-Lang/terminfo `truecolor`/
+│                       `24bit` convention) + `truecolor_supported()`. main.rs WARN-ONLY (never gates on Unix — many
+│                       truecolor terminals omit COLORTERM) on a non-windows Run-TUI tty; `doctor` prints a `terminal:`
+│                       row. Windows hard-gates VT separately (tui/mod). `floating` is exempt (softbuffer = real RGB px)
 ├── setup.rs            first-run detection for onboarding: the PURE `is_first_run(cfg, path) = !path.exists() ||
 │                       cfg.sources.is_empty()` (mirrors resolve_connected's migrate condition; unit-tested). `pub`
 │                       because main.rs (a separate crate) computes RunConfig.first_run from it. The cinematic overlay

@@ -32,15 +32,15 @@ pub struct Cli {
 pub struct SourceArgs {
     /// Empty/whitespace is rejected: an explicit override deserves a loud
     /// answer, and bind("") would strand a relative `.lock` in the CWD.
-    #[arg(long, value_parser = parse_nonempty_path)]
+    #[arg(long, value_parser = parse_nonempty_path, value_hint = clap::ValueHint::FilePath)]
     pub socket: Option<PathBuf>,
-    #[arg(long)]
+    #[arg(long, value_hint = clap::ValueHint::DirPath)]
     pub projects_root: Option<PathBuf>,
     /// Override the Codex sessions root (default ~/.codex/sessions).
     /// Point at a temp dir to replay fixtures into a headless run.
-    #[arg(long)]
+    #[arg(long, value_hint = clap::ValueHint::DirPath)]
     pub codex_sessions_root: Option<PathBuf>,
-    #[arg(long)]
+    #[arg(long, value_hint = clap::ValueHint::DirPath)]
     pub pack_dir: Option<PathBuf>,
 }
 
@@ -71,11 +71,13 @@ pub enum Cmd {
     /// Validate a custom sprite pack directory.
     ValidatePack {
         /// Path to the pack directory (must contain pack.toml).
+        #[arg(value_hint = clap::ValueHint::DirPath)]
         pack_dir: PathBuf,
     },
     /// Extract a skeleton sprite pack to a directory for customization.
     InitPack {
         /// Destination directory (created if absent).
+        #[arg(value_hint = clap::ValueHint::DirPath)]
         dest: PathBuf,
         /// Overwrite existing files.
         #[arg(long, default_value_t = false)]
@@ -122,6 +124,18 @@ pub enum Cmd {
         #[arg(long)]
         yes: bool,
     },
+    /// Print a shell completion script to stdout, e.g.
+    /// `pixtuoid completions zsh > ~/.zfunc/_pixtuoid`. Package managers install
+    /// these automatically; this command lets `cargo install` / `npm` users do it
+    /// themselves for any shell.
+    Completions {
+        /// Target shell.
+        shell: clap_complete::Shell,
+    },
+    /// Print the roff man page to stdout (`pixtuoid man > pixtuoid.1`). A
+    /// packaging interface — generated from the same clap definitions as `--help`.
+    #[command(hide = true)]
+    Man,
 }
 
 #[derive(Debug, Subcommand)]
@@ -378,5 +392,57 @@ mod tests {
         assert!(matches!(dry.cmd, Some(Cmd::Setup { yes: false })));
         let apply = Cli::try_parse_from(["pixtuoid", "setup", "--yes"]).unwrap();
         assert!(matches!(apply.cmd, Some(Cmd::Setup { yes: true })));
+    }
+
+    #[test]
+    fn completions_takes_a_shell_value() {
+        let c = Cli::try_parse_from(["pixtuoid", "completions", "zsh"]).unwrap();
+        assert!(matches!(
+            c.cmd,
+            Some(Cmd::Completions {
+                shell: clap_complete::Shell::Zsh
+            })
+        ));
+        // A bogus shell is a hard parse error (typed ValueEnum), not a runtime bail.
+        assert!(Cli::try_parse_from(["pixtuoid", "completions", "nonsense"]).is_err());
+    }
+
+    /// The packaging guard (ripgrep's zsh-coverage check analogue): a clap-derive
+    /// change can't silently ship a binary whose generated completions/man are
+    /// empty or miss a subcommand. Cheap — generate into a buffer in-process.
+    #[test]
+    fn completions_and_man_generate_non_empty_and_cover_subcommands() {
+        use clap::CommandFactory;
+
+        for shell in [
+            clap_complete::Shell::Bash,
+            clap_complete::Shell::Zsh,
+            clap_complete::Shell::Fish,
+        ] {
+            let mut buf = Vec::new();
+            clap_complete::generate(shell, &mut Cli::command(), "pixtuoid", &mut buf);
+            let script = String::from_utf8(buf).expect("completion script is utf-8");
+            assert!(!script.is_empty(), "{shell:?} completion script is empty");
+            // A representative subcommand from across the tree must be present, so a
+            // dropped/renamed subcommand trips this rather than shipping silently.
+            assert!(
+                script.contains("floating") && script.contains("doctor"),
+                "{shell:?} completion script is missing a known subcommand"
+            );
+        }
+
+        let mut man = Vec::new();
+        clap_mangen::Man::new(Cli::command())
+            .render(&mut man)
+            .expect("man render");
+        let man = String::from_utf8(man).expect("man page is utf-8");
+        assert!(man.contains("pixtuoid"), "man page missing program name");
+        // Same dropped-subcommand teeth as the completions loop: clap_mangen
+        // renders a SUBCOMMANDS section, so a removed/renamed subcommand trips this
+        // rather than shipping a man page that silently lost it.
+        assert!(
+            man.contains("doctor"),
+            "man page SUBCOMMANDS section is missing a known subcommand"
+        );
     }
 }

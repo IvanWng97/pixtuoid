@@ -11,6 +11,7 @@ pub mod install;
 pub mod runtime;
 pub mod setup;
 pub mod sources;
+pub mod term;
 pub mod tui;
 pub mod validate;
 pub mod version;
