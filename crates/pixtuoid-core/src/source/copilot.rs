@@ -221,10 +221,18 @@ pub fn decode_copilot_line(
                 cwd: PathBuf::new(), // sub-agents carry no cwd; label comes from Rename
                 parent_id: Some(root),
             }];
-            if let Some(name) = data.and_then(|d| str_at(d, "agentDisplayName")) {
+            if let Some(name) = data
+                .and_then(|d| str_at(d, "agentDisplayName"))
+                .filter(|s| !s.is_empty())
+            {
+                // Capped at decode (CONTRIBUTING pitfall 3 / R0612-06): agentDisplayName
+                // is transcript content that persists in slot state for the session +
+                // egresses on the headless summary — the sibling cap #364/R0620-364-04
+                // applied to the permission path. `.filter(non-empty)` mirrors CC: an
+                // empty name must not emit a blanking `Rename { label: "" }`.
                 evs.push(AgentEvent::Rename {
                     agent_id: child,
-                    label: name.to_string(),
+                    label: ellipsize(name, MAX_DECODED_FIELD_CHARS),
                 });
             }
             evs
@@ -396,6 +404,52 @@ mod tests {
                 assert_eq!(label, "Sisko - Incident Commander / SRE Lead");
             }
             other => panic!("expected SessionStart+Rename, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn subagent_display_name_is_capped_and_empty_is_dropped() {
+        // `agentDisplayName` is untrusted transcript content that flows into the
+        // child's Rename label, persists in AgentSlot for the session, and egresses
+        // on the headless summary line — so it MUST be `ellipsize`-capped
+        // (CONTRIBUTING pitfall 3 / R0612-06) and an EMPTY value must not emit a
+        // blanking `Rename { label: "" }`, the same guards CC applies
+        // (claude_code.rs). The N-1-of-N sibling fix #364 (R0620-364-04) capped
+        // copilot's permission reason but left this subagent arm uncapped.
+        let over = "x".repeat(MAX_DECODED_FIELD_CHARS + 50);
+        let line = serde_json::json!({
+            "type": "subagent.started",
+            "data": {"toolCallId": "call_X", "agentDisplayName": over},
+            "parentId": "p",
+            "agentId": "call_X"
+        })
+        .to_string();
+        match &decode(&line)[..] {
+            [AgentEvent::SessionStart { .. }, AgentEvent::Rename { label, .. }] => {
+                assert!(
+                    label.chars().count() <= MAX_DECODED_FIELD_CHARS + 1,
+                    "label not capped: {} chars",
+                    label.chars().count()
+                );
+                assert!(
+                    label.ends_with('…'),
+                    "expected an ellipsis on the capped label"
+                );
+            }
+            other => panic!("expected SessionStart + capped Rename, got {other:?}"),
+        }
+        // An EMPTY agentDisplayName must NOT emit a Rename (it would blank the good
+        // ordinal label with no recovery until the next Rename).
+        let empty = serde_json::json!({
+            "type": "subagent.started",
+            "data": {"toolCallId": "call_Y", "agentDisplayName": ""},
+            "parentId": "p",
+            "agentId": "call_Y"
+        })
+        .to_string();
+        match &decode(&empty)[..] {
+            [AgentEvent::SessionStart { .. }] => {}
+            other => panic!("expected SessionStart only (no blanking Rename), got {other:?}"),
         }
     }
 

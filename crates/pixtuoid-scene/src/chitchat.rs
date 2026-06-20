@@ -12,13 +12,18 @@ use pixtuoid_core::AgentId;
 
 use crate::layout::{Point, WaypointKind};
 
-/// Total duration of a single chitchat exchange (4 turns + silent gap).
-pub const CHITCHAT_TOTAL_MS: u64 = 6_000;
+/// Total duration of a single chitchat exchange — the speaking turns fill it
+/// exactly (`= TURNS × TURN_MS` = 6 s). There is NO separate trailing silent gap:
+/// `current_bubble`'s `turn >= TURNS` guard is a defensive bound that only bites
+/// if these constants are later changed to make `CHITCHAT_TOTAL_MS` exceed the
+/// speaking turns; at the current values the `elapsed >= CHITCHAT_TOTAL_MS` guard
+/// ends the exchange first.
+pub const CHITCHAT_TOTAL_MS: u64 = TURNS * TURN_MS;
 
 /// Each speaker gets 1.5 s per turn.
 const TURN_MS: u64 = 1_500;
 
-/// Number of speaking turns before the silent gap.
+/// Number of speaking turns.
 const TURNS: u64 = 4;
 
 /// Pool of short speech-bubble quips — mostly dev humor, with a few

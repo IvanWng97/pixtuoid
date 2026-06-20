@@ -457,8 +457,12 @@ async fn emit_first_sight(
 /// file can't be opened/read or has no `cwd` in its head (an empty-cwd
 /// SessionStart then falls back to the project-dir label).
 async fn read_head_cwd(path: &Path, limit: u64) -> Option<PathBuf> {
+    // Bound the allocation to the SMALLER of `limit` and the real file size
+    // (mirrors `read_tail`): a tiny SessionStart line must not zero a full
+    // `MAX_PENDING_BYTES` (1 MiB) buffer on every oversized-first-sight read.
+    let file_len = tokio::fs::metadata(path).await.ok()?.len();
     let mut file = tokio::fs::File::open(path).await.ok()?;
-    let mut head = vec![0u8; limit as usize];
+    let mut head = vec![0u8; limit.min(file_len) as usize];
     let n = file.read(&mut head).await.ok()?;
     head.truncate(n);
     extract_cwd(&head)

@@ -126,10 +126,20 @@ fn claude_shim_ref(entry: &Value) -> crate::install::verify::ShimRef {
     match cmd {
         None => ShimRef::Unknown,
         Some(c) => {
-            let c = c.trim().trim_matches('\'');
+            let c = c.trim();
             if c == "pixtuoid-hook" {
                 ShimRef::BareName
+            } else if c.starts_with('\'') && c.ends_with('\'') {
+                // Unix explicit form: a `shell_single_quote`'d absolute path. Reverse
+                // the POSIX escaping via the SHARED `posix_unquote` — a naive
+                // `trim_matches('\'')` mangles an embedded `'\''` (an apostrophe in the
+                // path), false-flagging the install "broken" (the R0620-364-01
+                // mis-decode class that the shared `shell_shim_ref` already avoids).
+                ShimRef::Absolute(std::path::PathBuf::from(
+                    crate::install::verify::posix_unquote(c),
+                ))
             } else {
+                // Windows exec form (bare absolute `.exe`) or an unquoted path.
                 ShimRef::Absolute(std::path::PathBuf::from(c))
             }
         }
@@ -517,6 +527,31 @@ mod tests {
         // immediately) — only the explicit flag overrides it.
         let cmd = hook_command(Path::new("/usr/local/bin/pixtuoid-hook"), false).unwrap();
         assert_eq!(cmd, "pixtuoid-hook");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn claude_shim_ref_recovers_a_single_quoted_path_with_an_apostrophe() {
+        // Claude's Unix explicit hook command IS `shell_single_quote(path)`. A path
+        // containing an apostrophe round-trips as `'/U/O'\''B/hook'` — a naive
+        // `trim_matches('\'')` leaves the inner `'\''` and mis-decodes the path,
+        // false-flagging the install "broken" on `doctor` / the Sources panel (the
+        // R0620-364-01 mis-decode class, on the bespoke claude sibling). The decoder
+        // must reverse the POSIX escaping via the shared `posix_unquote`.
+        use crate::install::hook_cmd::unix::shell_single_quote;
+        use crate::install::verify::ShimRef;
+        let path = "/U/O'B/pixtuoid-hook";
+        let cmd = shell_single_quote(path);
+        // sanity: the round-trip really does embed `'\''`, the case the naive trim broke.
+        assert!(
+            cmd.contains("'\\''"),
+            "expected an escaped apostrophe in {cmd:?}"
+        );
+        let entry = serde_json::json!({ "hooks": [{ "command": cmd }] });
+        assert_eq!(
+            claude_shim_ref(&entry),
+            ShimRef::Absolute(std::path::PathBuf::from(path))
+        );
     }
 
     #[cfg(windows)]

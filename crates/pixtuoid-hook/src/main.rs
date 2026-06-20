@@ -28,14 +28,20 @@ const STAMP_HEADROOM: u64 = 256;
 /// pre-existing stall→watchdog→drop mode, never a block of CC.
 const STDIN_CAP: u64 = (1 << 20) - STAMP_HEADROOM;
 
-/// Explicit `u128 → u64` narrowing (`try_from`, not a truncating `as` cast):
-/// ms-since-epoch fits u64 for ~580M years, so the `unwrap_or(u64::MAX)` arm
-/// is unreachable in practice — it exists to make the narrowing visible and
-/// the fn total. A pre-epoch clock maps to 0 (same as before).
+/// Saturating `u128 → u64` narrowing (`try_from`, NOT a truncating `as` cast,
+/// which would WRAP a > u64::MAX value to a small number). Extracted as a pure fn
+/// so the saturation is unit-testable with a synthetic over-MAX input — a real
+/// `now_ms()` value never exercises the `u64::MAX` arm (ms-since-epoch fits u64
+/// for ~580M years), so a test calling `now_ms()` alone can't pin the narrowing.
+fn ms_u128_to_u64(ms: u128) -> u64 {
+    u64::try_from(ms).unwrap_or(u64::MAX)
+}
+
+/// Milliseconds since the epoch. A pre-epoch clock maps to 0 (same as before).
 fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+        .map_or(0, |d| ms_u128_to_u64(d.as_millis()))
 }
 
 fn main() -> Result<()> {
@@ -296,9 +302,16 @@ mod tests {
     }
 
     #[test]
-    fn now_ms_keeps_real_magnitude() {
-        // 2024-01-01 in ms — a truncating-narrowing bug would land far below.
+    fn now_ms_narrowing_saturates_instead_of_wrapping() {
+        // Real magnitude: 2024-01-01 in ms passes through unchanged.
+        assert_eq!(ms_u128_to_u64(1_704_067_200_000), 1_704_067_200_000);
         assert!(now_ms() > 1_704_067_200_000);
+        // TEETH: a value past u64::MAX must SATURATE to u64::MAX. A truncating
+        // `as u64` cast would WRAP these to small numbers — this assertion fails
+        // the moment `unwrap_or(u64::MAX)` regresses to `as u64`.
+        assert_eq!(ms_u128_to_u64(u64::MAX as u128), u64::MAX);
+        assert_eq!(ms_u128_to_u64(u64::MAX as u128 + 1), u64::MAX);
+        assert_eq!(ms_u128_to_u64(u128::MAX), u64::MAX);
     }
 
     #[test]

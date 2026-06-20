@@ -1878,31 +1878,27 @@ fn save_as_gif(
     Ok(())
 }
 
-fn fill_rgba_rect(img: &mut RgbaImage, x: u32, y: u32, w: u32, h: u32, color: ImgRgb<u8>) {
+/// Bounded rect fill shared by the RGB + RGBA paths — they differ only in pixel
+/// type, so the loop is generic over `image::GenericImage` and can't drift between
+/// the two wrappers below.
+fn fill_rect_px<I: image::GenericImage>(img: &mut I, x: u32, y: u32, w: u32, h: u32, px: I::Pixel) {
     let (img_w, img_h) = (img.width(), img.height());
-    let rgba = Rgba([color[0], color[1], color[2], 255]);
     for j in 0..h {
         for i in 0..w {
-            let px_x = x + i;
-            let px_y = y + j;
+            let (px_x, px_y) = (x + i, y + j);
             if px_x < img_w && px_y < img_h {
-                img.put_pixel(px_x, px_y, rgba);
+                img.put_pixel(px_x, px_y, px);
             }
         }
     }
 }
 
+fn fill_rgba_rect(img: &mut RgbaImage, x: u32, y: u32, w: u32, h: u32, color: ImgRgb<u8>) {
+    fill_rect_px(img, x, y, w, h, Rgba([color[0], color[1], color[2], 255]));
+}
+
 fn fill_rect(img: &mut RgbImage, x: u32, y: u32, w: u32, h: u32, color: ImgRgb<u8>) {
-    let (img_w, img_h) = (img.width(), img.height());
-    for j in 0..h {
-        for i in 0..w {
-            let px_x = x + i;
-            let px_y = y + j;
-            if px_x < img_w && px_y < img_h {
-                img.put_pixel(px_x, px_y, color);
-            }
-        }
-    }
+    fill_rect_px(img, x, y, w, h, color);
 }
 
 /// Blit an 8x8 glyph into one 8x16 cell, doubled vertically (1px → 2px tall) so
