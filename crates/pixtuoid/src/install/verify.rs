@@ -328,10 +328,11 @@ pub fn shell_shim_ref(command: &str) -> ShimRef {
             ShimRef::Absolute(PathBuf::from(p))
         };
     }
-    // Unquoted fallback (legacy / hand-edited): last whitespace token.
+    // Unquoted fallback (legacy / hand-edited): the last whitespace token.
+    // `split_whitespace` never yields an empty token, so no emptiness guard.
     match head.split_whitespace().next_back() {
-        Some(tok) if !tok.is_empty() => ShimRef::Absolute(PathBuf::from(tok)),
-        _ => ShimRef::Unknown,
+        Some(tok) => ShimRef::Absolute(PathBuf::from(tok)),
+        None => ShimRef::Unknown,
     }
 }
 
@@ -395,6 +396,18 @@ mod tests {
         assert_eq!(
             shell_shim_ref(r"C:\O'Brien\hook.exe --source codewhale --event session_start"),
             ShimRef::Absolute(PathBuf::from(r"C:\O'Brien\hook.exe"))
+        );
+    }
+
+    #[test]
+    fn shell_shim_ref_lone_trailing_quote_is_not_a_quoted_span() {
+        // A command ending in a SINGLE `'` with no opening quote (`start == end`) is
+        // NOT a valid single-quoted span — it must fall through to the unquoted
+        // fallback (treated as a literal token), not decode an empty span to Unknown.
+        // Pins the `start < end` boundary.
+        assert_eq!(
+            shell_shim_ref("/opt/hook'"),
+            ShimRef::Absolute(PathBuf::from("/opt/hook'"))
         );
     }
 

@@ -554,6 +554,20 @@ mod tests {
         );
     }
 
+    #[test]
+    fn claude_shim_ref_half_quoted_command_is_literal_not_unquoted() {
+        // Only a FULLY single-quoted command (`'…'`) is POSIX-unquoted — a
+        // half-quoted/malformed string (opening quote, no close) must be taken as a
+        // LITERAL path, not unquoted. Pins the `starts_with && ends_with` pairing
+        // (an OR would unquote a half-quoted string).
+        use crate::install::verify::ShimRef;
+        let entry = serde_json::json!({ "hooks": [{ "command": "'/opt/pixtuoid-hook" }] });
+        assert_eq!(
+            claude_shim_ref(&entry),
+            ShimRef::Absolute(std::path::PathBuf::from("'/opt/pixtuoid-hook"))
+        );
+    }
+
     #[cfg(windows)]
     #[test]
     fn hook_command_embeds_absolute_path_on_windows_either_way() {
