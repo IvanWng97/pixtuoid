@@ -12,6 +12,11 @@ on:
   schedule:
     - cron: "0 9 * * 1" # Mondays 09:00 UTC
   workflow_dispatch:
+    inputs:
+      interval:
+        description: "PRs-past-the-last-window threshold (lower it — e.g. 0 — to force a due check for a manual end-to-end test)"
+        required: false
+        default: "50"
   # On PRs touching the script/workflow, run ONLY the selftest — the live `gh`
   # check + issue-filing stay schedule/dispatch-only (they need network + must
   # never gate a PR). A parser/threshold regression IS caught here.
@@ -40,15 +45,18 @@ jobs:
       - name: Check whether a census is due
         id: check
         if: github.event_name != 'pull_request'
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        shell: bash
+          # workflow_dispatch can lower the threshold for a manual end-to-end test;
+          # scheduled runs get the empty default → the script's own 50.
+          INTERVAL: ${{ github.event.inputs.interval }}
         run: |
           set +e
           # max-by-number, NOT `--limit 1`: `gh pr list`'s sort order isn't a
           # guaranteed max-by-PR-number, so take the explicit max over a recent window.
           latest=$(gh pr list --state merged --limit 100 --json number --jq 'max_by(.number).number')
-          python3 scripts/census_reminder.py --latest-pr "$latest" > census-body.md
+          python3 scripts/census_reminder.py --latest-pr "$latest" --interval "${INTERVAL:-50}" > census-body.md
           echo "exit=$?" >> "$GITHUB_OUTPUT"
 
       - name: Open the census tracking issue (deduped on the `census` label)
