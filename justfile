@@ -534,6 +534,22 @@ setup-tools:
 drift-selftest:
     python3 scripts/check_upstream_drift_selftest.py
 
+# Whether a review-history census is due (the merged-PR backlog vs ~50 PRs past the
+# last census window). The weekly `census-reminder` workflow runs this + auto-files
+# a deduped `census` issue when due — this recipe is the local/manual check. Needs `gh`.
+[group('meta')]
+[doc('Check whether a review-history census is due (merged-PR backlog)')]
+census-reminder:
+    python3 scripts/census_reminder.py --latest-pr "$(gh pr list --state merged --limit 1 --json number --jq '.[0].number')"
+
+# Self-test the census-reminder parser — a regex/off-by-one regression silently
+# mis-files (or never files) a census, the upstream-drift silent-death class.
+# Pure Python, no network.
+[group('meta')]
+[doc('Self-test the census-reminder (filename parser + due threshold)')]
+census-reminder-selftest:
+    python3 scripts/census_reminder_selftest.py
+
 # Audit one or more PRs' claude[bot] MEDIUM+ inline findings for a disposition
 # trace (a `Bot-findings-adjudicated:` marker — see CONTRIBUTING.md). ADVISORY:
 # run during the merge disposition sweep to catch the #283 class (a MEDIUM+

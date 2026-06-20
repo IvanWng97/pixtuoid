@@ -123,7 +123,7 @@ each gate a versioned file with an automatic reader:
 | implement | the 6 recurring pitfalls + the PR template checkbox pointing at them | the template is forced on every author |
 | review | [`pr-review.prompt.md`](../.github/prompts/pr-review.prompt.md) — two differentiated lenses, five hard requirements, escalation triggers, ledger routing | copied verbatim into reviewer prompts; the bot loads its own rules file |
 | merge | the disposition sweep — every finding ends FIXED / REFUTED-with-trace / ISSUE-FILED / ACCEPTED-residual; plan-misses become `plan-miss:` commit lines | the orchestrator's process notes; commit messages become the data channel |
-| periodic | the history census (each run files its successor as a pinned issue), ledger-blind calibration, `scripts/review-metrics.py` + the reports below | the issue backlog and the harvest scripts |
+| periodic | the history census (the weekly `census-reminder` workflow auto-files its successor as a `census` issue once the merged-PR backlog crosses ~50 past the last window — `scripts/census_reminder.py`, no hand-filed placeholder), ledger-blind calibration, `scripts/review-metrics.py` + the reports below | the issue backlog and the harvest scripts |
 
 Three properties make this a system rather than a document set:
 
