@@ -124,6 +124,13 @@ pub fn verify_target(t: &'static Target, config: Option<PathBuf>) -> verify::Sch
     // WITHOUT resolving the binary — a read-only doctor check must not hard-error
     // just because pixtuoid-hook isn't locatable. Calling the SAME fn install uses
     // means the verified path set can never drift from the writer's.
+    //
+    // INVARIANT (#387): `install_target`'s code-write surface is exactly
+    // {`config_path` merge, `extra_artifacts` dir}, and BOTH are verify-covered —
+    // the config by `verify_schema` (opencode's plugin IS its config), the dir by
+    // this stat. A NEW code-shipping path added to `install_target` MUST gain a
+    // matching check here, or it ships the silent-dead class for a 3rd code-artifact
+    // target. Pinned by `verify_target_hard_flags_a_missing_code_artifact_for_every_extra_artifacts_target`.
     if let Some(make) = t.extra_artifacts {
         match make(std::path::Path::new("pixtuoid-hook")) {
             Ok(arts) => {
@@ -1309,34 +1316,63 @@ mod tests {
         );
     }
 
+    // INVARIANT (#387 — the code-artifact verify-coverage guard): `install_target`
+    // ships a target's CODE via exactly two write paths — the merged `config_path`
+    // (covered by `verify_schema`: opencode's plugin IS its config) and the
+    // wholly-owned `extra_artifacts` dir (covered by verify_target's existence
+    // stat, #332). A config can verify clean while the plugin FILES the runtime
+    // actually loads are missing/clobbered — the silent-dead class doctor exists to
+    // catch. This loops EVERY `extra_artifacts` target (today only OpenClaw) so a
+    // future 3rd code-artifact target is AUTO-guarded: install → confirm sound →
+    // delete the artifacts the target itself declares → assert verify goes
+    // HARD-broken. A new code-shipping path added to `install_target` with no
+    // matching check in `verify_target` fails this guard.
     #[test]
-    fn verify_target_flags_missing_extra_artifacts() {
-        // OpenClaw's config can verify clean while the wholly-owned plugin DIR the
-        // gateway actually loads is missing/clobbered — the silent-dead class the
-        // config-level check is blind to (#332). Install, then delete the plugin
-        // dir → verify must report broken (the gateway would never load us).
+    fn verify_target_hard_flags_a_missing_code_artifact_for_every_extra_artifacts_target() {
         let _env = crate::TEST_ENV_LOCK
             .lock()
             .unwrap_or_else(|e| e.into_inner());
+        // Isolate OpenClaw's artifacts under a temp home (never touch ~/.openclaw).
         let oc_home = tempfile::TempDir::new().unwrap();
         std::env::set_var("OPENCLAW_STATE_DIR", oc_home.path());
         let exe = std::env::current_exe().unwrap();
-        let tmp = tempfile::TempDir::new().unwrap();
-        let cfg = tmp.path().join("openclaw.json");
-        install_target(&OPENCLAW, Some(cfg.clone()), Some(exe)).unwrap();
-        // Sanity: a complete install (config + plugin dir present) verifies sound.
-        assert!(verify_target(&OPENCLAW, Some(cfg.clone())).is_sound());
-        // The plugin dir vanishes (a manual delete / a stale uninstall / a clobber)
-        // while openclaw.json still registers it — config sound, artifacts gone.
-        std::fs::remove_dir_all(oc_home.path().join("plugins")).unwrap();
-        let v = verify_target(&OPENCLAW, Some(cfg));
-        assert!(!v.is_sound(), "missing plugin artifacts must break verify");
+        let mut covered = 0;
+        for &t in target::TARGETS {
+            let Some(make) = t.extra_artifacts else {
+                continue;
+            };
+            let tmp = tempfile::TempDir::new().unwrap();
+            let cfg = tmp.path().join("config");
+            install_target(t, Some(cfg.clone()), Some(exe.clone())).unwrap();
+            // A complete install (config + artifacts present) verifies sound.
+            assert!(
+                verify_target(t, Some(cfg.clone())).is_sound(),
+                "{}: a fresh install must verify sound",
+                t.name
+            );
+            // The wholly-owned artifacts vanish (manual delete / stale uninstall /
+            // clobber) while the config still registers them — config sound,
+            // artifacts gone. Locate them via the target's OWN declaration so this
+            // stays generic over any future extra_artifacts target.
+            for (p, _) in make(&exe).unwrap() {
+                let _ = std::fs::remove_file(&p).or_else(|_| std::fs::remove_dir_all(&p));
+            }
+            let v = verify_target(t, Some(cfg));
+            assert!(
+                !v.is_sound()
+                    && v.issues
+                        .iter()
+                        .any(|i| i.contains("plugin artifact missing")),
+                "{}: a missing code artifact must be a HARD verify issue (the silent-dead \
+                 invariant) — got {:?}",
+                t.name,
+                v.issues
+            );
+            covered += 1;
+        }
         assert!(
-            v.issues
-                .iter()
-                .any(|i| i.contains("plugin artifact missing")),
-            "{:?}",
-            v.issues
+            covered >= 1,
+            "expected at least one extra_artifacts target (OpenClaw) — did the registry change?"
         );
     }
 
