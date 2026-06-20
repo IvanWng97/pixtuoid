@@ -1,24 +1,29 @@
 name: review-disposition
 
-# The bot-finding disposition harvester (scripts/check_review_disposition.py) is
-# advisory tooling whose ONLY correctness guard is its selftest, which pins the
-# claude[bot] inline-comment parsers (severity + `Bot-findings-adjudicated:`
-# marker). A parser regression = the harvester silently finds nothing — a false
-# "no drops", the exact failure mode it exists to catch. Mirror the
-# upstream-drift pattern: run the selftest on PRs that touch the script, so a
-# regression can't merge unnoticed. (The live `gh`-driven PR audit stays a
-# manual `just review-disposition <PR>` — it needs a PR number + network and
-# must never gate a PR.)
+# The bot-finding disposition harvester (scripts/check_review_disposition.py)
+# turns "every claude[bot] MEDIUM+ finding reached a terminal state" from a manual
+# `gh` sweep into a mechanical check (issue #335). Census #3 (#329) found the
+# harvester was BUILT but never ADOPTED — it audited zero feature PRs — so "no
+# drops" was still inferred-from-absence. This workflow closes that gap (#384):
+#
+#   selftest — pins the parsers (severity + `Bot-findings-adjudicated:` marker) so
+#     a regex regression can't silently turn the harvester into a false "no drops".
+#   audit    — runs the live `gh`-driven audit on EVERY PR and writes the result to
+#     the job summary. ADVISORY: it never fails a PR (matching is per-file/coarse and
+#     the bot re-flags stale commits across rounds, so a hard gate would mis-fire) —
+#     it just makes an un-adjudicated MEDIUM+ finding VISIBLE during review.
 
 on:
   workflow_dispatch:
   pull_request:
-    paths:
-      - "scripts/check_review_disposition*.py"
-      - ".github/workflows/review-disposition.yml"
 
 permissions:
   contents: read
+  pull-requests: read
+
+concurrency:
+  group: review-disposition-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   selftest:
@@ -29,3 +34,29 @@ jobs:
       - uses: actions/checkout@v6
       - name: Self-test the disposition harvester
         run: python3 scripts/check_review_disposition_selftest.py
+
+  audit:
+    name: bot-finding disposition (advisory)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - name: Audit this PR's bot-finding dispositions (advisory — never blocks merge)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          # shellcheck disable=SC2016  # backticks are literal markdown, not command substitution
+          {
+            echo '## Bot-finding disposition (advisory)'
+            echo
+            echo 'Every `claude[bot]` MEDIUM+ inline finding should reach a terminal'
+            echo 'state before merge — a `Bot-findings-adjudicated:` marker line, a'
+            echo 'REVIEW-LEDGER row, or a filed issue. Any `[UN-ADJUDICATED]` below is'
+            echo 'a finding to record (this check never blocks — see CONTRIBUTING.md).'
+            echo
+            echo '```'
+            python3 scripts/check_review_disposition.py "$PR_NUMBER" 2>&1 || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -62,8 +62,11 @@ design-intent skeptic armed with them refuted 26 candidates in one run).
 found LLM-generated context files *reduced* agent success in 5 of 8 settings
 while raising cost ~20%; the converged practice is a ~100–300 line **map,
 not a manual**. **Counter:** size budgets, citation tracking (a sharp edge
-no review has cited in two quarters is a demotion candidate), periodic
-audits.
+no review has cited across **two consecutive censuses** is a demotion
+candidate — counted against the **full** `CLAUDE.md` sharp-edge set, not a
+sampled subset, or a topic-concentrated review window manufactures false
+staleness; census #3 widened the inventory and re-anchored the clock rather
+than demote on the skew, #386), periodic audits.
 
 ### Retrieval (knowledge computed on demand, never stored)
 

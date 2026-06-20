@@ -174,7 +174,13 @@ phase 2 never fired a demotion), verify A/B per that design: a control arm
 of full pairs on ALL candidates — which doubles the run's verification
 spend and doubles as protocol step 8's ledger-blind calibration — alongside
 the ledger-routed treatment arm. Once the rate is recorded, delete this
-A/B clause: routing alone is the steady state. Whole-codebase reviews also
+A/B clause: routing alone is the steady state. Every whole-codebase run MUST
+append its adjudications to [`REVIEW-LEDGER.md`](../../docs/REVIEW-LEDGER.md) as
+a dated section — one premise-anchored row per finding, BOTH confirmed and
+refuted (a refuted candidate with no row is re-derived and re-paid next run; a
+confirmed-fixed row is the regression anchor). Recording only an "N confirmed /
+M refuted" count in the squash body is the #385 disposition gap, not a
+disposition. Whole-codebase reviews also
 carry a SYSTEM lens — module decomposition still right, dependency
 directions clean, cross-PR composition seams, AND a DRY/duplication census —
 because architecture (and duplication) erodes BETWEEN PRs, not within them

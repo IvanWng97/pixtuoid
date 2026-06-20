@@ -37,10 +37,21 @@ BOT_LOGINS = {"claude[bot]", "github-actions[bot]"}
 BLOCKING = ("CRITICAL", "HIGH", "MEDIUM")
 LEDGER = Path(__file__).resolve().parent.parent / "docs" / "REVIEW-LEDGER.md"
 
-# A bot inline comment leads with its severity, wrapped in bold and written a
-# few ways across rounds: `**MEDIUM — …`, `**HIGH: …`, `**[MEDIUM] …`,
-# `**LOW — …`. Match the first such token.
-_SEVERITY = re.compile(r"\*\*\s*\[?\s*(CRITICAL|HIGH|MEDIUM|LOW)\b", re.IGNORECASE)
+# A bot inline comment leads with its severity, written a few ways across rounds:
+# `**MEDIUM — …`, `**HIGH: …`, `**[MEDIUM] …`, `**LOW — …`, and sometimes WITHOUT
+# the bold (`MEDIUM — …`, `[HIGH] …`) — the prose form the census found we missed
+# (#384). Match a severity token that is EITHER line-leading (optionally decorated
+# with `*`/`#`/`>`/`[`) OR bold-wrapped anywhere, AND followed by a label
+# terminator (`]`, em/en-dash, `:`, `**`, or end-of-line). The terminator guard is
+# what stops a hyphenated word ("Low-hanging", "HIGH-traffic") or mid-sentence
+# "medium" from registering as a finding — a plain `-` is deliberately NOT a
+# terminator for that reason.
+_SEVERITY = re.compile(
+    r"(?:^[>\s*_#]*\[?\s*|\*\*\s*\[?\s*)"
+    r"(CRITICAL|HIGH|MEDIUM|LOW)\b"
+    r"\s*(?:\]|[—–:]|\*\*|$)",
+    re.IGNORECASE | re.MULTILINE,
+)
 _MARKER_HEADER = re.compile(r"^\s*bot-findings-adjudicated\s*:", re.IGNORECASE)
 
 

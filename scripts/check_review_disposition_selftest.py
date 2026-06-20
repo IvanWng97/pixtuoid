@@ -23,6 +23,17 @@ def run() -> int:
     check("sev bracket medium", m.severity_of("**[MEDIUM] Subprocess output printed raw**") == "MEDIUM")
     check("sev low em-dash", m.severity_of("**LOW — unchecked i64 → i32 narrowing**") == "LOW")
     check("sev none", m.severity_of("just a plain comment, no severity") is None)
+    # prose-form (no bold) severity at line start — the #384 robustness fix: a bot
+    # finding that leads with `MEDIUM —` / `[HIGH]` without bold must still register.
+    check("sev prose em-dash", m.severity_of("MEDIUM — no ledger row for this finding") == "MEDIUM")
+    check("sev prose colon", m.severity_of("HIGH: installed-but-no-sprite on Windows") == "HIGH")
+    check("sev prose bracket", m.severity_of("[MEDIUM] subprocess output printed raw") == "MEDIUM")
+    check("sev bold mid-line still matches", m.severity_of("Context first. **MEDIUM — foo**") == "MEDIUM")
+    # negatives — a hyphenated/mid-prose severity word must NOT register (no false
+    # MEDIUM+ from "Low-hanging" / "HIGH-traffic" / mid-sentence "medium").
+    check("sev no false low-hanging", m.severity_of("Low-hanging fruit, an easy win") is None)
+    check("sev no false high-traffic", m.severity_of("This is a HIGH-traffic code path") is None)
+    check("sev no false mid-prose medium", m.severity_of("a medium amount of risk here") is None)
 
     # extract_findings — bot author + MEDIUM+ filter (LOW and non-bot dropped).
     comments = [

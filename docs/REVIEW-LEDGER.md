@@ -29,13 +29,19 @@ and the HEAD it was rendered at.
    re-derivation of the original bug.
 5. **Every NEW design-intent refutation MUST cite an existing sharp edge**
    (workspace or nested `CLAUDE.md`, or an in-code WHY doc) **or add one in
-   the same PR**. No undocumented refutations enter this ledger.
+   the same PR**. No undocumented refutations enter this ledger. **Tag a cited
+   sharp edge `[edge:<slug>]`** (its kebab-name from the owning `CLAUDE.md`) in
+   the mechanism column, so the census's sharp-edge-citation leg harvests
+   citations mechanically instead of by hand-reading every anchor (#386).
 6. **Append-only.** A flipped verdict appends a superseding row that links the
    old one; the old row is never edited or deleted.
 7. **After adjudication, append**: a new dated `##` section, one row per
    adjudicated finding (same 8 columns), ID prefix `RMMDD-NN` (date-based);
    grouped rows only where individual claims weren't preserved (those are
-   tier B by definition).
+   tier B by definition). **A whole-codebase / multi-agent batch review rows
+   BOTH its confirmed AND its refuted candidates** — an "N confirmed / M
+   refuted" count with no per-finding rows is the #385 disposition gap (the M
+   refutations get re-derived and re-paid next run; the N catches go uncounted).
 8. **Calibration**: every Nth review runs ledger-blind. A finding the ledger
    would have demoted but the blind run confirms = a false suppression —
    record the rate in `docs/review-metrics/`.
@@ -859,3 +865,30 @@ Pre-implementation arc (consulted the `code-architect` agent + the architecture 
 | R0619-07 | `sources.rs` `SourceStatus.health` `Option<String>` → schema required/nullable | MED (online review r1): generated `health?: string \| null` flagged as nullability-imprecise; suggested `#[schemars(required)]` | REFUTED-wrong-fix | the suggested fix STRIPS the `\| null` (schema `type` becomes `"string"`, not `["string","null"]`) → the WRONG `health: string`, a false non-null assertion the wire violates (`"health":null` is pinned by `source_status_json_shape`) = the "mis-specified nullability" pitfall PARALLEL-DELIVERY.md itself names. `health?: string \| null` is a safe SUPERSET: the `?` is harmless (the wire always emits `health`; the sole consumer access `if (s.health)` is identical optional-vs-required), and `\| null` (the load-bearing part) is preserved. Kept optional + a WHY comment at the field (the trace). Online review round 2 INDEPENDENTLY confirmed this refutation. `1d7c1686` | A | feat/json-contract-codegen | 2026-06-19 |
 | R0619-08 | the 3-gate anti-drift chain (struct↔schema / schema↔TS / TS↔usage) | (local teeth lens): do the gates actually fire, or are they decorative? | CONFIRMED-with-teeth | mutation-tested in an isolated worktree: gate 1 (struct↔schema golden test) — add a field, no regen → `cargo test … source_status_schema_matches` EXIT 101; gate 2 (schema↔TS, raycast CI `gen:contract` + `git diff --exit-code`) — edit the schema, no TS regen → diff EXIT 1; gate 3 (TS↔usage) — `tsc --noEmit`; bless path (`UPDATE_CONTRACT_SCHEMA=1`) EXIT 0. No uncaught drift path: a `sources.rs` change forces a schema regen (else gate 1 reds on every PR via `ci.yml`, which has no path filter), and the committed schema lives under `integrations/raycast/**` so it triggers the raycast freshness workflow | A | feat/json-contract-codegen | 2026-06-19 |
 | R0619-09 | `docs/REVIEW-LEDGER.md` trace for #367 | MED (online review r2): the #367 adjudications (R0619-06/07/08) left no ledger row — CLAUDE.md requires every adjudication to trace here for the cross-PR audit trail | CONFIRMED→FIXED | this section | A | feat/json-contract-codegen | 2026-06-19 |
+
+## 2026-06-18 — whole-codebase review @d3fdc1a0 → PR #364 (11 confirmed / 18 refuted) — BACKFILLED per #385
+
+Backfill of #364's per-finding rows: the original squash recorded only the
+"11 confirmed / 18 refuted" counts — the #385 disposition gap (review-history
+census #3 flagged that `grep 983150a4 REVIEW-LEDGER.md` = 0, so the catches went
+uncounted). The 11 CONFIRMED findings are recoverable from the PR body and rowed
+below. The **18 REFUTED candidates are NOT recoverable** — count-only in the
+squash, no per-candidate seam/claim survived — so they re-enter the candidate
+pool with no demote credit, which is exactly why the convention now requires a
+row for BOTH outcomes at adjudication time (CONTRIBUTING.md / pr-review.prompt.md).
+Confirmed rows are regression anchors: verify the cited mechanism still holds at
+the anchor paths.
+
+| ID | seam | claim | verdict | mechanism / anchor | tier | HEAD | date |
+|---|---|---|---|---|---|---|---|
+| R0620-364-01 | `install/verify.rs::shell_shim_ref` | MED: `split_whitespace().next_back()` truncated a hook path containing a space (`'/Users/Jane Doe/…'` → `Doe/…'`) → `verify_target` falsely reported the shim missing on every boot preflight / `doctor` / Sources panel — the unfixed twin of R0615-09 (#311 `doctor::field` truncation class) | CONFIRMED→FIXED | made POSIX-single-quote-aware (`posix_unquote` reversing `shell_single_quote`) so a spaced hook path round-trips | A | #364 (d3fdc1a0) | 2026-06-18 |
+| R0620-364-02 | `tui` branding click region | LOW: click region not gated tightly → phantom `open::that(github)` on row-0 dead space / a too-small / floor-transition frame | CONFIRMED→FIXED | gated on the painted row (`== 1`, not `<= 1`) AND `cached_layout().is_some()`; extracted testable `hit_test_branding` | A | #364 (d3fdc1a0) | 2026-06-18 |
+| R0620-364-03 | `sprite/format.rs::validate_recolor_palette` | LOW: a non-recolor key sharing a recolor base's RGB slips the validator (`recolor_frame` substitutes by RGB over ALL pixels) → custom `--pack-dir` artifact gap | CONFIRMED→FIXED | validator now also rejects that RGB collision; corrected a false test comment | A | #364 (d3fdc1a0) | 2026-06-18 |
+| R0620-364-04 | `source/copilot.rs` permission `Waiting` reason | LOW: content-derived reason NOT `ellipsize`-capped at the decode boundary like opencode/reasonix — the N-th sibling decoder missing the #286 cap (pitfall 3 / R0612-06); **the census's one true rule-6 recurrence**, caught here at the whole-codebase review, NOT at copilot's introducing PR #292 | CONFIRMED→FIXED | `ellipsize`-capped at the decode boundary | A | #364 (d3fdc1a0) | 2026-06-18 |
+| R0620-364-05 | `source/daemon.rs::enter_down` | LOW: abrupt-down didn't clear `current_pid` → a reconnect-as-new-pid re-adopted only via the 5-min sweep, not the #318 instant rung | CONFIRMED→FIXED | `enter_down()` clears `current_pid` so a reconnect re-adopts via `PidSeen` + re-arms the #318 instant abrupt-down rung on the 2nd cycle (lifecycle lens reproduced the teeth-test: removing it makes the new test fail `Some(100) != Some(200)`) | A | #364 (d3fdc1a0) | 2026-06-18 |
+| R0620-364-06 | `floating` boot desk-capacity | LOW: boot cap used the TUI footer-subtracting math → over-seed could strand a boot-race agent | CONFIRMED→FIXED | `boot_capacities_for_window` computes from rendered geometry (`window/office_scale`, no footer), matching the first redraw's `sync_floor_caps`; shared `window_buffer_geometry` so seed+redraw can't drift | A | #364 (d3fdc1a0) | 2026-06-18 |
+| R0620-364-07 | `pet.rs::elapsed_ms` | NIT: duplicated the anim time helper | CONFIRMED→FIXED | delegates to `anim::elapsed_ms` (byte-identical) | A | #364 (d3fdc1a0) | 2026-06-18 |
+| R0620-364-08 | `splitmix64` cross-crate copies | NIT: 3 undocumented copies of the PRNG | CONFIRMED (documented = ACCEPTED-residual) | documented the 3 deliberate copies (frozen algorithm; not worth widening core's semver surface) | A | #364 (d3fdc1a0) | 2026-06-18 |
+| R0620-364-09 | `--max-desks` clamp comment | NIT: orphaned clamp comment detached from its test | CONFIRMED→FIXED | moved the comment onto the real clamp test | A | #364 (d3fdc1a0) | 2026-06-18 |
+| R0620-364-10 | OpenClaw install plugin-dir write order | NIT: plugin dir written before the config-merge parse check → orphan plugin files on a malformed `openclaw.json` | CONFIRMED→FIXED | writes the plugin dir AFTER the config merge confirms the config parses (+ data-safety test) | A | #364 (d3fdc1a0) | 2026-06-18 |
+| R0620-364-11 | Raycast `OutcomeRow` doc | NIT: doc implied `no_op` applies broadly | CONFIRMED→FIXED | narrowed the doc (`no_op` is `sources set`-only) | A | #364 (d3fdc1a0) | 2026-06-18 |
