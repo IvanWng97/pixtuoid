@@ -67,9 +67,10 @@ scripts/             gen-media.py + media.json (the ONE manifest-driven driver f
                      census_reminder.py (weekly `census-reminder` Action: is a
                      review-history census due vs the ~50-PR window? → auto-files a
                      deduped `census` issue; `just census-reminder` local),
-                     check_review_disposition.py (merge-time `review-disposition`
-                     gate: harvests a PR's claude[bot] MEDIUM+ findings → asserts each
-                     carries a disposition marker — the #283 silent-drop class),
+                     check_review_disposition.py (per-PR `review-disposition` Action,
+                     ADVISORY — never fails a PR: surfaces any claude[bot] MEDIUM+
+                     finding missing a `Bot-findings-adjudicated:` disposition marker so
+                     it can't be silently dropped — the #335/#384 silent-drop class),
                      sharp_edge_inventory.py (CI-hygiene drift gate: keeps
                      docs/review-metrics/sharp-edge-inventory.md in lockstep with the
                      CLAUDE.md sharp-edge bullets + resolves ledger `[edge:<slug>]`
