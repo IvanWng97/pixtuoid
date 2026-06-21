@@ -38,11 +38,16 @@ src/
 ├── term.rs             truecolor preflight (BOTH fns PURE + unit-tested — main.rs is the untestable presenter,
 │                       so the policy lives here; `doctor::run` returns its report String so it's tested too):
 │                       `colorterm_is_truecolor($COLORTERM)` (the
-│                       S-Lang/terminfo `truecolor`/`24bit` convention) + `terminal_diagnostic_row(term, colorterm)` (the
-│                       `doctor` `terminal:` line; env values sanitized). main.rs WARN-ONLY (never gates on Unix — many
-│                       truecolor terminals omit COLORTERM; the env read is INLINED at the excluded main.rs call site, no
+│                       S-Lang/terminfo `truecolor`/`24bit` convention) + `terminal_diagnostic_row(term, colorterm, terminfo_caps)` (the
+│                       `doctor` `terminal:` line; env values sanitized; verdict shares the COLORTERM-OR-terminfo signals with
+│                       the warn policy so doctor + the startup warning agree on a TERM-only-truecolor terminal) + the WARN POLICY `should_warn_no_truecolor(colorterm,
+│                       term, suppress_env, terminfo_caps)` (#397: suppresses on $COLORTERM truecolor OR terminfo Tc/RGB for
+│                       $TERM OR a truthy $PIXTUOID_NO_TRUECOLOR_WARN — every input passed in / terminfo lookup INJECTED as a
+│                       closure, so the policy is pure + unit-tested; `terminfo_boolean_caps` is the real `infocmp` seam,
+│                       None on any failure = graceful degrade). main.rs WARN-ONLY (never gates on Unix — many
+│                       truecolor terminals omit COLORTERM; the env reads are INLINED at the excluded main.rs call site, no
 │                       untestable wrapper to mutate) on a non-windows Run-TUI tty. Windows hard-gates VT separately
-│                       (tui/mod). `floating` is exempt (softbuffer = real RGB px). #397 = terminfo Tc/RGB follow-up
+│                       (tui/mod). `floating` is exempt (softbuffer = real RGB px).
 ├── setup.rs            first-run detection for onboarding: the PURE `is_first_run(cfg, path) = !path.exists() ||
 │                       cfg.sources.is_empty()` (mirrors resolve_connected's migrate condition; unit-tested). `pub`
 │                       because main.rs (a separate crate) computes RunConfig.first_run from it. The cinematic overlay

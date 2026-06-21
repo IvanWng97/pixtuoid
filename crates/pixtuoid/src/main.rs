@@ -27,13 +27,19 @@ fn main() -> Result<()> {
             ..
         }
     ) && std::io::IsTerminal::is_terminal(&std::io::stderr())
-        && !pixtuoid::term::colorterm_is_truecolor(std::env::var("COLORTERM").ok().as_deref())
+        && pixtuoid::term::should_warn_no_truecolor(
+            std::env::var("COLORTERM").ok().as_deref(),
+            std::env::var("TERM").ok().as_deref(),
+            std::env::var("PIXTUOID_NO_TRUECOLOR_WARN").ok().as_deref(),
+            pixtuoid::term::terminfo_boolean_caps,
+        )
     {
         eprintln!(
-            "⚠ pixtuoid: your terminal does not advertise COLORTERM=truecolor — the \
-             pixel-art office renders in 24-bit color and may look wrong. Use a \
-             truecolor terminal (Windows Terminal, iTerm2, Ghostty, Alacritty, kitty, \
-             WezTerm), or run `pixtuoid doctor` to check."
+            "⚠ pixtuoid: your terminal does not advertise truecolor (COLORTERM or a \
+             terminfo Tc/RGB capability) — the pixel-art office renders in 24-bit color \
+             and may look wrong. Use a truecolor terminal (Windows Terminal, iTerm2, \
+             Ghostty, Alacritty, kitty, WezTerm), or run `pixtuoid doctor` to check. \
+             To silence this warning, set PIXTUOID_NO_TRUECOLOR_WARN=1."
         );
     }
     // The typed LogLevel's as_str is exactly the old free-string levels, so

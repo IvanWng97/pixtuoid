@@ -572,10 +572,13 @@ pub fn run(log_path: &std::path::Path) -> anyhow::Result<String> {
     // colors. Surface the detected $TERM/$COLORTERM so a "colors look wrong over
     // ssh/tmux" report is self-diagnosable. The row is formatted by the PURE,
     // unit-tested `term::terminal_diagnostic_row` (env values sanitized there);
-    // `.ok()` makes an unset var a genuine `None`, not `Some("")`.
+    // `.ok()` makes an unset var a genuine `None`, not `Some("")`. The terminfo
+    // probe (`terminfo_boolean_caps`) is threaded in so the verdict matches the
+    // startup warning policy for a TERM-only-truecolor terminal (#397).
     out.push_str(&crate::term::terminal_diagnostic_row(
         std::env::var("TERM").ok().as_deref(),
         std::env::var("COLORTERM").ok().as_deref(),
+        crate::term::terminfo_boolean_caps,
     ));
     out.push('\n');
     // Surface config-load warnings IN the report — a malformed config makes every
