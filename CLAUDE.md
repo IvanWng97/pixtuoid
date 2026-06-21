@@ -137,7 +137,9 @@ baselines) plus `site/public/demos/` in the same change, or the smoke job's
 
 The `justfile` is the single source of truth for every check — CI and the
 git hooks call the same recipes (no local-vs-CI drift). `just setup-tools`
-installs the needed cargo tools once per clone.
+installs the needed cargo tools once per clone (including the `rust-analyzer`
+component — `rust-toolchain.toml` pins only `rustfmt`+`clippy`, so without it the
+editor / AI-agent LSP silently degrades to grep).
 
 ```
 just preflight    # full pre-push gate: lint (fmt+machete+deny+arch+shfmt+actionlint+links) → clippy → hack → test

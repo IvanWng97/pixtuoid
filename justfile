@@ -511,6 +511,16 @@ setup-tools:
         echo "brew install cargo-binstall (or cargo install cargo-binstall) to grab prebuilt binaries instead." >&2
         cargo install "${tools[@]}"
     fi
+    # The rust-analyzer component powers the editor / AI-agent LSP (go-to-def,
+    # find-references — the tool the "change all N keying sites in lockstep"
+    # invariants depend on). rust-toolchain.toml pins only rustfmt+clippy, so
+    # without this the `~/.cargo/bin/rust-analyzer` rustup shim errors with
+    # "Unknown binary" and the LSP silently degrades to grep. Idempotent; skipped
+    # cleanly when rustup is absent (e.g. a distro-packaged toolchain).
+    if command -v rustup &>/dev/null; then
+        rustup component add rust-analyzer >/dev/null 2>&1 ||
+            echo "could not add the rust-analyzer component — install it for LSP support" >&2
+    fi
     # Non-cargo lint tools that `just lint` gates on (Go binaries, not crates:
     # shfmt formats shell, actionlint lints the workflows). brew on macOS;
     # elsewhere point at the install docs rather than silently leaving `just
