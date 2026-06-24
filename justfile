@@ -111,6 +111,16 @@ arch:
 lint:
     #!/usr/bin/env bash
     set -euo pipefail
+    # Fail fast with an actionable message when a lint tool is missing, instead
+    # of a bare `command not found` (exit 127) buried in a parallel job's log.
+    missing=()
+    for t in shfmt actionlint cargo-machete cargo-deny lychee; do
+        command -v "$t" &>/dev/null || missing+=("$t")
+    done
+    if (( ${#missing[@]} )); then
+        printf 'error: missing lint tool(s): %s — run `just setup-tools`\n' "${missing[*]}" >&2
+        exit 1
+    fi
     # Per-check logs; dump only the failures so a green run stays quiet.
     tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
     run() { local n="$1"; shift; if "$@" >"$tmp/$n.log" 2>&1; then printf '  \033[32m✓ %s\033[0m\n' "$n"; else printf '  \033[31m✗ %s\033[0m\n' "$n"; cat "$tmp/$n.log"; return 1; fi; }
@@ -143,6 +153,9 @@ test *args:
 [group('rust')]
 [doc('Feature-powerset check — every feature subset must compile')]
 hack:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    command -v cargo-hack &>/dev/null || { echo "error: cargo-hack not found — run \`just setup-tools\`" >&2; exit 1; }
     cargo hack --feature-powerset --no-dev-deps check --workspace
 
 # Cross-lint the workspace for Windows (clippy subsumes check; no linking).
@@ -529,11 +542,21 @@ setup-tools:
     for t in shfmt actionlint; do
         command -v "$t" &>/dev/null && continue
         if command -v brew &>/dev/null; then
-            brew install "$t"
-        else
-            echo "$t not found — install it via your package manager; \`just lint\` needs it." >&2
+            brew install "$t" || true
         fi
     done
+    # Re-verify AFTER the install attempts: a `brew install` that exits 0 without
+    # putting the binary on PATH (transient failure), or no brew at all, must be
+    # caught here — not silently pass as a successful setup (the #283-class silent
+    # no-op this recipe is meant to prevent).
+    missing=()
+    for t in shfmt actionlint; do
+        command -v "$t" &>/dev/null || missing+=("$t")
+    done
+    if (( ${#missing[@]} )); then
+        echo "error: ${missing[*]} still missing after setup — install via your package manager (e.g. brew install ${missing[*]}); \`just lint\` needs it." >&2
+        exit 1
+    fi
 
 # Self-test the upstream-drift watcher — its ONLY test. A regex-parser regression
 # is a silent monitor death (the script returns empty / raises, the weekly job
@@ -591,3 +614,11 @@ review-disposition *prs:
 [doc('Self-test the review-disposition harvester (parsers + assessor)')]
 review-disposition-selftest:
     python3 scripts/check_review_disposition_selftest.py
+
+# Self-test the review-metrics collector — its keyword role classifier, pinned to
+# first-match-wins ordering. A keyword/order regression silently mis-buckets an
+# agent's role, corrupting the REVIEW-LEDGER economics record. Pure, no network.
+[group('meta')]
+[doc('Self-test the review-metrics collector (role classifier + ordering)')]
+review-metrics-selftest:
+    python3 scripts/review-metrics_selftest.py

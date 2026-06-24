@@ -105,6 +105,9 @@ jobs:
       # edges (the census's citation leg counts against it) — #386.
       - run: just sharp-edge-inventory-selftest
       - run: just sharp-edge-inventory
+      # review-metrics.py is the economics collector with no Action of its own;
+      # gate its selftest here (the hygiene job) alongside the other parsers.
+      - run: just review-metrics-selftest
 
   msrv:
     name: msrv

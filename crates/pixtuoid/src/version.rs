@@ -232,27 +232,37 @@ mod tests {
         );
     }
 
-    /// Guard for #110: the `pixtuoid → pixtuoid-core` path-dep `version` is a
-    /// hardcoded requirement (NOT workspace-inherited), so a bump that misses it
-    /// breaks `cargo publish`. Assert it tracks the crate version. `just bump`
-    /// (cargo set-version) keeps them synced; this fails fast — in `just test`,
-    /// preflight, and the release `check` job — if they ever drift.
+    /// Guard for #110: every hardcoded `pixtuoid-core` path-dep `version` (NOT
+    /// workspace-inherited) must track the crate version, or a bump that misses
+    /// one breaks `cargo publish`. BOTH downstream crates pin it — `pixtuoid →
+    /// pixtuoid-core` AND `pixtuoid-scene → pixtuoid-core` — and the whole
+    /// workspace bumps in lockstep, so both equal `CARGO_PKG_VERSION`. `just bump`
+    /// (cargo set-version --workspace) keeps them synced; this fails fast — in
+    /// `just test`, preflight, and the release `check` job — if any drifts.
     #[test]
     fn path_dep_version_tracks_crate_version() {
-        let manifest = include_str!("../Cargo.toml");
-        let dep_line = manifest
-            .lines()
-            .find(|l| l.trim_start().starts_with("pixtuoid-core") && l.contains("path ="))
-            .expect("a pixtuoid-core path-dependency line in crates/pixtuoid/Cargo.toml");
-        let dep_version = dep_line
-            .split_once("version = \"")
-            .and_then(|(_, rest)| rest.split('"').next())
-            .expect("a version requirement on the pixtuoid-core path-dep");
-        assert_eq!(
-            dep_version,
-            env!("CARGO_PKG_VERSION"),
-            "pixtuoid-core path-dep version ({dep_version}) != crate version ({}) — run `just bump` (see #110)",
-            env!("CARGO_PKG_VERSION")
+        let assert_tracks = |manifest: &str, who: &str| {
+            let dep_line = manifest
+                .lines()
+                .find(|l| l.trim_start().starts_with("pixtuoid-core") && l.contains("path ="))
+                .unwrap_or_else(|| panic!("a pixtuoid-core path-dependency line in {who}"));
+            let dep_version = dep_line
+                .split_once("version = \"")
+                .and_then(|(_, rest)| rest.split('"').next())
+                .unwrap_or_else(|| {
+                    panic!("a version requirement on the pixtuoid-core path-dep in {who}")
+                });
+            assert_eq!(
+                dep_version,
+                env!("CARGO_PKG_VERSION"),
+                "{who}: pixtuoid-core path-dep version ({dep_version}) != crate version ({}) — run `just bump` (see #110)",
+                env!("CARGO_PKG_VERSION")
+            );
+        };
+        assert_tracks(include_str!("../Cargo.toml"), "crates/pixtuoid/Cargo.toml");
+        assert_tracks(
+            include_str!("../../pixtuoid-scene/Cargo.toml"),
+            "crates/pixtuoid-scene/Cargo.toml",
         );
     }
 
