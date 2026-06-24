@@ -20,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           # Full history for the tag-on-main ancestry check below.
           fetch-depth: 0
@@ -86,7 +86,7 @@ jobs:
           - target: aarch64-pc-windows-msvc
             os: windows-2022
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -155,7 +155,7 @@ jobs:
           - target: aarch64-unknown-linux-gnu
             cross: true
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -196,7 +196,7 @@ jobs:
       id-token: write # provenance attestation (OIDC)
       attestations: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -254,7 +254,7 @@ jobs:
       # is gone — this claim is the only credential.
       id-token: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Authenticate to crates.io (OIDC trusted publishing)
@@ -392,7 +392,7 @@ jobs:
       contents: read
       id-token: write # npm provenance (`npm publish --provenance`)
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v6
         with:
           node-version: 22

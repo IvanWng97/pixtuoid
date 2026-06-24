@@ -29,7 +29,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       # Always runs (incl. PRs): a parser/classifier regression = silent monitor
       # death, so guard it before the live check trusts the parsers.

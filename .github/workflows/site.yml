@@ -27,7 +27,7 @@ jobs:
       run:
         working-directory: site
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v6
         with:
           node-version: 22
@@ -37,7 +37,7 @@ jobs:
       # cache the ~92MB Chromium across runs (keyed on the lockfile) so the install
       # below is a no-op on a hit
       - name: Cache Playwright Chromium
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('site/package-lock.json') }}
