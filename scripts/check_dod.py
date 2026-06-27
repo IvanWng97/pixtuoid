@@ -49,6 +49,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from _gov import _strip_control  # shared pure helper (see docs/governance-scripts.md)
+
 DEFAULT_REPO = "IvanWng97/pixtuoid"
 
 # The ONE place install writes ~/.claude/settings.json (CLAUDE.md invariant #4).
@@ -64,14 +66,6 @@ _DOC_RE = re.compile(
 _RUST_SRC_RE = re.compile(r"^crates/[^/]+/src/.*\.rs$")
 _RUST_TEST_RE = re.compile(r"(^crates/[^/]+/tests/)|(_tests?\.rs$)|(/tests?\.rs$)")
 _SPRITE_RE = re.compile(r"(^|/)sprites/|\.sprite$")
-
-
-def _strip_control(s: str) -> str:
-    """Drop C0/C1 control chars + DEL so untrusted PR/diff/commit text can't emit
-    a terminal escape (ANSI/OSC) when this report prints — the Python twin of the
-    Rust sanitize-at-the-boundary rule (R0615-06), as in
-    check_review_disposition.py. Applied at construction, not each print."""
-    return "".join(ch for ch in s if not (ord(ch) < 0x20 or 0x7F <= ord(ch) <= 0x9F))
 
 
 # --------------------------------------------------------------------------- #

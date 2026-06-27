@@ -52,8 +52,12 @@ it never reds a PR (and is absent on fork PRs).
 
 They look similar but have **distinct cadence, authority, and domain** (a weekly
 issue-filer vs a per-PR blocking gate); merging the *logic* would erase those
-boundaries. The only genuine code overlap is ~15 lines of `gh` plumbing
-(`DEFAULT_REPO`, `_gh_json`) shared by `check_dod.py` and
-`check_review_disposition.py` — two consumers, so the rule of three is unmet and a
-shared `scripts/_gov.py` would cost more (another module + selftest + map entry)
-than it saves. **Revisit at the third `gh`-consuming gate.**
+boundaries. `scripts/_gov.py` holds only what is genuinely shared *and*
+abstraction-free: the pure `_strip_control` boundary-sanitizer, which was
+byte-identical in both scripts — DRYing a verbatim pure helper has no abstraction
+cost and removes a real drift risk (it stays pinned through both `*_selftest.py`
+import sites). The remaining overlap is ~15 lines of `gh` plumbing (`DEFAULT_REPO`,
+`_gh_json`): that is policy-shaped (each gate's repo / auth / error handling) and
+has only two consumers, so the rule of three is unmet — it stays inlined per
+script. **Revisit moving the `gh` plumbing into `_gov.py` at the third
+`gh`-consuming gate.**

@@ -638,6 +638,10 @@ review-metrics-selftest:
 dod *args:
     #!/usr/bin/env bash
     set -euo pipefail
+    # {{ args }} is deliberately UNquoted: it must word-split so `just dod --pr 405`
+    # reaches argparse as two argv tokens (quote() would collapse it to one and break
+    # it). Safe because the input is the developer's own local CLI args, never
+    # untrusted PR content. (Refuted bot finding, ledger R0626-DOD-18 #1.)
     if [ -z "{{ args }}" ]; then python3 scripts/check_dod.py --local; else python3 scripts/check_dod.py {{ args }}; fi
 
 # Self-test the Definition-of-Done gate — pins EVERY pure parser/check on both

@@ -31,6 +31,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from _gov import _strip_control  # shared pure helper (see docs/governance-scripts.md)
+
 DEFAULT_REPO = "IvanWng97/pixtuoid"
 BOT_LOGINS = {"claude[bot]", "github-actions[bot]"}
 # MEDIUM and up — LOW findings don't require a tracked disposition.
@@ -61,14 +63,6 @@ class Finding:
     path: str
     line: object  # int or None — bot inline comments often carry a null line
     title: str
-
-
-def _strip_control(s: str) -> str:
-    """Drop C0/C1 control chars + DEL so untrusted bot-comment text / paths can't
-    emit a terminal escape (ANSI/OSC) when this report is printed — the Python
-    twin of the Rust side's `verify::display_safe` sanitize-at-the-boundary rule
-    (R0615-06). Applied where findings are constructed, not at each print site."""
-    return "".join(ch for ch in s if not (ord(ch) < 0x20 or 0x7F <= ord(ch) <= 0x9F))
 
 
 def severity_of(body: str) -> str | None:

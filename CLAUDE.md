@@ -89,7 +89,9 @@ scripts/             gen-media.py + media.json (the ONE manifest-driven driver f
                      when, which can fail a PR, bypass) is tabled in
                      [`docs/governance-scripts.md`](docs/governance-scripts.md); the
                      advisory `--judge-prompt` substance check is shared via the
-                     `.github/actions/llm-judge` composite (DoD + review-disposition)
+                     `.github/actions/llm-judge` composite (DoD + review-disposition);
+                     `_gov.py` holds the one verbatim-shared pure helper
+                     (`_strip_control`), gh plumbing stays per-script until a 3rd gate
 site/                Astro landing page → GitHub Pages; self-contained Node project,
                      own CI; `just site-{setup,dev,check,fmt}` → see site/README.md
 integrations/raycast/  Raycast extension (TypeScript, self-contained Node project; NOT Rust):
