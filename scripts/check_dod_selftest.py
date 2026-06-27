@@ -158,17 +158,27 @@ def run() -> int:
         check(f"no-verify cmd hit: {fn}", d.command_has_no_verify(fn))
 
     # --- is_push tolerates leading git global options (review F) ------------ #
-    is_push = lambda c: d._git_subcommand_tokens(c)[0] == "push"  # noqa: E731
     for c in ["git push", "git -C /repo push", "git -c http.x=y push", 'git -c x="a b" push']:
-        check(f"is_push: {c}", is_push(c))
-    check("is_push: 'git config push.default' not a push", not is_push("git config push.default x"))
-    check("is_push: 'git log' not a push", not is_push("git log --oneline"))
-    # py/redos regression: the tokenizer must not backtrack on a pathological run of
-    # `-- -- --` (the old `(?:\s+--?[\w-]+(?:[= ]\S+)?)*` regex hung here).
+        check(f"is_push: {c}", d._has_push(c))
+    check("is_push: 'git config push.default' not a push", not d._has_push("git config push.default x"))
+    check("is_push: 'git log' not a push", not d._has_push("git log --oneline"))
+    # CHAINED commands — the agent's canonical forms. The tokenizer must see a push /
+    # commit -n in ANY git invocation, not just the first (regression vs the old
+    # re.search-anywhere; review R0626-DOD-17).
+    for c in ["git add . && git push", "git add -A && git commit -m x && git push",
+              "git status; git push", "git fetch && git push --force"]:
+        check(f"is_push chained: {c}", d._has_push(c))
+    for c in ["git add . && git commit -nm x", "git status; git commit -n -m msg",
+              "git add -A && git commit -nm 'wip'"]:
+        check(f"no-verify chained: {c}", d.command_has_no_verify(c))
+    # but a `;`/`&&` INSIDE a quoted message is not a real separator
+    check("no-verify: separator inside quoted msg ignored",
+          not d._has_push("git commit -m 'fix; then push later'"))
+    # py/redos regression: must not backtrack on a pathological `-- -- --` run.
     import time as _t
-    _redos = "git " + "-- " * 8000 + "push"
     _t0 = _t.time()
-    check("is_push: pathological '-- ' run terminates fast", is_push(_redos) and (_t.time() - _t0) < 0.5)
+    check("is_push: pathological '-- ' run terminates fast",
+          d._has_push("git " + "-- " * 8000 + "push") and (_t.time() - _t0) < 0.5)
     _t1 = _t.time()
     check("has_no_verify: pathological run terminates fast",
           (d.command_has_no_verify("git " + "-- " * 8000 + "commit -n") is True) and (_t.time() - _t1) < 0.5)

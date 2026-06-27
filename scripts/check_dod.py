@@ -313,34 +313,53 @@ _GIT_VALUE_OPTS = frozenset(
 )
 
 
-def _git_subcommand_tokens(cmd: str):
-    """For the FIRST `git` invocation in `cmd`, return (subcommand, tokens-after-it),
-    skipping leading git GLOBAL options and their space-separated values; (None, [])
-    if there's no `git` subcommand. TOKENIZED, not regex — ReDoS-immune by
-    construction (the prior `(?:\\s+--?[\\w-]+(?:[= ]\\S+)?)*` form had catastrophic
-    backtracking on `-- -- --` runs: py/redos). Quote-strip first so a flag inside a
-    message/string isn't counted."""
-    toks = _strip_shell_quotes(cmd or "").split()
-    for i, t in enumerate(toks):
-        if t != "git":
-            continue
-        j = i + 1
-        while j < len(toks) and toks[j].startswith("-"):
-            opt = toks[j]
-            j += 1
-            if opt in _GIT_VALUE_OPTS and j < len(toks):
-                j += 1  # consume the option's value token
-        return (toks[j], toks[j + 1:]) if j < len(toks) else (None, [])
-    return None, []
+# Shell command/segment separators — split on them so a chained `git add && git
+# push` is seen as TWO invocations (matching the old `re.search`-anywhere behavior;
+# scanning only the first `git` was a regression). Quote-strip BEFORE splitting so a
+# separator inside a message (`commit -m "a; b"`) isn't a real boundary.
+_SHELL_SEP = re.compile(r"[;&|\n]+")
+
+
+def _git_invocations(cmd: str):
+    """Every (subcommand, tokens-after-it) for EACH `git` across the shell-separated
+    segments of `cmd`, skipping leading git GLOBAL options and their space-separated
+    values. TOKENIZED, not regex — ReDoS-immune by construction (the prior
+    `(?:\\s+--?[\\w-]+(?:[= ]\\S+)?)*` form had catastrophic backtracking on
+    `-- -- --` runs: py/redos)."""
+    out: list = []
+    for seg in _SHELL_SEP.split(_strip_shell_quotes(cmd or "")):
+        toks = seg.split()
+        i = 0
+        while i < len(toks):
+            if toks[i] != "git":
+                i += 1
+                continue
+            j = i + 1
+            while j < len(toks) and toks[j].startswith("-"):
+                opt = toks[j]
+                j += 1
+                if opt in _GIT_VALUE_OPTS and j < len(toks):
+                    j += 1  # consume the option's value token
+            if j < len(toks):
+                out.append((toks[j], toks[j + 1:]))
+            i = j + 1
+    return out
+
+
+def _has_push(cmd: str) -> bool:
+    """Whether ANY git invocation in `cmd` is a `push` (incl. chained `git x && git
+    push`)."""
+    return any(sub == "push" for sub, _ in _git_invocations(cmd))
 
 
 def _commit_has_short_no_verify(cmd: str) -> bool:
-    """`git commit` carrying a combinable short `-n` (commit -n == --no-verify), e.g.
-    `-n`, `-nm`, `-mn` — even behind a global option (`git -c k=v commit -n`)."""
-    sub, rest = _git_subcommand_tokens(cmd)
-    if sub != "commit":
-        return False
-    return any(t.startswith("-") and not t.startswith("--") and "n" in t[1:] for t in rest)
+    """ANY `git commit` carrying a combinable short `-n` (commit -n == --no-verify),
+    e.g. `-n`/`-nm`/`-mn` — even behind a global option or chained after another git
+    (`git add . && git commit -nm x`)."""
+    return any(
+        sub == "commit" and any(t.startswith("-") and not t.startswith("--") and "n" in t[1:] for t in rest)
+        for sub, rest in _git_invocations(cmd)
+    )
 
 
 def command_has_no_verify(cmd: str) -> bool:
@@ -734,7 +753,7 @@ def run_gate_from_stdin() -> int:
                      "(CLAUDE.md)." + _BYPASS_HINT)
     root = _worktree_root()
     is_merge = bool(_MERGE_RE.search(_strip_shell_quotes(cmd)))
-    is_push = _git_subcommand_tokens(cmd)[0] == "push"
+    is_push = _has_push(cmd)
     if not (is_merge or is_push):
         return 0
     if bypass_reason(_attestation(root), os.environ):
