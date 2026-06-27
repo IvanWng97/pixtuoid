@@ -301,15 +301,46 @@ def _strip_shell_quotes(s: str) -> str:
     return re.sub(r"'[^']*'|\"[^\"]*\"", "", s)
 
 
-# A real hook-skipping git op (after quote-stripping): `--no-verify` on any git
-# command, a combinable `-n` short flag on `git commit` (commit -n == --no-verify),
-# or a `SKIP_PREFLIGHT=1` env-assignment at a command/segment boundary. The
-# `commit` subcommand match tolerates leading git global options (`git -c k=v
-# commit -n`) so the short-flag form can't be smuggled past behind a `-c`.
-_GIT_GLOBALS = r"(?:\s+--?[\w-]+(?:[= ]\S+)?)*"
+# `--no-verify` on any git command, or `SKIP_PREFLIGHT=1` at a command/segment
+# boundary — both LINEAR regexes (lazy `*?` + literal, no nested quantifier).
 _GIT_NOVERIFY_LONG = re.compile(r"\bgit\b[^|&;]*?--no-verify\b")
-_GIT_COMMIT_N = re.compile(r"\bgit\b" + _GIT_GLOBALS + r"\s+commit\b[^|&;]*?\s-[A-Za-z]*n[A-Za-z]*\b")
 _SKIP_ENV = re.compile(r"(?:^|[|&;]\s*|\b(?:env|export)\s+)SKIP_PREFLIGHT=1\b")
+
+# Git global options that consume the NEXT token as a value (`git -c k=v commit`,
+# `git -C dir push`), so the subcommand scanner skips that value token too.
+_GIT_VALUE_OPTS = frozenset(
+    {"-c", "-C", "--git-dir", "--work-tree", "--namespace", "--exec-path", "--super-prefix"}
+)
+
+
+def _git_subcommand_tokens(cmd: str):
+    """For the FIRST `git` invocation in `cmd`, return (subcommand, tokens-after-it),
+    skipping leading git GLOBAL options and their space-separated values; (None, [])
+    if there's no `git` subcommand. TOKENIZED, not regex — ReDoS-immune by
+    construction (the prior `(?:\\s+--?[\\w-]+(?:[= ]\\S+)?)*` form had catastrophic
+    backtracking on `-- -- --` runs: py/redos). Quote-strip first so a flag inside a
+    message/string isn't counted."""
+    toks = _strip_shell_quotes(cmd or "").split()
+    for i, t in enumerate(toks):
+        if t != "git":
+            continue
+        j = i + 1
+        while j < len(toks) and toks[j].startswith("-"):
+            opt = toks[j]
+            j += 1
+            if opt in _GIT_VALUE_OPTS and j < len(toks):
+                j += 1  # consume the option's value token
+        return (toks[j], toks[j + 1:]) if j < len(toks) else (None, [])
+    return None, []
+
+
+def _commit_has_short_no_verify(cmd: str) -> bool:
+    """`git commit` carrying a combinable short `-n` (commit -n == --no-verify), e.g.
+    `-n`, `-nm`, `-mn` — even behind a global option (`git -c k=v commit -n`)."""
+    sub, rest = _git_subcommand_tokens(cmd)
+    if sub != "commit":
+        return False
+    return any(t.startswith("-") and not t.startswith("--") and "n" in t[1:] for t in rest)
 
 
 def command_has_no_verify(cmd: str) -> bool:
@@ -318,9 +349,7 @@ def command_has_no_verify(cmd: str) -> bool:
     `--no-verify` inside a message or an echo'd string is not a false deny; the
     `-n` short flag is matched only on `git commit` (where it means --no-verify)."""
     c = _strip_shell_quotes(cmd or "")
-    return bool(
-        _GIT_NOVERIFY_LONG.search(c) or _GIT_COMMIT_N.search(c) or _SKIP_ENV.search(c)
-    )
+    return bool(_GIT_NOVERIFY_LONG.search(c)) or _commit_has_short_no_verify(c) or bool(_SKIP_ENV.search(c))
 
 
 # The committed-diff backstop fires ONLY on paths where a hook-skipping flag would
@@ -677,10 +706,9 @@ def _deny(reason: str) -> int:
     return 0
 
 
-# `git push` tolerating leading global options (`git -C <dir> push`, `git -c k=v
-# push`); merge via `gh pr merge` / `gh api .../merge`. Agent-layer (CI is the
-# authoritative backstop), so porous forms here are bounded.
-_GIT_PUSH_RE = re.compile(r"\bgit\b(?:\s+--?[\w-]+(?:[= ]\S+)?)*\s+push\b")
+# Merge via `gh pr merge` / `gh api .../merge` (linear regex). `git push` detection
+# tolerating leading global options goes through `_git_subcommand_tokens` (the
+# tokenizer) — a regex for it had a py/redos. Agent-layer; CI is the backstop.
 _MERGE_RE = re.compile(r"\bgh\s+pr\s+merge\b|\bgh\s+api\b[^|&;]*?/merge\b")
 _BYPASS_HINT = ' Override (agent-layer only; CI still gates): DOD_BYPASS="<reason>".'
 
@@ -705,11 +733,8 @@ def run_gate_from_stdin() -> int:
         return _deny("This repo bans --no-verify / SKIP_PREFLIGHT on git ops "
                      "(CLAUDE.md)." + _BYPASS_HINT)
     root = _worktree_root()
-    # Quote-strip so a config value with a space (`git -c x="a b" push`) doesn't
-    # split the global-option run and hide the push/merge.
-    cmd_nq = _strip_shell_quotes(cmd)
-    is_merge = bool(_MERGE_RE.search(cmd_nq))
-    is_push = bool(_GIT_PUSH_RE.search(cmd_nq))
+    is_merge = bool(_MERGE_RE.search(_strip_shell_quotes(cmd)))
+    is_push = _git_subcommand_tokens(cmd)[0] == "push"
     if not (is_merge or is_push):
         return 0
     if bypass_reason(_attestation(root), os.environ):

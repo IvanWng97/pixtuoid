@@ -158,11 +158,20 @@ def run() -> int:
         check(f"no-verify cmd hit: {fn}", d.command_has_no_verify(fn))
 
     # --- is_push tolerates leading git global options (review F) ------------ #
-    for c in ["git push", "git -C /repo push", "git -c http.x=y push"]:
-        check(f"is_push: {c}", bool(d._GIT_PUSH_RE.search(c)))
-    check("is_push: 'git config push.default' not a push", not d._GIT_PUSH_RE.search("git config push.default x"))
-    check("is_push: quoted config value w/ space (after quote-strip)",
-          bool(d._GIT_PUSH_RE.search(d._strip_shell_quotes('git -c x="a b" push'))))
+    is_push = lambda c: d._git_subcommand_tokens(c)[0] == "push"  # noqa: E731
+    for c in ["git push", "git -C /repo push", "git -c http.x=y push", 'git -c x="a b" push']:
+        check(f"is_push: {c}", is_push(c))
+    check("is_push: 'git config push.default' not a push", not is_push("git config push.default x"))
+    check("is_push: 'git log' not a push", not is_push("git log --oneline"))
+    # py/redos regression: the tokenizer must not backtrack on a pathological run of
+    # `-- -- --` (the old `(?:\s+--?[\w-]+(?:[= ]\S+)?)*` regex hung here).
+    import time as _t
+    _redos = "git " + "-- " * 8000 + "push"
+    _t0 = _t.time()
+    check("is_push: pathological '-- ' run terminates fast", is_push(_redos) and (_t.time() - _t0) < 0.5)
+    _t1 = _t.time()
+    check("has_no_verify: pathological run terminates fast",
+          (d.command_has_no_verify("git " + "-- " * 8000 + "commit -n") is True) and (_t.time() - _t1) < 0.5)
     check("merge: gh pr merge detected", bool(d._MERGE_RE.search("gh pr merge 5 --squash")))
 
     # --- prod_print / settings: syntax-blind FP fixes (review D, E) --------- #
