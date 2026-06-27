@@ -1,0 +1,45 @@
+name: LLM judge (advisory)
+description: >
+  Post an advisory "substance over existence" verdict to the job summary by asking
+  a small Claude model to rate a process artifact. Shared by the governance gates
+  (definition-of-done, review-disposition) so the jq+curl+summary plumbing lives in
+  ONE place. The prompt itself is gate-specific (built by a script's --judge-prompt
+  mode) and passed in via prompt-file. The CALLER gates on the api-key being present
+  (`if: env.ANTHROPIC_API_KEY != ''`) and sets continue-on-error — this action
+  assumes the key is non-empty and never fails the job on a bad model response.
+inputs:
+  prompt-file:
+    description: Path to a file holding the judge prompt (built by a --judge-prompt mode).
+    required: true
+  title:
+    description: Markdown header for the summary block.
+    required: true
+  api-key:
+    description: Anthropic API key (caller maps it from a secret and gates on presence).
+    required: true
+  model:
+    description: Anthropic model id.
+    required: false
+    default: claude-haiku-4-5-20251001
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        ANTHROPIC_API_KEY: ${{ inputs.api-key }}
+        PROMPT_FILE: ${{ inputs.prompt-file }}
+        TITLE: ${{ inputs.title }}
+        MODEL: ${{ inputs.model }}
+      run: |
+        jq -Rs --arg m "$MODEL" \
+          '{model:$m,max_tokens:1024,messages:[{role:"user",content:.}]}' \
+          < "$PROMPT_FILE" > /tmp/llm_judge_body.json
+        {
+          echo "## $TITLE"
+          curl -sS https://api.anthropic.com/v1/messages \
+            -H "x-api-key: $ANTHROPIC_API_KEY" \
+            -H "anthropic-version: 2023-06-01" \
+            -H "content-type: application/json" \
+            -d @/tmp/llm_judge_body.json \
+            | jq -r '.content[0].text // .error.message // "judge call failed"'
+        } >> "$GITHUB_STEP_SUMMARY"

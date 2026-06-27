@@ -143,25 +143,22 @@ jobs:
         run: just dod --pr ${{ github.event.pull_request.number }}
       # Advisory LLM-judge — substance over existence (does the two-lens block show
       # DISTINCT perspectives? is TDD evident?). Never reds the PR (continue-on-error
-      # + no-ops without the secret). Verdict goes to the run summary.
-      - name: LLM-judge (advisory)
+      # + no-ops without the secret). The jq+curl+summary plumbing is the shared
+      # ./.github/actions/llm-judge composite (also used by review-disposition).
+      - name: Build the Definition-of-Done judge prompt
         if: ${{ env.ANTHROPIC_API_KEY != '' }}
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          python3 scripts/check_dod.py --judge-prompt --pr "${{ github.event.pull_request.number }}" > /tmp/dod_judge_prompt.txt
-          jq -Rs '{model:"claude-haiku-4-5-20251001",max_tokens:1024,messages:[{role:"user",content:.}]}' \
-            < /tmp/dod_judge_prompt.txt > /tmp/dod_judge_body.json
-          {
-            echo "## Definition-of-Done — advisory LLM-judge"
-            curl -sS https://api.anthropic.com/v1/messages \
-              -H "x-api-key: $ANTHROPIC_API_KEY" \
-              -H "anthropic-version: 2023-06-01" \
-              -H "content-type: application/json" \
-              -d @/tmp/dod_judge_body.json \
-              | jq -r '.content[0].text // .error.message // "judge call failed"'
-          } >> "$GITHUB_STEP_SUMMARY"
+        run: python3 scripts/check_dod.py --judge-prompt --pr "${{ github.event.pull_request.number }}" > /tmp/dod_judge_prompt.txt
+      - name: LLM-judge (advisory)
+        if: ${{ env.ANTHROPIC_API_KEY != '' }}
+        continue-on-error: true
+        uses: ./.github/actions/llm-judge
+        with:
+          prompt-file: /tmp/dod_judge_prompt.txt
+          title: Definition-of-Done — advisory LLM-judge
+          api-key: ${{ secrets.ANTHROPIC_API_KEY }}
 
   msrv:
     name: msrv

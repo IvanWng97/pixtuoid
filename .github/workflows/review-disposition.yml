@@ -40,6 +40,10 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    env:
+      # Mapped from the secret so the advisory substance-judge step can gate on its
+      # presence via `if:` without exposing it there. Absent (fork PR) => judge no-ops.
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
     steps:
       - uses: actions/checkout@v7
       - name: Audit this PR's bot-finding dispositions (advisory — never blocks merge)
@@ -60,3 +64,19 @@ jobs:
             python3 scripts/check_review_disposition.py "$PR_NUMBER" 2>&1 || true
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+      # Substance over existence: rate whether the dispositions that ARE present are
+      # real adjudications, not rubber-stamps. Shared ./.github/actions/llm-judge.
+      - name: Build the disposition-substance judge prompt
+        if: ${{ env.ANTHROPIC_API_KEY != '' }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/check_review_disposition.py --judge-prompt "${{ github.event.pull_request.number }}" > /tmp/disp_judge_prompt.txt
+      - name: LLM-judge — disposition substance (advisory)
+        if: ${{ env.ANTHROPIC_API_KEY != '' }}
+        continue-on-error: true
+        uses: ./.github/actions/llm-judge
+        with:
+          prompt-file: /tmp/disp_judge_prompt.txt
+          title: Bot-finding dispositions — advisory substance judge
+          api-key: ${{ secrets.ANTHROPIC_API_KEY }}

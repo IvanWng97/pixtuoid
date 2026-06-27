@@ -84,7 +84,12 @@ scripts/             gen-media.py + media.json (the ONE manifest-driven driver f
                      `.githooks/pre-push` + the CI `definition-of-done` job (change layer,
                      AUTHORITATIVE — ignores DOD_BYPASS); diff-scoped so existing code is
                      grandfathered. `just dod` / `just dod-selftest`; `check_dod_selftest.py`
-                     pins the parsers, CI-gated in hygiene + as a job prerequisite)
+                     pins the parsers, CI-gated in hygiene + as a job prerequisite).
+                     The cadence+authority of ALL these governance scripts (which run
+                     when, which can fail a PR, bypass) is tabled in
+                     [`docs/governance-scripts.md`](docs/governance-scripts.md); the
+                     advisory `--judge-prompt` substance check is shared via the
+                     `.github/actions/llm-judge` composite (DoD + review-disposition)
 site/                Astro landing page → GitHub Pages; self-contained Node project,
                      own CI; `just site-{setup,dev,check,fmt}` → see site/README.md
 integrations/raycast/  Raycast extension (TypeScript, self-contained Node project; NOT Rust):

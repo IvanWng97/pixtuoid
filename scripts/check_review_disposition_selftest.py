@@ -96,6 +96,17 @@ def run() -> int:
     check("ledger matches #283", m.ledger_mentions_pr("see #283 for the fix", 283))
     check("ledger no false #28 in #283", not m.ledger_mentions_pr("only #283 here", 28))
 
+    # judge_prompt — the advisory substance prompt embeds the findings + the marker
+    # lines so the shared LLM-judge can rate substance vs rubber-stamp. Pure; pinned
+    # so a refactor can't silently empty it (the same silent-monitor-death guard).
+    jp = m.judge_prompt(findings, markers)
+    check("judge_prompt names a finding path", "b.rs" in jp)
+    check("judge_prompt embeds a disposition marker", "ISSUE-FILED #332" in jp)
+    check("judge_prompt asks for substantive verdict", "substantive" in jp and "rubber_stamped" in jp)
+    empty = m.judge_prompt([], [])
+    check("judge_prompt handles empty (no findings/markers)",
+          "(none)" in empty and "no disposition marker" in empty)
+
     if failures:
         print("check_review_disposition selftest FAILED:")
         for f in failures:
