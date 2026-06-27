@@ -15,6 +15,16 @@ pub fn colorterm_is_truecolor(colorterm: Option<&str>) -> bool {
     matches!(colorterm, Some(v) if v.contains("truecolor") || v.contains("24bit"))
 }
 
+/// Whether to emit the truecolor preflight warning: a TUI `run` (not headless),
+/// attached to a tty, whose `$COLORTERM` doesn't advertise 24-bit. Pure so the
+/// gate LOGIC is unit-tested over its truth table; `main.rs` keeps the
+/// `#[cfg(not(windows))]`, the `IsTerminal` probe, and the `$COLORTERM` read
+/// inline at its (codecov-excluded) call site — the policy lives here, the
+/// untestable env/tty/cfg reads stay there (the "policy in term.rs" pattern).
+pub fn should_warn_truecolor(cmd_is_run_tui: bool, is_tty: bool, colorterm: Option<&str>) -> bool {
+    cmd_is_run_tui && is_tty && !colorterm_is_truecolor(colorterm)
+}
+
 /// The `pixtuoid doctor` `terminal:` line — `$TERM` / `$COLORTERM` and the
 /// truecolor verdict. Pure (takes the env values as `Option`s, `None` = unset) so
 /// the row logic is unit-testable on its own (and `doctor::run` returns its report
@@ -47,6 +57,17 @@ mod tests {
         assert!(colorterm_is_truecolor(Some("24bit")));
         // A terminal may set a compound value.
         assert!(colorterm_is_truecolor(Some("truecolor:whatever")));
+    }
+
+    #[test]
+    fn should_warn_truecolor_truth_table() {
+        // Warn ONLY for a TUI run, on a tty, without an advertised truecolor.
+        assert!(should_warn_truecolor(true, true, None));
+        assert!(should_warn_truecolor(true, true, Some("256color")));
+        // Suppressed by ANY of: not a TUI run, not a tty, or truecolor advertised.
+        assert!(!should_warn_truecolor(false, true, None));
+        assert!(!should_warn_truecolor(true, false, None));
+        assert!(!should_warn_truecolor(true, true, Some("truecolor")));
     }
 
     #[test]

@@ -20,15 +20,17 @@ fn main() -> Result<()> {
     // in `tui::mod`. The `floating` window paints real RGB pixels via softbuffer,
     // not terminal SGR, so it is exempt.
     #[cfg(not(windows))]
-    if matches!(
-        &cmd,
-        Cmd::Run {
-            headless: false,
-            ..
-        }
-    ) && std::io::IsTerminal::is_terminal(&std::io::stderr())
-        && !pixtuoid::term::colorterm_is_truecolor(std::env::var("COLORTERM").ok().as_deref())
-    {
+    if pixtuoid::term::should_warn_truecolor(
+        matches!(
+            &cmd,
+            Cmd::Run {
+                headless: false,
+                ..
+            }
+        ),
+        std::io::IsTerminal::is_terminal(&std::io::stderr()),
+        std::env::var("COLORTERM").ok().as_deref(),
+    ) {
         eprintln!(
             "⚠ pixtuoid: your terminal does not advertise COLORTERM=truecolor — the \
              pixel-art office renders in 24-bit color and may look wrong. Use a \

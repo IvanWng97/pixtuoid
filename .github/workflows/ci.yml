@@ -108,6 +108,60 @@ jobs:
       # review-metrics.py is the economics collector with no Action of its own;
       # gate its selftest here (the hygiene job) alongside the other parsers.
       - run: just review-metrics-selftest
+      # The Definition-of-Done parser guard (silent-monitor-death class) — also a
+      # prerequisite of the definition-of-done job below.
+      - run: just dod-selftest
+
+  # The non-code-shaped lifecycle gate (two-lens review, traceability, hygiene)
+  # that the ~25 code-shape jobs can't see. AUTHORITATIVE: this job ignores
+  # DOD_BYPASS, so a bypassed local push still meets a gate no env var can relax.
+  # Promote to a REQUIRED branch-protection check to make the merge gate binding.
+  definition-of-done:
+    name: definition-of-done
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+      pull-requests: read
+    env:
+      # Mapped from the secret so the advisory judge step can gate on its presence
+      # via `if:` without exposing it there. Absent (e.g. a fork PR) => the judge
+      # step no-ops; the gate itself still runs on the read-only github.token.
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: extractions/setup-just@v4
+      # Pin the parsers before trusting the gate (mirrors sharp-edge-inventory).
+      - run: just dod-selftest
+      # The gate. Non-zero ONLY on a BLOCKING violation (new prod println! /
+      # settings.json write outside install/io.rs / --no-verify) or a missing
+      # two-lens-review block on a code PR. Heuristic findings warn, never fail.
+      - name: Definition-of-Done gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: just dod --pr ${{ github.event.pull_request.number }}
+      # Advisory LLM-judge — substance over existence (does the two-lens block show
+      # DISTINCT perspectives? is TDD evident?). Never reds the PR (continue-on-error
+      # + no-ops without the secret). Verdict goes to the run summary.
+      - name: LLM-judge (advisory)
+        if: ${{ env.ANTHROPIC_API_KEY != '' }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 scripts/check_dod.py --judge-prompt --pr "${{ github.event.pull_request.number }}" > /tmp/dod_judge_prompt.txt
+          jq -Rs '{model:"claude-haiku-4-5-20251001",max_tokens:1024,messages:[{role:"user",content:.}]}' \
+            < /tmp/dod_judge_prompt.txt > /tmp/dod_judge_body.json
+          {
+            echo "## Definition-of-Done — advisory LLM-judge"
+            curl -sS https://api.anthropic.com/v1/messages \
+              -H "x-api-key: $ANTHROPIC_API_KEY" \
+              -H "anthropic-version: 2023-06-01" \
+              -H "content-type: application/json" \
+              -d @/tmp/dod_judge_body.json \
+              | jq -r '.content[0].text // .error.message // "judge call failed"'
+          } >> "$GITHUB_STEP_SUMMARY"
 
   msrv:
     name: msrv

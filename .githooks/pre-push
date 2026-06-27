@@ -21,4 +21,9 @@ if ! command -v just &>/dev/null; then
     exit 1
 fi
 
+# Definition-of-Done gate (change layer) before the full preflight. Honors
+# DOD_BYPASS for local work; the CI `definition-of-done` job is the authoritative
+# backstop (it ignores DOD_BYPASS), so a local bypass still meets a real gate.
+just dod --local
+
 exec just preflight

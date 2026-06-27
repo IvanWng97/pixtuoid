@@ -557,6 +557,11 @@ setup-tools:
         echo "error: ${missing[*]} still missing after setup — install via your package manager (e.g. brew install ${missing[*]}); \`just lint\` needs it." >&2
         exit 1
     fi
+    # Activate the local pre-push gate (dormant by default in a fresh clone, so CI
+    # would otherwise be the only gate — and the in-session Claude hooks are
+    # bypassable). Idempotent. The CI `definition-of-done` job stays the authoritative
+    # backstop regardless.
+    git config core.hooksPath .githooks
 
 # Self-test the upstream-drift watcher — its ONLY test. A regex-parser regression
 # is a silent monitor death (the script returns empty / raises, the weekly job
@@ -622,3 +627,31 @@ review-disposition-selftest:
 [doc('Self-test the review-metrics collector (role classifier + ordering)')]
 review-metrics-selftest:
     python3 scripts/review-metrics_selftest.py
+# Definition-of-Done gate (scripts/check_dod.py) — mechanize the non-code-shaped
+# lifecycle discipline (two-lens review, traceability, hygiene) that CI's ~25
+# code-shape jobs can't see. ONE source of truth, called from the Claude Code
+# hooks (agent layer) AND pre-push + the CI definition-of-done job (change layer).
+# `--pr` is the AUTHORITATIVE gate — it ignores DOD_BYPASS. No arg => `--local`
+# (ahead-of-main commits in this worktree). `--pr N` needs `gh`; the rest is pure git.
+[group('meta')]
+[doc('Definition-of-Done gate (no arg = local ahead-of-main commits; --pr N for CI)')]
+dod *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -z "{{ args }}" ]; then python3 scripts/check_dod.py --local; else python3 scripts/check_dod.py {{ args }}; fi
+
+# Self-test the Definition-of-Done gate — pins EVERY pure parser/check on both
+# sides of its threshold so a regression can't silently make the gate find
+# nothing ("DoD met" by absence — the silent-monitor-death class). Pure, no network.
+[group('meta')]
+[doc('Self-test the Definition-of-Done gate (parsers + checks)')]
+dod-selftest:
+    python3 scripts/check_dod_selftest.py
+
+# Emit the advisory LLM-judge prompt (substance-over-existence: does the two-lens
+# block show distinct perspectives? is TDD evident?). The CI definition-of-done
+# job pipes this to the model; the Python stays pure (no model call in-script).
+[group('meta')]
+[doc('Emit the DoD LLM-judge prompt (CI pipes it to the model)')]
+dod-judge:
+    python3 scripts/check_dod.py --judge-prompt

@@ -293,8 +293,13 @@ pub fn flat_json_verify(content: &str, events: &[&str], sentinel: &str) -> Schem
 /// if nothing path-like can be peeled out. Mirrors the read-back
 /// `codex::command_basename_is_hook` already does.
 pub fn shell_shim_ref(command: &str) -> ShimRef {
-    // Strip a trailing ` --event <name>` (CodeWhale bakes one per entry).
-    let head = match command.split_once(" --event ") {
+    // Strip the trailing ` --event <name>` (CodeWhale bakes one per entry). Use
+    // rsplit_once so a single-quoted PATH that literally contains " --event "
+    // keeps that occurrence and only the genuinely-appended tail is removed —
+    // otherwise the front-split cuts inside the path and `head` no longer ends
+    // with the closing `'`, so the quote arm below is skipped and a bogus partial
+    // token leaks out (the R0620-WCR-02/03 path-mis-split twin, for ` --event `).
+    let head = match command.rsplit_once(" --event ") {
         Some((before, _)) => before,
         None => command,
     };
@@ -465,6 +470,22 @@ mod tests {
         assert_eq!(
             shell_shim_ref(r"C:\bin\pixtuoid-hook.exe --source codewhale --event session_start"),
             ShimRef::Absolute(PathBuf::from(r"C:\bin\pixtuoid-hook.exe"))
+        );
+    }
+
+    #[test]
+    fn shell_shim_ref_path_containing_event_marker_is_not_missplit() {
+        // A single-quoted Unix path that literally contains ` --event ` must keep
+        // it: rsplit_once strips only the genuinely-appended tail, so `head` still
+        // ends with the closing `'` and posix_unquote recovers the real path. With
+        // a front-anchored split_once the path would be cut mid-way → a bogus
+        // partial token → a false "shim missing". Compare PathBuf STRUCTURALLY —
+        // never assert on a `/`-string (the Windows path-sep class).
+        assert_eq!(
+            shell_shim_ref(
+                "PIXTUOID_SOURCE=codewhale '/Users/x/my --event dir/pixtuoid-hook' --event tool"
+            ),
+            ShimRef::Absolute(PathBuf::from("/Users/x/my --event dir/pixtuoid-hook"))
         );
     }
 

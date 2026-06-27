@@ -18,6 +18,7 @@ use pixtuoid_core::state::ActivityState;
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex, SceneState};
 use pixtuoid_scene::embedded_pack::load_sprite_pack;
 use pixtuoid_scene::floor::FloorMeta;
+use pixtuoid_scene::pixel_painter::force_weather;
 use pixtuoid_scene::theme::{self, Theme};
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
@@ -116,21 +117,25 @@ fn floor_seed_affects_render() {
 
 #[test]
 fn weather_cycle_affects_render() {
-    // Weather state is derived from wallclock / 600 (10 min cycles). Two
-    // timestamps 20 minutes apart should hit different weather variants
-    // (assuming splitmix64 doesn't collide on adjacent inputs).
-    let base = SystemTime::UNIX_EPOCH + Duration::from_secs(1_716_286_800);
-    let later = base + Duration::from_secs(20 * 60);
-    let scene = fixture_scene(base);
+    // Force two DISTINCT weather variants at ONE timestamp and assert the render
+    // differs — this isolates the weather render path. (The old version compared
+    // two timestamps 20 min apart, but the analog clock + continuous time-of-day
+    // lighting move the hash regardless of weather, so it passed even if the
+    // weather render were no-oped — no real tooth.) `force_weather` is a
+    // thread-local override; reset it BEFORE the assert so a failing assert can't
+    // leak the override into a reused harness thread.
+    let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_716_286_800);
+    let scene = fixture_scene(now);
 
-    let hash_a = render_hash(&scene, base, &theme::NORMAL, FloorMeta::ground());
-    // Re-create scene with `later` so `created_at` stays before `now`.
-    let scene_later = fixture_scene(later);
-    let hash_b = render_hash(&scene_later, later, &theme::NORMAL, FloorMeta::ground());
+    force_weather(Some("clear")).expect("`clear` is a valid weather name");
+    let hash_clear = render_hash(&scene, now, &theme::NORMAL, FloorMeta::ground());
+    force_weather(Some("storm")).expect("`storm` is a valid weather name");
+    let hash_storm = render_hash(&scene, now, &theme::NORMAL, FloorMeta::ground());
+    force_weather(None).expect("clearing the override never fails");
 
     assert_ne!(
-        hash_a, hash_b,
-        "render is identical 20 minutes apart -- weather cycle appears bypassed"
+        hash_clear, hash_storm,
+        "clear vs storm produced identical pixels -- weather render path appears no-oped"
     );
 }
 

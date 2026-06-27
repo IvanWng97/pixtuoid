@@ -35,13 +35,15 @@ src/
 │                       capture them); main.rs dispatches both as plain arms (tracing → stderr, so stdout stays clean). The
 │                       five PathBuf args carry `value_hint` so completions path-complete. Presenters live in main.rs
 │                       (run_sources_list/run_sources_set/run_change/run_setup, codecov-excluded like doctor::run)
-├── term.rs             truecolor preflight (BOTH fns PURE + unit-tested — main.rs is the untestable presenter,
+├── term.rs             truecolor preflight (ALL fns PURE + unit-tested — main.rs is the untestable presenter,
 │                       so the policy lives here; `doctor::run` returns its report String so it's tested too):
 │                       `colorterm_is_truecolor($COLORTERM)` (the
-│                       S-Lang/terminfo `truecolor`/`24bit` convention) + `terminal_diagnostic_row(term, colorterm)` (the
-│                       `doctor` `terminal:` line; env values sanitized). main.rs WARN-ONLY (never gates on Unix — many
-│                       truecolor terminals omit COLORTERM; the env read is INLINED at the excluded main.rs call site, no
-│                       untestable wrapper to mutate) on a non-windows Run-TUI tty. Windows hard-gates VT separately
+│                       S-Lang/terminfo `truecolor`/`24bit` convention) + `should_warn_truecolor(cmd_is_run_tui, is_tty,
+│                       colorterm)` (the warn-gate PREDICATE — its truth table is unit-tested) + `terminal_diagnostic_row(
+│                       term, colorterm)` (the `doctor` `terminal:` line; env values sanitized). main.rs WARN-ONLY (never
+│                       gates on Unix — many truecolor terminals omit COLORTERM; the `#[cfg(not(windows))]`, `IsTerminal`
+│                       probe, and the env read stay INLINED at the excluded main.rs call site — which just calls
+│                       `should_warn_truecolor`, no untestable policy wrapper to mutate) on a non-windows Run-TUI tty. Windows hard-gates VT separately
 │                       (tui/mod). `floating` is exempt (softbuffer = real RGB px). #397 = terminfo Tc/RGB follow-up
 ├── setup.rs            first-run detection for onboarding: the PURE `is_first_run(cfg, path) = !path.exists() ||
 │                       cfg.sources.is_empty()` (mirrors resolve_connected's migrate condition; unit-tested). `pub`
