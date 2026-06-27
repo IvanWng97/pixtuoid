@@ -232,31 +232,43 @@ mod tests {
         );
     }
 
-    /// Guard for #110: every hardcoded `pixtuoid-core` path-dep `version` (NOT
+    /// Guard for #110: every hardcoded intra-workspace path-dep `version` (NOT
     /// workspace-inherited) must track the crate version, or a bump that misses
-    /// one breaks `cargo publish`. BOTH downstream crates pin it — `pixtuoid →
-    /// pixtuoid-core` AND `pixtuoid-scene → pixtuoid-core` — and the whole
-    /// workspace bumps in lockstep, so both equal `CARGO_PKG_VERSION`. `just bump`
-    /// (cargo set-version --workspace) keeps them synced; this fails fast — in
-    /// `just test`, preflight, and the release `check` job — if any drifts.
+    /// one breaks `cargo publish`. Three such pins exist — `pixtuoid →
+    /// pixtuoid-core`, `pixtuoid → pixtuoid-scene`, and `pixtuoid-scene →
+    /// pixtuoid-core` — and the whole workspace bumps in lockstep, so all equal
+    /// `CARGO_PKG_VERSION`. `just bump` (cargo set-version --workspace) keeps them
+    /// synced; this fails fast — in `just test`, preflight, and the release
+    /// `check` job — if any drifts. Checks EVERY `path =` + `version = "` line
+    /// (not a named subset), so a future workspace path-dep is covered the moment
+    /// it's added, not silently left unguarded.
     #[test]
     fn path_dep_version_tracks_crate_version() {
         let assert_tracks = |manifest: &str, who: &str| {
-            let dep_line = manifest
-                .lines()
-                .find(|l| l.trim_start().starts_with("pixtuoid-core") && l.contains("path ="))
-                .unwrap_or_else(|| panic!("a pixtuoid-core path-dependency line in {who}"));
-            let dep_version = dep_line
-                .split_once("version = \"")
-                .and_then(|(_, rest)| rest.split('"').next())
-                .unwrap_or_else(|| {
-                    panic!("a version requirement on the pixtuoid-core path-dep in {who}")
-                });
-            assert_eq!(
-                dep_version,
-                env!("CARGO_PKG_VERSION"),
-                "{who}: pixtuoid-core path-dep version ({dep_version}) != crate version ({}) — run `just bump` (see #110)",
-                env!("CARGO_PKG_VERSION")
+            let mut checked = 0;
+            for line in manifest.lines() {
+                let l = line.trim_start();
+                // An intra-workspace published path-dep carries BOTH `path =` and a
+                // hardcoded `version = "..."`; that pair is the #110 publish surface.
+                // A version-inherited path-dep (no `version = "`) is not a hazard.
+                if !(l.contains("path =") && l.contains("version = \"")) {
+                    continue;
+                }
+                let dep_version = l
+                    .split_once("version = \"")
+                    .and_then(|(_, rest)| rest.split('"').next())
+                    .unwrap_or_else(|| panic!("a version requirement on a path-dep in {who}"));
+                assert_eq!(
+                    dep_version,
+                    env!("CARGO_PKG_VERSION"),
+                    "{who}: path-dep version ({dep_version}) != crate version ({}) — run `just bump` (see #110)",
+                    env!("CARGO_PKG_VERSION")
+                );
+                checked += 1;
+            }
+            assert!(
+                checked > 0,
+                "{who}: expected at least one hardcoded path-dep version to guard (see #110)"
             );
         };
         assert_tracks(include_str!("../Cargo.toml"), "crates/pixtuoid/Cargo.toml");

@@ -58,6 +58,15 @@ def run() -> int:
         "dedup outranks finder + implementer (list order)",
         m.classify("implement a finder for the dedup stage") == "dedup",
     )
+    # finder outranks implementer: a prompt carrying BOTH an implementer keyword
+    # ("implement") and a finder keyword ("find bugs") must return the FIRST role
+    # in the list — finder. This is the ONLY assertion that co-presents the two,
+    # so it's what actually gives the "reorder is caught" claim teeth: a
+    # finder<->implementer swap of ROLE_KEYWORDS flips this to "implementer".
+    check(
+        "finder outranks implementer (list order)",
+        m.classify("implement a fix and find bugs") == "finder",
+    )
 
     if fails:
         print("review-metrics selftest FAILED:")
