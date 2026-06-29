@@ -2,15 +2,14 @@ name: claude security review
 
 on:
   pull_request:
-    # `synchronize` is deliberate (mirrors claude-review): every push to a
-    # security-path PR re-reviews. `/security-review` (below) adds the manual
-    # re-trigger this workflow previously lacked.
+    # Runs on EVERY non-fork PR (no `paths:` filter). A hardcoded path
+    # allowlist silently rots as the security surface moves — a new crate, a
+    # new install target, embedded_pack's `--pack-dir` ingestion, platform
+    # path resolution all sit outside the old four globs. The gate is now the
+    # MODEL reading the diff: it early-exits on a diff with no trust boundary
+    # (see the prompt), bounded by `--max-budget-usd`, so coverage can't drift.
+    # `synchronize` re-reviews every push; `/security-review` is the manual re-trigger.
     types: [opened, reopened, synchronize]
-    paths:
-      - "crates/pixtuoid-hook/**"
-      - "crates/pixtuoid/src/install/**"
-      - "crates/pixtuoid/src/runtime/**"
-      - "crates/pixtuoid-core/src/source/**"
   issue_comment:
     types: [created]
 
@@ -47,7 +46,16 @@ jobs:
 
             Read CLAUDE.md first for architecture invariants and known sharp edges.
 
-            Review this PR for security issues. Focus on:
+            FIRST, look at the diff (`gh pr diff`). If it touches NO trust boundary —
+            nothing under the hook shim, socket/pipe transport, settings.json / config
+            writes, install targets, path/home resolution, untrusted-input decoding
+            (transcripts, hook payloads, JSONL lines), pack/asset ingestion, or
+            process/permission handling — post a one-line "no security-relevant changes
+            in this diff" summary via `gh pr comment` and exit without further review.
+            This workflow runs on every PR, so a clean exit on an irrelevant diff is the
+            expected, cheap path.
+
+            Otherwise, review this PR for security issues. Focus on:
             1. Hook shim safety: must always exit 0, must never block CC, 200ms timeout non-negotiable
             2. settings.json writes: must go through write_config_atomic (advisory lock + atomic rename + symlink resolution)
             3. Unix socket handling: no path traversal, no symlink attacks
