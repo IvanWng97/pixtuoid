@@ -41,11 +41,10 @@ Every section gets an answer; "n/a" counts only with a reason.
    (the repo is TDD-first), then the refusal paths those tests will pin —
    BOTH sides of every window/threshold, with offsets derived from the
    constant under test (pitfall 4).
-6. **Sharp edges + ledger** — read the nested `CLAUDE.md` for every crate
-   touched and list the sharp edges that constrain this design. Check
-   `docs/REVIEW-LEDGER.md` for CONFIRMED rows on the touched seams — those
-   are known hazards exactly where you are about to work. (Plan time is the
-   ledger's second consumption path; verification routing is its first.)
+6. **Sharp edges** — read the nested `CLAUDE.md` "Known sharp edges" for
+   every crate touched and list the ones that constrain this design — they
+   are the documented hazards exactly where you are about to work, the live
+   and maintained record of what looks like a bug but is deliberate.
 7. **Verification plan** — the gates to run, and any watch-it requirement:
    motion/pose changes render an animation and WATCH it; sprite changes run
    the `beautify-decoration` loop. Verification steps are blocking plan
@@ -71,8 +70,5 @@ section answers (or the claim list) in the PR body — that is where lens 1's
 slot is filled from; a plan that exists only in the planning session closes
 no loop. A review finding the plan never named is a measured failure of the
 plan stage, not just a bug in the code: the orchestrator records it as a
-`plan-miss:` line in the review-round commit message and carries it into
-the squash body — the channel the review-history census already harvests —
-so each census can compute the rate (the conveyor's merge gate in
-`docs/KNOWLEDGE-ENGINEERING.md`; first measurement in
-`docs/review-metrics/phase3-onboarding-2026-06.md`, design in issue #264).
+`plan-miss:` line in the review-round commit message, so the planning brief
+keeps earning its place against the classes it failed to catch.

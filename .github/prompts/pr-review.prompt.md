@@ -21,9 +21,11 @@ Both briefs MUST carry, verbatim or equivalent:
    insisted a 12-day-old tap "doesn't exist" for 4 rounds (#112; the twin
    `checkout@v6` case: docs/review-metrics/mining-2026-06.md). Both existed.
 3. **Integer confidence 0–100 + `file:line`** on every finding.
-4. **Ledger check** — match familiar-smelling claims against
-   `docs/REVIEW-LEDGER.md` (its header protocol governs; premise-anchored:
-   same seam ≠ same claim).
+4. **Sharp-edge check** — match familiar-smelling claims against the
+   per-crate `CLAUDE.md` "Known sharp edges" (the live, maintained record of
+   deliberate-design refutations; premise-anchored: same seam ≠ same claim).
+   `docs/REVIEW-LEDGER.md` is a frozen archive you may skim for older
+   adjudications, but it is no longer required reading.
 5. **Verdict** — exactly one of APPROVE / APPROVE-WITH-NITS / REQUEST-CHANGES.
 
 ---
@@ -152,36 +154,20 @@ Process notes for the orchestrator: dispatch both in parallel, in the
 worktree, background; verify every MEDIUM+ finding's premise yourself before
 coding a fix (reviewers have incomplete design context — check sharp edges
 first); fold accepted findings into ONE review-round commit, recording any
-reviewer-flagged plan-misses as `plan-miss:` lines in that commit's message
-and carrying them into the squash body (the census harvests that channel).
-Before merging, sweep
-every reviewer/bot finding to exactly one terminal state — FIXED,
-REFUTED-with-trace (ledger row if it will recur), ISSUE FILED (no-deferral
-rule applies: only big/refactor work defers), or ACCEPTED-residual with its
-WHY documented in code or a ledger row (the ledger's verdict vocabulary
-governs). "Acknowledged, no action" is not a state: #40's ignored migration
-finding became a 0.4.1 release-blocker (#46); two more drop cases:
-docs/review-metrics/mining-2026-06.md. After a fix
-round, re-run the gates and watch the NEW head's CI.
+reviewer-flagged plan-misses as `plan-miss:` lines in that commit's message.
+Before merging, drive every reviewer/bot finding to exactly one terminal
+state IN THE PR THREAD — FIXED, REFUTED-with-trace (if it's deliberate
+design, cite or ADD the relevant per-crate `CLAUDE.md` sharp edge), or
+ISSUE-FILED (no-deferral rule applies: only big/refactor work defers).
+"Acknowledged, no action" is not a state: #40's ignored migration finding
+became a 0.4.1 release-blocker (#46); two more drop cases:
+docs/review-metrics/mining-2026-06.md. After a fix round, re-run the gates
+and watch the NEW head's CI.
 
-Whole-codebase reviews (the finder → dedup → ledger-routing → verification
-pipeline; worked design: docs/review-metrics/phase2-ab-2026-06.md)
-additionally: finder briefs do NOT carry the ledger — unbiased candidate
-recall is what keeps the ledger's calibration measurable; the ledger enters
-at routing/verification only. Until a run records the demote path's
-false-suppression rate (status lives in that report or its successor —
-phase 2 never fired a demotion), verify A/B per that design: a control arm
-of full pairs on ALL candidates — which doubles the run's verification
-spend and doubles as protocol step 8's ledger-blind calibration — alongside
-the ledger-routed treatment arm. Once the rate is recorded, delete this
-A/B clause: routing alone is the steady state. Every whole-codebase run MUST
-append its adjudications to [`REVIEW-LEDGER.md`](../../docs/REVIEW-LEDGER.md) as
-a dated section — one premise-anchored row per finding, BOTH confirmed and
-refuted (a refuted candidate with no row is re-derived and re-paid next run; a
-confirmed-fixed row is the regression anchor). Recording only an "N confirmed /
-M refuted" count in the squash body is the #385 disposition gap, not a
-disposition. Whole-codebase reviews also
-carry a SYSTEM lens — module decomposition still right, dependency
+Whole-codebase reviews (finder → dedup → adversarial verification — many
+candidate finders, then independent skeptics that try to REFUTE each survivor
+before it is reported; unbiased candidate recall first, verification second)
+additionally carry a SYSTEM lens — module decomposition still right, dependency
 directions clean, cross-PR composition seams, AND a DRY/duplication census —
 because architecture (and duplication) erodes BETWEEN PRs, not within them
 (no per-PR lens can see it; the census's "emergent cross-PR composition"
