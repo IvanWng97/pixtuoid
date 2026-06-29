@@ -28,12 +28,13 @@ and compares against the live upstream:
   * opencode events    -> the EventV2 `type`s the decoder maps (the `match event`
                           block in crates/pixtuoid-core/src/source/opencode.rs)
                           vs the `EventV2.define` type literals in
-                          anomalyco/opencode core/src/v1/session.ts + permission.ts
+                          anomalyco/opencode packages/schema/src/v1/session.ts +
+                          packages/schema/src/permission.ts
                           (one-directional: only a VANISHED depended type alarms)
   * Copilot events     -> the event `type`s the decoder maps (the `match kind`
                           block in crates/pixtuoid-core/src/source/copilot.rs)
                           vs the per-event `type` consts in the published
-                          @github/copilot session-events JSON schema (unpkg)
+                          @github/copilot-<os>-<arch> session-events JSON schema (unpkg)
                           (one-directional: Copilot emits ~100 event types and we
                           map ~10 by design, so only a VANISHED depended type alarms)
   * Cursor hooks       -> the camelCase `hook_event_name`s we register
