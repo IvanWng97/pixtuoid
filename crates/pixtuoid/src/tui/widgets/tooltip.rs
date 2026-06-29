@@ -626,4 +626,42 @@ mod tests {
             " OpenClaw gateway · model error · 3 sessions "
         );
     }
+
+    /// The tooltip render path (`paint_coffee_tooltip` → `paint_simple_tooltip` →
+    /// the shared `super::paint_card_backing`) casts the drop shadow. Pins that a
+    /// future edit dropping the backing call would be caught — the modal path is
+    /// covered separately by `panel::borderless_panel_casts_a_drop_shadow_*`.
+    /// Pre-fills the buffer with a bright equal-channel gray; only a shadowed
+    /// office cell ends up an equal-channel gray darker than that (the card's
+    /// `tooltip_bg` is a distinct hue), so its presence proves the shadow ran.
+    #[test]
+    fn coffee_tooltip_casts_a_drop_shadow_via_the_shared_backing() {
+        use ratatui::style::Color;
+        let scene = Rect::new(0, 0, 48, 16);
+        let bright = Color::Rgb(200, 200, 200);
+        let mut term = Terminal::new(TestBackend::new(48, 16)).unwrap();
+        term.draw(|f| {
+            let full = f.area();
+            for y in 0..full.height {
+                for x in 0..full.width {
+                    let cell = &mut f.buffer_mut()[(x, y)];
+                    cell.set_symbol("\u{2580}");
+                    cell.fg = bright;
+                    cell.bg = bright;
+                }
+            }
+            super::paint_coffee_tooltip(f, 20, 8, scene, &theme::NORMAL);
+        })
+        .unwrap();
+        let buf = term.backend().buffer();
+        let shadowed = (0..buf.area.height).any(|y| {
+            (0..buf.area.width).any(|x| {
+                matches!(buf[(x, y)].bg, Color::Rgb(r, g, b) if r == g && g == b && (120..200).contains(&r))
+            })
+        });
+        assert!(
+            shadowed,
+            "the tooltip path must dim office cells into a drop shadow"
+        );
+    }
 }
