@@ -200,9 +200,15 @@ CODEWHALE_KNOWN_OMITTED = {
 # NB: the repo's default branch is `dev` (not `main`) — the `main` branch was
 # retired, which 404'd these URLs and (pre-`try_fetch`) was silently bucketed as
 # transient, blinding the opencode watch. Track `dev` (the active default).
+# NB2: opencode moved the schema definitions out of `packages/core/` into a
+# dedicated `packages/schema/` package (the old `core/src/v1/session.ts` is now a
+# re-export shim with no `type:` literals — it 200s but greps empty, which read as
+# a false "every event GONE" until these paths were repointed, #406). The session
+# lifecycle + `message.part.updated` live in `schema/src/v1/session.ts`; the v2
+# `permission.v2.asked` lives in the top-level `schema/src/permission.ts`.
 OPENCODE_EVENT_URLS = (
-    "https://raw.githubusercontent.com/anomalyco/opencode/dev/packages/core/src/v1/session.ts",
-    "https://raw.githubusercontent.com/anomalyco/opencode/dev/packages/core/src/permission.ts",
+    "https://raw.githubusercontent.com/anomalyco/opencode/dev/packages/schema/src/v1/session.ts",
+    "https://raw.githubusercontent.com/anomalyco/opencode/dev/packages/schema/src/permission.ts",
 )
 
 # `permission.asked` is forwarded/decoded DEFENSIVELY (a V1/alias spelling); only
@@ -210,16 +216,21 @@ OPENCODE_EVENT_URLS = (
 # don't alarm if the bare form isn't found as a `type:` literal.
 OPENCODE_TOLERATED = {"permission.asked"}
 
-# Copilot CLI publishes a session-events JSON schema in its npm package; unpkg
-# serves the file directly (the bare path 302-redirects to the latest pinned
-# version, which urllib follows — intentionally UNPINNED: a drift watch wants to
-# track the latest published shape, not freeze a tested one). Each event is a
-# `definitions.<Name>` object whose
+# Copilot CLI publishes a session-events JSON schema; unpkg serves the file
+# directly (the bare path 302-redirects to the latest published version, which
+# urllib follows — intentionally UNPINNED: a drift watch wants the latest shape,
+# not a frozen one). Each event is a `definitions.<Name>` object whose
 # `properties.type.const` is the wire `type` string. The check is ONE-DIRECTIONAL
 # (like opencode): Copilot emits ~100 event types and copilot.rs intentionally maps
 # only ~10, so "new upstream event" is noise — we alarm only when a type WE DEPEND
 # ON vanishes (a rename the transcript still carries but the decoder maps to nothing).
-COPILOT_SCHEMA_URL = "https://unpkg.com/@github/copilot/schemas/session-events.schema.json"
+# NB: `@github/copilot` is now a thin loader stub (its tarball is just package.json
+# + npm-loader.js that pulls a `@github/copilot-<os>-<arch>` binary package at
+# runtime), so the schema 404'd at the old root path (#406). The schema ships
+# inside the platform packages at `schemas/session-events.schema.json`; we fetch
+# the linux-x64 one (matches the CI host — every platform package carries the
+# identical schema, and unpkg serves the single file without the 100MB tarball).
+COPILOT_SCHEMA_URL = "https://unpkg.com/@github/copilot-linux-x64/schemas/session-events.schema.json"
 
 # Cursor CLI (`cursor-agent`) is HOOK-ONLY; the events we register/decode are
 # camelCase `hook_event_name`s (`source/cursor.rs`). Cursor is a closed binary,
