@@ -34,10 +34,94 @@ use pixtuoid_core::sprite::Rgb;
 use pixtuoid_core::state::ActivityState;
 use pixtuoid_core::SceneState;
 use ratatui::layout::Rect;
-use ratatui::style::Color;
+use ratatui::style::{Color, Style};
+use ratatui::widgets::{Block, Clear};
+
+use pixtuoid_scene::theme::Theme;
 
 fn to_color(c: Rgb) -> Color {
     Color::Rgb(c.r, c.g, c.b)
+}
+
+// --- Shared borderless-card backing (shadow + clear + bg fill) ----------------
+// The ONE place the "block board" look every borderless card sits on is defined.
+// `borderless_panel` (modals) and the framed tooltips both delegate to
+// `paint_card_backing`, so the drop shadow can't be applied inconsistently or
+// silently forgotten by a future card.
+
+/// Per-cell darkening factors for the soft drop shadow (0 = black, 1 = unchanged).
+/// The right band fades out over two columns (a penumbra); the single bottom row
+/// uses one mid factor (it's already ~2px tall, so it needs no gradient of its
+/// own). Higher = softer.
+const SHADOW_RIGHT_FALLOFF: [f32; 2] = [0.66, 0.85];
+const SHADOW_BOTTOM_FACTOR: f32 = 0.74;
+
+/// Multiply an `Rgb` color toward black by `f`. Half-block office cells carry a
+/// real RGB on BOTH `fg` (top sub-pixel) and `bg` (bottom sub-pixel), so a clean
+/// shadow darkens both — ratatui's own `Block::shadow` tints bg-only / stamps a
+/// shade glyph, which smears over the pixel art.
+fn dim_rgb(c: Color, f: f32) -> Color {
+    match c {
+        Color::Rgb(r, g, b) => Color::Rgb(
+            (r as f32 * f) as u8,
+            (g as f32 * f) as u8,
+            (b as f32 * f) as u8,
+        ),
+        other => other,
+    }
+}
+
+/// Darken one clipped band of cells in place by `factor`.
+fn dim_band(f: &mut ratatui::Frame<'_>, band: Rect, bounds: Rect, factor: f32) {
+    let Some(c) = crate::tui::renderer::clip_widget_rect(band, bounds) else {
+        return;
+    };
+    let buf = f.buffer_mut();
+    for y in c.y..c.bottom() {
+        for x in c.x..c.right() {
+            let cell = &mut buf[(x, y)];
+            cell.fg = dim_rgb(cell.fg, factor);
+            cell.bg = dim_rgb(cell.bg, factor);
+        }
+    }
+}
+
+/// Cast a soft 1-cell-offset drop shadow into the office cells below-right of
+/// `area`: a right strip that fades out over `SHADOW_RIGHT_FALLOFF.len()` columns,
+/// and a 1-row strip below, offset down a row so it reads as cast, not as an
+/// outline. Clipped to the frame so it never indexes past the buffer.
+fn cast_drop_shadow(f: &mut ratatui::Frame<'_>, area: Rect) {
+    let bounds = f.area();
+    for (d, &factor) in SHADOW_RIGHT_FALLOFF.iter().enumerate() {
+        let col = Rect {
+            x: area.right().saturating_add(d as u16),
+            y: area.y.saturating_add(1),
+            width: 1,
+            height: area.height,
+        };
+        dim_band(f, col, bounds, factor);
+    }
+    let bottom = Rect {
+        x: area.x.saturating_add(1),
+        y: area.bottom(),
+        width: area.width.saturating_sub(1),
+        height: 1,
+    };
+    dim_band(f, bottom, bounds, SHADOW_BOTTOM_FACTOR);
+}
+
+/// Paint the shared backing for a borderless card over `area`: cast the drop
+/// shadow into the office cells below-right, `Clear` the card's own cells, then
+/// fill them with the solid `tooltip_bg`. Both `panel::borderless_panel` (modals)
+/// and the framed tooltips delegate here, so the "block board" look — bg fill +
+/// shadow — has one definition and can't drift between popup kinds.
+fn paint_card_backing(f: &mut ratatui::Frame<'_>, area: Rect, theme: &Theme) {
+    cast_drop_shadow(f, area);
+    f.render_widget(Clear, area);
+    f.render_widget(
+        Block::default().style(Style::default().bg(to_color(theme.ui.tooltip_bg))),
+        area,
+    );
 }
 
 /// The badge color for a source's 2-char label prefix — shared by the dashboard

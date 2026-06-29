@@ -1,15 +1,16 @@
-//! The shared borderless modal frame for every popup. Renders `Clear` + a
-//! solid-bg `Block` with NO border — readability over the busy pixel office
-//! without the outline — plus an optional bold inner title line, and returns the
-//! inner content `Rect` the caller paints into. Replaces every popup's bordered
-//! Block (help / version / theme picker / dashboard / tooltips / connection).
+//! The shared borderless modal frame for every popup. Delegates the card backing
+//! (drop shadow + `Clear` + solid bg fill) to `super::paint_card_backing` — the
+//! ONE definition shared with the framed tooltips — then adds a uniform pad and
+//! an optional bold inner title line, and returns the inner content `Rect` the
+//! caller paints into. NO border (readability over the busy pixel office without
+//! the outline). Used by help / version / theme picker / dashboard / connection.
 
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Clear, Paragraph};
+use ratatui::widgets::Paragraph;
 
-use super::to_color;
+use super::{paint_card_backing, to_color};
 use pixtuoid_scene::theme::Theme;
 
 /// Uniform inner padding for every borderless popup — the breathing room that
@@ -31,10 +32,10 @@ pub(crate) fn borderless_panel(
     title: Option<&str>,
     theme: &Theme,
 ) -> Rect {
-    f.render_widget(Clear, area);
+    // Shared backing: drop shadow + Clear + solid bg fill (the padding region is
+    // bg, not blank). The title row below re-uses the same fill.
+    paint_card_backing(f, area, theme);
     let bg = Style::default().bg(to_color(theme.ui.tooltip_bg));
-    // Solid background over the FULL area (the padding region is bg, not blank).
-    f.render_widget(Block::default().style(bg), area);
     // Too small to pad — hand back the raw area rather than underflow.
     if area.width <= PANEL_PAD_X * 2 || area.height <= PANEL_PAD_Y * 2 {
         return area;
@@ -150,5 +151,55 @@ mod tests {
             let _ = render_to_string(w, h, Some("T"));
             let _ = render_to_string(w, h, None);
         }
+    }
+
+    /// `borderless_panel` (via the shared `paint_card_backing`) darkens the office
+    /// cells in the L-band below-right of the popup (right strip fading inner→
+    /// outer), and leaves cells outside the band untouched. Pre-fills the buffer
+    /// with a known bright color to stand in for the already-flushed office, then
+    /// renders a small inset panel.
+    #[test]
+    fn borderless_panel_casts_a_drop_shadow_with_falloff() {
+        use ratatui::style::Color;
+        let bright = Color::Rgb(200, 200, 200);
+        let area = Rect::new(5, 4, 8, 4); // small, well inside the 20x12 buffer
+        let mut term = Terminal::new(TestBackend::new(20, 12)).unwrap();
+        term.draw(|f| {
+            let full = f.area();
+            for y in 0..full.height {
+                for x in 0..full.width {
+                    let cell = &mut f.buffer_mut()[(x, y)];
+                    cell.set_symbol("\u{2580}");
+                    cell.fg = bright;
+                    cell.bg = bright;
+                }
+            }
+            borderless_panel(f, area, None, &pixtuoid_scene::theme::NORMAL);
+        })
+        .unwrap();
+        let buf = term.backend().buffer().clone();
+        let r = |x: u16, y: u16| match buf.cell((x, y)).unwrap().bg {
+            Color::Rgb(r, _, _) => r,
+            other => panic!("expected Rgb bg, got {other:?}"),
+        };
+        // Right strip darkens, and the inner column is darker than the outer (the
+        // penumbra falloff).
+        let inner = r(area.right(), area.y + 1);
+        let outer = r(area.right() + 1, area.y + 1);
+        assert!(
+            inner < 200,
+            "right band inner column must darken (got {inner})"
+        );
+        assert!(
+            inner < outer,
+            "shadow must fade inner→outer (inner {inner} !< outer {outer})"
+        );
+        // Bottom strip darkens.
+        assert!(
+            r(area.x + 1, area.bottom()) < 200,
+            "bottom band must darken"
+        );
+        // A cell far from the band is untouched.
+        assert_eq!(r(0, 0), 200, "cells outside the band stay bright");
     }
 }

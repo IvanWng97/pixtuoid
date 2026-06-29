@@ -172,6 +172,11 @@ struct SnapshotArgs {
     #[arg(long)]
     popup: bool,
 
+    /// Force a hover tooltip at terminal cell "x,y" (for screenshots / shadow
+    /// visual checks), e.g. --hover 30,40.
+    #[arg(long, value_name = "X,Y")]
+    hover: Option<String>,
+
     /// Add a wandering office pet to a renderer-driven --gif capture
     /// (cat | dog). Routes the capture through the real TuiRenderer,
     /// which owns pet motion -- the pet roams desks/pantry/sofas and
@@ -641,7 +646,10 @@ fn main() -> Result<()> {
         motion: &mut motion,
         door_anim_max_ms: 0,
         light: &mut light,
-        mouse_pos: None,
+        mouse_pos: args.hover.as_deref().and_then(|s| {
+            let (x, y) = s.split_once(',')?;
+            Some((x.trim().parse().ok()?, y.trim().parse().ok()?))
+        }),
         pinned_agent: None,
         // `--debug-walkable` drives BOTH the live `w` pixel overlay (mask +
         // approach-point/seat markers + A* routes, painted into the RgbBuffer

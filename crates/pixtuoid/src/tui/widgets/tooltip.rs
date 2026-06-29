@@ -13,20 +13,15 @@ use pixtuoid_scene::layout::{Layout, DESK_W};
 use pixtuoid_scene::overlay::LabelTone;
 use pixtuoid_scene::pet::PetKind;
 use pixtuoid_scene::pose;
-use pixtuoid_scene::theme::Theme;
 
-/// Borderless tooltip frame shared by every hover/click tooltip. No outline
-/// (the whole UI dropped popup borders) — a solid `tooltip_bg` fill plus a
-/// 1-cell uniform padding stands in for the old rounded border, so the content
-/// keeps its readable inset and the existing `+2` width/height math is unchanged
-/// (padding consumes exactly the two cells the border used to). The caller still
-/// renders `Clear` under it. Reads as one visual family with the other
-/// borderless popups (`panel::borderless_panel`).
-pub(super) fn framed_tooltip<'a>(lines: Vec<Line<'a>>, theme: &Theme) -> Paragraph<'a> {
-    let block = Block::default()
-        .padding(Padding::uniform(1))
-        .style(Style::default().bg(to_color(theme.ui.tooltip_bg)));
-    Paragraph::new(lines).block(block)
+/// Borderless tooltip frame shared by every hover/click tooltip: just the padded
+/// text. The `Clear` + solid `tooltip_bg` fill + drop shadow come from the shared
+/// `super::paint_card_backing`, which the caller paints UNDER this — so every
+/// borderless card's backing (tooltip and modal `panel::borderless_panel` alike)
+/// has ONE definition and can't drift. The 1-cell uniform padding stands in for
+/// the old border, keeping the `+2` width/height math unchanged.
+pub(super) fn framed_tooltip<'a>(lines: Vec<Line<'a>>) -> Paragraph<'a> {
+    Paragraph::new(lines).block(Block::default().padding(Padding::uniform(1)))
 }
 
 /// Horizontal anchor for a tooltip of width `tip_w`: place it just right of the
@@ -200,8 +195,8 @@ pub(crate) fn paint_hover_tooltip(
         return;
     };
 
-    f.render_widget(ratatui::widgets::Clear, clipped);
-    f.render_widget(framed_tooltip(lines, theme), clipped);
+    super::paint_card_backing(f, clipped, theme);
+    f.render_widget(framed_tooltip(lines), clipped);
 }
 
 fn paint_simple_tooltip(
@@ -242,8 +237,8 @@ fn paint_simple_tooltip(
         },
         scene_rect,
     ) {
-        f.render_widget(ratatui::widgets::Clear, r);
-        f.render_widget(framed_tooltip(vec![line], theme), r);
+        super::paint_card_backing(f, r, theme);
+        f.render_widget(framed_tooltip(vec![line]), r);
     }
 }
 
