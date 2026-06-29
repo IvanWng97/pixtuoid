@@ -1,5 +1,12 @@
 //! pixtuoid-core: headless logic for the pixtuoid TUI.
 
+// Invariant #1: this crate is headless and must never write to a terminal.
+// `just arch` greps the dep tree (ratatui/crossterm), but a raw `println!`
+// pulls no dep and slips past it — this clippy restriction lint closes that
+// gap (a hard error under the workspace `-D warnings`). Non-test builds only,
+// so test diagnostics may print freely.
+#![cfg_attr(not(test), warn(clippy::print_stdout, clippy::print_stderr))]
+
 pub mod grid;
 pub mod id;
 pub mod layout;

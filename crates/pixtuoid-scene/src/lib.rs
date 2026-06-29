@@ -6,6 +6,12 @@
 //! dependency — `tui` (ratatui half-block) and `floating` (winit/softbuffer)
 //! are thin painters layered on top, and neither depends on the other.
 
+// Terminal- and window-free (invariant #1, crate-boundary enforced). The dep
+// boundary can't see a raw `println!` (std, no dep); this restriction lint does
+// (a hard error under the workspace `-D warnings`). Non-test builds only, so
+// test diagnostics may print freely.
+#![cfg_attr(not(test), warn(clippy::print_stdout, clippy::print_stderr))]
+
 pub mod anim;
 pub mod chitchat;
 pub mod embedded_pack;

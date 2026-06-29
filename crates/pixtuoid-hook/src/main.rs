@@ -1,3 +1,13 @@
+// Invariant #5 (non-negotiable): the shim must never block CC — it always exits
+// 0 silently on any error. A prod `unwrap()`/`expect()`/`panic!` violates that
+// (non-zero exit + a backtrace CC may surface), so they are compiler-denied in
+// non-test builds for this safety-critical crate (tests unwrap freely). Scoped
+// to the shim ONLY — a workspace-wide ban would churn ~150 grandfathered unwraps.
+#![cfg_attr(
+    not(test),
+    deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)
+)]
+
 use std::io::Read;
 use std::time::{SystemTime, UNIX_EPOCH};
 

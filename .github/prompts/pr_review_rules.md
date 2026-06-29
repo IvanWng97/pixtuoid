@@ -42,6 +42,25 @@ by reading actual code — no guessing, no "this might be an issue."
    same finding); `Frame`/`RgbBuffer` each re-hand-rolled `Grid<T>`'s row-major buffer. This is
    the ONE check that requires searching the codebase, not just reading the diff.
 
+### Escalate by what the diff touches
+
+The checks above apply to every PR; these fire only when the diff touches a
+high-risk seam, and they require looking BEYOND the diff:
+
+- **`crates/pixtuoid-hook/**` (the shim)** → audit the WHOLE shim, not just the
+  diff. It must use `args_os()` not `args()` (a non-UTF-8 argv panics → non-zero
+  exit, visible to CC), do no slicing/indexing on untrusted bytes, bound every
+  read, and route every error path to a silent `exit(0)`. Invariant #5 is the
+  most-documented contract here, yet a prod `env::args()` once slipped both the
+  bot and local review (#198).
+- **`motion/` / `pose/` / walk-leg behavior** → not diff-readable. State in your
+  summary that a human must render and WATCH it (an animation via the snapshot
+  example, or `scripts/replay-fixture.sh` for resume/lifecycle motion) before
+  merge — five walk regressions once shipped behind an unchecked "live run" (#61).
+- **reducer / liveness ladder / sweeps** → trace the downstream interaction graph
+  (rebind, TTLs, cascade, dedup), not just the changed lines; the bug is usually
+  in an interaction the diff doesn't show.
+
 ### Do NOT flag
 
 - Formatting or style (rustfmt enforced in CI)
