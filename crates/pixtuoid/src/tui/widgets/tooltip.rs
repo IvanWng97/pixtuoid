@@ -499,9 +499,13 @@ mod tests {
     }
 
     #[test]
-    fn hover_tooltip_fresh_agent_shows_dashes_for_active_pct() {
+    fn hover_tooltip_shows_fresh_dashes_and_casts_a_drop_shadow() {
         // A <5s-old agent shows the literal `--%` active percentage instead of a
-        // computed N% (the fresh-agent branch, line 149).
+        // computed N% (the fresh-agent branch, line 149). This is also the ONLY
+        // coverage for `paint_hover_tooltip`'s backing: it routes through the
+        // shared `paint_card_backing`, so a pre-filled bright office must come
+        // back dimmed in the drop-shadow band (the other backing caller,
+        // `paint_simple_tooltip`, is pinned by the coffee test).
         use std::path::Path;
         use std::sync::Arc;
         use std::time::{Duration, SystemTime};
@@ -535,8 +539,20 @@ mod tests {
         scene.agents.insert(id, slot);
 
         let mut term = Terminal::new(TestBackend::new(60, 24)).unwrap();
+        let bright = ratatui::style::Color::Rgb(200, 200, 200);
         term.draw(|f| {
-            super::paint_hover_tooltip(f, &scene, id, 20, 10, f.area(), now, &theme::NORMAL)
+            // Stand in for the already-flushed office so the drop shadow has real
+            // cells to dim.
+            let full = f.area();
+            for y in 0..full.height {
+                for x in 0..full.width {
+                    let cell = &mut f.buffer_mut()[(x, y)];
+                    cell.set_symbol("\u{2580}");
+                    cell.fg = bright;
+                    cell.bg = bright;
+                }
+            }
+            super::paint_hover_tooltip(f, &scene, id, 20, 10, f.area(), now, &theme::NORMAL);
         })
         .unwrap();
         let text = buffer_text(&term);
@@ -547,6 +563,19 @@ mod tests {
         assert!(
             !text.contains("0%"),
             "fresh agent must not compute a numeric percentage, got: {text:?}"
+        );
+        // The hover path routes through the shared `paint_card_backing`: a bright
+        // equal-channel office cell can only turn into a dimmer equal-channel gray
+        // via the drop-shadow dim (the card's `tooltip_bg` is a distinct hue).
+        let buf = term.backend().buffer();
+        let shadowed = (0..buf.area.height).any(|y| {
+            (0..buf.area.width).any(|x| {
+                matches!(buf[(x, y)].bg, ratatui::style::Color::Rgb(r, g, b) if r == g && g == b && (120..200).contains(&r))
+            })
+        });
+        assert!(
+            shadowed,
+            "the agent hover tooltip must cast a drop shadow via the shared backing"
         );
     }
 
