@@ -98,66 +98,10 @@ configured before the tag is pushed, or that target's publish step fails. See
 
 ## Pull requests
 
-- Every PR is reviewed by **2+ agents** (explorer / reviewer / architect) before merge — no exceptions.
+- Every PR is reviewed by **2+ agents** (explorer / reviewer / architect) before merge — no exceptions. The teeth here are the `claude-review` + `claude-security-review` CI workflows plus your own local pass; the lens-labelled write-up is a practice, not a parsed gate.
 - AI-authored PRs get the `needs-human-verify` label and a human visual check before merge.
 - Track every consciously-deferred finding as a GitHub issue (`gh issue create`) before moving on.
-- Review verdicts on recurring claims live in [`REVIEW-LEDGER.md`](REVIEW-LEDGER.md) — check it before re-arguing a finding that smells familiar.
-- **Disposition sweep — every `claude[bot]` MEDIUM+ inline finding reaches a terminal state before merge.** Record each in a `Bot-findings-adjudicated:` block in a review-round (or the squash) commit message, one line per finding naming its file + terminal state:
-
-  ```
-  Bot-findings-adjudicated:
-  - MEDIUM crates/pixtuoid/src/tui/mod.rs → FIXED (block_in_place off the executor)
-  - HIGH  crates/pixtuoid/src/install/mod.rs → ISSUE-FILED #332
-  - MEDIUM crates/.../foo.rs → REFUTED-design (cites the <name> sharp edge)
-  ```
-
-  This is the mechanical channel that makes "no findings dropped" *verifiable* rather than inferred-from-absence — a MEDIUM+ finding once reached merge with no terminal state at all (#283 → became the #330 fix). The **`review-disposition` CI job runs this audit advisorily on every PR** (it never blocks merge — matching is per-file and the bot re-flags stale commits across rounds, so a hard gate would mis-fire) and writes any `[UN-ADJUDICATED]` MEDIUM+ finding to the job summary; `just review-disposition <PR#>` runs the same audit locally during the sweep. The terminal states are the ledger's verdict vocabulary: FIXED / REFUTED-with-trace / ISSUE-FILED #N / ACCEPTED-residual (WHY documented).
-- **A whole-codebase / multi-agent batch review leaves a per-finding ledger row, not just a count.** A review that records "N confirmed / M refuted" in its squash body *without* appending the per-finding [`REVIEW-LEDGER.md`](REVIEW-LEDGER.md) section drops the premise-anchored traces the ledger exists for: the confirmed catches go uncounted and a future review can't demote the M refutations, so it re-derives and re-pays for them (#385). Append one dated section, one row per adjudicated finding (the 8-column format), same as the per-PR two-lens reviews.
-
-### Definition of Done — mechanized (`just dod`)
-
-The lifecycle discipline above (two-lens review, the ledger trace, deferred→issue,
-docs-currency, the prod-`println!`/`settings.json`-write/`--no-verify` bans) is
-enforced by `scripts/check_dod.py`, not left to memory. ONE source of truth, two
-binding layers:
-
-- **Agent layer** — the committed `.claude/settings.json` hooks. A `Stop` hook
-  blocks turn-end on a code branch whose `.dod/attestation.md` boxes / blocking
-  checks are unmet; a `PreToolUse` hook denies `gh pr merge` / `git push` /
-  `--no-verify` git ops unless the DoD passes. Binds Claude Code sessions only —
-  the first Bash call in a trusted CC session will show a hooks prompt (this repo
-  ships agent hooks by design); they MERGE with your global `~/.claude` hooks and
-  are inert in any other repo. Every deny names the `DOD_BYPASS="<reason>"` escape.
-- **Change layer (AUTHORITATIVE)** — `.githooks/pre-push` (activate once with
-  `git config core.hooksPath .githooks`, or `just setup-tools`) and the CI
-  `definition-of-done` job. This layer **ignores `DOD_BYPASS`**, so a bypassed
-  local push still meets a gate no env var can relax. Promote the CI job to a
-  REQUIRED branch-protection check to make the merge gate binding.
-
-**Attestation.** Copy `.dod/attestation.template.md` → `.dod/attestation.md`
-(gitignored) and tick the boxes for your branch. Boxes are class-gated: a
-docs-only/clean tree needs none; feature-shaped work also needs Design + Impl-plan;
-a public-surface change also needs Docs-currency.
-
-**Two-lens-review block.** A code PR's body must carry a block the merge gate
-reads — ≥2 DISTINCT lens labels, each with a verdict (a `conf <0–100>` tail is
-optional; a sane number is recommended, a garbage one is ignored):
-
-```
-Two-lens-review:
-- correctness: APPROVE (conf 85)
-- design/blast-radius: REQUEST-CHANGES
-```
-
-The advisory CI LLM-judge rates whether the lenses are genuinely distinct (not
-paraphrases): existence is the floor, substance is the judge.
-
-**Bypass.** AGENT-LAYER ONLY, always logged: `DOD_BYPASS="<reason>"` in the env,
-or a `DOD-BYPASS: <reason>` line in `.dod/attestation.md`. The CI job ignores it.
-
-**Adding a check.** A new finding-class the gate should catch needs a `check_dod`
-sub-check **plus a both-sides `check_dod_selftest.py` case** in the same change —
-a parser that finds nothing is a silent "DoD met" (the silent-monitor-death class).
+- [`REVIEW-LEDGER.md`](REVIEW-LEDGER.md) and `docs/review-metrics/` are a **frozen historical archive** of past adjudications — handy to skim before re-arguing a finding that smells familiar, but no longer a required-update log.
 
 ### Recurring pitfalls (this codebase's review history, distilled)
 

@@ -558,9 +558,8 @@ setup-tools:
         exit 1
     fi
     # Activate the local pre-push gate (dormant by default in a fresh clone, so CI
-    # would otherwise be the only gate — and the in-session Claude hooks are
-    # bypassable). Idempotent. The CI `definition-of-done` job stays the authoritative
-    # backstop regardless.
+    # would otherwise be the only gate). Idempotent. CI re-runs `just preflight`
+    # regardless, so a skipped local hook still meets the same checks at merge.
     git config core.hooksPath .githooks
 
 # Self-test the upstream-drift watcher — its ONLY test. A regex-parser regression
@@ -572,90 +571,3 @@ setup-tools:
 drift-selftest:
     python3 scripts/check_upstream_drift_selftest.py
 
-# Whether a review-history census is due (the merged-PR backlog vs ~50 PRs past the
-# last census window). The weekly `census-reminder` workflow runs this + auto-files
-# a deduped `census` issue when due — this recipe is the local/manual check. Needs `gh`.
-[group('meta')]
-[doc('Check whether a review-history census is due (merged-PR backlog)')]
-census-reminder:
-    python3 scripts/census_reminder.py --latest-pr "$(gh pr list --state merged --limit 100 --json number --jq 'max_by(.number).number')"
-
-# Self-test the census-reminder parser — a regex/off-by-one regression silently
-# mis-files (or never files) a census, the upstream-drift silent-death class.
-# Pure Python, no network.
-[group('meta')]
-[doc('Self-test the census-reminder (filename parser + due threshold)')]
-census-reminder-selftest:
-    python3 scripts/census_reminder_selftest.py
-
-# Validate docs/review-metrics/sharp-edge-inventory.md against the CLAUDE.md sharp
-# edges (per-file count parity) + the ledger's [edge:<slug>] citations. A sharp
-# edge can't be added/removed from a CLAUDE.md without updating the inventory (the
-# census sharp-edge leg counts against it). Gated in the CI hygiene job. Pure, no network.
-[group('meta')]
-[doc('Validate the sharp-edge inventory vs CLAUDE.md + the ledger (#386)')]
-sharp-edge-inventory:
-    python3 scripts/sharp_edge_inventory.py
-
-# Self-test the sharp-edge-inventory parsers (count/rows/citation regexes).
-[group('meta')]
-[doc('Self-test the sharp-edge-inventory validator (parsers)')]
-sharp-edge-inventory-selftest:
-    python3 scripts/sharp_edge_inventory_selftest.py
-
-# Audit one or more PRs' claude[bot] MEDIUM+ inline findings for a disposition
-# trace (a `Bot-findings-adjudicated:` marker — see CONTRIBUTING.md). ADVISORY:
-# run during the merge disposition sweep to catch the #283 class (a MEDIUM+
-# finding that reached merge with no terminal state). Needs `gh` auth.
-[group('meta')]
-[doc('Audit PRs for un-adjudicated claude[bot] MEDIUM+ findings (#335)')]
-review-disposition *prs:
-    python3 scripts/check_review_disposition.py {{prs}}
-
-# Self-test the review-disposition harvester — its parsers + assessor, pinned to
-# the real claude[bot] comment shapes. A regex regression is a silent
-# disposition hole (finds nothing → false "no drops"). Pure Python, no network.
-[group('meta')]
-[doc('Self-test the review-disposition harvester (parsers + assessor)')]
-review-disposition-selftest:
-    python3 scripts/check_review_disposition_selftest.py
-
-# Self-test the review-metrics collector — its keyword role classifier, pinned to
-# first-match-wins ordering. A keyword/order regression silently mis-buckets an
-# agent's role, corrupting the REVIEW-LEDGER economics record. Pure, no network.
-[group('meta')]
-[doc('Self-test the review-metrics collector (role classifier + ordering)')]
-review-metrics-selftest:
-    python3 scripts/review-metrics_selftest.py
-# Definition-of-Done gate (scripts/check_dod.py) — mechanize the non-code-shaped
-# lifecycle discipline (two-lens review, traceability, hygiene) that CI's ~25
-# code-shape jobs can't see. ONE source of truth, called from the Claude Code
-# hooks (agent layer) AND pre-push + the CI definition-of-done job (change layer).
-# `--pr` is the AUTHORITATIVE gate — it ignores DOD_BYPASS. No arg => `--local`
-# (ahead-of-main commits in this worktree). `--pr N` needs `gh`; the rest is pure git.
-[group('meta')]
-[doc('Definition-of-Done gate (no arg = local ahead-of-main commits; --pr N for CI)')]
-dod *args:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    # {{ args }} is deliberately UNquoted: it must word-split so `just dod --pr 405`
-    # reaches argparse as two argv tokens (quote() would collapse it to one and break
-    # it). Safe because the input is the developer's own local CLI args, never
-    # untrusted PR content. (Refuted bot finding, ledger R0626-DOD-18 #1.)
-    if [ -z "{{ args }}" ]; then python3 scripts/check_dod.py --local; else python3 scripts/check_dod.py {{ args }}; fi
-
-# Self-test the Definition-of-Done gate — pins EVERY pure parser/check on both
-# sides of its threshold so a regression can't silently make the gate find
-# nothing ("DoD met" by absence — the silent-monitor-death class). Pure, no network.
-[group('meta')]
-[doc('Self-test the Definition-of-Done gate (parsers + checks)')]
-dod-selftest:
-    python3 scripts/check_dod_selftest.py
-
-# Emit the advisory LLM-judge prompt (substance-over-existence: does the two-lens
-# block show distinct perspectives? is TDD evident?). The CI definition-of-done
-# job pipes this to the model; the Python stays pure (no model call in-script).
-[group('meta')]
-[doc('Emit the DoD LLM-judge prompt (CI pipes it to the model)')]
-dod-judge:
-    python3 scripts/check_dod.py --judge-prompt

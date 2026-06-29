@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch: # manual trigger for the on-demand mutants job
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -101,64 +102,6 @@ jobs:
       - run: just shfmt-check
       - run: just actionlint
       - run: just links
-      # The sharp-edge inventory must stay in lockstep with the CLAUDE.md sharp
-      # edges (the census's citation leg counts against it) — #386.
-      - run: just sharp-edge-inventory-selftest
-      - run: just sharp-edge-inventory
-      # review-metrics.py is the economics collector with no Action of its own;
-      # gate its selftest here (the hygiene job) alongside the other parsers.
-      - run: just review-metrics-selftest
-      # The Definition-of-Done parser guard (silent-monitor-death class) — also a
-      # prerequisite of the definition-of-done job below.
-      - run: just dod-selftest
-
-  # The non-code-shaped lifecycle gate (two-lens review, traceability, hygiene)
-  # that the ~25 code-shape jobs can't see. AUTHORITATIVE: this job ignores
-  # DOD_BYPASS, so a bypassed local push still meets a gate no env var can relax.
-  # Promote to a REQUIRED branch-protection check to make the merge gate binding.
-  definition-of-done:
-    name: definition-of-done
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    if: github.event_name == 'pull_request'
-    permissions:
-      contents: read
-      pull-requests: read
-    env:
-      # Mapped from the secret so the advisory judge step can gate on its presence
-      # via `if:` without exposing it there. Absent (e.g. a fork PR) => the judge
-      # step no-ops; the gate itself still runs on the read-only github.token.
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-    steps:
-      - uses: actions/checkout@v7
-      - uses: extractions/setup-just@v4
-      # Pin the parsers before trusting the gate (mirrors sharp-edge-inventory).
-      - run: just dod-selftest
-      # The gate. Non-zero ONLY on a BLOCKING violation (new prod println! /
-      # settings.json write outside install/io.rs / --no-verify) or a missing
-      # two-lens-review block on a code PR. Heuristic findings warn, never fail.
-      - name: Definition-of-Done gate
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: just dod --pr ${{ github.event.pull_request.number }}
-      # Advisory LLM-judge — substance over existence (does the two-lens block show
-      # DISTINCT perspectives? is TDD evident?). Never reds the PR (continue-on-error
-      # + no-ops without the secret). The jq+curl+summary plumbing is the shared
-      # ./.github/actions/llm-judge composite (also used by review-disposition).
-      - name: Build the Definition-of-Done judge prompt
-        if: ${{ env.ANTHROPIC_API_KEY != '' }}
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: python3 scripts/check_dod.py --judge-prompt --pr "${{ github.event.pull_request.number }}" > /tmp/dod_judge_prompt.txt
-      - name: LLM-judge (advisory)
-        if: ${{ env.ANTHROPIC_API_KEY != '' }}
-        continue-on-error: true
-        uses: ./.github/actions/llm-judge
-        with:
-          prompt-file: /tmp/dod_judge_prompt.txt
-          title: Definition-of-Done — advisory LLM-judge
-          api-key: ${{ secrets.ANTHROPIC_API_KEY }}
 
   msrv:
     name: msrv
@@ -377,13 +320,14 @@ jobs:
       - run: just snapshots
 
   mutants:
-    name: mutation testing (advisory)
-    # PR-only (mutating a merge-to-main has no meaningful diff base) and
-    # diff-scoped, so cost scales with the change. ADVISORY: `continue-on-error`
-    # keeps a surviving mutant OFF the required-checks path — it's a hint to
-    # strengthen a test, never a merge gate (flake-averse repo). The survivor
-    # list rides out as the `mutants-report` artifact.
-    if: github.event_name == 'pull_request'
+    name: mutation testing (on-demand)
+    # ON-DEMAND only (`workflow_dispatch`) — mutation testing is an occasional
+    # "do the assertions have teeth?" audit, not a per-PR cost. Run it from the
+    # Actions tab when you want it, or locally via `just mutants` (diff-scoped).
+    # ADVISORY: `continue-on-error` keeps a surviving mutant off any required
+    # path — it's a hint to strengthen a test. Survivors ride out as the
+    # `mutants-report` artifact.
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     continue-on-error: true

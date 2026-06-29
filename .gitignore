@@ -16,5 +16,3 @@ __pycache__/
 lcov.info
 mutants.out/
 mutants.out.old/
-.dod/attestation.md
-.dod/.state

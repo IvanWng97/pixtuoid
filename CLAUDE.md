@@ -63,35 +63,6 @@ scripts/             gen-media.py + media.json (the ONE manifest-driven driver f
                      the lobster AND its backend `cc·<workspace>` coding sprite coexist live; real
                      account/gateway footprint, NOT a CI test),
                      check_upstream_drift.py (weekly wire-format watch),
-                     review-metrics.py (review-economics collector),
-                     census_reminder.py (weekly `census-reminder` Action: is a
-                     review-history census due vs the ~50-PR window? → auto-files a
-                     deduped `census` issue; `just census-reminder` local),
-                     check_review_disposition.py (per-PR `review-disposition` Action,
-                     ADVISORY — never fails a PR: surfaces any claude[bot] MEDIUM+
-                     finding lacking a `Bot-findings-adjudicated:` disposition marker —
-                     the #283 silent-drop class (channel built #335, adopted #384)),
-                     sharp_edge_inventory.py (CI-hygiene drift gate: keeps
-                     docs/review-metrics/sharp-edge-inventory.md in lockstep with the
-                     CLAUDE.md sharp-edge bullets + resolves ledger `[edge:<slug>]`
-                     citations → `just sharp-edge-inventory`; each governance script
-                     above has a `*_selftest.py` pinning its parsers, also CI-gated),
-                     check_dod.py (the Definition-of-Done gate — mechanizes the
-                     non-code-shaped lifecycle discipline the ~25 CI code-jobs can't see:
-                     two-lens-review-at-merge, prod-println!/settings-write/--no-verify
-                     guards, docs-currency + ledger/deferral traceability. ONE SoT called
-                     from the Claude Code hooks (`.claude/settings.json`, agent layer) AND
-                     `.githooks/pre-push` + the CI `definition-of-done` job (change layer,
-                     AUTHORITATIVE — ignores DOD_BYPASS); diff-scoped so existing code is
-                     grandfathered. `just dod` / `just dod-selftest`; `check_dod_selftest.py`
-                     pins the parsers, CI-gated in hygiene + as a job prerequisite).
-                     The cadence+authority of ALL these governance scripts (which run
-                     when, which can fail a PR, bypass) is tabled in
-                     [`docs/governance-scripts.md`](docs/governance-scripts.md); the
-                     advisory `--judge-prompt` substance check is shared via the
-                     `.github/actions/llm-judge` composite (DoD + review-disposition);
-                     `_gov.py` holds the one verbatim-shared pure helper
-                     (`_strip_control`), gh plumbing stays per-script until a 3rd gate
 site/                Astro landing page → GitHub Pages; self-contained Node project,
                      own CI; `just site-{setup,dev,check,fmt}` → see site/README.md
 integrations/raycast/  Raycast extension (TypeScript, self-contained Node project; NOT Rust):
@@ -187,11 +158,11 @@ and stays a human step. See
 - **No scan-the-history logic.** Keep persistent state (a set, a map, a bool) updated as events arrive; never derive state by scanning backward through time.
 - **Match the surrounding shell** (zsh interactive / POSIX sh); `shellcheck` + `shfmt` any `.sh` you touch — run `just shfmt-fix` to format (both gated by `just lint` + the CI `hygiene` job). **macOS first**: BSD CLI, brew, launchd.
 - **Keep docs current.** A change that alters module structure, architecture, workflow, or public API updates the relevant `CLAUDE.md` + `README.md` in the same commit.
-- **Every review adjudication leaves a trace** in [`docs/REVIEW-LEDGER.md`](docs/REVIEW-LEDGER.md) (premise-anchored protocol in its header; economics in `docs/review-metrics/`). A finding refuted as "deliberate design" MUST cite an existing sharp edge or add one in the same change.
+- **A refuted finding cites (or adds) a sharp edge.** When you reject a review finding as "deliberate design," point at the relevant per-crate `CLAUDE.md` "Known sharp edges" entry — or add one in the same change. That keeps the context accurate for the next agent (the real payoff). (`docs/REVIEW-LEDGER.md` + `docs/review-metrics/` are a frozen historical archive of past adjudications, kept for reference — no longer a required-update log.)
 - **Track every deferred finding as a GitHub issue** BEFORE moving on — problem, why deferred, fix sketch. A deferred finding with no issue is a silently-dropped finding. (Verify it's real first — see "Don't blindly accept reviewer findings".)
 - **Sprite changes require visual verification** — render, crop, read the PNG, self-critique until it reads at half-block scale; commit messages carry the iteration history. Full checklist: `.claude/skills/beautify-decoration/SKILL.md`.
 - **Periodic context-file audits also distill memory**: each `/revise-claude-md`-style audit sweeps recent session memories for promote-to-repo candidates (the memory layer of [`docs/KNOWLEDGE-ENGINEERING.md`](docs/KNOWLEDGE-ENGINEERING.md)).
-- **Definition of Done is MECHANIZED, not just prose.** The lifecycle conventions above that aren't code-shaped (two-lens review before merge, the ledger trace, deferred→issue, docs-currency, the prod-`println!`/`settings.json`-write/`--no-verify` bans) are enforced by `scripts/check_dod.py` (`just dod`) from BOTH the Claude Code hooks (`.claude/settings.json` — Stop + PreToolUse, the agent layer) and `.githooks/pre-push` + the CI `definition-of-done` job (the change layer, AUTHORITATIVE — it ignores `DOD_BYPASS`). Prose binds intention; this binds behavior. Fill `.dod/attestation.md` (template in `.dod/`) on a code branch; the merge gate needs a `Two-lens-review:` block in the PR body (format in [`CONTRIBUTING.md`](docs/CONTRIBUTING.md)). Don't add a finding-class the gate misses without adding a `check_dod` sub-check + selftest case in the same change.
+- **The lifecycle conventions above are PRACTICES, not a gate.** Two-lens review before merge, deferred→issue, docs-currency, no stray prod-`println!`, no direct `settings.json` write, no `--no-verify` — do them because they're right, not because a script blocks you. (The old `check_dod` mechanization + its `.dod/` attestation + the CI `definition-of-done` job were removed: a one-person gate run against oneself is ceremony, not enforcement. Real teeth live in the automated checks — `just preflight`, clippy, tests, the `claude-review` second lens.)
 
 ## Architecture invariants
 
@@ -246,7 +217,7 @@ full WHY lives in the nested `CLAUDE.md` for the owning crate.
 - "How does a CC tool call become a moving sprite?" → `runtime/driver.rs::run_async` → `SourceManager::spawn` → source → decoder → `reducer::Reducer::apply` → `watch` channel → `TuiRenderer::render` → `pixtuoid_scene::pixel_painter::render_to_rgb_buffer` (the world render) → `tui::renderer::draw_scene` (the terminal flush). First half in `pixtuoid-core`; the world render in the `pixtuoid-scene` crate; the terminal flush in `pixtuoid`'s `tui`.
 - Architecture overview + data-flow diagram: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Area-specific entries (layout, sources, install, themes, motion, weather, pets, …) are in the nested guides.
 - "How do I ship one change that spans the Rust lib + the site + the Raycast extension in parallel?" → [`docs/PARALLEL-DELIVERY.md`](docs/PARALLEL-DELIVERY.md) (the contract-first → fan-out → join model; the `--json` shape is the contract, the per-area `CLAUDE.md`/`AGENTS.md` scope each worker/agent). How lessons persist across agent runs so the next change is cheaper: [`docs/KNOWLEDGE-ENGINEERING.md`](docs/KNOWLEDGE-ENGINEERING.md).
-- "Working an agent-driven change — what do I run, and when?" (each gate is detailed above; this is the running order) → **before code**, if non-trivial (new seam / ≥3 files), plan against [`.github/prompts/impl-plan.prompt.md`](.github/prompts/impl-plan.prompt.md) → **touched the `--json` / `SourceStatus` shape?** `just gen-contract` (else the Raycast `gen:contract` diff + `tsc` go red) → **before push** `just preflight` (lint → clippy → hack → test; never pipe through `tail`/`head` — it eats the exit code; the CI-only gates under "Build & test" — sharp-edge-inventory, semver, gen-check — still run separately) → **before merge** the two-lens review (2+ agents, differentiated lenses; see "Things NOT to do") → **dogfood a source/lifecycle change** with `pixtuoid run --headless --projects-root ~/.claude/projects` vs live CC, or replay hermetically via `scripts/replay-fixture.sh` / `scripts/openclaw-live-e2e.sh`. Advisory backstops that surface drift but never gate: `scripts/check_review_disposition.py`, `scripts/check_upstream_drift.py`.
+- "Working an agent-driven change — what do I run, and when?" (each gate is detailed above; this is the running order) → **before code**, if non-trivial (new seam / ≥3 files), plan against [`.github/prompts/impl-plan.prompt.md`](.github/prompts/impl-plan.prompt.md) → **touched the `--json` / `SourceStatus` shape?** `just gen-contract` (else the Raycast `gen:contract` diff + `tsc` go red) → **before push** `just preflight` (lint → clippy → hack → test; never pipe through `tail`/`head` — it eats the exit code; the CI-only gates under "Build & test" — semver, gen-check — still run separately) → **before merge** the two-lens review (2+ agents, differentiated lenses; see "Things NOT to do") → **dogfood a source/lifecycle change** with `pixtuoid run --headless --projects-root ~/.claude/projects` vs live CC, or replay hermetically via `scripts/replay-fixture.sh` / `scripts/openclaw-live-e2e.sh`. Advisory backstop that surfaces drift but never gates: `scripts/check_upstream_drift.py`.
 
 ## When refactoring
 

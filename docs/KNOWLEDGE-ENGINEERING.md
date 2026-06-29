@@ -7,8 +7,20 @@ pixtuoid is built almost entirely by AI coding agents, reviewed by fleets of
 AI reviewers, and maintained across hundreds of agent sessions. That makes it
 a live laboratory for a question every team adopting agents hits eventually:
 **where does the knowledge live, and who pays when it doesn't?** This page is
-the system we run, the experiments we ran against it, and the honest results
+the system we ran, the experiments we ran against it, and the honest results
 — including the null ones.
+
+> **Editor's note (2026-06).** The heavy *process* machinery described below —
+> the review-ledger suppression protocol, the merge-time disposition sweep, and
+> the `census-reminder` / `review-metrics` / `sharp-edge-inventory` automation —
+> has since been **removed** from the repo as a deliberate simplification. This
+> page is kept as a record of what we built and, more to the point, what we
+> *measured*: the null onboarding result and the code-first storage ranking are
+> exactly *why* the prose-and-process layers were cut back to the parts that act
+> on a change while it is still being written — context files, the in-session
+> build gate (`just preflight`), lints and tests, and human-plus-AI review. Read
+> the storage layers and "the conveyor" below as the system as it stood during
+> the experiments, not as current tooling.
 
 ## The numbers that started it
 
