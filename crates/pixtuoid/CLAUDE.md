@@ -37,9 +37,11 @@ src/
 │                       (run_sources_list/run_sources_set/run_change/run_setup, codecov-excluded like doctor::run)
 ├── term.rs             truecolor preflight — does NOT guess from a $TERM name allowlist; ASKS the terminal (#397).
 │                       `query_truecolor(timeout)` (the IO seam, cfg(unix), codecov-excluded): opens `/dev/tty`,
-│                       raw-modes it (RAII `TermiosRestore`), writes the DECRQSS probe (`ESC[48:2:1:2:3m ESC P$qm ESC\\
-│                       ESC[0m` — set unlikely 24-bit bg, query SGR back, reset), reads the reply via `libc::poll` until
-│                       the `ESC\\`/BEL terminator or the budget, then `parse_decrqss_truecolor` (PURE, unit-tested):
+│                       raw-modes it (RAII `TermiosRestore`), writes the DECRQSS probe (`ESC[48;2;1;2;3m ESC P$qm ESC\\
+│                       ESC[0m` — set unlikely 24-bit bg in the SEMICOLON form crossterm emits, query SGR back, reset),
+│                       reads the reply via `libc::select` (NOT poll — macOS `poll()` returns POLLNVAL on tty/pty fds,
+│                       found by PTY dogfood) until the `ESC\\`/BEL terminator or the budget, then `parse_decrqss_truecolor`
+│                       (PURE, unit-tested):
 │                       Some(true)=our RGB triple echoed back, Some(false)=valid-but-downsampled, None=`0$r`/empty/timeout.
 │                       The pure policy pieces: `warn_zone(cmd_is_run_tui, is_tty, colorterm, suppress_env)` (the cheap
 │                       pre-gate — only QUERY when this holds; truth-table tested) + `colorterm_is_truecolor` (an explicit

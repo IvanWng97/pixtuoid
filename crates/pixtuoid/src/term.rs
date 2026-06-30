@@ -17,7 +17,7 @@
 
 /// Default round-trip budget for the `DECRQSS` probe: long enough for a laggy SSH
 /// link to answer, short enough that a terminal which never answers (no DECRQSS
-/// support → genuinely suspect) only costs this once at startup. `poll` returns
+/// support → genuinely suspect) only costs this once at startup. `select` returns
 /// the instant a reply arrives, so a responsive terminal never waits the full
 /// budget — only non-responders pay it.
 pub const TRUECOLOR_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(100);
@@ -130,7 +130,7 @@ const DECRQSS_TRUECOLOR_PROBE: &[u8] = b"\x1b[48;2;1;2;3m\x1bP$qm\x1b\\\x1b[0m";
 /// allowlist). Opens the controlling terminal (`/dev/tty`, so a piped
 /// `pixtuoid doctor > file` never receives escape codes), switches it to raw so
 /// the reply isn't echoed and arrives un-buffered, writes the probe, reads the
-/// reply with a `poll` timeout, restores the terminal, and parses. Returns `None`
+/// reply with a `select` timeout, restores the terminal, and parses. Returns `None`
 /// on any I/O failure or no answer — degrading to "warn", unchanged from a
 /// terminal we can't confirm. The IO seam (codecov-excluded); the parser and the
 /// policy around it are the unit-tested pure pieces.
@@ -205,14 +205,29 @@ fn read_until_terminator(
         if elapsed >= timeout {
             break;
         }
-        let remaining_ms = (timeout - elapsed).as_millis().min(i32::MAX as u128) as i32;
-        let mut pfd = libc::pollfd {
-            fd,
-            events: libc::POLLIN,
-            revents: 0,
+        let remaining = timeout - elapsed;
+        let mut tv = libc::timeval {
+            tv_sec: remaining.as_secs() as libc::time_t,
+            tv_usec: remaining.subsec_micros() as libc::suseconds_t,
         };
-        // SAFETY: `pfd` is a single valid pollfd; `poll` only reads/writes it.
-        let ready = unsafe { libc::poll(&mut pfd, 1, remaining_ms) };
+        // `select`, NOT `poll`: macOS `poll()` is broken on tty/pty devices and
+        // returns `POLLNVAL` for a valid terminal fd, which would make every
+        // non-`$COLORTERM` terminal read nothing and falsely warn. `select` works
+        // on ttys on both macOS and Linux. The fd is opened early so it's well
+        // under `FD_SETSIZE`.
+        // SAFETY: a zeroed `fd_set` with our single valid fd registered.
+        let mut rfds: libc::fd_set = unsafe { std::mem::zeroed() };
+        unsafe { libc::FD_SET(fd, &mut rfds) };
+        // SAFETY: one read fd, null write/error sets, a valid timeval.
+        let ready = unsafe {
+            libc::select(
+                fd + 1,
+                &mut rfds,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                &mut tv,
+            )
+        };
         if ready < 0 {
             // A signal (e.g. SIGWINCH at startup) interrupted the wait — retry
             // within the remaining budget rather than give up to a false warn.
@@ -221,7 +236,8 @@ fn read_until_terminator(
             }
             break;
         }
-        if ready == 0 || pfd.revents & libc::POLLIN == 0 {
+        // SAFETY: `rfds` was populated by `select`; checking our fd's membership.
+        if ready == 0 || !unsafe { libc::FD_ISSET(fd, &rfds) } {
             break; // timeout, or not a read-ready event
         }
         match tty.read(&mut chunk) {
