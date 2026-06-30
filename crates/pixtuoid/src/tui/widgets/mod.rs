@@ -56,6 +56,11 @@ fn to_color(c: Rgb) -> Color {
 const SHADOW_RIGHT_FALLOFF: [f32; 2] = [0.66, 0.85];
 const SHADOW_BOTTOM_FACTOR: f32 = 0.74;
 
+/// How far the shadow is cast down-and-right of the card, in cells. The whole
+/// L-band shifts by this, which is what makes it read as a cast shadow rather
+/// than a hard outline. Bumping it deepens the offset; the falloff stays as-is.
+const SHADOW_OFFSET: u16 = 1;
+
 /// Multiply an `Rgb` color toward black by `f`. Half-block office cells carry a
 /// real RGB on BOTH `fg` (top sub-pixel) and `bg` (bottom sub-pixel), so a clean
 /// shadow darkens both — ratatui's own `Block::shadow` tints bg-only / stamps a
@@ -95,16 +100,16 @@ fn cast_drop_shadow(f: &mut ratatui::Frame<'_>, area: Rect) {
     for (d, &factor) in SHADOW_RIGHT_FALLOFF.iter().enumerate() {
         let col = Rect {
             x: area.right().saturating_add(d as u16),
-            y: area.y.saturating_add(1),
+            y: area.y.saturating_add(SHADOW_OFFSET),
             width: 1,
             height: area.height,
         };
         dim_band(f, col, bounds, factor);
     }
     let bottom = Rect {
-        x: area.x.saturating_add(1),
+        x: area.x.saturating_add(SHADOW_OFFSET),
         y: area.bottom(),
-        width: area.width.saturating_sub(1),
+        width: area.width.saturating_sub(SHADOW_OFFSET),
         height: 1,
     };
     dim_band(f, bottom, bounds, SHADOW_BOTTOM_FACTOR);
