@@ -86,24 +86,19 @@ SEAMS: tuple[Seam, ...] = (
         ),
         source=(".github/prompts/pr_review_rules.md", "walk-leg"),
     ),
+    # reducer-liveness matches by DIRECTORY (state/ + source/jsonl/) so a NEW
+    # file in either is covered automatically — the old explicit file list was
+    # the rot-prone outlier (every other seam matches by dir substring) and
+    # silently missed jsonl/mod.rs + jsonl/health.rs, the watcher orchestration
+    # loop (refresh_probe_snapshot / walk_jsonl / drain_child_end_unclaims /
+    # FailureLatch). The source/-root probe rungs aren't in a dir of their own,
+    # so they stay slash-anchored file matches.
     Seam(
         key="reducer-liveness",
         title="🧠 Reducer / liveness ladder / scope (state machine + concurrency)",
-        match=lambda p: p.endswith(
-            (
-                "state/mod.rs",
-                "state/reducer.rs",
-                "state/fsm.rs",
-                "state/scope.rs",
-                "state/correlation.rs",
-                "source/jsonl/liveness.rs",
-                "source/jsonl/unclaim.rs",
-                "source/jsonl/walk.rs",
-                "source/exit_watch.rs",
-                "source/cc_probe.rs",
-                "source/fd_probe.rs",
-            )
-        ),
+        match=lambda p: "/state/" in p
+        or "/source/jsonl/" in p
+        or p.endswith(("/exit_watch.rs", "/cc_probe.rs", "/fd_probe.rs")),
         audit=(
             "Trace the **downstream interaction graph** (rebind, TTLs, cascade, dedup, sweeps), not just the changed lines — the bug is usually in an interaction the diff doesn't show.",
             "Check the negative branches are pinned (a test that survives deleting the guarded constant pins nothing).",
@@ -210,15 +205,17 @@ def _selftest() -> int:
     assert keys([".github/workflows/ci.yml"]) == ["ci-gates"]
     assert keys(["justfile"]) == ["ci-gates"]
 
-    # Per-path coverage: EVERY path in a multi-path predicate must fire its seam,
-    # so dropping one from a tuple turns this red (closes the silent-rot gap the
-    # module docstring promises). reducer-liveness has 11 paths:
+    # reducer-liveness matches whole dirs (state/ + source/jsonl/) + the
+    # source/-root probe rungs. Includes jsonl/mod.rs + jsonl/health.rs — the
+    # watcher orchestration loop the old file-list silently missed.
     for p in (
         "crates/pixtuoid-core/src/state/mod.rs",
         "crates/pixtuoid-core/src/state/reducer.rs",
         "crates/pixtuoid-core/src/state/fsm.rs",
         "crates/pixtuoid-core/src/state/scope.rs",
         "crates/pixtuoid-core/src/state/correlation.rs",
+        "crates/pixtuoid-core/src/source/jsonl/mod.rs",  # was uncovered
+        "crates/pixtuoid-core/src/source/jsonl/health.rs",  # was uncovered
         "crates/pixtuoid-core/src/source/jsonl/liveness.rs",
         "crates/pixtuoid-core/src/source/jsonl/unclaim.rs",
         "crates/pixtuoid-core/src/source/jsonl/walk.rs",
@@ -227,6 +224,10 @@ def _selftest() -> int:
         "crates/pixtuoid-core/src/source/fd_probe.rs",
     ):
         assert keys([p]) == ["reducer-liveness"], p
+    # The dir match is slash-anchored — a per-source decoder or a "state"-ish
+    # name that is NOT under state/ or jsonl/ must NOT fire reducer-liveness.
+    assert keys(["crates/pixtuoid-core/src/source/copilot.rs"]) == []
+    assert keys(["crates/x/src/reinstate.rs"]) == []
     # visual fires on the office-look SOURCE dirs, not just sprites/painter:
     for p in (
         "crates/pixtuoid-scene/src/theme/cyberpunk.rs",
