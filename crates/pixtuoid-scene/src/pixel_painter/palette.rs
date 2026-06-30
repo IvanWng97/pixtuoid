@@ -1,22 +1,24 @@
 //! Per-agent palette (shirt / hair / skin) + frame recolor + color math
 //! primitives (blend / lerp / bell / mix_lab).
 //!
-//! `agent_palette` picks a deterministic shirt/hair/skin from per-agent
-//! hashes; `recolor_frame` rewrites a frame's pixels by RGB-equality
-//! against the base pack palette. The color-math helpers live here too
-//! because the palette tint code uses them directly and they're widely
-//! shared with background/effects.
+//! `agent_palette` picks the **outfit (shirt + pants) from the agent's normalized cwd**
+//! (same working directory → same outfit, for glanceable team/org-chart grouping), while
+//! **hair/skin stay per-agent** (`agent_id`-seeded). When `cwd` is unknown or empty, the outfit
+//! falls back to the `agent_id` seed. `recolor_frame` rewrites a frame's pixels by RGB-equality
+//! against the base pack palette. The color-math helpers live here too because the palette tint
+//! code uses them directly and they're widely shared with background/effects.
 
 use pixtuoid_core::source::decoder::normalize_path_key;
 use pixtuoid_core::sprite::format::RECOLOR_KEYS;
 use pixtuoid_core::sprite::{Frame, Palette, Pixel, Rgb, RgbBuffer};
 use pixtuoid_core::AgentSlot;
 
-/// A complete shirt + pants combo. We pick *outfits* per agent rather
-/// than independent shirt and pants colors so the result is always a
-/// harmonious pairing (designed together by someone who knows color)
-/// instead of a random clash. Sources: Wes Anderson stills, Studio
-/// Ghibli character art, modern office capsule-wardrobe palettes.
+/// A complete shirt + pants combo. Outfits are **keyed by the agent's normalized
+/// working directory** (same cwd → same outfit, so the office reads as a color-coded org-chart),
+/// not by per-agent hash. We pick *complete outfits* rather than independent shirt and pants
+/// colors so the result is always a harmonious pairing (designed together by someone who knows
+/// color) instead of a random clash. Hair/skin stay per-agent for individual distinctness.
+/// Sources: Wes Anderson stills, Studio Ghibli character art, modern office capsule-wardrobe palettes.
 #[derive(Clone, Copy)]
 struct Outfit {
     shirt: Rgb,
