@@ -65,6 +65,84 @@ pub fn warn_zone(
         && !truecolor_warn_suppressed(suppress_env)
 }
 
+/// The pre-flight decision for the terminal TUI's *color* requirement (distinct
+/// from the truecolor *depth* warning above). The pixel-art office is 24-bit
+/// color end to end with no legible monochrome fallback, so when the environment
+/// disables color we refuse to launch the canvas and explain why — mirroring the
+/// Windows VT hard-gate — instead of rendering unreadable block-soup with no hint.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColorPreflight {
+    /// Color is available — launch normally.
+    Proceed,
+    /// `$NO_COLOR` is set but `$CLICOLOR_FORCE` overrides it (the BSD precedence).
+    /// The caller MUST `crossterm::style::force_color_output(true)`: crossterm
+    /// strips color under `$NO_COLOR` and does NOT honor `$CLICOLOR_FORCE` itself
+    /// (verified empirically), so without the explicit force the office would
+    /// still render colorless despite the user asking for color.
+    ForceColor,
+    /// `$NO_COLOR` is set (and not force-overridden) → refuse + explain.
+    RefuseNoColor,
+    /// `$TERM=dumb` → the terminal can't render escapes at all → refuse + explain.
+    RefuseDumbTerm,
+}
+
+/// Decide the color preflight from the environment (pure; the caller reads env and
+/// acts — the "policy in term.rs, IO at the call site" pattern). Precedence,
+/// highest first:
+///   1. `$TERM=dumb` — a terminal that can't interpret escape sequences at all;
+///      nothing we emit renders, and forcing color can't fix it, so refuse first.
+///   2. `$NO_COLOR` non-empty — crossterm strips our 24-bit SGR to a bare reset,
+///      so the office would be unreadable blocks. Honor the BSD `$CLICOLOR_FORCE`
+///      \> `$NO_COLOR` precedence: a non-empty `$CLICOLOR_FORCE` is the user
+///      explicitly wanting color, so force it on rather than refuse.
+///   3. otherwise proceed.
+///
+/// `$NO_COLOR` counts as active only when NON-EMPTY — matching crossterm, the
+/// thing that actually strips the color (it ignores an empty `$NO_COLOR`). An
+/// empty value therefore doesn't break the render and must not block launch.
+pub fn color_preflight(
+    no_color: Option<&str>,
+    clicolor_force: Option<&str>,
+    term: Option<&str>,
+) -> ColorPreflight {
+    if matches!(term, Some(t) if t == "dumb") {
+        return ColorPreflight::RefuseDumbTerm;
+    }
+    let no_color_set = matches!(no_color, Some(v) if !v.is_empty());
+    if no_color_set {
+        let forced = matches!(clicolor_force, Some(v) if !v.is_empty());
+        return if forced {
+            ColorPreflight::ForceColor
+        } else {
+            ColorPreflight::RefuseNoColor
+        };
+    }
+    ColorPreflight::Proceed
+}
+
+/// The `pixtuoid doctor` color-availability line, derived from the SAME
+/// `color_preflight` policy the launcher acts on so the diagnostic matches what
+/// `run` would do. `None` when color is available (the `terminal:` row already
+/// covers depth — no extra line needed); `Some(reason)` when color is disabled or
+/// force-overridden, so a "the office is monochrome / won't launch" report is
+/// self-diagnosable. Pure (takes the decision) — covered via `doctor::run`.
+pub fn color_status_row(pf: ColorPreflight) -> Option<&'static str> {
+    match pf {
+        ColorPreflight::Proceed => None,
+        ColorPreflight::ForceColor => {
+            Some("color: forced on ($CLICOLOR_FORCE overrides $NO_COLOR)")
+        }
+        ColorPreflight::RefuseNoColor => Some(
+            "color: DISABLED — $NO_COLOR is set, so colors are stripped and the \
+             office can't render. Unset NO_COLOR, or set CLICOLOR_FORCE=1 to override.",
+        ),
+        ColorPreflight::RefuseDumbTerm => Some(
+            "color: DISABLED — $TERM=dumb; this terminal can't render escape \
+             sequences or color.",
+        ),
+    }
+}
+
 /// Parse a `DECRQSS`-for-SGR reply to our truecolor probe. We set the background
 /// to `48;2;1;2;3`; the reply form is `DCS 1 $ r <SGR> ST` for a valid request
 /// and `DCS 0 $ r ST` when the terminal can't honor it. Returns
@@ -316,6 +394,43 @@ mod tests {
         assert!(!warn_zone(true, false, None, None));
         assert!(!warn_zone(true, true, Some("truecolor"), None));
         assert!(!warn_zone(true, true, None, Some("1")));
+    }
+
+    #[test]
+    fn color_preflight_precedence_and_thresholds() {
+        use ColorPreflight::*;
+        // Healthy: no NO_COLOR, no dumb → launch.
+        assert_eq!(color_preflight(None, None, Some("xterm-256color")), Proceed);
+        // Empty NO_COLOR is ignored (crossterm doesn't strip on it) → still launch.
+        assert_eq!(color_preflight(Some(""), None, None), Proceed);
+        // NO_COLOR set (any non-empty value, value-agnostic) → refuse.
+        assert_eq!(color_preflight(Some("1"), None, None), RefuseNoColor);
+        assert_eq!(color_preflight(Some("anything"), None, None), RefuseNoColor);
+        // CLICOLOR_FORCE overrides NO_COLOR (BSD precedence) → force, don't refuse.
+        assert_eq!(color_preflight(Some("1"), Some("1"), None), ForceColor);
+        // ...but an EMPTY CLICOLOR_FORCE is not a force → still refuse.
+        assert_eq!(color_preflight(Some("1"), Some(""), None), RefuseNoColor);
+        // CLICOLOR_FORCE with no NO_COLOR is a no-op here (nothing to override).
+        assert_eq!(color_preflight(None, Some("1"), None), Proceed);
+        // TERM=dumb outranks everything — even a force can't make dumb render.
+        assert_eq!(color_preflight(None, None, Some("dumb")), RefuseDumbTerm);
+        assert_eq!(
+            color_preflight(Some("1"), Some("1"), Some("dumb")),
+            RefuseDumbTerm
+        );
+    }
+
+    #[test]
+    fn color_status_row_only_speaks_when_color_is_not_plainly_available() {
+        use ColorPreflight::*;
+        assert_eq!(color_status_row(Proceed), None);
+        assert!(color_status_row(ForceColor)
+            .unwrap()
+            .contains("CLICOLOR_FORCE"));
+        assert!(color_status_row(RefuseNoColor)
+            .unwrap()
+            .contains("NO_COLOR"));
+        assert!(color_status_row(RefuseDumbTerm).unwrap().contains("dumb"));
     }
 
     #[cfg(unix)]

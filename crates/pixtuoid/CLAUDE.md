@@ -56,7 +56,21 @@ src/
 │                       (softbuffer = real RGB px). **Sharp edges:** a truecolor terminal that doesn't answer DECRQSS (rare)
 │                       false-positives → the escape hatch covers it; a very-laggy reply past the 100ms budget could leak a
 │                       few bytes to the TUI's stdin (accepted, rare). The query is the authority — there is NO $TERM/
-│                       $TERM_PROGRAM allowlist to keep current (deleted on purpose; that was the "magic variable" smell)
+│                       $TERM_PROGRAM allowlist to keep current (deleted on purpose; that was the "magic variable" smell).
+│                       SEPARATE axis (color ON/OFF, not depth): `color_preflight(no_color, clicolor_force, term)` →
+│                       `ColorPreflight` {Proceed / ForceColor / RefuseNoColor / RefuseDumbTerm}. The office is 24-bit with
+│                       NO legible monochrome fallback, so when color is disabled we REFUSE the canvas + explain (mirrors the
+│                       Windows VT hard-gate) instead of rendering block-soup. Precedence: `$TERM=dumb` first (can't render
+│                       escapes at all — a force can't fix it), then NON-EMPTY `$NO_COLOR` (crossterm strips our SGR to a bare
+│                       reset — VERIFIED empirically) UNLESS NON-EMPTY `$CLICOLOR_FORCE` overrides it (BSD precedence →
+│                       `ForceColor`; main.rs MUST call `crossterm::style::force_color_output(true)` itself — crossterm
+│                       honors `$NO_COLOR` but NOT `$CLICOLOR_FORCE`, also verified). Empty `$NO_COLOR` is ignored (matches
+│                       crossterm — the thing that strips). Gated to the `run` TUI only (--headless/doctor/sources are plain
+│                       text; floating = softbuffer). `color_status_row(pf)` is the `doctor` color line (reuses the SAME
+│                       policy so the diagnostic matches `run`; doctor also SKIPS the DECRQSS probe under `$TERM=dumb`).
+│                       **Sharp edge:** tmux (#4034) doesn't implement DECRQSS, so a truecolor tmux can false-positive the
+│                       depth warn — `$PIXTUOID_NO_TRUECOLOR_WARN=1` covers it (tmux usually sets `$COLORTERM`, skipping the
+│                       query entirely anyway).
 ├── setup.rs            first-run detection for onboarding: the PURE `is_first_run(cfg, path) = !path.exists() ||
 │                       cfg.sources.is_empty()` (mirrors resolve_connected's migrate condition; unit-tested). `pub`
 │                       because main.rs (a separate crate) computes RunConfig.first_run from it. The cinematic overlay

@@ -12,6 +12,56 @@ fn main() -> Result<()> {
     install_crash_hook();
     let (log_level, cli_theme, cmd) = Cli::parse().cmd_or_default();
 
+    // The terminal `run` TUI is the only command that paints the pixel-art canvas:
+    // --headless is a text summary, `doctor`/`sources` are plain output, and
+    // `floating` paints real RGB via softbuffer — none need the terminal's color.
+    let is_run_tui = matches!(
+        &cmd,
+        Cmd::Run {
+            headless: false,
+            ..
+        }
+    );
+
+    // Color preflight (cross-platform — crossterm strips our 24-bit SGR to a bare
+    // reset under $NO_COLOR, and a $TERM=dumb terminal can't render escapes at all;
+    // either way the office, which has no legible monochrome fallback, would be
+    // unreadable). Refuse the canvas with a one-line explanation instead of
+    // rendering block-soup, honoring the BSD $CLICOLOR_FORCE > $NO_COLOR override
+    // (crossterm needs the force call applied explicitly — it ignores
+    // $CLICOLOR_FORCE on its own). This runs before the truecolor probe, so a dumb
+    // terminal never gets DECRQSS escapes.
+    if is_run_tui {
+        use pixtuoid::term::ColorPreflight;
+        match pixtuoid::term::color_preflight(
+            std::env::var("NO_COLOR").ok().as_deref(),
+            std::env::var("CLICOLOR_FORCE").ok().as_deref(),
+            std::env::var("TERM").ok().as_deref(),
+        ) {
+            ColorPreflight::Proceed => {}
+            ColorPreflight::ForceColor => crossterm::style::force_color_output(true),
+            ColorPreflight::RefuseNoColor => {
+                eprintln!(
+                    "pixtuoid: $NO_COLOR is set, so your terminal strips color — the \
+                     pixel-art office is 24-bit color with no legible monochrome mode \
+                     and would render as unreadable blocks. Unset NO_COLOR (or set \
+                     CLICOLOR_FORCE=1 to override) to run it, or use \
+                     `pixtuoid run --headless` for a text summary."
+                );
+                return Ok(());
+            }
+            ColorPreflight::RefuseDumbTerm => {
+                eprintln!(
+                    "pixtuoid: $TERM=dumb — this terminal can't render the pixel-art \
+                     office (no cursor addressing or color). Use a graphical terminal \
+                     (Windows Terminal, iTerm2, Ghostty, Alacritty, kitty, WezTerm), \
+                     or `pixtuoid run --headless` for a text summary."
+                );
+                return Ok(());
+            }
+        }
+    }
+
     // Truecolor preflight: the terminal TUI renders 24-bit half-block pixels; a
     // non-truecolor terminal renders them approximated/garbled with no other hint.
     // Rather than guess from a $TERM allowlist, ASK the terminal (DECRQSS) when
@@ -24,13 +74,7 @@ fn main() -> Result<()> {
     // truecolor session (COLORTERM set) pays nothing.
     #[cfg(not(windows))]
     if pixtuoid::term::warn_zone(
-        matches!(
-            &cmd,
-            Cmd::Run {
-                headless: false,
-                ..
-            }
-        ),
+        is_run_tui,
         std::io::IsTerminal::is_terminal(&std::io::stderr()),
         std::env::var("COLORTERM").ok().as_deref(),
         std::env::var("PIXTUOID_NO_TRUECOLOR_WARN").ok().as_deref(),

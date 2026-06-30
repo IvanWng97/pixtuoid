@@ -570,12 +570,22 @@ pub fn run(log_path: &std::path::Path) -> anyhow::Result<String> {
     // Terminal capability: the pixel-art office needs a 24-bit-color terminal, and
     // the #1 silent failure is a non-truecolor terminal rendering approximated
     // colors. When $COLORTERM hasn't already declared truecolor, ASK the terminal
-    // directly (DECRQSS) — but ONLY when stdout is a real tty, so a piped
-    // `pixtuoid doctor > file` neither emits escape codes nor blocks (and the
-    // test harness, whose output is captured, never probes). The row is formatted
-    // by the PURE, unit-tested `term::terminal_diagnostic_row`; `.ok()` makes an
-    // unset var a genuine `None`, not `Some("")`.
-    let truecolor_probe = if std::io::IsTerminal::is_terminal(&std::io::stdout()) {
+    // directly (DECRQSS) — but ONLY when stdout is a real tty (so a piped
+    // `pixtuoid doctor > file` neither emits escape codes nor blocks, and the test
+    // harness, whose output is captured, never probes) AND the terminal isn't
+    // $TERM=dumb (which can't answer DECRQSS — don't emit escapes at it). The same
+    // `color_preflight` the launcher acts on drives both the probe skip and the
+    // color-status line, so the diagnostic matches what `run` would do. The row is
+    // formatted by the PURE, unit-tested `term::terminal_diagnostic_row`; `.ok()`
+    // makes an unset var a genuine `None`, not `Some("")`.
+    let color_pf = crate::term::color_preflight(
+        std::env::var("NO_COLOR").ok().as_deref(),
+        std::env::var("CLICOLOR_FORCE").ok().as_deref(),
+        std::env::var("TERM").ok().as_deref(),
+    );
+    let probe_ok = std::io::IsTerminal::is_terminal(&std::io::stdout())
+        && color_pf != crate::term::ColorPreflight::RefuseDumbTerm;
+    let truecolor_probe = if probe_ok {
         crate::term::query_truecolor(crate::term::TRUECOLOR_PROBE_TIMEOUT)
     } else {
         None
@@ -586,6 +596,10 @@ pub fn run(log_path: &std::path::Path) -> anyhow::Result<String> {
         truecolor_probe,
     ));
     out.push('\n');
+    if let Some(line) = crate::term::color_status_row(color_pf) {
+        out.push_str(line);
+        out.push('\n');
+    }
     // Surface config-load warnings IN the report — a malformed config makes every
     // source read disconnected, and a diagnostic tool must say WHY rather than
     // silently swallow it. Sanitized: a warning can interpolate config content.

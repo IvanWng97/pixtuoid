@@ -96,4 +96,25 @@ the query runs only otherwise.) Run `pixtuoid doctor` for the detected
 
 A terminal that's genuinely truecolor but doesn't answer the query (rare) may
 still get warned. If you know your terminal is fine, silence the warning with
-`$PIXTUOID_NO_TRUECOLOR_WARN=1` (any of `1`/`true`/`yes`/`on`).
+`$PIXTUOID_NO_TRUECOLOR_WARN=1` (any of `1`/`true`/`yes`/`on`). Note: `tmux`
+doesn't implement the `DECRQSS` query, so a truecolor tmux session can trip this
+warning — set `$PIXTUOID_NO_TRUECOLOR_WARN=1` (tmux usually advertises
+`$COLORTERM`, which skips the query, so most setups never see it).
+
+### When color is disabled (`$NO_COLOR`, `$TERM=dumb`)
+
+The office has **no legible monochrome mode** — it's color end to end. So rather
+than render unreadable blocks, `pixtuoid run` refuses to launch the canvas and
+explains why when color is turned off:
+
+- **`$NO_COLOR`** (the [no-color.org](https://no-color.org) convention; any
+  non-empty value): the terminal layer strips our 24-bit color, so the office
+  can't render. Unset `NO_COLOR`, or override per the standard precedence with
+  **`$CLICOLOR_FORCE=1`** (forces color on despite `$NO_COLOR`). An *empty*
+  `$NO_COLOR` is ignored (it doesn't actually strip color).
+- **`$TERM=dumb`**: the terminal can't render escape sequences or color at all.
+
+In both cases use a graphical terminal, or `pixtuoid run --headless` for a plain
+text summary (which works fine without color). `pixtuoid doctor` reports the
+active color status. This gate applies only to the terminal `run` TUI —
+`--headless`, `doctor`, `sources`, and the `floating` window are unaffected.
