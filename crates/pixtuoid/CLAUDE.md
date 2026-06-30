@@ -38,13 +38,24 @@ src/
 ├── term.rs             truecolor preflight (ALL fns PURE + unit-tested — main.rs is the untestable presenter,
 │                       so the policy lives here; `doctor::run` returns its report String so it's tested too):
 │                       `colorterm_is_truecolor($COLORTERM)` (the
-│                       S-Lang/terminfo `truecolor`/`24bit` convention) + `should_warn_truecolor(cmd_is_run_tui, is_tty,
-│                       colorterm)` (the warn-gate PREDICATE — its truth table is unit-tested) + `terminal_diagnostic_row(
-│                       term, colorterm)` (the `doctor` `terminal:` line; env values sanitized). main.rs WARN-ONLY (never
-│                       gates on Unix — many truecolor terminals omit COLORTERM; the `#[cfg(not(windows))]`, `IsTerminal`
-│                       probe, and the env read stay INLINED at the excluded main.rs call site — which just calls
-│                       `should_warn_truecolor`, no untestable policy wrapper to mutate) on a non-windows Run-TUI tty. Windows hard-gates VT separately
-│                       (tui/mod). `floating` is exempt (softbuffer = real RGB px). #397 = terminfo Tc/RGB follow-up
+│                       S-Lang/terminfo `truecolor`/`24bit` convention) + `term_is_truecolor($TERM,$TERM_PROGRAM)` (the
+│                       static allowlist — `*-direct`/`*-truecolor`, kitty/ghostty/alacritty/wezterm/foot/contour/rio,
+│                       TERM_PROGRAM ∈ {iTerm.app,WezTerm,ghostty,vscode,Hyper,rio,Tabby}; mirrors what supports-color/
+│                       anstyle-query do — neither reads terminfo) + `should_warn_truecolor(cmd_is_run_tui, is_tty,
+│                       colorterm, term, term_program, suppress_env)` (the warn-gate PREDICATE — truth table unit-tested) +
+│                       `terminal_diagnostic_row(term, colorterm, term_program)` (the `doctor` `terminal:` line; shares the
+│                       same advertise signals so doctor + the warning can't disagree; names WHICH signal fired; env values
+│                       sanitized). main.rs WARN-ONLY (never gates on Unix — many truecolor terminals omit COLORTERM; the
+│                       `#[cfg(not(windows))]`, `IsTerminal` probe, and the env reads stay INLINED at the excluded main.rs
+│                       call site — no untestable policy wrapper to mutate) on a non-windows Run-TUI tty. Windows hard-gates
+│                       VT separately (tui/mod). `floating` is exempt (softbuffer = real RGB px). **Known sharp edge (#397):**
+│                       the deep tmux/SSH case whose ONLY truecolor signal is a terminfo `Tc`/`RGB` override is intentionally
+│                       NOT auto-detected — that needs an `infocmp` subprocess (absent on musl/alpine/Nix, and stale on stock
+│                       macOS where `tmux-256color` carries no `Tc`) or a terminfo dep, far too much for a warn-only nag; it's
+│                       covered by the `$PIXTUOID_NO_TRUECOLOR_WARN` escape hatch (truthy `1`/`true`/`yes`/`on`) instead.
+│                       Apple `Terminal.app` (`xterm-256color`, 256-color until macOS 26/Tahoe) is deliberately EXCLUDED from
+│                       the allowlist so it still warns. Upgrade path IF false-positive reports arrive: the pure-Rust `termini`
+│                       crate reads the extended `Tc`/`RGB` boolean cap with no subprocess — NOT an `infocmp` shell-out
 ├── setup.rs            first-run detection for onboarding: the PURE `is_first_run(cfg, path) = !path.exists() ||
 │                       cfg.sources.is_empty()` (mirrors resolve_connected's migrate condition; unit-tested). `pub`
 │                       because main.rs (a separate crate) computes RunConfig.first_run from it. The cinematic overlay

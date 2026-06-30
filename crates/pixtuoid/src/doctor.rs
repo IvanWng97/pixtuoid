@@ -576,6 +576,7 @@ pub fn run(log_path: &std::path::Path) -> anyhow::Result<String> {
     out.push_str(&crate::term::terminal_diagnostic_row(
         std::env::var("TERM").ok().as_deref(),
         std::env::var("COLORTERM").ok().as_deref(),
+        std::env::var("TERM_PROGRAM").ok().as_deref(),
     ));
     out.push('\n');
     // Surface config-load warnings IN the report — a malformed config makes every

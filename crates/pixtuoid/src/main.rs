@@ -13,12 +13,14 @@ fn main() -> Result<()> {
     let (log_level, cli_theme, cmd) = Cli::parse().cmd_or_default();
 
     // Truecolor preflight: the terminal TUI renders 24-bit half-block pixels; a
-    // terminal that does not advertise COLORTERM=truecolor may render them
-    // approximated/garbled with no other hint. Warn ONCE on the pre-altscreen
-    // stderr channel — never gate on Unix (many truecolor terminals omit
-    // COLORTERM, so a gate would false-negative); Windows hard-gates VT separately
-    // in `tui::mod`. The `floating` window paints real RGB pixels via softbuffer,
-    // not terminal SGR, so it is exempt.
+    // terminal that advertises neither COLORTERM=truecolor nor a known-truecolor
+    // TERM/TERM_PROGRAM may render them approximated/garbled with no other hint.
+    // Warn ONCE on the pre-altscreen stderr channel — never gate on Unix (many
+    // truecolor terminals omit COLORTERM, so a gate would false-negative); Windows
+    // hard-gates VT separately in `tui::mod`. The deep tmux/SSH terminfo-Tc case
+    // isn't auto-detected (no startup infocmp subprocess) — $PIXTUOID_NO_TRUECOLOR_WARN
+    // is the escape hatch (#397). The `floating` window paints real RGB pixels via
+    // softbuffer, not terminal SGR, so it is exempt.
     #[cfg(not(windows))]
     if pixtuoid::term::should_warn_truecolor(
         matches!(
@@ -30,12 +32,16 @@ fn main() -> Result<()> {
         ),
         std::io::IsTerminal::is_terminal(&std::io::stderr()),
         std::env::var("COLORTERM").ok().as_deref(),
+        std::env::var("TERM").ok().as_deref(),
+        std::env::var("TERM_PROGRAM").ok().as_deref(),
+        std::env::var("PIXTUOID_NO_TRUECOLOR_WARN").ok().as_deref(),
     ) {
         eprintln!(
-            "⚠ pixtuoid: your terminal does not advertise COLORTERM=truecolor — the \
-             pixel-art office renders in 24-bit color and may look wrong. Use a \
-             truecolor terminal (Windows Terminal, iTerm2, Ghostty, Alacritty, kitty, \
-             WezTerm), or run `pixtuoid doctor` to check."
+            "⚠ pixtuoid: your terminal does not advertise truecolor (COLORTERM or a \
+             known truecolor TERM) — the pixel-art office renders in 24-bit color and \
+             may look wrong. Use a truecolor terminal (Windows Terminal, iTerm2, \
+             Ghostty, Alacritty, kitty, WezTerm), run `pixtuoid doctor` to check, or \
+             set PIXTUOID_NO_TRUECOLOR_WARN=1 to silence."
         );
     }
     // The typed LogLevel's as_str is exactly the old free-string levels, so
