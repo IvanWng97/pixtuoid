@@ -92,14 +92,21 @@ pub enum ColorPreflight {
 ///   1. `$TERM=dumb` — a terminal that can't interpret escape sequences at all;
 ///      nothing we emit renders, and forcing color can't fix it, so refuse first.
 ///   2. `$NO_COLOR` non-empty — crossterm strips our 24-bit SGR to a bare reset,
-///      so the office would be unreadable blocks. Honor the BSD `$CLICOLOR_FORCE`
-///      \> `$NO_COLOR` precedence: a non-empty `$CLICOLOR_FORCE` is the user
+///      so the office would be unreadable blocks. Honor the `$CLICOLOR_FORCE`
+///      \> `$NO_COLOR` precedence: a non-zero `$CLICOLOR_FORCE` is the user
 ///      explicitly wanting color, so force it on rather than refuse.
 ///   3. otherwise proceed.
 ///
 /// `$NO_COLOR` counts as active only when NON-EMPTY — matching crossterm, the
 /// thing that actually strips the color (it ignores an empty `$NO_COLOR`). An
 /// empty value therefore doesn't break the render and must not block launch.
+/// `$CLICOLOR_FORCE` follows the bixense convention (active when set and `!= 0`),
+/// the Rust CLI-ecosystem norm — so `$CLICOLOR_FORCE=0` does NOT override.
+///
+/// `$FORCE_COLOR` (npm) and `$CLICOLOR` are intentionally NOT read: crossterm —
+/// the thing that actually strips our color — keys only on `$NO_COLOR`, so they
+/// would have no effect on the render. `$CLICOLOR_FORCE` is the lone override
+/// because we enact it ourselves (`force_color_output` at the call site).
 pub fn color_preflight(
     no_color: Option<&str>,
     clicolor_force: Option<&str>,
@@ -110,7 +117,9 @@ pub fn color_preflight(
     }
     let no_color_set = matches!(no_color, Some(v) if !v.is_empty());
     if no_color_set {
-        let forced = matches!(clicolor_force, Some(v) if !v.is_empty());
+        // bixense `!= 0` semantics (not mere presence): `CLICOLOR_FORCE=0` means
+        // "do NOT force", so it must not override $NO_COLOR.
+        let forced = matches!(clicolor_force.map(str::trim), Some(v) if !v.is_empty() && v != "0");
         return if forced {
             ColorPreflight::ForceColor
         } else {
@@ -408,8 +417,13 @@ mod tests {
         assert_eq!(color_preflight(Some("anything"), None, None), RefuseNoColor);
         // CLICOLOR_FORCE overrides NO_COLOR (BSD precedence) → force, don't refuse.
         assert_eq!(color_preflight(Some("1"), Some("1"), None), ForceColor);
+        // A non-zero value other than "1" still forces (active when set && != 0).
+        assert_eq!(color_preflight(Some("1"), Some("yes"), None), ForceColor);
         // ...but an EMPTY CLICOLOR_FORCE is not a force → still refuse.
         assert_eq!(color_preflight(Some("1"), Some(""), None), RefuseNoColor);
+        // ...and CLICOLOR_FORCE=0 means "do not force" (bixense != 0) → still refuse.
+        assert_eq!(color_preflight(Some("1"), Some("0"), None), RefuseNoColor);
+        assert_eq!(color_preflight(Some("1"), Some(" 0 "), None), RefuseNoColor);
         // CLICOLOR_FORCE with no NO_COLOR is a no-op here (nothing to override).
         assert_eq!(color_preflight(None, Some("1"), None), Proceed);
         // TERM=dumb outranks everything — even a force can't make dumb render.

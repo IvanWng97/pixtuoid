@@ -108,10 +108,10 @@ than render unreadable blocks, `pixtuoid run` refuses to launch the canvas and
 explains why when color is turned off:
 
 - **`$NO_COLOR`** (the [no-color.org](https://no-color.org) convention; any
-  non-empty value): the terminal layer strips our 24-bit color, so the office
-  can't render. Unset `NO_COLOR`, or override per the standard precedence with
-  **`$CLICOLOR_FORCE=1`** (forces color on despite `$NO_COLOR`). An *empty*
-  `$NO_COLOR` is ignored (it doesn't actually strip color).
+  non-empty value): color output is disabled, so the office can't render. Unset
+  `NO_COLOR`, or override per the standard precedence with **`$CLICOLOR_FORCE=1`**
+  (forces color on despite `$NO_COLOR`; a `0` value does not force). An *empty*
+  `$NO_COLOR` is ignored (it doesn't actually disable color).
 - **`$TERM=dumb`**: the terminal can't render escape sequences or color at all.
 
 In both cases use a graphical terminal, or `pixtuoid run --headless` for a plain

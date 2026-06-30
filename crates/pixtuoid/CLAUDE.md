@@ -62,10 +62,11 @@ src/
 │                       NO legible monochrome fallback, so when color is disabled we REFUSE the canvas + explain (mirrors the
 │                       Windows VT hard-gate) instead of rendering block-soup. Precedence: `$TERM=dumb` first (can't render
 │                       escapes at all — a force can't fix it), then NON-EMPTY `$NO_COLOR` (crossterm strips our SGR to a bare
-│                       reset — VERIFIED empirically) UNLESS NON-EMPTY `$CLICOLOR_FORCE` overrides it (BSD precedence →
+│                       reset — VERIFIED empirically) UNLESS `$CLICOLOR_FORCE` (bixense `!= 0`) overrides it (precedence →
 │                       `ForceColor`; main.rs MUST call `crossterm::style::force_color_output(true)` itself — crossterm
 │                       honors `$NO_COLOR` but NOT `$CLICOLOR_FORCE`, also verified). Empty `$NO_COLOR` is ignored (matches
-│                       crossterm — the thing that strips). Gated to the `run` TUI only (--headless/doctor/sources are plain
+│                       crossterm — the thing that strips); `$FORCE_COLOR`/`$CLICOLOR` are deliberately NOT read (crossterm
+│                       keys only on `$NO_COLOR`, so they'd no-op the render). Gated to the `run` TUI only (--headless/doctor/sources are plain
 │                       text; floating = softbuffer). `color_status_row(pf)` is the `doctor` color line (reuses the SAME
 │                       policy so the diagnostic matches `run`; doctor also SKIPS the DECRQSS probe under `$TERM=dumb`).
 │                       **Sharp edge:** tmux (#4034) doesn't implement DECRQSS, so a truecolor tmux can false-positive the

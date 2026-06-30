@@ -42,7 +42,7 @@ fn main() -> Result<()> {
             ColorPreflight::ForceColor => crossterm::style::force_color_output(true),
             ColorPreflight::RefuseNoColor => {
                 eprintln!(
-                    "pixtuoid: $NO_COLOR is set, so your terminal strips color — the \
+                    "pixtuoid: $NO_COLOR is set, so color output is disabled — the \
                      pixel-art office is 24-bit color with no legible monochrome mode \
                      and would render as unreadable blocks. Unset NO_COLOR (or set \
                      CLICOLOR_FORCE=1 to override) to run it, or use \
