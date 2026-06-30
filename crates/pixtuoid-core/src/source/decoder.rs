@@ -44,7 +44,13 @@ pub(crate) fn cwd_basename_label(prefix: &str, cwd: &Path) -> Option<String> {
 /// on Unix but still required so `normalize_path_key` is the one entry point
 /// for the `walk_jsonl` normalized-path string and `default_id_from_path`
 /// (Antigravity's watcher key) — those two paths must always agree.
-pub(crate) fn normalize_path_key(s: &str) -> String {
+///
+/// `pub` + `#[doc(hidden)]`: the `pixtuoid-scene` palette shares this one
+/// cwd-normalization definition (Team Palette keys outfits on the normalized
+/// cwd). Internal cross-crate helper, NOT a stable API — `#[doc(hidden)]`
+/// keeps it off `pixtuoid-core`'s semver surface (cf. `claude_config_dir`).
+#[doc(hidden)]
+pub fn normalize_path_key(s: &str) -> String {
     normalize_key_inner(cfg!(windows), s)
 }
 
