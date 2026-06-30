@@ -73,7 +73,9 @@ pub fn warn_zone(
 /// reply (`0$r`, empty, or a timeout) — which the caller treats as "warn", since
 /// a terminal that can't answer DECRQSS is unlikely to be truecolor. Pure
 /// (operates on the captured bytes) so every branch is unit-tested without a real
-/// terminal.
+/// terminal. `#[cfg(unix)]` like the rest of the DECRQSS machinery it serves —
+/// only the unix `query_truecolor` calls it, so it'd be dead code on Windows.
+#[cfg(unix)]
 fn parse_decrqss_truecolor(resp: &[u8]) -> Option<bool> {
     let s = String::from_utf8_lossy(resp);
     // A valid SGR reply is `DCS 1 $ r ... m ST`; `0 $ r` = request not honored.
@@ -316,6 +318,7 @@ mod tests {
         assert!(!warn_zone(true, true, None, Some("1")));
     }
 
+    #[cfg(unix)]
     #[test]
     fn parse_decrqss_distinguishes_truecolor_from_downsample() {
         // A truecolor terminal echoes our exact RGB triple (colon form).
@@ -345,6 +348,9 @@ mod tests {
         assert_eq!(parse_decrqss_truecolor(b""), None);
     }
 
+    // `response_terminated` is `#[cfg(unix)]` (it serves the unix-only read loop),
+    // so its test must be gated too — else `check-windows` fails to compile.
+    #[cfg(unix)]
     #[test]
     fn response_terminated_on_st_or_bel() {
         assert!(response_terminated(b"\x1bP1$r0m\x1b\\"));
