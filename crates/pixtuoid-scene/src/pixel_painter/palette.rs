@@ -7,11 +7,10 @@
 //! because the palette tint code uses them directly and they're widely
 //! shared with background/effects.
 
+use pixtuoid_core::source::decoder::normalize_path_key;
 use pixtuoid_core::sprite::format::RECOLOR_KEYS;
 use pixtuoid_core::sprite::{Frame, Palette, Pixel, Rgb, RgbBuffer};
 use pixtuoid_core::AgentSlot;
-
-use crate::pose;
 
 /// A complete shirt + pants combo. We pick *outfits* per agent rather
 /// than independent shirt and pants colors so the result is always a
@@ -314,6 +313,19 @@ const SKIN_PRESETS: &[Rgb] = &[
     }, // warm tan
 ];
 
+/// Deterministic seed from a normalized cwd string: byte-fold (cf.
+/// `pixel_painter/mod.rs` label hash) then the splitmix64 finalizer used
+/// across the scene (`ambient.rs`, `core::id`). No `DefaultHasher` (its
+/// per-process randomization would flicker colors across runs), no new dep.
+fn cwd_outfit_seed(cwd_norm: &str) -> u64 {
+    let folded = cwd_norm
+        .bytes()
+        .fold(0u64, |h, b| h.wrapping_mul(131).wrapping_add(b as u64));
+    let z = (folded ^ (folded >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    let z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    z ^ (z >> 31)
+}
+
 /// Build the per-agent palette. `glow_tint` carries the monitor-glow
 /// color when the agent is seated at a lit screen (SeatedTyping). The
 /// skin blends 18% toward that tint so the eye reads "the monitor is
@@ -327,16 +339,27 @@ const SKIN_PRESETS: &[Rgb] = &[
 ///   orange = Bash
 ///   purple = Agent / Task
 pub(super) fn agent_palette(base: &Palette, agent: &AgentSlot, glow_tint: Option<Rgb>) -> Palette {
-    let seed = agent.agent_id.raw() as usize;
-    let p = pose::personality_for(agent.agent_id);
-    let outfits = if p.trip_chance_pct >= 30 {
-        OUTFITS_WARM
+    // Hair/skin stay per-individual (agent_id); only the OUTFIT re-keys on cwd
+    // so same-repo agents share a shirt (Team Palette). The old WARM/COOL split
+    // was personality-derived (an agent_id artifact cwd-keying breaks anyway);
+    // the outfit now spans the full 16-preset pool indexed by the cwd seed.
+    let id_seed = agent.agent_id.raw() as usize;
+    let outfit_seed = if agent.unknown_cwd || agent.cwd.as_os_str().is_empty() {
+        // No usable cwd (hook-only / pre-cwd) => fall back to the per-agent seed
+        // so cwd-less agents still get a stable, individually-varied outfit.
+        agent.agent_id.raw()
     } else {
-        OUTFITS_COOL
+        cwd_outfit_seed(&normalize_path_key(&agent.cwd.to_string_lossy()))
     };
-    let outfit = outfits[seed % outfits.len()];
-    let hair = HAIR_PRESETS[(seed / 7) % HAIR_PRESETS.len()];
-    let skin = SKIN_PRESETS[(seed / 13) % SKIN_PRESETS.len()];
+    let pool_len = OUTFITS_WARM.len() + OUTFITS_COOL.len();
+    let i = (outfit_seed as usize) % pool_len;
+    let outfit = if i < OUTFITS_WARM.len() {
+        OUTFITS_WARM[i]
+    } else {
+        OUTFITS_COOL[i - OUTFITS_WARM.len()]
+    };
+    let hair = HAIR_PRESETS[(id_seed / 7) % HAIR_PRESETS.len()];
+    let skin = SKIN_PRESETS[(id_seed / 13) % SKIN_PRESETS.len()];
     let final_skin = if let Some(tint) = glow_tint {
         blend_rgb(skin, tint, 0.18)
     } else {

@@ -166,6 +166,16 @@ fn make_slot(id: pixtuoid_core::AgentId, state: ActivityState) -> AgentSlot {
     }
 }
 
+// Team Palette tests: build a slot with an explicit cwd + unknown_cwd flag.
+#[cfg(test)]
+fn make_slot_cwd(id_path: &str, cwd: &str, unknown_cwd: bool) -> AgentSlot {
+    let id = pixtuoid_core::AgentId::from_transcript_path(id_path);
+    let mut s = make_slot(id, ActivityState::Idle); // reuse the existing builder's defaults
+    s.cwd = std::sync::Arc::from(std::path::Path::new(cwd));
+    s.unknown_cwd = unknown_cwd;
+    s
+}
+
 fn base_palette() -> Palette {
     let mut p = Palette::new();
     p.insert(
@@ -1611,4 +1621,63 @@ fn weather_gallery_manifest_matches_the_weather_enum() {
         "site/src/weather.json ids must match Weather::ALL names in order — \
          update the manifest + run `just gen-media` when the enum changes"
     );
+}
+
+#[test]
+fn agent_palette_outfit_is_keyed_by_cwd_not_id() {
+    let base = Palette::default();
+    // Same cwd, DIFFERENT agent ids.
+    let a = make_slot_cwd("/demo/api/aaaa.jsonl", "/demo/api", false);
+    let b = make_slot_cwd("/demo/api/bbbb.jsonl", "/demo/api", false);
+    let pa = agent_palette(&base, &a, None);
+    let pb = agent_palette(&base, &b, None);
+    // Same cwd => same outfit (shirt 'B' + pants 'P').
+    assert_eq!(pa.get('B'), pb.get('B'), "same cwd should share shirt");
+    assert_eq!(pa.get('P'), pb.get('P'), "same cwd should share pants");
+    // Different agent_id => hair/skin still differ (individuals stay distinct).
+    assert_ne!(
+        (pa.get('H'), pa.get('S')),
+        (pb.get('H'), pb.get('S')),
+        "different agents in the same repo must differ in hair/skin"
+    );
+}
+
+#[test]
+fn agent_palette_unknown_cwd_falls_back_to_id_outfit() {
+    let base = Palette::default();
+    // unknown_cwd and empty-cwd both fall back to the agent_id-seeded outfit.
+    let unknown = make_slot_cwd("/x/aaaa.jsonl", "/whatever", true);
+    let empty = make_slot_cwd("/x/aaaa.jsonl", "", false);
+    let p_unknown = agent_palette(&base, &unknown, None);
+    let p_empty = agent_palette(&base, &empty, None);
+    // Same agent_id under both fallback triggers => identical outfit.
+    assert_eq!(p_unknown.get('B'), p_empty.get('B'));
+    assert_eq!(p_unknown.get('P'), p_empty.get('P'));
+    // Fallback preserves per-agent variety: two cwd-less agents with different
+    // ids must NOT collapse to one "unknown" outfit.
+    let other = make_slot_cwd("/x/zzzz.jsonl", "", false);
+    let p_other = agent_palette(&base, &other, None);
+    assert_ne!(
+        p_other.get('B'),
+        p_empty.get('B'),
+        "cwd-less agents keep distinct per-id outfits"
+    );
+}
+
+#[test]
+fn agent_palette_same_id_different_cwd_changes_outfit() {
+    let base = Palette::default();
+    // Same id stem, different cwds chosen to land on different pool indices.
+    let a = make_slot_cwd("/p/aaaa.jsonl", "/demo/api", false);
+    let b = make_slot_cwd("/p/aaaa.jsonl", "/demo/infra", false);
+    let pa = agent_palette(&base, &a, None);
+    let pb = agent_palette(&base, &b, None);
+    assert_ne!(
+        pa.get('B'),
+        pb.get('B'),
+        "different cwds should pick different outfits"
+    );
+    // Hair/skin (same id) stay identical regardless of cwd.
+    assert_eq!(pa.get('H'), pb.get('H'));
+    assert_eq!(pa.get('S'), pb.get('S'));
 }
