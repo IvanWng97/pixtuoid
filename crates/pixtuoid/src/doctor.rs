@@ -569,14 +569,21 @@ pub fn run(log_path: &std::path::Path) -> anyhow::Result<String> {
     ));
     // Terminal capability: the pixel-art office needs a 24-bit-color terminal, and
     // the #1 silent failure is a non-truecolor terminal rendering approximated
-    // colors. Surface the detected $TERM/$COLORTERM so a "colors look wrong over
-    // ssh/tmux" report is self-diagnosable. The row is formatted by the PURE,
-    // unit-tested `term::terminal_diagnostic_row` (env values sanitized there);
-    // `.ok()` makes an unset var a genuine `None`, not `Some("")`.
+    // colors. When $COLORTERM hasn't already declared truecolor, ASK the terminal
+    // directly (DECRQSS) — but ONLY when stdout is a real tty, so a piped
+    // `pixtuoid doctor > file` neither emits escape codes nor blocks (and the
+    // test harness, whose output is captured, never probes). The row is formatted
+    // by the PURE, unit-tested `term::terminal_diagnostic_row`; `.ok()` makes an
+    // unset var a genuine `None`, not `Some("")`.
+    let truecolor_probe = if std::io::IsTerminal::is_terminal(&std::io::stdout()) {
+        crate::term::query_truecolor(crate::term::TRUECOLOR_PROBE_TIMEOUT)
+    } else {
+        None
+    };
     out.push_str(&crate::term::terminal_diagnostic_row(
         std::env::var("TERM").ok().as_deref(),
         std::env::var("COLORTERM").ok().as_deref(),
-        std::env::var("TERM_PROGRAM").ok().as_deref(),
+        truecolor_probe,
     ));
     out.push('\n');
     // Surface config-load warnings IN the report — a malformed config makes every

@@ -13,16 +13,17 @@ fn main() -> Result<()> {
     let (log_level, cli_theme, cmd) = Cli::parse().cmd_or_default();
 
     // Truecolor preflight: the terminal TUI renders 24-bit half-block pixels; a
-    // terminal that advertises neither COLORTERM=truecolor nor a known-truecolor
-    // TERM/TERM_PROGRAM may render them approximated/garbled with no other hint.
-    // Warn ONCE on the pre-altscreen stderr channel — never gate on Unix (many
-    // truecolor terminals omit COLORTERM, so a gate would false-negative); Windows
-    // hard-gates VT separately in `tui::mod`. The deep tmux/SSH terminfo-Tc case
-    // isn't auto-detected (no startup infocmp subprocess) — $PIXTUOID_NO_TRUECOLOR_WARN
-    // is the escape hatch (#397). The `floating` window paints real RGB pixels via
-    // softbuffer, not terminal SGR, so it is exempt.
+    // non-truecolor terminal renders them approximated/garbled with no other hint.
+    // Rather than guess from a $TERM allowlist, ASK the terminal (DECRQSS) when
+    // $COLORTERM hasn't already declared truecolor — warn ONCE on the pre-altscreen
+    // stderr channel only if the terminal doesn't confirm. Never gate on Unix;
+    // Windows hard-gates VT separately in `tui::mod`. $PIXTUOID_NO_TRUECOLOR_WARN
+    // is an explicit escape hatch for a terminal we can't auto-detect (#397). The
+    // `floating` window paints real RGB pixels via softbuffer, not terminal SGR,
+    // so it is exempt. The query only runs when warn_zone holds, so a healthy
+    // truecolor session (COLORTERM set) pays nothing.
     #[cfg(not(windows))]
-    if pixtuoid::term::should_warn_truecolor(
+    if pixtuoid::term::warn_zone(
         matches!(
             &cmd,
             Cmd::Run {
@@ -32,16 +33,15 @@ fn main() -> Result<()> {
         ),
         std::io::IsTerminal::is_terminal(&std::io::stderr()),
         std::env::var("COLORTERM").ok().as_deref(),
-        std::env::var("TERM").ok().as_deref(),
-        std::env::var("TERM_PROGRAM").ok().as_deref(),
         std::env::var("PIXTUOID_NO_TRUECOLOR_WARN").ok().as_deref(),
-    ) {
+    ) && pixtuoid::term::query_truecolor(pixtuoid::term::TRUECOLOR_PROBE_TIMEOUT) != Some(true)
+    {
         eprintln!(
-            "⚠ pixtuoid: your terminal does not advertise truecolor (COLORTERM or a \
-             known truecolor TERM) — the pixel-art office renders in 24-bit color and \
-             may look wrong. Use a truecolor terminal (Windows Terminal, iTerm2, \
-             Ghostty, Alacritty, kitty, WezTerm), run `pixtuoid doctor` to check, or \
-             set PIXTUOID_NO_TRUECOLOR_WARN=1 to silence."
+            "⚠ pixtuoid: your terminal didn't confirm truecolor support — the \
+             pixel-art office renders in 24-bit color and may look wrong. Use a \
+             truecolor terminal (Windows Terminal, iTerm2, Ghostty, Alacritty, kitty, \
+             WezTerm), run `pixtuoid doctor` to check, or set \
+             PIXTUOID_NO_TRUECOLOR_WARN=1 to silence."
         );
     }
     // The typed LogLevel's as_str is exactly the old free-string levels, so

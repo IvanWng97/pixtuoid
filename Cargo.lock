@@ -2246,6 +2246,7 @@ dependencies = [
  "crossterm",
  "image",
  "insta",
+ "libc",
  "open",
  "pixtuoid-core",
  "pixtuoid-scene",

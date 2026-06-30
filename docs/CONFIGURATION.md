@@ -85,14 +85,15 @@ Non-TUI commands (`--headless`, `validate-pack`, …) log to stderr directly.
 
 ### Truecolor preflight
 
-The pixel-art office renders in 24-bit color. On launch, `pixtuoid run` prints a
-one-line stderr warning if it can't tell your terminal is truecolor-capable —
-i.e. neither `$COLORTERM` (`truecolor`/`24bit`) nor a known-truecolor
-`$TERM`/`$TERM_PROGRAM` (kitty, Ghostty, Alacritty, WezTerm, foot, iTerm2, …) is
-set. It's **warn-only** (never blocks) and scrolls away once the office takes
-over. Run `pixtuoid doctor` for the detected `terminal:` verdict.
+The pixel-art office renders in 24-bit color. On launch, `pixtuoid run`
+**asks your terminal** whether it supports truecolor — it sets an unlikely
+24-bit color and queries it back (a `DECRQSS` probe) — rather than guessing from
+the terminal's name. If the terminal doesn't confirm, it prints a one-line
+stderr warning. It's **warn-only** (never blocks) and scrolls away once the
+office takes over. (`$COLORTERM=truecolor` is taken as a yes and skips the query;
+the query runs only otherwise.) Run `pixtuoid doctor` for the detected
+`terminal:` verdict.
 
-Some genuinely-truecolor setups can't be auto-detected — notably tmux/SSH
-sessions whose only truecolor signal is a terminfo `Tc`/`RGB` override. If you
-know your terminal is fine, silence the warning with
+A terminal that's genuinely truecolor but doesn't answer the query (rare) may
+still get warned. If you know your terminal is fine, silence the warning with
 `$PIXTUOID_NO_TRUECOLOR_WARN=1` (any of `1`/`true`/`yes`/`on`).

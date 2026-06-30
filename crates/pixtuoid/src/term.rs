@@ -1,88 +1,40 @@
-//! Terminal capability probes for the truecolor preflight (the pixel-art office
-//! renders 24-bit half-block SGR; a terminal that can't parse those shows
+//! Terminal capability detection for the truecolor preflight (the pixel-art
+//! office renders 24-bit half-block SGR; a terminal that can't parse those shows
 //! approximated/garbled colors with no other hint — the #1 baffling-bug class for
-//! a truecolor-only TUI). Detection is intentionally a WARN signal, never a gate
-//! on Unix: many genuinely-truecolor terminals omit `COLORTERM`, so a hard gate
-//! would false-negative. (Windows is the exception — `tui::mod` hard-gates VT
-//! there because the WinAPI color fallback renders black-on-black.)
+//! a truecolor-only TUI). The warning is a WARN signal, never a gate on Unix.
+//! (Windows is the exception — `tui::mod` hard-gates VT there because the WinAPI
+//! color fallback renders black-on-black.)
 //!
-//! Truecolor is detected from env only — `$COLORTERM` OR a static
-//! `$TERM`/`$TERM_PROGRAM` allowlist, the same signals `supports-color` /
-//! `anstyle-query` use (neither reads terminfo). The deep case whose ONLY
-//! truecolor signal is a terminfo `Tc`/`RGB` override (some tmux/SSH setups) is
-//! deliberately NOT auto-detected: that needs an `infocmp` subprocess or a
-//! terminfo dependency that is absent on musl/alpine/Nix and stale on stock
-//! macOS, far too much for a warn-only nag. It's covered by the
-//! `$PIXTUOID_NO_TRUECOLOR_WARN` escape hatch instead (#397).
+//! We do NOT guess truecolor from a `$TERM` name allowlist. Detection ASKS the
+//! terminal directly: set an unlikely 24-bit background, then `DECRQSS`-query the
+//! SGR back — a truecolor terminal echoes the RGB triple, a 256-color one
+//! downsamples it, and one that can't even parse the query stays silent
+//! (`query_truecolor`, the termstandard/colors method). `$COLORTERM=truecolor`
+//! is honored as an explicit positive (the terminal declaring itself — not a
+//! guess) purely to skip the round-trip, and `$PIXTUOID_NO_TRUECOLOR_WARN` is an
+//! explicit user override; neither is a heuristic. The query is the authority for
+//! everything else (#397).
+
+/// Default round-trip budget for the `DECRQSS` probe: long enough for a laggy SSH
+/// link to answer, short enough that a terminal which never answers (no DECRQSS
+/// support → genuinely suspect) only costs this once at startup. `poll` returns
+/// the instant a reply arrives, so a responsive terminal never waits the full
+/// budget — only non-responders pay it.
+pub const TRUECOLOR_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(100);
 
 /// True iff `$COLORTERM` advertises 24-bit color (`truecolor` or `24bit`) — the
-/// S-Lang / terminfo convention also used by bat, alacritty, and wezterm. Pure
-/// (takes the env value) so the policy is unit-testable without touching the
-/// environment. Case-sensitive on purpose: the advertised tokens are lowercase
-/// by convention, and a loose match would treat unrelated values as truecolor.
-pub fn colorterm_is_truecolor(colorterm: Option<&str>) -> bool {
+/// terminal explicitly declaring itself (the S-Lang convention), honored as a
+/// positive so we can skip the terminal round-trip. Pure (takes the env value).
+/// Case-sensitive on purpose: the advertised tokens are lowercase by convention.
+fn colorterm_is_truecolor(colorterm: Option<&str>) -> bool {
     matches!(colorterm, Some(v) if v.contains("truecolor") || v.contains("24bit"))
 }
 
-/// Terminals that are genuinely truecolor but don't reliably set `$COLORTERM`
-/// (notably over SSH, which forwards `$TERM` via the pty-req but not
-/// `$COLORTERM`), identified by `$TERM` / `$TERM_PROGRAM`. This mirrors the
-/// static allowlist `supports-color` / `anstyle-query` use — neither reads
-/// terminfo. Deliberately does NOT match `*-256color`: that's Apple Terminal.app
-/// (256-color until macOS 26 / Tahoe), a genuinely-non-truecolor terminal that
-/// MUST still get the warning. Pure (takes the env values) for unit-testing.
-fn term_is_truecolor(term: Option<&str>, term_program: Option<&str>) -> bool {
-    // `$TERM` names are lowercase by convention → case-sensitive substring match.
-    let term_advertises = term.is_some_and(|t| {
-        t.ends_with("-direct")
-            || t.ends_with("-truecolor")
-            || [
-                "kitty",
-                "ghostty",
-                "alacritty",
-                "wezterm",
-                "foot",
-                "contour",
-                "rio",
-            ]
-            .iter()
-            .any(|name| t.contains(name))
-    });
-    // `$TERM_PROGRAM` is a proper name (mixed case: `iTerm.app`, `WezTerm`) →
-    // exact, case-insensitive. `Apple_Terminal` is intentionally absent.
-    let program_advertises = term_program.is_some_and(|p| {
-        [
-            "iTerm.app",
-            "WezTerm",
-            "ghostty",
-            "vscode",
-            "Hyper",
-            "rio",
-            "Tabby",
-        ]
-        .iter()
-        .any(|name| p.eq_ignore_ascii_case(name))
-    });
-    term_advertises || program_advertises
-}
-
-/// The single "is this terminal advertising truecolor?" signal, shared by the
-/// warn policy and the `doctor` verdict so the two can NEVER disagree: `true`
-/// when `$COLORTERM` advertises it OR a known-truecolor `$TERM`/`$TERM_PROGRAM`.
-fn truecolor_advertised(
-    colorterm: Option<&str>,
-    term: Option<&str>,
-    term_program: Option<&str>,
-) -> bool {
-    colorterm_is_truecolor(colorterm) || term_is_truecolor(term, term_program)
-}
-
 /// True iff `$PIXTUOID_NO_TRUECOLOR_WARN` is set to a truthy token (`1` / `true`
-/// / `yes` / `on`, case-insensitive, trimmed) — the documented escape hatch for
-/// a user whose terminal is fine but isn't auto-detected (e.g. a tmux/SSH setup
-/// whose only truecolor signal is a terminfo override). Empty / `0` / `false` /
-/// anything else = not suppressed, so a leftover `PIXTUOID_NO_TRUECOLOR_WARN=`
-/// doesn't silently kill the warning. Pure (takes the env value) for testing.
+/// / `yes` / `on`, case-insensitive, trimmed) — the explicit user override for a
+/// terminal we can't auto-detect (e.g. one that's truecolor but doesn't answer
+/// DECRQSS). Empty / `0` / `false` / anything else = not suppressed, so a
+/// leftover `PIXTUOID_NO_TRUECOLOR_WARN=` doesn't silently kill the warning.
 fn truecolor_warn_suppressed(suppress_env: Option<&str>) -> bool {
     matches!(
         suppress_env.map(str::trim),
@@ -93,40 +45,57 @@ fn truecolor_warn_suppressed(suppress_env: Option<&str>) -> bool {
     )
 }
 
-/// Whether to emit the truecolor preflight warning: a TUI `run` (not headless),
-/// attached to a tty, whose terminal does NOT advertise truecolor (`$COLORTERM`
-/// or the `$TERM`/`$TERM_PROGRAM` allowlist) and hasn't set the
-/// `$PIXTUOID_NO_TRUECOLOR_WARN` escape hatch. Pure so the gate LOGIC is
-/// unit-tested over its truth table; `main.rs` keeps the `#[cfg(not(windows))]`,
+/// Whether we're in the zone where the warning *might* fire and so the terminal
+/// query is worth running: a TUI `run` (not headless), attached to a tty, where
+/// `$COLORTERM` didn't already declare truecolor and the escape hatch isn't set.
+/// Pure so the gate is unit-tested; `main.rs` keeps the `#[cfg(not(windows))]`,
 /// the `IsTerminal` probe, and the env reads inline at its (codecov-excluded)
-/// call site — the policy lives here, the untestable env/tty/cfg reads stay there
-/// (the "policy in term.rs" pattern).
-pub fn should_warn_truecolor(
+/// call site, then runs `query_truecolor` only when this is true (the "policy in
+/// term.rs, IO at the call site" pattern). The final decision is: warn unless the
+/// query returns `Some(true)`.
+pub fn warn_zone(
     cmd_is_run_tui: bool,
     is_tty: bool,
     colorterm: Option<&str>,
-    term: Option<&str>,
-    term_program: Option<&str>,
     suppress_env: Option<&str>,
 ) -> bool {
     cmd_is_run_tui
         && is_tty
-        && !truecolor_advertised(colorterm, term, term_program)
+        && !colorterm_is_truecolor(colorterm)
         && !truecolor_warn_suppressed(suppress_env)
 }
 
-/// The `pixtuoid doctor` `terminal:` line — `$TERM` / `$COLORTERM` /
-/// `$TERM_PROGRAM` and the truecolor verdict, naming WHICH signal advertised it
-/// so a "colors look wrong" report is self-diagnosable. Pure (takes the env
-/// values as `Option`s, `None` = unset) so the row logic is unit-testable on its
-/// own (and `doctor::run` returns its report string, so it's covered end-to-end
-/// too). Shares `truecolor_advertised`'s inputs with the warn policy, so the
-/// diagnostic and the startup warning can never disagree. Untrusted env values
-/// are stripped of control chars before display.
+/// Parse a `DECRQSS`-for-SGR reply to our truecolor probe. We set the background
+/// to `48;2;1;2;3`; the reply form is `DCS 1 $ r <SGR> ST` for a valid request
+/// and `DCS 0 $ r ST` when the terminal can't honor it. Returns
+/// `Some(true)` when our exact RGB triple came back (truecolor), `Some(false)`
+/// for a valid-but-downsampled reply (not truecolor), and `None` for no valid
+/// reply (`0$r`, empty, or a timeout) — which the caller treats as "warn", since
+/// a terminal that can't answer DECRQSS is unlikely to be truecolor. Pure
+/// (operates on the captured bytes) so every branch is unit-tested without a real
+/// terminal.
+fn parse_decrqss_truecolor(resp: &[u8]) -> Option<bool> {
+    let s = String::from_utf8_lossy(resp);
+    // A valid SGR reply is `DCS 1 $ r ... m ST`; `0 $ r` = request not honored.
+    if !s.contains("1$r") {
+        return None;
+    }
+    // Tolerate `:` / `;` separators and an optional empty colorspace-id field
+    // (`48:2::1:2:3`) — both are spec-legal ways to echo our triple back.
+    let normalized = s.replace(';', ":");
+    Some(normalized.contains("48:2:1:2:3") || normalized.contains("48:2::1:2:3"))
+}
+
+/// The `pixtuoid doctor` `terminal:` line — `$TERM` / `$COLORTERM` and the
+/// truecolor verdict, naming HOW it was determined so a "colors look wrong"
+/// report is self-diagnosable. `probe` is the `query_truecolor` result (or `None`
+/// when doctor isn't attached to a tty). Pure (takes its inputs) so the row logic
+/// is unit-tested; `doctor::run` returns its report string, so it's covered
+/// end-to-end too. Untrusted env values are stripped of control chars.
 pub fn terminal_diagnostic_row(
     term: Option<&str>,
     colorterm: Option<&str>,
-    term_program: Option<&str>,
+    probe: Option<bool>,
 ) -> String {
     let shown = |v: Option<&str>| match v {
         Some(s) if !s.is_empty() => crate::strip_control_chars(s),
@@ -134,18 +103,154 @@ pub fn terminal_diagnostic_row(
     };
     let verdict = if colorterm_is_truecolor(colorterm) {
         "yes (COLORTERM)"
-    } else if term_is_truecolor(term, term_program) {
-        "yes (TERM/TERM_PROGRAM)"
     } else {
-        "not advertised"
+        match probe {
+            Some(true) => "yes (terminal query)",
+            Some(false) => "no (terminal downsamples)",
+            None => "unknown (terminal did not answer)",
+        }
     };
     format!(
-        "terminal: TERM={} COLORTERM={} TERM_PROGRAM={} truecolor={}",
+        "terminal: TERM={} COLORTERM={} truecolor={}",
         shown(term),
         shown(colorterm),
-        shown(term_program),
         verdict,
     )
+}
+
+/// The probe bytes: set bg to `48;2;1;2;3` — the SEMICOLON 24-bit SGR form the
+/// renderer (crossterm) actually emits, so we test what pixtuoid will output, not
+/// the stricter colon form some truecolor terminals reject — then `DECRQSS`-query
+/// the SGR back (`DCS $ q m ST`) and reset SGR. Echo is off and we write no
+/// printable text, so there's no on-screen effect.
+#[cfg(unix)]
+const DECRQSS_TRUECOLOR_PROBE: &[u8] = b"\x1b[48;2;1;2;3m\x1bP$qm\x1b\\\x1b[0m";
+
+/// Ask the terminal whether it is truecolor by querying it directly (no `$TERM`
+/// allowlist). Opens the controlling terminal (`/dev/tty`, so a piped
+/// `pixtuoid doctor > file` never receives escape codes), switches it to raw so
+/// the reply isn't echoed and arrives un-buffered, writes the probe, reads the
+/// reply with a `poll` timeout, restores the terminal, and parses. Returns `None`
+/// on any I/O failure or no answer — degrading to "warn", unchanged from a
+/// terminal we can't confirm. The IO seam (codecov-excluded); the parser and the
+/// policy around it are the unit-tested pure pieces.
+#[cfg(unix)]
+pub fn query_truecolor(timeout: std::time::Duration) -> Option<bool> {
+    use std::io::Write;
+    use std::os::fd::AsRawFd;
+
+    let mut tty = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open("/dev/tty")
+        .ok()?;
+    let fd = tty.as_raw_fd();
+
+    // SAFETY: `tcgetattr` only fills the zeroed repr(C) `termios` for a valid fd;
+    // all-zero is a valid starting value (overwritten on success).
+    let mut saved: libc::termios = unsafe { std::mem::zeroed() };
+    if unsafe { libc::tcgetattr(fd, &mut saved) } != 0 {
+        return None;
+    }
+    // Restore the saved settings on EVERY exit path (incl. a panic unwinding).
+    let _restore = TermiosRestore { fd, saved };
+
+    let mut raw = saved;
+    // SAFETY: `cfmakeraw` only mutates the termios struct in place.
+    unsafe { libc::cfmakeraw(&mut raw) };
+    // SAFETY: applying a well-formed termios to the open tty fd.
+    if unsafe { libc::tcsetattr(fd, libc::TCSANOW, &raw) } != 0 {
+        return None;
+    }
+
+    tty.write_all(DECRQSS_TRUECOLOR_PROBE).ok()?;
+    tty.flush().ok()?;
+
+    parse_decrqss_truecolor(&read_until_terminator(&mut tty, fd, timeout))
+}
+
+/// RAII restore of the terminal's saved `termios` — fires on return, `?`, and
+/// panic unwinding so a probe can never leave the terminal in raw mode.
+#[cfg(unix)]
+struct TermiosRestore {
+    fd: std::os::fd::RawFd,
+    saved: libc::termios,
+}
+
+#[cfg(unix)]
+impl Drop for TermiosRestore {
+    fn drop(&mut self) {
+        // SAFETY: re-applying the termios we captured from this same fd.
+        unsafe { libc::tcsetattr(self.fd, libc::TCSANOW, &self.saved) };
+    }
+}
+
+/// Read the terminal's reply, bounded by `timeout`, until the `DCS` string
+/// terminator (`ESC \`) or `BEL` arrives (or the budget elapses / the buffer
+/// caps). `poll` returns the instant bytes are ready, so a prompt terminal never
+/// waits the full budget.
+#[cfg(unix)]
+fn read_until_terminator(
+    tty: &mut std::fs::File,
+    fd: std::os::fd::RawFd,
+    timeout: std::time::Duration,
+) -> Vec<u8> {
+    use std::io::Read;
+
+    let start = std::time::Instant::now();
+    let mut buf = Vec::with_capacity(64);
+    let mut chunk = [0u8; 64];
+    loop {
+        let elapsed = start.elapsed();
+        if elapsed >= timeout {
+            break;
+        }
+        let remaining_ms = (timeout - elapsed).as_millis().min(i32::MAX as u128) as i32;
+        let mut pfd = libc::pollfd {
+            fd,
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        // SAFETY: `pfd` is a single valid pollfd; `poll` only reads/writes it.
+        let ready = unsafe { libc::poll(&mut pfd, 1, remaining_ms) };
+        if ready < 0 {
+            // A signal (e.g. SIGWINCH at startup) interrupted the wait — retry
+            // within the remaining budget rather than give up to a false warn.
+            if std::io::Error::last_os_error().kind() == std::io::ErrorKind::Interrupted {
+                continue;
+            }
+            break;
+        }
+        if ready == 0 || pfd.revents & libc::POLLIN == 0 {
+            break; // timeout, or not a read-ready event
+        }
+        match tty.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(n) => {
+                buf.extend_from_slice(&chunk[..n]);
+                if response_terminated(&buf) || buf.len() > 1024 {
+                    break;
+                }
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(_) => break,
+        }
+    }
+    buf
+}
+
+/// A `DCS` reply ends with the string terminator `ESC \` (some terminals use
+/// `BEL`). Seeing either means the reply is complete — stop reading.
+#[cfg(unix)]
+fn response_terminated(buf: &[u8]) -> bool {
+    buf.windows(2).any(|w| w == [0x1b, b'\\']) || buf.contains(&0x07)
+}
+
+/// Non-Unix stub: Windows hard-gates VT separately in `tui::mod`, so there is no
+/// preflight query there. Keeps `doctor` / the call site cross-platform.
+#[cfg(not(unix))]
+pub fn query_truecolor(_timeout: std::time::Duration) -> Option<bool> {
+    None
 }
 
 #[cfg(test)]
@@ -153,55 +258,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn truecolor_tokens_match() {
+    fn colorterm_truecolor_tokens() {
         assert!(colorterm_is_truecolor(Some("truecolor")));
         assert!(colorterm_is_truecolor(Some("24bit")));
-        // A terminal may set a compound value.
         assert!(colorterm_is_truecolor(Some("truecolor:whatever")));
-    }
-
-    #[test]
-    fn term_allowlist_matches_modern_terminals_but_not_256color() {
-        // Direct-color entries + the modern-terminal $TERM family advertise.
-        for t in [
-            "xterm-direct",
-            "tmux-truecolor",
-            "xterm-kitty",
-            "xterm-ghostty",
-            "alacritty",
-            "wezterm",
-            "foot-extra",
-            "contour",
-            "rio",
-        ] {
-            assert!(term_is_truecolor(Some(t), None), "{t} should advertise");
-        }
-        // $TERM_PROGRAM (proper-name, case-insensitive); Apple_Terminal must NOT.
-        for p in [
-            "iTerm.app",
-            "WezTerm",
-            "ghostty",
-            "vscode",
-            "Hyper",
-            "tabby",
-        ] {
-            assert!(
-                term_is_truecolor(None, Some(p)),
-                "{p} program should advertise"
-            );
-        }
-        // The load-bearing exclusion: Apple Terminal.app is genuinely 256-color
-        // (until macOS 26) and MUST still warn — neither its $TERM nor its
-        // $TERM_PROGRAM may match the allowlist.
-        assert!(!term_is_truecolor(
-            Some("xterm-256color"),
-            Some("Apple_Terminal")
-        ));
-        // tmux/screen default $TERM carries no truecolor signal by name (the deep
-        // terminfo-Tc case is the documented residual, covered by the hatch).
-        assert!(!term_is_truecolor(Some("tmux-256color"), None));
-        assert!(!term_is_truecolor(Some("screen-256color"), None));
-        assert!(!term_is_truecolor(None, None));
+        assert!(!colorterm_is_truecolor(None));
+        assert!(!colorterm_is_truecolor(Some("")));
+        assert!(!colorterm_is_truecolor(Some("256color")));
+        // Case-sensitive: only the conventional lowercase tokens count.
+        assert!(!colorterm_is_truecolor(Some("TrueColor")));
     }
 
     #[test]
@@ -222,103 +287,79 @@ mod tests {
     }
 
     #[test]
-    fn should_warn_truecolor_truth_table() {
-        // Warn ONLY for a TUI run, on a tty, with no truecolor signal + no hatch.
-        assert!(should_warn_truecolor(true, true, None, None, None, None));
-        assert!(should_warn_truecolor(
-            true,
-            true,
-            Some("256color"),
-            Some("xterm-256color"),
-            Some("Apple_Terminal"),
-            None
-        ));
-        // Suppressed by ANY of: not a TUI run, not a tty, $COLORTERM truecolor, a
-        // known-truecolor $TERM / $TERM_PROGRAM, or the escape hatch.
-        assert!(!should_warn_truecolor(false, true, None, None, None, None));
-        assert!(!should_warn_truecolor(true, false, None, None, None, None));
-        assert!(!should_warn_truecolor(
-            true,
-            true,
-            Some("truecolor"),
-            None,
-            None,
-            None
-        ));
-        assert!(!should_warn_truecolor(
-            true,
-            true,
-            None,
-            Some("xterm-kitty"),
-            None,
-            None
-        ));
-        assert!(!should_warn_truecolor(
-            true,
-            true,
-            None,
-            None,
-            Some("iTerm.app"),
-            None
-        ));
-        assert!(!should_warn_truecolor(
-            true,
-            true,
-            None,
-            None,
-            None,
-            Some("1")
-        ));
-        // The SSH false-positive #397 targets: $COLORTERM stripped but $TERM
-        // survives the pty-req → no warning.
-        assert!(!should_warn_truecolor(
-            true,
-            true,
-            None,
-            Some("xterm-ghostty"),
-            None,
-            None
-        ));
+    fn warn_zone_truth_table() {
+        // In the zone (→ query the terminal) only for a TUI run, on a tty, with no
+        // COLORTERM truecolor declaration and no escape hatch.
+        assert!(warn_zone(true, true, None, None));
+        assert!(warn_zone(true, true, Some("256color"), None));
+        // Out of the zone (skip the query, never warn): not a run, not a tty,
+        // COLORTERM already truecolor, or the hatch set.
+        assert!(!warn_zone(false, true, None, None));
+        assert!(!warn_zone(true, false, None, None));
+        assert!(!warn_zone(true, true, Some("truecolor"), None));
+        assert!(!warn_zone(true, true, None, Some("1")));
     }
 
     #[test]
-    fn non_truecolor_is_false() {
-        assert!(!colorterm_is_truecolor(None));
-        assert!(!colorterm_is_truecolor(Some("")));
-        assert!(!colorterm_is_truecolor(Some("256color")));
-        // Case-sensitive: only the conventional lowercase tokens count.
-        assert!(!colorterm_is_truecolor(Some("TrueColor")));
+    fn parse_decrqss_distinguishes_truecolor_from_downsample() {
+        // A truecolor terminal echoes our exact RGB triple (colon form).
+        assert_eq!(
+            parse_decrqss_truecolor(b"\x1bP1$r48:2:1:2:3m\x1b\\"),
+            Some(true)
+        );
+        // Semicolon form is normalized to the same triple.
+        assert_eq!(
+            parse_decrqss_truecolor(b"\x1bP1$r0;48;2;1;2;3m\x1b\\"),
+            Some(true)
+        );
+        // Empty colorspace-id field is spec-legal and still truecolor.
+        assert_eq!(
+            parse_decrqss_truecolor(b"\x1bP1$r48:2::1:2:3m\x1b\\"),
+            Some(true)
+        );
+        // A valid reply that downsampled to a 256-color index is NOT truecolor.
+        assert_eq!(
+            parse_decrqss_truecolor(b"\x1bP1$r48;5;16m\x1b\\"),
+            Some(false)
+        );
+        // A bare attribute reply (no color set) — answered, but not our triple.
+        assert_eq!(parse_decrqss_truecolor(b"\x1bP1$r0m\x1b\\"), Some(false));
+        // `0$r` = request not honored → ambiguous; empty/timeout → ambiguous.
+        assert_eq!(parse_decrqss_truecolor(b"\x1bP0$r\x1b\\"), None);
+        assert_eq!(parse_decrqss_truecolor(b""), None);
     }
 
     #[test]
-    fn terminal_row_renders_each_state() {
-        let yes = terminal_diagnostic_row(Some("xterm-256color"), Some("truecolor"), None);
-        assert!(yes.contains("TERM=xterm-256color"));
-        assert!(yes.contains("COLORTERM=truecolor"));
-        assert!(yes.contains("truecolor=yes (COLORTERM)"));
+    fn response_terminated_on_st_or_bel() {
+        assert!(response_terminated(b"\x1bP1$r0m\x1b\\"));
+        assert!(response_terminated(b"\x1bP1$r0m\x07"));
+        assert!(!response_terminated(b"\x1bP1$r0m"));
+    }
 
-        // $COLORTERM unset but a known-truecolor $TERM → the verdict names the
-        // TERM signal (the doctor/warning coherence case).
-        let by_term = terminal_diagnostic_row(Some("xterm-kitty"), None, None);
-        assert!(by_term.contains("TERM=xterm-kitty"), "{by_term}");
+    #[test]
+    fn terminal_row_names_how_truecolor_was_determined() {
+        let by_colorterm = terminal_diagnostic_row(Some("xterm-256color"), Some("truecolor"), None);
+        assert!(by_colorterm.contains("TERM=xterm-256color"));
+        assert!(by_colorterm.contains("COLORTERM=truecolor"));
+        assert!(by_colorterm.contains("truecolor=yes (COLORTERM)"));
+
+        // COLORTERM silent → the verdict reports the terminal-query outcome.
+        assert!(terminal_diagnostic_row(Some("xterm"), None, Some(true))
+            .contains("truecolor=yes (terminal query)"));
+        assert!(terminal_diagnostic_row(Some("xterm"), None, Some(false))
+            .contains("truecolor=no (terminal downsamples)"));
+
+        // No tty / no answer → unknown, and unset values read as "(unset)".
+        let unknown = terminal_diagnostic_row(None, None, None);
+        assert!(unknown.contains("TERM=(unset)"), "{unknown}");
+        assert!(unknown.contains("COLORTERM=(unset)"), "{unknown}");
         assert!(
-            by_term.contains("truecolor=yes (TERM/TERM_PROGRAM)"),
-            "{by_term}"
+            unknown.contains("truecolor=unknown (terminal did not answer)"),
+            "{unknown}"
         );
 
-        // Unset ($COLORTERM = None) and set-but-empty both read as "(unset)" and a
-        // "not advertised" verdict (no $TERM signal either).
-        for ct in [None, Some("")] {
-            let row = terminal_diagnostic_row(None, ct, None);
-            assert!(row.contains("TERM=(unset)"), "{row}");
-            assert!(row.contains("COLORTERM=(unset)"), "{row}");
-            assert!(row.contains("TERM_PROGRAM=(unset)"), "{row}");
-            assert!(row.contains("truecolor=not advertised"), "{row}");
-        }
-
         // Untrusted env values are control-char-stripped before display.
-        let sanitized =
-            terminal_diagnostic_row(Some("a\x1b[31mb"), Some("truecolor"), Some("x\x1by"));
+        let sanitized = terminal_diagnostic_row(Some("a\x1b[31mb"), Some("truecolor"), None);
         assert!(!sanitized.contains('\u{1b}'), "{sanitized}");
     }
 }

@@ -45,6 +45,12 @@ softbuffer         = "0.4"
 clap_complete = "4.6.5"
 clap_mangen = "0.3.0"
 
+# termios/poll for the truecolor preflight's DECRQSS terminal query (term.rs):
+# raw-mode the controlling tty + timed read of the reply. Unix-only — Windows
+# hard-gates VT separately. Same 0.2 as pixtuoid-core/hook — no second build.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 # GetShortPathNameW for the Codex/Reasonix Windows hook path: resolve a
 # space/metacharacter-bearing install path to its DOS 8.3 short form so cmd.exe /C
 # can invoke it (#195). Same 0.61 major as pixtuoid-core — no second build.
