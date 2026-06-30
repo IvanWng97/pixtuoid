@@ -40,8 +40,8 @@
   },
   {
     "icon": "🎨",
-    "name": "Per-agent identity",
-    "desc": "Deterministic shirt/hair/skin palette from session hash, 16 curated outfits"
+    "name": "Team palette",
+    "desc": "Shirt + pants colored by working directory (same repo → same color, a glanceable org-chart); hair/skin per agent. 16 curated outfits"
   },
   {
     "icon": "🦞",
