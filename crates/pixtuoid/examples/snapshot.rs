@@ -1022,6 +1022,7 @@ fn fill_sample_agents(s: &mut SceneState, now: SystemTime, desks: std::ops::Rang
         ),
         ("floor-idle2", ActivityState::Idle, D::from_millis(3_000)),
     ];
+    const DEMO_REPOS: [&str; 3] = ["/demo/api", "/demo/web", "/demo/infra"];
     for i in desks {
         let (key, state, age) = &agents[i % agents.len()];
         // Keys must be unique across the full desk range: bare key for the first
@@ -1032,6 +1033,7 @@ fn fill_sample_agents(s: &mut SceneState, now: SystemTime, desks: std::ops::Rang
         } else {
             format!("{key}-{i}")
         };
+        let cwd_str = DEMO_REPOS[i % DEMO_REPOS.len()];
         let id = AgentId::from_transcript_path(&format!("/demo/{unique_key}.jsonl"));
         s.agents.insert(
             id,
@@ -1039,7 +1041,7 @@ fn fill_sample_agents(s: &mut SceneState, now: SystemTime, desks: std::ops::Rang
                 agent_id: id,
                 source: std::sync::Arc::from("claude-code"),
                 session_id: std::sync::Arc::from(format!("demo-{unique_key}").as_str()),
-                cwd: std::sync::Arc::from(PathBuf::from("/demo").as_path()),
+                cwd: std::sync::Arc::from(PathBuf::from(cwd_str).as_path()),
                 label: std::sync::Arc::from(unique_key.as_str()),
                 state: state.clone(),
                 state_started_at: now - *age,
