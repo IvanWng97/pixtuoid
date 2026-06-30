@@ -26,7 +26,8 @@ struct Outfit {
 }
 
 /// Warm / extroverted outfits — earthy reds, ochres, terracottas paired
-/// with deep neutrals. Used for agents with higher trip_chance_pct.
+/// with deep neutrals. A warm aesthetic grouping within the 16-preset pool;
+/// outfit selection is keyed on `cwd`, not personality (see `agent_palette`).
 const OUTFITS_WARM: &[Outfit] = &[
     // Wes Anderson — Grand Budapest concierge (cream + plum)
     Outfit {
@@ -135,7 +136,8 @@ const OUTFITS_WARM: &[Outfit] = &[
 ];
 
 /// Cool / homebody outfits — sages, slates, indigos paired with deeper
-/// neutrals. Used for agents with lower trip_chance_pct.
+/// neutrals. A cool aesthetic grouping within the 16-preset pool;
+/// outfit selection is keyed on `cwd`, not personality (see `agent_palette`).
 const OUTFITS_COOL: &[Outfit] = &[
     // Modern minimal — sage + charcoal
     Outfit {
