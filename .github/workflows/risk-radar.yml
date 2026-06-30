@@ -29,7 +29,11 @@ jobs:
       - name: Self-test the matcher
         run: python3 scripts/risk-radar.py --selftest
 
+      # continue-on-error: a transient `gh pr diff` hiccup must not redden an
+      # advisory, non-required job. The step summary is the durable floor.
       - name: Compute risk radar
+        id: compute
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
@@ -40,9 +44,11 @@ jobs:
             if [ -s radar.md ]; then cat radar.md; else echo "_No high-blast-radius seams touched._"; fi
           } >>"$GITHUB_STEP_SUMMARY"
 
-      # Soft: a read-only fork token can't comment — the step summary above is
-      # the durable floor, so this never fails the job.
+      # Only upsert when the radar was actually computed (else radar.md is
+      # untrustworthy and the empty-body branch would wrongly delete the
+      # existing comment). Soft: a read-only fork token can't comment anyway.
       - name: Upsert sticky PR comment
+        if: steps.compute.outcome == 'success'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}

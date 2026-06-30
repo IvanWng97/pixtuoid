@@ -18,10 +18,16 @@ body_file="${2:?usage: risk-radar-upsert.sh <pr-number> <body-file>}"
 marker='<!-- risk-radar -->'
 repo="${GH_REPO:-$(gh repo view --json nameWithOwner --jq .nameWithOwner)}"
 
-# First existing radar comment id (empty if none). --paginate can emit one id
-# per page, so take the first.
-existing_id="$(gh api "repos/$repo/issues/$pr/comments" --paginate \
-    --jq ".[] | select(.body | startswith(\"$marker\")) | .id" | head -n1 || true)"
+# Find our existing radar comment id (empty if none). A GET *failure* must NOT
+# be mistaken for "no comment" — that would POST a duplicate sticky comment and
+# break idempotency. So capture explicitly and bail soft on a real error;
+# otherwise take the first marker'd id (oldest, stable target across re-pushes).
+if ! comments="$(gh api "repos/$repo/issues/$pr/comments" --paginate \
+    --jq ".[] | select(.body | startswith(\"$marker\")) | .id")"; then
+    echo "risk-radar: could not list PR comments (transient API error?); skipping to avoid a duplicate" >&2
+    exit 0
+fi
+existing_id="${comments%%$'\n'*}"
 
 if [ -s "$body_file" ]; then
     body="$(cat "$body_file")"
