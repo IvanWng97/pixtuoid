@@ -45,7 +45,11 @@ by reading actual code — no guessing, no "this might be an issue."
 ### Escalate by what the diff touches
 
 The checks above apply to every PR; these fire only when the diff touches a
-high-risk seam, and they require looking BEYOND the diff:
+high-risk seam, and they require looking BEYOND the diff. The **`risk radar`
+workflow** (`scripts/risk-radar.py`, advisory) auto-detects these seams by path
+and posts the matching checklist as a sticky PR comment — it is a deterministic
+backstop for this section (prose-only escalation slipped both bot and local
+review in #198), NOT a replacement for the judgement below:
 
 - **`crates/pixtuoid-hook/**` (the shim)** → audit the WHOLE shim, not just the
   diff. It must use `args_os()` not `args()` (a non-UTF-8 argv panics → non-zero

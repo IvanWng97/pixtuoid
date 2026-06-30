@@ -1,0 +1,51 @@
+name: risk radar
+
+# Advisory, deterministic blast-radius surfacer (NOT a merge gate). On each PR
+# it computes which high-risk seams the diff touches (pure path matching, no
+# LLM) and posts a sticky checklist of the documented review escalations. It
+# converts prose-only escalation — which slipped both the review bot and local
+# review in #198 — into something the PR states outright. Never blocks merge;
+# degrades to the step summary when the token can't comment (fork PRs).
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: risk-radar-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  risk-radar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # The matcher's selftest is the gate on the seam map itself — if someone
+      # edits scripts/risk-radar.py and breaks a rule, this fails first.
+      - name: Self-test the matcher
+        run: python3 scripts/risk-radar.py --selftest
+
+      - name: Compute risk radar
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          gh pr diff "$PR" --name-only | python3 scripts/risk-radar.py >radar.md
+          {
+            echo "## Risk radar"
+            if [ -s radar.md ]; then cat radar.md; else echo "_No high-blast-radius seams touched._"; fi
+          } >>"$GITHUB_STEP_SUMMARY"
+
+      # Soft: a read-only fork token can't comment — the step summary above is
+      # the durable floor, so this never fails the job.
+      - name: Upsert sticky PR comment
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: scripts/risk-radar-upsert.sh "$PR" radar.md
