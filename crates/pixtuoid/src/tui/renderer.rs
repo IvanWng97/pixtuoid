@@ -222,10 +222,8 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     let buf_w = scene_rect.width;
     let buf_h = scene_rect.height.saturating_mul(2);
     ctx.buf.ensure_size(buf_w, buf_h, theme.surface.bg_fallback);
-    use pixtuoid_scene::layout::MAX_VISIBLE_DESKS;
     // Always compute maximum layout capacity — floor overflow handles the rest.
-    let Some(layout) = Layout::compute_with_seed(buf_w, buf_h, MAX_VISIBLE_DESKS, floor.floor_seed)
-    else {
+    let Some(layout) = Layout::compute_with_seed(buf_w, buf_h, None, floor.floor_seed) else {
         term.draw(|f| {
             let actual = f.area();
             paint_footer(f, scene, actual, theme, floor_info, ctx.source_warning);

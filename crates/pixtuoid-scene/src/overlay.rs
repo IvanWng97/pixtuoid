@@ -150,7 +150,7 @@ mod tests {
     }
 
     fn layout() -> Layout {
-        Layout::compute(120, 96, 4).expect("fits")
+        Layout::compute(120, 96, Some(4)).expect("fits")
     }
 
     fn slot(label: &str, session_id: &str, desk: usize, state: ActivityState) -> AgentSlot {

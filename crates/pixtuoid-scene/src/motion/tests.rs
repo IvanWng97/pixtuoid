@@ -156,7 +156,7 @@ fn idle_slot(path: &str, state_started: SystemTime) -> AgentSlot {
 }
 
 fn layout() -> Layout {
-    Layout::compute(120, 96, 4).expect("fits")
+    Layout::compute(120, 96, Some(4)).expect("fits")
 }
 
 /// Find an agent whose cycle_n=0 is a trip cycle, using the given path prefix.

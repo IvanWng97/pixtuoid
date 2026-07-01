@@ -38,14 +38,9 @@ pub fn floor_seed(floor_idx: usize) -> u64 {
 /// `0` when the buffer is too small for even one cubicle (`compute_with_seed`
 /// returns `None`), matching the existing `unwrap_or(0)` capacity callers.
 pub fn floor_capacity(buf_w: u16, buf_h: u16, floor_seed: u64) -> usize {
-    crate::layout::SceneLayout::compute_with_seed(
-        buf_w,
-        buf_h,
-        crate::layout::MAX_VISIBLE_DESKS,
-        floor_seed,
-    )
-    .map(|l| l.home_desks.len())
-    .unwrap_or(0)
+    crate::layout::SceneLayout::compute_with_seed(buf_w, buf_h, None, floor_seed)
+        .map(|l| l.home_desks.len())
+        .unwrap_or(0)
 }
 
 #[derive(Debug, Clone, Copy)]

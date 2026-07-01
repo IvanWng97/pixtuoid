@@ -479,7 +479,7 @@ mod tests {
     use crate::layout::{Layout, WallSegment};
 
     fn make_layout() -> Layout {
-        Layout::compute(160, 200, 4).expect("layout fits")
+        Layout::compute(160, 200, Some(4)).expect("layout fits")
     }
 
     #[test]
@@ -580,7 +580,7 @@ mod tests {
         // printer, which also pins the INTER_POD_AISLE_X width: narrow the aisle
         // and the decor disconnects the grid here). Across seeds × sizes incl. the
         // 96×70 floor. It caught the narrow-meeting-room teleport (now gated).
-        use crate::layout::MAX_VISIBLE_DESKS;
+        use crate::layout::TEST_DEFAULT_DESKS;
         let overlay = OccupancyOverlay::new();
         let sizes = [
             (96u16, 70u16),
@@ -591,7 +591,8 @@ mod tests {
         ];
         for (w, h) in sizes {
             for seed in 0..5u64 {
-                let Some(l) = Layout::compute_with_seed(w, h, MAX_VISIBLE_DESKS, seed) else {
+                let Some(l) = Layout::compute_with_seed(w, h, Some(TEST_DEFAULT_DESKS), seed)
+                else {
                     continue;
                 };
                 let Some(origin) = l.door_threshold else {
@@ -623,7 +624,7 @@ mod tests {
         // exists, approach_point returns the `wp.pos` sentinel (NO fallback — the
         // wander skips the furniture), which isn't a real destination, so we
         // exclude it below.
-        use crate::layout::MAX_VISIBLE_DESKS;
+        use crate::layout::TEST_DEFAULT_DESKS;
         use pixtuoid_core::layout::approach_point;
         let overlay = OccupancyOverlay::new();
         for (w, h) in [
@@ -634,7 +635,8 @@ mod tests {
             (240, 160),
         ] {
             for seed in 0..5u64 {
-                let Some(l) = Layout::compute_with_seed(w, h, MAX_VISIBLE_DESKS, seed) else {
+                let Some(l) = Layout::compute_with_seed(w, h, Some(TEST_DEFAULT_DESKS), seed)
+                else {
                     continue;
                 };
                 for &desk in &l.home_desks {
@@ -671,11 +673,12 @@ mod tests {
         // approach_point simply won't pick those.) Pins the core↔router
         // coarsening agreement on REAL layouts, not just synthetic masks, so
         // approach_point can never select an unroutable approach side.
-        use crate::layout::MAX_VISIBLE_DESKS;
+        use crate::layout::TEST_DEFAULT_DESKS;
         let overlay = OccupancyOverlay::new();
         for (w, h) in [(160u16, 120u16), (200, 80), (96, 70)] {
             for seed in 0..3u64 {
-                let Some(l) = Layout::compute_with_seed(w, h, MAX_VISIBLE_DESKS, seed) else {
+                let Some(l) = Layout::compute_with_seed(w, h, Some(TEST_DEFAULT_DESKS), seed)
+                else {
                     continue;
                 };
                 let Some(door) = l.door_threshold else {

@@ -230,8 +230,10 @@ mod tests {
 
     #[test]
     fn capacity_for_normal_terminal() {
+        // No upper bound: desk capacity fills the buffer's physical space
+        // (the old 16-desk layout ceiling was removed with the desk cap).
         let cap = capacity_for_terminal(192, 48, 0);
-        assert!(cap > 0 && cap <= pixtuoid_core::layout::MAX_VISIBLE_DESKS);
+        assert!(cap > 0);
     }
 
     #[test]
@@ -255,14 +257,9 @@ mod tests {
         let cols: u16 = 160;
         let rows: u16 = 50;
         let buf_h = rows.saturating_sub(1) * 2;
-        let expected = pixtuoid_core::layout::SceneLayout::compute_with_seed(
-            cols,
-            buf_h,
-            pixtuoid_core::layout::MAX_VISIBLE_DESKS,
-            0,
-        )
-        .map(|l| l.home_desks.len())
-        .unwrap_or(0);
+        let expected = pixtuoid_core::layout::SceneLayout::compute_with_seed(cols, buf_h, None, 0)
+            .map(|l| l.home_desks.len())
+            .unwrap_or(0);
         assert_eq!(capacity_for_terminal(cols, rows, 0), expected);
     }
 

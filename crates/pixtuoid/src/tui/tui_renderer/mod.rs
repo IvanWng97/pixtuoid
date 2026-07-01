@@ -27,7 +27,7 @@ use crate::tui::renderer::{draw_scene, flush_buffer_to_term_at_offset, DrawCtx, 
 use pixtuoid_scene::floor::{
     num_floors, project_floor_scene, FloorCtx, FloorMeta, FloorTransition,
 };
-use pixtuoid_scene::layout::{Layout, MAX_VISIBLE_DESKS};
+use pixtuoid_scene::layout::Layout;
 use pixtuoid_scene::pathfind::Router;
 use pixtuoid_scene::pet::PetFrame;
 use pixtuoid_scene::pixel_painter::{render_to_rgb_buffer, PixelCtx};
@@ -816,9 +816,7 @@ fn render_transition_floor(
     now: SystemTime,
     debug_walkable: bool,
 ) -> Vec<pixtuoid_core::AgentId> {
-    let Some(layout) =
-        Layout::compute_with_seed(buf_w, buf_h, MAX_VISIBLE_DESKS, floor_meta.floor_seed)
-    else {
+    let Some(layout) = Layout::compute_with_seed(buf_w, buf_h, None, floor_meta.floor_seed) else {
         return Vec::new();
     };
     fctx.router.set_preferred_zone(layout.corridor);

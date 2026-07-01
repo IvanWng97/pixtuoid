@@ -668,8 +668,8 @@ fn settle_view_matches_the_seated_view_for_every_seat() {
     // the "sit facing the wrong way then snap" bug cannot recur, for current
     // OR future seatable furniture (matched generically by having a settle
     // foot-cell, not a hardcoded kind list).
-    use crate::layout::{Facing, WaypointKind, MAX_VISIBLE_DESKS};
-    let l = Layout::compute(192, 158, MAX_VISIBLE_DESKS).expect("fits");
+    use crate::layout::{Facing, WaypointKind, TEST_DEFAULT_DESKS};
+    let l = Layout::compute(192, 158, Some(TEST_DEFAULT_DESKS)).expect("fits");
     let seats: Vec<_> = l
         .waypoints
         .iter()
@@ -736,9 +736,9 @@ fn settle_seat_view_recognizes_the_home_desk() {
     // = desk_walk_anchor) is a settle target, so the arrival glide onto it goes
     // through SeatView::Front (front-facing, stable z-key) — same path as the
     // sofas, no front-cross.
-    use crate::layout::MAX_VISIBLE_DESKS;
+    use crate::layout::TEST_DEFAULT_DESKS;
     use pixtuoid_core::layout::{desk_walk_anchor, Furniture};
-    let l = Layout::compute(192, 158, MAX_VISIBLE_DESKS).expect("fits");
+    let l = Layout::compute(192, 158, Some(TEST_DEFAULT_DESKS)).expect("fits");
     let desk = *l.home_desks.first().expect("at least one home desk");
     let chair = desk_walk_anchor(desk);
     assert_eq!(
@@ -796,9 +796,9 @@ fn sit_arc_z_key_is_stable_and_on_the_right_side_of_its_furniture() {
     // sofa/couch, on top of (tie with) a front sofa, and in front of the
     // meeting table for a stand.
     use crate::layout::{
-        furniture_def, z_sort_row, Anchor, Facing, Furniture, WaypointKind, MAX_VISIBLE_DESKS,
+        furniture_def, z_sort_row, Anchor, Facing, Furniture, WaypointKind, TEST_DEFAULT_DESKS,
     };
-    let l = Layout::compute(192, 158, MAX_VISIBLE_DESKS).expect("fits");
+    let l = Layout::compute(192, 158, Some(TEST_DEFAULT_DESKS)).expect("fits");
     let mut saw_back = false;
     for w in l
         .waypoints

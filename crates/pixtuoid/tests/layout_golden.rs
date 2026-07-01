@@ -15,31 +15,31 @@ use pixtuoid_core::layout::SceneLayout;
 
 #[test]
 fn layout_standard_96x72_desks() {
-    let l = SceneLayout::compute(96, 72, 4).unwrap();
+    let l = SceneLayout::compute(96, 72, Some(4)).unwrap();
     insta::assert_debug_snapshot!("desks_96x72", l.home_desks);
 }
 
 #[test]
 fn layout_standard_96x72_waypoints() {
-    let l = SceneLayout::compute(96, 72, 4).unwrap();
+    let l = SceneLayout::compute(96, 72, Some(4)).unwrap();
     insta::assert_debug_snapshot!("waypoints_96x72", l.waypoints);
 }
 
 #[test]
 fn layout_standard_96x72_meeting() {
-    let l = SceneLayout::compute(96, 72, 4).unwrap();
+    let l = SceneLayout::compute(96, 72, Some(4)).unwrap();
     insta::assert_debug_snapshot!("meeting_96x72", l.meeting_room);
 }
 
 #[test]
 fn layout_standard_96x72_room_walls() {
-    let l = SceneLayout::compute(96, 72, 4).unwrap();
+    let l = SceneLayout::compute(96, 72, Some(4)).unwrap();
     insta::assert_debug_snapshot!("room_walls_96x72", l.room_walls);
 }
 
 #[test]
 fn layout_standard_96x72_zones() {
-    let l = SceneLayout::compute(96, 72, 4).unwrap();
+    let l = SceneLayout::compute(96, 72, Some(4)).unwrap();
     insta::assert_debug_snapshot!("cubicle_band_96x72", l.cubicle_band);
     insta::assert_debug_snapshot!("cubicle_aisle_96x72", l.cubicle_aisle);
     insta::assert_debug_snapshot!("pantry_96x72", l.pantry_room);
@@ -49,25 +49,25 @@ fn layout_standard_96x72_zones() {
 
 #[test]
 fn layout_standard_192x160_desks() {
-    let l = SceneLayout::compute(192, 160, 8).unwrap();
+    let l = SceneLayout::compute(192, 160, Some(8)).unwrap();
     insta::assert_debug_snapshot!("desks_192x160", l.home_desks);
 }
 
 #[test]
 fn layout_standard_192x160_waypoints() {
-    let l = SceneLayout::compute(192, 160, 8).unwrap();
+    let l = SceneLayout::compute(192, 160, Some(8)).unwrap();
     insta::assert_debug_snapshot!("waypoints_192x160", l.waypoints);
 }
 
 #[test]
 fn layout_standard_192x160_meeting() {
-    let l = SceneLayout::compute(192, 160, 8).unwrap();
+    let l = SceneLayout::compute(192, 160, Some(8)).unwrap();
     insta::assert_debug_snapshot!("meeting_192x160", l.meeting_room);
 }
 
 #[test]
 fn layout_standard_192x160_room_walls() {
-    let l = SceneLayout::compute(192, 160, 8).unwrap();
+    let l = SceneLayout::compute(192, 160, Some(8)).unwrap();
     insta::assert_debug_snapshot!("room_walls_192x160", l.room_walls);
 }
 
@@ -76,25 +76,25 @@ fn layout_standard_192x160_room_walls() {
 
 #[test]
 fn layout_open_plan_seed2_desks() {
-    let l = SceneLayout::compute_with_seed(160, 120, 4, 2).unwrap();
+    let l = SceneLayout::compute_with_seed(160, 120, Some(4), 2).unwrap();
     insta::assert_debug_snapshot!("desks_open_plan_seed2", l.home_desks);
 }
 
 #[test]
 fn layout_open_plan_seed2_waypoints() {
-    let l = SceneLayout::compute_with_seed(160, 120, 4, 2).unwrap();
+    let l = SceneLayout::compute_with_seed(160, 120, Some(4), 2).unwrap();
     insta::assert_debug_snapshot!("waypoints_open_plan_seed2", l.waypoints);
 }
 
 #[test]
 fn layout_open_plan_seed2_meeting() {
-    let l = SceneLayout::compute_with_seed(160, 120, 4, 2).unwrap();
+    let l = SceneLayout::compute_with_seed(160, 120, Some(4), 2).unwrap();
     insta::assert_debug_snapshot!("meeting_open_plan_seed2", l.meeting_room);
 }
 
 #[test]
 fn layout_open_plan_seed2_room_walls() {
-    let l = SceneLayout::compute_with_seed(160, 120, 4, 2).unwrap();
+    let l = SceneLayout::compute_with_seed(160, 120, Some(4), 2).unwrap();
     insta::assert_debug_snapshot!("room_walls_open_plan_seed2", l.room_walls);
 }
 
@@ -103,25 +103,25 @@ fn layout_open_plan_seed2_room_walls() {
 
 #[test]
 fn layout_dense_seed6_desks() {
-    let l = SceneLayout::compute_with_seed(192, 160, 4, 6).unwrap();
+    let l = SceneLayout::compute_with_seed(192, 160, Some(4), 6).unwrap();
     insta::assert_debug_snapshot!("desks_dense_seed6", l.home_desks);
 }
 
 #[test]
 fn layout_dense_seed6_waypoints() {
-    let l = SceneLayout::compute_with_seed(192, 160, 4, 6).unwrap();
+    let l = SceneLayout::compute_with_seed(192, 160, Some(4), 6).unwrap();
     insta::assert_debug_snapshot!("waypoints_dense_seed6", l.waypoints);
 }
 
 #[test]
 fn layout_dense_seed6_meeting() {
-    let l = SceneLayout::compute_with_seed(192, 160, 4, 6).unwrap();
+    let l = SceneLayout::compute_with_seed(192, 160, Some(4), 6).unwrap();
     insta::assert_debug_snapshot!("meeting_dense_seed6", l.meeting_room);
 }
 
 #[test]
 fn layout_dense_seed6_room_walls() {
-    let l = SceneLayout::compute_with_seed(192, 160, 4, 6).unwrap();
+    let l = SceneLayout::compute_with_seed(192, 160, Some(4), 6).unwrap();
     insta::assert_debug_snapshot!("room_walls_dense_seed6", l.room_walls);
 }
 
@@ -138,7 +138,7 @@ fn floor_variant_hash_gives_unique_layouts_per_floor() {
     let signatures: HashSet<_> = (0u64..5)
         .map(|i| {
             let seed = i.wrapping_mul(FLOOR_SEED_MULTIPLIER);
-            let l = SceneLayout::compute_with_seed(192, 160, 4, seed).unwrap();
+            let l = SceneLayout::compute_with_seed(192, 160, Some(4), seed).unwrap();
             (
                 l.meeting_room,
                 l.pantry_room,

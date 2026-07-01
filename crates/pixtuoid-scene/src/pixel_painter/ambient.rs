@@ -460,7 +460,7 @@ mod tests {
         use crate::pixel_painter::background::Weather;
         use chrono::TimeZone;
         let theme = &crate::theme::NORMAL;
-        let layout = crate::layout::Layout::compute(192, 80, 4).expect("layout fits");
+        let layout = crate::layout::Layout::compute(192, 80, Some(4)).expect("layout fits");
         // 07:00 → East-wall spot. Weather varies by day at a fixed hour, so
         // search days for each weather (TZ-independent).
         let morning = |day: u32| -> SystemTime {
@@ -522,7 +522,7 @@ mod tests {
         use crate::pixel_painter::background::Weather;
         use chrono::TimeZone;
         let theme = &crate::theme::NORMAL;
-        let layout = crate::layout::Layout::compute(192, 80, 4).expect("layout fits");
+        let layout = crate::layout::Layout::compute(192, 80, Some(4)).expect("layout fits");
         // 19:30 local → West-wall spot at the upper boundary (boundary_fade=0).
         let dusk_edge = |day: u32| -> SystemTime {
             chrono::Local
@@ -600,7 +600,7 @@ mod tests {
     fn dust_motes_clamp_to_a_tiny_buffer() {
         use chrono::TimeZone;
         let theme = &crate::theme::NORMAL;
-        let layout = crate::layout::Layout::compute(192, 80, 4).expect("layout fits");
+        let layout = crate::layout::Layout::compute(192, 80, Some(4)).expect("layout fits");
         // 07:00 Clear morning → sun up + full beam.
         let now = (1..=60u32)
             .map(|day| -> SystemTime {
@@ -633,7 +633,7 @@ mod tests {
         use chrono::TimeZone;
         let theme = &crate::theme::NORMAL;
         // top_margin == WALL_BAND_TO_TOP_MARGIN → wall_band_h saturating_sub to 0.
-        let mut layout = crate::layout::Layout::compute(192, 80, 4).expect("layout fits");
+        let mut layout = crate::layout::Layout::compute(192, 80, Some(4)).expect("layout fits");
         layout.top_margin = pixtuoid_core::layout::WALL_BAND_TO_TOP_MARGIN;
         // 07:00 → East wall spot with a real beam under Clear, so execution
         // reaches the wall_band_h==0 guard rather than an earlier return.

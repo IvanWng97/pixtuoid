@@ -212,12 +212,22 @@ pub const DESK_H: u16 = 6;
 /// these so the door footprint can't drift between them.
 pub const ELEVATOR_W: u16 = 16;
 pub const ELEVATOR_H: u16 = 14;
-/// Hard cap on how many cubicles get painted regardless of how high
-/// `max_desks` is set. Bumped from 8 → 16 after the lounge_band quadrant
-/// was retired and the cubicle band absorbed its vertical space — more
-/// rows fit, so more agents can have their own desk before falling back
-/// to overflow seating.
-pub const MAX_VISIBLE_DESKS: usize = 16;
+/// NOT a cap anymore — production layouts fill the buffer's physical space
+/// (`compute_with_seed(.., max_desks: None, ..)`), so desk count scales with
+/// the canvas. This is the historical 16-desk ceiling kept as a NAMED DEFAULT
+/// for deterministic tests/snapshots (`Some(TEST_DEFAULT_DESKS)`) — a stable
+/// "one classic office worth of desks" reference, not a limit the layout
+/// enforces.
+pub const TEST_DEFAULT_DESKS: usize = 16;
+/// Semver alias for the pre-rename name — `TEST_DEFAULT_DESKS` was published
+/// as `MAX_VISIBLE_DESKS` through 0.11.x, and removing a `pub` const is a
+/// breaking change the CI semver gate (rightly) rejects without a version
+/// bump. Drop this alias at the next minor bump.
+#[deprecated(
+    since = "0.11.2",
+    note = "renamed to TEST_DEFAULT_DESKS — it is a test default, not a cap"
+)]
+pub const MAX_VISIBLE_DESKS: usize = TEST_DEFAULT_DESKS;
 pub const DESK_GAP_X: u16 = 11;
 pub const DESK_GAP_Y: u16 = 14;
 pub const MIN_TOP_MARGIN: u16 = 20;
@@ -244,17 +254,21 @@ pub const INTER_POD_AISLE_Y: u16 = 22;
 impl SceneLayout {
     /// Returns `None` if the buffer is too small for even one cubicle and the
     /// fixed lounge area. Caller should paint a "terminal too small" message.
-    pub fn compute(buf_w: u16, buf_h: u16, num_agents: usize) -> Option<Self> {
-        Self::compute_with_seed(buf_w, buf_h, num_agents, 0)
+    pub fn compute(buf_w: u16, buf_h: u16, max_desks: Option<usize>) -> Option<Self> {
+        Self::compute_with_seed(buf_w, buf_h, max_desks, 0)
     }
 
+    /// `max_desks` caps the desk count: `None` fills the office to the buffer's
+    /// physical capacity (production — the office scales to the canvas), while
+    /// `Some(n)` caps at `n` desks for deterministic tests/snapshots. The pod
+    /// grid geometry is always the room's true capacity regardless of the cap.
     pub fn compute_with_seed(
         buf_w: u16,
         buf_h: u16,
-        num_agents: usize,
+        max_desks: Option<usize>,
         floor_seed: u64,
     ) -> Option<Self> {
-        compute::compute_with_seed(buf_w, buf_h, num_agents, floor_seed)
+        compute::compute_with_seed(buf_w, buf_h, max_desks, floor_seed)
     }
 
     pub fn is_walkable(&self, x: u16, y: u16) -> bool {

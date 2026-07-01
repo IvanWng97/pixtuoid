@@ -401,7 +401,7 @@ mod tests {
         // vending + printer spawn) so the appliance stand cells are covered too.
         for (bw, bh) in [(160u16, 120u16), (160, 150)] {
             for seed in 0..5u64 {
-                let l = SceneLayout::compute_with_seed(bw, bh, 6, seed).unwrap();
+                let l = SceneLayout::compute_with_seed(bw, bh, Some(6), seed).unwrap();
                 let origin = l
                     .home_desks
                     .first()
@@ -438,7 +438,7 @@ mod tests {
         // tracks the origin (the whole point: a desk above the pantry → a
         // top-down approach, not a detour below).
         use crate::layout::SceneLayout;
-        let l = SceneLayout::compute(120, 96, 4).unwrap();
+        let l = SceneLayout::compute(120, 96, Some(4)).unwrap();
         let p = l
             .waypoints
             .iter()
@@ -569,7 +569,7 @@ mod tests {
         use crate::layout::{furniture_def, SceneLayout};
         for (w, h) in [(120u16, 96u16), (160, 120), (192, 160), (240, 160)] {
             for seed in 0..4u64 {
-                let Some(l) = SceneLayout::compute_with_seed(w, h, 4, seed) else {
+                let Some(l) = SceneLayout::compute_with_seed(w, h, Some(4), seed) else {
                     continue;
                 };
                 for &desk in &l.home_desks {

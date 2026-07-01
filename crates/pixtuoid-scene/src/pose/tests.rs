@@ -42,7 +42,7 @@ impl Router for StubRouter {
 }
 
 fn layout() -> Layout {
-    Layout::compute(120, 96, 4).expect("fits")
+    Layout::compute(120, 96, Some(4)).expect("fits")
 }
 
 /// Router that returns a stable polyline (`first`) for its first few calls
@@ -2229,7 +2229,7 @@ fn exit_while_wandering_does_not_teleport_to_desk() {
     // fallback rule a trip agent correctly skips them and never wanders far. A
     // real floor has reachable waypoints, so the agent genuinely walks out —
     // which is what this exit-while-wandering test needs.
-    let l = Layout::compute(160, 120, 4).expect("fits");
+    let l = Layout::compute(160, 120, Some(4)).expect("fits");
     let trip_id = (0u64..1000)
         .map(|i| AgentId::from_transcript_path(&format!("/exitw/{i}.jsonl")))
         .find(|id| takes_trip(*id, 0))
@@ -2360,7 +2360,7 @@ fn wander_continuous_across_layouts_and_agents() {
     // MULTIPLE desks per layout (so different home positions and wander
     // destinations, incl. couch/pantry/etc., are exercised). Overlay churns
     // every frame. A teleport on any geometry/agent fails the sweep.
-    use pixtuoid_core::layout::MAX_VISIBLE_DESKS;
+    use pixtuoid_core::layout::TEST_DEFAULT_DESKS;
 
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let geometries: [(u16, u16, u64); 5] = [
@@ -2372,7 +2372,7 @@ fn wander_continuous_across_layouts_and_agents() {
     ];
 
     for (w, h, seed) in geometries {
-        let Some(l) = Layout::compute_with_seed(w, h, MAX_VISIBLE_DESKS, seed) else {
+        let Some(l) = Layout::compute_with_seed(w, h, Some(TEST_DEFAULT_DESKS), seed) else {
             continue;
         };
         if l.home_desks.is_empty() || l.waypoints.is_empty() {

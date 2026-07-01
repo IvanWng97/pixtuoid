@@ -52,7 +52,7 @@ fn couch_pos(cubicle_band: &Bounds, top_margin: u16) -> Point {
 pub(super) fn compute_with_seed(
     buf_w: u16,
     buf_h: u16,
-    num_agents: usize,
+    max_desks: Option<usize>,
     floor_seed: u64,
 ) -> Option<SceneLayout> {
     const MIN_W: u16 = DESK_W + DESK_GAP_X * 2;
@@ -187,14 +187,12 @@ pub(super) fn compute_with_seed(
     // terminals get more breathing room.
     let couch_to_desk_extra = buf_h.saturating_sub(60) / 20;
     let pod_cols = ((right_w.saturating_sub(INTER_POD_AISLE_X / 2)) / pod_stride_x).max(1);
-    let pod_rows = {
-        let raw = ((cubicle_h.saturating_sub(couch_to_desk_extra) + INTER_POD_AISLE_Y)
-            / pod_stride_y)
-            .max(1);
-        let max_pods = MAX_VISIBLE_DESKS as u16 / (POD_SIDE * POD_SIDE);
-        let total_pods = (pod_cols * raw).min(max_pods);
-        total_pods.div_ceil(pod_cols).min(raw)
-    };
+    // Fill: the pod grid packs as many rows as physically fit. The desk COUNT
+    // cap (if any) is applied at emission in `compute_pod_desks` via `max_desks`
+    // — the grid geometry itself is always the room's true capacity, so a bigger
+    // canvas is a bigger office (production passes `None`; tests cap the count).
+    let pod_rows =
+        ((cubicle_h.saturating_sub(couch_to_desk_extra) + INTER_POD_AISLE_Y) / pod_stride_y).max(1);
     let pod_grid = PodGrid {
         cols: pod_cols,
         rows: pod_rows,
@@ -203,7 +201,7 @@ pub(super) fn compute_with_seed(
         couch_to_desk_extra,
     };
 
-    let home_desks = compute_pod_desks(num_agents, &cubicle_band, pod_grid);
+    let home_desks = compute_pod_desks(max_desks, &cubicle_band, pod_grid);
 
     let pod_decor = compute_pod_decor(&cubicle_band, pod_grid, floor_seed);
 
@@ -603,7 +601,7 @@ pub(super) struct RoomPresence {
 /// Pod-grid desk placement: full pods, partial columns at right edge,
 /// partial row at bottom edge.
 pub(super) fn compute_pod_desks(
-    num_agents: usize,
+    max_desks: Option<usize>,
     cubicle_band: &Bounds,
     grid: PodGrid,
 ) -> Vec<Point> {
@@ -617,8 +615,14 @@ pub(super) fn compute_pod_desks(
         stride_y: pod_stride_y,
         couch_to_desk_extra,
     } = grid;
-    let n = num_agents.min(MAX_VISIBLE_DESKS);
-    let mut home_desks = Vec::with_capacity(n);
+    // `None` fills the grid (emission unbounded); `Some(cap)` caps the count —
+    // the deterministic knob for tests/snapshots. Bound the allocation hint to
+    // the grid's physical desk capacity: `n` may be `usize::MAX` (fill), and
+    // `Vec::with_capacity(usize::MAX)` aborts.
+    let n = max_desks.unwrap_or(usize::MAX);
+    let grid_desk_cap =
+        (pod_cols as usize) * (pod_rows as usize) * (POD_SIDE as usize) * (POD_SIDE as usize);
+    let mut home_desks = Vec::with_capacity(n.min(grid_desk_cap.max(1)));
     // Clamp: a desk must fit entirely inside the cubicle band.
     // Without this, the last intra-pod row of a bottom pod can
     // extend past cubicle_band into the cubicle_aisle (the pod_rows

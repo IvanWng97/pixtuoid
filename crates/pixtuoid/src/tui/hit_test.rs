@@ -403,13 +403,13 @@ mod tests {
 
     #[test]
     fn coffee_machine_hit_test_returns_false_for_origin() {
-        let layout = Layout::compute(160, 200, 4).expect("layout");
+        let layout = Layout::compute(160, 200, Some(4)).expect("layout");
         assert!(!hit_test_coffee_machine(&layout, 0, 0));
     }
 
     #[test]
     fn coffee_machine_hit_test_returns_true_for_machine_area() {
-        let layout = Layout::compute(160, 200, 4).expect("layout");
+        let layout = Layout::compute(160, 200, Some(4)).expect("layout");
         let pantry_wp = layout
             .waypoints
             .iter()
@@ -432,7 +432,7 @@ mod tests {
 
     #[test]
     fn furniture_hit_test_returns_none_for_empty_space() {
-        let layout = Layout::compute(160, 200, 4).expect("layout");
+        let layout = Layout::compute(160, 200, Some(4)).expect("layout");
         // Open floor must report no furniture. Scan for an empty cell rather
         // than hardcoding one — which mid-floor cells are open shifts when the
         // pod aisle spacing is retuned (a hardcoded point goes stale and lands
@@ -447,7 +447,7 @@ mod tests {
 
     #[test]
     fn furniture_hit_test_finds_desk() {
-        let layout = Layout::compute(160, 200, 4).expect("layout");
+        let layout = Layout::compute(160, 200, Some(4)).expect("layout");
         let desk = layout.home_desks.first().expect("desk");
         let cell_y = (desk.y + 2) / 2;
         assert_eq!(
@@ -458,7 +458,7 @@ mod tests {
 
     #[test]
     fn furniture_hit_test_finds_elevator() {
-        let layout = Layout::compute(160, 200, 4).expect("layout");
+        let layout = Layout::compute(160, 200, Some(4)).expect("layout");
         let door = layout.door.expect("door");
         let cell_y = (door.y + 7) / 2;
         assert_eq!(
@@ -469,7 +469,7 @@ mod tests {
 
     #[test]
     fn furniture_hit_test_finds_meeting_table() {
-        let layout = Layout::compute(160, 200, 4).expect("layout");
+        let layout = Layout::compute(160, 200, Some(4)).expect("layout");
         let table = layout.meeting_furniture.first().expect("room").table;
         let cell_y = table.y / 2;
         assert_eq!(
@@ -481,9 +481,9 @@ mod tests {
     #[test]
     fn furniture_hit_test_respects_floor_seed() {
         // seed=1 → Lounge variant (no meeting room)
-        let layout1 = Layout::compute_with_seed(160, 200, 4, 1).expect("layout");
+        let layout1 = Layout::compute_with_seed(160, 200, Some(4), 1).expect("layout");
         assert!(layout1.meeting_furniture.is_empty());
-        let layout0 = Layout::compute(160, 200, 4).expect("layout");
+        let layout0 = Layout::compute(160, 200, Some(4)).expect("layout");
         if let Some(room) = layout0.meeting_furniture.first() {
             let table = room.table;
             let cell_y = table.y / 2;
@@ -557,7 +557,7 @@ mod tests {
 
     #[test]
     fn from_tui_hits_agent_at_its_desk_anchor() {
-        let layout = Layout::compute(160, 200, 4).expect("layout");
+        let layout = Layout::compute(160, 200, Some(4)).expect("layout");
         let (scene, id) = scene_with_agent_at_desk(0);
         let d = layout.home_desks[0];
         // Mirror hit_test_from_tui's own anchor geometry.
@@ -568,14 +568,14 @@ mod tests {
 
     #[test]
     fn from_tui_misses_empty_space() {
-        let layout = Layout::compute(160, 200, 4).expect("layout");
+        let layout = Layout::compute(160, 200, Some(4)).expect("layout");
         let (scene, _id) = scene_with_agent_at_desk(0);
         assert_eq!(hit_test_from_tui(&scene, &layout, 0, 0), None);
     }
 
     #[test]
     fn from_tui_skips_agent_with_out_of_range_desk() {
-        let layout = Layout::compute(160, 200, 4).expect("layout");
+        let layout = Layout::compute(160, 200, Some(4)).expect("layout");
         // desk_index past the layout's home-desk count ⇒ `continue` arm.
         let (scene, _id) = scene_with_agent_at_desk(layout.home_desks.len() + 100);
         // No agent occupies any cell — scan a few and confirm None everywhere.
@@ -592,7 +592,7 @@ mod tests {
     #[test]
     fn from_tui_oob_desk_at_capacity_boundary_does_not_wrap_to_desk_zero() {
         use pixtuoid_core::state::GlobalDeskIndex;
-        let layout = Layout::compute(160, 200, 4).expect("layout");
+        let layout = Layout::compute(160, 200, Some(4)).expect("layout");
         let (mut scene, id) = scene_with_agent_at_desk(0);
         let cap = scene.floor_capacities[0];
         // Re-seat the agent at exactly `cap` — the wrap-prone value.
@@ -619,7 +619,7 @@ mod tests {
     #[test]
     fn furniture_hit_test_ficus_via_synthetic_plant() {
         use pixtuoid_scene::layout::Point;
-        let mut layout = Layout::compute(160, 200, 4).expect("layout");
+        let mut layout = Layout::compute(160, 200, Some(4)).expect("layout");
         let pos = Point { x: 40, y: 40 };
         layout.plants.push(pixtuoid_scene::layout::PlantItem {
             kind: pixtuoid_scene::layout::PlantKind::Ficus,
@@ -632,7 +632,7 @@ mod tests {
     #[test]
     fn furniture_hit_test_bulletin_board_via_synthetic_wall_decor() {
         use pixtuoid_scene::layout::Point;
-        let mut layout = Layout::compute(160, 200, 4).expect("layout");
+        let mut layout = Layout::compute(160, 200, Some(4)).expect("layout");
         // Wall decor is TOP-LEFT anchored at `pos` (not centered). Place it in
         // open space so no earlier furniture arm shadows it.
         let pos = Point { x: 60, y: 30 };
@@ -671,7 +671,7 @@ mod tests {
     // other coordinate).
     #[test]
     fn coffee_machine_returns_false_when_no_pantry_waypoint() {
-        let mut layout = Layout::compute(160, 200, 4).expect("layout");
+        let mut layout = Layout::compute(160, 200, Some(4)).expect("layout");
         let wp = *layout
             .waypoints
             .iter()
@@ -709,7 +709,7 @@ mod tests {
     // cw>=32 split (e.g. always taking the large offsets).
     #[test]
     fn coffee_machine_small_counter_uses_8_13_offsets() {
-        let mut layout = Layout::compute(160, 200, 4).expect("layout");
+        let mut layout = Layout::compute(160, 200, Some(4)).expect("layout");
         let wp = *layout
             .waypoints
             .iter()
@@ -739,7 +739,7 @@ mod tests {
     #[test]
     fn furniture_hit_test_finds_lounge_sofa_via_synthetic_center() {
         use pixtuoid_scene::layout::Point;
-        let mut layout = Layout::compute(160, 200, 4).expect("layout");
+        let mut layout = Layout::compute(160, 200, Some(4)).expect("layout");
         let c = Point { x: 40, y: 50 };
         layout.couch_sprite_center = Some(c);
         assert_eq!(
@@ -756,7 +756,7 @@ mod tests {
     #[test]
     fn furniture_hit_test_finds_floor_lamp_via_synthetic() {
         use pixtuoid_scene::layout::Point;
-        let mut layout = Layout::compute(160, 200, 4).expect("layout");
+        let mut layout = Layout::compute(160, 200, Some(4)).expect("layout");
         let p = Point { x: 40, y: 40 };
         layout.floor_lamp = Some(p);
         assert_eq!(
@@ -768,7 +768,7 @@ mod tests {
     #[test]
     fn furniture_hit_test_finds_tv_stand_via_synthetic_pod_decor() {
         use pixtuoid_scene::layout::{PodDecor, PodDecorItem, Point};
-        let mut layout = Layout::compute(160, 200, 4).expect("layout");
+        let mut layout = Layout::compute(160, 200, Some(4)).expect("layout");
         let p = Point { x: 50, y: 40 };
         layout.pod_decor.push(PodDecorItem {
             kind: PodDecor::Tv,
@@ -780,7 +780,7 @@ mod tests {
     #[test]
     fn furniture_hit_test_finds_side_table_via_synthetic() {
         use pixtuoid_scene::layout::Point;
-        let mut layout = Layout::compute(160, 200, 4).expect("layout");
+        let mut layout = Layout::compute(160, 200, Some(4)).expect("layout");
         let t = Point { x: 30, y: 90 };
         layout.lounge_side_table = Some(t);
         assert_eq!(

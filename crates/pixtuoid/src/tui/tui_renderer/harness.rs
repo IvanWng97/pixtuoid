@@ -2208,7 +2208,7 @@ fn meeting_glass_partition_connects_at_window_and_corner() {
 fn furniture_hit_test_covers_every_kind_on_real_layouts() {
     use crate::tui::hit_test::hit_test_furniture;
     use pixtuoid_scene::layout::{
-        Layout, PlantKind, PodDecor, WallDecor, WaypointKind, MAX_VISIBLE_DESKS,
+        Layout, PlantKind, PodDecor, WallDecor, WaypointKind, TEST_DEFAULT_DESKS,
     };
     use std::collections::HashSet;
 
@@ -2233,7 +2233,7 @@ fn furniture_hit_test_covers_every_kind_on_real_layouts() {
     // PhoneBooth/StandingDesk pod-decor + a coat-rack-only meeting room).
     let mut covered: HashSet<&'static str> = HashSet::new();
     for seed in [0u64, 3] {
-        let layout = Layout::compute_with_seed(160, 200, MAX_VISIBLE_DESKS, seed)
+        let layout = Layout::compute_with_seed(160, 200, Some(TEST_DEFAULT_DESKS), seed)
             .unwrap_or_else(|| panic!("layout for seed {seed}"));
         let labels = labels_on(&layout);
 

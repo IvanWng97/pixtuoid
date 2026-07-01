@@ -683,7 +683,7 @@ fn main() -> Result<()> {
     draw_scene(&mut term, &scene, &pack, now, &mut draw_ctx)?;
 
     if args.debug_walkable {
-        debug_paint_walkable_overlay(&mut term, &scene)?;
+        debug_paint_walkable_overlay(&mut term)?;
     }
 
     let crop_rect = if args.crop_mascot {
@@ -727,10 +727,7 @@ fn main() -> Result<()> {
 /// has an isolated region and A* will fall back to a straight line when
 /// crossing into it. That's the root cause of any remaining "闪现"
 /// (character teleport) the user sees.
-fn debug_paint_walkable_overlay(
-    term: &mut Terminal<TestBackend>,
-    scene: &SceneState,
-) -> Result<()> {
+fn debug_paint_walkable_overlay(term: &mut Terminal<TestBackend>) -> Result<()> {
     use pixtuoid_scene::layout::SceneLayout;
 
     let size = term.size()?;
@@ -738,7 +735,9 @@ fn debug_paint_walkable_overlay(
     let scene_h = size.height.saturating_sub(1);
     let buf_w = scene_w;
     let buf_h = scene_h * 2;
-    let Some(layout) = SceneLayout::compute(buf_w, buf_h, scene.floor_capacities[0]) else {
+    // `None` = the SAME fill the renderer's draw_scene passes — the overlay
+    // must mirror the real layout exactly (desks stamp the walkable mask).
+    let Some(layout) = SceneLayout::compute(buf_w, buf_h, None) else {
         println!("(debug_walkable) layout too small to compute");
         return Ok(());
     };
@@ -1114,11 +1113,11 @@ fn meeting_scene(
     };
 
     // Match the renderer's layout EXACTLY (terminal minus 1-row footer,
-    // half-block doubling) — same convention as anim_scene. Capacity must be
-    // the scene's floor-0 capacity (max_desks), which is what draw_scene
-    // passes, or the waypoint indices shift and the staging silently misses.
+    // half-block doubling) — same convention as anim_scene. `None` = the same
+    // desk fill draw_scene passes, or the waypoint indices shift and the
+    // staging silently misses.
     let (buf_w, buf_h) = (cols, rows.saturating_sub(1).saturating_mul(2));
-    let l = SceneLayout::compute_with_seed(buf_w, buf_h, max_desks, floor_seed)
+    let l = SceneLayout::compute_with_seed(buf_w, buf_h, None, floor_seed)
         .ok_or_else(|| anyhow::anyhow!("--meeting: scene too small to compute a layout"))?;
     let nw = l.waypoints.len();
 
@@ -1390,7 +1389,7 @@ fn anim_scene(
     floor_seed: u64,
     facing: Option<&str>,
 ) -> (SceneState, u64) {
-    use pixtuoid_core::layout::{Facing, SceneLayout, WaypointKind, MAX_VISIBLE_DESKS};
+    use pixtuoid_core::layout::{Facing, SceneLayout, WaypointKind, TEST_DEFAULT_DESKS};
     use pixtuoid_core::pose::{
         is_aimless_cycle, seated_dwell_ms, takes_trip, waypoint_index_for_cycle,
     };
@@ -1399,7 +1398,7 @@ fn anim_scene(
     // 1-row footer, then buf_h = scene_rect.height*2 (half-block). A 2px mismatch
     // shifts the waypoint set and the agent targets the wrong furniture.
     let (buf_w, buf_h) = (cols, rows.saturating_sub(1).saturating_mul(2));
-    let l = SceneLayout::compute_with_seed(buf_w, buf_h, MAX_VISIBLE_DESKS, floor_seed)
+    let l = SceneLayout::compute_with_seed(buf_w, buf_h, None, floor_seed)
         .expect("anim layout computes");
     let n = l.waypoints.len();
 
@@ -1479,7 +1478,7 @@ fn anim_scene(
         seated_dwell_ms(id)
     );
 
-    let mut s = SceneState::uniform(MAX_VISIBLE_DESKS);
+    let mut s = SceneState::uniform(TEST_DEFAULT_DESKS);
     s.agents.insert(
         id,
         AgentSlot {
@@ -1539,7 +1538,7 @@ fn compute_crop_rect(
         let layout = pixtuoid_core::layout::SceneLayout::compute_with_seed(
             buf_w,
             buf_h,
-            scene.floor_capacities[0],
+            Some(scene.floor_capacities[0]),
             args.floor_seed,
         )
         .ok_or_else(|| anyhow::anyhow!("scene too small to compute a layout"))?;
@@ -2082,7 +2081,7 @@ mod tests {
             .unwrap()
             .expect("pantry crop");
         let layout =
-            pixtuoid_core::layout::SceneLayout::compute_with_seed(192, 126, 12, 0).unwrap();
+            pixtuoid_core::layout::SceneLayout::compute_with_seed(192, 126, Some(12), 0).unwrap();
         let pantry = layout
             .waypoints
             .iter()
@@ -2197,7 +2196,8 @@ mod tests {
         let (scene, warmup_ms) = meeting_scene(now, 3, cols, rows, 0, max_desks, 12).unwrap();
         assert_eq!(scene.agents.len(), 12, "staged 3 + 9 archetype fillers");
 
-        let layout = SceneLayout::compute_with_seed(cols, (rows - 1) * 2, max_desks, 0).unwrap();
+        let layout =
+            SceneLayout::compute_with_seed(cols, (rows - 1) * 2, Some(max_desks), 0).unwrap();
         let staged: Vec<_> = scene
             .agents
             .values()

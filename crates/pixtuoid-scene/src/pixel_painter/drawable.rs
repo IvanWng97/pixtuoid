@@ -1081,7 +1081,7 @@ mod tests {
     fn pet_rest_picks_sleep_anim_when_all_idle() {
         // frac >= 0.35 (rest phase) AND all_idle => the sleep anim is selected
         // regardless of whether the rest spot is an idle desk.
-        let layout = crate::layout::Layout::compute(160, 200, 4).expect("layout fits");
+        let layout = crate::layout::Layout::compute(160, 200, Some(4)).expect("layout fits");
         let pack = test_pack();
         // elapsed % 40_000 == 20_000 → frac = 0.5 (rest phase).
         let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(20_000);
@@ -1105,7 +1105,7 @@ mod tests {
         // (x>=120) pockets are unreachable from each other on the coarse grid.
         mask.mark_blocked(80, 0, 40, h, 0);
         let reachable = ReachSet::from_mask(&mask, Point { x: 20, y: 20 });
-        let mut layout = crate::layout::Layout::compute(w, h, 4).expect("layout fits");
+        let mut layout = crate::layout::Layout::compute(w, h, Some(4)).expect("layout fits");
         // Override geometry: exactly two spots, one per pocket. The desk spot
         // resolves to (desk.x+DESK_W+1, desk.y+DESK_H+2) on the LEFT; the
         // corridor centre on the RIGHT.
@@ -1364,7 +1364,7 @@ mod tests {
         // centre fallback (430-434): (corridor.x + width/2, corridor.y), then snaps
         // to walkable. A normal layout always has a door_threshold, so this is the
         // only path that exercises the `or_else` branch.
-        let mut layout = crate::layout::Layout::compute(160, 120, 4).expect("layout fits");
+        let mut layout = crate::layout::Layout::compute(160, 120, Some(4)).expect("layout fits");
         layout.door = None;
         layout.door_threshold = None;
         let corridor = layout.corridor.expect("compute gives a corridor");
@@ -1386,7 +1386,7 @@ mod tests {
         // (a) The empty-spots guard (496) returns the home beat, not walking.
         // (b) Cycle 0 forces prev=home (502) so leg 0 joins the enter walk pop-free:
         //     the walking position equals walk_between(home → hash_pick(spots, seed+1)).
-        let layout = crate::layout::Layout::compute(160, 200, 4).expect("layout fits");
+        let layout = crate::layout::Layout::compute(160, 200, Some(4)).expect("layout fits");
         let home = mascot_home(&layout).expect("home beat");
 
         // (a) empty guard.
@@ -1435,7 +1435,7 @@ mod tests {
         // age < MASCOT_ENTER_MS → the walk-in arm (559-563) lerps elevator→home at
         // t = age/2200. age=0 lands exactly at the elevator; age≈half lands midway
         // (distinct from both endpoints).
-        let layout = crate::layout::Layout::compute(160, 120, 4).expect("layout fits");
+        let layout = crate::layout::Layout::compute(160, 120, Some(4)).expect("layout fits");
         let elevator = mascot_elevator(&layout).expect("elevator");
         let home = mascot_home(&layout).expect("home");
         let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(20_000);
@@ -1480,7 +1480,7 @@ mod tests {
         // than Idle's 9000. Pick a `now` where the two cycles land the mascot in
         // DIFFERENT wander phases so the rendered anim/pos differs. A mutant mapping
         // Degraded → 9000 would make the two results identical.
-        let layout = crate::layout::Layout::compute(160, 200, 4).expect("layout fits");
+        let layout = crate::layout::Layout::compute(160, 200, Some(4)).expect("layout fits");
         // Fixed entry anchor; we vary `now` so `age = now - entered_at` actually
         // grows (an entered_at pinned at `now - k` would make age constant).
         let entered_at = SystemTime::UNIX_EPOCH;

@@ -19,7 +19,7 @@ use pixtuoid_core::AgentId;
 
 use pixtuoid_scene::chitchat::{ActiveChitchat, VenueKey};
 use pixtuoid_scene::floor::{FloorCtx, FloorMeta};
-use pixtuoid_scene::layout::{Layout, MAX_VISIBLE_DESKS};
+use pixtuoid_scene::layout::Layout;
 use pixtuoid_scene::pathfind::Router;
 use pixtuoid_scene::pixel_painter::{render_to_rgb_buffer, PixelCtx};
 use pixtuoid_scene::theme::Theme;
@@ -73,8 +73,7 @@ impl OfficeRenderer {
     ) -> &RgbBuffer {
         self.buf
             .ensure_size(buf_w, buf_h, theme.surface.bg_fallback);
-        let Some(layout) =
-            Layout::compute_with_seed(buf_w, buf_h, MAX_VISIBLE_DESKS, floor_meta.floor_seed)
+        let Some(layout) = Layout::compute_with_seed(buf_w, buf_h, None, floor_meta.floor_seed)
         else {
             return &self.buf;
         };
