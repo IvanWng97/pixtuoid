@@ -7,6 +7,7 @@ use tokio::io::{AsyncReadExt, AsyncSeekExt, SeekFrom};
 use tokio::sync::Mutex;
 use tracing::{debug, warn};
 
+use crate::source::decoder::SUBAGENTS_DIR;
 use crate::source::{AgentEvent, TaggedSender, Transport};
 use crate::AgentId;
 
@@ -604,23 +605,6 @@ async fn scan_pending_tasks(
             return;
         }
     }
-}
-
-/// The directory a CC subagent transcript sits under: `<parent>/subagents/
-/// agent-*.jsonl`. Matched as a whole path COMPONENT (never a substring) so a
-/// project dir merely *containing* the word (e.g. `subagents-paper`) is not
-/// mistaken for one, and so Windows backslash-separated paths match too (the
-/// old `"/subagents/"` string scan was '/'-literal — found by the windows-test
-/// CI job). Single source of truth for both `is_subagent_path` and
-/// `detect_parent_id` so they cannot diverge (they did once: see the
-/// `bug_004` fix in `cc_derive_label`).
-const SUBAGENTS_DIR: &str = "subagents";
-
-/// Whether a transcript path is a CC subagent transcript (vs a top-level
-/// session). Codex subagents are FLAT (no such segment) — they're linked via the
-/// `SubagentStart` hook instead, so this predicate is CC-layout-specific.
-pub(crate) fn is_subagent_path(path: &Path) -> bool {
-    path.components().any(|c| c.as_os_str() == SUBAGENTS_DIR)
 }
 
 /// Detect a CC subagent by the `subagents` path component and link it to its

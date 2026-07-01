@@ -15,9 +15,13 @@ use anyhow::Result;
 use serde_json::{Map, Value};
 
 use crate::source::decoder::{cwd_basename_label, make_tool_detail};
+#[cfg(feature = "native")]
 use crate::source::fd_probe;
+#[cfg(feature = "native")]
 use crate::source::jsonl::{ChildEndUnclaims, JsonlWatcher, ProbeSnapshot};
-use crate::source::{AgentEvent, Source, TaggedSender};
+use crate::source::AgentEvent;
+#[cfg(feature = "native")]
+use crate::source::{Source, TaggedSender};
 use crate::AgentId;
 
 pub const SOURCE_NAME: &str = "codex";
@@ -227,6 +231,7 @@ pub fn derive_codex_label(_path: &Path, _source: &str, cwd: &Path) -> String {
 
 /// Codex writes no session-end marker; the reducer's stale-sweep reaps dead
 /// sessions. Always false (defer to mtime window + stale-sweep).
+#[cfg(feature = "native")]
 fn codex_session_ended(_tail: &[u8]) -> bool {
     false
 }
@@ -245,6 +250,7 @@ fn codex_session_ended(_tail: &[u8]) -> bool {
 /// sessions root is NOT a failure — codex may simply never have run — so it
 /// returns `Some(empty)`: a healthy "nothing alive" observation. Per-pid fd
 /// failures stay non-failures (a pid exiting mid-probe is normal).
+#[cfg(feature = "native")]
 pub fn live_codex_rollout_ids(sessions_root: &Path) -> Option<ProbeSnapshot> {
     // Canonicalize once per probe call: kernel-reported fd paths are fully
     // resolved (e.g. /tmp → /private/tmp on macOS), so the prefix compare
@@ -270,6 +276,7 @@ pub fn live_codex_rollout_ids(sessions_root: &Path) -> Option<ProbeSnapshot> {
 /// through `codex_id_from_path` — the watcher's `IdDeriver`, so probe ids and
 /// gate ids can't drift. Each surviving pair also binds id → pid for the
 /// snapshot's `pid_of` (the exit-watch half).
+#[cfg(feature = "native")]
 fn rollout_ids_from_paths(
     root: &Path,
     pairs: impl Iterator<Item = (i32, PathBuf)>,
@@ -294,6 +301,7 @@ fn rollout_ids_from_paths(
     snap
 }
 
+#[cfg(feature = "native")]
 fn is_rollout_filename(path: &Path) -> bool {
     path.extension().and_then(|e| e.to_str()) == Some("jsonl")
         && path
@@ -312,6 +320,7 @@ fn is_rollout_filename(path: &Path) -> bool {
 /// and those runs must keep the pure-mtime first-sight gate (the probe is
 /// additive-only; a replayed rollout vouched for by a coincidentally-running
 /// codex would resurrect as live).
+#[cfg(feature = "native")]
 fn codex_probe_root(sessions_root: &Path) -> Option<PathBuf> {
     codex_probe_root_resolved(sessions_root, &codex_home())
 }
@@ -319,6 +328,7 @@ fn codex_probe_root(sessions_root: &Path) -> Option<PathBuf> {
 /// The injectable core of [`codex_probe_root`] (mirrors
 /// `platform::resolve_codex_home`'s testable split): `home` is the resolved
 /// codex home for this environment.
+#[cfg(feature = "native")]
 fn codex_probe_root_resolved(sessions_root: &Path, home: &Path) -> Option<PathBuf> {
     if sessions_root.file_name().and_then(|n| n.to_str()) != Some("sessions") {
         return None;
@@ -348,6 +358,7 @@ pub fn codex_home() -> PathBuf {
 }
 
 /// Source that watches the Codex session transcript directory.
+#[cfg(feature = "native")]
 pub struct CodexSource {
     pub sessions_root: PathBuf,
     /// The #246 child-end un-claim side-channel — Codex is consumer-only:
@@ -360,6 +371,7 @@ pub struct CodexSource {
     pub child_end_unclaims: Option<ChildEndUnclaims>,
 }
 
+#[cfg(feature = "native")]
 impl CodexSource {
     pub fn default_paths() -> Self {
         Self {
@@ -369,6 +381,7 @@ impl CodexSource {
     }
 }
 
+#[cfg(feature = "native")]
 impl Source for CodexSource {
     fn name(&self) -> &str {
         SOURCE_NAME

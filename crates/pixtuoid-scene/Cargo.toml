@@ -14,8 +14,15 @@ categories.workspace   = true
 [lints]
 workspace = true
 
+# `native` (default) forwards to pixtuoid-core's async runtime + watcher layer.
+# `cargo build -p pixtuoid-scene --no-default-features` drops it, giving a
+# wasm32-buildable render engine (no tokio/notify) — the WebAssembly office hero.
+[features]
+default = ["native"]
+native  = ["pixtuoid-core/native"]
+
 [dependencies]
-pixtuoid-core = { path = "../pixtuoid-core", version = "0.11.1" }
+pixtuoid-core = { path = "../pixtuoid-core", version = "0.11.1", default-features = false }
 anyhow        = { workspace = true }
 tracing       = { workspace = true }
 # clock feature gives us Local::now() w/ system timezone for the wall clock.

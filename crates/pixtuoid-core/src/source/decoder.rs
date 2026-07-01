@@ -11,6 +11,29 @@ use serde_json::Value;
 use crate::source::{AgentEvent, ToolDetail};
 use crate::AgentId;
 
+/// The JSONL line-decoder fn pointer: `(transcript_path, source, raw_line) ->
+/// events`. Defined HERE (the always-compiled decoder module), NOT in the
+/// `native`-gated `jsonl` module, so the registry's `SourceDescriptor` can name
+/// it in a `--no-default-features` (wasm) build; `jsonl` re-exports it.
+pub type LineDecoder = fn(&str, &str, Value) -> Result<Vec<AgentEvent>>;
+
+/// The directory a CC subagent transcript sits under: `<parent>/subagents/
+/// agent-*.jsonl`. Matched as a whole path COMPONENT (never a substring) so a
+/// project dir merely *containing* the word (e.g. `subagents-paper`) is not
+/// mistaken for one, and so Windows backslash-separated paths match too. Single
+/// source of truth for both `is_subagent_path` and the watcher's
+/// `detect_parent_id` so they cannot diverge.
+pub(crate) const SUBAGENTS_DIR: &str = "subagents";
+
+/// Whether a transcript path is a CC subagent transcript (vs a top-level
+/// session). Codex subagents are FLAT (no such segment) — they're linked via the
+/// `SubagentStart` hook instead, so this predicate is CC-layout-specific. Lives
+/// here (not the `native`-gated `jsonl` module) because CC's pure line decoder
+/// consults it.
+pub(crate) fn is_subagent_path(path: &Path) -> bool {
+    path.components().any(|c| c.as_os_str() == SUBAGENTS_DIR)
+}
+
 /// `"{prefix}·{basename}"` from a working directory, or `None` when `cwd` is
 /// empty / the filesystem root / has no final component. The cwd-basename label
 /// rule, shared by the per-source derivers (cc / cx / ag) so it lives once; each

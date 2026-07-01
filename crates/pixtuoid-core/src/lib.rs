@@ -22,7 +22,11 @@ pub mod walkable;
 pub use grid::Grid;
 pub use id::AgentId;
 pub use render::Renderer;
-pub use source::{AgentEvent, Source, TaggedReceiver, TaggedSender, ToolDetail, Transport};
+pub use source::{AgentEvent, ToolDetail, Transport};
+// The `Source` trait + its tagged tokio channel are the async transport seam —
+// native-only (they don't exist in a `--no-default-features` wasm build).
+#[cfg(feature = "native")]
+pub use source::{Source, TaggedReceiver, TaggedSender};
 pub use sprite::{Frame, Palette, Pixel, Rgb, RgbBuffer, Sprite};
 pub use state::reducer::Reducer;
 pub use state::{ActivityState, AgentSlot, FloorLocalDeskIndex, GlobalDeskIndex, SceneState};

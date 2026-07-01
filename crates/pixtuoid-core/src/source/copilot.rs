@@ -39,8 +39,11 @@ use serde_json::Value;
 use crate::source::decoder::{
     cwd_basename_label, ellipsize, make_tool_detail, MAX_DECODED_FIELD_CHARS,
 };
+#[cfg(feature = "native")]
 use crate::source::jsonl::JsonlWatcher;
-use crate::source::{AgentEvent, Source, TaggedSender, ToolDetail};
+use crate::source::{AgentEvent, ToolDetail};
+#[cfg(feature = "native")]
+use crate::source::{Source, TaggedSender};
 use crate::AgentId;
 
 pub const SOURCE_NAME: &str = "copilot";
@@ -73,6 +76,7 @@ pub fn derive_copilot_label(_path: &Path, _source: &str, cwd: &Path) -> String {
 /// Copilot persists a real `session.shutdown` event, so a transcript that has
 /// already ended carries that marker — the first-sight gate uses it to avoid
 /// resurrecting a finished session.
+#[cfg(feature = "native")]
 fn copilot_session_ended(tail: &[u8]) -> bool {
     // Substring scan over the tail window. ANCHOR on the structural `"type"`
     // field — a bare `session.shutdown` would false-positive on tool OUTPUT
@@ -266,10 +270,12 @@ pub fn decode_copilot_line(
 }
 
 /// Source that watches the Copilot session-state directory.
+#[cfg(feature = "native")]
 pub struct CopilotSource {
     pub sessions_root: PathBuf,
 }
 
+#[cfg(feature = "native")]
 impl CopilotSource {
     pub fn default_paths() -> Self {
         Self {
@@ -278,6 +284,7 @@ impl CopilotSource {
     }
 }
 
+#[cfg(feature = "native")]
 impl Source for CopilotSource {
     fn name(&self) -> &str {
         SOURCE_NAME

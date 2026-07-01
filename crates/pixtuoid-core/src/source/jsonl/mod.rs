@@ -20,7 +20,12 @@ mod walk;
 
 pub use liveness::{LivenessProbe, ProbeSnapshot};
 pub use unclaim::ChildEndUnclaims;
-pub(crate) use walk::is_subagent_path;
+// `is_subagent_path` + `LineDecoder` moved to the always-compiled `decoder`
+// module (a pure CC decoder + the registry name them in the wasm build). Only
+// this module's own tests still reach it by the `jsonl::` path, so the
+// re-export is test-scoped (prod callers use `decoder::is_subagent_path`).
+#[cfg(test)]
+pub(crate) use crate::source::decoder::is_subagent_path;
 
 use health::FailureLatch;
 use liveness::{

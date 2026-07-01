@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "native")]
 use tokio::sync::mpsc;
 
 use crate::id::AgentId;
@@ -238,7 +239,9 @@ impl AgentEvent {
 }
 
 /// Events sent on a tagged channel so the reducer knows which transport produced them.
+#[cfg(feature = "native")]
 pub type TaggedSender = mpsc::Sender<(Transport, AgentEvent)>;
+#[cfg(feature = "native")]
 pub type TaggedReceiver = mpsc::Receiver<(Transport, AgentEvent)>;
 
 /// A `Source` produces `AgentEvent`s from one agent CLI flavor (Claude Code,
@@ -270,6 +273,7 @@ pub type TaggedReceiver = mpsc::Receiver<(Transport, AgentEvent)>;
 ///    than `unwrap`.
 ///
 /// [`AgentId::from_parts`]: crate::AgentId::from_parts
+#[cfg(feature = "native")]
 pub trait Source: Send + 'static {
     fn name(&self) -> &str;
     fn run(
@@ -287,6 +291,7 @@ pub trait Source: Send + 'static {
 /// this trait: the blanket impl below + unsize coercion let
 /// `with_source(Box::new(my_source))` work directly; implement [`Source`]
 /// only.
+#[cfg(feature = "native")]
 pub trait DynSource: Send + 'static {
     fn name(&self) -> &str;
     fn run(
@@ -300,6 +305,7 @@ pub trait DynSource: Send + 'static {
 /// to add, now paid only where dynamic dispatch genuinely needs it. The
 /// inner `self.name()`/`self.run(tx)` calls resolve to `<T as Source>` (the
 /// where-clause candidate), not recursively to this impl.
+#[cfg(feature = "native")]
 impl<T: Source> DynSource for T {
     fn name(&self) -> &str {
         self.name()
@@ -314,6 +320,12 @@ impl<T: Source> DynSource for T {
 }
 
 pub mod antigravity;
+// The async runtime + watcher + liveness-probe layer: gated out of a wasm
+// (`--no-default-features`) build. These modules own all the tokio/notify/libc
+// FFI in the crate; the per-source modules below stay compiled because their
+// pure DECODERS feed the registry (only their `impl Source` runtime blocks are
+// `native`-gated in-file).
+#[cfg(feature = "native")]
 pub(crate) mod cc_probe;
 pub mod claude_code;
 pub mod codewhale;
@@ -326,10 +338,15 @@ pub mod cursor;
 pub mod daemon;
 pub mod decoder;
 pub mod drift;
+#[cfg(feature = "native")]
 pub(crate) mod exit_watch;
+#[cfg(feature = "native")]
 pub(crate) mod fd_probe;
+#[cfg(feature = "native")]
 pub mod hook;
+#[cfg(feature = "native")]
 pub mod jsonl;
+#[cfg(feature = "native")]
 pub mod manager;
 pub mod openclaw;
 pub mod opencode;

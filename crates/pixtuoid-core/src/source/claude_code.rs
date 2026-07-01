@@ -3,15 +3,20 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use serde_json::Value;
 
+#[cfg(feature = "native")]
 use crate::source::cc_probe::cc_sessions_dir;
 // The registry-probe machinery lives in `source/cc_probe.rs`; the public path
 // `claude_code::live_cc_session_ids` is preserved via this re-export.
+#[cfg(feature = "native")]
 pub use crate::source::cc_probe::live_cc_session_ids;
 use crate::source::decoder::{
     cwd_basename_label, ellipsize, make_tool_detail, MAX_DECODED_FIELD_CHARS,
 };
+#[cfg(feature = "native")]
 use crate::source::jsonl::{ChildEndUnclaims, JsonlWatcher};
-use crate::source::{AgentEvent, Source, TaggedSender};
+use crate::source::AgentEvent;
+#[cfg(feature = "native")]
+use crate::source::{Source, TaggedSender};
 use crate::AgentId;
 
 pub const SOURCE_NAME: &str = "claude-code";
@@ -137,6 +142,7 @@ pub(crate) fn decode_cc_hook_custom(v: &Value) -> Result<Option<Vec<AgentEvent>>
 /// [`crate::source::hook::HookRouter`] (its honest owner — every source's hooks
 /// ride that one socket), so this is now ONLY the `~/.claude/projects` JSONL
 /// watcher: no socket bind, no presence/pid plumbing, no dual-task `select!`.
+#[cfg(feature = "native")]
 pub struct ClaudeCodeSource {
     pub projects_root: PathBuf,
     /// The #246 child-end un-claim side-channel — CONSUMER only now (its watcher
@@ -159,6 +165,7 @@ pub fn claude_config_dir() -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
+#[cfg(feature = "native")]
 impl ClaudeCodeSource {
     // The resolved hook-socket path. It stays on `ClaudeCodeSource` (CC no longer
     // binds the socket — the `HookRouter` does — but this is the shim↔daemon
@@ -205,6 +212,7 @@ impl ClaudeCodeSource {
     }
 }
 
+#[cfg(feature = "native")]
 impl Source for ClaudeCodeSource {
     fn name(&self) -> &str {
         SOURCE_NAME
@@ -368,7 +376,7 @@ pub fn cc_derive_label(path: &Path, _source: &str, cwd: &Path) -> String {
     // so the two can't diverge — a loose `"subagents"` substring once mislabeled a
     // `subagents-paper` repo's parent transcript "subagent" with parent_id=None
     // (bug_004); the slash-bounded predicate fixes that at a single source.
-    if crate::source::jsonl::is_subagent_path(path) {
+    if crate::source::decoder::is_subagent_path(path) {
         return "subagent".to_string();
     }
     if let Some(label) = cwd_basename_label("cc", cwd) {

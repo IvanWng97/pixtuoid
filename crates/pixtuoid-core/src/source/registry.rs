@@ -20,7 +20,7 @@
 use anyhow::Result;
 use serde_json::Value;
 
-use crate::source::jsonl::LineDecoder;
+use crate::source::decoder::LineDecoder;
 use crate::source::{
     antigravity, claude_code, codewhale, codex, copilot, cursor, openclaw, opencode, reasonix,
     AgentEvent,

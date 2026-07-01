@@ -1,11 +1,20 @@
+// Path/PathBuf are only named by `native`-gated code (the Source struct,
+// `default_paths`, `derive_ag_label`); the pure line decoder keys off `&str`.
+#[cfg(feature = "native")]
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use serde_json::Value;
 
-use crate::source::decoder::{cwd_basename_label, make_tool_detail};
+use crate::source::decoder::make_tool_detail;
+// cwd_basename_label is only used by the `native`-gated label deriver.
+#[cfg(feature = "native")]
+use crate::source::decoder::cwd_basename_label;
+#[cfg(feature = "native")]
 use crate::source::jsonl::JsonlWatcher;
-use crate::source::{AgentEvent, Source, TaggedSender};
+use crate::source::AgentEvent;
+#[cfg(feature = "native")]
+use crate::source::{Source, TaggedSender};
 use crate::AgentId;
 
 pub const SOURCE_NAME: &str = "antigravity";
@@ -13,10 +22,12 @@ pub const SOURCE_NAME: &str = "antigravity";
 /// Source that watches Antigravity CLI conversation log directories.
 /// Uses JsonlWatcher with a custom decoder for the Antigravity JSONL
 /// format (step_index/PLANNER_RESPONSE/tool_calls schema).
+#[cfg(feature = "native")]
 pub struct AntigravitySource {
     pub brain_root: PathBuf,
 }
 
+#[cfg(feature = "native")]
 impl AntigravitySource {
     /// The Antigravity **CLI** (`agy`) brain dir, home-rooted on every platform:
     /// `<home>/.gemini/antigravity-cli/brain` (Windows: `%USERPROFILE%\.gemini\…`
@@ -35,6 +46,7 @@ impl AntigravitySource {
     }
 }
 
+#[cfg(feature = "native")]
 impl Source for AntigravitySource {
     fn name(&self) -> &str {
         SOURCE_NAME
@@ -109,6 +121,7 @@ pub fn decode_ag_line(transcript_path: &str, source: &str, v: Value) -> Result<V
     Ok(out)
 }
 
+#[cfg(feature = "native")]
 fn ag_session_ended(_tail: &[u8]) -> bool {
     false
 }
@@ -171,6 +184,7 @@ fn normalize_ag_tool_input(name: &str, args: Option<&Value>) -> Value {
     Value::Object(normalized)
 }
 
+#[cfg(feature = "native")]
 fn derive_ag_label(_path: &Path, _source: &str, cwd: &Path) -> String {
     cwd_basename_label("ag", cwd).unwrap_or_else(|| "ag".to_string())
 }
