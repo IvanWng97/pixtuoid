@@ -1,5 +1,9 @@
 ---
 import { REPO, asset } from '../consts';
+import { getStars, formatStars } from '../lib/github';
+
+// Baked in at build (CSP blocks a client fetch); hides if the API is unreachable.
+const stars = await getStars();
 ---
 
 <section id="lobby" class="hero" data-floor="6">
@@ -21,7 +25,11 @@ import { REPO, asset } from '../consts';
         <a class="btn btn-primary" href="#install"
           >Install pixtuoid <span aria-hidden="true">→</span></a
         >
-        <a class="btn btn-ghost" href={REPO} target="_blank" rel="noreferrer">★ Star on GitHub</a>
+        <a class="btn btn-ghost" href={REPO} target="_blank" rel="noreferrer"
+          >★ Star on GitHub{
+            stars != null && <span class="hero__stars"> · {formatStars(stars)}</span>
+          }</a
+        >
       </div>
       <p class="hero__avail">macOS · Linux · Windows · crates.io · MIT licensed</p>
     </div>
@@ -106,6 +114,11 @@ import { REPO, asset } from '../consts';
     letter-spacing: 0.04em;
     color: var(--fg-muted);
   }
+  /* live-at-build star count riding the Star CTA */
+  .hero__stars {
+    color: var(--accent-2);
+    font-variant-numeric: tabular-nums;
+  }
   .terminal__screen {
     width: 100%;
     height: auto;
@@ -118,6 +131,29 @@ import { REPO, asset } from '../consts';
     z-index: 2;
     pointer-events: none;
     image-rendering: pixelated;
+  }
+  /* the office lighting follows the visitor's wall clock (data-clock-night is set
+     pre-paint in Base.astro). After hours the office dims to a cool night shift —
+     applied to both the live screen and the assembly canvas so the look is
+     consistent through the reveal. */
+  .terminal__screen,
+  .assemble {
+    transition: filter 0.7s ease;
+  }
+  :global([data-clock-night='1']) .hero .terminal__screen,
+  :global([data-clock-night='1']) .hero .assemble {
+    filter: brightness(0.66) saturate(0.82) contrast(1.06) hue-rotate(-12deg);
+  }
+  /* a faint moonlight wash over the window, gated on the same clock flag */
+  :global([data-clock-night='1']) .hero .terminal::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 3;
+    pointer-events: none;
+    border-radius: inherit;
+    background: radial-gradient(130% 90% at 72% -10%, rgba(122, 152, 220, 0.16), transparent 58%);
+    mix-blend-mode: screen;
   }
 
   /* one orchestrated page-load entrance, staggered */

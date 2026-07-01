@@ -107,6 +107,15 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
           const BG = { day: '#f4eee2', night: '#0e0d0c', dracula: '#21222c' };
           const meta = document.querySelector('meta[name="theme-color"]');
           if (meta && BG[theme]) meta.setAttribute('content', BG[theme]);
+          // The office LIGHTING follows the visitor's wall clock — independent of
+          // the dark-first page theme. After hours (19:00–07:00) the hero office
+          // dims to a night shift and the footer says so. Only the clock turns
+          // this on; an explicit theme choice ends its authority (the FX script
+          // below clears the flag on pix:theme). Set pre-paint so there's no FOUC.
+          if (!ok(pick)) {
+            const hr = new Date().getHours();
+            if (hr >= 19 || hr < 7) document.documentElement.dataset.clockNight = '1';
+          }
         } catch (e) {
           document.documentElement.dataset.theme = 'day';
         }

@@ -1,5 +1,8 @@
 ---
 import { REPO, CRATES, SPONSOR, asset } from '../consts';
+import { getStars, formatStars } from '../lib/github';
+
+const stars = await getStars();
 ---
 
 <footer class="footer">
@@ -19,7 +22,9 @@ import { REPO, CRATES, SPONSOR, asset } from '../consts';
       <p class="footer__tag">A terminal pixel-art office for your AI coding agents.</p>
     </div>
     <nav class="footer__links" aria-label="Footer">
-      <a href={REPO} target="_blank" rel="noreferrer">GitHub</a>
+      <a href={REPO} target="_blank" rel="noreferrer"
+        >GitHub{stars != null && <span class="footer__stars"> ★{formatStars(stars)}</span>}</a
+      >
       <a href={CRATES} target="_blank" rel="noreferrer">crates.io</a>
       <a href={`${REPO}/releases`} target="_blank" rel="noreferrer">Releases</a>
       <a href="#install">Install</a>
@@ -83,6 +88,10 @@ import { REPO, CRATES, SPONSOR, asset } from '../consts';
   }
   .footer__links a:hover {
     color: var(--fg);
+  }
+  .footer__stars {
+    color: var(--accent-2);
+    font-variant-numeric: tabular-nums;
   }
   .footer__legal {
     display: flex;
