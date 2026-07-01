@@ -7,8 +7,6 @@ import '@fontsource/jersey-10/400.css';
 import '@fontsource/jetbrains-mono/400.css';
 import '@fontsource/jetbrains-mono/500.css';
 import '@fontsource/jetbrains-mono/700.css';
-import '@fontsource/lora/400.css';
-import '@fontsource/lora/500.css';
 import '../styles/global.css';
 import { asset, THEMES } from '../consts';
 
@@ -34,7 +32,6 @@ const ogImage = new URL(asset('demos/hero-poster.png'), SITE).href;
 // Per-page canonical/og:url — Astro.url.pathname includes the /pixtuoid base in
 // the static build, so /config no longer self-declares the homepage as canonical.
 const canonical = new URL(Astro.url.pathname, SITE).href;
-const version = __PIXTUOID_VERSION__; // from the workspace Cargo.toml at build
 
 // Escape `<` so no string value can break out of the <script> block (a `</script`
 // or `<!--` in serialized JSON would otherwise close it). Defense-in-depth: every
@@ -43,7 +40,7 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
 ---
 
 <!doctype html>
-<html lang="en" data-theme="day">
+<html lang="en" data-theme="night">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -69,8 +66,8 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
     <link rel="icon" type="image/png" sizes="180x180" href={asset('apple-touch-icon.png')} />
     <link rel="apple-touch-icon" href={asset('apple-touch-icon.png')} />
     <link rel="canonical" href={canonical} />
-    {/* default = day --bg; the theme-init script below updates it for night/dracula */}
-    <meta name="theme-color" content="#f4eee2" />
+    {/* default = dark terminal --bg; the theme-init script below updates it for day/dracula */}
+    <meta name="theme-color" content="#0e0d0c" />
     {preloadImage && <link rel="preload" as="image" href={preloadImage} fetchpriority="high" />}
 
     <!-- Open Graph / Twitter -->
@@ -101,20 +98,12 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
           };
           const forced = new URLSearchParams(location.search).get('theme');
           const pick = ok(forced) ? forced : localStorage.getItem('pix-theme');
-          // The app's office lighting follows the wall clock; until the visitor
-          // chooses a theme, so does the site — arriving after dark means the
-          // night office. The clock only ever turns night ON: a dark-preference
-          // user keeps night at noon via the system fallback below.
-          const hour = new Date().getHours();
-          const afterHours = hour >= 19 || hour < 7;
-          const sys = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'night' : 'day';
-          const theme = ok(pick) ? pick : afterHours ? 'night' : sys;
-          // clock-forced (not chosen, not system) → the footer explains itself
-          if (!ok(pick) && afterHours && sys === 'day')
-            document.documentElement.dataset.clockNight = '1';
+          // Terminal Habitat is dark-first: the page IS a terminal, so it opens
+          // dark unless the visitor explicitly chose the daylight theme.
+          const theme = ok(pick) ? pick : 'night';
           document.documentElement.dataset.theme = theme;
           // keep the mobile browser-chrome tint in sync with the resolved theme
-          const BG = { day: '#f4eee2', night: '#1d1813', dracula: '#282a36' };
+          const BG = { day: '#f4eee2', night: '#0e0d0c', dracula: '#21222c' };
           const meta = document.querySelector('meta[name="theme-color"]');
           if (meta && BG[theme]) meta.setAttribute('content', BG[theme]);
         } catch (e) {
@@ -122,32 +111,9 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
         }
       })();
     </script>
-
-    <!-- show the boot intro once per session (skip for reduced-motion) -->
-    <script is:inline>
-      try {
-        if (
-          !window.matchMedia('(prefers-reduced-motion: reduce)').matches &&
-          !sessionStorage.getItem('pix-booted')
-        ) {
-          document.documentElement.dataset.booting = '1';
-        }
-      } catch (e) {}
-    </script>
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
-
-    <div id="boot" class="boot" role="status" aria-label="Loading pixtuoid">
-      <div class="boot__log">
-        <div class="boot__line">pixtuoid <b>v{version}</b></div>
-        <div class="boot__line">▸ booting office… <span class="boot__ok">ok</span></div>
-        <div class="boot__line">▸ loading themes… <span class="boot__ok">ok</span></div>
-        <div class="boot__line">▸ spawning agents… <span class="boot__ok">ok</span></div>
-        <div class="boot__line">▸ ready<span class="cursor" aria-hidden="true"></span></div>
-      </div>
-      <div class="boot__hint">press any key to skip</div>
-    </div>
 
     <slot />
 
@@ -195,7 +161,7 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
         const reduce = reduceMQ.matches;
 
         // keep the mobile browser-chrome tint in sync on every theme change
-        const BG = { day: '#f4eee2', night: '#1d1813', dracula: '#282a36' };
+        const BG = { day: '#f4eee2', night: '#0e0d0c', dracula: '#21222c' };
         const themeMeta = document.querySelector('meta[name="theme-color"]');
         // …and the tab icon: the little coworker turns the lights off after
         // dark (path derived from the day href so the Pages base-path holds)
@@ -268,18 +234,10 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
               saved = localStorage.getItem('pix-theme');
             } catch (e2) {}
             // validate like the no-FOUC init — a stale/garbage stored id must not
-            // land in data-theme — and restore through the SAME fallback chain
-            // the init uses (clock, then system), or an after-hours visitor with
-            // no saved choice would get snapped to day by the Escape that merely
-            // closed the Docs dropdown.
-            const hour = new Date().getHours();
-            const fallback =
-              hour >= 19 || hour < 7 || window.matchMedia('(prefers-color-scheme: dark)').matches
-                ? 'night'
-                : 'day';
-            setTheme(
-              saved === 'night' || saved === 'dracula' || saved === 'day' ? saved : fallback
-            );
+            // land in data-theme — and restore through the SAME dark-first default
+            // the init uses, so Escape (e.g. closing the Docs dropdown) never snaps
+            // a visitor with no saved choice away from the dark terminal.
+            setTheme(saved === 'night' || saved === 'dracula' || saved === 'day' ? saved : 'night');
             return;
           }
           if (e.key && e.key.length === 1) {
@@ -317,72 +275,11 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
       })();
     </script>
 
-    <!-- boot intro sequence → dispatches `pix:revealed` (immediately if skipped/disabled) -->
+    <!-- Terminal Habitat has no boot overlay: the hero's particle-assembly is the
+         intro. Fire pix:revealed immediately so the reveal-on-scroll, hero command
+         typing, and CRT power-on observers (registered above) start right away. -->
     <script is:inline>
-      (function () {
-        const root = document.documentElement;
-        const boot = document.getElementById('boot');
-        function reveal() {
-          document.dispatchEvent(new Event('pix:revealed'));
-        }
-        if (root.dataset.booting !== '1' || !boot) {
-          reveal();
-          return;
-        }
-        // make the page behind the opaque overlay inert + hidden from AT, so a
-        // keyboard / screen-reader user can't reach controls obscured under it
-        const bg = [];
-        Array.prototype.forEach.call(document.body.children, function (el) {
-          if (el !== boot) {
-            el.setAttribute('inert', '');
-            el.setAttribute('aria-hidden', 'true');
-            bg.push(el);
-          }
-        });
-        const lines = boot.querySelectorAll('.boot__line');
-        let i = 0,
-          done = false;
-        function finish() {
-          if (done) return;
-          done = true;
-          boot.classList.add('is-done');
-          try {
-            sessionStorage.setItem('pix-booted', '1');
-          } catch (e) {}
-          bg.forEach(function (el) {
-            el.removeAttribute('inert');
-            el.removeAttribute('aria-hidden');
-          });
-          setTimeout(function () {
-            root.removeAttribute('data-booting');
-          }, 460);
-          boot.removeEventListener('click', skip);
-          document.removeEventListener('keydown', onKey);
-          reveal();
-          // leave focus at the document start (don't focus #main: it would scroll
-          // the page and skip keyboard users past the nav/skip-link). The bg is
-          // no longer inert, so Tab flows skip-link -> nav -> content as normal.
-        }
-        function step() {
-          if (i < lines.length) {
-            lines[i].classList.add('in');
-            i++;
-            setTimeout(step, 260);
-          } else {
-            setTimeout(finish, 520);
-          }
-        }
-        function skip() {
-          for (let j = 0; j < lines.length; j++) lines[j].classList.add('in');
-          finish();
-        }
-        function onKey() {
-          skip();
-        }
-        setTimeout(step, 220);
-        boot.addEventListener('click', skip);
-        document.addEventListener('keydown', onKey);
-      })();
+      document.dispatchEvent(new Event('pix:revealed'));
     </script>
   </body>
 </html>

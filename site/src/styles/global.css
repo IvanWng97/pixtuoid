@@ -1,77 +1,117 @@
 /* ============================================================
-   pixtuoid — "Cozy Terminal" skin
-   Claude warmth (paper #faf9f5 · ink #141413 · coral #d97757) kept as the base,
-   pushed toward terminal/pixel character:
-   Display: Jersey 10  ·  UI/code: JetBrains Mono  ·  Body: Lora
-   coral→amber accent gradient · blinking cursor · ASCII dividers · CRT scanlines
+   pixtuoid — "Terminal Habitat" skin
+   The page IS the terminal you run pixtuoid in: a dark truecolor TUI.
+   Dark-first · all-mono body · pixel display · the office assembles from
+   its own pixels. Accents ARE the product's real agent-sprite hues,
+   used as ANSI colors — not an arbitrary neon.
+   Display: Jersey 10  ·  everything else: JetBrains Mono (no serif)
    ============================================================ */
 
 :root {
-  /* Brand constants */
-  /* Warm "Coworking" palette — cream lightened from the office carpet (#8A765F)
-     + Claude coral. Analogous warm harmony so the office art sits INTO the page. */
-  --paper: #f4eee2; /* warm cream (carpet hue, lifted) */
-  --ink: #241c14; /* deep warm wood */
-  --gray: #b3a892;
-  --coral: #d97757; /* Claude coral */
-  --coral-deep: #a8431f; /* darkened for WCAG AA: ~5:1 on the cream --paper */
-  --amber: #e6a356; /* warm amber — gradient end */
-  --blue: #6a9bcc;
-  --green: #788c5d;
-  --ok: #556b2f; /* AA "ok" green for the boot log — 5.15:1 on cream (raw --green is 3.18:1) */
-  /* Gradient-headline stops, AA-tuned and theme-aware via --grad-2, so the .hl
-     word stays legible (deep coral → deep amber) and — unlike --coral/--amber —
-     is NOT dragged below contrast by the gallery retint. */
-  --grad-2: #9c5a12; /* deep amber — 4.68:1 on the cream --bg */
-  --grad: linear-gradient(100deg, var(--coral-deep), var(--grad-2));
-  /* Focus ring — kept a LITERAL (not `var(--coral-deep)`) and theme-aware, so no
-     retint / theme override can drag the focus affordance below WCAG 1.4.11's
-     3:1 on the cream bg. */
-  --focus-ring: #a8431f;
+  /* ---- Terminal Habitat: dark base (the default identity) ---- */
+  --bg: #0e0d0c; /* near-black terminal ground */
+  --bg-tint: #0a0908; /* deeper wells / status footer */
+  --panel: #16151a; /* raised surface / cards */
+  --panel-2: #1e1c22; /* higher surface / hover */
+  --fg: #f4eee2; /* warm paper text (~17:1 on --bg) */
+  --fg-muted: #b3a890; /* ~8:1 on --bg */
+  --fg-dim: #7d7566; /* captions / inert glyphs */
 
-  /* Semantic tokens — DAY (warm cream) */
-  --bg: var(--paper);
-  --bg-tint: #ede3d1;
-  --surface: #fdf9ef;
-  --surface-2: #ece1cd;
-  --fg: var(--ink);
-  --fg-muted: #6f6453;
-  --border: color-mix(in srgb, var(--ink) 12%, transparent);
-  --border-strong: color-mix(in srgb, var(--ink) 20%, transparent);
-  --shadow: 0 1px 2px rgba(36, 28, 20, 0.05), 0 8px 24px rgba(36, 28, 20, 0.09);
-  --shadow-lg: 0 2px 4px rgba(36, 28, 20, 0.06), 0 20px 50px rgba(36, 28, 20, 0.13);
-  --glow: color-mix(in srgb, var(--coral) 15%, transparent);
+  /* Agent-sprite hues, used as ANSI accents (from the product's night palette) */
+  --coral: #e3845f; /* Claude */
+  --cyan: #6a9bcc; /* Codex */
+  --green: #8bbf6a; /* ok / success */
+  --purple: #bd93f9; /* subagents */
+  --amber: #ecae66; /* warning / gradient end */
+
+  /* The switchable primary — the [t] key / command palette retint this pair,
+     never the raw hues above, so the ANSI legend stays stable. */
+  --accent: var(--coral);
+  --accent-2: var(--amber);
+  --grad: linear-gradient(100deg, var(--accent), var(--accent-2));
+
+  --line: rgba(244, 238, 226, 0.12);
+  --line-strong: rgba(244, 238, 226, 0.22);
+  /* Focus ring — a LITERAL (not var(--accent)) so a palette retint can't drag
+     the focus affordance below WCAG 1.4.11's 3:1 on the dark --bg. */
+  --focus-ring: #e3845f;
+  --glow: color-mix(in srgb, var(--accent) 22%, transparent);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 12px 34px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 2px 6px rgba(0, 0, 0, 0.45), 0 28px 70px rgba(0, 0, 0, 0.62);
 
   /* Type */
   --font-display: 'Jersey 10', 'Segoe UI', system-ui, sans-serif;
-  --font-body: 'Lora', Georgia, 'Times New Roman', serif;
   --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  --font-body: var(--font-mono); /* all-mono — you're in a terminal */
 
   /* Scale */
-  --maxw: 1120px;
-  --radius: 16px;
-  --radius-sm: 10px;
+  --maxw: 1140px;
+  --radius: 14px;
+  --radius-sm: 9px;
+  /* half-block dividers + TUI chrome measure against this */
+  --cell: 8px;
+
+  /* Back-compat aliases: the old "Cozy Terminal" token names, remapped onto the
+     new Terminal Habitat tokens so existing component scoped-styles render in the
+     dark palette immediately. Each section drops its alias use as it's reskinned;
+     these are the transition scaffold, not the target vocabulary. */
+  --paper: var(--bg);
+  --ink: var(--fg);
+  --gray: var(--fg-dim);
+  --surface: var(--panel);
+  --surface-2: var(--panel-2);
+  --border: var(--line);
+  --border-strong: var(--line-strong);
+  --coral-deep: var(--accent);
+  --grad-2: var(--accent-2);
+  --blue: var(--cyan);
+  --ok: var(--green);
 }
 
-:root[data-theme='night'] {
-  /* warm "after-hours office" dark — pairs with the night-office renders */
-  --coral: #e3845f;
-  --coral-deep: #f0a07f;
-  --amber: #ecae66;
-  --ok: #788c5d; /* 4.79:1 on the night --bg */
-  --grad-2: #ecae66; /* light amber — high contrast on the dark night --bg */
-  --focus-ring: #e3845f; /* literal; matches the night --coral (see :root note) */
-  --bg: #1d1813;
-  --bg-tint: #18130f;
-  --surface: #271f17;
-  --surface-2: #322820;
-  --fg: #f4eee2;
-  --fg-muted: #b3a890;
-  --border: color-mix(in srgb, #f4eee2 13%, transparent);
-  --border-strong: color-mix(in srgb, #f4eee2 24%, transparent);
-  --shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 10px 30px rgba(0, 0, 0, 0.45);
-  --shadow-lg: 0 2px 6px rgba(0, 0, 0, 0.4), 0 24px 60px rgba(0, 0, 0, 0.6);
-  --glow: color-mix(in srgb, var(--coral) 24%, transparent);
+/* ---- Light alternate ("daylight terminal") — opt-in via the theme switch ---- */
+:root[data-theme='day'] {
+  --bg: #f4eee2;
+  --bg-tint: #ede3d1;
+  --panel: #fdf9ef;
+  --panel-2: #ece1cd;
+  --fg: #241c14;
+  --fg-muted: #6f6453;
+  --fg-dim: #9a8f7c;
+  --coral: #a8431f; /* AA-tuned on cream */
+  --cyan: #2f6690;
+  --green: #556b2f;
+  --purple: #6a4bb0;
+  --amber: #9c5a12;
+  --accent: #a8431f;
+  --accent-2: #9c5a12;
+  --line: rgba(36, 28, 20, 0.12);
+  --line-strong: rgba(36, 28, 20, 0.2);
+  --focus-ring: #a8431f;
+  --glow: color-mix(in srgb, var(--accent) 15%, transparent);
+  --shadow: 0 1px 2px rgba(36, 28, 20, 0.05), 0 8px 24px rgba(36, 28, 20, 0.09);
+  --shadow-lg: 0 2px 4px rgba(36, 28, 20, 0.06), 0 20px 50px rgba(36, 28, 20, 0.13);
+}
+
+/* ---- Dracula — a dark variant (hidden 'dracula' easter egg + palette) ---- */
+:root[data-theme='dracula'] {
+  --bg: #21222c;
+  --bg-tint: #191a21;
+  --panel: #282a36;
+  --panel-2: #343746;
+  --fg: #f8f8f2;
+  --fg-muted: #9aa0c8;
+  --fg-dim: #6b7194;
+  --coral: #ff79c6;
+  --cyan: #8be9fd;
+  --green: #50fa7b;
+  --purple: #bd93f9;
+  --amber: #f1fa8c;
+  --accent: #bd93f9;
+  --accent-2: #ff79c6;
+  --line: rgba(248, 248, 242, 0.13);
+  --line-strong: rgba(248, 248, 242, 0.24);
+  --focus-ring: #bd93f9;
+  --glow: color-mix(in srgb, var(--accent) 26%, transparent);
 }
 
 /* ---------- reset ---------- */
@@ -89,8 +129,8 @@ body {
   font-family: var(--font-body);
   background: var(--bg);
   color: var(--fg);
-  line-height: 1.7;
-  font-size: clamp(1rem, 0.95rem + 0.2vw, 1.115rem);
+  line-height: 1.65;
+  font-size: clamp(0.95rem, 0.9rem + 0.2vw, 1.04rem);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
   transition:
@@ -99,7 +139,7 @@ body {
   overflow-x: hidden;
 }
 
-/* warm dawn-glow atmosphere */
+/* faint terminal-phosphor atmosphere: a top glow + a very subtle scanline wash */
 body::before {
   content: '';
   position: fixed;
@@ -107,11 +147,11 @@ body::before {
   z-index: -1;
   pointer-events: none;
   background:
-    radial-gradient(120% 80% at 80% -10%, var(--glow), transparent 60%),
+    radial-gradient(120% 80% at 82% -12%, var(--glow), transparent 58%),
     radial-gradient(
-      90% 60% at 6% 0%,
-      color-mix(in srgb, var(--amber) 9%, transparent),
-      transparent 55%
+      90% 60% at 4% -4%,
+      color-mix(in srgb, var(--cyan) 8%, transparent),
+      transparent 52%
     );
 }
 
@@ -120,22 +160,18 @@ img {
   display: block;
 }
 a {
-  color: var(--coral-deep);
+  color: var(--accent);
   text-underline-offset: 2px;
 }
-:root[data-theme='night'] a {
-  color: var(--coral);
-}
 
-/* Visible keyboard focus on every interactive control (WCAG 2.4.7) — the design
-   defined :hover but had no focus affordance. */
+/* Visible keyboard focus on every interactive control (WCAG 2.4.7) */
 :focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
   border-radius: 3px;
 }
 
-/* skip-to-content: off-screen until focused (WCAG 2.4.1 Bypass Blocks) */
+/* skip-to-content: off-screen until focused (WCAG 2.4.1) */
 .skip-link {
   position: fixed;
   top: 0.6rem;
@@ -144,9 +180,9 @@ a {
   transform: translateY(-150%);
   padding: 0.6rem 1rem;
   border-radius: var(--radius-sm);
-  background: var(--surface);
+  background: var(--panel);
   color: var(--fg);
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--line-strong);
   font-family: var(--font-mono);
   font-size: 0.9rem;
   text-decoration: none;
@@ -161,54 +197,63 @@ h1,
 h2,
 h3 {
   font-family: var(--font-display);
-  /* Jersey 10 ships a single weight — request 400 and forbid synthesis so the
+  /* Jersey 10 ships one weight — request 400 and forbid synthesis so the
      browser never fake-bolds it (faux-bold smears a pixel font's crisp edges). */
   font-weight: 400;
   font-synthesis: none;
-  line-height: 1.04;
-  letter-spacing: 0;
+  line-height: 1.02;
+  letter-spacing: 0.01em;
   color: var(--fg);
 }
 h1 {
-  font-size: clamp(2.5rem, 1.7rem + 3.6vw, 4.6rem);
+  font-size: clamp(2.7rem, 1.8rem + 4vw, 5rem);
 }
 h2 {
-  font-size: clamp(1.9rem, 1.4rem + 2vw, 2.9rem);
+  font-size: clamp(2rem, 1.5rem + 2.1vw, 3rem);
 }
 h3 {
-  font-size: clamp(1.15rem, 1.04rem + 0.5vw, 1.4rem);
-  /* stays 400: Jersey 10 is single-weight, and a 600 here would only be a dead
-     declaration (the h1,h2,h3 font-synthesis:none guard already blocks faux-bold)
-     until someone relaxes that guard — then h3 would smear. Keep them in sync. */
+  font-size: clamp(1.2rem, 1.08rem + 0.5vw, 1.45rem);
   font-weight: 400;
 }
+
 /* terminal-prompt eyebrow */
 .eyebrow {
   font-family: var(--font-mono);
   font-weight: 700;
-  font-size: 0.76rem;
-  letter-spacing: 0.12em;
+  font-size: 0.74rem;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--coral-deep);
+  color: var(--accent);
 }
 .eyebrow::before {
   content: '› ';
-  opacity: 0.7;
-}
-:root[data-theme='night'] .eyebrow {
-  color: var(--coral);
+  opacity: 0.65;
 }
 .lead {
-  font-size: clamp(1.08rem, 1rem + 0.5vw, 1.34rem);
+  font-family: var(--font-mono);
+  font-size: clamp(1rem, 0.94rem + 0.4vw, 1.2rem);
   color: var(--fg-muted);
-  max-width: 42ch;
+  max-width: 46ch;
+  line-height: 1.6;
 }
-/* coral→amber gradient headline word */
+
+/* gradient headline word (accent → accent-2) */
 .hl {
   background: var(--grad);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
+  background-size: 220% 100%;
+  animation: shimmer 7s ease-in-out infinite;
+}
+@keyframes shimmer {
+  0%,
+  100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
 }
 
 /* blinking block cursor */
@@ -218,7 +263,7 @@ h3 {
   height: 0.92em;
   margin-left: 0.08em;
   transform: translateY(0.08em);
-  background: var(--coral);
+  background: var(--accent);
   animation: blink 1.05s steps(1) infinite;
 }
 @keyframes blink {
@@ -235,25 +280,29 @@ h3 {
   padding-inline: clamp(1.1rem, 4vw, 2.5rem);
 }
 section {
-  padding-block: clamp(3.2rem, 7vw, 6rem);
+  padding-block: clamp(3.4rem, 7vw, 6.4rem);
 }
 .section-head {
-  max-width: 48ch;
+  max-width: 52ch;
   margin-bottom: clamp(1.8rem, 4vw, 3rem);
 }
 .section-head .lead {
   margin-top: 0.9rem;
 }
 
-/* ASCII pixel divider between sections */
+/* half-block ▀▄ rule between sections — the terminal's own divider glyph */
 .px-rule {
-  height: 6px;
+  height: 10px;
   width: min(100%, var(--maxw));
   margin: 0 auto;
   border: 0;
-  background: repeating-linear-gradient(90deg, var(--coral) 0 6px, transparent 6px 14px);
-  image-rendering: pixelated;
-  opacity: 0.4;
+  color: var(--accent);
+  background:
+    repeating-linear-gradient(90deg, currentColor 0 8px, transparent 8px 16px) top / 100% 5px
+      no-repeat,
+    repeating-linear-gradient(90deg, transparent 0 8px, currentColor 8px 16px) bottom / 100% 5px
+      no-repeat;
+  opacity: 0.32;
   -webkit-mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
   mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
 }
@@ -265,9 +314,9 @@ section {
   gap: 0.5rem;
   font-family: var(--font-mono);
   font-weight: 700;
-  font-size: 0.92rem;
+  font-size: 0.9rem;
   padding: 0.72rem 1.3rem;
-  border-radius: 12px;
+  border-radius: 11px;
   border: 1px solid transparent;
   cursor: pointer;
   text-decoration: none;
@@ -281,31 +330,28 @@ section {
   transform: translateY(-2px);
 }
 .btn-primary {
-  /* deep-coral gradient (NOT the light amber end of --grad) + a text-shadow so
-     the white label stays legible in both day and night. The glow uses a FIXED
-     coral (not var(--coral)) so it matches the baked fill in every theme and
-     gallery retint instead of drifting to the theme hue. */
-  background: linear-gradient(100deg, #ad5230, #c96a45);
-  color: #fff;
-  text-shadow: 0 1px 2px rgba(35, 14, 5, 0.4);
-  box-shadow: 0 8px 20px color-mix(in srgb, #c96a45 42%, transparent);
+  background: var(--grad);
+  color: #14100c;
+  text-shadow: none;
+  box-shadow: 0 8px 22px var(--glow);
 }
 .btn-primary:hover {
-  filter: brightness(1.08);
+  filter: brightness(1.06);
 }
 .btn-ghost {
-  background: transparent;
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
   color: var(--fg);
-  border-color: var(--border-strong);
+  border-color: var(--line-strong);
 }
 .btn-ghost:hover {
-  background: color-mix(in srgb, var(--fg) 5%, transparent);
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+  border-color: var(--accent);
 }
 
 /* ---------- surfaces ---------- */
 .card {
-  background: var(--surface);
-  border: 1px solid var(--border);
+  background: var(--panel);
+  border: 1px solid var(--line);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
 }
@@ -314,8 +360,8 @@ section {
 .terminal {
   position: relative;
   border-radius: var(--radius);
-  border: 1px solid var(--border-strong);
-  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  background: var(--panel);
   box-shadow: var(--shadow-lg);
   overflow: hidden;
 }
@@ -324,14 +370,14 @@ section {
   align-items: center;
   gap: 0.5rem;
   padding: 0.6rem 0.9rem;
-  background: var(--surface-2);
-  border-bottom: 1px solid var(--border);
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--line);
 }
 .terminal__dot {
   width: 11px;
   height: 11px;
   border-radius: 50%;
-  background: var(--gray);
+  background: var(--fg-dim);
 }
 .terminal__dot--r {
   background: #e06a5a;
@@ -351,7 +397,7 @@ section {
 .terminal__screen {
   display: block;
   width: 100%;
-  background: #0e0d0c;
+  background: #0a0908;
 }
 /* scanline overlay — very faint, only reads as CRT texture up close */
 .terminal__scan {
@@ -359,9 +405,9 @@ section {
   left: 0;
   right: 0;
   bottom: 0;
-  top: 38px; /* below the title bar */
+  top: 38px;
   pointer-events: none;
-  background: repeating-linear-gradient(to bottom, rgba(0, 0, 0, 0.05) 0 1px, transparent 1px 3px);
+  background: repeating-linear-gradient(to bottom, rgba(0, 0, 0, 0.16) 0 1px, transparent 1px 3px);
   mix-blend-mode: multiply;
 }
 
@@ -417,21 +463,6 @@ code,
    FX layer — tasteful flair, all reduced-motion-safe above
    ============================================================ */
 
-/* animated shimmer across the gradient headline word */
-.hl {
-  background-size: 220% 100%;
-  animation: shimmer 7s ease-in-out infinite;
-}
-@keyframes shimmer {
-  0%,
-  100% {
-    background-position: 0% 50%;
-  }
-  50% {
-    background-position: 100% 50%;
-  }
-}
-
 /* CRT power-on when a terminal scrolls into view */
 .crt.crt-on .terminal__screen {
   animation: crt-on 0.9s ease-out both;
@@ -478,28 +509,8 @@ code,
   animation: retint-pulse 0.6s ease-out;
 }
 
-/* Dracula — hidden easter-egg theme (type "dracula"; Esc restores) */
-:root[data-theme='dracula'] {
-  --coral: #bd93f9;
-  --coral-deep: #caa6fb;
-  --amber: #ff79c6;
-  --ok: #9db87e; /* 6.50:1 on the dracula --bg */
-  --grad-2: #ff79c6; /* light pink — high contrast on the dark dracula --bg */
-  --focus-ring: #caa6fb; /* literal; matches the dracula --coral-deep (see :root note) */
-  --bg: #282a36;
-  --bg-tint: #21222c;
-  --surface: #343746;
-  --surface-2: #44475a;
-  --fg: #f8f8f2;
-  --fg-muted: #8b92bd;
-  --border: color-mix(in srgb, #f8f8f2 13%, transparent);
-  --border-strong: color-mix(in srgb, #f8f8f2 24%, transparent);
-  --shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 10px 30px rgba(0, 0, 0, 0.45);
-  --shadow-lg: 0 2px 6px rgba(0, 0, 0, 0.4), 0 24px 60px rgba(0, 0, 0, 0.6);
-  --glow: color-mix(in srgb, var(--coral) 26%, transparent);
-}
-
-/* ---------- boot intro overlay ---------- */
+/* ---------- boot intro overlay (interim — the particle-assembly hero
+   supersedes this in the hero rebuild) ---------- */
 .boot {
   display: none;
   position: fixed;
@@ -536,7 +547,7 @@ code,
   color: var(--fg);
 }
 .boot__ok {
-  color: var(--ok);
+  color: var(--green);
 }
 .boot__hint {
   margin-top: 1.4rem;
@@ -544,7 +555,7 @@ code,
   opacity: 0.55;
 }
 
-/* ---------- prose: rendered markdown (the /config page) ---------- */
+/* ---------- prose: rendered markdown (the /config etc. doc pages) ---------- */
 .prose {
   line-height: 1.7;
 }
@@ -556,7 +567,7 @@ code,
   font-size: clamp(1.45rem, 1.2rem + 1.3vw, 1.95rem);
   margin: 2.2rem 0 0.8rem;
   padding-top: 1.4rem;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--line);
 }
 .prose h3 {
   margin: 1.6rem 0 0.5rem;
@@ -566,12 +577,8 @@ code,
   color: var(--fg);
 }
 .prose a {
-  color: var(--coral-deep);
+  color: var(--accent);
   font-weight: 600;
-}
-:root[data-theme='night'] .prose a,
-:root[data-theme='dracula'] .prose a {
-  color: var(--coral);
 }
 .prose ul {
   padding-left: 1.3rem;
@@ -579,21 +586,19 @@ code,
 .prose li {
   margin: 0.3rem 0;
 }
-/* inline code */
 .prose :not(pre) > code {
   font-family: var(--font-mono);
   font-size: 0.88em;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
   border-radius: 6px;
   padding: 0.08rem 0.34rem;
 }
-/* fenced code blocks (Shiki sets the colors; we frame them) */
 .prose pre {
   margin: 1.2rem 0;
   padding: 1rem 1.1rem;
   border-radius: var(--radius-sm);
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--line-strong);
   overflow-x: auto;
   font-size: 0.9rem;
   line-height: 1.6;
@@ -601,7 +606,6 @@ code,
 .prose pre code {
   font-family: var(--font-mono);
 }
-/* tables */
 .prose table {
   width: 100%;
   border-collapse: collapse;
@@ -612,18 +616,17 @@ code,
 .prose td {
   text-align: left;
   padding: 0.55rem 0.8rem;
-  border: 1px solid var(--border);
+  border: 1px solid var(--line);
   vertical-align: top;
 }
 .prose th {
-  background: var(--surface-2);
+  background: var(--panel-2);
   font-family: var(--font-display);
   font-weight: 400;
   font-synthesis: none;
 }
-/* architecture diagram (```mermaid → build-time inline SVG): frame it in a fixed
-   light "terminal screen" so the day-palette SVG stays legible on night/dracula,
-   and make it responsive (the SVG keeps its viewBox aspect). */
+/* architecture diagram (```mermaid → inline SVG): keep a fixed LIGHT "terminal
+   screen" so the day-palette SVG stays legible on the dark page. */
 .prose svg {
   display: block;
   width: 100%;
@@ -632,16 +635,10 @@ code,
   margin: 1.8rem auto;
   padding: clamp(0.8rem, 2vw, 1.4rem);
   background: #fbfaf6;
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--line-strong);
   border-radius: var(--radius-sm);
   box-shadow: var(--shadow);
 }
-/* mermaid renders labels as HTML inside <foreignObject> (htmlLabels), so the
-   page's `.prose p{color:var(--fg)}` / `.prose a{color:coral}` / `.prose code
-   {background:surface-2}` cascade leaks in and makes the labels invisible on the
-   light frame in night/dracula. The frame is always light, so pin every label to
-   dark ink on a light backing — readable on all themes. (Scope fill: to text
-   elements only; arrowheads/edges are <path> and keep mermaid's stroke colors.) */
 .prose svg .nodeLabel,
 .prose svg .nodeLabel p,
 .prose svg .edgeLabel,
@@ -664,7 +661,6 @@ code,
   fill: #fbfaf6 !important;
   border-color: transparent !important;
 }
-/* mermaid bakes edge @keyframes into the SVG — keep them inert for reduced motion */
 @media (prefers-reduced-motion: reduce) {
   .prose svg [class*='edge'] {
     animation: none !important;

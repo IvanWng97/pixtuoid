@@ -56,6 +56,11 @@ import { REPO, asset } from '../consts';
             alt="A pixel-art office with animated coding-agent characters working at their desks"
           />
         </video>
+        {
+          /* The office reconstructs from its own pixels on load, then fades to the
+            live clip beneath — the signature. Sampled from the real poster. */
+        }
+        <canvas id="assemble" class="assemble px" aria-hidden="true"></canvas>
         <span class="terminal__scan" aria-hidden="true"></span>
       </figure>
     </div>
@@ -104,6 +109,15 @@ import { REPO, asset } from '../consts';
   .terminal__screen {
     width: 100%;
     height: auto;
+  }
+  /* particle-assembly overlay — positioned exactly over the video in JS */
+  .assemble {
+    position: absolute;
+    top: 38px;
+    left: 0;
+    z-index: 2;
+    pointer-events: none;
+    image-rendering: pixelated;
   }
 
   /* one orchestrated page-load entrance, staggered */
@@ -299,5 +313,145 @@ import { REPO, asset } from '../consts';
     }
     apply();
     if (mq.addEventListener) mq.addEventListener('change', apply);
+  })();
+</script>
+
+<script is:inline>
+  // SIGNATURE: the office reconstructs from its own pixels. Sample the real
+  // poster on a coarse grid → each cell is a chunky pixel that starts scattered
+  // across the frame and flies to its place, then the canvas fades to reveal the
+  // live clip beneath. prefers-reduced-motion / already-seen → skip, show clip.
+  (function () {
+    const canvas = document.getElementById('assemble');
+    const fig = document.querySelector('.hero .terminal');
+    const video = document.querySelector('.hero video');
+    if (!canvas || !fig || !video) return;
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    let seen = false;
+    try {
+      seen = sessionStorage.getItem('pix-assembled') === '1';
+    } catch (e) {}
+    if (reduce || seen) {
+      canvas.style.display = 'none';
+      return;
+    }
+
+    const ctx = canvas.getContext('2d');
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const DUR = 720; // per-particle travel
+    const STAGGER = 440; // spread of start times
+    let parts = [],
+      W = 0,
+      H = 0,
+      GRID = 0,
+      startT = 0,
+      running = false;
+
+    const img = new Image();
+    img.decoding = 'async';
+    img.src = video.getAttribute('poster');
+    img.onload = prep;
+    img.onerror = function () {
+      canvas.style.display = 'none';
+    };
+
+    function prep() {
+      const vb = video.getBoundingClientRect();
+      const fb = fig.getBoundingClientRect();
+      W = vb.width;
+      H = vb.height;
+      if (W < 4 || H < 4) {
+        requestAnimationFrame(prep);
+        return;
+      } // await layout
+      // sit exactly over the video
+      canvas.style.top = vb.top - fb.top + 'px';
+      canvas.style.left = vb.left - fb.left + 'px';
+      canvas.style.width = W + 'px';
+      canvas.style.height = H + 'px';
+      canvas.width = Math.round(W * dpr);
+      canvas.height = Math.round(H * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.imageSmoothingEnabled = false;
+
+      // sample the poster down to a coarse grid → ~5k chunky pixel blocks
+      const TARGET = 5000;
+      GRID = Math.max(6, Math.round(Math.sqrt((W * H) / TARGET)));
+      const cols = Math.ceil(W / GRID),
+        rows = Math.ceil(H / GRID);
+      const off = document.createElement('canvas');
+      off.width = cols;
+      off.height = rows;
+      const octx = off.getContext('2d');
+      octx.drawImage(img, 0, 0, cols, rows);
+      const d = octx.getImageData(0, 0, cols, rows).data;
+      parts = [];
+      for (let j = 0; j < rows; j++) {
+        for (let i = 0; i < cols; i++) {
+          const k = (j * cols + i) * 4;
+          if (d[k + 3] < 8) continue;
+          parts.push({
+            tx: i * GRID,
+            ty: j * GRID,
+            // scatter start over a frame slightly larger than the canvas
+            sx: -0.12 * W + Math.random() * 1.24 * W,
+            sy: -0.12 * H + Math.random() * 1.24 * H,
+            c: 'rgb(' + d[k] + ',' + d[k + 1] + ',' + d[k + 2] + ')',
+            delay: Math.random() * STAGGER,
+          });
+        }
+      }
+      // pix:revealed may fire before the image decodes, so also self-start.
+      document.addEventListener('pix:revealed', begin, { once: true });
+      requestAnimationFrame(begin);
+    }
+
+    function begin() {
+      if (running || !parts.length) return;
+      running = true;
+      startT = performance.now();
+      requestAnimationFrame(frame);
+    }
+
+    function frame(now) {
+      const el = now - startT;
+      ctx.clearRect(0, 0, W, H);
+      let done = true;
+      const g = GRID + 1; // +1 hides seams between blocks
+      for (let n = 0; n < parts.length; n++) {
+        const p = parts[n];
+        let t = (el - p.delay) / DUR;
+        if (t < 0) {
+          done = false;
+          ctx.fillStyle = p.c;
+          ctx.fillRect(p.sx | 0, p.sy | 0, g, g); // scattered, waiting
+          continue;
+        }
+        if (t < 1) done = false;
+        else t = 1;
+        const e = 1 - Math.pow(1 - t, 3); // easeOutCubic
+        ctx.fillStyle = p.c;
+        ctx.fillRect((p.sx + (p.tx - p.sx) * e) | 0, (p.sy + (p.ty - p.sy) * e) | 0, g, g);
+      }
+      if (done) finish();
+      else requestAnimationFrame(frame);
+    }
+
+    function finish() {
+      ctx.clearRect(0, 0, W, H);
+      ctx.drawImage(img, 0, 0, W, H); // crisp final frame
+      try {
+        sessionStorage.setItem('pix-assembled', '1');
+      } catch (e) {}
+      const pr = video.play();
+      if (pr && pr.catch) pr.catch(function () {});
+      canvas.style.transition = 'opacity 0.5s ease';
+      requestAnimationFrame(function () {
+        canvas.style.opacity = '0';
+      });
+      setTimeout(function () {
+        canvas.style.display = 'none';
+      }, 560);
+    }
   })();
 </script>

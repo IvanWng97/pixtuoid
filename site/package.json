@@ -23,7 +23,6 @@
     "@astrojs/sitemap": "^3.7.3",
     "@fontsource/jersey-10": "^5.2.8",
     "@fontsource/jetbrains-mono": "^5.2.8",
-    "@fontsource/lora": "^5.2.8",
     "astro": "^6.4.7"
   },
   "devDependencies": {
