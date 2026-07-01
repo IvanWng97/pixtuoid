@@ -50,15 +50,19 @@ fn to_color(c: Rgb) -> Color {
 // silently forgotten by a future card.
 
 /// Per-cell darkening factors for the soft drop shadow (0 = black, 1 = unchanged).
-/// The right band fades out over two columns (a penumbra); the single bottom row
-/// uses one mid factor (it's already ~2px tall, so it needs no gradient of its
-/// own). Higher = softer.
+/// The right band fades out over two columns (a penumbra); the bottom row uses one
+/// mid factor on its upper half-block sub-pixel only (`top_half_only`), so it's a
+/// 1px contact shadow hugging the card's base rather than a full 2px band below it.
+/// Higher = softer.
 const SHADOW_RIGHT_FALLOFF: [f32; 2] = [0.66, 0.85];
 const SHADOW_BOTTOM_FACTOR: f32 = 0.74;
 
 /// How far the shadow is cast down-and-right of the card, in cells. The whole
-/// L-band shifts by this, which is what makes it read as a cast shadow rather
-/// than a hard outline. Bumping it deepens the offset; the falloff stays as-is.
+/// L-band shifts by this, which is what makes it read as a cast shadow rather than
+/// a hard outline: the right strip starts one row *below* the top edge (so the
+/// top-right corner stays lit instead of being outlined) and the bottom strip one
+/// column right of the left edge. Bumping it deepens the offset; the falloff stays
+/// as-is.
 const SHADOW_OFFSET: u16 = 1;
 
 /// Multiply an `Rgb` color toward black by `f`. Half-block office cells carry a
@@ -76,8 +80,17 @@ fn dim_rgb(c: Color, f: f32) -> Color {
     }
 }
 
-/// Darken one clipped band of cells in place by `factor`.
-fn dim_band(f: &mut ratatui::Frame<'_>, band: Rect, bounds: Rect, factor: f32) {
+/// Darken one clipped band of cells in place by `factor`. With `top_half_only`,
+/// darkens just the upper half-block sub-pixel (`cell.fg`) and leaves the lower
+/// one (`cell.bg`) lit — a 1px-tall contact shadow that hugs the card's bottom
+/// edge, instead of a full 2px cell that reads as a band set off below it.
+fn dim_band(
+    f: &mut ratatui::Frame<'_>,
+    band: Rect,
+    bounds: Rect,
+    factor: f32,
+    top_half_only: bool,
+) {
     let Some(c) = crate::tui::renderer::clip_widget_rect(band, bounds) else {
         return;
     };
@@ -86,15 +99,20 @@ fn dim_band(f: &mut ratatui::Frame<'_>, band: Rect, bounds: Rect, factor: f32) {
         for x in c.x..c.right() {
             let cell = &mut buf[(x, y)];
             cell.fg = dim_rgb(cell.fg, factor);
-            cell.bg = dim_rgb(cell.bg, factor);
+            if !top_half_only {
+                cell.bg = dim_rgb(cell.bg, factor);
+            }
         }
     }
 }
 
-/// Cast a soft 1-cell-offset drop shadow into the office cells below-right of
-/// `area`: a right strip that fades out over `SHADOW_RIGHT_FALLOFF.len()` columns,
-/// and a 1-row strip below, offset down a row so it reads as cast, not as an
-/// outline. Clipped to the frame so it never indexes past the buffer.
+/// Cast a soft drop shadow into the office cells below-right of `area`: a right
+/// strip that fades out over `SHADOW_RIGHT_FALLOFF.len()` columns, offset down by
+/// `SHADOW_OFFSET` so its top stays clear of the top-right corner (reads as a cast
+/// shadow, not a hard outline), and a 1px contact strip hugging the bottom edge,
+/// offset right by `SHADOW_OFFSET`. The right strip reaches one row below the card,
+/// so it meets the bottom strip at the bottom-right corner. Clipped to the frame
+/// so it never indexes past the buffer.
 fn cast_drop_shadow(f: &mut ratatui::Frame<'_>, area: Rect) {
     let bounds = f.area();
     for (d, &factor) in SHADOW_RIGHT_FALLOFF.iter().enumerate() {
@@ -104,7 +122,7 @@ fn cast_drop_shadow(f: &mut ratatui::Frame<'_>, area: Rect) {
             width: 1,
             height: area.height,
         };
-        dim_band(f, col, bounds, factor);
+        dim_band(f, col, bounds, factor, false);
     }
     let bottom = Rect {
         x: area.x.saturating_add(SHADOW_OFFSET),
@@ -112,7 +130,7 @@ fn cast_drop_shadow(f: &mut ratatui::Frame<'_>, area: Rect) {
         width: area.width.saturating_sub(SHADOW_OFFSET),
         height: 1,
     };
-    dim_band(f, bottom, bounds, SHADOW_BOTTOM_FACTOR);
+    dim_band(f, bottom, bounds, SHADOW_BOTTOM_FACTOR, true);
 }
 
 /// Paint the shared backing for a borderless card over `area`: cast the drop

@@ -178,10 +178,14 @@ mod tests {
         })
         .unwrap();
         let buf = term.backend().buffer().clone();
-        let r = |x: u16, y: u16| match buf.cell((x, y)).unwrap().bg {
+        let chan = |c: Color| match c {
             Color::Rgb(r, _, _) => r,
-            other => panic!("expected Rgb bg, got {other:?}"),
+            other => panic!("expected Rgb, got {other:?}"),
         };
+        // `r` reads a cell's lower sub-pixel (bg); `rf` its upper one (fg). The
+        // right band darkens the whole cell; the bottom band only the upper half.
+        let r = |x: u16, y: u16| chan(buf.cell((x, y)).unwrap().bg);
+        let rf = |x: u16, y: u16| chan(buf.cell((x, y)).unwrap().fg);
         // Right strip darkens, and the inner column is darker than the outer (the
         // penumbra falloff).
         let inner = r(area.right(), area.y + 1);
@@ -194,12 +198,46 @@ mod tests {
             inner < outer,
             "shadow must fade inner→outer (inner {inner} !< outer {outer})"
         );
-        // Bottom strip darkens.
+        // Bottom strip is a 1px contact shadow: its upper sub-pixel (fg) darkens
+        // and hugs the card's base, while the lower sub-pixel (bg) stays lit so it
+        // never reads as a thick band set off below the popup.
         assert!(
-            r(area.x + 1, area.bottom()) < 200,
-            "bottom band must darken"
+            rf(area.x + 1, area.bottom()) < 200,
+            "bottom band upper sub-pixel must darken (the contact shadow)"
+        );
+        assert_eq!(
+            r(area.x + 1, area.bottom()),
+            200,
+            "bottom band lower sub-pixel stays lit (1px contact shadow, not a 2px band)"
+        );
+        // The shadow is a cast offset, not an outline: the right strip starts one
+        // row BELOW the top edge, so the top-right corner stays lit (the strip
+        // never runs the card's full height), and the bottom strip starts one
+        // column right of the left edge, so the bottom-left corner stays lit.
+        assert_eq!(
+            r(area.right(), area.y),
+            200,
+            "top-right corner stays lit — right strip is offset down, not full-height"
+        );
+        assert_eq!(
+            rf(area.x, area.bottom()),
+            200,
+            "bottom-left corner stays lit — bottom strip is offset right"
+        );
+        // …but the right strip reaches one row below the card, so it still meets
+        // the bottom strip at the bottom-right corner (the cast connects there).
+        assert!(
+            r(area.right(), area.bottom()) < 200,
+            "bottom-right corner is shadowed (right strip meets the bottom strip)"
         );
         // A cell far from the band is untouched.
         assert_eq!(r(0, 0), 200, "cells outside the band stay bright");
+        // The card's top-LEFT stays lit — the shadow is cast down-right only, not
+        // an all-sides outline.
+        assert_eq!(
+            r(area.x.saturating_sub(1), area.y),
+            200,
+            "no shadow on the lit (top-left) side"
+        );
     }
 }
