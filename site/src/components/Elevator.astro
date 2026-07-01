@@ -90,7 +90,8 @@ const FLOORS = [
 
     // track the floor the viewport is on. rootMargin centers the trigger band
     // so the indicator flips roughly when a floor crosses mid-screen.
-    if ('IntersectionObserver' in window) {
+    function trackFloors() {
+      if (!('IntersectionObserver' in window)) return;
       const io = new IntersectionObserver(
         function (entries) {
           entries.forEach(function (e) {
@@ -102,6 +103,15 @@ const FLOORS = [
       document.querySelectorAll('[data-floor]').forEach(function (s) {
         io.observe(s);
       });
+    }
+    // The [data-floor] sections are OUTSIDE this component and render AFTER it in
+    // index.astro, so this is:inline script runs (at parse position) before they
+    // exist. Wiring the observer now would observe zero elements and leave the
+    // indicator frozen on the server-rendered floor 6 — defer to DOM-ready.
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', trackFloors, { once: true });
+    } else {
+      trackFloors();
     }
   })();
 </script>
