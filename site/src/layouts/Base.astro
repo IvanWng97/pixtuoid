@@ -230,6 +230,41 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
           document.documentElement.dataset.theme = t;
           document.dispatchEvent(new CustomEvent('pix:theme'));
         };
+        // 🦞 easter egg: type "lobster" and the OpenClaw mascot scuttles across
+        // the floor (the ok· lobster is the gateway's coding sprite). One at a
+        // time; reduced-motion gets a brief static cameo instead of the scuttle.
+        let lobBusy = false;
+        const spawnLobster = function () {
+          if (lobBusy) return;
+          lobBusy = true;
+          const el = document.createElement('div');
+          el.textContent = '🦞';
+          el.setAttribute('aria-hidden', 'true');
+          el.style.cssText =
+            'position:fixed;left:0;bottom:5vh;font-size:2.4rem;z-index:9998;pointer-events:none;will-change:transform;';
+          document.body.appendChild(el);
+          const done = function () {
+            el.remove();
+            lobBusy = false;
+          };
+          if (reduce) {
+            el.style.transform = 'translateX(2rem)';
+            setTimeout(done, 1400);
+            return;
+          }
+          const span = window.innerWidth + 120;
+          const start = performance.now();
+          const DUR = 3200;
+          const step = function (now) {
+            const p = Math.min(1, (now - start) / DUR);
+            const x = -60 + p * span;
+            const bob = Math.sin(p * Math.PI * 11) * 7; // a little scuttle bob
+            el.style.transform = 'translate(' + x + 'px,' + bob + 'px)';
+            if (p < 1) requestAnimationFrame(step);
+            else done();
+          };
+          requestAnimationFrame(step);
+        };
         document.addEventListener('keydown', function (e) {
           // don't hijack typing: skip when a field is focused or a modifier is held
           const tgt = e.target;
@@ -258,6 +293,7 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
               clearRetint();
               setTheme('dracula');
             }
+            if (buf.indexOf('lobster') !== -1) spawnLobster();
           }
         });
       })();

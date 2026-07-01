@@ -509,52 +509,6 @@ code,
   animation: retint-pulse 0.6s ease-out;
 }
 
-/* ---------- boot intro overlay (interim — the particle-assembly hero
-   supersedes this in the hero rebuild) ---------- */
-.boot {
-  display: none;
-  position: fixed;
-  inset: 0;
-  z-index: 9999;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  background: var(--bg);
-  font-family: var(--font-mono);
-  color: var(--fg-muted);
-  font-size: clamp(0.82rem, 0.74rem + 0.4vw, 1rem);
-  line-height: 1.95;
-  transition: opacity 0.45s ease;
-}
-:root[data-booting='1'] .boot {
-  display: flex;
-}
-.boot.is-done {
-  opacity: 0;
-  pointer-events: none;
-}
-.boot__log {
-  width: min(86vw, 420px);
-}
-.boot__line {
-  opacity: 0;
-  transition: opacity 0.25s ease;
-}
-.boot__line.in {
-  opacity: 1;
-}
-.boot__line b {
-  color: var(--fg);
-}
-.boot__ok {
-  color: var(--green);
-}
-.boot__hint {
-  margin-top: 1.4rem;
-  font-size: 0.72rem;
-  opacity: 0.55;
-}
-
 /* ---------- prose: rendered markdown (the /config etc. doc pages) ---------- */
 .prose {
   line-height: 1.7;
