@@ -153,15 +153,21 @@ mod tests {
         }
     }
 
-    /// `borderless_panel` (via the shared `paint_card_backing`) darkens the office
-    /// cells in the L-band below-right of the popup (right strip fading inner→
-    /// outer), and leaves cells outside the band untouched. Pre-fills the buffer
-    /// with a known bright color to stand in for the already-flushed office, then
-    /// renders a small inset panel.
+    /// `borderless_panel` (via the shared `paint_card_backing`) casts a flat,
+    /// single-color drop shadow: the card's silhouette darkened by ONE uniform
+    /// `SHADOW_FACTOR` and offset one cell down-and-right. What stays visible is an
+    /// L-band whose right column is FULL cells and whose bottom row is TOP-HALF only
+    /// (a 1px contact line — `fg` dimmed, `bg` left lit), both the SAME shade, with
+    /// the top-right and bottom-left corners left lit and nothing above/left of the
+    /// card. Pre-fills the buffer with a known bright color to stand in for the
+    /// already-flushed office, then renders a small inset panel. Values are derived
+    /// from `SHADOW_FACTOR` so a darkness tweak doesn't silently gut the assertions.
     #[test]
-    fn borderless_panel_casts_a_drop_shadow_with_falloff() {
+    fn borderless_panel_casts_a_flat_offset_shadow() {
         use ratatui::style::Color;
         let bright = Color::Rgb(200, 200, 200);
+        let dim = (200.0 * crate::tui::widgets::SHADOW_FACTOR) as u8; // the one shadow shade
+        assert!(dim < 200, "SHADOW_FACTOR must actually darken");
         let area = Rect::new(5, 4, 8, 4); // small, well inside the 20x12 buffer
         let mut term = Terminal::new(TestBackend::new(20, 12)).unwrap();
         term.draw(|f| {
@@ -178,28 +184,59 @@ mod tests {
         })
         .unwrap();
         let buf = term.backend().buffer().clone();
-        let r = |x: u16, y: u16| match buf.cell((x, y)).unwrap().bg {
+        let chan = |c: Color| match c {
             Color::Rgb(r, _, _) => r,
-            other => panic!("expected Rgb bg, got {other:?}"),
+            other => panic!("expected Rgb, got {other:?}"),
         };
-        // Right strip darkens, and the inner column is darker than the outer (the
-        // penumbra falloff).
-        let inner = r(area.right(), area.y + 1);
-        let outer = r(area.right() + 1, area.y + 1);
-        assert!(
-            inner < 200,
-            "right band inner column must darken (got {inner})"
+        let r = |x: u16, y: u16| chan(buf.cell((x, y)).unwrap().bg);
+        let rf = |x: u16, y: u16| chan(buf.cell((x, y)).unwrap().fg);
+        // Right column: FULL cell — both half-block sub-pixels darkened to the shade.
+        assert_eq!(rf(area.right(), area.y + 1), dim, "right band top px dim");
+        assert_eq!(r(area.right(), area.y + 1), dim, "right band bottom px dim");
+        // Bottom row: TOP-HALF only — top sub-pixel dim, bottom sub-pixel LIT (1px).
+        assert_eq!(rf(area.x + 1, area.bottom()), dim, "bottom band top px dim");
+        assert_eq!(
+            r(area.x + 1, area.bottom()),
+            200,
+            "bottom band bottom px stays lit (a 1px line, not a full cell)"
         );
-        assert!(
-            inner < outer,
-            "shadow must fade inner→outer (inner {inner} !< outer {outer})"
+        // SAME COLOR: right band and bottom band are the identical shade.
+        assert_eq!(
+            rf(area.right(), area.y + 1),
+            rf(area.x + 1, area.bottom()),
+            "right and bottom bands are ONE uniform color"
         );
-        // Bottom strip darkens.
-        assert!(
-            r(area.x + 1, area.bottom()) < 200,
-            "bottom band must darken"
+        // Corner joins them and is also top-half (top px dim, bottom px lit).
+        assert_eq!(rf(area.right(), area.bottom()), dim, "corner top px dim");
+        assert_eq!(r(area.right(), area.bottom()), 200, "corner bottom px lit");
+        // Offset silhouette: the right band is 1 cell wide and offset DOWN (top-right
+        // corner lit); the bottom band is offset RIGHT (bottom-left corner lit).
+        assert_eq!(
+            r(area.right() + 1, area.y + 1),
+            200,
+            "right band is 1 cell wide (the next column is lit)"
         );
-        // A cell far from the band is untouched.
+        assert_eq!(
+            r(area.right(), area.y),
+            200,
+            "top-right corner stays lit (offset down)"
+        );
+        assert_eq!(
+            r(area.x, area.bottom()),
+            200,
+            "bottom-left corner stays lit (offset right)"
+        );
+        // Nothing above or left of the card, and cells far from the band stay bright.
+        assert_eq!(
+            r(area.x, area.y.saturating_sub(1)),
+            200,
+            "no shadow above the card"
+        );
+        assert_eq!(
+            r(area.x.saturating_sub(1), area.y),
+            200,
+            "no shadow left of the card"
+        );
         assert_eq!(r(0, 0), 200, "cells outside the band stay bright");
     }
 }

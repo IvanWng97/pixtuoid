@@ -570,7 +570,9 @@ mod tests {
         let buf = term.backend().buffer();
         let shadowed = (0..buf.area.height).any(|y| {
             (0..buf.area.width).any(|x| {
-                matches!(buf[(x, y)].bg, ratatui::style::Color::Rgb(r, g, b) if r == g && g == b && (120..200).contains(&r))
+                // The 200-fill dimmed by the exact SHADOW_FACTOR (derived, not a loose
+                // range — so a darkness tweak can't silently pass a near-invisible shadow).
+                matches!(buf[(x, y)].bg, ratatui::style::Color::Rgb(r, g, b) if r == g && g == b && r == (200.0 * crate::tui::widgets::SHADOW_FACTOR) as u8)
             })
         });
         assert!(
@@ -659,7 +661,7 @@ mod tests {
     /// The tooltip render path (`paint_coffee_tooltip` → `paint_simple_tooltip` →
     /// the shared `super::paint_card_backing`) casts the drop shadow. Pins that a
     /// future edit dropping the backing call would be caught — the modal path is
-    /// covered separately by `panel::borderless_panel_casts_a_drop_shadow_*`.
+    /// covered separately by `panel::borderless_panel_casts_a_flat_offset_shadow`.
     /// Pre-fills the buffer with a bright equal-channel gray; only a shadowed
     /// office cell ends up an equal-channel gray darker than that (the card's
     /// `tooltip_bg` is a distinct hue), so its presence proves the shadow ran.
@@ -685,7 +687,9 @@ mod tests {
         let buf = term.backend().buffer();
         let shadowed = (0..buf.area.height).any(|y| {
             (0..buf.area.width).any(|x| {
-                matches!(buf[(x, y)].bg, Color::Rgb(r, g, b) if r == g && g == b && (120..200).contains(&r))
+                // The 200-fill dimmed by the exact SHADOW_FACTOR (derived, not a loose
+                // range — so a darkness tweak can't silently pass a near-invisible shadow).
+                matches!(buf[(x, y)].bg, Color::Rgb(r, g, b) if r == g && g == b && r == (200.0 * crate::tui::widgets::SHADOW_FACTOR) as u8)
             })
         });
         assert!(
