@@ -8,6 +8,7 @@ import '@fontsource/jetbrains-mono/400.css';
 import '@fontsource/jetbrains-mono/500.css';
 import '@fontsource/jetbrains-mono/700.css';
 import '../styles/global.css';
+import CommandPalette from '../components/CommandPalette.astro';
 import { asset, THEMES } from '../consts';
 
 interface Props {
@@ -116,6 +117,8 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
     <a class="skip-link" href="#main">Skip to content</a>
 
     <slot />
+
+    <CommandPalette />
 
     <!-- reveal-on-scroll: one orchestrated entrance per section -->
     <script is:inline>

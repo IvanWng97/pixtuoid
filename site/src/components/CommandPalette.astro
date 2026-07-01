@@ -1,0 +1,456 @@
+---
+import { REPO, CRATES, SPONSOR, asset } from '../consts';
+
+// The terminal you run pixtuoid in has a command line — so does the page. `/`,
+// `:` or ⌘K open it; every action here maps to something the page can already
+// do (ride the elevator, switch theme, open a doc), surfaced as one keyboard
+// entry point. Actions render server-side as data-attributed rows; the hoisted
+// (deferred) script reads them, so there's no is:inline parse-order trap.
+const JUMP = [
+  { icon: '↟', label: 'Top — penthouse', target: 'lobby', keys: '6' },
+  { icon: '▮', label: 'Showcase — the studio', target: 'showcase', keys: '5' },
+  { icon: '▮', label: 'Features — the amenities', target: 'features', keys: '4' },
+  { icon: '▮', label: 'How it works — the machine room', target: 'how', keys: '3' },
+  { icon: '▮', label: 'Supported tools — the tenants', target: 'tools', keys: '2' },
+  { icon: '▮', label: 'Install — the front desk', target: 'install', keys: '1' },
+];
+const THEME = [
+  { icon: '☀', label: 'Theme — day (lights on)', target: 'day' },
+  { icon: '☾', label: 'Theme — night (default)', target: 'night' },
+  { icon: '✦', label: 'Theme — dracula', target: 'dracula' },
+];
+const LINK = [
+  { icon: '↗', label: 'GitHub — source & issues', href: REPO, ext: true },
+  { icon: '☰', label: 'Docs — Architecture', href: asset('architecture'), ext: false },
+  { icon: '☰', label: 'Docs — Configuration', href: asset('config'), ext: false },
+  { icon: '⬗', label: 'crates.io — install page', href: CRATES, ext: true },
+  { icon: '☕', label: 'Buy me a coffee', href: SPONSOR, ext: true },
+];
+---
+
+<div id="cmdk" class="cmdk" hidden>
+  <div class="cmdk__scrim" data-cmdk-close></div>
+  <div
+    class="cmdk__panel"
+    role="dialog"
+    aria-modal="true"
+    aria-label="Command palette"
+    id="cmdk-panel"
+  >
+    <div class="cmdk__head">
+      <span class="cmdk__prompt" aria-hidden="true">&rsaquo;</span>
+      <input
+        id="cmdk-input"
+        class="cmdk__input"
+        type="text"
+        role="combobox"
+        aria-controls="cmdk-list"
+        aria-expanded="true"
+        aria-autocomplete="list"
+        placeholder="jump to a floor, switch theme, open a doc…"
+        autocomplete="off"
+        autocorrect="off"
+        autocapitalize="off"
+        spellcheck="false"
+      />
+      <kbd class="cmdk__esc">esc</kbd>
+    </div>
+    <ul id="cmdk-list" class="cmdk__list" role="listbox" aria-label="Commands">
+      {
+        JUMP.map((a) => (
+          <li class="cmdk__item" role="option" data-kind="jump" data-target={a.target}>
+            <span class="cmdk__ico" aria-hidden="true">
+              {a.icon}
+            </span>
+            <span class="cmdk__label">{a.label}</span>
+            <kbd class="cmdk__key">{a.keys}</kbd>
+          </li>
+        ))
+      }
+      {
+        THEME.map((a) => (
+          <li class="cmdk__item" role="option" data-kind="theme" data-target={a.target}>
+            <span class="cmdk__ico" aria-hidden="true">
+              {a.icon}
+            </span>
+            <span class="cmdk__label">{a.label}</span>
+          </li>
+        ))
+      }
+      <li class="cmdk__item" role="option" data-kind="accent">
+        <span class="cmdk__ico" aria-hidden="true">⟳</span>
+        <span class="cmdk__label">Cycle the accent hue</span>
+        <kbd class="cmdk__key">t</kbd>
+      </li>
+      {
+        LINK.map((a) => (
+          <li
+            class="cmdk__item"
+            role="option"
+            data-kind="link"
+            data-href={a.href}
+            data-ext={a.ext ? '1' : '0'}
+          >
+            <span class="cmdk__ico" aria-hidden="true">
+              {a.icon}
+            </span>
+            <span class="cmdk__label">{a.label}</span>
+            {a.ext && (
+              <span class="cmdk__ext" aria-hidden="true">
+                ↗
+              </span>
+            )}
+          </li>
+        ))
+      }
+      <li class="cmdk__item" role="option" data-kind="replay">
+        <span class="cmdk__ico" aria-hidden="true">⏮</span>
+        <span class="cmdk__label">Replay the intro</span>
+      </li>
+      <li class="cmdk__empty" hidden>no commands match — try "theme" or "docs"</li>
+    </ul>
+    <div class="cmdk__foot" aria-hidden="true">
+      <span><kbd>↑</kbd><kbd>↓</kbd> move</span>
+      <span><kbd>↵</kbd> run</span>
+      <span><kbd>esc</kbd> close</span>
+    </div>
+  </div>
+</div>
+
+<button id="cmdk-hint" class="cmdk-hint" type="button" aria-label="Open command palette">
+  <kbd>/</kbd> commands
+</button>
+
+<style>
+  .cmdk {
+    position: fixed;
+    inset: 0;
+    z-index: 100; /* above the sticky nav (50) and the elevator */
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    padding: 14vh 1rem 1rem;
+    background: color-mix(in srgb, var(--bg-tint) 62%, transparent);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+  }
+  .cmdk[hidden] {
+    display: none;
+  }
+  .cmdk__scrim {
+    position: absolute;
+    inset: 0;
+  }
+  .cmdk__panel {
+    position: relative;
+    width: min(560px, 94vw);
+    max-height: 72vh;
+    display: flex;
+    flex-direction: column;
+    background: var(--panel);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-lg);
+    overflow: hidden;
+    font-family: var(--font-mono);
+    animation: cmdk-in 0.14s ease-out both;
+  }
+  @keyframes cmdk-in {
+    from {
+      opacity: 0;
+      transform: translateY(-8px);
+    }
+  }
+  .cmdk__head {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.75rem 0.9rem;
+    border-bottom: 1px solid var(--line);
+  }
+  .cmdk__prompt {
+    color: var(--accent);
+    font-weight: 700;
+  }
+  .cmdk__input {
+    flex: 1;
+    background: none;
+    border: 0;
+    outline: none;
+    color: var(--fg);
+    font: inherit;
+    font-size: 0.95rem;
+  }
+  .cmdk__input::placeholder {
+    color: var(--fg-dim);
+  }
+  .cmdk__esc {
+    font-size: 0.68rem;
+    color: var(--fg-dim);
+    border: 1px solid var(--line-strong);
+    border-radius: 4px;
+    padding: 0.05rem 0.35rem;
+  }
+  .cmdk__list {
+    list-style: none;
+    margin: 0;
+    padding: 0.35rem;
+    overflow-y: auto;
+  }
+  .cmdk__item {
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+    padding: 0.5rem 0.6rem;
+    border-radius: var(--radius-sm);
+    border-left: 2px solid transparent;
+    cursor: pointer;
+    font-size: 0.9rem;
+    color: var(--fg-muted);
+  }
+  .cmdk__item[hidden] {
+    display: none;
+  }
+  .cmdk__item.is-sel {
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
+    border-left-color: var(--accent);
+    color: var(--fg);
+  }
+  .cmdk__ico {
+    width: 1.1rem;
+    text-align: center;
+    color: var(--accent-2);
+  }
+  .cmdk__label {
+    flex: 1;
+  }
+  .cmdk__key,
+  .cmdk__foot kbd {
+    font-size: 0.68rem;
+    color: var(--fg-dim);
+    border: 1px solid var(--line-strong);
+    border-radius: 4px;
+    padding: 0.05rem 0.35rem;
+    min-width: 1.1rem;
+    text-align: center;
+  }
+  .cmdk__ext {
+    color: var(--fg-dim);
+    font-size: 0.8rem;
+  }
+  .cmdk__empty {
+    padding: 0.9rem 0.7rem;
+    color: var(--fg-dim);
+    font-size: 0.85rem;
+  }
+  .cmdk__foot {
+    display: flex;
+    gap: 1rem;
+    padding: 0.5rem 0.9rem;
+    border-top: 1px solid var(--line);
+    font-size: 0.72rem;
+    color: var(--fg-dim);
+  }
+  .cmdk__foot kbd {
+    margin-right: 0.15rem;
+  }
+
+  /* discoverability: a quiet corner chip that opens the palette */
+  .cmdk-hint {
+    position: fixed;
+    left: 1rem;
+    bottom: 1rem;
+    z-index: 40;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.35rem 0.6rem;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--fg-dim);
+    background: color-mix(in srgb, var(--panel) 80%, transparent);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    cursor: pointer;
+    opacity: 0.6;
+    transition:
+      opacity 0.15s ease,
+      color 0.15s ease;
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+  }
+  .cmdk-hint:hover,
+  .cmdk-hint:focus-visible {
+    opacity: 1;
+    color: var(--fg);
+  }
+  .cmdk-hint kbd {
+    font-size: 0.68rem;
+    color: var(--fg-muted);
+    border: 1px solid var(--line-strong);
+    border-radius: 4px;
+    padding: 0 0.3rem;
+  }
+  /* the chip is a nicety; on narrow screens it competes with the thumb zone */
+  @media (max-width: 640px) {
+    .cmdk-hint {
+      display: none;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .cmdk__panel {
+      animation: none;
+    }
+  }
+</style>
+
+{
+  /* is:inline (matches Nav/Hero/Elevator): renders after <slot/>, so its own
+    #cmdk* nodes exist at parse — no ordering trap, and vanilla DOM code skips
+    the strict TS pass the processed-script path would apply. */
+}
+<script is:inline>
+  (function () {
+    const root = document.getElementById('cmdk');
+    const input = document.getElementById('cmdk-input');
+    const list = document.getElementById('cmdk-list');
+    if (!root || !input || !list) return;
+    const hint = document.getElementById('cmdk-hint');
+    const items = Array.prototype.slice.call(list.querySelectorAll('.cmdk__item'));
+    const empty = list.querySelector('.cmdk__empty');
+    let lastFocus = null;
+    let sel = 0;
+
+    const visible = () => items.filter((el) => !el.hidden);
+
+    function paint() {
+      const vis = visible();
+      if (sel < 0) sel = 0;
+      if (sel > vis.length - 1) sel = vis.length - 1;
+      items.forEach((el) => el.classList.remove('is-sel'));
+      const cur = vis[sel];
+      if (cur) {
+        cur.classList.add('is-sel');
+        cur.scrollIntoView({ block: 'nearest' });
+        input.setAttribute('aria-activedescendant', cur.id || '');
+      }
+    }
+
+    function filter() {
+      const q = input.value.trim().toLowerCase();
+      items.forEach((el) => {
+        const label = (el.querySelector('.cmdk__label').textContent || '').toLowerCase();
+        el.hidden = q !== '' && label.indexOf(q) === -1;
+      });
+      const none = visible().length === 0;
+      if (empty) empty.hidden = !none;
+      sel = 0;
+      paint();
+    }
+
+    function open() {
+      if (!root.hidden) return;
+      lastFocus = document.activeElement;
+      root.hidden = false;
+      input.value = '';
+      filter();
+      input.focus();
+    }
+    function close() {
+      if (root.hidden) return;
+      root.hidden = true;
+      if (lastFocus && lastFocus.focus) lastFocus.focus();
+    }
+
+    function run(el) {
+      if (!el) return;
+      const kind = el.dataset.kind;
+      close();
+      if (kind === 'jump') {
+        const sec = document.getElementById(el.dataset.target);
+        if (sec)
+          sec.scrollIntoView({
+            behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches
+              ? 'auto'
+              : 'smooth',
+            block: 'start',
+          });
+      } else if (kind === 'theme') {
+        const r = document.documentElement.style;
+        r.removeProperty('--coral');
+        r.removeProperty('--coral-deep');
+        r.removeProperty('--amber');
+        document.documentElement.dataset.theme = el.dataset.target;
+        try {
+          localStorage.setItem('pix-theme', el.dataset.target);
+        } catch (e) {}
+        document.dispatchEvent(new CustomEvent('pix:theme'));
+      } else if (kind === 'accent') {
+        // reuse the app's `t` retint cycle wired in Base.astro
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 't' }));
+      } else if (kind === 'link') {
+        if (el.dataset.ext === '1') window.open(el.dataset.href, '_blank', 'noopener');
+        else window.location.href = el.dataset.href;
+      } else if (kind === 'replay') {
+        try {
+          sessionStorage.removeItem('pix-assembled');
+        } catch (e) {}
+        window.location.reload();
+      }
+    }
+
+    // pointer: hover selects, click runs
+    items.forEach((el) => {
+      el.addEventListener('mousemove', () => {
+        const vis = visible();
+        const idx = vis.indexOf(el);
+        if (idx !== -1 && idx !== sel) {
+          sel = idx;
+          paint();
+        }
+      });
+      el.addEventListener('click', () => run(el));
+    });
+
+    input.addEventListener('input', filter);
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        sel++;
+        paint();
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        sel--;
+        paint();
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        run(visible()[sel]);
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        close();
+      } else if (e.key === 'Tab') {
+        e.preventDefault(); // trap focus on the input while open
+      }
+    });
+
+    root.querySelectorAll('[data-cmdk-close]').forEach((el) => el.addEventListener('click', close));
+    if (hint) hint.addEventListener('click', open);
+
+    // global opener: `/` or `:` or ⌘/Ctrl-K — but never while typing in a field
+    document.addEventListener('keydown', (e) => {
+      if (root.hidden) {
+        const t = e.target;
+        const typing =
+          t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
+        const metaK = (e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K');
+        if (
+          metaK ||
+          (!typing && !e.metaKey && !e.ctrlKey && !e.altKey && (e.key === '/' || e.key === ':'))
+        ) {
+          e.preventDefault();
+          open();
+        }
+      }
+    });
+  })();
+</script>
