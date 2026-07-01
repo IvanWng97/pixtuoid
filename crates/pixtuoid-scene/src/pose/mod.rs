@@ -96,6 +96,14 @@ const SNAP_BACK_MS: u64 = 900;
 /// the desk before we bother animating the snap-back. Below this the
 /// teleport is invisible and animating wastes a frame.
 const SNAP_BACK_MIN_DIST: i32 = 8;
+/// Max age (ms) for a recorded `PoseHistory` position to count as "where the
+/// agent is now" — the start point for both the exit walk and the snap-back.
+const HISTORY_RECENT_MS: u64 = 300;
+/// Safety margin (ms) shaved off `EXIT_GRACE_WINDOW` so the time-compressed
+/// exit walk reaches the door before the reducer GCs the slot. Coincides with
+/// `HISTORY_RECENT_MS` in value but is independently motivated (GC-timing slack,
+/// not a recency window) — the two may diverge, so they stay separate consts.
+const EXIT_BUDGET_MARGIN_MS: u64 = 300;
 
 /// The home desk's ARRIVAL target: a reachable cell on an ALLOWED side
 /// (`DESK_APPROACH` = N/E/W, excluding the south front) via the SAME
@@ -231,7 +239,7 @@ pub fn derive_with_routing(
             // ends teleports back to the desk before walking to the door.
             let desk_anchor = desk_walk_anchor(desk);
             let from = history
-                .recent(slot.agent_id, 300, now)
+                .recent(slot.agent_id, HISTORY_RECENT_MS, now)
                 .unwrap_or(desk_anchor);
             // Exit is a desk DEPARTURE: when leaving the seated chair, rise off it
             // via the N/E/W approach cell so the walk to the (NE) door doesn't dip
@@ -272,7 +280,7 @@ pub fn derive_with_routing(
         // the sprite vanishes in the corridor instead of reaching the door.
         // (Entry has no such cap — nothing GCs an entering agent.)
         let exit_budget = (pixtuoid_core::state::reducer::EXIT_GRACE_WINDOW.as_millis() as u64)
-            .saturating_sub(300);
+            .saturating_sub(EXIT_BUDGET_MARGIN_MS);
         let eff_elapsed = if profile.duration_ms.saturating_add(profile.pause_ms) > exit_budget {
             (elapsed_ms.saturating_mul(profile.duration_ms) / exit_budget.max(1)).max(elapsed_ms)
         } else {
@@ -553,7 +561,7 @@ pub fn derive_with_routing(
             // a fresh leg, but only for a recent flip (the arm window).
             ms_entry.snap_back = None;
             if since_state < SNAP_BACK_MS {
-                if let Some(prev) = history.recent(slot.agent_id, 300, now) {
+                if let Some(prev) = history.recent(slot.agent_id, HISTORY_RECENT_MS, now) {
                     // Distance to the CHAIR (where the agent actually sits), NOT the
                     // desk origin: the chair is offset (+6,+4) from the origin, so a
                     // desk-origin gate would re-fire forever once the agent settles ON
@@ -864,10 +872,16 @@ fn route_walking_pose(
 use crate::pixel_painter::walking_position;
 
 pub(crate) fn octile_distance(a: Point, b: Point) -> u32 {
+    use crate::pathfind::{OCTILE_DIAGONAL_COST, OCTILE_STRAIGHT_COST};
     let dx = (a.x as i32 - b.x as i32).unsigned_abs();
     let dy = (a.y as i32 - b.y as i32).unsigned_abs();
-    14 * dx.min(dy) + 10 * (dx.max(dy) - dx.min(dy))
+    OCTILE_DIAGONAL_COST * dx.min(dy) + OCTILE_STRAIGHT_COST * (dx.max(dy) - dx.min(dy))
 }
+
+/// Half-range (px) of the per-agent destination jitter — the offset spans
+/// `-JITTER_MAX_PX..=JITTER_MAX_PX`, so the modulus span is `2*MAX+1`.
+const JITTER_MAX_PX: i32 = 4;
+const JITTER_SPAN: u64 = (2 * JITTER_MAX_PX + 1) as u64;
 
 /// Per-agent ±4px routing-destination jitter, hashed from the agent_id, so
 /// converging agents take visibly different polylines (breaks the "ant trail")
@@ -876,8 +890,8 @@ pub(crate) fn octile_distance(a: Point, b: Point) -> u32 {
 /// sites (same hash, same `saturating_add_signed`).
 fn jitter_dest(id: AgentId, p: Point) -> Point {
     let h = id.raw();
-    let jx = ((h % 9) as i32 - 4) as i16;
-    let jy = (((h >> 16) % 9) as i32 - 4) as i16;
+    let jx = ((h % JITTER_SPAN) as i32 - JITTER_MAX_PX) as i16;
+    let jy = (((h >> 16) % JITTER_SPAN) as i32 - JITTER_MAX_PX) as i16;
     Point {
         x: p.x.saturating_add_signed(jx),
         y: p.y.saturating_add_signed(jy),

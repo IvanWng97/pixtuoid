@@ -129,7 +129,8 @@ impl Source for HookRouter {
             Some(unclaims) => {
                 // Same capacity as the runtime's event channel: the tee adds a
                 // stage, not a different backpressure policy.
-                let (tee_tx, tee_rx) = tokio::sync::mpsc::channel(256);
+                let (tee_tx, tee_rx) =
+                    tokio::sync::mpsc::channel(crate::source::EVENT_CHANNEL_CAPACITY);
                 tokio::spawn(tee_child_end_unclaims(tee_rx, tx.clone(), unclaims.clone()));
                 tee_tx
             }

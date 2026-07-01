@@ -134,11 +134,16 @@ pub struct Personality {
     pub aimless_pref_pct: u8,
 }
 
+/// Widths of the hashed personality ranges: trip-chance lands in 25..=60 (span
+/// 36), aimless-preference in 0..=50 (span 51).
+const TRIP_CHANCE_SPAN_PCT: u64 = 36;
+const AIMLESS_PREF_SPAN_PCT: u64 = 51;
+
 pub fn personality_for(agent_id: AgentId) -> Personality {
     let h = agent_id.raw();
     Personality {
-        trip_chance_pct: (25 + (h % 36)) as u8,  // 25..=60
-        aimless_pref_pct: ((h >> 8) % 51) as u8, // 0..=50
+        trip_chance_pct: (25 + (h % TRIP_CHANCE_SPAN_PCT)) as u8, // 25..=60
+        aimless_pref_pct: ((h >> 8) % AIMLESS_PREF_SPAN_PCT) as u8, // 0..=50
     }
 }
 
@@ -378,7 +383,10 @@ pub fn pick_aimless_dest(layout: &SceneLayout, seed: u64, home_desk: Point) -> P
             }
         })
         .unwrap_or(&zones[0].0);
-    for i in 0..32u64 {
+    // Rejection-sampling budget: tries this many hashed cells to land on a
+    // walkable one before falling back to the zone origin.
+    const AIMLESS_SAMPLE_ATTEMPTS: u64 = 32;
+    for i in 0..AIMLESS_SAMPLE_ATTEMPTS {
         let h = seed
             .wrapping_add(i.wrapping_mul(0x9e37_79b9_7f4a_7c15))
             .wrapping_mul(0xc6a4_a793_5bd1_e995);

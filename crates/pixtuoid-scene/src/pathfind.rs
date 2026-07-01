@@ -212,10 +212,17 @@ const NEIGHBORS_8: [(i32, i32); 8] = [
     (-1, -1),
 ];
 
+/// Octile-distance step costs (integer, so the heuristic stays admissible): a
+/// diagonal move costs `OCTILE_DIAGONAL_COST`, an orthogonal one
+/// `OCTILE_STRAIGHT_COST` — the classic 14/10 ≈ √2 : 1 ratio. Shared with
+/// `pose::octile_distance` so the heuristic and the path metric can't drift.
+pub(crate) const OCTILE_STRAIGHT_COST: u32 = 10;
+pub(crate) const OCTILE_DIAGONAL_COST: u32 = 14;
+
 fn heuristic(a: (u16, u16), b: (u16, u16)) -> u32 {
     let dx = (a.0 as i32 - b.0 as i32).unsigned_abs();
     let dy = (a.1 as i32 - b.1 as i32).unsigned_abs();
-    14 * dx.min(dy) + 10 * (dx.max(dy) - dx.min(dy))
+    OCTILE_DIAGONAL_COST * dx.min(dy) + OCTILE_STRAIGHT_COST * (dx.max(dy) - dx.min(dy))
 }
 
 /// Is the center of cell `(cx, cy)` inside `zone`? Used by the preferred-
@@ -321,6 +328,12 @@ pub fn find_path(
         return Some(vec![from, to]);
     };
 
+    // Preferred-corridor discount: a step inside the preferred zone costs
+    // `NUM/DEN` (= 7/10, a 30% discount) so A* is biased to hug the corridor
+    // without it being a hard constraint.
+    const PREFERRED_ZONE_COST_NUM: u32 = 7;
+    const PREFERRED_ZONE_COST_DEN: u32 = 10;
+
     let start = snap_to_walkable(mask, overlay, cell_of(from), cell_w, cell_h)?;
     let goal = snap_to_walkable(mask, overlay, cell_of(to), cell_w, cell_h)?;
 
@@ -358,9 +371,13 @@ pub fn find_path(
             if !cell_walkable(mask, overlay, nx, ny) {
                 continue;
             }
-            let base_step = if dx.abs() + dy.abs() == 2 { 14 } else { 10 };
+            let base_step = if dx.abs() + dy.abs() == 2 {
+                OCTILE_DIAGONAL_COST
+            } else {
+                OCTILE_STRAIGHT_COST
+            };
             let step = if cell_in_zone(preferred, nx, ny) {
-                base_step * 7 / 10
+                base_step * PREFERRED_ZONE_COST_NUM / PREFERRED_ZONE_COST_DEN
             } else {
                 base_step
             };

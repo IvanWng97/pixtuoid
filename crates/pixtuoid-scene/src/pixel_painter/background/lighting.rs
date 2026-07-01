@@ -99,8 +99,10 @@ pub(in crate::pixel_painter) fn paint_neon_panel(
     now: SystemTime,
     theme: &Theme,
 ) {
+    // Neon border breathes on this period (a slow ~1.2s sine pulse).
+    const NEON_PULSE_PERIOD_MS: f32 = 1200.0;
     let elapsed_ms = epoch_ms(now);
-    let pulse = 0.7 + 0.3 * ((elapsed_ms as f32 / 1200.0).sin() * 0.5 + 0.5);
+    let pulse = 0.7 + 0.3 * ((elapsed_ms as f32 / NEON_PULSE_PERIOD_MS).sin() * 0.5 + 0.5);
 
     let panel_bg = theme.office.neon_panel_bg;
     let base = theme.office.neon_frame_base;

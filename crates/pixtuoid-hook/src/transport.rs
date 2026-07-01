@@ -59,6 +59,12 @@ pub(crate) fn send_line(endpoint: &str, line: &[u8]) {
     if !spawn_timeout_watchdog() {
         return;
     }
+    // 231 = ERROR_PIPE_BUSY (all named-pipe server instances mid-handshake).
+    // Matched on the raw numeric code — NOT a windows-crate constant — to keep the
+    // shipped shim at ZERO Windows deps (the deliberate reason it's hardcoded, not
+    // imported). The backoff is bounded by the 200ms send watchdog either way.
+    const ERROR_PIPE_BUSY: i32 = 231;
+    const PIPE_BUSY_RETRY_BACKOFF_MS: u64 = 10;
     loop {
         match std::fs::OpenOptions::new()
             .read(true)
@@ -69,11 +75,9 @@ pub(crate) fn send_line(endpoint: &str, line: &[u8]) {
                 let _ = f.write_all(line);
                 return;
             }
-            // 231 = ERROR_PIPE_BUSY (all server instances mid-handshake):
-            // retry until the watchdog fires. Matched on raw_os_error to
-            // keep the shipped shim at zero Windows deps.
-            Err(e) if e.raw_os_error() == Some(231) => {
-                std::thread::sleep(Duration::from_millis(10));
+            // Retry until the watchdog fires (all server instances mid-handshake).
+            Err(e) if e.raw_os_error() == Some(ERROR_PIPE_BUSY) => {
+                std::thread::sleep(Duration::from_millis(PIPE_BUSY_RETRY_BACKOFF_MS));
             }
             // NotFound etc.: daemon not running — drop the event, same as
             // the Unix connect-failure path.

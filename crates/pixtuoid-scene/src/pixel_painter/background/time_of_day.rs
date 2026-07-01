@@ -81,7 +81,9 @@ pub(in crate::pixel_painter) fn weather_state(now: SystemTime) -> Weather {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    let cycle = secs / 600;
+    // Weather re-rolls per hashed bucket, so it changes ~every 10 minutes.
+    const WEATHER_CYCLE_SECS: u64 = 600;
+    let cycle = secs / WEATHER_CYCLE_SECS;
     // splitmix64 finalizer, open-coded by deliberate choice (see `strike_offset`
     // in background/mod.rs for the cross-crate-copy rationale).
     let mut h = cycle.wrapping_add(0x9e37_79b9_7f4a_7c15);
@@ -173,9 +175,13 @@ pub(in crate::pixel_painter) fn weather_light(w: Weather) -> WeatherLight {
 }
 
 pub(in crate::pixel_painter) fn sunset_strength(now: SystemTime) -> f32 {
+    // Golden-hour tint peaks at sunset (18:00) and, more softly, sunrise (~06:30).
+    const SUNSET_PEAK_HOUR: f32 = 18.0;
+    const SUNRISE_PEAK_HOUR: f32 = 6.5;
     let h = super::local_hour_frac(now);
-    crate::pixel_painter::palette::bell(h, 18.0, 1.5)
-        .max(crate::pixel_painter::palette::bell(h, 6.5, 1.0))
+    crate::pixel_painter::palette::bell(h, SUNSET_PEAK_HOUR, 1.5).max(
+        crate::pixel_painter::palette::bell(h, SUNRISE_PEAK_HOUR, 1.0),
+    )
 }
 
 /// Window glass color + spill intensity + spill slant for the current local

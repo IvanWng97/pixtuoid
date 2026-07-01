@@ -126,14 +126,17 @@ pub(super) fn build_walkable_mask(
         top_margin.saturating_sub(WALL_BAND_TO_TOP_MARGIN),
         0,
     );
+    // Door gap punched in the north wall band; south baseboard obstacle strip.
+    const DOOR_CUT_W: u16 = 8;
+    const BASEBOARD_H: u16 = 3;
     if let Some(d) = door {
         let cut_x = d.x.saturating_sub(2);
         let cut_h = top_margin.saturating_add(OBSTACLE_PAD_PX);
-        mask.mark_walkable(cut_x, 0, 8, cut_h);
+        mask.mark_walkable(cut_x, 0, DOOR_CUT_W, cut_h);
     }
 
-    let baseboard_top = buf_h.saturating_sub(3);
-    mask.mark_blocked(0, baseboard_top, buf_w, 3, 0);
+    let baseboard_top = buf_h.saturating_sub(BASEBOARD_H);
+    mask.mark_blocked(0, baseboard_top, buf_w, BASEBOARD_H, 0);
 
     // Interior walls. Stardew-style fake-3D perspective:
     //   • horizontal walls (E-W) show their FACE — WALL_THICK_H px tall so the

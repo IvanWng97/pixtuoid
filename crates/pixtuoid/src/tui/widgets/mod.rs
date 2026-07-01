@@ -300,7 +300,7 @@ impl TickerQueue {
             .unwrap_or(0);
         let chars: Vec<char> = self.buffer.chars().collect();
         let len = chars.len();
-        let offset = (elapsed_ms / 150) as usize % len;
+        let offset = (elapsed_ms / MARQUEE_MS_PER_CHAR) as usize % len;
         (0..width).map(|i| chars[(offset + i) % len]).collect()
     }
 }

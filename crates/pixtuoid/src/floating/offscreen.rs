@@ -244,8 +244,9 @@ pub fn paint_labels_into_surface(
         let tw = pixtuoid_scene::font::text_width(&text, 1);
         // anchor_px is the sprite TOP-LEFT in office space; center the badge over the sprite
         // and lift it one glyph-height (8px) + a 2px gap above the head.
+        const BADGE_LIFT_PX: i32 = 10;
         let cx = el.anchor_px.x as i32 * scale + (FLOATING_SPRITE_W * scale) / 2 - tw / 2;
-        let cy = el.anchor_px.y as i32 * scale - 10;
+        let cy = el.anchor_px.y as i32 * scale - BADGE_LIFT_PX;
         let mut put = |x: i32, y: i32, c: u32| {
             if x >= 0 && y >= 0 && (x as usize) < win_w && (y as usize) < win_h {
                 sb[y as usize * win_w + x as usize] = c;

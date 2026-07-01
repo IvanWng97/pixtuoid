@@ -419,7 +419,9 @@ fn rescan_drift(
     out: &mut Vec<String>,
 ) {
     let Some(lp) = log_path else { return };
-    let due = last_scan.is_none_or(|t| t.elapsed().as_secs() >= 15);
+    // Throttle: rescan the log for decode-drift breadcrumbs at most this often.
+    const DRIFT_RESCAN_INTERVAL_SECS: u64 = 15;
+    let due = last_scan.is_none_or(|t| t.elapsed().as_secs() >= DRIFT_RESCAN_INTERVAL_SECS);
     if due {
         *last_scan = Some(Instant::now());
         *out = std::fs::read_to_string(lp)
@@ -528,7 +530,9 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
             .unwrap_or_default()
     };
 
-    let tick = Duration::from_millis(33);
+    // Render/event-loop tick (~30fps).
+    const FRAME_TICK_MS: u64 = 33;
+    let tick = Duration::from_millis(FRAME_TICK_MS);
     let result: Result<()> = (async {
         // External-signal teardown: raw mode delivers keyboard Ctrl-C as a key
         // event (the quit chord), but an EXTERNAL SIGINT/SIGTERM (`kill <pid>`,

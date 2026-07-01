@@ -160,6 +160,12 @@ pub(crate) fn clip_widget_rect(rect: Rect, bounds: Rect) -> Option<Rect> {
     })
 }
 
+/// Minimum drawable scene size (cells) below which the world render is skipped
+/// for a footer-only draw. Shared by `draw_scene` and the floor-transition path
+/// (`tui_renderer`) so the two "too small" gates can't drift apart.
+pub(crate) const MIN_SCENE_WIDTH: u16 = 20;
+pub(crate) const MIN_SCENE_HEIGHT: u16 = 12;
+
 /// The drawable scene rect: the full terminal area minus the 1-row footer.
 /// Single source of truth for the "everything but the footer" geometry that
 /// both `draw_scene` and the floor-transition path re-derive each frame.
@@ -205,7 +211,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     let source_warning = ctx.source_warning;
     let floor = ctx.floor;
 
-    if scene_rect.width < 20 || scene_rect.height < 12 {
+    if scene_rect.width < MIN_SCENE_WIDTH || scene_rect.height < MIN_SCENE_HEIGHT {
         term.draw(|f| {
             let actual = f.area();
             paint_footer(f, scene, actual, theme, floor_info, ctx.source_warning);

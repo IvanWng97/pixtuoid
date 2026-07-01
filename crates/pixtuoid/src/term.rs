@@ -274,6 +274,15 @@ impl Drop for TermiosRestore {
     }
 }
 
+/// Per-`read` chunk / initial buffer size — a DECRQSS SGR reply is a few dozen
+/// bytes, so one small chunk usually drains it in a single syscall.
+#[cfg(unix)]
+const DECRQSS_READ_CHUNK: usize = 64;
+/// Hard cap on bytes buffered before giving up — a well-behaved terminal replies
+/// in well under this; the bound just stops a chatty/garbage stream from looping.
+#[cfg(unix)]
+const MAX_DECRQSS_RESPONSE_BYTES: usize = 1024;
+
 /// Read the terminal's reply, bounded by `timeout`, until the `DCS` string
 /// terminator (`ESC \`) or `BEL` arrives (or the budget elapses / the buffer
 /// caps). `poll` returns the instant bytes are ready, so a prompt terminal never
@@ -287,8 +296,8 @@ fn read_until_terminator(
     use std::io::Read;
 
     let start = std::time::Instant::now();
-    let mut buf = Vec::with_capacity(64);
-    let mut chunk = [0u8; 64];
+    let mut buf = Vec::with_capacity(DECRQSS_READ_CHUNK);
+    let mut chunk = [0u8; DECRQSS_READ_CHUNK];
     loop {
         let elapsed = start.elapsed();
         if elapsed >= timeout {
@@ -333,7 +342,7 @@ fn read_until_terminator(
             Ok(0) => break,
             Ok(n) => {
                 buf.extend_from_slice(&chunk[..n]);
-                if response_terminated(&buf) || buf.len() > 1024 {
+                if response_terminated(&buf) || buf.len() > MAX_DECRQSS_RESPONSE_BYTES {
                     break;
                 }
             }

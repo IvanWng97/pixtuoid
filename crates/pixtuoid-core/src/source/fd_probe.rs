@@ -78,7 +78,8 @@ mod imp {
             return None;
         }
         // Slack for processes spawned between the sizing call and the fill.
-        let cap = count as usize + 32;
+        const PID_LIST_SLACK: usize = 32;
+        let cap = count as usize + PID_LIST_SLACK;
         let mut pids = vec![0 as libc::pid_t; cap];
         // SAFETY: `pids` owns exactly `cap` pid_t elements and `buffersize` is
         // exactly the matching byte length, so the kernel cannot write past

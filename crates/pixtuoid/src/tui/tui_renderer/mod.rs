@@ -381,14 +381,19 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     /// snapping to 0 or 1 and re-animating from scratch.
     pub fn version_popup_scale(&self, now: SystemTime) -> f32 {
         use pixtuoid_scene::anim::{eased_progress, Easing};
+        // Version popup entrance (grow) and dismissal (shrink) durations.
+        const VERSION_POPUP_GROW_MS: u32 = 200;
+        const VERSION_POPUP_SHRINK_MS: u32 = 120;
         match (self.popup.open, self.popup.started_at) {
             (true, Some(start)) => {
-                let progress = eased_progress(start, 200, Easing::EaseOutCubic, now);
+                let progress =
+                    eased_progress(start, VERSION_POPUP_GROW_MS, Easing::EaseOutCubic, now);
                 // Lerp from the scale at edge time to the target (1.0)
                 self.popup.scale_at_edge + (1.0 - self.popup.scale_at_edge) * progress
             }
             (false, Some(start)) => {
-                let progress = eased_progress(start, 120, Easing::EaseInQuad, now);
+                let progress =
+                    eased_progress(start, VERSION_POPUP_SHRINK_MS, Easing::EaseInQuad, now);
                 // Lerp from the scale at edge time to the target (0.0)
                 self.popup.scale_at_edge * (1.0 - progress)
             }
@@ -479,7 +484,9 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         };
         let scene_rect = crate::tui::renderer::scene_rect(full_rect);
 
-        if scene_rect.width < 20 || scene_rect.height < 12 {
+        if scene_rect.width < crate::tui::renderer::MIN_SCENE_WIDTH
+            || scene_rect.height < crate::tui::renderer::MIN_SCENE_HEIGHT
+        {
             // Too small to render this frame: clear the interaction state the
             // mouse handler reads, so a click doesn't hit-test against a stale
             // layout / pet / popup left over from a larger prior frame.
@@ -581,8 +588,10 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         // Compute y-offsets for vertical slide with divider gap.
         // t applies to total travel = screen_height + divider_height
         // so the easing covers the full distance including the gap.
+        // Divider gap between floors during the slide = 1/5 of the screen height.
+        const FLOOR_SLIDE_DIVIDER_FRACTION: f32 = 5.0;
         let h = scene_rect.height as f32;
-        let divider_h = (scene_rect.height as f32) / 5.0;
+        let divider_h = (scene_rect.height as f32) / FLOOR_SLIDE_DIVIDER_FRACTION;
         let total = h + divider_h;
         let (from_offset, to_offset) = if going_down {
             // Higher floor: current slides DOWN, new enters from TOP

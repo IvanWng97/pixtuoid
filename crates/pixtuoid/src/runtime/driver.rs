@@ -84,7 +84,8 @@ async fn run_async(cfg: RunConfig) -> Result<()> {
         Some(presence_tx),
     );
 
-    let (tx, rx) = mpsc::channel::<(Transport, AgentEvent)>(256);
+    let (tx, rx) =
+        mpsc::channel::<(Transport, AgentEvent)>(pixtuoid_core::source::EVENT_CHANNEL_CAPACITY);
     let boot_caps: [usize; MAX_FLOORS] = match (desk_cap, headless) {
         // Headless: no terminal to measure. Honor the cap as-is, else the fallback.
         (Some(cap), true) => [cap; MAX_FLOORS],
@@ -228,7 +229,8 @@ pub(crate) async fn reducer_task(
         std::array::from_fn(|i| floor_caps[i].load(Ordering::Relaxed));
     let mut scene = SceneState::new(initial_caps);
     // 1-Hz tick so exit-grace sweeps run even when no new events arrive.
-    let mut sweep_interval = tokio::time::interval(Duration::from_secs(1));
+    const SWEEP_TICK_INTERVAL_SECS: u64 = 1;
+    let mut sweep_interval = tokio::time::interval(Duration::from_secs(SWEEP_TICK_INTERVAL_SECS));
     sweep_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
         // Sync per-floor capacities from the shared atomics so the
@@ -348,9 +350,11 @@ async fn headless_loop_with_signal(
     // dead transport reads as a silently empty office. Tracked by count: the
     // watch Vec only grows.
     let mut deaths_seen = 0usize;
+    // How often the headless driver re-samples the scene watch and prints a diff.
+    const HEADLESS_SUMMARY_POLL_INTERVAL_MS: u64 = 200;
     loop {
         tokio::select! {
-            _ = tokio::time::sleep(Duration::from_millis(200)) => {
+            _ = tokio::time::sleep(Duration::from_millis(HEADLESS_SUMMARY_POLL_INTERVAL_MS)) => {
                 let snapshot = scene_rx.borrow_and_update().clone();
                 let summary = summarize(&snapshot);
                 if summary != prev_summary {

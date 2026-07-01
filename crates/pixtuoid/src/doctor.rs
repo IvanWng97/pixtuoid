@@ -520,7 +520,11 @@ fn probe_version(argv: &'static [&'static str]) -> Option<String> {
         .ok()?;
     // `--version` output is tiny, so the piped buffers never fill while we poll
     // (no reader-vs-writer deadlock for this use).
-    let deadline = Instant::now() + Duration::from_secs(5);
+    // Kill a `--version` child that hasn't exited within this budget; poll for its
+    // exit at this cadence meanwhile.
+    const PROBE_VERSION_TIMEOUT_SECS: u64 = 5;
+    const PROBE_POLL_INTERVAL_MS: u64 = 20;
+    let deadline = Instant::now() + Duration::from_secs(PROBE_VERSION_TIMEOUT_SECS);
     loop {
         match child.try_wait() {
             Ok(Some(_)) => break,
@@ -529,7 +533,7 @@ fn probe_version(argv: &'static [&'static str]) -> Option<String> {
                 let _ = child.wait();
                 return None;
             }
-            Ok(None) => std::thread::sleep(Duration::from_millis(20)),
+            Ok(None) => std::thread::sleep(Duration::from_millis(PROBE_POLL_INTERVAL_MS)),
             Err(_) => return None,
         }
     }

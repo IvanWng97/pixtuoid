@@ -42,8 +42,10 @@ pub(super) fn paint_screen_glow(
     for dx in 4..=9 {
         put(buf, dx, 3, frame_lit);
     }
+    // Screen scanline advances one column per this interval.
+    const SCANLINE_STEP_MS: u64 = 120;
     let elapsed_ms = epoch_ms(now);
-    let phase = (elapsed_ms / 120) as u16 + desk_x;
+    let phase = (elapsed_ms / SCANLINE_STEP_MS) as u16 + desk_x;
     let scan_col = 4 + (phase % 6);
     put(buf, scan_col, 1, scanline);
     put(buf, scan_col, 2, scanline);
@@ -96,11 +98,13 @@ pub(super) fn paint_sleep_z(
 
 pub(super) fn paint_coffee_steam(buf: &mut RgbBuffer, base: Point, now: SystemTime, theme: &Theme) {
     let steam = theme.effects.coffee_steam;
+    // Each steam plume fades over one full cycle; 3 plumes staggered by cycle/3.
+    const STEAM_CYCLE_MS: u64 = 1800;
     let elapsed_ms = epoch_ms(now);
     for offset in 0..3u64 {
-        let phase = (elapsed_ms + offset * 600) % 1800;
+        let phase = (elapsed_ms + offset * (STEAM_CYCLE_MS / 3)) % STEAM_CYCLE_MS;
         let rise = (phase / 140) as u16;
-        let alpha = 1.0 - phase as f32 / 1800.0;
+        let alpha = 1.0 - phase as f32 / STEAM_CYCLE_MS as f32;
         if alpha < 0.15 {
             continue;
         }

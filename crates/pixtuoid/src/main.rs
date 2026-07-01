@@ -535,8 +535,10 @@ fn build_issue_url(
     let os = std::env::consts::OS;
     let arch = std::env::consts::ARCH;
 
-    let title_msg = if panic_msg.len() > 80 {
-        let cut = truncate_to_char_boundary(panic_msg, 80);
+    // Truncate an over-long panic message for the crash-report title.
+    const PANIC_TITLE_MAX_LEN: usize = 80;
+    let title_msg = if panic_msg.len() > PANIC_TITLE_MAX_LEN {
+        let cut = truncate_to_char_boundary(panic_msg, PANIC_TITLE_MAX_LEN);
         format!("{}…", &panic_msg[..cut])
     } else {
         panic_msg.to_string()

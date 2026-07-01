@@ -116,6 +116,11 @@ pub(super) struct CeilingHalo {
     pub intensity: f32,
 }
 
+/// Base brightness of a ceiling halo before distance falloff.
+const CEILING_HALO_INTENSITY: f32 = 0.8;
+/// Peak additive glow at a halo's center (caps the composited strength).
+const CEILING_HALO_MAX_STRENGTH: f32 = 0.4;
+
 /// Soft 5×2 tinted halo above each lit monitor — tied to the active
 /// tool's glow color so the ceiling reads "this desk is doing edits"
 /// at a glance. Painted only on dark themes; on light themes the warm
@@ -134,7 +139,8 @@ pub(super) fn paint_ceiling_halos(buf: &mut RgbBuffer, theme: &Theme, halos: &[C
                     continue;
                 }
                 let dist = ((dx as i32 - 2).abs() as f32 + dy as f32) / 3.0;
-                let strength = (halo.intensity * (1.0 - dist).max(0.0) * 0.4).clamp(0.0, 1.0);
+                let strength = (halo.intensity * (1.0 - dist).max(0.0) * CEILING_HALO_MAX_STRENGTH)
+                    .clamp(0.0, 1.0);
                 let cur = buf.get(x, y);
                 buf.put(x, y, blend_rgb(cur, halo.color, strength));
             }
@@ -196,7 +202,7 @@ fn collect_ceiling_halos(
             x: desk.x + 6,
             y: desk.y.saturating_sub(1),
             color,
-            intensity: 0.8,
+            intensity: CEILING_HALO_INTENSITY,
         });
     }
     halos

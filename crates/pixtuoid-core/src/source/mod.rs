@@ -59,6 +59,13 @@ mod registry_bridge_tests {
     }
 }
 
+/// Backpressure bound for the workspace-wide `(Transport, AgentEvent)` event
+/// channel — the ONE place this capacity is defined. The runtime reducer feed
+/// (`runtime::driver` + `floating`) and the hook tee (`hook::router`) all size
+/// their channels from this so the tee adds a stage, not a different
+/// backpressure policy; keeping one constant stops the three from drifting.
+pub const EVENT_CHANNEL_CAPACITY: usize = 256;
+
 /// Which transport produced an event — used by the reducer for hook-wins
 /// dedup. Lives on the source side because every `Source` implementor must
 /// tag its own events; the reducer is downstream.

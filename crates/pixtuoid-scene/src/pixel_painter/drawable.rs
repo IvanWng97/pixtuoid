@@ -287,7 +287,9 @@ pub(super) fn pet_position(
     let (dest, is_idle_spot) = pick(cycle_n);
     let (prev, _) = pick(cycle_n.wrapping_sub(1));
 
-    let frame_idx = (elapsed_ms / 220) as usize % 2;
+    // Pet walk cycle: a 2-frame toggle at this interval.
+    const PET_ANIM_FRAME_MS: u64 = 220;
+    let frame_idx = (elapsed_ms / PET_ANIM_FRAME_MS) as usize % 2;
 
     if frac < 0.35 {
         let t = (frac / 0.35).clamp(0.0, 1.0);
@@ -526,7 +528,9 @@ pub(super) fn mascot_position(
 ) -> Option<(Point, &'static str, usize)> {
     let elevator = mascot_elevator(layout)?;
     let home = mascot_home(layout)?;
-    let frame = ((epoch_ms(now) / 200) % 2) as usize;
+    // Mascot (lobster) walk cycle: a 2-frame toggle at this interval.
+    const MASCOT_ANIM_FRAME_MS: u64 = 200;
+    let frame = ((epoch_ms(now) / MASCOT_ANIM_FRAME_MS) % 2) as usize;
 
     if presence.state == DaemonState::Down {
         // Walk-out: from where the lobster was at the instant of Down, to the elevator.

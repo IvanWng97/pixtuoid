@@ -174,6 +174,10 @@ pub fn walk_profile(path_len_octile: u32, intent: WalkIntent, agent_id: AgentId)
     }
 }
 
+/// Fixed-point resolution of `walk_progress`: it returns `t_x1000 ∈ [0, 1000]`
+/// (progress scaled by this, so integer math carries three fractional digits).
+pub const PROGRESS_SCALE: u16 = 1000;
+
 /// Render progress as `t_x1000 = round(1000 · s(elapsed_ms) / L)`.
 ///
 /// - `elapsed_ms < duration_ms`: physics kinematics (accel/cruise/decel).
@@ -181,7 +185,7 @@ pub fn walk_profile(path_len_octile: u32, intent: WalkIntent, agent_id: AgentId)
 /// - Zero-length profile: always returns 1000.
 pub fn walk_progress(p: &WalkProfile, elapsed_ms: u64) -> u16 {
     if p.path_len_octile == 0 || elapsed_ms >= p.duration_ms {
-        return 1000;
+        return PROGRESS_SCALE;
     }
 
     let l = p.path_len_octile as f32;
@@ -226,7 +230,7 @@ pub fn walk_progress(p: &WalkProfile, elapsed_ms: u64) -> u16 {
     // here at t ≥ t_total, but f32 rounding can still nudge s slightly outside
     // [0, L] at phase boundaries — clamp defensively (two-layer defence).
     let s_clamped = s.max(0.0).min(l);
-    (1000.0 * s_clamped / l).round() as u16
+    (PROGRESS_SCALE as f32 * s_clamped / l).round() as u16
 }
 
 /// Returns `true` when the full walk + pause has elapsed.

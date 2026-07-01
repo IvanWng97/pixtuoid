@@ -386,7 +386,9 @@ fn city_dot_lit(window_idx: u16, dx: u16, dy: u16) -> bool {
     h ^= (dx as u64).wrapping_mul(0xc6a4_a793_5bd1_e995);
     h ^= (dy as u64).wrapping_mul(0x1656_67b1_9e37_79b9);
     h ^= h >> 17;
-    (h % 100) < 75
+    // ~75% of the city-window grid is lit at night so the skyline reads as alive.
+    const CITY_WINDOW_LIT_PERCENT: u64 = 75;
+    (h % 100) < CITY_WINDOW_LIT_PERCENT
 }
 
 /// Per-dot twinkle: each city-window dot has its own ~600-1400ms cycle and

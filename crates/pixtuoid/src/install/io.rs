@@ -131,6 +131,7 @@ fn rename_with_retry(from: &Path, to: &Path) -> std::io::Result<()> {
     #[cfg(windows)]
     {
         const MAX_ATTEMPTS: u32 = 3;
+        const RENAME_RETRY_SLEEP_MS: u64 = 50;
         for attempt in 1..=MAX_ATTEMPTS {
             match std::fs::rename(from, to) {
                 Ok(()) => return Ok(()),
@@ -138,7 +139,7 @@ fn rename_with_retry(from: &Path, to: &Path) -> std::io::Result<()> {
                     // ERROR_SHARING_VIOLATION = os error 32.
                     // Sleep only on the retriable attempts; propagate on the last.
                     let _ = e; // silence unused-variable lint on non-windows
-                    std::thread::sleep(std::time::Duration::from_millis(50));
+                    std::thread::sleep(std::time::Duration::from_millis(RENAME_RETRY_SLEEP_MS));
                 }
                 Err(e) => return Err(e),
             }

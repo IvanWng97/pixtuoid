@@ -74,7 +74,8 @@ pub fn run(cfg: RunConfig) -> Result<()> {
         codex_sessions_root,
         Some(presence_tx),
     );
-    let (tx, rx) = mpsc::channel::<(Transport, AgentEvent)>(256);
+    let (tx, rx) =
+        mpsc::channel::<(Transport, AgentEvent)>(pixtuoid_core::source::EVENT_CHANNEL_CAPACITY);
     // Boot capacity from the WINDOW at the SAME geometry the window renders (office
     // buffer = window / office_scale, no footer) so the boot seed and the first redraw
     // (window::sync_floor_caps) agree — reusing the TUI's footer-subtracting,

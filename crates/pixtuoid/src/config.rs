@@ -74,6 +74,9 @@ pub const FLOATING_DEFAULT_W: u32 = 360;
 pub const FLOATING_DEFAULT_H: u32 = 240;
 pub const FLOATING_MIN_W: u32 = 240;
 pub const FLOATING_MIN_H: u32 = 160;
+/// Floor the parsed floating-window opacity is clamped up to — below this the
+/// window is too transparent to read.
+pub const FLOATING_MIN_OPACITY: f32 = 0.2;
 
 /// Raw `[floating]` table as parsed — every field optional so a partial table (or an
 /// absent one) is valid; [`resolve_floating`] fills defaults + clamps.
@@ -110,7 +113,7 @@ pub fn resolve_floating(config: &AppConfig) -> FloatingConfig {
         height: raw.height.unwrap_or(FLOATING_DEFAULT_H).max(FLOATING_MIN_H),
         x: raw.x,
         y: raw.y,
-        opacity: raw.opacity.unwrap_or(1.0).clamp(0.2, 1.0),
+        opacity: raw.opacity.unwrap_or(1.0).clamp(FLOATING_MIN_OPACITY, 1.0),
     }
 }
 

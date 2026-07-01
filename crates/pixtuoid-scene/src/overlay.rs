@@ -68,7 +68,9 @@ pub fn build_overlay(
         } else {
             std::borrow::Cow::Borrowed(&*agent.label)
         };
-        let text = truncate_label(&raw, (DESK_W + 4) as usize).into_owned();
+        // Label width budget: the desk width plus this much slack before truncation.
+        const LABEL_BUDGET_PAD: u16 = 4;
+        let text = truncate_label(&raw, (DESK_W + LABEL_BUDGET_PAD) as usize).into_owned();
         let tone = if agent.exiting_at.is_some() {
             LabelTone::Exiting
         } else {
