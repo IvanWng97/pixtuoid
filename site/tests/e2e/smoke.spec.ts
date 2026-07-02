@@ -11,7 +11,11 @@ import { expect, test, type Page } from '@playwright/test';
 //   - a wasm/glue ABI mismatch throwing at runtime under the hero
 // Runs against the PRODUCTION build (see playwright.config.ts).
 
-/** Fail the calling test if the page logs an uncaught error or console.error. */
+/**
+ * Fail the calling test if the page logs an uncaught error or console.error.
+ * Attached once per DISTINCT code path (index live boot, copy/hire, docs
+ * shell, reduced-motion) rather than every test — keeps failures pointed.
+ */
 function watchErrors(page: Page): () => string[] {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
@@ -99,9 +103,10 @@ test('the install Copy click hires without breaking the page', async ({ page, co
 
 test('docs pages keep the sticky nav with section links', async ({ page }) => {
   // The floating-nav treatment is index-ONLY; the docs pages have no office
-  // backdrop or statusline, so they keep the sticky bar (the #429-review
+  // backdrop or statusline, so they keep the sticky bar (the #426-review
   // regression: `nav--floating` leaked here — absolute, transparent, links
   // hidden — and every scroll offset went stale).
+  const errors = watchErrors(page);
   await page.goto('./config');
   const nav = page.locator('.nav');
   await expect(nav).not.toHaveClass(/nav--floating/);
@@ -109,6 +114,9 @@ test('docs pages keep the sticky nav with section links', async ({ page }) => {
     .poll(() => page.evaluate(() => getComputedStyle(document.querySelector('.nav')!).position))
     .toBe('sticky');
   await expect(page.locator('.nav__section-link').first()).toBeVisible();
+  // The docs shell has its own script surface (sidebar scrollspy, pager,
+  // inline mermaid SVG) the index tests never visit — keep it error-free too.
+  expect(errors()).toEqual([]);
 });
 
 test('reduced motion stays on the still poster without errors', async ({ browser }) => {
@@ -118,11 +126,17 @@ test('reduced motion stays on the still poster without errors', async ({ browser
   const context = await browser.newContext({ reducedMotion: 'reduce' });
   const page = await context.newPage();
   const errors = watchErrors(page);
+  const wasmRequests: string[] = [];
+  page.on('request', (r) => {
+    if (r.url().includes('/wasm/')) wasmRequests.push(r.url());
+  });
   await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
   await page.goto('./');
   await expect(page.locator('.backdrop__poster')).toBeVisible();
-  // Give a would-be wasm boot time to (wrongly) start, then assert it didn't.
-  await page.waitForTimeout(2_000);
+  // Deterministic (no fixed wait): by network-idle a would-be boot would have
+  // fetched the wasm glue and published __pixHire — assert neither happened.
+  await page.waitForLoadState('networkidle');
+  expect(wasmRequests).toEqual([]);
   await expect(page.locator('.backdrop.is-live')).not.toBeAttached();
   expect(errors()).toEqual([]);
   await context.close();

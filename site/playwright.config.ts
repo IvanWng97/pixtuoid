@@ -4,9 +4,9 @@ import { defineConfig, devices } from '@playwright/test';
 // (the official Astro testing posture: "run your tests against your production
 // code" — the dev server's Vite cache has twice masqueraded as a site bug in
 // this repo). `dist/` must exist: `just site-e2e` builds first; in CI the
-// build step precedes the e2e step. Port 4321 (astro's default) deliberately
-// differs from the local dev habit (4399) so the suite never grabs a live dev
-// server through `reuseExistingServer`.
+// build step precedes the e2e step. Port 4321 is astro's default for dev AND
+// preview — a live dev server squatting it makes the webServer spawn fail
+// LOUD (reuseExistingServer stays false below), never quietly test dev bytes.
 export default defineConfig({
   testDir: './tests/e2e',
   fullyParallel: true,

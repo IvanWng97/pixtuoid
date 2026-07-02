@@ -291,9 +291,10 @@ deb target:
 # own CI (.github/workflows/site.yml). See site/README.md.
 
 [group('site')]
-[doc('Install the site npm deps (run once per clone)')]
+[doc('Install the site npm deps + the e2e browser (run once per clone)')]
 site-setup:
     npm --prefix site ci
+    npx --prefix site playwright install chromium
 
 [group('site')]
 [doc('Site dev server with HMR → http://localhost:4321/pixtuoid/')]

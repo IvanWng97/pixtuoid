@@ -25,9 +25,13 @@ npm run lint       # eslint .
 npm run check       # astro check (types + templates)
 npm run knip       # unused files / exports / dependencies
 npm run build      # astro build → dist/
+npm run e2e        # Playwright smoke suite (tests/e2e/) vs the PRODUCTION build
 ```
 
-From the repo root the same gate is `just site-check` (and `just site-fmt`).
+From the repo root the same gate is `just site-check` (and `just site-fmt`);
+`just site-e2e` builds then runs the Playwright suite — the runtime-contract
+tier (window seams, scrollspy keys, dimmer, reduced-motion) that the static
+gates can't see. CI runs it in `site.yml` after the build step.
 
 > **Cross-boundary build inputs.** The site reads seven files from _outside_ `site/`
 > at build time: the workspace `Cargo.toml` (displayed version, via `vite.define` in
@@ -82,9 +86,11 @@ From the repo root the same gate is `just site-check` (and `just site-fmt`).
   and `data-floor` (scrollspy) — a new floor needs both plus a `FLOORS` row in
   `Statusline.astro`. The backdrop publishes `window.__pixLights` (per-frame
   dim value; the statusline polls it) and `pix:onair` + the `.backdrop.is-live`
-  class (discrete live flip; event for changes, class for late-attach seeding).
-  `window.__pixNight()` (defined in `Base.astro`'s head boot) is the ONE
-  client-side day/night boundary — never re-derive 19:00–07:00 inline.
+  class (discrete live flip; event for changes, class for late-attach seeding),
+  plus `window.__pixHire()` (walk one extra sprite in; the install Copy
+  buttons call it). `window.__pixNight()` (defined in `Base.astro`'s head
+  boot) is the ONE client-side day/night boundary — never re-derive
+  19:00–07:00 inline.
 - **FX** (all `prefers-reduced-motion`-safe) — CRT power-on, hero pixel-dust,
   and the dimmer itself. (The old pointer glow + 3D tilt were removed
   deliberately: perspective transforms smear pixel art.)
