@@ -102,7 +102,11 @@ impl ConnectedSources {
 /// silently dropped during the boot race before the first TUI frame.
 pub(crate) fn boot_capacities_for(cols: u16, rows: u16) -> [usize; MAX_FLOORS] {
     std::array::from_fn(|i| {
-        let seed = (i as u64).wrapping_mul(pixtuoid_scene::floor::FLOOR_SEED_MULTIPLIER);
+        // The ONE seed derivation every call site shares (floor_seed's own doc
+        // claim) — never an inline copy of the formula, which would silently
+        // drift the boot capacities from the rendered layout if the derivation
+        // ever changes (over-seeded atomics strand agents on unrendered desks).
+        let seed = pixtuoid_scene::floor::floor_seed(i);
         let cap = capacity_for_terminal(cols, rows, seed);
         if cap == 0 {
             FALLBACK_DESKS
@@ -202,8 +206,10 @@ mod tests {
     use pixtuoid_core::{Reducer, Transport};
     use std::time::SystemTime;
 
-    fn floor_seed(i: u64) -> u64 {
-        i.wrapping_mul(pixtuoid_scene::floor::FLOOR_SEED_MULTIPLIER)
+    // The shared derivation, NOT a copy of the formula — a test-local restatement
+    // structurally couldn't catch the impl diverging from `floor_seed`.
+    fn floor_seed(i: usize) -> u64 {
+        pixtuoid_scene::floor::floor_seed(i)
     }
 
     #[test]
@@ -273,7 +279,7 @@ mod tests {
         'outer: for cols in [120u16, 140, 160, 180, 200, 220, 240] {
             for rows in [30u16, 36, 40, 48, 56, 64] {
                 let mut unique = std::collections::HashSet::new();
-                for i in 0..MAX_FLOORS as u64 {
+                for i in 0..MAX_FLOORS {
                     unique.insert(capacity_for_terminal(cols, rows, floor_seed(i)));
                 }
                 if unique.len() > 1 {
@@ -293,7 +299,7 @@ mod tests {
     fn boot_capacities_uses_each_floor_seed() {
         let caps = boot_capacities_for(192, 48);
         let expected: [usize; MAX_FLOORS] = std::array::from_fn(|i| {
-            let c = capacity_for_terminal(192, 48, floor_seed(i as u64));
+            let c = capacity_for_terminal(192, 48, floor_seed(i));
             if c == 0 {
                 FALLBACK_DESKS
             } else {

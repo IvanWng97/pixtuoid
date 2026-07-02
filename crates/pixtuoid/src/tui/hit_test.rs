@@ -70,8 +70,14 @@ pub fn hit_test_from_tui(scene: &SceneState, layout: &Layout, mx: u16, my: u16) 
         let Some(desk) = layout.home_desk(agent.desk_index.single_floor_local()) else {
             continue;
         };
-        let ax = desk.x + 1;
-        let ay = desk.y.saturating_sub(4);
+        // The painter's seated anchor (pixtuoid_scene pixel_painter::anchors::
+        // seated_anchor): the 8px sprite centered on DESK_W, 8px above the desk.
+        // Derived from the SAME DESK_W the painter centers on — the pairing is
+        // pinned against `character_anchor` by
+        // `from_tui_pin_box_matches_the_painted_seated_anchor`, so the pin box
+        // can't drift from the hover/blit geometry again.
+        let ax = desk.x + pixtuoid_scene::layout::DESK_W.saturating_sub(SPRITE_W) / 2;
+        let ay = desk.y.saturating_sub(8);
         let cell_x = ax;
         let cell_y = ay / 2;
         if mx >= cell_x
@@ -560,10 +566,64 @@ mod tests {
         let layout = Layout::compute(160, 200, Some(4)).expect("layout");
         let (scene, id) = scene_with_agent_at_desk(0);
         let d = layout.home_desks[0];
-        // Mirror hit_test_from_tui's own anchor geometry.
-        let cx = d.x + 1;
-        let cy = d.y.saturating_sub(4) / 2;
+        // Computed FROM the painter's seated-anchor geometry (DESK_W-centered
+        // 8px sprite, 8px above the desk) — NOT a mirror of the impl's own
+        // literals, so a drift from the painted sprite reddens here.
+        let cx = d.x + pixtuoid_scene::layout::DESK_W.saturating_sub(8) / 2;
+        let cy = d.y.saturating_sub(8) / 2;
         assert_eq!(hit_test_from_tui(&scene, &layout, cx, cy), Some(id));
+    }
+
+    // The drift-pair guard: the click-to-pin box must cover EXACTLY the cells the
+    // painter blits the seated sprite into. The oracle is `character_anchor` —
+    // the SAME anchor the hover tooltip (hit_test_agent) and the sprite blit use
+    // — so hover and click can't disagree on the same cells (the PANEL_PAD
+    // pairing class: derive both sides from one geometry, pin with a test).
+    #[test]
+    fn from_tui_pin_box_matches_the_painted_seated_anchor() {
+        let layout = Layout::compute(160, 200, Some(4)).expect("layout");
+        let (mut scene, id) = scene_with_agent_at_desk(0);
+        // A recent last_event_at keeps the wander machine in its Seated phase;
+        // the pose derives as seated either way for an Idle agent at bootstrap.
+        let now = SystemTime::now();
+        scene.agents.get_mut(&id).expect("slot").last_event_at = now;
+
+        let mut router = pixtuoid_scene::pathfind::AStarRouter::new();
+        let overlay = pixtuoid_core::walkable::OccupancyOverlay::new();
+        let mut history = pose::PoseHistory::default();
+        let mut motion = std::collections::HashMap::new();
+        let mut rctx = pose::RouteCtx {
+            router: &mut router,
+            overlay: &overlay,
+            history: &mut history,
+            motion: &mut motion,
+        };
+        let agent = scene.agents.get(&id).expect("slot");
+        let anchor = character_anchor(agent, &layout, now, &mut rctx)
+            .expect("a seated agent has a painted anchor");
+
+        let (ax, ay) = (anchor.x, anchor.y / 2);
+        // Every cell of the painted 8x6 sprite box pins…
+        for dx in 0..8u16 {
+            for dy in 0..6u16 {
+                assert_eq!(
+                    hit_test_from_tui(&scene, &layout, ax + dx, ay + dy),
+                    Some(id),
+                    "painted sprite cell ({dx},{dy}) must be pinnable"
+                );
+            }
+        }
+        // …and the cells just outside it do not (no phantom pin).
+        assert_eq!(
+            hit_test_from_tui(&scene, &layout, ax.wrapping_sub(1), ay),
+            None
+        );
+        assert_eq!(hit_test_from_tui(&scene, &layout, ax + 8, ay), None);
+        assert_eq!(
+            hit_test_from_tui(&scene, &layout, ax, ay.wrapping_sub(1)),
+            None
+        );
+        assert_eq!(hit_test_from_tui(&scene, &layout, ax, ay + 6), None);
     }
 
     #[test]
@@ -599,7 +659,10 @@ mod tests {
         scene.agents.get_mut(&id).expect("slot").desk_index = GlobalDeskIndex(cap);
         // Scan desk 0's whole sprite box — the wrapped bridge would hit here.
         let desk0 = layout.home_desks[0];
-        let (ax, ay) = (desk0.x + 1, desk0.y.saturating_sub(4) / 2);
+        let (ax, ay) = (
+            desk0.x + pixtuoid_scene::layout::DESK_W.saturating_sub(8) / 2,
+            desk0.y.saturating_sub(8) / 2,
+        );
         for dx in 0..8u16 {
             for dy in 0..6u16 {
                 assert_eq!(

@@ -299,9 +299,16 @@ pub fn shell_shim_ref(command: &str) -> ShimRef {
     // otherwise the front-split cuts inside the path and `head` no longer ends
     // with the closing `'`, so the quote arm below is skipped and a bogus partial
     // token leaks out (the R0620-WCR-02/03 path-mis-split twin, for ` --event `).
+    // AND only honor the strip when the residual head still parses as a writer
+    // shape (ends with `'` = the Unix quoted form; contains " --source " = the
+    // Windows bare form): a NO-tail command (Codex/Reasonix/Cursor never append
+    // one) whose quoted path contains " --event " would otherwise be cut at the
+    // in-quotes occurrence and mis-parse to a bogus partial path — the tail
+    // strip is only ever needed for CodeWhale entries, whose head always
+    // matches one of the two shapes.
     let head = match command.rsplit_once(" --event ") {
-        Some((before, _)) => before,
-        None => command,
+        Some((before, _)) if before.ends_with('\'') || before.contains(" --source ") => before,
+        _ => command,
     };
     // Unix env-prefix form `PIXTUOID_SOURCE=<src> '<path>'`: the path is POSIX
     // single-quoted by `hook_cmd::unix::shell_single_quote`, so `head` ENDS with the
@@ -486,6 +493,25 @@ mod tests {
                 "PIXTUOID_SOURCE=codewhale '/Users/x/my --event dir/pixtuoid-hook' --event tool"
             ),
             ShimRef::Absolute(PathBuf::from("/Users/x/my --event dir/pixtuoid-hook"))
+        );
+    }
+
+    #[test]
+    fn shell_shim_ref_tailless_path_containing_event_marker_is_not_missplit() {
+        // The tail-less twin of the test above: a Codex/Reasonix/Cursor command
+        // (which NEVER appends ` --event `) whose quoted path literally contains
+        // " --event " must not have the in-quotes occurrence stripped — the
+        // residual head (`PIXTUOID_SOURCE=codex '/opt/my`) is no writer shape,
+        // so the strip is only honored when the head still parses as one
+        // (ends with `'` on Unix / contains " --source " on Windows).
+        assert_eq!(
+            shell_shim_ref("PIXTUOID_SOURCE=codex '/opt/my --event dir/pixtuoid-hook'"),
+            ShimRef::Absolute(PathBuf::from("/opt/my --event dir/pixtuoid-hook"))
+        );
+        // …and the Windows bare form of the same case.
+        assert_eq!(
+            shell_shim_ref(r"C:\my --event dir\pixtuoid-hook.exe --source cursor"),
+            ShimRef::Absolute(PathBuf::from(r"C:\my --event dir\pixtuoid-hook.exe"))
         );
     }
 

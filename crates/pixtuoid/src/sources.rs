@@ -142,15 +142,35 @@ fn connect_target(
     target: Option<&Target>,
     target_config: Option<PathBuf>,
 ) -> Result<ConnectOutcome> {
+    // Capture the PRIOR flag before the optimistic save, so a failed install
+    // restores the exact pre-attempt state: a re-connect of an ALREADY-connected
+    // source (`connect` re-run, `setup --yes`) can fail while the old, working
+    // hooks stay on disk — forcing `false` there would silently disconnect a
+    // healthy source on the next launch.
+    let prior = config::load(cfg, &mut Vec::new()).sources.get(sid).copied();
     config::save_source_connected(cfg, sid, true)?;
     match target {
         Some(t) => match install::install_target(t, target_config, None) {
             Ok(r) => Ok(ConnectOutcome::Installed(r)),
             Err(e) => {
-                // Roll the flag back so the next launch doesn't honor a
-                // "connected" with no hooks behind it (the same path the first
-                // save just succeeded on, so it's reliable).
-                let _ = config::save_source_connected(cfg, sid, false);
+                // Roll the flag back to the prior state so the next launch
+                // doesn't honor a "connected" with no hooks behind it — and an
+                // absent flag rolls back to ABSENT (the migrate default), not
+                // an explicit `false`.
+                let restore = match prior {
+                    Some(v) => config::save_source_connected(cfg, sid, v),
+                    None => config::remove_source_connected(cfg, sid),
+                };
+                if let Err(re) = restore {
+                    // The write path just succeeded, so this is rare — but a
+                    // silently-failed restore leaves flag=true with no hooks
+                    // (the shown-but-broken class), so it must leave a trace.
+                    tracing::warn!(
+                        source = sid,
+                        error = %format!("{re:#}"),
+                        "connect rollback failed to restore the prior [sources] flag"
+                    );
+                }
                 Err(e)
             }
         },
@@ -526,7 +546,8 @@ mod tests {
     #[test]
     fn connect_target_rolls_the_flag_back_when_install_fails() {
         // Persist succeeds (writable cfg), THEN install_target fails → the flag
-        // must roll back to false (no shown-but-broken source after a restart).
+        // must roll back to its PRIOR state. From a fresh config that state is
+        // ABSENT (the migrate default decides), not a forced `false`.
         let dir = tempfile::tempdir().unwrap();
         let cfg = dir.path().join("config.toml");
         let err = connect_target(&cfg, "rollbacktest", Some(&FAIL_TARGET), None).unwrap_err();
@@ -534,9 +555,43 @@ mod tests {
         let app = config::load(&cfg, &mut Vec::new());
         assert_eq!(
             app.sources.get("rollbacktest"),
-            Some(&false),
-            "the flag was rolled back to false"
+            None,
+            "a previously-absent flag rolls back to ABSENT (migrate default), not false"
         );
+    }
+
+    #[test]
+    fn connect_target_rollback_restores_a_previously_connected_flag() {
+        // The already-connected re-connect case (`pixtuoid connect` re-run,
+        // `setup --yes` over a working source): a failed re-install must RESTORE
+        // the prior `true`, never force `false` — the old hooks are still on
+        // disk and working, so persisting false silently disconnects a healthy
+        // source on next launch.
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = dir.path().join("config.toml");
+        config::save_source_connected(&cfg, "rollbacktest", true).unwrap();
+
+        let err = connect_target(&cfg, "rollbacktest", Some(&FAIL_TARGET), None).unwrap_err();
+        assert!(err.to_string().contains("forced install failure"), "{err}");
+        let app = config::load(&cfg, &mut Vec::new());
+        assert_eq!(
+            app.sources.get("rollbacktest"),
+            Some(&true),
+            "a previously-connected flag must survive a failed re-install"
+        );
+    }
+
+    #[test]
+    fn connect_target_rollback_restores_a_previously_disconnected_flag() {
+        // Explicit prior `false` is restored as `false` (not removed — an
+        // explicit user choice outranks the migrate default).
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = dir.path().join("config.toml");
+        config::save_source_connected(&cfg, "rollbacktest", false).unwrap();
+
+        connect_target(&cfg, "rollbacktest", Some(&FAIL_TARGET), None).unwrap_err();
+        let app = config::load(&cfg, &mut Vec::new());
+        assert_eq!(app.sources.get("rollbacktest"), Some(&false));
     }
 
     #[test]

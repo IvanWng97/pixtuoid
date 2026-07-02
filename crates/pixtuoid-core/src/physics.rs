@@ -661,3 +661,91 @@ mod tests {
         );
     }
 }
+
+// Property-based generalizations of the example tests above (the walkable.rs
+// `mod prop` pattern): the hand-picked cases pin a few Entry/WanderOut points
+// far from the regime boundary; these falsify the per-frame f32 kinematics —
+// walk_progress runs per moving sprite per frame (tui/floating/wasm) — across
+// thousands of generated (length, intent, agent, elapsed) inputs, INCLUDING
+// lengths within rounding of `L_crit = v²/a`, where the triangular/trapezoidal
+// branch selection in walk_profile vs walk_progress could disagree. A
+// violation renders as a live sprite teleporting mid-leg, so a failure here is
+// a real regression, not flake.
+#[cfg(test)]
+mod prop {
+    use super::*;
+    use proptest::prelude::*;
+
+    const ALL_INTENTS: [WalkIntent; 5] = [
+        WalkIntent::Entry,
+        WalkIntent::Exit,
+        WalkIntent::WanderOut,
+        WalkIntent::WanderBack,
+        WalkIntent::SnapBack,
+    ];
+
+    fn prop_id(seed: u64) -> crate::AgentId {
+        crate::AgentId::from_parts("prop", &seed.to_string())
+    }
+
+    /// Sweep one profile's whole timeline: progress is bounded to [0, 1000],
+    /// non-decreasing in elapsed, exactly 1000 at/after duration_ms, and never
+    /// panics — the invariants every render path leans on. Returns proptest's
+    /// `TestCaseError` so the `prop_assert!`s compose with `?` at the call site.
+    fn assert_progress_invariants(p: &WalkProfile) -> Result<(), TestCaseError> {
+        let mut prev = walk_progress(p, 0);
+        prop_assert!(prev <= PROGRESS_SCALE, "p(0)={} out of range", prev);
+        // 32 in-flight samples + 4 past-duration ones (saturation).
+        const STEPS: u64 = 32;
+        for i in 1..=STEPS + 4 {
+            // Saturating: duration_ms can be 0 (zero-length legs).
+            let t = p.duration_ms.saturating_mul(i) / STEPS;
+            let cur = walk_progress(p, t);
+            prop_assert!(cur <= PROGRESS_SCALE, "p({})={} out of range", t, cur);
+            prop_assert!(
+                cur >= prev,
+                "progress regressed: p({})={} < previous {}",
+                t,
+                cur,
+                prev
+            );
+            prev = cur;
+        }
+        prop_assert_eq!(
+            walk_progress(p, p.duration_ms),
+            PROGRESS_SCALE,
+            "p(duration) must saturate"
+        );
+        Ok(())
+    }
+
+    proptest! {
+        // Arbitrary lengths across the full screen-scale input space (the doc
+        // header bounds real paths well under ~57k octile).
+        #[test]
+        fn walk_progress_is_bounded_monotone_and_saturating(
+            l in 0u32..=60_000, intent_idx in 0usize..ALL_INTENTS.len(), seed in any::<u64>(),
+        ) {
+            let p = walk_profile(l, ALL_INTENTS[intent_idx], prop_id(seed));
+            assert_progress_invariants(&p)?;
+        }
+
+        // Lengths WITHIN ROUNDING of the regime crossover: derive L_crit from
+        // the SAME formula walk_profile/walk_progress branch on (v²/a, off the
+        // profile's own frozen v_cruise/accel) and probe ±3 octile around it —
+        // the band no hand-picked example test reaches.
+        #[test]
+        fn regime_boundary_lengths_keep_the_invariants(
+            intent_idx in 0usize..ALL_INTENTS.len(), seed in any::<u64>(), delta in -3i64..=3,
+        ) {
+            let intent = ALL_INTENTS[intent_idx];
+            let agent = prop_id(seed);
+            // The frozen per-agent v/a pair (any length yields the same pair).
+            let probe = walk_profile(1, intent, agent);
+            let l_crit = probe.v_cruise * probe.v_cruise / probe.accel;
+            let l = (l_crit.round() as i64 + delta).max(0) as u32;
+            let p = walk_profile(l, intent, agent);
+            assert_progress_invariants(&p)?;
+        }
+    }
+}

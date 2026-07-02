@@ -156,9 +156,25 @@ fn managed_entry(hook_command: &str) -> Value {
 }
 
 /// Install-schema verification (#309) — Cursor's flat-JSON shape (shared with
-/// Reasonix): `hooks.<event>` arrays of `{_pixtuoid, command}`.
+/// Reasonix): `hooks.<event>` arrays of `{_pixtuoid, command}`, PLUS the
+/// Cursor-specific whole-file gate: the top-level `version` key. Cursor requires
+/// it (module doc) — a hooks.json with intact managed entries but no numeric
+/// `version` loads NO hooks at all, the exact silent-dead class #309 exists to
+/// catch (the CodeWhale `[hooks].enabled = false` twin).
 pub fn verify_schema(content: &str) -> crate::install::verify::SchemaParse {
-    crate::install::verify::flat_json_verify(content, CURSOR_EVENTS, SENTINEL_KEY)
+    let mut parse = crate::install::verify::flat_json_verify(content, CURSOR_EVENTS, SENTINEL_KEY);
+    // Only reachable on parseable JSON — an unparseable file is already a HARD
+    // "no longer parses" issue from flat_json_verify.
+    if let Ok(doc) = serde_json::from_str::<Value>(content) {
+        if !doc.get("version").is_some_and(|v| v.is_number()) {
+            parse.issues.push(
+                "hooks.json has no numeric top-level `version` key — Cursor requires it, \
+                 so no hooks load (reconnect via the Sources panel)"
+                    .to_string(),
+            );
+        }
+    }
+    parse
 }
 
 /// Cursor's flat-JSON install: set `version` (Cursor-specific, set-if-absent,
@@ -331,6 +347,39 @@ mod tests {
             cleaned,
             json!({"version": 3}),
             "a user's version must not be lost on uninstall: {cleaned}"
+        );
+    }
+
+    // Twin of codewhale's verify_schema_flags_enabled_false_and_passes_full_install:
+    // Cursor gates ALL hook loading on the top-level `version` key (the module
+    // doc's upstream note), so a hooks.json with intact managed entries but no
+    // (or a non-numeric) `version` is the #309 silent-dead class and must verify
+    // BROKEN — while a fresh full install verifies sound.
+    #[test]
+    fn verify_schema_flags_a_missing_version_and_passes_full_install() {
+        let installed =
+            json_merge_install(json!({}), "PIXTUOID_SOURCE=cursor '/opt/pixtuoid-hook'");
+        let sound = verify_schema(&installed.to_string());
+        assert!(sound.issues.is_empty(), "{:?}", sound.issues);
+
+        // Same managed entries, `version` dropped (a user/tool rewrite).
+        let mut versionless = installed.clone();
+        versionless.as_object_mut().unwrap().remove("version");
+        let p = verify_schema(&versionless.to_string());
+        assert!(
+            p.issues.iter().any(|i| i.contains("version")),
+            "a version-less hooks.json must be flagged: {:?}",
+            p.issues
+        );
+
+        // A non-numeric version is equally dead to Cursor's loader.
+        let mut stringly = installed;
+        stringly["version"] = json!("1");
+        let p = verify_schema(&stringly.to_string());
+        assert!(
+            p.issues.iter().any(|i| i.contains("version")),
+            "a non-numeric version must be flagged: {:?}",
+            p.issues
         );
     }
 

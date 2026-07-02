@@ -215,6 +215,33 @@ fn disconnect_source(
     }
 }
 
+/// Reflect the onboarding apply's outcomes into the LIVE connected-set.
+/// `choices` and `outcomes` are index-aligned (`apply_choices` maps each choice
+/// in order). `NoOp` means "already in the DESIRED state — nothing written"
+/// (`sources::ChangeOutcome`), so it sets the gate to the desired flag rather
+/// than hardcoding it closed: a NoOp for a CHECKED row must leave the gate OPEN
+/// (an already-connected source the user just confirmed must not have its live
+/// agents evicted). A failed connect must NOT go live, and leaves a trace on
+/// the warn-floor log (doctor + the footer nudge read it).
+fn reflect_onboarding_outcomes(
+    connected: &crate::runtime::ConnectedSources,
+    choices: &[(&'static str, bool)],
+    outcomes: &[(String, crate::sources::ChangeOutcome)],
+) {
+    use crate::sources::ChangeOutcome;
+    for ((_, want), (id, oc)) in choices.iter().zip(outcomes) {
+        match oc {
+            ChangeOutcome::Connected => connected.set(id, true),
+            ChangeOutcome::Disconnected => connected.set(id, false),
+            ChangeOutcome::NoOp => connected.set(id, *want),
+            ChangeOutcome::Failed(e) => {
+                connected.set(id, false);
+                tracing::warn!("onboarding: {id} failed to connect: {e}");
+            }
+        }
+    }
+}
+
 fn is_quit_chord(code: KeyCode, mods: KeyModifiers) -> bool {
     matches!(
         (code, mods),
@@ -303,13 +330,16 @@ fn dispatch_key(
         };
     }
     if let Some(idx) = modal.theme_picker {
-        return match code {
-            KeyCode::Up | KeyCode::Char('k') => KeyAction::ThemePreview(idx.saturating_sub(1)),
-            KeyCode::Down | KeyCode::Char('j') => {
+        return match (code, mods) {
+            // The quit chord passes through like every other modal tier — the
+            // run_tui quit arm already reverts the previewed theme on break.
+            _ if is_quit_chord(code, mods) => KeyAction::Quit,
+            (KeyCode::Up | KeyCode::Char('k'), _) => KeyAction::ThemePreview(idx.saturating_sub(1)),
+            (KeyCode::Down | KeyCode::Char('j'), _) => {
                 KeyAction::ThemePreview((idx + 1).min(modal.n_themes.saturating_sub(1)))
             }
-            KeyCode::Enter => KeyAction::ThemeCommit(idx),
-            KeyCode::Esc => KeyAction::ThemeCancel,
+            (KeyCode::Enter, _) => KeyAction::ThemeCommit(idx),
+            (KeyCode::Esc, _) => KeyAction::ThemeCancel,
             _ => KeyAction::None,
         };
     }
@@ -410,23 +440,72 @@ fn resolve_version_popup(config_path: &std::path::Path) -> bool {
 /// The throttled (≤ every 15s) decode-drift re-scan that drives the footer
 /// nudge: reuses doctor's tested scanner over the warn-floor log. The ONE
 /// deliberate exception to "no scan-the-history" — it derives a passive
-/// diagnostic nudge from the log artifact, NOT lifecycle state. Mutates
-/// `last_scan` (the throttle stamp) and `out` (the drifted prefixes) exactly as
-/// the inlined loop did; a `None` log path is a no-op (headless = no surfacing).
-fn rescan_drift(
-    log_path: &Option<std::path::PathBuf>,
-    last_scan: &mut Option<Instant>,
-    out: &mut Vec<String>,
-) {
-    let Some(lp) = log_path else { return };
-    // Throttle: rescan the log for decode-drift breadcrumbs at most this often.
-    const DRIFT_RESCAN_INTERVAL_SECS: u64 = 15;
-    let due = last_scan.is_none_or(|t| t.elapsed().as_secs() >= DRIFT_RESCAN_INTERVAL_SECS);
-    if due {
-        *last_scan = Some(Instant::now());
-        *out = std::fs::read_to_string(lp)
-            .map(|log| crate::doctor::drifted_sources(&log))
-            .unwrap_or_default();
+/// diagnostic nudge from the log artifact, NOT lifecycle state. A `None` log
+/// path is a no-op (headless = no surfacing).
+///
+/// INCREMENTAL: log rotation is startup-only, so within a session the file is
+/// append-only and unbounded (a sustained drift regime warns per tool call).
+/// Re-reading the WHOLE file every 15s inline in the ~30fps loop turns that
+/// growth into monotonically-worsening frame hitches + a log-sized transient
+/// allocation — so the scan keeps persistent state (byte offset + accumulated
+/// prefixes) and each pass reads ONLY the appended bytes. Drift breadcrumbs are
+/// monotone within a session (they never un-happen), so prefixes accumulate.
+#[derive(Default)]
+struct DriftScan {
+    last_scan: Option<Instant>,
+    /// End of the last fully-scanned LINE — never mid-line: a read boundary can
+    /// split a breadcrumb, so a partial trailing line waits for the next pass.
+    offset: u64,
+    /// Accumulated drifted label prefixes — what the footer merge reads.
+    drifted: Vec<String>,
+}
+
+impl DriftScan {
+    /// The per-frame call site: throttled to at most one scan per interval.
+    fn rescan(&mut self, log_path: &Option<std::path::PathBuf>) {
+        let Some(lp) = log_path else { return };
+        // Throttle: rescan the log for decode-drift breadcrumbs at most this often.
+        const DRIFT_RESCAN_INTERVAL_SECS: u64 = 15;
+        let due = self
+            .last_scan
+            .is_none_or(|t| t.elapsed().as_secs() >= DRIFT_RESCAN_INTERVAL_SECS);
+        if due {
+            self.last_scan = Some(Instant::now());
+            self.scan_appended(lp);
+        }
+    }
+
+    /// One unthrottled incremental pass: read from the stored offset to EOF,
+    /// scan the COMPLETE new lines, merge the drifted prefixes. A file shrunk
+    /// out from under us (external rotation/truncation) rescans from the top.
+    /// Any I/O error leaves the state unchanged for the next pass.
+    fn scan_appended(&mut self, lp: &std::path::Path) {
+        use std::io::{Read, Seek, SeekFrom};
+        let Ok(mut f) = std::fs::File::open(lp) else {
+            return;
+        };
+        let len = f.metadata().map(|m| m.len()).unwrap_or(0);
+        if len < self.offset {
+            self.offset = 0;
+        }
+        if len == self.offset || f.seek(SeekFrom::Start(self.offset)).is_err() {
+            return;
+        }
+        let mut new = Vec::with_capacity((len - self.offset) as usize);
+        if f.take(len - self.offset).read_to_end(&mut new).is_err() {
+            return;
+        }
+        // Only complete lines: a partial tail (mid-write) stays for next pass.
+        let Some(last_nl) = new.iter().rposition(|&b| b == b'\n') else {
+            return;
+        };
+        let text = String::from_utf8_lossy(&new[..=last_nl]);
+        self.offset += (last_nl + 1) as u64;
+        for p in crate::doctor::drifted_sources(&text) {
+            if !self.drifted.contains(&p) {
+                self.drifted.push(p);
+            }
+        }
     }
 }
 
@@ -517,9 +596,9 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
     let mut dashboard_ui = dashboard::DashboardUi::default();
     let mut connection_ui = connection::ConnectionUi::default();
     // Live decode-drift footer nudge: throttle-scan the warn-floor log (reusing
-    // doctor's tested scanner) at most every ~15s, NOT per frame.
-    let mut last_drift_scan: Option<std::time::Instant> = None;
-    let mut drifted_prefixes: Vec<String> = Vec::new();
+    // doctor's tested scanner) at most every ~15s, NOT per frame — and
+    // incrementally (appended bytes only), never the whole file.
+    let mut drift_scan = DriftScan::default();
     // The Sources panel's cached rows carry a per-source HEALTH summary
     // (install soundness + drift) computed on open/toggle; it scans the warn-floor
     // log, so read it fresh at each (infrequent) rebuild. `""` when no log path.
@@ -599,10 +678,10 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
             // lifecycle state (the no-history rule guards the reducer). A counting
             // tracing::Layer was rejected — it would add stateful blast radius to
             // the single global file subscriber for a hint the 15s scan covers.
-            rescan_drift(&log_path, &mut last_drift_scan, &mut drifted_prefixes);
+            drift_scan.rescan(&log_path);
             renderer.set_source_warning(crate::doctor::footer_warning(
                 widgets::source_warning_message(&health).as_deref(),
-                &drifted_prefixes,
+                &drift_scan.drifted,
             ));
             // Mirror the dashboard frame: while open, rebuild the rows from the
             // live snapshot, re-anchor the selection by AgentId (an agent may
@@ -980,25 +1059,9 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                                     crate::sources::apply_choices(&config_path, &choices)
                                 });
                                 // Reflect each into the LIVE connected-set off its
-                                // ACTUAL outcome (a failed connect must NOT go live),
-                                // and surface any failure to the warn-floor log (doctor
-                                // + the footer drift nudge read it) — a hook install
-                                // that errors here would otherwise be silently lost.
-                                use crate::sources::ChangeOutcome;
-                                for (id, oc) in &outcomes {
-                                    match oc {
-                                        ChangeOutcome::Connected => connected.set(id, true),
-                                        ChangeOutcome::Disconnected | ChangeOutcome::NoOp => {
-                                            connected.set(id, false)
-                                        }
-                                        ChangeOutcome::Failed(e) => {
-                                            connected.set(id, false);
-                                            tracing::warn!(
-                                                "onboarding: {id} failed to connect: {e}"
-                                            );
-                                        }
-                                    }
-                                }
+                                // ACTUAL outcome (a failed connect must NOT go live;
+                                // a NoOp keeps the DESIRED state) — see the helper.
+                                reflect_onboarding_outcomes(&connected, &choices, &outcomes);
                                 onboarding_opened_at = None;
                                 onboarding_closing_at = Some(Instant::now());
                             }
@@ -1433,9 +1496,20 @@ mod dispatch_tests {
             dispatch_key(KeyCode::Esc, NONE, c, nav()),
             KeyAction::ThemeCancel
         );
-        // q does NOT quit while the picker is open (must Esc/Enter out first).
+        // The quit chord passes through like EVERY other modal tier (the run_tui
+        // quit arm reverts the previewed theme before breaking) — the picker
+        // used to be the one tier that swallowed Ctrl+C entirely.
         assert_eq!(
             dispatch_key(KeyCode::Char('q'), NONE, c, nav()),
+            KeyAction::Quit
+        );
+        assert_eq!(
+            dispatch_key(KeyCode::Char('c'), CTRL, c, nav()),
+            KeyAction::Quit
+        );
+        // Non-chord keys are still swallowed (modal).
+        assert_eq!(
+            dispatch_key(KeyCode::Char('p'), NONE, c, nav()),
             KeyAction::None
         );
 
@@ -1780,4 +1854,144 @@ mod dispatch_tests {
     // The install-failure rollback is now tested at the core
     // (`sources::connect_target_rolls_the_flag_back_when_install_fails`) — the
     // panel just delegates to `crate::sources::connect`.
+
+    // --- onboarding outcome → live-gate mapping --------------------------------
+
+    #[test]
+    fn onboarding_noop_outcome_keeps_the_desired_gate_state() {
+        use crate::sources::ChangeOutcome;
+        // A NoOp for a CHECKED row means "already connected — nothing written":
+        // the live gate must stay OPEN, never be hardcoded closed (which would
+        // evict the source's live agents the user just confirmed).
+        let connected = crate::runtime::ConnectedSources::new(
+            std::iter::once("antigravity".to_string()).collect(),
+        );
+        let choices: Vec<(&'static str, bool)> = vec![("antigravity", true), ("codex", false)];
+        let outcomes = vec![
+            ("antigravity".to_string(), ChangeOutcome::NoOp),
+            ("codex".to_string(), ChangeOutcome::NoOp),
+        ];
+        super::reflect_onboarding_outcomes(&connected, &choices, &outcomes);
+        assert!(
+            connected.is_connected("antigravity"),
+            "NoOp on a checked row must leave the gate open"
+        );
+        assert!(
+            !connected.is_connected("codex"),
+            "NoOp on an unchecked row keeps the gate closed"
+        );
+    }
+
+    #[test]
+    fn onboarding_outcomes_map_connected_disconnected_failed() {
+        use crate::sources::ChangeOutcome;
+        let connected = crate::runtime::ConnectedSources::default();
+        let choices: Vec<(&'static str, bool)> =
+            vec![("antigravity", true), ("codex", false), ("cursor", true)];
+        let outcomes = vec![
+            ("antigravity".to_string(), ChangeOutcome::Connected),
+            ("codex".to_string(), ChangeOutcome::Disconnected),
+            ("cursor".to_string(), ChangeOutcome::Failed("boom".into())),
+        ];
+        super::reflect_onboarding_outcomes(&connected, &choices, &outcomes);
+        assert!(connected.is_connected("antigravity"));
+        assert!(!connected.is_connected("codex"));
+        assert!(
+            !connected.is_connected("cursor"),
+            "a failed connect must NOT go live"
+        );
+    }
+
+    // --- DriftScan: the incremental warn-floor log scan ------------------------
+
+    // A real tracing-fmt drift breadcrumb line (the shape doctor's scanner parses).
+    fn drift_line(source: &str, name: &str) -> String {
+        format!(
+            "2026-06-15T00:00:00Z  WARN pixtuoid::drift: source={source} kind=\"unknown_event\" name={name}\n"
+        )
+    }
+
+    #[test]
+    fn drift_scan_reads_incrementally_and_accumulates_prefixes() {
+        use std::io::Write;
+        let dir = tempfile::TempDir::new().unwrap();
+        let log = dir.path().join("log");
+        std::fs::write(&log, drift_line("claude-code", "X")).unwrap();
+
+        let mut scan = super::DriftScan::default();
+        scan.scan_appended(&log);
+        assert_eq!(scan.drifted, vec!["cc".to_string()]);
+        let after_first = scan.offset;
+        assert_eq!(
+            after_first,
+            std::fs::metadata(&log).unwrap().len(),
+            "offset advances past the scanned lines"
+        );
+
+        // Append a SECOND source's breadcrumb: the next pass reads only the
+        // appended bytes (offset moved by exactly the new line) and MERGES the
+        // new prefix — the first one survives without re-reading its bytes.
+        let codex_line = drift_line("codex", "Y");
+        let mut f = std::fs::OpenOptions::new().append(true).open(&log).unwrap();
+        f.write_all(codex_line.as_bytes()).unwrap();
+        drop(f);
+        scan.scan_appended(&log);
+        assert_eq!(scan.drifted, vec!["cc".to_string(), "cx".to_string()]);
+        assert_eq!(
+            scan.offset,
+            after_first + codex_line.len() as u64,
+            "second pass consumed only the appended bytes"
+        );
+
+        // A no-growth pass changes nothing (and re-appending the SAME source
+        // never duplicates its prefix).
+        scan.scan_appended(&log);
+        assert_eq!(scan.drifted.len(), 2);
+    }
+
+    #[test]
+    fn drift_scan_leaves_a_partial_trailing_line_for_the_next_pass() {
+        use std::io::Write;
+        let dir = tempfile::TempDir::new().unwrap();
+        let log = dir.path().join("log");
+        let full = drift_line("claude-code", "X");
+        // Write the line WITHOUT its terminating newline (mid-write).
+        std::fs::write(&log, full.trim_end_matches('\n')).unwrap();
+
+        let mut scan = super::DriftScan::default();
+        scan.scan_appended(&log);
+        assert_eq!(scan.offset, 0, "a partial line is not consumed");
+        assert!(scan.drifted.is_empty(), "…nor scanned: {:?}", scan.drifted);
+
+        // The newline lands → the completed line scans on the next pass.
+        let mut f = std::fs::OpenOptions::new().append(true).open(&log).unwrap();
+        f.write_all(b"\n").unwrap();
+        drop(f);
+        scan.scan_appended(&log);
+        assert_eq!(scan.drifted, vec!["cc".to_string()]);
+    }
+
+    #[test]
+    fn drift_scan_resets_on_external_truncation_and_tolerates_missing_file() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let log = dir.path().join("log");
+
+        // Missing file: a quiet no-op.
+        let mut scan = super::DriftScan::default();
+        scan.scan_appended(&log);
+        assert_eq!(scan.offset, 0);
+
+        std::fs::write(&log, drift_line("claude-code", "X")).unwrap();
+        scan.scan_appended(&log);
+        assert!(scan.offset > 0);
+
+        // Externally truncated/rotated below the offset → rescan from the top.
+        std::fs::write(&log, drift_line("codex", "Y")).unwrap();
+        scan.scan_appended(&log);
+        assert!(
+            scan.drifted.contains(&"cx".to_string()),
+            "post-truncation content is scanned from offset 0: {:?}",
+            scan.drifted
+        );
+    }
 }

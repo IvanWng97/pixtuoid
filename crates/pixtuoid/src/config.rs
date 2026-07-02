@@ -262,6 +262,27 @@ pub fn save_source_connected(path: &Path, source_id: &'static str, connected: bo
     })
 }
 
+/// Remove a single source's connection flag — the connect-rollback restore for a
+/// flag that was ABSENT before the attempt (rollback must restore absence so the
+/// migrate default in [`resolve_connected`] decides again; writing `false` would
+/// overwrite it with an explicit disconnect). Drops an emptied `[sources]` table
+/// so a rolled-back first connect leaves the config exactly as it was (incl. the
+/// `setup::is_first_run` empty-table signal).
+pub fn remove_source_connected(path: &Path, source_id: &str) -> Result<()> {
+    update_config(path, |doc| {
+        let emptied = match doc.get_mut("sources").and_then(|s| s.as_table_like_mut()) {
+            Some(t) => {
+                t.remove(source_id);
+                t.is_empty()
+            }
+            None => false,
+        };
+        if emptied {
+            doc.as_table_mut().remove("sources");
+        }
+    })
+}
+
 /// Persist the `pixtuoid floating` window geometry into the `[floating]` table (size always;
 /// position when the OS reported it). Same `toml_edit` ConfigLock round as
 /// `save_source_connected`, so the user's other settings + hand-formatting survive.
@@ -1383,6 +1404,34 @@ mod tests {
             load(&p, &mut Vec::new()).sources.get("claude-code"),
             Some(&true)
         );
+    }
+
+    #[test]
+    fn remove_source_connected_drops_the_key_and_an_emptied_table() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("config.toml");
+        std::fs::write(&p, "theme = \"normal\"\n").unwrap();
+
+        save_source_connected(&p, "claude-code", true).unwrap();
+        save_source_connected(&p, "codex", true).unwrap();
+        remove_source_connected(&p, "claude-code").unwrap();
+        let cfg = load(&p, &mut Vec::new());
+        assert_eq!(cfg.sources.get("claude-code"), None, "key removed");
+        assert_eq!(cfg.sources.get("codex"), Some(&true), "sibling survives");
+        assert_eq!(cfg.theme.as_deref(), Some("normal"), "other keys survive");
+
+        // Removing the last key drops the now-empty [sources] table entirely,
+        // so a rolled-back first connect leaves no `[sources]` residue (the
+        // is_first_run signal reads table emptiness, but an empty table header
+        // in the file is still pointless noise).
+        remove_source_connected(&p, "codex").unwrap();
+        let after = std::fs::read_to_string(&p).unwrap();
+        assert!(
+            !after.contains("[sources]"),
+            "emptied table dropped: {after}"
+        );
+        // Removing an absent key / from an absent table is a quiet no-op.
+        remove_source_connected(&p, "codex").unwrap();
     }
 
     // --- write seam parity with install/io.rs (#16) ----------------------------

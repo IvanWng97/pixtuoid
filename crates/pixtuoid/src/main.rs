@@ -117,9 +117,11 @@ fn main() -> Result<()> {
     let tui_active = matches!(&cmd, Cmd::Run { headless, .. } if !*headless)
         || matches!(&cmd, Cmd::Floating { .. });
     let wants_verbose = matches!(log_level, "debug" | "trace");
-    // The env var's VALUE is the log file path — an empty value would
-    // "enable" file mode with an unopenable path; treat it as unset.
-    let explicit_log_file = std::env::var("PIXTUOID_LOG").is_ok_and(|v| !v.is_empty());
+    // The env var's VALUE is the log file path — an empty (or whitespace-only)
+    // value would "enable" file mode with an unopenable path; treat it as unset
+    // via the ONE empty-as-unset env filter (io::nonempty), the same trim
+    // semantics XDG_STATE_HOME / XDG_CONFIG_HOME / PIXTUOID_HOOK already use.
+    let explicit_log_file = pixtuoid::install::io::nonempty_env("PIXTUOID_LOG").is_some();
 
     if tui_active {
         // Explicit verbosity keeps today's semantics (the full --log-level /
@@ -389,7 +391,11 @@ fn build_run_config(
     let cfg = config::load(&cfg_path, &mut cfg_warnings);
     // First launch ever (no `[sources]` flags yet) → the TUI plays onboarding.
     // Computed from the same migrate condition `resolve_connected` uses below.
-    let first_run = setup::is_first_run(&cfg, &cfg_path);
+    // Right after load(), a non-empty warnings Vec means the file EXISTS but is
+    // malformed/unreadable — "previously configured", never a first run (the
+    // onboarding apply couldn't succeed anyway: update_config refuses to
+    // rewrite a malformed config). A missing file warns nothing ⇒ first run.
+    let first_run = setup::is_first_run(&cfg, &cfg_path, !cfg_warnings.is_empty());
     let theme = config::resolve_theme(&cfg, cli_theme, &mut cfg_warnings)?;
     // The config seam's twin of the clap range(1..) guard: a config max-desks = 0
     // is ignored with a collected warning (eager `.or` argument on purpose — the
@@ -630,12 +636,13 @@ fn filter_directives<'a>(rust_log: Option<&'a str>, log_level: &'a str) -> &'a s
 }
 
 fn log_file_path() -> PathBuf {
-    // Empty value = unset (the value is the PATH, not an on/off toggle; an
-    // empty path would silently fail to open and log nothing).
-    if let Ok(p) = std::env::var("PIXTUOID_LOG") {
-        if !p.is_empty() {
-            return PathBuf::from(p);
-        }
+    // Empty/whitespace-only value = unset (the value is the PATH, not an on/off
+    // toggle; an empty path would silently fail to open and log nothing) — the
+    // shared io::nonempty semantics, kept in lockstep with the
+    // `explicit_log_file` read in main() so "file mode enabled" and "which
+    // file" can't disagree on a whitespace value.
+    if let Some(p) = pixtuoid::install::io::nonempty_env("PIXTUOID_LOG") {
+        return PathBuf::from(p);
     }
     if let Some(state) = pixtuoid::install::io::nonempty_env("XDG_STATE_HOME") {
         return PathBuf::from(format!("{state}/pixtuoid/log"));

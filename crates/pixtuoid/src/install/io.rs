@@ -132,19 +132,18 @@ fn rename_with_retry(from: &Path, to: &Path) -> std::io::Result<()> {
     {
         const MAX_ATTEMPTS: u32 = 3;
         const RENAME_RETRY_SLEEP_MS: u64 = 50;
-        for attempt in 1..=MAX_ATTEMPTS {
+        // ERROR_SHARING_VIOLATION = os error 32. The retriable attempts sleep
+        // and loop; the FINAL attempt sits outside the loop so its result is
+        // returned directly — no unreachable fall-through arm to maintain.
+        for _ in 1..MAX_ATTEMPTS {
             match std::fs::rename(from, to) {
                 Ok(()) => return Ok(()),
-                Err(e) if attempt < MAX_ATTEMPTS => {
-                    // ERROR_SHARING_VIOLATION = os error 32.
-                    // Sleep only on the retriable attempts; propagate on the last.
-                    let _ = e; // silence unused-variable lint on non-windows
-                    std::thread::sleep(std::time::Duration::from_millis(RENAME_RETRY_SLEEP_MS));
+                Err(_) => {
+                    std::thread::sleep(std::time::Duration::from_millis(RENAME_RETRY_SLEEP_MS))
                 }
-                Err(e) => return Err(e),
             }
         }
-        unreachable!()
+        std::fs::rename(from, to)
     }
     #[cfg(not(windows))]
     {
@@ -284,7 +283,17 @@ fn backup_once_resolved(target: &Path, suffix: &str) -> Result<Option<PathBuf>> 
     if bak.exists() {
         return Ok(Some(bak));
     }
-    std::fs::copy(target, &bak)?;
+    // Temp + fsync + rename (the same pattern write_atomic uses), NOT a bare
+    // fs::copy: the take-once latch above permanently trusts whatever bytes sit
+    // at the .bak name, and this file is the user's only recovery path — a
+    // crash/power-loss mid-copy must leave the backup either complete or
+    // absent, never a latched truncated fragment. (fs::copy preserves the
+    // source's permissions on the temp, so a 0600 settings.json backs up 0600;
+    // an orphaned .tmp from a crash is overwritten by the next attempt.)
+    let tmp = sibling(&bak, "tmp");
+    std::fs::copy(target, &tmp)?;
+    File::open(&tmp)?.sync_all()?;
+    rename_with_retry(&tmp, &bak)?;
     Ok(Some(bak))
 }
 
@@ -666,6 +675,31 @@ mod tests {
         std::fs::write(&p, "x = 1\n").unwrap();
         let bak = backup_once(&p, "pixtuoid.bak").unwrap().unwrap();
         assert_eq!(bak.file_name().unwrap(), "config.local.toml.pixtuoid.bak");
+    }
+
+    #[test]
+    fn backup_once_writes_via_temp_rename_and_survives_a_stale_tmp() {
+        // The backup is "the user's only recovery path" (mod.rs uninstall arm)
+        // and its take-once latch makes whatever lands at the .bak name
+        // permanent — so the copy must be temp+rename atomic (a crash mid-copy
+        // must never latch a truncated backup as the trusted snapshot).
+        let dir = TempDir::new().unwrap();
+        let p = dir.path().join("settings.json");
+        std::fs::write(&p, "{\"user\": \"content\"}").unwrap();
+        // A stale tmp sidecar from a crashed earlier run must not poison the copy.
+        let stale_tmp = dir.path().join("settings.json.pixtuoid.bak.tmp");
+        std::fs::write(&stale_tmp, "torn garbage").unwrap();
+
+        let bak = backup_once(&p, "pixtuoid.bak").unwrap().unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&bak).unwrap(),
+            "{\"user\": \"content\"}",
+            "the latched backup is the complete snapshot"
+        );
+        assert!(
+            !stale_tmp.exists(),
+            "the tmp sidecar is consumed by the atomic rename"
+        );
     }
 
     #[test]

@@ -295,6 +295,14 @@ fn read_until_terminator(
 ) -> Vec<u8> {
     use std::io::Read;
 
+    // `FD_SET` on an fd >= FD_SETSIZE writes outside the fd_set's bit array (UB).
+    // The tty is opened early so this can't fire in practice, but the soundness
+    // of the unsafe block below must rest on a structural guard, not a prose
+    // claim (a negative fd wraps past FD_SETSIZE via the cast and is caught
+    // too). An empty reply reads as "no confirmation" — same as a timeout.
+    if fd as usize >= libc::FD_SETSIZE {
+        return Vec::new();
+    }
     let start = std::time::Instant::now();
     let mut buf = Vec::with_capacity(DECRQSS_READ_CHUNK);
     let mut chunk = [0u8; DECRQSS_READ_CHUNK];
@@ -311,9 +319,9 @@ fn read_until_terminator(
         // `select`, NOT `poll`: macOS `poll()` is broken on tty/pty devices and
         // returns `POLLNVAL` for a valid terminal fd, which would make every
         // non-`$COLORTERM` terminal read nothing and falsely warn. `select` works
-        // on ttys on both macOS and Linux. The fd is opened early so it's well
-        // under `FD_SETSIZE`.
-        // SAFETY: a zeroed `fd_set` with our single valid fd registered.
+        // on ttys on both macOS and Linux.
+        // SAFETY: a zeroed `fd_set` with our single valid fd registered; the fd
+        // is < FD_SETSIZE by the structural guard at the top of this fn.
         let mut rfds: libc::fd_set = unsafe { std::mem::zeroed() };
         unsafe { libc::FD_SET(fd, &mut rfds) };
         // SAFETY: one read fd, null write/error sets, a valid timeval.

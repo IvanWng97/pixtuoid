@@ -67,10 +67,13 @@ pub fn default_config_path() -> Result<PathBuf> {
     reasonix_home()
         .map(|h| h.join("settings.json"))
         .ok_or_else(|| {
-            // Reachable ONLY on non-Windows with no `HOME` (the Windows arm always
-            // resolves via `user_config_dir()`), so `USERPROFILE` is not named here.
+            // Non-Windows: no `HOME`. Windows: neither `%APPDATA%` nor a home
+            // (USERPROFILE/HOME) resolves — erroring mirrors the sibling
+            // home-anchored targets instead of silently writing a CWD-relative
+            // config Reasonix never reads.
             anyhow!(
-                "cannot resolve Reasonix's home (REASONIX_HOME/HOME unset); pass --config <path>"
+                "cannot resolve Reasonix's home (REASONIX_HOME and the platform \
+                 home/config dir unset); pass --config <path>"
             )
         })
 }
@@ -88,24 +91,25 @@ fn reasonix_home() -> Option<PathBuf> {
 }
 
 /// Pure core for [`reasonix_home`] — the `REASONIX_HOME` override, the platform
-/// flag, the resolved Windows config dir (`%APPDATA%`), and the OS home are all
-/// injected so BOTH platform arms unit-test on any host. The Windows arm ALWAYS
-/// returns `Some` (`user_config_dir()` falls `%APPDATA%`→`<home>/AppData/Roaming`,
-/// so it never fails) — deliberately MORE lenient than Go's `os.UserConfigDir`,
-/// which ERRORS when `%APPDATA%` is unset. Harmless: that case means Reasonix
-/// itself resolves no home (it can't read the file either), and the computed
-/// `<home>/AppData/Roaming/reasonix` is exactly the canonical `%APPDATA%` default.
+/// flag, the resolved Windows config dir (`%APPDATA%`, `None` when unresolvable),
+/// and the OS home are all injected so BOTH platform arms unit-test on any host.
+/// The Windows arm is still MORE lenient than Go's `os.UserConfigDir` (which
+/// ERRORS whenever `%APPDATA%` is unset): with `%APPDATA%` unset but a HOME
+/// resolved, [`user_config_dir`] computes `<home>/AppData/Roaming` — exactly the
+/// canonical `%APPDATA%` default. It returns `None` only when NEITHER resolves;
+/// installing then would write a CWD-relative file Reasonix never reads, so the
+/// caller surfaces "pass --config" like every other home-anchored target.
 fn resolve_reasonix_home(
     reasonix_home_env: Option<PathBuf>,
     windows: bool,
-    windows_config_dir: PathBuf,
+    windows_config_dir: Option<PathBuf>,
     unix_home: Option<String>,
 ) -> Option<PathBuf> {
     if let Some(h) = reasonix_home_env {
         return Some(h);
     }
     if windows {
-        return Some(windows_config_dir.join("reasonix"));
+        return windows_config_dir.map(|d| d.join("reasonix"));
     }
     unix_home.map(|h| PathBuf::from(h).join(".reasonix"))
 }
@@ -130,14 +134,45 @@ pub fn detect_installed() -> bool {
 ///
 /// The OS->dir decision is a PURE core fn (`platform::resolve_user_config_dir`)
 /// so every arm is unit-testable on any host; this site just injects the live
-/// OS + env + home values once.
-fn user_config_dir() -> PathBuf {
-    pixtuoid_core::platform::resolve_user_config_dir(
+/// OS + env + home values once. Returns `None` (instead of the CWD-relative
+/// path the probe-only `home_relative("")` would fabricate — its own doc bans
+/// WRITE paths) when the selected arm needs a home and none resolves.
+fn user_config_dir() -> Option<PathBuf> {
+    user_config_dir_checked(
         std::env::consts::OS,
         std::env::var("APPDATA").ok(),
         std::env::var("XDG_CONFIG_HOME").ok(),
-        &io::home_relative(""),
+        pixtuoid_core::platform::user_home_opt(),
     )
+}
+
+/// Pure core for [`user_config_dir`]: `platform::resolve_user_config_dir` with
+/// the WRITE-path home contract layered on — `None` when the arm the OS/env
+/// select would fall back to a home join and no home resolves. The env-decided
+/// arms (Windows non-empty `%APPDATA%`; Linux/BSD non-empty `$XDG_CONFIG_HOME`)
+/// never consult the home, so they resolve home-lessly; `io::nonempty` mirrors
+/// the core fn's own empty-as-unset filter so the two can't disagree on when
+/// the fallback fires.
+fn user_config_dir_checked(
+    os: &str,
+    appdata: Option<String>,
+    xdg: Option<String>,
+    home: Option<String>,
+) -> Option<PathBuf> {
+    let env_decides = match os {
+        "windows" => io::nonempty(appdata.clone()).is_some(),
+        "macos" => false,
+        _ => io::nonempty(xdg.clone()).is_some(),
+    };
+    if !env_decides && home.is_none() {
+        return None;
+    }
+    // The home base is only read by the fallback arms, which the gate above
+    // guarantees have a real home when reached.
+    let home_base = PathBuf::from(home.unwrap_or_default());
+    Some(pixtuoid_core::platform::resolve_user_config_dir(
+        os, appdata, xdg, &home_base,
+    ))
 }
 
 /// Reasonix runs the `command` string under a shell — `sh -c` on Unix, `cmd.exe
@@ -235,18 +270,56 @@ mod tests {
         let appdata = PathBuf::from(r"C:\Users\me\AppData\Roaming");
         // Windows → <%APPDATA%>/reasonix (the injected config dir), NOT <home>/.reasonix.
         assert_eq!(
-            resolve_reasonix_home(None, true, appdata.clone(), Some(r"C:\Users\me".into())),
+            resolve_reasonix_home(
+                None,
+                true,
+                Some(appdata.clone()),
+                Some(r"C:\Users\me".into())
+            ),
             Some(appdata.join("reasonix"))
         );
         // Non-Windows → <home>/.reasonix (config dir ignored).
         assert_eq!(
-            resolve_reasonix_home(None, false, appdata, Some("/home/u".into())),
+            resolve_reasonix_home(None, false, Some(appdata), Some("/home/u".into())),
             Some(PathBuf::from("/home/u").join(".reasonix"))
         );
         // Non-Windows with no home → None (installer surfaces "pass --config").
         assert_eq!(
-            resolve_reasonix_home(None, false, PathBuf::from("/ignored"), None),
+            resolve_reasonix_home(None, false, Some(PathBuf::from("/ignored")), None),
             None
+        );
+        // Windows with NO resolvable config dir (APPDATA + home all unset) →
+        // None too: writing `./AppData/Roaming/reasonix/settings.json` relative
+        // to pixtuoid's CWD would be a config Reasonix never reads — the same
+        // "pass --config" error every other home-anchored target surfaces.
+        assert_eq!(resolve_reasonix_home(None, true, None, None), None);
+    }
+
+    #[test]
+    fn user_config_dir_checked_refuses_a_homeless_fallback_arm() {
+        // Env-decided arms resolve without a home…
+        assert_eq!(
+            user_config_dir_checked("windows", Some(r"C:\AppData".into()), None, None),
+            Some(PathBuf::from(r"C:\AppData"))
+        );
+        assert_eq!(
+            user_config_dir_checked("linux", None, Some("/xdg".into()), None),
+            Some(PathBuf::from("/xdg"))
+        );
+        // …but the home-joining fallback arms refuse (None) instead of the
+        // probe-only CWD fabrication when no home resolves — incl. an EMPTY
+        // env value, which the core resolver also treats as unset.
+        assert_eq!(user_config_dir_checked("windows", None, None, None), None);
+        assert_eq!(
+            user_config_dir_checked("windows", Some("  ".into()), None, None),
+            None
+        );
+        assert_eq!(user_config_dir_checked("macos", None, None, None), None);
+        assert_eq!(user_config_dir_checked("linux", None, None, None), None);
+        // With a home, the fallback arms join onto it as before.
+        assert_eq!(
+            user_config_dir_checked("windows", None, None, Some(r"C:\Users\me".into())),
+            Some(PathBuf::from(r"C:\Users\me").join("AppData/Roaming"))
         );
     }
 
@@ -259,7 +332,7 @@ mod tests {
                 resolve_reasonix_home(
                     Some("/custom/rx".into()),
                     windows,
-                    PathBuf::from(r"C:\AppData"),
+                    Some(PathBuf::from(r"C:\AppData")),
                     Some("/home/u".into()),
                 ),
                 Some(PathBuf::from("/custom/rx"))
@@ -436,7 +509,7 @@ mod tests {
         std::env::set_var("APPDATA", r"C:\Users\ada\AppData\Roaming");
         assert_eq!(
             user_config_dir(),
-            PathBuf::from(r"C:\Users\ada\AppData\Roaming")
+            Some(PathBuf::from(r"C:\Users\ada\AppData\Roaming"))
         );
         match saved {
             Some(v) => std::env::set_var("APPDATA", v),

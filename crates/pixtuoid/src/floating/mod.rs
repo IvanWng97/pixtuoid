@@ -30,6 +30,18 @@ use crate::runtime::driver::{build_source_set, reducer_task};
 use crate::runtime::{ConnectedSources, RunConfig};
 use window::{FloatingApp, FloatingEvent};
 
+/// The not-yet-surfaced tail of the grow-only `SourceDeath` watch Vec, advancing
+/// `seen` past it — the pure half of the health-bridge dedup ("tracked by count:
+/// the watch Vec only grows", the same contract headless_loop keeps inline).
+fn unseen_deaths<'a>(
+    deaths: &'a [pixtuoid_core::source::manager::SourceDeath],
+    seen: &mut usize,
+) -> &'a [pixtuoid_core::source::manager::SourceDeath] {
+    let start = (*seen).min(deaths.len());
+    *seen = deaths.len();
+    &deaths[start..]
+}
+
 /// Open the floating window and drive it until the user closes it.
 ///
 /// `winit`'s event loop must own the main thread, so the source pipeline runs on a
@@ -125,12 +137,18 @@ pub fn run(cfg: RunConfig) -> Result<()> {
             }
         });
     }
-    // Source deaths have no footer in floating — log them (the office partially freezes).
+    // Source deaths have no footer in floating — log them (the office partially
+    // freezes). Deduped by count exactly like headless_loop's consumer of the
+    // SAME channel: the watch value is a grow-only Vec, so logging the whole
+    // borrow on every change re-warns all prior deaths (N deaths → N(N+1)/2
+    // lines, reading as repeated crashes in log forensics).
     {
         let mut health_rx = health_rx;
         rt.spawn(async move {
+            let mut deaths_seen = 0usize;
             while health_rx.changed().await.is_ok() {
-                for death in health_rx.borrow().iter() {
+                let deaths = health_rx.borrow_and_update().clone();
+                for death in unseen_deaths(&deaths, &mut deaths_seen) {
                     tracing::warn!("pixtuoid floating: source exited: {death:?}");
                 }
             }
@@ -150,4 +168,31 @@ pub fn run(cfg: RunConfig) -> Result<()> {
         .run_app(&mut app)
         .context("running the floating window event loop")?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::unseen_deaths;
+    use pixtuoid_core::source::manager::SourceDeath;
+
+    #[test]
+    fn unseen_deaths_yields_each_death_exactly_once() {
+        let mut seen = 0usize;
+        let one = vec![SourceDeath::new("codex", "boom")];
+        assert_eq!(unseen_deaths(&one, &mut seen).len(), 1);
+        assert_eq!(seen, 1);
+
+        // The grow-only Vec gains a second death: only the NEW one surfaces —
+        // the first must not be re-logged on every later change.
+        let two = vec![
+            SourceDeath::new("codex", "boom"),
+            SourceDeath::new("claude-code", "bind"),
+        ];
+        let fresh = unseen_deaths(&two, &mut seen);
+        assert_eq!(fresh.len(), 1);
+        assert_eq!(fresh[0].source, "claude-code");
+
+        // No growth → nothing to log.
+        assert!(unseen_deaths(&two, &mut seen).is_empty());
+    }
 }
