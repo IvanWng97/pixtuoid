@@ -55,8 +55,9 @@ crates/                 DAG: pixtuoid-core ← pixtuoid-scene ← {pixtuoid, pix
 │                    INPUT (`just gen-wasm` → committed site/public/wasm/), not a crates.io
 │                    artifact. `Office` handle: new(seed) / step(now_ms,w,h) / frame_ptr/len;
 │                    a looped scripted timeline (src/script.rs) drives the REAL Reducer, so the
-│                    live-office hero can't drift from app behavior. Time is a PARAMETER — the
-│                    engine never reads the clock on wasm.
+│                    hero's lifecycle/motion/render behave exactly like the app (the EVENT STREAM
+│                    is authored; the state machine + pixel pass are the app's). Time is a
+│                    PARAMETER — the engine never reads the clock on wasm.
 └── pixtuoid-hook/   tiny shim CC invokes — stdin JSON → Unix socket / Windows named
                      pipe (transport.rs), 200ms send bound
 scripts/             gen-media.py + media.json (the ONE manifest-driven driver for ALL

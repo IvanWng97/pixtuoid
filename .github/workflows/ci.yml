@@ -54,6 +54,28 @@ jobs:
       - uses: extractions/setup-just@v4
       - run: just clippy
 
+  # The wasm office (pixtuoid-web) must keep COMPILING for wasm32 — `just hack`
+  # checks the no-default-features graph on the HOST target only, so a core
+  # change that breaks the wasm build (a target-gated dep, a syscall outside
+  # the `native` gate) would otherwise surface only when someone next runs
+  # `just gen-wasm` locally. Build-only on purpose: NO byte-compare against
+  # the committed site/public/wasm/ artifact (wasm output drifts across rustc
+  # versions and this job installs latest stable — freshness stays a local
+  # `just gen-wasm` + review concern, like the committed demo media).
+  wasm-check:
+    name: wasm-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: v1-rust
+      - run: cargo build -p pixtuoid-web --target wasm32-unknown-unknown --release
+
   deny:
     name: cargo-deny
     runs-on: ubuntu-latest

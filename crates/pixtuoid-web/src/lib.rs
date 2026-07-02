@@ -107,6 +107,11 @@ impl Office {
     }
 
     /// Pointer to the RGBA frame in wasm linear memory (`w*h*4` bytes).
+    ///
+    /// CONTRACT: re-read this (and rebuild any `Uint8ClampedArray` view) after
+    /// EVERY `step` — a canvas resize reallocates the staging buffer (the
+    /// pointer moves), and any wasm `memory.grow` invalidates existing JS
+    /// views into linear memory even when the pointer value is unchanged.
     pub fn frame_ptr(&self) -> *const u8 {
         self.rgba.as_ptr()
     }
@@ -124,7 +129,9 @@ impl Office {
     /// and a resumed step has to catch up a large gap. Wraps the loop epoch;
     /// a gap past one full loop is re-anchored instead of replayed N times.
     fn advance_script(&mut self, now: SystemTime) {
-        let epoch = *self.epoch.get_or_insert(now);
+        // Track the loop epoch in a local and write it back at each mutation —
+        // no Option re-read (and no unreachable-expect) inside the loop.
+        let mut epoch = *self.epoch.get_or_insert(now);
         let mut elapsed = now
             .duration_since(epoch)
             .unwrap_or_default()
@@ -135,17 +142,17 @@ impl Office {
         // replayed SessionStarts of the kept phase re-seat the cast.
         if elapsed >= 2 * LOOP_MS {
             let skip = (elapsed / LOOP_MS - 1) * LOOP_MS;
-            self.epoch = Some(epoch + Duration::from_millis(skip));
+            epoch += Duration::from_millis(skip);
+            self.epoch = Some(epoch);
             elapsed -= skip;
         }
 
         loop {
-            let loop_epoch = self.epoch.expect("set above");
             while let Some(beat) = self.beats.get(self.cursor) {
                 if beat.at_ms > elapsed {
                     break;
                 }
-                let at = loop_epoch + Duration::from_millis(beat.at_ms);
+                let at = epoch + Duration::from_millis(beat.at_ms);
                 self.reducer
                     .apply(&mut self.scene, beat.event.clone(), at, beat.transport);
                 self.cursor += 1;
@@ -154,7 +161,8 @@ impl Office {
                 break;
             }
             // Loop wrap: restart the script one LOOP_MS later.
-            self.epoch = Some(loop_epoch + Duration::from_millis(LOOP_MS));
+            epoch += Duration::from_millis(LOOP_MS);
+            self.epoch = Some(epoch);
             self.cursor = 0;
             elapsed -= LOOP_MS;
         }

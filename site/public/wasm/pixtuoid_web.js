@@ -28,6 +28,11 @@ export class Office {
     }
     /**
      * Pointer to the RGBA frame in wasm linear memory (`w*h*4` bytes).
+     *
+     * CONTRACT: re-read this (and rebuild any `Uint8ClampedArray` view) after
+     * EVERY `step` — a canvas resize reallocates the staging buffer (the
+     * pointer moves), and any wasm `memory.grow` invalidates existing JS
+     * views into linear memory even when the pointer value is unchanged.
      * @returns {number}
      */
     frame_ptr() {

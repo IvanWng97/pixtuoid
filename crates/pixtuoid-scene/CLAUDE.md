@@ -86,12 +86,15 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
 > only as the offset primitive for shadow/halo placement. See `core::layout::placement`.
 
 > **`render_to_rgb_buffer` is the seam, not `draw_scene`.** The world render lives
-> HERE (this crate's `pixel_painter`) and has THREE consumers, ALL in the `pixtuoid`
-> binary: `tui::renderer::draw_scene` (terminal half-block flush),
+> HERE (this crate's `pixel_painter`) and has FOUR consumers: three in the `pixtuoid`
+> binary — `tui::renderer::draw_scene` (terminal half-block flush),
 > `tui::renderer::render_transition_floor` (the floor-slide), and
-> `floating::offscreen::OfficeRenderer` (the desktop window). The terminal flush +
+> `floating::offscreen::OfficeRenderer` (the desktop window) — plus the
+> `pixtuoid-web` crate's `Office` (the wasm `<canvas>` painter, a near-verbatim
+> OfficeRenderer mirror; window-free by crate like this one). The terminal flush +
 > widgets + footer are the painter's job and live in the binary's `tui/`; the
-> chunky-upscale blit is the binary's `floating/`. Keep `pixtuoid-scene` flush-free.
+> chunky-upscale blit is the binary's `floating/`; the RGBA blit to canvas is
+> `pixtuoid-web`'s. Keep `pixtuoid-scene` flush-free.
 
 ## Known sharp edges (don't be surprised by these)
 

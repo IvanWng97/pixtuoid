@@ -19,6 +19,7 @@
 
 use std::path::PathBuf;
 
+use pixtuoid_core::source::{claude_code, codex, cursor, opencode};
 use pixtuoid_core::{AgentEvent, AgentId, ToolDetail, Transport};
 
 /// One scripted beat: fires `at_ms` into the current loop.
@@ -33,17 +34,20 @@ pub(crate) struct Beat {
 pub(crate) const LOOP_MS: u64 = 120_000;
 
 /// A cast member: a source CLI + a repo-ish cwd (drives the label AND the
-/// Team-Palette outfit, which keys on cwd).
+/// Team-Palette outfit, which keys on cwd). Sources reference the modules'
+/// `SOURCE_NAME` consts — a hand-typed string here silently misses the
+/// registry and the label falls back to the RAW string (`claude_code·api`
+/// instead of `cc·api` — a review-caught, test-invisible defect class).
 const CAST: &[(&str, &str, &str)] = &[
     // (source, session key, cwd)
-    ("claude_code", "hero-cc-api", "/work/api"),
-    ("claude_code", "hero-cc-web", "/work/webapp"),
-    ("codex", "hero-cx-infra", "/work/infra"),
-    ("claude_code", "hero-cc-data", "/work/data"),
-    ("opencode", "hero-oc-cli", "/work/cli"),
-    ("codex", "hero-cx-web", "/work/webapp"),
-    ("cursor", "hero-cu-docs", "/work/docs"),
-    ("claude_code", "hero-cc-infra", "/work/infra"),
+    (claude_code::SOURCE_NAME, "hero-cc-api", "/work/api"),
+    (claude_code::SOURCE_NAME, "hero-cc-web", "/work/webapp"),
+    (codex::SOURCE_NAME, "hero-cx-infra", "/work/infra"),
+    (claude_code::SOURCE_NAME, "hero-cc-data", "/work/data"),
+    (opencode::SOURCE_NAME, "hero-oc-cli", "/work/cli"),
+    (codex::SOURCE_NAME, "hero-cx-web", "/work/webapp"),
+    (cursor::SOURCE_NAME, "hero-cu-docs", "/work/docs"),
+    (claude_code::SOURCE_NAME, "hero-cc-infra", "/work/infra"),
 ];
 
 fn cast_id(i: usize) -> AgentId {
@@ -283,6 +287,17 @@ mod tests {
             scene.agents.len(),
             "each agent has its own desk"
         );
+        // Every cast source resolved a REGISTERED label prefix — a hand-typed
+        // source string that misses the registry falls back to the raw string
+        // (e.g. `claude_code·api`), which no real app session ever shows.
+        for a in scene.agents.values() {
+            let prefix = a.label.split('·').next().unwrap();
+            assert!(
+                ["cc", "cx", "oc", "cu"].contains(&prefix),
+                "label {:?} must carry a registered source prefix",
+                a.label
+            );
+        }
     }
 
     #[test]
