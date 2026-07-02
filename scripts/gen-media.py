@@ -233,6 +233,28 @@ def run_clip(job, out_dirs, work, intermediates):
                str(d / f"{cid}-poster.png"))
 
 
+def run_wasm_still(job, out_dirs, work, intermediates):
+    # The live-office backdrop's poster (#425): a REAL frame of the pixtuoid-web
+    # Office — same seed-3 layout, same looped script, same 320x180 buffer a
+    # 16:9 viewport's canvas computes — so the poster→canvas crossfade
+    # dissolves in place instead of reframing (the old terminal-render poster
+    # was ~1.18:1; cover-cropping it dropped ~60% of its height on wide
+    # screens). Deterministic per (t0_ms, advance_ms) under the process TZ=UTC
+    # pin, so --check pixel-gates it like every other still.
+    subprocess.run(
+        ["cargo", "build", "--release", "-p", "pixtuoid-web", "--example", "hero_still"],
+        check=True,
+    )
+    for d in out_dirs:
+        subprocess.run(
+            [str(ROOT / "target/release/examples/hero_still"),
+             str(d / f"{job['id']}.png"),
+             "--width", str(job["w"]), "--height", str(job["h"]),
+             "--t0-ms", str(job["t0_ms"]), "--advance-ms", str(job["advance_ms"])],
+            check=True,
+        )
+
+
 HANDLERS = {
     "render": run_render,
     "crop": run_crop,
@@ -240,6 +262,7 @@ HANDLERS = {
     "gif": run_gif,
     "matrix": run_matrix,
     "clip": run_clip,
+    "wasm-still": run_wasm_still,
 }
 
 

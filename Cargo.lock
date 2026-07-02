@@ -2311,6 +2311,7 @@ name = "pixtuoid-web"
 version = "0.11.1"
 dependencies = [
  "chrono",
+ "image",
  "pixtuoid-core",
  "pixtuoid-scene",
  "wasm-bindgen",

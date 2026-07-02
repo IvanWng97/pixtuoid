@@ -7,17 +7,20 @@ import { asset } from '../consts';
      whole page: ONE continuous office (the hero's Dense variant — two
      meeting rooms), one timeline that never resets while you scroll.
      Content floats over it as glass bands. Poster-first: the still is the
-     instant layer; the canvas fades in after the first wasm frame.
+     instant layer; the canvas fades in after the first wasm frame. The
+     poster (demos/hero-wide.png) is a REAL wasm-hero frame at the 320x180
+     buffer a 16:9 canvas computes (#425), so the fade dissolves in place
+     instead of reframing.
      Reduced-motion / no-JS / no-wasm / fetch-failure all simply stay on
      the still. */
 }
 <div class="backdrop" aria-hidden="true">
   <img
     class="backdrop__poster px"
-    src={asset('demos/hero-poster.png')}
+    src={asset('demos/hero-wide.png')}
     alt=""
-    width="1664"
-    height="1408"
+    width="320"
+    height="180"
     decoding="async"
     fetchpriority="high"
   />

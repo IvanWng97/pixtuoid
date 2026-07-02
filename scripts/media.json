@@ -221,15 +221,30 @@
  },
  {
   "id": "hero",
-  "kind": "clip",
+  "kind": "render",
   "targets": [
    "site"
   ],
   "cols": 208,
   "rows": 88,
-  "duration": 20,
-  "fps": 12,
-  "hour": 17
+  "day": 1,
+  "frames": [
+   {
+    "name": "hero-poster",
+    "hour": 17
+   }
+  ]
+ },
+ {
+  "id": "hero-wide",
+  "kind": "wasm-still",
+  "targets": [
+   "site"
+  ],
+  "w": 320,
+  "h": 180,
+  "t0_ms": 1768498200000,
+  "advance_ms": 100000
  },
  {
   "id": "multi-floor",
