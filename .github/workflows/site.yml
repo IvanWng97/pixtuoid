@@ -52,6 +52,13 @@ jobs:
       # `verify` script; runs before build for fast feedback.
       - run: npm run knip
       - run: npm run build
+      # e2e smoke suite vs the PRODUCTION build just produced (astro preview,
+      # the official Astro testing posture): pins the page's runtime contracts
+      # — wasm office goes live, statusline truth-light, digit-key scrollspy,
+      # dimmer release, Copy→hire wiring, docs-nav variant, reduced-motion
+      # fallback — plus a console-error watchdog (it caught the CSP-blocked
+      # inlined fonts on day one). Chromium is already installed above.
+      - run: npm run e2e
       # Lighthouse CI: gate a11y / SEO / best-practices (perf advisory) against
       # the built pages — serves dist via `astro preview` (honors the /pixtuoid
       # base) and audits each. Replaces the dropped eslint-plugin-jsx-a11y with a

@@ -182,5 +182,13 @@ export default defineConfig({
   // project page, so a repo-local robots.txt would serve under /pixtuoid/ and
   // crawlers only read robots.txt from the origin root — see the PR notes).
   integrations: [sitemap()],
-  vite: { define: { __PIXTUOID_VERSION__: JSON.stringify(version) } },
+  vite: {
+    define: { __PIXTUOID_VERSION__: JSON.stringify(version) },
+    // Never inline assets as data: URLs. Vite's default 4KiB inlining turned
+    // the small @fontsource unicode-range subsets into data: fonts, which the
+    // hand-rolled CSP (font-src 'self', Base.astro) silently BLOCKED in
+    // production — caught by the e2e suite's console-error watchdog. Keeping
+    // the CSP strict and the assets as files is the fix, not `data:` in CSP.
+    build: { assetsInlineLimit: 0 },
+  },
 });

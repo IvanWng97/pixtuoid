@@ -60,7 +60,11 @@ Mermaid diagram becomes an inline SVG at build via `rehype-mermaid`, which is
 
 ## Gates
 
-`just site-{setup, dev, check, fmt}` (see `README.md`). The full-stack gate is
-`just verify` = `preflight` + `site-check` + `gen-check`. For a site-only change,
-`just site-check` is the relevant one; CI is `site.yml` / `pages.yml` (NOT the
-Rust `ci.yml`).
+`just site-{setup, dev, check, fmt, e2e}` (see `README.md`). The full-stack gate
+is `just verify` = `preflight` + `site-check` + `gen-check`. For a site-only
+change, `just site-check` is the relevant one; `just site-e2e` (Playwright vs
+the PRODUCTION build via `astro preview` — the official Astro posture) pins the
+page's RUNTIME contracts (`__pixLights`/`pix:onair`/`data-lit` seams, the
+digit-key scrollspy, the docs-nav variant, reduced-motion) plus a console-error
+watchdog, where tsc/knip/build are blind. CI is `site.yml` / `pages.yml` (NOT
+the Rust `ci.yml`).

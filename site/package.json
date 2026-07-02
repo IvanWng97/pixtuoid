@@ -17,7 +17,8 @@
     "format:check": "prettier --check .",
     "knip": "knip",
     "verify": "npm run format:check && npm run lint && npm run check && npm run knip && npm run build",
-    "lighthouse": "lhci autorun"
+    "lighthouse": "lhci autorun",
+    "e2e": "playwright test"
   },
   "dependencies": {
     "@astrojs/sitemap": "^3.7.3",
@@ -30,6 +31,7 @@
     "@astrojs/check": "^0.9.4",
     "@eslint/js": "^10.0.1",
     "@lhci/cli": "^0.15.1",
+    "@playwright/test": "^1.61.1",
     "@types/node": "^22.19.21",
     "eslint": "^10.5.0",
     "eslint-config-prettier": "^10.1.8",

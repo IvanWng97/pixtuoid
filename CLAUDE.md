@@ -15,7 +15,8 @@ live in nested `CLAUDE.md` files**, auto-loaded when you touch those trees:
   - [`crates/pixtuoid/src/tui/CLAUDE.md`](crates/pixtuoid/src/tui/CLAUDE.md) — the terminal painter (over the `pixtuoid-scene` crate): draw_scene flush, harness, widgets, the theme-PICKER ui, Sources panel, dashboard, hit_test, version popup.
 
 The NON-Rust **consumers** of the `--json` contract have their own guides (their
-gates are `tsc`/`eslint` / `just site-check`, NOT cargo — the Rust house rules
+gates are `tsc`/`eslint` / `just site-check` (+ `just site-e2e`, the Playwright
+runtime-contract smoke suite), NOT cargo — the Rust house rules
 above don't apply there):
 - [`integrations/raycast/CLAUDE.md`](integrations/raycast/CLAUDE.md) — the Raycast TS extension.
 - [`site/CLAUDE.md`](site/CLAUDE.md) — the Astro landing page.

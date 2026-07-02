@@ -310,6 +310,15 @@ site-check:
 site-fmt:
     npm --prefix site run format
 
+[group('site')]
+[doc('E2E smoke suite vs the PRODUCTION build (astro preview) — the runtime-contract gate')]
+site-e2e:
+    #!/usr/bin/env sh
+    set -eu
+    cd site
+    npm run build
+    npx playwright test
+
 # ── gen ───────────────────────────────────────────────────────────
 # Regenerate the committed artifacts that derive from a single source of truth:
 # README sections from site/src/*.json (gen-readme), and the office images for

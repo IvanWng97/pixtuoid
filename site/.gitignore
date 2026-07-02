@@ -11,3 +11,6 @@ node_modules/
 .env.production
 # misc
 .DS_Store
+# playwright e2e artifacts
+test-results/
+playwright-report/
