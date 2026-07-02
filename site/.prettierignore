@@ -4,6 +4,9 @@ node_modules
 package-lock.json
 # generated/binary demo assets — never reformat
 public/demos
+# wasm-bindgen generated glue (committed by `just gen-wasm`) — a regen would
+# fight prettier every build
+public/wasm
 # agent guides are docs, not site source — kept consistent with the other
 # CLAUDE.md/AGENTS.md files (all outside site/, so naturally prettier-exempt)
 CLAUDE.md

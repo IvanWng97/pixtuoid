@@ -9,7 +9,10 @@ import astro from 'eslint-plugin-astro';
 import prettier from 'eslint-config-prettier';
 
 export default [
-  { ignores: ['dist/', '.astro/', 'node_modules/'] },
+  // public/wasm/ is wasm-bindgen GENERATED glue (committed by `just gen-wasm`,
+  // like the demo media in public/demos/) — never hand-linted; a regen would
+  // fight the linter every build.
+  { ignores: ['dist/', '.astro/', 'node_modules/', 'public/wasm/'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   ...astro.configs.recommended,
