@@ -14,8 +14,7 @@ import tabs from '../install.json';
       <p class="eyebrow">1F · front desk — get it</p>
       <h2 class="statement statement--md">Move them in.</h2>
       <p class="lead">
-        macOS, Linux &amp; Windows — then run <code>pixtuoid</code> and press
-        <code>s</code> to connect your CLI.
+        macOS, Linux &amp; Windows. Install, run <code>pixtuoid</code>, and the office opens.
       </p>
     </div>
 
@@ -42,7 +41,7 @@ import tabs from '../install.json';
             class:list={['install__panel', { 'is-active': i === 0 }]}
             data-panel={t.id}
           >
-            <Code code={t.cmds.join('\n')} lang="bash" />
+            <Code code={t.cmds.join('\n')} lang="bash" theme="vesper" />
             <button class="install__copy" data-copy={t.cmds.join('\n')} aria-label="Copy command">
               Copy
             </button>
@@ -174,7 +173,8 @@ import tabs from '../install.json';
     padding: 0.35rem 0.7rem;
     border-radius: 999px;
     border: 1px solid rgba(255, 255, 255, 0.18);
-    background: rgba(255, 255, 255, 0.08);
+    /* opaque: the pill can sit over a long command's tail at narrow widths */
+    background: color-mix(in srgb, var(--screen) 88%, #fff);
     color: #f3ede3;
     cursor: pointer;
   }
@@ -187,5 +187,21 @@ import tabs from '../install.json';
     padding: 0.4rem 0.7rem 0.6rem;
     font-size: 0.9rem;
     color: var(--fg-muted);
+  }
+  /* phone widths: wrap the command instead of scrolling it under the pill —
+     pre-wrap breaks at the content box, so the reserved right padding keeps
+     every character clear of the Copy control */
+  @media (max-width: 560px) {
+    .install__panel :global(pre) {
+      padding-right: 4.6rem;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      font-size: 1rem;
+    }
+  }
+  @media (pointer: coarse) {
+    .install__tab {
+      padding-block: 0.55rem;
+    }
   }
 </style>

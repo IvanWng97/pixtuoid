@@ -35,8 +35,15 @@ try {
     { headers, signal: AbortSignal.timeout(5000) }
   );
   if (res.ok) {
-    const prs = (await res.json()) as { number: number; title: string; merged_at: string | null }[];
-    const merged = prs.filter((p) => p.merged_at).slice(0, 6);
+    const prs = (await res.json()) as {
+      number: number;
+      title: string;
+      merged_at: string | null;
+      user: { login: string } | null;
+    }[];
+    // bots don't get feed credit — a dependabot bump attributed to the office's
+    // coding agents undercuts the "agents built this" story
+    const merged = prs.filter((p) => p.merged_at && !p.user?.login?.endsWith('[bot]')).slice(0, 6);
     if (merged.length >= 4) {
       const human = (title: string) => {
         const t = title.replace(/^[a-z]+(\([^)]*\))?!?:\s*/, '');
@@ -134,10 +141,10 @@ const FLOORS = [
     height: calc(2rem + env(safe-area-inset-bottom, 0px));
     padding: 0 0.9rem env(safe-area-inset-bottom, 0px);
     background: var(--screen);
-    border-top: 1px solid #3a332a;
+    border-top: 1px solid var(--chip-line);
     font-family: var(--font-mono);
     font-size: 0.8rem;
-    color: #d8cfc0;
+    color: var(--chip-ink);
   }
   .sl__nav {
     position: relative;
@@ -162,10 +169,10 @@ const FLOORS = [
     letter-spacing: 0.05em;
   }
   .sl__name {
-    color: #d8cfc0;
+    color: var(--chip-ink);
   }
   .sl__caret {
-    color: #8f8574;
+    color: var(--chip-dim);
     font-size: 0.7rem;
   }
   /* the class display beats [hidden]'s UA rule — restate it */
@@ -179,7 +186,7 @@ const FLOORS = [
     display: flex;
     flex-direction: column;
     background: var(--screen);
-    border: 1px solid #3a332a;
+    border: 1px solid var(--chip-line);
     padding: 0.3rem;
     min-width: 12rem;
   }
@@ -191,7 +198,7 @@ const FLOORS = [
     border: 0;
     padding: 0.35rem 0.5rem;
     font: inherit;
-    color: #d8cfc0;
+    color: var(--chip-ink);
     cursor: pointer;
     text-align: left;
   }
@@ -203,7 +210,7 @@ const FLOORS = [
     color: var(--led);
   }
   .sl__floorname {
-    color: #8f8574;
+    color: var(--chip-dim);
   }
   .sl__feed {
     position: relative;
@@ -221,7 +228,8 @@ const FLOORS = [
     overflow: hidden;
     text-overflow: ellipsis;
     opacity: 0;
-    transition: opacity 0.6s ease;
+    /* must finish inside the rotation's 350ms out→in gap */
+    transition: opacity 0.3s ease;
   }
   .sl__item.is-on {
     opacity: 1;
@@ -249,7 +257,7 @@ const FLOORS = [
     flex: none;
     display: inline-flex;
     gap: 0.55rem;
-    color: #8f8574;
+    color: var(--chip-dim);
   }
   .sl__sep {
     color: #4a4438;
@@ -260,7 +268,7 @@ const FLOORS = [
   }
   .sl__keys {
     flex: none;
-    color: #8f8574;
+    color: var(--chip-dim);
   }
   @media (max-width: 760px) {
     .sl__feed,
@@ -269,6 +277,15 @@ const FLOORS = [
     }
     .statusline {
       justify-content: space-between;
+    }
+  }
+  @media (pointer: coarse) {
+    /* a keyboard-only affordance on a keyboardless device */
+    .sl__keys {
+      display: none;
+    }
+    .sl__floorbtn {
+      padding: 0.6rem 0.5rem;
     }
   }
 </style>
@@ -362,14 +379,19 @@ const FLOORS = [
       observeFloors();
     }
 
-    // ── the feed: one item at a time, crossfading (reduced motion: static) ──
+    // ── the feed: one item at a time, sequenced fade-out → fade-in (the items
+    // are absolutely stacked, so a simultaneous swap double-exposes two lines
+    // mid-transition; reduced motion: static) ──
     const feedItems = Array.prototype.slice.call(bar.querySelectorAll('.sl__item'));
     if (feedItems.length > 1 && !mq.matches) {
       let on = 0;
       setInterval(function () {
         feedItems[on].classList.remove('is-on');
         on = (on + 1) % feedItems.length;
-        feedItems[on].classList.add('is-on');
+        const next = feedItems[on];
+        setTimeout(function () {
+          next.classList.add('is-on');
+        }, 350);
       }, 6000);
     }
 
@@ -391,18 +413,26 @@ const FLOORS = [
       if (mq.matches) {
         lights.textContent = 'lights 55%';
       } else {
+        // 250ms: fast enough that the readout tracks the dimmer's ease instead
+        // of contradicting a fully-lit gap for a visible beat
         setInterval(function () {
           const v = typeof window.__pixLights === 'number' ? window.__pixLights : 0.55;
           lights.textContent = 'lights ' + Math.round((1 - v) * 100) + '%';
-        }, 1000);
+        }, 250);
       }
     }
     if (onair) {
-      if (mq.matches) onair.textContent = '□ STILL FRAME';
-      document.addEventListener('pix:onair', function (e) {
-        const live = e.detail && e.detail.live;
+      const setAir = function (live) {
         onair.textContent = live ? '● LIVE' : '○ STILL';
         onair.classList.toggle('is-live', !!live);
+      };
+      if (mq.matches) onair.textContent = '□ STILL FRAME';
+      // seed from the backdrop's class: the one-shot pix:onair event can fire
+      // before this script attaches (fast wasm load), and a missed event would
+      // read STILL forever
+      if (!mq.matches && document.querySelector('.backdrop.is-live')) setAir(true);
+      document.addEventListener('pix:onair', function (e) {
+        setAir(e.detail && e.detail.live);
       });
     }
   })();

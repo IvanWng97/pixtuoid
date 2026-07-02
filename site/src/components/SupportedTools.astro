@@ -29,16 +29,26 @@ const stateLabel = (s: string): string => STATE_LABEL[s as OsState] ?? s;
 
 const supported = sources.filter((s) => s.status === 'supported');
 const planned = sources.filter((s) => s.status === 'planned');
+
+// Legend derived from the states actually on screen — a hand-written legend
+// drifted (explained 🔜 with zero planned rows, omitted the nine 🧪 cells).
+const present = new Set<string>(supported.flatMap((s) => OSES.map((o) => s.platforms[o.key])));
+if (planned.length > 0) present.add('planned');
+const LEGEND_LABEL: Record<OsState, string> = { ...STATE_LABEL, no: 'n/a' };
+const legend = (['yes', 'experimental', 'planned', 'no'] as OsState[])
+  .filter((s) => present.has(s))
+  .map((s) => `${GLYPH[s]} ${LEGEND_LABEL[s]}`)
+  .join(' · ');
 ---
 
 <section id="tools" class="tools" data-lit data-floor="2">
   <div class="container">
     <div class="section-head reveal">
-      <p class="eyebrow">2F · tenants — works with</p>
+      <p class="eyebrow">2F · tenants — the resident CLIs</p>
       <h2 class="statement statement--md">Whichever CLI<br />they run.</h2>
       <p class="lead">
         Each coding agent shows up as a coworker. Support is per-tool <em>and</em> per-OS — this is the
-        Sources panel you'll press <code>s</code> to open. New CLIs land via one
+        Sources panel inside the app. New CLIs land via one
         <a href={asset('contributing')}>Source adapter</a>.
       </p>
     </div>
@@ -104,9 +114,7 @@ const planned = sources.filter((s) => s.status === 'planned');
           )
         }
       </table>
-      <p class="tools__legend">
-        <span>✅ supported</span> · <span>🔜 planned</span> · <span>— n/a</span>
-      </p>
+      <p class="tools__legend">{legend}</p>
     </div>
   </div>
 </section>
@@ -176,7 +184,9 @@ const planned = sources.filter((s) => s.status === 'planned');
   .tools__cell[data-state='no'] {
     opacity: 0.35;
   }
-  .tools__how {
+  /* td-qualified: must outrank the `.tools th, .tools td` nowrap above —
+     bare .tools__how loses on specificity and the column clips mid-word */
+  .tools td.tools__how {
     font-size: 0.82rem;
     opacity: 0.7;
     white-space: normal;
@@ -204,6 +214,17 @@ const planned = sources.filter((s) => s.status === 'planned');
     .tools__how-col,
     .tools__how {
       display: none;
+    }
+  }
+  /* 390px: Tool + 3 OS columns must fit without clipping the Windows column */
+  @media (max-width: 480px) {
+    .tools th,
+    .tools td {
+      padding: 0.5rem 0.35rem;
+      font-size: 0.85rem;
+    }
+    .tools__badge {
+      margin-right: 0.3rem;
     }
   }
 </style>

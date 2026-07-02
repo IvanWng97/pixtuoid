@@ -18,7 +18,7 @@ const steps = [
     n: '03',
     cmd: '# just start coding',
     title: 'Watch them arrive',
-    body: 'Every session you start walks in, sits down, and gets to work. Disconnect in the panel and they head for the elevator.',
+    body: 'Every session you start shows up at a desk within seconds. Disconnect in the panel and they head for the elevator.',
   },
 ];
 ---
@@ -46,7 +46,7 @@ const steps = [
       }
     </ol>
     <p class="how__more reveal">
-      <a href={asset('architecture')}>See how it works under the hood →</a>
+      <a href={asset('architecture')}>see how it works under the hood →</a>
     </p>
   </div>
 </section>
@@ -62,7 +62,9 @@ const steps = [
   }
   .how__step {
     display: grid;
-    grid-template-columns: auto 1fr;
+    /* fixed number column — `auto` sized each step by its own Jersey-10
+       digits (non-tabular), so the three bodies didn't share a left edge */
+    grid-template-columns: clamp(2.4rem, 5vw, 3.4rem) 1fr;
     gap: 0.2rem 1.6rem;
     align-items: baseline;
   }
@@ -84,7 +86,7 @@ const steps = [
   }
   .how__detail h3 {
     display: inline;
-    font-family: var(--font-serif);
+    font-family: var(--font-body);
     font-weight: 600;
     font-size: 1.05rem;
     margin: 0;
@@ -95,7 +97,7 @@ const steps = [
   }
   .how__detail p {
     display: inline;
-    font-family: var(--font-serif);
+    font-family: var(--font-body);
     color: var(--fg-muted);
     margin: 0;
   }

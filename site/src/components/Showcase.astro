@@ -9,6 +9,24 @@ const channels = SHOWCASE.map((c, i) => ({
 }));
 const live = channels.filter((c) => c.status === 'live');
 const def = channels.find((c) => c.default) ?? live[0];
+// headline count derived from the dial itself — a hardcoded "Eight" desyncs
+// the moment a channel is added or dropped
+const COUNT_WORDS = [
+  'Zero',
+  'One',
+  'Two',
+  'Three',
+  'Four',
+  'Five',
+  'Six',
+  'Seven',
+  'Eight',
+  'Nine',
+  'Ten',
+  'Eleven',
+  'Twelve',
+];
+const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
 ---
 
 <section id="showcase" class="showcase" data-lit data-floor="5">
@@ -21,7 +39,7 @@ const def = channels.find((c) => c.default) ?? live[0];
   <div class="container">
     <div class="section-head reveal">
       <p class="eyebrow">5F · studio — {live.length} channels on air</p>
-      <h2 class="statement statement--md">Eight channels.<br />One office.</h2>
+      <h2 class="statement statement--md">{countWord} channels.<br />One office.</h2>
       <p class="lead">
         The office, channel by channel — tune a monitor to switch the big screen. Themes and weather
         expose their dials on-screen.
@@ -224,12 +242,21 @@ const def = channels.find((c) => c.default) ?? live[0];
 
 <style>
   .dial {
-    display: flex;
-    flex-wrap: wrap;
+    /* aligned columns, not ragged inline flow — the numbered labels imply a grid */
+    display: grid;
+    grid-template-columns: repeat(3, max-content);
     gap: 0.4rem 1.6rem;
     margin-top: 1.2rem;
     font-family: var(--font-mono);
     font-size: 0.92rem;
+  }
+  .dial__ch {
+    text-align: left;
+  }
+  @media (pointer: coarse) {
+    .dial__ch {
+      padding-block: 0.55rem;
+    }
   }
   .dial__ch {
     background: none;

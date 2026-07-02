@@ -58,6 +58,16 @@
   --maxw: 1120px;
   --radius: 16px;
   --radius-sm: 10px;
+
+  /* Screen chrome — text that sits on/over the office render, THEME-INDEPENDENT
+     (the office pixels don't change with the site theme, so neither do these):
+     ink/dim/line match the statusline's fixed palette. The halo lifts floating
+     chrome (nav, hero ghost link) off a DARK office only — day sets none. */
+  --chip-ink: #d8cfc0;
+  --chip-dim: #8f8574;
+  --chip-line: #3a332a;
+  --chip-bg: color-mix(in srgb, var(--screen) 82%, transparent);
+  --chrome-halo: none;
 }
 
 :root[data-theme='night'] {
@@ -79,6 +89,7 @@
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 10px 30px rgba(0, 0, 0, 0.45);
   --shadow-lg: 0 2px 6px rgba(0, 0, 0, 0.4), 0 24px 60px rgba(0, 0, 0, 0.6);
   --glow: color-mix(in srgb, var(--coral) 24%, transparent);
+  --chrome-halo: 0 1px 8px rgba(0, 0, 0, 0.45);
 }
 
 /* ---------- reset ---------- */
@@ -130,7 +141,9 @@ a {
   color: var(--coral-deep);
   text-underline-offset: 2px;
 }
-:root[data-theme='night'] a {
+/* :not(.btn) keeps this repaint off button-anchors — unscoped it outranks
+   .btn-primary's white label and rendered the CTA coral-on-coral. */
+:root[data-theme='night'] a:not(.btn) {
   color: var(--coral);
 }
 
@@ -209,6 +222,7 @@ h3 {
   font-size: clamp(1.08rem, 1rem + 0.5vw, 1.34rem);
   color: var(--fg-muted);
   max-width: 42ch;
+  text-wrap: pretty;
 }
 /* coral→amber gradient headline word */
 .hl {
@@ -381,9 +395,10 @@ section {
   font-size: clamp(2.4rem, 6.5vw, 4.75rem);
 }
 .statement-sub {
-  font-family: var(--font-serif);
+  font-family: var(--font-body);
   font-size: clamp(1.05rem, 1.6vw, 1.25rem);
   max-width: 52ch;
+  text-wrap: pretty;
 }
 /* Local contrast floor: even mid-dim, a lit block carries its own soft
    radial wash so a stalled scroll never shows low-contrast text. */
@@ -417,8 +432,8 @@ section {
   left: clamp(1rem, 4vw, 3rem);
   font-family: var(--font-mono);
   font-size: 0.85rem;
-  color: #d8cfc0;
-  background: color-mix(in srgb, var(--screen) 82%, transparent);
+  color: var(--chip-ink);
+  background: var(--chip-bg);
   padding: 0.5rem 0.8rem;
 }
 /* The frameless-window beat (gap 2): the product's floating desktop window
@@ -432,12 +447,20 @@ section {
   left: 50%;
   transform: translate(-50%, -55%);
   width: min(560px, 72vw);
-  border: 1px solid rgba(216, 207, 192, 0.28);
+  border: 1px solid rgba(216, 207, 192, 0.4);
   background: var(--screen);
+  /* ambient ring first so the TOP edge separates from the office too —
+     bottom-weighted drop shadows alone let the upper edge dissolve */
   box-shadow:
+    0 0 34px rgba(0, 0, 0, 0.4),
     0 32px 90px rgba(0, 0, 0, 0.6),
     0 8px 24px rgba(0, 0, 0, 0.45);
   pointer-events: none;
+}
+@media (max-width: 560px) {
+  .gap-frame {
+    width: 86vw;
+  }
 }
 .gap-frame__body {
   display: block;
@@ -591,6 +614,7 @@ code,
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 10px 30px rgba(0, 0, 0, 0.45);
   --shadow-lg: 0 2px 6px rgba(0, 0, 0, 0.4), 0 24px 60px rgba(0, 0, 0, 0.6);
   --glow: color-mix(in srgb, var(--coral) 26%, transparent);
+  --chrome-halo: 0 1px 8px rgba(0, 0, 0, 0.45);
 }
 
 /* ---------- boot intro overlay ---------- */

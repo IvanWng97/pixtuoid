@@ -178,7 +178,7 @@ const home = asset('');
   .nav__version {
     font-family: var(--font-mono);
     font-size: 0.75rem;
-    color: #8f8574;
+    color: var(--chip-dim);
     background: color-mix(in srgb, var(--screen) 72%, transparent);
     padding: 0.15rem 0.45rem;
     margin-left: -0.4rem;
@@ -186,7 +186,8 @@ const home = asset('');
   .nav__logo,
   .nav__links a,
   .nav__docs-btn {
-    text-shadow: 0 1px 8px rgba(0, 0, 0, 0.45);
+    /* dark themes only — on the day office this black halo read as a smudge */
+    text-shadow: var(--chrome-halo);
   }
   .nav__inner {
     display: flex;

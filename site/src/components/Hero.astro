@@ -13,20 +13,20 @@ import { REPO } from '../consts';
   <canvas id="dust" class="dust" aria-hidden="true"></canvas>
   <div class="container hero__frame">
     <div class="hero__copy" data-lit="fade">
-      <p class="eyebrow">6F · penthouse — terminal-native, open source</p>
+      <p class="eyebrow">6F · penthouse — terminal-native, open&nbsp;source</p>
       <h1 class="statement">
         Your agents<br />
         <span class="hl">work here</span><span class="cursor" aria-hidden="true"></span>
       </h1>
       <p class="statement-sub lead">
-        Every Claude Code, Codex or Cursor session walks in, sits down, and gets to work — in a
+        Every Claude Code, Codex, or Cursor session walks in, sits down, and gets to work — in a
         pixel office that lives in your terminal.
       </p>
       <div class="hero__cta">
         <a class="btn btn-primary" href="#install">[ install <span aria-hidden="true">→</span> ]</a>
         <a class="hero__ghost" href={REPO} target="_blank" rel="noreferrer">star on github ↗</a>
       </div>
-      <p class="hero__avail">macOS · Linux · Windows · crates.io · MIT licensed</p>
+      <p class="hero__avail">macOS · Linux · Windows · crates.io · MIT&nbsp;licensed</p>
     </div>
   </div>
 </section>
@@ -52,7 +52,8 @@ import { REPO } from '../consts';
     position: relative;
     z-index: 1;
     width: 100%;
-    max-width: 1400px;
+    /* one shared rail: hero, nav, and every section head align on --maxw */
+    max-width: var(--maxw);
   }
   .hero__copy {
     max-width: 900px;
@@ -74,12 +75,12 @@ import { REPO } from '../consts';
   .hero__ghost {
     font-family: var(--font-mono);
     font-size: 0.95rem;
-    color: #d8cfc0;
+    color: var(--fg);
     text-decoration: none;
-    text-shadow: 0 1px 8px rgba(0, 0, 0, 0.45);
+    text-shadow: var(--chrome-halo);
   }
   .hero__ghost:hover {
-    color: #fff;
+    color: var(--coral);
   }
   .hero__avail {
     margin-top: 1.1rem;
