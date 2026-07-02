@@ -12,10 +12,11 @@ the system we ran, the experiments we ran against it, and the honest results
 
 > **Editor's note (2026-06).** The heavy *process* machinery described below —
 > the review-ledger suppression protocol, the disposition sweep's mechanized
-> attestation (the old `check_dod`/`.dod` gate — the sweep itself survives as a
-> practice in `pr-review.prompt.md`'s process notes), and the
+> attestation (the old `check_dod`/`.dod` gate), and the
 > `census-reminder` / `review-metrics` / `sharp-edge-inventory` automation —
-> has since been **removed** from the repo as a deliberate simplification. This
+> has since been **removed** from the repo as a deliberate simplification (the
+> disposition sweep itself survives as a practice in `pr-review.prompt.md`'s
+> process notes). This
 > page is kept as a record of what we built and, more to the point, what we
 > *measured*: the null onboarding result and the code-first storage ranking are
 > exactly *why* the prose-and-process layers were cut back to the parts that act

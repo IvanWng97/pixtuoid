@@ -30,7 +30,7 @@ This release also adds two new sources you can connect there: **CodeWhale**
 | `~/.cache/ascii-agents/` | `~/.cache/pixtuoid/` |
 | `/tmp/ascii-agents-{uid}.sock` | `/tmp/pixtuoid-{uid}.sock` |
 | `_ascii_agents` hook key in `settings.json` | `_pixtuoid` |
-| `ASCII_AGENTS_SOCKET` env var | `PIXTUOID_SOCKET` (v0.4.0 also adds `PIXTUOID_LOG`) |
+| `ASCII_AGENTS_SOCKET` / `_HOOK` / `_LOG` env vars | `PIXTUOID_SOCKET` / `PIXTUOID_HOOK` / `PIXTUOID_LOG` |
 
 ## Upgrade steps
 

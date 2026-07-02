@@ -225,12 +225,12 @@ you:
    and the full add-a-CLI test steps are in
    [`crates/pixtuoid-core/tests/CLAUDE.md`](../crates/pixtuoid-core/tests/CLAUDE.md).
 7. **Wire it into `runtime/driver.rs::run_async`** (`crates/pixtuoid/src/runtime/driver.rs`) —
-   the runtime spawns sources by hand; the registry gates tests, not spawning.
-8. **If the CLI has hooks**, add an `install/` target (`Target` registry row +
+   the runtime spawns sources by hand (the registry drives the guard test, not the spawning).
+8. **If the CLI has hooks**, add an `install/` target (a `Target` registry row +
    a `merge_install`/`merge_uninstall` pair + a `verify_schema` fn mirroring
-   the target's own config format — pinned by
-   `verify_target_is_sound_after_a_real_install_for_every_target` — + a
-   registered-events↔decoder-arms guard test) so connecting `<name>` in the in-TUI Sources panel (`s`) wires
+   the target's own config format + a registered-events↔decoder-arms guard
+   test; `verify_target_is_sound_after_a_real_install_for_every_target` pins
+   the schema fn) so connecting `<name>` in the in-TUI Sources panel (`s`) wires
    the shim.
 9. **Add a row to [`site/src/sources.json`](../site/src/sources.json)** — the
    single source of truth for the README "Supported Tools" glimpse AND the
