@@ -223,6 +223,8 @@ pub const CLASSIC_OFFICE_DESKS: usize = 16;
 /// Test-facing alias for [`CLASSIC_OFFICE_DESKS`] — the NAMED DEFAULT
 /// deterministic tests/snapshots pass as `Some(TEST_DEFAULT_DESKS)`. Same
 /// value by definition; production consumers use the production name.
+/// (Published as `MAX_VISIBLE_DESKS` through 0.11.x; that deprecated alias was
+/// dropped at 0.12.0 exactly as its own comment scheduled — don't re-add it.)
 pub const TEST_DEFAULT_DESKS: usize = CLASSIC_OFFICE_DESKS;
 pub const DESK_GAP_X: u16 = 11;
 pub const DESK_GAP_Y: u16 = 14;

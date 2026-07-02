@@ -24,6 +24,40 @@ use crate::install::{
     InstallReport, UninstallReport,
 };
 
+/// The wire-facing outcome token — a CLOSED set, published in the JSON schema
+/// as an `enum` so the generated Raycast type is a string-literal UNION (a
+/// consumer typo like `"conected"` is a `tsc` error, not a runtime miss).
+/// Chosen over a bare `string` in the pre-store-publication free window: the
+/// stronger contract costs nothing now; loosening later is additive.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum WireOutcome {
+    Connected,
+    Disconnected,
+    NoOp,
+    Failed,
+}
+
+impl WireOutcome {
+    /// The serialized token — the ONE string authority (serde's snake_case
+    /// rename and this table are pinned equal by `wire_outcome_serializes_as_its_token`).
+    pub fn token(self) -> &'static str {
+        match self {
+            WireOutcome::Connected => "connected",
+            WireOutcome::Disconnected => "disconnected",
+            WireOutcome::NoOp => "no_op",
+            WireOutcome::Failed => "failed",
+        }
+    }
+}
+
+impl std::fmt::Display for WireOutcome {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.token())
+    }
+}
+
 /// Outcome of a single connect/disconnect, so a batch (`reconcile_to`) can
 /// report per-source without aborting the rest.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,13 +75,18 @@ impl ChangeOutcome {
     /// value, never carrying human text (the detail rides in [`Self::message`]).
     /// Kept separate from the enum's `Debug` so the JSON contract can't drift
     /// if a variant is renamed.
-    pub fn wire_token(&self) -> &'static str {
+    pub fn wire_outcome(&self) -> WireOutcome {
         match self {
-            ChangeOutcome::Connected => "connected",
-            ChangeOutcome::Disconnected => "disconnected",
-            ChangeOutcome::NoOp => "no_op",
-            ChangeOutcome::Failed(_) => "failed",
+            ChangeOutcome::Connected => WireOutcome::Connected,
+            ChangeOutcome::Disconnected => WireOutcome::Disconnected,
+            ChangeOutcome::NoOp => WireOutcome::NoOp,
+            ChangeOutcome::Failed(_) => WireOutcome::Failed,
         }
+    }
+
+    /// The serialized token for this outcome (via [`WireOutcome::token`]).
+    pub fn wire_token(&self) -> &'static str {
+        self.wire_outcome().token()
     }
 
     /// The human-readable detail alongside the token — `Some` exactly for
@@ -80,10 +119,10 @@ impl ChangeOutcome {
 pub struct OutcomeRow {
     /// The registry source id the outcome applies to (e.g. `codex`).
     pub id: String,
-    /// The BARE outcome token from `ChangeOutcome::wire_token`: `connected` |
-    /// `disconnected` | `no_op` | `failed`. Machine-matchable (compare with
-    /// `===`), never carrying human text — the detail rides in `message`.
-    pub outcome: String,
+    /// The BARE outcome token: `connected` | `disconnected` | `no_op` |
+    /// `failed` — a schema ENUM, so the generated TS side is a string-literal
+    /// union (machine-matchable with `===`); human text rides in `message`.
+    pub outcome: WireOutcome,
     /// Human-readable detail for the row — present exactly when the outcome
     /// carries any (`failed`), and OMITTED (not `null`) otherwise, so a
     /// success row stays the minimal `{id, outcome}`.
@@ -98,7 +137,7 @@ impl OutcomeRow {
     pub fn new(id: String, outcome: &ChangeOutcome) -> Self {
         OutcomeRow {
             id,
-            outcome: outcome.wire_token().to_string(),
+            outcome: outcome.wire_outcome(),
             message: outcome.message().map(str::to_string),
         }
     }
@@ -691,6 +730,23 @@ mod tests {
             steady.iter().all(|(_, a)| *a == Action::NoOp),
             "matching state ⇒ no changes"
         );
+    }
+
+    #[test]
+    fn wire_outcome_serializes_as_its_token() {
+        // serde's snake_case rename and the token() table are two spellings of
+        // one contract — pin them equal for every variant.
+        for w in [
+            WireOutcome::Connected,
+            WireOutcome::Disconnected,
+            WireOutcome::NoOp,
+            WireOutcome::Failed,
+        ] {
+            assert_eq!(
+                serde_json::to_value(w).unwrap(),
+                serde_json::Value::String(w.token().to_string())
+            );
+        }
     }
 
     #[test]

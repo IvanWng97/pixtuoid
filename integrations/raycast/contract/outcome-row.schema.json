@@ -16,13 +16,25 @@
       ]
     },
     "outcome": {
-      "description": "The BARE outcome token from `ChangeOutcome::wire_token`: `connected` |\n`disconnected` | `no_op` | `failed`. Machine-matchable (compare with\n`===`), never carrying human text — the detail rides in `message`.",
-      "type": "string"
+      "description": "The BARE outcome token: `connected` | `disconnected` | `no_op` |\n`failed` — a schema ENUM, so the generated TS side is a string-literal\nunion (machine-matchable with `===`); human text rides in `message`.",
+      "$ref": "#/$defs/WireOutcome"
     }
   },
   "additionalProperties": false,
   "required": [
     "id",
     "outcome"
-  ]
+  ],
+  "$defs": {
+    "WireOutcome": {
+      "description": "The wire-facing outcome token — a CLOSED set, published in the JSON schema\nas an `enum` so the generated Raycast type is a string-literal UNION (a\nconsumer typo like `\"conected\"` is a `tsc` error, not a runtime miss).\nChosen over a bare `string` in the pre-store-publication free window: the\nstronger contract costs nothing now; loosening later is additive.",
+      "type": "string",
+      "enum": [
+        "connected",
+        "disconnected",
+        "no_op",
+        "failed"
+      ]
+    }
+  }
 }

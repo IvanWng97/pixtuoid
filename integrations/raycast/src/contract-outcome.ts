@@ -32,9 +32,9 @@ export interface OutcomeRow {
    */
   message?: string | null;
   /**
-   * The BARE outcome token from `ChangeOutcome::wire_token`: `connected` |
-   * `disconnected` | `no_op` | `failed`. Machine-matchable (compare with
-   * `===`), never carrying human text — the detail rides in `message`.
+   * The BARE outcome token: `connected` | `disconnected` | `no_op` |
+   * `failed` — a schema ENUM, so the generated TS side is a string-literal
+   * union (machine-matchable with `===`); human text rides in `message`.
    */
-  outcome: string;
+  outcome: "connected" | "disconnected" | "no_op" | "failed";
 }
