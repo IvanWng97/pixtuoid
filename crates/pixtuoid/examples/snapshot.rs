@@ -1109,8 +1109,8 @@ fn meeting_scene(
     max_desks: usize,
     n_agents: usize,
 ) -> Result<(SceneState, u64)> {
-    use pixtuoid_core::layout::{SceneLayout, WaypointKind};
-    use pixtuoid_core::pose::{
+    use pixtuoid_scene::layout::{SceneLayout, WaypointKind};
+    use pixtuoid_scene::pose::{
         est_wander_cycle_ms, is_aimless_cycle, seated_dwell_ms, takes_trip,
         waypoint_index_for_cycle,
     };
@@ -1394,8 +1394,8 @@ fn anim_scene(
     floor_seed: u64,
     facing: Option<&str>,
 ) -> (SceneState, u64) {
-    use pixtuoid_core::layout::{Facing, SceneLayout, WaypointKind, CLASSIC_OFFICE_DESKS};
-    use pixtuoid_core::pose::{
+    use pixtuoid_scene::layout::{Facing, SceneLayout, WaypointKind, CLASSIC_OFFICE_DESKS};
+    use pixtuoid_scene::pose::{
         is_aimless_cycle, seated_dwell_ms, takes_trip, waypoint_index_for_cycle,
     };
 
@@ -1517,7 +1517,7 @@ fn compute_crop_rect(
     rows: u16,
     now: SystemTime,
 ) -> Result<Option<ratatui::layout::Rect>> {
-    use pixtuoid_core::layout::WaypointKind;
+    use pixtuoid_scene::layout::WaypointKind;
 
     // Fail loudly like --theme/--weather above — a typo'd crop target silently
     // writing the full uncropped PNG defeats the point of the flag.
@@ -1540,7 +1540,7 @@ fn compute_crop_rect(
     } else if let Some(ref furniture_str) = args.crop_furniture {
         let buf_w = cols;
         let buf_h = rows.saturating_sub(1).saturating_mul(2);
-        let layout = pixtuoid_core::layout::SceneLayout::compute_with_seed(
+        let layout = pixtuoid_scene::layout::SceneLayout::compute_with_seed(
             buf_w,
             buf_h,
             Some(scene.floor_capacities[0]),
@@ -2085,11 +2085,11 @@ mod tests {
             .unwrap()
             .expect("pantry crop");
         let layout =
-            pixtuoid_core::layout::SceneLayout::compute_with_seed(192, 126, Some(12), 0).unwrap();
+            pixtuoid_scene::layout::SceneLayout::compute_with_seed(192, 126, Some(12), 0).unwrap();
         let pantry = layout
             .waypoints
             .iter()
-            .find(|w| w.kind == pixtuoid_core::layout::WaypointKind::Pantry)
+            .find(|w| w.kind == pixtuoid_scene::layout::WaypointKind::Pantry)
             .unwrap();
         let (cx, cy) = (pantry.pos.x, pantry.pos.y / 2);
         assert!(rect.x <= cx && cx < rect.x + rect.width, "x not in crop");
@@ -2189,8 +2189,8 @@ mod tests {
     /// pre-roll just under the earliest rise.
     #[test]
     fn meeting_scene_stages_a_convergent_group() {
-        use pixtuoid_core::layout::{SceneLayout, WaypointKind};
-        use pixtuoid_core::pose::{
+        use pixtuoid_scene::layout::{SceneLayout, WaypointKind};
+        use pixtuoid_scene::pose::{
             est_wander_cycle_ms, is_aimless_cycle, seated_dwell_ms, takes_trip,
             waypoint_index_for_cycle,
         };

@@ -5,7 +5,7 @@
 //! connectivity test — you can SEE where the blocked areas are, so a changed
 //! obstacle pad or wall placement shows up as a clear diff.
 
-use pixtuoid_core::layout::SceneLayout;
+use pixtuoid_scene::layout::SceneLayout;
 
 fn mask_to_ascii(layout: &SceneLayout) -> String {
     let w = layout.buf_w as usize;

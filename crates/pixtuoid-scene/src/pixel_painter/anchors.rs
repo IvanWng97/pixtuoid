@@ -7,7 +7,7 @@
 
 use std::time::SystemTime;
 
-use pixtuoid_core::layout::{SEAT_RENDER_Y_OFF, WALKING_Y_OFF};
+use crate::layout::{SEAT_RENDER_Y_OFF, WALKING_Y_OFF};
 use pixtuoid_core::AgentSlot;
 
 use super::epoch_ms;
@@ -137,7 +137,7 @@ pub fn character_anchor(
             // Anchor off the resolved stand cell (same `desk` origin as the
             // walk destination), so the label tracks where the agent actually
             // stands instead of the blocked furniture center.
-            let stand = pixtuoid_core::layout::stand_point(
+            let stand = crate::layout::stand_point(
                 wp_obj.kind,
                 wp_obj.pos,
                 layout.pantry_counter_size,

@@ -13,8 +13,8 @@
 use std::collections::VecDeque;
 
 use super::Point;
-use crate::grid::Grid;
-use crate::walkable::WalkableMask;
+use pixtuoid_core::grid::Grid;
+use pixtuoid_core::walkable::WalkableMask;
 
 /// Coarse-cell edge in px. MUST equal `tui::pathfind::CELL_SIZE` (asserted there).
 pub const REACH_CELL_SIZE: u16 = 4;
@@ -94,8 +94,8 @@ impl ReachSet {
     /// coarse cell when `seed` lands on a blocked one, like the router's start
     /// snap). An empty/degenerate mask yields an all-unreachable set.
     pub fn from_mask(mask: &WalkableMask, seed: Point) -> ReachSet {
-        let cell_w = mask.width / REACH_CELL_SIZE;
-        let cell_h = mask.height / REACH_CELL_SIZE;
+        let cell_w = mask.width() / REACH_CELL_SIZE;
+        let cell_h = mask.height() / REACH_CELL_SIZE;
         let mut grid = Grid::filled(cell_w, cell_h, false);
         if cell_w == 0 || cell_h == 0 {
             return ReachSet { grid };
@@ -201,8 +201,8 @@ mod tests {
         // Nothing is reachable — the seed could not snap into any component.
         assert!(!r.reaches(Point { x: 8, y: 8 }), "seed cell is blocked");
         assert!(!r.reaches(Point { x: 50, y: 50 }), "open area never seeded");
-        let all_unreachable = (0..r.grid.height).all(|cy| {
-            (0..r.grid.width).all(|cx| {
+        let all_unreachable = (0..r.grid.height()).all(|cy| {
+            (0..r.grid.width()).all(|cx| {
                 !r.reaches(Point {
                     x: cx * REACH_CELL_SIZE,
                     y: cy * REACH_CELL_SIZE,
@@ -242,7 +242,7 @@ mod tests {
         assert!(!r.reaches(Point { x: 0, y: 0 }));
         // width < cell size collapses the cell width to 0 → a 0-column grid, so
         // no cell is addressable and every query is unreachable (asserted above).
-        assert_eq!(r.grid.width, 0, "degenerate mask has a 0-width cell grid");
+        assert_eq!(r.grid.width(), 0, "degenerate mask has a 0-width cell grid");
     }
 
     #[test]

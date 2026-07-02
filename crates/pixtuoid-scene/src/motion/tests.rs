@@ -602,7 +602,7 @@ fn dwell_time_independent_of_path_length() {
 // -----------------------------------------------------------------------
 #[test]
 fn far_waypoint_full_cycle_is_longer() {
-    use pixtuoid_core::physics::{walk_profile, WalkIntent};
+    use crate::physics::{walk_profile, WalkIntent};
 
     let trip_id = trip_agent("far");
     let seated_dur = seated_dwell_ms(trip_id);
@@ -639,7 +639,7 @@ fn far_waypoint_full_cycle_is_longer() {
 // -----------------------------------------------------------------------
 #[test]
 fn arrival_pause_holds_walking_out_phase() {
-    use pixtuoid_core::physics::{walk_arrived, walk_profile, WalkIntent};
+    use crate::physics::{walk_arrived, walk_profile, WalkIntent};
 
     let trip_id = trip_agent("pause");
     let now = t0();
@@ -996,7 +996,7 @@ fn back_profile_routes_to_the_jittered_desk_goal_the_render_uses() {
 // -----------------------------------------------------------------------
 #[test]
 fn missing_profile_warn_latches_once_per_episode() {
-    use pixtuoid_core::physics::{walk_profile, WalkIntent};
+    use crate::physics::{walk_profile, WalkIntent};
 
     let now = t0();
     let slot = idle_slot("/p/latch.jsonl", now - Duration::from_secs(90));
@@ -1081,7 +1081,7 @@ fn wander_dest_for_pantry_is_the_home_desk_stand_point() {
     let ms = motion.get(&slot.agent_id).expect("state");
     assert_eq!(ms.wander.dest_kind, Some(WaypointKind::Pantry));
     let desk = l.home_desks[0];
-    let expected = pixtuoid_core::layout::approach_point(
+    let expected = crate::layout::approach_point(
         WaypointKind::Pantry.furniture(),
         l.waypoints[pantry_idx].pos,
         l.waypoints[pantry_idx].facing,
@@ -1249,7 +1249,7 @@ fn at_waypoint_resnapshots_back_profile_when_missing() {
 // -----------------------------------------------------------------------
 #[test]
 fn pick_wander_dest_falls_back_to_aimless_when_boxed_in() {
-    use pixtuoid_core::layout::ReachSet;
+    use crate::layout::ReachSet;
 
     let mut l = layout();
     assert!(!l.waypoints.is_empty(), "layout must have waypoints");

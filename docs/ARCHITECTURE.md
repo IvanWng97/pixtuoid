@@ -14,11 +14,13 @@ pixtuoid is a Cargo workspace of **five crates** wired as a strict
 
 - **`pixtuoid-core`** — the headless library. It has **no terminal dependencies**
   (no `ratatui`, no `crossterm`); everything terminal-specific sits behind the
-  `Renderer` trait. Owns sources, the reducer + scene state, layout/physics/pose,
-  and the sprite format.
+  `Renderer` trait. Owns sources, the reducer + scene state, the sprite format,
+  and the grid/walkable vocabulary (the sim geometry — layout/physics/pose —
+  lives in `pixtuoid-scene`; only the coherence-bound `walkable.rs` stays).
 - **`pixtuoid-scene`** — the backend-agnostic render + simulation **engine**: the
-  office world itself (`render_to_rgb_buffer`, layout geometry, pose/motion/
-  pathfinding, the theme model, pets, chitchat, the embedded default pack). It is
+  office world itself (`render_to_rgb_buffer`, layout geometry, walk physics,
+  pose/motion/pathfinding, the theme model, pets, chitchat, the embedded default
+  pack). It is
   terminal- AND window-free **by crate boundary** (no `ratatui`/`crossterm`/
   `winit`/`softbuffer` in its `Cargo.toml` — compiler-enforced, not just a lint).
   Depends on `pixtuoid-core`.
@@ -30,7 +32,7 @@ pixtuoid is a Cargo workspace of **five crates** wired as a strict
   that renders the same engine into a browser `<canvas>` (the site's live-office
   hero). Depends on `pixtuoid-scene` with default features off — core's `native`
   feature (the async source runtime: `tokio`/`notify`, the watchers and probes)
-  is disabled, leaving the pure decode/reducer/layout core that compiles to
+  is disabled, leaving the pure decode/reducer core that compiles to
   `wasm32-unknown-unknown`. A scripted event loop drives the real reducer; the
   built artifact is committed under `site/public/wasm/` (`just gen-wasm`).
 - **`pixtuoid-hook`** — a tiny shim Claude Code invokes per hook event. It depends

@@ -1,31 +1,30 @@
-//! TUI-side pose layer.
+//! Pose layer: pure derivation + the routed authority, split file-level.
 //!
-//! Re-exports the pure pose-derivation surface from `pixtuoid_core::pose`
-//! and adds the binary-side machinery:
+//! `pure` (sibling file) is the stateless state → pose derivation — a
+//! function of the snapshot inputs only, no routing, no per-frame history.
+//! This module re-exports its whole surface and adds the routed machinery:
 //!   * `PoseHistory` — per-agent cache of the last rendered position.
 //!   * `derive_with_routing` — the routed variant of `derive` that consults
 //!     a `&mut dyn Router` so walking poses follow A*-routed polylines and
 //!     so state transitions are smoothed with a snap-back walk instead of
 //!     teleporting back to the desk.
-//!
-//! Keeping the routed code on this side means `pixtuoid-core` does not
-//! depend on the pathfinder — the trait lives in the binary because A* is
-//! TUI-rendering-adjacent and may differ for non-terminal renderers.
+
+mod pure;
 
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
 
-use pixtuoid_core::physics::{walk_arrived, walk_profile, walk_progress, WalkIntent};
 use pixtuoid_core::state::AgentSlot;
-use pixtuoid_core::walkable::{OccupancyOverlay, WalkableMask};
 use pixtuoid_core::AgentId;
 
 use crate::motion::{
     advance_wander, octile_path_len, settle_len, walking_position, MotionState, WalkLeg,
     WalkPathSnapshot, WanderPhase,
 };
+use crate::physics::{walk_arrived, walk_profile, walk_progress, WalkIntent};
+use pixtuoid_core::walkable::{OccupancyOverlay, WalkableMask};
 
-pub use pixtuoid_core::pose::{
+pub use pure::{
     aimless_wander_seed, derive, derive_state_only, dwell_ms, est_wander_cycle_ms,
     is_aimless_cycle, personality_for, pick_aimless_dest, seated_dwell_ms, stale_resume_gap_ms,
     takes_trip, walking_frame, waypoint_index_for_cycle, Personality, Pose, ENTRY_ANIMATION_MS,
@@ -122,7 +121,7 @@ const EXIT_BUDGET_MARGIN_MS: u64 = 300;
 /// approach cell sits directly off the seat and the settle glide is a short
 /// straight hop onto the chair.
 pub(crate) fn desk_approach_cell(desk: Point, layout: &Layout) -> Option<Point> {
-    use pixtuoid_core::layout::{approach_point, desk_walk_anchor, Facing, Furniture};
+    use crate::layout::{approach_point, desk_walk_anchor, Facing, Furniture};
     let chair = desk_walk_anchor(desk);
     let cell = approach_point(
         Furniture::Desk,
@@ -162,7 +161,7 @@ pub(crate) fn desk_approach_cell(desk: Point, layout: &Layout) -> Option<Point> 
 /// profile — no fixed-time compression). The ONLY non-caller is a mid-wander EXIT:
 /// there the agent departs from its live wander position, not the chair.
 pub(crate) fn desk_leg_endpoint(desk: Point, layout: &Layout) -> (Point, Option<Point>) {
-    let chair = pixtuoid_core::layout::desk_walk_anchor(desk);
+    let chair = crate::layout::desk_walk_anchor(desk);
     match desk_approach_cell(desk, layout) {
         Some(approach) => (approach, Some(chair)),
         None => (chair, None),

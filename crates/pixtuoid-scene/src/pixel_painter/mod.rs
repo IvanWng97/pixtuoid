@@ -12,7 +12,7 @@
 use std::collections::HashMap;
 use std::time::SystemTime;
 
-use pixtuoid_core::layout::WALKING_Y_OFF;
+use crate::layout::WALKING_Y_OFF;
 use pixtuoid_core::sprite::blit::blit_frame;
 use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
@@ -216,7 +216,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
     let top_wall_h = ctx
         .layout
         .top_margin
-        .saturating_sub(pixtuoid_core::layout::WALL_BAND_TO_TOP_MARGIN);
+        .saturating_sub(crate::layout::WALL_BAND_TO_TOP_MARGIN);
     // The elevator door replaces the rightmost window — pass its x-range
     // so `paint_floor_and_walls` skips drawing a window that would
     // otherwise bleed through behind the elevator frame.
@@ -524,7 +524,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
                     .layout
                     .home_desk(agent.desk_index.single_floor_local())
                     .unwrap_or(w.pos);
-                let stand = pixtuoid_core::layout::stand_point(
+                let stand = crate::layout::stand_point(
                     w.kind,
                     w.pos,
                     ctx.layout.pantry_counter_size,
@@ -816,7 +816,7 @@ fn enqueue_characters<'a>(
                     // this is the side stand cell (side-aware); for seats it is
                     // `wp.pos` (the sprite sits ON the furniture) — the walk-in
                     // approach cell is resolved separately by `approach_point`.
-                    let stand = pixtuoid_core::layout::stand_point(
+                    let stand = crate::layout::stand_point(
                         wp_obj.kind,
                         wp_obj.pos,
                         ctx.layout.pantry_counter_size,

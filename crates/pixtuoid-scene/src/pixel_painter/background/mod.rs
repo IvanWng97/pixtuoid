@@ -248,7 +248,7 @@ fn skyline_haze(w: Weather) -> Option<(Rgb, f32)> {
 pub(in crate::pixel_painter) fn window_spill_columns(layout: &Layout) -> Vec<SunbeamColumn> {
     let top_wall_h = layout
         .top_margin
-        .saturating_sub(pixtuoid_core::layout::WALL_BAND_TO_TOP_MARGIN);
+        .saturating_sub(crate::layout::WALL_BAND_TO_TOP_MARGIN);
     let skip = layout.door.map(|d| (d.x, d.x + ELEVATOR_W));
     let mut out = Vec::new();
     let mut x = 3u16;

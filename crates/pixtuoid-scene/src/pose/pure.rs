@@ -1,11 +1,11 @@
-//! Pure state → pose derivation. Lives in core so non-TUI renderers
-//! (snapshot tooling, future PNG/GIF capture, web canvas) get identical
-//! pose semantics without depending on the binary crate.
+//! Pure state → pose derivation — every renderer (tui, floating, snapshot
+//! tooling, web canvas) gets identical pose semantics from this one file.
 //!
 //! `derive(slot, now, layout)` is a function of the snapshot inputs only —
 //! no routing, no per-frame history. The routed variant (which composes
-//! against a `Router` and a `PoseHistory` cache) is `tui::pose` on the
-//! binary side, since the router is terminal-rendering-adjacent.
+//! against a `Router` and a `PoseHistory` cache) is the sibling
+//! `pose/mod.rs` (`derive_with_routing`) — the pure-vs-routed split is
+//! file-level within this module.
 //!
 //! Variation knobs:
 //!  * `stale_resume_gap_ms(agent_id)` — per-agent off-screen-gap sentinel (NOT the
@@ -21,8 +21,8 @@ use crate::layout::{
     desk_furniture_def, desk_walk_anchor, furniture_def, Bounds, DwellWindow, Point, SceneLayout,
     WaypointKind,
 };
-use crate::state::{ActivityState, AgentSlot};
-use crate::AgentId;
+use pixtuoid_core::state::{ActivityState, AgentSlot};
+use pixtuoid_core::AgentId;
 
 /// How long after the last event an Idle agent stays in the "thinking"
 /// pose (seated, awake, no z's) before entering the wander/sleep cycle.
@@ -91,7 +91,7 @@ pub fn stale_resume_gap_ms(agent_id: AgentId) -> u64 {
 /// security relevance.
 fn jittered_dwell(window: DwellWindow, agent_id: AgentId, tag: u64) -> u64 {
     let DwellWindow { base_ms, range_ms } = window;
-    base_ms + crate::id::splitmix64(agent_id.raw() ^ tag) % range_ms.max(1)
+    base_ms + pixtuoid_core::id::splitmix64(agent_id.raw() ^ tag) % range_ms.max(1)
 }
 
 /// Absolute dwell (ms) an agent lingers at a waypoint, per spot kind, with

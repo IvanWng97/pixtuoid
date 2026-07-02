@@ -9,7 +9,13 @@ pub struct AgentId(u64);
 /// collide to a couple of buckets — so the personality slicers (`speed_mult`,
 /// `pause_ms_for`, dwell jitter) finalize the raw id (xor a per-purpose tag)
 /// through this before taking a bit window. Not cryptographic.
-pub(crate) fn splitmix64(z: u64) -> u64 {
+///
+/// `pub` + `#[doc(hidden)]`: internal cross-crate helper, NOT a stable API —
+/// the personality slicers moved to `pixtuoid-scene` (physics/pose) with the
+/// sim-geometry cluster and still finalize through this one canonical copy
+/// (same treatment as [`normalize_path_key`]).
+#[doc(hidden)]
+pub fn splitmix64(z: u64) -> u64 {
     let z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
     let z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
     z ^ (z >> 31)

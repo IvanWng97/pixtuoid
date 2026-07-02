@@ -12,7 +12,7 @@ use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::time::SystemTime;
 
-use pixtuoid_core::physics::{walk_arrived, WalkProfile};
+use crate::physics::{walk_arrived, WalkProfile};
 use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::sprite::RgbBuffer;
 use pixtuoid_core::state::{AgentSlot, GlobalDeskIndex, SceneState};

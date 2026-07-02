@@ -263,7 +263,7 @@ mod tests {
         let cols: u16 = 160;
         let rows: u16 = 50;
         let buf_h = rows.saturating_sub(1) * 2;
-        let expected = pixtuoid_core::layout::SceneLayout::compute_with_seed(cols, buf_h, None, 0)
+        let expected = pixtuoid_scene::layout::SceneLayout::compute_with_seed(cols, buf_h, None, 0)
             .map(|l| l.home_desks.len())
             .unwrap_or(0);
         assert_eq!(capacity_for_terminal(cols, rows, 0), expected);

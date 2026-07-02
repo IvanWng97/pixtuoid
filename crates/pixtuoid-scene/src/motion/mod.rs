@@ -11,7 +11,7 @@
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
 
-use pixtuoid_core::physics::{walk_arrived, walk_profile, WalkIntent, WalkProfile};
+use crate::physics::{walk_arrived, walk_profile, WalkIntent, WalkProfile};
 use pixtuoid_core::state::AgentSlot;
 use pixtuoid_core::walkable::OccupancyOverlay;
 use pixtuoid_core::AgentId;
@@ -471,7 +471,7 @@ fn poll_walk_leg(
     };
     // Profile readable again: the missing episode (if any) is over — re-arm.
     ms.missing_profile_warned = false;
-    let t_x1000 = pixtuoid_core::physics::walk_progress(profile, elapsed_phase);
+    let t_x1000 = crate::physics::walk_progress(profile, elapsed_phase);
     if may_transition && walk_arrived(profile, elapsed_phase) {
         WalkLegStatus::Arrived {
             t_x1000,
@@ -520,7 +520,7 @@ fn pick_wander_dest(
         // (NOT the raw blocked `wp.pos`, which made A* detour + the sprite pop).
         // Same `&layout.reachable` + origin as core::pose::idle_pose so the
         // stateless overlay and this routed dest stay in lockstep.
-        let dest = pixtuoid_core::layout::approach_point(
+        let dest = crate::layout::approach_point(
             wp.kind.furniture(),
             wp.pos,
             wp.facing,
@@ -540,7 +540,7 @@ fn pick_wander_dest(
         }
         // Seat foot cell `S`: the walk SETTLES from `dest` onto it (the sprite
         // renders here). `None` for obstacles — the agent stands AT `dest`.
-        let seat = pixtuoid_core::layout::seated_foot_cell(wp.kind.furniture(), wp.pos);
+        let seat = crate::layout::seated_foot_cell(wp.kind.furniture(), wp.pos);
         (dest, Some(wp.kind), Some(wp_idx), seat)
     }
 }

@@ -40,6 +40,7 @@ pub mod motion;
 pub mod overlay;
 pub mod pathfind;
 pub mod pet;
+pub mod physics;
 pub mod pixel_painter;
 pub mod pose;
 pub mod theme;

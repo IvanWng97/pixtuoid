@@ -1,6 +1,6 @@
 [package]
 name                   = "pixtuoid-core"
-description            = "Headless engine for pixtuoid — state, sprites, layout"
+description            = "Headless engine for pixtuoid — sources, state, sprites"
 version.workspace      = true
 edition.workspace      = true
 rust-version.workspace = true
@@ -26,7 +26,7 @@ workspace = true
 # hook listeners, the JSONL watcher, the liveness probes). Building WITHOUT it
 # (`--no-default-features`) yields a pure core that compiles to
 # wasm32-unknown-unknown: the event vocabulary + reducer + state + the
-# layout/sprite/pose/physics/render surface, no tokio/notify. That no-default
+# sprite/render surface, no tokio/notify. That no-default
 # build is what pixtuoid-scene → the WebAssembly office hero compiles against.
 [features]
 default       = ["native"]
@@ -53,7 +53,8 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Securit
 [dev-dependencies]
 tokio = { workspace = true, features = ["sync", "rt", "macros", "fs", "net", "time", "io-util", "rt-multi-thread"] }
 # Property-based testing of the pure-core algebraic invariants (the walkable-mask
-# geometry today): generate thousands of inputs to falsify a property, shrinking
+# geometry today — the rest of the sim-geometry prop modules moved to
+# pixtuoid-scene): generate thousands of inputs to falsify a property, shrinking
 # any failure to a minimal counterexample. Found failures persist under
 # `proptest-regressions/` so they re-run forever.
 proptest = "1"

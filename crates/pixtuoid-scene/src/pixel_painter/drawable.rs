@@ -1097,7 +1097,7 @@ mod tests {
         // pockets by a solid vertical wall. With one spot in each pocket, the
         // pet's walk leg routes between them, find_path returns None, and the
         // straight-lerp fallback (the cited 297-300) is taken.
-        use pixtuoid_core::layout::{Bounds, ReachSet};
+        use crate::layout::{Bounds, ReachSet};
         use pixtuoid_core::walkable::WalkableMask;
         let (w, h) = (200u16, 120u16);
         let mut mask = WalkableMask::new_open(w, h);

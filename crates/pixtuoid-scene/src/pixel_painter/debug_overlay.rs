@@ -297,7 +297,7 @@ mod tests {
     /// to a side, not through the desk front.
     #[test]
     fn overlay_marks_desk_approach_distinct_from_the_chair() {
-        use pixtuoid_core::layout::{Facing, Furniture};
+        use crate::layout::{Facing, Furniture};
         let l = SceneLayout::compute_with_seed(200, 130, Some(8), 0).unwrap();
         let desk = *l.home_desks.first().expect("a home desk");
         let chair = desk_walk_anchor(desk);

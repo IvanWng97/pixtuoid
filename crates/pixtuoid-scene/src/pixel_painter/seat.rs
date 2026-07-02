@@ -191,7 +191,7 @@ impl SeatView {
 ///   (`seated_anchor.y + 12 = desk.y + 4`, below the desk furniture's `desk.y+8`),
 ///   so the glide stays behind the desk — no front-cross.
 pub(super) fn settle_seat_view(cell: Point, layout: &Layout) -> Option<(SeatView, u16)> {
-    use pixtuoid_core::layout::{seated_foot_cell, Furniture};
+    use crate::layout::{seated_foot_cell, Furniture};
     layout
         .waypoints
         .iter()

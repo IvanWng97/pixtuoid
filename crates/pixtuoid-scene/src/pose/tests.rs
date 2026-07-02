@@ -619,7 +619,7 @@ fn snap_back_routes_via_the_approach_cell_then_settles_onto_the_chair() {
     // approach cell and SETTLES onto the chair, instead of aiming A* at the blocked
     // chair (which find_path snaps to the nearest — south — cell). The frozen
     // polyline therefore ends [..., approach, chair].
-    use pixtuoid_core::layout::desk_walk_anchor;
+    use crate::layout::desk_walk_anchor;
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let l = layout();
     let desk_index = (0..l.home_desks.len())
@@ -1573,10 +1573,8 @@ fn exit_uses_commute_speed_faster_than_wander() {
     // The minimum possible commute v_cruise = 0.36 * 0.85 ≈ 0.306,
     // while the maximum wander v_cruise = 0.25 * 1.20 ≈ 0.300.
     // There's a gap: anything >= 0.301 is unambiguously commute.
-    let min_commute =
-        pixtuoid_core::physics::V_CRUISE_COMMUTE * pixtuoid_core::physics::SPEED_MULT_MIN;
-    let max_wander =
-        pixtuoid_core::physics::V_CRUISE_WANDER * pixtuoid_core::physics::SPEED_MULT_MAX;
+    let min_commute = crate::physics::V_CRUISE_COMMUTE * crate::physics::SPEED_MULT_MIN;
+    let max_wander = crate::physics::V_CRUISE_WANDER * crate::physics::SPEED_MULT_MAX;
     assert!(
         min_commute > max_wander,
         "test invariant: commute and wander speed ranges must not overlap"
@@ -1731,7 +1729,7 @@ fn desk_approach_cell_is_never_inside_the_blocked_desk() {
     // what made it fall back to a straight door→chair line THROUGH the desk body
     // (the "walk through the table" bug). A walkable result is, by construction,
     // outside every blocked cell.
-    use pixtuoid_core::layout::desk_walk_anchor;
+    use crate::layout::desk_walk_anchor;
     let l = layout();
     let mut any_some = false;
     for &desk in &l.home_desks {
@@ -1766,7 +1764,7 @@ fn desk_entry_routes_around_the_desk_then_settles_onto_the_chair() {
     // (off an allowed side) and only THEN settles onto the chair — it must NOT
     // straight-line door→chair through the desk body. With the chair appended as
     // the settle endpoint, the frozen leg polyline is [door, approach, chair].
-    use pixtuoid_core::layout::desk_walk_anchor;
+    use crate::layout::desk_walk_anchor;
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let l = layout();
     let door = l.door_threshold.expect("door");
@@ -1830,8 +1828,8 @@ fn wander_legs_approach_the_desk_via_an_allowed_side_not_through_the_front() {
     // on every wander cycle. Every desk-touching leg must instead route via
     // `desk_leg_endpoint` (a reachable N/E/W approach cell) and SETTLE onto the
     // chair, exactly like entry. This pins both legs.
+    use crate::layout::desk_walk_anchor;
     use crate::pathfind::AStarRouter;
-    use pixtuoid_core::layout::desk_walk_anchor;
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let l = layout();
 
@@ -1942,7 +1940,7 @@ fn exit_from_desk_rises_off_the_chair_via_the_approach_cell() {
     // chair snaps the goal to the nearest (south) cell, sending the agent the
     // wrong way around the desk before doubling back to the door. The frozen
     // exit polyline must therefore START [chair, approach, …], mirroring entry.
-    use pixtuoid_core::layout::desk_walk_anchor;
+    use crate::layout::desk_walk_anchor;
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let l = layout();
     let desk_index = (0..l.home_desks.len())
@@ -2362,7 +2360,7 @@ fn wander_continuous_across_layouts_and_agents() {
     // MULTIPLE desks per layout (so different home positions and wander
     // destinations, incl. couch/pantry/etc., are exercised). Overlay churns
     // every frame. A teleport on any geometry/agent fails the sweep.
-    use pixtuoid_core::layout::TEST_DEFAULT_DESKS;
+    use crate::layout::TEST_DEFAULT_DESKS;
 
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let geometries: [(u16, u16, u64); 5] = [

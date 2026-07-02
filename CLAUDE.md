@@ -8,9 +8,9 @@ This is the **workspace-level map** — conventions, invariants, and rules that
 apply everywhere. **Module-level detail and the crate-specific "sharp edges"
 live in nested `CLAUDE.md` files**, auto-loaded when you touch those trees:
 
-- [`crates/pixtuoid-core/CLAUDE.md`](crates/pixtuoid-core/CLAUDE.md) — the headless lib: sources, reducer/state, sprites, layout, physics, pose.
+- [`crates/pixtuoid-core/CLAUDE.md`](crates/pixtuoid-core/CLAUDE.md) — the headless lib: sources, reducer/state, sprites, the grid/walkable vocabulary.
   - [`crates/pixtuoid-core/tests/CLAUDE.md`](crates/pixtuoid-core/tests/CLAUDE.md) — the integration-test layout (8 test binaries: six grouped + two flat publish-excluded; parity twins) + add-a-CLI test steps.
-- [`crates/pixtuoid-scene/CLAUDE.md`](crates/pixtuoid-scene/CLAUDE.md) — the backend-agnostic render+sim engine CRATE (`pixtuoid-core ← pixtuoid-scene ← pixtuoid`): pixel painter (render_to_rgb_buffer), layout, pose/motion authority, pathfinding, the theme MODEL, weather/ambient, pets, chitchat, frame_cache, embedded_pack.
+- [`crates/pixtuoid-scene/CLAUDE.md`](crates/pixtuoid-scene/CLAUDE.md) — the backend-agnostic render+sim engine CRATE (`pixtuoid-core ← pixtuoid-scene ← pixtuoid`): pixel painter (render_to_rgb_buffer), layout, walk physics, pose (pure + routed) / motion authority, pathfinding, the theme MODEL, weather/ambient, pets, chitchat, frame_cache, embedded_pack.
 - [`crates/pixtuoid/CLAUDE.md`](crates/pixtuoid/CLAUDE.md) — the binary: install, runtime, cli, config, multi-floor, embedded pack.
   - [`crates/pixtuoid/src/tui/CLAUDE.md`](crates/pixtuoid/src/tui/CLAUDE.md) — the terminal painter (over the `pixtuoid-scene` crate): draw_scene flush, harness, widgets, the theme-PICKER ui, Sources panel, dashboard, hit_test, version popup.
 
@@ -38,16 +38,18 @@ an ASCII office. Rust workspace of five crates. User-facing overview:
 ```
 crates/                 DAG: pixtuoid-core ← pixtuoid-scene ← {pixtuoid, pixtuoid-web} (+ standalone pixtuoid-hook)
 ├── pixtuoid-core/   headless lib — no terminal deps (ratatui/crossterm forbidden)
-│                    source/ state/ sprite/ render/ layout/ physics.rs pose/ walkable.rs
+│                    source/ state/ sprite/ render/ grid.rs walkable.rs (walkable STAYS here:
+│                    its ops are an inherent `impl Grid<bool>`, orphan-rule-pinned to Grid's crate)
 │                    `native` (default) feature gates the async source runtime (tokio/notify,
 │                    hook/jsonl/manager/probes, the Source-trait seam source/native.rs + each
 │                    source's runtime half source/<cli>/native.rs — MODULE-level gates with
 │                    parent re-exports, not item-level cfg scatter) — `default-features = false`
-│                    leaves the pure decode/reducer/layout core, which compiles to wasm32
+│                    leaves the pure decode/reducer core, which compiles to wasm32
 ├── pixtuoid-scene/  backend-agnostic render+sim ENGINE crate — terminal AND window-free BY CRATE
 │                    BOUNDARY (no ratatui/crossterm/winit/softbuffer in its Cargo.toml; just arch enforces)
-│                    pixel_painter/ (render_to_rgb_buffer) layout/ pose/ motion/ pathfind/ floor/ theme/
-│                    pet/ chitchat/ frame_cache/ anim/ overlay/ font/ embedded_pack/ (default pack at
+│                    pixel_painter/ (render_to_rgb_buffer) layout/ physics.rs pose/ (pure + routed,
+│                    file-level split) motion/ pathfind/ floor/ theme/ pet/ chitchat/ frame_cache/
+│                    anim/ overlay/ font/ embedded_pack/ (default pack at
 │                    sprites/default/, own build.rs); depends on pixtuoid-core (forwards `native`)
 ├── pixtuoid/        binary — ratatui + crossterm + winit + tokio + clap; depends on pixtuoid-scene
 │                    cli.rs config.rs runtime/ install/ tui/ floating/ (two thin painters over the

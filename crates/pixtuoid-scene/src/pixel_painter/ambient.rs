@@ -301,7 +301,7 @@ pub(super) fn paint_sun_spot(
     // project onto the outer 1-px column at the left/right edge of that band.
     let wall_band_h = layout
         .top_margin
-        .saturating_sub(pixtuoid_core::layout::WALL_BAND_TO_TOP_MARGIN);
+        .saturating_sub(crate::layout::WALL_BAND_TO_TOP_MARGIN);
     if wall_band_h == 0 {
         return;
     }
@@ -634,7 +634,7 @@ mod tests {
         let theme = &crate::theme::NORMAL;
         // top_margin == WALL_BAND_TO_TOP_MARGIN → wall_band_h saturating_sub to 0.
         let mut layout = crate::layout::Layout::compute(192, 80, Some(4)).expect("layout fits");
-        layout.top_margin = pixtuoid_core::layout::WALL_BAND_TO_TOP_MARGIN;
+        layout.top_margin = crate::layout::WALL_BAND_TO_TOP_MARGIN;
         // 07:00 → East wall spot with a real beam under Clear, so execution
         // reaches the wall_band_h==0 guard rather than an earlier return.
         let clear_morning = (1..=60u32)

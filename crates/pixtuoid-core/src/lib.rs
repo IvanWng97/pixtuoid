@@ -9,14 +9,16 @@
 
 pub mod grid;
 pub mod id;
-pub mod layout;
-pub mod physics;
 pub mod platform;
-pub mod pose;
 pub mod render;
 pub mod source;
 pub mod sprite;
 pub mod state;
+// Coherence-bound residue of the sim-geometry move to `pixtuoid-scene`:
+// `WalkableMask` is an ALIAS for `Grid<bool>` whose obstacle ops are an
+// inherent `impl Grid<bool>`, and the orphan rule pins that impl to the
+// crate that owns `Grid` — so the mask vocabulary stays here even though
+// its producers (layout) and consumers (pathfind/pose) live in the scene crate.
 pub mod walkable;
 
 pub use grid::Grid;

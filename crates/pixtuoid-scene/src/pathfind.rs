@@ -34,8 +34,8 @@ const CELL_WALKABLE_MIN: u16 = 8;
 // The core-side `ReachSet` MUST coarsen identically to this router, or
 // "reachable" in `approach_point` would diverge from what A* actually routes.
 // Locked at compile time so a CELL_SIZE / threshold edit can't silently desync.
-const _: () = assert!(CELL_SIZE == pixtuoid_core::layout::REACH_CELL_SIZE);
-const _: () = assert!(CELL_WALKABLE_MIN == pixtuoid_core::layout::REACH_CELL_WALKABLE_MIN);
+const _: () = assert!(CELL_SIZE == crate::layout::REACH_CELL_SIZE);
+const _: () = assert!(CELL_WALKABLE_MIN == crate::layout::REACH_CELL_WALKABLE_MIN);
 
 /// Abstract pathfinder — implementations route from `from` to `to` over
 /// the supplied mask + overlay, returning a polyline (first = `from`,
@@ -634,8 +634,8 @@ mod tests {
         // exists, approach_point returns the `wp.pos` sentinel (NO fallback — the
         // wander skips the furniture), which isn't a real destination, so we
         // exclude it below.
+        use crate::layout::approach_point;
         use crate::layout::TEST_DEFAULT_DESKS;
-        use pixtuoid_core::layout::approach_point;
         let overlay = OccupancyOverlay::new();
         for (w, h) in [
             (96u16, 70u16),

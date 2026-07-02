@@ -2301,6 +2301,7 @@ dependencies = [
  "font8x8",
  "palette",
  "pixtuoid-core",
+ "proptest",
  "serde_json",
  "tempfile",
  "tracing",

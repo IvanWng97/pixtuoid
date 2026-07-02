@@ -9,7 +9,7 @@ use super::{
     PodDecorItem, Point, Size, WallDecorItem, WallSegment, Waypoint, WaypointKind, OBSTACLE_PAD_PX,
     PANTRY_FOOTPRINT_DEPTH, WALL_BAND_TO_TOP_MARGIN,
 };
-use crate::walkable::WalkableMask;
+use pixtuoid_core::walkable::WalkableMask;
 
 /// Stamp a `(w, h)` furniture footprint into the mask, positioned by its
 /// placement `anchor` (the ONE source for footprint origin — shared with the

@@ -1,10 +1,10 @@
 //! Pure physics model for character walking.
 //!
-//! Imports only `crate::AgentId`. No router, no layout, no terminal deps.
+//! Imports only `pixtuoid_core::AgentId`. No router, no layout, no terminal deps.
 //! All kinematics are f32; screen is ≤ ~4096 px → ≤ ~57k octile, well
 //! within f32's 24-bit mantissa.
 
-use crate::AgentId;
+use pixtuoid_core::AgentId;
 
 // ── Intent ────────────────────────────────────────────────────────────────────
 
@@ -101,7 +101,7 @@ pub struct WalkProfile {
 pub fn speed_mult(agent_id: AgentId) -> f32 {
     // Finalize with splitmix64 before slicing so distinct agents get distinct
     // speeds (raw FNV-1a doesn't avalanche the high bits — see `splitmix64`).
-    let z = crate::id::splitmix64(agent_id.raw());
+    let z = pixtuoid_core::id::splitmix64(agent_id.raw());
     let bits = (z >> 24) & 0x3FF; // 0..=1023
     let t = bits as f32 / 1023.0; // [0.0, 1.0]
     SPEED_MULT_MIN + t * (SPEED_MULT_MAX - SPEED_MULT_MIN)
@@ -114,7 +114,7 @@ pub fn speed_mult(agent_id: AgentId) -> f32 {
 pub fn pause_ms_for(agent_id: AgentId) -> u64 {
     // Same splitmix64 finalize as speed_mult, but a disjoint bit window so
     // pause is independent of speed (a fast walker is not always a brief pauser).
-    let z = crate::id::splitmix64(agent_id.raw());
+    let z = pixtuoid_core::id::splitmix64(agent_id.raw());
     let bits = (z >> 40) & 0xFFF; // 0..=4095
                                   // f64 (not f32 like speed_mult): the output is a u64 ms count, so f64 keeps
                                   // the bits→[0,1]→ms integer round-trip exact across the full 200..=400 range.
@@ -684,8 +684,8 @@ mod prop {
         WalkIntent::SnapBack,
     ];
 
-    fn prop_id(seed: u64) -> crate::AgentId {
-        crate::AgentId::from_parts("prop", &seed.to_string())
+    fn prop_id(seed: u64) -> pixtuoid_core::AgentId {
+        pixtuoid_core::AgentId::from_parts("prop", &seed.to_string())
     }
 
     /// Sweep one profile's whole timeline: progress is bounded to [0, 1000],

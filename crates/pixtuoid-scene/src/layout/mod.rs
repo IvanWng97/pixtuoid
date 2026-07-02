@@ -33,8 +33,8 @@ pub use mask::{WALL_THICK_H, WALL_THICK_V};
 pub use placement::{anchored_top_left, z_sort_row, Anchor};
 pub use reach::{ReachSet, REACH_CELL_SIZE, REACH_CELL_WALKABLE_MIN};
 
-use crate::state::FloorLocalDeskIndex;
-use crate::walkable::WalkableMask;
+use pixtuoid_core::state::FloorLocalDeskIndex;
+use pixtuoid_core::walkable::WalkableMask;
 
 /// Primitive rectangle. Same shape as `ratatui::layout::Rect` so the
 /// binary can convert with a one-line field-by-field copy without paying
@@ -119,6 +119,10 @@ pub struct Waypoint {
     /// `room_id` form one group-chitchat venue.
     pub room_id: Option<usize>,
 }
+
+/// Backwards-compat alias — existing call sites construct `Layout::compute()`
+/// (the pre-move façade name this crate re-exported `SceneLayout` under).
+pub type Layout = SceneLayout;
 
 #[derive(Debug, Clone)]
 pub struct SceneLayout {

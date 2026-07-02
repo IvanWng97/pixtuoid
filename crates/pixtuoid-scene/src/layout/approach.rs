@@ -18,7 +18,7 @@
 use super::decor::{furniture_def, Facing, Furniture, WaypointKind};
 use super::reach::ReachSet;
 use super::{Point, Size};
-use crate::walkable::WalkableMask;
+use pixtuoid_core::walkable::WalkableMask;
 
 /// First clear pixel beyond a footprint half-extent. `mask.rs` stamps
 /// waypoint furniture with `pad = 1`, so `half + 2` is the first

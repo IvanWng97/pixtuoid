@@ -1,5 +1,5 @@
 use super::*;
-use crate::state::{GlobalDeskIndex, ToolKind};
+use pixtuoid_core::state::{GlobalDeskIndex, ToolKind};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -785,7 +785,7 @@ fn aimless_fallback_scans_the_midline_for_a_walkable_cell() {
         x: c.x + c.width - 2,
         y: mid_y,
     };
-    let mut mask = crate::walkable::WalkableMask::new_open(l.buf_w, l.buf_h);
+    let mut mask = pixtuoid_core::walkable::WalkableMask::new_open(l.buf_w, l.buf_h);
     mask.mark_blocked(0, 0, l.buf_w, l.buf_h, 0);
     mask.mark_walkable(open.x, open.y, 1, 1);
     l.walkable = mask;
@@ -811,7 +811,7 @@ fn aimless_fallback_on_a_fully_blocked_mask_returns_the_desk_anchor() {
     // the agent's own desk anchor — a destination every consumer already
     // handles (A* snap / render anchor) — rather than a cell inside furniture.
     let mut l = layout();
-    let mut mask = crate::walkable::WalkableMask::new_open(l.buf_w, l.buf_h);
+    let mut mask = pixtuoid_core::walkable::WalkableMask::new_open(l.buf_w, l.buf_h);
     mask.mark_blocked(0, 0, l.buf_w, l.buf_h, 0);
     l.walkable = mask;
 

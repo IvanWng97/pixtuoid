@@ -18,7 +18,7 @@ use super::palette::blend_over;
 pub(super) const WALL_THICK_V_PX: u16 = 3; // visual; footprint is 1 px (mask.rs)
                                            // Derived from the core mask const so the visible glass face and the blocked
                                            // ground footprint share a single source of truth (can't drift apart).
-pub(super) const WALL_THICK_H_PX: u16 = pixtuoid_core::layout::WALL_THICK_H;
+pub(super) const WALL_THICK_H_PX: u16 = crate::layout::WALL_THICK_H;
 const GLASS_SEAM_STRIDE: u16 = 16;
 // The horizontal wall's frosted glass rises this many px NORTH of its walkable
 // footprint — a "back cap" giving the wall height. Because the strip is

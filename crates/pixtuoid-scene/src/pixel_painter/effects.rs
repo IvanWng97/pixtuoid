@@ -1,6 +1,6 @@
 use std::time::SystemTime;
 
-use pixtuoid_core::layout::WALKING_Y_OFF;
+use crate::layout::WALKING_Y_OFF;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
 use super::epoch_ms;

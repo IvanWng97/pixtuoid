@@ -989,7 +989,7 @@ mod tests {
         // blit lives in tui `drawable.rs`). Adding a variant without a name is a
         // compile error (exhaustive match); a TYPO'd name would draw nothing —
         // this catches it by checking every value is a real registered animation.
-        use crate::sprite::format::OPTIONAL_FURNITURE_ANIMATIONS;
+        use pixtuoid_core::sprite::format::OPTIONAL_FURNITURE_ANIMATIONS;
         let names: Vec<&str> = [
             WallDecor::Bookshelf.sprite_name(),
             WallDecor::Whiteboard.sprite_name(),

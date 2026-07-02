@@ -9,7 +9,7 @@
 //! `INSTA_UPDATE=always cargo test -p pixtuoid --test layout_golden`). The same
 //! applies to `walkable_golden.rs`.
 
-use pixtuoid_core::layout::SceneLayout;
+use pixtuoid_scene::layout::SceneLayout;
 
 // ── Standard 96×72, seed 0 ──────────────────────────────────────────
 

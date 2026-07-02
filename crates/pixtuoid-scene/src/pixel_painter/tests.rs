@@ -58,7 +58,7 @@ fn stitch_vertical_wall_connects_each_joint() {
 #[test]
 fn vertical_wall_top_raise_agrees_between_renderer_and_mask() {
     let top_margin = 48u16;
-    let tbm = pixtuoid_core::layout::WALL_BAND_TO_TOP_MARGIN;
+    let tbm = crate::layout::WALL_BAND_TO_TOP_MARGIN;
     let top_wall_h = top_margin - tbm; // what the binary passes the renderer
     let mask_raise = top_margin.saturating_sub(tbm); // what mask.rs computes
     let (renderer_raise, _) = stitch_vertical_wall(top_margin, 90, top_margin, top_wall_h, &[]);
@@ -624,7 +624,7 @@ fn seated_foot_cell_settles_exactly_on_the_render_anchor() {
     // post-A* settle ends with zero pop on every arrival side. back_couch
     // render for couch/sofa, waypoint render for stand, seated_anchor for the
     // desk: ONE fn, the correctness lock for the whole convergence.
-    use pixtuoid_core::layout::{seated_foot_cell, Furniture};
+    use crate::layout::{seated_foot_cell, Furniture};
     for pos in [
         Point { x: 40, y: 30 },
         Point { x: 100, y: 60 },
@@ -675,7 +675,7 @@ fn settle_view_matches_the_seated_view_for_every_seat() {
     let seats: Vec<_> = l
         .waypoints
         .iter()
-        .filter(|w| pixtuoid_core::layout::seated_foot_cell(w.kind.furniture(), w.pos).is_some())
+        .filter(|w| crate::layout::seated_foot_cell(w.kind.furniture(), w.pos).is_some())
         .collect();
     assert!(
         seats.iter().any(
@@ -685,7 +685,7 @@ fn settle_view_matches_the_seated_view_for_every_seat() {
         "this layout size must have a window-facing (North) seat to exercise the fix"
     );
     for w in &seats {
-        let foot = pixtuoid_core::layout::seated_foot_cell(w.kind.furniture(), w.pos)
+        let foot = crate::layout::seated_foot_cell(w.kind.furniture(), w.pos)
             .expect("seat occupies_pos → has a settle foot cell");
         let view = SeatView::of(w.kind, w.facing);
         // The sit-down glide onto this seat renders in the seat's view, at the
@@ -739,7 +739,7 @@ fn settle_seat_view_recognizes_the_home_desk() {
     // through SeatView::Front (front-facing, stable z-key) — same path as the
     // sofas, no front-cross.
     use crate::layout::TEST_DEFAULT_DESKS;
-    use pixtuoid_core::layout::{desk_walk_anchor, Furniture};
+    use crate::layout::{desk_walk_anchor, Furniture};
     let l = Layout::compute(192, 158, Some(TEST_DEFAULT_DESKS)).expect("fits");
     let desk = *l.home_desks.first().expect("at least one home desk");
     let chair = desk_walk_anchor(desk);
@@ -750,7 +750,7 @@ fn settle_seat_view_recognizes_the_home_desk() {
     );
     // seated_foot_cell(Desk) is exactly desk_walk_anchor — the hook keys off it.
     assert_eq!(
-        pixtuoid_core::layout::seated_foot_cell(Furniture::Desk, desk),
+        crate::layout::seated_foot_cell(Furniture::Desk, desk),
         Some(chair)
     );
     // A non-chair cell near the desk is ordinary travel.
@@ -805,7 +805,7 @@ fn sit_arc_z_key_is_stable_and_on_the_right_side_of_its_furniture() {
     for w in l
         .waypoints
         .iter()
-        .filter(|w| pixtuoid_core::layout::seated_foot_cell(w.kind.furniture(), w.pos).is_some())
+        .filter(|w| crate::layout::seated_foot_cell(w.kind.furniture(), w.pos).is_some())
     {
         let view = SeatView::of(w.kind, w.facing);
         let z = view.z_key_for_seat(w.pos);
