@@ -15,7 +15,10 @@
 //! bytes, so `gen-check` pixel-gates the committed poster like every still.
 //!
 //! Driven by the `wasm-still` job kind in `scripts/media.json`; not part of
-//! the shipped wasm artifact (an example, native-only).
+//! the shipped wasm artifact (an example, native-only). The committed
+//! poster's manifest values decode to: t0 = 2026-01-15T17:30:00Z (evening —
+//! night skyline, city lights) and advance = 100s (the script's populated
+//! plateau: all 7 walk-ins land by 19s, the first walkout fires at 104s).
 
 use std::process::ExitCode;
 
@@ -50,8 +53,8 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    // First step anchors the script epoch at t0 (fires nothing); the second
-    // advances the loop so the cast walks in / seats per the script's beats.
+    // First step anchors the script epoch at t0 (only the at_ms=0 beat is due);
+    // the second advances the loop so the cast walks in / seats per the beats.
     office.step(t0_ms as f64, w as u32, h as u32);
     office.step((t0_ms + advance_ms) as f64, w as u32, h as u32);
 

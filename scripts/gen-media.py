@@ -244,6 +244,7 @@ def run_wasm_still(job, out_dirs, work, intermediates):
     subprocess.run(
         ["cargo", "build", "--release", "-p", "pixtuoid-web", "--example", "hero_still"],
         check=True,
+        cwd=ROOT,
     )
     for d in out_dirs:
         subprocess.run(
@@ -269,12 +270,20 @@ HANDLERS = {
 # ── drift check ──────────────────────────────────────────────────────────────
 
 
-def _presence_only(name):
-    """Clips (mp4/webm), the animated gif, and clip posters are ffmpeg/gifsicle
-    outputs whose bytes aren't stable cross-version, so we never pixel-gate them —
-    and --check skips regenerating them entirely (vp9 encoding blew the CI timeout
-    for zero gating value). Everything else is a pixel-deterministic still."""
-    return name.endswith((".mp4", ".webm", ".gif", "-poster.png"))
+def _presence_only_names(manifest, target):
+    """Filenames owned by clip/gif jobs for `target` — ffmpeg/gifsicle outputs
+    whose bytes aren't stable cross-version, so they're presence-checked, never
+    pixel-gated (and --check skips regenerating them: vp9 encoding blew the CI
+    timeout for zero gating value). Derived from the MANIFEST, not a name-shape
+    rule: a `-poster.png` suffix rule silently exempted a deterministic render
+    still that merely kept a poster name (hero-poster.png, the og:image) when
+    its job flipped clip→render (#432 review)."""
+    return {
+        name
+        for job in manifest
+        if target in job["targets"]
+        for name in _expected_presence_outputs(job)
+    }
 
 
 def _expected_presence_outputs(job):
@@ -298,12 +307,13 @@ def run_check(out_base, work, manifest, only=None):
             continue
         committed_dir = TARGET_DIRS[target]
         produced = {p.name for p in tdir.iterdir() if p.is_file()}  # stills only
+        presence_only = _presence_only_names(manifest, target)
 
         for c in sorted((p for p in committed_dir.iterdir() if p.is_file()), key=lambda p: p.name):
             name = c.name
             if name in NOT_GENERATED:
                 continue
-            if _presence_only(name):
+            if name in presence_only:
                 print(f"  present (not pixel-gated): {target}/{name}")
                 continue
             # a rendered still — must have been regenerated AND pixel-match

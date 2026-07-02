@@ -93,7 +93,7 @@ From the repo root the same gate is `just site-check` (and `just site-fmt`).
 
 ## Demo art
 
-`site/public/demos/*` (office screenshots, the hero `.mp4`, per-theme shots) is
+`site/public/demos/*` (office screenshots, demo clips, per-theme shots) is
 **generated**, never hand-placed. Regenerate from the pixtuoid binary:
 
 ```sh
