@@ -4,32 +4,27 @@ import { REPO } from '../consts';
 
 <section id="lobby" class="hero" data-floor="6">
   {
-    /* The live office runs page-wide behind everything (OfficeBackdrop —
-      the fixed canvas). The hero is a transparent window onto it: the copy
-      floats RIGHT behind a mirrored scrim, exposing the layout's left
-      column — where the engine always places the meeting rooms + pantry
-      (the scene's most interesting real estate). */
+    /* The title card: the live office (page-wide backdrop) is fully lit at
+      scroll-0; the statement sits bottom-left, film-title style, and pulls
+      the dimmer in as it approaches the viewport center (data-lit="fade").
+      The engine places the meeting rooms in the layout's left column — the
+      statement deliberately sits UNDER them, not over. */
   }
-  <div class="hero__scrim" aria-hidden="true"></div>
   <canvas id="dust" class="dust" aria-hidden="true"></canvas>
-  <div class="container hero__grid">
+  <div class="container hero__frame">
     <div class="hero__copy" data-lit="fade">
       <p class="eyebrow">6F · penthouse — terminal-native, open source</p>
-      <h1>
-        Your coding agents,<br /> alive in a <span class="hl">pixel office</span><span
-          class="cursor"
-          aria-hidden="true"></span>
+      <h1 class="statement">
+        Your agents<br />
+        <span class="hl">work here</span><span class="cursor" aria-hidden="true"></span>
       </h1>
-      <p class="lead">
-        Every running agent session — Claude Code, Codex, and more — becomes a little animated
-        coworker: typing, pacing the corridor, fetching coffee, in an ASCII office that lives in
-        your terminal.
+      <p class="statement-sub lead">
+        Every Claude Code, Codex or Cursor session walks in, sits down, and gets to work — in a
+        pixel office that lives in your terminal.
       </p>
       <div class="hero__cta">
-        <a class="btn btn-primary" href="#install"
-          >Install pixtuoid <span aria-hidden="true">→</span></a
-        >
-        <a class="btn btn-ghost" href={REPO} target="_blank" rel="noreferrer">★ Star on GitHub</a>
+        <a class="btn btn-primary" href="#install">[ install <span aria-hidden="true">→</span> ]</a>
+        <a class="hero__ghost" href={REPO} target="_blank" rel="noreferrer">star on github ↗</a>
       </div>
       <p class="hero__avail">macOS · Linux · Windows · crates.io · MIT licensed</p>
     </div>
@@ -39,23 +34,11 @@ import { REPO } from '../consts';
 <style>
   .hero {
     position: relative;
-    padding-block: clamp(2rem, 5vw, 4.5rem) clamp(3rem, 7vw, 6rem);
+    min-height: 100svh;
+    display: flex;
+    align-items: flex-end;
     overflow: hidden;
-  }
-  /* Copy-side readability wash, MIRRORED (copy sits right): strongest at
-     the right edge, letting the meeting rooms on the office's left breathe. */
-  .hero__scrim {
-    position: absolute;
-    inset: 0;
-    z-index: 0;
-    pointer-events: none;
-    background: linear-gradient(
-      270deg,
-      var(--bg) 0%,
-      color-mix(in srgb, var(--bg) 62%, transparent) 34%,
-      color-mix(in srgb, var(--bg) 18%, transparent) 66%,
-      transparent 100%
-    );
+    padding-block: 0 clamp(3.5rem, 8vh, 6rem);
   }
   .dust {
     position: absolute;
@@ -65,28 +48,38 @@ import { REPO } from '../consts';
     z-index: 0;
     pointer-events: none;
   }
-  /* The copy floats RIGHT over the live office — the office is the demo,
-     and the layout's meeting rooms (always the left column) stay in view. */
-  .hero__grid {
+  .hero__frame {
     position: relative;
     z-index: 1;
-    display: flex;
-    justify-content: flex-end;
+    width: 100%;
+    max-width: 1400px;
   }
   .hero__copy {
-    max-width: 620px;
+    max-width: 900px;
   }
-  /* Give the office room to read as a scene, not a strip. */
-  .hero {
-    min-height: clamp(30rem, 78vh, 46rem);
-    display: flex;
-    align-items: center;
+  .hero__copy .statement .hl {
+    /* the gradient headline treatment, kept */
+    background: var(--grad);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
   }
   .hero__cta {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.8rem;
+    align-items: center;
+    gap: 1.4rem;
     margin-top: 1.8rem;
+  }
+  .hero__ghost {
+    font-family: var(--font-mono);
+    font-size: 0.95rem;
+    color: #d8cfc0;
+    text-decoration: none;
+    text-shadow: 0 1px 8px rgba(0, 0, 0, 0.45);
+  }
+  .hero__ghost:hover {
+    color: #fff;
   }
   .hero__avail {
     margin-top: 1.1rem;

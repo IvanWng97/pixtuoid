@@ -17,11 +17,12 @@ const home = asset('');
       />
       pixtuoid
     </a>
+    <span class="nav__version" aria-hidden="true">v{__PIXTUOID_VERSION__}</span>
     <nav id="nav-links" class="nav__links" aria-label="Primary">
-      <a href={`${home}#showcase`}>Showcase</a>
-      <a href={`${home}#features`}>Features</a>
-      <a href={`${home}#tools`}>Tools</a>
-      <a href={`${home}#install`}>Install</a>
+      <a class="nav__section-link" href={`${home}#showcase`}>Showcase</a>
+      <a class="nav__section-link" href={`${home}#features`}>Features</a>
+      <a class="nav__section-link" href={`${home}#tools`}>Tools</a>
+      <a class="nav__section-link" href={`${home}#install`}>Install</a>
       <div class="nav__docs">
         <button
           id="docs-btn"
@@ -162,14 +163,30 @@ const home = asset('');
 </script>
 
 <style>
+  /* Corner chrome: the nav floats over the live office at the top of the
+     page and scrolls away (the statusline is the persistent chrome). No bar,
+     no border — and critically NO backdrop-filter: a live blur over the
+     30fps canvas is the documented compositor-flicker class. */
   .nav {
-    position: sticky;
+    position: absolute;
     top: 0;
+    left: 0;
+    right: 0;
     z-index: 50;
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
-    background: color-mix(in srgb, var(--bg) 80%, transparent);
-    border-bottom: 1px solid var(--border);
+    background: none;
+  }
+  .nav__version {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: #8f8574;
+    background: color-mix(in srgb, var(--screen) 72%, transparent);
+    padding: 0.15rem 0.45rem;
+    margin-left: -0.4rem;
+  }
+  .nav__logo,
+  .nav__links a,
+  .nav__docs-btn {
+    text-shadow: 0 1px 8px rgba(0, 0, 0, 0.45);
   }
   .nav__inner {
     display: flex;
@@ -257,6 +274,9 @@ const home = asset('');
     display: none;
   }
   @media (min-width: 760px) {
+    .nav__section-link {
+      display: none; /* floors live in the statusline; corners stay sparse */
+    }
     .nav__links {
       display: flex;
       position: static;
