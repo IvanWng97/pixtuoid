@@ -42,7 +42,7 @@ font8x8       = "0.3.1"
 [dev-dependencies]
 serde_json = { workspace = true }
 # Property-based testing of the pure-geometry algebraic invariants (the
-# walkable-mask + walk-physics modules today): generate thousands of inputs to
+# walk-physics module today; the walkable-mask props stayed core-side): generate thousands of inputs to
 # falsify a property, shrinking any failure to a minimal counterexample. Found
 # failures persist under `proptest-regressions/` so they re-run forever.
 proptest   = "1"
