@@ -90,7 +90,11 @@ const FLOORS = [
 
     // track the floor the viewport is on. rootMargin centers the trigger band
     // so the indicator flips roughly when a floor crosses mid-screen.
-    if ('IntersectionObserver' in window) {
+    // DEFERRED: this is:inline script renders BEFORE <main>, so a parse-time
+    // querySelectorAll sees zero [data-floor] sections and the spy freezes on
+    // 6F (the documented is:inline parse-position trap).
+    function observeFloors() {
+      if (!('IntersectionObserver' in window)) return;
       const io = new IntersectionObserver(
         function (entries) {
           entries.forEach(function (e) {
@@ -102,6 +106,11 @@ const FLOORS = [
       document.querySelectorAll('[data-floor]').forEach(function (s) {
         io.observe(s);
       });
+    }
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', observeFloors, { once: true });
+    } else {
+      observeFloors();
     }
   })();
 </script>

@@ -4,25 +4,13 @@ import { REPO, asset } from '../consts';
 
 <section id="lobby" class="hero" data-floor="6">
   {
-    /* The LIVE office — the real render engine (wasm) painting the hero's
-      background. Layering: office (bottom) → dust motes → copy/demo. The
-      poster is the instant LCP layer; the canvas fades in over it only once
-      the wasm module has painted its first frame (reduced-motion, no-JS,
-      fetch-failure, and old browsers simply stay on the poster). */
+    /* The live office runs page-wide behind everything (OfficeBackdrop —
+      the fixed canvas). The hero is a transparent window onto it: the copy
+      floats RIGHT behind a mirrored scrim, exposing the layout's left
+      column — where the engine always places the meeting rooms + pantry
+      (the scene's most interesting real estate). */
   }
-  <div class="hero__office" aria-hidden="true">
-    <img
-      class="hero__office-poster px"
-      src={asset('demos/hero-poster.png')}
-      alt=""
-      width="1664"
-      height="1408"
-      decoding="async"
-      fetchpriority="high"
-    />
-    <canvas id="office-live" class="hero__office-live px"></canvas>
-    <div class="hero__office-scrim"></div>
-  </div>
+  <div class="hero__scrim" aria-hidden="true"></div>
   <canvas id="dust" class="dust" aria-hidden="true"></canvas>
   <div class="container hero__grid">
     <div class="hero__copy">
@@ -54,63 +42,20 @@ import { REPO, asset } from '../consts';
     padding-block: clamp(2rem, 5vw, 4.5rem) clamp(3rem, 7vw, 6rem);
     overflow: hidden;
   }
-  /* The live-office background layer. Tunables are custom props so the
-     composition (dim strength, scrim reach) is adjustable in one place. */
-  .hero__office {
-    --office-dim: 0.5; /* 0 = full-bright office, 1 = invisible */
-    --office-scrim-stop: 78%; /* how far the copy-side scrim reaches */
+  /* Copy-side readability wash, MIRRORED (copy sits right): strongest at
+     the right edge, letting the meeting rooms on the office's left breathe. */
+  .hero__scrim {
     position: absolute;
     inset: 0;
     z-index: 0;
     pointer-events: none;
-  }
-  .hero__office-poster,
-  .hero__office-live {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-  }
-  .hero__office-live {
-    opacity: 0;
-    transition: opacity 1.2s ease;
-  }
-  /* .is-live is set only after the wasm module painted its first frame. */
-  .hero__office.is-live .hero__office-live {
-    opacity: 1;
-  }
-  .hero__office.is-live .hero__office-poster {
-    opacity: 0;
-    transition: opacity 1.2s ease;
-  }
-  /* Readability: a global dim + a stronger copy-side wash so the floating
-     text never fights the pixel art behind it. */
-  .hero__office-scrim {
-    position: absolute;
-    inset: 0;
-    background:
-      linear-gradient(
-        90deg,
-        var(--bg) 0%,
-        color-mix(in srgb, var(--bg) 72%, transparent) 34%,
-        color-mix(in srgb, var(--bg) 30%, transparent) var(--office-scrim-stop),
-        color-mix(in srgb, var(--bg) 12%, transparent) 100%
-      ),
-      linear-gradient(
-        180deg,
-        color-mix(in srgb, var(--bg) 55%, transparent) 0%,
-        transparent 30%,
-        transparent 68%,
-        var(--bg) 100%
-      );
-  }
-  .hero__office::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background: var(--bg);
-    opacity: var(--office-dim);
+    background: linear-gradient(
+      270deg,
+      var(--bg) 0%,
+      color-mix(in srgb, var(--bg) 62%, transparent) 34%,
+      color-mix(in srgb, var(--bg) 18%, transparent) 66%,
+      transparent 100%
+    );
   }
   .dust {
     position: absolute;
@@ -120,11 +65,13 @@ import { REPO, asset } from '../consts';
     z-index: 0;
     pointer-events: none;
   }
-  /* The copy floats OVER the live office — one column, generous line
-     lengths; the office is the demo (no boxed terminal beside it). */
+  /* The copy floats RIGHT over the live office — the office is the demo,
+     and the layout's meeting rooms (always the left column) stay in view. */
   .hero__grid {
     position: relative;
     z-index: 1;
+    display: flex;
+    justify-content: flex-end;
   }
   .hero__copy {
     max-width: 620px;

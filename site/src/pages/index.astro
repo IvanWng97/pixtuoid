@@ -1,6 +1,7 @@
 ---
 import Base from '../layouts/Base.astro';
 import Nav from '../components/Nav.astro';
+import OfficeBackdrop from '../components/OfficeBackdrop.astro';
 import Hero from '../components/Hero.astro';
 import Ticker from '../components/Ticker.astro';
 import Showcase from '../components/Showcase.astro';
@@ -36,6 +37,7 @@ const softwareJsonLd = {
 
 <Base preloadImage={asset('demos/hero-poster.png')} jsonLd={softwareJsonLd}>
   <span id="top"></span>
+  <OfficeBackdrop />
   <Nav />
   <Elevator />
   <main id="main" tabindex="-1">

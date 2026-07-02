@@ -47,7 +47,12 @@ Mermaid diagram becomes an inline SVG at build via `rehype-mermaid`, which is
   `scripts/media.json` (the one manifest-driven driver), rendering through the
   REAL `TuiRenderer` — `just gen` regenerates, `just gen-check` pixel-diffs the
   committed stills. A PR that changes the office's look regenerates these in the
-  same change (workspace `CLAUDE.md`). Clips (`.webm`/`.mp4`) are presence-gated,
+  same change (workspace `CLAUDE.md`).
+- `public/wasm/` is the live-office hero's engine — a GENERATED, COMMITTED
+  artifact built from the `pixtuoid-web` crate by `just gen-wasm` (wasm +
+  wasm-bindgen JS glue, size-gated by `gen-wasm-check` in the Rust CI). The
+  hero (`components/Hero.astro`) dynamically `import()`s it at runtime. Never
+  hand-edit (prettier/eslint/knip all ignore it); regenerate from the crate. Clips (`.webm`/`.mp4`) are presence-gated,
   not pixel-gated (encoding is non-deterministic).
 
 ## Gates

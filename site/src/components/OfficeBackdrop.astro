@@ -1,0 +1,258 @@
+---
+import { asset } from '../consts';
+---
+
+{
+  /* THE BUILDING — the real pixtuoid engine (wasm) running fixed behind the
+     whole page. Each [data-floor] section swaps the office to that floor's
+     own layout variant (the engine's five hand-authored geometries), so
+     scrolling the page IS riding the elevator: 6F penthouse (dense, two
+     meeting rooms) down to 1F install (standard). Content floats over it as
+     glass bands. Poster-first: the still is the instant layer; the canvas
+     fades in after the first wasm frame. Reduced-motion / no-JS / no-wasm /
+     fetch-failure all simply stay on the still. */
+}
+<div class="backdrop" aria-hidden="true">
+  <img
+    class="backdrop__poster px"
+    src={asset('demos/hero-poster.png')}
+    alt=""
+    width="1664"
+    height="1408"
+    decoding="async"
+    fetchpriority="high"
+  />
+  <canvas id="office-live" class="backdrop__live px"></canvas>
+  <div class="backdrop__wash"></div>
+</div>
+
+<style is:global>
+  /* The fixed canvas sits at z:-1; the body's opaque background would hide
+     it. The html root keeps --bg (no white flash); content paints its own
+     glass. Scoped to pages that render this component. */
+  body {
+    background: transparent;
+  }
+  .backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    background: var(--bg);
+    pointer-events: none;
+  }
+  .backdrop__poster,
+  .backdrop__live {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .backdrop__live {
+    opacity: 0;
+    transition: opacity 1.2s ease;
+  }
+  .backdrop.is-live .backdrop__live {
+    opacity: 1;
+  }
+  .backdrop.is-live .backdrop__poster {
+    opacity: 0;
+    transition: opacity 1.2s ease;
+  }
+  /* Floor swap: a fast dip so the variant change reads as a cut with a
+     blink, not a hard pop. */
+  .backdrop.is-swapping .backdrop__live {
+    opacity: 0;
+    transition: opacity 0.18s ease;
+  }
+  /* Legibility floor for everything above: a global dim + gentle verticals.
+     Sections add their own glass; this is the base wash. */
+  .backdrop__wash {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bg) 62%, transparent) 0%,
+      color-mix(in srgb, var(--bg) 28%, transparent) 22%,
+      color-mix(in srgb, var(--bg) 28%, transparent) 78%,
+      color-mix(in srgb, var(--bg) 68%, transparent) 100%
+    );
+  }
+  .backdrop::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: var(--bg);
+    opacity: 0.38;
+  }
+  /* Content floats as GLASS BANDS over the running building: every section
+     below the hero gets a translucent sheet (its inner cards keep their own
+     styles). The gaps between bands — and the hero — show the office sharp. */
+  main > section:not(.hero),
+  .ticker {
+    background: color-mix(in srgb, var(--bg) 86%, transparent);
+    backdrop-filter: blur(7px);
+    -webkit-backdrop-filter: blur(7px);
+  }
+  main > hr.px-rule {
+    background-color: transparent;
+  }
+</style>
+
+<script is:inline define:vars={{ wasmJsUrl: asset('wasm/pixtuoid_web.js') }}>
+  (function () {
+    const wrap = document.querySelector('.backdrop');
+    const canvas = document.getElementById('office-live');
+    if (!wrap || !canvas || typeof WebAssembly === 'undefined') return;
+    const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+    if (mq.matches) return; // reduced motion: still poster only, no fetch
+
+    // Render SMALL and let CSS stretch (image-rendering: pixelated): ~180px
+    // tall is the app's own chunky-pixel scale (OFFICE_TARGET_H).
+    const BUF_H = 180;
+    const FRAME_MS = 33; // ~30fps cap
+    // Floor → seed → the engine's layout variant (verified mapping):
+    // 6F dense (two meeting rooms), 5F senior (large meeting + pantry),
+    // 4F standard, 3F lounge, 2F open plan, 1F standard.
+    const FLOOR_SEEDS = { 6: 3, 5: 2, 4: 0, 3: 9, 2: 11, 1: 8 };
+
+    let OfficeCtor = null;
+    let office = null;
+    let wasm = null;
+    let ctx2d = null;
+    let img = null;
+    let bufW = 0;
+    let raf = 0;
+    let last = 0;
+    let live = false;
+    let floor = 6;
+    let swapTimer = 0;
+
+    function sizeBuffer() {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      if (w < 1 || h < 1) return;
+      bufW = Math.min(640, Math.max(64, Math.round((w / h) * BUF_H)));
+      canvas.width = bufW;
+      canvas.height = BUF_H;
+      img = new ImageData(bufW, BUF_H);
+    }
+
+    function frame(t) {
+      raf = 0;
+      if (document.hidden) return;
+      if (t - last >= FRAME_MS) {
+        last = t;
+        // Date.now(), NOT the rAF timestamp: the engine decodes now_ms as
+        // calendar time (browser-local day/night + wall clock).
+        office.step(Date.now(), bufW, BUF_H);
+        // Re-read ptr/len EVERY frame (resize reallocates; memory.grow
+        // invalidates views) and copy into the reusable ImageData.
+        const view = new Uint8ClampedArray(
+          wasm.memory.buffer,
+          office.frame_ptr(),
+          office.frame_len()
+        );
+        if (view.length === img.data.length) {
+          img.data.set(view);
+          ctx2d.putImageData(img, 0, 0);
+          if (!live) {
+            live = true;
+            wrap.classList.add('is-live');
+          }
+        }
+      }
+      raf = requestAnimationFrame(frame);
+    }
+    function start() {
+      if (!raf && office && !document.hidden && !mq.matches) {
+        raf = requestAnimationFrame(frame);
+      }
+    }
+    function stop() {
+      if (raf) cancelAnimationFrame(raf);
+      raf = 0;
+    }
+
+    function setFloor(next) {
+      if (next === floor || !OfficeCtor) return;
+      floor = next;
+      // Dip → rebuild on the new floor's seed → the next painted frame lifts
+      // the dip (fresh scene, ~200ms blink; motion state is per-floor anyway,
+      // exactly like the app's floor switch).
+      wrap.classList.add('is-swapping');
+      clearTimeout(swapTimer);
+      swapTimer = setTimeout(function () {
+        if (office && office.free) office.free();
+        office = new OfficeCtor(FLOOR_SEEDS[next] ?? 0);
+        wrap.classList.remove('is-swapping');
+      }, 180);
+    }
+
+    import(wasmJsUrl)
+      .then(function (mod) {
+        return mod.default().then(function (w) {
+          wasm = w;
+          OfficeCtor = mod.Office;
+          office = new OfficeCtor(FLOOR_SEEDS[floor]);
+          ctx2d = canvas.getContext('2d');
+          sizeBuffer();
+          start();
+        });
+      })
+      .catch(function () {
+        /* the still poster stays — the building simply doesn't go live */
+      });
+
+    let rraf = 0;
+    window.addEventListener('resize', function () {
+      if (rraf) return;
+      rraf = requestAnimationFrame(function () {
+        rraf = 0;
+        sizeBuffer();
+      });
+    });
+    document.addEventListener('visibilitychange', function () {
+      if (document.hidden) stop();
+      else start();
+    });
+    if (mq.addEventListener) {
+      mq.addEventListener('change', function () {
+        if (mq.matches) {
+          stop();
+          wrap.classList.remove('is-live');
+          live = false;
+        } else {
+          start();
+        }
+      });
+    }
+    // Ride the elevator: the floor whose section owns the viewport center
+    // drives the office. Same [data-floor] sections the elevator nav tracks.
+    // DEFERRED to DOMContentLoaded: this is:inline script renders BEFORE
+    // <main>, so a parse-time querySelectorAll sees zero sections and the
+    // floor swap never arms (the documented elevator-scrollspy trap).
+    function observeFloors() {
+      if (!('IntersectionObserver' in window)) return;
+      const io = new IntersectionObserver(
+        function (es) {
+          es.forEach(function (e) {
+            if (e.isIntersecting) {
+              const f = parseInt(e.target.getAttribute('data-floor') || '6', 10);
+              setFloor(f);
+            }
+          });
+        },
+        { rootMargin: '-45% 0px -45% 0px', threshold: 0 }
+      );
+      document.querySelectorAll('[data-floor]').forEach(function (s) {
+        io.observe(s);
+      });
+    }
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', observeFloors, { once: true });
+    } else {
+      observeFloors();
+    }
+  })();
+</script>
