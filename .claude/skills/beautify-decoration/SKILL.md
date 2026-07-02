@@ -58,7 +58,7 @@ The user is the final judge of "does it look like a fridge / coffee machine / et
 
 `examples/snapshot` defaults to 192×80 cells → buffer 192×160. Several layouts (pantry, corridor appliances) have conditional variants based on room dimensions. Corridor items (vending machine, printer) only appear when `walkway_h ≥ 9–10`. **Use the default `--cols 192 --rows 80` to see everything.**
 
-Pantry-specific threshold: `pantry_room.width >= 36` triggers the 32×10 sprite; below that, the 20×8 `pantry_small.sprite` is used. Threshold lives in `crates/pixtuoid-core/src/layout/compute.rs`.
+Pantry-specific threshold: `pantry_room.width >= 36` triggers the 32×10 sprite; below that, the 20×8 `pantry_small.sprite` is used. Threshold lives in `crates/pixtuoid-scene/src/layout/compute.rs`.
 
 ### 3. Visual-inspection helper
 
@@ -110,7 +110,7 @@ Symptoms of weak identity:
 
 When a sprite **changes size**:
 
-1. Update the walkable-mask footprint in `core::layout::build_walkable_mask` — there's a per-WaypointKind match arm with hardcoded `(w, h)` tuples.
+1. Update the walkable-mask footprint in `pixtuoid_scene::layout::build_walkable_mask` — there's a per-WaypointKind match arm with hardcoded `(w, h)` tuples.
 2. If the obstacle is a non-waypoint (plant, wall decor, pod decor), update the corresponding mark_blocked call too.
 3. Run `cargo test -p pixtuoid-core` — the `walkable_mask_is_fully_connected_across_buffer_sizes` test catches mask/sprite mismatches by trying multiple buffer sizes and asserting BFS reach from the door.
 4. If the connectivity test fails on the smallest buffer (96×70), the sprite is too big for that pantry. Add a `_small` variant + conditional pick (see `pantry_counter_size` in `SceneLayout` for the pattern).

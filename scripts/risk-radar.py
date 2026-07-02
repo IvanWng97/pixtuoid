@@ -197,7 +197,7 @@ def _selftest() -> int:
     # Each seam fires for a representative path.
     assert keys(["crates/pixtuoid-hook/src/main.rs"]) == ["hook-shim"]
     assert keys(["crates/pixtuoid-scene/src/motion/mod.rs"]) == ["motion-pose"]
-    assert keys(["crates/pixtuoid-core/src/pose/tests.rs"]) == ["motion-pose"]
+    assert keys(["crates/pixtuoid-scene/src/pose/tests.rs"]) == ["motion-pose"]
     assert keys(["crates/pixtuoid-scene/sprites/default/robot.sprite"]) == ["visual"]
     assert keys(["crates/pixtuoid-scene/src/pixel_painter/palette.rs"]) == ["visual"]
     assert keys(["crates/pixtuoid/src/install/io.rs"]) == ["install"]
@@ -231,7 +231,7 @@ def _selftest() -> int:
     # visual fires on the office-look SOURCE dirs, not just sprites/painter:
     for p in (
         "crates/pixtuoid-scene/src/theme/cyberpunk.rs",
-        "crates/pixtuoid-core/src/layout/compute.rs",
+        "crates/pixtuoid-scene/src/layout/compute.rs",
         "crates/pixtuoid-scene/src/pet.rs",
         "crates/pixtuoid-scene/src/chitchat.rs",
     ):

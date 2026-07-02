@@ -20,7 +20,7 @@ use crate::grid::Grid;
 
 /// Static obstacle mask sized `width × height` pixels — a `Grid<bool>`
 /// (`true` = open floor, `false` = obstacle). An ALIAS, not a wrapper: the
-/// mask's dims ARE the grid's `pub width`/`height` (no mirrored fields), and
+/// mask's dims ARE the grid's `width()`/`height()` accessors (no mirrored fields), and
 /// the obstacle ops live in the `impl Grid<bool>` below. This is the clean
 /// endpoint of the #333 `Grid<T>` extraction — it landed in the 0.10.0 break
 /// because removing the old `pub struct WalkableMask` is a cargo-semver-checks
