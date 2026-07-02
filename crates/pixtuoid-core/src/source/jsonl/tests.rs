@@ -469,7 +469,7 @@ async fn gated_file_registers_on_oversized_first_append() {
     full.push_str(&"{\"type\":\"assistant\"}\n".repeat(60_000));
     tokio::fs::write(&path, &full).await.unwrap();
     assert!(
-        (full.len() - initial.len()) as u64 > (1 << 20),
+        (full.len() - initial.len()) as u64 > super::walk::MAX_PENDING_BYTES,
         "the appended span must exceed MAX_PENDING_BYTES"
     );
 
@@ -1186,7 +1186,7 @@ async fn known_oversized_tail_emits_session_end_if_the_skipped_span_ended() {
     tokio::fs::write(&path, &full).await.unwrap();
     let len = full.len() as u64;
     assert!(
-        len - seeded > (1 << 20),
+        len - seeded > super::walk::MAX_PENDING_BYTES,
         "the appended span must exceed MAX_PENDING_BYTES"
     );
 

@@ -640,6 +640,8 @@ impl Reducer {
                     // invisible (every later arm is a no-op once the corpse is
                     // GC'd). Gated to root agents on BOTH sides so a late
                     // duplicate can't un-exit a b1-cascaded subagent.
+                    // (mutants: `&&`→`||` on the last conjunct is a documented
+                    // accepted equivalent — see the residuals note in tests.)
                     if slot.exiting_at.is_some() && slot.parent_id.is_none() && parent_id.is_none()
                     {
                         // Route through fsm so an in-flight Active span is folded

@@ -236,6 +236,33 @@ impl CoffeeState {
     }
 }
 
+/// The shared per-frame PROLOGUE: lay the floor out and point the router at
+/// its corridor. ONE definition so `render_floor` and `FloorSession::observe`
+/// can't drift (the mirrored-epilogue class #423 exists to kill).
+fn frame_prologue(
+    fctx: &mut FloorCtx,
+    buf_w: u16,
+    buf_h: u16,
+    floor_seed: u64,
+) -> Option<crate::layout::Layout> {
+    let layout = crate::layout::Layout::compute_with_seed(buf_w, buf_h, None, floor_seed)?;
+    fctx.router.set_preferred_zone(layout.corridor);
+    Some(layout)
+}
+
+/// The shared per-frame EPILOGUE: stamp this frame's new coffee carriers and
+/// refresh the door-cosmetic clamp. Same ONE-definition rationale as
+/// [`frame_prologue`].
+fn frame_epilogue(
+    fctx: &mut FloorCtx,
+    coffee: &mut CoffeeState,
+    carriers: impl IntoIterator<Item = pixtuoid_core::AgentId>,
+    now: SystemTime,
+) {
+    coffee.record(carriers, now);
+    fctx.recompute_door_anim_max_ms(now);
+}
+
 /// THE shared headless frame seam: scene → `RgbBuffer`, one floor, one frame —
 /// prologue (buffer sizing, layout, router zone), the pixel pass, and the
 /// bookkeeping epilogue (coffee-carrier persistence + the door-anim clamp
@@ -284,9 +311,7 @@ pub fn render_floor(
     debug_walkable: bool,
 ) -> Option<crate::layout::Layout> {
     buf.ensure_size(buf_w, buf_h, theme.surface.bg_fallback);
-    let layout =
-        crate::layout::Layout::compute_with_seed(buf_w, buf_h, None, floor_meta.floor_seed)?;
-    fctx.router.set_preferred_zone(layout.corridor);
+    let layout = frame_prologue(fctx, buf_w, buf_h, floor_meta.floor_seed)?;
     let result = render_to_rgb_buffer(&mut PixelCtx {
         scene,
         layout: &layout,
@@ -308,13 +333,9 @@ pub fn render_floor(
         light: &mut fctx.light,
         debug_walkable,
     });
-    // The epilogue the consumers used to mirror by hand:
-    // 1. a pantry trip completed this frame stamps the carrier so the cup
-    //    lands on the desk + steams;
-    coffee.record(result.new_coffee_carriers, now);
-    // 2. the pass may have snapshotted new entry/exit profiles into motion —
-    //    refresh the door-cosmetic clamp for the next frame.
-    fctx.recompute_door_anim_max_ms(now);
+    // The epilogue the consumers used to mirror by hand — now ONE definition
+    // (carrier stamping + the door-cosmetic clamp) shared with observe().
+    frame_epilogue(fctx, coffee, result.new_coffee_carriers, now);
     Some(layout)
 }
 
@@ -471,9 +492,7 @@ impl FloorSession {
         now: SystemTime,
     ) -> Option<SimFrame> {
         self.evict_missing(scene);
-        let layout =
-            crate::layout::Layout::compute_with_seed(buf_w, buf_h, None, floor_meta.floor_seed)?;
-        self.floor.ctx.router.set_preferred_zone(layout.corridor);
+        let layout = frame_prologue(&mut self.floor.ctx, buf_w, buf_h, floor_meta.floor_seed)?;
         let frame = sim_step(
             &mut SimStores {
                 router: &mut self.floor.ctx.router,
@@ -490,11 +509,13 @@ impl FloorSession {
             floor_meta.floor_idx,
             now,
         );
-        // The same epilogue render_floor owns for the painted path.
-        self.office
-            .coffee
-            .record(frame.new_coffee_carriers.iter().copied(), now);
-        self.floor.ctx.recompute_door_anim_max_ms(now);
+        // The same epilogue as the painted path — literally: one definition.
+        frame_epilogue(
+            &mut self.floor.ctx,
+            &mut self.office.coffee,
+            frame.new_coffee_carriers.iter().copied(),
+            now,
+        );
         Some(frame)
     }
 }

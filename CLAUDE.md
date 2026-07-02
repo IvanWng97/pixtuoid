@@ -154,7 +154,7 @@ git config core.hooksPath .githooks   # activate hooks once per clone
 
 Never pipe `preflight` through `tail`/`head` — the exit code becomes the
 pipe's and a real failure reads as green; redirect to a file and `echo $?`.
-CI-only gates: semver (pixtuoid-core only — the binary's lib target is not a
+CI-only gates: semver (pixtuoid-core + pixtuoid-scene — the binary's lib target is not a
 semver surface), coverage/smoke, gen-check, gen-readme-check, npm-check,
 check-windows (cross-lint for msvc on every PR), snapshots (`cargo insta` —
 fails on a pending OR orphan `.snap`, the rot plain `cargo test` can't see).

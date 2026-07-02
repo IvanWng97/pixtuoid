@@ -16,6 +16,11 @@ use super::health::FailureLatch;
 use super::liveness::{probe_admits, revouch_gated_files};
 use super::{SessionEndChecker, SourceDecoders, WatchCtx};
 
+/// Oversized-span skip threshold (#204): a pending span past this is never
+/// replayed. Module-scoped (not fn-local) so the boundary TEST imports THIS
+/// const instead of a drifting second copy of the literal.
+pub(super) const MAX_PENDING_BYTES: u64 = 1 << 20;
+
 /// First-sight decision, shared by EVERY path that can be the first to see a
 /// file (the initial seed, the 250ms rescan, the 60s poll, a notify event):
 /// seed the cursor at EOF — suppressing SessionStart — when the session is
@@ -136,7 +141,6 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
     }
 
     let file_len = meta.len();
-    const MAX_PENDING_BYTES: u64 = 1 << 20;
 
     // `known` = already tracked (an earlier pass seeded or read it); `cursor_now`
     // = where to resume (0 if untracked). One lock read for both.
