@@ -1,6 +1,10 @@
 [package]
 name                   = "pixtuoid-scene"
 description            = "Backend-agnostic render + simulation engine for pixtuoid"
+# site_badge_colors.rs reads ../../site/src/sources.json at runtime — fine for
+# publish verify (compiles), but `cargo test` on the extracted .crate would
+# panic (no workspace tree). Same treatment as pixtuoid-core's manifest test.
+exclude                = ["tests/site_badge_colors.rs"]
 version.workspace      = true
 edition.workspace      = true
 rust-version.workspace = true

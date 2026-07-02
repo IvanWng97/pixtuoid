@@ -6,7 +6,11 @@ import { asset } from '../consts';
 // glimpse is generated from the SAME file (scripts/gen-readme.mjs), and the
 // `supported` set is pinned to the code's REGISTERED_SOURCES by a Rust test
 // (crates/pixtuoid-core/tests/supported_sources_manifest.rs) — so this matrix,
-// the README glimpse, and what's actually wired can't drift.
+// the README glimpse, and what's actually wired can't drift. The per-CLI
+// `badge` prefixes and `badge_color` hexes are likewise pinned: prefixes to
+// the registry (same core test), colors to the app's theme::NORMAL.source
+// palette (crates/pixtuoid-scene/tests/site_badge_colors.rs) — the hues the
+// wasm office behind this page actually renders with.
 
 type OsState = 'yes' | 'experimental' | 'planned' | 'no';
 const OSES = [
@@ -69,7 +73,11 @@ const legend = (['yes', 'experimental', 'planned', 'no'] as OsState[])
               <tr>
                 <th scope="row">
                   {s.badge && (
-                    <span class="tools__badge" aria-hidden="true">
+                    <span
+                      class="tools__badge"
+                      style={s.badge_color ? `--badge:${s.badge_color}` : undefined}
+                      aria-hidden="true"
+                    >
                       {s.badge}
                     </span>
                   )}
@@ -161,7 +169,9 @@ const legend = (['yes', 'experimental', 'planned', 'no'] as OsState[])
     font-family: var(--font-mono);
     font-size: 0.78rem;
     font-weight: 700;
-    color: var(--led);
+    /* the app's real per-CLI hue (sources.json badge_color, pinned to
+       theme::NORMAL.source by a scene bridge test); LED green fallback */
+    color: var(--badge, var(--led));
     background: var(--screen);
     padding: 0.1rem 0.35rem;
     margin-right: 0.5rem;

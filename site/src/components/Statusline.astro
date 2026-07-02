@@ -9,6 +9,8 @@
 // merged PRs of this repo — authored by coding agents working in this very
 // office — with canned office-life beats interleaved; falls back to the
 // canned reel when the API is unreachable so the build never fails.
+import sources from '../sources.json';
+
 const FALLBACK = [
   { state: 'active', who: 'claude-code', what: 'editing src/reducer.rs' },
   { state: 'waiting', who: 'codex', what: 'awaiting approval' },
@@ -72,6 +74,13 @@ const FLOORS = [
   { n: 2, id: 'tools', name: 'tenants' },
   { n: 1, id: 'install', name: 'front desk' },
 ];
+
+// per-CLI hue for a feed credit like "cc·pixtuoid" — the same manifest colors
+// the tools-matrix chips use (badge includes the trailing '·')
+const badgeColor = (who: string): string | undefined => {
+  const hit = sources.find((s) => s.badge && who.startsWith(s.badge));
+  return hit && 'badge_color' in hit ? (hit.badge_color as string) : undefined;
+};
 ---
 
 <div class="statusline" id="statusline">
@@ -108,7 +117,9 @@ const FLOORS = [
       items.map((it, i) => (
         <span class:list={['sl__item', { 'is-on': i === 0 }]}>
           <span class:list={['sl__dot', it.state]} />
-          <b>{it.who}</b> · {it.what}
+          <b style={badgeColor(it.who) ? `--who:${badgeColor(it.who)}` : undefined}>
+            {it.who}
+          </b> · {it.what}
         </span>
       ))
     }
@@ -235,7 +246,7 @@ const FLOORS = [
     opacity: 1;
   }
   .sl__item b {
-    color: #f0e8d8;
+    color: var(--who, #f0e8d8);
     font-weight: 700;
   }
   .sl__dot {

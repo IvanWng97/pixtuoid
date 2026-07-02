@@ -2,6 +2,7 @@
   {
     "id": "claude-code",
     "badge": "cc·",
+    "badge_color": "#c86e12",
     "name": "Claude Code",
     "url": "https://code.claude.com",
     "status": "supported",
@@ -16,6 +17,7 @@
   {
     "id": "codex",
     "badge": "cx·",
+    "badge_color": "#1e80c0",
     "name": "Codex CLI",
     "url": "https://github.com/openai/codex",
     "status": "supported",
@@ -30,6 +32,7 @@
   {
     "id": "antigravity",
     "badge": "ag·",
+    "badge_color": "#2e9e4a",
     "name": "Antigravity CLI",
     "url": "https://github.com/antiGravity-AI/antigravity-cli",
     "status": "supported",
@@ -44,6 +47,7 @@
   {
     "id": "reasonix",
     "badge": "rx·",
+    "badge_color": "#9c3cc0",
     "name": "DeepSeek-Reasonix",
     "url": "https://github.com/esengine/DeepSeek-Reasonix",
     "status": "supported",
@@ -58,6 +62,7 @@
   {
     "id": "codewhale",
     "badge": "cw·",
+    "badge_color": "#14b8b0",
     "name": "CodeWhale",
     "url": "https://github.com/Hmbown/CodeWhale",
     "status": "supported",
@@ -72,6 +77,7 @@
   {
     "id": "copilot",
     "badge": "cp·",
+    "badge_color": "#e0609c",
     "name": "Copilot CLI",
     "url": "https://github.com/github/copilot-cli",
     "status": "supported",
@@ -86,6 +92,7 @@
   {
     "id": "opencode",
     "badge": "oc·",
+    "badge_color": "#d83a3a",
     "name": "opencode",
     "url": "https://github.com/anomalyco/opencode",
     "status": "supported",
@@ -100,6 +107,7 @@
   {
     "id": "cursor",
     "badge": "cu·",
+    "badge_color": "#96a0af",
     "name": "Cursor CLI",
     "url": "https://cursor.com/cli",
     "status": "supported",
@@ -114,6 +122,7 @@
   {
     "id": "openclaw",
     "badge": "ok·",
+    "badge_color": "#ffaa30",
     "name": "OpenClaw",
     "url": "https://github.com/openclaw/openclaw",
     "status": "supported",
