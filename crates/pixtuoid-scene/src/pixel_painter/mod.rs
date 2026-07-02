@@ -5,14 +5,18 @@
 //! export, GIF capture) from the ratatui-coupled half-block flush + widget
 //! overlay (terminal lifecycle lives with the event loop in `tui/mod.rs`).
 //!
-//! `render_to_rgb_buffer` is the public entry point. Everything else is
-//! private to this module except `character_anchor`, which `widgets.rs`
-//! uses for label placement and `hit_test.rs` for mouse hit-testing.
+//! `render_to_rgb_buffer` is the public entry point, and is itself TWO
+//! phases behind one seam: [`sim_step`] (the `sim` module) advances the
+//! world — motion, poses, lighting, chitchat — with no pixel access and
+//! returns an immutable [`SimFrame`]; the paint pass (`paint_frame`)
+//! consumes `&SimFrame` and mutates only the buffer + the paint-local
+//! `FrameCache`. Everything else is private to this module except
+//! `character_anchor`, which `widgets.rs` uses for label placement and
+//! `hit_test.rs` for mouse hit-testing.
 
 use std::collections::HashMap;
 use std::time::SystemTime;
 
-use crate::layout::WALKING_Y_OFF;
 use pixtuoid_core::sprite::blit::blit_frame;
 use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
@@ -20,7 +24,7 @@ use pixtuoid_core::state::{ActivityState, FloorLocalDeskIndex};
 use pixtuoid_core::walkable::OccupancyOverlay;
 use pixtuoid_core::{AgentSlot, SceneState};
 
-use crate::chitchat::{self, ActiveChitchat, ChitchatBubble};
+use crate::chitchat::{ActiveChitchat, ChitchatBubble};
 use crate::floor::LightingState;
 use crate::frame_cache::FrameCache;
 use crate::layout::{
@@ -30,7 +34,7 @@ use crate::layout::{
 use crate::motion::MotionState;
 use crate::pathfind::Router;
 use crate::pet::PetFrame;
-use crate::pose::{self, Pose};
+use crate::pose;
 
 /// Milliseconds since the Unix epoch for `now` (0 if the clock is before it).
 /// The wall-clock decode the pixel-pass animation timers share — was hand-rolled
@@ -85,13 +89,12 @@ mod furniture;
 mod glass;
 mod palette;
 mod seat;
+mod sim;
 
-pub(crate) use crate::motion::walking_position;
 pub use anchors::character_anchor;
-use anchors::{
-    back_couch_anchor, compute_door_frame_idx, seated_anchor, standing_at_desk_anchor,
-    walking_anchor, waypoint_anchor, waypoint_rank_offset_x, with_breath, CHARACTER_SPRITE_W,
-};
+pub use sim::{sim_step, CharacterGlow, CharacterPlacement, SimFrame, SimStores};
+
+use anchors::compute_door_frame_idx;
 use background::{
     daylight_floor_overlay, dim_floor_overlay, paint_ceiling_pool, paint_clock,
     paint_corridor_runner, paint_floor_and_walls, paint_floor_lamp_halo, paint_neon_panel,
@@ -102,7 +105,7 @@ use drawable::{
 };
 use glass::{paint_glass_wall_h, paint_glass_wall_v, stitch_vertical_wall, WALL_THICK_H_PX};
 use palette::{agent_palette, outfit_seed_for, recolor_frame};
-use seat::{paint_character_at, seat_sprite, settle_seat_view, SeatView};
+use seat::paint_character_at;
 
 /// The weather names accepted by [`force_weather`], canonical order — for
 /// `--weather` error text and the manifest drift-guard test. (The gallery
@@ -201,11 +204,89 @@ pub struct PixelCtx<'a> {
     pub debug_walkable: bool,
 }
 
+/// The paint pass's borrow set — everything `paint_frame` may touch. The only
+/// `&mut`s are the pixel buffer and the paint-local `FrameCache` (a render
+/// cache, not a sim store); the sim stores are absent BY TYPE (`motion` is an
+/// immutable view, read by the debug route overlay), so painting cannot move
+/// the world — see the `sim` module docs for the classification.
+struct PaintCtx<'a> {
+    scene: &'a SceneState,
+    layout: &'a Layout,
+    pack: &'a Pack,
+    now: SystemTime,
+    buf: &'a mut RgbBuffer,
+    cache: &'a mut FrameCache,
+    theme: &'a crate::theme::Theme,
+    floor: crate::floor::FloorMeta,
+    active_pet: Option<&'a crate::pet::PetState>,
+    floor_pet: Option<&'a crate::pet::Pet>,
+    coffee: &'a HashMap<pixtuoid_core::AgentId, SystemTime>,
+    motion: &'a HashMap<pixtuoid_core::AgentId, MotionState>,
+    door_anim_max_ms: u64,
+    debug_walkable: bool,
+}
+
 pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
-    let agents: Vec<_> = ctx.scene.agents.values().cloned().collect();
+    // Phase 1 — SIM: advance the world (motion/poses/lighting/chitchat),
+    // producing no pixels. See `sim::sim_step`.
+    let frame = sim_step(
+        &mut SimStores {
+            router: &mut *ctx.router,
+            overlay: &mut *ctx.overlay,
+            history: &mut *ctx.history,
+            motion: &mut *ctx.motion,
+            light: &mut *ctx.light,
+            chitchat: &mut *ctx.chitchat_state,
+        },
+        ctx.scene,
+        ctx.layout,
+        ctx.pack,
+        ctx.coffee,
+        ctx.floor.floor_idx,
+        ctx.now,
+    );
+    // Phase 2 — PAINT: an immutable read of the SimFrame that mutates only
+    // the buffer + the recolor cache. Painting the same frame twice is
+    // byte-identical (pinned by `paint_frame_is_pure_and_byte_identical`).
+    let (pet_pos, mascot_pos) = paint_frame(
+        &mut PaintCtx {
+            scene: ctx.scene,
+            layout: ctx.layout,
+            pack: ctx.pack,
+            now: ctx.now,
+            buf: &mut *ctx.buf,
+            cache: &mut *ctx.cache,
+            theme: ctx.theme,
+            floor: ctx.floor,
+            active_pet: ctx.active_pet,
+            floor_pet: ctx.floor_pet,
+            coffee: ctx.coffee,
+            motion: &*ctx.motion,
+            door_anim_max_ms: ctx.door_anim_max_ms,
+            debug_walkable: ctx.debug_walkable,
+        },
+        &frame,
+    );
+    PixelPassResult {
+        pet_pos,
+        mascot_pos,
+        chitchat_bubbles: frame.chitchat_bubbles,
+        new_coffee_carriers: frame.new_coffee_carriers,
+    }
+}
+
+/// The PAINT half of the frame: blit the world the sim already advanced.
+/// Reads the [`SimFrame`] immutably; every positional/lifecycle decision was
+/// made in `sim_step` — this pass only resolves presentation (theme colors,
+/// sprite pixels) and composites. Returns the resolved pet + mascot frames
+/// for the caller's hit-testing.
+fn paint_frame(
+    ctx: &mut PaintCtx<'_>,
+    frame: &SimFrame,
+) -> (Option<PetFrame>, Option<MascotFrame>) {
+    let agents: &[AgentSlot] = &frame.agents;
     let buf_w = ctx.layout.buf_w;
     let buf_h = ctx.layout.buf_h;
-    let mut new_coffee_carriers: Vec<pixtuoid_core::AgentId> = Vec::new();
 
     // Compute time-of-day once per frame and pass to every paint
     // helper that depends on it. Avoids recomputing the chrono local
@@ -233,10 +314,11 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
         ctx.floor.altitude,
     );
 
-    // Per-floor lighting: tick the fade state with the current occupancy.
-    // `indoor_scale` smoothly travels from MIN_LEVEL (empty + past
-    // debounce) to 1.0 (populated). Windows/skyline are unaffected.
-    let indoor_scale = ctx.light.tick(ctx.scene.agents.is_empty(), ctx.now);
+    // Per-floor lighting: `sim_step` already ticked the fade state with the
+    // current occupancy. `indoor_scale` smoothly travels from MIN_LEVEL
+    // (empty + past debounce) to 1.0 (populated). Windows/skyline are
+    // unaffected.
+    let indoor_scale = frame.indoor_scale;
     // Empty floors get an extra floor-darken boost on top of the time-of-
     // day dim — there are no monitor/lamp light sources to balance against
     // the overhead darkness, so without the boost they read as "lights
@@ -498,104 +580,12 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
         );
     }
 
-    // Build per-frame occupancy from STATIONARY agent positions only — BEFORE
-    // the seated prepass, since the single per-agent `derive_with_routing` below
-    // routes Walking poses against THIS overlay (it used to run after the prepass,
-    // which then re-derived each agent a second time inside `enqueue_characters`).
-    // Walkers are deliberately excluded — their position interpolates every frame,
-    // which would change the overlay signature every frame, wipe the path cache,
-    // recompute A*, and snap walkers to new path segments (the visible "flash").
-    // Sitters at desks are already covered by the static desk mask. Only waypoint
-    // visitors contribute here — they have stable positions across frames, so the
-    // signature is stable and the cache hits. Reads only the STATELESS `pose::derive`
-    // + stand_point (no dependency on the seated map / ambient), so it's safe up here.
-    ctx.overlay.clear();
-    for agent in &agents {
-        let Some(pose) = pose::derive(agent, ctx.now, ctx.layout) else {
-            continue;
-        };
-        if let Pose::AtWaypoint { wp, .. } = pose {
-            if let Some(w) = ctx.layout.waypoints.get(wp) {
-                // Reserve the cell the agent actually stands on (the stand cell,
-                // off the furniture), NOT the blocked furniture center — else
-                // another agent's A* routes straight through the stander. Same
-                // `desk` origin as every other stand_point caller.
-                let origin = ctx
-                    .layout
-                    .home_desk(agent.desk_index.single_floor_local())
-                    .unwrap_or(w.pos);
-                let stand = crate::layout::stand_point(
-                    w.kind,
-                    w.pos,
-                    ctx.layout.pantry_counter_size,
-                    &ctx.layout.walkable,
-                    origin,
-                    w.facing,
-                );
-                ctx.overlay
-                    .add(stand.x.saturating_sub(4), stand.y.saturating_sub(6), 8, 12);
-            }
-        }
-    }
-
-    // Derive every home-desk agent's routed pose ONCE per frame. This is the
-    // AUTHORITATIVE pose derivation — it runs the advance_wander / walk_path /
-    // history side effects exactly once; `enqueue_characters` later just looks the
-    // cached pose up by agent_id instead of re-deriving (the old double-A*). The
-    // `exiting_at` filter is INTENTIONALLY absent: exiting agents are never
-    // SeatedTyping/Thinking (so `seated_agents` is unchanged), but their pose is
-    // needed for the character enqueue. Only the home_desk filter remains (a
-    // deskless agent can't render anyway).
-    let poses: HashMap<pixtuoid_core::AgentId, Option<Pose>> = agents
-        .iter()
-        .filter(|a| {
-            ctx.layout
-                .home_desk(a.desk_index.single_floor_local())
-                .is_some()
-        })
-        .map(|a| {
-            let p = pose::derive_with_routing(
-                a,
-                ctx.now,
-                ctx.layout,
-                &mut crate::pose::RouteCtx {
-                    router: &mut *ctx.router,
-                    overlay: &*ctx.overlay,
-                    history: &mut *ctx.history,
-                    motion: &mut *ctx.motion,
-                },
-            );
-            (a.agent_id, p)
-        })
-        .collect();
-
-    // Per-desk "is the occupant actually seated right now" map (pose is
-    // SeatedTyping/Thinking, not walking in / snapping back), derived from the
-    // cached poses so the desk-cubicle screen glow + ceiling halos share one gate
-    // and one pose derivation (no double A*). Exiting agents are absent from the
-    // seated set by construction (their pose is Walking, not Seated).
-    let seated_agents: HashMap<FloorLocalDeskIndex, bool> = agents
-        .iter()
-        .filter(|a| {
-            ctx.layout
-                .home_desk(a.desk_index.single_floor_local())
-                .is_some()
-                && a.exiting_at.is_none()
-        })
-        .map(|a| {
-            let seated = matches!(
-                poses.get(&a.agent_id),
-                Some(Some(Pose::SeatedTyping { .. } | Pose::SeatedThinking))
-            );
-            (a.desk_index.single_floor_local(), seated)
-        })
-        .collect();
-
-    // Ceiling halos gate on `seated_agents` so a tool-glow halo never floats
-    // above an empty desk while its Active occupant is mid-walk (entry/snap).
-    // `look` was already computed once per frame above — forward it so the
-    // ambient sub-passes don't recompute `time_of_day_look(now, theme)`.
-    ambient::paint_ambient(ctx, &look, &seated_agents);
+    // Ceiling halos gate on the sim's `seated_agents` so a tool-glow halo
+    // never floats above an empty desk while its Active occupant is mid-walk
+    // (entry/snap). `look` was already computed once per frame above —
+    // forward it so the ambient sub-passes don't recompute
+    // `time_of_day_look(now, theme)`.
+    ambient::paint_ambient(ctx, &look, &frame.seated_agents);
 
     // --- Build the y-sortable middle pass -------------------------------
     //
@@ -605,26 +595,20 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
     // the painter's algorithm applied to a top-down 2D scene.
     let mut drawables: Vec<Drawable<'_>> = Vec::new();
 
-    enqueue_desk_cubicles(ctx, &agents, &seated_agents, &mut drawables);
+    enqueue_desk_cubicles(ctx, agents, &frame.seated_agents, &mut drawables);
 
     enqueue_meeting_furniture(ctx.layout, &mut drawables);
 
     enqueue_lounge_pantry_appliances(ctx.layout, &mut drawables);
 
     enqueue_pod_decor_and_plants(ctx.layout, &mut drawables);
-    enqueue_floor_fixtures(ctx, &agents, &mut drawables);
+    enqueue_floor_fixtures(ctx, agents, &mut drawables);
     enqueue_wall_decor(ctx.layout, &mut drawables);
 
-    let resolved_pet_pos = enqueue_pet(ctx, &agents, &mut drawables);
+    let resolved_pet_pos = enqueue_pet(ctx, agents, &mut drawables);
     let resolved_mascot_pos = enqueue_gateway_mascot(ctx, &mut drawables);
 
-    let waypoint_visitors = enqueue_characters(
-        ctx,
-        &agents,
-        &poses,
-        &mut drawables,
-        &mut new_coffee_carriers,
-    );
+    enqueue_characters(ctx, frame, &mut drawables);
 
     enqueue_room_walls_h(ctx.layout, &mut drawables);
 
@@ -653,351 +637,42 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
         debug_overlay::paint(ctx.buf, ctx.layout, ctx.scene, ctx.motion);
     }
 
-    let chitchat_bubbles = chitchat::update_and_collect(
-        ctx.chitchat_state,
-        ctx.floor.floor_idx,
-        &waypoint_visitors,
-        ctx.now,
-    );
-
-    PixelPassResult {
-        pet_pos: resolved_pet_pos,
-        mascot_pos: resolved_mascot_pos,
-        chitchat_bubbles,
-        new_coffee_carriers,
-    }
+    (resolved_pet_pos, resolved_mascot_pos)
 }
 
-/// All character sprites — the y-sorted middle pass's main subject. For each
-/// agent it looks up the routed pose (entry/exit/wander/seated) from `poses` —
-/// the cached map the authoritative `derive_with_routing` prepass built ONCE this
-/// frame (so the advance_wander / walk_path / history side effects run exactly
-/// once, not twice) — and enqueues the sprite at the feet anchor. Returns the
-/// waypoint visitors (for the chitchat venues) and pushes any agent seen
-/// carrying coffee this frame into `new_coffee_carriers`. The Character
-/// drawable borrows the agent, so this is the ONE phase tied to the agent
-/// set's lifetime `'a`.
+/// Map the sim's resolved [`CharacterPlacement`]s 1:1 onto y-sorted
+/// drawables. Every positional decision (pose, anchor, z-key, sprite pick,
+/// rank fan-out) was made by `sim_step`; the ONLY paint-side work here is
+/// presentation — resolving the theme-free [`CharacterGlow`] to a `Theme`
+/// color. The Character drawable borrows its agent from `frame.agents`, so
+/// this is the ONE phase tied to the frame's lifetime `'a`.
 fn enqueue_characters<'a>(
-    ctx: &mut PixelCtx<'_>,
-    agents: &'a [AgentSlot],
-    poses: &HashMap<pixtuoid_core::AgentId, Option<Pose>>,
+    ctx: &PaintCtx<'_>,
+    frame: &'a SimFrame,
     drawables: &mut Vec<Drawable<'a>>,
-    new_coffee_carriers: &mut Vec<pixtuoid_core::AgentId>,
-) -> Vec<chitchat::Visitor> {
-    let mut wp_rank: HashMap<usize, usize> = HashMap::new();
-    let mut waypoint_visitors: Vec<chitchat::Visitor> = Vec::new();
-    // All 3 lounge-couch seat waypoints collapse to ONE chitchat venue (keyed
-    // on the first couch's index) so the couch hosts a single group
-    // conversation like the meeting room — without overloading the
-    // meeting-only `room_id` field (which indexes `meeting_furniture`).
-    let couch_group_idx = ctx
-        .layout
-        .waypoints
-        .iter()
-        .position(|w| w.kind == crate::layout::WaypointKind::Couch);
-    // The pack's character sprite width (8 for the bundled pack, 10 for the
-    // robot pack). All character poses share one width, so resolve it ONCE from
-    // a reference pose and center every anchor on it — a non-8-wide pack would
-    // otherwise blit ~1px off (the anchors hardcoded 8). Fallback to the bundled
-    // default if the pack lacks the reference anim.
-    let char_w = ctx
-        .pack
-        .animation("standing")
-        .and_then(|a| a.frames.first())
-        .map_or(CHARACTER_SPRITE_W, |f| f.width());
-    for agent in agents {
-        let Some(desk) = ctx.layout.home_desk(agent.desk_index.single_floor_local()) else {
-            continue;
+) {
+    for p in &frame.characters {
+        let agent = &frame.agents[p.agent_idx];
+        let glow_tint = match p.glow {
+            CharacterGlow::None => None,
+            CharacterGlow::Thinking => Some(ctx.theme.tool_glow.default),
+            CharacterGlow::Tool => palette::tool_glow_tint(agent, &ctx.theme.tool_glow),
         };
-        // Look up the pose the authoritative prepass already derived (one
-        // derive_with_routing per agent per frame) instead of re-deriving — the
-        // prepass ran the advance_wander/walk_path/history side effects once.
-        let Some(p) = poses.get(&agent.agent_id).copied().flatten() else {
-            continue;
-        };
-        match p {
-            Pose::SeatedIdle => {
-                let anchor_no_breath = seated_anchor(desk, char_w);
-                let anchor = with_breath(anchor_no_breath, agent.agent_id, ctx.now);
-                let sleep_variant = if agent.agent_id.raw() % 2 == 0 {
-                    "seated_sleeping"
-                } else {
-                    "seated_sleeping_alt"
-                };
-                drawables.push(Drawable {
-                    // Breath-independent z-key (matches AtWaypoint/AimlessAt):
-                    // the ±1px breath must not flip sort order against nearby
-                    // desk decor frame-to-frame.
-                    anchor_y: anchor_no_breath.y + WALKING_Y_OFF,
-                    kind: DrawableKind::Character {
-                        agent,
-                        anim_name: sleep_variant,
-                        frame_idx: 0,
-                        anchor,
-                        flip_x: false,
-                        glow_tint: None,
-                        sleep_z_seed: Some(agent.agent_id.raw()),
-                        waiting_bubble: false,
-                        walking_dust_frame: None,
-                    },
-                });
-            }
-            Pose::SeatedThinking => {
-                let anchor_no_breath = seated_anchor(desk, char_w);
-                let anchor = with_breath(anchor_no_breath, agent.agent_id, ctx.now);
-                drawables.push(Drawable {
-                    // Breath-independent z-key (matches AtWaypoint/AimlessAt):
-                    // the ±1px breath must not flip sort order against nearby
-                    // desk decor frame-to-frame.
-                    anchor_y: anchor_no_breath.y + WALKING_Y_OFF,
-                    kind: DrawableKind::Character {
-                        agent,
-                        anim_name: "seated",
-                        frame_idx: 0,
-                        anchor,
-                        flip_x: false,
-                        glow_tint: Some(ctx.theme.tool_glow.default),
-                        sleep_z_seed: None,
-                        waiting_bubble: false,
-                        walking_dust_frame: None,
-                    },
-                });
-            }
-            Pose::SeatedTyping { frame } => {
-                let anchor_no_breath = seated_anchor(desk, char_w);
-                let anchor = with_breath(anchor_no_breath, agent.agent_id, ctx.now);
-                drawables.push(Drawable {
-                    // Breath-independent z-key (matches AtWaypoint/AimlessAt):
-                    // the ±1px breath must not flip sort order against nearby
-                    // desk decor frame-to-frame.
-                    anchor_y: anchor_no_breath.y + WALKING_Y_OFF,
-                    kind: DrawableKind::Character {
-                        agent,
-                        anim_name: "typing",
-                        frame_idx: frame,
-                        anchor,
-                        flip_x: false,
-                        glow_tint: palette::tool_glow_tint(agent, &ctx.theme.tool_glow),
-                        sleep_z_seed: None,
-                        waiting_bubble: false,
-                        walking_dust_frame: None,
-                    },
-                });
-            }
-            Pose::StandingAtDesk => {
-                let anchor_no_breath = standing_at_desk_anchor(desk, char_w);
-                let anchor = with_breath(anchor_no_breath, agent.agent_id, ctx.now);
-                let is_waiting = matches!(agent.state, ActivityState::Waiting { .. });
-                drawables.push(Drawable {
-                    // Breath-independent z-key (matches AtWaypoint/AimlessAt):
-                    // the ±1px breath must not flip sort order against nearby
-                    // desk decor frame-to-frame.
-                    anchor_y: anchor_no_breath.y + WALKING_Y_OFF,
-                    kind: DrawableKind::Character {
-                        agent,
-                        anim_name: "standing",
-                        frame_idx: 0,
-                        anchor,
-                        flip_x: false,
-                        glow_tint: None,
-                        sleep_z_seed: None,
-                        waiting_bubble: is_waiting,
-                        walking_dust_frame: None,
-                    },
-                });
-            }
-            Pose::AtWaypoint { wp, kind } => {
-                if let Some(wp_obj) = ctx.layout.waypoints.get(wp) {
-                    let rank = *wp_rank.entry(wp).or_insert(0);
-                    wp_rank.insert(wp, rank + 1);
-                    let dx = waypoint_rank_offset_x(kind, rank);
-                    use crate::layout::WaypointKind;
-                    // Render anchor: the cell the agent occupies. For obstacles
-                    // this is the side stand cell (side-aware); for seats it is
-                    // `wp.pos` (the sprite sits ON the furniture) — the walk-in
-                    // approach cell is resolved separately by `approach_point`.
-                    let stand = crate::layout::stand_point(
-                        wp_obj.kind,
-                        wp_obj.pos,
-                        ctx.layout.pantry_counter_size,
-                        &ctx.layout.walkable,
-                        desk,
-                        wp_obj.facing,
-                    );
-                    let (anim_name, anchor_base, sprite_h, flip_x) = match kind {
-                        WaypointKind::Pantry => (
-                            "holding_coffee",
-                            waypoint_anchor(stand, char_w),
-                            12u16,
-                            false,
-                        ),
-                        // Lounge couch + meeting sofa: the sprite follows the
-                        // SEATED facing (couch always North/window → back_couch;
-                        // the sofa's two seats face each other across the table).
-                        // Both reuse the 16×7-sofa anchor.
-                        WaypointKind::Couch | WaypointKind::MeetingSofa => {
-                            let (anim, flip) = seat_sprite(kind, wp_obj.facing);
-                            (anim, back_couch_anchor(stand, char_w), 9u16, flip)
-                        }
-                        // Meeting stand: beside the table, facing inward.
-                        WaypointKind::MeetingStand => {
-                            let (anim, flip) = seat_sprite(kind, wp_obj.facing);
-                            (anim, waypoint_anchor(stand, char_w), 12u16, flip)
-                        }
-                        // PhoneBooth + StandingDesk → agent just stands at the
-                        // decor. waypoint_anchor positions them directly above
-                        // the decor centre (sprite footprint sits just north
-                        // of the decor's centre, head visible above).
-                        WaypointKind::PhoneBooth
-                        | WaypointKind::StandingDesk
-                        | WaypointKind::VendingMachine
-                        | WaypointKind::Printer => {
-                            ("standing", waypoint_anchor(stand, char_w), 12u16, false)
-                        }
-                    };
-                    let anchor_no_breath = Point {
-                        x: anchor_base.x.saturating_add_signed(dx),
-                        y: anchor_base.y,
-                    };
-                    if chitchat::supports_chitchat(kind) {
-                        waypoint_visitors.push(chitchat::Visitor {
-                            // Couch seats share one venue (group chat); other
-                            // waypoints key on their own index.
-                            wp_idx: chitchat::venue_wp_idx(kind, wp, couch_group_idx),
-                            agent_id: agent.agent_id,
-                            anchor: anchor_no_breath,
-                            room_id: wp_obj.room_id,
-                        });
-                    }
-                    let anchor = with_breath(anchor_no_breath, agent.agent_id, ctx.now);
-                    drawables.push(Drawable {
-                        // Breath-independent sort key: a seated occupant must
-                        // y-sort identically every frame so the breath ±1px never
-                        // flips it under its sofa (the overlap bug). The visual
-                        // `anchor` above still breathes; only the z-order is pinned.
-                        //
-                        // Seats route through `SeatView::z_key_for_seat` — the SAME
-                        // key the sit-down/stand-up glide uses, so the agent can't
-                        // pop across its furniture's z-key at the walk→seat seam.
-                        // (back/front sofa+couch → pos+2; stand → pos+3, clearing
-                        // the meeting table.) Obstacles (pantry/booth/vending/
-                        // printer) keep the stand-at-the-approach-cell key — the
-                        // agent stands AT them, there is no settle onto them.
-                        anchor_y: match kind {
-                            WaypointKind::Couch
-                            | WaypointKind::MeetingSofa
-                            | WaypointKind::MeetingStand => {
-                                SeatView::of(kind, wp_obj.facing).z_key_for_seat(stand)
-                            }
-                            _ => anchor_no_breath.y + sprite_h,
-                        },
-                        kind: DrawableKind::Character {
-                            agent,
-                            anim_name,
-                            frame_idx: 0,
-                            anchor,
-                            flip_x,
-                            glow_tint: None,
-                            sleep_z_seed: None,
-                            waiting_bubble: false,
-                            walking_dust_frame: None,
-                        },
-                    });
-                }
-            }
-            Pose::AimlessAt { dest } => {
-                // Breath-independent sort key (like the AtWaypoint arm): the
-                // ±1px breath bob must not flicker the z-order frame to frame.
-                let anchor_no_breath = waypoint_anchor(dest, char_w);
-                let anchor = with_breath(anchor_no_breath, agent.agent_id, ctx.now);
-                drawables.push(Drawable {
-                    anchor_y: anchor_no_breath.y + WALKING_Y_OFF,
-                    kind: DrawableKind::Character {
-                        agent,
-                        anim_name: "standing",
-                        frame_idx: 0,
-                        anchor,
-                        flip_x: false,
-                        glow_tint: None,
-                        sleep_z_seed: None,
-                        waiting_bubble: false,
-                        walking_dust_frame: None,
-                    },
-                });
-            }
-            Pose::Walking {
-                from,
-                to,
-                t_x1000,
-                frame,
-                mut carrying_coffee,
-            } => {
-                // Exit walks: core sets carrying_coffee=false (no
-                // render-side state), but we know from the coffee map.
-                if agent.exiting_at.is_some() && ctx.coffee.contains_key(&agent.agent_id) {
-                    carrying_coffee = true;
-                }
-                if carrying_coffee {
-                    new_coffee_carriers.push(agent.agent_id);
-                }
-                let pos = walking_position(from, to, t_x1000);
-                let walker_anchor = walking_anchor(pos, char_w);
-                let dx = to.x as i32 - from.x as i32;
-                let dy = to.y as i32 - from.y as i32;
-                // A sit-down glide onto a seat faces the SEAT's seated direction
-                // (single source of truth — same `facing` as the seated render),
-                // NOT the travel direction. Without this a window-facing seat
-                // (couch / south meeting sofa, approached from the north, foot-cell
-                // to the south) renders a FRONT walk and the agent sits facing the
-                // camera until it snaps to `back_couch` at AtWaypoint. With it the
-                // agent backs into the seat already facing the window — no late
-                // flip. Ordinary travel segments keep the travel-direction rule.
-                // On the sit arc? `to` is a foot-cell while settling ONTO a seat
-                // (sit-down); `from` is a foot-cell while rising OFF one
-                // (stand-up). Either way the agent renders in the SEAT's view and
-                // at the SEAT's stable z-key for the whole glide — same single
-                // source as the seated render — so it neither faces the wrong way
-                // nor crosses its furniture's z-key mid-glide. Ordinary travel
-                // segments keep the travel-direction facing and foot-position
-                // z-key.
-                let settle =
-                    settle_seat_view(to, ctx.layout).or_else(|| settle_seat_view(from, ctx.layout));
-                let (going_back, flip) = match settle {
-                    Some((view, _)) => view.settle_walk(),
-                    None => (
-                        dy.unsigned_abs() > dx.unsigned_abs() && dy < 0,
-                        to.x < from.x,
-                    ),
-                };
-                // walking_back always wins (no back-facing coffee sprite).
-                let anim_name: &'static str = if going_back {
-                    "walking_back"
-                } else if carrying_coffee && ctx.pack.animation("walking_coffee").is_some() {
-                    "walking_coffee"
-                } else {
-                    "walking"
-                };
-                drawables.push(Drawable {
-                    anchor_y: match settle {
-                        Some((_, z_key)) => z_key,
-                        None => walker_anchor.y + WALKING_Y_OFF,
-                    },
-                    kind: DrawableKind::Character {
-                        agent,
-                        anim_name,
-                        frame_idx: frame,
-                        anchor: walker_anchor,
-                        flip_x: flip,
-                        glow_tint: None,
-                        sleep_z_seed: None,
-                        waiting_bubble: false,
-                        walking_dust_frame: Some(frame),
-                    },
-                });
-            }
-        }
+        drawables.push(Drawable {
+            anchor_y: p.anchor_y,
+            kind: DrawableKind::Character {
+                agent,
+                anim_name: p.anim_name,
+                frame_idx: p.frame_idx,
+                anchor: p.anchor,
+                flip_x: p.flip_x,
+                glow_tint,
+                sleep_z_seed: p.sleep_z_seed,
+                waiting_bubble: p.waiting_bubble,
+                walking_dust_frame: p.walking_dust_frame,
+            },
+        });
     }
-    waypoint_visitors
 }
 
 /// Horizontal (E-W) room dividers join the y-sort, anchored at their south
@@ -1028,7 +703,7 @@ fn enqueue_room_walls_h<'a>(layout: &'a Layout, drawables: &mut Vec<Drawable<'a>
 /// so it only paints for a worker actually at the desk. The DeskCubicle
 /// drawable is Copy, so this borrows nothing from the agent set.
 fn enqueue_desk_cubicles<'a>(
-    ctx: &PixelCtx<'_>,
+    ctx: &PaintCtx<'_>,
     agents: &[AgentSlot],
     seated_agents: &HashMap<FloorLocalDeskIndex, bool>,
     drawables: &mut Vec<Drawable<'a>>,
@@ -1081,7 +756,7 @@ fn enqueue_desk_cubicles<'a>(
 /// sorts one row shallower than the h=6 walk/sit sprites — a hardcoded +2 once
 /// painted a sleeping pet over a character whose feet land at pos.y+1).
 fn enqueue_pet<'a>(
-    ctx: &PixelCtx<'_>,
+    ctx: &PaintCtx<'_>,
     agents: &[AgentSlot],
     drawables: &mut Vec<Drawable<'a>>,
 ) -> Option<PetFrame> {
@@ -1158,7 +833,7 @@ fn enqueue_pet<'a>(
 /// so "entry present" tracks "connected + alive", not merely "a hook arrived".
 /// y-sorted at the mascot's south row.
 fn enqueue_gateway_mascot<'a>(
-    ctx: &PixelCtx<'_>,
+    ctx: &PaintCtx<'_>,
     drawables: &mut Vec<Drawable<'a>>,
 ) -> Option<MascotFrame> {
     let mut hover = None;
@@ -1393,7 +1068,7 @@ fn enqueue_pod_decor_and_plants<'a>(layout: &'a Layout, drawables: &mut Vec<Draw
 /// currently in their entry/exit window — the MAX frame so the door is at least
 /// as open as the most-in-progress agent needs).
 fn enqueue_floor_fixtures<'a>(
-    ctx: &PixelCtx<'_>,
+    ctx: &PaintCtx<'_>,
     agents: &[AgentSlot],
     drawables: &mut Vec<Drawable<'a>>,
 ) {

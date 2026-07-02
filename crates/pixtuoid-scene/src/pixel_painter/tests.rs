@@ -1,4 +1,8 @@
-use super::seat::DESK_SEAT_Z_OFF;
+use super::anchors::{
+    back_couch_anchor, seated_anchor, standing_at_desk_anchor, walking_anchor, waypoint_anchor,
+    CHARACTER_SPRITE_W,
+};
+use super::seat::{seat_sprite, settle_seat_view, SeatView, DESK_SEAT_Z_OFF};
 use super::*;
 use pixtuoid_core::sprite::{Frame, Palette};
 use pixtuoid_core::state::{GlobalDeskIndex, ToolKind};
@@ -1770,4 +1774,187 @@ fn agent_palette_same_id_different_cwd_changes_outfit() {
     // Hair/skin (same id) stay identical regardless of cwd.
     assert_eq!(pa.get('H'), pb.get('H'));
     assert_eq!(pa.get('S'), pb.get('S'));
+}
+
+// --- the sim/paint split (the two-phase seam behind render_to_rgb_buffer) --
+
+/// Shared rig for the seam tests: one fresh agent (mid entry-walk), a real
+/// layout, and every sim store — no pixel buffer anywhere near the sim half.
+fn sim_rig() -> (SceneState, Layout, pixtuoid_core::AgentId, SystemTime, Pack) {
+    let pack = crate::embedded_pack::test_default_pack();
+    let layout = Layout::compute_with_seed(160, 96, None, 0).expect("160x96 lays out");
+    let now0 = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+    let id = pixtuoid_core::AgentId::from_transcript_path("/p/sim-seam.jsonl");
+    let mut slot = make_slot(id, ActivityState::Idle);
+    slot.created_at = now0;
+    slot.state_started_at = now0;
+    slot.last_event_at = now0;
+    let mut scene = SceneState::uniform(16);
+    scene.agents.insert(id, slot);
+    (scene, layout, id, now0, pack)
+}
+
+#[test]
+fn sim_step_advances_motion_without_painting() {
+    // The whole point of the split: the world advances with NO pixel buffer
+    // in sight — sim_step's signature has no RgbBuffer, and this test never
+    // constructs one. A fresh agent is mid entry-walk; two ticks apart the
+    // walk must have progressed and the motion store must hold its leg.
+    use crate::pose::Pose;
+    use std::time::Duration;
+    let (scene, layout, id, now0, pack) = sim_rig();
+    let coffee = HashMap::new();
+
+    let mut router = crate::pathfind::AStarRouter::new();
+    let mut overlay = OccupancyOverlay::new();
+    let mut history = pose::PoseHistory::new();
+    let mut motion = HashMap::new();
+    let mut light = LightingState::new();
+    let mut chitchat = HashMap::new();
+    let mut stores = SimStores {
+        router: &mut router,
+        overlay: &mut overlay,
+        history: &mut history,
+        motion: &mut motion,
+        light: &mut light,
+        chitchat: &mut chitchat,
+    };
+
+    let walk_t = |f: &SimFrame| match f.poses.get(&id) {
+        Some(Some(Pose::Walking { t_x1000, .. })) => *t_x1000,
+        other => panic!("expected an entry walk pose, got {other:?}"),
+    };
+    let f1 = sim_step(
+        &mut stores,
+        &scene,
+        &layout,
+        &pack,
+        &coffee,
+        0,
+        now0 + Duration::from_millis(50),
+    );
+    let f2 = sim_step(
+        &mut stores,
+        &scene,
+        &layout,
+        &pack,
+        &coffee,
+        0,
+        now0 + Duration::from_millis(250),
+    );
+    assert!(
+        walk_t(&f2) > walk_t(&f1),
+        "entry walk must progress between ticks: {} -> {}",
+        walk_t(&f1),
+        walk_t(&f2)
+    );
+    // The observable outcomes are on the frame, not behind a render: the
+    // placement resolved to a walking sprite, and the motion store holds the
+    // snapshotted entry leg.
+    assert!(
+        f2.characters
+            .iter()
+            .any(|c| c.anim_name.starts_with("walking")),
+        "the tick's placements carry the walking sprite"
+    );
+    assert!(
+        motion.get(&id).is_some_and(|m| m.entry.is_some()),
+        "sim_step snapshotted the entry walk profile into the motion store"
+    );
+}
+
+#[test]
+fn paint_frame_is_pure_and_byte_identical() {
+    // The immutability proof for the paint half: painting the SAME SimFrame
+    // twice yields byte-identical buffers and moves NO sim state. The type
+    // system already bars paint from the stores (PaintCtx carries no `&mut`
+    // sim store — router/overlay absent entirely, motion an immutable view);
+    // this pins the observable halves: light level, motion, history,
+    // chitchat all unchanged, pixels reproducible.
+    use std::time::Duration;
+    let (scene, layout, id, now0, pack) = sim_rig();
+    let _ = id;
+    let coffee = HashMap::new();
+
+    let mut router = crate::pathfind::AStarRouter::new();
+    let mut overlay = OccupancyOverlay::new();
+    let mut history = pose::PoseHistory::new();
+    let mut motion = HashMap::new();
+    let mut light = LightingState::new();
+    let mut chitchat = HashMap::new();
+    let now = now0 + Duration::from_millis(120);
+    let frame = sim_step(
+        &mut SimStores {
+            router: &mut router,
+            overlay: &mut overlay,
+            history: &mut history,
+            motion: &mut motion,
+            light: &mut light,
+            chitchat: &mut chitchat,
+        },
+        &scene,
+        &layout,
+        &pack,
+        &coffee,
+        0,
+        now,
+    );
+
+    let light_before = light.level();
+    let motion_before = format!("{motion:?}");
+    let history_before = format!("{history:?}");
+    let chitchat_before = chitchat.len();
+
+    let theme = crate::theme::theme_by_name("normal").expect("normal theme");
+    let black = Rgb { r: 0, g: 0, b: 0 };
+    let mut cache = FrameCache::new();
+    let mut buf1 = RgbBuffer::filled(layout.buf_w, layout.buf_h, black);
+    let mut buf2 = RgbBuffer::filled(layout.buf_w, layout.buf_h, black);
+    for buf in [&mut buf1, &mut buf2] {
+        paint_frame(
+            &mut PaintCtx {
+                scene: &scene,
+                layout: &layout,
+                pack: &pack,
+                now,
+                buf,
+                cache: &mut cache,
+                theme,
+                floor: crate::floor::FloorMeta::ground(),
+                active_pet: None,
+                floor_pet: None,
+                coffee: &coffee,
+                motion: &motion,
+                door_anim_max_ms: 0,
+                debug_walkable: false,
+            },
+            &frame,
+        );
+    }
+
+    assert_eq!(
+        buf1.as_slice(),
+        buf2.as_slice(),
+        "painting the same SimFrame twice must be byte-identical"
+    );
+    assert!(
+        buf1.as_slice().iter().any(|p| *p != black),
+        "the paint pass actually painted the office"
+    );
+    assert_eq!(light.level(), light_before, "paint must not tick lighting");
+    assert_eq!(
+        format!("{motion:?}"),
+        motion_before,
+        "paint must not move motion state"
+    );
+    assert_eq!(
+        format!("{history:?}"),
+        history_before,
+        "paint must not record pose history"
+    );
+    assert_eq!(
+        chitchat.len(),
+        chitchat_before,
+        "paint must not start/expire chitchat"
+    );
 }

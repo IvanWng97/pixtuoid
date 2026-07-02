@@ -15,7 +15,7 @@ use crate::pixel_painter::background::{
     sun_on_wall, weather_light, weather_state, window_spill_columns, TimeOfDayLook, WallSide,
 };
 use crate::pixel_painter::palette::blend_rgb;
-use crate::pixel_painter::PixelCtx;
+use crate::pixel_painter::PaintCtx;
 use crate::theme::Theme;
 
 pub(super) struct SunbeamColumn {
@@ -88,7 +88,7 @@ pub(super) fn dust_mote_positions(
 }
 
 pub(super) fn paint_ambient(
-    ctx: &mut PixelCtx<'_>,
+    ctx: &mut PaintCtx<'_>,
     look: &TimeOfDayLook,
     seated_agents: &std::collections::HashMap<FloorLocalDeskIndex, bool>,
 ) {
@@ -154,7 +154,7 @@ pub(super) fn paint_ceiling_halos(buf: &mut RgbBuffer, theme: &Theme, halos: &[C
 /// row above the desk's top edge so the halo sits in the wall band
 /// rather than on the monitor frame itself.
 fn collect_ceiling_halos(
-    ctx: &PixelCtx<'_>,
+    ctx: &PaintCtx<'_>,
     seated_agents: &std::collections::HashMap<FloorLocalDeskIndex, bool>,
 ) -> Vec<CeilingHalo> {
     use pixtuoid_core::state::ActivityState;
