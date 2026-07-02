@@ -381,26 +381,45 @@ gen-wasm:
     wasm-bindgen --target web --out-dir site/public/wasm \
         target/wasm32-unknown-unknown/release/pixtuoid_web.wasm
     wasm-opt -Oz -o site/public/wasm/pixtuoid_web_bg.wasm site/public/wasm/pixtuoid_web_bg.wasm
+    # Stamp the wasm/glue PAIR (#424): the JS glue's ABI must match the exact
+    # .wasm it was generated with, so every emitted file's sha256 lands in one
+    # manifest, verified by gen-wasm-check. Generation-time stamping keeps CI
+    # toolchain-free (byte-exact rebuilds drift across rustc versions — the
+    # documented reason rebuild comparison is NOT CI'd).
+    (cd site/public/wasm && find . -maxdepth 1 -type f ! -name manifest.sha256 | LC_ALL=C sort | xargs shasum -a 256 > manifest.sha256)
     ls -la site/public/wasm/
 
-# Bloat gate for the committed wasm artifact: the hero must stay a lazy-load
-# behind the poster, so a silent size regression (a dep pulling in formatting
-# machinery, an accidental debug build) fails loudly. 1 MiB raw ≈ ~350-400 KB
-# gzipped over the wire; the artifact is ~700 KB today. Byte-exact
-# rebuild-match is deliberately NOT checked in CI — wasm output drifts across
-# rustc versions, and CI installs latest stable (local `just gen-wasm` +
-# review is the freshness authority, like the committed demo media).
+# Bloat + PAIR gate for the committed wasm artifact. Size: the hero must stay
+# a lazy-load behind the poster, so a silent size regression (a dep pulling in
+# formatting machinery, an accidental debug build) fails loudly — 1 MiB raw ≈
+# ~350-400 KB gzipped; the artifact is ~700 KB today. Pair (#424): the
+# wasm-bindgen JS glue's ABI must match the exact .wasm it was generated with;
+# a one-sided merge resolution or partial regen ships a silent runtime throw,
+# so every committed file must match gen-wasm's sha256 manifest AND every file
+# must be covered by it. Byte-exact rebuild-match is deliberately NOT checked
+# in CI — wasm output drifts across rustc versions, and CI installs latest
+# stable (local `just gen-wasm` + review is the freshness authority, like the
+# committed demo media).
 [group('gen')]
-[doc('Fail if the committed wasm artifact is missing or over the size cap')]
+[doc('Fail if the committed wasm pair is missing, over the size cap, or hash-mismatched')]
 gen-wasm-check:
     #!/usr/bin/env sh
     set -eu
     W=site/public/wasm/pixtuoid_web_bg.wasm
+    M=site/public/wasm/manifest.sha256
     test -f "$W" || { echo "missing $W — run 'just gen-wasm'"; exit 1; }
     CAP=1048576
     SIZE=$(wc -c < "$W" | tr -d ' ')
     test "$SIZE" -le "$CAP" || { echo "$W is $SIZE bytes (> $CAP cap) — investigate the bloat"; exit 1; }
-    echo "gen-wasm-check OK: $W ($SIZE bytes <= $CAP)"
+    test -f "$M" || { echo "missing $M — run 'just gen-wasm' (the wasm/glue pair manifest)"; exit 1; }
+    (cd site/public/wasm && shasum -a 256 --strict -c manifest.sha256 >/dev/null) \
+        || { echo "wasm/glue pair MISMATCH vs $M — a partial regen or one-sided merge; run 'just gen-wasm' and commit all of site/public/wasm/"; exit 1; }
+    for f in site/public/wasm/*; do
+        b=$(basename "$f")
+        [ "$b" = manifest.sha256 ] && continue
+        grep -q " ./$b\$" "$M" || { echo "$f is not covered by $M — run 'just gen-wasm'"; exit 1; }
+    done
+    echo "gen-wasm-check OK: $W ($SIZE bytes <= $CAP), pair manifest verified"
 
 # Drift gate: fail if any committed README section OR rendered still is stale.
 # Pixel-diffs every PNG (threshold 0); video clips + demo.gif are presence-only
