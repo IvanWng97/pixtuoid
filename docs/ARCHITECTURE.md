@@ -64,7 +64,7 @@ daemon lane below is deliberately `AgentId`-free.
 ```mermaid
 flowchart TB
   accTitle: pixtuoid data flow
-  accDescr: A hook or transcript event flows from a coding agent (Claude Code, Codex) through the pixtuoid-hook shim into pixtuoid-core, where a HookRouter demuxes agent payloads to the Transport-tagged reducer and SceneState.agents. A daemon gateway (OpenClaw) shares the same shim and socket but is routed instead to apply_presence and SceneState.daemons over a sibling channel that bypasses the reducer. The pixtuoid TUI renderer then paints the whole scene through a terminal-agnostic pixel pass and a half-block flush.
+  accDescr: A hook or transcript event flows from a coding agent (Claude Code, Codex) through the pixtuoid-hook shim into pixtuoid-core, where a HookRouter demuxes agent payloads to the Transport-tagged reducer and SceneState.agents. A daemon gateway (OpenClaw) shares the same shim and socket but is routed instead to apply_presence and SceneState.daemons over a sibling channel that bypasses the reducer. The pixtuoid TUI renderer then paints the whole scene through the pixtuoid-scene engine's terminal-agnostic pixel pass and a half-block flush.
   CC["Claude Code / Codex<br/>(agent source)"]
   OC["OpenClaw gateway<br/>(daemon source)"]
 
@@ -91,10 +91,14 @@ flowchart TB
   subgraph bin["pixtuoid (binary · TUI)"]
     W["watch&lt;Arc&lt;SceneState&gt;&gt;"]
     TR["TuiRenderer"]
-    PX["render_to_rgb_buffer<br/>(desks + mascots)"]
     FL["flush · ½-block cells"]
-    W --> TR --> PX --> FL
   end
+
+  subgraph scene["pixtuoid-scene (engine)"]
+    PX["render_to_rgb_buffer<br/>(desks + mascots)"]
+  end
+
+  W --> TR --> PX --> FL
 
   CC -->|hook event| SH
   OC -->|hook event| SH
@@ -147,12 +151,13 @@ sweep), while the gateway's own process pid is armed for instant `ExitWatch`.
 These are load-bearing — see `CLAUDE.md` and the nested guides before changing them.
 
 - **The `Source` trait is the only seam for adding a transcript-bearing agent
-  CLI** (Codex, Copilot CLI, Cursor, …). Per-source format knowledge lives in that source's
+  CLI** (Codex, Copilot CLI, Antigravity, …). Per-source format knowledge lives in that source's
   own decoder functions (injected into `JsonlWatcher` as fn pointers), not in a
-  shared decoder. A hook-only CLI (Reasonix — no watchable transcript) is the
-  documented exception: no `Source` impl and no runtime wiring; its registry
-  row sets `line_decoder: None` and supplies a custom hook decoder, and it
-  ships an install `Target` instead (bound via the in-TUI Sources panel).
+  shared decoder. Hook-only CLIs (Reasonix, opencode, Cursor CLI,
+  CodeWhale — no watchable transcript) are the documented exception: no
+  `Source` impl and no runtime wiring; their registry rows set
+  `line_decoder: None` and supply a custom hook decoder, and each ships an
+  install `Target` instead (bound via the in-TUI Sources panel).
 - **A `Source` is an `Agent` or a `Daemon`** (`SourceKind`). A daemon (the
   OpenClaw gateway is the first) earns a presence-gated wandering mascot, not a
   desk: its deltas ride a **sibling channel** (`PresenceMsg { source, delta }`,

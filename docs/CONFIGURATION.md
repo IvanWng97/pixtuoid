@@ -28,7 +28,7 @@ kind = "dog"        # name omitted → "Office Dog"
 | Key | Default | Description |
 |-----|---------|-------------|
 | `theme` | `"normal"` | Color theme — `normal`, `cyberpunk`, `dracula`, `tokyo-night`, `catppuccin`, `gruvbox`. |
-| `max-desks` | auto | Cap desks per floor (≥ 1; `0` is ignored with a warning). If unset, auto-computed from terminal size. Excess agents overflow to additional floors. |
+| `max-desks` | auto | Cap desks per floor (≥ 1; `0` is ignored with a warning). If unset, auto-computed from terminal size. Excess agents overflow to additional floors. Applies to the `run` TUI; `pixtuoid floating` sizes its floors from the window. |
 | `pack-dir` | — | Custom sprite pack directory. Supports `~` expansion. See [Custom sprite packs](#custom-sprite-packs). |
 | `[[pets]]` | all kinds, default names | One stanza per pet. `kind` (`"cat"`/`"dog"`) is required; `name` is optional (the hover-tooltip label, default `Office Cat`/`Office Dog`). Omit the section for all pets; `pets = []` for none; an unknown `kind` is skipped without affecting other settings. Keep it last (it's a table section). |
 
@@ -36,8 +36,9 @@ kind = "dog"        # name omitted → "Office Dog"
 
 | Key | Purpose |
 |-----|---------|
-| `last-seen-version` | Tracks the highest version you've launched, so the "what's new" popup only fires once per upgrade. Pixtuoid overwrites this on every launch. |
-| `[sources]` | Per-agent-CLI connection state (`source-id = true/false`), written when you connect/disconnect a source in the in-TUI **Sources panel** (`s`). When a source has no entry, pixtuoid migrates a default on launch: connected if its hooks are already installed (or it has no hooks to install, like Antigravity), else disconnected. A disconnected source's characters are hidden even if its hooks/transcripts are still present. |
+| `last-seen-version` | Tracks the last version whose "what's new" popup you've seen, so the popup only fires once per upgrade. Pixtuoid rewrites it when the popup fires, on first launch, or to repair an unparseable value — not on every launch. |
+| `[sources]` | Per-agent-CLI connection state (`source-id = true/false`), written when you connect/disconnect a source in the in-TUI **Sources panel** (`s`) or via the scriptable CLI (`pixtuoid connect`/`disconnect`/`sources set`/`setup --yes`). When a source has no entry, pixtuoid migrates a default on launch: connected if its hooks are already installed (or it has no hooks to install, like Antigravity), else disconnected. A disconnected source's characters are hidden even if its hooks/transcripts are still present. |
+| `[floating]` | Geometry of the `pixtuoid floating` desktop window (`width`/`height`/`x`/`y`), rewritten when the window closes. Sizes below 240×160 clamp up on load; `x`/`y` are dropped when the OS can't report the position (the next launch is OS-placed). A user-set `opacity` parses (clamped 0.2–1.0) and survives the rewrite, but isn't applied yet. |
 
 ## Themes
 
@@ -59,7 +60,8 @@ pixtuoid run --pack-dir ./my-pack
 ```
 
 A **robot** pack ships as an example at `crates/pixtuoid/sprites/robot/`. See the
-[sprite format docs](../crates/pixtuoid/CLAUDE.md) for palette keys and animation requirements.
+[binary guide](../crates/pixtuoid/CLAUDE.md) for pack loading, and the
+[scene engine guide](../crates/pixtuoid-scene/CLAUDE.md) for the recolor palette keys.
 
 ## Logging & troubleshooting
 

@@ -1,7 +1,7 @@
 # Migration
 
 Per-version upgrade notes. Most releases need nothing; the entries below cover
-the two that changed something user-visible.
+the releases that changed something user-visible.
 
 ## v0.7.x → v0.8.0
 
@@ -30,6 +30,7 @@ This release also adds two new sources you can connect there: **CodeWhale**
 | `~/.cache/ascii-agents/` | `~/.cache/pixtuoid/` |
 | `/tmp/ascii-agents-{uid}.sock` | `/tmp/pixtuoid-{uid}.sock` |
 | `_ascii_agents` hook key in `settings.json` | `_pixtuoid` |
+| `ASCII_AGENTS_SOCKET` env var | `PIXTUOID_SOCKET` (v0.4.0 also adds `PIXTUOID_LOG`) |
 
 ## Upgrade steps
 

@@ -11,8 +11,10 @@ the system we ran, the experiments we ran against it, and the honest results
 — including the null ones.
 
 > **Editor's note (2026-06).** The heavy *process* machinery described below —
-> the review-ledger suppression protocol, the merge-time disposition sweep, and
-> the `census-reminder` / `review-metrics` / `sharp-edge-inventory` automation —
+> the review-ledger suppression protocol, the disposition sweep's mechanized
+> attestation (the old `check_dod`/`.dod` gate — the sweep itself survives as a
+> practice in `pr-review.prompt.md`'s process notes), and the
+> `census-reminder` / `review-metrics` / `sharp-edge-inventory` automation —
 > has since been **removed** from the repo as a deliberate simplification. This
 > page is kept as a record of what we built and, more to the point, what we
 > *measured*: the null onboarding result and the code-first storage ranking are
@@ -137,7 +139,7 @@ each gate a versioned file with an automatic reader:
 |---|---|---|
 | plan | [`impl-plan.prompt.md`](../.github/prompts/impl-plan.prompt.md) — 7 sections every non-trivial plan must answer (data-shape identity, named consumers, sibling paths, untrusted-input boundaries, tests-first + negative branches, sharp-edge + ledger sweep, blocking verification) | routed from the workspace context file; the plan lands in the PR body |
 | implement | the 6 recurring pitfalls + the PR template checkbox pointing at them | the template is forced on every author |
-| review | [`pr-review.prompt.md`](../.github/prompts/pr-review.prompt.md) — two differentiated lenses, five hard requirements, escalation triggers, ledger routing | copied verbatim into reviewer prompts; the bot loads its own rules file |
+| review | [`pr-review.prompt.md`](../.github/prompts/pr-review.prompt.md) — two differentiated lenses, five hard requirements, escalation triggers, sharp-edge routing | copied verbatim into reviewer prompts; the bot loads its own rules file |
 | merge | the disposition sweep — every finding ends FIXED / REFUTED-with-trace / ISSUE-FILED / ACCEPTED-residual; plan-misses become `plan-miss:` commit lines | the orchestrator's process notes; commit messages become the data channel |
 | periodic | the history census (the weekly `census-reminder` workflow auto-files its successor as a `census` issue once the merged-PR backlog crosses ~50 past the last window — `scripts/census_reminder.py`, no hand-filed placeholder), ledger-blind calibration, `scripts/review-metrics.py` + the reports below | the issue backlog and the harvest scripts |
 

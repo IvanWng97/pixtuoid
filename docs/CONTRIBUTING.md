@@ -19,7 +19,7 @@ git hooks call the same recipes.
 
 ```bash
 just              # list recipes
-just preflight    # full pre-push gate: lint (fmt + machete + deny + arch) → clippy → hack → test
+just preflight    # full pre-push gate: lint (fmt + machete + deny + arch + shfmt + actionlint + links) → clippy → hack → test
 just fmt          # auto-format
 just test         # the whole suite (cargo-nextest if installed, else cargo test)
 ```
@@ -52,7 +52,7 @@ Recipes are grouped by intent — run `just --list` to see them:
 
 | To… | Run | What it touches |
 | --- | --- | --- |
-| **cut a release** | `just bump X.Y.Z` | every version number (workspace + the `pixtuoid`→`pixtuoid-core` path-dep + `Cargo.lock`) · drafts the in-app release notes · `just preflight` · commits on `release/vX.Y.Z` |
+| **cut a release** | `just bump X.Y.Z` | every version number (workspace + the inter-crate path-deps — `pixtuoid`/`pixtuoid-web` → `pixtuoid-scene` → `pixtuoid-core` — + `Cargo.lock`) · drafts the in-app release notes · `just preflight` · commits on `release/vX.Y.Z` |
 | **regenerate doc art** | `just gen` (or `just gen-media` for images only) | `docs/images/*` + `site/public/demos/*` (screenshots + `demo.gif`) from a release build, driven by `scripts/media.json` |
 
 `just bump` rewrites every version number in one shot via `cargo set-version`
@@ -89,7 +89,7 @@ configured before the tag is pushed, or that target's publish step fails. See
 
 ## Architecture invariants (don't break these)
 
-1. `pixtuoid-core` has **no terminal dependencies** (no `ratatui`/`crossterm`/`stdout`).
+1. `pixtuoid-core` and `pixtuoid-scene` (the render+sim engine crate) have **no terminal or window dependencies** (no `ratatui`/`crossterm`/`winit`/`softbuffer`/`stdout` — `just arch` enforces both; terminal/window code lives in the binary's `tui/` and `floating/` painters).
 2. Events flow through **one** channel typed `mpsc::Sender<(Transport, AgentEvent)>`; the `Transport` tag is load-bearing (hook-wins dedup).
 3. The **`Source` trait** is the only seam for adding a transcript-bearing agent CLI (hook-only CLIs like Reasonix instead ship a hook decoder + an install `Target` — see `crates/pixtuoid-core/CLAUDE.md`).
 4. Hook install (`install::install_target`) writes through symlinks (`resolve_symlink`) — don't replace with `fs::rename`.
@@ -159,9 +159,15 @@ TUI), `gh skill` (install Agent Skills, incl. into `.claude/skills/`).
 
 ## Adding a new agent CLI
 
-Step by step. The registration steps (4–6) are test-forced — skipping one
-fails `just test`; steps 1–3 and 7–9 are on you (7, the runtime wiring, is the
-historically-missed one):
+Step by step. The registration steps (4–7 and 9) are test-forced — skipping
+one fails `just test` (the runtime wiring by
+`build_source_set_wires_every_transcript_bearing_source_plus_the_hook_router`
+in `runtime/driver.rs`; the manifest row by `supported_sources_manifest.rs`).
+Step 8 is forced only for hook-only sources
+(`every_hook_only_source_has_an_install_target`) — a transcript-bearing CLI
+that ALSO has hooks still needs you to remember its install target. Step 10
+(the badge hue) is forced by the theme guards. Steps 1–3 and 11 (docs) are on
+you:
 
 1. **Verify the wire format against the CLI's actual source/releases first.**
    Where does it write transcripts, what does a line look like, does it have
@@ -200,9 +206,12 @@ historically-missed one):
 
 4. **Add ONE `SourceDescriptor` row** in `crates/pixtuoid-core/src/source/registry.rs`
    — label prefix (2 chars), the line decoder, hook keying (`IdKey` + an
-   optional custom hook decoder), and truthful capability flags (`has_exit_signal`,
-   `resurrects_on_prompt`, `delegations_are_hook_silent`). Lifecycle policy
-   derives from the flags; you do **not** edit the reducer.
+   optional custom hook decoder), truthful capability flags (`has_exit_signal`,
+   `resurrects_on_prompt`, `delegations_are_hook_silent`), plus
+   `verified_version` ("unknown" until a byte-real capture anchors it — pinned
+   non-empty by `every_descriptor_has_a_verified_version`) and `version_probe`
+   (the `<cli> --version` argv for `pixtuoid doctor`, or `None`). Lifecycle
+   policy derives from the flags; you do **not** edit the reducer.
 5. **Add the name to `source::REGISTERED_SOURCES`** — a bridge test pins
    table↔list equality, and the conformance suite then REQUIRES a fixture.
 6. **Drop a sanitized real-capture fixture** under
@@ -218,8 +227,10 @@ historically-missed one):
 7. **Wire it into `runtime/driver.rs::run_async`** (`crates/pixtuoid/src/runtime/driver.rs`) —
    the runtime spawns sources by hand; the registry gates tests, not spawning.
 8. **If the CLI has hooks**, add an `install/` target (`Target` registry row +
-   a `merge_install`/`merge_uninstall` pair + a registered-events↔decoder-arms
-   guard test) so connecting `<name>` in the in-TUI Sources panel (`s`) wires
+   a `merge_install`/`merge_uninstall` pair + a `verify_schema` fn mirroring
+   the target's own config format — pinned by
+   `verify_target_is_sound_after_a_real_install_for_every_target` — + a
+   registered-events↔decoder-arms guard test) so connecting `<name>` in the in-TUI Sources panel (`s`) wires
    the shim.
 9. **Add a row to [`site/src/sources.json`](../site/src/sources.json)** — the
    single source of truth for the README "Supported Tools" glimpse AND the
@@ -228,7 +239,14 @@ historically-missed one):
    the README. The `supported` set is pinned to `REGISTERED_SOURCES` by
    `crates/pixtuoid-core/tests/supported_sources_manifest.rs`, so a newly
    registered source FAILS that test until its manifest row exists.
-10. **Other docs in the same PR**: the nested `crates/pixtuoid-core/CLAUDE.md`
+10. **Add the per-source badge hue** — a new field on `SourceColors` in
+    `crates/pixtuoid-scene/src/theme/mod.rs` (wired into `SourceColors::all()`
+    and the `by_prefix` match) plus its value in EVERY theme file under
+    `crates/pixtuoid-scene/src/theme/`, and a `badge_color` in the
+    `sources.json` row. `source_colors_cover_every_registered_source`,
+    the per-theme legibility/distinctness guards, and the site bridge test
+    (`pixtuoid-scene/tests/site_badge_colors.rs`) all fail until it exists.
+11. **Other docs in the same PR**: the nested `crates/pixtuoid-core/CLAUDE.md`
     entry, and — if the upstream is open source — a
     `scripts/check_upstream_drift.py` check so a silent rename pages us weekly.
 

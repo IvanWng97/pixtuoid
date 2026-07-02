@@ -155,9 +155,11 @@ an incident into a review finding into a checklist into a gate.
 
 ## Worked example: pixtuoid
 
-pixtuoid is a Cargo workspace `pixtuoid-core ← pixtuoid-scene ← pixtuoid` plus an
-Astro **site** and a Raycast **TS extension** — a producer + three consumers in
-one monorepo. The cross-area contract is **`pixtuoid … --json`** (the
+pixtuoid is a Cargo workspace `pixtuoid-core ← pixtuoid-scene ← {pixtuoid,
+pixtuoid-web}` (plus the standalone `pixtuoid-hook` shim), an Astro **site**,
+and a Raycast **TS extension** — one producer chain + its consumers in one
+monorepo (the `pixtuoid-web` wasm painter is itself a site build input:
+`just gen-wasm` → the committed `site/public/wasm/`). The cross-area contract is **`pixtuoid … --json`** (the
 `SourceStatus` / `OutcomeRow` DTOs).
 
 - **Pinning:** the Rust side pins the shape with the `source_status_json_shape`
@@ -188,14 +190,16 @@ runnable shape (Claude Code's Workflow tool):
 // Phase 0 happened already: the --json shape + its pinning test are on the branch.
 phase('Fan out')
 const areas = [
-  { key: 'rust',    dir: 'crates/',             gate: 'just preflight && just semver && just gen-check' },
-  { key: 'site',    dir: 'site/',               gate: 'just site-check' },
-  { key: 'raycast', dir: 'integrations/raycast/', gate: 'cd integrations/raycast && npx tsc --noEmit && npx eslint .' },
+  // guide is explicit: the rust area's house rules live in the ROOT CLAUDE.md
+  // (there is no crates/CLAUDE.md), the consumers' in their own directories
+  { key: 'rust',    dir: 'crates/',             guide: 'CLAUDE.md',                      gate: 'just preflight && just semver && just gen-check' },
+  { key: 'site',    dir: 'site/',               guide: 'site/CLAUDE.md',                 gate: 'just site-check' },
+  { key: 'raycast', dir: 'integrations/raycast/', guide: 'integrations/raycast/CLAUDE.md', gate: 'cd integrations/raycast && npx tsc --noEmit && npx eslint .' },
 ]
 const results = await parallel(areas.map((a) => () =>
   agent(
     `Implement the <feature> in ${a.dir} against the FROZEN pixtuoid --json contract ` +
-    `(SourceStatus/OutcomeRow). Read ${a.dir}CLAUDE.md for this area's house rules. ` +
+    `(SourceStatus/OutcomeRow). Read ${a.guide} for this area's house rules. ` +
     `Run its gate and report the EXIT CODE you observed: ${a.gate}`,
     { label: `area:${a.key}`, isolation: 'worktree' },   // each agent gets its own worktree
   )))
