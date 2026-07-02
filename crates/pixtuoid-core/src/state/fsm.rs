@@ -17,7 +17,7 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use crate::source::ToolDetail;
-use crate::state::{ActivityState, AgentSlot};
+use crate::state::{ActivityState, AgentSlot, ToolKind};
 
 /// Fold the time the slot has spent Active into `active_ms`, then it's safe to
 /// overwrite `state`/`state_started_at`. A no-op unless the slot is currently
@@ -35,17 +35,21 @@ fn accumulate_active_ms(slot: &mut AgentSlot, until: SystemTime) {
 }
 
 /// Enter `Active` with a concrete tool — the general `ActivityStart` path.
-/// Stamps `last_event_at` (this is the actor's own event).
+/// Stamps `last_event_at` (this is the actor's own event). `kind` is the
+/// caller-derived semantic category (`ToolKind::from_detail`, computed once
+/// from the typed `ToolDetail` before it is erased to the display string).
 pub(crate) fn enter_active(
     slot: &mut AgentSlot,
     tool_use_id: Option<Arc<str>>,
     detail: Option<Arc<str>>,
+    kind: ToolKind,
     now: SystemTime,
 ) {
     accumulate_active_ms(slot, now);
     slot.state = ActivityState::Active {
         tool_use_id,
         detail,
+        kind,
     };
     slot.state_started_at = now;
     slot.last_event_at = now;
@@ -66,9 +70,11 @@ pub(crate) fn enter_delegating(
     accumulate_active_ms(slot, now);
     slot.state = ActivityState::Active {
         tool_use_id,
-        // Single source of truth: the tui palette string-matches this against
-        // `ToolDetail::Task.display()`, so don't re-spell the literal here.
+        // The HUD text; reuse `ToolDetail::Task.display()` rather than
+        // re-spelling the literal. Semantics ride on `kind` — the stale-window
+        // policy and the glow tint match `ToolKind::Task`, never this string.
         detail: Some(Arc::<str>::from(ToolDetail::Task.display())),
+        kind: ToolKind::Task,
     };
     slot.state_started_at = now;
     slot.pending_idle_at = None;
@@ -176,6 +182,7 @@ mod tests {
             ActivityState::Active {
                 tool_use_id: None,
                 detail: None,
+                kind: ToolKind::Other,
             },
             started,
         )
@@ -186,7 +193,13 @@ mod tests {
         let t0 = SystemTime::now();
         let mut s = active(t0);
         s.pending_idle_at = Some(t0);
-        enter_active(&mut s, None, None, t0 + Duration::from_secs(1));
+        enter_active(
+            &mut s,
+            None,
+            None,
+            ToolKind::Other,
+            t0 + Duration::from_secs(1),
+        );
         assert_eq!(s.active_ms, 1000, "prior Active span folded in");
         assert_eq!(s.state_started_at, t0 + Duration::from_secs(1));
         assert_eq!(s.last_event_at, t0 + Duration::from_secs(1));
@@ -212,8 +225,9 @@ mod tests {
             "enter_delegating leaves last_event_at to refresh_lineage"
         );
         match &s.state {
-            ActivityState::Active { detail, .. } => {
-                assert_eq!(detail.as_deref(), Some("Delegating"))
+            ActivityState::Active { detail, kind, .. } => {
+                assert_eq!(detail.as_deref(), Some("Delegating"));
+                assert_eq!(*kind, ToolKind::Task, "delegation is typed, not spelled");
             }
             other => panic!("expected Active(Delegating), got {other:?}"),
         }

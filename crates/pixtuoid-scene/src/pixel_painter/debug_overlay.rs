@@ -59,7 +59,7 @@ fn tint(buf: &mut RgbBuffer, x: i32, y: i32, c: Rgb, t: f32) {
         return;
     }
     let (x, y) = (x as u16, y as u16);
-    if x >= buf.width || y >= buf.height {
+    if x >= buf.width() || y >= buf.height() {
         return;
     }
     let color = blend_over(buf, x, y, c, t);

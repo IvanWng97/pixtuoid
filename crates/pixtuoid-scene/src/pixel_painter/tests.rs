@@ -1,7 +1,7 @@
 use super::seat::DESK_SEAT_Z_OFF;
 use super::*;
 use pixtuoid_core::sprite::{Frame, Palette};
-use pixtuoid_core::state::GlobalDeskIndex;
+use pixtuoid_core::state::{GlobalDeskIndex, ToolKind};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -324,6 +324,7 @@ fn tool_glow_tint_maps_known_tools() {
         ActivityState::Active {
             tool_use_id: None,
             detail: Some(Arc::from("Edit src/main.rs")),
+            kind: ToolKind::Edit,
         },
     );
     let bash_slot = make_slot(
@@ -331,6 +332,7 @@ fn tool_glow_tint_maps_known_tools() {
         ActivityState::Active {
             tool_use_id: None,
             detail: Some(Arc::from("Bash: ls")),
+            kind: ToolKind::Bash,
         },
     );
     let idle_slot = make_slot(id, ActivityState::Idle);
@@ -384,8 +386,8 @@ fn recolor_frame_substitutes_bhs_pixels() {
     );
 
     let out = recolor_frame(&frame, &agent_pal, &base);
-    assert_eq!(out.width, 5);
-    assert_eq!(out.height, 1);
+    assert_eq!(out.width(), 5);
+    assert_eq!(out.height(), 1);
     assert_eq!(out.as_slice()[0], Some(Rgb { r: 200, g: 0, b: 0 }));
     assert_eq!(out.as_slice()[1], Some(Rgb { r: 0, g: 200, b: 0 }));
     assert_eq!(out.as_slice()[2], Some(Rgb { r: 0, g: 0, b: 200 }));
@@ -539,7 +541,7 @@ fn pet_z_anchor_tracks_the_selected_anim_sprite_height() {
     let anim_h = |name: &str| {
         pack.animation(name)
             .and_then(|a| a.frames.first())
-            .map(|f| f.height)
+            .map(|f| f.height())
             .unwrap_or_else(|| panic!("missing pet anim {name}"))
     };
     for &kind in crate::pet::PetKind::ALL {
@@ -1177,42 +1179,63 @@ fn waypoint_rank_offset_x_decollision_table() {
     );
 }
 
-// --- tool_glow_tint token arms ----------------------------------------
+// --- tool_glow_tint kind arms ------------------------------------------
 
+/// Render-parity net for the ToolDetail → ToolKind → glow pipeline: for a
+/// table of representative production displays, deriving the kind exactly as
+/// the reducer does at slot entry (`ToolKind::from_detail`, detail-less →
+/// `Other`) must reproduce the tint the old per-frame first-token string
+/// parse produced. Each expected value below IS that old parse's answer for
+/// the display — change this table only when the glow policy itself changes.
 #[test]
-fn tool_glow_tint_maps_delegation_search_and_unknown_tokens() {
+fn kind_derivation_reproduces_the_string_parse_tint_for_representative_displays() {
+    use pixtuoid_core::ToolDetail;
     let id = pixtuoid_core::AgentId::from_transcript_path("/g.jsonl");
     let glow = &crate::theme::NORMAL.tool_glow;
-    let active = |detail: &str| {
+    // Mirror the reducer's slot entry: detail typed → (display string, kind).
+    let active = |detail: Option<&ToolDetail>| {
         make_slot(
             id,
             ActivityState::Active {
                 tool_use_id: None,
-                detail: Some(Arc::from(detail)),
+                detail: detail.map(|d| Arc::from(d.display())),
+                kind: detail.map_or(ToolKind::Other, ToolKind::from_detail),
             },
         )
     };
-    // Agent / Task → glow.agent.
+    let generic = |display: &str| ToolDetail::Generic {
+        display: display.into(),
+    };
+    let table: &[(Option<ToolDetail>, Rgb)] = &[
+        // Delegation is TYPED (displays "Delegating") → glow.agent.
+        (Some(ToolDetail::Task), glow.agent),
+        (Some(generic("Edit src/main.rs")), glow.edit),
+        (Some(generic("Write: src/foo.rs")), glow.edit),
+        (Some(generic("MultiEdit lib.rs")), glow.edit),
+        (Some(generic("Read: README.md")), glow.read),
+        (Some(generic("Bash: cargo test")), glow.bash),
+        (Some(generic("Grep: TODO")), glow.grep),
+        (Some(generic("Glob **/*.rs")), glow.grep),
+        // Unknown tool → glow.default.
+        (Some(generic("WebFetch https://x")), glow.default),
+        // Detail-less Active (old parse: empty token) → glow.default.
+        (None, glow.default),
+    ];
+    for (detail, expected) in table {
+        assert_eq!(
+            palette::tool_glow_tint(&active(detail.as_ref()), glow),
+            Some(*expected),
+            "display {:?} must keep its pre-ToolKind tint",
+            detail.as_ref().map(ToolDetail::display),
+        );
+    }
+    // The one DELIBERATE divergence from the old token parse: a Generic tool
+    // whose display merely spells a delegation word is NOT kind Task — it
+    // glows default and (the real payoff) never rides the reducer's
+    // delegation stale-window carve-out. Impossible from production decoders,
+    // which type every dispatch as ToolDetail::Task upstream.
     assert_eq!(
-        palette::tool_glow_tint(&active("Agent code-reviewer"), glow),
-        Some(glow.agent)
-    );
-    assert_eq!(
-        palette::tool_glow_tint(&active("Task: do X"), glow),
-        Some(glow.agent)
-    );
-    // Grep / Glob → glow.grep.
-    assert_eq!(
-        palette::tool_glow_tint(&active("Grep pattern"), glow),
-        Some(glow.grep)
-    );
-    assert_eq!(
-        palette::tool_glow_tint(&active("Glob **/*.rs"), glow),
-        Some(glow.grep)
-    );
-    // Unknown token → glow.default.
-    assert_eq!(
-        palette::tool_glow_tint(&active("WebFetch https://x"), glow),
+        palette::tool_glow_tint(&active(Some(&generic("Delegating imposter"))), glow),
         Some(glow.default)
     );
 }
@@ -1277,8 +1300,8 @@ fn degraded_frame_transforms_opaque_pixels_and_preserves_transparency_and_dims()
         ],
     );
     let out = palette::degraded_frame(&frame);
-    assert_eq!(out.width, 2);
-    assert_eq!(out.height, 1);
+    assert_eq!(out.width(), 2);
+    assert_eq!(out.height(), 1);
     // Opaque pixel runs through degraded_pixel (the {255,255,255}→{171,130,130}
     // transform proven above).
     assert_eq!(
@@ -1352,8 +1375,8 @@ fn paint_character_at_missing_anim_is_a_noop() {
         None,
         &mut cache,
     );
-    for y in 0..buf.height {
-        for x in 0..buf.width {
+    for y in 0..buf.height() {
+        for x in 0..buf.width() {
             assert_eq!(
                 buf.get(x, y),
                 bg,
@@ -1460,8 +1483,8 @@ fn furniture_room_decor_too_small_bounds_are_noops() {
     let assert_noop = |f: &dyn Fn(&mut RgbBuffer)| {
         let mut buf = RgbBuffer::filled(60, 60, bg);
         f(&mut buf);
-        for y in 0..buf.height {
-            for x in 0..buf.width {
+        for y in 0..buf.height() {
+            for x in 0..buf.width() {
                 assert_eq!(buf.get(x, y), bg, "too-small bounds must paint nothing");
             }
         }

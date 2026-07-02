@@ -476,7 +476,7 @@ fn proof_of_life_on_delegating_parent_shields_its_active_subtree() {
         AgentEvent::ActivityStart {
             agent_id: parent,
             tool_use_id: Some("task-T".into()),
-            detail: Some("Task".into()),
+            detail: Some("Agent".into()),
         },
         t0 + Duration::from_secs(1),
         Transport::Hook,
@@ -546,7 +546,7 @@ fn vouch_lapse_restores_subtree_sweep() {
         AgentEvent::ActivityStart {
             agent_id: parent,
             tool_use_id: Some("task-T".into()),
-            detail: Some("Task".into()),
+            detail: Some("Agent".into()),
         },
         t0 + Duration::from_secs(1),
         Transport::Hook,
@@ -1281,7 +1281,7 @@ fn long_delegation_keeps_parent_and_live_subagent_alive() {
         AgentEvent::ActivityStart {
             agent_id: parent,
             tool_use_id: Some("task-T".into()),
-            detail: Some("Task".into()),
+            detail: Some("Agent".into()),
         },
         t0 + Duration::from_secs(1),
         Transport::Hook,
@@ -1526,7 +1526,7 @@ fn active_subagent_keeps_parent_alive_via_jsonl_events() {
         AgentEvent::ActivityStart {
             agent_id: parent,
             tool_use_id: Some("task-T".into()),
-            detail: Some("Task".into()),
+            detail: Some("Agent".into()),
         },
         t0 + Duration::from_secs(1),
         Transport::Hook,

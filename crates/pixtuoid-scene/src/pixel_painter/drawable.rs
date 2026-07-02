@@ -600,7 +600,7 @@ fn paint_mascot_bubbles(buf: &mut RgbBuffer, pos: Point, frame_h: u16, runs: u32
         let phase = ((now_ms / 110) + i as u64 * 7) % 6;
         let by = top.saturating_sub(phase as u16);
         let bx = (pos.x + i * 2).saturating_sub(n);
-        if bx < buf.width && by < buf.height {
+        if bx < buf.width() && by < buf.height() {
             buf.put(bx, by, bubble);
         }
     }
@@ -630,7 +630,7 @@ pub(super) fn paint_drawable(
                 let div_x = desk.x + DESK_W + 3;
                 for dy in 0..(DESK_H + 1) {
                     let py = desk.y.saturating_sub(1) + dy;
-                    if div_x < buf.width && py < buf.height {
+                    if div_x < buf.width() && py < buf.height() {
                         buf.put(div_x, py, divider);
                     }
                 }
@@ -640,9 +640,9 @@ pub(super) fn paint_drawable(
                     .animation("filing_cabinet")
                     .and_then(|a| a.frames.first())
                 {
-                    let cab_x = desk.x.saturating_sub(cab.width + 1);
+                    let cab_x = desk.x.saturating_sub(cab.width() + 1);
                     let cab_y = desk.y;
-                    if cab_y + cab.height <= buf.height {
+                    if cab_y + cab.height() <= buf.height() {
                         blit_frame(cab, cab_x, cab_y, buf);
                     }
                 }
@@ -656,7 +656,7 @@ pub(super) fn paint_drawable(
             if let Some(bin) = pack.animation("trash_bin").and_then(|a| a.frames.first()) {
                 let bin_x = desk.x + DESK_W;
                 let bin_y = desk.y + 4;
-                if bin_x + bin.width <= buf.width && bin_y + bin.height <= buf.height {
+                if bin_x + bin.width() <= buf.width() && bin_y + bin.height() <= buf.height() {
                     blit_frame(bin, bin_x, bin_y, buf);
                 }
             }
@@ -698,8 +698,8 @@ pub(super) fn paint_drawable(
                 .animation("meeting_sofa")
                 .and_then(|a| a.frames.first())
             {
-                let cx = pos.x.saturating_sub(f.width / 2);
-                let cy = pos.y.saturating_sub(f.height / 2);
+                let cx = pos.x.saturating_sub(f.width() / 2);
+                let cy = pos.y.saturating_sub(f.height() / 2);
                 let flipped = f.mirror_vertical();
                 blit_frame(&flipped, cx, cy, buf);
             }
@@ -710,8 +710,8 @@ pub(super) fn paint_drawable(
             // narrow terminals.
             let anim_name = if *use_large { "pantry" } else { "pantry_small" };
             if let Some(f) = pack.animation(anim_name).and_then(|a| a.frames.first()) {
-                let cx = pos.x.saturating_sub(f.width / 2);
-                let cy = pos.y.saturating_sub(f.height / 2);
+                let cx = pos.x.saturating_sub(f.width() / 2);
+                let cy = pos.y.saturating_sub(f.height() / 2);
                 // A character behind the counter is occluded by the counter's own
                 // sprite (it y-sorts at the south base → paints over a north-
                 // stander). The mask south-anchors a shallow strip to that base so
@@ -739,8 +739,8 @@ pub(super) fn paint_drawable(
                 .animation("meeting_sofa")
                 .and_then(|a| a.frames.first())
             {
-                let sx = pos.x.saturating_sub(f.width / 2);
-                let sy = pos.y.saturating_sub(f.height / 2);
+                let sx = pos.x.saturating_sub(f.width() / 2);
+                let sy = pos.y.saturating_sub(f.height() / 2);
                 if *mirrored {
                     let flipped = f.mirror_vertical();
                     blit_frame(&flipped, sx, sy, buf);
@@ -771,8 +771,8 @@ pub(super) fn paint_drawable(
         DrawableKind::Plant { kind, pos } => {
             let anim_name = kind.sprite_name();
             if let Some(f) = pack.animation(anim_name).and_then(|a| a.frames.first()) {
-                let px = pos.x.saturating_sub(f.width / 2);
-                let py = pos.y.saturating_sub(f.height / 2);
+                let px = pos.x.saturating_sub(f.width() / 2);
+                let py = pos.y.saturating_sub(f.height() / 2);
                 // Occlusion is the sprite's own job: the foliage overhangs north
                 // of the mask's shallow south-anchored pot strip, so a walker
                 // parks deep behind the pot and the leaves (y-sorted over them)
@@ -783,15 +783,15 @@ pub(super) fn paint_drawable(
         DrawableKind::PodDecorItem { kind, pos } => {
             let anim_name = kind.sprite_name();
             if let Some(f) = pack.animation(anim_name).and_then(|a| a.frames.first()) {
-                let px = pos.x.saturating_sub(f.width / 2);
-                let py = pos.y.saturating_sub(f.height / 2);
+                let px = pos.x.saturating_sub(f.width() / 2);
+                let py = pos.y.saturating_sub(f.height() / 2);
                 blit_frame(f, px, py, buf);
             }
         }
         DrawableKind::FloorLamp { pos } => {
             if let Some(f) = pack.animation("floor_lamp").and_then(|a| a.frames.first()) {
-                let px = pos.x.saturating_sub(f.width / 2);
-                let py = pos.y.saturating_sub(f.height / 2);
+                let px = pos.x.saturating_sub(f.width() / 2);
+                let py = pos.y.saturating_sub(f.height() / 2);
                 blit_frame(f, px, py, buf);
             }
         }
@@ -822,7 +822,7 @@ pub(super) fn paint_drawable(
                 for dx in 0..4u16 {
                     let px = vx + dx;
                     let py = vy + dy;
-                    if px < buf.width && py < buf.height {
+                    if px < buf.width() && py < buf.height() {
                         let color = if dy == 0 {
                             panel
                         } else if (1..=3).contains(&dy) && (1..=2).contains(&dx) {
@@ -856,7 +856,7 @@ pub(super) fn paint_drawable(
                 for dx in 0..5u16 {
                     let px = px0 + dx;
                     let py = py0 + dy;
-                    if px < buf.width && py < buf.height {
+                    if px < buf.width() && py < buf.height() {
                         let color = if dy == 0 {
                             if (1..=3).contains(&dx) {
                                 glass
@@ -898,8 +898,8 @@ pub(super) fn paint_drawable(
             } else {
                 frame.clone()
             };
-            let px = pos.x.saturating_sub(final_frame.width / 2);
-            let py = pos.y.saturating_sub(final_frame.height / 2);
+            let px = pos.x.saturating_sub(final_frame.width() / 2);
+            let py = pos.y.saturating_sub(final_frame.height() / 2);
             blit_frame(&final_frame, px, py, buf);
             if let Some(elapsed) = pet_elapsed_ms {
                 paint_pet_hearts(buf, *pos, *elapsed);
@@ -920,8 +920,8 @@ pub(super) fn paint_drawable(
             let Some(frame) = anim.frames.get(*frame_idx).or(anim.frames.first()) else {
                 return;
             };
-            let px = pos.x.saturating_sub(frame.width / 2);
-            let py = pos.y.saturating_sub(frame.height / 2);
+            let px = pos.x.saturating_sub(frame.width() / 2);
+            let py = pos.y.saturating_sub(frame.height() / 2);
             // Degraded (#317): blit a sickly-red tinted copy of the frame.
             if *degraded {
                 blit_frame(&super::palette::degraded_frame(frame), px, py, buf);
@@ -932,7 +932,7 @@ pub(super) fn paint_drawable(
             // above the lobster's head. `run_count > 0` IS the busy gate (busy ⟺
             // in-flight runs); a persistent idle session must NOT bubble.
             if *run_count > 0 {
-                paint_mascot_bubbles(buf, *pos, frame.height, *run_count, now);
+                paint_mascot_bubbles(buf, *pos, frame.height(), *run_count, now);
             }
         }
         DrawableKind::RoomWallH { x0, x1, y_top } => {
@@ -946,7 +946,7 @@ pub(super) fn paint_drawable(
             // Pole (1px wide, 8 tall).
             for dy in 0..8u16 {
                 let py = cy + dy;
-                if py < buf.height && cx < buf.width {
+                if py < buf.height() && cx < buf.width() {
                     buf.put(cx, py, pole);
                 }
             }
@@ -954,7 +954,7 @@ pub(super) fn paint_drawable(
             let by = cy + 7;
             for dx in 0..3u16 {
                 let px = cx.saturating_sub(1) + dx;
-                if px < buf.width && by < buf.height {
+                if px < buf.width() && by < buf.height() {
                     buf.put(px, by, base);
                 }
             }
@@ -967,7 +967,7 @@ pub(super) fn paint_drawable(
                     for dx in 0..2u16 {
                         let px = hx.wrapping_add(if side < 0 { dx.wrapping_sub(1) } else { dx });
                         let py = hook_y + dy;
-                        if px < buf.width && py < buf.height {
+                        if px < buf.width() && py < buf.height() {
                             buf.put(px, py, coat_color);
                         }
                     }
@@ -989,7 +989,7 @@ fn paint_desk_coffee(
         return;
     }
     let put = |buf: &mut RgbBuffer, x: u16, y: u16, c: Rgb| {
-        if x < buf.width && y < buf.height {
+        if x < buf.width() && y < buf.height() {
             buf.put(x, y, c);
         }
     };
@@ -1212,10 +1212,10 @@ mod tests {
         };
         paint_drawable(&d, &mut buf, &pack, &mut cache, now, theme());
         // Cabinet lands at desk.x - cab.width - 1 .. ; sample a pixel inside it.
-        let cab_x = desk.x.saturating_sub(cab.width + 1);
+        let cab_x = desk.x.saturating_sub(cab.width() + 1);
         let mut cab_painted = false;
-        for dy in 0..cab.height {
-            for dx in 0..cab.width {
+        for dy in 0..cab.height() {
+            for dx in 0..cab.width() {
                 if buf.get(cab_x + dx, desk.y + dy) != bg {
                     cab_painted = true;
                 }
@@ -1225,8 +1225,8 @@ mod tests {
         // Trash bin lands at desk.x + DESK_W.
         let bin_x = desk.x + DESK_W;
         let mut bin_painted = false;
-        for dy in 0..bin.height {
-            for dx in 0..bin.width {
+        for dy in 0..bin.height() {
+            for dx in 0..bin.width() {
                 if buf.get(bin_x + dx, desk.y + 4 + dy) != bg {
                     bin_painted = true;
                 }
@@ -1287,8 +1287,8 @@ mod tests {
             },
         };
         paint_drawable(&d, &mut buf, &pack, &mut cache, now, theme());
-        for y in 0..buf.height {
-            for x in 0..buf.width {
+        for y in 0..buf.height() {
+            for x in 0..buf.width() {
                 assert_eq!(buf.get(x, y), bg, "missing pet anim must paint nothing");
             }
         }
@@ -1652,8 +1652,8 @@ mod tests {
             },
         };
         paint_drawable(&d, &mut buf, &pack, &mut cache, now, theme());
-        for y in 0..buf.height {
-            for x in 0..buf.width {
+        for y in 0..buf.height() {
+            for x in 0..buf.width() {
                 assert_eq!(buf.get(x, y), bg, "missing mascot anim must paint nothing");
             }
         }

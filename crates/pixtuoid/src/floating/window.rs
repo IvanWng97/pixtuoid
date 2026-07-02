@@ -161,7 +161,7 @@ impl FloatingApp {
             floor_pet,
         );
         // Collect office pixels (release the `self.renderer` borrow) as `0x00RRGGBB`.
-        let (ow, oh) = (office.width as usize, office.height as usize);
+        let (ow, oh) = (office.width() as usize, office.height() as usize);
         let opx: Vec<u32> = office
             .as_slice()
             .iter()

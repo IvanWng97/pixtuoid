@@ -384,27 +384,28 @@ pub(super) fn agent_palette(base: &Palette, agent: &AgentSlot, glow_tint: Option
         .with_override('P', Some(outfit.pants))
 }
 
-/// Map an agent's active tool detail to a monitor glow color.
-/// Returns `None` for non-Active states (no glow).
+/// Map an agent's active tool kind to a monitor glow color.
+/// Returns `None` for non-Active states (no glow). Matches the typed
+/// `ToolKind` carried in the slot (derived once at slot entry by the
+/// reducer) — no per-frame re-parse of the human-facing `detail` string.
+/// The match is exhaustive on purpose: a new `ToolKind` variant must
+/// consciously pick a color here.
 pub(super) fn tool_glow_tint(
     agent: &AgentSlot,
     glow: &crate::theme::ToolGlowColors,
 ) -> Option<Rgb> {
-    use pixtuoid_core::state::ActivityState;
-    let detail = match &agent.state {
-        ActivityState::Active { detail, .. } => detail.as_deref(),
+    use pixtuoid_core::state::{ActivityState, ToolKind};
+    let kind = match &agent.state {
+        ActivityState::Active { kind, .. } => *kind,
         _ => return None,
     };
-    let token = detail
-        .and_then(|d| d.split(|c: char| !c.is_alphanumeric()).next())
-        .unwrap_or("");
-    Some(match token {
-        "Edit" | "Write" | "MultiEdit" => glow.edit,
-        "Read" => glow.read,
-        "Bash" => glow.bash,
-        "Agent" | "Task" | "Delegating" => glow.agent,
-        "Grep" | "Glob" => glow.grep,
-        _ => glow.default,
+    Some(match kind {
+        ToolKind::Edit => glow.edit,
+        ToolKind::Read => glow.read,
+        ToolKind::Bash => glow.bash,
+        ToolKind::Task => glow.agent,
+        ToolKind::Search => glow.grep,
+        ToolKind::Other => glow.default,
     })
 }
 
@@ -429,7 +430,7 @@ pub(super) fn recolor_frame(frame: &Frame, pal: &Palette, base_pal: &Palette) ->
             None => None,
         })
         .collect();
-    Frame::from_pixels(frame.width, frame.height, pixels)
+    Frame::from_pixels(frame.width(), frame.height(), pixels)
 }
 
 /// Map one mascot pixel to its "degraded" look (#317): a gateway that is UP but
@@ -466,7 +467,7 @@ pub(super) fn degraded_frame(frame: &Frame) -> Frame {
         .iter()
         .map(|&p| p.map(degraded_pixel))
         .collect();
-    Frame::from_pixels(frame.width, frame.height, pixels)
+    Frame::from_pixels(frame.width(), frame.height(), pixels)
 }
 
 // --- Color math primitives -----------------------------------------------

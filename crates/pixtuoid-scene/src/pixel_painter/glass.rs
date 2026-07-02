@@ -101,7 +101,7 @@ pub(super) fn paint_glass_wall_h(
     y_top: u16,
 ) {
     let (hi, mid, lo) = glass_tones(theme);
-    let (bw, bh) = (buf.width, buf.height);
+    let (bw, bh) = (buf.width(), buf.height());
     // The strip spans the back cap (rising north of the footprint) + the
     // 6 px face. Row 0 = lit far/top edge (north), last row = soft front base.
     let cap_top = y_top.saturating_sub(GLASS_CAP_PX);
@@ -138,7 +138,7 @@ pub(super) fn paint_glass_wall_v(
     y_bot: u16,
 ) {
     let (hi, mid, lo) = glass_tones(theme);
-    let (bw, bh) = (buf.width, buf.height);
+    let (bw, bh) = (buf.width(), buf.height());
     for y in y_top..=y_bot.min(bh.saturating_sub(1)) {
         let seam = (y - y_top).is_multiple_of(GLASS_SEAM_STRIDE);
         for dx in 0..WALL_THICK_V_PX {

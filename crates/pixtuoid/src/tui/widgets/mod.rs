@@ -463,6 +463,7 @@ mod tests {
             ActivityState::Active {
                 tool_use_id: Some(Arc::from("t")),
                 detail: Some(Arc::from(detail)),
+                kind: pixtuoid_core::state::ToolKind::from_display(detail),
             },
             label,
         )

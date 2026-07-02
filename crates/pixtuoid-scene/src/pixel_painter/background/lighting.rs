@@ -27,9 +27,9 @@ fn paint_ellipse_blend(buf: &mut RgbBuffer, e: Ellipse, strength: f32, color: Rg
         return;
     }
     let min_x = e.cx.saturating_sub(e.half_w);
-    let max_x = (e.cx + e.half_w).min(buf.width);
+    let max_x = (e.cx + e.half_w).min(buf.width());
     let min_y = e.cy.saturating_sub(e.half_h);
-    let max_y = (e.cy + e.half_h).min(buf.height);
+    let max_y = (e.cy + e.half_h).min(buf.height());
     for y in min_y..max_y {
         for x in min_x..max_x {
             let nx = (x as f32 - e.cx as f32) / e.half_w as f32;
@@ -69,9 +69,9 @@ pub(in crate::pixel_painter) fn paint_floor_lamp_halo(
         return;
     }
     let min_x = cx.saturating_sub(RADIUS);
-    let max_x = (cx + RADIUS).min(buf.width);
+    let max_x = (cx + RADIUS).min(buf.width());
     let min_y = cy.saturating_sub(RADIUS);
-    let max_y = (cy + RADIUS).min(buf.height);
+    let max_y = (cy + RADIUS).min(buf.height());
     let r2max = (RADIUS as f32) * (RADIUS as f32);
     for y in min_y..max_y {
         for x in min_x..max_x {
@@ -118,7 +118,7 @@ pub(in crate::pixel_painter) fn paint_neon_panel(
         for dx in 0..w {
             let px = x + dx;
             let py = y + dy;
-            if px >= buf.width || py >= buf.height {
+            if px >= buf.width() || py >= buf.height() {
                 continue;
             }
             let on_border = dx == 0 || dx == w - 1 || dy == 0 || dy == h - 1;
@@ -160,7 +160,7 @@ pub(in crate::pixel_painter) fn paint_clock(
             };
             let px = x + dx as u16;
             let py = y + dy as u16;
-            if px < buf.width && py < buf.height {
+            if px < buf.width() && py < buf.height() {
                 buf.put(px, py, c);
             }
         }
@@ -182,7 +182,7 @@ pub(in crate::pixel_painter) fn paint_clock(
     let put = |buf: &mut RgbBuffer, ox: i32, oy: i32, color: Rgb| {
         let px = x as i32 + 3 + ox;
         let py = y as i32 + 3 + oy;
-        if px >= 0 && py >= 0 && (px as u16) < buf.width && (py as u16) < buf.height {
+        if px >= 0 && py >= 0 && (px as u16) < buf.width() && (py as u16) < buf.height() {
             buf.put(px as u16, py as u16, color);
         }
     };
@@ -234,8 +234,8 @@ pub(in crate::pixel_painter) fn paint_corridor_runner(
     let runner_base = theme.office.runner_base;
     let runner_stripe = theme.office.runner_stripe;
     let runner_edge = theme.office.runner_edge;
-    let max_x = (rect.x + rect.width).min(buf.width);
-    let max_y = (rect.y + rect.height).min(buf.height);
+    let max_x = (rect.x + rect.width).min(buf.width());
+    let max_y = (rect.y + rect.height).min(buf.height());
     for y in rect.y..max_y {
         for x in rect.x..max_x {
             let is_edge = y == rect.y || y + 1 == max_y;
@@ -296,8 +296,8 @@ mod tests {
             0.8,
             theme.lighting.ceiling_pool,
         );
-        for y in 0..buf.height {
-            for x in 0..buf.width {
+        for y in 0..buf.height() {
+            for x in 0..buf.width() {
                 assert_eq!(buf.get(x, y), fill, "half_w==0 must paint nothing");
             }
         }
@@ -314,8 +314,8 @@ mod tests {
             0.0,
             theme.lighting.ceiling_pool,
         );
-        for y in 0..buf.height {
-            for x in 0..buf.width {
+        for y in 0..buf.height() {
+            for x in 0..buf.width() {
                 assert_eq!(buf.get(x, y), fill, "strength<=0 must paint nothing");
             }
         }

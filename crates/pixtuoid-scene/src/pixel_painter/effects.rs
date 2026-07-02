@@ -28,7 +28,7 @@ pub(super) fn paint_screen_glow(
     let put = |buf: &mut RgbBuffer, dx: u16, dy: u16, c: Rgb| {
         let px = desk_x + dx;
         let py = desk_y + dy;
-        if px < buf.width && py < buf.height {
+        if px < buf.width() && py < buf.height() {
             buf.put(px, py, c);
         }
     };
@@ -89,7 +89,7 @@ pub(super) fn paint_sleep_z(
     for (dx, dy) in GLYPH {
         let px = z_x + dx;
         let py = z_y + dy;
-        if px < buf.width && py < buf.height {
+        if px < buf.width() && py < buf.height() {
             let cur = buf.get(px, py);
             buf.put(px, py, blend_rgb(cur, z_color, alpha));
         }
@@ -115,7 +115,7 @@ pub(super) fn paint_coffee_steam(buf: &mut RgbBuffer, base: Point, now: SystemTi
         };
         let px = base.x + wiggle;
         let py = base.y.saturating_sub(rise + 2);
-        if px < buf.width && py < buf.height {
+        if px < buf.width() && py < buf.height() {
             let cur = buf.get(px, py);
             buf.put(px, py, blend_rgb(cur, steam, alpha * 0.55));
         }
@@ -131,7 +131,7 @@ pub(super) fn paint_walking_dust(
     let dust = theme.effects.walking_dust;
     let foot_y = walker_anchor.y + WALKING_Y_OFF;
     let foot_x = walker_anchor.x + if frame_idx == 0 { 6 } else { 1 };
-    if foot_x < buf.width && foot_y < buf.height {
+    if foot_x < buf.width() && foot_y < buf.height() {
         let cur = buf.get(foot_x, foot_y);
         buf.put(foot_x, foot_y, blend_rgb(cur, dust, 0.45));
     }
@@ -173,7 +173,7 @@ pub(super) fn paint_pet_hearts(buf: &mut RgbBuffer, cat_pos: Point, elapsed_ms: 
             for ddx in 0..2u16 {
                 let px = hx + ddx;
                 let py = hy + dy;
-                if px < buf.width && py < buf.height {
+                if px < buf.width() && py < buf.height() {
                     let cur = buf.get(px, py);
                     buf.put(px, py, blend_rgb(cur, heart_color, alpha * 0.8));
                 }
@@ -194,7 +194,7 @@ pub(super) fn paint_waiting_bubble(buf: &mut RgbBuffer, anchor: Point, theme: &T
             }
             let px = bx + dx as u16;
             let py = by + dy as u16;
-            if px < buf.width && py < buf.height {
+            if px < buf.width() && py < buf.height() {
                 buf.put(px, py, fg);
             }
         }
@@ -252,8 +252,8 @@ mod tests {
 
         // During the rest gap (phase >= RISE_MS) nothing is painted at all.
         let resting = render(head, 2300);
-        for y in 0..resting.height {
-            for x in 0..resting.width {
+        for y in 0..resting.height() {
+            for x in 0..resting.width() {
                 assert_eq!(resting.get(x, y), bg, "no z during the rest gap");
             }
         }

@@ -3,7 +3,7 @@ use super::*;
 use std::path::Path;
 use std::time::SystemTime;
 
-use pixtuoid_core::state::{ActivityState, AgentSlot, GlobalDeskIndex};
+use pixtuoid_core::state::{ActivityState, AgentSlot, GlobalDeskIndex, ToolKind};
 use pixtuoid_core::AgentId;
 
 /// Build a slot with the fields the dashboard reads; the rest are inert.
@@ -312,6 +312,7 @@ fn build_rows_carries_waiting_and_active_state() {
             ActivityState::Active {
                 tool_use_id: None,
                 detail: Some(Arc::from("Edit x")),
+                kind: ToolKind::Edit,
             },
         ),
     );

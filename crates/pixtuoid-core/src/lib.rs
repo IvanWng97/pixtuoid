@@ -21,6 +21,9 @@ pub mod walkable;
 
 pub use grid::Grid;
 pub use id::AgentId;
+// Legacy pre-scene-split seam (see `render/mod.rs`) — hidden alongside the
+// trait itself so the re-export can't resurface it on the semver/doc surface.
+#[doc(hidden)]
 pub use render::Renderer;
 pub use source::{AgentEvent, ToolDetail, Transport};
 // The `Source` trait + its tagged tokio channel are the async transport seam —
@@ -29,7 +32,9 @@ pub use source::{AgentEvent, ToolDetail, Transport};
 pub use source::{Source, TaggedReceiver, TaggedSender};
 pub use sprite::{Frame, Palette, Pixel, Rgb, RgbBuffer, Sprite};
 pub use state::reducer::Reducer;
-pub use state::{ActivityState, AgentSlot, FloorLocalDeskIndex, GlobalDeskIndex, SceneState};
+pub use state::{
+    ActivityState, AgentSlot, FloorLocalDeskIndex, GlobalDeskIndex, SceneState, ToolKind,
+};
 pub use walkable::{OccupancyOverlay, WalkableMask};
 
 /// Test-only mutex serializing tests that mutate process-global environment

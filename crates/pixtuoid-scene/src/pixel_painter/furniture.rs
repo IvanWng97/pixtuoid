@@ -23,9 +23,9 @@ pub(super) fn paint_meeting_table(
     let top = theme.furniture.wood_top;
     let trim = theme.furniture.wood_trim;
     let min_x = cx.saturating_sub(w / 2);
-    let max_x = (cx + w / 2 + (w & 1)).min(buf.width);
+    let max_x = (cx + w / 2 + (w & 1)).min(buf.width());
     let min_y = cy.saturating_sub(h / 2);
-    let max_y = (cy + h / 2 + (h & 1)).min(buf.height);
+    let max_y = (cy + h / 2 + (h & 1)).min(buf.height());
     for y in min_y..max_y {
         for x in min_x..max_x {
             let on_front = y + 1 == max_y;
@@ -54,7 +54,7 @@ pub(super) fn paint_area_rug(
         for dx in 0..w as i32 {
             let px = cx as i32 - half_w + dx;
             let py = cy as i32 - half_h + dy;
-            if px < 0 || py < 0 || px >= buf.width as i32 || py >= buf.height as i32 {
+            if px < 0 || py < 0 || px >= buf.width() as i32 || py >= buf.height() as i32 {
                 continue;
             }
             let on_border = dx == 0 || dx == w as i32 - 1 || dy == 0 || dy == h as i32 - 1;
@@ -89,7 +89,7 @@ pub(super) fn paint_side_table(buf: &mut RgbBuffer, cx: u16, cy: u16, theme: &cr
         for dx in 0..w {
             let px = cx as i32 - w / 2 + dx;
             let py = cy as i32 - h / 2 + dy;
-            if px < 0 || py < 0 || px >= buf.width as i32 || py >= buf.height as i32 {
+            if px < 0 || py < 0 || px >= buf.width() as i32 || py >= buf.height() as i32 {
                 continue;
             }
             let on_bottom = dy == h - 1;
@@ -107,7 +107,7 @@ pub(super) fn paint_side_table(buf: &mut RgbBuffer, cx: u16, cy: u16, theme: &cr
     for ((dx, dy), c) in mag_pixels {
         let px = cx as i32 + dx;
         let py = cy as i32 + dy;
-        if px >= 0 && py >= 0 && (px as u16) < buf.width && (py as u16) < buf.height {
+        if px >= 0 && py >= 0 && (px as u16) < buf.width() && (py as u16) < buf.height() {
             buf.put(px as u16, py as u16, *c);
         }
     }
@@ -135,7 +135,7 @@ pub(super) fn paint_pantry_table(
             }
             let px = cx as i32 - w / 2 + dx;
             let py = cy as i32 - h / 2 + dy;
-            if px < 0 || py < 0 || px >= buf.width as i32 || py >= buf.height as i32 {
+            if px < 0 || py < 0 || px >= buf.width() as i32 || py >= buf.height() as i32 {
                 continue;
             }
             let on_edge = dy == h - 1;
@@ -155,7 +155,7 @@ pub(super) fn paint_pantry_chair(
     let put = |buf: &mut RgbBuffer, dx: i32, dy: i32, c: Rgb| {
         let px = cx as i32 + dx;
         let py = cy as i32 + dy;
-        if px >= 0 && py >= 0 && (px as u16) < buf.width && (py as u16) < buf.height {
+        if px >= 0 && py >= 0 && (px as u16) < buf.width() && (py as u16) < buf.height() {
             buf.put(px as u16, py as u16, c);
         }
     };
@@ -179,7 +179,7 @@ pub(super) fn paint_notice_board(buf: &mut RgbBuffer, mr: Bounds, theme: &crate:
         for dx in 0..8u16 {
             let px = bx + dx;
             let py = by + dy;
-            if px < buf.width && py < buf.height {
+            if px < buf.width() && py < buf.height() {
                 let on_edge = dx == 0 || dx == 7 || dy == 0 || dy == 4;
                 buf.put(px, py, if on_edge { wall_color } else { accent });
             }
@@ -200,7 +200,7 @@ pub(super) fn paint_doormat(buf: &mut RgbBuffer, mr: Bounds, theme: &crate::them
         for dx in 0..4u16 {
             let px = mat_x + dx + 1;
             let py = mat_y + dy;
-            if px < buf.width && py < buf.height {
+            if px < buf.width() && py < buf.height() {
                 let on_border = dx == 0 || dx == 3 || dy == 0 || dy == 4;
                 buf.put(px, py, if on_border { mat_color } else { mat_accent });
             }
@@ -225,7 +225,7 @@ pub(super) fn paint_water_cooler(buf: &mut RgbBuffer, pr: Bounds, theme: &crate:
         for dx in 0..3u16 {
             let px = wx + dx;
             let py = wy + dy;
-            if px < buf.width && py < buf.height {
+            if px < buf.width() && py < buf.height() {
                 let color = if dy < 2 { cooler_water } else { cooler_body };
                 buf.put(px, py, color);
             }
@@ -266,7 +266,7 @@ pub(super) fn paint_trash_bin(buf: &mut RgbBuffer, pr: Bounds) {
         for dx in 0..4u16 {
             let px = tx + dx;
             let py = ty + dy;
-            if px < buf.width && py < buf.height {
+            if px < buf.width() && py < buf.height() {
                 let color = if dy == 0 {
                     // Rim row — lighter metal rim with bag liner peek
                     if dx == 0 || dx == 3 {

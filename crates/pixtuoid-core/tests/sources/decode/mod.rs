@@ -563,7 +563,7 @@ fn decode_pre_tool_use_carries_tool_use_id_from_payload() {
         "session_id": "ses-abc",
         "transcript_path": "/Users/me/.claude/projects/x/ses-abc.jsonl",
         "cwd": "/repo",
-        "tool_name": "Task",
+        "tool_name": "Agent",
         "tool_use_id": "toolu_01ABC",
         "tool_input": { "description": "go" }
     });
@@ -586,7 +586,11 @@ fn decode_pre_tool_use_carries_tool_use_id_from_payload() {
 // input carries {description, prompt, subagent_type}. Task-detection must
 // recognise it, else `active_tasks` subagent-leak suppression and b1 Task-drain
 // completion never fire for real subagents (the parent shows the subagent's
-// tools — observed live). Both names map to `ToolDetail::Task`.
+// tools — observed live). Since 0.12.0 only "Agent" is a KNOWN name; the
+// legacy pre-v2.1.63 "Task" dispatch here rides purely the SEMANTIC
+// `subagent_type` detection (this test pins that an old CC's real dispatch —
+// which always carries the field — is still caught after the name arm's
+// removal).
 #[test]
 fn decode_pre_tool_use_agent_tool_is_task() {
     for tool in ["Agent", "Task"] {
@@ -1255,6 +1259,51 @@ async fn hook_and_watcher_keys_coalesce_for_one_file() {
         "hook AgentId ({hook_id}) must equal watcher AgentId ({watcher_id}) for the \
          same file — mismatching IDs split one session into two sprites"
     );
+}
+
+// The walker's first-sight head scan dispatches to the SCANNED source's own
+// cwd extractor (a registry-row fn — invariant #3). Pin each transcript-
+// bearing source's extractor against its REAL fixture head bytes, so a wire-
+// shape drift (or a row pointing at the wrong extractor) fails here with the
+// source's name. Antigravity's lines carry no cwd at all — its row uses the
+// shared top-level shape, which must find nothing.
+#[test]
+fn registry_cwd_extractor_matches_each_sources_real_head_shape() {
+    use std::path::{Path, PathBuf};
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/sources/fixtures");
+    let cases: [(&str, &str, Option<&str>); 4] = [
+        (
+            "claude-code",
+            "claude-code/tool-call/01000000-0000-7000-8000-0000000000cc.jsonl",
+            Some("/home/user/demo-project"),
+        ),
+        (
+            "codex",
+            "codex/tool-run/rollout-2026-01-01T00-00-00-01000000-0000-7000-8000-000000000002.jsonl",
+            Some("/home/user/demo-project"),
+        ),
+        (
+            "copilot",
+            "copilot/tool-run/events.jsonl",
+            Some(r"d:\contentforge-fullstack (1)"),
+        ),
+        ("antigravity", "antigravity/tool-run/transcript.jsonl", None),
+    ];
+    for (source, rel, expected) in cases {
+        let extract = pixtuoid_core::source::registry::cwd_extractor_for(source);
+        let content = std::fs::read_to_string(fixtures.join(rel))
+            .unwrap_or_else(|e| panic!("read fixture {rel}: {e}"));
+        let got = content.lines().find_map(|l| {
+            serde_json::from_str::<serde_json::Value>(l)
+                .ok()
+                .and_then(|v| extract(&v))
+        });
+        assert_eq!(
+            got,
+            expected.map(PathBuf::from),
+            "cwd extracted from {source}'s real fixture head"
+        );
+    }
 }
 
 // The mixed-separator/case path-fold (Windows) — retargeted to Antigravity,

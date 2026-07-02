@@ -119,8 +119,8 @@ pub(super) fn paint_lightning_flash(buf: &mut RgbBuffer, now: SystemTime, weathe
         return;
     }
     let alpha = 0.20 * level;
-    for y in 0..buf.height {
-        for x in 0..buf.width {
+    for y in 0..buf.height() {
+        for x in 0..buf.width() {
             let cur = buf.get(x, y);
             buf.put(
                 x,
@@ -430,9 +430,9 @@ fn paint_window_light_spill(
         let shift = (slant_per_row * dy as f32).round() as i32;
         let base_x = (window_x as i32 + shift).max(0) as u16;
         let start_x = base_x.saturating_sub(widen);
-        let end_x = (base_x + window_w + widen).min(buf.width);
+        let end_x = (base_x + window_w + widen).min(buf.width());
         let y = top_y + dy;
-        if y >= buf.height {
+        if y >= buf.height() {
             break;
         }
         let strength = fade_start * (1.0 - dy as f32 / SPILL_DEPTH as f32);
@@ -524,7 +524,7 @@ fn paint_streaks(
                     let dx = if drift { dy / 2 } else { 0 };
                     let px = glass_x0 + (sx + dx) % gw;
                     let py = glass_y0 + ((phase as u16 + dy) % gh);
-                    if px < buf.width && py < buf.height {
+                    if px < buf.width() && py < buf.height() {
                         let alpha = alpha_base - (dy as f32 / len as f32) * alpha_falloff;
                         let cur = buf.get(px, py);
                         buf.put(px, py, blend_rgb(cur, spec.color, alpha));
@@ -539,7 +539,7 @@ fn paint_streaks(
                 };
                 let px = glass_x0 + (sx + wiggle) % gw;
                 let py = glass_y0 + phase as u16;
-                if px < buf.width && py < buf.height {
+                if px < buf.width() && py < buf.height() {
                     buf.put(px, py, spec.color);
                 }
             }
@@ -558,7 +558,7 @@ fn wash_glass(buf: &mut RgbBuffer, x0: u16, y0: u16, w: u16, h: u16, color: Rgb,
         for dx in 1..w.saturating_sub(1) {
             let px = x0 + dx;
             let py = y0 + dy;
-            if px < buf.width && py < buf.height {
+            if px < buf.width() && py < buf.height() {
                 let cur = buf.get(px, py);
                 buf.put(px, py, blend_rgb(cur, color, alpha));
             }
@@ -651,7 +651,7 @@ fn paint_floor_to_ceiling_window(
         for dx in 0..w {
             let px = x + dx;
             let py = y + dy;
-            if px >= buf.width || py >= buf.height {
+            if px >= buf.width() || py >= buf.height() {
                 continue;
             }
             let on_edge = dx == 0 || dx == w - 1 || dy == 0 || dy == h - 1;
@@ -701,7 +701,7 @@ fn paint_floor_to_ceiling_window(
             for dx in 1..w.saturating_sub(1) {
                 let px = x + dx;
                 let py = y + dy;
-                if px < buf.width && py < buf.height {
+                if px < buf.width() && py < buf.height() {
                     let cur = buf.get(px, py);
                     buf.put(px, py, blend_rgb(cur, haze, alpha));
                 }
@@ -785,7 +785,7 @@ fn paint_floor_to_ceiling_window(
                     for dx in 1..w.saturating_sub(1) {
                         let px = x + dx;
                         let py = y + dy;
-                        if px < buf.width && py < buf.height {
+                        if px < buf.width() && py < buf.height() {
                             let cur = buf.get(px, py);
                             buf.put(
                                 px,
@@ -933,7 +933,7 @@ fn paint_floor_to_ceiling_window(
             for dx in 1..w.saturating_sub(1) {
                 let px = x + dx;
                 let py = y + dy;
-                if px < buf.width && py < buf.height {
+                if px < buf.width() && py < buf.height() {
                     let cur = buf.get(px, py);
                     let s = sunset * 0.35;
                     buf.put(

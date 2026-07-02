@@ -263,7 +263,7 @@ mod tests {
             FloorMeta::ground(),
             None,
         );
-        assert_eq!((buf.width, buf.height), (160, 96));
+        assert_eq!((buf.width(), buf.height()), (160, 96));
         // Assert PAINTED content, not the pre-fill: `ensure_size` fills the buffer with
         // `bg_fallback` (non-black) BEFORE the painter runs, so "any non-black pixel" would
         // pass even if the painter no-op'd. Require a pixel that is neither black NOR

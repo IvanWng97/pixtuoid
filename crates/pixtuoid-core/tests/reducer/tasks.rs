@@ -88,7 +88,7 @@ fn hook_activity_during_active_task_is_suppressed() {
         AgentEvent::ActivityStart {
             agent_id: parent,
             tool_use_id: Some("task-T".into()),
-            detail: Some("Task".into()),
+            detail: Some("Agent".into()),
         },
         t0,
         Transport::Hook,
@@ -185,7 +185,7 @@ fn subagent_jsonl_activity_is_unaffected_by_parent_task_suppression() {
         AgentEvent::ActivityStart {
             agent_id: parent,
             tool_use_id: Some("task-T".into()),
-            detail: Some("Task".into()),
+            detail: Some("Agent".into()),
         },
         t0,
         Transport::Hook,
@@ -451,7 +451,7 @@ fn subagent_is_removed_promptly_when_its_parent_task_completes() {
         AgentEvent::ActivityStart {
             agent_id: parent,
             tool_use_id: Some("task-T".into()),
-            detail: Some("Task".into()),
+            detail: Some("Agent".into()),
         },
         t0 + Duration::from_secs(1),
         Transport::Hook,
@@ -640,7 +640,7 @@ fn late_jsonl_dispatch_copy_inside_grace_cancels_premature_cascade() {
         AgentEvent::ActivityStart {
             agent_id: parent,
             tool_use_id: Some("task-1".into()),
-            detail: Some("Task".into()),
+            detail: Some("Agent".into()),
         },
         t1,
         Transport::Hook,
@@ -651,7 +651,7 @@ fn late_jsonl_dispatch_copy_inside_grace_cancels_premature_cascade() {
         AgentEvent::ActivityStart {
             agent_id: parent,
             tool_use_id: Some("task-2".into()),
-            detail: Some("Task".into()),
+            detail: Some("Agent".into()),
         },
         t1 + Duration::from_millis(50),
         Transport::Hook,
@@ -679,7 +679,7 @@ fn late_jsonl_dispatch_copy_inside_grace_cancels_premature_cascade() {
         AgentEvent::ActivityStart {
             agent_id: parent,
             tool_use_id: Some("task-2".into()),
-            detail: Some("Task".into()),
+            detail: Some("Agent".into()),
         },
         t1 + Duration::from_secs(1),
         Transport::Jsonl,
@@ -736,7 +736,7 @@ fn second_drain_inside_grace_restarts_the_cascade_clock() {
         AgentEvent::ActivityStart {
             agent_id: parent,
             tool_use_id: Some("task-1".into()),
-            detail: Some("Task".into()),
+            detail: Some("Agent".into()),
         },
         t1,
         Transport::Hook,
@@ -757,7 +757,7 @@ fn second_drain_inside_grace_restarts_the_cascade_clock() {
         AgentEvent::ActivityStart {
             agent_id: parent,
             tool_use_id: Some("task-2".into()),
-            detail: Some("Task".into()),
+            detail: Some("Agent".into()),
         },
         t1 + Duration::from_secs(1),
         Transport::Jsonl,
@@ -814,7 +814,7 @@ fn late_jsonl_replay_of_drained_task_end_does_not_false_resolve_waiting() {
         AgentEvent::ActivityStart {
             agent_id: parent,
             tool_use_id: Some("task-T".into()),
-            detail: Some("Task".into()),
+            detail: Some("Agent".into()),
         },
         t1,
         Transport::Hook,
@@ -889,7 +889,7 @@ fn task_drain_keeps_parallel_ordinary_tool_gate() {
         AgentEvent::ActivityStart {
             agent_id: parent,
             tool_use_id: Some("task-T".into()),
-            detail: Some("Task".into()),
+            detail: Some("Agent".into()),
         },
         t1,
         Transport::Hook,
@@ -969,7 +969,7 @@ fn suppressed_child_event_keeps_parents_own_parallel_tool_gate() {
         AgentEvent::ActivityStart {
             agent_id: parent,
             tool_use_id: Some("task-T".into()),
-            detail: Some("Task".into()),
+            detail: Some("Agent".into()),
         },
         t1,
         Transport::Hook,
@@ -1057,7 +1057,7 @@ fn own_parallel_tool_end_mid_delegation_returns_parent_to_delegating() {
         AgentEvent::ActivityStart {
             agent_id: parent,
             tool_use_id: Some("task-T".into()),
-            detail: Some("Task".into()),
+            detail: Some("Agent".into()),
         },
         t1,
         Transport::Hook,
@@ -1198,7 +1198,7 @@ fn jsonl_task_start_duplicate_does_not_clobber_waiting_parent() {
         AgentEvent::ActivityStart {
             agent_id: parent,
             tool_use_id: Some("task-T".into()),
-            detail: Some("Task".into()),
+            detail: Some("Agent".into()),
         },
         t0 + Duration::from_secs(1),
         Transport::Hook,
@@ -1220,7 +1220,7 @@ fn jsonl_task_start_duplicate_does_not_clobber_waiting_parent() {
         AgentEvent::ActivityStart {
             agent_id: parent,
             tool_use_id: Some("task-T".into()),
-            detail: Some("Task".into()),
+            detail: Some("Agent".into()),
         },
         t0 + Duration::from_secs(1) + HOOK_WINS_WINDOW / 5,
         Transport::Jsonl,
@@ -1255,7 +1255,7 @@ fn jsonl_task_start_replay_outside_dedup_window_does_not_clobber_waiting_parent(
         AgentEvent::ActivityStart {
             agent_id: parent,
             tool_use_id: Some("task-T".into()),
-            detail: Some("Task".into()),
+            detail: Some("Agent".into()),
         },
         t0 + Duration::from_secs(1),
         Transport::Hook,
@@ -1278,7 +1278,7 @@ fn jsonl_task_start_replay_outside_dedup_window_does_not_clobber_waiting_parent(
         AgentEvent::ActivityStart {
             agent_id: parent,
             tool_use_id: Some("task-T".into()),
-            detail: Some("Task".into()),
+            detail: Some("Agent".into()),
         },
         t0 + Duration::from_secs(1) + HOOK_WINS_WINDOW * 2,
         Transport::Jsonl,
@@ -1315,7 +1315,7 @@ fn lagged_jsonl_task_pair_after_drain_does_not_clobber_waiting_parent() {
         AgentEvent::ActivityStart {
             agent_id: parent,
             tool_use_id: Some("task-T".into()),
-            detail: Some("Task".into()),
+            detail: Some("Agent".into()),
         },
         t0 + Duration::from_secs(1),
         Transport::Hook,
@@ -1349,7 +1349,7 @@ fn lagged_jsonl_task_pair_after_drain_does_not_clobber_waiting_parent() {
         AgentEvent::ActivityStart {
             agent_id: parent,
             tool_use_id: Some("task-T".into()),
-            detail: Some("Task".into()),
+            detail: Some("Agent".into()),
         },
         replay_at,
         Transport::Jsonl,
@@ -1449,7 +1449,7 @@ fn suppressed_parallel_task_dispatch_jsonl_copy_survives_dedup_and_tracks() {
         AgentEvent::ActivityStart {
             agent_id: parent,
             tool_use_id: Some("task-1".into()),
-            detail: Some("Task".into()),
+            detail: Some("Agent".into()),
         },
         t0 + Duration::from_secs(1),
         Transport::Hook,
@@ -1461,7 +1461,7 @@ fn suppressed_parallel_task_dispatch_jsonl_copy_survives_dedup_and_tracks() {
         AgentEvent::ActivityStart {
             agent_id: parent,
             tool_use_id: Some("task-2".into()),
-            detail: Some("Task".into()),
+            detail: Some("Agent".into()),
         },
         t0 + Duration::from_secs(1) + HOOK_WINS_WINDOW / 10,
         Transport::Hook,
@@ -1475,7 +1475,7 @@ fn suppressed_parallel_task_dispatch_jsonl_copy_survives_dedup_and_tracks() {
         AgentEvent::ActivityStart {
             agent_id: parent,
             tool_use_id: Some("task-2".into()),
-            detail: Some("Task".into()),
+            detail: Some("Agent".into()),
         },
         t0 + Duration::from_secs(1) + HOOK_WINS_WINDOW / 10 + HOOK_WINS_WINDOW / 5,
         Transport::Jsonl,
@@ -1557,7 +1557,7 @@ fn jsonl_task_self_end_drains_when_hook_end_drops() {
         AgentEvent::ActivityStart {
             agent_id: parent,
             tool_use_id: Some("task-T".into()),
-            detail: Some("Task".into()),
+            detail: Some("Agent".into()),
         },
         t0 + Duration::from_secs(1),
         Transport::Hook,
@@ -1653,7 +1653,7 @@ fn parent_waiting_on_subagent_permission_resolves_when_the_subagent_resumes() {
         AgentEvent::ActivityStart {
             agent_id: parent,
             tool_use_id: Some("task-T".into()),
-            detail: Some("Task".into()),
+            detail: Some("Agent".into()),
         },
         t0 + Duration::from_secs(1),
         Transport::Hook,

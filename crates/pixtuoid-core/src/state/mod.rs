@@ -110,6 +110,66 @@ impl GlobalDeskIndex {
     }
 }
 
+/// Semantic category of the tool an `Active` slot is running, carried IN the
+/// slot so downstream deciders — the reducer's stale-window policy and the
+/// pixel painter's monitor-glow tint — match on a typed kind instead of
+/// re-parsing the human-facing `detail` string. Derived ONCE at slot entry
+/// ([`ToolKind::from_detail`]); `detail` stays purely HUD text.
+///
+/// The variant set is exactly what those two deciders discriminate today
+/// (the glow's five color buckets + the policy's Task test) — don't add
+/// variants nothing matches on. Deliberately NOT `#[non_exhaustive]`: the
+/// painter's glow map matches every variant, so adding a kind is a compile
+/// error there — the new category must consciously pick a glow color rather
+/// than silently falling into a wildcard.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ToolKind {
+    /// Subagent dispatch (`ToolDetail::Task` — CC `Agent`/legacy `Task`,
+    /// displayed "Delegating"). Only the TYPED detail maps here; a Generic
+    /// display spelling one of those words does not (see `from_display`).
+    Task,
+    /// Edit / Write / MultiEdit.
+    Edit,
+    Read,
+    Bash,
+    /// Grep / Glob.
+    Search,
+    /// Anything else, including a detail-less Active.
+    Other,
+}
+
+impl ToolKind {
+    /// The one production derivation, run by the reducer at slot entry.
+    pub fn from_detail(detail: &crate::source::ToolDetail) -> Self {
+        match detail {
+            crate::source::ToolDetail::Task => ToolKind::Task,
+            crate::source::ToolDetail::Generic { display } => Self::from_display(display),
+        }
+    }
+
+    /// The Generic-display half: first alphanumeric token → kind (the same
+    /// token split the glow tint used to parse per frame). Deliberately has
+    /// NO `"Agent" | "Task" | "Delegating"` arm — delegation is a semantic
+    /// fact carried by the typed `ToolDetail::Task`, and a Generic tool whose
+    /// display merely spells those words must not inherit delegation policy
+    /// (the stale-window carve-out). Production dispatch tools are typed
+    /// upstream (`decoder::make_tool_detail`), so no real display loses its
+    /// glow to this.
+    pub fn from_display(display: &str) -> Self {
+        match display
+            .split(|c: char| !c.is_alphanumeric())
+            .next()
+            .unwrap_or("")
+        {
+            "Edit" | "Write" | "MultiEdit" => ToolKind::Edit,
+            "Read" => ToolKind::Read,
+            "Bash" => ToolKind::Bash,
+            "Grep" | "Glob" => ToolKind::Search,
+            _ => ToolKind::Other,
+        }
+    }
+}
+
 /// `AgentSlot` strings (label, source, session_id) and paths (cwd) are
 /// stored as `Arc<str>` / `Arc<Path>` so `SceneState::clone()` is a series
 /// of pointer copies instead of heap allocations. At 30 fps with N agents
@@ -122,6 +182,7 @@ pub enum ActivityState {
         tool_use_id: Option<Arc<str>>,
         #[serde(with = "opt_arc_str_serde")]
         detail: Option<Arc<str>>,
+        kind: ToolKind,
     },
     Waiting {
         #[serde(with = "arc_str_serde")]
@@ -378,6 +439,7 @@ mod tests {
         slot_a.state = ActivityState::Active {
             tool_use_id: Some(Arc::from("tuid-1")),
             detail: Some(Arc::from("Read · src/main.rs")),
+            kind: ToolKind::Read,
         };
         s.agents.insert(a, slot_a);
 

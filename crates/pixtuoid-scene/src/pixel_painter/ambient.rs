@@ -135,7 +135,7 @@ pub(super) fn paint_ceiling_halos(buf: &mut RgbBuffer, theme: &Theme, halos: &[C
             for dx in 0..5u16 {
                 let x = halo.x.saturating_sub(2).saturating_add(dx);
                 let y = halo.y.saturating_sub(dy);
-                if x >= buf.width || y >= buf.height {
+                if x >= buf.width() || y >= buf.height() {
                     continue;
                 }
                 let dist = ((dx as i32 - 2).abs() as f32 + dy as f32) / 3.0;
@@ -239,7 +239,7 @@ pub(super) fn paint_dust_motes(
     let warm = theme.lighting.sun_spill;
     for col in window_spill_columns(layout) {
         for DustMote { x, y, alpha } in dust_mote_positions(floor_seed, now, &col) {
-            if x >= buf.width || y >= buf.height {
+            if x >= buf.width() || y >= buf.height() {
                 continue;
             }
             let cur = buf.get(x, y);
@@ -328,8 +328,8 @@ pub(super) fn paint_sun_spot(
     // falling-off) spot actually reads, gently scaled by how direct the light is.
     // The old `0.35 * effective_intensity` (~0.10) blended sub-1-RGB → invisible.
     let tint_strength = (0.45 + 0.35 * effective_intensity).min(0.7);
-    let max_x = (rx + w).min(buf.width);
-    let max_y = (ry + h).min(buf.height);
+    let max_x = (rx + w).min(buf.width());
+    let max_y = (ry + h).min(buf.height());
     // Centre at (rx + (w-1)/2, ry + (h-1)/2) so the ellipse spans the
     // loop's full inclusive index range symmetrically — pre-fix used
     // `rx + w/2` which biased the centre half a cell off-grid, making
@@ -487,8 +487,8 @@ mod tests {
             );
             paint_sun_spot(&mut buf, theme, &layout, now, &time_of_day_look(now, theme));
             let mut sum = 0u64;
-            for y in 0..buf.height {
-                for x in 0..buf.width {
+            for y in 0..buf.height() {
+                for x in 0..buf.width() {
                     let p = buf.get(x, y);
                     sum += p.r as u64 + p.g as u64 + p.b as u64;
                 }
@@ -558,8 +558,8 @@ mod tests {
         };
         let mut buf = RgbBuffer::filled(192, 80, fill);
         paint_sun_spot(&mut buf, theme, &layout, now, &time_of_day_look(now, theme));
-        for y in 0..buf.height {
-            for x in 0..buf.width {
+        for y in 0..buf.height() {
+            for x in 0..buf.width() {
                 assert_eq!(
                     buf.get(x, y),
                     fill,
@@ -661,8 +661,8 @@ mod tests {
             &time_of_day_look(clear_morning, theme),
         );
         // wall_band_h == 0 → nothing painted.
-        for y in 0..buf.height {
-            for x in 0..buf.width {
+        for y in 0..buf.height() {
+            for x in 0..buf.width() {
                 assert_eq!(buf.get(x, y), fill, "zero wall band → no sun spot");
             }
         }

@@ -660,7 +660,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
             };
             let snapshot = scene_rx.borrow_and_update().clone();
             renderer.evict_missing(&snapshot);
-            let sig = (renderer.buf().width, renderer.buf().height);
+            let sig = (renderer.buf().width(), renderer.buf().height());
             if last_layout_sig != Some(sig) {
                 renderer.invalidate_routes();
                 renderer.cancel_transition();
@@ -1051,7 +1051,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                             KeyAction::OnboardingConfirm => {
                                 // Apply the roster: connect the checked, disconnect
                                 // the unchecked — SCOPED to the detected sources, so
-                                // a migrate-default (antigravity) is never touched.
+                                // an undetected source's flag is never written.
                                 // Blocking ConfigLock I/O → block_in_place (run_tui
                                 // is on the multi-thread runtime, like the panel).
                                 let choices = onboarding_ui.decisions();

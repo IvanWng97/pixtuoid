@@ -4,7 +4,7 @@
 //! that the unit-level `advance_wander` tests can't reach — and asserts an
 //! off-screen floor freezes while hidden and resyncs (no replay) on return.
 use super::*;
-use pixtuoid_core::state::{ActivityState, AgentSlot, GlobalDeskIndex, SceneState};
+use pixtuoid_core::state::{ActivityState, AgentSlot, GlobalDeskIndex, SceneState, ToolKind};
 use pixtuoid_core::AgentId;
 use pixtuoid_scene::layout::Point;
 use pixtuoid_scene::pet::PetKind;
@@ -101,6 +101,7 @@ fn active(id: &str, desk: usize, detail: &str, started: SystemTime) -> AgentSlot
     s.state = ActivityState::Active {
         tool_use_id: Some(Arc::from("t")),
         detail: Some(Arc::from(detail)),
+        kind: ToolKind::from_display(detail),
     };
     s.last_event_at = started;
     s
@@ -134,8 +135,8 @@ fn lum(c: pixtuoid_core::sprite::Rgb) -> f32 {
 fn avg_lum(buf: &RgbBuffer, x0: u16, y0: u16, w: u16, h: u16) -> f32 {
     let mut sum = 0.0;
     let mut n = 0u32;
-    for y in y0..(y0 + h).min(buf.height) {
-        for x in x0..(x0 + w).min(buf.width) {
+    for y in y0..(y0 + h).min(buf.height()) {
+        for x in x0..(x0 + w).min(buf.width()) {
             sum += lum(buf.get(x, y));
             n += 1;
         }
@@ -150,8 +151,8 @@ fn avg_lum(buf: &RgbBuffer, x0: u16, y0: u16, w: u16, h: u16) -> f32 {
 /// buffers of equal size — a robust "did this region change" metric.
 fn region_diff(a: &RgbBuffer, b: &RgbBuffer, x0: u16, y0: u16, w: u16, h: u16) -> u64 {
     let mut d = 0u64;
-    for y in y0..(y0 + h).min(a.height).min(b.height) {
-        for x in x0..(x0 + w).min(a.width).min(b.width) {
+    for y in y0..(y0 + h).min(a.height()).min(b.height()) {
+        for x in x0..(x0 + w).min(a.width()).min(b.width()) {
             let (p, q) = (a.get(x, y), b.get(x, y));
             d += (p.r as i32 - q.r as i32).unsigned_abs() as u64
                 + (p.g as i32 - q.g as i32).unsigned_abs() as u64
@@ -233,9 +234,9 @@ fn offscreen_floor_freezes_and_resyncs_on_return() {
         .and_then(|m| m.get(&a))
         .expect("floor-0 motion present");
     assert!(
-            ms.wander.phase_started_at >= back_at,
-            "floor-0 agent must resync its wander clock on return (got an anchor before the switch-back ⇒ replay)"
-        );
+        ms.wander.phase_started_at >= back_at,
+        "floor-0 agent must resync its wander clock on return (got an anchor before the switch-back ⇒ replay)"
+    );
 }
 
 // ===================================================================
@@ -491,8 +492,8 @@ fn transition_at_narrow_terminal_paints_no_agents_no_panic() {
     // render_floor returned early (no layout) ⇒ it stays uniform.
     let bg = normal_theme().surface.bg_fallback;
     let from = r.floor_buf(0).expect("floor-0 buffer allocated");
-    let non_bg = (0..from.height)
-        .flat_map(|y| (0..from.width).map(move |x| (x, y)))
+    let non_bg = (0..from.height())
+        .flat_map(|y| (0..from.width()).map(move |x| (x, y)))
         .filter(|&(x, y)| from.get(x, y) != bg)
         .count();
     assert_eq!(
@@ -519,7 +520,7 @@ fn theme_switch_recolors_floor() {
     let before = r.buf().clone();
     r.set_theme(dark_theme());
     r.render(&scene, &pack(), now).unwrap();
-    let d = region_diff(&before, r.buf(), 0, 0, before.width, before.height);
+    let d = region_diff(&before, r.buf(), 0, 0, before.width(), before.height());
     assert!(
         d > 5_000,
         "switching to a different theme must recolor the floor (diff={d})"
@@ -541,7 +542,7 @@ fn set_theme_with_same_theme_is_a_noop() {
     // The SAME &'static pointer the renderer holds ⇒ ptr::eq is true ⇒ skip.
     r.set_theme(normal_theme());
     r.render(&scene, &pack(), now).unwrap();
-    let d = region_diff(&before, r.buf(), 0, 0, before.width, before.height);
+    let d = region_diff(&before, r.buf(), 0, 0, before.width(), before.height());
     assert_eq!(
         d, 0,
         "re-setting the identical theme must not recolor (cache not flushed), diff={d}"
@@ -583,7 +584,7 @@ fn walkable_debug_toggle_tints_blocked_pixels_and_is_reversible() {
         before.get(bx, by),
         on.get(bx, by),
     );
-    let on_diff = region_diff(&before, &on, 0, 0, before.width, before.height);
+    let on_diff = region_diff(&before, &on, 0, 0, before.width(), before.height());
     assert!(
         on_diff > 1_000,
         "the debug layer must visibly change the frame"
@@ -592,7 +593,7 @@ fn walkable_debug_toggle_tints_blocked_pixels_and_is_reversible() {
     // Toggle OFF → the scene returns to the un-overlaid frame (additive layer).
     r.set_debug_walkable(false);
     r.render(&scene, &pack(), now).unwrap();
-    let off_diff = region_diff(&before, r.buf(), 0, 0, before.width, before.height);
+    let off_diff = region_diff(&before, r.buf(), 0, 0, before.width(), before.height());
     assert!(
         off_diff < 200,
         "toggling the debug layer off must restore the scene (diff={off_diff})"
@@ -618,12 +619,12 @@ fn occupied_floor_stays_lit() {
     r.render(&scene, &pack(), now).unwrap();
     now += Duration::from_millis(2000);
     r.render(&scene, &pack(), now).unwrap();
-    let early = avg_lum(r.buf(), 0, 0, r.buf().width, r.buf().height);
+    let early = avg_lum(r.buf(), 0, 0, r.buf().width(), r.buf().height());
     for _ in 0..700 {
         now += Duration::from_millis(33);
         r.render(&scene, &pack(), now).unwrap();
     }
-    let late = avg_lum(r.buf(), 0, 0, r.buf().width, r.buf().height);
+    let late = avg_lum(r.buf(), 0, 0, r.buf().width(), r.buf().height());
     assert!(
         late > early * 0.9,
         "occupied floor must stay lit (early={early:.1}, late={late:.1})"
@@ -1166,9 +1167,9 @@ fn version_popup_interrupt_continues_from_edge() {
     r.set_version_popup(false, half);
     let s = r.version_popup_scale(half + Duration::from_millis(1));
     assert!(
-            (s - scale_at_interrupt).abs() < 0.2,
-            "interrupted animation continues from current scale ({scale_at_interrupt}), not a snap (got {s})"
-        );
+        (s - scale_at_interrupt).abs() < 0.2,
+        "interrupted animation continues from current scale ({scale_at_interrupt}), not a snap (got {s})"
+    );
 }
 
 // ===================================================================
@@ -1218,8 +1219,8 @@ fn bubble_px(buf: &RgbBuffer) -> usize {
         b: 0xf8,
     };
     let mut n = 0;
-    for y in 0..buf.height {
-        for x in 0..buf.width {
+    for y in 0..buf.height() {
+        for x in 0..buf.width() {
             if buf.get(x, y) == bubble {
                 n += 1;
             }
@@ -1255,8 +1256,8 @@ fn lobster_px(buf: &RgbBuffer) -> usize {
         }, // shade
     ];
     let mut n = 0;
-    for y in 0..buf.height {
-        for x in 0..buf.width {
+    for y in 0..buf.height() {
+        for x in 0..buf.width() {
             if reds.contains(&buf.get(x, y)) {
                 n += 1;
             }
@@ -1372,8 +1373,8 @@ fn gateway_mascot_wanders_over_time() {
         r.render(&scene, &pack(), now).unwrap();
         // Signature: the topmost-leftmost lobster pixel.
         let buf = r.buf();
-        'scan: for y in 0..buf.height {
-            for x in 0..buf.width {
+        'scan: for y in 0..buf.height() {
+            for x in 0..buf.width() {
                 let reds = [
                     pixtuoid_core::sprite::Rgb {
                         r: 0xd2,
@@ -1427,8 +1428,8 @@ fn lobster_red_bbox(buf: &RgbBuffer) -> Option<(u16, u16, u16, u16)> {
     ];
     let (mut x0, mut y0, mut x1, mut y1) = (u16::MAX, u16::MAX, 0u16, 0u16);
     let mut any = false;
-    for y in 0..buf.height {
-        for x in 0..buf.width {
+    for y in 0..buf.height() {
+        for x in 0..buf.width() {
             if reds.contains(&buf.get(x, y)) {
                 any = true;
                 x0 = x0.min(x);
@@ -1547,7 +1548,7 @@ fn onboarding_dims_the_office_buffer() {
     // Baseline: onboarding closed → full-brightness office.
     let mut base = build(100, 40, vec![]);
     base.render(&scene, &pack(), t0()).unwrap();
-    let bright = avg_lum(base.buf(), 0, 0, base.buf().width, base.buf().height);
+    let bright = avg_lum(base.buf(), 0, 0, base.buf().width(), base.buf().height());
 
     // Same scene, onboarding open + fully ramped (large elapsed) → the office
     // pixel buffer is dimmed as the modal backdrop (the card paints on the cell
@@ -1566,7 +1567,13 @@ fn onboarding_dims_the_office_buffer() {
         dim: 0.4,
     });
     dimmed.render(&scene, &pack(), t0()).unwrap();
-    let dim = avg_lum(dimmed.buf(), 0, 0, dimmed.buf().width, dimmed.buf().height);
+    let dim = avg_lum(
+        dimmed.buf(),
+        0,
+        0,
+        dimmed.buf().width(),
+        dimmed.buf().height(),
+    );
 
     assert!(
         dim < bright * 0.6,
@@ -1968,7 +1975,14 @@ fn version_popup_paints_when_open() {
         r.last_popup_scale() > 0.9,
         "popup should be near full scale"
     );
-    let d = region_diff(&baseline, r.buf(), 0, 0, baseline.width, baseline.height);
+    let d = region_diff(
+        &baseline,
+        r.buf(),
+        0,
+        0,
+        baseline.width(),
+        baseline.height(),
+    );
     assert!(
         d > 1000,
         "an open version popup must paint over the scene (diff={d})"
@@ -1994,8 +2008,8 @@ fn weather_variants_render_without_panic_and_vary() {
         // Signature the top window strip (where weather effects paint).
         let buf = r.buf();
         let mut s: u64 = 0;
-        for y in 0..(buf.height / 4).max(1) {
-            for x in (0..buf.width).step_by(7) {
+        for y in 0..(buf.height() / 4).max(1) {
+            for x in (0..buf.width()).step_by(7) {
                 let c = buf.get(x, y);
                 s = s
                     .wrapping_mul(1099511628211)
@@ -3121,6 +3135,7 @@ fn dashboard_renders_waiting_reason_and_active_without_detail() {
     a.state = ActivityState::Active {
         tool_use_id: Some(Arc::from("t")),
         detail: None,
+        kind: ToolKind::Other,
     };
     let scene = scene_with(vec![w, a], 16);
 

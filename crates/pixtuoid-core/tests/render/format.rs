@@ -19,8 +19,8 @@ fn parses_two_frame_mini_sprite() {
     let frames = parse_sprite_file(&src, &palette()).unwrap();
 
     assert_eq!(frames.len(), 2);
-    assert_eq!(frames[0].width, 4);
-    assert_eq!(frames[0].height, 2);
+    assert_eq!(frames[0].width(), 4);
+    assert_eq!(frames[0].height(), 2);
     assert_eq!(frames[0].as_slice()[0], Some(Rgb { r: 1, g: 2, b: 3 }));
     assert_eq!(frames[0].as_slice()[1], None);
     assert_eq!(frames[0].as_slice()[2], Some(Rgb { r: 4, g: 5, b: 6 }));
@@ -128,7 +128,7 @@ fn loads_mini_pack() {
     let idle = pack.animation("idle").expect("idle animation");
     assert_eq!(idle.frame_ms, 500);
     assert_eq!(idle.frames.len(), 1);
-    assert_eq!(idle.frames[0].width, 4);
+    assert_eq!(idle.frames[0].width(), 4);
 }
 
 #[test]
@@ -154,12 +154,12 @@ fn default_pack_loads_with_required_animations() {
         assert!(pack.animation(name).is_some(), "missing animation: {name}");
     }
     let seated = pack.animation("seated").unwrap();
-    assert_eq!(seated.frames[0].width, 8);
-    assert_eq!(seated.frames[0].height, 10);
+    assert_eq!(seated.frames[0].width(), 8);
+    assert_eq!(seated.frames[0].height(), 10);
 
     let standing = pack.animation("standing").unwrap();
-    assert_eq!(standing.frames[0].width, 8);
-    assert_eq!(standing.frames[0].height, 12);
+    assert_eq!(standing.frames[0].width(), 8);
+    assert_eq!(standing.frames[0].height(), 12);
 
     let walking = pack.animation("walking").unwrap();
     assert_eq!(walking.frames.len(), 2);
@@ -304,13 +304,13 @@ fn merge_from_inherits_furniture_only_and_never_clobbers_own() {
 
     let base = load_pack(base_dir.path()).unwrap();
     let mut custom = load_pack(custom_dir.path()).unwrap();
-    assert_eq!(custom.animation("desk").unwrap().frames[0].width, 1);
+    assert_eq!(custom.animation("desk").unwrap().frames[0].width(), 1);
 
     custom.merge_from(&base);
 
     // Own `desk` preserved (NOT clobbered by base's 2-wide desk).
     assert_eq!(
-        custom.animation("desk").unwrap().frames[0].width,
+        custom.animation("desk").unwrap().frames[0].width(),
         1,
         "merge_from must not overwrite an animation the custom pack already defines"
     );

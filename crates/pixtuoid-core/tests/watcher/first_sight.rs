@@ -362,6 +362,64 @@ async fn first_sight_extracts_cwd_past_non_json_prefix() {
     handle.abort();
 }
 
+/// The first-sight head scan dispatches by the SCANNED source (design-debt
+/// #5): a codex-shaped `payload.cwd` line inside a CC transcript must NOT
+/// label the CC session with the foreign cwd — before the registry-dispatched
+/// extractors, the shared if-chain tried every source's shape against every
+/// transcript, so this SessionStart registered with cwd = `/foreign/repo`.
+/// With no CC-shaped cwd anywhere in the head, the registration falls back to
+/// an EMPTY cwd (→ the project-dir label fallback), never the foreign one.
+#[tokio::test]
+async fn first_sight_cwd_ignores_foreign_source_shapes() {
+    let dir = TempDir::new().unwrap();
+    let projects_root = dir.path().to_path_buf();
+    let project_dir = projects_root.join("proj-foreign");
+    tokio::fs::create_dir_all(&project_dir).await.unwrap();
+    let transcript = project_dir.join("ses-foreign.jsonl");
+
+    let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(32);
+    let watcher = cc_watcher(projects_root.clone());
+    let handle = tokio::spawn(async move { watcher.run(tx).await });
+
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    // Codex-shaped head line + a cwd-less CC line. Staged + renamed like
+    // `first_sight_extracts_cwd_past_non_json_prefix` so first sight always
+    // reads the full content.
+    let codex_shaped = serde_json::json!({
+        "type": "session_meta",
+        "payload": { "id": "ses-foreign", "cwd": "/foreign/repo" }
+    });
+    let cc_line = serde_json::json!({
+        "type": "system",
+        "subtype": "session_start",
+        "sessionId": "ses-foreign"
+    });
+    let content = format!("{codex_shaped}\n{cc_line}\n");
+    let staging = project_dir.join("ses-foreign.jsonl.partial");
+    tokio::fs::write(&staging, content.as_bytes())
+        .await
+        .unwrap();
+    tokio::fs::rename(&staging, &transcript).await.unwrap();
+
+    let mut found_cwd = None;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    while tokio::time::Instant::now() < deadline {
+        if let Ok(Some((_, AgentEvent::SessionStart { cwd, .. }))) =
+            tokio::time::timeout(Duration::from_millis(100), rx.recv()).await
+        {
+            found_cwd = Some(cwd);
+            break;
+        }
+    }
+    assert_eq!(
+        found_cwd,
+        Some(std::path::PathBuf::new()),
+        "a foreign source's cwd shape must not label a CC session"
+    );
+    handle.abort();
+}
+
 /// Stale files become live as soon as CC writes to them — the next notify
 /// event must produce a SessionStart, since the file is now active.
 #[tokio::test]

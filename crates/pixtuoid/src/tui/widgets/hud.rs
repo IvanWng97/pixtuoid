@@ -781,6 +781,7 @@ mod hud_tests {
             state: ActivityState::Active {
                 tool_use_id: Some(Arc::from("t")),
                 detail: Some(Arc::from("/usr/bin/thing")),
+                kind: pixtuoid_core::state::ToolKind::Other,
             },
             state_started_at: SystemTime::UNIX_EPOCH,
             created_at: SystemTime::UNIX_EPOCH,
@@ -828,6 +829,7 @@ mod hud_tests {
             state: ActivityState::Active {
                 tool_use_id: Some(Arc::from("t")),
                 detail: Some(Arc::from("Bash ls")),
+                kind: pixtuoid_core::state::ToolKind::Bash,
             },
             state_started_at: SystemTime::UNIX_EPOCH,
             created_at: SystemTime::UNIX_EPOCH,

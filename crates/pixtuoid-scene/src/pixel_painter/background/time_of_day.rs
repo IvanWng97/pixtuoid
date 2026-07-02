@@ -365,8 +365,8 @@ pub(in crate::pixel_painter) fn dim_floor_overlay(
     if s <= 0.0 {
         return;
     }
-    for y in top_y..bottom_y.min(buf.height) {
-        for x in 0..buf.width {
+    for y in top_y..bottom_y.min(buf.height()) {
+        for x in 0..buf.width() {
             let cur = buf.get(x, y);
             buf.put(x, y, blend_rgb(cur, night_tint, s));
         }
@@ -398,8 +398,8 @@ pub(in crate::pixel_painter) fn daylight_floor_overlay(
     if s <= 0.0 {
         return;
     }
-    for y in top_y..bottom_y.min(buf.height) {
-        for x in 0..buf.width {
+    for y in top_y..bottom_y.min(buf.height()) {
+        for x in 0..buf.width() {
             let cur = buf.get(x, y);
             buf.put(x, y, blend_rgb(cur, SUN_TINT, s));
         }

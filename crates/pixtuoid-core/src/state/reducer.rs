@@ -4,7 +4,7 @@ use std::time::{Duration, SystemTime};
 
 use crate::source::{AgentEvent, Transport};
 use crate::state::correlation::{Correlation, ToolEventKind};
-use crate::state::{fsm, scope, ActivityState, AgentSlot, SceneState};
+use crate::state::{fsm, scope, ActivityState, AgentSlot, SceneState, ToolKind};
 use crate::AgentId;
 
 // The correlation-map TTL constants moved to `state/correlation.rs` with
@@ -132,16 +132,16 @@ fn stale_threshold_with_caps(
         // such row) emits NOTHING until the dispatch tool's PostToolUse —
         // `last_event_at` freezes for the whole delegation, so a long
         // research/review run would be swept mid-turn on the Active timer.
-        // Give it the Waiting-class window instead. (CC is immune by
-        // construction: its subagents' misattributed hooks drive
+        // Give it the Waiting-class window instead. Keyed on the typed
+        // `ToolKind::Task` the slot carries, never the display string — a
+        // Generic tool spelling "Delegating" is not a delegation. (CC is
+        // immune by construction: its subagents' misattributed hooks drive
         // `refresh_lineage`. The false-positive ghost self-heals on the next
         // UserPromptSubmit — same argument as the Codex idle carve-out.)
-        ActivityState::Active { detail, .. }
-            if caps.is_some_and(|c| c.delegations_are_hook_silent)
-                && detail.as_deref() == Some(crate::source::ToolDetail::Task.display()) =>
-        {
-            STALE_WAITING_TIMEOUT
-        }
+        ActivityState::Active {
+            kind: ToolKind::Task,
+            ..
+        } if caps.is_some_and(|c| c.delegations_are_hook_silent) => STALE_WAITING_TIMEOUT,
         ActivityState::Active { .. } => STALE_ACTIVE_TIMEOUT,
         ActivityState::Idle if caps.is_some_and(|c| c.short_idle_reap()) => {
             STALE_SHORT_IDLE_TIMEOUT
@@ -704,10 +704,17 @@ impl Reducer {
                         if !detail.as_ref().is_some_and(|d| d.is_task()) {
                             slot.tool_call_count += 1;
                         }
+                        // Derive the semantic category ONCE, from the typed
+                        // detail, before it is erased to the HUD display
+                        // string — downstream deciders match `kind`.
+                        let kind = detail
+                            .as_ref()
+                            .map_or(ToolKind::Other, ToolKind::from_detail);
                         fsm::enter_active(
                             slot,
                             tool_use_id.map(|s| Arc::<str>::from(s.as_str())),
                             detail.map(|d| Arc::<str>::from(d.display())),
+                            kind,
                             now,
                         );
                     }
@@ -1611,6 +1618,58 @@ mod tests {
         );
     }
 
+    // The delegation carve-out must key on the TYPED tool kind, not the
+    // human-facing display string: a GENERIC tool whose display merely spells
+    // "Delegating" is NOT a delegation and must reap on the normal Active
+    // timer. (Before `ToolKind`, the policy string-compared the display and
+    // this slot wrongly got the 60-min Waiting-class window.)
+    #[test]
+    fn generic_tool_displaying_delegating_keeps_the_active_window() {
+        use super::{stale_threshold_with_caps, STALE_ACTIVE_TIMEOUT};
+        use crate::source::registry::SourceCaps;
+        use crate::source::{AgentEvent, ToolDetail, Transport};
+        use crate::{AgentId, Reducer, SceneState};
+        use std::time::SystemTime;
+        let caps = SourceCaps {
+            has_exit_signal: true,
+            resurrects_on_prompt: true,
+            delegations_are_hook_silent: true,
+        };
+        let mut scene = SceneState::uniform(4);
+        let mut r = Reducer::new();
+        let id = AgentId::from_parts("hook-silent-cli", "/p");
+        r.apply(
+            &mut scene,
+            AgentEvent::SessionStart {
+                agent_id: id,
+                source: "hook-silent-cli".into(),
+                session_id: "/p".into(),
+                cwd: "/p".into(),
+                parent_id: None,
+            },
+            SystemTime::UNIX_EPOCH,
+            Transport::Hook,
+        );
+        r.apply(
+            &mut scene,
+            AgentEvent::ActivityStart {
+                agent_id: id,
+                tool_use_id: None,
+                detail: Some(ToolDetail::Generic {
+                    display: "Delegating".into(),
+                }),
+            },
+            SystemTime::UNIX_EPOCH,
+            Transport::Hook,
+        );
+        let slot = scene.agents.get(&id).unwrap();
+        assert_eq!(
+            stale_threshold_with_caps(slot, Some(caps)),
+            STALE_ACTIVE_TIMEOUT,
+            "a Generic tool spelling 'Delegating' must not ride the delegation carve-out"
+        );
+    }
+
     // White-box: `gated_before_waiting` is reclaimed in TWO places — `tick`'s
     // retain and `sweep_exited`'s explicit remove (the apply path, where tick's
     // retain never runs). All existing reducer tests go through `tick`; this
@@ -1756,7 +1815,7 @@ mod tests {
             AgentEvent::ActivityStart {
                 agent_id: id,
                 tool_use_id: Some("task-1".into()),
-                detail: Some(ToolDetail::from("Task")),
+                detail: Some(ToolDetail::from("Agent")),
             },
             t0 + Duration::from_secs(2),
             Transport::Hook,

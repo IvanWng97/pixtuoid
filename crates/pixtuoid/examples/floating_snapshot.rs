@@ -15,7 +15,7 @@ use std::time::{Duration, SystemTime};
 use anyhow::{anyhow, Context, Result};
 use image::{Rgb as ImgRgb, RgbImage};
 use pixtuoid::floating::offscreen::{paint_labels_into_surface, OfficeRenderer};
-use pixtuoid_core::state::{ActivityState, SceneState};
+use pixtuoid_core::state::{ActivityState, SceneState, ToolKind};
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex};
 use pixtuoid_scene::floor::FloorMeta;
 use pixtuoid_scene::theme::theme_by_name;
@@ -29,6 +29,7 @@ fn populate_demo_agents(scene: &mut SceneState, now: SystemTime, n: usize) {
             ActivityState::Active {
                 tool_use_id: Some("tu_a".into()),
                 detail: Some("Write: src/foo.rs".into()),
+                kind: ToolKind::Edit,
             },
         ),
         ("codex", ActivityState::Idle),
@@ -43,6 +44,7 @@ fn populate_demo_agents(scene: &mut SceneState, now: SystemTime, n: usize) {
             ActivityState::Active {
                 tool_use_id: Some("tu_d".into()),
                 detail: Some("Bash: cargo test".into()),
+                kind: ToolKind::Bash,
             },
         ),
         ("reasonix", ActivityState::Idle),
@@ -51,6 +53,7 @@ fn populate_demo_agents(scene: &mut SceneState, now: SystemTime, n: usize) {
             ActivityState::Active {
                 tool_use_id: Some("tu_e".into()),
                 detail: Some("Grep: TODO".into()),
+                kind: ToolKind::Search,
             },
         ),
     ];
@@ -145,7 +148,7 @@ fn main() -> Result<()> {
     let ow = (win_w / scale).max(1).min(u16::MAX as u32) as u16;
     let oh = (win_h / scale).max(1).min(u16::MAX as u32) as u16;
     let buf = renderer.render(&scene, &pack, theme, now, ow, oh, FloorMeta::ground(), None);
-    let (bw, bh) = (buf.width as u32, buf.height as u32);
+    let (bw, bh) = (buf.width() as u32, buf.height() as u32);
 
     let (ww, wh) = (win_w as usize, win_h as usize);
     let mut sb: Vec<u32> = vec![0; ww * wh];

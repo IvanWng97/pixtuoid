@@ -704,7 +704,7 @@ fn enqueue_characters<'a>(
         .pack
         .animation("standing")
         .and_then(|a| a.frames.first())
-        .map_or(CHARACTER_SPRITE_W, |f| f.width);
+        .map_or(CHARACTER_SPRITE_W, |f| f.width());
     for agent in agents {
         let Some(desk) = ctx.layout.home_desk(agent.desk_index.single_floor_local()) else {
             continue;
@@ -1130,7 +1130,7 @@ fn enqueue_pet<'a>(
         .pack
         .animation(anim_name)
         .and_then(|a| a.frames.first())
-        .map_or(6, |f| f.height);
+        .map_or(6, |f| f.height());
     drawables.push(Drawable {
         anchor_y: z_sort_row(Anchor::Center, pos, pet_h),
         kind: DrawableKind::Pet {
@@ -1179,7 +1179,7 @@ fn enqueue_gateway_mascot<'a>(
             .pack
             .animation(anim_name)
             .and_then(|a| a.frames.first())
-            .map_or(12, |f| f.height);
+            .map_or(12, |f| f.height());
         let run_count = presence.in_flight_run_keys.len() as u32;
         drawables.push(Drawable {
             anchor_y: z_sort_row(Anchor::Center, pos, h),

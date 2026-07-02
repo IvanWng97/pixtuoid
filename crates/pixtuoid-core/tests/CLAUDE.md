@@ -36,7 +36,7 @@ tests/
 │   ├── sources.rs            Source::run glue (codex / antigravity / claude-code bind+spawn)
 │   └── attach.rs             the mid-attach scenario suite (attach shows exactly the live set)
 ├── transport/main.rs         #[cfg(unix)] mod socket;  #[cfg(windows)] mod pipe;
-├── render/main.rs            mod {blit, format, animator}  +  render/fixtures/ (sprites)
+├── render/main.rs            mod {blit, format}  +  render/fixtures/ (sprites)
 ├── socket_path_parity.rs     FLAT — publish-excluded (see below)
 └── supported_sources_manifest.rs   FLAT — publish-excluded
 ```

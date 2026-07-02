@@ -15,7 +15,7 @@ use pixtuoid::tui::renderer::{draw_scene, DrawCtx, TickerQueue};
 use pixtuoid_core::source::jsonl::JsonlWatcher;
 use pixtuoid_core::source::AgentEvent;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
-use pixtuoid_core::state::ActivityState;
+use pixtuoid_core::state::{ActivityState, ToolKind};
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex, Reducer, SceneState, Transport};
 use pixtuoid_scene::embedded_pack::load_sprite_pack;
 use pixtuoid_scene::frame_cache::FrameCache;
@@ -972,6 +972,7 @@ fn fill_sample_agents(s: &mut SceneState, now: SystemTime, desks: std::ops::Rang
             ActivityState::Active {
                 tool_use_id: Some("tu_a".into()),
                 detail: Some("Write: src/foo.rs".into()),
+                kind: ToolKind::Edit,
             },
             D::from_millis(0),
         ),
@@ -991,6 +992,7 @@ fn fill_sample_agents(s: &mut SceneState, now: SystemTime, desks: std::ops::Rang
             ActivityState::Active {
                 tool_use_id: Some("tu_c".into()),
                 detail: Some("Read: README.md".into()),
+                kind: ToolKind::Read,
             },
             D::from_millis(140),
         ),
@@ -1006,6 +1008,7 @@ fn fill_sample_agents(s: &mut SceneState, now: SystemTime, desks: std::ops::Rang
             ActivityState::Active {
                 tool_use_id: Some("tu_d".into()),
                 detail: Some("Bash: cargo test".into()),
+                kind: ToolKind::Bash,
             },
             D::from_millis(140),
         ),
@@ -1015,6 +1018,7 @@ fn fill_sample_agents(s: &mut SceneState, now: SystemTime, desks: std::ops::Rang
             ActivityState::Active {
                 tool_use_id: Some("tu_e".into()),
                 detail: Some("Grep: TODO".into()),
+                kind: ToolKind::Search,
             },
             D::from_millis(280),
         ),
@@ -1276,7 +1280,7 @@ fn meeting_scene(
 /// varied activity states.
 fn dashboard_scene(now: SystemTime) -> SceneState {
     use pixtuoid_core::source::{claude_code, codex, reasonix};
-    use pixtuoid_core::state::ActivityState;
+    use pixtuoid_core::state::{ActivityState, ToolKind};
     use std::time::Duration as D;
 
     // Named to satisfy clippy::type_complexity (a 6-field tuple trips the lint):
@@ -1301,6 +1305,7 @@ fn dashboard_scene(now: SystemTime) -> SceneState {
             ActivityState::Active {
                 tool_use_id: Some("tu0".into()),
                 detail: Some("Edit: reducer.rs".into()),
+                kind: ToolKind::Edit,
             },
             None,
             0,
@@ -1312,6 +1317,7 @@ fn dashboard_scene(now: SystemTime) -> SceneState {
             ActivityState::Active {
                 tool_use_id: Some("tu1".into()),
                 detail: Some("Grep: TODO".into()),
+                kind: ToolKind::Search,
             },
             Some(cc_root_id),
             1,
@@ -1388,7 +1394,7 @@ fn anim_scene(
     floor_seed: u64,
     facing: Option<&str>,
 ) -> (SceneState, u64) {
-    use pixtuoid_core::layout::{Facing, SceneLayout, WaypointKind, TEST_DEFAULT_DESKS};
+    use pixtuoid_core::layout::{Facing, SceneLayout, WaypointKind, CLASSIC_OFFICE_DESKS};
     use pixtuoid_core::pose::{
         is_aimless_cycle, seated_dwell_ms, takes_trip, waypoint_index_for_cycle,
     };
@@ -1477,7 +1483,7 @@ fn anim_scene(
         seated_dwell_ms(id)
     );
 
-    let mut s = SceneState::uniform(TEST_DEFAULT_DESKS);
+    let mut s = SceneState::uniform(CLASSIC_OFFICE_DESKS);
     s.agents.insert(
         id,
         AgentSlot {

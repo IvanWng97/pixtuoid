@@ -393,7 +393,7 @@ fn resurrect_in_place_clears_stale_active_tasks_so_fresh_session_hooks_apply() {
         AgentEvent::ActivityStart {
             agent_id: id,
             tool_use_id: Some("task-stale".into()),
-            detail: Some("Task".into()),
+            detail: Some("Agent".into()),
         },
         t0 + Duration::from_secs(1),
         Transport::Hook,
@@ -480,7 +480,7 @@ fn resurrect_in_place_cancels_stale_pending_b1_cascade() {
         AgentEvent::ActivityStart {
             agent_id: parent,
             tool_use_id: Some("task-old".into()),
-            detail: Some("Task".into()),
+            detail: Some("Agent".into()),
         },
         t0 + Duration::from_secs(1),
         Transport::Hook,
