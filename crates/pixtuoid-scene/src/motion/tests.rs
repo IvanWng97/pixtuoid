@@ -1036,8 +1036,8 @@ fn missing_profile_warn_latches_once_per_episode() {
 
 // -----------------------------------------------------------------------
 // Dest mirror: the motion walk destination for a furniture waypoint must
-// equal core::layout::stand_point computed with the agent's HOME DESK as
-// origin — the same call core::pose::idle_pose and both render anchors make.
+// equal layout::stand_point computed with the agent's HOME DESK as
+// origin — the same call pose::pure::idle_pose and both render anchors make.
 // Guards the load-bearing core↔tui dest mirror against a future origin drift.
 // -----------------------------------------------------------------------
 #[test]
