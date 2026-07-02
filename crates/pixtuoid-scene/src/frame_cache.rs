@@ -2,10 +2,14 @@
 //!
 //! `recolor_frame` clones a Frame and rewrites pixels — cheap per call,
 //! but called once per agent per render tick (~30fps). With N agents the
-//! per-second work scales linearly. Since shirt+hair colors are deterministic
-//! from agent_id, the recolored frame is stable across the agent's lifetime
-//! and can be cached.
+//! per-second work scales linearly. The recolored frame is stable for as
+//! long as its palette inputs are: hair/skin are `agent_id`-seeded (fixed
+//! for the agent's lifetime), and the OUTFIT is keyed on the agent's cwd
+//! (Team Palette) — mutable mid-lifetime via a cwd backfill, which
+//! [`FrameCache::note_outfit_seed`] detects to drop the agent's stale
+//! entries. With that one invalidation, caching is safe.
 
+use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 
 use pixtuoid_core::sprite::{Frame, Rgb};
@@ -26,6 +30,8 @@ pub struct FrameKey {
 #[derive(Default)]
 pub struct FrameCache {
     entries: HashMap<FrameKey, Frame>,
+    /// Last-seen outfit-determining seed per agent (see `note_outfit_seed`).
+    outfit_seeds: HashMap<AgentId, u64>,
 }
 
 impl FrameCache {
@@ -39,10 +45,34 @@ impl FrameCache {
         self.entries.entry(key).or_insert_with(compute)
     }
 
+    /// Record the outfit-determining seed for `id`. The outfit (shirt+pants)
+    /// is keyed on the agent's cwd (Team Palette) with an `agent_id` fallback
+    /// while the cwd is unknown — and cwd is mutable post-registration (a
+    /// hook-first slot heals it on the next `SessionStart`). A seed CHANGE
+    /// therefore drops the agent's cached frames, or already-cached poses
+    /// would keep the stale outfit for the agent's lifetime while new poses
+    /// render the healed one. Callers pass the exact seed the palette derives
+    /// (`pixel_painter::palette::outfit_seed_for`), before `get_or_make`.
+    pub fn note_outfit_seed(&mut self, id: AgentId, seed: u64) {
+        match self.outfit_seeds.entry(id) {
+            Entry::Occupied(mut e) => {
+                if *e.get() != seed {
+                    e.insert(seed);
+                    self.entries.retain(|k, _| k.agent_id != id);
+                }
+            }
+            Entry::Vacant(v) => {
+                v.insert(seed);
+            }
+        }
+    }
+
     /// Drop cached frames for agents no longer present in the scene.
     pub fn evict_missing(&mut self, scene: &SceneState) {
         self.entries
             .retain(|k, _| scene.agents.contains_key(&k.agent_id));
+        self.outfit_seeds
+            .retain(|id, _| scene.agents.contains_key(id));
     }
 
     /// Test-only inspection seam (entry count). `#[doc(hidden)]`: not part of the
@@ -68,14 +98,18 @@ mod tests {
         Frame::from_pixels(1, 1, vec![None])
     }
 
-    fn key() -> FrameKey {
+    fn key_for(id: AgentId) -> FrameKey {
         FrameKey {
-            agent_id: AgentId::from_transcript_path("/fc/a.jsonl"),
+            agent_id: id,
             anim_name: "standing",
             frame_idx: 0,
             flip_x: false,
             glow_tint: None,
         }
+    }
+
+    fn key() -> FrameKey {
+        key_for(AgentId::from_transcript_path("/fc/a.jsonl"))
     }
 
     #[test]
@@ -96,5 +130,44 @@ mod tests {
         });
         assert!(!computed_again, "cached key must not recompute");
         assert_eq!(cache.len(), 1);
+    }
+
+    #[test]
+    fn outfit_seed_change_drops_only_that_agents_entries() {
+        let a = AgentId::from_transcript_path("/fc/a.jsonl");
+        let b = AgentId::from_transcript_path("/fc/b.jsonl");
+        let mut cache = FrameCache::new();
+        cache.note_outfit_seed(a, 1);
+        cache.note_outfit_seed(b, 7);
+        let _ = cache.get_or_make(key_for(a), dummy_frame);
+        let _ = cache.get_or_make(key_for(b), dummy_frame);
+        assert_eq!(cache.len(), 2);
+
+        // Re-noting the SAME seed (the per-frame steady state) keeps the cache.
+        cache.note_outfit_seed(a, 1);
+        let mut recomputed = false;
+        let _ = cache.get_or_make(key_for(a), || {
+            recomputed = true;
+            dummy_frame()
+        });
+        assert!(!recomputed, "an unchanged outfit seed must not evict");
+
+        // A CHANGED seed (the cwd backfill) drops a's entries; b's survive.
+        cache.note_outfit_seed(a, 2);
+        let mut recomputed = false;
+        let _ = cache.get_or_make(key_for(a), || {
+            recomputed = true;
+            dummy_frame()
+        });
+        assert!(
+            recomputed,
+            "a changed outfit seed must drop the agent's stale-outfit frames"
+        );
+        let mut b_recomputed = false;
+        let _ = cache.get_or_make(key_for(b), || {
+            b_recomputed = true;
+            dummy_frame()
+        });
+        assert!(!b_recomputed, "another agent's cache must be untouched");
     }
 }

@@ -28,6 +28,9 @@ pub(super) fn paint_character_at(
     let Some(frame) = anim.frames.get(frame_idx).or_else(|| anim.frames.first()) else {
         return;
     };
+    // A cwd backfill re-keys the outfit (Team Palette) mid-lifetime — flag the
+    // change so the cache drops the agent's stale recolors before the lookup.
+    cache.note_outfit_seed(agent.agent_id, outfit_seed_for(agent));
     let cached = cache.get_or_make(
         crate::frame_cache::FrameKey {
             agent_id: agent.agent_id,

@@ -17,7 +17,7 @@ use std::time::{Duration, SystemTime};
 
 use pixtuoid_core::physics::{walk_arrived, walk_profile, walk_progress, WalkIntent};
 use pixtuoid_core::state::AgentSlot;
-use pixtuoid_core::walkable::OccupancyOverlay;
+use pixtuoid_core::walkable::{OccupancyOverlay, WalkableMask};
 use pixtuoid_core::AgentId;
 
 use crate::motion::{
@@ -766,11 +766,8 @@ fn route_walking_pose(
         match &ms.walk_path {
             Some(wp) if wp.from == from && wp.to == to => wp.path.clone(),
             _ => {
-                let to_jittered = jitter_dest(slot.agent_id, to);
-                let mut p = router.route(&layout.walkable, overlay, from, to_jittered);
-                if let Some(last) = p.last_mut() {
-                    *last = to;
-                }
+                let mut p =
+                    route_jittered(router, &layout.walkable, overlay, slot.agent_id, from, to);
                 // Settle: extend the polyline onto/off the seat (terminal "sit
                 // down" / "stand up" the router never plans). walk-end ≡ render.
                 match settle {
@@ -885,10 +882,13 @@ const JITTER_SPAN: u64 = (2 * JITTER_MAX_PX + 1) as u64;
 
 /// Per-agent ±4px routing-destination jitter, hashed from the agent_id, so
 /// converging agents take visibly different polylines (breaks the "ant trail")
-/// — the entry/exit walk targets and the wander walk-path freeze all perturb
-/// the GOAL the same way. Output must stay bit-identical across the three call
-/// sites (same hash, same `saturating_add_signed`).
-fn jitter_dest(id: AgentId, p: Point) -> Point {
+/// — the entry/exit/snap-back walk targets, the wander walk-path freeze, and
+/// the motion-side wander profile snapshots (via [`route_jittered`]) all
+/// perturb the GOAL the same way. Output must stay bit-identical across every
+/// call site (same hash, same `saturating_add_signed`) — a site routing the
+/// RAW goal measures a differently-shaped polyline than the one rendered AND
+/// mints a second router-cache key per leg.
+pub(crate) fn jitter_dest(id: AgentId, p: Point) -> Point {
     let h = id.raw();
     let jx = ((h % JITTER_SPAN) as i32 - JITTER_MAX_PX) as i16;
     let jy = (((h >> 16) % JITTER_SPAN) as i32 - JITTER_MAX_PX) as i16;
@@ -896,6 +896,27 @@ fn jitter_dest(id: AgentId, p: Point) -> Point {
         x: p.x.saturating_add_signed(jx),
         y: p.y.saturating_add_signed(jy),
     }
+}
+
+/// Route `from → to` against the per-agent JITTERED goal, then restore the
+/// polyline's endpoint to the true `to` — the wander-leg routing call shared
+/// by the render-side walk-path freeze ([`route_walking_pose`]) and the
+/// motion-side profile snapshots (`advance_wander` / `snapshot_back_profile`),
+/// so the rendered shape, the measured profile length, and the router-cache
+/// key can't diverge (the [`jitter_dest`] lockstep contract).
+pub(crate) fn route_jittered(
+    router: &mut dyn Router,
+    mask: &WalkableMask,
+    overlay: &OccupancyOverlay,
+    id: AgentId,
+    from: Point,
+    to: Point,
+) -> Vec<Point> {
+    let mut p = router.route(mask, overlay, from, jitter_dest(id, to));
+    if let Some(last) = p.last_mut() {
+        *last = to;
+    }
+    p
 }
 
 #[cfg(test)]

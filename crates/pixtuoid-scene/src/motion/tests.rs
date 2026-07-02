@@ -95,6 +95,25 @@ impl Router for Straight {
     fn invalidate(&mut self) {}
 }
 
+/// Recording stub: captures every `(from, to)` route request, returning the
+/// straight line. Pins WHICH goal the profile snapshots route to.
+struct Recording {
+    calls: Vec<(Point, Point)>,
+}
+impl Router for Recording {
+    fn route(
+        &mut self,
+        _: &WalkableMask,
+        _: &OccupancyOverlay,
+        from: Point,
+        to: Point,
+    ) -> Vec<Point> {
+        self.calls.push((from, to));
+        vec![from, to]
+    }
+    fn invalidate(&mut self) {}
+}
+
 /// Fixed-octile-length stub: synthesises a horizontal path of the requested
 /// octile length starting at `from`, ignoring `to`. Used to test phase
 /// transitions with predictable walk durations.
@@ -888,6 +907,130 @@ fn long_dwell_never_trips_stale_resume_on_screen() {
             WanderPhase::AtWaypoint
         ),
         "agent should still be AtWaypoint just before the dwell ends"
+    );
+}
+
+// -----------------------------------------------------------------------
+// Jitter lockstep: the profile snapshots must route to the SAME jittered
+// goal the render's walk-path freeze uses (route_walking_pose →
+// jitter_dest). A raw-dest route measures a differently-shaped polyline
+// than the one rendered (wrong walk speed) AND mints a second router-cache
+// key per leg (2x the PATH_CACHE_CAP sizing note).
+// -----------------------------------------------------------------------
+
+use crate::pose::jitter_dest;
+
+/// A trip agent whose ±4px goal jitter is nonzero, so the lockstep
+/// assertions below have teeth.
+fn jittering_trip_agent(prefix: &str) -> AgentId {
+    let probe = Point { x: 50, y: 50 };
+    (0u64..2000)
+        .map(|i| AgentId::from_transcript_path(&format!("/p/{prefix}_{i}.jsonl")))
+        .find(|id| takes_trip(*id, 0) && jitter_dest(*id, probe) != probe)
+        .expect("should find a jittering trip agent quickly")
+}
+
+#[test]
+fn wander_out_profile_routes_to_the_jittered_goal_the_render_uses() {
+    let trip_id = jittering_trip_agent("jout");
+    let now = t0();
+    let slot = AgentSlot {
+        agent_id: trip_id,
+        ..idle_slot("/dummy", now)
+    };
+    let l = layout();
+    let overlay = OccupancyOverlay::new();
+    let mut router = Recording { calls: Vec::new() };
+    let mut motion: HashMap<AgentId, MotionState> = HashMap::new();
+
+    advance_wander(&slot, now, &l, &mut router, &overlay, &mut motion);
+    advance_until_leaves(
+        &slot,
+        &l,
+        &mut router,
+        &overlay,
+        &mut motion,
+        now,
+        WanderPhase::Seated,
+        60_000,
+    );
+
+    let ms = motion.get(&trip_id).expect("state");
+    assert_eq!(ms.wander.phase, WanderPhase::WalkingOut);
+    let (_, routed_to) = *router.calls.last().expect("the trip snapshot routed");
+    assert_eq!(
+        routed_to,
+        jitter_dest(trip_id, ms.wander.dest),
+        "the WalkingOut profile must route to the render's jittered goal"
+    );
+}
+
+#[test]
+fn back_profile_routes_to_the_jittered_desk_goal_the_render_uses() {
+    let trip_id = jittering_trip_agent("jback");
+    let now = t0();
+    let slot = AgentSlot {
+        agent_id: trip_id,
+        ..idle_slot("/dummy", now)
+    };
+    let l = layout();
+    let overlay = OccupancyOverlay::new();
+    let mut router = Recording { calls: Vec::new() };
+    let mut ms = MotionState::new(trip_id);
+    ms.wander.dest = Point { x: 40, y: 60 };
+
+    let _ = snapshot_back_profile(&slot, &ms, &l, &mut router, &overlay);
+
+    let (snap_to, _) = desk_leg_endpoint(l.home_desks[0], &l);
+    assert_eq!(
+        router.calls,
+        vec![(ms.wander.dest, jitter_dest(trip_id, snap_to))],
+        "the walk-back profile must route to the render's jittered desk goal"
+    );
+}
+
+// -----------------------------------------------------------------------
+// Missing-profile warn latch: the Missing arm fires per frame while the
+// corrupt state persists; the warn must fire once per agent per episode
+// (repeats downgraded to trace), re-arming when the profile recovers.
+// -----------------------------------------------------------------------
+#[test]
+fn missing_profile_warn_latches_once_per_episode() {
+    use pixtuoid_core::physics::{walk_profile, WalkIntent};
+
+    let now = t0();
+    let slot = idle_slot("/p/latch.jsonl", now - Duration::from_secs(90));
+    let mut ms = MotionState::new(slot.agent_id);
+    ms.wander.phase = WanderPhase::WalkingOut;
+    assert!(!ms.missing_profile_warned);
+
+    assert!(matches!(
+        poll_walk_leg(&slot, &mut ms, WanderPhase::WalkingOut, 0, true),
+        WalkLegStatus::Missing
+    ));
+    assert!(
+        ms.missing_profile_warned,
+        "the first miss must latch the warn"
+    );
+
+    assert!(matches!(
+        poll_walk_leg(&slot, &mut ms, WanderPhase::WalkingOut, 33, true),
+        WalkLegStatus::Missing
+    ));
+    assert!(
+        ms.missing_profile_warned,
+        "repeats stay latched (trace, not warn)"
+    );
+
+    // A recovered profile ends the episode and re-arms the warn.
+    ms.wander.profile = Some(walk_profile(100, WalkIntent::WanderOut, slot.agent_id));
+    assert!(!matches!(
+        poll_walk_leg(&slot, &mut ms, WanderPhase::WalkingOut, 33, true),
+        WalkLegStatus::Missing
+    ));
+    assert!(
+        !ms.missing_profile_warned,
+        "a recovered profile must re-arm the warn for the next episode"
     );
 }
 

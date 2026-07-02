@@ -23,7 +23,7 @@ use crate::pose::{
     seated_dwell_ms, stale_resume_gap_ms, takes_trip, waypoint_index_for_cycle,
     WANDER_DWELL_EST_MS,
 };
-use crate::pose::{desk_leg_endpoint, octile_distance};
+use crate::pose::{desk_leg_endpoint, octile_distance, route_jittered};
 
 /// Frozen A* polyline for one in-flight walk leg.
 ///
@@ -136,6 +136,13 @@ pub struct MotionState {
     /// `None` while not walking. Re-snapshotted when the leg's `(from, to)`
     /// endpoints change. See [`WalkPathSnapshot`].
     pub walk_path: Option<WalkPathSnapshot>,
+
+    /// Latch for the "wander walk profile missing" warn: the Missing recover
+    /// path fires every frame while the corrupt state persists (the
+    /// WalkingOut/WalkingBack arms return early without restoring a profile),
+    /// so only the FIRST miss of an episode warns — repeats log at trace.
+    /// Reset as soon as the profile is readable again (episode over).
+    pub(crate) missing_profile_warned: bool,
 }
 
 impl MotionState {
@@ -164,6 +171,7 @@ impl MotionState {
                 last_advanced_at: SystemTime::UNIX_EPOCH,
             },
             walk_path: None,
+            missing_profile_warned: false,
         }
     }
 }
@@ -302,8 +310,11 @@ pub fn advance_wander(
                     // mirroring pose's WalkingOut leg. The profile duration must
                     // cover the FULL polyline: chair-glide + route + seat settle —
                     // else t reaches 1000 before the sprite arrives and it pops.
+                    // Routed via the SAME jittered goal the render's walk-path
+                    // freeze uses (route_jittered), so the measured length and
+                    // the router-cache key match the rendered leg.
                     let (from, chair_settle) = desk_leg_endpoint(desk, layout);
-                    let path = router.route(&layout.walkable, overlay, from, dest);
+                    let path = route_jittered(router, &layout.walkable, overlay, id, from, dest);
                     let desk_glide = settle_len(from, chair_settle);
                     let len = (octile_path_len(&path) + desk_glide + settle_len(dest, seat)).max(1);
                     ms.wander.profile = Some(walk_profile(len, WalkIntent::WanderOut, id));
@@ -426,7 +437,7 @@ enum WalkLegStatus {
 /// arrival check is factored here.
 fn poll_walk_leg(
     slot: &AgentSlot,
-    ms: &MotionState,
+    ms: &mut MotionState,
     phase: WanderPhase,
     elapsed_phase: u64,
     may_transition: bool,
@@ -436,15 +447,30 @@ fn poll_walk_leg(
         None => {
             // Should be unreachable: an in-flight phase always has a profile
             // snapshotted at its entering transition. Log + recover (project
-            // convention: never freeze silently).
-            tracing::warn!(
-                agent_id = ?slot.agent_id,
-                ?phase,
-                "wander walk profile missing — recovering"
-            );
+            // convention: never freeze silently). The Missing state persists
+            // across frames (the callers' early returns don't restore a
+            // profile), so the warn is LATCHED per agent per episode — the
+            // first miss warns, repeats trace — or a stuck agent floods the
+            // log at frame rate.
+            if ms.missing_profile_warned {
+                tracing::trace!(
+                    agent_id = ?slot.agent_id,
+                    ?phase,
+                    "wander walk profile still missing — recovering"
+                );
+            } else {
+                ms.missing_profile_warned = true;
+                tracing::warn!(
+                    agent_id = ?slot.agent_id,
+                    ?phase,
+                    "wander walk profile missing — recovering"
+                );
+            }
             return WalkLegStatus::Missing;
         }
     };
+    // Profile readable again: the missing episode (if any) is over — re-arm.
+    ms.missing_profile_warned = false;
     let t_x1000 = pixtuoid_core::physics::walk_progress(profile, elapsed_phase);
     if may_transition && walk_arrived(profile, elapsed_phase) {
         WalkLegStatus::Arrived {
@@ -541,9 +567,18 @@ fn snapshot_back_profile(
         .unwrap_or(ms.wander.dest);
     // Arrive via the desk approach cell (glide onto the chair), mirroring pose's
     // WalkingBack leg; add the chair-glide so the profile covers the full
-    // polyline (no pop on arrival).
+    // polyline (no pop on arrival). Routed via the SAME jittered goal the
+    // render's walk-path freeze uses (route_jittered), so the measured length
+    // and the router-cache key match the rendered leg.
     let (snap_to, chair_settle) = desk_leg_endpoint(desk, layout);
-    let back_path = router.route(&layout.walkable, overlay, ms.wander.dest, snap_to);
+    let back_path = route_jittered(
+        router,
+        &layout.walkable,
+        overlay,
+        slot.agent_id,
+        ms.wander.dest,
+        snap_to,
+    );
     let desk_glide = settle_len(snap_to, chair_settle);
     let back_len =
         (octile_path_len(&back_path) + settle_len(ms.wander.dest, ms.wander.seat) + desk_glide)

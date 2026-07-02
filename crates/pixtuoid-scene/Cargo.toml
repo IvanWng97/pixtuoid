@@ -15,6 +15,9 @@ homepage.workspace     = true
 keywords.workspace     = true
 categories.workspace   = true
 
+# NB: `workspace = true` cannot be combined with per-crate lint tables (Cargo
+# rejects the manifest), so the crate-specific `forbid(unsafe_code)` lives as
+# the crate-root attribute in src/lib.rs instead.
 [lints]
 workspace = true
 

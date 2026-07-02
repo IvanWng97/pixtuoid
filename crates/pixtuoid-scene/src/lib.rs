@@ -11,6 +11,11 @@
 // (a hard error under the workspace `-D warnings`). Non-test builds only, so
 // test diagnostics may print freely.
 #![cfg_attr(not(test), warn(clippy::print_stdout, clippy::print_stderr))]
+// The engine crate has ZERO unsafe — lock that in so a future "just this once"
+// block can't slip in (raw-pixel hot paths belong behind core's checked
+// Grid/RgbBuffer seams). Lives here, not in Cargo.toml: `[lints] workspace =
+// true` cannot be combined with a per-crate `[lints.rust]` table.
+#![forbid(unsafe_code)]
 
 pub mod anim;
 pub mod chitchat;

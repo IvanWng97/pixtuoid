@@ -1665,6 +1665,73 @@ fn agent_palette_unknown_cwd_falls_back_to_id_outfit() {
 }
 
 #[test]
+fn cwd_backfill_invalidates_cached_outfit_frames() {
+    // A slot first seen without a cwd caches frames in the agent_id-seeded
+    // fallback outfit; core's backfill_identity then heals (cwd, unknown_cwd)
+    // on the next identity-bearing event. Already-cached poses must repaint
+    // in the healed Team-Palette outfit — pinned by comparing the healed
+    // repaint (same cache) against a fresh-cache render.
+    let pack = crate::embedded_pack::load_sprite_pack(None).expect("embedded pack loads");
+    let unknown = make_slot_cwd("/p/heal.jsonl", "", true);
+    // Pick a cwd whose Team-Palette outfit differs from the id-seeded
+    // fallback outfit, so the assertion has teeth.
+    let healed = (0..64)
+        .map(|i| make_slot_cwd("/p/heal.jsonl", &format!("/repo/team{i}"), false))
+        .find(|h| {
+            agent_palette(&pack.palette, h, None).get('B')
+                != agent_palette(&pack.palette, &unknown, None).get('B')
+        })
+        .expect("some cwd lands on a different outfit than the fallback");
+
+    let anchor = Point { x: 2, y: 2 };
+    let black = Rgb { r: 0, g: 0, b: 0 };
+    let mut cache = FrameCache::new();
+    let mut before = RgbBuffer::filled(24, 24, black);
+    paint_character_at(
+        &mut before,
+        "seated",
+        0,
+        anchor,
+        &unknown,
+        &pack,
+        false,
+        None,
+        &mut cache,
+    );
+
+    // Heal the cwd, repaint the SAME pose through the SAME cache.
+    let mut after = RgbBuffer::filled(24, 24, black);
+    paint_character_at(
+        &mut after, "seated", 0, anchor, &healed, &pack, false, None, &mut cache,
+    );
+
+    // Ground truth: the same repaint through a FRESH cache.
+    let mut fresh = RgbBuffer::filled(24, 24, black);
+    paint_character_at(
+        &mut fresh,
+        "seated",
+        0,
+        anchor,
+        &healed,
+        &pack,
+        false,
+        None,
+        &mut FrameCache::new(),
+    );
+
+    assert_ne!(
+        before.as_slice(),
+        after.as_slice(),
+        "the healed cwd must change the painted outfit"
+    );
+    assert_eq!(
+        after.as_slice(),
+        fresh.as_slice(),
+        "the healed repaint must match a fresh render, not the stale cached outfit"
+    );
+}
+
+#[test]
 fn agent_palette_same_id_different_cwd_changes_outfit() {
     let base = Palette::default();
     // Same id stem, different cwds chosen to land on different pool indices.

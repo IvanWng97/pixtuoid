@@ -443,6 +443,13 @@ impl ValidationReport {
 
 pub fn validate_pack_animations(pack: &Pack) -> ValidationReport {
     let mut report = ValidationReport::default();
+    let known_names = || {
+        REQUIRED_CHARACTER_ANIMATIONS
+            .iter()
+            .chain(OPTIONAL_CHARACTER_ANIMATIONS.iter())
+            .chain(OPTIONAL_FURNITURE_ANIMATIONS.iter())
+            .copied()
+    };
 
     for &name in REQUIRED_CHARACTER_ANIMATIONS {
         if pack.animation(name).is_none() {
@@ -459,7 +466,18 @@ pub fn validate_pack_animations(pack: &Pack) -> ValidationReport {
         }
     }
 
-    for &(name, min_frames) in MULTI_FRAME_REQUIREMENTS {
+    // Frame-count floor: every KNOWN animation PRESENT in the pack needs at
+    // least one frame — a `frames = []` entry deserializes and makes
+    // `animation()` return Some (dodging the missing-required check above)
+    // while every render consumer guards with `.frames.first()` and silently
+    // draws nothing; an empty OPTIONAL entry additionally SHADOWS the embedded
+    // default in `Pack::merge_from` (`contains_key` is true). Names in
+    // MULTI_FRAME_REQUIREMENTS carry their own higher minimum.
+    for name in known_names() {
+        let min_frames = MULTI_FRAME_REQUIREMENTS
+            .iter()
+            .find(|&&(n, _)| n == name)
+            .map_or(1, |&(_, min)| min);
         if let Some(anim) = pack.animation(name) {
             if anim.frames.len() < min_frames {
                 report
@@ -469,12 +487,7 @@ pub fn validate_pack_animations(pack: &Pack) -> ValidationReport {
         }
     }
 
-    let all_known: std::collections::HashSet<&str> = REQUIRED_CHARACTER_ANIMATIONS
-        .iter()
-        .chain(OPTIONAL_CHARACTER_ANIMATIONS.iter())
-        .chain(OPTIONAL_FURNITURE_ANIMATIONS.iter())
-        .copied()
-        .collect();
+    let all_known: std::collections::HashSet<&str> = known_names().collect();
     for name in pack.animation_names() {
         if !all_known.contains(name.as_str()) {
             report.unknown.push(name.clone());
@@ -482,6 +495,93 @@ pub fn validate_pack_animations(pack: &Pack) -> ValidationReport {
     }
 
     report
+}
+
+#[cfg(test)]
+mod validation_floor_tests {
+    use super::*;
+
+    fn pack_with_animation(name: &str, frames_toml: &str) -> Pack {
+        let pack_toml = format!(
+            "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n\"A\"=\"#010203\"\n\
+             [animations.{name}]\nframes={frames_toml}\nframe_ms=100\n"
+        );
+        load_pack_from_strings(&pack_toml, &[("f.sprite", "@frame 0\nA")]).expect("pack builds")
+    }
+
+    #[test]
+    fn empty_frames_on_a_required_animation_fails_validation() {
+        // `frames = []` deserializes, build_pack inserts `Sprite { frames:
+        // vec![] }`, and `animation()` returns Some — dodging the
+        // missing-required check — while every render consumer guards with
+        // `.frames.first()` and silently draws nothing. An empty frame list
+        // on a known animation must be a hard validation error (implicit
+        // min-1), so `pixtuoid validate-pack` catches the exact authoring
+        // mistake it exists for.
+        let pack = pack_with_animation("seated", "[]");
+        let report = validate_pack_animations(&pack);
+        assert!(
+            report
+                .insufficient_frames
+                .contains(&("seated".to_string(), 1, 0)),
+            "empty seated must report (seated, 1, 0); got {:?}",
+            report.insufficient_frames
+        );
+        assert!(report.has_errors());
+        // Not double-counted as missing — the entry exists.
+        assert!(!report.missing_required.contains(&"seated".to_string()));
+    }
+
+    #[test]
+    fn empty_frames_on_an_optional_furniture_animation_fails_validation() {
+        // An empty OPTIONAL entry is worse than an absent one: `merge_from`
+        // skips the embedded-default fallback because `contains_key` is true,
+        // so the empty animation SHADOWS the default furniture sprite.
+        let pack = pack_with_animation("desk", "[]");
+        let report = validate_pack_animations(&pack);
+        assert!(
+            report
+                .insufficient_frames
+                .contains(&("desk".to_string(), 1, 0)),
+            "empty desk must report (desk, 1, 0); got {:?}",
+            report.insufficient_frames
+        );
+        assert!(report.has_errors());
+    }
+
+    #[test]
+    fn one_frame_on_a_plain_known_animation_passes_validation() {
+        // The implicit floor is min-1 — a single-frame animation outside
+        // MULTI_FRAME_REQUIREMENTS must not be flagged as insufficient.
+        // (The pack still misses OTHER required animations; only the
+        // frame-count floor is under test here.)
+        let pack = pack_with_animation("seated", "[\"f.sprite\"]");
+        let report = validate_pack_animations(&pack);
+        assert!(
+            report.insufficient_frames.is_empty(),
+            "a 1-frame seated must not be flagged; got {:?}",
+            report.insufficient_frames
+        );
+    }
+
+    #[test]
+    fn multi_frame_requirements_all_name_known_animations() {
+        // The frame-count floor iterates the KNOWN animation lists and reads
+        // each name's stricter minimum from MULTI_FRAME_REQUIREMENTS — a row
+        // naming an unknown animation would silently never be checked.
+        let known: std::collections::HashSet<&str> = REQUIRED_CHARACTER_ANIMATIONS
+            .iter()
+            .chain(OPTIONAL_CHARACTER_ANIMATIONS.iter())
+            .chain(OPTIONAL_FURNITURE_ANIMATIONS.iter())
+            .copied()
+            .collect();
+        for (name, _) in MULTI_FRAME_REQUIREMENTS {
+            assert!(
+                known.contains(name),
+                "MULTI_FRAME_REQUIREMENTS names unknown animation {name}"
+            );
+        }
+    }
 }
 
 fn parse_palette_value(v: &str) -> Result<Pixel> {

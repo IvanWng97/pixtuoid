@@ -867,11 +867,15 @@ pub(super) fn compute_room_walls(
         // its own door gap.
         if has_dual_meeting {
             // Second meeting room: extend wall below horizontal.
-            // Start below the horizontal wall (its thickness + pad). This
-            // offset MUST stay within the renderer's bridge-up tolerance
-            // (`WALL_THICK_H_PX + 2` in `stitch_vertical_wall`) or this lower
-            // segment renders as a detached strip below the cross wall.
-            let v2_top = mid_y_split + 6;
+            // Start below the horizontal wall's mask footprint — the offset IS
+            // the wall thickness (horizontal walls stamp with pad 0), so read
+            // it from WALL_THICK_H rather than a second copy of the value.
+            // This keeps the offset within the renderer's bridge-up tolerance
+            // by construction (`WALL_THICK_H_PX + 2` in `stitch_vertical_wall`,
+            // where WALL_THICK_H_PX is defined AS this const) — a hardcoded 6
+            // would leave this segment rendering as a detached strip if the
+            // wall face were ever thinned.
+            let v2_top = mid_y_split + super::WALL_THICK_H;
             let v2_bot = top_margin + usable_h;
             let v2_center = v2_top + (v2_bot - v2_top) / 2;
             let v2_door_top = v2_center.saturating_sub(DOOR_GAP_V / 2);

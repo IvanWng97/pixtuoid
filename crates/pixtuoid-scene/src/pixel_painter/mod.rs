@@ -101,7 +101,7 @@ use drawable::{
     gateway_mascot_def, mascot_position, paint_drawable, pet_position, Drawable, DrawableKind,
 };
 use glass::{paint_glass_wall_h, paint_glass_wall_v, stitch_vertical_wall, WALL_THICK_H_PX};
-use palette::{agent_palette, recolor_frame};
+use palette::{agent_palette, outfit_seed_for, recolor_frame};
 use seat::{paint_character_at, seat_sprite, settle_seat_view, SeatView};
 
 /// The weather names accepted by [`force_weather`], canonical order — for
@@ -134,7 +134,9 @@ pub fn force_weather(name: Option<&str>) -> Result<(), Vec<&'static str>> {
     }
 }
 
-const COFFEE_STEAM_WINDOW_SECS: u64 = 120;
+// The steam gate reads the SAME window `CoffeeState::record` refreshes on —
+// a reference, not a second copy of the value.
+const COFFEE_STEAM_WINDOW_SECS: u64 = crate::floor::CoffeeState::STEAM_WINDOW_SECS;
 
 /// The home desk sprite's front lip extends this many px past its blocked
 /// footprint (the top-down 3/4 bevel), so the desk's z-sort baseline is the

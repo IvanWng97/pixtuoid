@@ -132,13 +132,23 @@ impl Router for AStarRouter {
         if let Some(p) = self.paths.get(&(from, to)) {
             return p.clone();
         }
-        let path = find_path(mask, overlay, self.preferred_zone, from, to)
-            .unwrap_or_else(|| vec![from, to]);
-        self.paths.insert((from, to), path.clone());
-        if self.paths.len() > PATH_CACHE_CAP {
-            self.paths.clear();
+        // Cache ONLY real routes. The no-path straight [from, to] fallback is
+        // returned UNCACHED: `path_clear_under` validates cached entries against
+        // the OVERLAY only (never the static mask), so a fallback minted while a
+        // transient blocker severed the grid would survive every retain() and
+        // serve a walk-through-walls line for that (from, to) key forever. Left
+        // uncached it re-routes next call — the same self-healing re-route class
+        // the walk-path freeze already accepts for 2-point legs.
+        match find_path(mask, overlay, self.preferred_zone, from, to) {
+            Some(path) => {
+                self.paths.insert((from, to), path.clone());
+                if self.paths.len() > PATH_CACHE_CAP {
+                    self.paths.clear();
+                }
+                path
+            }
+            None => vec![from, to],
         }
-        path
     }
 
     fn invalidate(&mut self) {
@@ -922,6 +932,47 @@ mod tests {
         assert!(
             result.is_none(),
             "completely surrounded target should return None, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn transient_no_path_fallback_is_not_served_from_the_cache() {
+        // A wall with ONE gap; an overlay blocker transiently closes the gap →
+        // find_path None → route() returns the straight [from, to] fallback.
+        // When the blocker leaves, the SAME (from, to) key must recover the
+        // real detour: `path_clear_under` checks only the OVERLAY (never the
+        // static mask), so a cached wall-crossing fallback would survive every
+        // retain() and the agent would walk through the wall on every future
+        // leg (see the walk-path freeze doc: 2-point legs deliberately stay
+        // unfrozen precisely so "the next frame recovers the real route").
+        let mut mask = WalkableMask::new_open(80, 48);
+        // Blocked strip x ∈ [36, 44) for y ∈ [0, 32); gap open at y ∈ [32, 48).
+        mask.mark_blocked(36, 0, 8, 32, 0);
+        let from = Point { x: 10, y: 10 };
+        let to = Point { x: 70, y: 10 };
+
+        // Sanity: with the gap open the real route is a cornered detour.
+        let open = find_path(&mask, &OccupancyOverlay::new(), None, from, to).expect("gap routes");
+        assert!(
+            open.len() > 2,
+            "expected a detour via the gap, got {open:?}"
+        );
+
+        let mut router = AStarRouter::new();
+        let mut blocked = OccupancyOverlay::new();
+        blocked.add(36, 32, 8, 16); // close the gap → no path at all
+        assert_eq!(
+            router.route(&mask, &blocked, from, to),
+            vec![from, to],
+            "with the gap closed the router falls back to the straight line"
+        );
+
+        // Blocker leaves (overlay signature changes back). The poisoned key
+        // must re-route for real instead of serving the cached fallback.
+        let recovered = router.route(&mask, &OccupancyOverlay::new(), from, to);
+        assert!(
+            recovered.len() > 2,
+            "the transient no-path fallback must not be cached; got {recovered:?}"
         );
     }
 

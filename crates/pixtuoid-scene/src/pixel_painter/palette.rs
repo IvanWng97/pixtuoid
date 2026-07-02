@@ -342,19 +342,28 @@ fn cwd_outfit_seed(cwd_norm: &str) -> u64 {
 ///   cyan   = Read
 ///   orange = Bash
 ///   purple = Agent / Task
+/// The outfit-determining seed for `agent` — the ONE input `agent_palette`
+/// keys the shirt+pants (Team Palette) on. Extracted so the frame cache can
+/// watch it for the mid-lifetime cwd backfill (`FrameCache::note_outfit_seed`)
+/// with the EXACT fallback logic the palette uses — a second copy of the
+/// unknown-cwd rule would silently drift.
+pub(super) fn outfit_seed_for(agent: &AgentSlot) -> u64 {
+    if agent.unknown_cwd || agent.cwd.as_os_str().is_empty() {
+        // No usable cwd (hook-only / pre-cwd) => fall back to the per-agent seed
+        // so cwd-less agents still get a stable, individually-varied outfit.
+        agent.agent_id.raw()
+    } else {
+        cwd_outfit_seed(&normalize_path_key(&agent.cwd.to_string_lossy()))
+    }
+}
+
 pub(super) fn agent_palette(base: &Palette, agent: &AgentSlot, glow_tint: Option<Rgb>) -> Palette {
     // Hair/skin stay per-individual (agent_id); only the OUTFIT re-keys on cwd
     // so same-repo agents share a shirt (Team Palette). The old WARM/COOL split
     // was personality-derived (an agent_id artifact cwd-keying breaks anyway);
     // the outfit now spans the full 16-preset pool indexed by the cwd seed.
     let id_seed = agent.agent_id.raw() as usize;
-    let outfit_seed = if agent.unknown_cwd || agent.cwd.as_os_str().is_empty() {
-        // No usable cwd (hook-only / pre-cwd) => fall back to the per-agent seed
-        // so cwd-less agents still get a stable, individually-varied outfit.
-        agent.agent_id.raw()
-    } else {
-        cwd_outfit_seed(&normalize_path_key(&agent.cwd.to_string_lossy()))
-    };
+    let outfit_seed = outfit_seed_for(agent);
     let pool_len = OUTFITS_WARM.len() + OUTFITS_COOL.len();
     let i = (outfit_seed as usize) % pool_len;
     let outfit = if i < OUTFITS_WARM.len() {

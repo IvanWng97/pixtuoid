@@ -8,6 +8,7 @@
 //! shared headless frame seam ([`render_floor`]) plus the per-office
 //! [`CoffeeState`] bookkeeping every painter routes through.
 
+use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::time::SystemTime;
 
@@ -177,6 +178,12 @@ impl FloorCtx {
 pub struct CoffeeState(HashMap<AgentId, SystemTime>);
 
 impl CoffeeState {
+    /// Desk-cup steam window (secs): a freshly fetched cup steams this long on
+    /// the desk. ONE source of truth — the pixel pass's steam gate
+    /// (`pixel_painter`) and [`record`](CoffeeState::record)'s refetch-refresh
+    /// both read it, so the paint and the bookkeeping can't drift.
+    pub const STEAM_WINDOW_SECS: u64 = 120;
+
     pub fn new() -> Self {
         Self::default()
     }
@@ -201,11 +208,29 @@ impl CoffeeState {
         self.0.retain(|id, _| scene.agents.contains_key(id));
     }
 
-    /// Persist newly detected coffee carriers. `or_insert` keeps an existing
-    /// carrier's stamp — a re-render must not restart an old cup's steam.
+    /// Persist newly detected coffee carriers. A carrier re-reported WITHIN
+    /// the steam window keeps its stamp (`new_coffee_carriers` re-reports on
+    /// every frame of a carrying-coffee walk-back — a re-render must not
+    /// restart an old cup's steam); a report arriving AFTER the window
+    /// expired is a genuinely NEW pantry fetch, so the stamp refreshes and
+    /// the fresh cup steams again instead of landing permanently steam-less.
     pub fn record(&mut self, carriers: impl IntoIterator<Item = AgentId>, now: SystemTime) {
         for id in carriers {
-            self.0.entry(id).or_insert(now);
+            match self.0.entry(id) {
+                Entry::Occupied(mut e) => {
+                    // Backward clock (duration_since err) reads as not-expired:
+                    // keep the old stamp rather than restamping on a clock step.
+                    let expired = now
+                        .duration_since(*e.get())
+                        .is_ok_and(|d| d.as_secs() >= Self::STEAM_WINDOW_SECS);
+                    if expired {
+                        e.insert(now);
+                    }
+                }
+                Entry::Vacant(v) => {
+                    v.insert(now);
+                }
+            }
         }
     }
 }
@@ -398,6 +423,20 @@ impl FloorTransition {
     }
 
     pub fn is_done(&self, now: SystemTime) -> bool {
+        // Backward-clock escape: `t` saturates to 0 while `now < started_at`
+        // (eased_progress), so a wall-clock step to before the transition
+        // start (NTP correction, suspend) would otherwise hold is_done false
+        // and wedge the renderer in the transition composite — no labels,
+        // tooltips, chitchat, or mouse hit-testing — until the clock re-passes
+        // started_at. A backward step larger than the transition's own
+        // duration can't be render-loop jitter; treat it as done so the
+        // caller lands on to_floor (mirroring cancel_transition). Smaller
+        // wobbles keep the saturate-to-0 convention every other animation uses.
+        if let Ok(behind) = self.started_at.duration_since(now) {
+            if behind.as_millis() as u64 > self.duration_ms {
+                return true;
+            }
+        }
         self.t(now) >= 1.0
     }
 }
@@ -961,6 +1000,55 @@ mod tests {
         let empty = SceneState::new([8; MAX_FLOORS]);
         coffee.evict_missing(&empty);
         assert!(coffee.map().is_empty());
+    }
+
+    #[test]
+    fn coffee_second_trip_after_steam_window_restamps() {
+        let id = AgentId::from_parts("claude-code", "coffee-refetch");
+        let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+        let mut coffee = CoffeeState::new();
+        coffee.record([id], t0);
+        // Within the window: per-frame walk-back re-reports keep the stamp.
+        let within = t0 + Duration::from_secs(CoffeeState::STEAM_WINDOW_SECS - 1);
+        coffee.record([id], within);
+        assert_eq!(
+            coffee.map().get(&id),
+            Some(&t0),
+            "a re-report within the steam window keeps the original stamp"
+        );
+        // A report past the window is a genuinely NEW pantry fetch (the old
+        // cup's steam long expired) — the stamp must refresh so the fresh cup
+        // steams again instead of landing permanently steam-less.
+        let refetch = t0 + Duration::from_secs(CoffeeState::STEAM_WINDOW_SECS * 3);
+        coffee.record([id], refetch);
+        assert_eq!(
+            coffee.map().get(&id),
+            Some(&refetch),
+            "a fetch after the steam window expired must restamp"
+        );
+    }
+
+    #[test]
+    fn transition_escapes_a_backward_clock_step() {
+        let start = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+        let tr = FloorTransition::new(0, 1, start);
+        // A small backward wobble (within one transition duration) is clock
+        // jitter: hold at t = 0 and let the clock catch up.
+        let wobble = start - Duration::from_millis(100);
+        assert!(
+            !tr.is_done(wobble),
+            "a small wobble must not abort the slide"
+        );
+        assert!((tr.t(wobble) - 0.0).abs() < f32::EPSILON);
+        // A step to before started_at by MORE than the transition's own
+        // duration can't be render-loop jitter — without an escape the
+        // renderer stays wedged in the transition composite (no labels,
+        // tooltips, or hit-testing) until the wall clock re-passes started_at.
+        let stepped = start - Duration::from_millis(tr.duration_ms * 2);
+        assert!(
+            tr.is_done(stepped),
+            "a large backward clock step must complete the transition"
+        );
     }
 
     #[test]
