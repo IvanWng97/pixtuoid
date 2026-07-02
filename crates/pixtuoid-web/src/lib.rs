@@ -14,7 +14,7 @@
 
 mod script;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
 
 use wasm_bindgen::prelude::*;
@@ -22,16 +22,13 @@ use wasm_bindgen::prelude::*;
 use pixtuoid_core::sprite::{format::Pack, Rgb, RgbBuffer};
 use pixtuoid_core::state::reducer::Reducer;
 use pixtuoid_core::state::SceneState;
-use pixtuoid_core::AgentId;
 
 use crate::script::{hero_script, Beat, LOOP_MS};
 
 use pixtuoid_scene::chitchat::{ActiveChitchat, VenueKey};
 use pixtuoid_scene::embedded_pack::load_sprite_pack;
-use pixtuoid_scene::floor::{FloorCtx, FloorMeta};
-use pixtuoid_scene::layout::{Layout, TEST_DEFAULT_DESKS};
-use pixtuoid_scene::pathfind::Router;
-use pixtuoid_scene::pixel_painter::{render_to_rgb_buffer, PixelCtx};
+use pixtuoid_scene::floor::{render_floor, CoffeeState, FloorCtx, FloorMeta};
+use pixtuoid_scene::layout::TEST_DEFAULT_DESKS;
 use pixtuoid_scene::theme::{Theme, ALL_THEMES};
 
 /// A live office rendered to a reusable RGBA buffer across frames. Owns the
@@ -51,8 +48,7 @@ pub struct Office {
     pack: Pack,
     theme: &'static Theme,
     chitchat: HashMap<VenueKey, ActiveChitchat>,
-    coffee_holders: HashSet<AgentId>,
-    coffee_fetched_at: HashMap<AgentId, SystemTime>,
+    coffee: CoffeeState,
     seed: u64,
     /// The REAL reducer + the looped hero script driving it — the office is
     /// populated by the same state machine the app uses, not a hand-rolled fake.
@@ -83,8 +79,7 @@ impl Office {
             pack,
             theme: ALL_THEMES[0],
             chitchat: HashMap::new(),
-            coffee_holders: HashSet::new(),
-            coffee_fetched_at: HashMap::new(),
+            coffee: CoffeeState::new(),
             seed: seed as u64,
             reducer: Reducer::new(),
             beats: hero_script(),
@@ -107,21 +102,12 @@ impl Office {
         self.advance_script(now);
         // The per-frame sweep: Active→Idle debounce, exit GC, walkouts.
         self.reducer.tick(&mut self.scene, now);
-        // Evict per-agent render state for agents the sweep removed — the
-        // same epilogue the tui painter runs (`TuiRenderer::evict_missing` +
-        // its coffee retains). Load-bearing HERE because the looped script
-        // REUSES agent ids: without eviction, a returning cast member finds
-        // its previous life's entry/exit walk legs (they gate on `is_none()`)
-        // and teleports in instead of walking — visible from loop 2 onward.
-        self.floor.cache.evict_missing(&self.scene);
-        self.floor.history.evict_missing(&self.scene);
-        self.floor
-            .motion
-            .retain(|id, _| self.scene.agents.contains_key(id));
-        self.coffee_holders
-            .retain(|id| self.scene.agents.contains_key(id));
-        self.coffee_fetched_at
-            .retain(|id, _| self.scene.agents.contains_key(id));
+        // Evict per-agent render state for agents the sweep removed (#423: the
+        // shared scene seam — see `FloorCtx::evict_missing`'s doc for why this
+        // is load-bearing here: the looped script REUSES agent ids, and a
+        // returning cast member with stale walk legs teleports in).
+        self.floor.evict_missing(&self.scene);
+        self.coffee.evict_missing(&self.scene);
         let buf_w = w.clamp(1, u16::MAX as u32) as u16;
         let buf_h = h.clamp(1, u16::MAX as u32) as u16;
         self.render(now, buf_w, buf_h);
@@ -191,43 +177,32 @@ impl Office {
     }
 
     fn render(&mut self, now: SystemTime, buf_w: u16, buf_h: u16) {
-        self.buf
-            .ensure_size(buf_w, buf_h, self.theme.surface.bg_fallback);
-        // `None` = fill: the office packs as many desk pods as the canvas
-        // physically fits (the Phase-1 desk-cap refactor — the point of it
-        // for a web-scale hero background).
-        let Some(layout) = Layout::compute_with_seed(buf_w, buf_h, None, self.seed) else {
-            return; // too small to lay out — leave the cleared buffer, never panic
+        // The shared scene seam (#423) owns the whole frame: buffer sizing,
+        // layout (`None` desk cap = fill — the office packs as many desk pods
+        // as the canvas physically fits), the pixel pass, and the
+        // coffee/door-anim epilogue. Too-small layouts leave the cleared
+        // buffer; never panics. The layout seed is the hero's variant seed
+        // (NOT floor-derived), so build the meta then override the seed.
+        let floor_meta = FloorMeta {
+            floor_seed: self.seed,
+            ..FloorMeta::for_floor(0, 1)
         };
-        self.floor.router.set_preferred_zone(layout.corridor);
-        let floor_meta = FloorMeta::for_floor(0, 1);
-        let result = render_to_rgb_buffer(&mut PixelCtx {
-            scene: &self.scene,
-            layout: &layout,
-            pack: &self.pack,
+        render_floor(
+            &mut self.floor,
+            &mut self.buf,
+            &mut self.coffee,
+            &mut self.chitchat,
+            &self.scene,
+            &self.pack,
+            self.theme,
             now,
-            buf: &mut self.buf,
-            cache: &mut self.floor.cache,
-            router: &mut self.floor.router,
-            overlay: &mut self.floor.overlay,
-            history: &mut self.floor.history,
-            motion: &mut self.floor.motion,
-            door_anim_max_ms: self.floor.door_anim_max_ms,
-            theme: self.theme,
-            floor: floor_meta,
-            active_pet: None,
-            floor_pet: None,
-            chitchat_state: &mut self.chitchat,
-            coffee_holders: &self.coffee_holders,
-            coffee_fetched_at: &self.coffee_fetched_at,
-            light: &mut self.floor.light,
-            debug_walkable: false,
-        });
-        for id in result.new_coffee_carriers {
-            self.coffee_holders.insert(id);
-            self.coffee_fetched_at.entry(id).or_insert(now);
-        }
-        self.floor.recompute_door_anim_max_ms(now);
+            buf_w,
+            buf_h,
+            floor_meta,
+            None,
+            None,
+            false,
+        );
     }
 
     /// Expand the packed-RGB render buffer into the RGBA staging vec (opaque
@@ -364,7 +339,7 @@ mod tests {
             "agent 5's motion state was evicted with its slot"
         );
         assert!(
-            !o.coffee_holders.contains(&cast_id(5)),
+            !o.coffee.holders.contains(&cast_id(5)),
             "agent 5's coffee state was evicted with its slot"
         );
     }

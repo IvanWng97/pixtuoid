@@ -6,18 +6,24 @@
 //! and the per-floor rendering context (`FloorCtx`) so each floor owns its
 //! own router, overlay, pose history, and frame cache.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::SystemTime;
 
 use pixtuoid_core::physics::{walk_arrived, WalkProfile};
+use pixtuoid_core::sprite::format::Pack;
+use pixtuoid_core::sprite::RgbBuffer;
 use pixtuoid_core::state::{AgentSlot, GlobalDeskIndex, SceneState};
 use pixtuoid_core::walkable::OccupancyOverlay;
 use pixtuoid_core::AgentId;
 
+use crate::chitchat::{ActiveChitchat, VenueKey};
 use crate::frame_cache::FrameCache;
 use crate::motion::MotionState;
-use crate::pathfind::AStarRouter;
+use crate::pathfind::{AStarRouter, Router};
+use crate::pet::{Pet, PetState};
+use crate::pixel_painter::{render_to_rgb_buffer, PixelCtx};
 use crate::pose::PoseHistory;
+use crate::theme::Theme;
 
 pub use pixtuoid_core::state::MAX_FLOORS;
 
@@ -84,8 +90,8 @@ pub struct FloorCtx {
     pub cache: FrameCache,
     pub light: LightingState,
     /// Per-agent walk-timing state (physics profiles for entry/exit/wander).
-    /// Evicted alongside `history` and `cache` in
-    /// `TuiRenderer::evict_missing` when the agent leaves the scene.
+    /// Evicted alongside `history` and `cache` in [`FloorCtx::evict_missing`]
+    /// when the agent leaves the scene.
     pub motion: HashMap<AgentId, MotionState>,
     /// Longest in-flight entry- or exit-walk `duration_ms + pause_ms` on
     /// this floor (ms). Written each frame by `derive_with_routing`; read by
@@ -111,6 +117,18 @@ impl FloorCtx {
             motion: HashMap::new(),
             door_anim_max_ms: 0,
         }
+    }
+
+    /// Drop per-agent render state for agents no longer in `scene` — cached
+    /// frames, pose history, and motion (walk-path/profile) entries. Call with
+    /// the live snapshot before rendering. Load-bearing wherever agent ids can
+    /// RECUR (the web hero's looped script): a returning id would find its
+    /// previous life's entry/exit legs (they gate on `is_none()`) and teleport
+    /// in instead of walking.
+    pub fn evict_missing(&mut self, scene: &SceneState) {
+        self.cache.evict_missing(scene);
+        self.history.evict_missing(scene);
+        self.motion.retain(|id, _| scene.agents.contains_key(id));
     }
 
     /// Recompute `door_anim_max_ms` from the current `motion` map: the max
@@ -143,6 +161,117 @@ impl FloorCtx {
             acc.max(entry).max(exit)
         });
     }
+}
+
+/// Cross-frame coffee bookkeeping: which agents completed a pantry trip
+/// (`holders` — the desk cup paints while they're seated) and when
+/// (`fetched_at` — drives the 120s steam window). One per OFFICE, not per
+/// floor: an agent's cup survives floor navigation, so the TUI shares one
+/// across its `Vec<FloorCtx>` (the floating window and the web hero each own
+/// one alongside their single floor).
+#[derive(Debug, Default)]
+pub struct CoffeeState {
+    pub holders: HashSet<AgentId>,
+    pub fetched_at: HashMap<AgentId, SystemTime>,
+}
+
+impl CoffeeState {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Drop coffee state for agents no longer in `scene` (the cup leaves with
+    /// the agent). The coffee half of the per-agent eviction that
+    /// [`FloorCtx::evict_missing`] does for render state.
+    pub fn evict_missing(&mut self, scene: &SceneState) {
+        self.holders.retain(|id| scene.agents.contains_key(id));
+        self.fetched_at
+            .retain(|id, _| scene.agents.contains_key(id));
+    }
+
+    /// Persist newly detected coffee carriers. `holders.insert` returns
+    /// `true` only for a NEW carrier (not an already-recorded prior pantry
+    /// trip), and only then is `fetched_at` stamped (the steam window) — a
+    /// re-render must not restart an old cup's steam.
+    pub fn record(&mut self, carriers: impl IntoIterator<Item = AgentId>, now: SystemTime) {
+        for id in carriers {
+            if self.holders.insert(id) {
+                self.fetched_at.insert(id, now);
+            }
+        }
+    }
+}
+
+/// THE shared headless frame seam: scene → `RgbBuffer`, one floor, one frame —
+/// prologue (buffer sizing, layout, router zone), the pixel pass, and the
+/// bookkeeping epilogue (coffee-carrier persistence + the door-anim clamp
+/// refresh) in ONE compiler-owned place. Before this seam the epilogue was
+/// mirrored by convention across the consumers and drifted twice for real
+/// (a dropped-carriers bug in the TUI transition path; the web hero shipping
+/// without eviction at all — the loop-2 teleport, #423).
+///
+/// Consumers: the TUI floor-slide (`TuiRenderer::render_transition`), the
+/// floating window (`OfficeRenderer::render`), and the web hero
+/// (`pixtuoid-web::Office`). The TUI's NORMAL draw path (`draw_scene`) is the
+/// deliberate exception — it needs the full `PixelPassResult` (pet/mascot
+/// positions, chitchat bubbles) and holds only immutable coffee borrows
+/// mid-flush — so it stays on raw `render_to_rgb_buffer` and routes its
+/// bookkeeping through [`CoffeeState`]/[`FloorCtx::evict_missing`] instead.
+///
+/// Returns the computed layout (callers cache it for label overlays /
+/// hit-testing), or `None` when the size can't lay out — the buffer is left
+/// cleared and nothing panics.
+#[allow(clippy::too_many_arguments)] // the render inputs are genuinely flat (same shape as the pass itself)
+pub fn render_floor(
+    fctx: &mut FloorCtx,
+    buf: &mut RgbBuffer,
+    coffee: &mut CoffeeState,
+    chitchat: &mut HashMap<VenueKey, ActiveChitchat>,
+    scene: &SceneState,
+    pack: &Pack,
+    theme: &'static Theme,
+    now: SystemTime,
+    buf_w: u16,
+    buf_h: u16,
+    floor_meta: FloorMeta,
+    active_pet: Option<&PetState>,
+    floor_pet: Option<&Pet>,
+    debug_walkable: bool,
+) -> Option<crate::layout::Layout> {
+    buf.ensure_size(buf_w, buf_h, theme.surface.bg_fallback);
+    let layout =
+        crate::layout::Layout::compute_with_seed(buf_w, buf_h, None, floor_meta.floor_seed)?;
+    fctx.router.set_preferred_zone(layout.corridor);
+    let result = render_to_rgb_buffer(&mut PixelCtx {
+        scene,
+        layout: &layout,
+        pack,
+        now,
+        buf,
+        cache: &mut fctx.cache,
+        router: &mut fctx.router,
+        overlay: &mut fctx.overlay,
+        history: &mut fctx.history,
+        motion: &mut fctx.motion,
+        door_anim_max_ms: fctx.door_anim_max_ms,
+        theme,
+        floor: floor_meta,
+        active_pet,
+        floor_pet,
+        chitchat_state: chitchat,
+        coffee_holders: &coffee.holders,
+        coffee_fetched_at: &coffee.fetched_at,
+        light: &mut fctx.light,
+        debug_walkable,
+    });
+    // The epilogue the consumers used to mirror by hand:
+    // 1. a pantry trip completed this frame stamps the carrier so the cup
+    //    lands on the desk + steams;
+    coffee.record(result.new_coffee_carriers, now);
+    // 2. the pass may have snapshotted new entry/exit profiles into motion —
+    //    refresh the door-cosmetic clamp for the next frame.
+    fctx.recompute_door_anim_max_ms(now);
+    Some(layout)
 }
 
 /// Per-floor indoor-lighting fade state.
@@ -796,5 +925,91 @@ mod tests {
         let mut light = LightingState::new();
         light.snap_to_empty();
         assert!((light.level() - LightingState::MIN_LEVEL).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn coffee_record_stamps_only_new_carriers_and_evict_follows_the_scene() {
+        let id = AgentId::from_parts("claude-code", "coffee-test");
+        let t0 = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        let t1 = t0 + std::time::Duration::from_secs(60);
+        let mut coffee = CoffeeState::new();
+        coffee.record([id], t0);
+        assert!(coffee.holders.contains(&id));
+        assert_eq!(coffee.fetched_at.get(&id), Some(&t0));
+        // Re-recording an existing carrier must NOT restart its steam window.
+        coffee.record([id], t1);
+        assert_eq!(
+            coffee.fetched_at.get(&id),
+            Some(&t0),
+            "an already-recorded carrier keeps its original fetch stamp"
+        );
+        // The agent leaving the scene evicts both halves.
+        let empty = SceneState::new([8; MAX_FLOORS]);
+        coffee.evict_missing(&empty);
+        assert!(coffee.holders.is_empty() && coffee.fetched_at.is_empty());
+    }
+
+    #[test]
+    fn render_floor_paints_records_coffee_state_and_survives_a_tiny_buffer() {
+        let pack = crate::embedded_pack::load_sprite_pack(None).expect("embedded pack loads");
+        let theme = crate::theme::theme_by_name("normal").expect("normal theme exists");
+        let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        let scene = SceneState::new([8; MAX_FLOORS]);
+        let mut fctx = FloorCtx::new();
+        let mut buf = RgbBuffer::filled(0, 0, pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 });
+        let mut coffee = CoffeeState::new();
+        let mut chitchat = HashMap::new();
+
+        // A too-small buffer: no layout, `None`, no panic — the buffer is
+        // resized+cleared but unpainted.
+        let none = render_floor(
+            &mut fctx,
+            &mut buf,
+            &mut coffee,
+            &mut chitchat,
+            &scene,
+            &pack,
+            theme,
+            now,
+            8,
+            8,
+            FloorMeta::ground(),
+            None,
+            None,
+            false,
+        );
+        assert!(none.is_none(), "an unlayoutable size returns None");
+        assert_eq!(
+            (buf.width, buf.height),
+            (8, 8),
+            "the buffer was still sized"
+        );
+
+        // A real size: the layout comes back and the pass painted content
+        // beyond the cleared background fill.
+        let layout = render_floor(
+            &mut fctx,
+            &mut buf,
+            &mut coffee,
+            &mut chitchat,
+            &scene,
+            &pack,
+            theme,
+            now,
+            160,
+            96,
+            FloorMeta::ground(),
+            None,
+            None,
+            false,
+        );
+        assert!(layout.is_some(), "a layoutable size returns the layout");
+        let bg = theme.surface.bg_fallback;
+        assert!(
+            buf.as_slice()
+                .iter()
+                .any(|p| *p != pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 } && *p != bg),
+            "the pixel pass painted office content"
+        );
     }
 }

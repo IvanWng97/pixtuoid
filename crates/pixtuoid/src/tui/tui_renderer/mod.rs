@@ -25,12 +25,12 @@ use ratatui::layout::Rect;
 
 use crate::tui::renderer::{draw_scene, flush_buffer_to_term_at_offset, DrawCtx, PetState};
 use pixtuoid_scene::floor::{
-    num_floors, project_floor_scene, FloorCtx, FloorMeta, FloorTransition,
+    num_floors, project_floor_scene, render_floor, CoffeeState, FloorCtx, FloorMeta,
+    FloorTransition,
 };
 use pixtuoid_scene::layout::Layout;
 use pixtuoid_scene::pathfind::Router;
 use pixtuoid_scene::pet::PetFrame;
-use pixtuoid_scene::pixel_painter::{render_to_rgb_buffer, PixelCtx};
 
 /// `FloorInfo` for a 1-based floor index, or `None` when there is only one floor
 /// (no elevator indicator). The one source behind both the normal and the
@@ -89,12 +89,11 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
         pixtuoid_scene::chitchat::VenueKey,
         pixtuoid_scene::chitchat::ActiveChitchat,
     >,
-    /// Persistent set of agents that have visited the pantry and carry a
-    /// coffee cup back to their desk. Replaces the stateless
-    /// `has_desk_coffee` cycle-scanning. Cleared on agent exit.
-    coffee_holders: std::collections::HashSet<pixtuoid_core::AgentId>,
-    /// Timestamp when each agent first returned with coffee (for steam).
-    coffee_fetched_at: std::collections::HashMap<pixtuoid_core::AgentId, SystemTime>,
+    /// Persistent coffee bookkeeping (which agents carry a cup + when they
+    /// fetched it, for steam) — ONE per office, shared across floors, the
+    /// scene-owned type every painter uses (#423). Replaces the stateless
+    /// `has_desk_coffee` cycle-scanning. Evicted on agent exit.
+    coffee: CoffeeState,
     /// The version popup's animation state machine (open flag + edge clock +
     /// edge-scale + last-rendered-scale all move as a unit — see `PopupState`).
     popup: PopupState,
@@ -144,8 +143,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             last_pet_pos: None,
             pets,
             chitchat_state: std::collections::HashMap::new(),
-            coffee_holders: std::collections::HashSet::new(),
-            coffee_fetched_at: std::collections::HashMap::new(),
+            coffee: CoffeeState::new(),
             popup: PopupState::default(),
             help_open: false,
             source_warning: None,
@@ -271,24 +269,8 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     /// so steam-window rendering can be exercised in isolation.
     #[cfg(test)]
     pub fn inject_coffee(&mut self, id: AgentId, fetched_at: SystemTime) {
-        self.coffee_holders.insert(id);
-        self.coffee_fetched_at.insert(id, fetched_at);
-    }
-
-    /// Persist newly detected coffee carriers. `coffee_holders.insert` returns
-    /// `true` only on the EDGE (first time this agent enters the set for this
-    /// pantry trip), and only then do we stamp `coffee_fetched_at` (the steam
-    /// window anchor). Shared by the normal and floor-transition draw paths.
-    fn record_coffee_carriers(
-        &mut self,
-        carriers: impl IntoIterator<Item = pixtuoid_core::AgentId>,
-        now: SystemTime,
-    ) {
-        for id in carriers {
-            if self.coffee_holders.insert(id) {
-                self.coffee_fetched_at.insert(id, now);
-            }
-        }
+        self.coffee.holders.insert(id);
+        self.coffee.fetched_at.insert(id, fetched_at);
     }
 
     pub fn cached_layout(&self) -> Option<&Layout> {
@@ -430,16 +412,14 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     /// can't skip it.
     pub fn evict_missing(&mut self, scene: &SceneState) {
         for ctx in &mut self.floor_ctxs {
-            ctx.cache.evict_missing(scene);
-            ctx.history.evict_missing(scene);
-            ctx.motion.retain(|id, _| scene.agents.contains_key(id));
+            ctx.evict_missing(scene);
         }
     }
 
     /// Whether an agent is a recorded coffee carrier (test harness only).
     #[cfg(test)]
     pub fn coffee_holders_contains(&self, id: AgentId) -> bool {
-        self.coffee_holders.contains(&id)
+        self.coffee.holders.contains(&id)
     }
 
     /// Invalidate all floors' router path caches. Call when the static
@@ -527,9 +507,6 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             (hi_ctx, lo_ctx)
         };
 
-        from_buf.ensure_size(buf_w, buf_h, self.theme.surface.bg_fallback);
-        to_buf.ensure_size(buf_w, buf_h, self.theme.surface.bg_fallback);
-
         let from_meta = FloorMeta::for_floor(from_floor, nf);
         let to_meta = FloorMeta::for_floor(to_floor, nf);
 
@@ -550,38 +527,43 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         let from_pet = pixtuoid_scene::pet::select_pet_for_floor(from_meta.floor_seed, &self.pets);
         let to_pet = pixtuoid_scene::pet::select_pet_for_floor(to_meta.floor_seed, &self.pets);
 
-        let from_carriers = render_transition_floor(
-            &from_scene,
+        // The shared scene seam (#423) renders each sliding floor AND owns the
+        // coffee/door-anim epilogue — a pantry trip completed mid-slide lands
+        // its cup without the old hand-threaded `new_coffee_carriers` return
+        // (once a real dropped-carriers bug). Recording the from-floor's
+        // carriers before the to-floor render can't change the to-floor's
+        // pixels: an agent lives on exactly ONE floor, and each projected
+        // floor scene paints only its own agents' coffee state.
+        render_floor(
             from_ctx,
             from_buf,
-            from_meta,
+            &mut self.coffee,
+            &mut transition_chitchat,
+            &from_scene,
+            pack,
+            self.theme,
+            now,
             buf_w,
             buf_h,
+            from_meta,
             from_active_pet,
             from_pet,
-            self.theme,
-            &self.coffee_holders,
-            &self.coffee_fetched_at,
-            &mut transition_chitchat,
-            pack,
-            now,
             self.debug_walkable,
         );
-        let to_carriers = render_transition_floor(
-            &to_scene,
+        render_floor(
             to_ctx,
             to_buf,
-            to_meta,
+            &mut self.coffee,
+            &mut transition_chitchat,
+            &to_scene,
+            pack,
+            self.theme,
+            now,
             buf_w,
             buf_h,
+            to_meta,
             to_active_pet,
             to_pet,
-            self.theme,
-            &self.coffee_holders,
-            &self.coffee_fetched_at,
-            &mut transition_chitchat,
-            pack,
-            now,
             self.debug_walkable,
         );
 
@@ -657,10 +639,6 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         // clear the stale position so the mouse handler can't "pet" a ghost at
         // last frame's location during the transition.
         self.last_pet_pos = None;
-        // Persist coffee carriers detected on EITHER floor during the slide,
-        // same EDGE logic as the normal path. Without this a coffee run that
-        // completes mid-transition loses its cup.
-        self.record_coffee_carriers(from_carriers.into_iter().chain(to_carriers), now);
         Ok(())
     }
 }
@@ -720,10 +698,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> Renderer for TuiRenderer<B> {
         // Evict coffee state for agents no longer in the scene. (History,
         // motion, and frame-cache eviction live in `evict_missing`, which the
         // event loop calls with the live snapshot before every render.)
-        self.coffee_holders
-            .retain(|id| scene.agents.contains_key(id));
-        self.coffee_fetched_at
-            .retain(|id, _| scene.agents.contains_key(id));
+        self.coffee.evict_missing(scene);
 
         let floor_meta = FloorMeta::for_floor(self.current_floor, nf);
         // Compute popup scale before the mutable borrows below.
@@ -757,8 +732,8 @@ impl<B: Backend<Error: Send + Sync + 'static>> Renderer for TuiRenderer<B> {
             floor_pet: pixtuoid_scene::pet::select_pet_for_floor(floor_meta.floor_seed, &self.pets),
             chitchat_state: &mut self.chitchat_state,
             chitchat_bubbles: Vec::new(),
-            coffee_holders: &self.coffee_holders,
-            coffee_fetched_at: &self.coffee_fetched_at,
+            coffee_holders: &self.coffee.holders,
+            coffee_fetched_at: &self.coffee.fetched_at,
             new_coffee_carriers: Vec::new(),
             popup_scale,
             help_open: self.help_open,
@@ -776,7 +751,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> Renderer for TuiRenderer<B> {
         drop(draw_ctx);
         // Recompute door_anim_max_ms from the motion map for the NEXT frame.
         self.floor_ctxs[self.current_floor].recompute_door_anim_max_ms(now);
-        self.record_coffee_carriers(new_coffee_carriers, now);
+        self.coffee.record(new_coffee_carriers, now);
         if let Ok(ref layout_opt) = result {
             self.cached_layout = layout_opt.clone();
             // Ok(None) = draw_scene painted footer-only (compute failed at this
@@ -793,65 +768,6 @@ impl<B: Backend<Error: Send + Sync + 'static>> Renderer for TuiRenderer<B> {
         }
         result.map(|_| ())
     }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn render_transition_floor(
-    scene: &SceneState,
-    fctx: &mut FloorCtx,
-    buf: &mut RgbBuffer,
-    floor_meta: FloorMeta,
-    buf_w: u16,
-    buf_h: u16,
-    active_pet: Option<&PetState>,
-    floor_pet: Option<&pixtuoid_scene::pet::Pet>,
-    theme: &'static pixtuoid_scene::theme::Theme,
-    coffee_holders: &std::collections::HashSet<pixtuoid_core::AgentId>,
-    coffee_fetched_at: &std::collections::HashMap<pixtuoid_core::AgentId, SystemTime>,
-    chitchat_state: &mut std::collections::HashMap<
-        pixtuoid_scene::chitchat::VenueKey,
-        pixtuoid_scene::chitchat::ActiveChitchat,
-    >,
-    pack: &Pack,
-    now: SystemTime,
-    debug_walkable: bool,
-) -> Vec<pixtuoid_core::AgentId> {
-    let Some(layout) = Layout::compute_with_seed(buf_w, buf_h, None, floor_meta.floor_seed) else {
-        return Vec::new();
-    };
-    fctx.router.set_preferred_zone(layout.corridor);
-    let pixel_result = render_to_rgb_buffer(&mut PixelCtx {
-        scene,
-        layout: &layout,
-        pack,
-        now,
-        buf,
-        cache: &mut fctx.cache,
-        router: &mut fctx.router,
-        overlay: &mut fctx.overlay,
-        history: &mut fctx.history,
-        motion: &mut fctx.motion,
-        door_anim_max_ms: fctx.door_anim_max_ms,
-        theme,
-        floor: floor_meta,
-        active_pet,
-        floor_pet,
-        chitchat_state,
-        coffee_holders,
-        coffee_fetched_at,
-        light: &mut fctx.light,
-        debug_walkable,
-    });
-    // Mirror the normal-path refresh: render_to_rgb_buffer may have
-    // snapshotted new entry/exit profiles into fctx.motion during the
-    // ≤900ms slide, so refresh door_anim_max_ms for the next frame.
-    fctx.recompute_door_anim_max_ms(now);
-    // Return the coffee carriers detected this frame so the caller can
-    // persist them — the normal path does this via DrawCtx.new_coffee_carriers
-    // (renderer.rs); a transition bypasses draw_scene, so without threading
-    // this back a pantry trip completed mid-slide is silently dropped (the cup
-    // never lands on the desk).
-    pixel_result.new_coffee_carriers
 }
 
 /// Test-only access to the rendered ratatui frame. This is rendered OUTPUT

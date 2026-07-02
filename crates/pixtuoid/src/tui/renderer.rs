@@ -408,7 +408,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
 }
 
 /// The modal-overlay dispatch shared by `draw_scene` (normal path) and
-/// `render_transition_floor` (the floor-slide path): theme picker → dashboard →
+/// `TuiRenderer::render_transition` (the floor-slide path): theme picker → dashboard →
 /// Sources panel → version popup → help, each gated by its own state and drawn
 /// at the same `bounds` (the full terminal area). Centralized so the two draw
 /// paths can't drift in ordering or args; behavior-identical to the inlined

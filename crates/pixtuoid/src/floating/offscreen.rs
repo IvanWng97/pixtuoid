@@ -1,27 +1,24 @@
 //! Headless office → `RgbBuffer` rendering for the `pixtuoid floating` desktop window.
 //!
-//! This renders the office to a raw pixel `RgbBuffer` via `render_to_rgb_buffer` — NOT the
-//! half-block terminal emulation `examples/snapshot.rs` saves (snapshot writes the ratatui
-//! `TestBackend` → a ▀-compressed PNG via `save_backend_as_png`). A floating-only seam: no
-//! `draw_scene`, no `Terminal`, no shared output with snapshot. `floating::window` renders at
-//! a DOWNSCALED buffer (~window/SCALE) and nearest-neighbor upscales it, so the pixel-art
-//! office stays chunky/legible instead of 8×12-px-tiny at 1:1. This module just paints the
-//! buffer at whatever dims it's handed. It mirrors `tui_renderer::render_transition_floor`
-//! (the established headless pixel pattern), owning the per-frame caches plus the persistent
-//! office state (coffee cups, group chitchat) across frames so motion stays continuous.
+//! This renders the office to a raw pixel `RgbBuffer` via the shared scene seam
+//! (`pixtuoid_scene::floor::render_floor`, #423) — NOT the half-block terminal emulation
+//! `examples/snapshot.rs` saves (snapshot writes the ratatui `TestBackend` → a ▀-compressed
+//! PNG via `save_backend_as_png`). A floating-only surface: no `draw_scene`, no `Terminal`,
+//! no shared output with snapshot. `floating::window` renders at a DOWNSCALED buffer
+//! (~window/SCALE) and nearest-neighbor upscales it, so the pixel-art office stays
+//! chunky/legible instead of 8×12-px-tiny at 1:1. This module just paints the buffer at
+//! whatever dims it's handed, owning the per-frame caches plus the persistent office state
+//! (coffee cups, group chitchat) across frames so motion stays continuous.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::time::SystemTime;
 
 use pixtuoid_core::sprite::{format::Pack, Rgb, RgbBuffer};
 use pixtuoid_core::state::SceneState;
-use pixtuoid_core::AgentId;
 
 use pixtuoid_scene::chitchat::{ActiveChitchat, VenueKey};
-use pixtuoid_scene::floor::{FloorCtx, FloorMeta};
+use pixtuoid_scene::floor::{render_floor, CoffeeState, FloorCtx, FloorMeta};
 use pixtuoid_scene::layout::Layout;
-use pixtuoid_scene::pathfind::Router;
-use pixtuoid_scene::pixel_painter::{render_to_rgb_buffer, PixelCtx};
 use pixtuoid_scene::theme::Theme;
 
 /// Owns everything needed to render the live office to a reusable `RgbBuffer` across
@@ -33,8 +30,7 @@ pub struct OfficeRenderer {
     floor: FloorCtx,
     buf: RgbBuffer,
     chitchat: HashMap<VenueKey, ActiveChitchat>,
-    coffee_holders: HashSet<AgentId>,
-    coffee_fetched_at: HashMap<AgentId, SystemTime>,
+    coffee: CoffeeState,
     /// The layout the LAST `render` computed — captured so `labels` can build the
     /// name-badge overlay against the SAME geometry the sprite pass used (labels
     /// align 1:1 with the painted characters). `None` before the first render.
@@ -47,8 +43,7 @@ impl OfficeRenderer {
             floor: FloorCtx::new(),
             buf: RgbBuffer::filled(0, 0, Rgb { r: 0, g: 0, b: 0 }),
             chitchat: HashMap::new(),
-            coffee_holders: HashSet::new(),
-            coffee_fetched_at: HashMap::new(),
+            coffee: CoffeeState::new(),
             last_layout: None,
         }
     }
@@ -71,51 +66,35 @@ impl OfficeRenderer {
         floor_meta: FloorMeta,
         floor_pet: Option<&pixtuoid_scene::pet::Pet>,
     ) -> &RgbBuffer {
-        self.buf
-            .ensure_size(buf_w, buf_h, theme.surface.bg_fallback);
-        let Some(layout) = Layout::compute_with_seed(buf_w, buf_h, None, floor_meta.floor_seed)
-        else {
-            return &self.buf;
-        };
-        self.floor.router.set_preferred_zone(layout.corridor);
-        // Capture the layout for `labels` BEFORE the render borrow — `labels` rebuilds
-        // the name-badge overlay against this exact geometry. Clone so the borrow is
-        // released (SceneLayout is Clone).
-        self.last_layout = Some(layout.clone());
-        let result = render_to_rgb_buffer(&mut PixelCtx {
+        // Drop per-agent state for agents no longer in the scene (#423: the
+        // shared eviction; previously the floating painter never evicted, so
+        // exited agents' motion/cache/coffee entries accumulated for the
+        // window's lifetime — a slow leak, invisible in pixels because gone
+        // agents aren't painted).
+        self.floor.evict_missing(scene);
+        self.coffee.evict_missing(scene);
+        // The shared scene seam (#423): buffer sizing, layout, the pixel pass,
+        // and the coffee/door-anim epilogue in one place. The returned layout
+        // is captured for `labels` — the name-badge overlay must be built
+        // against the SAME geometry the sprite pass used. active_pet stays
+        // None: click-to-pet needs window pointer hit-testing (deferred); the
+        // WANDERING floor pet is wired.
+        self.last_layout = render_floor(
+            &mut self.floor,
+            &mut self.buf,
+            &mut self.coffee,
+            &mut self.chitchat,
             scene,
-            layout: &layout,
             pack,
-            now,
-            buf: &mut self.buf,
-            cache: &mut self.floor.cache,
-            router: &mut self.floor.router,
-            overlay: &mut self.floor.overlay,
-            history: &mut self.floor.history,
-            motion: &mut self.floor.motion,
-            door_anim_max_ms: self.floor.door_anim_max_ms,
             theme,
-            floor: floor_meta,
-            // active_pet is the click-to-pet heart animation — needs window pointer
-            // hit-testing (deferred); the WANDERING floor pet is wired.
-            active_pet: None,
+            now,
+            buf_w,
+            buf_h,
+            floor_meta,
+            None,
             floor_pet,
-            chitchat_state: &mut self.chitchat,
-            coffee_holders: &self.coffee_holders,
-            coffee_fetched_at: &self.coffee_fetched_at,
-            light: &mut self.floor.light,
-            debug_walkable: false,
-        });
-        // Persist desk cups: a pantry trip completed this frame stamps the carrier so the
-        // cup lands on the desk + steams (mirrors TuiRenderer's coffee bookkeeping, which
-        // the transition path threads via `new_coffee_carriers`).
-        for id in result.new_coffee_carriers {
-            self.coffee_holders.insert(id);
-            self.coffee_fetched_at.entry(id).or_insert(now);
-        }
-        // render_to_rgb_buffer may have snapshotted new entry/exit profiles into motion;
-        // refresh the door-cosmetic clamp for next frame (same as the transition path).
-        self.floor.recompute_door_anim_max_ms(now);
+            false,
+        );
         &self.buf
     }
 
