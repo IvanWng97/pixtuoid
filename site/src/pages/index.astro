@@ -48,15 +48,30 @@ const softwareJsonLd = {
     </div>
     <Showcase />
     <Features />
-    {/* observation gap 2 — with the frameless-window beat */}
+    {
+      /* observation gap 2 — with the frameless-window beat: the real floating
+        window is an OPAQUE, chrome-less rect of office pixels (softbuffer
+        writes XRGB, no alpha), so the beat is an office still at window
+        scale floating over the page office — the pixel-scale contrast is
+        what reads as "a separate window". */
+    }
     <div class="office-gap">
       <div class="gap-frame" aria-hidden="true">
-        <div class="gap-frame__bar">pixtuoid — office · always on top</div>
+        <img
+          class="gap-frame__body px"
+          src={asset('demos/night.png')}
+          data-gap-still
+          data-day={asset('demos/day.png')}
+          data-night={asset('demos/night.png')}
+          alt=""
+          loading="lazy"
+          decoding="async"
+        />
       </div>
       <p class="gap-caption" aria-hidden="true">
-        — runs as a frameless desktop window, too. lighting follows your clock; it's <span
-          data-gap-daynight>night</span
-        > where you are.
+        — runs as a frameless, always-on-top desktop window, too. lighting follows your clock; it's{
+          ' '
+        }<span data-gap-daynight>night</span> where you are.
       </p>
     </div>
     <HowItWorks />
@@ -68,12 +83,17 @@ const softwareJsonLd = {
     </div>
   </main>
   <script is:inline>
-    // the one dynamic word in gap 2 — same day/night boundary the office uses
+    // gap 2 follows the viewer's clock — same day/night boundary the office
+    // uses: the word AND the window still swap together.
     (function () {
+      const night = (function () {
+        const h = new Date().getHours();
+        return h < 7 || h >= 19;
+      })();
       const el = document.querySelector('[data-gap-daynight]');
-      if (!el) return;
-      const h = new Date().getHours();
-      el.textContent = h < 7 || h >= 19 ? 'night' : 'day';
+      if (el) el.textContent = night ? 'night' : 'day';
+      const img = document.querySelector('[data-gap-still]');
+      if (img) img.src = night ? img.dataset.night : img.dataset.day;
     })();
   </script>
   <Footer />
