@@ -12,6 +12,9 @@ use pixtuoid_core::AgentSlot;
 
 use super::epoch_ms;
 use crate::layout::{Point, WaypointKind, DESK_W};
+// Walk-leg lerp lives on the sim side (`motion` — pose history records with
+// it); re-imported here for the painter's blit/anchor call-sites.
+pub(crate) use crate::motion::walking_position;
 use crate::pose::{self, Pose};
 
 /// Default character sprite width (the bundled pack is 8×12). Used to anchor
@@ -105,20 +108,6 @@ pub(super) fn waypoint_rank_offset_x(kind: WaypointKind, rank: usize) -> i16 {
         (_, 1) => 9,
         (_, 2) => -9,
         (_, _) => 0,
-    }
-}
-
-pub(crate) fn walking_position(from: Point, to: Point, t_x1000: u16) -> Point {
-    let t = t_x1000 as i32;
-    let dx = to.x as i32 - from.x as i32;
-    let dy = to.y as i32 - from.y as i32;
-    // Clamp at zero before casting to u16 — left-walking agents (to.x <
-    // from.x) cross through negative x partway through their walk if the
-    // animation interpolation overshoots, and a bare `as u16` cast wraps
-    // silently to ~65k, blitting the sprite off-screen invisibly.
-    Point {
-        x: (from.x as i32 + dx * t / 1000).max(0).min(u16::MAX as i32) as u16,
-        y: (from.y as i32 + dy * t / 1000).max(0).min(u16::MAX as i32) as u16,
     }
 }
 

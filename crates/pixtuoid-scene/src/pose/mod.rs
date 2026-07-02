@@ -21,8 +21,8 @@ use pixtuoid_core::walkable::{OccupancyOverlay, WalkableMask};
 use pixtuoid_core::AgentId;
 
 use crate::motion::{
-    advance_wander, octile_path_len, settle_len, MotionState, WalkLeg, WalkPathSnapshot,
-    WanderPhase,
+    advance_wander, octile_path_len, settle_len, walking_position, MotionState, WalkLeg,
+    WalkPathSnapshot, WanderPhase,
 };
 
 pub use pixtuoid_core::pose::{
@@ -861,12 +861,6 @@ fn route_walking_pose(
         carrying_coffee,
     })
 }
-
-/// Pure linear interpolation along the segment from `from` to `to`. The
-/// rendering side has its own `walking_position` in renderer.rs that
-/// also applies vertical breathing; this one is for history-tracking
-/// only (we want the deterministic position, not the breath offset).
-use crate::pixel_painter::walking_position;
 
 pub(crate) fn octile_distance(a: Point, b: Point) -> u32 {
     use crate::pathfind::{OCTILE_DIAGONAL_COST, OCTILE_STRAIGHT_COST};

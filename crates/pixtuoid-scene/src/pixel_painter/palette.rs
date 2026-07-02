@@ -8,7 +8,10 @@
 //! against the base pack palette. The color-math helpers live here too because the palette tint
 //! code uses them directly and they're widely shared with background/effects.
 
-use pixtuoid_core::source::decoder::normalize_path_key;
+// The render layer deliberately shares the decode layer's ONE identity-key
+// normalization (Team Palette groups outfits by the same cwd key the sources
+// key sessions on) — `id` is the neutral identity-keying home both depend on.
+use pixtuoid_core::id::normalize_path_key;
 use pixtuoid_core::sprite::format::RECOLOR_KEYS;
 use pixtuoid_core::sprite::{Frame, Palette, Pixel, Rgb, RgbBuffer};
 use pixtuoid_core::AgentSlot;
