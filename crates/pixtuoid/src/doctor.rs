@@ -560,9 +560,7 @@ pub fn run(log_path: &std::path::Path) -> anyhow::Result<String> {
     // see). A snapshot diagnostic reading live on-disk state is the correct
     // semantic — it can lag a just-made in-TUI toggle until that toggle persists,
     // which it always does (persist-first; see `connect_source`/`disconnect_source`).
-    let connected = crate::config::resolve_connected(&cfg, |src| {
-        crate::install::target::by_source(src).map(crate::install::has_hooks)
-    });
+    let connected = crate::config::resolve_connected(&cfg);
     let log = std::fs::read_to_string(log_path).unwrap_or_default();
 
     let mut out = String::from("pixtuoid doctor — source health\n");

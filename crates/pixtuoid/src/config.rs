@@ -37,12 +37,13 @@ pub struct AppConfig {
     )]
     pub last_seen_version: Option<String>,
     /// Per-source connection flags (registry source id → connected). An absent
-    /// id falls to the migrate-default in [`resolve_connected`] (connected iff
-    /// hooks are already installed; a source with no install target ⇒ connected;
-    /// else disconnected). The `s` Sources panel writes a flag on toggle. A
-    /// `[sources]` table; empty ⇒ omitted on save. Keep BEFORE `pets` — pets
-    /// must stay last (its array-of-tables serializes cleanest after all tables,
-    /// and a `[sources]` table written after `[[pets]]` would re-parent).
+    /// id is simply DISCONNECTED ([`resolve_connected`] — only an explicit
+    /// `true` connects; the old v0.4–0.7 "absent ⇒ connected iff hooks
+    /// installed" migrate inference was dropped in 0.12.0). The `s` Sources
+    /// panel writes a flag on toggle. A `[sources]` table; empty ⇒ omitted on
+    /// save. Keep BEFORE `pets` — pets must stay last (its array-of-tables
+    /// serializes cleanest after all tables, and a `[sources]` table written
+    /// after `[[pets]]` would re-parent).
     #[serde(
         rename = "sources",
         default,
@@ -263,11 +264,12 @@ pub fn save_source_connected(path: &Path, source_id: &'static str, connected: bo
 }
 
 /// Remove a single source's connection flag — the connect-rollback restore for a
-/// flag that was ABSENT before the attempt (rollback must restore absence so the
-/// migrate default in [`resolve_connected`] decides again; writing `false` would
-/// overwrite it with an explicit disconnect). Drops an emptied `[sources]` table
-/// so a rolled-back first connect leaves the config exactly as it was (incl. the
-/// `setup::is_first_run` empty-table signal).
+/// flag that was ABSENT before the attempt (rollback must restore absence, the
+/// pre-attempt state; an absent flag and an explicit `false` both read as
+/// disconnected in [`resolve_connected`], but only absence keeps the
+/// `setup::is_first_run` empty-table signal intact). Drops an emptied
+/// `[sources]` table so a rolled-back first connect leaves the config exactly
+/// as it was.
 pub fn remove_source_connected(path: &Path, source_id: &str) -> Result<()> {
     update_config(path, |doc| {
         let emptied = match doc.get_mut("sources").and_then(|s| s.as_table_like_mut()) {
@@ -317,24 +319,20 @@ pub fn save_floating(
     })
 }
 
-/// Resolve the runtime connected-set the office gates its sprites on. An
-/// explicit `[sources]` flag wins; an absent id MIGRATES: a source with an
-/// install target is connected iff its hooks are already installed, and a
-/// source with NO install target (e.g. Antigravity, which never had a connect
-/// step) defaults connected. `has_hooks` is injected — `Some(installed)` for a
-/// target-bearing source, `None` for a no-target source — so this stays pure +
-/// FS-free for tests (mirrors `plan_targets`' injected detection).
-pub fn resolve_connected(
-    config: &AppConfig,
-    has_hooks: impl Fn(&'static str) -> Option<bool>,
-) -> std::collections::HashSet<String> {
+/// Resolve the runtime connected-set the office gates its sprites on: a
+/// registered source is connected iff its `[sources]` flag is an explicit
+/// `true`. An absent flag (or an absent/empty `[sources]` table) is plainly
+/// DISCONNECTED — the v0.4–0.7 "absent ⇒ connected iff hooks installed"
+/// migrate inference was dropped in 0.12.0 (too old to keep supporting).
+/// CONSEQUENCE: a v0.4–0.7 upgrader's config (exists, no `[sources]`, not
+/// degraded) now reads as a first run (`setup::is_first_run`), so the
+/// onboarding wizard replays and they re-connect there — acceptable, that IS
+/// the connect flow.
+pub fn resolve_connected(config: &AppConfig) -> std::collections::HashSet<String> {
     pixtuoid_core::source::REGISTERED_SOURCES
         .iter()
         .copied()
-        .filter(|src| match config.sources.get(*src) {
-            Some(&flag) => flag,
-            None => has_hooks(src).unwrap_or(true),
-        })
+        .filter(|src| config.sources.get(*src).copied().unwrap_or(false))
         .map(String::from)
         .collect()
 }
@@ -1328,47 +1326,52 @@ mod tests {
     }
 
     #[test]
-    fn resolve_connected_explicit_flag_wins_over_migrate() {
+    fn resolve_connected_only_explicit_true_connects() {
         let mut cfg = AppConfig::default();
         cfg.sources.insert("claude-code".into(), false);
-        // Hooks ARE installed everywhere, but the explicit `false` wins for cc.
-        let set = resolve_connected(&cfg, |_| Some(true));
-        assert!(!set.contains("claude-code"), "explicit false wins");
+        cfg.sources.insert("codex".into(), true);
+        let set = resolve_connected(&cfg);
+        assert!(!set.contains("claude-code"), "explicit false disconnects");
+        assert!(set.contains("codex"), "explicit true connects");
         assert!(
-            set.contains("codex"),
-            "absent + hooks installed → connected"
+            !set.contains("antigravity"),
+            "an absent flag is plainly disconnected (no migrate inference)"
         );
     }
 
+    // The 0.12.0 removal of the v0.4–0.7 migrate inference: an absent/empty
+    // [sources] means NOTHING connected — an upgrader's old config (exists,
+    // no [sources], not degraded) reads as a first run, so the onboarding
+    // wizard replays and they re-connect there (that IS the connect flow).
     #[test]
-    fn resolve_connected_migrate_defaults_both_sides() {
-        let cfg = AppConfig::default(); // no [sources] → everything migrates
-        let set = resolve_connected(&cfg, |src| match src {
-            "codex" => Some(true), // hooks installed → connected
-            "antigravity" => None, // no install target → connected
-            _ => Some(false),      // target-bearing, hooks absent → disconnected
-        });
-        assert!(set.contains("codex"), "hooks installed → connected");
-        assert!(set.contains("antigravity"), "no install target → connected");
-        assert!(!set.contains("claude-code"), "hooks absent → disconnected");
-        assert!(!set.contains("reasonix"), "hooks absent → disconnected");
+    fn resolve_connected_absent_sources_table_connects_nothing() {
+        let cfg = AppConfig::default(); // no [sources]
+        assert!(
+            resolve_connected(&cfg).is_empty(),
+            "absent [sources] is the plain default: nothing connected"
+        );
     }
 
     // A newly-added source must self-gate on first boot: resolve_connected
-    // iterates the registry, so every REGISTERED_SOURCES entry is decided (here,
-    // all "installed" → all connected). A source added to the registry without a
-    // config flag can't silently fall through.
+    // iterates the registry, so every REGISTERED_SOURCES entry is decided
+    // (here, all explicitly connected). A source added to the registry without
+    // a config flag can't silently fall through — and a flag for an
+    // UNREGISTERED id never leaks into the set.
     #[test]
     fn resolve_connected_covers_every_registered_source() {
-        let cfg = AppConfig::default(); // no [sources] → all migrate
-        let set = resolve_connected(&cfg, |_| Some(true));
+        let mut cfg = AppConfig::default();
+        for src in pixtuoid_core::source::REGISTERED_SOURCES {
+            cfg.sources.insert((*src).into(), true);
+        }
+        cfg.sources.insert("not-a-registered-source".into(), true);
+        let set = resolve_connected(&cfg);
         let expected: std::collections::HashSet<String> = pixtuoid_core::source::REGISTERED_SOURCES
             .iter()
             .map(|s| s.to_string())
             .collect();
         assert_eq!(
             set, expected,
-            "resolve_connected must decide every registered source"
+            "resolve_connected must decide every registered source and only those"
         );
     }
 

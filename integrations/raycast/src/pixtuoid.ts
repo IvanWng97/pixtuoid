@@ -4,11 +4,13 @@ import { accessSync, constants } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-// `SourceStatus` is GENERATED from the Rust serde type via a committed JSON
-// Schema — no more hand-mirroring. Source of truth: crates/pixtuoid/src/sources.rs
-// (its schema test emits contract/source-status.schema.json); regenerate this
-// type with `npm run gen:contract`. See ../../docs/PARALLEL-DELIVERY.md.
+// `SourceStatus` and `OutcomeRow` are GENERATED from the Rust serde types via
+// committed JSON Schemas — no more hand-mirroring. Source of truth:
+// crates/pixtuoid/src/sources.rs (its schema tests emit
+// contract/{source-status,outcome-row}.schema.json); regenerate these types
+// with `npm run gen:contract`. See ../../docs/PARALLEL-DELIVERY.md.
 import type { SourceStatus } from "./contract";
+import type { OutcomeRow } from "./contract-outcome";
 
 const pExecFile = promisify(execFile);
 
@@ -16,14 +18,12 @@ const pExecFile = promisify(execFile);
  *  contract above — re-exported so command UIs import it from here. */
 export type { SourceStatus };
 
-/** A row of `pixtuoid connect|disconnect <id> --json` (`run_change`).
- *  `outcome` ∈ `"connected" | "disconnected" | "failed: <msg>"` for these two
- *  single-id commands. (`run_change` also emits `"no_op"`, but only via
- *  `pixtuoid sources set` — the declarative reconcile this extension never calls.) */
-export interface OutcomeRow {
-  id: string;
-  outcome: string;
-}
+/** A row of `pixtuoid connect|disconnect <id> --json` (`run_change`) — also
+ *  generated. `outcome` ∈ `"connected" | "disconnected" | "failed"` (bare tokens)
+ *  for these two single-id commands; on failure the human detail rides in the
+ *  optional `message` field. (`"no_op"` is emitted only by `pixtuoid sources set`
+ *  — the declarative reconcile this extension never calls.) */
+export type { OutcomeRow };
 
 /** Thrown when the pixtuoid executable can't be located — the UI distinguishes
  *  this (offer the preference / install docs) from a runtime error. */
@@ -109,7 +109,7 @@ async function runPixtuoid(args: string[]): Promise<string> {
     return stdout;
   } catch (e) {
     // `connect`/`disconnect --json` print their outcome rows (INCLUDING a
-    // `failed: <msg>` row) to stdout AND exit non-zero when any op failed, so
+    // `failed`-token row with its `message`) to stdout AND exit non-zero when any op failed, so
     // promisified execFile rejects — but it attaches the child's stdout to the
     // error. Recover that JSON array so the caller can render the precise
     // per-source outcome; a genuine failure (missing binary, panic, non-JSON

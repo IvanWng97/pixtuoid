@@ -22,22 +22,27 @@ UIs. No server, no state of its own — every fact comes from the CLI's JSON.
 
 ## The contract is GENERATED, not hand-mirrored (read this first)
 
-`SourceStatus` is **generated**, not hand-typed. The Rust serde type
-(`crates/pixtuoid/src/sources.rs`) emits a committed JSON Schema
-(`contract/source-status.schema.json`, via its `schemars` derive + the
-`source_status_schema_matches_the_committed_contract` golden test); `npm run gen:contract`
-(json-schema-to-typescript) regenerates `src/contract.ts` from that schema; and
-`pixtuoid.ts` re-exports the generated type (`export type { SourceStatus }`). So
-a producer shape change **can't hand-drift** — three gates catch it: the Rust
-struct↔schema golden test (`just test`), the schema↔TS-type freshness check
-(raycast CI regenerates `contract.ts` and `git diff --exit-code`s it), and the
-TS-type↔usage `tsc --noEmit` pass. **After changing `SourceStatus`, run
-`just gen-contract`** (re-emits the schema + the TS type) and commit both.
-`src/contract.ts` is generated — eslint/prettier-ignored, never hand-edit it.
-This is `PARALLEL-DELIVERY.md`'s "codegen-from-one-source" applied to pixtuoid
-itself. (`OutcomeRow` stays hand-typed — it's `{id, outcome: string}`, a
-free-form token, not worth a schema; the `source_status_json_shape` byte test
-still pins the exact wire JSON.)
+BOTH wire types — `SourceStatus` AND `OutcomeRow` — are **generated**, not
+hand-typed. The Rust serde types (`crates/pixtuoid/src/sources.rs`) emit
+committed JSON Schemas (`contract/source-status.schema.json` +
+`contract/outcome-row.schema.json`, via their `schemars` derives + the
+`*_schema_matches_the_committed_contract` golden tests); `npm run gen:contract`
+(json-schema-to-typescript) regenerates `src/contract.ts` +
+`src/contract-outcome.ts` from those schemas; and `pixtuoid.ts` re-exports the
+generated types (`export type { SourceStatus }` / `{ OutcomeRow }`). So a
+producer shape change **can't hand-drift** — three gates catch it: the Rust
+struct↔schema golden tests (`just test`), the schema↔TS-type freshness check
+(raycast CI regenerates both files and `git diff --exit-code`s them), and the
+TS-type↔usage `tsc --noEmit` pass. **After changing `SourceStatus` or
+`OutcomeRow`, run `just gen-contract`** (re-emits the schemas + the TS types)
+and commit all of it. `src/contract.ts` / `src/contract-outcome.ts` are
+generated — eslint/prettier-ignored, never hand-edit them. This is
+`PARALLEL-DELIVERY.md`'s "codegen-from-one-source" applied to pixtuoid itself.
+(The `source_status_json_shape` / `outcome_row_json_shape` byte tests still pin
+the exact wire JSON; `OutcomeRow` is `{id, outcome, message?}` — a bare machine
+token plus an optional failure-detail field, split from the old folded
+`failed: <msg>` form BEFORE store publication — see the sharp edge below and
+the wire-shape sharp edge in `crates/pixtuoid/CLAUDE.md`.)
 
 ## Sharp edges (don't be surprised by these)
 
@@ -51,10 +56,16 @@ still pins the exact wire JSON.)
 - **The toolchain pins (`Node 22` / `eslint 9` / `typescript 5`) MATCH Raycast's
   own toolchain — do NOT bump them ahead** of what `@raycast/api` expects, or
   `ray build` (store publish) breaks even though `tsc` passes.
-- **`OutcomeRow.outcome` ∈ `connected | disconnected | failed: <msg>`** for the
-  single-id `connect`/`disconnect` the extension calls; `no_op` is emitted only
-  by `pixtuoid sources set` (the declarative reconcile this extension never
-  invokes). Parse structurally, not by an exhaustive union.
+- **`OutcomeRow.outcome` ∈ `connected | disconnected | failed`** (bare tokens)
+  for the single-id `connect`/`disconnect` the extension calls; `no_op` is
+  emitted only by `pixtuoid sources set` (the declarative reconcile this
+  extension never invokes). Failure detail rides in the optional `message`
+  field (present exactly when `outcome === "failed"`) — match tokens exactly,
+  no prefix-stripping. This clean split landed while the in-repo extension was
+  the ONLY consumer (it ships atomically with the binary; NOT yet on the
+  Raycast store). **After store publication, installed copies parse the wire
+  independently of the binary's version — any further wire change needs a
+  version handshake, not a flag-day edit.**
 
 ## Gates
 

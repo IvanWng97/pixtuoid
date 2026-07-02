@@ -22,14 +22,16 @@ use target::{BinaryStrategy, Target, BACKUP_SUFFIX};
 /// openclaw are code artifacts and use their own plugin-file sentinel.)
 pub(crate) const SENTINEL_KEY: &str = "_pixtuoid";
 
-/// Whether `t`'s config currently bears pixtuoid hooks — the migrate-default
-/// signal for an absent `[sources]` flag (see `config::resolve_connected`: a
-/// target-bearing source is connected iff its hooks are installed). A dry-run
-/// uninstall that would change the parsed doc means managed hooks are present.
-/// An absent/empty config is excluded; a config present but unreadable or
-/// unparseable is INCLUDED (true) so a hooks-bearing-but-malformed config still
-/// counts as connected.
-pub fn has_hooks(t: &'static Target) -> bool {
+/// Whether `t`'s config currently bears pixtuoid hooks — the load-bearing gate
+/// for `verify_target` (an uninstalled config would verify "broken"; see
+/// `doctor::diagnose`). A dry-run uninstall that would change the parsed doc
+/// means managed hooks are present. An absent/empty config is excluded; a
+/// config present but unreadable or unparseable is INCLUDED (true) so a
+/// hooks-bearing-but-malformed config still counts as installed. (Until 0.12.0
+/// this was also `config::resolve_connected`'s migrate-default signal for an
+/// absent `[sources]` flag — that inference was dropped, so this went
+/// `pub` → `pub(crate)`: `doctor` is the only remaining caller.)
+pub(crate) fn has_hooks(t: &'static Target) -> bool {
     // No resolvable default path (no home dir) → no config to bear hooks.
     let Ok(path) = (t.default_config_path)() else {
         return false;

@@ -9,11 +9,6 @@ use crate::install::target::MergeOutcome;
 use crate::install::verify;
 use crate::install::SENTINEL_KEY;
 
-/// Legacy sentinel keys from previous tool names. Entries tagged with any of
-/// these are stripped on install/uninstall so a v0.3.x → v0.4.x upgrade does
-/// not leave orphan hooks pointing at missing binaries.
-const LEGACY_SENTINEL_KEYS: &[&str] = &["_ascii_agents"];
-
 const EVENTS: &[&str] = &[
     "SessionStart",
     "PreToolUse",
@@ -173,13 +168,12 @@ pub fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
     })
 }
 
+// The v0.3.0-era `_ascii_agents` legacy-sentinel strip was dropped in 0.12.0
+// (pre-rename brew-tap installs are too old to keep supporting): a leftover
+// `_ascii_agents` entry is inert — CC ignores unknown hooks — it just is no
+// longer auto-stripped on install/uninstall.
 fn is_managed_entry(entry: &Value) -> bool {
-    if entry.get(SENTINEL_KEY).and_then(|v| v.as_bool()) == Some(true) {
-        return true;
-    }
-    LEGACY_SENTINEL_KEYS
-        .iter()
-        .any(|k| entry.get(*k).and_then(|v| v.as_bool()) == Some(true))
+    entry.get(SENTINEL_KEY).and_then(|v| v.as_bool()) == Some(true)
 }
 
 fn json_merge_install(doc: Value, hook_command: &str) -> Value {
@@ -355,38 +349,12 @@ mod tests {
         assert!(cleaned.get("hooks").is_none(), "got {cleaned}");
     }
 
-    // Regression for the v0.3.x → v0.4.x upgrade path: legacy entries tagged
-    // `_ascii_agents` must be stripped on install and uninstall. The previous
-    // PR #40 dropped the dual-sentinel cleanup, leaving stale hooks that
-    // point at a missing `ascii-agents-hook` binary.
+    // The `_ascii_agents` legacy-sentinel strip was removed in 0.12.0 (see
+    // is_managed_entry): a leftover v0.3.0-era entry is now an ordinary
+    // unmanaged entry — install/uninstall must leave it alone like any other
+    // user entry (inert; CC ignores unknown hooks).
     #[test]
-    fn install_strips_legacy_ascii_agents_entries() {
-        let initial = json!({
-            "hooks": {
-                "PreToolUse": [
-                    { "_ascii_agents": true, "matcher": ".*", "hooks": [{"type":"command","command":"/old"}] },
-                    { "matcher": "Write", "hooks": [{"type":"command","command":"/keep"}] }
-                ]
-            }
-        });
-        let merged = json_merge_install(initial, "/new");
-        let arr = merged["hooks"]["PreToolUse"].as_array().unwrap();
-        assert_eq!(
-            arr.len(),
-            2,
-            "legacy stripped, user entry kept, pixtuoid added"
-        );
-        let commands: Vec<&str> = arr
-            .iter()
-            .map(|e| e["hooks"][0]["command"].as_str().unwrap())
-            .collect();
-        assert!(commands.contains(&"/keep"));
-        assert!(commands.contains(&"/new"));
-        assert!(!commands.contains(&"/old"));
-    }
-
-    #[test]
-    fn uninstall_strips_legacy_ascii_agents_entries() {
+    fn legacy_ascii_agents_entries_are_no_longer_stripped() {
         let initial = json!({
             "hooks": {
                 "PreToolUse": [
@@ -394,27 +362,19 @@ mod tests {
                 ]
             }
         });
-        let cleaned = json_merge_uninstall(initial);
-        assert!(
-            cleaned.get("hooks").is_none(),
-            "legacy entry should be removed and empty hooks map dropped: {cleaned}"
-        );
-    }
+        let merged = json_merge_install(initial.clone(), "/new");
+        let arr = merged["hooks"]["PreToolUse"].as_array().unwrap();
+        let commands: Vec<&str> = arr
+            .iter()
+            .map(|e| e["hooks"][0]["command"].as_str().unwrap())
+            .collect();
+        assert!(commands.contains(&"/old"), "legacy entry left in place");
+        assert!(commands.contains(&"/new"));
 
-    #[test]
-    fn uninstall_strips_legacy_keeps_user_entries() {
-        let initial = json!({
-            "hooks": {
-                "PreToolUse": [
-                    { "_ascii_agents": true, "matcher": ".*", "hooks": [{"type":"command","command":"/old"}] },
-                    { "matcher": "Write", "hooks": [{"type":"command","command":"/keep"}] }
-                ]
-            }
-        });
         let cleaned = json_merge_uninstall(initial);
         let arr = cleaned["hooks"]["PreToolUse"].as_array().unwrap();
-        assert_eq!(arr.len(), 1);
-        assert_eq!(arr[0]["hooks"][0]["command"], json!("/keep"));
+        assert_eq!(arr.len(), 1, "uninstall keeps the legacy entry too");
+        assert_eq!(arr[0]["hooks"][0]["command"], json!("/old"));
     }
 
     #[test]

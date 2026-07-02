@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use pixtuoid::tui::renderer::draw_scene;
-use pixtuoid_core::state::ActivityState;
+use pixtuoid_core::state::{ActivityState, ToolKind};
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex, SceneState};
 use pixtuoid_scene::embedded_pack::load_sprite_pack;
 use pixtuoid_scene::floor::FloorMeta;
@@ -32,6 +32,7 @@ fn fixture_scene(now: SystemTime) -> SceneState {
             ActivityState::Active {
                 tool_use_id: Some("tu_a".into()),
                 detail: Some("Write".into()),
+                kind: ToolKind::Edit,
             },
         ),
         ("agent-b", ActivityState::Idle),

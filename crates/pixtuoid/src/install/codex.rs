@@ -82,22 +82,12 @@ pub fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
     })
 }
 
-fn command_basename_is_hook(command: &str) -> bool {
-    // The command string may be "PIXTUOID_SOURCE=codex /path/pixtuoid-hook";
-    // take the last whitespace-separated token, then its file_name.
-    let token = command.split_whitespace().last().unwrap_or(command);
-    Path::new(token).file_name().and_then(|s| s.to_str()) == Some("pixtuoid-hook")
-}
-
 fn handler_is_managed(h: &toml::Value) -> bool {
-    if h.get(SENTINEL_KEY).and_then(|v| v.as_bool()) == Some(true) {
-        return true;
-    }
-    // Legacy fallback for pre-sentinel (#59) entries.
-    h.get("type").and_then(|v| v.as_str()) == Some("command")
-        && h.get("command")
-            .and_then(|v| v.as_str())
-            .is_some_and(command_basename_is_hook)
+    // Sentinel-only: the `_pixtuoid_source` write and this installer shipped in
+    // the SAME first release (v0.5.0), so no released version ever wrote a
+    // sentinel-less entry — a basename fallback would only ever match entries a
+    // USER hand-wrote pointing at the shim, which uninstall must not touch.
+    h.get(SENTINEL_KEY).and_then(|v| v.as_bool()) == Some(true)
 }
 
 fn prune_managed_handlers(group: &mut toml::Value) {
@@ -368,22 +358,25 @@ mod tests {
     }
 
     #[test]
-    fn uninstall_legacy_basename_fallback() {
-        // A pre-sentinel #59 entry (no _pixtuoid, command basename pixtuoid-hook) is removed.
+    fn uninstall_leaves_a_hand_written_shim_entry_alone() {
+        // No released version ever wrote a sentinel-less entry (sentinel +
+        // installer shipped together in v0.5.0), so an unsentineled command
+        // pointing at the shim is USER-authored — uninstall must not eat it.
         let cfg = r#"
 [[hooks.PreToolUse]]
 matcher = "*"
 [[hooks.PreToolUse.hooks]]
 type = "command"
-command = "/old/pixtuoid-hook"
+command = "/hand/written/pixtuoid-hook"
 "#;
         let cleaned = merge_uninstall(cfg).unwrap();
         let v = parse(&cleaned.content);
         assert!(
-            v.get("hooks").is_none(),
-            "legacy basename entry removed: {}",
+            v.get("hooks").is_some(),
+            "hand-written entry survives uninstall: {}",
             cleaned.content
         );
+        assert!(!cleaned.changed, "nothing managed to remove");
     }
 
     // On Windows hook_command emits the BARE exec form `<path> --source codex`

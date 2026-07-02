@@ -13,7 +13,7 @@ use std::hash::{Hash, Hasher};
 use std::time::{Duration, SystemTime};
 
 use pixtuoid::tui::renderer::draw_scene;
-use pixtuoid_core::state::ActivityState;
+use pixtuoid_core::state::{ActivityState, ToolKind};
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex, SceneState};
 use pixtuoid_scene::embedded_pack::load_sprite_pack;
 use pixtuoid_scene::theme;
@@ -36,6 +36,7 @@ fn populated_scene(now: SystemTime) -> SceneState {
         ActivityState::Active {
             tool_use_id: None,
             detail: Some("Edit src/main.rs".into()),
+            kind: ToolKind::Edit,
         },
         ActivityState::Idle,
         ActivityState::Waiting {
@@ -44,6 +45,7 @@ fn populated_scene(now: SystemTime) -> SceneState {
         ActivityState::Active {
             tool_use_id: None,
             detail: Some("Bash ls".into()),
+            kind: ToolKind::Bash,
         },
     ];
     for (i, (label, state)) in labels.iter().zip(states).enumerate() {

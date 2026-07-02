@@ -15,7 +15,7 @@
   },
   {
     "cli_present": true,
-    "connected": true,
+    "connected": false,
     "display_name": "Antigravity",
     "health": null,
     "id": "antigravity"
@@ -43,7 +43,7 @@
   },
   {
     "cli_present": true,
-    "connected": true,
+    "connected": false,
     "display_name": "Copilot CLI",
     "health": null,
     "id": "copilot"

@@ -37,7 +37,7 @@ kind = "dog"        # name omitted → "Office Dog"
 | Key | Purpose |
 |-----|---------|
 | `last-seen-version` | Tracks the last version whose "what's new" popup you've seen, so the popup only fires once per upgrade. Pixtuoid rewrites it when the popup fires, on first launch, or to repair an unparseable value — not on every launch. |
-| `[sources]` | Per-agent-CLI connection state (`source-id = true/false`), written when you connect/disconnect a source in the in-TUI **Sources panel** (`s`) or via the scriptable CLI (`pixtuoid connect`/`disconnect`/`sources set`/`setup --yes`). When a source has no entry, pixtuoid migrates a default on launch: connected if its hooks are already installed (or it has no hooks to install, like Antigravity), else disconnected. A disconnected source's characters are hidden even if its hooks/transcripts are still present. |
+| `[sources]` | Per-agent-CLI connection state (`source-id = true/false`), written when you connect/disconnect a source in the in-TUI **Sources panel** (`s`) or via the scriptable CLI (`pixtuoid connect`/`disconnect`/`sources set`/`setup --yes`). When a source has no entry it is simply not connected (since 0.12.0; on a first run — no `[sources]` yet — the onboarding wizard offers the detected CLIs to connect). A disconnected source's characters are hidden even if its hooks/transcripts are still present. |
 | `[floating]` | Geometry of the `pixtuoid floating` desktop window (`width`/`height`/`x`/`y`), rewritten when the window closes. Sizes below 240×160 clamp up on load; `x`/`y` are dropped when the OS can't report the position (the next launch is OS-placed). A user-set `opacity` is accepted (clamped 0.2–1.0) and preserved across the rewrite, but isn't applied yet. |
 
 ## Themes

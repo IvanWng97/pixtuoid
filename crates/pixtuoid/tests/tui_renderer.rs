@@ -62,6 +62,7 @@ fn tui_renderer_render_paints_a_full_frame() {
             ActivityState::Active {
                 tool_use_id: Some(std::sync::Arc::from("t1")),
                 detail: Some(std::sync::Arc::from("Write")),
+                kind: pixtuoid_core::state::ToolKind::Edit,
             },
             now,
         ),
@@ -87,8 +88,8 @@ fn tui_renderer_render_paints_a_full_frame() {
     // for the 96×(36-1) scene area (one row reserved for footer), doubled
     // vertically via half-block: 96 cells wide, 70 pixels tall.
     let buf = renderer.buf();
-    assert_eq!(buf.width, 96);
-    assert_eq!(buf.height, 70);
+    assert_eq!(buf.width(), 96);
+    assert_eq!(buf.height(), 70);
 
     // And it should contain something (non-trivial color diversity), proving
     // the trait method actually triggered the paint pipeline.

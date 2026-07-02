@@ -340,7 +340,7 @@ pub fn shell_shim_ref(command: &str) -> ShimRef {
             ShimRef::Absolute(PathBuf::from(p))
         };
     }
-    // Unquoted fallback (legacy / hand-edited): the last whitespace token.
+    // Unquoted fallback (hand-edited configs; no released version ever wrote this form): the last whitespace token.
     // `split_whitespace` never yields an empty token, so no emptiness guard.
     match head.split_whitespace().next_back() {
         Some(tok) => ShimRef::Absolute(PathBuf::from(tok)),

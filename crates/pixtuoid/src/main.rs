@@ -1,15 +1,14 @@
-use std::fs::OpenOptions;
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+mod crash;
+mod logging;
+mod sources_cli;
 
 use anyhow::Result;
 use clap::Parser;
 use pixtuoid::cli::{Cli, Cmd, SourceArgs, SourcesAction};
 use pixtuoid::{config, doctor, floating, init_pack, install, runtime, setup, sources, validate};
-use tracing_subscriber::EnvFilter;
 
 fn main() -> Result<()> {
-    install_crash_hook();
+    crash::install_crash_hook();
     let (log_level, cli_theme, cmd) = Cli::parse().cmd_or_default();
 
     // The terminal `run` TUI is the only command that paints the pixel-art canvas:
@@ -89,93 +88,14 @@ fn main() -> Result<()> {
         );
     }
     // The typed LogLevel's as_str is exactly the old free-string levels, so
-    // every filter built below is unchanged — the enum only moved typo
-    // rejection to the clap seam (a typo used to parse as a bogus EnvFilter
-    // TARGET directive that silently filtered everything off, #157 class).
+    // every filter built in logging::init is unchanged — the enum only moved
+    // typo rejection to the clap seam (a typo used to parse as a bogus
+    // EnvFilter TARGET directive that silently filtered everything off,
+    // #157 class).
     let log_level: &'static str = log_level.as_str();
-    // RUST_LOG wins only when set to a NON-EMPTY value; an empty RUST_LOG
-    // parses as Ok(zero directives) = everything OFF, which would silently
-    // defeat logging on the verbose / $PIXTUOID_LOG / --headless paths that
-    // route through make_filter (the #157 silent-diagnostics class). The
-    // empty=unset normalization is pinned by `filter_directives` + its test.
-    let rust_log = std::env::var("RUST_LOG").ok();
-    let make_filter = || {
-        EnvFilter::try_new(filter_directives(rust_log.as_deref(), log_level))
-            .unwrap_or_else(|_| EnvFilter::new(log_level))
-    };
-
-    // Log routing:
-    //   TUI mode: ALWAYS log to the file (#157) — the alternate screen owns
-    //     the terminal, so the log file is the only place a runtime error
-    //     ("source died", decode failures) can surface. The default floor is
-    //     `warn`; $RUST_LOG, $PIXTUOID_LOG, or --log-level raise/shape it.
-    //     Crash reporting is handled separately by the panic hook.
-    //   Non-TUI (--headless, validate-pack, init-pack): stderr.
-    //   `floating`: file-log like the TUI — it's a long-running GUI; tracing spam
-    //     into the launching terminal would be noise (config warnings still
-    //     eprintln to that terminal via build_run_config before the window opens).
     let tui_active = matches!(&cmd, Cmd::Run { headless, .. } if !*headless)
         || matches!(&cmd, Cmd::Floating { .. });
-    let wants_verbose = matches!(log_level, "debug" | "trace");
-    // The env var's VALUE is the log file path — an empty (or whitespace-only)
-    // value would "enable" file mode with an unopenable path; treat it as unset
-    // via the ONE empty-as-unset env filter (io::nonempty), the same trim
-    // semantics XDG_STATE_HOME / XDG_CONFIG_HOME / PIXTUOID_HOOK already use.
-    let explicit_log_file = pixtuoid::install::io::nonempty_env("PIXTUOID_LOG").is_some();
-
-    if tui_active {
-        // Explicit verbosity keeps today's semantics (the full --log-level /
-        // RUST_LOG filter); the always-on default floors at warn so the file
-        // captures errors without accumulating info-level noise. RUST_LOG
-        // set-but-EMPTY parses as Ok(zero directives) = everything OFF —
-        // treat it as unset, or it silently defeats the always-on floor
-        // (the exact silent-failure class #157 exists to kill).
-        let rust_log_set = rust_log.as_deref().is_some_and(|v| !v.is_empty());
-        let filter = if wants_verbose || explicit_log_file {
-            make_filter()
-        } else if rust_log_set {
-            // Honor RUST_LOG, but floor the parse-failure fallback at warn (not
-            // log_level) so the always-on file stays quiet by default. Routed
-            // through filter_directives so an empty RUST_LOG can't silence this
-            // path either if the rust_log_set guard above ever changes.
-            EnvFilter::try_new(filter_directives(rust_log.as_deref(), "warn"))
-                .unwrap_or_else(|_| EnvFilter::new("warn"))
-        } else {
-            EnvFilter::new(match log_level {
-                lvl @ ("warn" | "error") => lvl,
-                _ => "warn",
-            })
-        };
-        let path = log_file_path();
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        rotate_if_large(&path);
-        match OpenOptions::new().create(true).append(true).open(&path) {
-            Ok(f) => {
-                let writer = Arc::new(Mutex::new(f));
-                tracing_subscriber::fmt()
-                    .with_env_filter(filter)
-                    .with_ansi(false)
-                    .with_writer(move || MutexFileWriter(writer.clone()))
-                    .init();
-            }
-            Err(e) => {
-                // The footer's "see log" advice would point at nothing —
-                // say so on the pre-altscreen stderr channel rather than
-                // degrading silently (the #157 failure class).
-                eprintln!(
-                    "⚠ pixtuoid: cannot open log file {} ({e}) — runtime warnings will not be recorded",
-                    path.display()
-                );
-            }
-        }
-    } else {
-        tracing_subscriber::fmt()
-            .with_env_filter(make_filter())
-            .with_writer(std::io::stderr)
-            .init();
-    }
+    logging::init(tui_active, log_level);
 
     match cmd {
         Cmd::Run {
@@ -194,28 +114,28 @@ fn main() -> Result<()> {
         }
         Cmd::ValidatePack { pack_dir } => validate::validate_pack(&pack_dir),
         Cmd::InitPack { dest, force } => init_pack::init_pack(&dest, force),
-        Cmd::Doctor => doctor::run(&log_file_path()).map(|report| print!("{report}")),
-        Cmd::Sources { action: None, json } => run_sources_list(json),
+        Cmd::Doctor => doctor::run(&logging::log_file_path()).map(|report| print!("{report}")),
+        Cmd::Sources { action: None, json } => sources_cli::run_sources_list(json),
         Cmd::Sources {
             action: Some(SourcesAction::Set { ids }),
             json,
-        } => run_sources_set(&ids, json),
-        Cmd::Connect { ids, json } => run_change(&ids, json, |c, i| {
-            sources::connect(c, i).map(|_| sources::ChangeOutcome::Connected.as_wire())
+        } => sources_cli::run_sources_set(&ids, json),
+        Cmd::Connect { ids, json } => sources_cli::run_change(&ids, json, |c, i| {
+            sources::connect(c, i).map(|_| sources::ChangeOutcome::Connected)
         }),
         // A folded hook-removal failure is a PARTIAL failure (the flag IS
         // disconnected, but hooks remain) — surface it AND signal it via a
         // non-zero exit (run_change treats an Err op as failed), so a $?-checking
         // script isn't told a clean "disconnected".
         Cmd::Disconnect { ids, json } => {
-            run_change(&ids, json, |c, i| match sources::disconnect(c, i)? {
+            sources_cli::run_change(&ids, json, |c, i| match sources::disconnect(c, i)? {
                 sources::DisconnectOutcome::HookRemovalFailed(e) => Err(anyhow::anyhow!(
                     "disconnected, but hook removal failed: {e}"
                 )),
-                _ => Ok(sources::ChangeOutcome::Disconnected.as_wire()),
+                _ => Ok(sources::ChangeOutcome::Disconnected),
             })
         }
-        Cmd::Setup { yes } => run_setup(yes),
+        Cmd::Setup { yes } => sources_cli::run_setup(yes),
         // Packaging interfaces: emit ONLY the generated artifact to stdout (the
         // tracing subscriber above writes to stderr, so stdout stays clean for the
         // homebrew `generate_completions_from_executable` / `man` capture). Driven
@@ -238,147 +158,6 @@ fn main() -> Result<()> {
     }
 }
 
-/// `pixtuoid setup [--yes]` — the headless onboarding twin (Raycast / CI /
-/// scripting). Detects installed agent CLIs and connects them via the SAME
-/// `sources::apply_choices` the in-TUI onboarding uses. Without `--yes` it is a
-/// DRY RUN (prints the detected set only) — writing to another tool's config is
-/// opt-in. Exits non-zero if any connect fails (a `$?`-checking caller's signal).
-fn run_setup(yes: bool) -> Result<()> {
-    let detected = sources::detect();
-    if detected.is_empty() {
-        println!("No agent CLIs detected on this machine \u{2014} nothing to set up.");
-        return Ok(());
-    }
-    if !yes {
-        println!("Detected agent CLIs (run `pixtuoid setup --yes` to connect):");
-        for sid in &detected {
-            println!("  {sid}");
-        }
-        return Ok(());
-    }
-    let cfg = config::config_path();
-    let choices: Vec<(&'static str, bool)> = detected.iter().map(|&s| (s, true)).collect();
-    let mut any_failed = false;
-    for (id, oc) in sources::apply_choices(&cfg, &choices) {
-        if matches!(oc, sources::ChangeOutcome::Failed(_)) {
-            any_failed = true;
-        }
-        println!("{id}: {}", oc.as_wire());
-    }
-    if any_failed {
-        anyhow::bail!("one or more sources failed to connect (see the rows above)");
-    }
-    Ok(())
-}
-
-/// `pixtuoid sources [--json]` — print every source's connection state. Read-only.
-fn run_sources_list(json: bool) -> Result<()> {
-    let cfg = config::config_path();
-    let log = std::fs::read_to_string(log_file_path()).unwrap_or_default();
-    let rows = sources::status(&cfg, &log);
-    if json {
-        println!("{}", serde_json::to_string_pretty(&rows)?);
-    } else {
-        for r in &rows {
-            let (mark, state) = if r.connected {
-                ('\u{25cf}', "connected") // ●
-            } else if r.cli_present {
-                ('\u{25cb}', "disconnected") // ○
-            } else {
-                ('\u{00b7}', "not installed") // ·
-            };
-            println!("{mark} {:<16} {state}", r.id);
-            if let Some(h) = &r.health {
-                println!("    {h}");
-            }
-        }
-    }
-    Ok(())
-}
-
-/// `pixtuoid sources set <ids>` — declarative reconcile (connected set = exactly these).
-fn run_sources_set(ids: &[String], json: bool) -> Result<()> {
-    let cfg = config::config_path();
-    // Validate every id up front so a typo can't partially apply.
-    let desired: std::collections::HashSet<String> = ids
-        .iter()
-        .map(|id| sources::registered_id(id).map(String::from))
-        .collect::<Result<_>>()?;
-    let outcomes = sources::reconcile_to(&cfg, &desired);
-    let any_failed = outcomes
-        .iter()
-        .any(|(_, oc)| matches!(oc, sources::ChangeOutcome::Failed(_)));
-    let out: Vec<(String, String)> = outcomes
-        .into_iter()
-        .map(|(id, oc)| (id, oc.as_wire()))
-        .collect();
-    emit_outcomes(&out, json)?;
-    if any_failed {
-        anyhow::bail!("one or more sources failed (see the rows above)");
-    }
-    Ok(())
-}
-
-/// Shared `connect`/`disconnect` presenter: validate all ids up front, then apply
-/// each, reporting per-source. `op` returns the SUCCESS token; an `Err` becomes a
-/// `failed: …` row AND makes the whole command exit non-zero (after emitting all
-/// rows) so a `$?`-checking shell/CI/onboarding caller gets a real error signal.
-fn run_change(
-    ids: &[String],
-    json: bool,
-    op: impl Fn(&Path, &str) -> Result<String>,
-) -> Result<()> {
-    let cfg = config::config_path();
-    let sids: Vec<&'static str> = ids
-        .iter()
-        .map(|id| sources::registered_id(id))
-        .collect::<Result<_>>()?;
-    let mut any_failed = false;
-    let out: Vec<(String, String)> = sids
-        .into_iter()
-        .map(|sid| {
-            let token = match op(&cfg, sid) {
-                Ok(t) => t,
-                Err(e) => {
-                    any_failed = true;
-                    // The same `failed: <msg>` wire form `sources set` emits —
-                    // spelled through the ONE token authority so the two
-                    // command surfaces can't drift.
-                    sources::ChangeOutcome::Failed(format!("{e:#}")).as_wire()
-                }
-            };
-            (sid.to_string(), token)
-        })
-        .collect();
-    emit_outcomes(&out, json)?;
-    if any_failed {
-        anyhow::bail!("one or more sources failed (see the rows above)");
-    }
-    Ok(())
-}
-
-/// Print a `[(id, outcome)]` batch as a table or a JSON array of `{id, outcome}`.
-fn emit_outcomes(out: &[(String, String)], json: bool) -> Result<()> {
-    if json {
-        println!("{}", serde_json::to_string_pretty(&outcome_rows_json(out))?);
-    } else {
-        for (id, outcome) in out {
-            println!("{id}: {outcome}");
-        }
-    }
-    Ok(())
-}
-
-/// The scriptable-surface `--json` batch envelope: one `{id, outcome}` object
-/// per source row — the shape the Raycast extension parses back from
-/// `connect`/`disconnect`/`sources set` (pinned by
-/// `outcome_envelope_is_the_id_outcome_raycast_contract`).
-fn outcome_rows_json(out: &[(String, String)]) -> Vec<serde_json::Value> {
-    out.iter()
-        .map(|(id, outcome)| serde_json::json!({ "id": id, "outcome": outcome }))
-        .collect()
-}
-
 /// Resolve the shared [`runtime::RunConfig`] from CLI args + the on-disk config —
 /// the common prelude for `run` (TUI) and `floating` (window). On a non-headless
 /// launch it also surfaces config warnings + the broken-install preflight to
@@ -399,7 +178,9 @@ fn build_run_config(
     let mut cfg_warnings = Vec::new();
     let cfg = config::load(&cfg_path, &mut cfg_warnings);
     // First launch ever (no `[sources]` flags yet) → the TUI plays onboarding.
-    // Computed from the same migrate condition `resolve_connected` uses below.
+    // Since 0.12.0 an empty [sources] also means NOTHING connected (the
+    // v0.4–0.7 migrate inference is gone), so onboarding IS the connect path
+    // for an upgrader whose config predates the flags.
     // Right after load(), a non-empty warnings Vec means the file EXISTS but is
     // malformed/unreadable — "previously configured", never a first run (the
     // onboarding apply couldn't succeed anyway: update_config refuses to
@@ -413,11 +194,9 @@ fn build_run_config(
     let pack_dir = config::resolve_pack_dir(&cfg, pack_dir);
     let pets = config::resolve_pets(&cfg, &mut cfg_warnings);
     // The connected-source set the office gates sprites on: explicit `[sources]`
-    // flags win; an absent flag migrates from the install state (target-bearing
-    // source connected iff its hooks are installed; a no-target source connected).
-    let connected = config::resolve_connected(&cfg, |src| {
-        install::target::by_source(src).map(install::has_hooks)
-    });
+    // true flags only (absent = disconnected; the install-state migrate
+    // inference was dropped in 0.12.0).
+    let connected = config::resolve_connected(&cfg);
     if !headless {
         // Config problems must reach the user's eyes, not only the log file (#87):
         // stderr BEFORE any alternate screen / window. Headless already has a
@@ -438,7 +217,7 @@ fn build_run_config(
         theme,
         pets,
         connected,
-        log_path: Some(log_file_path()),
+        log_path: Some(logging::log_file_path()),
         first_run,
     })
 }
@@ -468,403 +247,5 @@ fn warn_broken_installs(connected: &std::collections::HashSet<String>) {
                 t.core_source
             );
         }
-    }
-}
-
-fn install_crash_hook() {
-    std::panic::set_hook(Box::new(|info| {
-        // Same ordering contract as tui::teardown_terminal: mouse-capture
-        // restore must precede disable_raw_mode (see the WHY there).
-        let _ = crossterm::execute!(
-            std::io::stderr(),
-            crossterm::event::DisableMouseCapture,
-            crossterm::terminal::LeaveAlternateScreen
-        );
-        let _ = crossterm::terminal::disable_raw_mode();
-
-        let version = env!("CARGO_PKG_VERSION");
-        let crash_path = crash_log_path();
-        let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-
-        let panic_msg = extract_panic_message(info);
-        let location = info
-            .location()
-            .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
-            .unwrap_or_default();
-
-        let bt = std::backtrace::Backtrace::force_capture();
-        let bt_str = bt.to_string();
-
-        let mut report = String::new();
-        report.push_str(&format!("pixtuoid v{version} crashed at {timestamp}\n"));
-        report.push_str(&format!("{panic_msg}\n  at {location}\n\n"));
-        report.push_str(&bt_str);
-        report.push('\n');
-
-        if let Some(parent) = crash_path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        if let Ok(mut f) = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&crash_path)
-        {
-            use std::io::Write;
-            let _ = f.write_all(report.as_bytes());
-        }
-
-        let issue_url = build_issue_url(version, &panic_msg, &location, &bt_str, &crash_path);
-
-        eprintln!("\n\x1b[1;31mpixtuoid v{version} crashed — sorry about that.\x1b[0m\n");
-        eprintln!("  \x1b[2m{panic_msg}\x1b[0m");
-        eprintln!("  \x1b[2mat {location}\x1b[0m\n");
-        eprintln!("  \x1b[1mHelp fix it\x1b[0m — open this link to file a pre-filled bug report");
-        eprintln!("  (panic + backtrace already included, no typing needed):\n");
-        eprintln!("  \x1b[4m{issue_url}\x1b[0m\n");
-        eprintln!(
-            "  Full backtrace saved to \x1b[2m{}\x1b[0m",
-            crash_path.display()
-        );
-        eprintln!("  \x1b[2m(attach if the reviewer asks — the link above only carries a truncated trace)\x1b[0m\n");
-    }));
-}
-
-#[allow(deprecated)]
-fn extract_panic_message(info: &std::panic::PanicInfo<'_>) -> String {
-    if let Some(s) = info.payload().downcast_ref::<&str>() {
-        return (*s).to_string();
-    }
-    if let Some(s) = info.payload().downcast_ref::<String>() {
-        return s.clone();
-    }
-    "unknown panic".to_string()
-}
-
-fn build_issue_url(
-    version: &str,
-    panic_msg: &str,
-    location: &str,
-    backtrace: &str,
-    crash_path: &std::path::Path,
-) -> String {
-    let os = std::env::consts::OS;
-    let arch = std::env::consts::ARCH;
-
-    // Truncate an over-long panic message for the crash-report title.
-    const PANIC_TITLE_MAX_LEN: usize = 80;
-    let title_msg = if panic_msg.len() > PANIC_TITLE_MAX_LEN {
-        let cut = truncate_to_char_boundary(panic_msg, PANIC_TITLE_MAX_LEN);
-        format!("{}…", &panic_msg[..cut])
-    } else {
-        panic_msg.to_string()
-    };
-    let title = format!("Crash: {title_msg}");
-
-    // Truncate backtrace to keep URL under GitHub's 8191-byte limit.
-    const MAX_BT: usize = 1500;
-    let bt_body = if backtrace.len() > MAX_BT {
-        let cut = truncate_to_char_boundary(backtrace, MAX_BT);
-        format!(
-            "{}\n\n... truncated — see {} for full trace",
-            &backtrace[..cut],
-            crash_path.display()
-        )
-    } else {
-        backtrace.to_string()
-    };
-
-    let body = format!(
-        "## Environment\n\
-         - **Version:** {version}\n\
-         - **OS:** {os}/{arch}\n\n\
-         ## Panic\n\
-         ```\n{panic_msg}\n  at {location}\n```\n\n\
-         ## Backtrace\n\
-         ```\n{bt_body}\n```\n"
-    );
-
-    format!(
-        "https://github.com/IvanWng97/pixtuoid/issues/new?labels=crash-report&title={}&body={}",
-        percent_encode(&title),
-        percent_encode(&body),
-    )
-}
-
-fn percent_encode(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() * 2);
-    for b in s.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(b as char);
-            }
-            _ => {
-                use std::fmt::Write;
-                let _ = write!(out, "%{b:02X}");
-            }
-        }
-    }
-    out
-}
-
-fn truncate_to_char_boundary(s: &str, max_bytes: usize) -> usize {
-    if max_bytes >= s.len() {
-        return s.len();
-    }
-    let mut cut = max_bytes;
-    while cut > 0 && !s.is_char_boundary(cut) {
-        cut -= 1;
-    }
-    cut
-}
-
-fn crash_log_path() -> PathBuf {
-    // Empty XDG_STATE_HOME = unset (see io::nonempty_env) — left unfiltered,
-    // "" yields the root-absolute `/pixtuoid/...` (unwritable for non-root).
-    if let Some(state) = pixtuoid::install::io::nonempty_env("XDG_STATE_HOME") {
-        return PathBuf::from(format!("{state}/pixtuoid/crash.log"));
-    }
-    if let Some(home) = pixtuoid_core::platform::user_home_opt() {
-        return PathBuf::from(home)
-            .join(".cache")
-            .join("pixtuoid")
-            .join("crash.log");
-    }
-    std::env::temp_dir().join("pixtuoid-crash.log")
-}
-
-/// The tracing directive string to build the `EnvFilter` from: a NON-EMPTY
-/// `RUST_LOG` wins, otherwise the requested `log_level`. An empty `RUST_LOG`
-/// is treated as unset — left as-is it parses to zero directives (everything
-/// OFF) and silently defeats logging (#157). Pure (env read by the caller) so
-/// the normalization is unit-testable without mutating process env.
-fn filter_directives<'a>(rust_log: Option<&'a str>, log_level: &'a str) -> &'a str {
-    match rust_log {
-        Some(v) if !v.is_empty() => v,
-        _ => log_level,
-    }
-}
-
-fn log_file_path() -> PathBuf {
-    // Empty/whitespace-only value = unset (the value is the PATH, not an on/off
-    // toggle; an empty path would silently fail to open and log nothing) — the
-    // shared io::nonempty semantics, kept in lockstep with the
-    // `explicit_log_file` read in main() so "file mode enabled" and "which
-    // file" can't disagree on a whitespace value.
-    if let Some(p) = pixtuoid::install::io::nonempty_env("PIXTUOID_LOG") {
-        return PathBuf::from(p);
-    }
-    if let Some(state) = pixtuoid::install::io::nonempty_env("XDG_STATE_HOME") {
-        return PathBuf::from(format!("{state}/pixtuoid/log"));
-    }
-    if let Some(home) = pixtuoid_core::platform::user_home_opt() {
-        return PathBuf::from(home)
-            .join(".cache")
-            .join("pixtuoid")
-            .join("log");
-    }
-    // No home dir at all: mirror crash_log_path's temp fallback — the log
-    // must exist somewhere, it is the only runtime diagnostics channel (#157).
-    std::env::temp_dir().join("pixtuoid.log")
-}
-
-/// The append-only log was opt-in before #157; now that it is always on in
-/// TUI mode it needs a growth bound. One-deep rotation at startup (log →
-/// log.old) keeps the last two generations without a rotation dependency.
-/// Known accepted edge: with several pixtuoid instances sharing the default
-/// path, one instance's startup rotation renames the file out from under a
-/// running sibling (its fd follows; a later rotation strands it on an
-/// unlinked inode) — startup-only one-deep rotation is the deliberate
-/// no-dependency trade-off.
-const LOG_ROTATE_BYTES: u64 = 5 * 1024 * 1024;
-
-fn rotate_if_large(path: &Path) {
-    let too_large = std::fs::metadata(path).is_ok_and(|m| m.len() > LOG_ROTATE_BYTES);
-    if too_large {
-        // APPEND ".old" rather than with_extension: a custom $PIXTUOID_LOG
-        // like app.log must rotate to app.log.old (not clobber a sibling
-        // app.old), and a path already ending in .old must not rename onto
-        // itself (a no-op that would never rotate). OsString concatenation,
-        // not format!/display(): display() is lossy on non-UTF-8 paths, and
-        // a U+FFFD-mangled target would silently break the rotation.
-        let mut old = path.as_os_str().to_os_string();
-        old.push(".old");
-        let _ = std::fs::rename(path, &old);
-    }
-}
-
-/// Adapter that gives `tracing-subscriber` a `Write`-able file behind a Mutex.
-struct MutexFileWriter(Arc<Mutex<std::fs::File>>);
-
-impl std::io::Write for MutexFileWriter {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.0
-            .lock()
-            .map_err(|_| std::io::Error::other("poisoned"))?
-            .write(buf)
-    }
-    fn flush(&mut self) -> std::io::Result<()> {
-        self.0
-            .lock()
-            .map_err(|_| std::io::Error::other("poisoned"))?
-            .flush()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::path::Path;
-
-    use super::*;
-
-    #[test]
-    fn outcome_envelope_is_the_id_outcome_raycast_contract() {
-        // Pins the exact `{id, outcome}` JSON rows `connect`/`disconnect`/
-        // `sources set --json` emit — the batch envelope the Raycast extension
-        // parses. A key rename must break THIS test, not the consumer. The
-        // outcome TOKEN set itself ("connected"/"disconnected"/"no_op"/
-        // "failed: <msg>") is pinned by sources.rs's
-        // `change_outcome_wire_tokens_are_stable`, and every emission site
-        // routes through `ChangeOutcome::as_wire`, so the failed row below
-        // exercises the same form the CLI ships.
-        let rows = outcome_rows_json(&[
-            (
-                "codex".to_string(),
-                sources::ChangeOutcome::Connected.as_wire(),
-            ),
-            (
-                "cursor".to_string(),
-                sources::ChangeOutcome::Failed("boom".into()).as_wire(),
-            ),
-        ]);
-        assert_eq!(
-            serde_json::to_string(&rows).unwrap(),
-            r#"[{"id":"codex","outcome":"connected"},{"id":"cursor","outcome":"failed: boom"}]"#
-        );
-    }
-
-    #[test]
-    fn empty_rust_log_falls_back_to_requested_level() {
-        // The bug: an empty-but-set RUST_LOG must be treated as unset, not as
-        // "everything off". (#157 — the make_filter path lacked this guard.)
-        assert_eq!(filter_directives(Some(""), "debug"), "debug");
-        assert_eq!(filter_directives(None, "debug"), "debug");
-        // A non-empty RUST_LOG still wins, simple level or full directive.
-        assert_eq!(filter_directives(Some("trace"), "warn"), "trace");
-        assert_eq!(
-            filter_directives(Some("info,pixtuoid=debug"), "warn"),
-            "info,pixtuoid=debug"
-        );
-    }
-
-    #[test]
-    fn nonempty_treats_empty_and_whitespace_as_unset() {
-        // The shared io::nonempty filter backs XDG_STATE_HOME here: an
-        // unfiltered empty value would route the crash log / runtime log to
-        // the root-absolute `/pixtuoid/...`.
-        use pixtuoid::install::io::nonempty;
-        assert_eq!(nonempty(None), None);
-        assert_eq!(nonempty(Some(String::new())), None);
-        assert_eq!(nonempty(Some("   ".into())), None);
-        assert_eq!(nonempty(Some("/state".into())), Some("/state".to_string()));
-    }
-
-    #[test]
-    fn rotate_if_large_rotates_once_past_the_cap() {
-        let dir = tempfile::tempdir().unwrap();
-        let log = dir.path().join("log");
-
-        // Small file: untouched.
-        std::fs::write(&log, b"recent").unwrap();
-        rotate_if_large(&log);
-        assert!(log.exists(), "under-cap log must not rotate");
-
-        // Over the cap (sparse via set_len — no real 5MB write).
-        let f = std::fs::OpenOptions::new().write(true).open(&log).unwrap();
-        f.set_len(LOG_ROTATE_BYTES + 1).unwrap();
-        drop(f);
-        rotate_if_large(&log);
-        assert!(!log.exists(), "over-cap log rotates away");
-        assert!(
-            dir.path().join("log.old").exists(),
-            "one prior generation is kept"
-        );
-    }
-
-    #[test]
-    fn rotate_if_large_appends_old_to_dotted_custom_paths() {
-        // A custom $PIXTUOID_LOG like app.log must rotate to app.log.old —
-        // replacing the extension would clobber an unrelated app.old, and a
-        // *.old path would rename onto itself and never rotate.
-        let dir = tempfile::tempdir().unwrap();
-        let log = dir.path().join("app.log");
-        let f = std::fs::File::create(&log).unwrap();
-        f.set_len(LOG_ROTATE_BYTES + 1).unwrap();
-        drop(f);
-        rotate_if_large(&log);
-        assert!(!log.exists());
-        assert!(
-            dir.path().join("app.log.old").exists(),
-            ".old is appended, not substituted"
-        );
-    }
-
-    #[test]
-    fn truncate_ascii() {
-        assert_eq!(truncate_to_char_boundary("hello world", 5), 5);
-        assert_eq!(
-            &"hello world"[..truncate_to_char_boundary("hello world", 5)],
-            "hello"
-        );
-    }
-
-    #[test]
-    fn truncate_multibyte_boundary() {
-        // "café" is 5 bytes: c(1) a(1) f(1) é(2)
-        let s = "café";
-        assert_eq!(s.len(), 5);
-        // Cutting at byte 4 lands inside the é (2-byte char starting at 3)
-        let cut = truncate_to_char_boundary(s, 4);
-        assert_eq!(cut, 3);
-        assert_eq!(&s[..cut], "caf");
-    }
-
-    #[test]
-    fn truncate_beyond_length() {
-        assert_eq!(truncate_to_char_boundary("short", 100), 5);
-    }
-
-    #[test]
-    fn percent_encode_ascii() {
-        assert_eq!(percent_encode("hello"), "hello");
-        assert_eq!(percent_encode("a b"), "a%20b");
-    }
-
-    #[test]
-    fn percent_encode_special_chars() {
-        assert_eq!(percent_encode("#&="), "%23%26%3D");
-        assert_eq!(percent_encode("a\nb"), "a%0Ab");
-    }
-
-    #[test]
-    fn build_issue_url_starts_with_github() {
-        let url = build_issue_url(
-            "0.4.0",
-            "test panic",
-            "file.rs:1:1",
-            "bt",
-            Path::new("/tmp/x"),
-        );
-        assert!(url.starts_with("https://github.com/IvanWng97/pixtuoid/issues/new?"));
-        assert!(url.contains("labels=crash-report"));
-        assert!(url.contains("title="));
-        assert!(url.contains("body="));
-    }
-
-    #[test]
-    fn build_issue_url_truncates_long_backtrace() {
-        let long_bt = "x".repeat(2000);
-        let url = build_issue_url("0.4.0", "msg", "loc", &long_bt, Path::new("/tmp/x"));
-        // URL should stay under GitHub's 8191 byte limit
-        assert!(url.len() < 8191);
     }
 }

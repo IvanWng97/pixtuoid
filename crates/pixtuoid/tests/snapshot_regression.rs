@@ -19,7 +19,7 @@ use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
 use pixtuoid::tui::renderer::draw_scene;
-use pixtuoid_core::state::ActivityState;
+use pixtuoid_core::state::{ActivityState, ToolKind};
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex, SceneState};
 use pixtuoid_scene::embedded_pack::load_sprite_pack;
 use ratatui::backend::TestBackend;
@@ -34,6 +34,7 @@ fn fixture_scene(now: SystemTime) -> SceneState {
             ActivityState::Active {
                 tool_use_id: Some("tu_a".into()),
                 detail: Some("Write".into()),
+                kind: ToolKind::Edit,
             },
         ),
         ("agent-b", ActivityState::Idle),
@@ -151,8 +152,8 @@ fn render_produces_distinct_wall_band_and_floor_regions() {
     // the buffer should have distinctly different average colors. Avoids
     // a regression where the wall band paint pass is skipped, leaving the
     // wall band painted in floor colors (or vice versa).
-    let w = buf.width as usize;
-    let h = buf.height as usize;
+    let w = buf.width() as usize;
+    let h = buf.height() as usize;
     let wall_h = h / 4;
     let floor_y0 = h / 2;
 

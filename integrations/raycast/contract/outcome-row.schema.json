@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "OutcomeRow",
+  "description": "One row of the `--json` batch envelope `pixtuoid connect|disconnect|sources set`\nprint — the SECOND stable wire contract the Raycast extension parses (alongside\n`SourceStatus`), with the same treatment: a committed JSON Schema\n(`integrations/raycast/contract/outcome-row.schema.json`, golden-tested below)\nthe extension's TS type is generated from (`gen:contract`). The wire shape is\n`{id, outcome, message?}` — a bare machine token plus an optional human-detail\nfield, split from the older folded `failed: <msg>` string BEFORE the\nextension's store publication (the in-repo extension ships atomically with\nthe binary, so no installed consumer parsed the old form). Once the extension\nis store-published, changing this shape needs a version handshake — see the\nsharp edge in `crates/pixtuoid/CLAUDE.md`. Pinned by\n`outcome_row_json_shape_is_the_raycast_contract` + the envelope test in\n`sources_cli.rs`.",
+  "type": "object",
+  "properties": {
+    "id": {
+      "description": "The registry source id the outcome applies to (e.g. `codex`).",
+      "type": "string"
+    },
+    "message": {
+      "description": "Human-readable detail for the row — present exactly when the outcome\ncarries any (`failed`), and OMITTED (not `null`) otherwise, so a\nsuccess row stays the minimal `{id, outcome}`.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "outcome": {
+      "description": "The BARE outcome token from `ChangeOutcome::wire_token`: `connected` |\n`disconnected` | `no_op` | `failed`. Machine-matchable (compare with\n`===`), never carrying human text — the detail rides in `message`.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "outcome"
+  ]
+}
