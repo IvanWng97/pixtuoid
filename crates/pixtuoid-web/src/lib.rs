@@ -1,10 +1,11 @@
 //! `pixtuoid-web` — the WebAssembly canvas painter over the `pixtuoid-scene`
 //! engine. The THIRD painter (alongside the binary's `tui` + `floating`): it
-//! runs the real render+sim engine in the browser and blits
-//! `render_to_rgb_buffer` into a `<canvas>` — the live office hero, NOT a gif.
+//! runs the real render+sim engine in the browser and blits each frame of the
+//! shared `pixtuoid_scene::floor::render_floor` seam (#423) into a `<canvas>`
+//! — the live office hero, NOT a gif.
 //!
-//! It ports `pixtuoid::floating::offscreen::OfficeRenderer` (already
-//! winit/softbuffer-free — "scene → RgbBuffer"), minus the window: an [`Office`]
+//! A sibling thin caller of the same seam as the binary's painters (no window,
+//! no terminal): an [`Office`]
 //! handle owns everything cross-frame so motion/pose stay continuous, and
 //! `step(now_ms, w, h)` renders one frame into an RGBA staging buffer JS reads
 //! zero-copy via [`Office::frame_ptr`]/[`Office::frame_len`] → `ImageData`.

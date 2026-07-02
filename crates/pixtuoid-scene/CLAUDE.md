@@ -51,7 +51,8 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
 │                   per now via wander.last_advanced_at; owned as HashMap<AgentId, MotionState> on FloorCtx.motion),
 │                   tests.rs (#[cfg(test)] mod tests)
 ├── pathfind.rs     Router trait + AStarRouter with selective cache invalidation
-├── floor.rs        FloorCtx (per-floor render state), FloorTransition, LightingState, build_floor_scene
+├── floor.rs        FloorCtx (per-floor render state), render_floor (THE shared headless frame seam, #423),
+│                   CoffeeState (per-office cup/steam bookkeeping), FloorTransition, LightingState, build_floor_scene
 │                   (projects one floor's agents into a self-contained uniform scene; the desk_index
 │                   remap stays typed — it re-wraps as a GlobalDeskIndex valid FOR THAT smaller scene,
 │                   so single_floor_local identity reads stay honest; see its doc comment + core's

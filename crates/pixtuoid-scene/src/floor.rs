@@ -2,9 +2,11 @@
 //!
 //! When more agents are active than `max_desks` can seat on a single floor,
 //! the scene is split into multiple floors. This module provides the pure
-//! arithmetic (which floor does desk N belong to? how many floors exist?)
-//! and the per-floor rendering context (`FloorCtx`) so each floor owns its
-//! own router, overlay, pose history, and frame cache.
+//! arithmetic (which floor does desk N belong to? how many floors exist?),
+//! the per-floor rendering context (`FloorCtx`) so each floor owns its own
+//! router, overlay, pose history, and frame cache — and, since #423, the
+//! shared headless frame seam ([`render_floor`]) plus the per-office
+//! [`CoffeeState`] bookkeeping every painter routes through.
 
 use std::collections::{HashMap, HashSet};
 use std::time::SystemTime;
@@ -221,6 +223,14 @@ impl CoffeeState {
 /// Returns the computed layout (callers cache it for label overlays /
 /// hit-testing), or `None` when the size can't lay out — the buffer is left
 /// cleared and nothing panics.
+///
+/// Per-agent EVICTION deliberately stays CALLER-side — `FloorCtx::evict_missing`
+/// and `CoffeeState::evict_missing`, run against the FULL live scene: the TUI
+/// transition path hands this fn PROJECTED single-floor scenes
+/// (`project_floor_scene`), so evicting in here would wipe every OTHER
+/// floor's motion/cache/coffee on each slide frame. Don't "finish the seam"
+/// by moving eviction inside — it would pass every single-floor test and
+/// break multi-floor.
 #[allow(clippy::too_many_arguments)] // the render inputs are genuinely flat (same shape as the pass itself)
 pub fn render_floor(
     fctx: &mut FloorCtx,

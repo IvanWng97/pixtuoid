@@ -442,8 +442,9 @@ fn invalidate_routes_clears_every_floor_router_cache() {
     );
 }
 
-// `render_transition_floor`'s `compute_with_seed(...) else { return Vec::new() }`
-// guard — the transition twin of the normal-path Ok(None) branch. A 30-col
+// The transition path's no-layout guard (`floor::render_floor`'s
+// `compute_with_seed(...)?`) — the transition twin of the normal-path
+// Ok(None) branch. A 30-col
 // terminal passes `render_transition`'s 20×12 scene gate (scene_rect 30×39) but
 // buf_w=30 < the office MIN_W=34, so compute_with_seed returns None and the
 // floor paints nothing (no render_to_rgb_buffer, no coffee carriers). Mutating
@@ -487,7 +488,7 @@ fn transition_at_narrow_terminal_paints_no_agents_no_panic() {
     );
 
     // The from-floor buffer was ensure_size'd to the theme's bg-fallback, then
-    // render_transition_floor returned early (no layout) ⇒ it stays uniform.
+    // render_floor returned early (no layout) ⇒ it stays uniform.
     let bg = normal_theme().surface.bg_fallback;
     let from = r.floor_buf(0).expect("floor-0 buffer allocated");
     let non_bg = (0..from.height)
@@ -867,11 +868,12 @@ fn coffee_state_evicted_when_agent_leaves_scene() {
 
 #[test]
 fn coffee_persists_through_floor_transition() {
-    // Regression: render_transition_floor discarded its render_to_rgb_buffer
-    // result (`let _ =`), so a coffee carrier first DETECTED during a floor
-    // slide was never persisted into coffee_holders → the cup never landed.
-    // The normal path persists via DrawCtx.new_coffee_carriers; the transition
-    // path now threads the same Vec back.
+    // Regression: the old render_transition_floor discarded its
+    // render_to_rgb_buffer result (`let _ =`), so a coffee carrier first
+    // DETECTED during a floor slide was never persisted → the cup never
+    // landed. The transition path now records carriers inside the shared
+    // `floor::render_floor` seam (the normal path persists via
+    // DrawCtx.new_coffee_carriers).
     let p = pack();
     let step = Duration::from_millis(500);
     let cap = 16;

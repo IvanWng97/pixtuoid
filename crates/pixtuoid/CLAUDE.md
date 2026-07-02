@@ -187,8 +187,8 @@ src/
 │                       lives here: mod.rs (run: reuses the SAME pipeline as the TUI — build_source_set [the
 │                       ONE source-construction site] + reducer_task, both relaxed to pub(crate) — spawned on
 │                       a bg runtime, NEVER block_on [winit owns the main thread]; an EventLoopProxy bridges
-│                       scene changes → redraw), offscreen.rs (OfficeRenderer — the headless render seam over
-│                       render_to_rgb_buffer; moved here from tui/ as it's floating-only; the testable unit;
+│                       scene changes → redraw), offscreen.rs (OfficeRenderer — a thin caller of the shared
+│                       pixtuoid_scene::floor::render_floor seam (#423); moved here from tui/ as it's floating-only; the testable unit;
 │                       also OfficeRenderer::labels + paint_labels_into_surface — agent name badges from the
 │                       shared pixtuoid_scene::overlay model, 8px pixtuoid_scene::font glyphs blitted POST-upscale with a shadow),
 │                       window.rs (FloatingApp ApplicationHandler: renders the office at a DOWNSCALED buffer
