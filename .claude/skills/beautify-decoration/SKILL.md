@@ -112,7 +112,7 @@ When a sprite **changes size**:
 
 1. Update the walkable-mask footprint in `pixtuoid_scene::layout::build_walkable_mask` — there's a per-WaypointKind match arm with hardcoded `(w, h)` tuples.
 2. If the obstacle is a non-waypoint (plant, wall decor, pod decor), update the corresponding mark_blocked call too.
-3. Run `cargo test -p pixtuoid-core` — the `walkable_mask_is_fully_connected_across_buffer_sizes` test catches mask/sprite mismatches by trying multiple buffer sizes and asserting BFS reach from the door.
+3. Run `cargo test -p pixtuoid-scene` — the `walkable_mask_is_fully_connected_across_buffer_sizes` test (lives in `layout/tests.rs`, moved with the layout cluster) catches mask/sprite mismatches by trying multiple buffer sizes and asserting BFS reach from the door.
 4. If the connectivity test fails on the smallest buffer (96×70), the sprite is too big for that pantry. Add a `_small` variant + conditional pick (see `pantry_counter_size` in `SceneLayout` for the pattern).
 5. Update animation list in `crates/pixtuoid-scene/sprites/default/pack.toml` and `embedded_pack.rs` to include both `foo.sprite` and `foo_small.sprite` if you added a variant.
 
