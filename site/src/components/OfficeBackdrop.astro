@@ -59,12 +59,6 @@ import { asset } from '../consts';
     opacity: 0;
     transition: opacity 1.2s ease;
   }
-  /* Floor swap: a fast dip so the variant change reads as a cut with a
-     blink, not a hard pop. */
-  .backdrop.is-swapping .backdrop__live {
-    opacity: 0;
-    transition: opacity 0.18s ease;
-  }
   /* Legibility floor for everything above: a global dim + gentle verticals.
      Sections add their own glass; this is the base wash. */
   .backdrop__wash {
@@ -130,6 +124,13 @@ import { asset } from '../consts';
     let live = false;
     let floor = 6;
     let swapTimer = 0;
+    // ONE persistent Office per floor, created lazily on first visit. A floor
+    // swap is a reference switch between live frames — no teardown, no dark
+    // dip, no empty-office restart (the old dip-and-rebuild pulsed the whole
+    // background on every section crossing: the "flicker"). Revisiting a
+    // floor resumes its timeline (the wasm module's catch-up re-anchors
+    // long gaps). ~6 cached offices ≈ a few MB of wasm memory, bounded.
+    const officeByFloor = {};
 
     function sizeBuffer() {
       const w = window.innerWidth;
@@ -177,19 +178,24 @@ import { asset } from '../consts';
       raf = 0;
     }
 
+    function officeFor(f) {
+      let o = officeByFloor[f];
+      if (!o) {
+        o = new OfficeCtor(FLOOR_SEEDS[f] != null ? FLOOR_SEEDS[f] : 0);
+        officeByFloor[f] = o;
+      }
+      return o;
+    }
+
     function setFloor(next) {
       if (next === floor || !OfficeCtor) return;
       floor = next;
-      // Dip → rebuild on the new floor's seed → the next painted frame lifts
-      // the dip (fresh scene, ~200ms blink; motion state is per-floor anyway,
-      // exactly like the app's floor switch).
-      wrap.classList.add('is-swapping');
+      // Debounced: a momentum scroll across three floors lands ONE switch,
+      // and boundary jitter around a section edge can't thrash.
       clearTimeout(swapTimer);
       swapTimer = setTimeout(function () {
-        if (office && office.free) office.free();
-        office = new OfficeCtor(FLOOR_SEEDS[next] ?? 0);
-        wrap.classList.remove('is-swapping');
-      }, 180);
+        office = officeFor(floor);
+      }, 220);
     }
 
     import(wasmJsUrl)
@@ -197,7 +203,7 @@ import { asset } from '../consts';
         return mod.default().then(function (w) {
           wasm = w;
           OfficeCtor = mod.Office;
-          office = new OfficeCtor(FLOOR_SEEDS[floor]);
+          office = officeFor(floor);
           ctx2d = canvas.getContext('2d');
           sizeBuffer();
           start();
