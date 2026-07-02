@@ -112,6 +112,66 @@ fn spell(beats: &mut Vec<Beat>, i: usize, at_ms: u64, n: u64, tools: &[&str]) {
     }
 }
 
+/// How long a visitor hire works before heading out (`SessionEnd`; the
+/// reducer's exit grace then walks them to the elevator).
+pub(crate) const HIRE_STAY_MS: u64 = 70_000;
+
+/// One visitor-hired coworker's lifecycle (#434), as offsets from the hire
+/// instant: walk in now, three short work spells, leave at
+/// [`HIRE_STAY_MS`]. Reuses the cast's burst shape — the SAME
+/// `BURST_MS`/`BURST_SPACING_MS` consts, so the 300ms idle gap stays under
+/// the reducer's Active debounce and the `burst_gap_stays_under_the_reducer_
+/// debounce` pin covers hires too (two copies of those literals would be the
+/// latent-drift class the workspace magic-number rule names). The cwd is the
+/// hire's own ("/work/yours") so Team Palette gives hires a distinct outfit
+/// family.
+pub(crate) fn hire_beats(id: AgentId, session: String) -> Vec<(u64, AgentEvent)> {
+    let mut out: Vec<(u64, AgentEvent)> = Vec::new();
+    out.push((
+        0,
+        AgentEvent::SessionStart {
+            agent_id: id,
+            source: claude_code::SOURCE_NAME.to_string(),
+            session_id: session,
+            cwd: PathBuf::from("/work/yours"),
+            parent_id: None,
+        },
+    ));
+    // Three short work spells across the stay, spaced so the hire also
+    // idles/wanders like everyone else.
+    for (k, start) in [8_000u64, 28_000, 50_000].into_iter().enumerate() {
+        for b in 0..4u64 {
+            let at = start + b * BURST_SPACING_MS;
+            let tuid = format!("hire-{k}-{b}");
+            out.push((
+                at,
+                AgentEvent::ActivityStart {
+                    agent_id: id,
+                    tool_use_id: Some(tuid.clone()),
+                    detail: Some(ToolDetail::Generic {
+                        display: "Edit".to_string(),
+                    }),
+                },
+            ));
+            out.push((
+                at + BURST_MS,
+                AgentEvent::ActivityEnd {
+                    agent_id: id,
+                    tool_use_id: Some(tuid),
+                },
+            ));
+        }
+    }
+    out.push((
+        HIRE_STAY_MS,
+        AgentEvent::SessionEnd {
+            agent_id: id,
+            as_child: false,
+        },
+    ));
+    out
+}
+
 /// One scripted presence beat for the OpenClaw gateway mascot. Presence is
 /// deliberately NOT a [`Beat`]/`AgentEvent` (invariant #2: the one event
 /// channel is `AgentId`-pure) — these ride their own lane and land through

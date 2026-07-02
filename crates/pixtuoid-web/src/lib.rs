@@ -25,9 +25,9 @@ use pixtuoid_core::source::openclaw;
 use pixtuoid_core::sprite::{format::Pack, Rgb, RgbBuffer};
 use pixtuoid_core::state::reducer::Reducer;
 use pixtuoid_core::state::SceneState;
-use pixtuoid_core::{AgentEvent, AgentId, ToolDetail, Transport};
+use pixtuoid_core::{AgentEvent, AgentId, Transport};
 
-use crate::script::{hero_script, lobster_beats, Beat, PresenceBeat, LOOP_MS};
+use crate::script::{hero_script, hire_beats, lobster_beats, Beat, PresenceBeat, LOOP_MS};
 
 use pixtuoid_scene::chitchat::{ActiveChitchat, VenueKey};
 use pixtuoid_scene::embedded_pack::load_sprite_pack;
@@ -165,23 +165,29 @@ impl Office {
         let Some(base) = self.last_now else {
             return;
         };
-        self.hire_ids
-            .retain(|id| self.scene.agents.contains_key(id));
-        // Count queued-but-not-yet-started hires too (a click burst between
-        // frames must not overshoot the cap once their SessionStarts land).
-        let queued = self
-            .pending
-            .iter()
-            .filter(|(_, e)| matches!(e, AgentEvent::SessionStart { .. }))
-            .count();
-        if self.hire_ids.len() + queued >= Self::MAX_LIVE_HIRES {
+        // `hire_ids` is THE registry the cap counts — each admitted hire is in
+        // it exactly once. Prune only ids that are neither LIVE (in the scene)
+        // nor still QUEUED (SessionStart pending): pruning queued ids would
+        // permanently lose them, and a click one frame after a burst would
+        // overshoot the cap (the review-caught under-count, PR #436).
+        self.hire_ids.retain(|id| {
+            self.scene.agents.contains_key(id)
+                || self.pending.iter().any(
+                    |(_, e)| matches!(e, AgentEvent::SessionStart { agent_id, .. } if agent_id == id),
+                )
+        });
+        if self.hire_ids.len() >= Self::MAX_LIVE_HIRES {
             return;
         }
         self.hire_seq += 1;
         let session = format!("hire-{}", self.hire_seq);
         let id = AgentId::from_parts(pixtuoid_core::source::claude_code::SOURCE_NAME, &session);
         self.hire_ids.push(id);
-        self.queue_hire_beats(base, id, session);
+        for (at_ms, event) in hire_beats(id, session) {
+            self.pending
+                .push((base + Duration::from_millis(at_ms), event));
+        }
+        self.pending.sort_by_key(|(at, _)| *at);
     }
 }
 
@@ -261,64 +267,6 @@ impl Office {
     /// Cap on concurrently-alive visitor hires: enough that repeat clicks
     /// visibly stack, few enough that click-spam can't crowd out the cast.
     const MAX_LIVE_HIRES: usize = 3;
-    /// How long a hire works before heading out (SessionEnd; the reducer's
-    /// exit grace then walks them to the elevator).
-    const HIRE_STAY_MS: u64 = 70_000;
-
-    /// One scripted lifecycle for a visitor-hired agent, queued as ABSOLUTE
-    /// times from `base`: walk in now, run a few tool bursts, leave. The
-    /// events reuse the hero cast's burst shape so the hire reads as a real
-    /// coworker, and the cwd is its own ("/work/yours") so Team Palette gives
-    /// hires a distinct outfit family.
-    fn queue_hire_beats(&mut self, base: SystemTime, id: AgentId, session: String) {
-        let mut push = |at_ms: u64, event: AgentEvent| {
-            self.pending
-                .push((base + Duration::from_millis(at_ms), event));
-        };
-        push(
-            0,
-            AgentEvent::SessionStart {
-                agent_id: id,
-                source: pixtuoid_core::source::claude_code::SOURCE_NAME.to_string(),
-                session_id: session,
-                cwd: std::path::PathBuf::from("/work/yours"),
-                parent_id: None,
-            },
-        );
-        // Three short work spells across the stay, spaced so the hire also
-        // idles/wanders like everyone else.
-        for (k, start) in [8_000u64, 28_000, 50_000].into_iter().enumerate() {
-            for b in 0..4u64 {
-                let at = start + b * 1_200;
-                let tuid = format!("hire-{k}-{b}");
-                push(
-                    at,
-                    AgentEvent::ActivityStart {
-                        agent_id: id,
-                        tool_use_id: Some(tuid.clone()),
-                        detail: Some(ToolDetail::Generic {
-                            display: "Edit".to_string(),
-                        }),
-                    },
-                );
-                push(
-                    at + 900,
-                    AgentEvent::ActivityEnd {
-                        agent_id: id,
-                        tool_use_id: Some(tuid),
-                    },
-                );
-            }
-        }
-        push(
-            Self::HIRE_STAY_MS,
-            AgentEvent::SessionEnd {
-                agent_id: id,
-                as_child: false,
-            },
-        );
-        self.pending.sort_by_key(|(at, _)| *at);
-    }
 
     fn render(&mut self, now: SystemTime, buf_w: u16, buf_h: u16) {
         // The shared scene seam (#423) owns the whole frame: buffer sizing,
@@ -561,16 +509,27 @@ mod tests {
             o.hire();
         }
         o.step(T0_MS + 32_000.0, 160, 96);
-        let hires = o
-            .scene
-            .agents
-            .keys()
-            .filter(|id| !(0..8).map(cast_id).any(|c| c == **id))
-            .count();
+        let count_hires = |o: &Office| {
+            o.scene
+                .agents
+                .keys()
+                .filter(|id| !(0..8).map(cast_id).any(|c| c == **id))
+                .count()
+        };
         assert_eq!(
-            hires,
+            count_hires(&o),
             Office::MAX_LIVE_HIRES,
             "click spam caps at the limit"
+        );
+        // The review-caught under-count: one MORE click after the burst's
+        // SessionStarts have drained must still be refused — the registry
+        // counts live hires, not just queued ones.
+        o.hire();
+        o.step(T0_MS + 33_000.0, 160, 96);
+        assert_eq!(
+            count_hires(&o),
+            Office::MAX_LIVE_HIRES,
+            "a post-burst click must not overshoot the cap"
         );
     }
 }
