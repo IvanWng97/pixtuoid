@@ -74,7 +74,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           prefix-key: v1-rust
+      - uses: extractions/setup-just@v4
       - run: cargo build -p pixtuoid-web --target wasm32-unknown-unknown --release
+      # The committed artifact's size cap (deterministic — a stat on the
+      # checked-in blob, no toolchain drift; the byte-exact rebuild compare
+      # stays deliberately un-CI'd).
+      - run: just gen-wasm-check
 
   deny:
     name: cargo-deny

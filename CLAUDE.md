@@ -28,7 +28,7 @@ section in each nested file (indexed below) explains why.
 
 Terminal-native, multi-agent pixel-art visualizer for AI coding agents. Each
 running CC (Claude Code) session shows up as an animated half-block sprite in
-an ASCII office. Rust workspace of four crates. User-facing overview:
+an ASCII office. Rust workspace of five crates. User-facing overview:
 [`README.md`](README.md). (Design specs live locally under
 `docs/superpowers/`, unversioned.)
 

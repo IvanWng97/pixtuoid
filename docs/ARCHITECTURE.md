@@ -9,7 +9,7 @@ How a running coding-agent session becomes a moving sprite in the office.
 
 ## The shape of it
 
-pixtuoid is a Cargo workspace of **four crates** wired as a strict
+pixtuoid is a Cargo workspace of **five crates** wired as a strict
 **producer → reducer → renderer** pipeline:
 
 - **`pixtuoid-core`** — the headless library. It has **no terminal dependencies**
@@ -22,17 +22,24 @@ pixtuoid is a Cargo workspace of **four crates** wired as a strict
   terminal- AND window-free **by crate boundary** (no `ratatui`/`crossterm`/
   `winit`/`softbuffer` in its `Cargo.toml` — compiler-enforced, not just a lint).
   Depends on `pixtuoid-core`.
-- **`pixtuoid`** — the binary: `clap` CLI, `tokio` runtime wiring, and the two
-  thin painters over the engine — the TUI renderer (`ratatui` + `crossterm`) and
-  the `floating` desktop window (`winit` + `softbuffer`). Depends on
+- **`pixtuoid`** — the binary: `clap` CLI, `tokio` runtime wiring, and two of the
+  three thin painters over the engine — the TUI renderer (`ratatui` + `crossterm`)
+  and the `floating` desktop window (`winit` + `softbuffer`). Depends on
   `pixtuoid-scene`.
+- **`pixtuoid-web`** — the third painter: a publish-excluded `wasm-bindgen` crate
+  that renders the same engine into a browser `<canvas>` (the site's live-office
+  hero). Depends on `pixtuoid-scene` with default features off — core's `native`
+  feature (the async source runtime: `tokio`/`notify`, the watchers and probes)
+  is disabled, leaving the pure decode/reducer/layout core that compiles to
+  `wasm32-unknown-unknown`. A scripted event loop drives the real reducer; the
+  built artifact is committed under `site/public/wasm/` (`just gen-wasm`).
 - **`pixtuoid-hook`** — a tiny shim Claude Code invokes per hook event. It depends
   on no other crate; it reads stdin JSON, forwards it over a local IPC
   endpoint — a Unix socket on macOS/Linux, a named pipe on Windows (selected in
   `pixtuoid-hook/src/transport.rs`) — and **always exits 0** so it can never
   block your agent.
 
-Dependency direction is one-way: `pixtuoid-core ← pixtuoid-scene ← pixtuoid`. The
+Dependency direction is one-way: `pixtuoid-core ← pixtuoid-scene ← {pixtuoid, pixtuoid-web}`. The
 `Renderer` trait is the inversion point that keeps the core terminal-free (so the
 same pixel pass can drive a PNG/GIF export, not just the terminal).
 

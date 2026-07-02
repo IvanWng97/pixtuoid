@@ -42,6 +42,9 @@ component_management:
     - component_id: hook
       name: pixtuoid-hook
       paths: ["crates/pixtuoid-hook/**"]
+    - component_id: web
+      name: pixtuoid-web
+      paths: ["crates/pixtuoid-web/**"]
 
 comment:
   layout: "condensed_header, diff, components, files"

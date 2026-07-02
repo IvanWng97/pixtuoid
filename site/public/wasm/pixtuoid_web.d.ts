@@ -31,8 +31,15 @@ export class Office {
      */
     constructor(seed: number);
     /**
-     * Advance to `now_ms` (JS `performance.now()`/`Date.now()`) and render at
-     * `w`×`h` pixels into the RGBA staging buffer.
+     * Advance to `now_ms` and render at `w`×`h` pixels into the RGBA staging
+     * buffer.
+     *
+     * CONTRACT: `now_ms` must be UNIX-epoch milliseconds — `Date.now()`, NOT
+     * `performance.now()` and NOT a `requestAnimationFrame` timestamp (both
+     * are ms-since-page-load: motion still animates, but the office's
+     * day/night cycle and wall clock decode `now` as calendar time, so a
+     * page-relative clock pins the scene at 1970 — permanently 00:00,
+     * defeating the browser-timezone support entirely).
      */
     step(now_ms: number, w: number, h: number): void;
 }

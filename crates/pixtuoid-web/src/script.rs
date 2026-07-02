@@ -50,7 +50,7 @@ const CAST: &[(&str, &str, &str)] = &[
     (claude_code::SOURCE_NAME, "hero-cc-infra", "/work/infra"),
 ];
 
-fn cast_id(i: usize) -> AgentId {
+pub(crate) fn cast_id(i: usize) -> AgentId {
     let (source, key, _) = CAST[i];
     AgentId::from_parts(source, key)
 }
@@ -66,9 +66,17 @@ fn session_start(i: usize) -> AgentEvent {
     }
 }
 
+/// One tool burst's start→end span.
+const BURST_MS: u64 = 900;
+/// Start-to-start spacing of chained bursts inside a spell. The
+/// `BURST_SPACING_MS - BURST_MS` idle gap (300ms) must stay UNDER the
+/// reducer's `ACTIVE_GRACE_WINDOW` (1.5s) or the whole cast visibly flickers
+/// Active↔Idle — the pairing is pinned by
+/// `burst_gap_stays_under_the_reducer_debounce` below, so a core debounce
+/// change fails a test instead of silently degrading the hero.
+const BURST_SPACING_MS: u64 = 1200;
+
 fn tool(i: usize, at_ms: u64, tuid: &str, display: &str) -> [Beat; 2] {
-    // A burst is start→end 900ms apart; chaining bursts <1.5s apart keeps the
-    // slot Active through the reducer's ACTIVE_GRACE_WINDOW debounce.
     [
         Beat {
             at_ms,
@@ -82,7 +90,7 @@ fn tool(i: usize, at_ms: u64, tuid: &str, display: &str) -> [Beat; 2] {
             },
         },
         Beat {
-            at_ms: at_ms + 900,
+            at_ms: at_ms + BURST_MS,
             transport: Transport::Hook,
             event: AgentEvent::ActivityEnd {
                 agent_id: cast_id(i),
@@ -99,7 +107,7 @@ fn spell(beats: &mut Vec<Beat>, i: usize, at_ms: u64, n: u64, tools: &[&str]) {
     for k in 0..n {
         let display = tools[(k as usize) % tools.len()];
         let t = format!("s{at_ms}-{k}");
-        beats.extend(tool(i, at_ms + k * 1200, &t, display));
+        beats.extend(tool(i, at_ms + k * BURST_SPACING_MS, &t, display));
     }
 }
 
@@ -266,6 +274,20 @@ mod tests {
         let s = hero_script();
         assert!(s.windows(2).all(|w| w[0].at_ms <= w[1].at_ms));
         assert!(s.last().unwrap().at_ms < LOOP_MS);
+    }
+
+    #[test]
+    fn burst_gap_stays_under_the_reducer_debounce() {
+        // The cross-crate pairing this script's whole "continuously Active"
+        // illusion rests on: the idle gap between chained bursts must sit
+        // inside the reducer's Active→Idle debounce, or every spell flickers.
+        assert!(
+            std::time::Duration::from_millis(BURST_SPACING_MS - BURST_MS)
+                < pixtuoid_core::state::reducer::ACTIVE_GRACE_WINDOW,
+            "burst gap ({}ms) must stay under ACTIVE_GRACE_WINDOW ({:?})",
+            BURST_SPACING_MS - BURST_MS,
+            pixtuoid_core::state::reducer::ACTIVE_GRACE_WINDOW
+        );
     }
 
     #[test]

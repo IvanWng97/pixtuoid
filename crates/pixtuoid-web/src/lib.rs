@@ -93,13 +93,35 @@ impl Office {
         })
     }
 
-    /// Advance to `now_ms` (JS `performance.now()`/`Date.now()`) and render at
-    /// `w`×`h` pixels into the RGBA staging buffer.
+    /// Advance to `now_ms` and render at `w`×`h` pixels into the RGBA staging
+    /// buffer.
+    ///
+    /// CONTRACT: `now_ms` must be UNIX-epoch milliseconds — `Date.now()`, NOT
+    /// `performance.now()` and NOT a `requestAnimationFrame` timestamp (both
+    /// are ms-since-page-load: motion still animates, but the office's
+    /// day/night cycle and wall clock decode `now` as calendar time, so a
+    /// page-relative clock pins the scene at 1970 — permanently 00:00,
+    /// defeating the browser-timezone support entirely).
     pub fn step(&mut self, now_ms: f64, w: u32, h: u32) {
         let now = SystemTime::UNIX_EPOCH + Duration::from_millis(now_ms.max(0.0) as u64);
         self.advance_script(now);
         // The per-frame sweep: Active→Idle debounce, exit GC, walkouts.
         self.reducer.tick(&mut self.scene, now);
+        // Evict per-agent render state for agents the sweep removed — the
+        // same epilogue the tui painter runs (`TuiRenderer::evict_missing` +
+        // its coffee retains). Load-bearing HERE because the looped script
+        // REUSES agent ids: without eviction, a returning cast member finds
+        // its previous life's entry/exit walk legs (they gate on `is_none()`)
+        // and teleports in instead of walking — visible from loop 2 onward.
+        self.floor.cache.evict_missing(&self.scene);
+        self.floor.history.evict_missing(&self.scene);
+        self.floor
+            .motion
+            .retain(|id, _| self.scene.agents.contains_key(id));
+        self.coffee_holders
+            .retain(|id| self.scene.agents.contains_key(id));
+        self.coffee_fetched_at
+            .retain(|id, _| self.scene.agents.contains_key(id));
         let buf_w = w.clamp(1, u16::MAX as u32) as u16;
         let buf_h = h.clamp(1, u16::MAX as u32) as u16;
         self.render(now, buf_w, buf_h);
@@ -217,5 +239,133 @@ impl Office {
         for c in px {
             self.rgba.extend_from_slice(&[c.r, c.g, c.b, 255]);
         }
+    }
+}
+
+// The rlib half of the crate-type exists exactly for these: the full
+// `Office` pipeline (script drive + reducer + render + staging) runs
+// natively — the same headless-render precedent as `floating::offscreen`.
+// Only the JS boundary (the wasm-bindgen glue) is wasm-only.
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::script::cast_id;
+
+    /// `Office::new`'s error arm constructs a `JsError` (inert off-wasm), so
+    /// tests unwrap via match — the embedded pack parsing is a build-time
+    /// invariant and the Ok path never touches a JS value.
+    fn office() -> Office {
+        match Office::new(1) {
+            Ok(o) => o,
+            Err(_) => panic!("embedded pack must parse"),
+        }
+    }
+
+    /// Anchor sim time well past 0 so `exiting_at`-style guards never see the
+    /// UNIX_EPOCH sentinel; the value itself is arbitrary.
+    const T0_MS: f64 = 1_000_000_000.0;
+
+    #[test]
+    fn step_renders_a_frame_of_the_advertised_shape() {
+        let mut o = office();
+        let (w, h) = (160u32, 96u32);
+        o.step(T0_MS, w, h);
+        assert_eq!(o.frame_len(), (w * h * 4) as usize, "len is w*h*4");
+        let frame = &o.rgba;
+        assert!(
+            frame.iter().skip(3).step_by(4).all(|&a| a == 255),
+            "alpha channel is fully opaque"
+        );
+        assert!(
+            frame.chunks(4).any(|p| p[0] != 0 || p[1] != 0 || p[2] != 0),
+            "the office actually painted (not an all-black frame)"
+        );
+    }
+
+    #[test]
+    fn resize_reshapes_the_frame_and_a_tiny_canvas_never_panics() {
+        let mut o = office();
+        o.step(T0_MS, 320, 180);
+        assert_eq!(o.frame_len(), 320 * 180 * 4);
+        // Grow: the staging Vec reallocates — the documented frame_ptr
+        // re-read contract's trigger.
+        o.step(T0_MS + 100.0, 480, 270);
+        assert_eq!(o.frame_len(), 480 * 270 * 4);
+        // Too small for any layout: render early-returns, still a valid frame.
+        o.step(T0_MS + 200.0, 8, 8);
+        assert_eq!(o.frame_len(), 8 * 8 * 4);
+    }
+
+    #[test]
+    fn beats_fire_once_at_scheduled_times_across_a_wrap() {
+        // Drive PAST one loop in coarse steps: the cast must exist (beats
+        // fired), and the office must stay bounded (no double-fired
+        // SessionStarts duplicating agents across the wrap).
+        let mut o = office();
+        let step_ms = 5_000u64;
+        let total = LOOP_MS + LOOP_MS / 2;
+        let mut t = 0u64;
+        while t <= total {
+            o.step(T0_MS + t as f64, 160, 96);
+            t += step_ms;
+        }
+        assert!(
+            (5..=8).contains(&o.scene.agents.len()),
+            "cast bounded across the wrap, got {}",
+            o.scene.agents.len()
+        );
+        // Cursor is mid-loop (the wrap reset it from the end of loop 1).
+        assert!(o.cursor > 0 && o.cursor < o.beats.len());
+    }
+
+    #[test]
+    fn a_long_hidden_tab_reanchors_instead_of_replaying_every_missed_loop() {
+        let mut o = office();
+        o.step(T0_MS, 160, 96);
+        let epoch_before = o.epoch.unwrap();
+        // 10 simulated minutes of a hidden tab (5 whole loops).
+        let gap = 10 * 60 * 1_000u64;
+        o.step(T0_MS + gap as f64, 160, 96);
+        let epoch_after = o.epoch.unwrap();
+        let advanced = epoch_after
+            .duration_since(epoch_before)
+            .unwrap()
+            .as_millis() as u64;
+        // The epoch jumped by WHOLE loops (phase kept), leaving < 2 loops of
+        // catch-up — not a 5-loop replay.
+        assert_eq!(advanced % LOOP_MS, 0, "re-anchor keeps the loop phase");
+        assert!(gap - advanced < 2 * LOOP_MS, "at most one wrap replays");
+        assert!(
+            (5..=8).contains(&o.scene.agents.len()),
+            "office coherent after the gap, got {}",
+            o.scene.agents.len()
+        );
+    }
+
+    #[test]
+    fn exited_agents_render_state_is_evicted_so_loop_two_walks_dont_teleport() {
+        // The door-traffic ids (cast 5 walks out at 104s, cast 7 at wrap-2s)
+        // RECUR next loop. Stale MotionState entry/exit legs gate on
+        // `is_none()`, so a leftover entry from the previous life would skip
+        // the new walk-in — the teleport this eviction exists to prevent.
+        let mut o = office();
+        let mut t = 0u64;
+        // Past agent 5's SessionEnd (104s) + the 4.5s exit grace + sweep.
+        while t <= 115_000 {
+            o.step(T0_MS + t as f64, 160, 96);
+            t += 1_000;
+        }
+        assert!(
+            !o.scene.agents.contains_key(&cast_id(5)),
+            "agent 5 exited and was GC'd"
+        );
+        assert!(
+            !o.floor.motion.contains_key(&cast_id(5)),
+            "agent 5's motion state was evicted with its slot"
+        );
+        assert!(
+            !o.coffee_holders.contains(&cast_id(5)),
+            "agent 5's coffee state was evicted with its slot"
+        );
     }
 }

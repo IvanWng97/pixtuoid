@@ -412,7 +412,7 @@ gen-wasm-check:
 # + a release build of the snapshot example.
 [group('gen')]
 [doc('Fail if any committed README section or rendered image has drifted')]
-gen-check: gen-readme-check
+gen-check: gen-readme-check gen-wasm-check
     #!/usr/bin/env sh
     set -eu
     test -x .venv/bin/python3 || { echo "needs the venv: python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt"; exit 1; }

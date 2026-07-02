@@ -8,7 +8,7 @@ use super::walk::{
     TASK_SCAN_BYTES,
 };
 use super::*;
-use crate::source::Transport;
+use crate::source::{AgentEvent, Transport};
 use crate::AgentId;
 
 #[test]

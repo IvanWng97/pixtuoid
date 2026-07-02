@@ -9,7 +9,7 @@ use tokio::sync::Mutex;
 use tracing::{debug, warn};
 
 use crate::source::exit_watch::ExitWatch;
-use crate::source::{AgentEvent, TaggedSender};
+use crate::source::TaggedSender;
 
 mod health;
 mod liveness;
@@ -35,7 +35,11 @@ use liveness::{
 use unclaim::drain_child_end_unclaims;
 use walk::{scan_root, walk_jsonl};
 
-pub type LineDecoder = fn(&str, &str, serde_json::Value) -> Result<Vec<AgentEvent>>;
+// The ONE `LineDecoder` definition lives in the always-compiled `decoder`
+// module (the registry + a pure CC decoder name it in the wasm build);
+// re-exported so watcher-facing callers keep the `jsonl::LineDecoder` path —
+// a second local alias would be the two-copies drift bug.
+pub use crate::source::decoder::LineDecoder;
 pub type LabelDeriver = fn(&Path, &str, &Path) -> String;
 pub type SessionEndChecker = fn(&[u8]) -> bool;
 
