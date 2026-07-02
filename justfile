@@ -383,6 +383,25 @@ gen-wasm:
     wasm-opt -Oz -o site/public/wasm/pixtuoid_web_bg.wasm site/public/wasm/pixtuoid_web_bg.wasm
     ls -la site/public/wasm/
 
+# Bloat gate for the committed wasm artifact: the hero must stay a lazy-load
+# behind the poster, so a silent size regression (a dep pulling in formatting
+# machinery, an accidental debug build) fails loudly. 1 MiB raw ≈ ~350-400 KB
+# gzipped over the wire; the artifact is ~700 KB today. Byte-exact
+# rebuild-match is deliberately NOT checked in CI — wasm output drifts across
+# rustc versions, and CI installs latest stable (local `just gen-wasm` +
+# review is the freshness authority, like the committed demo media).
+[group('gen')]
+[doc('Fail if the committed wasm artifact is missing or over the size cap')]
+gen-wasm-check:
+    #!/usr/bin/env sh
+    set -eu
+    W=site/public/wasm/pixtuoid_web_bg.wasm
+    test -f "$W" || { echo "missing $W — run 'just gen-wasm'"; exit 1; }
+    CAP=1048576
+    SIZE=$(wc -c < "$W" | tr -d ' ')
+    test "$SIZE" -le "$CAP" || { echo "$W is $SIZE bytes (> $CAP cap) — investigate the bloat"; exit 1; }
+    echo "gen-wasm-check OK: $W ($SIZE bytes <= $CAP)"
+
 # Drift gate: fail if any committed README section OR rendered still is stale.
 # Pixel-diffs every PNG (threshold 0); video clips + demo.gif are presence-only
 # (ffmpeg/gifsicle bytes aren't stable cross-version, but the renders feeding

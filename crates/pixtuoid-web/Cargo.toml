@@ -33,3 +33,9 @@ wasm-bindgen   = "=0.2.126"
 # to UTC and the office's day/night cycle is wrong for most visitors). The
 # wasmbind deps are target-gated to wasm32 — zero cost on native builds.
 chrono         = { version = "0.4", default-features = false, features = ["wasmbind"] }
+
+# chrono is "unused" at the code level on purpose — no direct `use chrono`
+# here; the dep exists solely for the feature-union above (machete can't see
+# feature-unioning).
+[package.metadata.cargo-machete]
+ignored = ["chrono"]
