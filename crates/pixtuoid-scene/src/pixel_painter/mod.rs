@@ -92,7 +92,10 @@ mod seat;
 mod sim;
 
 pub use anchors::character_anchor;
-pub use sim::{sim_step, CharacterGlow, CharacterPlacement, SimFrame, SimStores};
+// pub(crate) until γ3's FloorSession facade: the raw seam has zero external
+// consumers, and publishing it pre-facade would make γ3's reshape a semver
+// break (the gate-pollution class). FloorSession widens what consumers need.
+pub(crate) use sim::{sim_step, CharacterGlow, SimFrame, SimStores};
 
 use anchors::compute_door_frame_idx;
 use background::{
@@ -640,7 +643,7 @@ fn paint_frame(
     (resolved_pet_pos, resolved_mascot_pos)
 }
 
-/// Map the sim's resolved [`CharacterPlacement`]s 1:1 onto y-sorted
+/// Map the sim's resolved [`sim::CharacterPlacement`]s 1:1 onto y-sorted
 /// drawables. Every positional decision (pose, anchor, z-key, sprite pick,
 /// rank fan-out) was made by `sim_step`; the ONLY paint-side work here is
 /// presentation — resolving the theme-free [`CharacterGlow`] to a `Theme`

@@ -44,7 +44,7 @@ use super::seat::{seat_sprite, settle_seat_view, SeatView};
 /// fused pass used to hide inside `PixelCtx`. `render_to_rgb_buffer` builds
 /// one from its `PixelCtx`; a headless consumer builds one from its own
 /// `FloorCtx` + chitchat map.
-pub struct SimStores<'a> {
+pub(crate) struct SimStores<'a> {
     pub router: &'a mut dyn Router,
     pub overlay: &'a mut OccupancyOverlay,
     pub history: &'a mut PoseHistory,
@@ -57,7 +57,7 @@ pub struct SimStores<'a> {
 /// glow applies (a pose/lifecycle fact); paint maps it to a `Theme` color —
 /// colors are presentation and must not leak into the sim layer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CharacterGlow {
+pub(crate) enum CharacterGlow {
     None,
     /// `SeatedThinking` — paint uses the theme's default tool-glow color.
     Thinking,
@@ -69,7 +69,7 @@ pub enum CharacterGlow {
 /// paint pass needs to blit the sprite, with no sim access and no colors.
 /// `agent_idx` indexes [`SimFrame::agents`].
 #[derive(Debug, Clone, Copy)]
-pub struct CharacterPlacement {
+pub(crate) struct CharacterPlacement {
     pub agent_idx: usize,
     /// Y-sort key (breath-independent — see the arm comments in
     /// `resolve_characters`).
@@ -89,13 +89,17 @@ pub struct CharacterPlacement {
 /// and cannot move the sim (the purity the split exists for). Owned data (no
 /// borrows into the stores) so the stores are free again the moment
 /// `sim_step` returns.
-pub struct SimFrame {
+pub(crate) struct SimFrame {
     /// The tick's agent snapshot (the one clone per frame the fused pass
     /// already made) — placements index into it, paint borrows from it.
     pub agents: Vec<AgentSlot>,
     /// The authoritative routed pose per home-desk agent this tick — the
     /// headless observation payload (`None` = no renderable pose, e.g. the
     /// exit window passed).
+    // The headless-observation payload: unread by paint BY DESIGN (that's the
+    // split's point) — the seam tests read it today, FloorSession (γ3) is the
+    // lib-side consumer tomorrow.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub poses: HashMap<AgentId, Option<Pose>>,
     /// Per-desk "occupant is actually seated right now" (drives screen glow +
     /// ceiling halos; exiting agents absent by construction).
@@ -121,7 +125,7 @@ pub struct SimFrame {
 /// sprite width, and placement is position. `coffee` is the immutable
 /// carrier→fetch-time view (`CoffeeState::map`); `floor_idx` keys the
 /// chitchat venues. Time is a parameter — never read the clock here (wasm).
-pub fn sim_step(
+pub(crate) fn sim_step(
     stores: &mut SimStores<'_>,
     scene: &SceneState,
     layout: &Layout,
