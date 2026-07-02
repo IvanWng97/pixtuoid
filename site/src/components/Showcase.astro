@@ -10,7 +10,9 @@ const channels = SHOWCASE.map((c, i) => ({
 const live = channels.filter((c) => c.status === 'live');
 const def = channels.find((c) => c.default) ?? live[0];
 // headline count derived from the dial itself — a hardcoded "Eight" desyncs
-// the moment a channel is added or dropped
+// the moment a channel is added or dropped. Deliberately counts ALL channels
+// (the dial shows "soon" slots too) while the eyebrow counts live.length "on
+// air" — the two diverge by design the day a soon-channel lands.
 const COUNT_WORDS = [
   'Zero',
   'One',
@@ -41,7 +43,7 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
       <p class="eyebrow">5F · studio — {live.length} channels on air</p>
       <h2 class="statement statement--md">{countWord} channels.<br />One office.</h2>
       <p class="lead">
-        The office, channel by channel — tune a monitor to switch the big screen. Themes and weather
+        The office, channel by channel — flip a channel to switch the big screen. Themes and weather
         expose their dials on-screen.
       </p>
     </div>

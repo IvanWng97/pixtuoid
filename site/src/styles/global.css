@@ -64,6 +64,7 @@
      ink/dim/line match the statusline's fixed palette. The halo lifts floating
      chrome (nav, hero ghost link) off a DARK office only — day sets none. */
   --chip-ink: #d8cfc0;
+  --chip-bright: #f0e8d8;
   --chip-dim: #8f8574;
   --chip-line: #3a332a;
   --chip-bg: color-mix(in srgb, var(--screen) 82%, transparent);

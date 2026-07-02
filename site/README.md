@@ -65,18 +65,29 @@ From the repo root the same gate is `just site-check` (and `just site-fmt`).
   clock only ever turns night ON — a dark-preference system keeps night at noon
   via the `prefers-color-scheme` fallback). `dracula` is a hidden easter-egg
   theme (type it, or `?theme=dracula`).
-- **The building** — the landing page maps the product's multi-floor metaphor
-  onto its own structure: each section is a floor (6F penthouse → 1F front desk),
-  `Elevator.astro` is a fixed desktop panel tracking scroll, and the app's
-  literal keys work on the page — digits `1–6` ride the elevator, `t` retints
-  the decorative palette through the THEMES list (Esc restores). The favicon
-  dims with the night theme; 404 is the office at 3 a.m. (`--empty` render).
-- **FX** (all `prefers-reduced-motion`-safe) — headline shimmer, CRT power-on,
-  pixel-dust, and click-to-retint theme chips. (The old pointer glow + 3D tilt
-  were removed deliberately: perspective transforms smear pixel art.)
-- **Ticker** — fed at build time with the repo's last merged PRs (the agents
-  that built pixtuoid); falls back to a canned reel offline so builds never
-  block on the GitHub API.
+- **The building (OPEN FLOOR)** — the page is one continuous camera hold on the
+  REAL office: `OfficeBackdrop.astro` runs the `pixtuoid-web` wasm engine as a
+  fixed full-viewport canvas (poster-first; reduced-motion / no-JS / any
+  failure stays on the still), and scrolling is the light switch — a `#dimmer`
+  sheet darkens toward statements and releases to 0 in full-viewport
+  "office gaps". Each section is a floor (6F penthouse → 1F front desk);
+  `Statusline.astro` is the one piece of fixed chrome (floor readout +
+  scrollspy, the build-time merged-PR feed with a canned-reel fallback,
+  `lights %` / clock / `● LIVE`), and the app's literal keys work on the page —
+  digits `1–6` ride between floors, `t` retints the decorative palette (Esc
+  restores). The favicon dims with the night theme; 404 is the office at
+  3 a.m. (`--empty` render).
+- **Cross-component seams** (what a new section must wire): sections declare
+  `data-lit` (dimmer target; `data-lit="fade"` also rises with the darkness)
+  and `data-floor` (scrollspy) — a new floor needs both plus a `FLOORS` row in
+  `Statusline.astro`. The backdrop publishes `window.__pixLights` (per-frame
+  dim value; the statusline polls it) and `pix:onair` + the `.backdrop.is-live`
+  class (discrete live flip; event for changes, class for late-attach seeding).
+  `window.__pixNight()` (defined in `Base.astro`'s head boot) is the ONE
+  client-side day/night boundary — never re-derive 19:00–07:00 inline.
+- **FX** (all `prefers-reduced-motion`-safe) — CRT power-on, hero pixel-dust,
+  and the dimmer itself. (The old pointer glow + 3D tilt were removed
+  deliberately: perspective transforms smear pixel art.)
 - **Docs shell** — `layouts/Docs.astro` gives /config, /architecture,
   /contributing, /migration a shared sidebar + build-time mini-TOC + pager.
 
@@ -108,10 +119,12 @@ resize/blur it.)
 ## Showcase (Studio Wall)
 
 The landing page's interactive demo section is a single, manifest-driven
-component (`Showcase` → `ChannelStage` / `MonitorWall`). Channel order, labels,
-and content type are all defined in **`src/showcase.json`** — the **fifth
-single-source manifest** alongside `src/themes.json`, `src/weather.json`,
-`src/features.json`, and `src/install.json`.
+component (`Showcase` → `ChannelStage`; the channel dial is inline mono text —
+`MonitorWall.astro` is the kept-but-unmounted fallback, see `knip.jsonc`).
+Channel order, labels, and content type are all defined in
+**`src/showcase.json`** — the **fifth single-source manifest** alongside
+`src/themes.json`, `src/weather.json`, `src/features.json`, and
+`src/install.json`.
 
 Channel kinds:
 

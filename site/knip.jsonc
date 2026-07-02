@@ -8,9 +8,9 @@
   // and knip can't trace it through the rehype plugin. Keep the pin; mark it used.
   "ignoreDependencies": ["mermaid"],
   // public/wasm/ is wasm-bindgen GENERATED glue committed by `just gen-wasm`
-  // (the live-office hero module). Nothing imports it until the hero loader
-  // lands (PR B) — and even then the import is a runtime `import()` from an
-  // is:inline script knip can't trace. Generated artifact, not site source.
+  // (the live-office backdrop module). Its one consumer is a runtime
+  // `import()` from OfficeBackdrop.astro's is:inline script, which knip
+  // can't trace. Generated artifact, not site source.
   "ignore": [
     "public/wasm/**",
     // The channel dial's documented FALLBACK: if the bare mono dial tests

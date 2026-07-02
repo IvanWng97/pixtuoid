@@ -96,6 +96,16 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
 
     <!-- No-FOUC theme init: ?theme= override → saved choice → system → day -->
     <script is:inline>
+      // THE site clock boundary (7/19) — the one client-side source of truth,
+      // defined parse-first so every later consumer (this init, the Escape
+      // fallback below, the statusline clock, the gap-2 window swap) reads the
+      // SAME predicate and can't drift. An approximation of the engine's own
+      // dawn/dusk ramp (time_of_day.rs ramps ~5-8 and ~17-20); if this ever
+      // re-tunes, it re-tunes everywhere at once.
+      window.__pixNight = function () {
+        const h = new Date().getHours();
+        return h >= 19 || h < 7;
+      };
       (function () {
         try {
           const ok = function (v) {
@@ -107,8 +117,7 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
           // chooses a theme, so does the site — arriving after dark means the
           // night office. The clock only ever turns night ON: a dark-preference
           // user keeps night at noon via the system fallback below.
-          const hour = new Date().getHours();
-          const afterHours = hour >= 19 || hour < 7;
+          const afterHours = window.__pixNight();
           const sys = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'night' : 'day';
           const theme = ok(pick) ? pick : afterHours ? 'night' : sys;
           // clock-forced (not chosen, not system) → the footer explains itself
@@ -189,8 +198,8 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
 
     <!-- FX: CRT power-on + a `dracula` easter egg. (The pointer glow + 3D tilt
          are gone on purpose: perspective transforms smear pixel art's crisp
-         edges, and both were generic-SaaS flair — the building effects in
-         Elevator.astro replace them with product-true ones.) -->
+         edges, and both were generic-SaaS flair — the live office backdrop +
+         statusline replaced them with product-true chrome.) -->
     <script is:inline>
       (function () {
         const reduceMQ = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -274,9 +283,8 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
             // the init uses (clock, then system), or an after-hours visitor with
             // no saved choice would get snapped to day by the Escape that merely
             // closed the Docs dropdown.
-            const hour = new Date().getHours();
             const fallback =
-              hour >= 19 || hour < 7 || window.matchMedia('(prefers-color-scheme: dark)').matches
+              window.__pixNight() || window.matchMedia('(prefers-color-scheme: dark)').matches
                 ? 'night'
                 : 'day';
             setTheme(

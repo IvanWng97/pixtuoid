@@ -2,9 +2,14 @@
 import { REPO, SPONSOR, asset } from '../consts';
 // Absolute home so the section anchors work from any page (e.g. /config).
 const home = asset('');
+// `floating` = the OPEN FLOOR index treatment (corner chrome over the live
+// office, scrolls away — the statusline is that page's persistent chrome).
+// The default is the sticky bar: Docs/404 have no backdrop and no statusline,
+// so they keep persistent nav, the 60px layout reservation, and section links.
+const { floating = false } = Astro.props;
 ---
 
-<header class="nav">
+<header class:list={['nav', { 'nav--floating': floating }]}>
   <div class="container nav__inner">
     <a class="nav__logo" href={home}>
       <img
@@ -163,17 +168,29 @@ const home = asset('');
 </script>
 
 <style>
-  /* Corner chrome: the nav floats over the live office at the top of the
-     page and scrolls away (the statusline is the persistent chrome). No bar,
-     no border — and critically NO backdrop-filter: a live blur over the
-     30fps canvas is the documented compositor-flicker class. */
+  /* Default: the sticky bar (docs + 404 pages). The blur is safe here — these
+     pages have no 30fps canvas underneath. */
   .nav {
-    position: absolute;
+    position: sticky;
     top: 0;
+    z-index: 50;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    background: color-mix(in srgb, var(--bg) 80%, transparent);
+    border-bottom: 1px solid var(--border);
+  }
+  /* Corner chrome (index): the nav floats over the live office at the top of
+     the page and scrolls away (the statusline is the persistent chrome). No
+     bar, no border — and critically NO backdrop-filter: a live blur over the
+     30fps canvas is the documented compositor-flicker class. */
+  .nav--floating {
+    position: absolute;
     left: 0;
     right: 0;
-    z-index: 50;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
     background: none;
+    border-bottom: 0;
   }
   .nav__version {
     font-family: var(--font-mono);
@@ -183,9 +200,9 @@ const home = asset('');
     padding: 0.15rem 0.45rem;
     margin-left: -0.4rem;
   }
-  .nav__logo,
-  .nav__links a,
-  .nav__docs-btn {
+  .nav--floating .nav__logo,
+  .nav--floating .nav__links a,
+  .nav--floating .nav__docs-btn {
     /* dark themes only — on the day office this black halo read as a smudge */
     text-shadow: var(--chrome-halo);
   }
@@ -275,8 +292,8 @@ const home = asset('');
     display: none;
   }
   @media (min-width: 760px) {
-    .nav__section-link {
-      display: none; /* floors live in the statusline; corners stay sparse */
+    .nav--floating .nav__section-link {
+      display: none; /* index only: floors live in the statusline; corners stay sparse */
     }
     .nav__links {
       display: flex;

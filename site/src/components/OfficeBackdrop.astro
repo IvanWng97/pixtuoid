@@ -89,7 +89,6 @@ import { asset } from '../consts';
     const canvas = document.getElementById('office-live');
     if (!wrap || !canvas || typeof WebAssembly === 'undefined') return;
     const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
-    if (mq.matches) return; // reduced motion: still poster only, no fetch
 
     // Render SMALL and let CSS stretch (image-rendering: pixelated): ~180px
     // tall is the app's own chunky-pixel scale (OFFICE_TARGET_H).
@@ -156,19 +155,28 @@ import { asset } from '../consts';
       raf = 0;
     }
 
-    import(wasmJsUrl)
-      .then(function (mod) {
-        return mod.default().then(function (w) {
-          wasm = w;
-          office = new mod.Office(SEED);
-          ctx2d = canvas.getContext('2d');
-          sizeBuffer();
-          start();
+    // Reduced motion defers the wasm fetch entirely (still poster only) —
+    // but a LIVE un-reduce should still bring the office up, so the fetch
+    // lives behind a one-shot boot() the mq listener can trigger later.
+    let booted = false;
+    function boot() {
+      if (booted) return;
+      booted = true;
+      import(wasmJsUrl)
+        .then(function (mod) {
+          return mod.default().then(function (w) {
+            wasm = w;
+            office = new mod.Office(SEED);
+            ctx2d = canvas.getContext('2d');
+            sizeBuffer();
+            start();
+          });
+        })
+        .catch(function () {
+          /* the still poster stays — the building simply doesn't go live */
         });
-      })
-      .catch(function () {
-        /* the still poster stays — the building simply doesn't go live */
-      });
+    }
+    if (!mq.matches) boot();
 
     let rraf = 0;
     window.addEventListener('resize', function () {
@@ -190,6 +198,7 @@ import { asset } from '../consts';
           live = false;
           document.dispatchEvent(new CustomEvent('pix:onair', { detail: { live: false } }));
         } else {
+          boot(); // no-op if already booted; a reduced-motion first visit fetches here
           start();
         }
       });
@@ -252,7 +261,9 @@ import { asset } from '../consts';
         if (Math.abs(op - lastOp) > 0.002) {
           lastOp = op;
           dimmer.style.opacity = op.toFixed(3);
-          // the statusline's "lights NN%" reads this at its own 1Hz cadence
+          // Polled global, deliberately NOT an event (contrast pix:onair): a
+          // continuous per-frame value is read at the consumer's own cadence
+          // (the statusline polls); a discrete flip gets an event + class seed.
           window.__pixLights = op;
         }
         // The lit block itself rises with the darkness (opt-in via

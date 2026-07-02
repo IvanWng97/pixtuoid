@@ -37,7 +37,7 @@ const softwareJsonLd = {
 <Base preloadImage={asset('demos/hero-poster.png')} jsonLd={softwareJsonLd}>
   <span id="top"></span>
   <OfficeBackdrop />
-  <Nav />
+  <Nav floating />
   <main id="main" tabindex="-1">
     <Hero />
     {/* observation gap 1 — the dim releases to 0; the office IS the content */}
@@ -69,9 +69,8 @@ const softwareJsonLd = {
         />
       </div>
       <p class="gap-caption" aria-hidden="true">
-        — this is that desktop window. lighting follows your clock; it's{' '}<span data-gap-daynight
-          >night</span
-        > where you are.
+        — the floating desktop window: the same office, popped out of the terminal. lighting follows
+        your clock; it's <span data-gap-daynight>night</span> where you are.
       </p>
     </div>
     <HowItWorks />
@@ -83,13 +82,10 @@ const softwareJsonLd = {
     </div>
   </main>
   <script is:inline>
-    // gap 2 follows the viewer's clock — same day/night boundary the office
-    // uses: the word AND the window still swap together.
+    // gap 2 follows the viewer's clock: the word AND the window still swap
+    // together off __pixNight (the one boundary, defined in Base's head boot).
     (function () {
-      const night = (function () {
-        const h = new Date().getHours();
-        return h < 7 || h >= 19;
-      })();
+      const night = window.__pixNight();
       const el = document.querySelector('[data-gap-daynight]');
       if (el) el.textContent = night ? 'night' : 'day';
       const img = document.querySelector('[data-gap-still]');
