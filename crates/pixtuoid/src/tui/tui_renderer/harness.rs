@@ -501,7 +501,7 @@ fn transition_at_narrow_terminal_paints_no_agents_no_panic() {
     );
     // No pantry trip could have completed against a None layout.
     assert!(
-        !r.coffee_holders_contains(AgentId::from_transcript_path("/narrow/0.jsonl")),
+        !r.coffee_contains(AgentId::from_transcript_path("/narrow/0.jsonl")),
         "a skipped transition floor records no coffee carriers"
     );
 }
@@ -855,13 +855,13 @@ fn coffee_state_evicted_when_agent_leaves_scene() {
     let mut r = build(100, 40, vec![]);
     r.inject_coffee(id, t0());
     r.render(&scene, &pack(), t0()).unwrap();
-    assert!(r.coffee_holders_contains(id));
+    assert!(r.coffee_contains(id));
     // Agent gone from the scene ⇒ next render evicts its coffee state.
     let empty = SceneState::uniform(16);
     r.render(&empty, &pack(), t0() + Duration::from_millis(33))
         .unwrap();
     assert!(
-        !r.coffee_holders_contains(id),
+        !r.coffee_contains(id),
         "coffee state must be evicted when the agent leaves (no leak)"
     );
 }
@@ -911,7 +911,7 @@ fn coffee_persists_through_floor_transition() {
         now += step;
         scratch.render(&scene, &p, now).unwrap();
         for &id in &f0_ids {
-            if scratch.coffee_holders_contains(id) {
+            if scratch.coffee_contains(id) {
                 hit = Some((id, now));
                 break 'outer;
             }
@@ -931,14 +931,14 @@ fn coffee_persists_through_floor_transition() {
         r.render(&scene, &p, t).unwrap();
     }
     assert!(
-        !r.coffee_holders_contains(agent),
+        !r.coffee_contains(agent),
         "agent must not yet hold coffee before the transition"
     );
     r.navigate_floor(1, t);
     assert!(r.transition().is_some(), "navigation begins a transition");
     r.render(&scene, &p, detect_at).unwrap();
     assert!(
-        r.coffee_holders_contains(agent),
+        r.coffee_contains(agent),
         "a coffee run completing mid-transition must persist (regression: \
          render_transition_floor dropped new_coffee_carriers)"
     );

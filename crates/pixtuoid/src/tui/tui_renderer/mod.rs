@@ -417,7 +417,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
 
     /// Whether an agent is a recorded coffee carrier (test harness only).
     #[cfg(test)]
-    pub fn coffee_holders_contains(&self, id: AgentId) -> bool {
+    pub fn coffee_contains(&self, id: AgentId) -> bool {
         self.coffee.map().contains_key(&id)
     }
 
@@ -726,7 +726,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> Renderer for TuiRenderer<B> {
             last_mascot_pos: None,
             // Borrows `self.pets` immutably — disjoint from the `&mut fctx`
             // (self.floor_ctxs) above, so the field-split borrow is fine (same
-            // as `&self.ticker`/`&self.coffee_holders` here). The picked `&Pet`
+            // as `&self.ticker`/`self.coffee.map()` here). The picked `&Pet`
             // carries the name, so the tooltip needs no separate map.
             floor_pet: pixtuoid_scene::pet::select_pet_for_floor(floor_meta.floor_seed, &self.pets),
             chitchat_state: &mut self.chitchat_state,
