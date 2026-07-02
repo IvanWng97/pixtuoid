@@ -23,29 +23,27 @@ const cells = features.flatMap((f) =>
   <div class="container">
     <div class="section-head reveal">
       <p class="eyebrow">4F · amenities — the office is alive</p>
-      <h2>Not a dashboard. A little world.</h2>
+      <h2 class="statement statement--md">Not a dashboard.<br />A little world.</h2>
       <p class="lead">
         pixtuoid renders your agents as coworkers in a top-down pixel office — with the small
         touches that make it worth glancing at.
       </p>
     </div>
 
-    <div class="bento">
+    <div class="ledger">
       {
         cells.map((c) => (
-          <article class="bento__cell reveal">
-            <div class="bento__body">
-              <span class="bento__icon" aria-hidden="true">
-                {c.icon}
-              </span>
-              <h3>{c.title}</h3>
-              <p>{c.body}</p>
-              {c.href && (
-                <a class="bento__link" href={c.href}>
-                  See it live →
-                </a>
-              )}
-            </div>
+          <article class="ledger__row reveal">
+            <span class="ledger__icon" aria-hidden="true">
+              {c.icon}
+            </span>
+            <h3 class="ledger__name">{c.title}</h3>
+            <p class="ledger__body">{c.body}</p>
+            {c.href && (
+              <a class="ledger__link" href={c.href}>
+                see it live →
+              </a>
+            )}
           </article>
         ))
       }
@@ -54,64 +52,52 @@ const cells = features.flatMap((f) =>
 </section>
 
 <style>
-  .bento {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 1.1rem;
-  }
-  @media (min-width: 720px) {
-    .bento {
-      grid-template-columns: repeat(2, 1fr);
-    }
-  }
-  @media (min-width: 1000px) {
-    .bento {
-      grid-template-columns: repeat(3, 1fr);
-    }
-  }
-  .bento__cell {
-    position: relative;
-    overflow: hidden;
+  /* the typographic ledger: no cards, no borders — rows of type sitting
+     directly on the dimmed office */
+  .ledger {
+    margin-top: 1.6rem;
     display: flex;
     flex-direction: column;
-    border-radius: var(--radius);
-    border: 1px solid var(--border);
-    background: var(--surface);
-    box-shadow: var(--shadow);
-    transition:
-      transform 0.2s ease,
-      box-shadow 0.3s ease;
+    gap: 2.2rem;
   }
-  .bento__cell:hover {
-    transform: translateY(-3px);
-    box-shadow: var(--shadow-lg);
+  .ledger__row {
+    display: grid;
+    grid-template-columns: 2.2rem minmax(12rem, 18rem) 1fr auto;
+    gap: 0.4rem 1.4rem;
+    align-items: baseline;
   }
-  .bento__icon {
-    display: block;
-    font-size: 1.6rem;
-    margin-bottom: 0.45rem;
+  .ledger__icon {
+    font-size: 1.2rem;
   }
-  .bento__body {
-    padding: 1rem 1.2rem 1.3rem;
+  .ledger__name {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-synthesis: none;
+    font-size: 1.65rem;
+    margin: 0;
   }
-  .bento__body h3 {
-    margin-bottom: 0.3rem;
-  }
-  .bento__body p {
+  .ledger__body {
+    font-family: var(--font-serif);
+    margin: 0;
     color: var(--fg-muted);
-    font-size: 0.98rem;
-    line-height: 1.55;
   }
-  .bento__link {
-    display: inline-block;
-    margin-top: 0.6rem;
+  .ledger__link {
     font-family: var(--font-mono);
-    font-weight: 700;
-    font-size: 0.86rem;
-    color: var(--coral-deep);
-    text-decoration: none;
-  }
-  :global([data-theme='night']) .bento__link {
+    font-size: 0.85rem;
     color: var(--coral);
+    text-decoration: none;
+    white-space: nowrap;
+  }
+  .ledger__link:hover {
+    color: var(--coral-deep);
+  }
+  @media (max-width: 860px) {
+    .ledger__row {
+      grid-template-columns: 2.2rem 1fr;
+    }
+    .ledger__body,
+    .ledger__link {
+      grid-column: 2;
+    }
   }
 </style>

@@ -12,14 +12,14 @@ import tabs from '../install.json';
   <div class="container">
     <div class="section-head reveal">
       <p class="eyebrow">1F · front desk — get it</p>
-      <h2>Install pixtuoid.</h2>
+      <h2 class="statement statement--md">Move them in.</h2>
       <p class="lead">
-        macOS, Linux &amp; Windows. Then run <code>pixtuoid</code> and press
+        macOS, Linux &amp; Windows — then run <code>pixtuoid</code> and press
         <code>s</code> to connect your CLI.
       </p>
     </div>
 
-    <div class="install__box card reveal">
+    <div class="install__box reveal">
       <div class="install__tabs" role="group" aria-label="Install method">
         {
           tabs.map((t, i) => (
@@ -118,50 +118,48 @@ import tabs from '../install.json';
 
 <style>
   .install__box {
-    max-width: 680px;
-    padding: 0.6rem;
-    overflow: hidden;
+    max-width: 860px;
   }
+  /* tabs: bare mono text-links (same aria-pressed JS) */
   .install__tabs {
     display: flex;
-    gap: 0.3rem;
-    padding: 0.4rem 0.4rem 0;
+    flex-wrap: wrap;
+    gap: 0.2rem 1.6rem;
+    padding: 0 0 0.7rem;
+    font-family: var(--font-mono);
   }
   .install__tab {
-    flex: 1;
-    font-family: var(--font-mono);
+    font-family: inherit;
     font-weight: 700;
-    font-size: 0.86rem;
-    padding: 0.55rem 0.6rem;
+    font-size: 0.88rem;
+    padding: 0.25rem 0;
     border: 0;
-    border-radius: var(--radius-sm) var(--radius-sm) 0 0;
-    background: transparent;
+    background: none;
     color: var(--fg-muted);
     cursor: pointer;
   }
   .install__tab.is-active {
-    color: var(--fg);
-    background: var(--surface-2);
+    color: var(--led);
+    text-shadow: 0 0 6px var(--led-glow);
   }
+  /* the climax: the active command HUGE in a square --screen block */
   .install__panel {
     display: none;
     position: relative;
-    margin: 0.4rem;
-    border-radius: var(--radius-sm);
     overflow: hidden;
-    border: 1px solid var(--border);
+    border: 1px solid #3a332a;
+    background: var(--screen);
   }
   .install__panel.is-active {
     display: block;
   }
-  /* frame the Shiki <Code> output like the old code box (it brings its own
-     theme background + per-token colors) */
   .install__panel :global(pre) {
     margin: 0;
-    padding: 1rem 1.1rem;
+    padding: clamp(1.2rem, 3vw, 2.2rem) clamp(1.2rem, 3.4vw, 2.6rem);
     overflow-x: auto;
-    font-size: 0.92rem;
-    line-height: 1.6;
+    font-size: clamp(1.1rem, 2.6vw, 2rem);
+    line-height: 1.5;
+    background: transparent !important;
   }
   .install__panel :global(pre code) {
     font-family: var(--font-mono);

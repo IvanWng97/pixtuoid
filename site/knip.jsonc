@@ -11,5 +11,11 @@
   // (the live-office hero module). Nothing imports it until the hero loader
   // lands (PR B) — and even then the import is a runtime `import()` from an
   // is:inline script knip can't trace. Generated artifact, not site source.
-  "ignore": ["public/wasm/**"],
+  "ignore": [
+    "public/wasm/**",
+    // The channel dial's documented FALLBACK: if the bare mono dial tests
+    // weak on scannability, MonitorWall returns with one import + one grid
+    // rule (OPEN FLOOR spec, Showcase section). Deliberately unimported.
+    "src/components/MonitorWall.astro",
+  ],
 }

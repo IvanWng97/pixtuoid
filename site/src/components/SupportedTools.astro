@@ -35,15 +35,15 @@ const planned = sources.filter((s) => s.status === 'planned');
   <div class="container">
     <div class="section-head reveal">
       <p class="eyebrow">2F · tenants — works with</p>
-      <h2>Your agents, whichever CLI they run.</h2>
+      <h2 class="statement statement--md">Whichever CLI<br />they run.</h2>
       <p class="lead">
-        Each coding agent shows up as a coworker. Support is per-tool <em>and</em> per-OS — here's the
-        full matrix. New CLIs land via one
+        Each coding agent shows up as a coworker. Support is per-tool <em>and</em> per-OS — this is the
+        Sources panel you'll press <code>s</code> to open. New CLIs land via one
         <a href={asset('contributing')}>Source adapter</a>.
       </p>
     </div>
 
-    <div class="tools__matrix card reveal">
+    <div class="tools__matrix reveal">
       <table>
         <caption class="sr-only">Supported coding agents by operating system</caption>
         <thead>
@@ -58,6 +58,11 @@ const planned = sources.filter((s) => s.status === 'planned');
             supported.map((s) => (
               <tr>
                 <th scope="row">
+                  {s.badge && (
+                    <span class="tools__badge" aria-hidden="true">
+                      {s.badge}
+                    </span>
+                  )}
                   <a href={s.url} target="_blank" rel="noreferrer">
                     {s.name}
                   </a>
@@ -132,16 +137,26 @@ const planned = sources.filter((s) => s.status === 'planned');
   .tools th,
   .tools td {
     padding: 0.6rem 0.7rem;
-    border-bottom: 1px solid var(--px-border, rgba(255, 255, 255, 0.08));
+    border-bottom: 1px solid color-mix(in srgb, var(--fg) 15%, transparent);
     text-align: left;
     white-space: nowrap;
   }
   .tools thead th {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-synthesis: none;
+    font-size: 1.05rem;
+    letter-spacing: 0.03em;
+    opacity: 0.85;
+  }
+  .tools__badge {
+    font-family: var(--font-mono);
     font-size: 0.78rem;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    opacity: 0.7;
-    font-weight: 600;
+    font-weight: 700;
+    color: var(--led);
+    background: var(--screen);
+    padding: 0.1rem 0.35rem;
+    margin-right: 0.5rem;
   }
   .tools tbody th[scope='row'] {
     font-weight: 600;

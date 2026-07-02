@@ -375,6 +375,9 @@ section {
   letter-spacing: 0.01em;
   margin: 0;
 }
+.statement--md {
+  font-size: clamp(2.4rem, 6.5vw, 5.5rem);
+}
 .statement-sub {
   font-family: var(--font-serif);
   font-size: clamp(1.05rem, 1.6vw, 1.35rem);

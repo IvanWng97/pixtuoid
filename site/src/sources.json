@@ -1,83 +1,128 @@
 [
   {
     "id": "claude-code",
+    "badge": "cc·",
     "name": "Claude Code",
     "url": "https://code.claude.com",
     "status": "supported",
     "featured": true,
     "transport": "Hook shim + JSONL watcher",
-    "platforms": { "macos": "yes", "linux": "yes", "windows": "experimental" }
+    "platforms": {
+      "macos": "yes",
+      "linux": "yes",
+      "windows": "experimental"
+    }
   },
   {
     "id": "codex",
+    "badge": "cx·",
     "name": "Codex CLI",
     "url": "https://github.com/openai/codex",
     "status": "supported",
     "featured": true,
     "transport": "Hook shim + JSONL watcher (hook/JSONL coalesce on session UUID)",
-    "platforms": { "macos": "yes", "linux": "yes", "windows": "experimental" }
+    "platforms": {
+      "macos": "yes",
+      "linux": "yes",
+      "windows": "experimental"
+    }
   },
   {
     "id": "antigravity",
+    "badge": "ag·",
     "name": "Antigravity CLI",
     "url": "https://github.com/antiGravity-AI/antigravity-cli",
     "status": "supported",
     "featured": false,
     "transport": "JSONL watcher",
-    "platforms": { "macos": "yes", "linux": "yes", "windows": "experimental" }
+    "platforms": {
+      "macos": "yes",
+      "linux": "yes",
+      "windows": "experimental"
+    }
   },
   {
     "id": "reasonix",
+    "badge": "rx·",
     "name": "DeepSeek-Reasonix",
     "url": "https://github.com/esengine/DeepSeek-Reasonix",
     "status": "supported",
     "featured": false,
     "transport": "Hook shim (hook-only — global ~/.reasonix/settings.json)",
-    "platforms": { "macos": "yes", "linux": "yes", "windows": "experimental" }
+    "platforms": {
+      "macos": "yes",
+      "linux": "yes",
+      "windows": "experimental"
+    }
   },
   {
     "id": "codewhale",
+    "badge": "cw·",
     "name": "CodeWhale",
     "url": "https://github.com/Hmbown/CodeWhale",
     "status": "supported",
     "featured": false,
     "transport": "Hook shim (hook-only — ~/.codewhale/config.toml [hooks], cwd-keyed)",
-    "platforms": { "macos": "yes", "linux": "yes", "windows": "experimental" }
+    "platforms": {
+      "macos": "yes",
+      "linux": "yes",
+      "windows": "experimental"
+    }
   },
   {
     "id": "copilot",
+    "badge": "cp·",
     "name": "Copilot CLI",
     "url": "https://github.com/github/copilot-cli",
     "status": "supported",
     "featured": false,
     "transport": "JSONL watcher (transcript-only — ~/.copilot/session-state/, sub-agents interleave by agentId)",
-    "platforms": { "macos": "yes", "linux": "yes", "windows": "experimental" }
+    "platforms": {
+      "macos": "yes",
+      "linux": "yes",
+      "windows": "experimental"
+    }
   },
   {
     "id": "opencode",
+    "badge": "oc·",
     "name": "opencode",
     "url": "https://github.com/anomalyco/opencode",
     "status": "supported",
     "featured": false,
     "transport": "Hook shim (TS plugin → ~/.config/opencode/plugin/, session-id-keyed)",
-    "platforms": { "macos": "yes", "linux": "yes", "windows": "experimental" }
+    "platforms": {
+      "macos": "yes",
+      "linux": "yes",
+      "windows": "experimental"
+    }
   },
   {
     "id": "cursor",
+    "badge": "cu·",
     "name": "Cursor CLI",
     "url": "https://cursor.com/cli",
     "status": "supported",
     "featured": false,
     "transport": "Hook shim (~/.cursor/hooks.json, session-id-keyed)",
-    "platforms": { "macos": "yes", "linux": "yes", "windows": "experimental" }
+    "platforms": {
+      "macos": "yes",
+      "linux": "yes",
+      "windows": "experimental"
+    }
   },
   {
     "id": "openclaw",
+    "badge": "ok·",
     "name": "OpenClaw",
     "url": "https://github.com/openclaw/openclaw",
     "status": "supported",
     "featured": false,
     "transport": "Hook shim (TS plugin → openclaw gateway; a wandering gateway mascot, not a desk agent)",
-    "platforms": { "macos": "yes", "linux": "yes", "windows": "experimental" }
+    "platforms": {
+      "macos": "yes",
+      "linux": "yes",
+      "windows": "experimental"
+    }
   }
 ]

@@ -121,3 +121,26 @@ fn manifest_rows_are_well_formed() {
         }
     }
 }
+
+/// The badge chip the site renders before each supported tool's name is the
+/// SAME two-char prefix the office labels agents with (`cc·pixtuoid`) — pinned
+/// to the registry's `label_prefix` so the marketing chip and the real sprite
+/// label can't drift.
+#[test]
+fn supported_badges_match_the_registry_label_prefixes() {
+    use pixtuoid_core::source::registry::descriptor_for;
+    for s in manifest() {
+        if str_field(&s, "status") != Some("supported") {
+            continue;
+        }
+        let id = str_field(&s, "id").expect("supported rows carry an id");
+        let badge = str_field(&s, "badge")
+            .unwrap_or_else(|| panic!("{id}: supported rows must carry a `badge` chip"));
+        let descriptor = descriptor_for(id).unwrap_or_else(|| panic!("{id}: not in the registry"));
+        assert_eq!(
+            badge,
+            format!("{}·", descriptor.label_prefix),
+            "{id}: badge must be the registry label_prefix + '·'"
+        );
+    }
+}

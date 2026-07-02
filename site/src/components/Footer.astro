@@ -3,102 +3,84 @@ import { REPO, CRATES, SPONSOR, asset } from '../consts';
 ---
 
 <footer class="footer">
-  <div class="container footer__inner">
-    <div class="footer__brand">
-      <a class="footer__logo" href="#top">
-        <img
-          class="footer__mark"
-          src={asset('char-mark.png')}
-          alt=""
-          aria-hidden="true"
-          width="17"
-          height="24"
-        />
-        pixtuoid
-      </a>
-      <p class="footer__tag">A terminal pixel-art office for your AI coding agents.</p>
-    </div>
-    <nav class="footer__links" aria-label="Footer">
-      <a href={REPO} target="_blank" rel="noreferrer">GitHub</a>
-      <a href={CRATES} target="_blank" rel="noreferrer">crates.io</a>
-      <a href={`${REPO}/releases`} target="_blank" rel="noreferrer">Releases</a>
-      <a href="#install">Install</a>
-      <a class="footer__coffee" href={SPONSOR} target="_blank" rel="noreferrer">☕ Coffee</a>
-    </nav>
-  </div>
-  <div class="container footer__legal">
-    <span>MIT licensed · built in Rust 🦀</span>
+  <div class="container footer__line">
+    <a class="footer__logo" href="#top">
+      <img
+        class="footer__mark"
+        src={asset('char-mark.png')}
+        alt=""
+        aria-hidden="true"
+        width="17"
+        height="24"
+      />
+      pixtuoid
+    </a>
+    <span class="footer__sep">·</span>
+    <span>MIT</span>
+    <span class="footer__sep">·</span>
+    <span>built in Rust 🦀</span>
+    <span class="footer__sep">·</span>
+    <a href={REPO} target="_blank" rel="noreferrer">GitHub</a>
+    <span class="footer__sep">·</span>
+    <a href={CRATES} target="_blank" rel="noreferrer">crates.io</a>
+    <span class="footer__sep">·</span>
+    <a href={`${REPO}/releases`} target="_blank" rel="noreferrer">Releases</a>
+    <span class="footer__sep">·</span>
+    <a class="footer__coffee" href={SPONSOR} target="_blank" rel="noreferrer">☕ Coffee</a>
+    <span class="footer__sep">·</span>
+    <span>made with Claude Code</span>
     {/* visible only while the clock (not the visitor, not the OS) holds night */}
-    <span class="footer__clock">after hours — the office lights follow your clock</span>
-    <span>Made with Claude Code</span>
+    <span class="footer__clock">after hours</span>
   </div>
 </footer>
 
 <style>
   .footer {
     margin-top: clamp(2rem, 6vw, 5rem);
-    padding-block: 2.6rem 1.6rem;
-    border-top: 1px solid var(--border);
-    background: var(--bg-tint);
+    padding-block: 1.4rem;
   }
-  .footer__inner {
+  .footer__line {
     display: flex;
     flex-wrap: wrap;
-    gap: 1.5rem 2rem;
-    justify-content: space-between;
-    align-items: flex-start;
+    align-items: center;
+    gap: 0.6rem;
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    color: var(--fg-muted);
   }
   .footer__logo {
     display: inline-flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: 0.45rem;
     font-family: var(--font-display);
     font-weight: 400;
     font-synthesis: none;
-    font-size: 1.25rem;
+    font-size: 1.1rem;
     color: var(--fg);
     text-decoration: none;
   }
   .footer__mark {
-    height: 24px;
+    height: 20px;
     width: auto;
     image-rendering: pixelated;
   }
-  .footer__tag {
-    margin-top: 0.5rem;
-    color: var(--fg-muted);
-    font-size: 0.95rem;
-    max-width: 34ch;
+  .footer__sep {
+    color: color-mix(in srgb, var(--fg-muted) 50%, transparent);
   }
-  .footer__links {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 1.1rem;
-    font-family: var(--font-mono);
-    font-size: 0.88rem;
-  }
-  .footer__links a {
+  .footer__line a {
     color: var(--fg-muted);
     text-decoration: none;
   }
-  .footer__links a:hover {
+  .footer__line a:hover {
     color: var(--fg);
   }
-  .footer__legal {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem 1.5rem;
-    justify-content: space-between;
-    margin-top: 1.8rem;
-    padding-top: 1.2rem;
-    border-top: 1px solid var(--border);
-    font-size: 0.85rem;
-    color: var(--fg-muted);
+  .footer__coffee {
+    color: var(--coral) !important;
   }
+  /* shown only when the local clock holds night — toggled by the Base script */
   .footer__clock {
     display: none;
-    font-family: var(--font-mono);
-    font-size: 0.78rem;
+    color: var(--amber);
   }
   :global([data-clock-night='1']) .footer__clock {
     display: inline;
