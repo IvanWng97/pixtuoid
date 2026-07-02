@@ -4,13 +4,12 @@ import { asset } from '../consts';
 
 {
   /* THE BUILDING — the real pixtuoid engine (wasm) running fixed behind the
-     whole page. Each [data-floor] section swaps the office to that floor's
-     own layout variant (the engine's five hand-authored geometries), so
-     scrolling the page IS riding the elevator: 6F penthouse (dense, two
-     meeting rooms) down to 1F install (standard). Content floats over it as
-     glass bands. Poster-first: the still is the instant layer; the canvas
-     fades in after the first wasm frame. Reduced-motion / no-JS / no-wasm /
-     fetch-failure all simply stay on the still. */
+     whole page: ONE continuous office (the hero's Dense variant — two
+     meeting rooms), one timeline that never resets while you scroll.
+     Content floats over it as glass bands. Poster-first: the still is the
+     instant layer; the canvas fades in after the first wasm frame.
+     Reduced-motion / no-JS / no-wasm / fetch-failure all simply stay on
+     the still. */
 }
 <div class="backdrop" aria-hidden="true">
   <img
@@ -108,12 +107,11 @@ import { asset } from '../consts';
     // tall is the app's own chunky-pixel scale (OFFICE_TARGET_H).
     const BUF_H = 180;
     const FRAME_MS = 33; // ~30fps cap
-    // Floor → seed → the engine's layout variant (verified mapping):
-    // 6F dense (two meeting rooms), 5F senior (large meeting + pantry),
-    // 4F standard, 3F lounge, 2F open plan, 1F standard.
-    const FLOOR_SEEDS = { 6: 3, 5: 2, 4: 0, 3: 9, 2: 11, 1: 8 };
+    // ONE office for the whole page (user-pinned): the hero's Dense variant
+    // (seed 3 → two meeting rooms). One continuous world, one timeline that
+    // never resets while you scroll — no per-floor swapping.
+    const SEED = 3;
 
-    let OfficeCtor = null;
     let office = null;
     let wasm = null;
     let ctx2d = null;
@@ -122,15 +120,6 @@ import { asset } from '../consts';
     let raf = 0;
     let last = 0;
     let live = false;
-    let floor = 6;
-    let swapTimer = 0;
-    // ONE persistent Office per floor, created lazily on first visit. A floor
-    // swap is a reference switch between live frames — no teardown, no dark
-    // dip, no empty-office restart (the old dip-and-rebuild pulsed the whole
-    // background on every section crossing: the "flicker"). Revisiting a
-    // floor resumes its timeline (the wasm module's catch-up re-anchors
-    // long gaps). ~6 cached offices ≈ a few MB of wasm memory, bounded.
-    const officeByFloor = {};
 
     function sizeBuffer() {
       const w = window.innerWidth;
@@ -178,32 +167,11 @@ import { asset } from '../consts';
       raf = 0;
     }
 
-    function officeFor(f) {
-      let o = officeByFloor[f];
-      if (!o) {
-        o = new OfficeCtor(FLOOR_SEEDS[f] != null ? FLOOR_SEEDS[f] : 0);
-        officeByFloor[f] = o;
-      }
-      return o;
-    }
-
-    function setFloor(next) {
-      if (next === floor || !OfficeCtor) return;
-      floor = next;
-      // Debounced: a momentum scroll across three floors lands ONE switch,
-      // and boundary jitter around a section edge can't thrash.
-      clearTimeout(swapTimer);
-      swapTimer = setTimeout(function () {
-        office = officeFor(floor);
-      }, 220);
-    }
-
     import(wasmJsUrl)
       .then(function (mod) {
         return mod.default().then(function (w) {
           wasm = w;
-          OfficeCtor = mod.Office;
-          office = officeFor(floor);
+          office = new mod.Office(SEED);
           ctx2d = canvas.getContext('2d');
           sizeBuffer();
           start();
@@ -235,33 +203,6 @@ import { asset } from '../consts';
           start();
         }
       });
-    }
-    // Ride the elevator: the floor whose section owns the viewport center
-    // drives the office. Same [data-floor] sections the elevator nav tracks.
-    // DEFERRED to DOMContentLoaded: this is:inline script renders BEFORE
-    // <main>, so a parse-time querySelectorAll sees zero sections and the
-    // floor swap never arms (the documented elevator-scrollspy trap).
-    function observeFloors() {
-      if (!('IntersectionObserver' in window)) return;
-      const io = new IntersectionObserver(
-        function (es) {
-          es.forEach(function (e) {
-            if (e.isIntersecting) {
-              const f = parseInt(e.target.getAttribute('data-floor') || '6', 10);
-              setFloor(f);
-            }
-          });
-        },
-        { rootMargin: '-45% 0px -45% 0px', threshold: 0 }
-      );
-      document.querySelectorAll('[data-floor]').forEach(function (s) {
-        io.observe(s);
-      });
-    }
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', observeFloors, { once: true });
-    } else {
-      observeFloors();
     }
   })();
 </script>
