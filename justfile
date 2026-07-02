@@ -356,6 +356,33 @@ gen-readme-check:
 gen-media *args:
     .venv/bin/python3 scripts/gen-media.py {{ args }}
 
+# Build the live-office wasm module (pixtuoid-web) + its JS glue into
+# site/public/wasm/ — a COMMITTED artifact (like public/demos/), so the site CI
+# stays Node-only. Toolchain gotcha (load-bearing, cost 2 debug cycles): the
+# PATH cargo/rustc may be Homebrew's, which has NO wasm32 std — and even
+# `rustup run stable cargo` fails because cargo resolves `rustc` via PATH. So
+# the recipe prepends the RUSTUP toolchain bin (via `rustup which`) and invokes
+# that cargo explicitly. wasm-bindgen-cli must match the crate's pinned
+# wasm-bindgen (see crates/pixtuoid-web/Cargo.toml); wasm-opt (binaryen)
+# shrinks the blob ~10-20%.
+[group('gen')]
+[doc('Build pixtuoid-web (wasm) + JS glue into site/public/wasm/')]
+gen-wasm:
+    #!/usr/bin/env sh
+    set -eu
+    command -v rustup >/dev/null || { echo "needs rustup (Homebrew rust has no wasm std)"; exit 1; }
+    command -v wasm-bindgen >/dev/null || { echo "needs wasm-bindgen-cli: cargo install wasm-bindgen-cli --locked"; exit 1; }
+    command -v wasm-opt >/dev/null || { echo "needs wasm-opt: brew install binaryen"; exit 1; }
+    rustup target list --toolchain stable --installed | grep -q wasm32-unknown-unknown \
+        || { echo "needs the wasm target: rustup target add wasm32-unknown-unknown"; exit 1; }
+    TB="$(dirname "$(rustup which --toolchain stable rustc)")"
+    PATH="$TB:$PATH" "$TB/cargo" build -p pixtuoid-web --target wasm32-unknown-unknown --release
+    mkdir -p site/public/wasm
+    wasm-bindgen --target web --out-dir site/public/wasm \
+        target/wasm32-unknown-unknown/release/pixtuoid_web.wasm
+    wasm-opt -Oz -o site/public/wasm/pixtuoid_web_bg.wasm site/public/wasm/pixtuoid_web_bg.wasm
+    ls -la site/public/wasm/
+
 # Drift gate: fail if any committed README section OR rendered still is stale.
 # Pixel-diffs every PNG (threshold 0); video clips + demo.gif are presence-only
 # (ffmpeg/gifsicle bytes aren't stable cross-version, but the renders feeding

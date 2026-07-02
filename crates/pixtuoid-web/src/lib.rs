@@ -12,14 +12,19 @@
 //! Time is a PARAMETER (`now_ms` from JS): the engine never calls
 //! `SystemTime::now()` (it panics on wasm32-unknown-unknown).
 
+mod script;
+
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, SystemTime};
 
 use wasm_bindgen::prelude::*;
 
 use pixtuoid_core::sprite::{format::Pack, Rgb, RgbBuffer};
+use pixtuoid_core::state::reducer::Reducer;
 use pixtuoid_core::state::SceneState;
 use pixtuoid_core::AgentId;
+
+use crate::script::{hero_script, Beat, LOOP_MS};
 
 use pixtuoid_scene::chitchat::{ActiveChitchat, VenueKey};
 use pixtuoid_scene::embedded_pack::load_sprite_pack;
@@ -49,6 +54,14 @@ pub struct Office {
     coffee_holders: HashSet<AgentId>,
     coffee_fetched_at: HashMap<AgentId, SystemTime>,
     seed: u64,
+    /// The REAL reducer + the looped hero script driving it — the office is
+    /// populated by the same state machine the app uses, not a hand-rolled fake.
+    reducer: Reducer,
+    beats: Vec<Beat>,
+    /// Next un-fired beat in the current loop.
+    cursor: usize,
+    /// t0 of the current loop; set on the first `step` call.
+    epoch: Option<SystemTime>,
 }
 
 #[wasm_bindgen]
@@ -73,6 +86,10 @@ impl Office {
             coffee_holders: HashSet::new(),
             coffee_fetched_at: HashMap::new(),
             seed: seed as u64,
+            reducer: Reducer::new(),
+            beats: hero_script(),
+            cursor: 0,
+            epoch: None,
         })
     }
 
@@ -80,6 +97,9 @@ impl Office {
     /// `w`×`h` pixels into the RGBA staging buffer.
     pub fn step(&mut self, now_ms: f64, w: u32, h: u32) {
         let now = SystemTime::UNIX_EPOCH + Duration::from_millis(now_ms.max(0.0) as u64);
+        self.advance_script(now);
+        // The per-frame sweep: Active→Idle debounce, exit GC, walkouts.
+        self.reducer.tick(&mut self.scene, now);
         let buf_w = w.clamp(1, u16::MAX as u32) as u16;
         let buf_h = h.clamp(1, u16::MAX as u32) as u16;
         self.render(now, buf_w, buf_h);
@@ -98,6 +118,48 @@ impl Office {
 }
 
 impl Office {
+    /// Fire every scripted beat due by `now`, each applied at its SCHEDULED
+    /// time (not `now`) so the reducer's time-based semantics — the 1.5s
+    /// Active debounce, exit grace — hold even when a hidden tab's rAF pauses
+    /// and a resumed step has to catch up a large gap. Wraps the loop epoch;
+    /// a gap past one full loop is re-anchored instead of replayed N times.
+    fn advance_script(&mut self, now: SystemTime) {
+        let epoch = *self.epoch.get_or_insert(now);
+        let mut elapsed = now
+            .duration_since(epoch)
+            .unwrap_or_default()
+            .as_millis()
+            .min(u128::from(u64::MAX)) as u64;
+
+        // A long-hidden tab: skip whole missed loops, keep the phase — the
+        // replayed SessionStarts of the kept phase re-seat the cast.
+        if elapsed >= 2 * LOOP_MS {
+            let skip = (elapsed / LOOP_MS - 1) * LOOP_MS;
+            self.epoch = Some(epoch + Duration::from_millis(skip));
+            elapsed -= skip;
+        }
+
+        loop {
+            let loop_epoch = self.epoch.expect("set above");
+            while let Some(beat) = self.beats.get(self.cursor) {
+                if beat.at_ms > elapsed {
+                    break;
+                }
+                let at = loop_epoch + Duration::from_millis(beat.at_ms);
+                self.reducer
+                    .apply(&mut self.scene, beat.event.clone(), at, beat.transport);
+                self.cursor += 1;
+            }
+            if elapsed < LOOP_MS {
+                break;
+            }
+            // Loop wrap: restart the script one LOOP_MS later.
+            self.epoch = Some(loop_epoch + Duration::from_millis(LOOP_MS));
+            self.cursor = 0;
+            elapsed -= LOOP_MS;
+        }
+    }
+
     fn render(&mut self, now: SystemTime, buf_w: u16, buf_h: u16) {
         self.buf
             .ensure_size(buf_w, buf_h, self.theme.surface.bg_fallback);

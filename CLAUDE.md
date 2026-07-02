@@ -35,18 +35,28 @@ an ASCII office. Rust workspace of four crates. User-facing overview:
 ## Layout (workspace)
 
 ```
-crates/                 DAG: pixtuoid-core ← pixtuoid-scene ← pixtuoid (+ standalone pixtuoid-hook)
+crates/                 DAG: pixtuoid-core ← pixtuoid-scene ← {pixtuoid, pixtuoid-web} (+ standalone pixtuoid-hook)
 ├── pixtuoid-core/   headless lib — no terminal deps (ratatui/crossterm forbidden)
 │                    source/ state/ sprite/ render/ layout/ physics.rs pose/ walkable.rs
+│                    `native` (default) feature gates the async source runtime (tokio/notify,
+│                    hook/jsonl/manager/probes, the Source trait) — `default-features = false`
+│                    leaves the pure decode/reducer/layout core, which compiles to wasm32
 ├── pixtuoid-scene/  backend-agnostic render+sim ENGINE crate — terminal AND window-free BY CRATE
 │                    BOUNDARY (no ratatui/crossterm/winit/softbuffer in its Cargo.toml; just arch enforces)
 │                    pixel_painter/ (render_to_rgb_buffer) layout/ pose/ motion/ pathfind/ floor/ theme/
 │                    pet/ chitchat/ frame_cache/ anim/ overlay/ font/ embedded_pack/ (default pack at
-│                    sprites/default/, own build.rs); depends on pixtuoid-core
+│                    sprites/default/, own build.rs); depends on pixtuoid-core (forwards `native`)
 ├── pixtuoid/        binary — ratatui + crossterm + winit + tokio + clap; depends on pixtuoid-scene
 │                    cli.rs config.rs runtime/ install/ tui/ floating/ (two thin painters over the
 │                    pixtuoid-scene crate; neither depends on the other) sprites/ (skeleton embedded via
 │                    include_str!, robot --pack-dir-loadable)
+├── pixtuoid-web/    the THIRD painter — wasm-bindgen `<canvas>` painter over pixtuoid-scene
+│                    (default-features off → no tokio anywhere), publish = false: a SITE BUILD
+│                    INPUT (`just gen-wasm` → committed site/public/wasm/), not a crates.io
+│                    artifact. `Office` handle: new(seed) / step(now_ms,w,h) / frame_ptr/len;
+│                    a looped scripted timeline (src/script.rs) drives the REAL Reducer, so the
+│                    live-office hero can't drift from app behavior. Time is a PARAMETER — the
+│                    engine never reads the clock on wasm.
 └── pixtuoid-hook/   tiny shim CC invokes — stdin JSON → Unix socket / Windows named
                      pipe (transport.rs), 200ms send bound
 scripts/             gen-media.py + media.json (the ONE manifest-driven driver for ALL

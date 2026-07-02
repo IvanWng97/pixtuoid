@@ -1,0 +1,299 @@
+//! The hero's scripted cast — a deterministic, LOOPED event timeline fed
+//! through the REAL `Reducer`, so the web office behaves exactly like the app
+//! (walk-ins, desk assignment, Active debounce, waiting bubbles, walkouts)
+//! and can never drift from real behavior. No tokio, no sources — just the
+//! same `(Transport, AgentEvent)` stream a live CLI would produce.
+//!
+//! Beat structure (one `LOOP_MS` cycle):
+//! - staggered `SessionStart`s walk the cast in over the first ~20s;
+//! - each agent runs chained tool bursts (`ActivityStart`→`ActivityEnd` with
+//!   gaps < the reducer's 1.5s Active debounce, so work reads continuous)
+//!   interleaved with idle stretches (wander/coffee/meetings emerge from the
+//!   engine, not the script);
+//! - one agent parks on a permission `Waiting` mid-loop;
+//! - one agent `SessionEnd`s and a "new hire" starts later (door traffic).
+//!
+//! On loop wrap the same events replay: a `SessionStart` for a live slot is
+//! a reducer no-op (backfill arm), the ended agent re-enters (resurrect /
+//! fresh registration), so the office stays coherent forever.
+
+use std::path::PathBuf;
+
+use pixtuoid_core::{AgentEvent, AgentId, ToolDetail, Transport};
+
+/// One scripted beat: fires `at_ms` into the current loop.
+pub(crate) struct Beat {
+    pub at_ms: u64,
+    pub transport: Transport,
+    pub event: AgentEvent,
+}
+
+/// Loop length. Long enough that the cycle doesn't read as a loop (the
+/// ambient layer — wander, pets, weather — is unsynchronized with it anyway).
+pub(crate) const LOOP_MS: u64 = 120_000;
+
+/// A cast member: a source CLI + a repo-ish cwd (drives the label AND the
+/// Team-Palette outfit, which keys on cwd).
+const CAST: &[(&str, &str, &str)] = &[
+    // (source, session key, cwd)
+    ("claude_code", "hero-cc-api", "/work/api"),
+    ("claude_code", "hero-cc-web", "/work/webapp"),
+    ("codex", "hero-cx-infra", "/work/infra"),
+    ("claude_code", "hero-cc-data", "/work/data"),
+    ("opencode", "hero-oc-cli", "/work/cli"),
+    ("codex", "hero-cx-web", "/work/webapp"),
+    ("cursor", "hero-cu-docs", "/work/docs"),
+    ("claude_code", "hero-cc-infra", "/work/infra"),
+];
+
+fn cast_id(i: usize) -> AgentId {
+    let (source, key, _) = CAST[i];
+    AgentId::from_parts(source, key)
+}
+
+fn session_start(i: usize) -> AgentEvent {
+    let (source, key, cwd) = CAST[i];
+    AgentEvent::SessionStart {
+        agent_id: cast_id(i),
+        source: source.to_string(),
+        session_id: key.to_string(),
+        cwd: PathBuf::from(cwd),
+        parent_id: None,
+    }
+}
+
+fn tool(i: usize, at_ms: u64, tuid: &str, display: &str) -> [Beat; 2] {
+    // A burst is start→end 900ms apart; chaining bursts <1.5s apart keeps the
+    // slot Active through the reducer's ACTIVE_GRACE_WINDOW debounce.
+    [
+        Beat {
+            at_ms,
+            transport: Transport::Hook,
+            event: AgentEvent::ActivityStart {
+                agent_id: cast_id(i),
+                tool_use_id: Some(format!("hero-{i}-{tuid}")),
+                detail: Some(ToolDetail::Generic {
+                    display: display.to_string(),
+                }),
+            },
+        },
+        Beat {
+            at_ms: at_ms + 900,
+            transport: Transport::Hook,
+            event: AgentEvent::ActivityEnd {
+                agent_id: cast_id(i),
+                tool_use_id: Some(format!("hero-{i}-{tuid}")),
+            },
+        },
+    ]
+}
+
+/// A work SPELL: `n` chained bursts starting at `at_ms` (each 1.2s apart →
+/// continuously Active for ~1.2n seconds, then the agent settles Idle and the
+/// engine's wander takes over until the next spell).
+fn spell(beats: &mut Vec<Beat>, i: usize, at_ms: u64, n: u64, tools: &[&str]) {
+    for k in 0..n {
+        let display = tools[(k as usize) % tools.len()];
+        let t = format!("s{at_ms}-{k}");
+        beats.extend(tool(i, at_ms + k * 1200, &t, display));
+    }
+}
+
+/// Build one loop of the hero timeline, sorted by `at_ms`.
+pub(crate) fn hero_script() -> Vec<Beat> {
+    let mut b: Vec<Beat> = Vec::new();
+
+    // Walk-ins: staggered so the door + corridor animate one by one.
+    for (i, delay) in [0u64, 2_500, 5_500, 9_000, 12_000, 15_500, 19_000]
+        .iter()
+        .enumerate()
+    {
+        b.push(Beat {
+            at_ms: *delay,
+            transport: Transport::Jsonl,
+            event: session_start(i),
+        });
+    }
+
+    // Work spells per agent — offsets chosen so at any instant roughly half
+    // the office types while the rest wander/idle (meetings + coffee emerge).
+    spell(
+        &mut b,
+        0,
+        6_000,
+        8,
+        &["Bash: cargo test", "Edit main.rs", "Read lib.rs"],
+    );
+    spell(&mut b, 1, 10_000, 6, &["Edit App.tsx", "Bash: pnpm build"]);
+    spell(
+        &mut b,
+        2,
+        14_000,
+        10,
+        &["Bash: terraform plan", "Read modules.tf"],
+    );
+    spell(&mut b, 3, 20_000, 6, &["Bash: dbt run", "Edit models.sql"]);
+    spell(&mut b, 4, 24_000, 8, &["Edit cmd.rs", "Bash: cargo clippy"]);
+    spell(&mut b, 5, 30_000, 6, &["Read index.ts", "Edit routes.ts"]);
+    spell(
+        &mut b,
+        0,
+        42_000,
+        10,
+        &["Write api.rs", "Bash: cargo check"],
+    );
+    spell(
+        &mut b,
+        2,
+        55_000,
+        8,
+        &["Bash: kubectl apply", "Read deploy.yml"],
+    );
+    spell(
+        &mut b,
+        1,
+        62_000,
+        8,
+        &["Edit styles.css", "Bash: pnpm test"],
+    );
+    spell(&mut b, 6, 40_000, 6, &["Edit README.md", "Read guide.md"]);
+    spell(
+        &mut b,
+        4,
+        70_000,
+        8,
+        &["Bash: cargo build", "Edit parse.rs"],
+    );
+    spell(&mut b, 3, 80_000, 6, &["Read schema.sql", "Edit etl.py"]);
+    spell(&mut b, 5, 90_000, 8, &["Bash: vitest run", "Edit hooks.ts"]);
+    spell(
+        &mut b,
+        0,
+        100_000,
+        6,
+        &["Edit tests.rs", "Bash: cargo test"],
+    );
+
+    // A permission park: agent 6 hits a gate mid-loop, resolved ~12s later by
+    // the gated tool's completion (the reducer's gated_before_waiting path).
+    b.push(Beat {
+        at_ms: 58_000,
+        transport: Transport::Hook,
+        event: AgentEvent::ActivityStart {
+            agent_id: cast_id(6),
+            tool_use_id: Some("hero-6-gated".to_string()),
+            detail: Some(ToolDetail::Generic {
+                display: "Bash: rm -rf dist".to_string(),
+            }),
+        },
+    });
+    b.push(Beat {
+        at_ms: 58_400,
+        transport: Transport::Hook,
+        event: AgentEvent::Waiting {
+            agent_id: cast_id(6),
+            reason: "permission".to_string(),
+        },
+    });
+    b.push(Beat {
+        at_ms: 70_500,
+        transport: Transport::Hook,
+        event: AgentEvent::ActivityEnd {
+            agent_id: cast_id(6),
+            tool_use_id: Some("hero-6-gated".to_string()),
+        },
+    });
+
+    // Door traffic: agent 5 wraps up and leaves; a late hire (7) walks in.
+    b.push(Beat {
+        at_ms: 104_000,
+        transport: Transport::Hook,
+        event: AgentEvent::SessionEnd {
+            agent_id: cast_id(5),
+            as_child: false,
+        },
+    });
+    b.push(Beat {
+        at_ms: 108_000,
+        transport: Transport::Jsonl,
+        event: session_start(7),
+    });
+    spell(&mut b, 7, 110_000, 6, &["Read main.rs", "Bash: just test"]);
+    // ...and 7 leaves near the wrap so the loop restart re-seats a stable cast
+    // (5 re-enters on the next loop's walk-in replay; 7's start replays too but
+    // lands AFTER its end below — the pair nets out to a periodic visitor).
+    b.push(Beat {
+        at_ms: LOOP_MS - 2_000,
+        transport: Transport::Hook,
+        event: AgentEvent::SessionEnd {
+            agent_id: cast_id(7),
+            as_child: false,
+        },
+    });
+
+    b.sort_by_key(|beat| beat.at_ms);
+    b
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pixtuoid_core::state::reducer::Reducer;
+    use pixtuoid_core::state::SceneState;
+    use std::time::{Duration, SystemTime};
+
+    fn run_script_through_reducer(loops: u32) -> SceneState {
+        let mut scene = SceneState::uniform(16);
+        let mut reducer = Reducer::new();
+        let t0 = SystemTime::UNIX_EPOCH + Duration::from_millis(1_000_000);
+        let script = hero_script();
+        for l in 0..loops {
+            for beat in &script {
+                let now = t0 + Duration::from_millis(u64::from(l) * LOOP_MS + beat.at_ms);
+                reducer.apply(&mut scene, beat.event.clone(), now, beat.transport);
+                reducer.tick(&mut scene, now);
+            }
+        }
+        scene
+    }
+
+    #[test]
+    fn script_is_sorted_and_fits_one_loop() {
+        let s = hero_script();
+        assert!(s.windows(2).all(|w| w[0].at_ms <= w[1].at_ms));
+        assert!(s.last().unwrap().at_ms < LOOP_MS);
+    }
+
+    #[test]
+    fn one_loop_populates_a_working_office() {
+        let scene = run_script_through_reducer(1);
+        // 7 walk-ins + the late hire − the two walkouts still present as slots
+        // (exiting slots GC ~4.5s after their end; the loop's last end is 2s
+        // before wrap, so at wrap the cast is 6 seated + up to 2 exiting).
+        assert!(
+            scene.agents.len() >= 6,
+            "expected a populated office, got {}",
+            scene.agents.len()
+        );
+        // Desk assignment happened through the real allocator.
+        let desks: std::collections::HashSet<_> =
+            scene.agents.values().map(|a| a.desk_index.0).collect();
+        assert_eq!(
+            desks.len(),
+            scene.agents.len(),
+            "each agent has its own desk"
+        );
+    }
+
+    #[test]
+    fn looping_stays_stable_across_wraps() {
+        // 3 loops: replayed SessionStarts must not duplicate agents or leak
+        // desks; the office converges to the steady cast.
+        let scene = run_script_through_reducer(3);
+        assert!(
+            (6..=8).contains(&scene.agents.len()),
+            "cast must stay bounded across loops, got {}",
+            scene.agents.len()
+        );
+    }
+}
