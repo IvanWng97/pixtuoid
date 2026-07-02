@@ -15,43 +15,38 @@
 
 mod script;
 
-use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
 
 use wasm_bindgen::prelude::*;
 
 use pixtuoid_core::source::daemon::apply_presence;
 use pixtuoid_core::source::openclaw;
-use pixtuoid_core::sprite::{format::Pack, Rgb, RgbBuffer};
+use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::state::reducer::Reducer;
 use pixtuoid_core::state::SceneState;
 use pixtuoid_core::{AgentEvent, AgentId, Transport};
 
 use crate::script::{hero_script, hire_beats, lobster_beats, Beat, PresenceBeat, LOOP_MS};
 
-use pixtuoid_scene::chitchat::{ActiveChitchat, VenueKey};
 use pixtuoid_scene::embedded_pack::load_sprite_pack;
-use pixtuoid_scene::floor::{floor_capacity, render_floor, CoffeeState, FloorCtx, FloorMeta};
+use pixtuoid_scene::floor::{floor_capacity, FloorMeta, FloorSession};
 use pixtuoid_scene::theme::{Theme, ALL_THEMES};
 
-/// A live office rendered to a reusable RGBA buffer across frames. Owns the
-/// per-floor render caches (`FloorCtx`) + the persistent office state
-/// (coffee/chitchat) so keeping ONE handle alive across `step` calls is what
-/// keeps motion/pose continuous (no walk-flash) — same contract as
-/// `OfficeRenderer`.
+/// A live office rendered to a reusable RGBA buffer across frames. Owns a
+/// `FloorSession` (the scene-owned painter session: per-floor render caches +
+/// persistent office coffee/chitchat + the dual eviction) so keeping ONE
+/// handle alive across `step` calls is what keeps motion/pose continuous
+/// (no walk-flash) — same contract as `OfficeRenderer`.
 #[wasm_bindgen]
 pub struct Office {
     scene: SceneState,
-    floor: FloorCtx,
-    buf: RgbBuffer,
+    session: FloorSession,
     /// RGBA staging (the render buffer is packed RGB, no alpha) — its ptr/len
     /// back a JS `Uint8ClampedArray` view into wasm memory, so blitting is
     /// zero-copy on the JS side.
     rgba: Vec<u8>,
     pack: Pack,
     theme: &'static Theme,
-    chitchat: HashMap<VenueKey, ActiveChitchat>,
-    coffee: CoffeeState,
     seed: u64,
     /// The REAL reducer + the looped hero script driving it — the office is
     /// populated by the same state machine the app uses, not a hand-rolled fake.
@@ -96,13 +91,10 @@ impl Office {
             // layout on every `step` (`sync_capacity`) before any beat fires,
             // so the reducer only admits agents the rendered office can seat.
             scene: SceneState::default(),
-            floor: FloorCtx::new(),
-            buf: RgbBuffer::filled(0, 0, Rgb { r: 0, g: 0, b: 0 }),
+            session: FloorSession::new(),
             rgba: Vec::new(),
             pack,
             theme: ALL_THEMES[0],
-            chitchat: HashMap::new(),
-            coffee: CoffeeState::new(),
             seed: seed as u64,
             reducer: Reducer::new(),
             beats: hero_script(),
@@ -138,12 +130,11 @@ impl Office {
         self.advance_script(now);
         // The per-frame sweep: Active→Idle debounce, exit GC, walkouts.
         self.reducer.tick(&mut self.scene, now);
-        // Evict per-agent render state for agents the sweep removed (#423: the
-        // shared scene seam — see `FloorCtx::evict_missing`'s doc for why this
-        // is load-bearing here: the looped script REUSES agent ids, and a
-        // returning cast member with stale walk legs teleports in).
-        self.floor.evict_missing(&self.scene);
-        self.coffee.evict_missing(&self.scene);
+        // `render` (the FloorSession) evicts per-agent render state for the
+        // agents the sweep removed — load-bearing here: the looped script
+        // REUSES agent ids, and a returning cast member with stale walk legs
+        // teleports in (see `FloorCtx::evict_missing`'s doc). Structural
+        // since the session owns it — this painter can't forget it again.
         self.render(now, buf_w, buf_h);
         self.expand_rgba();
     }
@@ -323,21 +314,18 @@ impl Office {
     const MAX_LIVE_HIRES: usize = 3;
 
     fn render(&mut self, now: SystemTime, buf_w: u16, buf_h: u16) {
-        // The shared scene seam (#423) owns the whole frame: buffer sizing,
-        // layout (`None` desk cap = fill — the office packs as many desk pods
-        // as the canvas physically fits), the pixel pass, and the
-        // coffee/door-anim epilogue. Too-small layouts leave the cleared
-        // buffer; never panics. The layout seed is the hero's variant seed
-        // (NOT floor-derived), so build the meta then override the seed.
+        // The scene-owned session owns the whole frame (#423 → FloorSession):
+        // the dual per-agent eviction, buffer sizing, layout (`None` desk cap
+        // = fill — the office packs as many desk pods as the canvas
+        // physically fits), the pixel pass, and the coffee/door-anim
+        // epilogue. Too-small layouts leave the cleared buffer; never panics.
+        // The layout seed is the hero's variant seed (NOT floor-derived), so
+        // build the meta then override the seed.
         let floor_meta = FloorMeta {
             floor_seed: self.seed,
             ..FloorMeta::for_floor(0, 1)
         };
-        render_floor(
-            &mut self.floor,
-            &mut self.buf,
-            &mut self.coffee,
-            &mut self.chitchat,
+        self.session.render(
             &self.scene,
             &self.pack,
             self.theme,
@@ -354,7 +342,7 @@ impl Office {
     /// Expand the packed-RGB render buffer into the RGBA staging vec (opaque
     /// alpha). `Rgb` is not `repr(C)`, so expand per-pixel — don't cast.
     fn expand_rgba(&mut self) {
-        let px = self.buf.as_slice();
+        let px = self.session.buf().as_slice();
         self.rgba.clear();
         self.rgba.reserve(px.len() * 4);
         for c in px {
@@ -478,7 +466,8 @@ mod tests {
             t += 1_000;
         }
         assert!(
-            o.scene.agents.contains_key(&cast_id(5)) && o.floor.motion.contains_key(&cast_id(5)),
+            o.scene.agents.contains_key(&cast_id(5))
+                && o.session.floor.ctx.motion.contains_key(&cast_id(5)),
             "agent 5 must be live with motion state mid-loop (positive control)"
         );
         // Past agent 5's SessionEnd (104s) + the 4.5s exit grace + sweep.
@@ -491,11 +480,11 @@ mod tests {
             "agent 5 exited and was GC'd"
         );
         assert!(
-            !o.floor.motion.contains_key(&cast_id(5)),
+            !o.session.floor.ctx.motion.contains_key(&cast_id(5)),
             "agent 5's motion state was evicted with its slot"
         );
         assert!(
-            !o.coffee.map().contains_key(&cast_id(5)),
+            !o.session.office.coffee.map().contains_key(&cast_id(5)),
             "agent 5's coffee state was evicted with its slot"
         );
     }

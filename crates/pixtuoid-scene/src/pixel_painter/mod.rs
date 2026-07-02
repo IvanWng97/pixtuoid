@@ -92,10 +92,12 @@ mod seat;
 mod sim;
 
 pub use anchors::character_anchor;
-// pub(crate) until γ3's FloorSession facade: the raw seam has zero external
-// consumers, and publishing it pre-facade would make γ3's reshape a semver
-// break (the gate-pollution class). FloorSession widens what consumers need.
-pub(crate) use sim::{sim_step, CharacterGlow, SimFrame, SimStores};
+// The γ3 widening that PR-450 planned for: the observation TYPES a
+// `floor::FloorSession::observe` caller reads go pub WITH the facade;
+// `sim_step` + `SimStores` (the per-call borrow-set) stay crate-internal —
+// the session is the public entry to the sim tick.
+pub(crate) use sim::{sim_step, SimStores};
+pub use sim::{CharacterGlow, CharacterPlacement, SimFrame};
 
 use anchors::compute_door_frame_idx;
 use background::{

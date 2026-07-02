@@ -99,7 +99,9 @@ impl GlobalDeskIndex {
     /// The floor-local view of this index **within a single-floor scene**.
     ///
     /// Valid only for slots in a per-floor projection (the output of
-    /// `build_floor_scene` / `project_floor_scene` in the tui, or any
+    /// `project_floor_scene` in pixtuoid-scene — whose `build_floor_scene`
+    /// carries the local desk as a typed `FloorLocalDeskIndex` pair until the
+    /// re-host — or any
     /// `uniform(cap)` scene standing in for one floor): there the scene's
     /// global space coincides with its floor-0 local space
     /// (`floor_of(g) == 0`, `floor_local_desk(g).0 == g.0`), so this cast

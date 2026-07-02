@@ -14,8 +14,8 @@ use std::time::SystemTime;
 
 use crate::physics::{walk_arrived, WalkProfile};
 use pixtuoid_core::sprite::format::Pack;
-use pixtuoid_core::sprite::RgbBuffer;
-use pixtuoid_core::state::{AgentSlot, GlobalDeskIndex, SceneState};
+use pixtuoid_core::sprite::{Rgb, RgbBuffer};
+use pixtuoid_core::state::{AgentSlot, FloorLocalDeskIndex, GlobalDeskIndex, SceneState};
 use pixtuoid_core::walkable::OccupancyOverlay;
 use pixtuoid_core::AgentId;
 
@@ -24,7 +24,7 @@ use crate::frame_cache::FrameCache;
 use crate::motion::MotionState;
 use crate::pathfind::{AStarRouter, Router};
 use crate::pet::{Pet, PetState};
-use crate::pixel_painter::{render_to_rgb_buffer, PixelCtx};
+use crate::pixel_painter::{render_to_rgb_buffer, sim_step, PixelCtx, SimFrame, SimStores};
 use crate::pose::PoseHistory;
 use crate::theme::Theme;
 
@@ -172,8 +172,9 @@ impl FloorCtx {
 /// map, not a `HashSet` + `HashMap` pair: cup-without-stamp and
 /// stamp-without-cup are unrepresentable instead of merely maintained (#431).
 /// One per OFFICE, not per floor: an agent's cup survives floor navigation,
-/// so the TUI shares one across its `Vec<FloorCtx>` (the floating window and
-/// the web hero each own one alongside their single floor).
+/// which is why it lives in [`PerOffice`] — the TUI shares one across its
+/// `Vec<PerFloor>`; the floating window and the web hero each own one inside
+/// their [`FloorSession`].
 #[derive(Debug, Default)]
 pub struct CoffeeState(HashMap<AgentId, SystemTime>);
 
@@ -261,7 +262,10 @@ impl CoffeeState {
 /// (`project_floor_scene`), so evicting in here would wipe every OTHER
 /// floor's motion/cache/coffee on each slide frame. Don't "finish the seam"
 /// by moving eviction inside — it would pass every single-floor test and
-/// break multi-floor.
+/// break multi-floor. For the single-floor painters "the caller" is now
+/// [`FloorSession`], whose `render` runs the dual eviction once (its scene IS
+/// the full live scene by contract); only a projected-scene consumer like the
+/// TUI slide still calls this fn raw and owns its own eviction.
 #[allow(clippy::too_many_arguments)] // the render inputs are genuinely flat (same shape as the pass itself)
 pub fn render_floor(
     fctx: &mut FloorCtx,
@@ -312,6 +316,193 @@ pub fn render_floor(
     //    refresh the door-cosmetic clamp for the next frame.
     fctx.recompute_door_anim_max_ms(now);
     Some(layout)
+}
+
+/// The per-FLOOR half of a painter's persistent session state: the sim/paint
+/// stores ([`FloorCtx`]) plus the reusable pixel buffer that floor renders
+/// into. A multi-floor painter composes `Vec<PerFloor>` (the TUI); the
+/// single-floor painters hold one inside a [`FloorSession`].
+pub struct PerFloor {
+    pub ctx: FloorCtx,
+    pub buf: RgbBuffer,
+}
+
+impl PerFloor {
+    pub fn new() -> Self {
+        Self {
+            ctx: FloorCtx::new(),
+            buf: RgbBuffer::filled(0, 0, Rgb { r: 0, g: 0, b: 0 }),
+        }
+    }
+
+    /// The per-floor half of the dual per-agent eviction protocol (cached
+    /// frames, pose history, motion legs). Run with the FULL live scene.
+    pub fn evict_missing(&mut self, scene: &SceneState) {
+        self.ctx.evict_missing(scene);
+    }
+}
+
+impl Default for PerFloor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// The per-OFFICE half: cross-frame state that survives floor navigation —
+/// an agent's desk cup ([`CoffeeState`]) and the venue chitchat map (its
+/// `VenueKey` already carries `floor_idx`). ONE per painter surface, shared
+/// across every floor, so a cup follows its agent through a floor switch.
+#[derive(Default)]
+pub struct PerOffice {
+    pub coffee: CoffeeState,
+    pub chitchat: HashMap<VenueKey, ActiveChitchat>,
+}
+
+impl PerOffice {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// The office half of the dual eviction: the cup leaves with the agent.
+    /// `chitchat` is deliberately untouched — conversations self-expire inside
+    /// `chitchat::update_and_collect` (participants are refreshed per frame),
+    /// so there is no per-agent entry to leak.
+    pub fn evict_missing(&mut self, scene: &SceneState) {
+        self.coffee.evict_missing(scene);
+    }
+}
+
+/// The OWNED painter session: the persistent bundle every painter used to
+/// hand-roll — {[`FloorCtx`], `RgbBuffer`, [`CoffeeState`], chitchat map} plus
+/// the dual `evict_missing` protocol — hoisted behind one type. Each painter
+/// drifted on exactly that convention once: the floating window never evicted
+/// (a slow per-agent leak for the window's lifetime) and the web hero shipped
+/// without eviction at all (the loop-2 teleport, #423). One floor + one
+/// office: the single-floor painters (`floating::offscreen::OfficeRenderer`,
+/// `pixtuoid-web::Office`) own a `FloorSession`; a multi-floor painter (the
+/// TUI) composes `Vec<`[`PerFloor`]`>` + one [`PerOffice`] and drives
+/// [`render_floor`] / `draw_scene` itself.
+pub struct FloorSession {
+    pub floor: PerFloor,
+    pub office: PerOffice,
+}
+
+impl FloorSession {
+    pub fn new() -> Self {
+        Self {
+            floor: PerFloor::new(),
+            office: PerOffice::default(),
+        }
+    }
+
+    /// Drop per-agent state for agents no longer in `scene` — BOTH halves of
+    /// the dual eviction (render caches + pose history + motion legs, and the
+    /// coffee cup), written once. `scene` must be the FULL live scene; see
+    /// [`render_floor`]'s eviction note for why a PROJECTED per-floor scene
+    /// must never be evicted against.
+    pub fn evict_missing(&mut self, scene: &SceneState) {
+        self.floor.evict_missing(scene);
+        self.office.evict_missing(scene);
+    }
+
+    /// Render one frame: the dual eviction, then the shared [`render_floor`]
+    /// seam (prologue → pixel pass → coffee/door-anim epilogue). Returns the
+    /// computed layout ([`FloorSession::buf`] holds the pixels), or `None`
+    /// when the size can't lay out.
+    ///
+    /// `scene` MUST be the full live scene — the session evicts against it,
+    /// so a painter can no longer forget the eviction (the drift class behind
+    /// the floating leak and the web loop-2 teleport). A consumer rendering
+    /// PROJECTED single-floor scenes (the TUI floor slide) stays on
+    /// [`render_floor`] directly and runs the eviction against the full scene
+    /// itself.
+    #[allow(clippy::too_many_arguments)] // the render inputs are genuinely flat (same shape as render_floor)
+    pub fn render(
+        &mut self,
+        scene: &SceneState,
+        pack: &Pack,
+        theme: &'static Theme,
+        now: SystemTime,
+        buf_w: u16,
+        buf_h: u16,
+        floor_meta: FloorMeta,
+        active_pet: Option<&PetState>,
+        floor_pet: Option<&Pet>,
+        debug_walkable: bool,
+    ) -> Option<crate::layout::Layout> {
+        self.evict_missing(scene);
+        render_floor(
+            &mut self.floor.ctx,
+            &mut self.floor.buf,
+            &mut self.office.coffee,
+            &mut self.office.chitchat,
+            scene,
+            pack,
+            theme,
+            now,
+            buf_w,
+            buf_h,
+            floor_meta,
+            active_pet,
+            floor_pet,
+            debug_walkable,
+        )
+    }
+
+    /// The rendered pixel buffer (a borrow of the reused allocation).
+    pub fn buf(&self) -> &RgbBuffer {
+        &self.floor.buf
+    }
+
+    /// Advance the world one tick WITHOUT painting — the headless observation
+    /// seam a native/windowless consumer drives: the same eviction, layout
+    /// prologue, sim tick (`pixel_painter::sim_step`), and bookkeeping
+    /// epilogue (coffee-carrier persistence + the door-anim clamp) as
+    /// [`FloorSession::render`], minus the paint pass — no pixel buffer is
+    /// touched. Returns the observed [`SimFrame`], or `None` when the size
+    /// can't lay out.
+    pub fn observe(
+        &mut self,
+        scene: &SceneState,
+        pack: &Pack,
+        buf_w: u16,
+        buf_h: u16,
+        floor_meta: FloorMeta,
+        now: SystemTime,
+    ) -> Option<SimFrame> {
+        self.evict_missing(scene);
+        let layout =
+            crate::layout::Layout::compute_with_seed(buf_w, buf_h, None, floor_meta.floor_seed)?;
+        self.floor.ctx.router.set_preferred_zone(layout.corridor);
+        let frame = sim_step(
+            &mut SimStores {
+                router: &mut self.floor.ctx.router,
+                overlay: &mut self.floor.ctx.overlay,
+                history: &mut self.floor.ctx.history,
+                motion: &mut self.floor.ctx.motion,
+                light: &mut self.floor.ctx.light,
+                chitchat: &mut self.office.chitchat,
+            },
+            scene,
+            &layout,
+            pack,
+            self.office.coffee.map(),
+            floor_meta.floor_idx,
+            now,
+        );
+        // The same epilogue render_floor owns for the painted path.
+        self.office
+            .coffee
+            .record(frame.new_coffee_carriers.iter().copied(), now);
+        self.floor.ctx.recompute_door_anim_max_ms(now);
+        Some(frame)
+    }
+}
+
+impl Default for FloorSession {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// Per-floor indoor-lighting fade state.
@@ -456,20 +647,26 @@ pub fn num_floors(scene: &SceneState) -> usize {
         .max(1)
 }
 
-/// Extract agents belonging to `floor_idx`, remapping their `desk_index`
-/// into the `[0..capacity)` range so the layout engine sees a
-/// self-contained floor. Uses the stored `floor_idx` on each slot so
-/// capacity growth never migrates agents between floors.
-///
-/// The remap is a RE-PROJECTION, not a space mix-up: the projected slots
-/// live in a `uniform(cap)` single-floor scene (`project_floor_scene`)
-/// whose own global desk space coincides with its floor-0 local space by
-/// construction (`floor_of(g) == 0`, `floor_local_desk(g).0 == g.0` —
-/// pinned by `build_floor_scene_remap_is_local_global_coincident` below).
-/// So the remapped value is a genuinely valid `GlobalDeskIndex` FOR THAT
-/// SMALLER SCENE, and the render path's
-/// `GlobalDeskIndex::single_floor_local` identity reads stay honest.
-pub fn build_floor_scene(scene: &SceneState, floor_idx: usize) -> Vec<AgentSlot> {
+/// One agent projected onto a floor by [`build_floor_scene`]: the slot — its
+/// `desk_index` still the ORIGINAL global allocation — paired with its desk in
+/// the floor's OWN local space, typed as such (`FloorLocalDeskIndex`, the #209
+/// currency). The projection used to write the floor-local offset back into
+/// `AgentSlot.desk_index` mid-flight, making that field's GLOBAL type a lie
+/// until [`project_floor_scene`] re-hosted the slot; the pair keeps the
+/// currency honest up to the re-host.
+pub struct ProjectedSlot {
+    pub slot: AgentSlot,
+    pub desk: FloorLocalDeskIndex,
+}
+
+/// Extract agents belonging to `floor_idx`, pairing each with its desk
+/// remapped into the floor's `[0..capacity)` LOCAL space (typed
+/// `FloorLocalDeskIndex`) so the layout engine sees a self-contained floor.
+/// Uses the stored `floor_idx` on each slot so capacity growth never migrates
+/// agents between floors. The slot's own `desk_index` is left at its global
+/// value; [`project_floor_scene`] performs the documented local→global
+/// re-host when it builds the single-floor scene.
+pub fn build_floor_scene(scene: &SceneState, floor_idx: usize) -> Vec<ProjectedSlot> {
     let offset = scene.floor_range(floor_idx).start;
     scene
         .agents
@@ -479,9 +676,10 @@ pub fn build_floor_scene(scene: &SceneState, floor_idx: usize) -> Vec<AgentSlot>
             if a.desk_index.0 < offset {
                 return None;
             }
-            let mut slot = a.clone();
-            slot.desk_index = GlobalDeskIndex(a.desk_index.0 - offset);
-            Some(slot)
+            Some(ProjectedSlot {
+                slot: a.clone(),
+                desk: FloorLocalDeskIndex(a.desk_index.0 - offset),
+            })
         })
         .collect()
 }
@@ -492,8 +690,18 @@ pub fn build_floor_scene(scene: &SceneState, floor_idx: usize) -> Vec<AgentSlot>
 /// floor-transition render paths both project the global scene this way.
 pub fn project_floor_scene(scene: &SceneState, floor_idx: usize) -> SceneState {
     let mut s = SceneState::uniform(scene.floor_capacities[floor_idx]);
-    for a in build_floor_scene(scene, floor_idx) {
-        s.agents.insert(a.agent_id, a);
+    for p in build_floor_scene(scene, floor_idx) {
+        let mut slot = p.slot;
+        // The RE-HOST, not a space mix-up: this `uniform(cap)` single-floor
+        // scene's global desk space coincides with its floor-0 local space by
+        // construction (`floor_of(g) == 0`, `floor_local_desk(g).0 == g.0` —
+        // pinned by `build_floor_scene_remap_is_local_global_coincident`
+        // below), so the floor-local desk IS a genuinely valid
+        // `GlobalDeskIndex` FOR THIS SMALLER SCENE — the inverse of the
+        // `GlobalDeskIndex::single_floor_local` identity the render path
+        // reads back through.
+        slot.desk_index = GlobalDeskIndex(p.desk.0);
+        s.agents.insert(slot.agent_id, slot);
     }
     // Daemon presences (the OpenClaw gateway mascot) are global, not per-desk —
     // carry them onto the GROUND floor only so the mascot renders exactly once.
@@ -696,19 +904,22 @@ mod tests {
 
         let floor0 = build_floor_scene(&scene, 0);
         assert_eq!(floor0.len(), 16);
-        for a in &floor0 {
-            assert!(
-                a.desk_index.0 < 16,
-                "desk_index {} out of range",
-                a.desk_index.0
-            );
+        for p in &floor0 {
+            assert!(p.desk.0 < 16, "local desk {} out of range", p.desk.0);
         }
 
         let floor1 = build_floor_scene(&scene, 1);
         assert_eq!(floor1.len(), 4);
-        let mut indices: Vec<usize> = floor1.iter().map(|a| a.desk_index.0).collect();
+        let mut indices: Vec<usize> = floor1.iter().map(|p| p.desk.0).collect();
         indices.sort();
         assert_eq!(indices, vec![0, 1, 2, 3]);
+        // The pair keeps the currency honest (#13): the LOCAL desk lives in
+        // the typed FloorLocalDeskIndex, while the slot's GLOBAL desk_index
+        // is untouched — floor 1's agents keep their real allocation (16..20)
+        // until project_floor_scene's documented re-host.
+        let mut globals: Vec<usize> = floor1.iter().map(|p| p.slot.desk_index.0).collect();
+        globals.sort();
+        assert_eq!(globals, vec![16, 17, 18, 19]);
     }
 
     #[test]
@@ -1113,5 +1324,113 @@ mod tests {
                 .any(|p| *p != pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 } && *p != bg),
             "the pixel pass painted office content"
         );
+    }
+
+    // ---- FloorSession -----------------------------------------------------
+
+    #[test]
+    fn floor_session_render_owns_the_dual_eviction() {
+        // The drift classes that actually shipped: the floating painter never
+        // evicted (per-agent motion/cache/coffee leaked for the window's
+        // lifetime) and the web hero forgot eviction entirely (the loop-2
+        // teleport). FloorSession::render runs BOTH halves itself, so a
+        // painter can no longer forget either one.
+        let pack = crate::embedded_pack::test_default_pack();
+        let theme = crate::theme::theme_by_name("normal").expect("normal theme exists");
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+        let gone = AgentId::from_parts("claude-code", "session-evict");
+        let mut session = FloorSession::new();
+        session
+            .floor
+            .ctx
+            .motion
+            .insert(gone, MotionState::new(gone));
+        session.office.coffee.insert(gone, now);
+
+        // `gone` is not in the scene → one render() must drop both entries.
+        let scene = SceneState::new([8; MAX_FLOORS]);
+        let layout = session.render(
+            &scene,
+            &pack,
+            theme,
+            now,
+            160,
+            96,
+            FloorMeta::ground(),
+            None,
+            None,
+            false,
+        );
+        assert!(layout.is_some(), "a layoutable size renders");
+        assert!(
+            !session.floor.ctx.motion.contains_key(&gone),
+            "render() evicts the floor half (motion) — the floating-leak class"
+        );
+        assert!(
+            !session.office.coffee.map().contains_key(&gone),
+            "render() evicts the office half (coffee) — the cup leaves with the agent"
+        );
+    }
+
+    #[test]
+    fn floor_session_observe_advances_the_world_without_a_pixel_buffer() {
+        // The headless observation seam the sim/paint split (#450) prepared:
+        // eviction + layout prologue + sim_step + the coffee/door epilogue,
+        // with NO pixel buffer touched. A fresh agent's entry walk must
+        // populate motion and the door-anim clamp, and the frame must carry
+        // its pose.
+        let pack = crate::embedded_pack::test_default_pack();
+        let scene = make_scene(1, 8);
+        let id = AgentId::from_transcript_path("/p/0.jsonl");
+        let t = t0() + Duration::from_millis(100); // 100ms in: entry walk in flight
+        let mut session = FloorSession::new();
+
+        let frame = session
+            .observe(&scene, &pack, 160, 96, FloorMeta::ground(), t)
+            .expect("a layoutable size observes");
+        assert!(
+            frame.poses.contains_key(&id),
+            "the frame carries the agent's routed pose"
+        );
+        assert!(
+            session.floor.ctx.motion.contains_key(&id),
+            "the sim advanced: the entry leg was snapshotted into motion"
+        );
+        assert!(
+            session.floor.ctx.door_anim_max_ms > 0,
+            "the epilogue ran headlessly: the in-flight entry drives the door clamp"
+        );
+        assert_eq!(
+            (session.buf().width(), session.buf().height()),
+            (0, 0),
+            "no pixel buffer was bought"
+        );
+
+        // Too small for any layout: None, never a panic.
+        assert!(
+            session
+                .observe(&scene, &pack, 8, 8, FloorMeta::ground(), t)
+                .is_none(),
+            "an unlayoutable size observes nothing"
+        );
+    }
+
+    #[test]
+    fn session_types_default_equals_new() {
+        // Same convention pin as FloorCtx/LightingState above: Default and
+        // new() must not diverge on a future field addition.
+        assert_eq!(PerFloor::default().ctx.door_anim_max_ms, 0);
+        assert_eq!(
+            (
+                PerFloor::default().buf.width(),
+                PerFloor::default().buf.height()
+            ),
+            (0, 0)
+        );
+        assert!(PerOffice::default().coffee.map().is_empty());
+        assert!(PerOffice::default().chitchat.is_empty());
+        let s = FloorSession::default();
+        assert!(s.floor.ctx.motion.is_empty());
+        assert!(s.office.coffee.map().is_empty());
     }
 }

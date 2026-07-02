@@ -7,9 +7,9 @@
 //! [`SimStores`] and returns an immutable [`SimFrame`] snapshot; the paint
 //! pass (still inside `render_to_rgb_buffer`) consumes `&SimFrame` and only
 //! ever writes the pixel buffer + the paint-local `FrameCache` (a render
-//! cache, deliberately NOT a sim store). Headless consumers (a FloorSession,
-//! a future native app) can call `sim_step` alone to observe poses/positions
-//! without buying a pixel pass.
+//! cache, deliberately NOT a sim store). Headless consumers drive
+//! `floor::FloorSession::observe` (the facade over `sim_step`) to observe
+//! poses/positions without buying a pixel pass.
 //!
 //! Store classification (what makes something SIM vs PAINT):
 //! * SIM — state that advances with time and must persist across frames:
@@ -57,7 +57,7 @@ pub(crate) struct SimStores<'a> {
 /// glow applies (a pose/lifecycle fact); paint maps it to a `Theme` color —
 /// colors are presentation and must not leak into the sim layer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum CharacterGlow {
+pub enum CharacterGlow {
     None,
     /// `SeatedThinking` — paint uses the theme's default tool-glow color.
     Thinking,
@@ -69,7 +69,7 @@ pub(crate) enum CharacterGlow {
 /// paint pass needs to blit the sprite, with no sim access and no colors.
 /// `agent_idx` indexes [`SimFrame::agents`].
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct CharacterPlacement {
+pub struct CharacterPlacement {
     pub agent_idx: usize,
     /// Y-sort key (breath-independent — see the arm comments in
     /// `resolve_characters`).
@@ -89,17 +89,14 @@ pub(crate) struct CharacterPlacement {
 /// and cannot move the sim (the purity the split exists for). Owned data (no
 /// borrows into the stores) so the stores are free again the moment
 /// `sim_step` returns.
-pub(crate) struct SimFrame {
+pub struct SimFrame {
     /// The tick's agent snapshot (the one clone per frame the fused pass
     /// already made) — placements index into it, paint borrows from it.
     pub agents: Vec<AgentSlot>,
     /// The authoritative routed pose per home-desk agent this tick — the
     /// headless observation payload (`None` = no renderable pose, e.g. the
-    /// exit window passed).
-    // The headless-observation payload: unread by paint BY DESIGN (that's the
-    // split's point) — the seam tests read it today, FloorSession (γ3) is the
-    // lib-side consumer tomorrow.
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// exit window passed). Unread by paint BY DESIGN (that's the split's
+    /// point); `floor::FloorSession::observe` is the lib-side consumer.
     pub poses: HashMap<AgentId, Option<Pose>>,
     /// Per-desk "occupant is actually seated right now" (drives screen glow +
     /// ceiling halos; exiting agents absent by construction).

@@ -7,30 +7,26 @@
 //! no shared output with snapshot. `floating::window` renders at a DOWNSCALED buffer
 //! (~window/SCALE) and nearest-neighbor upscales it, so the pixel-art office stays
 //! chunky/legible instead of 8×12-px-tiny at 1:1. This module just paints the buffer at
-//! whatever dims it's handed, owning the per-frame caches plus the persistent office state
-//! (coffee cups, group chitchat) across frames so motion stays continuous.
+//! whatever dims it's handed, owning one `pixtuoid_scene::floor::FloorSession` (the
+//! per-frame caches + persistent office state — coffee cups, group chitchat — plus the
+//! dual eviction) across frames so motion stays continuous.
 
-use std::collections::HashMap;
 use std::time::SystemTime;
 
 use pixtuoid_core::sprite::{format::Pack, Rgb, RgbBuffer};
 use pixtuoid_core::state::SceneState;
 
-use pixtuoid_scene::chitchat::{ActiveChitchat, VenueKey};
-use pixtuoid_scene::floor::{render_floor, CoffeeState, FloorCtx, FloorMeta};
+use pixtuoid_scene::floor::{FloorMeta, FloorSession};
 use pixtuoid_scene::layout::Layout;
 use pixtuoid_scene::theme::Theme;
 
-/// Owns everything needed to render the live office to a reusable `RgbBuffer` across
-/// frames: the per-floor render caches (`FloorCtx`) plus the persistent office state
-/// the pixel pass reads and updates (`CoffeeState` drives desk cups + steam;
-/// `chitchat` drives group speech bubbles). One per window — keeping it
-/// alive across frames is what keeps motion/pose continuous (no walk-flash).
+/// Owns everything needed to render the live office to a reusable `RgbBuffer`
+/// across frames: a [`FloorSession`] — the scene-owned painter session (sim
+/// stores + buffer + coffee + chitchat + the dual eviction, written once).
+/// One per window — keeping it alive across frames is what keeps motion/pose
+/// continuous (no walk-flash).
 pub struct OfficeRenderer {
-    floor: FloorCtx,
-    buf: RgbBuffer,
-    chitchat: HashMap<VenueKey, ActiveChitchat>,
-    coffee: CoffeeState,
+    session: FloorSession,
     /// The layout the LAST `render` computed — captured so `labels` can build the
     /// name-badge overlay against the SAME geometry the sprite pass used (labels
     /// align 1:1 with the painted characters). `None` before the first render.
@@ -40,10 +36,7 @@ pub struct OfficeRenderer {
 impl OfficeRenderer {
     pub fn new() -> Self {
         Self {
-            floor: FloorCtx::new(),
-            buf: RgbBuffer::filled(0, 0, Rgb { r: 0, g: 0, b: 0 }),
-            chitchat: HashMap::new(),
-            coffee: CoffeeState::new(),
+            session: FloorSession::new(),
             last_layout: None,
         }
     }
@@ -66,36 +59,19 @@ impl OfficeRenderer {
         floor_meta: FloorMeta,
         floor_pet: Option<&pixtuoid_scene::pet::Pet>,
     ) -> &RgbBuffer {
-        // Drop per-agent state for agents no longer in the scene (#423: the
-        // shared eviction; previously the floating painter never evicted, so
-        // exited agents' motion/cache/coffee entries accumulated for the
-        // window's lifetime — a slow leak, invisible in pixels because gone
-        // agents aren't painted).
-        self.floor.evict_missing(scene);
-        self.coffee.evict_missing(scene);
-        // The shared scene seam (#423): buffer sizing, layout, the pixel pass,
-        // and the coffee/door-anim epilogue in one place. The returned layout
-        // is captured for `labels` — the name-badge overlay must be built
-        // against the SAME geometry the sprite pass used. active_pet stays
-        // None: click-to-pet needs window pointer hit-testing (deferred); the
-        // WANDERING floor pet is wired.
-        self.last_layout = render_floor(
-            &mut self.floor,
-            &mut self.buf,
-            &mut self.coffee,
-            &mut self.chitchat,
-            scene,
-            pack,
-            theme,
-            now,
-            buf_w,
-            buf_h,
-            floor_meta,
-            None,
-            floor_pet,
-            false,
+        // The session owns the whole frame (#423 → FloorSession): the dual
+        // per-agent eviction (this painter historically never evicted — a
+        // slow per-agent leak, invisible in pixels because gone agents aren't
+        // painted — now structural: render() runs it), then buffer sizing,
+        // layout, the pixel pass, and the coffee/door-anim epilogue. The
+        // returned layout is captured for `labels` — the name-badge overlay
+        // must be built against the SAME geometry the sprite pass used.
+        // active_pet stays None: click-to-pet needs window pointer
+        // hit-testing (deferred); the WANDERING floor pet is wired.
+        self.last_layout = self.session.render(
+            scene, pack, theme, now, buf_w, buf_h, floor_meta, None, floor_pet, false,
         );
-        &self.buf
+        self.session.buf()
     }
 
     /// Build the name-badge overlay for the LAST rendered frame (call right after `render`).
@@ -109,11 +85,12 @@ impl OfficeRenderer {
         let Some(layout) = self.last_layout.as_ref() else {
             return Vec::new();
         };
+        let fctx = &mut self.session.floor.ctx;
         let mut rctx = pixtuoid_scene::pose::RouteCtx {
-            router: &mut self.floor.router,
-            overlay: &self.floor.overlay,
-            history: &mut self.floor.history,
-            motion: &mut self.floor.motion,
+            router: &mut fctx.router,
+            overlay: &fctx.overlay,
+            history: &mut fctx.history,
+            motion: &mut fctx.motion,
         };
         pixtuoid_scene::overlay::build_overlay(scene, layout, now, &mut rctx, None)
     }

@@ -421,23 +421,23 @@ fn invalidate_routes_clears_every_floor_router_cache() {
     // Advance up to ~60s of render time; bail out as soon as the router caches.
     for _ in 0..120 {
         r.render(&scene, &pack(), now).expect("render");
-        if !r.floor_ctxs[0].router.is_empty() {
+        if !r.floors[0].ctx.router.is_empty() {
             break;
         }
         now += Duration::from_millis(500);
     }
     assert!(
-        !r.floor_ctxs[0].router.is_empty(),
+        !r.floors[0].ctx.router.is_empty(),
         "a warmed-up wandering agent should have populated the A* path cache"
     );
 
     r.invalidate_routes();
     assert!(
-        r.floor_ctxs[0].router.is_empty(),
+        r.floors[0].ctx.router.is_empty(),
         "invalidate_routes must drop every floor's cached A* paths"
     );
     assert_eq!(
-        r.floor_ctxs[0].router.len(),
+        r.floors[0].ctx.router.len(),
         0,
         "cache is empty after invalidate"
     );

@@ -12,7 +12,7 @@ use std::time::SystemTime;
 
 use anyhow::Result;
 use pixtuoid_core::sprite::format::Pack;
-use pixtuoid_core::sprite::{Rgb, RgbBuffer};
+use pixtuoid_core::sprite::RgbBuffer;
 use pixtuoid_core::state::SceneState;
 #[cfg(test)]
 use pixtuoid_core::AgentId;
@@ -25,8 +25,7 @@ use ratatui::layout::Rect;
 
 use crate::tui::renderer::{draw_scene, flush_buffer_to_term_at_offset, DrawCtx, PetState};
 use pixtuoid_scene::floor::{
-    num_floors, project_floor_scene, render_floor, CoffeeState, FloorCtx, FloorMeta,
-    FloorTransition,
+    num_floors, project_floor_scene, render_floor, FloorMeta, FloorTransition, PerFloor, PerOffice,
 };
 use pixtuoid_scene::layout::Layout;
 use pixtuoid_scene::pathfind::Router;
@@ -68,8 +67,11 @@ struct PopupState {
 
 pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     pub terminal: Terminal<B>,
-    floor_bufs: Vec<RgbBuffer>,
-    floor_ctxs: Vec<FloorCtx>,
+    /// Per-floor session halves (sim/paint stores + pixel buffer), the
+    /// scene-owned `PerFloor` type — the multi-floor composition of the
+    /// single-floor painters' `FloorSession` (this painter drives
+    /// `draw_scene`/`render_floor` itself, so it composes the halves).
+    floors: Vec<PerFloor>,
     current_floor: usize,
     transition: Option<FloorTransition>,
     mouse_pos: Option<(u16, u16)>,
@@ -85,15 +87,11 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     /// per floor; the picked `&Pet` flows into `DrawCtx.floor_pet`. Replaces the
     /// former `enabled_pets: Vec<PetKind>` + `pet_names: HashMap` pair.
     pets: Vec<pixtuoid_scene::pet::Pet>,
-    chitchat_state: std::collections::HashMap<
-        pixtuoid_scene::chitchat::VenueKey,
-        pixtuoid_scene::chitchat::ActiveChitchat,
-    >,
-    /// Persistent coffee bookkeeping (which agents carry a cup + when they
-    /// fetched it, for steam) — ONE per office, shared across floors, the
-    /// scene-owned type every painter uses (#423). Replaces the stateless
-    /// `has_desk_coffee` cycle-scanning. Evicted on agent exit.
-    coffee: CoffeeState,
+    /// The per-OFFICE session half (scene-owned `PerOffice`): persistent
+    /// coffee bookkeeping + venue chitchat, ONE per office, shared across
+    /// every floor so a cup survives floor navigation (#423). Coffee is
+    /// evicted on agent exit through `PerOffice::evict_missing`.
+    office: PerOffice,
     /// The version popup's animation state machine (open flag + edge clock +
     /// edge-scale + last-rendered-scale all move as a unit — see `PopupState`).
     popup: PopupState,
@@ -107,7 +105,7 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     /// Agent-dashboard frame mirror, pushed each tick by the event loop via
     /// `set_dashboard_frame` (one snapshot, rows pre-built from the live scene).
     /// Kept here — disjoint from the floor buffers — so the painter can borrow it
-    /// into the `DrawCtx` without fighting the `floor_ctxs` / `floor_bufs` borrows.
+    /// into the `DrawCtx` without fighting the `floors` (per-floor session) borrows.
     dashboard: crate::tui::dashboard::DashboardFrame,
     /// Sources-panel frame mirror, pushed each tick via `set_connection_frame`.
     /// One snapshot the painter reads: the event loop builds the HOOK facet
@@ -129,8 +127,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     ) -> Self {
         Self {
             terminal,
-            floor_bufs: vec![RgbBuffer::filled(0, 0, Rgb { r: 0, g: 0, b: 0 })],
-            floor_ctxs: vec![FloorCtx::new()],
+            floors: vec![PerFloor::new()],
             current_floor: 0,
             transition: None,
             mouse_pos: None,
@@ -142,8 +139,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             active_pet: None,
             last_pet_pos: None,
             pets,
-            chitchat_state: std::collections::HashMap::new(),
-            coffee: CoffeeState::new(),
+            office: PerOffice::new(),
             popup: PopupState::default(),
             help_open: false,
             source_warning: None,
@@ -240,7 +236,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     /// departed agents are evicted on every floor.
     #[cfg(test)]
     pub fn floor_history(&self, floor: usize) -> Option<&pixtuoid_scene::pose::PoseHistory> {
-        self.floor_ctxs.get(floor).map(|f| &f.history)
+        self.floors.get(floor).map(|f| &f.ctx.history)
     }
 
     /// Read a floor's per-agent motion map (test harness only) — used to
@@ -252,7 +248,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     ) -> Option<
         &std::collections::HashMap<pixtuoid_core::AgentId, pixtuoid_scene::motion::MotionState>,
     > {
-        self.floor_ctxs.get(floor).map(|f| &f.motion)
+        self.floors.get(floor).map(|f| &f.ctx.motion)
     }
 
     /// Read a specific floor's pixel buffer (test harness only). `None` if the
@@ -260,7 +256,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     /// transition path paints both the from- and to-floor buffers.
     #[cfg(test)]
     pub fn floor_buf(&self, floor: usize) -> Option<&RgbBuffer> {
-        self.floor_bufs.get(floor)
+        self.floors.get(floor).map(|f| &f.buf)
     }
 
     /// Seed coffee-carrier state directly (test harness only). The production
@@ -269,7 +265,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     /// so steam-window rendering can be exercised in isolation.
     #[cfg(test)]
     pub fn inject_coffee(&mut self, id: AgentId, fetched_at: SystemTime) {
-        self.coffee.insert(id, fetched_at);
+        self.office.coffee.insert(id, fetched_at);
     }
 
     pub fn cached_layout(&self) -> Option<&Layout> {
@@ -277,7 +273,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     }
 
     pub fn current_floor_seed(&self) -> u64 {
-        let nf = self.floor_ctxs.len();
+        let nf = self.floors.len();
         FloorMeta::for_floor(self.current_floor, nf).floor_seed
     }
 
@@ -298,7 +294,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             // Land on the destination floor: a resize-induced cancel should
             // not silently revert a user-initiated navigation. Clamp against
             // the current floor count in case to_floor is now stale.
-            let nf = self.floor_ctxs.len().max(1);
+            let nf = self.floors.len().max(1);
             self.current_floor = tr.to_floor.min(nf - 1);
         }
     }
@@ -316,14 +312,14 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     }
 
     pub fn buf(&self) -> &RgbBuffer {
-        &self.floor_bufs[self.current_floor]
+        &self.floors[self.current_floor].buf
     }
 
     pub fn set_theme(&mut self, theme: &'static pixtuoid_scene::theme::Theme) {
         if !std::ptr::eq(self.theme, theme) {
             self.theme = theme;
-            for ctx in &mut self.floor_ctxs {
-                ctx.cache = pixtuoid_scene::frame_cache::FrameCache::new();
+            for pf in &mut self.floors {
+                pf.ctx.cache = pixtuoid_scene::frame_cache::FrameCache::new();
             }
         }
     }
@@ -410,22 +406,22 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     /// transition render path (which short-circuits the normal frame body)
     /// can't skip it.
     pub fn evict_missing(&mut self, scene: &SceneState) {
-        for ctx in &mut self.floor_ctxs {
-            ctx.evict_missing(scene);
+        for pf in &mut self.floors {
+            pf.evict_missing(scene);
         }
     }
 
     /// Whether an agent is a recorded coffee carrier (test harness only).
     #[cfg(test)]
     pub fn coffee_contains(&self, id: AgentId) -> bool {
-        self.coffee.map().contains_key(&id)
+        self.office.coffee.map().contains_key(&id)
     }
 
     /// Invalidate all floors' router path caches. Call when the static
     /// walkable mask changes (terminal resize, floor capacity change).
     pub fn invalidate_routes(&mut self) {
-        for ctx in &mut self.floor_ctxs {
-            ctx.router.invalidate();
+        for pf in &mut self.floors {
+            pf.ctx.router.invalidate();
         }
     }
     /// Composite two floors sliding in/out during a `FloorTransition` — the
@@ -488,23 +484,22 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             (to_floor, from_floor)
         };
 
-        let (bufs_lo, bufs_hi) = self.floor_bufs.split_at_mut(hi);
-        let lo_buf = &mut bufs_lo[lo];
-        let hi_buf = &mut bufs_hi[0];
-        let (from_buf, to_buf) = if from_floor < to_floor {
-            (lo_buf, hi_buf)
+        let (floors_lo, floors_hi) = self.floors.split_at_mut(hi);
+        let lo_floor = &mut floors_lo[lo];
+        let hi_floor = &mut floors_hi[0];
+        let (from_floor_half, to_floor_half) = if from_floor < to_floor {
+            (lo_floor, hi_floor)
         } else {
-            (hi_buf, lo_buf)
+            (hi_floor, lo_floor)
         };
-
-        let (ctxs_lo, ctxs_hi) = self.floor_ctxs.split_at_mut(hi);
-        let lo_ctx = &mut ctxs_lo[lo];
-        let hi_ctx = &mut ctxs_hi[0];
-        let (from_ctx, to_ctx) = if from_floor < to_floor {
-            (lo_ctx, hi_ctx)
-        } else {
-            (hi_ctx, lo_ctx)
-        };
+        let PerFloor {
+            ctx: from_ctx,
+            buf: from_buf,
+        } = from_floor_half;
+        let PerFloor {
+            ctx: to_ctx,
+            buf: to_buf,
+        } = to_floor_half;
 
         let from_meta = FloorMeta::for_floor(from_floor, nf);
         let to_meta = FloorMeta::for_floor(to_floor, nf);
@@ -536,7 +531,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         render_floor(
             from_ctx,
             from_buf,
-            &mut self.coffee,
+            &mut self.office.coffee,
             &mut transition_chitchat,
             &from_scene,
             pack,
@@ -552,7 +547,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         render_floor(
             to_ctx,
             to_buf,
-            &mut self.coffee,
+            &mut self.office.coffee,
             &mut transition_chitchat,
             &to_scene,
             pack,
@@ -654,13 +649,9 @@ impl<B: Backend<Error: Send + Sync + 'static>> Renderer for TuiRenderer<B> {
         // Compute how many floors the current scene needs.
         let nf = num_floors(scene).min(pixtuoid_scene::floor::MAX_FLOORS);
 
-        // Grow vectors if needed.
-        while self.floor_bufs.len() < nf {
-            self.floor_bufs
-                .push(RgbBuffer::filled(0, 0, Rgb { r: 0, g: 0, b: 0 }));
-        }
-        while self.floor_ctxs.len() < nf {
-            self.floor_ctxs.push(FloorCtx::new());
+        // Grow the per-floor sessions if needed.
+        while self.floors.len() < nf {
+            self.floors.push(PerFloor::new());
         }
 
         // Cancel transition if target floors no longer exist.
@@ -694,18 +685,20 @@ impl<B: Backend<Error: Send + Sync + 'static>> Renderer for TuiRenderer<B> {
         // --- Normal path: single floor ------------------------------------
         let floor_scene = project_floor_scene(scene, self.current_floor);
 
-        // Evict coffee state for agents no longer in the scene. (History,
-        // motion, and frame-cache eviction live in `evict_missing`, which the
-        // event loop calls with the live snapshot before every render.)
-        self.coffee.evict_missing(scene);
+        // Evict coffee state for agents no longer in the scene (the office
+        // half of the session split). (History, motion, and frame-cache
+        // eviction live in `evict_missing`, which the event loop calls with
+        // the live snapshot before every render.)
+        self.office.evict_missing(scene);
 
         let floor_meta = FloorMeta::for_floor(self.current_floor, nf);
         // Compute popup scale before the mutable borrows below.
         let popup_scale = self.version_popup_scale(now);
-        let fctx = &mut self.floor_ctxs[self.current_floor];
+        let pf = &mut self.floors[self.current_floor];
+        let fctx = &mut pf.ctx;
         let door_anim_max_ms = fctx.door_anim_max_ms;
         let mut draw_ctx = DrawCtx {
-            buf: &mut self.floor_bufs[self.current_floor],
+            buf: &mut pf.buf,
             cache: &mut fctx.cache,
             router: &mut fctx.router,
             overlay: &mut fctx.overlay,
@@ -725,13 +718,13 @@ impl<B: Backend<Error: Send + Sync + 'static>> Renderer for TuiRenderer<B> {
             last_pet_pos: None,
             last_mascot_pos: None,
             // Borrows `self.pets` immutably — disjoint from the `&mut fctx`
-            // (self.floor_ctxs) above, so the field-split borrow is fine (same
+            // (self.floors) above, so the field-split borrow is fine (same
             // as `&self.ticker`/`self.coffee.map()` here). The picked `&Pet`
             // carries the name, so the tooltip needs no separate map.
             floor_pet: pixtuoid_scene::pet::select_pet_for_floor(floor_meta.floor_seed, &self.pets),
-            chitchat_state: &mut self.chitchat_state,
+            chitchat_state: &mut self.office.chitchat,
             chitchat_bubbles: Vec::new(),
-            coffee: self.coffee.map(),
+            coffee: self.office.coffee.map(),
             new_coffee_carriers: Vec::new(),
             popup_scale,
             help_open: self.help_open,
@@ -742,14 +735,16 @@ impl<B: Backend<Error: Send + Sync + 'static>> Renderer for TuiRenderer<B> {
         };
         let result = draw_scene(&mut self.terminal, &floor_scene, pack, now, &mut draw_ctx);
         self.last_pet_pos = draw_ctx.last_pet_pos;
-        // Consume draw_ctx fields before the mutable borrow of floor_ctxs below.
+        // Consume draw_ctx fields before the mutable borrow of self.floors below.
         // std::mem::take avoids a partial move so drop(draw_ctx) can follow.
         let new_coffee_carriers = std::mem::take(&mut draw_ctx.new_coffee_carriers);
-        // drop draw_ctx here so we can re-borrow floor_ctxs freely.
+        // drop draw_ctx here so we can re-borrow the floors freely.
         drop(draw_ctx);
         // Recompute door_anim_max_ms from the motion map for the NEXT frame.
-        self.floor_ctxs[self.current_floor].recompute_door_anim_max_ms(now);
-        self.coffee.record(new_coffee_carriers, now);
+        self.floors[self.current_floor]
+            .ctx
+            .recompute_door_anim_max_ms(now);
+        self.office.coffee.record(new_coffee_carriers, now);
         if let Ok(ref layout_opt) = result {
             self.cached_layout = layout_opt.clone();
             // Ok(None) = draw_scene painted footer-only (compute failed at this
