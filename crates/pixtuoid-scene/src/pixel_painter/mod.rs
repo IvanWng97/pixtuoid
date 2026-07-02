@@ -44,7 +44,7 @@ pub(super) fn epoch_ms(now: SystemTime) -> u64 {
 /// Result of the pure-pixel pass — carries the resolved cat position
 /// (for hit-testing), active chitchat bubbles (for widget rendering),
 /// and agent ids that were seen carrying coffee this frame (so the
-/// caller can persist them into `coffee_holders`).
+/// caller can persist them into its `CoffeeState`).
 pub struct PixelPassResult {
     pub pet_pos: Option<PetFrame>,
     /// The gateway mascot's resolved frame this tick (for hover identity).
@@ -53,7 +53,7 @@ pub struct PixelPassResult {
     pub chitchat_bubbles: Vec<ChitchatBubble>,
     /// Agent ids observed in `Walking { carrying_coffee: true }` this
     /// frame. The caller inserts them into the persistent
-    /// `coffee_holders` set and records `coffee_fetched_at`.
+    /// `CoffeeState` (carrier + steam-window stamp in one map).
     pub new_coffee_carriers: Vec<pixtuoid_core::AgentId>,
 }
 
@@ -190,8 +190,9 @@ pub struct PixelCtx<'a> {
     /// pixel pass doesn't render the name, the tooltip does).
     pub floor_pet: Option<&'a crate::pet::Pet>,
     pub chitchat_state: &'a mut HashMap<crate::chitchat::VenueKey, ActiveChitchat>,
-    pub coffee_holders: &'a std::collections::HashSet<pixtuoid_core::AgentId>,
-    pub coffee_fetched_at: &'a HashMap<pixtuoid_core::AgentId, SystemTime>,
+    /// Carrier → fetch-time view of [`crate::floor::CoffeeState`] (one map:
+    /// key present = has a desk cup, value = steam-window anchor).
+    pub coffee: &'a HashMap<pixtuoid_core::AgentId, SystemTime>,
     pub light: &'a mut crate::floor::LightingState,
     /// When set, composite the walkable / approach / route debug layer over the
     /// finished scene (the live `w` toggle). Off by default; transient.
@@ -930,8 +931,8 @@ fn enqueue_characters<'a>(
                 mut carrying_coffee,
             } => {
                 // Exit walks: core sets carrying_coffee=false (no
-                // render-side state), but we know from coffee_holders.
-                if agent.exiting_at.is_some() && ctx.coffee_holders.contains(&agent.agent_id) {
+                // render-side state), but we know from the coffee map.
+                if agent.exiting_at.is_some() && ctx.coffee.contains_key(&agent.agent_id) {
                     carrying_coffee = true;
                 }
                 if carrying_coffee {
@@ -1049,10 +1050,10 @@ fn enqueue_desk_cubicles<'a>(
         let screen_glow = occupant
             .filter(|_| seated_agents.get(&local).copied().unwrap_or(false))
             .and_then(|a| palette::tool_glow_tint(a, &ctx.theme.tool_glow));
-        let has_coffee = occupant.is_some_and(|a| ctx.coffee_holders.contains(&a.agent_id));
+        let has_coffee = occupant.is_some_and(|a| ctx.coffee.contains_key(&a.agent_id));
         let coffee_steam = has_coffee
             && occupant.is_some_and(|a| {
-                ctx.coffee_fetched_at
+                ctx.coffee
                     .get(&a.agent_id)
                     .and_then(|t| ctx.now.duration_since(*t).ok())
                     .is_some_and(|d| d.as_secs() < COFFEE_STEAM_WINDOW_SECS)

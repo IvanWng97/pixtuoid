@@ -269,8 +269,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     /// so steam-window rendering can be exercised in isolation.
     #[cfg(test)]
     pub fn inject_coffee(&mut self, id: AgentId, fetched_at: SystemTime) {
-        self.coffee.holders.insert(id);
-        self.coffee.fetched_at.insert(id, fetched_at);
+        self.coffee.insert(id, fetched_at);
     }
 
     pub fn cached_layout(&self) -> Option<&Layout> {
@@ -419,7 +418,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     /// Whether an agent is a recorded coffee carrier (test harness only).
     #[cfg(test)]
     pub fn coffee_holders_contains(&self, id: AgentId) -> bool {
-        self.coffee.holders.contains(&id)
+        self.coffee.map().contains_key(&id)
     }
 
     /// Invalidate all floors' router path caches. Call when the static
@@ -732,8 +731,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> Renderer for TuiRenderer<B> {
             floor_pet: pixtuoid_scene::pet::select_pet_for_floor(floor_meta.floor_seed, &self.pets),
             chitchat_state: &mut self.chitchat_state,
             chitchat_bubbles: Vec::new(),
-            coffee_holders: &self.coffee.holders,
-            coffee_fetched_at: &self.coffee.fetched_at,
+            coffee: self.coffee.map(),
             new_coffee_carriers: Vec::new(),
             popup_scale,
             help_open: self.help_open,

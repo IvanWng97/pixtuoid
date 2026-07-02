@@ -107,11 +107,11 @@ pub struct DrawCtx<'a> {
         pixtuoid_scene::chitchat::ActiveChitchat,
     >,
     pub chitchat_bubbles: Vec<pixtuoid_scene::chitchat::ChitchatBubble>,
-    pub coffee_holders: &'a std::collections::HashSet<pixtuoid_core::AgentId>,
-    pub coffee_fetched_at:
-        &'a std::collections::HashMap<pixtuoid_core::AgentId, std::time::SystemTime>,
-    /// New coffee carriers detected this frame — caller uses these to
-    /// update the persistent `coffee_holders` set.
+    /// Carrier → fetch-time view of the renderer's `CoffeeState` (one map:
+    /// key present = has a desk cup, value = steam-window anchor).
+    pub coffee: &'a std::collections::HashMap<pixtuoid_core::AgentId, std::time::SystemTime>,
+    /// New coffee carriers detected this frame — caller records these into
+    /// the persistent `CoffeeState`.
     pub new_coffee_carriers: Vec<pixtuoid_core::AgentId>,
     /// Animated scale for the version popup (0.0 = hidden, 1.0 = fully shown).
     /// Drives entrance (EaseOutCubic/200ms) and dismissal (EaseInQuad/120ms).
@@ -249,8 +249,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         active_pet: ctx.active_pet,
         floor_pet: ctx.floor_pet,
         chitchat_state: ctx.chitchat_state,
-        coffee_holders: ctx.coffee_holders,
-        coffee_fetched_at: ctx.coffee_fetched_at,
+        coffee: ctx.coffee,
         light: ctx.light,
         door_anim_max_ms: ctx.door_anim_max_ms,
         debug_walkable: ctx.debug_walkable,

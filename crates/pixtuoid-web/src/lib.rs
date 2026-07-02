@@ -340,7 +340,7 @@ mod tests {
             "agent 5's motion state was evicted with its slot"
         );
         assert!(
-            !o.coffee.holders.contains(&cast_id(5)),
+            !o.coffee.map().contains_key(&cast_id(5)),
             "agent 5's coffee state was evicted with its slot"
         );
     }

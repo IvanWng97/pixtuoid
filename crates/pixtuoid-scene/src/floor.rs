@@ -8,7 +8,7 @@
 //! shared headless frame seam ([`render_floor`]) plus the per-office
 //! [`CoffeeState`] bookkeeping every painter routes through.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::time::SystemTime;
 
 use pixtuoid_core::physics::{walk_arrived, WalkProfile};
@@ -165,41 +165,47 @@ impl FloorCtx {
     }
 }
 
-/// Cross-frame coffee bookkeeping: which agents completed a pantry trip
-/// (`holders` — the desk cup paints while they're seated) and when
-/// (`fetched_at` — drives the 120s steam window). One per OFFICE, not per
-/// floor: an agent's cup survives floor navigation, so the TUI shares one
-/// across its `Vec<FloorCtx>` (the floating window and the web hero each own
-/// one alongside their single floor).
+/// Cross-frame coffee bookkeeping: ONE map — an agent holds a desk cup iff
+/// its id is a key (the cup paints while they're seated), and the value is
+/// WHEN it was fetched (drives the 120s steam window). Deliberately a single
+/// map, not a `HashSet` + `HashMap` pair: cup-without-stamp and
+/// stamp-without-cup are unrepresentable instead of merely maintained (#431).
+/// One per OFFICE, not per floor: an agent's cup survives floor navigation,
+/// so the TUI shares one across its `Vec<FloorCtx>` (the floating window and
+/// the web hero each own one alongside their single floor).
 #[derive(Debug, Default)]
-pub struct CoffeeState {
-    pub holders: HashSet<AgentId>,
-    pub fetched_at: HashMap<AgentId, SystemTime>,
-}
+pub struct CoffeeState(HashMap<AgentId, SystemTime>);
 
 impl CoffeeState {
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// The map view the pixel pass borrows (`PixelCtx.coffee`): key = carrier,
+    /// value = fetch time.
+    pub fn map(&self) -> &HashMap<AgentId, SystemTime> {
+        &self.0
+    }
+
+    /// Force a carrier with a chosen fetch stamp (overwrites an existing one).
+    /// A seeding seam — production detection goes through
+    /// [`record`](CoffeeState::record), which never restamps.
+    pub fn insert(&mut self, id: AgentId, fetched_at: SystemTime) {
+        self.0.insert(id, fetched_at);
+    }
+
     /// Drop coffee state for agents no longer in `scene` (the cup leaves with
     /// the agent). The coffee half of the per-agent eviction that
     /// [`FloorCtx::evict_missing`] does for render state.
     pub fn evict_missing(&mut self, scene: &SceneState) {
-        self.holders.retain(|id| scene.agents.contains_key(id));
-        self.fetched_at
-            .retain(|id, _| scene.agents.contains_key(id));
+        self.0.retain(|id, _| scene.agents.contains_key(id));
     }
 
-    /// Persist newly detected coffee carriers. `holders.insert` returns
-    /// `true` only for a NEW carrier (not an already-recorded prior pantry
-    /// trip), and only then is `fetched_at` stamped (the steam window) — a
-    /// re-render must not restart an old cup's steam.
+    /// Persist newly detected coffee carriers. `or_insert` keeps an existing
+    /// carrier's stamp — a re-render must not restart an old cup's steam.
     pub fn record(&mut self, carriers: impl IntoIterator<Item = AgentId>, now: SystemTime) {
         for id in carriers {
-            if self.holders.insert(id) {
-                self.fetched_at.insert(id, now);
-            }
+            self.0.entry(id).or_insert(now);
         }
     }
 }
@@ -269,8 +275,7 @@ pub fn render_floor(
         active_pet,
         floor_pet,
         chitchat_state: chitchat,
-        coffee_holders: &coffee.holders,
-        coffee_fetched_at: &coffee.fetched_at,
+        coffee: coffee.map(),
         light: &mut fctx.light,
         debug_walkable,
     });
@@ -944,19 +949,18 @@ mod tests {
         let t1 = t0 + std::time::Duration::from_secs(60);
         let mut coffee = CoffeeState::new();
         coffee.record([id], t0);
-        assert!(coffee.holders.contains(&id));
-        assert_eq!(coffee.fetched_at.get(&id), Some(&t0));
+        assert_eq!(coffee.map().get(&id), Some(&t0), "a new carrier is stamped");
         // Re-recording an existing carrier must NOT restart its steam window.
         coffee.record([id], t1);
         assert_eq!(
-            coffee.fetched_at.get(&id),
+            coffee.map().get(&id),
             Some(&t0),
             "an already-recorded carrier keeps its original fetch stamp"
         );
-        // The agent leaving the scene evicts both halves.
+        // The agent leaving the scene evicts the cup + stamp (one entry).
         let empty = SceneState::new([8; MAX_FLOORS]);
         coffee.evict_missing(&empty);
-        assert!(coffee.holders.is_empty() && coffee.fetched_at.is_empty());
+        assert!(coffee.map().is_empty());
     }
 
     #[test]
