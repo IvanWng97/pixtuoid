@@ -205,3 +205,42 @@ pub(super) async fn drain_child_end_unclaims(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn id(n: &str) -> AgentId {
+        AgentId::from_parts("test", n)
+    }
+
+    /// A push must never evict a FRESH sibling entry (the prune is
+    /// TTL-strict), a repeat push refreshes rather than duplicates, and the
+    /// dedupe matches on the SAME id. Pins the push-path prune/find mutants
+    /// (`<`→`==`/`>`, `==`→`!=`) a full cargo-mutants run reported surviving.
+    #[test]
+    fn push_keeps_fresh_siblings_and_dedupes_on_identity() {
+        let unclaims = ChildEndUnclaims::new();
+        unclaims.push(id("a"));
+        unclaims.push(id("b"));
+        unclaims.push(id("a")); // refresh, not a duplicate
+        let mut taken = unclaims.take_matching(|_| true);
+        taken.sort_by_key(|i| format!("{i:?}"));
+        let mut expected = vec![id("a"), id("b")];
+        expected.sort_by_key(|i| format!("{i:?}"));
+        assert_eq!(taken, expected, "both fresh ids pending, each exactly once");
+    }
+
+    /// The per-pass fast path: empty when new, non-empty after a push. (The
+    /// `false` arm is the one that matters — a stuck-non-empty fast path is
+    /// merely slow, but a stuck-EMPTY one would disable the whole #246 drain.)
+    #[test]
+    fn is_empty_tracks_pending_entries() {
+        let unclaims = ChildEndUnclaims::new();
+        assert!(unclaims.is_empty());
+        unclaims.push(id("a"));
+        assert!(!unclaims.is_empty());
+        unclaims.take_matching(|_| true);
+        assert!(unclaims.is_empty());
+    }
+}

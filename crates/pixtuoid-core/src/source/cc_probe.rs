@@ -163,8 +163,12 @@ pub fn live_cc_session_ids(sessions_dir: &Path) -> Option<ProbeSnapshot> {
 /// stability needs.
 #[cfg(unix)]
 fn prefer_candidate(incumbent: &RegistryEntry, candidate: &RegistryEntry) -> bool {
+    // Guard-pair form rather than `if c != i => c > i`: behavior-identical,
+    // but the old shape's `c > i` could never see `c == i` (the guard
+    // excluded it), leaving a `>`→`>=` mutation equivalent-unkillable.
     match (candidate.started_at_ms, incumbent.started_at_ms) {
-        (Some(c), Some(i)) if c != i => c > i,
+        (Some(c), Some(i)) if c > i => true,
+        (Some(c), Some(i)) if c < i => false,
         (Some(_), None) => true,
         (None, Some(_)) => false,
         _ => candidate.pid > incumbent.pid,
@@ -491,6 +495,135 @@ mod liveness_tests {
         let dir = tempfile::tempdir().unwrap();
         let missing = dir.path().join("does-not-exist");
         assert!(live_cc_session_ids(&missing).is_none());
+    }
+
+    /// #252 tie-break table, boundary-precise: newest `startedAt` wins over
+    /// any pid, attested beats unattested, and equal-on-everything keeps the
+    /// INCUMBENT (scan-order stability is the fn's whole point).
+    #[cfg(unix)]
+    #[test]
+    fn prefer_candidate_orders_by_started_at_then_attestation_then_pid() {
+        let e = |started_at_ms: Option<u64>, pid: i32| RegistryEntry {
+            pid,
+            session_id: "s".to_string(),
+            started_at_ms,
+        };
+        // Newest startedAt wins regardless of pid order.
+        assert!(prefer_candidate(&e(Some(1_000), 99), &e(Some(2_000), 1)));
+        assert!(!prefer_candidate(&e(Some(2_000), 1), &e(Some(1_000), 99)));
+        // An attested entry beats an unattested one, both directions.
+        assert!(prefer_candidate(&e(None, 99), &e(Some(1_000), 1)));
+        assert!(!prefer_candidate(&e(Some(1_000), 1), &e(None, 99)));
+        // Equal timestamps (and both-absent) fall to the pid tie-break…
+        assert!(prefer_candidate(&e(Some(1_000), 5), &e(Some(1_000), 9)));
+        assert!(!prefer_candidate(&e(Some(1_000), 9), &e(Some(1_000), 5)));
+        assert!(prefer_candidate(&e(None, 5), &e(None, 9)));
+        // …and a candidate equal on EVERY axis must not displace the
+        // incumbent (a `>`→`>=` flip here would flap the binding between
+        // refreshes on identical entries).
+        assert!(!prefer_candidate(&e(Some(1_000), 7), &e(Some(1_000), 7)));
+        assert!(!prefer_candidate(&e(None, 7), &e(None, 7)));
+    }
+
+    /// `pbi_start_tvsec` is EPOCH SECONDS (not ticks, not relative to boot):
+    /// our own process started after 2014 and not in the future. Pins the
+    /// unit contract the #220 identity check divides `startedAt` (ms) down
+    /// to — a wrong unit would silently skip every registry entry as
+    /// "recycled".
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn pid_start_time_is_plausible_epoch_seconds_for_own_process() {
+        let start =
+            pid_start_time_secs(std::process::id() as i32).expect("own pid must be introspectable");
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        assert!(
+            start > 1_400_000_000 && start <= now + 1,
+            "pbi_start_tvsec must be epoch seconds in (2014, now], got {start}"
+        );
+    }
+
+    /// The non-macOS unix fallback deliberately returns `None` — Linux start
+    /// time is ticks-since-boot and the epoch conversion is deferred, so the
+    /// identity check must stay ADDITIVE (pid-alive-only) there. A mutant
+    /// `Some(0)` would flip it to "every entry looks recycled" and silently
+    /// blind the whole probe on Linux; this is the cfg-twin of the macOS
+    /// plausibility pin above.
+    #[cfg(all(unix, not(target_os = "macos")))]
+    #[test]
+    fn pid_start_time_is_deliberately_unavailable_off_macos() {
+        assert_eq!(pid_start_time_secs(std::process::id() as i32), None);
+    }
+
+    /// The PID-reuse identity check is tolerance-INCLUSIVE: a `startedAt`
+    /// exactly `PID_START_TOLERANCE_SECS` from the kernel start time still
+    /// vouches (strict `>` rejection). CC stamps ~1.2s after process start,
+    /// so the boundary is headroom, not noise — a `>`→`>=` flip would
+    /// shave it.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn started_at_exactly_at_tolerance_still_vouches() {
+        let own_pid = std::process::id() as i32;
+        let actual = pid_start_time_secs(own_pid).expect("own pid must be introspectable");
+        let dir = tempfile::tempdir().unwrap();
+        let entry = |name: &str, claimed_secs: u64, sid: &str| {
+            std::fs::write(
+                dir.path().join(name),
+                serde_json::json!({
+                    "pid": own_pid,
+                    "sessionId": sid,
+                    "startedAt": claimed_secs * 1000,
+                })
+                .to_string(),
+            )
+            .unwrap();
+        };
+        entry(
+            "boundary.json",
+            actual + PID_START_TOLERANCE_SECS,
+            "boundary-session",
+        );
+        entry(
+            "recycled.json",
+            actual + PID_START_TOLERANCE_SECS + 1,
+            "recycled-session",
+        );
+        let live = live_cc_session_ids(dir.path()).expect("readable dir is a healthy probe");
+        assert!(
+            live.ids.contains("boundary-session"),
+            "a claim exactly at the tolerance must still vouch, got {live:?}"
+        );
+        assert!(
+            !live.ids.contains("recycled-session"),
+            "one second past the tolerance is a recycled pid, got {live:?}"
+        );
+    }
+
+    /// The per-entry read cap is 64 KiB — a real-shaped entry a few KiB
+    /// large (extra upstream keys) must still parse and vouch. A
+    /// `64*1024`→`64+1024` mutation collapses the cap to ~1 KiB and
+    /// truncates this entry into a parse failure.
+    #[cfg(unix)]
+    #[test]
+    fn multi_kib_entry_still_parses_within_the_read_cap() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("padded.json"),
+            serde_json::json!({
+                "pid": std::process::id() as i64,
+                "sessionId": "padded-session",
+                "future_upstream_key": "y".repeat(8 * 1024),
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let live = live_cc_session_ids(dir.path()).expect("readable dir is a healthy probe");
+        assert!(
+            live.ids.contains("padded-session"),
+            "an 8 KiB entry sits well under the 64 KiB cap, got {live:?}"
+        );
     }
 
     #[test]

@@ -1500,6 +1500,8 @@ mod tests {
             ("cc·#3", "claude-code"),         // basename that LOOKS ordinal
             ("xy#3", "claude-code"),          // foreign prefix — not ours to upgrade
             ("", "claude-code"),              // degenerate: empty is not an ordinal
+            ("cc#", "claude-code"),           // '#' with NO digits — not an ordinal
+            ("cc#12a", "claude-code"),        // digits+letters after '#' — a real name
         ] {
             assert!(
                 !is_fallback_label(label, source),
@@ -1508,14 +1510,23 @@ mod tests {
         }
     }
 
-    // Accepted-equivalent mutation residuals (cargo-mutants, state files):
-    // three boundary flips survive deliberately — `< → <=` in `gc`'s dedup
-    // retain (state/correlation.rs (Correlation::gc)), `> → >=` in `sweep_stale` (reducer.rs) and
-    // `sweep_exited` (767). Each only changes behavior at the EXACT threshold
-    // instant (age == timeout, to the nanosecond), a measure-zero event in
-    // wall-clock time and immaterial to a stale-sweep (one tick either way).
-    // Pinning them needs a hand-built exact-boundary SystemTime, which is
-    // brittle for no product value — left as documented equivalents, not gaps.
+    // The `< → <=` (correlation.rs) and `> → >=` (sweep_stale/sweep_exited)
+    // boundary mutants formerly documented here as accepted equivalents are
+    // now PINNED: `apply`/`tick`/`gc` all take an injected `now`, so the
+    // exact boundary is a hand-built SystemTime pair (deterministic, no wall
+    // clock) — see correlation.rs's test mod and the two
+    // `*_at_exactly_the_*` tests in tests/reducer/liveness.rs.
+    //
+    // One accepted-equivalent residual remains: the SessionStart arm's
+    // resurrect gate (`slot.exiting_at.is_some() && slot.parent_id.is_none()
+    // && parent_id.is_none()`) survives an `&&`→`||` flip on the LAST
+    // conjunct because the two parent sides cannot disagree by the time the
+    // gate runs — the ledger ADOPTION rewrites a parentless event's
+    // `parent_id` to the remembered parent, the #244-w2 gate drops a
+    // parented start on a recently-ended child, and the orphan-enrichment
+    // just above copies a surviving event link onto `slot.parent_id` — so
+    // the third conjunct is defense-in-depth (kept deliberately: it is the
+    // documented "gated on BOTH sides" belt), not independently observable.
 
     /// Pin the deliberate stale-timeout DURATIONS. Every timing test correctly
     /// derives its offsets FROM these constants (hardcoded ms make leg tests

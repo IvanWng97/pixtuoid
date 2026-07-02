@@ -18,4 +18,34 @@ exclude_globs = [
     # assertion (this repo is flake-averse; #352-#354).
     "crates/pixtuoid-core/src/source/exit_watch.rs",
     "crates/pixtuoid-core/src/source/fd_probe.rs",
+    # cfg(windows)-gated: never COMPILED on the unix hosts that run mutants, so
+    # the mutated code can't reach any test binary and every mutant "survives"
+    # as pure cross-compile noise (10/10 in the 2026-07 full run). Real Windows
+    # coverage lives in the windows-test CI job's actual test run.
+    "crates/pixtuoid-core/src/source/hook/windows.rs",
+]
+
+exclude_re = [
+    # Equivalent-mutant classes verified by hand in the 2026-07 survivor triage
+    # (each re-confirmed surviving on current main, then proven UNOBSERVABLE —
+    # not merely untested):
+    #
+    # ChildEndUnclaims prunes on `Instant::now()` deltas — `<` vs `<=` differs
+    # only when two monotonic reads land on the same instant, which no
+    # deterministic test can arrange (the non-boundary prune/dedupe behavior
+    # IS pinned by unclaim.rs's unit tests).
+    'unclaim\.rs.*replace < with <= in ChildEndUnclaims',
+    # The unix hook-socket bind's `tmp.len() > 100` picks between two bind
+    # strategies (temp-rename vs direct+chmod) whose end states are
+    # byte-identical — the boundary is sun_path headroom, distinguishable only
+    # by which syscall sequence ran, invisible to any external observation.
+    'hook/unix\.rs.*replace > with >= in Listener::bind',
+    # `pid_start_time_secs` is a cfg-twin pair (macOS proc_pidinfo / non-macOS
+    # `None` fallback): on ANY host the OTHER platform's variant is compiled
+    # out, so its mutants always "survive" — fn-level cross-compile noise
+    # (the windows.rs class). BOTH variants are pinned by cfg-twin tests in
+    # cc_probe.rs (`pid_start_time_is_plausible_epoch_seconds_for_own_process`
+    # / `pid_start_time_is_deliberately_unavailable_off_macos`), which run on
+    # their own platforms.
+    'cc_probe\.rs.*replace pid_start_time_secs',
 ]

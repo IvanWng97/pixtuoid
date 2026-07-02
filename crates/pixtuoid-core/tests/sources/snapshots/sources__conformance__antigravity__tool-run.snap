@@ -7,7 +7,7 @@ expression: events
     tool_use_id: ag-1-0
     detail:
       Generic:
-        display: list_dir
+        display: "list_dir: /home/user/demo-project/src"
 - ActivityEnd:
     agent_id: 5893914776247809446
     tool_use_id: ag-1-0

@@ -1,7 +1,7 @@
 use anyhow::Result;
 use serde_json::Value;
 
-use crate::source::decoder::make_tool_detail;
+use crate::source::decoder::generic_tool_display;
 use crate::source::AgentEvent;
 use crate::AgentId;
 
@@ -91,43 +91,38 @@ fn decode_ag_tool_call(
             reason: "asking permission".to_string(),
         };
     }
-    let normalized = normalize_ag_tool_input(name, args);
+    let target = ag_tool_target(args);
     AgentEvent::ActivityStart {
         agent_id,
         tool_use_id: Some(format!("ag-{step_index}-{i}")),
-        detail: Some(make_tool_detail(SOURCE_NAME, name, Some(&normalized))),
+        detail: Some(generic_tool_display(name, target.as_deref())),
     }
 }
 
-/// Normalize an Antigravity tool call's `args` to the `{key: value}` shape
-/// `make_tool_detail` reads: pick the first present path/command field, strip
-/// surrounding quotes, and key it by the tool's category. Returns an empty
-/// object when no recognized field is present.
-fn normalize_ag_tool_input(name: &str, args: Option<&Value>) -> Value {
-    let mut normalized = serde_json::Map::new();
-    if let Some(args_obj) = args.and_then(|v| v.as_object()) {
-        let raw_val = args_obj
-            .get("DirectoryPath")
-            .or_else(|| args_obj.get("AbsolutePath"))
-            .or_else(|| args_obj.get("TargetFile"))
-            .or_else(|| args_obj.get("CommandLine"))
-            .or_else(|| args_obj.get("SearchPath"))
-            .or_else(|| args_obj.get("query"))
-            .and_then(|v| v.as_str());
-        if let Some(s) = raw_val {
-            let clean = s
-                .strip_prefix('"')
-                .and_then(|s| s.strip_suffix('"'))
-                .unwrap_or(s);
-            let key = match name {
-                "run_command" => "command",
-                "grep_search" => "pattern",
-                _ => "file_path",
-            };
-            normalized.insert(key.to_string(), Value::String(clean.to_string()));
-        }
-    }
-    Value::Object(normalized)
+/// The first present path/command field of an Antigravity tool call's
+/// `args`, quote-stripped — the `: target` half of the Generic display.
+/// AG tool names have no `describe_tool_target` arm (that dispatch is CC's),
+/// so like `cursor_tool_detail` the source extracts its own target and hands
+/// it to the shared `generic_tool_display` chokepoint for the caps. (The
+/// former `normalize_ag_tool_input` re-KEYED the value into a
+/// `{command|pattern|file_path: …}` object for `make_tool_detail` to read —
+/// but nothing read AG-named tools' input there, so the keys were dead code
+/// and AG displays silently lost their targets.)
+fn ag_tool_target(args: Option<&Value>) -> Option<String> {
+    let args_obj = args?.as_object()?;
+    let raw = args_obj
+        .get("DirectoryPath")
+        .or_else(|| args_obj.get("AbsolutePath"))
+        .or_else(|| args_obj.get("TargetFile"))
+        .or_else(|| args_obj.get("CommandLine"))
+        .or_else(|| args_obj.get("SearchPath"))
+        .or_else(|| args_obj.get("query"))
+        .and_then(|v| v.as_str())?;
+    let clean = raw
+        .strip_prefix('"')
+        .and_then(|s| s.strip_suffix('"'))
+        .unwrap_or(raw);
+    Some(clean.to_string())
 }
 
 #[cfg(test)]
@@ -157,6 +152,73 @@ mod tests {
         });
         let out = decode_ag_line("/x/t.jsonl", SOURCE_NAME, v).unwrap();
         assert_eq!(out.len(), 1, "step_index 0 still emits: {out:?}");
+    }
+
+    /// The primary-tool End is scoped: USER_INPUT / CONVERSATION_HISTORY
+    /// steps are not tool completions (an `&&`→`||` flip would end a tool on
+    /// every user prompt), and step 0 has NO previous step to end — an End
+    /// there would mint the unmatchable `ag--1-0` (strict `step_index > 0`).
+    #[test]
+    fn only_a_real_follow_up_step_ends_the_previous_primary_tool() {
+        for (ty, idx) in [
+            ("USER_INPUT", 3),
+            ("CONVERSATION_HISTORY", 2),
+            ("EXECUTION_RESULT", 0),
+        ] {
+            let v = serde_json::json!({ "type": ty, "step_index": idx });
+            let out = decode_ag_line("/x/t.jsonl", SOURCE_NAME, v).unwrap();
+            assert!(
+                out.is_empty(),
+                "{ty} at step {idx} must not end anything: {out:?}"
+            );
+        }
+        // Control: a real follow-up step ends the previous primary.
+        let v = serde_json::json!({ "type": "EXECUTION_RESULT", "step_index": 2 });
+        let out = decode_ag_line("/x/t.jsonl", SOURCE_NAME, v).unwrap();
+        assert_eq!(out.len(), 1);
+        match &out[0] {
+            AgentEvent::ActivityEnd { tool_use_id, .. } => {
+                assert_eq!(tool_use_id.as_deref(), Some("ag-1-0"));
+            }
+            other => panic!("expected ActivityEnd, got {other:?}"),
+        }
+    }
+
+    /// The Generic display carries the tool's TARGET (quote-stripped), routed
+    /// through the shared `generic_tool_display` caps — the observable
+    /// contract of `ag_tool_target` (whose dead re-keying predecessor lost
+    /// the target entirely).
+    #[test]
+    fn tool_call_display_carries_the_quote_stripped_target() {
+        use crate::source::ToolDetail;
+        let v = serde_json::json!({
+            "type": "PLANNER_RESPONSE",
+            "step_index": 1,
+            "tool_calls": [
+                { "name": "run_command", "args": { "CommandLine": "\"git status\"" } },
+                { "name": "grep_search", "args": { "SearchPath": "/repo", "query": "TODO" } },
+                { "name": "view_file", "args": {} },
+            ],
+        });
+        let out = decode_ag_line("/x/t.jsonl", SOURCE_NAME, v).unwrap();
+        let displays: Vec<&str> = out
+            .iter()
+            .map(|e| match e {
+                AgentEvent::ActivityStart {
+                    detail: Some(ToolDetail::Generic { display }),
+                    ..
+                } => display.as_str(),
+                other => panic!("expected Generic ActivityStart, got {other:?}"),
+            })
+            .collect();
+        assert_eq!(
+            displays,
+            [
+                "run_command: git status", // CommandLine, surrounding quotes stripped
+                "grep_search: /repo",      // SearchPath outranks query
+                "view_file",               // no recognized field → bare name
+            ]
+        );
     }
 
     // The label / session-ended / default-paths tests live with the runtime

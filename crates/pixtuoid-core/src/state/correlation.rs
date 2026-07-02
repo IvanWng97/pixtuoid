@@ -269,3 +269,132 @@ impl Correlation {
             .is_some_and(|t| now.duration_since(*t).is_ok_and(|d| d < PROOF_OF_LIFE_TTL))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Deterministic exact-boundary pins for every TTL comparison in this
+    // module: freshness is STRICT (`elapsed < TTL`), so an entry queried at
+    // exactly its TTL is already expired/pruned. `now` is injected
+    // everywhere here, so the boundary is a hand-built SystemTime pair — no
+    // wall clock, no brittleness — and each pin kills the `<`→`<=`
+    // boundary mutants a full cargo-mutants run reported surviving.
+
+    /// A fixed, arbitrary anchor well past the epoch so `t0 + TTL` never
+    /// under/overflows.
+    fn t0() -> SystemTime {
+        SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000_000)
+    }
+
+    #[test]
+    fn session_end_tombstone_expires_at_exactly_its_ttl() {
+        let id = AgentId::from_parts("claude-code", "s1");
+        let mut corr = Correlation::default();
+        corr.recent_hook_session_ends.insert(id, t0());
+        let just_inside = t0() + HOOK_SESSION_END_TOMBSTONE_TTL - Duration::from_millis(1);
+        assert!(corr.hook_session_end_tombstoned(id, just_inside));
+        assert!(
+            !corr.hook_session_end_tombstoned(id, t0() + HOOK_SESSION_END_TOMBSTONE_TTL),
+            "freshness is strict: elapsed == TTL is expired"
+        );
+    }
+
+    #[test]
+    fn child_ledger_end_gate_expires_at_exactly_its_ttl() {
+        let id = AgentId::from_parts("claude-code", "child");
+        let mut corr = Correlation::default();
+        corr.child_ledger.insert(
+            id,
+            ChildLedgerEntry {
+                parent_id: None,
+                ended_at: Some(t0()),
+            },
+        );
+        let just_inside = t0() + CHILD_END_LEDGER_TTL - Duration::from_millis(1);
+        assert!(corr.child_recently_ended(id, just_inside));
+        assert!(
+            !corr.child_recently_ended(id, t0() + CHILD_END_LEDGER_TTL),
+            "freshness is strict: elapsed == TTL is expired"
+        );
+    }
+
+    #[test]
+    fn vouch_freshness_expires_at_exactly_its_ttl() {
+        let id = AgentId::from_parts("claude-code", "s1");
+        let mut corr = Correlation::default();
+        corr.recent_proof_of_life.insert(id, t0());
+        let just_inside = t0() + PROOF_OF_LIFE_TTL - Duration::from_millis(1);
+        assert!(corr.vouch_fresh(&id, just_inside));
+        assert!(
+            !corr.vouch_fresh(&id, t0() + PROOF_OF_LIFE_TTL),
+            "freshness is strict: elapsed == TTL is expired"
+        );
+    }
+
+    /// One pass per map: an entry aged EXACTLY to its TTL is pruned by `gc`
+    /// (strict `<` retain), while one 1ms younger survives. Covers all five
+    /// retains — each map has its own TTL constant and its own retain site.
+    #[test]
+    fn gc_prunes_each_map_at_exactly_its_ttl() {
+        let old = AgentId::from_parts("claude-code", "old");
+        let young = AgentId::from_parts("claude-code", "young");
+        let step = Duration::from_millis(1);
+        // (map-filler, TTL, prober) triples exercised uniformly.
+        let mut corr = Correlation::default();
+        corr.recent_hook_tool_uses
+            .insert((old, "t1".into()), (t0(), ToolEventKind::Start));
+        corr.recent_hook_tool_uses
+            .insert((young, "t2".into()), (t0() + step, ToolEventKind::End));
+        corr.gc(t0() + HOOK_WINS_WINDOW);
+        assert!(!corr.recent_hook_tool_uses.contains_key(&(old, "t1".into())));
+        assert!(corr
+            .recent_hook_tool_uses
+            .contains_key(&(young, "t2".into())));
+
+        let mut corr = Correlation::default();
+        corr.recent_hook_session_ends.insert(old, t0());
+        corr.recent_hook_session_ends.insert(young, t0() + step);
+        corr.gc(t0() + HOOK_SESSION_END_TOMBSTONE_TTL);
+        assert!(!corr.recent_hook_session_ends.contains_key(&old));
+        assert!(corr.recent_hook_session_ends.contains_key(&young));
+
+        let mut corr = Correlation::default();
+        corr.recent_proof_of_life.insert(old, t0());
+        corr.recent_proof_of_life.insert(young, t0() + step);
+        corr.gc(t0() + PROOF_OF_LIFE_TTL);
+        assert!(!corr.recent_proof_of_life.contains_key(&old));
+        assert!(corr.recent_proof_of_life.contains_key(&young));
+
+        let mut corr = Correlation::default();
+        corr.recent_task_drains.insert((old, "t1".into()), t0());
+        corr.recent_task_drains
+            .insert((young, "t2".into()), t0() + step);
+        corr.gc(t0() + DRAINED_TASK_TOMBSTONE_TTL);
+        assert!(!corr.recent_task_drains.contains_key(&(old, "t1".into())));
+        assert!(corr.recent_task_drains.contains_key(&(young, "t2".into())));
+
+        let mut corr = Correlation::default();
+        corr.child_ledger.insert(
+            old,
+            ChildLedgerEntry {
+                parent_id: None,
+                ended_at: Some(t0()),
+            },
+        );
+        corr.child_ledger.insert(
+            young,
+            ChildLedgerEntry {
+                parent_id: None,
+                ended_at: Some(t0() + step),
+            },
+        );
+        // A never-ended entry rides regardless of age.
+        let alive = AgentId::from_parts("claude-code", "alive");
+        corr.child_ledger.insert(alive, ChildLedgerEntry::default());
+        corr.gc(t0() + CHILD_END_LEDGER_TTL);
+        assert!(!corr.child_ledger.contains_key(&old));
+        assert!(corr.child_ledger.contains_key(&young));
+        assert!(corr.child_ledger.contains_key(&alive));
+    }
+}

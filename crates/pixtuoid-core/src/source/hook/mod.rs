@@ -424,6 +424,33 @@ mod tests {
         task.await.unwrap();
     }
 
+    /// The per-connection byte ceiling is 2 MiB — 2× the shim's ~1 MiB stdin
+    /// cap, so one maximal stamped line ALWAYS fits with headroom. A payload
+    /// just over half the ceiling (1.25 MiB — bigger than any single legal
+    /// shim line's cap, well under the ceiling) must still decode; a
+    /// `2*1024*1024` mutation to `(2+1024)*1024` (≈1.03 MiB) or
+    /// `2*(1024+1024)` (4 KiB) truncates it mid-line and loses the event.
+    #[tokio::test]
+    async fn handle_conn_ceiling_leaves_headroom_over_the_shim_line_cap() {
+        let (mut client, server) = tokio::io::duplex(64 * 1024);
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(8);
+        let task = tokio::spawn(handle_conn(server, tx, None, None));
+        let pad = "x".repeat((1 << 20) + (1 << 18)); // 1.25 MiB of payload padding
+        let line = format!(
+            "{{\"hook_event_name\":\"SessionStart\",\"session_id\":\"s1\",\
+             \"transcript_path\":\"/p/s1.jsonl\",\"pad\":\"{pad}\"}}\n"
+        );
+        client.write_all(line.as_bytes()).await.unwrap();
+        drop(client);
+        let (transport, ev) = rx
+            .recv()
+            .await
+            .expect("a 1.25 MiB line sits inside the 2 MiB conn ceiling");
+        assert_eq!(transport, Transport::Hook);
+        assert!(matches!(ev, AgentEvent::SessionStart { .. }));
+        task.await.unwrap();
+    }
+
     // The daemon demux is registry-DRIVEN (no source named in handle_conn): an
     // OpenClaw line routes to the SIDE channel as a SOURCE-TAGGED tuple
     // `("openclaw", GatewayUp)` and emits ZERO AgentEvents, while an ordinary CC

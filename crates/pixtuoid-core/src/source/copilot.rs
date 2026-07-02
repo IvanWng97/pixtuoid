@@ -293,6 +293,50 @@ mod tests {
         );
     }
 
+    #[test]
+    fn label_is_cp_dot_basename_with_bare_prefix_fallback() {
+        assert_eq!(
+            derive_copilot_label(Path::new(PATH), SOURCE_NAME, Path::new("/home/u/proj")),
+            "cp·proj"
+        );
+        assert_eq!(
+            derive_copilot_label(Path::new(PATH), SOURCE_NAME, Path::new("")),
+            "cp",
+            "an empty cwd falls back to the bare prefix"
+        );
+    }
+
+    /// An EMPTY envelope `agentId` is the root speaking, not a phantom
+    /// ""-keyed sub-agent — the `!aid.is_empty()` guard on the attribution
+    /// match. A guard→true flip would split every empty-tagged line off the
+    /// root sprite.
+    #[test]
+    fn empty_agent_id_attributes_to_the_root() {
+        let line = r#"{"type":"tool.execution_start","agentId":"","data":{"toolCallId":"call_1","toolName":"bash","arguments":{"command":"ls"}}}"#;
+        match &decode(line)[..] {
+            [AgentEvent::ActivityStart { agent_id, .. }] => {
+                assert_eq!(*agent_id, root(), "empty agentId must key to the root");
+            }
+            other => panic!("expected one ActivityStart, got {other:?}"),
+        }
+    }
+
+    /// `subagent.completed` keys the child off the ENVELOPE `agentId` when
+    /// present (the `data.toolCallId` fallback is for older lines without
+    /// one) — a `delete !` on the non-empty filter would reject every real
+    /// agentId and drop the end entirely when no fallback exists.
+    #[test]
+    fn subagent_completed_keys_off_the_envelope_agent_id() {
+        let line = r#"{"type":"subagent.completed","agentId":"call_7","data":{}}"#;
+        match &decode(line)[..] {
+            [AgentEvent::SessionEnd { agent_id, as_child }] => {
+                assert_eq!(*agent_id, AgentId::from_parts(SOURCE_NAME, "call_7"));
+                assert!(as_child);
+            }
+            other => panic!("expected one child SessionEnd, got {other:?}"),
+        }
+    }
+
     // ── byte-real lines (verbatim from the committed shreya661 / tamirdresher files) ──
 
     #[test]

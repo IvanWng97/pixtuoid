@@ -46,6 +46,86 @@ fn stale_idle_agent_is_marked_exiting_after_timeout() {
     );
 }
 
+/// The stale sweep is STRICT (`age > threshold`): a slot whose silence
+/// equals the threshold to the instant is NOT yet stale. `apply`/`tick` take
+/// an injected `now`, so the exact boundary is a hand-built SystemTime pair —
+/// deterministic, no wall clock. Pins the `>`→`>=` boundary mutant in
+/// `sweep_stale` a full cargo-mutants run reported surviving.
+#[test]
+fn stale_sweep_spares_a_slot_at_exactly_the_threshold() {
+    use pixtuoid_core::state::reducer::STALE_IDLE_TIMEOUT;
+    let mut scene = SceneState::uniform(4);
+    let mut reducer = Reducer::new();
+    let id = AgentId::from_transcript_path("/p/boundary.jsonl");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    reducer.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: id,
+            source: "claude-code".into(),
+            session_id: "s".into(),
+            cwd: PathBuf::from("/repo"),
+            parent_id: None,
+        },
+        t0,
+        Transport::Hook,
+    );
+    reducer.tick(&mut scene, t0 + STALE_IDLE_TIMEOUT);
+    assert!(
+        scene.agents.get(&id).unwrap().exiting_at.is_none(),
+        "age == threshold is not yet stale (strict >)"
+    );
+    reducer.tick(
+        &mut scene,
+        t0 + STALE_IDLE_TIMEOUT + Duration::from_millis(1),
+    );
+    assert!(scene.agents.get(&id).unwrap().exiting_at.is_some());
+}
+
+/// `sweep_exited`'s GC is strict too: a slot whose walkout age equals
+/// `EXIT_GRACE_WINDOW` exactly is still on stage. Same injected-now boundary
+/// discipline as above; pins the `>`→`>=` mutant in `sweep_exited`.
+#[test]
+fn exit_gc_spares_a_slot_at_exactly_the_grace_window() {
+    use pixtuoid_core::state::reducer::EXIT_GRACE_WINDOW;
+    let mut scene = SceneState::uniform(4);
+    let mut reducer = Reducer::new();
+    let id = AgentId::from_transcript_path("/p/grace.jsonl");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    reducer.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: id,
+            source: "claude-code".into(),
+            session_id: "s".into(),
+            cwd: PathBuf::from("/repo"),
+            parent_id: None,
+        },
+        t0,
+        Transport::Hook,
+    );
+    reducer.apply(
+        &mut scene,
+        AgentEvent::SessionEnd {
+            agent_id: id,
+            as_child: false,
+        },
+        t0,
+        Transport::Hook,
+    );
+    assert!(scene.agents.get(&id).unwrap().exiting_at.is_some());
+    reducer.tick(&mut scene, t0 + EXIT_GRACE_WINDOW);
+    assert!(
+        scene.agents.contains_key(&id),
+        "walkout age == grace window is not yet GC-able (strict >)"
+    );
+    reducer.tick(
+        &mut scene,
+        t0 + EXIT_GRACE_WINDOW + Duration::from_millis(1),
+    );
+    assert!(!scene.agents.contains_key(&id));
+}
+
 #[test]
 fn stale_active_agent_uses_shorter_timeout_than_idle() {
     use pixtuoid_core::state::reducer::{STALE_ACTIVE_TIMEOUT, STALE_IDLE_TIMEOUT};

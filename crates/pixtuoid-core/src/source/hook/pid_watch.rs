@@ -122,6 +122,17 @@ fn take_pid(pids: &PidMap, pid: i32) -> Vec<AgentId> {
 mod tests {
     use super::*;
 
+    /// The exit-watch backend EXISTS on the first-class platforms (macOS
+    /// kqueue / Linux pidfd) — `spawn` returning `None` there would silently
+    /// disable every hook-only source's abrupt-exit rung, and the behavioral
+    /// sibling tests skip-when-None, so only a direct pin catches it.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[tokio::test]
+    async fn spawn_returns_a_watch_on_first_class_platforms() {
+        let (tx, _rx) = tokio::sync::mpsc::channel(4);
+        assert!(HookPidWatch::spawn(tx).is_some());
+    }
+
     #[test]
     fn note_binds_agents_to_a_pid_and_take_removes_them_once() {
         let pids: PidMap = Mutex::new(HashMap::new());

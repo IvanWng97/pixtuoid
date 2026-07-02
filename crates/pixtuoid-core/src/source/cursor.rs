@@ -340,6 +340,25 @@ mod tests {
             "tool_name": "Read", "tool_input": {"file_path": "/r/x.rs"}
         }));
         assert!(matches!(&read, AgentEvent::ActivityStart { detail: Some(d), .. } if !d.is_task()));
+        // EITHER signal alone suffices (the detection is `name OR semantic
+        // field`, mirroring CC): an input-less `Task` call, and a renamed
+        // dispatch that still carries `subagent_type`.
+        let bare_task = decode(json!({
+            "hook_event_name": "preToolUse", "session_id": "p", "workspace_roots": ["/r"],
+            "tool_name": "Task"
+        }));
+        assert!(
+            matches!(&bare_task, AgentEvent::ActivityStart { detail: Some(d), .. } if d.is_task()),
+            "an input-less Task dispatch must still read as Delegating, got {bare_task:?}"
+        );
+        let renamed = decode(json!({
+            "hook_event_name": "preToolUse", "session_id": "p", "workspace_roots": ["/r"],
+            "tool_name": "Delegate", "tool_input": {"subagent_type": "code-explorer"}
+        }));
+        assert!(
+            matches!(&renamed, AgentEvent::ActivityStart { detail: Some(d), .. } if d.is_task()),
+            "the semantic field must catch a renamed dispatch, got {renamed:?}"
+        );
     }
 
     #[test]

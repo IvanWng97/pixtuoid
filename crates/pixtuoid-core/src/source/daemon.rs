@@ -312,6 +312,19 @@ mod tests {
     // state-machine code (the multi-daemon directive's structural guarantee).
     const SOURCES: [&str; 2] = ["openclaw", "daemon2"];
 
+    /// Pin the DEFAULT decay profile's literal values. Every timing test here
+    /// correctly derives its offsets FROM the profile (`ttl.presence_ttl_ms +
+    /// 1`), so mutating `5 * 60 * 1_000` also mutates each test's own
+    /// expectation — a direct pin is the only guard on the literals (the
+    /// reducer's stale-timeout pin, same rationale). The values ARE the
+    /// product decision; change deliberately, never to make this pass.
+    #[test]
+    fn default_presence_profile_has_its_intended_durations() {
+        assert_eq!(PresenceTtl::DEFAULT.busy_decay_ms, 30_000); // 30 s
+        assert_eq!(PresenceTtl::DEFAULT.presence_ttl_ms, 300_000); // 5 min
+        assert_eq!(PresenceTtl::DEFAULT.down_remove_ms, 5_000); // 5 s
+    }
+
     fn ms(m: u64) -> SystemTime {
         SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(m)
     }

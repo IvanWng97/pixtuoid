@@ -590,6 +590,25 @@ const CURSOR: SourceDescriptor = SourceDescriptor {
 mod tests {
     use super::*;
 
+    /// `daemon_sources()` drives the per-daemon presence sweep + disconnect
+    /// reconcile — an empty iterator silently freezes every mascot's decay.
+    /// Pin that it yields exactly the registry's Daemon rows (openclaw
+    /// today), each with the default decay profile.
+    #[test]
+    fn daemon_sources_yields_every_daemon_row() {
+        let daemons: Vec<&'static str> = daemon_sources()
+            .map(|(name, ttl)| {
+                assert_eq!(
+                    ttl.presence_ttl_ms,
+                    crate::source::daemon::PresenceTtl::DEFAULT.presence_ttl_ms,
+                    "{name} must carry the default decay profile"
+                );
+                name
+            })
+            .collect();
+        assert_eq!(daemons, vec![crate::source::openclaw::SOURCE_NAME]);
+    }
+
     // Registry-local shape check. The reducer KEEPS its own end-to-end
     // `every_registered_source_has_two_char_label_prefix` (through the real
     // `source_label_prefix`, lookup included) — this one exists so a bad row

@@ -216,6 +216,12 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
         // SessionStart — but matching the ordering closes it.)
         cursors.lock().await.insert(path.to_path_buf(), file_len);
         if ended_in_skip {
+            // A span that itself ENDED stays unregistered and unscanned — a
+            // SessionStart or a seeded Task after the SessionEnd just sent
+            // would resurrect/animate a ghost. (The if/else is structural on
+            // purpose: the ended arm un-claims `seen` below, so a trailing
+            // "not ended" conjunct on the scan would be redundant — an
+            // untestable equivalent under mutation.)
             let id = AgentId::from_parts(source, &(decoders.id_derive)(path));
             let _ = tx
                 .send((
@@ -232,6 +238,7 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
             // place pinned the path "registered" forever — a resumed session
             // could never re-appear without a watcher restart.
             seen.lock().await.remove(path);
+            return;
         }
         // #204: on the first oversized sight of a recent, live session, still
         // REGISTER the agent. Otherwise a >1 MB transcript stays invisible
@@ -244,27 +251,24 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
         // >1 MiB append lands here — keying on `!known` left that agent
         // invisible until a later ≤1 MiB append. The `seen` check also spares
         // already-registered files a redundant head read on every oversized
-        // append. A span that itself ENDED stays unregistered — a SessionStart
-        // after the SessionEnd just sent would resurrect a ghost. "Registered"
-        // = the claim is HELD (`true`); a child-end-RELEASED claim (`false`,
-        // #246) re-registers here like an absent one.
+        // append. "Registered" = the claim is HELD (`true`); a
+        // child-end-RELEASED claim (`false`, #246) re-registers here like an
+        // absent one.
         let registered = seen.lock().await.get(path) == Some(&true);
-        if !registered && !ended_in_skip {
+        if !registered {
             let head_cwd = read_head_cwd(path, MAX_PENDING_BYTES, cwd_extractor_for(source)).await;
             emit_first_sight(path, source, decoders, seen, tx, head_cwd).await;
         }
         // #222: the skipped span may bury an IN-FLIGHT Agent/Task dispatch —
         // tail-scan the last TASK_SCAN_BYTES for unmatched Task starts and
         // re-emit exactly those, restoring subagent-leak suppression + b1
-        // (see scan_pending_tasks for the full WHY). Only when the session is
-        // NOT ended (a terminator was just forwarded — seeding a Task after
-        // it would animate a ghost delegation) AND the file is registered
-        // after the decision above (no slot → JSONL events for an unknown id
-        // are reducer no-ops; skip the wasted 256 KiB decode). Runs AFTER
-        // emit_first_sight so the registration precedes the synthesized
-        // starts on the channel.
-        if !ended_in_skip && seen.lock().await.get(path) == Some(&true) {
-            scan_pending_tasks(path, file_len, decoders, ctx).await;
+        // (see scan_pending_tasks for the full WHY). Only when the file is
+        // registered after the decision above (no slot → JSONL events for an
+        // unknown id are reducer no-ops; skip the wasted 256 KiB decode).
+        // Runs AFTER emit_first_sight so the registration precedes the
+        // synthesized starts on the channel.
+        if seen.lock().await.get(path) == Some(&true) {
+            scan_pending_tasks(path, decoders, ctx).await;
         }
         return;
     }
@@ -399,8 +403,12 @@ pub(super) async fn park_if_truncated_below_cursor(path: &Path, ctx: &WatchCtx<'
     };
     let len = meta.len();
     let mut cursors = ctx.cursors.lock().await;
-    if cursors.get(path).is_some_and(|c| *c > len) {
-        cursors.insert(path.to_path_buf(), len);
+    // Clamp-to-len rather than a `cursor > len` guard: a no-op for an
+    // in-bounds cursor either way, and the clamp has no untestable boundary
+    // (the guarded form survives a `>`→`>=` mutation as a pure equivalent —
+    // it just re-inserts the same value).
+    if let Some(c) = cursors.get_mut(path) {
+        *c = (*c).min(len);
     }
 }
 
@@ -551,12 +559,7 @@ pub(super) const TASK_SCAN_BYTES: u64 = 256 * 1024;
 /// Codex/Antigravity rollouts produce no Task ActivityStarts from line
 /// decode (Codex subagents wire via the SubagentStart/Stop hooks), so the
 /// scan is a structural no-op for them.
-async fn scan_pending_tasks(
-    path: &Path,
-    file_len: u64,
-    decoders: SourceDecoders,
-    ctx: &WatchCtx<'_>,
-) {
+async fn scan_pending_tasks(path: &Path, decoders: SourceDecoders, ctx: &WatchCtx<'_>) {
     let Some(buf) = read_tail(path, TASK_SCAN_BYTES).await else {
         return;
     };
@@ -564,12 +567,14 @@ async fn scan_pending_tasks(
     // id from this normalized path string (see `transcript_path_str` there).
     let transcript_path_str = crate::id::normalize_path_key(&path.to_string_lossy());
     let mut lines = buf.split(|b| *b == b'\n');
-    if file_len > TASK_SCAN_BYTES {
-        // The window starts mid-file, so its first chunk is almost always a
-        // partial line — skip through the first newline rather than decode a
-        // fragment (which could even parse as JSON by accident).
-        let _ = lines.next();
-    }
+    // The window ALWAYS starts mid-file (the only caller is the oversized
+    // branch, so file_len > MAX_PENDING_BYTES > TASK_SCAN_BYTES by
+    // construction), so its first chunk is almost always a partial line —
+    // skip through the first newline unconditionally rather than decode a
+    // fragment (which could even parse as JSON by accident). The former
+    // `file_len > TASK_SCAN_BYTES` guard was provably constant-true here
+    // and its false arm untestable dead code.
+    let _ = lines.next();
     // Unmatched Task dispatches in file order. A Vec keeps the order; a
     // duplicate ActivityStart for a seen tuid is skipped (HashSet semantics)
     // and a completion removes its start wherever it sits.

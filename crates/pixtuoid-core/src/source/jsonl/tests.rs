@@ -1,7 +1,10 @@
 use std::io::Write;
 
 use super::health::FailureLatch;
-use super::liveness::{emit_session_exit, revouch_gated_files, unbind_session};
+use super::liveness::{
+    emit_session_exit, refresh_probe_snapshot, revouch_gated_files, unbind_session, NegativeVouch,
+    ProbeSnapshot,
+};
 use super::unclaim::drain_child_end_unclaims;
 use super::walk::{
     detect_parent_id, extract_cwd, park_if_truncated_below_cursor, scan_root, walk_jsonl,
@@ -27,6 +30,125 @@ fn unbind_session_drops_only_emptied_pid_entries() {
         bindings.get(&100).map(|ids| ids.len()),
         Some(1),
         "the sibling id on a shared pid must survive the unbind"
+    );
+}
+
+/// #223 rebind: the snapshot's `pid_of` is ownership ground truth — an id
+/// seen under a NEW pid MIGRATES its binding, so the old pid's later death
+/// can't end the live session. Asserted directly on the bindings map (the
+/// watcher-level twin skips the map, so an inverted `!=` that left the stale
+/// binding in place survived it).
+#[tokio::test]
+async fn refresh_probe_snapshot_migrates_a_rebound_id_between_pids() {
+    let cursors = Arc::new(Mutex::new(HashMap::new()));
+    let seen = Arc::new(Mutex::new(HashMap::new()));
+    let (tx, _rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(8);
+    let source: Arc<str> = Arc::from("test");
+    let live = Arc::new(Mutex::new(HashSet::new()));
+    let ctx = WatchCtx {
+        source: &source,
+        cursors: &cursors,
+        seen: &seen,
+        tx: &tx,
+        window: Duration::from_secs(3600),
+        live: &live,
+    };
+    let mut vouch = NegativeVouch::new(Duration::from_secs(60));
+    let mut bindings: HashMap<i32, HashSet<String>> = HashMap::new();
+    bindings.entry(1).or_default().insert("sess".to_string());
+    let probe: LivenessProbe = Arc::new(|| {
+        Some(ProbeSnapshot {
+            ids: HashSet::from(["sess".to_string()]),
+            pid_of: HashMap::from([("sess".to_string(), 2)]),
+        })
+    });
+    let refreshed = refresh_probe_snapshot(
+        Some(&probe),
+        &mut vouch,
+        &mut bindings,
+        None,
+        t_decoders(),
+        &ctx,
+    )
+    .await;
+    assert!(refreshed, "a healthy snapshot must report refreshed");
+    assert!(
+        !bindings.contains_key(&1),
+        "the stale pid-1 binding must be dropped on rebind, got {bindings:?}"
+    );
+    assert_eq!(
+        bindings.get(&2).map(|ids| ids.contains("sess")),
+        Some(true),
+        "the id must be bound under its NEW pid, got {bindings:?}"
+    );
+}
+
+/// The instant-exit ↔ negative-vouch handshake: `forget` disarms the ledger,
+/// so a later healthy-snapshot pair can never re-confirm an id whose
+/// `SessionEnd` the instant-exit arm already emitted. A body-wiped `forget`
+/// leaves the ledger armed and a duplicate SessionEnd lands on the channel.
+#[tokio::test]
+async fn forget_disarms_a_pending_negative_vouch_confirmation() {
+    let cursors = Arc::new(Mutex::new(HashMap::new()));
+    let seen = Arc::new(Mutex::new(HashMap::new()));
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(8);
+    let source: Arc<str> = Arc::from("test");
+    let live = Arc::new(Mutex::new(HashSet::new()));
+    let ctx = WatchCtx {
+        source: &source,
+        cursors: &cursors,
+        seen: &seen,
+        tx: &tx,
+        window: Duration::from_secs(3600),
+        live: &live,
+    };
+    // Tiny span so the confirming observation lands deterministically after
+    // it (load only stretches the sleep FURTHER past — the safe direction).
+    let mut vouch = NegativeVouch::new(Duration::from_millis(1));
+    let mut bindings: HashMap<i32, HashSet<String>> = HashMap::new();
+    let vouched: LivenessProbe = Arc::new(|| {
+        Some(ProbeSnapshot {
+            ids: HashSet::from(["sess".to_string()]),
+            pid_of: HashMap::new(),
+        })
+    });
+    refresh_probe_snapshot(
+        Some(&vouched),
+        &mut vouch,
+        &mut bindings,
+        None,
+        t_decoders(),
+        &ctx,
+    )
+    .await;
+    // The instant-exit arm already ended "sess" — disarm the slower rung.
+    vouch.forget("sess");
+    let gone: LivenessProbe = Arc::new(|| Some(ProbeSnapshot::default()));
+    refresh_probe_snapshot(
+        Some(&gone),
+        &mut vouch,
+        &mut bindings,
+        None,
+        t_decoders(),
+        &ctx,
+    )
+    .await;
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    refresh_probe_snapshot(
+        Some(&gone),
+        &mut vouch,
+        &mut bindings,
+        None,
+        t_decoders(),
+        &ctx,
+    )
+    .await;
+    let events = drain_events(&mut rx);
+    assert!(
+        !events
+            .iter()
+            .any(|(_, e)| matches!(e, AgentEvent::SessionEnd { .. })),
+        "a forgotten id must never re-confirm into a second SessionEnd, got {events:?}"
     );
 }
 
@@ -898,6 +1020,53 @@ async fn child_end_unclaims_ttl_prunes_unmatched_entries() {
     );
 }
 
+/// The release loop is scoped to the MATCHED id's own path: a sibling path
+/// this watcher also holds (a different session) must keep its claim when
+/// another child's un-claim drains. Pins the loop's skip condition
+/// (`*pid != id || !*held`) — an `||`→`&&` flip would walk + release every
+/// held sibling on any drain.
+#[tokio::test]
+async fn child_end_unclaim_releases_only_the_matched_ids_own_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let ended_child = dir.path().join("ended-child.jsonl");
+    let sibling = dir.path().join("live-sibling.jsonl");
+    let cursors = Arc::new(Mutex::new(HashMap::new()));
+    let seen = Arc::new(Mutex::new(HashMap::new()));
+    for p in [&ended_child, &sibling] {
+        std::fs::write(p, "{\"type\":\"assistant\"}\n").unwrap();
+        walk_once(p, Duration::from_secs(3600), t_ended, &cursors, &seen).await;
+        assert_eq!(seen.lock().await.get(p), Some(&true), "fixture: registered");
+    }
+
+    let unclaims = ChildEndUnclaims::new();
+    unclaims.push(AgentId::from_parts(
+        "test",
+        &default_id_from_path(&ended_child),
+    ));
+    let (tx, _rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(64);
+    let source: Arc<str> = Arc::from("test");
+    let live = Arc::new(Mutex::new(HashSet::new()));
+    let ctx = WatchCtx {
+        source: &source,
+        cursors: &cursors,
+        seen: &seen,
+        tx: &tx,
+        window: Duration::from_secs(3600),
+        live: &live,
+    };
+    drain_child_end_unclaims(Some(&unclaims), t_decoders(), &ctx).await;
+    assert_eq!(
+        seen.lock().await.get(&ended_child),
+        Some(&false),
+        "the ended child's claim is released"
+    );
+    assert_eq!(
+        seen.lock().await.get(&sibling),
+        Some(&true),
+        "the sibling session's claim must survive another child's un-claim"
+    );
+}
+
 #[tokio::test]
 async fn oversized_ended_skip_unclaims_seen_so_a_later_append_re_registers() {
     // Same self-heal for the oversized branch: a REGISTERED file whose
@@ -1617,6 +1786,77 @@ async fn oversized_attach_matched_task_is_not_seeded() {
             .iter()
             .any(|(_, e)| matches!(e, AgentEvent::ActivityStart { .. })),
         "a matched (returned) dispatch must not be seeded — and no other backlog event may leak from the scan, got {events:?}"
+    );
+}
+
+/// The oversized skip is STRICT (`pending > MAX_PENDING_BYTES`): a span of
+/// EXACTLY 1 MiB pending still replays through the normal decode path —
+/// activity events included. A `>`→`>=` flip would divert the boundary span
+/// into the skip branch (registration + Task-seeding only, the backlog's
+/// ordinary activity silently dropped).
+#[tokio::test]
+async fn pending_span_of_exactly_max_bytes_replays_instead_of_skipping() {
+    let bash_line = serde_json::json!({
+        "type": "assistant",
+        "message": {
+            "role": "assistant",
+            "content": [
+                { "type": "tool_use", "id": "tu_bash", "name": "Bash",
+                  "input": { "command": "ls" } }
+            ]
+        }
+    })
+    .to_string()
+        + "\n";
+    // walk_jsonl's MAX_PENDING_BYTES (a fn-local const) — the same value the
+    // sibling oversized fixtures overshoot with `+ 4096`.
+    let target = 1usize << 20;
+    let pad_open = "{\"type\":\"assistant\",\"pad\":\"";
+    let pad_close = "\"}\n";
+    let pad_len = target - CC_HEAD_LINE.len() - bash_line.len() - pad_open.len() - pad_close.len();
+    let full = format!(
+        "{CC_HEAD_LINE}{pad_open}{}{pad_close}{bash_line}",
+        "x".repeat(pad_len)
+    );
+    assert_eq!(full.len(), target, "fixture: exactly 1 MiB pending");
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("boundary.jsonl");
+    tokio::fs::write(&path, &full).await.unwrap();
+    let cursors = Arc::new(Mutex::new(HashMap::new()));
+    let seen = Arc::new(Mutex::new(HashMap::new()));
+    let events = walk_oversized_cc(&path, Duration::from_secs(3600), &cursors, &seen).await;
+    assert!(
+        events
+            .iter()
+            .any(|(_, e)| matches!(e, AgentEvent::ActivityStart { .. })),
+        "an exactly-at-the-cap span must REPLAY (strict >) — the ordinary \
+         tool activity must come through, got {events:?}"
+    );
+}
+
+/// Two distinct unmatched dispatches — one buried ~4 KiB before EOF (well
+/// past a `256*1024`→`256+1024` mutation's collapsed 1.3 KiB window), one
+/// near EOF — must BOTH be seeded, each exactly once, in file order. Pins
+/// the scan window's real depth and the pending-set's match-on-same-tuid
+/// dedupe (`==`→`!=` would drop every dispatch after the first).
+#[tokio::test]
+async fn oversized_attach_seeds_dispatches_across_the_full_scan_window() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("deleg-deep.jsonl");
+    let mut tail = vec![cc_task_dispatch_line("tu_deep")];
+    tail.extend(std::iter::repeat_n(FILLER_LINE.to_string(), 200)); // ~4.4 KiB spacing
+    tail.push(cc_task_dispatch_line("tu_near"));
+    let full = oversized_body(&tail);
+    tokio::fs::write(&path, &full).await.unwrap();
+    let cursors = Arc::new(Mutex::new(HashMap::new()));
+    let seen = Arc::new(Mutex::new(HashMap::new()));
+
+    let events = walk_oversized_cc(&path, Duration::from_secs(3600), &cursors, &seen).await;
+    assert_eq!(
+        task_start_tuids(&events),
+        vec!["tu_deep".to_string(), "tu_near".to_string()],
+        "both in-flight dispatches across the window must be seeded once, in file order"
     );
 }
 

@@ -302,9 +302,15 @@ pub(super) async fn refresh_probe_snapshot(
     // that registration failed kernel-side (EPERM), it is not retried — the
     // slower rungs cover.
     for (id, pid) in &snap.pid_of {
+        // find-then-compare (not `any(p != pid && contains)`): an id is bound
+        // under at most ONE pid (this very loop maintains that — unbind on
+        // migration, insert once), so the first holder is the only holder,
+        // and the single `!=` leaves no conjunction whose halves a mutation
+        // could silently swap.
         let bound_elsewhere = pid_bindings
             .iter()
-            .any(|(p, ids)| p != pid && ids.contains(id));
+            .find(|(_, ids)| ids.contains(id))
+            .is_some_and(|(p, _)| p != pid);
         if bound_elsewhere {
             unbind_session(pid_bindings, id);
         }

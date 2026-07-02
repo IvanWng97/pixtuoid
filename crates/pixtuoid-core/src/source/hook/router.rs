@@ -231,4 +231,31 @@ mod tests {
             .expect("tee exits when the listener side closes")
             .unwrap();
     }
+
+    /// `name()` is the footer attribution for a fatal bind (`spawn_with_health`
+    /// publishes `SourceDeath { source: name }`) — a blank or drifted name
+    /// makes that death message unattributable.
+    #[test]
+    fn router_name_is_the_infrastructure_source_name() {
+        assert_eq!(
+            HookRouter::new(PathBuf::from("/tmp/x.sock")).name(),
+            SOURCE_NAME
+        );
+    }
+
+    /// Only `SocketBusy` degrades to the quiet hook-plane-off Ok(()); every
+    /// OTHER bind failure must surface as Err → `SourceDeath` (a guard→true
+    /// mutation would swallow a permanently broken socket path silently).
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn fatal_bind_error_is_err_not_quiet_degradation() {
+        let dir = tempfile::tempdir().unwrap();
+        let bad = dir.path().join("no-such-dir").join("hook.sock");
+        let (tx, _rx) = tokio::sync::mpsc::channel(4);
+        let res = Box::new(HookRouter::new(bad)).run(tx).await;
+        assert!(
+            res.is_err(),
+            "a non-Busy bind failure must be Err (SourceDeath fuel), got {res:?}"
+        );
+    }
 }

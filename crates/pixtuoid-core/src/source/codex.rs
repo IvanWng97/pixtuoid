@@ -256,6 +256,25 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    /// `is_uuid` is the rollout-stem shape gate: 36 chars, dashes at the
+    /// canonical positions, hex everywhere else — each axis pinned by a
+    /// counterexample so an always-true / OR-collapsed mutant can't admit
+    /// non-UUID stems into the id space.
+    #[test]
+    fn is_uuid_requires_length_dashes_and_hex() {
+        assert!(is_uuid("0196fdb2-99d1-7db2-9ded-93a4a0d4a90e"));
+        for bad in [
+            "",
+            "abc",                                   // wrong length
+            "0196fdb299d17db29ded93a4a0d4a90e",      // 32 hex, no dashes
+            "0196fdb2-99d1-7db2-9ded-93a4a0d4a90ez", // 37 chars
+            "0196fdb2x99d1-7db2-9ded-93a4a0d4a90e",  // dash position wrong
+            "0196fdb2-99d1-7db2-9ded-93a4a0d4a90g",  // non-hex digit
+        ] {
+            assert!(!is_uuid(bad), "{bad:?} must not read as a UUID");
+        }
+    }
+
     // The custom-decoder contract: claim our two events FULLY — a malformed
     // instance must be Err, never Ok(None) (which would silently fall through
     // to the shared session-keyed arms). These pin the guards directly; the

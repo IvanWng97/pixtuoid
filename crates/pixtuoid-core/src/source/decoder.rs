@@ -60,9 +60,10 @@ pub(crate) fn is_subagent_path(path: &Path) -> bool {
 /// source supplies its 2-char prefix and its own fallback for the `None` case
 /// (CC falls back to its project dir, codex/antigravity to a bare prefix).
 pub(crate) fn cwd_basename_label(prefix: &str, cwd: &Path) -> Option<String> {
-    if cwd == Path::new("") || cwd == Path::new("/") {
-        return None;
-    }
+    // No explicit empty/root pre-check: `file_name()` is None for "", "/",
+    // and any path without a final normal component, so the `?` below IS the
+    // gate (a separate `cwd == ""` guard was redundant dead code — pinned by
+    // the empty/root cases in this file's tests).
     let base = cwd.file_name().and_then(|n| n.to_str())?;
     // The cwd is transcript/hook CONTENT (extract_cwd / read_head_cwd /
     // payload cwd), and a slashless crafted value makes the whole string the
@@ -501,6 +502,49 @@ mod tests {
         }
     }
 
+    /// The `TranscriptPathThenSessionId` key strategy (Antigravity + the
+    /// unknown-source default): a NON-EMPTY `transcript_path` is the key —
+    /// the same normalized path the JSONL watcher keys on, so hook and
+    /// transcript coalesce into one sprite — and only an empty/absent path
+    /// falls back to `session_id`. A `delete !` on the non-empty filter
+    /// inverts the fallback and splits every AG session in two.
+    #[test]
+    fn transcript_path_key_strategy_prefers_a_non_empty_path() {
+        let ev = decode_single(json!({
+            "hook_event_name": "SessionStart",
+            "session_id": "ag-sess-1",
+            "_pixtuoid_source": "antigravity",
+            "transcript_path": "/tmp/ag/brain/x.json",
+            "cwd": "/repo"
+        }));
+        match ev {
+            AgentEvent::SessionStart { agent_id, .. } => assert_eq!(
+                agent_id,
+                AgentId::from_parts(
+                    "antigravity",
+                    &crate::id::normalize_path_key("/tmp/ag/brain/x.json")
+                ),
+                "a non-empty transcript_path is the key, not session_id"
+            ),
+            other => panic!("expected SessionStart, got {other:?}"),
+        }
+        let ev = decode_single(json!({
+            "hook_event_name": "SessionStart",
+            "session_id": "ag-sess-1",
+            "_pixtuoid_source": "antigravity",
+            "transcript_path": "",
+            "cwd": "/repo"
+        }));
+        match ev {
+            AgentEvent::SessionStart { agent_id, .. } => assert_eq!(
+                agent_id,
+                AgentId::from_parts("antigravity", "ag-sess-1"),
+                "an EMPTY transcript_path falls back to session_id"
+            ),
+            other => panic!("expected SessionStart, got {other:?}"),
+        }
+    }
+
     #[test]
     fn codex_permission_request_maps_to_identity_plus_waiting() {
         // A cwd-less PermissionRequest (the captured Codex shape) still gets
@@ -901,6 +945,107 @@ mod tests {
         assert_eq!(
             cwd_basename_label("cc", Path::new("/repo/app")),
             Some("cc·app".to_string())
+        );
+    }
+
+    /// The empty / filesystem-root cwd degrades to `None` (each source's own
+    /// fallback then applies). `file_name()` is the one gate — this pins the
+    /// removal of the former redundant `cwd == "" || cwd == "/"` pre-check.
+    #[test]
+    fn cwd_basename_label_is_none_for_empty_and_root() {
+        assert_eq!(cwd_basename_label("cc", Path::new("")), None);
+        assert_eq!(cwd_basename_label("cc", Path::new("/")), None);
+    }
+
+    /// CC's per-tool target keys: the file-tool family reads `file_path`,
+    /// Bash reads `command`, Grep/Glob read `pattern`, anything else has no
+    /// keyed target. Deleting a match arm silently drops the `: target`
+    /// suffix from every display of that family.
+    #[test]
+    fn describe_tool_target_keys_each_cc_tool_family() {
+        for tool in ["Write", "Edit", "MultiEdit", "Read"] {
+            assert_eq!(
+                describe_tool_target(tool, Some(&json!({"file_path": "/a/b.rs"}))),
+                Some("/a/b.rs"),
+                "{tool} must key on file_path"
+            );
+        }
+        assert_eq!(
+            describe_tool_target("Bash", Some(&json!({"command": "ls"}))),
+            Some("ls")
+        );
+        assert_eq!(
+            describe_tool_target("Grep", Some(&json!({"pattern": "fn "}))),
+            Some("fn ")
+        );
+        assert_eq!(
+            describe_tool_target("WebFetch", Some(&json!({"url": "u"}))),
+            None
+        );
+    }
+
+    // Minimal tracing capture (the drift.rs test-mod pattern, duplicated on
+    // purpose — no cross-mod test util): collect fmt output during `f`.
+    fn capture_logs(f: impl FnOnce()) -> String {
+        use std::sync::{Arc, Mutex};
+        use tracing_subscriber::fmt::MakeWriter;
+        #[derive(Clone, Default)]
+        struct Buf(Arc<Mutex<Vec<u8>>>);
+        impl std::io::Write for Buf {
+            fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(b);
+                Ok(b.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        impl MakeWriter<'_> for Buf {
+            type Writer = Buf;
+            fn make_writer(&self) -> Buf {
+                self.clone()
+            }
+        }
+        let buf = Buf::default();
+        let sub = tracing_subscriber::fmt()
+            .with_writer(buf.clone())
+            .with_max_level(tracing::Level::TRACE)
+            .without_time()
+            .finish();
+        tracing::subscriber::with_default(sub, f);
+        let bytes = buf.0.lock().unwrap().clone();
+        String::from_utf8(bytes).unwrap()
+    }
+
+    /// The `unknown_dispatch` breadcrumb (upstream-drift defense #2) fires
+    /// EXACTLY when the semantic signal caught a dispatch under an
+    /// unrecognised name — never for the known `Agent` dispatch, whose warn
+    /// would be per-tool-call noise drowning the real drift signal.
+    #[test]
+    fn unknown_dispatch_breadcrumb_fires_only_for_a_renamed_dispatch() {
+        let renamed = capture_logs(|| {
+            let d = make_tool_detail(
+                "claude-code",
+                "DelegateZ",
+                Some(&json!({"subagent_type": "explorer"})),
+            );
+            assert!(d.is_task());
+        });
+        assert!(
+            renamed.contains("unknown_dispatch") && renamed.contains("DelegateZ"),
+            "a dispatch under an unrecognised name must leave the drift breadcrumb, got:\n{renamed}"
+        );
+        let known = capture_logs(|| {
+            let d = make_tool_detail(
+                "claude-code",
+                "Agent",
+                Some(&json!({"subagent_type": "explorer"})),
+            );
+            assert!(d.is_task());
+        });
+        assert!(
+            !known.contains("unknown_dispatch"),
+            "the known dispatch name must stay breadcrumb-silent, got:\n{known}"
         );
     }
 

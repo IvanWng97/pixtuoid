@@ -1085,10 +1085,10 @@ fn ag_non_integer_step_index_is_skipped() {
     );
 }
 
-// A `tool_calls` entry that isn't an object is skipped (`continue`), and the
-// run_command/grep_search normalize key-arms are exercised. The display text
-// itself reflects only the tool name (describe_tool_target has no antigravity
-// arm), so assert on the event shape + the load-bearing tool_use_id instead.
+// A `tool_calls` entry that isn't an object is skipped (`continue`). The
+// display text (tool name + `: target` via ag_tool_target →
+// generic_tool_display) is pinned by antigravity.rs's own unit tests; here
+// assert the event shape + the load-bearing tool_use_id.
 #[test]
 fn ag_skips_non_object_tool_call_and_keys_run_command() {
     let transcript = "/Users/me/.gemini/antigravity-cli/brain/sess/transcript.jsonl";
