@@ -386,7 +386,9 @@ gen-wasm:
     # manifest, verified by gen-wasm-check. Generation-time stamping keeps CI
     # toolchain-free (byte-exact rebuilds drift across rustc versions — the
     # documented reason rebuild comparison is NOT CI'd).
-    (cd site/public/wasm && find . -maxdepth 1 -type f ! -name manifest.sha256 | LC_ALL=C sort | xargs shasum -a 256 > manifest.sha256)
+    # `! -name '.*'` keeps dotfiles out: a Finder-dropped .DS_Store is gitignored,
+    # so stamping it would verify locally and fail CI (missing file) — local-green/CI-red.
+    (cd site/public/wasm && find . -maxdepth 1 -type f ! -name manifest.sha256 ! -name '.*' | LC_ALL=C sort | xargs shasum -a 256 > manifest.sha256)
     ls -la site/public/wasm/
 
 # Bloat + PAIR gate for the committed wasm artifact. Size: the hero must stay
@@ -417,7 +419,8 @@ gen-wasm-check:
     for f in site/public/wasm/*; do
         b=$(basename "$f")
         [ "$b" = manifest.sha256 ] && continue
-        grep -q " ./$b\$" "$M" || { echo "$f is not covered by $M — run 'just gen-wasm'"; exit 1; }
+        awk -v want="./$b" '$2 == want { found = 1 } END { exit !found }' "$M" \
+            || { echo "$f is not covered by $M — run 'just gen-wasm'"; exit 1; }
     done
     echo "gen-wasm-check OK: $W ($SIZE bytes <= $CAP), pair manifest verified"
 

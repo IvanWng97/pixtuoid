@@ -51,7 +51,8 @@ Mermaid diagram becomes an inline SVG at build via `rehype-mermaid`, which is
   regenerates these in the same change (workspace `CLAUDE.md`).
 - `public/wasm/` is the live-office backdrop's engine — a GENERATED, COMMITTED
   artifact built from the `pixtuoid-web` crate by `just gen-wasm` (wasm +
-  wasm-bindgen JS glue, size-gated by `gen-wasm-check` in the Rust CI).
+  wasm-bindgen JS glue, size- and pair-gated — a sha256 manifest pins the
+  wasm/glue ABI pair — by `gen-wasm-check` in the Rust CI).
   `components/OfficeBackdrop.astro` dynamically `import()`s it at runtime
   (poster-first; any failure keeps the still). Never hand-edit
   (prettier/eslint/knip all ignore it); regenerate from the crate.
