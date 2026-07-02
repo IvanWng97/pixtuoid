@@ -1,7 +1,7 @@
 [advisories]
-# Each ignore is Linux-only build-graph exposure with no untrusted input; a
-# tracking issue owns removal when upstream releases (see the issue for the
-# full dependency-path trace).
+# Each ignore is Linux-only build-graph exposure with no untrusted input;
+# issue #440 owns removal when upstream releases (full dependency-path
+# traces there; the winit-0.31 route is #441).
 ignore = [
     # quick-xml 0.39 pair, reachable only via wayland-scanner (build-time
     # codegen over vendored Wayland protocol XML — never attacker input).
