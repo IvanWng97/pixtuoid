@@ -7,7 +7,7 @@ driven by `tests/sources/conformance.rs`. Each fixture is a directory:
 tests/sources/fixtures/<source>/<scenario>/
     <transcript>.jsonl     # JSONL transcript lines, fed to the source's LineDecoder
                            # (JSONL-bearing sources only — a hook-only row,
-                           # line_decoder: None, ships NO transcript)
+                           # transcript: None, ships NO transcript)
     hook-payloads.jsonl    # one hook payload per line, fed to decode_hook_payload
     # expected snapshot lives in tests/sources/snapshots/ (insta), generated on first run
 ```
@@ -38,7 +38,7 @@ prove Codex *ignores* it and still coalesces on `session_id`.
 
 **Adding a CLI:** drop a new `fixtures/<source>/<scenario>/` dir — the decoder
 comes from the source's `SourceDescriptor` row in `source/registry.rs` (a
-hook-only row, `line_decoder: None`, ships only `hook-payloads.jsonl` instead
+hook-only row, `transcript: None`, ships only `hook-payloads.jsonl` instead
 of a transcript). Run `cargo insta review` to accept the generated snapshot.
 No harness edit, no other test code.
 

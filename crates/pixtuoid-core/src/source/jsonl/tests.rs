@@ -33,7 +33,7 @@ fn unbind_session_drops_only_emptied_pid_entries() {
 #[test]
 fn default_id_from_path_returns_normalized_path_key() {
     // Lowercase literal: identity on every platform (the Windows fold is
-    // pinned by decoder.rs's normalize_path_key unit tests + the backslash
+    // pinned by id.rs's normalize_path_key unit tests + the backslash
     // test below).
     let p = Path::new("/users/me/.claude/projects/x/abc.jsonl");
     assert_eq!(

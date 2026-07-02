@@ -24,7 +24,7 @@ use pixtuoid_core::source::jsonl::LineDecoder;
 use pixtuoid_core::source::{registry, AgentEvent, REGISTERED_SOURCES};
 
 /// A fixture source's JSONL line decoder, from the source registry. A
-/// hook-only source (`line_decoder: None`) ships no transcript and never
+/// hook-only source (`transcript: None`) ships no transcript and never
 /// reaches this fn (`is_hook_only` gates the transcript requirement).
 fn decoder_for(source: &str) -> LineDecoder {
     registry::descriptor_for(source)
@@ -108,7 +108,7 @@ fn decode_fixture(source: &str, dir: &Path) -> Decoded {
     // The transcript is the lone non-hook .jsonl in the dir. Exactly one for a
     // JSONL-bearing source — two would make selection (and the snapshot)
     // depend on read_dir order, zero would skip its LineDecoder entirely. A
-    // hook-only source (`line_decoder: None` in its registry row) must ship
+    // hook-only source (`transcript: None` in its registry row) must ship
     // ZERO transcripts — and ONLY it may.
     let mut transcripts: Vec<PathBuf> = std::fs::read_dir(dir)
         .unwrap()

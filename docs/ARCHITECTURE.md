@@ -156,7 +156,7 @@ These are load-bearing — see `CLAUDE.md` and the nested guides before changing
   shared decoder. Hook-only CLIs (Reasonix, opencode, Cursor CLI,
   CodeWhale — no watchable transcript) are the documented exception: no
   `Source` impl and no runtime wiring; their registry rows set
-  `line_decoder: None` and supply a custom hook decoder, and each ships an
+  `transcript: None` and supply a custom hook decoder, and each ships an
   install `Target` instead (bound via the in-TUI Sources panel).
 - **A `Source` is an `Agent` or a `Daemon`** (`SourceKind`). A daemon (the
   OpenClaw gateway is the first) earns a presence-gated wandering mascot, not a

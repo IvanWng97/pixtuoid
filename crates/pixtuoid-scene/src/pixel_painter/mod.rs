@@ -86,8 +86,8 @@ mod glass;
 mod palette;
 mod seat;
 
+pub(crate) use crate::motion::walking_position;
 pub use anchors::character_anchor;
-pub(crate) use anchors::walking_position;
 use anchors::{
     back_couch_anchor, compute_door_frame_idx, seated_anchor, standing_at_desk_anchor,
     walking_anchor, waypoint_anchor, waypoint_rank_offset_x, with_breath, CHARACTER_SPRITE_W,

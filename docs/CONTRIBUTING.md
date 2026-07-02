@@ -199,7 +199,7 @@ you:
 
    **Hook-only CLI** (no watchable transcript — e.g. one that full-rewrites
    its session file per turn)? Skip the `LineDecoder`, the `Source` trait, and
-   step 7: set `line_decoder: None` in the registry row, put the format
+   step 7: set `transcript: None` in the registry row, put the format
    knowledge in a `hook.custom` decoder (it must claim EVERY event — see the
    contract on `HookDecoding::custom`), and do step 8 (install target) instead
    — its hooks ride the shared socket.
