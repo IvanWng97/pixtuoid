@@ -750,6 +750,21 @@ impl Reducer {
                     if resolves_wait {
                         self.corr.gated_before_waiting.remove(&agent_id);
                     }
+                    // While the agent is still DELEGATING (a non-empty
+                    // active_tasks entry), its own parallel tool ending must
+                    // not settle it to Idle — nothing would restore the
+                    // Delegating display for the rest of the delegation (the
+                    // suppress-restore fires only from Waiting; the eventual
+                    // Task drain only arms idle / fires b1), so the parent
+                    // would render asleep while its subagents do the visible
+                    // work — exactly what `track_active_tasks`' Delegating
+                    // marking exists to prevent. Re-enter Delegating instead.
+                    let delegating_tuid = self
+                        .corr
+                        .active_tasks
+                        .get(&agent_id)
+                        .and_then(|s| s.iter().next())
+                        .map(|t| Arc::<str>::from(t.as_str()));
                     if let Some(slot) = scene.agents.get_mut(&agent_id) {
                         // Arm the idle debounce when Active (normal tool end) or
                         // when a gated permission just resolved — in both cases
@@ -757,7 +772,10 @@ impl Reducer {
                         // stale ActivityEnd while Idle, or a parallel tool ending
                         // while Waiting, leaves the timer alone.
                         if matches!(slot.state, ActivityState::Active { .. }) || resolves_wait {
-                            fsm::arm_pending_idle(slot, now);
+                            match delegating_tuid {
+                                Some(tuid) => fsm::enter_delegating(slot, Some(tuid), now),
+                                None => fsm::arm_pending_idle(slot, now),
+                            }
                         }
                         slot.last_event_at = now;
                     }
@@ -840,6 +858,16 @@ impl Reducer {
                 let cwd = cwd.as_deref().unwrap_or_else(|| std::path::Path::new(""));
                 if let Some(slot) = scene.agents.get_mut(&agent_id) {
                     backfill_identity(slot, &source, &session_id, cwd);
+                    // The same reap exemption the registration branch below
+                    // honors, mirrored: Identity is hook-only (transport
+                    // guard above), so the owning process is alive — a
+                    // JSONL-seeded unknown-cwd ghost flag (e.g. a Codex
+                    // revive ghost's empty cwd) must not keep the 3-min reap
+                    // armed on it. A cwd-less Identity can't heal the cwd
+                    // (`backfill_identity` clears the flag only on a real
+                    // cwd), and the motivating permission-parked session
+                    // emits nothing further within 3 min.
+                    slot.unknown_cwd = false;
                 } else if !self.corr.hook_session_end_tombstoned(agent_id, now)
                     && self.register_slot(scene, agent_id, &source, &session_id, cwd, None, now)
                 {
@@ -954,14 +982,16 @@ impl Reducer {
             return false;
         };
         let floor_idx = scene.floor_of(desk_index);
-        let base = cwd
-            .file_name()
-            .and_then(|n| n.to_str())
-            .filter(|s| !s.is_empty());
-        let has_cwd = base.is_some();
         let prefix = source_label_prefix(source);
-        let label: Arc<str> = match base {
-            Some(b) => Arc::<str>::from(format!("{prefix}·{b}").as_str()),
+        // The cwd is hook/transcript CONTENT — route the basename through the
+        // `cwd_basename_label` chokepoint so the label is capped at the decode
+        // boundary, exactly like the JSONL derivers and the duplicate-
+        // SessionStart backfill upgrade (this is the sole mint site for
+        // hook-only sources).
+        let named = crate::source::decoder::cwd_basename_label(prefix, cwd);
+        let has_cwd = named.is_some();
+        let label: Arc<str> = match named {
+            Some(l) => Arc::<str>::from(l.as_str()),
             None => {
                 // Only an unknown-cwd ghost consumes an ordinal, so labels
                 // stay contiguous (cc#1, cc#2, …) instead of skipping the
@@ -1039,20 +1069,39 @@ impl Reducer {
             // delegating parent from being wrongly stale-swept.
             //
             // One state change still belongs to the parent: if it is
-            // `Waiting` while delegating, that Waiting is the SUBAGENT's
-            // permission gate (the `Notification` was misattributed to the
-            // parent) — a parent blocked on a Task isn't running its own
-            // tools. A suppressed child event means the subagent resumed
-            // work, so the gate resolved: restore Active(Delegating) instead
-            // of leaving a stale "permission?" Waiting until the 60-min
-            // stale-sweep. Then drop the spurious display update.
+            // `Waiting` while delegating, that Waiting is usually the
+            // SUBAGENT's permission gate (the `Notification` was
+            // misattributed to the parent). A suppressed child event means
+            // the subagent resumed work, so the gate resolved: restore
+            // Active(Delegating) instead of leaving a stale "permission?"
+            // Waiting until the 60-min stale-sweep. Then drop the spurious
+            // display update.
+            //
+            // CONDITIONAL on the gate: a delegating parent CAN run its own
+            // parallel ordinary tool (applied via JSONL — suppression is
+            // hook-only; pinned by `task_drain_keeps_parallel_ordinary_tool_
+            // gate`), and when THAT tool was the one gated at Waiting-entry,
+            // the gate holds an ordinary tuid ∉ active_tasks — the prompt is
+            // the PARENT's own and still pending in CC. The subagent working
+            // on its independent loop proves nothing about it: keep the
+            // Waiting and the gate, so the own tool's END can still resolve
+            // it. A Task-tuid gate (∈ active_tasks — Waiting fired while
+            // Active(Delegating)) or no gate means the subagent's prompt:
+            // restore.
             if let Some(slot) = scene.agents.get_mut(&id) {
                 if matches!(slot.state, ActivityState::Waiting { .. }) {
-                    let task_tuid = tasks
-                        .and_then(|s| s.iter().next())
-                        .map(|t| Arc::<str>::from(t.as_str()));
-                    fsm::enter_delegating(slot, task_tuid, now);
-                    self.corr.gated_before_waiting.remove(&id);
+                    let gate_is_own_tool = self
+                        .corr
+                        .gated_before_waiting
+                        .get(&id)
+                        .is_some_and(|g| !tasks.is_some_and(|s| s.contains(&**g)));
+                    if !gate_is_own_tool {
+                        let task_tuid = tasks
+                            .and_then(|s| s.iter().next())
+                            .map(|t| Arc::<str>::from(t.as_str()));
+                        fsm::enter_delegating(slot, task_tuid, now);
+                        self.corr.gated_before_waiting.remove(&id);
+                    }
                 }
             }
         }
