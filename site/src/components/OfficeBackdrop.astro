@@ -22,8 +22,15 @@ import { asset } from '../consts';
     fetchpriority="high"
   />
   <canvas id="office-live" class="backdrop__live px"></canvas>
-  <div class="backdrop__wash"></div>
 </div>
+{
+  /* THE DIMMER — the design's signature. A fixed var(--bg) sheet whose
+     opacity is written per-frame by the scroll controller below: 0 in
+     observation gaps (the office fully bright IS the content), up to 0.86
+     when a statement owns the viewport center. Compositor-only (a single
+     style.opacity write), never pauses the canvas. */
+}
+<div id="dimmer" aria-hidden="true"></div>
 
 <style is:global>
   /* The fixed canvas sits at z:-1; the body's opaque background would hide
@@ -58,40 +65,21 @@ import { asset } from '../consts';
     opacity: 0;
     transition: opacity 1.2s ease;
   }
-  /* Legibility floor for everything above: a global dim + gentle verticals.
-     Sections add their own glass; this is the base wash. */
-  .backdrop__wash {
-    position: absolute;
+  #dimmer {
+    position: fixed;
     inset: 0;
-    background: linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--bg) 62%, transparent) 0%,
-      color-mix(in srgb, var(--bg) 28%, transparent) 22%,
-      color-mix(in srgb, var(--bg) 28%, transparent) 78%,
-      color-mix(in srgb, var(--bg) 68%, transparent) 100%
-    );
-  }
-  .backdrop::after {
-    content: '';
-    position: absolute;
-    inset: 0;
+    z-index: -1;
     background: var(--bg);
-    opacity: 0.38;
+    opacity: 0.55; /* pre-JS / reduced-motion resting level: constant AA */
+    pointer-events: none;
   }
-  /* Content floats as GLASS BANDS over the running building: every section
-     below the hero gets a translucent sheet (its inner cards keep their own
-     styles). The gaps between bands — and the hero — show the office sharp.
-     Deliberately NO backdrop-filter: blurring viewport-wide bands over a
-     canvas that repaints at 30fps forces the compositor to re-blur huge
-     regions every frame + every scroll tick — visible flicker/shimmer on
-     Chromium AND Safari. A slightly deeper flat glass reads the same on
-     these dark tones without the per-frame blur cost. */
-  main > section:not(.hero),
-  .ticker {
-    background: color-mix(in srgb, var(--bg) 91%, transparent);
-  }
-  main > hr.px-rule {
-    background-color: transparent;
+  /* Reduced motion is a complete parallel design: the office is the still
+     poster, the dimmer holds a constant readable level, nothing scrolls-
+     animates. (The controller also early-returns.) */
+  @media (prefers-reduced-motion: reduce) {
+    #dimmer {
+      opacity: 0.55 !important;
+    }
   }
 </style>
 
@@ -152,6 +140,7 @@ import { asset } from '../consts';
           if (!live) {
             live = true;
             wrap.classList.add('is-live');
+            document.dispatchEvent(new CustomEvent('pix:onair', { detail: { live: true } }));
           }
         }
       }
@@ -199,8 +188,123 @@ import { asset } from '../consts';
           stop();
           wrap.classList.remove('is-live');
           live = false;
+          document.dispatchEvent(new CustomEvent('pix:onair', { detail: { live: false } }));
         } else {
           start();
+        }
+      });
+    }
+  })();
+</script>
+
+<script is:inline>
+  // THE DIMMER CONTROLLER — scrolling is the light switch. One rAF loop,
+  // one style.opacity write per changed frame (compositor-only; no CSS-var
+  // recalc, no backdrop-filter). Every [data-lit] block pulls darkness in
+  // as it approaches the viewport center — text and dusk arrive as ONE
+  // gesture — and releases it in the observation gaps (dim → 0, the office
+  // alone is the content).
+  (function () {
+    const dimmer = document.getElementById('dimmer');
+    if (!dimmer) return;
+    const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const DIM_MAX = 0.86;
+
+    let blocks = []; // cached page-space rects; re-measured on resize only
+    let lastY = -1;
+    let lastOp = -1;
+    let raf = 0;
+    let active = null; // the currently-faded [data-lit] block
+
+    function measure() {
+      const y = window.scrollY;
+      blocks = Array.prototype.map.call(document.querySelectorAll('[data-lit]'), function (el) {
+        const r = el.getBoundingClientRect();
+        return { el, top: r.top + y, bottom: r.bottom + y };
+      });
+      lastY = -1; // force a recompute on the next frame
+    }
+
+    // smoothstep — darkness eases in/out with approach, no linear pop
+    function ease(t) {
+      return t * t * (3 - 2 * t);
+    }
+
+    function frame() {
+      raf = 0;
+      const y = window.scrollY;
+      if (y !== lastY) {
+        lastY = y;
+        const center = y + window.innerHeight / 2;
+        const reach = window.innerHeight * 0.55; // how far a block throws shade
+        let best = 0;
+        let bestEl = null;
+        for (let i = 0; i < blocks.length; i++) {
+          const b = blocks[i];
+          const d = center < b.top ? b.top - center : center > b.bottom ? center - b.bottom : 0;
+          const p = d >= reach ? 0 : 1 - d / reach;
+          if (p > best) {
+            best = p;
+            bestEl = b.el;
+          }
+        }
+        const op = DIM_MAX * ease(best);
+        if (Math.abs(op - lastOp) > 0.002) {
+          lastOp = op;
+          dimmer.style.opacity = op.toFixed(3);
+          // the statusline's "lights NN%" reads this at its own 1Hz cadence
+          window.__pixLights = op;
+        }
+        // The lit block itself rises with the darkness (opt-in via
+        // data-lit="fade"); only the active block + the one it replaces are
+        // ever written.
+        if (bestEl !== active) {
+          if (active && active.getAttribute('data-lit') === 'fade') {
+            active.style.opacity = '0.001';
+          }
+          active = bestEl;
+        }
+        if (active && active.getAttribute('data-lit') === 'fade') {
+          const t = ease(best);
+          active.style.opacity = (0.15 + 0.85 * t).toFixed(3);
+          active.style.transform = 'translateY(' + Math.round(24 * (1 - t)) + 'px)';
+        }
+      }
+      raf = requestAnimationFrame(frame);
+    }
+
+    function wire() {
+      if (mq.matches) return; // reduced motion: CSS holds the static 0.55
+      measure();
+      raf = requestAnimationFrame(frame);
+      let rraf = 0;
+      window.addEventListener('resize', function () {
+        if (rraf) return;
+        rraf = requestAnimationFrame(function () {
+          rraf = 0;
+          measure();
+        });
+      });
+      // content below (boot reveal, lazy media) can shift rects after load
+      window.addEventListener('load', measure);
+    }
+    // DEFERRED: this is:inline script renders BEFORE <main> — a parse-time
+    // querySelectorAll sees zero [data-lit] blocks (the documented
+    // parse-position trap).
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', wire, { once: true });
+    } else {
+      wire();
+    }
+    if (mq.addEventListener) {
+      mq.addEventListener('change', function () {
+        if (mq.matches && raf) {
+          cancelAnimationFrame(raf);
+          raf = 0;
+          dimmer.style.opacity = ''; // CSS reduced-motion rule takes over
+        } else if (!mq.matches && !raf) {
+          measure();
+          raf = requestAnimationFrame(frame);
         }
       });
     }

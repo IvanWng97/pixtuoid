@@ -12,7 +12,7 @@ const live = channels.filter((c) => c.status === 'live');
 const def = channels.find((c) => c.default) ?? live[0];
 ---
 
-<section id="showcase" class="showcase" data-floor="5">
+<section id="showcase" class="showcase" data-lit data-floor="5">
   {
     /* legacy anchors — inbound #themes/#weather links land here; the controller
       also maps them to their channel */

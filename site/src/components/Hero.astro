@@ -1,5 +1,5 @@
 ---
-import { REPO, asset } from '../consts';
+import { REPO } from '../consts';
 ---
 
 <section id="lobby" class="hero" data-floor="6">
@@ -13,7 +13,7 @@ import { REPO, asset } from '../consts';
   <div class="hero__scrim" aria-hidden="true"></div>
   <canvas id="dust" class="dust" aria-hidden="true"></canvas>
   <div class="container hero__grid">
-    <div class="hero__copy">
+    <div class="hero__copy" data-lit="fade">
       <p class="eyebrow">6F · penthouse — terminal-native, open source</p>
       <h1>
         Your coding agents,<br /> alive in a <span class="hl">pixel office</span><span
@@ -228,130 +228,5 @@ import { REPO, asset } from '../consts';
         if (mq.matches) stop();
         else start();
       });
-  })();
-</script>
-
-<script is:inline define:vars={{ wasmJsUrl: asset('wasm/pixtuoid_web.js') }}>
-  // The LIVE office: the real pixtuoid-scene engine (wasm) painting the
-  // hero's background. Progressive enhancement over the poster — every
-  // failure path (reduced motion, no WebAssembly, fetch/CSP failure, old
-  // browser) simply never reveals the canvas.
-  (function () {
-    const wrap = document.querySelector('.hero__office');
-    const canvas = document.getElementById('office-live');
-    const hero = document.querySelector('.hero');
-    if (!wrap || !canvas || !hero || typeof WebAssembly === 'undefined') return;
-    const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
-    if (mq.matches) return; // reduced motion: poster only, don't even fetch
-
-    // Render SMALL and let CSS stretch (image-rendering: pixelated): ~180px
-    // tall matches the app's own chunky-pixel scale (OFFICE_TARGET_H).
-    const BUF_H = 180;
-    const FRAME_MS = 33; // ~30fps cap — the office animates at app cadence
-
-    let office = null;
-    let wasm = null;
-    let ctx2d = null;
-    let img = null;
-    let bufW = 0;
-    let raf = 0;
-    let last = 0;
-    let visible = true;
-    let live = false;
-
-    function sizeBuffer() {
-      const r = hero.getBoundingClientRect();
-      if (r.width < 1 || r.height < 1) return;
-      bufW = Math.max(64, Math.round((r.width / r.height) * BUF_H));
-      canvas.width = bufW;
-      canvas.height = BUF_H;
-      img = new ImageData(bufW, BUF_H);
-    }
-
-    function frame(t) {
-      raf = 0;
-      if (!visible || document.hidden) return;
-      if (t - last >= FRAME_MS) {
-        last = t;
-        // Date.now(), NOT the rAF timestamp: the engine decodes now_ms as
-        // calendar time (browser-local day/night + wall clock).
-        office.step(Date.now(), bufW, BUF_H);
-        // Re-read ptr/len EVERY frame (resize reallocates; memory.grow
-        // invalidates views) and copy into the reusable ImageData.
-        const view = new Uint8ClampedArray(
-          wasm.memory.buffer,
-          office.frame_ptr(),
-          office.frame_len()
-        );
-        if (view.length === img.data.length) {
-          img.data.set(view);
-          ctx2d.putImageData(img, 0, 0);
-          if (!live) {
-            live = true;
-            wrap.classList.add('is-live');
-          }
-        }
-      }
-      raf = requestAnimationFrame(frame);
-    }
-    function start() {
-      if (!raf && office && visible && !document.hidden && !mq.matches) {
-        raf = requestAnimationFrame(frame);
-      }
-    }
-    function stop() {
-      if (raf) cancelAnimationFrame(raf);
-      raf = 0;
-    }
-
-    import(wasmJsUrl)
-      .then(function (mod) {
-        return mod.default().then(function (w) {
-          wasm = w;
-          office = new mod.Office(1);
-          ctx2d = canvas.getContext('2d');
-          sizeBuffer();
-          start();
-        });
-      })
-      .catch(function () {
-        /* poster stays — the office simply doesn't go live */
-      });
-
-    let rraf = 0;
-    window.addEventListener('resize', function () {
-      if (rraf) return;
-      rraf = requestAnimationFrame(function () {
-        rraf = 0;
-        sizeBuffer();
-      });
-    });
-    document.addEventListener('visibilitychange', function () {
-      if (document.hidden) stop();
-      else start();
-    });
-    if ('IntersectionObserver' in window) {
-      new IntersectionObserver(
-        function (es) {
-          es.forEach(function (e) {
-            visible = e.isIntersecting;
-            if (visible) start();
-            else stop();
-          });
-        },
-        { threshold: 0 }
-      ).observe(hero);
-    }
-    if (mq.addEventListener) {
-      mq.addEventListener('change', function () {
-        if (mq.matches) {
-          stop();
-          wrap.classList.remove('is-live'); // fade back to the still poster
-          live = false;
-        } else {
-          start();
-        }
-      });
-    }
   })();
 </script>

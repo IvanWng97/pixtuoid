@@ -29,6 +29,13 @@
      3:1 on the cream bg. */
   --focus-ring: #a8431f;
 
+  /* Hardware tokens — the office's own screens/LEDs (promoted from the
+     .terminal__screen / lift-digit literals; the statusline + every opaque
+     interactive chip sits on --screen regardless of theme). */
+  --screen: #0e0d0c;
+  --led: #8de069;
+  --led-glow: rgba(141, 224, 105, 0.55);
+
   /* Semantic tokens — DAY (warm cream) */
   --bg: var(--paper);
   --bg-tint: #ede3d1;
@@ -351,8 +358,65 @@ section {
 .terminal__screen {
   display: block;
   width: 100%;
-  background: #0e0d0c;
+  background: var(--screen);
 }
+
+/* ── OPEN FLOOR primitives ─────────────────────────────────────────────
+   The page is one continuous camera hold on the live office; scrolling is
+   the light switch. A .statement is a monumental Jersey-10 block that
+   arrives WITH darkness (the dimmer controller slaves both to viewport-
+   center proximity); an .office-gap is a full-viewport observation hold
+   where the dim releases to 0 and the office alone is the content. */
+.statement {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: clamp(3.2rem, 12vw, 11rem);
+  line-height: 0.92;
+  letter-spacing: 0.01em;
+  margin: 0;
+}
+.statement-sub {
+  font-family: var(--font-serif);
+  font-size: clamp(1.05rem, 1.6vw, 1.35rem);
+  max-width: 52ch;
+}
+/* Local contrast floor: even mid-dim, a lit block carries its own soft
+   radial wash so a stalled scroll never shows low-contrast text. */
+[data-lit] {
+  position: relative;
+}
+[data-lit]::before {
+  content: '';
+  position: absolute;
+  inset: -12% -8%;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse 90% 75% at 50% 55%,
+    color-mix(in srgb, var(--bg) 38%, transparent),
+    transparent 72%
+  );
+}
+.office-gap {
+  min-height: 100svh;
+  position: relative;
+}
+@media (max-width: 760px) {
+  .office-gap {
+    min-height: 70svh;
+  }
+}
+.office-gap .gap-caption {
+  position: absolute;
+  bottom: 3.2rem;
+  left: clamp(1rem, 4vw, 3rem);
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  color: #d8cfc0;
+  background: color-mix(in srgb, var(--screen) 82%, transparent);
+  padding: 0.5rem 0.8rem;
+}
+
 /* scanline overlay — very faint, only reads as CRT texture up close */
 .terminal__scan {
   position: absolute;
