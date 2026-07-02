@@ -307,7 +307,7 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
     // (same form as `id_derive` above) so that on Windows the hook key and
     // per-line key agree — an un-normalized path here would land every JSONL
     // event on a phantom id (caught by the PR #160 security review).
-    let transcript_path_str = crate::source::decoder::normalize_path_key(&path.to_string_lossy());
+    let transcript_path_str = crate::id::normalize_path_key(&path.to_string_lossy());
 
     // The first-sight cwd normally comes from the read span, but a GATED file
     // revived by an append only reads the tail — and Codex rollouts carry cwd
@@ -562,7 +562,7 @@ async fn scan_pending_tasks(
     };
     // Same per-line keying as the walk loop: the decoder re-derives the agent
     // id from this normalized path string (see `transcript_path_str` there).
-    let transcript_path_str = crate::source::decoder::normalize_path_key(&path.to_string_lossy());
+    let transcript_path_str = crate::id::normalize_path_key(&path.to_string_lossy());
     let mut lines = buf.split(|b| *b == b'\n');
     if file_len > TASK_SCAN_BYTES {
         // The window starts mid-file, so its first chunk is almost always a

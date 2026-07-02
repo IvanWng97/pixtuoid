@@ -40,7 +40,9 @@ crates/                 DAG: pixtuoid-core ← pixtuoid-scene ← {pixtuoid, pix
 ├── pixtuoid-core/   headless lib — no terminal deps (ratatui/crossterm forbidden)
 │                    source/ state/ sprite/ render/ layout/ physics.rs pose/ walkable.rs
 │                    `native` (default) feature gates the async source runtime (tokio/notify,
-│                    hook/jsonl/manager/probes, the Source trait) — `default-features = false`
+│                    hook/jsonl/manager/probes, the Source-trait seam source/native.rs + each
+│                    source's runtime half source/<cli>/native.rs — MODULE-level gates with
+│                    parent re-exports, not item-level cfg scatter) — `default-features = false`
 │                    leaves the pure decode/reducer/layout core, which compiles to wasm32
 ├── pixtuoid-scene/  backend-agnostic render+sim ENGINE crate — terminal AND window-free BY CRATE
 │                    BOUNDARY (no ratatui/crossterm/winit/softbuffer in its Cargo.toml; just arch enforces)

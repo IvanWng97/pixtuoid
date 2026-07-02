@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{anyhow, bail, Result};
 use serde_json::Value;
 
+use crate::id::normalize_path_key;
 use crate::source::{AgentEvent, ToolDetail};
 use crate::AgentId;
 
@@ -71,51 +72,6 @@ pub(crate) fn cwd_basename_label(prefix: &str, cwd: &Path) -> Option<String> {
         "{prefix}·{}",
         ellipsize(base, MAX_DECODED_FIELD_CHARS)
     ))
-}
-
-/// Canonical form of a transcript-path STRING before it is used as an
-/// `AgentId` key. Identity on Unix. On Windows: `\`→`/` + lowercase — CC
-/// emits backslash paths in hook payloads but mixes `\`/`/` forms of the
-/// same file internally, and NTFS is case-insensitive; without folding, the
-/// hook key and the watcher key hash to two different AgentIds and every
-/// session renders as TWO sprites. Used directly as an opaque key by
-/// **Antigravity** (whose hook keys on the normalized path). **CC** and
-/// **Codex** pass the normalized path string to their line decoders only as a
-/// routing hint — each decoder then extracts a UUID from the filename stem
-/// (`cc_id_from_path` / `codex_id_from_path`), so the fold is inert for them
-/// on Unix but still required so `normalize_path_key` is the one entry point
-/// for the `walk_jsonl` normalized-path string and `default_id_from_path`
-/// (Antigravity's watcher key) — those two paths must always agree.
-///
-/// `pub` + `#[doc(hidden)]`: the `pixtuoid-scene` palette shares this one
-/// cwd-normalization definition (Team Palette keys outfits on the normalized
-/// cwd). Internal cross-crate helper, NOT a stable API — `#[doc(hidden)]`
-/// keeps it off `pixtuoid-core`'s semver surface (cf. `claude_config_dir`).
-#[doc(hidden)]
-pub fn normalize_path_key(s: &str) -> String {
-    normalize_key_inner(cfg!(windows), s)
-}
-
-/// Pure core, separated so the Windows arm is unit-testable on any platform.
-fn normalize_key_inner(windows: bool, s: &str) -> String {
-    if !windows {
-        return s.to_string();
-    }
-    // Strip the `\\?\` verbatim / extended-length prefix before folding, so a
-    // verbatim-prefixed path (the form `std::fs::canonicalize` returns on Windows)
-    // keys the same as its plain form — otherwise `\\?\C:\X` folds to `//?/c:/x`
-    // and never coalesces with `C:\X`. Defensive (#197): nothing in-tree
-    // canonicalizes today, so neither side currently emits a verbatim prefix; this
-    // guards a future regression / an upstream CLI that starts sending one.
-    // `\\?\UNC\server\share` denotes `\\server\share`.
-    let stripped = if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
-        format!(r"\\{rest}")
-    } else if let Some(rest) = s.strip_prefix(r"\\?\") {
-        rest.to_string()
-    } else {
-        s.to_string()
-    };
-    stripped.replace('\\', "/").to_lowercase()
 }
 
 /// Decode one hook payload into the event sequence the reducer applies.
@@ -509,51 +465,6 @@ mod tests {
             .is_task(),
             "a renamed dispatch is still caught by the subagent_type field"
         );
-    }
-
-    #[test]
-    fn normalize_path_key_is_identity_on_unix() {
-        // The unix arm must be byte-identity — every existing AgentId
-        // (and golden) depends on it.
-        assert_eq!(
-            normalize_key_inner(false, "/Users/Me/.claude/projects/X/s.jsonl"),
-            "/Users/Me/.claude/projects/X/s.jsonl"
-        );
-    }
-
-    #[test]
-    fn normalize_path_key_folds_separators_and_case_on_windows() {
-        // CC mixes \ and / forms of the same path, and NTFS is
-        // case-insensitive — both fold to one key (windows arm is pure
-        // string code, testable on any platform).
-        let a = normalize_key_inner(true, r"C:\Users\Me\.claude\projects\X\s.jsonl");
-        assert_eq!(a, "c:/users/me/.claude/projects/x/s.jsonl");
-        assert_eq!(
-            normalize_key_inner(true, r"C:\Users\Me\x\s.jsonl"),
-            normalize_key_inner(true, "C:/users/me/X/s.jsonl")
-        );
-    }
-
-    #[test]
-    fn normalize_path_key_strips_verbatim_prefix_on_windows() {
-        // #197: a \\?\-prefixed path (what canonicalize returns) keys the same as
-        // its plain form, instead of folding to a never-coalescing //?/c:/… .
-        assert_eq!(
-            normalize_key_inner(true, r"\\?\C:\Foo\Bar.jsonl"),
-            normalize_key_inner(true, r"C:\Foo\Bar.jsonl")
-        );
-        assert_eq!(normalize_key_inner(true, r"\\?\C:\Foo"), "c:/foo");
-        // \\?\UNC\server\share denotes \\server\share — they must coalesce.
-        assert_eq!(
-            normalize_key_inner(true, r"\\?\UNC\srv\share\s.jsonl"),
-            normalize_key_inner(true, r"\\srv\share\s.jsonl")
-        );
-    }
-
-    #[test]
-    fn normalize_path_key_verbatim_prefix_is_inert_on_unix() {
-        // On Unix `\\?\` is just ordinary filename bytes — no stripping or folding.
-        assert_eq!(normalize_key_inner(false, r"\\?\C:\Foo"), r"\\?\C:\Foo");
     }
 
     /// A payload expected to decode to EXACTLY one event (lifecycle arms —

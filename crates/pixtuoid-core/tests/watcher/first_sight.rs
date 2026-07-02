@@ -699,9 +699,8 @@ async fn default_id_deriver_stays_path_keyed() {
     // is NOT the stem-keyed id (the regression a stem-keyed default deriver would
     // introduce); this holds on every platform since the path string is never
     // "abc". The EXACT value (`from_parts(source, normalize_path_key(path))`) is
-    // platform-dependent and `normalize_path_key` is `pub(crate)` (unreachable
-    // here), so it's pinned at the UNIT level instead —
-    // `jsonl/tests.rs::default_id_from_path_returns_normalized_path_key` + `decoder.rs`'s
+    // platform-dependent, so it's pinned at the UNIT level instead —
+    // `jsonl/tests.rs::default_id_from_path_returns_normalized_path_key` + `id.rs`'s
     // `normalize_path_key` tests — not re-derived in this integration test.
     let stem_keyed = AgentId::from_parts("antigravity", "abc");
     let mut ok = false;

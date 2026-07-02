@@ -1,68 +1,19 @@
-// Path/PathBuf are only named by `native`-gated code (the Source struct,
-// `default_paths`, `derive_ag_label`); the pure line decoder keys off `&str`.
-#[cfg(feature = "native")]
-use std::path::{Path, PathBuf};
-
 use anyhow::Result;
 use serde_json::Value;
 
 use crate::source::decoder::make_tool_detail;
-// cwd_basename_label is only used by the `native`-gated label deriver.
-#[cfg(feature = "native")]
-use crate::source::decoder::cwd_basename_label;
-#[cfg(feature = "native")]
-use crate::source::jsonl::JsonlWatcher;
 use crate::source::AgentEvent;
-#[cfg(feature = "native")]
-use crate::source::{Source, TaggedSender};
 use crate::AgentId;
 
+// The runtime half (`AntigravitySource` + its watcher wiring) — ONE gate for
+// the whole `native` layer of this source; the re-export keeps the pre-split
+// `source::antigravity::AntigravitySource` path.
+#[cfg(feature = "native")]
+mod native;
+#[cfg(feature = "native")]
+pub use native::AntigravitySource;
+
 pub const SOURCE_NAME: &str = "antigravity";
-
-/// Source that watches Antigravity CLI conversation log directories.
-/// Uses JsonlWatcher with a custom decoder for the Antigravity JSONL
-/// format (step_index/PLANNER_RESPONSE/tool_calls schema).
-#[cfg(feature = "native")]
-pub struct AntigravitySource {
-    pub brain_root: PathBuf,
-}
-
-#[cfg(feature = "native")]
-impl AntigravitySource {
-    /// The Antigravity **CLI** (`agy`) brain dir, home-rooted on every platform:
-    /// `<home>/.gemini/antigravity-cli/brain` (Windows: `%USERPROFILE%\.gemini\…`
-    /// via `user_home()` — the brain is NOT under `%APPDATA%`/`%LOCALAPPDATA%`;
-    /// only the IDE's editor settings and the `agy.exe` binary live there).
-    /// Note `antigravity-cli` (the CLI), NOT `antigravity` (the IDE's brain at
-    /// `~/.gemini/antigravity/brain`) — don't "fix" this to the IDE path.
-    pub fn default_paths() -> Self {
-        let home = crate::platform::user_home();
-        Self {
-            brain_root: PathBuf::from(home)
-                .join(".gemini")
-                .join("antigravity-cli")
-                .join("brain"),
-        }
-    }
-}
-
-#[cfg(feature = "native")]
-impl Source for AntigravitySource {
-    fn name(&self) -> &str {
-        SOURCE_NAME
-    }
-
-    async fn run(self: Box<Self>, tx: TaggedSender) -> Result<()> {
-        let watcher = JsonlWatcher::new(
-            self.brain_root.clone(),
-            SOURCE_NAME.to_string(),
-            decode_ag_line,
-            derive_ag_label,
-            ag_session_ended,
-        );
-        watcher.run(tx).await
-    }
-}
 
 pub fn decode_ag_line(transcript_path: &str, source: &str, v: Value) -> Result<Vec<AgentEvent>> {
     let agent_id = AgentId::from_parts(source, transcript_path);
@@ -119,11 +70,6 @@ pub fn decode_ag_line(transcript_path: &str, source: &str, v: Value) -> Result<V
     }
 
     Ok(out)
-}
-
-#[cfg(feature = "native")]
-fn ag_session_ended(_tail: &[u8]) -> bool {
-    false
 }
 
 /// Decode one tool call within a `PLANNER_RESPONSE` step. A permission/question
@@ -184,42 +130,9 @@ fn normalize_ag_tool_input(name: &str, args: Option<&Value>) -> Value {
     Value::Object(normalized)
 }
 
-#[cfg(feature = "native")]
-fn derive_ag_label(_path: &Path, _source: &str, cwd: &Path) -> String {
-    cwd_basename_label("ag", cwd).unwrap_or_else(|| "ag".to_string())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn label_is_ag_basename_or_bare_prefix() {
-        assert_eq!(
-            derive_ag_label(
-                Path::new("/x"),
-                SOURCE_NAME,
-                Path::new("/Users/me/dotfiles")
-            ),
-            "ag·dotfiles"
-        );
-        // Empty / root cwd fall back to the bare prefix.
-        assert_eq!(
-            derive_ag_label(Path::new("/x"), SOURCE_NAME, Path::new("")),
-            "ag"
-        );
-        assert_eq!(
-            derive_ag_label(Path::new("/x"), SOURCE_NAME, Path::new("/")),
-            "ag"
-        );
-    }
-
-    #[test]
-    fn ag_session_ended_is_always_false() {
-        // Antigravity writes no end marker — defer to mtime + stale-sweep.
-        assert!(!ag_session_ended(b"x"));
-        assert!(!ag_session_ended(b""));
-    }
 
     #[test]
     fn negative_step_index_is_skipped_not_minted() {
@@ -246,19 +159,6 @@ mod tests {
         assert_eq!(out.len(), 1, "step_index 0 still emits: {out:?}");
     }
 
-    // The brain dir is the CLI's (`antigravity-cli`), home-rooted, on every OS —
-    // the suffix is separator-agnostic so this pins it on Unix AND Windows. The
-    // USERPROFILE-vs-HOME rooting itself is covered by platform::user_home tests.
-    #[test]
-    fn brain_root_is_the_cli_brain_under_dot_gemini() {
-        let p = AntigravitySource::default_paths().brain_root;
-        assert!(
-            p.ends_with(
-                PathBuf::from(".gemini")
-                    .join("antigravity-cli")
-                    .join("brain")
-            ),
-            "brain_root must be <home>/.gemini/antigravity-cli/brain, got {p:?}"
-        );
-    }
+    // The label / session-ended / default-paths tests live with the runtime
+    // half in `native.rs`.
 }
