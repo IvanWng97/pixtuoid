@@ -1,0 +1,30 @@
+[package]
+name        = "pixtuoid-web"
+description  = "WebAssembly canvas painter over the pixtuoid-scene engine — the live office hero"
+# A SITE BUILD INPUT, never a crates.io artifact: it must not enter the
+# workspace's semver/release surface (the render engine's public API does; this
+# thin wasm shim does not).
+publish     = false
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+repository.workspace   = true
+authors.workspace      = true
+homepage.workspace     = true
+
+[lints]
+workspace = true
+
+# cdylib = the wasm-bindgen artifact; rlib = so the pure sim logic (scene
+# seeding, the scripted timeline, RGB→RGBA) is unit-testable natively.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# default-features = false → pixtuoid-core builds WITHOUT the native async
+# runtime (no tokio/notify) → the whole graph compiles to wasm32.
+pixtuoid-core  = { path = "../pixtuoid-core", version = "0.11.1", default-features = false }
+pixtuoid-scene = { path = "../pixtuoid-scene", version = "0.11.1", default-features = false }
+# Pin to the installed wasm-bindgen-cli (the generated JS glue must match).
+wasm-bindgen   = "=0.2.126"
