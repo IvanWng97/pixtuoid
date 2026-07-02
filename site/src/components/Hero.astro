@@ -3,6 +3,26 @@ import { REPO, asset } from '../consts';
 ---
 
 <section id="lobby" class="hero" data-floor="6">
+  {
+    /* The LIVE office — the real render engine (wasm) painting the hero's
+      background. Layering: office (bottom) → dust motes → copy/demo. The
+      poster is the instant LCP layer; the canvas fades in over it only once
+      the wasm module has painted its first frame (reduced-motion, no-JS,
+      fetch-failure, and old browsers simply stay on the poster). */
+  }
+  <div class="hero__office" aria-hidden="true">
+    <img
+      class="hero__office-poster px"
+      src={asset('demos/hero-poster.png')}
+      alt=""
+      width="1664"
+      height="1408"
+      decoding="async"
+      fetchpriority="high"
+    />
+    <canvas id="office-live" class="hero__office-live px"></canvas>
+    <div class="hero__office-scrim"></div>
+  </div>
   <canvas id="dust" class="dust" aria-hidden="true"></canvas>
   <div class="container hero__grid">
     <div class="hero__copy">
@@ -25,40 +45,6 @@ import { REPO, asset } from '../consts';
       </div>
       <p class="hero__avail">macOS · Linux · Windows · crates.io · MIT licensed</p>
     </div>
-
-    <div class="hero__demo">
-      <figure class="terminal crt crt-manual">
-        <div class="terminal__bar">
-          <span class="terminal__dot terminal__dot--r"></span>
-          <span class="terminal__dot terminal__dot--y"></span>
-          <span class="terminal__dot terminal__dot--g"></span>
-          <span class="terminal__title"
-            >~ <span id="hero-cmd"></span><span class="cursor" aria-hidden="true"></span></span
-          >
-        </div>
-        <video
-          class="terminal__screen px"
-          width="1664"
-          height="1408"
-          autoplay
-          muted
-          loop
-          playsinline
-          preload="metadata"
-          poster={asset('demos/hero-poster.png')}
-        >
-          <source src={asset('demos/hero.mp4')} type="video/mp4" />
-          <img
-            class="px"
-            width="1664"
-            height="1408"
-            src={asset('demos/hero-poster.png')}
-            alt="A pixel-art office with animated coding-agent characters working at their desks"
-          />
-        </video>
-        <span class="terminal__scan" aria-hidden="true"></span>
-      </figure>
-    </div>
   </div>
 </section>
 
@@ -66,6 +52,65 @@ import { REPO, asset } from '../consts';
   .hero {
     position: relative;
     padding-block: clamp(2rem, 5vw, 4.5rem) clamp(3rem, 7vw, 6rem);
+    overflow: hidden;
+  }
+  /* The live-office background layer. Tunables are custom props so the
+     composition (dim strength, scrim reach) is adjustable in one place. */
+  .hero__office {
+    --office-dim: 0.5; /* 0 = full-bright office, 1 = invisible */
+    --office-scrim-stop: 78%; /* how far the copy-side scrim reaches */
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+  }
+  .hero__office-poster,
+  .hero__office-live {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .hero__office-live {
+    opacity: 0;
+    transition: opacity 1.2s ease;
+  }
+  /* .is-live is set only after the wasm module painted its first frame. */
+  .hero__office.is-live .hero__office-live {
+    opacity: 1;
+  }
+  .hero__office.is-live .hero__office-poster {
+    opacity: 0;
+    transition: opacity 1.2s ease;
+  }
+  /* Readability: a global dim + a stronger copy-side wash so the floating
+     text never fights the pixel art behind it. */
+  .hero__office-scrim {
+    position: absolute;
+    inset: 0;
+    background:
+      linear-gradient(
+        90deg,
+        var(--bg) 0%,
+        color-mix(in srgb, var(--bg) 72%, transparent) 34%,
+        color-mix(in srgb, var(--bg) 30%, transparent) var(--office-scrim-stop),
+        color-mix(in srgb, var(--bg) 12%, transparent) 100%
+      ),
+      linear-gradient(
+        180deg,
+        color-mix(in srgb, var(--bg) 55%, transparent) 0%,
+        transparent 30%,
+        transparent 68%,
+        var(--bg) 100%
+      );
+  }
+  .hero__office::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: var(--bg);
+    opacity: var(--office-dim);
   }
   .dust {
     position: absolute;
@@ -75,18 +120,20 @@ import { REPO, asset } from '../consts';
     z-index: 0;
     pointer-events: none;
   }
+  /* The copy floats OVER the live office — one column, generous line
+     lengths; the office is the demo (no boxed terminal beside it). */
   .hero__grid {
     position: relative;
     z-index: 1;
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: clamp(2rem, 5vw, 4rem);
-    align-items: center;
   }
-  @media (min-width: 920px) {
-    .hero__grid {
-      grid-template-columns: 0.92fr 1.08fr;
-    }
+  .hero__copy {
+    max-width: 620px;
+  }
+  /* Give the office room to read as a scene, not a strip. */
+  .hero {
+    min-height: clamp(30rem, 78vh, 46rem);
+    display: flex;
+    align-items: center;
   }
   .hero__cta {
     display: flex;
@@ -101,11 +148,6 @@ import { REPO, asset } from '../consts';
     letter-spacing: 0.04em;
     color: var(--fg-muted);
   }
-  .terminal__screen {
-    width: 100%;
-    height: auto;
-  }
-
   /* one orchestrated page-load entrance, staggered */
   @keyframes rise {
     from {
@@ -135,12 +177,8 @@ import { REPO, asset } from '../consts';
   .hero__copy .hero__avail {
     animation-delay: 0.48s;
   }
-  .hero__demo {
-    animation: rise 0.9s 0.3s both;
-  }
   @media (prefers-reduced-motion: reduce) {
-    .hero__copy > *,
-    .hero__demo {
+    .hero__copy > * {
       animation: none;
     }
   }
@@ -246,58 +284,127 @@ import { REPO, asset } from '../consts';
   })();
 </script>
 
-<script is:inline>
-  // Hero: once the boot intro reveals, type the command, then power on the CRT.
+<script is:inline define:vars={{ wasmJsUrl: asset('wasm/pixtuoid_web.js') }}>
+  // The LIVE office: the real pixtuoid-scene engine (wasm) painting the
+  // hero's background. Progressive enhancement over the poster — every
+  // failure path (reduced motion, no WebAssembly, fetch/CSP failure, old
+  // browser) simply never reveals the canvas.
   (function () {
-    function run() {
-      const el = document.getElementById('hero-cmd');
-      const term = document.querySelector('.hero .terminal');
-      const text = 'pixtuoid run';
-      function powerOn() {
-        if (term) term.classList.add('crt-on');
-      }
-      if (!el) {
-        powerOn();
-        return;
-      }
-      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-        el.textContent = text;
-        powerOn();
-        return;
-      }
-      let i = 0;
-      (function type() {
-        el.textContent = text.slice(0, i);
-        if (i < text.length) {
-          i++;
-          setTimeout(type, 55);
-        } else {
-          powerOn();
-        }
-      })();
-    }
-    document.addEventListener('pix:revealed', run, { once: true });
-  })();
-</script>
-
-<script is:inline>
-  // Native <video autoplay loop> can't be gated by CSS @media, so honor
-  // prefers-reduced-motion (WCAG 2.2.2) in JS: pause + hold the poster frame,
-  // and respond live to OS changes.
-  (function () {
-    const v = document.querySelector('.hero video');
-    if (!v) return;
+    const wrap = document.querySelector('.hero__office');
+    const canvas = document.getElementById('office-live');
+    const hero = document.querySelector('.hero');
+    if (!wrap || !canvas || !hero || typeof WebAssembly === 'undefined') return;
     const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
-    function apply() {
-      if (mq.matches) {
-        v.removeAttribute('autoplay');
-        v.pause();
-      } else if (v.paused) {
-        const p = v.play();
-        if (p && p.catch) p.catch(function () {});
+    if (mq.matches) return; // reduced motion: poster only, don't even fetch
+
+    // Render SMALL and let CSS stretch (image-rendering: pixelated): ~180px
+    // tall matches the app's own chunky-pixel scale (OFFICE_TARGET_H).
+    const BUF_H = 180;
+    const FRAME_MS = 33; // ~30fps cap — the office animates at app cadence
+
+    let office = null;
+    let wasm = null;
+    let ctx2d = null;
+    let img = null;
+    let bufW = 0;
+    let raf = 0;
+    let last = 0;
+    let visible = true;
+    let live = false;
+
+    function sizeBuffer() {
+      const r = hero.getBoundingClientRect();
+      if (r.width < 1 || r.height < 1) return;
+      bufW = Math.max(64, Math.round((r.width / r.height) * BUF_H));
+      canvas.width = bufW;
+      canvas.height = BUF_H;
+      img = new ImageData(bufW, BUF_H);
+    }
+
+    function frame(t) {
+      raf = 0;
+      if (!visible || document.hidden) return;
+      if (t - last >= FRAME_MS) {
+        last = t;
+        // Date.now(), NOT the rAF timestamp: the engine decodes now_ms as
+        // calendar time (browser-local day/night + wall clock).
+        office.step(Date.now(), bufW, BUF_H);
+        // Re-read ptr/len EVERY frame (resize reallocates; memory.grow
+        // invalidates views) and copy into the reusable ImageData.
+        const view = new Uint8ClampedArray(
+          wasm.memory.buffer,
+          office.frame_ptr(),
+          office.frame_len()
+        );
+        if (view.length === img.data.length) {
+          img.data.set(view);
+          ctx2d.putImageData(img, 0, 0);
+          if (!live) {
+            live = true;
+            wrap.classList.add('is-live');
+          }
+        }
+      }
+      raf = requestAnimationFrame(frame);
+    }
+    function start() {
+      if (!raf && office && visible && !document.hidden && !mq.matches) {
+        raf = requestAnimationFrame(frame);
       }
     }
-    apply();
-    if (mq.addEventListener) mq.addEventListener('change', apply);
+    function stop() {
+      if (raf) cancelAnimationFrame(raf);
+      raf = 0;
+    }
+
+    import(wasmJsUrl)
+      .then(function (mod) {
+        return mod.default().then(function (w) {
+          wasm = w;
+          office = new mod.Office(1);
+          ctx2d = canvas.getContext('2d');
+          sizeBuffer();
+          start();
+        });
+      })
+      .catch(function () {
+        /* poster stays — the office simply doesn't go live */
+      });
+
+    let rraf = 0;
+    window.addEventListener('resize', function () {
+      if (rraf) return;
+      rraf = requestAnimationFrame(function () {
+        rraf = 0;
+        sizeBuffer();
+      });
+    });
+    document.addEventListener('visibilitychange', function () {
+      if (document.hidden) stop();
+      else start();
+    });
+    if ('IntersectionObserver' in window) {
+      new IntersectionObserver(
+        function (es) {
+          es.forEach(function (e) {
+            visible = e.isIntersecting;
+            if (visible) start();
+            else stop();
+          });
+        },
+        { threshold: 0 }
+      ).observe(hero);
+    }
+    if (mq.addEventListener) {
+      mq.addEventListener('change', function () {
+        if (mq.matches) {
+          stop();
+          wrap.classList.remove('is-live'); // fade back to the still poster
+          live = false;
+        } else {
+          start();
+        }
+      });
+    }
   })();
 </script>

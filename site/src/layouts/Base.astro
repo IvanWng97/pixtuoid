@@ -53,11 +53,13 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
         before paint (a strict hashed CSP would need every inline script
         externalized — and there is no script-injection vector: the only dynamic
         content is the trusted, scheme-sanitized /config markdown). frame-ancestors
-        and SRI need HTTP headers that GitHub Pages can't set. */
+        and SRI need HTTP headers that GitHub Pages can't set. 'wasm-unsafe-eval'
+        permits WebAssembly.instantiate for the live-office hero (wasm compilation
+        ONLY — unlike 'unsafe-eval' it does not enable JS eval). */
     }
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; base-uri 'self'; object-src 'none'; img-src 'self' data:; media-src 'self'; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; form-action 'self'"
+      content="default-src 'self'; base-uri 'self'; object-src 'none'; img-src 'self' data:; media-src 'self'; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; connect-src 'self'; form-action 'self'"
     />
     <title>{title}</title>
     <meta name="description" content={description} />
