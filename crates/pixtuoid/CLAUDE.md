@@ -74,8 +74,10 @@ src/
 │                       **Sharp edge:** tmux (#4034) doesn't implement DECRQSS, so a truecolor tmux can false-positive the
 │                       depth warn — `$PIXTUOID_NO_TRUECOLOR_WARN=1` covers it (tmux usually sets `$COLORTERM`, skipping the
 │                       query entirely anyway).
-├── setup.rs            first-run detection for onboarding: the PURE `is_first_run(cfg, path) = !path.exists() ||
-│                       cfg.sources.is_empty()` (mirrors resolve_connected's migrate condition; unit-tested). `pub`
+├── setup.rs            first-run detection for onboarding: the PURE `is_first_run(cfg, path, load_degraded)` —
+│                       `!load_degraded && (!path.exists() || cfg.sources.is_empty())`; a degraded load (malformed
+│                       config, main passes `!cfg_warnings.is_empty()`) is NEVER a first run — don't replay
+│                       onboarding over a real config. Mirrors resolve_connected's migrate condition; unit-tested. `pub`
 │                       because main.rs (a separate crate) computes RunConfig.first_run from it. The cinematic overlay
 │                       lives in tui/welcome + widgets/welcome; the headless `setup [--yes]` presenter is main::run_setup
 ├── sources.rs          the TUI-free source-control CORE (detect/connect/disconnect/reconcile_to/status + the

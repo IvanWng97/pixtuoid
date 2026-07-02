@@ -59,7 +59,9 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
 │                   so single_floor_local identity reads stay honest; see its doc comment + core's
 │                   GlobalDeskIndex/FloorLocalDeskIndex docs in state/mod.rs)
 ├── frame_cache.rs  FrameCache — per-agent recolored-sprite cache keyed (agent_id, anim, frame_idx, flip_x);
-│                   owned per-FloorCtx, flushed on theme change (set_theme) so recolors update immediately
+│                   owned per-FloorCtx, flushed on theme change (set_theme) so recolors update immediately;
+│                   per-agent entries also drop when the outfit seed changes (note_outfit_seed —
+│                   a cwd backfill retints the outfit mid-life, the stale-outfit class)
 ├── theme/          color theme MODEL — one file per theme, Theme struct in mod.rs
 │                   mod.rs (struct defs + ALL_THEMES registry), normal.rs, cyberpunk.rs,
 │                   dracula.rs, tokyo_night.rs, catppuccin.rs, gruvbox.rs
