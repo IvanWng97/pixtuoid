@@ -10,6 +10,12 @@ authors.workspace      = true
 homepage.workspace     = true
 keywords.workspace     = true
 categories.workspace   = true
+# Workspace-only test that reads a sibling crate's source file, absent from the
+# published tarball — shipping it would make `cargo test` fail on the .crate
+# (publish itself is unaffected: its verify step builds, not tests).
+# pipe_quota_parity include_str!'s pixtuoid-core's source/hook/windows.rs, the
+# same treatment core gives socket_path_parity.
+exclude                = ["tests/pipe_quota_parity.rs"]
 
 [lints]
 workspace = true

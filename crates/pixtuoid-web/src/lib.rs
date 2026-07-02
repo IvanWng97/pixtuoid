@@ -31,8 +31,7 @@ use crate::script::{hero_script, hire_beats, lobster_beats, Beat, PresenceBeat, 
 
 use pixtuoid_scene::chitchat::{ActiveChitchat, VenueKey};
 use pixtuoid_scene::embedded_pack::load_sprite_pack;
-use pixtuoid_scene::floor::{render_floor, CoffeeState, FloorCtx, FloorMeta};
-use pixtuoid_scene::layout::TEST_DEFAULT_DESKS;
+use pixtuoid_scene::floor::{floor_capacity, render_floor, CoffeeState, FloorCtx, FloorMeta};
 use pixtuoid_scene::theme::{Theme, ALL_THEMES};
 
 /// A live office rendered to a reusable RGBA buffer across frames. Owns the
@@ -78,6 +77,10 @@ pub struct Office {
     /// The clock of the most recent `step` — `hire()` has no clock parameter
     /// (it's a JS click handler), so it schedules relative to this.
     last_now: Option<SystemTime>,
+    /// The buffer size `floor_capacities` was last synced for — capacity only
+    /// changes on resize, so `sync_capacity` skips the layout recompute on
+    /// every other frame.
+    caps_size: Option<(u16, u16)>,
 }
 
 #[wasm_bindgen]
@@ -89,10 +92,10 @@ impl Office {
     pub fn new(seed: u32) -> Result<Office, JsError> {
         let pack = load_sprite_pack(None).map_err(|e| JsError::new(&e.to_string()))?;
         Ok(Office {
-            // Slot capacity for the SCRIPTED agents (one classic office worth
-            // is plenty for the hero's cast) — the LAYOUT below fills the
-            // canvas independently of this.
-            scene: SceneState::uniform(TEST_DEFAULT_DESKS),
+            // Slot capacity starts empty and is synced from the CANVAS's own
+            // layout on every `step` (`sync_capacity`) before any beat fires,
+            // so the reducer only admits agents the rendered office can seat.
+            scene: SceneState::default(),
             floor: FloorCtx::new(),
             buf: RgbBuffer::filled(0, 0, Rgb { r: 0, g: 0, b: 0 }),
             rgba: Vec::new(),
@@ -111,6 +114,7 @@ impl Office {
             hire_ids: Vec::new(),
             hire_seq: 0,
             last_now: None,
+            caps_size: None,
         })
     }
 
@@ -126,6 +130,11 @@ impl Office {
     pub fn step(&mut self, now_ms: f64, w: u32, h: u32) {
         let now = SystemTime::UNIX_EPOCH + Duration::from_millis(now_ms.max(0.0) as u64);
         self.last_now = Some(now);
+        let buf_w = w.clamp(1, u16::MAX as u32) as u16;
+        let buf_h = h.clamp(1, u16::MAX as u32) as u16;
+        // Capacity BEFORE the script advances: the SessionStarts due this
+        // frame must allocate desks against the canvas this frame renders.
+        self.sync_capacity(buf_w, buf_h);
         self.advance_script(now);
         // The per-frame sweep: Active→Idle debounce, exit GC, walkouts.
         self.reducer.tick(&mut self.scene, now);
@@ -135,8 +144,6 @@ impl Office {
         // returning cast member with stale walk legs teleports in).
         self.floor.evict_missing(&self.scene);
         self.coffee.evict_missing(&self.scene);
-        let buf_w = w.clamp(1, u16::MAX as u32) as u16;
-        let buf_h = h.clamp(1, u16::MAX as u32) as u16;
         self.render(now, buf_w, buf_h);
         self.expand_rgba();
     }
@@ -159,8 +166,9 @@ impl Office {
     /// Hire one more agent (#434): the site's install section calls this on a
     /// Copy click, and a new coworker walks into the background office, works
     /// a few spells, and heads out ~70s later. No-op before the first `step`
-    /// (no clock yet) and while `MAX_LIVE_HIRES` hires are already alive
-    /// (click-spam can't crowd out the cast). Never throws.
+    /// (no clock yet), while `MAX_LIVE_HIRES` hires are already alive
+    /// (click-spam can't crowd out the cast), and when the canvas-sized
+    /// office has no free desk to seat one. Never throws.
     pub fn hire(&mut self) {
         let Some(base) = self.last_now else {
             return;
@@ -179,6 +187,20 @@ impl Office {
         if self.hire_ids.len() >= Self::MAX_LIVE_HIRES {
             return;
         }
+        // A hire the office can't SEAT is refused outright: the reducer would
+        // drop its SessionStart (no free desk), yet the id would hold one of
+        // the MAX_LIVE_HIRES slots for the full stay — dead flourish, zero
+        // visual feedback. Live agents keep their desks through exit grace
+        // and each queued SessionStart will claim one, so count both against
+        // the canvas-synced capacity (`sync_capacity`).
+        let queued_starts = self
+            .pending
+            .iter()
+            .filter(|(_, e)| matches!(e, AgentEvent::SessionStart { .. }))
+            .count();
+        if self.scene.agents.len() + queued_starts >= self.scene.total_capacity() {
+            return;
+        }
         self.hire_seq += 1;
         let session = format!("hire-{}", self.hire_seq);
         let id = AgentId::from_parts(pixtuoid_core::source::claude_code::SOURCE_NAME, &session);
@@ -192,6 +214,38 @@ impl Office {
 }
 
 impl Office {
+    /// The rendered RGBA frame (`w*h*4`, opaque alpha) — the safe NATIVE
+    /// accessor (rlib consumers: the `hero_still` example, tests). The
+    /// wasm-JS boundary keeps the zero-copy [`Office::frame_ptr`]/
+    /// [`Office::frame_len`] contract instead — a `&[u8]` doesn't cross
+    /// wasm-bindgen without copying.
+    pub fn frame(&self) -> &[u8] {
+        &self.rgba
+    }
+
+    /// Keep the reducer's desk capacity in lockstep with the office actually
+    /// rendered at this buffer size — the authority is the layout's home-desk
+    /// count, the same per-resize sync the TUI and the floating window run
+    /// (`sync_floor_caps`). Without it the two decouple: an admitted agent's
+    /// desk index can exceed the canvas layout's desk count, so it paints
+    /// NOWHERE (its anchors return `None`) while staying alive in the scene —
+    /// on narrow/portrait canvases that stranded every visitor hire (and on
+    /// the tightest buffers part of the cast). Single floor: the hero renders
+    /// floor 0 only, so the other floors hold 0 desks and `total_capacity` IS
+    /// the canvas's desk count. A shrink lowers capacity for FUTURE
+    /// admissions; already-seated excess agents stay alive-but-offscreen,
+    /// same as the TUI on terminal shrink.
+    fn sync_capacity(&mut self, buf_w: u16, buf_h: u16) {
+        if self.caps_size == Some((buf_w, buf_h)) {
+            return;
+        }
+        // The SAME (size, cap=None, seed) computation `render` feeds
+        // `render_floor`, so reducer capacity and painted layout can't drift.
+        let cap = floor_capacity(buf_w, buf_h, self.seed);
+        self.scene.floor_capacities = std::array::from_fn(|i| if i == 0 { cap } else { 0 });
+        self.caps_size = Some((buf_w, buf_h));
+    }
+
     /// Fire every scripted beat due by `now`, each applied at its SCHEDULED
     /// time (not `now`) so the reducer's time-based semantics — the 1.5s
     /// Active debounce, exit grace — hold even when a hidden tab's rAF pauses
@@ -417,6 +471,16 @@ mod tests {
         // the new walk-in — the teleport this eviction exists to prevent.
         let mut o = office();
         let mut t = 0u64;
+        // Positive control first: while agent 5 lives, its render state must
+        // EXIST — otherwise the absence asserts below pass vacuously.
+        while t <= 60_000 {
+            o.step(T0_MS + t as f64, 160, 96);
+            t += 1_000;
+        }
+        assert!(
+            o.scene.agents.contains_key(&cast_id(5)) && o.floor.motion.contains_key(&cast_id(5)),
+            "agent 5 must be live with motion state mid-loop (positive control)"
+        );
         // Past agent 5's SessionEnd (104s) + the 4.5s exit grace + sweep.
         while t <= 115_000 {
             o.step(T0_MS + t as f64, 160, 96);
@@ -501,14 +565,73 @@ mod tests {
     }
 
     #[test]
-    fn hire_cap_holds_under_click_spam() {
+    fn frame_exposes_the_same_bytes_as_the_ptr_len_contract() {
         let mut o = office();
         o.step(T0_MS, 160, 96);
-        o.step(T0_MS + 30_000.0, 160, 96);
+        // The safe accessor and the wasm-JS zero-copy pair must be two views
+        // of ONE buffer — same base pointer, same length.
+        assert_eq!(o.frame().len(), o.frame_len());
+        assert_eq!(o.frame().as_ptr(), o.frame_ptr());
+    }
+
+    #[test]
+    fn capacity_tracks_the_canvas_layout_so_no_agent_is_stranded_unpainted() {
+        use pixtuoid_scene::layout::Layout;
+        // A portrait-phone hero buffer (the site renders BUF_H=180 at a
+        // narrow bufW) lays out 8 desks; the scripted cast alone holds 7 of
+        // them by 19s. The reducer's capacity must derive from THAT layout,
+        // so an admitted agent always has a paintable desk anchor — an agent
+        // whose desk index falls off the canvas layout renders NOWHERE
+        // (character_anchor returns None) while staying alive in the scene.
+        let (w, h) = (96u32, 180u32);
+        let mut o = office();
+        let mut t = 0u64;
+        while t <= 30_000 {
+            o.step(T0_MS + t as f64, w, h);
+            t += 1_000;
+        }
+        // Click-spam past the layout's one free desk: the first hire seats,
+        // the rest must be refused outright — a doomed hire would burn one of
+        // the MAX_LIVE_HIRES slots for its whole stay with zero feedback.
+        for _ in 0..3 {
+            o.hire();
+        }
+        o.step(T0_MS + 32_000.0, w, h);
+        let layout = Layout::compute_with_seed(w as u16, h as u16, None, o.seed)
+            .expect("the portrait buffer lays out");
+        assert_eq!(
+            o.scene.total_capacity(),
+            layout.home_desks.len(),
+            "reducer capacity derives from the SAME layout the canvas renders"
+        );
+        for a in o.scene.agents.values() {
+            let local = o.scene.floor_local_desk(a.desk_index);
+            assert!(
+                layout.home_desk(local).is_some(),
+                "agent {:?} at desk {:?} has no paintable anchor in the canvas layout",
+                a.agent_id,
+                a.desk_index
+            );
+        }
+        assert_eq!(
+            o.hire_ids.len(),
+            1,
+            "hires the office can't seat are refused, not admitted-invisible"
+        );
+    }
+
+    #[test]
+    fn hire_cap_holds_under_click_spam() {
+        // 320×180 (the 16:9 hero buffer) lays out 32 desks — ample room, so
+        // this exercises the MAX_LIVE_HIRES cap, not desk exhaustion (the
+        // narrow-canvas test above covers that).
+        let mut o = office();
+        o.step(T0_MS, 320, 180);
+        o.step(T0_MS + 30_000.0, 320, 180);
         for _ in 0..10 {
             o.hire();
         }
-        o.step(T0_MS + 32_000.0, 160, 96);
+        o.step(T0_MS + 32_000.0, 320, 180);
         let count_hires = |o: &Office| {
             o.scene
                 .agents
@@ -525,7 +648,7 @@ mod tests {
         // SessionStarts have drained must still be refused — the registry
         // counts live hires, not just queued ones.
         o.hire();
-        o.step(T0_MS + 33_000.0, 160, 96);
+        o.step(T0_MS + 33_000.0, 320, 180);
         assert_eq!(
             count_hires(&o),
             Office::MAX_LIVE_HIRES,

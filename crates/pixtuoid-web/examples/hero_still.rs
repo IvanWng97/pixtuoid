@@ -58,8 +58,9 @@ fn main() -> ExitCode {
     office.step(t0_ms as f64, w as u32, h as u32);
     office.step((t0_ms + advance_ms) as f64, w as u32, h as u32);
 
-    // The same RGBA contract the JS canvas blit uses (w*h*4, opaque alpha).
-    let px = unsafe { std::slice::from_raw_parts(office.frame_ptr(), office.frame_len()) }.to_vec();
+    // The same RGBA contract the JS canvas blit uses (w*h*4, opaque alpha) —
+    // via the safe native accessor; only the wasm-JS boundary reads ptr/len.
+    let px = office.frame().to_vec();
     let Some(img) = image::RgbaImage::from_raw(w as u32, h as u32, px) else {
         eprintln!("frame length didn't match {w}x{h}*4");
         return ExitCode::FAILURE;

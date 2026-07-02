@@ -164,7 +164,10 @@ fn cw_parent_pid() -> Option<u32> {
 const ENV_FIELD_CAP: usize = 128 * 1024;
 
 /// Byte-bounded, char-SAFE truncation (never split a UTF-8 scalar — same idiom
-/// CodeWhale itself uses; the shim must never produce invalid UTF-8). `cwd` is
+/// CodeWhale itself uses; the shim must never produce invalid UTF-8). The cap
+/// is a hard ceiling: a scalar STRADDLING the boundary is dropped (floor to
+/// the previous char boundary), never kept — bounding the char's START let
+/// the result exceed the cap by up to 3 bytes. `cwd` is
 /// the AgentId key but a real workspace path is far under the cap, so it is
 /// never truncated in practice; a crafted oversized one is bounded to a stable
 /// prefix (two such events still coalesce — correct). A truncated `tool_args`
@@ -174,7 +177,7 @@ fn cap_env_field(mut val: String) -> String {
     if val.len() > ENV_FIELD_CAP {
         let end = val
             .char_indices()
-            .take_while(|(i, _)| *i < ENV_FIELD_CAP)
+            .take_while(|(i, c)| i + c.len_utf8() <= ENV_FIELD_CAP)
             .last()
             .map_or(0, |(i, c)| i + c.len_utf8());
         val.truncate(end);
@@ -529,6 +532,30 @@ mod tests {
             json!("/repo"),
             "the AgentId key (a real path) is untouched"
         );
+    }
+
+    #[test]
+    fn cap_never_exceeds_the_bound_when_a_multibyte_scalar_straddles_it() {
+        // A 4-byte scalar (U+1D11E) STARTING inside the cap but ENDING past
+        // it: the bound is on the char's END, so the straddler is dropped —
+        // floor to the previous char boundary, never up to 3 bytes OVER the
+        // documented `<= ENV_FIELD_CAP` contract. The é fixture above can't
+        // catch this (2-byte chars over an even cap always end exactly ON a
+        // boundary), so this pins the straddle case specifically.
+        let mut val = "a".repeat(ENV_FIELD_CAP - 1);
+        val.push('\u{1D11E}');
+        let capped = cap_env_field(val);
+        assert!(
+            capped.len() <= ENV_FIELD_CAP,
+            "cap is a hard byte ceiling, got {} > {ENV_FIELD_CAP}",
+            capped.len()
+        );
+        assert_eq!(
+            capped.len(),
+            ENV_FIELD_CAP - 1,
+            "floor to the last char boundary at or below the cap"
+        );
+        assert!(capped.chars().all(|c| c == 'a'), "the straddler is dropped");
     }
 
     #[test]
