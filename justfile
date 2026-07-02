@@ -185,13 +185,14 @@ msrv:
     # gate links them fresh. (RUSTFLAGS env overrides target.*.rustflags wholesale.)
     RUSTFLAGS="" rustup run "$msrv" cargo check --workspace
 
-# SemVer-check the published library against its crates.io baseline. CI-only in
-# practice: needs network to fetch the baseline crate. Scoped to pixtuoid-core
-# (the headless lib others depend on); the binary crates' libs aren't public API.
+# SemVer-check the published libraries against their crates.io baselines. CI-only
+# in practice: needs network to fetch the baseline crates. Scoped to pixtuoid-core
+# (the headless lib) + pixtuoid-scene (the published engine crate); the binary
+# crates' libs aren't public API.
 [group('rust')]
-[doc('SemVer-check pixtuoid-core against its crates.io baseline (CI-only)')]
+[doc('SemVer-check pixtuoid-core + pixtuoid-scene against their crates.io baselines (CI-only)')]
 semver:
-    cargo semver-checks --package pixtuoid-core
+    cargo semver-checks --package pixtuoid-core --package pixtuoid-scene
 
 # Coverage + JUnit XML in one run — the exact command ci.yml's coverage job uses.
 # CI-only in practice: needs cargo-llvm-cov + cargo-nextest + the `ci` nextest
@@ -345,7 +346,7 @@ gen-readme:
 [group('gen')]
 [doc('Regenerate the --json contract: SourceStatus JSON Schema (Rust) + the Raycast TS type')]
 gen-contract:
-    UPDATE_CONTRACT_SCHEMA=1 cargo test -p pixtuoid --lib source_status_schema_matches_the_committed_contract
+    UPDATE_CONTRACT_SCHEMA=1 cargo test -p pixtuoid --lib schema_matches_the_committed_contract
     npm --prefix integrations/raycast run gen:contract
 
 # Fail if the committed README drifted from site/src/{features,sources,install}.json.

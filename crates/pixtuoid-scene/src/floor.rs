@@ -1082,7 +1082,7 @@ mod tests {
         );
         assert!(none.is_none(), "an unlayoutable size returns None");
         assert_eq!(
-            (buf.width, buf.height),
+            (buf.width(), buf.height()),
             (8, 8),
             "the buffer was still sized"
         );

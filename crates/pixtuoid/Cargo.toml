@@ -19,8 +19,8 @@ name = "pixtuoid"
 path = "src/main.rs"
 
 [dependencies]
-pixtuoid-core  = { path = "../pixtuoid-core", version = "0.11.1" }
-pixtuoid-scene = { path = "../pixtuoid-scene", version = "0.11.1" }
+pixtuoid-core  = { path = "../pixtuoid-core", version = "0.12.0" }
+pixtuoid-scene = { path = "../pixtuoid-scene", version = "0.12.0" }
 tokio              = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "sync", "time", "net", "fs", "io-util"] }
 ratatui            = { workspace = true }
 crossterm          = { workspace = true }

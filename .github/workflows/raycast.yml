@@ -33,11 +33,11 @@ jobs:
           cache: npm
           cache-dependency-path: integrations/raycast/package-lock.json
       - run: npm ci
-      # The --json contract type is GENERATED from the committed JSON Schema, so a
-      # producer change (a regenerated schema) that wasn't propagated to the TS
-      # type fails here — drift can't slip through. (The schema's own freshness vs
-      # the Rust struct is gated by the `source_status_schema_matches_the_committed_contract` test in ci.yml.)
-      - name: contract type matches the committed schema
-        run: npm run gen:contract && git diff --exit-code src/contract.ts
+      # The --json contract types are GENERATED from the committed JSON Schemas, so
+      # a producer change (a regenerated schema) that wasn't propagated to the TS
+      # types fails here — drift can't slip through. (Each schema's own freshness vs
+      # its Rust struct is gated by the `*_schema_matches_the_committed_contract` tests in ci.yml.)
+      - name: contract types match the committed schemas
+        run: npm run gen:contract && git diff --exit-code src/contract.ts src/contract-outcome.ts
       - run: npx tsc --noEmit
       - run: npx eslint .

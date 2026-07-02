@@ -1,5 +1,5 @@
 use super::*;
-use pixtuoid_core::state::{ActivityState, GlobalDeskIndex};
+use pixtuoid_core::state::{ActivityState, GlobalDeskIndex, ToolKind};
 use pixtuoid_core::walkable::WalkableMask;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -173,6 +173,7 @@ fn active_slot(state_started_at: SystemTime, created_at: SystemTime) -> AgentSlo
         state: ActivityState::Active {
             tool_use_id: Some(Arc::from("t")),
             detail: Some(Arc::from("Edit")),
+            kind: ToolKind::Edit,
         },
         state_started_at,
         last_event_at: created_at,
@@ -2106,6 +2107,7 @@ fn wander_interrupted_by_active_does_not_teleport() {
         state: ActivityState::Active {
             tool_use_id: Some(Arc::from("t")),
             detail: Some(Arc::from("Edit")),
+            kind: ToolKind::Edit,
         },
         state_started_at: now + Duration::from_millis(flip_frame * 33),
         ..idle.clone()

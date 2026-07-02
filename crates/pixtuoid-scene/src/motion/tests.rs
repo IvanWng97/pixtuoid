@@ -1256,7 +1256,7 @@ fn pick_wander_dest_falls_back_to_aimless_when_boxed_in() {
     // Box EVERY waypoint in: block the whole mask so approach_point finds no
     // allowed+reachable side for any waypoint and returns the `pos` sentinel.
     l.walkable
-        .mark_blocked(0, 0, l.walkable.width, l.walkable.height, 0);
+        .mark_blocked(0, 0, l.walkable.width(), l.walkable.height(), 0);
     l.reachable = ReachSet::from_mask(&l.walkable, Point { x: 0, y: 0 });
 
     // Find an agent whose cycle 0 is a directed (non-aimless) trip so we reach

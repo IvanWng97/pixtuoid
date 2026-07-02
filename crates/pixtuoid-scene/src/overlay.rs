@@ -137,7 +137,7 @@ mod tests {
     use crate::motion::MotionState;
     use crate::pathfind::AStarRouter;
     use crate::pose::{PoseHistory, RouteCtx};
-    use pixtuoid_core::state::{ActivityState, AgentSlot, GlobalDeskIndex, SceneState};
+    use pixtuoid_core::state::{ActivityState, AgentSlot, GlobalDeskIndex, SceneState, ToolKind};
     use pixtuoid_core::walkable::OccupancyOverlay;
     use pixtuoid_core::AgentId;
     use std::collections::HashMap;
@@ -179,6 +179,7 @@ mod tests {
         ActivityState::Active {
             tool_use_id: Some(Arc::from("t")),
             detail: Some(Arc::from("Edit")),
+            kind: ToolKind::Edit,
         }
     }
 

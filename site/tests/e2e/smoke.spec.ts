@@ -283,7 +283,7 @@ test('showcase studio: deep-links tune, dial and chips swap hydrated stages, the
 }) => {
   const errors = watchErrors(page);
   await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
-  await page.goto('./#themes'); // the legacy anchor maps to the themes channel
+  await page.goto('./#showcase-themes'); // the canonical deep link (the legacy #themes map was dropped in 0.12.0)
   await expect(page.locator('[data-stage="themes"]')).toBeVisible();
   await expect(page.locator('button.mon[data-ch="themes"]')).toHaveAttribute(
     'aria-pressed',

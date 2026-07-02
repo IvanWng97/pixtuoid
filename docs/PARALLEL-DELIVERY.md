@@ -167,15 +167,16 @@ monorepo (the `pixtuoid-web` wasm painter is itself a site build input:
   render output) it freezes the shape with **golden / snapshot tests** whose
   regeneration forces a reviewable PR diff (`gen-check` stills, the snapshot
   golden). That snapshot-as-gate is exactly the parallel-safety mechanism above.
-- **Codegen-from-one-source, applied:** the `--json` `SourceStatus` type is
-  **generated, not hand-mirrored**. A `schemars` derive on the Rust serde type
-  emits a committed JSON Schema (`integrations/raycast/contract/source-status.schema.json`,
-  freshness-gated by a Rust golden test), and the Raycast extension generates its
-  TS type from that schema (`json-schema-to-typescript`, CI-checked fresh by a
+- **Codegen-from-one-source, applied:** the `--json` `SourceStatus` and
+  `OutcomeRow` types are **generated, not hand-mirrored**. A `schemars` derive
+  on each Rust serde type emits a committed JSON Schema
+  (`integrations/raycast/contract/{source-status,outcome-row}.schema.json`,
+  freshness-gated by Rust golden tests), and the Raycast extension generates its
+  TS types from those schemas (`json-schema-to-typescript`, CI-checked fresh by a
   regenerate-and-`git diff` step). So a producer shape change is a **compile error
   in the consumer** — exactly the load-bearing guard above, dogfooded. (The
   earlier tier — a Rust byte-shape test + a hand-typed mirror — is what this
-  replaced; `OutcomeRow`, a `{id, outcome: string}` token, stays hand-typed.)
+  replaced.)
 - **Per-area gates** (each verifies independently): Rust → `just preflight` +
   `semver` + `gen-check`; site → `just site-check`; raycast → `tsc --noEmit` +
   `eslint`. Scoped per-area `CLAUDE.md`/`AGENTS.md` keep each agent on its own

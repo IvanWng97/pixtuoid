@@ -33,11 +33,9 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
 
 <section id="showcase" class="showcase" data-lit data-floor="5">
   {
-    /* legacy anchors — inbound #themes/#weather links land here; the controller
-      also maps them to their channel */
+    /* the legacy #themes/#weather anchor spans + their hash map were removed in
+      0.12.0 — #showcase-<id> is the one deep-link form (see fromHash below) */
   }
-  <span id="themes" class="showcase__anchor" aria-hidden="true"></span>
-  <span id="weather" class="showcase__anchor" aria-hidden="true"></span>
   <div class="container">
     <div class="section-head reveal">
       <p class="eyebrow">5F · studio — {live.length} channels on air</p>
@@ -222,18 +220,18 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
       }
     });
 
-    // ---- deep links: #showcase-<id>, plus legacy #themes/#weather
+    // ---- deep links: #showcase-<id> (the legacy #themes/#weather map was
+    // dropped in 0.12.0 — those inbound links now just don't scroll/tune,
+    // like any unknown fragment; the canonical form is what tune() writes)
     function fromHash() {
       const h = location.hash;
-      const legacy = { '#themes': 'themes', '#weather': 'weather' };
-      const id = legacy[h] || (h.indexOf('#showcase-') === 0 ? h.slice('#showcase-'.length) : null);
+      const id = h.indexOf('#showcase-') === 0 ? h.slice('#showcase-'.length) : null;
       if (!id) return;
       const exists = studio.querySelector('[data-stage="' + id + '"]');
       if (!exists) return;
       tune(id, true);
-      // #showcase-<id> matches no element id, so the browser never scrolls on its
-      // own — bring the studio into view (legacy #themes/#weather anchors scroll
-      // natively; an extra scrollIntoView to the same spot is a no-op).
+      // #showcase-<id> matches no element id, so the browser never scrolls on
+      // its own — bring the studio into view.
       const sec = document.getElementById('showcase');
       if (sec) sec.scrollIntoView({ behavior: mq.matches ? 'auto' : 'smooth', block: 'start' });
     }
@@ -295,10 +293,6 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
   .showcase {
     position: relative;
     padding-block: clamp(2.5rem, 6vw, 5rem);
-  }
-  .showcase__anchor {
-    position: absolute;
-    top: 0;
   }
   .studio {
     display: grid;

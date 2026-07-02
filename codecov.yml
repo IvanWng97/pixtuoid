@@ -58,7 +58,10 @@ ignore:
   - "docs/"
   - "*.md"
   # Not coverable headlessly — exercising these needs a real TTY / OS / display:
-  - "crates/pixtuoid/src/main.rs"               # binary entry: terminal raw-mode, crash hook, signal handling
+  - "crates/pixtuoid/src/main.rs"               # binary entry: arg-parse + dispatch + terminal preflights
+  - "crates/pixtuoid/src/crash.rs"              # panic hook: terminal restore + crash.log (was main.rs; its pure helpers stay unit-tested)
+  - "crates/pixtuoid/src/logging.rs"            # global tracing-subscriber init (once per process; was main.rs; pure helpers unit-tested)
+  - "crates/pixtuoid/src/sources_cli.rs"        # println presenters over the real config path (was main.rs; covered by the cli_json e2e binary run)
   - "crates/pixtuoid/src/tui/mod.rs"            # crossterm event loop + terminal lifecycle: reads/writes the real TTY
   - "crates/pixtuoid/src/runtime/driver.rs"     # async glue: tokio runtime + block_on + ctrl_c + socket bind (#103)
   - "crates/pixtuoid/src/floating/mod.rs"       # floating run(): tokio runtime + winit EventLoop glue (the floating twin of driver.rs)

@@ -1,5 +1,5 @@
 use super::*;
-use crate::state::GlobalDeskIndex;
+use crate::state::{GlobalDeskIndex, ToolKind};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -40,6 +40,7 @@ fn typing() -> ActivityState {
     ActivityState::Active {
         tool_use_id: Some("t".into()),
         detail: Some("Edit".into()),
+        kind: ToolKind::Edit,
     }
 }
 
@@ -636,6 +637,7 @@ fn derive_state_only_skips_entry_override() {
         state: ActivityState::Active {
             tool_use_id: Some("t".into()),
             detail: Some("Edit".into()),
+            kind: ToolKind::Edit,
         },
         state_started_at: now0,
         created_at: now0,

@@ -277,8 +277,8 @@ fn cell_center(cx: u16, cy: u16) -> Point {
 /// either axis is 0 — a degenerate grid the A* loop can't index. Callers pick
 /// their own degenerate return (straight `[from,to]`, `None`, `false`).
 fn grid_dims(mask: &WalkableMask) -> Option<(u16, u16)> {
-    let cell_w = mask.width / CELL_SIZE;
-    let cell_h = mask.height / CELL_SIZE;
+    let cell_w = mask.width() / CELL_SIZE;
+    let cell_h = mask.height() / CELL_SIZE;
     if cell_w == 0 || cell_h == 0 {
         return None;
     }

@@ -29,7 +29,7 @@ default = ["native"]
 native  = ["pixtuoid-core/native"]
 
 [dependencies]
-pixtuoid-core = { path = "../pixtuoid-core", version = "0.11.1", default-features = false }
+pixtuoid-core = { path = "../pixtuoid-core", version = "0.12.0", default-features = false }
 anyhow        = { workspace = true }
 tracing       = { workspace = true }
 # clock feature gives us Local::now() w/ system timezone for the wall clock.
