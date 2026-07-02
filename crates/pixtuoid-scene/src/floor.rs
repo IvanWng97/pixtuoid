@@ -1053,7 +1053,7 @@ mod tests {
 
     #[test]
     fn render_floor_paints_records_coffee_state_and_survives_a_tiny_buffer() {
-        let pack = crate::embedded_pack::load_sprite_pack(None).expect("embedded pack loads");
+        let pack = crate::embedded_pack::test_default_pack();
         let theme = crate::theme::theme_by_name("normal").expect("normal theme exists");
         let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
         let scene = SceneState::new([8; MAX_FLOORS]);

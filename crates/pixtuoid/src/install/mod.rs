@@ -415,6 +415,33 @@ mod tests {
     use super::*;
     use crate::install::target::{MergeOutcome, Target, CLAUDE, CODEX, OPENCLAW};
 
+    /// RAII override of a process-global env var: sets `key` for the test's
+    /// scope and restores the PRIOR value (or unsets) on drop — panic-safe, so
+    /// a failing assert can't leak the override past the test. Callers must
+    /// hold `TEST_ENV_LOCK` first, declared BEFORE this guard (locals drop in
+    /// reverse order, so the env restore happens while the lock is still held).
+    struct EnvVarOverride {
+        key: &'static str,
+        prior: Option<std::ffi::OsString>,
+    }
+
+    impl EnvVarOverride {
+        fn set(key: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
+            let prior = std::env::var_os(key);
+            std::env::set_var(key, value);
+            Self { key, prior }
+        }
+    }
+
+    impl Drop for EnvVarOverride {
+        fn drop(&mut self) {
+            match self.prior.take() {
+                Some(v) => std::env::set_var(self.key, v),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
+
     // A second fake target for "both present" rows (avoids depending on Phase 2's CODEX).
     static FAKE: Target = Target {
         name: "fake",
@@ -960,7 +987,7 @@ mod tests {
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         let oc_home = tempfile::TempDir::new().unwrap();
-        std::env::set_var("OPENCLAW_STATE_DIR", oc_home.path());
+        let _state = EnvVarOverride::set("OPENCLAW_STATE_DIR", oc_home.path());
         for t in target::TARGETS {
             let tmp = tempfile::TempDir::new().unwrap();
             let cfg = tmp.path().join("cfg");
@@ -1062,7 +1089,7 @@ mod tests {
             .unwrap_or_else(|e| e.into_inner());
         let oc_home = tempfile::TempDir::new().unwrap();
         let state = oc_home.path().join("ocstate"); // not yet created
-        std::env::set_var("OPENCLAW_STATE_DIR", &state);
+        let _state = EnvVarOverride::set("OPENCLAW_STATE_DIR", &state);
 
         assert!(
             !is_present(&OPENCLAW),
@@ -1079,7 +1106,6 @@ mod tests {
             "install must create the state dir the presence probe detects \
              (detect⇄install symmetry — else installed-but-invisible)"
         );
-        std::env::remove_var("OPENCLAW_STATE_DIR");
     }
 
     // --- preserve rule: uninstall un-merges, never DELETES the file (Test 4) --
@@ -1183,7 +1209,7 @@ mod tests {
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         let oc_home = tempfile::TempDir::new().unwrap();
-        std::env::set_var("OPENCLAW_STATE_DIR", oc_home.path());
+        let _state = EnvVarOverride::set("OPENCLAW_STATE_DIR", oc_home.path());
 
         let tmp = tempfile::TempDir::new().unwrap();
         let cfg = tmp.path().join("openclaw.json");
@@ -1207,8 +1233,6 @@ mod tests {
             !oc_home.path().join("plugins").exists(),
             "a malformed-config bail must not leave orphan plugin artifacts on disk"
         );
-
-        std::env::remove_var("OPENCLAW_STATE_DIR");
     }
 
     // --- verify_target (#309 install-schema soundness) ------------------------
@@ -1224,7 +1248,7 @@ mod tests {
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         let oc_home = tempfile::TempDir::new().unwrap();
-        std::env::set_var("OPENCLAW_STATE_DIR", oc_home.path());
+        let _state = EnvVarOverride::set("OPENCLAW_STATE_DIR", oc_home.path());
         let exe = std::env::current_exe().unwrap(); // a real, executable file
         for &t in target::TARGETS {
             let tmp = tempfile::TempDir::new().unwrap();
@@ -1334,7 +1358,7 @@ mod tests {
             .unwrap_or_else(|e| e.into_inner());
         // Isolate OpenClaw's artifacts under a temp home (never touch ~/.openclaw).
         let oc_home = tempfile::TempDir::new().unwrap();
-        std::env::set_var("OPENCLAW_STATE_DIR", oc_home.path());
+        let _state = EnvVarOverride::set("OPENCLAW_STATE_DIR", oc_home.path());
         let exe = std::env::current_exe().unwrap();
         let mut covered = 0;
         for &t in target::TARGETS {

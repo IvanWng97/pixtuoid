@@ -201,7 +201,7 @@ fn main() -> Result<()> {
             json,
         } => run_sources_set(&ids, json),
         Cmd::Connect { ids, json } => run_change(&ids, json, |c, i| {
-            sources::connect(c, i).map(|_| "connected".to_string())
+            sources::connect(c, i).map(|_| sources::ChangeOutcome::Connected.as_wire())
         }),
         // A folded hook-removal failure is a PARTIAL failure (the flag IS
         // disconnected, but hooks remain) — surface it AND signal it via a
@@ -212,7 +212,7 @@ fn main() -> Result<()> {
                 sources::DisconnectOutcome::HookRemovalFailed(e) => Err(anyhow::anyhow!(
                     "disconnected, but hook removal failed: {e}"
                 )),
-                _ => Ok("disconnected".to_string()),
+                _ => Ok(sources::ChangeOutcome::Disconnected.as_wire()),
             })
         }
         Cmd::Setup { yes } => run_setup(yes),
@@ -341,7 +341,10 @@ fn run_change(
                 Ok(t) => t,
                 Err(e) => {
                     any_failed = true;
-                    format!("failed: {e:#}")
+                    // The same `failed: <msg>` wire form `sources set` emits —
+                    // spelled through the ONE token authority so the two
+                    // command surfaces can't drift.
+                    sources::ChangeOutcome::Failed(format!("{e:#}")).as_wire()
                 }
             };
             (sid.to_string(), token)
@@ -357,17 +360,23 @@ fn run_change(
 /// Print a `[(id, outcome)]` batch as a table or a JSON array of `{id, outcome}`.
 fn emit_outcomes(out: &[(String, String)], json: bool) -> Result<()> {
     if json {
-        let rows: Vec<serde_json::Value> = out
-            .iter()
-            .map(|(id, outcome)| serde_json::json!({ "id": id, "outcome": outcome }))
-            .collect();
-        println!("{}", serde_json::to_string_pretty(&rows)?);
+        println!("{}", serde_json::to_string_pretty(&outcome_rows_json(out))?);
     } else {
         for (id, outcome) in out {
             println!("{id}: {outcome}");
         }
     }
     Ok(())
+}
+
+/// The scriptable-surface `--json` batch envelope: one `{id, outcome}` object
+/// per source row — the shape the Raycast extension parses back from
+/// `connect`/`disconnect`/`sources set` (pinned by
+/// `outcome_envelope_is_the_id_outcome_raycast_contract`).
+fn outcome_rows_json(out: &[(String, String)]) -> Vec<serde_json::Value> {
+    out.iter()
+        .map(|(id, outcome)| serde_json::json!({ "id": id, "outcome": outcome }))
+        .collect()
 }
 
 /// Resolve the shared [`runtime::RunConfig`] from CLI args + the on-disk config —
@@ -706,6 +715,32 @@ mod tests {
     use std::path::Path;
 
     use super::*;
+
+    #[test]
+    fn outcome_envelope_is_the_id_outcome_raycast_contract() {
+        // Pins the exact `{id, outcome}` JSON rows `connect`/`disconnect`/
+        // `sources set --json` emit — the batch envelope the Raycast extension
+        // parses. A key rename must break THIS test, not the consumer. The
+        // outcome TOKEN set itself ("connected"/"disconnected"/"no_op"/
+        // "failed: <msg>") is pinned by sources.rs's
+        // `change_outcome_wire_tokens_are_stable`, and every emission site
+        // routes through `ChangeOutcome::as_wire`, so the failed row below
+        // exercises the same form the CLI ships.
+        let rows = outcome_rows_json(&[
+            (
+                "codex".to_string(),
+                sources::ChangeOutcome::Connected.as_wire(),
+            ),
+            (
+                "cursor".to_string(),
+                sources::ChangeOutcome::Failed("boom".into()).as_wire(),
+            ),
+        ]);
+        assert_eq!(
+            serde_json::to_string(&rows).unwrap(),
+            r#"[{"id":"codex","outcome":"connected"},{"id":"cursor","outcome":"failed: boom"}]"#
+        );
+    }
 
     #[test]
     fn empty_rust_log_falls_back_to_requested_level() {

@@ -1074,7 +1074,7 @@ mod tests {
     }
 
     fn test_pack() -> Pack {
-        crate::embedded_pack::load_sprite_pack(None).expect("embedded pack")
+        crate::embedded_pack::test_default_pack()
     }
 
     #[test]

@@ -839,7 +839,13 @@ async fn unclaim_for_foreign_id_stays_pending_and_leaves_local_claims_alone() {
 /// early.
 #[tokio::test]
 async fn child_end_unclaims_ttl_prunes_unmatched_entries() {
-    let unclaims = ChildEndUnclaims::with_ttl(Duration::from_millis(40));
+    // The TTL is generous relative to the between-assert wall time: the
+    // "inside the TTL" drains below must land before it elapses even on a
+    // loaded machine (a 40ms TTL flaked when the scheduler stalled the test
+    // past it), and the prune sleep only needs to EXCEED it — load can only
+    // stretch the sleep further past, never under.
+    let ttl = Duration::from_millis(250);
+    let unclaims = ChildEndUnclaims::with_ttl(ttl);
     let id = AgentId::from_parts("codex", "orphaned-entry");
     unclaims.push(id);
     assert!(
@@ -852,7 +858,7 @@ async fn child_end_unclaims_ttl_prunes_unmatched_entries() {
         "inside the TTL a later drain still finds it"
     );
     unclaims.push(id);
-    tokio::time::sleep(Duration::from_millis(80)).await;
+    tokio::time::sleep(ttl * 2).await;
     assert!(
         unclaims.take_matching(|_| true).is_empty(),
         "past the TTL the unmatched entry is pruned"

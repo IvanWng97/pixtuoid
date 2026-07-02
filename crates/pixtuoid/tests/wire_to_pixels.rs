@@ -338,6 +338,67 @@ fn agent_cases() -> Vec<WireCase> {
     ]
 }
 
+/// Look up one matrix case by its registered source name. The per-source tests
+/// key on this STABLE id — never a positional index into `agent_cases()`, where
+/// an insertion/reorder would silently shift every downstream case onto the
+/// wrong fixture.
+fn agent_case(source: &str) -> WireCase {
+    agent_cases()
+        .into_iter()
+        .find(|c| c.source == source)
+        .unwrap_or_else(|| panic!("no wire-to-pixels case for source {source:?}"))
+}
+
+/// The matrix is truth-complete: every source in `REGISTERED_SOURCES` is
+/// exercised by this suite — the agent matrix covers every AGENT source, and
+/// each DAEMON source has its own presence test (the openclaw lobster below).
+/// A newly registered source with no wire case FAILS here instead of silently
+/// shipping untested (the same "registration is not coverage" pin
+/// `supported_sources_manifest.rs` gives `site/src/sources.json`).
+#[test]
+fn wire_matrix_covers_every_registered_source() {
+    use std::collections::BTreeSet;
+
+    let agents: BTreeSet<&str> = agent_cases().iter().map(|c| c.source).collect();
+    assert_eq!(
+        agents.len(),
+        agent_cases().len(),
+        "duplicate agent_cases rows for one source"
+    );
+    for source in &agents {
+        let d = registry::descriptor_for(source)
+            .unwrap_or_else(|| panic!("matrix source {source:?} is not in the registry"));
+        assert!(
+            !d.is_daemon(),
+            "{source}: a daemon belongs in the presence-test list, not the agent matrix"
+        );
+    }
+
+    // The daemon class is covered by its own presence→lobster test below; a
+    // 2nd daemon must gain a presence test AND a row here.
+    let daemons_covered = [pixtuoid_core::source::openclaw::SOURCE_NAME];
+    for source in daemons_covered {
+        let d = registry::descriptor_for(source)
+            .unwrap_or_else(|| panic!("presence-test source {source:?} is not in the registry"));
+        assert!(d.is_daemon(), "{source}: presence tests are for daemons");
+    }
+
+    let covered: BTreeSet<&str> = agents.iter().copied().chain(daemons_covered).collect();
+    let registered: BTreeSet<&str> = pixtuoid_core::source::REGISTERED_SOURCES
+        .iter()
+        .copied()
+        .collect();
+    assert_eq!(
+        covered,
+        registered,
+        "the wire→pixels suite must cover EVERY registered source.\n  \
+         registered but untested (add a WireCase / presence test): {:?}\n  \
+         tested but not registered (stale row): {:?}",
+        registered.difference(&covered).collect::<Vec<_>>(),
+        covered.difference(&registered).collect::<Vec<_>>(),
+    );
+}
+
 /// Drive the whole matrix in one test so a per-source failure names the source
 /// (the `case.name` is woven into every assertion message). Each case is the
 /// full wire→pixels chain for its source.
@@ -353,42 +414,42 @@ fn every_agent_source_renders_a_painted_sprite_from_real_wire() {
 
 #[test]
 fn claude_code_transcript_line_renders_a_painted_sprite() {
-    assert_renders_a_sprite(&agent_cases()[0]);
+    assert_renders_a_sprite(&agent_case("claude-code"));
 }
 
 #[test]
 fn codex_transcript_line_renders_a_painted_sprite() {
-    assert_renders_a_sprite(&agent_cases()[1]);
+    assert_renders_a_sprite(&agent_case("codex"));
 }
 
 #[test]
 fn antigravity_transcript_line_renders_a_painted_sprite() {
-    assert_renders_a_sprite(&agent_cases()[2]);
+    assert_renders_a_sprite(&agent_case("antigravity"));
 }
 
 #[test]
 fn copilot_transcript_line_renders_a_painted_sprite() {
-    assert_renders_a_sprite(&agent_cases()[3]);
+    assert_renders_a_sprite(&agent_case("copilot"));
 }
 
 #[test]
 fn reasonix_hook_envelope_renders_a_painted_sprite() {
-    assert_renders_a_sprite(&agent_cases()[4]);
+    assert_renders_a_sprite(&agent_case("reasonix"));
 }
 
 #[test]
 fn codewhale_hook_envelope_renders_a_painted_sprite() {
-    assert_renders_a_sprite(&agent_cases()[5]);
+    assert_renders_a_sprite(&agent_case("codewhale"));
 }
 
 #[test]
 fn opencode_hook_envelope_renders_a_painted_sprite() {
-    assert_renders_a_sprite(&agent_cases()[6]);
+    assert_renders_a_sprite(&agent_case("opencode"));
 }
 
 #[test]
 fn cursor_hook_envelope_renders_a_painted_sprite() {
-    assert_renders_a_sprite(&agent_cases()[7]);
+    assert_renders_a_sprite(&agent_case("cursor"));
 }
 
 // =====================================================================

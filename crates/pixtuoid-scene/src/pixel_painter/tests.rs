@@ -534,7 +534,7 @@ fn pet_z_anchor_tracks_the_selected_anim_sprite_height() {
     // one row NORTH of the walk/sit sprites — a literal +2 painted a sleeping
     // pet OVER a character whose feet land on pos.y+1. Reads the REAL embedded
     // heights so a pet-sprite resize surfaces HERE, not as a z-order bug.
-    let pack = crate::embedded_pack::load_sprite_pack(None).expect("embedded pack");
+    let pack = crate::embedded_pack::test_default_pack();
     let pos = Point { x: 40, y: 30 };
     let anim_h = |name: &str| {
         pack.animation(name)
@@ -1335,7 +1335,7 @@ fn seat_view_of_obstacle_kinds_is_upright_unflipped() {
 
 #[test]
 fn paint_character_at_missing_anim_is_a_noop() {
-    let pack = crate::embedded_pack::load_sprite_pack(None).expect("embedded pack");
+    let pack = crate::embedded_pack::test_default_pack();
     let mut cache = FrameCache::new();
     let id = pixtuoid_core::AgentId::from_transcript_path("/c.jsonl");
     let slot = make_slot(id, ActivityState::Idle);
@@ -1671,7 +1671,7 @@ fn cwd_backfill_invalidates_cached_outfit_frames() {
     // on the next identity-bearing event. Already-cached poses must repaint
     // in the healed Team-Palette outfit — pinned by comparing the healed
     // repaint (same cache) against a fresh-cache render.
-    let pack = crate::embedded_pack::load_sprite_pack(None).expect("embedded pack loads");
+    let pack = crate::embedded_pack::test_default_pack();
     let unknown = make_slot_cwd("/p/heal.jsonl", "", true);
     // Pick a cwd whose Team-Palette outfit differs from the id-seeded
     // fallback outfit, so the assertion has teeth.

@@ -331,10 +331,16 @@ async fn negative_vouch_emits_session_end_after_sustained_disappearance() {
 async fn one_missed_snapshot_does_not_end_the_session() {
     let dir = TempDir::new().unwrap();
     let uuid = "01000000-0000-7000-8000-0000000000ae";
+    // The confirmation span dwarfs the 250ms drop below (via the
+    // with_negative_vouch_min_span seam, not a bigger sleep): the re-vouch
+    // must land INSIDE the span even when load stretches the sleep — a 600ms
+    // span left only ~350ms of real-time slack and could flake into a
+    // confirmed exit on a busy machine.
+    let span = Duration::from_millis(2500);
     let (probe_state, mut rx, _transcript, handle) = admitted_with_mutable_probe(
         dir.path().to_path_buf(),
         uuid,
-        Duration::from_millis(600),
+        span,
         vouch_snapshot(&[uuid]),
     )
     .await;
@@ -346,10 +352,13 @@ async fn one_missed_snapshot_does_not_end_the_session() {
     // ...then the vouch re-appears INSIDE the span — the window must cancel.
     *probe_state.lock().unwrap() = vouch_snapshot(&[uuid]);
 
+    // The quiet window reaches PAST the span (+1s): a merely not-yet-expired
+    // (uncancelled) miss window would confirm inside it, so this proves the
+    // cancellation, not just that the span hasn't elapsed.
     assert_no_session_end_within(
         &mut rx,
         expected,
-        Duration::from_millis(1500),
+        span + Duration::from_millis(1000),
         "a vouch re-appearing within the span must cancel the miss window — no SessionEnd",
     )
     .await;

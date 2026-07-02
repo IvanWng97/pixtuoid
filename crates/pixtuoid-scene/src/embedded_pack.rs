@@ -105,6 +105,21 @@ pub fn load_sprite_pack(pack_dir: Option<PathBuf>) -> Result<Pack> {
     Ok(base)
 }
 
+/// Test-only default-pack loader: takes the crate's `TEST_ENV_LOCK` around the
+/// `XDG_CONFIG_HOME` read inside [`load_sprite_pack`], so an env-READING pack
+/// load can't race the env-MUTATING test
+/// (`load_sprite_pack_resolves_then_falls_back_via_xdg`) under plain
+/// `cargo test` — one test binary, many threads (nextest's per-process
+/// isolation masks the race). Every unit test resolving the default pack must
+/// come through here, never a bare `load_sprite_pack(None)`.
+#[cfg(test)]
+pub(crate) fn test_default_pack() -> Pack {
+    let _env = crate::TEST_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    load_sprite_pack(None).expect("default pack loads")
+}
+
 fn load_embedded_pack() -> Result<Pack> {
     let pack_toml = include_str!("../sprites/default/pack.toml");
     let seated = include_str!("../sprites/default/seated.sprite");
@@ -324,9 +339,13 @@ mod tests {
     }
 
     // The XDG path mutates a process-global env var. The TEST_ENV_LOCK
-    // serializes this against the crate's other env-mutating test
-    // (config::config_path_xdg_home_and_relative_branches, which also sets
-    // XDG_CONFIG_HOME) so the two can't race under plain `cargo test`.
+    // serializes this mutator against the crate's env-READING pack loads —
+    // every `test_default_pack()` caller (floor / pixel_painter / the
+    // embedded-pack tests below resolve the default pack through the same
+    // XDG_CONFIG_HOME read) — so a reader can't observe the temp dirs set
+    // here under plain `cargo test` (nextest's per-process isolation masks
+    // the race). This test calls `load_sprite_pack` DIRECTLY, not the locked
+    // helper: it already holds the (non-reentrant) lock.
     #[test]
     fn load_sprite_pack_resolves_then_falls_back_via_xdg() {
         let _env = crate::TEST_ENV_LOCK
@@ -374,7 +393,7 @@ mod tests {
     // the e/q = #1a1a1a dup that the B/H/S/P-only check below missed.
     #[test]
     fn embedded_pack_all_palette_keys_are_distinct_rgbs() {
-        let pack = load_sprite_pack(None).expect("embedded pack loads");
+        let pack = test_default_pack();
         let entries: Vec<(char, pixtuoid_core::sprite::Rgb)> = pack
             .palette
             .iter()
@@ -398,7 +417,7 @@ mod tests {
     // shipped embedded pack.
     #[test]
     fn embedded_pack_recolor_keys_are_distinct_rgbs() {
-        let pack = load_sprite_pack(None).expect("embedded pack loads");
+        let pack = test_default_pack();
         // The single source of truth — same set recolor_frame + the load guard use.
         let keys = pixtuoid_core::sprite::format::RECOLOR_KEYS;
         let rgbs: Vec<_> = keys
