@@ -173,6 +173,17 @@ import { asset } from '../consts';
             ctx2d = canvas.getContext('2d');
             sizeBuffer();
             start();
+            // #434: the install section's Copy click hires a coworker into
+            // the background office (engine-capped at 3 concurrent; a no-op
+            // before the first frame). A function global, same idiom as
+            // __pixLights.
+            window.__pixHire = function () {
+              try {
+                office.hire();
+              } catch (e) {
+                /* never let a background flourish break the click */
+              }
+            };
           });
         })
         .catch(function () {

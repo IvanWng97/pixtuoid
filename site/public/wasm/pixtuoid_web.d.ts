@@ -25,6 +25,14 @@ export class Office {
      */
     frame_ptr(): number;
     /**
+     * Hire one more agent (#434): the site's install section calls this on a
+     * Copy click, and a new coworker walks into the background office, works
+     * a few spells, and heads out ~70s later. No-op before the first `step`
+     * (no clock yet) and while `MAX_LIVE_HIRES` hires are already alive
+     * (click-spam can't crowd out the cast). Never throws.
+     */
+    hire(): void;
+    /**
      * Build an office seeded with `seed` (drives the layout variant). Errors
      * only if the compile-time-embedded sprite pack fails to parse (a build
      * bug), surfaced to JS as an exception.
@@ -51,6 +59,7 @@ export interface InitOutput {
     readonly __wbg_office_free: (a: number, b: number) => void;
     readonly office_frame_len: (a: number) => number;
     readonly office_frame_ptr: (a: number) => number;
+    readonly office_hire: (a: number) => void;
     readonly office_new: (a: number) => [number, number, number];
     readonly office_step: (a: number, b: number, c: number, d: number) => void;
     readonly __wbindgen_externrefs: WebAssembly.Table;

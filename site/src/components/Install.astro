@@ -100,6 +100,9 @@ import tabs from '../install.json';
         flash('Select & copy');
       }
       btn.addEventListener('click', function () {
+        // #434: hiring is the click's diegetic echo — a new coworker walks
+        // into the live office behind the page ("Move them in.", literally).
+        if (window.__pixHire) window.__pixHire();
         if (!navigator.clipboard || !navigator.clipboard.writeText) {
           manual();
           return;

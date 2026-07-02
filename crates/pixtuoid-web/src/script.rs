@@ -19,6 +19,7 @@
 
 use std::path::PathBuf;
 
+use pixtuoid_core::source::daemon::DaemonPresenceUpdate;
 use pixtuoid_core::source::{claude_code, codex, cursor, opencode};
 use pixtuoid_core::{AgentEvent, AgentId, ToolDetail, Transport};
 
@@ -109,6 +110,56 @@ fn spell(beats: &mut Vec<Beat>, i: usize, at_ms: u64, n: u64, tools: &[&str]) {
         let t = format!("s{at_ms}-{k}");
         beats.extend(tool(i, at_ms + k * BURST_SPACING_MS, &t, display));
     }
+}
+
+/// One scripted presence beat for the OpenClaw gateway mascot. Presence is
+/// deliberately NOT a [`Beat`]/`AgentEvent` (invariant #2: the one event
+/// channel is `AgentId`-pure) — these ride their own lane and land through
+/// the REAL `source::daemon::apply_presence` state machine, so the lobster's
+/// enter/busy/degraded/leave motion is the app's, not a scripted fake.
+pub(crate) struct PresenceBeat {
+    pub at_ms: u64,
+    pub update: DaemonPresenceUpdate,
+}
+
+/// The lobster's loop (#434): the OpenClaw mascot scuttles in from the
+/// elevator mid-loop, shuttles through two busy runs, and walks out before
+/// the wrap — so every loop replays a clean enter animation (GatewayUp after
+/// Down re-anchors `entered_at`). The wide poster's instant (100s) lands in
+/// the idle amble between run 2 ending (96s) and the walk-out (112s).
+pub(crate) fn lobster_beats() -> Vec<PresenceBeat> {
+    use DaemonPresenceUpdate::*;
+    [
+        (25_000, GatewayUp { pid: None }),
+        (
+            40_000,
+            RunStarted {
+                run_key: "hero-run-1".into(),
+            },
+        ),
+        (
+            62_000,
+            RunEnded {
+                run_key: "hero-run-1".into(),
+            },
+        ),
+        (
+            78_000,
+            RunStarted {
+                run_key: "hero-run-2".into(),
+            },
+        ),
+        (
+            96_000,
+            RunEnded {
+                run_key: "hero-run-2".into(),
+            },
+        ),
+        (112_000, GatewayDown),
+    ]
+    .into_iter()
+    .map(|(at_ms, update)| PresenceBeat { at_ms, update })
+    .collect()
 }
 
 /// Build one loop of the hero timeline, sorted by `at_ms`.

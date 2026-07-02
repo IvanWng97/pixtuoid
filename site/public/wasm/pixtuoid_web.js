@@ -40,6 +40,16 @@ export class Office {
         return ret >>> 0;
     }
     /**
+     * Hire one more agent (#434): the site's install section calls this on a
+     * Copy click, and a new coworker walks into the background office, works
+     * a few spells, and heads out ~70s later. No-op before the first `step`
+     * (no clock yet) and while `MAX_LIVE_HIRES` hires are already alive
+     * (click-spam can't crowd out the cast). Never throws.
+     */
+    hire() {
+        wasm.office_hire(this.__wbg_ptr);
+    }
+    /**
      * Build an office seeded with `seed` (drives the layout variant). Errors
      * only if the compile-time-embedded sprite pack fails to parse (a build
      * bug), surfaced to JS as an exception.

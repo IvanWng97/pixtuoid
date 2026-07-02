@@ -54,7 +54,9 @@ crates/                 DAG: pixtuoid-core ← pixtuoid-scene ← {pixtuoid, pix
 │                    (default-features off → no tokio anywhere), publish = false: a SITE BUILD
 │                    INPUT (`just gen-wasm` → committed site/public/wasm/), not a crates.io
 │                    artifact. `Office` handle: new(seed) / step(now_ms,w,h) / frame_ptr/len;
-│                    a looped scripted timeline (src/script.rs) drives the REAL Reducer, so the
+│                    a looped scripted timeline (src/script.rs) drives the REAL Reducer (+ the OpenClaw
+│                    lobster via the real apply_presence lane, and a visitor-facing Office.hire()
+│                    — the install Copy click walks a capped extra coworker in, #434), so the
 │                    hero's lifecycle/motion/render behave exactly like the app (the EVENT STREAM
 │                    is authored; the state machine + pixel pass are the app's). Time is a
 │                    PARAMETER — the engine never reads the clock on wasm.
