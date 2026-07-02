@@ -17,3 +17,26 @@ updates:
       actions:
         patterns: ["*"]
     open-pull-requests-limit: 5
+
+  # The two Node projects previously had security ALERTS but no update PRs —
+  # npm advisories surfaced with nothing offering the fix.
+  - package-ecosystem: npm
+    directory: /site
+    schedule:
+      interval: weekly
+    groups:
+      # playwright + @playwright/test must bump together (version-locked pair)
+      playwright:
+        patterns: ["playwright", "@playwright/*"]
+      site-deps:
+        patterns: ["*"]
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: npm
+    directory: /integrations/raycast
+    schedule:
+      interval: weekly
+    groups:
+      raycast-deps:
+        patterns: ["*"]
+    open-pull-requests-limit: 5

@@ -1,5 +1,17 @@
 [advisories]
-ignore = []
+# Each ignore is Linux-only build-graph exposure with no untrusted input; a
+# tracking issue owns removal when upstream releases (see the issue for the
+# full dependency-path trace).
+ignore = [
+    # quick-xml 0.39 pair, reachable only via wayland-scanner (build-time
+    # codegen over vendored Wayland protocol XML — never attacker input).
+    # Fix needs wayland-rs to release against quick-xml >=0.41.
+    "RUSTSEC-2026-0194",
+    "RUSTSEC-2026-0195",
+    # ttf-parser declared unmaintained; only via sctk-adwaita (Linux Wayland
+    # CSD titlebar text, local system fonts). Upstream is migrating to skrifa.
+    "RUSTSEC-2026-0192",
+]
 
 [licenses]
 allow = [

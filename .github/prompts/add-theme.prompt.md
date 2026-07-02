@@ -8,10 +8,10 @@ description: "Add a new color theme to pixtuoid"
 Add a new color theme named `${input:name}` to pixtuoid.
 
 1. Read an existing theme for the full field set — e.g.
-   `crates/pixtuoid/src/tui/theme/dracula.rs`. A theme is a `pub static Theme`
+   `crates/pixtuoid-scene/src/theme/dracula.rs`. A theme is a `pub static Theme`
    with ~110 color roles across 8 groups (including `ApplianceColors` for the
    vending machine / printer / coat rack).
-2. Create `crates/pixtuoid/src/tui/theme/<name>.rs` defining
+2. Create `crates/pixtuoid-scene/src/theme/<name>.rs` defining
    `pub static <NAME>: Theme = Theme { ... }`. Fill **every** field — each
    appliance/UI color must be supplied; never fall back to the normal palette
    (corridor appliances rendered wrong until each theme supplied its own set).

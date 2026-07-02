@@ -39,7 +39,7 @@
     "globals": "^17.6.0",
     "knip": "^6.17.1",
     "mermaid": "^11.15.0",
-    "playwright": "^1.61.0",
+    "playwright": "^1.61.1",
     "prettier": "^3.8.4",
     "prettier-plugin-astro": "^0.14.1",
     "rehype-mermaid": "^3.0.0",
@@ -47,6 +47,11 @@
     "typescript-eslint": "^8.61.1"
   },
   "overrides": {
-    "esbuild": "0.28.1"
+    "esbuild": "0.28.1",
+    "tmp": "^0.2.7",
+    "uuid": "^11.1.1",
+    "yaml-language-server": {
+      "yaml": "2.8.3"
+    }
   }
 }
