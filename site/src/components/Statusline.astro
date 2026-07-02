@@ -1,0 +1,409 @@
+---
+// The STATUSLINE — the app's status bar as the page's one piece of fixed
+// chrome. Absorbs the Ticker (build-time real-PR feed, crossfading instead
+// of marqueeing) and the Elevator's organs (floor readout, scrollspy, keys
+// 1–6, jump list). Sits on --screen (the office's own hardware black) and is
+// NEVER subject to the dimmer.
+//
+// Feed frontmatter migrated verbatim from Ticker.astro: the most recently
+// merged PRs of this repo — authored by coding agents working in this very
+// office — with canned office-life beats interleaved; falls back to the
+// canned reel when the API is unreachable so the build never fails.
+const FALLBACK = [
+  { state: 'active', who: 'claude-code', what: 'editing src/reducer.rs' },
+  { state: 'waiting', who: 'codex', what: 'awaiting approval' },
+  { state: 'active', who: 'claude-code', what: 'walking to the pantry ☕' },
+  { state: 'active', who: 'codex', what: 'running cargo test' },
+  { state: 'idle', who: 'cursor', what: 'idle at desk' },
+  // a real line from the meeting room's chitchat corpus (tui/chitchat.rs)
+  { state: 'active', who: 'meeting room', what: '“it’s DNS” · “blame git”' },
+  { state: 'active', who: 'claude-code', what: 'git commit -m "feat: ..."' },
+];
+
+interface TickerItem {
+  state: string;
+  who: string;
+  what: string;
+}
+
+let items: TickerItem[] = FALLBACK;
+try {
+  const headers: Record<string, string> = { accept: 'application/vnd.github+json' };
+  if (process.env.GITHUB_TOKEN) headers.authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
+  const res = await fetch(
+    'https://api.github.com/repos/IvanWng97/pixtuoid/pulls?state=closed&base=main&sort=updated&direction=desc&per_page=12',
+    { headers, signal: AbortSignal.timeout(5000) }
+  );
+  if (res.ok) {
+    const prs = (await res.json()) as { number: number; title: string; merged_at: string | null }[];
+    const merged = prs.filter((p) => p.merged_at).slice(0, 6);
+    if (merged.length >= 4) {
+      const human = (title: string) => {
+        const t = title.replace(/^[a-z]+(\([^)]*\))?!?:\s*/, '');
+        if (t.length <= 64) return t;
+        const cut = t.slice(0, 63);
+        return cut.slice(0, Math.max(40, cut.lastIndexOf(' '))) + '…';
+      };
+      const real: TickerItem[] = merged.map((p, i) => ({
+        state: ['active', 'active', 'idle'][i % 3],
+        who: 'cc·pixtuoid',
+        what: `merged #${p.number} · ${human(p.title)}`,
+      }));
+      const flavor = FALLBACK.filter((f) => f.who !== 'cursor');
+      items = real.flatMap((r, i) => (i % 2 === 1 ? [flavor[(i >> 1) % flavor.length], r] : [r]));
+    }
+  }
+} catch {
+  // offline / timeout → FALLBACK already in place
+}
+
+const FLOORS = [
+  { n: 6, id: 'lobby', name: 'penthouse' },
+  { n: 5, id: 'showcase', name: 'studio' },
+  { n: 4, id: 'features', name: 'amenities' },
+  { n: 3, id: 'how', name: 'machine room' },
+  { n: 2, id: 'tools', name: 'tenants' },
+  { n: 1, id: 'install', name: 'front desk' },
+];
+---
+
+<div class="statusline" id="statusline">
+  <nav class="sl__nav" aria-label="Floors">
+    <button
+      class="sl__floor"
+      data-floor-toggle
+      aria-expanded="false"
+      aria-controls="sl-floors"
+      aria-label="Jump to a floor"
+    >
+      <span class="sl__digit" data-lift-digit>6F</span>
+      <span class="sl__name" data-lift-name>penthouse</span>
+      <span class="sl__caret" aria-hidden="true">▴</span>
+    </button>
+    <div id="sl-floors" class="sl__floors" hidden>
+      {
+        FLOORS.map((f) => (
+          <button
+            class="sl__floorbtn"
+            data-floor-btn={String(f.n)}
+            data-target={f.id}
+            data-name={f.name}
+            aria-current={f.n === 6 ? 'location' : undefined}
+          >
+            {f.n}F <span class="sl__floorname">{f.name}</span>
+          </button>
+        ))
+      }
+    </div>
+  </nav>
+  <div class="sl__feed" aria-hidden="true">
+    {
+      items.map((it, i) => (
+        <span class:list={['sl__item', { 'is-on': i === 0 }]}>
+          <span class:list={['sl__dot', it.state]} />
+          <b>{it.who}</b> · {it.what}
+        </span>
+      ))
+    }
+  </div>
+  <div class="sl__env" aria-hidden="true">
+    <span data-sl-lights>lights ··%</span>
+    <span class="sl__sep">·</span>
+    <span data-sl-clock></span>
+    <span class="sl__sep">·</span>
+    <span class="sl__onair" data-sl-onair>○ STILL</span>
+  </div>
+  <span class="sl__keys" aria-hidden="true">keys 1–6</span>
+</div>
+
+<style is:global>
+  /* Reserve room for the fixed bar (the footer must never hide under it). */
+  body {
+    padding-bottom: calc(2rem + env(safe-area-inset-bottom, 0px));
+  }
+</style>
+
+<style>
+  .statusline {
+    position: fixed;
+    inset: auto 0 0 0;
+    z-index: 50;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    height: calc(2rem + env(safe-area-inset-bottom, 0px));
+    padding: 0 0.9rem env(safe-area-inset-bottom, 0px);
+    background: var(--screen);
+    border-top: 1px solid #3a332a;
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    color: #d8cfc0;
+  }
+  .sl__nav {
+    position: relative;
+    flex: none;
+  }
+  .sl__floor {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    background: none;
+    border: 0;
+    padding: 0.2rem 0.3rem;
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+  }
+  .sl__digit {
+    font-family: var(--font-display);
+    font-size: 1rem;
+    color: var(--led);
+    text-shadow: 0 0 6px var(--led-glow);
+    letter-spacing: 0.05em;
+  }
+  .sl__name {
+    color: #d8cfc0;
+  }
+  .sl__caret {
+    color: #8f8574;
+    font-size: 0.7rem;
+  }
+  /* the class display beats [hidden]'s UA rule — restate it */
+  .sl__floors[hidden] {
+    display: none;
+  }
+  .sl__floors {
+    position: absolute;
+    bottom: calc(100% + 0.4rem);
+    left: 0;
+    display: flex;
+    flex-direction: column;
+    background: var(--screen);
+    border: 1px solid #3a332a;
+    padding: 0.3rem;
+    min-width: 12rem;
+  }
+  .sl__floorbtn {
+    display: flex;
+    gap: 0.6rem;
+    align-items: baseline;
+    background: none;
+    border: 0;
+    padding: 0.35rem 0.5rem;
+    font: inherit;
+    color: #d8cfc0;
+    cursor: pointer;
+    text-align: left;
+  }
+  .sl__floorbtn:hover,
+  .sl__floorbtn:focus-visible {
+    background: #1c1916;
+  }
+  .sl__floorbtn[aria-current='location'] {
+    color: var(--led);
+  }
+  .sl__floorname {
+    color: #8f8574;
+  }
+  .sl__feed {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+    height: 100%;
+  }
+  .sl__item {
+    position: absolute;
+    inset: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    opacity: 0;
+    transition: opacity 0.6s ease;
+  }
+  .sl__item.is-on {
+    opacity: 1;
+  }
+  .sl__item b {
+    color: #f0e8d8;
+    font-weight: 700;
+  }
+  .sl__dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex: none;
+  }
+  .sl__dot.active {
+    background: var(--led);
+  }
+  .sl__dot.waiting {
+    background: var(--amber);
+  }
+  .sl__dot.idle {
+    background: #6f675a;
+  }
+  .sl__env {
+    flex: none;
+    display: inline-flex;
+    gap: 0.55rem;
+    color: #8f8574;
+  }
+  .sl__sep {
+    color: #4a4438;
+  }
+  .sl__onair.is-live {
+    color: var(--led);
+    text-shadow: 0 0 6px var(--led-glow);
+  }
+  .sl__keys {
+    flex: none;
+    color: #8f8574;
+  }
+  @media (max-width: 760px) {
+    .sl__feed,
+    .sl__env {
+      display: none;
+    }
+    .statusline {
+      justify-content: space-between;
+    }
+  }
+</style>
+
+<script is:inline>
+  (function () {
+    const bar = document.getElementById('statusline');
+    if (!bar) return;
+    const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const digit = bar.querySelector('[data-lift-digit]');
+    const name = bar.querySelector('[data-lift-name]');
+    const toggle = bar.querySelector('[data-floor-toggle]');
+    const list = document.getElementById('sl-floors');
+    const btns = Array.prototype.slice.call(bar.querySelectorAll('[data-floor-btn]'));
+
+    // ── floor readout + jump (the elevator's organs) ──
+    function setActive(n) {
+      btns.forEach(function (b) {
+        const on = b.dataset.floorBtn === String(n);
+        if (on) {
+          b.setAttribute('aria-current', 'location');
+          if (digit) digit.textContent = n + 'F';
+          if (name) name.textContent = b.dataset.name || '';
+        } else {
+          b.removeAttribute('aria-current');
+        }
+      });
+    }
+    function go(btn) {
+      const sec = document.getElementById(btn.dataset.target);
+      if (!sec) return;
+      sec.scrollIntoView({ behavior: mq.matches ? 'auto' : 'smooth', block: 'start' });
+      sec.setAttribute('tabindex', '-1');
+      sec.focus({ preventScroll: true });
+      closeList();
+    }
+    function closeList() {
+      if (list) list.hidden = true;
+      if (toggle) toggle.setAttribute('aria-expanded', 'false');
+    }
+    if (toggle && list) {
+      toggle.addEventListener('click', function () {
+        const open = list.hidden;
+        list.hidden = !open;
+        toggle.setAttribute('aria-expanded', String(open));
+      });
+      document.addEventListener('click', function (e) {
+        if (!bar.contains(e.target)) closeList();
+      });
+      document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') closeList();
+      });
+    }
+    btns.forEach(function (b) {
+      b.addEventListener('click', function () {
+        go(b);
+      });
+    });
+    // the app's literal floor keys: bare digits 1–6 ride the elevator (skipped
+    // while typing in a field, holding a modifier, or during the boot intro)
+    document.addEventListener('keydown', function (e) {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (document.documentElement.dataset.booting === '1') return;
+      const t = e.target;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      const btn = btns.find(function (b) {
+        return b.dataset.floorBtn === e.key;
+      });
+      if (btn) go(btn);
+    });
+    // scrollspy — DEFERRED: this is:inline script renders BEFORE <main>, so a
+    // parse-time querySelectorAll sees zero [data-floor] sections (the
+    // documented parse-position trap).
+    function observeFloors() {
+      if (!('IntersectionObserver' in window)) return;
+      const io = new IntersectionObserver(
+        function (entries) {
+          entries.forEach(function (e) {
+            if (e.isIntersecting) setActive(e.target.dataset.floor);
+          });
+        },
+        { rootMargin: '-45% 0px -45% 0px', threshold: 0 }
+      );
+      document.querySelectorAll('[data-floor]').forEach(function (s) {
+        io.observe(s);
+      });
+    }
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', observeFloors, { once: true });
+    } else {
+      observeFloors();
+    }
+
+    // ── the feed: one item at a time, crossfading (reduced motion: static) ──
+    const feedItems = Array.prototype.slice.call(bar.querySelectorAll('.sl__item'));
+    if (feedItems.length > 1 && !mq.matches) {
+      let on = 0;
+      setInterval(function () {
+        feedItems[on].classList.remove('is-on');
+        on = (on + 1) % feedItems.length;
+        feedItems[on].classList.add('is-on');
+      }, 6000);
+    }
+
+    // ── env readouts ──
+    const lights = bar.querySelector('[data-sl-lights]');
+    const clock = bar.querySelector('[data-sl-clock]');
+    const onair = bar.querySelector('[data-sl-onair]');
+    function tickClock() {
+      if (!clock) return;
+      const d = new Date();
+      const hh = String(d.getHours()).padStart(2, '0');
+      const mm = String(d.getMinutes()).padStart(2, '0');
+      const night = d.getHours() < 7 || d.getHours() >= 19;
+      clock.textContent = hh + ':' + mm + ' ' + (night ? 'night' : 'day');
+    }
+    tickClock();
+    setInterval(tickClock, 60000);
+    if (lights) {
+      if (mq.matches) {
+        lights.textContent = 'lights 55%';
+      } else {
+        setInterval(function () {
+          const v = typeof window.__pixLights === 'number' ? window.__pixLights : 0.55;
+          lights.textContent = 'lights ' + Math.round((1 - v) * 100) + '%';
+        }, 1000);
+      }
+    }
+    if (onair) {
+      if (mq.matches) onair.textContent = '□ STILL FRAME';
+      document.addEventListener('pix:onair', function (e) {
+        const live = e.detail && e.detail.live;
+        onair.textContent = live ? '● LIVE' : '○ STILL';
+        onair.classList.toggle('is-live', !!live);
+      });
+    }
+  })();
+</script>

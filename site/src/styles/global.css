@@ -416,6 +416,27 @@ section {
   background: color-mix(in srgb, var(--screen) 82%, transparent);
   padding: 0.5rem 0.8rem;
 }
+/* The frameless-window beat (gap 2): a see-through frame over the live
+   office — the product's floating desktop window, drawn in one div. */
+.gap-frame {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -55%);
+  width: min(560px, 72vw);
+  height: min(42vh, 340px);
+  border: 1px solid rgba(216, 207, 192, 0.4);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+.gap-frame__bar {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: #d8cfc0;
+  background: color-mix(in srgb, var(--screen) 88%, transparent);
+  border-bottom: 1px solid rgba(216, 207, 192, 0.25);
+  padding: 0.35rem 0.6rem;
+}
 
 /* scanline overlay — very faint, only reads as CRT texture up close */
 .terminal__scan {

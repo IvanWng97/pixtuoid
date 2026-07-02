@@ -3,14 +3,13 @@ import Base from '../layouts/Base.astro';
 import Nav from '../components/Nav.astro';
 import OfficeBackdrop from '../components/OfficeBackdrop.astro';
 import Hero from '../components/Hero.astro';
-import Ticker from '../components/Ticker.astro';
 import Showcase from '../components/Showcase.astro';
 import Features from '../components/Features.astro';
 import HowItWorks from '../components/HowItWorks.astro';
 import SupportedTools from '../components/SupportedTools.astro';
 import Install from '../components/Install.astro';
-import Elevator from '../components/Elevator.astro';
 import Footer from '../components/Footer.astro';
+import Statusline from '../components/Statusline.astro';
 import { asset, REPO, CRATES } from '../consts';
 
 // Homepage structured data: a free cross-platform developer tool. Search
@@ -39,19 +38,44 @@ const softwareJsonLd = {
   <span id="top"></span>
   <OfficeBackdrop />
   <Nav />
-  <Elevator />
   <main id="main" tabindex="-1">
     <Hero />
-    <Ticker />
+    {/* observation gap 1 — the dim releases to 0; the office IS the content */}
+    <div class="office-gap">
+      <p class="gap-caption" aria-hidden="true">
+        — you're watching the real engine. same wasm, same reducer, same office.
+      </p>
+    </div>
     <Showcase />
-    <hr class="px-rule" />
     <Features />
-    <hr class="px-rule" />
+    {/* observation gap 2 — with the frameless-window beat */}
+    <div class="office-gap">
+      <div class="gap-frame" aria-hidden="true">
+        <div class="gap-frame__bar">pixtuoid — office · always on top</div>
+      </div>
+      <p class="gap-caption" aria-hidden="true">
+        — runs as a frameless desktop window, too. lighting follows your clock; it's <span
+          data-gap-daynight>night</span
+        > where you are.
+      </p>
+    </div>
     <HowItWorks />
-    <hr class="px-rule" />
     <SupportedTools />
-    <hr class="px-rule" />
     <Install />
+    {/* observation gap 3 — the closing hold */}
+    <div class="office-gap">
+      <p class="gap-caption" aria-hidden="true">— your office is waiting.</p>
+    </div>
   </main>
+  <script is:inline>
+    // the one dynamic word in gap 2 — same day/night boundary the office uses
+    (function () {
+      const el = document.querySelector('[data-gap-daynight]');
+      if (!el) return;
+      const h = new Date().getHours();
+      el.textContent = h < 7 || h >= 19 ? 'night' : 'day';
+    })();
+  </script>
   <Footer />
+  <Statusline />
 </Base>
