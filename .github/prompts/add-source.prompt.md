@@ -10,7 +10,7 @@ a single-file change — read `crates/pixtuoid-core/CLAUDE.md` ("multi-source
 decoding" / "Adding a new agent CLI") first, then:
 
 1. Implement the `Source` trait (hook-only CLI? skip it + the runtime wiring —
-   set `line_decoder: None` and ship a `hook.custom` decoder + install target
+   set `transcript: None` and ship a `hook.custom` decoder + install target
    instead). Per-source JSONL format knowledge lives in the
    source's **own decoder fn** (injected into `JsonlWatcher` via fn pointers), not
    a shared decoder.
