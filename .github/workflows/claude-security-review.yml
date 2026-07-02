@@ -74,4 +74,4 @@ jobs:
             For each finding, cite the exact file:line and explain the attack scenario.
             Post inline comments via mcp__github_inline_comment__create_inline_comment.
             Always post one summary comment via `gh pr comment`, even if no findings.
-          claude_args: '--max-turns 20 --max-budget-usd 5 --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Read,Glob,Grep"'
+          claude_args: '--max-turns 40 --max-budget-usd 8 --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Read,Glob,Grep"'

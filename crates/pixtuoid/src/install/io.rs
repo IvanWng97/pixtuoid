@@ -292,7 +292,14 @@ fn backup_once_resolved(target: &Path, suffix: &str) -> Result<Option<PathBuf>> 
     // an orphaned .tmp from a crash is overwritten by the next attempt.)
     let tmp = sibling(&bak, "tmp");
     std::fs::copy(target, &tmp)?;
-    File::open(&tmp)?.sync_all()?;
+    // Windows' FlushFileBuffers demands a WRITE handle — a read-only
+    // `File::open` + sync_all is Access-denied there (fsync on an O_RDONLY fd
+    // is Unix-only leniency). Best-effort: the rename below is the atomicity;
+    // the flush only narrows the power-loss window — don't fail the backup
+    // over it (a read-only-attribute source also copies to a read-only tmp).
+    if let Ok(f) = std::fs::OpenOptions::new().write(true).open(&tmp) {
+        let _ = f.sync_all();
+    }
     rename_with_retry(&tmp, &bak)?;
     Ok(Some(bak))
 }
