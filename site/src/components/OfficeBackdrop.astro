@@ -87,12 +87,15 @@ import { asset } from '../consts';
   }
   /* Content floats as GLASS BANDS over the running building: every section
      below the hero gets a translucent sheet (its inner cards keep their own
-     styles). The gaps between bands — and the hero — show the office sharp. */
+     styles). The gaps between bands — and the hero — show the office sharp.
+     Deliberately NO backdrop-filter: blurring viewport-wide bands over a
+     canvas that repaints at 30fps forces the compositor to re-blur huge
+     regions every frame + every scroll tick — visible flicker/shimmer on
+     Chromium AND Safari. A slightly deeper flat glass reads the same on
+     these dark tones without the per-frame blur cost. */
   main > section:not(.hero),
   .ticker {
-    background: color-mix(in srgb, var(--bg) 86%, transparent);
-    backdrop-filter: blur(7px);
-    -webkit-backdrop-filter: blur(7px);
+    background: color-mix(in srgb, var(--bg) 91%, transparent);
   }
   main > hr.px-rule {
     background-color: transparent;
