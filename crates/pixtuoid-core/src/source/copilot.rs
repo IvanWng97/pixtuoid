@@ -108,6 +108,19 @@ fn str_at<'a>(v: &'a Value, key: &str) -> Option<&'a str> {
     v.get(key).and_then(|x| x.as_str())
 }
 
+/// First-sight cwd extractor (the walker's head scan, dispatched via the
+/// registry row — invariant #3): Copilot's `session.start` nests the cwd at
+/// `data.context.cwd`. Without it, a copilot transcript gated at first sight
+/// then tail-revived would register an empty-cwd root (→ the short unknown-cwd
+/// reap) and the root's label would degrade from `cp·<dir>` to `cp#N`.
+pub(crate) fn extract_copilot_cwd(v: &Value) -> Option<PathBuf> {
+    v.get("data")?
+        .get("context")?
+        .get("cwd")?
+        .as_str()
+        .map(PathBuf::from)
+}
+
 /// Decode one `events.jsonl` line into zero or more `AgentEvent`s. Unknown,
 /// ephemeral, or malformed shapes return `vec![]` (the watcher logs + continues;
 /// this never panics — real files carry embedded-newline / U+2028 corruption,

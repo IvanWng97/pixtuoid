@@ -7,7 +7,8 @@ use tokio::io::{AsyncReadExt, AsyncSeekExt, SeekFrom};
 use tokio::sync::Mutex;
 use tracing::{debug, warn};
 
-use crate::source::decoder::SUBAGENTS_DIR;
+use crate::source::decoder::{CwdExtractor, SUBAGENTS_DIR};
+use crate::source::registry::cwd_extractor_for;
 use crate::source::{AgentEvent, TaggedSender, Transport};
 use crate::AgentId;
 
@@ -249,7 +250,7 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
         // #246) re-registers here like an absent one.
         let registered = seen.lock().await.get(path) == Some(&true);
         if !registered && !ended_in_skip {
-            let head_cwd = read_head_cwd(path, MAX_PENDING_BYTES).await;
+            let head_cwd = read_head_cwd(path, MAX_PENDING_BYTES, cwd_extractor_for(source)).await;
             emit_first_sight(path, source, decoders, seen, tx, head_cwd).await;
         }
         // #222: the skipped span may bury an IN-FLIGHT Agent/Task dispatch —
@@ -317,9 +318,10 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
     // claim (`false`, #246) is about to RE-register below — it needs the head
     // cwd exactly like a never-registered path (the motivating Codex child's
     // turn-N+1 tail has no cwd line).
-    let mut first_sight_cwd = extract_cwd(new_bytes);
+    let extract = cwd_extractor_for(source);
+    let mut first_sight_cwd = extract_cwd(new_bytes, extract);
     if first_sight_cwd.is_none() && seen.lock().await.get(path) != Some(&true) {
-        first_sight_cwd = read_head_cwd(path, MAX_PENDING_BYTES).await;
+        first_sight_cwd = read_head_cwd(path, MAX_PENDING_BYTES, extract).await;
     }
     emit_first_sight(path, source, decoders, seen, tx, first_sight_cwd).await;
 
@@ -471,7 +473,7 @@ async fn emit_first_sight(
 /// file — the head is bounded by `MAX_PENDING_BYTES`. Returns `None` when the
 /// file can't be opened/read or has no `cwd` in its head (an empty-cwd
 /// SessionStart then falls back to the project-dir label).
-async fn read_head_cwd(path: &Path, limit: u64) -> Option<PathBuf> {
+async fn read_head_cwd(path: &Path, limit: u64, extract: CwdExtractor) -> Option<PathBuf> {
     // Bound the allocation to the SMALLER of `limit` and the real file size
     // (mirrors `read_tail`): a tiny SessionStart line must not zero a full
     // `MAX_PENDING_BYTES` (1 MiB) buffer on every oversized-first-sight read.
@@ -480,7 +482,7 @@ async fn read_head_cwd(path: &Path, limit: u64) -> Option<PathBuf> {
     let mut head = vec![0u8; limit.min(file_len) as usize];
     let n = file.read(&mut head).await.ok()?;
     head.truncate(n);
-    extract_cwd(&head)
+    extract_cwd(&head, extract)
 }
 
 /// Read at most `bytes` from the END of a file (clamped to file size).
@@ -640,7 +642,15 @@ pub(super) fn detect_parent_id(path: &Path, source: &str) -> Option<AgentId> {
     None
 }
 
-pub(super) fn extract_cwd(bytes: &[u8]) -> Option<PathBuf> {
+/// Scan a byte span line-by-line and return the first cwd the SCANNED
+/// source's own extractor finds. This fn owns only the shared line iteration
+/// (skip empty / non-UTF-8 / non-JSON lines, never short-circuit on them);
+/// the per-source shape knowledge lives in the source's registry row
+/// (invariant #3 — the old accreting if-chain here tried every source's shape
+/// against every transcript, so a foreign-shaped line, e.g. a codex-style
+/// `payload.cwd` inside a CC transcript, could label a session with a
+/// foreign, identity-bearing cwd).
+pub(super) fn extract_cwd(bytes: &[u8], extract: CwdExtractor) -> Option<PathBuf> {
     for line in bytes.split(|b| *b == b'\n') {
         if line.is_empty() {
             continue;
@@ -651,27 +661,8 @@ pub(super) fn extract_cwd(bytes: &[u8]) -> Option<PathBuf> {
         let Ok(v) = serde_json::from_str::<serde_json::Value>(s) else {
             continue;
         };
-        if let Some(cwd) = v.get("cwd").and_then(|c| c.as_str()) {
-            return Some(PathBuf::from(cwd));
-        }
-        if let Some(cwd) = v
-            .get("payload")
-            .and_then(|p| p.get("cwd"))
-            .and_then(|c| c.as_str())
-        {
-            return Some(PathBuf::from(cwd));
-        }
-        // Copilot CLI nests it: session.start `data.context.cwd`. Without this
-        // arm a copilot transcript gated-then-tail-revived registers an
-        // empty-cwd root (→ the short unknown-cwd reap); the head-read also
-        // gives the root its real `cp·<dir>` label instead of `cp#N`.
-        if let Some(cwd) = v
-            .get("data")
-            .and_then(|d| d.get("context"))
-            .and_then(|c| c.get("cwd"))
-            .and_then(|c| c.as_str())
-        {
-            return Some(PathBuf::from(cwd));
+        if let Some(cwd) = extract(&v) {
+            return Some(cwd);
         }
     }
     None

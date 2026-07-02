@@ -20,7 +20,7 @@
 use anyhow::Result;
 use serde_json::Value;
 
-use crate::source::decoder::LineDecoder;
+use crate::source::decoder::{extract_top_level_cwd, CwdExtractor, LineDecoder};
 use crate::source::{
     antigravity, claude_code, codewhale, codex, copilot, cursor, openclaw, opencode, reasonix,
     AgentEvent,
@@ -164,6 +164,16 @@ pub enum SourceKind {
         /// transcript): the fixture harness then accepts a transcript-less,
         /// hook-payloads-only scenario for it — and ONLY for it.
         line_decoder: Option<LineDecoder>,
+        /// First-sight cwd extractor for the walker's transcript head scan.
+        /// `Some` iff the source is transcript-bearing (pinned by
+        /// `cwd_extractor_present_iff_transcript_bearing` — a hook-only agent
+        /// has no transcript to scan). The fn lives in the source's own module
+        /// (invariant #3: per-source transcript-format knowledge stays
+        /// per-source); the shared `decoder::extract_top_level_cwd` covers
+        /// the top-level `cwd` shape (CC; Antigravity, whose lines carry no
+        /// cwd at all). The walker dispatches by the SCANNED source, so one
+        /// source's shape is never tried against another's transcript.
+        cwd_extractor: Option<CwdExtractor>,
         hook: HookDecoding,
         caps: SourceCaps,
     },
@@ -186,6 +196,15 @@ impl SourceDescriptor {
     pub fn line_decoder(&self) -> Option<LineDecoder> {
         match &self.kind {
             SourceKind::Agent { line_decoder, .. } => *line_decoder,
+            SourceKind::Daemon { .. } => None,
+        }
+    }
+
+    /// The first-sight cwd extractor (`None` for a hook-only agent AND every
+    /// daemon — neither has a transcript for the walker to head-scan).
+    pub fn cwd_extractor(&self) -> Option<CwdExtractor> {
+        match &self.kind {
+            SourceKind::Agent { cwd_extractor, .. } => *cwd_extractor,
             SourceKind::Daemon { .. } => None,
         }
     }
@@ -235,6 +254,20 @@ pub fn descriptor_for(name: &str) -> Option<&'static SourceDescriptor> {
     REGISTRY.iter().find(|d| d.name == name)
 }
 
+/// The first-sight cwd extractor for the source being scanned. Registry-driven
+/// (invariant #3): the JSONL walker calls this with the source it is scanning,
+/// so one source's head shape is never tried against another source's
+/// transcript (the pre-registry shared if-chain gave a foreign-shaped line —
+/// e.g. a codex-style `payload.cwd` inside a CC transcript — a cross-source
+/// false-positive window on the identity-bearing cwd). Falls back to the
+/// shared top-level `cwd` shape for a source with no row or no extractor
+/// (test-harness source names).
+pub fn cwd_extractor_for(source: &str) -> CwdExtractor {
+    descriptor_for(source)
+        .and_then(|d| d.cwd_extractor())
+        .unwrap_or(extract_top_level_cwd)
+}
+
 /// A daemon source's wire decoder: its envelope → presence deltas. The pointer
 /// type the registry hands the `HookRouter` demux so each daemon routes to its
 /// OWN decoder (a 2nd daemon needs no `handle_conn` edit).
@@ -265,6 +298,8 @@ const CLAUDE_CODE: SourceDescriptor = SourceDescriptor {
     version_probe: Some(&["claude", "--version"]),
     kind: SourceKind::Agent {
         line_decoder: Some(claude_code::decode_cc_line),
+        // CC writes a top-level `cwd` on transcript lines — the shared shape.
+        cwd_extractor: Some(extract_top_level_cwd),
         hook: HookDecoding {
             // CC keys on the session UUID (== the transcript filename stem
             // `cc_id_from_path` derives), NOT the cwd-derived transcript path, so a
@@ -294,6 +329,8 @@ const CODEX: SourceDescriptor = SourceDescriptor {
     version_probe: Some(&["codex", "--version"]),
     kind: SourceKind::Agent {
         line_decoder: Some(codex::decode_codex_line),
+        // Rollouts carry cwd ONLY on the head session_meta line, under `payload`.
+        cwd_extractor: Some(codex::extract_codex_cwd),
         hook: HookDecoding {
             id_key: IdKey::SessionId,
             // SubagentStart/Stop change the event's SUBJECT (child AgentId ≠
@@ -315,6 +352,10 @@ const ANTIGRAVITY: SourceDescriptor = SourceDescriptor {
     version_probe: Some(&["agy", "--version"]),
     kind: SourceKind::Agent {
         line_decoder: Some(antigravity::decode_ag_line),
+        // AG step lines carry no cwd field at all — the shared top-level shape
+        // never matches and the label falls back to the bare `ag` prefix,
+        // exactly the pre-dispatch behavior.
+        cwd_extractor: Some(extract_top_level_cwd),
         hook: HookDecoding {
             id_key: IdKey::TranscriptPathThenSessionId,
             custom: None,
@@ -339,6 +380,7 @@ const REASONIX: SourceDescriptor = SourceDescriptor {
     version_probe: Some(&["reasonix", "--version"]),
     kind: SourceKind::Agent {
         line_decoder: None,
+        cwd_extractor: None, // hook-only: no transcript for the walker to scan
         hook: HookDecoding {
             id_key: IdKey::TranscriptPathThenSessionId, // inert: custom claims all
             custom: Some(reasonix::decode_rx_hook_custom),
@@ -374,6 +416,7 @@ const CODEWHALE: SourceDescriptor = SourceDescriptor {
     version_probe: Some(&["codewhale", "--version"]),
     kind: SourceKind::Agent {
         line_decoder: None,
+        cwd_extractor: None, // hook-only: no transcript for the walker to scan
         hook: HookDecoding {
             id_key: IdKey::TranscriptPathThenSessionId, // inert: custom claims all
             custom: Some(codewhale::decode_cw_hook_custom),
@@ -405,6 +448,7 @@ const OPENCODE: SourceDescriptor = SourceDescriptor {
     version_probe: Some(&["opencode", "--version"]),
     kind: SourceKind::Agent {
         line_decoder: None,
+        cwd_extractor: None, // hook-only: no transcript for the walker to scan
         hook: HookDecoding {
             id_key: IdKey::TranscriptPathThenSessionId, // inert: custom claims all
             custom: Some(opencode::decode_oc_hook_custom),
@@ -463,6 +507,8 @@ const COPILOT: SourceDescriptor = SourceDescriptor {
     version_probe: Some(&["copilot", "--version"]),
     kind: SourceKind::Agent {
         line_decoder: Some(copilot::decode_copilot_line),
+        // `session.start` nests the cwd at `data.context.cwd`.
+        cwd_extractor: Some(copilot::extract_copilot_cwd),
         hook: HookDecoding {
             id_key: IdKey::TranscriptPathThenSessionId, // inert: no hook transport for this source
             custom: None,
@@ -498,6 +544,7 @@ const CURSOR: SourceDescriptor = SourceDescriptor {
     version_probe: Some(&["cursor-agent", "--version"]),
     kind: SourceKind::Agent {
         line_decoder: None,
+        cwd_extractor: None, // hook-only: no transcript for the walker to scan
         hook: HookDecoding {
             id_key: IdKey::TranscriptPathThenSessionId, // inert: custom claims all
             custom: Some(cursor::decode_cursor_hook_custom),
@@ -597,6 +644,64 @@ mod tests {
     fn descriptor_for_resolves_known_and_rejects_unknown() {
         assert_eq!(descriptor_for("codex").unwrap().label_prefix, "cx");
         assert!(descriptor_for("not-a-source").is_none());
+    }
+
+    // The walker's head scan needs a cwd extractor for EXACTLY the
+    // transcript-bearing sources: a row with a line decoder but no extractor
+    // would silently fall back to the top-level shape (wrong for
+    // codex/copilot), and an extractor on a hook-only row is dead data (there
+    // is no transcript to scan).
+    #[test]
+    fn cwd_extractor_present_iff_transcript_bearing() {
+        for d in REGISTRY {
+            assert_eq!(
+                d.cwd_extractor().is_some(),
+                d.line_decoder().is_some(),
+                "source {:?}: cwd_extractor must pair with line_decoder",
+                d.name
+            );
+        }
+    }
+
+    // Dispatch resolution: each source's extractor reads ITS OWN shape and
+    // ignores the others' — the walker never tries a foreign shape against a
+    // transcript. Unregistered (harness) sources fall back to the shared
+    // top-level shape.
+    #[test]
+    fn cwd_extractor_for_dispatches_per_source_shapes() {
+        use std::path::PathBuf;
+        let top = serde_json::json!({ "cwd": "/repo/top" });
+        let codex_shaped =
+            serde_json::json!({ "type": "session_meta", "payload": { "cwd": "/repo/cx" } });
+        let copilot_shaped = serde_json::json!({ "type": "session.start", "data": { "context": { "cwd": "/repo/cp" } } });
+
+        let cc = cwd_extractor_for(claude_code::SOURCE_NAME);
+        assert_eq!(cc(&top), Some(PathBuf::from("/repo/top")));
+        assert_eq!(cc(&codex_shaped), None, "CC must ignore the codex shape");
+        assert_eq!(
+            cc(&copilot_shaped),
+            None,
+            "CC must ignore the copilot shape"
+        );
+
+        let cx = cwd_extractor_for(codex::SOURCE_NAME);
+        assert_eq!(cx(&codex_shaped), Some(PathBuf::from("/repo/cx")));
+        assert_eq!(cx(&top), None, "codex must ignore a top-level cwd");
+
+        let cp = cwd_extractor_for(copilot::SOURCE_NAME);
+        assert_eq!(cp(&copilot_shaped), Some(PathBuf::from("/repo/cp")));
+        assert_eq!(
+            cp(&codex_shaped),
+            None,
+            "copilot must ignore the codex shape"
+        );
+
+        let unknown = cwd_extractor_for("not-a-source");
+        assert_eq!(
+            unknown(&top),
+            Some(PathBuf::from("/repo/top")),
+            "unregistered sources keep the shared top-level default"
+        );
     }
 
     // The short-idle policy must fire for Codex ONLY: it is the one source

@@ -8,6 +8,7 @@ use super::walk::{
     TASK_SCAN_BYTES,
 };
 use super::*;
+use crate::source::registry::cwd_extractor_for;
 use crate::source::{AgentEvent, Transport};
 use crate::AgentId;
 
@@ -128,13 +129,45 @@ fn detect_parent_id_handles_backslash_paths() {
 }
 
 #[test]
-fn extract_cwd_reads_top_level_and_nested_payload() {
-    // CC/AG shape: top-level cwd.
+fn extract_cwd_dispatches_the_scanned_sources_shape() {
+    // CC/AG shape: top-level cwd (also the unregistered-source default).
     let top = br#"{"cwd":"/repo/a"}"#;
-    assert_eq!(extract_cwd(top), Some(PathBuf::from("/repo/a")));
-    // Codex shape: cwd nested under payload (session_meta).
+    assert_eq!(
+        extract_cwd(top, cwd_extractor_for("claude-code")),
+        Some(PathBuf::from("/repo/a"))
+    );
+    assert_eq!(
+        extract_cwd(top, cwd_extractor_for("test")),
+        Some(PathBuf::from("/repo/a")),
+        "an unregistered harness source keeps the shared top-level default"
+    );
+    // Codex shape: cwd nested under payload (session_meta) — extracted only
+    // when codex is the scanned source.
     let nested = br#"{"type":"session_meta","payload":{"cwd":"/repo/b","id":"u"}}"#;
-    assert_eq!(extract_cwd(nested), Some(PathBuf::from("/repo/b")));
+    assert_eq!(
+        extract_cwd(nested, cwd_extractor_for("codex")),
+        Some(PathBuf::from("/repo/b"))
+    );
+    // The scan still skips non-JSON / cwd-less prefix lines (never
+    // short-circuits on them) before the shape matches.
+    let mixed = b"not-json\n{\"type\":\"noise\"}\n{\"cwd\":\"/repo/c\"}\n";
+    assert_eq!(
+        extract_cwd(mixed, cwd_extractor_for("claude-code")),
+        Some(PathBuf::from("/repo/c"))
+    );
+}
+
+#[test]
+fn cc_head_scan_ignores_codex_shaped_payload_cwd() {
+    // Design-debt #5: the head scan must dispatch by the SCANNED source, not
+    // try every source's shape — a codex-shaped `payload.cwd` inside a CC
+    // transcript must NOT label the CC session with the foreign cwd.
+    let codex_shaped = br#"{"type":"session_meta","payload":{"cwd":"/foreign/repo","id":"u"}}"#;
+    assert_eq!(
+        extract_cwd(codex_shaped, cwd_extractor_for("claude-code")),
+        None,
+        "a foreign source's cwd shape must not extract for a CC transcript"
+    );
 }
 
 fn t_decode(_t: &str, _s: &str, _v: serde_json::Value) -> Result<Vec<AgentEvent>> {
@@ -1031,14 +1064,17 @@ async fn known_oversized_tail_emits_session_end_if_the_skipped_span_ended() {
 
 #[tokio::test]
 async fn gated_revive_falls_back_to_head_cwd_when_tail_has_none() {
-    // G4: Codex rollouts carry cwd ONLY on the head session_meta line. A
-    // file gated at first sight then revived by a small cwd-less append
-    // used to register with an EMPTY cwd (downstream: unknown cwd → the
-    // short reap), because the revive read cwd only from the appended
-    // tail. The revive must fall back to a bounded head read.
+    // G4: a source can carry cwd ONLY on its head line (Codex's session_meta
+    // is the motivating case). A file gated at first sight then revived by a
+    // small cwd-less append used to register with an EMPTY cwd (downstream:
+    // unknown cwd → the short reap), because the revive read cwd only from
+    // the appended tail. The revive must fall back to a bounded head read.
+    // (This harness runs under the unregistered "test" source → the shared
+    // top-level shape; the codex payload-nested dispatch itself is pinned by
+    // `extract_cwd_dispatches_the_scanned_sources_shape` + the registry tests.)
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("rollout-gated.jsonl");
-    let head = "{\"type\":\"session_meta\",\"payload\":{\"cwd\":\"/repo/head\",\"id\":\"u\"}}\n";
+    let head = "{\"type\":\"meta\",\"cwd\":\"/repo/head\",\"id\":\"u\"}\n";
     let (cursors, seen) = gated_fixture(&path, head).await;
 
     let mut full = String::from(head);

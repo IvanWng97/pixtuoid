@@ -119,6 +119,13 @@ pub(crate) fn decode_codex_hook_custom(v: &Value) -> Result<Option<Vec<AgentEven
     }
 }
 
+/// First-sight cwd extractor (the walker's head scan, dispatched via the
+/// registry row — invariant #3): Codex rollouts carry the cwd ONLY on the head
+/// `session_meta` line, nested under `payload`.
+pub(crate) fn extract_codex_cwd(v: &Value) -> Option<PathBuf> {
+    v.get("payload")?.get("cwd")?.as_str().map(PathBuf::from)
+}
+
 /// Decode one transcript line. `tool_use_id` is always `None` so these events
 /// are never suppressed by the hook-wins dedup (which keys on `tool_use_id`).
 pub fn decode_codex_line(transcript_path: &str, source: &str, v: Value) -> Result<Vec<AgentEvent>> {

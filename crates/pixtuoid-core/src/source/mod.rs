@@ -116,16 +116,19 @@ impl ToolDetail {
     }
 }
 
-/// Test-ergonomic conversion by tool NAME. Both subagent-dispatch names map to
-/// `Task` — `"Agent"` (current CC) and legacy `"Task"` — so a test written as
-/// `Some("Agent".into())` exercises the real `is_task()` path (suppression /
-/// Delegating / b1) instead of silently falling to `Generic`. Production code
-/// calls `decoder::make_tool_detail`, which additionally detects a dispatch
-/// SEMANTICALLY via the `subagent_type` input field (the rename-resilient path);
-/// this name-only helper can't see the input, so it keys on the known names.
+/// Test-ergonomic conversion by tool NAME. `"Agent"` (current CC's dispatch
+/// tool) maps to `Task`, so a test written as `Some("Agent".into())` exercises
+/// the real `is_task()` path (suppression / Delegating / b1) instead of
+/// silently falling to `Generic`. The legacy `"Task"` name was dropped here in
+/// 0.12.0, in lockstep with `decoder::make_tool_detail`'s known-name set — a
+/// test-only alias for a name production no longer recognizes would give false
+/// confidence. Production code calls `make_tool_detail`, which additionally
+/// detects a dispatch SEMANTICALLY via the `subagent_type` input field (the
+/// rename-resilient path, THE mechanism); this name-only helper can't see the
+/// input, so it keys on the known name.
 impl From<&str> for ToolDetail {
     fn from(s: &str) -> Self {
-        if s == "Task" || s == "Agent" {
+        if s == "Agent" {
             ToolDetail::Task
         } else {
             ToolDetail::Generic {

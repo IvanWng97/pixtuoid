@@ -3,7 +3,7 @@
 //! socket is shared; Reasonix's non-CC-shaped envelope is dispatched out to
 //! its own module before the CC/Codex field requirements apply.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail, Result};
 use serde_json::Value;
@@ -16,6 +16,25 @@ use crate::AgentId;
 /// `native`-gated `jsonl` module, so the registry's `SourceDescriptor` can name
 /// it in a `--no-default-features` (wasm) build; `jsonl` re-exports it.
 pub type LineDecoder = fn(&str, &str, Value) -> Result<Vec<AgentEvent>>;
+
+/// The first-sight cwd-extractor fn pointer: ONE parsed transcript line → the
+/// working dir it carries, if any. Uniform signature like [`LineDecoder`], and
+/// defined here for the same wasm-build reason. Each transcript-bearing
+/// source's registry row names its own extractor (per-source transcript-format
+/// knowledge lives in the source's module — invariant #3); the JSONL walker's
+/// head scan dispatches by the source being scanned, so one source's shape is
+/// never tried against another source's transcript (a foreign-shaped line —
+/// e.g. a codex-style `payload.cwd` inside a CC transcript — must not label
+/// the session with a foreign, identity-bearing cwd).
+pub type CwdExtractor = fn(&Value) -> Option<PathBuf>;
+
+/// The shared/default [`CwdExtractor`]: a TOP-LEVEL `cwd` string. CC writes it
+/// on every transcript line (and Antigravity's row points here too — its steps
+/// carry no cwd field, so the shape simply never matches and the label falls
+/// back); also the fallback for sources with no registry row (test harnesses).
+pub(crate) fn extract_top_level_cwd(v: &Value) -> Option<PathBuf> {
+    v.get("cwd").and_then(Value::as_str).map(PathBuf::from)
+}
 
 /// The directory a CC subagent transcript sits under: `<parent>/subagents/
 /// agent-*.jsonl`. Matched as a whole path COMPONENT (never a substring) so a
@@ -338,14 +357,20 @@ pub fn decode_hook_payload(v: Value) -> Result<Vec<AgentEvent>> {
 
 pub(crate) fn make_tool_detail(source: &str, tool_name: &str, input: Option<&Value>) -> ToolDetail {
     // Detect the subagent-dispatch tool SEMANTICALLY, by the PRESENCE of a
-    // `subagent_type` input field. The dispatch tool was renamed `Task` →
-    // `Agent` (CC v2.1.63, undocumented) and upstream can rename it again, but
-    // the field is stable. Key on presence (not value): a renamed tool emitting
-    // `subagent_type: null` is still caught AND surfaces the drift breadcrumb —
-    // the one drift we most need to see. Known names are the fallback for the
-    // rare input-less call. The reducer keys subagent-leak suppression
-    // (`active_tasks`) and b1 Task-drain completion on `is_task()`, so a missed
-    // dispatch silently disables both for real subagents.
+    // `subagent_type` input field — this is THE mechanism. The dispatch tool
+    // was renamed `Task` → `Agent` (CC v2.1.63, undocumented) and upstream can
+    // rename it again, but the field is stable. Key on presence (not value): a
+    // renamed tool emitting `subagent_type: null` is still caught AND surfaces
+    // the drift breadcrumb — the one drift we most need to see. The known name
+    // (`Agent`, current CC) is the fallback for the rare input-less call; the
+    // legacy `Task` name arm was DROPPED in 0.12.0 (pre-v2.1.63 CC is too old
+    // to keep supporting — its dispatches carry `subagent_type` and stay
+    // caught semantically; only a name-only, input-less `Task` call loses
+    // coverage, and one WITH `subagent_type` now correctly fires the
+    // `unknown_dispatch` breadcrumb: an unrecognized dispatch name IS
+    // drift-worthy). The reducer keys subagent-leak suppression
+    // (`active_tasks`) and b1 Task-drain completion on `is_task()`, so a
+    // missed dispatch silently disables both for real subagents.
     let has_subagent_type = input.and_then(|v| v.get("subagent_type")).is_some();
     // DELIBERATELY NOT a known name: `Workflow` (CC's fleet dispatcher). Its
     // children fire no per-agent `Agent` tool_use, so mapping Workflow → Task
@@ -356,7 +381,7 @@ pub(crate) fn make_tool_detail(source: &str, tool_name: &str, input: Option<&Val
     // worse desk starvation than the gap it would "fix". Fleet lifecycle is
     // owned by the SubagentStart/Stop hooks instead
     // (`claude_code::decode_cc_hook_custom`, #241).
-    let known_name = tool_name == "Task" || tool_name == "Agent";
+    let known_name = tool_name == "Agent";
     if has_subagent_type || known_name {
         // Drift breadcrumb: a dispatch under a name we don't recognise means
         // upstream renamed the tool again. Semantic detection keeps us working;
@@ -444,7 +469,7 @@ mod tests {
     // "Task" — TaskCreate/TaskUpdate/TaskList/TaskStop/TaskOutput (1757
     // occurrences across a local 822 MB / 2379-session corpus) — but NONE carry
     // a `subagent_type`, so they are ordinary tools, NOT the subagent dispatch.
-    // make_tool_detail must key the dispatch on the EXACT name (`Task`/`Agent`)
+    // make_tool_detail must key the dispatch on the EXACT name (`Agent`)
     // or the `subagent_type` field, never a `starts_with("Task")` prefix — a
     // prefix match would mis-class every TaskUpdate as a delegation and wrongly
     // trip `active_tasks` subagent-leak suppression. The existing negative test
@@ -464,9 +489,17 @@ mod tests {
                 "{name} (no subagent_type) must be a Generic tool, not the subagent dispatch"
             );
         }
-        // The exact dispatch names + the semantic signal still resolve to Task.
-        assert!(make_tool_detail("test", "Task", None).is_task());
+        // The current dispatch name + the semantic signal resolve to Task; the
+        // legacy pre-v2.1.63 `Task` NAME arm was dropped in 0.12.0 — a bare,
+        // input-less `Task` is now an ordinary Generic tool (an old CC's real
+        // dispatch still carries `subagent_type`, so it rides the semantic
+        // detection instead).
+        assert!(!make_tool_detail("test", "Task", None).is_task());
         assert!(make_tool_detail("test", "Agent", None).is_task());
+        assert!(
+            make_tool_detail("test", "Task", Some(&json!({"subagent_type": "x"}))).is_task(),
+            "a legacy-named dispatch is still caught by the subagent_type field"
+        );
         assert!(
             make_tool_detail(
                 "test",
