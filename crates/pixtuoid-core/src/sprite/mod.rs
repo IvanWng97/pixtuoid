@@ -2,7 +2,6 @@ use std::collections::HashMap;
 
 use crate::grid::Grid;
 
-pub mod animator;
 pub mod blit;
 pub mod format;
 

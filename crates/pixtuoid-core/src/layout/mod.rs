@@ -214,20 +214,16 @@ pub const ELEVATOR_W: u16 = 16;
 pub const ELEVATOR_H: u16 = 14;
 /// NOT a cap anymore — production layouts fill the buffer's physical space
 /// (`compute_with_seed(.., max_desks: None, ..)`), so desk count scales with
-/// the canvas. This is the historical 16-desk ceiling kept as a NAMED DEFAULT
-/// for deterministic tests/snapshots (`Some(TEST_DEFAULT_DESKS)`) — a stable
-/// "one classic office worth of desks" reference, not a limit the layout
-/// enforces.
-pub const TEST_DEFAULT_DESKS: usize = 16;
-/// Semver alias for the pre-rename name — `TEST_DEFAULT_DESKS` was published
-/// as `MAX_VISIBLE_DESKS` through 0.11.x, and removing a `pub` const is a
-/// breaking change the CI semver gate (rightly) rejects without a version
-/// bump. Drop this alias at the next minor bump.
-#[deprecated(
-    since = "0.11.2",
-    note = "renamed to TEST_DEFAULT_DESKS — it is a test default, not a cap"
-)]
-pub const MAX_VISIBLE_DESKS: usize = TEST_DEFAULT_DESKS;
+/// the canvas. This is the historical 16-desk ceiling kept as a stable "one
+/// classic office worth of desks" reference, not a limit the layout enforces.
+/// It is a load-bearing PRODUCTION input too (the `snapshot` example that
+/// renders the docs/CI media baselines pins its scene to it), hence the
+/// production name; `TEST_DEFAULT_DESKS` below is the test-facing alias.
+pub const CLASSIC_OFFICE_DESKS: usize = 16;
+/// Test-facing alias for [`CLASSIC_OFFICE_DESKS`] — the NAMED DEFAULT
+/// deterministic tests/snapshots pass as `Some(TEST_DEFAULT_DESKS)`. Same
+/// value by definition; production consumers use the production name.
+pub const TEST_DEFAULT_DESKS: usize = CLASSIC_OFFICE_DESKS;
 pub const DESK_GAP_X: u16 = 11;
 pub const DESK_GAP_Y: u16 = 14;
 pub const MIN_TOP_MARGIN: u16 = 20;
