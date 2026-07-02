@@ -15,9 +15,11 @@
 //! `tokio::sync::mpsc::UnboundedSender` (send is sync-callable from a plain
 //! thread). The thread exits when (a) `ExitWatch::Drop` sets `closed` and
 //! wakes it, (b) an exit send fails (receiver gone — the watcher task
-//! ended), or (c) the backend dies (kevent/poll error, pidfd ENOSYS). The
-//! wait primitive's fds live in the shared `Arc` state, so the waker side
-//! can never touch a recycled fd after the thread closes up.
+//! ended), or (c) the backend dies (kevent/poll error, pidfd ENOSYS); every
+//! exit path marks `closed` on the way out so `watch()` rejects instead of
+//! queueing onto a queue nothing will ever drain. The wait primitive's fds
+//! live in the shared `Arc` state, so the waker side can never touch a
+//! recycled fd after the thread closes up.
 //!
 //! Contract (workspace invariant: log + continue, never panic): every
 //! failure path — backend init, registration, thread death — degrades to
@@ -91,7 +93,19 @@ impl ExitWatch {
         let thread_shared = Arc::clone(&shared);
         let spawned = std::thread::Builder::new()
             .name("pixtuoid-exit-watch".into())
-            .spawn(move || imp::run(&thread_shared, &exit_tx));
+            .spawn(move || {
+                imp::run(&thread_shared, &exit_tx);
+                // EVERY run() exit path (kevent/poll error, pidfd ENOSYS,
+                // receiver gone, Drop) lands here: mark the handle dead so
+                // `watch()` rejects instead of queueing — long-lived
+                // producers (HookPidWatch::note, PresenceExitWatch::watch)
+                // push per hook event for the process lifetime, and with no
+                // drainer `pending` would grow unboundedly. Clear what the
+                // final drain left behind; a push racing the store can leave
+                // at most one stray batch (bounded, not growth).
+                thread_shared.closed.store(true, Ordering::SeqCst);
+                lock_pending(&thread_shared).clear();
+            });
         if let Err(e) = spawned {
             tracing::debug!(
                 "exit-watch thread spawn failed: {e}; instant exit off (backstops cover)"
@@ -103,10 +117,13 @@ impl ExitWatch {
 
     /// Ask the thread to watch `pid`. Idempotent: watching an already-watched
     /// live pid is a no-op (the thread dedups against its watched set).
-    /// Never blocks beyond the queue lock; if the thread has already died the
-    /// wake goes nowhere and the pid is simply never watched (backstops
-    /// cover).
+    /// Never blocks beyond the queue lock; once the thread has died (`closed`
+    /// set by its exit hook) the pid is rejected outright — nothing would
+    /// ever drain it, so pushing would only grow `pending` (backstops cover).
     pub(crate) fn watch(&self, pid: i32) {
+        if self.shared.closed.load(Ordering::SeqCst) {
+            return;
+        }
         lock_pending(&self.shared).push(pid);
         self.shared.backend.wake();
     }
@@ -761,6 +778,43 @@ mod tests {
             assert!(
                 wait_for_pid(&mut rx, pid, LIVE_PID_DEADLINE).await,
                 "a bogus registration must not break later real watches"
+            );
+        }
+
+        /// A DEAD watcher thread (backend error, pidfd ENOSYS, receiver gone)
+        /// must mark the handle closed so `watch()` rejects instead of
+        /// queueing onto `pending` forever — long-lived producers
+        /// (`HookPidWatch::note`, `PresenceExitWatch::watch`) push per hook
+        /// event for the process lifetime, and with no drainer the Vec grows
+        /// unboundedly. Thread death is forced here via the receiver-gone
+        /// exit path (the only one triggerable portably).
+        #[tokio::test]
+        async fn watch_after_thread_death_stops_queueing() {
+            use std::sync::atomic::Ordering;
+            let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+            let watch = ExitWatch::spawn(tx).expect("backend must init on macOS/Linux");
+            drop(rx);
+            // An already-dead pid synthesizes an exit whose send fails
+            // (receiver dropped) → run() returns → the death hook must fire.
+            let mut child = sleeper();
+            let pid = child.id() as i32;
+            kill_and_reap(&mut child);
+            watch.watch(pid);
+            let deadline = tokio::time::Instant::now() + LIVE_PID_DEADLINE;
+            while !watch.shared.closed.load(Ordering::SeqCst)
+                && tokio::time::Instant::now() < deadline
+            {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            assert!(
+                watch.shared.closed.load(Ordering::SeqCst),
+                "a dead watcher thread must mark the handle closed"
+            );
+            watch.watch(4242);
+            watch.watch(4243);
+            assert!(
+                super::super::lock_pending(&watch.shared).is_empty(),
+                "watch() after thread death must not grow `pending`"
             );
         }
 

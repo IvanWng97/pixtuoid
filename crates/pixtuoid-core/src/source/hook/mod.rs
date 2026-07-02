@@ -238,11 +238,15 @@ pub(crate) async fn handle_conn(
                 // Peek the shim-supplied CLI pid BEFORE `v` is consumed by
                 // decode. Only sources whose shim/plugin stamps `_pid`
                 // (CodeWhale, opencode) have it, so this is inert for the rest.
+                // `as_u64` already rejects negatives; the `> 0` filter drops a
+                // crafted `_pid: 0` too (kill(0) targets the process GROUP —
+                // same guard as cc_probe/fd_probe/openclaw).
                 let pid = pid_watch
                     .as_ref()
                     .and_then(|_| v.get("_pid"))
                     .and_then(serde_json::Value::as_u64)
-                    .and_then(|p| i32::try_from(p).ok());
+                    .and_then(|p| i32::try_from(p).ok())
+                    .filter(|p| *p > 0);
                 match decode_hook_payload(v) {
                     // One payload can decode to multiple events (an Identity
                     // attached ahead of a tool/permission event, #221) — sent

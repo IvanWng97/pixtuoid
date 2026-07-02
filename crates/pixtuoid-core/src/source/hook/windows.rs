@@ -184,6 +184,10 @@ impl Listener {
                 // with the recreate-bail below. Unix accept errors leave the
                 // listener fd valid, hence its plain warn+continue.
                 warn!("hook pipe connect error: {e}; recreating instance");
+                // SAFETY: same contract as the bind site — `self.sd` is owned
+                // by `self` and outlives the call; the kernel copies the
+                // descriptor during CreateNamedPipeW, so nothing borrows past
+                // it.
                 self.server =
                     unsafe { create_hook_pipe(&self.name, self.sd.attributes_ptr(), false) }
                         .with_context(|| {
@@ -196,6 +200,9 @@ impl Listener {
             // re-create, clients would get ERROR_PIPE_BUSY or NotFound
             // depending on timing.
             //
+            // SAFETY: same contract as the bind site — `self.sd` is owned by
+            // `self` and outlives the call; the kernel copies the descriptor
+            // during CreateNamedPipeW, so nothing borrows past it.
             let next = unsafe { create_hook_pipe(&self.name, self.sd.attributes_ptr(), false) }
                 .with_context(|| format!("re-creating hook pipe at {}", self.name))?;
             let conn = std::mem::replace(&mut self.server, next);

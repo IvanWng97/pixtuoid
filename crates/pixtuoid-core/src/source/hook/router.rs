@@ -159,7 +159,9 @@ mod tests {
     /// AND every event — that one included — reaches the downstream channel
     /// UNCHANGED, in order, transport tag intact (invariant #2). Jsonl-tagged
     /// child ends and root (`as_child: false`) hook ends must NOT be pushed:
-    /// only the SubagentStop decode shape feeds the un-claim.
+    /// copilot's transcript decode emits Jsonl child ends
+    /// (`subagent.completed`/`failed`), so the transport guard is load-bearing,
+    /// not merely defensive.
     #[tokio::test]
     async fn tee_pushes_hook_child_ends_and_forwards_every_event_unchanged() {
         let unclaims = ChildEndUnclaims::new();
@@ -178,8 +180,9 @@ mod tests {
                     detail: None,
                 },
             ),
-            // A JSONL-tagged child end must not feed the handle (nothing
-            // in-tree emits one; the guard IS the boundary).
+            // A JSONL-tagged child end must not feed the handle — copilot's
+            // transcript decode emits exactly this shape (`subagent.completed`
+            // / `failed` lines), so the transport guard IS the boundary.
             (
                 Transport::Jsonl,
                 AgentEvent::SessionEnd {

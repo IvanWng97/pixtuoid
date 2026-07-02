@@ -947,6 +947,158 @@ fn task_drain_keeps_parallel_ordinary_tool_gate() {
 }
 
 #[test]
+fn suppressed_child_event_keeps_parents_own_parallel_tool_gate() {
+    // Companion to the Waiting-restore pin
+    // (`parent_waiting_on_subagent_permission_resolves_when_the_subagent_resumes`):
+    // the restore must be CONDITIONAL on the Waiting actually being the
+    // SUBAGENT's gate. While delegating, the parent's own ordinary tool
+    // (applied via JSONL — suppression is hook-only) can be the gated tool
+    // when Waiting fires, so the gate holds an ordinary tuid (∉ active_tasks),
+    // not the Task's. A suppressed child hook event arriving mid-prompt must
+    // NOT flip the parent back to Active(Delegating) — the user's permission
+    // prompt is still pending in CC — nor wipe the gate, or the own tool's
+    // END could never resolve the Waiting.
+    let mut scene = SceneState::uniform(8);
+    let mut r = Reducer::new();
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+    let (parent, _child) = delegating_pair(&mut r, &mut scene, "orch-own-gate", t0);
+    let t1 = t0 + Duration::from_secs(1);
+
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityStart {
+            agent_id: parent,
+            tool_use_id: Some("task-T".into()),
+            detail: Some("Task".into()),
+        },
+        t1,
+        Transport::Hook,
+    );
+    // Parent's own ordinary tool via JSONL while delegating.
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityStart {
+            agent_id: parent,
+            tool_use_id: Some("bash-1".into()),
+            detail: Some("Bash: ls".into()),
+        },
+        t1 + Duration::from_millis(100),
+        Transport::Jsonl,
+    );
+    // Permission prompt fires mid-bash → gate records bash-1 (∉ active_tasks).
+    r.apply(
+        &mut scene,
+        AgentEvent::Waiting {
+            agent_id: parent,
+            reason: "permission".into(),
+        },
+        t1 + Duration::from_millis(200),
+        Transport::Hook,
+    );
+    // The subagent keeps working on its independent loop — its next
+    // misattributed hook event is suppressed (parent in-Task). It must not
+    // clobber the parent's OWN still-pending prompt.
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityStart {
+            agent_id: parent,
+            tool_use_id: Some("sub-R".into()),
+            detail: Some("Read: /foo".into()),
+        },
+        t1 + Duration::from_millis(300),
+        Transport::Hook,
+    );
+    assert!(
+        matches!(
+            scene.agents.get(&parent).unwrap().state,
+            ActivityState::Waiting { .. }
+        ),
+        "a suppressed child event must not hide the parent's own still-pending permission Waiting"
+    );
+    // …and the kept gate still resolves: bash-1's END clears the Waiting.
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityEnd {
+            agent_id: parent,
+            tool_use_id: Some("bash-1".into()),
+        },
+        t1 + Duration::from_secs(1),
+        Transport::Jsonl,
+    );
+    r.tick(
+        &mut scene,
+        t1 + Duration::from_secs(1) + ACTIVE_GRACE_WINDOW + Duration::from_millis(10),
+    );
+    assert!(
+        !matches!(
+            scene.agents.get(&parent).unwrap().state,
+            ActivityState::Waiting { .. }
+        ),
+        "the kept gate must let the own tool's END resolve the Waiting"
+    );
+}
+
+#[test]
+fn own_parallel_tool_end_mid_delegation_returns_parent_to_delegating() {
+    // A delegating parent may run a quick own tool in parallel (JSONL-tracked;
+    // its hooks are suppressed while in-Task). That tool's END must not settle
+    // the parent to Idle while `active_tasks` is still non-empty — the parent
+    // would render asleep at its desk for the rest of the delegation, exactly
+    // the display state `enter_delegating` exists to prevent. It returns to
+    // Active(Delegating) instead.
+    let mut scene = SceneState::uniform(8);
+    let mut r = Reducer::new();
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+    let (parent, child) = delegating_pair(&mut r, &mut scene, "orch-own-end", t0);
+    let t1 = t0 + Duration::from_secs(1);
+
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityStart {
+            agent_id: parent,
+            tool_use_id: Some("task-T".into()),
+            detail: Some("Task".into()),
+        },
+        t1,
+        Transport::Hook,
+    );
+    // The parent's own quick tool overwrites Delegating with Active(Bash)…
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityStart {
+            agent_id: parent,
+            tool_use_id: Some("bash-1".into()),
+            detail: Some("Bash: ls".into()),
+        },
+        t1 + Duration::from_millis(100),
+        Transport::Jsonl,
+    );
+    // …and its END arrives while task-T is still in flight.
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityEnd {
+            agent_id: parent,
+            tool_use_id: Some("bash-1".into()),
+        },
+        t1 + Duration::from_millis(500),
+        Transport::Jsonl,
+    );
+    r.tick(
+        &mut scene,
+        t1 + Duration::from_millis(500) + ACTIVE_GRACE_WINDOW + Duration::from_millis(10),
+    );
+    assert_delegating(
+        &scene,
+        parent,
+        "parent must stay Delegating while its Task is still in flight — not settle to Idle",
+    );
+    assert!(
+        scene.agents.get(&child).unwrap().exiting_at.is_none(),
+        "the own tool's END must not have cascaded the live subtree"
+    );
+}
+
+#[test]
 fn late_batched_jsonl_pair_after_delivered_hook_end_is_fully_dropped() {
     // Asymmetric-matrix pin (#150): a delivered hook END's record suppresses
     // BOTH JSONL kinds for its tuid. When JSONL delivery lags a fast tool

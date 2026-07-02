@@ -1323,6 +1323,78 @@ fn hook_identity_without_cwd_registers_reap_exempt_blank_cwd() {
 }
 
 #[test]
+fn hook_identity_on_existing_unknown_cwd_slot_clears_ghost_reap() {
+    // The existing-slot mirror of the test above: a JSONL-seeded slot with an
+    // empty cwd (a Codex revive ghost) sits on the 3-min unknown-cwd reap. A
+    // later cwd-less hook Identity (Codex PermissionRequest, CC PostToolUse)
+    // is the SAME proof of life the fresh-registration branch honors — it
+    // can't heal the cwd, but it must still disarm the ghost timer so the
+    // process-proven-alive session rides the state-adaptive timeouts (here:
+    // Waiting, 60 min) instead of being reaped mid-permission-decision.
+    use pixtuoid_core::state::reducer::STALE_UNKNOWN_CWD_TIMEOUT;
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let id = AgentId::from_parts("codex", "cx-revive");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: id,
+            source: "codex".into(),
+            session_id: "cx-revive".into(),
+            cwd: PathBuf::from(""),
+            parent_id: None,
+        },
+        t0,
+        Transport::Jsonl,
+    );
+    assert!(
+        scene.agents.get(&id).unwrap().unknown_cwd,
+        "empty-cwd JSONL registration arms the ghost reap"
+    );
+
+    // The live session hits a permission prompt: the hook decoder emits a
+    // cwd-less Identity ahead of the Waiting.
+    r.apply(
+        &mut scene,
+        AgentEvent::Identity {
+            agent_id: id,
+            source: "codex".into(),
+            session_id: "cx-revive".into(),
+            cwd: None,
+        },
+        t0 + Duration::from_secs(1),
+        Transport::Hook,
+    );
+    r.apply(
+        &mut scene,
+        AgentEvent::Waiting {
+            agent_id: id,
+            reason: "permission".into(),
+        },
+        t0 + Duration::from_secs(1),
+        Transport::Hook,
+    );
+    assert!(
+        !scene.agents.get(&id).unwrap().unknown_cwd,
+        "a hook Identity is proof of life — the ghost reap must disarm on the existing-slot branch too"
+    );
+
+    r.tick(
+        &mut scene,
+        t0 + STALE_UNKNOWN_CWD_TIMEOUT + Duration::from_secs(60),
+    );
+    assert!(
+        scene
+            .agents
+            .get(&id)
+            .is_some_and(|s| s.exiting_at.is_none()),
+        "a process-proven-alive Waiting session must outlive the 3-min unknown-cwd reap"
+    );
+}
+
+#[test]
 fn hook_identity_backfills_blank_synthesized_slot() {
     // An identity-less hook event (e.g. a reordered Stop) synthesized a blank
     // slot first; the next Identity heals source/session_id/cwd — but leaves

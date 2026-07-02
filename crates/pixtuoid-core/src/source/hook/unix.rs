@@ -1,15 +1,56 @@
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use tokio::net::UnixListener;
 use tokio::sync::Semaphore;
 use tracing::warn;
 
+use crate::source::jsonl::FailureLatch;
 use crate::source::TaggedSender;
 
 use super::{handle_conn, CONN_TIMEOUT, MAX_CONCURRENT_CONNS};
+
+/// First retry delay after an accept() error. mio/tokio only clear readiness
+/// on EWOULDBLOCK, so a persistent accept errno (EMFILE/ENFILE while a shim
+/// connection sits in the backlog) returns Ready(Err) on every await — an
+/// unthrottled retry is a 100% CPU spin. 100ms is invisible next to the
+/// shim's 200ms send bound.
+const ACCEPT_BACKOFF_FIRST: Duration = Duration::from_millis(100);
+/// Backoff ceiling: fd pressure can persist for minutes, but the daemon must
+/// pick pending shim connections up promptly once fds free — 5s caps the
+/// retry latency while keeping the error-loop duty cycle negligible.
+const ACCEPT_BACKOFF_MAX: Duration = Duration::from_secs(5);
+
+/// Bounded exponential backoff for the accept loop's Err arm: doubles from
+/// [`ACCEPT_BACKOFF_FIRST`] to [`ACCEPT_BACKOFF_MAX`], reset by any
+/// successful accept.
+struct AcceptBackoff {
+    next: Duration,
+}
+
+impl Default for AcceptBackoff {
+    fn default() -> Self {
+        Self {
+            next: ACCEPT_BACKOFF_FIRST,
+        }
+    }
+}
+
+impl AcceptBackoff {
+    /// The delay to sleep before retrying; advances the ladder.
+    fn on_error(&mut self) -> Duration {
+        let delay = self.next;
+        self.next = (self.next * 2).min(ACCEPT_BACKOFF_MAX);
+        delay
+    }
+
+    fn on_success(&mut self) {
+        self.next = ACCEPT_BACKOFF_FIRST;
+    }
+}
 
 pub(super) struct Listener {
     listener: UnixListener,
@@ -162,6 +203,8 @@ impl Listener {
         presence_tx: Option<super::PresenceSender>,
     ) -> Result<()> {
         let sem = Arc::new(Semaphore::new(MAX_CONCURRENT_CONNS));
+        let mut backoff = AcceptBackoff::default();
+        let mut accept_health = FailureLatch::default();
         loop {
             let permit = match Arc::clone(&sem).acquire_owned().await {
                 Ok(p) => p,
@@ -171,6 +214,10 @@ impl Listener {
             };
             match self.listener.accept().await {
                 Ok((stream, _addr)) => {
+                    if accept_health.on_success() {
+                        tracing::info!("hook socket accepting connections again");
+                    }
+                    backoff.on_success();
                     let tx = tx.clone();
                     let pid_watch = pid_watch.clone();
                     let presence_tx = presence_tx.clone();
@@ -184,9 +231,44 @@ impl Listener {
                     });
                 }
                 Err(e) => {
-                    warn!("hook socket accept error: {e}");
+                    // A Unix accept error leaves the listener fd valid, so
+                    // retrying is right (contrast the Windows twin, which
+                    // must recreate-or-bail) — just not at CPU speed, and not
+                    // one warn per iteration: a persistent errno (the EMFILE
+                    // class) would otherwise peg a core and rotate real
+                    // diagnostics out of the warn-floor log.
+                    if accept_health.on_failure() {
+                        warn!("hook socket accept error (retrying with backoff): {e}");
+                    }
+                    tokio::time::sleep(backoff.on_error()).await;
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn accept_backoff_doubles_to_the_cap_and_resets_on_success() {
+        let mut b = AcceptBackoff::default();
+        assert_eq!(b.on_error(), ACCEPT_BACKOFF_FIRST);
+        assert_eq!(b.on_error(), ACCEPT_BACKOFF_FIRST * 2);
+        let mut last = Duration::ZERO;
+        for _ in 0..16 {
+            last = b.on_error();
+        }
+        assert_eq!(
+            last, ACCEPT_BACKOFF_MAX,
+            "the ladder must cap, not overflow"
+        );
+        b.on_success();
+        assert_eq!(
+            b.on_error(),
+            ACCEPT_BACKOFF_FIRST,
+            "a successful accept must reset the ladder"
+        );
     }
 }

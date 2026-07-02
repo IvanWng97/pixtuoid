@@ -200,8 +200,13 @@ fn function_call_needs_approval(payload: Option<&Map<String, Value>>) -> bool {
         Ok(v) => v,
         Err(e) => {
             // A complete line that parsed as JSON but whose nested `arguments`
-            // string doesn't is unusual; log (don't panic) so it's diagnosable.
-            tracing::debug!("codex function_call arguments not parseable: {e}");
+            // string doesn't is a consumed-shape drift — surfaced the same
+            // structured way as the sibling missing-`name` case (a plain
+            // debug! was invisible to the warn-floor log / `pixtuoid doctor`).
+            crate::source::drift::shape_drift(
+                SOURCE_NAME,
+                &format!("function_call arguments not parseable: {e}"),
+            );
             return false;
         }
     };

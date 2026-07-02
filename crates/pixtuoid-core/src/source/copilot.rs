@@ -78,16 +78,30 @@ pub fn derive_copilot_label(_path: &Path, _source: &str, cwd: &Path) -> String {
 /// resurrecting a finished session.
 #[cfg(feature = "native")]
 fn copilot_session_ended(tail: &[u8]) -> bool {
-    // Substring scan over the tail window. ANCHOR on the structural `"type"`
-    // field — a bare `session.shutdown` would false-positive on tool OUTPUT
-    // (e.g. a shell result containing "run session.shutdown the cluster"),
-    // seeding the cursor at EOF and silently dropping a live session. Content
-    // must never drive lifecycle (the CC sharp edge — its own end-checker only
-    // matches structural markers for exactly this reason). events.jsonl is
-    // compact JSON with `type` first, so `"type":"session.shutdown"` is the
-    // real on-disk shape; `"session_end"` is a quoted defensive alias.
-    let hay = String::from_utf8_lossy(tail);
-    hay.contains("\"type\":\"session.shutdown\"") || hay.contains("\"session_end\"")
+    // Parse each tail line as JSON and read ONLY the structural top-level
+    // `type` field (mirrors `cc_session_ended`). A substring scan is
+    // falsifiable by CONTENT: copilot persists tool `arguments` structurally
+    // in events.jsonl, so a grep run with pattern `session_end` lands the
+    // quoted marker bytes in the tail verbatim — and content must never
+    // drive lifecycle (the CC sharp edge). The window's leading partial line
+    // fails the parse and is skipped. `session.shutdown` is the real on-disk
+    // marker (drift-watched); `session_end` stays a defensive alias, now
+    // anchored on the structural field like everything else.
+    tail.split(|b| *b == b'\n').any(|line| {
+        if line.is_empty() {
+            return false;
+        }
+        let Ok(s) = std::str::from_utf8(line) else {
+            return false;
+        };
+        let Ok(v) = serde_json::from_str::<Value>(s) else {
+            return false;
+        };
+        matches!(
+            v.get("type").and_then(|t| t.as_str()),
+            Some("session.shutdown" | "session_end")
+        )
+    })
 }
 
 fn str_at<'a>(v: &'a Value, key: &str) -> Option<&'a str> {
@@ -771,7 +785,7 @@ mod tests {
     fn session_ended_marker_is_anchored_on_the_type_field() {
         // Real compact on-disk shape → ended.
         assert!(copilot_session_ended(
-            br#"...{"type":"session.shutdown","data":{}}"#
+            br#"{"type":"session.shutdown","data":{}}"#
         ));
         // A tool result that merely MENTIONS the string must NOT end the session
         // (content must never drive lifecycle — the CC sharp edge).
@@ -780,6 +794,37 @@ mod tests {
         ));
         assert!(!copilot_session_ended(
             br#"{"type":"tool.execution_start"}"#
+        ));
+    }
+
+    #[test]
+    fn session_ended_matches_marker_after_a_partial_first_tail_line() {
+        // The 8 KiB tail window usually opens mid-line; the leading fragment
+        // must be skipped without defeating the real marker on a later line.
+        assert!(copilot_session_ended(
+            b"...tail-fragment\"}\n{\"type\":\"session.shutdown\",\"data\":{}}\n"
+        ));
+    }
+
+    #[test]
+    fn session_ended_ignores_marker_bytes_inside_tool_arguments() {
+        // Copilot persists tool `arguments` STRUCTURALLY in events.jsonl, so a
+        // grep/glob run with pattern `session_end` puts the quoted marker
+        // bytes in the tail verbatim (`"pattern":"session_end"`). Only the
+        // structural top-level `type` field may end the session — content
+        // must never drive lifecycle.
+        assert!(!copilot_session_ended(
+            br#"{"type":"tool.execution_start","data":{"toolName":"grep","arguments":{"pattern":"session_end"}}}"#
+        ));
+        // Even the fully-anchored needle as argument CONTENT stays inert (the
+        // JSON string form escapes its quotes, so a structural parse can't
+        // confuse it with a real `type` field).
+        assert!(!copilot_session_ended(
+            br#"{"type":"tool.execution_start","data":{"arguments":{"pattern":"\"type\":\"session.shutdown\""}}}"#
+        ));
+        // Nested `type` keys deeper in the object are not the top-level field.
+        assert!(!copilot_session_ended(
+            br#"{"type":"tool.execution_complete","data":{"result":{"type":"session_end"}}}"#
         ));
     }
 }

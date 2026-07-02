@@ -27,7 +27,10 @@ pub use unclaim::ChildEndUnclaims;
 #[cfg(test)]
 pub(crate) use crate::source::decoder::is_subagent_path;
 
-use health::FailureLatch;
+// Re-exported crate-wide: the hook socket's accept loop latches its
+// persistent-error warn the same way (one warn per failure streak, one
+// recovery info) — a second local latch would drift from this one.
+pub(crate) use health::FailureLatch;
 use liveness::{
     emit_proof_of_life, emit_session_exit, refresh_probe_snapshot, NegativeVouch,
     NEGATIVE_VOUCH_MIN_SPAN,
@@ -281,7 +284,7 @@ impl JsonlWatcher {
         let event_handler = move |res: notify::Result<notify::Event>| match res {
             Ok(event) => {
                 if notify_health.on_success() {
-                    tracing::info!("file-watch backend delivering again");
+                    tracing::info!("file-watch backend is delivering events again");
                 }
                 for path in event.paths {
                     if path.extension().and_then(|s| s.to_str()) == Some("jsonl") {
@@ -291,11 +294,16 @@ impl JsonlWatcher {
             }
             // A backend error means events were LOST (inotify queue overflow,
             // an FSEvents failure) — the 60s poll papers over the gap, but
-            // the user must get a breadcrumb. Latched: a persistently broken
-            // backend must not warn on every delivery.
+            // the user must get a breadcrumb. Latched (warn once per failure
+            // streak, info on recovery — the FailureLatch convention the
+            // root-scan and accept-loop breadcrumbs share): a persistently
+            // broken backend must not warn on every delivery.
             Err(e) => {
                 if notify_health.on_failure() {
-                    warn!("file-watch backend error (events may have been lost): {e}");
+                    warn!(
+                        "file-watch backend error ({e}); events may have been lost — \
+                         the poll backstop covers until it recovers"
+                    );
                 }
             }
         };

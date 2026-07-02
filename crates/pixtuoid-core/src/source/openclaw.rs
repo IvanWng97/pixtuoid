@@ -81,10 +81,15 @@ pub fn decode_openclaw_hook_payload(v: &Value) -> Result<Vec<DaemonPresenceUpdat
     // Checked narrowing: a crafted out-of-range `_pid` (e.g. 2^32+1) must NOT
     // silently truncate to a valid pid (arming ExitWatch on PID 1) — an
     // unrepresentable pid is dropped (None); the TTL backstop still covers it.
+    // Zero/negative pids are dropped the same way (matching cc_probe/fd_probe/
+    // the hook `_pid` peek): kill(0)/kill(-n) target process GROUPS, and a
+    // bogus pid's ESRCH registration receipt would synthesize an instant exit
+    // that flaps the LIVE gateway Down.
     let pid = obj
         .get("_pid")
         .and_then(|p| p.as_i64())
-        .and_then(|p| i32::try_from(p).ok());
+        .and_then(|p| i32::try_from(p).ok())
+        .filter(|p| *p > 0);
     let mut out = match event {
         "gateway_start" => vec![DaemonPresenceUpdate::GatewayUp { pid }],
         "gateway_stop" => vec![DaemonPresenceUpdate::GatewayDown],
@@ -108,16 +113,15 @@ pub fn decode_openclaw_hook_payload(v: &Value) -> Result<Vec<DaemonPresenceUpdat
             }]
         }
         // Any other forwarded hook is a benign skip (the plugin forwards a
-        // filtered set). Log a drift breadcrumb instead of bailing — a NEW
-        // upstream gateway event the plugin starts forwarding surfaces here in
-        // the user's own stream (defense #2), the always-on backstop the
-        // `OPENCLAW_EVENTS` ⇔ decoder-arm consistency test (#3) complements.
+        // filtered set). Emit the structured drift breadcrumb instead of
+        // bailing — a NEW upstream gateway event the plugin starts forwarding
+        // surfaces here in the user's own stream (defense #2), the always-on
+        // backstop the `OPENCLAW_EVENTS` ⇔ decoder-arm consistency test (#3)
+        // complements. `warn!` like every sibling drift site: the consumers
+        // (the warn-floor log `pixtuoid doctor` scans, the counting Layer)
+        // listen at warn, so a debug-level breadcrumb was invisible to them.
         other => {
-            tracing::debug!(
-                target: "pixtuoid::drift",
-                event = other,
-                "unhandled openclaw gateway hook event (upstream may have added one)"
-            );
+            crate::source::drift::unknown_event(SOURCE_NAME, other);
             vec![]
         }
     };
@@ -171,6 +175,27 @@ mod tests {
         assert_eq!(
             decode(json!({"type": "gateway_start", "_pid": 4_294_967_297i64})),
             vec![DaemonPresenceUpdate::GatewayUp { pid: None }]
+        );
+    }
+
+    #[test]
+    fn nonpositive_pid_is_dropped_like_every_sibling_pid_ingest() {
+        // kill(0)/kill(-n) target process GROUPS, and a bogus pid's ESRCH
+        // receipt synthesizes an instant exit that flaps the LIVE gateway
+        // Down — cc_probe/fd_probe/the hook `_pid` peek all filter `> 0`;
+        // this decoder must too (the N-1-of-N guard gap).
+        assert_eq!(
+            decode(json!({"type": "gateway_start", "_pid": -1})),
+            vec![DaemonPresenceUpdate::GatewayUp { pid: None }]
+        );
+        assert_eq!(
+            decode(json!({"type": "gateway_start", "_pid": 0})),
+            vec![DaemonPresenceUpdate::GatewayUp { pid: None }]
+        );
+        // The #318 PidSeen prepend must drop it too — no adoption of -1.
+        assert_eq!(
+            decode(json!({"type": "session_start", "sessionId": "s1", "_pid": -1})),
+            vec![DaemonPresenceUpdate::SessionStarted]
         );
     }
 

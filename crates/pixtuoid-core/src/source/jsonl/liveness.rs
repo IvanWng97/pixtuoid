@@ -356,8 +356,20 @@ pub(super) async fn revouch_gated_files(decoders: SourceDecoders, ctx: &WatchCtx
         }
         // Only a file parked exactly at EOF is stuck — one with a pending
         // append revives through the normal walk on this same pass.
-        let Ok(meta) = tokio::fs::metadata(&path).await else {
-            continue;
+        let meta = match tokio::fs::metadata(&path).await {
+            Ok(m) => m,
+            Err(e) => {
+                if e.kind() == std::io::ErrorKind::NotFound {
+                    // Deleted transcript: prune. This sweep already stats
+                    // every gated candidate each scan pass, so a lost notify
+                    // Remove event (the walk-side eviction's trigger) would
+                    // otherwise leave the entry a permanent candidate — one
+                    // failed stat per pass, forever, on a file that can never
+                    // revive.
+                    ctx.cursors.lock().await.remove(&path);
+                }
+                continue;
+            }
         };
         if meta.len() != cursor {
             continue;

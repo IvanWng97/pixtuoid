@@ -100,7 +100,21 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
     // scan_root's read_dir resolves the root path; only entries are checked.
     let meta = match tokio::fs::symlink_metadata(path).await {
         Ok(m) => m,
-        Err(_) => return,
+        Err(e) => {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                // The path is GONE (CC's 30-day cleanup, a user delete) and
+                // this walk — typically the notify Remove event — is the last
+                // time the watcher hears about it: retire its map entries, or
+                // every transcript ever sighted leaks a cursors entry (and a
+                // permanent re-vouch stat candidate) for the process
+                // lifetime. A recreated same-path file correctly re-enters
+                // through the first-sight gate. NotFound ONLY — a transient
+                // EACCES must not drop a live session's cursor.
+                cursors.lock().await.remove(path);
+                seen.lock().await.remove(path);
+            }
+            return;
+        }
     };
     if meta.file_type().is_symlink() {
         // debug!, not warn!: a benign persistent symlink would otherwise

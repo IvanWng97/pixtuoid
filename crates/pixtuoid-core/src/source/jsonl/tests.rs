@@ -1,7 +1,7 @@
 use std::io::Write;
 
 use super::health::FailureLatch;
-use super::liveness::{emit_session_exit, unbind_session};
+use super::liveness::{emit_session_exit, revouch_gated_files, unbind_session};
 use super::unclaim::drain_child_end_unclaims;
 use super::walk::{
     detect_parent_id, extract_cwd, park_if_truncated_below_cursor, scan_root, walk_jsonl,
@@ -2363,6 +2363,96 @@ async fn task_scan_skips_a_decoder_error_line_and_still_seeds_a_later_dispatch()
         task_start_tuids(&events),
         vec!["tu_y".to_string()],
         "the decoder-error line must be skipped and the valid dispatch still seed, got {events:?}"
+    );
+}
+
+#[tokio::test]
+async fn deleted_gated_file_walk_evicts_its_cursor() {
+    // A transcript deleted from disk (CC's 30-day cleanup) delivers one last
+    // notify event for its path; that walk must retire the cursors entry —
+    // otherwise every file ever sighted leaks a map entry for the process
+    // lifetime (and stays a permanent re-vouch stat candidate).
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("gone.jsonl");
+    let (cursors, seen) = gated_fixture(&path, "{\"type\":\"assistant\"}\n").await;
+    assert!(cursors.lock().await.contains_key(&path));
+
+    tokio::fs::remove_file(&path).await.unwrap();
+    let events = walk_once(&path, Duration::from_secs(60), t_ended, &cursors, &seen).await;
+    assert!(
+        events.is_empty(),
+        "a deleted path emits nothing: {events:?}"
+    );
+    assert!(
+        !cursors.lock().await.contains_key(&path),
+        "the cursor entry of a deleted file must be evicted"
+    );
+}
+
+#[tokio::test]
+async fn deleted_registered_file_walk_evicts_cursor_and_claim() {
+    // Same eviction for a REGISTERED (seen-claimed) file: a recreated
+    // same-path file must re-enter through the first-sight gate, not resume
+    // a dead claim.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("gone-live.jsonl");
+    tokio::fs::write(&path, "{\"type\":\"assistant\",\"cwd\":\"/r\"}\n")
+        .await
+        .unwrap();
+    let cursors = Arc::new(Mutex::new(HashMap::new()));
+    let seen = Arc::new(Mutex::new(HashMap::new()));
+    let events = walk_once(&path, Duration::from_secs(60), t_ended, &cursors, &seen).await;
+    assert!(
+        events
+            .iter()
+            .any(|(_, e)| matches!(e, AgentEvent::SessionStart { .. })),
+        "fixture must register first, got {events:?}"
+    );
+
+    tokio::fs::remove_file(&path).await.unwrap();
+    walk_once(&path, Duration::from_secs(60), t_ended, &cursors, &seen).await;
+    assert!(!cursors.lock().await.contains_key(&path));
+    assert!(
+        !seen.lock().await.contains_key(&path),
+        "the first-sight claim of a deleted file must be evicted"
+    );
+}
+
+#[tokio::test]
+async fn revouch_pass_prunes_deleted_files_from_cursors() {
+    // The re-vouch sweep already stats every gated candidate each scan pass;
+    // a NotFound stat IS the "this transcript was deleted" observation.
+    // Pruning there is the backstop for a lost notify delete event —
+    // otherwise the entry stays a permanent candidate (a failed stat per
+    // pass, forever).
+    let dir = tempfile::tempdir().unwrap();
+    let gone = dir.path().join("deleted.jsonl");
+    let cursors: Arc<Mutex<HashMap<PathBuf, u64>>> = Arc::new(Mutex::new(HashMap::new()));
+    cursors.lock().await.insert(gone.clone(), 42);
+    let seen = Arc::new(Mutex::new(HashMap::new()));
+    let live: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(
+        std::iter::once("someone-alive".to_string()).collect(),
+    ));
+    let (tx, _rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(8);
+    let source: Arc<str> = Arc::from("test");
+    let decoders = SourceDecoders {
+        decode_line: t_decode,
+        derive_label: t_label,
+        check_ended: t_ended,
+        id_derive: default_id_from_path,
+    };
+    let ctx = WatchCtx {
+        source: &source,
+        cursors: &cursors,
+        seen: &seen,
+        tx: &tx,
+        window: Duration::from_secs(60),
+        live: &live,
+    };
+    revouch_gated_files(decoders, &ctx).await;
+    assert!(
+        !cursors.lock().await.contains_key(&gone),
+        "a NotFound re-vouch candidate must be pruned from cursors"
     );
 }
 

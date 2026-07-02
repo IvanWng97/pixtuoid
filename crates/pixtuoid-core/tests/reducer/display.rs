@@ -50,6 +50,73 @@ fn session_start_without_cwd_falls_back_to_cc_label() {
 }
 
 #[test]
+fn session_start_label_caps_a_pathologically_long_cwd_basename() {
+    // `register_slot` is the SOLE label-mint site for hook-only sources, and
+    // the SessionStart cwd is hook/transcript CONTENT — a crafted slashless
+    // value makes the whole string the basename. The label must route through
+    // the same decode-boundary cap the duplicate-SessionStart backfill upgrade
+    // applies (`cwd_basename_label` / MAX_DECODED_FIELD_CHARS), pinned here by
+    // PARITY: both mint sites must produce the IDENTICAL capped label for the
+    // same cwd, so the two copies of the cap policy can't drift.
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let long_cwd = PathBuf::from(format!("/tmp/{}", "x".repeat(300)));
+    let t0 = SystemTime::now();
+
+    // Direct registration: register_slot mints the label from the cwd.
+    let direct = AgentId::from_transcript_path("/p/direct.jsonl");
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: direct,
+            source: "claude-code".into(),
+            session_id: "d".into(),
+            cwd: long_cwd.clone(),
+            parent_id: None,
+        },
+        t0,
+        Transport::Hook,
+    );
+
+    // The sibling mint site: a blank hook-synthesized slot whose fallback
+    // label the duplicate-SessionStart backfill upgrades (explicitly capped).
+    let upgraded = AgentId::from_transcript_path("/p/upgraded.jsonl");
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityStart {
+            agent_id: upgraded,
+            tool_use_id: Some("t-1".into()),
+            detail: Some("Bash: ls".into()),
+        },
+        t0,
+        Transport::Hook,
+    );
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: upgraded,
+            source: "claude-code".into(),
+            session_id: "u".into(),
+            cwd: long_cwd,
+            parent_id: None,
+        },
+        t0 + Duration::from_secs(1),
+        Transport::Hook,
+    );
+
+    let direct_label = scene.agents.get(&direct).unwrap().label.clone();
+    let upgraded_label = scene.agents.get(&upgraded).unwrap().label.clone();
+    assert!(
+        upgraded_label.ends_with('…'),
+        "sanity: the 300-char basename is ellipsized on the backfill path, got {upgraded_label:?}"
+    );
+    assert_eq!(
+        &*direct_label, &*upgraded_label,
+        "register_slot must mint the same capped label as the backfill upgrade"
+    );
+}
+
+#[test]
 fn ghost_label_counter_is_contiguous_after_named_sessions() {
     // A named-cwd session must NOT consume a ghost ordinal: the first
     // unknown-cwd ghost is cc#1 even when named sessions preceded it.
