@@ -529,6 +529,7 @@ fn main() -> Result<()> {
             source_id,
             label_prefix,
             display_name,
+            connected: matches!(state, ConnState::Connected),
             state,
             config_path: cfg.map(PathBuf::from),
             target: None,
