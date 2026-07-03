@@ -56,61 +56,21 @@ pub(super) fn obstacle_footprint(kind: WaypointKind, pantry_counter_size: Size) 
     furniture_def(kind.furniture()).footprint
 }
 
-/// Footprint half-extents `(hx, hy)` for stand-cell resolution, or `None` for
-/// `occupies_pos` furniture (couch and meeting slots) whose `pos` is the cell
-/// the agent occupies ON the furniture — those pass through `pos` unchanged,
-/// no stand resolution. Gated on [`furniture_def`]`.occupies_pos`, a superset
-/// of `footprint.is_none()`: the couch HAS a footprint yet occupies its `pos`.
-fn half_extents(kind: WaypointKind, pantry_counter_size: Size) -> Option<(u16, u16)> {
-    let def = furniture_def(kind.furniture());
-    if def.occupies_pos {
-        return None;
-    }
-    // Stand-clearance is the VISUAL (the whole sprite the USER parks clear of),
-    // NOT the mask footprint — which is now a shallow south strip for occlusion,
-    // so deriving the stand distance from it would pull the user INSIDE the
-    // sprite. Pantry is runtime-sized (visual (0,0)), so its counter size IS the
-    // clearance.
-    //
-    // INVARIANT: this `visual/2` clearance assumes `Anchor::Center` placement
-    // (pos = sprite center, so visual/2 reaches the edges) — true for every
-    // obstacle WAYPOINT today (Pantry/PhoneBooth/StandingDesk/VendingMachine/
-    // Printer all stamp `Anchor::Center` in `mask.rs`). The anchor is a
-    // per-placement-site property (see `placement::Anchor` — Whiteboard is Center
-    // as pod decor but TopLeft as wall decor), and `stand_point`/`approach_point`
-    // receive no `Anchor`: if a future obstacle waypoint were placed `TopLeft`,
-    // this would compute the stand cell off a wrong center. The one TopLeft piece
-    // that reaches the approach machinery (the home Desk) sidesteps this by being
-    // `occupies_pos` (seat branch, no half-extent) and by `desk_walk_anchor`
-    // scanning from the CHAIR, not the desk's TopLeft origin. New TopLeft obstacle
-    // waypoints must pass a center, not the raw origin.
-    let Size { w, h } = if matches!(kind, WaypointKind::Pantry) {
-        pantry_counter_size
-    } else {
-        def.visual
-    };
-    Some((w / 2, h / 2))
-}
-
 /// The walkable cell where an agent should stand to use the OBSTACLE furniture
-/// of `kind` centered at `pos`, given the agent's `origin` (home desk). This is
-/// the RENDER anchor for an AtWaypoint obstacle sprite, and it MUST equal the
-/// walk goal [`approach_point`] returns for the same furniture — else the sprite
-/// pops from the side the agent walked to onto a different face on arrival.
+/// of `kind` centered at `pos`, given the agent's `origin` (home desk) — the
+/// RENDER anchor for an `AtWaypoint` obstacle sprite. It MUST equal the walk goal
+/// [`approach_point`] returns for the same furniture (else the sprite pops from
+/// the side the agent walked to onto a different face on arrival), so it simply
+/// DELEGATES there rather than re-scanning: seat furniture (`occupies_pos`)
+/// renders ON its `pos` (the seat cell) and short-circuits; every obstacle
+/// forwards to `approach_point` (keyed on `kind.furniture()`), whose obstacle
+/// branch is the single source of the "stand just off the VISUAL, on the
+/// reachable allowed side nearest `origin`" scan. Falls back to `pos` (the "no
+/// valid approach" sentinel) exactly where `approach_point` does.
 ///
-/// So it applies the SAME two filters `approach_point`'s obstacle branch does:
-/// the per-furniture approach allowlist AND coarse-grid `reachable`-ility, then
-/// among the qualifying sides returns the first walkable+reachable cell on the
-/// side nearest `origin`. Falls back to `pos` for seat furniture (`occupies_pos`)
-/// or when no reachable approach side exists — the same "no valid approach"
-/// sentinel `approach_point` returns, which the agent never reaches (so this is
-/// never rendered for it).
-///
-/// The scan is a deliberate parallel of `approach_point`'s obstacle branch rather
-/// than a delegation (it keeps the `WaypointKind` signature + the seat early-return
-/// that render callers want); the two are pinned equal for every obstacle waypoint
-/// by `real_layout_obstacle_stand_matches_approach_point`, so a divergence fails a
-/// test rather than shipping as an arrival pop.
+/// Equality is now true BY CONSTRUCTION — the old parallel scan (kept equal only
+/// by `real_layout_obstacle_stand_matches_approach_point`, retained as a cheap
+/// guard) is gone.
 pub fn stand_point(
     kind: WaypointKind,
     pos: Point,
@@ -120,47 +80,23 @@ pub fn stand_point(
     facing: Facing,
     reachable: &ReachSet,
 ) -> Point {
-    let Some((hx, hy)) = half_extents(kind, pantry_counter_size) else {
+    // Seat furniture (Couch / meeting slots) renders ON its `pos`; approach_point
+    // would return the off-side approach cell, not the seat, so short-circuit —
+    // matching the old `half_extents` `occupies_pos` early return.
+    if furniture_def(kind.furniture()).occupies_pos {
         return pos;
-    };
-    let approach = furniture_def(kind.furniture()).approach;
-
-    let mut best: Option<(u64, Point)> = None;
-    for (dx, dy) in CARDINAL_DIRS {
-        // Honor the per-furniture approach allowlist (rotated to facing).
-        // All obstacle furniture is `ALL` today, so this is a no-op for them;
-        // editing a kind's `approach` constrains both walk + render here.
-        if !approach.allows(facing, (dx, dy)) {
-            continue;
-        }
-        let half = if dx != 0 { hx } else { hy } as i32;
-        for step in 0..=STAND_SCAN {
-            let dist = half + STAND_CLEARANCE as i32 + step;
-            let cx = pos.x as i32 + dx * dist;
-            let cy = pos.y as i32 + dy * dist;
-            if cx < 0 || cy < 0 {
-                break;
-            }
-            let c = Point {
-                x: cx as u16,
-                y: cy as u16,
-            };
-            if mask.is_walkable(c.x, c.y) {
-                // Reachability filter — IDENTICAL to approach_point's obstacle
-                // branch (approach_point): a walkable but coarse-unreachable
-                // first cell (an OBSTACLE_PAD straddle) drops the side, so the
-                // render anchor can't keep a near side the walk goal rejected.
-                if reachable.reaches(c) {
-                    let d2 = squared_distance(c, origin);
-                    if best.is_none_or(|(bd, _)| d2 < bd) {
-                        best = Some((d2, c));
-                    }
-                }
-                break; // first walkable cell decides this side (matches approach_point)
-            }
-        }
     }
-    best.map(|(_, p)| p).unwrap_or(pos)
+    // Obstacle: render anchor == walk goal. NB `approach_point` takes `facing`
+    // BEFORE `pantry_counter_size` — the reverse of `stand_point`'s order.
+    approach_point(
+        kind.furniture(),
+        pos,
+        facing,
+        pantry_counter_size,
+        mask,
+        origin,
+        reachable,
+    )
 }
 
 /// A seat body (sofa) is wider than an appliance footprint, so its side
@@ -169,10 +105,22 @@ pub fn stand_point(
 const SEAT_APPROACH_SCAN: i32 = 14;
 
 /// Extent [`approach_point`] scans past for obstacle furniture — the VISUAL
-/// (whole sprite), so the approach cell lands clear of everything drawn, matching
-/// [`half_extents`]. (NOT the mask footprint, now a shallow south strip.) `None`
-/// for kinds with no ground footprint (seats / wall decor) — those never reach
-/// the obstacle branch. The runtime-sized `Pantry` counter is its own clearance.
+/// (whole sprite), so the approach cell (and the [`stand_point`] render anchor
+/// that delegates here) lands clear of everything drawn. (NOT the mask footprint,
+/// now a shallow south strip — deriving the stand distance from it would pull the
+/// user INSIDE the sprite.) The SINGLE extent source. `None` for kinds with no
+/// ground footprint (seats / wall decor) — those never reach the obstacle branch.
+/// The runtime-sized `Pantry` counter (visual (0,0)) is its own clearance.
+///
+/// INVARIANT: the `visual/2` half-extent `approach_point` derives from this
+/// assumes `Anchor::Center` placement (pos = sprite center, so visual/2 reaches
+/// the edges) — true for every obstacle WAYPOINT today (Pantry/PhoneBooth/
+/// StandingDesk/VendingMachine/Printer all stamp `Anchor::Center` in `mask.rs`).
+/// A future `TopLeft`-placed obstacle waypoint would compute the stand cell off a
+/// wrong center and must pass a center, not the raw origin. The one TopLeft piece
+/// that reaches the approach machinery (the home Desk) sidesteps this by being
+/// `occupies_pos` (seat branch, no extent) + `desk_walk_anchor` scanning from the
+/// CHAIR, not the desk's TopLeft origin.
 fn approach_clearance_extent(kind: Furniture, pantry_counter_size: Size) -> Option<Size> {
     if matches!(kind, Furniture::Pantry) {
         return Some(pantry_counter_size);
@@ -309,24 +257,25 @@ mod tests {
         // The decouple: stand/approach clearance is the FULL `visual` (a USER
         // parks clear of the whole sprite), NOT the shallow mask footprint. If
         // this regressed to footprint, a user would stand INSIDE the sprite. Pin
-        // the magnitude so the regression can't ship green.
-        // PhoneBooth: footprint (6,3) but visual (6,12) → half-extent must be 6.
+        // the magnitude so the regression can't ship green. `approach_clearance_extent`
+        // is the SINGLE extent source `stand_point` now delegates through.
+        // PhoneBooth: footprint (6,3) but visual (6,12).
         let booth = furniture_def(Furniture::PhoneBooth);
-        let (_, hy) = half_extents(WaypointKind::PhoneBooth, Size { w: 0, h: 0 })
+        let ext = approach_clearance_extent(Furniture::PhoneBooth, Size { w: 0, h: 0 })
             .expect("booth is an approachable obstacle");
         assert_eq!(
-            hy,
-            booth.visual.h / 2,
+            ext.h, booth.visual.h,
             "stand clearance must use the visual height, not the footprint"
         );
         assert!(
-            hy > booth.footprint.unwrap().h / 2,
-            "visual half-extent ({hy}) must exceed the shallow footprint's ({})",
-            booth.footprint.unwrap().h / 2
+            ext.h > booth.footprint.unwrap().h,
+            "visual extent ({}) must exceed the shallow footprint's ({})",
+            ext.h,
+            booth.footprint.unwrap().h
         );
         // StandingDesk too (visual (8,8) vs footprint (8,3)).
-        let (_, hy) = half_extents(WaypointKind::StandingDesk, Size { w: 0, h: 0 }).unwrap();
-        assert_eq!(hy, furniture_def(Furniture::StandingDesk).visual.h / 2);
+        let ext = approach_clearance_extent(Furniture::StandingDesk, Size { w: 0, h: 0 }).unwrap();
+        assert_eq!(ext.h, furniture_def(Furniture::StandingDesk).visual.h);
     }
 
     /// Build an open mask with a centred obstacle stamped exactly like
@@ -812,15 +761,15 @@ mod tests {
     }
 
     #[test]
-    fn approachable_obstacle_resolves_half_extents() {
+    fn approachable_obstacle_resolves_clearance_extent() {
         let dummy = Size { w: 32, h: 10 };
         for &kind in WaypointKind::ALL {
             let def = furniture_def(kind.furniture());
             let has_footprint = def.footprint.is_some() || kind == WaypointKind::Pantry;
             if has_footprint && !def.occupies_pos {
                 assert!(
-                    half_extents(kind, dummy).is_some(),
-                    "{kind:?}: an approachable obstacle must resolve half-extents",
+                    approach_clearance_extent(kind.furniture(), dummy).is_some(),
+                    "{kind:?}: an approachable obstacle must resolve a clearance extent",
                 );
             }
         }
