@@ -182,31 +182,38 @@ fn classify_rename(label: &str, source: &str) -> crate::state::SlotLabel {
     }
 }
 
+/// Borrowed identity context threaded into slot registration/back-fill.
+/// Groups the three identity fields so the two `&str`s (`source`/`session_id`,
+/// positionally interchangeable) can't be silently swapped at a call site.
+/// Purely a call-site bundle — never stored on `AgentSlot`, never public.
+#[derive(Clone, Copy)]
+struct IdentityCtx<'a> {
+    source: &'a str,
+    session_id: &'a str,
+    cwd: &'a std::path::Path,
+}
+
 /// First-wins identity back-fill shared by the duplicate-`SessionStart` arm
 /// and the hook [`AgentEvent::Identity`] arm (#221): heal EMPTY
 /// source/session_id/cwd — an established value is never overwritten. Returns
 /// the healed cwd's basename when THIS call healed the cwd; the SessionStart
 /// arm alone upgrades a fallback label from it (`Identity` carries no label
 /// authority — label upgrades stay on the SessionStart path).
-fn backfill_identity<'a>(
-    slot: &mut AgentSlot,
-    source: &str,
-    session_id: &str,
-    cwd: &'a std::path::Path,
-) -> Option<&'a str> {
-    if slot.source.is_empty() && !source.is_empty() {
-        slot.source = Arc::<str>::from(source);
+fn backfill_identity<'a>(slot: &mut AgentSlot, ctx: IdentityCtx<'a>) -> Option<&'a str> {
+    if slot.source.is_empty() && !ctx.source.is_empty() {
+        slot.source = Arc::<str>::from(ctx.source);
     }
-    if slot.session_id.is_empty() && !session_id.is_empty() {
-        slot.session_id = Arc::<str>::from(session_id);
+    if slot.session_id.is_empty() && !ctx.session_id.is_empty() {
+        slot.session_id = Arc::<str>::from(ctx.session_id);
     }
     if slot.unknown_cwd || slot.cwd.as_os_str().is_empty() {
-        if let Some(base) = cwd
+        if let Some(base) = ctx
+            .cwd
             .file_name()
             .and_then(|n| n.to_str())
             .filter(|s| !s.is_empty())
         {
-            slot.cwd = Arc::<std::path::Path>::from(cwd);
+            slot.cwd = Arc::<std::path::Path>::from(ctx.cwd);
             slot.unknown_cwd = false;
             return Some(base);
         }
@@ -597,7 +604,14 @@ impl Reducer {
                     // back-fill running first can't re-contextualize it (the
                     // old string-shape sniff had to be judged before).
                     let label_is_upgradable = slot.label.is_upgradable();
-                    if let Some(base) = backfill_identity(slot, &source, &session_id, &cwd) {
+                    if let Some(base) = backfill_identity(
+                        slot,
+                        IdentityCtx {
+                            source: &source,
+                            session_id: &session_id,
+                            cwd: &cwd,
+                        },
+                    ) {
                         // Upgrade ONLY a fallback label — a basename- or
                         // Rename-derived label is real information. This stays
                         // on the SessionStart path: `Identity` carries no
@@ -673,7 +687,17 @@ impl Reducer {
                     }
                     return;
                 }
-                if self.register_slot(scene, agent_id, &source, &session_id, &cwd, parent_id, now) {
+                if self.register_slot(
+                    scene,
+                    agent_id,
+                    IdentityCtx {
+                        source: &source,
+                        session_id: &session_id,
+                        cwd: &cwd,
+                    },
+                    parent_id,
+                    now,
+                ) {
                     // A CHILD registration feeds the ledger with its APPLIED
                     // parent (a desk-exhaustion refusal records nothing — the
                     // session was dropped, not registered); ended_at clears
@@ -855,8 +879,13 @@ impl Reducer {
                     return;
                 }
                 let cwd = cwd.as_deref().unwrap_or_else(|| std::path::Path::new(""));
+                let ctx = IdentityCtx {
+                    source: &source,
+                    session_id: &session_id,
+                    cwd,
+                };
                 if let Some(slot) = scene.agents.get_mut(&agent_id) {
-                    backfill_identity(slot, &source, &session_id, cwd);
+                    backfill_identity(slot, ctx);
                     // The same reap exemption the registration branch below
                     // honors, mirrored: Identity is hook-only (transport
                     // guard above), so the owning process is alive — a
@@ -868,7 +897,7 @@ impl Reducer {
                     // emits nothing further within 3 min.
                     slot.unknown_cwd = false;
                 } else if !self.corr.hook_session_end_tombstoned(agent_id, now)
-                    && self.register_slot(scene, agent_id, &source, &session_id, cwd, None, now)
+                    && self.register_slot(scene, agent_id, ctx, None, now)
                 {
                     // Only the 5s #242 tombstone is consulted — NOT the 90s
                     // child ledger, deliberately: a hook is proof of life and
@@ -939,7 +968,17 @@ impl Reducer {
         if self.corr.hook_session_end_tombstoned(id, now) {
             return;
         }
-        if self.register_slot(scene, id, "", "", std::path::Path::new(""), None, now) {
+        if self.register_slot(
+            scene,
+            id,
+            IdentityCtx {
+                source: "",
+                session_id: "",
+                cwd: std::path::Path::new(""),
+            },
+            None,
+            now,
+        ) {
             if let Some(slot) = scene.agents.get_mut(&id) {
                 // NOT an unknown-cwd ghost: the 3-min reap exists for startup
                 // JSONL-seeding artifacts that never get a follow-up event.
@@ -959,17 +998,19 @@ impl Reducer {
     /// [`Reducer::synthesize_hook_registration`] so both run the same
     /// desk-capacity gate + label derivation. Returns `false` when all desks
     /// are occupied (the session is dropped, consuming no ghost ordinal).
-    #[allow(clippy::too_many_arguments)]
     fn register_slot(
         &mut self,
         scene: &mut SceneState,
         agent_id: AgentId,
-        source: &str,
-        session_id: &str,
-        cwd: &std::path::Path,
+        ctx: IdentityCtx,
         parent_id: Option<AgentId>,
         now: SystemTime,
     ) -> bool {
+        let IdentityCtx {
+            source,
+            session_id,
+            cwd,
+        } = ctx;
         let Some(desk_index) = scene.next_free_desk() else {
             tracing::warn!(
                 ?agent_id,
