@@ -18,12 +18,11 @@ use pixtuoid_core::AgentId;
 
 use crate::layout::{Layout, Point, WaypointKind};
 use crate::pathfind::Router;
+use crate::pose::{desk_leg_endpoint, octile_distance, route_jittered};
 use crate::pose::{
-    aimless_wander_seed, dwell_ms, est_wander_cycle_ms, is_aimless_cycle, pick_aimless_dest,
-    seated_dwell_ms, stale_resume_gap_ms, takes_trip, waypoint_index_for_cycle,
+    dwell_ms, est_wander_cycle_ms, seated_dwell_ms, stale_resume_gap_ms, takes_trip,
     WANDER_DWELL_EST_MS,
 };
-use crate::pose::{desk_leg_endpoint, octile_distance, route_jittered};
 
 /// Frozen A* polyline for one in-flight walk leg.
 ///
@@ -66,10 +65,53 @@ pub struct WalkLeg {
     pub from: Point,
 }
 
+/// A resolved wander destination: the walkable target cell plus WHAT it is (a
+/// named lounge waypoint — with an optional seat to settle onto — or an aimless
+/// amble). `dest` stays outside the enum because it is always present; only the
+/// waypoint/seat metadata is variant-specific. Produced by
+/// [`crate::pose::resolve_wander_target`] (the ONE stateless resolver both the
+/// motion authority and `idle_pose` share).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WanderTarget {
+    /// Destination pixel of the current trip (the walkable approach/amble cell).
+    pub dest: Point,
+    pub kind: WanderKind,
+}
+
+/// What KIND of wander destination [`WanderTarget::dest`] is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WanderKind {
+    /// A named lounge waypoint: its `layout.waypoints` index + kind, plus the
+    /// seat foot cell `S` when it's an occupied seat. `seat = Some` ⇒ the walk
+    /// SETTLES from the approach point `dest` onto `S` (and rises from `S` on the
+    /// way back) so arrival/departure don't pop; `seat = None` for obstacles
+    /// (the agent stands AT `dest`).
+    Named {
+        wp_idx: usize,
+        kind: WaypointKind,
+        seat: Option<Point>,
+    },
+    /// An aimless amble to a random walkable point (no named waypoint, no seat).
+    Aimless,
+}
+
+impl WanderKind {
+    /// The seat foot cell to settle onto, when this destination is an occupied
+    /// seat — `None` for obstacles (`Named { seat: None }`) and aimless ambles.
+    pub(crate) fn seat(self) -> Option<Point> {
+        match self {
+            WanderKind::Named { seat, .. } => seat,
+            WanderKind::Aimless => None,
+        }
+    }
+}
+
 /// The elastic cyclic-wander timeline state machine for one agent (desk → waypoint
-/// → desk, repeating). The nine fields are one unit: `advance_wander` transitions
-/// them together, and the whole thing is idempotent per `now` via `last_advanced_at`.
-/// (Was nine flat `wander_*` / `last_advanced_at` fields on `MotionState`.)
+/// → desk, repeating). The fields are one unit: `advance_wander` transitions them
+/// together, and the whole thing is idempotent per `now` via `last_advanced_at`.
+/// (Was nine flat `wander_*` / `last_advanced_at` fields on `MotionState`; the
+/// trip destination `dest`/`dest_kind`/`dest_wp_idx`/`seat` are now one
+/// [`WanderTarget`].)
 #[derive(Debug, Clone)]
 pub struct WanderState {
     /// Monotonically increasing wander cycle counter, incremented each time
@@ -85,17 +127,10 @@ pub struct WanderState {
     /// Walk profile for the current out-/back-leg, snapshotted at the phase
     /// transition. `None` while `Seated` or `AtWaypoint`.
     pub profile: Option<WalkProfile>,
-    /// Destination pixel of the current trip. Reset on each new `WalkingOut`.
-    pub dest: Point,
-    /// Kind of the current wander waypoint, if it is a named waypoint.
-    pub dest_kind: Option<WaypointKind>,
-    /// Index into `layout.waypoints` for the current destination, if named.
-    pub dest_wp_idx: Option<usize>,
-    /// Seat foot cell `S` for the current waypoint (where the seated sprite
-    /// renders), when it's an occupied seat. `Some` ⇒ the walk SETTLES from the
-    /// approach point `dest` onto `S` (and rises from `S` on the way back) so
-    /// arrival/departure don't pop; `None` for obstacles/aimless (stands AT `dest`).
-    pub seat: Option<Point>,
+    /// The current trip's resolved destination (dest cell + named/aimless kind +
+    /// optional seat). Set on each new `WalkingOut`; its `kind` resets to
+    /// `Aimless` when a cycle completes (`WalkingBack` cleanup).
+    pub target: WanderTarget,
     /// Last `now` at which `advance_wander` performed a transition — idempotency:
     /// `now <= last_advanced_at` ⇒ a no-op on mutable state. Sentinel `UNIX_EPOCH`
     /// ⇒ never advanced.
@@ -126,8 +161,8 @@ pub struct MotionState {
     /// `exit`).
     pub snap_back: Option<WalkLeg>,
 
-    /// The elastic cyclic-wander timeline state machine — all nine values move as
-    /// a unit (`advance_wander` transitions them together, idempotent per `now`
+    /// The elastic cyclic-wander timeline state machine — the values move as a
+    /// unit (`advance_wander` transitions them together, idempotent per `now`
     /// via `wander.last_advanced_at`). See [`WanderState`]. (Was nine flat
     /// `wander_*` / `last_advanced_at` fields.)
     pub wander: WanderState,
@@ -164,10 +199,10 @@ impl MotionState {
                 phase_started_at: SystemTime::UNIX_EPOCH,
                 profile: None,
                 // Placeholder — replaced on first WalkingOut transition.
-                dest: Point { x: 0, y: 0 },
-                dest_kind: None,
-                dest_wp_idx: None,
-                seat: None,
+                target: WanderTarget {
+                    dest: Point { x: 0, y: 0 },
+                    kind: WanderKind::Aimless,
+                },
                 last_advanced_at: SystemTime::UNIX_EPOCH,
             },
             walk_path: None,
@@ -274,10 +309,10 @@ pub fn advance_wander(
     // a sofa lounges far longer than a vending grab. Aimless trips (no named
     // kind) fall back to the average dwell estimate.
     let seated_dur = seated_dwell_ms(id);
-    let dwell_dur = ms
-        .wander
-        .dest_kind
-        .map_or(WANDER_DWELL_EST_MS, |k| dwell_ms(k, id));
+    let dwell_dur = match ms.wander.target.kind {
+        WanderKind::Named { kind, .. } => dwell_ms(kind, id),
+        WanderKind::Aimless => WANDER_DWELL_EST_MS,
+    };
 
     let result = match ms.wander.phase {
         WanderPhase::Seated => {
@@ -298,12 +333,10 @@ pub fn advance_wander(
                     // stateless/stateful destinations stay in lockstep).
                     let desk_pt = layout.home_desk(slot.desk_index.single_floor_local());
                     let origin = desk_pt.unwrap_or(Point { x: 0, y: 0 });
-                    let (dest, dest_kind, wp_idx, seat) =
-                        pick_wander_dest(id, ms.wander.cycle_n, layout, origin);
-                    ms.wander.dest = dest;
-                    ms.wander.dest_kind = dest_kind;
-                    ms.wander.dest_wp_idx = wp_idx;
-                    ms.wander.seat = seat;
+                    let target = pick_wander_dest(id, ms.wander.cycle_n, layout, origin);
+                    ms.wander.target = target;
+                    let dest = target.dest;
+                    let seat = target.kind.seat();
 
                     let desk = desk_pt.unwrap_or(dest);
                     // Leave via the desk approach cell (rise off the chair),
@@ -389,16 +422,14 @@ pub fn advance_wander(
                 WalkLegStatus::InFlight(t) => (WanderPhase::WalkingBack, t),
                 WalkLegStatus::Arrived { walk_total, .. } => {
                     // Divergent on-arrival: a cycle completed — advance the cycle
-                    // counter and clear the trip fields.
+                    // counter and clear the trip kind back to Aimless (drops the
+                    // named waypoint + its seat; `target.dest` is left as-is — the
+                    // Seated arm never reads it and the next WalkingOut overwrites
+                    // it — matching the pre-`WanderTarget` fields, which reset
+                    // kind/idx/seat but not `dest`).
                     ms.wander.cycle_n += 1;
                     ms.wander.profile = None;
-                    ms.wander.dest_kind = None;
-                    ms.wander.dest_wp_idx = None;
-                    // Clear the seat too (symmetry with the sibling dest fields):
-                    // the Seated arm never reads it and the next WalkingOut overwrites
-                    // it, but leaving it stale invites a future Seated-phase reader to
-                    // mistake it for "currently on a seat".
-                    ms.wander.seat = None;
+                    ms.wander.target.kind = WanderKind::Aimless;
                     ms.wander.phase = WanderPhase::Seated;
                     advance_phase_clock(ms, walk_total, now);
                     (WanderPhase::Seated, 0)
@@ -433,7 +464,7 @@ enum WalkLegStatus {
 /// profile (warn on the unreachable missing case), compute physics progress, and
 /// classify the leg as in-flight or arrived. The arms run their OWN divergent
 /// on-arrival cleanup (WalkingOut: snapshot the back profile; WalkingBack: bump
-/// the cycle + clear trip fields incl. `wander.seat`) — only the read/progress/
+/// the cycle + reset `wander.target.kind` to Aimless) — only the read/progress/
 /// arrival check is factored here.
 fn poll_walk_leg(
     slot: &AgentSlot,
@@ -494,60 +525,19 @@ fn advance_phase_clock(ms: &mut MotionState, walk_total: u64, now: SystemTime) {
         .unwrap_or(now);
 }
 
-/// Pick the wander destination for a given agent and cycle. Mirrors the same
-/// logic as `pose::pure::idle_pose` so `cycle_n` produces identical
-/// destination choices in both the stateless core path and the stateful tui path.
-///
-/// `origin` is the agent's home desk — the stand-side tiebreaker, kept
-/// identical to `pose::pure::idle_pose`'s `desk` so the paths can't drift.
-///
-/// Returns `(dest_point, waypoint_kind, waypoint_index)`.
-fn pick_wander_dest(
-    id: AgentId,
-    cycle_n: u64,
-    layout: &Layout,
-    origin: Point,
-) -> (Point, Option<WaypointKind>, Option<usize>, Option<Point>) {
-    if is_aimless_cycle(id, cycle_n) {
-        // Shared seed helper so this can never drift from pose::pure::idle_pose.
-        let seed = aimless_wander_seed(id, cycle_n);
-        let p = pick_aimless_dest(layout, seed, origin);
-        (p, None, None, None)
-    } else {
-        let wp_idx = waypoint_index_for_cycle(id, cycle_n, layout.waypoints.len());
-        let wp = layout.waypoints[wp_idx];
-        // Walk destination = the A*-reachable approach point on an allowed side
-        // (NOT the raw blocked `wp.pos`, which made A* detour + the sprite pop).
-        // Same `&layout.reachable` + origin as pose::pure::idle_pose so the
-        // stateless overlay and this routed dest stay in lockstep.
-        let dest = crate::layout::approach_point(
-            wp.kind.furniture(),
-            wp.pos,
-            wp.facing,
-            layout.pantry_counter_size,
-            &layout.walkable,
-            origin,
-            &layout.reachable,
-        );
-        // NO approach-side fallback: when no allowed+reachable side exists,
-        // approach_point returns the blocked `wp.pos` sentinel (a seat boxed in to
-        // only its backrest, or an obstacle with no open reachable side). Never
-        // route there — A* would snap onto the furniture (the backrest, for a
-        // seat). Amble aimlessly this cycle instead, matching idle_pose.
-        if dest == wp.pos {
-            let seed = aimless_wander_seed(id, cycle_n);
-            return (pick_aimless_dest(layout, seed, origin), None, None, None);
-        }
-        // Seat foot cell `S`: the walk SETTLES from `dest` onto it (the sprite
-        // renders here). `None` for obstacles — the agent stands AT `dest`.
-        let seat = crate::layout::seated_foot_cell(wp.kind.furniture(), wp.pos);
-        (dest, Some(wp.kind), Some(wp_idx), seat)
-    }
+/// Pick the wander destination for a given agent and cycle — a thin delegate to
+/// the ONE stateless resolver [`crate::pose::resolve_wander_target`], which
+/// `pose::pure::idle_pose` also calls, so the routed motion path and the
+/// stateless overlay can never drift to different destinations for the same
+/// `(agent, cycle)`. `origin` is the agent's home desk (the stand-side
+/// tiebreaker), kept identical to `idle_pose`'s `desk`.
+fn pick_wander_dest(id: AgentId, cycle_n: u64, layout: &Layout, origin: Point) -> WanderTarget {
+    crate::pose::resolve_wander_target(id, cycle_n, layout, origin)
 }
 
-/// Snapshot the WanderBack `WalkProfile`: route `wander.dest → desk approach
-/// cell`, add the seat-rise (`settle_len(wander.dest, wander.seat)`) and the
-/// chair-glide settle, then freeze a `WanderBack` profile over that full
+/// Snapshot the WanderBack `WalkProfile`: route `wander.target.dest → desk
+/// approach cell`, add the seat-rise (`settle_len(target.dest, target.kind.seat())`)
+/// and the chair-glide settle, then freeze a `WanderBack` profile over that full
 /// polyline length (no pop on arrival).
 ///
 /// Endpoint is the desk approach cell (matching `seated_anchor` via the
@@ -564,7 +554,7 @@ fn snapshot_back_profile(
 ) -> WalkProfile {
     let desk = layout
         .home_desk(slot.desk_index.single_floor_local())
-        .unwrap_or(ms.wander.dest);
+        .unwrap_or(ms.wander.target.dest);
     // Arrive via the desk approach cell (glide onto the chair), mirroring pose's
     // WalkingBack leg; add the chair-glide so the profile covers the full
     // polyline (no pop on arrival). Routed via the SAME jittered goal the
@@ -576,13 +566,14 @@ fn snapshot_back_profile(
         &layout.walkable,
         overlay,
         slot.agent_id,
-        ms.wander.dest,
+        ms.wander.target.dest,
         snap_to,
     );
     let desk_glide = settle_len(snap_to, chair_settle);
-    let back_len =
-        (octile_path_len(&back_path) + settle_len(ms.wander.dest, ms.wander.seat) + desk_glide)
-            .max(1);
+    let back_len = (octile_path_len(&back_path)
+        + settle_len(ms.wander.target.dest, ms.wander.target.kind.seat())
+        + desk_glide)
+        .max(1);
     walk_profile(back_len, WalkIntent::WanderBack, slot.agent_id)
 }
 

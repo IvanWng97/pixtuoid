@@ -21,6 +21,7 @@ use crate::layout::{
     desk_furniture_def, desk_walk_anchor, furniture_def, Bounds, DwellWindow, Point, SceneLayout,
     WaypointKind,
 };
+use crate::motion::{WanderKind, WanderTarget};
 use pixtuoid_core::state::{ActivityState, AgentSlot};
 use pixtuoid_core::AgentId;
 
@@ -439,6 +440,60 @@ fn thinking_hold_ms(slot: &AgentSlot) -> u64 {
         .map_or(0, |d| d.as_millis() as u64)
 }
 
+/// Resolve the wander destination for `(agent_id, cycle_n)` on `layout`, with
+/// `origin` (the home desk) as the approach-side tiebreaker. The ONE stateless
+/// wander-destination resolver: the stateful motion authority
+/// (`motion::advance_wander` via `pick_wander_dest`) delegates to it, and
+/// `idle_pose` calls it then maps the [`WanderTarget`] to a [`Pose`]. Was
+/// DUPLICATED across the two, kept in lockstep only by comment + test.
+///
+/// A named waypoint whose only reachable side is its excluded backrest (or a
+/// fully-blocked obstacle) yields `approach_point == wp.pos`, the "no valid
+/// approach" sentinel — this ambles aimlessly that cycle instead of routing into
+/// the furniture.
+pub(crate) fn resolve_wander_target(
+    id: AgentId,
+    cycle_n: u64,
+    layout: &SceneLayout,
+    origin: Point,
+) -> WanderTarget {
+    let amble = || WanderTarget {
+        dest: pick_aimless_dest(layout, aimless_wander_seed(id, cycle_n), origin),
+        kind: WanderKind::Aimless,
+    };
+    if is_aimless_cycle(id, cycle_n) {
+        return amble();
+    }
+    let wp_idx = waypoint_index_for_cycle(id, cycle_n, layout.waypoints.len());
+    let wp = layout.waypoints[wp_idx];
+    // Walk destination = the A*-reachable approach point on an allowed side (NOT
+    // the raw blocked `wp.pos`, which made A* detour + the sprite pop). Same
+    // `&layout.reachable` + origin on both callers so they can't drift.
+    let dest = crate::layout::approach_point(
+        wp.kind.furniture(),
+        wp.pos,
+        wp.facing,
+        layout.pantry_counter_size,
+        &layout.walkable,
+        origin,
+        &layout.reachable,
+    );
+    if dest == wp.pos {
+        return amble();
+    }
+    // Seat foot cell `S`: the walk SETTLES from `dest` onto it (the sprite renders
+    // here). `None` for obstacles — the agent stands AT `dest`.
+    let seat = crate::layout::seated_foot_cell(wp.kind.furniture(), wp.pos);
+    WanderTarget {
+        dest,
+        kind: WanderKind::Named {
+            wp_idx,
+            kind: wp.kind,
+            seat,
+        },
+    }
+}
+
 fn idle_pose(slot: &AgentSlot, desk: Point, layout: &SceneLayout, elapsed_ms: u64) -> Pose {
     let cycle_ms = est_wander_cycle_ms(slot.agent_id);
     let cycle_n = elapsed_ms / cycle_ms;
@@ -447,10 +502,6 @@ fn idle_pose(slot: &AgentSlot, desk: Point, layout: &SceneLayout, elapsed_ms: u6
     if !takes_trip(slot.agent_id, cycle_n) || layout.waypoints.is_empty() {
         return Pose::SeatedIdle;
     }
-
-    // Per-cycle "trip type" roll. Personality.aimless_pref_pct shifts the
-    // mix between lounge waypoint and aimless wander.
-    let aimless = is_aimless_cycle(slot.agent_id, cycle_n);
 
     // Absolute phase boundaries (fixed overlay estimates; the routed render
     // path uses per-spot `dwell_ms`). cycle_ms == at_wp_end + WANDER_WALK_EST_MS
@@ -475,56 +526,17 @@ fn idle_pose(slot: &AgentSlot, desk: Point, layout: &SceneLayout, elapsed_ms: u6
         return Pose::SeatedIdle;
     }
 
-    // Weighted-zone aimless wander. Instead of uniformly sampling
-    // anywhere in the buffer (which clusters at the fallback because most
-    // cubicle pixels are obstacles), pick a ZONE by weight first — window-
-    // viewing strip, pantry, corridor, meeting room — then rejection-sample
-    // within that zone. Weights tune the "vibe" of where agents drift:
-    // window strip and pantry get the highest weight so the office feels
-    // alive (people stretching at windows, grabbing coffee), corridor/
-    // cubicle/meeting are more incidental. Shared between the explicit
-    // aimless branch and the no-reachable-side waypoint fallback below.
-    let amble = || {
-        let seed = aimless_wander_seed(slot.agent_id, cycle_n);
-        let p = pick_aimless_dest(layout, seed, desk);
-        (p, Pose::AimlessAt { dest: p })
-    };
-
-    // Destination: lounge waypoint OR aimless point.
-    let (dest, at_dest_pose): (Point, Pose) = if aimless {
-        amble()
-    } else {
-        let wp_idx = waypoint_index_for_cycle(slot.agent_id, cycle_n, layout.waypoints.len());
-        let wp = layout.waypoints[wp_idx];
-        // Walk DESTINATION (not the render anchor): the A*-reachable approach
-        // point on an allowed side — for seats an allowed-side cell so the agent
-        // never paths in through the back; the AtWaypoint sprite still renders on
-        // the seat (see pixel_painter). Same `&layout.reachable` as tui::motion.
-        let dest = crate::layout::approach_point(
-            wp.kind.furniture(),
-            wp.pos,
-            wp.facing,
-            layout.pantry_counter_size,
-            &layout.walkable,
-            desk,
-            &layout.reachable,
-        );
-        // NO approach-side fallback (mirrors tui::motion::pick_wander_dest so the
-        // overlay + render stay in lockstep): when no allowed+reachable side
-        // exists, approach_point returns the blocked `wp.pos` sentinel (a seat
-        // boxed in to only its backrest, or an obstacle with no open reachable
-        // side). Amble aimlessly this cycle instead of routing into the furniture.
-        if dest == wp.pos {
-            amble()
-        } else {
-            (
-                dest,
-                Pose::AtWaypoint {
-                    wp: wp_idx,
-                    kind: wp.kind,
-                },
-            )
-        }
+    // Destination: lounge waypoint OR aimless point, resolved by the ONE shared
+    // `resolve_wander_target` (also driving `motion::advance_wander`), then mapped
+    // to a pose. The per-cycle aimless-vs-waypoint roll, the weighted-zone aimless
+    // pick, the reachable-approach selection, and the no-reachable-side amble
+    // fallback all live in that resolver so the stateless overlay here and the
+    // stateful render can't drift.
+    let target = resolve_wander_target(slot.agent_id, cycle_n, layout, desk);
+    let dest = target.dest;
+    let at_dest_pose: Pose = match target.kind {
+        WanderKind::Named { wp_idx, kind, .. } => Pose::AtWaypoint { wp: wp_idx, kind },
+        WanderKind::Aimless => Pose::AimlessAt { dest: target.dest },
     };
 
     if phase_t < seated_end {

@@ -262,10 +262,14 @@ fn seated_waypoint_snap_back_starts_from_the_seat_not_the_approach_cell() {
     ms.wander.phase = crate::motion::WanderPhase::AtWaypoint;
     ms.wander.phase_started_at = now;
     ms.wander.last_advanced_at = now; // pin the phase (advance_wander no-ops at now)
-    ms.wander.dest = approach;
-    ms.wander.seat = Some(seat);
-    ms.wander.dest_kind = Some(crate::layout::WaypointKind::Couch);
-    ms.wander.dest_wp_idx = Some(0);
+    ms.wander.target = crate::motion::WanderTarget {
+        dest: approach,
+        kind: crate::motion::WanderKind::Named {
+            wp_idx: 0,
+            kind: crate::layout::WaypointKind::Couch,
+            seat: Some(seat),
+        },
+    };
     motion.insert(idle.agent_id, ms);
     match derive_with_routing(
         &idle,

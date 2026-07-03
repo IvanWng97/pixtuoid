@@ -19,7 +19,7 @@ use pixtuoid_core::AgentId;
 
 use crate::motion::{
     advance_wander, octile_path_len, settle_len, walking_position, MotionState, WalkLeg,
-    WalkPathSnapshot, WanderPhase,
+    WalkPathSnapshot, WanderKind, WanderPhase,
 };
 use crate::physics::{walk_arrived, walk_profile, walk_progress, WalkIntent};
 use pixtuoid_core::walkable::{OccupancyOverlay, WalkableMask};
@@ -31,6 +31,9 @@ pub use pure::{
     STALE_RESUME_GAP_BASE_MS, STALE_RESUME_GAP_RANGE_MS, THINKING_WINDOW_SECS, TYPING_FRAMES,
     TYPING_FRAME_MS, WALKING_FRAMES, WALKING_FRAME_MS, WANDER_DWELL_EST_MS, WANDER_WALK_EST_MS,
 };
+// `resolve_wander_target` stays crate-internal (the motion authority delegates to
+// it); a `pub use` would try to widen its `pub(crate)` visibility.
+pub(crate) use pure::resolve_wander_target;
 
 use crate::layout::{desk_walk_anchor, Layout, Point, WaypointKind};
 use crate::pathfind::Router;
@@ -437,8 +440,8 @@ pub fn derive_with_routing(
             WanderPhase::WalkingOut => {
                 let ms = motion.get(&slot.agent_id)?;
                 let desk_point = layout.home_desk(slot.desk_index.single_floor_local())?;
-                let dest = ms.wander.dest;
-                let seat = ms.wander.seat;
+                let dest = ms.wander.target.dest;
+                let seat = ms.wander.target.kind.seat();
                 // Leave the desk via the approach cell (a reachable N/E/W side),
                 // never straight through the south front: `from` is the approach
                 // cell and the chair is PREPENDED via Settle so the sprite first
@@ -472,14 +475,11 @@ pub fn derive_with_routing(
             }
             WanderPhase::AtWaypoint => {
                 let ms = motion.get(&slot.agent_id)?;
-                let pose = if let (Some(wp_idx), Some(kind)) =
-                    (ms.wander.dest_wp_idx, ms.wander.dest_kind)
-                {
-                    Pose::AtWaypoint { wp: wp_idx, kind }
-                } else {
-                    Pose::AimlessAt {
-                        dest: ms.wander.dest,
-                    }
+                let pose = match ms.wander.target.kind {
+                    WanderKind::Named { wp_idx, kind, .. } => Pose::AtWaypoint { wp: wp_idx, kind },
+                    WanderKind::Aimless => Pose::AimlessAt {
+                        dest: ms.wander.target.dest,
+                    },
                 };
                 // Record the RENDERED position so snap-back/exit (which read
                 // history.recent as their walk origin) start where the sprite
@@ -489,7 +489,12 @@ pub fn derive_with_routing(
                 // `dest` for a seat popped the sprite ~10px to the off-side
                 // approach cell on the first snap-back/exit frame — the one seated
                 // departure the WalkingBack Settle machinery didn't cover.
-                let pt = ms.wander.seat.unwrap_or(ms.wander.dest);
+                let pt = ms
+                    .wander
+                    .target
+                    .kind
+                    .seat()
+                    .unwrap_or(ms.wander.target.dest);
                 history.record(slot.agent_id, pt, now);
                 return Some(pose);
             }
@@ -498,10 +503,16 @@ pub fn derive_with_routing(
                 let desk_point = layout.home_desk(slot.desk_index.single_floor_local())?;
                 // Copy the fields off `ms` so the immutable `motion` borrow ends
                 // before `route_walking_pose` takes `&mut motion`.
-                let wander_dest = ms.wander.dest;
+                let wander_dest = ms.wander.target.dest;
                 let wander_phase_started_at = ms.wander.phase_started_at;
-                let carrying_coffee = ms.wander.dest_kind == Some(WaypointKind::Pantry);
-                let seat = ms.wander.seat;
+                let carrying_coffee = matches!(
+                    ms.wander.target.kind,
+                    WanderKind::Named {
+                        kind: WaypointKind::Pantry,
+                        ..
+                    }
+                );
+                let seat = ms.wander.target.kind.seat();
                 // Arrive at the desk via the approach cell (a reachable N/E/W
                 // side), never up through the south front: `to` is the approach
                 // cell and the chair is APPENDED via Settle so the sprite glides

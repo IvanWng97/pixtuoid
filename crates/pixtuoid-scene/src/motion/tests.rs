@@ -1,4 +1,5 @@
 use super::*;
+use crate::pose::{is_aimless_cycle, waypoint_index_for_cycle};
 use pixtuoid_core::{AgentId, GlobalDeskIndex};
 
 fn id() -> AgentId {
@@ -18,8 +19,7 @@ fn motion_state_new_default_fields() {
     assert_eq!(ms.wander.phase_started_at, SystemTime::UNIX_EPOCH);
     assert_eq!(ms.wander.last_advanced_at, SystemTime::UNIX_EPOCH);
     assert!(ms.wander.profile.is_none());
-    assert!(ms.wander.dest_kind.is_none());
-    assert!(ms.wander.dest_wp_idx.is_none());
+    assert!(matches!(ms.wander.target.kind, WanderKind::Aimless));
     assert!(ms.walk_path.is_none());
 }
 
@@ -190,10 +190,10 @@ fn trip_agent(prefix: &str) -> AgentId {
 /// (per-spot for a named waypoint, the estimate for an aimless trip). Read
 /// after the agent has picked a destination (WalkingOut onward).
 fn current_dwell_dur(motion: &HashMap<AgentId, MotionState>, id: AgentId) -> u64 {
-    motion
-        .get(&id)
-        .and_then(|ms| ms.wander.dest_kind)
-        .map_or(WANDER_DWELL_EST_MS, |k| dwell_ms(k, id))
+    match motion.get(&id).map(|ms| ms.wander.target.kind) {
+        Some(WanderKind::Named { kind, .. }) => dwell_ms(kind, id),
+        _ => WANDER_DWELL_EST_MS,
+    }
 }
 
 /// Poll `advance_wander` in ~1 s steps (well under the `stale_resume_gap_ms`
@@ -960,7 +960,7 @@ fn wander_out_profile_routes_to_the_jittered_goal_the_render_uses() {
     let (_, routed_to) = *router.calls.last().expect("the trip snapshot routed");
     assert_eq!(
         routed_to,
-        jitter_dest(trip_id, ms.wander.dest),
+        jitter_dest(trip_id, ms.wander.target.dest),
         "the WalkingOut profile must route to the render's jittered goal"
     );
 }
@@ -977,14 +977,14 @@ fn back_profile_routes_to_the_jittered_desk_goal_the_render_uses() {
     let overlay = OccupancyOverlay::new();
     let mut router = Recording { calls: Vec::new() };
     let mut ms = MotionState::new(trip_id);
-    ms.wander.dest = Point { x: 40, y: 60 };
+    ms.wander.target.dest = Point { x: 40, y: 60 };
 
     let _ = snapshot_back_profile(&slot, &ms, &l, &mut router, &overlay);
 
     let (snap_to, _) = desk_leg_endpoint(l.home_desks[0], &l);
     assert_eq!(
         router.calls,
-        vec![(ms.wander.dest, jitter_dest(trip_id, snap_to))],
+        vec![(ms.wander.target.dest, jitter_dest(trip_id, snap_to))],
         "the walk-back profile must route to the render's jittered desk goal"
     );
 }
@@ -1079,7 +1079,13 @@ fn wander_dest_for_pantry_is_the_home_desk_stand_point() {
     let _ = now;
 
     let ms = motion.get(&slot.agent_id).expect("state");
-    assert_eq!(ms.wander.dest_kind, Some(WaypointKind::Pantry));
+    assert!(matches!(
+        ms.wander.target.kind,
+        WanderKind::Named {
+            kind: WaypointKind::Pantry,
+            ..
+        }
+    ));
     let desk = l.home_desks[0];
     let expected = crate::layout::approach_point(
         WaypointKind::Pantry.furniture(),
@@ -1091,7 +1097,7 @@ fn wander_dest_for_pantry_is_the_home_desk_stand_point() {
         &l.reachable,
     );
     assert_eq!(
-        ms.wander.dest, expected,
+        ms.wander.target.dest, expected,
         "motion dest must equal the home-desk approach_point (core↔tui mirror)"
     );
 }
@@ -1267,12 +1273,11 @@ fn pick_wander_dest_falls_back_to_aimless_when_boxed_in() {
         .expect("should find a directed-trip agent");
 
     let origin = l.home_desks[0];
-    let (_dest, kind, wp_idx, seat) = pick_wander_dest(id, 0, &l, origin);
+    let target = pick_wander_dest(id, 0, &l, origin);
 
-    assert_eq!(
-        kind, None,
-        "a boxed-in waypoint (no reachable approach side) must amble aimlessly"
+    assert!(
+        matches!(target.kind, WanderKind::Aimless),
+        "a boxed-in waypoint (no reachable approach side) must amble aimlessly \
+         (no waypoint index / kind / seat)",
     );
-    assert_eq!(wp_idx, None, "aimless fallback carries no waypoint index");
-    assert_eq!(seat, None, "aimless fallback carries no seat cell");
 }
