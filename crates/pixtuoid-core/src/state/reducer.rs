@@ -671,25 +671,6 @@ impl Reducer {
         }
     }
 
-    /// Pre-pass 0 of [`Reducer::apply`] (hook transport only) — hook events
-    /// are proof of life: synthesize a registration for a tool/permission
-    /// event whose id has no slot, so a session whose transcript was gated at
-    /// first sight becomes visible the moment it fires a hook. Only
-    /// `ActivityStart`/`ActivityEnd`/`Waiting` qualify — each unambiguously
-    /// proves a live session; `SessionEnd` (nothing to remove) and `Rename`
-    /// (nothing to relabel) stay no-ops for an unknown id.
-    ///
-    /// The decoded activity events carry no identity context beyond the
-    /// `AgentId` (no source / session_id / cwd — and the id is a hash, not
-    /// reversible), so the slot starts blank with the bare ordinal label
-    /// (`#N`); a later real `SessionStart` back-fills it (see the
-    /// duplicate-SessionStart arm). Since #221 the hook decoders attach an
-    /// [`AgentEvent::Identity`] AHEAD of tool/permission events, so the slot
-    /// normally already exists — with real identity — by the time the activity
-    /// event applies; this blank path remains the fallback for identity-less
-    /// hook events (`Stop`, directly-constructed events). Routed through
-    /// [`Reducer::register_slot`] so the desk-capacity gate applies the same
-    /// as for a real `SessionStart`.
     /// The `SessionStart` arm of [`Reducer::apply`], lifted whole so the
     /// match stays a one-line dispatch. Handles the #242/#244 tombstone
     /// gates, ledger parent adoption/#240 cycle filter, duplicate-start
@@ -951,6 +932,25 @@ impl Reducer {
         }
     }
 
+    /// Pre-pass 0 of [`Reducer::apply`] (hook transport only) — hook events
+    /// are proof of life: synthesize a registration for a tool/permission
+    /// event whose id has no slot, so a session whose transcript was gated at
+    /// first sight becomes visible the moment it fires a hook. Only
+    /// `ActivityStart`/`ActivityEnd`/`Waiting` qualify — each unambiguously
+    /// proves a live session; `SessionEnd` (nothing to remove) and `Rename`
+    /// (nothing to relabel) stay no-ops for an unknown id.
+    ///
+    /// The decoded activity events carry no identity context beyond the
+    /// `AgentId` (no source / session_id / cwd — and the id is a hash, not
+    /// reversible), so the slot starts blank with the bare ordinal label
+    /// (`#N`); a later real `SessionStart` back-fills it (see the
+    /// duplicate-SessionStart arm). Since #221 the hook decoders attach an
+    /// [`AgentEvent::Identity`] AHEAD of tool/permission events, so the slot
+    /// normally already exists — with real identity — by the time the activity
+    /// event applies; this blank path remains the fallback for identity-less
+    /// hook events (`Stop`, directly-constructed events). Routed through
+    /// [`Reducer::register_slot`] so the desk-capacity gate applies the same
+    /// as for a real `SessionStart`.
     fn synthesize_hook_registration(
         &mut self,
         scene: &mut SceneState,

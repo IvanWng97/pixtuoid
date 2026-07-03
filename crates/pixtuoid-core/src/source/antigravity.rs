@@ -1,7 +1,7 @@
 use anyhow::Result;
 use serde_json::Value;
 
-use crate::source::decoder::generic_tool_display;
+use crate::source::decoder::{first_present_str, generic_tool_display};
 use crate::source::AgentEvent;
 use crate::AgentId;
 
@@ -109,15 +109,18 @@ fn decode_ag_tool_call(
 /// but nothing read AG-named tools' input there, so the keys were dead code
 /// and AG displays silently lost their targets.)
 fn ag_tool_target(args: Option<&Value>) -> Option<String> {
-    let args_obj = args?.as_object()?;
-    let raw = args_obj
-        .get("DirectoryPath")
-        .or_else(|| args_obj.get("AbsolutePath"))
-        .or_else(|| args_obj.get("TargetFile"))
-        .or_else(|| args_obj.get("CommandLine"))
-        .or_else(|| args_obj.get("SearchPath"))
-        .or_else(|| args_obj.get("query"))
-        .and_then(|v| v.as_str())?;
+    // AG's per-tool arg vocabulary (priority order); the shared scan skips a
+    // present-but-non-string key rather than giving up on it (the old
+    // `.or_else` chain `as_str`d only the first present key).
+    const KEYS: &[&str] = &[
+        "DirectoryPath",
+        "AbsolutePath",
+        "TargetFile",
+        "CommandLine",
+        "SearchPath",
+        "query",
+    ];
+    let raw = first_present_str(args?, KEYS)?;
     let clean = raw
         .strip_prefix('"')
         .and_then(|s| s.strip_suffix('"'))

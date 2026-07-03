@@ -183,7 +183,7 @@ fn floor_lamp_south_offset() -> u16 {
 /// Bundled input for the pixel-painting pass. Constructed at the `render_floor`
 /// / `draw_scene` call site.
 pub struct PixelCtx<'a> {
-    /// The per-floor sim/paint STORES borrowed as ONE group (was six flat
+    /// The per-floor sim/paint STORES borrowed as ONE group (was seven flat
     /// fields: `router`/`overlay`/`history`/`cache`/`motion`/`light` +
     /// `door_anim_max_ms`). `render_to_rgb_buffer` reads them as disjoint field
     /// projections (`store.router`, `store.overlay`, …). `buf` stays a SEPARATE
