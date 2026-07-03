@@ -33,7 +33,7 @@ tests/
 │   ├── first_sight.rs        the first-sight gate: stale/recent/ended/oversized seeds, probe bypass, cwd + id/label derivers, subagent parent links
 │   ├── liveness.rs           proof-of-life emission, negative vouch, instant exit (pid death), probe-failure no-ops
 │   ├── unclaim.rs            child-end un-claim: turn-N+1 re-register + in-flight multi-turn revival
-│   ├── sources.rs            Source::run glue (codex / antigravity / claude-code bind+spawn)
+│   ├── sources.rs            Source::run glue (codex / antigravity / claude-code / copilot bind+spawn)
 │   └── attach.rs             the mid-attach scenario suite (attach shows exactly the live set)
 ├── transport/main.rs         #[cfg(unix)] mod socket;  #[cfg(windows)] mod pipe;
 ├── render/main.rs            mod {blit, format}  +  render/fixtures/ (sprites)
@@ -86,6 +86,6 @@ tests/
 `transport/pipe.rs` (in `transport/main.rs`) and the hook shim's
 `tests/shim_pipe.rs` are `#[cfg(windows)]` twins of `transport/socket.rs`
 and `tests/shim.rs` respectively — they run only on the `windows-test` CI
-job (windows-2022, full nextest suite). Each branch executes only on its
+job (full nextest suite). Each branch executes only on its
 target OS, and the windows job is part of the parity invariant: a behavior
 pinned on one platform's transport must stay pinned on the other's twin.

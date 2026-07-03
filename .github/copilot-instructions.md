@@ -1,8 +1,10 @@
 # GitHub Copilot instructions — pixtuoid
 
 pixtuoid is a terminal-native, multi-agent pixel-art visualizer for AI coding
-agents — a Cargo workspace of three Rust crates (`pixtuoid-core` headless lib,
-`pixtuoid` binary, `pixtuoid-hook` shim).
+agents — a Cargo workspace of five Rust crates: `pixtuoid-core` (headless lib),
+`pixtuoid-scene` (backend-agnostic render+sim engine), `pixtuoid` (binary),
+`pixtuoid-web` (wasm `<canvas>` painter, publish-excluded), and `pixtuoid-hook`
+(the shim). DAG: `pixtuoid-core ← pixtuoid-scene ← {pixtuoid, pixtuoid-web}`.
 
 **Read [`CLAUDE.md`](../CLAUDE.md) first** (and the nested `crates/*/CLAUDE.md` for
 the crate you touch). It holds the architecture invariants and "known sharp
@@ -12,7 +14,7 @@ Workflow + how to add a theme / agent-CLI `Source`: [`CONTRIBUTING.md`](../docs/
 
 ## Architecture invariants (never break these)
 
-1. `pixtuoid-core` has **no terminal dependencies** — no `ratatui`, `crossterm`, or `stdout`/`println!`. Terminal concerns live behind the `Renderer` trait.
+1. `pixtuoid-core` **and** `pixtuoid-scene` have **no terminal/window dependencies** — no `ratatui`, `crossterm`, `winit`, or `stdout`/`println!` (compiler-enforced by the crate boundary, checked by `just arch`). Terminal/window concerns live in the binary's thin painters over the engine's render seam (`pixtuoid_scene::floor::render_floor` / `pixel_painter::render_to_rgb_buffer`) — NOT the legacy `#[doc(hidden)]` `Renderer` trait, which misled two design rounds; don't build on it.
 2. Events flow through **one** channel typed `mpsc::Sender<(Transport, AgentEvent)>`; the `Transport` tag is load-bearing (hook-wins dedup). Each `Source` tags its own events — don't hardcode `Transport::Hook` on the consumer side.
 3. The **`Source` trait** is the only seam for adding a transcript-bearing agent CLI (hook-only CLIs like Reasonix instead ship a hook decoder + an install `Target`).
 4. Hook install (`install::install_target`, driven by the in-TUI Sources panel `s` — no `install-hooks` CLI) writes through symlinks (`resolve_symlink`) — don't replace with `fs::rename`.
@@ -26,12 +28,12 @@ Workflow + how to add a theme / agent-CLI `Source`: [`CONTRIBUTING.md`](../docs/
 - Use `tracing::{info, warn, error}`, not `println!`/`eprintln!`.
 - **Comments explain WHY, not what.**
 - **Keep docs current** — a module/API/workflow change updates the relevant `CLAUDE.md` / `README.md` in the *same* commit.
-- Verify with `just preflight` (fmt → clippy → test) before pushing. Don't chain `cargo clippy && cargo test` — they use separate build caches (double rebuild).
+- Verify with `just preflight` (lint → clippy → hack → test) before pushing. Don't chain `cargo clippy && cargo test` — they use separate build caches (double rebuild).
 
 ## Build & test
 
 ```bash
-just preflight                         # full gate: lint → clippy → test
+just preflight                         # full gate: lint → clippy → hack → test
 just test                              # the suite (cargo-nextest)
 cargo nextest run -p <crate> <filter>  # fast iteration on one crate
 ```

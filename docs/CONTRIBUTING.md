@@ -64,7 +64,10 @@ the tag is what fires the *irreversible* crates.io publish, so a human owns that
 ```bash
 just setup-tools                            # once per clone — installs cargo-edit (+ the rest)
 just bump 0.5.1                             # bump + draft notes + preflight → branch release/v0.5.1
-# curate the drafted release_notes() bullets to ~6 highlights, then PR → review → merge, then:
+# curate the drafted release_notes() bullets to ~6 highlights, then `just gen`
+# (the office HUD bakes CARGO_PKG_VERSION, so a bump drifts every committed still)
+# and commit docs/images + site/public/demos — else CI's smoke gen-check reds the PR.
+# then PR → review → merge, then:
 git tag v0.5.1 && git push origin v0.5.1    # fires release.yml → build + crates.io + homebrew
 ```
 

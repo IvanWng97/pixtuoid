@@ -145,7 +145,7 @@ Skipping this checklist defeats the point of the skill — the whole reason it e
 6. Decide where it lives in the layout — add a `Point` placement in `SceneLayout::compute`.
 7. Add the obstacle footprint to `build_walkable_mask` (or a waypoint kind if it's interactive).
 8. Add a `DrawableKind::Foo` variant + `paint_drawable` arm if z-sorting matters.
-9. Run `cargo test -p pixtuoid-core`.
+9. Run `cargo test -p pixtuoid-scene` — the layout/walkable-connectivity and painter tests this checklist relies on live there since the scene split (`-p pixtuoid-core` no longer runs any of them).
 10. Snapshot + iterate.
 
 ## Recap of the pantry session (case study)

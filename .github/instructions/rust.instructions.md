@@ -24,9 +24,12 @@ coding-standard slice.
 
 ## Crate boundaries (load-bearing)
 
-- `pixtuoid-core` has **no terminal dependencies** — never add `ratatui`,
-  `crossterm`, or `stdout`/`println!` there. Terminal concerns live behind the
-  `Renderer` trait.
+- `pixtuoid-core` **and** `pixtuoid-scene` have **no terminal/window dependencies**
+  — never add `ratatui`, `crossterm`, `winit`, `softbuffer`, or `stdout`/`println!`
+  there (the crate boundary + `just arch` enforce it). Terminal/window code lives
+  only in the `pixtuoid` binary's painters over the engine's render seam
+  (`pixtuoid_scene::floor::render_floor` / `pixel_painter::render_to_rgb_buffer`) —
+  NOT the legacy `#[doc(hidden)]` `Renderer` trait; don't build on it.
 - Events flow through **one** channel typed `mpsc::Sender<(Transport, AgentEvent)>`.
   Don't hardcode `Transport::Hook` on the consumer side — each `Source` tags its
   own events.
@@ -60,5 +63,5 @@ coding-standard slice.
 - **Keep docs current** — a change to module structure, the public API, or a
   developer workflow updates the relevant `CLAUDE.md` / `README.md` in the *same*
   commit.
-- Verify locally with `just preflight` (lint → clippy → test, the exact CI order)
-  before pushing.
+- Verify locally with `just preflight` (lint → clippy → hack → test, the exact CI
+  order) before pushing.

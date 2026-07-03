@@ -9,7 +9,7 @@ apply everywhere. **Module-level detail and the crate-specific "sharp edges"
 live in nested `CLAUDE.md` files**, auto-loaded when you touch those trees:
 
 - [`crates/pixtuoid-core/CLAUDE.md`](crates/pixtuoid-core/CLAUDE.md) — the headless lib: sources, reducer/state, sprites, the grid/walkable vocabulary.
-  - [`crates/pixtuoid-core/tests/CLAUDE.md`](crates/pixtuoid-core/tests/CLAUDE.md) — the integration-test layout (8 test binaries: six grouped + two flat publish-excluded; parity twins) + add-a-CLI test steps.
+  - [`crates/pixtuoid-core/tests/CLAUDE.md`](crates/pixtuoid-core/tests/CLAUDE.md) — the integration-test layout (8 test binaries: five grouped + three flat, two of them publish-excluded; parity twins) + add-a-CLI test steps.
 - [`crates/pixtuoid-scene/CLAUDE.md`](crates/pixtuoid-scene/CLAUDE.md) — the backend-agnostic render+sim engine CRATE (`pixtuoid-core ← pixtuoid-scene ← pixtuoid`): pixel painter (render_to_rgb_buffer), layout, walk physics, pose (pure + routed) / motion authority, pathfinding, the theme MODEL, weather/ambient, pets, chitchat, frame_cache, embedded_pack.
 - [`crates/pixtuoid/CLAUDE.md`](crates/pixtuoid/CLAUDE.md) — the binary: install, runtime, cli, config, multi-floor, embedded pack.
   - [`crates/pixtuoid/src/tui/CLAUDE.md`](crates/pixtuoid/src/tui/CLAUDE.md) — the terminal painter (over the `pixtuoid-scene` crate): draw_scene flush, harness, widgets, the theme-PICKER ui, Sources panel, dashboard, hit_test, version popup.
@@ -48,8 +48,8 @@ crates/                 DAG: pixtuoid-core ← pixtuoid-scene ← {pixtuoid, pix
 ├── pixtuoid-scene/  backend-agnostic render+sim ENGINE crate — terminal AND window-free BY CRATE
 │                    BOUNDARY (no ratatui/crossterm/winit/softbuffer in its Cargo.toml; just arch enforces)
 │                    pixel_painter/ (render_to_rgb_buffer) layout/ physics.rs pose/ (pure + routed,
-│                    file-level split) motion/ pathfind/ floor/ theme/ pet/ chitchat/ frame_cache/
-│                    anim/ overlay/ font/ embedded_pack/ (default pack at
+│                    file-level split) motion/ pathfind.rs floor.rs theme/ pet.rs chitchat.rs
+│                    frame_cache.rs anim.rs overlay.rs font.rs embedded_pack.rs (default pack at
 │                    sprites/default/, own build.rs); depends on pixtuoid-core (forwards `native`)
 ├── pixtuoid/        binary — ratatui + crossterm + winit + tokio + clap; depends on pixtuoid-scene
 │                    cli.rs config.rs runtime/ install/ tui/ floating/ (two thin painters over the
@@ -112,17 +112,19 @@ scope to one crate (seconds vs a full-workspace run).
 **Test organization (three tiers):** unit tests next to the code (large
 modules use a sibling `#[cfg(test)] mod tests;` file — keeps `use super::*`
 without API widening); integration tests in `crates/<crate>/tests/` —
-pixtuoid-core's suite is 8 binaries (six capability-grouped + two
-deliberately flat publish-excluded) with `#[cfg(windows)]` parity twins, all mapped in
+pixtuoid-core's suite is 8 binaries (five capability-grouped + three
+flat, two of them deliberately publish-excluded) with `#[cfg(windows)]` parity twins, all mapped in
 [`crates/pixtuoid-core/tests/CLAUDE.md`](crates/pixtuoid-core/tests/CLAUDE.md);
 the headless render harness (`tui_renderer/harness.rs`) drives the real
 `TuiRenderer` through ratatui `TestBackend` — see the tui guide. Coverage:
 `just coverage`. Decoder never-panic fuzz vs a real session corpus:
 `just fuzz <jsonl-dir>` (on-demand, not in CI). Mutation testing (do the
 assertions have teeth?): `just mutants` — diff-scoped (`cargo-mutants
---in-diff` vs origin/main), config in `.cargo/mutants.toml`; CI runs it
-**advisory / non-blocking** on every PR (a surviving mutant is a hint, not a
-gate). Property-based invariants use `proptest` (e.g. `walkable.rs`).
+--in-diff` vs origin/main), config in `.cargo/mutants.toml`; in CI it is its own
+**on-demand** workflow (`mutants.yml`, `workflow_dispatch` from the Actions tab),
+NOT per-PR — run it there or locally on reducer/decoder/layout changes (a
+surviving mutant is a hint, not a gate). Property-based invariants use
+`proptest` (e.g. `walkable.rs`).
 
 ### Visual verification
 
@@ -232,7 +234,7 @@ full WHY lives in the nested `CLAUDE.md` for the owning crate.
 - Don't generate a README / CLAUDE.md / CHANGELOG / docs in PRs unless explicitly asked.
 - Don't `git push` without explicit user confirmation, even after committing.
 - Don't leave stale `Closes #N` in commit/squash bodies or PR text on a re-scope — GitHub fires the keyword from either place, and conditional phrasing still fires.
-- Don't merge a PR without the **two-lens review**: 2+ agents, lenses differentiated (correctness/grounding + design/blast-radius), briefs from [`.github/prompts/pr-review.prompt.md`](.github/prompts/pr-review.prompt.md). No exceptions — PR #23 merged unreviewed with a critical path-traversal vulnerability.
+- Don't merge a PR without the **two-lens review**: 2+ agents, lenses differentiated (correctness/grounding + design/blast-radius), briefs from [`.github/prompts/pr-review.prompt.md`](.github/prompts/pr-review.prompt.md) — invokable via the `two-lens-review` skill. No exceptions — PR #23 merged unreviewed with a critical path-traversal vulnerability.
 - Don't blindly accept reviewer findings. Verify the premise before coding a fix — check the relevant sharp edges and existing comments first; if a fix contradicts an earlier design decision, trace the code path manually.
 - **Don't assert on a path's STRING form with a hardcoded separator.** `Path::join` / `to_string_lossy()` emit `\` on Windows, so `assert_eq!(p.to_string_lossy(), "/home/u/claw")` passes on Unix and fails ONLY on `windows-test` (a CI-only catch — local macOS preflight is blind to it). Keep path helpers RETURNING `PathBuf` (not `String`) and compare `PathBuf` (structural, component-wise), or build the expected with the SAME `.join()` the impl uses. `PathBuf` is the cross-platform abstraction — stay in it, don't round-trip to `String` for comparison. (Resolution-POLICY differences — `HOME` vs `USERPROFILE`, `%APPDATA%` vs `~/.config` — are a SEPARATE class no path lib fixes: each CLI resolves differently, so `dirs`/`shellexpand` give the generic answer = the bug; mirror each CLI instead, see `platform::home_first_dir`/`resolve_user_config_dir`.)
 
@@ -256,4 +258,5 @@ new `AgentEvent` variant also needs an `agent_id()` arm.
 ship a `hook.custom` decoder + an `install/` target instead) + a row in
 `site/src/sources.json` (bridge-tested against `REGISTERED_SOURCES`). Full
 steps: `crates/pixtuoid-core/CLAUDE.md` "multi-source decoding" + the tests
-guide.
+guide — or invoke the `add-source` skill (which foregrounds the test-teeth steps
+a diff-scoped edit misses). A new theme has an analogous `add-theme` skill.

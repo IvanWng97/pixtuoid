@@ -15,7 +15,10 @@ by reading actual code — no guessing, no "this might be an issue."
 ### Must check
 
 1. **Architecture invariant violations** (the 6 invariants in CLAUDE.md):
-   - `pixtuoid-core` importing terminal dependencies (ratatui, crossterm)
+   - `pixtuoid-core` OR `pixtuoid-scene` importing terminal/window dependencies
+     (ratatui, crossterm, winit, softbuffer) — both crates are backend-free by
+     the crate boundary + `just arch`; terminal/window code lives only in the
+     `pixtuoid` binary's painters over the engine's render seam
    - Events bypassing the typed `mpsc` channel or hardcoding `Transport::Hook`
    - Source implementations not going through the `Source` trait
    - `install::install_target`/`uninstall_target` not going through the `ConfigLock` round (`write_config_atomic`) for settings.json
@@ -73,6 +76,9 @@ review in #198), NOT a replacement for the judgement below:
 - Speculative future issues ("this could become a problem if...")
 - Anything cargo-deny, cargo-machete, or CI already catches
 - Performance unless measurable (this is a TUI rendering ~30fps, not a hot loop)
+- Absence of defense-in-depth where a PRIMARY defense already exists (a missing
+  belt when the suspenders hold) — matches the two-lens protocol's negative space
+  (`pr-review.prompt.md`); a genuinely missing PRIMARY guard is a real bug, flag that
 
 ## Anti-hallucination protocol
 
@@ -91,7 +97,8 @@ review in #198), NOT a replacement for the judgement below:
 ## Severity
 
 - **HIGH**: must fix before merge — real bug, invariant violation, missing critical test
-- **MEDIUM**: worth fixing — scope creep, stale docs, defense-in-depth gap
+- **MEDIUM**: worth fixing — scope creep, stale docs (a genuinely missing PRIMARY
+  defense is a real bug → HIGH, not a MEDIUM defense-in-depth nit; see Do NOT flag)
 
 No LOW findings. If it's not worth fixing, don't mention it.
 

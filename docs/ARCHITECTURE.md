@@ -13,8 +13,10 @@ pixtuoid is a Cargo workspace of **five crates** wired as a strict
 **producer → reducer → renderer** pipeline:
 
 - **`pixtuoid-core`** — the headless library. It has **no terminal dependencies**
-  (no `ratatui`, no `crossterm`); everything terminal-specific sits behind the
-  `Renderer` trait. Owns sources, the reducer + scene state, the sprite format,
+  (no `ratatui`, no `crossterm`); terminal-specific code lives downstream in the
+  binary's thin painters, which render through the engine's seam
+  (`pixtuoid_scene::floor::render_floor` / `pixel_painter::render_to_rgb_buffer`).
+  Owns sources, the reducer + scene state, the sprite format,
   and the grid/walkable vocabulary (the sim geometry — layout/physics/pose —
   lives in `pixtuoid-scene`; only the coherence-bound `walkable.rs` stays).
 - **`pixtuoid-scene`** — the backend-agnostic render + simulation **engine**: the
@@ -42,8 +44,11 @@ pixtuoid is a Cargo workspace of **five crates** wired as a strict
   block your agent.
 
 Dependency direction is one-way: `pixtuoid-core ← pixtuoid-scene ← {pixtuoid, pixtuoid-web}`. The
-`Renderer` trait is the inversion point that keeps the core terminal-free (so the
-same pixel pass can drive a PNG/GIF export, not just the terminal).
+engine's render seam (`render_floor` / `render_to_rgb_buffer` in `pixtuoid-scene`)
+is the inversion point that keeps the core terminal-free — the same pixel pass
+drives the terminal, the desktop window, and a browser `<canvas>`. (A legacy
+`Renderer` trait survives in `pixtuoid-core`'s `render/`, but it is `#[doc(hidden)]`
+and NOT the seam — don't build on it.)
 
 A **`Source`** is one of two classes (`source/registry.rs`'s `SourceKind`):
 
@@ -180,7 +185,8 @@ These are load-bearing — see `CLAUDE.md` and the nested guides before changing
 - **Events flow through ONE tagged channel.** Producers tag their own events; the
   reducer never hardcodes `Transport::Hook` — it reads the producer's tag.
 - **`pixtuoid-core` has no terminal dependencies.** Anything terminal-specific
-  goes behind the `Renderer` trait.
+  lives in a thin painter over the engine's render seam (`render_floor` /
+  `render_to_rgb_buffer`), never in the core or the scene engine.
 - **The hook shim must never block the agent** — always exit 0, 200 ms write
   timeout.
 - **Subagent supervision is a scope tree** (`state/scope.rs`): exit cascades
