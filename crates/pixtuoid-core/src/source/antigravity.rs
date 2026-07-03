@@ -224,6 +224,17 @@ mod tests {
         );
     }
 
+    #[test]
+    fn ag_tool_target_falls_through_a_present_non_string_key() {
+        // Regression pin for the `first_present_str` switch: a present but
+        // non-string HIGHER-priority key must not abort the scan (the old
+        // `.or_else` chain `as_str`'d only the first present key and returned
+        // None here) — it now falls through. `DirectoryPath` is a number →
+        // skipped → the string `AbsolutePath` wins.
+        let args = serde_json::json!({ "DirectoryPath": 42, "AbsolutePath": "/repo/x" });
+        assert_eq!(ag_tool_target(Some(&args)).as_deref(), Some("/repo/x"));
+    }
+
     // The label / session-ended / default-paths tests live with the runtime
     // half in `native.rs`.
 }

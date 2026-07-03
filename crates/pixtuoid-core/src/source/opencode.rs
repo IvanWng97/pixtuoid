@@ -101,19 +101,20 @@ pub fn decode_oc_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
         .get("type")
         .and_then(|s| s.as_str())
         .ok_or_else(|| anyhow!("opencode payload missing type"))?;
-    // `properties` is the EventV2 `data`. Default to an empty object so a
-    // payload-shape surprise degrades to "missing field" rather than panicking.
-    let props = obj.get("properties").and_then(|p| p.as_object());
+    // `properties` is the EventV2 `data`. Derive it ONCE from a single lookup so
+    // the two views can't drift: `props_val` is the raw value (fed to
+    // `decode_permission`, which scans it via `first_present_str`), `props` its
+    // object view with an empty-object fallback so a payload-shape surprise
+    // degrades to "missing field" rather than panicking.
+    let props_val = obj.get("properties").unwrap_or(&Value::Null);
     let empty = serde_json::Map::new();
-    let props = props.unwrap_or(&empty);
+    let props = props_val.as_object().unwrap_or(&empty);
 
     match event {
         "session.created" => decode_session_lifecycle(props, false),
         "session.deleted" => decode_session_lifecycle(props, true),
         "message.part.updated" => decode_tool_part(props),
-        "permission.asked" | "permission.v2.asked" => {
-            decode_permission(obj.get("properties").unwrap_or(&Value::Null))
-        }
+        "permission.asked" | "permission.v2.asked" => decode_permission(props_val),
         // The plugin only forwards the mapped set + tool parts; anything else
         // (a pending tool part, a not-yet-mapped type) is skipped, not bailed.
         _ => Ok(vec![]),

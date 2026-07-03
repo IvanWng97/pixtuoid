@@ -1083,6 +1083,7 @@ fn wander_dest_for_pantry_is_the_home_desk_stand_point() {
         ms.wander.target.kind,
         WanderKind::Named {
             kind: WaypointKind::Pantry,
+            seat: None, // Pantry is an obstacle (stands AT, not sits ON)
             ..
         }
     ));
@@ -1279,5 +1280,50 @@ fn pick_wander_dest_falls_back_to_aimless_when_boxed_in() {
         matches!(target.kind, WanderKind::Aimless),
         "a boxed-in waypoint (no reachable approach side) must amble aimlessly \
          (no waypoint index / kind / seat)",
+    );
+}
+
+/// Continuity guard for the WanderTarget reshape (the flat
+/// `dest`/`dest_kind`/`dest_wp_idx`/`seat` -> `WanderKind::Named{wp_idx,kind,seat}
+/// | Aimless` collapse): a `Named` destination's `seat` is `Some` IFF the
+/// waypoint is one the agent sits ON (`occupies_pos`), `None` for an obstacle it
+/// stands AT — the invariant `seated_foot_cell` enforces. Pins the
+/// `Named{seat:None}`-vs-seat boundary across the resolver so a future
+/// `WanderKind` edit can't silently drop or forge the settle cell (a mid-walk
+/// pop / wrong render anchor).
+#[test]
+fn wander_named_seat_is_some_iff_the_destination_is_sat_on() {
+    use crate::layout::furniture_def;
+    // A full-size floor so BOTH obstacle (pantry/vending/printer) AND seat
+    // (couch / meeting sofa) waypoints exist to cover both sides of the boundary
+    // — the tiny 120x96 `layout()` fixture has no seat waypoints.
+    let l = Layout::compute(240, 160, None).expect("fits");
+    let origin = l.home_desks[0];
+    let (mut saw_obstacle, mut saw_seat) = (false, false);
+    for i in 0u64..5000 {
+        let id = AgentId::from_transcript_path(&format!("/p/seatpin_{i}.jsonl"));
+        if !takes_trip(id, 0) || is_aimless_cycle(id, 0) {
+            continue;
+        }
+        if let WanderKind::Named { kind, seat, .. } = pick_wander_dest(id, 0, &l, origin).kind {
+            assert_eq!(
+                seat.is_some(),
+                furniture_def(kind.furniture()).occupies_pos,
+                "Named.seat.is_some() must equal occupies_pos for {kind:?}",
+            );
+            if seat.is_some() {
+                saw_seat = true;
+            } else {
+                saw_obstacle = true;
+            }
+        }
+    }
+    assert!(
+        saw_obstacle,
+        "sweep must resolve at least one obstacle (seat:None) waypoint"
+    );
+    assert!(
+        saw_seat,
+        "sweep must resolve at least one seat (seat:Some) waypoint"
     );
 }
