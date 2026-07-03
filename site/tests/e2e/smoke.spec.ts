@@ -350,8 +350,13 @@ test('theme chain: saved choice, URL override, toggle persist, Escape restore, s
   // flip + persist + the pix:theme dispatch → listener → sync() icon/aria chain.
   await page.evaluate(() => localStorage.setItem('pix-theme', 'day'));
   await page.goto('./');
+  // the brand mark (nav + footer) IS the tab favicon asset, swapped by the same
+  // theme sync — day shows the lit mark, the toggle flips it to the night mark.
+  await expect(page.locator('.nav__mark')).toHaveAttribute('src', /favicon-32\.png$/);
   await page.locator('#theme-toggle').click();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'night');
+  await expect(page.locator('.nav__mark')).toHaveAttribute('src', /favicon-32-night\.png$/);
+  await expect(page.locator('.footer__mark')).toHaveAttribute('src', /favicon-32-night\.png$/);
   expect(await page.evaluate(() => localStorage.getItem('pix-theme'))).toBe('night');
   await expect(page.locator('#theme-toggle .nav__toggle-icon')).toHaveText('☀️');
   await expect(page.locator('#theme-toggle')).toHaveAttribute('aria-label', 'Switch to day');

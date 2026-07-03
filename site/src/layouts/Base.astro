@@ -269,21 +269,30 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
 
         // browser-chrome tint per theme comes from the parse-first single source
         const themeMeta = document.querySelector('meta[name="theme-color"]');
-        // …and the tab icon: the little coworker turns the lights off after
-        // dark (path derived from the day href so the Pages base-path holds)
+        // …and the brand mark: the tab favicon AND the on-page nav/footer marks
+        // are the SAME asset pair (one brand source, no drift), so the little
+        // coworker turns the lights off after dark everywhere at once. Night ⇔
+        // any non-day theme (dracula included), matching the Nav toggle. Path is
+        // derived from the current href so the Pages base-path holds.
         const fav = document.getElementById('favicon');
-        function syncFavicon() {
-          if (!fav) return;
-          const t = document.documentElement.dataset.theme;
-          const day = fav.href.replace('favicon-32-night.png', 'favicon-32.png');
-          fav.href = t === 'day' ? day : day.replace('favicon-32.png', 'favicon-32-night.png');
+        const brandMarks = document.querySelectorAll('.js-brand-mark');
+        function syncBrand() {
+          const night = document.documentElement.dataset.theme !== 'day';
+          function swap(cur) {
+            const day = cur.replace('favicon-32-night.png', 'favicon-32.png');
+            return night ? day.replace('favicon-32.png', 'favicon-32-night.png') : day;
+          }
+          if (fav) fav.href = swap(fav.href);
+          brandMarks.forEach(function (m) {
+            m.src = swap(m.src);
+          });
         }
-        syncFavicon();
+        syncBrand();
         document.addEventListener('pix:theme', function () {
           const t = document.documentElement.dataset.theme;
           if (themeMeta && window.__pixTheme.BG[t])
             themeMeta.setAttribute('content', window.__pixTheme.BG[t]);
-          syncFavicon();
+          syncBrand();
           // any explicit theme act ends the clock's authority (and its footer line)
           delete document.documentElement.dataset.clockNight;
         });
