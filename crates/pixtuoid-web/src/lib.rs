@@ -32,6 +32,94 @@ use pixtuoid_scene::embedded_pack::load_sprite_pack;
 use pixtuoid_scene::floor::{floor_capacity, FloorMeta, FloorSession};
 use pixtuoid_scene::theme::{Theme, ALL_THEMES};
 
+/// A scheduled one-shot event for a visitor hire — an absolute-time
+/// (`SystemTime`) event queued OUTSIDE the loop machinery, so a hire's lifecycle
+/// never replays on wrap. Named over the former `(SystemTime, AgentEvent)`
+/// tuple (cf. `PlantItem`/`WallDecorItem`).
+struct ScheduledEvent {
+    at: SystemTime,
+    event: AgentEvent,
+}
+
+/// The visitor-hire lane (#434): the pending one-shot queue, the live-id
+/// registry the cap counts, and the monotonic key counter — grouped so the cap
+/// invariant lives in ONE place across the enqueue (`try_hire`) and drain
+/// (`drain_due`) sides. This is grouping/taste, NOT an illegal-state fix — it
+/// makes no bad combination unrepresentable; it co-locates the two methods that
+/// jointly own the cap so they can't drift.
+#[derive(Default)]
+struct VisitorHires {
+    /// Absolute-time one-shot events, kept sorted by time; drained from the front.
+    pending: Vec<ScheduledEvent>,
+    /// Live hire ids (pruned against the scene) — caps concurrent hires.
+    ids: Vec<AgentId>,
+    /// Monotonic hire counter → unique session keys.
+    seq: u32,
+}
+
+impl VisitorHires {
+    /// Cap on concurrently-alive visitor hires: enough that repeat clicks
+    /// visibly stack, few enough that click-spam can't crowd out the cast.
+    const MAX_LIVE: usize = 3;
+
+    /// Queue one more hire's lifecycle — the enqueue side of `Office::hire`.
+    /// Owns the full prune → cap → free-desk → push → sort; refuses (no-op) when
+    /// the cap is reached or the canvas-synced office has no free desk to seat
+    /// one. `scene` is the live scene (read-only here — the reducer applies the
+    /// queued events later, in `drain_due`).
+    fn try_hire(&mut self, base: SystemTime, scene: &SceneState) {
+        // `ids` is THE registry the cap counts — each admitted hire is in it
+        // exactly once. Prune only ids that are neither LIVE (in the scene) nor
+        // still QUEUED (SessionStart pending): pruning queued ids would
+        // permanently lose them, and a click one frame after a burst would
+        // overshoot the cap (the review-caught under-count, PR #436).
+        self.ids.retain(|id| {
+            scene.agents.contains_key(id)
+                || self.pending.iter().any(
+                    |ev| matches!(&ev.event, AgentEvent::SessionStart { agent_id, .. } if agent_id == id),
+                )
+        });
+        if self.ids.len() >= Self::MAX_LIVE {
+            return;
+        }
+        // A hire the office can't SEAT is refused outright: the reducer would
+        // drop its SessionStart (no free desk), yet the id would hold one of
+        // the MAX_LIVE slots for the full stay — dead flourish, zero visual
+        // feedback. Live agents keep their desks through exit grace and each
+        // queued SessionStart will claim one, so count both against the
+        // canvas-synced capacity (`sync_capacity`).
+        let queued_starts = self
+            .pending
+            .iter()
+            .filter(|ev| matches!(ev.event, AgentEvent::SessionStart { .. }))
+            .count();
+        if scene.agents.len() + queued_starts >= scene.total_capacity() {
+            return;
+        }
+        self.seq += 1;
+        let session = format!("hire-{}", self.seq);
+        let id = AgentId::from_parts(pixtuoid_core::source::claude_code::SOURCE_NAME, &session);
+        self.ids.push(id);
+        for (at_ms, event) in hire_beats(id, session) {
+            self.pending.push(ScheduledEvent {
+                at: base + Duration::from_millis(at_ms),
+                event,
+            });
+        }
+        self.pending.sort_by_key(|ev| ev.at);
+    }
+
+    /// Fire every queued hire event due by `now`, each applied at its SCHEDULED
+    /// time (not `now`) so the reducer's time-based semantics hold. The queue is
+    /// push-sorted, so drain from the front.
+    fn drain_due(&mut self, now: SystemTime, reducer: &mut Reducer, scene: &mut SceneState) {
+        while self.pending.first().is_some_and(|ev| ev.at <= now) {
+            let ev = self.pending.remove(0);
+            reducer.apply(scene, ev.event, ev.at, Transport::Hook);
+        }
+    }
+}
+
 /// A live office rendered to a reusable RGBA buffer across frames. Owns a
 /// `FloorSession` (the scene-owned painter session: per-floor render caches +
 /// persistent office coffee/chitchat + the dual eviction) so keeping ONE
@@ -61,14 +149,11 @@ pub struct Office {
     presence_cursor: usize,
     /// t0 of the current loop; set on the first `step` call.
     epoch: Option<SystemTime>,
-    /// Visitor-hired agents (#434): absolute-time one-shot events queued by
-    /// `hire()` — outside the loop machinery, so a hire's lifecycle never
-    /// replays on wrap. Kept sorted by time; drained by `advance_script`.
-    pending: Vec<(SystemTime, AgentEvent)>,
-    /// Live hire ids (pruned against the scene) — caps concurrent hires.
-    hire_ids: Vec<AgentId>,
-    /// Monotonic hire counter → unique session keys.
-    hire_seq: u32,
+    /// Visitor-hired agents (#434): the one-shot event queue + live-id registry
+    /// + key counter, grouped in `VisitorHires` — outside the loop machinery, so
+    /// a hire's lifecycle never replays on wrap. Enqueued by `hire()`, drained
+    /// by `advance_script`.
+    hires: VisitorHires,
     /// The clock of the most recent `step` — `hire()` has no clock parameter
     /// (it's a JS click handler), so it schedules relative to this.
     last_now: Option<SystemTime>,
@@ -102,9 +187,7 @@ impl Office {
             presence_beats: lobster_beats(),
             presence_cursor: 0,
             epoch: None,
-            pending: Vec::new(),
-            hire_ids: Vec::new(),
-            hire_seq: 0,
+            hires: VisitorHires::default(),
             last_now: None,
             caps_size: None,
         })
@@ -164,43 +247,8 @@ impl Office {
         let Some(base) = self.last_now else {
             return;
         };
-        // `hire_ids` is THE registry the cap counts — each admitted hire is in
-        // it exactly once. Prune only ids that are neither LIVE (in the scene)
-        // nor still QUEUED (SessionStart pending): pruning queued ids would
-        // permanently lose them, and a click one frame after a burst would
-        // overshoot the cap (the review-caught under-count, PR #436).
-        self.hire_ids.retain(|id| {
-            self.scene.agents.contains_key(id)
-                || self.pending.iter().any(
-                    |(_, e)| matches!(e, AgentEvent::SessionStart { agent_id, .. } if agent_id == id),
-                )
-        });
-        if self.hire_ids.len() >= Self::MAX_LIVE_HIRES {
-            return;
-        }
-        // A hire the office can't SEAT is refused outright: the reducer would
-        // drop its SessionStart (no free desk), yet the id would hold one of
-        // the MAX_LIVE_HIRES slots for the full stay — dead flourish, zero
-        // visual feedback. Live agents keep their desks through exit grace
-        // and each queued SessionStart will claim one, so count both against
-        // the canvas-synced capacity (`sync_capacity`).
-        let queued_starts = self
-            .pending
-            .iter()
-            .filter(|(_, e)| matches!(e, AgentEvent::SessionStart { .. }))
-            .count();
-        if self.scene.agents.len() + queued_starts >= self.scene.total_capacity() {
-            return;
-        }
-        self.hire_seq += 1;
-        let session = format!("hire-{}", self.hire_seq);
-        let id = AgentId::from_parts(pixtuoid_core::source::claude_code::SOURCE_NAME, &session);
-        self.hire_ids.push(id);
-        for (at_ms, event) in hire_beats(id, session) {
-            self.pending
-                .push((base + Duration::from_millis(at_ms), event));
-        }
-        self.pending.sort_by_key(|(at, _)| *at);
+        // Delegate to the grouped hire lane (prune → cap → free-desk → push).
+        self.hires.try_hire(base, &self.scene);
     }
 }
 
@@ -300,18 +348,10 @@ impl Office {
         }
 
         // Visitor hires (#434): absolute-time one-shots, independent of the
-        // loop machinery (a hire's lifecycle must not replay on wrap). The
-        // queue is push-sorted, so drain from the front.
-        while self.pending.first().is_some_and(|(at, _)| *at <= now) {
-            let (at, event) = self.pending.remove(0);
-            self.reducer
-                .apply(&mut self.scene, event, at, Transport::Hook);
-        }
+        // loop machinery (a hire's lifecycle must not replay on wrap).
+        self.hires
+            .drain_due(now, &mut self.reducer, &mut self.scene);
     }
-
-    /// Cap on concurrently-alive visitor hires: enough that repeat clicks
-    /// visibly stack, few enough that click-spam can't crowd out the cast.
-    const MAX_LIVE_HIRES: usize = 3;
 
     fn render(&mut self, now: SystemTime, buf_w: u16, buf_h: u16) {
         // The scene-owned session owns the whole frame (#423 → FloorSession):
@@ -527,7 +567,7 @@ mod tests {
         // No clock yet → no-op, never panics.
         o.hire();
         assert!(
-            o.pending.is_empty(),
+            o.hires.pending.is_empty(),
             "hire before the first step is ignored"
         );
 
@@ -603,7 +643,7 @@ mod tests {
             );
         }
         assert_eq!(
-            o.hire_ids.len(),
+            o.hires.ids.len(),
             1,
             "hires the office can't seat are refused, not admitted-invisible"
         );
@@ -630,7 +670,7 @@ mod tests {
         };
         assert_eq!(
             count_hires(&o),
-            Office::MAX_LIVE_HIRES,
+            VisitorHires::MAX_LIVE,
             "click spam caps at the limit"
         );
         // The review-caught under-count: one MORE click after the burst's
@@ -640,7 +680,7 @@ mod tests {
         o.step(T0_MS + 33_000.0, 320, 180);
         assert_eq!(
             count_hires(&o),
-            Office::MAX_LIVE_HIRES,
+            VisitorHires::MAX_LIVE,
             "a post-burst click must not overshoot the cap"
         );
     }
