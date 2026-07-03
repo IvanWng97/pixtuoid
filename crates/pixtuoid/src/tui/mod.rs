@@ -694,10 +694,11 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                                             r.state,
                                             r.source_id,
                                             r.display_name,
+                                            r.connected,
                                             connection::no_action_hint(r),
                                         )
                                     });
-                                if let Some((state, source_id, name, hint)) = action {
+                                if let Some((state, source_id, name, is_connected, hint)) = action {
                                     match state {
                                         // Bound → arm the disconnect confirm (it
                                         // removes hooks + walks characters out).
@@ -729,7 +730,19 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                                                 });
                                         }
                                         connection::ConnState::NoCli => {
-                                            ui.connection.last_result = Some(hint);
+                                            // A source in the connected-set whose CLI
+                                            // has since vanished is STILL disconnectable
+                                            // — its hooks live in the config, not the
+                                            // missing binary — so arm the disconnect
+                                            // confirm. A never-connected absent CLI stays
+                                            // inert (the documented "the panel refuses an
+                                            // absent CLI" is a CONNECT-side rule only).
+                                            if is_connected {
+                                                ui.connection.confirm =
+                                                    Some(ui.connection.selected);
+                                            } else {
+                                                ui.connection.last_result = Some(hint);
+                                            }
                                         }
                                     }
                                 }

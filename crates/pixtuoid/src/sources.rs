@@ -438,6 +438,12 @@ pub struct ConnectionRow {
     pub label_prefix: &'static str,
     pub display_name: &'static str,
     pub state: ConnState,
+    /// Whether this source is in the live connected-set (the persisted `[sources]`
+    /// intent). Carried SEPARATELY from `state` because `NoCli` overrides
+    /// `Connected` in the display (an absent CLI is worth surfacing), yet a
+    /// connected-but-absent source is still disconnectable — its hooks live in the
+    /// config, not the missing binary — so the toggle needs the bit `state` hides.
+    pub connected: bool,
     /// The config the hooks live in; `None` for no-target (JSONL-only) rows.
     pub config_path: Option<PathBuf>,
     /// The install target backing this row; `None` ⇒ connect/disconnect is a
@@ -503,6 +509,7 @@ pub fn build_rows_from(inputs: Vec<RowInput>) -> Vec<ConnectionRow> {
                     .target
                     .map_or_else(|| display_name_for(input.source_id), |t| t.display_name),
                 state,
+                connected: input.connected,
                 config_path: input.facts.and_then(|f| f.config_path),
                 target: input.target,
                 health: input.health,
