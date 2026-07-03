@@ -57,7 +57,6 @@ pub struct FloorMeta {
     pub floor_idx: usize,
     pub altitude: f32,
     pub floor_seed: u64,
-    pub sunlight_boost: f32,
 }
 
 impl FloorMeta {
@@ -67,14 +66,14 @@ impl FloorMeta {
         } else {
             floor_idx as f32 / (total_floors - 1) as f32
         };
+        // Indoor lighting is uniform across floors — building interiors share the
+        // same overhead lighting regardless of altitude (the night floor-dim is a
+        // constant, `pixel_painter::NIGHT_FLOOR_DIM_STRENGTH`). The `altitude`
+        // field still drives skyline depth in the windows.
         Self {
             floor_idx,
             altitude,
             floor_seed: floor_seed(floor_idx),
-            // Indoor lighting is uniform across floors — building interiors
-            // share the same overhead lighting regardless of altitude. The
-            // `altitude` field still drives skyline depth in the windows.
-            sunlight_boost: 0.0,
         }
     }
 
@@ -97,9 +96,10 @@ pub struct FloorCtx {
     /// when the agent leaves the scene.
     pub motion: HashMap<AgentId, MotionState>,
     /// Longest in-flight entry- or exit-walk `duration_ms + pause_ms` on
-    /// this floor (ms). Written each frame by `derive_with_routing`; read by
-    /// `compute_door_frame_idx` to drive door-open cosmetics without a
-    /// hardcoded `ENTRY_ANIMATION_MS`.
+    /// this floor (ms). Recomputed each frame by `recompute_door_anim_max_ms`
+    /// (the shared frame epilogue on both the `render_floor` and `observe`
+    /// paths); read by `compute_door_frame_idx` to drive door-open cosmetics
+    /// without a hardcoded `ENTRY_ANIMATION_MS`.
     pub door_anim_max_ms: u64,
 }
 

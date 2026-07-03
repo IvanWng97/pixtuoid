@@ -332,7 +332,10 @@ fn paint_frame(
     let boost_ceiling = LightingState::EMPTY_FLOOR_DIM_BOOST;
     let empty_floor_boost = 1.0 + (1.0 - indoor_scale) * (boost_ceiling - 1.0) / (1.0 - min_level);
 
-    let dim_strength = (0.45 - ctx.floor.sunlight_boost).max(0.1);
+    // The night floor-dim dial (symmetric with `DAYLIGHT_FLOOR_LIFT` below); the
+    // per-floor `sunlight_boost` parameter that once offset it was vestigially 0.
+    const NIGHT_FLOOR_DIM_STRENGTH: f32 = 0.45;
+    let dim_strength = NIGHT_FLOOR_DIM_STRENGTH;
     dim_floor_overlay(
         ctx.buf,
         top_wall_h,
