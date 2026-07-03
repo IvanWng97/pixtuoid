@@ -22,13 +22,17 @@ const OSES = [
 ] as const;
 // In-palette marks replace the OS-native ✅/🧪 emoji — the ✅ grid was the
 // loudest, most-saturated off-system hue on the page (its glossy green belongs
-// to no token; the office greens are --ok/--led). The check is an 8×8 pixel SVG
-// (the same crispEdges idiom as the office pause icon), self-tinted to the
-// office green (supported) / amber (experimental); planned & absent are muted
-// text. The value still rides the sr-only sibling — these marks are aria-hidden.
+// to no token; the office greens are --ok/--led). Each state is a distinct 8×8
+// pixel SVG (the same crispEdges idiom as the office pause icon): a green check
+// (supported) vs an amber flask (experimental) — distinct SHAPE, not just hue,
+// so the distinction survives colour-blindness / the dracula pink --amber (WCAG
+// 1.4.1). Planned & absent are muted text. The value still rides the sr-only
+// sibling — these marks are aria-hidden.
 const MARK = (s: string): string => {
-  if (s === 'yes' || s === 'experimental')
-    return `<svg class="tools__mark tools__mark--${s}" viewBox="0 0 8 8" shape-rendering="crispEdges" aria-hidden="true"><use href="#tm-check" /></svg>`;
+  if (s === 'yes')
+    return `<svg class="tools__mark tools__mark--yes" viewBox="0 0 8 8" shape-rendering="crispEdges" aria-hidden="true"><use href="#tm-check" /></svg>`;
+  if (s === 'experimental')
+    return `<svg class="tools__mark tools__mark--experimental" viewBox="0 0 8 8" shape-rendering="crispEdges" aria-hidden="true"><use href="#tm-flask" /></svg>`;
   if (s === 'no') return '<span class="tools__mark tools__dash" aria-hidden="true">–</span>';
   return '<span class="tools__mark tools__soon" aria-hidden="true">soon</span>';
 };
@@ -70,6 +74,17 @@ const legendStates = (['yes', 'experimental', 'planned', 'no'] as OsState[]).fil
       <rect x="5" y="3" width="1" height="2"></rect>
       <rect x="6" y="2" width="1" height="2"></rect>
       <rect x="7" y="1" width="1" height="2"></rect>
+    </symbol>
+    {
+      /* experimental gets a distinct SHAPE (a pixel flask, echoing the app's 🧪),
+       not just a hue — so supported-vs-experimental survives colour-blindness
+       and the dracula theme's pink --amber (WCAG 1.4.1) */
+    }
+    <symbol id="tm-flask" viewBox="0 0 8 8">
+      <rect x="1" y="0" width="5" height="1"></rect>
+      <rect x="3" y="1" width="2" height="3"></rect>
+      <rect x="2" y="4" width="4" height="1"></rect>
+      <rect x="1" y="5" width="6" height="2"></rect>
     </symbol>
   </svg>
   <div class="container">
