@@ -53,9 +53,18 @@ the wire-shape sharp edge in `crates/pixtuoid/CLAUDE.md`.)
 - **The `binaryPath` preference is RE-READ on every call**, not cached — only
   the PATH auto-detect is memoized. A user who fixes the pref mid-session
   shouldn't have to relaunch.
-- **The toolchain pins (`Node 22` / `eslint 9` / `typescript 5`) MATCH Raycast's
-  own toolchain — do NOT bump them ahead** of what `@raycast/api` expects, or
-  `ray build` (store publish) breaks even though `tsc` passes.
+- **Toolchain bumps must stay within what Raycast DECLARES — check the peers,
+  don't guess.** `eslint`/`typescript` are gated by `@raycast/eslint-config`'s
+  peerDependencies (2.2.0 declares `eslint ^10`, `typescript <6.1.0` — so
+  eslint 10 + TS 6.0 are in-range); `@types/node` stays on the `22.x` line
+  because `@raycast/api` peers it EXACTLY (22.19.17; Raycast's runtime is
+  Node 22) — dependabot ignores its majors (`.github/dependabot.yml`). And
+  `ray build` type-checks with its OWN bundled tsc (5.6 as of api 1.104.21),
+  so `tsconfig.json` must stay parseable by BOTH that and the local TS: the
+  TS 6 migration was `moduleResolution: "Bundler"` + an explicit
+  `types: ["node"]` (TS 6.0 stopped auto-including `node_modules/@types`);
+  `ignoreDeprecations: "6.0"` would have broken `ray build` (TS 5.x rejects
+  the value).
 - **`OutcomeRow.outcome` ∈ `connected | disconnected | failed`** (bare tokens)
   for the single-id `connect`/`disconnect` the extension calls; `no_op` is
   emitted only by `pixtuoid sources set` (the declarative reconcile this

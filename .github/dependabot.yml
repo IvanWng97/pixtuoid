@@ -40,3 +40,9 @@ updates:
       raycast-deps:
         patterns: ["*"]
     open-pull-requests-limit: 5
+    ignore:
+      # @raycast/api peers @types/node EXACTLY (22.19.17 — Raycast's runtime is
+      # Node 22); a major ahead of that types APIs the runtime doesn't have.
+      # Bump only when @raycast/api's own peer pin moves.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
