@@ -16,8 +16,10 @@ fn pct(v: u16, n: u16) -> u16 {
 
 /// Counter width that marks the LARGE (detailed kitchen) pantry sprite. The size
 /// producer emits this width when the pantry room is wide enough; consumers test
-/// `>= PANTRY_COUNTER_LARGE_W` rather than the bare `32` literal.
-const PANTRY_COUNTER_LARGE_W: u16 = 32;
+/// `>= PANTRY_COUNTER_LARGE_W` rather than the bare `32` literal (`pub` + re-exported
+/// from `layout` so the painter's `use_large` selector and the binary's coffee
+/// hit-test share this one source instead of re-hardcoding 32).
+pub const PANTRY_COUNTER_LARGE_W: u16 = 32;
 
 /// Y-position percentage of the pantry counter within its room — lower (65%) for
 /// the large counter, a touch higher (60%) for the small one. SINGLE SOURCE: the

@@ -15,7 +15,9 @@
 //! completion, each a separate reactive scan).
 //!
 //! - **exit flows DOWN** — [`cascade_exit`]: a node leaving takes its whole
-//!   subtree. Used by `SessionEnd`, the stale-sweep, and subagent-completion.
+//!   subtree. Used by `SessionEnd`, the stale-sweep, `reconcile_connected`
+//!   (Sources-panel disconnect), and subagent-completion — see its `StampRoot`
+//!   doc for the per-caller root-stamp intent.
 //! - **liveness flows UP** — [`refresh_lineage`]: a working descendant keeps its
 //!   ancestors alive, so a blocked-but-delegating parent isn't stale-swept.
 //! - **readiness, queried UP** — [`has_waiting_ancestor`]: a node blocked under a

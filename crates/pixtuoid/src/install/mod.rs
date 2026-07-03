@@ -30,7 +30,10 @@ pub(crate) const SENTINEL_KEY: &str = "_pixtuoid";
 /// hooks-bearing-but-malformed config still counts as installed. (Until 0.12.0
 /// this was also `config::resolve_connected`'s migrate-default signal for an
 /// absent `[sources]` flag — that inference was dropped, so this went
-/// `pub` → `pub(crate)`: `doctor` is the only remaining caller.)
+/// `pub` → `pub(crate)`. Callers: `doctor::diagnose`'s verify gate,
+/// `doctor::run`'s per-source `hooks_installed` report row, and
+/// `sources::skip_freeze` (the onboarding-skip freeze probes it so a pre-0.12
+/// upgrader's hooks survive a skip).)
 pub(crate) fn has_hooks(t: &'static Target) -> bool {
     // No resolvable default path (no home dir) → no config to bear hooks.
     let Ok(path) = (t.default_config_path)() else {

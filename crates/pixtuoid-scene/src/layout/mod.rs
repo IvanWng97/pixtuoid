@@ -14,7 +14,7 @@
 //!   * `placement` — the `Anchor` convention (where a box sits vs its `pos`).
 //!   * `mask` — `build_walkable_mask`: stamps obstacle footprints for routing.
 //!   * `approach` — `stand_point`/`approach_point`: where an agent stands to use a piece.
-//!   * `reach` — `ReachSet`: coarse-cell BFS mirroring the tui A* grid.
+//!   * `reach` — `ReachSet`: coarse-cell BFS mirroring `crate::pathfind`'s A* grid.
 
 mod approach;
 mod compute;
@@ -24,6 +24,7 @@ mod placement;
 mod reach;
 
 pub use approach::{approach_point, stand_point};
+pub use compute::PANTRY_COUNTER_LARGE_W;
 pub use decor::{
     desk_furniture_def, desk_walk_anchor, furniture_def, seated_foot_cell, ApproachSides,
     DwellWindow, Facing, Furniture, FurnitureDef, PlantKind, PodDecor, WallDecor, WaypointKind,
@@ -175,7 +176,7 @@ pub struct SceneLayout {
     /// Coarse-cell reachable component (the walkable area an agent can A\*-route
     /// to). Computed once from a known in-component seed; consumed by
     /// `approach_point` to prefer a *reachable* approach side over a merely-
-    /// walkable-but-walled-off one. Mirrors the tui router's coarsening.
+    /// walkable-but-walled-off one. Mirrors `crate::pathfind`'s coarsening.
     pub reachable: ReachSet,
 }
 

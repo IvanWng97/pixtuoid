@@ -1035,7 +1035,7 @@ fn enqueue_lounge_pantry_appliances<'a>(layout: &'a Layout, drawables: &mut Vec<
                     anchor_y: z_sort_row(Anchor::Center, wp.pos, ch),
                     kind: DrawableKind::WaypointPantry {
                         pos: wp.pos,
-                        use_large: cw >= 32,
+                        use_large: cw >= crate::layout::PANTRY_COUNTER_LARGE_W,
                     },
                 });
             }

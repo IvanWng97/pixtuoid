@@ -109,7 +109,7 @@ pub fn hit_test_coffee_machine(layout: &Layout, mx: u16, my: u16) -> bool {
     // target can't drift from the painted machine (the version-popup / seated-
     // anchor pinning discipline). The small-case previously used a wider [8,13)
     // that false-positived counter cells 8 and 12.
-    let (dx0, dx1) = if cw >= 32 {
+    let (dx0, dx1) = if cw >= pixtuoid_scene::layout::PANTRY_COUNTER_LARGE_W {
         pixtuoid_scene::pixel_painter::PANTRY_COFFEE_COLS_LARGE
     } else {
         pixtuoid_scene::pixel_painter::PANTRY_COFFEE_COLS_SMALL

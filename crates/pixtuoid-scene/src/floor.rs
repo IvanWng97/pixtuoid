@@ -68,8 +68,8 @@ impl FloorMeta {
         };
         // Indoor lighting is uniform across floors — building interiors share the
         // same overhead lighting regardless of altitude (the night floor-dim is a
-        // constant, `pixel_painter::NIGHT_FLOOR_DIM_STRENGTH`). The `altitude`
-        // field still drives skyline depth in the windows.
+        // flat constant in the pixel painter's floor pass, no per-floor offset).
+        // The `altitude` field still drives skyline depth in the windows.
         Self {
             floor_idx,
             altitude,

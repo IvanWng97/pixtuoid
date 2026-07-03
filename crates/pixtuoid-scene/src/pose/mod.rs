@@ -925,11 +925,13 @@ pub(crate) fn jitter_dest(id: AgentId, p: Point) -> Point {
 }
 
 /// Route `from → to` against the per-agent JITTERED goal, then restore the
-/// polyline's endpoint to the true `to` — the wander-leg routing call shared
-/// by the render-side walk-path freeze ([`route_walking_pose`]) and the
-/// motion-side profile snapshots (`advance_wander` / `snapshot_back_profile`),
-/// so the rendered shape, the measured profile length, and the router-cache
-/// key can't diverge (the [`jitter_dest`] lockstep contract).
+/// polyline's endpoint to the true `to` — the routing call shared by EVERY walk
+/// leg: the render-side walk-path freeze ([`route_walking_pose`]), the wander
+/// profile snapshots (`advance_wander` / `snapshot_back_profile`), AND the
+/// one-shot entry/exit/snap-back profile snapshots (which measure the restored
+/// polyline so their duration matches the rendered leg), so the rendered shape,
+/// the measured profile length, and the router-cache key can't diverge (the
+/// [`jitter_dest`] lockstep contract).
 pub(crate) fn route_jittered(
     router: &mut dyn Router,
     mask: &WalkableMask,

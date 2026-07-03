@@ -31,7 +31,7 @@ pub const CELL_SIZE: u16 = 4;
 /// 4 = 25%) lets paths graze furniture edges. 50% is the sweet spot.
 const CELL_WALKABLE_MIN: u16 = 8;
 
-// The core-side `ReachSet` MUST coarsen identically to this router, or
+// `layout::reach::ReachSet` MUST coarsen identically to this router, or
 // "reachable" in `approach_point` would diverge from what A* actually routes.
 // Locked at compile time so a CELL_SIZE / threshold edit can't silently desync.
 const _: () = assert!(CELL_SIZE == crate::layout::REACH_CELL_SIZE);

@@ -6,8 +6,9 @@
 //! nearest-neighbor upscales it into the surface (CPU, `0x00RRGGBB`) so the pixel-art
 //! office stays chunky/legible instead of 1:1-tiny. Redraw is event-driven (a
 //! `FloatingEvent::SceneChanged` from the pipeline
-//! bridge) plus a ~30fps animation tick WHILE agents are present (motion is time-driven);
-//! when the office is empty it drops to a slow ~1fps ambient tick (keeping the time-driven
+//! bridge) plus a ~30fps animation tick WHILE agents OR a live gateway daemon (the OpenClaw
+//! lobster mascot in `scene.daemons`) are present (motion is time-driven); with no agents and
+//! every daemon Down it drops to a slow ~1fps ambient tick (keeping the time-driven
 //! clock/weather/lightning/day-night/pet alive without the 30fps cost), never fully idle.
 //! Platform glue — codecov-ignored like `driver.rs`; the testable seams are
 //! `floating::offscreen` (render) and `floating::geometry` (the window/monitor rect math

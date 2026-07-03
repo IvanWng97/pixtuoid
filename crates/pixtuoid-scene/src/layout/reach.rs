@@ -1,14 +1,14 @@
-//! Coarse-cell reachability over a [`WalkableMask`] — a pure-core mirror of the
-//! tui A\* router's coarsening, so the geometry layer can ask "is this cell
-//! actually *routable*?" without importing the router (workspace invariant #1:
-//! `pixtuoid-core` has no terminal/router deps).
+//! Coarse-cell reachability over a [`WalkableMask`] — a mirror of this crate's
+//! A\* router's coarsening, so the geometry layer (`layout`) can ask "is this
+//! cell actually *routable*?" without depending on the pathfind layer.
 //!
 //! [`approach_point`](super::approach) uses it to PREFER an A\*-reachable
 //! approach side over a merely-walkable-but-walled-off one — the "available
 //! approach side" rule. The coarsening (`REACH_CELL_SIZE` × `REACH_CELL_SIZE`
 //! cells, ≥ `REACH_CELL_WALKABLE_MIN` walkable px) is kept byte-identical to
-//! `tui::pathfind` (asserted by a `const` equality check on the tui side), so
-//! "reachable here" means the same thing A\* will find at route time.
+//! [`crate::pathfind`]'s `AStarRouter` (asserted by a `const` equality check in
+//! `pathfind`), so "reachable here" means the same thing A\* will find at route
+//! time.
 
 use std::collections::VecDeque;
 
@@ -16,10 +16,10 @@ use super::Point;
 use pixtuoid_core::grid::Grid;
 use pixtuoid_core::walkable::WalkableMask;
 
-/// Coarse-cell edge in px. MUST equal `tui::pathfind::CELL_SIZE` (asserted there).
+/// Coarse-cell edge in px. MUST equal `crate::pathfind`'s `CELL_SIZE` (asserted there).
 pub const REACH_CELL_SIZE: u16 = 4;
 /// Min walkable px (of `REACH_CELL_SIZE²` = 16) for a coarse cell to count as
-/// walkable. MUST equal `tui::pathfind`'s `CELL_WALKABLE_MIN` (asserted there).
+/// walkable. MUST equal `crate::pathfind`'s `CELL_WALKABLE_MIN` (asserted there).
 pub const REACH_CELL_WALKABLE_MIN: u16 = 8;
 
 const NEIGHBORS_8: [(i32, i32); 8] = [

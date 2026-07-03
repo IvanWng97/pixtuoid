@@ -105,6 +105,12 @@ fn half_extents(kind: WaypointKind, pantry_counter_size: Size) -> Option<(u16, u
 /// or when no reachable approach side exists — the same "no valid approach"
 /// sentinel `approach_point` returns, which the agent never reaches (so this is
 /// never rendered for it).
+///
+/// The scan is a deliberate parallel of `approach_point`'s obstacle branch rather
+/// than a delegation (it keeps the `WaypointKind` signature + the seat early-return
+/// that render callers want); the two are pinned equal for every obstacle waypoint
+/// by `real_layout_obstacle_stand_matches_approach_point`, so a divergence fails a
+/// test rather than shipping as an arrival pop.
 pub fn stand_point(
     kind: WaypointKind,
     pos: Point,
