@@ -55,7 +55,13 @@ Mermaid diagram becomes an inline SVG at build via `rehype-mermaid`, which is
   wasm-bindgen JS glue, size- and pair-gated — a sha256 manifest pins the
   wasm/glue ABI pair — by `gen-wasm-check` in the Rust CI).
   `components/OfficeBackdrop.astro` dynamically `import()`s it at runtime
-  (poster-first; any failure keeps the still). Never hand-edit
+  (cover-first on the boot path — the canvas covers the baked poster with its
+  OWN `var(--bg)` tone, then FLOOR-ROLLS the live office up out of that tone once
+  the boot splash clears (`pix:revealed`), so the reveal never cross-dissolves a
+  wrong-time still — the day/night flip is gone by construction; the splash in
+  turn HOLDS on `window.__pixEngineReady` (Level-2 gate) so it lifts straight into
+  the roll. Any failure / no-JS / no-wasm / reduced-motion keeps the still poster).
+  Never hand-edit
   (prettier/eslint/knip all ignore it); regenerate from the crate.
   The backdrop's pause switch (`#office-pause`, WCAG 2.2.2) lives in the same
   component: pause stops the rAF loop (frozen frame stays on the canvas) and
@@ -75,10 +81,7 @@ Mermaid diagram becomes an inline SVG at build via `rehype-mermaid`, which is
   non-reduced-motion visitor whose wasm never loads can still pause the ticker /
   dust / clips. Only the office RENDER path (`boot`/`paint`) is gated on `hasWasm`;
   `start`/`stop` are no-ops without a live office, so `setPaused` is safe
-  standalone. On phones (≤760px) the button DOCKS into a taller statusline at the
-  right (a 44px thumb target in reserved chrome) rather than floating over body
-  copy, and a compact `.sl__onair` pip returns to the otherwise-empty mobile bar
-  so it still confirms LIVE/PAUSED. Reduced-motion hides the button (nothing auto-animates there). The
+  standalone. Reduced-motion hides the button (nothing auto-animates there). The
   wasm fetch is **deferred** off the render-critical window (`load` →
   `requestIdleCallback`) so it doesn't compete with the above-fold poster/fonts;
   a live un-reduce still boots promptly via the mq listener. The dimmer

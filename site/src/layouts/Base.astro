@@ -402,6 +402,9 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
         const root = document.documentElement;
         const boot = document.getElementById('boot');
         function reveal() {
+          // Flag mirrors the one-shot event so a late-attaching listener (the
+          // office backdrop, if its script ran after this) still sees the reveal.
+          window.__pixRevealed = true;
           document.dispatchEvent(new Event('pix:revealed'));
         }
         if (root.dataset.booting !== '1' || !boot) {
@@ -448,8 +451,25 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
             i++;
             setTimeout(step, 260);
           } else {
-            setTimeout(finish, 520);
+            // Level 2: the lines are typed — now HOLD ("▸ ready") until the office
+            // engine is actually ready (window.__pixEngineReady, set by
+            // OfficeBackdrop on the first live frame, or on wasm failure/absence so
+            // we never hang), so the splash lifts STRAIGHT into the office reveal
+            // instead of onto a bg gap. Capped well under the first-visit reveal
+            // budget for a slow or dead engine.
+            waitForEngine(0);
           }
+        }
+        const MAX_ENGINE_WAITS = 50; // 50 × 80ms ≈ 4s cap after the lines finish
+        function waitForEngine(n) {
+          if (done) return;
+          if (window.__pixEngineReady || n >= MAX_ENGINE_WAITS) {
+            setTimeout(finish, 180);
+            return;
+          }
+          setTimeout(function () {
+            waitForEngine(n + 1);
+          }, 80);
         }
         function skip() {
           for (let j = 0; j < lines.length; j++) lines[j].classList.add('in');

@@ -6,11 +6,14 @@ import { asset, DIM_RESTING } from '../consts';
   /* THE BUILDING — the real pixtuoid engine (wasm) running fixed behind the
      whole page: ONE continuous office (the hero's Dense variant — two
      meeting rooms), one timeline that never resets while you scroll.
-     Content floats over it as glass bands. Poster-first: the still is the
-     instant layer; the canvas fades in after the first wasm frame. The
-     poster (demos/hero-wide.png) is a REAL wasm-hero frame at the 320x180
-     buffer a 16:9 canvas computes (#425), so the fade dissolves in place
-     instead of reframing.
+     Content floats over it as glass bands. Cover-first: on the wasm-boot path
+     the canvas covers the baked poster with its OWN bg tone (background:
+     var(--bg), which tracks the wall clock) from the first paint, then
+     FLOOR-ROLLS up out of that tone into the LIVE frame once the boot splash
+     clears — never a cross-dissolve of the wrong-time still, so the day/night
+     flip is gone by construction (see the reveal in the script). The poster
+     (demos/hero-wide.png) is a REAL wasm-hero frame at the 320x180 buffer a
+     16:9 canvas computes (#425) and stays the instant FALLBACK layer.
      Reduced-motion / no-JS / no-wasm / fetch-failure all simply stay on
      the still. */
 }
@@ -91,16 +94,25 @@ import { asset, DIM_RESTING } from '../consts';
     height: 100%;
     object-fit: cover;
   }
+  /* The canvas is BOTH the office AND — until it rolls in — the load-gap cover.
+     Opacity is JS-driven (the reveal in the script). Default 0 so every NON-boot
+     path (no-JS / no-wasm / fetch-fail / reduced-motion) shows the poster; the
+     boot path raises it to 1 so the canvas's own bg tone (background: var(--bg),
+     which tracks the wall clock — cream by day, dark by night) hides the baked
+     poster until the LIVE office floor-rolls in. The roll paints with alpha, so
+     its fade-in and floor-seams let this bg tone show through, occluding the
+     poster. Net: the reveal never cross-dissolves a wrong-time still — the
+     day/night flip is gone by construction. */
   .backdrop__live {
     opacity: 0;
-    transition: opacity 1.2s ease;
+    background: var(--bg);
   }
-  .backdrop.is-live .backdrop__live {
-    opacity: 1;
-  }
-  .backdrop.is-live .backdrop__poster {
-    opacity: 0;
-    transition: opacity 1.2s ease;
+  /* reduced motion IS the still-poster design — never cover it (wins even before
+     the script runs) */
+  @media (prefers-reduced-motion: reduce) {
+    .backdrop__live {
+      opacity: 0 !important;
+    }
   }
   #dimmer {
     position: fixed;
@@ -176,20 +188,6 @@ import { asset, DIM_RESTING } from '../consts';
     display: block;
     color: var(--led);
   }
-  /* Phone: the desktop pattern floats this 36px control 10px ABOVE the statusline,
-     where on a full-width mobile layout it lands over body copy (measured: it sat
-     over 14 text elements incl. a tools data cell, opaque while paused). Dock it
-     into the right of the taller mobile statusline instead — reserved chrome, off
-     the content — at a 44px thumb target, z above the bar so it stays tappable. */
-  @media (max-width: 760px) {
-    .office-ctl {
-      right: 6px;
-      bottom: calc(env(safe-area-inset-bottom, 0px) + 2px);
-      width: 44px;
-      height: 44px;
-      z-index: 51;
-    }
-  }
 </style>
 
 <script is:inline define:vars={{ wasmJsUrl: asset('wasm/pixtuoid_web.js') }}>
@@ -205,6 +203,35 @@ import { asset, DIM_RESTING } from '../consts';
     // on `hasWasm`. #456
     const hasWasm = typeof WebAssembly !== 'undefined';
 
+    // ── First-visit reveal (option A cover + Level-2 splash gate) ──────────────
+    let revealStartSim = 0; // sim-clock t0 of the roll (pause freezes it via nowMs)
+    let splashCleared = !!window.__pixRevealed; // seeded/repeat visit: already lifted
+    // Option A: on the boot path, cover the baked poster with the canvas's own bg
+    // tone (CSS background: var(--bg)) from the first paint, so the office reveals
+    // straight into the live frame instead of cross-dissolving the wrong-time
+    // still. Every non-boot path leaves it uncovered (the poster shows).
+    function cover() {
+      canvas.style.opacity = '1';
+    }
+    function uncover() {
+      canvas.style.opacity = '0';
+    }
+    // Tell the boot splash the office boot has RESOLVED (came up, failed, or is
+    // unsupported) so its Level-2 gate lifts — a flag, polled, so there's no
+    // event-ordering race with the splash (Base.astro).
+    function markEngineResolved() {
+      window.__pixEngineReady = true;
+    }
+    // The roll is HELD until the boot splash clears, so it's never played hidden
+    // behind the overlay. On a seeded/repeat visit pix:revealed already fired, so
+    // splashCleared is already true and the office rolls in on the first paint.
+    document.addEventListener('pix:revealed', function () {
+      splashCleared = true;
+    });
+    if (hasWasm && !mq.matches) cover();
+    else markEngineResolved(); // no office will boot → don't make the splash wait
+    // ──────────────────────────────────────────────────────────────────────────
+
     // Render SMALL and let CSS stretch (image-rendering: pixelated): ~180px
     // tall is the app's own chunky-pixel scale (OFFICE_TARGET_H).
     const BUF_H = 180;
@@ -213,6 +240,15 @@ import { asset, DIM_RESTING } from '../consts';
     // (seed 3 → two meeting rooms). One continuous world, one timeline that
     // never resets while you scroll — no per-floor swapping.
     const SEED = 3;
+    // The office "rolls in" on the first live frame once the boot splash clears:
+    // floors scroll up and decelerate (easeOutQuart) onto 6F, ghosting up out of
+    // the bg-tone cover into the LIVE current-time frame — so the reveal shows the
+    // correct-time office, never a cross-dissolve of the baked (evening) poster.
+    // REVEAL_MS = roll length; FLOORS_PAST = how many floors scroll by;
+    // CHROMA_SPLIT_PX = the faint CRT fringe at the start (set 0 to drop it).
+    const REVEAL_MS = 1600;
+    const FLOORS_PAST = 3.2;
+    const CHROMA_SPLIT_PX = 3;
 
     let office = null;
     let wasm = null;
@@ -254,15 +290,55 @@ import { asset, DIM_RESTING } from '../consts';
         office.frame_ptr(),
         office.frame_len()
       );
-      if (view.length === img.data.length) {
+      if (view.length !== img.data.length) return;
+      // First good frame = engine is up: release the boot splash's Level-2 gate.
+      markEngineResolved();
+      // Hold on the bg-tone cover until the boot splash has lifted, so the roll is
+      // never played hidden behind the overlay (the office keeps stepping meanwhile).
+      if (!splashCleared) return;
+      if (!live) {
+        live = true;
+        revealStartSim = nowMs; // sim-clock t0 → pause freezes the roll too
+        wrap.classList.add('is-live');
+        document.dispatchEvent(new CustomEvent('pix:onair', { detail: { live: true } }));
+      }
+      const rt = mq.matches ? 1 : (nowMs - revealStartSim) / REVEAL_MS;
+      if (rt < 1) {
+        drawRevealFrame(view, rt < 0 ? 0 : rt);
+      } else {
         img.data.set(view);
         ctx2d.putImageData(img, 0, 0);
-        if (!live) {
-          live = true;
-          wrap.classList.add('is-live');
-          document.dispatchEvent(new CustomEvent('pix:onair', { detail: { live: true } }));
+      }
+    }
+    // The floor-roll: row y samples the office roll-offset rows up (same-floor, no
+    // colour), alpha ramps from 0 so the bg tone shows through the fade-in and the
+    // floor-seams, floors decelerate (easeOutQuart) onto 6F, a faint CRT
+    // chroma-split converges. putImageData writes the sub-1 alpha straight to the
+    // canvas — the element's own bg (var(--bg)) shows through transparent pixels.
+    function drawRevealFrame(view, rt) {
+      const w = bufW;
+      const h = BUF_H;
+      const d = img.data;
+      const e = 1 - Math.pow(1 - rt, 4);
+      const roll = Math.round((1 - e) * h * FLOORS_PAST);
+      const alpha = Math.min(1, rt / 0.15);
+      const split = Math.round((1 - e) * CHROMA_SPLIT_PX);
+      for (let y = 0; y < h; y++) {
+        const sy = (y + roll) % h;
+        const seam = sy < 1 || sy > h - 2 ? 0.3 : 1; // floor divider: more bg shows
+        const a = alpha * seam * 255;
+        const row = sy * w;
+        for (let x = 0; x < w; x++) {
+          const o = (y * w + x) * 4;
+          const xr = split ? (x + split < w ? x + split : w - 1) : x;
+          const xb = split ? (x - split >= 0 ? x - split : 0) : x;
+          d[o] = view[(row + xr) * 4];
+          d[o + 1] = view[(row + x) * 4 + 1];
+          d[o + 2] = view[(row + xb) * 4 + 2];
+          d[o + 3] = a;
         }
       }
+      ctx2d.putImageData(img, 0, 0);
     }
 
     function frame(t) {
@@ -343,15 +419,19 @@ import { asset, DIM_RESTING } from '../consts';
           });
         })
         .catch(function () {
-          /* the still poster stays — the building simply doesn't go live */
+          // wasm never loaded: drop the cover so the still poster shows, and
+          // release the boot splash's gate (the engine won't be coming).
+          uncover();
+          markEngineResolved();
         });
     }
     // Defer the ~740KB wasm fetch OUT of the render-critical window: kick it
     // after `load`, at idle, so it stops competing with the above-fold poster /
-    // fonts / CSS (LCP is the H1 text). The poster is the instant layer; the
-    // canvas crossfades in whenever the first frame lands (~0.5–1s later on fast
-    // links — no visual change). Reduced motion still defers entirely; a live
-    // un-reduce boots promptly via the mq listener below.
+    // fonts / CSS (LCP is the H1 text). The bg-tone cover holds until the first
+    // frame lands (~0.5–1s later on fast links), then the office FLOOR-ROLLS in
+    // once the boot splash clears (REVEAL_MS ramp) — a deliberate reveal, not a
+    // silent swap. Reduced motion still defers entirely; a live un-reduce boots
+    // promptly via the mq listener below.
     function deferBoot() {
       if (mq.matches) return;
       (
@@ -397,6 +477,7 @@ import { asset, DIM_RESTING } from '../consts';
           live = false;
           document.dispatchEvent(new CustomEvent('pix:onair', { detail: { live: false } }));
         } else if (hasWasm) {
+          cover(); // re-cover before the fresh boot rolls the live office in
           boot(); // no-op if already booted; a reduced-motion first visit fetches here
           start();
         }

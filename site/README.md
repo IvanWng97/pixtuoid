@@ -111,7 +111,12 @@ gates can't see. CI runs it in `site.yml` after the build step.
     for late-attach seeding), and `pix:paused` (the office pause switch — see FX)
     — every >5s auto-motion listens, so ONE control governs page motion. Plus
     `window.__pixHire()` (walk one extra sprite in; the install Copy buttons call
-    it). `window.__pixNight()` and `window.__pixTheme` / `window.__pixKeys`
+    it). The boot handshake: `Base.astro` publishes `window.__pixRevealed` (+ the
+    `pix:revealed` event) when the terminal boot splash lifts — that RELEASES the
+    office's floor-roll reveal; `OfficeBackdrop` publishes `window.__pixEngineReady`
+    when the engine resolves (live / failed / unsupported), which the splash's
+    Level-2 gate polls so it lifts STRAIGHT into the reveal instead of a bg gap.
+    `window.__pixNight()` and `window.__pixTheme` / `window.__pixKeys`
     (defined parse-first in `Base.astro`'s head) are the ONE day/night boundary /
     theme-constants source / key-shortcut helpers — never re-derive 19:00–07:00,
     the theme BG map, or the typing guard inline.
@@ -125,9 +130,6 @@ gates can't see. CI runs it in `site.yml` after the build step.
   timeline up where it stopped. Hidden only under reduced motion (nothing
   auto-animates); on a no-wasm / fetch-failure poster it stays visible, since the
   ticker / dust / clips still run and it governs them wasm-independently (#456).
-  On phones it docks into a taller statusline (right side, 44px tap) instead of
-  floating over content, and a compact `● LIVE` / `❚❚ PAUSED` pip returns to the
-  mobile bar.
 - **Docs shell** — `layouts/Docs.astro` gives /config, /architecture,
   /contributing, /migration a shared sidebar + build-time mini-TOC + pager,
   driven by the one `DOCS` manifest in `consts.ts` (the Nav dropdown reads the

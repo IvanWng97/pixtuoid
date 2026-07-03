@@ -135,12 +135,6 @@ const badgeColor = (who: string): string | undefined => {
   body {
     padding-bottom: calc(2rem + env(safe-area-inset-bottom, 0px));
   }
-  /* the mobile bar is taller (hosts the docked pause control + a 44px floor tap) */
-  @media (max-width: 760px) {
-    body {
-      padding-bottom: calc(3rem + env(safe-area-inset-bottom, 0px));
-    }
-  }
 </style>
 
 <style>
@@ -284,30 +278,12 @@ const badgeColor = (who: string): string | undefined => {
     color: var(--chip-dim);
   }
   @media (max-width: 760px) {
-    .statusline {
-      /* taller: hosts a 44px floor tap + the docked pause control (right) */
-      height: calc(3rem + env(safe-area-inset-bottom, 0px));
-      justify-content: space-between;
-      /* clear the fixed pause button docked at the right edge */
-      padding-right: 3.4rem;
-    }
-    /* the scrolling PR feed drops (too wide), but keep a compact env — just the
-       on-air pip — so the bar still reads as a status line AND confirms
-       LIVE / PAUSED (the docked pause button's state lives here). */
-    .sl__feed {
-      display: none;
-    }
+    .sl__feed,
     .sl__env {
-      margin-left: auto;
-    }
-    .sl__env [data-sl-lights],
-    .sl__env [data-sl-clock],
-    .sl__env .sl__sep {
       display: none;
     }
-    /* a real thumb target on the primary mobile nav control (was ~34px) */
-    .sl__floor {
-      padding-block: 0.7rem;
+    .statusline {
+      justify-content: space-between;
     }
   }
   @media (pointer: coarse) {

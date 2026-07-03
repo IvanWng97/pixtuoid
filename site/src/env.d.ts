@@ -12,6 +12,12 @@ interface Window {
   __pixLights?: number;
   /** Hire a coworker into the live office — set once the wasm office boots. */
   __pixHire?: () => void;
+  /** Boot splash lifted (mirrors the one-shot pix:revealed for a late listener);
+   * set by Base.astro. Gates OfficeBackdrop's office-reveal roll. */
+  __pixRevealed?: boolean;
+  /** Office boot RESOLVED (live / failed / unsupported) — set by OfficeBackdrop.
+   * The boot splash's Level-2 gate polls it so it lifts straight into the reveal. */
+  __pixEngineReady?: boolean;
   /** THE theme registry + fallback, seeded parse-first in Base.astro's head. */
   __pixTheme?: {
     KEY: string;
