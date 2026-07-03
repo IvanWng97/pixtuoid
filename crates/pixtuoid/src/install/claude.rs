@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use pixtuoid_core::source::claude_code::claude_config_dir;
-use serde_json::{json, Map, Value};
+use serde_json::{json, Value};
 
 use crate::install::io;
 use crate::install::target::MergeOutcome;
@@ -142,15 +142,22 @@ fn claude_shim_ref(entry: &Value) -> crate::install::verify::ShimRef {
 }
 
 pub fn merge_install(content: &str, hook_cmd: &str) -> Result<MergeOutcome> {
-    let doc = crate::install::verify::parse_json_or_empty(content)?;
+    let doc = verify::parse_json_or_empty(content)?;
     // Valid JSON but not an object (a top-level array/string/number) would be
-    // silently discarded by `json_merge_install`'s `as_object().unwrap_or_default()`
+    // silently discarded by the shared merge's `as_object().unwrap_or_default()`
     // — writing only our hooks and dropping the user's document. Refuse, mirroring
     // `parse_or_empty`'s stance and the uninstall twin (which preserves it).
+    // Reasonix keeps the IDENTICAL guard.
     if !doc.is_object() && !doc.is_null() {
         anyhow::bail!("settings is valid JSON but not an object — refusing to overwrite");
     }
-    let merged = json_merge_install(doc.clone(), hook_cmd);
+    // Delegate to the shared flat-JSON merge (the same core Reasonix/Cursor ride).
+    // Claude's per-event entry is NESTED (`{matcher, hooks:[…]}`) rather than
+    // flat, but that shape rides ENTIRELY in the `managed_entry` closure — the
+    // merge only keys managed entries on the `_pixtuoid` sentinel, so the byte
+    // output is preserved (`managed_entry` emits the same `json!` as the old inline).
+    let merged =
+        verify::flat_json_merge_install(doc.clone(), EVENTS, SENTINEL_KEY, managed_entry, hook_cmd);
     let changed = merged != doc;
     Ok(MergeOutcome {
         content: serde_json::to_string_pretty(&merged)?,
@@ -159,8 +166,8 @@ pub fn merge_install(content: &str, hook_cmd: &str) -> Result<MergeOutcome> {
 }
 
 pub fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
-    let doc = crate::install::verify::parse_json_or_empty(content)?;
-    let cleaned = json_merge_uninstall(doc.clone());
+    let doc = verify::parse_json_or_empty(content)?;
+    let cleaned = verify::flat_json_merge_uninstall(doc.clone(), SENTINEL_KEY);
     let changed = cleaned != doc;
     Ok(MergeOutcome {
         content: serde_json::to_string_pretty(&cleaned)?,
@@ -171,73 +178,41 @@ pub fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
 // The v0.3.0-era `_ascii_agents` legacy-sentinel strip was dropped in 0.12.0
 // (pre-rename brew-tap installs are too old to keep supporting): a leftover
 // `_ascii_agents` entry is inert — CC ignores unknown hooks — it just is no
-// longer auto-stripped on install/uninstall.
+// longer auto-stripped on install/uninstall. KEPT because `verify_schema`
+// (the claude-specific check whose command is nested at `hooks[0].command`)
+// scans for managed entries with it.
 fn is_managed_entry(entry: &Value) -> bool {
     entry.get(SENTINEL_KEY).and_then(|v| v.as_bool()) == Some(true)
 }
 
-fn json_merge_install(doc: Value, hook_command: &str) -> Value {
-    let mut root: Map<String, Value> = doc.as_object().cloned().unwrap_or_default();
-    let hooks = root
-        .entry("hooks".to_string())
-        .or_insert_with(|| Value::Object(Map::new()));
-    // Coerce a non-object `hooks` to an empty object, then bind via `if let`
-    // (always matches now) — avoids an `.expect()` in production code.
-    if !hooks.is_object() {
-        *hooks = Value::Object(Map::new());
-    }
-    if let Value::Object(hooks_obj) = hooks {
-        for ev in EVENTS {
-            let list = hooks_obj
-                .entry((*ev).to_string())
-                .or_insert_with(|| Value::Array(vec![]));
-            if !list.is_array() {
-                *list = Value::Array(vec![]);
-            }
-            if let Value::Array(arr) = list {
-                arr.retain(|entry| !is_managed_entry(entry));
-                arr.push(json!({
-                    SENTINEL_KEY: true,
-                    "matcher": ".*",
-                    "hooks": [ hook_entry(hook_command, cfg!(windows)) ]
-                }));
-            }
-        }
-    }
-    Value::Object(root)
-}
-
-fn json_merge_uninstall(mut doc: Value) -> Value {
-    let Some(root) = doc.as_object_mut() else {
-        return doc;
-    };
-    let Some(Value::Object(hooks_obj)) = root.get_mut("hooks") else {
-        return doc;
-    };
-    for (_ev, list) in hooks_obj.iter_mut() {
-        if let Some(arr) = list.as_array_mut() {
-            arr.retain(|entry| !is_managed_entry(entry));
-        }
-    }
-    let to_remove: Vec<String> = hooks_obj
-        .iter()
-        .filter_map(|(k, v)| match v.as_array() {
-            Some(a) if a.is_empty() => Some(k.clone()),
-            _ => None,
-        })
-        .collect();
-    for k in to_remove {
-        hooks_obj.remove(&k);
-    }
-    if hooks_obj.is_empty() {
-        root.remove("hooks");
-    }
-    doc
+/// The managed per-event entry for the shared `flat_json_merge_install`. Claude's
+/// is NESTED (`{_pixtuoid, matcher, hooks:[{type, command}]}`) — unlike the flat
+/// Reasonix/Cursor entries — but the merge treats it opaquely (keys only on the
+/// sentinel), so this closure is the one place the CC shape lives. Byte-identical
+/// to the old inline `json!` push.
+fn managed_entry(hook_command: &str) -> Value {
+    json!({
+        SENTINEL_KEY: true,
+        "matcher": ".*",
+        "hooks": [ hook_entry(hook_command, cfg!(windows)) ]
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Thin wrappers over the shared flat-JSON merge so the per-shape tests below
+    // exercise Claude's events + nested-entry shape against the common core
+    // (mirrors reasonix.rs's test wrappers). Production `merge_install`/
+    // `merge_uninstall` call the shared helpers directly.
+    fn json_merge_install(doc: Value, hook_command: &str) -> Value {
+        verify::flat_json_merge_install(doc, EVENTS, SENTINEL_KEY, managed_entry, hook_command)
+    }
+
+    fn json_merge_uninstall(doc: Value) -> Value {
+        verify::flat_json_merge_uninstall(doc, SENTINEL_KEY)
+    }
 
     #[test]
     fn default_config_path_honors_claude_config_dir() {

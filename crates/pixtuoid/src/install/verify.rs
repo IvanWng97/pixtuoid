@@ -77,13 +77,15 @@ pub fn parse_toml_or_empty(content: &str) -> anyhow::Result<toml::Value> {
     toml::from_str(content).context("not valid TOML — refusing to overwrite")
 }
 
-/// Merge managed flat-JSON hook entries into `doc` (Reasonix/Cursor share the
-/// IDENTICAL shape): for each `event`, drop any prior managed entry (keyed on
-/// `sentinel`) and push a fresh one built by `make_entry`. The per-target entry
-/// SHAPE (Reasonix carries `timeout`/`description`, Cursor is bare) stays the
-/// caller's `make_entry`, so this is shape-sharing, not a shared decoder. A
-/// non-object `hooks` / non-array event is coerced (defensive), matching the two
-/// callers' prior inline behavior. Caller-set extras (Cursor's `version`) are
+/// Merge managed hook entries into `doc` (Reasonix, Cursor, AND Claude share this
+/// core): for each `event`, drop any prior managed entry (keyed on `sentinel`) and
+/// push a fresh one built by `make_entry`. The per-target entry SHAPE stays the
+/// caller's `make_entry` — Reasonix carries `timeout`/`description`, Cursor is
+/// bare, and Claude is the outlier NESTED `{matcher, hooks:[{type, command}]}`
+/// group (the merge treats the entry opaquely, keying only on the sentinel, so a
+/// nested shape rides through unchanged) — so this is shape-sharing, not a shared
+/// decoder. A non-object `hooks` / non-array event is coerced (defensive), matching
+/// the callers' prior inline behavior. Caller-set extras (Cursor's `version`) are
 /// applied before the call and pass through untouched.
 pub fn flat_json_merge_install(
     doc: Value,
@@ -116,11 +118,12 @@ pub fn flat_json_merge_install(
     Value::Object(root)
 }
 
-/// Remove managed flat-JSON hook entries (keyed on `sentinel`) from `doc`, then
-/// drop any event key whose array went empty and the `hooks` object if it
-/// emptied. The inverse of `flat_json_merge_install`, shared by Reasonix/Cursor.
-/// A target-specific key the install set (Cursor's `version`) is deliberately
-/// preserved — this only touches `hooks`.
+/// Remove managed hook entries (keyed on `sentinel`) from `doc`, then drop any
+/// event key whose array went empty and the `hooks` object if it emptied. The
+/// inverse of `flat_json_merge_install`, shared by Reasonix, Cursor, AND Claude
+/// (the sentinel-keyed removal is shape-agnostic — it strips Claude's nested
+/// entries the same way). A target-specific key the install set (Cursor's
+/// `version`) is deliberately preserved — this only touches `hooks`.
 pub fn flat_json_merge_uninstall(mut doc: Value, sentinel: &str) -> Value {
     let Some(root) = doc.as_object_mut() else {
         return doc;
