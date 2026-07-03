@@ -297,68 +297,51 @@ fn resolve_characters(
         let Some(p) = poses.get(&agent.agent_id).copied().flatten() else {
             continue;
         };
+        // The three seated-at-desk arms differ only in anim/frame/glow/sleep-z;
+        // everything else (the desk anchor, the breath, the breath-independent
+        // z-key, flip/waiting/dust) is identical. One closure builds the
+        // `CharacterPlacement` so the arms stay a single delta-then-push line each.
+        let seated = |anim_name: &'static str,
+                      frame_idx: usize,
+                      glow: CharacterGlow,
+                      sleep_z_seed: Option<u64>| {
+            let anchor_no_breath = seated_anchor(desk, char_w);
+            let anchor = with_breath(anchor_no_breath, agent.agent_id, now);
+            CharacterPlacement {
+                agent_idx,
+                // Breath-independent z-key (matches AtWaypoint/AimlessAt): the
+                // ±1px breath must not flip sort order against nearby desk decor
+                // frame-to-frame.
+                anchor_y: anchor_no_breath.y + WALKING_Y_OFF,
+                anim_name,
+                frame_idx,
+                anchor,
+                flip_x: false,
+                glow,
+                sleep_z_seed,
+                waiting_bubble: false,
+                walking_dust_frame: None,
+            }
+        };
         match p {
             Pose::SeatedIdle => {
-                let anchor_no_breath = seated_anchor(desk, char_w);
-                let anchor = with_breath(anchor_no_breath, agent.agent_id, now);
                 let sleep_variant = if agent.agent_id.raw() % 2 == 0 {
                     "seated_sleeping"
                 } else {
                     "seated_sleeping_alt"
                 };
-                placements.push(CharacterPlacement {
-                    agent_idx,
-                    // Breath-independent z-key (matches AtWaypoint/AimlessAt):
-                    // the ±1px breath must not flip sort order against nearby
-                    // desk decor frame-to-frame.
-                    anchor_y: anchor_no_breath.y + WALKING_Y_OFF,
-                    anim_name: sleep_variant,
-                    frame_idx: 0,
-                    anchor,
-                    flip_x: false,
-                    glow: CharacterGlow::None,
-                    sleep_z_seed: Some(agent.agent_id.raw()),
-                    waiting_bubble: false,
-                    walking_dust_frame: None,
-                });
+                placements.push(seated(
+                    sleep_variant,
+                    0,
+                    CharacterGlow::None,
+                    Some(agent.agent_id.raw()),
+                ));
             }
             Pose::SeatedThinking => {
-                let anchor_no_breath = seated_anchor(desk, char_w);
-                let anchor = with_breath(anchor_no_breath, agent.agent_id, now);
-                placements.push(CharacterPlacement {
-                    agent_idx,
-                    // Breath-independent z-key (matches AtWaypoint/AimlessAt):
-                    // the ±1px breath must not flip sort order against nearby
-                    // desk decor frame-to-frame.
-                    anchor_y: anchor_no_breath.y + WALKING_Y_OFF,
-                    anim_name: "seated",
-                    frame_idx: 0,
-                    anchor,
-                    flip_x: false,
-                    glow: CharacterGlow::Thinking,
-                    sleep_z_seed: None,
-                    waiting_bubble: false,
-                    walking_dust_frame: None,
-                });
+                placements.push(seated("seated", 0, CharacterGlow::Thinking, None));
             }
             Pose::SeatedTyping { frame } => {
-                let anchor_no_breath = seated_anchor(desk, char_w);
-                let anchor = with_breath(anchor_no_breath, agent.agent_id, now);
-                placements.push(CharacterPlacement {
-                    agent_idx,
-                    // Breath-independent z-key (matches AtWaypoint/AimlessAt):
-                    // the ±1px breath must not flip sort order against nearby
-                    // desk decor frame-to-frame.
-                    anchor_y: anchor_no_breath.y + WALKING_Y_OFF,
-                    anim_name: "typing",
-                    frame_idx: frame,
-                    anchor,
-                    flip_x: false,
-                    glow: CharacterGlow::Tool,
-                    sleep_z_seed: None,
-                    waiting_bubble: false,
-                    walking_dust_frame: None,
-                });
+                placements.push(seated("typing", frame, CharacterGlow::Tool, None));
             }
             Pose::StandingAtDesk => {
                 let anchor_no_breath = standing_at_desk_anchor(desk, char_w);
