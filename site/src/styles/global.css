@@ -102,7 +102,11 @@
    and --chip-bg goes transparent (light chrome text over the day office drops to
    low contrast). Mirror the load-bearing translucent tokens in rgba() (which
    predates color-mix by a decade); component-level decorative color-mix degrades
-   harmlessly (the color just inherits), so only these tokens need the fallback. */
+   harmlessly — a `color:` use inherits its parent color, a `background:`/
+   `box-shadow:`/gradient-stop use drops to its initial value (transparent/none) —
+   never illegible, so only these load-bearing tokens need the fallback. Every
+   visitor-reachable theme that redefines them in color-mix (day, night, AND the
+   dracula egg) needs an arm here, or its borders vanish on the old engine. */
 @supports not (color: color-mix(in srgb, red, red)) {
   :root {
     --border: rgba(36, 28, 20, 0.12);
@@ -114,6 +118,11 @@
     --border: rgba(244, 238, 226, 0.13);
     --border-strong: rgba(244, 238, 226, 0.24);
     --glow: rgba(227, 132, 95, 0.24);
+  }
+  :root[data-theme='dracula'] {
+    --border: rgba(248, 248, 242, 0.13); /* #f8f8f2 @ 13% */
+    --border-strong: rgba(248, 248, 242, 0.24); /* #f8f8f2 @ 24% */
+    --glow: rgba(189, 147, 249, 0.26); /* --coral #bd93f9 @ 26% */
   }
 }
 
@@ -354,7 +363,11 @@ section {
   box-shadow: 0 8px 20px color-mix(in srgb, #b5592f 42%, transparent);
 }
 .btn-primary:hover {
-  filter: brightness(1.08);
+  /* DARKEN, don't brighten: brightening the coral drops the white label below AA
+     on the light gradient stop (brightness(1.08) → 4.17:1). Darkening deepens the
+     fill AND keeps white ≥5.2:1 in every state; the -2px lift from .btn:hover is
+     the shared interactive cue, so the CTA still reads as hovered. */
+  filter: brightness(0.94);
 }
 .btn-ghost {
   background: transparent;
@@ -774,9 +787,12 @@ code,
 .prose pre code {
   font-family: var(--font-mono);
 }
-/* tables — display:block + overflow-x:auto gives wide markdown tables their OWN
+/* tables — display:block + overflow-x:auto gives a bare markdown <table> its OWN
    horizontal scroll on mobile instead of overflowing the page (which
-   body{overflow-x:hidden} would clip unreachably); mirrors the Tools matrix. */
+   body{overflow-x:hidden} would clip unreachably). Same GOAL as the Tools matrix
+   but a different mechanism: the matrix hangs overflow on a wrapper div and keeps
+   width:100%, whereas markdown has no wrapper — so display:block on the table
+   itself, which drops width:100% (narrow tables shrink to content on desktop). */
 .prose table {
   display: block;
   overflow-x: auto;

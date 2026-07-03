@@ -149,7 +149,12 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
     if (mq.addEventListener) mq.addEventListener('change', syncVideos);
     // WCAG 2.2.2: the page-wide pause button (#office-pause) stops the looping
     // demo clips too — one control governs all >5s auto-motion. The clips carry
-    // no visible controls in normal motion, so this IS their pause affordance.
+    // no visible controls in normal motion, so this IS their pause affordance —
+    // EXCEPT on a wasm-failure/no-wasm load, where #office-pause never unhides
+    // (poster-only path); there the reduced-motion branch above (native <video>
+    // controls) is the independent backstop. Unhiding the button without wasm is
+    // the shared pre-existing gap (statusline ticker + hero dust too) tracked
+    // separately — the clips ride the same page-pause pattern as those.
     document.addEventListener('pix:paused', function (e) {
       userPaused = !!(e.detail && e.detail.paused);
       syncVideos();
