@@ -220,8 +220,11 @@ const { floating = false } = Astro.props;
     text-decoration: none;
   }
   /* the logo mark IS the tab favicon (same asset, day/night swapped by the Base
-     theme sync) — one brand source, no drift. Shown 1:1 at its native 32px so the
-     pixel bust stays crisp (any non-integer size resamples it to a smudge). */
+     theme sync) — one brand source, no drift. Shown at the favicon's native 32px
+     (1:1), so the pixel bust is device-exact on 1× and a clean 2× double on
+     retina (image-rendering:pixelated keeps that double hard-edged). Size only to
+     32 or an integer fraction of it (the footer uses 16) — an arbitrary fraction
+     like the old 24px resamples the bust softer. */
   .nav__mark {
     height: 32px;
     width: 32px;

@@ -66,8 +66,11 @@ import { REPO, CRATES, SPONSOR, asset } from '../consts';
     text-decoration: none;
   }
   .footer__mark {
-    height: 20px;
-    width: auto;
+    /* exactly half the favicon's native 32px (a clean 2:1), so the pixel bust
+       stays device-exact on retina — the common case — where 16 CSS px = 32
+       device px. See .nav__mark for the 1:1 rationale. */
+    height: 16px;
+    width: 16px;
     image-rendering: pixelated;
   }
   .footer__sep {

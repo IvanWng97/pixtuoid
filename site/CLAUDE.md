@@ -81,6 +81,15 @@ Mermaid diagram becomes an inline SVG at build via `rehype-mermaid`, which is
   window (`load` → `requestIdleCallback`) so it doesn't compete with the
   above-fold poster/fonts; a live un-reduce still boots promptly via the mq
   listener.
+- The **on-page nav + footer logo mark IS the favicon** — `public/favicon-32.png`
+  / `favicon-32-night.png` (the head-and-collar bust squircle from #379), one
+  brand asset in two roles so there's no second file to drift (the old separate
+  `char-mark.png` silently diverged from the icon for a month). `Nav.astro` /
+  `Footer.astro` render it via the `.js-brand-mark` class, and `Base.astro`'s
+  `syncBrand` swaps BOTH the tab favicon and those marks day↔night together
+  (night ⇔ any non-day theme). Don't reintroduce a separate mark asset or drop
+  the `.js-brand-mark` hook. Size the mark to 32 (1:1) or an integer fraction
+  (footer uses 16) so the pixel bust stays device-exact.
 
 ## CSP (hash-based, two coordinated halves — both in astro.config.mjs)
 

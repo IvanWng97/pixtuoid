@@ -357,6 +357,16 @@ test('theme chain: saved choice, URL override, toggle persist, Escape restore, s
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'night');
   await expect(page.locator('.nav__mark')).toHaveAttribute('src', /favicon-32-night\.png$/);
   await expect(page.locator('.footer__mark')).toHaveAttribute('src', /favicon-32-night\.png$/);
+  // the swap must also run in reverse — toggle back to day and the marks return
+  // to the lit favicon (the night filename only appears if syncBrand ran, so this
+  // proves the day path with teeth, not just the authored default), then restore
+  // night for the persistence checks below.
+  await page.locator('#theme-toggle').click();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'day');
+  await expect(page.locator('.nav__mark')).toHaveAttribute('src', /favicon-32\.png$/);
+  await expect(page.locator('.footer__mark')).toHaveAttribute('src', /favicon-32\.png$/);
+  await page.locator('#theme-toggle').click();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'night');
   expect(await page.evaluate(() => localStorage.getItem('pix-theme'))).toBe('night');
   await expect(page.locator('#theme-toggle .nav__toggle-icon')).toHaveText('☀️');
   await expect(page.locator('#theme-toggle')).toHaveAttribute('aria-label', 'Switch to day');
