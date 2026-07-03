@@ -100,7 +100,11 @@ arch:
     # crate boundary already makes this a COMPILER fact; this pins it at the dep-tree
     # level too (a transitive pull-in via a feature would slip past the boundary).
     for crate in pixtuoid-core pixtuoid-scene; do
-        if cargo tree -p "$crate" --edges normal --prefix none | grep -qE '^(ratatui|crossterm|winit|softbuffer)'; then
+        # Capture first so a cargo-tree ERROR (e.g. a crate rename) kills the
+        # recipe via set -e, instead of reading as "no match" inside the if —
+        # which would print the green line without having checked anything.
+        deps="$(cargo tree -p "$crate" --edges normal --prefix none)"
+        if grep -qE '^(ratatui|crossterm|winit|softbuffer)' <<<"$deps"; then
             echo "ARCH VIOLATION: $crate depends on a terminal/window crate (CLAUDE.md invariant #1)"; exit 1
         fi
     done
@@ -235,10 +239,11 @@ mutants *args:
 
 # Never-panic fuzz the per-source decoders over a JSONL corpus DIR (on-demand;
 # not in preflight/CI — points at local or public real sessions, not committed
-# data). Auto-routes each line to the CC / Codex / hook decoder by its shape;
-# exits non-zero on any panic. Examples:
-#   just fuzz ~/.claude/projects     # your CC sessions (newest formats)
-#   just fuzz ~/.codex/sessions      # your Codex rollouts
+# data). Auto-routes each line to the CC / Codex / Copilot / Antigravity / hook
+# decoder by its shape; exits non-zero on any panic. Examples:
+#   just fuzz ~/.claude/projects       # your CC sessions (newest formats)
+#   just fuzz ~/.codex/sessions        # your Codex rollouts
+#   just fuzz ~/.copilot/session-state # your Copilot CLI sessions
 #   git clone https://github.com/daaain/claude-code-log /tmp/cc && just fuzz /tmp/cc/test_data/real_projects
 [group('rust')]
 [doc('Never-panic fuzz the decoders over a JSONL corpus dir: just fuzz ~/.claude/projects')]
@@ -367,27 +372,46 @@ gen-readme-check:
 gen-media *args:
     .venv/bin/python3 scripts/gen-media.py {{ args }}
 
-# Build the live-office wasm module (pixtuoid-web) + its JS glue into
-# site/public/wasm/ — a COMMITTED artifact (like public/demos/), so the site CI
-# stays Node-only. Toolchain gotcha (load-bearing, cost 2 debug cycles): the
+# The ONE wasm compile step — gen-wasm (below) and ci.yml's wasm-check job both
+# call this, so the package/target/profile CI checks can't drift from what
+# gen-wasm ships. Toolchain gotcha (load-bearing, cost 2 debug cycles): the
 # PATH cargo/rustc may be Homebrew's, which has NO wasm32 std — and even
 # `rustup run stable cargo` fails because cargo resolves `rustc` via PATH. So
 # the recipe prepends the RUSTUP toolchain bin (via `rustup which`) and invokes
-# that cargo explicitly. wasm-bindgen-cli must match the crate's pinned
-# wasm-bindgen (see crates/pixtuoid-web/Cargo.toml); wasm-opt (binaryen)
-# shrinks the blob ~10-20%.
+# that cargo explicitly.
 [group('gen')]
-[doc('Build pixtuoid-web (wasm) + JS glue into site/public/wasm/')]
-gen-wasm:
+[doc('Compile pixtuoid-web for wasm32 (release) — shared by gen-wasm + CI wasm-check')]
+wasm-build:
     #!/usr/bin/env sh
     set -eu
     command -v rustup >/dev/null || { echo "needs rustup (Homebrew rust has no wasm std)"; exit 1; }
-    command -v wasm-bindgen >/dev/null || { echo "needs wasm-bindgen-cli: cargo install wasm-bindgen-cli --locked"; exit 1; }
-    command -v wasm-opt >/dev/null || { echo "needs wasm-opt: brew install binaryen"; exit 1; }
     rustup target list --toolchain stable --installed | grep -q wasm32-unknown-unknown \
         || { echo "needs the wasm target: rustup target add wasm32-unknown-unknown"; exit 1; }
     TB="$(dirname "$(rustup which --toolchain stable rustc)")"
     PATH="$TB:$PATH" "$TB/cargo" build -p pixtuoid-web --target wasm32-unknown-unknown --release
+
+# The gen-only tool preflight — a SEPARATE recipe so it runs BEFORE the wasm-build
+# dependency, failing fast if wasm-bindgen/wasm-opt are missing instead of after a
+# minutes-long release compile. wasm-bindgen-cli must match the crate's pinned
+# wasm-bindgen (see crates/pixtuoid-web/Cargo.toml); wasm-opt (binaryen) shrinks
+# the blob ~10-20%. (ci.yml's wasm-check calls `wasm-build` directly — it only
+# compiles, so it needs neither of these.)
+[private]
+gen-wasm-tools:
+    #!/usr/bin/env sh
+    set -eu
+    command -v wasm-bindgen >/dev/null || { echo "needs wasm-bindgen-cli: cargo install wasm-bindgen-cli --locked"; exit 1; }
+    command -v wasm-opt >/dev/null || { echo "needs wasm-opt: brew install binaryen"; exit 1; }
+
+# Build the live-office wasm module (pixtuoid-web) + its JS glue into
+# site/public/wasm/ — a COMMITTED artifact (like public/demos/), so the site CI
+# stays Node-only. The compile itself is the shared `wasm-build` recipe; the
+# gen-only tools are checked first via the gen-wasm-tools pre-dep (fail-fast).
+[group('gen')]
+[doc('Build pixtuoid-web (wasm) + JS glue into site/public/wasm/')]
+gen-wasm: gen-wasm-tools wasm-build
+    #!/usr/bin/env sh
+    set -eu
     mkdir -p site/public/wasm
     wasm-bindgen --target web --out-dir site/public/wasm \
         target/wasm32-unknown-unknown/release/pixtuoid_web.wasm
@@ -492,6 +516,13 @@ bump version:
     if grep -q "\"$ver\" =>" crates/pixtuoid/src/version.rs; then
         echo "error: version.rs already has a release_notes arm for $ver" >&2; exit 1; fi
 
+    # the release-notes injection (step 5) is an awk match on this marker; if it's
+    # ever removed the awk silently no-ops, leaving version.rs without the new arm
+    # (surfacing only later as a cryptic preflight test failure). Fail loud here —
+    # the one un-guarded step in an otherwise heavily-guarded recipe.
+    if ! grep -q '\[bump-inject-here\]' crates/pixtuoid/src/version.rs; then
+        echo "error: version.rs is missing the [bump-inject-here] marker — release-notes injection would silently no-op" >&2; exit 1; fi
+
     # releases come from main; forking release/v$ver off anything else is usually wrong
     cur_branch="$(git symbolic-ref --short -q HEAD || echo detached)"
     if [ "$cur_branch" != "main" ]; then
@@ -547,7 +578,7 @@ bump version:
     git commit -q -m "chore(release): v$ver"
     committed=1
 
-    printf '\n\033[32m✓ v%s committed on %s\033[0m\n\n  next:\n    1. curate the drafted bullets in crates/pixtuoid/src/version.rs (release_notes\n       arm) down to ~6 highlights, then: git commit --amend -a\n    2. open a PR, review, merge to main\n    3. AFTER merge, tag to publish — IRREVERSIBLE (crates.io + homebrew):\n         git tag v%s && git push origin v%s\n' "$ver" "$branch" "$ver" "$ver"
+    printf '\n\033[32m✓ v%s committed on %s\033[0m\n\n  next:\n    1. curate the drafted bullets in crates/pixtuoid/src/version.rs (release_notes\n       arm) down to ~6 highlights, then: git commit --amend -a\n    2. regenerate committed artifacts — the office HUD bakes CARGO_PKG_VERSION, so a\n       bump drifts every still: just gen, then commit docs/images + site/public/demos\n       (else CI smoke gen-check reds the PR)\n    3. open a PR, review, merge to main\n    4. AFTER merge, tag to publish — IRREVERSIBLE (crates.io + homebrew):\n         git tag v%s && git push origin v%s\n' "$ver" "$branch" "$ver" "$ver"
 
 # Unit-test the npm package generator (Node, no cargo). The ONLY validation of
 # npm/generate.mjs — release.yml runs this as a hard gate right before `npm
@@ -613,12 +644,13 @@ setup-tools:
         rustup component add rust-analyzer >/dev/null 2>&1 ||
             echo "could not add the rust-analyzer component — install it for LSP support" >&2
     fi
-    # Non-cargo lint tools that `just lint` gates on (Go binaries, not crates:
-    # shfmt formats shell, actionlint lints the workflows). brew on macOS;
-    # elsewhere point at the install docs rather than silently leaving `just
-    # lint` unable to run. (actionlint also shells out to `shellcheck`, the
-    # house-rule tool, for its run-block checks.)
-    for t in shfmt actionlint; do
+    # Non-cargo lint tools that `just lint` gates on (shfmt formats shell,
+    # actionlint lints the workflows, and shellcheck backs actionlint's run-block
+    # checks — WITHOUT it on PATH, actionlint silently SKIPS them, so a shell bug
+    # in a workflow `run:` block passes `just lint` green locally). brew on macOS;
+    # elsewhere point at the install docs rather than silently leaving `just lint`
+    # unable to run — or, worse, passing with the shellcheck pass quietly skipped.
+    for t in shfmt actionlint shellcheck; do
         command -v "$t" &>/dev/null && continue
         if command -v brew &>/dev/null; then
             brew install "$t" || true
@@ -629,7 +661,7 @@ setup-tools:
     # caught here — not silently pass as a successful setup (the #283-class silent
     # no-op this recipe is meant to prevent).
     missing=()
-    for t in shfmt actionlint; do
+    for t in shfmt actionlint shellcheck; do
         command -v "$t" &>/dev/null || missing+=("$t")
     done
     if (( ${#missing[@]} )); then

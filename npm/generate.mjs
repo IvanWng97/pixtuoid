@@ -35,7 +35,9 @@ import { fileURLToPath } from "node:url";
 const SCOPE = "@pixtuoid";
 const BINS = ["pixtuoid", "pixtuoid-hook"];
 
-// The asymmetric 6-row target table — mirrors release.yml's build matrix.
+// The asymmetric 6-row target table — mirrors release.yml's build matrix
+// (equality PINNED by npm/generate.test.mjs, so a matrix target this table lacks
+// fails `just npm-check` instead of silently shipping nowhere on npm).
 //   linux-x64   → static musl build (portable to glibc too) → NO `libc` gate,
 //                 so npm installs it on every linux-x64 host.
 //   linux-arm64 → glibc build → `libc:["glibc"]` so npm SKIPS it on musl /

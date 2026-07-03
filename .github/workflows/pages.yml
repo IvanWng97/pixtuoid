@@ -10,10 +10,12 @@ on:
     paths: ['site/**', 'Cargo.toml', 'docs/CONFIGURATION.md', 'docs/ARCHITECTURE.md', 'docs/CONTRIBUTING.md', 'docs/MIGRATION.md', 'docs/KNOWLEDGE-ENGINEERING.md', 'docs/PARALLEL-DELIVERY.md', '.github/workflows/pages.yml']
   workflow_dispatch:
 
+# Least-privilege (mirrors release.yml, #215): jobs inherit read-only; the
+# deploy job alone carries the Pages-publish + OIDC scopes. The build job runs
+# third-party code (npm postinstall scripts, withastro/action) and must not
+# hold a token that can publish the site.
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 # one deploy at a time; don't cancel an in-flight publish
 concurrency:
@@ -56,6 +58,9 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

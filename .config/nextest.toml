@@ -7,8 +7,9 @@ slow-timeout = { period = "60s", terminate-after = 3 }
 
 # Full failure set per CI run: don't stop at the first failing test — a red CI
 # run should report every failure at once (one round-trip, not fix-push-refail).
-# Local `just test` keeps the default fail-fast for fast iteration. Active today
-# on the coverage job (`--profile ci`); windows-test joins via #214.
+# Local `just test` keeps the default fail-fast for fast iteration. Active on
+# every CI test job: `--profile ci` on coverage, `NEXTEST_PROFILE=ci` on
+# windows-test + macos-test (all three upload target/nextest/ci/junit.xml).
 [profile.ci]
 fail-fast = false
 

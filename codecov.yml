@@ -57,7 +57,10 @@ ignore:
   - "scripts/"
   - "docs/"
   - "*.md"
-  # Not coverable headlessly — exercising these needs a real TTY / OS / display:
+  # Not coverable headlessly — exercising these needs a real TTY / OS / display.
+  # `.cargo/mutants.toml` excludes the zero-kill-path SUBSET of this list (not
+  # crash/logging/sources_cli — their pure helpers are unit-tested); edit the two
+  # lists together, they are deliberately NOT identical.
   - "crates/pixtuoid/src/main.rs"               # binary entry: arg-parse + dispatch + terminal preflights
   - "crates/pixtuoid/src/crash.rs"              # panic hook: terminal restore + crash.log (was main.rs; its pure helpers stay unit-tested)
   - "crates/pixtuoid/src/logging.rs"            # global tracing-subscriber init (once per process; was main.rs; pure helpers unit-tested)

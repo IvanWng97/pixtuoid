@@ -135,3 +135,37 @@ test("throws when a target's prebuilt binary is missing", (t) => {
   assert.notEqual(r.status, 0);
   assert.match(r.stderr, /missing prebuilt binary for x86_64-unknown-linux-musl/);
 });
+
+// The target set lives in THREE hand-maintained places that can't share one
+// literal (a YAML matrix, this JS table, a Ruby heredoc): release.yml's `build`
+// matrix (what's compiled), generate.mjs/this TARGETS (what npm packages), and
+// homebrew's formula (a deliberate desktop-only subset). The dangerous drift is
+// SILENT: add a build target but not to TARGETS → the artifact builds and npm
+// ships the OLD set, no error. Pin the two full-set copies here (the repo's
+// "can't centralize across a boundary → pin with a test" rule); the extract step
+// self-guards (generate.mjs throws on a missing artifact) and homebrew is an
+// intentional subset, so those two are comment-pinned, not asserted.
+test("release.yml build matrix targets == npm TARGETS (npm ships every built platform)", () => {
+  const releaseYml = readFileSync(
+    join(dirname(SCRIPT), "..", ".github", "workflows", "release.yml"),
+    "utf8",
+  );
+  // Isolate the `build:` job (the `deb:` job carries its own smaller matrix):
+  // slice from the 2-space `build:` header to the next 2-space job key.
+  const buildStart = releaseYml.indexOf("\n  build:\n");
+  assert.notEqual(buildStart, -1, "release.yml has a build: job");
+  const afterBuild = releaseYml.slice(buildStart + 1);
+  const nextJob = afterBuild.search(/\n  [a-z][\w-]*:\n/);
+  const buildBlock = nextJob === -1 ? afterBuild : afterBuild.slice(0, nextJob + 1);
+  const matrixTargets = [...buildBlock.matchAll(/^\s+- target:\s*(\S+)/gm)].map((m) => m[1]);
+  assert.ok(
+    matrixTargets.length >= 4,
+    `parsed only ${matrixTargets.length} matrix targets — the build-job slice/regex drifted`,
+  );
+  assert.deepEqual(
+    [...matrixTargets].sort(),
+    TARGETS.map((t) => t.rust).sort(),
+    "release.yml build matrix targets must match npm TARGETS — a new build target the " +
+      "generator doesn't know ships NOWHERE on npm (silent). Update both (+ homebrew if desktop).",
+  );
+});

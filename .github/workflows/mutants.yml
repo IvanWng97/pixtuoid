@@ -1,0 +1,46 @@
+name: mutants
+
+# ON-DEMAND only — mutation testing is an occasional "do the assertions have
+# teeth?" audit, not a per-PR cost. Its own workflow (not a job in ci.yml) so a
+# dispatch runs ONLY this: when it lived in ci.yml, triggering it from the
+# Actions tab re-ran the entire CI matrix alongside it. Run it here, or locally
+# via `just mutants` (diff-scoped). ADVISORY by construction: nothing `needs:`
+# this workflow, so a red run gates nothing — and cargo-mutants exits non-zero
+# EXACTLY to signal surviving mutants, which is the answer you dispatched for, so
+# it is NOT swallowed with continue-on-error (that would bury it). Survivors also
+# ride out as the `mutants-report` artifact.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mutants:
+    name: mutation testing (on-demand)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # `--in-diff` needs the merge base in history
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: v1-rust # see ci.yml's clippy-job note
+      - uses: taiki-e/install-action@cargo-mutants
+      - uses: taiki-e/install-action@cargo-nextest
+      - uses: extractions/setup-just@v4
+      # workflow_dispatch has no pull_request context, so MUTANTS_BASE would be
+      # empty here — let `just mutants` fall back to its origin/main default (the
+      # checkout's fetch-depth: 0 gives `--in-diff` the merge base vs main).
+      - name: Mutation-test the diff vs main (advisory, non-blocking)
+        run: just mutants
+      - name: Upload surviving-mutants report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: mutants-report
+          path: mutants.out/
+          retention-days: 7
+          if-no-files-found: ignore

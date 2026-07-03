@@ -73,24 +73,27 @@ def test_try_fetch_classifies_permanent_vs_transient() -> None:
 
 
 def test_source_parsers_find_nonempty_well_shaped_sets() -> None:
-    # (reader, a shape regex every member must match) — non-empty + shape catches
-    # a broken regex / wrong-block grab WITHOUT coupling to the exact event set
-    # (which legitimately grows as sources are added).
+    # (reader, a shape regex every member must match, floor) — non-empty + shape
+    # catches a broken regex / wrong-block grab WITHOUT coupling to the exact event
+    # set (which legitimately grows as sources are added). floor is 2 for real
+    # event sets; the dispatch-tool name set is a legitimate SINGLETON since CC
+    # dropped the `Task` alias in 0.12.0 (only `Agent` remains — see the subagent
+    # sharp edge in crates/pixtuoid-core/CLAUDE.md), so it floors at 1.
     cases = [
-        (d.read_codex_events, r"^[A-Za-z]\w+$"),
-        (d.read_cc_events, r"^[A-Za-z]\w+$"),
-        (d.read_dispatch_names, r"^[A-Za-z]\w+$"),
-        (d.read_reasonix_events, r"^[A-Za-z]\w+$"),
-        (d.read_codewhale_events, r"^[a-z][a-z_]*$"),
-        (d.read_openclaw_events, r"^[a-z][a-z_]*$"),
-        (d.read_opencode_events, r"^[a-z][a-z0-9._]*$"),
-        (d.read_copilot_events, r"^[a-z][a-z0-9._]*$"),
-        (d.read_cursor_events, r"^[a-zA-Z]\w+$"),
+        (d.read_codex_events, r"^[A-Za-z]\w+$", 2),
+        (d.read_cc_events, r"^[A-Za-z]\w+$", 2),
+        (d.read_dispatch_names, r"^[A-Za-z]\w+$", 1),
+        (d.read_reasonix_events, r"^[A-Za-z]\w+$", 2),
+        (d.read_codewhale_events, r"^[a-z][a-z_]*$", 2),
+        (d.read_openclaw_events, r"^[a-z][a-z_]*$", 2),
+        (d.read_opencode_events, r"^[a-z][a-z0-9._]*$", 2),
+        (d.read_copilot_events, r"^[a-z][a-z0-9._]*$", 2),
+        (d.read_cursor_events, r"^[a-zA-Z]\w+$", 2),
     ]
-    for reader, shape in cases:
+    for reader, shape, floor in cases:
         name = reader.__name__
         got = reader()
-        check(isinstance(got, set) and len(got) >= 2, f"{name}: non-empty (>=2), got {got!r}")
+        check(isinstance(got, set) and len(got) >= floor, f"{name}: non-empty (>={floor}), got {got!r}")
         bad = [m for m in got if not re.match(shape, m)]
         check(not bad, f"{name}: members match {shape}; offenders={bad}")
 

@@ -21,13 +21,16 @@ concurrency:
 jobs:
   risk-radar:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+      - uses: extractions/setup-just@v4
 
       # The matcher's selftest is the gate on the seam map itself — if someone
-      # edits scripts/risk-radar.py and breaks a rule, this fails first.
+      # edits scripts/risk-radar.py and breaks a rule, this fails first. Through
+      # the justfile recipe (repo rule: CI calls the same recipes as local dev).
       - name: Self-test the matcher
-        run: python3 scripts/risk-radar.py --selftest
+        run: just risk-radar-test
 
       # continue-on-error: a transient `gh pr diff` hiccup must not redden an
       # advisory, non-required job. The step summary is the durable floor.

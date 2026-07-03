@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
-  workflow_dispatch: # manual trigger for the on-demand mutants job
+  workflow_dispatch: # manual re-run of the full matrix (mutants has its own workflow)
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -75,7 +75,9 @@ jobs:
         with:
           prefix-key: v1-rust
       - uses: extractions/setup-just@v4
-      - run: cargo build -p pixtuoid-web --target wasm32-unknown-unknown --release
+      # gen-wasm compiles through this same shared recipe (wasm-build) — one build
+      # line, so what CI checks can't drift from what gen-wasm ships.
+      - run: just wasm-build
       # The committed artifact's size cap (deterministic — a stat on the
       # checked-in blob, no toolchain drift; the byte-exact rebuild compare
       # stays deliberately un-CI'd).
@@ -216,9 +218,10 @@ jobs:
 
   windows-test:
     name: windows-test
-    # Pinned to windows-2022 during the VS 2026 migration of windows-latest
-    # (June 8-15, 2026); unpin once the migration settles (tracked carry-item).
-    runs-on: windows-2022
+    # Unpinned back to windows-latest now the June 2026 VS2026-image migration has
+    # settled. This job's own run validates the image on every PR — if it regresses,
+    # re-pin to a dated runner label here.
+    runs-on: windows-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
@@ -346,41 +349,8 @@ jobs:
       # which snapshots were referenced.
       - run: just snapshots
 
-  mutants:
-    name: mutation testing (on-demand)
-    # ON-DEMAND only (`workflow_dispatch`) — mutation testing is an occasional
-    # "do the assertions have teeth?" audit, not a per-PR cost. Run it from the
-    # Actions tab when you want it, or locally via `just mutants` (diff-scoped).
-    # ADVISORY: `continue-on-error` keeps a surviving mutant off any required
-    # path — it's a hint to strengthen a test. Survivors ride out as the
-    # `mutants-report` artifact.
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0 # `--in-diff` needs the merge base in history
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          prefix-key: v1-rust # see the clippy job's note
-      - uses: taiki-e/install-action@cargo-mutants
-      - uses: taiki-e/install-action@cargo-nextest
-      - uses: extractions/setup-just@v4
-      - name: Mutation-test the PR diff (advisory, non-blocking)
-        env:
-          MUTANTS_BASE: ${{ github.event.pull_request.base.sha }}
-        run: just mutants
-      - name: Upload surviving-mutants report
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: mutants-report
-          path: mutants.out/
-          retention-days: 7
-          if-no-files-found: ignore
+  # (mutation testing moved to its own on-demand workflow, mutants.yml — when it
+  # lived here, dispatching it re-ran this entire matrix alongside it.)
 
   smoke:
     name: smoke
@@ -445,6 +415,15 @@ jobs:
           done
           echo "ffmpeg install failed after 3 attempts" >&2
           exit 1
+      - name: Cache pip downloads
+        # The venv itself is cheap to recreate; the wheel DOWNLOAD is the cost.
+        # Cache ~/.cache/pip keyed on the pinned dep set so an unchanged
+        # requirements-dev.txt reinstalls from cache instead of re-fetching PyPI.
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-${{ hashFiles('requirements-dev.txt') }}
+          restore-keys: pip-${{ runner.os }}-
       - name: Set up Python virtual environment
         run: |
           python3 -m venv .venv

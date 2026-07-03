@@ -81,12 +81,14 @@ jobs:
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
             cross: true
-          # windows-2022 pinned — migrate to VS2026 image once stable.
           # aarch64 cross-links on the same x64 runner (Tier 1; VC ARM64 components preinstalled).
+          # windows-latest now the VS2026 migration has settled; unlike ci.yml's windows-test
+          # this build is validated only at TAG time (release.yml doesn't run on PRs), so watch
+          # the first tagged run after this and re-pin to a dated label if it regresses.
           - target: x86_64-pc-windows-msvc
-            os: windows-2022
+            os: windows-latest
           - target: aarch64-pc-windows-msvc
-            os: windows-2022
+            os: windows-latest
     steps:
       - uses: actions/checkout@v7
 
@@ -128,7 +130,7 @@ jobs:
         shell: bash
         run: |
           # Flat zip — exes at zip root so Expand-Archive doesn't double-wrap.
-          # 7z is preinstalled on windows-2022 runners.
+          # 7z is preinstalled on windows-latest runners.
           VERSION="${GITHUB_REF_NAME}"
           DIR="pixtuoid-${VERSION}-${{ matrix.target }}"
           mkdir "$DIR"
@@ -244,7 +246,11 @@ jobs:
 
   publish:
     name: publish to crates.io
-    needs: check
+    # Gate on the FULL build matrix, not just `check`: the crates.io publish is
+    # irreversible (a version can never be re-cut), so it must not fire for a tag
+    # whose binaries/debs don't build — otherwise crates.io gets 0.12.0 while the
+    # GH release (needs: [build, deb]) never ships. Matches the `release` job's gate.
+    needs: [check, build, deb]
     # Never publish a pre-release to crates.io — the publish is irreversible;
     # tester pre-release tags (v*-win.N etc.) build artifacts only.
     if: ${{ !contains(github.ref_name, '-') }}
@@ -316,6 +322,9 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           TAG="${GITHUB_REF_NAME}"
 
+          # Homebrew ships the 4 DESKTOP targets only (no windows) — a deliberate
+          # SUBSET of the build matrix, not a full mirror. Add an arm here when a
+          # new macOS/Linux target joins the matrix (windows stays npm/release-only).
           SHA_MACOS_ARM=$(sha256sum "artifacts/pixtuoid-${TAG}-aarch64-apple-darwin.tar.gz" | cut -d' ' -f1)
           SHA_MACOS_INTEL=$(sha256sum "artifacts/pixtuoid-${TAG}-x86_64-apple-darwin.tar.gz" | cut -d' ' -f1)
           SHA_LINUX_ARM=$(sha256sum "artifacts/pixtuoid-${TAG}-aarch64-unknown-linux-gnu.tar.gz" | cut -d' ' -f1)
@@ -380,12 +389,25 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Formula/pixtuoid.rb
-          git commit -m "pixtuoid ${VERSION}"
-          git push
+          # Idempotent: a re-run of the same tag regenerates a byte-identical
+          # formula (same version + same artifact SHAs), so `git commit` would
+          # exit 1 ("nothing to commit") and fail the job. Skip the commit/push
+          # when the formula is unchanged — mirrors the crates.io/npm jobs'
+          # safe-re-run discipline.
+          if git diff --staged --quiet; then
+            echo "::notice::homebrew formula unchanged for ${VERSION} — nothing to commit"
+          else
+            git commit -m "pixtuoid ${VERSION}"
+            git push
+          fi
 
   npm:
     name: publish to npm
-    needs: build
+    # Same full-matrix gate as the crates.io `publish` job: npm consumes only the
+    # `build` tarballs, but an npm publish is also irreversible (no unpublish
+    # after 72h), so it must not ship a version whose full artifact set (incl.
+    # debs) didn't build — one gate for every irreversible publisher.
+    needs: [check, build, deb]
     # Never publish a pre-release to npm — like crates.io, an npm publish is
     # effectively irreversible (no unpublish after 72h). Pre-release tags
     # (v*-win.N / -rc) build artifacts only. Consumes the SAME build artifacts
@@ -428,6 +450,9 @@ jobs:
         run: |
           set -euo pipefail
           TAG="${GITHUB_REF_NAME}"
+          # Mirrors the `build` matrix + npm/generate.mjs TARGETS. Self-guards: a
+          # missing artifact fails loud below; the build↔npm full-set equality is
+          # pinned by npm/generate.test.mjs (`just npm-check`, run just above).
           for target in aarch64-apple-darwin x86_64-apple-darwin \
                         x86_64-unknown-linux-musl aarch64-unknown-linux-gnu \
                         x86_64-pc-windows-msvc aarch64-pc-windows-msvc; do
