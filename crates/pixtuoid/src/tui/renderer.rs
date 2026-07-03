@@ -21,13 +21,10 @@ use ratatui::layout::Rect;
 use ratatui::style::Color;
 use ratatui::Terminal;
 
-use pixtuoid_scene::frame_cache::FrameCache;
 use pixtuoid_scene::layout::Layout;
-use pixtuoid_scene::motion::MotionState;
 use pixtuoid_scene::pathfind::Router;
 use pixtuoid_scene::pet::PetFrame;
 use pixtuoid_scene::pixel_painter::{render_to_rgb_buffer, MascotFrame, PixelCtx};
-use pixtuoid_scene::pose;
 
 // Re-exports so tui_renderer.rs and tui/mod.rs import from one place.
 pub(crate) use crate::tui::hit_test::hit_test_agent;
@@ -62,22 +59,13 @@ pub struct FloorInfo {
 /// the 14-parameter `draw_scene` signature with a single struct pass.
 pub struct DrawCtx<'a> {
     pub buf: &'a mut RgbBuffer,
-    pub cache: &'a mut FrameCache,
-    pub router: &'a mut dyn Router,
-    pub overlay: &'a mut pixtuoid_core::walkable::OccupancyOverlay,
-    pub history: &'a mut pose::PoseHistory,
-    /// Per-floor motion state — threaded like `history`. Agents' `MotionState`
-    /// entries are initialized and advanced by `derive_with_routing`.
-    pub motion: &'a mut std::collections::HashMap<pixtuoid_core::AgentId, MotionState>,
-    /// Per-floor max in-flight entry/exit physics duration (ms). Written
-    /// each render tick by `tui_renderer.rs` from `fctx.motion`; read by
-    /// `compute_door_frame_idx` so the door cosmetic scales with actual
-    /// walk physics instead of the old hardcoded `ENTRY_ANIMATION_MS`.
-    pub door_anim_max_ms: u64,
-    /// Per-floor lighting fade state. Advanced inside the pixel pass and
-    /// read by the indoor-light helpers. Borrowed mutably from the
-    /// matching `FloorCtx`.
-    pub light: &'a mut pixtuoid_scene::floor::LightingState,
+    /// The per-floor sim/paint STORES borrowed as ONE group — was seven flat
+    /// fields (`cache`/`router`/`overlay`/`history`/`motion`/`door_anim_max_ms`/
+    /// `light`), each a `FloorCtx` field. `draw_scene` forwards it straight into
+    /// `PixelCtx.store` and reads `store.router`/`store.overlay`/… for its
+    /// RouteCtx hit-tests + label overlay. `buf` stays a SEPARATE field: it is a
+    /// sibling of the `FloorCtx` on a `PerFloor`, borrowed disjointly.
+    pub store: &'a mut pixtuoid_scene::floor::FloorCtx,
     pub mouse_pos: Option<(u16, u16)>,
     pub pinned_agent: Option<pixtuoid_core::AgentId>,
     /// Live walkable/approach/route debug layer toggle (`w`). Threaded into the
@@ -245,27 +233,23 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         return Ok(None);
     };
 
-    ctx.router.set_preferred_zone(layout.corridor);
+    ctx.store.router.set_preferred_zone(layout.corridor);
 
     let pixel_result = render_to_rgb_buffer(&mut PixelCtx {
+        // Reborrow: `ctx.store`/`ctx.buf` are used again below (RouteCtx
+        // hit-tests, the dim, the flush).
+        store: &mut *ctx.store,
+        buf: &mut *ctx.buf,
         scene,
         layout: &layout,
         pack,
         now,
-        buf: ctx.buf,
-        cache: ctx.cache,
-        router: ctx.router,
-        overlay: ctx.overlay,
-        history: ctx.history,
-        motion: ctx.motion,
         theme,
         floor,
         active_pet: ctx.active_pet,
         floor_pet: ctx.floor_pet,
-        chitchat_state: ctx.chitchat_state,
         coffee: ctx.coffee,
-        light: ctx.light,
-        door_anim_max_ms: ctx.door_anim_max_ms,
+        chitchat_state: ctx.chitchat_state,
         debug_walkable: ctx.debug_walkable,
     });
     ctx.last_pet_pos = pixel_result.pet_pos;
@@ -281,10 +265,10 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
             &layout,
             now,
             &mut pixtuoid_scene::pose::RouteCtx {
-                router: &mut *ctx.router,
-                overlay: &*ctx.overlay,
-                history: &mut *ctx.history,
-                motion: &mut *ctx.motion,
+                router: &mut ctx.store.router,
+                overlay: &ctx.store.overlay,
+                history: &mut ctx.store.history,
+                motion: &mut ctx.store.motion,
             },
             mx,
             my,
@@ -317,10 +301,10 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
             &layout,
             now,
             &mut pixtuoid_scene::pose::RouteCtx {
-                router: &mut *ctx.router,
-                overlay: &*ctx.overlay,
-                history: &mut *ctx.history,
-                motion: &mut *ctx.motion,
+                router: &mut ctx.store.router,
+                overlay: &ctx.store.overlay,
+                history: &mut ctx.store.history,
+                motion: &mut ctx.store.motion,
             },
             actual_scene,
             hovered,

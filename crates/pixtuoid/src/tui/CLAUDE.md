@@ -26,7 +26,8 @@ Parent guides: binary [`../../CLAUDE.md`](../../CLAUDE.md); workspace
 
 ```
 tui/
-├── renderer.rs     draw_scene<B: Backend> orchestrator (DrawCtx struct): calls pixtuoid_scene::pixel_painter::
+├── renderer.rs     draw_scene<B: Backend> orchestrator (DrawCtx struct — borrows the per-floor FloorCtx
+│                   as ONE `store` field + a separate `buf`, was seven flat store fields): calls pixtuoid_scene::pixel_painter::
 │                   render_to_rgb_buffer for the world, then the half-block flush + widgets + footer
 │                   (terminal lifecycle — raw mode + alternate screen — lives with the event loop in
 │                   tui/mod.rs, #103); the floor-slide paints via the shared scene seam (floor::render_floor)
@@ -84,7 +85,7 @@ tui/
 
 ## Known sharp edges (don't be surprised by these)
 
-- **`draw_scene` is called through `TuiRenderer`** (the `Renderer` trait impl), which owns the cross-frame state (RgbBuffer, FrameCache, Router, OccupancyOverlay, PoseHistory) and assembles a per-frame DrawCtx borrow (RgbBuffer, FrameCache, Router, OccupancyOverlay, PoseHistory, theme, mouse state). It delegates the world render to `pixtuoid_scene::pixel_painter::render_to_rgb_buffer` (the shared engine seam — see [`../../../pixtuoid-scene/CLAUDE.md`](../../../pixtuoid-scene/CLAUDE.md)), then does the terminal-only half-block flush + widgets + footer. `draw_scene` returns `Result<Option<Layout>>` — the computed layout is cached on `TuiRenderer.cached_layout` so hit-test functions can use it without recomputing. During floor transitions, `cached_layout` is cleared to `None`.
+- **`draw_scene` is called through `TuiRenderer`** (the `Renderer` trait impl), which owns the cross-frame state (per-floor `FloorCtx` {FrameCache/Router/OccupancyOverlay/PoseHistory/motion/light} + the `RgbBuffer`) and assembles a per-frame `DrawCtx` borrow that carries that `FloorCtx` as ONE `store` field (was the flat FrameCache/Router/OccupancyOverlay/PoseHistory list) + a separate `buf` (disjoint sibling), plus theme + mouse state. It delegates the world render to `pixtuoid_scene::pixel_painter::render_to_rgb_buffer` (the shared engine seam — see [`../../../pixtuoid-scene/CLAUDE.md`](../../../pixtuoid-scene/CLAUDE.md)), then does the terminal-only half-block flush + widgets + footer. `draw_scene` returns `Result<Option<Layout>>` — the computed layout is cached on `TuiRenderer.cached_layout` so hit-test functions can use it without recomputing. During floor transitions, `cached_layout` is cleared to `None`.
 - **The version popup's URL click-rect (`version_popup_url_rect`) derives its offsets from the SAME `PANEL_PAD_*` consts the painter insets by** (`url_x = popup_x + PANEL_PAD_X + URL_PREFIX.len()`, edges clipped at `±PANEL_PAD_*`) — keep them in lockstep (the phantom-browser-launch regression class).
 - **Every crossterm key event passes `should_dispatch_key` first** (`tui/mod.rs`): Windows delivers Press AND Release (and Repeat) per keystroke, so only `KeyEventKind::Press` dispatches — otherwise toggle keys double-fire there (`p` pauses then instantly unpauses). Unix only emits Press, so the gate is a no-op locally.
 - **The `w` walkable/approach/route debug overlay is dev-only** — its dispatch arm is `#[cfg(debug_assertions)]`-gated, so release builds silently ignore `w`. Don't "fix" a report that `w` does nothing in an installed binary.

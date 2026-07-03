@@ -730,17 +730,10 @@ impl<B: Backend<Error: Send + Sync + 'static>> Renderer for TuiRenderer<B> {
         // Compute popup scale before the mutable borrows below.
         let popup_scale = self.version_popup_scale(now);
         let pf = &mut self.floors[self.current_floor];
-        let fctx = &mut pf.ctx;
-        let door_anim_max_ms = fctx.door_anim_max_ms;
         let mut draw_ctx = DrawCtx {
+            // buf + the FloorCtx store are disjoint fields of the PerFloor.
             buf: &mut pf.buf,
-            cache: &mut fctx.cache,
-            router: &mut fctx.router,
-            overlay: &mut fctx.overlay,
-            history: &mut fctx.history,
-            motion: &mut fctx.motion,
-            door_anim_max_ms,
-            light: &mut fctx.light,
+            store: &mut pf.ctx,
             mouse_pos: self.mouse_pos,
             pinned_agent: self.pinned_agent,
             debug_walkable: self.debug_walkable,

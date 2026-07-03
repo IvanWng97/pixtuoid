@@ -334,24 +334,19 @@ pub fn render_floor(
     buf.ensure_size(size.w, size.h, theme.surface.bg_fallback);
     let layout = frame_prologue(fctx, size.w, size.h, floor_meta.floor_seed)?;
     let result = render_to_rgb_buffer(&mut PixelCtx {
+        // Reborrow: `frame_epilogue` uses `fctx` after this render.
+        store: &mut *fctx,
+        buf,
         scene,
         layout: &layout,
         pack,
         now,
-        buf,
-        cache: &mut fctx.cache,
-        router: &mut fctx.router,
-        overlay: &mut fctx.overlay,
-        history: &mut fctx.history,
-        motion: &mut fctx.motion,
-        door_anim_max_ms: fctx.door_anim_max_ms,
         theme,
         floor: floor_meta,
         active_pet,
         floor_pet,
-        chitchat_state: chitchat,
         coffee: coffee.map(),
-        light: &mut fctx.light,
+        chitchat_state: chitchat,
         debug_walkable,
     });
     // The epilogue the consumers used to mirror by hand — now ONE definition

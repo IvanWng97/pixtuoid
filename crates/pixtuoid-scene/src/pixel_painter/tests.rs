@@ -4,8 +4,12 @@ use super::anchors::{
 };
 use super::seat::{seat_sprite, settle_seat_view, SeatView, DESK_SEAT_Z_OFF};
 use super::*;
+// Formerly reached via `super::*` off mod.rs's imports — now that PixelCtx no
+// longer names them (it borrows the FloorCtx group), import them directly.
+use crate::pose;
 use pixtuoid_core::sprite::{Frame, Palette};
 use pixtuoid_core::state::{GlobalDeskIndex, ToolKind};
+use pixtuoid_core::walkable::OccupancyOverlay;
 use std::path::PathBuf;
 use std::sync::Arc;
 

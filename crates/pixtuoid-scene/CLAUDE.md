@@ -131,8 +131,11 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
                     paint-local FrameCache — a render cache, deliberately not a sim store — so
                     painting can NOT move the world; pinned by paint_frame_is_pure_and_byte_identical
                     + sim_step_advances_motion_without_painting),
-                    mod.rs (PixelCtx struct — still the painters' construction surface, unchanged —
-                    orchestrator + the private PaintCtx), background/ (weather, sunset, skyline,
+                    mod.rs (PixelCtx struct — the painters' construction surface; it now BORROWS the
+                    per-floor `FloorCtx` as one `store` field (was six flat fields router/overlay/history/
+                    cache/motion/light + door_anim_max_ms), read as disjoint `store.router`/… projections;
+                    `buf` stays a SEPARATE field (disjoint sibling on a PerFloor) — orchestrator + the
+                    private PaintCtx), background/ (weather, sunset, skyline,
                     time_of_day.rs, lighting.rs), ambient.rs (sun spot + dust motes + ceiling halos),
                     drawable.rs (y-sort Drawable enum + dispatch), effects.rs (glow/z's/steam/dust/bubble),
                     palette.rs (agent palette + recolor + tool_glow_tint), anchors.rs (breath, character_anchor —

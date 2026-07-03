@@ -18,7 +18,6 @@ use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_core::state::{ActivityState, ToolKind};
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex, Reducer, SceneState, Transport};
 use pixtuoid_scene::embedded_pack::load_sprite_pack;
-use pixtuoid_scene::frame_cache::FrameCache;
 use ratatui::backend::TestBackend;
 use ratatui::style::Color;
 use ratatui::Terminal;
@@ -392,10 +391,9 @@ fn main() -> Result<()> {
     let mut term = Terminal::new(backend)?;
     let mut buf = RgbBuffer::filled(0, 0, Rgb { r: 0, g: 0, b: 0 });
     let pack = load_sprite_pack(args.pack_dir.clone())?;
-    let mut cache = FrameCache::new();
-    let mut router = pixtuoid_scene::pathfind::AStarRouter::new();
-    let mut overlay = pixtuoid_core::walkable::OccupancyOverlay::new();
-    let mut history = pixtuoid_scene::pose::PoseHistory::new();
+    // The per-floor sim/paint stores, grouped (cache/router/overlay/history/
+    // light/motion): DrawCtx + save_as_gif now take them as ONE FloorCtx.
+    let mut store = pixtuoid_scene::floor::FloorCtx::new();
     // Fail loudly like --weather above — a typo'd theme silently rendering
     // NORMAL would put wrong-palette art into the docs/site screenshot pipelines.
     let theme = pixtuoid_scene::theme::theme_by_name(&args.theme).ok_or_else(|| {
@@ -463,10 +461,7 @@ fn main() -> Result<()> {
             cols,
             rows,
             &mut buf,
-            &mut cache,
-            &mut router,
-            &mut overlay,
-            &mut history,
+            &mut store,
             args.gif_fps,
             args.gif_duration,
             theme,
@@ -500,15 +495,10 @@ fn main() -> Result<()> {
         .unwrap_or_default();
     let warning_text = pixtuoid::doctor::footer_warning(death_text.as_deref(), &drifted);
     let mut chitchat_state = std::collections::HashMap::new();
-    let mut light = pixtuoid_scene::floor::LightingState::new();
-    let mut motion: std::collections::HashMap<
-        pixtuoid_core::AgentId,
-        pixtuoid_scene::motion::MotionState,
-    > = std::collections::HashMap::new();
     // Static snapshots have no time to animate the fade — snap straight
     // to the steady-state level for the chosen scene.
     if args.empty {
-        light.snap_to_empty();
+        store.light.snap_to_empty();
     }
     let (dash_rows, dash_selected) = if args.dashboard {
         let folds = pixtuoid::tui::dashboard::DashboardFolds::default();
@@ -645,13 +635,7 @@ fn main() -> Result<()> {
     };
     let mut draw_ctx = DrawCtx {
         buf: &mut buf,
-        cache: &mut cache,
-        router: &mut router,
-        overlay: &mut overlay,
-        history: &mut history,
-        motion: &mut motion,
-        door_anim_max_ms: 0,
-        light: &mut light,
+        store: &mut store,
         mouse_pos: args.hover.as_deref().and_then(|s| {
             let (x, y) = s.split_once(',')?;
             Some((x.trim().parse().ok()?, y.trim().parse().ok()?))
@@ -701,7 +685,7 @@ fn main() -> Result<()> {
         })?;
         Some(centered_crop(m.pos.x, m.pos.y / 2, cols, rows))
     } else {
-        compute_crop_rect(&args, &scene, &history, cols, rows, now)?
+        compute_crop_rect(&args, &scene, &store.history, cols, rows, now)?
     };
 
     save_backend_as_png(&term, &args.out, cols, rows, crop_rect)?;
@@ -1810,10 +1794,7 @@ fn save_as_gif(
     cols: u16,
     rows: u16,
     buf: &mut RgbBuffer,
-    cache: &mut FrameCache,
-    router: &mut pixtuoid_scene::pathfind::AStarRouter,
-    overlay: &mut pixtuoid_core::walkable::OccupancyOverlay,
-    history: &mut pixtuoid_scene::pose::PoseHistory,
+    store: &mut pixtuoid_scene::floor::FloorCtx,
     fps: u64,
     duration_secs: u64,
     theme: &pixtuoid_scene::theme::Theme,
@@ -1836,22 +1817,11 @@ fn save_as_gif(
     encoder.set_repeat(Repeat::Infinite)?;
 
     let mut chitchat_state = std::collections::HashMap::new();
-    let mut light = pixtuoid_scene::floor::LightingState::new();
-    let mut motion: std::collections::HashMap<
-        pixtuoid_core::AgentId,
-        pixtuoid_scene::motion::MotionState,
-    > = std::collections::HashMap::new();
     for i in 0..(skip_frames + frame_count) {
         let now = start_now + Duration::from_millis(i as u64 * frame_ms);
         let mut draw_ctx = DrawCtx {
             buf,
-            cache,
-            router,
-            overlay,
-            history,
-            motion: &mut motion,
-            door_anim_max_ms: 0,
-            light: &mut light,
+            store,
             mouse_pos: None,
             pinned_agent: None,
             debug_walkable,

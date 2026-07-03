@@ -11,12 +11,9 @@
 macro_rules! make_draw_ctx {
     ($name:ident $(, $key:ident : $val:expr)* ) => {
         let mut _buf = pixtuoid_core::sprite::RgbBuffer::filled(0, 0, pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 });
-        let mut _cache = pixtuoid_scene::frame_cache::FrameCache::new();
-        let mut _router = pixtuoid_scene::pathfind::AStarRouter::new();
-        let mut _overlay = pixtuoid_core::walkable::OccupancyOverlay::new();
-        let mut _history = pixtuoid_scene::pose::PoseHistory::new();
-        let mut _motion: std::collections::HashMap<pixtuoid_core::AgentId, pixtuoid_scene::motion::MotionState> = std::collections::HashMap::new();
-        let mut _light = pixtuoid_scene::floor::LightingState::new();
+        // The per-floor sim/paint stores, grouped (was six separate locals):
+        // DrawCtx now borrows them as ONE `store` field.
+        let mut _store = pixtuoid_scene::floor::FloorCtx::new();
         let _ticker = pixtuoid::tui::renderer::TickerQueue::new();
         let mut _chitchat_state = std::collections::HashMap::new();
 
@@ -32,13 +29,7 @@ macro_rules! make_draw_ctx {
 
         let mut $name = pixtuoid::tui::renderer::DrawCtx {
             buf: &mut _buf,
-            cache: &mut _cache,
-            router: &mut _router,
-            overlay: &mut _overlay,
-            history: &mut _history,
-            motion: &mut _motion,
-            door_anim_max_ms: 0,
-            light: &mut _light,
+            store: &mut _store,
             mouse_pos: None,
             pinned_agent: None,
             debug_walkable: false,

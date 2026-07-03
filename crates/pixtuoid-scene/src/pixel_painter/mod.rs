@@ -21,7 +21,6 @@ use pixtuoid_core::sprite::blit::blit_frame;
 use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_core::state::{ActivityState, FloorLocalDeskIndex};
-use pixtuoid_core::walkable::OccupancyOverlay;
 use pixtuoid_core::{AgentSlot, SceneState};
 
 use crate::chitchat::{ActiveChitchat, ChitchatBubble};
@@ -32,9 +31,7 @@ use crate::layout::{
     DESK_H, DESK_W, ELEVATOR_H, ELEVATOR_W,
 };
 use crate::motion::MotionState;
-use crate::pathfind::Router;
 use crate::pet::PetFrame;
-use crate::pose;
 
 /// Milliseconds since the Unix epoch for `now` (0 if the clock is before it).
 /// The wall-clock decode the pixel-pass animation timers share — 8 callers read
@@ -183,36 +180,31 @@ fn floor_lamp_south_offset() -> u16 {
     )
 }
 
-/// Bundled input for the pixel-painting pass. Constructed from `DrawCtx`
-/// fields + per-frame inputs at the `draw_scene` call site.
+/// Bundled input for the pixel-painting pass. Constructed at the `render_floor`
+/// / `draw_scene` call site.
 pub struct PixelCtx<'a> {
+    /// The per-floor sim/paint STORES borrowed as ONE group (was six flat
+    /// fields: `router`/`overlay`/`history`/`cache`/`motion`/`light` +
+    /// `door_anim_max_ms`). `render_to_rgb_buffer` reads them as disjoint field
+    /// projections (`store.router`, `store.overlay`, …). `buf` stays a SEPARATE
+    /// field: it is a sibling of the `FloorCtx` on a `PerFloor`, borrowed
+    /// disjointly by a multi-floor painter's `split_at_mut`.
+    pub store: &'a mut crate::floor::FloorCtx,
+    pub buf: &'a mut RgbBuffer,
     pub scene: &'a SceneState,
     pub layout: &'a Layout,
     pub pack: &'a Pack,
     pub now: SystemTime,
-    pub buf: &'a mut RgbBuffer,
-    pub cache: &'a mut FrameCache,
-    pub router: &'a mut dyn Router,
-    pub overlay: &'a mut OccupancyOverlay,
-    pub history: &'a mut pose::PoseHistory,
-    /// Forwarded from `DrawCtx.motion` — identical lifetime, identical
-    /// borrow rules. `derive_with_routing` reads/writes per-agent entries.
-    pub motion: &'a mut std::collections::HashMap<pixtuoid_core::AgentId, MotionState>,
-    /// Per-floor max in-flight entry/exit physics duration (ms), forwarded
-    /// from `DrawCtx.door_anim_max_ms`. Used by `compute_door_frame_idx`
-    /// instead of the old hardcoded `ENTRY_ANIMATION_MS`.
-    pub door_anim_max_ms: u64,
     pub theme: &'a crate::theme::Theme,
     pub floor: crate::floor::FloorMeta,
     pub active_pet: Option<&'a crate::pet::PetState>,
     /// The pet on this floor (kind drives the sprite; name is unused here — the
     /// pixel pass doesn't render the name, the tooltip does).
     pub floor_pet: Option<&'a crate::pet::Pet>,
-    pub chitchat_state: &'a mut HashMap<crate::chitchat::VenueKey, ActiveChitchat>,
     /// Carrier → fetch-time view of [`crate::floor::CoffeeState`] (one map:
     /// key present = has a desk cup, value = steam-window anchor).
     pub coffee: &'a HashMap<pixtuoid_core::AgentId, SystemTime>,
-    pub light: &'a mut crate::floor::LightingState,
+    pub chitchat_state: &'a mut HashMap<crate::chitchat::VenueKey, ActiveChitchat>,
     /// When set, composite the walkable / approach / route debug layer over the
     /// finished scene (the live `w` toggle). Off by default; transient.
     pub debug_walkable: bool,
@@ -245,11 +237,11 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
     // producing no pixels. See `sim::sim_step`.
     let frame = sim_step(
         &mut SimStores {
-            router: &mut *ctx.router,
-            overlay: &mut *ctx.overlay,
-            history: &mut *ctx.history,
-            motion: &mut *ctx.motion,
-            light: &mut *ctx.light,
+            router: &mut ctx.store.router,
+            overlay: &mut ctx.store.overlay,
+            history: &mut ctx.store.history,
+            motion: &mut ctx.store.motion,
+            light: &mut ctx.store.light,
             chitchat: &mut *ctx.chitchat_state,
         },
         ctx.scene,
@@ -269,14 +261,14 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
             pack: ctx.pack,
             now: ctx.now,
             buf: &mut *ctx.buf,
-            cache: &mut *ctx.cache,
+            cache: &mut ctx.store.cache,
             theme: ctx.theme,
             floor: ctx.floor,
             active_pet: ctx.active_pet,
             floor_pet: ctx.floor_pet,
             coffee: ctx.coffee,
-            motion: &*ctx.motion,
-            door_anim_max_ms: ctx.door_anim_max_ms,
+            motion: &ctx.store.motion,
+            door_anim_max_ms: ctx.store.door_anim_max_ms,
             debug_walkable: ctx.debug_walkable,
         },
         &frame,
