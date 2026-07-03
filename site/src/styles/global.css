@@ -423,6 +423,13 @@ section {
    radial wash so a stalled scroll never shows low-contrast text. */
 [data-lit] {
   position: relative;
+  /* A full-width lit block's wash (::before, inset -8% horizontal) pokes 8% past
+     the viewport and widens the page (masked only by body's overflow-x:hidden).
+     Clip the horizontal bleed — it's off-screen on a full-bleed section, so zero
+     visual cost — while overflow-y stays visible so the vertical (-12%) glow
+     still washes above/below the text. `clip` (not hidden) adds no scroll
+     container and doesn't force overflow-y to auto. */
+  overflow-x: clip;
 }
 [data-lit]::before {
   content: '';
