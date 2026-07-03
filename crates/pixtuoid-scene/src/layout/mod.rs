@@ -14,9 +14,12 @@
 //!   * `placement` — the `Anchor` convention (where a box sits vs its `pos`).
 //!   * `mask` — `build_walkable_mask`: stamps obstacle footprints for routing.
 //!   * `approach` — `stand_point`/`approach_point`: where an agent stands to use a piece.
-//!   * `reach` — `ReachSet`: coarse-cell BFS mirroring `crate::pathfind`'s A* grid.
+//!   * `coarse` — the SHARED coarse routing-grid primitives (`cell_walkable`/`snap`/
+//!     `NEIGHBORS_8`/`COARSE_CELL_SIZE`) that BOTH `reach` and `crate::pathfind` ride.
+//!   * `reach` — `ReachSet`: coarse-cell BFS (over `coarse`) mirroring `crate::pathfind`'s A* grid.
 
 mod approach;
+mod coarse;
 mod compute;
 mod decor;
 mod mask;
@@ -32,7 +35,10 @@ pub use decor::{
 };
 pub use mask::{WALL_THICK_H, WALL_THICK_V};
 pub use placement::{anchored_top_left, z_sort_row, Anchor};
-pub use reach::{ReachSet, REACH_CELL_SIZE, REACH_CELL_WALKABLE_MIN};
+pub use reach::ReachSet;
+// The shared coarse routing-grid primitives (crate-internal — no semver surface):
+// `crate::pathfind`'s A* and `reach`'s BFS both ride these ONE definitions.
+pub(crate) use coarse::{cell_walkable, snap, COARSE_CELL_SIZE, NEIGHBORS_8};
 
 use pixtuoid_core::state::FloorLocalDeskIndex;
 use pixtuoid_core::walkable::WalkableMask;

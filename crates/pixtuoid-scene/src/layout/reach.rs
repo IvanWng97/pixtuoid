@@ -4,79 +4,26 @@
 //!
 //! [`approach_point`](super::approach) uses it to PREFER an A\*-reachable
 //! approach side over a merely-walkable-but-walled-off one — the "available
-//! approach side" rule. The coarsening (`REACH_CELL_SIZE` × `REACH_CELL_SIZE`
-//! cells, ≥ `REACH_CELL_WALKABLE_MIN` walkable px) is kept byte-identical to
-//! [`crate::pathfind`]'s `AStarRouter` (asserted by a `const` equality check in
-//! `pathfind`), so "reachable here" means the same thing A\* will find at route
-//! time.
+//! approach side" rule. The coarsening rides the SHARED `super::coarse`
+//! primitives (`COARSE_CELL_SIZE`-edge cells, ≥ `COARSE_CELL_WALKABLE_MIN`
+//! walkable px, `cell_walkable`/`snap`/`NEIGHBORS_8`) — the exact same ones
+//! [`crate::pathfind`]'s `AStarRouter` rides, so "reachable here" means the same
+//! thing A\* will find at route time BY CONSTRUCTION (was two hand-kept copies
+//! pinned equal by a 2-const compile assert). Reachability is over STATIC
+//! geometry only, so it passes an EMPTY occupancy overlay.
 
 use std::collections::VecDeque;
 
-use super::Point;
+use super::{cell_walkable, snap, Point, COARSE_CELL_SIZE, NEIGHBORS_8};
 use pixtuoid_core::grid::Grid;
-use pixtuoid_core::walkable::WalkableMask;
-
-/// Coarse-cell edge in px. MUST equal `crate::pathfind`'s `CELL_SIZE` (asserted there).
-pub const REACH_CELL_SIZE: u16 = 4;
-/// Min walkable px (of `REACH_CELL_SIZE²` = 16) for a coarse cell to count as
-/// walkable. MUST equal `crate::pathfind`'s `CELL_WALKABLE_MIN` (asserted there).
-pub const REACH_CELL_WALKABLE_MIN: u16 = 8;
-
-const NEIGHBORS_8: [(i32, i32); 8] = [
-    (1, 0),
-    (-1, 0),
-    (0, 1),
-    (0, -1),
-    (1, 1),
-    (1, -1),
-    (-1, 1),
-    (-1, -1),
-];
+use pixtuoid_core::walkable::{OccupancyOverlay, WalkableMask};
 
 /// How far (in coarse cells) to snap a blocked seed to the nearest walkable
 /// coarse cell — mirrors the router's start-snap so a seed sitting on a blocked
 /// pixel (a door on a wall edge, a desk) still lands in the right component.
-const SEED_SNAP_CELLS: i32 = 3;
-
-fn coarse_cell_walkable(mask: &WalkableMask, cx: u16, cy: u16) -> bool {
-    let px0 = cx.saturating_mul(REACH_CELL_SIZE);
-    let py0 = cy.saturating_mul(REACH_CELL_SIZE);
-    let mut n = 0u16;
-    for dy in 0..REACH_CELL_SIZE {
-        for dx in 0..REACH_CELL_SIZE {
-            if mask.is_walkable(px0 + dx, py0 + dy) {
-                n += 1;
-            }
-        }
-    }
-    n >= REACH_CELL_WALKABLE_MIN
-}
-
-fn snap_seed(mask: &WalkableMask, seed: Point, cell_w: u16, cell_h: u16) -> Option<(u16, u16)> {
-    let c = (seed.x / REACH_CELL_SIZE, seed.y / REACH_CELL_SIZE);
-    if c.0 < cell_w && c.1 < cell_h && coarse_cell_walkable(mask, c.0, c.1) {
-        return Some(c);
-    }
-    for r in 1..=SEED_SNAP_CELLS {
-        for dy in -r..=r {
-            for dx in -r..=r {
-                if dx.abs() != r && dy.abs() != r {
-                    continue; // ring only
-                }
-                let nx = c.0 as i32 + dx;
-                let ny = c.1 as i32 + dy;
-                if nx < 0 || ny < 0 {
-                    continue;
-                }
-                let (nx, ny) = (nx as u16, ny as u16);
-                if nx < cell_w && ny < cell_h && coarse_cell_walkable(mask, nx, ny) {
-                    return Some((nx, ny));
-                }
-            }
-        }
-    }
-    None
-}
+/// Shorter than the router's `MAX_SNAP_RADIUS` (a seed is always near its
+/// component; a route goal may be farther).
+const SEED_SNAP_CELLS: u16 = 3;
 
 /// The set of coarse cells reachable (8-connected) from a seed — i.e. the
 /// agent's connected walkable component. Built once per layout from a known
@@ -85,7 +32,7 @@ fn snap_seed(mask: &WalkableMask, seed: Point, cell_w: u16, cell_h: u16) -> Opti
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ReachSet {
     /// Coarse-cell reachability (`grid.width`/`height` are the cell dims, =
-    /// `mask.{width,height} / REACH_CELL_SIZE`).
+    /// `mask.{width,height} / COARSE_CELL_SIZE`).
     grid: Grid<bool>,
 }
 
@@ -94,13 +41,18 @@ impl ReachSet {
     /// coarse cell when `seed` lands on a blocked one, like the router's start
     /// snap). An empty/degenerate mask yields an all-unreachable set.
     pub fn from_mask(mask: &WalkableMask, seed: Point) -> ReachSet {
-        let cell_w = mask.width() / REACH_CELL_SIZE;
-        let cell_h = mask.height() / REACH_CELL_SIZE;
+        let cell_w = mask.width() / COARSE_CELL_SIZE;
+        let cell_h = mask.height() / COARSE_CELL_SIZE;
         let mut grid = Grid::filled(cell_w, cell_h, false);
         if cell_w == 0 || cell_h == 0 {
             return ReachSet { grid };
         }
-        if let Some(start) = snap_seed(mask, seed, cell_w, cell_h) {
+        // Reachability is over STATIC geometry — pass an empty overlay so the
+        // shared `cell_walkable`/`snap` count only the mask (the router passes the
+        // live occupancy overlay instead).
+        let empty = OccupancyOverlay::new();
+        let seed_cell = (seed.x / COARSE_CELL_SIZE, seed.y / COARSE_CELL_SIZE);
+        if let Some(start) = snap(mask, &empty, seed_cell, cell_w, cell_h, SEED_SNAP_CELLS) {
             let mut q = VecDeque::new();
             grid.set(start.0, start.1, true);
             q.push_back(start);
@@ -115,7 +67,7 @@ impl ReachSet {
                     if nx >= cell_w || ny >= cell_h || grid.get_or(nx, ny, false) {
                         continue;
                     }
-                    if coarse_cell_walkable(mask, nx, ny) {
+                    if cell_walkable(mask, &empty, nx, ny) {
                         grid.set(nx, ny, true);
                         q.push_back((nx, ny));
                     }
@@ -134,7 +86,7 @@ impl ReachSet {
     /// side `reaches` rejects — it will never pick an unroutable one.
     pub fn reaches(&self, p: Point) -> bool {
         self.grid
-            .get_or(p.x / REACH_CELL_SIZE, p.y / REACH_CELL_SIZE, false)
+            .get_or(p.x / COARSE_CELL_SIZE, p.y / COARSE_CELL_SIZE, false)
     }
 }
 
@@ -204,8 +156,8 @@ mod tests {
         let all_unreachable = (0..r.grid.height()).all(|cy| {
             (0..r.grid.width()).all(|cx| {
                 !r.reaches(Point {
-                    x: cx * REACH_CELL_SIZE,
-                    y: cy * REACH_CELL_SIZE,
+                    x: cx * crate::layout::COARSE_CELL_SIZE,
+                    y: cy * crate::layout::COARSE_CELL_SIZE,
                 })
             })
         });
@@ -235,7 +187,7 @@ mod tests {
 
     #[test]
     fn sub_cell_mask_yields_empty_reachset() {
-        // A mask narrower than REACH_CELL_SIZE (4) gives cell_w = 3/4 = 0, so
+        // A mask narrower than COARSE_CELL_SIZE (4) gives cell_w = 3/4 = 0, so
         // from_mask hits the degenerate early-return (an all-unreachable set with
         // an empty reachable grid) instead of indexing into a 0-width grid.
         let r = ReachSet::from_mask(&WalkableMask::new_open(3, 64), Point { x: 0, y: 0 });

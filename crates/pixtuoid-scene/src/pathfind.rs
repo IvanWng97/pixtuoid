@@ -8,34 +8,26 @@
 //!
 //! `AStarRouter` is the concrete impl: A* on a coarsened 4×4 cell grid
 //! with a permissive cell-walkability threshold (≥8/16 px walkable, 50% —
-//! see `CELL_WALKABLE_MIN` for why tighter thresholds were rejected).
-//! Memoizes results in a per-(from, to) cache; auto-invalidates when
-//! the overlay signature changes so per-frame agent movement still routes
-//! around live agents.
+//! see `layout::coarse::COARSE_CELL_WALKABLE_MIN` for why tighter thresholds
+//! were rejected). The coarse-grid primitives (`cell_walkable`/`snap`/
+//! `NEIGHBORS_8`/`CELL_SIZE`) are the SHARED `layout::coarse` ones `layout::reach`
+//! also rides, so router reachability can't drift from `ReachSet`. Memoizes
+//! results in a per-(from, to) cache; auto-invalidates when the overlay
+//! signature changes so per-frame agent movement still routes around live agents.
 
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap};
 
 use pixtuoid_core::walkable::{OccupancyOverlay, WalkableMask};
 
-use crate::layout::{Bounds, Point};
+use crate::layout::{cell_walkable, snap, Bounds, Point, COARSE_CELL_SIZE, NEIGHBORS_8};
 
-/// Cell size in pixels. Smaller = more accurate paths, more work per query.
-/// 4 px gives a ~40×60 grid on a typical 160×240 buffer — A* finishes in
-/// well under 1 ms uncached.
-pub const CELL_SIZE: u16 = 4;
-/// Cell-walkable threshold (out of CELL_SIZE^2 = 16 pixels). At 8 (50%) the
-/// coarsened grid can squeeze through 2-pixel-wide corridors, which is
-/// what the meeting-room interior needs after furniture obstacle padding.
-/// Tighter (e.g. 12 = 75%) made the meeting room unreachable; looser (e.g.
-/// 4 = 25%) lets paths graze furniture edges. 50% is the sweet spot.
-const CELL_WALKABLE_MIN: u16 = 8;
-
-// `layout::reach::ReachSet` MUST coarsen identically to this router, or
-// "reachable" in `approach_point` would diverge from what A* actually routes.
-// Locked at compile time so a CELL_SIZE / threshold edit can't silently desync.
-const _: () = assert!(CELL_SIZE == crate::layout::REACH_CELL_SIZE);
-const _: () = assert!(CELL_WALKABLE_MIN == crate::layout::REACH_CELL_WALKABLE_MIN);
+/// Cell size in pixels — the coarse routing-grid edge, re-exported from the
+/// SHARED `layout::coarse` (the single source `layout::reach`'s BFS also rides,
+/// so the router coarsening and the reachability coarsening can't drift — the
+/// agreement the two old `const _: () = assert!` checks pinned is now structural).
+/// Public name kept for this module's helpers + tests.
+pub const CELL_SIZE: u16 = COARSE_CELL_SIZE;
 
 /// Abstract pathfinder — implementations route from `from` to `to` over
 /// the supplied mask + overlay, returning a polyline (first = `from`,
@@ -211,17 +203,6 @@ impl PartialOrd for Node {
     }
 }
 
-const NEIGHBORS_8: [(i32, i32); 8] = [
-    (1, 0),
-    (-1, 0),
-    (0, 1),
-    (0, -1),
-    (1, 1),
-    (1, -1),
-    (-1, 1),
-    (-1, -1),
-];
-
 /// Octile-distance step costs (integer, so the heuristic stays admissible): a
 /// diagonal move costs `OCTILE_DIAGONAL_COST`, an orthogonal one
 /// `OCTILE_STRAIGHT_COST` — the classic 14/10 ≈ √2 : 1 ratio. Shared with
@@ -244,22 +225,6 @@ fn cell_in_zone(zone: Option<Bounds>, cx: u16, cy: u16) -> bool {
     };
     let cp = cell_center(cx, cy);
     cp.x >= z.x && cp.x < z.x + z.width && cp.y >= z.y && cp.y < z.y + z.height
-}
-
-fn cell_walkable(mask: &WalkableMask, overlay: &OccupancyOverlay, cx: u16, cy: u16) -> bool {
-    let px_start = cx.saturating_mul(CELL_SIZE);
-    let py_start = cy.saturating_mul(CELL_SIZE);
-    let mut walk_count = 0u16;
-    for dy in 0..CELL_SIZE {
-        for dx in 0..CELL_SIZE {
-            let px = px_start + dx;
-            let py = py_start + dy;
-            if mask.is_walkable(px, py) && !overlay.blocks(px, py) {
-                walk_count += 1;
-            }
-        }
-    }
-    walk_count >= CELL_WALKABLE_MIN
 }
 
 fn cell_of(p: Point) -> (u16, u16) {
@@ -285,42 +250,9 @@ fn grid_dims(mask: &WalkableMask) -> Option<(u16, u16)> {
     Some((cell_w, cell_h))
 }
 
+/// Max rings the A\* start/goal snap probes for a walkable coarse cell (the reach
+/// seed snap uses a shorter radius). Passed to the shared `layout::snap`.
 const MAX_SNAP_RADIUS: u16 = 12;
-
-fn snap_to_walkable(
-    mask: &WalkableMask,
-    overlay: &OccupancyOverlay,
-    cell: (u16, u16),
-    cell_w: u16,
-    cell_h: u16,
-) -> Option<(u16, u16)> {
-    if cell.0 < cell_w && cell.1 < cell_h && cell_walkable(mask, overlay, cell.0, cell.1) {
-        return Some(cell);
-    }
-    for r in 1..=MAX_SNAP_RADIUS {
-        let r_i = r as i32;
-        for dy in -r_i..=r_i {
-            for dx in -r_i..=r_i {
-                if dx.abs() != r_i && dy.abs() != r_i {
-                    continue;
-                }
-                let nx = cell.0 as i32 + dx;
-                let ny = cell.1 as i32 + dy;
-                if nx < 0 || ny < 0 {
-                    continue;
-                }
-                let (nx, ny) = (nx as u16, ny as u16);
-                if nx >= cell_w || ny >= cell_h {
-                    continue;
-                }
-                if cell_walkable(mask, overlay, nx, ny) {
-                    return Some((nx, ny));
-                }
-            }
-        }
-    }
-    None
-}
 
 /// Run A* on the layout's walkability mask + per-frame occupancy. When
 /// `preferred` is `Some(rect)`, cells whose center falls inside the rect
@@ -344,8 +276,15 @@ pub fn find_path(
     const PREFERRED_ZONE_COST_NUM: u32 = 7;
     const PREFERRED_ZONE_COST_DEN: u32 = 10;
 
-    let start = snap_to_walkable(mask, overlay, cell_of(from), cell_w, cell_h)?;
-    let goal = snap_to_walkable(mask, overlay, cell_of(to), cell_w, cell_h)?;
+    let start = snap(
+        mask,
+        overlay,
+        cell_of(from),
+        cell_w,
+        cell_h,
+        MAX_SNAP_RADIUS,
+    )?;
+    let goal = snap(mask, overlay, cell_of(to), cell_w, cell_h, MAX_SNAP_RADIUS)?;
 
     if start == goal {
         return Some(vec![from, to]);
@@ -432,7 +371,7 @@ pub fn point_in_walkable_cell(mask: &WalkableMask, p: Point) -> bool {
 pub fn snap_point_to_walkable(mask: &WalkableMask, p: Point) -> Option<Point> {
     let (cell_w, cell_h) = grid_dims(mask)?;
     let empty = OccupancyOverlay::new();
-    let (cx, cy) = snap_to_walkable(mask, &empty, cell_of(p), cell_w, cell_h)?;
+    let (cx, cy) = snap(mask, &empty, cell_of(p), cell_w, cell_h, MAX_SNAP_RADIUS)?;
     Some(cell_center(cx, cy))
 }
 
@@ -822,7 +761,14 @@ mod tests {
         let cell_h = l.buf_h / 4;
         let cx = (corridor.x + corridor.width / 2) / 4;
         let cy = (corridor.y + corridor.height / 2) / 4;
-        let result = snap_to_walkable(&l.walkable, &overlay, (cx, cy), cell_w, cell_h);
+        let result = snap(
+            &l.walkable,
+            &overlay,
+            (cx, cy),
+            cell_w,
+            cell_h,
+            MAX_SNAP_RADIUS,
+        );
         assert_eq!(result, Some((cx, cy)));
     }
 
@@ -832,12 +778,13 @@ mod tests {
         let cell_w = l.buf_w / 4;
         let cell_h = l.buf_h / 4;
         let wall_cell_y = l.top_margin / CELL_SIZE;
-        let result = snap_to_walkable(
+        let result = snap(
             &l.walkable,
             &OccupancyOverlay::new(),
             (0, wall_cell_y),
             cell_w,
             cell_h,
+            MAX_SNAP_RADIUS,
         );
         assert!(result.is_some(), "should snap to a nearby walkable cell");
     }
@@ -1127,7 +1074,14 @@ mod tests {
         let corner_px = ((cell_w - 1) * CELL_SIZE, (cell_h - 1) * CELL_SIZE);
         mask.mark_blocked(corner_px.0, corner_px.1, CELL_SIZE, CELL_SIZE, 0);
 
-        let result = snap_to_walkable(&mask, &overlay, (cell_w - 1, cell_h - 1), cell_w, cell_h);
+        let result = snap(
+            &mask,
+            &overlay,
+            (cell_w - 1, cell_h - 1),
+            cell_w,
+            cell_h,
+            MAX_SNAP_RADIUS,
+        );
         assert!(
             result.is_some(),
             "snap from the corner must still find an interior walkable cell"
