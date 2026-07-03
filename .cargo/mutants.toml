@@ -6,13 +6,12 @@
 test_tool = "nextest"
 
 exclude_globs = [
-    # Untestable painter / async + winit glue — a SUBSET of codecov.yml's ignore
-    # set: the pure-glue files with ZERO headless kill-path. (codecov also ignores
-    # crash.rs / logging.rs / sources_cli.rs, but those keep unit-tested pure
-    # helpers — sources_cli via the cli_json e2e run — so their mutants stay IN.
-    # Edit this list and codecov.yml's ignore block together — they are
-    # deliberately NOT identical.)
-    # No headless test can kill a mutant in these five, so every one "survives" = noise.
+    # Untestable painter / async + winit glue — these five are the painter files
+    # codecov.yml ALSO ignores; no headless test can kill their mutants, so every
+    # one "survives" = noise. The two ignore lists OVERLAP, not subset: codecov
+    # also ignores crash/logging/sources_cli (pure helpers stay unit-tested —
+    # sources_cli via the cli_json e2e — so their mutants stay IN), and this file
+    # also excludes the pixtuoid-core probe files below. Edit shared entries together.
     "crates/pixtuoid/src/main.rs",
     "crates/pixtuoid/src/tui/mod.rs",
     "crates/pixtuoid/src/runtime/driver.rs",
