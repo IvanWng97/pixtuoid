@@ -865,8 +865,8 @@ mod tests {
     #[test]
     fn find_path_returns_none_when_target_completely_surrounded() {
         // 200×200 mask so the wall around (100,100) doesn't saturate to
-        // origin and accidentally cover from=(4,4). This ensures
-        // snap_to_walkable succeeds on `from` but fails on the goal.
+        // origin and accidentally cover from=(4,4). This ensures the coarse-cell
+        // `snap` succeeds on `from` but fails on the goal.
         let mask = WalkableMask::new_open(200, 200);
         let mut overlay = OccupancyOverlay::new();
         let target = Point { x: 100, y: 100 };

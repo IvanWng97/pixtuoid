@@ -157,7 +157,7 @@ pub(crate) fn desk_approach_cell(desk: Point, layout: &Layout) -> Option<Point> 
 ///   * `chair_settle` — `Some(chair)` to prepend/append via [`Settle`] (the short
 ///     glide on/off the seat the router never plans), or `None` in the degenerate
 ///     boxed-in layout where every allowed side is walled off and the leg reverts
-///     to the direct chair target (resolved by `find_path`'s `snap_to_walkable`).
+///     to the direct chair target (resolved by `find_path`'s coarse-cell `snap`).
 ///
 /// NOTE: snap-back is now a caller too (the urgent Idle→Active return routes via
 /// the approach cell + settle like the rest, run by pure physics with a brisk

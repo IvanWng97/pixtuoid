@@ -138,8 +138,8 @@ mod tests {
     #[test]
     fn seed_in_fully_blocked_pocket_snaps_to_nothing() {
         // Seed buried in a region with NO walkable coarse cell within the
-        // SEED_SNAP_CELLS=3 ring radius → snap_seed returns None and the BFS
-        // never runs, yielding an all-unreachable set (covers the None return
+        // SEED_SNAP_CELLS=3 ring radius → the shared `snap` returns None and the
+        // BFS never runs, yielding an all-unreachable set (covers the None return
         // and the skipped `if let Some(start)` BFS guard). The blocked pocket
         // must extend ≥ (3 rings + 1) coarse cells (≈ 4*4 = 16px) past the seed
         // cell in every direction so all three snap rings land on blocked cells.

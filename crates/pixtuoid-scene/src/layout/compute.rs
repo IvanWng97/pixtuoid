@@ -497,7 +497,7 @@ pub(super) fn compute_with_seed(
 
     // Coarse reachable component, seeded from the door (where agents enter, so
     // always in the main component); fall back to a home desk, then buffer
-    // centre. `snap_seed` pulls a blocked seed into the adjacent component.
+    // centre. ReachSet's seed snap pulls a blocked seed into the adjacent component.
     let reachable = ReachSet::from_mask(
         &walkable,
         door_threshold
