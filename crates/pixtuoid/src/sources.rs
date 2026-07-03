@@ -439,8 +439,27 @@ pub enum ConnState {
     Connected,
     /// Unbound: the gate is closed; no characters. Toggle connects.
     Disconnected,
-    /// A target-bearing CLI that isn't installed on this machine — nothing to bind to.
-    NoCli,
+    /// A target-bearing CLI that isn't installed on this machine — nothing to bind
+    /// to. Carries the persisted `[sources]` intent (`connected`) because `NoCli`
+    /// overrides the `Connected`/`Disconnected` display (an absent CLI is worth
+    /// surfacing), yet a connected-but-absent source is still disconnectable — its
+    /// hooks live in the config, not the missing binary — so the toggle needs the
+    /// bit the display hides.
+    NoCli { connected: bool },
+}
+
+impl ConnState {
+    /// Whether this source is in the live connected-set (the persisted `[sources]`
+    /// intent): `true` for `Connected`, `false` for `Disconnected`, and the carried
+    /// bit for `NoCli` (a connected-but-absent CLI is still disconnectable). The ONE
+    /// derivation now that `ConnectionRow` no longer stores the bit separately.
+    pub fn connected(self) -> bool {
+        match self {
+            ConnState::Connected => true,
+            ConnState::Disconnected => false,
+            ConnState::NoCli { connected } => connected,
+        }
+    }
 }
 
 /// One row = one agent CLI (the union of registry sources + install targets).
@@ -452,13 +471,10 @@ pub struct ConnectionRow {
     /// 2-char badge id (`cc`/`cx`/…), from the source descriptor.
     pub label_prefix: &'static str,
     pub display_name: &'static str,
+    /// The connection facet — and, for `NoCli`, the persisted-intent bit the
+    /// display hides (read it via `ConnState::connected`). The row no longer
+    /// stores `connected` separately: `state` is the single source of truth.
     pub state: ConnState,
-    /// Whether this source is in the live connected-set (the persisted `[sources]`
-    /// intent). Carried SEPARATELY from `state` because `NoCli` overrides
-    /// `Connected` in the display (an absent CLI is worth surfacing), yet a
-    /// connected-but-absent source is still disconnectable — its hooks live in the
-    /// config, not the missing binary — so the toggle needs the bit `state` hides.
-    pub connected: bool,
     /// The config the hooks live in; `None` for no-target (JSONL-only) rows.
     pub config_path: Option<PathBuf>,
     /// The install target backing this row; `None` ⇒ connect/disconnect is a
@@ -511,7 +527,9 @@ pub fn build_rows_from(inputs: Vec<RowInput>) -> Vec<ConnectionRow> {
                 (Some(_), Some(f)) if !f.present
             );
             let state = if absent_cli {
-                ConnState::NoCli
+                ConnState::NoCli {
+                    connected: input.connected,
+                }
             } else if input.connected {
                 ConnState::Connected
             } else {
@@ -524,7 +542,6 @@ pub fn build_rows_from(inputs: Vec<RowInput>) -> Vec<ConnectionRow> {
                     .target
                     .map_or_else(|| display_name_for(input.source_id), |t| t.display_name),
                 state,
-                connected: input.connected,
                 config_path: input.facts.and_then(|f| f.config_path),
                 target: input.target,
                 health: input.health,
@@ -566,9 +583,9 @@ pub fn build_rows(connected: &HashSet<String>, log: &str) -> Vec<ConnectionRow> 
 /// Map a status row to the serializable `SourceStatus` DTO (the CLI/Raycast wire shape).
 ///
 /// NOTE: the wire `connected` here is deliberately PRESENT-AND-BOUND
-/// (`state == Connected`), NOT `ConnectionRow.connected` (the persisted `[sources]`
-/// intent bit — which stays `true` for a connected-but-absent `NoCli` source). The
-/// two share a name but answer different questions; the wire keeps the
+/// (`state == Connected`), NOT the persisted `[sources]` intent bit
+/// (`ConnState::connected` — which stays `true` for a connected-but-absent `NoCli`
+/// source). The two answer different questions; the wire keeps the
 /// present-and-bound meaning it always had (changing it is a `--json` contract
 /// change needing `gen-contract`).
 fn status_from_row(r: &ConnectionRow) -> SourceStatus {
@@ -578,7 +595,7 @@ fn status_from_row(r: &ConnectionRow) -> SourceStatus {
         connected: matches!(r.state, ConnState::Connected),
         // A no-target (JSONL-only) source is always "present"; a target-bearing
         // one is present unless probed absent (`NoCli`).
-        cli_present: !matches!(r.state, ConnState::NoCli),
+        cli_present: !matches!(r.state, ConnState::NoCli { .. }),
         health: r.health.clone(),
     }
 }

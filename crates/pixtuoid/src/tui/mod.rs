@@ -271,15 +271,16 @@ enum ToggleIntent {
 /// The Sources-panel toggle decision, factored OUT of the `run_tui` event loop
 /// (which is codecov-excluded and undriveable headlessly) so it is unit-testable —
 /// mirroring how `dispatch_key` factors key→action. The load-bearing arm is
-/// `NoCli` + still-connected → `ArmConfirm`: a source whose CLI vanished is still
+/// `NoCli { connected: true }` → `ArmConfirm`: a source whose CLI vanished is still
 /// disconnectable (its hooks live in the config, not the missing binary), while a
-/// never-connected absent CLI stays inert.
-fn toggle_intent(state: connection::ConnState, is_connected: bool) -> ToggleIntent {
+/// never-connected absent CLI (`NoCli { connected: false }`) stays inert.
+fn toggle_intent(state: connection::ConnState) -> ToggleIntent {
     match state {
-        connection::ConnState::Connected => ToggleIntent::ArmConfirm,
+        connection::ConnState::Connected | connection::ConnState::NoCli { connected: true } => {
+            ToggleIntent::ArmConfirm
+        }
         connection::ConnState::Disconnected => ToggleIntent::Connect,
-        connection::ConnState::NoCli if is_connected => ToggleIntent::ArmConfirm,
-        connection::ConnState::NoCli => ToggleIntent::Hint,
+        connection::ConnState::NoCli { connected: false } => ToggleIntent::Hint,
     }
 }
 
@@ -720,12 +721,11 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                                             r.state,
                                             r.source_id,
                                             r.display_name,
-                                            r.connected,
                                             connection::no_action_hint(r),
                                         )
                                     });
-                                if let Some((state, source_id, name, is_connected, hint)) = action {
-                                    match toggle_intent(state, is_connected) {
+                                if let Some((state, source_id, name, hint)) = action {
+                                    match toggle_intent(state) {
                                         // Bound, or connected-but-CLI-absent → arm the
                                         // disconnect confirm (it removes hooks + walks
                                         // characters out). A connected NoCli row is still
@@ -1028,20 +1028,23 @@ mod dispatch_tests {
         use super::connection::ConnState;
         use super::{toggle_intent, ToggleIntent};
         assert_eq!(
-            toggle_intent(ConnState::Connected, true),
+            toggle_intent(ConnState::Connected),
             ToggleIntent::ArmConfirm
         );
         assert_eq!(
-            toggle_intent(ConnState::Disconnected, false),
+            toggle_intent(ConnState::Disconnected),
             ToggleIntent::Connect
         );
         // The arc fix (#3): a connected-but-CLI-absent NoCli row stays disconnectable.
         assert_eq!(
-            toggle_intent(ConnState::NoCli, true),
+            toggle_intent(ConnState::NoCli { connected: true }),
             ToggleIntent::ArmConfirm
         );
         // A never-connected absent CLI is inert — the connect-side refusal only.
-        assert_eq!(toggle_intent(ConnState::NoCli, false), ToggleIntent::Hint);
+        assert_eq!(
+            toggle_intent(ConnState::NoCli { connected: false }),
+            ToggleIntent::Hint
+        );
     }
 
     #[test]

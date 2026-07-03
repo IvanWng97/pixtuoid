@@ -98,7 +98,7 @@ pub(crate) fn paint_connection_panel(
                     None => "connected".to_string(),
                 },
                 ConnState::Disconnected => "disconnected \u{2014} press t to connect".to_string(),
-                ConnState::NoCli => no_action_hint(row),
+                ConnState::NoCli { .. } => no_action_hint(row),
             }
         }
     } else {
@@ -147,7 +147,7 @@ fn connection_line(
     let (c_glyph, c_text, c_color) = match row.state {
         ConnState::Connected => ('\u{25cf}', "connected", theme.ui.label_active),
         ConnState::Disconnected => ('\u{25cb}', "disconnected", theme.ui.label_idle),
-        ConnState::NoCli => ('\u{2014}', "no CLI", theme.ui.label_idle),
+        ConnState::NoCli { .. } => ('\u{2014}', "no CLI", theme.ui.label_idle),
     };
     // glyph + space (2) + text padded to CONN_W - 2.
     let conn_cell = format!("{c_glyph} {:<width$}", c_text, width = CONN_W - 2);
@@ -226,7 +226,6 @@ mod tests {
             source_id,
             label_prefix,
             display_name: "Name",
-            connected: matches!(state, ConnState::Connected),
             state,
             config_path: None,
             target: None,
@@ -271,7 +270,6 @@ mod tests {
                 label_prefix: "cc",
                 display_name: "Name",
                 state: ConnState::Connected,
-                connected: true,
                 config_path: None,
                 target: None,
                 health,
@@ -300,7 +298,7 @@ mod tests {
     // arm never ran — a mutation swapping its glyph or text would slip past them.
     #[test]
     fn connection_line_no_cli_state_renders_no_cli_cell() {
-        let r = row("some-cli", "xx", ConnState::NoCli);
+        let r = row("some-cli", "xx", ConnState::NoCli { connected: false });
         let line = connection_line(
             &r,
             &LiveInfo::default(),
@@ -380,7 +378,6 @@ mod tests {
             label_prefix: "cc",
             display_name: "A-Very-Long-CLI-Display-Name-That-Overflows",
             state: ConnState::Connected,
-            connected: true,
             config_path: None,
             target: None,
             health: None,

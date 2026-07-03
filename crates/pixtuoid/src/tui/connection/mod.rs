@@ -122,7 +122,7 @@ pub fn move_selection(rows: &[ConnectionRow], sel: usize, delta: i32) -> usize {
 /// Detail-line hint when the toggle lands on a row that can't be acted on.
 pub fn no_action_hint(row: &ConnectionRow) -> String {
     match row.state {
-        ConnState::NoCli => format!("{} not detected on this machine", row.display_name),
+        ConnState::NoCli { .. } => format!("{} not detected on this machine", row.display_name),
         _ => format!("nothing to do for {}", row.display_name),
     }
 }

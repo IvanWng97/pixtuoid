@@ -82,7 +82,10 @@ fn build_rows_from_state_follows_connected_set_with_nocli_override() {
     ]);
     assert_eq!(rows[0].state, ConnState::Connected);
     assert_eq!(rows[1].state, ConnState::Disconnected);
-    assert_eq!(rows[2].state, ConnState::NoCli);
+    // The absent-CLI arm now CARRIES the persisted-intent bit in the variant: a
+    // stale flag says connected, so `NoCli { connected: true }` (rows[2]) — while a
+    // never-connected absent CLI would be `NoCli { connected: false }`.
+    assert_eq!(rows[2].state, ConnState::NoCli { connected: true });
     assert_eq!(rows[3].state, ConnState::Connected);
     assert_eq!(rows[4].state, ConnState::Disconnected);
     assert_eq!(rows[0].display_name, "Claude Code");
@@ -90,19 +93,19 @@ fn build_rows_from_state_follows_connected_set_with_nocli_override() {
     assert_eq!(rows[3].display_name, "Antigravity");
     assert!(rows[3].target.is_none());
     assert!(rows[3].config_path.is_none());
-    // The connected bit is retained SEPARATELY from `state` (which NoCli hides),
-    // so the toggle can still disconnect a connected-but-absent CLI (rows[2]) —
-    // its hooks live in the config, not the missing binary. Without the bit, a
-    // connected-but-absent NoCli was indistinguishable from a never-connected one
-    // and thus un-disconnectable via the panel.
+    // The connected bit is derived from `state` (`ConnState::connected`), so the
+    // toggle can still disconnect a connected-but-absent CLI (rows[2]) — its hooks
+    // live in the config, not the missing binary. Without the carried bit, a
+    // connected-but-absent NoCli would be indistinguishable from a never-connected
+    // one and thus un-disconnectable via the panel.
     assert!(
-        rows[2].connected,
+        rows[2].state.connected(),
         "a connected-but-absent NoCli must keep its connected bit"
     );
-    assert!(rows[0].connected);
-    assert!(!rows[1].connected);
-    assert!(rows[3].connected);
-    assert!(!rows[4].connected);
+    assert!(rows[0].state.connected());
+    assert!(!rows[1].state.connected());
+    assert!(rows[3].state.connected());
+    assert!(!rows[4].state.connected());
 }
 
 #[test]
@@ -347,7 +350,7 @@ fn no_action_hint_distinguishes_nocli_from_actionable() {
             health: None,
         },
     ]);
-    assert_eq!(rows[0].state, ConnState::NoCli);
+    assert_eq!(rows[0].state, ConnState::NoCli { connected: false });
     assert!(
         no_action_hint(&rows[0]).contains("not detected"),
         "NoCli hint: {}",

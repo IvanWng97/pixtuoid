@@ -529,7 +529,6 @@ fn main() -> Result<()> {
             source_id,
             label_prefix,
             display_name,
-            connected: matches!(state, ConnState::Connected),
             state,
             config_path: cfg.map(PathBuf::from),
             target: None,
@@ -550,7 +549,13 @@ fn main() -> Result<()> {
                 ConnState::Disconnected,
                 Some("~/.codex/config.toml"),
             ),
-            mk("reasonix", "rx", "Reasonix", ConnState::NoCli, None),
+            mk(
+                "reasonix",
+                "rx",
+                "Reasonix",
+                ConnState::NoCli { connected: false },
+                None,
+            ),
             mk(
                 "codewhale",
                 "cw",
