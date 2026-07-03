@@ -121,7 +121,9 @@ gates can't see. CI runs it in `site.yml` after the build step.
   statusline — WCAG 2.2.2): pause freezes the office frame in place AND, via the
   `pix:paused` event, stops every other >5s auto-motion (the statusline feed
   ticker, the hero dust) — the statusline reads `❚❚ PAUSED`; resume picks the
-  timeline up where it stopped. Hidden whenever only the still poster is showing.
+  timeline up where it stopped. Hidden only under reduced motion (nothing
+  auto-animates); on a no-wasm / fetch-failure poster it stays visible, since the
+  ticker / dust / clips still run and it governs them wasm-independently (#456).
 - **Docs shell** — `layouts/Docs.astro` gives /config, /architecture,
   /contributing, /migration a shared sidebar + build-time mini-TOC + pager,
   driven by the one `DOCS` manifest in `consts.ts` (the Nav dropdown reads the

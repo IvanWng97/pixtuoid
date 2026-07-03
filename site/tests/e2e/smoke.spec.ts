@@ -137,7 +137,7 @@ test('the hero pause switch freezes the office and resumes it seamlessly', async
   const errors = watchErrors(page);
   await gotoLive(page);
   const btn = page.locator('#office-pause');
-  await expect(btn).toBeVisible(); // unhidden by the first painted frame
+  await expect(btn).toBeVisible(); // shown at init for any non-reduced-motion visitor (syncPauseBtn), independent of the office going live
   await expect(btn).toHaveAttribute('aria-pressed', 'false');
   const shot = () =>
     page.evaluate(() => (document.getElementById('office-live') as HTMLCanvasElement).toDataURL());
@@ -227,7 +227,9 @@ test('reduced motion stays on the still poster without errors', async ({ browser
   await page.waitForLoadState('networkidle');
   expect(wasmRequests).toEqual([]);
   await expect(page.locator('.backdrop.is-live')).not.toBeAttached();
-  // Poster-only path: nothing is animating, so the pause switch stays hidden.
+  // Reduced motion is the ONLY path that hides the pause switch: nothing
+  // auto-animates here (the wasm-fail poster keeps it visible — ticker/dust/clips
+  // still run there, see the wasm-failure test).
   await expect(page.locator('#office-pause')).toBeHidden();
   // Reduced motion also strips the showcase clip's autoplay: native controls
   // appear and the video stays paused (WCAG 2.2.2).
