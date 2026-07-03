@@ -139,10 +139,12 @@ SEAMS: tuple[Seam, ...] = (
         key="json-contract",
         title="🔌 `--json` / Source contract surface",
         match=lambda p: p.endswith(("source/registry.rs", "source/mod.rs"))
+        or p.endswith("crates/pixtuoid/src/sources.rs")
+        or p.startswith("integrations/raycast/contract/")
         or p.endswith("site/src/sources.json"),
         audit=(
-            "Touched the `--json` / `SourceStatus` / `REGISTERED_SOURCES` shape? Run `just gen-contract` (else the Raycast `gen:contract` diff + `tsc` go red).",
-            "The registry↔`REGISTERED_SOURCES`↔`sources.json` bridges are test-pinned — keep them in lockstep.",
+            "Touched the `--json` / `SourceStatus` / `OutcomeRow` / `WireOutcome` shape (their home is `crates/pixtuoid/src/sources.rs`) or `REGISTERED_SOURCES`? Run `just gen-contract` (else the Raycast `gen:contract` diff + `tsc` go red).",
+            "The registry↔`REGISTERED_SOURCES`↔`sources.json` bridges + the committed `integrations/raycast/contract/*.schema.json` goldens are test-pinned — keep them in lockstep.",
         ),
         source=("CLAUDE.md", "gen-contract"),
     ),
@@ -151,10 +153,17 @@ SEAMS: tuple[Seam, ...] = (
         title="⚙️ CI / gate machinery (you're editing the safety net)",
         match=lambda p: p.startswith(".github/workflows/")
         or p == "justfile"
-        or p.startswith(".githooks/"),
+        or p.startswith(".githooks/")
+        or p
+        in (
+            "scripts/compare-screenshots.py",
+            "scripts/gen-media.py",
+            "scripts/gen-readme.mjs",
+        ),
         audit=(
             "Confirm you did NOT weaken a gate: no removed required check, no `--no-verify`/hook-skip flag, no relaxed `-D warnings`.",
             "A workflow change can't be proven by local preflight — reason about what runs on push vs PR, and whether secrets/permissions widened.",
+            "Editing the pixel/README drift-gate LOGIC (`compare-screenshots.py` threshold / `getbbox` trap, `gen-media.py --check`, `gen-readme.mjs`)? A silent weakening there has the same blast radius as a workflow edit.",
         ),
         source=("CLAUDE.md", "hook-skipping flags"),
     ),
@@ -239,8 +248,18 @@ def _selftest() -> int:
     # json-contract fires on the module root + the registry:
     assert keys(["crates/pixtuoid-core/src/source/mod.rs"]) == ["json-contract"]
     assert keys(["crates/pixtuoid-core/src/source/registry.rs"]) == ["json-contract"]
+    # ...AND the DTO home (SourceStatus/OutcomeRow/WireOutcome) + the committed
+    # Raycast contract goldens — the files most likely to carry a wire-shape change:
+    assert keys(["crates/pixtuoid/src/sources.rs"]) == ["json-contract"]
+    assert keys(["integrations/raycast/contract/outcome-row.schema.json"]) == ["json-contract"]
     # ci-gates fires on the hooks dir too:
     assert keys([".githooks/pre-push"]) == ["ci-gates"]
+    # ...AND the gate LOGIC that lives under scripts/ (the pixel/README drift gates):
+    assert keys(["scripts/compare-screenshots.py"]) == ["ci-gates"]
+    assert keys(["scripts/gen-media.py"]) == ["ci-gates"]
+    assert keys(["scripts/gen-readme.mjs"]) == ["ci-gates"]
+    # A non-gate script stays silent (scripts/ is NOT a blanket match).
+    assert keys(["scripts/crop-snapshot.py"]) == []
 
     # `pet.rs` matching is slash-anchored — a hypothetical `carpet.rs` must NOT fire.
     assert keys(["crates/x/src/carpet.rs"]) == []
