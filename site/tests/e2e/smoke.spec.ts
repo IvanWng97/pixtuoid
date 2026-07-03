@@ -241,7 +241,9 @@ test('reduced motion stays on the still poster without errors', async ({ browser
 test('wasm fetch failure keeps the still poster without an uncaught error', async ({ browser }) => {
   // The third documented boot path (live / reduced-motion / FAILURE): abort every
   // wasm request so the dynamic import rejects — the empty .catch must keep the
-  // poster (graceful degradation), never throw or show a dead-canvas pause button.
+  // poster (graceful degradation) and never throw. The pause control stays present
+  // though: it governs the wasm-independent ambient motion (ticker/dust/clips), so
+  // a failed office must NOT strand that motion uncontrollable (#456).
   const context = await browser.newContext();
   const page = await context.newPage();
   const errors = watchErrors(page);
@@ -257,8 +259,24 @@ test('wasm fetch failure keeps the still poster without an uncaught error', asyn
   await page.waitForLoadState('networkidle');
   await expect(page.locator('.backdrop__poster')).toBeVisible();
   await expect(page.locator('.backdrop.is-live')).not.toBeAttached();
-  await expect(page.locator('#office-pause')).toBeHidden(); // nothing to pause
   await expect(page.locator('[data-sl-onair]')).toHaveText('○ STILL');
+  // #456: the office canvas never went live, but the statusline ticker / hero dust
+  // / showcase clips still auto-animate — so the pause control must be VISIBLE and
+  // actually govern them (WCAG 2.2.2), not hidden as if nothing were animating.
+  // Clicking it fires the page-wide pix:paused even with no live office.
+  const pauseBtn = page.locator('#office-pause');
+  await expect(pauseBtn).toBeVisible();
+  const paused = page.evaluate(
+    () =>
+      new Promise<boolean>((resolve) => {
+        document.addEventListener('pix:paused', (e) => resolve((e as CustomEvent).detail.paused), {
+          once: true,
+        });
+      })
+  );
+  await pauseBtn.click();
+  expect(await paused).toBe(true);
+  await expect(pauseBtn).toHaveAttribute('aria-pressed', 'true');
   // the aborted request logs a resource error; the import rejection must stay
   // handled — no uncaught pageerror / console.error beyond that one line.
   expect(errors().filter((e) => !e.includes('Failed to load resource'))).toEqual([]);

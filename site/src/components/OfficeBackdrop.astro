@@ -40,12 +40,15 @@ import { asset, DIM_RESTING } from '../consts';
 }
 <div id="dimmer" aria-hidden="true" style={`--dim-rest:${DIM_RESTING}`}></div>
 {
-  /* THE PAUSE SWITCH (WCAG 2.2.2) — a real, keyboard-reachable <button> for
-     the auto-playing office; hidden until the canvas actually goes live (the
-     poster-only paths — reduced motion, no wasm, fetch failure — have nothing
-     to pause). aria-pressed carries the state; the label stays constant
-     (toggle-button convention). Icons are inline pixel SVGs on an 8×8 grid
-     (crispEdges — no anti-aliased glyph fonts near the office's pixels). */
+  /* THE PAUSE SWITCH (WCAG 2.2.2) — a real, keyboard-reachable <button> for the
+     page's auto-motion. Shown whenever motion runs = NOT reduced-motion: it
+     governs the wasm-INDEPENDENT ambient motion (statusline ticker, hero dust,
+     showcase clips) via pix:paused, so it stays reachable even on the no-wasm /
+     fetch-failure poster paths where the office canvas never goes live (#456).
+     Only reduced-motion hides it (nothing auto-animates there). aria-pressed
+     carries the state; the label stays constant (toggle-button convention).
+     Icons are inline pixel SVGs on an 8×8 grid (crispEdges — no anti-aliased
+     glyph fonts near the office's pixels). */
 }
 <button
   id="office-pause"
@@ -179,8 +182,14 @@ import { asset, DIM_RESTING } from '../consts';
   (function () {
     const wrap = document.querySelector('.backdrop');
     const canvas = document.getElementById('office-live');
-    if (!wrap || !canvas || typeof WebAssembly === 'undefined') return;
+    if (!wrap || !canvas) return;
     const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+    // The office needs WebAssembly, but the pause CONTROL does not: it governs
+    // the page's wasm-independent ambient motion (statusline ticker, hero dust,
+    // showcase clips) via pix:paused, so it must wire up and stay reachable even
+    // on a no-wasm engine or a failed fetch. Only the office render path is gated
+    // on `hasWasm`. #456
+    const hasWasm = typeof WebAssembly !== 'undefined';
 
     // Render SMALL and let CSS stretch (image-rendering: pixelated): ~180px
     // tall is the app's own chunky-pixel scale (OFFICE_TARGET_H).
@@ -237,7 +246,6 @@ import { asset, DIM_RESTING } from '../consts';
         if (!live) {
           live = true;
           wrap.classList.add('is-live');
-          if (pauseBtn) pauseBtn.hidden = false; // there is now something to pause
           document.dispatchEvent(new CustomEvent('pix:onair', { detail: { live: true } }));
         }
       }
@@ -283,6 +291,14 @@ import { asset, DIM_RESTING } from '../consts';
         setPaused(!paused);
       });
     }
+    // #office-pause is visible whenever the page has ambient auto-motion to pause
+    // — i.e. NOT reduced motion — regardless of whether the wasm office ever goes
+    // live. On a no-wasm / fetch-fail load the ticker + dust + clips still run, so
+    // the button must still offer their pause affordance (WCAG 2.2.2). #456
+    function syncPauseBtn() {
+      if (pauseBtn) pauseBtn.hidden = mq.matches;
+    }
+    syncPauseBtn();
 
     // Reduced motion defers the wasm fetch entirely (still poster only) —
     // but a LIVE un-reduce should still bring the office up, so the fetch
@@ -331,8 +347,10 @@ import { asset, DIM_RESTING } from '../consts';
         }
       )(boot);
     }
-    if (document.readyState === 'complete') deferBoot();
-    else window.addEventListener('load', deferBoot, { once: true });
+    if (hasWasm) {
+      if (document.readyState === 'complete') deferBoot();
+      else window.addEventListener('load', deferBoot, { once: true });
+    }
 
     let rraf = 0;
     window.addEventListener('resize', function () {
@@ -353,15 +371,10 @@ import { asset, DIM_RESTING } from '../consts';
       mq.addEventListener('change', function () {
         if (mq.matches) {
           stop();
-          // Reduced motion takes over as the poster-still design: the pause
-          // switch has nothing left to pause — reset it and hide it (a later
-          // un-reduce re-boots into the PLAYING state, button re-shown by the
-          // first painted frame).
+          // Reduced motion IS the poster-still design: nothing auto-animates, so
+          // reset the pause flag (syncPauseBtn hides the control below).
           paused = false;
-          if (pauseBtn) {
-            pauseBtn.setAttribute('aria-pressed', 'false');
-            pauseBtn.hidden = true;
-          }
+          if (pauseBtn) pauseBtn.setAttribute('aria-pressed', 'false');
           // clear any user-pause so the statusline feed / hero dust aren't stuck
           // paused after a later un-reduce (they hold their OWN reduced-motion
           // stop; this only keeps the pause flag in sync across surfaces)
@@ -369,10 +382,13 @@ import { asset, DIM_RESTING } from '../consts';
           wrap.classList.remove('is-live');
           live = false;
           document.dispatchEvent(new CustomEvent('pix:onair', { detail: { live: false } }));
-        } else {
+        } else if (hasWasm) {
           boot(); // no-op if already booted; a reduced-motion first visit fetches here
           start();
         }
+        // ambient motion stops on reduce and resumes on un-reduce (ticker/dust/
+        // clips) — show/hide the control to match, both directions. #456
+        syncPauseBtn();
       });
     }
   })();

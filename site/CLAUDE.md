@@ -60,9 +60,7 @@ Mermaid diagram becomes an inline SVG at build via `rehype-mermaid`, which is
   The backdrop's pause switch (`#office-pause`, WCAG 2.2.2) lives in the same
   component: pause stops the rAF loop (frozen frame stays on the canvas) and
   resume subtracts the paused span from the sim clock (`pauseOffset`) so the
-  timeline doesn't lurch-jump; the button stays `hidden` on every poster-only
-  path (reduced motion / no wasm / fetch failure) and is unhidden by the
-  first painted frame. Pause is **page-scoped**: `setPaused` dispatches
+  timeline doesn't lurch-jump. Pause is **page-scoped**: `setPaused` dispatches
   `pix:paused` and every other >5s auto-motion listens (the statusline feed
   ticker, the hero dust) — one control governs the page's *ambient* motion,
   and the statusline reads `❚❚ PAUSED`. The Showcase demo clips ARE in the
@@ -70,17 +68,17 @@ Mermaid diagram becomes an inline SVG at build via `rehype-mermaid`, which is
   in normal motion they auto-loop with NO visible controls, so in-view-gating
   alone did not satisfy 2.2.2 — the page pause button is their pause affordance.
   (Under reduced-motion the clips instead pause and show native `<video>`
-  controls, a separate path.) One caveat: on a **wasm-failure / no-wasm load**
-  `#office-pause` stays `hidden` (the poster-only path unhides it only on the
-  first painted frame), so a NON-reduced-motion visitor whose wasm never loads
-  has no visible pause button for the clips (nor the statusline ticker / hero
-  dust — the same shared, pre-existing dependency). Reduced-motion users are
-  unaffected (native `<video>` controls, wasm-independent). Unhiding the button
-  whenever any >5s auto-motion runs — independent of wasm — is the real fix,
-  tracked as a follow-up. The wasm fetch is **deferred** off the render-critical
-  window (`load` → `requestIdleCallback`) so it doesn't compete with the
-  above-fold poster/fonts; a live un-reduce still boots promptly via the mq
-  listener.
+  controls, a separate path.) Because that ambient motion is **wasm-independent**,
+  `#office-pause` is decoupled from the office canvas (#456): the button is shown
+  whenever motion runs = NOT reduced-motion, and its control (`setPaused` / the
+  click handler) wires up even on a no-wasm engine or a failed fetch — so a
+  non-reduced-motion visitor whose wasm never loads can still pause the ticker /
+  dust / clips. Only the office RENDER path (`boot`/`paint`) is gated on `hasWasm`;
+  `start`/`stop` are no-ops without a live office, so `setPaused` is safe
+  standalone. Reduced-motion hides the button (nothing auto-animates there). The
+  wasm fetch is **deferred** off the render-critical window (`load` →
+  `requestIdleCallback`) so it doesn't compete with the above-fold poster/fonts;
+  a live un-reduce still boots promptly via the mq listener.
 - The **on-page nav + footer logo mark IS the favicon** — `public/favicon-32.png`
   / `favicon-32-night.png` (the head-and-collar bust squircle from #379), one
   brand asset in two roles so there's no second file to drift (the old separate
