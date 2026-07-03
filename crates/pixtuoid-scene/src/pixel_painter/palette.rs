@@ -28,10 +28,16 @@ struct Outfit {
     pants: Rgb,
 }
 
-/// Warm / extroverted outfits — earthy reds, ochres, terracottas paired
-/// with deep neutrals. A warm aesthetic grouping within the 16-preset pool;
-/// outfit selection is keyed on `cwd`, not personality (see `agent_palette`).
-const OUTFITS_WARM: &[Outfit] = &[
+/// The 16 shirt+pants outfits — a curated pool indexed directly by the cwd seed
+/// (Team Palette). The first 8 are a WARM aesthetic grouping (earthy reds,
+/// ochres, terracottas over deep neutrals), the last 8 a COOL one (sages, slates,
+/// indigos over deeper neutrals): real palette curation, NOT a personality axis.
+/// (The old warm=extroverted / cool=homebody split was an `agent_id` artifact,
+/// dropped when outfits re-keyed on `cwd`; every agent now draws the full pool.)
+/// Order is load-bearing — the cwd seed indexes this array modulo its length, so
+/// keep warm `[0..8)` then cool `[8..16)`.
+const OUTFITS: &[Outfit; 16] = &[
+    // ── Warm ────────────────────────────────────────────────────────────
     // Wes Anderson — Grand Budapest concierge (cream + plum)
     Outfit {
         shirt: Rgb {
@@ -136,12 +142,7 @@ const OUTFITS_WARM: &[Outfit] = &[
             b: 0x2e,
         },
     },
-];
-
-/// Cool / homebody outfits — sages, slates, indigos paired with deeper
-/// neutrals. A cool aesthetic grouping within the 16-preset pool;
-/// outfit selection is keyed on `cwd`, not personality (see `agent_palette`).
-const OUTFITS_COOL: &[Outfit] = &[
+    // ── Cool ────────────────────────────────────────────────────────────
     // Modern minimal — sage + charcoal
     Outfit {
         shirt: Rgb {
@@ -367,13 +368,7 @@ pub(super) fn agent_palette(base: &Palette, agent: &AgentSlot, glow_tint: Option
     // the outfit now spans the full 16-preset pool indexed by the cwd seed.
     let id_seed = agent.agent_id.raw() as usize;
     let outfit_seed = outfit_seed_for(agent);
-    let pool_len = OUTFITS_WARM.len() + OUTFITS_COOL.len();
-    let i = (outfit_seed as usize) % pool_len;
-    let outfit = if i < OUTFITS_WARM.len() {
-        OUTFITS_WARM[i]
-    } else {
-        OUTFITS_COOL[i - OUTFITS_WARM.len()]
-    };
+    let outfit = OUTFITS[outfit_seed as usize % OUTFITS.len()];
     let hair = HAIR_PRESETS[(id_seed / 7) % HAIR_PRESETS.len()];
     let skin = SKIN_PRESETS[(id_seed / 13) % SKIN_PRESETS.len()];
     let final_skin = if let Some(tint) = glow_tint {
