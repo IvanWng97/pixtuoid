@@ -25,6 +25,29 @@ function watchErrors(page: Page): () => string[] {
   return () => errors;
 }
 
+/**
+ * Scroll a section to viewport center and expect its head to reveal (`in`).
+ * The scroll is INSIDE the retry: a one-shot scrollIntoView races the two
+ * things that keep moving the page under a slow (CI-throttled) load —
+ * Chromium's async scroll restoration after reload() (clamped retries while
+ * the document grows) and late layout settling — either can park the viewport
+ * where the head never intersects the 0.12 observer threshold. Re-scrolling
+ * per retry pins the geometry the assert depends on. (Reproduced identically
+ * on the Astro 6 build under 10x CPU throttle — a test-timing hazard, not a
+ * product one: the observer fires whenever the head actually intersects.)
+ */
+async function expectSectionReveal(page: Page, sectionId: string): Promise<void> {
+  await expect(async () => {
+    await page.evaluate(
+      (id) => document.getElementById(id)!.scrollIntoView({ block: 'center', behavior: 'instant' }),
+      sectionId
+    );
+    await expect(page.locator(`#${sectionId} .section-head.reveal`)).toHaveClass(/\bin\b/, {
+      timeout: 500,
+    });
+  }).toPass({ timeout: 10_000 });
+}
+
 /** Load the landing page with the boot intro pre-skipped and the office live. */
 async function gotoLive(page: Page): Promise<void> {
   await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
@@ -184,18 +207,12 @@ test('first visit: boot intro auto-runs, reveals the page, seeds the gate', asyn
   );
   // finish() dispatched pix:revealed, arming the reveal-on-scroll observer —
   // opacity:0 still counts as "visible" to Playwright, so assert the CLASS.
-  await page.evaluate(() =>
-    document.getElementById('features')!.scrollIntoView({ block: 'center', behavior: 'instant' })
-  );
-  await expect(page.locator('#features .section-head.reveal')).toHaveClass(/\bin\b/);
+  await expectSectionReveal(page, 'features');
   // Gate round-trip: a seeded session skips the overlay, and the IMMEDIATE
   // pix:revealed path must arm the reveal observer just the same.
   await page.reload();
   await expect(page.locator('#boot')).not.toBeVisible();
-  await page.evaluate(() =>
-    document.getElementById('features')!.scrollIntoView({ block: 'center', behavior: 'instant' })
-  );
-  await expect(page.locator('#features .section-head.reveal')).toHaveClass(/\bin\b/);
+  await expectSectionReveal(page, 'features');
 });
 
 test('theme chain: saved choice, URL override, toggle persist, Escape restore, system dark', async ({
