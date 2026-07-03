@@ -1,11 +1,11 @@
 /* @ts-self-types="./pixtuoid_web.d.ts" */
 
 /**
- * A live office rendered to a reusable RGBA buffer across frames. Owns the
- * per-floor render caches (`FloorCtx`) + the persistent office state
- * (coffee/chitchat) so keeping ONE handle alive across `step` calls is what
- * keeps motion/pose continuous (no walk-flash) — same contract as
- * `OfficeRenderer`.
+ * A live office rendered to a reusable RGBA buffer across frames. Owns a
+ * `FloorSession` (the scene-owned painter session: per-floor render caches +
+ * persistent office coffee/chitchat + the dual eviction) so keeping ONE
+ * handle alive across `step` calls is what keeps motion/pose continuous
+ * (no walk-flash) — same contract as `OfficeRenderer`.
  */
 export class Office {
     __destroy_into_raw() {
