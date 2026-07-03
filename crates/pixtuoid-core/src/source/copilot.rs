@@ -36,9 +36,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use serde_json::Value;
 
-use crate::source::decoder::{
-    cwd_basename_label, ellipsize, generic_tool_display, MAX_DECODED_FIELD_CHARS,
-};
+use crate::source::decoder::{ellipsize, generic_tool_display, MAX_DECODED_FIELD_CHARS};
 use crate::source::{AgentEvent, ToolDetail};
 use crate::AgentId;
 
@@ -74,8 +72,8 @@ pub fn copilot_id_from_path(path: &Path) -> String {
         .to_string()
 }
 
-pub fn derive_copilot_label(_path: &Path, _source: &str, cwd: &Path) -> String {
-    cwd_basename_label("cp", cwd).unwrap_or_else(|| "cp".to_string())
+pub fn derive_copilot_label(_path: &Path, source: &str, cwd: &Path) -> String {
+    crate::source::decoder::derive_prefixed_label(source, cwd)
 }
 
 fn str_at<'a>(v: &'a Value, key: &str) -> Option<&'a str> {

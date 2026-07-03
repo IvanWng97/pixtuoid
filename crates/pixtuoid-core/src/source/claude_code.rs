@@ -278,7 +278,7 @@ pub fn cc_session_ended(tail: &[u8]) -> bool {
 /// bare "cc": the project dir name encodes the cwd path with '/'→'-', so its
 /// last segment is the project basename. Without this, an empty-cwd Rename
 /// silently degrades a good hook-derived `cc·dotfiles` back to `cc`.
-pub fn cc_derive_label(path: &Path, _source: &str, cwd: &Path) -> String {
+pub fn cc_derive_label(path: &Path, source: &str, cwd: &Path) -> String {
     // ONE shared predicate with `detect_parent_id` (both via the `SUBAGENTS_DIR` component)
     // so the two can't diverge — a loose `"subagents"` substring once mislabeled a
     // `subagents-paper` repo's parent transcript "subagent" with parent_id=None
@@ -286,7 +286,10 @@ pub fn cc_derive_label(path: &Path, _source: &str, cwd: &Path) -> String {
     if crate::source::decoder::is_subagent_path(path) {
         return "subagent".to_string();
     }
-    if let Some(label) = cwd_basename_label("cc", cwd) {
+    // The `cc` prefix is a registry fact, not a literal (invariant #3) — read it
+    // from the same authority the shared derivers use.
+    let prefix = crate::source::decoder::label_prefix_for(source);
+    if let Some(label) = cwd_basename_label(prefix, cwd) {
         return label;
     }
     if let Some(base) = path
@@ -295,9 +298,9 @@ pub fn cc_derive_label(path: &Path, _source: &str, cwd: &Path) -> String {
         .and_then(|n| n.to_str())
         .and_then(|proj| proj.rsplit('-').find(|s| !s.is_empty()))
     {
-        return format!("cc·{base}");
+        return format!("{prefix}·{base}");
     }
-    "cc".to_string()
+    prefix.to_string()
 }
 
 #[cfg(test)]

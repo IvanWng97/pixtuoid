@@ -10,7 +10,6 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 
 use super::{decode_ag_line, SOURCE_NAME};
-use crate::source::decoder::cwd_basename_label;
 use crate::source::jsonl::JsonlWatcher;
 use crate::source::{Source, TaggedSender};
 
@@ -60,8 +59,8 @@ fn ag_session_ended(_tail: &[u8]) -> bool {
     false
 }
 
-fn derive_ag_label(_path: &Path, _source: &str, cwd: &Path) -> String {
-    cwd_basename_label("ag", cwd).unwrap_or_else(|| "ag".to_string())
+fn derive_ag_label(_path: &Path, source: &str, cwd: &Path) -> String {
+    crate::source::decoder::derive_prefixed_label(source, cwd)
 }
 
 #[cfg(test)]

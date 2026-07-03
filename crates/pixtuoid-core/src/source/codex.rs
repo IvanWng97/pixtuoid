@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use serde_json::{Map, Value};
 
-use crate::source::decoder::{cwd_basename_label, make_tool_detail};
+use crate::source::decoder::make_tool_detail;
 use crate::source::AgentEvent;
 use crate::AgentId;
 
@@ -239,8 +239,8 @@ fn codex_tool_start(agent_id: AgentId, payload: Option<&Map<String, Value>>) -> 
     }
 }
 
-pub fn derive_codex_label(_path: &Path, _source: &str, cwd: &Path) -> String {
-    cwd_basename_label("cx", cwd).unwrap_or_else(|| "cx".to_string())
+pub fn derive_codex_label(_path: &Path, source: &str, cwd: &Path) -> String {
+    crate::source::decoder::derive_prefixed_label(source, cwd)
 }
 
 /// The Codex home dir — honors `CODEX_HOME` when it points at an existing dir,

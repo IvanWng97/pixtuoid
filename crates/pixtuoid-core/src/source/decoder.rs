@@ -75,6 +75,28 @@ pub(crate) fn cwd_basename_label(prefix: &str, cwd: &Path) -> Option<String> {
     ))
 }
 
+/// The registered 2-char display prefix for `source` (invariant #3: the prefix
+/// is a cross-source registry FACT, not transcript-format knowledge), or the
+/// raw source name when it has no row — the same fallback the reducer's
+/// `source_label_prefix` honors. The single source-layer authority so no
+/// deriver hardcodes a prefix that could drift from the registry.
+pub(crate) fn label_prefix_for(source: &str) -> &str {
+    crate::source::registry::descriptor_for(source)
+        .map(|d| d.label_prefix)
+        .unwrap_or(source)
+}
+
+/// `"{prefix}·{basename}"` from a working directory, prefix looked up from the
+/// registry by `source` — the shared body of the codex / copilot / antigravity
+/// `LabelDeriver`s (which differ only in the source name they carry). Falls
+/// back to the bare prefix when `cwd` has no basename. CC keeps its own deriver
+/// for the subagent + project-dir fallbacks, but reads its prefix from the same
+/// [`label_prefix_for`] authority.
+pub(crate) fn derive_prefixed_label(source: &str, cwd: &Path) -> String {
+    let prefix = label_prefix_for(source);
+    cwd_basename_label(prefix, cwd).unwrap_or_else(|| prefix.to_string())
+}
+
 /// Decode one hook payload into the event sequence the reducer applies.
 ///
 /// Tool/permission arms (PreToolUse / PostToolUse / Notification /
@@ -955,6 +977,32 @@ mod tests {
     fn cwd_basename_label_is_none_for_empty_and_root() {
         assert_eq!(cwd_basename_label("cc", Path::new("")), None);
         assert_eq!(cwd_basename_label("cc", Path::new("/")), None);
+    }
+
+    /// Pin: every transcript-bearing source's `LabelDeriver`, on an EMPTY cwd,
+    /// falls back to EXACTLY its registry `label_prefix` — no deriver hardcodes
+    /// a prefix that could silently drift from the registry (invariant #3). The
+    /// codex/copilot/antigravity derivers share [`derive_prefixed_label`]; CC's
+    /// bespoke deriver (subagent + project-dir branches) is exercised directly.
+    #[test]
+    fn transcript_deriver_empty_cwd_fallback_equals_registry_prefix() {
+        use crate::source::{claude_code, registry};
+        // `line_decoder().is_some()` == transcript-bearing == has a LabelDeriver.
+        for d in registry::REGISTRY
+            .iter()
+            .filter(|d| d.line_decoder().is_some())
+        {
+            let got = if d.name == claude_code::SOURCE_NAME {
+                claude_code::cc_derive_label(Path::new(""), d.name, Path::new(""))
+            } else {
+                derive_prefixed_label(d.name, Path::new(""))
+            };
+            assert_eq!(
+                got, d.label_prefix,
+                "{} deriver empty-cwd fallback must equal its registry prefix",
+                d.name
+            );
+        }
     }
 
     /// CC's per-tool target keys: the file-tool family reads `file_path`,
