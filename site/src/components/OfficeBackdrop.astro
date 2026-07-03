@@ -472,6 +472,18 @@ import { asset, DIM_RESTING } from '../consts';
     });
     // content below (boot reveal, lazy media) can shift rects after load
     window.addEventListener('load', measure);
+    // A Showcase channel tune swaps stages of different heights, shifting the
+    // page-space top/bottom of the blocks below it (#install) — resize/load alone
+    // miss that. Re-measure (coalesced through rraf) on any body reflow.
+    if ('ResizeObserver' in window) {
+      new ResizeObserver(function () {
+        if (rraf) return;
+        rraf = requestAnimationFrame(function () {
+          rraf = 0;
+          measure();
+        });
+      }).observe(document.body);
+    }
 
     function wire() {
       if (mq.matches) return; // reduced motion: CSS holds the static level
@@ -496,11 +508,15 @@ import { asset, DIM_RESTING } from '../consts';
           // stays STRANDED at inline opacity 0.001 (invisible h1/CTA) with no
           // recovery while reduce stays on — an inline declaration beats the CSS
           // parallel design (mirrors the dimmer reset just above).
-          if (active) {
-            active.style.opacity = '';
-            active.style.transform = '';
-            active = null;
-          }
+          // Reset EVERY faded block, not just `active`: if you scrolled past the
+          // hero into Showcase/Install BEFORE enabling reduce, the hero is parked
+          // at opacity 0.001 but `active` is now #showcase/#install — so resetting
+          // only `active` leaves the hero H1/CTA invisible with no recovery.
+          document.querySelectorAll('[data-lit="fade"]').forEach(function (el) {
+            el.style.opacity = '';
+            el.style.transform = '';
+          });
+          active = null;
         } else if (!mq.matches && !raf) {
           measure();
           raf = requestAnimationFrame(frame);

@@ -36,6 +36,7 @@ const floor = floorByNumber(6);
 <style>
   .hero {
     position: relative;
+    min-height: 100vh; /* fallback for Safari < 15.4, which drops the svh line */
     min-height: 100svh;
     display: flex;
     align-items: flex-end;

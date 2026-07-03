@@ -259,7 +259,7 @@ export default defineConfig({
         "default-src 'self'",
         "base-uri 'self'",
         "object-src 'none'",
-        "img-src 'self' data:",
+        "img-src 'self'",
         "media-src 'self'",
         "font-src 'self'",
         "connect-src 'self'",

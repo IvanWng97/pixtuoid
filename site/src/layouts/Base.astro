@@ -191,6 +191,22 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
         }
       } catch (e) {}
     </script>
+
+    {
+      /* Progressive enhancement: .reveal starts opacity:0 and JS adds .in on
+        scroll. With JS disabled (or a script/CSP failure) every below-hero
+        section would stay invisible — a blank page under the hero. Reduced-motion
+        already shows them via a media query; this rescues the non-reduced no-JS
+        case too. (style-src keeps 'unsafe-inline', so no CSP hash needed.) */
+    }
+    <noscript>
+      <style>
+        .reveal {
+          opacity: 1 !important;
+          transform: none !important;
+        }
+      </style>
+    </noscript>
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
@@ -313,6 +329,10 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
           // don't hijack typing: skip when a field is focused or a modifier is held
           if (e.ctrlKey || e.metaKey || e.altKey) return;
           if (window.__pixKeys.typing(e)) return;
+          // Escape "skips the boot" — during boot it must NOT also run setTheme
+          // (which clears clock-night + fires a spurious pix:theme). The digit
+          // and `t` handlers already bail while booting; match them.
+          if (document.documentElement.dataset.booting === '1') return;
           const T = window.__pixTheme;
           if (e.key === 'Escape') {
             clearRetint();

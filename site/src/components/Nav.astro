@@ -74,7 +74,9 @@ const { floating = false } = Astro.props;
     const btn = document.getElementById('theme-toggle');
     const icon = btn && btn.querySelector('.nav__toggle-icon');
     function sync() {
-      const night = document.documentElement.dataset.theme === 'night';
+      // dracula is a DARK theme too — treat anything but day as "dark" so the
+      // toggle shows ☀️/"Switch to day" while in dracula (not 🌙/"Switch to night")
+      const night = document.documentElement.dataset.theme !== 'day';
       if (icon) icon.textContent = night ? '☀️' : '🌙';
       if (btn) btn.setAttribute('aria-label', night ? 'Switch to day' : 'Switch to night');
     }
@@ -90,7 +92,9 @@ const { floating = false } = Astro.props;
         root.style.removeProperty('--coral');
         root.style.removeProperty('--coral-deep');
         root.style.removeProperty('--amber');
-        const next = root.dataset.theme === 'night' ? 'day' : 'night';
+        // day → night; any dark theme (night OR dracula) → day, matching the
+        // "Switch to day" label so dracula has a one-click path back to day
+        const next = root.dataset.theme === 'day' ? 'night' : 'day';
         root.dataset.theme = next;
         try {
           localStorage.setItem(window.__pixTheme.KEY, next);

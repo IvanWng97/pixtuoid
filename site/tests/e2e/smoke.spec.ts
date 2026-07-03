@@ -461,6 +461,19 @@ test('showcase studio: deep-links tune, dial and chips swap hydrated stages, the
         .evaluate((v) => !(v as HTMLVideoElement).paused && !v.hasAttribute('controls'))
     )
     .toBe(true);
+  // WCAG 2.2.2: the page pause governs the clip too (it has no controls of its
+  // own in normal motion). Drive the same pix:paused signal #office-pause fires
+  // and assert the clip stops, then resumes.
+  const clipPaused = () =>
+    page.locator('[data-stage="agents"] video').evaluate((v) => (v as HTMLVideoElement).paused);
+  await page.evaluate(() =>
+    document.dispatchEvent(new CustomEvent('pix:paused', { detail: { paused: true } }))
+  );
+  await expect.poll(clipPaused).toBe(true);
+  await page.evaluate(() =>
+    document.dispatchEvent(new CustomEvent('pix:paused', { detail: { paused: false } }))
+  );
+  await expect.poll(clipPaused).toBe(false);
   expect(errors()).toEqual([]);
 });
 
@@ -573,4 +586,42 @@ test('landing fixed chrome: floating nav, statusline readouts, floor popover, da
   await page.locator('[data-floor-btn="1"]').click();
   await expect(page.locator('#sl-floors')).toBeHidden();
   await expect(page.locator('[data-lift-digit]')).toHaveText('1F', { timeout: 10_000 });
+});
+
+test('no horizontal overflow at phone widths (mobile pan guard)', async ({ browser }) => {
+  // `body { overflow-x: hidden }` masks the desktop scrollbar, so a full-width
+  // block whose ::before glow (or any child) pokes past the viewport is
+  // INVISIBLE on desktop yet PANS the visual viewport on mobile — the
+  // [data-lit]::before -8% overflow class (fixed by overflow-x: clip). A
+  // pseudo-element dodges every querySelectorAll('*') element scan, so only a
+  // documentElement scrollWidth<=clientWidth guard catches it. This whole class
+  // slipped the #453 whole-site audit (desktop-eyeballed, no such assertion);
+  // pin index + a docs page at real phone widths so it can't silently regress.
+  for (const [path, width] of [
+    ['./', 360], // Android
+    ['./', 390], // iPhone 12–14
+    ['./', 430], // iPhone Pro Max
+    ['./config', 390], // docs shell: code blocks / mermaid can overflow too
+  ] as const) {
+    const context = await browser.newContext({
+      viewport: { width, height: 820 },
+      isMobile: true,
+      hasTouch: true,
+    });
+    const page = await context.newPage();
+    await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
+    await page.goto(path);
+    // The reported symptom is a left-right drag at the BOTTOM — measure there,
+    // after any late layout settles.
+    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+    const { scrollW, clientW } = await page.evaluate(() => ({
+      scrollW: document.documentElement.scrollWidth,
+      clientW: document.documentElement.clientWidth,
+    }));
+    expect(
+      scrollW,
+      `${path} at ${width}px is ${scrollW - clientW}px wider than the viewport (horizontal pan)`
+    ).toBeLessThanOrEqual(clientW);
+    await context.close();
+  }
 });

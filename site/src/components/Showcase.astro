@@ -114,8 +114,10 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
     }
 
     // ---- play policy: a clip plays iff its stage is the tuned one AND the
-    // studio is in view AND reduced-motion is off (WCAG 2.2.2 — same contract
-    // as the hero video). Under reduced-motion show native controls instead.
+    // studio is in view AND reduced-motion is off AND the office isn't paused
+    // (WCAG 2.2.2 — the #office-pause button governs the clips too via the
+    // pix:paused listener below). Under reduced-motion show native controls.
+    let userPaused = false;
     function syncVideos() {
       stages.forEach(function (st) {
         const v = st.querySelector('video');
@@ -127,7 +129,7 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
           return;
         }
         v.removeAttribute('controls');
-        if (!st.hidden && inView && !v.dataset.mp4) {
+        if (!st.hidden && inView && !userPaused && !v.dataset.mp4) {
           const p = v.play();
           if (p && p.catch) p.catch(function () {});
         } else {
@@ -135,14 +137,23 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
         }
       });
     }
-    new IntersectionObserver(
-      function (entries) {
-        inView = entries[0].isIntersecting;
-        syncVideos();
-      },
-      { threshold: 0.15 }
-    ).observe(studio);
+    if ('IntersectionObserver' in window) {
+      new IntersectionObserver(
+        function (entries) {
+          inView = entries[0].isIntersecting;
+          syncVideos();
+        },
+        { threshold: 0.15 }
+      ).observe(studio);
+    }
     if (mq.addEventListener) mq.addEventListener('change', syncVideos);
+    // WCAG 2.2.2: the page-wide pause button (#office-pause) stops the looping
+    // demo clips too — one control governs all >5s auto-motion. The clips carry
+    // no visible controls in normal motion, so this IS their pause affordance.
+    document.addEventListener('pix:paused', function (e) {
+      userPaused = !!(e.detail && e.detail.paused);
+      syncVideos();
+    });
     syncVideos();
 
     // ---- channel tuning (hidden-swap; view-transition crossfade when available)
@@ -257,6 +268,15 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
     font-family: var(--font-mono);
     font-size: 0.92rem;
   }
+  @media (max-width: 480px) {
+    /* 3× max-content is ~376px — past a 360/390px phone, so the studio's
+       overflow-x:clip would hide the right dial column (03 Dashboard / 06 Spaces,
+       untappable). Wrap to two shrinkable columns so all 8 channels stay on-screen. */
+    .dial {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 0.4rem 1rem;
+    }
+  }
   .dial__ch {
     text-align: left;
   }
@@ -303,6 +323,10 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
   }
   .studio {
     display: grid;
+    /* the single mobile column must shrink below its content's min-width (the
+       dial's tracks), or a child drags the grid past the viewport and the
+       section's overflow-x:clip cuts off the overflow with no scroll */
+    grid-template-columns: minmax(0, 1fr);
     gap: 1.4rem;
   }
   @media (min-width: 980px) {

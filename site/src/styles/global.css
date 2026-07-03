@@ -96,6 +96,27 @@
   --chrome-halo: 0 1px 8px rgba(0, 0, 0, 0.45);
 }
 
+/* color-mix() landed in Safari 16.2 (Dec 2022). On an older engine an invalid
+   color-mix() poisons the whole declaration at computed-value time, so
+   `border: 1px solid var(--border)` resets to border-style:none (borders VANISH)
+   and --chip-bg goes transparent (light chrome text over the day office drops to
+   low contrast). Mirror the load-bearing translucent tokens in rgba() (which
+   predates color-mix by a decade); component-level decorative color-mix degrades
+   harmlessly (the color just inherits), so only these tokens need the fallback. */
+@supports not (color: color-mix(in srgb, red, red)) {
+  :root {
+    --border: rgba(36, 28, 20, 0.12);
+    --border-strong: rgba(36, 28, 20, 0.2);
+    --glow: rgba(217, 119, 87, 0.15);
+    --chip-bg: rgba(14, 13, 12, 0.82);
+  }
+  :root[data-theme='night'] {
+    --border: rgba(244, 238, 226, 0.13);
+    --border-strong: rgba(244, 238, 226, 0.24);
+    --glow: rgba(227, 132, 95, 0.24);
+  }
+}
+
 /* Metric-matched fallback for the Lora body face: local Georgia scaled to Lora's
    metrics so the font-display:swap doesn't reflow the docs prose. size-adjust is
    MEASURED against the built pages (rendered Georgia is ~94.5% of Lora's advance
@@ -325,10 +346,12 @@ section {
      the white label stays legible in both day and night. The glow uses a FIXED
      coral (not var(--coral)) so it matches the baked fill in every theme and
      gallery retint instead of drifting to the theme hue. */
-  background: linear-gradient(100deg, #ad5230, #c96a45);
+  /* The light gradient stop is capped at #b5592f so the white label clears WCAG
+     AA (4.5:1) across the WHOLE fill — the old #c96a45 end was ~3.7:1. */
+  background: linear-gradient(100deg, #ad5230, #b5592f);
   color: #fff;
   text-shadow: 0 1px 2px rgba(35, 14, 5, 0.4);
-  box-shadow: 0 8px 20px color-mix(in srgb, #c96a45 42%, transparent);
+  box-shadow: 0 8px 20px color-mix(in srgb, #b5592f 42%, transparent);
 }
 .btn-primary:hover {
   filter: brightness(1.08);
@@ -444,6 +467,7 @@ section {
   );
 }
 .office-gap {
+  min-height: 100vh; /* fallback for Safari < 15.4, which drops the svh line */
   min-height: 100svh;
   position: relative;
 }
@@ -733,6 +757,9 @@ code,
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 0.08rem 0.34rem;
+  /* long unbreakable tokens (paths, socket names) must wrap, not overflow the
+     mobile viewport — body{overflow-x:hidden} would clip them unreachably */
+  overflow-wrap: anywhere;
 }
 /* fenced code blocks (Shiki sets the colors; we frame them) */
 .prose pre {
@@ -747,9 +774,13 @@ code,
 .prose pre code {
   font-family: var(--font-mono);
 }
-/* tables */
+/* tables — display:block + overflow-x:auto gives wide markdown tables their OWN
+   horizontal scroll on mobile instead of overflowing the page (which
+   body{overflow-x:hidden} would clip unreachably); mirrors the Tools matrix. */
 .prose table {
-  width: 100%;
+  display: block;
+  overflow-x: auto;
+  max-width: 100%;
   border-collapse: collapse;
   margin: 1.2rem 0;
   font-size: 0.95rem;

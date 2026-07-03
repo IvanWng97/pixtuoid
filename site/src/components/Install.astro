@@ -163,8 +163,9 @@ import tabs from '../install.json';
     cursor: pointer;
   }
   .install__tab.is-active {
-    color: var(--led);
-    text-shadow: 0 0 6px var(--led-glow);
+    /* --coral-deep (5.2:1 on the day bg); the old --led green was ~1.4:1 and the
+       tab label is the ONLY text conveying which install method is selected */
+    color: var(--coral-deep);
   }
   /* the climax: the active command HUGE in a square --screen block */
   .install__panel {
