@@ -1,0 +1,46 @@
+# .harness/policy.toml — declarative action policy for pixtuoid's Claude Code harness.
+#
+# Each rule matches a PROPOSED tool action against the REAL tool_input
+# (provenance = environment: the model cannot fake which call it is making, so a
+# `block` here is legitimate — this is the cogpin moat, inherited). First matching
+# `block` wins → deny + exit 2. `warn` rules are advisory (never deny) — reserved.
+#
+# These mirror the prose invariants in the root CLAUDE.md ("Architecture
+# invariants", "Things NOT to do"). This file is the machine form of that prose.
+# Editing it is itself gated (rule `self-protect`) — change it by hand, out of band.
+schema = 1
+
+# --- self-protection: the gate may not let the agent weaken the gate ----------
+[[rule]]
+id = "self-protect"
+severity = "block"
+tools = ["Edit", "MultiEdit", "Write", "NotebookEdit"]
+path_glob = [".harness/**", "**/.harness/**", ".claude/settings.json", "**/.claude/settings.json"]
+reason = "Refusing to let the agent edit the harness's own gate/policy/ledger or .claude/settings.json (self-tamper). Change these by hand, outside the agent."
+
+# --- CLAUDE.md 'Things NOT to do': no direct ~/.claude/settings.json write -----
+[[rule]]
+id = "no-user-settings-write"
+severity = "block"
+tools = ["Bash"]
+command_regex = '(>>?|tee\b|sed\b[^\n]*-i)[^\n]{0,120}\.claude/settings(\.local)?\.json'
+reason = "Direct write to ~/.claude/settings.json is forbidden — go through install/io.rs write_config_atomic (CLAUDE.md 'Things NOT to do')."
+
+# --- Architecture invariant #1: pixtuoid-core stays terminal-free -------------
+[[rule]]
+id = "core-no-tui"
+severity = "block"
+tools = ["Edit", "MultiEdit", "Write"]
+path_glob = ["crates/pixtuoid-core/**", "**/crates/pixtuoid-core/**"]
+content_regex = '\b(ratatui|crossterm)\b'
+reason = "pixtuoid-core must have no terminal deps (arch invariant #1). No ratatui/crossterm in core — it belongs in a painter crate."
+
+# --- CLAUDE.md 'Things NOT to do': no println!/eprintln! in production paths ---
+[[rule]]
+id = "no-prod-println"
+severity = "block"
+tools = ["Edit", "MultiEdit", "Write"]
+path_glob = ["crates/*/src/**", "**/crates/*/src/**"]
+path_exclude = ["**/tests/**", "**/test_*.rs", "**/*_test.rs", "**/tests.rs"]
+content_regex = '\b(println!|eprintln!)'
+reason = "No println!/eprintln! in production paths — use tracing (CLAUDE.md 'Things NOT to do'). Headless summary / explicit CLI output are the documented exceptions; bypass with HARNESS_GATE_OFF=1 if this is one."

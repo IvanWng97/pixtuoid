@@ -16,3 +16,6 @@ __pycache__/
 lcov.info
 mutants.out/
 mutants.out.old/
+
+# harness flight-recorder runtime ledger (hash-chained; regenerated per session)
+.harness/ledger.jsonl

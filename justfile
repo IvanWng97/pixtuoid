@@ -729,3 +729,16 @@ risk-radar base="origin/main":
 risk-radar-test:
     python3 scripts/risk-radar.py --selftest
 
+# Harness flight-recorder check (dogfood v0) — selftest the gate engine, replay
+# the labeled adversarial fixtures, fire the inertness canary, and verify the
+# ledger hash-chain. RED if a guardrail was loosened (a should-deny now allows),
+# the gate went inert, or the ledger was tampered. Evidence-first, not a sandbox
+# — see .harness/README.md. Pure Python, no deps, no network.
+[group('meta')]
+[doc('Flight-recorder check: gate selftest + replay fixtures + canary + ledger hash-chain')]
+harness-check:
+    python3 .harness/harness.py selftest
+    python3 .harness/harness.py replay
+    python3 .harness/harness.py canary
+    python3 .harness/harness.py verify
+
