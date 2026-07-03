@@ -38,6 +38,13 @@ use crate::pathfind::{find_path, snap_point_to_walkable};
 use crate::pet::PetKind;
 use pixtuoid_core::walkable::OccupancyOverlay;
 
+/// Coffee-steam plume column offset from the pantry sprite CENTER (`pos.x`), per
+/// size — hand-tuned to the sprite art so the steam sits within
+/// [`super::PANTRY_COFFEE_COLS_LARGE`] / [`super::PANTRY_COFFEE_COLS_SMALL`]
+/// (pinned by `steam_anchor_sits_within_the_coffee_machine_columns`).
+const PANTRY_STEAM_DX_LARGE: i16 = -2;
+const PANTRY_STEAM_DX_SMALL: i16 = 1;
+
 pub(super) struct Drawable<'a> {
     pub(super) anchor_y: u16,
     pub(super) kind: DrawableKind<'a>,
@@ -718,11 +725,16 @@ pub(super) fn paint_drawable(
                 // the walker parks deep behind the visual; no synthetic cap.
                 blit_frame(f, cx, cy, buf);
             }
-            // Large sprite: coffee machine at sprite cols 11-18 of
-            // a 32-wide sprite → world x ≈ pos.x - 2.
-            // Small sprite: coffee at sprite cols 9-11 of a 20-wide
-            // sprite → world x = pos.x + 1.
-            let steam_dx: i16 = if *use_large { -2 } else { 1 };
+            // The coffee machine occupies `PANTRY_COFFEE_COLS_{LARGE,SMALL}` (the
+            // shared source of truth, also used by the binary's hit-test). The
+            // steam plumes from within that column range — hand-tuned per sprite
+            // art (`PANTRY_STEAM_DX_*`), pinned within the cols by
+            // `steam_anchor_sits_within_the_coffee_machine_columns`.
+            let steam_dx: i16 = if *use_large {
+                PANTRY_STEAM_DX_LARGE
+            } else {
+                PANTRY_STEAM_DX_SMALL
+            };
             let steam_x = (pos.x as i32 + steam_dx as i32).max(0) as u16;
             paint_coffee_steam(
                 buf,
@@ -1010,6 +1022,33 @@ mod tests {
 
     fn p(x: u16, y: u16) -> Point {
         Point { x, y }
+    }
+
+    #[test]
+    fn steam_anchor_sits_within_the_coffee_machine_columns() {
+        // The steam plume must land inside the machine's clickable column range
+        // (the binary hit-tests the same PANTRY_COFFEE_COLS_*), so a re-tuned
+        // sprite can't drift the steam off the machine or out of the hit box.
+        // steam_x = pos.x + steam_dx; sprite_x = pos.x - cw/2 → sprite-local steam
+        // col = steam_dx + cw/2.
+        for (dx, cw, (lo, hi)) in [
+            (
+                PANTRY_STEAM_DX_LARGE,
+                32i16,
+                crate::pixel_painter::PANTRY_COFFEE_COLS_LARGE,
+            ),
+            (
+                PANTRY_STEAM_DX_SMALL,
+                20i16,
+                crate::pixel_painter::PANTRY_COFFEE_COLS_SMALL,
+            ),
+        ] {
+            let steam_col = dx + cw / 2;
+            assert!(
+                steam_col >= lo as i16 && steam_col < hi as i16,
+                "steam col {steam_col} must sit within the machine cols [{lo},{hi})"
+            );
+        }
     }
 
     #[test]

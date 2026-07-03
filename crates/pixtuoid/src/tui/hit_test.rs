@@ -105,11 +105,16 @@ pub fn hit_test_coffee_machine(layout: &Layout, mx: u16, my: u16) -> bool {
     let Size { w: cw, h: ch } = layout.pantry_counter_size;
     let sprite_x = wp.pos.x.saturating_sub(cw / 2);
     let sprite_y = wp.pos.y.saturating_sub(ch / 2);
-    let (coffee_x0, coffee_x1) = if cw >= 32 {
-        (sprite_x + 11, sprite_x + 18)
+    // Derive the machine box from the painter's shared column source so the click
+    // target can't drift from the painted machine (the version-popup / seated-
+    // anchor pinning discipline). The small-case previously used a wider [8,13)
+    // that false-positived counter cells 8 and 12.
+    let (dx0, dx1) = if cw >= 32 {
+        pixtuoid_scene::pixel_painter::PANTRY_COFFEE_COLS_LARGE
     } else {
-        (sprite_x + 8, sprite_x + 13)
+        pixtuoid_scene::pixel_painter::PANTRY_COFFEE_COLS_SMALL
     };
+    let (coffee_x0, coffee_x1) = (sprite_x + dx0, sprite_x + dx1);
     let coffee_y0 = sprite_y;
     let coffee_y1 = sprite_y + ch;
     let cell_y = my * 2;
@@ -766,12 +771,15 @@ mod tests {
         assert!(!hit_test_coffee_machine(&layout, 0, 0));
     }
 
-    // The small-counter branch (cw < 32 ⇒ box x-offsets [8,13)). x+10 is inside
-    // that small box; x+15 is OUTSIDE it but WOULD be inside the large branch's
-    // [11,18) box — so the false at x+15 falsifies any mutation that drops the
-    // cw>=32 split (e.g. always taking the large offsets).
+    // The small-counter box is derived from the shared `PANTRY_COFFEE_COLS_SMALL`
+    // = [9,12). Pin the box endpoints to the const (col below/above the machine
+    // must miss; the machine edges must hit) so the click target can't drift from
+    // the painter — and keep the x+15 falsifier for the cw>=32 split (x+15 is
+    // outside the small box but inside the large [11,18), so a hit there means the
+    // split was dropped). The old [8,13) box false-positived counter cols 8 and 12.
     #[test]
-    fn coffee_machine_small_counter_uses_8_13_offsets() {
+    fn coffee_machine_small_counter_uses_the_shared_coffee_cols() {
+        let (lo, hi) = pixtuoid_scene::pixel_painter::PANTRY_COFFEE_COLS_SMALL;
         let mut layout = Layout::compute(160, 200, Some(4)).expect("layout");
         let wp = *layout
             .waypoints
@@ -783,13 +791,28 @@ mod tests {
         let sprite_x = wp.pos.x.saturating_sub(20 / 2);
         let sprite_y = wp.pos.y.saturating_sub(h / 2);
         let cell_y = (sprite_y + h / 2) / 2;
+        // The machine edges (cols lo..hi-1) hit; the counter cols just outside
+        // (lo-1, hi) miss — pinning the box to the const, with teeth against the
+        // old wider [8,13) box (which hit at lo-1 and hi).
         assert!(
-            hit_test_coffee_machine(&layout, sprite_x + 10, cell_y),
-            "x+10 is inside the small-counter [8,13) box"
+            !hit_test_coffee_machine(&layout, sprite_x + lo - 1, cell_y),
+            "the counter col just left of the machine must miss"
+        );
+        assert!(
+            hit_test_coffee_machine(&layout, sprite_x + lo, cell_y),
+            "the machine's left edge must hit"
+        );
+        assert!(
+            hit_test_coffee_machine(&layout, sprite_x + hi - 1, cell_y),
+            "the machine's right edge must hit"
+        );
+        assert!(
+            !hit_test_coffee_machine(&layout, sprite_x + hi, cell_y),
+            "the counter col just right of the machine must miss"
         );
         assert!(
             !hit_test_coffee_machine(&layout, sprite_x + 15, cell_y),
-            "x+15 is outside [8,13) — a hit here means the cw>=32 split was dropped"
+            "x+15 is outside the small box; a hit means the cw>=32 split was dropped"
         );
     }
 

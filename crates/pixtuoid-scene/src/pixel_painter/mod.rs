@@ -99,6 +99,16 @@ pub use anchors::character_anchor;
 pub(crate) use sim::{sim_step, SimStores};
 pub use sim::{CharacterGlow, CharacterPlacement, SimFrame};
 
+/// The coffee-machine sub-region within the pantry counter sprite, as sprite-local
+/// column ranges `[start, end)` per pantry size (the 32-wide `pantry` sprite vs the
+/// 20-wide `pantry_small`). THE single source of truth shared by the steam-anchor
+/// painter (`drawable`'s `WaypointPantry` arm) and the binary's
+/// `hit_test_coffee_machine`, so the clickable machine box can't silently drift
+/// from the painted art / steam anchor when the sprite is re-tuned. Pinned to the
+/// steam anchor by `steam_anchor_sits_within_the_coffee_machine_columns`.
+pub const PANTRY_COFFEE_COLS_LARGE: (u16, u16) = (11, 18);
+pub const PANTRY_COFFEE_COLS_SMALL: (u16, u16) = (9, 12);
+
 use anchors::compute_door_frame_idx;
 use background::{
     daylight_floor_overlay, dim_floor_overlay, paint_ceiling_pool, paint_clock,
