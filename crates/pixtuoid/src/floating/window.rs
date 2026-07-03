@@ -366,7 +366,8 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
         // (nowhere near the 30fps agents-present path). A LIVE gateway daemon (the OpenClaw
         // lobster) lives in `daemons`, not `agents`, and is a time-driven WANDERING mascot
         // — not slow ambient decor — so it keeps the 30fps path unless every daemon is Down
-        // (a Down daemon isn't rendered/moving, so it stays on the ambient tick).
+        // (a Down daemon is gone/leaving within MASCOT_LEAVE_MS, not a sustained wanderer, so
+        // it stays on the ambient tick — same brief terminal transition as before this change).
         let scene = self.scene_rx.borrow();
         let office_idle = scene.agents.is_empty()
             && scene

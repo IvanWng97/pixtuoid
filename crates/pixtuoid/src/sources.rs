@@ -394,16 +394,16 @@ pub fn apply_choices(cfg: &Path, choices: &[(&'static str, bool)]) -> Vec<(Strin
         .collect()
 }
 
-/// The onboarding SKIP freeze: map each detected source to its REAL current
-/// connection state — connected in the live gate OR already carrying installed
-/// hooks (`is_hooked`). Feeding THIS to [`apply_choices`] (rather than the live
-/// gate alone, which is EMPTY on a first run) is what makes a skip preserve an
-/// existing install: a pre-0.12 upgrader — hooks present but no `[sources]` flag,
-/// exactly the population onboarding replays to re-connect — freezes to `true`, so
-/// apply re-installs idempotently (a semantic no-op) instead of disconnecting +
-/// UNINSTALLING its working hooks. `is_hooked` is injected so this stays pure and
-/// unit-testable; the caller passes `by_source(id).is_some_and(has_hooks)`.
-pub fn freeze_for_skip(
+/// The onboarding SKIP freeze (pure core): map each detected source to its REAL
+/// current connection state — connected in the live gate OR already carrying
+/// installed hooks (`is_hooked`). Feeding THIS to [`apply_choices`] (rather than
+/// the live gate alone, which is EMPTY on a first run) is what makes a skip
+/// preserve an existing install: a pre-0.12 upgrader — hooks present but no
+/// `[sources]` flag, exactly the population onboarding replays to re-connect —
+/// freezes to `true`, so apply re-installs idempotently (a semantic no-op) instead
+/// of disconnecting + UNINSTALLING its working hooks. `is_hooked` is injected so
+/// this stays pure and unit-testable; production callers go through [`skip_freeze`].
+pub(crate) fn freeze_for_skip(
     detected: impl IntoIterator<Item = &'static str>,
     connected: &HashSet<String>,
     is_hooked: impl Fn(&'static str) -> bool,
@@ -412,6 +412,21 @@ pub fn freeze_for_skip(
         .into_iter()
         .map(|id| (id, connected.contains(id) || is_hooked(id)))
         .collect()
+}
+
+/// The production onboarding-SKIP freeze: [`freeze_for_skip`] with the real
+/// install-state probe assembled HERE, so the install-layer access
+/// (`has_hooks`/`by_source`) stays funneled through this `sources` facade — the
+/// same layer that owns connect/disconnect's install calls — rather than reaching
+/// out of the TUI event loop. Does per-target config reads (`has_hooks`), so the
+/// caller wraps it in `block_in_place` like the rest of the skip I/O.
+pub(crate) fn skip_freeze(
+    detected: impl IntoIterator<Item = &'static str>,
+    connected: &HashSet<String>,
+) -> Vec<(&'static str, bool)> {
+    freeze_for_skip(detected, connected, |id| {
+        by_source(id).is_some_and(install::has_hooks)
+    })
 }
 
 // ---- Source status MODEL (moved here from `tui::connection`, which re-exports
@@ -549,6 +564,13 @@ pub fn build_rows(connected: &HashSet<String>, log: &str) -> Vec<ConnectionRow> 
 }
 
 /// Map a status row to the serializable `SourceStatus` DTO (the CLI/Raycast wire shape).
+///
+/// NOTE: the wire `connected` here is deliberately PRESENT-AND-BOUND
+/// (`state == Connected`), NOT `ConnectionRow.connected` (the persisted `[sources]`
+/// intent bit — which stays `true` for a connected-but-absent `NoCli` source). The
+/// two share a name but answer different questions; the wire keeps the
+/// present-and-bound meaning it always had (changing it is a `--json` contract
+/// change needing `gen-contract`).
 fn status_from_row(r: &ConnectionRow) -> SourceStatus {
     SourceStatus {
         id: r.source_id.to_string(),

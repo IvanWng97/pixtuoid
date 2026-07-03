@@ -809,16 +809,15 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                                 // leaves the rest disconnected (uninstall of an absent
                                 // hook is a no-op), so `[sources]` becomes non-empty
                                 // (onboarding won't re-trigger) yet NO hooks are
-                                // added/removed. `has_hooks` reads each target's
-                                // config → block_in_place, like apply_choices.
+                                // added/removed. `skip_freeze` reads each target's
+                                // config (has_hooks) → block_in_place, like apply_choices;
+                                // it funnels the install-layer probe through the sources
+                                // facade so the event loop doesn't reach into install.
                                 let snap = connected.snapshot();
                                 let ids: Vec<&'static str> =
                                     ui.onboarding_ui.rows.iter().map(|r| r.source_id).collect();
                                 let freeze = tokio::task::block_in_place(|| {
-                                    crate::sources::freeze_for_skip(ids, &snap, |id| {
-                                        crate::install::target::by_source(id)
-                                            .is_some_and(crate::install::has_hooks)
-                                    })
+                                    crate::sources::skip_freeze(ids, &snap)
                                 });
                                 let outcomes = tokio::task::block_in_place(|| {
                                     crate::sources::apply_choices(&config_path, &freeze)

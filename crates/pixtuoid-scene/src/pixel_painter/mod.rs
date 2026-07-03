@@ -343,7 +343,8 @@ fn paint_frame(
     let empty_floor_boost = 1.0 + (1.0 - indoor_scale) * (boost_ceiling - 1.0) / (1.0 - min_level);
 
     // The night floor-dim dial (symmetric with `DAYLIGHT_FLOOR_LIFT` below); the
-    // per-floor `sunlight_boost` parameter that once offset it was vestigially 0.
+    // per-floor lighting offset it replaced was always 0 (indoor lighting is
+    // uniform across floors), so this is now a flat constant.
     const NIGHT_FLOOR_DIM_STRENGTH: f32 = 0.45;
     let dim_strength = NIGHT_FLOOR_DIM_STRENGTH;
     dim_floor_overlay(
