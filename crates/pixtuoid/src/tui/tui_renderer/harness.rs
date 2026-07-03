@@ -20,7 +20,7 @@ fn slot(id: AgentId, floor_idx: usize, desk_index: usize, started: SystemTime) -
         source: Arc::from("cc"),
         session_id: Arc::from("s"),
         cwd: Arc::from(Path::new("/repo")),
-        label: Arc::from("a"),
+        label: "a".into(),
         state: ActivityState::Idle,
         state_started_at: started,
         created_at: started,
@@ -660,7 +660,7 @@ fn colliding_labels_with_multibyte_session_ids_do_not_panic() {
     let mut mk = |id: &str, desk: usize| {
         let a = AgentId::from_transcript_path(id);
         let mut s = slot(a, 0, desk, t0());
-        s.label = Arc::from("rx\u{00b7}proj");
+        s.label = "rx\u{00b7}proj".into();
         s.session_id = Arc::from("/na\u{00ef}vet\u{00e9}/app");
         scene.agents.insert(a, s);
     };
@@ -1667,7 +1667,7 @@ fn pet_hit_test_resolves_at_pet_position() {
 #[test]
 fn agent_label_painted_above_character() {
     let mut s = idle("/lbl/0.jsonl", 0, t0() - Duration::from_secs(300));
-    s.label = Arc::from("ZQXLBL");
+    s.label = "ZQXLBL".into();
     let scene = scene_with(vec![s], 16);
     let mut r = build(120, 44, vec![]);
     r.render(&scene, &pack(), t0()).unwrap();
@@ -2363,7 +2363,7 @@ fn furniture_hit_test_covers_every_kind_on_real_layouts() {
 #[test]
 fn hovering_an_agent_marks_its_label() {
     let mut s = idle("/hov/0.jsonl", 0, t0() - Duration::from_secs(300));
-    s.label = Arc::from("HOVERME");
+    s.label = "HOVERME".into();
     let scene = scene_with(vec![s], 16);
     let mut r = build(140, 48, vec![]);
     r.render(&scene, &pack(), t0()).unwrap();
@@ -2433,7 +2433,7 @@ fn exiting_agent_label_uses_exiting_color() {
     // confirm its label still paints (the branch runs without panic). Color is
     // theme-internal; we assert the label survives the exiting code path.
     let mut a = idle("/ttE/0.jsonl", 0, t0() - Duration::from_secs(10));
-    a.label = Arc::from("LEAVING");
+    a.label = "LEAVING".into();
     a.exiting_at = Some(t0());
     let scene = scene_with(vec![a], 16);
     let mut r = build(120, 44, vec![]);
@@ -2689,9 +2689,9 @@ use crate::tui::dashboard::{build_dashboard_rows, DashboardFolds};
 fn dashboard_popup_renders_labels_states_and_live_tool() {
     let mut r = build(120, 44, vec![]);
     let mut a = active("/h/alpha.jsonl", 0, "Edit reducer.rs", t0());
-    a.label = Arc::from("cc\u{b7}alpha");
+    a.label = "cc\u{b7}alpha".into();
     let mut b = idle("/h/beta.jsonl", 1, t0());
-    b.label = Arc::from("cc\u{b7}beta");
+    b.label = "cc\u{b7}beta".into();
     let scene = scene_with(vec![a, b], 16);
 
     let rows = build_dashboard_rows(&scene, &DashboardFolds::default());
@@ -3047,13 +3047,13 @@ fn dashboard_collapsed_big_tree_shows_badge_and_hides_children() {
     let mut r = build(120, 44, vec![]);
     let root_id = AgentId::from_transcript_path("/h/root.jsonl");
     let mut root = slot(root_id, 0, 0, t0());
-    root.label = Arc::from("cc\u{b7}root");
+    root.label = "cc\u{b7}root".into();
     let mut agents = vec![root];
     // 6 > AUTO_COLLAPSE_THRESHOLD (5) → the root auto-collapses on open.
     for i in 0..6 {
         let cid = AgentId::from_transcript_path(&format!("/h/root/subagents/agent-{i}.jsonl"));
         let mut c = slot(cid, 0, 1 + i, t0());
-        c.label = Arc::from(format!("explorer{i}").as_str());
+        c.label = format!("explorer{i}").into();
         c.parent_id = Some(root_id);
         agents.push(c);
     }
@@ -3126,12 +3126,12 @@ fn dash_popup(buf: &ratatui::buffer::Buffer) -> String {
 fn dashboard_renders_waiting_reason_and_active_without_detail() {
     let mut r = build(120, 44, vec![]);
     let mut w = idle("/h/w.jsonl", 0, t0());
-    w.label = Arc::from("cc\u{b7}wait");
+    w.label = "cc\u{b7}wait".into();
     w.state = ActivityState::Waiting {
         reason: Arc::from("permission"),
     };
     let mut a = idle("/h/a.jsonl", 1, t0());
-    a.label = Arc::from("cc\u{b7}act");
+    a.label = "cc\u{b7}act".into();
     a.state = ActivityState::Active {
         tool_use_id: Some(Arc::from("t")),
         detail: None,
@@ -3163,7 +3163,7 @@ fn dashboard_scrolls_to_keep_a_deep_selection_visible() {
     let mut agents = Vec::new();
     for i in 0..20 {
         let mut s = idle(&format!("/h/r{i}.jsonl"), i, t0());
-        s.label = Arc::from(format!("row{i:02}").as_str());
+        s.label = format!("row{i:02}").into();
         s.floor_idx = i % 10;
         agents.push(s);
     }
@@ -3216,10 +3216,10 @@ fn dashboard_badge_text_present_for_cc_and_cx() {
     let mut r = build(120, 44, vec![]);
     let mut cc_slot = idle("/h/cc.jsonl", 0, t0());
     cc_slot.source = Arc::from("claude-code");
-    cc_slot.label = Arc::from("cc\u{b7}alpha");
+    cc_slot.label = "cc\u{b7}alpha".into();
     let mut cx_slot = idle("/h/cx.jsonl", 1, t0());
     cx_slot.source = Arc::from("codex");
-    cx_slot.label = Arc::from("cx\u{b7}beta");
+    cx_slot.label = "cx\u{b7}beta".into();
     let scene = scene_with(vec![cc_slot, cx_slot], 16);
 
     let rows = build_dashboard_rows(&scene, &DashboardFolds::default());
@@ -3237,7 +3237,7 @@ fn dashboard_overflow_cue_appears_below_when_more_than_viewport() {
     let mut agents = Vec::new();
     for i in 0..20 {
         let mut s = idle(&format!("/h/r{i}.jsonl"), i % 16, t0());
-        s.label = Arc::from(format!("overflow{i:02}").as_str());
+        s.label = format!("overflow{i:02}").into();
         s.floor_idx = i % 10;
         agents.push(s);
     }
@@ -3260,7 +3260,7 @@ fn dashboard_overflow_cue_absent_when_all_visible() {
     let mut agents = Vec::new();
     for i in 0..8 {
         let mut s = idle(&format!("/h/r{i}.jsonl"), i, t0());
-        s.label = Arc::from(format!("fit{i:02}").as_str());
+        s.label = format!("fit{i:02}").into();
         agents.push(s);
     }
     let scene = scene_with(agents, 16);
@@ -3283,7 +3283,7 @@ fn dashboard_overflow_cue_keeps_a_bottom_navigated_selection_visible() {
     let mut agents = Vec::new();
     for i in 0..25 {
         let mut s = idle(&format!("/h/r{i}.jsonl"), i, t0());
-        s.label = Arc::from(format!("row{i:02}").as_str());
+        s.label = format!("row{i:02}").into();
         s.floor_idx = i % 10;
         agents.push(s);
     }
@@ -3312,7 +3312,7 @@ fn dashboard_overflow_no_blank_line_when_selection_is_last_row() {
     let mut agents = Vec::new();
     for i in 0..17 {
         let mut s = idle(&format!("/h/r{i}.jsonl"), i, t0());
-        s.label = Arc::from(format!("row{i:02}").as_str());
+        s.label = format!("row{i:02}").into();
         s.floor_idx = i % 10;
         agents.push(s);
     }

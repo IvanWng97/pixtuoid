@@ -175,7 +175,7 @@ mod tests {
             agent_id: AgentId::from_transcript_path("/x.jsonl"),
             parent_id: None,
             depth: 0,
-            label: Arc::from(label),
+            label: label.into(),
             source: Arc::from(source),
             floor_idx: 0,
             state,

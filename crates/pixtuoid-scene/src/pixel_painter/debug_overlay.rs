@@ -352,7 +352,7 @@ mod tests {
             source: Arc::from("claude-code"),
             session_id: Arc::from("s"),
             cwd: Arc::from(PathBuf::from("/x").as_path()),
-            label: Arc::from("x"),
+            label: "x".into(),
             state: ActivityState::Idle,
             state_started_at: now,
             created_at: now,

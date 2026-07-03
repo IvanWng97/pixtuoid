@@ -35,9 +35,15 @@ pub use source::{Source, TaggedReceiver, TaggedSender};
 pub use sprite::{Frame, Palette, Pixel, Rgb, RgbBuffer, Sprite};
 pub use state::reducer::Reducer;
 pub use state::{
-    ActivityState, AgentSlot, FloorLocalDeskIndex, GlobalDeskIndex, SceneState, ToolKind,
+    ActivityState, AgentSlot, FloorLocalDeskIndex, GlobalDeskIndex, LabelProvenance, SceneState,
+    SlotLabel, ToolKind,
 };
 pub use walkable::{OccupancyOverlay, WalkableMask};
+
+/// Test-only tracing capture (`CaptureWriter` + `capture_logs`/`capture_warns`)
+/// shared by the unit-test mods that assert on log breadcrumbs.
+#[cfg(test)]
+pub(crate) mod test_capture;
 
 /// Test-only mutex serializing tests that mutate process-global environment
 /// variables (`CLAUDE_CONFIG_DIR` / `PIXTUOID_SOCKET` / …). The crate's unit

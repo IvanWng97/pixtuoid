@@ -776,7 +776,7 @@ mod hud_tests {
             source: Arc::from("cc"),
             session_id: Arc::from("s"),
             cwd: Arc::from(PathBuf::from("/p").as_path()),
-            label: Arc::from("lead"),
+            label: "lead".into(),
             // Leading '/' ⇒ first token after split-on-non-alphanumeric is "".
             state: ActivityState::Active {
                 tool_use_id: Some(Arc::from("t")),
@@ -823,7 +823,7 @@ mod hud_tests {
             source: Arc::from("cc"),
             session_id: Arc::from("s"),
             cwd: Arc::from(PathBuf::from("/p").as_path()),
-            label: Arc::from("mb"),
+            label: "mb".into(),
             // A real tool token ⇒ the tail carries `· Bash×1` (·/× are 2-byte,
             // 1-column glyphs).
             state: ActivityState::Active {

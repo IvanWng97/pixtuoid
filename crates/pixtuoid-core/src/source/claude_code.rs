@@ -333,39 +333,12 @@ mod tests {
     /// per-stop noise plus a silent real drift.
     #[test]
     fn subagent_stop_warns_only_when_stem_and_wire_id_disagree() {
-        use std::sync::{Arc, Mutex};
-        use tracing_subscriber::fmt::MakeWriter;
-        #[derive(Clone, Default)]
-        struct Buf(Arc<Mutex<Vec<u8>>>);
-        impl std::io::Write for Buf {
-            fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
-                self.0.lock().unwrap().extend_from_slice(b);
-                Ok(b.len())
-            }
-            fn flush(&mut self) -> std::io::Result<()> {
-                Ok(())
-            }
-        }
-        impl MakeWriter<'_> for Buf {
-            type Writer = Buf;
-            fn make_writer(&self) -> Buf {
-                self.clone()
-            }
-        }
         let capture = |payload: serde_json::Value| {
-            let buf = Buf::default();
-            let sub = tracing_subscriber::fmt()
-                .with_writer(buf.clone())
-                .with_max_level(tracing::Level::TRACE)
-                .without_time()
-                .finish();
-            tracing::subscriber::with_default(sub, || {
+            crate::test_capture::capture_logs(|| {
                 decode_cc_hook_custom(&payload)
                     .expect("decodes")
                     .expect("claimed");
-            });
-            let bytes = buf.0.lock().unwrap().clone();
-            String::from_utf8(bytes).unwrap()
+            })
         };
         let matched = capture(json!({
             "hook_event_name": "SubagentStop",

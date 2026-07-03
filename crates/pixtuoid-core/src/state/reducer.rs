@@ -164,25 +164,22 @@ fn source_label_prefix(source: &str) -> &str {
         .unwrap_or(source)
 }
 
-/// Whether `label` is still a derivation FALLBACK for `source` — i.e. carries
-/// no information worth preserving, so the duplicate-SessionStart back-fill may
-/// upgrade it. Three shapes: the bare prefix (`cx`, a JSONL `LabelDeriver`'s
-/// empty-cwd fallback), the ordinal ghost (`cc#3`), and the source-LESS ordinal
-/// (`#1` — minted by the hook-synthesis pre-pass under its empty source, which
-/// a source-only back-fill may have since re-contextualized, so it's matched
-/// regardless of the current prefix). Real labels (`cc·repo`, a Rename's
-/// `code-explorer`) never match.
-fn is_fallback_label(label: &str, source: &str) -> bool {
+/// Classify an incoming `Rename` label's provenance for `source`: exactly the
+/// registry prefix (`cx`, a JSONL `LabelDeriver`'s empty-cwd fallback) is a
+/// [`LabelProvenance::PrefixFallback`] the back-fill may still upgrade;
+/// anything else is a real display name ([`LabelProvenance::Renamed`] — CC
+/// `attributionAgent` subagent names, the derivers' cwd-derived renames). The
+/// judgment happens HERE, at the mint, not at back-fill time: a bare-prefix
+/// Rename always lands on a slot whose source is already set (its own
+/// transcript's `SessionStart` precedes it on the same channel and back-fills
+/// the source first), so the slot's prefix is the right yardstick.
+fn classify_rename(label: &str, source: &str) -> crate::state::SlotLabel {
     let prefix = source_label_prefix(source);
     if !prefix.is_empty() && label == prefix {
-        return true;
+        crate::state::SlotLabel::prefix_fallback(label)
+    } else {
+        crate::state::SlotLabel::renamed(label)
     }
-    // `{prefix}#N` (the ordinal ghost) — or bare `#N` even when the prefix
-    // doesn't match: that's the hook-synthesis shape, whose slot a source-only
-    // back-fill may have re-contextualized since the ordinal was minted.
-    let rest = label.strip_prefix(prefix).unwrap_or(label);
-    rest.strip_prefix('#')
-        .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
 }
 
 /// First-wins identity back-fill shared by the duplicate-`SessionStart` arm
@@ -598,31 +595,29 @@ impl Reducer {
                     // cwd. The first SessionStart carrying the missing piece
                     // heals it; an established value is never overwritten
                     // (first-wins, via the shared `backfill_identity` — the
-                    // hook `Identity` arm runs the same heal). Judge the
-                    // label's fallback-ness BEFORE the source back-fill — the
-                    // ordinal was minted under the OLD source's prefix.
-                    let label_is_fallback = is_fallback_label(&slot.label, &slot.source);
+                    // hook `Identity` arm runs the same heal). Upgradability
+                    // is the label's minted PROVENANCE, so the source
+                    // back-fill running first can't re-contextualize it (the
+                    // old string-shape sniff had to be judged before).
+                    let label_is_upgradable = slot.label.is_upgradable();
                     if let Some(base) = backfill_identity(slot, &source, &session_id, &cwd) {
                         // Upgrade ONLY a fallback label — a basename- or
                         // Rename-derived label is real information. This stays
                         // on the SessionStart path: `Identity` carries no
                         // label authority.
-                        if label_is_fallback {
+                        if label_is_upgradable {
                             // `base` is the event cwd's basename — content
                             // that BYPASSES the `cwd_basename_label`
                             // chokepoint, so it carries the same
                             // decode-boundary cap.
-                            slot.label = Arc::<str>::from(
-                                format!(
-                                    "{}·{}",
-                                    source_label_prefix(&slot.source),
-                                    crate::source::decoder::ellipsize(
-                                        base,
-                                        crate::source::decoder::MAX_DECODED_FIELD_CHARS,
-                                    )
+                            slot.label = crate::state::SlotLabel::cwd_derived(format!(
+                                "{}·{}",
+                                source_label_prefix(&slot.source),
+                                crate::source::decoder::ellipsize(
+                                    base,
+                                    crate::source::decoder::MAX_DECODED_FIELD_CHARS,
                                 )
-                                .as_str(),
-                            );
+                            ));
                         }
                     }
                     // A duplicate SessionStart is still a genuine liveness
@@ -810,7 +805,8 @@ impl Reducer {
             }
             AgentEvent::Rename { agent_id, label } => {
                 if let Some(slot) = scene.agents.get_mut(&agent_id) {
-                    fsm::rename(slot, &label, now);
+                    let label = classify_rename(&label, &slot.source);
+                    fsm::rename(slot, label, now);
                 }
             }
             AgentEvent::SessionEnd { agent_id, as_child } => {
@@ -999,14 +995,14 @@ impl Reducer {
         // hook-only sources).
         let named = crate::source::decoder::cwd_basename_label(prefix, cwd);
         let has_cwd = named.is_some();
-        let label: Arc<str> = match named {
-            Some(l) => Arc::<str>::from(l.as_str()),
+        let label = match named {
+            Some(l) => crate::state::SlotLabel::cwd_derived(l),
             None => {
                 // Only an unknown-cwd ghost consumes an ordinal, so labels
                 // stay contiguous (cc#1, cc#2, …) instead of skipping the
                 // count of preceding named sessions.
                 self.next_label_n += 1;
-                Arc::<str>::from(format!("{prefix}#{}", self.next_label_n).as_str())
+                crate::state::SlotLabel::ordinal_ghost(format!("{prefix}#{}", self.next_label_n))
             }
         };
         // Disambiguation for multiple sessions sharing a cwd happens
@@ -1476,40 +1472,42 @@ mod tests {
         }
     }
 
-    /// The back-fill's clobber gate: only labels carrying NO information may
-    /// be upgraded. Pins each fallback shape (bare prefix from a JSONL
-    /// LabelDeriver's empty-cwd Rename, the ordinal ghost, the source-less
-    /// hook-synthesis ordinal — also after a source-only back-fill changed the
-    /// prefix) and each real-label negative (basename-derived, Rename-derived,
-    /// a `·`-label whose basename merely contains `#N`).
+    /// The back-fill's clobber gate, now recorded at MINT time as
+    /// [`LabelProvenance`]: only a derivation fallback (ordinal ghost /
+    /// bare-prefix) may be upgraded; a cwd-basename- or Rename-derived label
+    /// is real information and never is. Pins the Rename arm's mint-time
+    /// classification (the one remaining string judgment — bare prefix vs
+    /// real name) and the upgradability of each variant.
     #[test]
-    fn fallback_label_detection_covers_each_shape_and_spares_real_labels() {
-        use super::is_fallback_label;
-        for (label, source) in [
-            ("cx", "codex"),         // bare prefix (LabelDeriver fallback)
-            ("cc#3", "claude-code"), // ordinal ghost
-            ("#1", ""),              // hook-synthesis shape, pre-back-fill
-            ("#1", "claude-code"),   // same slot after a source-only back-fill
+    fn rename_classification_and_upgradability_cover_each_provenance() {
+        use super::classify_rename;
+        use crate::state::{LabelProvenance, SlotLabel};
+        for (label, source, expect) in [
+            // Exactly the registry prefix = the LabelDeriver's empty-cwd
+            // fallback — still upgradable by a later cwd-bearing back-fill.
+            ("cx", "codex", LabelProvenance::PrefixFallback),
+            // Everything else arriving via Rename is a real display name.
+            ("cc·repo", "claude-code", LabelProvenance::Renamed),
+            ("code-explorer", "claude-code", LabelProvenance::Renamed),
+            // No Rename ever mints an ordinal — even an ordinal-LOOKING name
+            // is treated as real (only `register_slot` mints OrdinalGhost).
+            ("cc#3", "claude-code", LabelProvenance::Renamed),
+            // Degenerate: empty is not the prefix.
+            ("", "claude-code", LabelProvenance::Renamed),
         ] {
-            assert!(
-                is_fallback_label(label, source),
-                "{label:?} under source {source:?} must read as a fallback"
+            assert_eq!(
+                classify_rename(label, source).provenance(),
+                expect,
+                "{label:?} under source {source:?} must classify as {expect:?}"
             );
         }
-        for (label, source) in [
-            ("cc·repo", "claude-code"),       // basename-derived
-            ("code-explorer", "claude-code"), // Rename-derived
-            ("cc·#3", "claude-code"),         // basename that LOOKS ordinal
-            ("xy#3", "claude-code"),          // foreign prefix — not ours to upgrade
-            ("", "claude-code"),              // degenerate: empty is not an ordinal
-            ("cc#", "claude-code"),           // '#' with NO digits — not an ordinal
-            ("cc#12a", "claude-code"),        // digits+letters after '#' — a real name
-        ] {
-            assert!(
-                !is_fallback_label(label, source),
-                "{label:?} under source {source:?} must NOT be clobbered"
-            );
-        }
+        // The clobber gate per variant: the two derivation fallbacks may be
+        // upgraded, the two real-information provenances never.
+        assert!(SlotLabel::ordinal_ghost("cc#3").is_upgradable());
+        assert!(SlotLabel::ordinal_ghost("#1").is_upgradable());
+        assert!(SlotLabel::prefix_fallback("cx").is_upgradable());
+        assert!(!SlotLabel::cwd_derived("cc·repo").is_upgradable());
+        assert!(!SlotLabel::renamed("code-explorer").is_upgradable());
     }
 
     // The `< → <=` (correlation.rs) and `> → >=` (sweep_stale/sweep_exited)

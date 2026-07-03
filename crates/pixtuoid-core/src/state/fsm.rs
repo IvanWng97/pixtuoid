@@ -140,10 +140,11 @@ pub(crate) fn resurrect_in_place(slot: &mut AgentSlot, now: SystemTime) {
     slot.state_started_at = now;
 }
 
-/// Apply a display rename (idempotent) and refresh liveness.
-pub(crate) fn rename(slot: &mut AgentSlot, label: &str, now: SystemTime) {
-    if &*slot.label != label {
-        slot.label = Arc::<str>::from(label);
+/// Apply a display rename (idempotent — a same-text rename keeps the existing
+/// label AND its provenance) and refresh liveness.
+pub(crate) fn rename(slot: &mut AgentSlot, label: crate::state::SlotLabel, now: SystemTime) {
+    if *slot.label != *label {
+        slot.label = label;
     }
     slot.last_event_at = now;
 }
@@ -161,7 +162,7 @@ mod tests {
             source: Arc::from("cc"),
             session_id: Arc::from("s"),
             cwd: Arc::from(Path::new("/repo")),
-            label: Arc::from("cc·repo"),
+            label: "cc·repo".into(),
             state,
             state_started_at: started,
             last_event_at: started,
@@ -304,10 +305,10 @@ mod tests {
     fn rename_is_idempotent_but_always_refreshes_liveness() {
         let t0 = SystemTime::now();
         let mut s = active(t0);
-        rename(&mut s, "cc·repo", t0 + Duration::from_secs(1)); // same label
+        rename(&mut s, "cc·repo".into(), t0 + Duration::from_secs(1)); // same label
         assert_eq!(&*s.label, "cc·repo");
         assert_eq!(s.last_event_at, t0 + Duration::from_secs(1));
-        rename(&mut s, "code-explorer", t0 + Duration::from_secs(2));
+        rename(&mut s, "code-explorer".into(), t0 + Duration::from_secs(2));
         assert_eq!(&*s.label, "code-explorer");
         assert_eq!(s.last_event_at, t0 + Duration::from_secs(2));
     }

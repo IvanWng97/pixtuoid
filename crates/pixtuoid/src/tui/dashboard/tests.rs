@@ -21,7 +21,7 @@ fn mk_slot(
         source: Arc::from("claude-code"),
         session_id: Arc::from("s"),
         cwd: Arc::from(Path::new("/repo")),
-        label: Arc::from(label),
+        label: label.into(),
         state,
         state_started_at: now,
         created_at: now,

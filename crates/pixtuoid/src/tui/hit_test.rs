@@ -542,7 +542,7 @@ mod tests {
             source: Arc::from("cc"),
             session_id: Arc::from("s"),
             cwd: Arc::from(Path::new("/repo")),
-            label: Arc::from("a"),
+            label: "a".into(),
             state: ActivityState::Idle,
             state_started_at: SystemTime::UNIX_EPOCH,
             created_at: SystemTime::UNIX_EPOCH,

@@ -57,7 +57,7 @@ fn fixture_scene(now: SystemTime) -> SceneState {
                 source: Arc::from("claude-code"),
                 session_id: Arc::from(format!("session-{i}").as_str()),
                 cwd: Arc::from(PathBuf::from("/demo").as_path()),
-                label: Arc::from(*key),
+                label: (*key).into(),
                 state: state.clone(),
                 state_started_at: now,
                 last_event_at: now,

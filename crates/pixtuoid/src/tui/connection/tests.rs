@@ -24,7 +24,7 @@ fn mk_slot(id: AgentId, source: &str, last_event_at: SystemTime) -> AgentSlot {
         source: Arc::from(source),
         session_id: Arc::from("s"),
         cwd: Arc::from(Path::new("/repo")),
-        label: Arc::from("x"),
+        label: "x".into(),
         state: ActivityState::Idle,
         state_started_at: SystemTime::UNIX_EPOCH,
         created_at: SystemTime::UNIX_EPOCH,

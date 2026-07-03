@@ -169,7 +169,7 @@ fn active_slot(state_started_at: SystemTime, created_at: SystemTime) -> AgentSlo
         source: Arc::from("claude-code"),
         session_id: Arc::from("s"),
         cwd: Arc::from(PathBuf::from("/p").as_path()),
-        label: Arc::from("cc"),
+        label: "cc".into(),
         state: ActivityState::Active {
             tool_use_id: Some(Arc::from("t")),
             detail: Some(Arc::from("Edit")),
@@ -839,7 +839,7 @@ fn at_waypoint_pose_records_position_to_history() {
         source: Arc::from("claude-code"),
         session_id: Arc::from("s"),
         cwd: Arc::from(PathBuf::from("/p").as_path()),
-        label: Arc::from("cc"),
+        label: "cc".into(),
         state: ActivityState::Idle,
         state_started_at: now,
         created_at: now - Duration::from_secs(60),

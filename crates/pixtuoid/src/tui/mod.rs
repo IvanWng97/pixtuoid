@@ -3,12 +3,13 @@ pub mod dashboard;
 pub mod hit_test;
 pub mod renderer;
 pub mod tui_renderer;
+mod ui_state;
 pub mod welcome;
 pub mod widgets;
 
 use std::io::{stdout, Stdout};
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use crossterm::event::{
@@ -437,78 +438,6 @@ fn resolve_version_popup(config_path: &std::path::Path) -> bool {
     decision.should_show_popup
 }
 
-/// The throttled (≤ every 15s) decode-drift re-scan that drives the footer
-/// nudge: reuses doctor's tested scanner over the warn-floor log. The ONE
-/// deliberate exception to "no scan-the-history" — it derives a passive
-/// diagnostic nudge from the log artifact, NOT lifecycle state. A `None` log
-/// path is a no-op (headless = no surfacing).
-///
-/// INCREMENTAL: log rotation is startup-only, so within a session the file is
-/// append-only and unbounded (a sustained drift regime warns per tool call).
-/// Re-reading the WHOLE file every 15s inline in the ~30fps loop turns that
-/// growth into monotonically-worsening frame hitches + a log-sized transient
-/// allocation — so the scan keeps persistent state (byte offset + accumulated
-/// prefixes) and each pass reads ONLY the appended bytes. Drift breadcrumbs are
-/// monotone within a session (they never un-happen), so prefixes accumulate.
-#[derive(Default)]
-struct DriftScan {
-    last_scan: Option<Instant>,
-    /// End of the last fully-scanned LINE — never mid-line: a read boundary can
-    /// split a breadcrumb, so a partial trailing line waits for the next pass.
-    offset: u64,
-    /// Accumulated drifted label prefixes — what the footer merge reads.
-    drifted: Vec<String>,
-}
-
-impl DriftScan {
-    /// The per-frame call site: throttled to at most one scan per interval.
-    fn rescan(&mut self, log_path: &Option<std::path::PathBuf>) {
-        let Some(lp) = log_path else { return };
-        // Throttle: rescan the log for decode-drift breadcrumbs at most this often.
-        const DRIFT_RESCAN_INTERVAL_SECS: u64 = 15;
-        let due = self
-            .last_scan
-            .is_none_or(|t| t.elapsed().as_secs() >= DRIFT_RESCAN_INTERVAL_SECS);
-        if due {
-            self.last_scan = Some(Instant::now());
-            self.scan_appended(lp);
-        }
-    }
-
-    /// One unthrottled incremental pass: read from the stored offset to EOF,
-    /// scan the COMPLETE new lines, merge the drifted prefixes. A file shrunk
-    /// out from under us (external rotation/truncation) rescans from the top.
-    /// Any I/O error leaves the state unchanged for the next pass.
-    fn scan_appended(&mut self, lp: &std::path::Path) {
-        use std::io::{Read, Seek, SeekFrom};
-        let Ok(mut f) = std::fs::File::open(lp) else {
-            return;
-        };
-        let len = f.metadata().map(|m| m.len()).unwrap_or(0);
-        if len < self.offset {
-            self.offset = 0;
-        }
-        if len == self.offset || f.seek(SeekFrom::Start(self.offset)).is_err() {
-            return;
-        }
-        let mut new = Vec::with_capacity((len - self.offset) as usize);
-        if f.take(len - self.offset).read_to_end(&mut new).is_err() {
-            return;
-        }
-        // Only complete lines: a partial tail (mid-write) stays for next pass.
-        let Some(last_nl) = new.iter().rposition(|&b| b == b'\n') else {
-            return;
-        };
-        let text = String::from_utf8_lossy(&new[..=last_nl]);
-        self.offset += (last_nl + 1) as u64;
-        for p in crate::doctor::drifted_sources(&text) {
-            if !self.drifted.contains(&p) {
-                self.drifted.push(p);
-            }
-        }
-    }
-}
-
 /// The bundled inputs to [`run_tui`] — the runtime (`driver.rs`) builds it once
 /// and hands it over. Grouping these into a named struct kills the positional-arg
 /// transposition hazard (it had grown to 11 args of mostly `Option`/`PathBuf`/
@@ -558,19 +487,13 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
     let mut renderer = TuiRenderer::new(term, theme, pets);
     // First-run onboarding "move-in" overlay (TOP of the modal precedence chain).
     // The roster is built only on first run; if no agent CLIs are detected there's
-    // nothing to connect, so it stays closed and the office shows normally. The
-    // overlay is "open" exactly while `onboarding_opened_at` is `Some` (also the
-    // clock its painter's typewriter reads); confirm/skip clears it to `None`.
+    // nothing to connect, so it stays closed and the office shows normally.
     let detected_clis = if first_run {
         crate::sources::detect()
     } else {
         Vec::new()
     };
-    let mut onboarding_ui = welcome::WelcomeUi::from_detected(&detected_clis);
-    let mut onboarding_opened_at: Option<Instant> = (!onboarding_ui.is_empty()).then(Instant::now);
-    // Set on confirm/skip: the close fade-out — the office dims back UP over
-    // `welcome::DIM_FADE_OUT_MS` after the card is gone, then clears to fully live.
-    let mut onboarding_closing_at: Option<Instant> = None;
+    let onboarding_ui = welcome::WelcomeUi::from_detected(&detected_clis);
 
     // The "what's new in vX" version popup yields to onboarding ONLY when the
     // overlay actually takes the screen (a fresh install WITH detected CLIs): both
@@ -579,35 +502,18 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
     // welcome). Gating on the overlay SHOWING (not bare `first_run`) is load-bearing:
     // a no-CLI first-run user gets the version popup normally, incl. on a later
     // upgrade (otherwise `first_run` stays true forever and would mute it for good).
-    let mut version_popup = if onboarding_opened_at.is_some() {
+    let version_popup = if !onboarding_ui.is_empty() {
         let _ = resolve_version_popup(&config_path);
         false
     } else {
         resolve_version_popup(&config_path)
     };
+    // The per-surface UI state — open/close transitions + the ModalState
+    // projection + the per-frame renderer mirrors all live on UiState; this
+    // loop keeps the terminal lifecycle and the renderer/config/install side
+    // effects (see ui_state.rs).
+    let mut ui = ui_state::UiState::new(theme, onboarding_ui, version_popup, socket_path, log_path);
     let mut last_layout_sig: Option<(u16, u16)> = None;
-    let mut paused = false;
-    let mut frozen_now: Option<SystemTime> = None;
-    let mut theme_picker: Option<usize> = None;
-    let mut saved_theme_idx: usize = theme::ALL_THEMES
-        .iter()
-        .position(|t| std::ptr::eq(*t, theme))
-        .unwrap_or(0);
-    let mut dashboard_ui = dashboard::DashboardUi::default();
-    let mut connection_ui = connection::ConnectionUi::default();
-    // Live decode-drift footer nudge: throttle-scan the warn-floor log (reusing
-    // doctor's tested scanner) at most every ~15s, NOT per frame — and
-    // incrementally (appended bytes only), never the whole file.
-    let mut drift_scan = DriftScan::default();
-    // The Sources panel's cached rows carry a per-source HEALTH summary
-    // (install soundness + drift) computed on open/toggle; it scans the warn-floor
-    // log, so read it fresh at each (infrequent) rebuild. `""` when no log path.
-    let read_conn_log = || {
-        log_path
-            .as_deref()
-            .and_then(|p| std::fs::read_to_string(p).ok())
-            .unwrap_or_default()
-    };
 
     // Render/event-loop tick (~30fps).
     const FRAME_TICK_MS: u64 = 33;
@@ -652,12 +558,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
         let terminate = std::future::pending::<()>();
         tokio::pin!(terminate);
         loop {
-            let now = if paused {
-                *frozen_now.get_or_insert(SystemTime::now())
-            } else {
-                frozen_now = None;
-                SystemTime::now()
-            };
+            let now = ui.now();
             let snapshot = scene_rx.borrow_and_update().clone();
             renderer.evict_missing(&snapshot);
             let sig = (renderer.buf().width(), renderer.buf().height());
@@ -666,93 +567,14 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                 renderer.cancel_transition();
                 last_layout_sig = Some(sig);
             }
-            renderer.set_theme_picker(theme_picker);
-            renderer.set_version_popup(version_popup, now);
             // Capture the health snapshot ONCE this frame — both the footer
             // warning and the Sources panel's per-source `dead` flag read it.
             let health = source_health.borrow_and_update().clone();
-            // Throttled drift re-scan (≤ every 15s) — reuse doctor's tested
-            // scanner; the source-death warning still preempts it in the merge.
-            // This is the ONE deliberate exception to "no scan-the-history": it
-            // derives a passive diagnostic nudge from the log artifact, NOT
-            // lifecycle state (the no-history rule guards the reducer). A counting
-            // tracing::Layer was rejected — it would add stateful blast radius to
-            // the single global file subscriber for a hint the 15s scan covers.
-            drift_scan.rescan(&log_path);
-            renderer.set_source_warning(crate::doctor::footer_warning(
-                widgets::source_warning_message(&health).as_deref(),
-                &drift_scan.drifted,
-            ));
-            // Mirror the dashboard frame: while open, rebuild the rows from the
-            // live snapshot, re-anchor the selection by AgentId (an agent may
-            // have exited), and keep it in the scroll viewport. Closed → push an
-            // empty frame (the painter reads rows only when open).
-            if dashboard_ui.open {
-                let rows = dashboard::build_dashboard_rows(&snapshot, &dashboard_ui.folds);
-                dashboard_ui.selected = dashboard::reanchor_selection(&rows, dashboard_ui.selected);
-                dashboard_ui.scroll = dashboard::clamp_scroll(
-                    &rows,
-                    dashboard_ui.selected,
-                    dashboard_ui.scroll,
-                    dashboard::DASHBOARD_VIEWPORT_ROWS,
-                );
-                renderer.set_dashboard_frame(dashboard::DashboardFrame {
-                    open: true,
-                    rows,
-                    selected: dashboard_ui.selected,
-                    scroll: dashboard_ui.scroll,
-                });
-            } else {
-                renderer.set_dashboard_frame(dashboard::DashboardFrame::default());
-            }
-            // Mirror the Connection frame: the HOOK facet (`connection_ui.rows`) is cached
-            // (rebuilt on open + after actions, NOT per frame — it does FS reads);
-            // only the LIVE facet + socket line recompute here from the snapshot.
-            if connection_ui.open {
-                connection_ui.selected =
-                    connection::move_selection(&connection_ui.rows, connection_ui.selected, 0);
-                let live = connection::live_view(now, &connection_ui.rows, &snapshot, &health);
-                let socket_line = format!("socket  {}  (listening)", socket_path.display());
-                renderer.set_connection_frame(connection::ConnectionFrame {
-                    open: true,
-                    rows: connection_ui.rows.clone(),
-                    live,
-                    selected: connection_ui.selected,
-                    confirm: connection_ui.confirm,
-                    result: connection_ui.last_result.clone(),
-                    socket_line,
-                });
-            } else {
-                renderer.set_connection_frame(connection::ConnectionFrame::default());
-            }
-            // Onboarding frame: while OPEN, paint the card + dim ramps in (the
-            // painter's `elapsed_ms` drives the typewriter). While CLOSING, the card
-            // is gone but the office keeps fading back UP for a beat; once the fade
-            // completes, drop the closing state to fully live.
-            let onboarding_frame = if let Some(opened) = onboarding_opened_at {
-                let e = opened.elapsed().as_millis() as u64;
-                welcome::OnboardingFrame {
-                    open: true,
-                    rows: onboarding_ui.rows.clone(),
-                    selected: onboarding_ui.selected,
-                    elapsed_ms: e,
-                    dim: welcome::dim_opening(e),
-                }
-            } else if let Some(closing) = onboarding_closing_at {
-                match welcome::dim_closing(closing.elapsed().as_millis() as u64) {
-                    Some(dim) => welcome::OnboardingFrame {
-                        dim,
-                        ..Default::default()
-                    },
-                    None => {
-                        onboarding_closing_at = None;
-                        welcome::OnboardingFrame::default()
-                    }
-                }
-            } else {
-                welcome::OnboardingFrame::default()
-            };
-            renderer.set_onboarding_frame(onboarding_frame);
+            // Compute + push this frame's renderer mirrors (dashboard /
+            // connection / onboarding frames, theme-picker/version/help flags,
+            // the drift-scan-fed footer warning) — see UiState::build_frames.
+            ui.build_frames(now, &snapshot, &health)
+                .apply_to(&mut renderer, now);
             renderer.render(&snapshot, &pack, now)?;
 
             // Auto-compute per-floor desk capacity from the current
@@ -789,47 +611,33 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                     // keystroke; without this guard every key double-fires
                     // there (e.g. `p` pauses then instantly unpauses).
                     Event::Key(k) if should_dispatch_key(k.kind) => {
-                        let modal = ModalState {
-                            onboarding_open: onboarding_opened_at.is_some(),
-                            help_open: renderer.help_open(),
-                            version_popup,
-                            theme_picker,
-                            dashboard_open: dashboard_ui.open,
-                            connection_open: connection_ui.open,
-                            connection_confirm: connection_ui.confirm.is_some(),
-                            n_themes: theme::ALL_THEMES.len(),
-                        };
                         let floor = FloorNav {
                             n_floors: pixtuoid_scene::floor::num_floors(&snapshot),
                             current_floor: renderer.current_floor(),
                             in_transition: renderer.transition().is_some(),
                         };
-                        match dispatch_key(k.code, k.modifiers, modal, floor) {
+                        match dispatch_key(k.code, k.modifiers, ui.modal(), floor) {
                             KeyAction::None => {}
                             KeyAction::Quit => quit = true,
-                            KeyAction::TogglePause => paused = !paused,
-                            KeyAction::ToggleHelp => {
-                                let open = renderer.help_open();
-                                renderer.set_help_open(!open);
-                            }
-                            KeyAction::CloseHelp => renderer.set_help_open(false),
-                            KeyAction::DismissVersionPopup => version_popup = false,
-                            KeyAction::OpenThemePicker => theme_picker = Some(saved_theme_idx),
+                            KeyAction::TogglePause => ui.toggle_pause(),
+                            KeyAction::ToggleHelp => ui.toggle_help(),
+                            KeyAction::CloseHelp => ui.close_help(),
+                            KeyAction::DismissVersionPopup => ui.dismiss_version_popup(),
+                            KeyAction::OpenThemePicker => ui.open_theme_picker(),
                             KeyAction::ThemePreview(i) => {
-                                theme_picker = Some(i);
+                                ui.preview_theme(i);
                                 renderer.set_theme(theme::ALL_THEMES[i]);
                             }
                             KeyAction::ThemeCommit(i) => {
-                                saved_theme_idx = i;
-                                theme_picker = None;
+                                ui.commit_theme(i);
                                 let name = theme::ALL_THEMES[i].name;
                                 if let Err(e) = crate::config::save(&config_path, name) {
                                     tracing::warn!("failed to persist theme: {e}");
                                 }
                             }
                             KeyAction::ThemeCancel => {
-                                renderer.set_theme(theme::ALL_THEMES[saved_theme_idx]);
-                                theme_picker = None;
+                                let saved = ui.cancel_theme();
+                                renderer.set_theme(theme::ALL_THEMES[saved]);
                             }
                             KeyAction::NavigateFloor(target) => {
                                 renderer.navigate_floor(target, now);
@@ -838,89 +646,22 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                                 let on = renderer.debug_walkable();
                                 renderer.set_debug_walkable(!on);
                             }
-                            KeyAction::ToggleDashboard => {
-                                dashboard_ui.open = !dashboard_ui.open;
-                                if dashboard_ui.open {
-                                    let rows = dashboard::build_dashboard_rows(
-                                        &snapshot,
-                                        &dashboard_ui.folds,
-                                    );
-                                    dashboard_ui.selected =
-                                        dashboard::reanchor_selection(&rows, dashboard_ui.selected);
-                                }
-                            }
-                            KeyAction::DashboardClose => dashboard_ui.open = false,
-                            KeyAction::DashboardUp => {
-                                let rows =
-                                    dashboard::build_dashboard_rows(&snapshot, &dashboard_ui.folds);
-                                dashboard_ui.selected =
-                                    dashboard::move_selection(&rows, dashboard_ui.selected, -1);
-                            }
-                            KeyAction::DashboardDown => {
-                                let rows =
-                                    dashboard::build_dashboard_rows(&snapshot, &dashboard_ui.folds);
-                                dashboard_ui.selected =
-                                    dashboard::move_selection(&rows, dashboard_ui.selected, 1);
-                            }
-                            KeyAction::DashboardFoldLeft => {
-                                let rows =
-                                    dashboard::build_dashboard_rows(&snapshot, &dashboard_ui.folds);
-                                if let Some(sel) = dashboard_ui.selected {
-                                    if let Some(row) = rows.iter().find(|r| r.agent_id == sel) {
-                                        // On a child, collapse its parent and move the
-                                        // cursor up to the (now collapsed) root so it
-                                        // stays visible; on a root, collapse it.
-                                        let root = row.parent_id.unwrap_or(sel);
-                                        dashboard_ui.folds.fold_all([root]);
-                                        dashboard_ui.selected = Some(root);
-                                    }
-                                }
-                            }
-                            KeyAction::DashboardFoldRight => {
-                                let rows =
-                                    dashboard::build_dashboard_rows(&snapshot, &dashboard_ui.folds);
-                                if let Some(sel) = dashboard_ui.selected {
-                                    // Only roots are collapsible; expand the selected one.
-                                    if rows
-                                        .iter()
-                                        .any(|r| r.agent_id == sel && r.parent_id.is_none())
-                                    {
-                                        dashboard_ui.folds.unfold_all([sel]);
-                                    }
-                                }
-                            }
-                            KeyAction::DashboardFoldAll => {
-                                let rows =
-                                    dashboard::build_dashboard_rows(&snapshot, &dashboard_ui.folds);
-                                let roots: Vec<_> = rows
-                                    .iter()
-                                    .filter(|r| r.parent_id.is_none())
-                                    .map(|r| r.agent_id)
-                                    .collect();
-                                let any_expanded =
-                                    rows.iter().any(|r| r.parent_id.is_none() && !r.collapsed);
-                                if any_expanded {
-                                    dashboard_ui.folds.fold_all(roots);
-                                } else {
-                                    dashboard_ui.folds.unfold_all(roots);
-                                }
-                            }
+                            KeyAction::ToggleDashboard => ui.toggle_dashboard(&snapshot),
+                            KeyAction::DashboardClose => ui.close_dashboard(),
+                            KeyAction::DashboardUp => ui.dashboard_move(&snapshot, -1),
+                            KeyAction::DashboardDown => ui.dashboard_move(&snapshot, 1),
+                            KeyAction::DashboardFoldLeft => ui.dashboard_fold_left(&snapshot),
+                            KeyAction::DashboardFoldRight => ui.dashboard_fold_right(&snapshot),
+                            KeyAction::DashboardFoldAll => ui.dashboard_fold_all(&snapshot),
                             KeyAction::DashboardJump => {
-                                if let Some(sel) = dashboard_ui.selected {
-                                    let rows = dashboard::build_dashboard_rows(
-                                        &snapshot,
-                                        &dashboard_ui.folds,
-                                    );
-                                    if let Some(floor) = dashboard::resolve_floor(&rows, sel) {
-                                        renderer.navigate_floor(floor, now);
-                                    }
+                                if let Some(floor) = ui.dashboard_jump(&snapshot) {
+                                    renderer.navigate_floor(floor, now);
                                 }
-                                dashboard_ui.open = false;
                             }
                             KeyAction::ToggleConnection => {
-                                connection_ui.open = !connection_ui.open;
-                                connection_ui.confirm = None;
-                                if connection_ui.open {
+                                if ui.connection.open {
+                                    ui.close_connection();
+                                } else {
                                     // Cached connection facet: FS reads + the
                                     // connected-set snapshot happen HERE (on open)
                                     // + after each toggle, never per frame.
@@ -933,41 +674,22 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                                     // (census #266 escape #1; valid here because
                                     // run_tui runs on the multi-thread runtime). All
                                     // 5 panel-I/O sites are wrapped the same way.
-                                    connection_ui.rows = tokio::task::block_in_place(|| {
+                                    let rows = tokio::task::block_in_place(|| {
                                         connection::build_rows(
                                             &connected.snapshot(),
-                                            &read_conn_log(),
+                                            &ui.read_conn_log(),
                                         )
                                     });
-                                    connection_ui.selected = connection::move_selection(
-                                        &connection_ui.rows,
-                                        connection_ui.selected,
-                                        0,
-                                    );
-                                    connection_ui.last_result = None;
+                                    ui.open_connection(rows);
                                 }
                             }
-                            KeyAction::ConnectionUp => {
-                                connection_ui.selected = connection::move_selection(
-                                    &connection_ui.rows,
-                                    connection_ui.selected,
-                                    -1,
-                                );
-                                connection_ui.last_result = None;
-                            }
-                            KeyAction::ConnectionDown => {
-                                connection_ui.selected = connection::move_selection(
-                                    &connection_ui.rows,
-                                    connection_ui.selected,
-                                    1,
-                                );
-                                connection_ui.last_result = None;
-                            }
+                            KeyAction::ConnectionUp => ui.connection_move(-1),
+                            KeyAction::ConnectionDown => ui.connection_move(1),
                             KeyAction::ConnectionToggle => {
                                 // Copy the fields out before any rebuild of `rows`
                                 // (which would invalidate a `&ConnectionRow` borrow).
                                 let action =
-                                    connection_ui.rows.get(connection_ui.selected).map(|r| {
+                                    ui.connection.rows.get(ui.connection.selected).map(|r| {
                                         (
                                             r.state,
                                             r.source_id,
@@ -980,7 +702,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                                         // Bound → arm the disconnect confirm (it
                                         // removes hooks + walks characters out).
                                         connection::ConnState::Connected => {
-                                            connection_ui.confirm = Some(connection_ui.selected);
+                                            ui.connection.confirm = Some(ui.connection.selected);
                                         }
                                         // Unbound → connect immediately (additive,
                                         // reversible): flip the flag, open the live
@@ -989,7 +711,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                                             // block_in_place: connect_source takes a
                                             // flock + fsync + FS reads (see the open
                                             // site) — keep it off the executor.
-                                            connection_ui.last_result =
+                                            ui.connection.last_result =
                                                 Some(tokio::task::block_in_place(|| {
                                                     connect_source(
                                                         &config_path,
@@ -998,30 +720,31 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                                                         name,
                                                     )
                                                 }));
-                                            connection_ui.rows =
+                                            ui.connection.rows =
                                                 tokio::task::block_in_place(|| {
                                                     connection::build_rows(
                                                         &connected.snapshot(),
-                                                        &read_conn_log(),
+                                                        &ui.read_conn_log(),
                                                     )
                                                 });
                                         }
                                         connection::ConnState::NoCli => {
-                                            connection_ui.last_result = Some(hint);
+                                            ui.connection.last_result = Some(hint);
                                         }
                                     }
                                 }
                             }
                             KeyAction::ConnectionConfirm => {
-                                if let Some(idx) = connection_ui.confirm {
-                                    let action = connection_ui
+                                if let Some(idx) = ui.connection.confirm {
+                                    let action = ui
+                                        .connection
                                         .rows
                                         .get(idx)
                                         .map(|r| (r.source_id, r.display_name));
                                     if let Some((source_id, name)) = action {
                                         // block_in_place: disconnect takes a
                                         // flock + fsync + FS reads — off the executor.
-                                        connection_ui.last_result =
+                                        ui.connection.last_result =
                                             Some(tokio::task::block_in_place(|| {
                                                 disconnect_source(
                                                     &config_path,
@@ -1030,31 +753,28 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                                                     name,
                                                 )
                                             }));
-                                        connection_ui.rows = tokio::task::block_in_place(|| {
+                                        ui.connection.rows = tokio::task::block_in_place(|| {
                                             connection::build_rows(
                                                 &connected.snapshot(),
-                                                &read_conn_log(),
+                                                &ui.read_conn_log(),
                                             )
                                         });
                                     }
                                 }
-                                connection_ui.confirm = None;
+                                ui.connection.confirm = None;
                             }
-                            KeyAction::ConnectionCancelConfirm => connection_ui.confirm = None,
-                            KeyAction::ConnectionClose => {
-                                connection_ui.open = false;
-                                connection_ui.confirm = None;
-                            }
-                            KeyAction::OnboardingUp => onboarding_ui.move_up(),
-                            KeyAction::OnboardingDown => onboarding_ui.move_down(),
-                            KeyAction::OnboardingToggle => onboarding_ui.toggle_selected(),
+                            KeyAction::ConnectionCancelConfirm => ui.cancel_connection_confirm(),
+                            KeyAction::ConnectionClose => ui.close_connection(),
+                            KeyAction::OnboardingUp => ui.onboarding_ui.move_up(),
+                            KeyAction::OnboardingDown => ui.onboarding_ui.move_down(),
+                            KeyAction::OnboardingToggle => ui.onboarding_ui.toggle_selected(),
                             KeyAction::OnboardingConfirm => {
                                 // Apply the roster: connect the checked, disconnect
                                 // the unchecked — SCOPED to the detected sources, so
                                 // an undetected source's flag is never written.
                                 // Blocking ConfigLock I/O → block_in_place (run_tui
                                 // is on the multi-thread runtime, like the panel).
-                                let choices = onboarding_ui.decisions();
+                                let choices = ui.onboarding_ui.decisions();
                                 let outcomes = tokio::task::block_in_place(|| {
                                     crate::sources::apply_choices(&config_path, &choices)
                                 });
@@ -1062,8 +782,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                                 // ACTUAL outcome (a failed connect must NOT go live;
                                 // a NoOp keeps the DESIRED state) — see the helper.
                                 reflect_onboarding_outcomes(&connected, &choices, &outcomes);
-                                onboarding_opened_at = None;
-                                onboarding_closing_at = Some(Instant::now());
+                                ui.close_onboarding();
                             }
                             KeyAction::OnboardingSkip => {
                                 // Skip = mark onboarding done WITHOUT changing any
@@ -1072,7 +791,8 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                                 // (onboarding won't re-trigger) yet no hooks are
                                 // added/removed (a pre-existing install survives).
                                 let snap = connected.snapshot();
-                                let freeze: Vec<(&'static str, bool)> = onboarding_ui
+                                let freeze: Vec<(&'static str, bool)> = ui
+                                    .onboarding_ui
                                     .rows
                                     .iter()
                                     .map(|r| (r.source_id, snap.contains(r.source_id)))
@@ -1087,17 +807,16 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                                         );
                                     }
                                 }
-                                onboarding_opened_at = None;
-                                onboarding_closing_at = Some(Instant::now());
+                                ui.close_onboarding();
                             }
                         }
                     }
-                    Event::Mouse(_) if onboarding_opened_at.is_some() => {
+                    Event::Mouse(_) if ui.onboarding_open() => {
                         // Onboarding is modal for the mouse too — swallow every
                         // event so nothing leaks to the scene behind the overlay
                         // (it's keyboard-driven; there are no clickable targets).
                     }
-                    Event::Mouse(m) if renderer.help_open() => {
+                    Event::Mouse(m) if ui.help_open() => {
                         // The help overlay is modal for the mouse: a left
                         // click dismisses it and every mouse event is
                         // swallowed so nothing leaks to the scene behind it
@@ -1105,7 +824,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                         // browser). Placed before the popup guard so help
                         // wins even mid popup-dismiss animation.
                         if matches!(m.kind, MouseEventKind::Down(MouseButton::Left)) {
-                            renderer.set_help_open(false);
+                            ui.close_help();
                         }
                     }
                     Event::Mouse(m) if renderer.last_popup_scale() > 0.0 => {
@@ -1142,7 +861,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                         }
                     }
                     Event::Mouse(_)
-                        if theme_picker.is_some() || dashboard_ui.open || connection_ui.open =>
+                        if ui.theme_picker.is_some() || ui.dashboard.open || ui.connection.open =>
                     {
                         // The dashboard / Sources panel / theme picker are modal for
                         // the mouse too: they paint centered over the scene, so swallow
@@ -1199,8 +918,8 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                 polled = event::poll(Duration::from_millis(0))?;
             }
             if quit {
-                if theme_picker.is_some() {
-                    renderer.set_theme(theme::ALL_THEMES[saved_theme_idx]);
+                if ui.theme_picker.is_some() {
+                    renderer.set_theme(theme::ALL_THEMES[ui.saved_theme_idx]);
                 }
                 break;
             }
@@ -1899,99 +1618,6 @@ mod dispatch_tests {
         assert!(
             !connected.is_connected("cursor"),
             "a failed connect must NOT go live"
-        );
-    }
-
-    // --- DriftScan: the incremental warn-floor log scan ------------------------
-
-    // A real tracing-fmt drift breadcrumb line (the shape doctor's scanner parses).
-    fn drift_line(source: &str, name: &str) -> String {
-        format!(
-            "2026-06-15T00:00:00Z  WARN pixtuoid::drift: source={source} kind=\"unknown_event\" name={name}\n"
-        )
-    }
-
-    #[test]
-    fn drift_scan_reads_incrementally_and_accumulates_prefixes() {
-        use std::io::Write;
-        let dir = tempfile::TempDir::new().unwrap();
-        let log = dir.path().join("log");
-        std::fs::write(&log, drift_line("claude-code", "X")).unwrap();
-
-        let mut scan = super::DriftScan::default();
-        scan.scan_appended(&log);
-        assert_eq!(scan.drifted, vec!["cc".to_string()]);
-        let after_first = scan.offset;
-        assert_eq!(
-            after_first,
-            std::fs::metadata(&log).unwrap().len(),
-            "offset advances past the scanned lines"
-        );
-
-        // Append a SECOND source's breadcrumb: the next pass reads only the
-        // appended bytes (offset moved by exactly the new line) and MERGES the
-        // new prefix — the first one survives without re-reading its bytes.
-        let codex_line = drift_line("codex", "Y");
-        let mut f = std::fs::OpenOptions::new().append(true).open(&log).unwrap();
-        f.write_all(codex_line.as_bytes()).unwrap();
-        drop(f);
-        scan.scan_appended(&log);
-        assert_eq!(scan.drifted, vec!["cc".to_string(), "cx".to_string()]);
-        assert_eq!(
-            scan.offset,
-            after_first + codex_line.len() as u64,
-            "second pass consumed only the appended bytes"
-        );
-
-        // A no-growth pass changes nothing (and re-appending the SAME source
-        // never duplicates its prefix).
-        scan.scan_appended(&log);
-        assert_eq!(scan.drifted.len(), 2);
-    }
-
-    #[test]
-    fn drift_scan_leaves_a_partial_trailing_line_for_the_next_pass() {
-        use std::io::Write;
-        let dir = tempfile::TempDir::new().unwrap();
-        let log = dir.path().join("log");
-        let full = drift_line("claude-code", "X");
-        // Write the line WITHOUT its terminating newline (mid-write).
-        std::fs::write(&log, full.trim_end_matches('\n')).unwrap();
-
-        let mut scan = super::DriftScan::default();
-        scan.scan_appended(&log);
-        assert_eq!(scan.offset, 0, "a partial line is not consumed");
-        assert!(scan.drifted.is_empty(), "…nor scanned: {:?}", scan.drifted);
-
-        // The newline lands → the completed line scans on the next pass.
-        let mut f = std::fs::OpenOptions::new().append(true).open(&log).unwrap();
-        f.write_all(b"\n").unwrap();
-        drop(f);
-        scan.scan_appended(&log);
-        assert_eq!(scan.drifted, vec!["cc".to_string()]);
-    }
-
-    #[test]
-    fn drift_scan_resets_on_external_truncation_and_tolerates_missing_file() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let log = dir.path().join("log");
-
-        // Missing file: a quiet no-op.
-        let mut scan = super::DriftScan::default();
-        scan.scan_appended(&log);
-        assert_eq!(scan.offset, 0);
-
-        std::fs::write(&log, drift_line("claude-code", "X")).unwrap();
-        scan.scan_appended(&log);
-        assert!(scan.offset > 0);
-
-        // Externally truncated/rotated below the offset → rescan from the top.
-        std::fs::write(&log, drift_line("codex", "Y")).unwrap();
-        scan.scan_appended(&log);
-        assert!(
-            scan.drifted.contains(&"cx".to_string()),
-            "post-truncation content is scanned from offset 0: {:?}",
-            scan.drifted
         );
     }
 }

@@ -56,7 +56,7 @@ fn fixture_scene(now: SystemTime) -> SceneState {
                 source: std::sync::Arc::from("claude-code"),
                 session_id: std::sync::Arc::from(format!("session-{i}").as_str()),
                 cwd: std::sync::Arc::from(PathBuf::from("/demo").as_path()),
-                label: std::sync::Arc::from(*key),
+                label: (*key).into(),
                 state: state.clone(),
                 state_started_at: now,
                 last_event_at: now,

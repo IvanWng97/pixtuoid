@@ -8,7 +8,9 @@ agents:
     source: claude-code
     session_id: p
     cwd: /proj
-    label: cc·proj
+    label:
+      text: cc·proj
+      provenance: CwdDerived
     state:
       Active:
         tool_use_id: task-1
@@ -36,7 +38,9 @@ agents:
     source: claude-code
     session_id: w
     cwd: /wind
-    label: cc·wind
+    label:
+      text: cc·wind
+      provenance: CwdDerived
     state:
       Active:
         tool_use_id: w-1
@@ -66,7 +70,9 @@ agents:
     source: codex
     session_id: s
     cwd: /other
-    label: cx·other
+    label:
+      text: cx·other
+      provenance: CwdDerived
     state:
       Waiting:
         reason: "permission: Bash"
@@ -92,7 +98,9 @@ agents:
     source: claude-code
     session_id: i
     cwd: /idle
-    label: cc·idle
+    label:
+      text: cc·idle
+      provenance: CwdDerived
     state: Idle
     state_started_at:
       secs_since_epoch: 5
@@ -116,7 +124,9 @@ agents:
     source: claude-code
     session_id: c
     cwd: /proj
-    label: cc·proj
+    label:
+      text: cc·proj
+      provenance: CwdDerived
     state:
       Active:
         tool_use_id: tool-9

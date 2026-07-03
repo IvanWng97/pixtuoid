@@ -30,7 +30,7 @@ fn agent_slot(
         source: std::sync::Arc::from("claude-code"),
         session_id: std::sync::Arc::from(session),
         cwd: std::sync::Arc::from(PathBuf::from("/demo").as_path()),
-        label: std::sync::Arc::from(label),
+        label: label.into(),
         state,
         state_started_at: now,
         created_at: now - Duration::from_secs(60),

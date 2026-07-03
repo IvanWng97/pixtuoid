@@ -159,7 +159,7 @@ mod tests {
             source: Arc::from("claude-code"),
             session_id: Arc::from(session_id),
             cwd: Arc::from(PathBuf::from("/p").as_path()),
-            label: Arc::from(label),
+            label: label.into(),
             state,
             state_started_at: SystemTime::UNIX_EPOCH,
             last_event_at: SystemTime::UNIX_EPOCH,

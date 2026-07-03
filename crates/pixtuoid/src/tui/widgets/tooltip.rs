@@ -520,7 +520,7 @@ mod tests {
             source: Arc::from("claude-code"),
             session_id: Arc::from("s"),
             cwd: Arc::from(Path::new("/repo")),
-            label: Arc::from("fresh"),
+            label: "fresh".into(),
             state: ActivityState::Idle,
             state_started_at: now,
             // 2s < the 5s freshness floor → `--%`.

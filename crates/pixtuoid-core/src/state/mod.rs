@@ -192,6 +192,124 @@ pub enum ActivityState {
     },
 }
 
+/// How an [`AgentSlot`]'s display label came to be — recorded at mint time so
+/// the #221 blank-registration→back-fill state machine no longer rests on
+/// string-shape sniffing (the old `is_fallback_label`). One variant per REAL
+/// mint site:
+///
+/// - [`OrdinalGhost`](LabelProvenance::OrdinalGhost) — `register_slot`'s
+///   no-cwd arm: the monotonic `{prefix}#N` ordinal (bare `#N` when the
+///   hook-synthesis pre-pass registered under an empty source).
+/// - [`PrefixFallback`](LabelProvenance::PrefixFallback) — the `Rename` arm,
+///   when the incoming label is exactly the slot source's registry prefix (a
+///   JSONL `LabelDeriver`'s empty-cwd fallback, e.g. bare `cx`).
+/// - [`CwdDerived`](LabelProvenance::CwdDerived) — `register_slot`'s
+///   cwd-basename arm and the duplicate-`SessionStart` back-fill upgrade
+///   (`cc·repo`-style).
+/// - [`Renamed`](LabelProvenance::Renamed) — the `Rename` arm otherwise: an
+///   externally supplied display name (CC `attributionAgent` subagent names,
+///   the JSONL derivers' cwd-derived renames).
+///
+/// The first two carry no information worth preserving
+/// ([`SlotLabel::is_upgradable`]); the last two are real information and are
+/// never clobbered by a back-fill.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LabelProvenance {
+    OrdinalGhost,
+    PrefixFallback,
+    CwdDerived,
+    Renamed,
+}
+
+/// An [`AgentSlot`]'s display label + the provenance it was minted with.
+/// Derefs to `str` so read sites treat it as the label text.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SlotLabel {
+    #[serde(with = "arc_str_serde")]
+    text: Arc<str>,
+    provenance: LabelProvenance,
+}
+
+impl SlotLabel {
+    pub fn new(text: impl Into<Arc<str>>, provenance: LabelProvenance) -> Self {
+        Self {
+            text: text.into(),
+            provenance,
+        }
+    }
+
+    pub fn ordinal_ghost(text: impl Into<Arc<str>>) -> Self {
+        Self::new(text, LabelProvenance::OrdinalGhost)
+    }
+
+    pub fn prefix_fallback(text: impl Into<Arc<str>>) -> Self {
+        Self::new(text, LabelProvenance::PrefixFallback)
+    }
+
+    pub fn cwd_derived(text: impl Into<Arc<str>>) -> Self {
+        Self::new(text, LabelProvenance::CwdDerived)
+    }
+
+    pub fn renamed(text: impl Into<Arc<str>>) -> Self {
+        Self::new(text, LabelProvenance::Renamed)
+    }
+
+    /// The label text as a shared handle (for cheap clones into UI rows).
+    pub fn text(&self) -> Arc<str> {
+        Arc::clone(&self.text)
+    }
+
+    pub fn provenance(&self) -> LabelProvenance {
+        self.provenance
+    }
+
+    /// Whether the duplicate-`SessionStart` back-fill may upgrade this label:
+    /// only a derivation fallback (ordinal ghost / bare-prefix) carries no
+    /// information; a cwd-basename- or Rename-derived label is real
+    /// information and is never clobbered.
+    pub fn is_upgradable(&self) -> bool {
+        matches!(
+            self.provenance,
+            LabelProvenance::OrdinalGhost | LabelProvenance::PrefixFallback
+        )
+    }
+}
+
+impl std::ops::Deref for SlotLabel {
+    type Target = str;
+
+    fn deref(&self) -> &str {
+        &self.text
+    }
+}
+
+impl AsRef<str> for SlotLabel {
+    fn as_ref(&self) -> &str {
+        &self.text
+    }
+}
+
+impl std::fmt::Display for SlotLabel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.text)
+    }
+}
+
+/// Test-fixture convenience: a plain string reads as an externally supplied
+/// (non-upgradable) display name. The reducer's mint sites use the explicit
+/// constructors — reach for those when provenance matters.
+impl From<&str> for SlotLabel {
+    fn from(text: &str) -> Self {
+        Self::renamed(text)
+    }
+}
+
+impl From<String> for SlotLabel {
+    fn from(text: String) -> Self {
+        Self::renamed(text)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentSlot {
     pub agent_id: AgentId,
@@ -201,8 +319,7 @@ pub struct AgentSlot {
     pub session_id: Arc<str>,
     #[serde(with = "arc_path_serde")]
     pub cwd: Arc<Path>,
-    #[serde(with = "arc_str_serde")]
-    pub label: Arc<str>,
+    pub label: SlotLabel,
     pub state: ActivityState,
     pub state_started_at: SystemTime,
     /// Wall-clock time of the most recent event (any type) from this
@@ -410,7 +527,7 @@ mod tests {
             source: Arc::from("cc"),
             session_id: Arc::from("s0"),
             cwd: Arc::from(Path::new("/repo")),
-            label: Arc::from("a0"),
+            label: "a0".into(),
             state: ActivityState::Idle,
             state_started_at: now,
             created_at: now,

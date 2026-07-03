@@ -298,7 +298,6 @@ mod tests {
     use super::*;
     use crate::source::AgentEvent;
     use crate::AgentId;
-    use std::sync::{Arc, Mutex};
     use tokio::io::AsyncWriteExt;
 
     #[test]
@@ -348,47 +347,7 @@ mod tests {
         }
     }
 
-    /// MakeWriter that captures formatted log lines so the tests can assert
-    /// on the breadcrumb's presence/absence.
-    #[derive(Clone, Default)]
-    struct CaptureWriter(Arc<Mutex<Vec<u8>>>);
-
-    impl CaptureWriter {
-        fn contents(&self) -> String {
-            String::from_utf8_lossy(&self.0.lock().unwrap()).into_owned()
-        }
-    }
-
-    impl std::io::Write for CaptureWriter {
-        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-            self.0.lock().unwrap().extend_from_slice(buf);
-            Ok(buf.len())
-        }
-
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-
-    impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for CaptureWriter {
-        type Writer = CaptureWriter;
-
-        fn make_writer(&'a self) -> Self::Writer {
-            self.clone()
-        }
-    }
-
-    fn capture_warns() -> (CaptureWriter, tracing::subscriber::DefaultGuard) {
-        let logs = CaptureWriter::default();
-        let guard = tracing::subscriber::set_default(
-            tracing_subscriber::fmt()
-                .with_writer(logs.clone())
-                .with_ansi(false)
-                .with_max_level(tracing::Level::WARN)
-                .finish(),
-        );
-        (logs, guard)
-    }
+    use crate::test_capture::capture_warns;
 
     // Decodes to TWO events (Identity + ActivityStart, #221) — the shape the
     // mid-payload loss path needs: more than one event per payload.

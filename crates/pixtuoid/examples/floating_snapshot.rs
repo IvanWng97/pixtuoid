@@ -73,7 +73,7 @@ fn populate_demo_agents(scene: &mut SceneState, now: SystemTime, n: usize) {
                 source: Arc::from("claude-code"),
                 session_id: Arc::from(format!("demo-{key}-{i:04x}").as_str()),
                 cwd: Arc::from(PathBuf::from("/demo").as_path()),
-                label: Arc::from(*label),
+                label: (*label).into(),
                 state: state.clone(),
                 state_started_at: seated_since,
                 created_at: seated_since,

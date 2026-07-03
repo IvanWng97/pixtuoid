@@ -154,7 +154,7 @@ fn idle_slot(path: &str, state_started: SystemTime) -> AgentSlot {
         source: Arc::from("claude-code"),
         session_id: Arc::from("s"),
         cwd: Arc::from(PathBuf::from("/p").as_path()),
-        label: Arc::from("cc"),
+        label: "cc".into(),
         state: ActivityState::Idle,
         state_started_at: state_started,
         created_at: state_started

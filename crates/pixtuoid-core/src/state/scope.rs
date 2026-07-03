@@ -183,7 +183,7 @@ mod tests {
             source: Arc::from("cc"),
             session_id: Arc::from("s"),
             cwd: Arc::from(std::path::Path::new("/repo")),
-            label: Arc::from("cc·repo"),
+            label: "cc·repo".into(),
             state,
             state_started_at: now,
             last_event_at: now,

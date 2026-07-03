@@ -32,7 +32,16 @@ tui/
 │                   tui/mod.rs, #103); the floor-slide paints via the shared scene seam (floor::render_floor)
 ├── mod.rs          crossterm event loop + terminal lifecycle (raw mode / alternate screen) + key
 │                   dispatch (the `w` debug-overlay toggle — dev-only, debug builds; `t` theme picker, `Tab` dashboard, `s`
-│                   Sources panel, floor nav, version popup, quit chord) + connect_source/disconnect_source
+│                   Sources panel, floor nav, version popup, quit chord) + connect_source/disconnect_source.
+│                   run_tui is the EVENT LOOP + side effects only — the per-surface UI state lives in ui_state.rs
+├── ui_state.rs     UiState — run_tui's per-surface UI state as ONE struct (onboarding/version/help/
+│                   pause/theme-picker/dashboard/connection + DriftScan): owns the open/close
+│                   transitions, projects the dispatch-facing ModalState (`UiState::modal` — the one
+│                   source of truth; help_open is owned HERE, the renderer's copy is a per-frame
+│                   mirror like every other overlay), and computes the per-frame renderer mirrors
+│                   (`build_frames(now, scene, health) -> RenderFrames`, pushed by `RenderFrames::
+│                   apply_to`). Blocking panel I/O (`build_rows`, connect/disconnect, onboarding
+│                   apply) stays at the loop under its documented block_in_place wrapping
 ├── widgets/        ratatui widget paint fns, split into sub-modules:
 │                   mod.rs (TickerQueue, marquee_window/marquee_or_truncate, shared helpers + PANEL_PAD_*),
 │                   hud.rs (footer, wall display, elevator indicator, theme PICKER ui + theme_swatch,

@@ -177,7 +177,7 @@ fn row_for(
         agent_id: slot.agent_id,
         parent_id,
         depth,
-        label: slot.label.clone(),
+        label: slot.label.text(),
         source: slot.source.clone(),
         floor_idx: slot.floor_idx,
         state: row_state(&slot.state),
