@@ -493,6 +493,11 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         let buf_h = scene_rect.height.saturating_mul(2);
         // Compute popup scale before the split_at_mut borrows.
         let popup_scale = self.version_popup_scale(now);
+        // The onboarding modal-backdrop dim (same field draw_scene reads) — captured
+        // before the split_at_mut borrows `self.floors`, applied to BOTH sliding
+        // buffers below so a floor change mid-open lowers the lights on the whole
+        // office, matching the single-buffer path (#R0d82-item4).
+        let onboarding_dim = self.onboarding.dim;
 
         // Render both floors into their respective buffers.
         // Use split_at_mut to get mutable access to two different indices.
@@ -578,6 +583,15 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             to_pet,
             self.debug_walkable,
         );
+
+        // Modal backdrop: dim BOTH sliding buffers by the onboarding factor, the
+        // same multiply draw_scene applies to its single buffer (the transition
+        // path previously threaded the OnboardingFrame but silently dropped its
+        // dim, so a floor change mid-open flashed the office to full brightness).
+        if onboarding_dim < 0.999 {
+            crate::tui::renderer::apply_dim(from_buf, onboarding_dim);
+            crate::tui::renderer::apply_dim(to_buf, onboarding_dim);
+        }
 
         // Compute y-offsets for vertical slide with divider gap.
         // t applies to total travel = screen_height + divider_height

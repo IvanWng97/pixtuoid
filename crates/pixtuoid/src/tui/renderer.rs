@@ -297,12 +297,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     // the office keeps fading back up for a beat AFTER the card is gone. The card
     // itself paints opaque on top.
     if ctx.onboarding.dim < 0.999 {
-        let factor = ctx.onboarding.dim;
-        for px in ctx.buf.as_mut_slice() {
-            px.r = (px.r as f32 * factor) as u8;
-            px.g = (px.g as f32 * factor) as u8;
-            px.b = (px.b as f32 * factor) as u8;
-        }
+        apply_dim(ctx.buf, ctx.onboarding.dim);
     }
 
     let buf = &ctx.buf;
@@ -531,6 +526,20 @@ pub(super) fn flush_buffer_to_term_at_offset(
 
 fn flush_buffer_to_term(f: &mut ratatui::Frame<'_>, buf: &RgbBuffer, scene_rect: Rect) {
     flush_buffer_to_term_at_offset(f, buf, scene_rect, 0);
+}
+
+/// Multiply every pixel of `buf` down by `factor` — the modal-backdrop dim the
+/// onboarding overlay lowers the office to so the opaque welcome card pops.
+/// Shared by BOTH render paths: `draw_scene`'s single composited buffer and
+/// `render_transition`'s two sliding per-floor buffers (a floor change mid-open
+/// dims both halves), so the "lights lowered" look can't drift between them. The
+/// `factor >= 0.999` no-op short-circuit is the caller's (both gate on it).
+pub(crate) fn apply_dim(buf: &mut RgbBuffer, factor: f32) {
+    for px in buf.as_mut_slice() {
+        px.r = (px.r as f32 * factor) as u8;
+        px.g = (px.g as f32 * factor) as u8;
+        px.b = (px.b as f32 * factor) as u8;
+    }
 }
 
 #[cfg(test)]

@@ -1581,6 +1581,57 @@ fn onboarding_dims_the_office_buffer() {
     );
 }
 
+#[test]
+fn onboarding_dims_both_sliding_buffers_on_the_transition_path() {
+    // The floor-slide path (render_transition) threads the OnboardingFrame but
+    // used to drop its `dim`, so a floor change while the overlay is open flashed
+    // the office to full brightness for the ~400ms slide. Both sliding per-floor
+    // buffers must now dim by the same factor draw_scene applies. We observe the
+    // from-floor buffer (floor_buf(0)) mid-slide with vs without the dim.
+    use crate::tui::welcome::{OnboardingFrame, WelcomeRow};
+    let p = pack();
+    let scene = two_floor_scene();
+    let now = t0();
+    let mid = now + Duration::from_millis(200);
+
+    // Baseline: a mid-slide frame with onboarding CLOSED (default dim = 1.0) →
+    // the from-floor buffer stays full brightness.
+    let mut bright_r = build(100, 40, vec![]);
+    bright_r.render(&scene, &p, now).unwrap();
+    bright_r.navigate_floor(1, now);
+    bright_r.render(&scene, &p, mid).unwrap();
+    assert!(bright_r.transition().is_some(), "baseline still mid-slide");
+    let bb = bright_r.floor_buf(0).expect("from-floor buffer exists");
+    let bright = avg_lum(bb, 0, 0, bb.width(), bb.height());
+
+    // Same mid-slide frame, onboarding OPEN + fully ramped (dim = 0.4) → the
+    // transition path must dim the sliding buffer.
+    let mut dim_r = build(100, 40, vec![]);
+    dim_r.render(&scene, &p, now).unwrap();
+    dim_r.navigate_floor(1, now);
+    dim_r.set_onboarding_frame(OnboardingFrame {
+        open: true,
+        rows: vec![WelcomeRow {
+            source_id: "codex",
+            label_prefix: "cx",
+            display_name: "Codex".into(),
+            checked: true,
+        }],
+        selected: 0,
+        elapsed_ms: 100_000,
+        dim: 0.4,
+    });
+    dim_r.render(&scene, &p, mid).unwrap();
+    assert!(dim_r.transition().is_some(), "dimmed still mid-slide");
+    let db = dim_r.floor_buf(0).expect("from-floor buffer exists");
+    let dim = avg_lum(db, 0, 0, db.width(), db.height());
+
+    assert!(
+        dim < bright * 0.6,
+        "the transition path must dim the sliding buffers: dim={dim} vs bright={bright}"
+    );
+}
+
 // ===================================================================
 // Footer / HUD (rendered text)
 // ===================================================================
