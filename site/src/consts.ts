@@ -12,6 +12,75 @@ export const SPONSOR = 'https://buymeacoffee.com/IvanWng97';
 const BASE = import.meta.env.BASE_URL;
 export const asset = (p: string): string => `${BASE.replace(/\/$/, '')}/${p.replace(/^\//, '')}`;
 
+// ── Theme constants (single source for the Base/Nav inline-script family) ──
+// Seeded parse-first into window.__pixTheme (Base.astro head) via define:vars so
+// the theme init, the Escape restore, the FX theme-color sync, and Nav's toggle
+// all read ONE storage key + valid set + BG map and can't drift. THEME_BG is the
+// mobile browser-chrome tint per theme; its hexes MIRROR global.css's per-theme
+// --bg (day #f4eee2 / night #1d1813 / dracula #282a36) — a CSS↔JS pairing that
+// can't share a literal, so it's pinned here by comment (retune both together).
+export const THEME_STORAGE_KEY = 'pix-theme';
+export const VALID_THEMES = ['day', 'night', 'dracula'] as const;
+export type ThemeId = (typeof VALID_THEMES)[number];
+export const THEME_BG: Record<ThemeId, string> = {
+  day: '#f4eee2',
+  night: '#1d1813',
+  dracula: '#282a36',
+};
+
+// ── Floor identity: number ↔ section id ↔ name, single-sourced ──
+// Statusline builds its lift registry from this AND every narrative section
+// stamps its own data-floor + id + eyebrow prefix from its entry (via
+// floorByNumber), so a renumber / rename / add can't silently desync the
+// digit-key scrollspy or the lift readout (load-bearing runtime contracts).
+// Reading order = top floor down (the page scrolls 6F → 1F).
+export interface Floor {
+  n: number;
+  id: string; // section id + the digit-key jump target (getElementById)
+  name: string; // eyebrow + lift readout name
+}
+export const FLOORS: Floor[] = [
+  { n: 6, id: 'lobby', name: 'penthouse' },
+  { n: 5, id: 'showcase', name: 'studio' },
+  { n: 4, id: 'features', name: 'amenities' },
+  { n: 3, id: 'how', name: 'machine room' },
+  { n: 2, id: 'tools', name: 'tenants' },
+  { n: 1, id: 'install', name: 'front desk' },
+];
+export const floorByNumber = (n: number): Floor => {
+  const f = FLOORS.find((x) => x.n === n);
+  if (!f) throw new Error(`consts: no FLOORS entry for floor ${n}`);
+  return f;
+};
+
+// The dimmer's resting opacity — the single source for FIVE former copies that
+// straddle a JS↔CSS boundary. OfficeBackdrop emits it into #dimmer's CSS via an
+// inline `--dim-rest` custom property (its base + reduced-motion rules read it);
+// Statusline derives its 'lights N%' readout from it (100·(1 − DIM_RESTING)).
+// Both read THIS value at build time, so the pre-JS/reduced-motion dim level and
+// the statusline readout can never drift (they had already drifted: 55% vs 45%).
+export const DIM_RESTING = 0.55;
+
+// ── Rendered docs pages: one manifest the Nav dropdown, the Docs sidebar/pager,
+// and each page's `current` type all derive from (was triple-scattered). Fixed
+// reading order = the prev/next sequence AND the Nav dropdown order. Adding a
+// rendered doc still needs its content collection + page file (see
+// site/CLAUDE.md), but the menu/sidebar/pager come free from this one edit.
+export interface DocPage {
+  id: string;
+  route: string; // base-path-relative slug (asset(route))
+  label: string;
+}
+export const DOCS = [
+  { id: 'config', route: 'config', label: 'Configuration' },
+  { id: 'architecture', route: 'architecture', label: 'Architecture' },
+  { id: 'knowledge-base', route: 'knowledge-base', label: 'Knowledge engineering' },
+  { id: 'parallel-delivery', route: 'parallel-delivery', label: 'Parallel delivery' },
+  { id: 'contributing', route: 'contributing', label: 'Contributing' },
+  { id: 'migration', route: 'migration', label: 'Migration' },
+] as const satisfies readonly DocPage[];
+export type DocId = (typeof DOCS)[number]['id'];
+
 export interface ThemeShot {
   id: string;
   name: string;

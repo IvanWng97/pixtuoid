@@ -1,5 +1,8 @@
 ---
 import features from '../features.json';
+import { floorByNumber } from '../consts';
+
+const floor = floorByNumber(4);
 
 // Single source of truth: site/src/features.json — the SAME list the README
 // Features table is generated from (scripts/gen-readme.mjs), so the
@@ -19,10 +22,10 @@ const cells = features.flatMap((f) =>
 );
 ---
 
-<section id="features" class="features" data-lit data-floor="4">
+<section id={floor.id} class="features" data-lit data-floor={floor.n}>
   <div class="container">
     <div class="section-head reveal">
-      <p class="eyebrow">4F · amenities — the office is alive</p>
+      <p class="eyebrow">{floor.n}F · {floor.name} — the office is alive</p>
       <h2 class="statement statement--md">Not a dashboard.<br />A little world.</h2>
       <p class="lead">
         pixtuoid renders your agents as coworkers in a top-down pixel office — with the small

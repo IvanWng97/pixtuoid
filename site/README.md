@@ -93,29 +93,39 @@ gates can't see. CI runs it in `site.yml` after the build step.
   "office gaps". Each section is a floor (6F penthouse → 1F front desk);
   `Statusline.astro` is the one piece of fixed chrome (floor readout +
   scrollspy, the build-time merged-PR feed with a canned-reel fallback,
-  `lights %` / clock / `● LIVE`), and the app's literal keys work on the page —
-  digits `1–6` ride between floors, `t` retints the decorative palette (Esc
-  restores). The favicon dims with the night theme; 404 is the office at
-  3 a.m. (`--empty` render).
+  `lights %` / clock / `● LIVE` · `❚❚ PAUSED`), and the app's literal keys work
+  on the page — digits `1–6` ride between floors, `t` retints the decorative
+  palette (Esc restores). Those bare single-char shortcuts are **focus-gated**
+  (WCAG 2.1.4): they fire only from a neutral focus context (page body / a
+  jumped-to section / the statusline), never a focused control — the shared
+  `window.__pixKeys.shortcutContext()` gate. The favicon dims with the night
+  theme; 404 is the office at 3 a.m. (`--empty` render).
 - **Cross-component seams** (what a new section must wire): sections declare
   `data-lit` (dimmer target; `data-lit="fade"` also rises with the darkness)
-  and `data-floor` (scrollspy) — a new floor needs both plus a `FLOORS` row in
-  `Statusline.astro`. The backdrop publishes `window.__pixLights` (per-frame
-  dim value; the statusline polls it) and `pix:onair` + the `.backdrop.is-live`
-  class (discrete live flip; event for changes, class for late-attach seeding),
-  plus `window.__pixHire()` (walk one extra sprite in; the install Copy
-  buttons call it). `window.__pixNight()` (defined in `Base.astro`'s head
-  boot) is the ONE client-side day/night boundary — never re-derive
-  19:00–07:00 inline.
+  and `data-floor` (scrollspy) — a new floor is a `FLOORS` row in `consts.ts`
+  (the ONE source the statusline lift AND each section's `data-floor`/id/eyebrow
+  derive from), then `data-lit` on the section. The backdrop publishes
+  `window.__pixLights` (per-frame dim value; the statusline polls it), `pix:onair`
+  - the `.backdrop.is-live` class (discrete live flip; event for changes, class
+    for late-attach seeding), and `pix:paused` (the office pause switch — see FX)
+    — every >5s auto-motion listens, so ONE control governs page motion. Plus
+    `window.__pixHire()` (walk one extra sprite in; the install Copy buttons call
+    it). `window.__pixNight()` and `window.__pixTheme` / `window.__pixKeys`
+    (defined parse-first in `Base.astro`'s head) are the ONE day/night boundary /
+    theme-constants source / key-shortcut helpers — never re-derive 19:00–07:00,
+    the theme BG map, or the typing guard inline.
 - **FX** (all `prefers-reduced-motion`-safe) — CRT power-on, hero pixel-dust,
   and the dimmer itself. (The old pointer glow + 3D tilt were removed
   deliberately: perspective transforms smear pixel art.) The live office has
   a pixel-style pause switch (`#office-pause`, bottom-right above the
-  statusline — WCAG 2.2.2): pause freezes the frame in place, resume picks
-  the timeline up where it stopped; hidden whenever only the still poster is
-  showing.
+  statusline — WCAG 2.2.2): pause freezes the office frame in place AND, via the
+  `pix:paused` event, stops every other >5s auto-motion (the statusline feed
+  ticker, the hero dust) — the statusline reads `❚❚ PAUSED`; resume picks the
+  timeline up where it stopped. Hidden whenever only the still poster is showing.
 - **Docs shell** — `layouts/Docs.astro` gives /config, /architecture,
-  /contributing, /migration a shared sidebar + build-time mini-TOC + pager.
+  /contributing, /migration a shared sidebar + build-time mini-TOC + pager,
+  driven by the one `DOCS` manifest in `consts.ts` (the Nav dropdown reads the
+  same source).
 
 ## Demo art
 

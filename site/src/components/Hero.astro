@@ -1,8 +1,10 @@
 ---
-import { REPO } from '../consts';
+import { REPO, floorByNumber } from '../consts';
+
+const floor = floorByNumber(6);
 ---
 
-<section id="lobby" class="hero" data-floor="6">
+<section id={floor.id} class="hero" data-floor={floor.n}>
   {
     /* The title card: the live office (page-wide backdrop) is fully lit at
       scroll-0; the statement sits bottom-left, film-title style, and pulls
@@ -13,7 +15,7 @@ import { REPO } from '../consts';
   <canvas id="dust" class="dust" aria-hidden="true"></canvas>
   <div class="container hero__frame">
     <div class="hero__copy" data-lit="fade">
-      <p class="eyebrow">6F · penthouse — terminal-native, open&nbsp;source</p>
+      <p class="eyebrow">{floor.n}F · {floor.name} — terminal-native, open&nbsp;source</p>
       <h1 class="statement">
         Your agents<br />
         <span class="hl">work here</span><span class="cursor" aria-hidden="true"></span>
@@ -163,7 +165,8 @@ import { REPO } from '../consts';
     }
     let raf = 0,
       on = false,
-      visible = false;
+      visible = false,
+      userPaused = false;
     function frame() {
       ctx.clearRect(0, 0, W, H);
       for (let i = 0; i < motes.length; i++) {
@@ -183,7 +186,7 @@ import { REPO } from '../consts';
       raf = requestAnimationFrame(frame);
     }
     function start() {
-      if (on || mq.matches || !visible) return;
+      if (on || mq.matches || !visible || userPaused) return;
       on = true;
       raf = requestAnimationFrame(frame);
     }
@@ -222,5 +225,11 @@ import { REPO } from '../consts';
         if (mq.matches) stop();
         else start();
       });
+    // the office pause switch governs page motion (WCAG 2.2.2) — hold the dust too
+    document.addEventListener('pix:paused', function (e) {
+      userPaused = !!(e.detail && e.detail.paused);
+      if (userPaused) stop();
+      else start();
+    });
   })();
 </script>

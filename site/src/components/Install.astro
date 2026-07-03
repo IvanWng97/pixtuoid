@@ -1,6 +1,8 @@
 ---
 import { Code } from 'astro:components';
-import { REPO, CRATES } from '../consts';
+import { REPO, CRATES, floorByNumber } from '../consts';
+
+const floor = floorByNumber(1);
 // Single source of truth for install commands → site/src/install.json. The README
 // regenerates its install block from the same file (gen-readme-check), so the site and
 // README can't drift — the site shows every method, the README only the ones
@@ -8,10 +10,10 @@ import { REPO, CRATES } from '../consts';
 import tabs from '../install.json';
 ---
 
-<section id="install" class="install" data-lit data-floor="1">
+<section id={floor.id} class="install" data-lit data-floor={floor.n}>
   <div class="container">
     <div class="section-head reveal">
-      <p class="eyebrow">1F · front desk — get it</p>
+      <p class="eyebrow">{floor.n}F · {floor.name} — get it</p>
       <h2 class="statement statement--md">Move them in.</h2>
       <p class="lead">
         macOS, Linux &amp; Windows. Install, run <code>pixtuoid</code>, and the office opens.
@@ -42,9 +44,14 @@ import tabs from '../install.json';
             data-panel={t.id}
           >
             <Code code={t.cmds.join('\n')} lang="bash" theme="vesper" />
-            <button class="install__copy" data-copy={t.cmds.join('\n')} aria-label="Copy command">
+            {/* no aria-label: the visible "Copy" text IS the accessible name, so
+              the textContent swap stays exposed. The role=status sibling
+              ANNOUNCES the outcome to screen readers (a name change alone isn't
+              announced) — WCAG 4.1.3. */}
+            <button class="install__copy" data-copy={t.cmds.join('\n')}>
               Copy
             </button>
+            <span class="sr-only" role="status" data-copy-status />
           </div>
         ))
       }
@@ -79,11 +86,15 @@ import tabs from '../install.json';
       // capture the resting label ONCE — not after a click, or a rapid second
       // click would capture 'Copied ✓' and the button would stick on it
       const LABEL = (btn.textContent || 'Copy').trim();
-      function flash(msg) {
-        btn.textContent = msg;
+      const status = btn.parentElement && btn.parentElement.querySelector('[data-copy-status]');
+      // visible label swap (sighted) + a role=status announcement (screen reader)
+      function flash(label, announce) {
+        btn.textContent = label;
+        if (status) status.textContent = announce;
         clearTimeout(restore); // a fresh click cancels the previous restore timer
         restore = setTimeout(function () {
           btn.textContent = LABEL;
+          if (status) status.textContent = '';
         }, 1600);
       }
       function manual() {
@@ -97,7 +108,7 @@ import tabs from '../install.json';
           sel.removeAllRanges();
           sel.addRange(range);
         }
-        flash('Select & copy');
+        flash('Select & copy', 'Press Ctrl+C to copy the selected command');
       }
       btn.addEventListener('click', function () {
         // #434: hiring is the click's diegetic echo — a new coworker walks
@@ -110,7 +121,7 @@ import tabs from '../install.json';
         navigator.clipboard
           .writeText(btn.dataset.copy)
           .then(function () {
-            flash('Copied ✓');
+            flash('Copied ✓', 'Copied to clipboard');
           })
           .catch(manual);
       });
@@ -119,6 +130,17 @@ import tabs from '../install.json';
 </script>
 
 <style>
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
   .install__box {
     max-width: 860px;
   }

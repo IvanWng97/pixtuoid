@@ -51,7 +51,10 @@
 
   /* Type */
   --font-display: 'Jersey 10', 'Segoe UI', system-ui, sans-serif;
-  --font-body: 'Lora', Georgia, 'Times New Roman', serif;
+  /* 'Lora Fallback' = local Georgia, metric-matched to Lora (below), so the
+     font-display:swap on the text-heavy docs pages is shift-free (was ~0.12 CLS
+     from the Lora swap reflowing .prose). */
+  --font-body: 'Lora', 'Lora Fallback', Georgia, 'Times New Roman', serif;
   --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
 
   /* Scale */
@@ -91,6 +94,21 @@
   --shadow-lg: 0 2px 6px rgba(0, 0, 0, 0.4), 0 24px 60px rgba(0, 0, 0, 0.6);
   --glow: color-mix(in srgb, var(--coral) 24%, transparent);
   --chrome-halo: 0 1px 8px rgba(0, 0, 0, 0.45);
+}
+
+/* Metric-matched fallback for the Lora body face: local Georgia scaled to Lora's
+   metrics so the font-display:swap doesn't reflow the docs prose. size-adjust is
+   MEASURED against the built pages (rendered Georgia is ~94.5% of Lora's advance
+   width, so scale it up ~105.85%); ascent/descent overrides come from the real
+   Lora latin-400 (ascent 1006, descent -274 per 1000 em) divided by size-adjust.
+   Re-measure if the body face changes. */
+@font-face {
+  font-family: 'Lora Fallback';
+  src: local('Georgia');
+  size-adjust: 105.85%;
+  ascent-override: 95.04%;
+  descent-override: 25.88%;
+  line-gap-override: 0%;
 }
 
 /* ---------- reset ---------- */
@@ -660,7 +678,9 @@ code,
 .boot__hint {
   margin-top: 1.4rem;
   font-size: 0.72rem;
-  opacity: 0.55;
+  /* the sole "press any key to skip" instruction — it must stay readable, so the
+     de-emphasis comes from size alone (opacity:0.55 dropped it to ~2.2:1 in day,
+     below WCAG 1.4.3); inherited --fg-muted clears AA in every theme. */
 }
 
 /* ---------- prose: rendered markdown (the /config page) ---------- */

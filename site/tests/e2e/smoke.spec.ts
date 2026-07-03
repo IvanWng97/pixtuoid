@@ -141,16 +141,37 @@ test('the hero pause switch freezes the office and resumes it seamlessly', async
   await expect(btn).toHaveAttribute('aria-pressed', 'false');
   const shot = () =>
     page.evaluate(() => (document.getElementById('office-live') as HTMLCanvasElement).toDataURL());
+  const bufW = () =>
+    page.evaluate(() => (document.getElementById('office-live') as HTMLCanvasElement).width);
   await btn.click();
   await expect(btn).toHaveAttribute('aria-pressed', 'true');
   const frozen = await shot();
   await page.waitForTimeout(400); // >10 would-be frames at the 33ms cap
   expect(await shot()).toBe(frozen); // not one new frame painted
+  // Pause-unify (WCAG 2.2.2 covers the whole page): the statusline reflects the
+  // paused office — PAUSED, not '● LIVE'.
+  await expect(page.locator('[data-sl-onair]')).toHaveText('❚❚ PAUSED');
+  // Resize while paused: sizeBuffer() wipes the bitmap and no rAF will repaint
+  // it, so the resize handler must re-render the ONE frozen frame — a blank
+  // var(--bg) void here is the exact regression this branch prevents.
+  await page.setViewportSize({ width: 500, height: 900 });
+  await expect.poll(bufW).toBe(100); // re-aspected
+  expect(await btn.getAttribute('aria-pressed')).toBe('true'); // still paused
+  const painted = await page.evaluate(() => {
+    const c = document.getElementById('office-live') as HTMLCanvasElement;
+    const d = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data;
+    return d.some((v) => v !== 0);
+  });
+  expect(painted).toBe(true); // the frozen frame, not a void
+  const frozen2 = await shot(); // frozen at the new aspect
+  await page.waitForTimeout(400);
+  expect(await shot()).toBe(frozen2); // pause survives the resize
   // Keyboard operability: the switch is a real button — Enter resumes.
   await btn.focus();
   await page.keyboard.press('Enter');
   await expect(btn).toHaveAttribute('aria-pressed', 'false');
-  await expect.poll(shot, { timeout: 10_000 }).not.toBe(frozen); // animating again
+  await expect.poll(shot, { timeout: 10_000 }).not.toBe(frozen2); // animating again
+  await expect(page.locator('[data-sl-onair]')).toHaveText('● LIVE'); // back to live
   expect(errors()).toEqual([]);
 });
 
@@ -215,6 +236,74 @@ test('reduced motion stays on the still poster without errors', async ({ browser
   await expect.poll(() => video.evaluate((v) => (v as HTMLVideoElement).paused)).toBe(true);
   expect(errors()).toEqual([]);
   await context.close();
+});
+
+test('wasm fetch failure keeps the still poster without an uncaught error', async ({ browser }) => {
+  // The third documented boot path (live / reduced-motion / FAILURE): abort every
+  // wasm request so the dynamic import rejects — the empty .catch must keep the
+  // poster (graceful degradation), never throw or show a dead-canvas pause button.
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  const errors = watchErrors(page);
+  await page.route('**/wasm/**', (r) => r.abort());
+  const wasmTried: string[] = [];
+  page.on('request', (r) => {
+    if (r.url().includes('/wasm/')) wasmTried.push(r.url());
+  });
+  await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
+  await page.goto('./');
+  // the boot is deferred to load+idle — wait until it actually attempted the fetch
+  await expect.poll(() => wasmTried.length, { timeout: 15_000 }).toBeGreaterThan(0);
+  await page.waitForLoadState('networkidle');
+  await expect(page.locator('.backdrop__poster')).toBeVisible();
+  await expect(page.locator('.backdrop.is-live')).not.toBeAttached();
+  await expect(page.locator('#office-pause')).toBeHidden(); // nothing to pause
+  await expect(page.locator('[data-sl-onair]')).toHaveText('○ STILL');
+  // the aborted request logs a resource error; the import rejection must stay
+  // handled — no uncaught pageerror / console.error beyond that one line.
+  expect(errors().filter((e) => !e.includes('Failed to load resource'))).toEqual([]);
+  await context.close();
+});
+
+test('single-char shortcuts are focus-gated to a neutral context (WCAG 2.1.4)', async ({
+  page,
+}) => {
+  await gotoLive(page);
+  // Baseline: from the page body the digit still rides the lift.
+  await page.keyboard.press('3');
+  await expect(page.locator('[data-lift-digit]')).toHaveText('3F', { timeout: 10_000 });
+  // Focus a real interactive control (the fixed pause button — no scroll on
+  // focus): bare digits + `t` must go INERT so voice-control dictation / stray
+  // focus can't trigger floor or theme changes.
+  await page.locator('#office-pause').focus();
+  await page.keyboard.press('1');
+  await expect(page.locator('[data-lift-digit]')).toHaveText('3F'); // unchanged
+  await page.evaluate(() => document.documentElement.style.removeProperty('--coral'));
+  await page.keyboard.press('t');
+  expect(
+    await page.evaluate(() => document.documentElement.style.getPropertyValue('--coral'))
+  ).toBe(''); // no retint from a focused control
+});
+
+test('the clock forces night after hours and clears on an explicit theme act', async ({ page }) => {
+  // The only theme-init path every other test routes around. Playwright's clock
+  // makes it deterministic (fixes Date; timers/rAF stay real).
+  await page.clock.setFixedTime(new Date('2026-01-01T23:00:00'));
+  await page.emulateMedia({ colorScheme: 'light' }); // the clock must win over a light OS
+  await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
+  await page.goto('./');
+  await page.evaluate(() => localStorage.removeItem('pix-theme'));
+  await page.reload();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'night');
+  await expect(page.locator('html')).toHaveAttribute('data-clock-night', '1');
+  // an explicit theme act ends the clock's authority (and its footer explainer)
+  await page.locator('#theme-toggle').click();
+  await expect(page.locator('html')).not.toHaveAttribute('data-clock-night', '1');
+  // …and the clock NEVER forces day: noon + a light OS lands day, not night.
+  await page.clock.setFixedTime(new Date('2026-01-01T12:00:00'));
+  await page.evaluate(() => localStorage.removeItem('pix-theme'));
+  await page.reload();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'day');
 });
 
 // ---------------------------------------------------------------------------

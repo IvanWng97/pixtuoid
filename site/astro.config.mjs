@@ -1,12 +1,12 @@
 // @ts-check
 import { defineConfig } from 'astro/config';
 import { readFileSync, existsSync, writeFileSync, readdirSync } from 'node:fs';
-import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { posix, join } from 'node:path';
 import sitemap from '@astrojs/sitemap';
 import rehypeMermaid from 'rehype-mermaid';
 import { unified } from '@astrojs/markdown-remark';
+import { rewriteCspMeta } from './config/csp-hashes.mjs';
 
 // Single-source the displayed version from the workspace Cargo.toml so the boot
 // intro never goes stale on a release bump. Scope the match to the
@@ -163,13 +163,11 @@ function rehypeRepoLinks() {
 // this site has — and it unconditionally appends style hashes, which would make
 // browsers IGNORE the 'unsafe-inline' that Shiki/mermaid style attributes need.
 // This build:done hook closes both gaps from the BUILT html itself, so the
-// hashes are mechanically derived and can never drift from the content:
-//   - script-src: drop Astro's hashes (its client-directive bootstraps — no
-//     islands here; anything real is in the html and gets re-hashed), then add
-//     a sha256 for every inline <script> actually on that page. External
-//     scripts keep riding 'self'.
-//   - style-src: drop ALL hashes so the configured 'unsafe-inline' stays
-//     honored (CSP ignores it the moment any hash is present).
+// hashes are mechanically derived and can never drift from the content
+// (script-src re-hashed per page, style-src stripped of hashes). The delicate
+// per-page HTML→hashes→rewrite transform lives in ./config/csp-hashes.mjs so it
+// is unit-testable (config/csp-hashes.test.mjs) and its script-tag scan can't
+// diverge from the HTML tokenizer; this hook only walks dist/ and applies it.
 function cspInlineHashes() {
   return {
     name: 'csp-inline-hashes',
@@ -185,37 +183,9 @@ function cspInlineHashes() {
             else if (e.name.endsWith('.html')) htmlFiles.push(p);
           }
         })(fileURLToPath(dir));
-        const HASH = /^'sha(256|384|512)-/;
         for (const file of htmlFiles) {
-          const html = readFileSync(file, 'utf8');
-          // The browser hashes the exact bytes between the tags — extract them
-          // verbatim. Scripts with src= ride 'self'; ld+json data blocks never
-          // execute, but hashing them too is free cross-engine insurance.
-          const hashes = new Set();
-          for (const m of html.matchAll(/<script(\s[^>]*)?>([\s\S]*?)<\/script>/gi)) {
-            if (/\ssrc\s*=/i.test(m[1] ?? '')) continue;
-            hashes.add(`'sha256-${createHash('sha256').update(m[2], 'utf8').digest('base64')}'`);
-          }
-          let rewrote = false;
-          const updated = html.replace(
-            /(<meta http-equiv="content-security-policy" content=")([^"]*)(")/i,
-            (_, pre, /** @type {string} */ content, post) => {
-              rewrote = true;
-              const out = content
-                .split(';')
-                .map((d) => {
-                  const toks = d.trim().split(/\s+/).filter(Boolean);
-                  if (toks[0] !== 'script-src' && toks[0] !== 'style-src') return d.trim();
-                  const resources = toks.slice(1).filter((t) => !HASH.test(t));
-                  const add = toks[0] === 'script-src' ? [...hashes] : [];
-                  return [toks[0], ...resources, ...add].join(' ');
-                })
-                .filter(Boolean)
-                .join('; ');
-              return pre + out + post;
-            }
-          );
-          if (!rewrote) {
+          const updated = rewriteCspMeta(readFileSync(file, 'utf8'));
+          if (updated === null) {
             throw new Error(
               `csp-inline-hashes: no CSP <meta> found in ${file} — did security.csp get disabled?`
             );
@@ -300,6 +270,17 @@ export default defineConfig({
     },
   },
   prefetch: { prefetchAll: true, defaultStrategy: 'hover' },
+  build: {
+    // ALWAYS inline the page stylesheets. Astro's default 'auto' inlines only
+    // sheets smaller than vite's assetsInlineLimit — pinned to 0 below for the
+    // CSP-font posture — so 'auto' would inline NOTHING and every page would
+    // render-block on two external CSS requests (~592ms RTT on simulated
+    // mobile, on the FCP/LCP critical path). 'always' bypasses assetsInlineLimit
+    // entirely; woff2 fonts are not stylesheets so they stay hashed files under
+    // font-src 'self', and inline <style> is allowed (style-src keeps
+    // 'unsafe-inline', kept hash-free by the cspInlineHashes hook).
+    inlineStylesheets: 'always',
+  },
   vite: {
     define: { __PIXTUOID_VERSION__: JSON.stringify(version) },
     // Never inline assets as data: URLs. Vite's default 4KiB inlining turned

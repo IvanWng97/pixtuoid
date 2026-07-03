@@ -51,6 +51,9 @@ jobs:
       # an orphaned component or stale dep tsc/eslint can't see). Mirrors the
       # `verify` script; runs before build for fast feedback.
       - run: npm run knip
+      # node:test unit tests (config/csp-hashes.test.mjs) — the CSP hash kernel's
+      # edge cases the e2e watchdog can only catch indirectly. Part of `verify`.
+      - run: npm run test:unit
       - run: npm run build
       # e2e smoke suite vs the PRODUCTION build just produced (astro preview,
       # the official Astro testing posture): pins the page's runtime contracts

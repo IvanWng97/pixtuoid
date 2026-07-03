@@ -1,6 +1,7 @@
 ---
-import { asset } from '../consts';
+import { asset, floorByNumber } from '../consts';
 
+const floor = floorByNumber(3);
 const steps = [
   {
     n: '01',
@@ -23,10 +24,10 @@ const steps = [
 ];
 ---
 
-<section id="how" class="how" data-lit data-floor="3">
+<section id={floor.id} class="how" data-lit data-floor={floor.n}>
   <div class="container">
     <div class="section-head reveal">
-      <p class="eyebrow">3F · machine room — launch, connect, code</p>
+      <p class="eyebrow">{floor.n}F · {floor.name} — launch, connect, code</p>
       <h2 class="statement statement--md">Up and running<br />in a minute.</h2>
     </div>
     <ol class="how__steps">

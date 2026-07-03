@@ -3,21 +3,16 @@ import type { MarkdownHeading } from 'astro';
 import Base from './Base.astro';
 import Nav from '../components/Nav.astro';
 import Footer from '../components/Footer.astro';
-import { REPO, asset } from '../consts';
+import { REPO, asset, DOCS, type DocId } from '../consts';
 
 interface Props {
   title: string;
   description: string;
   /** from `await render(entry)` — drives the build-time mini-TOC */
   headings: MarkdownHeading[];
-  /** which doc this page is (sidebar highlight + prev/next) */
-  current:
-    | 'config'
-    | 'architecture'
-    | 'knowledge-base'
-    | 'parallel-delivery'
-    | 'contributing'
-    | 'migration';
+  /** which doc this page is (sidebar highlight + prev/next) — derived from the
+   * one DOCS manifest so it can't fall out of sync with the sidebar/pager */
+  current: DocId;
   /** repo-relative path for the "Source of truth" footer link, e.g. docs/CONFIGURATION.md */
   sourcePath: string;
   /** suffix after the source link (architecture mentions its Mermaid diagram) */
@@ -33,16 +28,7 @@ const {
   sourceNote = 'this page renders it verbatim.',
 } = Astro.props;
 
-// Fixed reading order — also the prev/next sequence.
-const DOCS = [
-  { id: 'config', label: 'Configuration', href: 'config' },
-  { id: 'architecture', label: 'Architecture', href: 'architecture' },
-  { id: 'knowledge-base', label: 'Knowledge engineering', href: 'knowledge-base' },
-  { id: 'parallel-delivery', label: 'Parallel delivery', href: 'parallel-delivery' },
-  { id: 'contributing', label: 'Contributing', href: 'contributing' },
-  { id: 'migration', label: 'Migration', href: 'migration' },
-] as const;
-
+// Reading order / sidebar / pager all come from the one DOCS manifest (consts.ts).
 const idx = DOCS.findIndex((d) => d.id === current);
 const prev = idx > 0 ? DOCS[idx - 1] : undefined;
 const next = idx >= 0 && idx < DOCS.length - 1 ? DOCS[idx + 1] : undefined;
@@ -64,7 +50,7 @@ const toc = raw.map((h) => ({ ...h, text: h.text.replace(/\s*\([^)]*\)\s*$/, '')
         {
           DOCS.map((d) => (
             <li>
-              <a href={asset(d.href)} aria-current={d.id === current ? 'page' : undefined}>
+              <a href={asset(d.route)} aria-current={d.id === current ? 'page' : undefined}>
                 {d.label}
               </a>
             </li>
@@ -81,7 +67,7 @@ const toc = raw.map((h) => ({ ...h, text: h.text.replace(/\s*\([^)]*\)\s*$/, '')
       <nav class="docs__pager" aria-label="Docs pagination">
         {
           prev ? (
-            <a class="docs__pager-link" href={asset(prev.href)} rel="prev">
+            <a class="docs__pager-link" href={asset(prev.route)} rel="prev">
               <span class="docs__pager-dir" aria-hidden="true">
                 ← previous
               </span>
@@ -93,7 +79,7 @@ const toc = raw.map((h) => ({ ...h, text: h.text.replace(/\s*\([^)]*\)\s*$/, '')
         }
         {
           next && (
-            <a class="docs__pager-link docs__pager-link--next" href={asset(next.href)} rel="next">
+            <a class="docs__pager-link docs__pager-link--next" href={asset(next.route)} rel="next">
               <span class="docs__pager-dir" aria-hidden="true">
                 next →
               </span>

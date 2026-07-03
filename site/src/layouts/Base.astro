@@ -14,7 +14,7 @@ import '@fontsource/jetbrains-mono/700.css';
 import '@fontsource/lora/400.css';
 import '@fontsource/lora/500.css';
 import '../styles/global.css';
-import { asset, THEMES } from '../consts';
+import { asset, THEMES, THEME_BG, THEME_STORAGE_KEY, VALID_THEMES } from '../consts';
 
 interface Props {
   title?: string;
@@ -67,8 +67,11 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
     <link rel="icon" type="image/png" sizes="180x180" href={asset('apple-touch-icon.png')} />
     <link rel="apple-touch-icon" href={asset('apple-touch-icon.png')} />
     <link rel="canonical" href={canonical} />
-    {/* default = day --bg; the theme-init script below updates it for night/dracula */}
-    <meta name="theme-color" content="#f4eee2" />
+    {
+      /* default = day --bg (single-sourced with the JS theme map); the theme-init
+      script below updates it for night/dracula */
+    }
+    <meta name="theme-color" content={THEME_BG.day} />
     {
       /* The above-fold display face (hero headline, statements, boot intro's
         version line): preload the latin subset so the pixel type doesn't
@@ -98,7 +101,10 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
     }
 
     <!-- No-FOUC theme init: ?theme= override → saved choice → system → day -->
-    <script is:inline>
+    <script
+      is:inline
+      define:vars={{ themeKey: THEME_STORAGE_KEY, validThemes: VALID_THEMES, themeBG: THEME_BG }}
+    >
       // THE site clock boundary (7/19) — the one client-side source of truth,
       // defined parse-first so every later consumer (this init, the Escape
       // fallback below, the statusline clock, the gap-2 window swap) reads the
@@ -109,28 +115,65 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
         const h = new Date().getHours();
         return h >= 19 || h < 7;
       };
+      // Parse-first theme constants (seeded from consts.ts via define:vars): ONE
+      // storage key + valid set + BG map + clock→system fallback, so the init
+      // below, the Escape restore, the FX theme-color sync, and Nav's toggle all
+      // read the SAME source and can't drift (the __pixNight single-source idiom).
+      window.__pixTheme = {
+        KEY: themeKey,
+        VALID: validThemes,
+        BG: themeBG,
+        ok: function (v) {
+          return validThemes.indexOf(v) !== -1;
+        },
+        // clock, then system — the ONE fallback both init and Escape restore use
+        fallback: function () {
+          return window.__pixNight() || window.matchMedia('(prefers-color-scheme: dark)').matches
+            ? 'night'
+            : 'day';
+        },
+      };
+      // Parse-first key helpers: the typing-surface guard (was copied 3×) and the
+      // WCAG 2.1.4 focus gate for the bare single-char shortcuts (digits 1–6, t).
+      // A shortcut fires only when a NEUTRAL surface holds focus — the page body,
+      // a section a floor-jump parked focus on, or the statusline — never a real
+      // interactive control (link/button/field), so voice-control dictation or
+      // stray focus can't trigger floor/theme changes.
+      window.__pixKeys = {
+        typing: function (e) {
+          const t = e && e.target;
+          return !!(
+            t &&
+            (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)
+          );
+        },
+        shortcutContext: function () {
+          const a = document.activeElement;
+          if (!a || a === document.body || a === document.documentElement) return true;
+          if (a.hasAttribute && a.hasAttribute('data-floor')) return true;
+          const sl = document.getElementById('statusline');
+          return !!(sl && sl.contains(a));
+        },
+      };
       (function () {
         try {
-          const ok = function (v) {
-            return v === 'day' || v === 'night' || v === 'dracula';
-          };
+          const T = window.__pixTheme;
           const forced = new URLSearchParams(location.search).get('theme');
-          const pick = ok(forced) ? forced : localStorage.getItem('pix-theme');
+          const pick = T.ok(forced) ? forced : localStorage.getItem(T.KEY);
           // The app's office lighting follows the wall clock; until the visitor
           // chooses a theme, so does the site — arriving after dark means the
           // night office. The clock only ever turns night ON: a dark-preference
-          // user keeps night at noon via the system fallback below.
+          // user keeps night at noon via the system fallback (see T.fallback).
           const afterHours = window.__pixNight();
-          const sys = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'night' : 'day';
-          const theme = ok(pick) ? pick : afterHours ? 'night' : sys;
+          const sysDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+          const theme = T.ok(pick) ? pick : T.fallback();
           // clock-forced (not chosen, not system) → the footer explains itself
-          if (!ok(pick) && afterHours && sys === 'day')
+          if (!T.ok(pick) && afterHours && !sysDark)
             document.documentElement.dataset.clockNight = '1';
           document.documentElement.dataset.theme = theme;
           // keep the mobile browser-chrome tint in sync with the resolved theme
-          const BG = { day: '#f4eee2', night: '#1d1813', dracula: '#282a36' };
           const meta = document.querySelector('meta[name="theme-color"]');
-          if (meta && BG[theme]) meta.setAttribute('content', BG[theme]);
+          if (meta && T.BG[theme]) meta.setAttribute('content', T.BG[theme]);
         } catch (e) {
           document.documentElement.dataset.theme = 'day';
         }
@@ -208,8 +251,7 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
         const reduceMQ = window.matchMedia('(prefers-reduced-motion: reduce)');
         const reduce = reduceMQ.matches;
 
-        // keep the mobile browser-chrome tint in sync on every theme change
-        const BG = { day: '#f4eee2', night: '#1d1813', dracula: '#282a36' };
+        // browser-chrome tint per theme comes from the parse-first single source
         const themeMeta = document.querySelector('meta[name="theme-color"]');
         // …and the tab icon: the little coworker turns the lights off after
         // dark (path derived from the day href so the Pages base-path holds)
@@ -223,7 +265,8 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
         syncFavicon();
         document.addEventListener('pix:theme', function () {
           const t = document.documentElement.dataset.theme;
-          if (themeMeta && BG[t]) themeMeta.setAttribute('content', BG[t]);
+          if (themeMeta && window.__pixTheme.BG[t])
+            themeMeta.setAttribute('content', window.__pixTheme.BG[t]);
           syncFavicon();
           // any explicit theme act ends the clock's authority (and its footer line)
           delete document.documentElement.dataset.clockNight;
@@ -268,31 +311,21 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
         };
         document.addEventListener('keydown', function (e) {
           // don't hijack typing: skip when a field is focused or a modifier is held
-          const tgt = e.target;
           if (e.ctrlKey || e.metaKey || e.altKey) return;
-          if (
-            tgt &&
-            (tgt.tagName === 'INPUT' || tgt.tagName === 'TEXTAREA' || tgt.isContentEditable)
-          )
-            return;
+          if (window.__pixKeys.typing(e)) return;
+          const T = window.__pixTheme;
           if (e.key === 'Escape') {
             clearRetint();
             let saved = null;
             try {
-              saved = localStorage.getItem('pix-theme');
+              saved = localStorage.getItem(T.KEY);
             } catch (e2) {}
             // validate like the no-FOUC init — a stale/garbage stored id must not
             // land in data-theme — and restore through the SAME fallback chain
             // the init uses (clock, then system), or an after-hours visitor with
             // no saved choice would get snapped to day by the Escape that merely
             // closed the Docs dropdown.
-            const fallback =
-              window.__pixNight() || window.matchMedia('(prefers-color-scheme: dark)').matches
-                ? 'night'
-                : 'day';
-            setTheme(
-              saved === 'night' || saved === 'dracula' || saved === 'day' ? saved : fallback
-            );
+            setTheme(T.ok(saved) ? saved : T.fallback());
             return;
           }
           if (e.key && e.key.length === 1) {
@@ -318,9 +351,9 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
           // "press any key to skip" the boot must not also retint (inert blocks
           // focus/clicks, not document-level keydown)
           if (document.documentElement.dataset.booting === '1') return;
-          const t = e.target;
-          if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable))
-            return;
+          // WCAG 2.1.4: fire only from a neutral focus context (never a focused
+          // control or text field), so dictation / stray focus can't retint.
+          if (window.__pixKeys.typing(e) || !window.__pixKeys.shortcutContext()) return;
           i = (i + 1) % accents.length;
           const s = document.documentElement.style;
           s.setProperty('--coral', accents[i].a);

@@ -62,18 +62,28 @@ Mermaid diagram becomes an inline SVG at build via `rehype-mermaid`, which is
   resume subtracts the paused span from the sim clock (`pauseOffset`) so the
   timeline doesn't lurch-jump; the button stays `hidden` on every poster-only
   path (reduced motion / no wasm / fetch failure) and is unhidden by the
-  first painted frame.
+  first painted frame. Pause is **page-scoped**: `setPaused` dispatches
+  `pix:paused` and every other >5s auto-motion listens (the statusline feed
+  ticker, the hero dust) — one control governs page motion, and the statusline
+  reads `❚❚ PAUSED`. The wasm fetch is **deferred** off the render-critical
+  window (`load` → `requestIdleCallback`) so it doesn't compete with the
+  above-fold poster/fonts; a live un-reduce still boots promptly via the mq
+  listener.
 
 ## CSP (hash-based, two coordinated halves — both in astro.config.mjs)
 
 The `<meta>` CSP is Astro 7's built-in `security.csp` PLUS the
-`cspInlineHashes()` `astro:build:done` hook, deliberately kept in the same
-file: Astro emits the meta into every page's head (404 included) and owns the
-RESOURCE lists; the hook then re-derives the hash sets from the **built
-html**, because (verified vs 7.0.5) Astro does not hash template-level
-`is:inline` scripts — the only script kind this site has — and it appends
-style hashes unconditionally, which would make browsers *ignore*
-`'unsafe-inline'`. Consequences to not "fix":
+`cspInlineHashes()` `astro:build:done` hook. The **policy** (`security.csp`
+directives) and the **hook registration** stay together in `astro.config.mjs`
+(the anti-drift co-location); the pure per-page transform — `rewriteCspMeta(html)`
+— lives in [`config/csp-hashes.mjs`](config/csp-hashes.mjs), unit-tested by
+`config/csp-hashes.test.mjs` (`npm run test:unit`, in `verify`) so its
+quote-aware script-tag scan can't diverge from the HTML tokenizer. Astro emits
+the meta into every page's head (404 included) and owns the RESOURCE lists; the
+hook then re-derives the hash sets from the **built html**, because (verified
+vs 7.0.5) Astro does not hash template-level `is:inline` scripts — the only
+script kind this site has — and it appends style hashes unconditionally, which
+would make browsers *ignore* `'unsafe-inline'`. Consequences to not "fix":
 
 - **`script-src` carries no `'unsafe-inline'`** — every inline script is
   whitelisted by content hash, recomputed on each build. Adding/editing an

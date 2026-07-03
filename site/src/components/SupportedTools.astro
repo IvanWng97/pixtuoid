@@ -1,6 +1,8 @@
 ---
 import sources from '../sources.json';
-import { asset } from '../consts';
+import { asset, floorByNumber } from '../consts';
+
+const floor = floorByNumber(2);
 
 // Single source of truth → site/src/sources.json. The README "Supported Tools"
 // glimpse is generated from the SAME file (scripts/gen-readme.mjs), and the
@@ -45,10 +47,10 @@ const legend = (['yes', 'experimental', 'planned', 'no'] as OsState[])
   .join(' · ');
 ---
 
-<section id="tools" class="tools" data-lit data-floor="2">
+<section id={floor.id} class="tools" data-lit data-floor={floor.n}>
   <div class="container">
     <div class="section-head reveal">
-      <p class="eyebrow">2F · tenants — the resident CLIs</p>
+      <p class="eyebrow">{floor.n}F · {floor.name} — the resident CLIs</p>
       <h2 class="statement statement--md">Whichever CLI<br />they run.</h2>
       <p class="lead">
         Each coding agent shows up as a coworker. Support is per-tool <em>and</em> per-OS — the same matrix
@@ -205,19 +207,24 @@ const legend = (['yes', 'experimental', 'planned', 'no'] as OsState[])
     font-size: 0.72rem;
     text-transform: uppercase;
     letter-spacing: 0.06em;
-    opacity: 0.55;
+    /* informative (the only shipped-vs-planned divider): a muted AA color, NOT
+       opacity — element opacity sat at ~3.6:1 in day, below WCAG 1.4.3. */
+    color: var(--fg-muted);
     padding-top: 0.9rem;
     border-bottom: none;
   }
   .tools__planned tbody:last-child tr:last-child th,
   .tools__planned tr th,
   .tools__planned tr td {
-    opacity: 0.62;
+    /* de-emphasize planned rows with a muted color, not opacity (which dropped
+       the informative tool names below AA) */
+    color: var(--fg-muted);
   }
   .tools__legend {
     margin: 0.7rem 0.2rem 0.3rem;
     font-size: 0.78rem;
-    opacity: 0.6;
+    /* the sole decode key for the ✅/🧪/🔜 glyphs — AA muted color, not opacity */
+    color: var(--fg-muted);
   }
   /* The transport column is supplementary — drop it before the grid gets cramped. */
   @media (max-width: 560px) {

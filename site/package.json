@@ -16,7 +16,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "knip": "knip",
-    "verify": "npm run format:check && npm run lint && npm run check && npm run knip && npm run build",
+    "test:unit": "node --test \"config/**/*.test.mjs\"",
+    "verify": "npm run format:check && npm run lint && npm run check && npm run knip && npm run test:unit && npm run build",
     "lighthouse": "lhci autorun",
     "e2e": "playwright test"
   },

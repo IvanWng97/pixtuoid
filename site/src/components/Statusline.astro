@@ -10,6 +10,7 @@
 // office — with canned office-life beats interleaved; falls back to the
 // canned reel when the API is unreachable so the build never fails.
 import sources from '../sources.json';
+import { FLOORS, DIM_RESTING } from '../consts';
 
 const FALLBACK = [
   { state: 'active', who: 'claude-code', what: 'editing src/reducer.rs' },
@@ -66,14 +67,9 @@ try {
   // offline / timeout → FALLBACK already in place
 }
 
-const FLOORS = [
-  { n: 6, id: 'lobby', name: 'penthouse' },
-  { n: 5, id: 'showcase', name: 'studio' },
-  { n: 4, id: 'features', name: 'amenities' },
-  { n: 3, id: 'how', name: 'machine room' },
-  { n: 2, id: 'tools', name: 'tenants' },
-  { n: 1, id: 'install', name: 'front desk' },
-];
+// FLOORS (number ↔ section id ↔ name) is single-sourced in consts.ts; each
+// narrative section stamps its own data-floor/id/eyebrow from the SAME manifest,
+// so the scrollspy can't desync from the sections it drives.
 
 // per-CLI hue for a feed credit like "cc·pixtuoid" — the same manifest colors
 // the tools-matrix chips use (badge includes the trailing '·')
@@ -301,7 +297,7 @@ const badgeColor = (who: string): string | undefined => {
   }
 </style>
 
-<script is:inline>
+<script is:inline define:vars={{ dimResting: DIM_RESTING }}>
   (function () {
     const bar = document.getElementById('statusline');
     if (!bar) return;
@@ -347,7 +343,12 @@ const badgeColor = (who: string): string | undefined => {
         if (!bar.contains(e.target)) closeList();
       });
       document.addEventListener('keydown', function (e) {
-        if (e.key === 'Escape') closeList();
+        if (e.key !== 'Escape' || list.hidden) return;
+        // if focus was inside the popup, return it to the toggle so closing it
+        // (display:none) doesn't drop focus to <body> (WCAG 2.4.3) — mirrors Nav
+        const inside = list.contains(document.activeElement);
+        closeList();
+        if (inside) toggle.focus();
       });
     }
     btns.forEach(function (b) {
@@ -355,13 +356,14 @@ const badgeColor = (who: string): string | undefined => {
         go(b);
       });
     });
-    // the app's literal floor keys: bare digits 1–6 ride the elevator (skipped
-    // while typing in a field, holding a modifier, or during the boot intro)
+    // the app's literal floor keys: bare digits 1–6 ride the elevator. WCAG
+    // 2.1.4: fire only from a neutral focus context (page body / a section a
+    // jump parked focus on / the statusline), never a focused control or field,
+    // and never during the boot intro.
     document.addEventListener('keydown', function (e) {
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       if (document.documentElement.dataset.booting === '1') return;
-      const t = e.target;
-      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      if (window.__pixKeys.typing(e) || !window.__pixKeys.shortcutContext()) return;
       const btn = btns.find(function (b) {
         return b.dataset.floorBtn === e.key;
       });
@@ -390,16 +392,27 @@ const badgeColor = (who: string): string | undefined => {
       observeFloors();
     }
 
+    // ── page-level pause (WCAG 2.2.2): the office pause switch governs EVERY
+    // >5s auto-motion, so it also holds the feed ticker (the hero dust listens
+    // too). Reduced motion holds the same surfaces. Both drive ONE stop path. ──
+    let userPaused = false;
+
     // ── the feed: one item at a time, sequenced fade-out → fade-in (the items
     // are absolutely stacked, so a simultaneous swap double-exposes two lines
-    // mid-transition; reduced motion: static) ──
+    // mid-transition; reduced motion / user pause: static) ──
     const feedItems = Array.prototype.slice.call(bar.querySelectorAll('.sl__item'));
-    if (feedItems.length > 1 && !mq.matches) {
-      let on = 0;
-      setInterval(function () {
-        feedItems[on].classList.remove('is-on');
-        on = (on + 1) % feedItems.length;
-        const next = feedItems[on];
+    let feedTimer = 0;
+    let feedOn = 0;
+    function stopFeed() {
+      if (feedTimer) clearInterval(feedTimer);
+      feedTimer = 0;
+    }
+    function startFeed() {
+      if (feedTimer || feedItems.length <= 1 || mq.matches || userPaused) return;
+      feedTimer = setInterval(function () {
+        feedItems[feedOn].classList.remove('is-on');
+        feedOn = (feedOn + 1) % feedItems.length;
+        const next = feedItems[feedOn];
         setTimeout(function () {
           next.classList.add('is-on');
         }, 350);
@@ -422,38 +435,73 @@ const badgeColor = (who: string): string | undefined => {
     tickClock();
     setInterval(tickClock, 60000);
     if (lights) {
+      // the resting readout derives from the ONE dimmer const (was a baked
+      // 'lights 55%' that disagreed with the live 100·(1−0.55)=45% math)
+      const rest = 'lights ' + Math.round((1 - dimResting) * 100) + '%';
       if (mq.matches) {
-        lights.textContent = 'lights 55%';
+        lights.textContent = rest;
       } else {
         // 250ms: fast enough that the readout tracks the dimmer's ease instead
         // of contradicting a fully-lit gap for a visible beat
         setInterval(function () {
-          // a mid-session reduce-ON pins the dimmer at the CSS 0.55 while
+          // a mid-session reduce-ON pins the dimmer at the resting level while
           // __pixLights goes stale — report the pinned value, not the ghost
           const v = mq.matches
-            ? 0.55
+            ? dimResting
             : typeof window.__pixLights === 'number'
               ? window.__pixLights
-              : 0.55;
+              : dimResting;
           lights.textContent = 'lights ' + Math.round((1 - v) * 100) + '%';
         }, 250);
       }
     }
-    if (onair) {
-      // not-live copy follows the motion mode: reduced motion shows the still
-      // POSTER (a frame), live-capable mode shows a paused feed (STILL)
-      const setAir = function (live) {
-        onair.textContent = live ? '● LIVE' : mq.matches ? '□ STILL FRAME' : '○ STILL';
-        onair.classList.toggle('is-live', !!live);
-      };
-      if (mq.matches) onair.textContent = '□ STILL FRAME';
-      // seed from the backdrop's class: the one-shot pix:onair event can fire
-      // before this script attaches (fast wasm load), and a missed event would
-      // read STILL forever
-      if (!mq.matches && document.querySelector('.backdrop.is-live')) setAir(true);
-      document.addEventListener('pix:onair', function (e) {
-        setAir(e.detail && e.detail.live);
+    // the on-air readout reflects LIVE / user-PAUSED / STILL (poster) — the
+    // paused state is what makes the fixed bar read as paused, not '● LIVE'
+    let isLive = false;
+    function renderAir() {
+      if (!onair) return;
+      let text, live;
+      if (userPaused) {
+        text = '❚❚ PAUSED';
+        live = false;
+      } else if (isLive) {
+        text = '● LIVE';
+        live = true;
+      } else {
+        // reduced motion shows the still POSTER (a frame); live-capable mode
+        // shows a paused feed (STILL)
+        text = mq.matches ? '□ STILL FRAME' : '○ STILL';
+        live = false;
+      }
+      onair.textContent = text;
+      onair.classList.toggle('is-live', live);
+    }
+    // seed from the backdrop's class: the one-shot pix:onair event can fire
+    // before this script attaches (fast wasm load), and a missed event would
+    // read STILL forever
+    if (!mq.matches && document.querySelector('.backdrop.is-live')) isLive = true;
+    renderAir();
+    document.addEventListener('pix:onair', function (e) {
+      isLive = !!(e.detail && e.detail.live);
+      renderAir();
+    });
+
+    // ONE control, ONE stop path: the office pause switch fans out here (the
+    // feed ticker) and to the hero dust; the reduced-motion flip drives the SAME
+    // paths, so a mid-session reduce-ON freezes the ticker too (not just at load).
+    document.addEventListener('pix:paused', function (e) {
+      userPaused = !!(e.detail && e.detail.paused);
+      if (userPaused) stopFeed();
+      else startFeed();
+      renderAir();
+    });
+    if (mq.addEventListener) {
+      mq.addEventListener('change', function () {
+        if (mq.matches) stopFeed();
+        else startFeed();
+        renderAir();
       });
     }
+    startFeed();
   })();
 </script>

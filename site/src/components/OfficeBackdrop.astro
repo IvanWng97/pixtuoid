@@ -1,5 +1,5 @@
 ---
-import { asset } from '../consts';
+import { asset, DIM_RESTING } from '../consts';
 ---
 
 {
@@ -33,7 +33,12 @@ import { asset } from '../consts';
      when a statement owns the viewport center. Compositor-only (a single
      style.opacity write), never pauses the canvas. */
 }
-<div id="dimmer" aria-hidden="true"></div>
+{
+  /* --dim-rest single-sources the resting opacity with consts DIM_RESTING (also
+   the statusline's 'lights N%' readout) — a JS↔CSS value that can't share a
+   literal, so it rides an inline custom property both #dimmer rules read. */
+}
+<div id="dimmer" aria-hidden="true" style={`--dim-rest:${DIM_RESTING}`}></div>
 {
   /* THE PAUSE SWITCH (WCAG 2.2.2) — a real, keyboard-reachable <button> for
      the auto-playing office; hidden until the canvas actually goes live (the
@@ -99,7 +104,7 @@ import { asset } from '../consts';
     inset: 0;
     z-index: -1;
     background: var(--bg);
-    opacity: 0.55; /* pre-JS / reduced-motion resting level: constant AA */
+    opacity: var(--dim-rest); /* pre-JS / reduced-motion resting level (consts DIM_RESTING) */
     pointer-events: none;
   }
   /* Reduced motion is a complete parallel design: the office is the still
@@ -107,7 +112,7 @@ import { asset } from '../consts';
      animates. (The controller also early-returns.) */
   @media (prefers-reduced-motion: reduce) {
     #dimmer {
-      opacity: 0.55 !important;
+      opacity: var(--dim-rest) !important;
     }
   }
   /* The pause switch: 8-bit hardware — square, hard edges, a 1px offset
@@ -261,6 +266,10 @@ import { asset } from '../consts';
     function setPaused(p) {
       paused = p;
       if (pauseBtn) pauseBtn.setAttribute('aria-pressed', String(p));
+      // fan the pause out to every OTHER >5s auto-motion surface — the statusline
+      // feed ticker and the hero dust — so ONE control governs page motion
+      // (WCAG 2.2.2 covers the whole page, not just this canvas).
+      document.dispatchEvent(new CustomEvent('pix:paused', { detail: { paused: p } }));
       if (p) {
         pausedAt = Date.now();
         stop();
@@ -307,7 +316,23 @@ import { asset } from '../consts';
           /* the still poster stays — the building simply doesn't go live */
         });
     }
-    if (!mq.matches) boot();
+    // Defer the ~740KB wasm fetch OUT of the render-critical window: kick it
+    // after `load`, at idle, so it stops competing with the above-fold poster /
+    // fonts / CSS (LCP is the H1 text). The poster is the instant layer; the
+    // canvas crossfades in whenever the first frame lands (~0.5–1s later on fast
+    // links — no visual change). Reduced motion still defers entirely; a live
+    // un-reduce boots promptly via the mq listener below.
+    function deferBoot() {
+      if (mq.matches) return;
+      (
+        window.requestIdleCallback ||
+        function (fn) {
+          return setTimeout(fn, 200);
+        }
+      )(boot);
+    }
+    if (document.readyState === 'complete') deferBoot();
+    else window.addEventListener('load', deferBoot, { once: true });
 
     let rraf = 0;
     window.addEventListener('resize', function () {
@@ -337,6 +362,10 @@ import { asset } from '../consts';
             pauseBtn.setAttribute('aria-pressed', 'false');
             pauseBtn.hidden = true;
           }
+          // clear any user-pause so the statusline feed / hero dust aren't stuck
+          // paused after a later un-reduce (they hold their OWN reduced-motion
+          // stop; this only keeps the pause flag in sync across surfaces)
+          document.dispatchEvent(new CustomEvent('pix:paused', { detail: { paused: false } }));
           wrap.classList.remove('is-live');
           live = false;
           document.dispatchEvent(new CustomEvent('pix:onair', { detail: { live: false } }));
@@ -427,20 +456,27 @@ import { asset } from '../consts';
       raf = requestAnimationFrame(frame);
     }
 
+    // Re-measure listeners are registered UNCONDITIONALLY (not behind the
+    // reduced-motion gate): a page loaded reduced then un-reduced mid-session
+    // must not run the controller forever on the single stale snapshot the
+    // un-reduce branch measured — every subsequent resize/rotation/late layout
+    // shift has to re-measure the page-space rects. (measure() is a cheap
+    // getBoundingClientRect sweep; harmless when no loop is running.)
+    let rraf = 0;
+    window.addEventListener('resize', function () {
+      if (rraf) return;
+      rraf = requestAnimationFrame(function () {
+        rraf = 0;
+        measure();
+      });
+    });
+    // content below (boot reveal, lazy media) can shift rects after load
+    window.addEventListener('load', measure);
+
     function wire() {
-      if (mq.matches) return; // reduced motion: CSS holds the static 0.55
+      if (mq.matches) return; // reduced motion: CSS holds the static level
       measure();
       raf = requestAnimationFrame(frame);
-      let rraf = 0;
-      window.addEventListener('resize', function () {
-        if (rraf) return;
-        rraf = requestAnimationFrame(function () {
-          rraf = 0;
-          measure();
-        });
-      });
-      // content below (boot reveal, lazy media) can shift rects after load
-      window.addEventListener('load', measure);
     }
     // DEFERRED: this is:inline script renders BEFORE <main> — a parse-time
     // querySelectorAll sees zero [data-lit] blocks (the documented
@@ -456,6 +492,15 @@ import { asset } from '../consts';
           cancelAnimationFrame(raf);
           raf = 0;
           dimmer.style.opacity = ''; // CSS reduced-motion rule takes over
+          // also release the faded [data-lit="fade"] block, or the hero copy
+          // stays STRANDED at inline opacity 0.001 (invisible h1/CTA) with no
+          // recovery while reduce stays on — an inline declaration beats the CSS
+          // parallel design (mirrors the dimmer reset just above).
+          if (active) {
+            active.style.opacity = '';
+            active.style.transform = '';
+            active = null;
+          }
         } else if (!mq.matches && !raf) {
           measure();
           raf = requestAnimationFrame(frame);

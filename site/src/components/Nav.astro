@@ -1,5 +1,5 @@
 ---
-import { REPO, SPONSOR, asset } from '../consts';
+import { REPO, SPONSOR, asset, DOCS } from '../consts';
 // Absolute home so the section anchors work from any page (e.g. /config).
 const home = asset('');
 // `floating` = the OPEN FLOOR index treatment (corner chrome over the live
@@ -39,12 +39,7 @@ const { floating = false } = Astro.props;
           Docs <span aria-hidden="true">▾</span>
         </button>
         <div id="docs-menu" class="nav__menu">
-          <a href={asset('architecture')}>Architecture</a>
-          <a href={asset('config')}>Config</a>
-          <a href={asset('contributing')}>Contributing</a>
-          <a href={asset('knowledge-base')}>Knowledge engineering</a>
-          <a href={asset('parallel-delivery')}>Parallel delivery</a>
-          <a href={asset('migration')}>Migration</a>
+          {DOCS.map((d) => <a href={asset(d.route)}>{d.label}</a>)}
         </div>
       </div>
       <a href={REPO} target="_blank" rel="noreferrer">GitHub ↗</a>
@@ -98,72 +93,68 @@ const { floating = false } = Astro.props;
         const next = root.dataset.theme === 'night' ? 'day' : 'night';
         root.dataset.theme = next;
         try {
-          localStorage.setItem('pix-theme', next);
+          localStorage.setItem(window.__pixTheme.KEY, next);
         } catch (e) {}
         // notify listeners (Nav icon sync, gallery chip reset, theme-color meta)
         // — the same event the dracula egg / Escape dispatch from Base.astro
         document.dispatchEvent(new CustomEvent('pix:theme'));
       });
 
-    // mobile hamburger → toggle the nav-links dropdown
-    const burger = document.getElementById('nav-burger');
-    const links = document.getElementById('nav-links');
-    const bicon = burger && burger.querySelector('.nav__burger-icon');
-    if (burger && links) {
-      const setMenu = function (open) {
-        links.classList.toggle('is-open', open);
-        burger.setAttribute('aria-expanded', open ? 'true' : 'false');
-        if (bicon) bicon.textContent = open ? '✕' : '☰';
+    // One disclosure wiring for both the burger menu and the Docs dropdown (the
+    // 5-part toggle/close/Escape-focus-return pattern was duplicated). `icon*`
+    // flips the burger glyph; `focusFirst` moves focus into the revealed panel
+    // so a menu that renders BELOW its trigger still follows it in tab order
+    // (WCAG 2.4.3) — the Escape branch returns focus to the trigger either way.
+    function wireDisclosure(trigger, panel, opts) {
+      opts = opts || {};
+      const isOpen = function () {
+        return panel.classList.contains('is-open');
       };
-      burger.addEventListener('click', function (e) {
+      const set = function (open) {
+        panel.classList.toggle('is-open', open);
+        trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+        if (opts.icon) opts.icon.textContent = open ? opts.iconOpen : opts.iconClosed;
+        if (open && opts.focusFirst) {
+          const first = panel.querySelector('a, button');
+          if (first) first.focus();
+        }
+      };
+      trigger.addEventListener('click', function (e) {
         e.stopPropagation();
-        setMenu(!links.classList.contains('is-open'));
+        set(!isOpen());
       });
-      links.querySelectorAll('a').forEach(function (a) {
+      panel.querySelectorAll('a').forEach(function (a) {
         a.addEventListener('click', function () {
-          setMenu(false);
+          set(false);
         });
       });
       document.addEventListener('keydown', function (e) {
-        if (e.key !== 'Escape' || !links.classList.contains('is-open')) return;
-        // if focus was inside the menu, return it to the burger so closing the
-        // dropdown (display:none) doesn't drop focus to <body> (WCAG 2.4.3)
-        const focusInMenu = links.contains(document.activeElement);
-        setMenu(false);
-        if (focusInMenu) burger.focus();
+        if (e.key !== 'Escape' || !isOpen()) return;
+        // if focus was inside the panel, return it to the trigger so closing the
+        // panel (display:none) doesn't drop focus to <body> (WCAG 2.4.3)
+        const inside = panel.contains(document.activeElement);
+        set(false);
+        if (inside) trigger.focus();
       });
       document.addEventListener('click', function (e) {
-        if (!links.contains(e.target) && !burger.contains(e.target)) setMenu(false);
+        if (!panel.contains(e.target) && !trigger.contains(e.target)) set(false);
       });
     }
 
-    // desktop "Docs" dropdown (on mobile its items render flat in the burger panel)
+    // mobile hamburger → the nav-links dropdown; desktop "Docs" dropdown (on
+    // mobile the Docs items render flat inside the burger panel)
+    const burger = document.getElementById('nav-burger');
+    const links = document.getElementById('nav-links');
+    if (burger && links)
+      wireDisclosure(burger, links, {
+        icon: burger.querySelector('.nav__burger-icon'),
+        iconOpen: '✕',
+        iconClosed: '☰',
+        focusFirst: true,
+      });
     const docsBtn = document.getElementById('docs-btn');
     const docsMenu = document.getElementById('docs-menu');
-    if (docsBtn && docsMenu) {
-      const setDocs = function (open) {
-        docsMenu.classList.toggle('is-open', open);
-        docsBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
-      };
-      docsBtn.addEventListener('click', function (e) {
-        e.stopPropagation();
-        setDocs(!docsMenu.classList.contains('is-open'));
-      });
-      docsMenu.querySelectorAll('a').forEach(function (a) {
-        a.addEventListener('click', function () {
-          setDocs(false);
-        });
-      });
-      document.addEventListener('keydown', function (e) {
-        if (e.key !== 'Escape' || !docsMenu.classList.contains('is-open')) return;
-        const inMenu = docsMenu.contains(document.activeElement);
-        setDocs(false);
-        if (inMenu) docsBtn.focus(); // don't drop focus to <body> (WCAG 2.4.3)
-      });
-      document.addEventListener('click', function (e) {
-        if (!docsMenu.contains(e.target) && !docsBtn.contains(e.target)) setDocs(false);
-      });
-    }
+    if (docsBtn && docsMenu) wireDisclosure(docsBtn, docsMenu);
   })();
 </script>
 

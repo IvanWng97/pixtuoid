@@ -333,7 +333,7 @@ site-dev-stop:
     cd site && node node_modules/astro/bin/astro.mjs dev stop
 
 [group('site')]
-[doc('Full site gate: format-check → lint → astro check → build (mirrors site CI)')]
+[doc('Site static tier: format-check → lint → astro check → knip → unit tests → build (site CI runs e2e + lighthouse after these)')]
 site-check:
     npm --prefix site run verify
 
