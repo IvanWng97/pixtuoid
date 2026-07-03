@@ -5,7 +5,7 @@
 //! Each subroutine is independently togglable and self-contained. New
 //! ambient effects go here, not in `background/` or `drawable.rs`.
 
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_core::state::FloorLocalDeskIndex;
@@ -42,10 +42,7 @@ pub(super) fn dust_mote_positions(
     now: SystemTime,
     col: &SunbeamColumn,
 ) -> Vec<DustMote> {
-    let t_ms = now
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap_or(Duration::ZERO)
-        .as_millis() as u64;
+    let t_ms = super::epoch_ms(now);
     let mut out = Vec::with_capacity(MOTES_PER_COLUMN);
     for i in 0..MOTES_PER_COLUMN {
         // Mix floor_seed, column x, and particle id through splitmix64 so
@@ -357,6 +354,7 @@ pub(super) fn paint_sun_spot(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
     // The paint passes now take the per-frame `look` by reference (computed once
     // in `render_to_rgb_buffer`); tests build it the same way the production
     // caller does, so the asserted output is unchanged.

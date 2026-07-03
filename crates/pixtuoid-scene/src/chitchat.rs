@@ -106,10 +106,10 @@ pub struct ActiveChitchat {
 
 impl ActiveChitchat {
     pub fn new(venue: VenueKey, participants: Vec<AgentId>, now: SystemTime) -> Self {
-        let ms = now
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(0);
+        // Direct call to the model-layer `anim::elapsed_ms` (NOT the render-layer
+        // `pixel_painter::epoch_ms` forwarder — chitchat is a model module and
+        // must not depend on the render layer).
+        let ms = crate::anim::elapsed_ms(now, SystemTime::UNIX_EPOCH);
         let mut chat = Self {
             venue,
             participants: Vec::new(),

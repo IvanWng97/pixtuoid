@@ -37,12 +37,11 @@ use crate::pet::PetFrame;
 use crate::pose;
 
 /// Milliseconds since the Unix epoch for `now` (0 if the clock is before it).
-/// The wall-clock decode the pixel-pass animation timers share — was hand-rolled
-/// identically at the top of half a dozen paint helpers.
+/// The wall-clock decode the pixel-pass animation timers share — 8 callers read
+/// better with this name than an inline `elapsed_ms(now, UNIX_EPOCH)`. A one-line
+/// forwarder to the scene-wide `anim::elapsed_ms` (same saturate-to-0 semantics).
 pub(super) fn epoch_ms(now: SystemTime) -> u64 {
-    now.duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
+    crate::anim::elapsed_ms(now, SystemTime::UNIX_EPOCH)
 }
 
 /// Result of the pure-pixel pass — carries the resolved cat position
