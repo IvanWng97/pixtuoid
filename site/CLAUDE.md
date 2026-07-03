@@ -57,6 +57,34 @@ Mermaid diagram becomes an inline SVG at build via `rehype-mermaid`, which is
   `components/OfficeBackdrop.astro` dynamically `import()`s it at runtime
   (poster-first; any failure keeps the still). Never hand-edit
   (prettier/eslint/knip all ignore it); regenerate from the crate.
+  The backdrop's pause switch (`#office-pause`, WCAG 2.2.2) lives in the same
+  component: pause stops the rAF loop (frozen frame stays on the canvas) and
+  resume subtracts the paused span from the sim clock (`pauseOffset`) so the
+  timeline doesn't lurch-jump; the button stays `hidden` on every poster-only
+  path (reduced motion / no wasm / fetch failure) and is unhidden by the
+  first painted frame.
+
+## CSP (hash-based, two coordinated halves — both in astro.config.mjs)
+
+The `<meta>` CSP is Astro 7's built-in `security.csp` PLUS the
+`cspInlineHashes()` `astro:build:done` hook, deliberately kept in the same
+file: Astro emits the meta into every page's head (404 included) and owns the
+RESOURCE lists; the hook then re-derives the hash sets from the **built
+html**, because (verified vs 7.0.5) Astro does not hash template-level
+`is:inline` scripts — the only script kind this site has — and it appends
+style hashes unconditionally, which would make browsers *ignore*
+`'unsafe-inline'`. Consequences to not "fix":
+
+- **`script-src` carries no `'unsafe-inline'`** — every inline script is
+  whitelisted by content hash, recomputed on each build. Adding/editing an
+  `is:inline` script needs NO manual CSP step.
+- **`style-src` keeps `'unsafe-inline'` and must stay hash-free**: Shiki
+  spans, the build-time mermaid SVG, and the few `style={}` attributes are
+  inline style ATTRIBUTES, which hashes cannot express (one present hash
+  disables `unsafe-inline` for the whole directive).
+- **`astro dev` serves NO CSP** (upstream: the feature is build/preview-only).
+  CSP regressions surface in `just site-e2e`'s console watchdog against the
+  production build, not in dev.
 
 ## Dev-server lifecycle (agent-driving)
 

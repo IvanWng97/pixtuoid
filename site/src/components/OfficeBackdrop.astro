@@ -34,6 +34,32 @@ import { asset } from '../consts';
      style.opacity write), never pauses the canvas. */
 }
 <div id="dimmer" aria-hidden="true"></div>
+{
+  /* THE PAUSE SWITCH (WCAG 2.2.2) — a real, keyboard-reachable <button> for
+     the auto-playing office; hidden until the canvas actually goes live (the
+     poster-only paths — reduced motion, no wasm, fetch failure — have nothing
+     to pause). aria-pressed carries the state; the label stays constant
+     (toggle-button convention). Icons are inline pixel SVGs on an 8×8 grid
+     (crispEdges — no anti-aliased glyph fonts near the office's pixels). */
+}
+<button
+  id="office-pause"
+  class="office-ctl"
+  hidden
+  aria-pressed="false"
+  aria-label="Pause the office animation"
+>
+  <svg class="office-ctl__pause" viewBox="0 0 8 8" shape-rendering="crispEdges" aria-hidden="true">
+    <rect x="1" y="1" width="2" height="6"></rect>
+    <rect x="5" y="1" width="2" height="6"></rect>
+  </svg>
+  <svg class="office-ctl__play" viewBox="0 0 8 8" shape-rendering="crispEdges" aria-hidden="true">
+    <rect x="2" y="1" width="1" height="7"></rect>
+    <rect x="3" y="2" width="1" height="5"></rect>
+    <rect x="4" y="3" width="1" height="3"></rect>
+    <rect x="5" y="4" width="1" height="1"></rect>
+  </svg>
+</button>
 
 <style is:global>
   /* The fixed canvas sits at z:-1; the body's opaque background would hide
@@ -84,6 +110,64 @@ import { asset } from '../consts';
       opacity: 0.55 !important;
     }
   }
+  /* The pause switch: 8-bit hardware — square, hard edges, a 1px offset
+     "casing" shadow, icons at an integer 3x of their 8×8 grid. Sits just
+     above the statusline, out of the dimmer's reach (fixed chrome, like the
+     statusline itself). Translucent at rest so it reads as part of the
+     office; solid on hover/focus and while paused (a frozen office must
+     announce why). */
+  /* the class display beats [hidden]'s UA rule — restate it (same trap as
+     the statusline's .sl__floors[hidden]) */
+  .office-ctl[hidden] {
+    display: none;
+  }
+  .office-ctl {
+    position: fixed;
+    right: 10px;
+    bottom: calc(2rem + env(safe-area-inset-bottom, 0px) + 10px);
+    z-index: 50;
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    background: var(--screen);
+    border: 2px solid var(--chip-line);
+    border-radius: 0;
+    box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.45);
+    color: var(--chip-bright);
+    cursor: pointer;
+    opacity: 0.45;
+    transition: opacity 0.15s ease;
+  }
+  .office-ctl:hover,
+  .office-ctl:focus-visible,
+  .office-ctl[aria-pressed='true'] {
+    opacity: 1;
+  }
+  .office-ctl:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+    border-radius: 0; /* the global :focus-visible rounds 3px — keep the pixel edge */
+  }
+  .office-ctl:active {
+    transform: translate(1px, 1px);
+    box-shadow: 1px 1px 0 rgba(0, 0, 0, 0.45);
+  }
+  .office-ctl svg {
+    width: 24px;
+    height: 24px;
+    fill: currentColor;
+  }
+  .office-ctl .office-ctl__play,
+  .office-ctl[aria-pressed='true'] .office-ctl__pause {
+    display: none;
+  }
+  .office-ctl[aria-pressed='true'] .office-ctl__play {
+    display: block;
+    color: var(--led);
+  }
 </style>
 
 <script is:inline define:vars={{ wasmJsUrl: asset('wasm/pixtuoid_web.js') }}>
@@ -110,6 +194,18 @@ import { asset } from '../consts';
     let raf = 0;
     let last = 0;
     let live = false;
+    // The pause switch (#office-pause). While paused the rAF loop is simply
+    // not scheduled — the last frame stays on the canvas. `pauseOffset` is the
+    // total user-paused time: the sim clock runs `Date.now() - pauseOffset`,
+    // so resuming continues from the frozen moment instead of lurch-jumping
+    // the timeline forward. (Tab-hidden stops take NO offset on purpose — the
+    // office keeps living while you're away; only an explicit pause freezes
+    // its clock. Cost: the engine's wall-clock day/night lags by the total
+    // paused time — invisible at human pause scales.)
+    const pauseBtn = document.getElementById('office-pause');
+    let paused = false;
+    let pauseOffset = 0;
+    let pausedAt = 0;
 
     function sizeBuffer() {
       const w = window.innerWidth;
@@ -121,6 +217,27 @@ import { asset } from '../consts';
       img = new ImageData(bufW, BUF_H);
     }
 
+    function paint(nowMs) {
+      office.step(nowMs, bufW, BUF_H);
+      // Re-read ptr/len EVERY frame (resize reallocates; memory.grow
+      // invalidates views) and copy into the reusable ImageData.
+      const view = new Uint8ClampedArray(
+        wasm.memory.buffer,
+        office.frame_ptr(),
+        office.frame_len()
+      );
+      if (view.length === img.data.length) {
+        img.data.set(view);
+        ctx2d.putImageData(img, 0, 0);
+        if (!live) {
+          live = true;
+          wrap.classList.add('is-live');
+          if (pauseBtn) pauseBtn.hidden = false; // there is now something to pause
+          document.dispatchEvent(new CustomEvent('pix:onair', { detail: { live: true } }));
+        }
+      }
+    }
+
     function frame(t) {
       raf = 0;
       if (document.hidden) return;
@@ -128,34 +245,34 @@ import { asset } from '../consts';
         last = t;
         // Date.now(), NOT the rAF timestamp: the engine decodes now_ms as
         // calendar time (browser-local day/night + wall clock).
-        office.step(Date.now(), bufW, BUF_H);
-        // Re-read ptr/len EVERY frame (resize reallocates; memory.grow
-        // invalidates views) and copy into the reusable ImageData.
-        const view = new Uint8ClampedArray(
-          wasm.memory.buffer,
-          office.frame_ptr(),
-          office.frame_len()
-        );
-        if (view.length === img.data.length) {
-          img.data.set(view);
-          ctx2d.putImageData(img, 0, 0);
-          if (!live) {
-            live = true;
-            wrap.classList.add('is-live');
-            document.dispatchEvent(new CustomEvent('pix:onair', { detail: { live: true } }));
-          }
-        }
+        paint(Date.now() - pauseOffset);
       }
       raf = requestAnimationFrame(frame);
     }
     function start() {
-      if (!raf && office && !document.hidden && !mq.matches) {
+      if (!raf && office && !document.hidden && !mq.matches && !paused) {
         raf = requestAnimationFrame(frame);
       }
     }
     function stop() {
       if (raf) cancelAnimationFrame(raf);
       raf = 0;
+    }
+    function setPaused(p) {
+      paused = p;
+      if (pauseBtn) pauseBtn.setAttribute('aria-pressed', String(p));
+      if (p) {
+        pausedAt = Date.now();
+        stop();
+      } else {
+        pauseOffset += Date.now() - pausedAt;
+        start();
+      }
+    }
+    if (pauseBtn) {
+      pauseBtn.addEventListener('click', function () {
+        setPaused(!paused);
+      });
     }
 
     // Reduced motion defers the wasm fetch entirely (still poster only) —
@@ -198,6 +315,9 @@ import { asset } from '../consts';
       rraf = requestAnimationFrame(function () {
         rraf = 0;
         sizeBuffer();
+        // Setting canvas.width WIPES the bitmap: while paused no loop will
+        // repaint it, so re-render the ONE frozen frame at its frozen time.
+        if (paused && live) paint(pausedAt - pauseOffset);
       });
     });
     document.addEventListener('visibilitychange', function () {
@@ -208,6 +328,15 @@ import { asset } from '../consts';
       mq.addEventListener('change', function () {
         if (mq.matches) {
           stop();
+          // Reduced motion takes over as the poster-still design: the pause
+          // switch has nothing left to pause — reset it and hide it (a later
+          // un-reduce re-boots into the PLAYING state, button re-shown by the
+          // first painted frame).
+          paused = false;
+          if (pauseBtn) {
+            pauseBtn.setAttribute('aria-pressed', 'false');
+            pauseBtn.hidden = true;
+          }
           wrap.classList.remove('is-live');
           live = false;
           document.dispatchEvent(new CustomEvent('pix:onair', { detail: { live: false } }));

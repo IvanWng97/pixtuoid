@@ -130,6 +130,30 @@ test('the dimmer darkens statements and releases in office gaps', async ({ page 
   await expect.poll(heroOp).toBeGreaterThan(0.5);
 });
 
+test('the hero pause switch freezes the office and resumes it seamlessly', async ({ page }) => {
+  // WCAG 2.2.2: the auto-playing office backdrop can be paused. Pause must
+  // STOP the rAF loop dead (a frozen canvas, byte-identical snapshots — not
+  // merely a hidden button), and resume must paint new frames again.
+  const errors = watchErrors(page);
+  await gotoLive(page);
+  const btn = page.locator('#office-pause');
+  await expect(btn).toBeVisible(); // unhidden by the first painted frame
+  await expect(btn).toHaveAttribute('aria-pressed', 'false');
+  const shot = () =>
+    page.evaluate(() => (document.getElementById('office-live') as HTMLCanvasElement).toDataURL());
+  await btn.click();
+  await expect(btn).toHaveAttribute('aria-pressed', 'true');
+  const frozen = await shot();
+  await page.waitForTimeout(400); // >10 would-be frames at the 33ms cap
+  expect(await shot()).toBe(frozen); // not one new frame painted
+  // Keyboard operability: the switch is a real button — Enter resumes.
+  await btn.focus();
+  await page.keyboard.press('Enter');
+  await expect(btn).toHaveAttribute('aria-pressed', 'false');
+  await expect.poll(shot, { timeout: 10_000 }).not.toBe(frozen); // animating again
+  expect(errors()).toEqual([]);
+});
+
 test('the install Copy click hires without breaking the page', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-write']);
   const errors = watchErrors(page);
@@ -182,6 +206,8 @@ test('reduced motion stays on the still poster without errors', async ({ browser
   await page.waitForLoadState('networkidle');
   expect(wasmRequests).toEqual([]);
   await expect(page.locator('.backdrop.is-live')).not.toBeAttached();
+  // Poster-only path: nothing is animating, so the pause switch stays hidden.
+  await expect(page.locator('#office-pause')).toBeHidden();
   // Reduced motion also strips the showcase clip's autoplay: native controls
   // appear and the video stays paused (WCAG 2.2.2).
   const video = page.locator('[data-stage="agents"] video');

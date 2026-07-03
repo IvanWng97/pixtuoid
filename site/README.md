@@ -109,7 +109,11 @@ gates can't see. CI runs it in `site.yml` after the build step.
   19:00–07:00 inline.
 - **FX** (all `prefers-reduced-motion`-safe) — CRT power-on, hero pixel-dust,
   and the dimmer itself. (The old pointer glow + 3D tilt were removed
-  deliberately: perspective transforms smear pixel art.)
+  deliberately: perspective transforms smear pixel art.) The live office has
+  a pixel-style pause switch (`#office-pause`, bottom-right above the
+  statusline — WCAG 2.2.2): pause freezes the frame in place, resume picks
+  the timeline up where it stopped; hidden whenever only the still poster is
+  showing.
 - **Docs shell** — `layouts/Docs.astro` gives /config, /architecture,
   /contributing, /migration a shared sidebar + build-time mini-TOC + pager.
 
@@ -180,7 +184,10 @@ render script all pick it up automatically — no component edits.
 
 Project page today (`base: '/pixtuoid'`). To move to e.g. `pixtuoid.dev`: add
 `public/CNAME` with the domain, set `base: '/'` and `site: 'https://pixtuoid.dev'`
-in `astro.config.mjs`, then point DNS at GitHub Pages.
+in `astro.config.mjs`, then point DNS at GitHub Pages. `robots.txt` and its
+sitemap URL (`src/pages/robots.txt.ts`) derive from that config automatically —
+note that on the project page crawlers never fetch it (they only read the
+ORIGIN root's robots.txt), so it only becomes authoritative on a custom domain.
 
 ## First deploy (one-time)
 
