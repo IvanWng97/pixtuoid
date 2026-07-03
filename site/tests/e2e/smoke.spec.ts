@@ -85,9 +85,14 @@ test('the cross-component window contracts exist', async ({ page }) => {
         night: typeof window.__pixNight === 'function' && typeof window.__pixNight() === 'boolean',
         hire: typeof window.__pixHire === 'function',
         lights: typeof window.__pixLights,
+        // the office-reveal boot handshake (PR #462): Base publishes __pixRevealed
+        // (splash lifted) to release the roll; OfficeBackdrop publishes
+        // __pixEngineReady (engine resolved) to release the Level-2 splash gate.
+        revealed: window.__pixRevealed === true,
+        engineReady: window.__pixEngineReady === true,
       }))
     )
-    .toEqual({ night: true, hire: true, lights: 'number' });
+    .toEqual({ night: true, hire: true, lights: 'number', revealed: true, engineReady: true });
 });
 
 test('digit keys ride between floors (scrollspy round-trip)', async ({ page }) => {
@@ -348,6 +353,22 @@ test('first visit: boot intro auto-runs, reveals the page, seeds the gate', asyn
   await page.reload();
   await expect(page.locator('#boot')).not.toBeVisible();
   await expectSectionReveal(page, 'features');
+});
+
+test('first visit on an office-less page lifts the splash promptly (no engine-gate hang)', async ({
+  page,
+}) => {
+  // The Level-2 boot gate holds the splash for window.__pixEngineReady, set ONLY by
+  // OfficeBackdrop — which is index-only. Docs/404 share Base.astro's splash but
+  // have NO office, so the gate MUST fall back to the flat delay there; else the page
+  // stays inert the full ~4s cap. Regression pin for PR #462's docs-page hang.
+  const errors = watchErrors(page);
+  await page.goto('./architecture/'); // real first visit (no pix-booted), no OfficeBackdrop
+  await expect(page.locator('#boot')).toBeVisible();
+  await expect(page.locator('#office-live')).toHaveCount(0); // confirm: no office on this page
+  // Fix clears data-booting in ~1.8s; the unguarded gate hangs to ~5.9s. 4s separates.
+  await expect(page.locator('html')).not.toHaveAttribute('data-booting', '1', { timeout: 4_000 });
+  expect(errors()).toEqual([]);
 });
 
 test('theme chain: saved choice, URL override, toggle persist, Escape restore, system dark', async ({

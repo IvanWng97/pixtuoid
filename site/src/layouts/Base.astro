@@ -450,14 +450,21 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
             lines[i].classList.add('in');
             i++;
             setTimeout(step, 260);
-          } else {
+          } else if (document.getElementById('office-live')) {
             // Level 2: the lines are typed — now HOLD ("▸ ready") until the office
             // engine is actually ready (window.__pixEngineReady, set by
             // OfficeBackdrop on the first live frame, or on wasm failure/absence so
             // we never hang), so the splash lifts STRAIGHT into the office reveal
             // instead of onto a bg gap. Capped well under the first-visit reveal
             // budget for a slow or dead engine.
+            // GATED on the office being PRESENT: this splash lives in the shared
+            // Base layout, but OfficeBackdrop (#office-live) is index-only — it's the
+            // sole setter of __pixEngineReady. On docs/404 first visits nothing would
+            // ever set the flag, so without this guard the splash would hang the full
+            // cap with the page inert. No office → keep the flat pre-Level-2 delay.
             waitForEngine(0);
+          } else {
+            setTimeout(finish, 520);
           }
         }
         const MAX_ENGINE_WAITS = 50; // 50 × 80ms ≈ 4s cap after the lines finish
