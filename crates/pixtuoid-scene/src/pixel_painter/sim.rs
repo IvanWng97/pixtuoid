@@ -169,6 +169,7 @@ pub(crate) fn sim_step(
                     &layout.walkable,
                     origin,
                     w.facing,
+                    &layout.reachable,
                 );
                 stores
                     .overlay
@@ -396,6 +397,7 @@ fn resolve_characters(
                         &layout.walkable,
                         desk,
                         wp_obj.facing,
+                        &layout.reachable,
                     );
                     let (anim_name, anchor_base, sprite_h, flip_x) = match kind {
                         WaypointKind::Pantry => (

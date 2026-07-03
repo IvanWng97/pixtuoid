@@ -144,6 +144,7 @@ pub fn character_anchor(
                 &layout.walkable,
                 desk,
                 wp_obj.facing,
+                &layout.reachable,
             );
             match kind {
                 WaypointKind::Couch | WaypointKind::MeetingSofa => back_couch_anchor(stand, w),

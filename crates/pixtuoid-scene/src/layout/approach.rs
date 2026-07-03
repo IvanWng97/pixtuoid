@@ -92,12 +92,19 @@ fn half_extents(kind: WaypointKind, pantry_counter_size: Size) -> Option<(u16, u
     Some((w / 2, h / 2))
 }
 
-/// The walkable cell where an agent should stand to use the furniture of
-/// `kind` centered at `pos`, given the agent's `origin` (home desk). Among
-/// the four sides, returns the first walkable cell on the side nearest
-/// `origin`. Falls back to `pos` for seat furniture or a degenerate mask
-/// with no walkable neighbour (no worse than targeting the center directly,
-/// which the router then snaps).
+/// The walkable cell where an agent should stand to use the OBSTACLE furniture
+/// of `kind` centered at `pos`, given the agent's `origin` (home desk). This is
+/// the RENDER anchor for an AtWaypoint obstacle sprite, and it MUST equal the
+/// walk goal [`approach_point`] returns for the same furniture — else the sprite
+/// pops from the side the agent walked to onto a different face on arrival.
+///
+/// So it applies the SAME two filters `approach_point`'s obstacle branch does:
+/// the per-furniture approach allowlist AND coarse-grid `reachable`-ility, then
+/// among the qualifying sides returns the first walkable+reachable cell on the
+/// side nearest `origin`. Falls back to `pos` for seat furniture (`occupies_pos`)
+/// or when no reachable approach side exists — the same "no valid approach"
+/// sentinel `approach_point` returns, which the agent never reaches (so this is
+/// never rendered for it).
 pub fn stand_point(
     kind: WaypointKind,
     pos: Point,
@@ -105,6 +112,7 @@ pub fn stand_point(
     mask: &WalkableMask,
     origin: Point,
     facing: Facing,
+    reachable: &ReachSet,
 ) -> Point {
     let Some((hx, hy)) = half_extents(kind, pantry_counter_size) else {
         return pos;
@@ -132,11 +140,17 @@ pub fn stand_point(
                 y: cy as u16,
             };
             if mask.is_walkable(c.x, c.y) {
-                let d2 = squared_distance(c, origin);
-                if best.is_none_or(|(bd, _)| d2 < bd) {
-                    best = Some((d2, c));
+                // Reachability filter — IDENTICAL to approach_point's obstacle
+                // branch (approach_point): a walkable but coarse-unreachable
+                // first cell (an OBSTACLE_PAD straddle) drops the side, so the
+                // render anchor can't keep a near side the walk goal rejected.
+                if reachable.reaches(c) {
+                    let d2 = squared_distance(c, origin);
+                    if best.is_none_or(|(bd, _)| d2 < bd) {
+                        best = Some((d2, c));
+                    }
                 }
-                break; // first walkable cell on this side wins
+                break; // first walkable cell decides this side (matches approach_point)
             }
         }
     }
@@ -321,6 +335,7 @@ mod tests {
     fn pantry_stand_is_walkable_and_off_center() {
         let pos = Point { x: 50, y: 50 };
         let m = mask_with_obstacle(100, 100, pos, 32, 10);
+        let reach = ReachSet::from_mask(&m, Point { x: 5, y: 5 });
         // Origin to the north → expect a north-side stand cell.
         let s = stand_point(
             WaypointKind::Pantry,
@@ -329,6 +344,7 @@ mod tests {
             &m,
             Point { x: 50, y: 8 },
             Facing::South,
+            &reach,
         );
         assert!(m.is_walkable(s.x, s.y), "stand cell must be walkable");
         assert_ne!(s, pos, "must move off the blocked center");
@@ -339,6 +355,7 @@ mod tests {
     fn pantry_stand_follows_origin_side() {
         let pos = Point { x: 50, y: 50 };
         let m = mask_with_obstacle(100, 100, pos, 32, 10);
+        let reach = ReachSet::from_mask(&m, Point { x: 5, y: 5 });
         let south = stand_point(
             WaypointKind::Pantry,
             pos,
@@ -346,6 +363,7 @@ mod tests {
             &m,
             Point { x: 50, y: 95 },
             Facing::South,
+            &reach,
         );
         assert!(south.y > pos.y, "south origin → south stand, got {south:?}");
         let east = stand_point(
@@ -355,6 +373,7 @@ mod tests {
             &m,
             Point { x: 98, y: 50 },
             Facing::South,
+            &reach,
         );
         assert!(east.x > pos.x, "east origin → east stand, got {east:?}");
     }
@@ -363,6 +382,7 @@ mod tests {
     fn seat_kinds_pass_through_pos() {
         let pos = Point { x: 50, y: 50 };
         let m = mask_with_obstacle(100, 100, pos, 20, 7);
+        let reach = ReachSet::from_mask(&m, Point { x: 10, y: 10 });
         for kind in [
             WaypointKind::Couch,
             WaypointKind::MeetingSofa,
@@ -375,7 +395,8 @@ mod tests {
                     Size { w: 0, h: 0 },
                     &m,
                     Point { x: 10, y: 10 },
-                    Facing::South
+                    Facing::South,
+                    &reach,
                 ),
                 pos,
                 "{kind:?} pos is already the seat cell"
@@ -415,6 +436,7 @@ mod tests {
                         &l.walkable,
                         origin,
                         wp.facing,
+                        &l.reachable,
                     );
                     if seat(wp.kind) {
                         assert_eq!(s, wp.pos, "seed {seed}: {:?} should pass through", wp.kind);
@@ -424,6 +446,65 @@ mod tests {
                             "{bw}x{bh} seed {seed}: {:?} stand {s:?} not a walkable off-center cell (center {:?})",
                             wp.kind,
                             wp.pos
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn real_layout_obstacle_stand_matches_approach_point() {
+        // The RENDER anchor (stand_point) and the WALK goal (approach_point) MUST
+        // agree for obstacle waypoints — else the AtWaypoint sprite pops from the
+        // side the agent walked to onto a different face on arrival. They diverged
+        // when stand_point lacked approach_point's reachability filter: on a real
+        // floor where the nearest-desk side's first walkable pixel sat in a coarse-
+        // unreachable OBSTACLE_PAD cell, stand kept the near (unreachable) side
+        // while approach picked a farther reachable one (~1 full sprite width pop).
+        // Assert equality across the sizes×seeds×desks that exhibited it.
+        use crate::layout::SceneLayout;
+        let obstacle = |k| {
+            !matches!(
+                k,
+                WaypointKind::Couch | WaypointKind::MeetingSofa | WaypointKind::MeetingStand
+            )
+        };
+        for (bw, bh) in [
+            (160u16, 120u16),
+            (192, 160),
+            (240, 160),
+            (256, 200),
+            (200, 140),
+        ] {
+            for seed in 0..16u64 {
+                let Some(l) = SceneLayout::compute_with_seed(bw, bh, Some(6), seed) else {
+                    continue;
+                };
+                for &desk in &l.home_desks {
+                    for wp in l.waypoints.iter().filter(|w| obstacle(w.kind)) {
+                        let stand = stand_point(
+                            wp.kind,
+                            wp.pos,
+                            l.pantry_counter_size,
+                            &l.walkable,
+                            desk,
+                            wp.facing,
+                            &l.reachable,
+                        );
+                        let approach = approach_point(
+                            wp.kind.furniture(),
+                            wp.pos,
+                            wp.facing,
+                            l.pantry_counter_size,
+                            &l.walkable,
+                            desk,
+                            &l.reachable,
+                        );
+                        assert_eq!(
+                            stand, approach,
+                            "{bw}x{bh} seed {seed} desk {desk:?}: {:?} render anchor {stand:?} != walk goal {approach:?}",
+                            wp.kind,
                         );
                     }
                 }
@@ -453,6 +534,7 @@ mod tests {
             &l.walkable,
             Point { x: p.x, y: 0 },
             Facing::South,
+            &l.reachable,
         );
         let south = stand_point(
             WaypointKind::Pantry,
@@ -464,6 +546,7 @@ mod tests {
                 y: l.buf_h - 1,
             },
             Facing::South,
+            &l.reachable,
         );
         assert!(
             north.y <= south.y,
@@ -481,6 +564,9 @@ mod tests {
         let pos = Point { x: 2, y: 2 };
         let counter = Size { w: 4, h: 4 };
         let m = mask_with_obstacle(100, 100, pos, counter.w, counter.h);
+        // Reach seeded from the far-open corner: the E/S stand cells are connected
+        // to it (the obstacle only blocks the top-left), so the filter is a no-op.
+        let reach = ReachSet::from_mask(&m, Point { x: 90, y: 90 });
         // Origin to the NW (off-buffer-ish corner) so the nearest sides (N/W) are
         // preferred — but they break on negative coords, forcing an E/S result.
         let s = stand_point(
@@ -490,6 +576,7 @@ mod tests {
             &m,
             Point { x: 0, y: 0 },
             Facing::South,
+            &reach,
         );
         assert!(m.is_walkable(s.x, s.y), "stand cell must be walkable");
         assert!(
@@ -506,6 +593,9 @@ mod tests {
         let pos = Point { x: 50, y: 50 };
         let mut m = WalkableMask::new_open(100, 100);
         m.mark_blocked(0, 0, 100, 54, 0);
+        // Reach seeded from the open south band (the only walkable region), so the
+        // south stand cell qualifies under the reachability filter.
+        let reach = ReachSet::from_mask(&m, Point { x: 50, y: 80 });
         let s = stand_point(
             WaypointKind::VendingMachine,
             pos,
@@ -513,6 +603,7 @@ mod tests {
             &m,
             Point { x: 50, y: 5 },
             Facing::South,
+            &reach,
         );
         assert!(m.is_walkable(s.x, s.y));
         assert!(s.y > pos.y, "only south is open, got {s:?}");
@@ -657,6 +748,7 @@ mod tests {
             &m,
             origin,
             Facing::South,
+            &reach,
         );
         assert!(
             reach.reaches(sp),
