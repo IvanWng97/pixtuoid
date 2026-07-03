@@ -18,8 +18,8 @@ use pixtuoid_core::state::AgentSlot;
 use pixtuoid_core::AgentId;
 
 use crate::motion::{
-    advance_wander, octile_path_len, settle_len, walking_position, MotionState, WalkLeg,
-    WalkPathSnapshot, WanderKind, WanderPhase,
+    advance_wander, measured_leg_len, walking_position, MotionState, WalkLeg, WalkPathSnapshot,
+    WanderKind, WanderPhase,
 };
 use crate::physics::{walk_arrived, walk_profile, walk_progress, WalkIntent};
 use pixtuoid_core::walkable::{OccupancyOverlay, WalkableMask};
@@ -266,8 +266,8 @@ pub fn derive_with_routing(
                 route_from,
                 door_target,
             );
-            let glide = settle_len(route_from, chair_rise);
-            let path_len = (octile_path_len(&path) + glide).max(1);
+            // Rise off the chair (start settle); the door has no seat (end None).
+            let path_len = measured_leg_len(&path, chair_rise, None);
             let profile = walk_profile(path_len, WalkIntent::Exit, slot.agent_id);
             // Store the ORIGIN (chair when a desk exit) so the render can detect
             // the desk-departure and re-derive the approach+settle.
@@ -354,7 +354,6 @@ pub fn derive_with_routing(
         // direct target with no settle.
         let (approach, chair_settle) = desk_leg_endpoint(desk, layout);
         let settle = chair_settle.map_or(Settle::None, Settle::End);
-        let settle_px = settle_len(approach, chair_settle);
 
         let mstate = motion
             .entry(slot.agent_id)
@@ -372,8 +371,9 @@ pub fn derive_with_routing(
                 door,
                 approach,
             );
-            // Profile covers door→approach PLUS the short settle glide onto the chair.
-            let path_len = (octile_path_len(&path) + settle_px).max(1);
+            // Profile covers door→approach PLUS the short settle glide onto the chair
+            // (end settle; the door start has no seat).
+            let path_len = measured_leg_len(&path, None, chair_settle);
             let profile = walk_profile(path_len, WalkIntent::Entry, slot.agent_id);
             mstate.entry = Some((slot.created_at, profile));
         }
@@ -631,8 +631,8 @@ pub fn derive_with_routing(
                             prev,
                             snap_target,
                         );
-                        let len =
-                            (octile_path_len(&path) + settle_len(snap_target, chair_settle)).max(1);
+                        // Glide onto the chair (end settle); `prev` start has no seat.
+                        let len = measured_leg_len(&path, None, chair_settle);
                         let p = walk_profile(len, WalkIntent::SnapBack, slot.agent_id);
                         ms_entry.snap_back = Some(WalkLeg {
                             started_at: slot.state_started_at,

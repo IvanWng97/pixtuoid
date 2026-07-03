@@ -348,8 +348,8 @@ pub fn advance_wander(
                     // the router-cache key match the rendered leg.
                     let (from, chair_settle) = desk_leg_endpoint(desk, layout);
                     let path = route_jittered(router, &layout.walkable, overlay, id, from, dest);
-                    let desk_glide = settle_len(from, chair_settle);
-                    let len = (octile_path_len(&path) + desk_glide + settle_len(dest, seat)).max(1);
+                    // Rise off the desk chair (start), glide onto the waypoint seat (end).
+                    let len = measured_leg_len(&path, chair_settle, seat);
                     ms.wander.profile = Some(walk_profile(len, WalkIntent::WanderOut, id));
 
                     ms.wander.phase = WanderPhase::WalkingOut;
@@ -569,11 +569,8 @@ fn snapshot_back_profile(
         ms.wander.target.dest,
         snap_to,
     );
-    let desk_glide = settle_len(snap_to, chair_settle);
-    let back_len = (octile_path_len(&back_path)
-        + settle_len(ms.wander.target.dest, ms.wander.target.kind.seat())
-        + desk_glide)
-        .max(1);
+    // Rise off the waypoint seat (start), glide onto the desk chair (end).
+    let back_len = measured_leg_len(&back_path, ms.wander.target.kind.seat(), chair_settle);
     walk_profile(back_len, WalkIntent::WanderBack, slot.agent_id)
 }
 
@@ -593,6 +590,32 @@ pub fn octile_path_len(path: &[Point]) -> u32 {
 /// DURATION covers the full walk including the short sit-down/stand-up settle.
 pub(crate) fn settle_len(approach: Point, seat: Option<Point>) -> u32 {
     seat.map_or(0, |s| octile_distance(approach, s))
+}
+
+/// Rendered-polyline length of a walk leg: the octile length of the routed
+/// polyline plus the short settle segments the router never plans (rise off the
+/// `start_settle` seat at `route`'s FIRST point, glide onto the `end_settle`
+/// seat at its LAST), floored at 1. The walk profile's DURATION is derived from
+/// this so it covers the FULL rendered leg — chair-glide + route + seat settle —
+/// and `t` can't reach 1000 before the sprite arrives (no pop). The ONE place
+/// the ~5 hand-assembled "profile length == rendered polyline length" sites
+/// agree; it takes the SAME start/end settle `Option`s `settle_from_pair` feeds
+/// the render.
+///
+/// `route` is a [`route_jittered`](crate::pose::route_jittered) polyline, whose
+/// first point is the leg source and last is the leg target by construction
+/// (`find_path`'s `reconstruct` restores both raw endpoints, and `route_jittered`
+/// re-pins the last to the true `to`) — so `settle_len(route.first, start_settle)`
+/// measures the same rise the render prepends and `settle_len(route.last,
+/// end_settle)` the same glide it appends.
+pub(crate) fn measured_leg_len(
+    route: &[Point],
+    start_settle: Option<Point>,
+    end_settle: Option<Point>,
+) -> u32 {
+    let start = route.first().map_or(0, |&p| settle_len(p, start_settle));
+    let end = route.last().map_or(0, |&p| settle_len(p, end_settle));
+    (octile_path_len(route) + start + end).max(1)
 }
 
 /// Pure linear interpolation along the walk segment `from → to` at
