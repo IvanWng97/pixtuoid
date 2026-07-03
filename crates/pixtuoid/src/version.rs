@@ -59,9 +59,9 @@ pub fn release_notes(version: &str) -> Option<&'static [&'static str]> {
         // brace would silently break if the indentation ever shifted.
         // [bump-inject-here]
         "0.12.0" => Some(&[
-            "A whole-codebase cleanup: 39 review findings fixed — sturdier session tracking (a delegating agent no longer hides its own pending permission; live sessions survive log-content lookalikes), fresher sprites after a project rename, and pathfinding that recovers when a blocked route reopens",
+            "A sustained whole-codebase cleanup across several review passes — sturdier session tracking (a delegating agent no longer hides its own pending permission; live sessions survive log-content lookalikes), fresher sprites after a project rename, and pathfinding that recovers when a blocked route reopens",
             "The office is more honest under pressure — a full pantry re-steams your coffee, narrow floating windows seat exactly as many agents as fit, and the web hero hires only when a desk is truly free",
-            "Under the hood: the render engine's public API slimmed and semver-gated, per-CLI transcript knowledge fully routed through the source registry, and the daily security-audit signal revived",
+            "Under the hood: a deep architecture pass made illegal states unrepresentable and slimmed the render engine's public API (semver-gated), per-CLI transcript knowledge is fully routed through the source registry, and the daily security-audit signal is revived",
         ]),
         "0.11.1" => Some(&[
             "Maintenance release — the animated office is unchanged from 0.11.0; documentation polish across the site and READMEs, plus a supply-chain hardening of how pixtuoid ships",
