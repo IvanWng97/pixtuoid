@@ -66,50 +66,33 @@ pub(super) fn compute_with_seed(
     let top_margin = pct(buf_h, 30).max(MIN_TOP_MARGIN);
     let usable_h = buf_h - top_margin;
 
-    // Per-floor layout variant: floor_seed encodes floor_idx via
-    // Fibonacci hashing (wrapping_mul with golden-ratio constant).
-    // The variant hash constant was chosen so that the standard floor
-    // seeds (0..FLOOR_VARIANT_COUNT × FLOOR_SEED_MULTIPLIER) each map to
-    // a unique variant in [0..FLOOR_VARIANT_COUNT). There are only 5
-    // hand-authored geometries, so with MAX_FLOORS > 5 the higher floors
-    // cycle through the same looks (cosmetic repetition, not a bug).
-    const FLOOR_VARIANT_COUNT: u64 = 5;
-    const FLOOR_VARIANT_HASH_MULT: u64 = 0x4737819096da1dad;
-    let floor_variant =
-        (floor_seed.wrapping_mul(FLOOR_VARIANT_HASH_MULT) % FLOOR_VARIANT_COUNT) as u8;
-
-    // F1(0): Standard — meeting + pantry, vertical wall between them
-    //        and the cubicle area, horizontal wall between meeting/pantry.
-    // F2(1): Open plan — pantry only, no vertical wall (open kitchen
-    //        corner, counter acts as divider). No meeting room.
-    // F3(2): Dense — two meeting rooms (top + bottom), no pantry.
-    //        Horizontal wall separates the two rooms. Each gets a door.
-    // F4(3): Senior — larger meeting + pantry (like Standard but wider).
-    // F5(4): Lounge — pantry only, no vertical wall (open break area).
-    let (mut mid_x, has_meeting, mut has_pantry) = match floor_variant {
-        0 => (pct(buf_w, 28), true, true),
-        1 => (pct(buf_w, 18), false, true),
-        2 => (pct(buf_w, 22), true, false),
-        3 => (pct(buf_w, 35), true, true),
-        _ => (pct(buf_w, 22), false, true),
+    // Per-floor layout variant: `floor_seed` selects one of the 5 hand-authored
+    // geometries via Fibonacci hashing (see `FloorVariant::from_seed`). With
+    // MAX_FLOORS > 5 the higher floors cycle through the same looks (cosmetic
+    // repetition, not a bug).
+    let variant = FloorVariant::from_seed(floor_seed);
+    let has_meeting = variant.has_meeting();
+    // (The vertical-wall presence == has_meeting; open-plan OpenPlan/Lounge floors
+    // skip it — the pantry counter is the boundary. compute_room_walls reads it
+    // off `geom`, so no separate local here.)
+    // Dense: two meeting rooms stacked vertically, ONLY when tall enough for two
+    // rooms with furniture + door gaps. This is the ONE size-dependent bit; every
+    // other geometry choice is a const of the variant.
+    let has_dual_meeting = variant == FloorVariant::Dense && usable_h >= MIN_DUAL_MEETING_H;
+    let geom = FloorGeometry {
+        variant,
+        has_dual_meeting,
     };
-    // Open-plan floors (1, 4) have no vertical wall — the pantry
-    // counter/furniture visually defines the zone boundary.
-    let has_vertical_wall = has_meeting;
-    // Dense floor (variant 2): two meeting rooms stacked vertically.
-    // Only when tall enough for two rooms with furniture + door gaps.
-    let has_dual_meeting = floor_variant == 2 && usable_h >= MIN_DUAL_MEETING_H;
-    // Variant 2 (Dense) only earns its narrow 22% left column + no-pantry when
-    // it actually fits TWO meeting rooms. On a terminal too short for that it
-    // degrades fully to the Standard single-meeting+pantry geometry — same 28%
-    // column width and pantry. The old degenerate fallback (22% wide, full-
-    // height meeting, no pantry) was too narrow to enclose a room and sealed a
-    // pocket at 96×70 (surfaced by the dense-variant small-size connectivity
-    // sweep). Keeps the dual-meeting wall branch below for the real dense floor.
-    if floor_variant == 2 && !has_dual_meeting {
-        has_pantry = true;
-        mid_x = pct(buf_w, 28);
-    }
+    // Dense only earns its narrow 22% left column + no-pantry when it actually
+    // fits TWO meeting rooms; on a terminal too short for that it degrades fully
+    // to the Standard single-meeting+pantry geometry (28% column + pantry). The
+    // old degenerate fallback (22% wide, full-height meeting, no pantry) was too
+    // narrow to enclose a room and sealed a pocket at 96×70 (surfaced by the
+    // dense-variant small-size connectivity sweep). `FloorGeometry::{has_pantry,
+    // mid_x_pct}` fold in that degrade; the dual-meeting wall branch below handles
+    // the real dense floor.
+    let has_pantry = geom.has_pantry();
+    let mid_x = pct(buf_w, geom.mid_x_pct());
 
     let mid_y_split = top_margin + usable_h / 2;
 
@@ -259,18 +242,7 @@ pub(super) fn compute_with_seed(
         }
     }
 
-    let room_walls = compute_room_walls(
-        RoomPresence {
-            has_vertical_wall,
-            has_dual_meeting,
-            has_meeting,
-            has_pantry,
-        },
-        mid_x,
-        mid_y_split,
-        top_margin,
-        usable_h,
-    );
+    let room_walls = compute_room_walls(geom, mid_x, mid_y_split, top_margin, usable_h);
 
     // Counter footprint depends on pantry width — 32×10 detailed
     // kitchen on default terminals, 20×8 compact fallback for narrow
@@ -591,13 +563,111 @@ impl PodGrid {
     }
 }
 
-/// Which rooms the floor has — drives [`compute_room_walls`]'s segment set.
+/// The five hand-authored floor geometries. `floor_seed` selects one via
+/// Fibonacci hashing; floors past the fifth cycle through the same looks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum FloorVariant {
+    /// Meeting + pantry, vertical wall between them and the cubicle area,
+    /// horizontal wall between meeting/pantry.
+    Standard,
+    /// Pantry only, no vertical wall (open kitchen corner, the counter is the
+    /// divider). No meeting room.
+    OpenPlan,
+    /// Two meeting rooms (top + bottom), no pantry — a horizontal wall separates
+    /// them, each gets a door. Degrades to Standard when too short for two rooms.
+    Dense,
+    /// Larger meeting + pantry (like Standard but a wider left column).
+    Senior,
+    /// Pantry only, no vertical wall (open break area).
+    Lounge,
+}
+
+impl FloorVariant {
+    /// Number of hand-authored geometries; floors past it cycle.
+    const COUNT: u64 = 5;
+    /// Fibonacci-hash multiplier, chosen so the standard floor seeds each map to
+    /// a distinct variant.
+    const HASH_MULT: u64 = 0x4737819096da1dad;
+
+    /// Select the variant for a floor seed (Fibonacci hashing).
+    fn from_seed(floor_seed: u64) -> Self {
+        match floor_seed.wrapping_mul(Self::HASH_MULT) % Self::COUNT {
+            0 => FloorVariant::Standard,
+            1 => FloorVariant::OpenPlan,
+            2 => FloorVariant::Dense,
+            3 => FloorVariant::Senior,
+            _ => FloorVariant::Lounge,
+        }
+    }
+
+    /// Whether this variant encloses a meeting room (== the vertical-wall presence).
+    const fn has_meeting(self) -> bool {
+        matches!(
+            self,
+            FloorVariant::Standard | FloorVariant::Dense | FloorVariant::Senior
+        )
+    }
+
+    /// Pantry presence BEFORE the Dense-degrade fixup (Dense has none until it
+    /// degrades on a short terminal).
+    const fn has_pantry_base(self) -> bool {
+        matches!(
+            self,
+            FloorVariant::Standard
+                | FloorVariant::OpenPlan
+                | FloorVariant::Senior
+                | FloorVariant::Lounge
+        )
+    }
+
+    /// Left-column split as a percent of buffer width, BEFORE the Dense-degrade.
+    const fn mid_x_pct(self) -> u16 {
+        match self {
+            FloorVariant::Standard => 28,
+            FloorVariant::OpenPlan => 18,
+            FloorVariant::Dense => 22,
+            FloorVariant::Senior => 35,
+            FloorVariant::Lounge => 22,
+        }
+    }
+}
+
+/// The resolved floor geometry: the `variant` plus the ONE size-dependent bit,
+/// `has_dual_meeting` (a Dense floor tall enough for two meeting rooms). Drives
+/// [`compute_room_walls`]'s segment set; the `has_pantry` / `mid_x_pct` accessors
+/// fold in the Dense-degrade (a too-short Dense floor gains a pantry and widens to
+/// the Standard column). Replaced the 4 mutually-constrained bools + debug_asserts.
 #[derive(Clone, Copy)]
-pub(super) struct RoomPresence {
-    has_vertical_wall: bool,
+pub(super) struct FloorGeometry {
+    variant: FloorVariant,
     has_dual_meeting: bool,
-    has_meeting: bool,
-    has_pantry: bool,
+}
+
+impl FloorGeometry {
+    fn has_meeting(self) -> bool {
+        self.variant.has_meeting()
+    }
+    fn has_vertical_wall(self) -> bool {
+        self.variant.has_meeting()
+    }
+    /// Resolved pantry presence AFTER the Dense-degrade: a Dense floor too short
+    /// for two rooms gains a pantry (Standard geometry).
+    fn has_pantry(self) -> bool {
+        if self.variant == FloorVariant::Dense && !self.has_dual_meeting {
+            true
+        } else {
+            self.variant.has_pantry_base()
+        }
+    }
+    /// Resolved mid-column percent AFTER the Dense-degrade (a too-short Dense
+    /// widens to the Standard 28% column).
+    fn mid_x_pct(self) -> u16 {
+        if self.variant == FloorVariant::Dense && !self.has_dual_meeting {
+            28
+        } else {
+            self.variant.mid_x_pct()
+        }
+    }
 }
 
 /// Pod-grid desk placement: full pods, partial columns at right edge,
@@ -806,20 +876,21 @@ pub(super) fn compute_pod_decor(
     pod_decor
 }
 
-/// Wall segments with door gaps for meeting/pantry rooms.
+/// Wall segments with door gaps for meeting/pantry rooms. Branches on the
+/// [`FloorGeometry`] (variant + `has_dual_meeting`); every wall condition folds
+/// from the variant's consts, so the old debug_asserts guarding the bool tuple
+/// (`has_pantry || has_dual_meeting` when `has_meeting`) are now structural.
 pub(super) fn compute_room_walls(
-    rooms: RoomPresence,
+    geom: FloorGeometry,
     mid_x: u16,
     mid_y_split: u16,
     top_margin: u16,
     usable_h: u16,
 ) -> Vec<WallSegment> {
-    let RoomPresence {
-        has_vertical_wall,
-        has_dual_meeting,
-        has_meeting,
-        has_pantry,
-    } = rooms;
+    let has_vertical_wall = geom.has_vertical_wall();
+    let has_dual_meeting = geom.has_dual_meeting;
+    let has_meeting = geom.has_meeting();
+    let has_pantry = geom.has_pantry();
     // Doorway widths are ABSOLUTE pixels — using percentages here makes
     // the gap shrink to zero on smaller terminals, which after the
     // 2-px wall obstacle padding leaves no walkable cell for A* and
@@ -835,16 +906,11 @@ pub(super) fn compute_room_walls(
     // meeting+pantry). Open-plan/lounge pantry-only floors skip it
     // — the counter is the visual boundary.
     if has_vertical_wall {
-        // has_vertical_wall == has_meeting (compute_with_seed), and a meeting
-        // always shares the left column with the pantry or a second meeting room
-        // per the variant table — so the vertical wall always stops at the
-        // mid-height split. The else-arm (full usable_h) was dead; assert the
-        // invariant (mirrors the meeting_room height assert) so a future
-        // variant-table edit fails loud instead of silently picking a full wall.
-        debug_assert!(
-            has_pantry || has_dual_meeting,
-            "meeting implies pantry-or-dual per the variant table"
-        );
+        // has_vertical_wall == has_meeting, and a meeting-bearing variant always
+        // shares the left column with the pantry or a second meeting room (structural
+        // in `FloorVariant`: Standard/Senior carry a pantry, Dense either has dual
+        // meetings or degrades to has_pantry) — so the vertical wall always stops at
+        // the mid-height split. The full-usable_h else-arm is dead by construction.
         let v_x = mid_x;
         let v_top = top_margin;
         let v_bot = mid_y_split;
