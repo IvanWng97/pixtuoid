@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { posix } from 'node:path';
 import sitemap from '@astrojs/sitemap';
 import rehypeMermaid from 'rehype-mermaid';
+import { unified } from '@astrojs/markdown-remark';
 
 // Single-source the displayed version from the workspace Cargo.toml so the boot
 // intro never goes stale on a release bump. Scope the match to the
@@ -161,21 +162,34 @@ export default defineConfig({
   site: 'https://ivanwng97.github.io',
   base: '/pixtuoid',
   trailingSlash: 'ignore',
+  // Astro 7 flipped the default to 'jsx' (JSX-rule whitespace stripping), which
+  // drops the space between adjacent inline elements on separate source lines —
+  // measured: dozens of visible-text joins across every page ("pixtuoid v0.11.1"
+  // → "pixtuoidv0.11.1", boot lines, docs prose). Pin the Astro 6 behavior.
+  compressHTML: true,
   markdown: {
     // keep ```mermaid as a RAW code node — Shiki would otherwise highlight it
     // into a <pre> before rehype-mermaid can turn it into an inline SVG.
+    // (syntaxHighlight stays a top-level markdown option in Astro 7 — the
+    // vite-plugin passes it into whichever processor is active.)
     syntaxHighlight: { type: 'shiki', excludeLangs: ['mermaid'] },
-    rehypePlugins: [
-      // build-time render: ```mermaid → inline <svg> (zero client JS, CSP-safe).
-      [
-        rehypeMermaid,
-        {
-          strategy: 'inline-svg',
-          mermaidConfig: { theme: 'neutral', flowchart: { htmlLabels: true } },
-        },
+    // Astro 7: Sätteri is the default Markdown processor and the legacy
+    // `markdown.rehypePlugins` key is deprecated (hard error without
+    // @astrojs/markdown-remark installed). Opt back into the remark/rehype
+    // pipeline explicitly — rehype-mermaid needs it.
+    processor: unified({
+      rehypePlugins: [
+        // build-time render: ```mermaid → inline <svg> (zero client JS, CSP-safe).
+        [
+          rehypeMermaid,
+          {
+            strategy: 'inline-svg',
+            mermaidConfig: { theme: 'neutral', flowchart: { htmlLabels: true } },
+          },
+        ],
+        rehypeRepoLinks, // after mermaid so it walks the final tree
       ],
-      rehypeRepoLinks, // after mermaid so it walks the final tree
-    ],
+    }),
   },
   // Sitemap respects `site` + `base`, so emitted URLs carry the /pixtuoid
   // prefix → submit /pixtuoid/sitemap-index.xml to Search Console (this is a
