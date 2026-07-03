@@ -251,8 +251,18 @@ pub fn derive_with_routing(
             } else {
                 (from, None)
             };
-            let to_jittered = jitter_dest(slot.agent_id, door_target);
-            let path = router.route(&layout.walkable, overlay, route_from, to_jittered);
+            // route_jittered restores the polyline's endpoint to the TRUE target,
+            // so the measured octile length matches the rendered leg — the same
+            // contract the wander legs use. A raw router.route(to_jittered) would
+            // measure the ±jitter-perturbed polyline, a small duration/speed skew.
+            let path = route_jittered(
+                router,
+                &layout.walkable,
+                overlay,
+                slot.agent_id,
+                route_from,
+                door_target,
+            );
             let glide = settle_len(route_from, chair_rise);
             let path_len = (octile_path_len(&path) + glide).max(1);
             let profile = walk_profile(path_len, WalkIntent::Exit, slot.agent_id);
@@ -349,8 +359,16 @@ pub fn derive_with_routing(
 
         // Snapshot on first sighting if we're within the spawn window.
         if mstate.entry.is_none() && since_spawn < ENTRY_ANIMATION_MS {
-            let to_jittered = jitter_dest(slot.agent_id, approach);
-            let path = router.route(&layout.walkable, overlay, door, to_jittered);
+            // route_jittered (endpoint restored) so the measured length matches
+            // the rendered leg — same as the wander legs.
+            let path = route_jittered(
+                router,
+                &layout.walkable,
+                overlay,
+                slot.agent_id,
+                door,
+                approach,
+            );
             // Profile covers door→approach PLUS the short settle glide onto the chair.
             let path_len = (octile_path_len(&path) + settle_px).max(1);
             let profile = walk_profile(path_len, WalkIntent::Entry, slot.agent_id);
@@ -463,8 +481,15 @@ pub fn derive_with_routing(
                         dest: ms.wander.dest,
                     }
                 };
-                // Record history so snap-back works if state changes now.
-                let pt = ms.wander.dest;
+                // Record the RENDERED position so snap-back/exit (which read
+                // history.recent as their walk origin) start where the sprite
+                // actually is: the seat cell for a seat waypoint (the sprite sits
+                // ON the furniture, ~half_extent off `dest`), else `dest` (an
+                // obstacle stands AT its approach cell, seat = None). Recording
+                // `dest` for a seat popped the sprite ~10px to the off-side
+                // approach cell on the first snap-back/exit frame — the one seated
+                // departure the WalkingBack Settle machinery didn't cover.
+                let pt = ms.wander.seat.unwrap_or(ms.wander.dest);
                 history.record(slot.agent_id, pt, now);
                 return Some(pose);
             }
@@ -585,8 +610,16 @@ pub fn derive_with_routing(
                         // accel (WalkIntent::SnapBack → WALK_ACCEL_SNAPBACK) keeps the
                         // urgent return brisk under pure physics.
                         let (snap_target, chair_settle) = desk_leg_endpoint(desk, layout);
-                        let to_jittered = jitter_dest(slot.agent_id, snap_target);
-                        let path = router.route(&layout.walkable, overlay, prev, to_jittered);
+                        // route_jittered (endpoint restored) so the measured length
+                        // matches the rendered leg — same as the wander legs.
+                        let path = route_jittered(
+                            router,
+                            &layout.walkable,
+                            overlay,
+                            slot.agent_id,
+                            prev,
+                            snap_target,
+                        );
                         let len =
                             (octile_path_len(&path) + settle_len(snap_target, chair_settle)).max(1);
                         let p = walk_profile(len, WalkIntent::SnapBack, slot.agent_id);

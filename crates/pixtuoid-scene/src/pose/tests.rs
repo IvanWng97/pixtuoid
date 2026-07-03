@@ -231,6 +231,81 @@ fn snap_back_walks_from_history_when_state_just_flipped() {
 }
 
 #[test]
+fn seated_waypoint_snap_back_starts_from_the_seat_not_the_approach_cell() {
+    // A seated agent (AtWaypoint on a seat) whose slot flips Active must snap
+    // back FROM the rendered seat, not the off-side approach cell. The AtWaypoint
+    // arm records history; recording `wander.dest` (the approach cell) instead of
+    // `wander.seat` (the rendered seat) popped the sprite ~half_extent on the
+    // first snap-back frame — the one seated departure the WalkingBack Settle
+    // machinery doesn't cover. Unlike the hand-injected snap-back tests, this
+    // drives the real AtWaypoint arm so the seat-vs-approach divergence is guarded.
+    let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let l = layout();
+    let desk = l.home_desks[0];
+    // Distinct seat vs approach cells, both far from the desk chair (snap arms).
+    let seat = Point {
+        x: desk.x + 50,
+        y: desk.y + 30,
+    };
+    let approach = Point {
+        x: desk.x + 56,
+        y: desk.y + 30,
+    };
+    let overlay = pixtuoid_core::walkable::OccupancyOverlay::new();
+    let mut router = StubRouter::straight();
+    let mut history = PoseHistory::new();
+    let mut motion: HashMap<AgentId, MotionState> = HashMap::new();
+
+    // Frame 1: Idle, seated AtWaypoint on a seat → records history at the SEAT.
+    let idle = entry_slot(now - Duration::from_secs(60));
+    let mut ms = MotionState::new(idle.agent_id);
+    ms.wander.phase = crate::motion::WanderPhase::AtWaypoint;
+    ms.wander.phase_started_at = now;
+    ms.wander.last_advanced_at = now; // pin the phase (advance_wander no-ops at now)
+    ms.wander.dest = approach;
+    ms.wander.seat = Some(seat);
+    ms.wander.dest_kind = Some(crate::layout::WaypointKind::Couch);
+    ms.wander.dest_wp_idx = Some(0);
+    motion.insert(idle.agent_id, ms);
+    match derive_with_routing(
+        &idle,
+        now,
+        &l,
+        &mut crate::pose::RouteCtx {
+            router: &mut router,
+            overlay: &overlay,
+            history: &mut history,
+            motion: &mut motion,
+        },
+    ) {
+        Some(Pose::AtWaypoint { .. }) => {}
+        other => panic!("expected AtWaypoint pose, got {other:?}"),
+    }
+
+    // Frame 2: the slot flips Active (a tool call arrives) → snap-back arms and
+    // must start FROM the seat recorded above, not the approach cell.
+    let active = active_slot(now, now - Duration::from_secs(60));
+    let then = now + Duration::from_millis(50);
+    match derive_with_routing(
+        &active,
+        then,
+        &l,
+        &mut crate::pose::RouteCtx {
+            router: &mut router,
+            overlay: &overlay,
+            history: &mut history,
+            motion: &mut motion,
+        },
+    ) {
+        Some(Pose::Walking { from, .. }) => assert_eq!(
+            from, seat,
+            "snap-back must start from the rendered seat {seat:?}, not the approach cell {approach:?}"
+        ),
+        other => panic!("expected snap-back Walking pose, got {other:?}"),
+    }
+}
+
+#[test]
 fn snap_back_origin_is_frozen_across_frames() {
     // A snap-back is a walk FROM the interruption point TO the desk. Its
     // origin is captured once (the `_snap_prev` field of the snap_back tuple)
