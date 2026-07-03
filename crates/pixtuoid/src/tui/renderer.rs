@@ -178,6 +178,26 @@ pub(crate) fn scene_rect(full: Rect) -> Rect {
     }
 }
 
+/// Paint the footer-only frame shown when the terminal is too small to render the
+/// office — the SHARED body of BOTH too-small gates (`draw_scene`'s and the
+/// floor-transition path's `render_transition`), so the shared `MIN_SCENE_*`
+/// threshold implies shared BEHAVIOR (one clean footer-only frame) instead of two
+/// divergent on-hit paths (one painting a footer, the other painting nothing —
+/// which left a stale, clipped, footer-less frame frozen on screen).
+pub(crate) fn draw_footer_only_frame<B: Backend<Error: Send + Sync + 'static>>(
+    term: &mut Terminal<B>,
+    scene: &SceneState,
+    theme: &pixtuoid_scene::theme::Theme,
+    floor_info: Option<FloorInfo>,
+    source_warning: Option<&str>,
+) -> Result<()> {
+    term.draw(|f| {
+        let actual = f.area();
+        paint_footer(f, scene, actual, theme, floor_info, source_warning);
+    })?;
+    Ok(())
+}
+
 // --- draw_scene ----------------------------------------------------------
 //
 // `draw_scene` is the orchestrator: get terminal geometry, compute the
@@ -212,10 +232,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     let floor = ctx.floor;
 
     if scene_rect.width < MIN_SCENE_WIDTH || scene_rect.height < MIN_SCENE_HEIGHT {
-        term.draw(|f| {
-            let actual = f.area();
-            paint_footer(f, scene, actual, theme, floor_info, ctx.source_warning);
-        })?;
+        draw_footer_only_frame(term, scene, theme, floor_info, ctx.source_warning)?;
         return Ok(None);
     }
 
@@ -224,10 +241,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     ctx.buf.ensure_size(buf_w, buf_h, theme.surface.bg_fallback);
     // Always compute maximum layout capacity — floor overflow handles the rest.
     let Some(layout) = Layout::compute_with_seed(buf_w, buf_h, None, floor.floor_seed) else {
-        term.draw(|f| {
-            let actual = f.area();
-            paint_footer(f, scene, actual, theme, floor_info, ctx.source_warning);
-        })?;
+        draw_footer_only_frame(term, scene, theme, floor_info, ctx.source_warning)?;
         return Ok(None);
     };
 

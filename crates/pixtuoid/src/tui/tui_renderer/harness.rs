@@ -2595,7 +2595,7 @@ fn layout_compute_none_bails_to_footer_only() {
 // ===================================================================
 
 #[test]
-fn transition_on_too_small_terminal_clears_interaction_state() {
+fn transition_on_too_small_terminal_clears_state_and_lands() {
     // Two-floor scene on a sub-20×12 terminal: starting a transition hits the
     // render_transition too-small bail → cached layout / pet / popup cleared.
     let scene = two_floor_scene();
@@ -2608,6 +2608,17 @@ fn transition_on_too_small_terminal_clears_interaction_state() {
     assert!(r.cached_layout().is_none());
     assert!(r.cached_pet_pos().is_none());
     assert_eq!(r.last_popup_scale(), 0.0);
+    // The gate now LANDS the transition instead of leaving it live: render_transition
+    // returns before render_floor/ensure_size, so the floor buffer's size signature
+    // never changes and the event loop's resize detector can't fire cancel_transition
+    // — the slide would otherwise stay live hitting the no-draw path for its whole
+    // ~400 ms timer, freezing a stale frame. Landing it drops back to draw_scene's
+    // footer-only path, which shares the same threshold behavior.
+    assert!(
+        r.transition().is_none(),
+        "the too-small gate should land (cancel) the stuck transition"
+    );
+    assert_eq!(r.current_floor(), 1, "landed on the destination floor");
 }
 
 #[test]

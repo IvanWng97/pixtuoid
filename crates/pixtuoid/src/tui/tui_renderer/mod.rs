@@ -468,6 +468,24 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             self.cached_layout = None;
             self.last_pet_pos = None;
             self.popup.last_scale = 0.0;
+            // Paint the SAME footer-only frame draw_scene's gate does (shared
+            // MIN_SCENE_* threshold ⇒ shared behavior), not nothing — else the
+            // stale pre-shrink frame stays frozen on screen. AND land the
+            // transition: this returns before render_floor/ensure_size, so the
+            // floor buffer's size signature never changes and the event loop's
+            // resize detector can't fire cancel_transition — the slide would
+            // otherwise stay live hitting this path for its whole ~400 ms timer.
+            let floor_info = floor_info_for(to_floor, nf, scene.agents.len());
+            let theme = self.theme;
+            let source_warning = self.source_warning.clone();
+            crate::tui::renderer::draw_footer_only_frame(
+                &mut self.terminal,
+                scene,
+                theme,
+                floor_info,
+                source_warning.as_deref(),
+            )?;
+            self.cancel_transition();
             return Ok(());
         }
 
