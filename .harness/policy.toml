@@ -10,6 +10,13 @@
 # Editing it is itself gated (rule `self-protect`) — change it by hand, out of band.
 schema = 1
 
+# mode = "observe" (default): record every decision to the ledger but NEVER block —
+# a pure flight-recorder, zero friction (the dogfood default; the honest posture
+# while work is human-supervised). "enforce": a deny also returns exit 2 and blocks
+# the tool. Flip to "enforce" only once the recorder has earned it, or for an
+# unattended/autonomous run. See .harness/README.md.
+mode = "observe"
+
 # --- self-protection: the gate may not let the agent weaken the gate ----------
 [[rule]]
 id = "self-protect"

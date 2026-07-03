@@ -8,8 +8,10 @@ make a bypass or a *loosened guardrail* **visible**, not impossible.
 
 - **Gates** each proposed tool action (`Edit`/`Write`/`Bash`/…) against a
   declarative policy — matched on the **real `tool_input`** (the model can't fake
-  which call it's making), so a `block` is legitimate. A deny returns **exit 2**
-  (which fires before the permission check).
+  which call it's making), so a `block` is legitimate. In `enforce` mode a deny
+  returns **exit 2** (blocks, before the permission check); in the **default
+  `observe` mode it records the would-be block and returns 0** — a pure
+  flight-recorder with zero friction. Flip via `mode` in `policy.toml`.
 - **Records** every decision as a **hash-chained** line in `ledger.jsonl` — the
   flight recorder. Tampering (editing/deleting a past line) breaks the chain.
 - **Fails loud, never silent.** A gate bug fails **closed** (exit 2); the
@@ -34,6 +36,22 @@ HARNESS_GATE_OFF=1 …        # escape hatch: records a BYPASS line + allows (au
 
 Wired as a `PreToolUse` hook in `.claude/settings.json` (session-scoped; takes
 effect on the **next** session launched in this worktree).
+
+## Operating rules
+
+**Reach for it when:** value = (how *unsupervised* the agent is) × (how *un-lintable*
+the rule is). High-value = autonomous/overnight runs, subagent fan-outs, or a
+convention the compiler/clippy can't express. Near-zero value = you hand-reviewing
+every diff on a rule `clippy`/`just arch` already catches. → stays `observe` until
+autonomy rises.
+
+**Update it when:** (add) a new CLAUDE.md invariant that's cheap-per-action AND
+non-lintable; (add) a real incident nothing caught early — encode it as a rule +
+fixture ("never again"); (fix) the drift selftest reddens or a false-positive keeps
+firing; (fix) the CC hook contract changes; (**delete**) an invariant becomes
+compiler/clippy-enforced — a rule whose owner got upgraded is dead weight. Before
+adding any rule: *can a stronger layer (compiler > clippy > gate) own it cheaply?*
+If yes, put it there, not here.
 
 ## Honest limits (read before trusting it)
 

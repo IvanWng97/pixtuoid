@@ -63,6 +63,15 @@ class Rule:
     reason: str
 
 
+def load_mode(path: Path = POLICY_PATH) -> str:
+    """"observe" (record only) | "enforce" (deny also exits 2). Defaults to observe."""
+    try:
+        mode = str(tomllib.loads(path.read_text()).get("mode", "observe"))
+    except Exception:  # noqa: BLE001 — an unreadable policy must not silently enforce
+        return "observe"
+    return "enforce" if mode == "enforce" else "observe"
+
+
 def load_policy(path: Path = POLICY_PATH) -> list[Rule]:
     data = tomllib.loads(path.read_text())
     rules: list[Rule] = []
@@ -249,8 +258,10 @@ def cmd_gate() -> int:
         sys.stderr.write(f"[harness] gate ERROR (failing closed): {e}\n")
         return 2
     if d.decision == "deny":
-        sys.stderr.write(f"[harness] BLOCKED by rule '{d.rule_id}': {d.reason}\n  target: {d.target}\n")
-        return 2
+        enforce = load_mode() == "enforce"
+        verb = "BLOCKED" if enforce else "WOULD BLOCK (observe-only, recorded)"
+        sys.stderr.write(f"[harness] {verb} by rule '{d.rule_id}': {d.reason}\n  target: {d.target}\n")
+        return 2 if enforce else 0
     return 0
 
 
