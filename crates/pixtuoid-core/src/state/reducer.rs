@@ -306,10 +306,7 @@ impl Reducer {
             .map(|s| s.agent_id)
             .collect();
         for id in ids {
-            if let Some(slot) = scene.agents.get_mut(&id) {
-                fsm::mark_exiting(slot, now);
-            }
-            scope::cascade_exit(scene, id, now);
+            scope::cascade_exit(scene, id, scope::StampRoot::Yes, now);
         }
     }
 
@@ -820,10 +817,7 @@ impl Reducer {
                 if as_child {
                     self.corr.child_ledger.entry(agent_id).or_default().ended_at = Some(now);
                 }
-                if let Some(slot) = scene.agents.get_mut(&agent_id) {
-                    fsm::mark_exiting(slot, now);
-                }
-                scope::cascade_exit(scene, agent_id, now);
+                scope::cascade_exit(scene, agent_id, scope::StampRoot::Yes, now);
             }
             // #220: refresh the sweep exemption — and NOTHING else. No slot
             // synthesis (only hook tool/permission events are proof of NEW
@@ -1270,7 +1264,9 @@ impl Reducer {
                 continue;
             }
             tracing::debug!(agent_id = ?id, "b1 grace elapsed — cascading completed subtree");
-            scope::cascade_exit(scene, id, now);
+            // StampRoot::No: the delegating parent keeps running; only its
+            // finished subtree walks out.
+            scope::cascade_exit(scene, id, scope::StampRoot::No, now);
         }
     }
 
@@ -1385,9 +1381,8 @@ impl Reducer {
                     threshold_secs = threshold.as_secs(),
                     "stale agent — marking exiting"
                 );
-                slot.exiting_at = Some(now);
             }
-            scope::cascade_exit(scene, id, now);
+            scope::cascade_exit(scene, id, scope::StampRoot::Yes, now);
         }
     }
 

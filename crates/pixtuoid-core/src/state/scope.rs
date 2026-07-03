@@ -24,27 +24,48 @@
 use std::collections::{BTreeMap, HashSet};
 use std::time::SystemTime;
 
-use crate::state::{ActivityState, AgentSlot, SceneState};
+use crate::state::{fsm, ActivityState, AgentSlot, SceneState};
 use crate::AgentId;
 
-/// Mark every not-yet-exiting descendant of `root` exiting, BFS over `parent_id`
-/// links (exit flows DOWN). `root` is only the BFS seed and is never re-stamped
-/// *by this function* — whether the caller marks `root` itself is caller-specific:
-/// the `SessionEnd` arm and `sweep_stale` stamp it first (the whole subtree
-/// leaves together), while subagent-completion does NOT (the parent keeps
-/// running; only its subtree leaves). Idempotent: slots already exiting are
-/// filtered out, so a leaf or a partly-exiting subtree is a safe no-op.
+/// Whether [`cascade_exit`] also marks the `root` seed itself exiting.
 ///
-/// FOOTGUN: whether `root` itself exits is encoded IMPLICITLY by whether the
-/// caller set `root.exiting_at` *before* calling — there is no assertion here to
-/// catch a caller that forgets. A future caller that means "the whole tree
-/// leaves" but neglects to stamp `root` first would silently leave the root
-/// running while exiting its entire subtree. All three current callers are
-/// correct (SessionEnd + sweep_stale stamp root first; subagent-completion
-/// deliberately does not); if a fourth is added, make the per-call-site intent
-/// explicit (e.g. a typed `StampRoot::{Yes,No}` param) rather than relying on
-/// this convention.
-pub(crate) fn cascade_exit(scene: &mut SceneState, root: AgentId, now: SystemTime) {
+/// Makes each call site's intent EXPLICIT — replacing the old implicit "did the
+/// caller stamp `root.exiting_at` before calling?" convention, which had no
+/// assertion to catch a caller that forgot (a caller meaning "the whole tree
+/// leaves" but neglecting to stamp `root` would silently leave the root running
+/// while exiting its entire subtree).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum StampRoot {
+    /// The whole tree leaves together — `root` is marked exiting too. Used by the
+    /// `SessionEnd` arm, `sweep_stale`, and `reconcile_connected`.
+    Yes,
+    /// Only the subtree leaves; `root` keeps running. Used by the b1
+    /// subagent-completion cascade (the parent stays alive as its finished
+    /// children walk out).
+    No,
+}
+
+/// Mark every not-yet-exiting descendant of `root` exiting, BFS over `parent_id`
+/// links (exit flows DOWN) — and, when `stamp_root` is [`StampRoot::Yes`], mark
+/// `root` itself exiting first (via [`fsm::mark_exiting`], so the earliest
+/// `exiting_at` wins). Idempotent: slots already exiting are filtered out, so a
+/// leaf or a partly-exiting subtree is a safe no-op.
+///
+/// The four callers: `SessionEnd`, `sweep_stale`, and `reconcile_connected` pass
+/// [`StampRoot::Yes`] (the whole tree leaves together); the b1
+/// subagent-completion cascade passes [`StampRoot::No`] (only the finished
+/// subtree leaves, the delegating parent keeps running).
+pub(crate) fn cascade_exit(
+    scene: &mut SceneState,
+    root: AgentId,
+    stamp_root: StampRoot,
+    now: SystemTime,
+) {
+    if stamp_root == StampRoot::Yes {
+        if let Some(slot) = scene.agents.get_mut(&root) {
+            fsm::mark_exiting(slot, now);
+        }
+    }
     let mut visited: HashSet<AgentId> = HashSet::new();
     visited.insert(root);
     let mut frontier = vec![root];
