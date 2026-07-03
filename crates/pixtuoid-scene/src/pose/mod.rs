@@ -193,10 +193,10 @@ pub fn derive_with_routing(
     layout: &Layout,
     rctx: &mut RouteCtx<'_>,
 ) -> Option<Pose> {
-    let router = &mut *rctx.router;
-    let overlay = rctx.overlay;
-    let history = &mut *rctx.history;
-    let motion = &mut *rctx.motion;
+    // The four engine borrows stay behind `rctx`: direct `rctx.router` /
+    // `rctx.overlay` / `rctx.history` / `rctx.motion` accesses are disjoint
+    // field borrows, and `rctx` auto-reborrows (`&mut *rctx`) at each
+    // `route_walking_pose` call — no per-branch `RouteCtx { .. }` rebuild.
     let desk = layout.home_desk(slot.desk_index.single_floor_local())?;
 
     // ---- EXIT branch -------------------------------------------------------
@@ -211,24 +211,15 @@ pub fn derive_with_routing(
             // handled this gracefully too.
             let raw = derive_state_only(slot, now, layout)?;
             return match raw {
-                Pose::Walking { .. } => route_walking_pose(
-                    slot,
-                    now,
-                    layout,
-                    &mut RouteCtx {
-                        router,
-                        overlay,
-                        history,
-                        motion,
-                    },
-                    raw,
-                    Settle::None,
-                ),
+                Pose::Walking { .. } => {
+                    route_walking_pose(slot, now, layout, rctx, raw, Settle::None)
+                }
                 other => Some(other),
             };
         };
 
-        let mstate = motion
+        let mstate = rctx
+            .motion
             .entry(slot.agent_id)
             .or_insert_with(|| MotionState::new(slot.agent_id));
 
@@ -240,7 +231,8 @@ pub fn derive_with_routing(
             // Without this, an agent that's mid-coffee-run when its session
             // ends teleports back to the desk before walking to the door.
             let desk_anchor = desk_walk_anchor(desk);
-            let from = history
+            let from = rctx
+                .history
                 .recent(slot.agent_id, HISTORY_RECENT_MS, now)
                 .unwrap_or(desk_anchor);
             // Exit is a desk DEPARTURE: when leaving the seated chair, rise off it
@@ -259,9 +251,9 @@ pub fn derive_with_routing(
             // contract the wander legs use. A raw router.route(to_jittered) would
             // measure the ±jitter-perturbed polyline, a small duration/speed skew.
             let path = route_jittered(
-                router,
+                rctx.router,
                 &layout.walkable,
-                overlay,
+                rctx.overlay,
                 slot.agent_id,
                 route_from,
                 door_target,
@@ -322,12 +314,7 @@ pub fn derive_with_routing(
             slot,
             now,
             layout,
-            &mut RouteCtx {
-                router,
-                overlay,
-                history,
-                motion,
-            },
+            rctx,
             Pose::Walking {
                 from,
                 to: door_target,
@@ -355,7 +342,8 @@ pub fn derive_with_routing(
         let (approach, chair_settle) = desk_leg_endpoint(desk, layout);
         let settle = chair_settle.map_or(Settle::None, Settle::End);
 
-        let mstate = motion
+        let mstate = rctx
+            .motion
             .entry(slot.agent_id)
             .or_insert_with(|| MotionState::new(slot.agent_id));
 
@@ -364,9 +352,9 @@ pub fn derive_with_routing(
             // route_jittered (endpoint restored) so the measured length matches
             // the rendered leg — same as the wander legs.
             let path = route_jittered(
-                router,
+                rctx.router,
                 &layout.walkable,
-                overlay,
+                rctx.overlay,
                 slot.agent_id,
                 door,
                 approach,
@@ -388,12 +376,7 @@ pub fn derive_with_routing(
                     slot,
                     now,
                     layout,
-                    &mut RouteCtx {
-                        router,
-                        overlay,
-                        history,
-                        motion,
-                    },
+                    rctx,
                     Pose::Walking {
                         from: door,
                         to: approach,
@@ -434,11 +417,12 @@ pub fn derive_with_routing(
             return Some(Pose::SeatedThinking);
         }
 
-        let (wander_phase, t_phys) = advance_wander(slot, now, layout, router, overlay, motion);
+        let (wander_phase, t_phys) =
+            advance_wander(slot, now, layout, rctx.router, rctx.overlay, rctx.motion);
 
         match wander_phase {
             WanderPhase::WalkingOut => {
-                let ms = motion.get(&slot.agent_id)?;
+                let ms = rctx.motion.get(&slot.agent_id)?;
                 let desk_point = layout.home_desk(slot.desk_index.single_floor_local())?;
                 let dest = ms.wander.target.dest;
                 let seat = ms.wander.target.kind.seat();
@@ -457,12 +441,7 @@ pub fn derive_with_routing(
                     slot,
                     now,
                     layout,
-                    &mut RouteCtx {
-                        router,
-                        overlay,
-                        history,
-                        motion,
-                    },
+                    rctx,
                     Pose::Walking {
                         from,
                         to: dest,
@@ -474,7 +453,7 @@ pub fn derive_with_routing(
                 );
             }
             WanderPhase::AtWaypoint => {
-                let ms = motion.get(&slot.agent_id)?;
+                let ms = rctx.motion.get(&slot.agent_id)?;
                 let pose = match ms.wander.target.kind {
                     WanderKind::Named { wp_idx, kind, .. } => Pose::AtWaypoint { wp: wp_idx, kind },
                     WanderKind::Aimless => Pose::AimlessAt {
@@ -495,11 +474,11 @@ pub fn derive_with_routing(
                     .kind
                     .seat()
                     .unwrap_or(ms.wander.target.dest);
-                history.record(slot.agent_id, pt, now);
+                rctx.history.record(slot.agent_id, pt, now);
                 return Some(pose);
             }
             WanderPhase::WalkingBack => {
-                let ms = motion.get(&slot.agent_id)?;
+                let ms = rctx.motion.get(&slot.agent_id)?;
                 let desk_point = layout.home_desk(slot.desk_index.single_floor_local())?;
                 // Copy the fields off `ms` so the immutable `motion` borrow ends
                 // before `route_walking_pose` takes `&mut motion`.
@@ -528,12 +507,7 @@ pub fn derive_with_routing(
                     slot,
                     now,
                     layout,
-                    &mut RouteCtx {
-                        router,
-                        overlay,
-                        history,
-                        motion,
-                    },
+                    rctx,
                     Pose::Walking {
                         from: wander_dest,
                         to: snap_target,
@@ -575,7 +549,8 @@ pub fn derive_with_routing(
     let since_state = crate::anim::elapsed_ms(now, slot.state_started_at);
     let mut final_settle = Settle::None;
     let pose = if desk_pose {
-        let ms_entry = motion
+        let ms_entry = rctx
+            .motion
             .entry(slot.agent_id)
             .or_insert_with(|| MotionState::new(slot.agent_id));
         // ARM ONCE per state transition. The distance gate is checked ONLY when not
@@ -596,7 +571,7 @@ pub fn derive_with_routing(
             // a fresh leg, but only for a recent flip (the arm window).
             ms_entry.snap_back = None;
             if since_state < SNAP_BACK_MS {
-                if let Some(prev) = history.recent(slot.agent_id, HISTORY_RECENT_MS, now) {
+                if let Some(prev) = rctx.history.recent(slot.agent_id, HISTORY_RECENT_MS, now) {
                     // Distance to the CHAIR (where the agent actually sits), NOT the
                     // desk origin: the chair is offset (+6,+4) from the origin, so a
                     // desk-origin gate would re-fire forever once the agent settles ON
@@ -624,9 +599,9 @@ pub fn derive_with_routing(
                         // route_jittered (endpoint restored) so the measured length
                         // matches the rendered leg — same as the wander legs.
                         let path = route_jittered(
-                            router,
+                            rctx.router,
                             &layout.walkable,
-                            overlay,
+                            rctx.overlay,
                             slot.agent_id,
                             prev,
                             snap_target,
@@ -692,7 +667,7 @@ pub fn derive_with_routing(
     } else {
         // Hard wall: clear any stale snap-back profile so the next state transition
         // gets a fresh snapshot rather than replaying a previous one.
-        if let Some(ms) = motion.get_mut(&slot.agent_id) {
+        if let Some(ms) = rctx.motion.get_mut(&slot.agent_id) {
             if ms.snap_back.is_some() {
                 ms.snap_back = None;
             }
@@ -700,19 +675,7 @@ pub fn derive_with_routing(
         raw
     };
 
-    route_walking_pose(
-        slot,
-        now,
-        layout,
-        &mut RouteCtx {
-            router,
-            overlay,
-            history,
-            motion,
-        },
-        pose,
-        final_settle,
-    )
+    route_walking_pose(slot, now, layout, rctx, pose, final_settle)
 }
 
 /// Apply A*-based polyline routing to a `Pose::Walking`, recording
