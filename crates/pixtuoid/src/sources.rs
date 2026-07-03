@@ -394,6 +394,26 @@ pub fn apply_choices(cfg: &Path, choices: &[(&'static str, bool)]) -> Vec<(Strin
         .collect()
 }
 
+/// The onboarding SKIP freeze: map each detected source to its REAL current
+/// connection state — connected in the live gate OR already carrying installed
+/// hooks (`is_hooked`). Feeding THIS to [`apply_choices`] (rather than the live
+/// gate alone, which is EMPTY on a first run) is what makes a skip preserve an
+/// existing install: a pre-0.12 upgrader — hooks present but no `[sources]` flag,
+/// exactly the population onboarding replays to re-connect — freezes to `true`, so
+/// apply re-installs idempotently (a semantic no-op) instead of disconnecting +
+/// UNINSTALLING its working hooks. `is_hooked` is injected so this stays pure and
+/// unit-testable; the caller passes `by_source(id).is_some_and(has_hooks)`.
+pub fn freeze_for_skip(
+    detected: impl IntoIterator<Item = &'static str>,
+    connected: &HashSet<String>,
+    is_hooked: impl Fn(&'static str) -> bool,
+) -> Vec<(&'static str, bool)> {
+    detected
+        .into_iter()
+        .map(|id| (id, connected.contains(id) || is_hooked(id)))
+        .collect()
+}
+
 // ---- Source status MODEL (moved here from `tui::connection`, which re-exports
 //      it so the panel/harness are unchanged). Pure: no ratatui, no SceneState. ----
 
@@ -570,6 +590,32 @@ mod tests {
         let err = registered_id("not-a-source").unwrap_err().to_string();
         assert!(err.contains("unknown source 'not-a-source'"), "{err}");
         assert!(err.contains("antigravity"), "lists known sources: {err}");
+    }
+
+    #[test]
+    fn freeze_for_skip_keeps_a_hooked_but_unflagged_source_connected() {
+        // A pre-0.12 upgrader: config has NO [sources] table (empty connected set),
+        // but claude-code's hooks ARE installed. Skip must freeze it to `true` so
+        // apply re-installs idempotently (hooks survive), NOT `false` — which would
+        // disconnect → uninstall its working hooks (the bug). A fresh, un-hooked
+        // source (codex) freezes to `false`. Teeth: reading only the connected gate
+        // (the old behavior) would freeze claude-code false here.
+        let connected = HashSet::new();
+        let freeze = freeze_for_skip(
+            ["claude-code", "codex"],
+            &connected,
+            |id| id == "claude-code", // only claude-code has installed hooks
+        );
+        assert_eq!(freeze, vec![("claude-code", true), ("codex", false)]);
+    }
+
+    #[test]
+    fn freeze_for_skip_honors_the_live_connected_gate() {
+        // A source already connected in the live gate freezes to `true` even with
+        // no installed hooks (e.g. antigravity, a no-target source).
+        let connected = set(&["antigravity"]);
+        let freeze = freeze_for_skip(["antigravity", "codex"], &connected, |_| false);
+        assert_eq!(freeze, vec![("antigravity", true), ("codex", false)]);
     }
 
     #[test]

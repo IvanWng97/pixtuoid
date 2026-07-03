@@ -786,17 +786,27 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                             }
                             KeyAction::OnboardingSkip => {
                                 // Skip = mark onboarding done WITHOUT changing any
-                                // connection: persist each detected source's CURRENT
-                                // state (freeze), so `[sources]` becomes non-empty
-                                // (onboarding won't re-trigger) yet no hooks are
-                                // added/removed (a pre-existing install survives).
+                                // hooks. Freeze each detected source to its REAL
+                                // current state — connected in the live gate OR
+                                // already carrying installed hooks (a pre-0.12
+                                // upgrader: hooks present, no `[sources]` flag — the
+                                // population onboarding replays to re-connect). Apply
+                                // then re-installs the hooked/connected ones
+                                // idempotently (a SEMANTIC no-op → hooks survive) and
+                                // leaves the rest disconnected (uninstall of an absent
+                                // hook is a no-op), so `[sources]` becomes non-empty
+                                // (onboarding won't re-trigger) yet NO hooks are
+                                // added/removed. `has_hooks` reads each target's
+                                // config → block_in_place, like apply_choices.
                                 let snap = connected.snapshot();
-                                let freeze: Vec<(&'static str, bool)> = ui
-                                    .onboarding_ui
-                                    .rows
-                                    .iter()
-                                    .map(|r| (r.source_id, snap.contains(r.source_id)))
-                                    .collect();
+                                let ids: Vec<&'static str> =
+                                    ui.onboarding_ui.rows.iter().map(|r| r.source_id).collect();
+                                let freeze = tokio::task::block_in_place(|| {
+                                    crate::sources::freeze_for_skip(ids, &snap, |id| {
+                                        crate::install::target::by_source(id)
+                                            .is_some_and(crate::install::has_hooks)
+                                    })
+                                });
                                 let outcomes = tokio::task::block_in_place(|| {
                                     crate::sources::apply_choices(&config_path, &freeze)
                                 });
