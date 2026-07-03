@@ -64,8 +64,11 @@ Mermaid diagram becomes an inline SVG at build via `rehype-mermaid`, which is
   path (reduced motion / no wasm / fetch failure) and is unhidden by the
   first painted frame. Pause is **page-scoped**: `setPaused` dispatches
   `pix:paused` and every other >5s auto-motion listens (the statusline feed
-  ticker, the hero dust) — one control governs page motion, and the statusline
-  reads `❚❚ PAUSED`. The wasm fetch is **deferred** off the render-critical
+  ticker, the hero dust) — one control governs the page's *ambient* motion,
+  and the statusline reads `❚❚ PAUSED`. (The Showcase demo clips are the one
+  motion NOT wired to `pix:paused`: they're in-view-gated and carry native
+  `<video>` controls, so 2.2.2 is satisfied there independently — don't add
+  them to the `pix:paused` set.) The wasm fetch is **deferred** off the render-critical
   window (`load` → `requestIdleCallback`) so it doesn't compete with the
   above-fold poster/fonts; a live un-reduce still boots promptly via the mq
   listener.

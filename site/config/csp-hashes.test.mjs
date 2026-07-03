@@ -18,9 +18,13 @@ test('a > inside a quoted attribute value does not truncate the content', () => 
   assert.ok(!h.has(sha('b">doWork()')));
 });
 
-test('a spec-legal whitespace end tag </script > still matches (js/bad-tag-filter)', () => {
+test('parser-error end tags a browser still honors match (js/bad-tag-filter)', () => {
+  // A browser ends the script at each of these; if our regex didn't, the
+  // trailing content would ship unhashed → prod-only CSP block.
   assert.ok(inlineScriptHashes('<script>doWork()</script >').has(sha('doWork()')));
   assert.ok(inlineScriptHashes('<script>doWork()</script\n>').has(sha('doWork()')));
+  assert.ok(inlineScriptHashes('<script>doWork()</script foo="bar">').has(sha('doWork()')));
+  assert.ok(inlineScriptHashes('<script>doWork()</script\t\n bar>').has(sha('doWork()')));
 });
 
 test('src= inside another attribute value is not treated as a real src', () => {

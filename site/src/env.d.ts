@@ -12,4 +12,18 @@ interface Window {
   __pixLights?: number;
   /** Hire a coworker into the live office — set once the wasm office boots. */
   __pixHire?: () => void;
+  /** THE theme registry + fallback, seeded parse-first in Base.astro's head. */
+  __pixTheme?: {
+    KEY: string;
+    VALID: readonly string[];
+    BG: Record<string, string>;
+    ok: (_v: string) => boolean;
+    fallback: () => string;
+  };
+  /** Key-shortcut guards (Base.astro): the typing-surface check + the WCAG
+   * 2.1.4 focus gate for the bare single-char shortcuts (digits 1–6, t). */
+  __pixKeys?: {
+    typing: (_e: Event) => boolean;
+    shortcutContext: () => boolean;
+  };
 }

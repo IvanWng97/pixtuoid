@@ -13,11 +13,14 @@ const HASH = /^'sha(256|384|512)-/;
 // attribute value. The old `<script(\s[^>]*)?>` truncated on `data-x="a>b"` and
 // hashed the wrong bytes, so a legal is:inline script would be CSP-blocked in
 // production only. Group 1 = the raw attribute list; group 2 = the exact bytes
-// between the tags (what the browser hashes). The end tag tolerates the
-// spec-legal trailing whitespace (`</script >`, `</script\n>`) — an unmatched
-// close would silently drop that script's hash → a prod-only CSP block
-// (CodeQL js/bad-tag-filter; the HTML tokenizer accepts `</script\s*>`).
-const SCRIPT_RE = /<script\b((?:[^>"']|"[^"]*"|'[^']*')*)>([\s\S]*?)<\/script\s*>/gi;
+// between the tags (what the browser hashes). The end tag matches everything a
+// browser treats as a script close — not just `</script>` but the parser-error
+// forms `</script >`, `</script\n>`, and `</script foo="bar">` (a browser ends
+// the script there anyway). An unmatched close would silently drop that
+// script's hash → a prod-only CSP block, and leaving content past a fake-strict
+// `</script>` unhashed is the CodeQL js/bad-tag-filter primitive; `[^>]*`
+// swallows the garbage up to the real `>`.
+const SCRIPT_RE = /<script\b((?:[^>"']|"[^"]*"|'[^']*')*)>([\s\S]*?)<\/script[^>]*>/gi;
 
 // A real `src` ATTRIBUTE (external script → rides 'self', no hash). Strip quoted
 // values first so a `src=` sitting inside another attribute's VALUE (e.g.
