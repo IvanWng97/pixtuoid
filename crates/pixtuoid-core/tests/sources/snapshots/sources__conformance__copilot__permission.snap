@@ -13,7 +13,7 @@ expression: events
     tool_use_id: call_nf1RvU9GxssNg2g7WtPgHqQ4
     detail:
       Generic:
-        display: bash
+        display: "bash: cat /etc/hostname"
 - Waiting:
     agent_id: 4184320534004752587
     reason: "permission: shell"

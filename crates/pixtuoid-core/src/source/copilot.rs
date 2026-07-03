@@ -37,7 +37,7 @@ use anyhow::Result;
 use serde_json::Value;
 
 use crate::source::decoder::{
-    cwd_basename_label, ellipsize, make_tool_detail, MAX_DECODED_FIELD_CHARS,
+    cwd_basename_label, ellipsize, generic_tool_display, MAX_DECODED_FIELD_CHARS,
 };
 use crate::source::{AgentEvent, ToolDetail};
 use crate::AgentId;
@@ -147,15 +147,7 @@ pub fn decode_copilot_line(
                 crate::source::drift::missing_field(source, "tool.execution_start", "toolName");
                 ""
             });
-            // The sub-agent dispatch is the `task` tool (`arguments.agent_type`);
-            // make_tool_detail keys on the CC `subagent_type` field, which Copilot
-            // doesn't use — so detect `task` by name here (the child sprite still
-            // comes from the explicit subagent.started below).
-            let detail = if tool_name == "task" {
-                ToolDetail::Task
-            } else {
-                make_tool_detail(source, tool_name, d.get("arguments"))
-            };
+            let detail = copilot_tool_detail(tool_name, d.get("arguments"));
             vec![AgentEvent::ActivityStart {
                 agent_id: acting,
                 tool_use_id: Some(tool_call_id.to_string()),
@@ -268,6 +260,32 @@ pub fn decode_copilot_line(
         _ => vec![],
     };
     Ok(out)
+}
+
+/// Copilot's tool-detail dispatch. The sub-agent dispatch is the `task` tool
+/// (`arguments.agent_type`), detected by NAME here — Copilot does NOT use CC's
+/// `subagent_type` field. Routing non-`task` tools through the shared
+/// [`crate::source::decoder::make_tool_detail`] (which flags a Task on the mere
+/// PRESENCE of a `subagent_type` input key) would let a model-authored /
+/// hallucinated `subagent_type` arg spoof an ordinary tool into a delegation —
+/// prematurely draining `active_tasks` and evicting real children. Name-only
+/// detection closes that (the vector Reasonix guards with `rx_tool_detail`),
+/// and mapping Copilot's own arg vocabulary restores the `: target` display its
+/// tools otherwise lose (`describe_tool_target` knows only CC's keys). The
+/// child sprite still comes from the explicit `subagent.started` event.
+fn copilot_tool_detail(tool: &str, args: Option<&Value>) -> ToolDetail {
+    if tool == "task" {
+        return ToolDetail::Task;
+    }
+    // Copilot's builtin tools key their target under these names (bash→command,
+    // view/read/write→path, grep→pattern); the shared last-mile assembly caps +
+    // formats the `: …` suffix so the policy can't drift per source.
+    let target = args.and_then(|a| {
+        ["command", "path", "filePath", "pattern", "query"]
+            .iter()
+            .find_map(|k| a.get(k).and_then(|v| v.as_str()))
+    });
+    generic_tool_display(tool, target)
 }
 
 #[cfg(test)]
@@ -402,6 +420,43 @@ mod tests {
                 detail: Some(d), ..
             }] => assert!(d.is_task(), "task tool must be Delegating, got {d:?}"),
             other => panic!("expected Delegating ActivityStart, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn spoofed_subagent_type_arg_does_not_make_a_task() {
+        // Copilot's `arguments` are fully model-authored; a hallucinated/injected
+        // `subagent_type` key on an ORDINARY tool must NOT flip it to a Task
+        // dispatch (only the `task` tool name delegates). Regression for the
+        // shared-detector spoof vector (make_tool_detail keys on the mere
+        // presence of `subagent_type`, incl. null) — Reasonix's twin guard.
+        let line = r#"{"type":"tool.execution_start","data":{"toolCallId":"c1","toolName":"view","arguments":{"path":"x.rs","subagent_type":null}},"id":"a","timestamp":"t","parentId":null}"#;
+        match &decode(line)[..] {
+            [AgentEvent::ActivityStart {
+                detail: Some(d), ..
+            }] => assert!(
+                !d.is_task(),
+                "a spoofed subagent_type arg must stay Generic, got {d:?}"
+            ),
+            other => panic!("expected Generic ActivityStart, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ordinary_tool_shows_its_own_arg_target() {
+        // Copilot's own arg vocabulary (bash→command) renders as a `: target`
+        // suffix — the display it lost while routing through the CC-keyed
+        // describe_tool_target (which only knows CC's Write/Bash/Grep keys).
+        let line = r#"{"type":"tool.execution_start","data":{"toolCallId":"c2","toolName":"bash","arguments":{"command":"cargo test"}},"id":"a","timestamp":"t","parentId":null}"#;
+        match &decode(line)[..] {
+            [AgentEvent::ActivityStart {
+                detail: Some(ToolDetail::Generic { display }),
+                ..
+            }] => assert!(
+                display.contains("cargo test"),
+                "bash tool should show its command target, got {display:?}"
+            ),
+            other => panic!("expected Generic ActivityStart with target, got {other:?}"),
         }
     }
 
