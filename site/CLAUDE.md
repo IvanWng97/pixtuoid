@@ -58,9 +58,25 @@ Mermaid diagram becomes an inline SVG at build via `rehype-mermaid`, which is
   (poster-first; any failure keeps the still). Never hand-edit
   (prettier/eslint/knip all ignore it); regenerate from the crate.
 
+## Dev-server lifecycle (agent-driving)
+
+Foreground `astro dev` quits on stdin EOF — under a PTY an AI agent could not
+keep it alive across commands. Astro 7's `--background` mode is the fix:
+**`just site-dev-bg`** daemonizes the server (no stdin/TTY tie) and polls the
+dev-only `/_astro/status` health endpoint (`{"ok":true}`) until ready;
+**`just site-dev-stop`** (= `astro dev stop`) shuts it down and frees the port.
+`astro dev status` / `astro dev logs --follow` inspect the daemon; non-TTY runs
+auto-emit JSON log lines. Two sharp edges: `/_astro/status` and the
+background/stop/status subcommands are **dev-server only** — `astro preview`
+404s the endpoint and has no daemon mode (verified vs 7.0.5), so the e2e
+webServer keeps its URL-poll readiness; and dev/preview share port 4321, so
+**stop the daemon before `just site-e2e`** (its webServer fails loud on a
+squatted port, by design). `just site-dev` stays foreground for humans who
+want HMR logs.
+
 ## Gates
 
-`just site-{setup, dev, check, fmt, e2e}` (see `README.md`). The full-stack gate
+`just site-{setup, dev, dev-bg, dev-stop, check, fmt, e2e}` (see `README.md`). The full-stack gate
 is `just verify` = `preflight` + `site-check` + `gen-check`. For a site-only
 change, `just site-check` is the relevant one; `just site-e2e` (Playwright vs
 the PRODUCTION build via `astro preview` — the official Astro posture) pins the

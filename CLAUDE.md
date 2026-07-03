@@ -82,7 +82,7 @@ scripts/             gen-media.py + media.json (the ONE manifest-driven driver f
                      account/gateway footprint, NOT a CI test),
                      check_upstream_drift.py (weekly wire-format watch),
 site/                Astro landing page → GitHub Pages; self-contained Node project,
-                     own CI; `just site-{setup,dev,check,fmt,e2e}` → see site/README.md
+                     own CI; `just site-{setup,dev,dev-bg,dev-stop,check,fmt,e2e}` → see site/README.md
 integrations/raycast/  Raycast extension (TypeScript, self-contained Node project; NOT Rust):
                      `Manage Sources` (connect/disconnect over `pixtuoid sources|connect|disconnect
                      --json`) + `Start Floating` commands. A thin shell over the CLI `--json`

@@ -15,6 +15,22 @@ npm install        # or: just site-setup   (from the repo root)
 npm run dev        # http://localhost:4321/pixtuoid/   ·  just site-dev
 ```
 
+**Agent-driven (non-TTY) dev server** — foreground `astro dev` exits on stdin
+EOF, so it dies between an agent's shell commands. Astro 7's background mode
+fixes this (dev-server only; `astro preview` has none of it):
+
+```sh
+just site-dev-bg       # astro dev --background, then polls /_astro/status until ready
+just site-dev-stop     # astro dev stop (frees port 4321; no-op if not running)
+npx astro dev status   # from site/: is the daemon up? · logs: npx astro dev logs --follow
+```
+
+Readiness/liveness is the dev-only `/_astro/status` endpoint (`{"ok":true}`,
+served at the root and under the base path). In a non-TTY context astro
+auto-switches to JSON log lines — no logger config needed. Stop the daemon
+before `just site-e2e`: dev and preview share port 4321, and the e2e webServer
+fails loud on a squatted port by design.
+
 ## Quality gates
 
 ```sh

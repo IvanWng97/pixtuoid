@@ -29,6 +29,10 @@ export default defineConfig({
     // reuseExistingServer would then silently test the ORPHAN'S stale build
     // (caught by this suite's own teeth test). reuse stays false for the same
     // reason: a squatted port must fail loud, never quietly test old bytes.
+    // Readiness stays Playwright's URL poll: Astro 7's /_astro/status health
+    // endpoint is DEV-SERVER-ONLY — verified vs 7.0.5, `astro preview` 404s it
+    // (and preview has no --background/stop either; those are `astro dev`
+    // subcommands, adopted in `just site-dev-bg`/`site-dev-stop`).
     command: 'node node_modules/astro/bin/astro.mjs preview --port 4321',
     url: 'http://localhost:4321/pixtuoid/',
     reuseExistingServer: false,

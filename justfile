@@ -298,9 +298,39 @@ site-setup:
     npx --prefix site playwright install chromium
 
 [group('site')]
-[doc('Site dev server with HMR → http://localhost:4321/pixtuoid/')]
+[doc('Site dev server with HMR → http://localhost:4321/pixtuoid/ (foreground; agents: site-dev-bg)')]
 site-dev:
     npm --prefix site run dev
+
+# Agent-facing dev-server lifecycle (Astro 7 `--background`): the daemon has no
+# stdin/TTY tie, so it survives the launching shell — the foreground `astro dev`
+# quits on stdin EOF, which killed agent-driven servers between commands.
+# Readiness = the DEV-ONLY /_astro/status health endpoint (preview 404s it);
+# the astro bin is called directly like playwright.config.ts does (same cwd, no
+# npm wrapper layer). NOTE: dev and preview share port 4321 — stop the daemon
+# (site-dev-stop) before `just site-e2e`, or its webServer spawn fails loud.
+[group('site')]
+[doc('Dev server as a background daemon (survives stdin EOF) — waits on /_astro/status; stop: just site-dev-stop')]
+site-dev-bg:
+    #!/usr/bin/env sh
+    set -eu
+    cd site
+    node node_modules/astro/bin/astro.mjs dev --background
+    # 60 × 0.5s = 30s readiness budget
+    for _ in $(seq 1 60); do
+        if curl -fsS -m 2 http://localhost:4321/_astro/status >/dev/null 2>&1; then
+            echo "ready → http://localhost:4321/pixtuoid/  (logs: cd site && npx astro dev logs --follow)"
+            exit 0
+        fi
+        sleep 0.5
+    done
+    echo "site-dev-bg: daemon started but /_astro/status not ready after 30s" >&2
+    exit 1
+
+[group('site')]
+[doc('Stop the background dev server (astro dev stop; no-op if none is running)')]
+site-dev-stop:
+    cd site && node node_modules/astro/bin/astro.mjs dev stop
 
 [group('site')]
 [doc('Full site gate: format-check → lint → astro check → build (mirrors site CI)')]
