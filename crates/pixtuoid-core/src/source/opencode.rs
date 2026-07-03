@@ -111,7 +111,9 @@ pub fn decode_oc_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
         "session.created" => decode_session_lifecycle(props, false),
         "session.deleted" => decode_session_lifecycle(props, true),
         "message.part.updated" => decode_tool_part(props),
-        "permission.asked" | "permission.v2.asked" => decode_permission(props),
+        "permission.asked" | "permission.v2.asked" => {
+            decode_permission(obj.get("properties").unwrap_or(&Value::Null))
+        }
         // The plugin only forwards the mapped set + tool parts; anything else
         // (a pending tool part, a not-yet-mapped type) is skipped, not bailed.
         _ => Ok(vec![]),
@@ -241,16 +243,17 @@ fn decode_tool_part(props: &serde_json::Map<String, Value>) -> Result<Vec<AgentE
 /// request carries only `sessionID`), so the prepended `Identity` registers
 /// ordinal-labeled if the session is unknown — back-filled when its
 /// `session.created` arrives (#221).
-fn decode_permission(props: &serde_json::Map<String, Value>) -> Result<Vec<AgentEvent>> {
+fn decode_permission(props: &Value) -> Result<Vec<AgentEvent>> {
     let session_id = props
         .get("sessionID")
         .and_then(|s| s.as_str())
         .filter(|s| !s.is_empty())
         .ok_or_else(|| anyhow!("opencode permission event missing sessionID"))?;
     let agent_id = AgentId::from_parts(SOURCE_NAME, session_id);
-    let reason = ["action", "permission", "title", "pattern", "type", "tool"]
-        .iter()
-        .find_map(|k| props.get(*k).and_then(|v| v.as_str()))
+    // Per-source reason vocabulary; the shared scan lives in the decoder. Keep
+    // the non-empty filter + ellipsize cap chained here.
+    const KEYS: &[&str] = &["action", "permission", "title", "pattern", "type", "tool"];
+    let reason = crate::source::decoder::first_present_str(props, KEYS)
         .filter(|s| !s.is_empty())
         .map(|s| ellipsize(s, MAX_DECODED_FIELD_CHARS))
         .unwrap_or_else(|| "permission".to_string());
@@ -294,21 +297,19 @@ fn oc_tool_detail(tool: &str, input: Option<&Value>) -> ToolDetail {
     if is_subagent {
         return ToolDetail::Task;
     }
-    let target = input_obj.and_then(|i| {
-        [
-            "command",
-            "filePath",
-            "file_path",
-            "path",
-            "pattern",
-            "url",
-            "query",
-        ]
-        .iter()
-        .find_map(|k| i.get(*k).and_then(|v| v.as_str()))
-    });
-    // Per-source target keys above; the shared last-mile assembly (name +
-    // `: target` with the matching caps) lives in `generic_tool_display`.
+    // Per-source target vocabulary; the shared scan lives in the decoder, the
+    // last-mile assembly (name + `: target` with the matching caps) in
+    // `generic_tool_display`.
+    const KEYS: &[&str] = &[
+        "command",
+        "filePath",
+        "file_path",
+        "path",
+        "pattern",
+        "url",
+        "query",
+    ];
+    let target = input.and_then(|i| crate::source::decoder::first_present_str(i, KEYS));
     generic_tool_display(tool, target)
 }
 

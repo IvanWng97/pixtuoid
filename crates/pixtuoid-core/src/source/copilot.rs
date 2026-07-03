@@ -278,11 +278,8 @@ fn copilot_tool_detail(tool: &str, args: Option<&Value>) -> ToolDetail {
     // Copilot's builtin tools key their target under these names (bash→command,
     // view/read/write→path, grep→pattern); the shared last-mile assembly caps +
     // formats the `: …` suffix so the policy can't drift per source.
-    let target = args.and_then(|a| {
-        ["command", "path", "filePath", "pattern", "query"]
-            .iter()
-            .find_map(|k| a.get(k).and_then(|v| v.as_str()))
-    });
+    const KEYS: &[&str] = &["command", "path", "filePath", "pattern", "query"];
+    let target = args.and_then(|a| crate::source::decoder::first_present_str(a, KEYS));
     generic_tool_display(tool, target)
 }
 

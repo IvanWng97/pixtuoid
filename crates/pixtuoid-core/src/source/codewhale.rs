@@ -264,13 +264,13 @@ fn cw_tool_detail(tool: &str, raw_args: Option<&Value>) -> ToolDetail {
         Some(v @ Value::Object(_)) => Some(v.clone()),
         _ => None,
     };
-    let target = parsed.as_ref().and_then(|a| {
-        ["command", "file_path", "path", "pattern", "url"]
-            .iter()
-            .find_map(|k| a.get(k).and_then(|v| v.as_str()))
-    });
-    // Per-source target keys above; the shared last-mile assembly (name +
-    // `: target` with the matching caps) lives in `generic_tool_display`.
+    // Per-source target vocabulary; the shared scan lives in the decoder, the
+    // last-mile assembly (name + `: target` with the matching caps) in
+    // `generic_tool_display`.
+    const KEYS: &[&str] = &["command", "file_path", "path", "pattern", "url"];
+    let target = parsed
+        .as_ref()
+        .and_then(|a| crate::source::decoder::first_present_str(a, KEYS));
     generic_tool_display(tool, target)
 }
 

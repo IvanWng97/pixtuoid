@@ -256,14 +256,11 @@ fn rx_tool_detail(tool: &str, args: Option<&Value>) -> ToolDetail {
     if SUBAGENT_TOOLS.contains(&tool) {
         return ToolDetail::Task;
     }
-    let target = args.and_then(|a| {
-        ["command", "path", "pattern", "url"]
-            .iter()
-            .find_map(|k| a.get(k).and_then(|v| v.as_str()))
-    });
-    // Per-source target keys above; the shared last-mile assembly (name +
-    // `: target`, each capped at the decode boundary — pitfall 3) lives in
-    // `generic_tool_display`.
+    // Per-source target vocabulary; the shared scan lives in the decoder, the
+    // last-mile assembly (name + `: target`, each capped at the decode boundary
+    // — pitfall 3) in `generic_tool_display`.
+    const KEYS: &[&str] = &["command", "path", "pattern", "url"];
+    let target = args.and_then(|a| crate::source::decoder::first_present_str(a, KEYS));
     generic_tool_display(tool, target)
 }
 

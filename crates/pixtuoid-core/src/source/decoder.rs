@@ -97,6 +97,16 @@ pub(crate) fn derive_prefixed_label(source: &str, cwd: &Path) -> String {
     cwd_basename_label(prefix, cwd).unwrap_or_else(|| prefix.to_string())
 }
 
+/// The first key in `keys` (priority order) whose value on `obj` is a string.
+/// The "first present tool-arg / reason key from a per-source vocabulary" scan,
+/// reimplemented at every per-source tool/permission decoder — centralized so
+/// only the VOCABULARY (each caller's own `KEYS`) stays per-source, not the
+/// scan itself. `None` for a non-object `obj` or when no key matches.
+pub(crate) fn first_present_str<'a>(obj: &'a Value, keys: &[&str]) -> Option<&'a str> {
+    let m = obj.as_object()?;
+    keys.iter().find_map(|k| m.get(*k).and_then(|v| v.as_str()))
+}
+
 /// Decode one hook payload into the event sequence the reducer applies.
 ///
 /// Tool/permission arms (PreToolUse / PostToolUse / Notification /
