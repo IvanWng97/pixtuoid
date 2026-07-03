@@ -18,6 +18,11 @@ test('a > inside a quoted attribute value does not truncate the content', () => 
   assert.ok(!h.has(sha('b">doWork()')));
 });
 
+test('a spec-legal whitespace end tag </script > still matches (js/bad-tag-filter)', () => {
+  assert.ok(inlineScriptHashes('<script>doWork()</script >').has(sha('doWork()')));
+  assert.ok(inlineScriptHashes('<script>doWork()</script\n>').has(sha('doWork()')));
+});
+
 test('src= inside another attribute value is not treated as a real src', () => {
   const h = inlineScriptHashes('<script data-cmd="ffmpeg src=in.mp4">go()</script>');
   assert.ok(h.has(sha('go()')), 'the inline script must still be hashed');
