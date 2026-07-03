@@ -12,7 +12,11 @@ import '@fontsource/jetbrains-mono/400.css';
 import '@fontsource/jetbrains-mono/500.css';
 import '@fontsource/jetbrains-mono/700.css';
 import '@fontsource/lora/400.css';
-import '@fontsource/lora/500.css';
+// 600 (SemiBold), not 500: the run-in step titles / docs links / tools CLI-name
+// column declare `font-weight: 600` on Lora — with only 400/500 loaded the 600
+// silently painted as Medium (500 was the accidental fallback, referenced by
+// nothing else). Loading the real 600 gives those a genuine weight step.
+import '@fontsource/lora/600.css';
 import '../styles/global.css';
 import { asset, THEMES, THEME_BG, THEME_STORAGE_KEY, VALID_THEMES } from '../consts';
 

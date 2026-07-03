@@ -176,6 +176,20 @@ import { asset, DIM_RESTING } from '../consts';
     display: block;
     color: var(--led);
   }
+  /* Phone: the desktop pattern floats this 36px control 10px ABOVE the statusline,
+     where on a full-width mobile layout it lands over body copy (measured: it sat
+     over 14 text elements incl. a tools data cell, opaque while paused). Dock it
+     into the right of the taller mobile statusline instead — reserved chrome, off
+     the content — at a 44px thumb target, z above the bar so it stays tappable. */
+  @media (max-width: 760px) {
+    .office-ctl {
+      right: 6px;
+      bottom: calc(env(safe-area-inset-bottom, 0px) + 2px);
+      width: 44px;
+      height: 44px;
+      z-index: 51;
+    }
+  }
 </style>
 
 <script is:inline define:vars={{ wasmJsUrl: asset('wasm/pixtuoid_web.js') }}>
@@ -445,7 +459,13 @@ import { asset, DIM_RESTING } from '../consts';
             bestEl = b.el;
           }
         }
-        const op = DIM_MAX * ease(best);
+        // A block may cap its own darkness below DIM_MAX via data-lit-max: the
+        // hero holds a lower ceiling so the LIVE office (the product's one true
+        // trick) actually reads above the fold, while the downpage statement
+        // holds keep DIM_MAX for copy legibility. The [data-lit]::before radial
+        // wash still floors local contrast on the capped block.
+        const cap = bestEl && bestEl.dataset.litMax ? parseFloat(bestEl.dataset.litMax) : DIM_MAX;
+        const op = cap * ease(best);
         if (Math.abs(op - lastOp) > 0.002) {
           lastOp = op;
           dimmer.style.opacity = op.toFixed(3);

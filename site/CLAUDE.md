@@ -75,10 +75,24 @@ Mermaid diagram becomes an inline SVG at build via `rehype-mermaid`, which is
   non-reduced-motion visitor whose wasm never loads can still pause the ticker /
   dust / clips. Only the office RENDER path (`boot`/`paint`) is gated on `hasWasm`;
   `start`/`stop` are no-ops without a live office, so `setPaused` is safe
-  standalone. Reduced-motion hides the button (nothing auto-animates there). The
+  standalone. On phones (≤760px) the button DOCKS into a taller statusline at the
+  right (a 44px thumb target in reserved chrome) rather than floating over body
+  copy, and a compact `.sl__onair` pip returns to the otherwise-empty mobile bar
+  so it still confirms LIVE/PAUSED. Reduced-motion hides the button (nothing auto-animates there). The
   wasm fetch is **deferred** off the render-critical window (`load` →
   `requestIdleCallback`) so it doesn't compete with the above-fold poster/fonts;
-  a live un-reduce still boots promptly via the mq listener.
+  a live un-reduce still boots promptly via the mq listener. The dimmer
+  controller honours a per-block `data-lit-max`: the hero's `data-lit` block caps
+  its darkness at 0.74 (below the shared `DIM_MAX` 0.86) so the LIVE office reads
+  above the fold, while downpage statement holds keep `DIM_MAX` for copy
+  legibility (the `[data-lit]::before` radial wash still floors local contrast).
+- **Scoped `<style>` does NOT reach `set:html` content.** Astro scopes component
+  styles by stamping a `data-astro-*` hash on template elements AND selectors;
+  markup injected at runtime via `set:html` (e.g. the SupportedTools per-OS
+  pixel-check marks from `MARK()`) carries no hash, so scoped rules silently miss
+  it — target it with `:global(...)`. (The tools checks rendered black + mis-sized
+  until the `.tools__mark*` rules were `:global`; caught only by rendering, not by
+  the static gates.)
 - The **on-page nav + footer logo mark IS the favicon** — `public/favicon-32.png`
   / `favicon-32-night.png` (the head-and-collar bust squircle from #379), one
   brand asset in two roles so there's no second file to drift (the old separate

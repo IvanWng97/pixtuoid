@@ -44,7 +44,10 @@ const cells = features.flatMap((f) =>
             <p class="ledger__body">{c.body}</p>
             {c.href && (
               <a class="ledger__link" href={c.href}>
-                see it live →
+                see it live{' '}
+                <span class="ledger__arrow" aria-hidden="true">
+                  →
+                </span>
               </a>
             )}
           </article>
@@ -91,8 +94,16 @@ const cells = features.flatMap((f) =>
     text-decoration: none;
     white-space: nowrap;
   }
-  .ledger__link:hover {
-    color: var(--coral-deep);
+  /* color-based hover was a no-op (rest is already --coral-deep, and night's
+     a:not(.btn) outranks it) — move the arrow instead: an AA-safe tell that
+     works in both themes without dropping contrast. */
+  .ledger__arrow {
+    display: inline-block;
+    transition: transform 0.18s ease;
+  }
+  .ledger__link:hover .ledger__arrow,
+  .ledger__link:focus-visible .ledger__arrow {
+    transform: translateX(3px);
   }
   @media (max-width: 860px) {
     .ledger__row {

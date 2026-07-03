@@ -47,7 +47,9 @@ const steps = [
       }
     </ol>
     <p class="how__more reveal">
-      <a href={asset('architecture')}>see how it works under the hood →</a>
+      <a href={asset('architecture')}
+        >see how it works under the hood <span class="how__arrow" aria-hidden="true">→</span></a
+      >
     </p>
   </div>
 </section>
@@ -111,7 +113,14 @@ const steps = [
     color: var(--coral-deep); /* AA 5.2:1; plain --coral was ~2.7:1 on day */
     text-decoration: none;
   }
-  .how__more a:hover {
-    color: var(--coral-deep);
+  /* color hover was a no-op (rest already --coral-deep; night's a:not(.btn)
+     outranks it) — nudge the arrow instead, contrast-safe in both themes. */
+  .how__arrow {
+    display: inline-block;
+    transition: transform 0.18s ease;
+  }
+  .how__more a:hover .how__arrow,
+  .how__more a:focus-visible .how__arrow {
+    transform: translateX(3px);
   }
 </style>

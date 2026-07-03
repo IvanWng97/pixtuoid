@@ -286,8 +286,10 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
     text-align: left;
   }
   @media (pointer: coarse) {
+    /* lift the row pitch toward the 44px thumb target — 0.55rem left adjacent
+       channels ~41px centre-to-centre (mis-tap range). */
     .dial__ch {
-      padding-block: 0.55rem;
+      padding-block: 0.7rem;
     }
   }
   .dial__ch {
@@ -297,6 +299,7 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
     font: inherit;
     color: var(--fg-muted);
     cursor: pointer;
+    transition: color 0.18s ease;
   }
   .dial__ch:hover,
   .dial__ch:focus-visible {
@@ -324,7 +327,9 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
 
   .showcase {
     position: relative;
-    padding-block: clamp(2.5rem, 6vw, 5rem);
+    /* inherit section's clamp(3.2rem,7vw,6rem)=96px — the lone 80px override was
+       an unexplained dip in an otherwise strict cadence (HowItWorks also follows
+       an office-gap and keeps 96px). */
   }
   .studio {
     display: grid;

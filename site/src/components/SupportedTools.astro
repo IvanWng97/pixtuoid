@@ -20,9 +20,19 @@ const OSES = [
   { key: 'linux', label: 'Linux' },
   { key: 'windows', label: 'Windows' },
 ] as const;
-const GLYPH: Record<OsState, string> = { yes: '✅', experimental: '🧪', planned: '🔜', no: '—' };
-const glyph = (s: string): string => GLYPH[s as OsState] ?? '—';
-// Screen-reader text for each cell. The emoji carries the value visually but is
+// In-palette marks replace the OS-native ✅/🧪 emoji — the ✅ grid was the
+// loudest, most-saturated off-system hue on the page (its glossy green belongs
+// to no token; the office greens are --ok/--led). The check is an 8×8 pixel SVG
+// (the same crispEdges idiom as the office pause icon), self-tinted to the
+// office green (supported) / amber (experimental); planned & absent are muted
+// text. The value still rides the sr-only sibling — these marks are aria-hidden.
+const MARK = (s: string): string => {
+  if (s === 'yes' || s === 'experimental')
+    return `<svg class="tools__mark tools__mark--${s}" viewBox="0 0 8 8" shape-rendering="crispEdges" aria-hidden="true"><use href="#tm-check" /></svg>`;
+  if (s === 'no') return '<span class="tools__mark tools__dash" aria-hidden="true">–</span>';
+  return '<span class="tools__mark tools__soon" aria-hidden="true">soon</span>';
+};
+// Screen-reader text for each cell. The mark carries the value visually but is
 // aria-hidden (aria-label on a roleless <span> is naming-prohibited and gets
 // dropped), so the real value rides a visually-hidden sibling.
 const STATE_LABEL: Record<OsState, string> = {
@@ -41,13 +51,27 @@ const planned = sources.filter((s) => s.status === 'planned');
 const present = new Set<string>(supported.flatMap((s) => OSES.map((o) => s.platforms[o.key])));
 if (planned.length > 0) present.add('planned');
 const LEGEND_LABEL: Record<OsState, string> = { ...STATE_LABEL, no: 'n/a' };
-const legend = (['yes', 'experimental', 'planned', 'no'] as OsState[])
-  .filter((s) => present.has(s))
-  .map((s) => `${GLYPH[s]} ${LEGEND_LABEL[s]}`)
-  .join(' · ');
+const legendStates = (['yes', 'experimental', 'planned', 'no'] as OsState[]).filter((s) =>
+  present.has(s)
+);
 ---
 
 <section id={floor.id} class="tools" data-lit data-floor={floor.n}>
+  {
+    /* pixel check, defined once, referenced by every supported/experimental cell
+     + the legend via <use> (crispEdges → hard pixel edges, like the pause icon) */
+  }
+  <svg width="0" height="0" class="tools__sprite" aria-hidden="true" focusable="false">
+    <symbol id="tm-check" viewBox="0 0 8 8">
+      <rect x="1" y="3" width="1" height="2"></rect>
+      <rect x="2" y="4" width="1" height="2"></rect>
+      <rect x="3" y="5" width="1" height="2"></rect>
+      <rect x="4" y="4" width="1" height="2"></rect>
+      <rect x="5" y="3" width="1" height="2"></rect>
+      <rect x="6" y="2" width="1" height="2"></rect>
+      <rect x="7" y="1" width="1" height="2"></rect>
+    </symbol>
+  </svg>
   <div class="container">
     <div class="section-head reveal">
       <p class="eyebrow">{floor.n}F · {floor.name} — the resident CLIs</p>
@@ -90,7 +114,7 @@ const legend = (['yes', 'experimental', 'planned', 'no'] as OsState[])
                 {OSES.map((o) => (
                   <td class="tools__cell" data-state={s.platforms[o.key]}>
                     <span class="sr-only">{stateLabel(s.platforms[o.key])}</span>
-                    <span aria-hidden="true">{glyph(s.platforms[o.key])}</span>
+                    <Fragment set:html={MARK(s.platforms[o.key])} />
                   </td>
                 ))}
                 <td class="tools__how">{s.transport}</td>
@@ -114,7 +138,7 @@ const legend = (['yes', 'experimental', 'planned', 'no'] as OsState[])
                   {OSES.map(() => (
                     <td class="tools__cell" data-state="planned">
                       <span class="sr-only">planned</span>
-                      <span aria-hidden="true">🔜</span>
+                      <Fragment set:html={MARK('planned')} />
                     </td>
                   ))}
                   <td class="tools__how">{s.transport}</td>
@@ -124,7 +148,15 @@ const legend = (['yes', 'experimental', 'planned', 'no'] as OsState[])
           )
         }
       </table>
-      <p class="tools__legend">{legend}</p>
+      <p class="tools__legend">
+        {
+          legendStates.map((s) => (
+            <span class="tools__legend-item">
+              <Fragment set:html={MARK(s)} /> {LEGEND_LABEL[s]}
+            </span>
+          ))
+        }
+      </p>
     </div>
   </div>
 </section>
@@ -143,7 +175,10 @@ const legend = (['yes', 'experimental', 'planned', 'no'] as OsState[])
   }
   .tools__matrix {
     max-width: 760px;
-    margin-inline: auto;
+    /* left-align to the page rail (x=200), NOT centered: every other block on
+       the page (hero, studio, ledger, steps, install) hangs on the left rail, so
+       a centered table floats out from under its own left-aligned headline. */
+    margin-inline: 0;
     padding: 0.4rem 0.4rem 0.2rem;
     overflow-x: auto;
   }
@@ -196,6 +231,36 @@ const legend = (['yes', 'experimental', 'planned', 'no'] as OsState[])
   .tools__cell[data-state='no'] {
     opacity: 0.35;
   }
+  .tools__sprite {
+    position: absolute;
+  }
+  /* the marks are injected via set:html (MARK()), so they carry no scoped
+     data-astro hash — scoped selectors would miss them. Style them :global
+     (names are component-unique, no leak risk). */
+  :global(.tools__mark) {
+    width: 1.1em;
+    height: 1.1em;
+    fill: currentColor;
+    vertical-align: -0.16em;
+  }
+  /* the office's own greens/amber (--ok is the AA "supported" green; the raw
+     bright --led reads too faint on cream), tinting the shared check by state */
+  :global(.tools__mark--yes) {
+    color: var(--ok);
+  }
+  :global(.tools__mark--experimental) {
+    color: var(--amber);
+  }
+  :global(.tools__dash) {
+    color: var(--fg-muted);
+  }
+  :global(.tools__soon) {
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--fg-muted);
+  }
   /* td-qualified: must outrank the `.tools th, .tools td` nowrap above —
      bare .tools__how loses on specificity and the column clips mid-word */
   .tools td.tools__how {
@@ -223,7 +288,15 @@ const legend = (['yes', 'experimental', 'planned', 'no'] as OsState[])
   .tools__legend {
     margin: 0.7rem 0.2rem 0.3rem;
     font-size: 0.78rem;
-    /* the sole decode key for the ✅/🧪/🔜 glyphs — AA muted color, not opacity */
+    /* the sole decode key for the marks — AA muted color, not opacity */
+    color: var(--fg-muted);
+  }
+  .tools__legend-item {
+    white-space: nowrap;
+  }
+  .tools__legend-item:not(:first-child)::before {
+    content: '·';
+    margin: 0 0.5rem;
     color: var(--fg-muted);
   }
   /* The transport column is supplementary — drop it before the grid gets cramped. */

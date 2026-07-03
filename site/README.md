@@ -90,7 +90,8 @@ gates can't see. CI runs it in `site.yml` after the build step.
   fixed full-viewport canvas (poster-first; reduced-motion / no-JS / any
   failure stays on the still), and scrolling is the light switch — a `#dimmer`
   sheet darkens toward statements and releases to 0 in full-viewport
-  "office gaps". Each section is a floor (6F penthouse → 1F front desk);
+  "office gaps" (the hero caps its dim lower via `data-lit-max` so the live
+  office reads above the fold). Each section is a floor (6F penthouse → 1F front desk);
   `Statusline.astro` is the one piece of fixed chrome (floor readout +
   scrollspy, the build-time merged-PR feed with a canned-reel fallback,
   `lights %` / clock / `● LIVE` · `❚❚ PAUSED`), and the app's literal keys work
@@ -124,6 +125,9 @@ gates can't see. CI runs it in `site.yml` after the build step.
   timeline up where it stopped. Hidden only under reduced motion (nothing
   auto-animates); on a no-wasm / fetch-failure poster it stays visible, since the
   ticker / dust / clips still run and it governs them wasm-independently (#456).
+  On phones it docks into a taller statusline (right side, 44px tap) instead of
+  floating over content, and a compact `● LIVE` / `❚❚ PAUSED` pip returns to the
+  mobile bar.
 - **Docs shell** — `layouts/Docs.astro` gives /config, /architecture,
   /contributing, /migration a shared sidebar + build-time mini-TOC + pager,
   driven by the one `DOCS` manifest in `consts.ts` (the Nav dropdown reads the

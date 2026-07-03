@@ -254,6 +254,9 @@ const { floating = false } = Astro.props;
     text-decoration: none;
     padding: 0.55rem 0.2rem;
     border-radius: var(--radius-sm);
+    /* ease the hover like the button/chip family does — the text-link row was
+       the only interactive surface that hard-snapped its color on hover. */
+    transition: color 0.18s ease;
   }
   .nav__links a:hover {
     color: var(--fg);
@@ -328,6 +331,7 @@ const { floating = false } = Astro.props;
       border: 0;
       padding: 0;
       cursor: pointer;
+      transition: color 0.18s ease;
     }
     .nav__docs-btn:hover,
     .nav__docs-btn[aria-expanded='true'] {
@@ -375,5 +379,14 @@ const { floating = false } = Astro.props;
   }
   .nav__toggle:hover {
     transform: translateY(-1px);
+  }
+  /* touch devices: raise the icon buttons to the 44px comfortable thumb target
+     (the 40px desktop size is a mis-tap risk on a phone). */
+  @media (pointer: coarse) {
+    .nav__burger,
+    .nav__toggle {
+      width: 44px;
+      height: 44px;
+    }
   }
 </style>

@@ -68,17 +68,26 @@ import tabs from '../install.json';
   (function () {
     const box = document.querySelector('.install__box');
     if (!box) return;
+    const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
     box.querySelectorAll('.install__tab').forEach(function (tab) {
       tab.addEventListener('click', function () {
         const id = tab.dataset.tab;
-        box.querySelectorAll('.install__tab').forEach(function (t) {
-          const on = t === tab;
-          t.classList.toggle('is-active', on);
-          t.setAttribute('aria-pressed', on ? 'true' : 'false');
-        });
-        box.querySelectorAll('.install__panel').forEach(function (p) {
-          p.classList.toggle('is-active', p.dataset.panel === id);
-        });
+        // crossfade the panel swap with the SAME view-transition the Showcase
+        // channel dial uses one section up (guarded on reduced-motion + support),
+        // so the two adjacent "switch the content" gestures feel of a piece
+        // instead of one crossfading and one hard-cutting.
+        function swap() {
+          box.querySelectorAll('.install__tab').forEach(function (t) {
+            const on = t === tab;
+            t.classList.toggle('is-active', on);
+            t.setAttribute('aria-pressed', on ? 'true' : 'false');
+          });
+          box.querySelectorAll('.install__panel').forEach(function (p) {
+            p.classList.toggle('is-active', p.dataset.panel === id);
+          });
+        }
+        if (!mq.matches && document.startViewTransition) document.startViewTransition(swap);
+        else swap();
       });
     });
     box.querySelectorAll('.install__copy').forEach(function (btn) {
@@ -174,6 +183,10 @@ import tabs from '../install.json';
     overflow: hidden;
     border: 1px solid var(--chip-line);
     background: var(--screen);
+    /* the one surface a visitor is meant to ACT on — lift it off the office with
+       the same warm, theme-aware elevation .terminal/.card already use, instead
+       of sitting flat on the cream. Sharp edge stays: it's a terminal screen. */
+    box-shadow: var(--shadow-lg);
   }
   .install__panel.is-active {
     display: block;
@@ -203,6 +216,10 @@ import tabs from '../install.json';
     background: color-mix(in srgb, var(--screen) 88%, #fff);
     color: #f3ede3;
     cursor: pointer;
+    transition:
+      background-color 0.18s ease,
+      border-color 0.18s ease,
+      color 0.18s ease;
   }
   .install__copy:hover {
     background: var(--coral);
@@ -227,6 +244,12 @@ import tabs from '../install.json';
   }
   @media (pointer: coarse) {
     .install__tab {
+      padding-block: 0.55rem;
+    }
+    /* the section's PRIMARY action (and the #434 hire trigger) — give it a
+       real thumb target (≥44px) instead of the 29px-tall desktop pill. */
+    .install__copy {
+      min-height: 44px;
       padding-block: 0.55rem;
     }
   }
