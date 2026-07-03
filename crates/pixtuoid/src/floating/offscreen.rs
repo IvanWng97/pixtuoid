@@ -16,8 +16,8 @@ use std::time::SystemTime;
 use pixtuoid_core::sprite::{format::Pack, Rgb, RgbBuffer};
 use pixtuoid_core::state::SceneState;
 
-use pixtuoid_scene::floor::{FloorMeta, FloorSession};
-use pixtuoid_scene::layout::Layout;
+use pixtuoid_scene::floor::{FloorMeta, FloorSession, FrameInputs};
+use pixtuoid_scene::layout::{Layout, Size};
 use pixtuoid_scene::theme::Theme;
 
 /// Owns everything needed to render the live office to a reusable `RgbBuffer`
@@ -68,9 +68,17 @@ impl OfficeRenderer {
         // must be built against the SAME geometry the sprite pass used.
         // active_pet stays None: click-to-pet needs window pointer
         // hit-testing (deferred); the WANDERING floor pet is wired.
-        self.last_layout = self.session.render(
-            scene, pack, theme, now, buf_w, buf_h, floor_meta, None, floor_pet, false,
-        );
+        self.last_layout = self.session.render(FrameInputs {
+            scene,
+            pack,
+            theme,
+            now,
+            size: Size { w: buf_w, h: buf_h },
+            floor_meta,
+            active_pet: None,
+            floor_pet,
+            debug_walkable: false,
+        });
         self.session.buf()
     }
 

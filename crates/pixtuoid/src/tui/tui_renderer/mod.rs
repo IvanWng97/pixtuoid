@@ -25,9 +25,10 @@ use ratatui::layout::Rect;
 
 use crate::tui::renderer::{draw_scene, flush_buffer_to_term_at_offset, DrawCtx, PetState};
 use pixtuoid_scene::floor::{
-    num_floors, project_floor_scene, render_floor, FloorMeta, FloorTransition, PerFloor, PerOffice,
+    num_floors, project_floor_scene, render_floor, FloorMeta, FloorTransition, FrameInputs,
+    PerFloor, PerOffice,
 };
-use pixtuoid_scene::layout::Layout;
+use pixtuoid_scene::layout::{Layout, Size};
 use pixtuoid_scene::pathfind::Router;
 use pixtuoid_scene::pet::PetFrame;
 
@@ -556,32 +557,34 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             from_buf,
             &mut self.office.coffee,
             &mut transition_chitchat,
-            &from_scene,
-            pack,
-            self.theme,
-            now,
-            buf_w,
-            buf_h,
-            from_meta,
-            from_active_pet,
-            from_pet,
-            self.debug_walkable,
+            FrameInputs {
+                scene: &from_scene,
+                pack,
+                theme: self.theme,
+                now,
+                size: Size { w: buf_w, h: buf_h },
+                floor_meta: from_meta,
+                active_pet: from_active_pet,
+                floor_pet: from_pet,
+                debug_walkable: self.debug_walkable,
+            },
         );
         render_floor(
             to_ctx,
             to_buf,
             &mut self.office.coffee,
             &mut transition_chitchat,
-            &to_scene,
-            pack,
-            self.theme,
-            now,
-            buf_w,
-            buf_h,
-            to_meta,
-            to_active_pet,
-            to_pet,
-            self.debug_walkable,
+            FrameInputs {
+                scene: &to_scene,
+                pack,
+                theme: self.theme,
+                now,
+                size: Size { w: buf_w, h: buf_h },
+                floor_meta: to_meta,
+                active_pet: to_active_pet,
+                floor_pet: to_pet,
+                debug_walkable: self.debug_walkable,
+            },
         );
 
         // Modal backdrop: dim BOTH sliding buffers by the onboarding factor, the

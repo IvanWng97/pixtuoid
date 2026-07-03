@@ -21,6 +21,7 @@ use pixtuoid_core::AgentId;
 
 use crate::chitchat::{ActiveChitchat, VenueKey};
 use crate::frame_cache::FrameCache;
+use crate::layout::Size;
 use crate::motion::MotionState;
 use crate::pathfind::{AStarRouter, Router};
 use crate::pet::{Pet, PetState};
@@ -293,25 +294,45 @@ fn frame_epilogue(
 /// [`FloorSession`], whose `render` runs the dual eviction once (its scene IS
 /// the full live scene by contract); only a projected-scene consumer like the
 /// TUI slide still calls this fn raw and owns its own eviction.
-#[allow(clippy::too_many_arguments)] // the render inputs are genuinely flat (same shape as the pass itself)
+/// The IMMUTABLE per-frame render inputs — the read-only cluster threaded
+/// through [`render_floor`] / [`FloorSession::render`] (was a 9-arg positional
+/// tail behind the mutable stores). The MUTABLE per-floor stores
+/// (`fctx`/`buf`/`coffee`/`chitchat`) stay SEPARATE params on `render_floor`: a
+/// painter that composes floors (the TUI) borrows those disjointly per floor via
+/// `split_at_mut`, so they can't fold into one bundle. `buf_w`/`buf_h` fold into
+/// [`Size`].
+pub struct FrameInputs<'a> {
+    pub scene: &'a SceneState,
+    pub pack: &'a Pack,
+    pub theme: &'static Theme,
+    pub now: SystemTime,
+    pub size: Size,
+    pub floor_meta: FloorMeta,
+    pub active_pet: Option<&'a PetState>,
+    pub floor_pet: Option<&'a Pet>,
+    pub debug_walkable: bool,
+}
+
 pub fn render_floor(
     fctx: &mut FloorCtx,
     buf: &mut RgbBuffer,
     coffee: &mut CoffeeState,
     chitchat: &mut HashMap<VenueKey, ActiveChitchat>,
-    scene: &SceneState,
-    pack: &Pack,
-    theme: &'static Theme,
-    now: SystemTime,
-    buf_w: u16,
-    buf_h: u16,
-    floor_meta: FloorMeta,
-    active_pet: Option<&PetState>,
-    floor_pet: Option<&Pet>,
-    debug_walkable: bool,
+    inputs: FrameInputs,
 ) -> Option<crate::layout::Layout> {
-    buf.ensure_size(buf_w, buf_h, theme.surface.bg_fallback);
-    let layout = frame_prologue(fctx, buf_w, buf_h, floor_meta.floor_seed)?;
+    let FrameInputs {
+        scene,
+        pack,
+        theme,
+        now,
+        size,
+        floor_meta,
+        active_pet,
+        floor_pet,
+        debug_walkable,
+    } = inputs;
+    buf.ensure_size(size.w, size.h, theme.surface.bg_fallback);
+    let layout = frame_prologue(fctx, size.w, size.h, floor_meta.floor_seed)?;
     let result = render_to_rgb_buffer(&mut PixelCtx {
         scene,
         layout: &layout,
@@ -437,36 +458,14 @@ impl FloorSession {
     /// PROJECTED single-floor scenes (the TUI floor slide) stays on
     /// [`render_floor`] directly and runs the eviction against the full scene
     /// itself.
-    #[allow(clippy::too_many_arguments)] // the render inputs are genuinely flat (same shape as render_floor)
-    pub fn render(
-        &mut self,
-        scene: &SceneState,
-        pack: &Pack,
-        theme: &'static Theme,
-        now: SystemTime,
-        buf_w: u16,
-        buf_h: u16,
-        floor_meta: FloorMeta,
-        active_pet: Option<&PetState>,
-        floor_pet: Option<&Pet>,
-        debug_walkable: bool,
-    ) -> Option<crate::layout::Layout> {
-        self.evict_missing(scene);
+    pub fn render(&mut self, inputs: FrameInputs) -> Option<crate::layout::Layout> {
+        self.evict_missing(inputs.scene);
         render_floor(
             &mut self.floor.ctx,
             &mut self.floor.buf,
             &mut self.office.coffee,
             &mut self.office.chitchat,
-            scene,
-            pack,
-            theme,
-            now,
-            buf_w,
-            buf_h,
-            floor_meta,
-            active_pet,
-            floor_pet,
-            debug_walkable,
+            inputs,
         )
     }
 
@@ -1301,16 +1300,17 @@ mod tests {
             &mut buf,
             &mut coffee,
             &mut chitchat,
-            &scene,
-            &pack,
-            theme,
-            now,
-            8,
-            8,
-            FloorMeta::ground(),
-            None,
-            None,
-            false,
+            FrameInputs {
+                scene: &scene,
+                pack: &pack,
+                theme,
+                now,
+                size: Size { w: 8, h: 8 },
+                floor_meta: FloorMeta::ground(),
+                active_pet: None,
+                floor_pet: None,
+                debug_walkable: false,
+            },
         );
         assert!(none.is_none(), "an unlayoutable size returns None");
         assert_eq!(
@@ -1326,16 +1326,17 @@ mod tests {
             &mut buf,
             &mut coffee,
             &mut chitchat,
-            &scene,
-            &pack,
-            theme,
-            now,
-            160,
-            96,
-            FloorMeta::ground(),
-            None,
-            None,
-            false,
+            FrameInputs {
+                scene: &scene,
+                pack: &pack,
+                theme,
+                now,
+                size: Size { w: 160, h: 96 },
+                floor_meta: FloorMeta::ground(),
+                active_pet: None,
+                floor_pet: None,
+                debug_walkable: false,
+            },
         );
         assert!(layout.is_some(), "a layoutable size returns the layout");
         let bg = theme.surface.bg_fallback;
@@ -1370,18 +1371,17 @@ mod tests {
 
         // `gone` is not in the scene → one render() must drop both entries.
         let scene = SceneState::new([8; MAX_FLOORS]);
-        let layout = session.render(
-            &scene,
-            &pack,
+        let layout = session.render(FrameInputs {
+            scene: &scene,
+            pack: &pack,
             theme,
             now,
-            160,
-            96,
-            FloorMeta::ground(),
-            None,
-            None,
-            false,
-        );
+            size: Size { w: 160, h: 96 },
+            floor_meta: FloorMeta::ground(),
+            active_pet: None,
+            floor_pet: None,
+            debug_walkable: false,
+        });
         assert!(layout.is_some(), "a layoutable size renders");
         assert!(
             !session.floor.ctx.motion.contains_key(&gone),

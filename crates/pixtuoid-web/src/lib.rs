@@ -29,7 +29,8 @@ use pixtuoid_core::{AgentEvent, AgentId, Transport};
 use crate::script::{hero_script, hire_beats, lobster_beats, Beat, PresenceBeat, LOOP_MS};
 
 use pixtuoid_scene::embedded_pack::load_sprite_pack;
-use pixtuoid_scene::floor::{floor_capacity, FloorMeta, FloorSession};
+use pixtuoid_scene::floor::{floor_capacity, FloorMeta, FloorSession, FrameInputs};
+use pixtuoid_scene::layout::Size;
 use pixtuoid_scene::theme::{Theme, ALL_THEMES};
 
 /// A scheduled one-shot event for a visitor hire — an absolute-time
@@ -365,18 +366,17 @@ impl Office {
             floor_seed: self.seed,
             ..FloorMeta::for_floor(0, 1)
         };
-        self.session.render(
-            &self.scene,
-            &self.pack,
-            self.theme,
+        self.session.render(FrameInputs {
+            scene: &self.scene,
+            pack: &self.pack,
+            theme: self.theme,
             now,
-            buf_w,
-            buf_h,
+            size: Size { w: buf_w, h: buf_h },
             floor_meta,
-            None,
-            None,
-            false,
-        );
+            active_pet: None,
+            floor_pet: None,
+            debug_walkable: false,
+        });
     }
 
     /// Expand the packed-RGB render buffer into the RGBA staging vec (opaque
