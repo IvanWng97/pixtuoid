@@ -4,6 +4,7 @@ pub mod codex;
 pub mod cursor;
 mod hook_cmd;
 pub mod io;
+pub mod merge;
 pub mod openclaw;
 pub mod opencode;
 pub mod reasonix;

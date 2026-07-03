@@ -112,7 +112,7 @@ pub fn detect_installed() -> bool {
 /// Codex/Reasonix/CodeWhale. `_explicit` (Claude's bare-vs-absolute switch) is
 /// irrelevant: opencode always needs the absolute path.
 pub fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
-    crate::install::verify::hook_path_str(resolved).map(str::to_string)
+    crate::install::merge::hook_path_str(resolved).map(str::to_string)
 }
 
 /// Render the plugin with the shim path baked in (JSON-encoded → a valid,
@@ -176,7 +176,7 @@ fn extract_hook_path(content: &str) -> Option<PathBuf> {
 }
 
 fn render_plugin(hook_path: &str) -> Result<String> {
-    crate::install::verify::bake_hook_path(PLUGIN_TEMPLATE, HOOK_PLACEHOLDER, hook_path, "opencode")
+    crate::install::merge::bake_hook_path(PLUGIN_TEMPLATE, HOOK_PLACEHOLDER, hook_path, "opencode")
 }
 
 #[cfg(test)]

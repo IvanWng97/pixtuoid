@@ -54,7 +54,7 @@ pub fn default_config_path() -> Result<PathBuf> {
 pub fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
     // `_explicit` is Claude's bare-name-vs-absolute switch — Codex always
     // embeds the absolute path, so the flag changes nothing here.
-    let p = crate::install::verify::hook_path_str(resolved)?;
+    let p = crate::install::merge::hook_path_str(resolved)?;
     // One OS fork for the cmd.exe-shelling strategy lives in
     // hook_cmd::shell_hook_command (Unix env-prefix form / Windows bare
     // `<path> --source codex`), shared with Reasonix so the platform halves can't
@@ -63,7 +63,7 @@ pub fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
 }
 
 pub fn merge_install(content: &str, hook_cmd: &str) -> Result<MergeOutcome> {
-    let doc = crate::install::verify::parse_toml_or_empty(content)?;
+    let doc = crate::install::merge::parse_toml_or_empty(content)?;
     let merged = toml_merge_install(doc.clone(), hook_cmd);
     let changed = merged != doc;
     Ok(MergeOutcome {
@@ -73,7 +73,7 @@ pub fn merge_install(content: &str, hook_cmd: &str) -> Result<MergeOutcome> {
 }
 
 pub fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
-    let doc = crate::install::verify::parse_toml_or_empty(content)?;
+    let doc = crate::install::merge::parse_toml_or_empty(content)?;
     let cleaned = toml_merge_uninstall(doc.clone());
     let changed = cleaned != doc;
     Ok(MergeOutcome {

@@ -33,8 +33,8 @@ use anyhow::{anyhow, Result};
 use serde_json::{json, Map, Value};
 
 use crate::install::io;
+use crate::install::merge;
 use crate::install::target::MergeOutcome;
-use crate::install::verify;
 use crate::install::SENTINEL_KEY;
 
 /// Events we register == events we decode (`source/cursor.rs`), enforced by
@@ -118,12 +118,12 @@ pub fn detect_installed() -> bool {
 ///
 /// Err on non-UTF-8 (prevents the to_string_lossy dead-hook).
 pub fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
-    let p = verify::hook_path_str(resolved)?;
+    let p = merge::hook_path_str(resolved)?;
     crate::install::hook_cmd::shell_hook_command(p, "cursor")
 }
 
 pub fn merge_install(content: &str, hook_cmd: &str) -> Result<MergeOutcome> {
-    let doc = verify::parse_json_or_empty(content)?;
+    let doc = merge::parse_json_or_empty(content)?;
     if !doc.is_object() && !doc.is_null() {
         anyhow::bail!("hooks.json is valid JSON but not an object — refusing to overwrite");
     }
@@ -136,11 +136,11 @@ pub fn merge_install(content: &str, hook_cmd: &str) -> Result<MergeOutcome> {
 }
 
 pub fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
-    let doc = verify::parse_json_or_empty(content)?;
+    let doc = merge::parse_json_or_empty(content)?;
     // Shared flat-JSON uninstall: removes managed entries + drops empty event
     // keys / the `hooks` object. `version` is untouched (preserved by design —
     // see the comment in `json_merge_uninstall`'s former body, now below).
-    let cleaned = verify::flat_json_merge_uninstall(doc.clone(), SENTINEL_KEY);
+    let cleaned = merge::flat_json_merge_uninstall(doc.clone(), SENTINEL_KEY);
     let changed = cleaned != doc;
     Ok(MergeOutcome {
         content: serde_json::to_string_pretty(&cleaned)?,
@@ -185,7 +185,7 @@ fn json_merge_install(doc: Value, hook_command: &str) -> Value {
     let mut root: Map<String, Value> = doc.as_object().cloned().unwrap_or_default();
     root.entry("version".to_string())
         .or_insert_with(|| json!(1));
-    verify::flat_json_merge_install(
+    merge::flat_json_merge_install(
         Value::Object(root),
         CURSOR_EVENTS,
         SENTINEL_KEY,
@@ -243,7 +243,7 @@ mod tests {
     // valid-Cursor residual (accepted, like opencode's no-op stub) — the shared
     // helper only touches `hooks`, so `version` survives.
     fn json_merge_uninstall(doc: Value) -> Value {
-        verify::flat_json_merge_uninstall(doc, SENTINEL_KEY)
+        merge::flat_json_merge_uninstall(doc, SENTINEL_KEY)
     }
 
     #[test]

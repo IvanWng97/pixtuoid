@@ -5,8 +5,8 @@ use pixtuoid_core::source::claude_code::claude_config_dir;
 use serde_json::{json, Value};
 
 use crate::install::io;
+use crate::install::merge;
 use crate::install::target::MergeOutcome;
-use crate::install::verify;
 use crate::install::SENTINEL_KEY;
 
 const EVENTS: &[&str] = &[
@@ -44,7 +44,7 @@ pub fn hook_command(resolved: &Path, explicit: bool) -> Result<String> {
     #[cfg(not(windows))]
     {
         if explicit {
-            let p = verify::hook_path_str(resolved)?;
+            let p = merge::hook_path_str(resolved)?;
             return Ok(crate::install::hook_cmd::unix::shell_single_quote(p));
         }
         Ok("pixtuoid-hook".to_string())
@@ -52,7 +52,7 @@ pub fn hook_command(resolved: &Path, explicit: bool) -> Result<String> {
     #[cfg(windows)]
     {
         let _ = explicit; // exec form always embeds the absolute path
-        verify::hook_path_str(resolved).map(str::to_string)
+        merge::hook_path_str(resolved).map(str::to_string)
     }
 }
 
@@ -142,7 +142,7 @@ fn claude_shim_ref(entry: &Value) -> crate::install::verify::ShimRef {
 }
 
 pub fn merge_install(content: &str, hook_cmd: &str) -> Result<MergeOutcome> {
-    let doc = verify::parse_json_or_empty(content)?;
+    let doc = merge::parse_json_or_empty(content)?;
     // Valid JSON but not an object (a top-level array/string/number) would be
     // silently discarded by the shared merge's `as_object().unwrap_or_default()`
     // — writing only our hooks and dropping the user's document. Refuse, mirroring
@@ -157,7 +157,7 @@ pub fn merge_install(content: &str, hook_cmd: &str) -> Result<MergeOutcome> {
     // merge only keys managed entries on the `_pixtuoid` sentinel, so the byte
     // output is preserved (`managed_entry` emits the same `json!` as the old inline).
     let merged =
-        verify::flat_json_merge_install(doc.clone(), EVENTS, SENTINEL_KEY, managed_entry, hook_cmd);
+        merge::flat_json_merge_install(doc.clone(), EVENTS, SENTINEL_KEY, managed_entry, hook_cmd);
     let changed = merged != doc;
     Ok(MergeOutcome {
         content: serde_json::to_string_pretty(&merged)?,
@@ -166,8 +166,8 @@ pub fn merge_install(content: &str, hook_cmd: &str) -> Result<MergeOutcome> {
 }
 
 pub fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
-    let doc = verify::parse_json_or_empty(content)?;
-    let cleaned = verify::flat_json_merge_uninstall(doc.clone(), SENTINEL_KEY);
+    let doc = merge::parse_json_or_empty(content)?;
+    let cleaned = merge::flat_json_merge_uninstall(doc.clone(), SENTINEL_KEY);
     let changed = cleaned != doc;
     Ok(MergeOutcome {
         content: serde_json::to_string_pretty(&cleaned)?,
@@ -207,11 +207,11 @@ mod tests {
     // (mirrors reasonix.rs's test wrappers). Production `merge_install`/
     // `merge_uninstall` call the shared helpers directly.
     fn json_merge_install(doc: Value, hook_command: &str) -> Value {
-        verify::flat_json_merge_install(doc, EVENTS, SENTINEL_KEY, managed_entry, hook_command)
+        merge::flat_json_merge_install(doc, EVENTS, SENTINEL_KEY, managed_entry, hook_command)
     }
 
     fn json_merge_uninstall(doc: Value) -> Value {
-        verify::flat_json_merge_uninstall(doc, SENTINEL_KEY)
+        merge::flat_json_merge_uninstall(doc, SENTINEL_KEY)
     }
 
     #[test]

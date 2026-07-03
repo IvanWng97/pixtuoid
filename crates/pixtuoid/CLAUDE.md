@@ -174,8 +174,8 @@ src/
 │                       target.rs (Target trait + TARGETS = [CLAUDE, CODEX, REASONIX, CODEWHALE, OPENCODE, CURSOR, OPENCLAW];
 │                         each Target carries a `verify_schema` fn-ptr — the #309 install-soundness check, per-source
 │                         format-local like merge_install/uninstall),
-│                       verify.rs (the #309 install-schema verifier: SchemaParse/SchemaVerifyResult/ShimRef +
-│                         shared helpers shell_shim_ref (4 shell targets) / flat_json_verify (reasonix+cursor) /
+│                       verify.rs (the READ-ONLY #309 install-schema verifier: SchemaParse/SchemaVerifyResult/ShimRef +
+│                         shared read helpers shell_shim_ref (4 shell targets) / flat_json_verify (reasonix+cursor) /
 │                         assemble; install::verify_target(t, config) = the I/O wrapper that reads the config +
 │                         calls verify_schema + stats the shim + (for `extra_artifacts` targets like OpenClaw)
 │                         stats each wholly-owned plugin file for existence — a missing one is a HARD break, the
@@ -183,6 +183,12 @@ src/
 │                         placeholder arg yields the install locations without resolving the binary). ONLY call when has_hooks(t) — the load-bearing gate
 │                         (an uninstalled config verifies "broken"; a disconnect removes hooks → has_hooks=false →
 │                         never called → never a false broken)),
+│                       merge.rs (the install-WRITE shared helpers, split OUT of verify.rs so the read/write
+│                         halves live apart: parse_json_or_empty/parse_toml_or_empty (empty ⇒ {}), hook_path_str
+│                         (the ONE non-UTF-8-path rejector), bake_hook_path (opencode/openclaw plugin templater),
+│                         and flat_json_merge_install/uninstall — the sentinel-keyed per-event merge Reasonix/Cursor/
+│                         Claude ride (the entry SHAPE rides in the caller's make_entry closure, so Claude's nested
+│                         entry fits the same core)),
 │                       claude.rs / codex.rs / reasonix.rs / codewhale.rs / opencode.rs (+ bundled opencode_plugin.ts) /
 │                         cursor.rs / openclaw.rs (+ bundled openclaw_plugin.js) (per-target hook_command + config path;
 │                         claude.rs: Unix = bare shell-form, Windows = exec-form absolute .exe;

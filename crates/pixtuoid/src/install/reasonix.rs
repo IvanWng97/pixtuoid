@@ -33,8 +33,8 @@ use anyhow::{anyhow, Result};
 use serde_json::{json, Value};
 
 use crate::install::io;
+use crate::install::merge;
 use crate::install::target::MergeOutcome;
-use crate::install::verify;
 use crate::install::SENTINEL_KEY;
 
 /// Events we register == events we decode (`source/reasonix.rs`), enforced by
@@ -190,20 +190,20 @@ fn user_config_dir_checked(
 pub fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
     // `_explicit` is Claude's bare-name-vs-absolute switch — Reasonix always
     // embeds the absolute path, so the flag changes nothing here.
-    let p = verify::hook_path_str(resolved)?;
+    let p = merge::hook_path_str(resolved)?;
     // Same OS fork as Codex, in one place (hook_cmd::shell_hook_command): Unix
     // env-prefix form / Windows bare `<path> --source reasonix`.
     crate::install::hook_cmd::shell_hook_command(p, "reasonix")
 }
 
 pub fn merge_install(content: &str, hook_cmd: &str) -> Result<MergeOutcome> {
-    let doc = verify::parse_json_or_empty(content)?;
+    let doc = merge::parse_json_or_empty(content)?;
     // See claude.rs: a valid-JSON-but-non-object doc would be silently dropped
     // by `flat_json_merge_install`. Refuse rather than overwrite the user's content.
     if !doc.is_object() && !doc.is_null() {
         anyhow::bail!("settings is valid JSON but not an object — refusing to overwrite");
     }
-    let merged = verify::flat_json_merge_install(
+    let merged = merge::flat_json_merge_install(
         doc.clone(),
         REASONIX_EVENTS,
         SENTINEL_KEY,
@@ -218,8 +218,8 @@ pub fn merge_install(content: &str, hook_cmd: &str) -> Result<MergeOutcome> {
 }
 
 pub fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
-    let doc = verify::parse_json_or_empty(content)?;
-    let cleaned = verify::flat_json_merge_uninstall(doc.clone(), SENTINEL_KEY);
+    let doc = merge::parse_json_or_empty(content)?;
+    let cleaned = merge::flat_json_merge_uninstall(doc.clone(), SENTINEL_KEY);
     let changed = cleaned != doc;
     Ok(MergeOutcome {
         content: serde_json::to_string_pretty(&cleaned)?,
@@ -249,7 +249,7 @@ mod tests {
     // Thin wrappers over the shared flat-JSON merge so the existing per-shape
     // tests below exercise Reasonix's events + entry shape against the common core.
     fn json_merge_install(doc: Value, hook_command: &str) -> Value {
-        verify::flat_json_merge_install(
+        merge::flat_json_merge_install(
             doc,
             REASONIX_EVENTS,
             SENTINEL_KEY,
@@ -259,7 +259,7 @@ mod tests {
     }
 
     fn json_merge_uninstall(doc: Value) -> Value {
-        verify::flat_json_merge_uninstall(doc, SENTINEL_KEY)
+        merge::flat_json_merge_uninstall(doc, SENTINEL_KEY)
     }
 
     #[test]
