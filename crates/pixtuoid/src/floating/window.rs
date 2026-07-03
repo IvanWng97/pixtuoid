@@ -21,7 +21,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
 use pixtuoid_core::sprite::format::Pack;
-use pixtuoid_core::state::{SceneState, MAX_FLOORS};
+use pixtuoid_core::state::{DaemonState, SceneState, MAX_FLOORS};
 use tokio::sync::watch;
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalPosition};
@@ -363,12 +363,22 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
         // lighting, the wandering pet) still advances, so a 0fps idle would freeze it and
         // an empty-office window would look dead/broken. Drop to a slow ~1fps ambient tick
         // instead — enough to keep the office alive while preserving the CPU-saving intent
-        // (nowhere near the 30fps agents-present path).
-        let next_tick = if self.scene_rx.borrow().agents.is_empty() {
+        // (nowhere near the 30fps agents-present path). A LIVE gateway daemon (the OpenClaw
+        // lobster) lives in `daemons`, not `agents`, and is a time-driven WANDERING mascot
+        // — not slow ambient decor — so it keeps the 30fps path unless every daemon is Down
+        // (a Down daemon isn't rendered/moving, so it stays on the ambient tick).
+        let scene = self.scene_rx.borrow();
+        let office_idle = scene.agents.is_empty()
+            && scene
+                .daemons()
+                .values()
+                .all(|d| d.state == DaemonState::Down);
+        let next_tick = if office_idle {
             Duration::from_millis(1000 / IDLE_AMBIENT_FPS)
         } else {
             Duration::from_millis(1000 / ACTIVE_FPS)
         };
+        drop(scene);
         event_loop.set_control_flow(ControlFlow::WaitUntil(Instant::now() + next_tick));
         if let Some(window) = &self.window {
             window.request_redraw();
