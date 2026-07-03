@@ -58,7 +58,6 @@ async fn refresh_probe_snapshot_migrates_a_rebound_id_between_pids() {
     bindings.entry(1).or_default().insert("sess".to_string());
     let probe: LivenessProbe = Arc::new(|| {
         Some(ProbeSnapshot {
-            ids: HashSet::from(["sess".to_string()]),
             pid_of: HashMap::from([("sess".to_string(), 2)]),
         })
     });
@@ -108,8 +107,7 @@ async fn forget_disarms_a_pending_negative_vouch_confirmation() {
     let mut bindings: HashMap<i32, HashSet<String>> = HashMap::new();
     let vouched: LivenessProbe = Arc::new(|| {
         Some(ProbeSnapshot {
-            ids: HashSet::from(["sess".to_string()]),
-            pid_of: HashMap::new(),
+            pid_of: HashMap::from([("sess".to_string(), 2)]),
         })
     });
     refresh_probe_snapshot(

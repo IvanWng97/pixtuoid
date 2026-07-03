@@ -136,8 +136,7 @@ pub fn live_cc_session_ids(sessions_dir: &Path) -> Option<ProbeSnapshot> {
         }
         let mut live = ProbeSnapshot::default();
         for (session_id, entry) in winners {
-            live.pid_of.insert(session_id.clone(), entry.pid);
-            live.ids.insert(session_id);
+            live.pid_of.insert(session_id, entry.pid);
         }
         Some(live)
     }
@@ -361,7 +360,7 @@ mod liveness_tests {
         );
         let live = live_cc_session_ids(dir.path()).expect("readable dir is a healthy probe");
         assert!(
-            live.ids.contains("alive-session"),
+            live.contains("alive-session"),
             "an entry with a live pid must be kept, got {live:?}"
         );
         // #223: the snapshot binds each vouched id to its owning OS pid (the
@@ -393,11 +392,11 @@ mod liveness_tests {
         );
         let live = live_cc_session_ids(dir.path()).expect("readable dir is a healthy probe");
         assert!(
-            !live.ids.contains("dead-session"),
+            !live.contains("dead-session"),
             "a crashed CC's leftover registry file must not count as live, got {live:?}"
         );
         assert!(
-            live.ids.contains("alive-session"),
+            live.contains("alive-session"),
             "the live sibling must survive the dead entry, got {live:?}"
         );
     }
@@ -428,7 +427,7 @@ mod liveness_tests {
 
         let live = live_cc_session_ids(dir.path()).expect("readable dir is a healthy probe");
         assert_eq!(
-            live.ids,
+            live.ids().cloned().collect::<HashSet<_>>(),
             HashSet::from(["valid-session".to_string()]),
             "only the well-formed live entry may survive"
         );
@@ -451,7 +450,7 @@ mod liveness_tests {
         );
         let live = live_cc_session_ids(dir.path()).expect("readable dir is a healthy probe");
         assert_eq!(
-            live.ids,
+            live.ids().cloned().collect::<HashSet<_>>(),
             HashSet::from(["valid-session".to_string()]),
             "an oversized junk entry must be ignored, not break the probe"
         );
@@ -480,7 +479,7 @@ mod liveness_tests {
         );
         let live = live_cc_session_ids(dir.path()).expect("readable dir is a healthy probe");
         assert_eq!(
-            live.ids,
+            live.ids().cloned().collect::<HashSet<_>>(),
             HashSet::from(["valid-session".to_string()]),
             "a FIFO entry must be skipped; the live sibling must survive"
         );
@@ -592,11 +591,11 @@ mod liveness_tests {
         );
         let live = live_cc_session_ids(dir.path()).expect("readable dir is a healthy probe");
         assert!(
-            live.ids.contains("boundary-session"),
+            live.contains("boundary-session"),
             "a claim exactly at the tolerance must still vouch, got {live:?}"
         );
         assert!(
-            !live.ids.contains("recycled-session"),
+            !live.contains("recycled-session"),
             "one second past the tolerance is a recycled pid, got {live:?}"
         );
     }
@@ -621,7 +620,7 @@ mod liveness_tests {
         .unwrap();
         let live = live_cc_session_ids(dir.path()).expect("readable dir is a healthy probe");
         assert!(
-            live.ids.contains("padded-session"),
+            live.contains("padded-session"),
             "an 8 KiB entry sits well under the 64 KiB cap, got {live:?}"
         );
     }
@@ -644,7 +643,7 @@ mod liveness_tests {
         // probe failure.
         let dir = tempfile::tempdir().unwrap();
         let snap = live_cc_session_ids(dir.path()).expect("empty readable dir is healthy");
-        assert!(snap.ids.is_empty());
+        assert!(snap.is_empty());
         assert!(snap.pid_of.is_empty());
     }
 
@@ -788,7 +787,7 @@ mod liveness_tests {
         );
         let live = live_cc_session_ids(dir.path()).expect("readable dir is a healthy probe");
         assert_eq!(
-            live.ids,
+            live.ids().cloned().collect::<HashSet<_>>(),
             HashSet::from(["valid-session".to_string()]),
             "a shape-drifted entry must not vouch; the well-formed sibling survives"
         );
@@ -857,7 +856,7 @@ mod liveness_tests {
         .unwrap();
         let live = live_cc_session_ids(dir.path()).expect("readable dir is a healthy probe");
         assert_eq!(
-            live.ids,
+            live.ids().cloned().collect::<HashSet<_>>(),
             HashSet::from(["genuine-session".to_string()]),
             "a recycled-pid entry must be dropped; the identity-matching one kept"
         );
@@ -877,7 +876,6 @@ mod liveness_tests {
         );
         assert!(live_cc_session_ids(dir.path())
             .expect("readable dir is a healthy probe")
-            .ids
             .contains("legacy-session"));
     }
 
@@ -953,7 +951,7 @@ mod liveness_tests {
         for snapshot in snapshots {
             let live = snapshot.expect("readable dir is a healthy probe");
             assert_eq!(
-                live.ids,
+                live.ids().cloned().collect::<HashSet<_>>(),
                 HashSet::from(["dup".to_string()]),
                 "a duplicate id must yield ONE vouch, not two"
             );

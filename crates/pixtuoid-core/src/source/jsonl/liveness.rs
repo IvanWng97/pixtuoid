@@ -14,15 +14,32 @@ use super::walk::{park_if_truncated_below_cursor, walk_jsonl};
 use super::{SourceDecoders, WatchCtx};
 
 /// One healthy liveness-probe observation: which agent processes are verified
-/// alive RIGHT NOW, and which OS pid owns each.
+/// alive RIGHT NOW, and which OS pid owns each. The set of live session ids IS
+/// `pid_of`'s key set — a live id always has an owning pid (both probes bind
+/// them together), so a separate `ids` set could only denormalize it into a
+/// representable "id without pid" illegal state. Read the id set via the
+/// `ids()` / `contains()` / `is_empty()` accessors.
 #[derive(Debug, Clone, Default)]
 pub struct ProbeSnapshot {
-    /// Session ids (`IdDeriver` id-space) of agent processes verified alive
-    /// right now.
-    pub ids: HashSet<String>,
     /// id → owning OS pid, for the exit watch (many ids may share one pid —
-    /// one codex process holds every rollout it has open).
+    /// one codex process holds every rollout it has open). The keys are the
+    /// live session ids (`IdDeriver` id-space).
     pub pid_of: HashMap<String, i32>,
+}
+
+impl ProbeSnapshot {
+    /// The live session ids (`pid_of`'s keys) — the former `ids` field.
+    pub fn ids(&self) -> impl Iterator<Item = &String> {
+        self.pid_of.keys()
+    }
+    /// Whether `id` is verified alive in this snapshot.
+    pub fn contains(&self, id: &str) -> bool {
+        self.pid_of.contains_key(id)
+    }
+    /// Whether the probe saw no live sessions (ran fine, nothing alive).
+    pub fn is_empty(&self) -> bool {
+        self.pid_of.is_empty()
+    }
 }
 
 /// Optional first-party liveness probe: returns the session ids — in the
@@ -138,8 +155,13 @@ impl NegativeVouch {
         let now = std::time::Instant::now();
         // A re-appearing id (fd reopened, registry entry back) cancels its
         // pending miss window.
-        self.miss_since.retain(|id, _| !snap.ids.contains(id));
-        let missing: Vec<String> = self.prev_vouched.difference(&snap.ids).cloned().collect();
+        self.miss_since.retain(|id, _| !snap.contains(id));
+        let missing: Vec<String> = self
+            .prev_vouched
+            .iter()
+            .filter(|id| !snap.pid_of.contains_key(*id))
+            .cloned()
+            .collect();
         for id in missing {
             match self.miss_since.get(&id) {
                 // Second healthy miss past the span — confirmed exit.
@@ -167,7 +189,7 @@ impl NegativeVouch {
         }
         // Previously-vouched = the current snapshot ∪ ids whose miss window
         // still runs (they must stay eligible for the confirming observation).
-        self.prev_vouched = snap.ids.clone();
+        self.prev_vouched = snap.pid_of.keys().cloned().collect();
         self.prev_vouched.extend(self.miss_since.keys().cloned());
     }
 
@@ -287,7 +309,7 @@ pub(super) async fn refresh_probe_snapshot(
         debug!("liveness probe failed; keeping the previous snapshot (failure changes nothing)");
         return false;
     };
-    *ctx.live.lock().await = snap.ids.clone();
+    *ctx.live.lock().await = snap.pid_of.keys().cloned().collect();
     vouch.observe(&snap, decoders, ctx, pid_bindings).await;
     // Bindings are ADDITIVE per snapshot (ids leave via the instant-exit arm
     // or the negative-vouch unbind above, never by snapshot omission — the

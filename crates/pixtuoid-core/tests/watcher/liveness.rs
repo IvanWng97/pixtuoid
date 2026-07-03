@@ -20,7 +20,6 @@ use crate::{
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 fn vouch_snapshot_with_pid(ids: &[&str], pid: i32) -> Option<ProbeSnapshot> {
     Some(ProbeSnapshot {
-        ids: ids.iter().map(|s| s.to_string()).collect(),
         pid_of: ids.iter().map(|s| (s.to_string(), pid)).collect(),
     })
 }
@@ -109,9 +108,17 @@ async fn poll_arm_refreshes_probe_snapshot_and_reemits_proof_of_life() {
         .with_initial_window(Duration::from_secs(60))
         .with_poll_interval(Duration::from_millis(100))
         .with_liveness_probe(Arc::new(move || {
+            // The live id set IS `pid_of`'s keys; this test only exercises
+            // admission + proof-of-life, so bind each vouched id to this live
+            // process's pid (a placeholder that never instant-exits).
+            let pid = std::process::id() as i32;
             Some(ProbeSnapshot {
-                ids: probe_view.lock().unwrap().clone(),
-                pid_of: std::collections::HashMap::new(),
+                pid_of: probe_view
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .map(|s| (s.clone(), pid))
+                    .collect(),
             })
         }));
     let handle = tokio::spawn(async move { watcher.run(tx).await });

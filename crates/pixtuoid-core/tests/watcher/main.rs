@@ -27,9 +27,13 @@ fn fast_watch() {
 /// tests fake the probe closure; the id→pid join is unit-tested at the source
 /// level (`claude_code::liveness_tests`, `codex::tests`).
 fn vouch_snapshot(ids: &[&str]) -> Option<ProbeSnapshot> {
+    // The live id set IS `pid_of`'s key set; these admission/proof-of-life
+    // tests don't exercise the id→pid exit-watch join (that's
+    // `vouch_snapshot_with_pid`), so bind each id to this live process's pid —
+    // a placeholder that can never spuriously instant-exit.
+    let pid = std::process::id() as i32;
     Some(ProbeSnapshot {
-        ids: ids.iter().map(|s| s.to_string()).collect(),
-        pid_of: std::collections::HashMap::new(),
+        pid_of: ids.iter().map(|s| (s.to_string(), pid)).collect(),
     })
 }
 

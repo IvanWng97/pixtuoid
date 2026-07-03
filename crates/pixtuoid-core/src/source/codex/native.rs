@@ -73,11 +73,10 @@ fn rollout_ids_from_paths(
         // not bind id→pid by proc-enumeration order — the same determinism
         // rule as the CC registry fold's no-startedAt arm (#252): larger pid
         // wins, arbitrary but stable for live processes.
-        let bound = snap.pid_of.entry(id.clone()).or_insert(pid);
+        let bound = snap.pid_of.entry(id).or_insert(pid);
         if pid > *bound {
             *bound = pid;
         }
-        snap.ids.insert(id);
     }
     snap
 }
@@ -203,7 +202,10 @@ mod tests {
             "2026/06/10/rollout-2026-06-10T08-00-00-{UUID}.jsonl"
         ));
         let got = snap_of(root, vec![nested]);
-        assert_eq!(got.ids, std::iter::once(UUID.to_string()).collect());
+        assert_eq!(
+            got.ids().cloned().collect::<Vec<_>>(),
+            vec![UUID.to_string()]
+        );
         // #223: the snapshot binds each id to the OWNING pid (the exit-watch
         // half) — the (42, path) pair above must survive the join intact.
         assert_eq!(got.pid_of.get(UUID), Some(&42));
@@ -220,7 +222,10 @@ mod tests {
         ));
         for pids in [[100, 200], [200, 100]] {
             let got = rollout_ids_from_paths(root, pids.into_iter().map(|p| (p, path.clone())));
-            assert_eq!(got.ids, std::iter::once(UUID.to_string()).collect());
+            assert_eq!(
+                got.ids().cloned().collect::<Vec<_>>(),
+                vec![UUID.to_string()]
+            );
             assert_eq!(
                 got.pid_of.get(UUID),
                 Some(&200),
@@ -234,7 +239,7 @@ mod tests {
         let root = Path::new("/home/u/.codex/sessions");
         let outside = PathBuf::from(format!("/tmp/elsewhere/rollout-1-{UUID}.jsonl"));
         let got = snap_of(root, vec![outside]);
-        assert!(got.ids.is_empty());
+        assert!(got.is_empty());
         assert!(got.pid_of.is_empty());
     }
 
@@ -244,9 +249,7 @@ mod tests {
         let wrong_stem = root.join("2026/06/10/history.jsonl");
         let wrong_ext = root.join(format!("2026/06/10/rollout-1-{UUID}.log"));
         let no_ext = root.join("2026/06/10/rollout-noext");
-        assert!(snap_of(root, vec![wrong_stem, wrong_ext, no_ext])
-            .ids
-            .is_empty());
+        assert!(snap_of(root, vec![wrong_stem, wrong_ext, no_ext]).is_empty());
     }
 
     #[test]
@@ -298,7 +301,7 @@ mod tests {
         // the negative-vouch ledger forever on machines without codex).
         let missing = Path::new("/definitely/not/a/real/.codex/sessions");
         let snap = live_codex_rollout_ids(missing).expect("absent root is not a probe failure");
-        assert!(snap.ids.is_empty());
+        assert!(snap.is_empty());
         assert!(snap.pid_of.is_empty());
     }
 
@@ -309,6 +312,6 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let snap = live_codex_rollout_ids(dir.path())
             .expect("a healthy system's enumeration must succeed");
-        assert!(snap.ids.is_empty());
+        assert!(snap.is_empty());
     }
 }
