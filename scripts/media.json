@@ -97,30 +97,6 @@
   "colors": 128
  },
  {
-  "id": "theme",
-  "kind": "matrix",
-  "targets": [
-   "site"
-  ],
-  "over": "@themes.json",
-  "axis": "theme",
-  "cols": 200,
-  "rows": 90,
-  "hour": 20
- },
- {
-  "id": "weather",
-  "kind": "matrix",
-  "targets": [
-   "site"
-  ],
-  "over": "@weather.json",
-  "axis": "weather",
-  "cols": 200,
-  "rows": 90,
-  "hour": 17
- },
- {
   "id": "day",
   "kind": "render",
   "targets": [
