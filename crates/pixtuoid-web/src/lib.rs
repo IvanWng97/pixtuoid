@@ -162,6 +162,11 @@ pub struct Office {
     /// changes on resize, so `sync_capacity` skips the layout recompute on
     /// every other frame.
     caps_size: Option<(u16, u16)>,
+    /// Override the weather for this office (`"clear"|"rain"|"storm"|"snow"|"fog"|
+    /// "overcast"|"windy"|"smog"`), or `None` to follow the clock-based cycle.
+    /// Applied each `step` (see the force_weather invariant) so two Offices sharing
+    /// the one wasm module never fight over the thread-local override.
+    weather_override: Option<String>,
 }
 
 #[wasm_bindgen]
@@ -191,6 +196,7 @@ impl Office {
             hires: VisitorHires::default(),
             last_now: None,
             caps_size: None,
+            weather_override: None,
         })
     }
 
@@ -208,6 +214,10 @@ impl Office {
         self.last_now = Some(now);
         let buf_w = w.clamp(1, u16::MAX as u32) as u16;
         let buf_h = h.clamp(1, u16::MAX as u32) as u16;
+        // Re-apply THIS office's weather every frame: force_weather is a thread-local
+        // shared by every Office in the module, so the last writer before a render
+        // wins — each office must set its own value right before rendering.
+        let _ = pixtuoid_scene::pixel_painter::force_weather(self.weather_override.as_deref());
         // Capacity BEFORE the script advances: the SessionStarts due this
         // frame must allocate desks against the canvas this frame renders.
         self.sync_capacity(buf_w, buf_h);
@@ -250,6 +260,14 @@ impl Office {
         };
         // Delegate to the grouped hire lane (prune → cap → free-desk → push).
         self.hires.try_hire(base, &self.scene);
+    }
+
+    /// Force the office's weather (`"clear"|"rain"|"storm"|"snow"|"fog"|
+    /// "overcast"|"windy"|"smog"`), or `None` to follow the clock-based cycle.
+    /// Applied each `step` (see the force_weather invariant) so two Offices sharing
+    /// the one wasm module never fight over the thread-local override.
+    pub fn set_weather(&mut self, name: Option<String>) {
+        self.weather_override = name;
     }
 }
 
@@ -683,5 +701,34 @@ mod tests {
             VisitorHires::MAX_LIVE,
             "a post-burst click must not overshoot the cap"
         );
+    }
+
+    #[test]
+    fn set_weather_forces_that_weather_and_two_offices_dont_fight() {
+        // Storm and clear render measurably different frames at the same instant.
+        let mut storm = Office::new(1).unwrap();
+        storm.set_weather(Some("storm".into()));
+        storm.step(T0_MS, 160, 96);
+        let storm_frame = storm.frame().to_vec();
+
+        let mut clear = Office::new(1).unwrap();
+        clear.set_weather(Some("clear".into()));
+        clear.step(T0_MS, 160, 96);
+        let clear_frame = clear.frame().to_vec();
+        assert_ne!(storm_frame, clear_frame, "storm vs clear must differ");
+
+        // ISOLATION: re-stepping `storm` after `clear` set the shared thread-local
+        // must still render STORM (each step re-applies its own override).
+        storm.step(T0_MS, 160, 96);
+        assert_eq!(
+            storm.frame(),
+            &storm_frame[..],
+            "storm office must keep its own weather after another office stepped"
+        );
+
+        // Unknown name = no panic, no-op (falls back to clock-based).
+        let mut c = Office::new(1).unwrap();
+        c.set_weather(Some("not-a-weather".into()));
+        c.step(T0_MS, 160, 96); // must not panic
     }
 }
