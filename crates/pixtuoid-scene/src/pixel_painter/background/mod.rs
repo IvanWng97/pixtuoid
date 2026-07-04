@@ -21,9 +21,15 @@ pub(super) use sky::{
 };
 // The celestial disc + night-star helpers (#469) are INTERNAL to this module —
 // the sky branch of `paint_floor_to_ceiling_window` (and its tests) consume
-// them. Unlike sky/lighting they are NOT re-exported up to `pixel_painter`; no
-// other pass reads them.
-use celestial::*;
+// them. Unlike sky/lighting they are NOT re-exported up to `pixel_painter` (no
+// other pass reads them), so this is a plain `use`, listed explicitly to keep
+// the celestial→mod surface auditable. celestial's placement-internal consts
+// (DISC_RADIUS_PX/FIRST_WINDOW_X/HORIZON_FRAC/ARC_RISE_FRAC/MIN_DISC_VIS/
+// STAR_SPARSITY/STAR_TWINKLE_*) stay private to celestial.rs.
+use celestial::{
+    compute_disc, golden_hour_blaze, night_star_strength, star_exists, star_twinkle, Disc,
+    GLOW_ALPHA, GLOW_PX, MOON_SHADOW, STAR_ALPHA_MAX, STAR_COLOR, STAR_MIN, STAR_SKY_BAND_FRAC,
+};
 
 use std::time::SystemTime;
 

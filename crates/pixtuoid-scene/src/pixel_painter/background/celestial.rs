@@ -35,7 +35,7 @@ pub(super) struct Disc {
     pub(super) lit_frac: f32,
 }
 
-pub(super) const DISC_RADIUS_PX: f32 = 5.0;
+const DISC_RADIUS_PX: f32 = 5.0;
 pub(super) const GLOW_PX: f32 = 3.0;
 pub(super) const GLOW_ALPHA: f32 = 0.55;
 /// The moon's dark (un-illuminated) limb, blended in over the terminator —
@@ -59,15 +59,15 @@ pub(super) const MOON_SHADOW: Rgb = Rgb {
 /// painted). The inset keeps the disc fully inside the glass at the arc
 /// extremes, its low-altitude ends landing near the outer frame edges rather
 /// than dead-centre on a mullion, and still lets a single-window buffer sweep.
-pub(super) const FIRST_WINDOW_X: f32 = 3.0;
+const FIRST_WINDOW_X: f32 = 3.0;
 // "Real low window": the horizon sits low in the band, and the apex climbs
 // high enough to leave the glass entirely (clipped) rather than the disc
 // tracking the full window height.
-pub(super) const HORIZON_FRAC: f32 = 0.55; // horizon_y = top_wall_h * HORIZON_FRAC
-pub(super) const ARC_RISE_FRAC: f32 = 0.80; // apex lifts top_wall_h * ARC_RISE_FRAC above horizon
+const HORIZON_FRAC: f32 = 0.55; // horizon_y = top_wall_h * HORIZON_FRAC
+const ARC_RISE_FRAC: f32 = 0.80; // apex lifts top_wall_h * ARC_RISE_FRAC above horizon
 /// Below this atmo `disc` visibility, thick cloud swallows the disc entirely
 /// (no point painting a body no one can see through the murk).
-pub(super) const MIN_DISC_VIS: f32 = 0.08;
+const MIN_DISC_VIS: f32 = 0.08;
 
 /// This frame's disc placement, or `None` under thick cloud (`atmo(weather).disc`
 /// below [`MIN_DISC_VIS`]). `cx`/`cy` are absolute buffer coordinates derived
@@ -130,7 +130,7 @@ pub(super) fn compute_disc(
 
 /// Roughly 1-in-`STAR_SPARSITY` sky pixels host a star — prime so the
 /// hash-modulo grid can't line up into a visible lattice.
-pub(super) const STAR_SPARSITY: u64 = 47;
+const STAR_SPARSITY: u64 = 47;
 /// Below this `star_strength` (darkness × clear-sky product), no star paints
 /// — keeps the field invisible by day and under thick cloud/fog.
 pub(super) const STAR_MIN: f32 = 0.15;
@@ -149,8 +149,8 @@ pub(super) const STAR_ALPHA_MAX: f32 = 0.55;
 /// Per-star twinkle cycle length range (ms) — mirrors `city_dot_twinkle`'s
 /// per-dot cadence idiom (each star's own cycle length comes from a hash of
 /// its position), staggered per star so the field doesn't blink in unison.
-pub(super) const STAR_TWINKLE_CYCLE_BASE_MS: u64 = 2000;
-pub(super) const STAR_TWINKLE_CYCLE_SPAN_MS: u64 = 3000;
+const STAR_TWINKLE_CYCLE_BASE_MS: u64 = 2000;
+const STAR_TWINKLE_CYCLE_SPAN_MS: u64 = 3000;
 
 /// How brightly the star field shows this frame. Stars only appear once the sun
 /// is BELOW the horizon (night = the emitter is the moon): dawn/dusk twilight
