@@ -49,17 +49,16 @@ From the repo root the same gate is `just site-check` (and `just site-fmt`);
 tier (window seams, scrollspy keys, dimmer, reduced-motion) that the static
 gates can't see. CI runs it in `site.yml` after the build step.
 
-> **Cross-boundary build inputs.** The site reads seven files from _outside_ `site/`
+> **Cross-boundary build inputs.** The site reads six files from _outside_ `site/`
 > at build time: the workspace `Cargo.toml` (displayed version, via `vite.define` in
 > `astro.config.mjs`), `docs/CONFIGURATION.md` (rendered as `/config`),
 > `docs/ARCHITECTURE.md` (rendered as `/architecture` — its Mermaid diagram becomes an
 > inline SVG at build via rehype-mermaid, which is why CI installs Chromium),
-> `docs/CONTRIBUTING.md` (rendered as `/contributing`), `docs/MIGRATION.md`
-> (rendered as `/migration`), `docs/KNOWLEDGE-ENGINEERING.md` (rendered as
+> `docs/CONTRIBUTING.md` (rendered as `/contributing`), `docs/KNOWLEDGE-ENGINEERING.md` (rendered as
 > `/knowledge-base` — the route slug kept from its `KNOWLEDGE-BASE.md` days, no link
 > rot), and `docs/PARALLEL-DELIVERY.md` (rendered as `/parallel-delivery`).
 > Renaming/moving any of them — or breaking the diagram's Mermaid syntax — fails
-> `astro build`; all seven are in the `site.yml` / `pages.yml` path filters so a
+> `astro build`; all six are in the `site.yml` / `pages.yml` path filters so a
 > change re-runs CI + redeploys. The root `README.md`'s Features table and install
 > commands are sourced from `src/features.json` / `src/install.json` (see below);
 > drift is gated by the `readme` job in `.github/workflows/ci.yml` (`just gen-readme-check`)
@@ -131,7 +130,7 @@ gates can't see. CI runs it in `site.yml` after the build step.
   auto-animates); on a no-wasm / fetch-failure poster it stays visible, since the
   ticker / dust / clips still run and it governs them wasm-independently (#456).
 - **Docs shell** — `layouts/Docs.astro` gives /config, /architecture,
-  /contributing, /migration a shared sidebar + build-time mini-TOC + pager,
+  /contributing, /knowledge-base, and /parallel-delivery a shared sidebar + build-time mini-TOC + pager,
   driven by the one `DOCS` manifest in `consts.ts` (the Nav dropdown reads the
   same source).
 

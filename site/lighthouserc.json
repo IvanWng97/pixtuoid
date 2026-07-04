@@ -10,8 +10,7 @@
         "http://localhost:4321/pixtuoid/architecture/",
         "http://localhost:4321/pixtuoid/config/",
         "http://localhost:4321/pixtuoid/contributing/",
-        "http://localhost:4321/pixtuoid/knowledge-base/",
-        "http://localhost:4321/pixtuoid/migration/"
+        "http://localhost:4321/pixtuoid/knowledge-base/"
       ]
     },
     "assert": {

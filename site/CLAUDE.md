@@ -14,21 +14,21 @@ Full detail: [`README.md`](README.md).
 
 ## Cross-boundary build inputs (the coupling that bites)
 
-`astro build` reads **seven files from OUTSIDE `site/`** at build time, and a
+`astro build` reads **six files from OUTSIDE `site/`** at build time, and a
 rename/move of any of them FAILS the build:
 
 - the workspace `Cargo.toml` → the displayed version (via `vite.define` in
   `astro.config.mjs`).
-- `docs/{CONFIGURATION, ARCHITECTURE, CONTRIBUTING, MIGRATION,
+- `docs/{CONFIGURATION, ARCHITECTURE, CONTRIBUTING,
   KNOWLEDGE-ENGINEERING, PARALLEL-DELIVERY}.md` → rendered as `/config`,
-  `/architecture`, `/contributing`, `/migration`, `/knowledge-base`,
+  `/architecture`, `/contributing`, `/knowledge-base`,
   `/parallel-delivery` respectively, via a `glob` loader in
   `src/content.config.ts` + a `src/pages/*.astro` per route. **Adding a rendered
   doc is the inverse of a rename — a new `glob` collection, a `src/pages/*.astro`,
   a `DOCS` entry + `current` union arm in `layouts/Docs.astro` (sidebar + pager),
   a `Nav.astro` link, and both path filters.**
 
-All seven are in the `site.yml` / `pages.yml` **path filters**, so editing one
+All six are in the `site.yml` / `pages.yml` **path filters**, so editing one
 re-runs the site CI + redeploys. **Renaming a rendered doc is a multi-point
 edit** — the `glob` pattern, the page's `sourcePath`, the nav label, the two
 path filters, and the doc itself (the `KNOWLEDGE-BASE → KNOWLEDGE-ENGINEERING`
