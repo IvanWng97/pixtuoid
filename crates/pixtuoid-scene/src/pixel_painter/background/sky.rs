@@ -174,6 +174,43 @@ pub(in crate::pixel_painter) fn weather_light(w: Weather) -> WeatherLight {
     }
 }
 
+/// Weather as an ATMOSPHERE: how much of the emitter's light survives to the
+/// interior, split into a hard directional beam, a flat diffuse fill, and the
+/// disc's own visibility through the medium. (Replaces the old absolute
+/// `weather_light` light-level table — magnitude now comes from the emitter.)
+#[derive(Debug, Clone, Copy)]
+pub(in crate::pixel_painter) struct Atmo {
+    pub(in crate::pixel_painter) direct: f32,
+    pub(in crate::pixel_painter) diffuse: f32,
+    pub(in crate::pixel_painter) disc: f32,
+}
+
+pub(in crate::pixel_painter) fn atmo(w: Weather) -> Atmo {
+    // (direct, diffuse, disc). Storm < Rain in BOTH transmission channels
+    // (denser cloud); lightning adds transient punch elsewhere, not here.
+    let (direct, diffuse, disc) = match w {
+        Weather::Clear => (1.00, 0.55, 1.00),
+        Weather::Windy => (0.90, 0.55, 0.95),
+        Weather::Snow => (0.25, 0.70, 0.30),
+        Weather::Smog => (0.30, 0.45, 0.45),
+        Weather::Fog => (0.05, 0.75, 0.10),
+        Weather::Overcast => (0.00, 0.50, 0.05),
+        Weather::Rain => (0.00, 0.40, 0.20),
+        Weather::Storm => (0.00, 0.28, 0.05),
+    };
+    debug_assert!(
+        [direct, diffuse, disc]
+            .iter()
+            .all(|c| (0.0..=1.0).contains(c)),
+        "Atmo channels must be 0..=1: {w:?} -> ({direct}, {diffuse}, {disc})"
+    );
+    Atmo {
+        direct,
+        diffuse,
+        disc,
+    }
+}
+
 pub(in crate::pixel_painter) fn sunset_strength(now: SystemTime) -> f32 {
     // Golden-hour tint peaks at sunset (18:00) and, more softly, sunrise (~06:30).
     const SUNSET_PEAK_HOUR: f32 = 18.0;
@@ -885,6 +922,49 @@ mod tests {
             weather_state(t),
             natural,
             "None restores time-based selection"
+        );
+    }
+
+    #[test]
+    fn storm_transmits_less_than_rain_overall() {
+        // The physical correction: cumulonimbus is optically denser than nimbostratus.
+        let s = atmo(Weather::Storm);
+        let r = atmo(Weather::Rain);
+        assert!(
+            s.direct <= r.direct && s.diffuse < r.diffuse,
+            "storm steady-state darker than rain: {s:?} vs {r:?}"
+        );
+    }
+
+    #[test]
+    fn clear_beams_hard_overcast_kills_the_beam() {
+        assert!(atmo(Weather::Clear).direct > 0.9, "clear = hard beam");
+        for w in [Weather::Overcast, Weather::Rain, Weather::Storm] {
+            assert_eq!(atmo(w).direct, 0.0, "{w:?} scatters the beam to nothing");
+        }
+    }
+
+    #[test]
+    fn fog_is_a_luminous_diffuse_whiteout() {
+        let f = atmo(Weather::Fog);
+        assert!(
+            f.diffuse >= atmo(Weather::Overcast).diffuse,
+            "fog is a bright veil"
+        );
+        assert!(f.direct < 0.2, "fog is near-shadowless");
+        assert!(f.disc < 0.2, "the disc is lost in fog");
+    }
+
+    #[test]
+    fn disc_visibility_is_clear_then_hazy_then_gone() {
+        assert!(atmo(Weather::Clear).disc > 0.9);
+        assert!(
+            (0.0..0.6).contains(&atmo(Weather::Smog).disc),
+            "haze half-hides the disc"
+        );
+        assert!(
+            atmo(Weather::Overcast).disc < 0.1,
+            "overcast hides the disc"
         );
     }
 }
