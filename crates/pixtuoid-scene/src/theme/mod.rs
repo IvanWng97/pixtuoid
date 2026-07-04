@@ -83,12 +83,12 @@ pub struct LightingColors {
     pub ceiling_pool: Rgb,
     pub floor_lamp_halo: Rgb,
     pub night_tint: Rgb,
-    /// The sun disc's core color (window-wall celestial body, `pixel_painter::background::compute_disc`).
+    /// The sun disc's core color (window-wall celestial body, `pixel_painter::background::celestial::compute_disc`).
     /// The soft halo ring reuses this SAME hue at lower alpha (no separate glow color) — must read
     /// warm (see `sun_and_moon_read_warm_and_cool_for_every_theme`).
     pub sun_core: Rgb,
     /// The moon disc's core color (lit side; the dark limb is the fixed `MOON_SHADOW` in
-    /// `background/mod.rs`, not per-theme). Must read cool.
+    /// `background/celestial.rs`, not per-theme). Must read cool.
     pub moon_core: Rgb,
 }
 

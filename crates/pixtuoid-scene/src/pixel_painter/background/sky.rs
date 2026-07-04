@@ -878,7 +878,7 @@ mod tests {
 
     #[test]
     fn thick_cloud_hides_the_disc_uniformly() {
-        // `MIN_DISC_VIS` (background/mod.rs `compute_disc`'s hide gate) is
+        // `MIN_DISC_VIS` (background/celestial.rs `compute_disc`'s hide gate) is
         // 0.08 — Overcast/Rain/Storm must all sit at or below it, so thick
         // cloud hides the disc uniformly: a THICKER cloud (Storm) must never
         // show MORE of the disc than a thinner one (Rain), matching the
