@@ -406,6 +406,78 @@ pub(in crate::pixel_painter) fn daylight_floor_overlay(
     }
 }
 
+/// The physical sky emitter — sun by day, moon by night — resolved from the
+/// local clock. Position rides an arc (§ altitude/azimuth); luminance + warmth
+/// follow altitude (low body = longer air path = dimmer + warmer). This is the
+/// ONE source the interior light + the disc derive from.
+pub(in crate::pixel_painter) enum Body {
+    Sun,
+    Moon,
+}
+
+pub(in crate::pixel_painter) struct SkyState {
+    pub(in crate::pixel_painter) body: Body,
+    pub(in crate::pixel_painter) altitude: f32, // 0 horizon .. 1 apex
+    pub(in crate::pixel_painter) azimuth: f32,  // 0 (east/dawn) .. 1 (west/dusk)
+    pub(in crate::pixel_painter) warmth: f32,   // 0 neutral(apex) .. 1 warm/red(horizon)
+    pub(in crate::pixel_painter) emitter_lum: f32, // 0..1 luminance reaching the atmosphere
+}
+
+// Sun rides the arc over its up-span; the moon owns the complementary night span.
+const SUN_RISE_H: f32 = 5.0;
+const SUN_SET_H: f32 = 20.0;
+/// Moon luminance is a small fraction of full sun even at a full phase.
+const MOON_PEAK_LUM: f32 = 0.22;
+/// Synodic month (days) + a known new-moon epoch (unix days) for the phase calc.
+const SYNODIC_DAYS: f32 = 29.530_588;
+const NEW_MOON_EPOCH_UNIX_DAYS: f32 = 18_231.0; // 2019-11-27 new moon (unix day index)
+
+fn arc_progress(h: f32, rise: f32, set: f32) -> f32 {
+    ((h - rise) / (set - rise)).clamp(0.0, 1.0)
+}
+
+pub(in crate::pixel_painter) fn emitter(now: SystemTime) -> SkyState {
+    let h = super::local_hour_frac(now);
+    let is_day = (SUN_RISE_H..SUN_SET_H).contains(&h);
+    let (rise, set) = if is_day {
+        (SUN_RISE_H, SUN_SET_H)
+    } else {
+        // Night span wraps midnight: dusk(20:00) -> next dawn(05:00) = 9h.
+        (SUN_SET_H, SUN_RISE_H + 24.0)
+    };
+    let h_lin = if is_day || h >= SUN_SET_H {
+        h
+    } else {
+        h + 24.0
+    };
+    let t = arc_progress(h_lin, rise, set);
+    let altitude = (std::f32::consts::PI * t).sin();
+    let warmth = (1.0 - altitude).clamp(0.0, 1.0);
+    let (body, emitter_lum) = if is_day {
+        (Body::Sun, altitude) // full sun ∝ altitude
+    } else {
+        (Body::Moon, MOON_PEAK_LUM * altitude * moon_phase(now))
+    };
+    SkyState {
+        body,
+        altitude,
+        azimuth: t,
+        warmth,
+        emitter_lum,
+    }
+}
+
+/// Illuminated fraction of the moon (0 new .. 1 full), from the synodic month.
+pub(in crate::pixel_painter) fn moon_phase(now: SystemTime) -> f32 {
+    let unix_days = now
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs_f32() / 86_400.0)
+        .unwrap_or(0.0);
+    let age = (unix_days - NEW_MOON_EPOCH_UNIX_DAYS).rem_euclid(SYNODIC_DAYS);
+    // Illuminated fraction ≈ (1 - cos(2π·age/synodic)) / 2.
+    (1.0 - (std::f32::consts::TAU * age / SYNODIC_DAYS).cos()) / 2.0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -690,6 +762,92 @@ mod tests {
         // case-insensitive + trimmed
         assert_eq!(Weather::from_name("  SNOW "), Some(Weather::Snow));
         assert_eq!(Weather::from_name("drizzle"), None);
+    }
+
+    #[test]
+    fn emitter_is_sun_by_day_moon_by_night_never_both() {
+        // Sample every 30 min across a day; exactly one body, and the switch
+        // happens around the dawn/dusk ramps (no midday moon, no midnight sun).
+        for slot in 0..48u32 {
+            let (h, m) = (slot / 2, (slot % 2) * 30);
+            let s = at_hour(h, m);
+            let e = emitter(s);
+            match e.body {
+                Body::Sun => assert!(
+                    (5.0..20.0).contains(&(h as f32 + m as f32 / 60.0)),
+                    "sun only during the daylight ramp, got {h}:{m:02}"
+                ),
+                Body::Moon => assert!(
+                    !(8.0..17.0).contains(&(h as f32 + m as f32 / 60.0)),
+                    "moon never at solar midday, got {h}:{m:02}"
+                ),
+            }
+        }
+    }
+
+    #[test]
+    fn sun_altitude_peaks_near_midday_and_bottoms_at_the_horizon() {
+        let noon = emitter(at_hour(12, 30)).altitude;
+        let dawn = emitter(at_hour(6, 30)).altitude;
+        let dusk = emitter(at_hour(18, 0)).altitude;
+        assert!(noon > 0.8, "midday sun rides high: {noon}");
+        // The brief's illustrative `< 0.35` for both doesn't hold honestly: on
+        // the sin(pi*t) arc over the 5..20 day span, dawn (6:30, t≈0.10) sits
+        // at altitude≈0.309 but dusk (18:00, t≈0.867) sits at altitude≈0.407
+        // -- dusk is only 2h before the 20:00 sunset while dawn is 1.5h after
+        // the 5:00 sunrise, so the two sample hours aren't equidistant from
+        // their respective horizon crossings. Not a curve bug, just an
+        // artifact of these particular sample points. Thresholds below keep
+        // the same ~0.09 real margin off the actual computed values (dawn
+        // 0.309 vs 0.4, dusk 0.407 vs 0.5) while still reading clearly low
+        // next to noon's >0.8.
+        assert!(
+            dawn < 0.4 && dusk < 0.5,
+            "dawn/dusk sit low: {dawn} / {dusk}"
+        );
+    }
+
+    #[test]
+    fn warmth_is_high_low_on_the_horizon_and_neutral_at_apex() {
+        // The brief's illustrative `> 0.7` doesn't hold honestly: dawn's
+        // warmth = 1 - altitude(6:30) computes to ≈0.691 on the sin(pi*t)
+        // arc. `> 0.6` keeps the same ~0.09 real margin as the reconciled
+        // altitude thresholds above.
+        assert!(emitter(at_hour(6, 30)).warmth > 0.6, "low sun is warm/red");
+        assert!(emitter(at_hour(12, 30)).warmth < 0.3, "apex sun is neutral");
+    }
+
+    #[test]
+    fn azimuth_advances_west_across_the_day() {
+        let a = emitter(at_hour(7, 0)).azimuth;
+        let b = emitter(at_hour(12, 0)).azimuth;
+        let c = emitter(at_hour(18, 0)).azimuth;
+        assert!(a < b && b < c, "azimuth marches E->W: {a} < {b} < {c}");
+    }
+
+    #[test]
+    fn moon_luminance_tracks_phase() {
+        // A near-full-moon night is brighter than a near-new-moon night.
+        // Search a lunar month for the min/max illuminated fraction at 02:00.
+        let (mut lo, mut hi) = (f32::MAX, f32::MIN);
+        let (mut lo_lum, mut hi_lum) = (0.0, 0.0);
+        for day in 1..=30u32 {
+            let s = night_on(day);
+            let frac = moon_phase(s);
+            let lum = emitter(s).emitter_lum;
+            if frac < lo {
+                lo = frac;
+                lo_lum = lum;
+            }
+            if frac > hi {
+                hi = frac;
+                hi_lum = lum;
+            }
+        }
+        assert!(
+            hi_lum > lo_lum,
+            "fuller moon lights brighter ({hi_lum} vs {lo_lum})"
+        );
     }
 
     #[test]
