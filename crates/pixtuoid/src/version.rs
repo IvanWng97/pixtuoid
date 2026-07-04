@@ -58,6 +58,9 @@ pub fn release_notes(version: &str) -> Option<&'static [&'static str]> {
         // anchoring on a marker is whitespace-independent — matching the `match`
         // brace would silently break if the indentation ever shifted.
         // [bump-inject-here]
+        "0.13.0" => Some(&[
+            "New agent supported — Hermes Agent (Nous Research) sessions now show up as animated pixel-art coworkers in the office, wired in like every other CLI",
+        ]),
         "0.12.0" => Some(&[
             "A whole-codebase cleanup: 39 review findings fixed — sturdier session tracking (a delegating agent no longer hides its own pending permission; live sessions survive log-content lookalikes), fresher sprites after a project rename, and pathfinding that recovers when a blocked route reopens",
             "The office is more honest under pressure — a full pantry re-steams your coffee, narrow floating windows seat exactly as many agents as fit, and the web hero hires only when a desk is truly free",
