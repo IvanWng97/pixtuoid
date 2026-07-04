@@ -161,9 +161,12 @@ pub fn weather_names() -> Vec<&'static str> {
 
 /// Force every subsequent render **on this thread** to a specific weather (by
 /// name, case-insensitive), or `None` to restore the clock-based selection.
-/// A screenshot/test affordance (`snapshot --weather`) — production never calls
-/// it, so live rendering is byte-identical. `Err` carries the valid names when
-/// `name` is unknown.
+/// `snapshot --weather` drives the docs stills; the wasm `Office` (pixtuoid-web)
+/// ALSO re-applies its OWN override every `step` — the hero backdrop defaults
+/// `None` (clock-based), the VIBING playground sets its chip. It's a thread-local
+/// shared by every `Office` in the one wasm module, so the last writer before a
+/// render wins and each surface must set its own value each frame. `Err` carries
+/// the valid names when `name` is unknown.
 pub fn force_weather(name: Option<&str>) -> Result<(), Vec<&'static str>> {
     match name {
         None => {
