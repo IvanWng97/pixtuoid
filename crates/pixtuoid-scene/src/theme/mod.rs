@@ -208,8 +208,9 @@ impl SourceColors {
     /// Badge hue for a source's 2-char label prefix (`SourceDescriptor::label_prefix`
     /// in `pixtuoid_core::source::registry`), or `None` for an unknown prefix. The
     /// painters (dashboard / connection) resolve a badge color from the prefix
-    /// without name-matching each source inline. Prefixes are the registry's
-    /// authoritative values: cc/cx/rx/ag/cw/oc/cp/cu/ok.
+    /// without name-matching each source inline. The accepted prefixes are the
+    /// registry's authoritative `SourceDescriptor::label_prefix` values — one arm
+    /// per registered source (kept in lockstep by the badge-coverage guards).
     pub fn by_prefix(&self, prefix: &str) -> Option<Rgb> {
         Some(match prefix {
             "cc" => self.claude_code,
