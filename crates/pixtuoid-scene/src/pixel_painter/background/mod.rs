@@ -452,6 +452,15 @@ pub(super) fn paint_floor_and_walls(
         let overlaps_door =
             skip_window_x_range.is_some_and(|(dx0, dx1)| x < dx1 && x + WINDOW_W > dx0);
         if !overlaps_door {
+            // The disc paints ONLY in the window its centre currently sits over.
+            // Without this gate, a disc whose `cx` lands near an inter-window gap
+            // is wide enough (radius+glow) to reach the glass of BOTH neighbours,
+            // so the same sun/moon rendered in two panes at once — bleeding
+            // through the solid wall pillar (frame + WINDOW_GAP + frame) between
+            // them. Restricting to the containing window makes that pillar occlude
+            // the body correctly: it hides behind the pillar between panes and
+            // re-emerges in the next window, "one disc across the wall".
+            let win_disc = disc.filter(|d| d.cx >= x as f32 && d.cx < (x + WINDOW_W) as f32);
             paint_floor_to_ceiling_window(
                 buf,
                 x,
@@ -466,7 +475,7 @@ pub(super) fn paint_floor_and_walls(
                 &lit_colors,
                 building,
                 &sky_row,
-                disc,
+                win_disc,
                 star_strength,
             );
             // look.spill_strength already includes atmospheric attenuation
@@ -1630,32 +1639,42 @@ mod tests {
     }
 
     #[test]
-    fn disc_lands_in_a_window_across_buffer_widths() {
-        // Regression guard for the wall-margin-vanish bug: the OLD linear
-        // `cx = FIRST_WINDOW_X + azimuth * (buf_w - WINDOW_W - FIRST_WINDOW_X)`
-        // only coincidentally lands inside a real window at buf_w=96 — at
-        // other widths (e.g. 76, 150, 300) it overshoots the last
-        // actually-painted pane and the disc vanishes onto blank wall.
-        // `compute_disc` now maps azimuth across the real tiled window
-        // centers, so the disc must render as a genuine multi-pixel disc
-        // (not a 1-2px wall-margin smudge) for ANY buffer width.
-        //
-        // Hour choice: 19:00 (dusk, azimuth ≈0.93 — close to the arc's far
-        // extreme), NOT the dawn-side 06:00. The old formula's error is
-        // `cx_old = FIRST_WINDOW_X + azimuth*(wrong span)`: at azimuth near 0
-        // the (wrong) span is multiplied by ~0, so `cx_old` collapses to
-        // `FIRST_WINDOW_X` regardless of `buf_w` and the bug never manifests
-        // (verified: reverting to the old formula, hour=6 still passes >=4
-        // for every width below — it doesn't discriminate). Only the
-        // azimuth-near-1 extreme stresses the (wrong) span fully, which is
-        // where the old formula actually overshoots past the last window.
+    fn disc_lands_in_a_window_never_on_the_wall_margin() {
+        // Regression guard for the original wall-margin-vanish bug (the OLD
+        // linear `cx` overshot the last painted pane onto blank wall). Now that
+        // `compute_disc` maps azimuth across the real tiled span AND the disc is
+        // gated to the window its centre is over, the disc can legitimately hide
+        // behind an inter-window pillar at some hours — so it is NOT visible at
+        // every hour. Across a sweep of low-sun hours it must, for every buffer
+        // width: (a) appear inside a real window at least once (not perpetually
+        // lost), and (b) NEVER paint a pixel past the last painted window (the
+        // wall margin — the bug this guards).
         let top_wall_h = 40u16;
+        let stride = (WINDOW_W + WINDOW_GAP) as f32;
         for buf_w in [76u16, 96, 120, 150, 192, 220, 300] {
-            let buf = render_office_at(19, Weather::Clear, buf_w, top_wall_h);
-            let n = count_warm_bright(&buf, top_wall_h);
+            // Last painted window's right edge (mirrors compute_disc's tiling).
+            let k_max = (((buf_w as f32) - WINDOW_W as f32 - 5.0) / stride).floor();
+            let last_right = (3.0 + k_max.max(0.0) * stride + WINDOW_W as f32) as u16;
+            let mut seen_in_a_window = false;
+            for h in [5u32, 6, 7, 17, 18, 19] {
+                let buf = render_office_at(h, Weather::Clear, buf_w, top_wall_h);
+                for y in 1..(top_wall_h / 3).max(2) {
+                    for x in 0..buf.width() {
+                        let p = buf.get(x, y);
+                        if p.r > 240 && p.r as i16 - p.b as i16 > 40 {
+                            assert!(
+                                x < last_right,
+                                "buf_w={buf_w} h={h}: disc pixel at x={x} is past the \
+                                 last window (wall margin; last right edge {last_right})"
+                            );
+                            seen_in_a_window = true;
+                        }
+                    }
+                }
+            }
             assert!(
-                n >= 4,
-                "buf_w={buf_w}: disc should render as a real disc, got {n} warm-bright px"
+                seen_in_a_window,
+                "buf_w={buf_w}: the disc never appeared in a window across the low-sun sweep"
             );
         }
     }
@@ -1768,6 +1787,47 @@ mod tests {
             night_star_strength(at(2), 0.9, Weather::Overcast) < STAR_MIN,
             "overcast should hide the stars even at night"
         );
+    }
+
+    #[test]
+    fn disc_never_bleeds_across_a_window_pillar() {
+        // Physics-audit repro: a disc whose `cx` lands near an inter-window gap
+        // is wide enough (radius + glow) to reach the glass on BOTH sides of the
+        // solid wall pillar (frame + WINDOW_GAP + frame). Before the per-window
+        // gate it painted in both panes at once — the sun/moon showing THROUGH a
+        // wall. The disc must light at most ONE window at any instant. A wide
+        // buffer has many internal gaps; sweep the low-sun hours so `cx` passes
+        // over one.
+        let buf_w = 280u16;
+        let top_wall_h = 40u16;
+        let stride = (WINDOW_W + WINDOW_GAP) as i32;
+        for h in [5u32, 6, 7, 17, 18, 19] {
+            let buf = render_office_at(h, Weather::Clear, buf_w, top_wall_h);
+            let mut wins = std::collections::HashSet::new();
+            // Upper sky band only (top third) so the skyline's own lit city dots
+            // can't masquerade as disc-core pixels.
+            for y in 1..(top_wall_h / 3).max(2) {
+                for x in 0..buf.width() {
+                    let p = buf.get(x, y);
+                    if !(p.r > 240 && p.r as i16 - p.b as i16 > 40) {
+                        continue;
+                    }
+                    let rel = x as i32 - 3;
+                    if rel < 0 {
+                        continue;
+                    }
+                    if rel % stride < WINDOW_W as i32 {
+                        wins.insert(rel / stride);
+                    }
+                }
+            }
+            assert!(
+                wins.len() <= 1,
+                "at {h}:00 the disc lit {} windows {:?} — it bled across a wall pillar",
+                wins.len(),
+                wins
+            );
+        }
     }
 
     #[test]
