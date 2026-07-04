@@ -161,7 +161,7 @@ These are load-bearing — see `CLAUDE.md` and the nested guides before changing
   CLI** (Codex, Copilot CLI, Antigravity, …). Per-source format knowledge lives in that source's
   own decoder functions (injected into `JsonlWatcher` as fn pointers), not in a
   shared decoder. Hook-only CLIs (Reasonix, opencode, Cursor CLI,
-  CodeWhale — no watchable transcript) are the documented exception: no
+  CodeWhale, Hermes — no watchable transcript) are the documented exception: no
   `Source` impl and no runtime wiring; their registry rows set
   `transcript: None` and supply a custom hook decoder, and each ships an
   install `Target` instead (bound via the in-TUI Sources panel).
