@@ -471,26 +471,26 @@ test('showcase studio: deep-links tune, dial and chips swap hydrated stages, the
 }) => {
   const errors = watchErrors(page);
   await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
-  await page.goto('./#showcase-themes'); // the canonical deep link (the legacy #themes map was dropped in 0.12.0)
-  await expect(page.locator('[data-stage="themes"]')).toBeVisible();
-  await expect(page.locator('button.mon[data-ch="themes"]')).toHaveAttribute(
+  await page.goto('./#showcase-spaces'); // the canonical deep link (the legacy #themes map was dropped in 0.12.0)
+  await expect(page.locator('[data-stage="spaces"]')).toBeVisible();
+  await expect(page.locator('button.mon[data-ch="spaces"]')).toHaveAttribute(
     'aria-pressed',
     'true'
   );
   // First tune hydrated the stage: data-src promoted to a real src.
-  await expect(page.locator('[data-stage="themes"] img.terminal__screen')).toHaveAttribute(
+  await expect(page.locator('[data-stage="spaces"] img.terminal__screen')).toHaveAttribute(
     'src',
-    /theme_/
+    /space_/
   );
   // An in-page hashchange re-tunes.
   await page.evaluate(() => {
-    location.hash = '#showcase-weather';
+    location.hash = '#showcase-dashboard';
   });
-  await expect(page.locator('[data-stage="weather"]')).toBeVisible();
+  await expect(page.locator('[data-stage="dashboard"]')).toBeVisible();
   // Dial click: exactly-one-visible-stage swap + aria radio + URL tracking.
   await page.locator('button.mon[data-ch="spaces"]').click();
   await expect(page.locator('[data-stage="spaces"]')).toBeVisible();
-  await expect(page.locator('[data-stage="weather"]')).toBeHidden();
+  await expect(page.locator('[data-stage="dashboard"]')).toBeHidden();
   await expect(page.locator('button.mon[data-ch="spaces"]')).toHaveAttribute(
     'aria-pressed',
     'true'
@@ -530,6 +530,77 @@ test('showcase studio: deep-links tune, dial and chips swap hydrated stages, the
     document.dispatchEvent(new CustomEvent('pix:paused', { detail: { paused: false } }))
   );
   await expect.poll(clipPaused).toBe(false);
+  expect(errors()).toEqual([]);
+});
+
+test('VIBING channel: live office paints, is pause-gated, chips drive it', async ({ page }) => {
+  const errors = watchErrors(page);
+  await gotoLive(page);
+  // VIBING is the default channel — no dial/hash tune needed to see it.
+  const stage = page.locator('[data-stage="vibing"]');
+  await expect(stage).toBeVisible();
+  await expect(page.locator('[data-vibing-canvas]')).toBeAttached();
+  // The VIBING office is a SECOND wasm Office, whose rAF loop is gated on the
+  // studio actually scrolling into view (IntersectionObserver) — bring it in.
+  await page.evaluate(() =>
+    document.getElementById('studio')!.scrollIntoView({ block: 'center', behavior: 'instant' })
+  );
+  const vibingShot = () =>
+    page.evaluate(() =>
+      (document.querySelector('[data-vibing-canvas]') as HTMLCanvasElement).toDataURL()
+    );
+  const vibingPainted = () =>
+    page.evaluate(() => {
+      const c = document.querySelector('[data-vibing-canvas]') as HTMLCanvasElement;
+      const d = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data;
+      return d.some((v) => v !== 0);
+    });
+  // Paints: the second Office actually rendered a frame (wasm cold-boot budget).
+  await expect.poll(vibingPainted, { timeout: 15_000 }).toBe(true);
+
+  // Weather chip: click storm — the office keeps live-painting through it.
+  const beforeWeather = await vibingShot();
+  const stormChip = page.locator('[data-stage="vibing"] .osd__chip[data-weather="storm"]');
+  await stormChip.click();
+  await expect.poll(vibingShot, { timeout: 5_000 }).not.toBe(beforeWeather);
+
+  // Theme chip: cyberpunk activates + retints the page, and does NOT touch
+  // the weather group's own active chip (the per-group-retint guard).
+  const coralBefore = await page.evaluate(() =>
+    getComputedStyle(document.documentElement).getPropertyValue('--coral')
+  );
+  const themeChip = page.locator('[data-stage="vibing"] .osd__chip[data-theme="cyberpunk"]');
+  await themeChip.click();
+  await expect(themeChip).toHaveClass(/is-active/);
+  await expect(themeChip).toHaveAttribute('aria-pressed', 'true');
+  await expect
+    .poll(() =>
+      page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--coral'))
+    )
+    .not.toBe(coralBefore);
+  await expect(stormChip).toHaveClass(/is-active/); // weather group untouched by the theme retint
+
+  // Slider: scrubbing the time updates the readout and repaints the office.
+  const beforeSlider = await vibingShot();
+  await page.locator('[data-vibing-time]').evaluate((el) => {
+    (el as HTMLInputElement).value = '6';
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await expect(page.locator('[data-vibing-time-label]')).toHaveText('06:00');
+  await expect.poll(vibingShot, { timeout: 5_000 }).not.toBe(beforeSlider);
+
+  // Pause gate (WCAG 2.2.2, page-scoped): #office-pause freezes this SECOND
+  // office too — a frozen canvas, byte-identical snapshots — and unpausing
+  // repaints it.
+  const pauseBtn = page.locator('#office-pause');
+  await pauseBtn.click();
+  await expect(pauseBtn).toHaveAttribute('aria-pressed', 'true');
+  const frozen = await vibingShot();
+  await page.waitForTimeout(150); // >4 would-be frames at the 33ms cap
+  expect(await vibingShot()).toBe(frozen); // not one new frame painted
+  await pauseBtn.click();
+  await expect(pauseBtn).toHaveAttribute('aria-pressed', 'false');
+  await expect.poll(vibingShot, { timeout: 5_000 }).not.toBe(frozen); // animating again
   expect(errors()).toEqual([]);
 });
 
