@@ -719,9 +719,12 @@ mod tests {
                     (5.0..20.0).contains(&(h as f32 + m as f32 / 60.0)),
                     "sun only during the daylight ramp, got {h}:{m:02}"
                 ),
+                // Exact complement of the Sun arm's `[5,20)` band (was the
+                // looser `!(8..17)`, which left [5,8)/[17,20) unchecked for the
+                // moon — a SUN_RISE_H/SUN_SET_H boundary shift slipped past it).
                 Body::Moon => assert!(
-                    !(8.0..17.0).contains(&(h as f32 + m as f32 / 60.0)),
-                    "moon never at solar midday, got {h}:{m:02}"
+                    !(5.0..20.0).contains(&(h as f32 + m as f32 / 60.0)),
+                    "moon only when the sun is down, got {h}:{m:02}"
                 ),
             }
         }

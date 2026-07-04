@@ -55,7 +55,7 @@
   {
     "icon": "🌧️",
     "name": "Weather effects",
-    "desc": "Rain, storm, snow, fog, overcast, windy — cycles every 10 min + sunset golden hour",
+    "desc": "Rain, storm, snow, fog, overcast, windy — eight variants cycling every 10 minutes",
     "card": {
       "blurb": "Lighting tracks your real clock; rain, storms, fog and moonlight roll past the windows.",
       "href": "#showcase-weather"
