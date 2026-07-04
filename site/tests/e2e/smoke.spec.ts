@@ -562,6 +562,10 @@ test('VIBING channel: live office paints, is pause-gated, chips drive it', async
   const beforeWeather = await vibingShot();
   const stormChip = page.locator('[data-stage="vibing"] .osd__chip[data-weather="storm"]');
   await stormChip.click();
+  // Deterministic teeth: the click handler ran + moved the active state (a
+  // frame-changed poll alone passes on ambient sprite motion regardless).
+  await expect(stormChip).toHaveClass(/is-active/);
+  await expect(stormChip).toHaveAttribute('aria-pressed', 'true');
   await expect.poll(vibingShot, { timeout: 5_000 }).not.toBe(beforeWeather);
 
   // Theme chip: cyberpunk activates + retints the page, and does NOT touch
@@ -596,7 +600,7 @@ test('VIBING channel: live office paints, is pause-gated, chips drive it', async
   await pauseBtn.click();
   await expect(pauseBtn).toHaveAttribute('aria-pressed', 'true');
   const frozen = await vibingShot();
-  await page.waitForTimeout(150); // >4 would-be frames at the 33ms cap
+  await page.waitForTimeout(400); // >12 would-be frames at the 33ms cap (CI-throttle margin, matches the hero-pause test)
   expect(await vibingShot()).toBe(frozen); // not one new frame painted
   await pauseBtn.click();
   await expect(pauseBtn).toHaveAttribute('aria-pressed', 'false');
