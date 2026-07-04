@@ -1179,18 +1179,19 @@ fn version_popup_interrupt_continues_from_edge() {
 /// A scene carrying an OpenClaw gateway presence (and nothing else, so the only
 /// lobster-red pixels on the floor are the lobster's).
 fn gateway_scene(
-    state: pixtuoid_core::state::DaemonState,
+    liveness: pixtuoid_core::state::DaemonLiveness,
     entered_at: SystemTime,
     last_seen: SystemTime,
     sessions: u32,
 ) -> SceneState {
-    gateway_scene_runs(state, entered_at, last_seen, sessions, &[])
+    gateway_scene_runs(liveness, entered_at, last_seen, sessions, &[])
 }
 
 /// As `gateway_scene`, with in-flight RUN keys (the busy bubble tell keys on
-/// runs, not sessions).
+/// runs, not sessions). Busy is DERIVED: pass `DaemonLiveness::UP` + ≥1 run
+/// (#460), not a stored Busy state.
 fn gateway_scene_runs(
-    state: pixtuoid_core::state::DaemonState,
+    liveness: pixtuoid_core::state::DaemonLiveness,
     entered_at: SystemTime,
     last_seen: SystemTime,
     sessions: u32,
@@ -1200,7 +1201,7 @@ fn gateway_scene_runs(
     s.daemons_mut().insert(
         pixtuoid_core::source::openclaw::SOURCE_NAME.to_string(),
         pixtuoid_core::state::DaemonPresence {
-            state,
+            liveness,
             active_sessions: sessions,
             last_seen,
             entered_at,
@@ -1279,7 +1280,7 @@ fn no_gateway_mascot_without_presence() {
 fn gateway_mascot_present_when_up() {
     // entered_at well in the past ⇒ steady wander (past the walk-in).
     let scene = gateway_scene(
-        pixtuoid_core::state::DaemonState::Idle,
+        pixtuoid_core::state::DaemonLiveness::UP,
         t0() - Duration::from_secs(20),
         t0(),
         0,
@@ -1299,10 +1300,10 @@ fn gateway_mascot_busy_bubbles_track_runs_not_sessions() {
     let entered = t0() - Duration::from_secs(20);
 
     // Idle with a live session (sessions=1, NO runs) ⇒ no bubbles.
-    let idle = gateway_scene(pixtuoid_core::state::DaemonState::Idle, entered, t0(), 1);
-    // Busy with two in-flight runs ⇒ bubbles.
+    let idle = gateway_scene(pixtuoid_core::state::DaemonLiveness::UP, entered, t0(), 1);
+    // Busy with two in-flight runs ⇒ bubbles (Busy derives from the runs, UP).
     let busy = gateway_scene_runs(
-        pixtuoid_core::state::DaemonState::Busy,
+        pixtuoid_core::state::DaemonLiveness::UP,
         entered,
         t0(),
         1,
@@ -1330,7 +1331,7 @@ fn gateway_mascot_walks_out_then_is_gone() {
     let mut r = build(160, 80, vec![]);
     // Just after going Down ⇒ still walking out, visible.
     let leaving = gateway_scene(
-        pixtuoid_core::state::DaemonState::Down,
+        pixtuoid_core::state::DaemonLiveness::Down,
         t0() - Duration::from_secs(20),
         t0() - Duration::from_millis(400),
         0,
@@ -1343,7 +1344,7 @@ fn gateway_mascot_walks_out_then_is_gone() {
 
     // Well past the walk-out window ⇒ gone (back to a normal office).
     let gone = gateway_scene(
-        pixtuoid_core::state::DaemonState::Down,
+        pixtuoid_core::state::DaemonLiveness::Down,
         t0() - Duration::from_secs(30),
         t0() - Duration::from_secs(10),
         0,
@@ -1361,7 +1362,7 @@ fn gateway_mascot_wanders_over_time() {
     // Same scene rendered across a wander cycle ⇒ the lobster changes position
     // (proves the motion is live, not a fixed sticker).
     let scene = gateway_scene(
-        pixtuoid_core::state::DaemonState::Idle,
+        pixtuoid_core::state::DaemonLiveness::UP,
         t0() - Duration::from_secs(20),
         t0(),
         0,
@@ -1446,7 +1447,7 @@ fn lobster_red_bbox(buf: &RgbBuffer) -> Option<(u16, u16, u16, u16)> {
 fn gateway_mascot_tooltip_on_hover() {
     // entered_at well in the past ⇒ steady wander (a stable lobster to aim at).
     let scene = gateway_scene(
-        pixtuoid_core::state::DaemonState::Idle,
+        pixtuoid_core::state::DaemonLiveness::UP,
         t0() - Duration::from_secs(20),
         t0(),
         0,

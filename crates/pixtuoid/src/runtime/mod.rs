@@ -170,7 +170,7 @@ fn summarize(scene: &SceneState) -> String {
         .daemons()
         .iter()
         .map(|(source, p)| {
-            let state = match p.state {
+            let state = match p.display_state() {
                 DaemonState::Idle => "idle",
                 DaemonState::Busy => "busy",
                 DaemonState::Degraded => "degraded",

@@ -40,7 +40,13 @@ src/
 │                       next event (apply_presence's None-only adopt; driver arms the watch on PidSeen too).
 │                       The 4th state DaemonState::Degraded (#317): agent_end.success:false → RunFailed →
 │                       Degraded (sickly-red sluggish the lobster), healed by the next clean RunEnded / new RunStarted /
-│                       GatewayUp restart),
+│                       GatewayUp restart. `DaemonPresence` STORES only the orthogonal axes `liveness:
+│                       DaemonLiveness{Up{degraded}|Down}` + `in_flight_run_keys` (#460): Busy/Idle are NOT
+│                       stored — they're PROJECTED by `DaemonPresence::display_state()` (in state/mod.rs), the ONE
+│                       place the Degraded>Busy>Idle priority lives (degraded checked BEFORE the run set, so a
+│                       fan-out-with-one-failure renders Degraded not Busy). apply_presence mutates axes; every
+│                       renderer reads `display_state()`/`is_busy()`, never a stored `state` — so Busy can't drift
+│                       from the run set (the 4-site hand-sync is gone)),
 │                       decoder.rs (shared utils + decode_hook_payload, a registry-driven dispatcher;
 │                       short-circuits is_daemon() → zero AgentEvents),
 │                       drift.rs (structured decode-drift breadcrumbs: unknown_event/missing_field/

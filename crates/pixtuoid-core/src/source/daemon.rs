@@ -17,7 +17,7 @@
 
 use std::time::SystemTime;
 
-use crate::state::{DaemonPresence, DaemonState, SceneState};
+use crate::state::{DaemonLiveness, DaemonPresence, SceneState};
 
 // The runtime half (the tokio presence side channel + `PresenceExitWatch`) —
 // ONE gate for the whole `native` layer of this module; the re-export keeps
@@ -139,7 +139,7 @@ impl DaemonPresence {
     /// `last_seen`: the `apply_presence` callers ride its top-level stamp, and the
     /// sweep / `mark_presence_down` re-anchor it explicitly for the walk-out timer.
     fn enter_down(&mut self) {
-        self.state = DaemonState::Down;
+        self.liveness = DaemonLiveness::Down;
         self.clear_concurrency();
         self.current_pid = None;
     }
@@ -160,7 +160,7 @@ pub fn apply_presence(
         .daemons_mut()
         .entry(source.to_string())
         .or_insert_with(|| DaemonPresence {
-            state: DaemonState::Idle,
+            liveness: DaemonLiveness::UP,
             active_sessions: 0,
             last_seen: now,
             entered_at: now,
@@ -170,7 +170,7 @@ pub fn apply_presence(
     // A transition out of Down (or a fresh GatewayUp) re-anchors the enter
     // animation — the mascot scuttles back in from the elevator. Idle↔Busy
     // does NOT reset it, so the steady wander clock stays continuous.
-    let was_down = p.state == DaemonState::Down;
+    let was_down = p.liveness == DaemonLiveness::Down;
     p.last_seen = now;
     match update {
         // UP-winning + idempotent. A (re)start resets the multiplexed-session
@@ -179,33 +179,38 @@ pub fn apply_presence(
         GatewayUp { pid } => {
             p.current_pid = pid;
             p.clear_concurrency();
-            p.state = DaemonState::Idle;
+            p.liveness = DaemonLiveness::UP;
         }
         GatewayDown => {
             p.enter_down();
         }
         SessionStarted => {
             p.active_sessions = p.active_sessions.saturating_add(1);
-            if p.state == DaemonState::Down {
-                p.state = DaemonState::Idle; // any event ⇒ up
+            if p.liveness == DaemonLiveness::Down {
+                p.liveness = DaemonLiveness::UP; // any event ⇒ up
             }
         }
         SessionEnded => {
             // saturating: a pre-attach session_start we never saw must not underflow.
             p.active_sessions = p.active_sessions.saturating_sub(1);
-            if p.state == DaemonState::Down {
-                p.state = DaemonState::Idle;
+            if p.liveness == DaemonLiveness::Down {
+                p.liveness = DaemonLiveness::UP;
             }
         }
         RunStarted { run_key } => {
             p.in_flight_run_keys.insert(run_key);
-            p.state = DaemonState::Busy;
+            // A run starting means alive + not degraded (a fresh attempt clears a
+            // prior model-error). Busy itself is DERIVED from the now-non-empty
+            // run set by `display_state()`, never stored.
+            p.liveness = DaemonLiveness::UP;
         }
         RunEnded { run_key } => {
             p.in_flight_run_keys.remove(&run_key);
             if p.in_flight_run_keys.is_empty() {
-                // A successful run ending heals a prior Degraded back to Idle.
-                p.state = DaemonState::Idle;
+                // The set drained: a clean run heals a prior Degraded and, if the
+                // daemon was Down, resurrects it. Idle is the derived projection
+                // of an empty run set, so there is nothing else to set.
+                p.liveness = DaemonLiveness::UP;
             }
         }
         // A FAILED run (#317): the gateway is alive but its model backend broke.
@@ -214,7 +219,9 @@ pub fn apply_presence(
         // (GatewayUp → Idle). Remove this run from the in-flight set (it ended).
         RunFailed { run_key } => {
             p.in_flight_run_keys.remove(&run_key);
-            p.state = DaemonState::Degraded;
+            // Degraded regardless of any OTHER run still in flight — the
+            // projection renders Degraded over Busy (degraded checked first).
+            p.liveness = DaemonLiveness::Up { degraded: true };
         }
         // Pure pid adoption (#318): bootstrap `current_pid` for a live daemon we
         // never saw `gateway_start` for (mid-attach / reconnect-while-alive), so
@@ -242,7 +249,7 @@ pub fn apply_presence(
     }
     // Re-anchor the enter animation on a Down → up resurrection (the entry was
     // not yet TTL-swept). A fresh insert already stamped `entered_at = now`.
-    if was_down && p.state != DaemonState::Down {
+    if was_down && p.liveness != DaemonLiveness::Down {
         p.entered_at = now;
     }
 }
@@ -263,7 +270,7 @@ pub fn sweep_presence_ttl(scene: &mut SceneState, source: &str, ttl: PresenceTtl
             .duration_since(p.last_seen)
             .map(|d| d.as_millis() as u64)
             .unwrap_or(0);
-        if p.state == DaemonState::Down {
+        if p.liveness == DaemonLiveness::Down {
             // Keep the Down entry only until the walk-out has had time to finish.
             idle_ms >= ttl.down_remove_ms
         } else {
@@ -275,8 +282,11 @@ pub fn sweep_presence_ttl(scene: &mut SceneState, source: &str, ttl: PresenceTtl
                 // no walk-out). The apply-path GatewayDown/PidExited ride
                 // `apply_presence`'s top-level stamp instead.
                 p.last_seen = now;
-            } else if p.state == DaemonState::Busy && idle_ms >= ttl.busy_decay_ms {
-                p.state = DaemonState::Idle;
+            } else if p.is_busy() && idle_ms >= ttl.busy_decay_ms {
+                // Drain the stranded run set; Busy → Idle falls out of the
+                // projection (no state field to flip). `is_busy()` is false while
+                // Degraded, so a broken gateway is NOT silently healed here — only
+                // a real RunEnded/RunStarted/GatewayUp does that.
                 p.in_flight_run_keys.clear();
             }
             false
@@ -296,7 +306,7 @@ pub fn sweep_presence_ttl(scene: &mut SceneState, source: &str, ttl: PresenceTtl
 /// reducer's `reconcile_connected` for agents).
 pub fn mark_presence_down(scene: &mut SceneState, source: &str, now: SystemTime) {
     if let Some(p) = scene.daemons_mut().get_mut(source) {
-        if p.state != DaemonState::Down {
+        if p.liveness != DaemonLiveness::Down {
             p.enter_down();
             p.last_seen = now;
         }
@@ -306,6 +316,9 @@ pub fn mark_presence_down(scene: &mut SceneState, source: &str, now: SystemTime)
 #[cfg(test)]
 mod tests {
     use super::*;
+    // The render vocabulary the assertions compare against — projected via
+    // `display_state()`; production daemon.rs now mutates only `DaemonLiveness`.
+    use crate::state::DaemonState;
 
     // The presence state machine is daemon-AGNOSTIC: every assertion runs
     // against TWO synthetic sources to PROVE a 2nd daemon needs zero new
@@ -329,7 +342,7 @@ mod tests {
         SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(m)
     }
     fn st(s: &SceneState, src: &str) -> DaemonState {
-        s.daemons()[src].state
+        s.daemons()[src].display_state()
     }
     fn sessions(s: &SceneState, src: &str) -> u32 {
         s.daemons()[src].active_sessions

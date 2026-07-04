@@ -914,21 +914,21 @@ fn sample_scene(now: SystemTime, max_desks: usize, n_agents: usize) -> SceneStat
 /// the wandering lobster mascot. `state` ∈ {idle, busy, down}; off the gen-media
 /// path so baselines hold.
 fn inject_openclaw_presence(s: &mut SceneState, state: &str, now: SystemTime) -> Result<()> {
-    use pixtuoid_core::state::{DaemonPresence, DaemonState};
-    // Busy carries in-flight RUN keys (two, for a lively demo stream) — the
-    // bubble tell keys on runs, not the persistent single session.
-    let (state, active_sessions, runs) = match state {
-        "idle" => (DaemonState::Idle, 1, Vec::new()),
+    use pixtuoid_core::state::{DaemonLiveness, DaemonPresence};
+    // Busy carries in-flight RUN keys (two, for a lively demo stream) — Busy is
+    // DERIVED from the run set (#460), so "busy" = UP + runs, not a stored state.
+    let (liveness, active_sessions, runs) = match state {
+        "idle" => (DaemonLiveness::UP, 1, Vec::new()),
         "busy" => (
-            DaemonState::Busy,
+            DaemonLiveness::UP,
             1,
             vec!["run-a".to_string(), "run-b".to_string()],
         ),
         // #317: the gateway is up but its model backend is failing every run —
         // a sickly-red, sluggishly-wandering lobster (no in-flight runs: the last
         // one FAILED out of the set).
-        "degraded" => (DaemonState::Degraded, 1, Vec::new()),
-        "down" => (DaemonState::Down, 0, Vec::new()),
+        "degraded" => (DaemonLiveness::Up { degraded: true }, 1, Vec::new()),
+        "down" => (DaemonLiveness::Down, 0, Vec::new()),
         other => {
             anyhow::bail!("unknown --openclaw {other:?}; valid: idle | busy | degraded | down")
         }
@@ -942,7 +942,7 @@ fn inject_openclaw_presence(s: &mut SceneState, state: &str, now: SystemTime) ->
     s.daemons_mut().insert(
         pixtuoid_core::source::openclaw::SOURCE_NAME.to_string(),
         DaemonPresence {
-            state,
+            liveness,
             active_sessions,
             last_seen: now,
             entered_at,

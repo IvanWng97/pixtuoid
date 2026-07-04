@@ -20,7 +20,7 @@ use std::time::SystemTime;
 use pixtuoid_core::sprite::blit::blit_frame;
 use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
-use pixtuoid_core::state::{DaemonPresence, DaemonState, FloorLocalDeskIndex};
+use pixtuoid_core::state::{DaemonLiveness, DaemonPresence, DaemonState, FloorLocalDeskIndex};
 use pixtuoid_core::AgentSlot;
 
 use super::effects::{
@@ -539,7 +539,7 @@ pub(super) fn mascot_position(
     const MASCOT_ANIM_FRAME_MS: u64 = 200;
     let frame = ((epoch_ms(now) / MASCOT_ANIM_FRAME_MS) % 2) as usize;
 
-    if presence.state == DaemonState::Down {
+    if presence.liveness == DaemonLiveness::Down {
         // Walk-out: from where the lobster was at the instant of Down, to the elevator.
         let down_age = now.duration_since(presence.last_seen).ok()?.as_millis() as u64;
         if down_age >= MASCOT_LEAVE_MS {
@@ -575,12 +575,12 @@ pub(super) fn mascot_position(
     }
 
     // Steady wander, styled by state.
-    let cycle_ms = match presence.state {
+    let cycle_ms = match presence.display_state() {
         DaemonState::Busy => MASCOT_BUSY_CYCLE_MS,
         DaemonState::Degraded => MASCOT_DEGRADED_CYCLE_MS,
         _ => MASCOT_IDLE_CYCLE_MS,
     };
-    let spots = mascot_spots(layout, presence.state, home);
+    let spots = mascot_spots(layout, presence.display_state(), home);
     let (pos, walking) = mascot_wander(layout, age - MASCOT_ENTER_MS, seed, &spots, home, cycle_ms);
     if walking {
         Some((pos, walk_anim, frame))
@@ -1460,7 +1460,8 @@ mod tests {
 
     fn idle_presence(now: SystemTime, age_ms: u64) -> DaemonPresence {
         DaemonPresence {
-            state: DaemonState::Idle,
+            // Up with an empty run set ⇒ Idle (the derived projection).
+            liveness: DaemonLiveness::UP,
             active_sessions: 0,
             last_seen: now,
             entered_at: now - std::time::Duration::from_millis(age_ms),
@@ -1525,9 +1526,11 @@ mod tests {
         let entered_at = SystemTime::UNIX_EPOCH;
         let seed = 0u64;
 
-        // Both presences identical except `state`; both well past the enter window.
-        let mk = |state: DaemonState, now: SystemTime| DaemonPresence {
-            state,
+        // Both presences identical except degraded-ness (Idle vs Degraded — the
+        // only two this test exercises); both well past the enter window. Empty
+        // run set, so `degraded: false` ⇒ Idle and `true` ⇒ Degraded.
+        let mk = |degraded: bool, now: SystemTime| DaemonPresence {
+            liveness: DaemonLiveness::Up { degraded },
             active_sessions: 0,
             last_seen: now,
             entered_at,
@@ -1552,8 +1555,8 @@ mod tests {
         }
         let now = found.expect("a tick where idle vs degraded phases diverge must exist");
 
-        let idle = mk(DaemonState::Idle, now);
-        let degraded = mk(DaemonState::Degraded, now);
+        let idle = mk(false, now);
+        let degraded = mk(true, now);
         let (_, idle_anim, _) =
             mascot_position(&layout, &idle, "lobster_walk", "lobster_rest", now, seed)
                 .expect("idle pos");

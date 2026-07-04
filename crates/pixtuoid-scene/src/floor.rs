@@ -741,13 +741,13 @@ mod tests {
         // daemons onto floor 0 ONLY, so a multi-floor office renders the lobster
         // exactly once (a regression dropping the gate / flipping the index would
         // duplicate him on every floor).
-        use pixtuoid_core::state::{DaemonPresence, DaemonState};
+        use pixtuoid_core::state::{DaemonLiveness, DaemonPresence};
         let mut scene = SceneState::uniform(16);
         scene.floor_capacities[1] = 16; // a second floor exists
         scene.daemons_mut().insert(
             pixtuoid_core::source::openclaw::SOURCE_NAME.to_string(),
             DaemonPresence {
-                state: DaemonState::Idle,
+                liveness: DaemonLiveness::UP,
                 active_sessions: 0,
                 last_seen: SystemTime::UNIX_EPOCH,
                 entered_at: SystemTime::UNIX_EPOCH,

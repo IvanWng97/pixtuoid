@@ -132,7 +132,7 @@ pub(crate) fn gateway_rollup(daemons: &BTreeMap<String, DaemonPresence>) -> Opti
     }
     daemons
         .values()
-        .map(|p| p.state)
+        .map(|p| p.display_state())
         .max_by_key(|s| severity(*s))
 }
 
@@ -567,13 +567,29 @@ mod tests {
 
     // --- office-wide plumbing (per-floor + gateway rollup) ------------------
 
+    // Maps a desired render `DaemonState` to the stored axes. Busy needs a
+    // (placeholder) in-flight run key because Busy is DERIVED from the run set,
+    // never stored (#460) — so `gateway_rollup_is_worst_of` still exercises a
+    // genuinely-Busy fixture rather than a silently-Idle one.
     fn daemon(state: pixtuoid_core::state::DaemonState) -> pixtuoid_core::state::DaemonPresence {
+        use pixtuoid_core::state::{DaemonLiveness, DaemonState};
+        let (liveness, in_flight_run_keys) = match state {
+            DaemonState::Idle => (DaemonLiveness::UP, Default::default()),
+            DaemonState::Busy => (
+                DaemonLiveness::UP,
+                ["fixture-run".to_string()]
+                    .into_iter()
+                    .collect::<std::collections::HashSet<String>>(),
+            ),
+            DaemonState::Degraded => (DaemonLiveness::Up { degraded: true }, Default::default()),
+            DaemonState::Down => (DaemonLiveness::Down, Default::default()),
+        };
         pixtuoid_core::state::DaemonPresence {
-            state,
+            liveness,
             active_sessions: 0,
             last_seen: SystemTime::UNIX_EPOCH,
             entered_at: SystemTime::UNIX_EPOCH,
-            in_flight_run_keys: Default::default(),
+            in_flight_run_keys,
             current_pid: None,
         }
     }

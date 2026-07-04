@@ -543,22 +543,22 @@ mod tests {
         );
         // 30s: up + idle amble.
         o.step(T0_MS + 30_000.0, 160, 96);
-        assert_eq!(o.scene.daemons()[src].state, DaemonState::Idle);
+        assert_eq!(o.scene.daemons()[src].display_state(), DaemonState::Idle);
         // 45s: run 1 in flight → busy shuttle.
         o.step(T0_MS + 45_000.0, 160, 96);
-        assert_eq!(o.scene.daemons()[src].state, DaemonState::Busy);
+        assert_eq!(o.scene.daemons()[src].display_state(), DaemonState::Busy);
         assert_eq!(o.scene.daemons()[src].in_flight_run_keys.len(), 1);
         // 100s (the wide poster's instant): both runs done → idle.
         o.step(T0_MS + 100_000.0, 160, 96);
-        assert_eq!(o.scene.daemons()[src].state, DaemonState::Idle);
+        assert_eq!(o.scene.daemons()[src].display_state(), DaemonState::Idle);
         // 115s: walked out (Down ≠ absent — the leave animation anchors on it).
         o.step(T0_MS + 115_000.0, 160, 96);
-        assert_eq!(o.scene.daemons()[src].state, DaemonState::Down);
+        assert_eq!(o.scene.daemons()[src].display_state(), DaemonState::Down);
         // Next loop, 30s in: the wrap reset the presence cursor; GatewayUp
         // resurrects Down → Idle and re-anchors the enter walk.
         let wrap30 = T0_MS + LOOP_MS as f64 + 30_000.0;
         o.step(wrap30, 160, 96);
-        assert_eq!(o.scene.daemons()[src].state, DaemonState::Idle);
+        assert_eq!(o.scene.daemons()[src].display_state(), DaemonState::Idle);
     }
 
     #[test]

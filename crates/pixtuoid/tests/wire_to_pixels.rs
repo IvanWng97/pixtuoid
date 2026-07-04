@@ -559,8 +559,8 @@ fn openclaw_presence_envelope_renders_a_lobster() {
         .get(pixtuoid_core::source::openclaw::SOURCE_NAME)
         .expect("openclaw presence must be populated");
     assert_ne!(
-        presence.state,
-        pixtuoid_core::state::DaemonState::Down,
+        presence.liveness,
+        pixtuoid_core::state::DaemonLiveness::Down,
         "the in-session presence stream must leave the gateway UP"
     );
 

@@ -379,12 +379,40 @@ pub enum DaemonState {
     Down,
 }
 
+/// The two ORTHOGONAL liveness axes a daemon mascot actually STORES, so that
+/// "busy" can never drift from the run set (#460). `Up { degraded }` is the
+/// alive gateway (healthy, or `degraded` = its model backend is failing every
+/// run, #317); `Down` is seen-then-died. The remaining render distinction —
+/// Idle vs Busy — is deliberately NOT a field here: it is a pure function of
+/// [`DaemonPresence::in_flight_run_keys`], projected by
+/// [`DaemonPresence::display_state`]. Storing `Busy`/`Idle` separately was the
+/// hand-synced duplication this split removes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DaemonLiveness {
+    /// The gateway is alive. `degraded` (#317): alive-but-broken (auth revoked /
+    /// provider down), rendered distressed; healed by the next clean run / new
+    /// attempt / restart.
+    Up { degraded: bool },
+    /// The gateway was seen and then died (the mascot walks out). Distinct from
+    /// *absent* (no map entry = never configured / plugin not loaded).
+    Down,
+}
+
+impl DaemonLiveness {
+    /// The healthy alive state (`Up { degraded: false }`) — the common case,
+    /// named once so construction sites don't repeat the struct literal.
+    pub const UP: DaemonLiveness = DaemonLiveness::Up { degraded: false };
+}
+
 /// Per-daemon presence for the gateway mascot (the P-A representation): lives on
 /// `SceneState` so the serializable scene snapshot the renderer reads carries
 /// the mascot's state + concurrency (bubble) intensity.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DaemonPresence {
-    pub state: DaemonState,
+    /// The stored liveness axes ([`DaemonLiveness`]). The 4-way render state
+    /// (incl. Idle/Busy) is PROJECTED via [`display_state`](Self::display_state),
+    /// never stored — Busy is derived from `in_flight_run_keys`.
+    pub liveness: DaemonLiveness,
     /// Concurrent sessions the gateway is multiplexing (bubble intensity).
     pub active_sessions: u32,
     /// Last time ANY presence event arrived — drives the busy→idle decay and
@@ -406,6 +434,35 @@ pub struct DaemonPresence {
     /// The gateway pid currently armed for `ExitWatch` (None until first seen).
     /// Kept for debug dumps + the restart pid-rebind guard; not a wire contract.
     pub current_pid: Option<i32>,
+}
+
+impl DaemonPresence {
+    /// The 4-way render vocabulary ([`DaemonState`]) projected from the stored
+    /// axes — the SINGLE place the `Degraded > Busy > Idle` priority is encoded.
+    /// Every renderer reads this instead of a stored `state` field, so Busy can't
+    /// drift from the run set: a `Degraded` gateway renders Degraded even with
+    /// runs still in flight (the fan-out-with-one-failure case), because
+    /// `degraded` is checked BEFORE the run set.
+    pub fn display_state(&self) -> DaemonState {
+        match self.liveness {
+            DaemonLiveness::Down => DaemonState::Down,
+            DaemonLiveness::Up { degraded: true } => DaemonState::Degraded,
+            DaemonLiveness::Up { degraded: false } => {
+                if self.in_flight_run_keys.is_empty() {
+                    DaemonState::Idle
+                } else {
+                    DaemonState::Busy
+                }
+            }
+        }
+    }
+
+    /// Whether the mascot renders as Busy (alive, not degraded, ≥1 run in flight).
+    /// Derived from [`display_state`](Self::display_state) so the Degraded-first
+    /// priority has exactly one definition.
+    pub fn is_busy(&self) -> bool {
+        self.display_state() == DaemonState::Busy
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -595,12 +652,16 @@ mod tests {
 
     #[test]
     fn daemon_presence_round_trips_and_skips_in_flight_keys() {
-        // The openclaw daemon-presence (mascot) state lives on SceneState (P-A) so
-        // the geometry pass can read it. It serializes like the rest of the tree
+        // The openclaw daemon-presence (mascot) lives on SceneState (P-A) so the
+        // geometry pass can read it. It serializes like the rest of the tree
         // (#279). `in_flight_run_keys` is transient process state — a daemon
         // restart resets it — so it is `#[serde(skip)]` and restores empty.
-        let mut p = DaemonPresence {
-            state: DaemonState::Busy,
+        // Consequence of the #460 split: since Busy is DERIVED from the run set
+        // (never a serialized field), a restored dump with a drained run set reads
+        // Idle, NOT Busy — the correct fix for the old "restore strands a
+        // perpetual Busy" drift (this test used to assert the stranded Busy).
+        let p = DaemonPresence {
+            liveness: DaemonLiveness::UP,
             active_sessions: 3,
             last_seen: SystemTime::now(),
             entered_at: SystemTime::now(),
@@ -609,13 +670,23 @@ mod tests {
                 .collect(),
             current_pid: Some(4242),
         };
+        assert_eq!(
+            p.display_state(),
+            DaemonState::Busy,
+            "a non-empty run set reads Busy before serialization"
+        );
         let json = serde_json::to_string(&p).expect("serialize");
         assert!(
             !json.contains("run-1"),
             "in_flight_run_keys must be skipped on the wire: {json}"
         );
         let back: DaemonPresence = serde_json::from_str(&json).expect("deserialize");
-        assert_eq!(back.state, DaemonState::Busy);
+        assert_eq!(back.liveness, DaemonLiveness::UP);
+        assert_eq!(
+            back.display_state(),
+            DaemonState::Idle,
+            "skipped run set restores empty ⇒ Idle, never a stranded Busy"
+        );
         assert_eq!(back.active_sessions, 3);
         assert_eq!(back.current_pid, Some(4242));
         assert!(
@@ -623,12 +694,18 @@ mod tests {
             "skipped field restores empty"
         );
 
-        for st in [DaemonState::Idle, DaemonState::Busy, DaemonState::Down] {
-            p.state = st;
-            let j = serde_json::to_string(&p).unwrap();
+        // Every liveness value round-trips (it IS the serialized axis).
+        let mut q = back;
+        for liveness in [
+            DaemonLiveness::UP,
+            DaemonLiveness::Up { degraded: true },
+            DaemonLiveness::Down,
+        ] {
+            q.liveness = liveness;
+            let j = serde_json::to_string(&q).unwrap();
             assert_eq!(
-                serde_json::from_str::<DaemonPresence>(&j).unwrap().state,
-                st
+                serde_json::from_str::<DaemonPresence>(&j).unwrap().liveness,
+                liveness
             );
         }
     }
@@ -641,7 +718,7 @@ mod tests {
         s.daemons.insert(
             "openclaw".to_string(),
             DaemonPresence {
-                state: DaemonState::Idle,
+                liveness: DaemonLiveness::UP,
                 active_sessions: 0,
                 last_seen: SystemTime::now(),
                 entered_at: SystemTime::now(),
@@ -656,8 +733,55 @@ mod tests {
             serde_json::to_string(&back).expect("re-serialize"),
             "round-trip must be byte-stable"
         );
-        assert_eq!(back.daemons["openclaw"].state, DaemonState::Idle);
+        assert_eq!(back.daemons["openclaw"].liveness, DaemonLiveness::UP);
         assert_eq!(back.daemons["openclaw"].current_pid, Some(900));
+    }
+
+    fn presence_at(liveness: DaemonLiveness) -> DaemonPresence {
+        DaemonPresence {
+            liveness,
+            active_sessions: 0,
+            last_seen: SystemTime::UNIX_EPOCH,
+            entered_at: SystemTime::UNIX_EPOCH,
+            in_flight_run_keys: Default::default(),
+            current_pid: None,
+        }
+    }
+
+    #[test]
+    fn display_state_derives_busy_from_the_run_set_not_a_stored_flag() {
+        // Busy is a pure function of `in_flight_run_keys`, never a separately
+        // stored field that could drift from the set (the #460 invariant).
+        let mut p = presence_at(DaemonLiveness::Up { degraded: false });
+        assert_eq!(p.display_state(), DaemonState::Idle);
+        assert!(!p.is_busy());
+        p.in_flight_run_keys.insert("r".into());
+        assert_eq!(p.display_state(), DaemonState::Busy);
+        assert!(p.is_busy());
+        p.in_flight_run_keys.clear();
+        assert_eq!(p.display_state(), DaemonState::Idle, "drained ⇒ Idle");
+    }
+
+    #[test]
+    fn display_state_degraded_wins_over_busy_with_a_run_still_in_flight() {
+        // The reachable fan-out-with-one-failure case: one run FAILED (degraded)
+        // while ANOTHER is still in flight. Degraded must render over Busy — this
+        // is exactly why the projection checks `degraded` BEFORE the run set (a
+        // naive `Up && !empty ⇒ Busy` would regress it).
+        let mut p = presence_at(DaemonLiveness::Up { degraded: true });
+        p.in_flight_run_keys.insert("still-running".into());
+        assert_eq!(p.display_state(), DaemonState::Degraded);
+        assert!(!p.is_busy(), "a degraded daemon never reads as Busy");
+    }
+
+    #[test]
+    fn display_state_down_wins_over_a_stray_run_key() {
+        // Down is terminal for the projection; a defensively non-empty run set
+        // (enter_down clears it, but the type permits it) can't read as Busy.
+        let mut p = presence_at(DaemonLiveness::Down);
+        p.in_flight_run_keys.insert("stray".into());
+        assert_eq!(p.display_state(), DaemonState::Down);
+        assert!(!p.is_busy());
     }
 
     #[test]

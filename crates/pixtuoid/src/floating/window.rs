@@ -22,7 +22,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
 use pixtuoid_core::sprite::format::Pack;
-use pixtuoid_core::state::{DaemonState, SceneState, MAX_FLOORS};
+use pixtuoid_core::state::{DaemonLiveness, SceneState, MAX_FLOORS};
 use tokio::sync::watch;
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalPosition};
@@ -374,7 +374,7 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
             && scene
                 .daemons()
                 .values()
-                .all(|d| d.state == DaemonState::Down);
+                .all(|d| d.liveness == DaemonLiveness::Down);
         let next_tick = if office_idle {
             Duration::from_millis(1000 / IDLE_AMBIENT_FPS)
         } else {

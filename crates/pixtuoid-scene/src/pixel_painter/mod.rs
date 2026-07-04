@@ -913,15 +913,15 @@ fn enqueue_gateway_mascot<'a>(
                 anim_name,
                 frame_idx,
                 run_count,
-                degraded: presence.state == pixtuoid_core::state::DaemonState::Degraded,
+                degraded: presence.display_state() == pixtuoid_core::state::DaemonState::Degraded,
             },
         });
         // First present gateway wins the hover frame (single-gateway today).
         hover.get_or_insert(MascotFrame {
             pos,
             name: def.display_name,
-            busy: presence.state == pixtuoid_core::state::DaemonState::Busy,
-            degraded: presence.state == pixtuoid_core::state::DaemonState::Degraded,
+            busy: presence.is_busy(),
+            degraded: presence.display_state() == pixtuoid_core::state::DaemonState::Degraded,
             active_sessions: presence.active_sessions,
         });
     }
