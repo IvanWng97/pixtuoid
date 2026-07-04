@@ -64,4 +64,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 notify             = "8"
 ratatui            = "0.30"
 crossterm          = "0.29"
+# Terminal display-column width (the authority ratatui itself uses). ONE measure
+# for footer right-flush / truncation so wide glyphs don't miscount.
+unicode-width      = "0.2"
 clap               = { version = "4", features = ["derive"] }

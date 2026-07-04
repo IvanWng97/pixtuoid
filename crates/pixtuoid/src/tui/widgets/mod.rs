@@ -43,6 +43,16 @@ fn to_color(c: Rgb) -> Color {
     Color::Rgb(c.r, c.g, c.b)
 }
 
+/// Display columns a string occupies in the terminal — the ONE width authority
+/// (the same `unicode-width` ratatui uses), replacing scattered `chars().count()`
+/// so a wide glyph in the footer/board can't miscount the right-flush. For the
+/// HUD's ambiguous-width glyphs (`·×↑↓●◐○◌`) this equals `chars().count()`; it
+/// diverges only for genuinely wide (2-col) or zero-width (combining) chars.
+pub(crate) fn display_width(s: &str) -> usize {
+    use unicode_width::UnicodeWidthStr;
+    s.width()
+}
+
 // --- Shared scene stats (spine 1: footer + board agree) -----------------------
 // ONE per-scene activity tally with ONE exiting-first bucketing policy, computed
 // once per frame and handed to BOTH the footer (authoritative integers) and the
@@ -529,6 +539,25 @@ mod tests {
         let t = &pixtuoid_scene::theme::NORMAL;
         assert_eq!(StateKind::Waiting.color(t), to_color(t.ui.label_waiting));
         assert_eq!(StateKind::Exiting.color(t), to_color(t.ui.label_exiting));
+    }
+
+    #[test]
+    fn display_width_counts_terminal_columns_not_chars() {
+        // The state/HUD glyphs are all East-Asian *ambiguous* = 1 column under the
+        // non-CJK `.width()`, so this measure == chars().count() for them (why the
+        // swap is snapshot-neutral), while still being correct for wide glyphs.
+        assert_eq!(display_width("\u{b7}\u{d7}\u{2191}\u{2193}"), 4); // · × ↑ ↓
+        assert_eq!(
+            display_width("\u{25cf}\u{25d0}\u{25cb}\u{25cc}"),
+            4,
+            "● ◐ ○ ◌ are one column each"
+        );
+        assert_eq!(display_width("[q]uit"), 6);
+        // A wide glyph is TWO columns (chars().count() would say 1) — the case that
+        // keeps the footer's right-flush correct once a wide chip can appear.
+        assert_eq!(display_width("\u{1f99e}"), 2); // 🦞
+                                                   // A zero-width combining mark adds no columns.
+        assert_eq!(display_width("a\u{0301}"), 1);
     }
 
     #[test]

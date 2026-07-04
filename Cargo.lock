@@ -2291,6 +2291,7 @@ dependencies = [
  "toml_edit",
  "tracing",
  "tracing-subscriber",
+ "unicode-width",
  "which",
  "windows-sys 0.61.2",
  "winit",
