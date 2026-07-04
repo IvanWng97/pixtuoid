@@ -48,6 +48,17 @@ Run `just preflight` locally first to avoid the push → CI-red → fix round-tr
 
 ## Releasing
 
+### Versioning
+
+Pre-1.0, we read SemVer onto `0.y.z` like this:
+
+- **patch (`0.y.Z`)** — bug fixes and minor polish only: no new public API, and nothing breaks.
+- **minor (`0.Y.z`)** — everything else: new user-facing features (a source, a theme, a CLI flag) **and** any breaking change to `pixtuoid-core` / `pixtuoid-scene`'s public API.
+
+**What the `semver` gate enforces vs. what's on you.** `cargo semver-checks` (the CI `semver` job, over those two crates) is a *compatibility* gate: it fails a **breaking** change that isn't paired with a minor bump — the "nothing breaks on a patch" half, machine-enforced. It does **not** flag a purely *additive* change shipped as a patch: new public API is backward-compatible, so the tool stays green. The "features also bump minor" half is therefore our **convention**, upheld in review, not by the gate. When a breaking change reddens `semver`, bump the minor **in the same PR** — never weaken the lint to ship a patch. At `1.0` this splits the usual way: additive → minor, breaking → major.
+
+### Cutting the release
+
 Recipes are grouped by intent — run `just --list` to see them:
 
 | To… | Run | What it touches |
