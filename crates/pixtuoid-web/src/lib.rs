@@ -269,6 +269,17 @@ impl Office {
     pub fn set_weather(&mut self, name: Option<String>) {
         self.weather_override = name;
     }
+
+    /// Recolor the whole office to a theme by name (`"normal"|"cyberpunk"|
+    /// "dracula"|"tokyo-night"|"catppuccin"|"gruvbox"`). Unknown name = no-op.
+    /// Flushes the recolor cache so agent sprites repaint on the next frame; the
+    /// env recolors on its own (painted fresh each frame from `self.theme`).
+    pub fn set_theme(&mut self, name: &str) {
+        if let Some(t) = pixtuoid_scene::theme::theme_by_name(name) {
+            self.theme = t;
+            self.session.reset_frame_cache();
+        }
+    }
 }
 
 impl Office {
@@ -730,5 +741,25 @@ mod tests {
         let mut c = Office::new(1).unwrap();
         c.set_weather(Some("not-a-weather".into()));
         c.step(T0_MS, 160, 96); // must not panic
+    }
+
+    #[test]
+    fn set_theme_recolors_and_unknown_is_noop() {
+        let mut a = Office::new(2).unwrap();
+        a.step(T0_MS, 160, 96);
+        let normal = a.frame().to_vec();
+
+        a.set_theme("cyberpunk");
+        a.step(T0_MS, 160, 96);
+        assert_ne!(
+            a.frame(),
+            &normal[..],
+            "cyberpunk must repaint the office differently from normal"
+        );
+
+        a.set_theme("nonsense"); // no-op, no panic, keeps cyberpunk
+        let before = a.frame().to_vec();
+        a.step(T0_MS, 160, 96);
+        assert_eq!(a.frame(), &before[..], "unknown theme is a no-op");
     }
 }
