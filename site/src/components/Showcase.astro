@@ -1,5 +1,5 @@
 ---
-import { SHOWCASE, showcaseVariants, floorByNumber } from '../consts';
+import { SHOWCASE, showcaseVariants, showcaseGroups, floorByNumber } from '../consts';
 import ChannelStage from './ChannelStage.astro';
 
 const floor = floorByNumber(5);
@@ -7,6 +7,7 @@ const channels = SHOWCASE.map((c, i) => ({
   ...c,
   ch: String(i + 1).padStart(2, '0'),
   variants: showcaseVariants(c),
+  groups: showcaseGroups(c),
 }));
 const live = channels.filter((c) => c.status === 'live');
 const def = channels.find((c) => c.default) ?? live[0];

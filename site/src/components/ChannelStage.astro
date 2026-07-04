@@ -6,11 +6,20 @@ const { channel: c, active } = Astro.props as {
   active: boolean;
 };
 const isClip = c.kind === 'clip';
+// `live` renders as a static poster fallback for now — the interactive wasm
+// office + time slider + per-group chips (c.groups) land in the next task;
+// this scaffold only keeps the build from crashing on a channel with no
+// `variants` (c.variantGroups resolves separately, via c.groups).
+const isLive = c.kind === 'live';
 const defVariant: ShowcaseVariant | null = c.variants.length
   ? (c.variants.find((v: ShowcaseVariant) => v.featured) ?? c.variants[0])
   : null;
 const title = `pixtuoid — CH ${c.ch} ${c.label}` + (defVariant ? ` · ${defVariant.name}` : '');
-const imgAlt = defVariant ? `pixtuoid office — ${defVariant.name} (${c.label.toLowerCase()})` : '';
+const imgAlt = defVariant
+  ? `pixtuoid office — ${defVariant.name} (${c.label.toLowerCase()})`
+  : isLive
+    ? `pixtuoid office — live (${c.label.toLowerCase()})`
+    : '';
 ---
 
 <figure
@@ -54,6 +63,15 @@ const imgAlt = defVariant ? `pixtuoid office — ${defVariant.name} (${c.label.t
         {active && <source src={asset(`demos/${c.asset}.webm`)} type="video/webm" />}
         {active && <source src={asset(`demos/${c.asset}.mp4`)} type="video/mp4" />}
       </video>
+    ) : isLive ? (
+      <img
+        class="terminal__screen px"
+        width={c.w ?? 1600}
+        height={c.h ?? 1440}
+        src={c.poster ? asset(`demos/${c.poster}`) : undefined}
+        alt={imgAlt}
+        loading="lazy"
+      />
     ) : (
       <img
         class="terminal__screen px"

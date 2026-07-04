@@ -101,6 +101,19 @@ for (const c of showcase) {
         throw new Error(
           `astro.config: showcase.json "${c.id}" variant "${v.id}" missing public/demos/${v.src}`
         );
+  } else if (c.kind === 'live') {
+    // A `live` channel is rendered by the wasm office canvas, not static demo
+    // assets — no asset/w/h required. Only the fallback poster (used when wasm
+    // never loads) and each chip group's manifest ref need validating.
+    if (c.poster && !demo(c.poster))
+      throw new Error(
+        `astro.config: showcase.json live channel "${c.id}" missing public/demos/${c.poster}`
+      );
+    for (const g of c.variantGroups ?? [])
+      if (g.variantsRef !== 'themes' && g.variantsRef !== 'weather')
+        throw new Error(
+          `astro.config: showcase.json "${c.id}" variantGroups["${g.key}"] has unknown variantsRef "${g.variantsRef}" (expected "themes" or "weather")`
+        );
   } else {
     throw new Error(`astro.config: showcase.json "${c.id}" has unknown kind "${c.kind}"`);
   }

@@ -8,8 +8,7 @@
     "h": 1408,
     "caption": "every session claims a desk across floors — typing, wandering, coffee runs. workflow fleets get desks too: review fleets of 100+ agents have run this repo through this office.",
     "duration": "0:10",
-    "status": "live",
-    "default": true
+    "status": "live"
   },
   {
     "id": "openclaw",
@@ -97,34 +96,17 @@
     "status": "live"
   },
   {
-    "id": "themes",
-    "label": "THEMES",
-    "kind": "variant-set",
-    "variantsRef": "themes",
-    "retint": true,
-    "caption": "press t in the app — the whole office retints",
-    "status": "live"
-  },
-  {
-    "id": "weather",
-    "label": "WEATHER",
-    "kind": "variant-set",
-    "variantsRef": "weather",
-    "variants": [
-      {
-        "id": "day",
-        "name": "Day",
-        "blurb": "high noon over the skyline",
-        "src": "day.png"
-      },
-      {
-        "id": "night",
-        "name": "Night",
-        "blurb": "moonlight, monitor glow",
-        "src": "night.png"
-      }
+    "id": "vibing",
+    "label": "VIBING",
+    "kind": "live",
+    "default": true,
+    "poster": "vibing-poster.png",
+    "timeSlider": true,
+    "variantGroups": [
+      { "key": "weather", "label": "weather", "variantsRef": "weather" },
+      { "key": "theme", "label": "vibe", "variantsRef": "themes", "retint": true }
     ],
-    "caption": "a sun and moon arc past the windows — weather is the atmosphere between them and your desk",
+    "caption": "set the mood — scrub the office's time, weather, and vibe",
     "status": "live"
   }
 ]
