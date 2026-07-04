@@ -885,7 +885,7 @@ mod tests {
         // show MORE of the disc than a thinner one (Rain), matching the
         // direct/diffuse ordering `storm_transmits_less_than_rain_overall`
         // already pins.
-        let min_disc_vis = super::celestial::MIN_DISC_VIS;
+        let min_disc_vis = crate::pixel_painter::background::celestial::MIN_DISC_VIS;
         let overcast = atmo(Weather::Overcast).disc;
         let rain = atmo(Weather::Rain).disc;
         let storm = atmo(Weather::Storm).disc;
