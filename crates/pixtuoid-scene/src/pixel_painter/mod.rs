@@ -105,6 +105,19 @@ pub use sim::{CharacterGlow, CharacterPlacement, SimFrame};
 pub const PANTRY_COFFEE_COLS_LARGE: (u16, u16) = (11, 18);
 pub const PANTRY_COFFEE_COLS_SMALL: (u16, u16) = (9, 12);
 
+/// The neon wall-sign panel geometry, in PIXELS: origin `(X, Y)` and size `W×H`.
+/// THE single source of truth shared by the pixel painter (dark panel + pulsing
+/// border, `paint_neon_panel`), the wall-clock collision clamp, and — cross-crate
+/// — the binary's `tui::widgets::hud::paint_wall_display`, whose branding/state
+/// text overlays this exact region (its cell width derives from `NEON_PANEL_W`,
+/// so the text box can't drift from the painted panel). A pixel column maps 1:1
+/// to a terminal cell column in the half-block flush, so `NEON_PANEL_W` px == the
+/// board's cell width.
+pub const NEON_PANEL_X: u16 = 1;
+pub const NEON_PANEL_Y: u16 = 1;
+pub const NEON_PANEL_W: u16 = 30;
+pub const NEON_PANEL_H: u16 = 8;
+
 use anchors::compute_door_frame_idx;
 use background::{
     daylight_floor_overlay, dim_floor_overlay, paint_ceiling_pool, paint_clock,
@@ -412,15 +425,23 @@ fn paint_frame(
     // Neon sign panel in the wall band — dark bg with glow border.
     // Text overlay (branding, dots, star link) is rendered by the ratatui
     // widget pass in renderer.rs::paint_wall_display.
-    let neon_w = 30u16;
-    let neon_h = 8u16;
-    paint_neon_panel(ctx.buf, 1, 1, neon_w, neon_h, ctx.now, ctx.theme);
+    paint_neon_panel(
+        ctx.buf,
+        NEON_PANEL_X,
+        NEON_PANEL_Y,
+        NEON_PANEL_W,
+        NEON_PANEL_H,
+        ctx.now,
+        ctx.theme,
+    );
 
     // Live wall clock painted after the wall (so hands sit on top of it)
     // but before wall decor — the bookshelf etc. shouldn't cover it.
     // 7x7 sprite, center at clock_x+3; clamp so it never collides with
-    // the 30-wide neon panel on the left.
-    let clock_x = (buf_w / 2).saturating_sub(3).max(neon_w + 2);
+    // the neon panel on the left (its right edge + a 1px gap).
+    let clock_x = (buf_w / 2)
+        .saturating_sub(3)
+        .max(NEON_PANEL_X + NEON_PANEL_W + 1);
     paint_clock(ctx.buf, clock_x, 1, ctx.now, ctx.theme);
     // Corridor runner — painted over the floor but BEFORE walls/decor
     // so walls cleanly overlap it where they cross.
