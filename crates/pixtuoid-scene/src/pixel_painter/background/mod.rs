@@ -7,14 +7,14 @@
 //! them in the order it wants.
 
 mod lighting;
-mod time_of_day;
+mod sky;
 
 // Re-export everything the parent pixel_painter/mod.rs imports.
 pub(super) use lighting::{
     paint_ceiling_pool, paint_clock, paint_corridor_runner, paint_floor_lamp_halo,
     paint_neon_panel, paint_shadow, Ellipse,
 };
-pub(super) use time_of_day::{
+pub(super) use sky::{
     daylight_floor_overlay, dim_floor_overlay, set_weather_override, sun_on_wall, sunset_strength,
     time_of_day_look, weather_light, weather_state, TimeOfDayLook, WallSide, Weather,
 };
@@ -80,7 +80,7 @@ fn lightning_envelope(since_strike_ms: u64) -> f32 {
 /// splitmix64 (same mixer as `weather_state`) for a well-distributed offset.
 //
 // The two-multiply-xor finalizer is `pixtuoid_core::id::splitmix64`, open-coded
-// here (and in `time_of_day::weather_state` + `ambient::dust_mote_positions`) by
+// here (and in `sky::weather_state` + `ambient::dust_mote_positions`) by
 // DELIBERATE choice: each is an independent noise source over a disjoint input
 // domain (no two sites need equal output — see the scene CLAUDE.md sharp edge).
 // The canonical fn is `#[doc(hidden)] pub` (off the semver surface but shared
