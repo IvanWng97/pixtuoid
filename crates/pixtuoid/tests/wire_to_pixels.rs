@@ -19,10 +19,13 @@
 //!   - agent hook         → `Transport::Hook`  (reasonix, codewhale, opencode, cursor)
 //!   - daemon presence    → the sibling channel (`apply_presence`) (openclaw)
 //!
-//! The agent assertion is a color-diversity FLOOR: an occupied frame must show
-//! materially more distinct colors than the same office with no agent (the
-//! recolored sprite + its shadow/label add colors absent from the empty floor).
-//! The daemon assertion counts the lobster's exclusive carapace-red pixels (its
+//! The agent assertion is a pixel-diff FLOOR: an occupied frame must repaint
+//! materially more subpixels than the same office with no agent, both rendered
+//! through the IDENTICAL settle sequence so their (time-of-day) skies cancel —
+//! what remains is exactly the recolored sprite + its shadow/label. (A raw
+//! distinct-COLOR count was a timezone lottery: the sky palette, keyed off
+//! `chrono::Local`, swamped the sprite's few colors at bright hours.) The
+//! daemon assertion counts the lobster's exclusive carapace-red pixels (its
 //! sprite is not recolored, so its authored RGBs render exactly).
 
 use std::path::{Path, PathBuf};
@@ -66,46 +69,47 @@ fn read_nonblank_lines(path: &Path) -> Vec<String> {
         .collect()
 }
 
-/// Count distinct RGB triples in the rendered buffer — the visible-paint metric.
-fn distinct_colors(buf: &pixtuoid_core::sprite::RgbBuffer) -> usize {
-    let mut set = std::collections::HashSet::new();
-    for px in buf.as_slice() {
-        set.insert((px.r, px.g, px.b));
-    }
-    set.len()
-}
-
 fn new_renderer(cols: u16, rows: u16) -> TuiRenderer<TestBackend> {
     let terminal = Terminal::new(TestBackend::new(cols, rows)).expect("test backend");
     TuiRenderer::new(terminal, &NORMAL, vec![])
 }
 
-/// Render an EMPTY office to pixels and return its distinct-color count — the
-/// baseline every agent wire test compares its occupied frame against.
-fn empty_office_color_count(cols: u16, rows: u16, now: SystemTime) -> usize {
-    let mut r = new_renderer(cols, rows);
+/// Render `scene` through the real renderer for a fixed settle window (so an
+/// agent's entry walk finishes and the sprite is firmly at its desk, not
+/// mid-doorway) and return the final frame's subpixels. The empty baseline and
+/// the occupied frame go through the IDENTICAL sequence, so their (time-of-day)
+/// skies are byte-for-byte equal — a later pixel-diff cancels the background and
+/// isolates exactly the agent's footprint. The sky reads the wall clock via
+/// `chrono::Local` (timezone-dependent), which is precisely why the diff, not a
+/// raw color count, is the metric.
+fn settled_pixels(scene: &SceneState, cols: u16, rows: u16, now: SystemTime) -> Vec<(u8, u8, u8)> {
+    // ~30 frames at a ~30fps step ≈ 1s — long enough for the entry walk.
+    const SETTLE_FRAMES: usize = 30;
+    const FRAME_STEP: Duration = Duration::from_millis(33);
     let pack = load_sprite_pack(None).expect("pack");
-    let empty = SceneState::uniform(8);
-    r.render(&empty, &pack, now).expect("render empty office");
-    distinct_colors(r.buf())
+    let mut r = new_renderer(cols, rows);
+    let mut t = now;
+    for _ in 0..SETTLE_FRAMES {
+        r.render(scene, &pack, t).expect("render office");
+        t += FRAME_STEP;
+    }
+    r.buf()
+        .as_slice()
+        .iter()
+        .map(|px| (px.r, px.g, px.b))
+        .collect()
 }
 
-/// Drive a scene through the renderer for a few frames so the agent's entry
-/// walk advances and the sprite is firmly on the floor (not mid-doorway), then
-/// return the distinct-color count of the settled frame.
-fn render_settled_color_count(
-    r: &mut TuiRenderer<TestBackend>,
-    scene: &SceneState,
-    now: SystemTime,
-) -> usize {
-    let pack = load_sprite_pack(None).expect("pack");
-    let mut t = now;
-    for _ in 0..30 {
-        r.render(scene, &pack, t).expect("render occupied office");
-        t += Duration::from_millis(33);
-    }
-    distinct_colors(r.buf())
-}
+/// The empty→occupied pixel-diff floor. A settled, recolored character (body +
+/// shadow + name label) repaints ~160 subpixels of the frame; the empty office
+/// rendered through the identical sequence differs from itself by 0 (the render
+/// is deterministic). 40 sits well above that noise floor and comfortably below
+/// the real footprint, tolerant of sprite-art tweaks. This is IMMUNE to the
+/// time-of-day sky because the diff cancels the (identical) background — the old
+/// distinct-color metric was not, and broke as a timezone lottery once the
+/// day/night lighting contrast sharpened (a rich daytime/dawn sky could even net
+/// NEGATIVE new colors as the sprite covered unique gradient pixels).
+const MIN_SPRITE_PIXELS: usize = 40;
 
 // =====================================================================
 // Part A — every AGENT source renders a sprite from real wire bytes
@@ -237,19 +241,23 @@ fn assert_renders_a_sprite(case: &WireCase) {
         case.name
     );
 
-    // Render to pixels and assert a sprite was painted (color floor). An empty
-    // office can't gain colors, so any positive delta is real paint; the +4
-    // floor is the measured minimum a settled, recolored character adds (a
-    // just-completed single-tool sprite is the leanest at +4, an actively-busy
-    // one runs +6) — well clear of an unpainted/no-slot frame's +0.
+    // Render the EMPTY office and the OCCUPIED office through the identical
+    // settle sequence, then count the subpixels the agent changed. Both skies
+    // are byte-identical (the agent touches neither weather nor stars), so the
+    // diff is exactly the character's footprint — proof a sprite was PAINTED,
+    // not merely slotted. Sky-INDEPENDENT by construction: the earlier
+    // distinct-color count was a timezone lottery (the sky's palette, keyed off
+    // `chrono::Local`, dwarfed and collided with the sprite's few colors at
+    // bright hours, and a rich dawn even netted a NEGATIVE delta).
     let (cols, rows) = (120, 44);
-    let baseline = empty_office_color_count(cols, rows, t0());
-    let mut r = new_renderer(cols, rows);
-    let occupied = render_settled_color_count(&mut r, &scene, t0());
+    let empty = settled_pixels(&SceneState::uniform(8), cols, rows, t0());
+    let occupied = settled_pixels(&scene, cols, rows, t0());
+    let changed = empty.iter().zip(&occupied).filter(|(a, b)| a != b).count();
     assert!(
-        occupied >= baseline + 4,
-        "{}: an occupied office (from real {} wire bytes) must paint materially more \
-         distinct colors than the empty baseline (empty={baseline}, occupied={occupied})",
+        changed >= MIN_SPRITE_PIXELS,
+        "{}: an occupied office (from real {} wire bytes) must repaint materially more \
+         pixels than the empty office at the same instant (changed={changed}, \
+         floor={MIN_SPRITE_PIXELS})",
         case.name,
         case.source
     );
