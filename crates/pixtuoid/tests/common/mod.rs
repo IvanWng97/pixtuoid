@@ -14,7 +14,6 @@ macro_rules! make_draw_ctx {
         // The per-floor sim/paint stores, grouped (was six separate locals):
         // DrawCtx now borrows them as ONE `store` field.
         let mut _store = pixtuoid_scene::floor::FloorCtx::new();
-        let _ticker = pixtuoid::tui::renderer::TickerQueue::new();
         let mut _chitchat_state = std::collections::HashMap::new();
 
         // Defaults
@@ -33,10 +32,11 @@ macro_rules! make_draw_ctx {
             mouse_pos: None,
             pinned_agent: None,
             debug_walkable: false,
-            ticker: &_ticker,
             theme: _theme,
             theme_picker: None,
             floor_info: _floor_info,
+            per_floor: Default::default(),
+            gateway: None,
             floor: _floor,
             active_pet: None,
             last_pet_pos: None,

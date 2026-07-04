@@ -1,5 +1,6 @@
 use std::time::SystemTime;
 
+use pixtuoid_core::source::registry::descriptor_for;
 use pixtuoid_core::state::ActivityState;
 use pixtuoid_core::{AgentId, SceneState};
 use ratatui::layout::Rect;
@@ -7,11 +8,12 @@ use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Padding, Paragraph};
 
-use super::{compact_hms, to_color};
+use super::{compact_hms, display_width, source_badge_span, to_color, StateKind};
 use crate::tui::renderer::clip_widget_rect;
 use pixtuoid_scene::layout::{Layout, DESK_W};
-use pixtuoid_scene::overlay::LabelTone;
+use pixtuoid_scene::overlay::{disambig_suffix, LabelTone};
 use pixtuoid_scene::pet::PetKind;
+use pixtuoid_scene::pixel_painter::tool_glow_for_kind;
 use pixtuoid_scene::pose;
 
 /// Borderless tooltip frame shared by every hover/click tooltip: just the padded
@@ -91,9 +93,31 @@ pub(crate) fn paint_label_widgets(
     }
 }
 
-/// Floating detail panel painted near the cursor when an agent is hovered.
-/// Shows the label, source, state, current tool detail, cwd, and session
-/// id. Positioned to avoid the cursor itself and the screen edges.
+/// A char-safe, ~30-column short form of a cwd path for the tooltip: the TAIL
+/// (most informative — project dir) with a leading `…` when truncated. Char-
+/// sliced, never a byte slice, so a multibyte path can't panic.
+fn short_cwd(cwd: &std::path::Path) -> String {
+    const MAX: usize = 30;
+    let s = cwd.to_string_lossy();
+    let chars: Vec<char> = s.chars().collect();
+    if chars.len() <= MAX {
+        s.into_owned()
+    } else {
+        format!(
+            "\u{2026}{}",
+            chars[chars.len() - (MAX - 1)..].iter().collect::<String>()
+        )
+    }
+}
+
+/// Floating "dossier" panel painted near the cursor when an agent is hovered or
+/// pinned. One coherent card: `[xx]` source badge + label + `·id4` (L1), a dim
+/// separator, the `{glyph} {Word}` state line (+ the current tool in its glow
+/// hue), the detail / waiting-reason, the `↳ under {parent}` lineage (subagents
+/// only), the cwd, and the `⏱` stats (with the active-% meter folded in). Uses
+/// the SHARED vocabulary (`StateKind`) + badge (`source_badge_span`) so it can't
+/// drift from the footer/board/dashboard. Dim rows use `tooltip_dim`, NOT the
+/// live `label_exiting` (C6). Positioned to avoid the cursor + screen edges.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn paint_hover_tooltip(
     f: &mut ratatui::Frame<'_>,
@@ -109,70 +133,127 @@ pub(crate) fn paint_hover_tooltip(
         return;
     };
 
-    let (state_label, state_detail, state_color) = match &agent.state {
-        ActivityState::Idle => ("Idle", String::new(), to_color(theme.ui.label_idle)),
-        ActivityState::Active { detail, .. } => (
-            "Active",
-            detail.as_deref().unwrap_or("").to_string(),
-            to_color(theme.ui.label_active),
-        ),
-        ActivityState::Waiting { reason } => (
-            "Waiting",
-            reason.to_string(),
-            to_color(theme.ui.label_waiting),
-        ),
+    // State vocabulary: an exiting agent reads Exiting regardless of last state.
+    let kind = if agent.exiting_at.is_some() {
+        StateKind::Exiting
+    } else {
+        match agent.state {
+            ActivityState::Active { .. } => StateKind::Active,
+            ActivityState::Waiting { .. } => StateKind::Waiting,
+            ActivityState::Idle => StateKind::Idle,
+        }
     };
-    let cwd_short = agent
-        .cwd
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("(unknown)");
+
+    let dim = Style::default().fg(to_color(theme.ui.tooltip_dim));
+    let text_style = Style::default().fg(to_color(theme.ui.tooltip_text));
+
+    // The state line: `{glyph} {Word}`, plus the current tool (raw name, glow
+    // hue from the TYPED kind — C7) when Active. The detail/reason goes below.
+    let mut state_spans = vec![Span::styled(
+        format!("{} {}", kind.glyph(), kind.word()),
+        Style::default().fg(kind.color(theme)),
+    )];
+    // An EXITING agent shows none of the live tool/reason affordances — the card
+    // already reads `◌ Exiting`, so the walking-out slot's retained Active/Waiting
+    // payload (mark_exiting doesn't reset `state`) must not leak a tool span, a
+    // `?reason`, or (below) an active-% meter. Gate the whole detail block on the
+    // exiting-first `kind`, not the raw `agent.state`.
+    let mut detail_line: Option<String> = None;
+    if !matches!(kind, StateKind::Exiting) {
+        if let ActivityState::Active {
+            detail, kind: tk, ..
+        } = &agent.state
+        {
+            if let Some(d) = detail.as_deref().filter(|d| !d.is_empty()) {
+                let (tool, rest) = d
+                    .split_once(char::is_whitespace)
+                    .map(|(t, r)| (t.trim_end_matches(':'), r.trim()))
+                    .unwrap_or((d.trim_end_matches(':'), ""));
+                if !tool.is_empty() {
+                    state_spans.push(Span::raw(" \u{b7} "));
+                    state_spans.push(Span::styled(
+                        tool.to_string(),
+                        Style::default().fg(to_color(tool_glow_for_kind(*tk, &theme.tool_glow))),
+                    ));
+                }
+                if !rest.is_empty() {
+                    detail_line = Some(rest.chars().take(34).collect());
+                }
+            }
+        } else if let ActivityState::Waiting { reason } = &agent.state {
+            // WHY leads for a blocked agent: the reason IS the detail, `?`-flagged.
+            let r: String = reason.chars().take(34).collect();
+            detail_line = Some(format!("?{r}"));
+        }
+    }
+
+    // Body lines (everything below the separator) — built first so the L1 `·id4`
+    // right-flush + the separator can size to the widest of them.
+    let mut body: Vec<Line> = Vec::new();
+    body.push(Line::from(state_spans));
+    if let Some(d) = detail_line {
+        body.push(Line::from(Span::styled(format!("  {d}"), text_style)));
+    }
+    // Lineage: subagents only (a resolved parent still in the scene).
+    if let Some(parent) = agent.parent_id.and_then(|p| scene.agents.get(&p)) {
+        body.push(Line::from(Span::styled(
+            format!("\u{21b3} under {}", parent.label),
+            dim,
+        )));
+    }
+    body.push(Line::from(Span::styled(
+        format!("\u{1f4c1} {}", short_cwd(&agent.cwd)),
+        dim,
+    )));
 
     let session_secs = now
         .duration_since(agent.created_at)
         .unwrap_or_default()
         .as_secs();
-    let duration_str = compact_hms(session_secs);
-    let active_str = if session_secs >= 5 {
+    let mut stats = format!(
+        "\u{23f1} {} \u{b7} {} calls",
+        compact_hms(session_secs),
+        agent.tool_call_count
+    );
+    // Active-% meter folded into the ⏱ line (height budget). Fresh agents show no
+    // meter (the % is noise before ~5s of accounting); an exiting agent shows none
+    // either (keyed off the exiting-first `kind`, matching the tool suppression).
+    if matches!(kind, StateKind::Active) && session_secs >= 5 {
         let pct = (agent.active_ms / 1000)
             .checked_mul(100)
             .and_then(|n| n.checked_div(session_secs))
             .map(|p| p.min(100))
             .unwrap_or(0);
-        format!("{pct}%")
-    } else {
-        "--%".to_string()
-    };
-
-    let mut lines: Vec<Line> = Vec::new();
-    lines.push(Line::from(Span::styled(
-        agent.label.to_string(),
-        Style::default()
-            .fg(to_color(theme.ui.tooltip_title))
-            .add_modifier(ratatui::style::Modifier::BOLD),
-    )));
-    lines.push(Line::from(vec![
-        Span::raw("● "),
-        Span::styled(state_label, Style::default().fg(state_color)),
-    ]));
-    if !state_detail.is_empty() {
-        let trimmed: String = state_detail.chars().take(34).collect();
-        lines.push(Line::from(Span::styled(
-            format!("  {}", trimmed),
-            Style::default().fg(to_color(theme.ui.tooltip_text)),
-        )));
+        let filled = (pct as usize * 5).div_ceil(100).min(5);
+        let meter: String = "\u{25ae}".repeat(filled) + &"\u{25af}".repeat(5 - filled);
+        stats.push_str(&format!(" \u{b7} {meter} {pct}%"));
     }
-    lines.push(Line::from(Span::styled(
-        format!("\u{1f4c1} {}", cwd_short),
-        Style::default().fg(to_color(theme.ui.label_idle)),
-    )));
-    lines.push(Line::from(Span::styled(
-        format!(
-            "\u{23f1} {} \u{00b7} {} calls \u{00b7} {} active",
-            duration_str, agent.tool_call_count, active_str
+    body.push(Line::from(Span::styled(stats, dim)));
+
+    // L1: `[xx] {label}` … right-flushed `·{id4}`. Width = widest body line.
+    let badge_tag = descriptor_for(agent.source.as_ref()).map_or("??", |d| d.label_prefix);
+    let l1_head_w = 4 + 1 + display_width(&agent.label); // "[xx]" + space + label
+    let id4 = format!("\u{b7}{}", disambig_suffix(&agent.session_id));
+    let body_w = body.iter().map(|l| l.width()).max().unwrap_or(0);
+    let content_w = body_w.max(l1_head_w + 2 + display_width(&id4));
+    let pad = content_w.saturating_sub(l1_head_w + display_width(&id4));
+    let l1 = Line::from(vec![
+        source_badge_span(badge_tag, theme),
+        Span::styled(
+            format!(" {}", agent.label),
+            Style::default()
+                .fg(to_color(theme.ui.tooltip_title))
+                .add_modifier(ratatui::style::Modifier::BOLD),
         ),
-        Style::default().fg(to_color(theme.ui.label_idle)),
-    )));
+        Span::raw(" ".repeat(pad)),
+        Span::styled(id4, dim),
+    ]);
+    let separator = Line::from(Span::styled("\u{2500}".repeat(content_w), dim));
+
+    let mut lines: Vec<Line> = Vec::with_capacity(body.len() + 2);
+    lines.push(l1);
+    lines.push(separator);
+    lines.extend(body);
 
     let content_h = lines.len() as u16;
     let content_w = lines.iter().map(|l| l.width() as u16).max().unwrap_or(20);
@@ -499,12 +580,12 @@ mod tests {
     }
 
     #[test]
-    fn hover_tooltip_shows_fresh_dashes_and_casts_a_drop_shadow() {
-        // A <5s-old agent shows the literal `--%` active percentage instead of a
-        // computed N% (the fresh-agent branch, line 149). This is also the ONLY
-        // coverage for `paint_hover_tooltip`'s backing: it routes through the
-        // shared `paint_card_backing`, so a pre-filled bright office must come
-        // back dimmed in the drop-shadow band (the other backing caller,
+    fn hover_tooltip_idle_shows_no_meter_and_casts_a_drop_shadow() {
+        // An Idle agent's dossier carries NO active-% meter (the meter is folded
+        // into the ⏱ line for Active≥5s only). This is also the ONLY coverage for
+        // `paint_hover_tooltip`'s backing: it routes through the shared
+        // `paint_card_backing`, so a pre-filled bright office must come back
+        // dimmed in the drop-shadow band (the other backing caller,
         // `paint_simple_tooltip`, is pinned by the coffee test).
         use std::path::Path;
         use std::sync::Arc;
@@ -557,13 +638,11 @@ mod tests {
         .unwrap();
         let text = buffer_text(&term);
         assert!(
-            text.contains("--%"),
-            "fresh (<5s) agent should show the literal --% active, got: {text:?}"
+            !text.contains('%'),
+            "an idle agent's dossier carries no active-% meter, got: {text:?}"
         );
-        assert!(
-            !text.contains("0%"),
-            "fresh agent must not compute a numeric percentage, got: {text:?}"
-        );
+        // The state line reads the shared vocabulary word.
+        assert!(text.contains("Idle"), "idle state word, got: {text:?}");
         // The hover path routes through the shared `paint_card_backing`: a bright
         // equal-channel office cell can only turn into a dimmer equal-channel gray
         // via the drop-shadow dim (the card's `tooltip_bg` is a distinct hue).

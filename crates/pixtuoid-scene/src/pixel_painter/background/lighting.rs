@@ -114,6 +114,10 @@ pub(in crate::pixel_painter) fn paint_neon_panel(
         b: clamp(base.b as f32 + 50.0 * pulse),
     };
 
+    // The frame thickness is the SAME const the board-text interior derives from
+    // (`NEON_PANEL_INNER_*`), so the cells this leaves dark == the cells the text
+    // is allowed to fill — they can't drift.
+    let b = crate::pixel_painter::NEON_PANEL_BORDER;
     for dy in 0..h {
         for dx in 0..w {
             let px = x + dx;
@@ -121,7 +125,7 @@ pub(in crate::pixel_painter) fn paint_neon_panel(
             if px >= buf.width() || py >= buf.height() {
                 continue;
             }
-            let on_border = dx == 0 || dx == w - 1 || dy == 0 || dy == h - 1;
+            let on_border = dx < b || dx >= w - b || dy < b || dy >= h - b;
             if on_border {
                 buf.put(px, py, frame_color);
             } else {

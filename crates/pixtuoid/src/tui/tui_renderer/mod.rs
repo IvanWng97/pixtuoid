@@ -77,7 +77,6 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     transition: Option<FloorTransition>,
     mouse_pos: Option<(u16, u16)>,
     pinned_agent: Option<pixtuoid_core::AgentId>,
-    pub ticker: crate::tui::renderer::TickerQueue,
     theme: &'static pixtuoid_scene::theme::Theme,
     theme_picker: Option<usize>,
     cached_layout: Option<Layout>,
@@ -133,7 +132,6 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             transition: None,
             mouse_pos: None,
             pinned_agent: None,
-            ticker: crate::tui::renderer::TickerQueue::new(),
             theme,
             theme_picker: None,
             cached_layout: None,
@@ -479,9 +477,18 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             let floor_info = floor_info_for(to_floor, nf, scene.agents.len());
             let theme = self.theme;
             let source_warning = self.source_warning.clone();
+            // Office-wide tallies from the full scene; the footer's rungs are the
+            // DESTINATION floor's slice (matches `floor_info`'s to_floor breadcrumb).
+            let per_floor = crate::tui::widgets::per_floor_counts(scene);
+            let footer_stats = crate::tui::widgets::FooterStats {
+                counts: per_floor[to_floor.min(pixtuoid_core::state::MAX_FLOORS - 1)],
+                per_floor: &per_floor,
+                gateway: crate::tui::widgets::gateway_rollup(scene.daemons()),
+            };
             crate::tui::renderer::draw_footer_only_frame(
                 &mut self.terminal,
                 scene,
+                &footer_stats,
                 theme,
                 floor_info,
                 source_warning.as_deref(),
@@ -633,6 +640,14 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         // label (otherwise users see "F1/3 ... 5 agents" with floor 2's
         // count for ~400 ms).
         let transition_floor_info = floor_info_for(to_floor, nf, scene.agents.len());
+        // Office-wide tallies from the full scene; the footer's rungs come from
+        // the destination projected scene (`to_scene`) — spine 1, computed once.
+        let transition_per_floor = crate::tui::widgets::per_floor_counts(scene);
+        let footer_stats = crate::tui::widgets::FooterStats {
+            counts: crate::tui::widgets::scene_stats(&to_scene),
+            per_floor: &transition_per_floor,
+            gateway: crate::tui::widgets::gateway_rollup(scene.daemons()),
+        };
 
         self.terminal.draw(|f| {
             let actual_full = f.area();
@@ -640,6 +655,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             crate::tui::renderer::paint_footer(
                 f,
                 &to_scene,
+                &footer_stats,
                 actual_full,
                 theme,
                 transition_floor_info,
@@ -678,8 +694,6 @@ impl<B: Backend<Error: Send + Sync + 'static>> Renderer for TuiRenderer<B> {
         if self.active_pet.as_ref().is_some_and(|p| !p.is_active(now)) {
             self.active_pet = None;
         }
-
-        self.ticker.update(scene);
 
         // Compute how many floors the current scene needs.
         let nf = num_floors(scene).min(pixtuoid_scene::floor::MAX_FLOORS);
@@ -737,17 +751,20 @@ impl<B: Backend<Error: Send + Sync + 'static>> Renderer for TuiRenderer<B> {
             mouse_pos: self.mouse_pos,
             pinned_agent: self.pinned_agent,
             debug_walkable: self.debug_walkable,
-            ticker: &self.ticker,
             theme: self.theme,
             theme_picker: self.theme_picker,
             floor_info,
+            // Office-wide truth computed from the FULL un-projected scene (C1):
+            // the footer's cross-floor cue + gateway chip render even single-floor.
+            per_floor: crate::tui::widgets::per_floor_counts(scene),
+            gateway: crate::tui::widgets::gateway_rollup(scene.daemons()),
             floor: floor_meta,
             active_pet: self.active_pet.as_ref(),
             last_pet_pos: None,
             last_mascot_pos: None,
             // Borrows `self.pets` immutably — disjoint from the `&mut fctx`
             // (self.floors) above, so the field-split borrow is fine (same
-            // as `&self.ticker`/`self.coffee.map()` here). The picked `&Pet`
+            // as `self.office.coffee.map()` here). The picked `&Pet`
             // carries the name, so the tooltip needs no separate map.
             floor_pet: pixtuoid_scene::pet::select_pet_for_floor(floor_meta.floor_seed, &self.pets),
             chitchat_state: &mut self.office.chitchat,

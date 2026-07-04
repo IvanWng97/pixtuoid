@@ -300,16 +300,19 @@ fn pid_start_time_secs(_pid: i32) -> Option<u64> {
     None
 }
 
-/// kill(pid, 0) liveness: rc 0 = alive and signalable; EPERM = alive but owned
-/// by another user; ESRCH (or anything else) = no such process.
+/// `kill(pid, 0)` liveness via `rustix::process::test_kill_process`: Ok = alive
+/// and signalable; EPERM = alive but owned by another user; ESRCH (or anything
+/// else) = no such process. Registry pids are always > 0; a 0 pid (which
+/// `Pid::from_raw` rejects) short-circuits to `false` before reaching `kill`.
 #[cfg(unix)]
 fn pid_alive(pid: i32) -> bool {
-    // SAFETY: kill with signal 0 performs only the existence/permission check —
-    // no signal is delivered, no memory is touched, no pointer args.
-    if unsafe { libc::kill(pid as libc::pid_t, 0) } == 0 {
-        return true;
+    let Some(pid) = rustix::process::Pid::from_raw(pid) else {
+        return false;
+    };
+    match rustix::process::test_kill_process(pid) {
+        Ok(()) => true,
+        Err(e) => e == rustix::io::Errno::PERM,
     }
-    std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
 }
 
 /// The sessions registry is a SIBLING of the projects root

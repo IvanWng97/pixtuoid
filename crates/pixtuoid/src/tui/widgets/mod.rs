@@ -1,5 +1,5 @@
 //! Ratatui widget paint functions: footer, labels, wall display, tooltips,
-//! ticker queue, and theme picker overlay.
+//! and theme picker overlay.
 
 mod connection;
 mod dashboard;
@@ -14,7 +14,8 @@ pub(super) use dashboard::paint_dashboard;
 pub(super) use help::paint_help_overlay;
 pub(super) use hud::{
     paint_elevator_indicator, paint_footer, paint_theme_picker, paint_version_popup,
-    paint_wall_display, version_popup_url_rect, VERSION_POPUP_URL,
+    paint_wall_display, star_hit_rect, version_popup_url_rect, FooterStats, REPO_URL,
+    VERSION_POPUP_URL,
 };
 pub(crate) use panel::{borderless_panel, PANEL_PAD_X, PANEL_PAD_Y};
 pub(super) use welcome::paint_welcome;
@@ -28,11 +29,12 @@ pub(super) use tooltip::{
 };
 pub(crate) use tooltip::{paint_hover_tooltip, paint_label_widgets};
 
+use std::collections::BTreeMap;
 use std::time::SystemTime;
 
 use pixtuoid_core::sprite::Rgb;
-use pixtuoid_core::state::ActivityState;
-use pixtuoid_core::SceneState;
+use pixtuoid_core::state::{ActivityState, DaemonPresence, DaemonState, MAX_FLOORS};
+use pixtuoid_core::{AgentSlot, SceneState};
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use ratatui::widgets::{Block, Clear};
@@ -41,6 +43,182 @@ use pixtuoid_scene::theme::Theme;
 
 fn to_color(c: Rgb) -> Color {
     Color::Rgb(c.r, c.g, c.b)
+}
+
+/// Display columns a string occupies in the terminal — the ONE width authority
+/// (the same `unicode-width` ratatui uses), replacing scattered `chars().count()`
+/// so a wide glyph in the footer/board can't miscount the right-flush. For the
+/// HUD's ambiguous-width glyphs (`·×↑↓●◐○◌`) this equals `chars().count()`; it
+/// diverges only for genuinely wide (2-col) or zero-width (combining) chars.
+pub(crate) fn display_width(s: &str) -> usize {
+    use unicode_width::UnicodeWidthStr;
+    s.width()
+}
+
+// --- Shared scene stats (spine 1: footer + board agree) -----------------------
+// ONE per-scene activity tally with ONE exiting-first bucketing policy, computed
+// once per frame and handed to BOTH the footer (authoritative integers) and the
+// wall board (plain-English echo) so the two surfaces can never disagree — the
+// historical footer(counts-all)-vs-board(counts-live) walkout drift.
+
+/// Per-scene tally of agent activity states. `total == active + waiting + idle +
+/// exiting` (debug-asserted). `exiting` is a first-class bucket, not folded into
+/// idle, so the footer can render an authoritative `n/total` incl. walkouts.
+// `pub` (not `pub(crate)`): reachable via the pub `DrawCtx::per_floor` field, the
+// same way its peer office/floor-display type `FloorInfo` is pub. The binary's
+// lib target is not a semver surface.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct StateCounts {
+    pub active: usize,
+    pub waiting: usize,
+    pub idle: usize,
+    pub exiting: usize,
+    pub total: usize,
+}
+
+/// Add one slot to `c` under the ONE exiting-first bucketing policy: an
+/// **exiting** agent (walking out) counts as `exiting` regardless of its last
+/// activity state. Shared by [`scene_stats`] and [`per_floor_counts`] so the
+/// policy can't drift between the office-wide and per-floor tallies.
+fn bucket_slot(c: &mut StateCounts, slot: &AgentSlot) {
+    c.total += 1;
+    if slot.exiting_at.is_some() {
+        c.exiting += 1;
+        return;
+    }
+    match slot.state {
+        ActivityState::Active { .. } => c.active += 1,
+        ActivityState::Waiting { .. } => c.waiting += 1,
+        ActivityState::Idle => c.idle += 1,
+    }
+}
+
+/// Bucket every agent in `scene` — the office-wide (or current-projected-floor)
+/// tally the footer and board both read.
+pub(crate) fn scene_stats(scene: &SceneState) -> StateCounts {
+    let mut c = StateCounts::default();
+    for slot in scene.agents.values() {
+        bucket_slot(&mut c, slot);
+    }
+    debug_assert_eq!(c.active + c.waiting + c.idle + c.exiting, c.total);
+    c
+}
+
+/// Per-floor [`StateCounts`], bucketed by `AgentSlot.floor_idx` (clamped to the
+/// last floor). The office-wide breakdown feeding the footer's cross-floor
+/// `▲F{n}` cue — computed from the FULL scene, deliberately distinct from the
+/// footer's per-state integers (`scene_stats` on the projected floor); C8 says
+/// don't derive one from the other.
+pub(crate) fn per_floor_counts(scene: &SceneState) -> [StateCounts; MAX_FLOORS] {
+    let mut floors = [StateCounts::default(); MAX_FLOORS];
+    for slot in scene.agents.values() {
+        bucket_slot(&mut floors[slot.floor_idx.min(MAX_FLOORS - 1)], slot);
+    }
+    floors
+}
+
+/// The worst-of daemon-liveness rollup for the gateway chip. `None` = no daemon
+/// configured (chip suppressed), distinct from `Some(DaemonState::Down)` (a
+/// daemon was seen, then died). `DaemonState` has no `Ord` (C8), so severity is
+/// ranked explicitly: Idle < Busy < Degraded < Down.
+pub(crate) fn gateway_rollup(daemons: &BTreeMap<String, DaemonPresence>) -> Option<DaemonState> {
+    fn severity(s: DaemonState) -> u8 {
+        match s {
+            DaemonState::Idle => 0,
+            DaemonState::Busy => 1,
+            DaemonState::Degraded => 2,
+            DaemonState::Down => 3,
+        }
+    }
+    daemons
+        .values()
+        .map(|p| p.state)
+        .max_by_key(|s| severity(*s))
+}
+
+impl StateCounts {
+    /// The count for one [`StateKind`] — lets a consumer iterate
+    /// [`StateKind::ALL`] and pull the matching tally without re-matching.
+    pub(crate) fn get(self, kind: StateKind) -> usize {
+        match kind {
+            StateKind::Active => self.active,
+            StateKind::Waiting => self.waiting,
+            StateKind::Idle => self.idle,
+            StateKind::Exiting => self.exiting,
+        }
+    }
+}
+
+// --- Shared state vocabulary (glyph + letter + word + hue) --------------------
+// ONE source for how an activity state reads on EVERY surface (footer, board,
+// tooltip, and — later — the dashboard). Each state carries FOUR redundant
+// channels; hue is never the sole carrier, so the design survives colour
+// removal, a colour-blind viewer, and a terminal that tofus a glyph.
+
+/// The four agent activity buckets as a shared vocabulary. `Waiting` owns the
+/// reserved amber "needs-you" hue.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum StateKind {
+    Active,
+    Waiting,
+    Idle,
+    Exiting,
+}
+
+impl StateKind {
+    /// Canonical render order (the footer's left-to-right rung order).
+    pub(crate) const ALL: [StateKind; 4] = [
+        StateKind::Active,
+        StateKind::Waiting,
+        StateKind::Idle,
+        StateKind::Exiting,
+    ];
+
+    /// A distinct geometric glyph per state — all East-Asian *ambiguous* width
+    /// (1 cell in a non-CJK terminal): `●` active, `◐` waiting, `○` idle, `◌`
+    /// exiting.
+    pub(crate) fn glyph(self) -> char {
+        match self {
+            StateKind::Active => '\u{25cf}',
+            StateKind::Waiting => '\u{25d0}',
+            StateKind::Idle => '\u{25cb}',
+            StateKind::Exiting => '\u{25cc}',
+        }
+    }
+
+    /// A distinct single letter — the primary colour-blind channel at the
+    /// footer's narrow tier where the full word doesn't fit.
+    pub(crate) fn letter(self) -> char {
+        match self {
+            StateKind::Active => 'A',
+            StateKind::Waiting => 'W',
+            StateKind::Idle => 'I',
+            StateKind::Exiting => 'x',
+        }
+    }
+
+    /// The full capitalized state word — the tooltip dossier's state line reads
+    /// `{glyph} {word}` (the board uses its own casual `work`/`wait`/`idle`).
+    pub(crate) fn word(self) -> &'static str {
+        match self {
+            StateKind::Active => "Active",
+            StateKind::Waiting => "Waiting",
+            StateKind::Idle => "Idle",
+            StateKind::Exiting => "Exiting",
+        }
+    }
+
+    /// The themed hue — reuses the existing `label_*` roles so state colour is
+    /// identical to the name-badges and every other surface (`label_waiting` is
+    /// the amber attention hue; `label_exiting` is already live).
+    pub(crate) fn color(self, theme: &Theme) -> Color {
+        to_color(match self {
+            StateKind::Active => theme.ui.label_active,
+            StateKind::Waiting => theme.ui.label_waiting,
+            StateKind::Idle => theme.ui.label_idle,
+            StateKind::Exiting => theme.ui.label_exiting,
+        })
+    }
 }
 
 // --- Shared borderless-card backing (shadow + clear + bg fill) ----------------
@@ -133,6 +311,18 @@ fn badge_color_for(tag: &str, theme: &pixtuoid_scene::theme::Theme) -> Color {
     to_color(theme.source.by_prefix(tag).unwrap_or(theme.ui.label_idle))
 }
 
+/// The `[xx]` two-letter source badge span, coloured by the source's theme hue.
+/// The ONE badge builder shared by the dashboard, the Sources panel, AND the
+/// tooltip dossier so the three can't drift (`tag` is a 2-char `label_prefix`).
+/// Never REVERSED — a low-luminance hue inverted vanishes against a highlight bg,
+/// so callers reverse the OTHER spans (name/state) on selection, never this one.
+pub(crate) fn source_badge_span(tag: &str, theme: &Theme) -> ratatui::text::Span<'static> {
+    ratatui::text::Span::styled(
+        format!("[{tag:<2}]"),
+        Style::default().fg(badge_color_for(tag, theme)),
+    )
+}
+
 /// A `desired_w × desired_h` rect clamped to `bounds` and centered within it,
 /// anchored off `bounds`'s origin (not 0,0) so a non-zero-origin bounds rect
 /// positions correctly. Shared by the keyboard-help and theme-picker overlays.
@@ -164,8 +354,9 @@ fn truncate(s: &str, max: usize) -> String {
     out
 }
 
-/// Time (ms) the marquee dwells on each character while scrolling — matches the
-/// wall ticker's 150ms cadence (~6.7 chars/sec).
+/// Time (ms) the marquee dwells on each character while scrolling
+/// (~6.7 chars/sec) — the auto-scroll cadence for the dashboard/connection
+/// selected-row fields.
 const MARQUEE_MS_PER_CHAR: u64 = 150;
 /// Time (ms) the marquee holds at each end (head / tail) before reversing.
 const MARQUEE_END_PAUSE_MS: u64 = 1200;
@@ -174,8 +365,8 @@ const MARQUEE_END_PAUSE_MS: u64 = 1200;
 /// columns wide, at time `now`. If `s` fits, it is returned unchanged (the
 /// caller pads/uses it exactly as it would `truncate`'s output). Otherwise it
 /// bounces — hold head → scroll to tail → hold tail → scroll back — purely as a
-/// function of `now`, with NO per-frame state (same wallclock trick as
-/// `TickerQueue::visible`, so two painters can call it freely). Char-windowed,
+/// function of `now`, with NO per-frame state (a stateless wallclock window, so
+/// two painters can call it freely). Char-windowed,
 /// matching `truncate` (single-column glyphs only; a wide CJK glyph would
 /// misalign by a column mid-scroll — the same assumption `truncate` makes).
 /// Unlike `truncate`, the scrolling window emits NO `…` — the motion signals
@@ -235,83 +426,214 @@ fn compact_hms(secs: u64) -> String {
     }
 }
 
-/// Persistent scrolling ticker queue. Messages append to the end and scroll
-/// off the left naturally — like a news crawl. The queue rebuilds only when
-/// the set of active tool details changes, preserving scroll continuity.
-pub struct TickerQueue {
-    buffer: String,
-    last_snapshot: String,
-}
-
-impl Default for TickerQueue {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl TickerQueue {
-    pub fn new() -> Self {
-        Self {
-            buffer: String::new(),
-            last_snapshot: String::new(),
-        }
-    }
-
-    pub fn update(&mut self, scene: &SceneState) {
-        let mut items: Vec<String> = scene
-            .agents
-            .values()
-            .filter(|a| a.exiting_at.is_none())
-            .filter_map(|a| match &a.state {
-                ActivityState::Active { detail, .. } => {
-                    let tool = detail.as_deref().unwrap_or("working");
-                    Some(format!("{}: {}", a.label, tool))
-                }
-                ActivityState::Waiting { reason } => Some(format!("{}: ?{}", a.label, reason)),
-                _ => None,
-            })
-            .collect();
-        items.sort();
-        let snapshot = items.join("|");
-        if snapshot != self.last_snapshot {
-            self.last_snapshot = snapshot;
-            for item in &items {
-                self.buffer.push_str(item);
-                self.buffer.push_str("  |  ");
-            }
-            const MAX_CHARS: usize = 512;
-            let char_count = self.buffer.chars().count();
-            if char_count > MAX_CHARS {
-                let trim_chars = char_count - MAX_CHARS;
-                if let Some((byte_idx, _)) = self.buffer.char_indices().nth(trim_chars) {
-                    self.buffer.drain(..byte_idx);
-                }
-            }
-        }
-    }
-
-    pub fn visible(&self, width: usize, now: SystemTime) -> String {
-        if self.buffer.is_empty() {
-            return String::new();
-        }
-        let elapsed_ms = now
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(0);
-        let chars: Vec<char> = self.buffer.chars().collect();
-        let len = chars.len();
-        let offset = (elapsed_ms / MARQUEE_MS_PER_CHAR) as usize % len;
-        (0..width).map(|i| chars[(offset + i) % len]).collect()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hud::{build_status_spans, build_status_summary};
+    use hud::{
+        board_mood_segments, build_status_spans, build_status_summary, FooterStats, BOARD_W,
+    };
     use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex};
     use std::path::PathBuf;
     use std::sync::Arc;
+
+    // --- scene_stats -------------------------------------------------------
+
+    fn stat_slot(path: &str, state: ActivityState, exiting: bool) -> AgentSlot {
+        let now = SystemTime::UNIX_EPOCH;
+        AgentSlot {
+            agent_id: AgentId::from_transcript_path(path),
+            source: Arc::from("claude-code"),
+            session_id: Arc::from("s"),
+            cwd: Arc::from(PathBuf::from("/p").as_path()),
+            label: "x".into(),
+            state,
+            state_started_at: now,
+            created_at: now,
+            last_event_at: now,
+            exiting_at: exiting.then_some(now),
+            pending_idle_at: None,
+            desk_index: GlobalDeskIndex(0),
+            floor_idx: 0,
+            tool_call_count: 0,
+            active_ms: 0,
+            unknown_cwd: false,
+            parent_id: None,
+        }
+    }
+
+    #[test]
+    fn scene_stats_buckets_exiting_first_and_totals() {
+        use pixtuoid_core::state::ToolKind;
+        let active = || ActivityState::Active {
+            tool_use_id: None,
+            detail: None,
+            kind: ToolKind::Other,
+        };
+        let mut scene = SceneState::uniform(16);
+        for s in [
+            // An exiting agent buckets as EXITING even though its last state is Active —
+            // the one policy that keeps the footer and board from disagreeing on a walkout.
+            stat_slot("/exiting-active.jsonl", active(), true),
+            stat_slot("/live-active.jsonl", active(), false),
+            stat_slot(
+                "/waiting.jsonl",
+                ActivityState::Waiting {
+                    reason: Arc::from("perm"),
+                },
+                false,
+            ),
+            stat_slot("/idle.jsonl", ActivityState::Idle, false),
+        ] {
+            scene.agents.insert(s.agent_id, s);
+        }
+        let c = scene_stats(&scene);
+        assert_eq!(
+            c.exiting, 1,
+            "an exiting agent buckets as exiting even mid-Active"
+        );
+        assert_eq!(c.active, 1, "only the LIVE Active counts as active");
+        assert_eq!(c.waiting, 1);
+        assert_eq!(c.idle, 1);
+        assert_eq!(c.total, 4);
+        assert_eq!(
+            c.active + c.waiting + c.idle + c.exiting,
+            c.total,
+            "the four buckets must partition the total"
+        );
+    }
+
+    #[test]
+    fn scene_stats_empty_scene_is_all_zero() {
+        let c = scene_stats(&SceneState::uniform(16));
+        assert_eq!(c, StateCounts::default());
+        assert_eq!(c.total, 0);
+    }
+
+    // --- state vocabulary --------------------------------------------------
+
+    #[test]
+    fn state_vocab_is_total_and_distinct() {
+        use std::collections::HashSet;
+        let kinds = StateKind::ALL;
+        assert_eq!(kinds.len(), 4, "the vocab covers exactly the four buckets");
+        // Every state must be distinguishable on EACH redundant channel, so the
+        // design never hinges on a single one (colour, glyph shape, or letter).
+        let glyphs: HashSet<char> = kinds.iter().map(|k| k.glyph()).collect();
+        let letters: HashSet<char> = kinds.iter().map(|k| k.letter()).collect();
+        let words: HashSet<&str> = kinds.iter().map(|k| k.word()).collect();
+        assert_eq!(glyphs.len(), 4, "each state has a distinct glyph");
+        assert_eq!(letters.len(), 4, "each state has a distinct letter");
+        assert_eq!(words.len(), 4, "each state has a distinct word");
+        // The reserved amber "needs-you" hue and the exiting hue map to their
+        // existing theme roles (label_waiting is amber; label_exiting is live).
+        let t = &pixtuoid_scene::theme::NORMAL;
+        assert_eq!(StateKind::Waiting.color(t), to_color(t.ui.label_waiting));
+        assert_eq!(StateKind::Exiting.color(t), to_color(t.ui.label_exiting));
+    }
+
+    #[test]
+    fn display_width_counts_terminal_columns_not_chars() {
+        // The state/HUD glyphs are all East-Asian *ambiguous* = 1 column under the
+        // non-CJK `.width()`, so this measure == chars().count() for them (why the
+        // swap is snapshot-neutral), while still being correct for wide glyphs.
+        assert_eq!(display_width("\u{b7}\u{d7}\u{2191}\u{2193}"), 4); // · × ↑ ↓
+        assert_eq!(
+            display_width("\u{25cf}\u{25d0}\u{25cb}\u{25cc}"),
+            4,
+            "● ◐ ○ ◌ are one column each"
+        );
+        assert_eq!(display_width("[q]uit"), 6);
+        // A wide glyph is TWO columns (chars().count() would say 1) — the case that
+        // keeps the footer's right-flush correct once a wide chip can appear.
+        assert_eq!(display_width("\u{1f99e}"), 2); // 🦞
+                                                   // A zero-width combining mark adds no columns.
+        assert_eq!(display_width("a\u{0301}"), 1);
+    }
+
+    #[test]
+    fn state_counts_get_maps_each_kind() {
+        let c = StateCounts {
+            active: 3,
+            waiting: 2,
+            idle: 7,
+            exiting: 1,
+            total: 13,
+        };
+        assert_eq!(c.get(StateKind::Active), 3);
+        assert_eq!(c.get(StateKind::Waiting), 2);
+        assert_eq!(c.get(StateKind::Idle), 7);
+        assert_eq!(c.get(StateKind::Exiting), 1);
+    }
+
+    // --- office-wide plumbing (per-floor + gateway rollup) ------------------
+
+    fn daemon(state: pixtuoid_core::state::DaemonState) -> pixtuoid_core::state::DaemonPresence {
+        pixtuoid_core::state::DaemonPresence {
+            state,
+            active_sessions: 0,
+            last_seen: SystemTime::UNIX_EPOCH,
+            entered_at: SystemTime::UNIX_EPOCH,
+            in_flight_run_keys: Default::default(),
+            current_pid: None,
+        }
+    }
+
+    #[test]
+    fn gateway_rollup_is_worst_of() {
+        use pixtuoid_core::state::DaemonState;
+        use std::collections::BTreeMap;
+        // Empty map → None (chip SUPPRESSED — distinct from Some(Down) = seen then died).
+        assert_eq!(gateway_rollup(&BTreeMap::new()), None);
+        // Single daemon → itself.
+        let mut m = BTreeMap::new();
+        m.insert("gw".to_string(), daemon(DaemonState::Busy));
+        assert_eq!(gateway_rollup(&m), Some(DaemonState::Busy));
+        // Worst-of across many: Idle + Degraded + Down → Down.
+        m.insert("b".to_string(), daemon(DaemonState::Idle));
+        m.insert("c".to_string(), daemon(DaemonState::Degraded));
+        m.insert("d".to_string(), daemon(DaemonState::Down));
+        assert_eq!(gateway_rollup(&m), Some(DaemonState::Down));
+        // Degraded outranks Busy/Idle when nothing is Down.
+        let mut m2 = BTreeMap::new();
+        m2.insert("x".to_string(), daemon(DaemonState::Idle));
+        m2.insert("y".to_string(), daemon(DaemonState::Degraded));
+        assert_eq!(gateway_rollup(&m2), Some(DaemonState::Degraded));
+    }
+
+    #[test]
+    fn per_floor_buckets_by_floor_idx() {
+        use pixtuoid_core::state::ToolKind;
+        let active = || ActivityState::Active {
+            tool_use_id: None,
+            detail: None,
+            kind: ToolKind::Other,
+        };
+        let mut scene = SceneState::uniform(16);
+        let add = |scene: &mut SceneState, path, state, exiting, floor: usize| {
+            let mut s = stat_slot(path, state, exiting);
+            s.floor_idx = floor;
+            scene.agents.insert(s.agent_id, s);
+        };
+        add(&mut scene, "/f0a.jsonl", active(), false, 0);
+        add(&mut scene, "/f0b.jsonl", active(), false, 0);
+        add(
+            &mut scene,
+            "/f1w.jsonl",
+            ActivityState::Waiting {
+                reason: Arc::from("p"),
+            },
+            false,
+            1,
+        );
+        add(&mut scene, "/f1x.jsonl", active(), true, 1); // exiting on floor 1
+        add(&mut scene, "/f2i.jsonl", ActivityState::Idle, false, 2);
+
+        let pf = per_floor_counts(&scene);
+        assert_eq!((pf[0].active, pf[0].total), (2, 2));
+        assert_eq!((pf[1].waiting, pf[1].exiting, pf[1].total), (1, 1, 2));
+        assert_eq!((pf[2].idle, pf[2].total), (1, 1));
+        assert_eq!(pf[3], StateCounts::default(), "an untouched floor is zero");
+    }
 
     // --- marquee_window ----------------------------------------------------
 
@@ -394,46 +716,6 @@ mod tests {
         assert_eq!(marquee_or_truncate(M, 5, false, at(0)), "ABCD\u{2026}");
     }
 
-    // --- TickerQueue -------------------------------------------------------
-
-    #[test]
-    fn ticker_default_is_empty() {
-        let q = TickerQueue::default();
-        assert_eq!(q.visible(40, SystemTime::UNIX_EPOCH), "");
-    }
-
-    #[test]
-    fn ticker_includes_waiting_reason() {
-        let mut q = TickerQueue::new();
-        let s = scene_of(vec![waiting("perm-agent")]);
-        q.update(&s);
-        // The Waiting arm formats "{label}: ?{reason}".
-        let text = q.visible(200, SystemTime::UNIX_EPOCH);
-        assert!(text.contains("perm-agent"), "got: {text}");
-        assert!(text.contains('?'), "waiting marker missing: {text}");
-    }
-
-    #[test]
-    fn ticker_trims_buffer_past_max() {
-        let mut q = TickerQueue::new();
-        // Push many distinct snapshots so the buffer grows past MAX_CHARS=512
-        // and the drain path runs. Each update with a NEW snapshot appends.
-        for i in 0..200 {
-            let label = format!("agent-with-a-fairly-long-name-{i:04}");
-            let s = scene_of(vec![active_with("Edit some/long/path.rs", &label)]);
-            q.update(&s);
-        }
-        // Buffer must have been trimmed: visible() still works and the kept
-        // text stays bounded near MAX_CHARS rather than growing unbounded.
-        let text = q.visible(40, SystemTime::UNIX_EPOCH);
-        assert_eq!(text.chars().count(), 40, "visible window must fill");
-        assert!(
-            q.buffer.chars().count() <= 512,
-            "buffer must be trimmed to MAX_CHARS, got {}",
-            q.buffer.chars().count()
-        );
-    }
-
     // --- build_status_summary ---------------------------------------------
 
     fn slot_with(state: ActivityState, label: &str) -> AgentSlot {
@@ -479,12 +761,40 @@ mod tests {
     fn idle(label: &str) -> AgentSlot {
         slot_with(ActivityState::Idle, label)
     }
+    fn active_kind(detail: &str, kind: pixtuoid_core::state::ToolKind, label: &str) -> AgentSlot {
+        slot_with(
+            ActivityState::Active {
+                tool_use_id: Some(Arc::from("t")),
+                detail: Some(Arc::from(detail)),
+                kind,
+            },
+            label,
+        )
+    }
     fn scene_of(slots: Vec<AgentSlot>) -> SceneState {
         let mut s = SceneState::uniform(16);
         for slot in slots {
             s.agents.insert(slot.agent_id, slot);
         }
         s
+    }
+
+    /// Assemble a `FooterStats` from the scene the way `draw_scene` does (no
+    /// gateway, per-floor bucketed from the scene) and render the plain-string
+    /// footer oracle.
+    fn footer_line(
+        scene: &SceneState,
+        width: u16,
+        floor_info: Option<crate::tui::renderer::FloorInfo>,
+        warning: Option<&str>,
+    ) -> String {
+        let pf = per_floor_counts(scene);
+        let stats = FooterStats {
+            counts: scene_stats(scene),
+            per_floor: &pf,
+            gateway: None,
+        };
+        build_status_summary(scene, &stats, width, floor_info, warning)
     }
 
     const QUIT_SUFFIX: &str = " [?]help [p]ause [t]heme [q]uit ";
@@ -509,7 +819,7 @@ mod tests {
     #[test]
     fn footer_source_warning_replaces_stats_and_keeps_quit() {
         let s = scene_of(vec![idle("myproject")]);
-        let line = build_status_summary(
+        let line = footer_line(
             &s,
             100,
             None,
@@ -519,8 +829,8 @@ mod tests {
         assert!(line.contains("claude-code source died"), "got: {line}");
         assert!(line.ends_with(" [q]uit "), "quit hint survives: {line}");
         assert!(
-            !line.contains(" 1 agents") && !line.contains("idle"),
-            "stale stats are replaced by the warning: {line}"
+            !line.contains('\u{25cb}') && !line.contains('\u{25cf}'),
+            "stale state rungs are replaced by the warning: {line}"
         );
         insta::assert_snapshot!(line);
     }
@@ -529,7 +839,7 @@ mod tests {
     fn footer_source_warning_survives_every_width() {
         let s = scene_of(vec![idle("myproject")]);
         for w in [20u16, 30, 40, 60, 80] {
-            let line = build_status_summary(
+            let line = footer_line(
                 &s,
                 w,
                 None,
@@ -549,7 +859,7 @@ mod tests {
     #[test]
     fn footer_zero_agents() {
         let s = scene_of(vec![]);
-        let line = build_status_summary(&s, 80, None, None);
+        let line = footer_line(&s, 80, None, None);
         assert_eq!(line.len(), 80, "should pad to full width");
         insta::assert_snapshot!(line);
     }
@@ -557,7 +867,9 @@ mod tests {
     #[test]
     fn footer_single_idle_agent() {
         let s = scene_of(vec![idle("myproject")]);
-        let line = build_status_summary(&s, 80, None, None);
+        let line = footer_line(&s, 80, None, None);
+        // FULL tier: bare count then the sole idle rung `○1 I`.
+        assert!(line.contains(" 1 \u{b7} \u{25cb}1 I"), "got: {line}");
         insta::assert_snapshot!(line);
     }
 
@@ -573,7 +885,17 @@ mod tests {
             idle("g"),
             idle("h"),
         ]);
-        let line = build_status_summary(&s, 120, None, None);
+        let line = footer_line(&s, 120, None, None);
+        // Every non-zero rung + the aggregate tool tally (glyph+count+letter).
+        for frag in [
+            "\u{25cf}3 A",
+            "\u{25d0}2 W",
+            "\u{25cb}3 I",
+            "Edit\u{d7}2",
+            "Bash\u{d7}1",
+        ] {
+            assert!(line.contains(frag), "missing {frag:?} in: {line}");
+        }
         insta::assert_snapshot!(line);
     }
 
@@ -584,11 +906,10 @@ mod tests {
             waiting("b"),
             idle("c"),
         ]);
-        let line = build_status_summary(&s, 60, None, None);
-        assert!(
-            !line.contains("3 agents"),
-            "full tier should not fit at width 60"
-        );
+        let line = footer_line(&s, 60, None, None);
+        // Medium drops the tool tally + separators; compact rungs `●1A ◐1W ○1I`.
+        assert!(!line.contains("Edit"), "medium drops tools: {line}");
+        assert!(line.contains("\u{25cf}1A"), "compact active rung: {line}");
         insta::assert_snapshot!(line);
     }
 
@@ -596,7 +917,7 @@ mod tests {
     fn footer_minimal_width() {
         let s = scene_of(vec![idle("a"), idle("b")]);
         let w = QUIT_SUFFIX.len() + 6;
-        let line = build_status_summary(&s, w as u16, None, None);
+        let line = footer_line(&s, w as u16, None, None);
         assert_eq!(line.len(), w);
         insta::assert_snapshot!(line);
     }
@@ -605,7 +926,7 @@ mod tests {
     fn footer_quit_only_below_threshold() {
         let s = scene_of(vec![idle("a")]);
         let w = QUIT_SUFFIX.len();
-        let line = build_status_summary(&s, w as u16, None, None);
+        let line = footer_line(&s, w as u16, None, None);
         insta::assert_snapshot!(line);
     }
 
@@ -619,10 +940,34 @@ mod tests {
             active_with("Grep x", "e"),
             active_with("Glob x", "f"),
         ]);
-        let line = build_status_summary(&s, 200, None, None);
+        let line = footer_line(&s, 200, None, None);
         let crosses = line.matches('\u{00d7}').count();
         assert_eq!(crosses, 4, "expected <=4 tools in breakdown");
         insta::assert_snapshot!(line);
+    }
+
+    #[test]
+    fn footer_minimal_leads_with_waiting_alarm() {
+        // The narrowest stats tier: the waiting ALARM (`▲N`) leads, then the count.
+        let s = scene_of(vec![waiting("a"), waiting("b"), idle("c"), idle("d")]);
+        let w = QUIT_SUFFIX.len() + 10;
+        let line = footer_line(&s, w as u16, None, None);
+        assert!(
+            line.contains("\u{25b2}2 \u{b7} 4"),
+            "▲2 · 4 (alarm leads): {line}"
+        );
+    }
+
+    #[test]
+    fn footer_death_keeps_the_waiting_alarm() {
+        // Even a source-death warning (stats stale) keeps the must-not-miss `▲N`.
+        let s = scene_of(vec![waiting("a"), waiting("b"), idle("c")]);
+        let line = footer_line(&s, 120, None, Some("codex disconnected"));
+        assert!(line.contains('\u{26a0}'), "warning present: {line}");
+        assert!(
+            line.contains("\u{25b2}2 need you"),
+            "alarm survives death: {line}"
+        );
     }
 
     fn fi(
@@ -640,7 +985,8 @@ mod tests {
     #[test]
     fn footer_with_floor_info() {
         let s = scene_of(vec![idle("a"), idle("b")]);
-        let line = build_status_summary(&s, 120, Some(fi(2, 3, 5)), None);
+        let line = footer_line(&s, 120, Some(fi(2, 3, 5)), None);
+        assert!(line.contains(" F2/3 "), "floor breadcrumb: {line}");
         insta::assert_snapshot!(line);
     }
 
@@ -650,19 +996,16 @@ mod tests {
     #[test]
     fn count_str_single_floor_shows_bare_n() {
         let s = scene_of(vec![idle("a"), idle("b")]);
-        let line = build_status_summary(&s, 120, None, None);
-        assert!(line.contains(" 2 agents "), "got: {line}");
-        assert!(
-            !line.contains("2/"),
-            "should not show slash on single floor"
-        );
+        let line = footer_line(&s, 120, None, None);
+        assert!(line.contains(" 2 \u{b7} \u{25cb}2 I"), "got: {line}");
+        assert!(!line.contains("2/"), "no slash on a single floor: {line}");
     }
 
     #[test]
     fn count_str_multi_floor_shows_n_slash_total() {
         let s = scene_of(vec![idle("a"), idle("b")]);
-        let line = build_status_summary(&s, 120, Some(fi(2, 3, 5)), None);
-        assert!(line.contains(" 2/5 agents "), "got: {line}");
+        let line = footer_line(&s, 120, Some(fi(2, 3, 5)), None);
+        assert!(line.contains(" 2/5 \u{b7}"), "got: {line}");
     }
 
     #[test]
@@ -670,8 +1013,8 @@ mod tests {
         // All agents happen to be on the visible floor — still show "/n"
         // to signal the multi-floor context.
         let s = scene_of(vec![idle("a"), idle("b")]);
-        let line = build_status_summary(&s, 120, Some(fi(1, 3, 2)), None);
-        assert!(line.contains(" 2/2 agents "), "got: {line}");
+        let line = footer_line(&s, 120, Some(fi(1, 3, 2)), None);
+        assert!(line.contains(" 2/2 \u{b7}"), "got: {line}");
     }
 
     #[test]
@@ -679,24 +1022,42 @@ mod tests {
         // The whole point of `total_agents`: when the current floor is
         // empty but other floors have agents, the footer must signal that.
         let s = scene_of(vec![]);
-        let line = build_status_summary(&s, 120, Some(fi(2, 3, 5)), None);
-        assert!(line.contains(" 0/5 agents "), "got: {line}");
+        let line = footer_line(&s, 120, Some(fi(2, 3, 5)), None);
+        assert!(line.contains(" 0/5 "), "got: {line}");
     }
 
     #[test]
-    fn count_str_narrow_tier_uses_bare_n() {
-        // "5/12a" is ambiguous at narrow widths; medium/min tiers must
-        // drop the slash form regardless of multi-floor status.
+    fn count_str_multi_floor_keeps_slash_at_narrow_tier() {
+        // Unlike the old footer, the redesign keeps `n/total` at EVERY tier
+        // (the design's MEDIUM/MIN both show the slash) — the office context
+        // matters most when space is tight.
         let s = scene_of(vec![idle("a"), idle("b"), idle("c")]);
-        let line = build_status_summary(&s, 60, Some(fi(1, 3, 10)), None);
+        let line = footer_line(&s, 50, Some(fi(1, 3, 10)), None);
         assert!(
-            !line.contains("3/10"),
-            "medium tier should not show slash: {line}"
+            line.contains("3/10"),
+            "slash kept at the narrow tier: {line}"
         );
-        assert!(line.contains("3a"), "got: {line}");
     }
 
     // --- build_status_spans ------------------------------------------------
+
+    fn footer_spans_text(
+        scene: &SceneState,
+        width: u16,
+        floor_info: Option<crate::tui::renderer::FloorInfo>,
+        theme: &pixtuoid_scene::theme::Theme,
+    ) -> String {
+        let pf = per_floor_counts(scene);
+        let stats = FooterStats {
+            counts: scene_stats(scene),
+            per_floor: &pf,
+            gateway: None,
+        };
+        build_status_spans(scene, &stats, width, floor_info, theme, None)
+            .iter()
+            .map(|sp| sp.content.as_ref().to_string())
+            .collect()
+    }
 
     // Drift guard: the colored footer must render the SAME text as the
     // plain-string footer across every tier — they share `status_segments`,
@@ -717,11 +1078,8 @@ mod tests {
             (10, None),
             (120, Some(fi(2, 3, 9))),
         ] {
-            let summary = build_status_summary(&s, w, fl, None);
-            let spans_text: String = build_status_spans(&s, w, fl, theme, None)
-                .iter()
-                .map(|sp| sp.content.as_ref())
-                .collect();
+            let summary = footer_line(&s, w, fl, None);
+            let spans_text = footer_spans_text(&s, w, fl, theme);
             assert_eq!(spans_text, summary, "tier width {w} drifted");
         }
     }
@@ -734,16 +1092,223 @@ mod tests {
             waiting("b"),
             idle("c"),
         ]);
-        let spans = build_status_spans(&s, 120, None, theme, None);
+        let pf = per_floor_counts(&s);
+        let stats = FooterStats {
+            counts: scene_stats(&s),
+            per_floor: &pf,
+            gateway: None,
+        };
+        let spans = build_status_spans(&s, &stats, 120, None, theme, None);
+        // The rungs are found by their vocabulary glyph, tinted via StateKind.
         let active = spans
             .iter()
-            .find(|sp| sp.content.contains("active"))
+            .find(|sp| sp.content.contains('\u{25cf}'))
             .unwrap();
         let waiting = spans
             .iter()
-            .find(|sp| sp.content.contains("waiting"))
+            .find(|sp| sp.content.contains('\u{25d0}'))
             .unwrap();
         assert_eq!(active.style.fg, Some(to_color(theme.ui.label_active)));
         assert_eq!(waiting.style.fg, Some(to_color(theme.ui.label_waiting)));
+    }
+
+    // --- T7 named tests: the redesign's two anti-drift anchors --------------
+
+    #[test]
+    fn footer_counts_agree_with_board_on_walkout() {
+        // 2 active + 1 exiting. OLD: footer counted all 3 as agents while the
+        // board counted 2 live — they disagreed mid-walkout. NOW both read the
+        // shared `scene_stats`, and the footer shows a first-class exiting rung.
+        let mut gone = active_with("Edit x", "gone");
+        gone.exiting_at = Some(SystemTime::UNIX_EPOCH);
+        let s = scene_of(vec![
+            active_with("Edit a", "a"),
+            active_with("Bash b", "b"),
+            gone,
+        ]);
+        let c = scene_stats(&s);
+        assert_eq!((c.active, c.exiting, c.total), (2, 1, 3), "shared spine");
+        let line = footer_line(&s, 160, None, None);
+        assert!(
+            line.contains(" 3 \u{b7} \u{25cf}2 A"),
+            "total incl. exiting: {line}"
+        );
+        assert!(
+            line.contains("\u{25cc}1 x"),
+            "first-class exiting rung: {line}"
+        );
+    }
+
+    #[test]
+    fn footer_tool_hue_reads_kind_field() {
+        // A Task dispatch DISPLAYS "Delegating" but its typed kind is Task — the
+        // tool segment must tint via ToolKind::Task's glow (== glow.agent), NEVER
+        // a re-parse of the "Delegating" string (C7).
+        let theme = &pixtuoid_scene::theme::NORMAL;
+        let s = scene_of(vec![active_kind(
+            "Delegating",
+            pixtuoid_core::state::ToolKind::Task,
+            "lead",
+        )]);
+        let pf = per_floor_counts(&s);
+        let stats = FooterStats {
+            counts: scene_stats(&s),
+            per_floor: &pf,
+            gateway: None,
+        };
+        let spans = build_status_spans(&s, &stats, 160, None, theme, None);
+        let tool = spans
+            .iter()
+            .find(|sp| sp.content.contains("Delegating"))
+            .expect("tool segment present");
+        let expected = to_color(pixtuoid_scene::pixel_painter::tool_glow_for_kind(
+            pixtuoid_core::state::ToolKind::Task,
+            &theme.tool_glow,
+        ));
+        assert_eq!(tool.style.fg, Some(expected), "hue from the typed kind");
+        assert_eq!(
+            expected,
+            to_color(theme.tool_glow.agent),
+            "== the agent glow"
+        );
+    }
+
+    #[test]
+    fn footer_gateway_chip_reflects_rollup_and_suppresses_when_absent() {
+        use pixtuoid_core::state::DaemonState;
+        let s = scene_of(vec![idle("a")]);
+        let pf = per_floor_counts(&s);
+        let with_gw = FooterStats {
+            counts: scene_stats(&s),
+            per_floor: &pf,
+            gateway: Some(DaemonState::Degraded),
+        };
+        let line = build_status_summary(&s, &with_gw, 160, None, None);
+        assert!(line.contains("\u{2b22}gw err"), "degraded chip: {line}");
+        let no_gw = FooterStats {
+            counts: scene_stats(&s),
+            per_floor: &pf,
+            gateway: None,
+        };
+        let line2 = build_status_summary(&s, &no_gw, 160, None, None);
+        assert!(
+            !line2.contains("gw"),
+            "chip suppressed when no daemon: {line2}"
+        );
+    }
+
+    #[test]
+    fn footer_cross_floor_alarm_points_at_waiting_floor() {
+        // On floor 1, floor 2 (index 1) has a waiting agent → a `▲F2` cue in the
+        // right-flushed floor suffix, telling you where to switch (C1: present
+        // even though `per_floor` is office-wide, not the projected floor).
+        let s = scene_of(vec![idle("a")]);
+        let mut pf = per_floor_counts(&s);
+        pf[1].waiting = 1;
+        pf[1].total = 1;
+        let stats = FooterStats {
+            counts: scene_stats(&s),
+            per_floor: &pf,
+            gateway: None,
+        };
+        let line = build_status_summary(&s, &stats, 160, Some(fi(1, 3, 2)), None);
+        assert!(
+            line.contains("\u{25b2}F2"),
+            "cross-floor waiting cue: {line}"
+        );
+    }
+
+    // --- T8: the wall board's mood pulse -----------------------------------
+
+    fn board_mood_text(counts: StateCounts) -> String {
+        board_mood_segments(counts)
+            .into_iter()
+            .map(|(t, _)| t)
+            .collect()
+    }
+
+    #[test]
+    fn board_mood_echoes_state_counts() {
+        // 3 active + 2 waiting + 5 idle + 1 exiting. The board reads the SAME
+        // `scene_stats` the footer does; the ▲ "needs-you" beacon LEADS, and the
+        // exiting walkout is deliberately absent — a departure isn't the mood.
+        let mut gone = active_with("Edit x", "gone");
+        gone.exiting_at = Some(SystemTime::UNIX_EPOCH);
+        let mut agents = vec![gone];
+        for i in 0..3 {
+            agents.push(active_with("Edit x", &format!("a{i}")));
+        }
+        for i in 0..2 {
+            agents.push(waiting(&format!("w{i}")));
+        }
+        for i in 0..5 {
+            agents.push(idle(&format!("i{i}")));
+        }
+        let s = scene_of(agents);
+        let text = board_mood_text(scene_stats(&s));
+        assert!(text.contains("\u{25b2}2 wait"), "waiting beacon: {text}");
+        assert!(text.contains("\u{25cf}3 work"), "active: {text}");
+        assert!(text.contains("\u{25cb}5 idle"), "idle: {text}");
+        let (w, a) = (
+            text.find('\u{25b2}').unwrap(),
+            text.find('\u{25cf}').unwrap(),
+        );
+        assert!(w < a, "waiting leads active: {text}");
+        assert!(
+            !text.contains("exit"),
+            "no exiting on the board mood: {text}"
+        );
+    }
+
+    #[test]
+    fn board_mood_is_numeric_and_never_overflows_the_panel() {
+        // The OLD board repeated one ● per agent (uncapped overflow). Now it is
+        // numeric, and abbreviates its words (wt/wk/id) so even an extreme office
+        // fits the fixed 30-cell panel.
+        let c = StateCounts {
+            active: 150,
+            waiting: 150,
+            idle: 150,
+            exiting: 0,
+            total: 450,
+        };
+        let text = board_mood_text(c);
+        assert!(
+            display_width(&text) <= BOARD_W as usize,
+            "fits the panel: {text} = {}",
+            display_width(&text)
+        );
+        assert!(text.contains("\u{25b2}150 wt"), "abbreviated big-N: {text}");
+    }
+
+    #[test]
+    fn board_mood_calm_office_drops_the_waiting_beacon() {
+        let s = scene_of(vec![idle("a"), idle("b"), active_with("Edit x", "c")]);
+        let text = board_mood_text(scene_stats(&s));
+        assert!(
+            !text.contains('\u{25b2}'),
+            "no beacon when nobody waits: {text}"
+        );
+        assert!(text.contains("\u{25cf}1 work") && text.contains("\u{25cb}2 idle"));
+    }
+
+    #[test]
+    fn board_mood_empty_office_reads_plainly() {
+        let text = board_mood_text(scene_stats(&scene_of(vec![])));
+        assert_eq!(text, "\u{2014} office empty \u{2014}");
+    }
+
+    #[test]
+    fn board_width_pins_to_neon_panel_interior() {
+        // Anti-drift spine 2: the board text width IS the painted panel's dark
+        // INTERIOR (outer width minus the frame on each side), so the lit letters
+        // sit inside the glowing frame — never overrunning it (the overflow bug was
+        // pinning BOARD_W to the full OUTER NEON_PANEL_W).
+        assert_eq!(
+            BOARD_W,
+            pixtuoid_scene::pixel_painter::NEON_PANEL_INNER_W,
+            "board width must equal the painted panel's dark interior width"
+        );
+        // (interior < outer frame is enforced at COMPILE time in pixel_painter.)
     }
 }

@@ -2,4 +2,4 @@
 source: crates/pixtuoid/src/tui/widgets/mod.rs
 expression: line
 ---
- 0 agents                                        [?]help [p]ause [t]heme [q]uit
+ 0                                               [?]help [p]ause [t]heme [q]uit

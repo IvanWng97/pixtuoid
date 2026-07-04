@@ -53,8 +53,7 @@ impl ClaudeCodeSource {
             if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR") {
                 return PathBuf::from(format!("{dir}/pixtuoid.sock"));
             }
-            // SAFETY: getuid() is a trivial syscall with no pointer args; cannot fail.
-            let uid = unsafe { libc::getuid() };
+            let uid = rustix::process::getuid().as_raw();
             PathBuf::from(format!("/tmp/pixtuoid-{uid}.sock"))
         }
         #[cfg(windows)]
@@ -158,8 +157,7 @@ mod tests {
 
         // With neither set, fall back to the uid-suffixed /tmp socket.
         std::env::remove_var("XDG_RUNTIME_DIR");
-        // SAFETY: getuid() is a trivial argless syscall.
-        let uid = unsafe { libc::getuid() };
+        let uid = rustix::process::getuid().as_raw();
         assert_eq!(
             ClaudeCodeSource::default_socket_path(),
             PathBuf::from(format!("/tmp/pixtuoid-{uid}.sock"))

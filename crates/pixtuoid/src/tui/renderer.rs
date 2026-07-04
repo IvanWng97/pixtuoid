@@ -29,11 +29,9 @@ use pixtuoid_scene::pixel_painter::{render_to_rgb_buffer, MascotFrame, PixelCtx}
 // Re-exports so tui_renderer.rs and tui/mod.rs import from one place.
 pub(crate) use crate::tui::hit_test::hit_test_agent;
 pub use crate::tui::hit_test::{
-    hit_test_branding, hit_test_coffee_machine, hit_test_from_tui, hit_test_furniture,
-    hit_test_mascot, hit_test_pet,
+    hit_test_coffee_machine, hit_test_from_tui, hit_test_furniture, hit_test_mascot, hit_test_pet,
 };
 pub(crate) use crate::tui::widgets::paint_hover_tooltip;
-pub use crate::tui::widgets::TickerQueue;
 pub(super) use crate::tui::widgets::{
     paint_chitchat_bubbles, paint_coffee_tooltip, paint_connection_panel, paint_dashboard,
     paint_elevator_indicator, paint_footer, paint_furniture_tooltip, paint_help_overlay,
@@ -71,7 +69,6 @@ pub struct DrawCtx<'a> {
     /// Live walkable/approach/route debug layer toggle (`w`). Threaded into the
     /// pixel pass; off by default, transient (not persisted to config).
     pub debug_walkable: bool,
-    pub ticker: &'a TickerQueue,
     pub theme: &'a pixtuoid_scene::theme::Theme,
     pub theme_picker: Option<usize>,
     /// Multi-floor display state. `Some` iff there's more than one floor.
@@ -79,6 +76,17 @@ pub struct DrawCtx<'a> {
     /// the system-wide agent count so the footer can render `n/total` and
     /// the elevator indicator can highlight the active floor.
     pub floor_info: Option<FloorInfo>,
+    /// Office-wide per-floor state tally (bucketed from the FULL, un-projected
+    /// scene by `AgentSlot.floor_idx`) — feeds the footer's cross-floor `▲F{n}`
+    /// cue. ALWAYS present (C1): unlike `floor_info` it never vanishes for a
+    /// single-floor office, so the chip + cue render there too. Distinct from the
+    /// footer's per-state integers (`scene_stats` on the PROJECTED floor) — C8:
+    /// don't derive one from the other.
+    pub per_floor: [crate::tui::widgets::StateCounts; pixtuoid_core::state::MAX_FLOORS],
+    /// Worst-of daemon-liveness rollup (the OpenClaw gateway) for the footer +
+    /// board `⬢gw` chip. `None` = no daemon configured (chip suppressed). Computed
+    /// from the full scene, independent of `floor_info` (C1).
+    pub gateway: Option<pixtuoid_core::state::DaemonState>,
     pub floor: pixtuoid_scene::floor::FloorMeta,
     pub active_pet: Option<&'a PetState>,
     pub last_pet_pos: Option<PetFrame>,
@@ -175,13 +183,14 @@ pub(crate) fn scene_rect(full: Rect) -> Rect {
 pub(crate) fn draw_footer_only_frame<B: Backend<Error: Send + Sync + 'static>>(
     term: &mut Terminal<B>,
     scene: &SceneState,
+    stats: &crate::tui::widgets::FooterStats<'_>,
     theme: &pixtuoid_scene::theme::Theme,
     floor_info: Option<FloorInfo>,
     source_warning: Option<&str>,
 ) -> Result<()> {
     term.draw(|f| {
         let actual = f.area();
-        paint_footer(f, scene, actual, theme, floor_info, source_warning);
+        paint_footer(f, scene, stats, actual, theme, floor_info, source_warning);
     })?;
     Ok(())
 }
@@ -219,8 +228,27 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     let source_warning = ctx.source_warning;
     let floor = ctx.floor;
 
+    // The footer's tallies, assembled ONCE (spine 1): per-state counts from the
+    // projected floor `scene`, office-wide `per_floor`/`gateway` copied out of
+    // `ctx` before the mutable buffer borrows below. `per_floor` is a small Copy
+    // array, so the local owns it and `FooterStats` can borrow it across the
+    // too-small early-returns and the main paint.
+    let footer_per_floor = ctx.per_floor;
+    let footer_stats = crate::tui::widgets::FooterStats {
+        counts: crate::tui::widgets::scene_stats(scene),
+        per_floor: &footer_per_floor,
+        gateway: ctx.gateway,
+    };
+
     if scene_rect.width < MIN_SCENE_WIDTH || scene_rect.height < MIN_SCENE_HEIGHT {
-        draw_footer_only_frame(term, scene, theme, floor_info, ctx.source_warning)?;
+        draw_footer_only_frame(
+            term,
+            scene,
+            &footer_stats,
+            theme,
+            floor_info,
+            source_warning,
+        )?;
         return Ok(None);
     }
 
@@ -229,7 +257,14 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     ctx.buf.ensure_size(buf_w, buf_h, theme.surface.bg_fallback);
     // Always compute maximum layout capacity — floor overflow handles the rest.
     let Some(layout) = Layout::compute_with_seed(buf_w, buf_h, None, floor.floor_seed) else {
-        draw_footer_only_frame(term, scene, theme, floor_info, ctx.source_warning)?;
+        draw_footer_only_frame(
+            term,
+            scene,
+            &footer_stats,
+            theme,
+            floor_info,
+            source_warning,
+        )?;
         return Ok(None);
     };
 
@@ -285,7 +320,6 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     }
 
     let buf = &ctx.buf;
-    let ticker = ctx.ticker;
     let theme_picker = ctx.theme_picker;
     let chitchat_bubbles = &ctx.chitchat_bubbles;
     term.draw(|f| {
@@ -293,7 +327,15 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         // terminal resize between term.size() and term.draw().
         let actual_full = f.area();
         let actual_scene = crate::tui::renderer::scene_rect(actual_full);
-        paint_footer(f, scene, actual_full, theme, floor_info, source_warning);
+        paint_footer(
+            f,
+            scene,
+            &footer_stats,
+            actual_full,
+            theme,
+            floor_info,
+            source_warning,
+        );
         flush_buffer_to_term(f, buf, actual_scene);
         paint_label_widgets(
             f,
@@ -311,7 +353,16 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
             theme,
         );
         paint_chitchat_bubbles(f, chitchat_bubbles, actual_scene, theme);
-        paint_wall_display(f, scene, actual_scene, now, ticker, theme);
+        paint_wall_display(
+            f,
+            scene,
+            actual_scene,
+            now,
+            footer_stats.counts,
+            floor_info,
+            footer_stats.gateway,
+            theme,
+        );
         if let Some(door) = layout.door {
             let current = floor_info.map(|fi| fi.current).unwrap_or(1);
             paint_elevator_indicator(f, door, current, actual_scene, theme);

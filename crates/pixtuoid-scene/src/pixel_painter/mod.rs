@@ -88,6 +88,9 @@ mod seat;
 mod sim;
 
 pub use anchors::character_anchor;
+// The ToolKind→glow-hue seam the binary's footer tints tool segments with, so a
+// footer tool colour matches the sprite's monitor glow exactly.
+pub use palette::tool_glow_for_kind;
 // The γ3 widening that PR-450 planned for: the observation TYPES a
 // `floor::FloorSession::observe` caller reads go pub WITH the facade;
 // `sim_step` + `SimStores` (the per-call borrow-set) stay crate-internal —
@@ -104,6 +107,35 @@ pub use sim::{CharacterGlow, CharacterPlacement, SimFrame};
 /// steam anchor by `steam_anchor_sits_within_the_coffee_machine_columns`.
 pub const PANTRY_COFFEE_COLS_LARGE: (u16, u16) = (11, 18);
 pub const PANTRY_COFFEE_COLS_SMALL: (u16, u16) = (9, 12);
+
+/// The neon wall-sign panel geometry, in PIXELS: origin `(X, Y)` and OUTER size
+/// `W×H`, drawn with a `NEON_PANEL_BORDER`-px frame on every side. THE single
+/// source of truth shared by the pixel painter (`paint_neon_panel`) and the
+/// wall-clock collision clamp. A pixel column maps 1:1 to a terminal cell column
+/// in the half-block flush, so these px widths ARE cell widths on the horizontal.
+///
+/// The board's TEXT overlay lives in the dark INTERIOR (`NEON_PANEL_INNER_*` = the
+/// panel minus its frame): the binary's `tui::widgets::hud::paint_wall_display`
+/// pins its cell-origin AND width to those, so the lit text can't overrun the
+/// glowing frame. Laying text to the full OUTER `NEON_PANEL_W` overran it by the
+/// border on each side (the board-overflow bug). Only the interior pair + the
+/// outer width cross the crate boundary (`pub`); `X`/`Y`/`H`/`BORDER` have no
+/// cross-crate consumer (`pub(crate)`, don't widen the semver surface).
+pub(crate) const NEON_PANEL_X: u16 = 1;
+pub(crate) const NEON_PANEL_Y: u16 = 1;
+pub const NEON_PANEL_W: u16 = 30;
+pub(crate) const NEON_PANEL_H: u16 = 8;
+/// The frame thickness `paint_neon_panel` lights on every side (it reads THIS, so
+/// the interior derivation below provably matches the pixels it leaves dark).
+pub(crate) const NEON_PANEL_BORDER: u16 = 1;
+/// The dark interior's left cell-origin (`X` + the frame) — where board text starts.
+pub const NEON_PANEL_INNER_X: u16 = NEON_PANEL_X + NEON_PANEL_BORDER;
+/// The dark interior's cell WIDTH (`W` minus the frame on both sides) — the board's
+/// usable text width; `BOARD_W` pins to this.
+pub const NEON_PANEL_INNER_W: u16 = NEON_PANEL_W - 2 * NEON_PANEL_BORDER;
+// The interior must be a non-empty strict subset of the outer frame (catches a
+// degenerate BORDER=0 / oversized-border config at compile time).
+const _: () = assert!(NEON_PANEL_INNER_W > 0 && NEON_PANEL_INNER_W < NEON_PANEL_W);
 
 use anchors::compute_door_frame_idx;
 use background::{
@@ -412,15 +444,23 @@ fn paint_frame(
     // Neon sign panel in the wall band — dark bg with glow border.
     // Text overlay (branding, dots, star link) is rendered by the ratatui
     // widget pass in renderer.rs::paint_wall_display.
-    let neon_w = 30u16;
-    let neon_h = 8u16;
-    paint_neon_panel(ctx.buf, 1, 1, neon_w, neon_h, ctx.now, ctx.theme);
+    paint_neon_panel(
+        ctx.buf,
+        NEON_PANEL_X,
+        NEON_PANEL_Y,
+        NEON_PANEL_W,
+        NEON_PANEL_H,
+        ctx.now,
+        ctx.theme,
+    );
 
     // Live wall clock painted after the wall (so hands sit on top of it)
     // but before wall decor — the bookshelf etc. shouldn't cover it.
     // 7x7 sprite, center at clock_x+3; clamp so it never collides with
-    // the 30-wide neon panel on the left.
-    let clock_x = (buf_w / 2).saturating_sub(3).max(neon_w + 2);
+    // the neon panel on the left (its right edge + a 1px gap).
+    let clock_x = (buf_w / 2)
+        .saturating_sub(3)
+        .max(NEON_PANEL_X + NEON_PANEL_W + 1);
     paint_clock(ctx.buf, clock_x, 1, ctx.now, ctx.theme);
     // Corridor runner — painted over the floor but BEFORE walls/decor
     // so walls cleanly overlap it where they cross.

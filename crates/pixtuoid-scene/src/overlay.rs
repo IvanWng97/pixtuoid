@@ -123,7 +123,7 @@ pub(crate) fn truncate_label(label: &str, budget: usize) -> std::borrow::Cow<'_,
 /// panics on multi-byte ids (e.g. `/naïveté/app`) by construction.
 /// (`DefaultHasher` is deterministic within a process — the suffix is a
 /// per-frame display aid, not a persisted identifier.)
-pub(crate) fn disambig_suffix(session_id: &str) -> String {
+pub fn disambig_suffix(session_id: &str) -> String {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
     session_id.hash(&mut h);

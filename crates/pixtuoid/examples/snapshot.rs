@@ -11,7 +11,7 @@ use anyhow::{Context as _, Result};
 use clap::Parser;
 use image::codecs::gif::{GifEncoder, Repeat};
 use image::{Delay, Frame as GifFrame, Rgb as ImgRgb, RgbImage, Rgba, RgbaImage};
-use pixtuoid::tui::renderer::{draw_scene, DrawCtx, TickerQueue};
+use pixtuoid::tui::renderer::{draw_scene, DrawCtx};
 use pixtuoid_core::source::jsonl::JsonlWatcher;
 use pixtuoid_core::source::AgentEvent;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
@@ -407,7 +407,6 @@ fn main() -> Result<()> {
             valid.join(" | ")
         )
     })?;
-    let ticker = TickerQueue::new();
 
     let navigations = parse_navigations(&args.navigate_at)?;
     let pet_vec: Vec<pixtuoid_scene::pet::Pet> = match args.pets.as_deref() {
@@ -645,10 +644,13 @@ fn main() -> Result<()> {
         // approach-point/seat markers + A* routes, painted into the RgbBuffer
         // here) AND the cell-level red wash + BFS connectivity report below.
         debug_walkable: args.debug_walkable,
-        ticker: &ticker,
         theme,
         theme_picker: args.theme_picker,
         floor_info: None,
+        // Single-floor still, no gateway: empty office-wide tallies (no cross-floor
+        // cue, chip suppressed). The footer's counts come from `scene_stats(scene)`.
+        per_floor: Default::default(),
+        gateway: None,
         floor: {
             let mut m = pixtuoid_scene::floor::FloorMeta::ground();
             m.floor_seed = args.floor_seed;
@@ -1810,7 +1812,6 @@ fn save_as_gif(
     let skip_frames = (skip_ms / frame_ms.max(1)) as usize;
     let img_w = cols as u32 * CELL_W;
     let img_h = rows as u32 * CELL_H;
-    let ticker = TickerQueue::new();
 
     let file = std::fs::File::create(path)?;
     let mut encoder = GifEncoder::new(file);
@@ -1825,10 +1826,11 @@ fn save_as_gif(
             mouse_pos: None,
             pinned_agent: None,
             debug_walkable,
-            ticker: &ticker,
             theme,
             theme_picker: None,
             floor_info: None,
+            per_floor: Default::default(),
+            gateway: None,
             floor: {
                 let mut m = pixtuoid_scene::floor::FloorMeta::ground();
                 m.floor_seed = floor_seed;

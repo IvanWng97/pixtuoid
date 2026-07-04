@@ -139,9 +139,17 @@ impl Drop for ExitWatch {
 #[cfg(target_os = "macos")]
 mod imp {
     use std::collections::HashSet;
-    use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+    use std::mem::MaybeUninit;
+    use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
+    use std::ptr;
     use std::sync::atomic::Ordering;
+    use std::time::Duration;
 
+    use rustix::event::kqueue::{
+        kevent, kqueue, Event, EventFilter, EventFlags, ProcessEvents, UserDefinedFlags, UserFlags,
+    };
+    use rustix::io::Errno;
+    use rustix::process::Pid;
     use tokio::sync::mpsc::UnboundedSender;
 
     use super::{drain_pending, Shared};
@@ -149,6 +157,25 @@ mod imp {
     /// Per-wait event budget. More than 16 simultaneous deliveries just take
     /// another loop turn — kqueue events are queued state, never lost.
     const EVENT_BUF: usize = 16;
+
+    /// The `EVFILT_USER` wake slot ident. A pure user-triggered wake — 0
+    /// carries no fd/pid, it's just the key we register once and trigger.
+    const WAKE_IDENT: isize = 0;
+
+    /// The `EVFILT_USER` ident-0 wake filter. Registration and fire differ only
+    /// in the fflags: registration carries no `NOTE_TRIGGER` (paired with
+    /// `EV_ADD | EV_CLEAR` at the call site), the fire carries `NOTE_TRIGGER`.
+    fn wake_filter(trigger: bool) -> EventFilter {
+        EventFilter::User {
+            ident: WAKE_IDENT,
+            flags: if trigger {
+                UserFlags::TRIGGER
+            } else {
+                UserFlags::empty()
+            },
+            user_flags: UserDefinedFlags::new(0),
+        }
+    }
 
     pub(super) struct Backend {
         /// One kqueue for the whole watch: the `EVFILT_PROC NOTE_EXIT` knotes
@@ -162,50 +189,29 @@ mod imp {
 
     impl Backend {
         pub(super) fn init() -> Option<Self> {
-            // SAFETY: kqueue() takes no arguments and returns a new fd or -1.
-            let raw = unsafe { libc::kqueue() };
-            if raw < 0 {
-                tracing::debug!(
-                    "kqueue() failed: {}; instant exit off (backstops cover)",
-                    std::io::Error::last_os_error()
-                );
-                return None;
-            }
-            // SAFETY: `raw` was just returned by kqueue() and has no other
-            // owner — transferring ownership to OwnedFd is sound.
-            let kq = unsafe { OwnedFd::from_raw_fd(raw) };
+            let kq = match kqueue() {
+                Ok(kq) => kq,
+                Err(e) => {
+                    tracing::debug!("kqueue() failed: {e}; instant exit off (backstops cover)");
+                    return None;
+                }
+            };
             // The wake slot: EVFILT_USER ident 0. EV_CLEAR so each delivered
             // NOTE_TRIGGER auto-resets the event for the next trigger.
-            let wake_slot = libc::kevent {
-                ident: 0,
-                filter: libc::EVFILT_USER,
-                flags: libc::EV_ADD | libc::EV_CLEAR,
-                fflags: 0,
-                data: 0,
-                udata: std::ptr::null_mut(),
-            };
-            let zero = libc::timespec {
-                tv_sec: 0,
-                tv_nsec: 0,
-            };
-            // SAFETY: changelist points at one initialized kevent we own;
-            // nevents is 0 so the kernel writes nothing; timeout points at a
-            // valid timespec.
-            let rc = unsafe {
-                libc::kevent(
-                    kq.as_raw_fd(),
-                    &wake_slot,
-                    1,
-                    std::ptr::null_mut(),
-                    0,
-                    &zero,
-                )
-            };
-            if rc < 0 {
-                tracing::debug!(
-                    "EVFILT_USER wake-slot registration failed: {}; instant exit off",
-                    std::io::Error::last_os_error()
-                );
+            let wake_slot = Event::new(
+                wake_filter(false),
+                EventFlags::ADD | EventFlags::CLEAR,
+                ptr::null_mut(),
+            );
+            // An empty eventlist ⇒ nevents 0: the kernel processes the change
+            // and writes nothing back.
+            let eventlist: &mut [Event] = &mut [];
+            // SAFETY: the EVFILT_USER change references no fd (ident 0 is a pure
+            // user-event key), so the kqueue-fd-validity contract is trivially
+            // met; the zero timeout means this can't block.
+            let registered = unsafe { kevent(&kq, &[wake_slot], eventlist, Some(Duration::ZERO)) };
+            if let Err(e) = registered {
+                tracing::debug!("EVFILT_USER wake-slot registration failed: {e}; instant exit off");
                 return None;
             }
             Some(Self { kq })
@@ -215,36 +221,14 @@ mod imp {
         /// wait. kevent(2) is documented thread-safe on one kq, so the
         /// registering side may call this while the thread is blocked.
         pub(super) fn wake(&self) {
-            let trigger = libc::kevent {
-                ident: 0,
-                filter: libc::EVFILT_USER,
-                flags: 0,
-                fflags: libc::NOTE_TRIGGER,
-                data: 0,
-                udata: std::ptr::null_mut(),
-            };
-            let zero = libc::timespec {
-                tv_sec: 0,
-                tv_nsec: 0,
-            };
-            // SAFETY: one initialized change entry we own; nevents 0 writes
-            // nothing; valid timespec. Cannot ENOENT — the slot is registered
-            // at init and never deleted while the kq lives.
-            let rc = unsafe {
-                libc::kevent(
-                    self.kq.as_raw_fd(),
-                    &trigger,
-                    1,
-                    std::ptr::null_mut(),
-                    0,
-                    &zero,
-                )
-            };
-            if rc < 0 {
-                tracing::debug!(
-                    "exit-watch wake trigger failed: {}",
-                    std::io::Error::last_os_error()
-                );
+            let trigger = Event::new(wake_filter(true), EventFlags::empty(), ptr::null_mut());
+            let eventlist: &mut [Event] = &mut [];
+            // SAFETY: the trigger references no fd; the empty eventlist + zero
+            // timeout write nothing and never block. Cannot ENOENT — the slot
+            // is registered at init and never deleted while the kq lives.
+            if let Err(e) = unsafe { kevent(&self.kq, &[trigger], eventlist, Some(Duration::ZERO)) }
+            {
+                tracing::debug!("exit-watch wake trigger failed: {e}");
             }
         }
     }
@@ -267,86 +251,74 @@ mod imp {
     /// check for plain NOTE_EXIT, so same-user non-children (every CC/codex
     /// session) are watchable unprivileged; the exit STATUS is child-only
     /// and unneeded.
-    fn register(kq: libc::c_int, pid: i32) -> Registered {
-        let change = libc::kevent {
-            ident: pid as libc::uintptr_t,
-            filter: libc::EVFILT_PROC,
+    fn register(kq: BorrowedFd, pid: i32) -> Registered {
+        let Some(rpid) = Pid::from_raw(pid) else {
+            return Registered::Failed; // pid <= 0 is never a real process
+        };
+        let change = Event::new(
+            EventFilter::Proc {
+                pid: rpid,
+                flags: ProcessEvents::EXIT,
+            },
             // EV_ONESHOT: NOTE_EXIT can only fire once per process; the knote
             // self-removes on delivery, so no post-fire cleanup exists.
-            flags: libc::EV_ADD | libc::EV_ONESHOT | libc::EV_RECEIPT,
-            fflags: libc::NOTE_EXIT,
-            data: 0,
-            udata: std::ptr::null_mut(),
+            EventFlags::ADD | EventFlags::ONESHOT | EventFlags::RECEIPT,
+            ptr::null_mut(),
+        );
+        // One receipt slot — EV_RECEIPT guarantees the receipt fills it ahead
+        // of any pending event.
+        let mut slot = [const { MaybeUninit::<Event>::uninit() }; 1];
+        // SAFETY: the EVFILT_PROC change references a pid, not an fd, so the
+        // kqueue-fd-validity contract is trivially met; the zero timeout can
+        // never block the loop.
+        let receipt = match unsafe { kevent(kq, &[change], &mut slot, Some(Duration::ZERO)) } {
+            Ok((got, _rest)) => got,
+            Err(e) => {
+                tracing::debug!(
+                    "EVFILT_PROC registration for pid {pid} failed: {e}; dropped (backstops cover)"
+                );
+                return Registered::Failed;
+            }
         };
-        // SAFETY: all-zero bytes are a valid kevent value (integers + a null
-        // pointer); the kernel overwrites it with the receipt.
-        let mut receipt: libc::kevent = unsafe { std::mem::zeroed() };
-        let zero = libc::timespec {
-            tv_sec: 0,
-            tv_nsec: 0,
+        // No receipt, or one without EV_ERROR / with data 0 = success.
+        let Some(ev) = receipt.first() else {
+            return Registered::Ok;
         };
-        // SAFETY: one initialized change entry; one owned receipt slot —
-        // EV_RECEIPT guarantees the receipt fills it ahead of any pending
-        // event; the zero timeout means this can never block the loop.
-        let rc = unsafe { libc::kevent(kq, &change, 1, &mut receipt, 1, &zero) };
-        if rc < 0 {
-            tracing::debug!(
-                "EVFILT_PROC registration for pid {pid} failed: {}; dropped (backstops cover)",
-                std::io::Error::last_os_error()
-            );
-            return Registered::Failed;
-        }
-        // Copy out of the repr(packed(4)) struct — taking a reference to a
-        // packed field (which format! capture would) is a hard error (E0793).
-        let (flags, data) = (receipt.flags, receipt.data);
-        if rc == 0 || flags & libc::EV_ERROR == 0 || data == 0 {
+        let data = ev.data();
+        if !ev.flags().contains(EventFlags::ERROR) || data == 0 {
             return Registered::Ok;
         }
-        match data as i32 {
-            libc::ESRCH => Registered::AlreadyDead,
-            libc::EPERM => {
-                tracing::debug!("EVFILT_PROC EPERM for pid {pid}; dropped (backstops cover)");
-                Registered::Failed
-            }
-            errno => {
-                tracing::debug!(
-                    "EVFILT_PROC registration for pid {pid} returned errno {errno}; dropped"
-                );
-                Registered::Failed
-            }
+        let errno = Errno::from_raw_os_error(data as i32);
+        if errno == Errno::SRCH {
+            Registered::AlreadyDead
+        } else if errno == Errno::PERM {
+            tracing::debug!("EVFILT_PROC EPERM for pid {pid}; dropped (backstops cover)");
+            Registered::Failed
+        } else {
+            tracing::debug!("EVFILT_PROC registration for pid {pid} returned {errno:?}; dropped");
+            Registered::Failed
         }
     }
 
     pub(super) fn run(shared: &Shared, exit_tx: &UnboundedSender<i32>) {
-        let kq = shared.backend.kq.as_raw_fd();
+        let kq = shared.backend.kq.as_fd();
         let mut watched: HashSet<i32> = HashSet::new();
         loop {
-            // SAFETY: all-zero bytes are a valid kevent value (see register).
-            let mut events: [libc::kevent; EVENT_BUF] = unsafe { std::mem::zeroed() };
-            // SAFETY: eventlist points at EVENT_BUF owned entries and nevents
-            // matches; the null timeout blocks until a NOTE_EXIT delivery or
-            // a NOTE_TRIGGER wake (both are queued kqueue state, so a wake
-            // sent before this call is still picked up — no lost wakeups).
-            let n = unsafe {
-                libc::kevent(
-                    kq,
-                    std::ptr::null(),
-                    0,
-                    events.as_mut_ptr(),
-                    EVENT_BUF as libc::c_int,
-                    std::ptr::null(),
-                )
-            };
-            if n < 0 {
-                let err = std::io::Error::last_os_error();
-                if err.raw_os_error() == Some(libc::EINTR) {
-                    continue;
+            let mut buf = [const { MaybeUninit::<Event>::uninit() }; EVENT_BUF];
+            // SAFETY: the empty changelist references no fds; the None timeout
+            // blocks until a NOTE_EXIT delivery or a NOTE_TRIGGER wake (both are
+            // queued kqueue state, so a wake sent before this call is still
+            // picked up — no lost wakeups).
+            let events = match unsafe { kevent(kq, &[], &mut buf, None) } {
+                Ok((events, _rest)) => events,
+                Err(e) if e == Errno::INTR => continue,
+                Err(e) => {
+                    tracing::debug!(
+                        "exit-watch kevent wait failed: {e}; thread exiting (backstops cover)"
+                    );
+                    return;
                 }
-                tracing::debug!(
-                    "exit-watch kevent wait failed: {err}; thread exiting (backstops cover)"
-                );
-                return;
-            }
+            };
             if shared.closed.load(Ordering::SeqCst) {
                 // ExitWatch dropped. The kq closes when the last Arc<Shared>
                 // (ours, on return) drops.
@@ -375,16 +347,16 @@ mod imp {
                     }
                 }
             }
-            for ev in events.iter().take(n as usize) {
-                // By-value copies out of the packed struct (E0793, as above).
-                let (filter, fflags, ident) = (ev.filter, ev.fflags, ev.ident);
-                if filter == libc::EVFILT_PROC && fflags & libc::NOTE_EXIT != 0 {
-                    let pid = ident as i32;
-                    // The knote already self-removed (EV_ONESHOT); drop our
-                    // bookkeeping so a recycled pid can be re-watched.
-                    watched.remove(&pid);
-                    if exit_tx.send(pid).is_err() {
-                        return;
+            for ev in events.iter() {
+                if let EventFilter::Proc { pid, flags } = ev.filter() {
+                    if flags.contains(ProcessEvents::EXIT) {
+                        let pid = pid.as_raw_pid();
+                        // The knote already self-removed (EV_ONESHOT); drop our
+                        // bookkeeping so a recycled pid can be re-watched.
+                        watched.remove(&pid);
+                        if exit_tx.send(pid).is_err() {
+                            return;
+                        }
                     }
                 }
                 // EVFILT_USER ident 0 is the wake: no payload, the pending
@@ -396,9 +368,13 @@ mod imp {
 
 #[cfg(target_os = "linux")]
 mod imp {
-    use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
+    use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
     use std::sync::atomic::Ordering;
 
+    use rustix::event::{poll, PollFd, PollFlags};
+    use rustix::io::Errno;
+    use rustix::pipe::{pipe_with, PipeFlags};
+    use rustix::process::{pidfd_open, Pid, PidfdFlags};
     use tokio::sync::mpsc::UnboundedSender;
 
     use super::{drain_pending, Shared};
@@ -415,36 +391,20 @@ mod imp {
 
     impl Backend {
         pub(super) fn init() -> Option<Self> {
-            let mut fds = [0 as libc::c_int; 2];
-            // SAFETY: pipe2 writes exactly two fds into the array we own.
-            let rc = unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC | libc::O_NONBLOCK) };
-            if rc != 0 {
-                tracing::debug!(
-                    "pipe2 failed: {}; instant exit off (backstops cover)",
-                    std::io::Error::last_os_error()
-                );
-                return None;
-            }
-            // SAFETY: both fds were just created by pipe2 and have no other
-            // owner — transferring ownership to OwnedFd is sound.
-            Some(Self {
-                pipe_rd: unsafe { OwnedFd::from_raw_fd(fds[0]) },
-                pipe_wr: unsafe { OwnedFd::from_raw_fd(fds[1]) },
-            })
+            let (pipe_rd, pipe_wr) = match pipe_with(PipeFlags::CLOEXEC | PipeFlags::NONBLOCK) {
+                Ok(pair) => pair,
+                Err(e) => {
+                    tracing::debug!("pipe2 failed: {e}; instant exit off (backstops cover)");
+                    return None;
+                }
+            };
+            Some(Self { pipe_rd, pipe_wr })
         }
 
         pub(super) fn wake(&self) {
-            let byte = 1u8;
-            // SAFETY: writes one byte from an owned local; the fd is
             // O_NONBLOCK, so a full pipe returns EAGAIN instead of blocking —
             // which is success for our purposes (a wake is already pending).
-            let _ = unsafe {
-                libc::write(
-                    self.pipe_wr.as_raw_fd(),
-                    std::ptr::from_ref(&byte).cast::<libc::c_void>(),
-                    1,
-                )
-            };
+            let _ = rustix::io::write(&self.pipe_wr, &[1]);
         }
     }
 
@@ -459,52 +419,38 @@ mod imp {
         Failed,
     }
 
-    /// `pidfd_open(2)` via raw syscall — libc 0.2 ships no wrapper (the
-    /// `SYS_pidfd_open` const is verified present for gnu/musl on
-    /// x86_64/aarch64).
-    fn pidfd_open(pid: i32) -> PidfdOpen {
-        // SAFETY: SYS_pidfd_open takes (pid_t, unsigned flags) and returns a
-        // new fd or -1; no pointers are involved.
-        let rc =
-            unsafe { libc::syscall(libc::SYS_pidfd_open, pid as libc::pid_t, 0 as libc::c_uint) };
-        if rc >= 0 {
-            // Kernel fds are int-bounded (RLIMIT_NOFILE), so this conversion
-            // can't fail in practice — the guard just makes the i64→i32
-            // narrowing explicit instead of a silent `as` truncation.
-            let Ok(fd) = RawFd::try_from(rc) else {
-                tracing::debug!("pidfd_open({pid}): fd {rc} out of RawFd range; dropped");
-                return PidfdOpen::Failed;
-            };
-            // SAFETY: the fd was just created by pidfd_open and has no other
-            // owner — transferring ownership to OwnedFd is sound.
-            return PidfdOpen::Opened(unsafe { OwnedFd::from_raw_fd(fd) });
-        }
-        let err = std::io::Error::last_os_error();
-        match err.raw_os_error() {
-            Some(libc::ESRCH) => PidfdOpen::AlreadyDead,
-            Some(libc::ENOSYS) => PidfdOpen::Unsupported,
-            _ => {
-                tracing::debug!("pidfd_open({pid}) failed: {err}; dropped (backstops cover)");
+    /// `pidfd_open(2)` via `rustix::process::pidfd_open` — a safe wrapper over
+    /// the syscall (libc 0.2 ships none), returning an `OwnedFd` directly.
+    fn pidfd_open_for(pid: i32) -> PidfdOpen {
+        let Some(rpid) = Pid::from_raw(pid) else {
+            return PidfdOpen::Failed; // pid <= 0 is never a real process
+        };
+        match pidfd_open(rpid, PidfdFlags::empty()) {
+            Ok(fd) => PidfdOpen::Opened(fd),
+            Err(e) if e == Errno::SRCH => PidfdOpen::AlreadyDead,
+            Err(e) if e == Errno::NOSYS => PidfdOpen::Unsupported,
+            Err(e) => {
+                tracing::debug!("pidfd_open({pid}) failed: {e}; dropped (backstops cover)");
                 PidfdOpen::Failed
             }
         }
     }
 
     /// Empty the self-pipe so the next wake byte makes it readable again.
-    fn drain_pipe(fd: RawFd) {
+    fn drain_pipe(pipe_rd: BorrowedFd) {
         let mut buf = [0u8; 64];
         loop {
-            // SAFETY: reads into an owned buffer of matching length; the fd
-            // is O_NONBLOCK so this never blocks (EAGAIN ends the drain).
-            let n = unsafe { libc::read(fd, buf.as_mut_ptr().cast::<libc::c_void>(), buf.len()) };
-            if n <= 0 || (n as usize) < buf.len() {
-                return;
+            // O_NONBLOCK so this never blocks (EAGAIN ends the drain); a short
+            // read means the pipe is now empty.
+            match rustix::io::read(pipe_rd, &mut buf) {
+                Ok(n) if n == buf.len() => continue,
+                _ => return,
             }
         }
     }
 
     pub(super) fn run(shared: &Shared, exit_tx: &UnboundedSender<i32>) {
-        let pipe_rd = shared.backend.pipe_rd.as_raw_fd();
+        let pipe_rd = shared.backend.pipe_rd.as_fd();
         // pid → its pidfd, in poll-set order: slot 0 of `fds` is always the
         // pipe, slot i+1 is watched[i] (pushes only append, so the zip below
         // stays aligned with the fds snapshot taken before any mutation).
@@ -525,29 +471,21 @@ mod imp {
             if shared.closed.load(Ordering::SeqCst) {
                 return;
             }
-            let mut fds: Vec<libc::pollfd> = Vec::with_capacity(watched.len() + 1);
-            fds.push(libc::pollfd {
-                fd: pipe_rd,
-                events: libc::POLLIN,
-                revents: 0,
-            });
+            let mut fds: Vec<PollFd> = Vec::with_capacity(watched.len() + 1);
+            fds.push(PollFd::from_borrowed_fd(pipe_rd, PollFlags::IN));
             for (_, pidfd) in &watched {
-                fds.push(libc::pollfd {
-                    fd: pidfd.as_raw_fd(),
-                    events: libc::POLLIN,
-                    revents: 0,
-                });
+                fds.push(PollFd::from_borrowed_fd(pidfd.as_fd(), PollFlags::IN));
             }
-            // SAFETY: fds points at len initialized pollfd entries we own;
-            // -1 blocks until a process exit or a wake byte.
-            let n = unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, -1) };
-            if n < 0 {
-                let err = std::io::Error::last_os_error();
-                if err.raw_os_error() == Some(libc::EINTR) {
-                    continue;
+            // -1 (None timeout) blocks until a process exit or a wake byte.
+            match poll(&mut fds, None) {
+                Ok(_) => {}
+                Err(e) if e == Errno::INTR => continue,
+                Err(e) => {
+                    tracing::debug!(
+                        "exit-watch poll failed: {e}; thread exiting (backstops cover)"
+                    );
+                    return;
                 }
-                tracing::debug!("exit-watch poll failed: {err}; thread exiting (backstops cover)");
-                return;
             }
             if shared.closed.load(Ordering::SeqCst) {
                 // ExitWatch dropped. Pidfds + pipe close with their owners.
@@ -559,27 +497,32 @@ mod imp {
             // pidfd polls POLLIN when the process exits (zombie) and POLLHUP
             // once reaped; ERR/NVAL are defensive — all four mean "this
             // watch is over" (prior art: Irrlicht).
+            let pipe_woke = !fds[0].revents().is_empty();
             let exited: Vec<i32> = fds[1..]
                 .iter()
                 .zip(watched.iter())
                 .filter(|(slot, _)| {
-                    slot.revents & (libc::POLLIN | libc::POLLHUP | libc::POLLERR | libc::POLLNVAL)
-                        != 0
+                    slot.revents().intersects(
+                        PollFlags::IN | PollFlags::HUP | PollFlags::ERR | PollFlags::NVAL,
+                    )
                 })
                 .map(|(_, (pid, _))| *pid)
                 .collect();
+            // `fds` borrows `watched` (and `pipe_rd`); drop it before mutating
+            // the set below.
+            drop(fds);
             // Drain pending BEFORE removing/sending the exits: a duplicate
             // watch() arriving in the same wake as its pid's exit must dedup
             // against the still-watched entry — exits-first would remove it,
             // then pidfd_open the drained duplicate on a dead pid and
             // synthesize a SECOND exit (caught by watch_is_idempotent).
-            if fds[0].revents != 0 {
+            if pipe_woke {
                 drain_pipe(pipe_rd);
                 for pid in drain_pending(shared) {
                     if watched.iter().any(|(p, _)| *p == pid) {
                         continue; // idempotent: already watched
                     }
-                    match pidfd_open(pid) {
+                    match pidfd_open_for(pid) {
                         PidfdOpen::Opened(pidfd) => watched.push((pid, pidfd)),
                         PidfdOpen::AlreadyDead => {
                             if exit_tx.send(pid).is_err() {

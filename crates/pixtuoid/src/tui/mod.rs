@@ -920,10 +920,28 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                             // Gate on cached_layout (the wall display only paints
                             // with a layout) so a too-small frame / floor-slide
                             // transition can't phantom-launch — mirrors the arms below.
-                            if renderer.cached_layout().is_some()
-                                && renderer::hit_test_branding(m.column, m.row)
-                            {
-                                let _ = open::that("https://github.com/IvanWng97/pixtuoid");
+                            // The ★ CTA's click target is the PRECISE painted span
+                            // (`star_hit_rect`, derived from the same board geometry),
+                            // not the old loose top-left row (C9).
+                            let on_star = renderer.cached_layout().is_some()
+                                && crossterm::terminal::size()
+                                    .ok()
+                                    .is_some_and(|(cols, rows)| {
+                                        let scene = renderer::scene_rect(ratatui::layout::Rect {
+                                            x: 0,
+                                            y: 0,
+                                            width: cols,
+                                            height: rows,
+                                        });
+                                        widgets::star_hit_rect(scene).is_some_and(|s| {
+                                            s.contains(ratatui::layout::Position {
+                                                x: m.column,
+                                                y: m.row,
+                                            })
+                                        })
+                                    });
+                            if on_star {
+                                let _ = open::that(widgets::REPO_URL);
                             } else if renderer.cached_layout().is_some_and(|layout| {
                                 renderer::hit_test_coffee_machine(layout, m.column, m.row)
                             }) {

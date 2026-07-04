@@ -430,8 +430,8 @@ pub(crate) const MAX_TOOL_TARGET_CHARS: usize = 40;
 /// Rename label) — generous against every legitimate value on those fields
 /// (subagent names, "Claude needs your permission to use Bash"), tight
 /// against a crafted ~1 MiB hook/transcript line: every TUI display site is
-/// individually bounded (tooltip char cap + rect clip, 512-char ticker
-/// buffer, ratatui cell clipping), but the headless summary line is not, and
+/// individually bounded (tooltip char cap + rect clip, ratatui cell
+/// clipping), but the headless summary line is not, and
 /// the uncapped value would sit in `AgentSlot` for the session's lifetime
 /// either way.
 pub(crate) const MAX_DECODED_FIELD_CHARS: usize = 80;

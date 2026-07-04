@@ -24,6 +24,7 @@ pixtuoid-scene = { path = "../pixtuoid-scene", version = "0.13.0" }
 tokio              = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "sync", "time", "net", "fs", "io-util"] }
 ratatui            = { workspace = true }
 crossterm          = { workspace = true }
+unicode-width      = { workspace = true }
 clap               = { workspace = true }
 serde              = { workspace = true }
 serde_json         = { workspace = true }

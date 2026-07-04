@@ -1,15 +1,29 @@
 use std::collections::HashMap;
 use std::time::SystemTime;
 
-use pixtuoid_core::state::ActivityState;
+use pixtuoid_core::state::{ActivityState, DaemonState, ToolKind, MAX_FLOORS};
 use pixtuoid_core::SceneState;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use ratatui::text::Span;
 use ratatui::widgets::Paragraph;
 
-use super::{centered_in, compact_hms, to_color, TickerQueue, PANEL_PAD_X, PANEL_PAD_Y};
+use super::{
+    centered_in, compact_hms, display_width, to_color, StateCounts, StateKind, PANEL_PAD_X,
+    PANEL_PAD_Y,
+};
 use crate::tui::renderer::clip_widget_rect;
+
+/// The pre-computed office/floor tallies the footer renders — assembled once per
+/// frame at each of the three `paint_footer` sites (C3). `counts` is the CURRENT
+/// (projected) floor's per-state breakdown (the rungs); `per_floor` + `gateway`
+/// are office-wide (the cross-floor `▲F{n}` cue + the `⬢gw` chip), always present
+/// so they render on a single-floor office too (C1).
+pub(crate) struct FooterStats<'a> {
+    pub counts: StateCounts,
+    pub per_floor: &'a [StateCounts; MAX_FLOORS],
+    pub gateway: Option<DaemonState>,
+}
 
 /// The two colors that characterize a theme in the picker swatch: its
 /// accent (`neon_brand`) and its dominant office surface (`carpet_base`).
@@ -95,13 +109,21 @@ pub fn source_warning_message(
 pub(crate) fn paint_footer(
     f: &mut ratatui::Frame<'_>,
     scene: &SceneState,
+    stats: &FooterStats<'_>,
     full_rect: Rect,
     theme: &pixtuoid_scene::theme::Theme,
     floor_info: Option<crate::tui::renderer::FloorInfo>,
     source_warning: Option<&str>,
 ) {
     use ratatui::text::Line;
-    let spans = build_status_spans(scene, full_rect.width, floor_info, theme, source_warning);
+    let spans = build_status_spans(
+        scene,
+        stats,
+        full_rect.width,
+        floor_info,
+        theme,
+        source_warning,
+    );
     // Base style on the whole row (label_idle) for parity with the old
     // single-Span footer: cells past the rendered spans (quit-only tier on a
     // wide-ish terminal) keep the muted footer tone rather than default.
@@ -118,67 +140,118 @@ pub(crate) fn paint_footer(
     );
 }
 
-/// Per-segment color role for the footer. The counting / tier-selection
-/// logic emits a list of `(text, role)` pieces once; the plain-string and
-/// colored-span renderers both consume that list, so their text is always
-/// byte-identical and only the color differs.
+/// Per-segment color role for the footer. The tier-selection logic emits a list
+/// of `(text, role)` pieces once; the plain-string and colored-span renderers
+/// both consume that list, so their text is always byte-identical and only the
+/// color differs.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum SegRole {
-    /// Labels, separators, counts, tools, padding, quit hint — muted.
+    /// Labels, separators, counts, padding, quit hint — muted.
     Neutral,
-    Active,
-    Waiting,
-    Idle,
+    /// An activity-state rung — delegates its hue to the shared `StateKind`
+    /// vocabulary (so footer/board/tooltip state colours can't drift).
+    State(StateKind),
+    /// A tool tally segment — hue from the TYPED `ToolKind` (C7), the same
+    /// monitor-glow colour the sprite shows, NEVER a re-parse of the name.
+    Tool(ToolKind),
+    /// The gateway `⬢gw` chip — hue by daemon liveness.
+    Gateway(DaemonState),
     /// Source-death warning (#157) — reuses the Waiting attention color
-    /// rather than adding a theme key (the un-themed-semantic-color audit's
-    /// nearest themed precedent for "needs your eyes").
+    /// rather than adding a theme key (the nearest themed "needs your eyes").
     Warning,
 }
 
 impl SegRole {
     fn color(self, theme: &pixtuoid_scene::theme::Theme) -> Color {
         match self {
-            SegRole::Neutral | SegRole::Idle => to_color(theme.ui.label_idle),
-            SegRole::Active => to_color(theme.ui.label_active),
-            SegRole::Waiting | SegRole::Warning => to_color(theme.ui.label_waiting),
+            SegRole::Neutral => to_color(theme.ui.label_idle),
+            SegRole::State(kind) => kind.color(theme),
+            SegRole::Tool(kind) => to_color(pixtuoid_scene::pixel_painter::tool_glow_for_kind(
+                kind,
+                &theme.tool_glow,
+            )),
+            SegRole::Gateway(state) => match state {
+                DaemonState::Idle => to_color(theme.ui.label_idle),
+                DaemonState::Busy => to_color(theme.ui.label_active),
+                DaemonState::Degraded | DaemonState::Down => to_color(theme.ui.label_waiting),
+            },
+            SegRole::Warning => to_color(theme.ui.label_waiting),
         }
     }
 }
 
-/// Build the footer as an ordered list of `(text, role)` segments, picking
-/// the widest tier (full / medium / minimal) that fits inside `term_width`
-/// alongside the fixed-right quit suffix. Single source of truth for both
-/// the plain-string footer (`build_status_summary`) and the colored footer
-/// (`build_status_spans`).
+/// The `⬢gw` chip's terse liveness word.
+fn gateway_label(state: DaemonState) -> &'static str {
+    match state {
+        DaemonState::Idle => "ok",
+        DaemonState::Busy => "busy",
+        DaemonState::Degraded => "err",
+        DaemonState::Down => "down",
+    }
+}
+
+/// Build the footer as an ordered list of `(text, role)` segments, picking the
+/// widest tier (full / medium / minimal) that fits inside `term_width` alongside
+/// the fixed-right quit suffix. Single source of truth for both the plain-string
+/// oracle (`build_status_summary`) and the colored footer (`build_status_spans`).
 ///
-/// Tier breakdown:
-///   * **full** (~50+ cells) — total count, per-state counts, top tool
-///     names with usage tallies, e.g. `12 agents · 3 active · 2 waiting
-///     · 7 idle · Edit×2 Bash×1`.
-///   * **medium** (~30+ cells) — compact letters, e.g. `12a · 3A · 2W · 7I`.
-///   * **minimal** — just the total, e.g. `12a`.
-///   * **fallback** — only the quit hint (any narrower terminal will
-///     truncate this naturally).
+/// Tier breakdown (state rungs carry glyph+count+letter — see `StateKind`):
+///   * **full** — `n/total`, a rung per non-zero state incl. a first-class
+///     Exiting rung, the aggregate tool tally, and the gateway chip, e.g.
+///     `13/20 · ●3 A · ◐2 W · ○7 I · ◌1 x · Edit×2 · ⬢gw ok`.
+///   * **medium** — compact rungs (no separators/exiting/tools/chip), e.g.
+///     `13/20 · ●3A ◐2W ○7I`.
+///   * **minimal** — the waiting alarm LEADS (survives to the narrowest tier)
+///     then the count, e.g. `▲2 · 13/20`.
+///   * **fallback** — only the quit hint.
 fn status_segments(
     scene: &SceneState,
+    stats: &FooterStats<'_>,
     term_width: u16,
     floor_info: Option<crate::tui::renderer::FloorInfo>,
     source_warning: Option<&str>,
 ) -> Vec<(String, SegRole)> {
+    let counts = stats.counts;
     // A dead source outranks the stats (#157): the counts below silently go
     // stale once a transport is gone, so the warning IS the status until
-    // restart. It survives every width — truncated to fit rather than
-    // tiered away — keeping the quit suffix (the advice is to restart).
+    // restart. It survives every width — truncated to fit rather than tiered
+    // away — but the waiting ALARM (`▲N need you`) rides along, the one
+    // must-not-miss datum even in a partially-frozen office (design DEATH tier).
     if let Some(warn) = source_warning {
         let w = term_width as usize;
         let quit = " [q]uit ";
         let avail = w.saturating_sub(quit.len());
-        let mut text = format!(" ⚠ {warn} ");
-        if text.chars().count() > avail {
-            text = text.chars().take(avail.saturating_sub(1)).collect();
-            text.push('…');
-        }
-        let pad = w.saturating_sub(text.chars().count() + quit.len());
+        let alarm = if counts.waiting > 0 {
+            format!(" · \u{25b2}{} need you", counts.waiting)
+        } else {
+            String::new()
+        };
+        // The `⚠ {warn}` body truncates to fit, but the `▲N need you` alarm is
+        // PINNED — the one must-not-miss datum rides through to the narrowest
+        // width (design DEATH tier). Only when the fixed chrome + alarm ALONE
+        // overflow does the alarm itself get cut. (The old code appended the
+        // alarm to `text` before a blanket truncate, so at narrow widths it was
+        // the TAIL cut first — the exact datum the comment promised to keep.)
+        let prefix = " \u{26a0} ";
+        let suffix = " ";
+        let full = format!("{prefix}{warn}{alarm}{suffix}");
+        let text = if display_width(&full) <= avail {
+            full
+        } else {
+            let chrome = display_width(prefix) + display_width(suffix) + display_width(&alarm);
+            let body_budget = avail.saturating_sub(chrome);
+            if body_budget >= 1 {
+                let mut body: String = warn.chars().take(body_budget.saturating_sub(1)).collect();
+                body.push('\u{2026}');
+                format!("{prefix}{body}{alarm}{suffix}")
+            } else {
+                // Too narrow even for the pinned alarm — truncate the whole line.
+                let mut t: String = full.chars().take(avail.saturating_sub(1)).collect();
+                t.push('\u{2026}');
+                t
+            }
+        };
+        let pad = w.saturating_sub(display_width(&text) + quit.len());
         let mut out = vec![(text, SegRole::Warning)];
         if pad > 0 {
             out.push((" ".repeat(pad), SegRole::Neutral));
@@ -187,101 +260,163 @@ fn status_segments(
         return out;
     }
 
-    let n = scene.agents.len();
-    // Multi-floor view always shows `n/total` so the total stays visible
-    // even when an agent migrates and per-floor matches total transiently.
+    // `n/total` — the floor's own agent count over the office total (the office
+    // total is the sum of the per-floor tallies, == FloorInfo.total_agents).
+    // Single-floor offices show just the floor count (no slash).
     let count_str = match floor_info {
-        Some(fi) => format!("{n}/{}", fi.total_agents),
-        None => format!("{n}"),
+        Some(fi) => format!("{}/{}", counts.total, fi.total_agents),
+        None => format!("{}", counts.total),
     };
-    let mut active = 0usize;
-    let mut waiting = 0usize;
-    let mut idle = 0usize;
-    let mut tool_counts: HashMap<&str, usize> = HashMap::new();
+
+    // The aggregate tool tally: group Active slots by their raw display token
+    // (kept verbatim) but carry the TYPED ToolKind for the hue (C7) — a Task
+    // slot displays "Delegating" yet tints via `kind = Task`, never the name.
+    let mut tool_counts: HashMap<&str, (ToolKind, usize)> = HashMap::new();
     for slot in scene.agents.values() {
-        match &slot.state {
-            ActivityState::Idle => idle += 1,
-            ActivityState::Waiting { .. } => waiting += 1,
-            ActivityState::Active { detail, .. } => {
-                active += 1;
-                if let Some(d) = detail.as_deref() {
-                    let token = d.split(|c: char| !c.is_alphanumeric()).next().unwrap_or("");
-                    if !token.is_empty() {
-                        *tool_counts.entry(token).or_insert(0) += 1;
-                    }
-                }
+        if let ActivityState::Active { detail, kind, .. } = &slot.state {
+            if let Some(token) = detail
+                .as_deref()
+                .and_then(|d| d.split(|c: char| !c.is_alphanumeric()).next())
+                .filter(|t| !t.is_empty())
+            {
+                tool_counts.entry(token).or_insert((*kind, 0)).1 += 1;
             }
         }
     }
+    let mut tools: Vec<(&str, ToolKind, usize)> = tool_counts
+        .iter()
+        .map(|(name, (kind, count))| (*name, *kind, *count))
+        .collect();
+    tools.sort_by(|a, b| b.2.cmp(&a.2).then(a.0.cmp(b.0)));
+    tools.truncate(4);
 
+    // Floor breadcrumb + the cross-floor `▲F{n}` cue: any OTHER floor holding a
+    // waiting agent (the one you'd want to switch to). Rides the right-flushed
+    // quit suffix so it's present at every tier that keeps the suffix.
+    let cross_floor = floor_info.and_then(|fi| {
+        let cur = fi.current.saturating_sub(1);
+        (0..MAX_FLOORS)
+            .find(|&fl| fl != cur && stats.per_floor[fl].waiting > 0)
+            .map(|fl| fl + 1)
+    });
     let floor_suffix = match floor_info {
-        Some(fi) => format!(" F{}/{} [\u{2191}\u{2193}]", fi.current, fi.total_floors),
+        Some(fi) => {
+            let cross = match cross_floor {
+                Some(n) => format!(" \u{25b2}F{n}"),
+                None => String::new(),
+            };
+            format!(
+                " F{}/{}{cross} [\u{2191}\u{2193}]",
+                fi.current, fi.total_floors
+            )
+        }
         None => String::new(),
     };
-    let quit_base = " [?]help [p]ause [t]heme [q]uit ";
-    let quit = format!("{floor_suffix}{quit_base}");
-    let tools_str = {
-        let mut tools: Vec<(&&str, &usize)> = tool_counts.iter().collect();
-        tools.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
-        tools
-            .iter()
-            .take(4)
-            .map(|(name, count)| format!("{name}×{count}"))
-            .collect::<Vec<_>>()
-            .join(" ")
-    };
+    let quit = format!("{floor_suffix} [?]help [p]ause [t]heme [q]uit ");
 
-    // Each tier is a list of (text, role) segments whose concatenation is
-    // exactly the old plain-string output for that tier.
-    let seg_full: Vec<(String, SegRole)> = if n == 0 {
-        vec![(format!(" {count_str} agents "), SegRole::Neutral)]
-    } else {
-        let tail = if tools_str.is_empty() {
-            " ".to_string()
-        } else {
-            format!(" · {tools_str} ")
-        };
-        vec![
-            (format!(" {count_str} agents · "), SegRole::Neutral),
-            (format!("{active} active"), SegRole::Active),
-            (" · ".to_string(), SegRole::Neutral),
-            (format!("{waiting} waiting"), SegRole::Waiting),
-            (" · ".to_string(), SegRole::Neutral),
-            (format!("{idle} idle"), SegRole::Idle),
-            (tail, SegRole::Neutral),
-        ]
-    };
-    // Narrow tiers use bare `n` — "5/12a" parses as "5 slash 12a" at a glance.
-    let seg_medium: Vec<(String, SegRole)> = vec![
-        (format!(" {n}a · "), SegRole::Neutral),
-        (format!("{active}A"), SegRole::Active),
-        (" · ".to_string(), SegRole::Neutral),
-        (format!("{waiting}W"), SegRole::Waiting),
-        (" · ".to_string(), SegRole::Neutral),
-        (format!("{idle}I"), SegRole::Idle),
-        (" ".to_string(), SegRole::Neutral),
-    ];
-    let seg_min: Vec<(String, SegRole)> = vec![(format!(" {n}a "), SegRole::Neutral)];
+    // --- tier builders --------------------------------------------------------
+    // An empty office reads as a bare count on every tier (the board owns the
+    // friendly "— office empty —").
+    if counts.total == 0 {
+        return finish_tier(
+            vec![(format!(" {count_str} "), SegRole::Neutral)],
+            &quit,
+            term_width,
+        );
+    }
 
-    let w = term_width as usize;
-    // Measure in display COLUMNS, not bytes: the footer carries single-column
-    // multi-byte glyphs (·, ×, ↑↓), so byte length over-counts width, biasing
-    // toward a narrower tier and short-padding the row. Matches the
-    // source-warning branch above (which already uses chars().count()).
-    let q = quit.chars().count();
-    for tier in [seg_full, seg_medium, seg_min] {
-        let stats_len: usize = tier.iter().map(|(s, _)| s.chars().count()).sum();
-        if stats_len + q <= w {
-            let pad = w.saturating_sub(stats_len + q);
-            let mut out = tier;
-            if pad > 0 {
-                out.push((" ".repeat(pad), SegRole::Neutral));
+    let seg_full = {
+        let mut segs = vec![(format!(" {count_str}"), SegRole::Neutral)];
+        for kind in StateKind::ALL {
+            let c = counts.get(kind);
+            if c == 0 {
+                continue;
             }
-            out.push((quit, SegRole::Neutral));
-            return out;
+            segs.push((" · ".to_string(), SegRole::Neutral));
+            segs.push((
+                format!("{}{} {}", kind.glyph(), c, kind.letter()),
+                SegRole::State(kind),
+            ));
+        }
+        if !tools.is_empty() {
+            segs.push((" · ".to_string(), SegRole::Neutral));
+            for (i, (name, kind, count)) in tools.iter().enumerate() {
+                if i > 0 {
+                    segs.push((" ".to_string(), SegRole::Neutral));
+                }
+                segs.push((format!("{name}\u{d7}{count}"), SegRole::Tool(*kind)));
+            }
+        }
+        if let Some(g) = stats.gateway {
+            segs.push((" · ".to_string(), SegRole::Neutral));
+            segs.push((
+                format!("\u{2b22}gw {}", gateway_label(g)),
+                SegRole::Gateway(g),
+            ));
+        }
+        segs.push((" ".to_string(), SegRole::Neutral));
+        segs
+    };
+
+    // Medium: compact rungs for the three resident states (exiting/tools/chip
+    // drop out for width); space-separated `{glyph}{count}{letter}`.
+    let seg_medium = {
+        let mut rungs: Vec<(String, SegRole)> = Vec::new();
+        for kind in [StateKind::Active, StateKind::Waiting, StateKind::Idle] {
+            let c = counts.get(kind);
+            if c == 0 {
+                continue;
+            }
+            if !rungs.is_empty() {
+                rungs.push((" ".to_string(), SegRole::Neutral));
+            }
+            rungs.push((
+                format!("{}{}{}", kind.glyph(), c, kind.letter()),
+                SegRole::State(kind),
+            ));
+        }
+        let mut segs = vec![(format!(" {count_str} \u{b7} "), SegRole::Neutral)];
+        segs.extend(rungs);
+        segs.push((" ".to_string(), SegRole::Neutral));
+        segs
+    };
+
+    // Minimal: the waiting alarm LEADS (the last stat to survive), then count.
+    let seg_min = if counts.waiting > 0 {
+        vec![
+            (
+                format!(" \u{25b2}{}", counts.waiting),
+                SegRole::State(StateKind::Waiting),
+            ),
+            (format!(" \u{b7} {count_str} "), SegRole::Neutral),
+        ]
+    } else {
+        vec![(format!(" {count_str} "), SegRole::Neutral)]
+    };
+
+    for tier in [seg_full, seg_medium, seg_min] {
+        let stats_len: usize = tier.iter().map(|(s, _)| display_width(s)).sum();
+        if stats_len + display_width(&quit) <= term_width as usize {
+            return finish_tier(tier, &quit, term_width);
         }
     }
     vec![(quit, SegRole::Neutral)]
+}
+
+/// Right-flush a chosen stats tier: pad the gap between it and the fixed quit
+/// suffix so `[q]uit` sits at the exact edge (display-column measured).
+fn finish_tier(
+    mut tier: Vec<(String, SegRole)>,
+    quit: &str,
+    term_width: u16,
+) -> Vec<(String, SegRole)> {
+    let stats_len: usize = tier.iter().map(|(s, _)| display_width(s)).sum();
+    let pad = (term_width as usize).saturating_sub(stats_len + display_width(quit));
+    if pad > 0 {
+        tier.push((" ".repeat(pad), SegRole::Neutral));
+    }
+    tier.push((quit.to_string(), SegRole::Neutral));
+    tier
 }
 
 /// Plain-string footer — renders `status_segments` to text. Test-only: it
@@ -291,126 +426,235 @@ fn status_segments(
 #[cfg(test)]
 pub(crate) fn build_status_summary(
     scene: &SceneState,
+    stats: &FooterStats<'_>,
     term_width: u16,
     floor_info: Option<crate::tui::renderer::FloorInfo>,
     source_warning: Option<&str>,
 ) -> String {
-    status_segments(scene, term_width, floor_info, source_warning)
+    status_segments(scene, stats, term_width, floor_info, source_warning)
         .into_iter()
         .map(|(s, _)| s)
         .collect()
 }
 
 /// Colored footer — same segments as `build_status_summary`, each tinted by
-/// its state role so active/waiting/idle counts scan by hue.
+/// its role so state / tool / gateway pieces scan by hue.
 pub(crate) fn build_status_spans<'a>(
     scene: &SceneState,
+    stats: &FooterStats<'_>,
     term_width: u16,
     floor_info: Option<crate::tui::renderer::FloorInfo>,
     theme: &pixtuoid_scene::theme::Theme,
     source_warning: Option<&str>,
 ) -> Vec<Span<'a>> {
-    status_segments(scene, term_width, floor_info, source_warning)
+    status_segments(scene, stats, term_width, floor_info, source_warning)
         .into_iter()
         .map(|(s, role)| Span::styled(s, Style::default().fg(role.color(theme))))
         .collect()
 }
 
+/// The wall board's text width + cell-origin pin to the painted neon panel's dark
+/// INTERIOR (spine 2), so the lit sign's letters can never overrun the glowing
+/// frame — the `PANTRY_COFFEE_COLS` anti-drift precedent. `NEON_PANEL_INNER_W` =
+/// the outer panel minus its `NEON_PANEL_BORDER` on each side (laying text to the
+/// full outer `NEON_PANEL_W` overran the frame — the board-overflow bug). Only the
+/// horizontal derives; the 3-row height + the `+1` cell ROW stay literal (the
+/// half-block 2:1 vertical is a different coordinate system — C2).
+pub(super) const BOARD_W: u16 = pixtuoid_scene::pixel_painter::NEON_PANEL_INNER_W;
+
+/// The board text's top-left terminal cell = the neon panel's dark interior origin
+/// (`NEON_PANEL_INNER_X` px, 1:1 with cells; the `+1` row is the half-block 2:1
+/// vertical, kept literal — C2). BOTH `paint_wall_display` and `star_hit_rect`
+/// read THIS one helper, so the painted text and the click target share an origin.
+fn board_cell_origin(scene_rect: Rect) -> (u16, u16) {
+    (
+        scene_rect.x + pixtuoid_scene::pixel_painter::NEON_PANEL_INNER_X,
+        scene_rect.y + 1,
+    )
+}
+
+/// The board's L1 ★ CTA text — the ONE definition the L1 painter renders AND
+/// `star_hit_rect` measures, so the clickable target can't drift from the paint.
+const BOARD_STAR: &str = "\u{2605} Star";
+
+/// The board's plain-English "mood pulse" — one `(text, colour-key)` segment per
+/// non-zero present state, echoing the SHARED `StateCounts` the footer reads (not
+/// a second live-only derivation, the old footer-vs-board disagreement).
+///
+/// The ▲ "needs-you" beacon LEADS (waiting first) — on the board, waiting is the
+/// amber attention flag, the same beacon the footer's alarm tier uses; the formal
+/// ◐ glyph stays on the detail surfaces. Counts are NUMERIC, never one-dot-per-
+/// agent (the old `●`-repeat overflowed an uncapped office); the words abbreviate
+/// (`wt`/`wk`/`id`) when the full form would overrun the fixed panel. Exiting
+/// agents are absent by design — a walkout isn't the office mood. `None` colour =
+/// the neutral `— office empty —` fallback.
+pub(super) fn board_mood_segments(counts: StateCounts) -> Vec<(String, Option<StateKind>)> {
+    if counts.active + counts.waiting + counts.idle == 0 {
+        return vec![("\u{2014} office empty \u{2014}".to_string(), None)];
+    }
+    // ▲ leads (waiting beacon), then ● work, ○ idle. Waiting borrows the alarm
+    // triangle, not StateKind::Waiting's ◐ — the board is the lit "needs-you" sign.
+    let build = |words: [&str; 3]| -> Vec<(String, Option<StateKind>)> {
+        let rows = [
+            (counts.waiting, '\u{25b2}', words[0], StateKind::Waiting),
+            (counts.active, '\u{25cf}', words[1], StateKind::Active),
+            (counts.idle, '\u{25cb}', words[2], StateKind::Idle),
+        ];
+        let mut segs: Vec<(String, Option<StateKind>)> = Vec::new();
+        for (n, glyph, word, kind) in rows {
+            if n == 0 {
+                continue;
+            }
+            if !segs.is_empty() {
+                segs.push(("  ".to_string(), None));
+            }
+            segs.push((format!("{glyph}{n} {word}"), Some(kind)));
+        }
+        segs
+    };
+    let full = build(["wait", "work", "idle"]);
+    let width: usize = full.iter().map(|(t, _)| display_width(t)).sum();
+    if width <= BOARD_W as usize {
+        full
+    } else {
+        build(["wt", "wk", "id"])
+    }
+}
+
+/// The in-scene neon wall board — the office's "lit sign": brand + ★ CTA (L1), the
+/// mood pulse echoing the shared counts (L2), and the office context row (L3:
+/// uptime + floor + gateway chip). It owns nothing critical exclusively (it may
+/// clip off-screen); the must-not-miss signals live in the footer. `counts` is the
+/// SAME `scene_stats` the footer reads (spine 1); `floor_info`/`gateway` are the
+/// always-present office-wide `DrawCtx` fields (C1). The scrolling ticker is gone.
+#[allow(clippy::too_many_arguments)] // a painter's distinct inputs (like paint_footer)
 pub(crate) fn paint_wall_display(
     f: &mut ratatui::Frame<'_>,
     scene: &SceneState,
     scene_rect: Rect,
     now: SystemTime,
-    ticker: &TickerQueue,
+    counts: StateCounts,
+    floor_info: Option<crate::tui::renderer::FloorInfo>,
+    gateway: Option<DaemonState>,
     theme: &pixtuoid_scene::theme::Theme,
 ) {
     use ratatui::style::Modifier;
     use ratatui::text::Line;
 
-    let cell_x = scene_rect.x + 2;
-    let cell_y = scene_rect.y + 1;
+    let (cell_x, cell_y) = board_cell_origin(scene_rect);
 
-    let live: Vec<&pixtuoid_core::AgentSlot> = scene
-        .agents
-        .values()
-        .filter(|a| a.exiting_at.is_none())
-        .collect();
-    let active = live
-        .iter()
-        .filter(|a| matches!(a.state, ActivityState::Active { .. }))
-        .count();
-    let waiting = live
-        .iter()
-        .filter(|a| matches!(a.state, ActivityState::Waiting { .. }))
-        .count();
-    let idle = live.len() - active - waiting;
-
+    // L1 — brand + ★ Star CTA, the star right-flushed to the panel edge so its
+    // left edge lands at `cell_x + BOARD_W - star_w` — the SAME position
+    // `star_hit_rect` derives the click target from. The `.max(1)` floor keeps a
+    // ≥1-col gap; the assert is STRICT (`<`) so the NATURAL gap is already ≥1,
+    // making `.max(1)` a no-op and paint == hit-rect. At the exact-fit boundary
+    // (`brand+star == BOARD_W`) `.max(1)` would shove the star one col past the
+    // hit-rect (and clip it), so `<` forbids that boundary rather than `<=`.
     let version = env!("CARGO_PKG_VERSION");
-    let top_spans = vec![
+    let brand = format!("pixtuoid v{version}");
+    let star_w = display_width(BOARD_STAR);
+    let gap = (BOARD_W as usize)
+        .saturating_sub(display_width(&brand) + star_w)
+        .max(1);
+    debug_assert!(
+        display_width(&brand) + star_w < BOARD_W as usize,
+        "brand+star must STRICTLY fit the panel (natural gap ≥1) for the right-flush = star_hit_rect pairing"
+    );
+    let top_line = Line::from(vec![
         Span::styled(
-            format!("pixtuoid v{version}"),
+            brand,
             Style::default()
                 .fg(to_color(theme.ui.neon_brand))
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::raw(" "),
+        Span::raw(" ".repeat(gap)),
         Span::styled(
-            "\u{2605} Star",
+            BOARD_STAR,
             Style::default()
                 .fg(to_color(theme.ui.neon_star))
                 .add_modifier(Modifier::BOLD),
         ),
-    ];
-    let top_line = Line::from(top_spans);
+    ]);
 
-    let oldest = live
-        .iter()
+    // L2 — the mood pulse (shared counts, ▲ beacon leads).
+    let mood_spans: Vec<Span> = board_mood_segments(counts)
+        .into_iter()
+        .map(|(text, kind)| {
+            let color = kind.map_or(to_color(theme.ui.tooltip_dim), |k| k.color(theme));
+            Span::styled(text, Style::default().fg(color))
+        })
+        .collect();
+    let mood_line = Line::from(mood_spans);
+
+    // L3 — office context: uptime (dim) · floor · gateway chip. Uptime spans the
+    // whole office (oldest agent, exiting included), so it doesn't dip on a walkout.
+    let oldest = scene
+        .agents
+        .values()
         .filter_map(|a| now.duration_since(a.created_at).ok())
         .max()
         .unwrap_or_default();
-    let uptime_secs = oldest.as_secs();
-    let uptime_str = format!("\u{2191}{}", compact_hms(uptime_secs));
+    let mut ctx_spans = vec![Span::styled(
+        format!("\u{2191}{}", compact_hms(oldest.as_secs())),
+        Style::default().fg(to_color(theme.ui.tooltip_dim)),
+    )];
+    if let Some(fi) = floor_info {
+        ctx_spans.push(Span::raw("  "));
+        ctx_spans.push(Span::styled(
+            format!("F{}/{}", fi.current, fi.total_floors),
+            Style::default().fg(to_color(theme.ui.tooltip_dim)),
+        ));
+    }
+    if let Some(state) = gateway {
+        ctx_spans.push(Span::raw("  "));
+        ctx_spans.push(Span::styled(
+            format!("\u{2b22}gw {}", gateway_label(state)),
+            Style::default().fg(SegRole::Gateway(state).color(theme)),
+        ));
+    }
+    let ctx_line = Line::from(ctx_spans);
 
-    let bot_line = Line::from(vec![
-        Span::styled(
-            "\u{25cf}".repeat(active),
-            Style::default().fg(to_color(theme.ui.label_active)),
-        ),
-        Span::styled(
-            "\u{25cf}".repeat(waiting),
-            Style::default().fg(to_color(theme.ui.label_waiting)),
-        ),
-        Span::styled(
-            "\u{25cf}".repeat(idle),
-            Style::default().fg(to_color(theme.ui.label_idle)),
-        ),
-        Span::raw("  "),
-        Span::styled(uptime_str, Style::default().fg(Color::DarkGray)),
-    ]);
-
-    let ticker_width = 28usize;
-    let visible = ticker.visible(ticker_width, now);
-    let ticker_line = Line::from(Span::styled(
-        visible,
-        Style::default().fg(to_color(theme.ui.neon_ticker)),
-    ));
-
-    let w = 30u16;
     if let Some(r) = clip_widget_rect(
         Rect {
             x: cell_x,
             y: cell_y,
-            width: w,
+            width: BOARD_W,
             height: 3,
         },
         scene_rect,
     ) {
-        f.render_widget(Paragraph::new(vec![top_line, bot_line, ticker_line]), r);
+        f.render_widget(Paragraph::new(vec![top_line, mood_line, ctx_line]), r);
     }
 }
 
-/// URL shown on the "More details" line and opened on click.
+/// The project repository — opened when the board's ★ Star CTA is clicked.
+pub(crate) const REPO_URL: &str = "https://github.com/IvanWng97/pixtuoid";
+/// URL shown on the version popup's "More details" line and opened on click:
+/// `REPO_URL` + `/releases`. Kept a full literal (const &str can't `concat!`);
+/// the two are pinned together by `version_popup_url_is_repo_releases`.
 pub(crate) const VERSION_POPUP_URL: &str = "https://github.com/IvanWng97/pixtuoid/releases";
+
+/// The precise screen rect of the board's `★ Star` CTA span, clipped to the
+/// scene (`None` when it clips away on a very narrow terminal). Derived from the
+/// SAME board geometry the L1 painter uses — `cell_x = scene.x + 2`, `cell_y =
+/// scene.y + 1`, and the right-flush to `BOARD_W` — so the click target can't
+/// drift from the painted star (the phantom-launch class the version-popup
+/// url-rect also guards). Replaces the loose `hit_test_branding` (cols `1..31`),
+/// which fired anywhere on the top-left row (C9).
+pub(crate) fn star_hit_rect(scene_rect: Rect) -> Option<Rect> {
+    let (cell_x, cell_y) = board_cell_origin(scene_rect);
+    let star_w = display_width(BOARD_STAR) as u16;
+    let star_x = cell_x + BOARD_W.saturating_sub(star_w);
+    clip_widget_rect(
+        Rect {
+            x: star_x,
+            y: cell_y,
+            width: star_w,
+            height: 1,
+        },
+        scene_rect,
+    )
+}
 /// Prefix rendered before the URL. Its byte-length determines the URL's
 /// click-rect x-offset; keep `paint_version_popup` and
 /// `version_popup_url_rect` consistent by using this constant.
@@ -581,6 +825,39 @@ mod hud_tests {
             width: w,
             height: h,
         }
+    }
+
+    #[test]
+    fn version_popup_url_is_repo_releases() {
+        // The two URL consts can't `concat!` (const &str), so pin them here — the
+        // version popup opens the repo's releases, the ★ CTA opens the repo root.
+        assert_eq!(VERSION_POPUP_URL, format!("{REPO_URL}/releases"));
+    }
+
+    #[test]
+    fn star_hit_rect_fits_and_truncates() {
+        let star_w = display_width(BOARD_STAR) as u16; // "★ Star" == 6 cols
+                                                       // cell_x = the panel INTERIOR origin; the star right-flushes to the
+                                                       // interior's right edge, which must land INSIDE the outer frame.
+        let inner_x = pixtuoid_scene::pixel_painter::NEON_PANEL_INNER_X;
+        let star_x = inner_x + BOARD_W - star_w;
+        let wide = star_hit_rect(full_bounds(120, 44)).expect("star fits");
+        assert_eq!(
+            (wide.x, wide.y, wide.width, wide.height),
+            (star_x, 1, star_w, 1)
+        );
+        assert!(wide.x + wide.width <= 120, "clipped within the scene");
+        // The star's right edge sits at or before the panel's inner-right edge, so
+        // it never spills onto/past the glowing frame (the overflow bug).
+        assert!(
+            wide.x + wide.width <= inner_x + BOARD_W,
+            "star must land inside the panel interior"
+        );
+        // A cramped scene truncates the span to its visible columns.
+        let narrow = star_hit_rect(full_bounds(star_x + 2, 44)).expect("partial star");
+        assert_eq!(narrow.width, 2, "clipped to the 2 visible cols");
+        // Too narrow to show any of the star ⇒ no click target (no phantom launch).
+        assert!(star_hit_rect(full_bounds(star_x, 44)).is_none());
     }
 
     #[test]
@@ -799,14 +1076,20 @@ mod hud_tests {
         scene.agents.insert(slot.agent_id, slot);
         // No '×' tool breakdown token survives — the empty leading token was
         // skipped, so the active agent contributes no tool count.
-        let line = build_status_summary(&scene, 200, None, None);
+        let pf = crate::tui::widgets::per_floor_counts(&scene);
+        let stats = FooterStats {
+            counts: crate::tui::widgets::scene_stats(&scene),
+            per_floor: &pf,
+            gateway: None,
+        };
+        let line = build_status_summary(&scene, &stats, 200, None, None);
         assert!(
             !line.contains('\u{00d7}'),
             "empty leading token must not produce a tool count: {line}"
         );
         assert!(
-            line.contains("1 active"),
-            "active count still shows: {line}"
+            line.contains("\u{25cf}1 A"),
+            "active rung still shows: {line}"
         );
     }
 
@@ -846,8 +1129,14 @@ mod hud_tests {
         let mut scene = SceneState::uniform(16);
         scene.agents.insert(slot.agent_id, slot);
         let width: u16 = 200; // wide enough that the full tier is selected either way
-        let segs = status_segments(&scene, width, None, None);
-        let cols: usize = segs.iter().map(|(s, _)| s.chars().count()).sum();
+        let pf = crate::tui::widgets::per_floor_counts(&scene);
+        let stats = FooterStats {
+            counts: crate::tui::widgets::scene_stats(&scene),
+            per_floor: &pf,
+            gateway: None,
+        };
+        let segs = status_segments(&scene, &stats, width, None, None);
+        let cols: usize = segs.iter().map(|(s, _)| display_width(s)).sum();
         assert_eq!(
             cols, width as usize,
             "footer must fill the full width in display columns: {segs:?}"
@@ -855,6 +1144,57 @@ mod hud_tests {
         assert!(
             segs.iter().any(|(s, _)| s.contains('\u{00d7}')),
             "full tier (with the tool breakdown) expected at width 200: {segs:?}"
+        );
+    }
+
+    // DEATH tier: a source-death warning replaces the stats, but the `▲N need you`
+    // alarm is the one must-not-miss datum — it must survive to a width so narrow
+    // the warning body itself is truncated. (Regression: the alarm used to be
+    // appended to the text BEFORE a blanket truncate, so it was the tail cut first.)
+    #[test]
+    fn death_tier_pins_the_waiting_alarm_through_the_narrowest_width() {
+        use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex};
+        use std::path::PathBuf;
+        use std::sync::Arc;
+        let slot = AgentSlot {
+            agent_id: AgentId::from_transcript_path("/p/wait.jsonl"),
+            source: Arc::from("cc"),
+            session_id: Arc::from("s"),
+            cwd: Arc::from(PathBuf::from("/p").as_path()),
+            label: "w".into(),
+            state: ActivityState::Waiting {
+                reason: Arc::from("permission"),
+            },
+            state_started_at: SystemTime::UNIX_EPOCH,
+            created_at: SystemTime::UNIX_EPOCH,
+            last_event_at: SystemTime::UNIX_EPOCH,
+            exiting_at: None,
+            pending_idle_at: None,
+            desk_index: GlobalDeskIndex(0),
+            floor_idx: 0,
+            tool_call_count: 0,
+            active_ms: 0,
+            unknown_cwd: false,
+            parent_id: None,
+        };
+        let mut scene = SceneState::uniform(16);
+        scene.agents.insert(slot.agent_id, slot);
+        let pf = crate::tui::widgets::per_floor_counts(&scene);
+        let stats = FooterStats {
+            counts: crate::tui::widgets::scene_stats(&scene),
+            per_floor: &pf,
+            gateway: None,
+        };
+        // A warning long enough that the body must truncate at this width.
+        let warn = "transport pixtuoid-hook died: connection refused after 3 retries";
+        let line = build_status_summary(&scene, &stats, 40, None, Some(warn));
+        assert!(
+            line.contains("\u{25b2}1 need you"),
+            "the ▲N alarm must survive even when the warning body is truncated: {line}"
+        );
+        assert!(
+            line.contains('\u{2026}'),
+            "the warning body itself IS truncated at this width (proving the alarm was pinned, not merely fit): {line}"
         );
     }
 }
