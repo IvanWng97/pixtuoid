@@ -1,15 +1,16 @@
 ---
-import { asset, type EnrichedShowcaseChannel, type ShowcaseVariant } from '../consts';
+import {
+  asset,
+  type EnrichedShowcaseChannel,
+  type EnrichedVariantGroup,
+  type ShowcaseVariant,
+} from '../consts';
 
 const { channel: c, active } = Astro.props as {
   channel: EnrichedShowcaseChannel;
   active: boolean;
 };
 const isClip = c.kind === 'clip';
-// `live` renders as a static poster fallback for now — the interactive wasm
-// office + time slider + per-group chips (c.groups) land in the next task;
-// this scaffold only keeps the build from crashing on a channel with no
-// `variants` (c.variantGroups resolves separately, via c.groups).
 const isLive = c.kind === 'live';
 const defVariant: ShowcaseVariant | null = c.variants.length
   ? (c.variants.find((v: ShowcaseVariant) => v.featured) ?? c.variants[0])
@@ -20,6 +21,16 @@ const imgAlt = defVariant
   : isLive
     ? `pixtuoid office — live (${c.label.toLowerCase()})`
     : '';
+
+// A live channel's default chip per group — the vibe a visitor should land
+// on (weather → `clear`, theme → `normal`) — falling back to the group's
+// first variant if that id isn't present.
+const DEFAULT_VARIANT_ID: Record<string, string> = { weather: 'clear', theme: 'normal' };
+function defaultVariant(g: EnrichedVariantGroup): ShowcaseVariant | undefined {
+  const wanted = DEFAULT_VARIANT_ID[g.key];
+  const preferred = wanted ? g.variants.find((v) => v.id === wanted) : undefined;
+  return preferred ?? g.variants[0];
+}
 ---
 
 <figure
@@ -64,14 +75,24 @@ const imgAlt = defVariant
         {active && <source src={asset(`demos/${c.asset}.mp4`)} type="video/mp4" />}
       </video>
     ) : isLive ? (
-      <img
-        class="terminal__screen px"
-        width={c.w ?? 1600}
-        height={c.h ?? 1440}
-        src={c.poster ? asset(`demos/${c.poster}`) : undefined}
-        alt={imgAlt}
-        loading="lazy"
-      />
+      <div class="vibing__screen">
+        <img
+          class="terminal__screen px vibing__poster"
+          width={c.w ?? 320}
+          height={c.h ?? 180}
+          src={active && c.poster ? asset(`demos/${c.poster}`) : undefined}
+          data-src={active || !c.poster ? undefined : asset(`demos/${c.poster}`)}
+          data-vibing-poster
+          alt={imgAlt}
+          loading="lazy"
+        />
+        <canvas
+          class="terminal__screen px"
+          width={c.w ?? 320}
+          height={c.h ?? 180}
+          data-vibing-canvas
+        />
+      </div>
     ) : (
       <img
         class="terminal__screen px"
@@ -86,24 +107,71 @@ const imgAlt = defVariant
   }
   <span class="terminal__scan" aria-hidden="true"></span>
   {
-    c.variants.length > 0 && (
-      <div class="stage__osd" role="group" aria-label={c.label.toLowerCase()}>
-        {c.variants.map((v: ShowcaseVariant) => (
-          <button
-            class:list={['osd__chip', { 'is-active': v.id === defVariant!.id }]}
-            aria-pressed={v.id === defVariant!.id ? 'true' : 'false'}
-            data-src={asset(`demos/${v.src}`)}
-            data-title={`pixtuoid — CH ${c.ch} ${c.label} · ${v.name}`}
-            data-alt={`pixtuoid office — ${v.name} (${c.label.toLowerCase()})`}
-            data-accent={v.accent}
-            data-accent2={v.accent2}
-            style={v.accent ? `--chip:${v.accent}` : undefined}
-          >
-            {v.accent && <span class="osd__swatch" />}
-            {v.name}
-          </button>
-        ))}
-      </div>
+    isLive ? (
+      <>
+        {c.timeSlider && (
+          <label class="vibing__time">
+            time
+            <input
+              type="range"
+              min="0"
+              max="24"
+              step="0.5"
+              value="18"
+              data-vibing-time
+              aria-label="time of day"
+            />
+            <span data-vibing-time-label>18:00</span>
+          </label>
+        )}
+        {c.groups.map((g: EnrichedVariantGroup) => {
+          const def = defaultVariant(g);
+          const dataKey = `data-${g.key}`;
+          return (
+            <div
+              class="stage__osd"
+              data-group={g.key}
+              data-retint={g.retint ? 'true' : undefined}
+              role="group"
+              aria-label={g.label}
+            >
+              {g.variants.map((v: ShowcaseVariant) => (
+                <button
+                  class:list={['osd__chip', { 'is-active': v.id === def?.id }]}
+                  aria-pressed={v.id === def?.id ? 'true' : 'false'}
+                  {...{ [dataKey]: v.id }}
+                  data-accent={v.accent}
+                  data-accent2={v.accent2}
+                  style={v.accent ? `--chip:${v.accent}` : undefined}
+                >
+                  {v.accent && <span class="osd__swatch" />}
+                  {v.name}
+                </button>
+              ))}
+            </div>
+          );
+        })}
+      </>
+    ) : (
+      c.variants.length > 0 && (
+        <div class="stage__osd" role="group" aria-label={c.label.toLowerCase()}>
+          {c.variants.map((v: ShowcaseVariant) => (
+            <button
+              class:list={['osd__chip', { 'is-active': v.id === defVariant!.id }]}
+              aria-pressed={v.id === defVariant!.id ? 'true' : 'false'}
+              data-src={asset(`demos/${v.src}`)}
+              data-title={`pixtuoid — CH ${c.ch} ${c.label} · ${v.name}`}
+              data-alt={`pixtuoid office — ${v.name} (${c.label.toLowerCase()})`}
+              data-accent={v.accent}
+              data-accent2={v.accent2}
+              style={v.accent ? `--chip:${v.accent}` : undefined}
+            >
+              {v.accent && <span class="osd__swatch" />}
+              {v.name}
+            </button>
+          ))}
+        </div>
+      )
     )
   }
   <figcaption class="stage__caption">{c.caption}</figcaption>
@@ -124,6 +192,45 @@ const imgAlt = defVariant
   .stage .terminal__screen {
     width: 100%;
     height: auto;
+  }
+  /* poster is the in-flow base layer (sizes the wrapper via its intrinsic
+     w/h attrs); the canvas paints over it once the controller (Task 8)
+     boots — no z-index needed, painting order already puts the absolutely
+     positioned canvas above the static poster. */
+  .vibing__screen {
+    position: relative;
+  }
+  .vibing__screen .vibing__poster {
+    position: relative;
+  }
+  .vibing__screen [data-vibing-canvas] {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    /* override .terminal__screen's opaque `background: var(--screen)` — an
+       untouched canvas has no drawn pixels, so an opaque bg would black out
+       the poster underneath until the controller (Task 8) starts painting */
+    background: transparent;
+  }
+  .vibing__time {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.8rem 0.9rem 0;
+    font-family: var(--font-mono);
+    font-size: 0.84rem;
+    font-weight: 700;
+    color: var(--fg-muted);
+  }
+  .vibing__time input[type='range'] {
+    flex: 1;
+    accent-color: var(--accent);
+  }
+  .vibing__time span {
+    min-width: 3.4em;
+    text-align: right;
+    color: var(--fg);
   }
   .stage__osd {
     display: flex;
