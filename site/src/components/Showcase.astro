@@ -268,7 +268,9 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
         scrubHour = parseFloat(vibingTime.value);
         vStart = Date.now(); // re-anchor: the office keeps living at this hour
         if (vibingTimeLabel) {
-          const hh = String(Math.floor(scrubHour)).padStart(2, '0');
+          // Slider max is 24 — wrap the hour so the top of the range reads 00:00,
+          // not 24:00 (setHours(24) already rolls to next-day midnight).
+          const hh = String(Math.floor(scrubHour) % 24).padStart(2, '0');
           const mm = String(Math.round((scrubHour % 1) * 60)).padStart(2, '0');
           vibingTimeLabel.textContent = hh + ':' + mm;
         }
