@@ -43,6 +43,45 @@ fn to_color(c: Rgb) -> Color {
     Color::Rgb(c.r, c.g, c.b)
 }
 
+// --- Shared scene stats (spine 1: footer + board agree) -----------------------
+// ONE per-scene activity tally with ONE exiting-first bucketing policy, computed
+// once per frame and handed to BOTH the footer (authoritative integers) and the
+// wall board (plain-English echo) so the two surfaces can never disagree — the
+// historical footer(counts-all)-vs-board(counts-live) walkout drift.
+
+/// Per-scene tally of agent activity states. `total == active + waiting + idle +
+/// exiting` (debug-asserted). `exiting` is a first-class bucket, not folded into
+/// idle, so the footer can render an authoritative `n/total` incl. walkouts.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct StateCounts {
+    pub active: usize,
+    pub waiting: usize,
+    pub idle: usize,
+    pub exiting: usize,
+    pub total: usize,
+}
+
+/// Bucket every agent in `scene`. An **exiting** agent (walking out) counts as
+/// `exiting` regardless of its last activity state — the single policy that fixes
+/// the footer-vs-board disagreement mid-walkout.
+pub(crate) fn scene_stats(scene: &SceneState) -> StateCounts {
+    let mut c = StateCounts::default();
+    for slot in scene.agents.values() {
+        c.total += 1;
+        if slot.exiting_at.is_some() {
+            c.exiting += 1;
+            continue;
+        }
+        match slot.state {
+            ActivityState::Active { .. } => c.active += 1,
+            ActivityState::Waiting { .. } => c.waiting += 1,
+            ActivityState::Idle => c.idle += 1,
+        }
+    }
+    debug_assert_eq!(c.active + c.waiting + c.idle + c.exiting, c.total);
+    c
+}
+
 // --- Shared borderless-card backing (shadow + clear + bg fill) ----------------
 // The ONE place the "block board" look every borderless card sits on is defined.
 // `borderless_panel` (modals) and the framed tooltips both delegate to
@@ -312,6 +351,79 @@ mod tests {
     use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex};
     use std::path::PathBuf;
     use std::sync::Arc;
+
+    // --- scene_stats -------------------------------------------------------
+
+    fn stat_slot(path: &str, state: ActivityState, exiting: bool) -> AgentSlot {
+        let now = SystemTime::UNIX_EPOCH;
+        AgentSlot {
+            agent_id: AgentId::from_transcript_path(path),
+            source: Arc::from("claude-code"),
+            session_id: Arc::from("s"),
+            cwd: Arc::from(PathBuf::from("/p").as_path()),
+            label: "x".into(),
+            state,
+            state_started_at: now,
+            created_at: now,
+            last_event_at: now,
+            exiting_at: exiting.then_some(now),
+            pending_idle_at: None,
+            desk_index: GlobalDeskIndex(0),
+            floor_idx: 0,
+            tool_call_count: 0,
+            active_ms: 0,
+            unknown_cwd: false,
+            parent_id: None,
+        }
+    }
+
+    #[test]
+    fn scene_stats_buckets_exiting_first_and_totals() {
+        use pixtuoid_core::state::ToolKind;
+        let active = || ActivityState::Active {
+            tool_use_id: None,
+            detail: None,
+            kind: ToolKind::Other,
+        };
+        let mut scene = SceneState::uniform(16);
+        for s in [
+            // An exiting agent buckets as EXITING even though its last state is Active —
+            // the one policy that keeps the footer and board from disagreeing on a walkout.
+            stat_slot("/exiting-active.jsonl", active(), true),
+            stat_slot("/live-active.jsonl", active(), false),
+            stat_slot(
+                "/waiting.jsonl",
+                ActivityState::Waiting {
+                    reason: Arc::from("perm"),
+                },
+                false,
+            ),
+            stat_slot("/idle.jsonl", ActivityState::Idle, false),
+        ] {
+            scene.agents.insert(s.agent_id, s);
+        }
+        let c = scene_stats(&scene);
+        assert_eq!(
+            c.exiting, 1,
+            "an exiting agent buckets as exiting even mid-Active"
+        );
+        assert_eq!(c.active, 1, "only the LIVE Active counts as active");
+        assert_eq!(c.waiting, 1);
+        assert_eq!(c.idle, 1);
+        assert_eq!(c.total, 4);
+        assert_eq!(
+            c.active + c.waiting + c.idle + c.exiting,
+            c.total,
+            "the four buckets must partition the total"
+        );
+    }
+
+    #[test]
+    fn scene_stats_empty_scene_is_all_zero() {
+        let c = scene_stats(&SceneState::uniform(16));
+        assert_eq!(c, StateCounts::default());
+        assert_eq!(c.total, 0);
+    }
 
     // --- marquee_window ----------------------------------------------------
 
