@@ -540,7 +540,7 @@ test('nav menus + docs: dropdown, TOC scrollspy, 404, mobile burger', async ({ p
     'aria-current',
     'location'
   );
-  // The Docs dropdown is the ONLY route to the six doc pages.
+  // The Docs dropdown is the ONLY route to the five doc pages.
   const btn = page.locator('#docs-btn');
   await btn.click();
   await expect(page.locator('#docs-menu')).toHaveClass(/is-open/);

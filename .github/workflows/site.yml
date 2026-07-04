@@ -5,11 +5,11 @@ on:
   # `npm run lint && npm run check` itself), so building here on a main push too
   # was a redundant 2nd Astro build per push. Only `format:check` is unique to
   # this workflow — auto-fixable + caught on every PR (everything lands via PR).
-  # site/ also renders ../Cargo.toml + ../docs/{CONFIGURATION,ARCHITECTURE,CONTRIBUTING,MIGRATION,KNOWLEDGE-ENGINEERING,PARALLEL-DELIVERY}.md
+  # site/ also renders ../Cargo.toml + ../docs/{CONFIGURATION,ARCHITECTURE,CONTRIBUTING,KNOWLEDGE-ENGINEERING,PARALLEL-DELIVERY}.md
   # (the mermaid block renders to an inline SVG at build). README drift from
   # site/src/*.json is gated by ci.yml's `readme` job — so README.md is NOT here.
   pull_request:
-    paths: ['site/**', 'Cargo.toml', 'docs/CONFIGURATION.md', 'docs/ARCHITECTURE.md', 'docs/CONTRIBUTING.md', 'docs/MIGRATION.md', 'docs/KNOWLEDGE-ENGINEERING.md', 'docs/PARALLEL-DELIVERY.md', '.github/workflows/site.yml', '.github/workflows/pages.yml']
+    paths: ['site/**', 'Cargo.toml', 'docs/CONFIGURATION.md', 'docs/ARCHITECTURE.md', 'docs/CONTRIBUTING.md', 'docs/KNOWLEDGE-ENGINEERING.md', 'docs/PARALLEL-DELIVERY.md', '.github/workflows/site.yml', '.github/workflows/pages.yml']
 
 permissions:
   contents: read

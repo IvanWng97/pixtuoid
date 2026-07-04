@@ -54,8 +54,7 @@ gates can't see. CI runs it in `site.yml` after the build step.
 > `astro.config.mjs`), `docs/CONFIGURATION.md` (rendered as `/config`),
 > `docs/ARCHITECTURE.md` (rendered as `/architecture` — its Mermaid diagram becomes an
 > inline SVG at build via rehype-mermaid, which is why CI installs Chromium),
-> `docs/CONTRIBUTING.md` (rendered as `/contributing`), `docs/MIGRATION.md`
-> (rendered as `/migration`), `docs/KNOWLEDGE-ENGINEERING.md` (rendered as
+> `docs/CONTRIBUTING.md` (rendered as `/contributing`), `docs/KNOWLEDGE-ENGINEERING.md` (rendered as
 > `/knowledge-base` — the route slug kept from its `KNOWLEDGE-BASE.md` days, no link
 > rot), and `docs/PARALLEL-DELIVERY.md` (rendered as `/parallel-delivery`).
 > Renaming/moving any of them — or breaking the diagram's Mermaid syntax — fails
@@ -131,7 +130,7 @@ gates can't see. CI runs it in `site.yml` after the build step.
   auto-animates); on a no-wasm / fetch-failure poster it stays visible, since the
   ticker / dust / clips still run and it governs them wasm-independently (#456).
 - **Docs shell** — `layouts/Docs.astro` gives /config, /architecture,
-  /contributing, /migration a shared sidebar + build-time mini-TOC + pager,
+  /contributing a shared sidebar + build-time mini-TOC + pager,
   driven by the one `DOCS` manifest in `consts.ts` (the Nav dropdown reads the
   same source).
 

@@ -175,12 +175,13 @@ pub fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
     })
 }
 
-// The v0.3.0-era `_ascii_agents` legacy-sentinel strip was dropped in 0.12.0
-// (pre-rename brew-tap installs are too old to keep supporting): a leftover
-// `_ascii_agents` entry is inert — CC ignores unknown hooks — it just is no
-// longer auto-stripped on install/uninstall. KEPT because `verify_schema`
-// (the claude-specific check whose command is nested at `hooks[0].command`)
-// scans for managed entries with it.
+// We ONLY manage entries carrying our own `SENTINEL_KEY`; a foreign hook entry
+// (another tool's, or one with an unrecognized legacy sentinel) is inert — CC
+// ignores unknown hooks — and is left untouched on install/uninstall. KEPT
+// because `verify_schema` (the claude-specific check whose command is nested at
+// `hooks[0].command`) scans for managed entries with it. (The v0.3.0-era
+// special-case strip of a foreign legacy sentinel was dropped in 0.12.0 — those
+// installs are too old to keep serving.)
 fn is_managed_entry(entry: &Value) -> bool {
     entry.get(SENTINEL_KEY).and_then(|v| v.as_bool()) == Some(true)
 }
@@ -324,16 +325,16 @@ mod tests {
         assert!(cleaned.get("hooks").is_none(), "got {cleaned}");
     }
 
-    // The `_ascii_agents` legacy-sentinel strip was removed in 0.12.0 (see
-    // is_managed_entry): a leftover v0.3.0-era entry is now an ordinary
-    // unmanaged entry — install/uninstall must leave it alone like any other
-    // user entry (inert; CC ignores unknown hooks).
+    // The v0.3.0-era special-case strip of a foreign legacy sentinel was removed
+    // in 0.12.0 (see is_managed_entry): any entry lacking OUR `SENTINEL_KEY` is an
+    // ordinary unmanaged entry — install/uninstall must leave it alone like any
+    // other user/third-party entry (inert; CC ignores unknown hooks).
     #[test]
-    fn legacy_ascii_agents_entries_are_no_longer_stripped() {
+    fn foreign_sentinel_entries_are_no_longer_stripped() {
         let initial = json!({
             "hooks": {
                 "PreToolUse": [
-                    { "_ascii_agents": true, "matcher": ".*", "hooks": [{"type":"command","command":"/old"}] }
+                    { "_legacy": true, "matcher": ".*", "hooks": [{"type":"command","command":"/old"}] }
                 ]
             }
         });

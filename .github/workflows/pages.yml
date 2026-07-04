@@ -2,12 +2,12 @@ name: deploy site
 
 on:
   # Redeploy when the inputs the build reads change: site/ itself, the version in
-  # ../Cargo.toml, and the rendered docs ../docs/{CONFIGURATION,ARCHITECTURE,CONTRIBUTING,MIGRATION,KNOWLEDGE-ENGINEERING,PARALLEL-DELIVERY}.md
+  # ../Cargo.toml, and the rendered docs ../docs/{CONFIGURATION,ARCHITECTURE,CONTRIBUTING,KNOWLEDGE-ENGINEERING,PARALLEL-DELIVERY}.md
   # (the /config, /architecture, /contributing pages). Without these the published
   # site silently lags its own source.
   push:
     branches: [main]
-    paths: ['site/**', 'Cargo.toml', 'docs/CONFIGURATION.md', 'docs/ARCHITECTURE.md', 'docs/CONTRIBUTING.md', 'docs/MIGRATION.md', 'docs/KNOWLEDGE-ENGINEERING.md', 'docs/PARALLEL-DELIVERY.md', '.github/workflows/pages.yml']
+    paths: ['site/**', 'Cargo.toml', 'docs/CONFIGURATION.md', 'docs/ARCHITECTURE.md', 'docs/CONTRIBUTING.md', 'docs/KNOWLEDGE-ENGINEERING.md', 'docs/PARALLEL-DELIVERY.md', '.github/workflows/pages.yml']
   workflow_dispatch:
 
 # Least-privilege (mirrors release.yml, #215): jobs inherit read-only; the

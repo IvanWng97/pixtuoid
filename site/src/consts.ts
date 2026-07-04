@@ -77,7 +77,6 @@ export const DOCS = [
   { id: 'knowledge-base', route: 'knowledge-base', label: 'Knowledge engineering' },
   { id: 'parallel-delivery', route: 'parallel-delivery', label: 'Parallel delivery' },
   { id: 'contributing', route: 'contributing', label: 'Contributing' },
-  { id: 'migration', route: 'migration', label: 'Migration' },
 ] as const satisfies readonly DocPage[];
 export type DocId = (typeof DOCS)[number]['id'];
 

@@ -69,7 +69,7 @@ Press `s` to open the **Sources** panel and connect your agent CLI (Claude Code,
 
 **Keyboard shortcuts:** `q` quit · `p` pause · `s` sources (connect / health) · `t` themes · `Tab` agent dashboard · `?` help · `↑↓/jk/PgUp/PgDn` floors · click to pin tooltip
 
-**More ways to install** — Cargo, prebuilt binaries, and Debian `.deb`s — are on the **[install guide ↗](https://ivanwng97.github.io/pixtuoid/#install)**. Upgrading from `ascii-agents`? See [docs/MIGRATION.md](docs/MIGRATION.md).
+**More ways to install** — Cargo, prebuilt binaries, and Debian `.deb`s — are on the **[install guide ↗](https://ivanwng97.github.io/pixtuoid/#install)**.
 
 ## Features
 

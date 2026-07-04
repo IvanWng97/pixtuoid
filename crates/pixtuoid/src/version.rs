@@ -127,14 +127,14 @@ pub fn release_notes(version: &str) -> Option<&'static [&'static str]> {
             "New project site — live demos, architecture & contributing docs, weather gallery",
         ]),
         "0.4.0" => Some(&[
-            "Renamed from ascii-agents to pixtuoid",
+            "Project renamed to pixtuoid",
             "Reconnect your CLI in the Sources panel (press s) to update hooks",
             "New env vars: PIXTUOID_SOCKET/HOOK/LOG",
             "Flaky startup test fixed + 250ms rescan",
         ]),
         "0.4.1" => Some(&[
             "Per-floor boot capacity fixes invisible-agent edge case",
-            "Connecting a CLI now strips legacy `_ascii_agents` entries again",
+            "Connecting a CLI now strips legacy hook entries again",
             "Resize mid-slide lands on destination floor, not source",
             "Version popup URL no longer mis-clicks on narrow terminals",
             "Corrupted last_seen_version self-heals on next launch",
