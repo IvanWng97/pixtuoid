@@ -258,14 +258,18 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
           return mod.default().then(function (w) {
             vWasm = w;
             vOffice = new mod.Office(VIBING_SEED);
-            // The `clear` weather chip loads is-active (it matches
-            // vibing-poster.png, gen'd with --weather clear), but a fresh
-            // Office defaults to weather_override=None (clock-based) — apply
-            // the chip's weather so live == poster == the highlighted chip
-            // from the first frame. Theme needs no equivalent: `normal` IS
-            // ALL_THEMES[0], the office's starting theme.
+            // Apply the currently-active weather AND theme chips so the booted
+            // office matches what the OSD reports. Weather: the `clear` chip is
+            // is-active (matches vibing-poster.png, gen'd --weather clear) but a
+            // fresh Office is weather_override=None (clock-based). Theme: a chip
+            // clicked DURING this async boot skipped its `if (vOffice)` set_theme
+            // yet still set is-active/aria-pressed + retinted — re-applying the
+            // active theme here keeps aria-pressed consistent with the rendered
+            // office (WCAG 4.1.2); `normal` (the default) is a harmless no-op.
             const w0 = vibingStage.querySelector('.osd__chip[data-weather].is-active');
             if (w0) vOffice.set_weather(w0.dataset.weather);
+            const t0 = vibingStage.querySelector('.osd__chip[data-theme].is-active');
+            if (t0) vOffice.set_theme(t0.dataset.theme);
             vCtx = vibingCanvas.getContext('2d');
             vImg = vCtx.createImageData(vibingCanvas.width, vibingCanvas.height);
             syncCanvas(); // gating may have moved on while the fetch was in flight
