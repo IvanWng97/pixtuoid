@@ -82,6 +82,90 @@ pub(crate) fn scene_stats(scene: &SceneState) -> StateCounts {
     c
 }
 
+impl StateCounts {
+    /// The count for one [`StateKind`] — lets a consumer iterate
+    /// [`StateKind::ALL`] and pull the matching tally without re-matching.
+    pub(crate) fn get(self, kind: StateKind) -> usize {
+        match kind {
+            StateKind::Active => self.active,
+            StateKind::Waiting => self.waiting,
+            StateKind::Idle => self.idle,
+            StateKind::Exiting => self.exiting,
+        }
+    }
+}
+
+// --- Shared state vocabulary (glyph + letter + word + hue) --------------------
+// ONE source for how an activity state reads on EVERY surface (footer, board,
+// tooltip, and — later — the dashboard). Each state carries FOUR redundant
+// channels; hue is never the sole carrier, so the design survives colour
+// removal, a colour-blind viewer, and a terminal that tofus a glyph.
+
+/// The four agent activity buckets as a shared vocabulary. `Waiting` owns the
+/// reserved amber "needs-you" hue.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum StateKind {
+    Active,
+    Waiting,
+    Idle,
+    Exiting,
+}
+
+impl StateKind {
+    /// Canonical render order (the footer's left-to-right rung order).
+    pub(crate) const ALL: [StateKind; 4] = [
+        StateKind::Active,
+        StateKind::Waiting,
+        StateKind::Idle,
+        StateKind::Exiting,
+    ];
+
+    /// A distinct geometric glyph per state — all East-Asian *ambiguous* width
+    /// (1 cell in a non-CJK terminal): `●` active, `◐` waiting, `○` idle, `◌`
+    /// exiting.
+    pub(crate) fn glyph(self) -> char {
+        match self {
+            StateKind::Active => '\u{25cf}',
+            StateKind::Waiting => '\u{25d0}',
+            StateKind::Idle => '\u{25cb}',
+            StateKind::Exiting => '\u{25cc}',
+        }
+    }
+
+    /// A distinct single letter — the primary colour-blind channel at the
+    /// footer's narrow tier where the full word doesn't fit.
+    pub(crate) fn letter(self) -> char {
+        match self {
+            StateKind::Active => 'A',
+            StateKind::Waiting => 'W',
+            StateKind::Idle => 'I',
+            StateKind::Exiting => 'x',
+        }
+    }
+
+    /// The lower-case word for the wall board's plain-English pulse.
+    pub(crate) fn word(self) -> &'static str {
+        match self {
+            StateKind::Active => "active",
+            StateKind::Waiting => "waiting",
+            StateKind::Idle => "idle",
+            StateKind::Exiting => "exiting",
+        }
+    }
+
+    /// The themed hue — reuses the existing `label_*` roles so state colour is
+    /// identical to the name-badges and every other surface (`label_waiting` is
+    /// the amber attention hue; `label_exiting` is already live).
+    pub(crate) fn color(self, theme: &Theme) -> Color {
+        to_color(match self {
+            StateKind::Active => theme.ui.label_active,
+            StateKind::Waiting => theme.ui.label_waiting,
+            StateKind::Idle => theme.ui.label_idle,
+            StateKind::Exiting => theme.ui.label_exiting,
+        })
+    }
+}
+
 // --- Shared borderless-card backing (shadow + clear + bg fill) ----------------
 // The ONE place the "block board" look every borderless card sits on is defined.
 // `borderless_panel` (modals) and the framed tooltips both delegate to
@@ -423,6 +507,43 @@ mod tests {
         let c = scene_stats(&SceneState::uniform(16));
         assert_eq!(c, StateCounts::default());
         assert_eq!(c.total, 0);
+    }
+
+    // --- state vocabulary --------------------------------------------------
+
+    #[test]
+    fn state_vocab_is_total_and_distinct() {
+        use std::collections::HashSet;
+        let kinds = StateKind::ALL;
+        assert_eq!(kinds.len(), 4, "the vocab covers exactly the four buckets");
+        // Every state must be distinguishable on EACH redundant channel, so the
+        // design never hinges on a single one (colour, glyph shape, or letter).
+        let glyphs: HashSet<char> = kinds.iter().map(|k| k.glyph()).collect();
+        let letters: HashSet<char> = kinds.iter().map(|k| k.letter()).collect();
+        let words: HashSet<&str> = kinds.iter().map(|k| k.word()).collect();
+        assert_eq!(glyphs.len(), 4, "each state has a distinct glyph");
+        assert_eq!(letters.len(), 4, "each state has a distinct letter");
+        assert_eq!(words.len(), 4, "each state has a distinct word");
+        // The reserved amber "needs-you" hue and the exiting hue map to their
+        // existing theme roles (label_waiting is amber; label_exiting is live).
+        let t = &pixtuoid_scene::theme::NORMAL;
+        assert_eq!(StateKind::Waiting.color(t), to_color(t.ui.label_waiting));
+        assert_eq!(StateKind::Exiting.color(t), to_color(t.ui.label_exiting));
+    }
+
+    #[test]
+    fn state_counts_get_maps_each_kind() {
+        let c = StateCounts {
+            active: 3,
+            waiting: 2,
+            idle: 7,
+            exiting: 1,
+            total: 13,
+        };
+        assert_eq!(c.get(StateKind::Active), 3);
+        assert_eq!(c.get(StateKind::Waiting), 2);
+        assert_eq!(c.get(StateKind::Idle), 7);
+        assert_eq!(c.get(StateKind::Exiting), 1);
     }
 
     // --- marquee_window ----------------------------------------------------
