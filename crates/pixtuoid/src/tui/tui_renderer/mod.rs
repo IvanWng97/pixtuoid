@@ -77,7 +77,6 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     transition: Option<FloorTransition>,
     mouse_pos: Option<(u16, u16)>,
     pinned_agent: Option<pixtuoid_core::AgentId>,
-    pub ticker: crate::tui::renderer::TickerQueue,
     theme: &'static pixtuoid_scene::theme::Theme,
     theme_picker: Option<usize>,
     cached_layout: Option<Layout>,
@@ -133,7 +132,6 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             transition: None,
             mouse_pos: None,
             pinned_agent: None,
-            ticker: crate::tui::renderer::TickerQueue::new(),
             theme,
             theme_picker: None,
             cached_layout: None,
@@ -697,8 +695,6 @@ impl<B: Backend<Error: Send + Sync + 'static>> Renderer for TuiRenderer<B> {
             self.active_pet = None;
         }
 
-        self.ticker.update(scene);
-
         // Compute how many floors the current scene needs.
         let nf = num_floors(scene).min(pixtuoid_scene::floor::MAX_FLOORS);
 
@@ -755,7 +751,6 @@ impl<B: Backend<Error: Send + Sync + 'static>> Renderer for TuiRenderer<B> {
             mouse_pos: self.mouse_pos,
             pinned_agent: self.pinned_agent,
             debug_walkable: self.debug_walkable,
-            ticker: &self.ticker,
             theme: self.theme,
             theme_picker: self.theme_picker,
             floor_info,
@@ -769,7 +764,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> Renderer for TuiRenderer<B> {
             last_mascot_pos: None,
             // Borrows `self.pets` immutably — disjoint from the `&mut fctx`
             // (self.floors) above, so the field-split borrow is fine (same
-            // as `&self.ticker`/`self.coffee.map()` here). The picked `&Pet`
+            // as `self.office.coffee.map()` here). The picked `&Pet`
             // carries the name, so the tooltip needs no separate map.
             floor_pet: pixtuoid_scene::pet::select_pet_for_floor(floor_meta.floor_seed, &self.pets),
             chitchat_state: &mut self.office.chitchat,

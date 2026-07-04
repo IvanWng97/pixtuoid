@@ -131,7 +131,6 @@ pub struct UiColors {
     pub tooltip_dim: Rgb,
     pub neon_brand: Rgb,
     pub neon_star: Rgb,
-    pub neon_ticker: Rgb,
 }
 
 /// Corridor appliance colors (vending machine, printer, coat rack). These were

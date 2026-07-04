@@ -371,11 +371,6 @@ pub static GRUVBOX: Theme = Theme {
             g: 128,
             b: 25,
         },
-        neon_ticker: Rgb {
-            r: 131,
-            g: 165,
-            b: 152,
-        },
     },
     appliance: ApplianceColors {
         vending_body: Rgb {

@@ -365,11 +365,6 @@ pub static NORMAL: Theme = Theme {
             g: 100,
             b: 200,
         },
-        neon_ticker: Rgb {
-            r: 180,
-            g: 220,
-            b: 255,
-        },
     },
     appliance: ApplianceColors {
         vending_body: Rgb {

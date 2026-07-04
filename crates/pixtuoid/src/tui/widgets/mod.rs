@@ -1,5 +1,5 @@
 //! Ratatui widget paint functions: footer, labels, wall display, tooltips,
-//! ticker queue, and theme picker overlay.
+//! and theme picker overlay.
 
 mod connection;
 mod dashboard;
@@ -330,8 +330,9 @@ fn truncate(s: &str, max: usize) -> String {
     out
 }
 
-/// Time (ms) the marquee dwells on each character while scrolling — matches the
-/// wall ticker's 150ms cadence (~6.7 chars/sec).
+/// Time (ms) the marquee dwells on each character while scrolling
+/// (~6.7 chars/sec) — the auto-scroll cadence for the dashboard/connection
+/// selected-row fields.
 const MARQUEE_MS_PER_CHAR: u64 = 150;
 /// Time (ms) the marquee holds at each end (head / tail) before reversing.
 const MARQUEE_END_PAUSE_MS: u64 = 1200;
@@ -340,8 +341,8 @@ const MARQUEE_END_PAUSE_MS: u64 = 1200;
 /// columns wide, at time `now`. If `s` fits, it is returned unchanged (the
 /// caller pads/uses it exactly as it would `truncate`'s output). Otherwise it
 /// bounces — hold head → scroll to tail → hold tail → scroll back — purely as a
-/// function of `now`, with NO per-frame state (same wallclock trick as
-/// `TickerQueue::visible`, so two painters can call it freely). Char-windowed,
+/// function of `now`, with NO per-frame state (a stateless wallclock window, so
+/// two painters can call it freely). Char-windowed,
 /// matching `truncate` (single-column glyphs only; a wide CJK glyph would
 /// misalign by a column mid-scroll — the same assumption `truncate` makes).
 /// Unlike `truncate`, the scrolling window emits NO `…` — the motion signals
@@ -401,80 +402,12 @@ fn compact_hms(secs: u64) -> String {
     }
 }
 
-/// Persistent scrolling ticker queue. Messages append to the end and scroll
-/// off the left naturally — like a news crawl. The queue rebuilds only when
-/// the set of active tool details changes, preserving scroll continuity.
-pub struct TickerQueue {
-    buffer: String,
-    last_snapshot: String,
-}
-
-impl Default for TickerQueue {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl TickerQueue {
-    pub fn new() -> Self {
-        Self {
-            buffer: String::new(),
-            last_snapshot: String::new(),
-        }
-    }
-
-    pub fn update(&mut self, scene: &SceneState) {
-        let mut items: Vec<String> = scene
-            .agents
-            .values()
-            .filter(|a| a.exiting_at.is_none())
-            .filter_map(|a| match &a.state {
-                ActivityState::Active { detail, .. } => {
-                    let tool = detail.as_deref().unwrap_or("working");
-                    Some(format!("{}: {}", a.label, tool))
-                }
-                ActivityState::Waiting { reason } => Some(format!("{}: ?{}", a.label, reason)),
-                _ => None,
-            })
-            .collect();
-        items.sort();
-        let snapshot = items.join("|");
-        if snapshot != self.last_snapshot {
-            self.last_snapshot = snapshot;
-            for item in &items {
-                self.buffer.push_str(item);
-                self.buffer.push_str("  |  ");
-            }
-            const MAX_CHARS: usize = 512;
-            let char_count = self.buffer.chars().count();
-            if char_count > MAX_CHARS {
-                let trim_chars = char_count - MAX_CHARS;
-                if let Some((byte_idx, _)) = self.buffer.char_indices().nth(trim_chars) {
-                    self.buffer.drain(..byte_idx);
-                }
-            }
-        }
-    }
-
-    pub fn visible(&self, width: usize, now: SystemTime) -> String {
-        if self.buffer.is_empty() {
-            return String::new();
-        }
-        let elapsed_ms = now
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(0);
-        let chars: Vec<char> = self.buffer.chars().collect();
-        let len = chars.len();
-        let offset = (elapsed_ms / MARQUEE_MS_PER_CHAR) as usize % len;
-        (0..width).map(|i| chars[(offset + i) % len]).collect()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hud::{build_status_spans, build_status_summary, FooterStats};
+    use hud::{
+        board_mood_segments, build_status_spans, build_status_summary, FooterStats, BOARD_W,
+    };
     use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex};
     use std::path::PathBuf;
     use std::sync::Arc;
@@ -755,46 +688,6 @@ mod tests {
         // Selected (scrolling) emits no ellipsis; unselected keeps `…`.
         assert_eq!(marquee_or_truncate(M, 5, true, at(0)), "ABCDE");
         assert_eq!(marquee_or_truncate(M, 5, false, at(0)), "ABCD\u{2026}");
-    }
-
-    // --- TickerQueue -------------------------------------------------------
-
-    #[test]
-    fn ticker_default_is_empty() {
-        let q = TickerQueue::default();
-        assert_eq!(q.visible(40, SystemTime::UNIX_EPOCH), "");
-    }
-
-    #[test]
-    fn ticker_includes_waiting_reason() {
-        let mut q = TickerQueue::new();
-        let s = scene_of(vec![waiting("perm-agent")]);
-        q.update(&s);
-        // The Waiting arm formats "{label}: ?{reason}".
-        let text = q.visible(200, SystemTime::UNIX_EPOCH);
-        assert!(text.contains("perm-agent"), "got: {text}");
-        assert!(text.contains('?'), "waiting marker missing: {text}");
-    }
-
-    #[test]
-    fn ticker_trims_buffer_past_max() {
-        let mut q = TickerQueue::new();
-        // Push many distinct snapshots so the buffer grows past MAX_CHARS=512
-        // and the drain path runs. Each update with a NEW snapshot appends.
-        for i in 0..200 {
-            let label = format!("agent-with-a-fairly-long-name-{i:04}");
-            let s = scene_of(vec![active_with("Edit some/long/path.rs", &label)]);
-            q.update(&s);
-        }
-        // Buffer must have been trimmed: visible() still works and the kept
-        // text stays bounded near MAX_CHARS rather than growing unbounded.
-        let text = q.visible(40, SystemTime::UNIX_EPOCH);
-        assert_eq!(text.chars().count(), 40, "visible window must fill");
-        assert!(
-            q.buffer.chars().count() <= 512,
-            "buffer must be trimmed to MAX_CHARS, got {}",
-            q.buffer.chars().count()
-        );
     }
 
     // --- build_status_summary ---------------------------------------------
@@ -1296,6 +1189,97 @@ mod tests {
         assert!(
             line.contains("\u{25b2}F2"),
             "cross-floor waiting cue: {line}"
+        );
+    }
+
+    // --- T8: the wall board's mood pulse -----------------------------------
+
+    fn board_mood_text(counts: StateCounts) -> String {
+        board_mood_segments(counts)
+            .into_iter()
+            .map(|(t, _)| t)
+            .collect()
+    }
+
+    #[test]
+    fn board_mood_echoes_state_counts() {
+        // 3 active + 2 waiting + 5 idle + 1 exiting. The board reads the SAME
+        // `scene_stats` the footer does; the ▲ "needs-you" beacon LEADS, and the
+        // exiting walkout is deliberately absent — a departure isn't the mood.
+        let mut gone = active_with("Edit x", "gone");
+        gone.exiting_at = Some(SystemTime::UNIX_EPOCH);
+        let mut agents = vec![gone];
+        for i in 0..3 {
+            agents.push(active_with("Edit x", &format!("a{i}")));
+        }
+        for i in 0..2 {
+            agents.push(waiting(&format!("w{i}")));
+        }
+        for i in 0..5 {
+            agents.push(idle(&format!("i{i}")));
+        }
+        let s = scene_of(agents);
+        let text = board_mood_text(scene_stats(&s));
+        assert!(text.contains("\u{25b2}2 wait"), "waiting beacon: {text}");
+        assert!(text.contains("\u{25cf}3 work"), "active: {text}");
+        assert!(text.contains("\u{25cb}5 idle"), "idle: {text}");
+        let (w, a) = (
+            text.find('\u{25b2}').unwrap(),
+            text.find('\u{25cf}').unwrap(),
+        );
+        assert!(w < a, "waiting leads active: {text}");
+        assert!(
+            !text.contains("exit"),
+            "no exiting on the board mood: {text}"
+        );
+    }
+
+    #[test]
+    fn board_mood_is_numeric_and_never_overflows_the_panel() {
+        // The OLD board repeated one ● per agent (uncapped overflow). Now it is
+        // numeric, and abbreviates its words (wt/wk/id) so even an extreme office
+        // fits the fixed 30-cell panel.
+        let c = StateCounts {
+            active: 150,
+            waiting: 150,
+            idle: 150,
+            exiting: 0,
+            total: 450,
+        };
+        let text = board_mood_text(c);
+        assert!(
+            display_width(&text) <= BOARD_W as usize,
+            "fits the panel: {text} = {}",
+            display_width(&text)
+        );
+        assert!(text.contains("\u{25b2}150 wt"), "abbreviated big-N: {text}");
+    }
+
+    #[test]
+    fn board_mood_calm_office_drops_the_waiting_beacon() {
+        let s = scene_of(vec![idle("a"), idle("b"), active_with("Edit x", "c")]);
+        let text = board_mood_text(scene_stats(&s));
+        assert!(
+            !text.contains('\u{25b2}'),
+            "no beacon when nobody waits: {text}"
+        );
+        assert!(text.contains("\u{25cf}1 work") && text.contains("\u{25cb}2 idle"));
+    }
+
+    #[test]
+    fn board_mood_empty_office_reads_plainly() {
+        let text = board_mood_text(scene_stats(&scene_of(vec![])));
+        assert_eq!(text, "\u{2014} office empty \u{2014}");
+    }
+
+    #[test]
+    fn board_width_pins_to_neon_const() {
+        // Anti-drift spine 2: the board text can't overrun (or underfill) the
+        // painted neon panel because its width IS the panel's width.
+        assert_eq!(
+            BOARD_W,
+            pixtuoid_scene::pixel_painter::NEON_PANEL_W,
+            "board width must equal the painted neon panel width"
         );
     }
 }

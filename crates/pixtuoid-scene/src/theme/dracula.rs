@@ -365,11 +365,6 @@ pub static DRACULA: Theme = Theme {
             g: 121,
             b: 198,
         },
-        neon_ticker: Rgb {
-            r: 139,
-            g: 233,
-            b: 253,
-        },
     },
     appliance: ApplianceColors {
         vending_body: Rgb {

@@ -9,8 +9,8 @@ use ratatui::text::Span;
 use ratatui::widgets::Paragraph;
 
 use super::{
-    centered_in, compact_hms, display_width, to_color, StateCounts, StateKind, TickerQueue,
-    PANEL_PAD_X, PANEL_PAD_Y,
+    centered_in, compact_hms, display_width, to_color, StateCounts, StateKind, PANEL_PAD_X,
+    PANEL_PAD_Y,
 };
 use crate::tui::renderer::clip_widget_rect;
 
@@ -433,12 +433,72 @@ pub(crate) fn build_status_spans<'a>(
         .collect()
 }
 
+/// The wall board's text width pins to the painted neon panel (spine 2), so the
+/// lit sign's letters can never overrun (or underfill) the glowing frame behind
+/// them — the `PANTRY_COFFEE_COLS` anti-drift precedent. Only WIDTH derives; the
+/// board's 3-row height + the `+2/+1` cell origin stay literal (the half-block
+/// 2:1 compression is a different coordinate system — C2).
+pub(super) const BOARD_W: u16 = pixtuoid_scene::pixel_painter::NEON_PANEL_W;
+
+/// The board's plain-English "mood pulse" — one `(text, colour-key)` segment per
+/// non-zero present state, echoing the SHARED `StateCounts` the footer reads (not
+/// a second live-only derivation, the old footer-vs-board disagreement).
+///
+/// The ▲ "needs-you" beacon LEADS (waiting first) — on the board, waiting is the
+/// amber attention flag, the same beacon the footer's alarm tier uses; the formal
+/// ◐ glyph stays on the detail surfaces. Counts are NUMERIC, never one-dot-per-
+/// agent (the old `●`-repeat overflowed an uncapped office); the words abbreviate
+/// (`wt`/`wk`/`id`) when the full form would overrun the fixed panel. Exiting
+/// agents are absent by design — a walkout isn't the office mood. `None` colour =
+/// the neutral `— office empty —` fallback.
+pub(super) fn board_mood_segments(counts: StateCounts) -> Vec<(String, Option<StateKind>)> {
+    if counts.active + counts.waiting + counts.idle == 0 {
+        return vec![("\u{2014} office empty \u{2014}".to_string(), None)];
+    }
+    // ▲ leads (waiting beacon), then ● work, ○ idle. Waiting borrows the alarm
+    // triangle, not StateKind::Waiting's ◐ — the board is the lit "needs-you" sign.
+    let build = |words: [&str; 3]| -> Vec<(String, Option<StateKind>)> {
+        let rows = [
+            (counts.waiting, '\u{25b2}', words[0], StateKind::Waiting),
+            (counts.active, '\u{25cf}', words[1], StateKind::Active),
+            (counts.idle, '\u{25cb}', words[2], StateKind::Idle),
+        ];
+        let mut segs: Vec<(String, Option<StateKind>)> = Vec::new();
+        for (n, glyph, word, kind) in rows {
+            if n == 0 {
+                continue;
+            }
+            if !segs.is_empty() {
+                segs.push(("  ".to_string(), None));
+            }
+            segs.push((format!("{glyph}{n} {word}"), Some(kind)));
+        }
+        segs
+    };
+    let full = build(["wait", "work", "idle"]);
+    let width: usize = full.iter().map(|(t, _)| display_width(t)).sum();
+    if width <= BOARD_W as usize {
+        full
+    } else {
+        build(["wt", "wk", "id"])
+    }
+}
+
+/// The in-scene neon wall board — the office's "lit sign": brand + ★ CTA (L1), the
+/// mood pulse echoing the shared counts (L2), and the office context row (L3:
+/// uptime + floor + gateway chip). It owns nothing critical exclusively (it may
+/// clip off-screen); the must-not-miss signals live in the footer. `counts` is the
+/// SAME `scene_stats` the footer reads (spine 1); `floor_info`/`gateway` are the
+/// always-present office-wide `DrawCtx` fields (C1). The scrolling ticker is gone.
+#[allow(clippy::too_many_arguments)] // a painter's distinct inputs (like paint_footer)
 pub(crate) fn paint_wall_display(
     f: &mut ratatui::Frame<'_>,
     scene: &SceneState,
     scene_rect: Rect,
     now: SystemTime,
-    ticker: &TickerQueue,
+    counts: StateCounts,
+    floor_info: Option<crate::tui::renderer::FloorInfo>,
+    gateway: Option<DaemonState>,
     theme: &pixtuoid_scene::theme::Theme,
 ) {
     use ratatui::style::Modifier;
@@ -447,82 +507,77 @@ pub(crate) fn paint_wall_display(
     let cell_x = scene_rect.x + 2;
     let cell_y = scene_rect.y + 1;
 
-    let live: Vec<&pixtuoid_core::AgentSlot> = scene
-        .agents
-        .values()
-        .filter(|a| a.exiting_at.is_none())
-        .collect();
-    let active = live
-        .iter()
-        .filter(|a| matches!(a.state, ActivityState::Active { .. }))
-        .count();
-    let waiting = live
-        .iter()
-        .filter(|a| matches!(a.state, ActivityState::Waiting { .. }))
-        .count();
-    let idle = live.len() - active - waiting;
-
+    // L1 — brand + ★ Star CTA, the star right-flushed to the panel edge.
     let version = env!("CARGO_PKG_VERSION");
-    let top_spans = vec![
+    let brand = format!("pixtuoid v{version}");
+    let star = "\u{2605} Star";
+    let gap = (BOARD_W as usize)
+        .saturating_sub(display_width(&brand) + display_width(star))
+        .max(1);
+    let top_line = Line::from(vec![
         Span::styled(
-            format!("pixtuoid v{version}"),
+            brand,
             Style::default()
                 .fg(to_color(theme.ui.neon_brand))
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::raw(" "),
+        Span::raw(" ".repeat(gap)),
         Span::styled(
-            "\u{2605} Star",
+            star,
             Style::default()
                 .fg(to_color(theme.ui.neon_star))
                 .add_modifier(Modifier::BOLD),
         ),
-    ];
-    let top_line = Line::from(top_spans);
+    ]);
 
-    let oldest = live
-        .iter()
+    // L2 — the mood pulse (shared counts, ▲ beacon leads).
+    let mood_spans: Vec<Span> = board_mood_segments(counts)
+        .into_iter()
+        .map(|(text, kind)| {
+            let color = kind.map_or(to_color(theme.ui.tooltip_dim), |k| k.color(theme));
+            Span::styled(text, Style::default().fg(color))
+        })
+        .collect();
+    let mood_line = Line::from(mood_spans);
+
+    // L3 — office context: uptime (dim) · floor · gateway chip. Uptime spans the
+    // whole office (oldest agent, exiting included), so it doesn't dip on a walkout.
+    let oldest = scene
+        .agents
+        .values()
         .filter_map(|a| now.duration_since(a.created_at).ok())
         .max()
         .unwrap_or_default();
-    let uptime_secs = oldest.as_secs();
-    let uptime_str = format!("\u{2191}{}", compact_hms(uptime_secs));
+    let mut ctx_spans = vec![Span::styled(
+        format!("\u{2191}{}", compact_hms(oldest.as_secs())),
+        Style::default().fg(to_color(theme.ui.tooltip_dim)),
+    )];
+    if let Some(fi) = floor_info {
+        ctx_spans.push(Span::raw("  "));
+        ctx_spans.push(Span::styled(
+            format!("F{}/{}", fi.current, fi.total_floors),
+            Style::default().fg(to_color(theme.ui.tooltip_dim)),
+        ));
+    }
+    if let Some(state) = gateway {
+        ctx_spans.push(Span::raw("  "));
+        ctx_spans.push(Span::styled(
+            format!("\u{2b22}gw {}", gateway_label(state)),
+            Style::default().fg(SegRole::Gateway(state).color(theme)),
+        ));
+    }
+    let ctx_line = Line::from(ctx_spans);
 
-    let bot_line = Line::from(vec![
-        Span::styled(
-            "\u{25cf}".repeat(active),
-            Style::default().fg(to_color(theme.ui.label_active)),
-        ),
-        Span::styled(
-            "\u{25cf}".repeat(waiting),
-            Style::default().fg(to_color(theme.ui.label_waiting)),
-        ),
-        Span::styled(
-            "\u{25cf}".repeat(idle),
-            Style::default().fg(to_color(theme.ui.label_idle)),
-        ),
-        Span::raw("  "),
-        Span::styled(uptime_str, Style::default().fg(Color::DarkGray)),
-    ]);
-
-    let ticker_width = 28usize;
-    let visible = ticker.visible(ticker_width, now);
-    let ticker_line = Line::from(Span::styled(
-        visible,
-        Style::default().fg(to_color(theme.ui.neon_ticker)),
-    ));
-
-    let w = 30u16;
     if let Some(r) = clip_widget_rect(
         Rect {
             x: cell_x,
             y: cell_y,
-            width: w,
+            width: BOARD_W,
             height: 3,
         },
         scene_rect,
     ) {
-        f.render_widget(Paragraph::new(vec![top_line, bot_line, ticker_line]), r);
+        f.render_widget(Paragraph::new(vec![top_line, mood_line, ctx_line]), r);
     }
 }
 

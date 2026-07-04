@@ -33,7 +33,6 @@ pub use crate::tui::hit_test::{
     hit_test_mascot, hit_test_pet,
 };
 pub(crate) use crate::tui::widgets::paint_hover_tooltip;
-pub use crate::tui::widgets::TickerQueue;
 pub(super) use crate::tui::widgets::{
     paint_chitchat_bubbles, paint_coffee_tooltip, paint_connection_panel, paint_dashboard,
     paint_elevator_indicator, paint_footer, paint_furniture_tooltip, paint_help_overlay,
@@ -71,7 +70,6 @@ pub struct DrawCtx<'a> {
     /// Live walkable/approach/route debug layer toggle (`w`). Threaded into the
     /// pixel pass; off by default, transient (not persisted to config).
     pub debug_walkable: bool,
-    pub ticker: &'a TickerQueue,
     pub theme: &'a pixtuoid_scene::theme::Theme,
     pub theme_picker: Option<usize>,
     /// Multi-floor display state. `Some` iff there's more than one floor.
@@ -323,7 +321,6 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     }
 
     let buf = &ctx.buf;
-    let ticker = ctx.ticker;
     let theme_picker = ctx.theme_picker;
     let chitchat_bubbles = &ctx.chitchat_bubbles;
     term.draw(|f| {
@@ -357,7 +354,16 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
             theme,
         );
         paint_chitchat_bubbles(f, chitchat_bubbles, actual_scene, theme);
-        paint_wall_display(f, scene, actual_scene, now, ticker, theme);
+        paint_wall_display(
+            f,
+            scene,
+            actual_scene,
+            now,
+            footer_stats.counts,
+            floor_info,
+            footer_stats.gateway,
+            theme,
+        );
         if let Some(door) = layout.door {
             let current = floor_info.map(|fi| fi.current).unwrap_or(1);
             paint_elevator_indicator(f, door, current, actual_scene, theme);

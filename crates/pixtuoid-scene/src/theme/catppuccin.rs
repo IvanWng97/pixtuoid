@@ -373,11 +373,6 @@ pub static CATPPUCCIN: Theme = Theme {
             g: 194,
             b: 231,
         },
-        neon_ticker: Rgb {
-            r: 137,
-            g: 220,
-            b: 235,
-        },
     },
     appliance: ApplianceColors {
         vending_body: Rgb {
