@@ -1460,14 +1460,33 @@ mod tests {
 
     #[test]
     fn reset_frame_cache_clears_cached_sprites() {
+        use crate::frame_cache::FrameKey;
+        use pixtuoid_core::{sprite::Frame, AgentId};
+
         let mut s = FloorSession::new();
-        // Prime the cache by rendering one frame with an agent present is heavy;
-        // instead assert the method exists and yields an empty cache by construction.
+        // Prime the cache with one entry, so the assertion below distinguishes a
+        // real reset from a no-op (a fresh session's cache is already empty).
+        s.floor.ctx.cache.get_or_make(
+            FrameKey {
+                agent_id: AgentId::from_parts("test", "agent"),
+                anim_name: "idle",
+                frame_idx: 0,
+                flip_x: false,
+                glow_tint: None,
+            },
+            Frame::default,
+        );
+        assert_eq!(
+            s.floor.ctx.cache.len(),
+            1,
+            "priming must populate the cache"
+        );
+
         s.reset_frame_cache();
         assert_eq!(
             s.floor.ctx.cache.len(),
             0,
-            "reset must leave an empty frame cache"
+            "reset must clear a populated cache"
         );
     }
 }
