@@ -33,7 +33,7 @@ use chrono::TimeZone;
 use pixtuoid_web::Office;
 
 const USAGE: &str = "usage: hero_still <out.png> [--width W] [--height H] \
-(--t0-ms EPOCH_MS | --hour 0-23) [--advance-ms MS] [--weather NAME] \
+(--t0-ms EPOCH_MS | --hour 0-23) [--advance-ms MS] [--weather NAME] [--seed N] \
 (<out.png> and the flags may appear in any order)";
 
 // Recognized flags, each followed by one value token — used to skip past
@@ -47,6 +47,7 @@ const FLAGS_WITH_VALUE: &[&str] = &[
     "--advance-ms",
     "--hour",
     "--weather",
+    "--seed",
 ];
 
 fn positional_out(args: &[String]) -> Option<&str> {
@@ -73,6 +74,11 @@ const DEFAULT_HEIGHT: u32 = 180;
 // doc) — a reasonable default so an `--hour` render also shows a seated cast
 // rather than an empty office at t0.
 const DEFAULT_ADVANCE_MS: u64 = 100_000;
+// Layout seed. The hero backdrop (OfficeBackdrop.astro) is seed 3, so the
+// default keeps `hero-wide.png` byte-identical; a caller passes `--seed` to
+// match a DIFFERENT live canvas (e.g. the VIBING channel is seed 11) so its
+// poster shows the same office layout the live office will paint.
+const DEFAULT_SEED: u32 = 3;
 
 // A fixed reference calendar date (arbitrary but FIXED — never "today") used
 // to turn `--hour` into a deterministic `t0_ms`. Only the hour-of-day drives
@@ -109,6 +115,7 @@ fn main() -> ExitCode {
     let width: u32 = arg(&args, "--width").unwrap_or(DEFAULT_WIDTH);
     let height: u32 = arg(&args, "--height").unwrap_or(DEFAULT_HEIGHT);
     let advance_ms: u64 = arg(&args, "--advance-ms").unwrap_or(DEFAULT_ADVANCE_MS);
+    let seed: u32 = arg(&args, "--seed").unwrap_or(DEFAULT_SEED);
     let weather: Option<String> = arg(&args, "--weather");
 
     let t0_ms: f64 = match (arg::<u64>(&args, "--t0-ms"), arg::<u32>(&args, "--hour")) {
@@ -126,7 +133,7 @@ fn main() -> ExitCode {
         }
     };
 
-    let mut office = match Office::new(3) {
+    let mut office = match Office::new(seed) {
         Ok(o) => o,
         Err(_) => {
             eprintln!("embedded sprite pack failed to parse (build bug)");

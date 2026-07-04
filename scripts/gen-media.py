@@ -260,6 +260,12 @@ def run_wasm_still(job, out_dirs, work, intermediates):
         extra += ["--hour", str(job["hour"])]
     if "weather" in job:
         extra += ["--weather", str(job["weather"])]
+    # Layout seed: match the LIVE canvas this poster falls back for (the VIBING
+    # channel is seed 11), else the poster's office layout pops when the live
+    # canvas paints over it. hero-wide sets no seed, so hero_still defaults to
+    # the backdrop's seed 3 (byte-identical).
+    if "seed" in job:
+        extra += ["--seed", str(job["seed"])]
     for d in out_dirs:
         subprocess.run(
             [str(ROOT / "target/release/examples/hero_still"),
