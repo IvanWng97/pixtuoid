@@ -44,6 +44,14 @@ notify      = { workspace = true, optional = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+# Safe wrappers for the liveness/exit-watch syscalls the `native` probe layer
+# makes: kqueue+kevent (macOS exit_watch), pidfd_open+poll+self-pipe (Linux
+# exit_watch), kill(0) (cc_probe). Retires the raw `libc::syscall(SYS_pidfd_open)`
+# and the hand-poked `libc::kevent`/`pollfd` structs. Already compiled in the
+# workspace (crossterm pulls it); unix-only like `libc`, so the wasm32 core build
+# (a NON-unix target) never sees it. libc STAYS for the macOS libproc calls rustix
+# doesn't wrap (proc_pidinfo start-time in cc_probe, the fd→path table in fd_probe).
+rustix = { version = "1", features = ["event", "process", "pipe"] }
 
 # 0.61 to match the major tokio already pulls (via mio) for this target —
 # a second windows-sys major would double-compile the bindings.
