@@ -1,5 +1,5 @@
 ---
-import { SHOWCASE, showcaseVariants, showcaseGroups, floorByNumber } from '../consts';
+import { SHOWCASE, showcaseVariants, showcaseGroups, floorByNumber, asset } from '../consts';
 import ChannelStage from './ChannelStage.astro';
 
 const floor = floorByNumber(5);
@@ -75,7 +75,7 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
   </div>
 </section>
 
-<script is:inline>
+<script is:inline define:vars={{ wasmJsUrl: asset('wasm/pixtuoid_web.js') }}>
   (function () {
     const studio = document.getElementById('studio');
     if (!studio) return;
@@ -83,6 +83,16 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
     const monitors = studio.querySelectorAll('button.mon[data-ch]');
     const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
     let inView = false;
+
+    // Retint the page's DECORATIVE hues to preview a theme — like hitting `t`
+    // in the app. Deliberately NOT --coral-deep: that's the AA text color, and
+    // a raw chip accent drops it below WCAG 1.4.3. Shared by the generic OSD
+    // gallery chips below and the VIBING theme chips.
+    function retintPage(accent, accent2) {
+      const root = document.documentElement;
+      root.style.setProperty('--coral', accent);
+      root.style.setProperty('--amber', accent2 || accent);
+    }
 
     // ---- lazy hydration: promote data-src media the first time a channel is
     // tuned or its monitor is hovered/focused (zero offscreen video bytes)
@@ -143,11 +153,16 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
         function (entries) {
           inView = entries[0].isIntersecting;
           syncVideos();
+          syncCanvas();
         },
         { threshold: 0.15 }
       ).observe(studio);
     }
-    if (mq.addEventListener) mq.addEventListener('change', syncVideos);
+    if (mq.addEventListener)
+      mq.addEventListener('change', function () {
+        syncVideos();
+        syncCanvas();
+      });
     // WCAG 2.2.2: the page-wide pause button (#office-pause) stops the looping
     // demo clips too — one control governs all >5s auto-motion. The clips carry
     // no visible controls in normal motion, so this IS their pause affordance.
@@ -159,8 +174,148 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
     document.addEventListener('pix:paused', function (e) {
       userPaused = !!(e.detail && e.detail.paused);
       syncVideos();
+      syncCanvas();
     });
     syncVideos();
+
+    // ---- VIBING channel: a live pixtuoid office (wasm) driven by the time
+    // slider + weather/theme chips. `syncCanvas` mirrors syncVideos' gate —
+    // active + visible + unpaused + motion allowed — and is called from the
+    // SAME four sites syncVideos is (the pix:paused listener above, the
+    // IntersectionObserver callback above, the mq change listener above, and
+    // tune()'s swap() below). A separate wasm Office instance from
+    // OfficeBackdrop's page-wide one (its own seed/timeline/weather/theme) —
+    // the wasm module itself is browser-cached by URL, so booting here costs
+    // no second fetch/compile.
+    const vibingStage = studio.querySelector('[data-stage="vibing"]');
+    const vibingCanvas = vibingStage && vibingStage.querySelector('[data-vibing-canvas]');
+    const vibingTime = vibingStage && vibingStage.querySelector('[data-vibing-time]');
+    const vibingTimeLabel = vibingStage && vibingStage.querySelector('[data-vibing-time-label]');
+    const vibingWeather =
+      vibingStage && vibingStage.querySelector('.stage__osd[data-group="weather"]');
+    const vibingTheme = vibingStage && vibingStage.querySelector('.stage__osd[data-group="theme"]');
+    const VIBING_SEED = 11; // fixed u32 — distinct from OfficeBackdrop's page office (seed 3)
+    let vWasm = null;
+    let vOffice = null;
+    let vCtx = null;
+    let vImg = null;
+    let vRaf = 0;
+    let vBooted = false;
+    // the slider's own rendered value is the one source of truth for the
+    // initial hour — no second hardcoded "18" to drift from it.
+    let scrubHour = vibingTime ? parseFloat(vibingTime.value) : 18;
+    let vStart = Date.now();
+
+    function anchorForHour(h) {
+      const d = new Date();
+      d.setHours(Math.floor(h), Math.round((h % 1) * 60), 0, 0);
+      return d.getTime();
+    }
+    function vPaint() {
+      const now = anchorForHour(scrubHour) + (Date.now() - vStart);
+      vOffice.step(now, vibingCanvas.width, vibingCanvas.height);
+      // re-read ptr/len every frame — a resize/memory.grow moves them
+      const view = new Uint8ClampedArray(
+        vWasm.memory.buffer,
+        vOffice.frame_ptr(),
+        vOffice.frame_len()
+      );
+      if (view.length !== vImg.data.length) return;
+      vImg.data.set(view);
+      vCtx.putImageData(vImg, 0, 0);
+    }
+    function vFrame() {
+      vRaf = 0;
+      vPaint();
+      vRaf = requestAnimationFrame(vFrame);
+    }
+    function startCanvas() {
+      if (!vRaf && vOffice) vRaf = requestAnimationFrame(vFrame);
+    }
+    function stopCanvas() {
+      if (vRaf) cancelAnimationFrame(vRaf);
+      vRaf = 0;
+    }
+    function bootCanvas() {
+      if (vBooted) return;
+      vBooted = true;
+      import(wasmJsUrl)
+        .then(function (mod) {
+          return mod.default().then(function (w) {
+            vWasm = w;
+            vOffice = new mod.Office(VIBING_SEED);
+            vCtx = vibingCanvas.getContext('2d');
+            vImg = vCtx.createImageData(vibingCanvas.width, vibingCanvas.height);
+            syncCanvas(); // gating may have moved on while the fetch was in flight
+          });
+        })
+        .catch(function () {
+          // wasm never loaded: leave the poster showing, no loop
+        });
+    }
+    function syncCanvas() {
+      if (!vibingStage || !vibingCanvas) return;
+      const run = !vibingStage.hidden && inView && !userPaused && !mq.matches;
+      if (run) {
+        if (!vOffice) bootCanvas();
+        else startCanvas();
+      } else {
+        stopCanvas();
+      }
+    }
+    if (vibingTime) {
+      vibingTime.addEventListener('input', function () {
+        scrubHour = parseFloat(vibingTime.value);
+        vStart = Date.now(); // re-anchor: the office keeps living at this hour
+        if (vibingTimeLabel) {
+          const hh = String(Math.floor(scrubHour)).padStart(2, '0');
+          const mm = String(Math.round((scrubHour % 1) * 60)).padStart(2, '0');
+          vibingTimeLabel.textContent = hh + ':' + mm;
+        }
+      });
+    }
+    if (vibingWeather) {
+      vibingWeather.addEventListener('click', function (e) {
+        const chip = e.target.closest('.osd__chip[data-weather]');
+        if (!chip) return;
+        if (vOffice) vOffice.set_weather(chip.dataset.weather);
+        vibingWeather.querySelectorAll('.osd__chip').forEach(function (x) {
+          const on = x === chip;
+          x.classList.toggle('is-active', on);
+          x.setAttribute('aria-pressed', on ? 'true' : 'false');
+        });
+      });
+    }
+    if (vibingTheme) {
+      vibingTheme.addEventListener('click', function (e) {
+        const chip = e.target.closest('.osd__chip[data-theme]');
+        if (!chip) return;
+        if (vOffice) vOffice.set_theme(chip.dataset.theme);
+        vibingTheme.querySelectorAll('.osd__chip').forEach(function (x) {
+          const on = x === chip;
+          x.classList.toggle('is-active', on);
+          x.setAttribute('aria-pressed', on ? 'true' : 'false');
+        });
+        if (vibingTheme.dataset.retint && chip.dataset.accent) {
+          retintPage(chip.dataset.accent, chip.dataset.accent2);
+        }
+      });
+      if (vibingTheme.dataset.retint) {
+        // a real theme change elsewhere (Nav toggle / Escape / dracula egg /
+        // the `t` key) clears this preview's pressed state — same contract as
+        // the generic gallery chips below (neither dispatches pix:theme
+        // itself: this IS a decorative preview, not the real site theme, and
+        // dispatching it would immediately self-clear the is-active state
+        // just set above, plus wrongly tell Base.astro's listener a real
+        // theme change happened).
+        document.addEventListener('pix:theme', function () {
+          vibingTheme.querySelectorAll('.osd__chip').forEach(function (x) {
+            x.classList.remove('is-active');
+            x.setAttribute('aria-pressed', 'false');
+          });
+        });
+      }
+    }
 
     // ---- channel tuning (hidden-swap; view-transition crossfade when available)
     function tune(id, silent) {
@@ -175,6 +330,7 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
           m.setAttribute('aria-pressed', m.dataset.ch === id ? 'true' : 'false');
         });
         syncVideos();
+        syncCanvas();
       }
       if (!mq.matches && document.startViewTransition) document.startViewTransition(swap);
       else swap();
@@ -196,7 +352,12 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
     stages.forEach(function (st) {
       const img = st.querySelector('img.terminal__screen');
       const title = st.querySelector('[data-stage-title]');
-      const chips = st.querySelectorAll('.osd__chip');
+      // .osd__chip is reused by the VIBING live channel's weather/theme groups
+      // too (data-weather/data-theme, no data-src) — filter to the variant-set
+      // chips this loop drives; the VIBING controller above owns its own.
+      const chips = Array.prototype.filter.call(st.querySelectorAll('.osd__chip'), function (c) {
+        return !!c.dataset.src;
+      });
       if (!chips.length || !img) return;
       const prefetched = {};
       function prefetch(src) {
@@ -214,14 +375,7 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
           img.alt = c.dataset.alt;
           if (title) title.textContent = c.dataset.title;
           if (c.dataset.accent) st.style.setProperty('--accent', c.dataset.accent);
-          if (st.dataset.retint) {
-            // Retint the page's DECORATIVE hues to preview this theme — like
-            // hitting `t` in the app. Deliberately NOT --coral-deep: that's the
-            // AA text color, and a raw chip accent drops it below WCAG 1.4.3.
-            const root = document.documentElement;
-            root.style.setProperty('--coral', c.dataset.accent);
-            root.style.setProperty('--amber', c.dataset.accent2 || c.dataset.accent);
-          }
+          if (st.dataset.retint) retintPage(c.dataset.accent, c.dataset.accent2);
           st.classList.remove('retint-pulse');
           void st.offsetWidth;
           st.classList.add('retint-pulse');
@@ -348,5 +502,15 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
   }
   .studio__stages {
     min-width: 0;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    /* the VIBING channel's controls only make sense with the office running,
+       and reduced-motion never boots it (poster only) — hide them. :global
+       because .vibing__time/.stage__osd are ChannelStage's own markup, not
+       this component's template (Astro scopes styles per-component). */
+    :global([data-stage='vibing'] .vibing__time),
+    :global([data-stage='vibing'] .stage__osd) {
+      display: none;
+    }
   }
 </style>
