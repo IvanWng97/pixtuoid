@@ -22,8 +22,8 @@
 //! The agent assertion is a pixel-diff FLOOR: an occupied frame must repaint
 //! materially more subpixels than the same office with no agent, both rendered
 //! through the IDENTICAL settle sequence so their (time-of-day) skies cancel —
-//! what remains is exactly the recolored sprite + its shadow/label. (A raw
-//! distinct-COLOR count was a timezone lottery: the sky palette, keyed off
+//! what remains is the agent's own paint (recolored sprite, shadow, name label,
+//! monitor glow). (A raw distinct-COLOR count was a timezone lottery: the sky palette, keyed off
 //! `chrono::Local`, swamped the sprite's few colors at bright hours.) The
 //! daemon assertion counts the lobster's exclusive carapace-red pixels (its
 //! sprite is not recolored, so its authored RGBs render exactly).
@@ -79,11 +79,17 @@ fn new_renderer(cols: u16, rows: u16) -> TuiRenderer<TestBackend> {
 /// mid-doorway) and return the final frame's subpixels. The empty baseline and
 /// the occupied frame go through the IDENTICAL sequence, so their (time-of-day)
 /// skies are byte-for-byte equal — a later pixel-diff cancels the background and
-/// isolates exactly the agent's footprint. The sky reads the wall clock via
+/// isolates the agent's footprint. The sky reads the wall clock via
 /// `chrono::Local` (timezone-dependent), which is precisely why the diff, not a
 /// raw color count, is the metric.
 fn settled_pixels(scene: &SceneState, cols: u16, rows: u16, now: SystemTime) -> Vec<(u8, u8, u8)> {
-    // ~30 frames at a ~30fps step ≈ 1s — long enough for the entry walk.
+    // ~30 frames at a ~30fps step ≈ 1s — bounded on BOTH sides. Lower bound:
+    // long enough for the entry walk to finish. Upper bound (load-bearing for
+    // the pixel-diff cancelling the sky): SHORTER than LightingState's 5s
+    // EMPTY_DEBOUNCE_MS — past that, the empty office's occupancy-driven floor
+    // dim would start easing while the occupied office holds its lights, so the
+    // two backgrounds would stop being byte-identical and the diff would no
+    // longer be purely the agent's paint. Don't raise this past ~150 frames.
     const SETTLE_FRAMES: usize = 30;
     const FRAME_STEP: Duration = Duration::from_millis(33);
     let pack = load_sprite_pack(None).expect("pack");
