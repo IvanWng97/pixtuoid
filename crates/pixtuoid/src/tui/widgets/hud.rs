@@ -440,6 +440,10 @@ pub(crate) fn build_status_spans<'a>(
 /// 2:1 compression is a different coordinate system — C2).
 pub(super) const BOARD_W: u16 = pixtuoid_scene::pixel_painter::NEON_PANEL_W;
 
+/// The board's L1 ★ CTA text — the ONE definition the L1 painter renders AND
+/// `star_hit_rect` measures, so the clickable target can't drift from the paint.
+const BOARD_STAR: &str = "\u{2605} Star";
+
 /// The board's plain-English "mood pulse" — one `(text, colour-key)` segment per
 /// non-zero present state, echoing the SHARED `StateCounts` the footer reads (not
 /// a second live-only derivation, the old footer-vs-board disagreement).
@@ -507,13 +511,20 @@ pub(crate) fn paint_wall_display(
     let cell_x = scene_rect.x + 2;
     let cell_y = scene_rect.y + 1;
 
-    // L1 — brand + ★ Star CTA, the star right-flushed to the panel edge.
+    // L1 — brand + ★ Star CTA, the star right-flushed to the panel edge so its
+    // left edge lands at `cell_x + BOARD_W - star_w` — the SAME position
+    // `star_hit_rect` derives the click target from (they can't drift while the
+    // brand fits, which the assert pins).
     let version = env!("CARGO_PKG_VERSION");
     let brand = format!("pixtuoid v{version}");
-    let star = "\u{2605} Star";
+    let star_w = display_width(BOARD_STAR);
     let gap = (BOARD_W as usize)
-        .saturating_sub(display_width(&brand) + display_width(star))
+        .saturating_sub(display_width(&brand) + star_w)
         .max(1);
+    debug_assert!(
+        display_width(&brand) + star_w <= BOARD_W as usize,
+        "brand+star must fit the panel for the right-flush = star_hit_rect pairing"
+    );
     let top_line = Line::from(vec![
         Span::styled(
             brand,
@@ -523,7 +534,7 @@ pub(crate) fn paint_wall_display(
         ),
         Span::raw(" ".repeat(gap)),
         Span::styled(
-            star,
+            BOARD_STAR,
             Style::default()
                 .fg(to_color(theme.ui.neon_star))
                 .add_modifier(Modifier::BOLD),
@@ -581,8 +592,35 @@ pub(crate) fn paint_wall_display(
     }
 }
 
-/// URL shown on the "More details" line and opened on click.
+/// The project repository — opened when the board's ★ Star CTA is clicked.
+pub(crate) const REPO_URL: &str = "https://github.com/IvanWng97/pixtuoid";
+/// URL shown on the version popup's "More details" line and opened on click:
+/// `REPO_URL` + `/releases`. Kept a full literal (const &str can't `concat!`);
+/// the two are pinned together by `version_popup_url_is_repo_releases`.
 pub(crate) const VERSION_POPUP_URL: &str = "https://github.com/IvanWng97/pixtuoid/releases";
+
+/// The precise screen rect of the board's `★ Star` CTA span, clipped to the
+/// scene (`None` when it clips away on a very narrow terminal). Derived from the
+/// SAME board geometry the L1 painter uses — `cell_x = scene.x + 2`, `cell_y =
+/// scene.y + 1`, and the right-flush to `BOARD_W` — so the click target can't
+/// drift from the painted star (the phantom-launch class the version-popup
+/// url-rect also guards). Replaces the loose `hit_test_branding` (cols `1..31`),
+/// which fired anywhere on the top-left row (C9).
+pub(crate) fn star_hit_rect(scene_rect: Rect) -> Option<Rect> {
+    let cell_x = scene_rect.x + 2;
+    let cell_y = scene_rect.y + 1;
+    let star_w = display_width(BOARD_STAR) as u16;
+    let star_x = cell_x + BOARD_W.saturating_sub(star_w);
+    clip_widget_rect(
+        Rect {
+            x: star_x,
+            y: cell_y,
+            width: star_w,
+            height: 1,
+        },
+        scene_rect,
+    )
+}
 /// Prefix rendered before the URL. Its byte-length determines the URL's
 /// click-rect x-offset; keep `paint_version_popup` and
 /// `version_popup_url_rect` consistent by using this constant.
@@ -753,6 +791,31 @@ mod hud_tests {
             width: w,
             height: h,
         }
+    }
+
+    #[test]
+    fn version_popup_url_is_repo_releases() {
+        // The two URL consts can't `concat!` (const &str), so pin them here — the
+        // version popup opens the repo's releases, the ★ CTA opens the repo root.
+        assert_eq!(VERSION_POPUP_URL, format!("{REPO_URL}/releases"));
+    }
+
+    #[test]
+    fn star_hit_rect_fits_and_truncates() {
+        let star_w = display_width(BOARD_STAR) as u16; // "★ Star" == 6 cols
+        let star_x = 2 + BOARD_W - star_w; // cell_x(=scene.x+2) + right-flush
+                                           // Roomy scene: the precise right-flushed span, one row tall at cell_y=1.
+        let wide = star_hit_rect(full_bounds(120, 44)).expect("star fits");
+        assert_eq!(
+            (wide.x, wide.y, wide.width, wide.height),
+            (star_x, 1, star_w, 1)
+        );
+        assert!(wide.x + wide.width <= 120, "clipped within the scene");
+        // A cramped scene truncates the span to its visible columns.
+        let narrow = star_hit_rect(full_bounds(star_x + 2, 44)).expect("partial star");
+        assert_eq!(narrow.width, 2, "clipped to the 2 visible cols");
+        // Too narrow to show any of the star ⇒ no click target (no phantom launch).
+        assert!(star_hit_rect(full_bounds(star_x, 44)).is_none());
     }
 
     #[test]

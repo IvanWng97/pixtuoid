@@ -121,18 +121,6 @@ pub fn hit_test_coffee_machine(layout: &Layout, mx: u16, my: u16) -> bool {
     mx >= coffee_x0 && mx < coffee_x1 && cell_y >= coffee_y0 && cell_y < coffee_y1
 }
 
-/// Hit-test the top-left wall-display branding link (the `pixtuoid vX … ★ Star`
-/// row that opens the GitHub repo). The brand paints at `scene_rect.y + 1` —
-/// row 1, since `scene_rect.y` is 0 — across cols `1..31`, so a click on row 0
-/// dead space above it must NOT match (the old `my <= 1` launched a browser on
-/// that unpainted row). The CALLER additionally gates on
-/// `cached_layout().is_some()` — the wall display only paints with a layout, so
-/// a too-small frame or a floor-slide transition (`cached_layout` cleared to
-/// `None`) can't phantom-launch — mirroring the coffee/pet click arms.
-pub fn hit_test_branding(mx: u16, my: u16) -> bool {
-    my == 1 && (1..31).contains(&mx)
-}
-
 /// Hit-test all furniture items in the office. Returns a short label
 /// if `(mx, my)` (terminal cell coords) falls on any known item.
 /// The coffee machine is handled separately for its click-to-open
@@ -398,19 +386,6 @@ pub fn hit_test_mascot(pos: pixtuoid_scene::layout::Point, mx: u16, my: u16) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn branding_hit_test_excludes_the_unpainted_row_zero() {
-        // The brand paints at row 1; a click on row 0 (the dead space above it,
-        // cols 1..31) must NOT match — the old `my <= 1` launched a browser there.
-        assert!(!hit_test_branding(5, 0), "row 0 is unpainted dead space");
-        assert!(hit_test_branding(5, 1), "row 1 is the branding link");
-        // Column bounds: cols 1..31 only.
-        assert!(!hit_test_branding(0, 1));
-        assert!(!hit_test_branding(31, 1));
-        assert!(hit_test_branding(1, 1));
-        assert!(hit_test_branding(30, 1));
-    }
 
     #[test]
     fn coffee_machine_hit_test_returns_false_for_origin() {
