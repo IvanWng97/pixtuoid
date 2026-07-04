@@ -196,6 +196,17 @@ impl StateKind {
         }
     }
 
+    /// The full capitalized state word — the tooltip dossier's state line reads
+    /// `{glyph} {word}` (the board uses its own casual `work`/`wait`/`idle`).
+    pub(crate) fn word(self) -> &'static str {
+        match self {
+            StateKind::Active => "Active",
+            StateKind::Waiting => "Waiting",
+            StateKind::Idle => "Idle",
+            StateKind::Exiting => "Exiting",
+        }
+    }
+
     /// The themed hue — reuses the existing `label_*` roles so state colour is
     /// identical to the name-badges and every other surface (`label_waiting` is
     /// the amber attention hue; `label_exiting` is already live).
@@ -297,6 +308,18 @@ fn paint_card_backing(f: &mut ratatui::Frame<'_>, area: Rect, theme: &Theme) {
 /// hue inverted vanishes against the highlight bg.
 fn badge_color_for(tag: &str, theme: &pixtuoid_scene::theme::Theme) -> Color {
     to_color(theme.source.by_prefix(tag).unwrap_or(theme.ui.label_idle))
+}
+
+/// The `[xx]` two-letter source badge span, coloured by the source's theme hue.
+/// The ONE badge builder shared by the dashboard, the Sources panel, AND the
+/// tooltip dossier so the three can't drift (`tag` is a 2-char `label_prefix`).
+/// Never REVERSED — a low-luminance hue inverted vanishes against a highlight bg,
+/// so callers reverse the OTHER spans (name/state) on selection, never this one.
+pub(crate) fn source_badge_span(tag: &str, theme: &Theme) -> ratatui::text::Span<'static> {
+    ratatui::text::Span::styled(
+        format!("[{tag:<2}]"),
+        Style::default().fg(badge_color_for(tag, theme)),
+    )
 }
 
 /// A `desired_w × desired_h` rect clamped to `bounds` and centered within it,
@@ -496,8 +519,10 @@ mod tests {
         // design never hinges on a single one (colour, glyph shape, or letter).
         let glyphs: HashSet<char> = kinds.iter().map(|k| k.glyph()).collect();
         let letters: HashSet<char> = kinds.iter().map(|k| k.letter()).collect();
+        let words: HashSet<&str> = kinds.iter().map(|k| k.word()).collect();
         assert_eq!(glyphs.len(), 4, "each state has a distinct glyph");
         assert_eq!(letters.len(), 4, "each state has a distinct letter");
+        assert_eq!(words.len(), 4, "each state has a distinct word");
         // The reserved amber "needs-you" hue and the exiting hue map to their
         // existing theme roles (label_waiting is amber; label_exiting is live).
         let t = &pixtuoid_scene::theme::NORMAL;

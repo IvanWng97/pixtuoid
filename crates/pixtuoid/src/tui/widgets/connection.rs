@@ -11,7 +11,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
 use super::{
-    badge_color_for, borderless_panel, centered_in, marquee_or_truncate, marquee_window, to_color,
+    borderless_panel, centered_in, marquee_or_truncate, marquee_window, source_badge_span, to_color,
 };
 use crate::tui::connection::{no_action_hint, ConnState, ConnectionRow, LiveInfo};
 use pixtuoid_scene::theme::Theme;
@@ -134,9 +134,8 @@ fn connection_line(
     let prefix = if is_selected { "\u{25b8} " } else { "  " };
 
     // Badge: source color, NEVER reversed (a low-luminance hue inverted vanishes
-    // against the highlight bg). Same mapping as the dashboard's badge.
+    // against the highlight bg). Same shared builder as the dashboard + tooltip.
     let badge_tag = row.label_prefix;
-    let badge_color = badge_color_for(badge_tag, theme);
 
     let base = if is_selected {
         Style::default().add_modifier(Modifier::REVERSED)
@@ -188,10 +187,7 @@ fn connection_line(
 
     Line::from(vec![
         Span::raw(prefix),
-        Span::styled(
-            format!("[{badge_tag:<2}]"),
-            Style::default().fg(badge_color),
-        ),
+        source_badge_span(badge_tag, theme),
         Span::raw(" "),
         Span::styled(name_cell, base.fg(to_color(theme.ui.tooltip_text))),
         Span::styled(conn_cell, base.fg(to_color(c_color))),

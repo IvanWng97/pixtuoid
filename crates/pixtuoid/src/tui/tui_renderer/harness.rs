@@ -1743,8 +1743,8 @@ fn pinned_agent_renders_stats_tooltip() {
     r.render(&scene, &pack(), t0()).unwrap();
     let after = frame_text(r.frame_buffer());
     assert!(
-        after.contains("calls") && after.contains("active"),
-        "pinned tooltip should show the agent stat line"
+        after.contains("calls"),
+        "pinned tooltip should show the agent ⏱ stat line"
     );
 }
 
@@ -2455,12 +2455,66 @@ fn pinned_active_agent_tooltip_shows_state_and_detail() {
     r.set_pinned_agent(Some(id));
     r.render(&scene, &pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
-    assert!(text.contains("Active"), "active state arm: {text}");
-    assert!(text.contains("Edit src/lib.rs"), "detail line: {text}");
-    // active_str numeric branch (session ≥5s): a '%' that is not "--%".
+    assert!(text.contains("Active"), "active state word: {text}");
+    // The detail splits: the tool name (`Edit`) rides the state line, the
+    // remaining args (`src/lib.rs`) the indented detail line below.
+    assert!(text.contains("Edit"), "tool name on the state line: {text}");
+    assert!(text.contains("src/lib.rs"), "detail line args: {text}");
+    // Active ≥5s folds a numeric meter into the ⏱ line (no `--%` anymore).
+    assert!(text.contains('%'), "active meter %: {text}");
+}
+
+#[test]
+fn pinned_agent_tooltip_shows_source_badge() {
+    // The dossier leads with the shared `[xx]` source badge (same builder as the
+    // dashboard/Sources panel) so the tooltip can't drift from them.
+    let mut a = active(
+        "/badge/0.jsonl",
+        0,
+        "Read src/main.rs",
+        t0() - Duration::from_secs(30),
+    );
+    // The badge resolves the source id → `label_prefix` via the registry; use the
+    // real id (the fixtures' shorthand "cc" is a prefix, not a registered id).
+    a.source = std::sync::Arc::from("claude-code");
+    let id = a.agent_id;
+    let scene = scene_with(vec![a], 16);
+    let mut r = build(120, 44, vec![]);
+    r.set_pinned_agent(Some(id));
+    r.render(&scene, &pack(), t0()).unwrap();
+    let text = frame_text(r.frame_buffer());
+    // claude-code → the `[cc]` badge prefix.
+    assert!(text.contains("[cc]"), "source badge on the tooltip: {text}");
+}
+
+#[test]
+fn pinned_subagent_tooltip_shows_lineage() {
+    // A subagent's dossier carries a `↳ under {parent}` line; a root agent's
+    // does not (the parent must resolve in the scene).
+    let parent = active(
+        "/lin/root.jsonl",
+        0,
+        "Read a",
+        t0() - Duration::from_secs(60),
+    );
+    let parent_id = parent.agent_id;
+    let mut child = active(
+        "/lin/child.jsonl",
+        1,
+        "Edit b",
+        t0() - Duration::from_secs(30),
+    );
+    child.label = "kid".into();
+    child.parent_id = Some(parent_id);
+    let child_id = child.agent_id;
+    let scene = scene_with(vec![parent, child], 16);
+    let mut r = build(120, 44, vec![]);
+    r.set_pinned_agent(Some(child_id));
+    r.render(&scene, &pack(), t0()).unwrap();
+    let text = frame_text(r.frame_buffer());
     assert!(
-        text.contains('%') && !text.contains("--%"),
-        "numeric active %: {text}"
+        text.contains("\u{21b3} under"),
+        "lineage line on the subagent: {text}"
     );
 }
 
