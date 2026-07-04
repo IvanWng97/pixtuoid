@@ -301,13 +301,18 @@ const MOON_SHADOW: Rgb = Rgb {
     b: 52,
 };
 /// Left edge of the first window (mirrors the `x = 3` start of the window loop
-/// in `paint_floor_and_walls`). The disc's `azimuth` maps onto the span between
-/// the first and last PAINTED pane's CENTERS (derived in `compute_disc` from
-/// this SAME `x=3, stride=WINDOW_W+WINDOW_GAP` tiling) — NOT a linear
-/// `buf_w - WINDOW_W` bound, which only coincidentally lands inside a window
-/// at some widths — so a low sun/moon at the arc extremes always lands inside
-/// a real pane instead of drifting onto the blank wall margin past the last
-/// window (where it would have no sky pixels to paint on and silently vanish).
+/// in `paint_floor_and_walls`). The disc's `azimuth` maps onto the span
+/// between the first PAINTED pane's left edge and the last PAINTED pane's
+/// right edge (derived in `compute_disc` from this SAME `x=3,
+/// stride=WINDOW_W+WINDOW_GAP` tiling), inset by `DISC_RADIUS_PX` at both
+/// ends — NOT a linear `buf_w - WINDOW_W` bound (only coincidentally lands
+/// inside a window at some widths) and NOT the pane CENTERS (which are
+/// bit-identical to the mullion columns, `dx == w/2`, so the old center-to-
+/// center span perfectly bisected the disc at its most visible low-altitude
+/// moments, and froze `cx` on that mullion whenever only one window is
+/// painted). The inset keeps the disc fully inside the glass at the arc
+/// extremes, its low-altitude ends landing near the outer frame edges rather
+/// than dead-centre on a mullion, and still lets a single-window buffer sweep.
 const FIRST_WINDOW_X: f32 = 3.0;
 // "Real low window": the horizon sits low in the band, and the apex climbs
 // high enough to leave the glass entirely (clipped) rather than the disc
@@ -335,18 +340,23 @@ fn compute_disc(
     if vis < MIN_DISC_VIS {
         return None; // thick cloud swallows the disc
     }
-    // Map azimuth across the actual tiled windows (centers of the first and last
-    // PAINTED panes), derived from the same `x=3, stride=WINDOW_W+WINDOW_GAP,
-    // while x+WINDOW_W+2<=buf_w` tiling the window loop uses — so the disc always
-    // lands inside a real pane at the arc extremes, for ANY buffer width (a linear
-    // `buf_w - WINDOW_W` bound only coincidentally works at buf_w=96).
+    // Sweep the disc across the windowed region [first pane, last pane], inset by
+    // the radius so it stays fully inside the glass at the extremes and its
+    // low-altitude arc ends land near the outer frame edges rather than pinned
+    // dead-centre on a mullion (which perfectly bisected the disc at its most
+    // visible moment; a single-window buffer also froze cx on that mullion).
+    // `k_max` (the last PAINTED window's index) is derived from the same
+    // `x=3, stride=WINDOW_W+WINDOW_GAP, while x+WINDOW_W+2<=buf_w` tiling the
+    // window loop uses, for ANY buffer width (a linear `buf_w - WINDOW_W`
+    // bound only coincidentally works at buf_w=96).
     let stride = (WINDOW_W + WINDOW_GAP) as f32;
     let k_max = (((buf_w as f32) - WINDOW_W as f32 - 5.0) / stride)
         .floor()
         .max(0.0);
-    let first_center = FIRST_WINDOW_X + WINDOW_W as f32 / 2.0;
-    let last_center = FIRST_WINDOW_X + k_max * stride + WINDOW_W as f32 / 2.0;
-    let cx = first_center + sky.azimuth * (last_center - first_center);
+    let last_window_right = FIRST_WINDOW_X + k_max * stride + WINDOW_W as f32;
+    let span_left = FIRST_WINDOW_X + DISC_RADIUS_PX;
+    let span_right = (last_window_right - DISC_RADIUS_PX).max(span_left);
+    let cx = span_left + sky.azimuth * (span_right - span_left);
     let horizon_y = top_wall_h as f32 * HORIZON_FRAC;
     let cy = horizon_y - sky.altitude * (top_wall_h as f32 * ARC_RISE_FRAC);
     // glow reuses the SAME hue as core — the soft halo is a lower-alpha ring
@@ -907,7 +917,11 @@ fn paint_floor_to_ceiling_window(
                         col = blend_rgb(col, target, d.vis);
                     } else if dist <= d.r + GLOW_PX {
                         let falloff = 1.0 - (dist - d.r) / GLOW_PX;
-                        col = blend_rgb(col, d.glow, d.vis * falloff * GLOW_ALPHA);
+                        // Scale by `lit_frac` so the glow tracks the illuminated
+                        // fraction: the sun (lit_frac=1.0) is unaffected, but a
+                        // new moon's near-dark core no longer casts a full-bright
+                        // halo — the ring dims in step with the phase.
+                        col = blend_rgb(col, d.glow, d.vis * falloff * GLOW_ALPHA * d.lit_frac);
                     }
                 }
                 buf.put(px, py, col);
@@ -1559,6 +1573,34 @@ mod tests {
     }
 
     #[test]
+    fn rain_hides_the_disc_like_overcast() {
+        // Thick cloud hides the disc UNIFORMLY: Rain's disc channel (0.05,
+        // same as Overcast/Storm) must hide it entirely too, not just dim it
+        // — regression guard for the old 0.20 value that let Rain out-show
+        // Overcast.
+        let buf_w = 96u16;
+        let top_wall_h = 40u16;
+        let clear = render_office_at(7, Weather::Clear, buf_w, top_wall_h);
+        let rain = render_office_at(7, Weather::Rain, buf_w, top_wall_h);
+        let overcast = render_office_at(7, Weather::Overcast, buf_w, top_wall_h);
+        let clear_n = count_warm_bright(&clear, top_wall_h);
+        let rain_n = count_warm_bright(&rain, top_wall_h);
+        let overcast_n = count_warm_bright(&overcast, top_wall_h);
+        assert!(
+            clear_n >= 3,
+            "clear should show a disc at a low sun hour, got {clear_n}"
+        );
+        assert_eq!(
+            rain_n, 0,
+            "rain should hide the disc entirely, like overcast, got {rain_n}"
+        );
+        assert_eq!(
+            overcast_n, 0,
+            "overcast should hide the disc entirely, got {overcast_n}"
+        );
+    }
+
+    #[test]
     fn disc_clips_above_the_glass_at_the_arc_apex() {
         // Hold `top_wall_h` CONSTANT and vary only the hour, so the only
         // difference between the two renders is the sun's altitude:
@@ -1616,6 +1658,43 @@ mod tests {
                 "buf_w={buf_w}: disc should render as a real disc, got {n} warm-bright px"
             );
         }
+    }
+
+    #[test]
+    fn disc_sweeps_across_a_single_window_buffer() {
+        // Regression guard for the old center-to-center mapping: with only
+        // ONE window painted, `first_center == last_center` (both the same
+        // window's centre), so `cx` was CONSTANT regardless of azimuth — the
+        // disc froze on the shared mullion column instead of sweeping. The
+        // new inset-span mapping must still sweep even on a single-window
+        // buffer. buf_w=40 paints exactly one window (WINDOW_W=22 + a margin
+        // too narrow for a second 22+3px pane).
+        let buf_w = 40u16;
+        let top_wall_h = 40u16;
+        let morning = render_office_at(7, Weather::Clear, buf_w, top_wall_h);
+        let evening = render_office_at(18, Weather::Clear, buf_w, top_wall_h);
+        let warm_center_x = |buf: &RgbBuffer| -> f32 {
+            let mut sum = 0u32;
+            let mut count = 0u32;
+            for y in 1..(top_wall_h / 3).max(2) {
+                for x in 0..buf.width() {
+                    let p = buf.get(x, y);
+                    if p.r > 200 && p.r > p.b.saturating_add(40) {
+                        sum += x as u32;
+                        count += 1;
+                    }
+                }
+            }
+            assert!(count > 0, "expected a warm disc to render in this buffer");
+            sum as f32 / count as f32
+        };
+        let morning_x = warm_center_x(&morning);
+        let evening_x = warm_center_x(&evening);
+        assert!(
+            (morning_x - evening_x).abs() > 1.0,
+            "the disc must sweep across a single-window buffer, not freeze on \
+             the mullion: morning_x={morning_x} evening_x={evening_x}"
+        );
     }
 
     #[test]
@@ -1771,6 +1850,53 @@ mod tests {
             crescent_dark >= full_dark + 10,
             "assert a real margin, not a hair's-breadth win: \
              crescent={crescent_dark} full={full_dark}"
+        );
+    }
+
+    #[test]
+    fn moon_glow_dims_at_new_moon() {
+        // The glow halo must track the phase: a new moon's near-dark core
+        // should cast (almost) no ring, unlike a full moon's bright one.
+        // Search January 2026 at 21:00 for the min/max illuminated fraction
+        // (mirrors `moon_luminance_tracks_phase` in sky.rs).
+        let buf_w = 96u16;
+        let top_wall_h = 40u16;
+        let (mut new_moon_day, mut new_moon_frac) = (1u32, f32::MAX);
+        let (mut full_moon_day, mut full_moon_frac) = (1u32, f32::MIN);
+        for day in 1..=31u32 {
+            let frac = sky::moon_phase(at_local(2026, 1, day, 21, 0));
+            if frac < new_moon_frac {
+                new_moon_frac = frac;
+                new_moon_day = day;
+            }
+            if frac > full_moon_frac {
+                full_moon_frac = frac;
+                full_moon_day = day;
+            }
+        }
+
+        // Count faint cool "glow ring" pixels — a softer bar than
+        // `count_cool_bright`'s core threshold, catching the halo blend
+        // around the disc rather than requiring a fully-opaque core hit.
+        let count_glow_ring = |buf: &RgbBuffer| -> usize {
+            (1..(top_wall_h / 3).max(2))
+                .flat_map(|y| (0..buf.width()).map(move |x| (x, y)))
+                .filter(|&(x, y)| {
+                    let p = buf.get(x, y);
+                    p.b > 90 && p.b > p.r.saturating_add(5)
+                })
+                .count()
+        };
+
+        let new_moon_buf = render_office_on(new_moon_day, 21, Weather::Clear, buf_w, top_wall_h);
+        let full_moon_buf = render_office_on(full_moon_day, 21, Weather::Clear, buf_w, top_wall_h);
+        let new_moon_glow = count_glow_ring(&new_moon_buf);
+        let full_moon_glow = count_glow_ring(&full_moon_buf);
+        assert!(
+            new_moon_glow < full_moon_glow,
+            "a new moon's glow ring (phase={new_moon_frac}) should show fewer/dimmer \
+             cool pixels than a full moon's (phase={full_moon_frac}): \
+             new={new_moon_glow} full={full_moon_glow}"
         );
     }
 }

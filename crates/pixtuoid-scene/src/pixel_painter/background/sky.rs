@@ -127,15 +127,18 @@ pub(in crate::pixel_painter) fn beam_strength(now: SystemTime) -> f32 {
 /// the most; a storm swallows it. Independent of the moon's (date-varying) phase,
 /// so the night weather-ordering is phase-stable.
 fn city_bounce(w: Weather) -> f32 {
+    // Roughly half the old table (Snow 0.16→0.08, …, Storm 0.03→0.015), same
+    // ordering — so a moonlit night's floor can never out-light a stormy solar
+    // noon (see `solar_noon_outshines_the_brightest_night`).
     let v = match w {
-        Weather::Snow => 0.16,
-        Weather::Clear => 0.11,
-        Weather::Windy => 0.10,
-        Weather::Fog => 0.09,
-        Weather::Smog => 0.09,
-        Weather::Overcast => 0.07,
-        Weather::Rain => 0.06,
-        Weather::Storm => 0.03,
+        Weather::Snow => 0.08,
+        Weather::Clear => 0.055,
+        Weather::Windy => 0.05,
+        Weather::Fog => 0.045,
+        Weather::Smog => 0.045,
+        Weather::Overcast => 0.035,
+        Weather::Rain => 0.03,
+        Weather::Storm => 0.015,
     };
     debug_assert!(
         (0.0..=1.0).contains(&v),
@@ -158,6 +161,9 @@ pub(in crate::pixel_painter) struct Atmo {
 pub(in crate::pixel_painter) fn atmo(w: Weather) -> Atmo {
     // (direct, diffuse, disc). Storm < Rain in BOTH transmission channels
     // (denser cloud); lightning adds transient punch elsewhere, not here.
+    // Overcast/Rain/Storm all sit at the SAME near-zero disc (0.05, below
+    // `MIN_DISC_VIS`) — thick cloud hides the disc uniformly, so a thicker
+    // cloud (Storm) never shows MORE of the disc than a thinner one (Rain).
     let (direct, diffuse, disc) = match w {
         Weather::Clear => (1.00, 0.55, 1.00),
         Weather::Windy => (0.90, 0.55, 0.95),
@@ -165,7 +171,7 @@ pub(in crate::pixel_painter) fn atmo(w: Weather) -> Atmo {
         Weather::Smog => (0.30, 0.45, 0.45),
         Weather::Fog => (0.05, 0.75, 0.10),
         Weather::Overcast => (0.00, 0.50, 0.05),
-        Weather::Rain => (0.00, 0.40, 0.20),
+        Weather::Rain => (0.00, 0.40, 0.05),
         Weather::Storm => (0.00, 0.28, 0.05),
     };
     debug_assert!(
@@ -196,8 +202,16 @@ pub(in crate::pixel_painter) struct TimeOfDayLook {
 pub(in crate::pixel_painter) fn time_of_day_look(now: SystemTime, theme: &Theme) -> TimeOfDayLook {
     let sky = emitter(now);
     let a = atmo(weather_state(now));
+    // The moon casts no USABLE direct beam (mirrors `beam_strength`'s own
+    // Sun/Moon gate) — a moonlit night must never out-light a cloudy solar
+    // noon, so only the sun feeds the hard-beam term; the moon's illuminance
+    // is diffuse-fill only.
+    let direct_eff = match sky.body {
+        Body::Sun => a.direct,
+        Body::Moon => 0.0,
+    };
     // One illuminance for sun OR moon: luminance carried by beam + diffuse fill.
-    let interior = (sky.emitter_lum * (a.direct * K_BEAM + a.diffuse * K_FILL)).clamp(0.0, 1.0);
+    let interior = (sky.emitter_lum * (direct_eff * K_BEAM + a.diffuse * K_FILL)).clamp(0.0, 1.0);
     // At night the city-bounce floor keeps the room from going pitch black.
     let night_floor = match sky.body {
         Body::Moon => city_bounce(weather_state(now)),
@@ -369,8 +383,11 @@ pub(in crate::pixel_painter) struct SkyState {
 // Sun rides the arc over its up-span; the moon owns the complementary night span.
 const SUN_RISE_H: f32 = 5.0;
 const SUN_SET_H: f32 = 20.0;
-/// Moon luminance is a small fraction of full sun even at a full phase.
-const MOON_PEAK_LUM: f32 = 0.22;
+/// Moon luminance is a small fraction of full sun even at a full phase — low
+/// enough that a full-moon midnight (plus the `city_bounce` floor) still
+/// stays dimmer than the dimmest cloudy daytime (a stormy solar noon); see
+/// `solar_noon_outshines_the_brightest_night`.
+const MOON_PEAK_LUM: f32 = 0.12;
 /// Synodic month (days) + a known new-moon epoch (unix days) for the phase calc.
 const SYNODIC_DAYS: f32 = 29.530_588;
 const NEW_MOON_EPOCH_UNIX_DAYS: f32 = 18_231.0; // 2019-11-27 new moon (unix day index)
@@ -500,6 +517,17 @@ mod tests {
             .into()
     }
 
+    /// Local midnight on a given January day — near the night arc's own apex,
+    /// so it's close to the brightest instant of that night regardless of
+    /// weather (mirrors `night_on` but at 00:00).
+    fn midnight_on(day: u32) -> SystemTime {
+        chrono::Local
+            .with_ymd_and_hms(2026, 1, day, 0, 0, 0)
+            .single()
+            .expect("local time should be unambiguous")
+            .into()
+    }
+
     // The interior illuminance now folds emitter luminance with atmo transmission
     // (`K_BEAM`/`K_FILL`), and night keeps a weather-keyed `city_bounce` floor —
     // so weather must still separate a night's darkness, but the OLD test's
@@ -555,6 +583,57 @@ mod tests {
         assert!(
             noon < dusk,
             "a stormy noon out-lights a stormy dusk: {noon} vs {dusk}"
+        );
+    }
+
+    // The headline physics-audit fix: a moonlit night must NEVER render
+    // brighter than a cloudy solar noon. Storm zeroes both `direct` channels
+    // (so the moon's already-zeroed direct beam can't matter, but a Storm
+    // noon still has to survive on diffuse alone), while Snow/Clear at a
+    // FULL moon are the two best cases night can offer (highest `city_bounce`
+    // floor + full lunar illumination). Even that best case must stay dimmer.
+    #[test]
+    fn solar_noon_outshines_the_brightest_night() {
+        struct Reset;
+        impl Drop for Reset {
+            fn drop(&mut self) {
+                set_weather_override(None);
+            }
+        }
+        let _reset = Reset;
+        let theme = crate::theme::ALL_THEMES[0];
+
+        // The fullest moon night in January 2026 (max illuminated fraction).
+        let full_moon_day = (1..=31u32)
+            .max_by(|&a, &b| {
+                moon_phase(night_on(a))
+                    .partial_cmp(&moon_phase(night_on(b)))
+                    .expect("moon_phase is never NaN")
+            })
+            .expect("January has days");
+        let full_moon_midnight = midnight_on(full_moon_day);
+
+        set_weather_override(Some(Weather::Storm));
+        let storm_noon = time_of_day_look(at_hour(12, 0), theme).darkness;
+
+        set_weather_override(Some(Weather::Clear));
+        let clear_full_moon = time_of_day_look(full_moon_midnight, theme).darkness;
+
+        set_weather_override(Some(Weather::Snow));
+        let snow_full_moon = time_of_day_look(full_moon_midnight, theme).darkness;
+
+        set_weather_override(None);
+
+        assert!(
+            storm_noon < clear_full_moon,
+            "a stormy solar noon must outshine even a clear full-moon midnight: \
+             storm_noon darkness={storm_noon} vs clear_full_moon={clear_full_moon}"
+        );
+        assert!(
+            storm_noon < snow_full_moon,
+            "a stormy solar noon must outshine even a snow-lit full-moon midnight \
+             (snow has the highest city_bounce floor): \
+             storm_noon darkness={storm_noon} vs snow_full_moon={snow_full_moon}"
         );
     }
 
@@ -791,6 +870,30 @@ mod tests {
         assert!(
             atmo(Weather::Overcast).disc < 0.1,
             "overcast hides the disc"
+        );
+    }
+
+    #[test]
+    fn thick_cloud_hides_the_disc_uniformly() {
+        // `MIN_DISC_VIS` (background/mod.rs `compute_disc`'s hide gate) is
+        // 0.08 — Overcast/Rain/Storm must all sit at or below it, so thick
+        // cloud hides the disc uniformly: a THICKER cloud (Storm) must never
+        // show MORE of the disc than a thinner one (Rain), matching the
+        // direct/diffuse ordering `storm_transmits_less_than_rain_overall`
+        // already pins.
+        const MIN_DISC_VIS: f32 = 0.08;
+        let overcast = atmo(Weather::Overcast).disc;
+        let rain = atmo(Weather::Rain).disc;
+        let storm = atmo(Weather::Storm).disc;
+        assert!(
+            overcast >= rain && rain >= storm,
+            "disc visibility must not increase as cloud thickens: \
+             overcast={overcast} rain={rain} storm={storm}"
+        );
+        assert!(
+            overcast < MIN_DISC_VIS && rain < MIN_DISC_VIS && storm < MIN_DISC_VIS,
+            "overcast/rain/storm should all hide the disc (below MIN_DISC_VIS={MIN_DISC_VIS}): \
+             overcast={overcast} rain={rain} storm={storm}"
         );
     }
 
