@@ -42,6 +42,11 @@ and compares against the live upstream:
                           vs the hook-event names on cursor.com/docs/hooks
                           (one-directional: Cursor exposes ~18 hook events and we
                           map ~5 by design, so only a VANISHED depended event alarms)
+  * Hermes hooks       -> `HERMES_EVENTS` in crates/pixtuoid/src/install/hermes.rs
+                          vs the `_DEFAULT_PAYLOADS` shell-hook event keys in
+                          NousResearch/hermes-agent hermes_cli/hooks.py
+                          (one-directional: Hermes fires ~15 shell-hook events and
+                          we register 4 by design, so only a VANISHED depended event alarms)
 
 Exit codes:
   0  no drift
@@ -256,6 +261,17 @@ OPENCLAW_HOOK_TYPES_URL = (
     "https://raw.githubusercontent.com/openclaw/openclaw/main/src/plugins/hook-types.ts"
 )
 
+# Hermes Agent is a hook-only source: we install SHELL hooks into config.yaml and
+# register 4 of its lifecycle events (`HERMES_EVENTS` in install/hermes.rs). Hermes
+# is open Python: the canonical shell-hook event set is the KEYS of `_DEFAULT_PAYLOADS`
+# in hermes_cli/hooks.py (the `hermes hooks test`/`doctor` fixtures, whose kwargs
+# mirror the real invoke_hook() call sites). ONE-DIRECTIONAL (like opencode/openclaw):
+# Hermes fires ~15 events and we register 4, so only an event WE REGISTER vanishing is
+# breaking (a rename → the shell hook we install fires nothing → no sprite).
+HERMES_HOOK_URL = (
+    "https://raw.githubusercontent.com/NousResearch/hermes-agent/main/hermes_cli/hooks.py"
+)
+
 
 def fetch(url: str) -> str:
     req = urllib.request.Request(url, headers={"User-Agent": "pixtuoid-drift-watch"})
@@ -406,6 +422,18 @@ def read_openclaw_events() -> set[str]:
     return set(re.findall(r'"(\w+)"', m.group(1)))
 
 
+def read_hermes_events() -> set[str]:
+    """The Hermes shell-hook events we register/decode, read from the
+    `HERMES_EVENTS` const in install/hermes.rs — pinned to the decoder arms by
+    `every_registered_hermes_event_decodes` (install/hermes.rs), so this is a
+    leak-free source of truth (mirrors read_cursor_events / read_openclaw_events)."""
+    src = (REPO / "crates/pixtuoid/src/install/hermes.rs").read_text()
+    m = re.search(r"const HERMES_EVENTS[^=]*=\s*&\[(.*?)\];", src, re.S)
+    if not m:
+        raise RuntimeError("could not locate HERMES_EVENTS in install/hermes.rs")
+    return set(re.findall(r'"(\w+)"', m.group(1)))
+
+
 def upstream_copilot_events(text: str) -> set[str] | None:
     """The per-event `type` consts from the @github/copilot session-events JSON
     schema. Each event is a `definitions.<Name>` object whose `properties.type`
@@ -455,6 +483,7 @@ def run_checks(
     copilot_ours: set[str] | None,
     cursor_ours: set[str] | None,
     openclaw_ours: set[str] | None,
+    hermes_ours: set[str] | None,
     breaking: list[str],
     review: list[str],
     errors: list[str],
@@ -625,6 +654,23 @@ def run_checks(
                         f"mascot silently stops reacting (no presence)."
                     )
 
+    # --- Hermes shell-hook events (only the FETCH is transient) ------------
+    if hermes_ours is not None:
+        text = try_fetch(HERMES_HOOK_URL, "Hermes hooks", breaking, errors)
+        if text is not None:
+            for ev in sorted(hermes_ours):
+                # `_DEFAULT_PAYLOADS` lists each event as a quoted dict key
+                # (`"on_session_start":`). ONE-DIRECTIONAL: a registered event
+                # missing upstream is breaking; new upstream events are ignored
+                # (we register 4 of ~15 by design).
+                if f'"{ev}"' not in text:
+                    breaking.append(
+                        f"Hermes hook `{ev}` (registered in HERMES_EVENTS) is GONE from "
+                        f"hermes_cli/hooks.py _DEFAULT_PAYLOADS — likely renamed; Hermes still "
+                        f"runs but the shell hook we install into config.yaml fires nothing "
+                        f"(no sprite / no activity)."
+                    )
+
     # --- CC subagent-dispatch tool (only the FETCH is transient) -----------
     if dispatch_names is not None:
         tools = try_fetch(CC_TOOLS_URL, "CC tools-reference", breaking, errors)
@@ -701,6 +747,7 @@ def main() -> int:
     copilot_ours = None
     cursor_ours = None
     openclaw_ours = None
+    hermes_ours = None
     try:
         codex_ours = read_codex_events()
         cc_ours = read_cc_events()
@@ -711,6 +758,7 @@ def main() -> int:
         copilot_ours = read_copilot_events()
         cursor_ours = read_cursor_events()
         openclaw_ours = read_openclaw_events()
+        hermes_ours = read_hermes_events()
     except Exception as e:  # noqa: BLE001
         breaking.append(
             f"drift-watch cannot read our own source ({e}) — the parsers in "
@@ -729,6 +777,7 @@ def main() -> int:
             copilot_ours,
             cursor_ours,
             openclaw_ours,
+            hermes_ours,
             breaking,
             review,
             errors,

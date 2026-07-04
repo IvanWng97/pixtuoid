@@ -1,0 +1,6 @@
+{"hook_event_name": "on_session_start", "session_id": "hm-7f3a-sess", "cwd": "/Users/dev/proj", "tool_name": null, "tool_input": null, "_pixtuoid_source": "hermes"}
+{"hook_event_name": "pre_tool_call", "session_id": "hm-7f3a-sess", "cwd": "/Users/dev/proj", "tool_name": "terminal", "tool_input": {"command": "cargo build"}, "extra": {"task_id": "t1", "tool_call_id": "c1"}, "_pixtuoid_source": "hermes"}
+{"hook_event_name": "post_tool_call", "session_id": "hm-7f3a-sess", "cwd": "/Users/dev/proj", "tool_name": "terminal", "extra": {"result": "{\"exit\":0}", "duration_ms": 812}, "_pixtuoid_source": "hermes"}
+{"hook_event_name": "pre_tool_call", "session_id": "hm-7f3a-sess", "cwd": "/Users/dev/proj", "tool_name": "read_file", "tool_input": {"file_path": "/Users/dev/proj/src/main.rs"}, "_pixtuoid_source": "hermes"}
+{"hook_event_name": "post_tool_call", "session_id": "hm-7f3a-sess", "cwd": "/Users/dev/proj", "tool_name": "read_file", "_pixtuoid_source": "hermes"}
+{"hook_event_name": "on_session_end", "session_id": "hm-7f3a-sess", "cwd": "/Users/dev/proj", "_pixtuoid_source": "hermes"}

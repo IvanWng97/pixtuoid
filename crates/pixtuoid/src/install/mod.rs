@@ -2,6 +2,7 @@ pub mod claude;
 pub mod codewhale;
 pub mod codex;
 pub mod cursor;
+pub mod hermes;
 mod hook_cmd;
 pub mod io;
 pub mod merge;

@@ -22,8 +22,8 @@ use serde_json::Value;
 
 use crate::source::decoder::{extract_top_level_cwd, CwdExtractor, LineDecoder};
 use crate::source::{
-    antigravity, claude_code, codewhale, codex, copilot, cursor, openclaw, opencode, reasonix,
-    AgentEvent,
+    antigravity, claude_code, codewhale, codex, copilot, cursor, hermes, openclaw, opencode,
+    reasonix, AgentEvent,
 };
 
 /// How the shared hook decoder derives the AgentId for this source. Moot for
@@ -257,6 +257,7 @@ pub const REGISTRY: &[SourceDescriptor] = &[
     OPENCODE,
     COPILOT,
     CURSOR,
+    HERMES,
     OPENCLAW,
 ];
 
@@ -586,6 +587,40 @@ const CURSOR: SourceDescriptor = SourceDescriptor {
     },
 };
 
+/// HOOK-ONLY: Hermes Agent (Nous Research) has no passively-observable transcript
+/// — its output is per-invocation and its sessions aren't a tailable JSONL. The
+/// reachable seam is Hermes shell hooks (`~/.hermes/config.yaml`, or
+/// `$HERMES_HOME/config.yaml`). The hook envelope reuses CC's `hook_event_name`
+/// field NAME but with snake_case values, so the custom decoder claims every
+/// event and keys on `session_id` (present + consistent; a real `cwd` is the
+/// label — `source/hermes.rs`). A user may run several instances, so session_id
+/// keeps concurrent sessions distinct rather than merging them by workspace.
+const HERMES: SourceDescriptor = SourceDescriptor {
+    name: hermes::SOURCE_NAME,
+    label_prefix: "hm",
+    verified_version: "0.18.0", // `Hermes Agent v0.18.0 (2026.7.1)`; wire captured 2026-07-03
+    version_probe: Some(&["hermes", "--version"]),
+    kind: SourceKind::Agent {
+        transcript: None, // hook-only: no transcript for the walker to watch
+        hook: HookDecoding {
+            id_key: IdKey::TranscriptPathThenSessionId, // inert: custom claims all
+            custom: Some(hermes::decode_hermes_hook_custom),
+        },
+        caps: SourceCaps {
+            // `on_session_end` FIRES on clean completion (best-effort counts,
+            // CC/Cursor class). Abrupt exits (no PID in the payload) fall to the
+            // generic stale-sweep.
+            has_exit_signal: true,
+            // A stale-swept session does not walk back in on a later prompt — but
+            // moot with an exit signal (short_idle_reap == false).
+            resurrects_on_prompt: false,
+            // No subagent nesting on the wire — sessions render flat, so there is
+            // no hook-silent delegation window to hold.
+            delegations_are_hook_silent: false,
+        },
+    },
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -669,10 +704,11 @@ mod tests {
         assert_eq!(OPENCODE.name, opencode::SOURCE_NAME);
         assert_eq!(COPILOT.name, copilot::SOURCE_NAME);
         assert_eq!(CURSOR.name, cursor::SOURCE_NAME);
+        assert_eq!(HERMES.name, hermes::SOURCE_NAME);
         assert_eq!(OPENCLAW.name, openclaw::SOURCE_NAME);
         // Hand-enumerated above — the len pin turns "forgot the new row's
         // assert" from a silent gap into a loud failure.
-        assert_eq!(REGISTRY.len(), 9, "new row? add its name-pin assert above");
+        assert_eq!(REGISTRY.len(), 10, "new row? add its name-pin assert above");
     }
 
     #[test]

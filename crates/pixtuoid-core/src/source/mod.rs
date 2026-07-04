@@ -30,6 +30,7 @@ pub const REGISTERED_SOURCES: &[&str] = &[
     opencode::SOURCE_NAME,
     copilot::SOURCE_NAME,
     cursor::SOURCE_NAME,
+    hermes::SOURCE_NAME,
     openclaw::SOURCE_NAME,
 ];
 
@@ -270,6 +271,7 @@ pub mod drift;
 pub(crate) mod exit_watch;
 #[cfg(feature = "native")]
 pub(crate) mod fd_probe;
+pub mod hermes;
 #[cfg(feature = "native")]
 pub mod hook;
 #[cfg(feature = "native")]

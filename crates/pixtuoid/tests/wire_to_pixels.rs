@@ -335,6 +335,14 @@ fn agent_cases() -> Vec<WireCase> {
             transport: Transport::Hook,
             seed: SeedStart::None,
         },
+        WireCase {
+            name: "hermes",
+            source: "hermes",
+            fixture: "hermes/tool-run/hook-payloads.jsonl",
+            decode: DecodeKind::Hook,
+            transport: Transport::Hook,
+            seed: SeedStart::None,
+        },
     ]
 }
 
@@ -450,6 +458,11 @@ fn opencode_hook_envelope_renders_a_painted_sprite() {
 #[test]
 fn cursor_hook_envelope_renders_a_painted_sprite() {
     assert_renders_a_sprite(&agent_case("cursor"));
+}
+
+#[test]
+fn hermes_hook_envelope_renders_a_painted_sprite() {
+    assert_renders_a_sprite(&agent_case("hermes"));
 }
 
 // =====================================================================

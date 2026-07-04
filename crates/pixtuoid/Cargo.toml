@@ -29,6 +29,11 @@ serde              = { workspace = true }
 serde_json         = { workspace = true }
 toml               = { workspace = true }
 toml_edit          = { workspace = true }
+# YAML parse+emit for the Hermes install target (config.yaml hooks merge). saphyr
+# is the maintained yaml-rust successor (serde_yaml/serde_yml are both abandoned);
+# it data-preserves a user's other config keys on merge but does NOT round-trip
+# comments (a YAML-ecosystem limitation — see install/hermes.rs). Binary-only.
+saphyr             = "0.0.6"
 anyhow             = { workspace = true }
 tracing            = { workspace = true }
 tracing-subscriber = { workspace = true }

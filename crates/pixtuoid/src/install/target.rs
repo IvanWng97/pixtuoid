@@ -201,6 +201,24 @@ pub const CURSOR: Target = Target {
     extra_artifacts: None,
 };
 
+pub const HERMES: Target = Target {
+    name: "hermes",
+    core_source: pixtuoid_core::source::hermes::SOURCE_NAME,
+    display_name: "Hermes Agent",
+    default_config_path: crate::install::hermes::default_config_path,
+    hook_command: crate::install::hermes::hook_command,
+    merge_install: crate::install::hermes::merge_install,
+    merge_uninstall: crate::install::hermes::merge_uninstall,
+    verify_schema: crate::install::hermes::verify_schema,
+    // Hermes ARGV-execs the command with the absolute path embedded (no shell PATH
+    // reliance), so an unresolvable binary is fatal.
+    binary_strategy: BinaryStrategy::EmbedAbsolute,
+    // Hermes creates ~/.hermes itself and OWNS config.yaml (model/provider); probe the
+    // home dir rather than the shared config file.
+    presence_probe: Some(crate::install::hermes::detect_installed),
+    extra_artifacts: None,
+};
+
 pub const OPENCLAW: Target = Target {
     name: "openclaw",
     core_source: pixtuoid_core::source::openclaw::SOURCE_NAME,
@@ -224,7 +242,7 @@ pub const OPENCLAW: Target = Target {
 };
 
 pub const TARGETS: &[&Target] = &[
-    &CLAUDE, &CODEX, &REASONIX, &CODEWHALE, &OPENCODE, &CURSOR, &OPENCLAW,
+    &CLAUDE, &CODEX, &REASONIX, &CODEWHALE, &OPENCODE, &CURSOR, &HERMES, &OPENCLAW,
 ];
 
 pub fn by_name(name: &str) -> Option<&'static Target> {
@@ -270,6 +288,7 @@ mod tests {
         assert_eq!(by_name("codewhale").unwrap().name, "codewhale");
         assert_eq!(by_name("opencode").unwrap().name, "opencode");
         assert_eq!(by_name("cursor").unwrap().name, "cursor");
+        assert_eq!(by_name("hermes").unwrap().name, "hermes");
         assert_eq!(by_name("openclaw").unwrap().name, "openclaw");
         assert!(by_name("nope").is_none());
         assert!(by_name("all").is_none()); // "all" is a meta-value, not a Target

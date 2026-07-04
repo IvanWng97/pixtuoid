@@ -1,0 +1,51 @@
+---
+source: crates/pixtuoid-core/tests/sources/conformance.rs
+expression: events
+---
+- SessionStart:
+    agent_id: 7533855382530380528
+    source: hermes
+    session_id: hm-7f3a-sess
+    cwd: /Users/dev/proj
+    parent_id: ~
+- Identity:
+    agent_id: 7533855382530380528
+    source: hermes
+    session_id: hm-7f3a-sess
+    cwd: /Users/dev/proj
+- ActivityStart:
+    agent_id: 7533855382530380528
+    tool_use_id: ~
+    detail:
+      Generic:
+        display: "terminal: cargo build"
+- Identity:
+    agent_id: 7533855382530380528
+    source: hermes
+    session_id: hm-7f3a-sess
+    cwd: /Users/dev/proj
+- ActivityEnd:
+    agent_id: 7533855382530380528
+    tool_use_id: ~
+- Identity:
+    agent_id: 7533855382530380528
+    source: hermes
+    session_id: hm-7f3a-sess
+    cwd: /Users/dev/proj
+- ActivityStart:
+    agent_id: 7533855382530380528
+    tool_use_id: ~
+    detail:
+      Generic:
+        display: "read_file: /Users/dev/proj/src/main.rs"
+- Identity:
+    agent_id: 7533855382530380528
+    source: hermes
+    session_id: hm-7f3a-sess
+    cwd: /Users/dev/proj
+- ActivityEnd:
+    agent_id: 7533855382530380528
+    tool_use_id: ~
+- SessionEnd:
+    agent_id: 7533855382530380528
+    as_child: false

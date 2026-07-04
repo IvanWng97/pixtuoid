@@ -58,6 +58,13 @@
   {
     "cli_present": false,
     "connected": false,
+    "display_name": "Hermes Agent",
+    "health": null,
+    "id": "hermes"
+  },
+  {
+    "cli_present": false,
+    "connected": false,
     "display_name": "OpenClaw",
     "health": null,
     "id": "openclaw"

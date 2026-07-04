@@ -120,6 +120,21 @@
     }
   },
   {
+    "id": "hermes",
+    "badge": "hm·",
+    "badge_color": "#6858e0",
+    "name": "Hermes Agent",
+    "url": "https://hermes-agent.nousresearch.com",
+    "status": "supported",
+    "featured": false,
+    "transport": "Hook shim (~/.hermes/config.yaml hooks, session-id-keyed; approve the hook once in Hermes to activate)",
+    "platforms": {
+      "macos": "yes",
+      "linux": "yes",
+      "windows": "experimental"
+    }
+  },
+  {
     "id": "openclaw",
     "badge": "ok·",
     "badge_color": "#ffaa30",

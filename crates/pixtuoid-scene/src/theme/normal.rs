@@ -503,5 +503,10 @@ pub static NORMAL: Theme = Theme {
             g: 0xaa,
             b: 0x30,
         }, // openclaw marigold (lobster; warm, clears claude-amber + opencode-red)
+        hermes: Rgb {
+            r: 0x68,
+            g: 0x58,
+            b: 0xe0,
+        }, // Hermes/Nous indigo (brand-constant like openclaw marigold; clears reasonix-violet + cursor-slate + codex-blue on every theme, min Manhattan >=92)
     },
 };
