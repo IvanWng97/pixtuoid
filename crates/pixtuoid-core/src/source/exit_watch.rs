@@ -295,9 +295,7 @@ mod imp {
             tracing::debug!("EVFILT_PROC EPERM for pid {pid}; dropped (backstops cover)");
             Registered::Failed
         } else {
-            tracing::debug!(
-                "EVFILT_PROC registration for pid {pid} returned errno {data}; dropped"
-            );
+            tracing::debug!("EVFILT_PROC registration for pid {pid} returned {errno:?}; dropped");
             Registered::Failed
         }
     }
