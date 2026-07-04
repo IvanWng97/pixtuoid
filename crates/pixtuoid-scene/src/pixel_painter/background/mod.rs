@@ -432,10 +432,7 @@ pub(super) fn paint_floor_and_walls(
     // Computed once per frame (not per window) and passed by value — see
     // `compute_disc`'s doc comment for why `cx` is absolute across the wall.
     let disc = compute_disc(now, weather, buf_w, top_wall_h, theme);
-    // High on a dark ∧ clear-sky night (stars visible), ~0 by day (darkness
-    // low) and under overcast/fog/storm (atmo.disc low) — the same "can you
-    // see through the sky" signal the disc's own visibility rides.
-    let star_strength = (look.darkness * sky::atmo(weather).disc).clamp(0.0, 1.0);
+    let star_strength = night_star_strength(now, look.darkness, weather);
     let mut x = 3u16;
     let mut idx: u32 = 0;
     while x + WINDOW_W + 2 <= buf_w {
@@ -544,6 +541,20 @@ const STAR_ALPHA_MAX: f32 = 0.55;
 /// its position), staggered per star so the field doesn't blink in unison.
 const STAR_TWINKLE_CYCLE_BASE_MS: u64 = 2000;
 const STAR_TWINKLE_CYCLE_SPAN_MS: u64 = 3000;
+
+/// How brightly the star field shows this frame. Stars only appear once the sun
+/// is BELOW the horizon (night = the emitter is the moon): dawn/dusk twilight
+/// has a high `darkness` (the sun is up but low, so `interior` is small) yet the
+/// brightening/dimming sky washes stars out — gating on `darkness` alone wrongly
+/// paints a full starfield at ~7am. At night it's `darkness × clear-sky` (the
+/// same "can you see through the sky" signal the disc rides), so overcast/fog/
+/// storm (low `atmo.disc`) hide the stars a clear night shows.
+fn night_star_strength(now: SystemTime, darkness: f32, weather: Weather) -> f32 {
+    match sky::emitter(now).body {
+        sky::Body::Moon => (darkness * sky::atmo(weather).disc).clamp(0.0, 1.0),
+        sky::Body::Sun => 0.0,
+    }
+}
 
 /// Deterministic sparse star field: ~1-in-`STAR_SPARSITY` sky pixels host a
 /// star. Hashed on the ABSOLUTE buffer `(px, py)` (not window-relative) so
@@ -1650,6 +1661,33 @@ mod tests {
             clear_n > overcast_n,
             "overcast (atmo.disc below STAR_MIN once multiplied by darkness) \
              should hide the stars a clear sky shows: clear={clear_n} overcast={overcast_n}"
+        );
+    }
+
+    #[test]
+    fn stars_gate_on_night_not_darkness_alone() {
+        // The star gate must key on the sun being BELOW the horizon (night), not
+        // on `darkness`. At 07:00 the sun is up but low, so a HIGH darkness (0.6)
+        // is passed — yet stars must be OFF (else a full field wrongly shows at
+        // dawn). Counting rendered pixels can't test this (the pale dawn sky is
+        // itself "faint-white"), so assert the pure gate directly.
+        let at = |h: u32| at_local(2026, 1, 1, h, 0);
+        // Dawn: sun up (emitter is the Sun) → no stars regardless of darkness.
+        assert_eq!(
+            night_star_strength(at(7), 0.6, Weather::Clear),
+            0.0,
+            "no stars at 7am while the sun is up"
+        );
+        // Deep night, clear: sun down (emitter is the Moon) → stars visible.
+        assert!(
+            night_star_strength(at(2), 0.9, Weather::Clear) > STAR_MIN,
+            "a clear night should light the stars"
+        );
+        // Night but overcast: the clear-sky factor (atmo.disc≈0.05) drops it
+        // below STAR_MIN → the thick cloud hides the stars.
+        assert!(
+            night_star_strength(at(2), 0.9, Weather::Overcast) < STAR_MIN,
+            "overcast should hide the stars even at night"
         );
     }
 
