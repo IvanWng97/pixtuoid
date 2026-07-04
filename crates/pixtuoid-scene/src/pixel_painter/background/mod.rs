@@ -289,28 +289,6 @@ struct Disc {
     lit_frac: f32,
 }
 
-// Placeholder celestial colors — Task 7 replaces these with the theme's
-// `theme.lighting.sun_core`/`moon_core`.
-const SUN_CORE: Rgb = Rgb {
-    r: 255,
-    g: 240,
-    b: 170,
-};
-const SUN_GLOW: Rgb = Rgb {
-    r: 255,
-    g: 205,
-    b: 120,
-};
-const MOON_CORE: Rgb = Rgb {
-    r: 236,
-    g: 242,
-    b: 255,
-};
-const MOON_GLOW: Rgb = Rgb {
-    r: 180,
-    g: 200,
-    b: 240,
-};
 const DISC_RADIUS_PX: f32 = 5.0;
 const GLOW_PX: f32 = 3.0;
 const GLOW_ALPHA: f32 = 0.55;
@@ -345,7 +323,13 @@ const MIN_DISC_VIS: f32 = 0.08;
 /// from the SAME `sky::emitter` arc that drives `time_of_day_look`'s spill lean
 /// and `sun_on_wall`'s wall spot — so the disc's side, the floor-spill lean, and
 /// the wall sun-spot can never disagree (all three read one `azimuth`).
-fn compute_disc(now: SystemTime, weather: Weather, buf_w: u16, top_wall_h: u16) -> Option<Disc> {
+fn compute_disc(
+    now: SystemTime,
+    weather: Weather,
+    buf_w: u16,
+    top_wall_h: u16,
+    theme: &Theme,
+) -> Option<Disc> {
     let sky = sky::emitter(now);
     let vis = sky::atmo(weather).disc;
     if vis < MIN_DISC_VIS {
@@ -365,9 +349,11 @@ fn compute_disc(now: SystemTime, weather: Weather, buf_w: u16, top_wall_h: u16) 
     let cx = first_center + sky.azimuth * (last_center - first_center);
     let horizon_y = top_wall_h as f32 * HORIZON_FRAC;
     let cy = horizon_y - sky.altitude * (top_wall_h as f32 * ARC_RISE_FRAC);
+    // glow reuses the SAME hue as core — the soft halo is a lower-alpha ring
+    // of the same color, so each theme's disc reads as one coherent body.
     let (core, glow) = match sky.body {
-        sky::Body::Sun => (SUN_CORE, SUN_GLOW),
-        sky::Body::Moon => (MOON_CORE, MOON_GLOW),
+        sky::Body::Sun => (theme.lighting.sun_core, theme.lighting.sun_core),
+        sky::Body::Moon => (theme.lighting.moon_core, theme.lighting.moon_core),
     };
     // The sun is always a full disc; the moon's illuminated fraction drives
     // the crescent/gibbous terminator in the disc-core render.
@@ -445,7 +431,7 @@ pub(super) fn paint_floor_and_walls(
     let (lit_colors, building, sky_row) = window_glass_invariants(window_h, look, theme);
     // Computed once per frame (not per window) and passed by value — see
     // `compute_disc`'s doc comment for why `cx` is absolute across the wall.
-    let disc = compute_disc(now, weather, buf_w, top_wall_h);
+    let disc = compute_disc(now, weather, buf_w, top_wall_h, theme);
     // High on a dark ∧ clear-sky night (stars visible), ~0 by day (darkness
     // low) and under overcast/fog/storm (atmo.disc low) — the same "can you
     // see through the sky" signal the disc's own visibility rides.
@@ -1509,11 +1495,11 @@ mod tests {
     }
 
     /// Count "cool bright" pixels (the moon disc's signature) in the same
-    /// sky-only region. `MOON_CORE`/`MOON_GLOW` sit closer to neutral white
-    /// than the sun's warm palette, so the blue-over-red margin is smaller
-    /// than `count_warm_bright`'s (10 vs 40) — still well clear of the base
-    /// night-sky gradient (`theme.lighting.night_sky_a/b`), whose blue
-    /// channel never approaches 200.
+    /// sky-only region. Per-theme `moon_core` values sit closer to neutral
+    /// white than each theme's warm `sun_core`, so the blue-over-red margin
+    /// is smaller than `count_warm_bright`'s (10 vs 40) — still well clear of
+    /// the base night-sky gradient (`theme.lighting.night_sky_a/b`), whose
+    /// blue channel never approaches 200.
     fn count_cool_bright(buf: &RgbBuffer, top_wall_h: u16) -> usize {
         (1..(top_wall_h / 3).max(2))
             .flat_map(|y| (0..buf.width()).map(move |x| (x, y)))
@@ -1671,17 +1657,20 @@ mod tests {
     fn crescent_moon_leaves_the_dark_limb_unlit() {
         // At 21:00 the moon disc sits low & in-glass at FULL atmo visibility
         // under Clear (`vis == atmo(Clear).disc == 1.0`), so every
-        // disc-interior pixel becomes EXACTLY `MOON_CORE` (lit) or EXACTLY
-        // `MOON_SHADOW` (the dark limb) — no partial blend to muddy the count.
-        // The disc's (cx, cy, r) depend only on the hour (not the date), so
-        // one `compute_disc` call gives the shared bounding box for every day.
+        // disc-interior pixel becomes EXACTLY `theme.lighting.moon_core` (lit)
+        // or EXACTLY `MOON_SHADOW` (the dark limb) — no partial blend to
+        // muddy the count. The disc's (cx, cy, r) depend only on the hour
+        // (not the date), so one `compute_disc` call gives the shared
+        // bounding box for every day.
         let buf_w = 96u16;
         let top_wall_h = 40u16;
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
         let geom = compute_disc(
             at_local(2026, 1, 1, 21, 0),
             Weather::Clear,
             buf_w,
             top_wall_h,
+            theme,
         )
         .expect("moon disc visible at 21:00 under Clear");
 

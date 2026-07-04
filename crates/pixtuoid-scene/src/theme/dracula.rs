@@ -197,6 +197,17 @@ pub static DRACULA: Theme = Theme {
             g: 15,
             b: 35,
         },
+        // Dracula orange sun (== sun_spill's own hue) / dracula purple moon.
+        sun_core: Rgb {
+            r: 255,
+            g: 184,
+            b: 108,
+        },
+        moon_core: Rgb {
+            r: 189,
+            g: 147,
+            b: 249,
+        },
     },
     furniture: FurnitureColors {
         wood_top: Rgb {

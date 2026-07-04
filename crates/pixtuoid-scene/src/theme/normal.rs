@@ -197,6 +197,18 @@ pub static NORMAL: Theme = Theme {
             g: 22,
             b: 38,
         },
+        // Matches the pre-Task-7 placeholder consts (visually approved) —
+        // pinned by task-7's brief so the already-verified look survives.
+        sun_core: Rgb {
+            r: 255,
+            g: 240,
+            b: 170,
+        },
+        moon_core: Rgb {
+            r: 236,
+            g: 242,
+            b: 255,
+        },
     },
     furniture: FurnitureColors {
         wood_top: Rgb {

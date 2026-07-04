@@ -203,6 +203,18 @@ pub static GRUVBOX: Theme = Theme {
             g: 18,
             b: 16,
         },
+        // Gruvbox bright yellow sun / a bluer aqua moon (gruvbox's own aqua
+        // leans green — brightened toward blue so the moon reads unambiguously cool).
+        sun_core: Rgb {
+            r: 250,
+            g: 189,
+            b: 47,
+        },
+        moon_core: Rgb {
+            r: 110,
+            g: 160,
+            b: 170,
+        },
     },
     furniture: FurnitureColors {
         wood_top: Rgb {

@@ -181,6 +181,17 @@ pub static CYBERPUNK: Theme = Theme {
             b: 255,
         },
         night_tint: Rgb { r: 8, g: 6, b: 18 },
+        // Hot-magenta sun / electric-cyan moon — the theme's own neon duality.
+        sun_core: Rgb {
+            r: 255,
+            g: 90,
+            b: 190,
+        },
+        moon_core: Rgb {
+            r: 100,
+            g: 230,
+            b: 255,
+        },
     },
     furniture: FurnitureColors {
         wood_top: Rgb {

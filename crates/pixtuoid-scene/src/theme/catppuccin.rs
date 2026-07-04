@@ -205,6 +205,17 @@ pub static CATPPUCCIN: Theme = Theme {
             g: 17,
             b: 27,
         },
+        // Catppuccin peach sun / lavender moon.
+        sun_core: Rgb {
+            r: 250,
+            g: 179,
+            b: 135,
+        },
+        moon_core: Rgb {
+            r: 180,
+            g: 190,
+            b: 254,
+        },
     },
     furniture: FurnitureColors {
         wood_top: Rgb {

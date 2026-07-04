@@ -83,6 +83,13 @@ pub struct LightingColors {
     pub ceiling_pool: Rgb,
     pub floor_lamp_halo: Rgb,
     pub night_tint: Rgb,
+    /// The sun disc's core color (window-wall celestial body, `pixel_painter::background::compute_disc`).
+    /// The soft halo ring reuses this SAME hue at lower alpha (no separate glow color) — must read
+    /// warm (see `sun_and_moon_read_warm_and_cool_for_every_theme`).
+    pub sun_core: Rgb,
+    /// The moon disc's core color (lit side; the dark limb is the fixed `MOON_SHADOW` in
+    /// `background/mod.rs`, not per-theme). Must read cool.
+    pub moon_core: Rgb,
 }
 
 #[derive(Debug, Clone)]
@@ -305,6 +312,28 @@ mod tests {
     #[test]
     fn light_themes_marked_light() {
         assert_eq!(NORMAL.kind, ThemeKind::Light);
+    }
+
+    // The window-wall celestial disc (Task 7) must read as a WARM sun and a
+    // COOL moon on every theme, or the day/night disc stops selling its
+    // identity regardless of how well it otherwise matches the palette.
+    #[test]
+    fn sun_and_moon_read_warm_and_cool_for_every_theme() {
+        for t in ALL_THEMES {
+            let l = &t.lighting;
+            assert!(
+                l.sun_core.r > l.sun_core.b,
+                "{}: sun_core {:?} should read warm (r > b)",
+                t.name,
+                l.sun_core
+            );
+            assert!(
+                l.moon_core.b > l.moon_core.r,
+                "{}: moon_core {:?} should read cool (b > r)",
+                t.name,
+                l.moon_core
+            );
+        }
     }
 
     // Every theme's appliance palette must keep the appliances LEGIBLE — the

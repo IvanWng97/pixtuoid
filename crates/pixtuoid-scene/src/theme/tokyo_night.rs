@@ -197,6 +197,17 @@ pub static TOKYO_NIGHT: Theme = Theme {
             g: 12,
             b: 26,
         },
+        // Amber sun (city_lit_windows[1]'s hue) / blue moon (neon_frame_base's hue).
+        sun_core: Rgb {
+            r: 224,
+            g: 175,
+            b: 104,
+        },
+        moon_core: Rgb {
+            r: 122,
+            g: 162,
+            b: 247,
+        },
     },
     furniture: FurnitureColors {
         wood_top: Rgb {
