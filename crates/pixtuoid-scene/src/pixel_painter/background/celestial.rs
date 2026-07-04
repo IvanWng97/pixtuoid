@@ -67,7 +67,7 @@ const HORIZON_FRAC: f32 = 0.55; // horizon_y = top_wall_h * HORIZON_FRAC
 const ARC_RISE_FRAC: f32 = 0.80; // apex lifts top_wall_h * ARC_RISE_FRAC above horizon
 /// Below this atmo `disc` visibility, thick cloud swallows the disc entirely
 /// (no point painting a body no one can see through the murk).
-const MIN_DISC_VIS: f32 = 0.08;
+pub(super) const MIN_DISC_VIS: f32 = 0.08;
 
 /// This frame's disc placement, or `None` under thick cloud (`atmo(weather).disc`
 /// below [`MIN_DISC_VIS`]). `cx`/`cy` are absolute buffer coordinates derived

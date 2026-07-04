@@ -878,13 +878,14 @@ mod tests {
 
     #[test]
     fn thick_cloud_hides_the_disc_uniformly() {
-        // `MIN_DISC_VIS` (background/celestial.rs `compute_disc`'s hide gate) is
-        // 0.08 — Overcast/Rain/Storm must all sit at or below it, so thick
+        // `MIN_DISC_VIS` (background/celestial.rs `compute_disc`'s hide gate)
+        // is the authoritative threshold — Overcast/Rain/Storm must all sit at
+        // or below it, so thick
         // cloud hides the disc uniformly: a THICKER cloud (Storm) must never
         // show MORE of the disc than a thinner one (Rain), matching the
         // direct/diffuse ordering `storm_transmits_less_than_rain_overall`
         // already pins.
-        const MIN_DISC_VIS: f32 = 0.08;
+        let min_disc_vis = super::celestial::MIN_DISC_VIS;
         let overcast = atmo(Weather::Overcast).disc;
         let rain = atmo(Weather::Rain).disc;
         let storm = atmo(Weather::Storm).disc;
@@ -894,8 +895,8 @@ mod tests {
              overcast={overcast} rain={rain} storm={storm}"
         );
         assert!(
-            overcast < MIN_DISC_VIS && rain < MIN_DISC_VIS && storm < MIN_DISC_VIS,
-            "overcast/rain/storm should all hide the disc (below MIN_DISC_VIS={MIN_DISC_VIS}): \
+            overcast < min_disc_vis && rain < min_disc_vis && storm < min_disc_vis,
+            "overcast/rain/storm should all hide the disc (below MIN_DISC_VIS={min_disc_vis}): \
              overcast={overcast} rain={rain} storm={storm}"
         );
     }
