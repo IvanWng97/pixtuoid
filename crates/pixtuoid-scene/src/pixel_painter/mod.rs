@@ -108,19 +108,34 @@ pub use sim::{CharacterGlow, CharacterPlacement, SimFrame};
 pub const PANTRY_COFFEE_COLS_LARGE: (u16, u16) = (11, 18);
 pub const PANTRY_COFFEE_COLS_SMALL: (u16, u16) = (9, 12);
 
-/// The neon wall-sign panel geometry, in PIXELS: origin `(X, Y)` and size `W×H`.
-/// THE single source of truth shared by the pixel painter (dark panel + pulsing
-/// border, `paint_neon_panel`) and the wall-clock collision clamp. Only the WIDTH
-/// crosses the crate boundary — `NEON_PANEL_W` is `pub` because the binary's
-/// `tui::widgets::hud::paint_wall_display` derives its board cell-width from it
-/// (so the text box can't drift from the painted panel); a pixel column maps 1:1
-/// to a terminal cell column in the half-block flush, so `NEON_PANEL_W` px == the
-/// board's cell width. `X`/`Y`/`H` have no cross-crate consumer, so they stay
-/// `pub(crate)` (don't widen the semver surface for internal geometry).
+/// The neon wall-sign panel geometry, in PIXELS: origin `(X, Y)` and OUTER size
+/// `W×H`, drawn with a `NEON_PANEL_BORDER`-px frame on every side. THE single
+/// source of truth shared by the pixel painter (`paint_neon_panel`) and the
+/// wall-clock collision clamp. A pixel column maps 1:1 to a terminal cell column
+/// in the half-block flush, so these px widths ARE cell widths on the horizontal.
+///
+/// The board's TEXT overlay lives in the dark INTERIOR (`NEON_PANEL_INNER_*` = the
+/// panel minus its frame): the binary's `tui::widgets::hud::paint_wall_display`
+/// pins its cell-origin AND width to those, so the lit text can't overrun the
+/// glowing frame. Laying text to the full OUTER `NEON_PANEL_W` overran it by the
+/// border on each side (the board-overflow bug). Only the interior pair + the
+/// outer width cross the crate boundary (`pub`); `X`/`Y`/`H`/`BORDER` have no
+/// cross-crate consumer (`pub(crate)`, don't widen the semver surface).
 pub(crate) const NEON_PANEL_X: u16 = 1;
 pub(crate) const NEON_PANEL_Y: u16 = 1;
 pub const NEON_PANEL_W: u16 = 30;
 pub(crate) const NEON_PANEL_H: u16 = 8;
+/// The frame thickness `paint_neon_panel` lights on every side (it reads THIS, so
+/// the interior derivation below provably matches the pixels it leaves dark).
+pub(crate) const NEON_PANEL_BORDER: u16 = 1;
+/// The dark interior's left cell-origin (`X` + the frame) — where board text starts.
+pub const NEON_PANEL_INNER_X: u16 = NEON_PANEL_X + NEON_PANEL_BORDER;
+/// The dark interior's cell WIDTH (`W` minus the frame on both sides) — the board's
+/// usable text width; `BOARD_W` pins to this.
+pub const NEON_PANEL_INNER_W: u16 = NEON_PANEL_W - 2 * NEON_PANEL_BORDER;
+// The interior must be a non-empty strict subset of the outer frame (catches a
+// degenerate BORDER=0 / oversized-border config at compile time).
+const _: () = assert!(NEON_PANEL_INNER_W > 0 && NEON_PANEL_INNER_W < NEON_PANEL_W);
 
 use anchors::compute_door_frame_idx;
 use background::{

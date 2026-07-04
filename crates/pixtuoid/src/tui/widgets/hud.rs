@@ -453,12 +453,25 @@ pub(crate) fn build_status_spans<'a>(
         .collect()
 }
 
-/// The wall board's text width pins to the painted neon panel (spine 2), so the
-/// lit sign's letters can never overrun (or underfill) the glowing frame behind
-/// them — the `PANTRY_COFFEE_COLS` anti-drift precedent. Only WIDTH derives; the
-/// board's 3-row height + the `+2/+1` cell origin stay literal (the half-block
-/// 2:1 compression is a different coordinate system — C2).
-pub(super) const BOARD_W: u16 = pixtuoid_scene::pixel_painter::NEON_PANEL_W;
+/// The wall board's text width + cell-origin pin to the painted neon panel's dark
+/// INTERIOR (spine 2), so the lit sign's letters can never overrun the glowing
+/// frame — the `PANTRY_COFFEE_COLS` anti-drift precedent. `NEON_PANEL_INNER_W` =
+/// the outer panel minus its `NEON_PANEL_BORDER` on each side (laying text to the
+/// full outer `NEON_PANEL_W` overran the frame — the board-overflow bug). Only the
+/// horizontal derives; the 3-row height + the `+1` cell ROW stay literal (the
+/// half-block 2:1 vertical is a different coordinate system — C2).
+pub(super) const BOARD_W: u16 = pixtuoid_scene::pixel_painter::NEON_PANEL_INNER_W;
+
+/// The board text's top-left terminal cell = the neon panel's dark interior origin
+/// (`NEON_PANEL_INNER_X` px, 1:1 with cells; the `+1` row is the half-block 2:1
+/// vertical, kept literal — C2). BOTH `paint_wall_display` and `star_hit_rect`
+/// read THIS one helper, so the painted text and the click target share an origin.
+fn board_cell_origin(scene_rect: Rect) -> (u16, u16) {
+    (
+        scene_rect.x + pixtuoid_scene::pixel_painter::NEON_PANEL_INNER_X,
+        scene_rect.y + 1,
+    )
+}
 
 /// The board's L1 ★ CTA text — the ONE definition the L1 painter renders AND
 /// `star_hit_rect` measures, so the clickable target can't drift from the paint.
@@ -528,8 +541,7 @@ pub(crate) fn paint_wall_display(
     use ratatui::style::Modifier;
     use ratatui::text::Line;
 
-    let cell_x = scene_rect.x + 2;
-    let cell_y = scene_rect.y + 1;
+    let (cell_x, cell_y) = board_cell_origin(scene_rect);
 
     // L1 — brand + ★ Star CTA, the star right-flushed to the panel edge so its
     // left edge lands at `cell_x + BOARD_W - star_w` — the SAME position
@@ -630,8 +642,7 @@ pub(crate) const VERSION_POPUP_URL: &str = "https://github.com/IvanWng97/pixtuoi
 /// url-rect also guards). Replaces the loose `hit_test_branding` (cols `1..31`),
 /// which fired anywhere on the top-left row (C9).
 pub(crate) fn star_hit_rect(scene_rect: Rect) -> Option<Rect> {
-    let cell_x = scene_rect.x + 2;
-    let cell_y = scene_rect.y + 1;
+    let (cell_x, cell_y) = board_cell_origin(scene_rect);
     let star_w = display_width(BOARD_STAR) as u16;
     let star_x = cell_x + BOARD_W.saturating_sub(star_w);
     clip_widget_rect(
@@ -826,14 +837,22 @@ mod hud_tests {
     #[test]
     fn star_hit_rect_fits_and_truncates() {
         let star_w = display_width(BOARD_STAR) as u16; // "★ Star" == 6 cols
-        let star_x = 2 + BOARD_W - star_w; // cell_x(=scene.x+2) + right-flush
-                                           // Roomy scene: the precise right-flushed span, one row tall at cell_y=1.
+                                                       // cell_x = the panel INTERIOR origin; the star right-flushes to the
+                                                       // interior's right edge, which must land INSIDE the outer frame.
+        let inner_x = pixtuoid_scene::pixel_painter::NEON_PANEL_INNER_X;
+        let star_x = inner_x + BOARD_W - star_w;
         let wide = star_hit_rect(full_bounds(120, 44)).expect("star fits");
         assert_eq!(
             (wide.x, wide.y, wide.width, wide.height),
             (star_x, 1, star_w, 1)
         );
         assert!(wide.x + wide.width <= 120, "clipped within the scene");
+        // The star's right edge sits at or before the panel's inner-right edge, so
+        // it never spills onto/past the glowing frame (the overflow bug).
+        assert!(
+            wide.x + wide.width <= inner_x + BOARD_W,
+            "star must land inside the panel interior"
+        );
         // A cramped scene truncates the span to its visible columns.
         let narrow = star_hit_rect(full_bounds(star_x + 2, 44)).expect("partial star");
         assert_eq!(narrow.width, 2, "clipped to the 2 visible cols");

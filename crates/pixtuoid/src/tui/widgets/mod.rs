@@ -1299,13 +1299,16 @@ mod tests {
     }
 
     #[test]
-    fn board_width_pins_to_neon_const() {
-        // Anti-drift spine 2: the board text can't overrun (or underfill) the
-        // painted neon panel because its width IS the panel's width.
+    fn board_width_pins_to_neon_panel_interior() {
+        // Anti-drift spine 2: the board text width IS the painted panel's dark
+        // INTERIOR (outer width minus the frame on each side), so the lit letters
+        // sit inside the glowing frame — never overrunning it (the overflow bug was
+        // pinning BOARD_W to the full OUTER NEON_PANEL_W).
         assert_eq!(
             BOARD_W,
-            pixtuoid_scene::pixel_painter::NEON_PANEL_W,
-            "board width must equal the painted neon panel width"
+            pixtuoid_scene::pixel_painter::NEON_PANEL_INNER_W,
+            "board width must equal the painted panel's dark interior width"
         );
+        // (interior < outer frame is enforced at COMPILE time in pixel_painter.)
     }
 }
