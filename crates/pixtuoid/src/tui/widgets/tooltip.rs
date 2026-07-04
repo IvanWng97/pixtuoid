@@ -153,12 +153,17 @@ pub(crate) fn paint_hover_tooltip(
         format!("{} {}", kind.glyph(), kind.word()),
         Style::default().fg(kind.color(theme)),
     )];
+    // An EXITING agent shows none of the live tool/reason affordances — the card
+    // already reads `◌ Exiting`, so the walking-out slot's retained Active/Waiting
+    // payload (mark_exiting doesn't reset `state`) must not leak a tool span, a
+    // `?reason`, or (below) an active-% meter. Gate the whole detail block on the
+    // exiting-first `kind`, not the raw `agent.state`.
     let mut detail_line: Option<String> = None;
-    if let ActivityState::Active {
-        detail, kind: tk, ..
-    } = &agent.state
-    {
-        if agent.exiting_at.is_none() {
+    if !matches!(kind, StateKind::Exiting) {
+        if let ActivityState::Active {
+            detail, kind: tk, ..
+        } = &agent.state
+        {
             if let Some(d) = detail.as_deref().filter(|d| !d.is_empty()) {
                 let (tool, rest) = d
                     .split_once(char::is_whitespace)
@@ -175,11 +180,11 @@ pub(crate) fn paint_hover_tooltip(
                     detail_line = Some(rest.chars().take(34).collect());
                 }
             }
+        } else if let ActivityState::Waiting { reason } = &agent.state {
+            // WHY leads for a blocked agent: the reason IS the detail, `?`-flagged.
+            let r: String = reason.chars().take(34).collect();
+            detail_line = Some(format!("?{r}"));
         }
-    } else if let ActivityState::Waiting { reason } = &agent.state {
-        // WHY leads for a blocked agent: the reason IS the detail, `?`-flagged.
-        let r: String = reason.chars().take(34).collect();
-        detail_line = Some(format!("?{r}"));
     }
 
     // Body lines (everything below the separator) — built first so the L1 `·id4`
@@ -211,8 +216,9 @@ pub(crate) fn paint_hover_tooltip(
         agent.tool_call_count
     );
     // Active-% meter folded into the ⏱ line (height budget). Fresh agents show no
-    // meter (the % is noise before ~5s of accounting).
-    if matches!(agent.state, ActivityState::Active { .. }) && session_secs >= 5 {
+    // meter (the % is noise before ~5s of accounting); an exiting agent shows none
+    // either (keyed off the exiting-first `kind`, matching the tool suppression).
+    if matches!(kind, StateKind::Active) && session_secs >= 5 {
         let pct = (agent.active_ms / 1000)
             .checked_mul(100)
             .and_then(|n| n.checked_div(session_secs))

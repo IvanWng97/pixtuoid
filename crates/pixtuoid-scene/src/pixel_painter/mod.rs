@@ -110,16 +110,17 @@ pub const PANTRY_COFFEE_COLS_SMALL: (u16, u16) = (9, 12);
 
 /// The neon wall-sign panel geometry, in PIXELS: origin `(X, Y)` and size `W×H`.
 /// THE single source of truth shared by the pixel painter (dark panel + pulsing
-/// border, `paint_neon_panel`), the wall-clock collision clamp, and — cross-crate
-/// — the binary's `tui::widgets::hud::paint_wall_display`, whose branding/state
-/// text overlays this exact region (its cell width derives from `NEON_PANEL_W`,
-/// so the text box can't drift from the painted panel). A pixel column maps 1:1
+/// border, `paint_neon_panel`) and the wall-clock collision clamp. Only the WIDTH
+/// crosses the crate boundary — `NEON_PANEL_W` is `pub` because the binary's
+/// `tui::widgets::hud::paint_wall_display` derives its board cell-width from it
+/// (so the text box can't drift from the painted panel); a pixel column maps 1:1
 /// to a terminal cell column in the half-block flush, so `NEON_PANEL_W` px == the
-/// board's cell width.
-pub const NEON_PANEL_X: u16 = 1;
-pub const NEON_PANEL_Y: u16 = 1;
+/// board's cell width. `X`/`Y`/`H` have no cross-crate consumer, so they stay
+/// `pub(crate)` (don't widen the semver surface for internal geometry).
+pub(crate) const NEON_PANEL_X: u16 = 1;
+pub(crate) const NEON_PANEL_Y: u16 = 1;
 pub const NEON_PANEL_W: u16 = 30;
-pub const NEON_PANEL_H: u16 = 8;
+pub(crate) const NEON_PANEL_H: u16 = 8;
 
 use anchors::compute_door_frame_idx;
 use background::{

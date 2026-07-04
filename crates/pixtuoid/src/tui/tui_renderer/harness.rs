@@ -2460,8 +2460,14 @@ fn pinned_active_agent_tooltip_shows_state_and_detail() {
     // remaining args (`src/lib.rs`) the indented detail line below.
     assert!(text.contains("Edit"), "tool name on the state line: {text}");
     assert!(text.contains("src/lib.rs"), "detail line args: {text}");
-    // Active ≥5s folds a numeric meter into the ⏱ line (no `--%` anymore).
-    assert!(text.contains('%'), "active meter %: {text}");
+    // Active ≥5s folds a numeric meter into the ⏱ line (no `--%` anymore). Teeth
+    // on BOTH computations: 120s/600s ⇒ 20%, and 20% ⇒ 1 filled + 4 empty cells
+    // (`filled = (20*5).div_ceil(100).min(5) = 1`).
+    assert!(text.contains("20%"), "exact active percent: {text}");
+    assert!(
+        text.contains("\u{25ae}\u{25af}\u{25af}\u{25af}\u{25af}"),
+        "meter fill (1 filled ▮ + 4 empty ▯): {text}"
+    );
 }
 
 #[test]
@@ -2485,6 +2491,13 @@ fn pinned_agent_tooltip_shows_source_badge() {
     let text = frame_text(r.frame_buffer());
     // claude-code → the `[cc]` badge prefix.
     assert!(text.contains("[cc]"), "source badge on the tooltip: {text}");
+    // …and L1 right-flushes the `·{id4}` disambiguation suffix (the fixtures'
+    // session_id is "s"; disambig_suffix is deterministic, zero-seeded SipHash).
+    let id4 = pixtuoid_scene::overlay::disambig_suffix("s");
+    assert!(
+        text.contains(&format!("\u{b7}{id4}")),
+        "id4 disambiguation suffix ·{id4}: {text}"
+    );
 }
 
 #[test]
@@ -2531,7 +2544,64 @@ fn pinned_waiting_agent_tooltip_shows_reason() {
     r.render(&scene, &pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
     assert!(text.contains("Waiting"), "waiting state arm: {text}");
-    assert!(text.contains("permission"), "reason line: {text}");
+    // The reason is `?`-flagged (WHY leads for a blocked agent) — assert the
+    // marker, not just the bare reason text.
+    assert!(
+        text.contains("?permission"),
+        "?-flagged reason line: {text}"
+    );
+}
+
+#[test]
+fn pinned_exiting_agent_tooltip_suppresses_meter() {
+    // A walking-out agent keeps its retained Active payload (mark_exiting doesn't
+    // reset `state`), but the dossier reads `◌ Exiting` — so the active-% meter is
+    // suppressed (keyed off the exiting-first `kind`, matching the tool span).
+    let mut a = active(
+        "/exM/0.jsonl",
+        0,
+        "Edit src/lib.rs",
+        t0() - Duration::from_secs(600),
+    );
+    a.active_ms = 120_000; // a 20% meter if it were NOT exiting
+    a.exiting_at = Some(t0());
+    let id = a.agent_id;
+    let scene = scene_with(vec![a], 16);
+    let mut r = build(120, 44, vec![]);
+    r.set_pinned_agent(Some(id));
+    r.render(&scene, &pack(), t0()).unwrap();
+    let text = frame_text(r.frame_buffer());
+    assert!(text.contains("Exiting"), "exiting state word: {text}");
+    assert!(
+        !text.contains('%'),
+        "no active-% meter on an exiting card: {text}"
+    );
+}
+
+#[test]
+fn pinned_exiting_agent_tooltip_suppresses_waiting_reason() {
+    // Symmetric to the meter: a Waiting slot now exiting reads `◌ Exiting`, not a
+    // `?reason` (the Waiting arm is gated on the exiting-first `kind` too).
+    let mut a = idle("/exW/0.jsonl", 0, t0() - Duration::from_secs(60));
+    a.state = ActivityState::Waiting {
+        reason: Arc::from("permission to edit"),
+    };
+    a.exiting_at = Some(t0());
+    let id = a.agent_id;
+    let scene = scene_with(vec![a], 16);
+    let mut r = build(120, 44, vec![]);
+    r.set_pinned_agent(Some(id));
+    r.render(&scene, &pack(), t0()).unwrap();
+    let text = frame_text(r.frame_buffer());
+    assert!(text.contains("Exiting"), "exiting state word: {text}");
+    assert!(
+        !text.contains("?permission"),
+        "no ?reason line on an exiting card: {text}"
+    );
+    assert!(
+        !text.contains("Waiting"),
+        "state word is Exiting, not Waiting: {text}"
+    );
 }
 
 #[test]

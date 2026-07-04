@@ -226,11 +226,31 @@ fn status_segments(
         } else {
             String::new()
         };
-        let mut text = format!(" \u{26a0} {warn}{alarm} ");
-        if display_width(&text) > avail {
-            text = text.chars().take(avail.saturating_sub(1)).collect();
-            text.push('\u{2026}');
-        }
+        // The `⚠ {warn}` body truncates to fit, but the `▲N need you` alarm is
+        // PINNED — the one must-not-miss datum rides through to the narrowest
+        // width (design DEATH tier). Only when the fixed chrome + alarm ALONE
+        // overflow does the alarm itself get cut. (The old code appended the
+        // alarm to `text` before a blanket truncate, so at narrow widths it was
+        // the TAIL cut first — the exact datum the comment promised to keep.)
+        let prefix = " \u{26a0} ";
+        let suffix = " ";
+        let full = format!("{prefix}{warn}{alarm}{suffix}");
+        let text = if display_width(&full) <= avail {
+            full
+        } else {
+            let chrome = display_width(prefix) + display_width(suffix) + display_width(&alarm);
+            let body_budget = avail.saturating_sub(chrome);
+            if body_budget >= 1 {
+                let mut body: String = warn.chars().take(body_budget.saturating_sub(1)).collect();
+                body.push('\u{2026}');
+                format!("{prefix}{body}{alarm}{suffix}")
+            } else {
+                // Too narrow even for the pinned alarm — truncate the whole line.
+                let mut t: String = full.chars().take(avail.saturating_sub(1)).collect();
+                t.push('\u{2026}');
+                t
+            }
+        };
         let pad = w.saturating_sub(display_width(&text) + quit.len());
         let mut out = vec![(text, SegRole::Warning)];
         if pad > 0 {
@@ -513,8 +533,11 @@ pub(crate) fn paint_wall_display(
 
     // L1 — brand + ★ Star CTA, the star right-flushed to the panel edge so its
     // left edge lands at `cell_x + BOARD_W - star_w` — the SAME position
-    // `star_hit_rect` derives the click target from (they can't drift while the
-    // brand fits, which the assert pins).
+    // `star_hit_rect` derives the click target from. The `.max(1)` floor keeps a
+    // ≥1-col gap; the assert is STRICT (`<`) so the NATURAL gap is already ≥1,
+    // making `.max(1)` a no-op and paint == hit-rect. At the exact-fit boundary
+    // (`brand+star == BOARD_W`) `.max(1)` would shove the star one col past the
+    // hit-rect (and clip it), so `<` forbids that boundary rather than `<=`.
     let version = env!("CARGO_PKG_VERSION");
     let brand = format!("pixtuoid v{version}");
     let star_w = display_width(BOARD_STAR);
@@ -522,8 +545,8 @@ pub(crate) fn paint_wall_display(
         .saturating_sub(display_width(&brand) + star_w)
         .max(1);
     debug_assert!(
-        display_width(&brand) + star_w <= BOARD_W as usize,
-        "brand+star must fit the panel for the right-flush = star_hit_rect pairing"
+        display_width(&brand) + star_w < BOARD_W as usize,
+        "brand+star must STRICTLY fit the panel (natural gap ≥1) for the right-flush = star_hit_rect pairing"
     );
     let top_line = Line::from(vec![
         Span::styled(
@@ -1102,6 +1125,57 @@ mod hud_tests {
         assert!(
             segs.iter().any(|(s, _)| s.contains('\u{00d7}')),
             "full tier (with the tool breakdown) expected at width 200: {segs:?}"
+        );
+    }
+
+    // DEATH tier: a source-death warning replaces the stats, but the `▲N need you`
+    // alarm is the one must-not-miss datum — it must survive to a width so narrow
+    // the warning body itself is truncated. (Regression: the alarm used to be
+    // appended to the text BEFORE a blanket truncate, so it was the tail cut first.)
+    #[test]
+    fn death_tier_pins_the_waiting_alarm_through_the_narrowest_width() {
+        use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex};
+        use std::path::PathBuf;
+        use std::sync::Arc;
+        let slot = AgentSlot {
+            agent_id: AgentId::from_transcript_path("/p/wait.jsonl"),
+            source: Arc::from("cc"),
+            session_id: Arc::from("s"),
+            cwd: Arc::from(PathBuf::from("/p").as_path()),
+            label: "w".into(),
+            state: ActivityState::Waiting {
+                reason: Arc::from("permission"),
+            },
+            state_started_at: SystemTime::UNIX_EPOCH,
+            created_at: SystemTime::UNIX_EPOCH,
+            last_event_at: SystemTime::UNIX_EPOCH,
+            exiting_at: None,
+            pending_idle_at: None,
+            desk_index: GlobalDeskIndex(0),
+            floor_idx: 0,
+            tool_call_count: 0,
+            active_ms: 0,
+            unknown_cwd: false,
+            parent_id: None,
+        };
+        let mut scene = SceneState::uniform(16);
+        scene.agents.insert(slot.agent_id, slot);
+        let pf = crate::tui::widgets::per_floor_counts(&scene);
+        let stats = FooterStats {
+            counts: crate::tui::widgets::scene_stats(&scene),
+            per_floor: &pf,
+            gateway: None,
+        };
+        // A warning long enough that the body must truncate at this width.
+        let warn = "transport pixtuoid-hook died: connection refused after 3 retries";
+        let line = build_status_summary(&scene, &stats, 40, None, Some(warn));
+        assert!(
+            line.contains("\u{25b2}1 need you"),
+            "the ▲N alarm must survive even when the warning body is truncated: {line}"
+        );
+        assert!(
+            line.contains('\u{2026}'),
+            "the warning body itself IS truncated at this width (proving the alarm was pinned, not merely fit): {line}"
         );
     }
 }
