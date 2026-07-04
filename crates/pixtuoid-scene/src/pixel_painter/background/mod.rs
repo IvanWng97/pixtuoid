@@ -311,11 +311,13 @@ const DISC_RADIUS_PX: f32 = 5.0;
 const GLOW_PX: f32 = 3.0;
 const GLOW_ALPHA: f32 = 0.55;
 /// Left edge of the first window (mirrors the `x = 3` start of the window loop
-/// in `paint_floor_and_walls`). The disc's `azimuth` maps onto the WINDOWED
-/// span `[FIRST_WINDOW_X, buf_w - WINDOW_W]` — NOT the full buffer — so a
-/// low sun/moon at the arc extremes lands inside the first/last window instead
-/// of drifting onto the blank wall margin past the last pane (where it would
-/// have no sky pixels to paint on and silently vanish).
+/// in `paint_floor_and_walls`). The disc's `azimuth` maps onto the span between
+/// the first and last PAINTED pane's CENTERS (derived in `compute_disc` from
+/// this SAME `x=3, stride=WINDOW_W+WINDOW_GAP` tiling) — NOT a linear
+/// `buf_w - WINDOW_W` bound, which only coincidentally lands inside a window
+/// at some widths — so a low sun/moon at the arc extremes always lands inside
+/// a real pane instead of drifting onto the blank wall margin past the last
+/// window (where it would have no sky pixels to paint on and silently vanish).
 const FIRST_WINDOW_X: f32 = 3.0;
 // "Real low window": the horizon sits low in the band, and the apex climbs
 // high enough to leave the glass entirely (clipped) rather than the disc
@@ -337,7 +339,18 @@ fn compute_disc(now: SystemTime, weather: Weather, buf_w: u16, top_wall_h: u16) 
     if vis < MIN_DISC_VIS {
         return None; // thick cloud swallows the disc
     }
-    let cx = FIRST_WINDOW_X + sky.azimuth * (buf_w as f32 - WINDOW_W as f32 - FIRST_WINDOW_X);
+    // Map azimuth across the actual tiled windows (centers of the first and last
+    // PAINTED panes), derived from the same `x=3, stride=WINDOW_W+WINDOW_GAP,
+    // while x+WINDOW_W+2<=buf_w` tiling the window loop uses — so the disc always
+    // lands inside a real pane at the arc extremes, for ANY buffer width (a linear
+    // `buf_w - WINDOW_W` bound only coincidentally works at buf_w=96).
+    let stride = (WINDOW_W + WINDOW_GAP) as f32;
+    let k_max = (((buf_w as f32) - WINDOW_W as f32 - 5.0) / stride)
+        .floor()
+        .max(0.0);
+    let first_center = FIRST_WINDOW_X + WINDOW_W as f32 / 2.0;
+    let last_center = FIRST_WINDOW_X + k_max * stride + WINDOW_W as f32 / 2.0;
+    let cx = first_center + sky.azimuth * (last_center - first_center);
     let horizon_y = top_wall_h as f32 * HORIZON_FRAC;
     let cy = horizon_y - sky.altitude * (top_wall_h as f32 * ARC_RISE_FRAC);
     let (core, glow) = match sky.body {
@@ -1422,29 +1435,63 @@ mod tests {
     }
 
     #[test]
-    fn disc_is_absent_at_apex_on_a_short_window() {
-        // Low-sun baseline: same 07:00 clear render as the test above.
+    fn disc_clips_above_the_glass_at_the_arc_apex() {
+        // Hold `top_wall_h` CONSTANT and vary only the hour, so the only
+        // difference between the two renders is the sun's altitude:
+        // `compute_disc`'s `cy` is `top_wall_h * (HORIZON_FRAC -
+        // altitude*ARC_RISE_FRAC)`, and at the apex (12:00, altitude ≈0.99)
+        // the bracket is solidly negative — the disc has climbed entirely
+        // above the glass, regardless of `top_wall_h`'s size ("real low
+        // window": the apex ALWAYS clips, by construction).
         let buf_w = 96u16;
-        let low_top_wall_h = 40u16;
-        let low = render_office_at(7, Weather::Clear, buf_w, low_top_wall_h);
-        let low_n = count_warm_bright(&low, low_top_wall_h);
-
-        // Apex (12:00, altitude ≈0.99) on a SHORT window: `compute_disc`'s
-        // `cy` is `top_wall_h * (HORIZON_FRAC - altitude*ARC_RISE_FRAC)`, and
-        // at this altitude the bracket is solidly negative — the disc has
-        // climbed above the glass regardless of `top_wall_h`'s size ("real
-        // low window": the apex ALWAYS clips, by construction). Must not
-        // panic (a short window also shrinks `window_h`/`glass_h` to their
-        // floor).
-        let short_top_wall_h = 10u16;
-        let apex = render_office_at(12, Weather::Clear, buf_w, short_top_wall_h);
-        let apex_n = count_warm_bright(&apex, short_top_wall_h);
-
-        assert!(
-            apex_n <= low_n,
-            "the apex disc should have clipped above the short glass: \
-             apex={apex_n} low={low_n}"
+        let top_wall_h = 40u16; // same height for both renders — only the HOUR varies
+        let low = render_office_at(7, Weather::Clear, buf_w, top_wall_h); // altitude ~0.41, in-glass
+        let apex = render_office_at(12, Weather::Clear, buf_w, top_wall_h); // altitude ~0.99, clipped
+        let low_n = count_warm_bright(&low, top_wall_h);
+        let apex_n = count_warm_bright(&apex, top_wall_h);
+        assert!(low_n >= 3, "low sun should show a disc: {low_n}");
+        assert_eq!(
+            apex_n, 0,
+            "the apex disc must clip entirely above the glass: {apex_n}"
         );
+    }
+
+    #[test]
+    fn short_window_apex_does_not_panic() {
+        // A SHORT window at the apex shrinks `window_h`/`glass_h` to their
+        // floor while the disc's `cy` is solidly negative — must not panic.
+        let _ = render_office_at(12, Weather::Clear, 96, 10);
+    }
+
+    #[test]
+    fn disc_lands_in_a_window_across_buffer_widths() {
+        // Regression guard for the wall-margin-vanish bug: the OLD linear
+        // `cx = FIRST_WINDOW_X + azimuth * (buf_w - WINDOW_W - FIRST_WINDOW_X)`
+        // only coincidentally lands inside a real window at buf_w=96 — at
+        // other widths (e.g. 76, 150, 300) it overshoots the last
+        // actually-painted pane and the disc vanishes onto blank wall.
+        // `compute_disc` now maps azimuth across the real tiled window
+        // centers, so the disc must render as a genuine multi-pixel disc
+        // (not a 1-2px wall-margin smudge) for ANY buffer width.
+        //
+        // Hour choice: 19:00 (dusk, azimuth ≈0.93 — close to the arc's far
+        // extreme), NOT the dawn-side 06:00. The old formula's error is
+        // `cx_old = FIRST_WINDOW_X + azimuth*(wrong span)`: at azimuth near 0
+        // the (wrong) span is multiplied by ~0, so `cx_old` collapses to
+        // `FIRST_WINDOW_X` regardless of `buf_w` and the bug never manifests
+        // (verified: reverting to the old formula, hour=6 still passes >=4
+        // for every width below — it doesn't discriminate). Only the
+        // azimuth-near-1 extreme stresses the (wrong) span fully, which is
+        // where the old formula actually overshoots past the last window.
+        let top_wall_h = 40u16;
+        for buf_w in [76u16, 96, 120, 150, 192, 220, 300] {
+            let buf = render_office_at(19, Weather::Clear, buf_w, top_wall_h);
+            let n = count_warm_bright(&buf, top_wall_h);
+            assert!(
+                n >= 4,
+                "buf_w={buf_w}: disc should render as a real disc, got {n} warm-bright px"
+            );
+        }
     }
 
     #[test]
