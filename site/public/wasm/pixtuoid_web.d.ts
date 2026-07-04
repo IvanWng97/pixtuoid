@@ -40,6 +40,20 @@ export class Office {
      */
     constructor(seed: number);
     /**
+     * Recolor the whole office to a theme by name (`"normal"|"cyberpunk"|
+     * "dracula"|"tokyo-night"|"catppuccin"|"gruvbox"`). Unknown name = no-op.
+     * Flushes the recolor cache so agent sprites repaint on the next frame; the
+     * env recolors on its own (painted fresh each frame from `self.theme`).
+     */
+    set_theme(name: string): void;
+    /**
+     * Force the office's weather (`"clear"|"rain"|"storm"|"snow"|"fog"|
+     * "overcast"|"windy"|"smog"`), or `None` to follow the clock-based cycle.
+     * Applied each `step` (see the force_weather invariant) so two Offices sharing
+     * the one wasm module never fight over the thread-local override.
+     */
+    set_weather(name?: string | null): void;
+    /**
      * Advance to `now_ms` and render at `w`×`h` pixels into the RGBA staging
      * buffer.
      *
@@ -62,9 +76,13 @@ export interface InitOutput {
     readonly office_frame_ptr: (a: number) => number;
     readonly office_hire: (a: number) => void;
     readonly office_new: (a: number) => [number, number, number];
+    readonly office_set_theme: (a: number, b: number, c: number) => void;
+    readonly office_set_weather: (a: number, b: number, c: number) => void;
     readonly office_step: (a: number, b: number, c: number, d: number) => void;
     readonly __wbindgen_externrefs: WebAssembly.Table;
     readonly __externref_table_dealloc: (a: number) => void;
+    readonly __wbindgen_malloc: (a: number, b: number) => number;
+    readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_start: () => void;
 }
 

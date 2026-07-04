@@ -222,6 +222,18 @@
   "advance_ms": 100000
  },
  {
+  "id": "vibing-poster",
+  "kind": "wasm-still",
+  "targets": [
+   "site"
+  ],
+  "w": 320,
+  "h": 180,
+  "hour": 18,
+  "weather": "clear",
+  "advance_ms": 100000
+ },
+ {
   "id": "multi-floor",
   "kind": "clip",
   "targets": [
