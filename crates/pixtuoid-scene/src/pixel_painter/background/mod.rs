@@ -307,9 +307,16 @@ const MOON_GLOW: Rgb = Rgb {
     g: 200,
     b: 240,
 };
-const DISC_RADIUS_PX: f32 = 3.5;
-const GLOW_PX: f32 = 2.5;
+const DISC_RADIUS_PX: f32 = 5.0;
+const GLOW_PX: f32 = 3.0;
 const GLOW_ALPHA: f32 = 0.55;
+/// Left edge of the first window (mirrors the `x = 3` start of the window loop
+/// in `paint_floor_and_walls`). The disc's `azimuth` maps onto the WINDOWED
+/// span `[FIRST_WINDOW_X, buf_w - WINDOW_W]` — NOT the full buffer — so a
+/// low sun/moon at the arc extremes lands inside the first/last window instead
+/// of drifting onto the blank wall margin past the last pane (where it would
+/// have no sky pixels to paint on and silently vanish).
+const FIRST_WINDOW_X: f32 = 3.0;
 // "Real low window": the horizon sits low in the band, and the apex climbs
 // high enough to leave the glass entirely (clipped) rather than the disc
 // tracking the full window height.
@@ -330,7 +337,7 @@ fn compute_disc(now: SystemTime, weather: Weather, buf_w: u16, top_wall_h: u16) 
     if vis < MIN_DISC_VIS {
         return None; // thick cloud swallows the disc
     }
-    let cx = sky.azimuth * buf_w as f32;
+    let cx = FIRST_WINDOW_X + sky.azimuth * (buf_w as f32 - WINDOW_W as f32 - FIRST_WINDOW_X);
     let horizon_y = top_wall_h as f32 * HORIZON_FRAC;
     let cy = horizon_y - sky.altitude * (top_wall_h as f32 * ARC_RISE_FRAC);
     let (core, glow) = match sky.body {
