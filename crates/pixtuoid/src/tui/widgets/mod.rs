@@ -28,11 +28,12 @@ pub(super) use tooltip::{
 };
 pub(crate) use tooltip::{paint_hover_tooltip, paint_label_widgets};
 
+use std::collections::BTreeMap;
 use std::time::SystemTime;
 
 use pixtuoid_core::sprite::Rgb;
-use pixtuoid_core::state::ActivityState;
-use pixtuoid_core::SceneState;
+use pixtuoid_core::state::{ActivityState, DaemonPresence, DaemonState, MAX_FLOORS};
+use pixtuoid_core::{AgentSlot, SceneState};
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use ratatui::widgets::{Block, Clear};
@@ -71,25 +72,64 @@ pub(crate) struct StateCounts {
     pub total: usize,
 }
 
-/// Bucket every agent in `scene`. An **exiting** agent (walking out) counts as
-/// `exiting` regardless of its last activity state — the single policy that fixes
-/// the footer-vs-board disagreement mid-walkout.
+/// Add one slot to `c` under the ONE exiting-first bucketing policy: an
+/// **exiting** agent (walking out) counts as `exiting` regardless of its last
+/// activity state. Shared by [`scene_stats`] and [`per_floor_counts`] so the
+/// policy can't drift between the office-wide and per-floor tallies.
+fn bucket_slot(c: &mut StateCounts, slot: &AgentSlot) {
+    c.total += 1;
+    if slot.exiting_at.is_some() {
+        c.exiting += 1;
+        return;
+    }
+    match slot.state {
+        ActivityState::Active { .. } => c.active += 1,
+        ActivityState::Waiting { .. } => c.waiting += 1,
+        ActivityState::Idle => c.idle += 1,
+    }
+}
+
+/// Bucket every agent in `scene` — the office-wide (or current-projected-floor)
+/// tally the footer and board both read.
 pub(crate) fn scene_stats(scene: &SceneState) -> StateCounts {
     let mut c = StateCounts::default();
     for slot in scene.agents.values() {
-        c.total += 1;
-        if slot.exiting_at.is_some() {
-            c.exiting += 1;
-            continue;
-        }
-        match slot.state {
-            ActivityState::Active { .. } => c.active += 1,
-            ActivityState::Waiting { .. } => c.waiting += 1,
-            ActivityState::Idle => c.idle += 1,
-        }
+        bucket_slot(&mut c, slot);
     }
     debug_assert_eq!(c.active + c.waiting + c.idle + c.exiting, c.total);
     c
+}
+
+/// Per-floor [`StateCounts`], bucketed by `AgentSlot.floor_idx` (clamped to the
+/// last floor). The office-wide breakdown feeding the footer's cross-floor
+/// `▲F{n}` cue — computed from the FULL scene, deliberately distinct from the
+/// footer's per-state integers (`scene_stats` on the projected floor); C8 says
+/// don't derive one from the other.
+pub(crate) fn per_floor_counts(scene: &SceneState) -> [StateCounts; MAX_FLOORS] {
+    let mut floors = [StateCounts::default(); MAX_FLOORS];
+    for slot in scene.agents.values() {
+        bucket_slot(&mut floors[slot.floor_idx.min(MAX_FLOORS - 1)], slot);
+    }
+    floors
+}
+
+/// The worst-of daemon-liveness rollup for the gateway chip. `None` = no daemon
+/// configured (chip suppressed), distinct from `Some(DaemonState::Down)` (a
+/// daemon was seen, then died). `DaemonState` has no `Ord` (C8), so severity is
+/// ranked explicitly: Idle < Busy < Degraded < Down.
+pub(crate) fn gateway_rollup(daemons: &BTreeMap<String, DaemonPresence>) -> Option<DaemonState> {
+    fn severity(s: DaemonState) -> u8 {
+        match s {
+            DaemonState::Idle => 0,
+            DaemonState::Busy => 1,
+            DaemonState::Degraded => 2,
+            DaemonState::Down => 3,
+        }
+    }
+    daemons
+        .values()
+        .map(|p| p.state)
+        .max_by_key(|s| severity(*s))
 }
 
 impl StateCounts {
@@ -573,6 +613,76 @@ mod tests {
         assert_eq!(c.get(StateKind::Waiting), 2);
         assert_eq!(c.get(StateKind::Idle), 7);
         assert_eq!(c.get(StateKind::Exiting), 1);
+    }
+
+    // --- office-wide plumbing (per-floor + gateway rollup) ------------------
+
+    fn daemon(state: pixtuoid_core::state::DaemonState) -> pixtuoid_core::state::DaemonPresence {
+        pixtuoid_core::state::DaemonPresence {
+            state,
+            active_sessions: 0,
+            last_seen: SystemTime::UNIX_EPOCH,
+            entered_at: SystemTime::UNIX_EPOCH,
+            in_flight_run_keys: Default::default(),
+            current_pid: None,
+        }
+    }
+
+    #[test]
+    fn gateway_rollup_is_worst_of() {
+        use pixtuoid_core::state::DaemonState;
+        use std::collections::BTreeMap;
+        // Empty map → None (chip SUPPRESSED — distinct from Some(Down) = seen then died).
+        assert_eq!(gateway_rollup(&BTreeMap::new()), None);
+        // Single daemon → itself.
+        let mut m = BTreeMap::new();
+        m.insert("gw".to_string(), daemon(DaemonState::Busy));
+        assert_eq!(gateway_rollup(&m), Some(DaemonState::Busy));
+        // Worst-of across many: Idle + Degraded + Down → Down.
+        m.insert("b".to_string(), daemon(DaemonState::Idle));
+        m.insert("c".to_string(), daemon(DaemonState::Degraded));
+        m.insert("d".to_string(), daemon(DaemonState::Down));
+        assert_eq!(gateway_rollup(&m), Some(DaemonState::Down));
+        // Degraded outranks Busy/Idle when nothing is Down.
+        let mut m2 = BTreeMap::new();
+        m2.insert("x".to_string(), daemon(DaemonState::Idle));
+        m2.insert("y".to_string(), daemon(DaemonState::Degraded));
+        assert_eq!(gateway_rollup(&m2), Some(DaemonState::Degraded));
+    }
+
+    #[test]
+    fn per_floor_buckets_by_floor_idx() {
+        use pixtuoid_core::state::ToolKind;
+        let active = || ActivityState::Active {
+            tool_use_id: None,
+            detail: None,
+            kind: ToolKind::Other,
+        };
+        let mut scene = SceneState::uniform(16);
+        let mut add = |scene: &mut SceneState, path, state, exiting, floor: usize| {
+            let mut s = stat_slot(path, state, exiting);
+            s.floor_idx = floor;
+            scene.agents.insert(s.agent_id, s);
+        };
+        add(&mut scene, "/f0a.jsonl", active(), false, 0);
+        add(&mut scene, "/f0b.jsonl", active(), false, 0);
+        add(
+            &mut scene,
+            "/f1w.jsonl",
+            ActivityState::Waiting {
+                reason: Arc::from("p"),
+            },
+            false,
+            1,
+        );
+        add(&mut scene, "/f1x.jsonl", active(), true, 1); // exiting on floor 1
+        add(&mut scene, "/f2i.jsonl", ActivityState::Idle, false, 2);
+
+        let pf = per_floor_counts(&scene);
+        assert_eq!((pf[0].active, pf[0].total), (2, 2));
+        assert_eq!((pf[1].waiting, pf[1].exiting, pf[1].total), (1, 1, 2));
+        assert_eq!((pf[2].idle, pf[2].total), (1, 1));
+        assert_eq!(pf[3], StateCounts::default(), "an untouched floor is zero");
     }
 
     // --- marquee_window ----------------------------------------------------
