@@ -3,8 +3,9 @@
 //! Render deterministic scenes and snapshot the pixel hash. Any visual
 //! regression (missing sprite, wrong color, broken layout) changes the
 //! hash. Tests only compare same-machine renders against each other
-//! (eq/ne assertions), so timezone-dependent code paths like
-//! `sunset_strength` don't cause cross-platform failures.
+//! (eq/ne assertions), so timezone-dependent code paths like the sky
+//! emitter's golden-hour blaze (`golden_hour_blaze`) don't cause
+//! cross-platform failures.
 
 mod common;
 

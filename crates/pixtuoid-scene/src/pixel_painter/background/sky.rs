@@ -127,7 +127,7 @@ pub(in crate::pixel_painter) fn beam_strength(now: SystemTime) -> f32 {
 /// the most; a storm swallows it. Independent of the moon's (date-varying) phase,
 /// so the night weather-ordering is phase-stable.
 fn city_bounce(w: Weather) -> f32 {
-    match w {
+    let v = match w {
         Weather::Snow => 0.16,
         Weather::Clear => 0.11,
         Weather::Windy => 0.10,
@@ -136,7 +136,12 @@ fn city_bounce(w: Weather) -> f32 {
         Weather::Overcast => 0.07,
         Weather::Rain => 0.06,
         Weather::Storm => 0.03,
-    }
+    };
+    debug_assert!(
+        (0.0..=1.0).contains(&v),
+        "city_bounce out of range: {w:?} -> {v}"
+    );
+    v
 }
 
 /// Weather as an ATMOSPHERE: how much of the emitter's light survives to the
@@ -252,6 +257,12 @@ pub(in crate::pixel_painter) struct SunSpot {
 /// wall the sun-spot lands on, the direction the floor spill leans, and the
 /// disc's own position (Task 5) can never disagree. Returns `None` at night
 /// (the moon casts no wall spot).
+/// Azimuth band boundaries partitioning the sun's E->W arc onto the office
+/// walls: `0.0..AZ_EAST_MAX` = east wall (morning), `AZ_EAST_MAX..AZ_WEST_MIN`
+/// = south/window wall (midday), `AZ_WEST_MIN..1.0` = west wall (evening).
+const AZ_EAST_MAX: f32 = 0.30;
+const AZ_WEST_MIN: f32 = 0.70;
+
 pub(in crate::pixel_painter) fn sun_on_wall(now: SystemTime) -> Option<SunSpot> {
     let sky = emitter(now);
     if !matches!(sky.body, Body::Sun) {
@@ -261,12 +272,15 @@ pub(in crate::pixel_painter) fn sun_on_wall(now: SystemTime) -> Option<SunSpot> 
     // the south (window) wall around midday, west wall in the evening — the SAME
     // azimuth that places the disc + leans the floor spill, so all three agree.
     let az = sky.azimuth;
-    let (wall, along) = if az < 0.30 {
-        (WallSide::East, az / 0.30)
-    } else if az < 0.70 {
-        (WallSide::South, (az - 0.30) / 0.40)
+    let (wall, along) = if az < AZ_EAST_MAX {
+        (WallSide::East, az / AZ_EAST_MAX)
+    } else if az < AZ_WEST_MIN {
+        (
+            WallSide::South,
+            (az - AZ_EAST_MAX) / (AZ_WEST_MIN - AZ_EAST_MAX),
+        )
     } else {
-        (WallSide::West, (az - 0.70) / 0.30)
+        (WallSide::West, (az - AZ_WEST_MIN) / (1.0 - AZ_WEST_MIN))
     };
     Some(SunSpot {
         wall,
@@ -778,5 +792,67 @@ mod tests {
             atmo(Weather::Overcast).disc < 0.1,
             "overcast hides the disc"
         );
+    }
+
+    #[test]
+    fn windy_near_full_beam() {
+        // Windy scatters cloud but keeps the sky mostly clear: near-full direct beam.
+        assert!(
+            atmo(Weather::Windy).direct > 0.5,
+            "windy keeps a strong beam"
+        );
+    }
+
+    #[test]
+    fn haze_and_snow_keep_a_faint_but_nonzero_beam() {
+        // Snow glare and atmospheric haze (fog/smog) still let a weak directional
+        // beam through — never a hard zero, but well below a clear/windy sky.
+        for w in [Weather::Snow, Weather::Fog, Weather::Smog] {
+            let d = atmo(w).direct;
+            assert!(
+                0.0 < d && d < 0.5,
+                "{w:?} should keep a faint but nonzero beam: {d}"
+            );
+        }
+    }
+
+    #[test]
+    fn storm_diffuse_dimmer_than_overcast() {
+        // A storm's cumulonimbus is optically denser than plain overcast stratus,
+        // so even the flat diffuse fill is dimmer under a storm.
+        assert!(
+            atmo(Weather::Storm).diffuse < atmo(Weather::Overcast).diffuse,
+            "storm diffuse should be dimmer than overcast"
+        );
+    }
+
+    #[test]
+    fn night_floor_varies_by_weather() {
+        // The city_bounce night floor is phase-independent (unlike the moon), so
+        // this ordering must hold regardless of the date: snow's albedo bounces
+        // the most, a storm swallows the most, and every weather keeps SOME glow
+        // (a room is never truly pitch black).
+        assert!(
+            city_bounce(Weather::Snow) >= city_bounce(Weather::Clear),
+            "snow albedo should bounce at least as much as a clear night"
+        );
+        assert!(
+            city_bounce(Weather::Clear) > city_bounce(Weather::Overcast),
+            "clear night should out-glow overcast"
+        );
+        assert!(
+            city_bounce(Weather::Storm) < city_bounce(Weather::Overcast),
+            "storm should swallow more glow than overcast"
+        );
+        assert!(
+            city_bounce(Weather::Storm) < city_bounce(Weather::Clear),
+            "storm should swallow more glow than a clear night"
+        );
+        for w in Weather::ALL {
+            assert!(
+                city_bounce(w) > 0.0,
+                "{w:?} must keep a nonzero city-bounce floor (never pitch black)"
+            );
+        }
     }
 }
