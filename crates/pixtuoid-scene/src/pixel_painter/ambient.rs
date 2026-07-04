@@ -12,7 +12,7 @@ use pixtuoid_core::state::FloorLocalDeskIndex;
 
 use crate::layout::Layout;
 use crate::pixel_painter::background::{
-    sun_on_wall, weather_light, weather_state, window_spill_columns, TimeOfDayLook, WallSide,
+    beam_strength, sun_on_wall, window_spill_columns, TimeOfDayLook, WallSide,
 };
 use crate::pixel_painter::palette::blend_rgb;
 use crate::pixel_painter::PaintCtx;
@@ -221,11 +221,12 @@ pub(super) fn paint_dust_motes(
         return;
     }
     // Dust motes scatter the direct beam; their density rides `beam_strength`
-    // (full under clear sky, faint through thin cloud/haze/snow-glare, zero
-    // under thick overcast/rain/storm). `look.spill_strength` adds the daylight
-    // ramp so they also fade in/out with the hour. `look` is the per-frame
-    // value forwarded from `render_to_rgb_buffer` (was recomputed here).
-    let beam = weather_light(weather_state(now)).beam_strength;
+    // (emitter luminance carried by the weather's direct transmission — full
+    // under clear sky, faint through thin cloud/haze/snow-glare, zero under
+    // thick overcast/rain/storm or at night). `look.spill_strength` adds the
+    // daylight ramp so they also fade in/out with the hour. `look` is the
+    // per-frame value forwarded from `render_to_rgb_buffer` (was recomputed here).
+    let beam = beam_strength(now);
     if beam <= 0.0 {
         return;
     }
@@ -265,9 +266,11 @@ pub(super) fn paint_sun_spot(
     // The wall sun-spot is the projected direct beam. Its strength rides
     // `beam_strength`: a sharp rectangle under clear sky, a faint smudge through
     // haze/thin-cloud/snow-glare, gone entirely under thick overcast/rain/storm
-    // (diffuse light reaches the wall but never as a defined rectangle).
-    // `look.spill_strength` adds the daylight ramp so it fades in/out smoothly.
-    let beam = weather_light(weather_state(now)).beam_strength;
+    // (diffuse light reaches the wall but never as a defined rectangle) — and
+    // zero at night (the moon casts no usable beam, so `sun_on_wall` is already
+    // `None` above). `look.spill_strength` adds the daylight ramp so it fades
+    // in/out smoothly.
+    let beam = beam_strength(now);
     if beam <= 0.0 {
         return;
     }
@@ -358,7 +361,7 @@ mod tests {
     // The paint passes now take the per-frame `look` by reference (computed once
     // in `render_to_rgb_buffer`); tests build it the same way the production
     // caller does, so the asserted output is unchanged.
-    use crate::pixel_painter::background::time_of_day_look;
+    use crate::pixel_painter::background::{time_of_day_look, weather_state};
 
     #[test]
     fn dust_mote_positions_deterministic_per_seed() {
@@ -509,45 +512,25 @@ mod tests {
         assert_eq!(rain, base, "rain has no direct beam → no sun spot");
     }
 
-    // At the exact sun-up boundary (~05:30 / ~19:30 local) `sun_on_wall` returns
-    // an East/West spot whose `boundary_fade` is 0, so `spot.intensity == 0` and
-    // `effective_intensity` collapses to 0 even with a positive beam — the
-    // `effective_intensity <= 0.0` early-return must fire (NOT the earlier beam
-    // gate). Search days for a beam-bearing weather at that 10-min bucket, same
-    // pattern as the beam-strength test above.
+    // At the exact sunrise instant (local 05:00:00) the emitter's altitude —
+    // and therefore BOTH `spot.intensity` and `beam_strength` — is exactly
+    // zero: the two are now coupled (both derive from the same `sky.altitude`
+    // for the Sun), unlike the old model's independent clock-based
+    // `boundary_fade` vs weather-based beam. `paint_sun_spot` must still be a
+    // clean no-op at that instant, regardless of which early-return catches
+    // it. Zero precision fuzz: `sin(pi * 0.0) == 0.0` exactly.
     #[test]
-    fn sun_spot_zero_intensity_at_hour_edge_leaves_buffer_untouched() {
-        use crate::pixel_painter::background::Weather;
+    fn sun_spot_paints_nothing_at_the_exact_sunrise_instant() {
         use chrono::TimeZone;
         let theme = &crate::theme::NORMAL;
         let layout = crate::layout::Layout::compute(192, 80, Some(4)).expect("layout fits");
-        // 19:30 local → West-wall spot at the upper boundary (boundary_fade=0).
-        let dusk_edge = |day: u32| -> SystemTime {
-            chrono::Local
-                .with_ymd_and_hms(2026, 1, day, 19, 30, 0)
-                .single()
-                .unwrap()
-                .into()
-        };
-        // A beam-bearing weather (Clear/Windy/Snow/Smog/Fog) so the earlier
-        // `beam <= 0.0` gate is NOT what returns — it must be the intensity gate.
-        let beam_bearing = |w: Weather| {
-            matches!(
-                w,
-                Weather::Clear | Weather::Windy | Weather::Snow | Weather::Smog | Weather::Fog
-            )
-        };
-        let now = (1..=120u32)
-            .map(dusk_edge)
-            .find(|t| beam_bearing(weather_state(*t)))
-            .expect("a beam-bearing dusk-edge bucket exists");
-        // Precondition: the spot exists and its intensity is zero at this edge.
-        let spot = sun_on_wall(now).expect("sun is up at the boundary");
-        assert!(
-            !matches!(spot.wall, WallSide::South),
-            "19:30 must be a West-wall spot, not the South window"
-        );
-        assert_eq!(spot.intensity, 0.0, "boundary_fade=0 → zero intensity");
+        let sunrise: SystemTime = chrono::Local
+            .with_ymd_and_hms(2026, 1, 1, 5, 0, 0)
+            .single()
+            .unwrap()
+            .into();
+        let spot = sun_on_wall(sunrise).expect("sun is up (just risen) at 05:00");
+        assert_eq!(spot.intensity, 0.0, "altitude is exactly zero at sunrise");
 
         let fill = Rgb {
             r: 20,
@@ -555,7 +538,13 @@ mod tests {
             b: 24,
         };
         let mut buf = RgbBuffer::filled(192, 80, fill);
-        paint_sun_spot(&mut buf, theme, &layout, now, &time_of_day_look(now, theme));
+        paint_sun_spot(
+            &mut buf,
+            theme,
+            &layout,
+            sunrise,
+            &time_of_day_look(sunrise, theme),
+        );
         for y in 0..buf.height() {
             for x in 0..buf.width() {
                 assert_eq!(

@@ -15,8 +15,8 @@ pub(super) use lighting::{
     paint_neon_panel, paint_shadow, Ellipse,
 };
 pub(super) use sky::{
-    daylight_floor_overlay, dim_floor_overlay, set_weather_override, sun_on_wall, sunset_strength,
-    time_of_day_look, weather_light, weather_state, TimeOfDayLook, WallSide, Weather,
+    beam_strength, daylight_floor_overlay, dim_floor_overlay, set_weather_override, sun_on_wall,
+    time_of_day_look, weather_state, TimeOfDayLook, WallSide, Weather,
 };
 
 use std::time::SystemTime;
@@ -341,7 +341,6 @@ pub(super) fn paint_floor_and_walls(
                 WINDOW_W,
                 window_h,
                 window_frame,
-                look,
                 idx as u16,
                 now,
                 weather,
@@ -611,6 +610,20 @@ fn window_glass_invariants(
     (lit_colors, building, sky_row)
 }
 
+/// Golden-hour blaze strength on the city silhouette — SUN-only: a low moon
+/// must never paint an orange cast, however warm/lit it computes (a real
+/// moon's own altitude/luminance are already too low to matter, but the gate
+/// is absolute, not incidental). Warmth peaks near the horizon, scaled by the
+/// emitter's own luminance (a dim sunrise/sunset blazes less than a bright
+/// one) and the atmosphere's disc visibility (clouds hide the source, so no
+/// blaze without a visible disc).
+fn golden_hour_blaze(sky: &sky::SkyState, a: &sky::Atmo) -> f32 {
+    match sky.body {
+        sky::Body::Sun => (sky.warmth * sky.emitter_lum * a.disc).clamp(0.0, 1.0),
+        sky::Body::Moon => 0.0,
+    }
+}
+
 /// Floor-to-ceiling window with frame, mullion, and a procedural city view
 /// inside the glass. Sky gradient at top blends with time-of-day glass
 /// colors; the lower portion shows building silhouettes whose "windows"
@@ -626,7 +639,6 @@ fn paint_floor_to_ceiling_window(
     w: u16,
     h: u16,
     frame: Rgb,
-    look: &TimeOfDayLook,
     window_idx: u16,
     now: SystemTime,
     weather: Weather,
@@ -911,20 +923,9 @@ fn paint_floor_to_ceiling_window(
         Weather::Clear => {}
     }
 
-    let raw_sunset = sunset_strength(now);
-    let twilight_now = look.twilight;
-    // Golden-hour blaze on the city silhouette is attenuated by atmo —
-    // clouds scatter the direct warm light away (Storm at sunset reaches
-    // only ~25% of Clear's strength), Smog amplifies the warm cast by 1.4×
-    // for the sodium-lit "Blade Runner" sunset.
-    let atmo = weather_light(weather);
-    let smog_boost = if matches!(weather, Weather::Smog) {
-        1.4
-    } else {
-        1.0
-    };
-    let sunset =
-        (raw_sunset * (1.0 - twilight_now * 0.8) * atmo.intensity * smog_boost).clamp(0.0, 1.0);
+    let sky_now = sky::emitter(now);
+    let a = sky::atmo(weather);
+    let sunset = golden_hour_blaze(&sky_now, &a);
     if sunset > 0.05 {
         let min_building_h = (glass_h / 5).max(3);
         for dy in 1..h.saturating_sub(1) {
@@ -956,6 +957,39 @@ fn paint_floor_to_ceiling_window(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Task 4's headline invariant for the golden-hour blaze: it must be
+    // SUN-only. Uses hand-built SkyState/Atmo values (not real clock times) so
+    // even a maximally warm/lit MOON — which a real moon's low altitude/luminance
+    // could never actually produce — still proves the gate is absolute.
+    #[test]
+    fn golden_hour_blaze_is_sun_only() {
+        let full_atmo = sky::Atmo {
+            direct: 1.0,
+            diffuse: 1.0,
+            disc: 1.0,
+        };
+        let moon = sky::SkyState {
+            body: sky::Body::Moon,
+            altitude: 1.0,
+            azimuth: 0.5,
+            warmth: 1.0,
+            emitter_lum: 1.0,
+        };
+        assert_eq!(
+            golden_hour_blaze(&moon, &full_atmo),
+            0.0,
+            "a moon must never blaze, even at maximal warmth/luminance"
+        );
+        let sun = sky::SkyState {
+            body: sky::Body::Sun,
+            ..moon
+        };
+        assert!(
+            golden_hour_blaze(&sun, &full_atmo) > 0.9,
+            "a maximal sun should blaze near-full"
+        );
+    }
 
     #[test]
     fn weather_floor_tint_differs_by_variant() {
@@ -1132,7 +1166,6 @@ mod tests {
                 WINDOW_W,
                 30,
                 theme.surface.window_frame,
-                &look,
                 0,
                 now,
                 Weather::Storm,
@@ -1181,7 +1214,6 @@ mod tests {
             spill_strength: 0.8,
             spill_slant: 0.0,
             darkness: 0.2,
-            twilight: 0.0,
         };
         let mut buf = RgbBuffer::filled(buf_w, buf_h, Rgb { r: 5, g: 5, b: 5 });
         paint_floor_and_walls(

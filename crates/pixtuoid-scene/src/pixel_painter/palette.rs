@@ -1,5 +1,5 @@
 //! Per-agent palette (shirt / hair / skin) + frame recolor + color math
-//! primitives (blend / lerp / bell / mix_lab).
+//! primitives (blend / lerp / mix_lab).
 //!
 //! `agent_palette` picks the **outfit (shirt + pants) from the agent's normalized cwd**
 //! (same working directory → same outfit, for glanceable team/org-chart grouping), while
@@ -469,13 +469,6 @@ pub(super) fn degraded_frame(frame: &Frame) -> Frame {
 }
 
 // --- Color math primitives -----------------------------------------------
-
-/// Bell curve centered at `c` with half-width `w` (so the bell is 0 at
-/// `c ± w` and 1 at `c`). Used for dawn/dusk twilight tint.
-pub(super) fn bell(x: f32, c: f32, w: f32) -> f32 {
-    let d = (x - c) / w;
-    (1.0 - d * d).max(0.0)
-}
 
 /// Per-channel sRGB lerp. Cheap; used for low-strength tints where
 /// perceptual error doesn't matter (e.g. agent skin glow).

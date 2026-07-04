@@ -1145,21 +1145,6 @@ fn weather_state_changes_across_cycles() {
     assert!(unique.len() >= 2, "weather should vary across cycles");
 }
 
-#[test]
-fn sunset_strength_varies_across_day() {
-    let mut strengths = Vec::new();
-    let base = SystemTime::UNIX_EPOCH;
-    for hour in 0..24u64 {
-        strengths.push(background::sunset_strength(
-            base + std::time::Duration::from_secs(hour * 3600),
-        ));
-    }
-    let has_zero = strengths.iter().any(|s| *s < 0.05);
-    let has_nonzero = strengths.iter().any(|s| *s > 0.1);
-    assert!(has_zero, "sunset should be ~0 at some hours");
-    assert!(has_nonzero, "sunset should be >0 at dawn/dusk hours");
-}
-
 // --- waypoint_rank_offset_x decollision table -------------------------
 
 #[test]
