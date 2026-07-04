@@ -106,7 +106,12 @@ Mermaid diagram becomes an inline SVG at build via `rehype-mermaid`, which is
   consumer, never a dispatcher of `#office-pause`), feeding a synthetic
   `Date.now()`-based `now_ms` for the time scrub. Theme chips call `Office::set_theme`
   AND decorative-retint the page via the shared `retintPage()` (they do NOT dispatch
-  `pix:theme` — that would clobber other channels' chip state). Schema: `kind:"live"`
+  `pix:theme` — that would clobber other channels' chip state). The two live-office
+  consumers (this backdrop and Showcase's VIBING controller) MUST share ONE `init()`
+  call via `window.__pixWasm` — the generated glue's `__wbg_init` guards only the
+  already-resolved instance, not an in-flight promise, so independent `mod.default()`
+  calls racing before either resolves instantiate two separate wasm instances that
+  stomp the single module-global `wasm`. Schema: `kind:"live"`
   + `variantGroups` (per-group `retint`) + `poster` + `timeSlider` in `showcase.json`,
   resolved by `showcaseGroups` in `consts.ts`, validated by the `astro.config.mjs`
   showcase guard's live branch. Fallback (no-JS / no-wasm / reduced-motion): the

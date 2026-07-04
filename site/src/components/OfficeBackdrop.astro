@@ -397,8 +397,26 @@ import { asset, DIM_RESTING } from '../consts';
     function boot() {
       if (booted) return;
       booted = true;
-      import(wasmJsUrl)
+      // Showcase.astro's VIBING channel boots a SECOND Office off the SAME
+      // wasm module. The generated glue's __wbg_init only memoizes the
+      // RESOLVED instance (`if (wasm !== undefined) return wasm`), not the
+      // in-flight promise — so two independent `mod.default()` calls racing
+      // before either resolves would each instantiate a separate wasm
+      // instance and stomp the one module-global `wasm`, leaving whichever
+      // Office built against the losing instance reading the wrong linear
+      // memory forever. Memoize ONE shared init promise on `window` so every
+      // consumer awaits the same instantiation (site/CLAUDE.md VIBING entry).
+      window.__pixWasm =
+        window.__pixWasm ||
+        import(wasmJsUrl).then(function (m) {
+          return m.default().then(function () {
+            return m;
+          });
+        });
+      window.__pixWasm
         .then(function (mod) {
+          // __wbg_init is idempotent once resolved, so this just hands back
+          // the already-instantiated exports (no second fetch/instantiate).
           return mod.default().then(function (w) {
             wasm = w;
             office = new mod.Office(SEED);

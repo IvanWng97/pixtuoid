@@ -239,11 +239,33 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
     function bootCanvas() {
       if (vBooted) return;
       vBooted = true;
-      import(wasmJsUrl)
+      // Share ONE init promise with OfficeBackdrop's page-wide Office — the
+      // generated glue's __wbg_init only memoizes the resolved instance, not
+      // an in-flight promise, so two independent boots racing before either
+      // resolves would instantiate two wasm instances and stomp the single
+      // module-global `wasm` (see OfficeBackdrop.astro's `boot()` for the
+      // full race + site/CLAUDE.md's VIBING entry).
+      window.__pixWasm =
+        window.__pixWasm ||
+        import(wasmJsUrl).then(function (m) {
+          return m.default().then(function () {
+            return m;
+          });
+        });
+      window.__pixWasm
         .then(function (mod) {
+          // idempotent once resolved — hands back the shared exports/memory
           return mod.default().then(function (w) {
             vWasm = w;
             vOffice = new mod.Office(VIBING_SEED);
+            // The `clear` weather chip loads is-active (it matches
+            // vibing-poster.png, gen'd with --weather clear), but a fresh
+            // Office defaults to weather_override=None (clock-based) — apply
+            // the chip's weather so live == poster == the highlighted chip
+            // from the first frame. Theme needs no equivalent: `normal` IS
+            // ALL_THEMES[0], the office's starting theme.
+            const w0 = vibingStage.querySelector('.osd__chip[data-weather].is-active');
+            if (w0) vOffice.set_weather(w0.dataset.weather);
             vCtx = vibingCanvas.getContext('2d');
             vImg = vCtx.createImageData(vibingCanvas.width, vibingCanvas.height);
             syncCanvas(); // gating may have moved on while the fetch was in flight

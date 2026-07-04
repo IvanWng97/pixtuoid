@@ -90,22 +90,28 @@ export interface ThemeShot {
   featured?: boolean; // shown first in the switcher
 }
 
-// Single source of truth for the theme switcher → site/src/themes.json.
-// Add a theme there + render its screenshot (just gen-media) and the gallery,
-// the live count, the retint, and the render script all pick it up. No component edits.
+// Single source of truth for the theme switcher → site/src/themes.json. Themes
+// now drive the live VIBING channel's theme chips IN-CANVAS (`Office::set_theme`)
+// — the static theme gallery, the per-id `theme_<id>.png` stills, and
+// astro.config's theme→still existence guard were all retired in #468. The
+// surviving guard is the Rust-side `theme_gallery_manifest_matches_all_themes`
+// set-equality test (pixtuoid-scene), so a live chip's `data-theme` always
+// resolves.
 export const THEMES: ThemeShot[] = themesData as ThemeShot[];
 
 interface WeatherShot {
-  id: string; // matches `--weather <id>` + public/demos/weather_<id>.png
+  id: string; // matches `--weather <id>` (the live VIBING chip's data-weather)
   name: string;
   blurb: string;
 }
 
-// Single source of truth for the weather gallery → site/src/weather.json. The
-// manifest↔art↔gallery triangle is guarded here (just gen-media derives its render
-// loop from this file; astro.config fails the build if any id lacks its
-// weather_<id>.png); the manifest↔Rust-enum edge is guarded by the
-// `weather_gallery_manifest_matches_the_weather_enum` unit test in pixtuoid.
+// Single source of truth for the weather chips → site/src/weather.json. Weather
+// now drives the live VIBING channel's weather chips IN-CANVAS
+// (`Office::set_weather`) — the static weather gallery, the per-id
+// `weather_<id>.png` stills, and astro.config's weather→still existence guard
+// were all retired in #468. The surviving guard is the Rust-side
+// `weather_gallery_manifest_matches_the_weather_enum` set-equality test
+// (pixtuoid-scene), so a live chip's `data-weather` always resolves.
 const WEATHERS: WeatherShot[] = weatherData as WeatherShot[];
 
 export interface ShowcaseVariant {
@@ -173,6 +179,10 @@ export interface EnrichedShowcaseChannel extends ShowcaseChannel {
 // The manifest resolution a `variantsRef` maps to — the SINGLE place both
 // showcaseVariants (channel-level) and showcaseGroups (live-channel, one per
 // group) read THEMES/WEATHERS, so the two callers can never disagree on shape.
+// `src` below is dead weight for a live-channel consumer (showcaseGroups) —
+// ChannelStage's live-chip branch renders only id/name/accent and never reads
+// it (those theme_<id>.png/weather_<id>.png stills are gone, #468); it's kept
+// because variant-set channels' chip branch still `data-src`-swaps with it.
 function variantsForRef(ref: 'themes' | 'weather'): ShowcaseVariant[] {
   if (ref === 'themes')
     return THEMES.map((t) => ({
