@@ -37,6 +37,8 @@ macro_rules! make_draw_ctx {
             theme: _theme,
             theme_picker: None,
             floor_info: _floor_info,
+            per_floor: Default::default(),
+            gateway: None,
             floor: _floor,
             active_pet: None,
             last_pet_pos: None,

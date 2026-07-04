@@ -14,7 +14,7 @@ pub(super) use dashboard::paint_dashboard;
 pub(super) use help::paint_help_overlay;
 pub(super) use hud::{
     paint_elevator_indicator, paint_footer, paint_theme_picker, paint_version_popup,
-    paint_wall_display, version_popup_url_rect, VERSION_POPUP_URL,
+    paint_wall_display, version_popup_url_rect, FooterStats, VERSION_POPUP_URL,
 };
 pub(crate) use panel::{borderless_panel, PANEL_PAD_X, PANEL_PAD_Y};
 pub(super) use welcome::paint_welcome;
@@ -63,8 +63,11 @@ pub(crate) fn display_width(s: &str) -> usize {
 /// Per-scene tally of agent activity states. `total == active + waiting + idle +
 /// exiting` (debug-asserted). `exiting` is a first-class bucket, not folded into
 /// idle, so the footer can render an authoritative `n/total` incl. walkouts.
+// `pub` (not `pub(crate)`): reachable via the pub `DrawCtx::per_floor` field, the
+// same way its peer office/floor-display type `FloorInfo` is pub. The binary's
+// lib target is not a semver surface.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) struct StateCounts {
+pub struct StateCounts {
     pub active: usize,
     pub waiting: usize,
     pub idle: usize,
@@ -190,16 +193,6 @@ impl StateKind {
             StateKind::Waiting => 'W',
             StateKind::Idle => 'I',
             StateKind::Exiting => 'x',
-        }
-    }
-
-    /// The lower-case word for the wall board's plain-English pulse.
-    pub(crate) fn word(self) -> &'static str {
-        match self {
-            StateKind::Active => "active",
-            StateKind::Waiting => "waiting",
-            StateKind::Idle => "idle",
-            StateKind::Exiting => "exiting",
         }
     }
 
@@ -481,7 +474,7 @@ impl TickerQueue {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hud::{build_status_spans, build_status_summary};
+    use hud::{build_status_spans, build_status_summary, FooterStats};
     use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex};
     use std::path::PathBuf;
     use std::sync::Arc;
@@ -570,10 +563,8 @@ mod tests {
         // design never hinges on a single one (colour, glyph shape, or letter).
         let glyphs: HashSet<char> = kinds.iter().map(|k| k.glyph()).collect();
         let letters: HashSet<char> = kinds.iter().map(|k| k.letter()).collect();
-        let words: HashSet<&str> = kinds.iter().map(|k| k.word()).collect();
         assert_eq!(glyphs.len(), 4, "each state has a distinct glyph");
         assert_eq!(letters.len(), 4, "each state has a distinct letter");
-        assert_eq!(words.len(), 4, "each state has a distinct word");
         // The reserved amber "needs-you" hue and the exiting hue map to their
         // existing theme roles (label_waiting is amber; label_exiting is live).
         let t = &pixtuoid_scene::theme::NORMAL;
@@ -659,7 +650,7 @@ mod tests {
             kind: ToolKind::Other,
         };
         let mut scene = SceneState::uniform(16);
-        let mut add = |scene: &mut SceneState, path, state, exiting, floor: usize| {
+        let add = |scene: &mut SceneState, path, state, exiting, floor: usize| {
             let mut s = stat_slot(path, state, exiting);
             s.floor_idx = floor;
             scene.agents.insert(s.agent_id, s);
@@ -851,12 +842,40 @@ mod tests {
     fn idle(label: &str) -> AgentSlot {
         slot_with(ActivityState::Idle, label)
     }
+    fn active_kind(detail: &str, kind: pixtuoid_core::state::ToolKind, label: &str) -> AgentSlot {
+        slot_with(
+            ActivityState::Active {
+                tool_use_id: Some(Arc::from("t")),
+                detail: Some(Arc::from(detail)),
+                kind,
+            },
+            label,
+        )
+    }
     fn scene_of(slots: Vec<AgentSlot>) -> SceneState {
         let mut s = SceneState::uniform(16);
         for slot in slots {
             s.agents.insert(slot.agent_id, slot);
         }
         s
+    }
+
+    /// Assemble a `FooterStats` from the scene the way `draw_scene` does (no
+    /// gateway, per-floor bucketed from the scene) and render the plain-string
+    /// footer oracle.
+    fn footer_line(
+        scene: &SceneState,
+        width: u16,
+        floor_info: Option<crate::tui::renderer::FloorInfo>,
+        warning: Option<&str>,
+    ) -> String {
+        let pf = per_floor_counts(scene);
+        let stats = FooterStats {
+            counts: scene_stats(scene),
+            per_floor: &pf,
+            gateway: None,
+        };
+        build_status_summary(scene, &stats, width, floor_info, warning)
     }
 
     const QUIT_SUFFIX: &str = " [?]help [p]ause [t]heme [q]uit ";
@@ -881,7 +900,7 @@ mod tests {
     #[test]
     fn footer_source_warning_replaces_stats_and_keeps_quit() {
         let s = scene_of(vec![idle("myproject")]);
-        let line = build_status_summary(
+        let line = footer_line(
             &s,
             100,
             None,
@@ -891,8 +910,8 @@ mod tests {
         assert!(line.contains("claude-code source died"), "got: {line}");
         assert!(line.ends_with(" [q]uit "), "quit hint survives: {line}");
         assert!(
-            !line.contains(" 1 agents") && !line.contains("idle"),
-            "stale stats are replaced by the warning: {line}"
+            !line.contains('\u{25cb}') && !line.contains('\u{25cf}'),
+            "stale state rungs are replaced by the warning: {line}"
         );
         insta::assert_snapshot!(line);
     }
@@ -901,7 +920,7 @@ mod tests {
     fn footer_source_warning_survives_every_width() {
         let s = scene_of(vec![idle("myproject")]);
         for w in [20u16, 30, 40, 60, 80] {
-            let line = build_status_summary(
+            let line = footer_line(
                 &s,
                 w,
                 None,
@@ -921,7 +940,7 @@ mod tests {
     #[test]
     fn footer_zero_agents() {
         let s = scene_of(vec![]);
-        let line = build_status_summary(&s, 80, None, None);
+        let line = footer_line(&s, 80, None, None);
         assert_eq!(line.len(), 80, "should pad to full width");
         insta::assert_snapshot!(line);
     }
@@ -929,7 +948,9 @@ mod tests {
     #[test]
     fn footer_single_idle_agent() {
         let s = scene_of(vec![idle("myproject")]);
-        let line = build_status_summary(&s, 80, None, None);
+        let line = footer_line(&s, 80, None, None);
+        // FULL tier: bare count then the sole idle rung `○1 I`.
+        assert!(line.contains(" 1 \u{b7} \u{25cb}1 I"), "got: {line}");
         insta::assert_snapshot!(line);
     }
 
@@ -945,7 +966,17 @@ mod tests {
             idle("g"),
             idle("h"),
         ]);
-        let line = build_status_summary(&s, 120, None, None);
+        let line = footer_line(&s, 120, None, None);
+        // Every non-zero rung + the aggregate tool tally (glyph+count+letter).
+        for frag in [
+            "\u{25cf}3 A",
+            "\u{25d0}2 W",
+            "\u{25cb}3 I",
+            "Edit\u{d7}2",
+            "Bash\u{d7}1",
+        ] {
+            assert!(line.contains(frag), "missing {frag:?} in: {line}");
+        }
         insta::assert_snapshot!(line);
     }
 
@@ -956,11 +987,10 @@ mod tests {
             waiting("b"),
             idle("c"),
         ]);
-        let line = build_status_summary(&s, 60, None, None);
-        assert!(
-            !line.contains("3 agents"),
-            "full tier should not fit at width 60"
-        );
+        let line = footer_line(&s, 60, None, None);
+        // Medium drops the tool tally + separators; compact rungs `●1A ◐1W ○1I`.
+        assert!(!line.contains("Edit"), "medium drops tools: {line}");
+        assert!(line.contains("\u{25cf}1A"), "compact active rung: {line}");
         insta::assert_snapshot!(line);
     }
 
@@ -968,7 +998,7 @@ mod tests {
     fn footer_minimal_width() {
         let s = scene_of(vec![idle("a"), idle("b")]);
         let w = QUIT_SUFFIX.len() + 6;
-        let line = build_status_summary(&s, w as u16, None, None);
+        let line = footer_line(&s, w as u16, None, None);
         assert_eq!(line.len(), w);
         insta::assert_snapshot!(line);
     }
@@ -977,7 +1007,7 @@ mod tests {
     fn footer_quit_only_below_threshold() {
         let s = scene_of(vec![idle("a")]);
         let w = QUIT_SUFFIX.len();
-        let line = build_status_summary(&s, w as u16, None, None);
+        let line = footer_line(&s, w as u16, None, None);
         insta::assert_snapshot!(line);
     }
 
@@ -991,10 +1021,34 @@ mod tests {
             active_with("Grep x", "e"),
             active_with("Glob x", "f"),
         ]);
-        let line = build_status_summary(&s, 200, None, None);
+        let line = footer_line(&s, 200, None, None);
         let crosses = line.matches('\u{00d7}').count();
         assert_eq!(crosses, 4, "expected <=4 tools in breakdown");
         insta::assert_snapshot!(line);
+    }
+
+    #[test]
+    fn footer_minimal_leads_with_waiting_alarm() {
+        // The narrowest stats tier: the waiting ALARM (`▲N`) leads, then the count.
+        let s = scene_of(vec![waiting("a"), waiting("b"), idle("c"), idle("d")]);
+        let w = QUIT_SUFFIX.len() + 10;
+        let line = footer_line(&s, w as u16, None, None);
+        assert!(
+            line.contains("\u{25b2}2 \u{b7} 4"),
+            "▲2 · 4 (alarm leads): {line}"
+        );
+    }
+
+    #[test]
+    fn footer_death_keeps_the_waiting_alarm() {
+        // Even a source-death warning (stats stale) keeps the must-not-miss `▲N`.
+        let s = scene_of(vec![waiting("a"), waiting("b"), idle("c")]);
+        let line = footer_line(&s, 120, None, Some("codex disconnected"));
+        assert!(line.contains('\u{26a0}'), "warning present: {line}");
+        assert!(
+            line.contains("\u{25b2}2 need you"),
+            "alarm survives death: {line}"
+        );
     }
 
     fn fi(
@@ -1012,7 +1066,8 @@ mod tests {
     #[test]
     fn footer_with_floor_info() {
         let s = scene_of(vec![idle("a"), idle("b")]);
-        let line = build_status_summary(&s, 120, Some(fi(2, 3, 5)), None);
+        let line = footer_line(&s, 120, Some(fi(2, 3, 5)), None);
+        assert!(line.contains(" F2/3 "), "floor breadcrumb: {line}");
         insta::assert_snapshot!(line);
     }
 
@@ -1022,19 +1077,16 @@ mod tests {
     #[test]
     fn count_str_single_floor_shows_bare_n() {
         let s = scene_of(vec![idle("a"), idle("b")]);
-        let line = build_status_summary(&s, 120, None, None);
-        assert!(line.contains(" 2 agents "), "got: {line}");
-        assert!(
-            !line.contains("2/"),
-            "should not show slash on single floor"
-        );
+        let line = footer_line(&s, 120, None, None);
+        assert!(line.contains(" 2 \u{b7} \u{25cb}2 I"), "got: {line}");
+        assert!(!line.contains("2/"), "no slash on a single floor: {line}");
     }
 
     #[test]
     fn count_str_multi_floor_shows_n_slash_total() {
         let s = scene_of(vec![idle("a"), idle("b")]);
-        let line = build_status_summary(&s, 120, Some(fi(2, 3, 5)), None);
-        assert!(line.contains(" 2/5 agents "), "got: {line}");
+        let line = footer_line(&s, 120, Some(fi(2, 3, 5)), None);
+        assert!(line.contains(" 2/5 \u{b7}"), "got: {line}");
     }
 
     #[test]
@@ -1042,8 +1094,8 @@ mod tests {
         // All agents happen to be on the visible floor — still show "/n"
         // to signal the multi-floor context.
         let s = scene_of(vec![idle("a"), idle("b")]);
-        let line = build_status_summary(&s, 120, Some(fi(1, 3, 2)), None);
-        assert!(line.contains(" 2/2 agents "), "got: {line}");
+        let line = footer_line(&s, 120, Some(fi(1, 3, 2)), None);
+        assert!(line.contains(" 2/2 \u{b7}"), "got: {line}");
     }
 
     #[test]
@@ -1051,24 +1103,42 @@ mod tests {
         // The whole point of `total_agents`: when the current floor is
         // empty but other floors have agents, the footer must signal that.
         let s = scene_of(vec![]);
-        let line = build_status_summary(&s, 120, Some(fi(2, 3, 5)), None);
-        assert!(line.contains(" 0/5 agents "), "got: {line}");
+        let line = footer_line(&s, 120, Some(fi(2, 3, 5)), None);
+        assert!(line.contains(" 0/5 "), "got: {line}");
     }
 
     #[test]
-    fn count_str_narrow_tier_uses_bare_n() {
-        // "5/12a" is ambiguous at narrow widths; medium/min tiers must
-        // drop the slash form regardless of multi-floor status.
+    fn count_str_multi_floor_keeps_slash_at_narrow_tier() {
+        // Unlike the old footer, the redesign keeps `n/total` at EVERY tier
+        // (the design's MEDIUM/MIN both show the slash) — the office context
+        // matters most when space is tight.
         let s = scene_of(vec![idle("a"), idle("b"), idle("c")]);
-        let line = build_status_summary(&s, 60, Some(fi(1, 3, 10)), None);
+        let line = footer_line(&s, 50, Some(fi(1, 3, 10)), None);
         assert!(
-            !line.contains("3/10"),
-            "medium tier should not show slash: {line}"
+            line.contains("3/10"),
+            "slash kept at the narrow tier: {line}"
         );
-        assert!(line.contains("3a"), "got: {line}");
     }
 
     // --- build_status_spans ------------------------------------------------
+
+    fn footer_spans_text(
+        scene: &SceneState,
+        width: u16,
+        floor_info: Option<crate::tui::renderer::FloorInfo>,
+        theme: &pixtuoid_scene::theme::Theme,
+    ) -> String {
+        let pf = per_floor_counts(scene);
+        let stats = FooterStats {
+            counts: scene_stats(scene),
+            per_floor: &pf,
+            gateway: None,
+        };
+        build_status_spans(scene, &stats, width, floor_info, theme, None)
+            .iter()
+            .map(|sp| sp.content.as_ref().to_string())
+            .collect()
+    }
 
     // Drift guard: the colored footer must render the SAME text as the
     // plain-string footer across every tier — they share `status_segments`,
@@ -1089,11 +1159,8 @@ mod tests {
             (10, None),
             (120, Some(fi(2, 3, 9))),
         ] {
-            let summary = build_status_summary(&s, w, fl, None);
-            let spans_text: String = build_status_spans(&s, w, fl, theme, None)
-                .iter()
-                .map(|sp| sp.content.as_ref())
-                .collect();
+            let summary = footer_line(&s, w, fl, None);
+            let spans_text = footer_spans_text(&s, w, fl, theme);
             assert_eq!(spans_text, summary, "tier width {w} drifted");
         }
     }
@@ -1106,16 +1173,129 @@ mod tests {
             waiting("b"),
             idle("c"),
         ]);
-        let spans = build_status_spans(&s, 120, None, theme, None);
+        let pf = per_floor_counts(&s);
+        let stats = FooterStats {
+            counts: scene_stats(&s),
+            per_floor: &pf,
+            gateway: None,
+        };
+        let spans = build_status_spans(&s, &stats, 120, None, theme, None);
+        // The rungs are found by their vocabulary glyph, tinted via StateKind.
         let active = spans
             .iter()
-            .find(|sp| sp.content.contains("active"))
+            .find(|sp| sp.content.contains('\u{25cf}'))
             .unwrap();
         let waiting = spans
             .iter()
-            .find(|sp| sp.content.contains("waiting"))
+            .find(|sp| sp.content.contains('\u{25d0}'))
             .unwrap();
         assert_eq!(active.style.fg, Some(to_color(theme.ui.label_active)));
         assert_eq!(waiting.style.fg, Some(to_color(theme.ui.label_waiting)));
+    }
+
+    // --- T7 named tests: the redesign's two anti-drift anchors --------------
+
+    #[test]
+    fn footer_counts_agree_with_board_on_walkout() {
+        // 2 active + 1 exiting. OLD: footer counted all 3 as agents while the
+        // board counted 2 live — they disagreed mid-walkout. NOW both read the
+        // shared `scene_stats`, and the footer shows a first-class exiting rung.
+        let mut gone = active_with("Edit x", "gone");
+        gone.exiting_at = Some(SystemTime::UNIX_EPOCH);
+        let s = scene_of(vec![
+            active_with("Edit a", "a"),
+            active_with("Bash b", "b"),
+            gone,
+        ]);
+        let c = scene_stats(&s);
+        assert_eq!((c.active, c.exiting, c.total), (2, 1, 3), "shared spine");
+        let line = footer_line(&s, 160, None, None);
+        assert!(
+            line.contains(" 3 \u{b7} \u{25cf}2 A"),
+            "total incl. exiting: {line}"
+        );
+        assert!(
+            line.contains("\u{25cc}1 x"),
+            "first-class exiting rung: {line}"
+        );
+    }
+
+    #[test]
+    fn footer_tool_hue_reads_kind_field() {
+        // A Task dispatch DISPLAYS "Delegating" but its typed kind is Task — the
+        // tool segment must tint via ToolKind::Task's glow (== glow.agent), NEVER
+        // a re-parse of the "Delegating" string (C7).
+        let theme = &pixtuoid_scene::theme::NORMAL;
+        let s = scene_of(vec![active_kind(
+            "Delegating",
+            pixtuoid_core::state::ToolKind::Task,
+            "lead",
+        )]);
+        let pf = per_floor_counts(&s);
+        let stats = FooterStats {
+            counts: scene_stats(&s),
+            per_floor: &pf,
+            gateway: None,
+        };
+        let spans = build_status_spans(&s, &stats, 160, None, theme, None);
+        let tool = spans
+            .iter()
+            .find(|sp| sp.content.contains("Delegating"))
+            .expect("tool segment present");
+        let expected = to_color(pixtuoid_scene::pixel_painter::tool_glow_for_kind(
+            pixtuoid_core::state::ToolKind::Task,
+            &theme.tool_glow,
+        ));
+        assert_eq!(tool.style.fg, Some(expected), "hue from the typed kind");
+        assert_eq!(
+            expected,
+            to_color(theme.tool_glow.agent),
+            "== the agent glow"
+        );
+    }
+
+    #[test]
+    fn footer_gateway_chip_reflects_rollup_and_suppresses_when_absent() {
+        use pixtuoid_core::state::DaemonState;
+        let s = scene_of(vec![idle("a")]);
+        let pf = per_floor_counts(&s);
+        let with_gw = FooterStats {
+            counts: scene_stats(&s),
+            per_floor: &pf,
+            gateway: Some(DaemonState::Degraded),
+        };
+        let line = build_status_summary(&s, &with_gw, 160, None, None);
+        assert!(line.contains("\u{2b22}gw err"), "degraded chip: {line}");
+        let no_gw = FooterStats {
+            counts: scene_stats(&s),
+            per_floor: &pf,
+            gateway: None,
+        };
+        let line2 = build_status_summary(&s, &no_gw, 160, None, None);
+        assert!(
+            !line2.contains("gw"),
+            "chip suppressed when no daemon: {line2}"
+        );
+    }
+
+    #[test]
+    fn footer_cross_floor_alarm_points_at_waiting_floor() {
+        // On floor 1, floor 2 (index 1) has a waiting agent → a `▲F2` cue in the
+        // right-flushed floor suffix, telling you where to switch (C1: present
+        // even though `per_floor` is office-wide, not the projected floor).
+        let s = scene_of(vec![idle("a")]);
+        let mut pf = per_floor_counts(&s);
+        pf[1].waiting = 1;
+        pf[1].total = 1;
+        let stats = FooterStats {
+            counts: scene_stats(&s),
+            per_floor: &pf,
+            gateway: None,
+        };
+        let line = build_status_summary(&s, &stats, 160, Some(fi(1, 3, 2)), None);
+        assert!(
+            line.contains("\u{25b2}F2"),
+            "cross-floor waiting cue: {line}"
+        );
     }
 }

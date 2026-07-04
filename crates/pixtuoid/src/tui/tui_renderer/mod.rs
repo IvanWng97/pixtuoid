@@ -479,9 +479,18 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             let floor_info = floor_info_for(to_floor, nf, scene.agents.len());
             let theme = self.theme;
             let source_warning = self.source_warning.clone();
+            // Office-wide tallies from the full scene; the footer's rungs are the
+            // DESTINATION floor's slice (matches `floor_info`'s to_floor breadcrumb).
+            let per_floor = crate::tui::widgets::per_floor_counts(scene);
+            let footer_stats = crate::tui::widgets::FooterStats {
+                counts: per_floor[to_floor.min(pixtuoid_core::state::MAX_FLOORS - 1)],
+                per_floor: &per_floor,
+                gateway: crate::tui::widgets::gateway_rollup(scene.daemons()),
+            };
             crate::tui::renderer::draw_footer_only_frame(
                 &mut self.terminal,
                 scene,
+                &footer_stats,
                 theme,
                 floor_info,
                 source_warning.as_deref(),
@@ -633,6 +642,14 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         // label (otherwise users see "F1/3 ... 5 agents" with floor 2's
         // count for ~400 ms).
         let transition_floor_info = floor_info_for(to_floor, nf, scene.agents.len());
+        // Office-wide tallies from the full scene; the footer's rungs come from
+        // the destination projected scene (`to_scene`) — spine 1, computed once.
+        let transition_per_floor = crate::tui::widgets::per_floor_counts(scene);
+        let footer_stats = crate::tui::widgets::FooterStats {
+            counts: crate::tui::widgets::scene_stats(&to_scene),
+            per_floor: &transition_per_floor,
+            gateway: crate::tui::widgets::gateway_rollup(scene.daemons()),
+        };
 
         self.terminal.draw(|f| {
             let actual_full = f.area();
@@ -640,6 +657,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             crate::tui::renderer::paint_footer(
                 f,
                 &to_scene,
+                &footer_stats,
                 actual_full,
                 theme,
                 transition_floor_info,
@@ -741,6 +759,10 @@ impl<B: Backend<Error: Send + Sync + 'static>> Renderer for TuiRenderer<B> {
             theme: self.theme,
             theme_picker: self.theme_picker,
             floor_info,
+            // Office-wide truth computed from the FULL un-projected scene (C1):
+            // the footer's cross-floor cue + gateway chip render even single-floor.
+            per_floor: crate::tui::widgets::per_floor_counts(scene),
+            gateway: crate::tui::widgets::gateway_rollup(scene.daemons()),
             floor: floor_meta,
             active_pet: self.active_pet.as_ref(),
             last_pet_pos: None,

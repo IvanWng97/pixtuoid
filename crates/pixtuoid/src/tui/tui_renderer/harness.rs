@@ -1761,9 +1761,11 @@ fn footer_shows_agent_count() {
     let mut r = build(140, 44, vec![]);
     r.render(&scene, &pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
+    // Redesigned footer: bare count + vocabulary rungs (glyph+count+letter).
+    // 1 active (Edit) + 2 idle: ` 3 · ●1 A · ○2 I · Edit×1 `.
     assert!(
-        text.contains("agents") && text.contains('3'),
-        "full-width footer shows the agent count; frame footer area:\n{}",
+        text.contains(" 3 \u{b7} \u{25cf}1 A") && text.contains("\u{25cb}2 I"),
+        "full-width footer shows the count + state rungs; frame footer area:\n{}",
         text.lines().last().unwrap_or("")
     );
 }

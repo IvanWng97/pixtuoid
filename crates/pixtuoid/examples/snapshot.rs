@@ -649,6 +649,10 @@ fn main() -> Result<()> {
         theme,
         theme_picker: args.theme_picker,
         floor_info: None,
+        // Single-floor still, no gateway: empty office-wide tallies (no cross-floor
+        // cue, chip suppressed). The footer's counts come from `scene_stats(scene)`.
+        per_floor: Default::default(),
+        gateway: None,
         floor: {
             let mut m = pixtuoid_scene::floor::FloorMeta::ground();
             m.floor_seed = args.floor_seed;
@@ -1829,6 +1833,8 @@ fn save_as_gif(
             theme,
             theme_picker: None,
             floor_info: None,
+            per_floor: Default::default(),
+            gateway: None,
             floor: {
                 let mut m = pixtuoid_scene::floor::FloorMeta::ground();
                 m.floor_seed = floor_seed;
