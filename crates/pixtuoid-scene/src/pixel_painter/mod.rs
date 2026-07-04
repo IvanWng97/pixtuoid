@@ -88,6 +88,9 @@ mod seat;
 mod sim;
 
 pub use anchors::character_anchor;
+// The ToolKind→glow-hue seam the binary's footer tints tool segments with, so a
+// footer tool colour matches the sprite's monitor glow exactly.
+pub use palette::tool_glow_for_kind;
 // The γ3 widening that PR-450 planned for: the observation TYPES a
 // `floor::FloorSession::observe` caller reads go pub WITH the facade;
 // `sim_step` + `SimStores` (the per-call borrow-set) stay crate-internal —

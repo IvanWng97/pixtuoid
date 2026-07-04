@@ -1248,6 +1248,44 @@ fn kind_derivation_reproduces_the_string_parse_tint_for_representative_displays(
     );
 }
 
+#[test]
+fn tool_glow_for_kind_is_the_shared_kind_to_hue_map() {
+    use pixtuoid_core::state::ToolKind;
+    let glow = &crate::theme::NORMAL.tool_glow;
+    // The pure ToolKind→hue seam the binary's footer reads directly, so a tool
+    // segment tints identically to the sprite's monitor glow.
+    assert_eq!(palette::tool_glow_for_kind(ToolKind::Edit, glow), glow.edit);
+    assert_eq!(palette::tool_glow_for_kind(ToolKind::Read, glow), glow.read);
+    assert_eq!(palette::tool_glow_for_kind(ToolKind::Bash, glow), glow.bash);
+    assert_eq!(
+        palette::tool_glow_for_kind(ToolKind::Task, glow),
+        glow.agent
+    );
+    assert_eq!(
+        palette::tool_glow_for_kind(ToolKind::Search, glow),
+        glow.grep
+    );
+    assert_eq!(
+        palette::tool_glow_for_kind(ToolKind::Other, glow),
+        glow.default
+    );
+    // tool_glow_tint now delegates: Active → Some(mapped hue), off-Active → None.
+    let id = pixtuoid_core::AgentId::from_transcript_path("/g.jsonl");
+    let edit = make_slot(
+        id,
+        ActivityState::Active {
+            tool_use_id: None,
+            detail: None,
+            kind: ToolKind::Edit,
+        },
+    );
+    assert_eq!(palette::tool_glow_tint(&edit, glow), Some(glow.edit));
+    assert_eq!(
+        palette::tool_glow_tint(&make_slot(id, ActivityState::Idle), glow),
+        None
+    );
+}
+
 // --- degraded_pixel / degraded_frame (#317 unwell gateway) -------------
 
 #[test]

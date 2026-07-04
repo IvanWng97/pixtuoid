@@ -382,29 +382,42 @@ pub(super) fn agent_palette(base: &Palette, agent: &AgentSlot, glow_tint: Option
         .with_override('P', Some(outfit.pants))
 }
 
-/// Map an agent's active tool kind to a monitor glow color.
-/// Returns `None` for non-Active states (no glow). Matches the typed
-/// `ToolKind` carried in the slot (derived once at slot entry by the
-/// reducer) — no per-frame re-parse of the human-facing `detail` string.
-/// The match is exhaustive on purpose: a new `ToolKind` variant must
-/// consciously pick a color here.
-pub(super) fn tool_glow_tint(
-    agent: &AgentSlot,
+/// The monitor glow color for a specific tool kind — the exhaustive
+/// `ToolKind → hue` map. THE shared seam: the office monitor glow
+/// (`tool_glow_tint`) AND, cross-crate, the binary's footer tool-segment tint
+/// read it, so the footer's tool colour matches the sprite's screen glow
+/// exactly (re-exported as `pixel_painter::tool_glow_for_kind`). The match is
+/// exhaustive on purpose: a new `ToolKind` variant must consciously pick a
+/// color here.
+pub fn tool_glow_for_kind(
+    kind: pixtuoid_core::state::ToolKind,
     glow: &crate::theme::ToolGlowColors,
-) -> Option<Rgb> {
-    use pixtuoid_core::state::{ActivityState, ToolKind};
-    let kind = match &agent.state {
-        ActivityState::Active { kind, .. } => *kind,
-        _ => return None,
-    };
-    Some(match kind {
+) -> Rgb {
+    use pixtuoid_core::state::ToolKind;
+    match kind {
         ToolKind::Edit => glow.edit,
         ToolKind::Read => glow.read,
         ToolKind::Bash => glow.bash,
         ToolKind::Task => glow.agent,
         ToolKind::Search => glow.grep,
         ToolKind::Other => glow.default,
-    })
+    }
+}
+
+/// Map an agent's active tool kind to a monitor glow color.
+/// Returns `None` for non-Active states (no glow). Matches the typed
+/// `ToolKind` carried in the slot (derived once at slot entry by the
+/// reducer) — no per-frame re-parse of the human-facing `detail` string.
+/// Delegates the kind→hue map to [`tool_glow_for_kind`].
+pub(super) fn tool_glow_tint(
+    agent: &AgentSlot,
+    glow: &crate::theme::ToolGlowColors,
+) -> Option<Rgb> {
+    use pixtuoid_core::state::ActivityState;
+    match &agent.state {
+        ActivityState::Active { kind, .. } => Some(tool_glow_for_kind(*kind, glow)),
+        _ => None,
+    }
 }
 
 pub(super) fn recolor_frame(frame: &Frame, pal: &Palette, base_pal: &Palette) -> Frame {
