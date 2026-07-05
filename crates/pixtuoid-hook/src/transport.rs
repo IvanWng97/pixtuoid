@@ -58,22 +58,50 @@ pub(crate) fn send_line(endpoint: &str, line: &[u8]) {
 }
 
 /// True iff the connected peer's effective uid is OURS. Validated on the live fd
-/// via `getpeereid` (atomic w.r.t. the connection — no TOCTOU), so a co-located
-/// user who parked a listening socket at our rendezvous path is rejected before
-/// any payload is written. Fails CLOSED on a `getpeereid` error (returns
-/// `false` → drop): it does not fail on a healthy connected `AF_UNIX` stream, so
-/// a failure means we cannot prove the peer is us. Complements the daemon's
+/// (atomic w.r.t. the connection — no TOCTOU), so a co-located user who parked a
+/// listening socket at our rendezvous path is rejected before any payload is
+/// written. Fails CLOSED when the peer uid can't be read (`None` → `false` →
+/// drop): the syscall doesn't fail on a healthy connected `AF_UNIX` stream, so a
+/// failure means we cannot prove the peer is us. Complements the daemon's
 /// create-side 0700-dir hardening (`hook::unix::ensure_private_dir`).
 #[cfg(unix)]
 fn peer_is_us(stream: &std::os::unix::net::UnixStream) -> bool {
     use std::os::unix::io::AsRawFd;
+    // Safety: getuid is always safe on Unix.
+    peer_uid(stream.as_raw_fd()) == Some(unsafe { libc::getuid() })
+}
+
+/// The connected peer's uid, or `None` if it can't be read. Linux exposes it via
+/// `SO_PEERCRED` (`struct ucred`); macOS/BSD via `getpeereid` (`libc` doesn't
+/// declare `getpeereid` on Linux, hence the split).
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn peer_uid(fd: std::os::unix::io::RawFd) -> Option<u32> {
+    let mut cred = libc::ucred {
+        pid: 0,
+        uid: 0,
+        gid: 0,
+    };
+    let mut len = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+    // Safety: `fd` is a live connected socket; the kernel writes `cred`/`len`.
+    let rc = unsafe {
+        libc::getsockopt(
+            fd,
+            libc::SOL_SOCKET,
+            libc::SO_PEERCRED,
+            std::ptr::addr_of_mut!(cred).cast(),
+            &mut len,
+        )
+    };
+    (rc == 0).then_some(cred.uid)
+}
+
+#[cfg(all(unix, not(any(target_os = "linux", target_os = "android"))))]
+fn peer_uid(fd: std::os::unix::io::RawFd) -> Option<u32> {
     let mut euid: libc::uid_t = 0;
     let mut egid: libc::gid_t = 0;
-    // Safety: `stream` is a live connected socket (valid fd); the kernel writes
-    // the two out-params. getpeereid never blocks.
-    let rc = unsafe { libc::getpeereid(stream.as_raw_fd(), &mut euid, &mut egid) };
-    // Safety: getuid is always safe on Unix.
-    rc == 0 && euid == unsafe { libc::getuid() }
+    // Safety: `fd` is a live connected socket; the kernel writes the out-params.
+    let rc = unsafe { libc::getpeereid(fd, &mut euid, &mut egid) };
+    (rc == 0).then_some(euid)
 }
 
 #[cfg(all(unix, test))]
