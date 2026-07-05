@@ -65,7 +65,8 @@ impl AcceptBackoff {
 /// or symlink) fails the bind LOUDLY here instead of silently locking the hook plane
 /// out. `/tmp`'s sticky bit stops another uid from renaming/replacing our directory
 /// once it exists, so the validated `lstat` result can't be swapped before the lock
-/// open. Mirrors the shim's `transport::owned_dir_is_hostile` read-side predicate.
+/// open. The create-side half of #485 — the shim closes the read side with a
+/// connected-peer-uid check (`transport::peer_is_us`).
 #[cfg(unix)]
 fn ensure_owned_socket_dir(path: &Path) -> Result<()> {
     let Some(parent) = path.parent() else {

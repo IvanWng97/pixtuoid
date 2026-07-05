@@ -49,11 +49,12 @@ pub(crate) fn default_socket_path() -> String {
 
 /// The per-user tmp dir we OWN (`/tmp/pixtuoid-{uid}`) when `endpoint` is the
 /// no-XDG `/tmp` FALLBACK — else `None`. PURE (no I/O), so it stays parity-safe.
-/// The daemon creates+validates this dir 0700; the shim validates it before
-/// connecting (`transport::send_line`) so it can't be tricked into piping the
-/// hook payload into a hostile listener a co-located user parked under a dir
-/// they made world-accessible (#485). `None` for the XDG / explicit-override
-/// branches — those parents are systemd's / the user's, not ours to police.
+/// The daemon creates+validates this dir 0700; the shim uses this to SCOPE its
+/// connected-peer-uid check (`transport::send_line`) to the fallback, so it can't
+/// be tricked into piping the hook payload into a hostile listener a co-located
+/// user parked at our rendezvous path (#485). `None` for the XDG / explicit-
+/// override branches — those endpoints are systemd's / the user's trust decision,
+/// not ours to police (an override may legitimately point at a cross-uid daemon).
 #[cfg(unix)]
 pub(crate) fn owned_tmp_socket_dir(endpoint: &str) -> Option<std::path::PathBuf> {
     use std::path::{Path, PathBuf};

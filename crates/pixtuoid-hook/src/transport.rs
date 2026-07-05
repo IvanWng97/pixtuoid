@@ -38,94 +38,61 @@ pub(crate) fn send_line(endpoint: &str, line: &[u8]) {
     if !spawn_timeout_watchdog() {
         return;
     }
-    // Before piping the hook payload anywhere, refuse a HOSTILE per-user tmp
-    // rendezvous dir (#485): if the endpoint is our `/tmp/pixtuoid-{uid}/`
-    // fallback and that dir isn't a private dir we own, a co-located user has
-    // parked it — connecting would leak the payload (cwd, tool names) into
-    // their listener. Drop silently (the never-block-CC contract). An ABSENT
-    // dir is fine — the connect below just fails fast. One lstat, non-blocking;
-    // the XDG / explicit-PIXTUOID_SOCKET branches return None (untouched).
-    if let Some(dir) = crate::paths::owned_tmp_socket_dir(endpoint) {
-        if owned_dir_is_hostile(&dir) {
+    if let Ok(mut s) = std::os::unix::net::UnixStream::connect(endpoint) {
+        // For the `/tmp/pixtuoid-{uid}/` fallback we own, verify the connected
+        // PEER is us BEFORE writing (#485). This closes the read-side TOCTOU a
+        // pre-connect path stat can't: even if a co-located user wins the
+        // create-race on an absent fallback dir and owns the listening socket,
+        // its peer uid != ours, so we drop instead of leaking the payload (cwd,
+        // tool names). The check is on the connected fd — atomic w.r.t. the
+        // connection, not a racy pre-stat of the path. Scoped to the fallback:
+        // an XDG or explicit PIXTUOID_SOCKET endpoint is the user's own trust
+        // decision (it may point at a cross-uid system daemon). One non-blocking
+        // getpeereid syscall, inside the watchdog bound.
+        if crate::paths::owned_tmp_socket_dir(endpoint).is_some() && !peer_is_us(&s) {
             return;
         }
-    }
-    if let Ok(mut s) = std::os::unix::net::UnixStream::connect(endpoint) {
         let _ = s.set_write_timeout(Some(WRITE_TIMEOUT));
         let _ = s.write_all(line);
     }
 }
 
-/// True iff `dir` EXISTS but is NOT a private directory we own — a symlink, a
-/// non-dir, owned by another uid, or group/other-accessible (`mode & 0o077`).
-/// An absent dir returns `false` (not hostile: the daemon simply hasn't bound
-/// yet, and the caller's connect will fail fast). `symlink_metadata` (lstat)
-/// keeps a planted symlink from being followed to a hostile target. Mirrors the
-/// daemon's `ensure_owned_socket_dir` predicate in `hook/unix.rs`.
+/// True iff the connected peer's effective uid is OURS. Validated on the live fd
+/// via `getpeereid` (atomic w.r.t. the connection — no TOCTOU), so a co-located
+/// user who parked a listening socket at our rendezvous path is rejected before
+/// any payload is written. Fails CLOSED on a `getpeereid` error (returns
+/// `false` → drop): it does not fail on a healthy connected `AF_UNIX` stream, so
+/// a failure means we cannot prove the peer is us. Complements the daemon's
+/// create-side 0700-dir hardening (`hook::unix::ensure_private_dir`).
 #[cfg(unix)]
-fn owned_dir_is_hostile(dir: &std::path::Path) -> bool {
-    use std::os::unix::fs::MetadataExt;
-    match std::fs::symlink_metadata(dir) {
-        Ok(md) => {
-            // Safety: getuid is always safe on Unix.
-            let uid = unsafe { libc::getuid() };
-            !md.is_dir() || md.uid() != uid || (md.mode() & 0o077 != 0)
-        }
-        Err(_) => false,
-    }
+fn peer_is_us(stream: &std::os::unix::net::UnixStream) -> bool {
+    use std::os::unix::io::AsRawFd;
+    let mut euid: libc::uid_t = 0;
+    let mut egid: libc::gid_t = 0;
+    // Safety: `stream` is a live connected socket (valid fd); the kernel writes
+    // the two out-params. getpeereid never blocks.
+    let rc = unsafe { libc::getpeereid(stream.as_raw_fd(), &mut euid, &mut egid) };
+    // Safety: getuid is always safe on Unix.
+    rc == 0 && euid == unsafe { libc::getuid() }
 }
 
 #[cfg(all(unix, test))]
 mod tests {
-    use super::owned_dir_is_hostile;
-    use std::os::unix::fs::PermissionsExt;
+    use super::peer_is_us;
+    use std::os::unix::net::{UnixListener, UnixStream};
 
     #[test]
-    fn absent_dir_is_not_hostile() {
-        // The daemon simply hasn't bound yet — the connect below fails fast and
-        // drops; we must NOT treat "not there" as an attack (would lose events).
+    fn peer_is_us_for_a_self_connection() {
+        // Both ends are this test process, so the peer's uid IS ours — the legit
+        // shim→daemon case (same user). Also proves getpeereid links + works on
+        // every CI platform the shim targets.
         let tmp = tempfile::TempDir::new().expect("tempdir");
-        assert!(!owned_dir_is_hostile(&tmp.path().join("nope")));
-    }
-
-    #[test]
-    fn owned_0700_dir_is_not_hostile() {
-        let tmp = tempfile::TempDir::new().expect("tempdir");
-        let dir = tmp.path().join("d");
-        std::fs::create_dir(&dir).expect("mkdir");
-        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).expect("chmod");
-        assert!(!owned_dir_is_hostile(&dir));
-    }
-
-    #[test]
-    fn group_or_other_accessible_dir_is_hostile() {
-        let tmp = tempfile::TempDir::new().expect("tempdir");
-        let dir = tmp.path().join("loose");
-        std::fs::create_dir(&dir).expect("mkdir");
-        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).expect("chmod");
-        assert!(owned_dir_is_hostile(&dir));
-    }
-
-    #[test]
-    fn a_symlink_is_hostile() {
-        let tmp = tempfile::TempDir::new().expect("tempdir");
-        let target = tmp.path().join("real");
-        std::fs::create_dir(&target).expect("mkdir");
-        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o700)).expect("chmod");
-        let link = tmp.path().join("link");
-        std::os::unix::fs::symlink(&target, &link).expect("symlink");
-        assert!(
-            owned_dir_is_hostile(&link),
-            "lstat catches the symlink even though its 0700 target is fine"
-        );
-    }
-
-    #[test]
-    fn a_regular_file_at_the_dir_path_is_hostile() {
-        let tmp = tempfile::TempDir::new().expect("tempdir");
-        let file = tmp.path().join("f");
-        std::fs::write(&file, b"squat").expect("write");
-        assert!(owned_dir_is_hostile(&file));
+        let sock = tmp.path().join("s.sock");
+        let listener = UnixListener::bind(&sock).expect("bind");
+        let client = UnixStream::connect(&sock).expect("connect");
+        let (server, _) = listener.accept().expect("accept");
+        assert!(peer_is_us(&client), "our own connection's peer is us");
+        assert!(peer_is_us(&server), "the accepted side's peer is us too");
     }
 }
 
