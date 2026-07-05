@@ -628,7 +628,11 @@ pub(crate) fn paint_wall_display(
 }
 
 /// The project repository — opened when the board's ★ Star CTA is clicked.
-pub(crate) const REPO_URL: &str = "https://github.com/IvanWng97/pixtuoid";
+/// `pub` (not `pub(crate)`): the BIN crate's crash reporter derives its
+/// issue-report URL from this same authority — crash.rs is a `main.rs` module,
+/// a separate crate the lib's `pub(crate)` can't reach (and the pixtuoid lib
+/// target is not a semver surface, so the widening is free).
+pub const REPO_URL: &str = "https://github.com/IvanWng97/pixtuoid";
 /// URL shown on the version popup's "More details" line and opened on click:
 /// `REPO_URL` + `/releases`. Kept a full literal (const &str can't `concat!`);
 /// the two are pinned together by `version_popup_url_is_repo_releases`.

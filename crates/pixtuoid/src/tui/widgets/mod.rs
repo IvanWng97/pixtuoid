@@ -14,9 +14,12 @@ pub(super) use dashboard::paint_dashboard;
 pub(super) use help::paint_help_overlay;
 pub(super) use hud::{
     paint_elevator_indicator, paint_footer, paint_theme_picker, paint_version_popup,
-    paint_wall_display, star_hit_rect, version_popup_url_rect, FooterStats, REPO_URL,
-    VERSION_POPUP_URL,
+    paint_wall_display, star_hit_rect, version_popup_url_rect, FooterStats, VERSION_POPUP_URL,
 };
+// `pub`: the BIN crate's crash reporter (crash.rs, a main.rs module — a separate
+// crate) derives its issue-report URL from this one authority (same rationale as
+// source_warning_message below).
+pub use hud::REPO_URL;
 pub(crate) use panel::{borderless_panel, PANEL_PAD_X, PANEL_PAD_Y};
 pub(super) use welcome::paint_welcome;
 // `pub`: the snapshot example reuses the real formatter for its

@@ -118,8 +118,12 @@ fn build_issue_url(
          ```\n{bt_body}\n```\n"
     );
 
+    // Derive from the ONE repo-URL authority (the lib's hud.rs REPO_URL — the
+    // same const the version popup + bulletin board open; crash.rs is a BIN-crate
+    // module, hence the `pixtuoid::` path). The test pins the expanded literal.
     format!(
-        "https://github.com/IvanWng97/pixtuoid/issues/new?labels=crash-report&title={}&body={}",
+        "{}/issues/new?labels=crash-report&title={}&body={}",
+        pixtuoid::tui::widgets::REPO_URL,
         percent_encode(&title),
         percent_encode(&body),
     )
