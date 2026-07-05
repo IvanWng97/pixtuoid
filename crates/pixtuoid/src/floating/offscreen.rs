@@ -2,7 +2,7 @@
 //!
 //! This renders the office to a raw pixel `RgbBuffer` via the shared scene seam
 //! (`pixtuoid_scene::floor::render_floor`, #423) — NOT the half-block terminal emulation
-//! `examples/snapshot.rs` saves (snapshot writes the ratatui `TestBackend` → a ▀-compressed
+//! `examples/snapshot/` saves (snapshot writes the ratatui `TestBackend` → a ▀-compressed
 //! PNG via `save_backend_as_png`). A floating-only surface: no `draw_scene`, no `Terminal`,
 //! no shared output with snapshot. `floating::window` renders at a DOWNSCALED buffer
 //! (~window/SCALE) and nearest-neighbor upscales it, so the pixel-art office stays
