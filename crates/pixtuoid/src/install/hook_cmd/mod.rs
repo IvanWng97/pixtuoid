@@ -16,6 +16,19 @@ pub(crate) mod unix;
 // `#[cfg(windows)]`.
 mod windows;
 
+/// The shim's source/event flag tokens — the ONE spelling shared by the WRITERS
+/// (this module's exec/bare hook commands + CodeWhale's per-event tail) and the
+/// READERS (`verify::shell_shim_ref`, `hermes::exec_shim_ref`). Both surrounding
+/// spaces are part of the token, so every site splices/splits on the exact same
+/// bytes; a rename here propagates to both sides, closing the compiler-invisible
+/// write↔read desync (writer emits the new form, reader still splits the old → a
+/// path with the un-stripped tail baked in → a false "shim missing" in doctor /
+/// the Sources panel). NOTE: the shim (pixtuoid-hook crate) parses the word-split
+/// BARE `--source`/`--event` argv tokens — a separate copy this const can't reach;
+/// keep them in sync by hand (the shim's own round-trip tests pin that side).
+pub(crate) const SOURCE_FLAG: &str = " --source ";
+pub(crate) const EVENT_FLAG: &str = " --event ";
+
 /// The OS-correct hook `command` string for a shell-running CLI. The single OS
 /// fork for that strategy, so a new cmd.exe-shelling CLI pays zero platform cost.
 ///
@@ -84,7 +97,7 @@ pub(crate) fn exec_hook_command(path: &str, source: &str) -> Result<String> {
     #[cfg(unix)]
     {
         Ok(format!(
-            "{} --source {source}",
+            "{}{SOURCE_FLAG}{source}",
             unix::shell_single_quote(path)
         ))
     }

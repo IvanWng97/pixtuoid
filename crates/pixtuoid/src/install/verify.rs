@@ -177,8 +177,12 @@ pub fn shell_shim_ref(command: &str) -> ShimRef {
     // in-quotes occurrence and mis-parse to a bogus partial path — the tail
     // strip is only ever needed for CodeWhale entries, whose head always
     // matches one of the two shapes.
-    let head = match command.rsplit_once(" --event ") {
-        Some((before, _)) if before.ends_with('\'') || before.contains(" --source ") => before,
+    let head = match command.rsplit_once(crate::install::hook_cmd::EVENT_FLAG) {
+        Some((before, _))
+            if before.ends_with('\'') || before.contains(crate::install::hook_cmd::SOURCE_FLAG) =>
+        {
+            before
+        }
         _ => command,
     };
     // Unix env-prefix form `PIXTUOID_SOURCE=<src> '<path>'`: the path is POSIX
@@ -203,7 +207,7 @@ pub fn shell_shim_ref(command: &str) -> ShimRef {
         }
     }
     // Windows bare form: `<abs> --source <source>` (unquoted).
-    if let Some((path, _)) = head.split_once(" --source ") {
+    if let Some((path, _)) = head.split_once(crate::install::hook_cmd::SOURCE_FLAG) {
         let p = path.trim();
         return if p.is_empty() {
             ShimRef::Unknown

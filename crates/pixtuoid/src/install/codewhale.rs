@@ -207,7 +207,7 @@ fn managed_entry(event: &str, env_mode: bool, base_cmd: &str) -> toml::Value {
     // the subagent observer events forward the raw stdin JSON, so the command is
     // the plain base form (no `--event`) — the shim reads stdin like CC/Codex.
     let command = if env_mode {
-        format!("{base_cmd} --event {event}")
+        format!("{base_cmd}{}{event}", crate::install::hook_cmd::EVENT_FLAG)
     } else {
         base_cmd.to_string()
     };

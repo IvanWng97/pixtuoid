@@ -62,14 +62,14 @@ fn resolve_windows_command(
         );
     }
     let Some(bad) = first_cmd_unsafe_char(path) else {
-        return Ok(format!("{path} --source {source}"));
+        return Ok(format!("{path}{}{source}", super::SOURCE_FLAG));
     };
     // Try the DOS 8.3 short form — space/metacharacter-free by construction.
     // (When 8.3 generation is disabled on the volume, GetShortPathNameW returns
     // the long path unchanged, so we re-check and fall through to the reject.)
     if let Some(s) = short_path(path) {
         if first_cmd_unsafe_char(&s).is_none() {
-            return Ok(format!("{s} --source {source}"));
+            return Ok(format!("{s}{}{source}", super::SOURCE_FLAG));
         }
     }
     anyhow::bail!(

@@ -155,7 +155,7 @@ fn managed_entry(hook_cmd: &str) -> YamlOwned {
 /// literally contains " --source " keeps it and only the genuine trailing flag is cut.
 fn exec_shim_ref(command: &str) -> ShimRef {
     let path = command
-        .rsplit_once(" --source ")
+        .rsplit_once(crate::install::hook_cmd::SOURCE_FLAG)
         .map(|(p, _)| p)
         .unwrap_or(command)
         .trim();
