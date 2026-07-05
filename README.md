@@ -110,7 +110,7 @@ _\* experimental — limited testing, unsigned binaries._
 
 > Adding a new tool? Implement the [`Source` trait](#contributing) — or, for a hook-only CLI, just a hook decoder + an install `Target` — then add a row to [`site/src/sources.json`](site/src/sources.json) (its `supported` set is pinned to the code by a test). One file, one channel, done.
 
-## Themes & Configuration
+## Configuration
 
 Press `t` to cycle the built-in themes with live preview. Your choice persists across sessions:
 
