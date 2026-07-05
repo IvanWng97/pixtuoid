@@ -22,7 +22,6 @@ use ratatui::style::Color;
 use ratatui::Terminal;
 
 use pixtuoid_scene::layout::Layout;
-use pixtuoid_scene::pathfind::Router;
 use pixtuoid_scene::pet::PetFrame;
 use pixtuoid_scene::pixel_painter::{render_to_rgb_buffer, MascotFrame, PixelCtx};
 
@@ -256,7 +255,10 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     let buf_h = scene_rect.height.saturating_mul(2);
     ctx.buf.ensure_size(buf_w, buf_h, theme.surface.bg_fallback);
     // Always compute maximum layout capacity — floor overflow handles the rest.
-    let Some(layout) = Layout::compute_with_seed(buf_w, buf_h, None, floor.floor_seed) else {
+    // The shared memoized prologue (FloorCtx::frame_layout): compute + the router
+    // corridor re-point, cached on (w, h, seed) so a steady frame skips the
+    // mask-stamp + coarse BFS.
+    let Some(layout) = ctx.store.frame_layout(buf_w, buf_h, floor.floor_seed) else {
         draw_footer_only_frame(
             term,
             scene,
@@ -267,8 +269,6 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         )?;
         return Ok(None);
     };
-
-    ctx.store.router.set_preferred_zone(layout.corridor);
 
     let pixel_result = render_to_rgb_buffer(&mut PixelCtx {
         // Reborrow: `ctx.store`/`ctx.buf` are used again below (RouteCtx

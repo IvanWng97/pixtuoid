@@ -102,6 +102,16 @@ pub struct FloorCtx {
     /// paths); read by `compute_door_frame_idx` to drive door-open cosmetics
     /// without a hardcoded `ENTRY_ANIMATION_MS`.
     pub door_anim_max_ms: u64,
+    /// Memo of the last per-frame layout, keyed by the ONLY inputs
+    /// `Layout::compute_with_seed` reads on the frame path (buf dims + floor
+    /// seed; `max_desks` is always `None` there). The compute is pure and
+    /// deterministic (byte-stable snapshots depend on that), but rebuilding it
+    /// every frame re-allocs + re-stamps the walkable mask and re-runs the
+    /// coarse BFS — the dominant fixed per-frame CPU, quadratic in buffer
+    /// area. One entry: a resize / floor switch changes the key and recomputes;
+    /// memory cost is one `Layout`. Private — everything rides
+    /// [`FloorCtx::frame_layout`].
+    layout_memo: Option<((u16, u16, u64), crate::layout::Layout)>,
 }
 
 impl Default for FloorCtx {
@@ -120,7 +130,33 @@ impl FloorCtx {
             light: LightingState::new(),
             motion: HashMap::new(),
             door_anim_max_ms: 0,
+            layout_memo: None,
         }
+    }
+
+    /// The per-frame layout — memoized `compute_with_seed(w, h, None, seed)` +
+    /// the router corridor re-point, the ONE frame prologue the engine
+    /// (`render_floor`/`observe`) and the TUI painter both ride. Returns a clone
+    /// (callers hold it across later `&mut self` uses; the clone is a plain
+    /// memcpy, dwarfed by the mask-stamp + BFS a hit skips). A too-small buffer
+    /// returns `None` without poisoning the memo.
+    pub fn frame_layout(
+        &mut self,
+        buf_w: u16,
+        buf_h: u16,
+        floor_seed: u64,
+    ) -> Option<crate::layout::Layout> {
+        let key = (buf_w, buf_h, floor_seed);
+        let layout = match &self.layout_memo {
+            Some((k, l)) if *k == key => l.clone(),
+            _ => {
+                let l = crate::layout::Layout::compute_with_seed(buf_w, buf_h, None, floor_seed)?;
+                self.layout_memo = Some((key, l.clone()));
+                l
+            }
+        };
+        self.router.set_preferred_zone(layout.corridor);
+        Some(layout)
     }
 
     /// Drop per-agent render state for agents no longer in `scene` — cached
@@ -260,9 +296,7 @@ fn frame_prologue(
     buf_h: u16,
     floor_seed: u64,
 ) -> Option<crate::layout::Layout> {
-    let layout = crate::layout::Layout::compute_with_seed(buf_w, buf_h, None, floor_seed)?;
-    fctx.router.set_preferred_zone(layout.corridor);
-    Some(layout)
+    fctx.frame_layout(buf_w, buf_h, floor_seed)
 }
 
 /// The shared per-frame EPILOGUE: stamp this frame's new coffee carriers and
@@ -756,6 +790,34 @@ mod tests {
     use std::path::Path;
     use std::sync::Arc;
     use std::time::Duration;
+
+    #[test]
+    fn frame_layout_memo_matches_fresh_compute_across_hits_resizes_and_none() {
+        let mut ctx = FloorCtx::new();
+        let fresh = crate::layout::Layout::compute_with_seed(192, 156, None, 0).unwrap();
+        // First call (miss) and second call (memo hit) must both equal a fresh
+        // compute — the memo is a pure cache, never a source of divergence.
+        let a = ctx.frame_layout(192, 156, 0).unwrap();
+        let b = ctx.frame_layout(192, 156, 0).unwrap();
+        for l in [&a, &b] {
+            assert_eq!(l.walkable, fresh.walkable);
+            assert_eq!(l.reachable, fresh.reachable);
+            assert_eq!(l.home_desks.len(), fresh.home_desks.len());
+        }
+        // A resize / different seed is a different key: recompute, not a stale hit.
+        let resized = ctx.frame_layout(120, 100, 0).unwrap();
+        let fresh_resized = crate::layout::Layout::compute_with_seed(120, 100, None, 0).unwrap();
+        assert_eq!(resized.walkable, fresh_resized.walkable);
+        // A too-small buffer is None and must not poison the memo.
+        assert!(ctx.frame_layout(3, 3, 0).is_none());
+        assert_eq!(
+            ctx.frame_layout(192, 156, 0).unwrap().walkable,
+            fresh.walkable
+        );
+        // (The corridor re-point half of the prologue runs on every call — hit or
+        // miss — inside frame_layout; the router keeps no public getter to assert
+        // on, and set_preferred_zone's behavior is pinned by the pathfind tests.)
+    }
 
     #[test]
     fn daemons_projects_onto_the_ground_floor_only() {
