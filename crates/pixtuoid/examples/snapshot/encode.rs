@@ -396,7 +396,6 @@ pub(crate) fn save_renderer_gif(
     navigations: &[(u64, usize)],
     pets: Vec<pixtuoid_scene::pet::Pet>,
 ) -> Result<()> {
-    use pixtuoid_core::render::Renderer as _;
     let frame_count = (duration_secs * fps) as usize;
     let frame_ms = 1000 / fps.max(1);
     let img_w = cols as u32 * CELL_W;

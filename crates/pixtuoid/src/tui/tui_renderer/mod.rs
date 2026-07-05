@@ -1,11 +1,8 @@
-//! `Renderer` trait impl that drives the half-block terminal TUI.
-//!
-//! Closes the v1 gap where production code called the free function
-//! `draw_scene` directly, leaving the core `Renderer` trait exercised only
-//! by `TestRenderer` in tests. `TuiRenderer` is the production impl: it
-//! owns the cross-frame mutable state (`RgbBuffer`, `FrameCache`,
-//! `AStarRouter`, `OccupancyOverlay`, `PoseHistory`) per floor and forwards
-//! to `draw_scene`, which recomputes its own layout per frame from
+//! `TuiRenderer` — the half-block terminal painter. Its `render` method is the
+//! production flush entry point (was the core `Renderer` trait impl, retired in
+//! #483 — inherent now). It owns the cross-frame mutable state (`RgbBuffer`,
+//! `FrameCache`, `AStarRouter`, `OccupancyOverlay`, `PoseHistory`) per floor and
+//! forwards to `draw_scene`, which recomputes its own layout per frame from
 //! `terminal.size()` because the user can resize at any time.
 
 use std::time::SystemTime;
@@ -16,7 +13,6 @@ use pixtuoid_core::sprite::RgbBuffer;
 use pixtuoid_core::state::SceneState;
 #[cfg(test)]
 use pixtuoid_core::AgentId;
-use pixtuoid_core::Renderer;
 
 use ratatui::backend::Backend;
 use ratatui::Terminal;
@@ -688,8 +684,10 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     }
 }
 
-impl<B: Backend<Error: Send + Sync + 'static>> Renderer for TuiRenderer<B> {
-    fn render(&mut self, scene: &SceneState, pack: &Pack, now: SystemTime) -> Result<()> {
+impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
+    /// The production terminal flush — was the core `Renderer` trait impl,
+    /// retired inherent in #483.
+    pub fn render(&mut self, scene: &SceneState, pack: &Pack, now: SystemTime) -> Result<()> {
         // Auto-expire pet state.
         if self.active_pet.as_ref().is_some_and(|p| !p.is_active(now)) {
             self.active_pet = None;

@@ -1,7 +1,7 @@
 # pixtuoid/tui — terminal renderer agent guide
 
-The **terminal painter**: ratatui `App` + `TuiRenderer` (the `Renderer` trait
-impl). Owns the half-block flush, the widgets (footer/wall-display/theme-picker
+The **terminal painter**: ratatui `App` + `TuiRenderer` (its inherent `render`
+flush — the core `Renderer` trait was retired #483). Owns the half-block flush, the widgets (footer/wall-display/theme-picker
 UI/tooltip/help/dashboard/Sources panel), mouse hit-testing, the version popup,
 the crossterm event loop + terminal lifecycle, and the per-session UI models
 (dashboard, Sources/connection). This is where the `pixtuoid-scene` engine's pixel
@@ -59,7 +59,7 @@ tui/
 │                   welcome.rs (paint_welcome — the first-run onboarding overlay PAINTER; typewriter
 │                   + staged roster reveal driven by OnboardingFrame.elapsed_ms)
 ├── hit_test.rs     mouse hit-test: agent hover, coffee machine click, furniture tooltips, pet
-├── tui_renderer/   Renderer trait impl, split production vs tests:
+├── tui_renderer/   TuiRenderer + its inherent `render` flush, split production vs tests:
 │                   mod.rs (TuiRenderer: cross-frame state — Vec<pixtuoid_scene::floor::PerFloor> (each = FloorCtx
 │                   [FrameCache/Router/PoseHistory/OccupancyOverlay + .motion + .door_anim_max_ms] + its RgbBuffer)
 │                   + one pixtuoid_scene::floor::PerOffice (coffee + chitchat, office-wide) — the session halves
@@ -89,7 +89,7 @@ tui/
 
 ## Known sharp edges (don't be surprised by these)
 
-- **`draw_scene` is called through `TuiRenderer`** (the `Renderer` trait impl), which owns the cross-frame state (per-floor `FloorCtx` {FrameCache/Router/OccupancyOverlay/PoseHistory/motion/light} + the `RgbBuffer`) and assembles a per-frame `DrawCtx` borrow that carries that `FloorCtx` as ONE `store` field (was the flat FrameCache/Router/OccupancyOverlay/PoseHistory list) + a separate `buf` (disjoint sibling), plus theme + mouse state. It delegates the world render to `pixtuoid_scene::pixel_painter::render_to_rgb_buffer` (the shared engine seam — see [`../../../pixtuoid-scene/CLAUDE.md`](../../../pixtuoid-scene/CLAUDE.md)), then does the terminal-only half-block flush + widgets + footer. `draw_scene` returns `Result<Option<Layout>>` — the computed layout is cached on `TuiRenderer.cached_layout` so hit-test functions can use it without recomputing. During floor transitions, `cached_layout` is cleared to `None`.
+- **`draw_scene` is called through `TuiRenderer`** (its inherent `render` flush; the core `Renderer` trait was retired #483), which owns the cross-frame state (per-floor `FloorCtx` {FrameCache/Router/OccupancyOverlay/PoseHistory/motion/light} + the `RgbBuffer`) and assembles a per-frame `DrawCtx` borrow that carries that `FloorCtx` as ONE `store` field (was the flat FrameCache/Router/OccupancyOverlay/PoseHistory list) + a separate `buf` (disjoint sibling), plus theme + mouse state. It delegates the world render to `pixtuoid_scene::pixel_painter::render_to_rgb_buffer` (the shared engine seam — see [`../../../pixtuoid-scene/CLAUDE.md`](../../../pixtuoid-scene/CLAUDE.md)), then does the terminal-only half-block flush + widgets + footer. `draw_scene` returns `Result<Option<Layout>>` — the computed layout is cached on `TuiRenderer.cached_layout` so hit-test functions can use it without recomputing. During floor transitions, `cached_layout` is cleared to `None`.
 - **The version popup's URL click-rect (`version_popup_url_rect`) derives its offsets from the SAME `PANEL_PAD_*` consts the painter insets by** (`url_x = popup_x + PANEL_PAD_X + URL_PREFIX.len()`, edges clipped at `±PANEL_PAD_*`) — keep them in lockstep (the phantom-browser-launch regression class).
 - **The board's ★ Star click target is `hud::star_hit_rect`, the same phantom-launch class** — it derives the precise `★ Star` span from the SAME board geometry the L1 painter uses (`cell_x = scene.x+2`, `cell_y = scene.y+1`, right-flushed to `BOARD_W`, star text = `BOARD_STAR`) and clips to the scene (`None` on a too-narrow terminal). The caller (`tui/mod.rs`) still gates on `cached_layout().is_some()`. It REPLACED the loose `hit_test_branding` (fired on all of cols `1..31`). Keep the paint + the hit-rect deriving from the same `BOARD_W`/`BOARD_STAR` — the `debug_assert` in `paint_wall_display` pins the brand-fits invariant the pairing needs.
 - **Every crossterm key event passes `should_dispatch_key` first** (`tui/mod.rs`): Windows delivers Press AND Release (and Repeat) per keystroke, so only `KeyEventKind::Press` dispatches — otherwise toggle keys double-fire there (`p` pauses then instantly unpauses). Unix only emits Press, so the gate is a no-op locally.

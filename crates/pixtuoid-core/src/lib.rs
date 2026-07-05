@@ -23,10 +23,6 @@ pub mod walkable;
 
 pub use grid::Grid;
 pub use id::AgentId;
-// Legacy pre-scene-split seam (see `render/mod.rs`) — hidden alongside the
-// trait itself so the re-export can't resurface it on the semver/doc surface.
-#[doc(hidden)]
-pub use render::Renderer;
 pub use source::{AgentEvent, ToolDetail, Transport};
 // The `Source` trait + its tagged tokio channel are the async transport seam —
 // native-only (they don't exist in a `--no-default-features` wasm build).

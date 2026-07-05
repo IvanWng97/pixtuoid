@@ -4,7 +4,6 @@ use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
 use pixtuoid_core::render::test_renderer::TestRenderer;
-use pixtuoid_core::render::Renderer;
 use pixtuoid_core::sprite::format::load_pack_from_strings;
 use pixtuoid_core::state::ActivityState;
 use pixtuoid_core::{AgentEvent, AgentId, Reducer, SceneState, Transport};
@@ -140,6 +139,6 @@ fn test_renderer_trait_render_increments_count() {
     .unwrap();
 
     assert_eq!(r.count(), 0);
-    <TestRenderer as Renderer>::render(&mut r, &scene, &pack, SystemTime::now()).unwrap();
+    r.render(&scene, &pack, SystemTime::now()).unwrap();
     assert_eq!(r.count(), 1, "trait render must record one snapshot");
 }

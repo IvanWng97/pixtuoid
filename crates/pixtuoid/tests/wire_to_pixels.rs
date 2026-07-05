@@ -41,7 +41,6 @@ use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 
 use pixtuoid::tui::tui_renderer::TuiRenderer;
-use pixtuoid_core::Renderer;
 
 /// A fixed wall-clock so motion/animation is deterministic across runs.
 fn t0() -> SystemTime {

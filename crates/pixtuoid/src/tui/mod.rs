@@ -20,7 +20,6 @@ use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
-use pixtuoid_core::Renderer;
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 

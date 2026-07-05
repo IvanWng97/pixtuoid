@@ -1,14 +1,13 @@
-//! Smoke test that `TuiRenderer` correctly implements the core `Renderer`
-//! trait. Closes the v1 gap where the production binary called the free
-//! function `draw_scene` directly, leaving the trait unexercised outside of
-//! the in-memory `TestRenderer` fixture.
+//! Smoke test that `TuiRenderer::render` (the production flush entry point —
+//! an inherent method since #483, was the core `Renderer` trait impl) drives a
+//! real half-block frame end to end, not just the in-memory `TestRenderer`.
 
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
 use pixtuoid::tui::tui_renderer::TuiRenderer;
 use pixtuoid_core::state::ActivityState;
-use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex, Renderer, SceneState};
+use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex, SceneState};
 use pixtuoid_scene::embedded_pack::load_sprite_pack;
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
@@ -80,9 +79,7 @@ fn tui_renderer_render_paints_a_full_frame() {
     );
     let pack = load_sprite_pack(None).expect("pack");
 
-    renderer
-        .render(&scene, &pack, now)
-        .expect("render through Renderer trait");
+    renderer.render(&scene, &pack, now).expect("render");
 
     // The TUI impl owns the pixel buffer — after render, it should be sized
     // for the 96×(36-1) scene area (one row reserved for footer), doubled

@@ -3,7 +3,6 @@ use std::time::SystemTime;
 
 use anyhow::Result;
 
-use crate::render::Renderer;
 use crate::sprite::format::Pack;
 use crate::state::SceneState;
 
@@ -20,17 +19,16 @@ impl TestRenderer {
     pub fn count(&self) -> usize {
         self.snapshots.lock().unwrap().len()
     }
-    /// Direct snapshot capture — avoids the test having to construct a
-    /// dummy `Pack` just to satisfy the `Renderer` trait. Tests that want
-    /// to assert on the full trait signature can still use
-    /// `<Self as Renderer>::render`.
+    /// Direct snapshot capture — avoids the test having to construct a dummy
+    /// `Pack` just to call [`Self::render`].
     pub fn record(&mut self, scene: &SceneState) {
         self.snapshots.lock().unwrap().push(scene.clone());
     }
-}
 
-impl Renderer for TestRenderer {
-    fn render(&mut self, scene: &SceneState, _pack: &Pack, _now: SystemTime) -> Result<()> {
+    /// Inherent render — was the legacy `Renderer` trait impl (retired #483).
+    /// Kept with the full 4-arg signature so the e2e harness drives the same
+    /// shape as the real `TuiRenderer::render`.
+    pub fn render(&mut self, scene: &SceneState, _pack: &Pack, _now: SystemTime) -> Result<()> {
         self.snapshots.lock().unwrap().push(scene.clone());
         Ok(())
     }
