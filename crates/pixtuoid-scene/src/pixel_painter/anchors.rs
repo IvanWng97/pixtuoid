@@ -17,10 +17,11 @@ use crate::layout::{Point, WaypointKind, DESK_W};
 pub(crate) use crate::motion::walking_position;
 use crate::pose::{self, Pose};
 
-/// Default character sprite width (the bundled pack is 8×12). Used to anchor
+/// Re-export the ONE cross-crate sprite-width authority (`layout::CHARACTER_SPRITE_W`)
+/// so pixel_painter siblings keep importing it via `super::`. Used to anchor
 /// LABELS (`character_anchor`), where a custom pack's true width isn't threaded
 /// and ±1px doesn't matter; the sprite BLIT sites pass the real `frame.width`.
-pub(super) const CHARACTER_SPRITE_W: u16 = 8;
+pub(super) use crate::layout::CHARACTER_SPRITE_W;
 
 // All anchor fns center the sprite horizontally on `sprite_w` — the pack's
 // character width (8 for the bundled pack, 10 for the robot pack). The vertical

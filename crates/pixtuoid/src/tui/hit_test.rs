@@ -25,11 +25,11 @@ pub(crate) fn hit_test_agent(
     mx: u16,
     my: u16,
 ) -> Option<AgentId> {
-    // Width-in-cells (sprite is 8 px wide; we don't divide x by 2 because
-    // each pixel column is one cell column in the half-block grid).
-    const SPRITE_W_CELLS: u16 = 8;
-    // Height-in-cells: sprite is 12 px tall = 6 cells.
-    const SPRITE_H_CELLS: u16 = 6;
+    // Width-in-cells: the sprite width in px IS the cell width — we don't divide
+    // x by 2, since each pixel column is one cell column in the half-block grid.
+    const SPRITE_W_CELLS: u16 = pixtuoid_scene::layout::CHARACTER_SPRITE_W;
+    // Height-in-cells: the 12 px sprite is 6 half-block cells.
+    const SPRITE_H_CELLS: u16 = pixtuoid_scene::layout::CHARACTER_SPRITE_H_CELLS;
     for agent in scene.agents.values() {
         let Some(anchor) = character_anchor(agent, layout, now, rctx) else {
             continue;
@@ -58,8 +58,8 @@ pub(crate) fn hit_test_agent(
 /// `GlobalDeskIndex` newtype exists to prevent: while viewing floor ≥ 1 it
 /// could pin an invisible agent from another floor.)
 pub fn hit_test_from_tui(scene: &SceneState, layout: &Layout, mx: u16, my: u16) -> Option<AgentId> {
-    const SPRITE_W: u16 = 8;
-    const SPRITE_H_CELLS: u16 = 6;
+    const SPRITE_W: u16 = pixtuoid_scene::layout::CHARACTER_SPRITE_W;
+    const SPRITE_H_CELLS: u16 = pixtuoid_scene::layout::CHARACTER_SPRITE_H_CELLS;
     for agent in scene.agents.values() {
         // `single_floor_local()` (the projected-scene identity), NOT the
         // arithmetic bridge: on an out-of-range desk the bridge would wrap onto
@@ -549,7 +549,10 @@ mod tests {
         // Computed FROM the painter's seated-anchor geometry (DESK_W-centered
         // 8px sprite, 8px above the desk) — NOT a mirror of the impl's own
         // literals, so a drift from the painted sprite reddens here.
-        let cx = d.x + pixtuoid_scene::layout::DESK_W.saturating_sub(8) / 2;
+        let cx = d.x
+            + pixtuoid_scene::layout::DESK_W
+                .saturating_sub(pixtuoid_scene::layout::CHARACTER_SPRITE_W)
+                / 2;
         let cy = d.y.saturating_sub(8) / 2;
         assert_eq!(hit_test_from_tui(&scene, &layout, cx, cy), Some(id));
     }
@@ -584,8 +587,8 @@ mod tests {
 
         let (ax, ay) = (anchor.x, anchor.y / 2);
         // Every cell of the painted 8x6 sprite box pins…
-        for dx in 0..8u16 {
-            for dy in 0..6u16 {
+        for dx in 0..pixtuoid_scene::layout::CHARACTER_SPRITE_W {
+            for dy in 0..pixtuoid_scene::layout::CHARACTER_SPRITE_H_CELLS {
                 assert_eq!(
                     hit_test_from_tui(&scene, &layout, ax + dx, ay + dy),
                     Some(id),
@@ -598,12 +601,28 @@ mod tests {
             hit_test_from_tui(&scene, &layout, ax.wrapping_sub(1), ay),
             None
         );
-        assert_eq!(hit_test_from_tui(&scene, &layout, ax + 8, ay), None);
+        assert_eq!(
+            hit_test_from_tui(
+                &scene,
+                &layout,
+                ax + pixtuoid_scene::layout::CHARACTER_SPRITE_W,
+                ay
+            ),
+            None
+        );
         assert_eq!(
             hit_test_from_tui(&scene, &layout, ax, ay.wrapping_sub(1)),
             None
         );
-        assert_eq!(hit_test_from_tui(&scene, &layout, ax, ay + 6), None);
+        assert_eq!(
+            hit_test_from_tui(
+                &scene,
+                &layout,
+                ax,
+                ay + pixtuoid_scene::layout::CHARACTER_SPRITE_H_CELLS
+            ),
+            None
+        );
     }
 
     #[test]
@@ -640,11 +659,14 @@ mod tests {
         // Scan desk 0's whole sprite box — the wrapped bridge would hit here.
         let desk0 = layout.home_desks[0];
         let (ax, ay) = (
-            desk0.x + pixtuoid_scene::layout::DESK_W.saturating_sub(8) / 2,
+            desk0.x
+                + pixtuoid_scene::layout::DESK_W
+                    .saturating_sub(pixtuoid_scene::layout::CHARACTER_SPRITE_W)
+                    / 2,
             desk0.y.saturating_sub(8) / 2,
         );
-        for dx in 0..8u16 {
-            for dy in 0..6u16 {
+        for dx in 0..pixtuoid_scene::layout::CHARACTER_SPRITE_W {
+            for dy in 0..pixtuoid_scene::layout::CHARACTER_SPRITE_H_CELLS {
                 assert_eq!(
                     hit_test_from_tui(&scene, &layout, ax + dx, ay + dy),
                     None,

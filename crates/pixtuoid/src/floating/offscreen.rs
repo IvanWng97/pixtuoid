@@ -164,11 +164,11 @@ pub(crate) fn boot_capacities_for_window(
     })
 }
 
-/// The bundled character sprite width (px). `CHARACTER_SPRITE_W` is `pub(super)` to
-/// `scene::pixel_painter` (not re-exported through `scene::layout`), so the floating
-/// painter uses the literal — labels only center ±half a glyph, so ±1px on a non-8-wide
-/// custom pack is cosmetically irrelevant (same rationale as `character_anchor`).
-const FLOATING_SPRITE_W: i32 = 8;
+/// The bundled character sprite width (px), from the ONE cross-crate authority
+/// `scene::layout::CHARACTER_SPRITE_W`. Labels only center ±half a glyph, so the
+/// default width (not a custom pack's real `frame.width`) is fine here — ±1px on
+/// a non-8-wide pack is cosmetically irrelevant (same rationale as `character_anchor`).
+const FLOATING_SPRITE_W: i32 = pixtuoid_scene::layout::CHARACTER_SPRITE_W as i32;
 
 /// Paint name badges into the upscaled `u32` surface (`0x00RRGGBB`). Each label's `anchor_px`
 /// is office-buffer space → multiply by `scale` for screen space; the badge is centered

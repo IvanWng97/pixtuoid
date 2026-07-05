@@ -493,4 +493,27 @@ mod tests {
             }
         }
     }
+
+    // `layout::CHARACTER_SPRITE_W` is the width every out-of-pixel_painter site
+    // (hit-test pin box, decor walk-offset, floating label centering) hard-codes
+    // its geometry on, as the width-unknown fallback for the pack's real
+    // `frame.width`. If the embedded pack's character sprite ever grows/shrinks,
+    // the const must move with it — else the pin box drifts off the painted
+    // sprite. `sim.rs` resolves the SAME "standing" reference pose per frame.
+    #[test]
+    fn character_sprite_w_matches_the_embedded_pack() {
+        let pack = test_default_pack();
+        let w = pack
+            .animation("standing")
+            .and_then(|a| a.frames.first())
+            .expect("embedded pack carries a standing pose")
+            .width();
+        assert_eq!(
+            w,
+            crate::layout::CHARACTER_SPRITE_W,
+            "embedded 'standing' sprite is {w}px wide but CHARACTER_SPRITE_W is {} — \
+             update the const so hit-test/decor/label geometry tracks the pack",
+            crate::layout::CHARACTER_SPRITE_W
+        );
+    }
 }
