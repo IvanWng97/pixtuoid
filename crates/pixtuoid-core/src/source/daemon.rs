@@ -147,8 +147,9 @@ impl DaemonPresence {
 
 /// Merge one presence delta into `scene.daemons[source]`. Called by the reducer
 /// task off the SIBLING channel — NEVER through `Reducer::apply` (which is
-/// `AgentId`-pure). Every update refreshes `last_seen` (any event is proof of
-/// life) and "any event implies UP" resurrects a wrongly-DOWN daemon.
+/// `AgentId`-pure). A proof-of-life update refreshes `last_seen` and "any event
+/// implies UP" resurrects a wrongly-DOWN daemon; `PidExited` is the exception — a
+/// DEATH signal that is non-creating (it never materializes an absent daemon).
 pub fn apply_presence(
     scene: &mut SceneState,
     source: &str,
@@ -156,17 +157,31 @@ pub fn apply_presence(
     now: SystemTime,
 ) {
     use DaemonPresenceUpdate::*;
-    let p = scene
-        .daemons_mut()
-        .entry(source.to_string())
-        .or_insert_with(|| DaemonPresence {
-            liveness: DaemonLiveness::UP,
-            active_sessions: 0,
-            last_seen: now,
-            entered_at: now,
-            in_flight_run_keys: Default::default(),
-            current_pid: None,
-        });
+    // `PidExited` is a DEATH signal (synthesized by the exit-watch drain), NOT
+    // proof of life, so — unlike every other delta — it must NEVER materialize a
+    // daemon: a fresh entry has `current_pid == None`, the arm's `current_pid ==
+    // Some(pid)` guard fails, and the entry is left UP — a phantom live idle mascot
+    // for a gateway that is actually dead (a resurrection if it was already
+    // TTL-removed; the exit watch races the removal sweep). For an absent daemon
+    // the death is a no-op. Every OTHER delta is proof of life and (re)creates UP.
+    let p = if matches!(update, PidExited { .. }) {
+        let Some(p) = scene.daemons_mut().get_mut(source) else {
+            return;
+        };
+        p
+    } else {
+        scene
+            .daemons_mut()
+            .entry(source.to_string())
+            .or_insert_with(|| DaemonPresence {
+                liveness: DaemonLiveness::UP,
+                active_sessions: 0,
+                last_seen: now,
+                entered_at: now,
+                in_flight_run_keys: Default::default(),
+                current_pid: None,
+            })
+    };
     // A transition out of Down (or a fresh GatewayUp) re-anchors the enter
     // animation — the mascot scuttles back in from the elevator. Idle↔Busy
     // does NOT reset it, so the steady wander clock stays continuous.
@@ -401,6 +416,29 @@ mod tests {
             up(&mut s, src, 1, 0);
             apply_presence(&mut s, src, DaemonPresenceUpdate::GatewayDown, ms(1));
             assert_eq!(st(&s, src), DaemonState::Down);
+        }
+    }
+
+    #[test]
+    fn pid_exited_never_materializes_a_daemon() {
+        // A `PidExited` is a DEATH signal (synthesized by the exit-watch drain),
+        // NOT proof of life. For a daemon that was never seen — or was already
+        // TTL-removed (the exit watch races the removal sweep) — the death must be
+        // a NO-OP, never mint a fresh UP entry: a fresh entry has `current_pid ==
+        // None`, so the arm's `current_pid == Some(pid)` guard fails and the entry
+        // is left UP, rendering a phantom live idle mascot for a dead gateway.
+        for src in SOURCES {
+            let mut s = SceneState::default();
+            apply_presence(
+                &mut s,
+                src,
+                DaemonPresenceUpdate::PidExited { pid: 100 },
+                ms(1),
+            );
+            assert!(
+                s.daemons().get(src).is_none(),
+                "PidExited on an absent daemon must not create an entry"
+            );
         }
     }
 
