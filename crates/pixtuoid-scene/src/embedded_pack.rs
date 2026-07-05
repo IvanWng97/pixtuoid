@@ -29,17 +29,29 @@ use pixtuoid_core::sprite::format::{
 /// Returns the directory only when `pack.toml` exists inside it — otherwise
 /// the caller falls back to the embedded pack.
 fn xdg_pack_dir() -> Option<PathBuf> {
-    let base = std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .or_else(|| {
-            pixtuoid_core::platform::user_home_opt().map(|h| PathBuf::from(h).join(".config"))
-        })?;
+    let base = xdg_config_base(
+        std::env::var_os("XDG_CONFIG_HOME"),
+        pixtuoid_core::platform::user_home_opt().map(PathBuf::from),
+    )?;
     let dir = base.join("pixtuoid").join("sprites");
     if dir.join("pack.toml").is_file() {
         Some(dir)
     } else {
         None
     }
+}
+
+/// Resolve the XDG config base: the env value when set to a NON-EMPTY path, else
+/// `<home>/.config`. Per the XDG basedir spec, an EMPTY `XDG_CONFIG_HOME` counts
+/// as unset — without the filter a `Some("")` skips the fallback and yields a
+/// CWD-RELATIVE `pixtuoid/sprites` path, silently loading an untrusted pack from
+/// the launch directory while ignoring the user's real `~/.config`. Pure (the env
+/// value is passed in) so the empty-vs-set precedence is unit-testable without
+/// mutating process env.
+fn xdg_config_base(xdg: Option<std::ffi::OsString>, home: Option<PathBuf>) -> Option<PathBuf> {
+    xdg.filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| home.map(|h| h.join(".config")))
 }
 
 /// Log a custom pack's animation-validation gaps at load time. A pack missing
@@ -229,6 +241,48 @@ mod tests {
     use super::*;
     use std::fs;
     use std::path::Path;
+
+    #[test]
+    fn xdg_config_base_treats_empty_as_unset() {
+        // XDG basedir spec: an EMPTY XDG_CONFIG_HOME counts as unset. Without the
+        // filter, `Some("")` skips the fallback and the pack dir resolves relative
+        // to CWD (loading an untrusted pack from the launch directory).
+        assert_eq!(
+            xdg_config_base(
+                Some(std::ffi::OsString::from("")),
+                Some(PathBuf::from("/home/u"))
+            ),
+            Some(PathBuf::from("/home/u/.config")),
+        );
+    }
+
+    #[test]
+    fn xdg_config_base_prefers_a_set_value_over_home() {
+        assert_eq!(
+            xdg_config_base(
+                Some(std::ffi::OsString::from("/xdg")),
+                Some(PathBuf::from("/home/u")),
+            ),
+            Some(PathBuf::from("/xdg")),
+        );
+    }
+
+    #[test]
+    fn xdg_config_base_falls_back_to_home_when_absent() {
+        assert_eq!(
+            xdg_config_base(None, Some(PathBuf::from("/home/u"))),
+            Some(PathBuf::from("/home/u/.config")),
+        );
+    }
+
+    #[test]
+    fn xdg_config_base_is_none_without_xdg_or_home() {
+        assert_eq!(
+            xdg_config_base(Some(std::ffi::OsString::from("")), None),
+            None
+        );
+        assert_eq!(xdg_config_base(None, None), None);
+    }
 
     /// Copy this crate's char-only pack fixture (a valid, loadable character
     /// pack with NO furniture — so the merge-from-embedded-default assertion
