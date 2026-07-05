@@ -43,8 +43,9 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
       <p class="eyebrow">{floor.n}F · {floor.name} — {live.length} channels on air</p>
       <h2 class="statement statement--md">{countWord} channels.<br />One office.</h2>
       <p class="lead">
-        The office, channel by channel — flip a channel to switch the big screen. VIBING runs live:
-        scrub the office's time, weather, and vibe on-screen.
+        This one's live — the same office running in your browser. Drag the time slider, throw a
+        storm at it, flip the vibe. The other channels are recorded; flip a channel to watch them on
+        the big screen.
       </p>
     </div>
 
@@ -62,6 +63,7 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
                 aria-pressed={c.id === def.id ? 'true' : 'false'}
               >
                 <span class="dial__num">{c.ch}</span> {c.label}
+                {c.kind === 'live' && <small class="dial__live">live</small>}
               </button>
             ) : (
               <span class="dial__ch dial__ch--soon">
@@ -459,7 +461,7 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
   @media (max-width: 480px) {
     /* 3× max-content is ~376px — past a 360/390px phone, so the studio's
        overflow-x:clip would hide the right dial column (03 Dashboard / 06 Spaces,
-       untappable). Wrap to two shrinkable columns so all 8 channels stay on-screen. */
+       untappable). Wrap to two shrinkable columns so all 7 channels stay on-screen. */
     .dial {
       grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 0.4rem 1rem;
@@ -506,6 +508,14 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
   .dial__ch--soon small {
     font-size: 0.72em;
     letter-spacing: 0.08em;
+  }
+  .dial__live {
+    /* marks the one INTERACTIVE channel (kind:"live") apart from the recorded
+       clips — reuses the active-channel LED glow so "live" reads as on-air. */
+    font-size: 0.72em;
+    letter-spacing: 0.08em;
+    color: var(--led);
+    text-shadow: 0 0 6px var(--led-glow);
   }
 
   .showcase {

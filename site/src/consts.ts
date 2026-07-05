@@ -205,8 +205,8 @@ function variantsForRef(ref: 'themes' | 'weather'): ShowcaseVariant[] {
 
 export function showcaseVariants(c: ShowcaseChannel): ShowcaseVariant[] {
   // A channel may carry a manifest-backed `variantsRef` AND extra inline
-  // `variants`, appended after it — e.g. WEATHER folds the day/night lighting
-  // stills in after the weather list (the former standalone NIGHT channel).
+  // `variants`, appended after it (variant-set channels only) — no current
+  // channel exercises the append, but the shape supports it.
   const inline = c.variants ?? [];
   if (c.variantsRef === 'themes' || c.variantsRef === 'weather')
     return [...variantsForRef(c.variantsRef), ...inline];

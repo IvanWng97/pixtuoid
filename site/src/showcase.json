@@ -6,7 +6,7 @@
     "asset": "multi-floor",
     "w": 1664,
     "h": 1408,
-    "caption": "every session claims a desk across floors — typing, wandering, coffee runs. workflow fleets get desks too: review fleets of 100+ agents have run this repo through this office.",
+    "caption": "every session claims a desk across floors — typing, wandering, coffee runs. big swarms scale too: fleets of 100+ agents have run this repo through this very office.",
     "duration": "0:10",
     "status": "live"
   },
@@ -17,7 +17,7 @@
     "asset": "openclaw",
     "w": 1120,
     "h": 960,
-    "caption": "run an OpenClaw gateway and a lobster scuttles in — its wander encodes the daemon's health: idle ambles, busy shuttles to the backend coders, a failing model flushes it sickly-red, shutdown walks it out.",
+    "caption": "a live OpenClaw gateway walks in as a lobster — its wander is the daemon's pulse: idle ambles, busy shuttles, failing flushes red, shutdown heads for the elevator.",
     "duration": "0:09",
     "status": "live"
   },
@@ -106,7 +106,7 @@
       { "key": "weather", "label": "weather", "variantsRef": "weather" },
       { "key": "theme", "label": "vibe", "variantsRef": "themes", "retint": true }
     ],
-    "caption": "set the mood — scrub the office's time, weather, and vibe",
+    "caption": "live — drag the slider, tap a vibe, roll the weather",
     "status": "live"
   }
 ]
