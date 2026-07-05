@@ -83,7 +83,7 @@ Press `s` to open the **Sources** panel and connect your agent CLI (Claude Code,
 | 💡 | **Per-tool monitor glow** | Edit = blue, Bash = orange, Read = cyan — scannable at a glance |
 | 🎨 | **Team palette** | Shirt + pants colored by working directory (same repo → same color, a glanceable org-chart); hair/skin per agent. 16 curated outfits |
 | 🦞 | **OpenClaw gateway mascot** | A live OpenClaw gateway shows up as a wandering lobster whose motion tracks gateway health |
-| 🎛️ | **VIBING** | A sun and moon arc the skyline as the day turns, weather rolls past the windows (rain, storm, snow, fog, overcast, wind, smog), and six themes reskin the office |
+| 🎛️ | **VIBING** | A sun and moon arc the skyline as the day turns, weather rolls past the windows (rain, storm, snow, fog, overcast, windy, smog), and six themes reskin the office |
 | 🔎 | **Hover tooltips** | Hover an agent for session duration, tool-call count and active-time %; hover any furniture — desks, sofas, plants, vending machine, printer — for its name |
 | 🐾 | **Office pets** | A cat or dog (one per floor) roams desks, pantry, sofas; sleeps near idle agents. Click to pet — pixel-art hearts float up |
 | 🛡️ | **Hook-safe** | The shim always exits 0 — a stuck visualizer can never block your agent |

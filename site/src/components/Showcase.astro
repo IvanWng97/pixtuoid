@@ -43,9 +43,9 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
       <p class="eyebrow">{floor.n}F · {floor.name} — {live.length} channels on air</p>
       <h2 class="statement statement--md">{countWord} channels.<br />One office.</h2>
       <p class="lead">
-        This one's live — the same office running in your browser. Drag the time slider, throw a
-        storm at it, flip the vibe. The other channels are recorded; flip a channel to watch them on
-        the big screen.
+        The channel on screen is live — the same office running in your browser. Drag the clock
+        forward, roll in a storm, switch the vibe. The other channels are recorded; flip a channel
+        to watch them on the big screen.
       </p>
     </div>
 
@@ -505,15 +505,15 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
     color: color-mix(in srgb, var(--fg-muted) 55%, transparent);
     cursor: default;
   }
-  .dial__ch--soon small {
+  /* the dial's two small appended status tags share one geometry (pinned here
+     so a size tweak can't drift): "soon" dims a placeholder channel; "live"
+     LED-glows the one INTERACTIVE channel (kind:"live") apart from the clips. */
+  .dial__ch--soon small,
+  .dial__live {
     font-size: 0.72em;
     letter-spacing: 0.08em;
   }
   .dial__live {
-    /* marks the one INTERACTIVE channel (kind:"live") apart from the recorded
-       clips — reuses the active-channel LED glow so "live" reads as on-air. */
-    font-size: 0.72em;
-    letter-spacing: 0.08em;
     color: var(--led);
     text-shadow: 0 0 6px var(--led-glow);
   }

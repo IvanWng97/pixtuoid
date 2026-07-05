@@ -106,7 +106,7 @@
       { "key": "weather", "label": "weather", "variantsRef": "weather" },
       { "key": "theme", "label": "vibe", "variantsRef": "themes", "retint": true }
     ],
-    "caption": "live — drag the slider, tap a vibe, roll the weather",
+    "caption": "live — you're driving this one",
     "status": "live"
   }
 ]
