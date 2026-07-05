@@ -80,7 +80,7 @@ insta    = "1"
 
 [[example]]
 name = "snapshot"
-path = "examples/snapshot.rs"
+path = "examples/snapshot/main.rs"
 test = true
 
 [package.metadata.deb]
