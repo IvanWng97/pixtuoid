@@ -765,19 +765,20 @@ fn paint_floor_to_ceiling_window(
     // Blend the glass interior toward the weather haze BEFORE the streak/flash
     // effects, so rain/snow/lightning still read on top of the murk.
     if let Some((haze, alpha)) = skyline_haze(weather) {
-        for dy in 1..h.saturating_sub(1) {
-            for dx in 1..w.saturating_sub(1) {
-                let px = x + dx;
-                let py = y + dy;
-                if px < buf.width() && py < buf.height() {
-                    let cur = buf.get(px, py);
-                    buf.put(px, py, blend_rgb(cur, haze, alpha));
-                }
-            }
-        }
+        wash_glass(buf, x, y, w, h, haze, alpha);
     }
 
     let elapsed_ms = epoch_ms(now);
+
+    // The streak arms (Rain/Storm/Snow/Windy) all paint into the same glass-
+    // interior inset; build it ONCE (reusing `glass_h`) so the four rects can't
+    // drift apart.
+    let glass = GlassRect {
+        x0: x + 1,
+        y0: y + 1,
+        w: w.saturating_sub(2),
+        h: glass_h,
+    };
 
     match weather {
         Weather::Rain => paint_streaks(
@@ -802,12 +803,7 @@ fn paint_floor_to_ceiling_window(
                 },
             },
             window_idx,
-            GlassRect {
-                x0: x + 1,
-                y0: y + 1,
-                w: w.saturating_sub(2),
-                h: h.saturating_sub(2),
-            },
+            glass,
             elapsed_ms,
         ),
         Weather::Storm => {
@@ -835,12 +831,7 @@ fn paint_floor_to_ceiling_window(
                     },
                 },
                 window_idx,
-                GlassRect {
-                    x0: x + 1,
-                    y0: y + 1,
-                    w: w.saturating_sub(2),
-                    h: h.saturating_sub(2),
-                },
+                glass,
                 elapsed_ms,
             );
             // The bright on-glass bolt — the strike's source. Uses the shared,
@@ -848,29 +839,21 @@ fn paint_floor_to_ceiling_window(
             // bounce (paint_lightning_flash).
             let level = lightning_flash_level(now);
             if level > 0.0 {
-                let alpha = 0.6 * level;
-                for dy in 1..h.saturating_sub(1) {
-                    for dx in 1..w.saturating_sub(1) {
-                        let px = x + dx;
-                        let py = y + dy;
-                        if px < buf.width() && py < buf.height() {
-                            let cur = buf.get(px, py);
-                            buf.put(
-                                px,
-                                py,
-                                blend_rgb(
-                                    cur,
-                                    Rgb {
-                                        r: 255,
-                                        g: 255,
-                                        b: 255,
-                                    },
-                                    alpha,
-                                ),
-                            );
-                        }
-                    }
-                }
+                // The on-glass bolt is the same glass-interior wash as fog/overcast,
+                // just white at the jittered flash level.
+                wash_glass(
+                    buf,
+                    x,
+                    y,
+                    w,
+                    h,
+                    Rgb {
+                        r: 255,
+                        g: 255,
+                        b: 255,
+                    },
+                    0.6 * level,
+                );
             }
         }
         Weather::Snow => paint_streaks(
@@ -891,12 +874,7 @@ fn paint_floor_to_ceiling_window(
                 particle: Particle::Flake,
             },
             window_idx,
-            GlassRect {
-                x0: x + 1,
-                y0: y + 1,
-                w: w.saturating_sub(2),
-                h: h.saturating_sub(2),
-            },
+            glass,
             elapsed_ms,
         ),
         Weather::Fog => wash_glass(
@@ -948,12 +926,7 @@ fn paint_floor_to_ceiling_window(
                 },
             },
             window_idx,
-            GlassRect {
-                x0: x + 1,
-                y0: y + 1,
-                w: w.saturating_sub(2),
-                h: h.saturating_sub(2),
-            },
+            glass,
             elapsed_ms,
         ),
         Weather::Smog => {
