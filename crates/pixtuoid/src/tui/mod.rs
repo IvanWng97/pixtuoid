@@ -428,8 +428,21 @@ pub fn setup_terminal() -> Result<Term> {
     // EnableMouseCapture turns on the terminal's mouse-event reporting.
     // Modern terminals emit MouseEventKind::Moved on cursor motion (no
     // button required), which is how we drive the hover tooltip.
-    execute!(out, EnterAlternateScreen, EnableMouseCapture)?;
-    Ok(Terminal::new(CrosstermBackend::new(out))?)
+    //
+    // Keep setup ATOMIC: if entering the alt screen / mouse capture — or building
+    // the Terminal (whose `.size()` query can fail) — errors after raw mode is on,
+    // roll the terminal all the way back before propagating. Otherwise the error
+    // path strands the user's shell in raw mode (no echo) and/or the alt screen.
+    if let Err(e) = execute!(out, EnterAlternateScreen, EnableMouseCapture) {
+        let _ = disable_raw_mode();
+        return Err(e.into());
+    }
+    Terminal::new(CrosstermBackend::new(out)).map_err(|e| {
+        let mut out = stdout();
+        let _ = execute!(out, DisableMouseCapture, LeaveAlternateScreen);
+        let _ = disable_raw_mode();
+        e.into()
+    })
 }
 
 pub fn teardown_terminal(term: &mut Term) -> Result<()> {
