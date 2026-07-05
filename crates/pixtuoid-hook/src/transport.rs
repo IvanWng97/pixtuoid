@@ -185,6 +185,20 @@ pub(crate) fn send_line(endpoint: &str, line: &[u8]) {
 /// plane silently degrades) and receive the payload. Comparing the connected
 /// server's token user SID to ours closes that. EVERYTHING here fails CLOSED
 /// (any FFI failure ⇒ `false` ⇒ drop) and never panics — invariant #5.
+///
+/// KNOWN SHARP EDGE — pid→token, not fd-atomic (don't "fix" it): unlike Unix
+/// `getpeereid` (which reads the peer off the connected fd atomically), this
+/// resolves the server via `GetNamedPipeServerProcessId` → `OpenProcess`, a
+/// pid→handle pair with an inherent PID-reuse TOCTOU. It is fail-closed AND
+/// effectively unexploitable: for the payload to leak, the squatter's server
+/// process must stay ALIVE to receive the write, so its pid can't have been
+/// recycled; a recycled pid means the squatter exited, its pipe instance died
+/// with it, and the write goes nowhere. There is no atomic Win32 alternative
+/// that ALSO survives elevation — `GetSecurityInfo(OWNER)` reads the pipe object
+/// owner in one call but would false-negative an admin daemon (owner = the
+/// Administrators group, not the user). The `default_windows_pipe_name` re-read
+/// in `send_line`'s scope check is a deliberate one-shot cost (the shim runs once
+/// per hook and exits).
 #[cfg(windows)]
 mod peer {
     use std::os::windows::io::AsRawHandle;
