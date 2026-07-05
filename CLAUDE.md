@@ -115,7 +115,7 @@ without API widening); integration tests in `crates/<crate>/tests/` —
 pixtuoid-core's suite is 8 binaries (five capability-grouped + three
 flat, two of them deliberately publish-excluded) with `#[cfg(windows)]` parity twins, all mapped in
 [`crates/pixtuoid-core/tests/CLAUDE.md`](crates/pixtuoid-core/tests/CLAUDE.md);
-the headless render harness (`tui_renderer/harness.rs`) drives the real
+the headless render harness (`tui_renderer/harness`) drives the real
 `TuiRenderer` through ratatui `TestBackend` — see the tui guide. Coverage:
 `just coverage`. Decoder never-panic fuzz vs a real session corpus:
 `just fuzz <jsonl-dir>` (on-demand, not in CI). Mutation testing (do the
