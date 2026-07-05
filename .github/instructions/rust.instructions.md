@@ -28,8 +28,8 @@ coding-standard slice.
   — never add `ratatui`, `crossterm`, `winit`, `softbuffer`, or `stdout`/`println!`
   there (the crate boundary + `just arch` enforce it). Terminal/window code lives
   only in the `pixtuoid` binary's painters over the engine's render seam
-  (`pixtuoid_scene::floor::render_floor` / `pixel_painter::render_to_rgb_buffer`) —
-  NOT the legacy `#[doc(hidden)]` `Renderer` trait; don't build on it.
+  (`pixtuoid_scene::floor::render_floor` / `pixel_painter::render_to_rgb_buffer`).
+  There is no core render trait — a `#[doc(hidden)]` `Renderer` trait was retired in #483.
 - Events flow through **one** channel typed `mpsc::Sender<(Transport, AgentEvent)>`.
   Don't hardcode `Transport::Hook` on the consumer side — each `Source` tags its
   own events.

@@ -47,8 +47,8 @@ Dependency direction is one-way: `pixtuoid-core ← pixtuoid-scene ← {pixtuoid
 engine's render seam (`render_floor` / `render_to_rgb_buffer` in `pixtuoid-scene`)
 is the inversion point that keeps the core terminal-free — the same pixel pass
 drives the terminal, the desktop window, and a browser `<canvas>`. (A legacy
-`Renderer` trait survives in `pixtuoid-core`'s `render/`, but it is `#[doc(hidden)]`
-and NOT the seam — don't build on it.)
+`#[doc(hidden)]` `Renderer` trait once lived in `pixtuoid-core`'s `render/`, but it
+was NOT the seam and was retired in #483 — its two impls are now inherent methods.)
 
 A **`Source`** is one of two classes (`source/registry.rs`'s `SourceKind`):
 
