@@ -203,29 +203,43 @@ mod tests {
     /// If upstream RENAMES `PLANNER_RESPONSE`, a step still carrying `tool_calls`
     /// arrives under an unrecognized type. It must SAFE-DEGRADE: the tool starts
     /// are NOT decoded (no spurious unmatched-start sticking the slot Active),
-    /// only the previous step's primary end fires — and the drift `unknown_event`
-    /// breadcrumb path (defense #2, the sole currency backstop for AG's
-    /// schema-less format) is exercised on the way. Guards the else-branch
-    /// restructure that added that breadcrumb without changing the event output.
+    /// only the previous step's primary end fires — AND it must fire the
+    /// `drift::unknown_event` breadcrumb (defense #2, the sole currency backstop
+    /// for AG's schema-less format). Both halves are pinned: removing the
+    /// breadcrumb call OR changing the event output reddens this.
     #[test]
-    fn renamed_planner_step_with_tool_calls_safe_degrades_to_end_only() {
-        let v = serde_json::json!({
+    fn renamed_planner_step_with_tool_calls_breadcrumbs_and_ends_only() {
+        let renamed = serde_json::json!({
             "type": "PLANNER_REPLY", // hypothetical upstream rename of PLANNER_RESPONSE
             "step_index": 2,
             "tool_calls": [ { "name": "read_file", "args": {} } ],
         });
-        let out = decode_ag_line("/x/t.jsonl", SOURCE_NAME, v).unwrap();
-        assert_eq!(
-            out.len(),
-            1,
-            "a renamed tool-call step must mint NO start, only the prev end: {out:?}"
-        );
-        match &out[0] {
-            AgentEvent::ActivityEnd { tool_use_id, .. } => {
-                assert_eq!(tool_use_id.as_deref(), Some("ag-1-0"));
+        let logs = crate::test_capture::capture_logs(|| {
+            let out = decode_ag_line("/x/t.jsonl", SOURCE_NAME, renamed).unwrap();
+            // No spurious start for the un-decoded tool; just the prev-step end.
+            assert_eq!(out.len(), 1, "renamed step must mint no start: {out:?}");
+            match &out[0] {
+                AgentEvent::ActivityEnd { tool_use_id, .. } => {
+                    assert_eq!(tool_use_id.as_deref(), Some("ag-1-0"));
+                }
+                other => panic!("expected ActivityEnd only, got {other:?}"),
             }
-            other => panic!("expected ActivityEnd only, got {other:?}"),
-        }
+        });
+        assert!(
+            logs.contains("unknown_event") && logs.contains("PLANNER_REPLY"),
+            "a tool-call step under a renamed type must fire the drift breadcrumb, got:\n{logs}"
+        );
+
+        // Negative: a real result step (no tool_calls) must stay SILENT — the
+        // breadcrumb can't false-positive on the legit else-branch traffic.
+        let result_step = serde_json::json!({ "type": "TOOL_RESULT", "step_index": 2 });
+        let quiet = crate::test_capture::capture_logs(|| {
+            decode_ag_line("/x/t.jsonl", SOURCE_NAME, result_step).unwrap();
+        });
+        assert!(
+            !quiet.contains("unknown_event"),
+            "a tool_calls-less result step must NOT breadcrumb, got:\n{quiet}"
+        );
     }
 
     /// The Generic display carries the tool's TARGET (quote-stripped), routed
