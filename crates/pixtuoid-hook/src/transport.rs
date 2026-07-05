@@ -38,9 +38,94 @@ pub(crate) fn send_line(endpoint: &str, line: &[u8]) {
     if !spawn_timeout_watchdog() {
         return;
     }
+    // Before piping the hook payload anywhere, refuse a HOSTILE per-user tmp
+    // rendezvous dir (#485): if the endpoint is our `/tmp/pixtuoid-{uid}/`
+    // fallback and that dir isn't a private dir we own, a co-located user has
+    // parked it — connecting would leak the payload (cwd, tool names) into
+    // their listener. Drop silently (the never-block-CC contract). An ABSENT
+    // dir is fine — the connect below just fails fast. One lstat, non-blocking;
+    // the XDG / explicit-PIXTUOID_SOCKET branches return None (untouched).
+    if let Some(dir) = crate::paths::owned_tmp_socket_dir(endpoint) {
+        if owned_dir_is_hostile(&dir) {
+            return;
+        }
+    }
     if let Ok(mut s) = std::os::unix::net::UnixStream::connect(endpoint) {
         let _ = s.set_write_timeout(Some(WRITE_TIMEOUT));
         let _ = s.write_all(line);
+    }
+}
+
+/// True iff `dir` EXISTS but is NOT a private directory we own — a symlink, a
+/// non-dir, owned by another uid, or group/other-accessible (`mode & 0o077`).
+/// An absent dir returns `false` (not hostile: the daemon simply hasn't bound
+/// yet, and the caller's connect will fail fast). `symlink_metadata` (lstat)
+/// keeps a planted symlink from being followed to a hostile target. Mirrors the
+/// daemon's `ensure_owned_socket_dir` predicate in `hook/unix.rs`.
+#[cfg(unix)]
+fn owned_dir_is_hostile(dir: &std::path::Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    match std::fs::symlink_metadata(dir) {
+        Ok(md) => {
+            // Safety: getuid is always safe on Unix.
+            let uid = unsafe { libc::getuid() };
+            !md.is_dir() || md.uid() != uid || (md.mode() & 0o077 != 0)
+        }
+        Err(_) => false,
+    }
+}
+
+#[cfg(all(unix, test))]
+mod tests {
+    use super::owned_dir_is_hostile;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn absent_dir_is_not_hostile() {
+        // The daemon simply hasn't bound yet — the connect below fails fast and
+        // drops; we must NOT treat "not there" as an attack (would lose events).
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        assert!(!owned_dir_is_hostile(&tmp.path().join("nope")));
+    }
+
+    #[test]
+    fn owned_0700_dir_is_not_hostile() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let dir = tmp.path().join("d");
+        std::fs::create_dir(&dir).expect("mkdir");
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).expect("chmod");
+        assert!(!owned_dir_is_hostile(&dir));
+    }
+
+    #[test]
+    fn group_or_other_accessible_dir_is_hostile() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let dir = tmp.path().join("loose");
+        std::fs::create_dir(&dir).expect("mkdir");
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+        assert!(owned_dir_is_hostile(&dir));
+    }
+
+    #[test]
+    fn a_symlink_is_hostile() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let target = tmp.path().join("real");
+        std::fs::create_dir(&target).expect("mkdir");
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o700)).expect("chmod");
+        let link = tmp.path().join("link");
+        std::os::unix::fs::symlink(&target, &link).expect("symlink");
+        assert!(
+            owned_dir_is_hostile(&link),
+            "lstat catches the symlink even though its 0700 target is fine"
+        );
+    }
+
+    #[test]
+    fn a_regular_file_at_the_dir_path_is_hostile() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let file = tmp.path().join("f");
+        std::fs::write(&file, b"squat").expect("write");
+        assert!(owned_dir_is_hostile(&file));
     }
 }
 

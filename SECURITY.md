@@ -30,9 +30,13 @@ The components that handle untrusted or privileged input, and how they're bounde
 
 1. **The hook shim (`pixtuoid-hook`)** is invoked by your agent CLI and forwards a
    single JSON line from stdin to the office over a **Unix domain socket** (a
-   per-user runtime path — `$XDG_RUNTIME_DIR/pixtuoid.sock`, else
-   `/tmp/pixtuoid-<uid>.sock`; `PIXTUOID_SOCKET` overrides — created `0600`,
-   owner-only) or a Windows named pipe. It is a *local IPC* — there is no network
+   per-user runtime path — `$XDG_RUNTIME_DIR/pixtuoid.sock`, else a per-user
+   `0700` directory `/tmp/pixtuoid-<uid>/pixtuoid.sock`; `PIXTUOID_SOCKET`
+   overrides — the socket itself created `0600`, owner-only). The `/tmp` fallback
+   dir is created with a TOCTOU-safe `mkdir` + ownership/mode validation, and the
+   shim refuses to connect into it if a co-located user pre-squatted it — so
+   another user cannot squat the (formerly flat, predictable) rendezvous path to
+   disable or intercept the hook plane. It is a *local IPC* — there is no network
    listener. The shim is hardened to **never block the agent**: it always exits
    `0`, within a hard ~200 ms watchdog bound, on any error. It does not execute or
    shell out to anything in the payload.

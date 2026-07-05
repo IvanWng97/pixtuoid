@@ -627,12 +627,16 @@ mod tests {
         std::env::set_var("XDG_RUNTIME_DIR", "/run/user/1000");
         assert_eq!(default_socket_path(), "/run/user/1000/pixtuoid.sock");
 
-        // Arm 3: neither set -> "/tmp/pixtuoid-{uid}.sock".
+        // Arm 3: neither set -> "/tmp/pixtuoid-{uid}/pixtuoid.sock" (#485: the
+        // per-user 0700 SUBDIR, not a flat squattable name).
         std::env::remove_var("PIXTUOID_SOCKET");
         std::env::remove_var("XDG_RUNTIME_DIR");
         // Safety: getuid is always safe on Unix.
         let uid = unsafe { libc::getuid() };
-        assert_eq!(default_socket_path(), format!("/tmp/pixtuoid-{uid}.sock"));
+        assert_eq!(
+            default_socket_path(),
+            format!("/tmp/pixtuoid-{uid}/pixtuoid.sock")
+        );
 
         match prior_socket {
             Some(v) => std::env::set_var("PIXTUOID_SOCKET", v),
@@ -642,6 +646,36 @@ mod tests {
             Some(v) => std::env::set_var("XDG_RUNTIME_DIR", v),
             None => std::env::remove_var("XDG_RUNTIME_DIR"),
         }
+    }
+
+    // #485: the shim only validates dir ownership for the `/tmp` fallback it
+    // owns — never for an XDG or explicit-override endpoint (someone else's dir).
+    #[cfg(unix)]
+    #[test]
+    fn owned_tmp_socket_dir_matches_only_the_tmp_fallback() {
+        // Safety: getuid is always safe on Unix.
+        let uid = unsafe { libc::getuid() };
+        let owned = std::path::PathBuf::from(format!("/tmp/pixtuoid-{uid}"));
+        assert_eq!(
+            paths::owned_tmp_socket_dir(&format!("/tmp/pixtuoid-{uid}/pixtuoid.sock")),
+            Some(owned),
+            "the /tmp fallback endpoint resolves its owned dir"
+        );
+        assert_eq!(
+            paths::owned_tmp_socket_dir("/run/user/1000/pixtuoid.sock"),
+            None,
+            "XDG_RUNTIME_DIR is systemd's, not ours to police"
+        );
+        assert_eq!(
+            paths::owned_tmp_socket_dir("/explicit/path.sock"),
+            None,
+            "an explicit PIXTUOID_SOCKET override is the user's, not ours"
+        );
+        // A different uid's tmp dir is NOT ours either (belt: parent must match).
+        assert_eq!(
+            paths::owned_tmp_socket_dir(&format!("/tmp/pixtuoid-{}/pixtuoid.sock", uid + 1)),
+            None
+        );
     }
 
     // The Windows twin only RUNS on a Windows runner (PR 3 turns that CI

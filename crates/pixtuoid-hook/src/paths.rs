@@ -21,9 +21,16 @@ pub(crate) fn default_socket_path() -> String {
         if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR") {
             return format!("{dir}/pixtuoid.sock");
         }
-        // Safety: getuid is always safe on Unix.
+        // No XDG_RUNTIME_DIR (macOS, bare Linux): the socket lives in a per-user
+        // subdir the daemon creates 0700-owned-by-us, NOT a flat, world-writable-
+        // /tmp-level predictable name. A co-located other user could squat/lock
+        // the flat `pixtuoid-{uid}.sock`(.lock) and silently disable the hook
+        // plane (#485); a 0700 subdir they cannot write into closes that, and a
+        // dir THEY pre-squatted makes the daemon's bind fail loudly instead of
+        // silently degrading. Parity-pinned to the daemon's branch 3 by
+        // `pixtuoid-core/tests/socket_path_parity.rs`.
         let uid = unsafe { libc::getuid() };
-        format!("/tmp/pixtuoid-{uid}.sock")
+        format!("/tmp/pixtuoid-{uid}/pixtuoid.sock")
     }
     #[cfg(windows)]
     {
@@ -38,4 +45,20 @@ pub(crate) fn default_socket_path() -> String {
             .replace('\\', "-");
         format!(r"\\.\pipe\pixtuoid-{user}")
     }
+}
+
+/// The per-user tmp dir we OWN (`/tmp/pixtuoid-{uid}`) when `endpoint` is the
+/// no-XDG `/tmp` FALLBACK — else `None`. PURE (no I/O), so it stays parity-safe.
+/// The daemon creates+validates this dir 0700; the shim validates it before
+/// connecting (`transport::send_line`) so it can't be tricked into piping the
+/// hook payload into a hostile listener a co-located user parked under a dir
+/// they made world-accessible (#485). `None` for the XDG / explicit-override
+/// branches — those parents are systemd's / the user's, not ours to police.
+#[cfg(unix)]
+pub(crate) fn owned_tmp_socket_dir(endpoint: &str) -> Option<std::path::PathBuf> {
+    use std::path::{Path, PathBuf};
+    // Safety: getuid is always safe on Unix.
+    let uid = unsafe { libc::getuid() };
+    let owned = PathBuf::from(format!("/tmp/pixtuoid-{uid}"));
+    (Path::new(endpoint).parent() == Some(owned.as_path())).then_some(owned)
 }

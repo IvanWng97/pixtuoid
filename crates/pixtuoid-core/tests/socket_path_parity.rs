@@ -59,10 +59,23 @@ fn shim_and_daemon_resolve_identical_socket_paths_in_all_three_branches() {
     assert_eq!(shim, daemon, "XDG_RUNTIME_DIR branch diverged");
     assert_eq!(shim, PathBuf::from("/run/user/7/pixtuoid.sock"));
 
-    // Branch 3: uid-suffixed /tmp fallback on both sides.
+    // Branch 3: uid-scoped /tmp SUBDIR fallback on both sides (#485 — the
+    // per-user 0700 dir, not a flat squattable `pixtuoid-{uid}.sock`).
     std::env::remove_var("XDG_RUNTIME_DIR");
     let (shim, daemon) = both();
     assert_eq!(shim, daemon, "/tmp-uid fallback branch diverged");
+    // Safety: getuid is always safe on Unix.
+    let uid = unsafe { libc::getuid() };
+    assert_eq!(
+        shim,
+        PathBuf::from(format!("/tmp/pixtuoid-{uid}/pixtuoid.sock"))
+    );
+    // The shim resolves its owned-dir (for the pre-connect ownership guard)
+    // from that same fallback endpoint — pin it here too (#485).
+    assert_eq!(
+        hook_paths::owned_tmp_socket_dir(&shim.to_string_lossy()),
+        Some(PathBuf::from(format!("/tmp/pixtuoid-{uid}"))),
+    );
 
     match saved_socket {
         Some(v) => std::env::set_var("PIXTUOID_SOCKET", v),

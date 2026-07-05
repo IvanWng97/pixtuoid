@@ -53,8 +53,13 @@ impl ClaudeCodeSource {
             if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR") {
                 return PathBuf::from(format!("{dir}/pixtuoid.sock"));
             }
+            // No XDG_RUNTIME_DIR (macOS, bare Linux): a per-user SUBDIR the bind
+            // creates 0700-owned-by-us (`hook::unix::ensure_owned_socket_dir`),
+            // NOT a flat predictable `pixtuoid-{uid}.sock` a co-located user
+            // could squat/lock to silently kill the hook plane (#485). Parity-
+            // pinned to the shim's branch 3 by tests/socket_path_parity.rs.
             let uid = rustix::process::getuid().as_raw();
-            PathBuf::from(format!("/tmp/pixtuoid-{uid}.sock"))
+            PathBuf::from(format!("/tmp/pixtuoid-{uid}/pixtuoid.sock"))
         }
         #[cfg(windows)]
         {
@@ -155,12 +160,13 @@ mod tests {
             PathBuf::from("/run/user/1000/pixtuoid.sock")
         );
 
-        // With neither set, fall back to the uid-suffixed /tmp socket.
+        // With neither set, fall back to the uid-scoped /tmp SUBDIR socket
+        // (#485: the bind creates `/tmp/pixtuoid-{uid}/` 0700-owned-by-us).
         std::env::remove_var("XDG_RUNTIME_DIR");
         let uid = rustix::process::getuid().as_raw();
         assert_eq!(
             ClaudeCodeSource::default_socket_path(),
-            PathBuf::from(format!("/tmp/pixtuoid-{uid}.sock"))
+            PathBuf::from(format!("/tmp/pixtuoid-{uid}/pixtuoid.sock"))
         );
 
         // Restore prior env so a later env-reading test in this binary isn't
