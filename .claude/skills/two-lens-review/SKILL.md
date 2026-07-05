@@ -1,68 +1,115 @@
 ---
 name: two-lens-review
-version: 1.0.0
-description: "Run pixtuoid's mandatory pre-merge two-lens PR review — 2+ parallel agents on the diff with differentiated lenses (correctness/grounding + design/blast-radius), then drive every finding to a terminal state. Use before merging ANY PR or when the user says 'review this PR/branch', 'two-lens review', or 'is this ready to merge'. Encodes the five hard requirements, the escalation triggers (shim / motion / reducer / generated art / public-facing), and the disposition sweep that the repo learned the hard way."
+version: 1.1.0
+description: "Run pixtuoid's review protocol at either scope — the mandatory pre-merge DIFF gate (2+ differentiated-lens agents on the diff) or a whole-codebase AUDIT (subsystem × factor fan-out over the whole tree). Both draw ONE shared factor taxonomy + verify contract + disposition; they differ only in population and orchestration. Use before merging ANY PR, on 'review this PR/branch' / 'is this ready to merge' (diff scope), or on 'whole-codebase review' / pre-release / periodic audit (whole-codebase scope). Encodes the five hard requirements, the escalation triggers, the adversarial finder→verify fan-out, and the disposition sweep the repo learned the hard way."
 metadata:
   scope: "pixtuoid repo only"
 ---
 
-# two-lens-review (v1)
+# two-lens-review (v1.1) — the review gate + the whole-codebase audit
 
-The repo's **mandatory** merge gate: "Don't merge a PR without the two-lens
-review" (workspace `CLAUDE.md`, "Things NOT to do" — PR #23 merged unreviewed
-with a critical path-traversal). This skill is the *orchestration* of that gate.
-The canonical fill-in-the-slots **brief templates live in
-[`.github/prompts/pr-review.prompt.md`](../../../.github/prompts/pr-review.prompt.md)** —
-read it; this skill tells you how to RUN it and not skip the parts that bite.
+ONE protocol, two SCOPES over the SAME factors:
+
+- **Diff scope** — the repo's **mandatory** merge gate ("Don't merge a PR without
+  the two-lens review" — workspace `CLAUDE.md`, "Things NOT to do"; PR #23 merged
+  unreviewed with a critical path-traversal). 2+ differentiated-lens agents on the
+  diff, disposition in the PR thread.
+- **Whole-codebase scope** — the periodic / pre-release AUDIT. A diff review and
+  an audit scan DIFFERENT populations (fix-introduced-in-one-change vs existing
+  code + cross-PR accumulation), so the audit is a SEPARATE pass, not a bigger
+  PR review — but it runs the same factors, verify contract, and disposition.
+
+The factors, the fill-in-the-slots lens briefs, the five hard requirements, the
+escalation triggers, AND the whole-codebase fan-out orchestration are all
+canonical in
+[`.github/prompts/pr-review.prompt.md`](../../../.github/prompts/pr-review.prompt.md) —
+**read it; fill from THAT file, never a paraphrase here** (a copy here is the exact
+two-copies-drift class Lens 2 hunts — when the prompt gains a factor or trigger, a
+copy here silently lags). This skill owns only *when* to invoke each scope, *how*
+to orchestrate, and the red-flag self-checks.
 
 ## When to use
 
-- Before merging any PR (no exceptions — it's the gate, not a nicety).
+**Diff scope:**
+- Before merging any PR (no exceptions — it's the gate, not a nicety; no size
+  exemption — lens count can shrink, the gate can't).
 - User says "review this branch/PR", "two-lens review", "is this ready to merge".
 - After a fix round, to re-review the new head before merge.
 
-## The briefs are canonical — copy them, don't restate them
+**Whole-codebase scope:**
+- User says "whole-codebase review" / "audit the repo"; a pre-release or milestone
+  sweep; a periodic drift/design-debt pass.
+- NOT the per-PR gate — that's the diff scope above.
 
-The **five hard requirements**, the **two lens briefs** (correctness/grounding +
-design/blast-radius, with their `<...>` slots), and the **escalation triggers**
-(generated art → film-critic, state-machine/concurrency → lifecycle, public-facing
-→ editorial, `pixtuoid-hook` → whole-shim never-panic, motion → render-and-watch)
-all live in [`.github/prompts/pr-review.prompt.md`](../../../.github/prompts/pr-review.prompt.md).
-**Fill the lens briefs from THAT file, never from memory or a paraphrase here** —
-duplicating them into this skill is the exact two-copies-drift class lens 2 hunts
-(when the prompt gains a sixth requirement or a new trigger, a copy here silently
-lags). This skill owns only the parts the prompt covers as loose prose: *when* to
-invoke, *how* to orchestrate, and the red-flag self-checks below.
+Two agents MINIMUM (diff scope), lenses **differentiated** (a shared lens makes
+their misses re-correlate); lens/finder count scales with blast radius (or tree
+size). The quality lever is never the lens NAME — it's the change-specific
+checklist filled into the `<...>` slots, and the FACTOR COVERAGE (no family
+silently dropped).
 
-Two agents MINIMUM, lenses **differentiated** (a shared lens makes their misses
-re-correlate); lens count scales with blast radius (two is the floor, not the law).
-
-## How to run it (orchestration)
+## Diff scope — how to run (orchestration)
 
 1. **Isolate**: the reviewed branch in a worktree (never the shared checkout —
    two sessions on one tree race on HEAD). Note `path`, `branch`, `base` sha.
 2. **Dispatch both lenses in parallel, in the background**, each a subagent with
    its brief from `pr-review.prompt.md`, `<...>` slots FILLED with this change's
    specific claims (a lazily-filled slot turns both reviewers generic). Give each
-   the worktree path + `git -C <path> diff <base>..HEAD`.
+   the worktree path + `git -C <path> diff <base>..HEAD`. Add escalation lenses
+   per the prompt's triggers (shim → whole-shim never-panic; motion →
+   render-and-watch; generated art → film-critic; state-machine/concurrency →
+   lifecycle; public-facing → editorial).
 3. **Collect + verify**: for every MEDIUM+ finding, **verify the premise yourself
    before coding a fix** — reviewers have incomplete design context; check the
    crate's sharp edges first, and if a finding is deliberate design, REFUTE it by
    citing (or ADDING) the relevant `CLAUDE.md` sharp edge.
 4. **Fold** accepted findings into ONE review-round commit; record any
    reviewer-flagged plan-misses as `plan-miss:` lines in its message.
-5. **Disposition sweep — drive every reviewer/bot finding to exactly one terminal
-   state in the PR thread**: FIXED · REFUTED-with-trace (cite/add the sharp edge)
-   · ISSUE-FILED (no-deferral rule: only big/refactor defers). "Acknowledged, no
-   action" is NOT a state — #40's ignored finding became a 0.4.1 blocker (#46).
+5. **Disposition sweep** (shared, below).
 6. **After a fix round**, re-run the gates and watch the NEW head's CI.
 
-## Red flags (you're about to skip the gate)
+## Whole-codebase scope — how to run (orchestration)
+
+The full fan-out template (subsystem finders + whole-tree specialist sweeps →
+adversarial verify → dedup → ranked report) is the "Whole-codebase scope —
+orchestration" section of `pr-review.prompt.md`. In brief:
+
+1. **Scout** (main loop): map crates / LOC / churn / hot files → the work-list.
+2. **Find**: fan out subsystem finders (per crate/module cluster) + whole-tree
+   specialist sweeps (arch-invariants, concurrency/liveness, security, drift —
+   the aggregate-only lenses). Each finder carries the FULL factor checklist.
+   Prefer a `Workflow` (pipeline per cell); degrade to parallel `Agent` fan-out.
+3. **Verify** each finding adversarially (default REFUTE; check sharp edges;
+   construct a repro or refute) — a separate skeptic per finding, never the
+   finder self-certifying.
+4. **Dedup + rank** survivors; ship a report ranked by corrected severity,
+   grouped by factor family, KEEPING the refuted-as-deliberate list (coverage
+   proof + sharp-edge context for the next agent).
+5. **Disposition sweep** (shared, below); end with the repo-wide stale-phrase
+   `grep` == 0.
+
+Scale to the ask: "any bugs?" → a few finders, single-vote verify; "thoroughly
+audit / be comprehensive" → larger finder pool, multi-vote adversarial verify,
+synthesis. Do the involved/cross-crate refactors it surfaces IN-ARC (design-debt
+lens); defer only genuinely big/refactor work to issues.
+
+## Disposition sweep (both scopes)
+
+Drive every reviewer/finder/bot finding to **exactly one terminal state**:
+**FIXED** · **REFUTED-with-trace** (cite or ADD the relevant per-crate `CLAUDE.md`
+sharp edge — that keeps the next agent's context accurate) · **ISSUE-FILED**
+(no-deferral rule: only big/refactor defers). "Acknowledged, no action" is NOT a
+state — #40's ignored finding became a 0.4.1 blocker (#46). Diff scope: in the PR
+thread. Whole-codebase scope: in the ranked report.
+
+## Red flags (you're about to skip the gate / short the audit)
 
 | Thought | Reality |
 |---------|---------|
 | "It's a tiny/doc-only PR" | The gate has no size exemption; run it (lens count can shrink, the gate can't). |
-| "CI is green, that's enough" | CI can't see design, blast radius, or a deliberate-looking real bug. |
+| "CI is green, that's enough" | CI can't see design, blast radius, drift, or a deliberate-looking real bug. |
 | "The reviewer said X, so fix X" | Verify the premise first — check sharp edges; a wrong fix contradicts a design decision. |
 | "One thorough agent is fine" | Two differentiated lenses is the floor; one lens's blind spots go uncaught. |
 | "I'll note the finding and move on" | Every finding needs a terminal state — dropped findings become release blockers. |
+| "The diff looks clean, we're done" (audit) | The diff scope can't see drift accumulation / design-debt accretion / arch erosion — those need the whole-codebase pass. |
+| "The finder found it, report it" (audit) | Findings self-certify nothing — a separate skeptic must try to REFUTE each survivor first. |
+| "Just unify the duplication" | Some duplication is documented deliberate separation (per-source decoders, per-CLI targets); check the sharp edge before proposing a merge. |
