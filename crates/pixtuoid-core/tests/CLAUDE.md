@@ -59,7 +59,7 @@ tests/
 2. **Only if the CLI has unique behavior** (subagent hooks, custom lifecycle): add
    `tests/sources/<cli>.rs` (or `<cli>/mod.rs` if it needs private fixtures) and
    register `mod <cli>;` in `tests/sources/main.rs`. Plain CLIs (antigravity,
-   reasonix) need none — `decode.rs` + `conformance.rs` cover them.
+   reasonix) need none — `decode/mod.rs` + `conformance.rs` cover them.
 
 ## Known sharp edges
 

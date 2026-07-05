@@ -363,6 +363,74 @@ fn session_start_on_exiting_subagent_does_not_resurrect() {
     );
 }
 
+// The resurrect gate fires ONLY for EXITING slots (conjunct A of the three).
+// A duplicate root SessionStart on a LIVE (non-exiting) session — the
+// Codex/Reasonix re-emit-a-start-per-prompt path — must refresh liveness WITHOUT
+// resurrect-in-place: resurrecting a live slot resets Active→Idle AND evicts its
+// active_tasks (reducer.rs:916), un-suppressing a delegating parent's subagent
+// leak. This pins that the `&&`→`||` mutant on the LAST conjunct dies — the
+// mutant reads `(exiting && slot_root) || incoming_root`, which on this live root
+// (incoming_root = true) would wrongly resurrect. (The old inline "accepted
+// equivalent" comment was WRONG: resurrect_in_place has no exiting guard.)
+#[test]
+fn duplicate_root_session_start_does_not_resurrect_a_live_session() {
+    let mut scene = SceneState::uniform(8);
+    let mut r = Reducer::new();
+    let root = AgentId::from_transcript_path("/p/live-root.jsonl");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: root,
+            source: "claude-code".into(),
+            session_id: "r".into(),
+            cwd: PathBuf::from("/repo"),
+            parent_id: None,
+        },
+        t0,
+        Transport::Hook,
+    );
+    // Drive it Active — a live, in-flight session that is NEVER exiting.
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityStart {
+            agent_id: root,
+            tool_use_id: Some("t1".into()),
+            detail: Some("Edit: foo.rs".into()),
+        },
+        t0 + Duration::from_secs(1),
+        Transport::Hook,
+    );
+    assert!(matches!(
+        scene.agents.get(&root).unwrap().state,
+        ActivityState::Active { .. }
+    ));
+    // A duplicate ROOT SessionStart (re-emitted per prompt) refreshes liveness but
+    // must NOT resurrect: the slot is not exiting, so conjunct A is false.
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: root,
+            source: "claude-code".into(),
+            session_id: "r".into(),
+            cwd: PathBuf::from("/repo"),
+            parent_id: None,
+        },
+        t0 + Duration::from_secs(2),
+        Transport::Hook,
+    );
+    let slot = scene.agents.get(&root).unwrap();
+    assert!(
+        slot.exiting_at.is_none(),
+        "the live session was never exiting"
+    );
+    assert!(
+        matches!(slot.state, ActivityState::Active { .. }),
+        "a duplicate root start on a LIVE session must NOT reset it to Idle: a \
+         resurrect here (the surviving mutant) drops Active + evicts active_tasks"
+    );
+}
+
 // Resurrect-in-place must evict the previous life's correlation state: a tuid
 // left in active_tasks by a session that ended mid-delegation can NEVER drain
 // (its End belongs to the dead life), so suppress_subagent_leak would eat

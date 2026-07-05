@@ -29,6 +29,7 @@ pub(crate) fn default_socket_path() -> String {
         // dir THEY pre-squatted makes the daemon's bind fail loudly instead of
         // silently degrading. Parity-pinned to the daemon's branch 3 by
         // `pixtuoid-core/tests/socket_path_parity.rs`.
+        // Safety: getuid is always safe on Unix.
         let uid = unsafe { libc::getuid() };
         format!("/tmp/pixtuoid-{uid}/pixtuoid.sock")
     }

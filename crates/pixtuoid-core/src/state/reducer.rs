@@ -878,9 +878,13 @@ impl Reducer {
             // session's start is swallowed and the whole first turn is
             // invisible (every later arm is a no-op once the corpse is
             // GC'd). Gated to root agents on BOTH sides so a late
-            // duplicate can't un-exit a b1-cascaded subagent.
-            // (mutants: `&&`→`||` on the last conjunct is a documented
-            // accepted equivalent — see the residuals note in tests.)
+            // duplicate can't un-exit a b1-cascaded subagent. All three
+            // conjuncts are load-bearing (`resurrect_in_place` has no exiting
+            // guard, so a `&&`→`||` here WOULD reset a LIVE root — NOT an
+            // equivalent mutant): the exiting conjunct is pinned by
+            // `duplicate_root_session_start_does_not_resurrect_a_live_session`,
+            // the two root-gate conjuncts by the exiting-slot / exiting-subagent
+            // resurrect tests.
             if slot.exiting_at.is_some() && slot.parent_id.is_none() && parent_id.is_none() {
                 // Route through fsm so an in-flight Active span is folded
                 // into active_ms before the reset (every other

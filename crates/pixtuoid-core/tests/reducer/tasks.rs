@@ -132,12 +132,13 @@ fn hook_activity_during_active_task_is_suppressed() {
         matches!(slot.state, ActivityState::Active { .. }),
         "parent must remain Active(Task) while task in flight"
     );
-    // The suppressed subagent End must be DROPPED, not merely state-neutral:
-    // an un-suppressed ActivityEnd arms pending_idle (the grace debounce keeps
-    // the slot Active, so the state check above can't see the leak). A None
-    // pending_idle is what proves the End never reached apply — this is the
-    // assertion that kills the `delete ActivityEnd arm in suppress_subagent_leak`
-    // mutant the state check alone leaves alive.
+    // A None pending_idle confirms the suppressed End didn't nudge the parent
+    // toward Idle. NOTE: this does NOT kill the `delete ActivityEnd arm in
+    // suppress_subagent_leak` mutant — a misattributed End's tuid (`subagent-R`)
+    // doesn't match the parent's active Task span, so even an UN-suppressed
+    // (applied) End leaves pending_idle None; both branches read None here. That
+    // mutant is killed by `parent_waiting_..._resolves_when_the_subagent_ends_a_tool`
+    // (the Waiting-restore is the observable the suppression path uniquely does).
     assert!(
         slot.pending_idle_at.is_none(),
         "a suppressed subagent End must not arm the parent's pending-idle"
@@ -1697,6 +1698,91 @@ fn parent_waiting_on_subagent_permission_resolves_when_the_subagent_resumes() {
         "parent resumes Active(Delegating) once the subagent works again — no stale Waiting"
     );
     assert!(scene.agents.get(&child).unwrap().exiting_at.is_none());
+}
+
+// SIBLING of the test above (which resumes via a child ActivityStart): the
+// Waiting-restore must ALSO fire for a suppressed child ActivityEnd. Deleting
+// the `ActivityEnd` arm of `suppress_subagent_leak` (a surviving mutant) leaves
+// THIS parent stuck on a stale "permission?" Waiting until the 60-min sweep,
+// because the child's End would then neither suppress nor restore. Pins that arm.
+#[test]
+fn parent_waiting_on_subagent_permission_resolves_when_the_subagent_ends_a_tool() {
+    let mut scene = SceneState::uniform(8);
+    let mut r = Reducer::new();
+    let parent = AgentId::from_transcript_path("/p/orch2.jsonl");
+    let child = AgentId::from_parts("claude-code", "/p/orch2/subagents/agent-1.jsonl");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: parent,
+            source: "claude-code".into(),
+            session_id: "p".into(),
+            cwd: PathBuf::from("/repo"),
+            parent_id: None,
+        },
+        t0,
+        Transport::Hook,
+    );
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: child,
+            source: "claude-code".into(),
+            session_id: "c".into(),
+            cwd: PathBuf::from("/repo"),
+            parent_id: Some(parent),
+        },
+        t0 + Duration::from_millis(100),
+        Transport::Jsonl,
+    );
+    // Parent delegates → Active(Delegating), active_tasks[parent] = {task-T}.
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityStart {
+            agent_id: parent,
+            tool_use_id: Some("task-T".into()),
+            detail: Some("Agent".into()),
+        },
+        t0 + Duration::from_secs(1),
+        Transport::Hook,
+    );
+    // Subagent's permission prompt → Notification misattributed to the parent.
+    r.apply(
+        &mut scene,
+        AgentEvent::Waiting {
+            agent_id: parent,
+            reason: "permission?".into(),
+        },
+        t0 + Duration::from_secs(2),
+        Transport::Hook,
+    );
+    assert!(
+        matches!(
+            scene.agents.get(&parent).unwrap().state,
+            ActivityState::Waiting { .. }
+        ),
+        "parent goes Waiting on the subagent's permission"
+    );
+    // Subagent resumes by ENDING a tool → a misattributed child hook END (a
+    // different tuid, so not the Task's self-end): suppressed, and the
+    // suppression restores Active(Delegating).
+    r.apply(
+        &mut scene,
+        AgentEvent::ActivityEnd {
+            agent_id: parent,
+            tool_use_id: Some("sub-bash".into()),
+        },
+        t0 + Duration::from_secs(3),
+        Transport::Hook,
+    );
+    assert!(
+        matches!(
+            scene.agents.get(&parent).unwrap().state,
+            ActivityState::Active { .. }
+        ),
+        "a suppressed child END must ALSO restore Active(Delegating), not leave a stale Waiting"
+    );
 }
 
 // Regression (adversarial review): a parent Waiting on a permission while a
