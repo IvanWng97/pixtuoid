@@ -142,36 +142,19 @@ fn claude_shim_ref(entry: &Value) -> crate::install::verify::ShimRef {
 }
 
 pub fn merge_install(content: &str, hook_cmd: &str) -> Result<MergeOutcome> {
-    let doc = merge::parse_json_or_empty(content)?;
-    // Valid JSON but not an object (a top-level array/string/number) would be
-    // silently discarded by the shared merge's `as_object().unwrap_or_default()`
-    // — writing only our hooks and dropping the user's document. Refuse, mirroring
-    // `parse_or_empty`'s stance and the uninstall twin (which preserves it).
-    // Reasonix keeps the IDENTICAL guard.
-    if !doc.is_object() && !doc.is_null() {
-        anyhow::bail!("settings is valid JSON but not an object — refusing to overwrite");
-    }
-    // Delegate to the shared flat-JSON merge (the same core Reasonix/Cursor ride).
-    // Claude's per-event entry is NESTED (`{matcher, hooks:[…]}`) rather than
-    // flat, but that shape rides ENTIRELY in the `managed_entry` closure — the
-    // merge only keys managed entries on the `_pixtuoid` sentinel, so the byte
-    // output is preserved (`managed_entry` emits the same `json!` as the old inline).
-    let merged =
-        merge::flat_json_merge_install(doc.clone(), EVENTS, SENTINEL_KEY, managed_entry, hook_cmd);
-    let changed = merged != doc;
-    Ok(MergeOutcome {
-        content: serde_json::to_string_pretty(&merged)?,
-        changed,
+    // The parse + non-object guard + semantic-`changed` + serialize plumbing is
+    // the shared wrapper (its guard is the ONE copy — see merge.rs). Claude's
+    // per-event entry is NESTED (`{matcher, hooks:[…]}`) rather than flat, but
+    // that shape rides ENTIRELY in the `managed_entry` closure — the merge keys
+    // managed entries on the `_pixtuoid` sentinel, so the byte output is preserved.
+    merge::flat_json_merge_outcome_install(content, "settings", |doc| {
+        merge::flat_json_merge_install(doc, EVENTS, SENTINEL_KEY, managed_entry, hook_cmd)
     })
 }
 
 pub fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
-    let doc = merge::parse_json_or_empty(content)?;
-    let cleaned = merge::flat_json_merge_uninstall(doc.clone(), SENTINEL_KEY);
-    let changed = cleaned != doc;
-    Ok(MergeOutcome {
-        content: serde_json::to_string_pretty(&cleaned)?,
-        changed,
+    merge::flat_json_merge_outcome_uninstall(content, |doc| {
+        merge::flat_json_merge_uninstall(doc, SENTINEL_KEY)
     })
 }
 

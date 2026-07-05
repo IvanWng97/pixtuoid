@@ -197,33 +197,16 @@ pub fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
 }
 
 pub fn merge_install(content: &str, hook_cmd: &str) -> Result<MergeOutcome> {
-    let doc = merge::parse_json_or_empty(content)?;
-    // See claude.rs: a valid-JSON-but-non-object doc would be silently dropped
-    // by `flat_json_merge_install`. Refuse rather than overwrite the user's content.
-    if !doc.is_object() && !doc.is_null() {
-        anyhow::bail!("settings is valid JSON but not an object — refusing to overwrite");
-    }
-    let merged = merge::flat_json_merge_install(
-        doc.clone(),
-        REASONIX_EVENTS,
-        SENTINEL_KEY,
-        managed_entry,
-        hook_cmd,
-    );
-    let changed = merged != doc;
-    Ok(MergeOutcome {
-        content: serde_json::to_string_pretty(&merged)?,
-        changed,
+    // Shared parse + non-object guard + semantic-`changed` + serialize wrapper
+    // (the guard's one copy lives in merge.rs).
+    merge::flat_json_merge_outcome_install(content, "settings", |doc| {
+        merge::flat_json_merge_install(doc, REASONIX_EVENTS, SENTINEL_KEY, managed_entry, hook_cmd)
     })
 }
 
 pub fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
-    let doc = merge::parse_json_or_empty(content)?;
-    let cleaned = merge::flat_json_merge_uninstall(doc.clone(), SENTINEL_KEY);
-    let changed = cleaned != doc;
-    Ok(MergeOutcome {
-        content: serde_json::to_string_pretty(&cleaned)?,
-        changed,
+    merge::flat_json_merge_outcome_uninstall(content, |doc| {
+        merge::flat_json_merge_uninstall(doc, SENTINEL_KEY)
     })
 }
 

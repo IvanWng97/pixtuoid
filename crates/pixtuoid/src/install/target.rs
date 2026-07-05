@@ -24,6 +24,7 @@ pub enum BinaryStrategy {
 /// comparison would make a semantic no-op look like a change, triggering a
 /// destructive rewrite + backup deletion on `uninstall` (violating the load-bearing
 /// "backup is the user's only recovery path" invariant).
+#[derive(Debug)]
 pub struct MergeOutcome {
     pub content: String,
     pub changed: bool,

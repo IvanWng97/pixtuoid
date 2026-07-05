@@ -15,6 +15,7 @@
 //!     per-event array merge Reasonix/Cursor/Claude share (the entry SHAPE rides in
 //!     the caller's `make_entry` closure, so a nested Claude entry fits too).
 
+use crate::install::target::MergeOutcome;
 use serde_json::{json, Map, Value};
 
 /// Parse JSON config content, treating empty/whitespace-only as the empty
@@ -150,9 +151,112 @@ fn is_flat_managed(entry: &Value, sentinel: &str) -> bool {
     entry.get(sentinel).and_then(|v| v.as_bool()) == Some(true)
 }
 
+/// Parse flat-JSON `content`, REFUSE a valid-but-non-object root (which
+/// `flat_json_merge_install` would silently coerce to `{}`, dropping the user's
+/// document), run `mutate`, and package a `MergeOutcome` with a SEMANTIC
+/// `changed` (a parsed-doc diff, never a byte diff — a byte diff would churn the
+/// user's formatting and delete their only backup on the next uninstall). `what`
+/// names the config in the refusal message ("settings" / "hooks.json"). The
+/// non-object guard lives HERE, once, so a future flat-JSON target cannot forget
+/// it and silently re-open the drop-the-user's-document path.
+pub fn flat_json_merge_outcome_install(
+    content: &str,
+    what: &str,
+    mutate: impl FnOnce(Value) -> Value,
+) -> anyhow::Result<MergeOutcome> {
+    let doc = parse_json_or_empty(content)?;
+    if !doc.is_object() && !doc.is_null() {
+        anyhow::bail!("{what} is valid JSON but not an object — refusing to overwrite");
+    }
+    let merged = mutate(doc.clone());
+    let changed = merged != doc;
+    Ok(MergeOutcome {
+        content: serde_json::to_string_pretty(&merged)?,
+        changed,
+    })
+}
+
+/// The uninstall twin: parse flat-JSON, run `mutate`, package the outcome.
+/// Deliberately UNGUARDED on a non-object root — uninstall must stay a clean
+/// no-op on a foreign non-object document (`flat_json_merge_uninstall` returns it
+/// unchanged), never error.
+pub fn flat_json_merge_outcome_uninstall(
+    content: &str,
+    mutate: impl FnOnce(Value) -> Value,
+) -> anyhow::Result<MergeOutcome> {
+    let doc = parse_json_or_empty(content)?;
+    let cleaned = mutate(doc.clone());
+    let changed = cleaned != doc;
+    Ok(MergeOutcome {
+        content: serde_json::to_string_pretty(&cleaned)?,
+        changed,
+    })
+}
+
+/// The TOML analog (Codex/CodeWhale): parse, run `mutate`, package with the same
+/// SEMANTIC `changed` rule. No non-object guard — a TOML root is always a table,
+/// which is why the TOML targets correctly lack the flat-JSON guard.
+pub fn toml_merge_outcome(
+    content: &str,
+    mutate: impl FnOnce(toml::Value) -> toml::Value,
+) -> anyhow::Result<MergeOutcome> {
+    let doc = parse_toml_or_empty(content)?;
+    let merged = mutate(doc.clone());
+    let changed = merged != doc;
+    Ok(MergeOutcome {
+        content: toml::to_string_pretty(&merged)?,
+        changed,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn flat_json_merge_outcome_install_refuses_a_valid_non_object_root() {
+        // The central guard (the whole point of the shared wrapper): a valid-JSON
+        // top-level array/scalar must be REFUSED, not silently coerced to `{}`
+        // (which drops the user's document). Every flat-JSON target routes through
+        // here, so no future target can forget the guard.
+        for content in ["[1, 2, 3]", "\"hello\"", "42", "true"] {
+            let err = flat_json_merge_outcome_install(content, "settings", |d| d)
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("not an object"), "{content}: {err}");
+        }
+        // An empty / null / object root is accepted (null is the empty-doc form).
+        for ok in ["", "null", "{}"] {
+            assert!(
+                flat_json_merge_outcome_install(ok, "settings", |d| d).is_ok(),
+                "{ok}"
+            );
+        }
+    }
+
+    #[test]
+    fn flat_json_merge_outcome_uninstall_is_a_clean_noop_on_a_non_object_root() {
+        // The uninstall twin is deliberately UNGUARDED: a foreign non-object doc
+        // passes through as an unchanged no-op, never an error.
+        let out = flat_json_merge_outcome_uninstall("[1, 2, 3]", |d| d).unwrap();
+        assert!(!out.changed);
+    }
+
+    #[test]
+    fn toml_merge_outcome_reports_semantic_change_not_byte_change() {
+        // `changed` is a parsed-doc diff: an identity mutate is a no-op (backups
+        // don't churn); a real mutation flips it true.
+        let noop = toml_merge_outcome("a = 1\n", |d| d).unwrap();
+        assert!(!noop.changed, "identity mutate must be a semantic no-op");
+        let changed = toml_merge_outcome("a = 1\n", |mut d| {
+            if let toml::Value::Table(t) = &mut d {
+                t.insert("b".into(), toml::Value::Integer(2));
+            }
+            d
+        })
+        .unwrap();
+        assert!(changed.changed);
+    }
 
     #[test]
     fn flat_json_merge_uninstall_returns_non_object_unchanged() {

@@ -63,23 +63,11 @@ pub fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
 }
 
 pub fn merge_install(content: &str, hook_cmd: &str) -> Result<MergeOutcome> {
-    let doc = crate::install::merge::parse_toml_or_empty(content)?;
-    let merged = toml_merge_install(doc.clone(), hook_cmd);
-    let changed = merged != doc;
-    Ok(MergeOutcome {
-        content: toml::to_string_pretty(&merged)?,
-        changed,
-    })
+    crate::install::merge::toml_merge_outcome(content, |doc| toml_merge_install(doc, hook_cmd))
 }
 
 pub fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
-    let doc = crate::install::merge::parse_toml_or_empty(content)?;
-    let cleaned = toml_merge_uninstall(doc.clone());
-    let changed = cleaned != doc;
-    Ok(MergeOutcome {
-        content: toml::to_string_pretty(&cleaned)?,
-        changed,
-    })
+    crate::install::merge::toml_merge_outcome(content, toml_merge_uninstall)
 }
 
 fn handler_is_managed(h: &toml::Value) -> bool {

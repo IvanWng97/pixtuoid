@@ -123,28 +123,19 @@ pub fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
 }
 
 pub fn merge_install(content: &str, hook_cmd: &str) -> Result<MergeOutcome> {
-    let doc = merge::parse_json_or_empty(content)?;
-    if !doc.is_object() && !doc.is_null() {
-        anyhow::bail!("hooks.json is valid JSON but not an object — refusing to overwrite");
-    }
-    let merged = json_merge_install(doc.clone(), hook_cmd);
-    let changed = merged != doc;
-    Ok(MergeOutcome {
-        content: serde_json::to_string_pretty(&merged)?,
-        changed,
+    // Shared parse + non-object guard + semantic-`changed` + serialize wrapper
+    // (the guard's one copy lives in merge.rs). Cursor's `version` field injection
+    // rides inside `json_merge_install`.
+    merge::flat_json_merge_outcome_install(content, "hooks.json", |doc| {
+        json_merge_install(doc, hook_cmd)
     })
 }
 
 pub fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
-    let doc = merge::parse_json_or_empty(content)?;
     // Shared flat-JSON uninstall: removes managed entries + drops empty event
-    // keys / the `hooks` object. `version` is untouched (preserved by design —
-    // see the comment in `json_merge_uninstall`'s former body, now below).
-    let cleaned = merge::flat_json_merge_uninstall(doc.clone(), SENTINEL_KEY);
-    let changed = cleaned != doc;
-    Ok(MergeOutcome {
-        content: serde_json::to_string_pretty(&cleaned)?,
-        changed,
+    // keys / the `hooks` object. `version` is untouched (preserved by design).
+    merge::flat_json_merge_outcome_uninstall(content, |doc| {
+        merge::flat_json_merge_uninstall(doc, SENTINEL_KEY)
     })
 }
 
