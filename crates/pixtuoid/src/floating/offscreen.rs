@@ -20,6 +20,17 @@ use pixtuoid_scene::floor::{FloorMeta, FloorSession, FrameInputs};
 use pixtuoid_scene::layout::{Layout, Size};
 use pixtuoid_scene::theme::Theme;
 
+/// Pack an `Rgb` into the softbuffer word format, `0x00RRGGBB` (XRGB) — the ONE
+/// definition of the floating painter's surface pixel format. The office blit
+/// (`window.rs`) and this label overlay write into the SAME surface, so they must
+/// agree on channel order / shift widths; a lone edit to one would color-swap the
+/// badges while the office renders correctly, with no compile error. (The test
+/// oracle re-derives the packing independently ON PURPOSE, so a bug here can't
+/// hide behind a shared helper — don't route it through this.)
+pub(crate) fn pack_xrgb(c: Rgb) -> u32 {
+    (c.r as u32) << 16 | (c.g as u32) << 8 | c.b as u32
+}
+
 /// Owns everything needed to render the live office to a reusable `RgbBuffer`
 /// across frames: a [`FloorSession`] — the scene-owned painter session (sim
 /// stores + buffer + coffee + chitchat + the dual eviction, written once).
@@ -194,7 +205,7 @@ pub fn paint_labels_into_surface(
                 LabelTone::Idle => theme.ui.label_idle,
             }
         };
-        let color = (rgb.r as u32) << 16 | (rgb.g as u32) << 8 | rgb.b as u32;
+        let color = pack_xrgb(rgb);
         // `\u{25cf}` (●) is in `scene::font`; `\u{25b8}` (▸) is NOT yet — the hovered branch
         // is dead today (`labels()` passes `hovered: None`, floating has no agent-hover). If
         // floating hover is ever wired, add a ▸ bitmap to `font::custom_glyph` first (its
@@ -227,6 +238,23 @@ pub fn paint_labels_into_surface(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pack_xrgb_is_0x00rrggbb() {
+        // Pin the surface pixel format (channel order + shift widths) so the two
+        // production packers (office blit + label overlay) can't re-drift. The
+        // per-tone label test below independently cross-checks it via `as_u32`.
+        assert_eq!(
+            pack_xrgb(Rgb {
+                r: 255,
+                g: 128,
+                b: 0
+            }),
+            0x00FF_8000
+        );
+        assert_eq!(pack_xrgb(Rgb { r: 0, g: 0, b: 0 }), 0x0000_0000);
+        assert_eq!(pack_xrgb(Rgb { r: 1, g: 2, b: 3 }), 0x0001_0203);
+    }
 
     #[test]
     fn renders_a_sized_nonblank_office_buffer() {

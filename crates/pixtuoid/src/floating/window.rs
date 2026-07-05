@@ -166,7 +166,7 @@ impl FloatingApp {
         let opx: Vec<u32> = office
             .as_slice()
             .iter()
-            .map(|p| (p.r as u32) << 16 | (p.g as u32) << 8 | p.b as u32)
+            .map(|p| super::offscreen::pack_xrgb(*p))
             .collect();
 
         let Some(surface) = self.surface.as_mut() else {
