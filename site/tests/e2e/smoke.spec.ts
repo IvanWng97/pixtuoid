@@ -584,14 +584,27 @@ test('VIBING channel: live office paints, is pause-gated, chips drive it', async
     .not.toBe(coralBefore);
   await expect(stormChip).toHaveClass(/is-active/); // weather group untouched by the theme retint
 
-  // Slider: scrubbing the time updates the readout and repaints the office.
+  // Slider: scrubbing the time updates the readout + aria-valuetext, flips the
+  // sun/moon `data-phase` via the ENGINE's `Office.is_day` boundary (the [5,20)
+  // sun window), and repaints the office. Exercises BOTH the day and the night
+  // branch — the drift-fix payload the sky-scrubber added.
+  const timeInput = stage.locator('[data-vibing-time]');
+  const timeWrap = stage.locator('.vibing__time');
+  const setHour = (h: number) =>
+    timeInput.evaluate((el, v) => {
+      (el as HTMLInputElement).value = String(v);
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    }, h);
   const beforeSlider = await vibingShot();
-  await page.locator('[data-vibing-time]').evaluate((el) => {
-    (el as HTMLInputElement).value = '6';
-    el.dispatchEvent(new Event('input', { bubbles: true }));
-  });
-  await expect(page.locator('[data-vibing-time-label]')).toHaveText('06:00');
+  await setHour(6); // 06:00 — inside the engine's [5,20) sun window → day
+  await expect(stage.locator('[data-vibing-time-label]')).toHaveText('06:00');
+  await expect(timeInput).toHaveAttribute('aria-valuetext', '06:00'); // SR hears "06:00", not "6"
+  await expect(timeWrap).toHaveAttribute('data-phase', 'day');
   await expect.poll(vibingShot, { timeout: 5_000 }).not.toBe(beforeSlider);
+  await setHour(22); // 22:00 — past sunset (≥ 20) → the moon branch
+  await expect(stage.locator('[data-vibing-time-label]')).toHaveText('22:00');
+  await expect(timeInput).toHaveAttribute('aria-valuetext', '22:00');
+  await expect(timeWrap).toHaveAttribute('data-phase', 'night');
 
   // Pause gate (WCAG 2.2.2, page-scoped): #office-pause freezes this SECOND
   // office too — a frozen canvas, byte-identical snapshots — and unpausing
