@@ -5,9 +5,11 @@ import { floorByNumber } from '../consts';
 const floor = floorByNumber(4);
 
 // Single source of truth: site/src/features.json — the SAME list the README
-// Features table is generated from (scripts/gen-readme.mjs), so the
-// two can't drift. The bento shows the items that carry `card` metadata; cards
-// deep-link into the Studio Wall channel that demos them live.
+// Features table is generated from (scripts/gen-readme.mjs), so the two can't
+// drift. The bento shows the items that carry `card` metadata. A card MAY
+// deep-link to the Studio Wall channel that demos it (`card.href`), but the 4F
+// "small touches" cards don't — their subjects aren't showcase channels — so no
+// current card carries an href and the JSON infers it away (hence the cast).
 const cells = features.flatMap((f) =>
   f.card
     ? [
@@ -15,7 +17,7 @@ const cells = features.flatMap((f) =>
           icon: f.icon,
           title: f.name,
           body: f.card.blurb ?? f.desc,
-          href: f.card.href,
+          href: (f.card as { blurb: string; href?: string }).href,
         },
       ]
     : []
