@@ -18,22 +18,35 @@ pub(in crate::pixel_painter) struct Ellipse {
     pub half_h: u16,
 }
 
-/// Blend `color` over an elliptical region with a quadratic falloff from the
-/// center (full `strength`) to the edge (0), so it reads as a soft round patch
-/// rather than a stamped oval. Shared by the ceiling light pool and the
-/// furniture shadow — same math, different tint.
-fn paint_ellipse_blend(buf: &mut RgbBuffer, e: Ellipse, strength: f32, color: Rgb) {
-    if e.half_w == 0 || e.half_h == 0 || strength <= 0.0 {
-        return;
-    }
-    let min_x = e.cx.saturating_sub(e.half_w);
-    let max_x = (e.cx + e.half_w).min(buf.width());
-    let min_y = e.cy.saturating_sub(e.half_h);
-    let max_y = (e.cy + e.half_h).min(buf.height());
-    for y in min_y..max_y {
-        for x in min_x..max_x {
-            let nx = (x as f32 - e.cx as f32) / e.half_w as f32;
-            let ny = (y as f32 - e.cy as f32) / e.half_h as f32;
+/// Float ellipse geometry for [`paint_radial_falloff`]: the paint bounds
+/// `[min..max)` per axis, plus the centre + per-axis normalizer — all `f32`, so a
+/// caller can centre on `(w-1)/2` (half-cell correct) as well as an integer cell.
+pub(in crate::pixel_painter) struct RadialFalloff {
+    pub min_x: u16,
+    pub max_x: u16,
+    pub min_y: u16,
+    pub max_y: u16,
+    pub cx: f32,
+    pub cy: f32,
+    pub rx_norm: f32,
+    pub ry_norm: f32,
+}
+
+/// Blend `color` over the region with a quadratic radial falloff from the centre
+/// (full `strength`) to the ellipse edge (`r² > 1` skipped), so it reads as a
+/// soft round patch rather than a stamped oval. THE one falloff-blend: the
+/// ceiling pool / furniture shadow (`paint_ellipse_blend`, integer centre) and
+/// the wall sun spot (`ambient::paint_sun_spot`, `(w-1)/2` float centre) share it.
+pub(in crate::pixel_painter) fn paint_radial_falloff(
+    buf: &mut RgbBuffer,
+    g: RadialFalloff,
+    strength: f32,
+    color: Rgb,
+) {
+    for y in g.min_y..g.max_y {
+        for x in g.min_x..g.max_x {
+            let nx = (x as f32 - g.cx) / g.rx_norm;
+            let ny = (y as f32 - g.cy) / g.ry_norm;
             let r2 = nx * nx + ny * ny;
             if r2 > 1.0 {
                 continue;
@@ -43,6 +56,32 @@ fn paint_ellipse_blend(buf: &mut RgbBuffer, e: Ellipse, strength: f32, color: Rg
             buf.put(x, y, blend_rgb(cur, color, t));
         }
     }
+}
+
+/// Blend `color` over an integer-centred ellipse — the ceiling pool + shadow.
+fn paint_ellipse_blend(buf: &mut RgbBuffer, e: Ellipse, strength: f32, color: Rgb) {
+    if e.half_w == 0 || e.half_h == 0 || strength <= 0.0 {
+        return;
+    }
+    let min_x = e.cx.saturating_sub(e.half_w);
+    let max_x = (e.cx + e.half_w).min(buf.width());
+    let min_y = e.cy.saturating_sub(e.half_h);
+    let max_y = (e.cy + e.half_h).min(buf.height());
+    paint_radial_falloff(
+        buf,
+        RadialFalloff {
+            min_x,
+            max_x,
+            min_y,
+            max_y,
+            cx: e.cx as f32,
+            cy: e.cy as f32,
+            rx_norm: e.half_w as f32,
+            ry_norm: e.half_h as f32,
+        },
+        strength,
+        color,
+    );
 }
 
 /// Elliptical "ceiling fluorescent" pool of pale warm light on the floor.

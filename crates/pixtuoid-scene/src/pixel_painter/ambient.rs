@@ -12,7 +12,8 @@ use pixtuoid_core::state::FloorLocalDeskIndex;
 
 use crate::layout::Layout;
 use crate::pixel_painter::background::{
-    beam_strength, sun_on_wall, window_spill_columns, TimeOfDayLook, WallSide,
+    beam_strength, paint_radial_falloff, sun_on_wall, window_spill_columns, RadialFalloff,
+    TimeOfDayLook, WallSide,
 };
 use crate::pixel_painter::palette::blend_rgb;
 use crate::pixel_painter::PaintCtx;
@@ -299,9 +300,7 @@ pub(super) fn paint_sun_spot(
 
     // The top wall band is the visible window wall; East/West sun spots
     // project onto the outer 1-px column at the left/right edge of that band.
-    let wall_band_h = layout
-        .top_margin
-        .saturating_sub(crate::layout::WALL_BAND_TO_TOP_MARGIN);
+    let wall_band_h = layout.wall_band_h();
     if wall_band_h == 0 {
         return;
     }
@@ -338,20 +337,23 @@ pub(super) fn paint_sun_spot(
     let cy = ry as f32 + (h.saturating_sub(1)) as f32 * 0.5;
     let rx_norm = ((w.saturating_sub(1)) as f32 * 0.5).max(1.0);
     let ry_norm = ((h.saturating_sub(1)) as f32 * 0.5).max(1.0);
-    for y in ry..max_y {
-        for x in rx..max_x {
-            // Quadratic radial falloff so the spot reads round, not boxy.
-            let nx = (x as f32 - cx) / rx_norm;
-            let ny = (y as f32 - cy) / ry_norm;
-            let r2 = nx * nx + ny * ny;
-            if r2 > 1.0 {
-                continue;
-            }
-            let t = (1.0 - r2) * tint_strength;
-            let cur = buf.get(x, y);
-            buf.put(x, y, blend_rgb(cur, color, t));
-        }
-    }
+    // Quadratic radial falloff (shared with the ceiling pool / shadow) so the
+    // spot reads round, not boxy.
+    paint_radial_falloff(
+        buf,
+        RadialFalloff {
+            min_x: rx,
+            max_x,
+            min_y: ry,
+            max_y,
+            cx,
+            cy,
+            rx_norm,
+            ry_norm,
+        },
+        tint_strength,
+        color,
+    );
 }
 
 #[cfg(test)]

@@ -13,7 +13,7 @@ mod sky;
 // Re-export everything the parent pixel_painter/mod.rs imports.
 pub(super) use lighting::{
     paint_ceiling_pool, paint_clock, paint_corridor_runner, paint_floor_lamp_halo,
-    paint_neon_panel, paint_shadow, Ellipse,
+    paint_neon_panel, paint_radial_falloff, paint_shadow, Ellipse, RadialFalloff,
 };
 pub(super) use sky::{
     beam_strength, daylight_floor_overlay, dim_floor_overlay, hour_is_day, set_weather_override,
@@ -260,9 +260,7 @@ fn skyline_haze(w: Weather) -> Option<(Rgb, f32)> {
 /// guard in `paint_floor_and_walls`. Used by `paint_dust_motes` so the
 /// motes drift through the same warm spill the floor pass paints.
 pub(in crate::pixel_painter) fn window_spill_columns(layout: &Layout) -> Vec<SunbeamColumn> {
-    let top_wall_h = layout
-        .top_margin
-        .saturating_sub(crate::layout::WALL_BAND_TO_TOP_MARGIN);
+    let top_wall_h = layout.wall_band_h();
     let skip = layout.door.map(|d| (d.x, d.x + ELEVATOR_W));
     let mut out = Vec::new();
     let mut x = 3u16;

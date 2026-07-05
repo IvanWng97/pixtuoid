@@ -344,10 +344,7 @@ fn paint_frame(
     let look = time_of_day_look(ctx.now, ctx.theme);
     // Wall band height tracks layout.top_margin (which is buf_h/4 with
     // a floor) — leaves a 4-px buffer between wall trim and cubicles.
-    let top_wall_h = ctx
-        .layout
-        .top_margin
-        .saturating_sub(crate::layout::WALL_BAND_TO_TOP_MARGIN);
+    let top_wall_h = ctx.layout.wall_band_h();
     // The elevator door replaces the rightmost window — pass its x-range
     // so `paint_floor_and_walls` skips drawing a window that would
     // otherwise bleed through behind the elevator frame.

@@ -159,11 +159,7 @@ fn exec_shim_ref(command: &str) -> ShimRef {
         .map(|(p, _)| p)
         .unwrap_or(command)
         .trim();
-    let unq = if path.len() >= 2 && path.starts_with('\'') && path.ends_with('\'') {
-        crate::install::verify::posix_unquote(path)
-    } else {
-        path.to_string()
-    };
+    let unq = crate::install::verify::posix_unquote_if_quoted(path);
     if unq.is_empty() {
         ShimRef::Unknown
     } else {

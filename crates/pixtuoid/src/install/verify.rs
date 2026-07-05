@@ -244,10 +244,40 @@ pub(crate) fn posix_unquote(span: &str) -> String {
     out
 }
 
+/// If `s` is a whole POSIX single-quoted span (`'…'`, length ≥ 2), reverse the
+/// quoting via [`posix_unquote`]; otherwise return it verbatim. THE one
+/// "whole-span quoted → unquote else literal" decision — the exec-form decoders
+/// (`claude`, `hermes`) route through it so the `len() >= 2` guard (a lone `'` is
+/// NOT a quoted span, and slicing it would strip to nothing) can't drift between
+/// them. A half-quoted `'/opt/x` (no close) is a literal, not unquoted.
+pub(crate) fn posix_unquote_if_quoted(s: &str) -> String {
+    if s.len() >= 2 && s.starts_with('\'') && s.ends_with('\'') {
+        posix_unquote(s)
+    } else {
+        s.to_string()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn posix_unquote_if_quoted_guards_len_and_pairing() {
+        // A whole single-quoted span is unquoted, incl. an embedded `'\''`.
+        assert_eq!(posix_unquote_if_quoted("'/opt/hook'"), "/opt/hook");
+        assert_eq!(posix_unquote_if_quoted(r"'/U/O'\''B/hook'"), "/U/O'B/hook");
+        // Half-quoted (open, no close) → literal, not unquoted.
+        assert_eq!(posix_unquote_if_quoted("'/opt/hook"), "'/opt/hook");
+        // A LONE `'` (len 1) is NOT a quoted span — the `len() >= 2` guard keeps
+        // it literal instead of slicing to "" (the claude/hermes guard drift this
+        // consolidation fixes: claude previously lacked the length check).
+        assert_eq!(posix_unquote_if_quoted("'"), "'");
+        // Empty + plain unquoted pass through verbatim.
+        assert_eq!(posix_unquote_if_quoted(""), "");
+        assert_eq!(posix_unquote_if_quoted("/plain/path"), "/plain/path");
+    }
 
     #[test]
     fn shell_shim_ref_unix_env_prefix_form() {

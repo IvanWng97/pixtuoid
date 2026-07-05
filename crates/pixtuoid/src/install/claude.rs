@@ -124,18 +124,15 @@ fn claude_shim_ref(entry: &Value) -> crate::install::verify::ShimRef {
             let c = c.trim();
             if c == "pixtuoid-hook" {
                 ShimRef::BareName
-            } else if c.starts_with('\'') && c.ends_with('\'') {
-                // Unix explicit form: a `shell_single_quote`'d absolute path. Reverse
-                // the POSIX escaping via the SHARED `posix_unquote` — a naive
-                // `trim_matches('\'')` mangles an embedded `'\''` (an apostrophe in the
-                // path), false-flagging the install "broken" (the R0620-364-01
-                // mis-decode class that the shared `shell_shim_ref` already avoids).
-                ShimRef::Absolute(std::path::PathBuf::from(
-                    crate::install::verify::posix_unquote(c),
-                ))
             } else {
-                // Windows exec form (bare absolute `.exe`) or an unquoted path.
-                ShimRef::Absolute(std::path::PathBuf::from(c))
+                // Unix explicit form: a `shell_single_quote`'d absolute path —
+                // reverse the POSIX escaping via the SHARED `posix_unquote_if_quoted`
+                // (a naive `trim_matches('\'')` mangles an embedded `'\''`, the
+                // R0620-364-01 mis-decode class). A Windows exec-form bare `.exe`,
+                // an unquoted path, or a half-quoted string passes through literal.
+                ShimRef::Absolute(std::path::PathBuf::from(
+                    crate::install::verify::posix_unquote_if_quoted(c),
+                ))
             }
         }
     }

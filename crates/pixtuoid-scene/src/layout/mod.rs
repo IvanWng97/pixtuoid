@@ -308,6 +308,15 @@ impl SceneLayout {
     pub fn home_desk(&self, i: FloorLocalDeskIndex) -> Option<Point> {
         self.home_desks.get(i.0).copied()
     }
+
+    /// The visible top window-wall band height in px — the wall strip between the
+    /// buffer top and where the floor begins, `top_margin - WALL_BAND_TO_TOP_MARGIN`
+    /// (the same quantity `compute` names `top_wall_h` at construction; saturates
+    /// to 0 on a degenerate tiny margin). Post-construction render sites (wall sun
+    /// spot, window spill, weather) read it here so the derivation lives once.
+    pub fn wall_band_h(&self) -> u16 {
+        self.top_margin.saturating_sub(WALL_BAND_TO_TOP_MARGIN)
+    }
 }
 
 #[cfg(test)]
