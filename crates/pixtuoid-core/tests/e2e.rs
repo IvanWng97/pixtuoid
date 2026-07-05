@@ -122,14 +122,14 @@ fn scripted_timeline_drives_scene_through_states() {
     );
 }
 
-/// Exercise the `Renderer` trait impl + the `count()` convenience wrapper
+/// Exercise the inherent `render()` method + the `count()` convenience wrapper
 /// directly — the scripted timeline above records via the inherent `record()`
-/// helper, so the trait-signature path and `count()` are otherwise uncovered.
+/// helper, so the pack-taking `render()` path and `count()` are otherwise uncovered.
 #[test]
-fn test_renderer_trait_render_increments_count() {
+fn test_renderer_render_increments_count() {
     let mut r = TestRenderer::new();
     let scene = SceneState::uniform(4);
-    // The trait impl ignores the pack, so any in-memory pack satisfies it.
+    // `render()` ignores the pack, so any in-memory pack satisfies it.
     let pack = load_pack_from_strings(
         "[pack]\nname=\"x\"\nversion=\"1\"\n\
          [palette]\n\"A\"=\"#010203\"\n\
@@ -140,5 +140,5 @@ fn test_renderer_trait_render_increments_count() {
 
     assert_eq!(r.count(), 0);
     r.render(&scene, &pack, SystemTime::now()).unwrap();
-    assert_eq!(r.count(), 1, "trait render must record one snapshot");
+    assert_eq!(r.count(), 1, "render must record one snapshot");
 }
