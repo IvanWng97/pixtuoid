@@ -193,6 +193,7 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
     const vibingCanvas = vibingStage && vibingStage.querySelector('[data-vibing-canvas]');
     const vibingTime = vibingStage && vibingStage.querySelector('[data-vibing-time]');
     const vibingTimeLabel = vibingStage && vibingStage.querySelector('[data-vibing-time-label]');
+    const vibingTimeWrap = vibingStage && vibingStage.querySelector('.vibing__time');
     const vibingWeather =
       vibingStage && vibingStage.querySelector('.stage__osd[data-group="weather"]');
     const vibingTheme = vibingStage && vibingStage.querySelector('.stage__osd[data-group="theme"]');
@@ -207,6 +208,14 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
     // initial hour — no second hardcoded "18" to drift from it.
     let scrubHour = vibingTime ? parseFloat(vibingTime.value) : 18;
     let vStart = Date.now();
+
+    // sky-scrubber phase: the thumb is a sun by day, a moon after dusk (sun up
+    // ~06:00–19:00) — set on the wrapper so the thumb + clock glow switch
+    // warm↔cool with the scrubbed hour.
+    function setSliderPhase(h) {
+      if (vibingTimeWrap) vibingTimeWrap.dataset.phase = h < 6 || h >= 19 ? 'night' : 'day';
+    }
+    setSliderPhase(scrubHour);
 
     function anchorForHour(h) {
       const d = new Date();
@@ -294,6 +303,7 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
     if (vibingTime) {
       vibingTime.addEventListener('input', function () {
         scrubHour = parseFloat(vibingTime.value);
+        setSliderPhase(scrubHour);
         vStart = Date.now(); // re-anchor: the office keeps living at this hour
         if (vibingTimeLabel) {
           // Slider max is 24 — wrap the hour so the top of the range reads 00:00,

@@ -110,19 +110,29 @@ function defaultVariant(g: EnrichedVariantGroup): ShowcaseVariant | undefined {
     isLive ? (
       <>
         {c.timeSlider && (
-          <label class="vibing__time">
-            time
-            <input
-              type="range"
-              min="0"
-              max="24"
-              step="0.5"
-              value="18"
-              data-vibing-time
-              aria-label="time of day"
-            />
-            <span data-vibing-time-label>18:00</span>
-          </label>
+          <div class="vibing__time" data-phase="day">
+            <div class="vibing__sky">
+              <input
+                type="range"
+                min="0"
+                max="24"
+                step="0.5"
+                value="18"
+                data-vibing-time
+                aria-label="time of day"
+              />
+              <div class="vibing__ticks" aria-hidden="true">
+                <span>00</span>
+                <span>06</span>
+                <span>12</span>
+                <span>18</span>
+                <span>24</span>
+              </div>
+            </div>
+            <span class="vibing__clock" data-vibing-time-label>
+              18:00
+            </span>
+          </div>
         )}
         {c.groups.map((g: EnrichedVariantGroup) => {
           const def = defaultVariant(g);
@@ -213,24 +223,126 @@ function defaultVariant(g: EnrichedVariantGroup): ShowcaseVariant | undefined {
        the poster underneath until the controller (Task 8) starts painting */
     background: transparent;
   }
+  /* the VIBING time control is a "sky scrubber": the track IS a full day of
+     sky (00→24h), and the thumb is a glowing sun that becomes a cool moon after
+     dusk. Phase (day/night) is set on the wrapper by Showcase.astro's slider
+     handler and swaps its four --thumb-… and --clock-glow vars below — the
+     webkit AND moz pseudo-elements both read those vars, so one phase flip restyles
+     the thumb + clock without touching each pseudo. (webkit/moz pseudo rules
+     MUST stay split — a browser drops a whole rule that lists a pseudo it
+     doesn't know.) */
   .vibing__time {
     display: flex;
     align-items: center;
-    gap: 0.6rem;
-    padding: 0.8rem 0.9rem 0;
-    font-family: var(--font-mono);
-    font-size: 0.84rem;
-    font-weight: 700;
-    color: var(--fg-muted);
+    gap: 0.9rem;
+    padding: 0.9rem 0.9rem 0.2rem;
+    --sky: linear-gradient(
+      90deg,
+      #0a0e24 0%,
+      #172046 18%,
+      #d9744f 27%,
+      #9cc3e6 44%,
+      #bfe0f2 50%,
+      #9cc3e6 58%,
+      #e0844a 74%,
+      #6b3f66 82%,
+      #141a38 90%,
+      #0a0e24 100%
+    );
+    --thumb-fill: radial-gradient(
+      circle at 38% 34%,
+      #fff7dc 0%,
+      #ffd873 42%,
+      #f6a63f 78%,
+      #e8863a 100%
+    );
+    --thumb-glow: 0 0 9px 2px rgba(255, 200, 90, 0.85), 0 0 20px 6px rgba(240, 150, 60, 0.45);
+    --thumb-ring: rgba(255, 240, 200, 0.7);
+    --clock-glow: 0 0 10px rgba(246, 166, 63, 0.55);
+  }
+  .vibing__time[data-phase='night'] {
+    --thumb-fill: radial-gradient(circle at 40% 36%, #f4f7ff 0%, #d3ddf6 48%, #97a2c8 100%);
+    --thumb-glow: 0 0 8px 2px rgba(200, 212, 248, 0.7), 0 0 18px 5px rgba(120, 132, 180, 0.4);
+    --thumb-ring: rgba(230, 236, 255, 0.7);
+    --clock-glow: 0 0 10px rgba(150, 162, 200, 0.6);
+  }
+  .vibing__sky {
+    flex: 1;
+    min-width: 0;
   }
   .vibing__time input[type='range'] {
-    flex: 1;
-    accent-color: var(--accent);
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 16px;
+    background: transparent;
+    cursor: pointer;
   }
-  .vibing__time span {
-    min-width: 3.4em;
+  .vibing__time input[type='range']::-webkit-slider-runnable-track {
+    height: 16px;
+    border-radius: 999px;
+    border: 1px solid var(--border-strong);
+    box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.45);
+    background: var(--sky);
+  }
+  .vibing__time input[type='range']::-moz-range-track {
+    height: 16px;
+    border-radius: 999px;
+    border: 1px solid var(--border-strong);
+    box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.45);
+    background: var(--sky);
+  }
+  .vibing__time input[type='range']::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 24px;
+    height: 24px;
+    margin-top: -4px; /* center a 24px thumb on the 16px track */
+    border-radius: 50%;
+    border: 1px solid var(--thumb-ring);
+    background: var(--thumb-fill);
+    box-shadow: var(--thumb-glow);
+    transition: box-shadow 0.2s ease;
+  }
+  .vibing__time input[type='range']::-moz-range-thumb {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    border: 1px solid var(--thumb-ring);
+    background: var(--thumb-fill);
+    box-shadow: var(--thumb-glow);
+  }
+  .vibing__time input[type='range']:focus-visible::-webkit-slider-thumb {
+    box-shadow:
+      0 0 0 3px var(--bg),
+      0 0 0 5px var(--accent),
+      var(--thumb-glow);
+  }
+  .vibing__time input[type='range']:focus-visible::-moz-range-thumb {
+    box-shadow:
+      0 0 0 3px var(--bg),
+      0 0 0 5px var(--accent);
+  }
+  .vibing__ticks {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 0.35rem;
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    letter-spacing: 0.08em;
+    color: var(--fg-muted);
+    opacity: 0.7;
+  }
+  .vibing__clock {
+    min-width: 4.1em;
     text-align: right;
+    font-family: var(--font-mono);
+    font-size: 1.15rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    font-variant-numeric: tabular-nums;
     color: var(--fg);
+    text-shadow: var(--clock-glow);
   }
   .stage__osd {
     display: flex;
