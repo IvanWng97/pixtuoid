@@ -101,6 +101,12 @@ mod tests {
         assert!(r.reaches(Point { x: 4, y: 4 }));
         assert!(r.reaches(Point { x: 60, y: 60 }));
         assert!(r.reaches(Point { x: 32, y: 8 }));
+        // Edge cells (column 0, row 0) must be reachable from an interior seed —
+        // this pins the BFS neighbor boundary guard (`nx < 0 || ny < 0`). A
+        // `< → ==` / `<= ` mutant drops the top/left coarse cells from the
+        // reachable set, which the interior-only asserts above cannot catch.
+        assert!(r.reaches(Point { x: 0, y: 32 }), "column-0 cell reachable");
+        assert!(r.reaches(Point { x: 32, y: 0 }), "row-0 cell reachable");
     }
 
     #[test]

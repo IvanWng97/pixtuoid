@@ -542,6 +542,13 @@ mod tests {
 
     #[test]
     fn install_renders_plugin_with_baked_shim_path_and_sentinel() {
+        // Resolves the OpenClaw state dir from HOME/USERPROFILE — serialize
+        // against config.rs's env-mutating tests (they null both in a window that
+        // would else make home_first_dir() return None → unwrap panic under plain
+        // `cargo test`; nextest's per-process isolation masks it).
+        let _env = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let arts = plugin_artifacts(Path::new("/opt/bin/pixtuoid-hook")).unwrap();
         assert_eq!(arts.len(), 3, "manifest + package.json + index.js");
         let index = &arts
@@ -566,6 +573,9 @@ mod tests {
 
     #[test]
     fn merge_install_adds_load_path_enabled_and_the_grant() {
+        let _env = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let out = merge_install("{}", "/opt/bin/pixtuoid-hook").unwrap();
         assert!(out.changed);
         let v: Value = serde_json::from_str(&out.content).unwrap();
@@ -593,6 +603,9 @@ mod tests {
 
     #[test]
     fn merge_install_is_idempotent() {
+        let _env = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let a = merge_install("{}", "/x").unwrap();
         let b = merge_install(&a.content, "/x").unwrap();
         assert!(!b.changed, "re-install of the same state is a no-op");
@@ -600,6 +613,9 @@ mod tests {
 
     #[test]
     fn merge_install_preserves_foreign_config() {
+        let _env = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let foreign = r#"{"gateway":{"mode":"local"},"plugins":{"entries":{"anthropic":{"enabled":true}},"load":{"paths":["/some/other/plugin"]}}}"#;
         let out = merge_install(foreign, "/x").unwrap();
         let v: Value = serde_json::from_str(&out.content).unwrap();
@@ -617,6 +633,9 @@ mod tests {
 
     #[test]
     fn uninstall_revokes_the_grant_but_keeps_foreign_entries() {
+        let _env = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let installed = merge_install(
             r#"{"plugins":{"entries":{"anthropic":{"enabled":true}}}}"#,
             "/x",
@@ -645,6 +664,9 @@ mod tests {
 
     #[test]
     fn uninstall_of_unmanaged_config_is_a_no_op() {
+        let _env = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         assert!(!merge_uninstall("{}").unwrap().changed);
         assert!(!merge_uninstall("").unwrap().changed);
         assert!(
@@ -656,6 +678,9 @@ mod tests {
 
     #[test]
     fn install_then_uninstall_round_trips() {
+        let _env = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let installed = merge_install("{}", "/x").unwrap();
         let removed = merge_uninstall(&installed.content).unwrap();
         let v: Value = serde_json::from_str(&removed.content).unwrap();
@@ -664,6 +689,9 @@ mod tests {
 
     #[test]
     fn empty_content_is_treated_as_empty_document() {
+        let _env = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let out = merge_install("", "/x").unwrap();
         assert!(out.changed);
         assert!(serde_json::from_str::<Value>(&out.content).is_ok());
