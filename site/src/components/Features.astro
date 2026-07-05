@@ -19,7 +19,7 @@ type Feature = {
 // Single source of truth: site/src/features.json — the SAME list the README
 // Features table is generated from (scripts/gen-readme.mjs), so the two can't drift.
 // The bento shows the items that carry `card` metadata.
-const features = featuresData as Feature[];
+const features: Feature[] = featuresData;
 const cells = features.flatMap((f) =>
   f.card
     ? [
