@@ -503,17 +503,27 @@ mod tests {
     #[test]
     fn character_sprite_w_matches_the_embedded_pack() {
         let pack = test_default_pack();
-        let w = pack
+        let frame = pack
             .animation("standing")
             .and_then(|a| a.frames.first())
-            .expect("embedded pack carries a standing pose")
-            .width();
+            .expect("embedded pack carries a standing pose");
+        let (w, h) = (frame.width(), frame.height());
         assert_eq!(
             w,
             crate::layout::CHARACTER_SPRITE_W,
             "embedded 'standing' sprite is {w}px wide but CHARACTER_SPRITE_W is {} — \
              update the const so hit-test/decor/label geometry tracks the pack",
             crate::layout::CHARACTER_SPRITE_W
+        );
+        // The px sprite is `H_CELLS` half-block rows tall (2 px per cell); pin
+        // the cell const too so the hit-test box height can't drift from the pack.
+        assert_eq!(
+            h,
+            crate::layout::CHARACTER_SPRITE_H_CELLS * 2,
+            "embedded 'standing' sprite is {h}px tall but CHARACTER_SPRITE_H_CELLS \
+             ({}) implies {}px — update the const so the hit-test box tracks the pack",
+            crate::layout::CHARACTER_SPRITE_H_CELLS,
+            crate::layout::CHARACTER_SPRITE_H_CELLS * 2
         );
     }
 }
