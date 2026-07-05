@@ -89,6 +89,7 @@ def test_source_parsers_find_nonempty_well_shaped_sets() -> None:
         (d.read_opencode_events, r"^[a-z][a-z0-9._]*$", 2),
         (d.read_copilot_events, r"^[a-z][a-z0-9._]*$", 2),
         (d.read_cursor_events, r"^[a-zA-Z]\w+$", 2),
+        (d.read_hermes_events, r"^[a-z][a-z_]*$", 2),
     ]
     for reader, shape, floor in cases:
         name = reader.__name__

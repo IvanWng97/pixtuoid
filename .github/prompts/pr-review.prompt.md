@@ -85,7 +85,16 @@ given change/tree, say so, don't skip it.
 - **(B) Design-debt** — duplication/DRY (N implementations of one concept —
   weight by DIVERGENCE risk, not line count); god-object / oversized module with
   a clean split; dead code / legacy remnant; leaky or missing abstraction;
-  inconsistent pattern where one way is clearly the house style; misleading
+  correlated-state bundling — N fields that ALWAYS change together (a phase + its
+  clock + its profile; a liveness axis + its run-set; a decoder + the extractor it
+  pairs with) belong in ONE struct/newtype so an illegal combination is
+  UNREPRESENTABLE, not merely co-maintained; the recurring win here is exactly
+  this (`WanderState` folded 9 flat wander fields; `DaemonPresence` STORES the
+  orthogonal axes + PROJECTS `Busy` from the run-set so a 4-site hand-sync can't
+  drift; the `Transcript` bundle makes the line-decoder↔cwd-extractor pairing
+  structural; the desk-index newtypes) — a manual N-site sync, or a bool/enum pair
+  that can contradict, is the smell; inconsistent pattern where one way is clearly
+  the house style; misleading
   identifier — a name that lies about what it holds/does (ask: would a human
   reading the logic be misled? one edit from an unrelated sibling in the same
   struct, `meeting_rooms` vs `meeting_room`; a name inverting documented
@@ -101,7 +110,11 @@ given change/tree, say so, don't skip it.
   post-merge stale-`line_decoder` MEDIUM and #449's beautify-SKILL recurrence
   were both hidden-dir misses); wire-format / upstream (a decoder or drift-watch
   rule vs the real upstream shape; a new source with no drift-watch row;
-  install-path resolvers are an upstream surface too, not just decoders);
+  install-path resolvers are an upstream surface too, not just decoders — and an
+  AUDIT sweeps EVERY registered source, not just a changed one: each source's
+  decoder vs its live upstream wire shape + a PRESENT, ALIVE `check_upstream_drift`
+  row, since the watch itself fail-open behind its own self-test false-greened two
+  sources through the wrong decoders for weeks, #454);
   version-lockstep (Cargo.toml versions, MSRV, the "N sites must stay in sync"
   invariants; version ADJUDICATION — the contract half semver-checks can't see
   (CONTRIBUTING.md "Releasing": patch=fix/polish, minor=feature OR breaking):
@@ -109,8 +122,13 @@ given change/tree, say so, don't skip it.
   does the number bump in THIS PR, ride the already-open unreleased minor, or
   stay put? over-bumping a break the open minor already covers is the same
   finding — the #471 premature-0.14.0 catch; Lens 2 states this call explicitly
-  in its verdict); comment-rot; manifest-bridge (a `site/src/*.json` / generated
-  schema vs its Rust source of truth).
+  in its verdict); comment-rot (a comment that now says something FALSE about the
+  code) AND comment-value (the house rule "No comments unless WHY": a comment
+  restating WHAT the code plainly does, or narrating an obvious step, is noise to
+  cut — only a non-obvious WHY earns its place: a workaround, a load-bearing
+  constraint, a surprising invariant; a NEW block of `//` narration added by the
+  diff that a reader could infer from the code is the smell); manifest-bridge (a
+  `site/src/*.json` / generated schema vs its Rust source of truth).
 - **(D) Quality + tooling** — test-coverage gaps (changed/existing code with no
   exercising test); mutation-teeth (assertions that survive the mutation);
   isolation & flakiness (real-state writes, wall-clock/order nondeterminism,
@@ -125,7 +143,14 @@ given change/tree, say so, don't skip it.
   watcher was dead for weeks behind its own self-test and decoder_fuzz
   false-greened two sources through the wrong decoders, #454; the security cron
   silently red, #440); dependency/supply-chain (unmaintained/droppable deps,
-  duplicate versions, feature-flag hygiene).
+  duplicate versions, feature-flag hygiene; FRESHNESS — a dep meaningfully behind
+  its latest release misses upstream bug/security fixes [`cargo outdated`], a
+  DISTINCT axis from the daily `cargo deny check advisories` RustSec gate (that
+  catches KNOWN vulns, not staleness); and the `deny.toml [advisories]` IGNORE
+  list is itself audited — every ignored `RUSTSEC-*` id is re-justified or
+  dropped, since a stale ignore silently hiding a now-fixable advisory is the
+  fail-open form; an upstream-blocked dedup with no clean bump is TRACKED not
+  churned — #486).
 
 ## The two populations (why scope matters)
 
@@ -442,7 +467,12 @@ and the fan-out change. Shape (prescribed; degradable to sequential/parallel
      theme+misc; binary: install / runtime+tui / widgets+floating; hook+web+
      tooling; site + integrations/raycast — the non-Rust consumers, with site
      pages RENDERED per the public-facing trigger, not source-read only —
-     #453 proved this surface is structurally unaudited otherwise).
+     #453 proved this surface is structurally unaudited otherwise. This finder
+     carries its OWN checklist: the `--json` / `SourceStatus` / `OutcomeRow` wire
+     contract parity (both consumers vs the Rust source of truth + the committed
+     schemas), hand-CSP soundness, a11y, `knip` dead-code, the site/raycast npm
+     deps' freshness, and `just site-check` / `site-e2e` gate liveness — the
+     cargo-centric sweeps below don't reach a Node project).
    - *Whole-tree specialist sweeps*, one FACTOR each across all crates —
      arch-invariants, concurrency/liveness seams, security, drift — the
      aggregate-only lenses a per-subsystem finder structurally can't run.

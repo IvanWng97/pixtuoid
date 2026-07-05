@@ -59,14 +59,27 @@ pub fn decode_ag_line(transcript_path: &str, source: &str, v: Value) -> Result<V
                 out.push(decode_ag_tool_call(agent_id, name, args, step_index, i));
             }
         }
-    } else if step_type != "USER_INPUT" && step_type != "CONVERSATION_HISTORY" && step_index > 0 {
-        // End the first tool from the previous step. Multi-tool steps have
-        // their remaining starts aged out by the reducer's pending_idle
-        // debounce, but the primary (i=0) start always gets a matching end.
-        out.push(AgentEvent::ActivityEnd {
-            agent_id,
-            tool_use_id: Some(format!("ag-{}-0", step_index - 1)),
-        });
+    } else {
+        // Antigravity is a closed Google IDE with no fetchable transcript
+        // schema, so the CI upstream-drift watch (defense #4) can't cover it —
+        // defense #2 (in-code breadcrumbs) is the ONLY currency backstop. A step
+        // carrying `tool_calls` under a type that ISN'T `PLANNER_RESPONSE` is the
+        // signal that upstream RENAMED that step (the `missing_field` breadcrumb
+        // above sits inside the now-unreached arm, so a rename would otherwise
+        // go silent — sprites blank with no drift trace). Result/input steps
+        // carry no `tool_calls`, so this can't false-positive on them.
+        if matches!(obj.get("tool_calls"), Some(Value::Array(a)) if !a.is_empty()) {
+            crate::source::drift::unknown_event(SOURCE_NAME, step_type);
+        }
+        if step_type != "USER_INPUT" && step_type != "CONVERSATION_HISTORY" && step_index > 0 {
+            // End the first tool from the previous step. Multi-tool steps have
+            // their remaining starts aged out by the reducer's pending_idle
+            // debounce, but the primary (i=0) start always gets a matching end.
+            out.push(AgentEvent::ActivityEnd {
+                agent_id,
+                tool_use_id: Some(format!("ag-{}-0", step_index - 1)),
+            });
+        }
     }
 
     Ok(out)
@@ -184,6 +197,34 @@ mod tests {
                 assert_eq!(tool_use_id.as_deref(), Some("ag-1-0"));
             }
             other => panic!("expected ActivityEnd, got {other:?}"),
+        }
+    }
+
+    /// If upstream RENAMES `PLANNER_RESPONSE`, a step still carrying `tool_calls`
+    /// arrives under an unrecognized type. It must SAFE-DEGRADE: the tool starts
+    /// are NOT decoded (no spurious unmatched-start sticking the slot Active),
+    /// only the previous step's primary end fires — and the drift `unknown_event`
+    /// breadcrumb path (defense #2, the sole currency backstop for AG's
+    /// schema-less format) is exercised on the way. Guards the else-branch
+    /// restructure that added that breadcrumb without changing the event output.
+    #[test]
+    fn renamed_planner_step_with_tool_calls_safe_degrades_to_end_only() {
+        let v = serde_json::json!({
+            "type": "PLANNER_REPLY", // hypothetical upstream rename of PLANNER_RESPONSE
+            "step_index": 2,
+            "tool_calls": [ { "name": "read_file", "args": {} } ],
+        });
+        let out = decode_ag_line("/x/t.jsonl", SOURCE_NAME, v).unwrap();
+        assert_eq!(
+            out.len(),
+            1,
+            "a renamed tool-call step must mint NO start, only the prev end: {out:?}"
+        );
+        match &out[0] {
+            AgentEvent::ActivityEnd { tool_use_id, .. } => {
+                assert_eq!(tool_use_id.as_deref(), Some("ag-1-0"));
+            }
+            other => panic!("expected ActivityEnd only, got {other:?}"),
         }
     }
 
