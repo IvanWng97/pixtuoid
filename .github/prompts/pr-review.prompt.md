@@ -130,7 +130,14 @@ given change/tree, say so, don't skip it.
   diff that a reader could infer from the code is the smell); manifest-bridge (a
   `site/src/*.json` / generated schema vs its Rust source of truth).
 - **(D) Quality + tooling** — test-coverage gaps (changed/existing code with no
-  exercising test); mutation-teeth (assertions that survive the mutation);
+  exercising test); mutation-teeth (assertions that survive the mutation — and a
+  PROSE CLAIM that a mutant is EQUIVALENT or KILLED is not teeth, it's an
+  unverified assertion: pin an equivalent in `.cargo/mutants.toml`'s `exclude_re`
+  [mechanically re-checked every run] or kill it with a real test, NEVER trust a
+  code comment; arc #2's mutation run found 2 live reducer survivors masked by
+  exactly such comments — one citing a "residuals note in tests" that didn't
+  exist, one whose "this kills the mutant" assertion couldn't distinguish the
+  branches [`duplicate_root_session_start_..._resurrect` + `parent_waiting_..._ends_a_tool` fixed both]);
   isolation & flakiness (real-state writes, wall-clock/order nondeterminism,
   `TEST_ENV_LOCK`, snapshot determinism); CI/build (gate coverage, path-filter
   holes, toolchain skew); gate-teeth & gate liveness (can this check actually
