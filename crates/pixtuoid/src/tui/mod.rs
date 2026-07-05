@@ -434,6 +434,10 @@ pub fn setup_terminal() -> Result<Term> {
     // roll the terminal all the way back before propagating. Otherwise the error
     // path strands the user's shell in raw mode (no echo) and/or the alt screen.
     if let Err(e) = execute!(out, EnterAlternateScreen, EnableMouseCapture) {
+        // Mirror the teardown order in case EnterAlternateScreen took effect
+        // before EnableMouseCapture failed — leave the alt screen too, not just
+        // raw mode, so the rollback is truly "all the way back".
+        let _ = execute!(out, DisableMouseCapture, LeaveAlternateScreen);
         let _ = disable_raw_mode();
         return Err(e.into());
     }

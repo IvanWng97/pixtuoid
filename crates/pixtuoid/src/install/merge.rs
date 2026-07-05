@@ -13,7 +13,11 @@
 //!   - `bake_hook_path` — the code-artifact plugin templater (opencode/openclaw),
 //!   - `flat_json_merge_install` / `flat_json_merge_uninstall` — the sentinel-keyed
 //!     per-event array merge Reasonix/Cursor/Claude share (the entry SHAPE rides in
-//!     the caller's `make_entry` closure, so a nested Claude entry fits too).
+//!     the caller's `make_entry` closure, so a nested Claude entry fits too),
+//!   - `flat_json_merge_outcome_install`/`_uninstall` + `toml_merge_outcome` — the
+//!     parse + non-object guard + semantic-`changed` + serialize `MergeOutcome`
+//!     wrappers every target delegates to (the guard lives in ONE place here so a
+//!     future flat-JSON target can't forget it and silently drop the user's doc).
 
 use crate::install::target::MergeOutcome;
 use serde_json::{json, Map, Value};

@@ -64,7 +64,7 @@ src/
 │                       the pid-start identity check + cc_sessions_dir),
 │                       reasonix.rs / codewhale.rs / opencode.rs / cursor.rs / hermes.rs (HOOK-ONLY: hook-payload decoder,
 │                       no Source impl — no watchable JSONL; codewhale is cwd-keyed because its session_id is
-│                       inconsistent across events, opencode is ses_*-keyed via a TS plugin, cursor is session_id-keyed, hermes is cwd-keyed),
+│                       inconsistent across events, opencode is ses_*-keyed via a TS plugin, cursor + hermes are session_id-keyed (hermes with a cwd fallback)),
 │                       manager.rs (SourceManager::spawn / with_source / spawn_with_health —
 │                       publishes SourceDeath on a watch channel so the binary can surface a
 │                       fatal source exit in the TUI footer, #157; plain data, invariant #1 holds)

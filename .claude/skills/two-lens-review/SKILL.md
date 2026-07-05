@@ -54,16 +54,11 @@ silently dropped).
 2. **Dispatch both lenses in parallel, in the background**, each a subagent with
    its brief from `pr-review.prompt.md`, `<...>` slots FILLED with this change's
    specific claims (a lazily-filled slot turns both reviewers generic). Give each
-   the worktree path + `git -C <path> diff <base>..HEAD`. Add escalation lenses
-   per the prompt's triggers (shim → whole-shim never-panic; motion →
-   render-and-watch; painter-framed string/layout → composed-frame render;
-   generated art → film-critic; state-machine/concurrency → lifecycle;
-   public-facing → editorial, + rendered-runtime if it renders; interactive TUI
-   flow → UX/user-journey walk; install / other-CLI config-write → per-axis
-   upstream mirroring; new source → live run or hermetic replay without the
-   capture rig's convenience flags; dedup refactor → wrong-abstraction lens;
-   "behavior-preserving" claim → per-call-site adjudication; physical/domain
-   feature or last PR of an arc → whole-feature invariant audit).
+   the worktree path + `git -C <path> diff <base>..HEAD`. Then add an escalation
+   lens for EVERY trigger the prompt's "When two lenses aren't enough" section
+   matches on this change — that trigger→lens list is canonical THERE; don't
+   restate it here (a copy would be the two-copies-drift class the header names —
+   a new trigger added to the prompt must reach reviews without a manual mirror).
 3. **Collect + verify**: first read each lens's ACTUAL return before counting it
    toward the lens floor — a one-word summary or "test"/placeholder findings is a
    STUB (a dispatch, not a review); re-run that lens as a single focused agent
