@@ -112,18 +112,21 @@ _\* experimental — limited testing, unsigned binaries._
 
 ## Configuration
 
-Press `t` to cycle the built-in themes with live preview. Your choice persists across sessions:
+Everything lives in `~/.config/pixtuoid/config.toml` (created on first launch;
+every key optional) — theme, desk cap, custom pet names, and sprite packs. CLI
+flags override the file (`pixtuoid run --theme dracula`).
+
+The setting you'll reach for most is the **theme** — press `t` in the TUI for a
+live-preview picker across six built-in palettes; your pick persists across sessions.
 
 <p align="center">
-  <img src="docs/images/themes-composite.png" alt="built-in themes side by side" width="800" />
+  <img src="docs/images/themes-composite.png" alt="the six built-in themes side by side" width="800" />
 </p>
 
-Settings live in `~/.config/pixtuoid/config.toml` — theme, desk cap, custom pet
-names, and sprite packs. CLI flags override the file (`pixtuoid run --theme dracula`).
 See **[docs/CONFIGURATION.md](docs/CONFIGURATION.md)** for the full key reference
 (defaults, system-managed keys), the custom sprite-pack workflow, and **logging /
-troubleshooting** (the TUI writes warnings to `~/.cache/pixtuoid/log`) — or browse it
-live at **[/config](https://ivanwng97.github.io/pixtuoid/config)**.
+troubleshooting** (diagnostics go to `~/.cache/pixtuoid/log`) — or browse it live
+at **[/config](https://ivanwng97.github.io/pixtuoid/config)**.
 
 ## How It Works
 
