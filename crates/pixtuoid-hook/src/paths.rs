@@ -34,17 +34,26 @@ pub(crate) fn default_socket_path() -> String {
     }
     #[cfg(windows)]
     {
-        // The pipe NAME is namespacing only — the security boundary is the
-        // server-side DACL (spec §2). USERNAME is std-only, present in any
-        // login session, and computed identically by shim and daemon
-        // (parity-pinned in pixtuoid-core/tests/socket_path_parity.rs).
-        // Backslashes are sanitized: pipe names can't contain them, and
-        // enterprise boxes do set USERNAME=DOMAIN\user.
-        let user = std::env::var("USERNAME")
-            .unwrap_or_else(|_| "default".into())
-            .replace('\\', "-");
-        format!(r"\\.\pipe\pixtuoid-{user}")
+        default_windows_pipe_name()
     }
+}
+
+/// The default hook pipe name `\\.\pipe\pixtuoid-{USERNAME}` (branch 2/3 on
+/// Windows), WITHOUT the `PIXTUOID_SOCKET` override short-circuit. The security
+/// boundary is the server-side DACL (spec §2), but the NAME is namespacing only —
+/// USERNAME is std-only, present in any login session, and computed identically
+/// by shim and daemon (parity-pinned in pixtuoid-core/tests/socket_path_parity.rs).
+/// Backslashes are sanitized: pipe names can't contain them, and enterprise boxes
+/// set USERNAME=DOMAIN\user. The shim compares the resolved endpoint against this
+/// to SCOPE its #495 peer-cred check to our own predictable rendezvous — an
+/// explicit `PIXTUOID_SOCKET` pipe stays the user's trust decision (parity with
+/// the Unix `owned_tmp_socket_dir` scoping).
+#[cfg(windows)]
+pub(crate) fn default_windows_pipe_name() -> String {
+    let user = std::env::var("USERNAME")
+        .unwrap_or_else(|_| "default".into())
+        .replace('\\', "-");
+    format!(r"\\.\pipe\pixtuoid-{user}")
 }
 
 /// The per-user tmp dir we OWN (`/tmp/pixtuoid-{uid}`) when `endpoint` is the

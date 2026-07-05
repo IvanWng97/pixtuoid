@@ -139,11 +139,11 @@ pub(crate) fn send_line(endpoint: &str, line: &[u8]) {
     if !spawn_timeout_watchdog() {
         return;
     }
-    // 231 = ERROR_PIPE_BUSY (all named-pipe server instances mid-handshake).
-    // Matched on the raw numeric code — NOT a windows-crate constant — to keep the
-    // shipped shim at ZERO Windows deps (the deliberate reason it's hardcoded, not
-    // imported). The backoff is bounded by the 200ms send watchdog either way.
-    const ERROR_PIPE_BUSY: i32 = 231;
+    // ERROR_PIPE_BUSY = all named-pipe server instances mid-handshake. Now the
+    // windows-sys constant (#495 pulled the crate in for the peer check below),
+    // no longer a hand-hardcoded 231. The backoff is bounded by the 200ms send
+    // watchdog either way.
+    const ERROR_PIPE_BUSY: i32 = windows_sys::Win32::Foundation::ERROR_PIPE_BUSY as i32;
     const PIPE_BUSY_RETRY_BACKOFF_MS: u64 = 10;
     loop {
         match std::fs::OpenOptions::new()
@@ -152,6 +152,17 @@ pub(crate) fn send_line(endpoint: &str, line: &[u8]) {
             .open(endpoint)
         {
             Ok(mut f) => {
+                // #495: before writing, verify the pipe SERVER runs as US — a
+                // co-located user who squatted our predictable default pipe (so
+                // our daemon's create failed → SocketBusy degrade) would else
+                // receive the payload (cwd, tool names). Scoped to our default
+                // rendezvous; an explicit PIXTUOID_SOCKET pipe is the user's
+                // trust call (parity with the Unix owned_tmp_socket_dir scope).
+                // Fail-closed drop, never a panic (invariant #5).
+                if endpoint == crate::paths::default_windows_pipe_name() && !peer::server_is_us(&f)
+                {
+                    return;
+                }
                 let _ = f.write_all(line);
                 return;
             }
@@ -166,9 +177,119 @@ pub(crate) fn send_line(endpoint: &str, line: &[u8]) {
     }
 }
 
-// No in-process tests here ON PURPOSE: send_line spawns a watchdog that
+/// The Windows counterpart of the Unix `peer_is_us` check (#495): verify the
+/// named-pipe SERVER (the process that created the pipe) runs as OUR user before
+/// the shim writes the hook payload. Windows named pipes are a machine-global,
+/// unprivileged namespace, so a co-located user can pre-create our predictable
+/// `\\.\pipe\pixtuoid-{USERNAME}` (making our daemon's create fail → the hook
+/// plane silently degrades) and receive the payload. Comparing the connected
+/// server's token user SID to ours closes that. EVERYTHING here fails CLOSED
+/// (any FFI failure ⇒ `false` ⇒ drop) and never panics — invariant #5.
+#[cfg(windows)]
+mod peer {
+    use std::os::windows::io::AsRawHandle;
+
+    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows_sys::Win32::Security::{
+        EqualSid, GetTokenInformation, TokenUser, PSID, TOKEN_QUERY, TOKEN_USER,
+    };
+    use windows_sys::Win32::System::Pipes::GetNamedPipeServerProcessId;
+    use windows_sys::Win32::System::Threading::{
+        GetCurrentProcess, OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+
+    /// The `TOKEN_USER` blob for `process`'s token, `u64`-backed so the embedded
+    /// `PSID` pointer is properly aligned (a `Vec<u8>` would only guarantee
+    /// align-1). The returned buffer OWNS the SID — keep it alive across the
+    /// `EqualSid` call. `None` on any failure.
+    ///
+    /// SAFETY: `process` is a valid process handle for the call's duration.
+    unsafe fn token_user_blob(process: HANDLE) -> Option<Vec<u64>> {
+        let mut token: HANDLE = std::ptr::null_mut();
+        if OpenProcessToken(process, TOKEN_QUERY, &mut token) == 0 {
+            return None;
+        }
+        // Size probe (returns 0 + sets `len`), then the real read; close the
+        // token on every path.
+        let mut len: u32 = 0;
+        GetTokenInformation(token, TokenUser, std::ptr::null_mut(), 0, &mut len);
+        let blob = if len == 0 {
+            None
+        } else {
+            let mut buf = vec![0u64; (len as usize).div_ceil(8)];
+            if GetTokenInformation(token, TokenUser, buf.as_mut_ptr().cast(), len, &mut len) == 0 {
+                None
+            } else {
+                Some(buf)
+            }
+        };
+        CloseHandle(token);
+        blob
+    }
+
+    /// The `PSID` embedded in a `TOKEN_USER` blob. Valid only while `blob` lives.
+    ///
+    /// SAFETY: `blob` is a `TOKEN_USER` written by `GetTokenInformation`, u64-aligned.
+    unsafe fn sid_of(blob: &[u64]) -> PSID {
+        (*(blob.as_ptr().cast::<TOKEN_USER>())).User.Sid
+    }
+
+    /// True iff the pipe server behind `file` runs as our user. Fail-closed.
+    pub(super) fn server_is_us(file: &std::fs::File) -> bool {
+        let handle = file.as_raw_handle() as HANDLE;
+        // SAFETY: `handle` is a live connected pipe; `server` (from OpenProcess)
+        // is closed exactly once; the two SID buffers outlive the EqualSid call.
+        unsafe {
+            let mut server_pid: u32 = 0;
+            if GetNamedPipeServerProcessId(handle, &mut server_pid) == 0 {
+                return false;
+            }
+            // Our own user SID (GetCurrentProcess is a pseudo-handle — never closed).
+            let Some(ours) = token_user_blob(GetCurrentProcess()) else {
+                return false;
+            };
+            let server = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, server_pid);
+            if server.is_null() {
+                return false;
+            }
+            let theirs = token_user_blob(server);
+            CloseHandle(server);
+            let Some(theirs) = theirs else {
+                return false;
+            };
+            EqualSid(sid_of(&ours), sid_of(&theirs)) != 0
+        }
+    }
+}
+
+// No in-process tests for `send_line` ON PURPOSE: it spawns a watchdog that
 // exit(0)s the whole process ~200ms later (both platforms), which would kill
 // sibling tests under plain `cargo test`'s shared-process runner. All
 // send_line coverage lives at the child-process level — tests/shim.rs
 // (delivery, missing endpoint, stalled listener) and its Windows twin
 // tests/shim_pipe.rs — where exit-is-the-contract is observable, not fatal.
+// `peer::server_is_us` spawns NO watchdog, so it IS unit-testable below.
+
+// The peer-cred check runs only on the `windows-test` CI job (no reachable path
+// on Unix). Both ends of a self-hosted pipe are THIS process → same user → true.
+#[cfg(all(windows, test))]
+mod win_peer_tests {
+    #[tokio::test]
+    async fn server_is_us_for_a_self_hosted_pipe() {
+        // A unique name per run so parallel test processes don't collide.
+        let name = format!(r"\\.\pipe\pixtuoid-peer-selftest-{}", std::process::id());
+        let _server = tokio::net::windows::named_pipe::ServerOptions::new()
+            .create(&name)
+            .expect("create self-hosted pipe server");
+        // A blocking std client — the same handle type `send_line` writes over.
+        let client = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&name)
+            .expect("open client end");
+        assert!(
+            super::peer::server_is_us(&client),
+            "our own process's pipe server must verify as us"
+        );
+    }
+}

@@ -34,9 +34,14 @@ The components that handle untrusted or privileged input, and how they're bounde
    `0700` directory `/tmp/pixtuoid-<uid>/pixtuoid.sock`; `PIXTUOID_SOCKET`
    overrides — the socket itself created `0600`, owner-only). The `/tmp` fallback
    dir is created with a TOCTOU-safe `mkdir` + ownership/mode validation, and the
-   shim verifies the connected peer's uid (`getpeereid`) before writing — so
-   another user cannot squat the (formerly flat, predictable) rendezvous path to
-   disable the hook plane, nor intercept the payload by racing a listener onto it.
+   shim verifies the connected peer's uid (`getpeereid`/`SO_PEERCRED`) before
+   writing — so another user cannot squat the (formerly flat, predictable)
+   rendezvous path to disable the hook plane, nor intercept the payload by racing
+   a listener onto it. On **Windows** the transport is a named pipe
+   `\\.\pipe\pixtuoid-<user>` with an owner-only DACL, and the shim likewise
+   verifies the pipe **server's** token user SID matches ours
+   (`GetNamedPipeServerProcessId` → token compare) before writing — closing the
+   same squat-and-intercept vector on the machine-global pipe namespace (#495).
    It is a *local IPC* — there is no network
    listener. The shim is hardened to **never block the agent**: it always exits
    `0`, within a hard ~200 ms watchdog bound, on any error. It does not execute or

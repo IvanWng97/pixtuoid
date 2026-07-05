@@ -6,7 +6,7 @@ use anyhow::{Context, Result};
 use tokio::net::windows::named_pipe::{NamedPipeServer, PipeMode, ServerOptions};
 use tokio::sync::Semaphore;
 use tracing::warn;
-use windows_sys::Win32::Foundation::LocalFree;
+use windows_sys::Win32::Foundation::{LocalFree, ERROR_ACCESS_DENIED};
 use windows_sys::Win32::Security::Authorization::{
     ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
 };
@@ -150,7 +150,7 @@ impl Listener {
             // stays fatal.
             Err(e)
                 if e.kind() == std::io::ErrorKind::PermissionDenied
-                    || e.raw_os_error() == Some(5) =>
+                    || e.raw_os_error() == Some(ERROR_ACCESS_DENIED as i32) =>
             {
                 return Err(anyhow::Error::new(super::SocketBusy {
                     path: path.to_path_buf(),

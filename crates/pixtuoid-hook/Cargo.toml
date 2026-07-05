@@ -31,6 +31,13 @@ anyhow     = { workspace = true }
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+# The shim was deliberately Windows-dep-free (constants hand-hardcoded), but the
+# #495 client-side peer-cred check needs Win32 (GetNamedPipeServerProcessId +
+# token-user SID compare) — verified decls beat hand-FFI in the never-panic shim.
+# Pin the SAME major as pixtuoid-core / pixtuoid so the bindings don't double-compile.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Pipes", "Win32_System_Threading"] }
+
 [target.'cfg(unix)'.dev-dependencies]
 tempfile = "3"
 
