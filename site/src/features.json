@@ -34,7 +34,7 @@
     "name": "Animated characters",
     "desc": "Typing, waiting (`?`), sleeping (z's), walking with A\\*-routed pathfinding",
     "card": {
-      "blurb": "everyone types, waits with a '?', naps under z's, and walks a*-routed paths between desks."
+      "blurb": "everyone types, waits with a '?', naps under z's, and walks A*-routed paths between desks."
     }
   },
   {
@@ -76,7 +76,7 @@
     "name": "Hover tooltips",
     "desc": "Hover an agent for session duration, tool-call count and active-time %; hover any furniture — desks, sofas, plants, vending machine, printer — for its name",
     "card": {
-      "blurb": "hover a coworker for session length, tool-call count and active-%, or any desk or plant for its name."
+      "blurb": "hover a coworker for session length, tool-call count and active-time %, or any desk or plant for its name."
     }
   },
   {

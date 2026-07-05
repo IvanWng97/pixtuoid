@@ -280,6 +280,16 @@ impl Office {
             self.session.reset_frame_cache();
         }
     }
+
+    /// Whether the office's sky shows the SUN at hour-of-day `hour` (0..24). The
+    /// site's VIBING sky-slider reads this to draw its thumb as a sun by day /
+    /// moon by night, so the control can't drift from the office it previews —
+    /// it delegates to the engine's ONE day/night boundary (`SUN_RISE_H`/
+    /// `SUN_SET_H`, `pixtuoid_scene`'s `sky::hour_is_day`). Pure in `hour`; the
+    /// `&self` receiver keeps it a JS method on the office handle JS already holds.
+    pub fn is_day(&self, hour: f32) -> bool {
+        pixtuoid_scene::pixel_painter::hour_is_day(hour)
+    }
 }
 
 impl Office {
@@ -761,5 +771,19 @@ mod tests {
         let before = a.frame().to_vec();
         a.step(T0_MS, 160, 96);
         assert_eq!(a.frame(), &before[..], "unknown theme is a no-op");
+    }
+
+    #[test]
+    fn is_day_matches_the_engine_sun_window() {
+        // The site's sky-slider phase reads this; it must be the SAME boundary
+        // the office's own sky renders (sky::hour_is_day, [SUN_RISE_H, SUN_SET_H))
+        // so the slider's sun/moon thumb can't drift from the office it previews.
+        let o = office();
+        assert!(!o.is_day(4.9), "pre-dawn is night");
+        assert!(o.is_day(5.0), "sunrise is day");
+        assert!(o.is_day(12.0), "noon is day");
+        assert!(o.is_day(19.9), "just before sunset is day");
+        assert!(!o.is_day(20.0), "sunset flips to night");
+        assert!(!o.is_day(23.0), "late night is night");
     }
 }

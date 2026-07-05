@@ -209,13 +209,30 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
     let scrubHour = vibingTime ? parseFloat(vibingTime.value) : 18;
     let vStart = Date.now();
 
-    // sky-scrubber phase: the thumb is a sun by day, a moon after dusk (sun up
-    // ~06:00–19:00) — set on the wrapper so the thumb + clock glow switch
-    // warm↔cool with the scrubbed hour.
-    function setSliderPhase(h) {
-      if (vibingTimeWrap) vibingTimeWrap.dataset.phase = h < 6 || h >= 19 ? 'night' : 'day';
+    // The clock readout: the visible label AND `aria-valuetext`, so a screen
+    // reader announces "18:00" instead of the raw 0–24 (0.5-step) range value.
+    function updateClock(h) {
+      // Slider max is 24 — wrap the hour so the top of the range reads 00:00,
+      // not 24:00 (setHours(24) already rolls to next-day midnight).
+      const hh = String(Math.floor(h) % 24).padStart(2, '0');
+      const mm = String(Math.round((h % 1) * 60)).padStart(2, '0');
+      const t = hh + ':' + mm;
+      if (vibingTimeLabel) vibingTimeLabel.textContent = t;
+      if (vibingTime) vibingTime.setAttribute('aria-valuetext', t);
     }
-    setSliderPhase(scrubHour);
+    updateClock(scrubHour);
+
+    // Sky-scrubber phase: sun by day, moon after dusk. The day/night boundary is
+    // the ENGINE's own SUN_RISE_H/SUN_SET_H window (Office.is_day, from sky.rs) —
+    // NOT a second hardcoded copy in JS — so the slider's sun/moon can't drift
+    // from the office it previews. Before the office boots, the SSR default
+    // (`data-phase="day"`, matching the 18:00 start) holds; the phase then syncs
+    // from the engine on boot and on every scrub.
+    function setSliderPhase(h) {
+      if (vibingTimeWrap && vOffice) {
+        vibingTimeWrap.dataset.phase = vOffice.is_day(h) ? 'day' : 'night';
+      }
+    }
 
     function anchorForHour(h) {
       const d = new Date();
@@ -281,6 +298,9 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
             if (w0) vOffice.set_weather(w0.dataset.weather);
             const t0 = vibingStage.querySelector('.osd__chip[data-theme].is-active');
             if (t0) vOffice.set_theme(t0.dataset.theme);
+            // Engine is live now → sync the slider's sun/moon to it (the SSR
+            // `data-phase` default held until this point).
+            setSliderPhase(scrubHour);
             vCtx = vibingCanvas.getContext('2d');
             vImg = vCtx.createImageData(vibingCanvas.width, vibingCanvas.height);
             syncCanvas(); // gating may have moved on while the fetch was in flight
@@ -303,15 +323,9 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
     if (vibingTime) {
       vibingTime.addEventListener('input', function () {
         scrubHour = parseFloat(vibingTime.value);
+        updateClock(scrubHour);
         setSliderPhase(scrubHour);
         vStart = Date.now(); // re-anchor: the office keeps living at this hour
-        if (vibingTimeLabel) {
-          // Slider max is 24 — wrap the hour so the top of the range reads 00:00,
-          // not 24:00 (setHours(24) already rolls to next-day midnight).
-          const hh = String(Math.floor(scrubHour) % 24).padStart(2, '0');
-          const mm = String(Math.round((scrubHour % 1) * 60)).padStart(2, '0');
-          vibingTimeLabel.textContent = hh + ':' + mm;
-        }
       });
     }
     if (vibingWeather) {

@@ -1,15 +1,25 @@
 ---
-import features from '../features.json';
+import featuresData from '../features.json';
 import { floorByNumber } from '../consts';
 
 const floor = floorByNumber(4);
 
+// A feature card MAY deep-link to the Studio Wall channel that demos it
+// (`card.href`); the 4F "small touches" cards don't — their subjects aren't
+// showcase channels — so no current card carries an href. `Feature` keeps that
+// field optional so `f.card.href` stays type-safe without a per-access cast.
+type Feature = {
+  icon: string;
+  name: string;
+  desc: string;
+  featured?: boolean;
+  card?: { blurb: string; href?: string };
+};
+
 // Single source of truth: site/src/features.json — the SAME list the README
-// Features table is generated from (scripts/gen-readme.mjs), so the two can't
-// drift. The bento shows the items that carry `card` metadata. A card MAY
-// deep-link to the Studio Wall channel that demos it (`card.href`), but the 4F
-// "small touches" cards don't — their subjects aren't showcase channels — so no
-// current card carries an href and the JSON infers it away (hence the cast).
+// Features table is generated from (scripts/gen-readme.mjs), so the two can't drift.
+// The bento shows the items that carry `card` metadata.
+const features = featuresData as Feature[];
 const cells = features.flatMap((f) =>
   f.card
     ? [
@@ -17,7 +27,7 @@ const cells = features.flatMap((f) =>
           icon: f.icon,
           title: f.name,
           body: f.card.blurb ?? f.desc,
-          href: (f.card as { blurb: string; href?: string }).href,
+          href: f.card.href,
         },
       ]
     : []

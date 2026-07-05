@@ -183,6 +183,15 @@ pub fn force_weather(name: Option<&str>) -> Result<(), Vec<&'static str>> {
     }
 }
 
+/// Whether the office's sky shows the SUN at hour-of-day `hour` (0..24), per the
+/// engine's own `SUN_RISE_H`/`SUN_SET_H` window (`background/sky.rs`). Exposed so
+/// the wasm painter's `Office::is_day` can hand the site's sky-slider the SAME
+/// day/night boundary the office renders — one source of truth, no drift across
+/// the Rust↔JS boundary.
+pub fn hour_is_day(hour: f32) -> bool {
+    background::hour_is_day(hour)
+}
+
 // The steam gate reads the SAME window `CoffeeState::record` refreshes on —
 // a reference, not a second copy of the value.
 const COFFEE_STEAM_WINDOW_SECS: u64 = crate::floor::CoffeeState::STEAM_WINDOW_SECS;

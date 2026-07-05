@@ -34,6 +34,15 @@ export class Office {
      */
     hire(): void;
     /**
+     * Whether the office's sky shows the SUN at hour-of-day `hour` (0..24). The
+     * site's VIBING sky-slider reads this to draw its thumb as a sun by day /
+     * moon by night, so the control can't drift from the office it previews —
+     * it delegates to the engine's ONE day/night boundary (`SUN_RISE_H`/
+     * `SUN_SET_H`, `pixtuoid_scene`'s `sky::hour_is_day`). Pure in `hour`; the
+     * `&self` receiver keeps it a JS method on the office handle JS already holds.
+     */
+    is_day(hour: number): boolean;
+    /**
      * Build an office seeded with `seed` (drives the layout variant). Errors
      * only if the compile-time-embedded sprite pack fails to parse (a build
      * bug), surfaced to JS as an exception.
@@ -75,6 +84,7 @@ export interface InitOutput {
     readonly office_frame_len: (a: number) => number;
     readonly office_frame_ptr: (a: number) => number;
     readonly office_hire: (a: number) => void;
+    readonly office_is_day: (a: number, b: number) => number;
     readonly office_new: (a: number) => [number, number, number];
     readonly office_set_theme: (a: number, b: number, c: number) => void;
     readonly office_set_weather: (a: number, b: number, c: number) => void;

@@ -51,6 +51,20 @@ export class Office {
         wasm.office_hire(this.__wbg_ptr);
     }
     /**
+     * Whether the office's sky shows the SUN at hour-of-day `hour` (0..24). The
+     * site's VIBING sky-slider reads this to draw its thumb as a sun by day /
+     * moon by night, so the control can't drift from the office it previews —
+     * it delegates to the engine's ONE day/night boundary (`SUN_RISE_H`/
+     * `SUN_SET_H`, `pixtuoid_scene`'s `sky::hour_is_day`). Pure in `hour`; the
+     * `&self` receiver keeps it a JS method on the office handle JS already holds.
+     * @param {number} hour
+     * @returns {boolean}
+     */
+    is_day(hour) {
+        const ret = wasm.office_is_day(this.__wbg_ptr, hour);
+        return ret !== 0;
+    }
+    /**
      * Build an office seeded with `seed` (drives the layout variant). Errors
      * only if the compile-time-embedded sprite pack fails to parse (a build
      * bug), surfaced to JS as an exception.

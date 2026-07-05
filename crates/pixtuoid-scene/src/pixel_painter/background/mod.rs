@@ -16,8 +16,8 @@ pub(super) use lighting::{
     paint_neon_panel, paint_shadow, Ellipse,
 };
 pub(super) use sky::{
-    beam_strength, daylight_floor_overlay, dim_floor_overlay, set_weather_override, sun_on_wall,
-    time_of_day_look, weather_state, TimeOfDayLook, WallSide, Weather,
+    beam_strength, daylight_floor_overlay, dim_floor_overlay, hour_is_day, set_weather_override,
+    sun_on_wall, time_of_day_look, weather_state, TimeOfDayLook, WallSide, Weather,
 };
 // The celestial disc + night-star helpers (#469) are INTERNAL to this module —
 // the sky branch of `paint_floor_to_ceiling_window` (and its tests) consume

@@ -396,9 +396,17 @@ fn arc_progress(h: f32, rise: f32, set: f32) -> f32 {
     ((h - rise) / (set - rise)).clamp(0.0, 1.0)
 }
 
+/// Whether the sky shows the SUN (not the moon) at hour-of-day `h` (0..24) — the
+/// ONE definition of the day/night boundary, so `emitter` below and any external
+/// consumer (the wasm `Office::is_day` the site's sky-slider phase reads) can't
+/// drift from a second hardcoded copy. Sun up over `[SUN_RISE_H, SUN_SET_H)`.
+pub(crate) fn hour_is_day(h: f32) -> bool {
+    (SUN_RISE_H..SUN_SET_H).contains(&h)
+}
+
 pub(in crate::pixel_painter) fn emitter(now: SystemTime) -> SkyState {
     let h = super::local_hour_frac(now);
-    let is_day = (SUN_RISE_H..SUN_SET_H).contains(&h);
+    let is_day = hour_is_day(h);
     let (rise, set) = if is_day {
         (SUN_RISE_H, SUN_SET_H)
     } else {

@@ -236,6 +236,14 @@ function defaultVariant(g: EnrichedVariantGroup): ShowcaseVariant | undefined {
     align-items: center;
     gap: 0.9rem;
     padding: 0.9rem 0.9rem 0.2rem;
+    /* track/thumb geometry named once — the -webkit- thumb offset derives from
+       these, so a size tweak can't drift across the 3 track + 2 thumb sites. */
+    --track-h: 16px;
+    --thumb-d: 24px;
+    /* a dark hairline so the thumb clears WCAG 1.4.11 (≥3:1 non-text) even over
+       the bright noon band, where the warm sun fill alone is ~1.4:1; pairs with
+       the light --thumb-ring border for a two-tone edge that reads on any sky. */
+    --thumb-edge: 0 0 0 1px rgba(10, 14, 36, 0.6);
     --sky: linear-gradient(
       90deg,
       #0a0e24 0%,
@@ -274,19 +282,19 @@ function defaultVariant(g: EnrichedVariantGroup): ShowcaseVariant | undefined {
     -webkit-appearance: none;
     appearance: none;
     width: 100%;
-    height: 16px;
+    height: var(--track-h);
     background: transparent;
     cursor: pointer;
   }
   .vibing__time input[type='range']::-webkit-slider-runnable-track {
-    height: 16px;
+    height: var(--track-h);
     border-radius: 999px;
     border: 1px solid var(--border-strong);
     box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.45);
     background: var(--sky);
   }
   .vibing__time input[type='range']::-moz-range-track {
-    height: 16px;
+    height: var(--track-h);
     border-radius: 999px;
     border: 1px solid var(--border-strong);
     box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.45);
@@ -295,22 +303,28 @@ function defaultVariant(g: EnrichedVariantGroup): ShowcaseVariant | undefined {
   .vibing__time input[type='range']::-webkit-slider-thumb {
     -webkit-appearance: none;
     appearance: none;
-    width: 24px;
-    height: 24px;
-    margin-top: -4px; /* center a 24px thumb on the 16px track */
+    width: var(--thumb-d);
+    height: var(--thumb-d);
+    margin-top: calc((var(--track-h) - var(--thumb-d)) / 2); /* center thumb on track */
     border-radius: 50%;
     border: 1px solid var(--thumb-ring);
     background: var(--thumb-fill);
-    box-shadow: var(--thumb-glow);
+    box-shadow: var(--thumb-edge), var(--thumb-glow);
     transition: box-shadow 0.2s ease;
   }
   .vibing__time input[type='range']::-moz-range-thumb {
-    width: 24px;
-    height: 24px;
+    width: var(--thumb-d);
+    height: var(--thumb-d);
     border-radius: 50%;
     border: 1px solid var(--thumb-ring);
     background: var(--thumb-fill);
-    box-shadow: var(--thumb-glow);
+    box-shadow: var(--thumb-edge), var(--thumb-glow);
+  }
+  /* Firefox can paint a default "progress" fill left of the thumb; with
+     appearance:none it usually doesn't, but keep it transparent so it can never
+     overlay the sky gradient's morning half. */
+  .vibing__time input[type='range']::-moz-range-progress {
+    background: transparent;
   }
   .vibing__time input[type='range']:focus-visible::-webkit-slider-thumb {
     box-shadow:
