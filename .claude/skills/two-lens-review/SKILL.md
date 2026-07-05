@@ -56,16 +56,29 @@ silently dropped).
    specific claims (a lazily-filled slot turns both reviewers generic). Give each
    the worktree path + `git -C <path> diff <base>..HEAD`. Add escalation lenses
    per the prompt's triggers (shim → whole-shim never-panic; motion →
-   render-and-watch; generated art → film-critic; state-machine/concurrency →
-   lifecycle; public-facing → editorial).
-3. **Collect + verify**: for every MEDIUM+ finding, **verify the premise yourself
-   before coding a fix** — reviewers have incomplete design context; check the
-   crate's sharp edges first, and if a finding is deliberate design, REFUTE it by
-   citing (or ADDING) the relevant `CLAUDE.md` sharp edge.
+   render-and-watch; painter-framed string/layout → composed-frame render;
+   generated art → film-critic; state-machine/concurrency → lifecycle;
+   public-facing → editorial, + rendered-runtime if it renders; interactive TUI
+   flow → UX/user-journey walk; install / other-CLI config-write → per-axis
+   upstream mirroring; new source → live run or hermetic replay without the
+   capture rig's convenience flags; dedup refactor → wrong-abstraction lens;
+   "behavior-preserving" claim → per-call-site adjudication; physical/domain
+   feature or last PR of an arc → whole-feature invariant audit).
+3. **Collect + verify**: first read each lens's ACTUAL return before counting it
+   toward the lens floor — a one-word summary or "test"/placeholder findings is a
+   STUB (a dispatch, not a review); re-run that lens as a single focused agent
+   (PR #455's a11y lens stubbed under an APPROVE-WITH-NITS aggregate; its re-run
+   caught a real AA failure). Then for every MEDIUM+ finding, **verify the
+   premise yourself before coding a fix** — reviewers have incomplete design
+   context; check the crate's sharp edges first, and if a finding is deliberate
+   design, REFUTE it by citing (or ADDING) the relevant `CLAUDE.md` sharp edge.
 4. **Fold** accepted findings into ONE review-round commit; record any
    reviewer-flagged plan-misses as `plan-miss:` lines in its message.
 5. **Disposition sweep** (shared, below).
-6. **After a fix round**, re-run the gates and watch the NEW head's CI.
+6. **After a fix round**, re-run the gates and watch the NEW head's CI; before
+   merging, read the online bot review's LATEST COMMENT verdict (`Findings: N`)
+   + `mergeStateStatus` — the review JOB passes even when it posts findings, so
+   the check table alone can't gate (#448).
 
 ## Whole-codebase scope — how to run (orchestration)
 
@@ -99,7 +112,10 @@ Drive every reviewer/finder/bot finding to **exactly one terminal state**:
 sharp edge — that keeps the next agent's context accurate) · **ISSUE-FILED**
 (no-deferral rule: only big/refactor defers). "Acknowledged, no action" is NOT a
 state — #40's ignored finding became a 0.4.1 blocker (#46). Diff scope: in the PR
-thread. Whole-codebase scope: in the ranked report.
+thread. Whole-codebase scope: in the ranked report. Sweep at the FINAL merge
+head — a finding that lands after the local lenses ran is the #283/#383 drop
+class; and check WHICH commit a bot re-flag was raised against before
+re-litigating (#316's were stale).
 
 ## Red flags (you're about to skip the gate / short the audit)
 
@@ -111,5 +127,7 @@ thread. Whole-codebase scope: in the ranked report.
 | "One thorough agent is fine" | Two differentiated lenses is the floor; one lens's blind spots go uncaught. |
 | "I'll note the finding and move on" | Every finding needs a terminal state — dropped findings become release blockers. |
 | "The diff looks clean, we're done" (audit) | The diff scope can't see drift accumulation / design-debt accretion / arch erosion — those need the whole-codebase pass. |
+| "The verdict row shows N lenses ran" | Count REAL returns, not dispatches — a stubbed lens under a clean aggregate hid a real AA failure (#455). |
+| "The bot says it's still broken" | Check WHICH commit it reviewed — #316's re-flags were raised against an old commit; five were already fixed (REFUTED-STALE). |
 | "The finder found it, report it" (audit) | Findings self-certify nothing — a separate skeptic must try to REFUTE each survivor first. |
 | "Just unify the duplication" | Some duplication is documented deliberate separation (per-source decoders, per-CLI targets); check the sharp edge before proposing a merge. |

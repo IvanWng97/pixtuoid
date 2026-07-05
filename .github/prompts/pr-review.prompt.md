@@ -26,29 +26,105 @@ given change/tree, say so, don't skip it.
 
 - **(A) Correctness + architecture** — logic/off-by-one/inverted-condition;
   concurrency & liveness (races, lock-order, lost wakeups, stale state, the
-  no-scan-the-history rule); error-handling & silent failure; security (path
-  traversal, unchecked wire input, config-write safety, terminal-egress control
-  chars); the architecture invariants (core=no-terminal, scene=no-window, ONE
+  no-scan-the-history rule; blocking I/O or lock acquisition on an async worker /
+  the render loop — sync flock/fsync/FS probes need `block_in_place` or an
+  off-loop task, the Sources-panel ConfigLock stall escaped as a dropped #283
+  bot MEDIUM; creation POLARITY — only a proof-of-LIFE event may create/resurrect
+  an entry for an unknown id, a death/exit/TTL signal for an absent id must
+  no-op, never synthesize: a shared `or_insert` before the match minted a
+  phantom mascot from `PidExited` (fbe26049); lifecycle-AUTHORITY —
+  user/model-controllable CONTENT (transcript text, message bodies, tool-arg
+  fields) must never drive lifecycle/state transitions, structural markers +
+  liveness signals only: the `/exit` content-matcher false-positived on messages
+  QUOTING it, and a model-authored `subagent_type` spoofed a delegation — both
+  read as clever resilience in review); error-handling & silent failure (incl.
+  degenerate env/config values: a SET-but-EMPTY env var reads as unset — the
+  #172 RUST_LOG policy; route env reads through `io::nonempty_env` — a raw
+  `var_os` read of XDG_CONFIG_HOME resolved the sprite-pack dir to CWD,
+  18ebf937); security (path traversal; unchecked wire input; config-write
+  safety — atomicity AND no destructive fallback: no error/skip/default arm may
+  rewrite, wipe, or strip user-owned configs/hooks — existing-but-unparseable is
+  NEVER rewritten, a skip must not remove pre-existing hooks, a per-field typo
+  must not fail the whole file, a wipe mode that escaped review twice;
+  terminal-egress sanitization — strip BOTH Cc controls and Cf bidi overrides,
+  `is_control()` covers only Cc and Trojan-Source CVE-2021-42574 rode the gap
+  (4bb786fa); local-IPC endpoint security — socket/pipe perms at creation
+  (create-restricted-then-rename, never a process-global umask: it races other
+  threads), squat/steal arbitration, and predictable rendezvous paths in
+  world-writable dirs — prefer XDG_RUNTIME_DIR/0700-dir placement, treat a
+  pre-existing endpoint as hostile, the `/tmp/pixtuoid-{uid}.sock` fallback
+  class); the architecture invariants (core=no-terminal, scene=no-window, ONE
   Transport-tagged channel, walkable=footprint, no direct settings.json write,
   no prod `println!`, `unreachable_pub`); magic-number / single-source-of-truth;
-  cross-platform (path-string separators, Windows parity); performance (per-frame
-  allocs, hot-path scans); resource/lifecycle (Drop, fd leaks, unbounded growth);
-  test-teeth (does the pinning test FAIL if the behavior breaks — mutate it).
+  cross-platform (path-string separators, Windows parity; resolution-POLICY
+  mirroring — each integrated CLI resolves home/config/env its OWN way
+  [HOME-first vs USERPROFILE-first, %APPDATA% vs `~/.<cli>`, verbatim vs
+  ~-expanded overrides], so the generic dirs/shellexpand answer IS the bug:
+  mirror the target CLI's own resolver, install/detect/watch reading ONE
+  resolver — #343/#342/#195); sibling-set completeness (the N-1-of-N class: a
+  guard/cap/validation added to some but not ALL sibling paths — per-source
+  decoders, per-CLI install targets, per-platform arms, twin call sites; the
+  most-recurrent escape across all three censuses: #272's decode cap missed 3
+  hook-only decoders, then copilot's twice more — ledger R0620-364-04,
+  R0620-WCR-01); performance (per-frame allocs, hot-path scans);
+  resource/lifecycle (Drop, fd leaks, unbounded growth; error-path ROLLBACK — a
+  multi-step setup mutating global/terminal state must unwind the
+  already-applied steps when a LATER step Errs, a plain Err bypasses the
+  panic-hook restore: the raw-mode strand, a976c604); upgrade-path /
+  installed-base (state written by previously-RELEASED versions — settings.json
+  hook entries, sentinels/connected flags, installed command strings; a
+  fresh-install assumption wipes an upgrader's — #457's HIGH: onboarding SKIP
+  stripped pre-0.12 hooks, fixed by freezing to the REAL state; a compat-path
+  removal must name its concrete surviving population, an empty set being the
+  only free removal — #447's purge rulings); test-teeth (does the pinning test
+  FAIL if the behavior breaks — mutate it); declared-not-wired (every NEW
+  field/flag/check/gate the diff declares must trace to a live consumer — the
+  smells: an `_`-bound capture, a built-but-never-called validator, a gate with
+  zero CI reach; #61's `_snap_prev` defeated its own PR's fix AND survived #62's
+  dedicated fix-round review; `just arch` had zero CI reach until #273).
 - **(B) Design-debt** — duplication/DRY (N implementations of one concept —
   weight by DIVERGENCE risk, not line count); god-object / oversized module with
   a clean split; dead code / legacy remnant; leaky or missing abstraction;
-  inconsistent pattern where one way is clearly the house style.
-- **(C) Drift** — doc↔code (a `CLAUDE.md`/README/SKILL naming a file/fn/flag/count
-  that moved); wire-format / upstream (a decoder or drift-watch rule vs the real
-  upstream shape; a new source with no drift-watch row); version-lockstep
-  (Cargo.toml versions, MSRV, the "N sites must stay in sync" invariants);
-  comment-rot; manifest-bridge (a `site/src/*.json` / generated schema vs its
-  Rust source of truth).
+  inconsistent pattern where one way is clearly the house style; misleading
+  identifier — a name that lies about what it holds/does (ask: would a human
+  reading the logic be misled? one edit from an unrelated sibling in the same
+  struct, `meeting_rooms` vs `meeting_room`; a name inverting documented
+  vocabulary, `approach_footprint` returning the VISUAL extent vs invariant #6;
+  a field named `name` holding an id that invites the wrong join). NOT "pure
+  style" (negative-space rule 2 doesn't apply) — the #321 naming pass confirmed
+  6 such renames (R0615-NM1..6), and a rename isn't done until the repo-wide
+  stale-prose grep is clean.
+- **(C) Drift** — doc↔code (a `CLAUDE.md`/README/SKILL/prompt naming a
+  file/fn/flag/count that moved — the population INCLUDES the hidden dirs
+  `.github/prompts/` and `.claude/skills/`, which bare `rg` skips by default;
+  sweep with `rg --hidden` or `grep -rn`, else the class recurs: #448's
+  post-merge stale-`line_decoder` MEDIUM and #449's beautify-SKILL recurrence
+  were both hidden-dir misses); wire-format / upstream (a decoder or drift-watch
+  rule vs the real upstream shape; a new source with no drift-watch row;
+  install-path resolvers are an upstream surface too, not just decoders);
+  version-lockstep (Cargo.toml versions, MSRV, the "N sites must stay in sync"
+  invariants; version ADJUDICATION — the contract half semver-checks can't see
+  (CONTRIBUTING.md "Releasing": patch=fix/polish, minor=feature OR breaking):
+  does the diff move a published crate's public surface or ship a feature, and
+  does the number bump in THIS PR, ride the already-open unreleased minor, or
+  stay put? over-bumping a break the open minor already covers is the same
+  finding — the #471 premature-0.14.0 catch; Lens 2 states this call explicitly
+  in its verdict); comment-rot; manifest-bridge (a `site/src/*.json` / generated
+  schema vs its Rust source of truth).
 - **(D) Quality + tooling** — test-coverage gaps (changed/existing code with no
   exercising test); mutation-teeth (assertions that survive the mutation);
   isolation & flakiness (real-state writes, wall-clock/order nondeterminism,
   `TEST_ENV_LOCK`, snapshot determinism); CI/build (gate coverage, path-filter
-  holes, toolchain skew); dependency/supply-chain (unmaintained/droppable deps,
+  holes, toolchain skew); gate-teeth & gate liveness (can this check actually
+  FAIL, and is it alive: a checker that exits 0 on its own internal error is
+  fail-open; an exit code read through a pipe / `; echo $?` is eaten; a check
+  never wired into a required workflow gates nothing — the `.harness` fail-open
+  + unwired case; a check that passes VACUOUSLY or a scheduled monitor red with
+  no consumer — ask of each gate "what makes this pass without checking?", and
+  an audit sweeps the run history of every scheduled workflow: the weekly drift
+  watcher was dead for weeks behind its own self-test and decoder_fuzz
+  false-greened two sources through the wrong decoders, #454; the security cron
+  silently red, #440); dependency/supply-chain (unmaintained/droppable deps,
   duplicate versions, feature-flag hygiene).
 
 ## The two populations (why scope matters)
@@ -63,9 +139,10 @@ coverage-topology gaps (each PR tests its own lines; the seams go untested),
 arch-invariant EROSION (every diff conforms; the boundary weakens in aggregate),
 orphaned surface (the diff that removed the last caller looked clean). The diff
 scope catches these per-CHANGE; only the whole-codebase scope sees the AGGREGATE.
-So a diff lens still runs the DRY / drift / data-shape checks below (they
-`grep`/`rg` OUTSIDE the diff — the one thing a diff-scoped read can't do by
-construction), and the audit adds finders dedicated to the aggregate-only classes.
+So a diff lens still runs the DRY / drift / data-shape / sibling-completeness
+checks below (they `grep`/`rg` OUTSIDE the diff — the one thing a diff-scoped
+read can't do by construction), and the audit adds finders dedicated to the
+aggregate-only classes.
 
 Both briefs MUST carry, verbatim or equivalent:
 
@@ -107,13 +184,31 @@ Verify rigorously (read the actual code, not just the diff):
 2. House rules on touched code: no unwrap() outside tests, tracing not
    println, comments WHY-only, docs-currency (CLAUDE.md/README updated when
    public surface moved).
-3. Tests don't lie: for every behavioral claim, check the pinning test would
+3. Sibling-set completeness: for every guard/cap/limit/validation the diff
+   adds or extends, enumerate the FULL sibling set (`rg` for the parallel
+   decoders / install targets / platform arms / twin call sites — siblings
+   live OUTSIDE the diff by construction) and verify each member got the
+   same treatment. This sweep must fire at the INTRODUCING PR even when the
+   plan enumerated siblings (impl-plan item 3 existed and copilot #292 still
+   shipped the N-th uncapped decoder — backstopped at #364, not here).
+4. Tests don't lie: for every behavioral claim, check the pinning test would
    FAIL if the behavior broke (mentally mutate the fix; a test that survives
    deletion of the guarded constant pins nothing — the CONN_TIMEOUT lesson,
-   ledger R0610-06).
-4. Run the gates yourself: `just <fmt-check|site-check|preflight>` as
+   ledger R0610-06). Also trace every NEW field/flag/gate the diff declares
+   to the consumer that reads it — a declared-but-unwired artifact passes
+   every test that ignores it (the compiler won't warn on `_x` bindings or
+   `pub` fields).
+5. Run the gates yourself: `just <fmt-check|site-check|preflight>` as
    applicable — do not trust the author's claim of green. Include the EXIT
-   CODE you observed (never infer it through a pipe).
+   CODE you observed (never infer it through a pipe). Then NAME any CI-ONLY
+   gate this diff can plausibly red — local preflight is blind to all of
+   them: semver (an intentional API change needs the 0.x minor bump in THIS
+   PR, never a revert), gen-check (a look-changing diff ships regenerated
+   docs/images + site demos; a scene change stales the wasm), wasm-check
+   (host-green ≠ wasm-green — `just hack` can't see wasm32-only breakage),
+   windows-test (path-string asserts), insta orphan snapshots — and remember
+   `--lib` builds neither the bin modules nor examples (a bin-module edit
+   verified with `--lib` alone is UNVERIFIED).
 
 [the five hard requirements]
 Your final message is the report.
@@ -143,7 +238,17 @@ Judge as a demanding critic:
    merely concerns the same entity (render caches, interaction state, scalar
    keys with disjoint key-spaces) — consolidate shared IDENTITY, not shared
    TOPIC. (The `[pet-names]` lesson, PR #86 — backtest-validated, controls
-   included: docs/review-metrics/mining-2026-06.md.)
+   included: docs/review-metrics/mining-2026-06.md.) Same item, the JOIN
+   direction: when the diff looks one existing collection's id up in
+   another's key-space (registry→install-target, manifest→registry), verify
+   the join key against the REAL production constants — never the tests'
+   fixtures, whose hand-fed ids match by construction: registry id
+   `claude-code` joined against target name `claude` rendered the flagship
+   CLI non-actionable while fixtures fed `"claude"` and stayed green (ledger
+   R0613-16, CRITICAL — pin the join with an every-id-resolves bridge test).
+   Corollary: eviction/reconcile keyed by ITERATING a registry misses
+   out-of-registry members — key on the COMPLEMENT of the allowed set
+   (R0613-18, CRITICAL).
 6. Duplication / DRY sweep on every NEW fn, type, helper, or const the diff
    introduces: `grep -rn`/`rg` the WHOLE tree for a pre-existing implementation
    of the same behavior. A diff shows only what's ADDED, so this is the one
@@ -191,10 +296,30 @@ history:
   catches).
 - **State machine / concurrency seam touched** (reducer, liveness ladder,
   motion) → add a lifecycle lens that traces the downstream interaction
-  graph (rebind, sweeps, TTLs) rather than the diff.
+  graph (rebind, sweeps, TTLs, and every event arm's create-on-unknown-id
+  policy vs its polarity) rather than the diff — and audit the PROVENANCE of
+  every signal the diff newly keys lifecycle/state on (content-derived = the
+  lifecycle-authority class in Family A).
 - **Public-facing artifact** (site page, README section, release notes) →
   add an editorial lens reading as an outside engineer, checking every
-  number against its source.
+  number against its source. If the artifact RENDERS (site page/component/
+  CSS), the editorial read is not enough — add a rendered-runtime lens:
+  build and DRIVE the real page, then MEASURE — WCAG contrast in EVERY
+  interactive state (rest/hover/focus/reduced-motion, not just rest), a
+  horizontal-pan sweep at mobile viewports, the no-JS strand, and
+  @supports/legacy-browser fallback arms. #453's diff-scoped "whole-site
+  review" shipped WCAG failures, a mobile pan, and a no-JS blackout — the
+  #455 rendered re-audit found them, and its RE-RUN rendered lens caught the
+  CTA :hover 4.17:1 AA failure that two static lenses AND a rest-state
+  render missed: state-sweep, don't spot-check.
+- **Interactive TUI flow changed** (onboarding, panel actions, popup gating,
+  keybind dispatch) → add a UX / user-journey lens that WALKS each user path
+  end-to-end — first run, every failure branch, the no-CLI user, repeat
+  launches — rather than reading the diff. On PR #359 (onboarding) the two
+  mandated lenses returned APPROVE with 0 findings while this lens confirmed
+  a HIGH — Confirm discarded the `apply_choices` outcomes, silently losing a
+  hook-install failure (R0619-02) — plus the version popup muted FOREVER for
+  a no-CLI user (R0619-01).
 - **Diff touches `pixtuoid-hook` (the shim)** → run a never-panic audit on
   the WHOLE shim, not just the diff: `args_os()` not `args()` (non-UTF-8
   argv panics → exit 101, visible to CC), no slicing/indexing on untrusted
@@ -210,6 +335,71 @@ history:
   919ea7a). This fires even when no
   committed art changes: the film-critic trigger above covers shipped clips,
   and the lifecycle lens traces state, not pixels in motion.
+- **A string or layout that a PAINTER frames changed** (footer/HUD text, panel
+  columns, popup copy — even a text-only diff) → render the COMPOSED frame
+  before the verdict (the snapshot example with the relevant flag). A
+  string-equality unit test is blind to the painter's framing: #308's
+  `footer_warning` embedded its own ⚠ while the hud.rs painter owns the glyph —
+  its test asserted the string WITH the glyph, both review rounds passed it, and
+  live rendered `⚠ ⚠` (caught post-merge only via `snapshot --drift-warning`,
+  R0615-22); #315's new 2-col health flag shifted data rows but not the static
+  "Live" header (R0615-32). The doctor→painter boundary is a two-incident escape
+  surface; the motion trigger above does NOT fire on static text.
+- **Diff touches `install/` or writes another CLI's config** (the surface that
+  mutates OTHER CLIs' user-owned files — PR #23's traversal lived here) → add a
+  per-axis upstream-mirroring lens: enumerate EVERY resolution axis (home order
+  HOME-vs-USERPROFILE; config-dir API — %APPDATA% vs `~/.<cli>`; env overrides
+  verbatim-vs-~-expanded; legacy-dir fallbacks; command form round-tripping the
+  target shell — cmd.exe quoting/8.3, #195) and re-verify each against that
+  CLI's AUTHORITATIVE upstream source IN-SESSION; install/detect/watch must read
+  ONE resolver, and write ⊆ verify (#387/#332). Both #338 lenses checked only
+  the HOME-vs-USERPROFILE axis and missed the %APPDATA% HIGH (reasonix wrote
+  `%USERPROFILE%\.reasonix`, the CLI reads `%APPDATA%\reasonix` →
+  installed-but-no-sprite, R0616-338-08); divergence shipped that class twice
+  (#343, #342).
+- **New source / hook-only integration ships** → demand a LIVE run (or hermetic
+  replay: `scripts/replay-fixture.sh`, the live-e2e scripts) WITHOUT the capture
+  rig's convenience flags before the verdict — a `-C`/forced-workspace capture
+  masks identity-field fallback paths. R0613-05 (env-mode cwd keyed solely on
+  `DEEPSEEK_WORKSPACE` → cwd-less envelope, NO sprite) passed the unit tests,
+  the 3-lens review, the whole-shim audit AND the bot — caught only by live use.
+  And ground event shapes in the CANONICAL upstream docs, never a fork's
+  permissive source (R0613-14: the fork's `{plugin,plugins}` glob masked the
+  `plugins/`-only canonical path).
+- **Dedup / consolidation refactor ships** → add a wrong-abstraction lens
+  ADVERSARIAL TOWARD REVERT, one pass per dedup the diff made: do all call sites
+  of the new shared abstraction share ONE reason-to-change? Sound shape shares
+  only the domain-neutral part — divergent selection/policy stays inline
+  ("duplication is cheaper than the wrong abstraction"). Distinct from Lens 2
+  item 6, which HUNTS new duplication; this validates consolidations the PR
+  SHIPPED, which byte-identity can't judge (it proves behavior, not future
+  divergence). #350's per-dedup adversarial pass held all 26 dedups; the two
+  borderline calls are adjudicated on record — demote, don't re-litigate
+  (R0617-DV-01/02).
+- **Diff claims a "behavior-preserving" refactor** (batch dedup, fields→enum
+  reshape) → don't accept the aggregate proof: a green suite + gen-check 0-drift
+  can't see a decoder-INPUT semantic move. Enumerate PER CALL-SITE which
+  conversions are mechanically identical and which semantics MOVED — a batch
+  dedup tends to hide exactly one mover (#461: of the six `first_present_str`
+  conversions, antigravity's `.or_else` chain had stopped at a
+  present-but-non-string key where the shared scan falls through; APPROVE across
+  every local lens, caught only by the online review, fixed 69934644). Each
+  mover gets its own red-first pin, and a state-shape reshape gets the owning
+  crate's continuity guard (scene `CLAUDE.md` "When refactoring").
+- **Feature models a physical/domain system, or this is the LAST PR of a
+  multi-PR feature arc** (lighting, sky/celestial, weather, walk kinematics —
+  anything with real-world invariants: day>night, occlusion, ordering across
+  weathers/phases) → add a whole-FEATURE invariant audit: ENUMERATE the domain's
+  invariants FIRST, then re-derive each over the FINISHED feature across the
+  parameter space (time × weather × phase), not the diff. Per-task diffs each
+  read consistent while the composition violates physics — this sits BETWEEN the
+  two scopes (too late for any diff lens; the whole-codebase audit doesn't run
+  at arc completion). The sun/moon arc's end-of-arc physics audit (#471,
+  77efd54f) caught 5 such bugs every per-task two-lens review structurally
+  missed (stars gated on darkness instead of `Body::Moon`; Rain disc 0.20 >
+  Overcast 0.05; the disc bleeding through the pillar). Distinct from the
+  film-critic trigger: committed stills pin ONE instant — these bugs live in
+  parameter combinations no baseline renders.
 
 Process notes for the orchestrator: dispatch both in parallel, in the
 worktree, background; verify every MEDIUM+ finding's premise yourself before
@@ -222,8 +412,19 @@ design, cite or ADD the relevant per-crate `CLAUDE.md` sharp edge), or
 ISSUE-FILED (no-deferral rule applies: only big/refactor work defers).
 "Acknowledged, no action" is not a state: #40's ignored migration finding
 became a 0.4.1 release-blocker (#46); two more drop cases:
-docs/review-metrics/mining-2026-06.md. After a fix round, re-run the gates
-and watch the NEW head's CI.
+docs/review-metrics/mining-2026-06.md. Commit skew cuts both ways: run the
+sweep against the FULL online thread at the FINAL merge head, not the commit
+the local lenses ran on — a bot finding that lands on a later commit after
+the sweep is the silent-drop class (#283's blocking-executor MEDIUM,
+dropped→#330; #383's terminal-by-code-only MEDIUM). Conversely, before acting
+on or re-litigating a bot re-flag, check WHICH commit the bot reviewed —
+#316 burned ~4 rounds on five already-fixed findings re-raised from an old
+commit (R0615-OCP1..5, all REFUTED-STALE). After a fix round, re-run the
+gates and watch the NEW head's CI — and gate the merge on the online bot
+review's LATEST COMMENT verdict (`Findings: N`) plus `mergeStateStatus`,
+never the check table: the claude-review JOB is green even when it posts
+findings (#448 merged past a fresh MEDIUM; #449 onward reads the comment
+verdict).
 
 ---
 
@@ -239,7 +440,9 @@ and the fan-out change. Shape (prescribed; degradable to sequential/parallel
    - *Subsystem finders*, one per crate/module cluster (core: decoders /
      liveness+watcher / reducer+state; scene: painter / motion+layout /
      theme+misc; binary: install / runtime+tui / widgets+floating; hook+web+
-     tooling).
+     tooling; site + integrations/raycast — the non-Rust consumers, with site
+     pages RENDERED per the public-facing trigger, not source-read only —
+     #453 proved this surface is structurally unaudited otherwise).
    - *Whole-tree specialist sweeps*, one FACTOR each across all crates —
      arch-invariants, concurrency/liveness seams, security, drift — the
      aggregate-only lenses a per-subsystem finder structurally can't run.
@@ -256,7 +459,8 @@ and the fan-out change. Shape (prescribed; degradable to sequential/parallel
    agent's sharp-edge context accurate.
 5. **Disposition sweep** — the shared terminal-state rule below (FIXED /
    REFUTED-with-sharp-edge / ISSUE-FILED); apply small fixes in-arc, defer only
-   big/refactor; end with the repo-wide stale-phrase `grep` == 0.
+   big/refactor; end with the repo-wide stale-phrase sweep == 0 (`rg --hidden`
+   or `grep -rn` — bare `rg` silently skips `.github/`/`.claude/`).
 
 The audit additionally carries a **SYSTEM lens** (module decomposition still
 right, dependency directions clean, cross-PR composition seams) **and a
