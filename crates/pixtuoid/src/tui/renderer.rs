@@ -295,19 +295,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     let mouse_pos = ctx.mouse_pos;
     let pinned_agent = ctx.pinned_agent;
     let hovered = mouse_pos.and_then(|(mx, my)| {
-        hit_test_agent(
-            scene,
-            &layout,
-            now,
-            &mut pixtuoid_scene::pose::RouteCtx {
-                router: &mut ctx.store.router,
-                overlay: &ctx.store.overlay,
-                history: &mut ctx.store.history,
-                motion: &mut ctx.store.motion,
-            },
-            mx,
-            my,
-        )
+        hit_test_agent(scene, &layout, now, &mut ctx.store.route_ctx(), mx, my)
     });
 
     // Modal backdrop: DIM the office by the loop-computed `onboarding.dim` (ramps
@@ -342,12 +330,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
             scene,
             &layout,
             now,
-            &mut pixtuoid_scene::pose::RouteCtx {
-                router: &mut ctx.store.router,
-                overlay: &ctx.store.overlay,
-                history: &mut ctx.store.history,
-                motion: &mut ctx.store.motion,
-            },
+            &mut ctx.store.route_ctx(),
             actual_scene,
             hovered,
             theme,

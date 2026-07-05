@@ -135,6 +135,20 @@ impl FloorCtx {
         self.motion.retain(|id, _| scene.agents.contains_key(id));
     }
 
+    /// Borrow this floor's routing state as a [`crate::pose::RouteCtx`] — the
+    /// disjoint `&mut router / &overlay / &mut history / &mut motion` bundle the
+    /// pose router + label overlay need. One method so a new store added to
+    /// `RouteCtx` lands here, not re-typed (with its per-field &-vs-&mut split) at
+    /// every painter call site.
+    pub fn route_ctx(&mut self) -> crate::pose::RouteCtx<'_> {
+        crate::pose::RouteCtx {
+            router: &mut self.router,
+            overlay: &self.overlay,
+            history: &mut self.history,
+            motion: &mut self.motion,
+        }
+    }
+
     /// Recompute `door_anim_max_ms` from the current `motion` map: the max
     /// `duration_ms + pause_ms` over the **in-flight** entry/exit profiles only.
     /// Called after each render (normal + transition paths) so the door cosmetic

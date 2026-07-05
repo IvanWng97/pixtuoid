@@ -104,13 +104,7 @@ impl OfficeRenderer {
         let Some(layout) = self.last_layout.as_ref() else {
             return Vec::new();
         };
-        let fctx = &mut self.session.floor.ctx;
-        let mut rctx = pixtuoid_scene::pose::RouteCtx {
-            router: &mut fctx.router,
-            overlay: &fctx.overlay,
-            history: &mut fctx.history,
-            motion: &mut fctx.motion,
-        };
+        let mut rctx = self.session.floor.ctx.route_ctx();
         pixtuoid_scene::overlay::build_overlay(scene, layout, now, &mut rctx, None)
     }
 }
