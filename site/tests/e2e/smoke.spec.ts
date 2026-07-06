@@ -643,8 +643,8 @@ test('the clock forces night after hours and clears on an explicit theme act', a
 test('first visit: boot intro auto-runs, reveals the page, seeds the gate', async ({ page }) => {
   await page.goto('./'); // NO pix-booted seed — the real first visit
   await expect(page.locator('#boot')).toBeVisible();
-  // The auto-run finishes in ~2.5s of sequenced timeouts — poll, no fixed wait.
-  await expect(page.locator('html')).not.toHaveAttribute('data-booting', '1', { timeout: 8_000 });
+  // Splash log displays 4 lines (~2.1s) then holds for engine (~4s MAX_ENGINE_WAITS) + settle fade (460ms) ≈ 6.5s.
+  await expect(page.locator('html')).not.toHaveAttribute('data-booting', '1', { timeout: 10_000 });
   await expect.poll(() => page.evaluate(() => sessionStorage.getItem('pix-booted'))).toBe('1');
   expect(await page.evaluate(() => document.getElementById('main')!.hasAttribute('inert'))).toBe(
     false
@@ -670,32 +670,25 @@ test('first visit on an office-less page lifts the splash promptly (no engine-ga
   await page.goto('./architecture/'); // real first visit (no pix-booted), no OfficeBackdrop
   await expect(page.locator('#boot')).toBeVisible();
   await expect(page.locator('#office-live')).toHaveCount(0); // confirm: no office on this page
-  // Fix clears data-booting in ~3.4s (per-line dwell 450ms); the unguarded gate hangs to ~5.9s. 5.2s separates.
-  await expect(page.locator('html')).not.toHaveAttribute('data-booting', '1', { timeout: 5_200 });
+  // Splash clears data-booting in ~2.1s (4×450ms line dwell) + 460ms fade ≈ 2.6s; the unguarded gate hangs to ~5.9s. 3.5s separates.
+  await expect(page.locator('html')).not.toHaveAttribute('data-booting', '1', { timeout: 3_500 });
   expect(errors()).toEqual([]);
 });
 
-test('first visit: splash types the install command and lands it in the hero row', async ({
-  page,
-}) => {
+test('first visit: splash displays 4-line log with per-line dwell (~450ms)', async ({ page }) => {
   const errors = watchErrors(page);
-  await page.goto('./'); // NO pix-booted seed — the real first visit
+  // Test on docs page (no office, no engine wait) for pure splash-timing measurement.
+  await page.goto('./config/'); // NO pix-booted seed — the real first visit
   await expect(page.locator('#boot')).toBeVisible();
-  // The remodeled log answers "does it support my tool" in the splash…
+  // The splash displays 4 log lines: version, booting, themes, CLI count.
+  await expect(page.locator('#boot .boot__log')).toContainText('pixtuoid');
+  await expect(page.locator('#boot .boot__log')).toContainText('booting office');
+  await expect(page.locator('#boot .boot__log')).toContainText('loading themes');
   await expect(page.locator('#boot .boot__log')).toContainText('10 CLIs connected');
-  // …and TYPES the real install command (single-sourced from install.json).
-  await expect(page.locator('#boot [data-boot-typed]')).toHaveText(
-    'brew install IvanWng97/pixtuoid/pixtuoid',
-    { timeout: 6_000 }
-  );
+  // Splash clears data-booting in ~2.1s (4×450ms line dwell) + 460ms fade ≈ 2.6s.
   await expect(page.locator('html')).not.toHaveAttribute('data-booting', '1', {
-    timeout: 8_000,
+    timeout: 3_500,
   });
-  // The landing slot: the hero install row carries the SAME command the
-  // splash typed — the FLIP hand-off can't desync (one source).
-  await expect(page.locator('#hero-install-cmd')).toContainText(
-    'brew install IvanWng97/pixtuoid/pixtuoid'
-  );
   // Whole-viewport skip still seeds the session gate.
   await expect.poll(() => page.evaluate(() => sessionStorage.getItem('pix-booted'))).toBe('1');
   expect(errors()).toEqual([]);

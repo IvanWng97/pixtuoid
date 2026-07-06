@@ -28,12 +28,9 @@ import sources from '../sources.json';
 const brewTab = installTabs.find((t) => t.id === 'brew');
 if (!brewTab) throw new Error('Base: install.json lost its brew row (the canonical one-liner)');
 const INSTALL_CMD = brewTab.cmds[0];
-// Splash single sources: the CLI count is the sources manifest's length (the
-// same file the tools board renders + the Rust bridge test pins), and the
-// typed command is the SAME brew entry the hero install row renders — no
-// literal to drift, and the FLIP landing can't desync from its target.
+// Splash single sources: the CLI count comes from the sources manifest's
+// length (the same file the tools board renders + the Rust bridge test pins).
 const CLI_COUNT = sources.length;
-const BOOT_CMD = INSTALL_CMD;
 
 interface Props {
   title?: string;
@@ -287,9 +284,6 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
         <div class="boot__line">▸ booting office… <span class="boot__ok">ok</span></div>
         <div class="boot__line">▸ loading themes… <span class="boot__ok">ok</span></div>
         <div class="boot__line">▸ {CLI_COUNT} CLIs connected… <span class="boot__ok">ok</span></div>
-        <div class="boot__line boot__line--cmd" data-boot-cmd={BOOT_CMD}>
-          $ <span data-boot-typed></span><span class="cursor" aria-hidden="true"></span>
-        </div>
       </div>
       <div class="boot__hint">
         <span class="boot__hint-key">press any key to skip</span><span class="boot__hint-tap"
@@ -523,22 +517,16 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
           }
         });
         const lines = boot.querySelectorAll('.boot__line');
-        const cmdLine = boot.querySelector('.boot__line--cmd');
-        const typedEl = boot.querySelector('[data-boot-typed]');
-        const CMD = cmdLine ? cmdLine.dataset.bootCmd || '' : '';
-        // §1 budget: ~3.4s total on the deterministic (no live-engine-wait)
-        // path — retuned for per-line dwell ~450ms/line (user decision 2026-07-06:
-        // readability of each line outranks total duration; skippable anyway).
-        // FIRST_MS + 4×LINE_MS + |cmd|×TYPE_MS ≈ 2.96s of log/typing (250 + 4×450 +
-        // 41×16, for the 40-char brew command), + NO_OFFICE_HOLD_MS + the 460ms
-        // overlay fade ≈ 3.4s. per-line dwell ~450ms mirrors the pre-redesign
-        // splash's rhythm. (The live-office/index page's ACTUAL total additionally
-        // depends on window.__pixEngineReady — bounded separately by MAX_ENGINE_WAITS,
-        // not this budget.)
+        // §1 budget: ~2.1s total on the deterministic (no live-engine-wait) path —
+        // four splash lines (no typed command; the hero install row already displays
+        // it permanently) with per-line dwell ~450ms/line (user decision 2026-07-06:
+        // readability of each line outranks duration; splash is skippable anyway).
+        // FIRST_MS + 4×LINE_MS ≈ 250 + 4×450 = 2,050ms of log display.
+        // The live-office/index page's ACTUAL total additionally depends on
+        // window.__pixEngineReady — bounded separately by MAX_ENGINE_WAITS, not this budget.
+        // (Typed-command landing removed by user decision 2026-07-06: hero row already carries it.)
         const LINE_MS = 450;
         const FIRST_MS = 250;
-        const TYPE_MS = 16;
-        const NO_OFFICE_HOLD_MS = 250; // the flat hold on an office-less page (docs/404)
         let i = 0,
           done = false;
         function settle() {
@@ -560,111 +548,42 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
           // the page and skip keyboard users past the nav/skip-link). The bg is
           // no longer inert, so Tab flows skip-link -> nav -> content as normal.
         }
-        // FLIP-land the typed prompt line into the hero's install slot (spec
-        // §1). The overlay bg and the office's boot-cover are BOTH var(--bg),
-        // so going transparent under the flying line is seamless; settle()'s
-        // .is-done fade then swaps the flown line for the real row. Falls
-        // through untouched on office-less pages (docs/404 have no hero slot)
-        // and on skip. Reduced-motion never reaches here (data-booting is
-        // never set — the static path shows the complete install row).
-        function land(cb) {
-          const dst = document.getElementById('hero-install-cmd');
-          if (!cmdLine || !dst) {
-            cb();
-            return;
-          }
-          const a = cmdLine.getBoundingClientRect();
-          const b = dst.getBoundingClientRect();
-          // Scale by FONT-SIZE ratio, not box-height ratio: the boot log's
-          // line-height (1.95, for the typed-line legibility) and the hero
-          // code element's (~1.7, browser default for its font) differ, so
-          // b.height/a.height undershoots the true glyph-size ratio — the
-          // flown text landed visibly smaller than the real row (a ghosting
-          // double-image caught by reading the FLIP frame series).
-          const scale =
-            parseFloat(getComputedStyle(dst).fontSize) /
-            parseFloat(getComputedStyle(cmdLine).fontSize);
-          boot.classList.add('is-landing');
-          cmdLine.style.transformOrigin = 'top left';
-          const FLIP_MS = 420;
-          cmdLine.style.transition =
-            'transform ' + FLIP_MS / 1000 + 's cubic-bezier(0.22, 0.9, 0.3, 1)';
-          cmdLine.style.transform =
-            'translate(' +
-            (b.left - a.left) +
-            'px, ' +
-            (b.top - a.top) +
-            'px) scale(' +
-            scale +
-            ')';
-          let called = false;
-          function once() {
-            if (called) return;
-            called = true;
-            cb();
-          }
-          cmdLine.addEventListener('transitionend', once, { once: true });
-          // transitionend can be swallowed (tab hide mid-flight) — never hang
-          // the page inert on a lost event.
-          setTimeout(once, FLIP_MS + 100);
-        }
-        function finish(viaSkip) {
+        function finish() {
           if (done) return;
-          done = true;
-          if (viaSkip) settle();
-          else land(settle);
-        }
-        function typeCmd(k) {
-          if (done) return;
-          if (k > CMD.length) {
-            afterLines();
-            return;
-          }
-          typedEl.textContent = CMD.slice(0, k);
-          setTimeout(function () {
-            typeCmd(k + 1);
-          }, TYPE_MS);
-        }
-        function afterLines() {
           if (document.getElementById('office-live')) {
-            // Level 2: the log is typed — now HOLD (the prompt cursor blinks)
-            // until the office engine is actually ready (window.__pixEngineReady,
-            // set by OfficeBackdrop on the first live frame, or on wasm
-            // failure/absence so we never hang), so the splash lifts STRAIGHT
-            // into the office reveal instead of onto a bg gap.
+            // Level 2: log is done — now HOLD until the office engine is actually
+            // ready (window.__pixEngineReady, set by OfficeBackdrop on the first live
+            // frame, or on wasm failure/absence so we never hang), so the splash lifts
+            // STRAIGHT into the office reveal instead of onto a bg gap.
             // GATED on the office being PRESENT: this splash lives in the shared
             // Base layout, but OfficeBackdrop (#office-live) is index-only — it's
             // the sole setter of __pixEngineReady. On docs/404 first visits nothing
             // would ever set the flag, so without this guard the splash would hang
-            // the full cap with the page inert. No office → a flat short delay.
+            // the full cap with the page inert. No office → settle() directly.
             waitForEngine(0);
           } else {
-            setTimeout(function () {
-              finish(false);
-            }, NO_OFFICE_HOLD_MS);
+            done = true;
+            settle();
           }
         }
         function step() {
           if (done) return;
           const line = lines[i];
           if (!line) {
-            afterLines();
+            finish();
             return;
           }
           line.classList.add('in');
           i++;
-          if (line === cmdLine) {
-            typeCmd(0);
-            return;
-          }
           setTimeout(step, LINE_MS);
         }
         const MAX_ENGINE_WAITS = 50; // 50 × 80ms ≈ 4s cap after the log finishes
         function waitForEngine(n) {
           if (done) return;
           if (window.__pixEngineReady || n >= MAX_ENGINE_WAITS) {
+            done = true;
             setTimeout(function () {
-              finish(false);
+              settle();
             }, 180);
             return;
           }
@@ -674,8 +593,7 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
         }
         function skip() {
           for (let j = 0; j < lines.length; j++) lines[j].classList.add('in');
-          if (typedEl) typedEl.textContent = CMD;
-          finish(true);
+          finish();
         }
         function onKey() {
           skip();
