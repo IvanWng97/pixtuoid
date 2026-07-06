@@ -364,7 +364,7 @@ site-e2e:
 # Regenerate everything: README sections + docs images + site demos.
 [group('gen')]
 [doc('Regenerate ALL committed artifacts (README sections + docs images + site demos)')]
-gen: gen-readme gen-media
+gen: gen-readme gen-media gen-icons
 
 # Sync the README's install/features/tools sections from site/src/*.json.
 [group('gen')]
@@ -401,6 +401,11 @@ gen-readme-check:
 [doc('Regenerate docs/images/ + site/public/demos/ from scripts/media.json')]
 gen-media *args:
     .venv/bin/python3 scripts/gen-media.py {{ args }}
+
+[group('gen')]
+[doc('Regenerate site/src/assets/pix-icons/ from the embedded sprite-pack palette')]
+gen-icons:
+    .venv/bin/python3 scripts/gen-pix-icons.py
 
 # The ONE wasm compile step — gen-wasm (below) and ci.yml's wasm-check job both
 # call this, so the package/target/profile CI checks can't drift from what

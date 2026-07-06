@@ -1,6 +1,7 @@
 ---
 import featuresData from '../features.json';
 import { floorById, floorName } from '../consts';
+import PixIcon from './PixIcon.astro';
 
 const floor = floorById('features');
 
@@ -13,6 +14,7 @@ type Feature = {
   name: string;
   desc: string;
   featured?: boolean;
+  pix?: string;
   card?: { blurb: string; href?: string };
 };
 
@@ -25,6 +27,7 @@ const cells = features.flatMap((f) =>
     ? [
         {
           icon: f.icon,
+          pix: f.pix,
           title: f.name,
           body: f.card.blurb ?? f.desc,
           href: f.card.href,
@@ -56,7 +59,7 @@ const cells = features.flatMap((f) =>
         cells.map((c) => (
           <article class="ledger__row reveal text-scrim">
             <span class="ledger__icon" aria-hidden="true">
-              {c.icon}
+              {c.pix ? <PixIcon name={c.pix} scale={2} /> : c.icon}
             </span>
             <h3 class="ledger__name">{c.title}</h3>
             <p class="ledger__body">{c.body}</p>
