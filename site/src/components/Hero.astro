@@ -20,15 +20,17 @@ const STARS = __GH_STARS__;
 
 <section id={floor.id} class="hero" data-floor={floor.fl} data-floor-label={floor.label}>
   {
-    /* The title card: the live office (page-wide backdrop) is fully lit at
-      scroll-0; the statement sits bottom-left, film-title style, and pulls
-      the dimmer in as it approaches the viewport center (data-lit="fade").
-      The engine places the meeting rooms in the layout's left column — the
+    /* The title card: the live office (page-wide backdrop) is permanently
+      exempt from the dimmer (data-lit-max="0" — the mask never darkens it,
+      at any scroll position); the statement sits bottom-left, film-title
+      style, and independently fades/rises with viewport proximity via
+      data-lit="fade" (its own local opacity, not the shared dimmer). The
+      engine places the meeting rooms in the layout's left column — the
       statement deliberately sits UNDER them, not over. */
   }
   <canvas id="dust" class="dust" aria-hidden="true"></canvas>
   <div class="container hero__frame">
-    <div class="hero__copy" data-lit="fade" data-lit-max="0.74">
+    <div class="hero__copy" data-lit="fade" data-lit-max="0">
       <p class="eyebrow">{floor.fl} · {floorName(floor)} — terminal-native, open&nbsp;source</p>
       <h1 class="statement">
         Your agents<br />

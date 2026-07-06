@@ -1137,16 +1137,18 @@ test('text over the live office carries its own scrim (.text-scrim)', async ({ p
 test('the scrimmed hero subcopy clears WCAG AA at the worst-case composite (day theme)', async ({
   page,
 }) => {
-  // Review finding (task 2): the binding constraint is WCAG AA (4.5:1) for
-  // EVERY token, but the shipped test above only checked a scrim EXISTS, not
-  // that it's dark/opaque enough. The worst case is day theme, since it's the
-  // theme whose --fg-muted/--scrim pairing has the least headroom: the hero
-  // subcopy (--fg-muted) inside .text-scrim, with the dimmer capped at the
-  // hero's own data-lit-max (below its usual ceiling — see [data-lit-max] in
-  // OfficeBackdrop.astro) instead of fully dark, painted over --screen (the
-  // darkest pixel the office ever renders). Reads REAL computed styles (not
-  // hardcoded token values) so a future --scrim/--fg-muted regression fails
-  // this test rather than only a visual read.
+  // The binding constraint is WCAG AA (4.5:1) for EVERY token. The worst
+  // case is day theme, since it's the theme whose --fg-muted/--scrim pairing
+  // has the least headroom: the hero subcopy (--fg-muted) inside
+  // .text-scrim, painted over --screen (the darkest pixel the office ever
+  // renders). The hero's data-lit-max="0" (position-purity redesign — the
+  // mask never darkens the hero, at any scroll position) makes the dimmer
+  // step below collapse to an IDENTITY (afterDimmer === officeWorstPixel),
+  // so .text-scrim alone carries the whole contrast burden — hence the
+  // day --scrim alpha lift to 0.97 (see global.css). Reads REAL computed
+  // styles (not hardcoded token values) so a future
+  // --scrim/--fg-muted/data-lit-max regression fails this test rather than
+  // only a visual read.
   await page.addInitScript(() => {
     sessionStorage.setItem('pix-booted', '1');
     localStorage.setItem('pix-theme', 'day');
@@ -1168,9 +1170,8 @@ test('the scrimmed hero subcopy clears WCAG AA at the worst-case composite (day 
 
   // --screen is a PROXY for the darkest pixel the live office canvas actually
   // renders (a real frame sample isn't practical here) — reviewer-verified
-  // immaterial: at the hero's 90% dimmer alpha, the ratio shift from any
-  // plausible canvas-vs-token delta is <0.005, against a 0.26 margin above
-  // the 4.5:1 floor.
+  // immaterial: the ratio shift from any plausible canvas-vs-token delta is
+  // <0.005, against a 0.22 margin above the 4.5:1 floor (measured ~4.72:1).
   const officeWorstPixel = parseHex(measured.screenToken);
   const afterDimmer = compositeOver(
     [...parseRgb(measured.dimmerBg).slice(0, 3), measured.dataLitMax] as [
@@ -1225,15 +1226,39 @@ test('hero badge codes: every per-source hue clears WCAG AA on the chip screen',
   }
 });
 
-test('scroll-0 holds full lights; the dimmer engages on first scroll', async ({ page }) => {
+test('the dimmer is a pure function of scroll position — no first-scroll latch', async ({
+  page,
+}) => {
+  // Regression pin (user-identified): the removed design tracked a visit-
+  // scoped `engaged` latch that flipped true on the first scroll gesture and
+  // never released, so the hero read bright on a fresh load but dimmed after
+  // scrolling down and back up — same scrollY, different appearance, purely
+  // from history. The hero's data-lit-max="0" now makes the mask permanently
+  // exempt there, so its contribution is 0 at ANY scroll position, fresh or
+  // returned-to.
   await gotoLive(page);
   const dim = () =>
     page.evaluate(() => parseFloat(document.getElementById('dimmer')!.style.opacity || '0'));
-  // Full lights before any scroll — the live office IS the first content.
+  // Full lights on a fresh load — the live office IS the first content.
   await expect.poll(dim).toBe(0);
-  await page.mouse.wheel(0, 400);
-  // …and the signature scroll-dimmer takes over on the first gesture.
-  await expect.poll(dim).toBeGreaterThan(0);
+  // Scroll deep enough to actually engage the mask elsewhere on the page —
+  // the old latch would flip true here and never release.
+  await page.evaluate(() =>
+    document.getElementById('features')!.scrollIntoView({ block: 'center', behavior: 'instant' })
+  );
+  await expect.poll(dim).toBeGreaterThan(0.5);
+  // Back to the hero's exact position: must read the SAME full-lights value
+  // it did before the deep scroll, not a residual latch-darkened one.
+  await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
+  await expect.poll(dim).toBe(0);
+  // The closer sits in its own office-gap (not a [data-lit] block, unaffected
+  // by this redesign) — the mask releases there too.
+  await page.evaluate(() =>
+    document
+      .querySelector('[data-office-hour]')!
+      .scrollIntoView({ block: 'center', behavior: 'instant' })
+  );
+  await expect.poll(dim).toBeLessThan(0.15);
 });
 
 test('the closer hold carries the install line and fires pix:install-copy {source:closer}', async ({

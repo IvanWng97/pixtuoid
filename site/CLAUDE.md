@@ -86,16 +86,19 @@ Mermaid diagram becomes an inline SVG at build via `rehype-mermaid`, which is
   wasm fetch is **deferred** off the render-critical window (`load` →
   `requestIdleCallback`) so it doesn't compete with the above-fold poster/fonts;
   a live un-reduce still boots promptly via the mq listener. The dimmer
-  controller honours a per-block `data-lit-max`: the hero's `data-lit` block caps
-  its darkness at 0.74 (below the shared `DIM_MAX` 0.86) so the LIVE office reads
-  above the fold, while downpage statement holds keep `DIM_MAX` for copy
-  legibility (the `[data-lit]::before` radial wash still floors local contrast).
-  Scroll-0 holds full lights (dim = 0) and the first scroll gesture engages the
-  dimmer via an `engaged` latch that never releases for the rest of the visit
-  (a return to scroll-0 keeps normal dimmer behavior, it just doesn't go back
-  to the pinned full-lights start) — it's **VISIT-scoped, not position-scoped**:
-  the latch lives in the controller's closure (reset only by a fresh page
-  load), not derived by re-checking `scrollY` each frame.
+  controller honours a per-block `data-lit-max`: the hero's `data-lit` block
+  carries a **permanent** `data-lit-max="0"` — the mask never contributes ANY
+  darkness there, at any scroll position, so the LIVE office reads above the
+  fold at all times (its text rides `.text-scrim`/`.hw-panel` backing instead,
+  not the dimmer), while downpage statement holds keep the shared `DIM_MAX`
+  (0.86) for copy legibility (the `[data-lit]::before` radial wash still
+  floors local contrast). **The dimmer is a pure function of viewport
+  position** — `op = cap * ease(best)`, recomputed every changed frame from
+  the current `scrollY` alone, with no latch and no history: the same
+  scrollY always reads the same opacity, whichever gestures preceded it (a
+  visit-scoped `engaged` latch used to make scroll-0 read full-lights only on
+  the FIRST arrival and dimmed on every later return — a position/history
+  mismatch a user caught and this redesign removed).
 - **The showcase `VIBING` channel is a SECOND live `Office` (#468).** The CRT
   showcase (`Showcase.astro` + `ChannelStage.astro`, driven by `src/showcase.json`
   → `src/consts.ts`) has one `kind:"live"` channel, `vibing`, whose screen is a
