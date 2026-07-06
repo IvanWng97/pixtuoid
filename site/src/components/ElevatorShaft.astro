@@ -1,5 +1,5 @@
 ---
-import { FLOORS } from '../consts';
+import { FLOORS, FLOOR_SPY_ROOT_MARGIN } from '../consts';
 
 // The elevator made literal (spec §4): a slim pixel shaft fixed at the right
 // edge; a pixel car rides 6F→1F with scroll; floors are dual-labeled from the
@@ -31,7 +31,7 @@ import { FLOORS } from '../consts';
   <span class="shaft__keys text-scrim" aria-hidden="true">keys 1–6</span>
 </aside>
 
-<script is:inline>
+<script is:inline define:vars={{ floorSpyRootMargin: FLOOR_SPY_ROOT_MARGIN }}>
   (function () {
     const shaft = document.querySelector('[data-shaft]');
     if (!shaft) return;
@@ -108,7 +108,8 @@ import { FLOORS } from '../consts';
     window.addEventListener('resize', queueRide);
 
     // ── current floor: the SAME center-band observer contract the statusline
-    // scrollspy uses (-45%/-45%), so the two readouts can never disagree ──
+    // scrollspy uses — both read FLOOR_SPY_ROOT_MARGIN (consts.ts), so the two
+    // readouts can never disagree ──
     function observe() {
       resolveSections();
       if ('IntersectionObserver' in window) {
@@ -118,7 +119,7 @@ import { FLOORS } from '../consts';
               if (e.isIntersecting) arrive(e.target.dataset.floor);
             });
           },
-          { rootMargin: '-45% 0px -45% 0px', threshold: 0 }
+          { rootMargin: floorSpyRootMargin, threshold: 0 }
         );
         sections.forEach(function (s) {
           io.observe(s);
@@ -132,9 +133,11 @@ import { FLOORS } from '../consts';
       observe();
     }
 
-    // ── ambient-motion membership: the page pause switch stills the ding
-    // pulse (the car itself only moves WITH user scroll — user-initiated,
-    // outside WCAG 2.2.2's auto-motion scope) ──
+    // ── ambient-motion membership (adjudicated): the page pause switch
+    // stills the ding pulse ONLY. The car itself keeps riding while paused —
+    // it only ever moves WITH user scroll, the same "user-initiated, not
+    // ambient" status a native scrollbar thumb has, so it sits outside WCAG
+    // 2.2.2's auto-motion scope and the pause switch has nothing to hold. ──
     document.addEventListener('pix:paused', function (e) {
       userPaused = !!(e.detail && e.detail.paused);
     });
@@ -269,9 +272,12 @@ import { FLOORS } from '../consts';
       display: none;
     }
     /* The shaft stays slim by design (it reads as hardware, a rail, not a
-       button bar) — widening each dot to a 44px touch target here would
-       defeat that. WCAG 2.5.8's "equivalent control" exception is met by the
-       statusline's own floor list (sl__floorbtn), which exposes the SAME six
-       floors at a real ≥44px target and already gets a coarse-pointer bump. */
+       button bar) — widening each dot into a real touch target here would
+       defeat that. The applicable SC is 2.5.8 Target Size Minimum (AA,
+       24×24px) — NOT 2.5.5 (AAA, 44×44px, a stricter level this site doesn't
+       claim). 2.5.8 carries its own "equivalent control" exception, met by
+       the statusline's own floor list (sl__floorbtn), which exposes the SAME
+       six floors at a measured ~40.9px target (already coarse-pointer-bumped)
+       — comfortably clearing the 24px AA minimum, well short of AAA. */
   }
 </style>

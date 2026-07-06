@@ -10,7 +10,7 @@
 // office — with canned office-life beats interleaved; falls back to the
 // canned reel when the API is unreachable so the build never fails.
 import sources from '../sources.json';
-import { FLOORS, floorName, DIM_RESTING, REPO } from '../consts';
+import { FLOORS, floorName, DIM_RESTING, FLOOR_SPY_ROOT_MARGIN, REPO } from '../consts';
 import { GH_FETCH_TIMEOUT_MS } from '../../config/gh-stars.mjs';
 
 // Build-time star count (§2): null when the API was unreachable at build —
@@ -463,7 +463,10 @@ const badgeColor = (who: string): string | undefined => {
   }
 </style>
 
-<script is:inline define:vars={{ dimResting: DIM_RESTING }}>
+<script
+  is:inline
+  define:vars={{ dimResting: DIM_RESTING, floorSpyRootMargin: FLOOR_SPY_ROOT_MARGIN }}
+>
   (function () {
     const bar = document.getElementById('statusline');
     if (!bar) return;
@@ -551,7 +554,7 @@ const badgeColor = (who: string): string | undefined => {
             if (e.isIntersecting) setActive(e.target.dataset.floor);
           });
         },
-        { rootMargin: '-45% 0px -45% 0px', threshold: 0 }
+        { rootMargin: floorSpyRootMargin, threshold: 0 }
       );
       document.querySelectorAll('[data-floor]').forEach(function (s) {
         io.observe(s);

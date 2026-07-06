@@ -56,6 +56,14 @@ export const floorById = (id: string): Floor => {
 // eyebrows and the lift readout
 export const floorName = (f: Floor): string => f.label.split(' — ')[0];
 
+// The ONE floor-spy IntersectionObserver band: the Statusline's scrollspy and
+// the ElevatorShaft's current-floor LED/car each build their own observer
+// over the SAME [data-floor] sections, so a one-sided retune of the band
+// would make the two readouts silently disagree. Both thread this in via
+// define:vars (is:inline scripts can't `import` at runtime) — no second
+// '-45%' literal anywhere.
+export const FLOOR_SPY_ROOT_MARGIN = '-45% 0px -45% 0px';
+
 // The dimmer's resting opacity — the single source for FIVE former copies that
 // straddle a JS↔CSS boundary. OfficeBackdrop emits it into #dimmer's CSS via an
 // inline `--dim-rest` custom property (its base + reduced-motion rules read it);

@@ -106,6 +106,15 @@ test('elevator shaft: click-to-ride lands the floor, LED + lift readout agree', 
   await expect(page.locator('[data-shaft-stop]')).toHaveCount(6);
   // 6F is home: the top stop is current on load
   await expect(page.locator('[data-shaft-stop="6F"]')).toHaveAttribute('aria-current', 'true');
+  const carY = () =>
+    page.evaluate(
+      () =>
+        new DOMMatrix(getComputedStyle(document.querySelector('[data-shaft-car]')!).transform).m42
+    );
+  // baseline BEFORE riding — 6F's resting Y is already > 0 (the top stop isn't
+  // pinned at the rail's own y=0), so "> 0" after the ride would pass even if
+  // the car never moved; record it and assert the DELTA instead
+  const preY = await carY();
   // click-to-ride: 1F front desk
   await page.locator('[data-shaft-stop="1F"]').click();
   await expect(page.locator('[data-shaft-stop="1F"]')).toHaveAttribute('aria-current', 'true', {
@@ -122,13 +131,85 @@ test('elevator shaft: click-to-ride lands the floor, LED + lift readout agree', 
     .toBe(true);
   // the statusline lift and the shaft read the SAME sections — they must agree
   await expect(page.locator('[data-lift-digit]')).toHaveText('1F');
-  // the car rode down the rail (transform moved off the 6F stop)
-  const carY = () =>
-    page.evaluate(
-      () =>
-        new DOMMatrix(getComputedStyle(document.querySelector('[data-shaft-car]')!).transform).m42
+  // the car rode down the rail by a MEANINGFUL amount — more than half of one
+  // inter-stop gap (the rail's 6 stops are evenly spaced top-to-bottom, so
+  // that's the actual on-page geometry, not an arbitrary literal): riding all
+  // the way from 6F to 1F must cover several gaps, so half of one is a floor
+  // well under what a real ride produces but well over layout jitter/rounding
+  const gap = await page.evaluate(() => {
+    const stops = Array.from(document.querySelectorAll<HTMLElement>('[data-shaft-stop]'));
+    return (stops[stops.length - 1].offsetTop - stops[0].offsetTop) / (stops.length - 1);
+  });
+  const postY = await carY();
+  expect(postY - preY).toBeGreaterThan(gap / 2);
+});
+
+test('elevator shaft: the current-floor LED dot is actually lit, not just text-colored', async ({
+  page,
+}) => {
+  await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
+  await page.goto('./');
+  // `.led-selected` (global.css) only recolors TEXT — the fix wires the dot's
+  // own background to the SAME --led token. Read the token straight off the
+  // root and compare it to the dot's rendered background so this proves the
+  // dot is really lit, not merely that a class name got toggled. Both are
+  // resolved by the SAME browser engine (a probe styled with `var(--led)`),
+  // so the comparison never depends on hex vs. rgb() string formatting.
+  const litColor = await page.evaluate(() => {
+    const probe = document.createElement('span');
+    probe.style.background = 'var(--led)';
+    document.body.appendChild(probe);
+    const c = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    return c;
+  });
+  const dotColor = (fl: string) =>
+    page
+      .locator(`[data-shaft-stop="${fl}"] .led-dot`)
+      .evaluate((el) => getComputedStyle(el).backgroundColor);
+  // 6F is current on load: its dot is lit, a non-current dot (5F) is not
+  await expect(page.locator('[data-shaft-stop="6F"]')).toHaveAttribute('aria-current', 'true');
+  expect(await dotColor('6F')).toBe(litColor);
+  expect(await dotColor('5F')).not.toBe(litColor);
+  // ride to 3F: the lit dot follows
+  await page.locator('[data-shaft-stop="3F"]').click();
+  await expect(page.locator('[data-shaft-stop="3F"]')).toHaveAttribute('aria-current', 'true', {
+    timeout: 10_000,
+  });
+  expect(await dotColor('3F')).toBe(litColor);
+  expect(await dotColor('6F')).not.toBe(litColor);
+});
+
+test('elevator shaft: every floor is reachable and reads current on BOTH the shaft LED and the statusline digit', async ({
+  page,
+}) => {
+  await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
+  await page.goto('./');
+  // the settle-drive: click each stop in turn, wait for its aria-current to
+  // land, then let the IntersectionObserver + rAF ride settle before reading
+  // state — a floor whose section is too short to ever own the floor-spy
+  // center band (e.g. 4F's pre-fix amenities shell) would settle on a
+  // DIFFERENT floor here instead of its own
+  for (const fl of ['6F', '5F', '4F', '3F', '2F', '1F']) {
+    await page.locator(`[data-shaft-stop="${fl}"]`).click();
+    await expect(page.locator(`[data-shaft-stop="${fl}"]`)).toHaveAttribute(
+      'aria-current',
+      'true',
+      {
+        timeout: 10_000,
+      }
     );
-  expect(await carY()).toBeGreaterThan(0);
+    await expect
+      .poll(() =>
+        page.evaluate((f) => {
+          const r = document.querySelector(`[data-floor="${f}"]`)!.getBoundingClientRect();
+          return r.top < window.innerHeight * 0.55 && r.bottom > window.innerHeight * 0.45;
+        }, fl)
+      )
+      .toBe(true);
+    await expect(page.locator('[data-shaft-stop][aria-current="true"]')).toHaveCount(1);
+    await expect(page.locator('[data-lift-digit]')).toHaveText(fl);
+  }
 });
 
 test('elevator shaft: reduced motion is a static indicator', async ({ browser }) => {
