@@ -227,8 +227,30 @@ test('the install Copy click hires without breaking the page', async ({ page, co
   const copy = page.locator('.install__panel.is-active .install__copy');
   await copy.click();
   // The copy flash proves the click handler ran to completion — i.e. the
-  // pre-copy __pixHire() call (the #436 wiring) didn't throw.
+  // post-copy pix:install-copy dispatch (OfficeBackdrop's hire listener) didn't throw.
   await expect(copy).toHaveText(/Copied|Select & copy/);
+  expect(errors()).toEqual([]);
+});
+
+test('an install copy hires a coworker: pix:install-copy → pix:hired', async ({
+  page,
+  context,
+}) => {
+  await context.grantPermissions(['clipboard-write']);
+  const errors = watchErrors(page);
+  await gotoLive(page); // hire needs the LIVE office (__pixHire exists)
+  await page.evaluate(() => {
+    (window as unknown as { __hired: string[] }).__hired = [];
+    document.addEventListener('pix:hired', (e) =>
+      (window as unknown as { __hired: string[] }).__hired.push(
+        (e as CustomEvent<{ name: string }>).detail.name
+      )
+    );
+  });
+  await page.keyboard.press('i');
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as { __hired: string[] }).__hired))
+    .toEqual(['cc·yours']);
   expect(errors()).toEqual([]);
 });
 

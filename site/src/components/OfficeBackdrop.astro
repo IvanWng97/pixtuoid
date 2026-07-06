@@ -390,6 +390,27 @@ import { asset, DIM_RESTING } from '../consts';
     }
     syncPauseBtn();
 
+    // Working Building: ANY install-copy control (hero row, statusline chip,
+    // docs strip, the 1F tabs, the `i` key) hires through ONE event instead of
+    // each caller reaching for __pixHire. Answer with pix:hired so the
+    // statusline can flash the receipt. The name mirrors the hire cast's real
+    // identity (claude_code + cwd "/work/yours" → label cc·yours — see
+    // pixtuoid-web/src/script.rs hire_beats).
+    let hiresDispatched = 0;
+    // 3 mirrors VisitorHires::MAX_LIVE in pixtuoid-web/src/lib.rs — two copies,
+    // keep in lockstep. hire() silently REFUSES past that concurrent cap, so past
+    // the 3rd receipt we still let the copy stand (the clipboard write already
+    // happened upstream in __pixInstall.copy / the 1F tab) but STOP dispatching
+    // pix:hired: the receipt must never claim a walk-in the engine turned away.
+    const HIRE_RECEIPT_CAP = 3;
+    document.addEventListener('pix:install-copy', function () {
+      if (!window.__pixHire) return;
+      window.__pixHire();
+      if (hiresDispatched >= HIRE_RECEIPT_CAP) return;
+      hiresDispatched++;
+      document.dispatchEvent(new CustomEvent('pix:hired', { detail: { name: 'cc·yours' } }));
+    });
+
     // Reduced motion defers the wasm fetch entirely (still poster only) —
     // but a LIVE un-reduce should still bring the office up, so the fetch
     // lives behind a one-shot boot() the mq listener can trigger later.
@@ -423,7 +444,7 @@ import { asset, DIM_RESTING } from '../consts';
             ctx2d = canvas.getContext('2d');
             sizeBuffer();
             start();
-            // #434: the install section's Copy click hires a coworker into
+            // #434: the pix:install-copy listener above hires a coworker into
             // the background office (engine-capped at 3 concurrent; a no-op
             // before the first frame). A function global, same idiom as
             // __pixLights.

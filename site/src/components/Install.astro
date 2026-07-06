@@ -126,9 +126,6 @@ import tabs from '../install.json';
         flash('Select & copy', 'Press Ctrl+C to copy the selected command');
       }
       btn.addEventListener('click', function () {
-        // #434: hiring is the click's diegetic echo — a new coworker walks
-        // into the live office behind the page ("Move them in.", literally).
-        if (window.__pixHire) window.__pixHire();
         if (!navigator.clipboard || !navigator.clipboard.writeText) {
           manual();
           return;
@@ -137,6 +134,12 @@ import tabs from '../install.json';
           .writeText(btn.dataset.copy)
           .then(function () {
             flash('Copied ✓', 'Copied to clipboard');
+            // #434, generalized (Working Building): a successful install-copy
+            // ANYWHERE fires one event; OfficeBackdrop's listener does the
+            // hiring and answers with pix:hired (the statusline receipt).
+            document.dispatchEvent(
+              new CustomEvent('pix:install-copy', { detail: { source: 'install' } })
+            );
           })
           .catch(manual);
       });
