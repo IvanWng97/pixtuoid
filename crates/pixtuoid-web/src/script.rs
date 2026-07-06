@@ -226,8 +226,11 @@ pub(crate) fn lobster_beats() -> Vec<PresenceBeat> {
 pub(crate) fn hero_script() -> Vec<Beat> {
     let mut b: Vec<Beat> = Vec::new();
 
-    // Walk-ins: staggered so the door + corridor animate one by one.
-    for (i, delay) in [0u64, 2_500, 5_500, 9_000, 12_000, 15_500, 19_000]
+    // Walk-ins — the MORNING RUSH (spec §1, audit top12 #3): the cast is
+    // through the door within ~2.5s of reveal instead of trickling in over
+    // 19s, so scroll-0 never reads as an empty looping video. Loop-wrap
+    // replay is unchanged: a SessionStart for a live slot is a no-op.
+    for (i, delay) in [0u64, 350, 750, 1_150, 1_600, 2_050, 2_500]
         .iter()
         .enumerate()
     {
@@ -238,26 +241,37 @@ pub(crate) fn hero_script() -> Vec<Beat> {
         });
     }
 
-    // Work spells per agent — offsets chosen so at any instant roughly half
-    // the office types while the rest wander/idle (meetings + coffee emerge).
+    // Opening spells: each agent starts working shortly after walking in —
+    // ≥4 monitors on by ~3s (pinned by morning_rush_populates_within_three_
+    // seconds). Offsets still interleave so wander/coffee/meetings emerge.
     spell(
         &mut b,
         0,
-        6_000,
+        1_000,
         8,
         &["Bash: cargo test", "Edit main.rs", "Read lib.rs"],
     );
-    spell(&mut b, 1, 10_000, 6, &["Edit App.tsx", "Bash: pnpm build"]);
+    spell(&mut b, 1, 1_600, 6, &["Edit App.tsx", "Bash: pnpm build"]);
     spell(
         &mut b,
         2,
-        14_000,
+        2_200,
         10,
         &["Bash: terraform plan", "Read modules.tf"],
     );
-    spell(&mut b, 3, 20_000, 6, &["Bash: dbt run", "Edit models.sql"]);
-    spell(&mut b, 4, 24_000, 8, &["Edit cmd.rs", "Bash: cargo clippy"]);
-    spell(&mut b, 5, 30_000, 6, &["Read index.ts", "Edit routes.ts"]);
+    spell(&mut b, 3, 2_800, 6, &["Bash: dbt run", "Edit models.sql"]);
+    spell(&mut b, 4, 3_400, 8, &["Edit cmd.rs", "Bash: cargo clippy"]);
+    spell(&mut b, 5, 4_000, 6, &["Read index.ts", "Edit routes.ts"]);
+    // Fill spells: the openers now END early (~11s), so re-cover the 15–40s
+    // stretch the old 6–30s starts used to occupy.
+    spell(
+        &mut b,
+        1,
+        16_000,
+        6,
+        &["Bash: pnpm test", "Edit styles.css"],
+    );
+    spell(&mut b, 3, 24_000, 6, &["Read schema.sql", "Edit etl.py"]);
     spell(
         &mut b,
         0,
@@ -442,6 +456,36 @@ mod tests {
             (6..=8).contains(&scene.agents.len()),
             "cast must stay bounded across loops, got {}",
             scene.agents.len()
+        );
+    }
+
+    #[test]
+    fn morning_rush_populates_within_three_seconds() {
+        // Spec §1 (audit top12 #3): within ~3s of reveal the office must read
+        // as a working morning — most of the cast through the door and ≥4
+        // monitors on — instead of the old 19s trickle-in.
+        let mut scene = SceneState::uniform(16);
+        let mut reducer = Reducer::new();
+        let t0 = SystemTime::UNIX_EPOCH + Duration::from_millis(1_000_000);
+        const RUSH_MS: u64 = 3_000;
+        for beat in hero_script().iter().filter(|b| b.at_ms <= RUSH_MS) {
+            let now = t0 + Duration::from_millis(beat.at_ms);
+            reducer.apply(&mut scene, beat.event.clone(), now, beat.transport);
+        }
+        reducer.tick(&mut scene, t0 + Duration::from_millis(RUSH_MS));
+        assert!(
+            scene.agents.len() >= 6,
+            "morning rush: expected >=6 walk-ins by 3s, got {}",
+            scene.agents.len()
+        );
+        let active = scene
+            .agents
+            .values()
+            .filter(|a| matches!(a.state, pixtuoid_core::state::ActivityState::Active { .. }))
+            .count();
+        assert!(
+            active >= 4,
+            "morning rush: expected >=4 monitors on by 3s, got {active}"
         );
     }
 }
