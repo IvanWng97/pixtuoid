@@ -79,14 +79,20 @@
 
   /* Screen chrome — text that sits on/over the office render, THEME-INDEPENDENT
      (the office pixels don't change with the site theme, so neither do these):
-     ink/dim/line match the statusline's fixed palette. The halo lifts floating
-     chrome (nav, hero ghost link) off a DARK office only — day sets none. */
+     ink/dim/line match the statusline's fixed palette. --chrome-halo lifts
+     floating chrome (nav, hero ghost link, hero eyebrow) off the office —
+     since the hero is now permanently exempt from the dimmer (data-lit-max
+     "0"), day chrome sits over a fully-lit office too, so day needs its OWN
+     halo, not night's black one re-applied (dark-on-already-dark ink read
+     as a smudge, not a lift — see the disabled arm this replaced). Reuses
+     --bg (the theme's own opposite-polarity background tone) via color-mix
+     for the alpha, same idiom as --glow below. */
   --chip-ink: #d8cfc0;
   --chip-bright: #f0e8d8;
   --chip-dim: #8f8574;
   --chip-line: #3a332a;
   --chip-bg: color-mix(in srgb, var(--screen) 82%, transparent);
-  --chrome-halo: none;
+  --chrome-halo: 0 1px 8px color-mix(in srgb, var(--bg) 70%, transparent);
 }
 
 :root[data-theme='night'] {
@@ -114,21 +120,24 @@
 
 /* color-mix() landed in Safari 16.2 (Dec 2022). On an older engine an invalid
    color-mix() poisons the whole declaration at computed-value time, so
-   `border: 1px solid var(--border)` resets to border-style:none (borders VANISH)
-   and --chip-bg goes transparent (light chrome text over the day office drops to
-   low contrast). Mirror the load-bearing translucent tokens in rgba() (which
-   predates color-mix by a decade); component-level decorative color-mix degrades
-   harmlessly — a `color:` use inherits its parent color, a `background:`/
-   `box-shadow:`/gradient-stop use drops to its initial value (transparent/none) —
-   never illegible, so only these load-bearing tokens need the fallback. Every
-   visitor-reachable theme that redefines them in color-mix (day, night, AND the
-   dracula egg) needs an arm here, or its borders vanish on the old engine. */
+   `border: 1px solid var(--border)` resets to border-style:none (borders VANISH),
+   --chip-bg goes transparent, and --chrome-halo's text-shadow drops to none
+   (day's hero/nav chrome over the live office loses its contrast lift — the
+   ink itself stays visible, just flatter). Mirror the load-bearing translucent
+   tokens in rgba() (which predates color-mix by a decade); component-level
+   decorative color-mix degrades harmlessly — a `color:` use inherits its parent
+   color, a one-off `background:`/`box-shadow:`/gradient-stop use drops to its
+   initial value (transparent/none) — so only these root-level tokens need the
+   fallback. Every visitor-reachable theme that redefines them in color-mix
+   (day, night, AND the dracula egg) needs an arm here, or its borders vanish
+   on the old engine. */
 @supports not (color: color-mix(in srgb, red, red)) {
   :root {
     --border: rgba(36, 28, 20, 0.12);
     --border-strong: rgba(36, 28, 20, 0.2);
     --glow: rgba(217, 119, 87, 0.15);
     --chip-bg: rgba(14, 13, 12, 0.82);
+    --chrome-halo: 0 1px 8px rgba(244, 238, 226, 0.7); /* #f4eee2 (--paper) @ 70% */
   }
   :root[data-theme='night'] {
     --border: rgba(244, 238, 226, 0.13);

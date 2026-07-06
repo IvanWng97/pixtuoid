@@ -198,7 +198,9 @@ const { floating = false } = Astro.props;
   .nav--floating .nav__logo,
   .nav--floating .nav__links a,
   .nav--floating .nav__docs-btn {
-    /* dark themes only — on the day office this black halo read as a smudge */
+    /* --chrome-halo is theme-polarity-correct (global.css): a light halo
+       behind day's dark ink, a dark halo behind night/dracula's light ink —
+       never the wrong-polarity smudge a single fixed color would read as. */
     text-shadow: var(--chrome-halo);
   }
   .nav__inner {

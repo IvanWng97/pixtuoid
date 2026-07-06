@@ -1193,6 +1193,67 @@ test('the scrimmed hero subcopy clears WCAG AA at the worst-case composite (day 
   );
 });
 
+test('the hero headline outline clears WCAG against the office darkest pixel (day AND night)', async ({
+  page,
+}) => {
+  // Follow-up to the position-purity redesign: with the hero permanently
+  // exempt from the dimmer, the headline sits over a live, fully-lit office
+  // at ANY scroll position — day's dark ink over the office's darkest
+  // pixel (--screen, e.g. a monitor bezel) is itself LOW contrast; the
+  // pixel-outline (an 8-direction 0-blur text-shadow stack, solid
+  // var(--bg)) is what rescues it, so legibility only needs ONE of
+  // {fill, outline} to clear the floor against the worst pixel — reads
+  // REAL computed styles so a future edit that drops the shadow rule (day)
+  // or weakens the reused --bg polarity (either theme) fails this test.
+  for (const theme of ['day', 'night'] as const) {
+    await page.addInitScript((t) => {
+      sessionStorage.setItem('pix-booted', '1');
+      localStorage.setItem('pix-theme', t);
+    }, theme);
+    await page.goto('./');
+    await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+    const measured = await page.evaluate(() => {
+      const st = document.querySelector('.hero .statement')!;
+      const cs = getComputedStyle(st);
+      return {
+        textShadow: cs.textShadow,
+        fill: cs.color,
+        outline: getComputedStyle(document.documentElement).getPropertyValue('--bg'),
+        screenToken: getComputedStyle(document.documentElement).getPropertyValue('--screen'),
+      };
+    });
+    expect(measured.textShadow, `${theme}: headline must carry the pixel-outline shadow`).not.toBe(
+      'none'
+    );
+    const worst = parseHex(measured.screenToken);
+    const fillRatio = contrastRatio(
+      parseRgb(measured.fill).slice(0, 3) as [number, number, number],
+      worst
+    );
+    const outlineRatio = contrastRatio(parseHex(measured.outline), worst);
+    expect(
+      Math.max(fillRatio, outlineRatio),
+      `${theme}: neither fill (${fillRatio.toFixed(2)}:1) nor outline (${outlineRatio.toFixed(2)}:1) clears WCAG's 3:1 large-text floor against the office's darkest pixel`
+    ).toBeGreaterThanOrEqual(3);
+  }
+  // The eyebrow + CTA-row "ghost" links ride --chrome-halo (global.css) —
+  // day used to set it to `none` by design; it must now be a real value in
+  // BOTH themes (the day-halo fix this same round added).
+  await page.addInitScript(() => {
+    sessionStorage.setItem('pix-booted', '1');
+    localStorage.setItem('pix-theme', 'day');
+  });
+  await page.goto('./');
+  const chromeShadows = await page.evaluate(() => ({
+    eyebrow: getComputedStyle(document.querySelector('.hero .eyebrow')!).textShadow,
+    ghost: getComputedStyle(document.querySelector('.hero__ghost')!).textShadow,
+  }));
+  expect(chromeShadows.eyebrow, 'day: eyebrow must carry a real chrome-halo').not.toBe('none');
+  expect(chromeShadows.ghost, 'day: hero ghost links must carry a real chrome-halo').not.toBe(
+    'none'
+  );
+});
+
 test('hero badge codes: every per-source hue clears WCAG AA on the chip screen', async ({
   page,
 }) => {

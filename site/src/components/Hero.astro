@@ -101,12 +101,49 @@ const STARS = __GH_STARS__;
   .hero__copy {
     max-width: 900px;
   }
+  /* Pixel-outline: with the hero permanently exempt from the dimmer
+     (data-lit-max="0"), the headline/eyebrow sit over a live, fully-lit
+     office at ANY scroll position — a plain ink color alone can't clear
+     contrast against every possible pixel behind it. A retro-game 8-
+     direction text-shadow stack (0-blur, solid var(--bg)) reads as a crisp
+     pixel edge rather than a soft blur, and REUSES the theme's own
+     background token: day's --bg is light (a light outline behind dark
+     ink), night/dracula's --bg is dark (a dark outline behind light ink) —
+     the same token is already the correct polarity in every theme, no new
+     color to maintain. The eyebrow gets the lighter, existing
+     --chrome-halo treatment instead (small mono text reads better with a
+     soft halo than a hard outline at that scale — judged by eye). */
+  .hero__copy .statement {
+    --ol: 2px;
+    text-shadow:
+      var(--ol) var(--ol) 0 var(--bg),
+      var(--ol) calc(var(--ol) * -1) 0 var(--bg),
+      calc(var(--ol) * -1) var(--ol) 0 var(--bg),
+      calc(var(--ol) * -1) calc(var(--ol) * -1) 0 var(--bg),
+      var(--ol) 0 0 var(--bg),
+      calc(var(--ol) * -1) 0 0 var(--bg),
+      0 var(--ol) 0 var(--bg),
+      0 calc(var(--ol) * -1) 0 var(--bg);
+  }
+  .hero__copy .eyebrow {
+    text-shadow: var(--chrome-halo);
+  }
   .hero__copy .statement .hl {
-    /* the gradient headline treatment, kept */
+    /* the gradient headline treatment, kept — but text-shadow does NOT
+       composite correctly here (verified by rendering): with color:
+       transparent, the inherited 8-direction shadow stack from .statement
+       above OVERWRITES the gradient fill instead of rimming it (the word
+       rendered as a solid block of the outline color in BOTH themes).
+       -webkit-text-stroke is the technique that's actually built for
+       pairing with background-clip:text gradient fills — it strokes the
+       glyph outline independent of the (transparent) fill, so the gradient
+       shows through the interior with the outline only at the rim. */
     background: var(--grad);
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
+    text-shadow: none;
+    -webkit-text-stroke: var(--ol) var(--bg);
   }
   .hero__cta {
     display: flex;
