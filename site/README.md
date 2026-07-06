@@ -108,20 +108,19 @@ gates can't see. CI runs it in `site.yml` after the build step.
   scrollspy, the build-time merged-PR feed with a canned-reel fallback,
   `lights %` / clock / `● LIVE` · `❚❚ PAUSED`, and a right-end install chip —
   star count, copy, hire receipt), and the app's literal keys work on the
-  page — digits `1–6` ride between floors and `i` copies the install
-  one-liner, both **document-global** from any scroll depth (guards: typing
-  surfaces, the boot splash, a held modifier, and a focused
-  `[data-keys-scope]` region claims the digits locally instead); `t` retints
-  the decorative palette (Esc restores) and keeps the stricter
-  **focus-gated** posture (WCAG 2.1.4: fires only from a neutral focus
-  context — page body / a jumped-to section / the statusline, never a
+  page — digits `1–6` ride between floors, **document-global** from any
+  scroll depth (guards: typing surfaces, the boot splash, a held modifier,
+  and a focused `[data-keys-scope]` region claims the digits locally
+  instead); `t` retints the decorative palette (Esc restores) and keeps the
+  stricter **focus-gated** posture (WCAG 2.1.4: fires only from a neutral
+  focus context — page body / a jumped-to section / the statusline, never a
   focused control — the shared `window.__pixKeys.shortcutContext()` gate).
-  Making digits/`i` document-global is a deliberate WCAG 2.1.4 posture
+  Making digits document-global is a deliberate WCAG 2.1.4 posture
   change — they used to share `t`'s focus gate, which silently killed them
   after any content click — so the whole vocabulary ships a persisted
   off-switch instead: the keyboard-shortcuts toggle in the statusline floor
   popover (`localStorage('pix-keys')`, `window.__pixKeys.enabled()` /
-  `setEnabled()`), and the statusline hint reads `keys 1–6 · i`. The favicon
+  `setEnabled()`), and the statusline hint reads `keys 1–6`. The favicon
   dims with the night theme; 404 is the office at 3 a.m. (`--empty` render).
 - **Cross-component seams** (what a new section must wire): sections declare
   `data-lit` (dimmer target; `data-lit="fade"` also rises with the darkness)
@@ -139,8 +138,8 @@ gates can't see. CI runs it in `site.yml` after the build step.
     engine directly: `window.__pixInstall` (parse-first, in `Base.astro`'s
     head — THE install one-liner + copy dispatcher) writes the clipboard then
     fires `pix:install-copy {source}` (any Copy control names its own
-    `source` — hero row, statusline chip, docs strip, the 1F tabs, the `i`
-    key); `OfficeBackdrop`'s listener walks a coworker into the live office
+    `source` — hero row, statusline chip, docs strip, the 1F tabs);
+    `OfficeBackdrop`'s listener walks a coworker into the live office
     (engine-capped at `VisitorHires::MAX_LIVE`, 3 concurrent) and answers
     with `pix:hired {name: 'cc·yours'}`, which the statusline chip listens
     for to flash its hire receipt. `__GH_STARS__` is a build-time

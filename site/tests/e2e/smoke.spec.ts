@@ -247,7 +247,7 @@ test('an install copy hires a coworker: pix:install-copy → pix:hired', async (
       )
     );
   });
-  await page.keyboard.press('i');
+  expect(await page.evaluate(() => window.__pixInstall!.copy('closer'))).toBe(true);
   await expect
     .poll(() => page.evaluate(() => (window as unknown as { __hired: string[] }).__hired))
     .toEqual(['cc·yours']);
@@ -284,7 +284,7 @@ test('the hire cap stops the receipt at 3 but keeps hiring every time', async ({
     };
   });
   for (let i = 0; i < 4; i++) {
-    expect(await page.evaluate(() => window.__pixInstall!.copy('key'))).toBe(true);
+    expect(await page.evaluate(() => window.__pixInstall!.copy('statusline'))).toBe(true);
   }
   await expect
     .poll(() => page.evaluate(() => (window as unknown as { __hired: string[] }).__hired))
@@ -320,7 +320,7 @@ test('reduced motion: an install copy writes the clipboard but hires nobody', as
       )
     );
   });
-  expect(await page.evaluate(() => window.__pixInstall!.copy('key'))).toBe(true);
+  expect(await page.evaluate(() => window.__pixInstall!.copy('statusline'))).toBe(true);
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
     'brew install IvanWng97/pixtuoid/pixtuoid'
   );
@@ -457,31 +457,6 @@ test('key vocabulary: digits ride globally, typing surfaces stay guarded, t keep
   ).toBe('');
 });
 
-test("the i key copies the install one-liner and fires pix:install-copy {source:'key'}", async ({
-  page,
-  context,
-}) => {
-  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
-  const errors = watchErrors(page);
-  await gotoLive(page);
-  await page.evaluate(() => {
-    (window as unknown as { __copies: string[] }).__copies = [];
-    document.addEventListener('pix:install-copy', (e) =>
-      (window as unknown as { __copies: string[] }).__copies.push(
-        (e as CustomEvent<{ source: string }>).detail.source
-      )
-    );
-  });
-  await page.keyboard.press('i');
-  await expect
-    .poll(() => page.evaluate(() => (window as unknown as { __copies: string[] }).__copies))
-    .toEqual(['key']);
-  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
-    'brew install IvanWng97/pixtuoid/pixtuoid'
-  );
-  expect(errors()).toEqual([]);
-});
-
 test('statusline install chip: copy flashes ✓, clipboard gets the one-liner, then the hire receipt', async ({
   page,
   context,
@@ -523,7 +498,7 @@ test('statusline install chip: the ★ star segment renders the overridden count
   await expect(stars).toHaveText(/^\s*★\s*\d+\s*$/);
 });
 
-test('WCAG 2.1.4: the statusline keys toggle turns the digit/i shortcuts off, then back on', async ({
+test('WCAG 2.1.4: the statusline keys toggle turns the digit shortcuts off, then back on', async ({
   page,
 }) => {
   await gotoLive(page);
@@ -1080,6 +1055,11 @@ test('the scrimmed hero subcopy clears WCAG AA at the worst-case composite (day 
     };
   });
 
+  // --screen is a PROXY for the darkest pixel the live office canvas actually
+  // renders (a real frame sample isn't practical here) — reviewer-verified
+  // immaterial: at the hero's 90% dimmer alpha, the ratio shift from any
+  // plausible canvas-vs-token delta is <0.005, against a 0.26 margin above
+  // the 4.5:1 floor.
   const officeWorstPixel = parseHex(measured.screenToken);
   const afterDimmer = compositeOver(
     [...parseRgb(measured.dimmerBg).slice(0, 3), measured.dataLitMax] as [

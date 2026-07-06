@@ -112,7 +112,7 @@ const badgeColor = (who: string): string | undefined => {
         ))
       }
       <div class="sl__keysrow">
-        <span class="sl__keyslabel">keys 1–6 · i</span>
+        <span class="sl__keyslabel">keys 1–6</span>
         <button
           class="sl__keystoggle"
           type="button"
@@ -165,7 +165,7 @@ const badgeColor = (who: string): string | undefined => {
     </button>
     <span class="sr-only" role="status" data-sl-copy-status></span>
   </div>
-  <span class="sl__keys" aria-hidden="true">keys 1–6 · i</span>
+  <span class="sl__keys" aria-hidden="true">keys 1–6</span>
 </div>
 
 <style is:global>
@@ -467,7 +467,7 @@ const badgeColor = (who: string): string | undefined => {
       });
     });
     // ── keyboard-shortcuts off-switch (WCAG 2.1.4): render + persist the
-    // digit/`i` on/off state. The FLAG lives in window.__pixKeys (Base.astro,
+    // digit on/off state. The FLAG lives in window.__pixKeys (Base.astro,
     // parse-first) — Base's document handler reads enabled() at each keydown;
     // here we only reflect + toggle it. Default on. ──
     const keysToggle = bar.querySelector('[data-keys-toggle]');

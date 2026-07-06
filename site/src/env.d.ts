@@ -29,12 +29,14 @@ interface Window {
     ok: (_v: string) => boolean;
     fallback: () => string;
   };
-  /** Key-shortcut guards (Base.astro): the typing-surface check + the WCAG
-   * 2.1.4 focus gate for the bare single-char shortcuts (digits 1–6, t). */
+  /** Key-shortcut guards (Base.astro): the typing-surface check, shared by
+   * every single-char shortcut, and the WCAG 2.1.4 focus gate — which only
+   * `t` (decorative retint) rides; digits 1–6 are document-global instead,
+   * gated by enabled()/typing() below and the boot-splash guard. */
   __pixKeys?: {
     typing: (_e: Event) => boolean;
     shortcutContext: () => boolean;
-    /** WCAG 2.1.4 off-switch for the bare digit/`i` shortcuts, persisted in
+    /** WCAG 2.1.4 off-switch for the bare digit shortcuts, persisted in
      * localStorage('pix-keys'); read at each keydown, written by the statusline
      * toggle. */
     enabled: () => boolean;
@@ -45,8 +47,6 @@ interface Window {
    * pix:install-copy {source}); false when the Clipboard API is unavailable. */
   __pixInstall?: {
     CMD: string;
-    copy: (
-      _source: 'hero' | 'statusline' | 'docs' | 'closer' | 'key' | 'install'
-    ) => Promise<boolean>;
+    copy: (_source: 'hero' | 'statusline' | 'docs' | 'closer' | 'install') => Promise<boolean>;
   };
 }

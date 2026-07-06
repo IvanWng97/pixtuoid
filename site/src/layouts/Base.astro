@@ -151,7 +151,8 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
         },
       };
       // Parse-first key helpers: the typing-surface guard (was copied 3×) and the
-      // WCAG 2.1.4 focus gate for the bare single-char shortcuts (digits 1–6, t).
+      // WCAG 2.1.4 focus gate — only `t` (decorative retint) rides it; digits 1–6
+      // are document-global, gated by enabled()/typing() and the boot guard instead.
       // A shortcut fires only when a NEUTRAL surface holds focus — the page body,
       // a section a floor-jump parked focus on, or the statusline — never a real
       // interactive control (link/button/field), so voice-control dictation or
@@ -171,7 +172,7 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
           const sl = document.getElementById('statusline');
           return !!(sl && sl.contains(a));
         },
-        // WCAG 2.1.4 off-switch: the digit/`i` vocabulary is single-character
+        // WCAG 2.1.4 off-switch: the digit vocabulary is single-character
         // and NOT focus-scoped, so it needs a documented turn-off. Persisted in
         // localStorage('pix-keys') (default on); the statusline popover toggles
         // it via setEnabled(), the document key handler below reads enabled() at
@@ -190,10 +191,14 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
         },
       };
       // THE install one-liner + its dispatch helper (Working Building contract):
-      // EVERY install-copy control routes through copy() so the clipboard write
-      // and the pix:install-copy event (→ OfficeBackdrop's hire listener → the
-      // statusline receipt) can never drift apart. Resolves true only after a
-      // successful write; false (no event) when the Clipboard API is unavailable.
+      // every control that copies THIS SAME one-liner (hero, statusline, docs,
+      // closer) routes through copy() so the clipboard write and the
+      // pix:install-copy event (→ OfficeBackdrop's hire listener → the statusline
+      // receipt) can never drift apart. Resolves true only after a successful
+      // write; false (no event) when the Clipboard API is unavailable. Exception:
+      // the 1F Install tabs copy a PER-METHOD command (brew/npm/cargo/…), so
+      // Install.astro writes the clipboard and dispatches pix:install-copy
+      // {source:'install'} directly instead of routing through this helper.
       window.__pixInstall = {
         CMD: installCmd,
         copy: function (source) {
@@ -452,24 +457,20 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
 
     <!-- The building's key vocabulary (Working Building §4): digits 1–6 ride to
          [data-floor] sections from ANY scroll depth (the old focus-context gate
-         killed them after any content click — the audit's dead-keys bug); `i`
-         copies the install one-liner anywhere. Guards: never while typing
-         (input/textarea/contenteditable), never during the boot splash, never
-         with a modifier held; the WCAG 2.1.4 off-switch (statusline toggle →
-         __pixKeys.enabled()) can disable the whole vocabulary; a focused
-         [data-keys-scope] region (the CRT studio, wb-3) claims the digits locally
-         instead. `t` keeps its stricter gate in the FX script above. -->
+         killed them after any content click — the audit's dead-keys bug).
+         Guards: never while typing (input/textarea/contenteditable), never
+         during the boot splash, never with a modifier held; the WCAG 2.1.4
+         off-switch (statusline toggle → __pixKeys.enabled()) can disable the
+         whole vocabulary; a focused [data-keys-scope] region (the CRT studio,
+         wb-3) claims the digits locally instead. `t` keeps its stricter gate
+         in the FX script above. -->
     <script is:inline>
       (function () {
         document.addEventListener('keydown', function (e) {
           if (e.ctrlKey || e.metaKey || e.altKey) return;
           if (document.documentElement.dataset.booting === '1') return;
           if (window.__pixKeys.typing(e)) return;
-          if (!window.__pixKeys.enabled()) return; // WCAG 2.1.4 turn-off (both `i` and digits)
-          if (e.key === 'i') {
-            if (window.__pixInstall) window.__pixInstall.copy('key');
-            return;
-          }
+          if (!window.__pixKeys.enabled()) return; // WCAG 2.1.4 turn-off
           if (!/^[1-6]$/.test(e.key)) return;
           const a = document.activeElement;
           if (a && a.closest && a.closest('[data-keys-scope]')) return;
