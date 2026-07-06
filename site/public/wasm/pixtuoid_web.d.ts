@@ -27,12 +27,15 @@ export class Office {
     /**
      * Hire one more agent (#434): the site's install section calls this on a
      * Copy click, and a new coworker walks into the background office, works
-     * a few spells, and heads out ~70s later. No-op before the first `step`
-     * (no clock yet), while `MAX_LIVE_HIRES` hires are already alive
-     * (click-spam can't crowd out the cast), and when the canvas-sized
-     * office has no free desk to seat one. Never throws.
+     * a few spells, and heads out ~70s later. Returns whether the hire was
+     * admitted (`true`) or refused (`false`) — refused before the first `step`
+     * (no clock yet), while `MAX_LIVE` hires are already alive (click-spam
+     * can't crowd out the cast), and when the canvas-sized office has no free
+     * desk to seat one. The caller (the site's install-copy chain) answers its
+     * receipt event from this return, not a JS-side mirror of the cap. Never
+     * throws.
      */
-    hire(): void;
+    hire(): boolean;
     /**
      * Whether the office's sky shows the SUN at hour-of-day `hour` (0..24). The
      * site's VIBING sky-slider reads this to draw its thumb as a sun by day /
@@ -83,7 +86,7 @@ export interface InitOutput {
     readonly __wbg_office_free: (a: number, b: number) => void;
     readonly office_frame_len: (a: number) => number;
     readonly office_frame_ptr: (a: number) => number;
-    readonly office_hire: (a: number) => void;
+    readonly office_hire: (a: number) => number;
     readonly office_is_day: (a: number, b: number) => number;
     readonly office_new: (a: number) => [number, number, number];
     readonly office_set_theme: (a: number, b: number, c: number) => void;

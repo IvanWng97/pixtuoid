@@ -64,11 +64,12 @@ impl VisitorHires {
     const MAX_LIVE: usize = 3;
 
     /// Queue one more hire's lifecycle — the enqueue side of `Office::hire`.
-    /// Owns the full prune → cap → free-desk → push → sort; refuses (no-op) when
-    /// the cap is reached or the canvas-synced office has no free desk to seat
-    /// one. `scene` is the live scene (read-only here — the reducer applies the
+    /// Owns the full prune → cap → free-desk → push → sort. Returns whether the
+    /// hire was admitted (`true`) or refused (`false`, no-op) — refused when the
+    /// cap is reached or the canvas-synced office has no free desk to seat one.
+    /// `scene` is the live scene (read-only here — the reducer applies the
     /// queued events later, in `drain_due`).
-    fn try_hire(&mut self, base: SystemTime, scene: &SceneState) {
+    fn try_hire(&mut self, base: SystemTime, scene: &SceneState) -> bool {
         // `ids` is THE registry the cap counts — each admitted hire is in it
         // exactly once. Prune only ids that are neither LIVE (in the scene) nor
         // still QUEUED (SessionStart pending): pruning queued ids would
@@ -81,7 +82,7 @@ impl VisitorHires {
                 )
         });
         if self.ids.len() >= Self::MAX_LIVE {
-            return;
+            return false;
         }
         // A hire the office can't SEAT is refused outright: the reducer would
         // drop its SessionStart (no free desk), yet the id would hold one of
@@ -95,7 +96,7 @@ impl VisitorHires {
             .filter(|ev| matches!(ev.event, AgentEvent::SessionStart { .. }))
             .count();
         if scene.agents.len() + queued_starts >= scene.total_capacity() {
-            return;
+            return false;
         }
         self.seq += 1;
         let session = format!("hire-{}", self.seq);
@@ -108,6 +109,7 @@ impl VisitorHires {
             });
         }
         self.pending.sort_by_key(|ev| ev.at);
+        true
     }
 
     /// Fire every queued hire event due by `now`, each applied at its SCHEDULED
@@ -250,16 +252,19 @@ impl Office {
 
     /// Hire one more agent (#434): the site's install section calls this on a
     /// Copy click, and a new coworker walks into the background office, works
-    /// a few spells, and heads out ~70s later. No-op before the first `step`
-    /// (no clock yet), while `MAX_LIVE_HIRES` hires are already alive
-    /// (click-spam can't crowd out the cast), and when the canvas-sized
-    /// office has no free desk to seat one. Never throws.
-    pub fn hire(&mut self) {
+    /// a few spells, and heads out ~70s later. Returns whether the hire was
+    /// admitted (`true`) or refused (`false`) — refused before the first `step`
+    /// (no clock yet), while `MAX_LIVE` hires are already alive (click-spam
+    /// can't crowd out the cast), and when the canvas-sized office has no free
+    /// desk to seat one. The caller (the site's install-copy chain) answers its
+    /// receipt event from this return, not a JS-side mirror of the cap. Never
+    /// throws.
+    pub fn hire(&mut self) -> bool {
         let Some(base) = self.last_now else {
-            return;
+            return false;
         };
         // Delegate to the grouped hire lane (prune → cap → free-desk → push).
-        self.hires.try_hire(base, &self.scene);
+        self.hires.try_hire(base, &self.scene)
     }
 
     /// Force the office's weather (`"clear"|"rain"|"storm"|"snow"|"fog"|
@@ -603,8 +608,8 @@ mod tests {
     #[test]
     fn hire_walks_in_works_and_leaves_without_replaying_on_wrap() {
         let mut o = office();
-        // No clock yet → no-op, never panics.
-        o.hire();
+        // No clock yet → refused, never panics.
+        assert!(!o.hire(), "hire before the first step is refused");
         assert!(
             o.hires.pending.is_empty(),
             "hire before the first step is ignored"
@@ -613,7 +618,7 @@ mod tests {
         o.step(T0_MS, 160, 96);
         o.step(T0_MS + 30_000.0, 160, 96);
         let baseline = o.scene.agents.len();
-        o.hire();
+        assert!(o.hire(), "the hire is admitted");
         o.step(T0_MS + 31_000.0, 160, 96);
         assert_eq!(o.scene.agents.len(), baseline + 1, "the hire walked in");
         // Mid-stay: still present (working its spells).
@@ -660,10 +665,13 @@ mod tests {
         }
         // Click-spam past the layout's one free desk: the first hire seats,
         // the rest must be refused outright — a doomed hire would burn one of
-        // the MAX_LIVE_HIRES slots for its whole stay with zero feedback.
-        for _ in 0..3 {
-            o.hire();
-        }
+        // the MAX_LIVE slots for its whole stay with zero feedback.
+        let admitted: Vec<bool> = (0..3).map(|_| o.hire()).collect();
+        assert_eq!(
+            admitted,
+            vec![true, false, false],
+            "the one free desk seats the first click; desk exhaustion refuses the rest"
+        );
         o.step(T0_MS + 32_000.0, w, h);
         let layout = Layout::compute_with_seed(w as u16, h as u16, None, o.seed)
             .expect("the portrait buffer lays out");
@@ -691,14 +699,17 @@ mod tests {
     #[test]
     fn hire_cap_holds_under_click_spam() {
         // 320×180 (the 16:9 hero buffer) lays out 32 desks — ample room, so
-        // this exercises the MAX_LIVE_HIRES cap, not desk exhaustion (the
+        // this exercises the MAX_LIVE cap, not desk exhaustion (the
         // narrow-canvas test above covers that).
         let mut o = office();
         o.step(T0_MS, 320, 180);
         o.step(T0_MS + 30_000.0, 320, 180);
-        for _ in 0..10 {
-            o.hire();
-        }
+        let admitted: Vec<bool> = (0..10).map(|_| o.hire()).collect();
+        assert_eq!(
+            admitted.iter().filter(|&&ok| ok).count(),
+            VisitorHires::MAX_LIVE,
+            "only the first MAX_LIVE clicks are admitted; click spam past it is refused"
+        );
         o.step(T0_MS + 32_000.0, 320, 180);
         let count_hires = |o: &Office| {
             o.scene
@@ -715,13 +726,56 @@ mod tests {
         // The review-caught under-count: one MORE click after the burst's
         // SessionStarts have drained must still be refused — the registry
         // counts live hires, not just queued ones.
-        o.hire();
+        assert!(!o.hire(), "a post-burst click must not overshoot the cap");
         o.step(T0_MS + 33_000.0, 320, 180);
         assert_eq!(
             count_hires(&o),
             VisitorHires::MAX_LIVE,
             "a post-burst click must not overshoot the cap"
         );
+    }
+
+    #[test]
+    fn hire_after_the_stay_ends_re_admits_past_the_cap() {
+        // MAX_LIVE caps CONCURRENT hires, not lifetime hires (the addendum
+        // this test exists for, PR #504's under-claim finding): once the
+        // earlier three finish their stay and get pruned from the office, a
+        // fresh click must be admitted again, not refused forever.
+        use crate::script::HIRE_STAY_MS;
+        let mut o = office();
+        o.step(T0_MS, 320, 180);
+        o.step(T0_MS + 30_000.0, 320, 180);
+        let admitted: Vec<bool> = (0..VisitorHires::MAX_LIVE).map(|_| o.hire()).collect();
+        assert!(
+            admitted.iter().all(|&ok| ok),
+            "the first MAX_LIVE clicks all seat"
+        );
+        assert!(
+            !o.hire(),
+            "a click past the cap is refused while the first three are live"
+        );
+        o.step(T0_MS + 32_000.0, 320, 180);
+
+        let count_hires = |o: &Office| {
+            o.scene
+                .agents
+                .keys()
+                .filter(|id| !(0..8).map(cast_id).any(|c| c == **id))
+                .count()
+        };
+        assert_eq!(count_hires(&o), VisitorHires::MAX_LIVE);
+
+        // Past the stay + exit grace + GC sweep: all three pruned out.
+        let after_stay = T0_MS + 32_000.0 + HIRE_STAY_MS as f64 + 20_000.0;
+        o.step(after_stay, 320, 180);
+        assert_eq!(count_hires(&o), 0, "the earlier hires left the office");
+
+        assert!(
+            o.hire(),
+            "the cap frees up once the earlier hires pruned out"
+        );
+        o.step(after_stay + 1_000.0, 320, 180);
+        assert_eq!(count_hires(&o), 1, "the re-admitted hire walked in");
     }
 
     #[test]
