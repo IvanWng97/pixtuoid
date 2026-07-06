@@ -527,7 +527,7 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
         const typedEl = boot.querySelector('[data-boot-typed]');
         const CMD = cmdLine ? cmdLine.dataset.bootCmd || '' : '';
         // §1 budget: ~1.4s total on the deterministic (no live-engine-wait)
-        // path — was ~2.5s. FIRST_MS + 4×LINE_MS + |cmd|×TYPE_MS ≈ 0.87s of
+        // path — was ~2.5s. FIRST_MS + 4×LINE_MS + |cmd|×TYPE_MS ≈ 0.62s of
         // log/typing, + NO_OFFICE_HOLD_MS + the 460ms overlay fade. (The
         // live-office/index page's ACTUAL total additionally depends on
         // window.__pixEngineReady — bounded separately by MAX_ENGINE_WAITS,
@@ -583,7 +583,9 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
             parseFloat(getComputedStyle(cmdLine).fontSize);
           boot.classList.add('is-landing');
           cmdLine.style.transformOrigin = 'top left';
-          cmdLine.style.transition = 'transform 0.42s cubic-bezier(0.22, 0.9, 0.3, 1)';
+          const FLIP_MS = 420;
+          cmdLine.style.transition =
+            'transform ' + FLIP_MS / 1000 + 's cubic-bezier(0.22, 0.9, 0.3, 1)';
           cmdLine.style.transform =
             'translate(' +
             (b.left - a.left) +
@@ -601,7 +603,7 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
           cmdLine.addEventListener('transitionend', once, { once: true });
           // transitionend can be swallowed (tab hide mid-flight) — never hang
           // the page inert on a lost event.
-          setTimeout(once, 520);
+          setTimeout(once, FLIP_MS + 100);
         }
         function finish(viaSkip) {
           if (done) return;
