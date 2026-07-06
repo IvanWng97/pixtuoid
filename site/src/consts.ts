@@ -28,30 +28,33 @@ export const THEME_BG: Record<ThemeId, string> = {
   dracula: '#282a36',
 };
 
-// ── Floor identity: number ↔ section id ↔ name, single-sourced ──
-// Statusline builds its lift registry from this AND every narrative section
-// stamps its own data-floor + id + eyebrow prefix from its entry (via
-// floorByNumber), so a renumber / rename / add can't silently desync the
-// digit-key scrollspy or the lift readout (load-bearing runtime contracts).
+// ── Floor identity: id ↔ floor string ↔ label, single-sourced ──
+// THE Working Building shared-contract manifest: the Statusline lift, the
+// Base.astro key handler, the (wb-3) ElevatorShaft, and every narrative
+// section stamp their id / data-floor / data-floor-label / eyebrow from this
+// ONE array, so a renumber / rename / add can't silently desync them.
 // Reading order = top floor down (the page scrolls 6F → 1F).
 export interface Floor {
-  n: number;
-  id: string; // section id + the digit-key jump target (getElementById)
-  name: string; // eyebrow + lift readout name
+  id: string; // section id + the digit-key / elevator jump target (getElementById) — the EXISTING dom ids, unchanged
+  fl: string; // '6F'..'1F' — the data-floor stamp, lift readout, digit-key vocabulary
+  label: string; // 'penthouse — hero' — data-floor-label + wayfinding copy
 }
 export const FLOORS: Floor[] = [
-  { n: 6, id: 'lobby', name: 'penthouse' },
-  { n: 5, id: 'showcase', name: 'studio' },
-  { n: 4, id: 'features', name: 'amenities' },
-  { n: 3, id: 'how', name: 'machine room' },
-  { n: 2, id: 'tools', name: 'tenants' },
-  { n: 1, id: 'install', name: 'front desk' },
+  { id: 'lobby', fl: '6F', label: 'penthouse — hero' },
+  { id: 'showcase', fl: '5F', label: 'studio — channels' },
+  { id: 'features', fl: '4F', label: 'amenities — the office is alive' },
+  { id: 'how', fl: '3F', label: 'machine room — quickstart' },
+  { id: 'tools', fl: '2F', label: 'tenants — compatibility' },
+  { id: 'install', fl: '1F', label: 'front desk — install' },
 ];
-export const floorByNumber = (n: number): Floor => {
-  const f = FLOORS.find((x) => x.n === n);
-  if (!f) throw new Error(`consts: no FLOORS entry for floor ${n}`);
+export const floorById = (id: string): Floor => {
+  const f = FLOORS.find((x) => x.id === id);
+  if (!f) throw new Error(`consts: no FLOORS entry for floor id "${id}"`);
   return f;
 };
+// the short name half of a label ('penthouse — hero' → 'penthouse'), for
+// eyebrows and the lift readout
+export const floorName = (f: Floor): string => f.label.split(' — ')[0];
 
 // The dimmer's resting opacity — the single source for FIVE former copies that
 // straddle a JS↔CSS boundary. OfficeBackdrop emits it into #dimmer's CSS via an

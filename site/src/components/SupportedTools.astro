@@ -1,8 +1,8 @@
 ---
 import sources from '../sources.json';
-import { asset, floorByNumber } from '../consts';
+import { asset, floorById, floorName } from '../consts';
 
-const floor = floorByNumber(2);
+const floor = floorById('tools');
 
 // Single source of truth → site/src/sources.json. The README "Supported Tools"
 // glimpse is generated from the SAME file (scripts/gen-readme.mjs), and the
@@ -60,7 +60,7 @@ const legendStates = (['yes', 'experimental', 'planned', 'no'] as OsState[]).fil
 );
 ---
 
-<section id={floor.id} class="tools" data-lit data-floor={floor.n}>
+<section id={floor.id} class="tools" data-lit data-floor={floor.fl} data-floor-label={floor.label}>
   {
     /* pixel check, defined once, referenced by every supported/experimental cell
      + the legend via <use> (crispEdges → hard pixel edges, like the pause icon) */
@@ -89,7 +89,7 @@ const legendStates = (['yes', 'experimental', 'planned', 'no'] as OsState[]).fil
   </svg>
   <div class="container">
     <div class="section-head reveal">
-      <p class="eyebrow">{floor.n}F · {floor.name} — the resident CLIs</p>
+      <p class="eyebrow">{floor.fl} · {floorName(floor)} — the resident CLIs</p>
       <h2 class="statement statement--md">Whichever CLI<br />they run.</h2>
       <p class="lead">
         Each coding agent shows up as a coworker. Support is per-tool <em>and</em> per-OS — the same matrix

@@ -1,8 +1,8 @@
 ---
-import { SHOWCASE, showcaseVariants, showcaseGroups, floorByNumber, asset } from '../consts';
+import { SHOWCASE, showcaseVariants, showcaseGroups, floorById, floorName, asset } from '../consts';
 import ChannelStage from './ChannelStage.astro';
 
-const floor = floorByNumber(5);
+const floor = floorById('showcase');
 const channels = SHOWCASE.map((c, i) => ({
   ...c,
   ch: String(i + 1).padStart(2, '0'),
@@ -33,14 +33,20 @@ const COUNT_WORDS = [
 const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
 ---
 
-<section id={floor.id} class="showcase" data-lit data-floor={floor.n}>
+<section
+  id={floor.id}
+  class="showcase"
+  data-lit
+  data-floor={floor.fl}
+  data-floor-label={floor.label}
+>
   {
     /* the legacy #themes/#weather anchor spans + their hash map were removed in
       0.12.0 — #showcase-<id> is the one deep-link form (see fromHash below) */
   }
   <div class="container">
     <div class="section-head reveal">
-      <p class="eyebrow">{floor.n}F · {floor.name} — {live.length} channels on air</p>
+      <p class="eyebrow">{floor.fl} · {floorName(floor)} — {live.length} channels on air</p>
       <h2 class="statement statement--md">{countWord} channels.<br />One office.</h2>
       <p class="lead">
         The channel on screen is live — the same office running in your browser. Drag the clock

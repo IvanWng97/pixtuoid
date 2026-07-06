@@ -10,7 +10,7 @@
 // office — with canned office-life beats interleaved; falls back to the
 // canned reel when the API is unreachable so the build never fails.
 import sources from '../sources.json';
-import { FLOORS, DIM_RESTING } from '../consts';
+import { FLOORS, floorName, DIM_RESTING } from '../consts';
 
 const FALLBACK = [
   { state: 'active', who: 'claude-code', what: 'editing src/reducer.rs' },
@@ -67,9 +67,9 @@ try {
   // offline / timeout → FALLBACK already in place
 }
 
-// FLOORS (number ↔ section id ↔ name) is single-sourced in consts.ts; each
-// narrative section stamps its own data-floor/id/eyebrow from the SAME manifest,
-// so the scrollspy can't desync from the sections it drives.
+// FLOORS (id ↔ fl string ↔ label) is single-sourced in consts.ts; each
+// narrative section stamps its own data-floor/data-floor-label/id/eyebrow from
+// the SAME manifest, so the scrollspy can't desync from the sections it drives.
 
 // per-CLI hue for a feed credit like "cc·pixtuoid" — the same manifest colors
 // the tools-matrix chips use (badge includes the trailing '·')
@@ -88,8 +88,8 @@ const badgeColor = (who: string): string | undefined => {
       aria-controls="sl-floors"
       aria-label="Jump to a floor"
     >
-      <span class="sl__digit" data-lift-digit>6F</span>
-      <span class="sl__name" data-lift-name>penthouse</span>
+      <span class="sl__digit" data-lift-digit>{FLOORS[0].fl}</span>
+      <span class="sl__name" data-lift-name>{floorName(FLOORS[0])}</span>
       <span class="sl__caret" aria-hidden="true">▴</span>
     </button>
     <div id="sl-floors" class="sl__floors" hidden>
@@ -97,12 +97,12 @@ const badgeColor = (who: string): string | undefined => {
         FLOORS.map((f) => (
           <button
             class="sl__floorbtn"
-            data-floor-btn={String(f.n)}
+            data-floor-btn={f.fl}
             data-target={f.id}
-            data-name={f.name}
-            aria-current={f.n === 6 ? 'location' : undefined}
+            data-name={floorName(f)}
+            aria-current={f.fl === FLOORS[0].fl ? 'location' : undefined}
           >
-            {f.n}F <span class="sl__floorname">{f.name}</span>
+            {f.fl} <span class="sl__floorname">{floorName(f)}</span>
           </button>
         ))
       }
@@ -314,7 +314,7 @@ const badgeColor = (who: string): string | undefined => {
         const on = b.dataset.floorBtn === String(n);
         if (on) {
           b.setAttribute('aria-current', 'location');
-          if (digit) digit.textContent = n + 'F';
+          if (digit) digit.textContent = n;
           if (name) name.textContent = b.dataset.name || '';
         } else {
           b.removeAttribute('aria-current');
@@ -365,7 +365,7 @@ const badgeColor = (who: string): string | undefined => {
       if (document.documentElement.dataset.booting === '1') return;
       if (window.__pixKeys.typing(e) || !window.__pixKeys.shortcutContext()) return;
       const btn = btns.find(function (b) {
-        return b.dataset.floorBtn === e.key;
+        return b.dataset.floorBtn === e.key + 'F';
       });
       if (btn) go(btn);
     });

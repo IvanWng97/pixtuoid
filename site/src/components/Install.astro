@@ -1,8 +1,8 @@
 ---
 import { Code } from 'astro:components';
-import { REPO, CRATES, floorByNumber } from '../consts';
+import { REPO, CRATES, floorById, floorName } from '../consts';
 
-const floor = floorByNumber(1);
+const floor = floorById('install');
 // Single source of truth for install commands → site/src/install.json. The README
 // regenerates its install block from the same file (gen-readme-check), so the site and
 // README can't drift — the site shows every method, the README only the ones
@@ -10,10 +10,16 @@ const floor = floorByNumber(1);
 import tabs from '../install.json';
 ---
 
-<section id={floor.id} class="install" data-lit data-floor={floor.n}>
+<section
+  id={floor.id}
+  class="install"
+  data-lit
+  data-floor={floor.fl}
+  data-floor-label={floor.label}
+>
   <div class="container">
     <div class="section-head reveal">
-      <p class="eyebrow">{floor.n}F · {floor.name} — get it</p>
+      <p class="eyebrow">{floor.fl} · {floorName(floor)} — get it</p>
       <h2 class="statement statement--md">Move them in.</h2>
       <p class="lead">
         macOS, Linux &amp; Windows. Install, run <code>pixtuoid</code>, and the office opens.

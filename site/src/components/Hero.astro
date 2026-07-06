@@ -1,10 +1,10 @@
 ---
-import { REPO, floorByNumber } from '../consts';
+import { REPO, floorById, floorName } from '../consts';
 
-const floor = floorByNumber(6);
+const floor = floorById('lobby');
 ---
 
-<section id={floor.id} class="hero" data-floor={floor.n}>
+<section id={floor.id} class="hero" data-floor={floor.fl} data-floor-label={floor.label}>
   {
     /* The title card: the live office (page-wide backdrop) is fully lit at
       scroll-0; the statement sits bottom-left, film-title style, and pulls
@@ -15,7 +15,7 @@ const floor = floorByNumber(6);
   <canvas id="dust" class="dust" aria-hidden="true"></canvas>
   <div class="container hero__frame">
     <div class="hero__copy" data-lit="fade" data-lit-max="0.74">
-      <p class="eyebrow">{floor.n}F · {floor.name} — terminal-native, open&nbsp;source</p>
+      <p class="eyebrow">{floor.fl} · {floorName(floor)} — terminal-native, open&nbsp;source</p>
       <h1 class="statement">
         Your agents<br />
         <span class="hl">work here</span><span class="cursor" aria-hidden="true"></span>

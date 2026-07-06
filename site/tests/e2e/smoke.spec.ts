@@ -727,7 +727,7 @@ test('landing fixed chrome: floating nav, statusline readouts, floor popover, da
   await page.keyboard.press('Escape');
   await expect(page.locator('#sl-floors')).toBeHidden();
   await toggle.click();
-  await page.locator('[data-floor-btn="1"]').click();
+  await page.locator('[data-floor-btn="1F"]').click();
   await expect(page.locator('#sl-floors')).toBeHidden();
   await expect(page.locator('[data-lift-digit]')).toHaveText('1F', { timeout: 10_000 });
 });
