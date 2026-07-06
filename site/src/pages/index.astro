@@ -94,12 +94,9 @@ const softwareJsonLd = {
       <div class="gap-caption gap-caption--closer">
         <p class="closer-line">— your office is waiting.</p>
         <div class="closer-install" data-install-row>
-          <code>$ {BREW_CMD}</code>
-          <button
-            class="closer-install__copy"
-            data-install-copy
-            data-source="closer"
-            data-copy={BREW_CMD}>[ copy ]</button
+          <code>$ <span data-cmd>{BREW_CMD}</span></code>
+          <button class="closer-install__copy" data-install-copy data-source="closer"
+            >[ copy ]</button
           >
           <span class="sr-only" role="status" data-copy-status></span>
         </div>

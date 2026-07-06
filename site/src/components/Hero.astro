@@ -35,7 +35,7 @@ const STARS = __GH_STARS__;
         pixel office that lives in your terminal.
       </p>
       <div class="hero__install hw-panel" id="hero-install-row" data-install-row>
-        <code class="hero__cmd" id="hero-install-cmd">$ {BREW_CMD}</code>
+        <code class="hero__cmd" id="hero-install-cmd">$ <span data-cmd>{BREW_CMD}</span></code>
         <button class="hero__copy-chip" data-install-copy data-source="hero">[ copy ]</button>
         <span class="sr-only" role="status" data-copy-status></span>
       </div>
@@ -378,11 +378,13 @@ const STARS = __GH_STARS__;
         }, 1600);
       }
       function manual() {
-        const code = row && row.querySelector('code');
+        // select JUST the command span, not the whole <code> — the '$ ' prompt
+        // prefix lives outside it, so a paste of the selection can't include it.
+        const cmd = row && row.querySelector('[data-cmd]');
         const sel = window.getSelection && window.getSelection();
-        if (code && sel) {
+        if (cmd && sel) {
           const range = document.createRange();
-          range.selectNodeContents(code);
+          range.selectNodeContents(cmd);
           sel.removeAllRanges();
           sel.addRange(range);
         }

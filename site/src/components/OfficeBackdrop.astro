@@ -291,7 +291,11 @@ import { asset, DIM_RESTING } from '../consts';
     let hourShift = 0;
     function engageGoldenHour() {
       if (hourShift) return;
-      let dh = GOLDEN_HOUR - new Date().getHours();
+      // The RENDER clock (Date.now() - pauseOffset), not the wall clock: a
+      // long pause straddling an hour boundary before the closer intersects
+      // must ratchet off the hour the office is actually paused AT, or the
+      // jump lands on the wrong golden hour once resumed.
+      let dh = GOLDEN_HOUR - new Date(Date.now() - pauseOffset).getHours();
       if (dh < 0) dh += 24;
       hourShift = dh * 3_600_000; // whole hours only — loop-phase-preserving
     }
