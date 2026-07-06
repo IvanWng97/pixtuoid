@@ -88,3 +88,12 @@ test('the six floors declare the elevator anchor contract, top floor down', asyn
   );
   expect(shimFloor).toBe('5F');
 });
+
+test('the floating-window still gap is retired (wb-4 owns the slot)', async ({ page }) => {
+  await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
+  await page.goto('./');
+  await expect(page.locator('[data-gap-still]')).toHaveCount(0);
+  await expect(page.locator('[data-gap-daynight]')).toHaveCount(0);
+  // the two KEPT holds: #1 "the real thing" (locked decision) and the closer
+  await expect(page.locator('.office-gap')).toHaveCount(2);
+});

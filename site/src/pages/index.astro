@@ -66,31 +66,6 @@ const softwareJsonLd = {
         </div>
       </div>
     </section>
-    {
-      /* observation gap 2 — with the frameless-window beat: the real floating
-        window is an OPAQUE, chrome-less rect of office pixels (softbuffer
-        writes XRGB, no alpha), so the beat is an office still at window
-        scale floating over the page office — the pixel-scale contrast is
-        what reads as "a separate window". */
-    }
-    <div class="office-gap">
-      <div class="gap-frame" aria-hidden="true">
-        <img
-          class="gap-frame__body px"
-          src={asset('demos/night.png')}
-          data-gap-still
-          data-day={asset('demos/day.png')}
-          data-night={asset('demos/night.png')}
-          alt=""
-          loading="lazy"
-          decoding="async"
-        />
-      </div>
-      <p class="gap-caption" aria-hidden="true">
-        — the floating desktop window: the same office, popped out of the terminal. lighting follows
-        your clock; it's <span data-gap-daynight>night</span> where you are.
-      </p>
-    </div>
     <HowItWorks />
     <SupportedTools />
     <Install />
@@ -103,17 +78,6 @@ const softwareJsonLd = {
       <p class="gap-caption" aria-hidden="true">— your office is waiting.</p>
     </div>
   </main>
-  <script is:inline>
-    // gap 2 follows the viewer's clock: the word AND the window still swap
-    // together off __pixNight (the one boundary, defined in Base's head boot).
-    (function () {
-      const night = window.__pixNight();
-      const el = document.querySelector('[data-gap-daynight]');
-      if (el) el.textContent = night ? 'night' : 'day';
-      const img = document.querySelector('[data-gap-still]');
-      if (img) img.src = night ? img.dataset.night : img.dataset.day;
-    })();
-  </script>
   <Footer />
   <Statusline />
 </Base>

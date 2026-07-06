@@ -1150,9 +1150,7 @@ test('nav menus + docs: dropdown, TOC scrollspy, 404, mobile burger', async ({ p
   await ctx.close();
 });
 
-test('landing fixed chrome: floating nav, statusline readouts, floor popover, day/night gap', async ({
-  page,
-}) => {
+test('landing fixed chrome: floating nav, statusline readouts, floor popover', async ({ page }) => {
   await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
   await page.goto('./'); // no live-office wait — everything here is wasm-independent
   // The load-bearing half of the floating variant: no live blur filter over a
@@ -1165,15 +1163,6 @@ test('landing fixed chrome: floating nav, statusline readouts, floor popover, da
   // fallback pre-wasm, so no live wait is needed); clock is format-only — TZ-agnostic.
   await expect(page.locator('[data-sl-lights]')).toHaveText(/lights \d+%/);
   await expect(page.locator('[data-sl-clock]')).toHaveText(/^\d{2}:\d{2} (day|night)$/);
-  // Gap-2's claim must AGREE with the one clock boundary — consistency, not a
-  // fixed value, so it's green at any hour.
-  const s = await page.evaluate(() => ({
-    night: window.__pixNight!(),
-    word: document.querySelector('[data-gap-daynight]')!.textContent,
-    src: (document.querySelector('[data-gap-still]') as HTMLImageElement).src,
-  }));
-  expect(s.word).toBe(s.night ? 'night' : 'day');
-  expect(s.src).toContain(s.night ? 'night.png' : 'day.png');
   // Floor popover: toggle → Esc closes → reopen → a floor jump closes AND
   // rides the lift (the same scrollspy round-trip as the digit-keys test).
   const toggle = page.locator('[data-floor-toggle]');

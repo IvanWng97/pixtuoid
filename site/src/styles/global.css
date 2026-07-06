@@ -598,39 +598,6 @@ section {
   background: var(--chip-bg);
   padding: 0.5rem 0.8rem;
 }
-/* The frameless-window beat (gap 2): the product's floating desktop window
-   is a chrome-less OPAQUE rect of office pixels (softbuffer XRGB, no alpha),
-   so the beat is exactly that — a small office still at its own pixel scale,
-   floating over the page office on a deep shadow. No fake title bar: the
-   window is frameless in the product, so it's frameless here. */
-.gap-frame {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -55%);
-  width: min(560px, 72vw);
-  border: 1px solid rgba(216, 207, 192, 0.4);
-  background: var(--screen);
-  /* ambient ring first so the TOP edge separates from the office too —
-     bottom-weighted drop shadows alone let the upper edge dissolve */
-  box-shadow:
-    0 0 34px rgba(0, 0, 0, 0.4),
-    0 32px 90px rgba(0, 0, 0, 0.6),
-    0 8px 24px rgba(0, 0, 0, 0.45);
-  pointer-events: none;
-}
-@media (max-width: 560px) {
-  .gap-frame {
-    width: 86vw;
-  }
-}
-.gap-frame__body {
-  display: block;
-  width: 100%;
-  aspect-ratio: 16 / 10;
-  object-fit: cover;
-  object-position: center 30%;
-}
 
 /* scanline overlay — very faint, only reads as CRT texture up close */
 .terminal__scan {
