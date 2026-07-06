@@ -12,6 +12,43 @@ import { expect, test, type Page } from '@playwright/test';
 // Runs against the PRODUCTION build (see playwright.config.ts).
 
 /**
+ * WCAG 2.1 relative luminance + contrast ratio (per the spec's definitions),
+ * plus the minimal alpha-compositing needed to pin `.text-scrim`'s worst case:
+ * the scrim is painted over the dimmer, which is itself translucent over the
+ * live office. Kept fn-local (used by one test) rather than a shared util.
+ */
+function relLuminance([r, g, b]: [number, number, number]): number {
+  const lin = (c: number) => {
+    const s = c / 255;
+    return s <= 0.04045 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+  };
+  return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+}
+function contrastRatio(a: [number, number, number], b: [number, number, number]): number {
+  const [la, lb] = [relLuminance(a), relLuminance(b)];
+  const [hi, lo] = la > lb ? [la, lb] : [lb, la];
+  return (hi + 0.05) / (lo + 0.05);
+}
+function compositeOver(
+  [r, g, b, a]: [number, number, number, number],
+  under: [number, number, number]
+): [number, number, number] {
+  const [ur, ug, ub] = under;
+  return [r * a + ur * (1 - a), g * a + ug * (1 - a), b * a + ub * (1 - a)];
+}
+function parseRgb(css: string): [number, number, number, number] {
+  const m = css.match(/rgba?\(([^)]+)\)/);
+  if (!m) throw new Error(`unparseable color: ${css}`);
+  const [r, g, b, a] = m[1].split(',').map((s) => parseFloat(s));
+  return [r, g, b, a ?? 1];
+}
+function parseHex(hex: string): [number, number, number] {
+  const m = hex.trim().match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
+  if (!m) throw new Error(`unparseable hex color: ${hex}`);
+  return [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)];
+}
+
+/**
  * Fail the calling test if the page logs an uncaught error or console.error.
  * Attached once per DISTINCT code path (index live boot, copy/hire, docs
  * shell, reduced-motion) rather than every test — keeps failures pointed.
@@ -809,4 +846,57 @@ test('text over the live office carries its own scrim (.text-scrim)', async ({ p
   );
   expect(bg).not.toBe('rgba(0, 0, 0, 0)');
   expect(await page.locator('#features .ledger__row.text-scrim').count()).toBeGreaterThan(0);
+});
+
+test('the scrimmed hero subcopy clears WCAG AA at the worst-case composite (day theme)', async ({
+  page,
+}) => {
+  // Review finding (task 2): the binding constraint is WCAG AA (4.5:1) for
+  // EVERY token, but the shipped test above only checked a scrim EXISTS, not
+  // that it's dark/opaque enough. The worst case is day theme, since it's the
+  // theme whose --fg-muted/--scrim pairing has the least headroom: the hero
+  // subcopy (--fg-muted) inside .text-scrim, with the dimmer capped at the
+  // hero's own data-lit-max (below its usual ceiling — see [data-lit-max] in
+  // OfficeBackdrop.astro) instead of fully dark, painted over --screen (the
+  // darkest pixel the office ever renders). Reads REAL computed styles (not
+  // hardcoded token values) so a future --scrim/--fg-muted regression fails
+  // this test rather than only a visual read.
+  await page.addInitScript(() => {
+    sessionStorage.setItem('pix-booted', '1');
+    localStorage.setItem('pix-theme', 'day');
+  });
+  await page.goto('./');
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'day');
+
+  const measured = await page.evaluate(() => {
+    const sub = document.querySelector('.hero .statement-sub')!;
+    const litBlock = document.querySelector('.hero__copy') as HTMLElement;
+    return {
+      textColor: getComputedStyle(sub).color,
+      scrimBg: getComputedStyle(sub).backgroundColor,
+      dimmerBg: getComputedStyle(document.getElementById('dimmer')!).backgroundColor,
+      dataLitMax: parseFloat(litBlock.dataset.litMax!),
+      screenToken: getComputedStyle(document.documentElement).getPropertyValue('--screen'),
+    };
+  });
+
+  const officeWorstPixel = parseHex(measured.screenToken);
+  const afterDimmer = compositeOver(
+    [...parseRgb(measured.dimmerBg).slice(0, 3), measured.dataLitMax] as [
+      number,
+      number,
+      number,
+      number,
+    ],
+    officeWorstPixel
+  );
+  const afterScrim = compositeOver(parseRgb(measured.scrimBg), afterDimmer);
+  const ratio = contrastRatio(
+    parseRgb(measured.textColor).slice(0, 3) as [number, number, number],
+    afterScrim
+  );
+
+  expect(ratio, `WCAG AA floor is 4.5:1; measured ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(
+    4.5
+  );
 });

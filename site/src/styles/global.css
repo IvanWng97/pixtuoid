@@ -36,10 +36,15 @@
   --led: #8de069;
   --led-glow: rgba(141, 224, 105, 0.55);
   --led-off: #6f675a; /* an unlit LED (also the statusline idle dot) */
-  /* opaque-theme --bg at 72% — plain rgba() on purpose: the scrim is
-     load-bearing legibility, so it must not depend on color-mix() support
-     (see the @supports fallback note below). Mirrors --bg per theme. */
-  --scrim: rgba(244, 238, 226, 0.72);
+  /* opaque-theme --bg at 90% (day) / 72% (night, dracula) — plain rgba() on
+     purpose: the scrim is load-bearing legibility, so it must not depend on
+     color-mix() support (see the @supports fallback note below). Mirrors
+     --bg per theme. Day's worst case (scrimmed --fg-muted subcopy over the
+     hero's darkest office pixel, dimmer capped at data-lit-max 0.74) fails
+     WCAG AA at 72% (~4.3:1); 90% clears it with margin (~4.76:1) — measured
+     via computed styles in a real render, not estimated. Night/dracula
+     already clear AA at 72% (~7.5:1 / ~4.85:1) so they keep the lower alpha. */
+  --scrim: rgba(244, 238, 226, 0.9);
 
   /* Semantic tokens — DAY (warm cream) */
   --bg: var(--paper);
