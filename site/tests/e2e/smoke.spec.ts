@@ -644,6 +644,32 @@ test('first visit on an office-less page lifts the splash promptly (no engine-ga
   expect(errors()).toEqual([]);
 });
 
+test('first visit: splash types the install command and lands it in the hero row', async ({
+  page,
+}) => {
+  const errors = watchErrors(page);
+  await page.goto('./'); // NO pix-booted seed — the real first visit
+  await expect(page.locator('#boot')).toBeVisible();
+  // The remodeled log answers "does it support my tool" in the splash…
+  await expect(page.locator('#boot .boot__log')).toContainText('10 CLIs connected');
+  // …and TYPES the real install command (single-sourced from install.json).
+  await expect(page.locator('#boot [data-boot-typed]')).toHaveText(
+    'brew install IvanWng97/pixtuoid/pixtuoid',
+    { timeout: 6_000 }
+  );
+  await expect(page.locator('html')).not.toHaveAttribute('data-booting', '1', {
+    timeout: 8_000,
+  });
+  // The landing slot: the hero install row carries the SAME command the
+  // splash typed — the FLIP hand-off can't desync (one source).
+  await expect(page.locator('#hero-install-cmd')).toContainText(
+    'brew install IvanWng97/pixtuoid/pixtuoid'
+  );
+  // Whole-viewport skip still seeds the session gate.
+  await expect.poll(() => page.evaluate(() => sessionStorage.getItem('pix-booted'))).toBe('1');
+  expect(errors()).toEqual([]);
+});
+
 test('theme chain: saved choice, URL override, toggle persist, Escape restore, system dark', async ({
   page,
 }) => {

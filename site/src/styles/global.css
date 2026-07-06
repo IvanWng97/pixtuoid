@@ -790,6 +790,34 @@ code,
      de-emphasis comes from size alone (opacity:0.55 dropped it to ~2.2:1 in day,
      below WCAG 1.4.3); inherited --fg-muted clears AA in every theme. */
 }
+.boot__line--cmd {
+  color: var(--fg);
+  will-change: transform;
+}
+/* the FLIP landing (spec §1): everything but the prompt line fades, the
+   overlay ground goes transparent under the flying line — it's the SAME
+   var(--bg) the office's boot-cover paints, so the hand-off is seamless */
+.boot.is-landing {
+  background: transparent;
+}
+.boot.is-landing .boot__line:not(.boot__line--cmd),
+.boot.is-landing .boot__hint {
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+/* mobile: the whole viewport is the tap target (the overlay's click handler);
+   say so instead of naming a keyboard */
+.boot__hint-tap {
+  display: none;
+}
+@media (pointer: coarse) {
+  .boot__hint-key {
+    display: none;
+  }
+  .boot__hint-tap {
+    display: inline;
+  }
+}
 
 /* ---------- prose: rendered markdown (the /config page) ---------- */
 .prose {
