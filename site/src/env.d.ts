@@ -1,5 +1,8 @@
 // Injected at build time from the workspace Cargo.toml (see astro.config.mjs).
 declare const __PIXTUOID_VERSION__: string;
+// Build-time GitHub star count ("342"), or null when the API was unreachable
+// at build (offline builds must not fail) — consumers omit the count then.
+declare const __GH_STARS__: string | null;
 
 // The page's cross-component runtime contracts (producers/consumers documented
 // in README.md "Cross-component seams"; existence pinned by tests/e2e). All

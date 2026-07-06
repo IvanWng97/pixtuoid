@@ -7,6 +7,7 @@ import sitemap from '@astrojs/sitemap';
 import rehypeMermaid from 'rehype-mermaid';
 import { unified } from '@astrojs/markdown-remark';
 import { rewriteCspMeta } from './config/csp-hashes.mjs';
+import { fetchStarCount } from './config/gh-stars.mjs';
 
 // Single-source the displayed version from the workspace Cargo.toml so the boot
 // intro never goes stale on a release bump. Scope the match to the
@@ -19,6 +20,10 @@ const version = pkgSection.match(/^version\s*=\s*"([^"]+)"/m)?.[1];
 if (!version) {
   throw new Error('astro.config: could not parse [workspace.package] version from ../Cargo.toml');
 }
+
+// Build-time star count (§2): baked like the version — the CSP forbids a
+// runtime fetch. null on any failure; consumers omit the count (never fail).
+const ghStars = await fetchStarCount();
 
 // (The old themes.json→theme_<id>.png and weather.json→weather_<id>.png
 // demo-still guards were removed with the static THEMES/WEATHER channels (#468):
@@ -270,7 +275,10 @@ export default defineConfig({
     inlineStylesheets: 'always',
   },
   vite: {
-    define: { __PIXTUOID_VERSION__: JSON.stringify(version) },
+    define: {
+      __PIXTUOID_VERSION__: JSON.stringify(version),
+      __GH_STARS__: JSON.stringify(ghStars),
+    },
     // Never inline assets as data: URLs. Vite's default 4KiB inlining turned
     // the small @fontsource unicode-range subsets into data: fonts, which the
     // hand-rolled CSP (font-src 'self', Base.astro) silently BLOCKED in
