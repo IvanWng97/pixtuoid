@@ -120,10 +120,10 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
     >
       // THE site clock boundary (7/19) — the one client-side source of truth,
       // defined parse-first so every later consumer (this init, the Escape
-      // fallback below, the statusline clock, the gap-2 window swap) reads the
-      // SAME predicate and can't drift. An approximation of the engine's own
-      // dawn/dusk ramp (time_of_day.rs ramps ~5-8 and ~17-20); if this ever
-      // re-tunes, it re-tunes everywhere at once.
+      // fallback below, the statusline clock) reads the SAME predicate and can't
+      // drift. An approximation of the engine's own dawn/dusk ramp (time_of_day.rs
+      // ramps ~5-8 and ~17-20); if this ever re-tunes, it re-tunes everywhere at
+      // once.
       window.__pixNight = function () {
         const h = new Date().getHours();
         return h >= 19 || h < 7;
