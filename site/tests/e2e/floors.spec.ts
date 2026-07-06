@@ -60,3 +60,31 @@ test('CRT channel keys: a digit tunes the channel and does NOT ride the floor el
   // …and the building's floor elevator did NOT jump to 2F (the scope claimed the key)
   await expect(page.locator('[data-lift-digit]')).not.toHaveText('2F');
 });
+
+test('the six floors declare the elevator anchor contract, top floor down', async ({ page }) => {
+  await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
+  await page.goto('./');
+  const floors = await page.$$eval('[data-floor]', (els) =>
+    els.map((e) => ({
+      fl: e.getAttribute('data-floor'),
+      label: e.getAttribute('data-floor-label'),
+      id: e.id,
+    }))
+  );
+  expect(floors).toEqual([
+    { fl: '6F', label: 'penthouse — hero', id: 'lobby' },
+    { fl: '5F', label: 'studio — channels', id: 'showcase' },
+    { fl: '4F', label: 'amenities — proof + pantry', id: 'amenities' },
+    { fl: '3F', label: 'machine room — quickstart', id: 'how' },
+    { fl: '2F', label: 'tenants — compatibility', id: 'tools' },
+    { fl: '1F', label: 'front desk — install', id: 'install' },
+  ]);
+  // the statusline lift readout consumes the SAME fl-form values (scrollspy compat)
+  await expect(page.locator('[data-lift-digit]')).toHaveText(/^\dF$/);
+  // the #features anchor-compat shim lives in the merged 5F band, so inbound
+  // /#features deep links still land where the feature roster now is
+  const shimFloor = await page.$eval('#features', (el) =>
+    el.closest('[data-floor]')?.getAttribute('data-floor')
+  );
+  expect(shimFloor).toBe('5F');
+});

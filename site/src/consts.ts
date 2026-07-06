@@ -41,12 +41,8 @@ export interface Floor {
 }
 export const FLOORS: Floor[] = [
   { id: 'lobby', fl: '6F', label: 'penthouse — hero' },
-  // 'features' (4F, "amenities") was MERGED into 'showcase' (wb-3 task 1):
-  // the ledger rows now live inside the 5F studio band as channel triggers,
-  // so 4F is a retired floor number — a floor digit with no [data-floor]
-  // match is already inert by design (see Base.astro's key handler), not an
-  // error, so nothing re-numbers to fill the gap.
   { id: 'showcase', fl: '5F', label: 'studio — channels' },
+  { id: 'amenities', fl: '4F', label: 'amenities — proof + pantry' },
   { id: 'how', fl: '3F', label: 'machine room — quickstart' },
   { id: 'tools', fl: '2F', label: 'tenants — compatibility' },
   { id: 'install', fl: '1F', label: 'front desk — install' },

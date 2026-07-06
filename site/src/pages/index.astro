@@ -9,7 +9,9 @@ import SupportedTools from '../components/SupportedTools.astro';
 import Install from '../components/Install.astro';
 import Footer from '../components/Footer.astro';
 import Statusline from '../components/Statusline.astro';
-import { asset, REPO, CRATES } from '../consts';
+import { asset, REPO, CRATES, floorById } from '../consts';
+
+const amenities = floorById('amenities');
 
 // Homepage structured data: a free cross-platform developer tool. Search
 // engines use this for a rich result; the version is single-sourced from the
@@ -46,6 +48,24 @@ const softwareJsonLd = {
       </p>
     </div>
     <Showcase />
+    {
+      /* 4F — amenities: the section ROOT is wb-3's (the elevator needs six
+        stops); its content is mounted by siblings — wb-4's <ProofSplit /> and
+        wb-5's <PantryFaq /> render INSIDE this section, in that order. */
+    }
+    <section
+      id={amenities.id}
+      class="amenities"
+      data-lit
+      data-floor={amenities.fl}
+      data-floor-label={amenities.label}
+    >
+      <div class="container">
+        <div class="section-head reveal">
+          <p class="eyebrow">{amenities.fl} · {amenities.label}</p>
+        </div>
+      </div>
+    </section>
     {
       /* observation gap 2 — with the frameless-window beat: the real floating
         window is an OPAQUE, chrome-less rect of office pixels (softbuffer

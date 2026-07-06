@@ -113,6 +113,7 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
           }
         </div>
         <div class="roster" role="group" aria-label="Features — tune a row in on the studio wall">
+          <span id="features" aria-hidden="true"></span>
           {
             roster.map((r) =>
               r.ch ? (
