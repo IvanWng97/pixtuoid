@@ -440,19 +440,13 @@ import { asset, DIM_RESTING } from '../consts';
     // each caller reaching for __pixHire. Answer with pix:hired so the
     // statusline can flash the receipt. The name mirrors the hire cast's real
     // identity (claude_code + cwd "/work/yours" → label cc·yours — see
-    // pixtuoid-web/src/script.rs hire_beats).
-    let hiresDispatched = 0;
-    // 3 mirrors VisitorHires::MAX_LIVE in pixtuoid-web/src/lib.rs — two copies,
-    // keep in lockstep. hire() silently REFUSES past that concurrent cap, so past
-    // the 3rd receipt we still let the copy stand (the clipboard write already
-    // happened upstream in __pixInstall.copy / the 1F tab) but STOP dispatching
-    // pix:hired: the receipt must never claim a walk-in the engine turned away.
-    const HIRE_RECEIPT_CAP = 3;
+    // pixtuoid-web/src/script.rs hire_beats). The engine's own return value is
+    // the admission signal (`Office::hire`'s bool contract) — the copy path
+    // never mirrors the concurrent cap on the JS side, so the receipt can't
+    // drift from what the engine actually admitted.
     document.addEventListener('pix:install-copy', function () {
       if (!window.__pixHire) return;
-      window.__pixHire();
-      if (hiresDispatched >= HIRE_RECEIPT_CAP) return;
-      hiresDispatched++;
+      if (!window.__pixHire()) return; // engine refused: cap reached or no free desk
       document.dispatchEvent(new CustomEvent('pix:hired', { detail: { name: 'cc·yours' } }));
     });
 
@@ -491,13 +485,15 @@ import { asset, DIM_RESTING } from '../consts';
             start();
             // #434: the pix:install-copy listener above hires a coworker into
             // the background office (engine-capped at 3 concurrent; a no-op
-            // before the first frame). A function global, same idiom as
-            // __pixLights.
+            // before the first frame) and reads the admitted/refused bool
+            // straight off the wasm call — the receipt event fires on THIS
+            // return, not a JS-side guess at the engine's cap. A function
+            // global, same idiom as __pixLights.
             window.__pixHire = function () {
               try {
-                office.hire();
+                return office.hire();
               } catch (e) {
-                /* never let a background flourish break the click */
+                return false; // never let a background flourish break the click
               }
             };
           });

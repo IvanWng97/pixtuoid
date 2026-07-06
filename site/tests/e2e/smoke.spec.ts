@@ -291,13 +291,13 @@ test('the hire cap stops the receipt at 3 but keeps hiring every time', async ({
   page,
   context,
 }) => {
-  // Cross-boundary pin (review finding on Task 6): HIRE_RECEIPT_CAP in
-  // OfficeBackdrop.astro mirrors VisitorHires::MAX_LIVE in
-  // crates/pixtuoid-web/src/lib.rs across the wasm boundary — a comment
-  // pairing alone can drift silently. This test pins BOTH halves: the cap
-  // VALUE (3) and the keep-attempting BEHAVIOR (the clipboard/copy path must
-  // never look broken even once the engine has quietly refused a hire past
-  // its cap). A change to either constant without the other now fails here.
+  // The engine's own bool return is now the ONE admission signal (see
+  // `Office::hire`'s contract, pixtuoid-web/src/lib.rs) — no JS-side mirror of
+  // `VisitorHires::MAX_LIVE` to drift out of lockstep. This test pins BOTH
+  // halves: the cap VALUE (3, via the receipts) and the keep-attempting
+  // BEHAVIOR (the clipboard/copy path must never look broken even once the
+  // engine has quietly refused a hire past its cap — the 4th call still runs,
+  // it just returns false).
   await context.grantPermissions(['clipboard-write']);
   const errors = watchErrors(page);
   await gotoLive(page); // hire needs the LIVE office (__pixHire exists)
@@ -308,12 +308,15 @@ test('the hire cap stops the receipt at 3 but keeps hiring every time', async ({
         (e as CustomEvent<{ name: string }>).detail.name
       )
     );
-    // Instrument the REAL Office.hire() call BEFORE firing any copies.
+    // Instrument the REAL Office.hire() call BEFORE firing any copies — must
+    // forward its bool return, or the admission signal the listener gates
+    // pix:hired on goes missing.
     const real = window.__pixHire!;
-    (window as unknown as { __hireCalls: number }).__hireCalls = 0;
+    (window as unknown as { __hireResults: boolean[] }).__hireResults = [];
     window.__pixHire = function () {
-      (window as unknown as { __hireCalls: number }).__hireCalls++;
-      real();
+      const admitted = real();
+      (window as unknown as { __hireResults: boolean[] }).__hireResults.push(admitted);
+      return admitted;
     };
   });
   for (let i = 0; i < 4; i++) {
@@ -323,8 +326,8 @@ test('the hire cap stops the receipt at 3 but keeps hiring every time', async ({
     .poll(() => page.evaluate(() => (window as unknown as { __hired: string[] }).__hired))
     .toEqual(['cc·yours', 'cc·yours', 'cc·yours']); // receipt caps at MAX_LIVE (3), not 4
   expect(
-    await page.evaluate(() => (window as unknown as { __hireCalls: number }).__hireCalls)
-  ).toBe(4); // Office.hire() is still called every time — only the receipt stops
+    await page.evaluate(() => (window as unknown as { __hireResults: boolean[] }).__hireResults)
+  ).toEqual([true, true, true, false]); // hire() runs every time; only the 4th is refused
   expect(errors()).toEqual([]);
 });
 
@@ -1266,5 +1269,32 @@ test('the golden-hour ratchet advances the render clock when the closer intersec
   // the ONLY regression coverage for the ratchet's observable effect (the
   // closer-install test above only pins the install-copy wiring).
   await expect.poll(lastHour, { timeout: 5_000 }).toBe(17);
+  expect(errors()).toEqual([]);
+});
+
+test('hero copy → hire receipt: pix:install-copy walks a coworker in (pix:hired)', async ({
+  page,
+  context,
+}) => {
+  await context.grantPermissions(['clipboard-write']);
+  const errors = watchErrors(page);
+  await page.addInitScript(() => {
+    sessionStorage.setItem('pix-booted', '1');
+    (window as { __hired?: boolean }).__hired = false;
+    document.addEventListener(
+      'pix:hired',
+      () => ((window as { __hired?: boolean }).__hired = true)
+    );
+  });
+  await page.goto('./');
+  // hire() is a no-op before the first live frame — wait for the office.
+  await expect(page.locator('.backdrop.is-live')).toBeAttached({ timeout: 15_000 });
+  await page.locator('#hero-install-row [data-install-copy]').click();
+  // wb-1's bridge: pix:install-copy → Office.hire() → pix:hired {name}.
+  await expect
+    .poll(() => page.evaluate(() => (window as { __hired?: boolean }).__hired), {
+      timeout: 10_000,
+    })
+    .toBe(true);
   expect(errors()).toEqual([]);
 });

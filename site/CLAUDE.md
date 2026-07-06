@@ -90,6 +90,12 @@ Mermaid diagram becomes an inline SVG at build via `rehype-mermaid`, which is
   its darkness at 0.74 (below the shared `DIM_MAX` 0.86) so the LIVE office reads
   above the fold, while downpage statement holds keep `DIM_MAX` for copy
   legibility (the `[data-lit]::before` radial wash still floors local contrast).
+  Scroll-0 holds full lights (dim = 0) and the first scroll gesture engages the
+  dimmer via an `engaged` latch that never releases for the rest of the visit
+  (a return to scroll-0 keeps normal dimmer behavior, it just doesn't go back
+  to the pinned full-lights start) — it's **VISIT-scoped, not position-scoped**:
+  the latch lives in the controller's closure (reset only by a fresh page
+  load), not derived by re-checking `scrollY` each frame.
 - **The showcase `VIBING` channel is a SECOND live `Office` (#468).** The CRT
   showcase (`Showcase.astro` + `ChannelStage.astro`, driven by `src/showcase.json`
   → `src/consts.ts`) has one `kind:"live"` channel, `vibing`, whose screen is a

@@ -483,6 +483,12 @@ mod tests {
             .values()
             .filter(|a| matches!(a.state, pixtuoid_core::state::ActivityState::Active { .. }))
             .count();
+        // WHY the exact-4 hairline is expected, not a regression: the current
+        // schedule lands `active` at exactly the >=4 floor with zero headroom
+        // — a spell-offset tweak that shifts one burst's start a beat later
+        // can drop this to 3 without the morning-rush SPEC actually regressing.
+        // This asserts the floor, not a margin; if it flips red, re-check the
+        // rendered office before assuming a real regression.
         assert!(
             active >= 4,
             "morning rush: expected >=4 monitors on by 3s, got {active}"

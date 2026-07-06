@@ -13,8 +13,10 @@ interface Window {
   __pixNight?: () => boolean;
   /** Per-frame dimmer opacity — written by OfficeBackdrop's controller. */
   __pixLights?: number;
-  /** Hire a coworker into the live office — set once the wasm office boots. */
-  __pixHire?: () => void;
+  /** Hire a coworker into the live office — set once the wasm office boots.
+   * Returns whether the engine admitted the hire (the receipt-event signal;
+   * see `Office::hire`'s bool contract in pixtuoid-web/src/lib.rs). */
+  __pixHire?: () => boolean;
   /** Boot splash lifted (mirrors the one-shot pix:revealed for a late listener);
    * set by Base.astro. Gates OfficeBackdrop's office-reveal roll. */
   __pixRevealed?: boolean;
