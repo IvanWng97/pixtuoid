@@ -161,6 +161,7 @@ const badgeColor = (who: string): string | undefined => {
     }
     <button class="sl__copy" data-sl-copy aria-label="Copy the install command">
       <span class="sl__copy-icon" aria-hidden="true">⧉</span>
+      <span class="sl__copy-icon-flash led-selected" aria-hidden="true">✓</span>
       <span class="sl__copy-label" aria-hidden="true">brew install</span>
     </button>
     <span class="sr-only" role="status" data-sl-copy-status></span>
@@ -368,6 +369,19 @@ const badgeColor = (who: string): string | undefined => {
   .sl__copy:focus-visible {
     color: var(--led);
   }
+  /* hidden everywhere by default — only the icon-only mobile collapse below
+     ever shows it, so wide screens (label visible) stay pixel-unchanged. */
+  .sl__copy-icon-flash {
+    display: none;
+  }
+  @keyframes chip-pulse {
+    0% {
+      box-shadow: 0 0 0 0 var(--led-glow);
+    }
+    100% {
+      box-shadow: 0 0 0 8px transparent;
+    }
+  }
   .sr-only {
     position: absolute;
     width: 1px;
@@ -394,6 +408,18 @@ const badgeColor = (who: string): string | undefined => {
     .sl__copy-label,
     .sl__stars {
       display: none;
+    }
+    /* the label's copied/hire-receipt states are invisible in this collapse,
+       so the flash also swaps the glyph + pulses the chip (review round:
+       sighted mobile users got zero confirmation the copy worked). */
+    .sl__copy.is-flash {
+      animation: chip-pulse 0.6s ease-out;
+    }
+    .sl__copy.is-flash .sl__copy-icon {
+      display: none;
+    }
+    .sl__copy.is-flash .sl__copy-icon-flash {
+      display: inline;
     }
   }
   @media (pointer: coarse) {
@@ -615,15 +641,20 @@ const badgeColor = (who: string): string | undefined => {
     function armBusy() {
       chipBusyUntil = Date.now() + CHIP_FLASH_MS;
     }
-    function chipFlash(text, announce) {
+    // `confirm` also drives the icon-only mobile collapse's glyph swap + chip
+    // pulse (§sl__copy-icon-flash below) — a failed copy stays plain so a
+    // mobile visitor never sees a false ✓.
+    function chipFlash(text, announce, confirm) {
       if (!copyLabel) return;
       copyLabel.textContent = text;
       if (copyStatus) copyStatus.textContent = announce || '';
+      if (copyBtn) copyBtn.classList.toggle('is-flash', !!confirm);
       armBusy();
       clearTimeout(chipTimer);
       chipTimer = setTimeout(function () {
         copyLabel.textContent = CHIP_REST;
         if (copyStatus) copyStatus.textContent = '';
+        if (copyBtn) copyBtn.classList.remove('is-flash');
       }, CHIP_FLASH_MS);
     }
     if (copyBtn) {
@@ -639,7 +670,8 @@ const badgeColor = (who: string): string | undefined => {
         window.__pixInstall.copy('statusline').then(function (ok) {
           chipFlash(
             ok ? 'copied ✓' : 'copy failed',
-            ok ? 'Install command copied' : 'Clipboard unavailable'
+            ok ? 'Install command copied' : 'Clipboard unavailable',
+            ok
           );
         });
       });
@@ -647,7 +679,7 @@ const badgeColor = (who: string): string | undefined => {
     document.addEventListener('pix:hired', function () {
       const wait = Math.max(0, chipBusyUntil - Date.now());
       setTimeout(function () {
-        chipFlash('you · hired · just now', 'A coworker walked into the office');
+        chipFlash('you · hired · just now', 'A coworker walked into the office', true);
       }, wait);
     });
 

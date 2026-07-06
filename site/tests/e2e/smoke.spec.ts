@@ -478,6 +478,34 @@ test('statusline install chip: copy flashes ✓, clipboard gets the one-liner, t
   expect(errors()).toEqual([]);
 });
 
+test('statusline install chip: the icon-only mobile collapse still shows the copied/hired flash (review round, #504)', async ({
+  page,
+  context,
+}) => {
+  // ≤760px hides .sl__copy-label — the desktop test above asserts on TEXT
+  // that's invisible here. This pins the glyph swap + chip pulse that stand
+  // in for it (a pixel-diff at this width showed no perceivable change
+  // before this fix — sighted mobile users got zero copy confirmation).
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  const errors = watchErrors(page);
+  await gotoLive(page); // live office → the copy also hires → the receipt
+  await page.setViewportSize({ width: 375, height: 800 });
+  const chip = page.locator('#sl-install .sl__copy');
+  const flashIcon = page.locator('#sl-install .sl__copy-icon-flash');
+  await expect(chip).not.toHaveClass(/is-flash/);
+  await expect(flashIcon).toBeHidden();
+  await page.locator('#sl-install [data-sl-copy]').click();
+  await expect(chip).toHaveClass(/is-flash/);
+  await expect(flashIcon).toBeVisible();
+  // …and once the whole copied → hired-receipt sequence settles, it reverts
+  await expect(page.locator('#sl-install .sl__copy-label')).toHaveText('brew install', {
+    timeout: 8_000,
+  });
+  await expect(chip).not.toHaveClass(/is-flash/);
+  await expect(flashIcon).toBeHidden();
+  expect(errors()).toEqual([]);
+});
+
 test('statusline install chip: the ★ star segment renders the overridden count, never a literal null/undefined', async ({
   page,
 }) => {
