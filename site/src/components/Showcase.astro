@@ -661,9 +661,9 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
 
   .showcase {
     position: relative;
-    /* inherit section's clamp(3.2rem,7vw,6rem)=96px — the lone 80px override was
-       an unexplained dip in an otherwise strict cadence (HowItWorks also follows
-       an office-gap and keeps 96px). */
+    /* inherit section's shared padding-block (global.css) — the lone 80px
+       override was an unexplained dip in an otherwise strict cadence
+       (HowItWorks also follows an office-gap and keeps the shared value). */
   }
   /* Mobile only: at narrow widths the kicker + heading wrap onto more lines and
      scroll into view while still low in the viewport — far from the dimmer's

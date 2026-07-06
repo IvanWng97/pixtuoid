@@ -41,7 +41,9 @@ import { REPO, CRATES, SPONSOR, asset } from '../consts';
 
 <style>
   .footer {
-    margin-top: clamp(2rem, 6vw, 5rem);
+    /* compression (§4, scroll-budget pin): same tightened rhythm as the
+       shared `section` rule, same reasoning (global.css). */
+    margin-top: clamp(1.5rem, 5vw, 3rem);
     padding-block: 1.4rem;
   }
   /* The line floats over the released dimmer (office fully lit) at page end,

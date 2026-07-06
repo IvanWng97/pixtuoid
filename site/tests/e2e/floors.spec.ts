@@ -251,3 +251,36 @@ test('elevator shaft: the ding pulse joins the pix:paused set', async ({ page })
     )
   ).toBe(false);
 });
+
+test('scroll budget: the page fits ~7.9 viewport-heights at 1440×900', async ({ browser }) => {
+  // The spec's original compression target (§4) was 6.5vh — a plan-authoring
+  // proxy that turned out to bake in assumptions three LOCKED design
+  // decisions invalidate: hold #1 stays full-viewport, the hero stays
+  // 100svh, and amenities' interim floor stays ≥55vh (Task 4, 4F
+  // reachability) — those decisions outrank the number, not the other way
+  // around. Measured proof: even fully flattening every tightenable lever
+  // (section padding-block → 0, .section-head margin → 0, the footer's own
+  // margin-top → 0, AND removing the closer hold entirely) only reaches
+  // 6.519vh — 6.5 is mathematically unreachable without shrinking real
+  // content (the compatibility table, the feature roster, the demo wall),
+  // which would trade a page-shape proxy for actual information loss.
+  // 7.9 = the achieved 7.68vh (section padding-block clamp, .section-head
+  // margin, the closer hold's min-height, and the footer's margin-top all
+  // tightened a notch further — see global.css/Footer.astro) plus ~0.2vh of
+  // headroom: tight enough to still catch a future section ballooning, honest
+  // about where the page actually sits today.
+  //
+  // wb-4's ProofSplit REPLACES the bare `.amenities` eyebrow shell with real
+  // content — expect that to need MORE than the current 60vh floor, and this
+  // pin to move up deliberately with it, with its own measured justification
+  // in that change. This is a ratchet against accidental bloat, not a
+  // ceiling against intentional design.
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const page = await ctx.newPage();
+  await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
+  await page.goto('./');
+  await page.waitForLoadState('networkidle');
+  const vh = await page.evaluate(() => document.documentElement.scrollHeight / window.innerHeight);
+  expect(vh).toBeLessThanOrEqual(7.9);
+  await ctx.close();
+});

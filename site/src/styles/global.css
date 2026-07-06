@@ -347,11 +347,17 @@ h3 {
   padding-inline: clamp(1.1rem, 4vw, 2.5rem);
 }
 section {
-  padding-block: clamp(3.2rem, 7vw, 6rem);
+  /* compression (§4): the pre-redesign clamp(3.2rem, 7vw, 6rem) carried
+     30–39% empty scroll (audit top12 #9); the merged 5F band + retired gap
+     do the heavy lifting, this trims the per-section breathing to match.
+     Tightened a second notch (4rem → 3rem ceiling) toward the measured
+     scroll-budget pin below — see that spec for why 6.5vh itself isn't the
+     final number. */
+  padding-block: clamp(1.6rem, 5vw, 3rem);
 }
 .section-head {
   max-width: 48ch;
-  margin-bottom: clamp(1.8rem, 4vw, 3rem);
+  margin-bottom: clamp(1.1rem, 3vw, 1.8rem);
 }
 .section-head .lead {
   margin-top: 0.9rem;
@@ -587,6 +593,15 @@ section {
   .office-gap {
     min-height: 70svh;
   }
+}
+/* the closing hold reads at a shorter beat — the caption (and wb-2's install
+   line) sit low, so 55svh keeps the emotional hold without a full empty screen
+   (tightened a second notch from 80svh toward the scroll-budget pin below —
+   the caption is position:absolute off the bottom edge, so this height is
+   pure held-air, never a content floor). Hold #1 (the "real thing" gap)
+   deliberately KEEPS the full-viewport base. */
+.office-gap--closer {
+  min-height: 55svh;
 }
 .office-gap .gap-caption {
   position: absolute;
