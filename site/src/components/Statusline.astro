@@ -10,8 +10,12 @@
 // office — with canned office-life beats interleaved; falls back to the
 // canned reel when the API is unreachable so the build never fails.
 import sources from '../sources.json';
-import { FLOORS, floorName, DIM_RESTING } from '../consts';
+import { FLOORS, floorName, DIM_RESTING, REPO } from '../consts';
 import { GH_FETCH_TIMEOUT_MS } from '../../config/gh-stars.mjs';
+
+// Build-time star count (§2): null when the API was unreachable at build —
+// the chip stays, the ★ segment is omitted (offline builds never fail).
+const ghStars: string | null = __GH_STARS__;
 
 const FALLBACK = [
   { state: 'active', who: 'claude-code', what: 'editing src/reducer.rs' },
@@ -140,6 +144,26 @@ const badgeColor = (who: string): string | undefined => {
     <span data-sl-clock></span>
     <span class="sl__sep">·</span>
     <span class="sl__onair" data-sl-onair>○ STILL</span>
+  </div>
+  <div class="sl__install hw-panel" id="sl-install">
+    {
+      ghStars && (
+        <a
+          class="sl__stars"
+          href={REPO}
+          target="_blank"
+          rel="noreferrer"
+          aria-label={`${ghStars} GitHub stars`}
+        >
+          ★ {ghStars}
+        </a>
+      )
+    }
+    <button class="sl__copy" data-sl-copy aria-label="Copy the install command">
+      <span class="sl__copy-icon" aria-hidden="true">⧉</span>
+      <span class="sl__copy-label" aria-hidden="true">brew install</span>
+    </button>
+    <span class="sr-only" role="status" data-sl-copy-status></span>
   </div>
   <span class="sl__keys" aria-hidden="true">keys 1–6 · i</span>
 </div>
@@ -314,6 +338,47 @@ const badgeColor = (who: string): string | undefined => {
     color: var(--led);
     text-shadow: 0 0 6px var(--led-glow);
   }
+  .sl__install {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+    padding: 0.1rem 0.55rem;
+  }
+  .sl__stars {
+    color: var(--chip-bright);
+    text-decoration: none;
+  }
+  .sl__stars:hover,
+  .sl__stars:focus-visible {
+    color: var(--led);
+  }
+  .sl__copy {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    background: none;
+    border: 0;
+    padding: 0.2rem 0;
+    font: inherit;
+    color: var(--chip-ink);
+    cursor: pointer;
+  }
+  .sl__copy:hover,
+  .sl__copy:focus-visible {
+    color: var(--led);
+  }
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
   .sl__keys {
     flex: none;
     color: var(--chip-dim);
@@ -325,6 +390,10 @@ const badgeColor = (who: string): string | undefined => {
     }
     .statusline {
       justify-content: space-between;
+    }
+    .sl__copy-label,
+    .sl__stars {
+      display: none;
     }
   }
   @media (pointer: coarse) {
@@ -530,6 +599,56 @@ const badgeColor = (who: string): string | undefined => {
     document.addEventListener('pix:onair', function (e) {
       isLive = !!(e.detail && e.detail.live);
       renderAir();
+    });
+
+    // ── the install chip (#sl-install): copy → copied ✓ (2s), then the hire
+    // receipt (pix:hired answers a successful copy via OfficeBackdrop). The
+    // receipt QUEUES behind an active flash so 'copied ✓' gets its full
+    // window. Left-segment feed/readouts above are untouched (locked). ──
+    const copyBtn = bar.querySelector('[data-sl-copy]');
+    const copyLabel = bar.querySelector('.sl__copy-label');
+    const copyStatus = bar.querySelector('[data-sl-copy-status]');
+    const CHIP_FLASH_MS = 2000; // §2: 'copied ✓' holds for 2s
+    const CHIP_REST = 'brew install';
+    let chipTimer = 0;
+    let chipBusyUntil = 0;
+    function armBusy() {
+      chipBusyUntil = Date.now() + CHIP_FLASH_MS;
+    }
+    function chipFlash(text, announce) {
+      if (!copyLabel) return;
+      copyLabel.textContent = text;
+      if (copyStatus) copyStatus.textContent = announce || '';
+      armBusy();
+      clearTimeout(chipTimer);
+      chipTimer = setTimeout(function () {
+        copyLabel.textContent = CHIP_REST;
+        if (copyStatus) copyStatus.textContent = '';
+      }, CHIP_FLASH_MS);
+    }
+    if (copyBtn) {
+      copyBtn.addEventListener('click', function () {
+        if (!window.__pixInstall) return;
+        // Arm the busy window SYNCHRONOUSLY, before the async copy resolves:
+        // OfficeBackdrop's pix:install-copy → hire → pix:hired cascade fires
+        // synchronously inside the SAME clipboard-write promise continuation
+        // that resolves copy() — i.e. BEFORE the .then() below runs — so the
+        // pix:hired listener would otherwise read a stale chipBusyUntil (0)
+        // and fire the receipt immediately instead of queuing behind it.
+        armBusy();
+        window.__pixInstall.copy('statusline').then(function (ok) {
+          chipFlash(
+            ok ? 'copied ✓' : 'copy failed',
+            ok ? 'Install command copied' : 'Clipboard unavailable'
+          );
+        });
+      });
+    }
+    document.addEventListener('pix:hired', function () {
+      const wait = Math.max(0, chipBusyUntil - Date.now());
+      setTimeout(function () {
+        chipFlash('you · hired · just now', 'A coworker walked into the office');
+      }, wait);
     });
 
     // ONE control, ONE stop path: the office pause switch fans out here (the

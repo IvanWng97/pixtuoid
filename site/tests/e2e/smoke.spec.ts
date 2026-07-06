@@ -482,6 +482,27 @@ test("the i key copies the install one-liner and fires pix:install-copy {source:
   expect(errors()).toEqual([]);
 });
 
+test('statusline install chip: copy flashes ✓, clipboard gets the one-liner, then the hire receipt', async ({
+  page,
+  context,
+}) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  const errors = watchErrors(page);
+  await gotoLive(page); // live office → the copy also hires → the receipt
+  const label = page.locator('#sl-install .sl__copy-label');
+  await expect(label).toHaveText('brew install');
+  await page.locator('#sl-install [data-sl-copy]').click();
+  await expect(label).toHaveText('copied ✓');
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
+    'brew install IvanWng97/pixtuoid/pixtuoid'
+  );
+  // the receipt queues BEHIND the 2s copied-✓ window, then flashes
+  await expect(label).toHaveText('you · hired · just now', { timeout: 6_000 });
+  // …and the chip returns to rest
+  await expect(label).toHaveText('brew install', { timeout: 6_000 });
+  expect(errors()).toEqual([]);
+});
+
 test('WCAG 2.1.4: the statusline keys toggle turns the digit/i shortcuts off, then back on', async ({
   page,
 }) => {

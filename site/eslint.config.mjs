@@ -18,7 +18,11 @@ export default [
   ...astro.configs.recommended,
   {
     languageOptions: {
-      globals: { ...globals.browser, __PIXTUOID_VERSION__: 'readonly' },
+      globals: {
+        ...globals.browser,
+        __PIXTUOID_VERSION__: 'readonly',
+        __GH_STARS__: 'readonly',
+      },
     },
     rules: {
       // inline client scripts intentionally swallow storage/JSON errors
