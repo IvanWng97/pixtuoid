@@ -9,6 +9,10 @@ const floor = floorById('lobby');
 const brew = tabs.find((t) => t.id === 'brew');
 if (!brew) throw new Error('Hero: install.json lost its brew entry');
 const BREW_CMD = brew.cmds[0];
+// The other install methods (1F has all four tabs) — brew excluded since it
+// IS the hero row above. Derived, not hardcoded, so a manager added/removed
+// in install.json updates this line for free.
+const altTabs = tabs.filter((t) => t.id !== 'brew');
 // Build-time star count (wb-1's vite define; null when the API was unreachable
 // — the offline build must not fail, so the count simply doesn't render).
 const STARS = __GH_STARS__;
@@ -39,12 +43,17 @@ const STARS = __GH_STARS__;
         <button class="hero__copy-chip" data-install-copy data-source="hero">[ copy ]</button>
         <span class="sr-only" role="status" data-copy-status></span>
       </div>
+      <p class="hero__alt-install">
+        also via <a href="#install">{altTabs.map((t) => t.label).join(' · ')} →</a>
+      </p>
       <ul class="hero__badges" aria-label={`Works with ${sources.length} coding CLIs`}>
         {
           sources.map((s) => (
             <li class="hero__badge" style={`--badge:${s.badge_color}`}>
-              {s.badge.replace('·', '')}
-              <span class="sr-only">{s.name}</span>
+              <span class="hero__badge-code" aria-hidden="true">
+                {s.badge.replace('·', '')}
+              </span>
+              <span class="hero__badge-name">{s.name}</span>
             </li>
           ))
         }
@@ -121,6 +130,20 @@ const STARS = __GH_STARS__;
     letter-spacing: 0.04em;
     color: var(--fg-muted);
   }
+  /* style-matched to .hero__avail — same demoted, small-print treatment */
+  .hero__alt-install {
+    margin-top: 0.7rem;
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+    letter-spacing: 0.04em;
+    color: var(--fg-muted);
+  }
+  .hero__alt-install a {
+    color: var(--fg-muted);
+  }
+  .hero__alt-install a:hover {
+    color: var(--coral);
+  }
   .hero__install {
     display: inline-flex;
     align-items: center;
@@ -162,6 +185,9 @@ const STARS = __GH_STARS__;
     list-style: none;
   }
   .hero__badge {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.35rem;
     font-family: var(--font-mono);
     font-size: 0.78rem;
     letter-spacing: 0.03em;
@@ -170,7 +196,29 @@ const STARS = __GH_STARS__;
        page theme (in-app they live on the dark Sources panel), not on cream */
     background: var(--screen);
     border: 1px solid var(--chip-line);
+  }
+  .hero__badge-code {
+    font-weight: 600;
+    /* --badge is sources.json's badge_color — a pinned wire fact, bridge-tested
+       against pixtuoid_scene's theme::NORMAL.source palette (the office's own
+       rendered hue for this CLI), so it can't just be recolored. Three of the
+       ten raw hues fail WCAG 4.5:1 on this chip's --screen background (Reasonix
+       ~3.5:1, Hermes ~3.75:1, opencode ~4.24:1) — lifting toward white in THIS
+       text context (not touching the source value) clears the floor for all
+       ten with margin (worst case, Reasonix, measures ~4.9:1 at 82%; see the
+       e2e contrast sweep). `color: var(--badge)` is the deliberate fallback for
+       engines predating color-mix() (Safari <16.2): an unparseable color-mix()
+       value invalidates only THIS declaration at parse time, so the plain
+       line above stays in effect — same posture as global.css's `@supports
+       not (color: color-mix(...))` arms, without duplicating the palette here. */
     color: var(--badge);
+    color: color-mix(in srgb, var(--badge) 82%, white);
+  }
+  .hero__badge-name {
+    /* neutral screen-chrome ink (theme-independent, always legible on
+       --screen — same tokens the statusline text uses), never the per-source
+       hue: the abbreviation carries the color, the name stays readable. */
+    color: var(--chip-ink);
   }
   .sr-only {
     position: absolute;
@@ -226,6 +274,9 @@ const STARS = __GH_STARS__;
   }
   .hero__copy .hero__install {
     animation-delay: 0.34s;
+  }
+  .hero__copy .hero__alt-install {
+    animation-delay: 0.38s;
   }
   .hero__copy .hero__badges {
     animation-delay: 0.42s;

@@ -648,7 +648,21 @@ const badgeColor = (who: string): string | undefined => {
       if (!copyLabel) return;
       copyLabel.textContent = text;
       if (copyStatus) copyStatus.textContent = announce || '';
-      if (copyBtn) copyBtn.classList.toggle('is-flash', !!confirm);
+      if (copyBtn) {
+        if (confirm) {
+          // The hire receipt can fire while the copy flash's OWN is-flash is
+          // still on (it queues behind the active flash, above) — a plain
+          // classList.toggle('is-flash', true) is then a no-op (class already
+          // present), so the mobile icon-only pulse (chip-pulse) never
+          // restarts for the second event. Force it: remove, flush the
+          // removal with a layout read, then re-add.
+          copyBtn.classList.remove('is-flash');
+          void copyBtn.offsetWidth;
+          copyBtn.classList.add('is-flash');
+        } else {
+          copyBtn.classList.remove('is-flash');
+        }
+      }
       armBusy();
       clearTimeout(chipTimer);
       chipTimer = setTimeout(function () {

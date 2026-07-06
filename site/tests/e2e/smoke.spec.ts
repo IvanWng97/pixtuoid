@@ -38,9 +38,19 @@ function compositeOver(
 }
 function parseRgb(css: string): [number, number, number, number] {
   const m = css.match(/rgba?\(([^)]+)\)/);
-  if (!m) throw new Error(`unparseable color: ${css}`);
-  const [r, g, b, a] = m[1].split(',').map((s) => parseFloat(s));
-  return [r, g, b, a ?? 1];
+  if (m) {
+    const [r, g, b, a] = m[1].split(',').map((s) => parseFloat(s));
+    return [r, g, b, a ?? 1];
+  }
+  // A color-mix()-derived computed value serializes in the CSS Color 4
+  // color() functional notation (0..1 floats), not legacy rgb() 0..255 —
+  // hit by Hero.astro's .hero__badge-code contrast lift.
+  const cm = css.match(/^color\(srgb\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)(?:\s*\/\s*([\d.]+))?\)$/);
+  if (cm) {
+    const [, r, g, b, a] = cm;
+    return [parseFloat(r) * 255, parseFloat(g) * 255, parseFloat(b) * 255, a ? parseFloat(a) : 1];
+  }
+  throw new Error(`unparseable color: ${css}`);
 }
 function parseHex(hex: string): [number, number, number] {
   const m = hex.trim().match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
@@ -524,6 +534,19 @@ test('statusline install chip: the icon-only mobile collapse still shows the cop
   // before this fix — sighted mobile users got zero copy confirmation).
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   const errors = watchErrors(page);
+  // U5: the copy flash and the hire receipt share .is-flash — a naive
+  // classList.toggle('is-flash', true) is a no-op (and the CSS animation
+  // can't restart) when the receipt fires while the copy flash's OWN class
+  // is still on. Count REAL animationstart events for the chip-pulse
+  // keyframe (not just class presence) to prove it fires twice, not once.
+  await page.addInitScript(() => {
+    (window as unknown as { __chipPulses: number }).__chipPulses = 0;
+    document.addEventListener('animationstart', (e) => {
+      if ((e as AnimationEvent).animationName === 'chip-pulse') {
+        (window as unknown as { __chipPulses: number }).__chipPulses++;
+      }
+    });
+  });
   await gotoLive(page); // live office → the copy also hires → the receipt
   await page.setViewportSize({ width: 375, height: 800 });
   const chip = page.locator('#sl-install .sl__copy');
@@ -539,6 +562,11 @@ test('statusline install chip: the icon-only mobile collapse still shows the cop
   });
   await expect(chip).not.toHaveClass(/is-flash/);
   await expect(flashIcon).toBeHidden();
+  // TWO starts: the initial copy flash, then the queued hire-receipt flash —
+  // the bug measured exactly 1 (the second toggle was a same-value no-op).
+  expect(
+    await page.evaluate(() => (window as unknown as { __chipPulses: number }).__chipPulses)
+  ).toBe(2);
   expect(errors()).toEqual([]);
 });
 
@@ -1169,6 +1197,39 @@ test('the scrimmed hero subcopy clears WCAG AA at the worst-case composite (day 
   expect(ratio, `WCAG AA floor is 4.5:1; measured ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(
     4.5
   );
+});
+
+test('hero badge codes: every per-source hue clears WCAG AA on the chip screen', async ({
+  page,
+}) => {
+  // U4 amendment: 3 of the 10 badge_color hues (Reasonix, Hermes, opencode) fail
+  // 4.5:1 raw against --screen — the hues are bridge-pinned wire facts
+  // (sources.json <-> pixtuoid_scene theme), so Hero.astro lifts the CODE toward
+  // white in this text context only (.hero__badge-code's color-mix). --screen and
+  // --badge are both theme-independent, so one theme (the default) covers every
+  // visitor. Reads REAL computed styles, not the color-mix math, so a future
+  // sources.json hue or lift-percentage regression fails this test.
+  await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
+  await page.goto('./');
+  const measured = await page.evaluate(() => {
+    const chips = Array.from(document.querySelectorAll('.hero__badge'));
+    return chips.map((chip) => ({
+      code: chip.querySelector('.hero__badge-code')!.textContent,
+      textColor: getComputedStyle(chip.querySelector('.hero__badge-code')!).color,
+      bg: getComputedStyle(chip).backgroundColor,
+    }));
+  });
+  expect(measured.length).toBe(10);
+  for (const m of measured) {
+    const ratio = contrastRatio(
+      parseRgb(m.textColor).slice(0, 3) as [number, number, number],
+      parseRgb(m.bg).slice(0, 3) as [number, number, number]
+    );
+    expect(
+      ratio,
+      `badge "${m.code}": WCAG AA floor is 4.5:1; measured ${ratio.toFixed(2)}:1`
+    ).toBeGreaterThanOrEqual(4.5);
+  }
 });
 
 test('scroll-0 holds full lights; the dimmer engages on first scroll', async ({ page }) => {

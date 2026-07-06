@@ -291,11 +291,15 @@ import { asset, DIM_RESTING } from '../consts';
     let hourShift = 0;
     function engageGoldenHour() {
       if (hourShift) return;
-      // The RENDER clock (Date.now() - pauseOffset), not the wall clock: a
-      // long pause straddling an hour boundary before the closer intersects
-      // must ratchet off the hour the office is actually paused AT, or the
-      // jump lands on the wrong golden hour once resumed.
-      let dh = GOLDEN_HOUR - new Date(Date.now() - pauseOffset).getHours();
+      // The RENDER clock — (paused ? pausedAt : Date.now()) - pauseOffset,
+      // the SAME expression the resize handler repaints with below — not the
+      // wall clock: while paused, pauseOffset only accumulates on RESUME, so
+      // a plain `Date.now() - pauseOffset` keeps advancing with real time
+      // even though the office is visually frozen at pausedAt. A long pause
+      // straddling an hour boundary before the closer intersects must
+      // ratchet off the hour the office is actually paused AT, or the jump
+      // lands on the wrong golden hour once resumed.
+      let dh = GOLDEN_HOUR - new Date((paused ? pausedAt : Date.now()) - pauseOffset).getHours();
       if (dh < 0) dh += 24;
       hourShift = dh * 3_600_000; // whole hours only — loop-phase-preserving
     }
@@ -585,13 +589,20 @@ import { asset, DIM_RESTING } from '../consts';
     if (!dimmer) return;
     const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
     const DIM_MAX = 0.86;
+    // How long the first-scroll engage EASES in (user feedback: an instant
+    // 0 → computed jump read as the mask "slamming on"). Only the latch's
+    // false→true flip gets this treatment — every scroll after that already
+    // moves smoothly frame-to-frame via `ease(best)`.
+    const ENGAGE_RAMP_MS = 500;
 
     // Spec §1: scroll-0 is FULL LIGHTS — the dimmer is scroll's instrument, so
     // it stays at 0 until the first scroll gesture. Latch, never release (a
     // return to top keeps normal dimmer behavior); a mid-page reload
-    // (scroll restoration) starts already engaged. Hero-copy legibility at
-    // op=0 is the .text-scrim's job, not the dimmer's.
+    // (scroll restoration) starts already engaged (no ramp: there's no prior
+    // frame to ease from). Hero-copy legibility at op=0 is the .text-scrim's
+    // job, not the dimmer's.
     let engaged = window.scrollY > 0;
+    let rampStart = 0; // rAF timestamp of the engage flip; 0 = no ramp in flight
 
     let blocks = []; // cached page-space rects; re-measured on resize only
     let lastY = -1;
@@ -613,10 +624,13 @@ import { asset, DIM_RESTING } from '../consts';
       return t * t * (3 - 2 * t);
     }
 
-    function frame() {
+    function frame(ts) {
       raf = 0;
       const y = window.scrollY;
-      if (y !== lastY) {
+      // Also recompute while a ramp is in flight — otherwise a single scroll
+      // gesture that lands on a still scrollY would compute op ONCE (at ramp
+      // start, i.e. op*0) and never revisit it once y stops changing.
+      if (y !== lastY || rampStart) {
         lastY = y;
         const center = y + window.innerHeight / 2;
         const reach = window.innerHeight * 0.55; // how far a block throws shade
@@ -637,8 +651,16 @@ import { asset, DIM_RESTING } from '../consts';
         // holds keep DIM_MAX for copy legibility. The [data-lit]::before radial
         // wash still floors local contrast on the capped block.
         const cap = bestEl && bestEl.dataset.litMax ? parseFloat(bestEl.dataset.litMax) : DIM_MAX;
-        if (!engaged && y > 0) engaged = true;
-        const op = engaged ? cap * ease(best) : 0;
+        if (!engaged && y > 0) {
+          engaged = true;
+          rampStart = ts;
+        }
+        let op = engaged ? cap * ease(best) : 0;
+        if (rampStart) {
+          const ramp = Math.min(1, (ts - rampStart) / ENGAGE_RAMP_MS);
+          op *= ramp;
+          if (ramp >= 1) rampStart = 0;
+        }
         if (Math.abs(op - lastOp) > 0.002) {
           lastOp = op;
           dimmer.style.opacity = op.toFixed(3);

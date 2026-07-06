@@ -526,15 +526,17 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
         const cmdLine = boot.querySelector('.boot__line--cmd');
         const typedEl = boot.querySelector('[data-boot-typed]');
         const CMD = cmdLine ? cmdLine.dataset.bootCmd || '' : '';
-        // §1 budget: ~1.4s total on the deterministic (no live-engine-wait)
-        // path — was ~2.5s. FIRST_MS + 4×LINE_MS + |cmd|×TYPE_MS ≈ 0.62s of
-        // log/typing, + NO_OFFICE_HOLD_MS + the 460ms overlay fade. (The
-        // live-office/index page's ACTUAL total additionally depends on
-        // window.__pixEngineReady — bounded separately by MAX_ENGINE_WAITS,
-        // not this budget.)
-        const LINE_MS = 50;
-        const FIRST_MS = 100;
-        const TYPE_MS = 8;
+        // §1 budget: ~1.9s total on the deterministic (no live-engine-wait)
+        // path — retuned from an unreadable ~1.4s for splash-pacing legibility
+        // (user decision 2026-07-06; was ~2.5s before that). FIRST_MS +
+        // 4×LINE_MS + |cmd|×TYPE_MS ≈ 1.09s of log/typing (120 + 4×140 +
+        // 41×10, for the current 40-char brew command), + NO_OFFICE_HOLD_MS
+        // + the 460ms overlay fade ≈ 1.8s. (The live-office/index page's
+        // ACTUAL total additionally depends on window.__pixEngineReady —
+        // bounded separately by MAX_ENGINE_WAITS, not this budget.)
+        const LINE_MS = 140;
+        const FIRST_MS = 120;
+        const TYPE_MS = 10;
         const NO_OFFICE_HOLD_MS = 250; // the flat hold on an office-less page (docs/404)
         let i = 0,
           done = false;
