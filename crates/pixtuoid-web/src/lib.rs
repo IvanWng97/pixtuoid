@@ -647,7 +647,7 @@ mod tests {
         use pixtuoid_scene::layout::Layout;
         // A portrait-phone hero buffer (the site renders BUF_H=180 at a
         // narrow bufW) lays out 8 desks; the scripted cast alone holds 7 of
-        // them by 19s. The reducer's capacity must derive from THAT layout,
+        // them by ~2.5s (the morning rush walk-in). The reducer's capacity must derive from THAT layout,
         // so an admitted agent always has a paintable desk anchor — an agent
         // whose desk index falls off the canvas layout renders NOWHERE
         // (character_anchor returns None) while staying alive in the scene.

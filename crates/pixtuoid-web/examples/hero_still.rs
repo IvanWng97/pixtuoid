@@ -25,7 +25,7 @@
 //! the shipped wasm artifact (an example, native-only). The committed
 //! poster's manifest values decode to: t0 = 2026-01-15T17:30:00Z (evening —
 //! night skyline, city lights) and advance = 100s (the script's populated
-//! plateau: all 7 walk-ins land by 19s, the first walkout fires at 104s).
+//! plateau: all 7 walk-ins land by ~2.5s, the working plateau holds from the opening burst).
 
 use std::process::ExitCode;
 

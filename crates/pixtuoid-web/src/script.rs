@@ -5,7 +5,7 @@
 //! same `(Transport, AgentEvent)` stream a live CLI would produce.
 //!
 //! Beat structure (one `LOOP_MS` cycle):
-//! - staggered `SessionStart`s walk the cast in over the first ~20s;
+//! - staggered `SessionStart`s walk the cast in over the first ~2.5s (morning rush);
 //! - each agent runs chained tool bursts (`ActivityStart`→`ActivityEnd` with
 //!   gaps < the reducer's 1.5s Active debounce, so work reads continuous)
 //!   interleaved with idle stretches (wander/coffee/meetings emerge from the
@@ -227,9 +227,9 @@ pub(crate) fn hero_script() -> Vec<Beat> {
     let mut b: Vec<Beat> = Vec::new();
 
     // Walk-ins — the MORNING RUSH (spec §1, audit top12 #3): the cast is
-    // through the door within ~2.5s of reveal instead of trickling in over
-    // 19s, so scroll-0 never reads as an empty looping video. Loop-wrap
-    // replay is unchanged: a SessionStart for a live slot is a no-op.
+    // through the door within ~2.5s of reveal, so scroll-0 never reads as an
+    // empty looping video. Loop-wrap replay is unchanged: a SessionStart for a
+    // live slot is a no-op.
     for (i, delay) in [0u64, 350, 750, 1_150, 1_600, 2_050, 2_500]
         .iter()
         .enumerate()
@@ -463,7 +463,7 @@ mod tests {
     fn morning_rush_populates_within_three_seconds() {
         // Spec §1 (audit top12 #3): within ~3s of reveal the office must read
         // as a working morning — most of the cast through the door and ≥4
-        // monitors on — instead of the old 19s trickle-in.
+        // monitors on (the morning rush spec).
         let mut scene = SceneState::uniform(16);
         let mut reducer = Reducer::new();
         let t0 = SystemTime::UNIX_EPOCH + Duration::from_millis(1_000_000);
