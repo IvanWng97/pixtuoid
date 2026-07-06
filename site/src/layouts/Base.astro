@@ -19,6 +19,14 @@ import '@fontsource/lora/400.css';
 import '@fontsource/lora/600.css';
 import '../styles/global.css';
 import { asset, THEMES, THEME_BG, THEME_STORAGE_KEY, VALID_THEMES } from '../consts';
+import installTabs from '../install.json';
+
+// THE install one-liner (single-sourced from install.json — the same file the
+// 1F tabs and the generated README install block read, so no second copy of
+// the command can drift). The brew row is the canonical short form.
+const brewTab = installTabs.find((t) => t.id === 'brew');
+if (!brewTab) throw new Error('Base: install.json lost its brew row (the canonical one-liner)');
+const INSTALL_CMD = brewTab.cmds[0];
 
 interface Props {
   title?: string;
@@ -107,7 +115,12 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
     <!-- No-FOUC theme init: ?theme= override → saved choice → system → day -->
     <script
       is:inline
-      define:vars={{ themeKey: THEME_STORAGE_KEY, validThemes: VALID_THEMES, themeBG: THEME_BG }}
+      define:vars={{
+        themeKey: THEME_STORAGE_KEY,
+        validThemes: VALID_THEMES,
+        themeBG: THEME_BG,
+        installCmd: INSTALL_CMD,
+      }}
     >
       // THE site clock boundary (7/19) — the one client-side source of truth,
       // defined parse-first so every later consumer (this init, the Escape
@@ -157,6 +170,47 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
           if (a.hasAttribute && a.hasAttribute('data-floor')) return true;
           const sl = document.getElementById('statusline');
           return !!(sl && sl.contains(a));
+        },
+        // WCAG 2.1.4 off-switch: the digit/`i` vocabulary is single-character
+        // and NOT focus-scoped, so it needs a documented turn-off. Persisted in
+        // localStorage('pix-keys') (default on); the statusline popover toggles
+        // it via setEnabled(), the document key handler below reads enabled() at
+        // each keydown. The flag string lives ONCE — here.
+        enabled: function () {
+          try {
+            return localStorage.getItem('pix-keys') !== 'off';
+          } catch (e) {
+            return true;
+          }
+        },
+        setEnabled: function (on) {
+          try {
+            localStorage.setItem('pix-keys', on ? 'on' : 'off');
+          } catch (e) {}
+        },
+      };
+      // THE install one-liner + its dispatch helper (Working Building contract):
+      // EVERY install-copy control routes through copy() so the clipboard write
+      // and the pix:install-copy event (→ OfficeBackdrop's hire listener → the
+      // statusline receipt) can never drift apart. Resolves true only after a
+      // successful write; false (no event) when the Clipboard API is unavailable.
+      window.__pixInstall = {
+        CMD: installCmd,
+        copy: function (source) {
+          if (!navigator.clipboard || !navigator.clipboard.writeText) {
+            return Promise.resolve(false);
+          }
+          return navigator.clipboard.writeText(installCmd).then(
+            function () {
+              document.dispatchEvent(
+                new CustomEvent('pix:install-copy', { detail: { source: source } })
+              );
+              return true;
+            },
+            function () {
+              return false;
+            }
+          );
         },
       };
       (function () {
@@ -392,6 +446,39 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
           s.setProperty('--coral', accents[i].a);
           s.setProperty('--amber', accents[i].b || accents[i].a);
           document.dispatchEvent(new CustomEvent('pix:theme'));
+        });
+      })();
+    </script>
+
+    <!-- The building's key vocabulary (Working Building §4): digits 1–6 ride to
+         [data-floor] sections from ANY scroll depth (the old focus-context gate
+         killed them after any content click — the audit's dead-keys bug); `i`
+         copies the install one-liner anywhere. Guards: never while typing
+         (input/textarea/contenteditable), never during the boot splash, never
+         with a modifier held; the WCAG 2.1.4 off-switch (statusline toggle →
+         __pixKeys.enabled()) can disable the whole vocabulary; a focused
+         [data-keys-scope] region (the CRT studio, wb-3) claims the digits locally
+         instead. `t` keeps its stricter gate in the FX script above. -->
+    <script is:inline>
+      (function () {
+        document.addEventListener('keydown', function (e) {
+          if (e.ctrlKey || e.metaKey || e.altKey) return;
+          if (document.documentElement.dataset.booting === '1') return;
+          if (window.__pixKeys.typing(e)) return;
+          if (!window.__pixKeys.enabled()) return; // WCAG 2.1.4 turn-off (both `i` and digits)
+          if (e.key === 'i') {
+            if (window.__pixInstall) window.__pixInstall.copy('key');
+            return;
+          }
+          if (!/^[1-6]$/.test(e.key)) return;
+          const a = document.activeElement;
+          if (a && a.closest && a.closest('[data-keys-scope]')) return;
+          const sec = document.querySelector('[data-floor="' + e.key + 'F"]');
+          if (!sec) return; // docs/404 have no floors (until wb-5) — inert, not an error
+          const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+          sec.scrollIntoView({ behavior: mq.matches ? 'auto' : 'smooth', block: 'start' });
+          sec.setAttribute('tabindex', '-1');
+          sec.focus({ preventScroll: true });
         });
       })();
     </script>

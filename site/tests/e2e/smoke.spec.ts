@@ -327,24 +327,83 @@ test('wasm fetch failure keeps the still poster without an uncaught error', asyn
   await context.close();
 });
 
-test('single-char shortcuts are focus-gated to a neutral context (WCAG 2.1.4)', async ({
+test('key vocabulary: digits ride globally, typing surfaces stay guarded, t keeps its gate', async ({
   page,
 }) => {
   await gotoLive(page);
-  // Baseline: from the page body the digit still rides the lift.
   await page.keyboard.press('3');
   await expect(page.locator('[data-lift-digit]')).toHaveText('3F', { timeout: 10_000 });
-  // Focus a real interactive control (the fixed pause button — no scroll on
-  // focus): bare digits + `t` must go INERT so voice-control dictation / stray
-  // focus can't trigger floor or theme changes.
+  // The audit's dead-digit-keys bug, pinned FIXED (§4): focus parked on a real
+  // control no longer kills the floor keys — digits are document-global now.
   await page.locator('#office-pause').focus();
   await page.keyboard.press('1');
-  await expect(page.locator('[data-lift-digit]')).toHaveText('3F'); // unchanged
+  await expect(page.locator('[data-lift-digit]')).toHaveText('1F', { timeout: 10_000 });
+  // …but a typing surface still swallows them (no teleport mid-input).
+  await page.evaluate(() => {
+    const inp = document.createElement('input');
+    inp.id = 'e2e-typing-probe';
+    document.body.appendChild(inp);
+    inp.focus();
+  });
+  await page.keyboard.press('3');
+  await expect(page.locator('[data-lift-digit]')).toHaveText('1F'); // unchanged
+  await page.evaluate(() => document.getElementById('e2e-typing-probe')!.remove());
+  // `t` (decorative retint) KEEPS the old WCAG 2.1.4 focus gate.
+  await page.locator('#office-pause').focus();
   await page.evaluate(() => document.documentElement.style.removeProperty('--coral'));
   await page.keyboard.press('t');
   expect(
     await page.evaluate(() => document.documentElement.style.getPropertyValue('--coral'))
-  ).toBe(''); // no retint from a focused control
+  ).toBe('');
+});
+
+test("the i key copies the install one-liner and fires pix:install-copy {source:'key'}", async ({
+  page,
+  context,
+}) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  const errors = watchErrors(page);
+  await gotoLive(page);
+  await page.evaluate(() => {
+    (window as unknown as { __copies: string[] }).__copies = [];
+    document.addEventListener('pix:install-copy', (e) =>
+      (window as unknown as { __copies: string[] }).__copies.push(
+        (e as CustomEvent<{ source: string }>).detail.source
+      )
+    );
+  });
+  await page.keyboard.press('i');
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as { __copies: string[] }).__copies))
+    .toEqual(['key']);
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
+    'brew install IvanWng97/pixtuoid/pixtuoid'
+  );
+  expect(errors()).toEqual([]);
+});
+
+test('WCAG 2.1.4: the statusline keys toggle turns the digit/i shortcuts off, then back on', async ({
+  page,
+}) => {
+  await gotoLive(page);
+  // digits ride by default
+  await page.keyboard.press('2');
+  await expect(page.locator('[data-lift-digit]')).toHaveText('2F', { timeout: 10_000 });
+  // open the floor popover and flip the shortcuts OFF
+  await page.locator('[data-floor-toggle]').click();
+  const keysToggle = page.locator('[data-keys-toggle]');
+  await keysToggle.click();
+  await expect(keysToggle).toHaveAttribute('aria-checked', 'false');
+  // OFF: a floor digit is inert — the lift readout does not move
+  await page.keyboard.press('4');
+  await expect(page.locator('[data-lift-digit]')).toHaveText('2F');
+  // …and the choice is persisted (single-char shortcuts have a real off-switch)
+  expect(await page.evaluate(() => localStorage.getItem('pix-keys'))).toBe('off');
+  // flip it back ON — the digit rides again
+  await keysToggle.click();
+  await expect(keysToggle).toHaveAttribute('aria-checked', 'true');
+  await page.keyboard.press('4');
+  await expect(page.locator('[data-lift-digit]')).toHaveText('4F', { timeout: 10_000 });
 });
 
 test('the clock forces night after hours and clears on an explicit theme act', async ({ page }) => {

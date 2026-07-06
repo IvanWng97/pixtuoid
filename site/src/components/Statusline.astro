@@ -107,6 +107,19 @@ const badgeColor = (who: string): string | undefined => {
           </button>
         ))
       }
+      <div class="sl__keysrow">
+        <span class="sl__keyslabel">keys 1–6 · i</span>
+        <button
+          class="sl__keystoggle"
+          type="button"
+          data-keys-toggle
+          role="switch"
+          aria-checked="true"
+          aria-label="Keyboard shortcuts"
+        >
+          <span data-keys-state>on</span>
+        </button>
+      </div>
     </div>
   </nav>
   <div class="sl__feed" aria-hidden="true">
@@ -128,7 +141,7 @@ const badgeColor = (who: string): string | undefined => {
     <span class="sl__sep">·</span>
     <span class="sl__onair" data-sl-onair>○ STILL</span>
   </div>
-  <span class="sl__keys" aria-hidden="true">keys 1–6</span>
+  <span class="sl__keys" aria-hidden="true">keys 1–6 · i</span>
 </div>
 
 <style is:global>
@@ -219,6 +232,33 @@ const badgeColor = (who: string): string | undefined => {
   }
   .sl__floorname {
     color: var(--chip-dim);
+  }
+  .sl__keysrow {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.6rem;
+    margin-top: 0.3rem;
+    padding: 0.4rem 0.5rem 0.15rem;
+    border-top: 1px solid var(--chip-line);
+    font-size: 0.82em;
+    color: var(--chip-dim);
+  }
+  .sl__keystoggle {
+    background: none;
+    border: 1px solid var(--chip-line);
+    padding: 0.05rem 0.45rem;
+    font: inherit;
+    color: var(--chip-dim);
+    cursor: pointer;
+  }
+  .sl__keystoggle[aria-checked='true'] {
+    color: var(--led);
+    border-color: var(--led);
+  }
+  .sl__keystoggle:hover,
+  .sl__keystoggle:focus-visible {
+    color: var(--chip-ink);
   }
   .sl__feed {
     position: relative;
@@ -357,19 +397,24 @@ const badgeColor = (who: string): string | undefined => {
         go(b);
       });
     });
-    // the app's literal floor keys: bare digits 1–6 ride the elevator. WCAG
-    // 2.1.4: fire only from a neutral focus context (page body / a section a
-    // jump parked focus on / the statusline), never a focused control or field,
-    // and never during the boot intro.
-    document.addEventListener('keydown', function (e) {
-      if (e.ctrlKey || e.metaKey || e.altKey) return;
-      if (document.documentElement.dataset.booting === '1') return;
-      if (window.__pixKeys.typing(e) || !window.__pixKeys.shortcutContext()) return;
-      const btn = btns.find(function (b) {
-        return b.dataset.floorBtn === e.key + 'F';
+    // ── keyboard-shortcuts off-switch (WCAG 2.1.4): render + persist the
+    // digit/`i` on/off state. The FLAG lives in window.__pixKeys (Base.astro,
+    // parse-first) — Base's document handler reads enabled() at each keydown;
+    // here we only reflect + toggle it. Default on. ──
+    const keysToggle = bar.querySelector('[data-keys-toggle]');
+    const keysState = bar.querySelector('[data-keys-state]');
+    function renderKeys(on) {
+      if (keysToggle) keysToggle.setAttribute('aria-checked', on ? 'true' : 'false');
+      if (keysState) keysState.textContent = on ? 'on' : 'off';
+    }
+    if (keysToggle && window.__pixKeys) {
+      renderKeys(window.__pixKeys.enabled());
+      keysToggle.addEventListener('click', function () {
+        const next = !window.__pixKeys.enabled();
+        window.__pixKeys.setEnabled(next);
+        renderKeys(next);
       });
-      if (btn) go(btn);
-    });
+    }
     // scrollspy — DEFERRED: this is:inline script renders BEFORE <main>, so a
     // parse-time querySelectorAll sees zero [data-floor] sections (the
     // documented parse-position trap).

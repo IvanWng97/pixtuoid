@@ -34,5 +34,19 @@ interface Window {
   __pixKeys?: {
     typing: (_e: Event) => boolean;
     shortcutContext: () => boolean;
+    /** WCAG 2.1.4 off-switch for the bare digit/`i` shortcuts, persisted in
+     * localStorage('pix-keys'); read at each keydown, written by the statusline
+     * toggle. */
+    enabled: () => boolean;
+    setEnabled: (_on: boolean) => void;
+  };
+  /** THE install one-liner + copy dispatcher (Base.astro, parse-first). copy()
+   * resolves true after a successful clipboard write (and fires
+   * pix:install-copy {source}); false when the Clipboard API is unavailable. */
+  __pixInstall?: {
+    CMD: string;
+    copy: (
+      _source: 'hero' | 'statusline' | 'docs' | 'closer' | 'key' | 'install'
+    ) => Promise<boolean>;
   };
 }
