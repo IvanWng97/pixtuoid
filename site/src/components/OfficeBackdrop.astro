@@ -271,6 +271,46 @@ import { asset, DIM_RESTING } from '../consts';
     let pauseOffset = 0;
     let pausedAt = 0;
 
+    // ── Golden-hour ratchet (spec §4: the page tells ONE office day) ─────────
+    // When the closer hold ([data-office-hour], index.astro) enters view, the
+    // render clock jumps FORWARD to the next golden hour, in WHOLE hours only:
+    // 1h = 3,600,000ms = exactly 30 × the script's LOOP_MS (120s), so the beat
+    // cursor keeps its loop phase and the jump rides the engine's tested
+    // catch-up path (advance_script's skip-whole-loops arm). Forward-only and
+    // never reset: a backward now_ms stalls the beat cursor until real time
+    // catches up (fine for the VIBING scrub, not for the flagship backdrop),
+    // so scrolling back up simply keeps golden hour. Time stays a PARAMETER —
+    // JS owns the clock, the engine never reads it on wasm.
+    // 17 = the same golden hour media.json's hero-poster frame bakes (hour: 17).
+    const GOLDEN_HOUR = 17;
+    let hourShift = 0;
+    function engageGoldenHour() {
+      if (hourShift) return;
+      let dh = GOLDEN_HOUR - new Date().getHours();
+      if (dh < 0) dh += 24;
+      hourShift = dh * 3_600_000; // whole hours only — loop-phase-preserving
+    }
+    // DEFERRED wiring: this is:inline script parses BEFORE <main>, so the
+    // closer block doesn't exist yet (the documented parse-position trap).
+    function wireGoldenHour() {
+      const block = document.querySelector('[data-office-hour]');
+      if (!block || !('IntersectionObserver' in window)) return;
+      new IntersectionObserver(
+        function (es) {
+          es.forEach(function (e) {
+            if (e.isIntersecting) engageGoldenHour();
+          });
+        },
+        { threshold: 0.4 }
+      ).observe(block);
+    }
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', wireGoldenHour, { once: true });
+    } else {
+      wireGoldenHour();
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     function sizeBuffer() {
       const w = window.innerWidth;
       const h = window.innerHeight;
@@ -348,7 +388,7 @@ import { asset, DIM_RESTING } from '../consts';
         last = t;
         // Date.now(), NOT the rAF timestamp: the engine decodes now_ms as
         // calendar time (browser-local day/night + wall clock).
-        paint(Date.now() - pauseOffset);
+        paint(Date.now() - pauseOffset + hourShift);
       }
       raf = requestAnimationFrame(frame);
     }
@@ -493,7 +533,7 @@ import { asset, DIM_RESTING } from '../consts';
         sizeBuffer();
         // Setting canvas.width WIPES the bitmap: while paused no loop will
         // repaint it, so re-render the ONE frozen frame at its frozen time.
-        if (paused && live) paint(pausedAt - pauseOffset);
+        if (paused && live) paint(pausedAt - pauseOffset + hourShift);
       });
     });
     document.addEventListener('visibilitychange', function () {

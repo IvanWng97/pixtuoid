@@ -1178,3 +1178,34 @@ test('scroll-0 holds full lights; the dimmer engages on first scroll', async ({ 
   // …and the signature scroll-dimmer takes over on the first gesture.
   await expect.poll(dim).toBeGreaterThan(0);
 });
+
+test('the closer hold carries the install line and fires pix:install-copy {source:closer}', async ({
+  page,
+  context,
+}) => {
+  await context.grantPermissions(['clipboard-write']);
+  const errors = watchErrors(page);
+  await page.addInitScript(() => {
+    sessionStorage.setItem('pix-booted', '1');
+    (window as { __copySources?: string[] }).__copySources = [];
+    document.addEventListener('pix:install-copy', (e) =>
+      (window as { __copySources?: string[] }).__copySources!.push(
+        (e as CustomEvent<{ source: string }>).detail.source
+      )
+    );
+  });
+  await page.goto('./');
+  await page.evaluate(() =>
+    document
+      .querySelector('[data-office-hour]')!
+      .scrollIntoView({ block: 'center', behavior: 'instant' })
+  );
+  const chip = page.locator('[data-office-hour] [data-install-copy]');
+  await expect(chip).toBeVisible();
+  await chip.click();
+  await expect(chip).toHaveText(/copied|select & copy/);
+  await expect
+    .poll(() => page.evaluate(() => (window as { __copySources?: string[] }).__copySources))
+    .toContain('closer');
+  expect(errors()).toEqual([]);
+});

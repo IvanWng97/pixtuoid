@@ -11,6 +11,13 @@ import Install from '../components/Install.astro';
 import Footer from '../components/Footer.astro';
 import Statusline from '../components/Statusline.astro';
 import { asset, REPO, CRATES } from '../consts';
+import installTabs from '../install.json';
+
+// The closer's install line — same single source as the hero row and the
+// splash (install.json's brew entry).
+const brew = installTabs.find((t) => t.id === 'brew');
+if (!brew) throw new Error('index: install.json lost its brew entry');
+const BREW_CMD = brew.cmds[0];
 
 // Homepage structured data: a free cross-platform developer tool. Search
 // engines use this for a rich result; the version is single-sourced from the
@@ -76,9 +83,27 @@ const softwareJsonLd = {
     <HowItWorks />
     <SupportedTools />
     <Install />
-    {/* observation gap 3 — the closing hold */}
-    <div class="office-gap">
-      <p class="gap-caption" aria-hidden="true">— your office is waiting.</p>
+    {
+      /* observation gap 3 — the closing hold: the office at golden hour (the
+        backdrop's render-clock ratchet keys on data-office-hour) + the page's
+        LAST install line. The caption is NOT aria-hidden anymore: it carries
+        a real control now (spec §4 — the emotional peak is no longer a dead
+        end). */
+    }
+    <div class="office-gap" data-office-hour>
+      <div class="gap-caption gap-caption--closer">
+        <p class="closer-line">— your office is waiting.</p>
+        <div class="closer-install" data-install-row>
+          <code>$ {BREW_CMD}</code>
+          <button
+            class="closer-install__copy"
+            data-install-copy
+            data-source="closer"
+            data-copy={BREW_CMD}>[ copy ]</button
+          >
+          <span class="sr-only" role="status" data-copy-status></span>
+        </div>
+      </div>
     </div>
   </main>
   <script is:inline>
