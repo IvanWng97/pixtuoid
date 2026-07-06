@@ -670,8 +670,8 @@ test('first visit on an office-less page lifts the splash promptly (no engine-ga
   await page.goto('./architecture/'); // real first visit (no pix-booted), no OfficeBackdrop
   await expect(page.locator('#boot')).toBeVisible();
   await expect(page.locator('#office-live')).toHaveCount(0); // confirm: no office on this page
-  // Fix clears data-booting in ~1.8s; the unguarded gate hangs to ~5.9s. 4s separates.
-  await expect(page.locator('html')).not.toHaveAttribute('data-booting', '1', { timeout: 4_000 });
+  // Fix clears data-booting in ~3.4s (per-line dwell 450ms); the unguarded gate hangs to ~5.9s. 5.2s separates.
+  await expect(page.locator('html')).not.toHaveAttribute('data-booting', '1', { timeout: 5_200 });
   expect(errors()).toEqual([]);
 });
 
