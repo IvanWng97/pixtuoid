@@ -35,6 +35,11 @@
   --screen: #0e0d0c;
   --led: #8de069;
   --led-glow: rgba(141, 224, 105, 0.55);
+  --led-off: #6f675a; /* an unlit LED (also the statusline idle dot) */
+  /* opaque-theme --bg at 72% — plain rgba() on purpose: the scrim is
+     load-bearing legibility, so it must not depend on color-mix() support
+     (see the @supports fallback note below). Mirrors --bg per theme. */
+  --scrim: rgba(244, 238, 226, 0.72);
 
   /* Semantic tokens — DAY (warm cream) */
   --bg: var(--paper);
@@ -83,6 +88,7 @@
   --grad-2: #ecae66; /* light amber — high contrast on the dark night --bg */
   --focus-ring: #e3845f; /* literal; matches the night --coral (see :root note) */
   --bg: #1d1813;
+  --scrim: rgba(29, 24, 19, 0.72);
   --bg-tint: #18130f;
   --surface: #271f17;
   --surface-2: #322820;
@@ -483,6 +489,51 @@ section {
     transparent 72%
   );
 }
+
+/* ── Working Building primitives (§5) ──────────────────────────────────
+   ONE geometry rule: HARDWARE components (screens, boards, the statusline,
+   the elevator shaft) are .hw-panel — sharp corners, 1px light top edge,
+   dark --screen ground. PAPER components (cards, quotes) stay the existing
+   .card — rounded (--radius) + warm shadow. ONE selected-state everywhere:
+   the LED glow (.led-selected / .led-dot.is-on). */
+.hw-panel {
+  background: var(--screen);
+  border: 1px solid var(--chip-line);
+  /* the 1px light edge: hardware catches the ceiling light on top */
+  border-top-color: color-mix(in srgb, var(--chip-ink) 45%, var(--chip-line));
+  border-radius: 0;
+  color: var(--chip-ink);
+}
+.led-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--led-off);
+  flex: none;
+}
+.led-dot.is-on {
+  background: var(--led);
+  box-shadow: 0 0 6px var(--led-glow);
+}
+.led-dot.is-warn {
+  background: var(--amber); /* wb-5: 'experimental' OS support */
+}
+.led-selected {
+  color: var(--led);
+  text-shadow: 0 0 6px var(--led-glow);
+}
+/* Guaranteed-legibility scrim for text overlapping the live office: a local
+   plate + soft halo (the 22px spread feathers the edge), so a stalled scroll
+   can never show low-contrast copy regardless of the dimmer's state. */
+.text-scrim {
+  background: var(--scrim);
+  box-shadow:
+    0 0 0 1px var(--scrim),
+    0 0 22px 10px var(--scrim);
+  border-radius: 2px;
+}
+
 .office-gap {
   min-height: 100vh; /* fallback for Safari < 15.4, which drops the svh line */
   min-height: 100svh;
@@ -671,6 +722,7 @@ code,
   --grad-2: #ff79c6; /* light pink — high contrast on the dark dracula --bg */
   --focus-ring: #caa6fb; /* literal; matches the dracula --coral-deep (see :root note) */
   --bg: #282a36;
+  --scrim: rgba(40, 42, 54, 0.72);
   --bg-tint: #21222c;
   --surface: #343746;
   --surface-2: #44475a;
