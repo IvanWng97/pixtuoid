@@ -232,6 +232,39 @@ test('the install Copy click hires without breaking the page', async ({ page, co
   expect(errors()).toEqual([]);
 });
 
+test('hero install row: copy chip flashes and fires pix:install-copy {source:hero}', async ({
+  page,
+  context,
+}) => {
+  await context.grantPermissions(['clipboard-write']);
+  const errors = watchErrors(page);
+  await page.addInitScript(() => {
+    sessionStorage.setItem('pix-booted', '1');
+    (window as unknown as { __copySources: string[] }).__copySources = [];
+    document.addEventListener('pix:install-copy', (e) =>
+      (window as unknown as { __copySources: string[] }).__copySources.push(
+        (e as CustomEvent<{ source: string }>).detail.source
+      )
+    );
+  });
+  await page.goto('./');
+  // The primary CTA carries the REAL brew command (single-sourced from install.json).
+  await expect(page.locator('#hero-install-cmd')).toContainText(
+    'brew install IvanWng97/pixtuoid/pixtuoid'
+  );
+  // Ten CLI badges — one per sources.json entry, compatibility answered in viewport 1.
+  await expect(page.locator('.hero__badge')).toHaveCount(10);
+  const copy = page.locator('#hero-install-row [data-install-copy]');
+  await copy.click();
+  await expect(copy).toHaveText(/copied|select & copy/);
+  await expect
+    .poll(() =>
+      page.evaluate(() => (window as unknown as { __copySources: string[] }).__copySources)
+    )
+    .toContain('hero');
+  expect(errors()).toEqual([]);
+});
+
 test('an install copy hires a coworker: pix:install-copy → pix:hired', async ({
   page,
   context,
