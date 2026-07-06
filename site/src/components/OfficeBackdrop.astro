@@ -541,6 +541,13 @@ import { asset, DIM_RESTING } from '../consts';
     const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
     const DIM_MAX = 0.86;
 
+    // Spec §1: scroll-0 is FULL LIGHTS — the dimmer is scroll's instrument, so
+    // it stays at 0 until the first scroll gesture. Latch, never release (a
+    // return to top keeps normal dimmer behavior); a mid-page reload
+    // (scroll restoration) starts already engaged. Hero-copy legibility at
+    // op=0 is the .text-scrim's job, not the dimmer's.
+    let engaged = window.scrollY > 0;
+
     let blocks = []; // cached page-space rects; re-measured on resize only
     let lastY = -1;
     let lastOp = -1;
@@ -585,7 +592,8 @@ import { asset, DIM_RESTING } from '../consts';
         // holds keep DIM_MAX for copy legibility. The [data-lit]::before radial
         // wash still floors local contrast on the capped block.
         const cap = bestEl && bestEl.dataset.litMax ? parseFloat(bestEl.dataset.litMax) : DIM_MAX;
-        const op = cap * ease(best);
+        if (!engaged && y > 0) engaged = true;
+        const op = engaged ? cap * ease(best) : 0;
         if (Math.abs(op - lastOp) > 0.002) {
           lastOp = op;
           dimmer.style.opacity = op.toFixed(3);

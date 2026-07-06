@@ -1167,3 +1167,14 @@ test('the scrimmed hero subcopy clears WCAG AA at the worst-case composite (day 
     4.5
   );
 });
+
+test('scroll-0 holds full lights; the dimmer engages on first scroll', async ({ page }) => {
+  await gotoLive(page);
+  const dim = () =>
+    page.evaluate(() => parseFloat(document.getElementById('dimmer')!.style.opacity || '0'));
+  // Full lights before any scroll — the live office IS the first content.
+  await expect.poll(dim).toBe(0);
+  await page.mouse.wheel(0, 400);
+  // …and the signature scroll-dimmer takes over on the first gesture.
+  await expect.poll(dim).toBeGreaterThan(0);
+});
