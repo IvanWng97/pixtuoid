@@ -97,3 +97,76 @@ test('the floating-window still gap is retired (wb-4 owns the slot)', async ({ p
   // the two KEPT holds: #1 "the real thing" (locked decision) and the closer
   await expect(page.locator('.office-gap')).toHaveCount(2);
 });
+
+test('elevator shaft: click-to-ride lands the floor, LED + lift readout agree', async ({
+  page,
+}) => {
+  await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
+  await page.goto('./');
+  await expect(page.locator('[data-shaft-stop]')).toHaveCount(6);
+  // 6F is home: the top stop is current on load
+  await expect(page.locator('[data-shaft-stop="6F"]')).toHaveAttribute('aria-current', 'true');
+  // click-to-ride: 1F front desk
+  await page.locator('[data-shaft-stop="1F"]').click();
+  await expect(page.locator('[data-shaft-stop="1F"]')).toHaveAttribute('aria-current', 'true', {
+    timeout: 10_000,
+  });
+  // the install section actually owns the viewport center band
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const r = document.querySelector('[data-floor="1F"]')!.getBoundingClientRect();
+        return r.top < window.innerHeight * 0.55 && r.bottom > window.innerHeight * 0.45;
+      })
+    )
+    .toBe(true);
+  // the statusline lift and the shaft read the SAME sections — they must agree
+  await expect(page.locator('[data-lift-digit]')).toHaveText('1F');
+  // the car rode down the rail (transform moved off the 6F stop)
+  const carY = () =>
+    page.evaluate(
+      () =>
+        new DOMMatrix(getComputedStyle(document.querySelector('[data-shaft-car]')!).transform).m42
+    );
+  expect(await carY()).toBeGreaterThan(0);
+});
+
+test('elevator shaft: reduced motion is a static indicator', async ({ browser }) => {
+  const ctx = await browser.newContext({ reducedMotion: 'reduce' });
+  const page = await ctx.newPage();
+  await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
+  await page.goto('./');
+  // no car glide, no ding pulse — the LED indicator still tracks floors.
+  // global.css's sitewide reduced-motion reset forces every element's
+  // transition-duration near-zero (0.001ms, not literally 0 — kept
+  // non-zero so transitionend still fires elsewhere), so assert "no
+  // perceptible motion" rather than the exact forced value.
+  const styles = await page.evaluate(() => {
+    const car = getComputedStyle(document.querySelector('[data-shaft-car]')!);
+    return { transition: car.transitionDuration };
+  });
+  expect(parseFloat(styles.transition)).toBeLessThan(0.001);
+  await page.locator('[data-shaft-stop="3F"]').click();
+  await expect(page.locator('[data-shaft-stop="3F"]')).toHaveAttribute('aria-current', 'true', {
+    timeout: 10_000,
+  });
+  await ctx.close();
+});
+
+test('elevator shaft: the ding pulse joins the pix:paused set', async ({ page }) => {
+  await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
+  await page.goto('./');
+  // pause the page, then ride: the arrival must NOT pulse (visual motion held)
+  await page.evaluate(() =>
+    document.dispatchEvent(new CustomEvent('pix:paused', { detail: { paused: true } }))
+  );
+  await page.locator('[data-shaft-stop="1F"]').click();
+  await expect(page.locator('[data-shaft-stop="1F"]')).toHaveAttribute('aria-current', 'true', {
+    timeout: 10_000,
+  });
+  expect(
+    await page.evaluate(() =>
+      document.querySelector('[data-shaft-stop="1F"]')!.classList.contains('is-ding')
+    )
+  ).toBe(false);
+});

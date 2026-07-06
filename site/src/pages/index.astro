@@ -9,6 +9,7 @@ import SupportedTools from '../components/SupportedTools.astro';
 import Install from '../components/Install.astro';
 import Footer from '../components/Footer.astro';
 import Statusline from '../components/Statusline.astro';
+import ElevatorShaft from '../components/ElevatorShaft.astro';
 import { asset, REPO, CRATES, floorById } from '../consts';
 
 const amenities = floorById('amenities');
@@ -80,4 +81,5 @@ const softwareJsonLd = {
   </main>
   <Footer />
   <Statusline />
+  <ElevatorShaft />
 </Base>

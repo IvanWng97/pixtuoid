@@ -1,0 +1,277 @@
+---
+import { FLOORS } from '../consts';
+
+// The elevator made literal (spec §4): a slim pixel shaft fixed at the right
+// edge; a pixel car rides 6F→1F with scroll; floors are dual-labeled from the
+// ONE FLOORS manifest (the same const the section anchors and the statusline
+// lift read, so a rename/renumber can't desync the three). Desktop shows the
+// shaft + hover plates; mobile collapses to a 6-dot rail. index-only chrome —
+// the docs pages get wb-5's elevator-PANEL sidebar instead.
+---
+
+<aside class="shaft" data-shaft>
+  <nav class="shaft__rail hw-panel" aria-label="Elevator — ride to a floor">
+    {
+      FLOORS.map((f) => (
+        <button
+          class="shaft__stop"
+          data-shaft-stop={f.fl}
+          aria-label={`${f.fl} ${f.label}`}
+          aria-current={f.fl === '6F' ? 'true' : undefined}
+        >
+          <span class="led-dot" aria-hidden="true" />
+          <span class="shaft__plate hw-panel" aria-hidden="true">
+            <b>{f.fl}</b> {f.label}
+          </span>
+        </button>
+      ))
+    }
+    <span class="shaft__car" data-shaft-car aria-hidden="true"></span>
+  </nav>
+  <span class="shaft__keys text-scrim" aria-hidden="true">keys 1–6</span>
+</aside>
+
+<script is:inline>
+  (function () {
+    const shaft = document.querySelector('[data-shaft]');
+    if (!shaft) return;
+    const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const car = shaft.querySelector('[data-shaft-car]');
+    const stops = Array.prototype.slice.call(shaft.querySelectorAll('[data-shaft-stop]'));
+    let userPaused = false;
+    let sections = [];
+
+    // deferred: this component mounts at the END of <body>, but keep the same
+    // defensive DOMContentLoaded gate the statusline documents (the is:inline
+    // parse-position trap) so a future mount-point move can't silently break it
+    function resolveSections() {
+      sections = stops
+        .map(function (s) {
+          return document.querySelector('[data-floor="' + s.dataset.shaftStop + '"]');
+        })
+        .filter(Boolean);
+    }
+
+    // ── click-to-ride (mirrors the statusline's go(): smooth unless reduced,
+    // focus follows so keys keep working from the landed floor) ──
+    stops.forEach(function (s) {
+      s.addEventListener('click', function () {
+        const sec = document.querySelector('[data-floor="' + s.dataset.shaftStop + '"]');
+        if (!sec) return;
+        sec.scrollIntoView({ behavior: mq.matches ? 'auto' : 'smooth', block: 'start' });
+        sec.setAttribute('tabindex', '-1');
+        sec.focus({ preventScroll: true });
+      });
+    });
+
+    // ── arrival: current-floor LED + the visual-only "ding" pulse (skipped
+    // under reduced motion and while the page pause switch holds motion) ──
+    let currentFl = null;
+    function arrive(fl) {
+      if (fl === currentFl) return;
+      const first = currentFl === null; // no ding on initial load
+      currentFl = fl;
+      stops.forEach(function (s) {
+        const on = s.dataset.shaftStop === fl;
+        if (on) s.setAttribute('aria-current', 'true');
+        else s.removeAttribute('aria-current');
+        s.classList.toggle('led-selected', on);
+        if (on && !first && !mq.matches && !userPaused) {
+          s.classList.remove('is-ding');
+          void s.offsetWidth;
+          s.classList.add('is-ding');
+        }
+      });
+    }
+
+    // ── the car rides with scroll: piecewise-lerp between stop positions,
+    // keyed on the sections' live offsets (rAF-throttled) ──
+    let raf = 0;
+    function ride() {
+      raf = 0;
+      if (!sections.length) return;
+      const mid = window.scrollY + window.innerHeight / 2;
+      let i = 0;
+      while (i < sections.length - 1 && mid >= sections[i + 1].offsetTop) i++;
+      const top = sections[i].offsetTop;
+      const next =
+        i < sections.length - 1 ? sections[i + 1].offsetTop : document.documentElement.scrollHeight;
+      const within = Math.min(1, Math.max(0, (mid - top) / Math.max(1, next - top)));
+      const a = stops[i].offsetTop;
+      const b = stops[Math.min(i + 1, stops.length - 1)].offsetTop;
+      car.style.transform = 'translateY(' + Math.round(a + (b - a) * within) + 'px)';
+    }
+    function queueRide() {
+      if (!raf) raf = requestAnimationFrame(ride);
+    }
+    window.addEventListener('scroll', queueRide, { passive: true });
+    window.addEventListener('resize', queueRide);
+
+    // ── current floor: the SAME center-band observer contract the statusline
+    // scrollspy uses (-45%/-45%), so the two readouts can never disagree ──
+    function observe() {
+      resolveSections();
+      if ('IntersectionObserver' in window) {
+        const io = new IntersectionObserver(
+          function (entries) {
+            entries.forEach(function (e) {
+              if (e.isIntersecting) arrive(e.target.dataset.floor);
+            });
+          },
+          { rootMargin: '-45% 0px -45% 0px', threshold: 0 }
+        );
+        sections.forEach(function (s) {
+          io.observe(s);
+        });
+      }
+      queueRide();
+    }
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', observe, { once: true });
+    } else {
+      observe();
+    }
+
+    // ── ambient-motion membership: the page pause switch stills the ding
+    // pulse (the car itself only moves WITH user scroll — user-initiated,
+    // outside WCAG 2.2.2's auto-motion scope) ──
+    document.addEventListener('pix:paused', function (e) {
+      userPaused = !!(e.detail && e.detail.paused);
+    });
+  })();
+</script>
+
+<style>
+  .shaft {
+    position: fixed;
+    right: clamp(4px, 0.6vw, 10px);
+    top: 50%;
+    transform: translateY(-50%);
+    /* under the statusline (50) and its floor popover, over the office */
+    z-index: 40;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.55rem;
+  }
+  .shaft__rail {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    width: 24px; /* the spec's slim pixel shaft */
+    height: min(52vh, 420px);
+    padding: 8px 0;
+  }
+  .shaft__stop {
+    position: relative;
+    display: flex;
+    justify-content: center;
+    width: 100%;
+    background: none;
+    border: 0;
+    padding: 6px 0;
+    cursor: pointer;
+  }
+  .shaft__plate {
+    position: absolute;
+    right: calc(100% + 10px);
+    top: 50%;
+    transform: translateY(-50%);
+    white-space: nowrap;
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    padding: 0.28rem 0.55rem;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s ease;
+  }
+  .shaft__plate b {
+    font-family: var(--font-display);
+    font-weight: 400;
+    letter-spacing: 0.05em;
+  }
+  .shaft__stop:hover .shaft__plate,
+  .shaft__stop:focus-visible .shaft__plate {
+    opacity: 1;
+  }
+  /* .led-selected (global) recolors TEXT — it doesn't reach the dot's own
+     background, so the current floor's dot would stay perpetually "off"
+     (.led-dot's own default) without this. Reuses the SAME --led/--led-glow
+     tokens .led-dot.is-on itself uses — no new value, just wiring the
+     existing "lit" look to the state this component already tracks. */
+  .shaft__stop.led-selected :global(.led-dot) {
+    background: var(--led);
+    box-shadow: 0 0 6px var(--led-glow);
+  }
+  .shaft__car {
+    position: absolute;
+    top: 0;
+    left: 50%;
+    margin-left: -4px;
+    width: 8px;
+    height: 16px;
+    background: var(--coral);
+    image-rendering: pixelated;
+    transition: transform 0.25s ease;
+    will-change: transform;
+    pointer-events: none;
+  }
+  /* the arrival "ding" — visual pulse ONLY (no audio, spec §4) */
+  @keyframes shaft-ding {
+    0% {
+      box-shadow: 0 0 0 0 var(--led-glow);
+    }
+    100% {
+      box-shadow: 0 0 12px 5px transparent;
+    }
+  }
+  .shaft__stop.is-ding :global(.led-dot) {
+    animation: shaft-ding 0.6s ease-out 1;
+  }
+  .shaft__keys {
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.06em;
+    color: var(--fg-muted);
+    writing-mode: vertical-rl;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    /* static indicator: the LED still tracks floors; the car snaps (no glide),
+       the ding never pulses. global.css's sitewide reset already forces
+       transition-duration near-zero here (0.001ms !important, universal
+       selector) — this rule additionally zeroes transition-PROPERTY, the one
+       longhand that reset doesn't touch, so the car is fully non-transitioning
+       rather than merely imperceptibly fast. */
+    .shaft__car {
+      transition: none;
+    }
+    .shaft__stop.is-ding :global(.led-dot) {
+      animation: none;
+    }
+  }
+  @media (max-width: 760px) {
+    /* the 6-dot rail: dots + current LED only */
+    .shaft__rail {
+      width: 14px;
+      height: 38vh;
+      padding: 6px 0;
+    }
+    .shaft__plate,
+    .shaft__car,
+    .shaft__keys {
+      display: none;
+    }
+  }
+  @media (pointer: coarse) {
+    /* a keyboard-only affordance on a keyboardless device (same rule as sl__keys) */
+    .shaft__keys {
+      display: none;
+    }
+    /* The shaft stays slim by design (it reads as hardware, a rail, not a
+       button bar) — widening each dot to a 44px touch target here would
+       defeat that. WCAG 2.5.8's "equivalent control" exception is met by the
+       statusline's own floor list (sl__floorbtn), which exposes the SAME six
+       floors at a real ≥44px target and already gets a coarse-pointer bump. */
+  }
+</style>
