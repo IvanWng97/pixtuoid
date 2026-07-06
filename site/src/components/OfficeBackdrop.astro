@@ -281,7 +281,12 @@ import { asset, DIM_RESTING } from '../consts';
     // catches up (fine for the VIBING scrub, not for the flagship backdrop),
     // so scrolling back up simply keeps golden hour. Time stays a PARAMETER —
     // JS owns the clock, the engine never reads it on wasm.
-    // 17 = the same golden hour media.json's hero-poster frame bakes (hour: 17).
+    // 17 = the hour the committed hero-wide.png poster is baked at: its
+    // media.json job pins `t0_ms: 1768498200000` (no literal "hour" field —
+    // that field belongs to the separate vibing-poster job, pinned to 18),
+    // which hero_still decodes to 2026-01-15T17:30:00Z under the pipeline's
+    // TZ=UTC pin — hour 17. Keeps the fallback poster and the ratcheted live
+    // office showing the same time of day.
     const GOLDEN_HOUR = 17;
     let hourShift = 0;
     function engageGoldenHour() {

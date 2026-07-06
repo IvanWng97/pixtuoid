@@ -1209,3 +1209,62 @@ test('the closer hold carries the install line and fires pix:install-copy {sourc
     .toContain('closer');
   expect(errors()).toEqual([]);
 });
+
+test('the golden-hour ratchet advances the render clock when the closer intersects', async ({
+  page,
+}) => {
+  const errors = watchErrors(page);
+  // Step-clock instrumentation: wrap Office.prototype.step, once the real
+  // wasm module resolves through window.__pixWasm, to record the LAST now_ms
+  // the engine was actually stepped with. Deterministic at any wall-clock
+  // time — sampling the canvas's sky color instead would shrink to nothing
+  // if this test happens to run when the real hour is already near golden
+  // hour. Both the hero backdrop and the VIBING channel await the SAME
+  // window.__pixWasm promise (site/CLAUDE.md), so patching Office.prototype
+  // here catches every Office this page creates.
+  await page.addInitScript(() => {
+    let wrapped: Promise<unknown> | undefined;
+    Object.defineProperty(window, '__pixWasm', {
+      configurable: true,
+      get: () => wrapped,
+      set: (
+        promise: Promise<{
+          Office: { prototype: { step: (_nowMs: number, _w: number, _h: number) => void } };
+        }>
+      ) => {
+        wrapped = promise.then((mod) => {
+          const orig = mod.Office.prototype.step;
+          mod.Office.prototype.step = function (
+            this: unknown,
+            nowMs: number,
+            w: number,
+            h: number
+          ) {
+            (window as { __lastStepNowMs?: number }).__lastStepNowMs = nowMs;
+            return orig.call(this, nowMs, w, h);
+          };
+          return mod;
+        });
+      },
+    });
+  });
+  await gotoLive(page);
+  const lastHour = () =>
+    page.evaluate(() => {
+      const ms = (window as { __lastStepNowMs?: number }).__lastStepNowMs;
+      return ms === undefined ? NaN : new Date(ms).getHours();
+    });
+  // Sanity: the wrapper is actually capturing frames before the ratchet.
+  await expect.poll(async () => Number.isNaN(await lastHour())).toBe(false);
+  await page.evaluate(() =>
+    document
+      .querySelector('[data-office-hour]')!
+      .scrollIntoView({ block: 'center', behavior: 'instant' })
+  );
+  // GOLDEN_HOUR in OfficeBackdrop.astro — pinned here per CLAUDE.md's "two
+  // copies of a magic value" rule: this poll is the pairing check, and it's
+  // the ONLY regression coverage for the ratchet's observable effect (the
+  // closer-install test above only pins the install-copy wiring).
+  await expect.poll(lastHour, { timeout: 5_000 }).toBe(17);
+  expect(errors()).toEqual([]);
+});
