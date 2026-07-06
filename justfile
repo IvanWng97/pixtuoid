@@ -509,6 +509,7 @@ gen-check: gen-readme-check gen-wasm-check
     set -eu
     test -x .venv/bin/python3 || { echo "needs the venv: python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt"; exit 1; }
     .venv/bin/python3 scripts/gen-media.py --check
+    .venv/bin/python3 scripts/gen-pix-icons.py --check
 
 # ── release ───────────────────────────────────────────────────────
 

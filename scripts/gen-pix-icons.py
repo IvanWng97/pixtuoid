@@ -11,10 +11,18 @@ integer-upscales them with image-rendering: pixelated (upscale-crisp only).
 Usage:
   .venv/bin/python3 scripts/gen-pix-icons.py          # (re)generate (just gen-icons)
   .venv/bin/python3 scripts/gen-pix-icons.py --check  # exit 1 on drift
+
+--check decode-compares pixels (via scripts/compare-screenshots.py, like
+gen-media.py's --check) rather than raw PNG bytes — a raw-byte compare is
+Pillow-version-fragile (re-encoding the identical pixels can change the
+compressed bytes), which would make the gate flaky across machines/CI.
 """
 
 import io
+import shutil
+import subprocess
 import sys
+import tempfile
 import tomllib
 from pathlib import Path
 
@@ -23,6 +31,8 @@ from PIL import Image
 ROOT = Path(__file__).resolve().parent.parent
 PACK = ROOT / "crates/pixtuoid-scene/sprites/default"
 OUT = ROOT / "site/src/assets/pix-icons"
+COMPARE = ROOT / "scripts/compare-screenshots.py"
+DIFF_DIR = ROOT / "target/gen-check-diff"
 
 # Icon manifest. "sprite": extract a whole pack sprite frame verbatim.
 # "grid": rows of space-separated pack-palette keys ('.' = transparent).
@@ -148,6 +158,7 @@ def render(icon_name, rows, pal):
     h, w = len(rows), len(rows[0])
     img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     px = img.load()
+    assert px is not None
     for y, row in enumerate(rows):
         if len(row) != w:
             sys.exit(f"gen-pix-icons: {icon_name} row {y} is ragged ({len(row)} != {w})")
@@ -165,20 +176,35 @@ def main():
     pal = load_palette()
     OUT.mkdir(parents=True, exist_ok=True)
     stale = []
-    for name, spec in ICONS.items():
-        rows = sprite_rows(spec["sprite"]) if "sprite" in spec else [r.split() for r in spec["grid"]]
-        img = render(name, rows, pal)
-        buf = io.BytesIO()
-        img.save(buf, format="PNG")
-        out = OUT / f"{name}.png"
-        if check:
-            if not out.exists() or out.read_bytes() != buf.getvalue():
-                stale.append(name)
-        else:
-            out.write_bytes(buf.getvalue())
-            print(f"wrote {out.relative_to(ROOT)} ({img.width}x{img.height})")
+    work = Path(tempfile.mkdtemp(prefix="gen-pix-icons-"))
+    try:
+        for name, spec in ICONS.items():
+            rows = sprite_rows(spec["sprite"]) if "sprite" in spec else [r.split() for r in spec["grid"]]
+            img = render(name, rows, pal)
+            out = OUT / f"{name}.png"
+            if check:
+                if not out.exists():
+                    stale.append(f"{name} (missing)")
+                    continue
+                cand = work / f"{name}.png"
+                img.save(cand)
+                DIFF_DIR.mkdir(parents=True, exist_ok=True)
+                rc = subprocess.run(
+                    [sys.executable, str(COMPARE), str(out), str(cand), str(DIFF_DIR / f"diff-icon-{name}.png")]
+                ).returncode
+                if rc != 0:
+                    stale.append(name)
+            else:
+                buf = io.BytesIO()
+                img.save(buf, format="PNG")
+                out.write_bytes(buf.getvalue())
+                print(f"wrote {out.relative_to(ROOT)} ({img.width}x{img.height})")
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
     if stale:
         sys.exit(f"gen-pix-icons --check: stale/missing: {', '.join(stale)} — run just gen-icons")
+    if check:
+        print(f"gen-pix-icons --check: OK ({len(ICONS)} icons match)")
 
 
 if __name__ == "__main__":
