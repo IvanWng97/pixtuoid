@@ -254,6 +254,84 @@ test('an install copy hires a coworker: pix:install-copy → pix:hired', async (
   expect(errors()).toEqual([]);
 });
 
+test('the hire cap stops the receipt at 3 but keeps hiring every time', async ({
+  page,
+  context,
+}) => {
+  // Cross-boundary pin (review finding on Task 6): HIRE_RECEIPT_CAP in
+  // OfficeBackdrop.astro mirrors VisitorHires::MAX_LIVE in
+  // crates/pixtuoid-web/src/lib.rs across the wasm boundary — a comment
+  // pairing alone can drift silently. This test pins BOTH halves: the cap
+  // VALUE (3) and the keep-attempting BEHAVIOR (the clipboard/copy path must
+  // never look broken even once the engine has quietly refused a hire past
+  // its cap). A change to either constant without the other now fails here.
+  await context.grantPermissions(['clipboard-write']);
+  const errors = watchErrors(page);
+  await gotoLive(page); // hire needs the LIVE office (__pixHire exists)
+  await page.evaluate(() => {
+    (window as unknown as { __hired: string[] }).__hired = [];
+    document.addEventListener('pix:hired', (e) =>
+      (window as unknown as { __hired: string[] }).__hired.push(
+        (e as CustomEvent<{ name: string }>).detail.name
+      )
+    );
+    // Instrument the REAL Office.hire() call BEFORE firing any copies.
+    const real = window.__pixHire!;
+    (window as unknown as { __hireCalls: number }).__hireCalls = 0;
+    window.__pixHire = function () {
+      (window as unknown as { __hireCalls: number }).__hireCalls++;
+      real();
+    };
+  });
+  for (let i = 0; i < 4; i++) {
+    expect(await page.evaluate(() => window.__pixInstall!.copy('key'))).toBe(true);
+  }
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as { __hired: string[] }).__hired))
+    .toEqual(['cc·yours', 'cc·yours', 'cc·yours']); // receipt caps at MAX_LIVE (3), not 4
+  expect(
+    await page.evaluate(() => (window as unknown as { __hireCalls: number }).__hireCalls)
+  ).toBe(4); // Office.hire() is still called every time — only the receipt stops
+  expect(errors()).toEqual([]);
+});
+
+test('reduced motion: an install copy writes the clipboard but hires nobody', async ({
+  browser,
+}) => {
+  // The no-wasm strand of the same finding: under reduced motion the wasm
+  // fetch never runs, so window.__pixHire is never published. copy() must
+  // still succeed (the clipboard write is independent of the office) and
+  // OfficeBackdrop's `if (!window.__pixHire) return;` guard must make the
+  // hire side a true no-op — no throw, no pix:hired receipt.
+  const context = await browser.newContext({
+    reducedMotion: 'reduce',
+    permissions: ['clipboard-read', 'clipboard-write'],
+  });
+  const page = await context.newPage();
+  const errors = watchErrors(page);
+  await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
+  await page.goto('./');
+  await expect(page.locator('.backdrop.is-live')).not.toBeAttached();
+  await page.evaluate(() => {
+    (window as unknown as { __hired: string[] }).__hired = [];
+    document.addEventListener('pix:hired', (e) =>
+      (window as unknown as { __hired: string[] }).__hired.push(
+        (e as CustomEvent<{ name: string }>).detail.name
+      )
+    );
+  });
+  expect(await page.evaluate(() => window.__pixInstall!.copy('key'))).toBe(true);
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
+    'brew install IvanWng97/pixtuoid/pixtuoid'
+  );
+  await page.waitForTimeout(500); // settle window: no late/async hire lands
+  expect(await page.evaluate(() => (window as unknown as { __hired: string[] }).__hired)).toEqual(
+    []
+  );
+  expect(errors()).toEqual([]);
+  await context.close();
+});
+
 test('docs pages keep the sticky nav with section links', async ({ page }) => {
   // The floating-nav treatment is index-ONLY; the docs pages have no office
   // backdrop or statusline, so they keep the sticky bar (the #426-review
