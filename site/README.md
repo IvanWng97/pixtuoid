@@ -137,8 +137,8 @@ gates can't see. CI runs it in `site.yml` after the build step.
   `{id: 'lobby', fl: '6F', label: 'penthouse — hero'}` — the ONE source the
   statusline lift, `ElevatorShaft.astro`'s LED/car, AND each section's
   `data-floor="6F"` string / `data-floor-label` / id / eyebrow derive from),
-  then `data-lit` on the section. The backdrop publishes `window.__pixLights` (per-frame dim value;
-  the statusline polls it), `pix:onair`
+  then `data-lit` on the section. The backdrop publishes
+  `window.__pixLights` (per-frame dim value; the statusline polls it), `pix:onair`
   - the `.backdrop.is-live` class (discrete live flip; event for changes, class
     for late-attach seeding), and `pix:paused` (the office pause switch — see FX)
     — every >5s auto-motion listens, so ONE control governs page motion. The 1F
