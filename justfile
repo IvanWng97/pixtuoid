@@ -353,6 +353,10 @@ site-e2e:
     #!/usr/bin/env sh
     set -eu
     cd site
+    # deterministic ★ count for the whole suite (config/gh-stars.mjs GH_STARS_OVERRIDE
+    # seam) — an unauthenticated build would otherwise rate-limit to null and hide
+    # the star chip, silently no-op-ing its e2e assertion.
+    export GH_STARS_OVERRIDE=842
     npm run build
     npx playwright test
 

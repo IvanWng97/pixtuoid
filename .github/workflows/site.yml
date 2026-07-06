@@ -54,7 +54,13 @@ jobs:
       # node:test unit tests (config/csp-hashes.test.mjs) — the CSP hash kernel's
       # edge cases the e2e watchdog can only catch indirectly. Part of `verify`.
       - run: npm run test:unit
+      # deterministic ★ count for the e2e suite below (config/gh-stars.mjs
+      # GH_STARS_OVERRIDE seam) — this runner's unauthenticated GitHub API call
+      # would otherwise rate-limit to null and hide the star chip, silently
+      # no-op-ing its assertion.
       - run: npm run build
+        env:
+          GH_STARS_OVERRIDE: 842
       # e2e smoke suite vs the PRODUCTION build just produced (astro preview,
       # the official Astro testing posture): pins the page's runtime contracts
       # — wasm office goes live, statusline truth-light, digit-key scrollspy,
