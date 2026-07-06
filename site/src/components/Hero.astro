@@ -101,32 +101,25 @@ const STARS = __GH_STARS__;
   .hero__copy {
     max-width: 900px;
   }
-  /* Pixel-outline: with the hero permanently exempt from the dimmer
-     (data-lit-max="0"), the headline/eyebrow sit over a live, fully-lit
-     office at ANY scroll position — a plain ink color alone can't clear
-     contrast against every possible pixel behind it. A retro-game 8-
-     direction text-shadow stack (0-blur, solid var(--bg)) reads as a crisp
-     pixel edge rather than a soft blur, and REUSES the theme's own
-     background token: day's --bg is light (a light outline behind dark
-     ink), night/dracula's --bg is dark (a dark outline behind light ink) —
-     the same token is already the correct polarity in every theme, no new
-     color to maintain. The eyebrow gets the lighter, existing
-     --chrome-halo treatment instead (small mono text reads better with a
-     soft halo than a hard outline at that scale — judged by eye). */
+  /* Pixel-outline (global.css --text-outline / --text-outline-sm): with the
+     hero permanently exempt from the dimmer (data-lit-max="0"), the
+     headline/eyebrow/CTA links sit over a live, fully-lit office at ANY
+     scroll position — a plain ink color alone can't clear contrast against
+     every possible pixel behind it. --ol sets the outline's offset per
+     scale: 2px for the giant display headline (--text-outline, single
+     --bg-polarity ring), 1px for the small mono chrome below it
+     (--text-outline-sm, --bg ring PLUS a --screen outer ring — a single
+     ring alone measured short of WCAG's small-text floor against a
+     mid-tone office pixel; see global.css). The soft --chrome-halo is
+     layered underneath too, for a touch of extra lift, not as the primary
+     mechanism. */
   .hero__copy .statement {
     --ol: 2px;
-    text-shadow:
-      var(--ol) var(--ol) 0 var(--bg),
-      var(--ol) calc(var(--ol) * -1) 0 var(--bg),
-      calc(var(--ol) * -1) var(--ol) 0 var(--bg),
-      calc(var(--ol) * -1) calc(var(--ol) * -1) 0 var(--bg),
-      var(--ol) 0 0 var(--bg),
-      calc(var(--ol) * -1) 0 0 var(--bg),
-      0 var(--ol) 0 var(--bg),
-      0 calc(var(--ol) * -1) 0 var(--bg);
+    text-shadow: var(--text-outline);
   }
   .hero__copy .eyebrow {
-    text-shadow: var(--chrome-halo);
+    --ol: 1px;
+    text-shadow: var(--text-outline-sm), var(--chrome-halo);
   }
   .hero__copy .statement .hl {
     /* the gradient headline treatment, kept — but text-shadow does NOT
@@ -157,25 +150,29 @@ const STARS = __GH_STARS__;
     font-size: 0.95rem;
     color: var(--fg);
     text-decoration: none;
-    text-shadow: var(--chrome-halo);
+    --ol: 1px;
+    text-shadow: var(--text-outline-sm), var(--chrome-halo);
   }
   .hero__ghost:hover {
     color: var(--coral);
   }
+  /* .hero__avail and .hero__alt-install are style-matched (same demoted,
+     small-print treatment, incl. the outline — both sit over the same
+     busy office); only their margin-top differs. */
+  .hero__avail,
+  .hero__alt-install {
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+    letter-spacing: 0.04em;
+    color: var(--fg-muted);
+    --ol: 1px;
+    text-shadow: var(--text-outline-sm), var(--chrome-halo);
+  }
   .hero__avail {
     margin-top: 1.1rem;
-    font-family: var(--font-mono);
-    font-size: 0.82rem;
-    letter-spacing: 0.04em;
-    color: var(--fg-muted);
   }
-  /* style-matched to .hero__avail — same demoted, small-print treatment */
   .hero__alt-install {
     margin-top: 0.7rem;
-    font-family: var(--font-mono);
-    font-size: 0.82rem;
-    letter-spacing: 0.04em;
-    color: var(--fg-muted);
   }
   .hero__alt-install a {
     color: var(--fg-muted);

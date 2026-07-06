@@ -79,20 +79,55 @@
 
   /* Screen chrome — text that sits on/over the office render, THEME-INDEPENDENT
      (the office pixels don't change with the site theme, so neither do these):
-     ink/dim/line match the statusline's fixed palette. --chrome-halo lifts
-     floating chrome (nav, hero ghost link, hero eyebrow) off the office —
-     since the hero is now permanently exempt from the dimmer (data-lit-max
-     "0"), day chrome sits over a fully-lit office too, so day needs its OWN
-     halo, not night's black one re-applied (dark-on-already-dark ink read
-     as a smudge, not a lift — see the disabled arm this replaced). Reuses
-     --bg (the theme's own opposite-polarity background tone) via color-mix
-     for the alpha, same idiom as --glow below. */
+     ink/dim/line match the statusline's fixed palette. Two lift mechanisms
+     for floating chrome over the (now permanently visible) office:
+     --chrome-halo, a soft blurred shadow — day needs its OWN (a same-color/
+     dark halo behind already-dark ink reads as a smudge, not a lift, see the
+     disabled arm this replaced) — and --text-outline, a crisp retro-game
+     pixel edge (8-direction, 0-blur, solid var(--bg)) for SMALL text on busy
+     pixels, where the soft halo alone measured too weak (eyebrow, hero CTA
+     ghost links, the alt-install line, the floating nav). --ol (the
+     outline's offset) is set by the consumer — 1px for small mono chrome,
+     2px for the hero's giant display headline — so ONE template covers
+     every scale. Reuses --bg (the theme's own opposite-polarity background
+     tone): day's light --bg outlines dark ink, night/dracula's dark --bg
+     outlines light ink, so the polarity is already correct everywhere, no
+     new color to maintain — this alone clears WCAG against the office's
+     darkest pixel (--screen) with a wide margin in both themes. */
   --chip-ink: #d8cfc0;
   --chip-bright: #f0e8d8;
   --chip-dim: #8f8574;
   --chip-line: #3a332a;
   --chip-bg: color-mix(in srgb, var(--screen) 82%, transparent);
   --chrome-halo: 0 1px 8px color-mix(in srgb, var(--bg) 70%, transparent);
+  --text-outline:
+    var(--ol, 2px) var(--ol, 2px) 0 var(--bg), var(--ol, 2px) calc(var(--ol, 2px) * -1) 0 var(--bg),
+    calc(var(--ol, 2px) * -1) var(--ol, 2px) 0 var(--bg),
+    calc(var(--ol, 2px) * -1) calc(var(--ol, 2px) * -1) 0 var(--bg), var(--ol, 2px) 0 0 var(--bg),
+    calc(var(--ol, 2px) * -1) 0 0 var(--bg), 0 var(--ol, 2px) 0 var(--bg),
+    0 calc(var(--ol, 2px) * -1) 0 var(--bg);
+  /* --text-outline-sm layers a SECOND, wider ring in --screen (the office's
+     own darkest reference — no new color) OUTSIDE the --text-outline ring
+     above, for small text only. Measured need: against a MID-TONE office
+     pixel (the carpet the --paper hue was lifted from, documented above as
+     #8A765F) a single --bg-polarity ring alone measured only ~3.8-4.1:1 —
+     short of WCAG's 4.5:1 small-text floor — because --bg (light in day,
+     dark in night) sits too close in luminance to that medium brown/tan
+     for either polarity alone. --screen is close to true black, so it's
+     the strongest available contrast against that mid-tone (~4.5:1, the
+     best any office-derived token achieves — pure black would clear it
+     with full margin, but --screen is the authoritative "darkest office
+     pixel" token this file already measures against elsewhere, so it's
+     reused rather than hardcoding a bespoke black). Harmless where it's
+     redundant: against --screen itself the ring is dark-on-dark
+     (invisible), but the inner --bg ring already carries that case. */
+  --text-outline-sm:
+    var(--text-outline), calc(var(--ol, 1px) * 2) calc(var(--ol, 1px) * 2) 0 var(--screen),
+    calc(var(--ol, 1px) * 2) calc(var(--ol, 1px) * -2) 0 var(--screen),
+    calc(var(--ol, 1px) * -2) calc(var(--ol, 1px) * 2) 0 var(--screen),
+    calc(var(--ol, 1px) * -2) calc(var(--ol, 1px) * -2) 0 var(--screen),
+    calc(var(--ol, 1px) * 2) 0 0 var(--screen), calc(var(--ol, 1px) * -2) 0 0 var(--screen),
+    0 calc(var(--ol, 1px) * 2) 0 var(--screen), 0 calc(var(--ol, 1px) * -2) 0 var(--screen);
 }
 
 :root[data-theme='night'] {
