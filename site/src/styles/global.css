@@ -818,6 +818,16 @@ code,
   font-weight: 400;
   font-synthesis: none;
 }
+/* inside tables, the inline-code `overflow-wrap:anywhere` guard above is both
+   redundant (the table's own overflow-x:auto handles wide content) and harmful:
+   `anywhere` shrinks min-content to 1ch, so table auto-layout collapses a
+   code-only column and wraps its token letter-by-letter. nowrap also stops the
+   hyphen-break (`max-` / `desks`) a squeezed column would otherwise take. */
+.prose th code,
+.prose td code {
+  overflow-wrap: normal;
+  white-space: nowrap;
+}
 /* architecture diagram (```mermaid → build-time inline SVG): frame it in a fixed
    light "terminal screen" so the day-palette SVG stays legible on night/dracula,
    and make it responsive (the SVG keeps its viewBox aspect). */
