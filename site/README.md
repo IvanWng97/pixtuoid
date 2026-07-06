@@ -104,14 +104,20 @@ gates can't see. CI runs it in `site.yml` after the build step.
   sheet darkens toward statements and releases to 0 in full-viewport
   "office gaps" (the hero caps its dim lower via `data-lit-max` so the live
   office reads above the fold). Each section is a floor (6F penthouse → 1F front desk);
-  `Statusline.astro` is the one piece of fixed chrome (floor readout +
-  scrollspy, the build-time merged-PR feed with a canned-reel fallback,
-  `lights %` / clock / `● LIVE` · `❚❚ PAUSED`, and a right-end install chip —
-  star count, a jump-to-Install link, hire receipt), and the app's literal keys work on the
+  `Statusline.astro` and `ElevatorShaft.astro` are the two pieces of fixed
+  chrome. The statusline carries the floor readout + scrollspy, the
+  build-time merged-PR feed with a canned-reel fallback, `lights %` / clock /
+  `● LIVE` · `❚❚ PAUSED`, and a right-end install chip — star count, a
+  jump-to-Install link, hire receipt. The shaft is a slim pixel car riding
+  the same six floors along the right edge (click-to-ride, a lit
+  current-floor LED, an arrival-pulse ding, six dots on mobile, and its own
+  `keys 1–6` hint); both read the ONE floor-spy band so their readouts can't
+  disagree. And the app's literal keys work on the
   page — digits `1–6` ride between floors, **document-global** from any
   scroll depth (guards: typing surfaces, the boot splash, a held modifier,
-  and a focused `[data-keys-scope]` region claims the digits locally
-  instead); `t` retints the decorative palette (Esc restores) and keeps the
+  and a focused `[data-keys-scope]` region — e.g. the 5F channel dial's
+  own tune keys — claims the digits locally instead); `t` retints the
+  decorative palette (Esc restores) and keeps the
   stricter **focus-gated** posture (WCAG 2.1.4: fires only from a neutral
   focus context — page body / a jumped-to section / the statusline, never a
   focused control — the shared `window.__pixKeys.shortcutContext()` gate).
@@ -127,9 +133,9 @@ gates can't see. CI runs it in `site.yml` after the build step.
   and `data-floor`/`data-floor-label` (scrollspy + wayfinding) — a new floor
   is a `FLOORS` row in `consts.ts` (the `{id, fl, label}` shape, e.g.
   `{id: 'lobby', fl: '6F', label: 'penthouse — hero'}` — the ONE source the
-  statusline lift AND each section's `data-floor="6F"` string /
-  `data-floor-label` / id / eyebrow derive from), then `data-lit` on the
-  section. The backdrop publishes `window.__pixLights` (per-frame dim value;
+  statusline lift, `ElevatorShaft.astro`'s LED/car, AND each section's
+  `data-floor="6F"` string / `data-floor-label` / id / eyebrow derive from),
+  then `data-lit` on the section. The backdrop publishes `window.__pixLights` (per-frame dim value;
   the statusline polls it), `pix:onair`
   - the `.backdrop.is-live` class (discrete live flip; event for changes, class
     for late-attach seeding), and `pix:paused` (the office pause switch — see FX)

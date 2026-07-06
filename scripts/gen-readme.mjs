@@ -3,7 +3,7 @@
 //   • Features table          ← site/src/features.json  (GENERATED between markers)
 //   • Supported-tools glimpse ← site/src/sources.json   (GENERATED between markers)
 //   • Install block           ← site/src/install.json   (GENERATED — `readme:true` methods only)
-// The site (Features.astro / SupportedTools.astro / Install.astro) reads the same
+// The site (Showcase.astro / SupportedTools.astro / Install.astro) reads the same
 // JSON, so the README and the site can't drift. The supported-tools glimpse shows
 // only the FEATURED tools + a link to the full tool × OS matrix on the site, so the
 // README stays short as more agent CLIs are added. Run `just gen-readme` (or
