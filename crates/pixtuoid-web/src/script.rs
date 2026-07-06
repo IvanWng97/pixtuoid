@@ -20,7 +20,9 @@
 use std::path::PathBuf;
 
 use pixtuoid_core::source::daemon::DaemonPresenceUpdate;
-use pixtuoid_core::source::{claude_code, codex, cursor, opencode};
+use pixtuoid_core::source::{
+    antigravity, claude_code, codewhale, codex, copilot, cursor, hermes, opencode,
+};
 use pixtuoid_core::{AgentEvent, AgentId, ToolDetail, Transport};
 
 /// One scripted beat: fires `at_ms` into the current loop.
@@ -39,16 +41,22 @@ pub(crate) const LOOP_MS: u64 = 120_000;
 /// `SOURCE_NAME` consts — a hand-typed string here silently misses the
 /// registry and the label falls back to the RAW string (`claude_code·api`
 /// instead of `cc·api` — a review-caught, test-invisible defect class).
+/// Every slot carries a DISTINCT CLI (8 of the registry's 9 non-daemon
+/// sources — Reasonix is the one omitted; OpenClaw is the 10th, rendered
+/// separately as the lobster mascot via `lobster_beats`, never a cast
+/// member): the hero's ten CLI-name chips and the badged sprites below are
+/// meant to ECHO each other ("we support these agents"), so the cast should
+/// span the roster instead of repeating one CLI across most of the slots.
 const CAST: &[(&str, &str, &str)] = &[
     // (source, session key, cwd)
     (claude_code::SOURCE_NAME, "hero-cc-api", "/work/api"),
-    (claude_code::SOURCE_NAME, "hero-cc-web", "/work/webapp"),
-    (codex::SOURCE_NAME, "hero-cx-infra", "/work/infra"),
-    (claude_code::SOURCE_NAME, "hero-cc-data", "/work/data"),
-    (opencode::SOURCE_NAME, "hero-oc-cli", "/work/cli"),
     (codex::SOURCE_NAME, "hero-cx-web", "/work/webapp"),
-    (cursor::SOURCE_NAME, "hero-cu-docs", "/work/docs"),
-    (claude_code::SOURCE_NAME, "hero-cc-infra", "/work/infra"),
+    (antigravity::SOURCE_NAME, "hero-ag-infra", "/work/infra"),
+    (codewhale::SOURCE_NAME, "hero-cw-data", "/work/data"),
+    (opencode::SOURCE_NAME, "hero-oc-cli", "/work/cli"),
+    (copilot::SOURCE_NAME, "hero-cp-docs", "/work/docs"),
+    (cursor::SOURCE_NAME, "hero-cu-etl", "/work/etl"),
+    (hermes::SOURCE_NAME, "hero-hm-tests", "/work/tests"),
 ];
 
 pub(crate) fn cast_id(i: usize) -> AgentId {
@@ -440,7 +448,7 @@ mod tests {
         for a in scene.agents.values() {
             let prefix = a.label.split('·').next().unwrap();
             assert!(
-                ["cc", "cx", "oc", "cu"].contains(&prefix),
+                ["cc", "cx", "ag", "cw", "oc", "cp", "cu", "hm"].contains(&prefix),
                 "label {:?} must carry a registered source prefix",
                 a.label
             );
