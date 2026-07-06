@@ -1,6 +1,47 @@
 ---
 import { SHOWCASE, showcaseVariants, showcaseGroups, floorById, floorName, asset } from '../consts';
 import ChannelStage from './ChannelStage.astro';
+import featuresData from '../features.json';
+import PixIcon from './PixIcon.astro';
+
+// The merged 5F band: the ledger rows that used to be the standalone Features
+// section now live INSIDE the studio band — "the channel IS the feature list".
+// Rows whose card carries a #showcase-<id> href become channel TRIGGERS.
+// features.json stays the README single source (gen-readme.mjs reads only
+// icon/name/desc/featured; `card` is site-only).
+type Feature = {
+  icon: string;
+  name: string;
+  desc: string;
+  featured?: boolean;
+  card?: { blurb: string; href?: string };
+};
+// emoji → PixIcon sprite name (spec §5: every emoji glyph becomes a real
+// pixel icon; the emoji field stays in features.json because the README
+// table renders it verbatim)
+const PIX_BY_EMOJI: Record<string, string> = {
+  '🎭': 'walk',
+  '☕': 'coffee',
+  '💬': 'chat',
+  '🎨': 'palette',
+  '💡': 'glow',
+  '🔎': 'magnify',
+  '🛡️': 'shield',
+};
+const roster = (featuresData as Feature[]).flatMap((f) =>
+  f.card
+    ? [
+        {
+          pix: PIX_BY_EMOJI[f.icon],
+          title: f.name,
+          body: f.card.blurb ?? f.desc,
+          ch: f.card.href?.startsWith('#showcase-')
+            ? f.card.href.slice('#showcase-'.length)
+            : undefined,
+        },
+      ]
+    : []
+);
 
 const floor = floorById('showcase');
 const channels = SHOWCASE.map((c, i) => ({
@@ -39,6 +80,7 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
   data-lit
   data-floor={floor.fl}
   data-floor-label={floor.label}
+  data-keys-scope="channels"
 >
   {
     /* the legacy #themes/#weather anchor spans + their hash map were removed in
@@ -49,9 +91,9 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
       <p class="eyebrow">{floor.fl} · {floorName(floor)} — {live.length} channels on air</p>
       <h2 class="statement statement--md">{countWord} channels.<br />One office.</h2>
       <p class="lead">
-        The channel on screen is live — the same office running in your browser. Drag the clock
-        forward, roll in a storm, switch the vibe. The other channels are recorded; flip a channel
-        to watch them on the big screen.
+        The channel on screen is live — the same office running in your browser. The rows on the
+        right are what you're watching: tune one in and the wall demonstrates it. Drag the clock,
+        roll in a storm, switch the vibe.
       </p>
     </div>
 
@@ -59,25 +101,49 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
       <div class="studio__stages">
         {live.map((c) => <ChannelStage channel={c} active={c.id === def.id} />)}
       </div>
-      <div class="dial" role="group" aria-label="Demo channels">
-        {
-          channels.map((c) =>
-            c.status === 'live' ? (
-              <button
-                class="mon dial__ch"
-                data-ch={c.id}
-                aria-pressed={c.id === def.id ? 'true' : 'false'}
-              >
-                <span class="dial__num">{c.ch}</span> {c.label}
-                {c.kind === 'live' && <small class="dial__live">live</small>}
-              </button>
-            ) : (
-              <span class="dial__ch dial__ch--soon">
-                <span class="dial__num">{c.ch}</span> {c.label} <small>soon</small>
-              </span>
+      <div class="studio__panel">
+        <div class="dial" role="group" aria-label="Demo channels">
+          {
+            channels.map((c) =>
+              c.status === 'live' ? (
+                <button
+                  class="mon dial__ch"
+                  data-ch={c.id}
+                  aria-pressed={c.id === def.id ? 'true' : 'false'}
+                >
+                  <span class="dial__num">{c.ch}</span> {c.label}
+                  {c.kind === 'live' && <small class="dial__live">live</small>}
+                </button>
+              ) : (
+                <span class="dial__ch dial__ch--soon">
+                  <span class="dial__num">{c.ch}</span> {c.label} <small>soon</small>
+                </span>
+              )
             )
-          )
-        }
+          }
+        </div>
+        <div class="roster" role="group" aria-label="Features — tune a row in on the studio wall">
+          {
+            roster.map((r) =>
+              r.ch ? (
+                <button class="roster__row text-scrim" data-feature-ch={r.ch} aria-pressed="false">
+                  <PixIcon name={r.pix} scale={2} />
+                  <span class="roster__name">{r.title}</span>
+                  <span class="roster__body">{r.body}</span>
+                  <span class="roster__tune" aria-hidden="true">
+                    tune in →
+                  </span>
+                </button>
+              ) : (
+                <div class="roster__row roster__row--plain text-scrim">
+                  <PixIcon name={r.pix} scale={2} />
+                  <span class="roster__name">{r.title}</span>
+                  <span class="roster__body">{r.body}</span>
+                </div>
+              )
+            )
+          }
+        </div>
       </div>
     </div>
   </div>
@@ -389,6 +455,11 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
         monitors.forEach(function (m) {
           m.setAttribute('aria-pressed', m.dataset.ch === id ? 'true' : 'false');
         });
+        rows.forEach(function (r) {
+          const on = r.dataset.featureCh === id;
+          r.setAttribute('aria-pressed', on ? 'true' : 'false');
+          r.classList.toggle('led-selected', on);
+        });
         syncVideos();
         syncCanvas();
       }
@@ -407,6 +478,47 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
       m.addEventListener('pointerenter', warm);
       m.addEventListener('focus', warm);
     });
+
+    // ---- merged 5F band: feature rows are channel triggers ("the channel IS
+    // the feature list") — a row rides the SAME tune() path as the dial, and
+    // warms its stage on hover/focus like a monitor does.
+    const rows = Array.prototype.slice.call(studio.querySelectorAll('[data-feature-ch]'));
+    rows.forEach(function (r) {
+      r.addEventListener('click', function () {
+        tune(r.dataset.featureCh);
+      });
+      function warmRow() {
+        const st = studio.querySelector('[data-stage="' + r.dataset.featureCh + '"]');
+        if (st) hydrate(st);
+      }
+      r.addEventListener('pointerenter', warmRow);
+      r.addEventListener('focus', warmRow);
+    });
+
+    // ---- scoped channel keys (§4): while focus is inside the studio, digits
+    // 1–N tune channels instead of riding the building's floor elevator. The
+    // section carries data-keys-scope="channels", so Base.astro's document-level
+    // floor handler yields these digits to us — the CRT wins, no 2F jump, no
+    // double-action. The digit → channel map is read from the dial's own
+    // .dial__num labels (single source: the rendered dial), so it can't desync.
+    const scope = document.querySelector('[data-keys-scope="channels"]');
+    if (scope) {
+      const dialButtons = Array.prototype.slice.call(scope.querySelectorAll('button.dial__ch'));
+      scope.addEventListener('keydown', function (e) {
+        if (e.ctrlKey || e.metaKey || e.altKey) return;
+        if (window.__pixKeys && window.__pixKeys.typing(e)) return;
+        if (!/^[1-9]$/.test(e.key)) return;
+        const num = e.key.padStart(2, '0');
+        const btn = dialButtons.find(function (b) {
+          const n = b.querySelector('.dial__num');
+          return n && n.textContent.trim() === num;
+        });
+        if (!btn) return; // a soon/absent channel — inert (Base already yielded)
+        e.preventDefault();
+        tune(btn.dataset.ch);
+        btn.focus();
+      });
+    }
 
     // ---- OSD chips (variant-set channels) — the old gallery JS, parameterized
     stages.forEach(function (st) {
@@ -588,6 +700,63 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
   }
   .studio__stages {
     min-width: 0;
+  }
+  .studio__panel {
+    min-width: 0;
+  }
+  .roster {
+    margin-top: 1.6rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+    border-top: 1px solid var(--border);
+    padding-top: 1.2rem;
+  }
+  .roster__row {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    grid-template-areas: 'icon name' 'icon body';
+    column-gap: 0.7rem;
+    align-items: start;
+    text-align: left;
+    background: none;
+    border: 0;
+    padding: 0.35rem 0.3rem;
+    font: inherit;
+    color: var(--fg);
+  }
+  .roster__row :global(.pix-icon) {
+    grid-area: icon;
+  }
+  button.roster__row {
+    cursor: pointer;
+  }
+  .roster__name {
+    grid-area: name;
+    font-family: var(--font-body);
+    font-weight: 600;
+    font-size: 0.98rem;
+  }
+  .roster__body {
+    grid-area: body;
+    font-family: var(--font-body);
+    font-size: 0.88rem;
+    color: var(--fg-muted);
+  }
+  .roster__tune {
+    grid-column: 2;
+    justify-self: start;
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    color: var(--coral-deep); /* AA 5.2:1 in both themes (same token Features used) */
+  }
+  button.roster__row:hover .roster__tune,
+  button.roster__row:focus-visible .roster__tune {
+    text-decoration: underline;
+  }
+  button.roster__row[aria-pressed='true'] .roster__name {
+    color: var(--led);
+    text-shadow: 0 0 6px var(--led-glow);
   }
   @media (prefers-reduced-motion: reduce) {
     /* the VIBING channel's controls only make sense with the office running,

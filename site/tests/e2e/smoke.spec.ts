@@ -159,7 +159,7 @@ test('the dimmer darkens statements and releases in office gaps', async ({ page 
     page.evaluate(() => parseFloat(document.getElementById('dimmer')!.style.opacity || '0'));
   // A statement at viewport center pulls the darkness in…
   await page.evaluate(() =>
-    document.getElementById('features')!.scrollIntoView({ block: 'center', behavior: 'instant' })
+    document.getElementById('install')!.scrollIntoView({ block: 'center', behavior: 'instant' })
   );
   await expect.poll(dim).toBeGreaterThan(0.5);
   // …and the first observation gap releases it (the office IS the content).
@@ -175,7 +175,7 @@ test('the dimmer darkens statements and releases in office gaps', async ({ page 
       parseFloat((document.querySelector('.hero__copy') as HTMLElement).style.opacity || '1')
     );
   await page.evaluate(() =>
-    document.getElementById('features')!.scrollIntoView({ block: 'center', behavior: 'instant' })
+    document.getElementById('install')!.scrollIntoView({ block: 'center', behavior: 'instant' })
   );
   await expect.poll(heroOp).toBeLessThan(0.01);
   await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
@@ -704,15 +704,15 @@ test('WCAG 2.1.4: the statusline keys toggle turns the digit shortcuts off, then
   await keysToggle.click();
   await expect(keysToggle).toHaveAttribute('aria-checked', 'false');
   // OFF: a floor digit is inert — the lift readout does not move
-  await page.keyboard.press('4');
+  await page.keyboard.press('3');
   await expect(page.locator('[data-lift-digit]')).toHaveText('2F');
   // …and the choice is persisted (single-char shortcuts have a real off-switch)
   expect(await page.evaluate(() => localStorage.getItem('pix-keys'))).toBe('off');
   // flip it back ON — the digit rides again
   await keysToggle.click();
   await expect(keysToggle).toHaveAttribute('aria-checked', 'true');
-  await page.keyboard.press('4');
-  await expect(page.locator('[data-lift-digit]')).toHaveText('4F', { timeout: 10_000 });
+  await page.keyboard.press('3');
+  await expect(page.locator('[data-lift-digit]')).toHaveText('3F', { timeout: 10_000 });
 });
 
 test('the clock forces night after hours and clears on an explicit theme act', async ({ page }) => {
@@ -752,12 +752,12 @@ test('first visit: boot intro auto-runs, reveals the page, seeds the gate', asyn
   );
   // finish() dispatched pix:revealed, arming the reveal-on-scroll observer —
   // opacity:0 still counts as "visible" to Playwright, so assert the CLASS.
-  await expectSectionReveal(page, 'features');
+  await expectSectionReveal(page, 'install');
   // Gate round-trip: a seeded session skips the overlay, and the IMMEDIATE
   // pix:revealed path must arm the reveal observer just the same.
   await page.reload();
   await expect(page.locator('#boot')).not.toBeVisible();
-  await expectSectionReveal(page, 'features');
+  await expectSectionReveal(page, 'install');
 });
 
 test('a keypress during the Level-2 engine hold force-settles the splash immediately', async ({
@@ -1258,12 +1258,13 @@ test('docs-table code cells render single-line (column-collapse guard)', async (
 
 test('text over the live office carries its own scrim (.text-scrim)', async ({ page }) => {
   await gotoLive(page);
-  // wb-2 C9: the hero copy (eyebrow/subcopy/CTA/platform-line) and the 4F
-  // intro paragraph are now BARE, tools-table style — legibility comes from
-  // --office-ink/--office-ink-accent tokens tuned against the real office
-  // composite, not a plate (see the WCAG test below + global.css's doc
-  // comment). Only the feature ledger and the install note still carry an
-  // actual scrim/plate.
+  // wb-2 C9: the hero copy (eyebrow/subcopy/CTA/platform-line) is now BARE,
+  // tools-table style — legibility comes from --office-ink/--office-ink-accent
+  // tokens tuned against the real office composite, not a plate (see the WCAG
+  // test below + global.css's doc comment). The install note still carries an
+  // actual scrim/plate; the standalone Features ledger was retired — its rows
+  // now live inside the merged 5F studio band as the roster, which carries
+  // the same local-scrim legibility guarantee the old ledger rows had.
   const heroBg = await page.evaluate(
     () => getComputedStyle(document.querySelector('.hero .statement-sub')!).backgroundColor
   );
@@ -1272,29 +1273,25 @@ test('text over the live office carries its own scrim (.text-scrim)', async ({ p
     () => getComputedStyle(document.querySelector('.hero__ghost')!).backgroundColor
   );
   expect(ghostBg).toBe('rgba(0, 0, 0, 0)');
-  const featuresLeadBg = await page.evaluate(
-    () => getComputedStyle(document.querySelector('#features .section-head .lead')!).backgroundColor
-  );
-  expect(featuresLeadBg).toBe('rgba(0, 0, 0, 0)');
 
-  expect(await page.locator('#features .ledger.text-scrim').count()).toBe(1);
-  expect(await page.locator('#features .ledger.text-scrim .ledger__row').count()).toBeGreaterThan(
-    0
-  );
   // The install note ("Also on crates.io...") floated unplated over the
   // skyline — give it the same crisp plate (it's NOT hero, so the install
-  // card idiom applies, unlike the hero/4F bare treatment above).
+  // card idiom applies, unlike the hero's bare treatment above).
   expect(await page.locator('.install__note.text-scrim').count()).toBe(1);
+  expect(await page.locator('#showcase .roster__row.text-scrim').count()).toBeGreaterThan(0);
 });
 
-test('bare hero + 4F text clears WCAG AA at the real office composite (day + night)', async ({
+test('bare hero text clears WCAG AA at the real office composite (day + night)', async ({
   page,
 }) => {
-  // wb-2 C6/C9: the hero eyebrow/subcopy/platform-line and the 4F intro
-  // paragraph read directly over the live office (no plate — the
-  // SupportedTools-table look). Legibility now depends entirely on the ink
-  // token clearing contrast against whatever the office ACTUALLY renders
-  // behind it, so this samples the REAL canvas pixels (not a --screen proxy
+  // wb-2 C6/C9: the hero eyebrow/subcopy/platform-line read directly over the
+  // live office (no plate — the SupportedTools-table look). The 4F Features
+  // intro paragraph this test also covered was retired along with the
+  // standalone floor (its rows are now scrimmed roster entries in the merged
+  // 5F band — see the .text-scrim test above — so the bare-ink-token
+  // legibility path no longer applies to them). Legibility now depends
+  // entirely on the ink token clearing contrast against whatever the office
+  // ACTUALLY renders behind it, so this samples the REAL canvas pixels (not a --screen proxy
   // — with no opaque plate the underlying office pixel is no longer
   // "immaterial") across the sampled element's bounding box, finds the
   // brightest AND darkest pixel in it (day's dimmer LIGHTENS the composite
@@ -1385,16 +1382,6 @@ test('bare hero + 4F text clears WCAG AA at the real office composite (day + nig
         `${theme} ${selector}: WCAG AA floor is 4.5:1; measured ${ratio.toFixed(2)}:1`
       ).toBeGreaterThanOrEqual(4.5);
     }
-
-    await page.evaluate(() =>
-      document.getElementById('features')!.scrollIntoView({ block: 'center', behavior: 'instant' })
-    );
-    await page.waitForTimeout(700);
-    const { ratio: leadRatio } = await worstCaseRatio('#features .section-head .lead');
-    expect(
-      leadRatio,
-      `${theme} #features .lead: WCAG AA floor is 4.5:1; measured ${leadRatio.toFixed(2)}:1`
-    ).toBeGreaterThanOrEqual(4.5);
   }
 });
 

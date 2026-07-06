@@ -35,7 +35,8 @@
     "desc": "Typing, waiting (`?`), sleeping (z's), walking with A\\*-routed pathfinding",
     "pix": "walk",
     "card": {
-      "blurb": "everyone types, waits with a '?', naps under z's, and walks A*-routed paths between desks."
+      "blurb": "everyone types, waits with a '?', naps under z's, and walks A*-routed paths between desks.",
+      "href": "#showcase-agents"
     }
   },
   {
@@ -45,7 +46,8 @@
     "featured": false,
     "pix": "coffee",
     "card": {
-      "blurb": "idle agents fetch a coffee from the pantry and carry it back — the cup stays till they leave."
+      "blurb": "idle agents fetch a coffee from the pantry and carry it back — the cup stays till they leave.",
+      "href": "#showcase-vibing"
     }
   },
   {
@@ -55,7 +57,8 @@
     "featured": false,
     "pix": "chat",
     "card": {
-      "blurb": "two idle agents drift to the same spot and a dev-humor speech bubble pops up between them."
+      "blurb": "two idle agents drift to the same spot and a dev-humor speech bubble pops up between them.",
+      "href": "#showcase-meetings"
     }
   },
   {
@@ -64,7 +67,8 @@
     "desc": "Shirt + pants colored by working directory (same repo → same color, a glanceable org-chart); hair/skin per agent. 16 curated outfits",
     "pix": "palette",
     "card": {
-      "blurb": "shirt and pants colored by working directory — same repo, same colors: the room reads like an org-chart."
+      "blurb": "shirt and pants colored by working directory — same repo, same colors: the room reads like an org-chart.",
+      "href": "#showcase-agents"
     }
   },
   {
@@ -73,7 +77,8 @@
     "desc": "Edit = blue, Bash = orange, Read = cyan — scannable at a glance",
     "pix": "glow",
     "card": {
-      "blurb": "edit glows blue, bash orange, read cyan — you can read the room from across the floor."
+      "blurb": "edit glows blue, bash orange, read cyan — you can read the room from across the floor.",
+      "href": "#showcase-spaces"
     }
   },
   {
