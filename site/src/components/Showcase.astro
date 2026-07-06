@@ -14,25 +14,15 @@ type Feature = {
   name: string;
   desc: string;
   featured?: boolean;
+  pix?: string;
   card?: { blurb: string; href?: string };
-};
-// emoji → PixIcon sprite name (spec §5: every emoji glyph becomes a real
-// pixel icon; the emoji field stays in features.json because the README
-// table renders it verbatim)
-const PIX_BY_EMOJI: Record<string, string> = {
-  '🎭': 'walk',
-  '☕': 'coffee',
-  '💬': 'chat',
-  '🎨': 'palette',
-  '💡': 'glow',
-  '🔎': 'magnify',
-  '🛡️': 'shield',
 };
 const roster = (featuresData as Feature[]).flatMap((f) =>
   f.card
     ? [
         {
-          pix: PIX_BY_EMOJI[f.icon],
+          icon: f.icon,
+          pix: f.pix,
           title: f.name,
           body: f.card.blurb ?? f.desc,
           ch: f.card.href?.startsWith('#showcase-')
@@ -126,8 +116,14 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
           {
             roster.map((r) =>
               r.ch ? (
-                <button class="roster__row text-scrim" data-feature-ch={r.ch} aria-pressed="false">
-                  <PixIcon name={r.pix} scale={2} />
+                <button
+                  class="roster__row text-scrim"
+                  data-feature-ch={r.ch}
+                  aria-pressed={r.ch === def.id ? 'true' : 'false'}
+                >
+                  <span class="roster__icon" aria-hidden="true">
+                    {r.pix ? <PixIcon name={r.pix} scale={2} /> : r.icon}
+                  </span>
                   <span class="roster__name">{r.title}</span>
                   <span class="roster__body">{r.body}</span>
                   <span class="roster__tune" aria-hidden="true">
@@ -136,7 +132,9 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
                 </button>
               ) : (
                 <div class="roster__row roster__row--plain text-scrim">
-                  <PixIcon name={r.pix} scale={2} />
+                  <span class="roster__icon" aria-hidden="true">
+                    {r.pix ? <PixIcon name={r.pix} scale={2} /> : r.icon}
+                  </span>
                   <span class="roster__name">{r.title}</span>
                   <span class="roster__body">{r.body}</span>
                 </div>
@@ -725,7 +723,7 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
     font: inherit;
     color: var(--fg);
   }
-  .roster__row :global(.pix-icon) {
+  .roster__icon {
     grid-area: icon;
   }
   button.roster__row {

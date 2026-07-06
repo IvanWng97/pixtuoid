@@ -4,6 +4,21 @@ import { expect, test } from '@playwright/test';
 // triggers), the floor-anchor vocabulary, the elevator shaft, and the scroll
 // budget. Companion to smoke.spec.ts; runs against the PRODUCTION build.
 
+test('cold load: the roster row for the default channel starts pressed, in sync with the dial', async ({
+  page,
+}) => {
+  await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
+  await page.goto('./');
+  // the default channel is 'vibing' (src/showcase.json's default:true) — its
+  // roster row is "coffee run" (card.href="#showcase-vibing"), never clicked
+  const row = page.locator('[data-feature-ch="vibing"]').first();
+  await expect(row).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('button.mon[data-ch="vibing"]')).toHaveAttribute(
+    'aria-pressed',
+    'true'
+  );
+});
+
 test('a feature row retunes the studio to its demo channel', async ({ page }) => {
   await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
   await page.goto('./');
