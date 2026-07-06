@@ -69,9 +69,17 @@ function regenSection(label, start, end, body) {
 // `"featured": false` (the inverse of install.json's opt-IN `readme:true`, because
 // most features are headline and only a few are flavor). Edit the flag in
 // features.json, never this table.
+// Icon column: a feature with a `pix` name gets the office's own pixel icon —
+// the SAME sprite-pack-derived art PixIcon.astro renders on the site, via the
+// README-scaled PNG scripts/gen-pix-icons.py writes to docs/images/pix-icons/
+// (pre-scaled because GitHub's renderer strips the site's upscale CSS) — so
+// the README and the site can never show different art for the same feature.
+// Features without a `pix` yet fall back to the plain emoji.
+const iconCell = (f) =>
+  f.pix ? `<img src="docs/images/pix-icons/${cell(f.pix)}.png" alt="">` : cell(f.icon);
 const featureRows = features
   .filter((f) => f.featured !== false)
-  .map((f) => `| ${cell(f.icon)} | **${cell(f.name)}** | ${cell(f.desc)} |`);
+  .map((f) => `| ${iconCell(f)} | **${cell(f.name)}** | ${cell(f.desc)} |`);
 regenSection(
   'Features table',
   '<!-- features:start · generated from site/src/features.json by `just gen-readme` — edit the JSON, not this table -->',

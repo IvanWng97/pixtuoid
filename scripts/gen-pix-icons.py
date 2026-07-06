@@ -1,12 +1,18 @@
 #!/usr/bin/env python3
-"""Generate the site's pixel-icon PNGs (site/src/assets/pix-icons/).
+"""Generate the site's pixel-icon PNGs (site/src/assets/pix-icons/) plus the
+root README's pre-scaled variants (docs/images/pix-icons/).
 
 Single color source: the embedded sprite pack's palette
 (crates/pixtuoid-scene/sprites/default/pack.toml) — an icon grid may only use
 keys defined there, so the icons can never drift off the office's own colors.
 An icon is either extracted verbatim from a pack sprite ("sprite") or authored
-here as a pixel grid ("grid"). Output is 1x RGBA PNGs; PixIcon.astro
-integer-upscales them with image-rendering: pixelated (upscale-crisp only).
+here as a pixel grid ("grid"). The site's 1x RGBA PNGs are consumed by
+PixIcon.astro, which integer-upscales them with image-rendering: pixelated
+(upscale-crisp only). GitHub strips that CSS, so the README instead embeds a
+SEPARATE, pre-scaled (nearest-neighbor, README_SCALE) variant per icon — the
+only way to keep them crisp there — written to docs/images/pix-icons/
+(the doc-image convention; the site's src/assets/pix-icons/ is a Vite build
+input, not a docs asset).
 
 Usage:
   .venv/bin/python3 scripts/gen-pix-icons.py          # (re)generate (just gen-icons)
@@ -15,7 +21,10 @@ Usage:
 --check decode-compares pixels (via scripts/compare-screenshots.py, like
 gen-media.py's --check) rather than raw PNG bytes — a raw-byte compare is
 Pillow-version-fragile (re-encoding the identical pixels can change the
-compressed bytes), which would make the gate flaky across machines/CI.
+compressed bytes), which would make the gate flaky across machines/CI. It also
+diffs each output directory's file listing against ICONS.keys() so a PNG left
+behind by a removed manifest entry (an orphan) fails loudly instead of going
+unnoticed.
 """
 
 import io
@@ -31,6 +40,12 @@ from PIL import Image
 ROOT = Path(__file__).resolve().parent.parent
 PACK = ROOT / "crates/pixtuoid-scene/sprites/default"
 OUT = ROOT / "site/src/assets/pix-icons"
+README_OUT = ROOT / "docs/images/pix-icons"
+# Nearest-neighbor upscale factor for the README variants: GitHub's markdown
+# renderer strips <img> sizing/CSS, so unlike PixIcon.astro's runtime upscale
+# these must be pre-scaled pixels. 3x turns the 10x10 (or 8x12 sprite) grids
+# into ~24-36px images — crisp and legible at their natural embed size.
+README_SCALE = 3
 COMPARE = ROOT / "scripts/compare-screenshots.py"
 DIFF_DIR = ROOT / "target/gen-check-diff"
 
@@ -171,40 +186,65 @@ def render(icon_name, rows, pal):
     return img
 
 
+# (label, dir) pairs — label disambiguates the two outputs, since both
+# directories happen to share the basename "pix-icons".
+OUTPUTS = [("site", OUT), ("readme", README_OUT)]
+
+
+def emit(name, img, label, out_dir, check, work, stale):
+    out = out_dir / f"{name}.png"
+    tag = f"{label}/{name}"
+    if check:
+        if not out.exists():
+            stale.append(f"{tag} (missing)")
+            return
+        cand = work / f"{label}-{name}.png"
+        img.save(cand)
+        DIFF_DIR.mkdir(parents=True, exist_ok=True)
+        rc = subprocess.run(
+            [sys.executable, str(COMPARE), str(out), str(cand), str(DIFF_DIR / f"diff-{label}-{name}.png")]
+        ).returncode
+        if rc != 0:
+            stale.append(tag)
+    else:
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        out.write_bytes(buf.getvalue())
+        print(f"wrote {out.relative_to(ROOT)} ({img.width}x{img.height})")
+
+
 def main():
     check = "--check" in sys.argv[1:]
     pal = load_palette()
-    OUT.mkdir(parents=True, exist_ok=True)
+    for _, out_dir in OUTPUTS:
+        out_dir.mkdir(parents=True, exist_ok=True)
     stale = []
     work = Path(tempfile.mkdtemp(prefix="gen-pix-icons-"))
     try:
         for name, spec in ICONS.items():
             rows = sprite_rows(spec["sprite"]) if "sprite" in spec else [r.split() for r in spec["grid"]]
             img = render(name, rows, pal)
-            out = OUT / f"{name}.png"
-            if check:
-                if not out.exists():
-                    stale.append(f"{name} (missing)")
-                    continue
-                cand = work / f"{name}.png"
-                img.save(cand)
-                DIFF_DIR.mkdir(parents=True, exist_ok=True)
-                rc = subprocess.run(
-                    [sys.executable, str(COMPARE), str(out), str(cand), str(DIFF_DIR / f"diff-icon-{name}.png")]
-                ).returncode
-                if rc != 0:
-                    stale.append(name)
-            else:
-                buf = io.BytesIO()
-                img.save(buf, format="PNG")
-                out.write_bytes(buf.getvalue())
-                print(f"wrote {out.relative_to(ROOT)} ({img.width}x{img.height})")
+            readme_img = img.resize(
+                (img.width * README_SCALE, img.height * README_SCALE), Image.Resampling.NEAREST
+            )
+            emit(name, img, "site", OUT, check, work, stale)
+            emit(name, readme_img, "readme", README_OUT, check, work, stale)
     finally:
         shutil.rmtree(work, ignore_errors=True)
+
+    if check:
+        # F3: an orphaned committed PNG (its manifest entry removed) is invisible
+        # to the loop above, which only ever iterates ICONS — diff the directory
+        # listing the other way too.
+        for label, out_dir in OUTPUTS:
+            orphans = sorted(p.stem for p in out_dir.glob("*.png") if p.stem not in ICONS)
+            if orphans:
+                stale.append(f"{label}: orphaned {', '.join(orphans)}")
+
     if stale:
         sys.exit(f"gen-pix-icons --check: stale/missing: {', '.join(stale)} — run just gen-icons")
     if check:
-        print(f"gen-pix-icons --check: OK ({len(ICONS)} icons match)")
+        print(f"gen-pix-icons --check: OK ({len(ICONS)} icons match in both output dirs)")
 
 
 if __name__ == "__main__":

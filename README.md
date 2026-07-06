@@ -82,11 +82,11 @@ Press `s` to open the **Sources** panel and connect your agent CLI (Claude Code,
 | 🦞 | **OpenClaw gateway mascot** | A live OpenClaw gateway shows up as a wandering lobster whose motion tracks gateway health |
 | 🎛️ | **Vibing** | A sun and moon arc the skyline as the day turns, weather rolls past the windows (rain, storm, snow, fog, overcast, windy, smog), and six themes reskin the office |
 | 🐾 | **Office pets** | A cat or dog (one per floor) roams desks, pantry, sofas; sleeps near idle agents. Click to pet — pixel-art hearts float up |
-| 🎭 | **Animated characters** | Typing, waiting (`?`), sleeping (z's), walking with A\*-routed pathfinding |
-| 🎨 | **Team palette** | Shirt + pants colored by working directory (same repo → same color, a glanceable org-chart); hair/skin per agent. 16 curated outfits |
-| 💡 | **Per-tool monitor glow** | Edit = blue, Bash = orange, Read = cyan — scannable at a glance |
-| 🔎 | **Hover tooltips** | Hover an agent for session duration, tool-call count and active-time %; hover any furniture — desks, sofas, plants, vending machine, printer — for its name |
-| 🛡️ | **Hook-safe** | The shim always exits 0 — a stuck visualizer can never block your agent |
+| <img src="docs/images/pix-icons/walk.png" alt=""> | **Animated characters** | Typing, waiting (`?`), sleeping (z's), walking with A\*-routed pathfinding |
+| <img src="docs/images/pix-icons/palette.png" alt=""> | **Team palette** | Shirt + pants colored by working directory (same repo → same color, a glanceable org-chart); hair/skin per agent. 16 curated outfits |
+| <img src="docs/images/pix-icons/glow.png" alt=""> | **Per-tool monitor glow** | Edit = blue, Bash = orange, Read = cyan — scannable at a glance |
+| <img src="docs/images/pix-icons/magnify.png" alt=""> | **Hover tooltips** | Hover an agent for session duration, tool-call count and active-time %; hover any furniture — desks, sofas, plants, vending machine, printer — for its name |
+| <img src="docs/images/pix-icons/shield.png" alt=""> | **Hook-safe** | The shim always exits 0 — a stuck visualizer can never block your agent |
 <!-- features:end -->
 
 <p align="center">
