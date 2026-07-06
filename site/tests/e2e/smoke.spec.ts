@@ -503,6 +503,29 @@ test('statusline install chip: copy flashes ✓, clipboard gets the one-liner, t
   expect(errors()).toEqual([]);
 });
 
+test('statusline install chip: the ★ star segment is either absent or a bare count, never a literal null/undefined', async ({
+  page,
+}) => {
+  // __GH_STARS__ is a build-time GitHub API fetch (astro.config.mjs calls
+  // fetchStarCount() with no override seam) — offline/rate-limited builds get
+  // null (chip omits the segment), a reachable build gets a real count. Both
+  // are legitimate outcomes of the SAME build the CI/local e2e run actually
+  // produces (unauthenticated + shared-IP rate limits make it genuinely
+  // non-deterministic which one), so this pins the CONTRACT rather than one
+  // branch: whichever the real build produced, it must never render the
+  // stringified-null/undefined defect class (`★null`/`★undefined`). The
+  // override seam (config/gh-stars.mjs `GH_STARS_OVERRIDE`) is unit-tested
+  // directly (config/gh-stars.test.mjs) for the verbatim/degenerate-env
+  // contract; exercising it here would need a second astro build against a
+  // separate outDir/server, which this suite's single shared webServer/dist
+  // doesn't wire up.
+  await gotoLive(page);
+  const stars = page.locator('#sl-install .sl__stars');
+  if (await stars.count()) {
+    await expect(stars).toHaveText(/^\s*★\s*\d+\s*$/);
+  }
+});
+
 test('WCAG 2.1.4: the statusline keys toggle turns the digit/i shortcuts off, then back on', async ({
   page,
 }) => {

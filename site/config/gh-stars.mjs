@@ -17,6 +17,11 @@ export const GH_FETCH_TIMEOUT_MS = 5000;
  * @returns {Promise<string | null>} the count as a string ("342"), or null
  */
 export async function fetchStarCount(fetchImpl = fetch, token = process.env.GITHUB_TOKEN) {
+  // astro.config.mjs calls this with no override seam, so an e2e build that
+  // needs a deterministic non-null count can't inject a fetchImpl stub —
+  // GH_STARS_OVERRIDE substitutes the count directly, verbatim, no network.
+  // Set-but-empty behaves as unset (repo convention, e.g. RUST_LOG=).
+  if (process.env.GH_STARS_OVERRIDE) return process.env.GH_STARS_OVERRIDE;
   try {
     /** @type {Record<string, string>} */
     const headers = { accept: 'application/vnd.github+json' };

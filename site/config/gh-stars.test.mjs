@@ -5,6 +5,7 @@
 // only the wiring.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import process from 'node:process';
 import { fetchStarCount } from './gh-stars.mjs';
 
 const ok = (count) =>
@@ -49,4 +50,32 @@ test('the fetch is bounded by an AbortSignal (the offline-build timeout)', async
     return ok(1);
   }, undefined);
   assert.ok(seenSignal instanceof AbortSignal);
+});
+
+test('GH_STARS_OVERRIDE short-circuits the fetch and returns it verbatim', async () => {
+  const prev = process.env.GH_STARS_OVERRIDE;
+  process.env.GH_STARS_OVERRIDE = '842';
+  try {
+    let called = false;
+    const count = await fetchStarCount(async () => {
+      called = true;
+      return ok(1);
+    }, undefined);
+    assert.equal(count, '842');
+    assert.equal(called, false);
+  } finally {
+    if (prev === undefined) delete process.env.GH_STARS_OVERRIDE;
+    else process.env.GH_STARS_OVERRIDE = prev;
+  }
+});
+
+test('a set-but-empty GH_STARS_OVERRIDE behaves as unset (degenerate-env rule)', async () => {
+  const prev = process.env.GH_STARS_OVERRIDE;
+  process.env.GH_STARS_OVERRIDE = '';
+  try {
+    assert.equal(await fetchStarCount(async () => ok(7), undefined), '7');
+  } finally {
+    if (prev === undefined) delete process.env.GH_STARS_OVERRIDE;
+    else process.env.GH_STARS_OVERRIDE = prev;
+  }
 });
