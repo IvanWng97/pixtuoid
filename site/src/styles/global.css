@@ -529,14 +529,17 @@ section {
   text-shadow: 0 0 6px var(--led-glow);
 }
 /* Guaranteed-legibility scrim for text overlapping the live office: a local
-   plate + soft halo (the 22px spread feathers the edge), so a stalled scroll
-   can never show low-contrast copy regardless of the dimmer's state. */
+   plate + soft halo, so a stalled scroll can never show low-contrast copy
+   regardless of the dimmer's state. border-radius reuses --radius-sm (never a
+   one-off literal here); the halo's blur+spread must read as a visible
+   outward gradient, not a hard-edged rectangle (#U3 — a sharp-cornered plate
+   read as a hard box in review). */
 .text-scrim {
   background: var(--scrim);
+  border-radius: var(--radius-sm);
   box-shadow:
     0 0 0 1px var(--scrim),
-    0 0 22px 10px var(--scrim);
-  border-radius: 2px;
+    0 0 18px 12px var(--scrim);
 }
 
 .office-gap {
