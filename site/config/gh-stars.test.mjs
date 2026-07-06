@@ -41,3 +41,12 @@ test('a provided token rides the authorization header', async () => {
   }, 'tok');
   assert.equal(seen, 'Bearer tok');
 });
+
+test('the fetch is bounded by an AbortSignal (the offline-build timeout)', async () => {
+  let seenSignal;
+  await fetchStarCount(async (_url, init) => {
+    seenSignal = init.signal;
+    return ok(1);
+  }, undefined);
+  assert.ok(seenSignal instanceof AbortSignal);
+});

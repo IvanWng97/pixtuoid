@@ -11,6 +11,7 @@
 // canned reel when the API is unreachable so the build never fails.
 import sources from '../sources.json';
 import { FLOORS, floorName, DIM_RESTING } from '../consts';
+import { GH_FETCH_TIMEOUT_MS } from '../../config/gh-stars.mjs';
 
 const FALLBACK = [
   { state: 'active', who: 'claude-code', what: 'editing src/reducer.rs' },
@@ -35,7 +36,7 @@ try {
   if (process.env.GITHUB_TOKEN) headers.authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
   const res = await fetch(
     'https://api.github.com/repos/IvanWng97/pixtuoid/pulls?state=closed&base=main&sort=updated&direction=desc&per_page=12',
-    { headers, signal: AbortSignal.timeout(5000) }
+    { headers, signal: AbortSignal.timeout(GH_FETCH_TIMEOUT_MS) }
   );
   if (res.ok) {
     const prs = (await res.json()) as {

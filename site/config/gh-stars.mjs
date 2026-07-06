@@ -7,7 +7,9 @@
 import process from 'node:process';
 
 const API = 'https://api.github.com/repos/IvanWng97/pixtuoid';
-const TIMEOUT_MS = 5000; // matches the statusline PR-feed fetch bound
+// Shared with Statusline.astro's PR-feed fetch — ONE bound for every build-time
+// GitHub API call, so an offline/slow CI runner fails both the same way.
+export const GH_FETCH_TIMEOUT_MS = 5000;
 
 /**
  * @param {typeof fetch} [fetchImpl]
@@ -19,7 +21,7 @@ export async function fetchStarCount(fetchImpl = fetch, token = process.env.GITH
     /** @type {Record<string, string>} */
     const headers = { accept: 'application/vnd.github+json' };
     if (token) headers.authorization = `Bearer ${token}`;
-    const res = await fetchImpl(API, { headers, signal: AbortSignal.timeout(TIMEOUT_MS) });
+    const res = await fetchImpl(API, { headers, signal: AbortSignal.timeout(GH_FETCH_TIMEOUT_MS) });
     if (!res.ok) return null;
     const repo = await res.json();
     const n = repo?.stargazers_count;
