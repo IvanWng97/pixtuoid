@@ -822,9 +822,13 @@ code,
    redundant (the table's own overflow-x:auto handles wide content) and harmful:
    `anywhere` shrinks min-content to 1ch, so table auto-layout collapses a
    code-only column and wraps its token letter-by-letter. nowrap also stops the
-   hyphen-break (`max-` / `desks`) a squeezed column would otherwise take. */
-.prose th code,
-.prose td code {
+   hyphen-break (`max-` / `desks`) a squeezed column would otherwise take.
+   Tradeoff: a genuinely long, break-point-free token in a cell now scrolls the
+   table rather than wrapping — such tokens belong in a fenced block, not a
+   table cell. (`table` in the selector lifts specificity to (0,1,3) so the
+   override beats the (0,1,2) guard above by weight, not source order.) */
+.prose table th code,
+.prose table td code {
   overflow-wrap: normal;
   white-space: nowrap;
 }

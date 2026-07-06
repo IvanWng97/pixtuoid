@@ -769,3 +769,33 @@ test('no horizontal overflow at phone widths (mobile pan guard)', async ({ brows
     await context.close();
   }
 });
+
+test('docs-table code cells render single-line (column-collapse guard)', async ({ browser }) => {
+  // `.prose :not(pre) > code`'s overflow-wrap:anywhere feeds its soft-wrap
+  // opportunities into MIN-CONTENT intrinsic sizing (unlike break-word), so
+  // table auto-layout crushed the /config Key column to ~1ch and wrapped
+  // `theme` letter-by-letter. The pan guard above is blind to it — a column
+  // collapse never widens the page — so pin the `.prose table th/td code`
+  // exemption directly: every table code token renders as ONE line box.
+  const context = await browser.newContext({
+    viewport: { width: 390, height: 820 },
+    isMobile: true,
+    hasTouch: true,
+  });
+  const page = await context.newPage();
+  await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
+  await page.goto('./config');
+  const cells = await page.evaluate(() => {
+    const code = [...document.querySelectorAll('.prose table th code, .prose table td code')];
+    return {
+      total: code.length,
+      wrapped: code.filter((c) => c.getClientRects().length > 1).map((c) => c.textContent),
+    };
+  });
+  expect(
+    cells.total,
+    'the /config tables rendered no code cells — selector drifted?'
+  ).toBeGreaterThan(0);
+  expect(cells.wrapped, 'code tokens inside table cells wrapped mid-token').toEqual([]);
+  await context.close();
+});
