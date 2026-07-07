@@ -554,6 +554,24 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
        an unexplained dip in an otherwise strict cadence (HowItWorks also follows
        an office-gap and keeps 96px). */
   }
+  /* Mobile only: at narrow widths the kicker + heading wrap onto more lines and
+     scroll into view while still low in the viewport — far from the dimmer's
+     center-line, so its distance-based ease (OfficeBackdrop's recompute()) hasn't
+     engaged yet and the text crosses bare office floor unplated for a stretch of
+     scroll (clean only once the block nears center). Desktop's shorter content
+     reaches center — and a real dimmer level — by the time it's visible at all,
+     so it never shows this gap. Give the section head the same guaranteed-floor
+     scrim idiom Hero/Features/Install already lean on (same padding/margin-inline
+     cancel as .text-scrim, reused directly rather than via the class since it
+     wraps the whole head, not one paragraph). */
+  @media (max-width: 760px) {
+    .section-head {
+      background: var(--scrim);
+      border: 1px solid var(--border-strong);
+      padding: 0.75rem;
+      margin-inline: -0.75rem;
+    }
+  }
   .studio {
     display: grid;
     /* the single mobile column must shrink below its content's min-width (the
