@@ -107,7 +107,7 @@ gates can't see. CI runs it in `site.yml` after the build step.
   `Statusline.astro` is the one piece of fixed chrome (floor readout +
   scrollspy, the build-time merged-PR feed with a canned-reel fallback,
   `lights %` / clock / `● LIVE` · `❚❚ PAUSED`, and a right-end install chip —
-  star count, copy, hire receipt), and the app's literal keys work on the
+  star count, a jump-to-Install link, hire receipt), and the app's literal keys work on the
   page — digits `1–6` ride between floors, **document-global** from any
   scroll depth (guards: typing surfaces, the boot splash, a held modifier,
   and a focused `[data-keys-scope]` region claims the digits locally
@@ -138,7 +138,9 @@ gates can't see. CI runs it in `site.yml` after the build step.
     engine directly: `window.__pixInstall` (parse-first, in `Base.astro`'s
     head — THE install one-liner + copy dispatcher) writes the clipboard then
     fires `pix:install-copy {source}` (any Copy control names its own
-    `source` — statusline chip, docs strip, the closer, the 1F tabs);
+    `source` — docs strip, the 1F tabs; the statusline chip is a plain jump
+    link to Install now, not a copy control, and the closer's own copy row
+    was cut as redundant right after Install);
     `OfficeBackdrop`'s listener walks a coworker into the live office
     (engine-capped at `VisitorHires::MAX_LIVE`, 3 concurrent) and answers
     with `pix:hired {name: 'cc·yours'}`, which the statusline chip listens

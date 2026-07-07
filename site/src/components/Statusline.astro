@@ -159,11 +159,16 @@ const badgeColor = (who: string): string | undefined => {
         </a>
       )
     }
-    <button class="sl__copy" data-sl-copy aria-label="Copy the install command">
-      <span class="sl__copy-icon" aria-hidden="true">⧉</span>
+    <a
+      class="sl__copy"
+      href="#install"
+      data-sl-install-link
+      aria-label="Jump to the install section"
+    >
+      <span class="sl__copy-icon" aria-hidden="true">→</span>
       <span class="sl__copy-icon-flash led-selected" aria-hidden="true">✓</span>
-      <span class="sl__copy-label" aria-hidden="true">brew install</span>
-    </button>
+      <span class="sl__copy-label" aria-hidden="true">install</span>
+    </a>
     <span class="sr-only" role="status" data-sl-copy-status></span>
   </div>
   <span class="sl__keys" aria-hidden="true">keys 1–6</span>
@@ -363,6 +368,7 @@ const badgeColor = (who: string): string | undefined => {
     padding: 0.2rem 0;
     font: inherit;
     color: var(--chip-ink);
+    text-decoration: none;
     cursor: pointer;
   }
   .sl__copy:hover,
@@ -627,74 +633,52 @@ const badgeColor = (who: string): string | undefined => {
       renderAir();
     });
 
-    // ── the install chip (#sl-install): copy → copied ✓ (2s), then the hire
-    // receipt (pix:hired answers a successful copy via OfficeBackdrop). The
-    // receipt QUEUES behind an active flash so 'copied ✓' gets its full
-    // window. Left-segment feed/readouts above are untouched (locked). ──
-    const copyBtn = bar.querySelector('[data-sl-copy]');
+    // ── the install chip (#sl-install): a plain jump link to the Install
+    // section (#install) — it copies nothing itself (Install.astro's own
+    // tabs do that); clicking/activating it smooth-scrolls there (instant
+    // under reduced motion) and parks focus on the section, same as the
+    // elevator's own floor-jump (go(), above). The label still flashes
+    // 'you · hired · just now' when a hire lands from one of those real
+    // copies (pix:hired), then reverts. Left-segment feed/readouts above are
+    // untouched (locked). ──
+    const installLink = bar.querySelector('[data-sl-install-link]');
     const copyLabel = bar.querySelector('.sl__copy-label');
     const copyStatus = bar.querySelector('[data-sl-copy-status]');
-    const CHIP_FLASH_MS = 2000; // §2: 'copied ✓' holds for 2s
-    const CHIP_REST = 'brew install';
+    const CHIP_FLASH_MS = 2000; // §2: the receipt holds for 2s
+    const CHIP_REST = 'install';
     let chipTimer = 0;
-    let chipBusyUntil = 0;
-    function armBusy() {
-      chipBusyUntil = Date.now() + CHIP_FLASH_MS;
-    }
-    // `confirm` also drives the icon-only mobile collapse's glyph swap + chip
-    // pulse (§sl__copy-icon-flash below) — a failed copy stays plain so a
-    // mobile visitor never sees a false ✓.
-    function chipFlash(text, announce, confirm) {
+    function chipFlash(text, announce) {
       if (!copyLabel) return;
       copyLabel.textContent = text;
       if (copyStatus) copyStatus.textContent = announce || '';
-      if (copyBtn) {
-        if (confirm) {
-          // The hire receipt can fire while the copy flash's OWN is-flash is
-          // still on (it queues behind the active flash, above) — a plain
-          // classList.toggle('is-flash', true) is then a no-op (class already
-          // present), so the mobile icon-only pulse (chip-pulse) never
-          // restarts for the second event. Force it: remove, flush the
-          // removal with a layout read, then re-add.
-          copyBtn.classList.remove('is-flash');
-          void copyBtn.offsetWidth;
-          copyBtn.classList.add('is-flash');
-        } else {
-          copyBtn.classList.remove('is-flash');
-        }
+      if (installLink) {
+        // Force the mobile icon-only pulse (chip-pulse, §sl__copy-icon-flash
+        // below) to restart even if a previous flash's class is still on —
+        // classList.toggle('is-flash', true) alone is a no-op when the class
+        // is already present (remove, flush a layout read, then re-add).
+        installLink.classList.remove('is-flash');
+        void installLink.offsetWidth;
+        installLink.classList.add('is-flash');
       }
-      armBusy();
       clearTimeout(chipTimer);
       chipTimer = setTimeout(function () {
         copyLabel.textContent = CHIP_REST;
         if (copyStatus) copyStatus.textContent = '';
-        if (copyBtn) copyBtn.classList.remove('is-flash');
+        if (installLink) installLink.classList.remove('is-flash');
       }, CHIP_FLASH_MS);
     }
-    if (copyBtn) {
-      copyBtn.addEventListener('click', function () {
-        if (!window.__pixInstall) return;
-        // Arm the busy window SYNCHRONOUSLY, before the async copy resolves:
-        // OfficeBackdrop's pix:install-copy → hire → pix:hired cascade fires
-        // synchronously inside the SAME clipboard-write promise continuation
-        // that resolves copy() — i.e. BEFORE the .then() below runs — so the
-        // pix:hired listener would otherwise read a stale chipBusyUntil (0)
-        // and fire the receipt immediately instead of queuing behind it.
-        armBusy();
-        window.__pixInstall.copy('statusline').then(function (ok) {
-          chipFlash(
-            ok ? 'copied ✓' : 'copy failed',
-            ok ? 'Install command copied' : 'Clipboard unavailable',
-            ok
-          );
-        });
+    if (installLink) {
+      installLink.addEventListener('click', function (e) {
+        e.preventDefault();
+        const sec = document.getElementById('install');
+        if (!sec) return;
+        sec.scrollIntoView({ behavior: mq.matches ? 'auto' : 'smooth', block: 'start' });
+        sec.setAttribute('tabindex', '-1');
+        sec.focus({ preventScroll: true });
       });
     }
     document.addEventListener('pix:hired', function () {
-      const wait = Math.max(0, chipBusyUntil - Date.now());
-      setTimeout(function () {
-        chipFlash('you · hired · just now', 'A coworker walked into the office', true);
-      }, wait);
+      chipFlash('you · hired · just now', 'A coworker walked into the office');
     });
 
     // ONE control, ONE stop path: the office pause switch fans out here (the

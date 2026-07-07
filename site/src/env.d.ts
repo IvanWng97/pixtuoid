@@ -49,6 +49,6 @@ interface Window {
    * pix:install-copy {source}); false when the Clipboard API is unavailable. */
   __pixInstall?: {
     CMD: string;
-    copy: (_source: 'statusline' | 'docs' | 'closer' | 'install') => Promise<boolean>;
+    copy: (_source: 'statusline' | 'docs' | 'install') => Promise<boolean>;
   };
 }

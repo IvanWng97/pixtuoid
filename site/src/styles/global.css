@@ -596,62 +596,6 @@ section {
   object-position: center 30%;
 }
 
-/* the closing hold's install line (spec §4): the caption becomes the page's
-   last actionable surface — chip styling matches the hero's terminal chrome */
-.gap-caption--closer {
-  display: grid;
-  gap: 0.55rem;
-}
-.gap-caption--closer .closer-line {
-  margin: 0;
-}
-.closer-install {
-  display: flex;
-  align-items: center;
-  gap: 0.7rem;
-  font-family: var(--font-mono);
-}
-.closer-install code {
-  font-size: 0.85rem;
-  color: var(--chip-bright);
-}
-.closer-install__copy {
-  font-family: var(--font-mono);
-  font-size: 0.78rem;
-  font-weight: 600;
-  padding: 0.3rem 0.55rem;
-  border: 1px solid var(--chip-line);
-  background: transparent;
-  color: var(--chip-bright);
-  cursor: pointer;
-}
-.closer-install__copy:hover {
-  color: var(--coral);
-  border-color: var(--coral);
-}
-.closer-install__copy:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
-}
-@media (pointer: coarse) {
-  .closer-install__copy {
-    min-height: 44px;
-  }
-}
-/* screen-reader-only utility (the closer's role=status announcement lives in
-   page markup styled from here; Install carries a scoped copy) */
-.sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
-}
-
 /* scanline overlay — very faint, only reads as CRT texture up close */
 .terminal__scan {
   position: absolute;

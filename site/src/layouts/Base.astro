@@ -195,11 +195,11 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
         },
       };
       // THE install one-liner + its dispatch helper (Working Building contract):
-      // every control that copies THIS SAME one-liner (hero, statusline, docs,
-      // closer) routes through copy() so the clipboard write and the
-      // pix:install-copy event (→ OfficeBackdrop's hire listener → the statusline
-      // receipt) can never drift apart. Resolves true only after a successful
-      // write; false (no event) when the Clipboard API is unavailable. Exception:
+      // any future control that copies THIS SAME one-liner (docs, …) routes
+      // through copy() so the clipboard write and the pix:install-copy event
+      // (→ OfficeBackdrop's hire listener → the statusline's hire receipt)
+      // can never drift apart. Resolves true only after a successful write;
+      // false (no event) when the Clipboard API is unavailable. Exception:
       // the 1F Install tabs copy a PER-METHOD command (brew/npm/cargo/…), so
       // Install.astro writes the clipboard and dispatches pix:install-copy
       // {source:'install'} directly instead of routing through this helper.

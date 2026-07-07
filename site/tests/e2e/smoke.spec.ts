@@ -320,28 +320,6 @@ test('the install Copy click hires without breaking the page', async ({ page, co
   expect(errors()).toEqual([]);
 });
 
-test('an install copy hires a coworker: pix:install-copy → pix:hired', async ({
-  page,
-  context,
-}) => {
-  await context.grantPermissions(['clipboard-write']);
-  const errors = watchErrors(page);
-  await gotoLive(page); // hire needs the LIVE office (__pixHire exists)
-  await page.evaluate(() => {
-    (window as unknown as { __hired: string[] }).__hired = [];
-    document.addEventListener('pix:hired', (e) =>
-      (window as unknown as { __hired: string[] }).__hired.push(
-        (e as CustomEvent<{ name: string }>).detail.name
-      )
-    );
-  });
-  expect(await page.evaluate(() => window.__pixInstall!.copy('closer'))).toBe(true);
-  await expect
-    .poll(() => page.evaluate(() => (window as unknown as { __hired: string[] }).__hired))
-    .toEqual(['cc·yours']);
-  expect(errors()).toEqual([]);
-});
-
 test('the hire cap stops the receipt at 3 but keeps hiring every time', async ({
   page,
   context,
@@ -352,10 +330,15 @@ test('the hire cap stops the receipt at 3 but keeps hiring every time', async ({
   // halves: the cap VALUE (3, via the receipts) and the keep-attempting
   // BEHAVIOR (the clipboard/copy path must never look broken even once the
   // engine has quietly refused a hire past its cap — the 4th call still runs,
-  // it just returns false).
+  // it just returns false). Drives the REAL Install-section copy control
+  // (wb-2: the statusline chip that used to drive this is now a plain jump
+  // link — Install.astro's own tabs are the surviving install-copy surface).
   await context.grantPermissions(['clipboard-write']);
   const errors = watchErrors(page);
   await gotoLive(page); // hire needs the LIVE office (__pixHire exists)
+  await page.evaluate(() =>
+    document.getElementById('install')!.scrollIntoView({ block: 'center', behavior: 'instant' })
+  );
   await page.evaluate(() => {
     (window as unknown as { __hired: string[] }).__hired = [];
     document.addEventListener('pix:hired', (e) =>
@@ -374,8 +357,18 @@ test('the hire cap stops the receipt at 3 but keeps hiring every time', async ({
       return admitted;
     };
   });
+  const copy = page.locator('.install__panel.is-active .install__copy');
   for (let i = 0; i < 4; i++) {
-    expect(await page.evaluate(() => window.__pixInstall!.copy('statusline'))).toBe(true);
+    await copy.click();
+    // wait for THIS click's hire() result to land before firing the next —
+    // each click's clipboard-write → pix:install-copy → hire() chain is async.
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () => (window as unknown as { __hireResults: boolean[] }).__hireResults.length
+        )
+      )
+      .toBe(i + 1);
   }
   await expect
     .poll(() => page.evaluate(() => (window as unknown as { __hired: string[] }).__hired))
@@ -548,42 +541,69 @@ test('key vocabulary: digits ride globally, typing surfaces stay guarded, t keep
   ).toBe('');
 });
 
-test('statusline install chip: copy flashes ✓, clipboard gets the one-liner, then the hire receipt', async ({
+test('statusline install chip is a link that jumps to Install (href, scroll, keyboard)', async ({
   page,
-  context,
 }) => {
-  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   const errors = watchErrors(page);
-  await gotoLive(page); // live office → the copy also hires → the receipt
-  const label = page.locator('#sl-install .sl__copy-label');
-  await expect(label).toHaveText('brew install');
-  await page.locator('#sl-install [data-sl-copy]').click();
-  await expect(label).toHaveText('copied ✓');
-  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
-    'brew install IvanWng97/pixtuoid/pixtuoid'
+  await gotoLive(page);
+  const link = page.locator('#sl-install [data-sl-install-link]');
+  expect(await link.evaluate((el) => el.tagName)).toBe('A');
+  await expect(link).toHaveAttribute('href', '#install');
+  await expect(link).toHaveAttribute('aria-label', 'Jump to the install section');
+  await expect(page.locator('#sl-install .sl__copy-label')).toHaveText('install');
+  // the ★ star count is unaffected by wb-2 (still the chip's sibling)
+  await expect(page.locator('#sl-install .sl__stars')).toBeVisible();
+
+  await link.click();
+  await expect
+    .poll(() =>
+      page.evaluate(() => document.getElementById('install')!.getBoundingClientRect().top)
+    )
+    .toBeLessThan(50);
+  expect(await page.evaluate(() => document.activeElement && document.activeElement.id)).toBe(
+    'install'
   );
-  // the receipt queues BEHIND the 2s copied-✓ window, then flashes
-  await expect(label).toHaveText('you · hired · just now', { timeout: 6_000 });
-  // …and the chip returns to rest
-  await expect(label).toHaveText('brew install', { timeout: 6_000 });
+
+  // keyboard activation: a real <a> answers Enter without any extra wiring
+  await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
+  await link.focus();
+  await page.keyboard.press('Enter');
+  await expect
+    .poll(() =>
+      page.evaluate(() => document.getElementById('install')!.getBoundingClientRect().top)
+    )
+    .toBeLessThan(50);
   expect(errors()).toEqual([]);
 });
 
-test('statusline install chip: the icon-only mobile collapse still shows the copied/hired flash (review round, #504)', async ({
+test('statusline install chip: reduced motion jumps instantly (no smooth scroll)', async ({
+  browser,
+}) => {
+  const context = await browser.newContext({ reducedMotion: 'reduce' });
+  const page = await context.newPage();
+  const errors = watchErrors(page);
+  await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
+  await page.goto('./');
+  await page.locator('#sl-install [data-sl-install-link]').click();
+  await expect
+    .poll(() =>
+      page.evaluate(() => document.getElementById('install')!.getBoundingClientRect().top)
+    )
+    .toBeLessThan(50);
+  expect(errors()).toEqual([]);
+  await context.close();
+});
+
+test('statusline install chip: the icon-only mobile collapse shows the hire-receipt flash', async ({
   page,
   context,
 }) => {
   // ≤760px hides .sl__copy-label — the desktop test above asserts on TEXT
   // that's invisible here. This pins the glyph swap + chip pulse that stand
-  // in for it (a pixel-diff at this width showed no perceivable change
-  // before this fix — sighted mobile users got zero copy confirmation).
-  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  // in for it. Post-wb-2 the chip no longer copies anything itself (it's a
+  // jump link) — the hire fires from the Install section's OWN copy control.
+  await context.grantPermissions(['clipboard-write']);
   const errors = watchErrors(page);
-  // U5: the copy flash and the hire receipt share .is-flash — a naive
-  // classList.toggle('is-flash', true) is a no-op (and the CSS animation
-  // can't restart) when the receipt fires while the copy flash's OWN class
-  // is still on. Count REAL animationstart events for the chip-pulse
-  // keyframe (not just class presence) to prove it fires twice, not once.
   await page.addInitScript(() => {
     (window as unknown as { __chipPulses: number }).__chipPulses = 0;
     document.addEventListener('animationstart', (e) => {
@@ -592,26 +612,31 @@ test('statusline install chip: the icon-only mobile collapse still shows the cop
       }
     });
   });
-  await gotoLive(page); // live office → the copy also hires → the receipt
+  await gotoLive(page); // live office → the Install copy also hires → the receipt
   await page.setViewportSize({ width: 375, height: 800 });
   const chip = page.locator('#sl-install .sl__copy');
   const flashIcon = page.locator('#sl-install .sl__copy-icon-flash');
   await expect(chip).not.toHaveClass(/is-flash/);
   await expect(flashIcon).toBeHidden();
-  await page.locator('#sl-install [data-sl-copy]').click();
+
+  await page.evaluate(() =>
+    document.getElementById('install')!.scrollIntoView({ block: 'center', behavior: 'instant' })
+  );
+  await page.locator('.install__panel.is-active .install__copy').click();
+
   await expect(chip).toHaveClass(/is-flash/);
   await expect(flashIcon).toBeVisible();
-  // …and once the whole copied → hired-receipt sequence settles, it reverts
-  await expect(page.locator('#sl-install .sl__copy-label')).toHaveText('brew install', {
+  // …and once the hire-receipt sequence settles, it reverts
+  await expect(page.locator('#sl-install .sl__copy-label')).toHaveText('install', {
     timeout: 8_000,
   });
   await expect(chip).not.toHaveClass(/is-flash/);
   await expect(flashIcon).toBeHidden();
-  // TWO starts: the initial copy flash, then the queued hire-receipt flash —
-  // the bug measured exactly 1 (the second toggle was a same-value no-op).
+  // ONE start: only the hire-receipt flash fires now (there's no more
+  // separate copy flash on the chip itself to queue behind).
   expect(
     await page.evaluate(() => (window as unknown as { __chipPulses: number }).__chipPulses)
-  ).toBe(2);
+  ).toBe(1);
   expect(errors()).toEqual([]);
 });
 
@@ -1239,41 +1264,14 @@ test('the scrimmed hero subcopy clears WCAG AA at the worst-case composite (day 
   );
 });
 
-test('the closer hold carries the install line and fires pix:install-copy {source:closer}', async ({
+test('an install copy from the Install section hires a coworker: pix:install-copy → pix:hired', async ({
   page,
   context,
 }) => {
-  await context.grantPermissions(['clipboard-write']);
-  const errors = watchErrors(page);
-  await page.addInitScript(() => {
-    sessionStorage.setItem('pix-booted', '1');
-    (window as { __copySources?: string[] }).__copySources = [];
-    document.addEventListener('pix:install-copy', (e) =>
-      (window as { __copySources?: string[] }).__copySources!.push(
-        (e as CustomEvent<{ source: string }>).detail.source
-      )
-    );
-  });
-  await page.goto('./');
-  await page.evaluate(() =>
-    document
-      .querySelector('.gap-caption--closer')!
-      .scrollIntoView({ block: 'center', behavior: 'instant' })
-  );
-  const chip = page.locator('.gap-caption--closer [data-install-copy]');
-  await expect(chip).toBeVisible();
-  await chip.click();
-  await expect(chip).toHaveText(/copied|select & copy/);
-  await expect
-    .poll(() => page.evaluate(() => (window as { __copySources?: string[] }).__copySources))
-    .toContain('closer');
-  expect(errors()).toEqual([]);
-});
-
-test('an install copy hires a coworker via the statusline chip: pix:install-copy → pix:hired', async ({
-  page,
-  context,
-}) => {
+  // wb-2: the closer's own copy row is gone (redundant right after Install)
+  // and the statusline chip is now a plain jump link — Install.astro's tabs
+  // are the surviving install-copy surface, so the hire chain is driven from
+  // there.
   await context.grantPermissions(['clipboard-write']);
   const errors = watchErrors(page);
   await page.addInitScript(() => {
@@ -1287,8 +1285,11 @@ test('an install copy hires a coworker via the statusline chip: pix:install-copy
   await page.goto('./');
   // hire() is a no-op before the first live frame — wait for the office.
   await expect(page.locator('.backdrop.is-live')).toBeAttached({ timeout: 15_000 });
-  await page.locator('#sl-install [data-sl-copy]').click();
-  // wb-1's bridge: pix:install-copy → Office.hire() → pix:hired {name}.
+  await page.evaluate(() =>
+    document.getElementById('install')!.scrollIntoView({ block: 'center', behavior: 'instant' })
+  );
+  await page.locator('.install__panel.is-active .install__copy').click();
+  // pix:install-copy → Office.hire() → pix:hired {name}.
   await expect
     .poll(() => page.evaluate(() => (window as { __hired?: boolean }).__hired), {
       timeout: 10_000,
