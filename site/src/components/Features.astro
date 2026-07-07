@@ -79,6 +79,14 @@ const cells = features.flatMap((f) =>
 </section>
 
 <style>
+  /* Bare over the live office (no plate) — matches the SupportedTools compat-
+     table look. The shared .lead's --fg-muted measured short of WCAG AA here
+     (day worst-case 3.79:1, centered at the section's own 0.86 dimmer cap);
+     --office-ink clears it (day/night both ≥6.8:1) without a plate. Scoped to
+     this section only — every OTHER section's .lead stays --fg-muted. */
+  #features .section-head .lead {
+    color: var(--office-ink);
+  }
   /* the ledger is ONE bordered .text-scrim plate (not 7 separate per-row
      cards — tried both; individual boxes read heavy/repetitive, one sheet
      with hairline row dividers reads as a single ledger, matching the name),

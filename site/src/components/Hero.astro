@@ -20,7 +20,7 @@ const floor = floorById('lobby');
         Your agents<br />
         <span class="hl">work here</span><span class="cursor" aria-hidden="true"></span>
       </h1>
-      <p class="statement-sub lead text-scrim">
+      <p class="statement-sub lead">
         Every Claude Code, Codex, or Cursor session walks in, sits down, and gets to work — in a
         pixel office that lives in your terminal.
       </p>
@@ -93,7 +93,10 @@ const floor = floorById('lobby');
     font-family: var(--font-mono);
     font-size: 0.82rem;
     letter-spacing: 0.04em;
-    color: var(--fg-muted);
+    /* bare over the live office (no plate) — --fg-muted measured short of
+       WCAG AA at the office's real brightness extremes; see --office-ink's
+       doc comment in global.css. */
+    color: var(--office-ink);
   }
   /* one orchestrated page-load entrance, staggered */
   @keyframes rise {
@@ -111,12 +114,22 @@ const floor = floorById('lobby');
   }
   .hero__copy .eyebrow {
     animation-delay: 0.05s;
+    /* bare over the live office (no plate) — the shared .eyebrow color
+       (--coral-deep/--coral) measured short of WCAG AA at the office's real
+       brightness extremes; --office-ink-accent keeps the coral accent (unlike
+       --office-ink) while clearing it. See global.css's doc comment. */
+    color: var(--office-ink-accent);
   }
   .hero__copy h1 {
     animation-delay: 0.14s;
   }
   .hero__copy .lead {
     animation-delay: 0.26s;
+    /* bare over the live office (no plate) — see --office-ink's doc comment
+       in global.css; this OVERRIDES the shared .lead's --fg-muted, scoped to
+       the hero only (every other section's .lead sits over the deeper
+       shared 0.86 dimmer cap, not this hero's 0.74, and stays --fg-muted). */
+    color: var(--office-ink);
   }
   .hero__copy .hero__cta {
     animation-delay: 0.38s;

@@ -42,12 +42,6 @@ function parseRgb(css: string): [number, number, number, number] {
   const [r, g, b, a] = m[1].split(',').map((s) => parseFloat(s));
   return [r, g, b, a ?? 1];
 }
-function parseHex(hex: string): [number, number, number] {
-  const m = hex.trim().match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
-  if (!m) throw new Error(`unparseable hex color: ${hex}`);
-  return [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)];
-}
-
 /**
  * Fail the calling test if the page logs an uncaught error or console.error.
  * Attached once per DISTINCT code path (index live boot, copy/hire, docs
@@ -1227,80 +1221,144 @@ test('docs-table code cells render single-line (column-collapse guard)', async (
 
 test('text over the live office carries its own scrim (.text-scrim)', async ({ page }) => {
   await gotoLive(page);
-  // §5: legibility must not depend on the center-anchored scroll dimmer — the
-  // hero subcopy and the feature ledger carry a local scrim. The ledger is
-  // ONE wrapping plate (not a per-row scrim — wb-2 redesign), so the scrim
-  // lives on `.ledger` itself, with every row inside it.
-  const bg = await page.evaluate(
+  // wb-2 C9: the hero copy (eyebrow/subcopy/CTA/platform-line) and the 4F
+  // intro paragraph are now BARE, tools-table style — legibility comes from
+  // --office-ink/--office-ink-accent tokens tuned against the real office
+  // composite, not a plate (see the WCAG test below + global.css's doc
+  // comment). Only the feature ledger and the install note still carry an
+  // actual scrim/plate.
+  const heroBg = await page.evaluate(
     () => getComputedStyle(document.querySelector('.hero .statement-sub')!).backgroundColor
   );
-  expect(bg).not.toBe('rgba(0, 0, 0, 0)');
+  expect(heroBg).toBe('rgba(0, 0, 0, 0)');
+  const ghostBg = await page.evaluate(
+    () => getComputedStyle(document.querySelector('.hero__ghost')!).backgroundColor
+  );
+  expect(ghostBg).toBe('rgba(0, 0, 0, 0)');
+  const featuresLeadBg = await page.evaluate(
+    () => getComputedStyle(document.querySelector('#features .section-head .lead')!).backgroundColor
+  );
+  expect(featuresLeadBg).toBe('rgba(0, 0, 0, 0)');
+
   expect(await page.locator('#features .ledger.text-scrim').count()).toBe(1);
   expect(await page.locator('#features .ledger.text-scrim .ledger__row').count()).toBeGreaterThan(
     0
   );
   // The install note ("Also on crates.io...") floated unplated over the
   // skyline — give it the same crisp plate (it's NOT hero, so the install
-  // card idiom applies, unlike the hero/4F bare treatment elsewhere).
+  // card idiom applies, unlike the hero/4F bare treatment above).
   expect(await page.locator('.install__note.text-scrim').count()).toBe(1);
 });
 
-test('the scrimmed hero subcopy clears WCAG AA at the worst-case composite (day theme)', async ({
+test('bare hero + 4F text clears WCAG AA at the real office composite (day + night)', async ({
   page,
 }) => {
-  // Review finding (task 2): the binding constraint is WCAG AA (4.5:1) for
-  // EVERY token, but the shipped test above only checked a scrim EXISTS, not
-  // that it's dark/opaque enough. The worst case is day theme, since it's the
-  // theme whose --fg-muted/--scrim pairing has the least headroom: the hero
-  // subcopy (--fg-muted) inside .text-scrim, with the dimmer capped at the
-  // hero's own data-lit-max (below its usual ceiling — see [data-lit-max] in
-  // OfficeBackdrop.astro) instead of fully dark, painted over --screen (the
-  // darkest pixel the office ever renders). Reads REAL computed styles (not
-  // hardcoded token values) so a future --scrim/--fg-muted regression fails
-  // this test rather than only a visual read.
-  await page.addInitScript(() => {
-    sessionStorage.setItem('pix-booted', '1');
-    localStorage.setItem('pix-theme', 'day');
-  });
-  await page.goto('./');
-  await expect(page.locator('html')).toHaveAttribute('data-theme', 'day');
+  // wb-2 C6/C9: the hero eyebrow/subcopy/platform-line and the 4F intro
+  // paragraph read directly over the live office (no plate — the
+  // SupportedTools-table look). Legibility now depends entirely on the ink
+  // token clearing contrast against whatever the office ACTUALLY renders
+  // behind it, so this samples the REAL canvas pixels (not a --screen proxy
+  // — with no opaque plate the underlying office pixel is no longer
+  // "immaterial") across the sampled element's bounding box, finds the
+  // brightest AND darkest pixel in it (day's dimmer LIGHTENS the composite
+  // toward --paper, night's DARKENS it toward --bg — opposite directions, so
+  // the true worst case can be either extreme depending on theme), composites
+  // each with the live dimmer, and checks both against the element's real
+  // computed ink color.
+  async function worstCaseRatio(selector: string): Promise<{ ratio: number; theme: string }> {
+    const theme = await page.evaluate(() => document.documentElement.dataset.theme || 'day');
+    const measured = await page.evaluate((sel) => {
+      const canvas = document.getElementById('office-live') as HTMLCanvasElement;
+      const el = document.querySelector(sel)!;
+      const r = el.getBoundingClientRect();
+      const cr = canvas.getBoundingClientRect();
+      const sx = canvas.width / cr.width;
+      const sy = canvas.height / cr.height;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+      const x0 = Math.max(0, Math.floor((r.left - cr.left) * sx));
+      const y0 = Math.max(0, Math.floor((r.top - cr.top) * sy));
+      const w = Math.max(1, Math.ceil(r.width * sx));
+      const h = Math.max(1, Math.ceil(r.height * sy));
+      const data = ctx.getImageData(
+        x0,
+        y0,
+        Math.min(w, canvas.width - x0),
+        Math.min(h, canvas.height - y0)
+      ).data;
+      let maxLum = -1,
+        maxPx = [0, 0, 0];
+      let minLum = 2,
+        minPx = [0, 0, 0];
+      const relLum = ([rr, gg, bb]: number[]) => {
+        const lin = (c: number) => {
+          const s = c / 255;
+          return s <= 0.04045 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+        };
+        return 0.2126 * lin(rr) + 0.7152 * lin(gg) + 0.0722 * lin(bb);
+      };
+      for (let i = 0; i < data.length; i += 4) {
+        const px = [data[i], data[i + 1], data[i + 2]];
+        const lum = relLum(px);
+        if (lum > maxLum) {
+          maxLum = lum;
+          maxPx = px;
+        }
+        if (lum < minLum) {
+          minLum = lum;
+          minPx = px;
+        }
+      }
+      return {
+        maxPx,
+        minPx,
+        dimmerBg: getComputedStyle(document.getElementById('dimmer')!).backgroundColor,
+        dimmerOpacity: parseFloat(
+          (document.getElementById('dimmer') as HTMLElement).style.opacity || '0'
+        ),
+        textColor: getComputedStyle(el).color,
+      };
+    }, selector);
 
-  const measured = await page.evaluate(() => {
-    const sub = document.querySelector('.hero .statement-sub')!;
-    const litBlock = document.querySelector('.hero__copy') as HTMLElement;
-    return {
-      textColor: getComputedStyle(sub).color,
-      scrimBg: getComputedStyle(sub).backgroundColor,
-      dimmerBg: getComputedStyle(document.getElementById('dimmer')!).backgroundColor,
-      dataLitMax: parseFloat(litBlock.dataset.litMax!),
-      screenToken: getComputedStyle(document.documentElement).getPropertyValue('--screen'),
-    };
-  });
+    const dim = parseRgb(measured.dimmerBg).slice(0, 3) as [number, number, number];
+    const textRgb = parseRgb(measured.textColor).slice(0, 3) as [number, number, number];
+    const afterMax = compositeOver(
+      [...dim, measured.dimmerOpacity] as [number, number, number, number],
+      measured.maxPx as [number, number, number]
+    );
+    const afterMin = compositeOver(
+      [...dim, measured.dimmerOpacity] as [number, number, number, number],
+      measured.minPx as [number, number, number]
+    );
+    const ratio = Math.min(contrastRatio(textRgb, afterMax), contrastRatio(textRgb, afterMin));
+    return { ratio, theme };
+  }
 
-  // --screen is a PROXY for the darkest pixel the live office canvas actually
-  // renders (a real frame sample isn't practical here) — reviewer-verified
-  // immaterial: at the hero's 90% dimmer alpha, the ratio shift from any
-  // plausible canvas-vs-token delta is <0.005, against a 0.26 margin above
-  // the 4.5:1 floor.
-  const officeWorstPixel = parseHex(measured.screenToken);
-  const afterDimmer = compositeOver(
-    [...parseRgb(measured.dimmerBg).slice(0, 3), measured.dataLitMax] as [
-      number,
-      number,
-      number,
-      number,
-    ],
-    officeWorstPixel
-  );
-  const afterScrim = compositeOver(parseRgb(measured.scrimBg), afterDimmer);
-  const ratio = contrastRatio(
-    parseRgb(measured.textColor).slice(0, 3) as [number, number, number],
-    afterScrim
-  );
+  for (const theme of ['day', 'night'] as const) {
+    await page.addInitScript((t) => {
+      sessionStorage.setItem('pix-booted', '1');
+      localStorage.setItem('pix-theme', t);
+    }, theme);
+    await page.goto('./');
+    await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
 
-  expect(ratio, `WCAG AA floor is 4.5:1; measured ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(
-    4.5
-  );
+    for (const selector of ['.hero .eyebrow', '.hero .statement-sub', '.hero__avail']) {
+      const { ratio } = await worstCaseRatio(selector);
+      expect(
+        ratio,
+        `${theme} ${selector}: WCAG AA floor is 4.5:1; measured ${ratio.toFixed(2)}:1`
+      ).toBeGreaterThanOrEqual(4.5);
+    }
+
+    await page.evaluate(() =>
+      document.getElementById('features')!.scrollIntoView({ block: 'center', behavior: 'instant' })
+    );
+    await page.waitForTimeout(700);
+    const { ratio: leadRatio } = await worstCaseRatio('#features .section-head .lead');
+    expect(
+      leadRatio,
+      `${theme} #features .lead: WCAG AA floor is 4.5:1; measured ${leadRatio.toFixed(2)}:1`
+    ).toBeGreaterThanOrEqual(4.5);
+  }
 });
 
 test('the statusline feed ellipsizes on the wrapping text span, not the flex row', async ({

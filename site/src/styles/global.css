@@ -88,6 +88,24 @@
   --chip-line: #3a332a;
   --chip-bg: color-mix(in srgb, var(--screen) 82%, transparent);
   --chrome-halo: none;
+
+  /* Bare-over-office ink (no plate/scrim behind it) — the hero subcopy/eyebrow/
+     platform-line and the 4F intro paragraph read directly against the live
+     office at its RESTING dim level (the hero caps at 0.74, other sections at
+     the shared 0.86 DIM_MAX). Real-canvas-sampled worst case: the office's
+     rendered luminance spans a bright sprite (~236,236,236 — a monitor/window
+     highlight) to a dark floor pixel (~26-29), and DAY's dimmer LIGHTENS that
+     range (its --bg is the light --paper) while NIGHT's DARKENS it (--bg is
+     dark) — opposite directions, so day needs a dark ink and night a light
+     one; --fg-muted/--coral-deep weren't dark/light enough at either extreme
+     (measured worst-case ~2.8-3.7:1, short of the 4.5:1 floor). --office-ink
+     is that nudge for plain body/muted text (measured worst-case ≥5.1:1 in
+     both themes, both widths sampled); --office-ink-accent is the same nudge
+     for the coral-branded eyebrow, which can't reuse --office-ink without
+     losing the coral accent every other section's eyebrow carries (measured
+     worst-case ≥5.2:1 day, ≥5.1:1 night). */
+  --office-ink: #453e34;
+  --office-ink-accent: #6b2a10;
 }
 
 :root[data-theme='night'] {
@@ -111,6 +129,13 @@
   --shadow-lg: 0 2px 6px rgba(0, 0, 0, 0.4), 0 24px 60px rgba(0, 0, 0, 0.6);
   --glow: color-mix(in srgb, var(--coral) 24%, transparent);
   --chrome-halo: 0 1px 8px rgba(0, 0, 0, 0.45);
+  /* night's dark --bg darkens the office composite (opposite of day) — reuse
+     the already-light, theme-independent --chip-ink rather than a second
+     literal; --office-ink-accent stays its own (lighter) coral so the
+     eyebrow keeps its brand hue instead of drifting toward --chip-ink's
+     neutral warm gray. */
+  --office-ink: var(--chip-ink);
+  --office-ink-accent: #f5c9a0;
 }
 
 /* color-mix() landed in Safari 16.2 (Dec 2022). On an older engine an invalid
@@ -753,6 +778,12 @@ code,
   --shadow-lg: 0 2px 6px rgba(0, 0, 0, 0.4), 0 24px 60px rgba(0, 0, 0, 0.6);
   --glow: color-mix(in srgb, var(--coral) 26%, transparent);
   --chrome-halo: 0 1px 8px rgba(0, 0, 0, 0.45);
+  /* dracula's --bg is dark too (same darkening direction as night) — not
+     independently contrast-measured (outside the matrix sweep's scope), but
+     the SAME reasoning applies: reuse --chip-ink, and keep the eyebrow on its
+     own existing --coral-deep rather than day's dark accent. */
+  --office-ink: var(--chip-ink);
+  --office-ink-accent: var(--coral-deep);
 }
 
 /* ---------- boot intro overlay ---------- */
