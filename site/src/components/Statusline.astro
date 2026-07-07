@@ -131,9 +131,10 @@ const badgeColor = (who: string): string | undefined => {
       items.map((it, i) => (
         <span class:list={['sl__item', { 'is-on': i === 0 }]}>
           <span class:list={['sl__dot', it.state]} />
-          <b style={badgeColor(it.who) ? `--who:${badgeColor(it.who)}` : undefined}>
-            {it.who}
-          </b> · {it.what}
+          <span class="sl__text">
+            <b style={badgeColor(it.who) ? `--who:${badgeColor(it.who)}` : undefined}>{it.who}</b> ·{' '}
+            {it.what}
+          </span>
         </span>
       ))
     }
@@ -302,15 +303,24 @@ const badgeColor = (who: string): string | undefined => {
     display: inline-flex;
     align-items: center;
     gap: 0.5rem;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
     opacity: 0;
     /* must finish inside the rotation's 350ms out→in gap */
     transition: opacity 0.3s ease;
   }
   .sl__item.is-on {
     opacity: 1;
+  }
+  /* the clippable run of text: a flex container's own overflow/text-overflow
+     never applies to ITS children (the `<b>` and the raw " · {what}" text run
+     are separate anonymous flex items, each un-clippable on its own) — so the
+     ellipsis has to live on this one block-level span instead of on
+     .sl__item itself. min-width:0 lets it shrink below its content's width,
+     the flex default is auto (content-sized, never shrinks). */
+  .sl__text {
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
   }
   .sl__item b {
     color: var(--who, var(--chip-bright));
@@ -402,6 +412,18 @@ const badgeColor = (who: string): string | undefined => {
   .sl__keys {
     flex: none;
     color: var(--chip-dim);
+  }
+  /* The feed alone gets a WIDER hide-breakpoint than .sl__env/.sl__stars/etc
+     below: once its available width drops under ~200px (roughly 768-860px,
+     measured against .sl__text's clientWidth), even a clean single-line
+     ellipsis leaves a fragment too short to read ("cc·pixtuoid · mer…") —
+     hiding it reads better than a barely-there sliver. Decorative
+     (aria-hidden), so losing it here costs nothing accessibility-wise; its
+     CONTENT stays untouched, only where it disappears moves. */
+  @media (max-width: 860px) {
+    .sl__feed {
+      display: none;
+    }
   }
   @media (max-width: 760px) {
     .sl__feed,
