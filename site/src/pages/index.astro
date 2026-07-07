@@ -84,13 +84,11 @@ const softwareJsonLd = {
     <SupportedTools />
     <Install />
     {
-      /* observation gap 3 — the closing hold: the office at golden hour (the
-        backdrop's render-clock ratchet keys on data-office-hour) + the page's
-        LAST install line. The caption is NOT aria-hidden anymore: it carries
-        a real control now (spec §4 — the emotional peak is no longer a dead
-        end). */
+      /* observation gap 3 — the closing hold: the page's LAST install line.
+        The caption is NOT aria-hidden anymore: it carries a real control now
+        (spec §4 — the emotional peak is no longer a dead end). */
     }
-    <div class="office-gap" data-office-hour>
+    <div class="office-gap">
       <div class="gap-caption gap-caption--closer">
         <p class="closer-line">— your office is waiting.</p>
         <div class="closer-install" data-install-row>
@@ -112,6 +110,58 @@ const softwareJsonLd = {
       if (el) el.textContent = night ? 'night' : 'day';
       const img = document.querySelector('[data-gap-still]');
       if (img) img.src = night ? img.dataset.night : img.dataset.day;
+    })();
+  </script>
+  <script is:inline>
+    // The closer's copy chip: routes through window.__pixInstall.copy(source) —
+    // THE one-liner's single clipboard-write + pix:install-copy dispatch
+    // (Base.astro head boot; also ridden by the statusline chip) — so this
+    // chip can't grow a second copy of that logic. copy() only dispatches on
+    // a successful write; the manual-select fallback below (no/blocked
+    // Clipboard API) fires the event itself, since the visitor's install
+    // intent is the same either way.
+    (function () {
+      const btn = document.querySelector('.closer-install [data-install-copy]');
+      if (!btn) return;
+      const row = btn.closest('[data-install-row]');
+      const status = row && row.querySelector('[data-copy-status]');
+      const source = btn.dataset.source;
+      // constant resting label — capturing textContent after a click would
+      // capture the flash and stick (the Install.astro-documented trap)
+      const LABEL = '[ copy ]';
+      function flash(label, announce) {
+        btn.textContent = label;
+        if (status) status.textContent = announce;
+        clearTimeout(btn.__pixRestore);
+        btn.__pixRestore = setTimeout(function () {
+          btn.textContent = LABEL;
+          if (status) status.textContent = '';
+        }, 1600);
+      }
+      function manual() {
+        // select JUST the command span, not the whole <code> — the '$ ' prompt
+        // prefix lives outside it, so a paste of the selection can't include it.
+        const cmd = row && row.querySelector('[data-cmd]');
+        const sel = window.getSelection && window.getSelection();
+        if (cmd && sel) {
+          const range = document.createRange();
+          range.selectNodeContents(cmd);
+          sel.removeAllRanges();
+          sel.addRange(range);
+        }
+        flash('[ select & copy ]', 'Press Ctrl+C to copy the selected command');
+        document.dispatchEvent(new CustomEvent('pix:install-copy', { detail: { source: source } }));
+      }
+      btn.addEventListener('click', function () {
+        if (!window.__pixInstall) {
+          manual();
+          return;
+        }
+        window.__pixInstall.copy(source).then(function (ok) {
+          if (ok) flash('[ copied ✓ ]', 'Copied to clipboard');
+          else manual();
+        });
+      });
     })();
   </script>
   <Footer />

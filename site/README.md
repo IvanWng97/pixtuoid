@@ -138,7 +138,7 @@ gates can't see. CI runs it in `site.yml` after the build step.
     engine directly: `window.__pixInstall` (parse-first, in `Base.astro`'s
     head — THE install one-liner + copy dispatcher) writes the clipboard then
     fires `pix:install-copy {source}` (any Copy control names its own
-    `source` — hero row, statusline chip, docs strip, the 1F tabs);
+    `source` — statusline chip, docs strip, the closer, the 1F tabs);
     `OfficeBackdrop`'s listener walks a coworker into the live office
     (engine-capped at `VisitorHires::MAX_LIVE`, 3 concurrent) and answers
     with `pix:hired {name: 'cc·yours'}`, which the statusline chip listens
