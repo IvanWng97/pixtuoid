@@ -537,11 +537,74 @@ import { asset, DIM_RESTING } from '../consts';
     const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
     const DIM_MAX = 0.86;
 
-    let blocks = []; // cached page-space rects; re-measured on resize only
+    let blocks = []; // cached page-space rects; re-measured on resize/body-reflow
     let lastY = -1;
     let lastOp = -1;
     let raf = 0;
     let active = null; // the currently-faded [data-lit] block
+
+    // smoothstep — darkness eases in/out with approach, no linear pop
+    function ease(t) {
+      return t * t * (3 - 2 * t);
+    }
+
+    // The shared compute-and-apply step, driven by EITHER the per-frame scroll
+    // check (frame(), below) or a fresh measure() (re-measure paths, further
+    // down). A content reflow ABOVE the viewport (e.g. a Showcase channel
+    // swap) shrinks/grows the page and the browser's own scroll anchoring
+    // adjusts window.scrollY IMMEDIATELY, in the SAME task — before this
+    // controller's re-measure ever runs. If that re-measure were merely
+    // deferred (invalidate blocks, let the NEXT frame() tick recompute), the
+    // rAF that already ran THIS frame paints one wrong frame first (a real,
+    // reproducible glitch: scroll-anchor-adjusted y against stale pre-reflow
+    // blocks briefly select the wrong [data-lit] block). Re-measure calling
+    // this SAME function synchronously means the corrected write lands in the
+    // same task, before paint — the wrong value is never on screen.
+    function recompute(y) {
+      lastY = y;
+      const center = y + window.innerHeight / 2;
+      const reach = window.innerHeight * 0.55; // how far a block throws shade
+      let best = 0;
+      let bestEl = null;
+      for (let i = 0; i < blocks.length; i++) {
+        const b = blocks[i];
+        const d = center < b.top ? b.top - center : center > b.bottom ? center - b.bottom : 0;
+        const p = d >= reach ? 0 : 1 - d / reach;
+        if (p > best) {
+          best = p;
+          bestEl = b.el;
+        }
+      }
+      // A block may cap its own darkness below DIM_MAX via data-lit-max: the
+      // hero holds a lower ceiling so the LIVE office (the product's one true
+      // trick) actually reads above the fold, while the downpage statement
+      // holds keep DIM_MAX for copy legibility. The [data-lit]::before radial
+      // wash still floors local contrast on the capped block.
+      const cap = bestEl && bestEl.dataset.litMax ? parseFloat(bestEl.dataset.litMax) : DIM_MAX;
+      const op = cap * ease(best);
+      if (Math.abs(op - lastOp) > 0.002) {
+        lastOp = op;
+        dimmer.style.opacity = op.toFixed(3);
+        // Polled global, deliberately NOT an event (contrast pix:onair): a
+        // continuous per-frame value is read at the consumer's own cadence
+        // (the statusline polls); a discrete flip gets an event + class seed.
+        window.__pixLights = op;
+      }
+      // The lit block itself rises with the darkness (opt-in via
+      // data-lit="fade"); only the active block + the one it replaces are
+      // ever written.
+      if (bestEl !== active) {
+        if (active && active.getAttribute('data-lit') === 'fade') {
+          active.style.opacity = '0.001';
+        }
+        active = bestEl;
+      }
+      if (active && active.getAttribute('data-lit') === 'fade') {
+        const t = ease(best);
+        active.style.opacity = (0.15 + 0.85 * t).toFixed(3);
+        active.style.transform = 'translateY(' + Math.round(24 * (1 - t)) + 'px)';
+      }
+    }
 
     function measure() {
       const y = window.scrollY;
@@ -549,62 +612,13 @@ import { asset, DIM_RESTING } from '../consts';
         const r = el.getBoundingClientRect();
         return { el, top: r.top + y, bottom: r.bottom + y };
       });
-      lastY = -1; // force a recompute on the next frame
-    }
-
-    // smoothstep — darkness eases in/out with approach, no linear pop
-    function ease(t) {
-      return t * t * (3 - 2 * t);
+      recompute(y); // same task, before paint — see recompute()'s comment
     }
 
     function frame() {
       raf = 0;
       const y = window.scrollY;
-      if (y !== lastY) {
-        lastY = y;
-        const center = y + window.innerHeight / 2;
-        const reach = window.innerHeight * 0.55; // how far a block throws shade
-        let best = 0;
-        let bestEl = null;
-        for (let i = 0; i < blocks.length; i++) {
-          const b = blocks[i];
-          const d = center < b.top ? b.top - center : center > b.bottom ? center - b.bottom : 0;
-          const p = d >= reach ? 0 : 1 - d / reach;
-          if (p > best) {
-            best = p;
-            bestEl = b.el;
-          }
-        }
-        // A block may cap its own darkness below DIM_MAX via data-lit-max: the
-        // hero holds a lower ceiling so the LIVE office (the product's one true
-        // trick) actually reads above the fold, while the downpage statement
-        // holds keep DIM_MAX for copy legibility. The [data-lit]::before radial
-        // wash still floors local contrast on the capped block.
-        const cap = bestEl && bestEl.dataset.litMax ? parseFloat(bestEl.dataset.litMax) : DIM_MAX;
-        const op = cap * ease(best);
-        if (Math.abs(op - lastOp) > 0.002) {
-          lastOp = op;
-          dimmer.style.opacity = op.toFixed(3);
-          // Polled global, deliberately NOT an event (contrast pix:onair): a
-          // continuous per-frame value is read at the consumer's own cadence
-          // (the statusline polls); a discrete flip gets an event + class seed.
-          window.__pixLights = op;
-        }
-        // The lit block itself rises with the darkness (opt-in via
-        // data-lit="fade"); only the active block + the one it replaces are
-        // ever written.
-        if (bestEl !== active) {
-          if (active && active.getAttribute('data-lit') === 'fade') {
-            active.style.opacity = '0.001';
-          }
-          active = bestEl;
-        }
-        if (active && active.getAttribute('data-lit') === 'fade') {
-          const t = ease(best);
-          active.style.opacity = (0.15 + 0.85 * t).toFixed(3);
-          active.style.transform = 'translateY(' + Math.round(24 * (1 - t)) + 'px)';
-        }
-      }
+      if (y !== lastY) recompute(y);
       raf = requestAnimationFrame(frame);
     }
 
@@ -625,16 +639,14 @@ import { asset, DIM_RESTING } from '../consts';
     // content below (boot reveal, lazy media) can shift rects after load
     window.addEventListener('load', measure);
     // A Showcase channel tune swaps stages of different heights, shifting the
-    // page-space top/bottom of the blocks below it (#install) — resize/load alone
-    // miss that. Re-measure (coalesced through rraf) on any body reflow.
+    // page-space top/bottom of the blocks below it (#install) — resize/load
+    // alone miss that. Call measure() DIRECTLY here (no rAF deferral, unlike
+    // the plain resize listener above): ResizeObserver notifications land in
+    // the SAME task as the reflow that triggered them, and measure() now
+    // recomputes synchronously (see recompute()'s comment) — deferring this
+    // one frame is exactly what let the stale-block glitch reach the screen.
     if ('ResizeObserver' in window) {
-      new ResizeObserver(function () {
-        if (rraf) return;
-        rraf = requestAnimationFrame(function () {
-          rraf = 0;
-          measure();
-        });
-      }).observe(document.body);
+      new ResizeObserver(measure).observe(document.body);
     }
 
     function wire() {

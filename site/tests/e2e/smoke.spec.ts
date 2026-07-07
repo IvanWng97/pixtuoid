@@ -172,6 +172,94 @@ test('the dimmer darkens statements and releases in office gaps', async ({ page 
   await expect.poll(heroOp).toBeGreaterThan(0.5);
 });
 
+// Regression pin for a real (if brief) dimmer glitch found while investigating
+// a reported "dimmer jumps/strobes near the floating-window gap" bug: a
+// Showcase channel swap changes content height ABOVE the viewport (every live
+// channel renders a different height — measured ~8224px to ~8306px across the
+// 7 channels), and the browser's OWN scroll anchoring adjusts window.scrollY
+// to compensate *in the same task* as the swap — before OfficeBackdrop's
+// ResizeObserver-triggered re-measure ever runs. The gap-2 image itself turned
+// out NOT to be the cause (its box is pinned by `aspect-ratio: 16/10`
+// regardless of load state — see the sibling test below); the real mechanism
+// is this content-reflow-above-the-viewport race, and gap-2 sits directly
+// downstream of Showcase so it's exactly where a visitor would see it.
+// OfficeBackdrop.astro's recompute() now runs synchronously from the
+// ResizeObserver callback (no extra rAF hop) so the corrected opacity lands
+// in the same task as the reflow, before paint.
+test('the dimmer tracks live geometry across a Showcase channel swap', async ({ page }) => {
+  await gotoLive(page);
+  // Straddle the gap-2 observation hold (between Features and HowItWorks) —
+  // the reported bug's location.
+  await page.evaluate(() => window.scrollTo({ top: 3763, behavior: 'instant' }));
+
+  // Ground truth: replicate the dimmer's own ease()/cap/best-block formula
+  // against LIVE getBoundingClientRect() rects and the LIVE (possibly
+  // scroll-anchor-adjusted) scrollY — independent of whatever the controller
+  // has cached.
+  const liveTruth = () =>
+    page.evaluate(() => {
+      const y = window.scrollY;
+      const innerH = window.innerHeight;
+      const center = y + innerH / 2;
+      const reach = innerH * 0.55;
+      let best = 0;
+      let bestCap = 0.86;
+      document.querySelectorAll<HTMLElement>('[data-lit]').forEach((el) => {
+        const r = el.getBoundingClientRect();
+        const top = r.top + y;
+        const bottom = r.bottom + y;
+        const d = center < top ? top - center : center > bottom ? center - bottom : 0;
+        const p = d >= reach ? 0 : 1 - d / reach;
+        if (p > best) {
+          best = p;
+          bestCap = el.dataset.litMax ? parseFloat(el.dataset.litMax) : 0.86;
+        }
+      });
+      const ease = (t: number) => t * t * (3 - 2 * t);
+      return bestCap * ease(best);
+    });
+  const pageOp = () =>
+    page.evaluate(() => parseFloat(document.getElementById('dimmer')!.style.opacity || '0'));
+
+  // Cycle through every live channel (each a genuine reflow above the
+  // viewport) and confirm the dimmer converges to the live ground truth —
+  // not a value cached from before the swap.
+  const channels = ['agents', 'openclaw', 'dashboard', 'meetings', 'pets', 'spaces', 'vibing'];
+  for (const ch of channels) {
+    await page.evaluate(
+      (id) => (document.querySelector(`.dial__ch[data-ch="${id}"]`) as HTMLElement | null)?.click(),
+      ch
+    );
+    await expect
+      .poll(async () => Math.abs((await pageOp()) - (await liveTruth())), {
+        message: `dimmer opacity vs live ground truth after switching to "${ch}"`,
+      })
+      .toBeLessThan(0.01);
+  }
+});
+
+// The gap-2 floating-window still was the ORIGINAL suspect for the dimmer
+// glitch above (a lazy image with no width/height reserving no space). It
+// isn't: `.gap-frame__body`'s CSS `aspect-ratio: 16/10` pins the box before
+// the PNG ever arrives. Pin that explicitly so it can't regress silently (the
+// width/height attributes on the <img> are still worth keeping as defense in
+// depth — see index.astro).
+test('the gap-2 still reserves its box before and after the image loads', async ({ page }) => {
+  await gotoLive(page);
+  const frameHeight = () =>
+    page.evaluate(() => document.querySelector('.gap-frame__body')!.getBoundingClientRect().height);
+  const before = await frameHeight();
+  await page.evaluate(() =>
+    document.querySelector('.gap-frame')!.scrollIntoView({ block: 'center', behavior: 'instant' })
+  );
+  await page.waitForFunction(() => {
+    const img = document.querySelector<HTMLImageElement>('[data-gap-still]');
+    return !!img && img.complete && img.naturalWidth > 0;
+  });
+  const after = await frameHeight();
+  expect(Math.abs(after - before)).toBeLessThan(0.5);
+});
+
 test('the hero pause switch freezes the office and resumes it seamlessly', async ({ page }) => {
   // WCAG 2.2.2: the auto-playing office backdrop can be paused. Pause must
   // STOP the rAF loop dead (a frozen canvas, byte-identical snapshots — not
