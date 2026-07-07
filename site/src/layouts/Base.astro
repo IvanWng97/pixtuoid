@@ -517,16 +517,18 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
           }
         });
         const lines = boot.querySelectorAll('.boot__line');
-        // §1 budget: ~2.1s total on the deterministic (no live-engine-wait) path —
-        // four splash lines (no typed command; the hero install row already displays
-        // it permanently) with per-line dwell ~450ms/line (user decision 2026-07-06:
-        // readability of each line outranks duration; splash is skippable anyway).
-        // FIRST_MS + 4×LINE_MS ≈ 250 + 4×450 = 2,050ms of log display.
+        // §1 budget: ~2.1s total on the deterministic (no live-engine-wait) path,
+        // matching production's felt pace (user decision 2026-07-06: the prior
+        // 450ms/line cadence measured ~2.5s end-to-end — noticeably slower —
+        // once the settle fade below is counted; readability of each line still
+        // outranks raw speed, so the dwell is trimmed, not cut to a blur; the
+        // splash stays skippable regardless). Four splash lines: version,
+        // booting, themes, CLI count. FIRST_MS + 4×LINE_MS + the 460ms settle
+        // fade (below) ≈ 100 + 4×390 + 460 = 2,120ms end-to-end.
         // The live-office/index page's ACTUAL total additionally depends on
         // window.__pixEngineReady — bounded separately by MAX_ENGINE_WAITS, not this budget.
-        // (Typed-command landing removed by user decision 2026-07-06: hero row already carries it.)
-        const LINE_MS = 450;
-        const FIRST_MS = 250;
+        const LINE_MS = 390;
+        const FIRST_MS = 100;
         let i = 0,
           done = false;
         function settle() {
