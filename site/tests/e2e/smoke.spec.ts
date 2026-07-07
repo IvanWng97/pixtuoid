@@ -1239,6 +1239,10 @@ test('text over the live office carries its own scrim (.text-scrim)', async ({ p
   expect(await page.locator('#features .ledger.text-scrim .ledger__row').count()).toBeGreaterThan(
     0
   );
+  // The install note ("Also on crates.io...") floated unplated over the
+  // skyline — give it the same crisp plate (it's NOT hero, so the install
+  // card idiom applies, unlike the hero/4F bare treatment elsewhere).
+  expect(await page.locator('.install__note.text-scrim').count()).toBe(1);
 });
 
 test('the scrimmed hero subcopy clears WCAG AA at the worst-case composite (day theme)', async ({
