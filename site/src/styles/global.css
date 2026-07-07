@@ -36,20 +36,15 @@
   --led: #8de069;
   --led-glow: rgba(141, 224, 105, 0.55);
   --led-off: #6f675a; /* an unlit LED (also the statusline idle dot) */
-  /* opaque-theme --bg at 97% (day) / 72% (night, dracula) — plain rgba() on
+  /* opaque-theme --bg at 90% (day) / 72% (night, dracula) — plain rgba() on
      purpose: the scrim is load-bearing legibility, so it must not depend on
      color-mix() support (see the @supports fallback note below). Mirrors
-     --bg per theme. Day's worst case is the scrimmed --fg-muted subcopy
-     painted directly over the hero's darkest office pixel — the hero's
-     data-lit-max="0" means the dimmer contributes NO darkness underneath, so
-     the scrim alone carries the contrast (a lower alpha here was fine back
-     when the dimmer's own 0.74 cap pre-lightened the pixel underneath it).
-     72% fails WCAG AA (~4.06:1 with the dimmer now a no-op); 97% clears it
-     with margin (~4.72:1) — measured via computed styles in a real render,
-     not estimated. Night/dracula already clear AA at 72% (~7.5:1 / ~4.85:1)
-     so they keep the lower alpha (their hero is behind a dark office pixel
-     either way, dimmer contribution or not). */
-  --scrim: rgba(244, 238, 226, 0.97);
+     --bg per theme. Day's worst case (scrimmed --fg-muted subcopy over the
+     hero's darkest office pixel, dimmer capped at data-lit-max 0.74) fails
+     WCAG AA at 72% (~4.3:1); 90% clears it with margin (~4.76:1) — measured
+     via computed styles in a real render, not estimated. Night/dracula
+     already clear AA at 72% (~7.5:1 / ~4.85:1) so they keep the lower alpha. */
+  --scrim: rgba(244, 238, 226, 0.9);
 
   /* Semantic tokens — DAY (warm cream) */
   --bg: var(--paper);
@@ -79,55 +74,14 @@
 
   /* Screen chrome — text that sits on/over the office render, THEME-INDEPENDENT
      (the office pixels don't change with the site theme, so neither do these):
-     ink/dim/line match the statusline's fixed palette. Two lift mechanisms
-     for floating chrome over the (now permanently visible) office:
-     --chrome-halo, a soft blurred shadow — day needs its OWN (a same-color/
-     dark halo behind already-dark ink reads as a smudge, not a lift, see the
-     disabled arm this replaced) — and --text-outline, a crisp retro-game
-     pixel edge (8-direction, 0-blur, solid var(--bg)) for SMALL text on busy
-     pixels, where the soft halo alone measured too weak (eyebrow, hero CTA
-     ghost links, the alt-install line, the floating nav). --ol (the
-     outline's offset) is set by the consumer — 1px for small mono chrome,
-     2px for the hero's giant display headline — so ONE template covers
-     every scale. Reuses --bg (the theme's own opposite-polarity background
-     tone): day's light --bg outlines dark ink, night/dracula's dark --bg
-     outlines light ink, so the polarity is already correct everywhere, no
-     new color to maintain — this alone clears WCAG against the office's
-     darkest pixel (--screen) with a wide margin in both themes. */
+     ink/dim/line match the statusline's fixed palette. The halo lifts floating
+     chrome (nav, hero ghost link) off a DARK office only — day sets none. */
   --chip-ink: #d8cfc0;
   --chip-bright: #f0e8d8;
   --chip-dim: #8f8574;
   --chip-line: #3a332a;
   --chip-bg: color-mix(in srgb, var(--screen) 82%, transparent);
-  --chrome-halo: 0 1px 8px color-mix(in srgb, var(--bg) 70%, transparent);
-  --text-outline:
-    var(--ol, 2px) var(--ol, 2px) 0 var(--bg), var(--ol, 2px) calc(var(--ol, 2px) * -1) 0 var(--bg),
-    calc(var(--ol, 2px) * -1) var(--ol, 2px) 0 var(--bg),
-    calc(var(--ol, 2px) * -1) calc(var(--ol, 2px) * -1) 0 var(--bg), var(--ol, 2px) 0 0 var(--bg),
-    calc(var(--ol, 2px) * -1) 0 0 var(--bg), 0 var(--ol, 2px) 0 var(--bg),
-    0 calc(var(--ol, 2px) * -1) 0 var(--bg);
-  /* --text-outline-sm layers a SECOND, wider ring in --screen (the office's
-     own darkest reference — no new color) OUTSIDE the --text-outline ring
-     above, for small text only. Measured need: against a MID-TONE office
-     pixel (the carpet the --paper hue was lifted from, documented above as
-     #8A765F) a single --bg-polarity ring alone measured only ~3.8-4.1:1 —
-     short of WCAG's 4.5:1 small-text floor — because --bg (light in day,
-     dark in night) sits too close in luminance to that medium brown/tan
-     for either polarity alone. --screen is close to true black, so it's
-     the strongest available contrast against that mid-tone (~4.5:1, the
-     best any office-derived token achieves — pure black would clear it
-     with full margin, but --screen is the authoritative "darkest office
-     pixel" token this file already measures against elsewhere, so it's
-     reused rather than hardcoding a bespoke black). Harmless where it's
-     redundant: against --screen itself the ring is dark-on-dark
-     (invisible), but the inner --bg ring already carries that case. */
-  --text-outline-sm:
-    var(--text-outline), calc(var(--ol, 1px) * 2) calc(var(--ol, 1px) * 2) 0 var(--screen),
-    calc(var(--ol, 1px) * 2) calc(var(--ol, 1px) * -2) 0 var(--screen),
-    calc(var(--ol, 1px) * -2) calc(var(--ol, 1px) * 2) 0 var(--screen),
-    calc(var(--ol, 1px) * -2) calc(var(--ol, 1px) * -2) 0 var(--screen),
-    calc(var(--ol, 1px) * 2) 0 0 var(--screen), calc(var(--ol, 1px) * -2) 0 0 var(--screen),
-    0 calc(var(--ol, 1px) * 2) 0 var(--screen), 0 calc(var(--ol, 1px) * -2) 0 var(--screen);
+  --chrome-halo: none;
 }
 
 :root[data-theme='night'] {
@@ -155,24 +109,21 @@
 
 /* color-mix() landed in Safari 16.2 (Dec 2022). On an older engine an invalid
    color-mix() poisons the whole declaration at computed-value time, so
-   `border: 1px solid var(--border)` resets to border-style:none (borders VANISH),
-   --chip-bg goes transparent, and --chrome-halo's text-shadow drops to none
-   (day's hero/nav chrome over the live office loses its contrast lift — the
-   ink itself stays visible, just flatter). Mirror the load-bearing translucent
-   tokens in rgba() (which predates color-mix by a decade); component-level
-   decorative color-mix degrades harmlessly — a `color:` use inherits its parent
-   color, a one-off `background:`/`box-shadow:`/gradient-stop use drops to its
-   initial value (transparent/none) — so only these root-level tokens need the
-   fallback. Every visitor-reachable theme that redefines them in color-mix
-   (day, night, AND the dracula egg) needs an arm here, or its borders vanish
-   on the old engine. */
+   `border: 1px solid var(--border)` resets to border-style:none (borders VANISH)
+   and --chip-bg goes transparent (light chrome text over the day office drops to
+   low contrast). Mirror the load-bearing translucent tokens in rgba() (which
+   predates color-mix by a decade); component-level decorative color-mix degrades
+   harmlessly — a `color:` use inherits its parent color, a `background:`/
+   `box-shadow:`/gradient-stop use drops to its initial value (transparent/none) —
+   never illegible, so only these load-bearing tokens need the fallback. Every
+   visitor-reachable theme that redefines them in color-mix (day, night, AND the
+   dracula egg) needs an arm here, or its borders vanish on the old engine. */
 @supports not (color: color-mix(in srgb, red, red)) {
   :root {
     --border: rgba(36, 28, 20, 0.12);
     --border-strong: rgba(36, 28, 20, 0.2);
     --glow: rgba(217, 119, 87, 0.15);
     --chip-bg: rgba(14, 13, 12, 0.82);
-    --chrome-halo: 0 1px 8px rgba(244, 238, 226, 0.7); /* #f4eee2 (--paper) @ 70% */
   }
   :root[data-theme='night'] {
     --border: rgba(244, 238, 226, 0.13);
@@ -688,7 +639,7 @@ section {
   }
 }
 /* screen-reader-only utility (the closer's role=status announcement lives in
-   page markup styled from here; Hero/Install carry scoped copies) */
+   page markup styled from here; Install carries a scoped copy) */
 .sr-only {
   position: absolute;
   width: 1px;
@@ -894,21 +845,6 @@ code,
   /* the sole "press any key to skip" instruction — it must stay readable, so the
      de-emphasis comes from size alone (opacity:0.55 dropped it to ~2.2:1 in day,
      below WCAG 1.4.3); inherited --fg-muted clears AA in every theme. */
-}
-.boot__line--cmd {
-  color: var(--fg);
-  will-change: transform;
-}
-/* the FLIP landing (spec §1): everything but the prompt line fades, the
-   overlay ground goes transparent under the flying line — it's the SAME
-   var(--bg) the office's boot-cover paints, so the hand-off is seamless */
-.boot.is-landing {
-  background: transparent;
-}
-.boot.is-landing .boot__line:not(.boot__line--cmd),
-.boot.is-landing .boot__hint {
-  opacity: 0;
-  transition: opacity 0.25s ease;
 }
 /* mobile: the whole viewport is the tap target (the overlay's click handler);
    say so instead of naming a keyboard */

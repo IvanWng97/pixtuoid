@@ -198,14 +198,8 @@ const { floating = false } = Astro.props;
   .nav--floating .nav__logo,
   .nav--floating .nav__links a,
   .nav--floating .nav__docs-btn {
-    /* --text-outline-sm (global.css) is the primary lift here — the soft
-       --chrome-halo alone measured too weak for this small mono text
-       against busy office pixels, and a single --bg-polarity ring alone
-       measured short of WCAG's small-text floor against a mid-tone office
-       pixel (hence the added --screen outer ring in -sm). Layering
-       --chrome-halo on top costs nothing wrong-polarity either way. */
-    --ol: 1px;
-    text-shadow: var(--text-outline-sm), var(--chrome-halo);
+    /* dark themes only — on the day office this black halo read as a smudge */
+    text-shadow: var(--chrome-halo);
   }
   .nav__inner {
     display: flex;
