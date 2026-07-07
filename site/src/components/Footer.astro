@@ -15,20 +15,25 @@ import { REPO, CRATES, SPONSOR, asset } from '../consts';
       />
       pixtuoid
     </a>
-    <span class="footer__sep">·</span>
-    <span>MIT</span>
-    <span class="footer__sep">·</span>
-    <span>built in Rust 🦀</span>
-    <span class="footer__sep">·</span>
-    <a href={REPO} target="_blank" rel="noreferrer">GitHub</a>
-    <span class="footer__sep">·</span>
-    <a href={CRATES} target="_blank" rel="noreferrer">crates.io</a>
-    <span class="footer__sep">·</span>
-    <a href={`${REPO}/releases`} target="_blank" rel="noreferrer">Releases</a>
-    <span class="footer__sep">·</span>
-    <a class="footer__coffee" href={SPONSOR} target="_blank" rel="noreferrer">☕ Coffee</a>
-    <span class="footer__sep">·</span>
-    <span>made with Claude Code</span>
+    <span class="footer__grp"><span class="footer__sep">·</span> MIT</span>
+    <span class="footer__grp"><span class="footer__sep">·</span> built in Rust 🦀</span>
+    <span class="footer__grp">
+      <span class="footer__sep">·</span>
+      <a href={REPO} target="_blank" rel="noreferrer">GitHub</a>
+    </span>
+    <span class="footer__grp">
+      <span class="footer__sep">·</span>
+      <a href={CRATES} target="_blank" rel="noreferrer">crates.io</a>
+    </span>
+    <span class="footer__grp">
+      <span class="footer__sep">·</span>
+      <a href={`${REPO}/releases`} target="_blank" rel="noreferrer">Releases</a>
+    </span>
+    <span class="footer__grp">
+      <span class="footer__sep">·</span>
+      <a class="footer__coffee" href={SPONSOR} target="_blank" rel="noreferrer">☕ Coffee</a>
+    </span>
+    <span class="footer__grp"><span class="footer__sep">·</span> made with Claude Code</span>
     {/* visible only while the clock (not the visitor, not the OS) holds night */}
     <span class="footer__clock">after hours</span>
   </div>
@@ -75,6 +80,14 @@ import { REPO, CRATES, SPONSOR, asset } from '../consts';
   }
   .footer__sep {
     color: var(--chip-dim);
+  }
+  /* Groups a "·" with the item it introduces into ONE flex item, so
+     flex-wrap can only break BETWEEN groups — never leave a separator
+     stranded alone at the start of a wrapped line (#U8: a bare .footer__sep
+     span had no affinity for its neighbor). white-space:nowrap is a second
+     backstop against an internal break inside the (short) group itself. */
+  .footer__grp {
+    white-space: nowrap;
   }
   .footer__line a {
     color: var(--chip-ink);

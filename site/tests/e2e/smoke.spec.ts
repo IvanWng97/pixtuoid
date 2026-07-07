@@ -1299,6 +1299,19 @@ test('the scrimmed hero subcopy clears WCAG AA at the worst-case composite (day 
   );
 });
 
+test('footer separators never strand alone at a wrap boundary', async ({ page }) => {
+  // Each "·" is grouped with the item it introduces into ONE flex item
+  // (.footer__grp), so flex-wrap can only break BETWEEN groups. Pin the
+  // structure directly rather than pixel-measuring a wrap (viewport-fragile):
+  // every .footer__sep's parent must be a .footer__grp.
+  await gotoLive(page);
+  const seps = await page.locator('.footer .footer__sep').all();
+  expect(seps.length).toBeGreaterThan(0);
+  for (const sep of seps) {
+    await expect(sep.locator('xpath=..')).toHaveClass(/\bfooter__grp\b/);
+  }
+});
+
 test('an install copy from the Install section hires a coworker: pix:install-copy → pix:hired', async ({
   page,
   context,
