@@ -38,19 +38,9 @@ function compositeOver(
 }
 function parseRgb(css: string): [number, number, number, number] {
   const m = css.match(/rgba?\(([^)]+)\)/);
-  if (m) {
-    const [r, g, b, a] = m[1].split(',').map((s) => parseFloat(s));
-    return [r, g, b, a ?? 1];
-  }
-  // A color-mix()-derived computed value serializes in the CSS Color 4
-  // color() functional notation (0..1 floats), not legacy rgb() 0..255 —
-  // hit by Hero.astro's .hero__badge-code contrast lift.
-  const cm = css.match(/^color\(srgb\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)(?:\s*\/\s*([\d.]+))?\)$/);
-  if (cm) {
-    const [, r, g, b, a] = cm;
-    return [parseFloat(r) * 255, parseFloat(g) * 255, parseFloat(b) * 255, a ? parseFloat(a) : 1];
-  }
-  throw new Error(`unparseable color: ${css}`);
+  if (!m) throw new Error(`unparseable color: ${css}`);
+  const [r, g, b, a] = m[1].split(',').map((s) => parseFloat(s));
+  return [r, g, b, a ?? 1];
 }
 function parseHex(hex: string): [number, number, number] {
   const m = hex.trim().match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
@@ -239,39 +229,6 @@ test('the install Copy click hires without breaking the page', async ({ page, co
   // The copy flash proves the click handler ran to completion — i.e. the
   // post-copy pix:install-copy dispatch (OfficeBackdrop's hire listener) didn't throw.
   await expect(copy).toHaveText(/Copied|Select & copy/);
-  expect(errors()).toEqual([]);
-});
-
-test('hero install row: copy chip flashes and fires pix:install-copy {source:hero}', async ({
-  page,
-  context,
-}) => {
-  await context.grantPermissions(['clipboard-write']);
-  const errors = watchErrors(page);
-  await page.addInitScript(() => {
-    sessionStorage.setItem('pix-booted', '1');
-    (window as unknown as { __copySources: string[] }).__copySources = [];
-    document.addEventListener('pix:install-copy', (e) =>
-      (window as unknown as { __copySources: string[] }).__copySources.push(
-        (e as CustomEvent<{ source: string }>).detail.source
-      )
-    );
-  });
-  await page.goto('./');
-  // The primary CTA carries the REAL brew command (single-sourced from install.json).
-  await expect(page.locator('#hero-install-cmd')).toContainText(
-    'brew install IvanWng97/pixtuoid/pixtuoid'
-  );
-  // Ten CLI badges — one per sources.json entry, compatibility answered in viewport 1.
-  await expect(page.locator('.hero__badge')).toHaveCount(10);
-  const copy = page.locator('#hero-install-row [data-install-copy]');
-  await copy.click();
-  await expect(copy).toHaveText(/copied|select & copy/);
-  await expect
-    .poll(() =>
-      page.evaluate(() => (window as unknown as { __copySources: string[] }).__copySources)
-    )
-    .toContain('hero');
   expect(errors()).toEqual([]);
 });
 
@@ -643,7 +600,7 @@ test('the clock forces night after hours and clears on an explicit theme act', a
 test('first visit: boot intro auto-runs, reveals the page, seeds the gate', async ({ page }) => {
   await page.goto('./'); // NO pix-booted seed — the real first visit
   await expect(page.locator('#boot')).toBeVisible();
-  // Splash log displays 4 lines (~2.1s) then holds for engine (~4s MAX_ENGINE_WAITS) + settle fade (460ms) ≈ 6.5s.
+  // Splash log displays 4 lines (~1.7s) then holds for engine (~4s MAX_ENGINE_WAITS) + settle fade (460ms) ≈ 6.3s.
   await expect(page.locator('html')).not.toHaveAttribute('data-booting', '1', { timeout: 10_000 });
   await expect.poll(() => page.evaluate(() => sessionStorage.getItem('pix-booted'))).toBe('1');
   expect(await page.evaluate(() => document.getElementById('main')!.hasAttribute('inert'))).toBe(
@@ -670,12 +627,12 @@ test('first visit on an office-less page lifts the splash promptly (no engine-ga
   await page.goto('./architecture/'); // real first visit (no pix-booted), no OfficeBackdrop
   await expect(page.locator('#boot')).toBeVisible();
   await expect(page.locator('#office-live')).toHaveCount(0); // confirm: no office on this page
-  // Splash clears data-booting in ~2.1s (4×450ms line dwell) + 460ms fade ≈ 2.6s; the unguarded gate hangs to ~5.9s. 3.5s separates.
-  await expect(page.locator('html')).not.toHaveAttribute('data-booting', '1', { timeout: 3_500 });
+  // Splash clears data-booting in ~1.7s (4×390ms line dwell) + 460ms fade ≈ 2.1s; the unguarded gate hangs to ~5.9s. 3s separates.
+  await expect(page.locator('html')).not.toHaveAttribute('data-booting', '1', { timeout: 3_000 });
   expect(errors()).toEqual([]);
 });
 
-test('first visit: splash displays 4-line log with per-line dwell (~450ms)', async ({ page }) => {
+test('first visit: splash displays 4-line log with per-line dwell (~390ms)', async ({ page }) => {
   const errors = watchErrors(page);
   // Test on docs page (no office, no engine wait) for pure splash-timing measurement.
   await page.goto('./config/'); // NO pix-booted seed — the real first visit
@@ -685,9 +642,11 @@ test('first visit: splash displays 4-line log with per-line dwell (~450ms)', asy
   await expect(page.locator('#boot .boot__log')).toContainText('booting office');
   await expect(page.locator('#boot .boot__log')).toContainText('loading themes');
   await expect(page.locator('#boot .boot__log')).toContainText('10 CLIs connected');
-  // Splash clears data-booting in ~2.1s (4×450ms line dwell) + 460ms fade ≈ 2.6s.
+  // Splash clears data-booting in ~1.7s (4×390ms line dwell) + 460ms fade ≈ 2.1s — the
+  // §1 budget (user decision 2026-07-06: retimed from ~450ms/line, which measured
+  // ~2.5s end-to-end here — noticeably slower than production's felt pace).
   await expect(page.locator('html')).not.toHaveAttribute('data-booting', '1', {
-    timeout: 3_500,
+    timeout: 3_000,
   });
   // Whole-viewport skip still seeds the session gate.
   await expect.poll(() => page.evaluate(() => sessionStorage.getItem('pix-booted'))).toBe('1');
@@ -1137,18 +1096,16 @@ test('text over the live office carries its own scrim (.text-scrim)', async ({ p
 test('the scrimmed hero subcopy clears WCAG AA at the worst-case composite (day theme)', async ({
   page,
 }) => {
-  // The binding constraint is WCAG AA (4.5:1) for EVERY token. The worst
-  // case is day theme, since it's the theme whose --fg-muted/--scrim pairing
-  // has the least headroom: the hero subcopy (--fg-muted) inside
-  // .text-scrim, painted over --screen (the darkest pixel the office ever
-  // renders). The hero's data-lit-max="0" (position-purity redesign — the
-  // mask never darkens the hero, at any scroll position) makes the dimmer
-  // step below collapse to an IDENTITY (afterDimmer === officeWorstPixel),
-  // so .text-scrim alone carries the whole contrast burden — hence the
-  // day --scrim alpha lift to 0.97 (see global.css). Reads REAL computed
-  // styles (not hardcoded token values) so a future
-  // --scrim/--fg-muted/data-lit-max regression fails this test rather than
-  // only a visual read.
+  // Review finding (task 2): the binding constraint is WCAG AA (4.5:1) for
+  // EVERY token, but the shipped test above only checked a scrim EXISTS, not
+  // that it's dark/opaque enough. The worst case is day theme, since it's the
+  // theme whose --fg-muted/--scrim pairing has the least headroom: the hero
+  // subcopy (--fg-muted) inside .text-scrim, with the dimmer capped at the
+  // hero's own data-lit-max (below its usual ceiling — see [data-lit-max] in
+  // OfficeBackdrop.astro) instead of fully dark, painted over --screen (the
+  // darkest pixel the office ever renders). Reads REAL computed styles (not
+  // hardcoded token values) so a future --scrim/--fg-muted regression fails
+  // this test rather than only a visual read.
   await page.addInitScript(() => {
     sessionStorage.setItem('pix-booted', '1');
     localStorage.setItem('pix-theme', 'day');
@@ -1170,8 +1127,9 @@ test('the scrimmed hero subcopy clears WCAG AA at the worst-case composite (day 
 
   // --screen is a PROXY for the darkest pixel the live office canvas actually
   // renders (a real frame sample isn't practical here) — reviewer-verified
-  // immaterial: the ratio shift from any plausible canvas-vs-token delta is
-  // <0.005, against a 0.22 margin above the 4.5:1 floor (measured ~4.72:1).
+  // immaterial: at the hero's 90% dimmer alpha, the ratio shift from any
+  // plausible canvas-vs-token delta is <0.005, against a 0.26 margin above
+  // the 4.5:1 floor.
   const officeWorstPixel = parseHex(measured.screenToken);
   const afterDimmer = compositeOver(
     [...parseRgb(measured.dimmerBg).slice(0, 3), measured.dataLitMax] as [
@@ -1193,199 +1151,6 @@ test('the scrimmed hero subcopy clears WCAG AA at the worst-case composite (day 
   );
 });
 
-test('the hero headline outline clears WCAG against the office darkest pixel (day AND night)', async ({
-  page,
-}) => {
-  // Follow-up to the position-purity redesign: with the hero permanently
-  // exempt from the dimmer, the headline sits over a live, fully-lit office
-  // at ANY scroll position — day's dark ink over the office's darkest
-  // pixel (--screen, e.g. a monitor bezel) is itself LOW contrast; the
-  // pixel-outline (an 8-direction 0-blur text-shadow stack, solid
-  // var(--bg)) is what rescues it, so legibility only needs ONE of
-  // {fill, outline} to clear the floor against the worst pixel — reads
-  // REAL computed styles so a future edit that drops the shadow rule (day)
-  // or weakens the reused --bg polarity (either theme) fails this test.
-  for (const theme of ['day', 'night'] as const) {
-    await page.addInitScript((t) => {
-      sessionStorage.setItem('pix-booted', '1');
-      localStorage.setItem('pix-theme', t);
-    }, theme);
-    await page.goto('./');
-    await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
-    const measured = await page.evaluate(() => {
-      const st = document.querySelector('.hero .statement')!;
-      const cs = getComputedStyle(st);
-      return {
-        textShadow: cs.textShadow,
-        fill: cs.color,
-        outline: getComputedStyle(document.documentElement).getPropertyValue('--bg'),
-        screenToken: getComputedStyle(document.documentElement).getPropertyValue('--screen'),
-      };
-    });
-    expect(measured.textShadow, `${theme}: headline must carry the pixel-outline shadow`).not.toBe(
-      'none'
-    );
-    const worst = parseHex(measured.screenToken);
-    const fillRatio = contrastRatio(
-      parseRgb(measured.fill).slice(0, 3) as [number, number, number],
-      worst
-    );
-    const outlineRatio = contrastRatio(parseHex(measured.outline), worst);
-    expect(
-      Math.max(fillRatio, outlineRatio),
-      `${theme}: neither fill (${fillRatio.toFixed(2)}:1) nor outline (${outlineRatio.toFixed(2)}:1) clears WCAG's 3:1 large-text floor against the office's darkest pixel`
-    ).toBeGreaterThanOrEqual(3);
-  }
-});
-
-test('small chrome text clears WCAG against the office darkest pixel AND a mid-tone office pixel (day AND night)', async ({
-  page,
-}) => {
-  // Follow-up to the headline outline: the same --text-outline idea proved
-  // too weak at small mono sizes (eyebrow, hero CTA ghost links, the
-  // alt-install/avail line, the floating nav's Docs/GitHub/Coffee) against
-  // BUSY office pixels — the soft --chrome-halo alone measured weaker
-  // still. --text-outline-sm (global.css) layers a SECOND ring in --screen
-  // OUTSIDE the --bg ring: a single --bg-polarity ring alone measured only
-  // ~3.8-4.1:1 against a MID-TONE office pixel (the carpet --paper was
-  // lifted from, #8A765F, documented in this same file) — short of WCAG's
-  // 4.5:1 small-text floor. The added --screen ring lifts every surface to
-  // a consistent ~4.47:1 (the best achievable reusing the office's OWN
-  // darkest token — a bespoke pure black would clear 4.5 outright but
-  // isn't itself used anywhere else in this design system, so it's not
-  // introduced just to chase the last 0.03). The 4.4 floor below pins
-  // exactly that measured, honest ceiling with a small margin: it fails a
-  // regression back toward the single-ring ~3.8-4.1:1, and passes today's
-  // real ~4.47:1 with room to spare.
-  const CARPET: [number, number, number] = [0x8a, 0x76, 0x5f]; // the office carpet global.css's --paper comment cites
-  const CARPET_FLOOR = 4.4;
-  const SURFACES: Array<[string, string]> = [
-    ['eyebrow', '.hero .eyebrow'],
-    ['hero CTA ghost link', '.hero__ghost'],
-    ['alt-install line', '.hero__alt-install'],
-    ['avail line', '.hero__avail'],
-    ['nav GitHub link', '.nav--floating .nav__links a[href*="github.com"]'],
-  ];
-  for (const theme of ['day', 'night'] as const) {
-    await page.addInitScript((t) => {
-      sessionStorage.setItem('pix-booted', '1');
-      localStorage.setItem('pix-theme', t);
-    }, theme);
-    await page.goto('./');
-    await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
-    const tokens = await page.evaluate(() => {
-      const root = getComputedStyle(document.documentElement);
-      return {
-        bg: root.getPropertyValue('--bg').trim(),
-        screenToken: root.getPropertyValue('--screen').trim(),
-      };
-    });
-    const screenPixel = parseHex(tokens.screenToken);
-    const innerRing = parseHex(tokens.bg);
-    const outerRing = screenPixel; // --text-outline-sm's second ring IS --screen
-
-    for (const [name, selector] of SURFACES) {
-      const measured = await page.evaluate((sel) => {
-        const el = document.querySelector(sel);
-        if (!el) return null;
-        const cs = getComputedStyle(el);
-        return { textShadow: cs.textShadow, fill: cs.color };
-      }, selector);
-      expect(measured, `${theme}: ${name} (${selector}) must exist`).not.toBeNull();
-      expect(measured!.textShadow, `${theme}: ${name} must carry a pixel-outline shadow`).not.toBe(
-        'none'
-      );
-      const fill = parseRgb(measured!.fill).slice(0, 3) as [number, number, number];
-      const vsScreen = Math.max(
-        contrastRatio(fill, screenPixel),
-        contrastRatio(innerRing, screenPixel),
-        contrastRatio(outerRing, screenPixel)
-      );
-      const vsCarpet = Math.max(
-        contrastRatio(fill, CARPET),
-        contrastRatio(innerRing, CARPET),
-        contrastRatio(outerRing, CARPET)
-      );
-      expect(
-        vsScreen,
-        `${theme}: ${name} — best of {fill,inner,outer} vs --screen is ${vsScreen.toFixed(2)}:1, below the 4.5:1 small-text floor`
-      ).toBeGreaterThanOrEqual(4.5);
-      expect(
-        vsCarpet,
-        `${theme}: ${name} — best of {fill,inner,outer} vs the mid-tone carpet is ${vsCarpet.toFixed(2)}:1, below the accepted ${CARPET_FLOOR}:1 floor (4.5 is unreachable reusing only office-derived tokens — see global.css --text-outline-sm)`
-      ).toBeGreaterThanOrEqual(CARPET_FLOOR);
-    }
-  }
-});
-
-test('hero badge codes: every per-source hue clears WCAG AA on the chip screen', async ({
-  page,
-}) => {
-  // U4 amendment: 3 of the 10 badge_color hues (Reasonix, Hermes, opencode) fail
-  // 4.5:1 raw against --screen — the hues are bridge-pinned wire facts
-  // (sources.json <-> pixtuoid_scene theme), so Hero.astro lifts the CODE toward
-  // white in this text context only (.hero__badge-code's color-mix). --screen and
-  // --badge are both theme-independent, so one theme (the default) covers every
-  // visitor. Reads REAL computed styles, not the color-mix math, so a future
-  // sources.json hue or lift-percentage regression fails this test.
-  await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
-  await page.goto('./');
-  const measured = await page.evaluate(() => {
-    const chips = Array.from(document.querySelectorAll('.hero__badge'));
-    return chips.map((chip) => ({
-      code: chip.querySelector('.hero__badge-code')!.textContent,
-      textColor: getComputedStyle(chip.querySelector('.hero__badge-code')!).color,
-      bg: getComputedStyle(chip).backgroundColor,
-    }));
-  });
-  expect(measured.length).toBe(10);
-  for (const m of measured) {
-    const ratio = contrastRatio(
-      parseRgb(m.textColor).slice(0, 3) as [number, number, number],
-      parseRgb(m.bg).slice(0, 3) as [number, number, number]
-    );
-    expect(
-      ratio,
-      `badge "${m.code}": WCAG AA floor is 4.5:1; measured ${ratio.toFixed(2)}:1`
-    ).toBeGreaterThanOrEqual(4.5);
-  }
-});
-
-test('the dimmer is a pure function of scroll position — no first-scroll latch', async ({
-  page,
-}) => {
-  // Regression pin (user-identified): the removed design tracked a visit-
-  // scoped `engaged` latch that flipped true on the first scroll gesture and
-  // never released, so the hero read bright on a fresh load but dimmed after
-  // scrolling down and back up — same scrollY, different appearance, purely
-  // from history. The hero's data-lit-max="0" now makes the mask permanently
-  // exempt there, so its contribution is 0 at ANY scroll position, fresh or
-  // returned-to.
-  await gotoLive(page);
-  const dim = () =>
-    page.evaluate(() => parseFloat(document.getElementById('dimmer')!.style.opacity || '0'));
-  // Full lights on a fresh load — the live office IS the first content.
-  await expect.poll(dim).toBe(0);
-  // Scroll deep enough to actually engage the mask elsewhere on the page —
-  // the old latch would flip true here and never release.
-  await page.evaluate(() =>
-    document.getElementById('features')!.scrollIntoView({ block: 'center', behavior: 'instant' })
-  );
-  await expect.poll(dim).toBeGreaterThan(0.5);
-  // Back to the hero's exact position: must read the SAME full-lights value
-  // it did before the deep scroll, not a residual latch-darkened one.
-  await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
-  await expect.poll(dim).toBe(0);
-  // The closer sits in its own office-gap (not a [data-lit] block, unaffected
-  // by this redesign) — the mask releases there too.
-  await page.evaluate(() =>
-    document
-      .querySelector('[data-office-hour]')!
-      .scrollIntoView({ block: 'center', behavior: 'instant' })
-  );
-  await expect.poll(dim).toBeLessThan(0.15);
-});
-
 test('the closer hold carries the install line and fires pix:install-copy {source:closer}', async ({
   page,
   context,
@@ -1404,10 +1169,10 @@ test('the closer hold carries the install line and fires pix:install-copy {sourc
   await page.goto('./');
   await page.evaluate(() =>
     document
-      .querySelector('[data-office-hour]')!
+      .querySelector('.gap-caption--closer')!
       .scrollIntoView({ block: 'center', behavior: 'instant' })
   );
-  const chip = page.locator('[data-office-hour] [data-install-copy]');
+  const chip = page.locator('.gap-caption--closer [data-install-copy]');
   await expect(chip).toBeVisible();
   await chip.click();
   await expect(chip).toHaveText(/copied|select & copy/);
@@ -1417,66 +1182,7 @@ test('the closer hold carries the install line and fires pix:install-copy {sourc
   expect(errors()).toEqual([]);
 });
 
-test('the golden-hour ratchet advances the render clock when the closer intersects', async ({
-  page,
-}) => {
-  const errors = watchErrors(page);
-  // Step-clock instrumentation: wrap Office.prototype.step, once the real
-  // wasm module resolves through window.__pixWasm, to record the LAST now_ms
-  // the engine was actually stepped with. Deterministic at any wall-clock
-  // time — sampling the canvas's sky color instead would shrink to nothing
-  // if this test happens to run when the real hour is already near golden
-  // hour. Both the hero backdrop and the VIBING channel await the SAME
-  // window.__pixWasm promise (site/CLAUDE.md), so patching Office.prototype
-  // here catches every Office this page creates.
-  await page.addInitScript(() => {
-    let wrapped: Promise<unknown> | undefined;
-    Object.defineProperty(window, '__pixWasm', {
-      configurable: true,
-      get: () => wrapped,
-      set: (
-        promise: Promise<{
-          Office: { prototype: { step: (_nowMs: number, _w: number, _h: number) => void } };
-        }>
-      ) => {
-        wrapped = promise.then((mod) => {
-          const orig = mod.Office.prototype.step;
-          mod.Office.prototype.step = function (
-            this: unknown,
-            nowMs: number,
-            w: number,
-            h: number
-          ) {
-            (window as { __lastStepNowMs?: number }).__lastStepNowMs = nowMs;
-            return orig.call(this, nowMs, w, h);
-          };
-          return mod;
-        });
-      },
-    });
-  });
-  await gotoLive(page);
-  const lastHour = () =>
-    page.evaluate(() => {
-      const ms = (window as { __lastStepNowMs?: number }).__lastStepNowMs;
-      return ms === undefined ? NaN : new Date(ms).getHours();
-    });
-  // Sanity: the wrapper is actually capturing frames before the ratchet.
-  await expect.poll(async () => Number.isNaN(await lastHour())).toBe(false);
-  await page.evaluate(() =>
-    document
-      .querySelector('[data-office-hour]')!
-      .scrollIntoView({ block: 'center', behavior: 'instant' })
-  );
-  // GOLDEN_HOUR in OfficeBackdrop.astro — pinned here per CLAUDE.md's "two
-  // copies of a magic value" rule: this poll is the pairing check, and it's
-  // the ONLY regression coverage for the ratchet's observable effect (the
-  // closer-install test above only pins the install-copy wiring).
-  await expect.poll(lastHour, { timeout: 5_000 }).toBe(17);
-  expect(errors()).toEqual([]);
-});
-
-test('hero copy → hire receipt: pix:install-copy walks a coworker in (pix:hired)', async ({
+test('an install copy hires a coworker via the statusline chip: pix:install-copy → pix:hired', async ({
   page,
   context,
 }) => {
@@ -1493,7 +1199,7 @@ test('hero copy → hire receipt: pix:install-copy walks a coworker in (pix:hire
   await page.goto('./');
   // hire() is a no-op before the first live frame — wait for the office.
   await expect(page.locator('.backdrop.is-live')).toBeAttached({ timeout: 15_000 });
-  await page.locator('#hero-install-row [data-install-copy]').click();
+  await page.locator('#sl-install [data-sl-copy]').click();
   // wb-1's bridge: pix:install-copy → Office.hire() → pix:hired {name}.
   await expect
     .poll(() => page.evaluate(() => (window as { __hired?: boolean }).__hired), {
