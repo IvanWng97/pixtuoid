@@ -31,11 +31,9 @@ import { asset, DIM_RESTING } from '../consts';
 </div>
 {
   /* THE DIMMER — the design's signature. A fixed var(--bg) sheet whose
-     opacity is written per-frame by the scroll controller below, as a PURE
-     FUNCTION of viewport position (no latch, no history): 0 in observation
-     gaps and permanently over the hero (see [data-lit-max] on Hero.astro's
-     .hero__copy), up to 0.86 when a statement owns the viewport center — the
-     same scrollY always reads the same opacity. Compositor-only (a single
+     opacity is written per-frame by the scroll controller below: 0 in
+     observation gaps (the office fully bright IS the content), up to 0.86
+     when a statement owns the viewport center. Compositor-only (a single
      style.opacity write), never pauses the canvas. */
 }
 {
@@ -273,59 +271,6 @@ import { asset, DIM_RESTING } from '../consts';
     let pauseOffset = 0;
     let pausedAt = 0;
 
-    // ── Golden-hour ratchet (spec §4: the page tells ONE office day) ─────────
-    // When the closer hold ([data-office-hour], index.astro) enters view, the
-    // render clock jumps FORWARD to the next golden hour, in WHOLE hours only:
-    // 1h = 3,600,000ms = exactly 30 × the script's LOOP_MS (120s), so the beat
-    // cursor keeps its loop phase and the jump rides the engine's tested
-    // catch-up path (advance_script's skip-whole-loops arm). Forward-only and
-    // never reset: a backward now_ms stalls the beat cursor until real time
-    // catches up (fine for the VIBING scrub, not for the flagship backdrop),
-    // so scrolling back up simply keeps golden hour. Time stays a PARAMETER —
-    // JS owns the clock, the engine never reads it on wasm.
-    // 17 = the hour the committed hero-wide.png poster is baked at: its
-    // media.json job pins `t0_ms: 1768498200000` (no literal "hour" field —
-    // that field belongs to the separate vibing-poster job, pinned to 18),
-    // which hero_still decodes to 2026-01-15T17:30:00Z under the pipeline's
-    // TZ=UTC pin — hour 17. Keeps the fallback poster and the ratcheted live
-    // office showing the same time of day.
-    const GOLDEN_HOUR = 17;
-    let hourShift = 0;
-    function engageGoldenHour() {
-      if (hourShift) return;
-      // The RENDER clock — (paused ? pausedAt : Date.now()) - pauseOffset,
-      // the SAME expression the resize handler repaints with below — not the
-      // wall clock: while paused, pauseOffset only accumulates on RESUME, so
-      // a plain `Date.now() - pauseOffset` keeps advancing with real time
-      // even though the office is visually frozen at pausedAt. A long pause
-      // straddling an hour boundary before the closer intersects must
-      // ratchet off the hour the office is actually paused AT, or the jump
-      // lands on the wrong golden hour once resumed.
-      let dh = GOLDEN_HOUR - new Date((paused ? pausedAt : Date.now()) - pauseOffset).getHours();
-      if (dh < 0) dh += 24;
-      hourShift = dh * 3_600_000; // whole hours only — loop-phase-preserving
-    }
-    // DEFERRED wiring: this is:inline script parses BEFORE <main>, so the
-    // closer block doesn't exist yet (the documented parse-position trap).
-    function wireGoldenHour() {
-      const block = document.querySelector('[data-office-hour]');
-      if (!block || !('IntersectionObserver' in window)) return;
-      new IntersectionObserver(
-        function (es) {
-          es.forEach(function (e) {
-            if (e.isIntersecting) engageGoldenHour();
-          });
-        },
-        { threshold: 0.4 }
-      ).observe(block);
-    }
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', wireGoldenHour, { once: true });
-    } else {
-      wireGoldenHour();
-    }
-    // ─────────────────────────────────────────────────────────────────────────
-
     function sizeBuffer() {
       const w = window.innerWidth;
       const h = window.innerHeight;
@@ -403,7 +348,7 @@ import { asset, DIM_RESTING } from '../consts';
         last = t;
         // Date.now(), NOT the rAF timestamp: the engine decodes now_ms as
         // calendar time (browser-local day/night + wall clock).
-        paint(Date.now() - pauseOffset + hourShift);
+        paint(Date.now() - pauseOffset);
       }
       raf = requestAnimationFrame(frame);
     }
@@ -544,7 +489,7 @@ import { asset, DIM_RESTING } from '../consts';
         sizeBuffer();
         // Setting canvas.width WIPES the bitmap: while paused no loop will
         // repaint it, so re-render the ONE frozen frame at its frozen time.
-        if (paused && live) paint(pausedAt - pauseOffset + hourShift);
+        if (paused && live) paint(pausedAt - pauseOffset);
       });
     });
     document.addEventListener('visibilitychange', function () {
@@ -631,14 +576,10 @@ import { asset, DIM_RESTING } from '../consts';
           }
         }
         // A block may cap its own darkness below DIM_MAX via data-lit-max: the
-        // hero holds a PERMANENT cap of 0 — it never contributes darkness, so
-        // the live office (the product's one true trick) reads above the fold
-        // at ANY scroll position, while the downpage statement holds keep
-        // DIM_MAX for copy legibility. The [data-lit]::before radial wash
-        // still floors local contrast on the capped block. `op` is a pure
-        // function of `best` (viewport position) — no history, no latch: the
-        // same scrollY always yields the same opacity, whichever gestures
-        // preceded it.
+        // hero holds a lower ceiling so the LIVE office (the product's one true
+        // trick) actually reads above the fold, while the downpage statement
+        // holds keep DIM_MAX for copy legibility. The [data-lit]::before radial
+        // wash still floors local contrast on the capped block.
         const cap = bestEl && bestEl.dataset.litMax ? parseFloat(bestEl.dataset.litMax) : DIM_MAX;
         const op = cap * ease(best);
         if (Math.abs(op - lastOp) > 0.002) {

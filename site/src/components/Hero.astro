@@ -1,36 +1,20 @@
 ---
 import { REPO, floorById, floorName } from '../consts';
-import sources from '../sources.json';
-import tabs from '../install.json';
 
 const floor = floorById('lobby');
-// THE primary CTA's command — single-sourced from install.json (the same file
-// the README + Install section regenerate from), never a string literal here.
-const brew = tabs.find((t) => t.id === 'brew');
-if (!brew) throw new Error('Hero: install.json lost its brew entry');
-const BREW_CMD = brew.cmds[0];
-// The other install methods (1F has all four tabs) — brew excluded since it
-// IS the hero row above. Derived, not hardcoded, so a manager added/removed
-// in install.json updates this line for free.
-const altTabs = tabs.filter((t) => t.id !== 'brew');
-// Build-time star count (wb-1's vite define; null when the API was unreachable
-// — the offline build must not fail, so the count simply doesn't render).
-const STARS = __GH_STARS__;
 ---
 
 <section id={floor.id} class="hero" data-floor={floor.fl} data-floor-label={floor.label}>
   {
-    /* The title card: the live office (page-wide backdrop) is permanently
-      exempt from the dimmer (data-lit-max="0" — the mask never darkens it,
-      at any scroll position); the statement sits bottom-left, film-title
-      style, and independently fades/rises with viewport proximity via
-      data-lit="fade" (its own local opacity, not the shared dimmer). The
-      engine places the meeting rooms in the layout's left column — the
+    /* The title card: the live office (page-wide backdrop) is fully lit at
+      scroll-0; the statement sits bottom-left, film-title style, and pulls
+      the dimmer in as it approaches the viewport center (data-lit="fade").
+      The engine places the meeting rooms in the layout's left column — the
       statement deliberately sits UNDER them, not over. */
   }
   <canvas id="dust" class="dust" aria-hidden="true"></canvas>
   <div class="container hero__frame">
-    <div class="hero__copy" data-lit="fade" data-lit-max="0">
+    <div class="hero__copy" data-lit="fade" data-lit-max="0.74">
       <p class="eyebrow">{floor.fl} · {floorName(floor)} — terminal-native, open&nbsp;source</p>
       <h1 class="statement">
         Your agents<br />
@@ -40,33 +24,12 @@ const STARS = __GH_STARS__;
         Every Claude Code, Codex, or Cursor session walks in, sits down, and gets to work — in a
         pixel office that lives in your terminal.
       </p>
-      <div class="hero__install hw-panel" id="hero-install-row" data-install-row>
-        <code class="hero__cmd" id="hero-install-cmd">$ <span data-cmd>{BREW_CMD}</span></code>
-        <button class="hero__copy-chip" data-install-copy data-source="hero">[ copy ]</button>
-        <span class="sr-only" role="status" data-copy-status></span>
-      </div>
-      <p class="hero__alt-install">
-        also via <a href="#install">{altTabs.map((t) => t.label).join(' · ')} →</a>
-      </p>
-      <ul class="hero__badges" aria-label={`Works with ${sources.length} coding CLIs`}>
-        {
-          sources.map((s) => (
-            <li class="hero__badge" style={`--badge:${s.badge_color}`}>
-              <span class="hero__badge-code" aria-hidden="true">
-                {s.badge.replace('·', '')}
-              </span>
-              <span class="hero__badge-name">{s.name}</span>
-            </li>
-          ))
-        }
-      </ul>
       <div class="hero__cta">
+        <a class="btn btn-primary" href="#install">[ install <span aria-hidden="true">→</span> ]</a>
         <a class="hero__ghost" href="#showcase-vibing"
           ><span aria-hidden="true">▸</span> play with it live</a
         >
-        <a class="hero__ghost" href={REPO} target="_blank" rel="noreferrer"
-          >star on github{STARS ? ` · ★ ${STARS}` : ''} ↗</a
-        >
+        <a class="hero__ghost" href={REPO} target="_blank" rel="noreferrer">star on github ↗</a>
       </div>
       <p class="hero__avail">macOS · Linux · Windows · crates.io · MIT&nbsp;licensed</p>
     </div>
@@ -101,42 +64,12 @@ const STARS = __GH_STARS__;
   .hero__copy {
     max-width: 900px;
   }
-  /* Pixel-outline (global.css --text-outline / --text-outline-sm): with the
-     hero permanently exempt from the dimmer (data-lit-max="0"), the
-     headline/eyebrow/CTA links sit over a live, fully-lit office at ANY
-     scroll position — a plain ink color alone can't clear contrast against
-     every possible pixel behind it. --ol sets the outline's offset per
-     scale: 2px for the giant display headline (--text-outline, single
-     --bg-polarity ring), 1px for the small mono chrome below it
-     (--text-outline-sm, --bg ring PLUS a --screen outer ring — a single
-     ring alone measured short of WCAG's small-text floor against a
-     mid-tone office pixel; see global.css). The soft --chrome-halo is
-     layered underneath too, for a touch of extra lift, not as the primary
-     mechanism. */
-  .hero__copy .statement {
-    --ol: 2px;
-    text-shadow: var(--text-outline);
-  }
-  .hero__copy .eyebrow {
-    --ol: 1px;
-    text-shadow: var(--text-outline-sm), var(--chrome-halo);
-  }
   .hero__copy .statement .hl {
-    /* the gradient headline treatment, kept — but text-shadow does NOT
-       composite correctly here (verified by rendering): with color:
-       transparent, the inherited 8-direction shadow stack from .statement
-       above OVERWRITES the gradient fill instead of rimming it (the word
-       rendered as a solid block of the outline color in BOTH themes).
-       -webkit-text-stroke is the technique that's actually built for
-       pairing with background-clip:text gradient fills — it strokes the
-       glyph outline independent of the (transparent) fill, so the gradient
-       shows through the interior with the outline only at the rim. */
+    /* the gradient headline treatment, kept */
     background: var(--grad);
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
-    text-shadow: none;
-    -webkit-text-stroke: var(--ol) var(--bg);
   }
   .hero__cta {
     display: flex;
@@ -150,140 +83,17 @@ const STARS = __GH_STARS__;
     font-size: 0.95rem;
     color: var(--fg);
     text-decoration: none;
-    --ol: 1px;
-    text-shadow: var(--text-outline-sm), var(--chrome-halo);
+    text-shadow: var(--chrome-halo);
   }
   .hero__ghost:hover {
     color: var(--coral);
   }
-  /* .hero__avail and .hero__alt-install are style-matched (same demoted,
-     small-print treatment, incl. the outline — both sit over the same
-     busy office); only their margin-top differs. */
-  .hero__avail,
-  .hero__alt-install {
+  .hero__avail {
+    margin-top: 1.1rem;
     font-family: var(--font-mono);
     font-size: 0.82rem;
     letter-spacing: 0.04em;
     color: var(--fg-muted);
-    --ol: 1px;
-    text-shadow: var(--text-outline-sm), var(--chrome-halo);
-  }
-  .hero__avail {
-    margin-top: 1.1rem;
-  }
-  .hero__alt-install {
-    margin-top: 0.7rem;
-  }
-  .hero__alt-install a {
-    color: var(--fg-muted);
-  }
-  .hero__alt-install a:hover {
-    color: var(--coral);
-  }
-  .hero__install {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.9rem;
-    margin-top: 1.6rem;
-    padding: 0.8rem 1.1rem;
-    font-family: var(--font-mono);
-  }
-  .hero__cmd {
-    font-size: clamp(0.95rem, 1.6vw, 1.25rem);
-    /* on the .hw-panel dark screen ground — same ink the Install pill uses */
-    color: #f3ede3;
-    white-space: nowrap;
-  }
-  .hero__copy-chip {
-    font-family: var(--font-mono);
-    font-size: 0.82rem;
-    font-weight: 600;
-    padding: 0.35rem 0.6rem;
-    border: 1px solid var(--chip-line);
-    background: transparent;
-    color: var(--chip-bright);
-    cursor: pointer;
-  }
-  .hero__copy-chip:hover {
-    color: var(--coral);
-    border-color: var(--coral);
-  }
-  .hero__copy-chip:focus-visible {
-    outline: 2px solid var(--focus-ring);
-    outline-offset: 2px;
-  }
-  .hero__badges {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.45rem;
-    margin: 0.9rem 0 0;
-    padding: 0;
-    list-style: none;
-  }
-  .hero__badge {
-    display: inline-flex;
-    align-items: baseline;
-    gap: 0.35rem;
-    font-family: var(--font-mono);
-    font-size: 0.78rem;
-    letter-spacing: 0.03em;
-    padding: 0.22rem 0.5rem;
-    /* the product's per-source neon hues read on a dark screen chip in every
-       page theme (in-app they live on the dark Sources panel), not on cream */
-    background: var(--screen);
-    border: 1px solid var(--chip-line);
-  }
-  .hero__badge-code {
-    font-weight: 600;
-    /* --badge is sources.json's badge_color — a pinned wire fact, bridge-tested
-       against pixtuoid_scene's theme::NORMAL.source palette (the office's own
-       rendered hue for this CLI), so it can't just be recolored. Three of the
-       ten raw hues fail WCAG 4.5:1 on this chip's --screen background (Reasonix
-       ~3.5:1, Hermes ~3.75:1, opencode ~4.24:1) — lifting toward white in THIS
-       text context (not touching the source value) clears the floor for all
-       ten with margin (worst case, Reasonix, measures ~4.9:1 at 82%; see the
-       e2e contrast sweep). `color: var(--badge)` is the deliberate fallback for
-       engines predating color-mix() (Safari <16.2): an unparseable color-mix()
-       value invalidates only THIS declaration at parse time, so the plain
-       line above stays in effect — same posture as global.css's `@supports
-       not (color: color-mix(...))` arms, without duplicating the palette here. */
-    color: var(--badge);
-    color: color-mix(in srgb, var(--badge) 82%, white);
-  }
-  .hero__badge-name {
-    /* neutral screen-chrome ink (theme-independent, always legible on
-       --screen — same tokens the statusline text uses), never the per-source
-       hue: the abbreviation carries the color, the name stays readable. */
-    color: var(--chip-ink);
-  }
-  .sr-only {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    padding: 0;
-    margin: -1px;
-    overflow: hidden;
-    clip: rect(0, 0, 0, 0);
-    white-space: nowrap;
-    border: 0;
-  }
-  @media (max-width: 560px) {
-    .hero__install {
-      display: flex;
-      /* the copy chip must drop to its own row, not shrink its own label
-         onto three lines fighting the wrapped command for width */
-      flex-wrap: wrap;
-    }
-    .hero__cmd {
-      white-space: normal;
-      overflow-wrap: anywhere;
-    }
-  }
-  @media (pointer: coarse) {
-    .hero__copy-chip {
-      min-height: 44px;
-      padding-block: 0.55rem;
-    }
   }
   /* one orchestrated page-load entrance, staggered */
   @keyframes rise {
@@ -308,20 +118,11 @@ const STARS = __GH_STARS__;
   .hero__copy .lead {
     animation-delay: 0.26s;
   }
-  .hero__copy .hero__install {
-    animation-delay: 0.34s;
-  }
-  .hero__copy .hero__alt-install {
+  .hero__copy .hero__cta {
     animation-delay: 0.38s;
   }
-  .hero__copy .hero__badges {
-    animation-delay: 0.42s;
-  }
-  .hero__copy .hero__cta {
-    animation-delay: 0.5s;
-  }
   .hero__copy .hero__avail {
-    animation-delay: 0.58s;
+    animation-delay: 0.48s;
   }
   @media (prefers-reduced-motion: reduce) {
     .hero__copy > * {
@@ -433,59 +234,6 @@ const STARS = __GH_STARS__;
       userPaused = !!(e.detail && e.detail.paused);
       if (userPaused) stop();
       else start();
-    });
-  })();
-</script>
-
-<script is:inline>
-  // ONE delegated handler for the page's terminal install chips (hero +
-  // closer): routes through window.__pixInstall.copy(source) — THE
-  // one-liner's single clipboard-write + pix:install-copy dispatch (Base.astro
-  // head boot; also ridden by the statusline chip) — so this chip can't grow a
-  // second copy of that logic. copy() only dispatches on a successful write;
-  // the manual-select fallback below (no/blocked Clipboard API) fires the
-  // event itself, since the visitor's install intent is the same either way.
-  (function () {
-    document.addEventListener('click', function (e) {
-      const btn = e.target && e.target.closest && e.target.closest('[data-install-copy]');
-      if (!btn) return;
-      const row = btn.closest('[data-install-row]');
-      const status = row && row.querySelector('[data-copy-status]');
-      const source = btn.dataset.source;
-      // constant resting label — capturing textContent after a click would
-      // capture the flash and stick (the Install.astro-documented trap)
-      const LABEL = '[ copy ]';
-      function flash(label, announce) {
-        btn.textContent = label;
-        if (status) status.textContent = announce;
-        clearTimeout(btn.__pixRestore);
-        btn.__pixRestore = setTimeout(function () {
-          btn.textContent = LABEL;
-          if (status) status.textContent = '';
-        }, 1600);
-      }
-      function manual() {
-        // select JUST the command span, not the whole <code> — the '$ ' prompt
-        // prefix lives outside it, so a paste of the selection can't include it.
-        const cmd = row && row.querySelector('[data-cmd]');
-        const sel = window.getSelection && window.getSelection();
-        if (cmd && sel) {
-          const range = document.createRange();
-          range.selectNodeContents(cmd);
-          sel.removeAllRanges();
-          sel.addRange(range);
-        }
-        flash('[ select & copy ]', 'Press Ctrl+C to copy the selected command');
-        document.dispatchEvent(new CustomEvent('pix:install-copy', { detail: { source: source } }));
-      }
-      if (!window.__pixInstall) {
-        manual();
-        return;
-      }
-      window.__pixInstall.copy(source).then(function (ok) {
-        if (ok) flash('[ copied ✓ ]', 'Copied to clipboard');
-        else manual();
-      });
     });
   })();
 </script>
