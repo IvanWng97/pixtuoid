@@ -359,14 +359,6 @@ pub struct FrameInputs<'a> {
     pub active_pet: Option<&'a PetState>,
     pub floor_pet: Option<&'a Pet>,
     pub debug_walkable: bool,
-    /// Whether the caller composites its own text INTO the neon wall panel's
-    /// dark interior afterward (the TUI's `tui::widgets::hud::paint_wall_display`
-    /// ratatui overlay — see `pixel_painter::NEON_PANEL_INNER_X/W`). The pixel
-    /// pass paints only the panel's border+bg; without a text overlay to
-    /// complete it, an empty bordered box reads as a broken HUD element (the
-    /// floating window and the web/wasm painter have no such overlay), so they
-    /// pass `false` to skip painting the panel at all. The TUI passes `true`.
-    pub neon_panel_text_overlay: bool,
 }
 
 pub fn render_floor(
@@ -386,7 +378,6 @@ pub fn render_floor(
         active_pet,
         floor_pet,
         debug_walkable,
-        neon_panel_text_overlay,
     } = inputs;
     buf.ensure_size(size.w, size.h, theme.surface.bg_fallback);
     let layout = frame_prologue(fctx, size.w, size.h, floor_meta.floor_seed)?;
@@ -405,7 +396,6 @@ pub fn render_floor(
         coffee: coffee.map(),
         chitchat_state: chitchat,
         debug_walkable,
-        neon_panel_text_overlay,
     });
     // The epilogue the consumers used to mirror by hand — now ONE definition
     // (carrier stamping + the door-cosmetic clamp) shared with observe().
@@ -1399,7 +1389,6 @@ mod tests {
                 active_pet: None,
                 floor_pet: None,
                 debug_walkable: false,
-                neon_panel_text_overlay: true,
             },
         );
         assert!(none.is_none(), "an unlayoutable size returns None");
@@ -1426,7 +1415,6 @@ mod tests {
                 active_pet: None,
                 floor_pet: None,
                 debug_walkable: false,
-                neon_panel_text_overlay: true,
             },
         );
         assert!(layout.is_some(), "a layoutable size returns the layout");
@@ -1472,7 +1460,6 @@ mod tests {
             active_pet: None,
             floor_pet: None,
             debug_walkable: false,
-            neon_panel_text_overlay: true,
         });
         assert!(layout.is_some(), "a layoutable size renders");
         assert!(

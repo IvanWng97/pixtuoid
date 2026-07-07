@@ -252,11 +252,6 @@ pub struct PixelCtx<'a> {
     /// When set, composite the walkable / approach / route debug layer over the
     /// finished scene (the live `w` toggle). Off by default; transient.
     pub debug_walkable: bool,
-    /// Whether the caller composites its own text into the neon wall panel's
-    /// dark interior afterward (see [`crate::floor::FrameInputs::neon_panel_text_overlay`]
-    /// for the full rationale). `false` skips painting the panel entirely —
-    /// an empty bordered box with no completing text reads as broken.
-    pub neon_panel_text_overlay: bool,
 }
 
 /// The paint pass's borrow set — everything `paint_frame` may touch. The only
@@ -279,7 +274,6 @@ struct PaintCtx<'a> {
     motion: &'a HashMap<pixtuoid_core::AgentId, MotionState>,
     door_anim_max_ms: u64,
     debug_walkable: bool,
-    neon_panel_text_overlay: bool,
 }
 
 pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
@@ -320,7 +314,6 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
             motion: &ctx.store.motion,
             door_anim_max_ms: ctx.store.door_anim_max_ms,
             debug_walkable: ctx.debug_walkable,
-            neon_panel_text_overlay: ctx.neon_panel_text_overlay,
         },
         &frame,
     );
@@ -459,21 +452,16 @@ fn paint_frame(
 
     // Neon sign panel in the wall band — dark bg with glow border.
     // Text overlay (branding, dots, star link) is rendered by the ratatui
-    // widget pass in renderer.rs::paint_wall_display — a terminal-only layer
-    // this pixel pass has no equivalent for. A painter with no such overlay
-    // (floating window, web/wasm) sets `neon_panel_text_overlay: false` so an
-    // empty, un-completed bordered box is never painted at all.
-    if ctx.neon_panel_text_overlay {
-        paint_neon_panel(
-            ctx.buf,
-            NEON_PANEL_X,
-            NEON_PANEL_Y,
-            NEON_PANEL_W,
-            NEON_PANEL_H,
-            ctx.now,
-            ctx.theme,
-        );
-    }
+    // widget pass in renderer.rs::paint_wall_display.
+    paint_neon_panel(
+        ctx.buf,
+        NEON_PANEL_X,
+        NEON_PANEL_Y,
+        NEON_PANEL_W,
+        NEON_PANEL_H,
+        ctx.now,
+        ctx.theme,
+    );
 
     // Live wall clock painted after the wall (so hands sit on top of it)
     // but before wall decor — the bookshelf etc. shouldn't cover it.

@@ -286,11 +286,6 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         coffee: ctx.coffee,
         chitchat_state: ctx.chitchat_state,
         debug_walkable: ctx.debug_walkable,
-        // The TUI always completes the neon wall panel with its own ratatui
-        // text overlay (widgets/hud.rs::paint_wall_display), so it's the one
-        // painter that always paints the panel itself — see
-        // pixtuoid_scene::floor::FrameInputs::neon_panel_text_overlay.
-        neon_panel_text_overlay: true,
     });
     ctx.last_pet_pos = pixel_result.pet_pos;
     ctx.last_mascot_pos = pixel_result.mascot_pos;

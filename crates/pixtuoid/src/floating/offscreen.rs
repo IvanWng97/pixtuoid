@@ -89,10 +89,6 @@ impl OfficeRenderer {
             active_pet: None,
             floor_pet,
             debug_walkable: false,
-            // The floating window has no ratatui (or equivalent) text overlay
-            // to complete the neon wall panel — an empty bordered box with no
-            // brand text reads as broken. See FrameInputs' field doc.
-            neon_panel_text_overlay: false,
         });
         self.session.buf()
     }
