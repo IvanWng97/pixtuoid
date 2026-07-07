@@ -54,10 +54,10 @@ const cells = features.flatMap((f) =>
       </p>
     </div>
 
-    <div class="ledger">
+    <div class="ledger text-scrim">
       {
         cells.map((c) => (
-          <article class="ledger__row reveal text-scrim">
+          <article class="ledger__row reveal">
             <span class="ledger__icon" aria-hidden="true">
               {c.pix ? <PixIcon name={c.pix} scale={2} /> : c.icon}
             </span>
@@ -79,19 +79,30 @@ const cells = features.flatMap((f) =>
 </section>
 
 <style>
-  /* the typographic ledger: no cards, no borders — rows of type sitting
-     directly on the dimmed office */
+  /* the ledger is ONE bordered .text-scrim plate (not 7 separate per-row
+     cards — tried both; individual boxes read heavy/repetitive, one sheet
+     with hairline row dividers reads as a single ledger, matching the name),
+     wrapping typographic rows with no per-row background of their own. */
   .ledger {
     margin-top: 1.6rem;
     display: flex;
     flex-direction: column;
-    gap: 2.2rem;
+    /* horizontal padding/margin-inline stay the base .text-scrim values
+       (0.75em / -0.75em) — they already cancel out so the row icons stay
+       left-aligned with the section head above. A wider override here
+       overflowed past the container's own padding at 390px (the border
+       rendered off-screen) — only vertical breathing room is wrapper-local. */
+    padding-block: 0.4rem;
   }
   .ledger__row {
     display: grid;
     grid-template-columns: 2.2rem minmax(12rem, 18rem) 1fr auto;
     gap: 0.4rem 1.4rem;
     align-items: baseline;
+    padding: 1.3rem 0;
+  }
+  .ledger__row:not(:last-child) {
+    border-bottom: 1px solid var(--border);
   }
   .ledger__icon {
     font-size: 1.2rem;

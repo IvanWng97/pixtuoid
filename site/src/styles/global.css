@@ -36,15 +36,21 @@
   --led: #8de069;
   --led-glow: rgba(141, 224, 105, 0.55);
   --led-off: #6f675a; /* an unlit LED (also the statusline idle dot) */
-  /* opaque-theme --bg at 90% (day) / 72% (night, dracula) — plain rgba() on
+  /* opaque-theme --bg at 95% (day) / 94% (night, dracula) — plain rgba() on
      purpose: the scrim is load-bearing legibility, so it must not depend on
      color-mix() support (see the @supports fallback note below). Mirrors
-     --bg per theme. Day's worst case (scrimmed --fg-muted subcopy over the
-     hero's darkest office pixel, dimmer capped at data-lit-max 0.74) fails
-     WCAG AA at 72% (~4.3:1); 90% clears it with margin (~4.76:1) — measured
-     via computed styles in a real render, not estimated. Night/dracula
-     already clear AA at 72% (~7.5:1 / ~4.85:1) so they keep the lower alpha. */
-  --scrim: rgba(244, 238, 226, 0.9);
+     --bg per theme. Near-opaque (not the old 90%/72%) so the office pixels
+     underneath stop showing through as mud — the crisp terminal-panel idiom
+     (`.text-scrim` below) reads as an intentional card, not a translucent
+     smudge. Worst case (scrimmed --fg-muted subcopy over the hero's darkest
+     office pixel, dimmer capped at data-lit-max 0.74), measured via computed
+     styles in a real render, not estimated: day 4.88:1 (was ~4.76:1 at the
+     old 90%, the pinned e2e's floor is 4.5:1), night 7.50:1 (~unchanged —
+     already far past the floor), dracula 4.74:1 (was ~4.85:1 at the old
+     72% — a denser scrim leans slightly on the underlying --screen pixel
+     less, which happens to cost dracula's light-on-dark pairing a hair of
+     margin; still clears AA with the same headroom day's old 90% had). */
+  --scrim: rgba(244, 238, 226, 0.95);
 
   /* Semantic tokens — DAY (warm cream) */
   --bg: var(--paper);
@@ -93,7 +99,7 @@
   --grad-2: #ecae66; /* light amber — high contrast on the dark night --bg */
   --focus-ring: #e3845f; /* literal; matches the night --coral (see :root note) */
   --bg: #1d1813;
-  --scrim: rgba(29, 24, 19, 0.72);
+  --scrim: rgba(29, 24, 19, 0.94);
   --bg-tint: #18130f;
   --surface: #271f17;
   --surface-2: #322820;
@@ -528,18 +534,23 @@ section {
   color: var(--led);
   text-shadow: 0 0 6px var(--led-glow);
 }
-/* Guaranteed-legibility scrim for text overlapping the live office: a local
-   plate + soft halo, so a stalled scroll can never show low-contrast copy
-   regardless of the dimmer's state. border-radius reuses --radius-sm (never a
-   one-off literal here); the halo's blur+spread must read as a visible
-   outward gradient, not a hard-edged rectangle (#U3 — a sharp-cornered plate
-   read as a hard box in review). */
+/* Guaranteed-legibility scrim for text overlapping the live office, so a
+   stalled scroll can never show low-contrast copy regardless of the dimmer's
+   state. Styled as the site's own crisp terminal-panel idiom (same grammar as
+   .card/.terminal's hairline-bordered surface, not the hardware-fixed
+   .hw-panel — the scrim TRACKS the site theme, so its border does too):
+   near-opaque --scrim background, a 1px --border-strong hairline, sharp
+   corners (pixel aesthetic, no --radius). No blur halo — a #U3-era review
+   found a soft glow read as a murky smudge over the office pixels; a flat
+   bordered plate reads as an intentional card instead. margin-inline cancels
+   the padding so the TEXT stays left-aligned with its siblings (h1, eyebrow,
+   CTA row) — only the plate's edge insets around it. */
 .text-scrim {
   background: var(--scrim);
-  border-radius: var(--radius-sm);
-  box-shadow:
-    0 0 0 1px var(--scrim),
-    0 0 18px 12px var(--scrim);
+  border: 1px solid var(--border-strong);
+  border-radius: 0;
+  padding: 0.5em 0.75em;
+  margin-inline: -0.75em;
 }
 
 .office-gap {
@@ -730,7 +741,7 @@ code,
   --grad-2: #ff79c6; /* light pink — high contrast on the dark dracula --bg */
   --focus-ring: #caa6fb; /* literal; matches the dracula --coral-deep (see :root note) */
   --bg: #282a36;
-  --scrim: rgba(40, 42, 54, 0.72);
+  --scrim: rgba(40, 42, 54, 0.94);
   --bg-tint: #21222c;
   --surface: #343746;
   --surface-2: #44475a;

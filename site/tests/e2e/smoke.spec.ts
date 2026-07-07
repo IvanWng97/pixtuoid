@@ -1212,12 +1212,17 @@ test('docs-table code cells render single-line (column-collapse guard)', async (
 test('text over the live office carries its own scrim (.text-scrim)', async ({ page }) => {
   await gotoLive(page);
   // §5: legibility must not depend on the center-anchored scroll dimmer — the
-  // hero subcopy and the feature ledger rows carry a local scrim.
+  // hero subcopy and the feature ledger carry a local scrim. The ledger is
+  // ONE wrapping plate (not a per-row scrim — wb-2 redesign), so the scrim
+  // lives on `.ledger` itself, with every row inside it.
   const bg = await page.evaluate(
     () => getComputedStyle(document.querySelector('.hero .statement-sub')!).backgroundColor
   );
   expect(bg).not.toBe('rgba(0, 0, 0, 0)');
-  expect(await page.locator('#features .ledger__row.text-scrim').count()).toBeGreaterThan(0);
+  expect(await page.locator('#features .ledger.text-scrim').count()).toBe(1);
+  expect(await page.locator('#features .ledger.text-scrim .ledger__row').count()).toBeGreaterThan(
+    0
+  );
 });
 
 test('the scrimmed hero subcopy clears WCAG AA at the worst-case composite (day theme)', async ({
