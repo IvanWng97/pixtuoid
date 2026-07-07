@@ -563,6 +563,35 @@ const badgeColor = (who: string): string | undefined => {
       observeFloors();
     }
 
+    // Bottom-clamp: 1F (install) + the footer rarely fill the -45%/-45%
+    // middle band the observer above keys off, so the last section can never
+    // cross it — the readout freezes on the SECOND-to-last floor while the
+    // visitor reads the very end of the page. At the true scroll max, the
+    // last floor wins unconditionally, overriding whatever the observer last
+    // reported (wb-3's elevator shaft mirrors this same clamp on rebase — it
+    // consumes the identical -45%/-45% root-margin authority).
+    const BOTTOM_CLAMP_EPSILON_PX = 2; // rounding slack: scrollY+innerHeight vs scrollHeight
+    function clampToLastFloorAtBottom() {
+      if (!btns.length) return;
+      const atBottom =
+        window.scrollY + window.innerHeight >=
+        document.documentElement.scrollHeight - BOTTOM_CLAMP_EPSILON_PX;
+      if (atBottom) setActive(btns[btns.length - 1].dataset.floorBtn);
+    }
+    let bottomRaf = 0;
+    window.addEventListener(
+      'scroll',
+      function () {
+        if (bottomRaf) return;
+        bottomRaf = requestAnimationFrame(function () {
+          bottomRaf = 0;
+          clampToLastFloorAtBottom();
+        });
+      },
+      { passive: true }
+    );
+    clampToLastFloorAtBottom(); // a hash-anchored load can already start at the bottom
+
     // ── page-level pause (WCAG 2.2.2): the office pause switch governs EVERY
     // >5s auto-motion, so it also holds the feed ticker (the hero dust listens
     // too). Reduced motion holds the same surfaces. Both drive ONE stop path. ──

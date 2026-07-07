@@ -143,6 +143,22 @@ test('digit keys ride between floors (scrollspy round-trip)', async ({ page }) =
   await expect(page.locator('[data-lift-digit]')).toHaveText('1F', { timeout: 10_000 });
 });
 
+test('scrolled to the true page bottom, the statusline clamps to the last floor', async ({
+  page,
+}) => {
+  // 1F (install) + the footer rarely fill the observer's -45%/-45% middle
+  // band, so without a bottom clamp the readout can freeze one floor short
+  // while the visitor reads the very end of the page. Force actual max scroll
+  // (not a fixed pixel guess — page height varies by content/viewport); retry
+  // a few times since late layout settling can still grow the page after the
+  // first scrollTo lands.
+  await gotoLive(page);
+  await expect(async () => {
+    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+    await expect(page.locator('[data-lift-digit]')).toHaveText('1F', { timeout: 500 });
+  }).toPass({ timeout: 10_000 });
+});
+
 test('the dimmer darkens statements and releases in office gaps', async ({ page }) => {
   await gotoLive(page);
   const dim = () =>
