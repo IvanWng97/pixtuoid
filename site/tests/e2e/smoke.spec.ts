@@ -601,14 +601,16 @@ test('statusline install chip: reduced motion jumps instantly (no smooth scroll)
   await context.close();
 });
 
-test('statusline install chip: the icon-only mobile collapse shows the hire-receipt flash', async ({
+test('statusline install chip on mobile: label stays readable at rest, flash swaps to the glyph', async ({
   page,
   context,
 }) => {
-  // ≤760px hides .sl__copy-label — the desktop test above asserts on TEXT
-  // that's invisible here. This pins the glyph swap + chip pulse that stand
-  // in for it. Post-wb-2 the chip no longer copies anything itself (it's a
-  // jump link) — the hire fires from the Install section's OWN copy control.
+  // ≤760px KEEPS the one-word 'install' label (a bare arrow means nothing to
+  // a first-time visitor — user-caught regression); only the hire-receipt
+  // flash swaps to the ✓ glyph + pulse, because the receipt TEXT is too long
+  // for the narrow bar. Post-wb-2 the chip no longer copies anything itself
+  // (it's a jump link) — the hire fires from the Install section's OWN copy
+  // control.
   await context.grantPermissions(['clipboard-write']);
   const errors = watchErrors(page);
   await page.addInitScript(() => {
@@ -622,9 +624,13 @@ test('statusline install chip: the icon-only mobile collapse shows the hire-rece
   await gotoLive(page); // live office → the Install copy also hires → the receipt
   await page.setViewportSize({ width: 375, height: 800 });
   const chip = page.locator('#sl-install .sl__copy');
+  const label = page.locator('#sl-install .sl__copy-label');
   const flashIcon = page.locator('#sl-install .sl__copy-icon-flash');
   await expect(chip).not.toHaveClass(/is-flash/);
   await expect(flashIcon).toBeHidden();
+  // the rest state must READ on mobile: arrow + the word, not a bare glyph
+  await expect(label).toBeVisible();
+  await expect(label).toHaveText('install');
 
   await page.evaluate(() =>
     document.getElementById('install')!.scrollIntoView({ block: 'center', behavior: 'instant' })
@@ -633,6 +639,7 @@ test('statusline install chip: the icon-only mobile collapse shows the hire-rece
 
   await expect(chip).toHaveClass(/is-flash/);
   await expect(flashIcon).toBeVisible();
+  await expect(label).toBeHidden(); // the long receipt text never overflows the narrow bar
   // …and once the hire-receipt sequence settles, it reverts
   await expect(page.locator('#sl-install .sl__copy-label')).toHaveText('install', {
     timeout: 8_000,

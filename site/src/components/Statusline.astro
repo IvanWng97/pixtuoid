@@ -411,17 +411,19 @@ const badgeColor = (who: string): string | undefined => {
     .statusline {
       justify-content: space-between;
     }
-    .sl__copy-label,
     .sl__stars {
       display: none;
     }
-    /* the label's copied/hire-receipt states are invisible in this collapse,
-       so the flash also swaps the glyph + pulses the chip (review round:
-       sighted mobile users got zero confirmation the copy worked). */
+    /* the jump link KEEPS its one-word label here — a bare arrow carries no
+       meaning to a first-time visitor (the old COMMAND chip collapsed because
+       the brew line was long; 'install' IS the point of the link). Only the
+       hire-receipt flash swaps to the glyph: the receipt text is too long for
+       this bar, so the pulse + ✓ carry the confirmation instead. */
     .sl__copy.is-flash {
       animation: chip-pulse 0.6s ease-out;
     }
-    .sl__copy.is-flash .sl__copy-icon {
+    .sl__copy.is-flash .sl__copy-icon,
+    .sl__copy.is-flash .sl__copy-label {
       display: none;
     }
     .sl__copy.is-flash .sl__copy-icon-flash {
