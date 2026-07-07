@@ -1299,6 +1299,53 @@ test('the scrimmed hero subcopy clears WCAG AA at the worst-case composite (day 
   );
 });
 
+test('the statusline feed ellipsizes on the wrapping text span, not the flex row', async ({
+  page,
+}) => {
+  // A flex container's own overflow/text-overflow never applies to its
+  // children (the badge `<b>` and the raw " · {what}" run are separate
+  // anonymous flex items) — regression pin for the mid-glyph clip: ellipsis
+  // must live on `.sl__text`, and it must actually be clipping SOMETHING
+  // (i.e. the item's content is wider than its box) for this pin to mean
+  // anything at a viewport wide enough to show the feed at all.
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await gotoLive(page);
+  // The feed's real content is a build-time GH API fetch (real PR titles) —
+  // length varies build to build, so don't rely on live content happening to
+  // overflow. Force it deterministically instead: the CSS behavior under test
+  // is on `.sl__text` itself, independent of what text it holds.
+  const info = await page.evaluate(() => {
+    const text = document.querySelector('.sl__item .sl__text') as HTMLElement;
+    text.textContent =
+      'cc·pixtuoid · merged #999 · this is a deliberately very long line of feed text to force an overflow';
+    const cs = getComputedStyle(text);
+    return {
+      overflow: cs.overflow,
+      textOverflow: cs.textOverflow,
+      whiteSpace: cs.whiteSpace,
+      scrollWidth: text.scrollWidth,
+      clientWidth: text.clientWidth,
+    };
+  });
+  expect(info.overflow).toBe('hidden');
+  expect(info.textOverflow).toBe('ellipsis');
+  expect(info.whiteSpace).toBe('nowrap');
+  expect(info.scrollWidth).toBeGreaterThan(info.clientWidth);
+});
+
+test('the feed hides itself, rather than show an unreadably short fragment, at a squeezed width', async ({
+  page,
+}) => {
+  // 768-860px: .sl__text's available width drops to a sliver ("cc·pixtuoid ·
+  // mer…") even with a clean ellipsis — hiding reads better than a fragment
+  // too short to convey anything. Above/below that band it should show.
+  await page.setViewportSize({ width: 800, height: 720 });
+  await gotoLive(page);
+  await expect(page.locator('.sl__feed')).toBeHidden();
+  await page.setViewportSize({ width: 1024, height: 720 });
+  await expect(page.locator('.sl__feed')).toBeVisible();
+});
+
 test('footer separators never strand alone at a wrap boundary', async ({ page }) => {
   // Each "·" is grouped with the item it introduces into ONE flex item
   // (.footer__grp), so flex-wrap can only break BETWEEN groups. Pin the
