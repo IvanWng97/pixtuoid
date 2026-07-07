@@ -241,14 +241,22 @@ test('the dimmer tracks live geometry across a Showcase channel swap', async ({ 
 // The gap-2 floating-window still was the ORIGINAL suspect for the dimmer
 // glitch above (a lazy image with no width/height reserving no space). It
 // isn't: `.gap-frame__body`'s CSS `aspect-ratio: 16/10` pins the box before
-// the PNG ever arrives. Pin that explicitly so it can't regress silently (the
-// width/height attributes on the <img> are still worth keeping as defense in
-// depth — see index.astro).
-test('the gap-2 still reserves its box before and after the image loads', async ({ page }) => {
+// the PNG ever arrives. Pin the EXPECTED box, not before/after equality: a
+// stray height presentational attribute overrides aspect-ratio (it only
+// applies to auto dimensions) and blew the frame to natural height — a
+// same-before-and-after assertion stayed green through that regression.
+// Do NOT re-add width/height attributes to this <img> (the 1600×1440
+// natural size is 10:9, not the frame's 16/10 crop).
+test('the gap-2 still holds its 16/10 crop before and after the image loads', async ({ page }) => {
   await gotoLive(page);
-  const frameHeight = () =>
-    page.evaluate(() => document.querySelector('.gap-frame__body')!.getBoundingClientRect().height);
-  const before = await frameHeight();
+  const frameBox = () =>
+    page.evaluate(() => {
+      const r = document.querySelector('.gap-frame__body')!.getBoundingClientRect();
+      return { w: r.width, h: r.height };
+    });
+  const expectSixteenTen = (box: { w: number; h: number }) =>
+    expect(Math.abs(box.h - (box.w * 10) / 16)).toBeLessThan(1);
+  expectSixteenTen(await frameBox());
   await page.evaluate(() =>
     document.querySelector('.gap-frame')!.scrollIntoView({ block: 'center', behavior: 'instant' })
   );
@@ -256,8 +264,7 @@ test('the gap-2 still reserves its box before and after the image loads', async 
     const img = document.querySelector<HTMLImageElement>('[data-gap-still]');
     return !!img && img.complete && img.naturalWidth > 0;
   });
-  const after = await frameHeight();
-  expect(Math.abs(after - before)).toBeLessThan(0.5);
+  expectSixteenTen(await frameBox());
 });
 
 test('the hero pause switch freezes the office and resumes it seamlessly', async ({ page }) => {
