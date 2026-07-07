@@ -1954,6 +1954,7 @@ fn paint_frame_is_pure_and_byte_identical() {
                 motion: &motion,
                 door_anim_max_ms: 0,
                 debug_walkable: false,
+                neon_panel_text_overlay: true,
             },
             &frame,
         );

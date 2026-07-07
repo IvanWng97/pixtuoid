@@ -570,6 +570,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                 active_pet: from_active_pet,
                 floor_pet: from_pet,
                 debug_walkable: self.debug_walkable,
+                neon_panel_text_overlay: true,
             },
         );
         render_floor(
@@ -587,6 +588,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                 active_pet: to_active_pet,
                 floor_pet: to_pet,
                 debug_walkable: self.debug_walkable,
+                neon_panel_text_overlay: true,
             },
         );
 
