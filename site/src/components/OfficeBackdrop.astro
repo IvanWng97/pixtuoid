@@ -438,15 +438,17 @@ import { asset, DIM_RESTING } from '../consts';
       wireFooterHeight();
     }
 
-    // Working Building: ANY install-copy control (hero row, statusline chip,
-    // docs strip, the 1F tabs) hires through ONE event instead of
-    // each caller reaching for __pixHire. Answer with pix:hired so the
-    // statusline can flash the receipt. The name mirrors the hire cast's real
-    // identity (claude_code + cwd "/work/yours" → label cc·yours — see
-    // pixtuoid-web/src/script.rs hire_beats). The engine's own return value is
-    // the admission signal (`Office::hire`'s bool contract) — the copy path
-    // never mirrors the concurrent cap on the JS side, so the receipt can't
-    // drift from what the engine actually admitted.
+    // Working Building: the 1F Install tabs are the surviving install-copy
+    // control (wb-2: the statusline chip became a plain jump link and the
+    // closer's own copy row was cut, both redundant with Install) — they hire
+    // through ONE event instead of reaching for __pixHire directly. Answer
+    // with pix:hired so the statusline can flash the receipt. The name
+    // mirrors the hire cast's real identity (claude_code + cwd "/work/yours"
+    // → label cc·yours — see pixtuoid-web/src/script.rs hire_beats). The
+    // engine's own return value is the admission signal (`Office::hire`'s
+    // bool contract) — the copy path never mirrors the concurrent cap on the
+    // JS side, so the receipt can't drift from what the engine actually
+    // admitted.
     document.addEventListener('pix:install-copy', function () {
       if (!window.__pixHire) return;
       if (!window.__pixHire()) return; // engine refused: cap reached or no free desk

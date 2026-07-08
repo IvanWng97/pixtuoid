@@ -400,10 +400,12 @@ test('reduced motion: an install copy writes the clipboard but hires nobody', as
   browser,
 }) => {
   // The no-wasm strand of the same finding: under reduced motion the wasm
-  // fetch never runs, so window.__pixHire is never published. copy() must
-  // still succeed (the clipboard write is independent of the office) and
-  // OfficeBackdrop's `if (!window.__pixHire) return;` guard must make the
-  // hire side a true no-op — no throw, no pix:hired receipt.
+  // fetch never runs, so window.__pixHire is never published. Install.astro's
+  // own copy button (the surviving install-copy control — the statusline
+  // chip is a plain jump link) must still succeed writing the clipboard (that
+  // path is independent of the office) and OfficeBackdrop's
+  // `if (!window.__pixHire) return;` guard must make the hire side a true
+  // no-op — no throw, no pix:hired receipt.
   const context = await browser.newContext({
     reducedMotion: 'reduce',
     permissions: ['clipboard-read', 'clipboard-write'],
@@ -421,7 +423,12 @@ test('reduced motion: an install copy writes the clipboard but hires nobody', as
       )
     );
   });
-  expect(await page.evaluate(() => window.__pixInstall!.copy('statusline'))).toBe(true);
+  await page.evaluate(() =>
+    document.getElementById('install')!.scrollIntoView({ block: 'center', behavior: 'instant' })
+  );
+  const copy = page.locator('.install__panel.is-active .install__copy');
+  await copy.click();
+  await expect(copy).toHaveText(/Copied|Select & copy/);
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
     'brew install IvanWng97/pixtuoid/pixtuoid'
   );

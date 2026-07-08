@@ -19,15 +19,8 @@ import '@fontsource/lora/400.css';
 import '@fontsource/lora/600.css';
 import '../styles/global.css';
 import { asset, THEMES, THEME_BG, THEME_STORAGE_KEY, VALID_THEMES } from '../consts';
-import installTabs from '../install.json';
 import sources from '../sources.json';
 
-// THE install one-liner (single-sourced from install.json — the same file the
-// 1F tabs and the generated README install block read, so no second copy of
-// the command can drift). The brew row is the canonical short form.
-const brewTab = installTabs.find((t) => t.id === 'brew');
-if (!brewTab) throw new Error('Base: install.json lost its brew row (the canonical one-liner)');
-const INSTALL_CMD = brewTab.cmds[0];
 // Splash single sources: the CLI count comes from the sources manifest's
 // length (the same file the tools board renders + the Rust bridge test pins).
 const CLI_COUNT = sources.length;
@@ -123,7 +116,6 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
         themeKey: THEME_STORAGE_KEY,
         validThemes: VALID_THEMES,
         themeBG: THEME_BG,
-        installCmd: INSTALL_CMD,
       }}
     >
       // THE site clock boundary (7/19) — the one client-side source of truth,
@@ -192,34 +184,6 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
           try {
             localStorage.setItem('pix-keys', on ? 'on' : 'off');
           } catch (e) {}
-        },
-      };
-      // THE install one-liner + its dispatch helper (Working Building contract):
-      // any future control that copies THIS SAME one-liner (docs, …) routes
-      // through copy() so the clipboard write and the pix:install-copy event
-      // (→ OfficeBackdrop's hire listener → the statusline's hire receipt)
-      // can never drift apart. Resolves true only after a successful write;
-      // false (no event) when the Clipboard API is unavailable. Exception:
-      // the 1F Install tabs copy a PER-METHOD command (brew/npm/cargo/…), so
-      // Install.astro writes the clipboard and dispatches pix:install-copy
-      // {source:'install'} directly instead of routing through this helper.
-      window.__pixInstall = {
-        CMD: installCmd,
-        copy: function (source) {
-          if (!navigator.clipboard || !navigator.clipboard.writeText) {
-            return Promise.resolve(false);
-          }
-          return navigator.clipboard.writeText(installCmd).then(
-            function () {
-              document.dispatchEvent(
-                new CustomEvent('pix:install-copy', { detail: { source: source } })
-              );
-              return true;
-            },
-            function () {
-              return false;
-            }
-          );
         },
       };
       (function () {
