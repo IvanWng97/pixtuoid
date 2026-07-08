@@ -284,5 +284,20 @@
    "--agents",
    "5"
   ]
+ },
+ {
+  "id": "proof",
+  "kind": "proof",
+  "targets": [
+   "site"
+  ],
+  "cols": 120,
+  "rows": 52,
+  "hour": 21,
+  "theme": "tokyo-night",
+  "duration": 26,
+  "fps": 12,
+  "poster": 10.0,
+  "fixture": "crates/pixtuoid-core/tests/sources/fixtures/claude-code/proof-session/01000000-0000-7000-8000-0000000000f4.jsonl"
  }
 ]

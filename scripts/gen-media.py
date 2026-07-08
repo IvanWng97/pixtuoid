@@ -19,6 +19,9 @@ demo.gif are presence-checked only (ffmpeg/gifsicle output is not byte-stable
 across versions, but the underlying renders are pixel-deterministic). Exits
 non-zero on any drift.
 
+kind:"proof" renders the §3 split-screen replay via snapshot --proof (posters
+pixel-gated, encodes presence-gated).
+
 Requires the .venv (Pillow) + ffmpeg + gifsicle. Run via `.venv/bin/python3`.
 """
 
@@ -45,6 +48,9 @@ TARGET_DIRS = {
 }
 # --check writes pixel-diff overlays here (survives the run for CI artifact upload).
 DIFF_DIR = ROOT / "target/gen-check-diff"
+# --check must REGENERATE the proof posters (pixel-gated stills) but skip the
+# video encodes (presence-gated, non-byte-stable) — handlers read this flag.
+CHECK_MODE = False
 # Committed files under docs/images/ that this pipeline does NOT generate
 # (a live-agent capture and a hand-made banner) — never compared in --check.
 NOT_GENERATED = {"screenshot-real.png", "sprite-banner.png"}
@@ -277,6 +283,42 @@ def run_wasm_still(job, out_dirs, work, intermediates):
         )
 
 
+def run_proof(job, out_dirs, work, intermediates):
+    # §3 split-screen proof: ONE snapshot --proof pass renders BOTH compositions
+    # (wide + tall) from the same fixture-driven reducer replay; ffmpeg encodes
+    # each; the poster is a designated frame COPY, so it stays pixel-deterministic
+    # (and pixel-gated) while the encodes stay presence-only.
+    fps = job["fps"]
+    poster_idx = int(job["poster"] * fps) + 1
+    # In --check only the poster frame matters: rendering a deterministic PREFIX
+    # of the timeline (through the poster frame) yields the identical poster.
+    secs = int(job["poster"]) + 2 if CHECK_MODE else job["duration"]
+    frames = work / "proof-frames"
+    subprocess.run(
+        [str(SNAP), "--proof", str(ROOT / job["fixture"]),
+         "--frames-dir", str(frames),
+         "--proof-fps", str(fps), "--proof-secs", str(secs),
+         "--cols", str(job["cols"]), "--rows", str(job["rows"]),
+         "--now-hour", str(job["hour"]), "--theme", job["theme"], "--weather", "clear"],
+        check=True, stdout=subprocess.DEVNULL,
+    )
+    scale = "scale=trunc(iw/2)*2:trunc(ih/2)*2"
+    for layout, suffix in (("wide", ""), ("tall", "-tall")):
+        ldir = frames / layout
+        for d in out_dirs:
+            shutil.copyfile(ldir / f"f{poster_idx:04d}.png",
+                            d / f"{job['id']}{suffix}-poster.png")
+            if CHECK_MODE:
+                continue
+            ffmpeg("-framerate", str(fps), "-i", str(ldir / "f%04d.png"),
+                   "-movflags", "+faststart", "-pix_fmt", "yuv420p", "-vf", scale,
+                   str(d / f"{job['id']}{suffix}.mp4"))
+            ffmpeg("-framerate", str(fps), "-i", str(ldir / "f%04d.png"),
+                   "-c:v", "libvpx-vp9", "-b:v", "0", "-crf", "36", "-row-mt", "1",
+                   "-pix_fmt", "yuv420p", "-vf", scale,
+                   str(d / f"{job['id']}{suffix}.webm"))
+
+
 HANDLERS = {
     "render": run_render,
     "crop": run_crop,
@@ -285,6 +327,7 @@ HANDLERS = {
     "matrix": run_matrix,
     "clip": run_clip,
     "wasm-still": run_wasm_still,
+    "proof": run_proof,
 }
 
 
@@ -315,6 +358,8 @@ def _expected_presence_outputs(job):
         return [f"{job['id']}.gif"]
     if job["kind"] == "clip":
         return [f"{job['id']}.mp4", f"{job['id']}.webm", f"{job['id']}-poster.png"]
+    if job["kind"] == "proof":
+        return [f"{job['id']}{s}.{ext}" for s in ("", "-tall") for ext in ("mp4", "webm")]
     return []
 
 
@@ -384,6 +429,8 @@ def main():
     ap.add_argument("--only", choices=["docs", "site"], help="restrict to one surface")
     ap.add_argument("--jobs", help="comma-separated job ids to run (default: all)")
     args = ap.parse_args()
+    global CHECK_MODE
+    CHECK_MODE = args.check
 
     # run_check walks the FULL committed tree, so every still owned by a
     # filtered-out job would report "NOT REGENERATED" — spurious failures.
