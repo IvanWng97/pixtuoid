@@ -583,8 +583,10 @@ section {
    caller needing a tighter plate overrides just that one property and the
    cancellation stays exact — no way for padding and margin to desync again
    (#wb-3: a raw padding override left the margin canceling the OLD 0.75em,
-   pushing text ~7px past the edge; the roster rows that hit this have since
-   gone bare — .install__note is the surviving consumer). */
+   pushing text ~7px past the edge). No current consumer uses that override;
+   the one live consumer, .install__note, instead deliberately zeroes
+   margin-inline — the IN-CARD exception where the plate edge must align
+   with its column (see Install.astro's own comment). */
 /* Every bare muted-text surface over the office rides the hero's tuned inks
    (day LIGHTENS the composite, night DARKENS it — stock --fg-muted clears
    neither extreme; see --office-ink's doc comment above). Lens B measured the
