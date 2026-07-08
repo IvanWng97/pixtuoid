@@ -5,17 +5,19 @@ import featuresData from '../features.json';
 import PixIcon from './PixIcon.astro';
 
 // The merged 5F band: the ledger rows that used to be the standalone Features
-// section now live INSIDE the studio band — "the channel IS the feature list".
-// Rows whose card carries a #showcase-<id> href become channel TRIGGERS.
-// features.json stays the README single source (gen-readme.mjs reads only
-// icon/name/desc/featured; `card` is site-only).
+// section now live INSIDE the studio band, as a quiet, non-interactive grid
+// BELOW the CRT + dial — the dial is the one interactive switcher (a prior
+// per-row "tune in →" link duplicated it, and half its channel mapping was
+// fabricated, e.g. Coffee run → vibing). features.json stays the README
+// single source (gen-readme.mjs reads only icon/name/desc/featured; `card` is
+// site-only).
 type Feature = {
   icon: string;
   name: string;
   desc: string;
   featured?: boolean;
   pix?: string;
-  card?: { blurb: string; href?: string };
+  card?: { blurb: string };
 };
 const roster = (featuresData as Feature[]).flatMap((f) =>
   f.card
@@ -25,9 +27,6 @@ const roster = (featuresData as Feature[]).flatMap((f) =>
           pix: f.pix,
           title: f.name,
           body: f.card.blurb ?? f.desc,
-          ch: f.card.href?.startsWith('#showcase-')
-            ? f.card.href.slice('#showcase-'.length)
-            : undefined,
         },
       ]
     : []
@@ -112,39 +111,23 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
             )
           }
         </div>
-        <div class="roster" role="group" aria-label="Features — tune a row in on the studio wall">
-          <span id="features" aria-hidden="true"></span>
-          {
-            roster.map((r) =>
-              r.ch ? (
-                <button
-                  class="roster__row text-scrim"
-                  data-feature-ch={r.ch}
-                  aria-pressed={r.ch === def.id ? 'true' : 'false'}
-                >
-                  <span class="roster__icon" aria-hidden="true">
-                    {r.pix ? <PixIcon name={r.pix} scale={2} /> : r.icon}
-                  </span>
-                  <span class="roster__name">{r.title}</span>
-                  <span class="roster__body">{r.body}</span>
-                  <span class="roster__tune" aria-hidden="true">
-                    tune in →
-                  </span>
-                </button>
-              ) : (
-                <div class="roster__row roster__row--plain text-scrim">
-                  <span class="roster__icon" aria-hidden="true">
-                    {r.pix ? <PixIcon name={r.pix} scale={2} /> : r.icon}
-                  </span>
-                  <span class="roster__name">{r.title}</span>
-                  <span class="roster__body">{r.body}</span>
-                </div>
-              )
-            )
-          }
-        </div>
       </div>
     </div>
+
+    <span id="features" aria-hidden="true"></span>
+    <ul class="roster reveal" aria-label="Feature highlights">
+      {
+        roster.map((r) => (
+          <li class="roster__row text-scrim">
+            <span class="roster__icon" aria-hidden="true">
+              {r.pix ? <PixIcon name={r.pix} scale={2} /> : r.icon}
+            </span>
+            <span class="roster__name">{r.title}</span>
+            <span class="roster__body">{r.body}</span>
+          </li>
+        ))
+      }
+    </ul>
   </div>
 </section>
 
@@ -454,11 +437,6 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
         monitors.forEach(function (m) {
           m.setAttribute('aria-pressed', m.dataset.ch === id ? 'true' : 'false');
         });
-        rows.forEach(function (r) {
-          const on = r.dataset.featureCh === id;
-          r.setAttribute('aria-pressed', on ? 'true' : 'false');
-          r.classList.toggle('led-selected', on);
-        });
         syncVideos();
         syncCanvas();
       }
@@ -476,22 +454,6 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
       }
       m.addEventListener('pointerenter', warm);
       m.addEventListener('focus', warm);
-    });
-
-    // ---- merged 5F band: feature rows are channel triggers ("the channel IS
-    // the feature list") — a row rides the SAME tune() path as the dial, and
-    // warms its stage on hover/focus like a monitor does.
-    const rows = Array.prototype.slice.call(studio.querySelectorAll('[data-feature-ch]'));
-    rows.forEach(function (r) {
-      r.addEventListener('click', function () {
-        tune(r.dataset.featureCh);
-      });
-      function warmRow() {
-        const st = studio.querySelector('[data-stage="' + r.dataset.featureCh + '"]');
-        if (st) hydrate(st);
-      }
-      r.addEventListener('pointerenter', warmRow);
-      r.addEventListener('focus', warmRow);
     });
 
     // ---- scoped channel keys (§4): while focus is inside the studio, digits
@@ -703,13 +665,24 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
   .studio__panel {
     min-width: 0;
   }
+  /* the quiet, non-interactive feature grid — moved BELOW the stage (was
+     the studio panel's narrow single-column list, stacked beside the dial);
+     now a full-width 2-column grid across the whole container, single
+     column ≤760px, with a tighter row rhythm than the old stacked list. */
   .roster {
-    margin-top: 1.6rem;
-    display: flex;
-    flex-direction: column;
-    gap: 0.55rem;
+    list-style: none;
+    margin: 1rem 0 0;
+    padding: 0.8rem 0 0;
     border-top: 1px solid var(--border);
-    padding-top: 1.2rem;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: 2.2rem;
+    row-gap: 0.5rem;
+  }
+  @media (max-width: 760px) {
+    .roster {
+      grid-template-columns: minmax(0, 1fr);
+    }
   }
   .roster__row {
     display: grid;
@@ -718,8 +691,6 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
     column-gap: 0.7rem;
     align-items: start;
     text-align: left;
-    background: none;
-    border: 0;
     /* .text-scrim (global.css) cancels its own inline padding via a matching
        negative margin-inline, both reading ONE --scrim-pad-x property — this
        row's tighter density overrides just that property (not a raw padding
@@ -727,16 +698,13 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
        sync with the margin (#wb-3: the old raw override left text ~7px past
        the container edge). */
     --scrim-pad-x: 0.3rem;
-    padding-block: 0.35rem;
+    padding-block: 0.3rem;
     padding-inline: var(--scrim-pad-x);
     font: inherit;
     color: var(--fg);
   }
   .roster__icon {
     grid-area: icon;
-  }
-  button.roster__row {
-    cursor: pointer;
   }
   .roster__name {
     grid-area: name;
@@ -749,21 +717,6 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
     font-family: var(--font-body);
     font-size: 0.88rem;
     color: var(--fg-muted);
-  }
-  .roster__tune {
-    grid-column: 2;
-    justify-self: start;
-    font-family: var(--font-mono);
-    font-size: 0.78rem;
-    color: var(--coral-deep); /* AA 5.2:1 in both themes (same token Features used) */
-  }
-  button.roster__row:hover .roster__tune,
-  button.roster__row:focus-visible .roster__tune {
-    text-decoration: underline;
-  }
-  button.roster__row[aria-pressed='true'] .roster__name {
-    color: var(--led);
-    text-shadow: 0 0 6px var(--led-glow);
   }
   @media (prefers-reduced-motion: reduce) {
     /* the VIBING channel's controls only make sense with the office running,

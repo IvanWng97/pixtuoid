@@ -1,44 +1,44 @@
 import { expect, test } from '@playwright/test';
 
-// wb-3's runtime contracts: the merged 5F band (feature rows ARE channel
-// triggers), the floor-anchor vocabulary, the elevator shaft, and the scroll
+// wb-3's runtime contracts: the merged 5F band (the dial is the ONE channel
+// switcher; the feature roster below the stage is quiet, non-interactive
+// content), the floor-anchor vocabulary, the elevator shaft, and the scroll
 // budget. Companion to smoke.spec.ts; runs against the PRODUCTION build.
 
-test('cold load: the roster row for the default channel starts pressed, in sync with the dial', async ({
-  page,
-}) => {
+test('cold load: the dial marks the default channel pressed', async ({ page }) => {
   await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
   await page.goto('./');
-  // the default channel is 'vibing' (src/showcase.json's default:true) — its
-  // roster row is "coffee run" (card.href="#showcase-vibing"), never clicked
-  const row = page.locator('[data-feature-ch="vibing"]').first();
-  await expect(row).toHaveAttribute('aria-pressed', 'true');
+  // the default channel is 'vibing' (src/showcase.json's default:true) — the
+  // dial is the ONE interactive switcher now (the feature roster below the
+  // stage no longer mirrors channel state; it never did anything but tune).
   await expect(page.locator('button.mon[data-ch="vibing"]')).toHaveAttribute(
     'aria-pressed',
     'true'
   );
 });
 
-test('a feature row retunes the studio to its demo channel', async ({ page }) => {
+test('the feature roster is a quiet, non-interactive grid — the dial is the switcher', async ({
+  page,
+}) => {
   await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
   await page.goto('./');
-  // "pantry chitchat" row → the MEETINGS channel (chitchat bubbles on screen)
-  const row = page.locator('[data-feature-ch="meetings"]');
-  await row.scrollIntoViewIfNeeded();
-  await row.click();
+  // wb-3: the per-row "tune in →" link (and its half-fabricated channel
+  // mapping — Coffee run → vibing, monitor glow → spaces) is retired. A
+  // stays-dead pin: no channel-tune trigger or #showcase-<id> anchor is left
+  // anywhere in the roster.
+  await expect(page.locator('#showcase [data-feature-ch]')).toHaveCount(0);
+  await expect(page.locator('#showcase button.roster__row')).toHaveCount(0);
+  await expect(page.locator('#showcase a[href^="#showcase-"]')).toHaveCount(0);
+  const rowCount = await page.locator('#showcase .roster__row').count();
+  expect(rowCount).toBeGreaterThan(0);
+  // a dial click still retunes the studio (the switcher survives the roster's
+  // demotion) — "meetings" is the chitchat-bubble channel.
+  const btn = page.locator('button.mon[data-ch="meetings"]');
+  await btn.scrollIntoViewIfNeeded();
+  await btn.click();
   await expect(page.locator('[data-stage="meetings"]')).toBeVisible();
   await expect(page.locator('[data-stage="vibing"]')).toBeHidden();
-  // the row and the dial agree on the tuned channel (one tune() path)
-  await expect(row).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.locator('button.mon[data-ch="meetings"]')).toHaveAttribute(
-    'aria-pressed',
-    'true'
-  );
-  // "coffee run" rides back to the LIVE office channel (the spec's worked example)
-  const coffee = page.locator('[data-feature-ch="vibing"]').first();
-  await coffee.click();
-  await expect(page.locator('[data-stage="vibing"]')).toBeVisible();
-  await expect(coffee).toHaveAttribute('aria-pressed', 'true');
+  await expect(btn).toHaveAttribute('aria-pressed', 'true');
   // the standalone Features section is GONE — merged, not duplicated
   await expect(page.locator('section.features')).toHaveCount(0);
 });
