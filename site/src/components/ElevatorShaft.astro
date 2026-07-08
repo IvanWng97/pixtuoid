@@ -133,6 +133,34 @@ import { FLOORS, FLOOR_SPY_ROOT_MARGIN } from '../consts';
       observe();
     }
 
+    // Bottom-clamp: mirrors the statusline's identical fix (Statusline.astro)
+    // — both consume the same FLOOR_SPY_ROOT_MARGIN (consts.ts) center-band
+    // authority, so 1F + the footer rarely fill the band the observer above
+    // keys off, and the last section can never cross it. At the true scroll
+    // max, the last floor's LED wins unconditionally, overriding whatever the
+    // observer last reported.
+    const BOTTOM_CLAMP_EPSILON_PX = 2; // rounding slack: scrollY+innerHeight vs scrollHeight
+    function clampToLastFloorAtBottom() {
+      if (!stops.length) return;
+      const atBottom =
+        window.scrollY + window.innerHeight >=
+        document.documentElement.scrollHeight - BOTTOM_CLAMP_EPSILON_PX;
+      if (atBottom) arrive(stops[stops.length - 1].dataset.shaftStop);
+    }
+    let bottomRaf = 0;
+    window.addEventListener(
+      'scroll',
+      function () {
+        if (bottomRaf) return;
+        bottomRaf = requestAnimationFrame(function () {
+          bottomRaf = 0;
+          clampToLastFloorAtBottom();
+        });
+      },
+      { passive: true }
+    );
+    clampToLastFloorAtBottom(); // a hash-anchored load can already start at the bottom
+
     // ── ambient-motion membership (adjudicated): the page pause switch
     // stills the ding pulse ONLY. The car itself keeps riding while paused —
     // it only ever moves WITH user scroll, the same "user-initiated, not

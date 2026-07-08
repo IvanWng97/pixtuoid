@@ -566,13 +566,14 @@ const badgeColor = (who: string): string | undefined => {
       observeFloors();
     }
 
-    // Bottom-clamp: 1F (install) + the footer rarely fill the -45%/-45%
-    // middle band the observer above keys off, so the last section can never
-    // cross it — the readout freezes on the SECOND-to-last floor while the
-    // visitor reads the very end of the page. At the true scroll max, the
-    // last floor wins unconditionally, overriding whatever the observer last
-    // reported (wb-3's elevator shaft mirrors this same clamp on rebase — it
-    // consumes the identical -45%/-45% root-margin authority).
+    // Bottom-clamp: 1F (install) + the footer rarely fill the center band
+    // (FLOOR_SPY_ROOT_MARGIN, consts.ts) the observer above keys off, so the
+    // last section can never cross it — the readout freezes on the
+    // SECOND-to-last floor while the visitor reads the very end of the page.
+    // At the true scroll max, the last floor wins unconditionally,
+    // overriding whatever the observer last reported (the elevator shaft
+    // mirrors this same clamp — it consumes the identical root-margin
+    // authority, see ElevatorShaft.astro).
     const BOTTOM_CLAMP_EPSILON_PX = 2; // rounding slack: scrollY+innerHeight vs scrollHeight
     function clampToLastFloorAtBottom() {
       if (!btns.length) return;

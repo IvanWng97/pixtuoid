@@ -210,6 +210,19 @@ test('elevator shaft: every floor is reachable and reads current on BOTH the sha
     await expect(page.locator('[data-shaft-stop][aria-current="true"]')).toHaveCount(1);
     await expect(page.locator('[data-lift-digit]')).toHaveText(fl);
   }
+
+  // Bottom-clamp agreement: 1F + the footer rarely fill the center band
+  // (FLOOR_SPY_ROOT_MARGIN, consts.ts) the observer above keys off, so at
+  // the TRUE scroll max both readouts must clamp to the last floor (1F)
+  // regardless of what the observer last reported — the statusline's clamp
+  // and the shaft's mirror of it (ElevatorShaft.astro) read the identical
+  // epsilon, so they can't disagree at the page bottom either.
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  await expect(page.locator('[data-shaft-stop="1F"]')).toHaveAttribute('aria-current', 'true', {
+    timeout: 10_000,
+  });
+  await expect(page.locator('[data-shaft-stop][aria-current="true"]')).toHaveCount(1);
+  await expect(page.locator('[data-lift-digit]')).toHaveText('1F');
 });
 
 test('elevator shaft: reduced motion is a static indicator', async ({ browser }) => {
