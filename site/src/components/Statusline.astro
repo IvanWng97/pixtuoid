@@ -10,7 +10,14 @@
 // office — with canned office-life beats interleaved; falls back to the
 // canned reel when the API is unreachable so the build never fails.
 import sources from '../sources.json';
-import { FLOORS, floorName, DIM_RESTING, FLOOR_SPY_ROOT_MARGIN, REPO } from '../consts';
+import {
+  FLOORS,
+  floorName,
+  DIM_RESTING,
+  FLOOR_SPY_ROOT_MARGIN,
+  BOTTOM_CLAMP_EPSILON_PX,
+  REPO,
+} from '../consts';
 import { GH_FETCH_TIMEOUT_MS } from '../../config/gh-stars.mjs';
 
 // Build-time star count (§2): null when the API was unreachable at build —
@@ -465,7 +472,11 @@ const badgeColor = (who: string): string | undefined => {
 
 <script
   is:inline
-  define:vars={{ dimResting: DIM_RESTING, floorSpyRootMargin: FLOOR_SPY_ROOT_MARGIN }}
+  define:vars={{
+    dimResting: DIM_RESTING,
+    floorSpyRootMargin: FLOOR_SPY_ROOT_MARGIN,
+    bottomClampEpsilonPx: BOTTOM_CLAMP_EPSILON_PX,
+  }}
 >
   (function () {
     const bar = document.getElementById('statusline');
@@ -574,12 +585,11 @@ const badgeColor = (who: string): string | undefined => {
     // overriding whatever the observer last reported (the elevator shaft
     // mirrors this same clamp — it consumes the identical root-margin
     // authority, see ElevatorShaft.astro).
-    const BOTTOM_CLAMP_EPSILON_PX = 2; // rounding slack: scrollY+innerHeight vs scrollHeight
     function clampToLastFloorAtBottom() {
       if (!btns.length) return;
       const atBottom =
         window.scrollY + window.innerHeight >=
-        document.documentElement.scrollHeight - BOTTOM_CLAMP_EPSILON_PX;
+        document.documentElement.scrollHeight - bottomClampEpsilonPx;
       if (atBottom) setActive(btns[btns.length - 1].dataset.floorBtn);
     }
     let bottomRaf = 0;

@@ -64,6 +64,10 @@ export const floorName = (f: Floor): string => f.label.split(' — ')[0];
 // define:vars (is:inline scripts can't `import` at runtime) — no second
 // '-45%' literal anywhere.
 export const FLOOR_SPY_ROOT_MARGIN = '-45% 0px -45% 0px';
+// Rounding slack for the bottom-clamp both floor-spy consumers apply at true
+// scroll max (scrollY+innerHeight vs scrollHeight can differ by a subpixel):
+// ONE value so the shaft LED and the statusline can never desync at page end.
+export const BOTTOM_CLAMP_EPSILON_PX = 2;
 
 // The dimmer's resting opacity — the single source for FIVE former copies that
 // straddle a JS↔CSS boundary. OfficeBackdrop emits it into #dimmer's CSS via an

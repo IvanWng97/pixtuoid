@@ -26,3 +26,20 @@ for (const [label, rel] of [
     assert.doesNotMatch(src, /-45%/, `${label} must not carry its own '-45%' band literal`);
   });
 }
+
+// Same single-authority contract for the bottom-clamp epsilon (bot finding,
+// PR #508): a re-declared local const in either consumer would let the shaft
+// LED and the statusline desync at page end.
+test('neither floor-spy consumer re-declares the bottom-clamp epsilon', () => {
+  for (const f of ['../src/components/Statusline.astro', '../src/components/ElevatorShaft.astro']) {
+    const src = readFileSync(new URL(f, import.meta.url), 'utf8');
+    assert.ok(
+      !/const BOTTOM_CLAMP_EPSILON_PX/.test(src),
+      `${f} must consume consts.ts's epsilon via define:vars, not re-declare it`
+    );
+    assert.ok(
+      src.includes('bottomClampEpsilonPx: BOTTOM_CLAMP_EPSILON_PX'),
+      `${f} must thread BOTTOM_CLAMP_EPSILON_PX through define:vars`
+    );
+  }
+});

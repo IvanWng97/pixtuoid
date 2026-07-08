@@ -580,10 +580,11 @@ section {
    the padding so the TEXT stays left-aligned with its siblings (h1, eyebrow,
    CTA row) — only the plate's edge insets around it. Both sides read the
    SAME --scrim-pad-x custom property (not two independent literals), so a
-   caller that needs a tighter plate (Showcase's .roster__row) overrides just
-   that one property and the cancellation stays exact — no way for padding
-   and margin to desync again (#wb-3: a raw padding override here left the
-   margin canceling the OLD 0.75em, pushing text ~7px past the edge). */
+   caller needing a tighter plate overrides just that one property and the
+   cancellation stays exact — no way for padding and margin to desync again
+   (#wb-3: a raw padding override left the margin canceling the OLD 0.75em,
+   pushing text ~7px past the edge; the roster rows that hit this have since
+   gone bare — .install__note is the surviving consumer). */
 .text-scrim {
   --scrim-pad-x: 0.75em;
   background: var(--scrim);
