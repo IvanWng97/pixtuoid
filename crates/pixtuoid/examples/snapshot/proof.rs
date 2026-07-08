@@ -341,10 +341,29 @@ fn dashed_h(img: &mut RgbaImage, x0: i32, x1: i32, y: i32, c: Rgba<u8>) {
     }
 }
 
-fn chrome(img: &mut RgbaImage, x: u32, y: u32, w: u32, title: &str) {
+// Mac-style traffic-light dots — the pinned mock's terminal chrome carries
+// them so the left panel reads as a window, not a bare text box.
+const DOT_RED: Rgba<u8> = Rgba([255, 95, 86, 255]);
+const DOT_YELLOW: Rgba<u8> = Rgba([255, 189, 46, 255]);
+const DOT_GREEN: Rgba<u8> = Rgba([39, 201, 63, 255]);
+const DOT_PITCH: i32 = 9; // scale-1 dot glyphs are ~8px wide; 9 keeps a 1px gap
+const DOT_GAP_AFTER: i32 = 6; // clearance between the 3rd dot and the title
+
+fn chrome(img: &mut RgbaImage, x: u32, y: u32, w: u32, title: &str, traffic_lights: bool) {
     fill(img, x, y, w, HEADER_H, CHROME_BG);
     fill(img, x, y + HEADER_H - 1, w, 1, EDGE);
-    text(img, title, (x + PAD) as i32, (y + 8) as i32, INK);
+    let cy = (y + HEADER_H / 2) as i32;
+    let title_x = if traffic_lights {
+        let mut cx = x as i32 + PAD as i32 + 4;
+        for c in [DOT_RED, DOT_YELLOW, DOT_GREEN] {
+            dot(img, cx, cy, 1, c);
+            cx += DOT_PITCH;
+        }
+        cx + DOT_GAP_AFTER
+    } else {
+        (x + PAD) as i32
+    };
+    text(img, title, title_x, (y + 8) as i32, INK);
 }
 
 fn panel_body(
@@ -405,13 +424,13 @@ pub(crate) fn compose_frame(
     let panel_title = format!("~ captured claude code session · {}", script.capture_date);
     let (panel_origin, panel_size, office_origin) = match layout {
         ProofLayout::Wide => {
-            chrome(&mut img, 0, 0, PANEL_W, &panel_title);
-            chrome(&mut img, PANEL_W, 0, ow, "pixtuoid");
+            chrome(&mut img, 0, 0, PANEL_W, &panel_title, true);
+            chrome(&mut img, PANEL_W, 0, ow, "pixtuoid", false);
             ((0, HEADER_H), (PANEL_W, oh), (PANEL_W, HEADER_H))
         }
         ProofLayout::Tall => {
-            chrome(&mut img, 0, 0, ow, &panel_title);
-            chrome(&mut img, 0, HEADER_H + TALL_PANEL_H, ow, "pixtuoid");
+            chrome(&mut img, 0, 0, ow, &panel_title, true);
+            chrome(&mut img, 0, HEADER_H + TALL_PANEL_H, ow, "pixtuoid", false);
             (
                 (0, HEADER_H),
                 (ow, TALL_PANEL_H),
@@ -441,8 +460,14 @@ pub(crate) fn compose_frame(
                 (office_origin.0 + desk_px.0) as i32,
                 (office_origin.1 + desk_px.1) as i32,
             );
-            // sits on the floor tile just above the desk — off the sprite itself
-            let anchor_y = desk.1 - 10;
+            // Sits above the desk, clear of the ceiling halo `paint_ceiling_halos`
+            // (pixtuoid_scene::pixel_painter::ambient) burns over a lit monitor: a
+            // 2-buffer-row band starting one row above the desk, i.e. up to 16px
+            // above desk.1 in PNG space (buffer row -> 8px here, same halving the
+            // desk_px conversion above uses). GLOW_CLEARANCE clears its top edge
+            // with an 8px margin so the connector/dot never sits inside the glow.
+            const GLOW_CLEARANCE: i32 = 24;
+            let anchor_y = desk.1 - GLOW_CLEARANCE;
             match layout {
                 ProofLayout::Wide => {
                     let text_w = font::text_width(label, TEXT_SCALE);
@@ -470,10 +495,10 @@ pub(crate) fn compose_frame(
                     // head/name-tag, plus a dot marking the desk itself.
                     let text_w = font::text_width(label, TEXT_SCALE);
                     let label_x = (desk.0 - text_w - 16).max(PAD as i32);
-                    let label_y = desk.1 - 44;
+                    let label_y = anchor_y - 22;
                     text(&mut img, label, label_x, label_y + 1, Rgba([0, 0, 0, 255]));
                     text(&mut img, label, label_x, label_y, ANNOT);
-                    dot(&mut img, desk.0 - 6, desk.1 - 10, 2, ANNOT);
+                    dot(&mut img, desk.0 - 6, anchor_y, 2, ANNOT);
                 }
             }
         }
@@ -650,7 +675,7 @@ mod tests {
         // the first fixture line lands PREAMBLE_MS in
         assert_eq!(s.lines[2].at_ms, PREAMBLE_MS);
         // the fixture's own capture date — the panel title's past-tense archive
-        assert_eq!(s.capture_date, "2026-01-01");
+        assert_eq!(s.capture_date, "2026-06-30");
     }
 
     #[test]
