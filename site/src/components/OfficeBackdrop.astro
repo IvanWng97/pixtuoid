@@ -163,14 +163,20 @@ import { asset, DIM_RESTING } from '../consts';
   }
   /* Footer.astro's flex-wrap row sits directly above the statusline with no
      clearance, and its fit-content width degenerates to full-container width
-     once it wraps to 2 lines (≤960px, measured) — its own bg plate then
-     reaches this control's x-position, and at the true scroll-bottom its taller
-     2-line box vertically overlaps this control's fixed band too (both sit
-     flush against the reserved statusline height by construction). Raise the
-     clearance enough to clear a wrapped footer's height at this breakpoint. */
+     once it wraps (≤960px, measured) — its own bg plate then reaches this
+     control's x-position, and at the true scroll-bottom its taller wrapped
+     box vertically overlaps this control's fixed band too (both sit flush
+     against the reserved statusline height by construction). The wrap count
+     itself isn't fixed at 2 lines — it varies non-monotonically with viewport
+     width (measured 3 lines in the 360-460px band), so a flat pixel offset
+     either overlaps a taller wrap or overshoots a shorter one; --footer-h
+     (below) tracks the footer's REAL rendered height instead. The var()
+     fallback (74px = the old flat 84px minus this rule's own +10px gap)
+     only ever shows pre-JS/no-JS, matching the prior static behavior until
+     the ResizeObserver in the script below reports the real height. */
   @media (max-width: 960px) {
     .office-ctl {
-      bottom: calc(2rem + env(safe-area-inset-bottom, 0px) + 84px);
+      bottom: calc(2rem + env(safe-area-inset-bottom, 0px) + var(--footer-h, 74px) + 10px);
     }
   }
   .office-ctl:hover,
@@ -401,6 +407,36 @@ import { asset, DIM_RESTING } from '../consts';
       if (pauseBtn) pauseBtn.hidden = mq.matches;
     }
     syncPauseBtn();
+
+    // .office-ctl's ≤960px clearance (above) reads --footer-h off the
+    // footer's REAL rendered height instead of a flat guess — Footer.astro's
+    // row wraps a different number of lines at different widths (measured 3
+    // lines in the 360-460px band, not just the 2 the old flat offset
+    // assumed), so only a live measurement clears every wrap. offsetHeight
+    // reads 0 if the footer were ever display:none, which harmlessly
+    // collapses the clearance to the desktop baseline via the calc's own gap
+    // term rather than going stale. DEFERRED: this is:inline script renders
+    // BEFORE <footer> (the parse-position trap already noted elsewhere in
+    // this file) — a parse-time querySelector sees no footer yet.
+    function wireFooterHeight() {
+      const footerEl = document.querySelector('.footer');
+      if (!footerEl) return;
+      const root = document.documentElement;
+      const syncFooterHeight = function () {
+        root.style.setProperty('--footer-h', footerEl.offsetHeight + 'px');
+      };
+      syncFooterHeight();
+      if ('ResizeObserver' in window) {
+        new ResizeObserver(syncFooterHeight).observe(footerEl);
+      } else {
+        window.addEventListener('resize', syncFooterHeight);
+      }
+    }
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', wireFooterHeight, { once: true });
+    } else {
+      wireFooterHeight();
+    }
 
     // Working Building: ANY install-copy control (hero row, statusline chip,
     // docs strip, the 1F tabs) hires through ONE event instead of

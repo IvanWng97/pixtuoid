@@ -1451,6 +1451,56 @@ test('footer separators never strand alone at a wrap boundary', async ({ page })
   }
 });
 
+test('the pause control never overlaps a footer link across the mobile wrap range', async ({
+  page,
+}) => {
+  // C8 clamped the pause button's ≤960px clearance with a flat +84px, sized
+  // for an assumed 2-line footer wrap — but the wrap count is non-monotonic
+  // across viewport widths (measured 3 lines in the 360-460px band on real
+  // device sizes: iPhone 12/13/14/15, Pixel 7), so a flat offset either
+  // overlaps a taller wrap or overshoots a shorter one. Sweep the whole range
+  // (the --footer-h fix) instead of spot-checking one breakpoint.
+  await gotoLive(page);
+  const widths = [360, 375, 390, 393, 412, 460, 480, 768, 960];
+  for (const width of widths) {
+    await page.setViewportSize({ width, height: 844 });
+    // expect.poll tolerates the async ResizeObserver round-trip that updates
+    // --footer-h after the reflow, and re-settles scroll-bottom on each retry
+    // (a resize can change the page's total scroll height via the footer).
+    // behavior:'instant' is load-bearing: global.css sets scroll-behavior:
+    // smooth, so the 2-arg scrollTo(x, y) form (equivalent to behavior:'auto',
+    // which DEFERS to that CSS) would still be animating when the rect read
+    // below runs — landing this poll's first read on a pre-scroll snapshot
+    // (footer off-screen, trivially zero overlap) and passing for the wrong
+    // reason regardless of the real bottom-of-page geometry.
+    await expect
+      .poll(() =>
+        page.evaluate((w) => {
+          window.scrollTo({
+            top: document.documentElement.scrollHeight,
+            left: 0,
+            behavior: 'instant',
+          });
+          const btn = document.getElementById('office-pause');
+          if (!btn || btn.hidden) return [];
+          const b = btn.getBoundingClientRect();
+          return Array.from(document.querySelectorAll<HTMLAnchorElement>('.footer a'))
+            .filter((a) => {
+              const r = a.getBoundingClientRect();
+              return !(
+                r.right <= b.left ||
+                r.left >= b.right ||
+                r.bottom <= b.top ||
+                r.top >= b.bottom
+              );
+            })
+            .map((a) => `${w}px: ${(a.textContent || '').trim()}`);
+        }, width)
+      )
+      .toEqual([]);
+  }
+});
+
 test('an install copy from the Install section hires a coworker: pix:install-copy → pix:hired', async ({
   page,
   context,
