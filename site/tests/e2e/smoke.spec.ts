@@ -1505,6 +1505,57 @@ test('the pause control never occludes in-page copy at mobile widths', async ({ 
   await assertClearOfPause('[data-vibing-time-label]'); // Showcase VIBING clock readout
 });
 
+test('the elevator shaft never overlaps the studio panel copy at 390 or 768', async ({ page }) => {
+  // R2a (wb-3 matrix sweep): .shaft is position:fixed at every width (only
+  // its rail width shrinks ≤760px, via --shaft-w) — the roster's feature-row
+  // text ran under it at BOTH 390 (14px dot-rail) and 768 (24px full rail),
+  // since .container never reserved a gutter for it (unlike the statusline's
+  // own body-padding reservation for ITS fixed bar). Horizontal position
+  // doesn't depend on scroll, so this checks pure geometry, no scrolling
+  // needed: every roster row's right edge must clear the shaft's left edge.
+  await gotoLive(page);
+  for (const width of [390, 768]) {
+    await page.setViewportSize({ width, height: 844 });
+    const overlaps = await page.evaluate(() => {
+      const shaft = document.querySelector('.shaft');
+      if (!shaft) return [];
+      const shaftLeft = shaft.getBoundingClientRect().left;
+      return Array.from(document.querySelectorAll<HTMLElement>('.roster__row'))
+        .map((el) => el.getBoundingClientRect().right - shaftLeft)
+        .filter((over) => over > 0);
+    });
+    expect(overlaps, `${width}px: roster rows reach ${overlaps}px past the shaft's left edge`).toEqual(
+      []
+    );
+  }
+});
+
+test('text-scrim padding/margin cancellation holds for the roster rows (no residual inline shift)', async ({
+  page,
+}) => {
+  // R2b (wb-3 matrix sweep): .text-scrim (global.css) cancels its own inline
+  // padding with a matching negative margin-inline so the TEXT stays aligned
+  // with unscrimmed siblings — Showcase's .roster__row used to override just
+  // the padding (a raw 0.3rem), leaving the margin still canceling the OLD
+  // 0.75em and pushing the row's copy ~7px past its natural left edge. Both
+  // now derive from the SAME --scrim-pad-x property, so this can't desync:
+  // padding-inline-start and margin-inline-start must sum to ~0 for every
+  // row that carries both classes.
+  await gotoLive(page);
+  const sums = await page.$$eval('.roster__row.text-scrim', (rows) =>
+    rows.map((el) => {
+      const cs = getComputedStyle(el);
+      return parseFloat(cs.paddingInlineStart) + parseFloat(cs.marginInlineStart);
+    })
+  );
+  expect(sums.length).toBeGreaterThan(0);
+  for (const sum of sums) {
+    expect(Math.abs(sum), 'padding-inline-start + margin-inline-start should cancel to ~0').toBeLessThan(
+      0.5
+    );
+  }
+});
+
 test('an install copy from the Install section hires a coworker: pix:install-copy → pix:hired', async ({
   page,
   context,

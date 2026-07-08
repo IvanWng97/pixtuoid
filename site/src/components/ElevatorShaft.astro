@@ -172,10 +172,35 @@ import { FLOORS, FLOOR_SPY_ROOT_MARGIN } from '../consts';
   })();
 </script>
 
+<style is:global>
+  :root {
+    /* the shaft's own footprint, named so the body-gutter reservation below
+       (and .shaft/.shaft__rail themselves) never carry a second copy. */
+    --shaft-edge: clamp(4px, 0.6vw, 10px);
+    --shaft-w: 24px;
+  }
+  @media (max-width: 760px) {
+    :root {
+      --shaft-w: 14px; /* the collapsed mobile dot-rail */
+    }
+  }
+  /* The shaft is position:fixed at every width (only --shaft-w above
+     shrinks ≤760px) — .container's own padding leaves no room to clear it
+     once the viewport narrows toward that footprint (measured: body text
+     runs under the rail at both 390 and 768px, not just below the 760px
+     dot-rail cutover). Mirrors Statusline.astro's identical body-padding
+     idiom for its own fixed bar. */
+  @media (max-width: 960px) {
+    body {
+      padding-right: calc(var(--shaft-edge) + var(--shaft-w) + 8px);
+    }
+  }
+</style>
+
 <style>
   .shaft {
     position: fixed;
-    right: clamp(4px, 0.6vw, 10px);
+    right: var(--shaft-edge);
     top: 50%;
     transform: translateY(-50%);
     /* under the statusline (50) and its floor popover, over the office */
@@ -190,7 +215,7 @@ import { FLOORS, FLOOR_SPY_ROOT_MARGIN } from '../consts';
     display: flex;
     flex-direction: column;
     justify-content: space-between;
-    width: 24px; /* the spec's slim pixel shaft */
+    width: var(--shaft-w); /* the spec's slim pixel shaft — 14px ≤760px, above */
     height: min(52vh, 420px);
     padding: 8px 0;
   }
@@ -282,9 +307,9 @@ import { FLOORS, FLOOR_SPY_ROOT_MARGIN } from '../consts';
     }
   }
   @media (max-width: 760px) {
-    /* the 6-dot rail: dots + current LED only */
+    /* the 6-dot rail: dots + current LED only (the width itself already
+       shrunk via --shaft-w, set above) */
     .shaft__rail {
-      width: 14px;
       height: 38vh;
       padding: 6px 0;
     }

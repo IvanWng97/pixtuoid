@@ -720,7 +720,15 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
     text-align: left;
     background: none;
     border: 0;
-    padding: 0.35rem 0.3rem;
+    /* .text-scrim (global.css) cancels its own inline padding via a matching
+       negative margin-inline, both reading ONE --scrim-pad-x property — this
+       row's tighter density overrides just that property (not a raw padding
+       value), so the cancellation stays exact instead of drifting out of
+       sync with the margin (#wb-3: the old raw override left text ~7px past
+       the container edge). */
+    --scrim-pad-x: 0.3rem;
+    padding-block: 0.35rem;
+    padding-inline: var(--scrim-pad-x);
     font: inherit;
     color: var(--fg);
   }
