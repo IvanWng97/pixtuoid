@@ -11,7 +11,7 @@ const thumb = (c: EnrichedShowcaseChannel) =>
     : `demos/${(c.variants.find((v: ShowcaseVariant) => v.featured) ?? c.variants[0]).src}`;
 ---
 
-<div class="wall" role="group" aria-label="Demo channels">
+<div class="wall" role="group" aria-label="Demos">
   {
     channels.map((c: EnrichedShowcaseChannel) =>
       c.status === 'live' ? (

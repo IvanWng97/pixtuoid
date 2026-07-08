@@ -1,6 +1,7 @@
 import themesData from './themes.json';
 import weatherData from './weather.json';
 import showcaseData from './showcase.json';
+import featuresData from './features.json';
 
 // Shared site constants + a base-path-safe asset/link helper.
 // (GitHub Pages serves the site under /pixtuoid/, so every internal URL must
@@ -41,7 +42,7 @@ export interface Floor {
 }
 export const FLOORS: Floor[] = [
   { id: 'lobby', fl: '6F', label: 'penthouse — hero' },
-  { id: 'showcase', fl: '5F', label: 'studio — channels' },
+  { id: 'showcase', fl: '5F', label: 'studio — demos' },
   { id: 'amenities', fl: '4F', label: 'amenities — proof + pantry' },
   { id: 'how', fl: '3F', label: 'machine room — quickstart' },
   { id: 'tools', fl: '2F', label: 'tenants — compatibility' },
@@ -145,7 +146,7 @@ export interface VariantGroup {
 }
 
 export interface ShowcaseChannel {
-  id: string; // slug; hash target #showcase-<id>
+  id: string; // slug; hash target #showcase-<id> — ALSO the features.json row's `channel` value (the wb-3 bijection)
   label: string; // monitor label (channel number is derived from manifest order)
   kind: 'clip' | 'variant-set' | 'live';
   asset?: string; // clip: demos/<asset>.mp4 [+ .webm] + <asset>-poster.png
@@ -157,7 +158,11 @@ export interface ShowcaseChannel {
   variantGroups?: VariantGroup[]; // live channel: multiple independently-labeled chip groups
   timeSlider?: boolean; // live channel: exposes a time-of-day scrub control
   poster?: string; // live channel: public/demos/-relative static fallback image
-  caption: string; // diegetic one-liner under the stage
+  // diegetic one-liner under the stage — OPTIONAL: a channel whose caption
+  // would just restate its joined feature's `desc` (currently only "pets")
+  // omits it and falls back to that desc (ChannelStage's `description`),
+  // rather than print the same content twice on the same screen.
+  caption?: string;
   duration?: string; // clip badge, m:ss
   status: 'live' | 'soon'; // soon = dimmed placeholder monitor, no assets needed
   default?: boolean; // exactly one — the channel tuned at load
@@ -169,6 +174,33 @@ export interface ShowcaseChannel {
 // them via variantsRef and resolve here.
 // The manifest's kind/status/default/asset invariants are enforced at build time by the showcase guard in astro.config.mjs.
 export const SHOWCASE: ShowcaseChannel[] = showcaseData as unknown as ShowcaseChannel[];
+
+// ── The feature collection: features.json is the TOTAL set (also the README
+// Features table's source, via gen-readme.mjs). A row that has a video/live
+// demo channel carries `channel: "<showcase id>"`; the Studio Wall dial is
+// exactly those rows, joined against SHOWCASE for the stage's clip/live
+// config — one collection, partitioned by has-demo (Showcase.astro's roster
+// is the complementary `!channel` half). The channel↔feature bijection is
+// enforced at build time by astro.config.mjs's guard.
+export interface Feature {
+  icon: string;
+  name: string;
+  desc: string;
+  featured?: boolean;
+  pix?: string;
+  channel?: string; // joins to a SHOWCASE row's `id`
+  card?: { blurb: string };
+}
+export const FEATURES: Feature[] = featuresData as Feature[];
+
+const featureByChannelId = new Map(FEATURES.filter((f) => f.channel).map((f) => [f.channel!, f]));
+
+// A SHOWCASE channel's joined feature — guaranteed to resolve by the
+// astro.config.mjs bijection guard, so callers use it unchecked (matching
+// ChannelStage's existing `defVariant!` non-null-assertion idiom).
+export function featureForChannel(id: string): Feature {
+  return featureByChannelId.get(id)!;
+}
 
 // The shape Showcase.astro passes down to ChannelStage/MonitorWall: each
 // channel enriched with `ch` (zero-padded channel number, from manifest order)
@@ -184,6 +216,7 @@ export interface EnrichedShowcaseChannel extends ShowcaseChannel {
   ch: string;
   variants: ShowcaseVariant[];
   groups: EnrichedVariantGroup[];
+  featureDesc: string; // joined features.json row's desc — the dial accordion body, and the caption fallback
 }
 
 // The manifest resolution a `variantsRef` maps to — the SINGLE place both

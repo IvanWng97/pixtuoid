@@ -1,11 +1,21 @@
 import { expect, test } from '@playwright/test';
+import featuresData from '../../src/features.json' with { type: 'json' };
 
 // wb-3's runtime contracts: the merged 5F band (the dial is the ONE channel
 // switcher; the feature roster below the stage is quiet, non-interactive
 // content), the floor-anchor vocabulary, the elevator shaft, and the scroll
 // budget. Companion to smoke.spec.ts; runs against the PRODUCTION build.
 
-test('cold load: the dial marks the default channel pressed', async ({ page }) => {
+// features.json is the total collection, partitioned by `channel` (consts.ts)
+// — read it directly so these specs can't drift from the manifest they're
+// pinning (a hand-copied expected string would silently go stale).
+type Feature = { name: string; desc: string; channel?: string };
+const features = featuresData as Feature[];
+const descByChannel = new Map(features.filter((f) => f.channel).map((f) => [f.channel!, f.desc]));
+
+test('cold load: the dial marks the default channel pressed, accordion shows its desc', async ({
+  page,
+}) => {
   await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
   await page.goto('./');
   // the default channel is 'vibing' (src/showcase.json's default:true) — the
@@ -15,11 +25,29 @@ test('cold load: the dial marks the default channel pressed', async ({ page }) =
     'aria-pressed',
     'true'
   );
+  // the accordion body is server-rendered with the default channel's joined
+  // features.json desc — no JS/click required to see it.
+  await expect(page.locator('#dial-desc')).toHaveText(descByChannel.get('vibing')!);
 });
 
-test('the feature roster is a quiet, non-interactive grid — the dial is the switcher', async ({
+test('dial accordion: clicking a channel reveals its features.json desc under the dial', async ({
   page,
 }) => {
+  await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
+  await page.goto('./');
+  const btn = page.locator('button.mon[data-ch="openclaw"]');
+  await expect(btn).toHaveAttribute('aria-expanded', 'false');
+  await btn.click();
+  await expect(btn).toHaveAttribute('aria-expanded', 'true');
+  // exactly one entry is expanded at a time (single-open accordion)
+  await expect(page.locator('button.mon[data-ch="vibing"]')).toHaveAttribute(
+    'aria-expanded',
+    'false'
+  );
+  await expect(page.locator('#dial-desc')).toHaveText(descByChannel.get('openclaw')!);
+});
+
+test('the below-stage roster is exactly the features WITHOUT a channel', async ({ page }) => {
   await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
   await page.goto('./');
   // wb-3: the per-row "tune in →" link (and its half-fabricated channel
@@ -29,8 +57,19 @@ test('the feature roster is a quiet, non-interactive grid — the dial is the sw
   await expect(page.locator('#showcase [data-feature-ch]')).toHaveCount(0);
   await expect(page.locator('#showcase button.roster__row')).toHaveCount(0);
   await expect(page.locator('#showcase a[href^="#showcase-"]')).toHaveCount(0);
-  const rowCount = await page.locator('#showcase .roster__row').count();
-  expect(rowCount).toBeGreaterThan(0);
+  // the wb-3-plus-wb-3.1 partition: every channel-carrying feature tunes the
+  // dial instead, so the roster is exactly (and in order) the complement.
+  const expectedNames = features.filter((f) => !f.channel).map((f) => f.name);
+  expect(expectedNames.length).toBeGreaterThan(0);
+  const renderedNames = await page.locator('#showcase .roster__name').allTextContents();
+  expect(renderedNames).toEqual(expectedNames);
+});
+
+test('the feature roster stays a quiet, non-interactive grid — the dial is the switcher', async ({
+  page,
+}) => {
+  await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
+  await page.goto('./');
   // a dial click still retunes the studio (the switcher survives the roster's
   // demotion) — "meetings" is the chitchat-bubble channel.
   const btn = page.locator('button.mon[data-ch="meetings"]');
@@ -73,7 +112,7 @@ test('the six floors declare the elevator anchor contract, top floor down', asyn
   );
   expect(floors).toEqual([
     { fl: '6F', label: 'penthouse — hero', id: 'lobby' },
-    { fl: '5F', label: 'studio — channels', id: 'showcase' },
+    { fl: '5F', label: 'studio — demos', id: 'showcase' },
     { fl: '4F', label: 'amenities — proof + pantry', id: 'amenities' },
     { fl: '3F', label: 'machine room — quickstart', id: 'how' },
     { fl: '2F', label: 'tenants — compatibility', id: 'tools' },

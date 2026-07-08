@@ -12,7 +12,7 @@ const features = JSON.parse(
 
 test('features.json declares pix icons for every bento card row', () => {
   const cards = features.filter((f) => f.card);
-  assert.ok(cards.length >= 7, 'the bento rows exist');
+  assert.ok(cards.length >= 6, 'the bento rows exist');
   assert.deepEqual(
     cards.filter((f) => typeof f.pix !== 'string').map((f) => f.name),
     [],

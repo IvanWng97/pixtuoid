@@ -12,6 +12,11 @@ const { channel: c, active } = Astro.props as {
 };
 const isClip = c.kind === 'clip';
 const isLive = c.kind === 'live';
+// showcase.json's diegetic caption is the primary copy; a channel that would
+// just restate its joined feature's desc (currently only "pets") omits
+// caption and falls back here — one description, not a same-screen repeat
+// (site/CLAUDE.md's Single-sourced-content section).
+const description = c.caption ?? c.featureDesc;
 const defVariant: ShowcaseVariant | null = c.variants.length
   ? (c.variants.find((v: ShowcaseVariant) => v.featured) ?? c.variants[0])
   : null;
@@ -49,10 +54,10 @@ function defaultVariant(g: EnrichedVariantGroup): ShowcaseVariant | undefined {
   {
     /* No `autoplay`: it overrides preload="metadata" and eagerly downloads the
       whole (below-the-fold) webm at page load. The IntersectionObserver play
-      policy in Showcase.astro already play()s the tuned+visible clip, so
+      policy in Showcase.astro already play()s the picked+visible clip, so
       autoplay bought nothing for JS visitors while costing ~294KB. Trade-off: a
       no-JS visitor sees the poster instead of a playing clip (acceptable — the
-      dial/OSD are JS-only anyway). Hidden channels defer their poster too
+      dial/OSD are JS-only anyway). Hidden demos defer their poster too
       (data-poster → hydrate()), so only the active poster is fetched at load. */
   }
   {
@@ -69,7 +74,7 @@ function defaultVariant(g: EnrichedVariantGroup): ShowcaseVariant | undefined {
         data-poster={active ? undefined : asset(`demos/${c.asset}-poster.png`)}
         data-mp4={active ? undefined : asset(`demos/${c.asset}.mp4`)}
         data-webm={active ? undefined : asset(`demos/${c.asset}.webm`)}
-        aria-label={`pixtuoid demo: ${c.caption}`}
+        aria-label={`pixtuoid demo: ${description}`}
       >
         {active && <source src={asset(`demos/${c.asset}.webm`)} type="video/webm" />}
         {active && <source src={asset(`demos/${c.asset}.mp4`)} type="video/mp4" />}
@@ -184,7 +189,7 @@ function defaultVariant(g: EnrichedVariantGroup): ShowcaseVariant | undefined {
       )
     )
   }
-  <figcaption class="stage__caption">{c.caption}</figcaption>
+  <figcaption class="stage__caption">{description}</figcaption>
 </figure>
 
 <style>

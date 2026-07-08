@@ -99,6 +99,38 @@ for (const c of showcase) {
   }
 }
 
+// Studio Wall ↔ Features bridge: features.json is the total feature
+// collection, and a row with a video/live demo channel carries
+// `channel: "<showcase id>"` (consts.ts). The dial + its accordion desc and
+// the below-stage roster are ONE collection partitioned by that field, so
+// the two manifests must agree on a bijection — every showcase.json channel
+// has exactly one features.json row claiming it, and vice versa — or the
+// dial silently shows an empty accordion / a feature silently has no home.
+const features = /** @type {any[]} */ (
+  JSON.parse(readFileSync(fileURLToPath(new URL('./src/features.json', import.meta.url)), 'utf8'))
+);
+const featureChannelOwner = new Map();
+for (const f of features) {
+  if (!f.channel) continue;
+  if (featureChannelOwner.has(f.channel))
+    throw new Error(
+      `astro.config: features.json "${featureChannelOwner.get(f.channel)}" and "${f.name}" both claim channel "${f.channel}"`
+    );
+  featureChannelOwner.set(f.channel, f.name);
+}
+for (const c of showcase) {
+  if (!featureChannelOwner.has(c.id))
+    throw new Error(
+      `astro.config: showcase.json channel "${c.id}" has no features.json row with channel:"${c.id}" — add one, or drop the channel`
+    );
+}
+for (const [chId, name] of featureChannelOwner) {
+  if (!scIds.has(chId))
+    throw new Error(
+      `astro.config: features.json "${name}" has channel:"${chId}" but showcase.json has no such channel — fix the id or drop channel`
+    );
+}
+
 // Rewrite repo-relative links in rendered markdown (e.g. ../crates/...) to GitHub
 // so docs/CONFIGURATION.md's links resolve on the deployed site.
 function rehypeRepoLinks() {

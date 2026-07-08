@@ -43,13 +43,37 @@ Mermaid diagram becomes an inline SVG at build via `rehype-mermaid`, which is
   `src/features.json` / `src/install.json` (`just gen-readme`); drift is gated by
   the `readme` job (`just gen-readme-check`) on every PR. Edit the JSON, not the
   README prose. `gen-readme.mjs` reads only `icon`/`name`/`desc`/`featured` off
-  each row — the site-side consumer of the REST of the row (`card.blurb`) is
-  the merged 5F band inside `Showcase.astro` (the standalone `Features.astro`
-  component is gone). `card.href` (a per-row "tune in →" deep link into the
-  studio) was RETIRED (wb-3): its channel mapping was half-fabricated (e.g.
-  Coffee run → vibing, monitor glow → spaces) and duplicated the dial one
-  studio-panel-width away, so `astro.config.mjs`'s matching cross-guard went
-  with it — a feature row is plain content now, nothing to validate.
+  each row, regardless of the partition below.
+- **`features.json` is the TOTAL feature collection, partitioned by `channel`**
+  (wb-3.1): a row with a video/live demo carries `channel: "<showcase.json id>"`
+  and DRIVES the 5F studio's channel dial — the dial no longer hand-lists 7
+  channels beside a separately-curated roster, it's `showcase.json` joined
+  against every `channel`-bearing `features.json` row (`consts.ts`'s
+  `featureForChannel`); the rest (no `channel`) render as the merged 5F band's
+  quiet, non-interactive grid BELOW the CRT + dial (`Showcase.astro`'s
+  `roster`, falling back to `desc` — stripped of any README-authored backtick
+  code spans, e.g. `` `pixtuoid floating` `` — when a row has no `card.blurb`).
+  The two manifests' `channel`↔`id` correspondence is a BIJECTION, enforced at
+  build time by `astro.config.mjs`'s guard (immediately after the pre-existing
+  showcase guard): every showcase.json channel needs exactly one claiming
+  features.json row and vice versa, or `astro dev`/`build` fails loud with the
+  offending id. **The dial is an accordion**: clicking a channel sets
+  `aria-expanded` and swaps `#dial-desc`'s text to that channel's joined
+  `desc` — ONE shared slot below the (unchanged, 3-col/2-col) dial grid, not
+  a per-row expansion, since the panel already sits shorter than the CRT
+  stage's row height (`align-items: start` leaves headroom there for free —
+  measured net scroll-budget delta from adding this: zero, see the ≤7.9vh
+  pin's test). `ShowcaseChannel.caption` (the stage's diegetic figcaption) is
+  now OPTIONAL: a channel whose caption would just restate its joined
+  feature's desc (only "pets" today) omits it, and `ChannelStage.astro` falls
+  back to the feature desc — one description, not a same-screen repeat;
+  channels with a caption that adds real distinct color (agents' swarm-scale
+  aside, openclaw's per-state motion detail, meetings' actual dialogue quotes,
+  vibing's "you're driving this one") keep it. `card.href` (a per-row
+  "tune in →" deep link into the studio) was RETIRED earlier (wb-3): its
+  channel mapping was half-fabricated (e.g. Coffee run → vibing, monitor glow
+  → spaces) and duplicated the dial one studio-panel-width away — the wb-3.1
+  bijection guard is the principled replacement for that ad hoc cross-guard.
 - The six-floor anchor vocabulary (`data-floor="6F"`…`"1F"` + `data-floor-label`,
   stamped from `consts.ts`'s `FLOORS`) is what `ElevatorShaft.astro` (mounted
   index-only, a `pix:paused` set member) and the Statusline's scrollspy both

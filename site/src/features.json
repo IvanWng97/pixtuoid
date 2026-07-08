@@ -2,7 +2,8 @@
   {
     "icon": "🏢",
     "name": "Multi-agent office",
-    "desc": "Each agent session gets a desk; overflow agents auto-fill new floors"
+    "desc": "Each agent session gets a desk; overflow agents auto-fill new floors",
+    "channel": "agents"
   },
   {
     "icon": "🛗",
@@ -17,17 +18,32 @@
   {
     "icon": "🦞",
     "name": "OpenClaw gateway mascot",
-    "desc": "A live OpenClaw gateway shows up as a wandering lobster whose motion tracks gateway health"
+    "desc": "A live OpenClaw gateway shows up as a wandering lobster whose motion tracks gateway health",
+    "channel": "openclaw"
   },
   {
     "icon": "🎛️",
     "name": "Vibing",
-    "desc": "A sun and moon arc the skyline as the day turns, weather rolls past the windows (rain, storm, snow, fog, overcast, windy, smog), and six themes reskin the office"
+    "desc": "A sun and moon arc the skyline as the day turns, weather rolls past the windows (rain, storm, snow, fog, overcast, windy, smog), and six themes reskin the office",
+    "channel": "vibing"
   },
   {
     "icon": "🐾",
     "name": "Office pets",
-    "desc": "A cat or dog (one per floor) roams desks, pantry, sofas; sleeps near idle agents. Click to pet — pixel-art hearts float up"
+    "desc": "A cat or dog (one per floor) roams desks, pantry, sofas; sleeps near idle agents. Click to pet — pixel-art hearts float up",
+    "channel": "pets"
+  },
+  {
+    "icon": "🗂️",
+    "name": "Agent tree dashboard",
+    "desc": "Tab opens a foldable tree of every floor's agents — badged by CLI, with activity tints and tool-call counts",
+    "channel": "dashboard"
+  },
+  {
+    "icon": "🧭",
+    "name": "Office spaces",
+    "desc": "Cubicles, a meeting lounge, and a pantry — the office is laid out in distinct furnished zones, not just a grid of identical desks",
+    "channel": "spaces"
   },
   {
     "icon": "🎭",
@@ -53,10 +69,7 @@
     "name": "Pantry chitchat",
     "desc": "2+ idle agents at the same waypoint trigger speech bubbles with dev-humor snippets",
     "featured": false,
-    "pix": "chat",
-    "card": {
-      "blurb": "two idle agents drift to the same spot and a dev-humor speech bubble pops up between them."
-    }
+    "channel": "meetings"
   },
   {
     "icon": "🎨",
