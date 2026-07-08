@@ -77,6 +77,15 @@ schemars = "1"
 tokio    = { workspace = true, features = ["test-util"] }
 image    = { version = "0.25", default-features = false, features = ["png", "gif"] }
 insta    = "1"
+# AA text rasterizer for the --proof panel's Font C (examples/snapshot/proof.rs):
+# already resolved transitively via sctk-adwaita (winit's Wayland CSD titlebar
+# text on Linux — see Cargo.lock), so promoting it to a direct dev-dependency
+# adds no new crate to the tree and no new license to allow. Its per-pixel
+# coverage callback (`OutlinedGlyph::draw`) extends the example's existing
+# callback-based `pixtuoid_scene::font::draw_text` with an alpha channel,
+# unlike fontdue's raw-bitmap-buffer API, which would need a manual index loop.
+# pixtuoid-scene (the wasm-compiled engine) never sees this dep — binary-only.
+ab_glyph = "0.2"
 
 [[example]]
 name = "snapshot"

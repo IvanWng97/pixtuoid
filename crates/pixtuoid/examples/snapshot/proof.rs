@@ -1,15 +1,20 @@
 //! `--proof`: the §3 split-screen causal-proof renderer. ONE committed CC session
 //! fixture drives BOTH sides of every frame: the left panel types the session
-//! (terminal chrome, 8x8 pixel font), the right side is the REAL draw_scene pass
-//! replaying the SAME decoded AgentEvent stream through the real Reducer — the two
-//! sides structurally cannot desync. Annotations, the connector, and the coda
-//! strip are burned into the frames; scripts/gen-media.py (kind:"proof") encodes them.
+//! (terminal chrome, an anti-aliased JetBrains Mono face — see `fonts/`), the
+//! right side is the REAL draw_scene pass replaying the SAME decoded AgentEvent
+//! stream through the real Reducer — the two sides structurally cannot desync.
+//! The coral office annotations + connector stay the office's own 8x8 pixel
+//! font (they belong to the pixel world, a user-ratified split); the burned
+//! coda strip joins the panel's AA side. scripts/gen-media.py (kind:"proof")
+//! encodes the frames.
 
 use std::collections::VecDeque;
 use std::fs;
 use std::path::Path;
+use std::sync::LazyLock;
 use std::time::{Duration, SystemTime};
 
+use ab_glyph::{point, Font, FontRef, PxScale, ScaleFont};
 use anyhow::{anyhow, Context as _, Result};
 use image::{Rgba, RgbaImage};
 use pixtuoid::tui::renderer::{draw_scene, DrawCtx};
@@ -35,13 +40,35 @@ const TALL_PANEL_H: u32 = 400; // terminal panel height (tall layout)
 const HEADER_H: u32 = 32; // chrome strip: "captured..." / "pixtuoid"
 const PAD: u32 = 16;
 const LINE_H: u32 = 28;
-const TEXT_SCALE: i32 = 2; // 8x8 glyphs → 16px
+const TEXT_SCALE: i32 = 2; // office-side 8x8 pixel font (coral annotations only) → 16px
 const TYPE_CPS: u64 = 30; // typewriter reveal, chars/sec
 const PREAMBLE_MS: u64 = 6000; // "$ claude" + session start precede the first fixture line
 
+// Every callout holds at most this long from its OWN at_ms, independent of
+// when the next annotated line appears. Without a ceiling, "a sprite walks
+// in" held for the full 8.2s gap to the NEXT annotation — front-loaded by
+// PREAMBLE_MS, since that annotation's at_ms=800 predates the preamble that
+// pads every later beat. 4200ms is the verified upper edge of the other four
+// transitions' natural gaps (3500/3900/4200ms, `dbg_print_annotation_gaps`
+// against the committed fixture) — high enough that none of them are
+// affected, low enough to meaningfully shorten the one outlier.
+const ANNOTATION_MAX_HOLD_MS: u64 = 4200;
+
+// the PANEL's own text (Font C, user-picked): an anti-aliased JetBrains Mono
+// (OFL 1.1, `fonts/`) rather than the office's blocky 8x8 pixel font — the
+// title, the typed body lines, and the coda strip. Sizes target the OLD 16px
+// line metrics so LINE_H/wrap math stays proportioned; a pure-Rust rasterizer
+// (ab_glyph) composites its grayscale coverage onto the panel's dark ground.
+const PROOF_FONT_BYTES: &[u8] = include_bytes!("fonts/JetBrainsMono-Regular.ttf");
+const PROOF_FONT_PX: f32 = 16.0;
+const CODA_FONT_PX: f32 = 12.0;
+
+static PROOF_FONT: LazyLock<FontRef<'static>> = LazyLock::new(|| {
+    FontRef::try_from_slice(PROOF_FONT_BYTES).expect("bundled JetBrains Mono TTF must parse")
+});
+
 // the burned coda strip — a full-width caption, theme-independent like the panel
-const CODA_SCALE: i32 = 1; // 8px glyphs; the caption is long, keep it compact
-const CODA_LINE_H: u32 = 14;
+const CODA_LINE_H: u32 = 18;
 const CODA_PAD: u32 = 10;
 const CODA_TEXT: &str = "the left pane happened in a terminal. the right pane is the same \
 event stream, drawn by the same engine -- nothing is mocked.";
@@ -78,10 +105,13 @@ pub(crate) struct ProofScript {
     pub(crate) capture_date: String,
 }
 
-/// Greedy word-wrap of `text` at `scale`-px 8x8 glyphs to fit within `max_width`
-/// px. A single over-long word is kept whole (never split mid-word) rather than
-/// looping forever; never returns an empty vec.
-fn wrap_text(text: &str, max_width: i32, scale: i32) -> Vec<String> {
+/// Greedy word-wrap of `text` to fit within `max_width` px, measuring each
+/// candidate line via the caller-supplied `width_fn` (font8x8's fixed-advance
+/// `font::text_width` or the AA font's metric-derived advance — the panel/coda
+/// callers each pick their own face and size). A single over-long word is kept
+/// whole (never split mid-word) rather than looping forever; never returns an
+/// empty vec.
+fn wrap_text(text: &str, max_width: i32, width_fn: impl Fn(&str) -> i32) -> Vec<String> {
     let mut lines = Vec::new();
     let mut cur = String::new();
     for word in text.split(' ') {
@@ -90,7 +120,7 @@ fn wrap_text(text: &str, max_width: i32, scale: i32) -> Vec<String> {
         } else {
             format!("{cur} {word}")
         };
-        if cur.is_empty() || font::text_width(&candidate, scale) <= max_width {
+        if cur.is_empty() || width_fn(&candidate) <= max_width {
             cur = candidate;
         } else {
             lines.push(std::mem::take(&mut cur));
@@ -106,9 +136,77 @@ fn wrap_text(text: &str, max_width: i32, scale: i32) -> Vec<String> {
     lines
 }
 
+/// Sum of the AA font's per-glyph pixel-scaled advances — `wrap_text`'s width
+/// function for the panel/coda (both AA now). JetBrains Mono is monospace, but
+/// summing real advances (rather than `chars * one_advance`) stays correct
+/// even for a future proportional face.
+fn aa_text_width_at(s: &str, px: f32) -> i32 {
+    let sf = PROOF_FONT.as_scaled(PxScale::from(px));
+    s.chars()
+        .map(|c| sf.h_advance(sf.glyph_id(c)))
+        .sum::<f32>()
+        .round() as i32
+}
+
+/// Draws `s` in the AA face at pixel size `px`, top-left at `(x, top_y)`
+/// (matching the office-side `text()`/`text_at()` call convention), alpha-
+/// composited onto the existing pixels via `blend_px`. Returns the total
+/// advance width, so callers needing it (the typing-cursor block) don't
+/// recompute via a second `aa_text_width_at` call.
+fn aa_draw_text_at(
+    img: &mut RgbaImage,
+    s: &str,
+    x: i32,
+    top_y: i32,
+    px: f32,
+    color: Rgba<u8>,
+) -> i32 {
+    let scale = PxScale::from(px);
+    let sf = PROOF_FONT.as_scaled(scale);
+    let baseline_y = top_y as f32 + sf.ascent();
+    let mut cursor_x = x as f32;
+    for ch in s.chars() {
+        let gid = sf.glyph_id(ch);
+        let glyph = gid.with_scale_and_position(scale, point(cursor_x, baseline_y));
+        if let Some(outlined) = PROOF_FONT.outline_glyph(glyph) {
+            let bounds = outlined.px_bounds();
+            let (ox, oy) = (bounds.min.x.round() as i32, bounds.min.y.round() as i32);
+            outlined.draw(|gx, gy, coverage| {
+                blend_px(img, ox + gx as i32, oy + gy as i32, color, coverage);
+            });
+        }
+        cursor_x += sf.h_advance(gid);
+    }
+    (cursor_x - x as f32).round() as i32
+}
+
+/// Alpha-composite `color` onto the existing pixel at `coverage` (the AA
+/// rasterizer's per-pixel grayscale strength) — the panel's text sits on the
+/// dark `PANEL_BG`/`CODA_BG` ground, never a transparent surface, so a
+/// straight linear blend (no separate alpha channel to preserve) is correct.
+fn blend_px(img: &mut RgbaImage, x: i32, y: i32, color: Rgba<u8>, coverage: f32) {
+    if x < 0 || y < 0 || (x as u32) >= img.width() || (y as u32) >= img.height() {
+        return;
+    }
+    let bg = *img.get_pixel(x as u32, y as u32);
+    let a = coverage.clamp(0.0, 1.0);
+    let mix = |fg: u8, bg: u8| (fg as f32 * a + bg as f32 * (1.0 - a)).round() as u8;
+    img.put_pixel(
+        x as u32,
+        y as u32,
+        Rgba([
+            mix(color[0], bg[0]),
+            mix(color[1], bg[1]),
+            mix(color[2], bg[2]),
+            255,
+        ]),
+    );
+}
+
 fn coda_lines(canvas_w: u32) -> Vec<String> {
-    let max_w = (canvas_w as i32 - 2 * CODA_PAD as i32).max(8 * CODA_SCALE);
-    wrap_text(CODA_TEXT, max_w, CODA_SCALE)
+    let floor = aa_text_width_at("M", CODA_FONT_PX);
+    let max_w = (canvas_w as i32 - 2 * CODA_PAD as i32).max(floor);
+    wrap_text(CODA_TEXT, max_w, |s| aa_text_width_at(s, CODA_FONT_PX))
 }
 
 /// Pixel height of the coda strip for a canvas of width `canvas_w` — a pure
@@ -138,14 +236,26 @@ pub(crate) fn revealed_chars(at_ms: u64, elapsed_ms: u64, len: usize) -> usize {
     (((elapsed_ms - at_ms) * TYPE_CPS) / 1000).min(len as u64) as usize
 }
 
-/// The newest annotated line already on screen — its connector + callout are lit.
+/// The newest annotated line already on screen — its connector + callout are
+/// lit for at most `ANNOTATION_MAX_HOLD_MS` past its OWN `at_ms`, UNLESS it's
+/// the last annotated line in the script, which holds indefinitely. The cap
+/// exists to stop a callout over-holding while it waits on a FUTURE beat
+/// (that's the bug: "a sprite walks in" front-loaded by PREAMBLE_MS, so its
+/// next beat was 8.2s out); the final beat has no next beat to wait on, so
+/// capping it too would just go quiet for the clip's idle tail instead of
+/// riding out to the coda, an unrelated regression the fixture's f0300 caught
+/// (last annotation at_ms=20600, cap would expire it at 24800 — 1.1s before
+/// the 26s clip ends). Once a non-final annotation's cap expires, this
+/// returns `None` rather than falling back to an OLDER annotated line — an
+/// expired callout goes quiet, it doesn't resurrect the previous one.
 pub(crate) fn active_annotation(lines: &[PanelLine], elapsed_ms: u64) -> Option<usize> {
-    lines
+    let (i, line) = lines
         .iter()
         .enumerate()
         .rev()
-        .find(|(_, l)| l.annotation.is_some() && l.at_ms <= elapsed_ms)
-        .map(|(i, _)| i)
+        .find(|(_, l)| l.annotation.is_some() && l.at_ms <= elapsed_ms)?;
+    let is_final_annotation = lines[i + 1..].iter().all(|l| l.annotation.is_none());
+    (is_final_annotation || elapsed_ms - line.at_ms <= ANNOTATION_MAX_HOLD_MS).then_some(i)
 }
 
 fn ts_ms(v: &serde_json::Value) -> Result<i64> {
@@ -349,21 +459,24 @@ const DOT_GREEN: Rgba<u8> = Rgba([39, 201, 63, 255]);
 const DOT_PITCH: i32 = 9; // scale-1 dot glyphs are ~8px wide; 9 keeps a 1px gap
 const DOT_GAP_AFTER: i32 = 6; // clearance between the 3rd dot and the title
 
-fn chrome(img: &mut RgbaImage, x: u32, y: u32, w: u32, title: &str, traffic_lights: bool) {
+/// `is_panel` gates BOTH the traffic-light dots and the AA title font — only
+/// the left "captured..." panel is a typed terminal (Font C); the "pixtuoid"
+/// office chrome stays the office's own 8x8 pixel font.
+fn chrome(img: &mut RgbaImage, x: u32, y: u32, w: u32, title: &str, is_panel: bool) {
     fill(img, x, y, w, HEADER_H, CHROME_BG);
     fill(img, x, y + HEADER_H - 1, w, 1, EDGE);
-    let cy = (y + HEADER_H / 2) as i32;
-    let title_x = if traffic_lights {
+    if is_panel {
+        let cy = (y + HEADER_H / 2) as i32;
         let mut cx = x as i32 + PAD as i32 + 4;
         for c in [DOT_RED, DOT_YELLOW, DOT_GREEN] {
             dot(img, cx, cy, 1, c);
             cx += DOT_PITCH;
         }
-        cx + DOT_GAP_AFTER
+        let title_x = cx + DOT_GAP_AFTER;
+        aa_draw_text_at(img, title, title_x, (y + 8) as i32, PROOF_FONT_PX, INK);
     } else {
-        (x + PAD) as i32
-    };
-    text(img, title, title_x, (y + 8) as i32, INK);
+        text(img, title, (x + PAD) as i32, (y + 8) as i32, INK);
+    }
 }
 
 fn panel_body(
@@ -374,7 +487,8 @@ fn panel_body(
     elapsed_ms: u64,
 ) {
     fill(img, origin.0, origin.1, size.0, size.1, PANEL_BG);
-    let max_w = (size.0 as i32 - 2 * PAD as i32).max(8 * TEXT_SCALE);
+    let floor = aa_text_width_at("M", PROOF_FONT_PX);
+    let max_w = (size.0 as i32 - 2 * PAD as i32).max(floor);
     let mut row = 0u32;
     for line in &script.lines {
         let total_len = line.text.chars().count();
@@ -386,7 +500,7 @@ fn panel_body(
         // string's character stream (build_script/reveal timing untouched); a
         // long line simply pushes later lines down as more of it becomes
         // visible, like a real terminal.
-        let wrapped = wrap_text(&line.text, max_w, TEXT_SCALE);
+        let wrapped = wrap_text(&line.text, max_w, |s| aa_text_width_at(s, PROOF_FONT_PX));
         let color = if line.prompt { PROMPT } else { INK };
         let mut remaining = shown;
         for sub in &wrapped {
@@ -400,9 +514,16 @@ fn panel_body(
                 return; // panel full — the timeline is authored to fit; guard anyway
             }
             let visible: String = sub.chars().take(take).collect();
-            text(img, &visible, (origin.0 + PAD) as i32, y as i32, color);
+            let advance = aa_draw_text_at(
+                img,
+                &visible,
+                (origin.0 + PAD) as i32,
+                y as i32,
+                PROOF_FONT_PX,
+                color,
+            );
             if take < sub_len {
-                let cx = origin.0 as i32 + PAD as i32 + font::text_width(&visible, TEXT_SCALE);
+                let cx = origin.0 as i32 + PAD as i32 + advance;
                 fill(img, cx.max(0) as u32, y, 10, 16, INK);
             }
             row += 1;
@@ -510,10 +631,10 @@ pub(crate) fn compose_frame(
     fill(&mut img, 0, coda_y0, w, ch, CODA_BG);
     fill(&mut img, 0, coda_y0, w, 1, EDGE);
     for (i, cline) in coda_lines(w).iter().enumerate() {
-        let lw = font::text_width(cline, CODA_SCALE);
+        let lw = aa_text_width_at(cline, CODA_FONT_PX);
         let x = ((w as i32 - lw) / 2).max(0);
         let y = (coda_y0 + CODA_PAD) as i32 + i as i32 * CODA_LINE_H as i32;
-        text_at(&mut img, cline, x, y, CODA_SCALE, CODA_INK);
+        aa_draw_text_at(&mut img, cline, x, y, CODA_FONT_PX, CODA_INK);
     }
     img
 }
@@ -703,18 +824,43 @@ mod tests {
                 prompt: false,
                 annotation: Some("y"),
             },
+            PanelLine {
+                at_ms: 900 + ANNOTATION_MAX_HOLD_MS + 50_000,
+                text: "d".into(),
+                prompt: false,
+                annotation: Some("z"),
+            },
         ];
         assert_eq!(active_annotation(&lines, 100), Some(0));
         assert_eq!(active_annotation(&lines, 899), Some(0));
         assert_eq!(active_annotation(&lines, 900), Some(2));
+        // the max-hold ceiling on a MIDDLE annotation ("y" — "z" is still to
+        // come): right at the edge it's still lit, one ms past it goes quiet
+        // — and does NOT fall back to the older annotation (0).
+        assert_eq!(
+            active_annotation(&lines, 900 + ANNOTATION_MAX_HOLD_MS),
+            Some(2)
+        );
+        assert_eq!(
+            active_annotation(&lines, 900 + ANNOTATION_MAX_HOLD_MS + 1),
+            None
+        );
+        // "z" is the LAST annotated line — exempt from the cap, it holds
+        // indefinitely (there's no future beat it could be over-holding for).
+        let z_at = 900 + ANNOTATION_MAX_HOLD_MS + 50_000;
+        assert_eq!(active_annotation(&lines, z_at), Some(3));
+        assert_eq!(
+            active_annotation(&lines, z_at + ANNOTATION_MAX_HOLD_MS + 1_000_000),
+            Some(3)
+        );
     }
 
     #[test]
     fn canvas_dims_are_even_and_stack_correctly() {
         let (ww, wh) = canvas_dims(&ProofLayout::Wide, 960, 832);
-        assert_eq!((ww, wh), (1720, 898));
+        assert_eq!((ww, wh), (1720, 902));
         let (tw, th) = canvas_dims(&ProofLayout::Tall, 960, 832);
-        assert_eq!((tw, th), (960, 1344));
+        assert_eq!((tw, th), (960, 1334));
         for d in [ww, wh, tw, th] {
             assert_eq!(d % 2, 0, "yuv420p needs even dims");
         }
@@ -732,25 +878,32 @@ mod tests {
     }
 
     #[test]
-    fn coda_wraps_to_fit_narrow_canvas_but_not_wide_canvas() {
-        // Wide reference canvas (1720px) fits the caption on one line; the
-        // narrower Tall canvas (960px, cols=120) must wrap without dropping words.
-        let wide = coda_lines(1720);
-        let tall = coda_lines(960);
-        assert_eq!(wide.len(), 1);
-        assert_eq!(tall.len(), 2);
-        for lines in [&wide, &tall] {
-            let rejoined = lines.join(" ");
-            assert_eq!(
-                rejoined, CODA_TEXT,
-                "wrapping must not drop or reorder words"
-            );
+    fn coda_fits_one_line_at_both_reference_canvas_widths() {
+        // The AA font's narrower per-char advance (vs font8x8) means the
+        // caption now fits on one line at BOTH the wide (1720px) and tall
+        // (960px, cols=120) reference canvases.
+        for w in [1720, 960] {
+            let lines = coda_lines(w);
+            assert_eq!(lines.len(), 1, "canvas_w={w}");
+            assert_eq!(lines[0], CODA_TEXT);
         }
     }
 
     #[test]
+    fn coda_wraps_a_narrow_canvas_without_dropping_words() {
+        let narrow = coda_lines(500);
+        assert!(narrow.len() > 1, "500px must force a wrap");
+        assert_eq!(
+            narrow.join(" "),
+            CODA_TEXT,
+            "wrapping must not drop or reorder words"
+        );
+    }
+
+    #[test]
     fn wrap_text_never_produces_an_empty_line_list() {
-        assert_eq!(wrap_text("", 100, 1), vec![String::new()]);
-        assert_eq!(wrap_text("hi", 4, 1), vec!["hi".to_string()]); // single word, never split
+        let unit_width = |s: &str| s.chars().count() as i32;
+        assert_eq!(wrap_text("", 100, unit_width), vec![String::new()]);
+        assert_eq!(wrap_text("hi", 1, unit_width), vec!["hi".to_string()]); // single word, never split
     }
 }
