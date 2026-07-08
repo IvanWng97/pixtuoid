@@ -1238,7 +1238,9 @@ test('text over the live office carries its own scrim (.text-scrim)', async ({ p
   // skyline — give it the same crisp plate (it's NOT hero, so the install
   // card idiom applies, unlike the hero's bare treatment above).
   expect(await page.locator('.install__note.text-scrim').count()).toBe(1);
-  expect(await page.locator('#showcase .roster__row.text-scrim').count()).toBeGreaterThan(0);
+  // The roster rows are BARE over the section's DIM_MAX backing (user verdict,
+  // same rule as the hero + tools table) — the plate must never come back.
+  expect(await page.locator('#showcase .roster__row.text-scrim').count()).toBe(0);
   // …and INSIDE the card the plate's visible edge aligns with the tabs/command
   // column: text-scrim's negative office-margin is zeroed there (user-caught —
   // the plate hung ~11px left of its siblings).
@@ -1578,33 +1580,6 @@ test('the elevator shaft never overlaps the studio panel copy at 390 or 768', as
       overlaps,
       `${width}px: roster rows reach ${overlaps}px past the shaft's left edge`
     ).toEqual([]);
-  }
-});
-
-test('text-scrim padding/margin cancellation holds for the roster rows (no residual inline shift)', async ({
-  page,
-}) => {
-  // R2b (wb-3 matrix sweep): .text-scrim (global.css) cancels its own inline
-  // padding with a matching negative margin-inline so the TEXT stays aligned
-  // with unscrimmed siblings — Showcase's .roster__row used to override just
-  // the padding (a raw 0.3rem), leaving the margin still canceling the OLD
-  // 0.75em and pushing the row's copy ~7px past its natural left edge. Both
-  // now derive from the SAME --scrim-pad-x property, so this can't desync:
-  // padding-inline-start and margin-inline-start must sum to ~0 for every
-  // row that carries both classes.
-  await gotoLive(page);
-  const sums = await page.$$eval('.roster__row.text-scrim', (rows) =>
-    rows.map((el) => {
-      const cs = getComputedStyle(el);
-      return parseFloat(cs.paddingInlineStart) + parseFloat(cs.marginInlineStart);
-    })
-  );
-  expect(sums.length).toBeGreaterThan(0);
-  for (const sum of sums) {
-    expect(
-      Math.abs(sum),
-      'padding-inline-start + margin-inline-start should cancel to ~0'
-    ).toBeLessThan(0.5);
   }
 });
 
