@@ -16,7 +16,13 @@ categories.workspace   = true
 # #[path]-includes ../../pixtuoid-hook/src/paths.rs; supported_sources_manifest
 # reads ../../site/src/sources.json at runtime (runtime-read spares the publish
 # build-verify, NOT cargo test on an extracted crate — so it must be excluded too).
-exclude                = ["tests/socket_path_parity.rs", "tests/supported_sources_manifest.rs"]
+# proof_fixture_disjointness reads ../../site/src/components/Statusline.astro
+# the same way.
+exclude                = [
+    "tests/socket_path_parity.rs",
+    "tests/supported_sources_manifest.rs",
+    "tests/proof_fixture_disjointness.rs",
+]
 
 [lints]
 workspace = true
