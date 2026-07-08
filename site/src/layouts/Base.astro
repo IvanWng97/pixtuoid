@@ -550,9 +550,9 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
           // the page and skip keyboard users past the nav/skip-link). The bg is
           // no longer inert, so Tab flows skip-link -> nav -> content as normal.
         }
-        function finish() {
+        function finish(force) {
           if (done) return;
-          if (document.getElementById('office-live')) {
+          if (!force && document.getElementById('office-live')) {
             // Level 2: log is done — now HOLD until the office engine is actually
             // ready (window.__pixEngineReady, set by OfficeBackdrop on the first live
             // frame, or on wasm failure/absence so we never hang), so the splash lifts
@@ -595,7 +595,12 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
         }
         function skip() {
           for (let j = 0; j < lines.length; j++) lines[j].classList.add('in');
-          finish();
+          // A user gesture (click/keypress) always wins over the Level-2 engine
+          // hold — force finish() straight to settle() even mid-wait, or a tap
+          // during the hold left the page inert for up to MAX_ENGINE_WAITS more.
+          // The natural no-gesture path (step() -> finish(), no force arg) keeps
+          // holding for the engine exactly as before.
+          finish(true);
         }
         function onKey() {
           skip();

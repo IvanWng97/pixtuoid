@@ -753,6 +753,36 @@ test('first visit: boot intro auto-runs, reveals the page, seeds the gate', asyn
   await expectSectionReveal(page, 'features');
 });
 
+test('a keypress during the Level-2 engine hold force-settles the splash immediately', async ({
+  page,
+}) => {
+  // Regression pin: skip() used to just call finish() — on the index page
+  // (#office-live present) that re-enters the SAME waitForEngine() hold an
+  // unforced finish() would, so a user gesture mid-hold did NOTHING but relight
+  // already-lit log lines; the page stayed inert up to the ~4s MAX_ENGINE_WAITS
+  // cap regardless of the keypress. A user gesture must always win over the
+  // engine hold.
+  const errors = watchErrors(page);
+  // Hang the wasm fetch forever (never fulfilled/aborted): window.__pixEngineReady
+  // then never resolves via the office's own first-frame path, so an unforced
+  // finish() would hold the full MAX_ENGINE_WAITS cap.
+  await page.route('**/wasm/**', () => {});
+  await page.goto('./'); // real first visit — no pix-booted seed
+  await expect(page.locator('#boot')).toBeVisible();
+  // Wait for the log to finish (last line lit) — the exact moment finish()
+  // runs and, since #office-live exists and the engine will never resolve,
+  // enters the waitForEngine hold. Bounded generously above the ~1.7s nominal
+  // log time for CI slack.
+  await expect(page.locator('.boot__line').last()).toHaveClass(/\bin\b/, { timeout: 5_000 });
+  await page.keyboard.press('Space');
+  // Must clear almost immediately — nowhere near the ~4s MAX_ENGINE_WAITS cap.
+  await expect(page.locator('html')).not.toHaveAttribute('data-booting', '1', { timeout: 700 });
+  expect(await page.evaluate(() => document.getElementById('main')!.hasAttribute('inert'))).toBe(
+    false
+  );
+  expect(errors()).toEqual([]);
+});
+
 test('first visit on an office-less page lifts the splash promptly (no engine-gate hang)', async ({
   page,
 }) => {
