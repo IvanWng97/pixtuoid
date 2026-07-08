@@ -28,7 +28,11 @@ import { FLOORS, FLOOR_SPY_ROOT_MARGIN } from '../consts';
     }
     <span class="shaft__car" data-shaft-car aria-hidden="true"></span>
   </nav>
-  <span class="shaft__keys text-scrim" aria-hidden="true">keys 1–6</span>
+  {
+    /* no keys hint here — the statusline owns the ONE "keys 1–6" affordance
+      (it sits beside the popover's on/off toggle); a second copy on the
+      shaft duplicated it on-screen (user-caught) */
+  }
 </aside>
 
 <script is:inline define:vars={{ floorSpyRootMargin: FLOOR_SPY_ROOT_MARGIN }}>
@@ -285,13 +289,6 @@ import { FLOORS, FLOOR_SPY_ROOT_MARGIN } from '../consts';
   .shaft__stop.is-ding :global(.led-dot) {
     animation: shaft-ding 0.6s ease-out 1;
   }
-  .shaft__keys {
-    font-family: var(--font-mono);
-    font-size: 0.68rem;
-    letter-spacing: 0.06em;
-    color: var(--fg-muted);
-    writing-mode: vertical-rl;
-  }
   @media (prefers-reduced-motion: reduce) {
     /* static indicator: the LED still tracks floors; the car snaps (no glide),
        the ding never pulses. global.css's sitewide reset already forces
@@ -314,16 +311,11 @@ import { FLOORS, FLOOR_SPY_ROOT_MARGIN } from '../consts';
       padding: 6px 0;
     }
     .shaft__plate,
-    .shaft__car,
-    .shaft__keys {
+    .shaft__car {
       display: none;
     }
   }
   @media (pointer: coarse) {
-    /* a keyboard-only affordance on a keyboardless device (same rule as sl__keys) */
-    .shaft__keys {
-      display: none;
-    }
     /* The shaft stays slim by design (it reads as hardware, a rail, not a
        button bar) — widening each dot into a real touch target here would
        defeat that. The applicable SC is 2.5.8 Target Size Minimum (AA,
