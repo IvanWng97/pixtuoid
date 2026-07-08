@@ -38,12 +38,12 @@ export const THEME_BG: Record<ThemeId, string> = {
 export interface Floor {
   id: string; // section id + the digit-key / elevator jump target (getElementById) — the EXISTING dom ids, unchanged
   fl: string; // '6F'..'1F' — the data-floor stamp, lift readout, digit-key vocabulary
-  label: string; // 'penthouse — hero' — data-floor-label + wayfinding copy
+  label: string; // 'penthouse — welcome' — data-floor-label + wayfinding copy
 }
 export const FLOORS: Floor[] = [
-  { id: 'lobby', fl: '6F', label: 'penthouse — hero' },
+  { id: 'lobby', fl: '6F', label: 'penthouse — welcome' },
   { id: 'showcase', fl: '5F', label: 'studio — demos' },
-  { id: 'amenities', fl: '4F', label: 'amenities — proof + pantry' },
+  { id: 'amenities', fl: '4F', label: 'amenities — see it real' },
   { id: 'how', fl: '3F', label: 'machine room — quickstart' },
   { id: 'tools', fl: '2F', label: 'tenants — compatibility' },
   { id: 'install', fl: '1F', label: 'front desk — install' },
@@ -53,7 +53,7 @@ export const floorById = (id: string): Floor => {
   if (!f) throw new Error(`consts: no FLOORS entry for floor id "${id}"`);
   return f;
 };
-// the short name half of a label ('penthouse — hero' → 'penthouse'), for
+// the short name half of a label ('penthouse — welcome' → 'penthouse'), for
 // eyebrows and the lift readout
 export const floorName = (f: Floor): string => f.label.split(' — ')[0];
 

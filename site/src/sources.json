@@ -7,7 +7,7 @@
     "url": "https://code.claude.com",
     "status": "supported",
     "featured": true,
-    "transport": "Hook shim + JSONL watcher",
+    "transport": "hooks + session transcripts",
     "platforms": {
       "macos": "yes",
       "linux": "yes",
@@ -22,7 +22,7 @@
     "url": "https://github.com/openai/codex",
     "status": "supported",
     "featured": true,
-    "transport": "Hook shim + JSONL watcher (hook/JSONL coalesce on session UUID)",
+    "transport": "hooks + session transcripts (merged per session)",
     "platforms": {
       "macos": "yes",
       "linux": "yes",
@@ -37,7 +37,7 @@
     "url": "https://github.com/antiGravity-AI/antigravity-cli",
     "status": "supported",
     "featured": false,
-    "transport": "JSONL watcher",
+    "transport": "session transcripts",
     "platforms": {
       "macos": "yes",
       "linux": "yes",
@@ -52,7 +52,7 @@
     "url": "https://github.com/esengine/DeepSeek-Reasonix",
     "status": "supported",
     "featured": false,
-    "transport": "Hook shim (hook-only — global ~/.reasonix/settings.json)",
+    "transport": "hooks only (global ~/.reasonix/settings.json)",
     "platforms": {
       "macos": "yes",
       "linux": "yes",
@@ -67,7 +67,7 @@
     "url": "https://github.com/Hmbown/CodeWhale",
     "status": "supported",
     "featured": false,
-    "transport": "Hook shim (hook-only — ~/.codewhale/config.toml [hooks], cwd-keyed)",
+    "transport": "hooks only (~/.codewhale/config.toml [hooks], cwd-keyed)",
     "platforms": {
       "macos": "yes",
       "linux": "yes",
@@ -82,7 +82,7 @@
     "url": "https://github.com/github/copilot-cli",
     "status": "supported",
     "featured": false,
-    "transport": "JSONL watcher (transcript-only — ~/.copilot/session-state/, sub-agents interleave by agentId)",
+    "transport": "session transcripts only (~/.copilot/session-state/, sub-agents interleave by agentId)",
     "platforms": {
       "macos": "yes",
       "linux": "yes",
@@ -97,7 +97,7 @@
     "url": "https://github.com/anomalyco/opencode",
     "status": "supported",
     "featured": false,
-    "transport": "Hook shim (TS plugin → ~/.config/opencode/plugin/, session-id-keyed)",
+    "transport": "hooks (TS plugin → ~/.config/opencode/plugin/, session-id-keyed)",
     "platforms": {
       "macos": "yes",
       "linux": "yes",
@@ -112,7 +112,7 @@
     "url": "https://cursor.com/cli",
     "status": "supported",
     "featured": false,
-    "transport": "Hook shim (~/.cursor/hooks.json, session-id-keyed)",
+    "transport": "hooks (~/.cursor/hooks.json, session-id-keyed)",
     "platforms": {
       "macos": "yes",
       "linux": "yes",
@@ -127,7 +127,7 @@
     "url": "https://hermes-agent.nousresearch.com",
     "status": "supported",
     "featured": false,
-    "transport": "Hook shim (~/.hermes/config.yaml hooks, session-id-keyed; approve the hook once in Hermes to activate)",
+    "transport": "hooks (~/.hermes/config.yaml hooks, session-id-keyed; approve the hook once in Hermes to activate)",
     "platforms": {
       "macos": "yes",
       "linux": "yes",
@@ -142,7 +142,7 @@
     "url": "https://github.com/openclaw/openclaw",
     "status": "supported",
     "featured": false,
-    "transport": "Hook shim (TS plugin → openclaw gateway; a wandering gateway mascot, not a desk agent)",
+    "transport": "hooks (TS plugin → openclaw gateway; a wandering gateway mascot, not a desk agent)",
     "platforms": {
       "macos": "yes",
       "linux": "yes",

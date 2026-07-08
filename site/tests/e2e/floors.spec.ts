@@ -111,9 +111,9 @@ test('the six floors declare the elevator anchor contract, top floor down', asyn
     }))
   );
   expect(floors).toEqual([
-    { fl: '6F', label: 'penthouse — hero', id: 'lobby' },
+    { fl: '6F', label: 'penthouse — welcome', id: 'lobby' },
     { fl: '5F', label: 'studio — demos', id: 'showcase' },
-    { fl: '4F', label: 'amenities — proof + pantry', id: 'amenities' },
+    { fl: '4F', label: 'amenities — see it real', id: 'amenities' },
     { fl: '3F', label: 'machine room — quickstart', id: 'how' },
     { fl: '2F', label: 'tenants — compatibility', id: 'tools' },
     { fl: '1F', label: 'front desk — install', id: 'install' },

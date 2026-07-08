@@ -144,7 +144,7 @@ const badgeColor = (who: string): string | undefined => {
     <span class="sl__sep">·</span>
     <span data-sl-clock></span>
     <span class="sl__sep">·</span>
-    <span class="sl__onair" data-sl-onair>○ STILL</span>
+    <span class="sl__onair" data-sl-onair>○ STATIC</span>
   </div>
   <div class="sl__install hw-panel" id="sl-install">
     {
@@ -659,7 +659,7 @@ const badgeColor = (who: string): string | undefined => {
         }, 250);
       }
     }
-    // the on-air readout reflects LIVE / user-PAUSED / STILL (poster) — the
+    // the on-air readout reflects LIVE / user-PAUSED / STATIC (poster) — the
     // paused state is what makes the fixed bar read as paused, not '● LIVE'
     let isLive = false;
     function renderAir() {
@@ -673,8 +673,8 @@ const badgeColor = (who: string): string | undefined => {
         live = true;
       } else {
         // reduced motion shows the still POSTER (a frame); live-capable mode
-        // shows a paused feed (STILL)
-        text = mq.matches ? '□ STILL FRAME' : '○ STILL';
+        // shows a paused feed (STATIC)
+        text = mq.matches ? '□ STATIC FRAME' : '○ STATIC';
         live = false;
       }
       onair.textContent = text;
@@ -682,7 +682,7 @@ const badgeColor = (who: string): string | undefined => {
     }
     // seed from the backdrop's class: the one-shot pix:onair event can fire
     // before this script attaches (fast wasm load), and a missed event would
-    // read STILL forever
+    // read STATIC forever
     if (!mq.matches && document.querySelector('.backdrop.is-live')) isLive = true;
     renderAir();
     document.addEventListener('pix:onair', function (e) {

@@ -5,7 +5,7 @@ import { expect, test, type Page } from '@playwright/test';
 // events, data-attribute wiring) where tsc/eslint/knip/astro-build are blind.
 // The first seven tests are regression pins for bug classes a human review
 // actually caught on this site:
-//   - the missed one-shot `pix:onair` event (statusline read STILL forever)
+//   - the missed one-shot `pix:onair` event (statusline read STATIC forever)
 //   - the `is:inline` parse-position trap (scrollspy frozen on floor 6)
 //   - the floating-nav variant leaking onto the docs pages
 //   - a wasm/glue ABI mismatch throwing at runtime under the hero
@@ -482,7 +482,7 @@ test('wasm fetch failure keeps the still poster without an uncaught error', asyn
   await page.waitForLoadState('networkidle');
   await expect(page.locator('.backdrop__poster')).toBeVisible();
   await expect(page.locator('.backdrop.is-live')).not.toBeAttached();
-  await expect(page.locator('[data-sl-onair]')).toHaveText('○ STILL');
+  await expect(page.locator('[data-sl-onair]')).toHaveText('○ STATIC');
   // #456: the office canvas never went live, but the statusline ticker / hero dust
   // / showcase clips still auto-animate — so the pause control must be VISIBLE and
   // actually govern them (WCAG 2.2.2), not hidden as if nothing were animating.

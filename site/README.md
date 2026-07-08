@@ -134,7 +134,7 @@ gates can't see. CI runs it in `site.yml` after the build step.
   `data-lit` (dimmer target; `data-lit="fade"` also rises with the darkness)
   and `data-floor`/`data-floor-label` (scrollspy + wayfinding) — a new floor
   is a `FLOORS` row in `consts.ts` (the `{id, fl, label}` shape, e.g.
-  `{id: 'lobby', fl: '6F', label: 'penthouse — hero'}` — the ONE source the
+  `{id: 'lobby', fl: '6F', label: 'penthouse — welcome'}` — the ONE source the
   statusline lift, `ElevatorShaft.astro`'s LED/car, AND each section's
   `data-floor="6F"` string / `data-floor-label` / id / eyebrow derive from),
   then `data-lit` on the section. The backdrop publishes
