@@ -1455,6 +1455,56 @@ test('the pause control never overlaps a footer link across the mobile wrap rang
   }
 });
 
+test('the pause control never occludes in-page copy at mobile widths', async ({ page }) => {
+  // R1 (wb-3 matrix sweep): .office-ctl is position:fixed, so its on-screen
+  // band is CONSTANT across the whole scroll — every section's copy passes
+  // under that same band at some scroll offset, not just the footer's (the
+  // sibling test above only ever guarded the footer). OfficeBackdrop.astro
+  // now widens .container's end-padding and caps the two office-gap
+  // captions' width (they render outside .container) by the button's own
+  // footprint at ≤760px. Prove it at the four convicted spots: for each,
+  // scroll the page so the copy's OWN midpoint lands on the button's fixed
+  // band midpoint (the worst-case alignment a visitor could ever scroll
+  // to — the band is viewport-relative and constant, so this position
+  // always exists short of the document's scroll ends), then check the two
+  // rects don't intersect. A plain scrollIntoView({block:'center'}) does NOT
+  // reproduce this — it centers the copy in the *viewport*, not in the
+  // button's band near the bottom, so it can miss the real collision.
+  await gotoLive(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+
+  async function assertClearOfPause(selector: string): Promise<void> {
+    const overlap = await page.evaluate((sel) => {
+      const el = document.querySelector(sel) as HTMLElement | null;
+      const btn = document.getElementById('office-pause') as HTMLElement | null;
+      if (!el || !btn || btn.hidden) return { found: !!el, overlap: false };
+      // Align the copy's midpoint with the button's fixed-band midpoint —
+      // the worst-case scroll position for this exact pair.
+      const b = btn.getBoundingClientRect();
+      const r = el.getBoundingClientRect();
+      const elAbsMid = (r.top + r.bottom) / 2 + window.scrollY;
+      const bandMid = (b.top + b.bottom) / 2;
+      window.scrollTo({ top: Math.max(0, Math.round(elAbsMid - bandMid)), behavior: 'instant' });
+      const r2 = el.getBoundingClientRect();
+      const b2 = btn.getBoundingClientRect();
+      const overlap = !(
+        r2.right <= b2.left ||
+        r2.left >= b2.right ||
+        r2.bottom <= b2.top ||
+        r2.top >= b2.bottom
+      );
+      return { found: true, overlap };
+    }, selector);
+    expect(overlap.found, `${selector} not found`).toBe(true);
+    expect(overlap.overlap, `${selector} overlaps #office-pause's fixed band`).toBe(false);
+  }
+
+  await assertClearOfPause('.hero__ghost[href="#showcase-vibing"]'); // hero CTA ("▸ play with it live")
+  await assertClearOfPause('.office-gap:not(.office-gap--closer) .gap-caption'); // gap-1 caption
+  await assertClearOfPause('.how__step:first-child .how__detail p'); // HowItWorks step 01 body
+  await assertClearOfPause('[data-vibing-time-label]'); // Showcase VIBING clock readout
+});
+
 test('an install copy from the Install section hires a coworker: pix:install-copy → pix:hired', async ({
   page,
   context,

@@ -344,7 +344,10 @@ h3 {
   width: 100%;
   max-width: var(--maxw);
   margin-inline: auto;
-  padding-inline: clamp(1.1rem, 4vw, 2.5rem);
+  /* named so a fixed-chrome clearance (OfficeBackdrop's ≤760px office-ctl
+     gutter) can widen just the end side without retyping this clamp(). */
+  --container-pad-x: clamp(1.1rem, 4vw, 2.5rem);
+  padding-inline: var(--container-pad-x);
 }
 section {
   /* compression (§4): the pre-redesign clamp(3.2rem, 7vw, 6rem) carried
@@ -575,13 +578,19 @@ section {
    found a soft glow read as a murky smudge over the office pixels; a flat
    bordered plate reads as an intentional card instead. margin-inline cancels
    the padding so the TEXT stays left-aligned with its siblings (h1, eyebrow,
-   CTA row) — only the plate's edge insets around it. */
+   CTA row) — only the plate's edge insets around it. Both sides read the
+   SAME --scrim-pad-x custom property (not two independent literals), so a
+   caller that needs a tighter plate (Showcase's .roster__row) overrides just
+   that one property and the cancellation stays exact — no way for padding
+   and margin to desync again (#wb-3: a raw padding override here left the
+   margin canceling the OLD 0.75em, pushing text ~7px past the edge). */
 .text-scrim {
+  --scrim-pad-x: 0.75em;
   background: var(--scrim);
   border: 1px solid var(--border-strong);
   border-radius: 0;
-  padding: 0.5em 0.75em;
-  margin-inline: -0.75em;
+  padding: 0.5em var(--scrim-pad-x);
+  margin-inline: calc(-1 * var(--scrim-pad-x));
 }
 
 .office-gap {
@@ -606,7 +615,12 @@ section {
 .office-gap .gap-caption {
   position: absolute;
   bottom: 3.2rem;
-  left: clamp(1rem, 4vw, 3rem);
+  /* named so OfficeBackdrop's ≤760px office-ctl clearance can size a
+     matching max-width without retyping this clamp() (the caption sits
+     outside .container, as a direct <main> child, so that clearance can't
+     reach it via .container's own padding). */
+  --gap-caption-inset: clamp(1rem, 4vw, 3rem);
+  left: var(--gap-caption-inset);
   font-family: var(--font-mono);
   font-size: 0.85rem;
   color: var(--chip-ink);

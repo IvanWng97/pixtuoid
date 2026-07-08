@@ -138,16 +138,22 @@ import { asset, DIM_RESTING } from '../consts';
      announce why). */
   /* the class display beats [hidden]'s UA rule — restate it (same trap as
      the statusline's .sl__floors[hidden]) */
+  :root {
+    /* the button's own footprint, named so the ≤760px content-gutter rule
+       below can reserve exactly this much (never a second copy to drift). */
+    --office-ctl-edge: 10px;
+    --office-ctl-w: 36px;
+  }
   .office-ctl[hidden] {
     display: none;
   }
   .office-ctl {
     position: fixed;
-    right: 10px;
+    right: var(--office-ctl-edge);
     bottom: calc(2rem + env(safe-area-inset-bottom, 0px) + 10px);
     z-index: 50;
-    width: 36px;
-    height: 36px;
+    width: var(--office-ctl-w);
+    height: var(--office-ctl-w);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -177,6 +183,26 @@ import { asset, DIM_RESTING } from '../consts';
   @media (max-width: 960px) {
     .office-ctl {
       bottom: calc(2rem + env(safe-area-inset-bottom, 0px) + var(--footer-h, 74px) + 10px);
+    }
+  }
+  /* The clearance above only ever kept the FOOTER's own copy clear of the
+     button. But .office-ctl is position:fixed — its on-screen band is
+     constant across the whole scroll, so every section's copy passes under
+     it at some scroll offset, not just the footer's. At ≤760px .container
+     nearly fills the viewport (no side margin wide enough to clear the
+     button on its own), so widen just its END padding by the button's own
+     footprint (--office-ctl-edge/-w above — never a second copy of those
+     numbers). The two office-gap captions render OUTSIDE .container (direct
+     <main> children, #wb-3), so they need the same reservation applied
+     directly via a matching max-width. */
+  @media (max-width: 760px) {
+    .container {
+      padding-inline-end: calc(var(--container-pad-x) + var(--office-ctl-edge) + var(--office-ctl-w) + 8px);
+    }
+    .gap-caption {
+      max-width: calc(
+        100% - var(--gap-caption-inset) - var(--office-ctl-edge) - var(--office-ctl-w) - 8px
+      );
     }
   }
   .office-ctl:hover,
