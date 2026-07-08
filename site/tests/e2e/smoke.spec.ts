@@ -1566,9 +1566,10 @@ test('the elevator shaft never overlaps the studio panel copy at 390 or 768', as
         .map((el) => el.getBoundingClientRect().right - shaftLeft)
         .filter((over) => over > 0);
     });
-    expect(overlaps, `${width}px: roster rows reach ${overlaps}px past the shaft's left edge`).toEqual(
-      []
-    );
+    expect(
+      overlaps,
+      `${width}px: roster rows reach ${overlaps}px past the shaft's left edge`
+    ).toEqual([]);
   }
 });
 
@@ -1592,9 +1593,10 @@ test('text-scrim padding/margin cancellation holds for the roster rows (no resid
   );
   expect(sums.length).toBeGreaterThan(0);
   for (const sum of sums) {
-    expect(Math.abs(sum), 'padding-inline-start + margin-inline-start should cancel to ~0').toBeLessThan(
-      0.5
-    );
+    expect(
+      Math.abs(sum),
+      'padding-inline-start + margin-inline-start should cancel to ~0'
+    ).toBeLessThan(0.5);
   }
 });
 

@@ -197,7 +197,9 @@ import { asset, DIM_RESTING } from '../consts';
      directly via a matching max-width. */
   @media (max-width: 760px) {
     .container {
-      padding-inline-end: calc(var(--container-pad-x) + var(--office-ctl-edge) + var(--office-ctl-w) + 8px);
+      padding-inline-end: calc(
+        var(--container-pad-x) + var(--office-ctl-edge) + var(--office-ctl-w) + 8px
+      );
     }
     .gap-caption {
       max-width: calc(
