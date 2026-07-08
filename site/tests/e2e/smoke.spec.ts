@@ -1345,7 +1345,21 @@ test('bare hero text clears WCAG AA at the real office composite (day + night)',
     await page.goto('./');
     await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
 
-    for (const selector of ['.hero .eyebrow', '.hero .statement-sub', '.hero__avail']) {
+    // Every BARE muted-text surface over the office, not just the hero's
+    // (lens B measured #showcase's lead + roster body at 3.79-3.96:1 day —
+    // the sibling sweep adds the other sections' leads and eyebrows too):
+    for (const selector of [
+      '.hero .eyebrow',
+      '.hero .statement-sub',
+      '.hero__avail',
+      '#showcase .section-head .lead',
+      '#showcase .eyebrow',
+      '.roster__body',
+      '#how .eyebrow',
+      '#tools .section-head .lead',
+      '#install .section-head .lead',
+      '#amenities .eyebrow',
+    ]) {
       const { ratio } = await worstCaseRatio(selector);
       expect(
         ratio,

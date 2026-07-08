@@ -79,9 +79,8 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
       <p class="eyebrow">{floor.fl} · {floorName(floor)} — watch it work</p>
       <h2 class="statement statement--md">{countWord} demos.<br />One office.</h2>
       <p class="lead">
-        What's playing is live — the same office running in your browser. The list on the right is
-        what you can watch: pick a demo and the wall plays it. Drag the clock, roll in a storm,
-        switch the vibe.
+        What's playing is live — the same office running in your browser. Every demo on the list is
+        watchable: pick one and the wall plays it. Drag the clock, roll in a storm, switch the vibe.
       </p>
     </div>
 
@@ -741,7 +740,10 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
     grid-area: body;
     font-family: var(--font-body);
     font-size: 0.88rem;
-    color: var(--fg-muted);
+    /* bare over the office: the tuned ink, not --fg-muted (see global.css's
+       --office-ink doc comment; scoped specificity beats the global rule, so
+       the token is applied here directly) */
+    color: var(--office-ink);
   }
   @media (prefers-reduced-motion: reduce) {
     /* the VIBING channel's controls only make sense with the office running,

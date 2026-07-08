@@ -585,6 +585,19 @@ section {
    (#wb-3: a raw padding override left the margin canceling the OLD 0.75em,
    pushing text ~7px past the edge; the roster rows that hit this have since
    gone bare — .install__note is the surviving consumer). */
+/* Every bare muted-text surface over the office rides the hero's tuned inks
+   (day LIGHTENS the composite, night DARKENS it — stock --fg-muted clears
+   neither extreme; see --office-ink's doc comment above). Lens B measured the
+   5F lead at 2.69-3.88:1 day before this rule; .roster__body gets the same
+   token in Showcase.astro's scoped styles (scoped specificity wins there). */
+section[data-lit] .section-head .lead {
+  color: var(--office-ink);
+}
+section[data-lit] .section-head .eyebrow {
+  /* same nudge for the coral eyebrows (hero's own scoped rule pioneered it) */
+  color: var(--office-ink-accent);
+}
+
 .text-scrim {
   --scrim-pad-x: 0.75em;
   background: var(--scrim);
