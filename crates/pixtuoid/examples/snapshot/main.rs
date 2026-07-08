@@ -4,6 +4,7 @@
 //! fixes — see `cargo run --example snapshot --release`.
 
 mod encode;
+mod proof;
 mod scenes;
 
 use std::path::PathBuf;
@@ -286,6 +287,29 @@ struct SnapshotArgs {
     /// "visible" isn't expressible as a static flag dependency. Static-PNG path only.
     #[arg(long, conflicts_with_all = ["crop_agent", "crop_furniture", "gif", "anim"])]
     crop_mascot: bool,
+
+    /// Render the §3 split-screen proof replay from a captured CC session
+    /// fixture: left = typed transcript, right = the real reducer+renderer
+    /// replaying the same decoded events; annotations burned in. Emits PNG
+    /// frame sequences to --frames-dir/{wide,tall}/ (both compositions from
+    /// ONE render pass); scripts/gen-media.py (kind:"proof") encodes them.
+    #[arg(long, value_name = "FIXTURE", value_hint = clap::ValueHint::FilePath,
+          conflicts_with_all = ["gif", "anim", "meeting", "pets", "navigate_at",
+          "dashboard", "connection", "onboarding", "empty", "live",
+          "crop_agent", "crop_furniture", "crop_mascot", "debug_walkable"])]
+    proof: Option<std::path::PathBuf>,
+
+    /// Output directory for --proof frame sequences (wide/ + tall/ created inside).
+    #[arg(long, value_hint = clap::ValueHint::DirPath, requires = "proof")]
+    frames_dir: Option<std::path::PathBuf>,
+
+    /// --proof frame rate.
+    #[arg(long, default_value_t = 12, requires = "proof")]
+    proof_fps: u64,
+
+    /// --proof clip length in seconds (the idle tail past the last event included).
+    #[arg(long, default_value_t = 26, requires = "proof")]
+    proof_secs: u64,
 }
 
 fn default_projects_root() -> String {
@@ -411,6 +435,27 @@ fn main() -> Result<()> {
             valid.join(" | ")
         )
     })?;
+
+    if let Some(fixture) = args.proof.as_deref() {
+        let frames_dir = args
+            .frames_dir
+            .as_deref()
+            .context("--proof requires --frames-dir")?;
+        proof::render_proof(&proof::ProofJob {
+            fixture,
+            frames_dir,
+            cols,
+            rows,
+            fps: args.proof_fps,
+            secs: args.proof_secs,
+            max_desks: args.max_desks,
+            theme,
+            pack: &pack,
+            start: now,
+        })?;
+        println!("wrote proof frames → {}", frames_dir.display());
+        return Ok(());
+    }
 
     let navigations = parse_navigations(&args.navigate_at)?;
     let pet_vec: Vec<pixtuoid_scene::pet::Pet> = match args.pets.as_deref() {

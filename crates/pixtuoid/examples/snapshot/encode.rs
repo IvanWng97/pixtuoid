@@ -329,7 +329,7 @@ pub(crate) fn save_backend_as_png(
 /// Rasterize a post-draw ratatui cell buffer to RGBA: half-block cells become
 /// two stacked pixels (fg = top, bg = bottom); text cells are drawn as real
 /// glyphs via the 8x8 bitmap font (glyph8x8) — same path as the PNG rasterizer.
-fn cells_to_rgba(
+pub(crate) fn cells_to_rgba(
     term_buf: &ratatui::buffer::Buffer,
     cols: u16,
     rows: u16,
