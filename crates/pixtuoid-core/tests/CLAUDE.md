@@ -2,7 +2,7 @@
 
 Integration tests for the headless lib, organized **by capability/layer** (the
 suite's real axis), with the per-CLI dimension living where the actual variation
-is — the source fixtures. 8 test binaries (each top-level `tests/*.rs` or
+is — the source fixtures. 9 test binaries (each top-level `tests/*.rs` or
 `tests/<area>/main.rs` is one binary):
 
 ```
@@ -40,7 +40,8 @@ tests/
 ├── transport/main.rs         #[cfg(unix)] mod socket;  #[cfg(windows)] mod pipe;
 ├── render/main.rs            mod {blit, format}  +  render/fixtures/ (sprites)
 ├── socket_path_parity.rs     FLAT — publish-excluded (see below)
-└── supported_sources_manifest.rs   FLAT — publish-excluded
+├── supported_sources_manifest.rs   FLAT — publish-excluded
+└── proof_fixture_disjointness.rs   FLAT — publish-excluded (see below)
 ```
 
 ## Governing principle
@@ -65,12 +66,15 @@ tests/
 
 ## Known sharp edges
 
-- **Two tests stay FLAT and MUST NOT be moved into a grouped binary**:
-  `socket_path_parity.rs` (`#[path]`-includes the hook shim's `paths.rs`) and
-  `supported_sources_manifest.rs` (reads `../../site/src/sources.json`). Both are
-  in `Cargo.toml`'s `exclude` so the published `.crate` tarball builds without
-  their sibling files; a submodule of a grouped binary can't be individually
-  excluded (the parent's `mod` would fail to compile on the extracted crate).
+- **Three tests stay FLAT and MUST NOT be moved into a grouped binary**:
+  `socket_path_parity.rs` (`#[path]`-includes the hook shim's `paths.rs`),
+  `supported_sources_manifest.rs` (reads `../../site/src/sources.json`), and
+  `proof_fixture_disjointness.rs` (reads `../../site/src/components/Statusline.astro`
+  — the proof-session fixture's disjointness pin against the statusline ticker's
+  `FALLBACK` corpus). All three are in `Cargo.toml`'s `exclude` so the published
+  `.crate` tarball builds without their sibling `site/`/`pixtuoid-hook` files; a
+  submodule of a grouped binary can't be individually excluded (the parent's
+  `mod` would fail to compile on the extracted crate).
 - **A multi-file binary is `tests/<area>/main.rs`, NOT `tests/<area>.rs`.** A
   top-level `area.rs` is a *crate root* — its `mod foo;` resolves to `tests/foo.rs`
   (a sibling), not `tests/area/foo.rs`. The `<area>/main.rs` dir form makes `mod`

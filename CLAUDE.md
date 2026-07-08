@@ -9,7 +9,7 @@ apply everywhere. **Module-level detail and the crate-specific "sharp edges"
 live in nested `CLAUDE.md` files**, auto-loaded when you touch those trees:
 
 - [`crates/pixtuoid-core/CLAUDE.md`](crates/pixtuoid-core/CLAUDE.md) — the headless lib: sources, reducer/state, sprites, the grid/walkable vocabulary.
-  - [`crates/pixtuoid-core/tests/CLAUDE.md`](crates/pixtuoid-core/tests/CLAUDE.md) — the integration-test layout (8 test binaries: five grouped + three flat, two of them publish-excluded; parity twins) + add-a-CLI test steps.
+  - [`crates/pixtuoid-core/tests/CLAUDE.md`](crates/pixtuoid-core/tests/CLAUDE.md) — the integration-test layout (9 test binaries: five grouped + four flat, three of them publish-excluded; parity twins) + add-a-CLI test steps.
 - [`crates/pixtuoid-scene/CLAUDE.md`](crates/pixtuoid-scene/CLAUDE.md) — the backend-agnostic render+sim engine CRATE (`pixtuoid-core ← pixtuoid-scene ← pixtuoid`): pixel painter (render_to_rgb_buffer), layout, walk physics, pose (pure + routed) / motion authority, pathfinding, the theme MODEL, weather/ambient, pets, chitchat, frame_cache, embedded_pack.
 - [`crates/pixtuoid/CLAUDE.md`](crates/pixtuoid/CLAUDE.md) — the binary: install, runtime, cli, config, multi-floor, embedded pack.
   - [`crates/pixtuoid/src/tui/CLAUDE.md`](crates/pixtuoid/src/tui/CLAUDE.md) — the terminal painter (over the `pixtuoid-scene` crate): draw_scene flush, harness, widgets, the theme-PICKER ui, Sources panel, dashboard, hit_test, version popup.
@@ -112,8 +112,8 @@ scope to one crate (seconds vs a full-workspace run).
 **Test organization (three tiers):** unit tests next to the code (large
 modules use a sibling `#[cfg(test)] mod tests;` file — keeps `use super::*`
 without API widening); integration tests in `crates/<crate>/tests/` —
-pixtuoid-core's suite is 8 binaries (five capability-grouped + three
-flat, two of them deliberately publish-excluded) with `#[cfg(windows)]` parity twins, all mapped in
+pixtuoid-core's suite is 9 binaries (five capability-grouped + four
+flat, three of them deliberately publish-excluded) with `#[cfg(windows)]` parity twins, all mapped in
 [`crates/pixtuoid-core/tests/CLAUDE.md`](crates/pixtuoid-core/tests/CLAUDE.md);
 the headless render harness (`tui_renderer/harness`) drives the real
 `TuiRenderer` through ratatui `TestBackend` — see the tui guide. Coverage:
