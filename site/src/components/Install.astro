@@ -237,6 +237,11 @@ import tabs from '../install.json';
   }
   .install__note {
     padding: 0.4rem 0.7rem 0.6rem;
+    /* text-scrim's negative margin exists so OFFICE-floating text stays
+       left-aligned despite the plate's padding; INSIDE the install card the
+       visible plate edge must align with the command/tabs column instead
+       (user-caught: the plate hung ~11px left of its siblings) */
+    margin-inline: 0;
     font-size: 0.9rem;
     color: var(--fg-muted);
   }

@@ -1239,6 +1239,14 @@ test('text over the live office carries its own scrim (.text-scrim)', async ({ p
   // card idiom applies, unlike the hero's bare treatment above).
   expect(await page.locator('.install__note.text-scrim').count()).toBe(1);
   expect(await page.locator('#showcase .roster__row.text-scrim').count()).toBeGreaterThan(0);
+  // …and INSIDE the card the plate's visible edge aligns with the tabs/command
+  // column: text-scrim's negative office-margin is zeroed there (user-caught —
+  // the plate hung ~11px left of its siblings).
+  const [noteX, tabsX] = await page.evaluate(() => [
+    document.querySelector('.install__note')!.getBoundingClientRect().x,
+    document.querySelector('.install__tabs')!.getBoundingClientRect().x,
+  ]);
+  expect(Math.abs(noteX - tabsX)).toBeLessThan(1);
 });
 
 test('bare hero text clears WCAG AA at the real office composite (day + night)', async ({
