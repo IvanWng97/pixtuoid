@@ -1405,6 +1405,48 @@ test('footer separators never strand alone at a wrap boundary', async ({ page })
   }
 });
 
+test('no footer line begins or ends with a separator dot once the row wraps', async ({ page }) => {
+  // R3 (wb-3 matrix sweep): the sibling test above only proves a "·" can't be
+  // stranded ALONE mid-row — but each dot introduces its FOLLOWING item
+  // (.footer__grp), so a group that itself wraps to a new line still leads
+  // that line with its own dot (#768-day-08: "· built in Rust" opening
+  // line 2). Below the width where the row visibly wraps, Footer.astro now
+  // hides the dots entirely and lets the row's flex gap carry the
+  // separation. Check actual RENDERED rows (grouped by top position), not
+  // raw textContent — a display:none dot still shows up in textContent even
+  // though nothing paints, which would false-positive this check.
+  await gotoLive(page);
+  await page.setViewportSize({ width: 768, height: 900 });
+  await page.evaluate(() =>
+    window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'instant' })
+  );
+  const bad = await page.evaluate(() => {
+    const line = document.querySelector('.footer__line')!;
+    const items = Array.from(line.children).filter(
+      (el) => (el as HTMLElement).offsetParent !== null
+    );
+    const rows = new Map<number, Element[]>();
+    for (const el of items) {
+      const top = Math.round(el.getBoundingClientRect().top);
+      (rows.get(top) ?? rows.set(top, []).get(top)!).push(el);
+    }
+    const findings: string[] = [];
+    for (const rowEls of rows.values()) {
+      rowEls.sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left);
+      const leadingSep = rowEls[0].querySelector('.footer__sep');
+      if (leadingSep && getComputedStyle(leadingSep).display !== 'none') {
+        findings.push(`leading: "${(rowEls[0].textContent || '').trim()}"`);
+      }
+      const lastText = (rowEls[rowEls.length - 1].textContent || '').trim();
+      if (lastText.endsWith('·')) {
+        findings.push(`trailing: "${lastText}"`);
+      }
+    }
+    return findings;
+  });
+  expect(bad).toEqual([]);
+});
+
 test('the pause control never overlaps a footer link across the mobile wrap range', async ({
   page,
 }) => {

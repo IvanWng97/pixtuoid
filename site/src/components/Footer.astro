@@ -91,6 +91,18 @@ import { REPO, CRATES, SPONSOR, asset } from '../consts';
   .footer__grp {
     white-space: nowrap;
   }
+  /* The grouping above stops a dot from being stranded ALONE mid-row, but a
+     GROUP that itself wraps to start a new line still leads that line with
+     its own dot (#wb-3: "· built in Rust" opening line 2) — each "·"
+     introduces its FOLLOWING item, so it can only ever land at a line's
+     leading edge, never trailing. Below the width where the row visibly
+     wraps (.footer__line's own flex-wrap, measured ≤960px), drop the dots
+     and let the row's gap carry the separation instead. */
+  @media (max-width: 960px) {
+    .footer__sep {
+      display: none;
+    }
+  }
   .footer__line a {
     color: var(--chip-ink);
     text-decoration: none;
