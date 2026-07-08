@@ -1,4 +1,11 @@
 import { expect, test, type Page } from '@playwright/test';
+import sourcesData from '../../src/sources.json' with { type: 'json' };
+
+// read the manifest directly (same idiom as floors.spec.ts's features.json
+// import) so the hero-badge bridge test below can't drift from a hand-copied
+// expected count.
+type SourceRow = { badge: string; badge_color: string; name: string; status: string };
+const supportedSources = (sourcesData as SourceRow[]).filter((s) => s.status === 'supported');
 
 // The smoke suite: one assertion per cross-component CONTRACT of the OPEN
 // FLOOR page — the seams that only exist at runtime (window globals, custom
@@ -37,10 +44,21 @@ function compositeOver(
   return [r * a + ur * (1 - a), g * a + ug * (1 - a), b * a + ub * (1 - a)];
 }
 function parseRgb(css: string): [number, number, number, number] {
-  const m = css.match(/rgba?\(([^)]+)\)/);
-  if (!m) throw new Error(`unparseable color: ${css}`);
-  const [r, g, b, a] = m[1].split(',').map((s) => parseFloat(s));
-  return [r, g, b, a ?? 1];
+  const rgb = css.match(/rgba?\(([^)]+)\)/);
+  if (rgb) {
+    const [r, g, b, a] = rgb[1].split(',').map((s) => parseFloat(s));
+    return [r, g, b, a ?? 1];
+  }
+  // Chromium resolves a color-mix() result to the `color(srgb r g b [/ a])`
+  // functional form (0–1 components), not rgb() — the hero badge-code hue
+  // (color-mix toward white/black) hits this path; every other caller still
+  // sees plain rgb()/rgba() and takes the branch above.
+  const srgb = css.match(/color\(srgb\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)(?:\s*\/\s*([\d.]+))?\)/);
+  if (srgb) {
+    const [r, g, b, a] = srgb.slice(1, 5).map((s) => (s === undefined ? undefined : parseFloat(s)));
+    return [r! * 255, g! * 255, b! * 255, a ?? 1];
+  }
+  throw new Error(`unparseable color: ${css}`);
 }
 /**
  * Fail the calling test if the page logs an uncaught error or console.error.
@@ -1369,6 +1387,61 @@ test('bare hero text clears WCAG AA at the real office composite (day + night)',
       expect(
         ratio,
         `${theme} ${selector}: WCAG AA floor is 4.5:1; measured ${ratio.toFixed(2)}:1`
+      ).toBeGreaterThanOrEqual(4.5);
+    }
+  }
+});
+
+test('hero badge row: one chip per registered source, matching the tools-table row count', async ({
+  page,
+}) => {
+  // One manifest (sources.json), two consumers (Hero's chip row, the tools
+  // table on #tools) — a bridge, not two independently-maintained counts, so
+  // adding/removing a source can't silently desync them.
+  await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
+  await page.goto('./');
+  const chips = page.locator('.hero__badges .hero__badge');
+  await expect(chips).toHaveCount(supportedSources.length);
+  await expect(chips.first()).toHaveText(
+    `${supportedSources[0].badge.replace('·', '')} ${supportedSources[0].name}`
+  );
+
+  const tableRows = page.locator('.tools tbody:not(.tools__planned) tr');
+  await expect(tableRows).toHaveCount(supportedSources.length);
+});
+
+test('hero badge hues clear WCAG AA against their theme-aware chip surface (day + night)', async ({
+  page,
+}) => {
+  // The badge-code hue is a cross-boundary copy of the app's per-source color
+  // (pinned to theme::NORMAL.source by the Rust bridge test), painted on a
+  // chip surface that FLIPS per theme — day's light --surface chip darkens
+  // the hue toward black, night's dark --screen chip lightens it toward
+  // white (global.css's .hero__badge-code doc comment) — so this sweeps
+  // every rendered hue in both themes rather than trusting one spot check.
+  for (const theme of ['day', 'night'] as const) {
+    await page.addInitScript((t) => {
+      sessionStorage.setItem('pix-booted', '1');
+      localStorage.setItem('pix-theme', t);
+    }, theme);
+    await page.goto('./');
+    await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+
+    const chips = await page.evaluate(() =>
+      [...document.querySelectorAll('.hero__badge')].map((li) => ({
+        codeColor: getComputedStyle(li.querySelector('.hero__badge-code')!).color,
+        chipBg: getComputedStyle(li).backgroundColor,
+        label: li.textContent?.trim(),
+      }))
+    );
+    expect(chips.length, `${theme}: no .hero__badge chips rendered`).toBe(supportedSources.length);
+    for (const { codeColor, chipBg, label } of chips) {
+      const fg = parseRgb(codeColor).slice(0, 3) as [number, number, number];
+      const bg = parseRgb(chipBg).slice(0, 3) as [number, number, number];
+      const ratio = contrastRatio(fg, bg);
+      expect(
+        ratio,
+        `${theme} "${label}": WCAG AA floor is 4.5:1; code ${codeColor} on chip ${chipBg} measured ${ratio.toFixed(2)}:1`
       ).toBeGreaterThanOrEqual(4.5);
     }
   }

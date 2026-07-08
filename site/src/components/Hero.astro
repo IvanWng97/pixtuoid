@@ -1,7 +1,12 @@
 ---
 import { REPO, floorById, floorName } from '../consts';
+import sources from '../sources.json';
 
 const floor = floorById('lobby');
+// Same manifest + supported-filter SupportedTools.astro renders its tools
+// table from — a bridge e2e (smoke.spec.ts) pins this chip count to that
+// table's row count, so the two consumers can't silently diverge.
+const badges = sources.filter((s) => s.status === 'supported');
 ---
 
 <section id={floor.id} class="hero" data-floor={floor.fl} data-floor-label={floor.label}>
@@ -21,9 +26,18 @@ const floor = floorById('lobby');
         <span class="hl">work here</span><span class="cursor" aria-hidden="true"></span>
       </h1>
       <p class="statement-sub lead">
-        Every Claude Code, Codex, or Cursor session walks in, sits down, and gets to work — in a
-        pixel office that lives in your terminal.
+        Every session walks in, sits down, and gets to work — in a pixel office that lives in your
+        terminal.
       </p>
+      <ul class="hero__badges" aria-label={`Works with ${badges.length} coding CLIs`}>
+        {
+          badges.map((s) => (
+            <li class="hero__badge" style={`--badge:${s.badge_color}`}>
+              <span class="hero__badge-code">{s.badge.replace('·', '')}</span> {s.name}
+            </li>
+          ))
+        }
+      </ul>
       <div class="hero__cta">
         <a class="btn btn-primary" href="#install">[ install <span aria-hidden="true">→</span> ]</a>
         <a class="hero__ghost" href="#showcase-vibing"
@@ -88,6 +102,56 @@ const floor = floorById('lobby');
   .hero__ghost:hover {
     color: var(--coral);
   }
+  .hero__badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin: 1.15rem 0 0;
+    padding: 0;
+    list-style: none;
+  }
+  .hero__badge {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.4em;
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    letter-spacing: 0.02em;
+    padding: 0.32rem 0.6rem;
+    /* DAY default: the light --surface family — a hairline-bordered chip,
+       not the dark hardware panel (the dark chip read too heavy on the light
+       day office, user-caught). NIGHT below switches to the --screen /
+       --chip-line hardware family instead (the mock's look, matching the
+       app's own dark Sources panel). */
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    color: var(--fg);
+  }
+  .hero__badge-code {
+    font-weight: 700;
+    /* the app's real per-CLI hue (sources.json badge_color, pinned to
+       theme::NORMAL.source by crates/pixtuoid-scene/tests/site_badge_colors.rs),
+       darkened toward black so it clears WCAG AA (4.5:1) on the light day
+       chip — measured worst case (OpenClaw #ffaa30) 5.37:1 at 45% black; the
+       e2e badge-hue sweep (smoke.spec.ts) pins every hue in both themes. */
+    color: color-mix(in srgb, var(--badge) 55%, black);
+  }
+  :root[data-theme='night'] .hero__badge,
+  :root[data-theme='dracula'] .hero__badge {
+    /* dracula's --bg is dark too (same direction as night — see
+       --office-ink's dracula arm in global.css); it piggybacks on night's
+       already-measured formula rather than a third dedicated sweep. */
+    background: var(--screen);
+    border-color: var(--chip-line);
+    color: var(--chip-ink);
+  }
+  :root[data-theme='night'] .hero__badge-code,
+  :root[data-theme='dracula'] .hero__badge-code {
+    /* lightened toward white so the hue clears 4.5:1 on the dark --screen
+       chip — measured worst case (DeepSeek-Reasonix #9c3cc0) 5.09:1 at 20%
+       white. */
+    color: color-mix(in srgb, var(--badge) 80%, white);
+  }
   .hero__avail {
     margin-top: 1.1rem;
     font-family: var(--font-mono);
@@ -131,11 +195,14 @@ const floor = floorById('lobby');
        shared 0.86 dimmer cap, not this hero's 0.74, and stays --fg-muted). */
     color: var(--office-ink);
   }
+  .hero__copy .hero__badges {
+    animation-delay: 0.32s;
+  }
   .hero__copy .hero__cta {
-    animation-delay: 0.38s;
+    animation-delay: 0.4s;
   }
   .hero__copy .hero__avail {
-    animation-delay: 0.48s;
+    animation-delay: 0.5s;
   }
   @media (prefers-reduced-motion: reduce) {
     .hero__copy > * {

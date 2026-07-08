@@ -66,8 +66,10 @@ gates can't see. CI runs it in `site.yml` after the build step.
 
 > **Generated README sections.** `src/features.json` (feature inventory — also
 > drives the Showcase roster), `src/sources.json` (supported tools — also drives the
-> tool × OS matrix), and `src/install.json` (install methods — also drives the
-> Install tabs) are single sources shared with the **root README**:
+> tool × OS matrix AND the hero's badge row, filtered to `status: "supported"` —
+> a bridge e2e pins the two rendered counts together), and `src/install.json`
+> (install methods — also drives the Install tabs) are single sources shared
+> with the **root README**:
 > `scripts/gen-readme.mjs` regenerates the Features table, the supported-tools
 > glimpse, and the install block between their markers. The install block shows
 > only methods flagged `"readme": true` (Homebrew, npm); the rest (Cargo, GitHub
