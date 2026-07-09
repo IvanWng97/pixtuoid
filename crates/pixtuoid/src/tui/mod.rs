@@ -1724,15 +1724,18 @@ mod dispatch_tests {
         use crate::sources::ChangeOutcome;
         // Regression: the SKIP arm must reflect its freeze into the live gate
         // like Confirm. A pre-0.12 upgrader boots with an EMPTY gate; skip
-        // freezes their hooked source to `true` and persists it — the gate must
-        // OPEN this session, else their office stays empty until the next
-        // restart re-seeds from the (now true) flags. (`skip_freeze`'s
-        // has_hooks probe is FS-bound and exercised by the arm at runtime; here
-        // we model its `true` verdict and pin the empty-gate → open transition.)
+        // freezes their hooked source `true`, and apply_choices issues a Connect
+        // whose semantic-no-op re-install yields `Connected` — the outcome the
+        // skip path actually emits (apply_choices maps every want to
+        // Connect/Disconnect, never NoOp). Reflecting it must OPEN the gate this
+        // session, else their office stays empty until the next restart re-seeds
+        // from the (now true) flags. (The arm's one-line call to reflect lives
+        // in the codecov-excluded run_tui loop; this pins the reflect branch it
+        // drives, as the Confirm-arm tests do.)
         let connected = crate::runtime::ConnectedSources::default();
         assert!(!connected.is_connected("antigravity"), "gate starts empty");
         let freeze: Vec<(&'static str, bool)> = vec![("antigravity", true)];
-        let outcomes = vec![("antigravity".to_string(), ChangeOutcome::NoOp)];
+        let outcomes = vec![("antigravity".to_string(), ChangeOutcome::Connected)];
         super::reflect_onboarding_outcomes(&connected, &freeze, &outcomes);
         assert!(
             connected.is_connected("antigravity"),
