@@ -431,7 +431,7 @@ test('reduced motion: an install copy writes the clipboard but hires nobody', as
 
 test('docs pages keep the sticky nav with section links', async ({ page }) => {
   // The floating-nav treatment is index-ONLY; the docs pages have no office
-  // backdrop or statusline, so they keep the sticky bar (the #426-review
+  // backdrop (they DO mount the statusline since wb-5), so they keep the sticky bar (the #426-review
   // regression: `nav--floating` leaked here — absolute, transparent, links
   // hidden — and every scroll offset went stale).
   const errors = watchErrors(page);

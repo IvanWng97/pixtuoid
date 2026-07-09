@@ -3,6 +3,7 @@ import type { MarkdownHeading } from 'astro';
 import Base from './Base.astro';
 import Nav from '../components/Nav.astro';
 import Footer from '../components/Footer.astro';
+import Statusline from '../components/Statusline.astro';
 import { REPO, asset, DOCS, type DocId } from '../consts';
 
 interface Props {
@@ -32,6 +33,9 @@ const {
 const idx = DOCS.findIndex((d) => d.id === current);
 const prev = idx > 0 ? DOCS[idx - 1] : undefined;
 const next = idx >= 0 && idx < DOCS.length - 1 ? DOCS[idx + 1] : undefined;
+
+// The statusline's left path segment — same DOCS manifest the sidebar uses.
+const routeSlug = idx >= 0 ? DOCS[idx].route : current;
 
 // Mini-TOC: h2 sections; when a doc has few of them, fold in the h3s too.
 // Trailing parentheticals are stripped for the rail — "System-managed (don't
@@ -115,6 +119,7 @@ const toc = raw.map((h) => ({ ...h, text: h.text.replace(/\s*\([^)]*\)\s*$/, '')
     }
   </main>
   <Footer />
+  <Statusline doc={routeSlug} />
 </Base>
 
 <script is:inline>

@@ -20,6 +20,15 @@ import {
 } from '../consts';
 import { GH_FETCH_TIMEOUT_MS } from '../../config/gh-stars.mjs';
 
+interface Props {
+  /** Doc-shell variant (§6): render "~ pixtuoid docs · /<doc>" as the left
+   * segment instead of the index-only organs (floor lift, PR feed, env
+   * readouts, keys hint). wb-1's #sl-install chip block renders in BOTH
+   * variants (it sits outside the conditional). */
+  doc?: string;
+}
+const { doc } = Astro.props;
+
 // Build-time star count (§2): null when the API was unreachable at build —
 // the chip stays, the ★ segment is omitted (offline builds never fail).
 const ghStars: string | null = __GH_STARS__;
@@ -42,41 +51,48 @@ interface TickerItem {
 }
 
 let items: TickerItem[] = FALLBACK;
-try {
-  const headers: Record<string, string> = { accept: 'application/vnd.github+json' };
-  if (process.env.GITHUB_TOKEN) headers.authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
-  const res = await fetch(
-    'https://api.github.com/repos/IvanWng97/pixtuoid/pulls?state=closed&base=main&sort=updated&direction=desc&per_page=12',
-    { headers, signal: AbortSignal.timeout(GH_FETCH_TIMEOUT_MS) }
-  );
-  if (res.ok) {
-    const prs = (await res.json()) as {
-      number: number;
-      title: string;
-      merged_at: string | null;
-      user: { login: string } | null;
-    }[];
-    // bots don't get feed credit — a dependabot bump attributed to the office's
-    // coding agents undercuts the "agents built this" story
-    const merged = prs.filter((p) => p.merged_at && !p.user?.login?.endsWith('[bot]')).slice(0, 6);
-    if (merged.length >= 4) {
-      const human = (title: string) => {
-        const t = title.replace(/^[a-z]+(\([^)]*\))?!?:\s*/, '');
-        if (t.length <= 64) return t;
-        const cut = t.slice(0, 63);
-        return cut.slice(0, Math.max(40, cut.lastIndexOf(' '))) + '…';
-      };
-      const real: TickerItem[] = merged.map((p, i) => ({
-        state: ['active', 'active', 'idle'][i % 3],
-        who: 'cc·pixtuoid',
-        what: `merged #${p.number} · ${human(p.title)}`,
-      }));
-      const flavor = FALLBACK.filter((f) => f.who !== 'cursor');
-      items = real.flatMap((r, i) => (i % 2 === 1 ? [flavor[(i >> 1) % flavor.length], r] : [r]));
+// the fetch feeds only the index ticker (.sl__feed, doc-variant-excluded
+// below) — skip it on the doc variant so the 6 doc pages don't each re-hit
+// the GitHub API at build
+if (!doc) {
+  try {
+    const headers: Record<string, string> = { accept: 'application/vnd.github+json' };
+    if (process.env.GITHUB_TOKEN) headers.authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
+    const res = await fetch(
+      'https://api.github.com/repos/IvanWng97/pixtuoid/pulls?state=closed&base=main&sort=updated&direction=desc&per_page=12',
+      { headers, signal: AbortSignal.timeout(GH_FETCH_TIMEOUT_MS) }
+    );
+    if (res.ok) {
+      const prs = (await res.json()) as {
+        number: number;
+        title: string;
+        merged_at: string | null;
+        user: { login: string } | null;
+      }[];
+      // bots don't get feed credit — a dependabot bump attributed to the office's
+      // coding agents undercuts the "agents built this" story
+      const merged = prs
+        .filter((p) => p.merged_at && !p.user?.login?.endsWith('[bot]'))
+        .slice(0, 6);
+      if (merged.length >= 4) {
+        const human = (title: string) => {
+          const t = title.replace(/^[a-z]+(\([^)]*\))?!?:\s*/, '');
+          if (t.length <= 64) return t;
+          const cut = t.slice(0, 63);
+          return cut.slice(0, Math.max(40, cut.lastIndexOf(' '))) + '…';
+        };
+        const real: TickerItem[] = merged.map((p, i) => ({
+          state: ['active', 'active', 'idle'][i % 3],
+          who: 'cc·pixtuoid',
+          what: `merged #${p.number} · ${human(p.title)}`,
+        }));
+        const flavor = FALLBACK.filter((f) => f.who !== 'cursor');
+        items = real.flatMap((r, i) => (i % 2 === 1 ? [flavor[(i >> 1) % flavor.length], r] : [r]));
+      }
     }
+  } catch {
+    // offline / timeout → FALLBACK already in place
   }
-} catch {
-  // offline / timeout → FALLBACK already in place
 }
 
 // FLOORS (id ↔ fl string ↔ label) is single-sourced in consts.ts; each
@@ -92,67 +108,84 @@ const badgeColor = (who: string): string | undefined => {
 ---
 
 <div class="statusline" id="statusline">
-  <nav class="sl__nav" aria-label="Floors">
-    <button
-      class="sl__floor"
-      data-floor-toggle
-      aria-expanded="false"
-      aria-controls="sl-floors"
-      aria-label="Jump to a floor"
-    >
-      <span class="sl__digit" data-lift-digit>{FLOORS[0].fl}</span>
-      <span class="sl__name" data-lift-name>{floorName(FLOORS[0])}</span>
-      <span class="sl__caret" aria-hidden="true">▴</span>
-    </button>
-    <div id="sl-floors" class="sl__floors" hidden>
-      {
-        FLOORS.map((f) => (
+  {
+    doc ? (
+      <span class="sl__path">~ pixtuoid docs · /{doc}</span>
+    ) : (
+      <>
+        <nav class="sl__nav" aria-label="Floors">
           <button
-            class="sl__floorbtn"
-            data-floor-btn={f.fl}
-            data-target={f.id}
-            data-name={floorName(f)}
-            aria-current={f.fl === FLOORS[0].fl ? 'location' : undefined}
+            class="sl__floor"
+            data-floor-toggle
+            aria-expanded="false"
+            aria-controls="sl-floors"
+            aria-label="Jump to a floor"
           >
-            {f.fl} <span class="sl__floorname">{floorName(f)}</span>
+            <span class="sl__digit" data-lift-digit>
+              {FLOORS[0].fl}
+            </span>
+            <span class="sl__name" data-lift-name>
+              {floorName(FLOORS[0])}
+            </span>
+            <span class="sl__caret" aria-hidden="true">
+              ▴
+            </span>
           </button>
-        ))
-      }
-      <div class="sl__keysrow">
-        <span class="sl__keyslabel">keys 1–6</span>
-        <button
-          class="sl__keystoggle"
-          type="button"
-          data-keys-toggle
-          role="switch"
-          aria-checked="true"
-          aria-label="Keyboard shortcuts"
-        >
-          <span data-keys-state>on</span>
-        </button>
-      </div>
-    </div>
-  </nav>
-  <div class="sl__feed" aria-hidden="true">
-    {
-      items.map((it, i) => (
-        <span class:list={['sl__item', { 'is-on': i === 0 }]}>
-          <span class:list={['sl__dot', it.state]} />
-          <span class="sl__text">
-            <b style={badgeColor(it.who) ? `--who:${badgeColor(it.who)}` : undefined}>{it.who}</b> ·{' '}
-            {it.what}
+          <div id="sl-floors" class="sl__floors" hidden>
+            {FLOORS.map((f) => (
+              <button
+                class="sl__floorbtn"
+                data-floor-btn={f.fl}
+                data-target={f.id}
+                data-name={floorName(f)}
+                aria-current={f.fl === FLOORS[0].fl ? 'location' : undefined}
+              >
+                {f.fl} <span class="sl__floorname">{floorName(f)}</span>
+              </button>
+            ))}
+            <div class="sl__keysrow">
+              <span class="sl__keyslabel">keys 1–6</span>
+              <button
+                class="sl__keystoggle"
+                type="button"
+                data-keys-toggle
+                role="switch"
+                aria-checked="true"
+                aria-label="Keyboard shortcuts"
+              >
+                <span data-keys-state>on</span>
+              </button>
+            </div>
+          </div>
+        </nav>
+        <div class="sl__feed" aria-hidden="true">
+          {items.map((it, i) => (
+            <span class:list={['sl__item', { 'is-on': i === 0 }]}>
+              <span class:list={['sl__dot', it.state]} />
+              <span class="sl__text">
+                <b style={badgeColor(it.who) ? `--who:${badgeColor(it.who)}` : undefined}>
+                  {it.who}
+                </b>{' '}
+                · {it.what}
+              </span>
+            </span>
+          ))}
+        </div>
+        <div class="sl__env" aria-hidden="true">
+          <span data-sl-lights>lights ··%</span>
+          <span class="sl__sep">·</span>
+          <span data-sl-clock />
+          <span class="sl__sep">·</span>
+          <span class="sl__onair" data-sl-onair>
+            ○ STATIC
           </span>
+        </div>
+        <span class="sl__keys" aria-hidden="true">
+          keys 1–6
         </span>
-      ))
-    }
-  </div>
-  <div class="sl__env" aria-hidden="true">
-    <span data-sl-lights>lights ··%</span>
-    <span class="sl__sep">·</span>
-    <span data-sl-clock></span>
-    <span class="sl__sep">·</span>
-    <span class="sl__onair" data-sl-onair>○ STATIC</span>
-  </div>
+      </>
+    )
+  }
   <div class="sl__install hw-panel" id="sl-install">
     {
       ghStars && (
@@ -173,13 +206,12 @@ const badgeColor = (who: string): string | undefined => {
       data-sl-install-link
       aria-label="Jump to the install section"
     >
-      <span class="sl__copy-icon" aria-hidden="true">→</span>
-      <span class="sl__copy-icon-flash led-selected" aria-hidden="true">✓</span>
-      <span class="sl__copy-label" aria-hidden="true">install</span>
+      <span class="sl__copy-icon" aria-hidden="true"> → </span>
+      <span class="sl__copy-icon-flash led-selected" aria-hidden="true"> ✓ </span>
+      <span class="sl__copy-label" aria-hidden="true"> install </span>
     </a>
     <span class="sr-only" role="status" data-sl-copy-status></span>
   </div>
-  <span class="sl__keys" aria-hidden="true">keys 1–6</span>
 </div>
 
 <style is:global>
@@ -419,6 +451,14 @@ const badgeColor = (who: string): string | undefined => {
   .sl__keys {
     flex: none;
     color: var(--chip-dim);
+  }
+  .sl__path {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--chip-ink);
   }
   /* The feed alone gets a WIDER hide-breakpoint than .sl__env/.sl__stars/etc
      below: once its available width drops under ~200px (roughly 768-860px,
