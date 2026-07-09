@@ -58,6 +58,9 @@ pub fn release_notes(version: &str) -> Option<&'static [&'static str]> {
         // anchoring on a marker is whitespace-independent — matching the `match`
         // brace would silently break if the indentation ever shifted.
         // [bump-inject-here]
+        "0.14.0" => Some(&[
+            "New agent supported — Oh My Pi (omp) sessions now show up as animated pixel-art coworkers in the office: pixtuoid tails omp's session transcripts, so tool runs, task subagents (as linked child sprites), and clean exits all animate live, with an om· lime badge",
+        ]),
         "0.13.0" => Some(&[
             "New agent supported — Hermes Agent (Nous Research) sessions now show up as animated pixel-art coworkers in the office, wired in like every other CLI",
             "A living sky — a sun and moon now arc past the office windows over the city skyline as the day turns, and weather became the atmosphere between them and your desk: a clear noon blazes, a storm dusk goes gloomy, fog swallows the sun, and a crescent moon rises at night, all tinted per theme",
