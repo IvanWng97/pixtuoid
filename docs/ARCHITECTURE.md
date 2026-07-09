@@ -3,7 +3,7 @@
 How a running coding-agent session becomes a moving sprite in the office.
 
 > This file is the **single source** for pixtuoid's architecture overview. It
-> renders on the website at [`/architecture`](https://ivanwng97.github.io/pixtuoid/architecture)
+> renders on the website at [`/architecture`](https://pixtuoid.dev/architecture)
 > and on GitHub (the diagram below is native Mermaid). `CLAUDE.md` (the agent
 > guide) links here; per-crate "sharp edges" live in the nested `CLAUDE.md` files.
 
@@ -199,7 +199,7 @@ These are load-bearing — see `CLAUDE.md` and the nested guides before changing
 ## Where to go next
 
 - **Configure it:** [`docs/CONFIGURATION.md`](CONFIGURATION.md) ·
-  [live `/config`](https://ivanwng97.github.io/pixtuoid/config)
+  [live `/config`](https://pixtuoid.dev/config)
 - **Contribute:** [`CONTRIBUTING.md`](CONTRIBUTING.md)
 - **Agent/contributor detail:** the workspace `CLAUDE.md` + the nested per-crate
   `CLAUDE.md` files.

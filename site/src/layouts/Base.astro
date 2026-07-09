@@ -42,9 +42,9 @@ const {
 } = Astro.props;
 
 // Absolute URLs for crawlers (Astro.site is the deploy origin).
-const SITE = Astro.site ?? new URL('https://ivanwng97.github.io');
+const SITE = Astro.site ?? new URL('https://pixtuoid.dev');
 const ogImage = new URL(asset('demos/hero-poster.png'), SITE).href;
-// Per-page canonical/og:url — Astro.url.pathname includes the /pixtuoid base in
+// Per-page canonical/og:url — Astro.url.pathname includes the configured base in
 // the static build, so /config no longer self-declares the homepage as canonical.
 const canonical = new URL(Astro.url.pathname, SITE).href;
 const version = __PIXTUOID_VERSION__; // from the workspace Cargo.toml at build

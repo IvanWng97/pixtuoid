@@ -205,11 +205,12 @@ function cspInlineHashes() {
   };
 }
 
-// Project page → https://ivanwng97.github.io/pixtuoid/
-// If a custom domain is later added, set base back to '/' (and update CNAME).
+// Custom domain → https://pixtuoid.dev/ (the domain lives in the repo's
+// Settings → Pages, not in the artifact — Actions deploys need no CNAME file).
+// GitHub redirects the old project page ivanwng97.github.io/pixtuoid/ here.
 export default defineConfig({
-  site: 'https://ivanwng97.github.io',
-  base: '/pixtuoid',
+  site: 'https://pixtuoid.dev',
+  base: '/',
   trailingSlash: 'ignore',
   // Astro 7 flipped the default to 'jsx' (JSX-rule whitespace stripping), which
   // drops the space between adjacent inline elements on separate source lines —
@@ -241,11 +242,9 @@ export default defineConfig({
       ],
     }),
   },
-  // Sitemap respects `site` + `base`, so emitted URLs carry the /pixtuoid
-  // prefix → submit /pixtuoid/sitemap-index.xml to Search Console. A
-  // robots.txt pointing at it is prerendered by src/pages/robots.txt.ts —
-  // note it serves under /pixtuoid/ while crawlers only read robots.txt from
-  // the origin root, so it becomes authoritative only on a custom domain.
+  // Sitemap respects `site` + `base` → https://pixtuoid.dev/sitemap-index.xml.
+  // robots.txt (prerendered by src/pages/robots.txt.ts) serves at the origin
+  // root on the custom domain, so crawlers pick the sitemap up from it directly.
   integrations: [sitemap(), cspInlineHashes()],
   // Prefetch same-site links on hover — the docs pages are tiny static HTML,
   // so hover-to-tap latency covers the fetch. The injected prefetch client is

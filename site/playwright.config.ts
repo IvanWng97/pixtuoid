@@ -15,7 +15,7 @@ export default defineConfig({
   reporter: process.env.CI ? 'github' : 'list',
   timeout: 45_000,
   use: {
-    baseURL: 'http://localhost:4321/pixtuoid/',
+    baseURL: 'http://localhost:4321/',
     trace: 'on-first-retry',
   },
   projects: [
@@ -34,7 +34,7 @@ export default defineConfig({
     // (and preview has no --background/stop either; those are `astro dev`
     // subcommands, adopted in `just site-dev-bg`/`site-dev-stop`).
     command: 'node node_modules/astro/bin/astro.mjs preview --port 4321',
-    url: 'http://localhost:4321/pixtuoid/',
+    url: 'http://localhost:4321/',
     reuseExistingServer: false,
     timeout: 30_000,
   },

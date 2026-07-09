@@ -6,11 +6,11 @@
       "startServerReadyTimeout": 20000,
       "numberOfRuns": 1,
       "url": [
-        "http://localhost:4321/pixtuoid/",
-        "http://localhost:4321/pixtuoid/architecture/",
-        "http://localhost:4321/pixtuoid/config/",
-        "http://localhost:4321/pixtuoid/contributing/",
-        "http://localhost:4321/pixtuoid/knowledge-base/"
+        "http://localhost:4321/",
+        "http://localhost:4321/architecture/",
+        "http://localhost:4321/config/",
+        "http://localhost:4321/contributing/",
+        "http://localhost:4321/knowledge-base/"
       ]
     },
     "assert": {

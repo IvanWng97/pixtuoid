@@ -26,7 +26,7 @@ const features = JSON.parse(readFileSync(join(root, 'site', 'src', 'features.jso
 const sources = JSON.parse(readFileSync(join(root, 'site', 'src', 'sources.json'), 'utf8'));
 const install = JSON.parse(readFileSync(join(root, 'site', 'src', 'install.json'), 'utf8'));
 
-const SITE = 'https://ivanwng97.github.io/pixtuoid';
+const SITE = 'https://pixtuoid.dev';
 const check = process.argv.includes('--check');
 let readme = readFileSync(readmePath, 'utf8');
 const errors = [];

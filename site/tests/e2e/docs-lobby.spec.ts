@@ -48,7 +48,7 @@ test('the docs sidebar is an elevator panel: current-doc LED + a building bank f
   // the building bank reads the shared FLOORS manifest — 6 floors, landing anchors
   const building = panel.locator('.docs__list--building a');
   await expect(building).toHaveCount(6);
-  await expect(building.first()).toHaveAttribute('href', /\/pixtuoid\/#/);
+  await expect(building.first()).toHaveAttribute('href', /^\/#/);
 });
 
 test('markdown callouts render as terminal windows (note + warning)', async ({ page }) => {

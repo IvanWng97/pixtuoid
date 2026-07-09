@@ -1125,7 +1125,7 @@ test('nav menus + docs: dropdown, TOC scrollspy, 404, mobile burger', async ({ p
         .evaluate((img) => (img as HTMLImageElement).naturalWidth)
     )
     .toBeGreaterThan(0);
-  await expect(page.locator('.lost__cta .btn-primary')).toHaveAttribute('href', '/pixtuoid/');
+  await expect(page.locator('.lost__cta .btn-primary')).toHaveAttribute('href', '/');
   expect(errors().filter((e) => !e.includes('Failed to load resource'))).toEqual([]);
   // Mobile burger: below 760px the link panel is display:none until .is-open —
   // a dead burger means no navigation at all on phones. Same Esc-focus-return

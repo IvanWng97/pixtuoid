@@ -4,8 +4,9 @@ import showcaseData from './showcase.json';
 import featuresData from './features.json';
 
 // Shared site constants + a base-path-safe asset/link helper.
-// (GitHub Pages serves the site under /pixtuoid/, so every internal URL must
-//  be prefixed with import.meta.env.BASE_URL — asset() does that robustly.)
+// (The site serves at the origin root of pixtuoid.dev — base '/' — but every
+//  internal URL still goes through asset()/BASE_URL so a base change, like the
+//  old /pixtuoid/ project page, can never silently break links.)
 export const REPO = 'https://github.com/IvanWng97/pixtuoid';
 export const CRATES = 'https://crates.io/crates/pixtuoid';
 export const SPONSOR = 'https://buymeacoffee.com/IvanWng97';

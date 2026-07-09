@@ -2,7 +2,8 @@
 
 The marketing landing page for [pixtuoid](https://github.com/IvanWng97/pixtuoid),
 built with [Astro](https://astro.build). Deploys to GitHub Pages at
-**https://ivanwng97.github.io/pixtuoid/**.
+**https://pixtuoid.dev/** (the old project page
+https://ivanwng97.github.io/pixtuoid/ redirects there).
 
 Self-contained: this is a Node project that lives in `site/` and is independent
 of the Rust workspace. Its CI (`.github/workflows/site.yml`) runs the same checks
@@ -12,7 +13,7 @@ as `npm run verify`; deploys run via `.github/workflows/pages.yml`.
 
 ```sh
 npm install        # or: just site-setup   (from the repo root)
-npm run dev        # http://localhost:4321/pixtuoid/   ·  just site-dev
+npm run dev        # http://localhost:4321/   ·  just site-dev
 ```
 
 **Agent-driven (non-TTY) dev server** — foreground `astro dev` exits on stdin
@@ -250,12 +251,14 @@ render script all pick it up automatically — no component edits.
 
 ## Custom domain
 
-Project page today (`base: '/pixtuoid'`). To move to e.g. `pixtuoid.dev`: add
-`public/CNAME` with the domain, set `base: '/'` and `site: 'https://pixtuoid.dev'`
-in `astro.config.mjs`, then point DNS at GitHub Pages. `robots.txt` and its
-sitemap URL (`src/pages/robots.txt.ts`) derive from that config automatically —
-note that on the project page crawlers never fetch it (they only read the
-ORIGIN root's robots.txt), so it only becomes authoritative on a custom domain.
+The site lives on **pixtuoid.dev** (`base: '/'`, `site: 'https://pixtuoid.dev'`
+in `astro.config.mjs`). The domain itself is configured in the repo's
+**Settings → Pages** — Actions deploys need no `public/CNAME` file (that's a
+branch-deploy mechanism) — with DNS A/AAAA records on the apex pointing at
+GitHub Pages and `www` CNAME'd to `ivanwng97.github.io`. `robots.txt` and its
+sitemap URL (`src/pages/robots.txt.ts`) derive from the config automatically,
+and now serve at the origin root where crawlers actually read them. GitHub
+redirects the old `ivanwng97.github.io/pixtuoid/` project-page URLs here.
 
 ## First deploy (one-time)
 

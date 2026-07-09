@@ -27,10 +27,10 @@
 </p>
 
 <p align="center">
-  <a href="https://ivanwng97.github.io/pixtuoid/"><strong>🖥&#xFE0E; Live demo ↗</strong></a>
-  &nbsp;·&nbsp; <a href="https://ivanwng97.github.io/pixtuoid/architecture">Architecture</a>
-  &nbsp;·&nbsp; <a href="https://ivanwng97.github.io/pixtuoid/config">Configuration</a>
-  &nbsp;·&nbsp; <a href="https://ivanwng97.github.io/pixtuoid/contributing">Contributing</a>
+  <a href="https://pixtuoid.dev/"><strong>🖥&#xFE0E; Live demo ↗</strong></a>
+  &nbsp;·&nbsp; <a href="https://pixtuoid.dev/architecture">Architecture</a>
+  &nbsp;·&nbsp; <a href="https://pixtuoid.dev/config">Configuration</a>
+  &nbsp;·&nbsp; <a href="https://pixtuoid.dev/contributing">Contributing</a>
 </p>
 
 ---
@@ -69,7 +69,7 @@ Press `s` to open the **Sources** panel and connect your agent CLI (Claude Code,
 
 **Keyboard shortcuts:** `q` quit · `p` pause · `s` sources (connect / health) · `t` themes · `Tab` agent dashboard · `?` help · `↑↓/jk/PgUp/PgDn` floors · click to pin tooltip
 
-**More ways to install** — Cargo, prebuilt binaries, and Debian `.deb`s — are on the **[install guide ↗](https://ivanwng97.github.io/pixtuoid/#install)**.
+**More ways to install** — Cargo, prebuilt binaries, and Debian `.deb`s — are on the **[install guide ↗](https://pixtuoid.dev/#install)**.
 
 ## Features
 
@@ -92,7 +92,7 @@ Press `s` to open the **Sources** panel and connect your agent CLI (Claude Code,
 <!-- features:end -->
 
 <p align="center">
-  <a href="https://ivanwng97.github.io/pixtuoid/#showcase"><strong>▶ See every feature live — floors, themes, weather, pets, the office tour →</strong></a>
+  <a href="https://pixtuoid.dev/#showcase"><strong>▶ See every feature live — floors, themes, weather, pets, the office tour →</strong></a>
 </p>
 
 ## Supported Tools
@@ -105,7 +105,7 @@ Press `s` to open the **Sources** panel and connect your agent CLI (Claude Code,
 
 _Also supported: [Antigravity CLI](https://github.com/antiGravity-AI/antigravity-cli), [DeepSeek-Reasonix](https://github.com/esengine/DeepSeek-Reasonix), [CodeWhale](https://github.com/Hmbown/CodeWhale), [Copilot CLI](https://github.com/github/copilot-cli), [opencode](https://github.com/anomalyco/opencode), [Cursor CLI](https://cursor.com/cli), [Hermes Agent](https://hermes-agent.nousresearch.com), [OpenClaw](https://github.com/openclaw/openclaw)._
 
-**→ [Full tool × OS support matrix on the site](https://ivanwng97.github.io/pixtuoid/#tools)**
+**→ [Full tool × OS support matrix on the site](https://pixtuoid.dev/#tools)**
 
 _\* experimental — limited testing, unsigned binaries._
 <!-- tools:end -->
@@ -128,13 +128,13 @@ live-preview picker across six built-in palettes; your pick persists across sess
 See **[docs/CONFIGURATION.md](docs/CONFIGURATION.md)** for the full key reference
 (defaults, system-managed keys), the custom sprite-pack workflow, and **logging /
 troubleshooting** (diagnostics go to `~/.cache/pixtuoid/log`) — or browse it live
-at **[/config](https://ivanwng97.github.io/pixtuoid/config)**.
+at **[/config](https://pixtuoid.dev/config)**.
 
 ## How It Works
 
 Agent CLIs emit events two ways — a hook shim (a 200ms fire-and-forget write to a Unix socket, or a named pipe on Windows, that can never block your agent) and JSONL transcript watching. Both feed one channel; a reducer folds events into office state; the renderer draws it as half-block pixel art. Five Rust crates, zero terminal deps in the core.
 
-**[Full architecture with diagrams →](https://ivanwng97.github.io/pixtuoid/architecture)** · single source: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
+**[Full architecture with diagrams →](https://pixtuoid.dev/architecture)** · single source: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 
 ## Privacy & Security
 
