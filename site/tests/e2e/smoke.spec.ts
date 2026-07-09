@@ -1546,6 +1546,44 @@ test('tenant board text (badges, legend, planned rows, soon marks, star plaque) 
   }
 });
 
+test('pantry chitchat bubble text clears WCAG AA against its own dark ground (day + night)', async ({
+  page,
+}) => {
+  // Same pattern as the tenant-board sweep above: .pantry__bubble paints its
+  // OWN opaque --screen background (not a shared board), so read fg/bg off
+  // the bubble element directly rather than a separate panel ancestor. Both
+  // tokens are THEME-INDEPENDENT (global.css never redefines --screen/
+  // --chip-bright per theme, same reasoning as the board/plaque), so this
+  // sweep is defense-in-depth, not an expected-to-move ratio.
+  for (const theme of ['day', 'night'] as const) {
+    await page.addInitScript((t) => {
+      sessionStorage.setItem('pix-booted', '1');
+      localStorage.setItem('pix-theme', t);
+    }, theme);
+    await page.goto('./');
+    await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+    await page.evaluate(() =>
+      document.querySelector('.pantry')!.scrollIntoView({ block: 'center', behavior: 'instant' })
+    );
+    const bubbles = await page.evaluate(() =>
+      [...document.querySelectorAll('.pantry__bubble')].map((b) => {
+        const cs = getComputedStyle(b);
+        return { color: cs.color, bg: cs.backgroundColor, label: b.textContent?.trim() };
+      })
+    );
+    expect(bubbles.length, `${theme}: no .pantry__bubble rendered`).toBeGreaterThan(0);
+    for (const { color, bg, label } of bubbles) {
+      const fg = parseRgb(color).slice(0, 3) as [number, number, number];
+      const bgRgb = parseRgb(bg).slice(0, 3) as [number, number, number];
+      const ratio = contrastRatio(fg, bgRgb);
+      expect(
+        ratio,
+        `${theme} "${label}": WCAG AA floor is 4.5:1; ${color} on ${bg} measured ${ratio.toFixed(2)}:1`
+      ).toBeGreaterThanOrEqual(4.5);
+    }
+  }
+});
+
 test('the statusline feed ellipsizes on the wrapping text span, not the flex row', async ({
   page,
 }) => {

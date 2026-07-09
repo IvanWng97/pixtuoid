@@ -99,3 +99,34 @@ test('the star plaque hangs beside the tenant board with the sourced engraving',
     'fleets of 100+ agents have run this repo through this very office'
   );
 });
+
+test('pantry FAQ: bubbles pop in sequence, join pix:paused, reduced-motion is static', async ({
+  page,
+  browser,
+}) => {
+  await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
+  await page.goto('./');
+  await page.evaluate(() =>
+    document.querySelector('.pantry')!.scrollIntoView({ block: 'center', behavior: 'instant' })
+  );
+  const first = page.locator('.pantry__bubble').first();
+  // the reveal ('in') arms the pop; fill-mode carries the bubble to opacity 1
+  await expect
+    .poll(() => first.evaluate((el) => getComputedStyle(el).opacity), { timeout: 10_000 })
+    .toBe('1');
+  // bubbles are pix:paused CONSUMERS (spec §7: bubbles join the set)
+  await page.evaluate(() =>
+    document.dispatchEvent(new CustomEvent('pix:paused', { detail: { paused: true } }))
+  );
+  await expect
+    .poll(() => first.evaluate((el) => (el as HTMLElement).style.animationPlayState))
+    .toBe('paused');
+  // reduced-motion: static, no animation, fully visible
+  const ctx = await browser.newContext({ reducedMotion: 'reduce' });
+  const m = await ctx.newPage();
+  await m.goto('./');
+  const mb = m.locator('.pantry__bubble').first();
+  expect(await mb.evaluate((el) => getComputedStyle(el).animationName)).toBe('none');
+  expect(await mb.evaluate((el) => getComputedStyle(el).opacity)).toBe('1');
+  await ctx.close();
+});

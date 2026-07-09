@@ -304,7 +304,7 @@ test('elevator shaft: the ding pulse joins the pix:paused set', async ({ page })
   ).toBe(false);
 });
 
-test('scroll budget: the page fits ~8.4 viewport-heights at 1440×900', async ({ browser }) => {
+test('scroll budget: the page fits ~8.6 viewport-heights at 1440×900', async ({ browser }) => {
   // The spec's original compression target (§4) was 6.5vh — a plan-authoring
   // proxy that turned out to bake in assumptions three LOCKED design
   // decisions invalidate: hold #1 stays full-viewport, the hero stays
@@ -327,12 +327,28 @@ test('scroll budget: the page fits ~8.4 viewport-heights at 1440×900', async ({
   // before, now plus ProofSplit's own clamp()-bounded stage) plus ~0.27vh of
   // headroom: tight enough to still catch a future section ballooning,
   // honest about where the page actually sits today.
+  //
+  // Task 7 moved the pin again: PantryFaq mounts a second block inside
+  // section#amenities, after ProofSplit — a still image + a 2-turn chitchat
+  // FAQ, genuinely new content, not padding. Before implementing, this same
+  // build measured 8.113vh (unchanged from Task 6). The FIRST draft used a
+  // symmetric padding-block on .pantry (measured 8.601vh) — redundant with
+  // ProofSplit's OWN bottom padding closing the same gap, so it was cut to a
+  // single margin-top reusing .section-head's existing "adjacent chunk in
+  // one section" scale (8.494vh), confirmed via getBoundingClientRect that
+  // the remaining added height is genuinely the still image (294.5px, the
+  // taller of its two flex columns) + that margin (28.8px) — no further
+  // padding to cut without shrinking the image itself. Final measured:
+  // 8.472vh. 8.6 = that measured value plus ~0.13vh of headroom — tighter
+  // in absolute terms than Task 4's 0.27vh margin, but this floor's content
+  // is now real (an image + real copy, not a placeholder), so a future
+  // regression here is a real ballooning, not slack being eaten.
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const page = await ctx.newPage();
   await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
   await page.goto('./');
   await page.waitForLoadState('networkidle');
   const vh = await page.evaluate(() => document.documentElement.scrollHeight / window.innerHeight);
-  expect(vh).toBeLessThanOrEqual(8.4);
+  expect(vh).toBeLessThanOrEqual(8.6);
   await ctx.close();
 });
