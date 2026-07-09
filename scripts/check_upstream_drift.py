@@ -286,16 +286,23 @@ OPENCODE_PAYLOAD_FIELDS = {
 COPILOT_SCHEMA_URL = "https://unpkg.com/@github/copilot-linux-x64/schemas/session-events.schema.json"
 
 # Copilot payload FIELD names decode_copilot_line / extract_copilot_cwd read
-# (beyond the `type` discriminator): identity/link (`agentId` — the child key,
-# == data.toolCallId; `sessionId`, `context`, `cwd`), tool (`toolCallId`,
-# `toolName`, `arguments`), display (`agentDisplayName`) and permission
-# (`permissionRequest`, `result`, `kind`). The wire `parentId` is deliberately
-# NOT here — sub-agents link via the envelope `agentId`, not a parent field, so
-# watching `parentId` would false-alarm on a field we don't depend on. Curated
-# (NOT scraped — a scrape drags in opaque tool-arg keys + fixture JSON). Checked
-# against the union of every `properties` key at ANY depth (envelope + nested
-# `data.properties`) in the SAME schema `text` (a depended field GONE = breaking).
+# (beyond the `type` discriminator): the `data` ENVELOPE wrapper (every tool /
+# permission / identity field below lives under it — decode_copilot_line's
+# `obj.get("data")`, extract_copilot_cwd's `v.get("data")`), so a rename of this
+# one key silently nulls ALL of them while the nested fields still resolve under
+# the new wrapper (the union check would NOT alarm) — it is a top-level
+# `properties` key on every event, so the all-depth union finds it and the add is
+# false-alarm-safe; identity/link (`agentId` — the child key, == data.toolCallId;
+# `sessionId`, `context`, `cwd`), tool (`toolCallId`, `toolName`, `arguments`),
+# display (`agentDisplayName`) and permission (`permissionRequest`, `result`,
+# `kind`). The wire `parentId` is deliberately NOT here — sub-agents link via the
+# envelope `agentId`, not a parent field, so watching `parentId` would false-alarm
+# on a field we don't depend on. Curated (NOT scraped — a scrape drags in opaque
+# tool-arg keys + fixture JSON). Checked against the union of every `properties`
+# key at ANY depth (envelope + nested `data.properties`) in the SAME schema `text`
+# (a depended field GONE = breaking).
 COPILOT_PAYLOAD_FIELDS = {
+    "data",
     "agentId", "sessionId", "context", "cwd",
     "toolCallId", "toolName", "arguments", "agentDisplayName",
     "permissionRequest", "result", "kind",

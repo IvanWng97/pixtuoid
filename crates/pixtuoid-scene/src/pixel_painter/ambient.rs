@@ -64,9 +64,14 @@ pub(super) fn dust_mote_positions(
         let speed_y = 0.6 + ((s >> 12) & 0x3) as f32 * 0.2;
         let speed_x = 0.4 + ((s >> 14) & 0x3) as f32 * 0.15;
         let cycle = col.depth as f32;
-        let y_offset = ((t_ms as f32 / 1000.0) * speed_y + ((s >> 4) & 0xFF) as f32) % cycle;
+        // `t_ms` is the absolute epoch ms (~1.7e12); `t_ms as f32` first would
+        // round to the nearest f32 (ULP ~131 s at that magnitude) and freeze the
+        // drift/fall for ~2 min. Keep the time term in f64 (elapsed seconds),
+        // cast to f32 only at the final position — see `lighting::neon_pulse`.
+        let ts = t_ms as f64 / 1000.0;
+        let y_offset = ((ts * speed_y as f64 + ((s >> 4) & 0xFF) as f64) % cycle as f64) as f32;
         let y = col.top_y + y_offset as u16;
-        let sx = (phase + (t_ms as f32 / 1000.0) * speed_x).sin();
+        let sx = (phase as f64 + ts * speed_x as f64).sin() as f32;
         // Clamp x to [0, u16::MAX] before casting — negative f32 silently
         // wraps to 0 via `as u16`, dragging motes to the left buffer edge
         // on narrow terminals where col.x is small.
@@ -391,6 +396,24 @@ mod tests {
         let a = dust_mote_positions(7, now1, &col);
         let b = dust_mote_positions(7, now2, &col);
         assert_ne!(a, b, "positions should advance over time");
+    }
+
+    // Regression: the drift must also advance at a WALL-CLOCK-scale `now`
+    // (~1.7e12 ms), not just a small test epoch. The old `t_ms as f32` froze
+    // here (f32 ULP ~131 s at that magnitude) — this case FAILS on the pre-fix
+    // code (equal positions) and passes once the time term is computed in f64.
+    #[test]
+    fn dust_motes_drift_at_wall_clock_scale() {
+        let now1 = SystemTime::UNIX_EPOCH + Duration::from_millis(1_752_000_000_000);
+        let now2 = now1 + Duration::from_millis(500);
+        let col = SunbeamColumn {
+            x: 100,
+            top_y: 12,
+            depth: 12,
+        };
+        let a = dust_mote_positions(7, now1, &col);
+        let b = dust_mote_positions(7, now2, &col);
+        assert_ne!(a, b, "positions should advance over time at wall-clock ms");
     }
 
     #[test]

@@ -855,13 +855,14 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                                 let outcomes = tokio::task::block_in_place(|| {
                                     crate::sources::apply_choices(&config_path, &freeze)
                                 });
-                                for (id, oc) in &outcomes {
-                                    if let crate::sources::ChangeOutcome::Failed(e) = oc {
-                                        tracing::warn!(
-                                            "onboarding(skip): {id} persist failed: {e}"
-                                        );
-                                    }
-                                }
+                                // Reflect the freeze into the LIVE gate, exactly
+                                // like the Confirm arm — skip PERSISTS connected=true
+                                // for a pre-0.12 upgrader's hooked sources, so the
+                                // in-process gate must open THIS session too, else
+                                // their office stays empty until the next restart
+                                // re-seeds the gate from the (now true) flags. Also
+                                // logs any persist failure (its Failed arm).
+                                reflect_onboarding_outcomes(&connected, &freeze, &outcomes);
                                 ui.close_onboarding();
                             }
                         }
@@ -1715,6 +1716,27 @@ mod dispatch_tests {
         assert!(
             !connected.is_connected("cursor"),
             "a failed connect must NOT go live"
+        );
+    }
+
+    #[test]
+    fn onboarding_skip_reflects_its_freeze_into_the_live_gate() {
+        use crate::sources::ChangeOutcome;
+        // Regression: the SKIP arm must reflect its freeze into the live gate
+        // like Confirm. A pre-0.12 upgrader boots with an EMPTY gate; skip
+        // freezes their hooked source to `true` and persists it — the gate must
+        // OPEN this session, else their office stays empty until the next
+        // restart re-seeds from the (now true) flags. (`skip_freeze`'s
+        // has_hooks probe is FS-bound and exercised by the arm at runtime; here
+        // we model its `true` verdict and pin the empty-gate → open transition.)
+        let connected = crate::runtime::ConnectedSources::default();
+        assert!(!connected.is_connected("antigravity"), "gate starts empty");
+        let freeze: Vec<(&'static str, bool)> = vec![("antigravity", true)];
+        let outcomes = vec![("antigravity".to_string(), ChangeOutcome::NoOp)];
+        super::reflect_onboarding_outcomes(&connected, &freeze, &outcomes);
+        assert!(
+            connected.is_connected("antigravity"),
+            "skip must open the live gate for a frozen-connected source"
         );
     }
 }

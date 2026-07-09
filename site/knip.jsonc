@@ -7,10 +7,11 @@
   // pin is load-bearing — which means it is never `import`ed in our own source
   // and knip can't trace it through the rehype plugin. Keep the pin; mark it used.
   "ignoreDependencies": ["mermaid"],
-  // `VariantGroup` (src/consts.ts) is consumed today only inside consts.ts
-  // itself (the ShowcaseChannel field type + showcaseGroups' resolver) — its
-  // first external consumer is ChannelStage.astro's live-channel chip-group
-  // UI, landing in the next task. `interface` is scoped narrowly (not a
+  // `VariantGroup` (src/consts.ts) is consumed only inside consts.ts itself
+  // (the ShowcaseChannel field type + showcaseGroups' resolver); the
+  // live-channel chip-group UI (ChannelStage.astro, #478) consumes the DERIVED
+  // `EnrichedVariantGroup`, not `VariantGroup`, so this stays used-in-file. A
+  // STANDING exemption, not temporary. `interface` is scoped narrowly (not a
   // blanket knip loosening) so a genuinely dead interface elsewhere still trips.
   "ignoreExportsUsedInFile": { "interface": true },
   // public/wasm/ is wasm-bindgen GENERATED glue committed by `just gen-wasm`

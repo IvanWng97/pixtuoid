@@ -127,6 +127,19 @@ pub(in crate::pixel_painter) fn paint_floor_lamp_halo(
     }
 }
 
+/// Neon border breathing brightness (0.7..1.0) for the given wall-clock ms.
+///
+/// `elapsed_ms` is the ABSOLUTE epoch ms (~1.7e12 today); the divide MUST stay
+/// in f64. `elapsed_ms as f32` first would round to the nearest representable
+/// f32 (ULP ~131 s at that magnitude), collapsing every frame within ~2 min to
+/// one value and freezing the pulse — the same reduce-before-cast rule the sim's
+/// other epoch-driven animations follow (`% CYCLE_MS` before the f32 cast).
+fn neon_pulse(elapsed_ms: u64) -> f32 {
+    // Slow ~1.2s sine pulse.
+    const NEON_PULSE_PERIOD_MS: f64 = 1200.0;
+    (0.7 + 0.3 * ((elapsed_ms as f64 / NEON_PULSE_PERIOD_MS).sin() * 0.5 + 0.5)) as f32
+}
+
 /// Neon sign panel — dark background with colored glow border, painted in
 /// the wall band. The ratatui text widget renders on top with bright colors.
 pub(in crate::pixel_painter) fn paint_neon_panel(
@@ -138,10 +151,7 @@ pub(in crate::pixel_painter) fn paint_neon_panel(
     now: SystemTime,
     theme: &Theme,
 ) {
-    // Neon border breathes on this period (a slow ~1.2s sine pulse).
-    const NEON_PULSE_PERIOD_MS: f32 = 1200.0;
-    let elapsed_ms = epoch_ms(now);
-    let pulse = 0.7 + 0.3 * ((elapsed_ms as f32 / NEON_PULSE_PERIOD_MS).sin() * 0.5 + 0.5);
+    let pulse = neon_pulse(epoch_ms(now));
 
     let panel_bg = theme.office.neon_panel_bg;
     let base = theme.office.neon_frame_base;
@@ -315,6 +325,24 @@ pub(in crate::pixel_painter) fn paint_shadow(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Regression: the pulse must advance frame-to-frame at a WALL-CLOCK-scale
+    // timestamp (~1.7e12 ms), not just at small test epochs. The old
+    // `elapsed_ms as f32 / PERIOD` froze here (f32 ULP ~131 s at that magnitude),
+    // so two frames 33 ms apart yielded an identical pulse for ~2 min.
+    #[test]
+    fn neon_pulse_advances_at_wall_clock_scale() {
+        // 2026-scale epoch ms; two consecutive ~30fps frames.
+        let t0: u64 = 1_767_000_000_000;
+        let a = neon_pulse(t0);
+        let b = neon_pulse(t0 + 33);
+        assert_ne!(
+            a, b,
+            "pulse must change across a 33ms frame at wall-clock ms"
+        );
+        // Stays in the documented 0.7..=1.0 band.
+        assert!((0.7..=1.0).contains(&a), "pulse {a} out of band");
+    }
 
     // A degenerate ellipse (half_w == 0) or zero strength must early-return and
     // leave the buffer untouched — the guard at the top of paint_ellipse_blend.
