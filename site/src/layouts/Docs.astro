@@ -56,7 +56,10 @@ const toc = raw.map((h) => ({ ...h, text: h.text.replace(/\s*\([^)]*\)\s*$/, '')
             <li>
               <a href={asset(d.route)} aria-current={d.id === current ? 'page' : undefined}>
                 <span
-                  class:list={['led-dot', { 'led-selected': d.id === current }]}
+                  class:list={[
+                    'led-dot',
+                    { 'led-selected': d.id === current, 'is-on': d.id === current },
+                  ]}
                   aria-hidden="true"
                 />
                 {d.label}
@@ -272,15 +275,6 @@ const toc = raw.map((h) => ({ ...h, text: h.text.replace(/\s*\([^)]*\)\s*$/, '')
     border-left-color: var(--led);
     border-top-left-radius: 0;
     border-bottom-left-radius: 0;
-  }
-  /* .led-selected is normally wired via a container/:global(.led-dot) pairing
-     (ElevatorShaft) because that component's dot lives across a scope
-     boundary; here the dot carries the class directly, so it needs its own
-     lit-fill rule — .led-dot.is-on's exact fill+glow, just keyed off the
-     selected-state class this sidebar actually uses. */
-  .docs__sidebar .led-dot.led-selected {
-    background: var(--led);
-    box-shadow: 0 0 6px var(--led-glow);
   }
   .docs__fl {
     font-family: var(--font-display);
