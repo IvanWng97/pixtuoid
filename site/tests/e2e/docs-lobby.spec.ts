@@ -64,3 +64,31 @@ test('markdown callouts render as terminal windows (note + warning)', async ({ p
   await expect(note).toBeVisible();
   await expect(note.locator('.callout__title')).toHaveText('~ note');
 });
+
+test('the docs install strip copies and fires pix:install-copy {source:"docs"}', async ({
+  page,
+  context,
+}) => {
+  // clipboard-read is needed for the readText() assertion below — the
+  // smoke suite's `install:` test (smoke.spec.ts:400) shows the working set.
+  await context.grantPermissions(['clipboard-write', 'clipboard-read']);
+  await page.addInitScript(() => {
+    const w = window as unknown as { __copies: unknown[] };
+    w.__copies = [];
+    document.addEventListener('pix:install-copy', (e) =>
+      w.__copies.push((e as CustomEvent).detail?.source)
+    );
+  });
+  await page.goto('./config');
+  const btn = page.locator('[data-docs-copy]');
+  await btn.scrollIntoViewIfNeeded();
+  await btn.click();
+  await expect(btn).toHaveText(/copied ✓/);
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as { __copies: unknown[] }).__copies))
+    .toContain('docs');
+  // the copied text is the ONE install.json brew command
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toContain(
+    'brew install IvanWng97/pixtuoid/pixtuoid'
+  );
+});
