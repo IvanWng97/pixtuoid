@@ -1180,11 +1180,26 @@ test('no horizontal overflow at phone widths (mobile pan guard)', async ({ brows
   // documentElement scrollWidth<=clientWidth guard catches it. This whole class
   // slipped the #453 whole-site audit (desktop-eyeballed, no such assertion);
   // pin index + a docs page at real phone widths so it can't silently regress.
+  // #503: the guard's old scrollW<=clientW assertion is BLIND to the second
+  // overflow mode — on mobile emulation, content wider than the meta-viewport
+  // EXPANDS the whole layout viewport (scrollW==clientW==526 at a 375 device),
+  // so both sides of the old inequality grow together and it passes. Assert
+  // clientW<=device width too, and cover every doc route (the /parallel-
+  // delivery Shiki/anchor overflow lived on the one route not in this list)
+  // plus the tablet width.
   for (const [path, width] of [
     ['./', 360], // Android
     ['./', 390], // iPhone 12–14
     ['./', 430], // iPhone Pro Max
+    ['./', 768], // tablet
     ['./config', 390], // docs shell: code blocks / mermaid can overflow too
+    ['./config', 768],
+    ['./architecture', 375], // build-time mermaid SVG
+    ['./contributing', 375],
+    ['./knowledge-base', 375],
+    ['./parallel-delivery', 320], // the #503 repro: wide ASCII pre + long links
+    ['./parallel-delivery', 375],
+    ['./parallel-delivery', 768],
   ] as const) {
     const context = await browser.newContext({
       viewport: { width, height: 820 },
@@ -1205,6 +1220,10 @@ test('no horizontal overflow at phone widths (mobile pan guard)', async ({ brows
       scrollW,
       `${path} at ${width}px is ${scrollW - clientW}px wider than the viewport (horizontal pan)`
     ).toBeLessThanOrEqual(clientW);
+    expect(
+      clientW,
+      `${path} at ${width}px: the layout viewport expanded to ${clientW}px (${clientW - width}px past the device width — mode-2 overflow, the #503 class)`
+    ).toBeLessThanOrEqual(width);
     await context.close();
   }
 });

@@ -886,6 +886,13 @@ code,
 .prose a {
   color: var(--coral-deep);
   font-weight: 600;
+  /* #503: long unbreakable link text (repo paths, URLs) was the widest box on
+     /parallel-delivery at phone widths — it expanded the whole mobile layout
+     viewport (375→526). break-word, NOT anywhere: `anywhere` feeds soft-wrap
+     into MIN-CONTENT sizing and re-crushes table columns (the #501 class,
+     documented on the docs-table guard); break-word wraps at overflow time
+     only, leaving intrinsic sizing alone. */
+  overflow-wrap: break-word;
 }
 :root[data-theme='night'] .prose a,
 :root[data-theme='dracula'] .prose a {
