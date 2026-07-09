@@ -365,6 +365,33 @@ HERMES_SHELL_HOOK_URL = (
 # dict-key literals in _serialize_payload; ONE-DIRECTIONAL (a depended field gone).
 HERMES_PAYLOAD_FIELDS = {"session_id", "cwd", "tool_name", "tool_input"}
 
+# Oh My Pi (omp) is TRANSCRIPT-ONLY: the decoder tails the session JSONL, so the
+# depended names are the entry `type` discriminators (source/omp.rs `match kind`)
+# plus a handful of field literals, split across the upstream files that define
+# them (open TS, can1357/oh-my-pi). ONE-DIRECTIONAL like copilot: omp persists
+# ~15 entry types and we map 3 by design — only a name WE DEPEND ON vanishing is
+# breaking (a rename → the transcript still flows but decodes to nothing).
+OMP_SESSION_ENTRIES_URL = (
+    "https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/coding-agent/src/session/session-entries.ts"
+)
+# Field literals defined in session-entries.ts: the header `cwd` (the label/first-
+# sight identity) + the `customType` discriminator decode_omp_line keys custom
+# entries on. The entry `type` values from read_omp_entry_types are checked
+# against the SAME file (they are TS literal types there: `type: "message"`).
+OMP_SESSION_ENTRY_FIELDS = {"cwd", "customType"}
+# The clean-teardown marker (SESSION_EXIT_CUSTOM_TYPE) lives in exit-diagnostics.ts
+# — the session-ended checker + the SessionEnd decode both key on it.
+OMP_EXIT_DIAG_URL = (
+    "https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/coding-agent/src/session/exit-diagnostics.ts"
+)
+# The message-level names (roles + tool-call block shape) live in the pi-ai LLM
+# types: `role:"assistant"`/`"toolResult"`, the `"toolCall"` content-block type +
+# its `arguments`, and the result's `toolCallId` back-reference.
+OMP_AI_TYPES_URL = (
+    "https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/ai/src/types.ts"
+)
+OMP_MESSAGE_WIRE_NAMES = {"assistant", "toolResult", "toolCall", "toolCallId", "arguments"}
+
 
 def fetch(url: str) -> str:
     req = urllib.request.Request(url, headers={"User-Agent": "pixtuoid-drift-watch"})
@@ -561,6 +588,19 @@ def read_opencode_events() -> set[str]:
     return set(re.findall(r'"((?:session|message|permission)\.[a-z0-9.]+)"', m.group(1)))
 
 
+def read_omp_entry_types() -> set[str]:
+    """The session-entry `type` strings decode_omp_line maps, read from the
+    `match kind` block in source/omp.rs (the source of truth — stays in sync
+    with the decoder by construction). Scoped to the match block so the unit
+    tests further down the file (which embed the same strings as JSON) don't
+    leak in."""
+    src = (REPO / "crates/pixtuoid-core/src/source/omp.rs").read_text()
+    m = re.search(r"let out = match kind \{(.*?)\n    \};", src, re.S)
+    if not m:
+        raise RuntimeError("could not locate the `match kind` block in source/omp.rs")
+    return set(re.findall(r'"(session|message|custom)"', m.group(1)))
+
+
 def read_copilot_events() -> set[str]:
     """The event `type` strings the decoder maps, read from the `match kind`
     block in source/copilot.rs (the source of truth — stays in sync with the
@@ -687,6 +727,7 @@ def run_checks(
     codewhale_ours: set[str] | None,
     opencode_ours: set[str] | None,
     copilot_ours: set[str] | None,
+    omp_ours: set[str] | None,
     cursor_ours: set[str] | None,
     openclaw_ours: set[str] | None,
     hermes_ours: set[str] | None,
@@ -924,6 +965,37 @@ def run_checks(
                             f"no tool label / permission never gates)."
                         )
 
+    # --- omp session-entry types + wire names (only the FETCH is transient) --
+    if omp_ours is not None:
+        text = try_fetch(OMP_SESSION_ENTRIES_URL, "omp session-entries", breaking, errors)
+        if text is not None:
+            # Entry `type` discriminators are TS literal types (`type: "message"`)
+            # + `customType`/`cwd` field literals — all in the same file.
+            for name in sorted(omp_ours | OMP_SESSION_ENTRY_FIELDS):
+                if not re.search(rf'\b{re.escape(name)}\b', text):
+                    breaking.append(
+                        f"omp name `{name}` (read by decode_omp_line) is GONE from "
+                        f"session-entries.ts — likely renamed; the transcript still "
+                        f"flows but the decoder maps it to nothing (no sprite / no "
+                        f"activity / no cwd label)."
+                    )
+        diag = try_fetch(OMP_EXIT_DIAG_URL, "omp exit-diagnostics", breaking, errors)
+        if diag is not None and '"session_exit"' not in diag:
+            breaking.append(
+                "omp customType `session_exit` (the clean-teardown marker the "
+                "session-ended checker + SessionEnd decode key on) is GONE from "
+                "exit-diagnostics.ts — renamed; finished sessions resurrect at "
+                "first sight and never SessionEnd."
+            )
+        ai = try_fetch(OMP_AI_TYPES_URL, "omp pi-ai types", breaking, errors)
+        if ai is not None:
+            for name in sorted(OMP_MESSAGE_WIRE_NAMES):
+                if f'"{name}"' not in ai and not re.search(rf'\b{re.escape(name)}\b', ai):
+                    breaking.append(
+                        f"omp message name `{name}` (read by decode_omp_line) is GONE "
+                        f"from pi-ai types.ts — renamed; tool rounds decode to nothing."
+                    )
+
     # --- Cursor hook events (only the FETCH is transient) ------------------
     if cursor_ours is not None:
         text = try_fetch(CURSOR_HOOKS_URL, "Cursor hooks doc", breaking, errors)
@@ -1069,6 +1141,7 @@ def main() -> int:
     codewhale_ours = None
     opencode_ours = None
     copilot_ours = None
+    omp_ours = None
     cursor_ours = None
     openclaw_ours = None
     hermes_ours = None
@@ -1081,6 +1154,7 @@ def main() -> int:
         codewhale_ours = read_codewhale_events()
         opencode_ours = read_opencode_events()
         copilot_ours = read_copilot_events()
+        omp_ours = read_omp_entry_types()
         cursor_ours = read_cursor_events()
         openclaw_ours = read_openclaw_events()
         hermes_ours = read_hermes_events()
@@ -1101,6 +1175,7 @@ def main() -> int:
             codewhale_ours,
             opencode_ours,
             copilot_ours,
+            omp_ours,
             cursor_ours,
             openclaw_ours,
             hermes_ours,

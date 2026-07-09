@@ -63,6 +63,13 @@
     "id": "hermes"
   },
   {
+    "cli_present": true,
+    "connected": false,
+    "display_name": "Oh My Pi",
+    "health": null,
+    "id": "omp"
+  },
+  {
     "cli_present": false,
     "connected": false,
     "display_name": "OpenClaw",

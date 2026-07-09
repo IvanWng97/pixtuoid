@@ -1,0 +1,32 @@
+---
+source: crates/pixtuoid-core/tests/sources/conformance.rs
+assertion_line: 301
+expression: events
+---
+- SessionStart:
+    agent_id: 4828388175023562719
+    source: omp
+    session_id: 2026-07-09T08-00-00-000Z_0197f0aa-0000-7000-8000-000000000001
+    cwd: /home/user/project
+    parent_id: ~
+- ActivityStart:
+    agent_id: 4828388175023562719
+    tool_use_id: toolu_01AAAAAAAAAAAAAAAAAAAAAA
+    detail:
+      Generic:
+        display: "read: /home/user/project/tests/flaky.rs"
+- ActivityEnd:
+    agent_id: 4828388175023562719
+    tool_use_id: toolu_01AAAAAAAAAAAAAAAAAAAAAA
+- ActivityStart:
+    agent_id: 4828388175023562719
+    tool_use_id: toolu_01BBBBBBBBBBBBBBBBBBBBBB
+    detail:
+      Generic:
+        display: "bash: cargo test flaky"
+- ActivityEnd:
+    agent_id: 4828388175023562719
+    tool_use_id: toolu_01BBBBBBBBBBBBBBBBBBBBBB
+- SessionEnd:
+    agent_id: 4828388175023562719
+    as_child: false

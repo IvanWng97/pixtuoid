@@ -31,6 +31,7 @@ pub const REGISTERED_SOURCES: &[&str] = &[
     copilot::SOURCE_NAME,
     cursor::SOURCE_NAME,
     hermes::SOURCE_NAME,
+    omp::SOURCE_NAME,
     openclaw::SOURCE_NAME,
 ];
 
@@ -284,6 +285,7 @@ pub mod manager;
 mod native;
 #[cfg(feature = "native")]
 pub use native::{DynSource, Source, TaggedReceiver, TaggedSender};
+pub mod omp;
 pub mod openclaw;
 pub mod opencode;
 pub mod reasonix;

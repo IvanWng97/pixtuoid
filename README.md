@@ -103,7 +103,7 @@ Press `s` to open the **Sources** panel and connect your agent CLI (Claude Code,
 | [Claude Code](https://code.claude.com) | macOS · Linux · Windows\* |
 | [Codex CLI](https://github.com/openai/codex) | macOS · Linux · Windows\* |
 
-_Also supported: [Antigravity CLI](https://github.com/antiGravity-AI/antigravity-cli), [DeepSeek-Reasonix](https://github.com/esengine/DeepSeek-Reasonix), [CodeWhale](https://github.com/Hmbown/CodeWhale), [Copilot CLI](https://github.com/github/copilot-cli), [opencode](https://github.com/anomalyco/opencode), [Cursor CLI](https://cursor.com/cli), [Hermes Agent](https://hermes-agent.nousresearch.com), [OpenClaw](https://github.com/openclaw/openclaw)._
+_Also supported: [Antigravity CLI](https://github.com/antiGravity-AI/antigravity-cli), [DeepSeek-Reasonix](https://github.com/esengine/DeepSeek-Reasonix), [CodeWhale](https://github.com/Hmbown/CodeWhale), [Copilot CLI](https://github.com/github/copilot-cli), [opencode](https://github.com/anomalyco/opencode), [Cursor CLI](https://cursor.com/cli), [Hermes Agent](https://hermes-agent.nousresearch.com), [Oh My Pi](https://omp.sh), [OpenClaw](https://github.com/openclaw/openclaw)._
 
 **→ [Full tool × OS support matrix on the site](https://pixtuoid.dev/#tools)**
 

@@ -153,7 +153,7 @@ src/
 │                       is untouched. Reconnect = a fresh `SessionStart` resurrects-in-place once the old slot GCs.
 │                       `build_source_set` is the ONE source-construction site: it mints the HookRouter (the
 │                       Source that owns the shared hook socket — every CLI's hooks ride it), the transcript
-│                       watchers (CC/Antigravity/Codex/Copilot), and the ONE shared ChildEndUnclaims handle (#246)
+│                       watchers (CC/Antigravity/Codex/Copilot/omp), and the ONE shared ChildEndUnclaims handle (#246)
 │                       — handed to the HookRouter (hook-tee PRODUCER) + ClaudeCodeSource & CodexSource (watcher
 │                       CONSUMERS). Daemon presence (OpenClaw) rides a source-tagged sibling channel into
 │                       SceneState::daemons; reducer_task's presence/sweep arms are registry-driven

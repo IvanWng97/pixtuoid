@@ -25,6 +25,7 @@ use pixtuoid_core::source::daemon::{self, PresenceMsg};
 use pixtuoid_core::source::hook::HookRouter;
 use pixtuoid_core::source::jsonl::ChildEndUnclaims;
 use pixtuoid_core::source::manager::SourceManager;
+use pixtuoid_core::source::omp::OmpSource;
 use pixtuoid_core::source::registry;
 use pixtuoid_core::source::DynSource;
 use pixtuoid_core::state::MAX_FLOORS;
@@ -164,6 +165,7 @@ pub(crate) fn build_source_set(
     }
     let ag_src = AntigravitySource::default_paths();
     let copilot_src = CopilotSource::default_paths();
+    let omp_src = OmpSource::default_paths();
 
     let mut codex_src = CodexSource::default_paths();
     if let Some(p) = codex_sessions_root {
@@ -192,6 +194,7 @@ pub(crate) fn build_source_set(
         Box::new(ag_src),
         Box::new(codex_src),
         Box::new(copilot_src),
+        Box::new(omp_src),
     ]
 }
 

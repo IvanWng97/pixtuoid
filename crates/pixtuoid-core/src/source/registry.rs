@@ -22,7 +22,7 @@ use serde_json::Value;
 
 use crate::source::decoder::{extract_top_level_cwd, CwdExtractor, LineDecoder};
 use crate::source::{
-    antigravity, claude_code, codewhale, codex, copilot, cursor, hermes, openclaw, opencode,
+    antigravity, claude_code, codewhale, codex, copilot, cursor, hermes, omp, openclaw, opencode,
     reasonix, AgentEvent,
 };
 
@@ -258,6 +258,7 @@ pub const REGISTRY: &[SourceDescriptor] = &[
     COPILOT,
     CURSOR,
     HERMES,
+    OMP,
     OPENCLAW,
 ];
 
@@ -621,6 +622,49 @@ const HERMES: SourceDescriptor = SourceDescriptor {
     },
 };
 
+/// Oh My Pi (`omp`, omp.sh). TRANSCRIPT-ONLY (Copilot/Antigravity-class): the
+/// whole lifecycle is persisted to
+/// `<omp_agent_dir>/sessions/<encoded-cwd>/<ts>_<uuid>.jsonl` (assistant
+/// toolCall blocks + toolResult messages + the `session_exit` custom entry),
+/// and omp has NO shell-hook seam (its hooks are in-process TS extensions), so
+/// it needs NO install target and NO custom hook decoder. Subagents persist as
+/// SEPARATE nested files (`<parent-stem>/<taskId>.jsonl`) — parent-linked by
+/// path (`omp::omp_id_from_path` keys the stem chain).
+const OMP: SourceDescriptor = SourceDescriptor {
+    name: omp::SOURCE_NAME,
+    label_prefix: "om",
+    // Repo-derived (v16.3.12, commit ff1fe5f) — no byte-real live capture yet.
+    verified_version: "unknown",
+    version_probe: Some(&["omp", "--version"]),
+    kind: SourceKind::Agent {
+        transcript: Some(Transcript {
+            line_decoder: omp::decode_omp_line,
+            // The `type:"session"` header carries a top-level `cwd` — the
+            // shared shape.
+            cwd_extractor: extract_top_level_cwd,
+        }),
+        hook: HookDecoding {
+            id_key: IdKey::TranscriptPathThenSessionId, // inert: no hook transport for this source
+            custom: None,
+        },
+        caps: SourceCaps {
+            // The `session_exit` custom entry is appended + flushed on every
+            // clean teardown incl. SIGINT/SIGTERM (best-effort counts;
+            // SIGKILL falls to the stale-sweep) → no short-idle reaper.
+            has_exit_signal: true,
+            // The header `SessionStart` decodes once per transcript life (and
+            // first-sight is once per path), so a stale-swept session does not
+            // walk back in on the next prompt — moot anyway with a real exit
+            // signal (short_idle_reap == false).
+            resurrects_on_prompt: false,
+            // The `task` dispatch emits a toolCall/toolResult pair on the
+            // parent AND the child persists its own parent-linked transcript
+            // (liveness flows up), so a delegation is not hook-silent.
+            delegations_are_hook_silent: false,
+        },
+    },
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -705,10 +749,11 @@ mod tests {
         assert_eq!(COPILOT.name, copilot::SOURCE_NAME);
         assert_eq!(CURSOR.name, cursor::SOURCE_NAME);
         assert_eq!(HERMES.name, hermes::SOURCE_NAME);
+        assert_eq!(OMP.name, omp::SOURCE_NAME);
         assert_eq!(OPENCLAW.name, openclaw::SOURCE_NAME);
         // Hand-enumerated above — the len pin turns "forgot the new row's
         // assert" from a silent gap into a loud failure.
-        assert_eq!(REGISTRY.len(), 10, "new row? add its name-pin assert above");
+        assert_eq!(REGISTRY.len(), 11, "new row? add its name-pin assert above");
     }
 
     #[test]

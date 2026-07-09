@@ -88,6 +88,7 @@ def test_source_parsers_find_nonempty_well_shaped_sets() -> None:
         (d.read_openclaw_events, r"^[a-z][a-z_]*$", 2),
         (d.read_opencode_events, r"^[a-z][a-z0-9._]*$", 2),
         (d.read_copilot_events, r"^[a-z][a-z0-9._]*$", 2),
+        (d.read_omp_entry_types, r"^[a-z]+$", 3),
         (d.read_cursor_events, r"^[a-zA-Z]\w+$", 2),
         (d.read_hermes_events, r"^[a-z][a-z_]*$", 2),
     ]
