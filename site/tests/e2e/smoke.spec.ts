@@ -1382,6 +1382,7 @@ test('bare hero text clears WCAG AA at the real office composite (day + night)',
       '#tools .section-head .lead',
       '#install .section-head .lead',
       '#amenities .eyebrow',
+      '.pantry__cite',
     ]) {
       const { ratio } = await worstCaseRatio(selector);
       expect(

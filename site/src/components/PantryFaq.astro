@@ -44,7 +44,13 @@ import { asset } from '../consts';
             <p class="pantry__bubble pantry__bubble--a" style={`--turn:${i * 2 + 1}`}>
               {f.a}
             </p>
-            <p class="pantry__cite">— {f.cite}</p>
+            {/* same --turn as the answer above: a citation pops WITH its
+              answer, never before it (review-caught: an un-turned cite has no
+              delay — an unset var() in calc() computes to 0s — so it spoiled
+              the sequence from frame one) */}
+            <p class="pantry__cite" style={`--turn:${i * 2 + 1}`}>
+              — {f.cite}
+            </p>
           </li>
         ))
       }
@@ -59,7 +65,7 @@ import { asset } from '../consts';
   (function () {
     const chat = document.querySelector('[data-pantry-chat]');
     if (!chat) return;
-    const bubbles = chat.querySelectorAll('.pantry__bubble');
+    const bubbles = chat.querySelectorAll('.pantry__bubble, .pantry__cite');
     document.addEventListener('pix:paused', function (e) {
       const paused = !!(e.detail && e.detail.paused);
       bubbles.forEach(function (b) {
@@ -126,11 +132,14 @@ import { asset } from '../consts';
   .pantry__bubble--a {
     margin-left: clamp(1.2rem, 8%, 2.4rem);
   }
+  /* bare text over the dimmed office (not on a bubble's --screen plate) —
+     the wb-3 class: --fg-muted measured 4.26:1 on the day dim, under the
+     4.5:1 floor; --office-ink is THE token for exactly this ground. */
   .pantry__cite {
     margin: 0;
     font-family: var(--font-mono);
     font-size: 0.72rem;
-    color: var(--fg-muted);
+    color: var(--office-ink);
   }
   /* sequential pop, armed by the section reveal ('in'), one turn per beat.
      No-JS never adds .in → bubbles simply show (no opacity:0 base); reduced-
@@ -138,7 +147,8 @@ import { asset } from '../consts';
      pre-delay opacity 0 without leaving a permanently-hidden element behind
      (the animation ends back at the base style, which is already opacity 1). */
   @media (prefers-reduced-motion: no-preference) {
-    .pantry__scene.in .pantry__bubble {
+    .pantry__scene.in .pantry__bubble,
+    .pantry__scene.in .pantry__cite {
       animation: pantry-pop 0.3s ease backwards;
       animation-delay: calc(var(--turn) * 1.6s + 0.3s);
     }
