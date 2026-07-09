@@ -1447,6 +1447,49 @@ test('hero badge hues clear WCAG AA against their theme-aware chip surface (day 
   }
 });
 
+test('tenant board badge hues clear WCAG AA against the dark board ground (day + night)', async ({
+  page,
+}) => {
+  // The tenant board (#tools) is a .hw-panel — its --screen ground is a
+  // THEME-INDEPENDENT literal (global.css never redefines --screen per
+  // theme), unlike the hero's day/night chip split. This sweep runs both
+  // page themes anyway as a defense-in-depth pin, not because the ratio is
+  // expected to move.
+  for (const theme of ['day', 'night'] as const) {
+    await page.addInitScript((t) => {
+      sessionStorage.setItem('pix-booted', '1');
+      localStorage.setItem('pix-theme', t);
+    }, theme);
+    await page.goto('./');
+    await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+    await page.evaluate(() =>
+      document.getElementById('tools')!.scrollIntoView({ block: 'center', behavior: 'instant' })
+    );
+
+    const boardBg = await page.evaluate(
+      () => getComputedStyle(document.querySelector('.tools__board')!).backgroundColor
+    );
+    const badges = await page.evaluate(() =>
+      [...document.querySelectorAll('.tools__board .tools__badge')].map((b) => ({
+        codeColor: getComputedStyle(b).color,
+        label: b.textContent?.trim(),
+      }))
+    );
+    expect(badges.length, `${theme}: no .tools__badge chips rendered`).toBe(
+      supportedSources.length
+    );
+    const bg = parseRgb(boardBg).slice(0, 3) as [number, number, number];
+    for (const { codeColor, label } of badges) {
+      const fg = parseRgb(codeColor).slice(0, 3) as [number, number, number];
+      const ratio = contrastRatio(fg, bg);
+      expect(
+        ratio,
+        `${theme} "${label}": WCAG AA floor is 4.5:1; code ${codeColor} on board ${boardBg} measured ${ratio.toFixed(2)}:1`
+      ).toBeGreaterThanOrEqual(4.5);
+    }
+  }
+});
+
 test('the statusline feed ellipsizes on the wrapping text span, not the flex row', async ({
   page,
 }) => {

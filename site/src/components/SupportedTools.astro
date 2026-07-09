@@ -20,19 +20,16 @@ const OSES = [
   { key: 'linux', label: 'Linux' },
   { key: 'windows', label: 'Windows' },
 ] as const;
-// In-palette marks replace the OS-native ✅/🧪 emoji — the ✅ grid was the
-// loudest, most-saturated off-system hue on the page (its glossy green belongs
-// to no token; the office greens are --ok/--led). Each state is a distinct 8×8
-// pixel SVG (the same crispEdges idiom as the office pause icon): a green check
-// (supported) vs an amber flask (experimental) — distinct SHAPE, not just hue,
-// so the distinction survives colour-blindness / the dracula pink --amber (WCAG
-// 1.4.1). Planned & absent are muted text. The value still rides the sr-only
-// sibling — these marks are aria-hidden.
+// Tenant-board LEDs replace the pixel check/flask SVGs. The WCAG 1.4.1
+// shape-not-just-hue rule the old marks encoded SURVIVES: supported is a
+// FILLED glowing disc, experimental a HOLLOW ring — distinct silhouette, so
+// the distinction holds under colour-blindness / the dracula pink --amber.
+// The value still rides the sr-only sibling; the LEDs are aria-hidden.
 const MARK = (s: string): string => {
   if (s === 'yes')
-    return `<svg class="tools__mark tools__mark--yes" viewBox="0 0 8 8" shape-rendering="crispEdges" aria-hidden="true"><use href="#tm-check" /></svg>`;
+    return `<span class="led-dot tools__led tools__led--on" aria-hidden="true"></span>`;
   if (s === 'experimental')
-    return `<svg class="tools__mark tools__mark--experimental" viewBox="0 0 8 8" shape-rendering="crispEdges" aria-hidden="true"><use href="#tm-flask" /></svg>`;
+    return `<span class="led-dot tools__led tools__led--exp" aria-hidden="true"></span>`;
   if (s === 'no') return '<span class="tools__mark tools__dash" aria-hidden="true">–</span>';
   return '<span class="tools__mark tools__soon" aria-hidden="true">soon</span>';
 };
@@ -61,32 +58,6 @@ const legendStates = (['yes', 'experimental', 'planned', 'no'] as OsState[]).fil
 ---
 
 <section id={floor.id} class="tools" data-lit data-floor={floor.fl} data-floor-label={floor.label}>
-  {
-    /* pixel check, defined once, referenced by every supported/experimental cell
-     + the legend via <use> (crispEdges → hard pixel edges, like the pause icon) */
-  }
-  <svg width="0" height="0" class="tools__sprite" aria-hidden="true" focusable="false">
-    <symbol id="tm-check" viewBox="0 0 8 8">
-      <rect x="1" y="3" width="1" height="2"></rect>
-      <rect x="2" y="4" width="1" height="2"></rect>
-      <rect x="3" y="5" width="1" height="2"></rect>
-      <rect x="4" y="4" width="1" height="2"></rect>
-      <rect x="5" y="3" width="1" height="2"></rect>
-      <rect x="6" y="2" width="1" height="2"></rect>
-      <rect x="7" y="1" width="1" height="2"></rect>
-    </symbol>
-    {
-      /* experimental gets a distinct SHAPE (a pixel flask, echoing the app's 🧪),
-       not just a hue — so supported-vs-experimental survives colour-blindness
-       and the dracula theme's pink --amber (WCAG 1.4.1) */
-    }
-    <symbol id="tm-flask" viewBox="0 0 8 8">
-      <rect x="1" y="0" width="5" height="1"></rect>
-      <rect x="3" y="1" width="2" height="3"></rect>
-      <rect x="2" y="4" width="4" height="1"></rect>
-      <rect x="1" y="5" width="6" height="2"></rect>
-    </symbol>
-  </svg>
   <div class="container">
     <div class="section-head reveal">
       <p class="eyebrow">{floor.fl} · {floorName(floor)} — the resident CLIs</p>
@@ -98,7 +69,7 @@ const legendStates = (['yes', 'experimental', 'planned', 'no'] as OsState[]).fil
       </p>
     </div>
 
-    <div class="tools__matrix reveal">
+    <div class="tools__matrix tools__board hw-panel reveal">
       <table>
         <caption class="sr-only">Supported coding agents by operating system</caption>
         <thead>
@@ -222,8 +193,14 @@ const legendStates = (['yes', 'experimental', 'planned', 'no'] as OsState[]).fil
     font-size: 0.78rem;
     font-weight: 700;
     /* the app's real per-CLI hue (sources.json badge_color, pinned to
-       theme::NORMAL.source by a scene bridge test); LED green fallback */
-    color: var(--badge, var(--led));
+       theme::NORMAL.source by a scene bridge test); LED green fallback.
+       Lightened toward white so it clears WCAG AA (4.5:1) on this ALWAYS-dark
+       --screen ground — unlike the hero's day/night badge split, this table
+       renders on --screen regardless of page theme, so one lift covers every
+       theme. Same formula + measured worst case as the hero's night-mode arm
+       (DeepSeek-Reasonix #9c3cc0, 5.09:1 at 20% white); the e2e board-hue
+       sweep (smoke.spec.ts) pins every hue in both page themes. */
+    color: color-mix(in srgb, var(--badge, var(--led)) 80%, white);
     background: var(--screen);
     padding: 0.1rem 0.35rem;
     margin-right: 0.5rem;
@@ -246,8 +223,58 @@ const legendStates = (['yes', 'experimental', 'planned', 'no'] as OsState[]).fil
   .tools__cell[data-state='no'] {
     opacity: 0.35;
   }
-  .tools__sprite {
-    position: absolute;
+  /* the lobby directory board (§5): dark hardware screen — ink flips to the
+     chip palette (the statusline's --screen vocabulary) */
+  .tools__board {
+    padding: 0.9rem 0.9rem 0.4rem;
+    color: var(--chip-ink);
+  }
+  .tools__board th,
+  .tools__board td {
+    border-bottom-color: var(--chip-line);
+  }
+  .tools__board thead th {
+    color: var(--chip-dim);
+  }
+  /* row lights on hover — same hardware-hover ground as the statusline's
+     floor buttons (#1c1916 on --screen) */
+  .tools__board tbody tr:hover {
+    background: #1c1916;
+  }
+  .tools__board .tools__badge {
+    background: none;
+    /* the neon: the app's real per-CLI hue, glowing on the dark screen */
+    text-shadow: 0 0 8px color-mix(in srgb, var(--badge, var(--led)) 55%, transparent);
+  }
+  .tools__board td.tools__how {
+    color: var(--chip-dim);
+    opacity: 1;
+  }
+  .tools__board .tools__group td,
+  .tools__board .tools__planned tr th,
+  .tools__board .tools__planned tr td,
+  .tools__board .tools__legend,
+  .tools__board .tools__legend-item:not(:first-child)::before {
+    /* the legend/planned muted ink is --fg-muted, tuned for the light PAGE
+       background — the board is now an ALWAYS-dark --screen ground
+       regardless of page theme, so it needs the same --chip-dim the rest of
+       this block already uses (measured 3.36:1 with --fg-muted, below the
+       4.5:1 AA floor; --chip-dim clears 5.34:1). */
+    color: var(--chip-dim);
+  }
+  :global(.tools__led) {
+    display: inline-block;
+    vertical-align: -0.1em;
+  }
+  :global(.tools__led--on) {
+    background: var(--led);
+    box-shadow: 0 0 6px var(--led-glow);
+  }
+  /* hollow ring = the experimental SHAPE (vs the filled supported disc) */
+  :global(.tools__led--exp) {
+    background: transparent;
+    border: 2px solid var(--amber);
+    box-shadow: none;
   }
   /* the marks are injected via set:html (MARK()), so they carry no scoped
      data-astro hash — scoped selectors would miss them. Style them :global
@@ -257,14 +284,6 @@ const legendStates = (['yes', 'experimental', 'planned', 'no'] as OsState[]).fil
     height: 1.1em;
     fill: currentColor;
     vertical-align: -0.16em;
-  }
-  /* the office's own greens/amber (--ok is the AA "supported" green; the raw
-     bright --led reads too faint on cream), tinting the shared check by state */
-  :global(.tools__mark--yes) {
-    color: var(--ok);
-  }
-  :global(.tools__mark--experimental) {
-    color: var(--amber);
   }
   :global(.tools__dash) {
     color: var(--fg-muted);

@@ -64,3 +64,24 @@ test('markdown callouts render as terminal windows (note + warning)', async ({ p
   await expect(note).toBeVisible();
   await expect(note.locator('.callout__title')).toHaveText('~ note');
 });
+
+test('tenant board: hw-panel screen, LED dots with shape distinction, sr-only values survive', async ({
+  page,
+}) => {
+  await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
+  await page.goto('./');
+  await page.evaluate(() =>
+    document.getElementById('tools')!.scrollIntoView({ block: 'center', behavior: 'instant' })
+  );
+  const board = page.locator('#tools .tools__board');
+  await expect(board).toHaveClass(/hw-panel/);
+  // ten supported CLIs × macOS = at least ten lit LEDs; windows column = rings
+  expect(await board.locator('.tools__led--on').count()).toBeGreaterThanOrEqual(10);
+  expect(await board.locator('.tools__led--exp').count()).toBeGreaterThan(0);
+  // the LED is aria-hidden; the value still rides the sr-only sibling (WCAG)
+  await expect(board.locator('td.tools__cell .sr-only').first()).toHaveText(
+    /supported|experimental/
+  );
+  // the section anchor speaks the shared floor vocabulary (wb-1 already stamped it)
+  await expect(page.locator('#tools')).toHaveAttribute('data-floor', '2F');
+});
