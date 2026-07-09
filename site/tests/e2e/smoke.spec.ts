@@ -1272,6 +1272,42 @@ test('no horizontal overflow at phone widths (mobile pan guard)', async ({ brows
   }
 });
 
+test('the hero copy clears the floating nav at phone viewports (vertical overlap guard)', async ({
+  browser,
+}) => {
+  // The hero is min-height:100svh with the copy BOTTOM-anchored (flex-end), so
+  // when the copy outgrows the viewport (narrow phones; iOS text metrics), its
+  // TOP is what gives way — with no top reservation the eyebrow slid to page
+  // y=0, straight under the index's floating (absolute) nav logo (measured
+  // pre-fix: eyebrow.top 0 vs nav bottom 60 at 402×700; a 1206×2622 iPhone
+  // field report). The fix reserves --nav-h + a breath as .hero padding-top.
+  // The pan guard above is width-only — this is the VERTICAL twin. 402×700 ≈
+  // iOS Safari's visible viewport on a 874pt phone; 360×640 = small Android.
+  for (const [width, height] of [
+    [402, 700],
+    [360, 640],
+    [402, 874],
+  ] as const) {
+    const context = await browser.newContext({
+      viewport: { width, height },
+      isMobile: true,
+      hasTouch: true,
+    });
+    const page = await context.newPage();
+    await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
+    await page.goto('./');
+    const { navBottom, eyebrowTop } = await page.evaluate(() => ({
+      navBottom: document.querySelector('.nav .nav__inner')!.getBoundingClientRect().bottom,
+      eyebrowTop: document.querySelector('.hero__copy .eyebrow')!.getBoundingClientRect().top,
+    }));
+    expect(
+      eyebrowTop,
+      `at ${width}x${height} the hero eyebrow (top ${eyebrowTop}px) sits under the floating nav (bottom ${navBottom}px)`
+    ).toBeGreaterThanOrEqual(navBottom);
+    await context.close();
+  }
+});
+
 test('docs-table code cells render single-line (column-collapse guard)', async ({ browser }) => {
   // `.prose :not(pre) > code`'s overflow-wrap:anywhere feeds its soft-wrap
   // opportunities into MIN-CONTENT intrinsic sizing (unlike break-word), so

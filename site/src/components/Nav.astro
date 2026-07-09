@@ -204,7 +204,7 @@ const { floating = false } = Astro.props;
     display: flex;
     align-items: center;
     gap: 1rem;
-    height: 60px;
+    height: var(--nav-h); /* single-sourced in global.css — Hero reserves the same */
   }
   .nav__logo {
     display: flex;

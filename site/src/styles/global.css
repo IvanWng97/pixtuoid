@@ -84,6 +84,13 @@
   --maxw: 1120px;
   --radius: 16px;
   --radius-sm: 10px;
+  /* The nav bar's row height — single-sourced because TWO components must agree:
+     Nav.astro sizes .nav__inner with it, and Hero.astro reserves exactly this
+     much top padding so the bottom-anchored hero copy can never rise underneath
+     the index's floating (absolute) nav when the copy outgrows the viewport
+     (the mobile eyebrow-under-logo overlap; headless cleared it by only ~10px,
+     real iOS text metrics crossed the line). */
+  --nav-h: 60px;
 
   /* Screen chrome — text that sits on/over the office render, THEME-INDEPENDENT
      (the office pixels don't change with the site theme, so neither do these):
