@@ -8,13 +8,6 @@
 //! coda strip joins the panel's AA side. scripts/gen-media.py (kind:"proof")
 //! encodes the frames.
 
-use std::collections::VecDeque;
-use std::fs;
-use std::path::Path;
-use std::sync::LazyLock;
-use std::time::{Duration, SystemTime};
-
-use ab_glyph::{point, Font, FontRef, PxScale, ScaleFont};
 use anyhow::{anyhow, Context as _, Result};
 use image::{Rgba, RgbaImage};
 use pixtuoid::tui::renderer::{draw_scene, DrawCtx};
@@ -27,6 +20,10 @@ use pixtuoid_core::{AgentId, Reducer, SceneState, Transport};
 use pixtuoid_scene::font;
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
+use std::collections::VecDeque;
+use std::fs;
+use std::path::Path;
+use std::time::{Duration, SystemTime};
 
 use crate::encode::cells_to_rgba;
 use crate::{CELL_H, CELL_W};
@@ -59,13 +56,8 @@ const ANNOTATION_MAX_HOLD_MS: u64 = 4200;
 // title, the typed body lines, and the coda strip. Sizes target the OLD 16px
 // line metrics so LINE_H/wrap math stays proportioned; a pure-Rust rasterizer
 // (ab_glyph) composites its grayscale coverage onto the panel's dark ground.
-const PROOF_FONT_BYTES: &[u8] = include_bytes!("fonts/JetBrainsMono-Regular.ttf");
 const PROOF_FONT_PX: f32 = 16.0;
 const CODA_FONT_PX: f32 = 12.0;
-
-static PROOF_FONT: LazyLock<FontRef<'static>> = LazyLock::new(|| {
-    FontRef::try_from_slice(PROOF_FONT_BYTES).expect("bundled JetBrains Mono TTF must parse")
-});
 
 // the burned coda strip — a full-width caption, theme-independent like the panel
 const CODA_LINE_H: u32 = 18;
@@ -147,11 +139,7 @@ fn wrap_text(text: &str, max_width: i32, width_fn: impl Fn(&str) -> i32) -> Vec<
 /// summing real advances (rather than `chars * one_advance`) stays correct
 /// even for a future proportional face.
 fn aa_text_width_at(s: &str, px: f32) -> i32 {
-    let sf = PROOF_FONT.as_scaled(PxScale::from(px));
-    s.chars()
-        .map(|c| sf.h_advance(sf.glyph_id(c)))
-        .sum::<f32>()
-        .round() as i32
+    pixtuoid::aa_text::text_width(s, px)
 }
 
 /// Draws `s` in the AA face at pixel size `px`, top-left at `(x, top_y)`
@@ -167,23 +155,9 @@ fn aa_draw_text_at(
     px: f32,
     color: Rgba<u8>,
 ) -> i32 {
-    let scale = PxScale::from(px);
-    let sf = PROOF_FONT.as_scaled(scale);
-    let baseline_y = top_y as f32 + sf.ascent();
-    let mut cursor_x = x as f32;
-    for ch in s.chars() {
-        let gid = sf.glyph_id(ch);
-        let glyph = gid.with_scale_and_position(scale, point(cursor_x, baseline_y));
-        if let Some(outlined) = PROOF_FONT.outline_glyph(glyph) {
-            let bounds = outlined.px_bounds();
-            let (ox, oy) = (bounds.min.x.round() as i32, bounds.min.y.round() as i32);
-            outlined.draw(|gx, gy, coverage| {
-                blend_px(img, ox + gx as i32, oy + gy as i32, color, coverage);
-            });
-        }
-        cursor_x += sf.h_advance(gid);
-    }
-    (cursor_x - x as f32).round() as i32
+    pixtuoid::aa_text::draw_text_at(s, x, top_y, px, |gx, gy, coverage| {
+        blend_px(img, gx, gy, color, coverage);
+    })
 }
 
 /// Alpha-composite `color` onto the existing pixel at `coverage` (the AA

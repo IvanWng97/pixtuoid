@@ -32,12 +32,9 @@ pub(super) use tooltip::{
 };
 pub(crate) use tooltip::{paint_hover_tooltip, paint_label_widgets};
 
-use std::collections::BTreeMap;
 use std::time::SystemTime;
 
 use pixtuoid_core::sprite::Rgb;
-use pixtuoid_core::state::{ActivityState, DaemonPresence, DaemonState, MAX_FLOORS};
-use pixtuoid_core::{AgentSlot, SceneState};
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use ratatui::widgets::{Block, Clear};
@@ -59,96 +56,30 @@ pub(crate) fn display_width(s: &str) -> usize {
 }
 
 // --- Shared scene stats (spine 1: footer + board agree) -----------------------
-// ONE per-scene activity tally with ONE exiting-first bucketing policy, computed
-// once per frame and handed to BOTH the footer (authoritative integers) and the
-// wall board (plain-English echo) so the two surfaces can never disagree — the
-// historical footer(counts-all)-vs-board(counts-live) walkout drift.
+// The per-scene activity tally, the gateway rollup, and `compact_hms` moved to
+// the backend-agnostic `pixtuoid_scene::board` module so `pixtuoid-web` can build
+// the wall board too (not just this binary). Re-exported here under their original
+// names, so the footer/board call sites are unchanged. `StateCounts` stays `pub`
+// (reachable via the pub `DrawCtx::per_floor` field, like its peer `FloorInfo`);
+// the binary lib target is not a semver surface. `StateCounts::get` couldn't move
+// as an inherent method (orphan rule — `StateKind` is binary-local), so it's the
+// free fn `state_count` below.
+pub use pixtuoid_scene::board::StateCounts;
+pub(crate) use pixtuoid_scene::board::{
+    compact_hms, gateway_rollup, per_floor_counts, scene_stats,
+};
 
-/// Per-scene tally of agent activity states. `total == active + waiting + idle +
-/// exiting` (debug-asserted). `exiting` is a first-class bucket, not folded into
-/// idle, so the footer can render an authoritative `n/total` incl. walkouts.
-// `pub` (not `pub(crate)`): reachable via the pub `DrawCtx::per_floor` field, the
-// same way its peer office/floor-display type `FloorInfo` is pub. The binary's
-// lib target is not a semver surface.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct StateCounts {
-    pub active: usize,
-    pub waiting: usize,
-    pub idle: usize,
-    pub exiting: usize,
-    pub total: usize,
-}
-
-/// Add one slot to `c` under the ONE exiting-first bucketing policy: an
-/// **exiting** agent (walking out) counts as `exiting` regardless of its last
-/// activity state. Shared by [`scene_stats`] and [`per_floor_counts`] so the
-/// policy can't drift between the office-wide and per-floor tallies.
-fn bucket_slot(c: &mut StateCounts, slot: &AgentSlot) {
-    c.total += 1;
-    if slot.exiting_at.is_some() {
-        c.exiting += 1;
-        return;
-    }
-    match slot.state {
-        ActivityState::Active { .. } => c.active += 1,
-        ActivityState::Waiting { .. } => c.waiting += 1,
-        ActivityState::Idle => c.idle += 1,
-    }
-}
-
-/// Bucket every agent in `scene` — the office-wide (or current-projected-floor)
-/// tally the footer and board both read.
-pub(crate) fn scene_stats(scene: &SceneState) -> StateCounts {
-    let mut c = StateCounts::default();
-    for slot in scene.agents.values() {
-        bucket_slot(&mut c, slot);
-    }
-    debug_assert_eq!(c.active + c.waiting + c.idle + c.exiting, c.total);
-    c
-}
-
-/// Per-floor [`StateCounts`], bucketed by `AgentSlot.floor_idx` (clamped to the
-/// last floor). The office-wide breakdown feeding the footer's cross-floor
-/// `▲F{n}` cue — computed from the FULL scene, deliberately distinct from the
-/// footer's per-state integers (`scene_stats` on the projected floor); C8 says
-/// don't derive one from the other.
-pub(crate) fn per_floor_counts(scene: &SceneState) -> [StateCounts; MAX_FLOORS] {
-    let mut floors = [StateCounts::default(); MAX_FLOORS];
-    for slot in scene.agents.values() {
-        bucket_slot(&mut floors[slot.floor_idx.min(MAX_FLOORS - 1)], slot);
-    }
-    floors
-}
-
-/// The worst-of daemon-liveness rollup for the gateway chip. `None` = no daemon
-/// configured (chip suppressed), distinct from `Some(DaemonState::Down)` (a
-/// daemon was seen, then died). `DaemonState` has no `Ord` (C8), so severity is
-/// ranked explicitly: Idle < Busy < Degraded < Down.
-pub(crate) fn gateway_rollup(daemons: &BTreeMap<String, DaemonPresence>) -> Option<DaemonState> {
-    fn severity(s: DaemonState) -> u8 {
-        match s {
-            DaemonState::Idle => 0,
-            DaemonState::Busy => 1,
-            DaemonState::Degraded => 2,
-            DaemonState::Down => 3,
-        }
-    }
-    daemons
-        .values()
-        .map(|p| p.display_state())
-        .max_by_key(|s| severity(*s))
-}
-
-impl StateCounts {
-    /// The count for one [`StateKind`] — lets a consumer iterate
-    /// [`StateKind::ALL`] and pull the matching tally without re-matching.
-    pub(crate) fn get(self, kind: StateKind) -> usize {
-        match kind {
-            StateKind::Active => self.active,
-            StateKind::Waiting => self.waiting,
-            StateKind::Idle => self.idle,
-            StateKind::Exiting => self.exiting,
-        }
+/// The count for one [`StateKind`] — lets a consumer iterate [`StateKind::ALL`]
+/// and pull the matching tally without re-matching. A free fn (not the old
+/// `StateCounts::get`) because `StateCounts` is now a foreign type
+/// (`pixtuoid_scene::board`) and `StateKind` is binary-local — an inherent impl
+/// would violate the orphan rule.
+pub(crate) fn state_count(counts: StateCounts, kind: StateKind) -> usize {
+    match kind {
+        StateKind::Active => counts.active,
+        StateKind::Waiting => counts.waiting,
+        StateKind::Idle => counts.idle,
+        StateKind::Exiting => counts.exiting,
     }
 }
 
@@ -416,26 +347,12 @@ fn marquee_or_truncate(s: &str, width: usize, selected: bool, now: SystemTime) -
     }
 }
 
-/// Format a duration in seconds as a compact `"{h}h{m}m"` / `"{m}m"` / `"<1m"`
-/// string (no prefix). The HUD uptime badge prepends "↑"; the tooltip uses the
-/// bare form. Bucket thresholds: ≥1h shows hours+minutes, ≥1m shows minutes.
-fn compact_hms(secs: u64) -> String {
-    if secs >= 3600 {
-        format!("{}h{}m", secs / 3600, (secs % 3600) / 60)
-    } else if secs >= 60 {
-        format!("{}m", secs / 60)
-    } else {
-        "<1m".to_string()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hud::{
-        board_mood_segments, build_status_spans, build_status_summary, FooterStats, BOARD_W,
-    };
-    use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex};
+    use hud::{build_status_spans, build_status_summary, FooterStats, BOARD_W};
+    use pixtuoid_core::state::ActivityState;
+    use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex, SceneState};
     use std::path::PathBuf;
     use std::sync::Arc;
 
@@ -554,7 +471,7 @@ mod tests {
     }
 
     #[test]
-    fn state_counts_get_maps_each_kind() {
+    fn state_count_maps_each_kind() {
         let c = StateCounts {
             active: 3,
             waiting: 2,
@@ -562,10 +479,10 @@ mod tests {
             exiting: 1,
             total: 13,
         };
-        assert_eq!(c.get(StateKind::Active), 3);
-        assert_eq!(c.get(StateKind::Waiting), 2);
-        assert_eq!(c.get(StateKind::Idle), 7);
-        assert_eq!(c.get(StateKind::Exiting), 1);
+        assert_eq!(state_count(c, StateKind::Active), 3);
+        assert_eq!(state_count(c, StateKind::Waiting), 2);
+        assert_eq!(state_count(c, StateKind::Idle), 7);
+        assert_eq!(state_count(c, StateKind::Exiting), 1);
     }
 
     // --- office-wide plumbing (per-floor + gateway rollup) ------------------
@@ -1237,85 +1154,11 @@ mod tests {
         );
     }
 
-    // --- T8: the wall board's mood pulse -----------------------------------
-
-    fn board_mood_text(counts: StateCounts) -> String {
-        board_mood_segments(counts)
-            .into_iter()
-            .map(|(t, _)| t)
-            .collect()
-    }
-
-    #[test]
-    fn board_mood_echoes_state_counts() {
-        // 3 active + 2 waiting + 5 idle + 1 exiting. The board reads the SAME
-        // `scene_stats` the footer does; the ▲ "needs-you" beacon LEADS, and the
-        // exiting walkout is deliberately absent — a departure isn't the mood.
-        let mut gone = active_with("Edit x", "gone");
-        gone.exiting_at = Some(SystemTime::UNIX_EPOCH);
-        let mut agents = vec![gone];
-        for i in 0..3 {
-            agents.push(active_with("Edit x", &format!("a{i}")));
-        }
-        for i in 0..2 {
-            agents.push(waiting(&format!("w{i}")));
-        }
-        for i in 0..5 {
-            agents.push(idle(&format!("i{i}")));
-        }
-        let s = scene_of(agents);
-        let text = board_mood_text(scene_stats(&s));
-        assert!(text.contains("\u{25b2}2 wait"), "waiting beacon: {text}");
-        assert!(text.contains("\u{25cf}3 work"), "active: {text}");
-        assert!(text.contains("\u{25cb}5 idle"), "idle: {text}");
-        let (w, a) = (
-            text.find('\u{25b2}').unwrap(),
-            text.find('\u{25cf}').unwrap(),
-        );
-        assert!(w < a, "waiting leads active: {text}");
-        assert!(
-            !text.contains("exit"),
-            "no exiting on the board mood: {text}"
-        );
-    }
-
-    #[test]
-    fn board_mood_is_numeric_and_never_overflows_the_panel() {
-        // The OLD board repeated one ● per agent (uncapped overflow). Now it is
-        // numeric, and abbreviates its words (wt/wk/id) so even an extreme office
-        // fits the fixed 30-cell panel.
-        let c = StateCounts {
-            active: 150,
-            waiting: 150,
-            idle: 150,
-            exiting: 0,
-            total: 450,
-        };
-        let text = board_mood_text(c);
-        assert!(
-            display_width(&text) <= BOARD_W as usize,
-            "fits the panel: {text} = {}",
-            display_width(&text)
-        );
-        assert!(text.contains("\u{25b2}150 wt"), "abbreviated big-N: {text}");
-    }
-
-    #[test]
-    fn board_mood_calm_office_drops_the_waiting_beacon() {
-        let s = scene_of(vec![idle("a"), idle("b"), active_with("Edit x", "c")]);
-        let text = board_mood_text(scene_stats(&s));
-        assert!(
-            !text.contains('\u{25b2}'),
-            "no beacon when nobody waits: {text}"
-        );
-        assert!(text.contains("\u{25cf}1 work") && text.contains("\u{25cb}2 idle"));
-    }
-
-    #[test]
-    fn board_mood_empty_office_reads_plainly() {
-        let text = board_mood_text(scene_stats(&scene_of(vec![])));
-        assert_eq!(text, "\u{2014} office empty \u{2014}");
-    }
+    // --- the wall board's mood pulse ---------------------------------------
+    // The mood-pulse content tests (echoes counts / beacon leads / abbreviates /
+    // empty-office) moved WITH `board_mood_segments` into
+    // `pixtuoid_scene::board::tests`. What stays here is the binary-local pin that
+    // `BOARD_W` tracks the painted panel's interior width.
 
     #[test]
     fn board_width_pins_to_neon_panel_interior() {

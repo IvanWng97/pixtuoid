@@ -2,6 +2,7 @@
 //! examples and integration tests can import them. The `main.rs` binary is
 //! the primary entry point.
 
+pub mod aa_text;
 pub mod cli;
 pub mod config;
 pub mod doctor;

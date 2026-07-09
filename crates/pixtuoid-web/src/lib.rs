@@ -30,7 +30,7 @@ use crate::script::{hero_script, hire_beats, lobster_beats, Beat, PresenceBeat, 
 
 use pixtuoid_scene::embedded_pack::load_sprite_pack;
 use pixtuoid_scene::floor::{floor_capacity, FloorMeta, FloorSession, FrameInputs};
-use pixtuoid_scene::layout::Size;
+use pixtuoid_scene::layout::{Layout, Size, CHARACTER_SPRITE_W};
 use pixtuoid_scene::theme::{Theme, ALL_THEMES};
 
 /// A scheduled one-shot event for a visitor hire — an absolute-time
@@ -169,6 +169,10 @@ pub struct Office {
     /// Applied each `step` (see the force_weather invariant) so two Offices sharing
     /// the one wasm module never fight over the thread-local override.
     weather_override: Option<String>,
+    /// The layout the LAST `render` computed — captured so `overlay_json` builds
+    /// the name-badge overlay against the SAME geometry the sprite pass used
+    /// (labels align 1:1 with the painted characters). `None` before the first step.
+    last_layout: Option<Layout>,
 }
 
 #[wasm_bindgen]
@@ -199,6 +203,7 @@ impl Office {
             last_now: None,
             caps_size: None,
             weather_override: None,
+            last_layout: None,
         })
     }
 
@@ -294,6 +299,74 @@ impl Office {
     /// `&self` receiver keeps it a JS method on the office handle JS already holds.
     pub fn is_day(&self, hour: f32) -> bool {
         pixtuoid_scene::pixel_painter::hour_is_day(hour)
+    }
+
+    /// Export the current frame's name-badge labels + neon wall-board TEXT as a
+    /// small JSON string for the site's DOM overlay (`OfficeBackdrop.astro`).
+    ///
+    /// The wasm office renders at a SMALL buffer that CSS upscales with
+    /// `image-rendering: pixelated`, so anti-aliased text CANNOT be baked into the
+    /// pixels (it would nearest-neighbor blow up blocky). Instead the site lays
+    /// crisp JetBrains Mono DOM spans over the canvas from this model. Coordinates
+    /// are OFFICE-BUFFER px (a label's `x` is the sprite CENTER, `y` its head-top;
+    /// the board `rect` is the neon-panel interior) — the site scales them to the
+    /// CSS-displayed canvas. Colors are RESOLVED against the CURRENT theme, so a
+    /// `set_theme` reflects with no extra call. Call right after `step` (it reads
+    /// the step's clock). No serde — the payload is tiny and hand-built (escaped);
+    /// the site wraps `JSON.parse` in try/catch so a bad frame degrades to no overlay.
+    pub fn overlay_json(&mut self) -> String {
+        use pixtuoid_scene::pixel_painter::{
+            NEON_PANEL_INNER_H, NEON_PANEL_INNER_W, NEON_PANEL_INNER_X, NEON_PANEL_INNER_Y,
+        };
+        let Some(now) = self.last_now else {
+            return r#"{"labels":[],"board":null}"#.to_string();
+        };
+        let theme = self.theme;
+
+        // Labels — built against the LAST render's layout + this session's route
+        // state (disjoint field borrows of `self`), so they align 1:1 with the sprites.
+        let labels = match self.last_layout.as_ref() {
+            Some(layout) => {
+                let mut rctx = self.session.floor.ctx.route_ctx();
+                pixtuoid_scene::overlay::build_overlay(&self.scene, layout, now, &mut rctx, None)
+            }
+            None => Vec::new(),
+        };
+
+        // Board — the SAME `pixtuoid_scene::board` model the TUI + floating use.
+        let counts = pixtuoid_scene::board::scene_stats(&self.scene);
+        let oldest = self
+            .scene
+            .agents
+            .values()
+            .filter_map(|a| now.duration_since(a.created_at).ok())
+            .max()
+            .unwrap_or_default();
+        let gateway = pixtuoid_scene::board::gateway_rollup(self.scene.daemons());
+        let board = pixtuoid_scene::board::build_board(counts, oldest.as_secs(), None, gateway);
+
+        let mut out = String::from("{\"labels\":[");
+        for (i, el) in labels.iter().enumerate() {
+            if i > 0 {
+                out.push(',');
+            }
+            let cx = el.anchor_px.x as i32 + CHARACTER_SPRITE_W as i32 / 2;
+            out.push_str(&format!("{{\"x\":{cx},\"y\":{},\"text\":", el.anchor_px.y));
+            push_json_string(&mut out, &format!("\u{25cf}{}", el.text));
+            out.push_str(&format!(",\"color\":\"{}\"}}", label_hex(theme, el.tone)));
+        }
+        out.push_str(&format!(
+            "],\"board\":{{\"rect\":{{\"x\":{NEON_PANEL_INNER_X},\"y\":{NEON_PANEL_INNER_Y},\"w\":{NEON_PANEL_INNER_W},\"h\":{NEON_PANEL_INNER_H}}},"
+        ));
+        push_board_segment(&mut out, "brand", &board.brand, theme);
+        out.push(',');
+        push_board_segment(&mut out, "star", &board.star, theme);
+        out.push_str(",\"mood\":");
+        push_board_segments(&mut out, &board.mood, theme);
+        out.push_str(",\"context\":");
+        push_board_segments(&mut out, &board.context, theme);
+        out.push_str("}}");
+        out
     }
 }
 
@@ -410,7 +483,7 @@ impl Office {
             floor_seed: self.seed,
             ..FloorMeta::for_floor(0, 1)
         };
-        self.session.render(FrameInputs {
+        self.last_layout = self.session.render(FrameInputs {
             scene: &self.scene,
             pack: &self.pack,
             theme: self.theme,
@@ -433,6 +506,75 @@ impl Office {
             self.rgba.extend_from_slice(&[c.r, c.g, c.b, 255]);
         }
     }
+}
+
+// --- overlay_json helpers (hand-built JSON — no serde in the wasm artifact) ---
+
+/// `#rrggbb` for an `Rgb`.
+fn hex(c: pixtuoid_core::sprite::Rgb) -> String {
+    format!("#{:02x}{:02x}{:02x}", c.r, c.g, c.b)
+}
+
+/// A label tone → this theme's hex color. The tone→role map is single-sourced in
+/// `scene::overlay`; this surface only formats the resolved `Rgb` as `#rrggbb`.
+fn label_hex(theme: &Theme, tone: pixtuoid_scene::overlay::LabelTone) -> String {
+    hex(pixtuoid_scene::overlay::label_tone_rgb(tone, theme))
+}
+
+/// A board tone → this theme's hex color. The tone→role map is single-sourced in
+/// `scene::board` (shared with the tui + floating painters), so the three surfaces
+/// can't drift; this surface only formats the resolved `Rgb` as `#rrggbb`.
+fn board_hex(theme: &Theme, tone: pixtuoid_scene::board::BoardTone) -> String {
+    hex(pixtuoid_scene::board::tone_rgb(tone, theme))
+}
+
+/// Append `s` as a JSON string literal (quotes + escapes) to `out`. Agent labels
+/// derive from arbitrary cwds, so `"`/`\`/control chars MUST be escaped or one
+/// bad label breaks the whole frame's `JSON.parse` on the site.
+fn push_json_string(out: &mut String, s: &str) {
+    out.push('"');
+    for ch in s.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+}
+
+/// Append `"key":{"text":<escaped>,"color":"#hex"}` for one board segment.
+fn push_board_segment(
+    out: &mut String,
+    key: &str,
+    seg: &pixtuoid_scene::board::BoardSegment,
+    theme: &Theme,
+) {
+    out.push_str(&format!("\"{key}\":{{\"text\":"));
+    push_json_string(out, &seg.text);
+    out.push_str(&format!(",\"color\":\"{}\"}}", board_hex(theme, seg.tone)));
+}
+
+/// Append a `[{text,color},…]` array of board segments.
+fn push_board_segments(
+    out: &mut String,
+    segs: &[pixtuoid_scene::board::BoardSegment],
+    theme: &Theme,
+) {
+    out.push('[');
+    for (i, seg) in segs.iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        out.push_str("{\"text\":");
+        push_json_string(out, &seg.text);
+        out.push_str(&format!(",\"color\":\"{}\"}}", board_hex(theme, seg.tone)));
+    }
+    out.push(']');
 }
 
 // The rlib half of the crate-type exists exactly for these: the full
@@ -509,6 +651,102 @@ mod tests {
         );
         // Cursor is mid-loop (the wrap reset it from the end of loop 1).
         assert!(o.cursor > 0 && o.cursor < o.beats.len());
+    }
+
+    #[test]
+    fn overlay_json_before_first_step_is_empty_but_valid() {
+        // No step yet → no clock/layout → an empty-but-parseable payload (the site
+        // wraps JSON.parse in try/catch, but the null-safe shape means it never has to).
+        let mut o = office();
+        let v: serde_json::Value = serde_json::from_str(&o.overlay_json()).expect("valid JSON");
+        assert!(v["labels"].as_array().unwrap().is_empty());
+        assert!(v["board"].is_null());
+    }
+
+    #[test]
+    fn json_string_escapes_quotes_backslashes_and_controls() {
+        // Agent labels derive from arbitrary cwds — a stray quote/backslash/control
+        // char must not break the whole frame's parse.
+        let mut s = String::new();
+        push_json_string(&mut s, "a\"b\\c\n\td");
+        assert_eq!(s, r#""a\"b\\c\n\td""#);
+        let mut ctrl = String::new();
+        push_json_string(&mut ctrl, "x\u{0001}y");
+        assert_eq!(ctrl, "\"x\\u0001y\"");
+        // Round-trips through a real parser back to the original bytes.
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&s)
+                .unwrap()
+                .as_str()
+                .unwrap(),
+            "a\"b\\c\n\td"
+        );
+    }
+
+    #[test]
+    fn overlay_json_exports_a_board_and_a_label_per_visible_agent() {
+        let mut o = office();
+        // Drive to mid-loop at a poster-sized canvas so the hero script seats
+        // several visible agents (same drive shape as `beats_fire_once`).
+        let mut t = 0u64;
+        while t <= LOOP_MS / 2 {
+            o.step(T0_MS + t as f64, 288, 180);
+            t += 5_000;
+        }
+        assert!(
+            !o.scene.agents.is_empty(),
+            "the hero script populated the office"
+        );
+
+        let json = o.overlay_json();
+        let v: serde_json::Value = serde_json::from_str(&json).expect("overlay_json is valid JSON");
+
+        // Board — always present; brand carries the version, the rect is the panel interior.
+        let board = &v["board"];
+        assert!(
+            board["brand"]["text"]
+                .as_str()
+                .unwrap()
+                .starts_with("pixtuoid v"),
+            "brand carries the version: {board}"
+        );
+        assert_eq!(board["star"]["text"].as_str().unwrap(), "\u{2605} Star");
+        assert!(board["mood"].is_array() && board["context"].is_array());
+        assert_eq!(
+            board["rect"]["w"].as_u64().unwrap(),
+            pixtuoid_scene::pixel_painter::NEON_PANEL_INNER_W as u64
+        );
+        assert_eq!(
+            board["rect"]["h"].as_u64().unwrap(),
+            pixtuoid_scene::pixel_painter::NEON_PANEL_INNER_H as u64
+        );
+        // Every color is a resolved #rrggbb (theme-tracked, not a tone token).
+        assert!(board["brand"]["color"].as_str().unwrap().starts_with('#'));
+
+        // Labels — one per VISIBLE agent (`character_anchor` places them), each with
+        // buffer-px coords + a ●-marked text + a resolved color.
+        let labels = v["labels"].as_array().unwrap();
+        assert!(!labels.is_empty(), "visible agents produce badges");
+        for l in labels {
+            assert!(l["x"].is_number() && l["y"].is_number());
+            assert!(l["text"].as_str().unwrap().starts_with('\u{25cf}'));
+            assert!(l["color"].as_str().unwrap().starts_with('#'));
+        }
+    }
+
+    #[test]
+    fn overlay_json_colors_track_set_theme() {
+        // Resolving colors wasm-side means a theme swap reflects with no extra call.
+        let mut o = office();
+        o.step(T0_MS, 288, 180);
+        let normal: serde_json::Value = serde_json::from_str(&o.overlay_json()).unwrap();
+        o.set_theme("cyberpunk");
+        o.step(T0_MS + 100.0, 288, 180);
+        let cyber: serde_json::Value = serde_json::from_str(&o.overlay_json()).unwrap();
+        assert_ne!(
+            normal["board"]["brand"]["color"], cyber["board"]["brand"]["color"],
+            "the brand hue differs between normal and cyberpunk"
+        );
     }
 
     #[test]

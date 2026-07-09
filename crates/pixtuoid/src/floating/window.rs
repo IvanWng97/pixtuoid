@@ -191,14 +191,24 @@ impl FloatingApp {
                 sb[dst_row + wx] = opx[src_row + (wx / scale).min(ow - 1)];
             }
         }
-        // Name badges, drawn POST-upscale at native surface res (crisp 8px text proportional
-        // to the chunky sprites) using the same layout/route state the office pass just used.
+        // Name badges + the neon wall board, drawn POST-upscale at native surface res
+        // (crisp anti-aliased JetBrains Mono) using the same layout/route state the office
+        // pass just used. Badges are a fixed caption height; the board scales with the panel.
         let labels = self.renderer.labels(&scene, SystemTime::now());
         super::offscreen::paint_labels_into_surface(
             &mut sb,
             win_w,
             win_h,
             &labels,
+            scale as i32,
+            self.theme,
+        );
+        let board = self.renderer.board(&scene, SystemTime::now());
+        super::offscreen::paint_wall_board_into_surface(
+            &mut sb,
+            win_w,
+            win_h,
+            &board,
             scale as i32,
             self.theme,
         );

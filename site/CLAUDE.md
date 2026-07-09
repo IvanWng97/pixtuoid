@@ -139,6 +139,25 @@ display-line authority (`starText`), unit-tested on its null-stars arm since
   the roll. Any failure / no-JS / no-wasm / reduced-motion keeps the still poster).
   Never hand-edit
   (prettier/eslint/knip all ignore it); regenerate from the crate.
+- **The crisp AA caption layer (`#office-overlay`).** The canvas renders a
+  ~180px buffer that CSS upscales with `image-rendering: pixelated`, so text
+  BAKED into the office pixels blows up blocky. Instead the engine exports the
+  name badges + the neon wall board as a MODEL — `pixtuoid-web`'s
+  `Office.overlay_json()` (the SAME `pixtuoid_scene::overlay` + `pixtuoid_scene::board`
+  the TUI/floating painters use) → `{ labels:[{x,y,text,color}], board:{rect,brand,
+  star,mood,context} }`, coords in OFFICE-BUFFER px, colors resolved against the
+  current theme. `OfficeBackdrop.astro` lays pooled JetBrains Mono (`var(--font-mono)`)
+  DOM `<span>`s over the canvas at DISPLAY resolution, positioned by the canvas's
+  `object-fit: cover` geometry (`scale = max(disp/buf)`, buffer centered — the
+  same math the cover-crop uses), so they stay sharp at any zoom. Load-bearing:
+  (1) captions update + fade in (`.is-on`) only AFTER the reveal roll settles
+  (`rt >= 1`), never over the rolling floors — labels track FINAL sprite
+  positions; (2) `JSON.parse` is try/caught so a malformed frame degrades to no
+  overlay, never a throw; (3) segment spans use `.textContent`, never
+  `innerHTML` — agent cwds are untrusted; (4) reduced motion is `display:none`
+  (no live office to caption). Pinned by `smoke.spec.ts` ("crisp AA captions
+  overlay the live office" + the reduced-motion hide twin). This layer is part
+  of the same `is:inline` script the CSP hook hashes — no manual CSP step.
   The backdrop's pause switch (`#office-pause`, WCAG 2.2.2) lives in the same
   component: pause stops the rAF loop (frozen frame stays on the canvas) and
   resume subtracts the paused span from the sim clock (`pauseOffset`) so the

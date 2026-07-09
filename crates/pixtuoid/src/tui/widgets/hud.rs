@@ -9,7 +9,7 @@ use ratatui::text::Span;
 use ratatui::widgets::Paragraph;
 
 use super::{
-    centered_in, compact_hms, display_width, to_color, StateCounts, StateKind, PANEL_PAD_X,
+    centered_in, display_width, state_count, to_color, StateCounts, StateKind, PANEL_PAD_X,
     PANEL_PAD_Y,
 };
 use crate::tui::renderer::clip_widget_rect;
@@ -180,16 +180,6 @@ impl SegRole {
     }
 }
 
-/// The `⬢gw` chip's terse liveness word.
-fn gateway_label(state: DaemonState) -> &'static str {
-    match state {
-        DaemonState::Idle => "ok",
-        DaemonState::Busy => "busy",
-        DaemonState::Degraded => "err",
-        DaemonState::Down => "down",
-    }
-}
-
 /// Build the footer as an ordered list of `(text, role)` segments, picking the
 /// widest tier (full / medium / minimal) that fits inside `term_width` alongside
 /// the fixed-right quit suffix. Single source of truth for both the plain-string
@@ -328,7 +318,7 @@ fn status_segments(
     let seg_full = {
         let mut segs = vec![(format!(" {count_str}"), SegRole::Neutral)];
         for kind in StateKind::ALL {
-            let c = counts.get(kind);
+            let c = state_count(counts, kind);
             if c == 0 {
                 continue;
             }
@@ -350,7 +340,7 @@ fn status_segments(
         if let Some(g) = stats.gateway {
             segs.push((" · ".to_string(), SegRole::Neutral));
             segs.push((
-                format!("\u{2b22}gw {}", gateway_label(g)),
+                format!("\u{2b22}gw {}", pixtuoid_scene::board::gateway_label(g)),
                 SegRole::Gateway(g),
             ));
         }
@@ -363,7 +353,7 @@ fn status_segments(
     let seg_medium = {
         let mut rungs: Vec<(String, SegRole)> = Vec::new();
         for kind in [StateKind::Active, StateKind::Waiting, StateKind::Idle] {
-            let c = counts.get(kind);
+            let c = state_count(counts, kind);
             if c == 0 {
                 continue;
             }
@@ -473,52 +463,16 @@ fn board_cell_origin(scene_rect: Rect) -> (u16, u16) {
     )
 }
 
-/// The board's L1 ★ CTA text — the ONE definition the L1 painter renders AND
-/// `star_hit_rect` measures, so the clickable target can't drift from the paint.
-const BOARD_STAR: &str = "\u{2605} Star";
-
-/// The board's plain-English "mood pulse" — one `(text, colour-key)` segment per
-/// non-zero present state, echoing the SHARED `StateCounts` the footer reads (not
-/// a second live-only derivation, the old footer-vs-board disagreement).
-///
-/// The ▲ "needs-you" beacon LEADS (waiting first) — on the board, waiting is the
-/// amber attention flag, the same beacon the footer's alarm tier uses; the formal
-/// ◐ glyph stays on the detail surfaces. Counts are NUMERIC, never one-dot-per-
-/// agent (the old `●`-repeat overflowed an uncapped office); the words abbreviate
-/// (`wt`/`wk`/`id`) when the full form would overrun the fixed panel. Exiting
-/// agents are absent by design — a walkout isn't the office mood. `None` colour =
-/// the neutral `— office empty —` fallback.
-pub(super) fn board_mood_segments(counts: StateCounts) -> Vec<(String, Option<StateKind>)> {
-    if counts.active + counts.waiting + counts.idle == 0 {
-        return vec![("\u{2014} office empty \u{2014}".to_string(), None)];
-    }
-    // ▲ leads (waiting beacon), then ● work, ○ idle. Waiting borrows the alarm
-    // triangle, not StateKind::Waiting's ◐ — the board is the lit "needs-you" sign.
-    let build = |words: [&str; 3]| -> Vec<(String, Option<StateKind>)> {
-        let rows = [
-            (counts.waiting, '\u{25b2}', words[0], StateKind::Waiting),
-            (counts.active, '\u{25cf}', words[1], StateKind::Active),
-            (counts.idle, '\u{25cb}', words[2], StateKind::Idle),
-        ];
-        let mut segs: Vec<(String, Option<StateKind>)> = Vec::new();
-        for (n, glyph, word, kind) in rows {
-            if n == 0 {
-                continue;
-            }
-            if !segs.is_empty() {
-                segs.push(("  ".to_string(), None));
-            }
-            segs.push((format!("{glyph}{n} {word}"), Some(kind)));
-        }
-        segs
-    };
-    let full = build(["wait", "work", "idle"]);
-    let width: usize = full.iter().map(|(t, _)| display_width(t)).sum();
-    if width <= BOARD_W as usize {
-        full
-    } else {
-        build(["wt", "wk", "id"])
-    }
+/// Map a backend-agnostic `BoardTone` to this theme's ratatui color. Mirrors the
+/// footer's role→color map so the board's tones (brand/star/state/dim/gateway)
+/// resolve to the SAME hues the footer's `SegRole` uses.
+fn board_tone_color(
+    tone: pixtuoid_scene::board::BoardTone,
+    theme: &pixtuoid_scene::theme::Theme,
+) -> Color {
+    // The tone→role map is the ONE authority in `scene::board`; this painter only
+    // converts the resolved `Rgb` to ratatui `Color`.
+    to_color(pixtuoid_scene::board::tone_rgb(tone, theme))
 }
 
 /// The in-scene neon wall board — the office's "lit sign": brand + ★ CTA (L1), the
@@ -543,6 +497,22 @@ pub(crate) fn paint_wall_display(
 
     let (cell_x, cell_y) = board_cell_origin(scene_rect);
 
+    // The board's TEXT is the backend-agnostic `pixtuoid_scene::board` model (so
+    // floating/wasm build the SAME content); this painter only maps each tone to a
+    // ratatui color + owns the cell-space L1 right-flush.
+    let oldest = scene
+        .agents
+        .values()
+        .filter_map(|a| now.duration_since(a.created_at).ok())
+        .max()
+        .unwrap_or_default();
+    let model = pixtuoid_scene::board::build_board(
+        counts,
+        oldest.as_secs(),
+        floor_info.map(|fi| (fi.current, fi.total_floors)),
+        gateway,
+    );
+
     // L1 — brand + ★ Star CTA, the star right-flushed to the panel edge so its
     // left edge lands at `cell_x + BOARD_W - star_w` — the SAME position
     // `star_hit_rect` derives the click target from. The `.max(1)` floor keeps a
@@ -550,69 +520,44 @@ pub(crate) fn paint_wall_display(
     // making `.max(1)` a no-op and paint == hit-rect. At the exact-fit boundary
     // (`brand+star == BOARD_W`) `.max(1)` would shove the star one col past the
     // hit-rect (and clip it), so `<` forbids that boundary rather than `<=`.
-    let version = env!("CARGO_PKG_VERSION");
-    let brand = format!("pixtuoid v{version}");
-    let star_w = display_width(BOARD_STAR);
+    let star_w = display_width(&model.star.text);
     let gap = (BOARD_W as usize)
-        .saturating_sub(display_width(&brand) + star_w)
+        .saturating_sub(display_width(&model.brand.text) + star_w)
         .max(1);
     debug_assert!(
-        display_width(&brand) + star_w < BOARD_W as usize,
+        display_width(&model.brand.text) + star_w < BOARD_W as usize,
         "brand+star must STRICTLY fit the panel (natural gap ≥1) for the right-flush = star_hit_rect pairing"
     );
     let top_line = Line::from(vec![
         Span::styled(
-            brand,
+            model.brand.text.clone(),
             Style::default()
-                .fg(to_color(theme.ui.neon_brand))
+                .fg(board_tone_color(model.brand.tone, theme))
                 .add_modifier(Modifier::BOLD),
         ),
         Span::raw(" ".repeat(gap)),
         Span::styled(
-            BOARD_STAR,
+            model.star.text.clone(),
             Style::default()
-                .fg(to_color(theme.ui.neon_star))
+                .fg(board_tone_color(model.star.tone, theme))
                 .add_modifier(Modifier::BOLD),
         ),
     ]);
 
-    // L2 — the mood pulse (shared counts, ▲ beacon leads).
-    let mood_spans: Vec<Span> = board_mood_segments(counts)
-        .into_iter()
-        .map(|(text, kind)| {
-            let color = kind.map_or(to_color(theme.ui.tooltip_dim), |k| k.color(theme));
-            Span::styled(text, Style::default().fg(color))
-        })
-        .collect();
-    let mood_line = Line::from(mood_spans);
-
-    // L3 — office context: uptime (dim) · floor · gateway chip. Uptime spans the
-    // whole office (oldest agent, exiting included), so it doesn't dip on a walkout.
-    let oldest = scene
-        .agents
-        .values()
-        .filter_map(|a| now.duration_since(a.created_at).ok())
-        .max()
-        .unwrap_or_default();
-    let mut ctx_spans = vec![Span::styled(
-        format!("\u{2191}{}", compact_hms(oldest.as_secs())),
-        Style::default().fg(to_color(theme.ui.tooltip_dim)),
-    )];
-    if let Some(fi) = floor_info {
-        ctx_spans.push(Span::raw("  "));
-        ctx_spans.push(Span::styled(
-            format!("F{}/{}", fi.current, fi.total_floors),
-            Style::default().fg(to_color(theme.ui.tooltip_dim)),
-        ));
-    }
-    if let Some(state) = gateway {
-        ctx_spans.push(Span::raw("  "));
-        ctx_spans.push(Span::styled(
-            format!("\u{2b22}gw {}", gateway_label(state)),
-            Style::default().fg(SegRole::Gateway(state).color(theme)),
-        ));
-    }
-    let ctx_line = Line::from(ctx_spans);
+    // L2 — the mood pulse (shared counts, ▲ beacon leads); L3 — office context
+    // (uptime · floor · gateway chip). Both are just tone-mapped model segments.
+    let styled = |segs: &[pixtuoid_scene::board::BoardSegment]| -> Vec<Span<'static>> {
+        segs.iter()
+            .map(|s| {
+                Span::styled(
+                    s.text.clone(),
+                    Style::default().fg(board_tone_color(s.tone, theme)),
+                )
+            })
+            .collect()
+    };
+    let mood_line = Line::from(styled(&model.mood));
+    let ctx_line = Line::from(styled(&model.context));
 
     if let Some(r) = clip_widget_rect(
         Rect {
@@ -647,7 +592,7 @@ pub(crate) const VERSION_POPUP_URL: &str = "https://github.com/IvanWng97/pixtuoi
 /// which fired anywhere on the top-left row (C9).
 pub(crate) fn star_hit_rect(scene_rect: Rect) -> Option<Rect> {
     let (cell_x, cell_y) = board_cell_origin(scene_rect);
-    let star_w = display_width(BOARD_STAR) as u16;
+    let star_w = display_width(pixtuoid_scene::board::BOARD_STAR) as u16;
     let star_x = cell_x + BOARD_W.saturating_sub(star_w);
     clip_widget_rect(
         Rect {
@@ -838,11 +783,74 @@ mod hud_tests {
         assert_eq!(VERSION_POPUP_URL, format!("{REPO_URL}/releases"));
     }
 
+    // Read the `width` cells starting at `(x, y)` back as a string — the rendered
+    // text of one board row.
+    fn row_text(buf: &ratatui::buffer::Buffer, x: u16, y: u16, width: u16) -> String {
+        (0..width).map(|dx| buf[(x + dx, y)].symbol()).collect()
+    }
+
+    #[test]
+    fn wall_board_renders_the_three_model_lines_over_the_panel() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+        // The mood reads `counts` (passed separately, like production's scene_stats);
+        // uptime reads the scene, empty here → "<1m". A gateway + no floor exercises
+        // the L3 chip and the single-floor (no breadcrumb) context.
+        let counts = StateCounts {
+            active: 2,
+            waiting: 1,
+            idle: 1,
+            exiting: 0,
+            total: 4,
+        };
+        let scene = SceneState::uniform(16);
+        let scene_rect = full_bounds(120, 44);
+        let mut term = Terminal::new(TestBackend::new(120, 44)).unwrap();
+        term.draw(|f| {
+            paint_wall_display(
+                f,
+                &scene,
+                scene_rect,
+                SystemTime::UNIX_EPOCH,
+                counts,
+                None,
+                Some(DaemonState::Idle),
+                &pixtuoid_scene::theme::NORMAL,
+            );
+        })
+        .unwrap();
+        let buf = term.backend().buffer();
+        let (cx, cy) = board_cell_origin(scene_rect);
+        let l1 = row_text(buf, cx, cy, BOARD_W);
+        let l2 = row_text(buf, cx, cy + 1, BOARD_W);
+        let l3 = row_text(buf, cx, cy + 2, BOARD_W);
+        // L1: brand left, ★ Star right-flushed.
+        assert!(l1.starts_with("pixtuoid v"), "brand leads L1: {l1:?}");
+        assert!(
+            l1.trim_end().ends_with("\u{2605} Star"),
+            "star right-flushed: {l1:?}"
+        );
+        // L2: the mood pulse, beacon leading.
+        assert!(
+            l2.contains("\u{25b2}1 wait")
+                && l2.contains("\u{25cf}2 work")
+                && l2.contains("\u{25cb}1 idle"),
+            "mood pulse: {l2:?}"
+        );
+        // L3: uptime + the ⬢gw chip (no floor breadcrumb on a single floor).
+        assert!(l3.contains("\u{2191}<1m"), "uptime: {l3:?}");
+        assert!(l3.contains("\u{2b22}gw ok"), "gateway chip: {l3:?}");
+        assert!(
+            !l3.contains('F'),
+            "no floor breadcrumb when floor_info is None: {l3:?}"
+        );
+    }
+
     #[test]
     fn star_hit_rect_fits_and_truncates() {
-        let star_w = display_width(BOARD_STAR) as u16; // "★ Star" == 6 cols
-                                                       // cell_x = the panel INTERIOR origin; the star right-flushes to the
-                                                       // interior's right edge, which must land INSIDE the outer frame.
+        let star_w = display_width(pixtuoid_scene::board::BOARD_STAR) as u16; // "★ Star" == 6 cols
+                                                                              // cell_x = the panel INTERIOR origin; the star right-flushes to the
+                                                                              // interior's right edge, which must land INSIDE the outer frame.
         let inner_x = pixtuoid_scene::pixel_painter::NEON_PANEL_INNER_X;
         let star_x = inner_x + BOARD_W - star_w;
         let wide = star_hit_rect(full_bounds(120, 44)).expect("star fits");

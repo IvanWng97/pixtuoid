@@ -10,12 +10,14 @@
 use std::collections::HashMap;
 use std::time::SystemTime;
 
+use pixtuoid_core::sprite::Rgb;
 use pixtuoid_core::state::ActivityState;
 use pixtuoid_core::{AgentId, SceneState};
 
 use crate::layout::{Layout, Point, DESK_W};
 use crate::pixel_painter::character_anchor;
 use crate::pose::RouteCtx;
+use crate::theme::Theme;
 
 /// Activity-derived label tone — backend-agnostic. Each painter maps it to its own
 /// color (ratatui `Color` in tui, `Rgb` in floating). Mirrors the TUI's color tiers.
@@ -25,6 +27,20 @@ pub enum LabelTone {
     Waiting,
     Idle,
     Exiting,
+}
+
+/// Resolve a `LabelTone` to its theme color role — the SINGLE authority every
+/// label painter shares, so the tui (`to_color`), floating (`pack_xrgb`), and
+/// wasm (`#hex`) surfaces can't disagree on which role a tone maps to; only the
+/// output color TYPE differs per surface. The `hovered` near-white highlight is
+/// NOT a `LabelTone`, so it stays a per-painter surface choice.
+pub fn label_tone_rgb(tone: LabelTone, theme: &Theme) -> Rgb {
+    match tone {
+        LabelTone::Exiting => theme.ui.label_exiting,
+        LabelTone::Active => theme.ui.label_active,
+        LabelTone::Waiting => theme.ui.label_waiting,
+        LabelTone::Idle => theme.ui.label_idle,
+    }
 }
 
 /// One agent name-badge to paint above its sprite. `anchor_px` is the character anchor in

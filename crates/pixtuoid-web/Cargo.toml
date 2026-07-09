@@ -46,3 +46,6 @@ ignored = ["chrono"]
 # hero_still example only (PNG encode for the committed wide poster, #425);
 # dev-deps never reach the wasm artifact.
 image = { version = "0.25", default-features = false, features = ["png"] }
+# Parse+assert `overlay_json`'s hand-built payload in the native tests (never in
+# the wasm artifact — dev-deps aren't bundled).
+serde_json = { workspace = true }

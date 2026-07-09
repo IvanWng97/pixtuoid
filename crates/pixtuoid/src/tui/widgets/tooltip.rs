@@ -11,7 +11,7 @@ use ratatui::widgets::{Block, Padding, Paragraph};
 use super::{compact_hms, display_width, source_badge_span, to_color, StateKind};
 use crate::tui::renderer::clip_widget_rect;
 use pixtuoid_scene::layout::{Layout, DESK_W};
-use pixtuoid_scene::overlay::{disambig_suffix, LabelTone};
+use pixtuoid_scene::overlay::disambig_suffix;
 use pixtuoid_scene::pet::PetKind;
 use pixtuoid_scene::pixel_painter::tool_glow_for_kind;
 use pixtuoid_scene::pose;
@@ -62,12 +62,9 @@ pub(crate) fn paint_label_widgets(
         let label_color = if el.hovered {
             Color::White
         } else {
-            match el.tone {
-                LabelTone::Exiting => to_color(theme.ui.label_exiting),
-                LabelTone::Active => to_color(theme.ui.label_active),
-                LabelTone::Waiting => to_color(theme.ui.label_waiting),
-                LabelTone::Idle => to_color(theme.ui.label_idle),
-            }
+            // Tone→role map is single-sourced in `scene::overlay`; this painter
+            // only converts the resolved `Rgb` to ratatui `Color`.
+            to_color(pixtuoid_scene::overlay::label_tone_rgb(el.tone, theme))
         };
         let text = if el.hovered {
             format!("▸{}", el.text)

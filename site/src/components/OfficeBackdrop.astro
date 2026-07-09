@@ -28,6 +28,18 @@ import { asset, DIM_RESTING } from '../consts';
     fetchpriority="high"
   />
   <canvas id="office-live" class="backdrop__live px"></canvas>
+  {
+    /* THE CAPTION LAYER — crisp anti-aliased text laid OVER the pixel office.
+       The canvas renders a ~180px buffer that CSS upscales with
+       image-rendering: pixelated, so baked AA text would nearest-neighbor blow
+       up blocky. Instead the engine exports the name-badge labels + neon
+       wall-board as a model (Office.overlay_json) and these DOM spans (JetBrains
+       Mono, var(--font-mono)) are positioned over the canvas at DISPLAY
+       resolution via the object-fit:cover mapping — sharp at any zoom. Hidden
+       until the office rolls in (is-on), and entirely off under reduced motion
+       (the still poster shows, no live office to caption). */
+  }
+  <div id="office-overlay" class="backdrop__overlay" aria-hidden="true"></div>
 </div>
 {
   /* THE DIMMER — the design's signature. A fixed var(--bg) sheet whose
@@ -113,6 +125,74 @@ import { asset, DIM_RESTING } from '../consts';
     .backdrop__live {
       opacity: 0 !important;
     }
+  }
+  /* The crisp AA caption layer sits in the SAME box as the canvas (both
+     position:absolute inset:0 in the fixed .backdrop), so a viewport-space
+     point maps 1:1 into it — the script positions each span by the canvas's
+     object-fit:cover geometry. overflow:hidden clips captions the cover crop
+     pushed off-canvas. Fades in only once the office has rolled in (is-on) so
+     labels never show over the reveal scroll; opacity-only, compositor-cheap. */
+  .backdrop__overlay {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.35s ease;
+    font-family: var(--font-mono);
+    --ov-label-px: 12px;
+  }
+  .backdrop__overlay.is-on {
+    opacity: 1;
+  }
+  /* Reduced motion IS the still-poster design — no live office, so no captions. */
+  @media (prefers-reduced-motion: reduce) {
+    .backdrop__overlay {
+      display: none !important;
+    }
+  }
+  /* One name badge above a sprite. Positioned by transform (translate to the
+     mapped point, then bottom-center onto the head-top) — compositor-only, no
+     per-frame layout. The dark text-shadow keeps it legible over any office
+     tone (day cream / night navy / a bright window behind). */
+  .ov-label {
+    position: absolute;
+    left: 0;
+    top: 0;
+    white-space: nowrap;
+    font-size: var(--ov-label-px);
+    font-weight: 500;
+    line-height: 1;
+    letter-spacing: -0.01em;
+    text-shadow:
+      0 1px 2px rgba(0, 0, 0, 0.9),
+      0 0 3px rgba(0, 0, 0, 0.75);
+    will-change: transform;
+  }
+  /* The neon wall board — brand · ★ / mood / uptime, three rows filling the
+     panel interior rect. Column layout, rows spread across the panel height. */
+  .ov-board {
+    position: absolute;
+    left: 0;
+    top: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    overflow: hidden;
+    line-height: 1;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
+    will-change: transform;
+  }
+  .ov-brow {
+    display: flex;
+    gap: 0.4em;
+    white-space: nowrap;
+  }
+  .ov-brow--top {
+    justify-content: space-between;
+    gap: 0.6em;
   }
   #dimmer {
     position: fixed;
@@ -327,6 +407,135 @@ import { asset, DIM_RESTING } from '../consts';
       img = new ImageData(bufW, BUF_H);
     }
 
+    // ── The AA caption overlay ─────────────────────────────────────────────
+    // Crisp DOM text (JetBrains Mono) laid over the pixel canvas: the engine
+    // exports name badges + the neon board as a model (Office.overlay_json), and
+    // these pooled spans are positioned at DISPLAY resolution via the canvas's
+    // object-fit:cover geometry — sharp at any zoom, where baked AA text would
+    // pixelate under the buffer's image-rendering:pixelated upscale. Spans are
+    // transform-positioned (no per-frame layout) and JSON.parse is guarded, so a
+    // malformed frame just skips the overlay that tick rather than throwing.
+    const overlayEl = document.getElementById('office-overlay');
+    const labelPool = [];
+    let boardWrap = null;
+    let boardBrand = null;
+    let boardStar = null;
+    let boardMood = null;
+    let boardCtx = null;
+    let lastLabelPx = -1;
+
+    function ensureBoard() {
+      if (boardWrap || !overlayEl) return;
+      boardWrap = document.createElement('div');
+      boardWrap.className = 'ov-board';
+      const top = document.createElement('div');
+      top.className = 'ov-brow ov-brow--top';
+      boardBrand = document.createElement('span');
+      boardStar = document.createElement('span');
+      top.appendChild(boardBrand);
+      top.appendChild(boardStar);
+      boardMood = document.createElement('div');
+      boardMood.className = 'ov-brow';
+      boardCtx = document.createElement('div');
+      boardCtx.className = 'ov-brow';
+      boardWrap.appendChild(top);
+      boardWrap.appendChild(boardMood);
+      boardWrap.appendChild(boardCtx);
+      overlayEl.appendChild(boardWrap);
+    }
+
+    // Rebuild a board row's colored segment spans from a [{text,color}] list
+    // (segment counts vary with the office's mood/context, so rebuild not diff).
+    function setSegments(rowEl, segs) {
+      while (rowEl.firstChild) rowEl.removeChild(rowEl.firstChild);
+      for (let i = 0; i < segs.length; i++) {
+        const s = document.createElement('span');
+        s.textContent = segs[i].text; // textContent, never innerHTML (agent cwds are untrusted)
+        s.style.color = segs[i].color;
+        rowEl.appendChild(s);
+      }
+    }
+
+    // object-fit:cover mapping: office-buffer point (bx,by) → viewport px.
+    // scale = max(disp/buf) (cover fills then crops); the buffer is centered.
+    function coverMap() {
+      const r = canvas.getBoundingClientRect();
+      const s = Math.max(r.width / bufW, r.height / BUF_H);
+      return { s, ox: r.left + (r.width - bufW * s) / 2, oy: r.top + (r.height - BUF_H * s) / 2 };
+    }
+
+    function updateOverlay() {
+      if (!overlayEl || bufW < 1) return;
+      let data;
+      try {
+        data = JSON.parse(office.overlay_json());
+      } catch (e) {
+        return; // a malformed frame degrades to no overlay, never a throw
+      }
+      const map = coverMap();
+      // Font scales with the office (clamped) so a badge stays a small caption
+      // relative to its sprite at every viewport size. Written as a shared CSS
+      // var, not per-span, so the labels don't each reflow every frame.
+      const labelPx = Math.max(9, Math.min(20, map.s * 2.2));
+      if (labelPx !== lastLabelPx) {
+        lastLabelPx = labelPx;
+        overlayEl.style.setProperty('--ov-label-px', labelPx + 'px');
+      }
+      const labels = data.labels || [];
+      const lift = Math.max(2, map.s); // ~1 buffer px above the head-top
+      let i = 0;
+      for (; i < labels.length; i++) {
+        let el = labelPool[i];
+        if (!el) {
+          el = document.createElement('span');
+          el.className = 'ov-label';
+          overlayEl.appendChild(el);
+          labelPool[i] = el;
+        }
+        const L = labels[i];
+        if (el.textContent !== L.text) el.textContent = L.text;
+        if (el._c !== L.color) {
+          el.style.color = L.color;
+          el._c = L.color;
+        }
+        const x = map.ox + L.x * map.s;
+        const y = map.oy + L.y * map.s - lift;
+        el.style.transform = 'translate(' + x + 'px,' + y + 'px) translate(-50%,-100%)';
+        if (el._hidden) {
+          el.style.display = '';
+          el._hidden = false;
+        }
+      }
+      for (; i < labelPool.length; i++) {
+        if (!labelPool[i]._hidden) {
+          labelPool[i].style.display = 'none';
+          labelPool[i]._hidden = true;
+        }
+      }
+      // Board — position at the neon-panel interior rect, rows spread to its height.
+      const b = data.board;
+      if (!b) {
+        if (boardWrap) boardWrap.style.display = 'none';
+        return;
+      }
+      ensureBoard();
+      const bx = map.ox + b.rect.x * map.s;
+      const by = map.oy + b.rect.y * map.s;
+      const bw = b.rect.w * map.s;
+      const bh = b.rect.h * map.s;
+      boardWrap.style.display = 'flex';
+      boardWrap.style.transform = 'translate(' + bx + 'px,' + by + 'px)';
+      boardWrap.style.width = bw + 'px';
+      boardWrap.style.height = bh + 'px';
+      boardWrap.style.fontSize = Math.max(4, (bh / 3) * 0.82) + 'px';
+      boardBrand.textContent = b.brand.text;
+      boardBrand.style.color = b.brand.color;
+      boardStar.textContent = b.star.text;
+      boardStar.style.color = b.star.color;
+      setSegments(boardMood, b.mood || []);
+      setSegments(boardCtx, b.context || []);
+    }
+
     function paint(nowMs) {
       office.step(nowMs, bufW, BUF_H);
       // Re-read ptr/len EVERY frame (resize reallocates; memory.grow
@@ -354,6 +563,10 @@ import { asset, DIM_RESTING } from '../consts';
       } else {
         img.data.set(view);
         ctx2d.putImageData(img, 0, 0);
+        // Caption the settled office (not the reveal scroll — labels track the
+        // FINAL sprite positions, so they'd smear over the rolling floors).
+        updateOverlay();
+        if (overlayEl) overlayEl.classList.add('is-on');
       }
     }
     // The floor-roll: row y samples the office roll-offset rows up (same-floor, no
@@ -587,6 +800,7 @@ import { asset, DIM_RESTING } from '../consts';
           // stop; this only keeps the pause flag in sync across surfaces)
           document.dispatchEvent(new CustomEvent('pix:paused', { detail: { paused: false } }));
           wrap.classList.remove('is-live');
+          if (overlayEl) overlayEl.classList.remove('is-on');
           live = false;
           document.dispatchEvent(new CustomEvent('pix:onair', { detail: { live: false } }));
         } else if (hasWasm) {

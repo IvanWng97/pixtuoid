@@ -21,6 +21,16 @@ path = "src/main.rs"
 [dependencies]
 pixtuoid-core  = { path = "../pixtuoid-core", version = "0.13.0" }
 pixtuoid-scene = { path = "../pixtuoid-scene", version = "0.13.0" }
+# AA text rasterizer (JetBrains Mono) for the binary's pixel surfaces: the
+# floating window's name badges + wall board (src/aa_text.rs) AND the --proof
+# example panel. On Linux it's already resolved transitively via sctk-adwaita
+# (winit's Wayland CSD titlebar text — see Cargo.lock), so the direct entry adds
+# no new crate/license there; on mac/Windows it's a small pure-Rust link-time
+# dep. Its per-pixel coverage callback (`OutlinedGlyph::draw`) suits our
+# callback-based `aa_text::draw_text_at` better than fontdue's raw-bitmap API.
+# pixtuoid-scene (the wasm-compiled engine) never sees this dep — binary-only, so
+# the wasm hero renders text as a crisp DOM overlay, not baked pixels.
+ab_glyph = "0.2"
 tokio              = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "sync", "time", "net", "fs", "io-util"] }
 ratatui            = { workspace = true }
 crossterm          = { workspace = true }
@@ -77,15 +87,6 @@ schemars = "1"
 tokio    = { workspace = true, features = ["test-util"] }
 image    = { version = "0.25", default-features = false, features = ["png", "gif"] }
 insta    = "1"
-# AA text rasterizer for the --proof panel's Font C (examples/snapshot/proof.rs):
-# already resolved transitively via sctk-adwaita (winit's Wayland CSD titlebar
-# text on Linux — see Cargo.lock), so promoting it to a direct dev-dependency
-# adds no new crate to the tree and no new license to allow. Its per-pixel
-# coverage callback (`OutlinedGlyph::draw`) extends the example's existing
-# callback-based `pixtuoid_scene::font::draw_text` with an alpha channel,
-# unlike fontdue's raw-bitmap-buffer API, which would need a manual index loop.
-# pixtuoid-scene (the wasm-compiled engine) never sees this dep — binary-only.
-ab_glyph = "0.2"
 
 [[example]]
 name = "snapshot"

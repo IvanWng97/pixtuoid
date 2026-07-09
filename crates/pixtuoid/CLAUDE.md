@@ -163,6 +163,15 @@ src/
 │                       embed ESC/OSC via \u escapes), so every printed line routes through
 │                       strip_control_chars (same egress rule as the headless summary + doctor)
 ├── version.rs          pure version-popup boot logic
+├── aa_text.rs          the anti-aliased text rasterizer for the FLOATING window (+ shared by the snapshot
+│                       example): a `LazyLock<FontRef>` over `fonts/JetBrainsMono-Regular.ttf` (include_bytes!),
+│                       exposing text_width / line_height / draw_text_at(s, x, top_y, px, put(x,y,coverage)) — a
+│                       surface-agnostic coverage callback the caller blends (offscreen.rs `blend_xrgb`, the
+│                       snapshot example `blend_px`). Binary-only (ab_glyph is a runtime dep of THIS crate, not
+│                       pixtuoid-scene — the engine stays font-impl-free); the wasm/site painter does its own AA
+│                       via DOM spans, not this. Replaced the 8px `pixtuoid_scene::font` for the label + board faces.
+├── fonts/              JetBrainsMono-Regular.ttf + OFL.txt (the label/board face; git-moved OUT of
+│                       examples/snapshot/fonts/ when aa_text was promoted from the example into the lib)
 ├── install/            multi-target (Claude + Codex + Reasonix + CodeWhale + opencode + Cursor + Hermes + OpenClaw) hook install via the `Target` registry:
 │                       mod.rs (install_target/uninstall_target = structured core → InstallReport/UninstallReport,
 │                         driven SOLELY by the in-TUI Sources panel's connect/disconnect (no CLI orchestration —
@@ -229,8 +238,11 @@ src/
 │                       scene changes → redraw), offscreen.rs (OfficeRenderer — owns one
 │                       pixtuoid_scene::floor::FloorSession, the scene-owned painter session over the shared
 │                       render_floor seam (#423; eviction is structural — render() runs it); moved here from tui/ as it's floating-only; the testable unit;
-│                       also OfficeRenderer::labels + paint_labels_into_surface — agent name badges from the
-│                       shared pixtuoid_scene::overlay model, 8px pixtuoid_scene::font glyphs blitted POST-upscale with a shadow),
+│                       also OfficeRenderer::{labels + paint_labels_into_surface, board + paint_wall_board_into_surface}
+│                       — agent name badges from the shared pixtuoid_scene::overlay model AND the neon wall board
+│                       from pixtuoid_scene::board, both rendered as anti-aliased JetBrains Mono via crate::aa_text
+│                       (NOT the old 8px pixtuoid_scene::font — that pixelated), blitted at NATIVE surface res
+│                       POST-upscale with a near-black drop-shadow so the crisp caption reads over the chunky office),
 │                       window.rs (FloatingApp ApplicationHandler: renders the office at a DOWNSCALED buffer
 │                       [~window/SCALE, OFFICE_TARGET_H≈180] then nearest-neighbor UPSCALES into the surface —
 │                       a 1:1 blit renders 8×12 sprites unreadably tiny; ~30fps tick WHILE agents OR a live gateway

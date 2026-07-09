@@ -133,9 +133,15 @@ pub const NEON_PANEL_INNER_X: u16 = NEON_PANEL_X + NEON_PANEL_BORDER;
 /// The dark interior's cell WIDTH (`W` minus the frame on both sides) — the board's
 /// usable text width; `BOARD_W` pins to this.
 pub const NEON_PANEL_INNER_W: u16 = NEON_PANEL_W - 2 * NEON_PANEL_BORDER;
+/// The dark interior's top pixel-origin (`Y` + the frame) — where the floating /
+/// wasm painters anchor the board's first text row over the panel.
+pub const NEON_PANEL_INNER_Y: u16 = NEON_PANEL_Y + NEON_PANEL_BORDER;
+/// The dark interior's pixel HEIGHT (`H` minus the frame on both sides).
+pub const NEON_PANEL_INNER_H: u16 = NEON_PANEL_H - 2 * NEON_PANEL_BORDER;
 // The interior must be a non-empty strict subset of the outer frame (catches a
 // degenerate BORDER=0 / oversized-border config at compile time).
 const _: () = assert!(NEON_PANEL_INNER_W > 0 && NEON_PANEL_INNER_W < NEON_PANEL_W);
+const _: () = assert!(NEON_PANEL_INNER_H > 0 && NEON_PANEL_INNER_H < NEON_PANEL_H);
 
 use anchors::compute_door_frame_idx;
 use background::{

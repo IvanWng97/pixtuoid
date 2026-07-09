@@ -107,6 +107,22 @@ impl OfficeRenderer {
         let mut rctx = self.session.floor.ctx.route_ctx();
         pixtuoid_scene::overlay::build_overlay(scene, layout, now, &mut rctx, None)
     }
+
+    /// Build the neon wall-board model for the current scene — the SAME
+    /// backend-agnostic `pixtuoid_scene::board` model the TUI footer/board and the
+    /// wasm hero use. Floating shows one floor at a time, so `floor = None` (no
+    /// cross-floor breadcrumb); uptime is the oldest live-or-exiting agent's age.
+    pub fn board(&self, scene: &SceneState, now: SystemTime) -> pixtuoid_scene::board::BoardModel {
+        let counts = pixtuoid_scene::board::scene_stats(scene);
+        let oldest = scene
+            .agents
+            .values()
+            .filter_map(|a| now.duration_since(a.created_at).ok())
+            .max()
+            .unwrap_or_default();
+        let gateway = pixtuoid_scene::board::gateway_rollup(scene.daemons());
+        pixtuoid_scene::board::build_board(counts, oldest.as_secs(), None, gateway)
+    }
 }
 
 impl Default for OfficeRenderer {
@@ -170,11 +186,69 @@ pub(crate) fn boot_capacities_for_window(
 /// a non-8-wide pack is cosmetically irrelevant (same rationale as `character_anchor`).
 const FLOATING_SPRITE_W: i32 = pixtuoid_scene::layout::CHARACTER_SPRITE_W as i32;
 
+/// Name-badge AA font size (px), drawn at NATIVE surface res (not upscaled by the
+/// office `scale`) so a badge stays a crisp fixed-height caption over the chunky
+/// sprites — the same "fixed px, not upscaled" intent the old 8px bitmap had, now
+/// anti-aliased. Tuned by eye against `examples/floating_snapshot`.
+const LABEL_FONT_PX: f32 = 12.0;
+/// Near-black badge drop-shadow (`0x00RRGGBB`) — the AA text draws straight over
+/// the office (no TUI cell background), so a 1px offset shadow keeps it legible
+/// over bright windows / plants.
+const BADGE_SHADOW: u32 = 0x0000_0000;
+
+/// Alpha-composite `color` over the surface pixel at `(x, y)` by `coverage` (the
+/// AA rasterizer's per-pixel strength), a straight linear blend in `0x00RRGGBB`
+/// space — the badge/board sit on opaque office pixels, no alpha channel to keep.
+fn blend_xrgb(
+    sb: &mut [u32],
+    win_w: usize,
+    win_h: usize,
+    x: i32,
+    y: i32,
+    color: u32,
+    coverage: f32,
+) {
+    if x < 0 || y < 0 || (x as usize) >= win_w || (y as usize) >= win_h {
+        return;
+    }
+    let idx = y as usize * win_w + x as usize;
+    let bg = sb[idx];
+    let a = coverage.clamp(0.0, 1.0);
+    let mix = |fg: u32, bg: u32| ((fg as f32) * a + (bg as f32) * (1.0 - a)).round() as u32;
+    let chan = |v: u32, sh: u32| (v >> sh) & 0xff;
+    let r = mix(chan(color, 16), chan(bg, 16));
+    let g = mix(chan(color, 8), chan(bg, 8));
+    let b = mix(chan(color, 0), chan(bg, 0));
+    sb[idx] = (r << 16) | (g << 8) | b;
+}
+
+/// Rasterize `text` at `(x, top_y)` in the shared AA face, `color` over a 1px
+/// down-right near-black shadow (shadow drawn first, both coverage-composited).
+#[allow(clippy::too_many_arguments)] // flat surface + placement + style inputs, like paint_labels
+fn draw_badge_text(
+    sb: &mut [u32],
+    win_w: usize,
+    win_h: usize,
+    text: &str,
+    x: i32,
+    top_y: i32,
+    px: f32,
+    color: u32,
+) {
+    crate::aa_text::draw_text_at(text, x + 1, top_y + 1, px, |gx, gy, cov| {
+        blend_xrgb(sb, win_w, win_h, gx, gy, BADGE_SHADOW, cov)
+    });
+    crate::aa_text::draw_text_at(text, x, top_y, px, |gx, gy, cov| {
+        blend_xrgb(sb, win_w, win_h, gx, gy, color, cov)
+    });
+}
+
 /// Paint name badges into the upscaled `u32` surface (`0x00RRGGBB`). Each label's `anchor_px`
 /// is office-buffer space → multiply by `scale` for screen space; the badge is centered
-/// horizontally over the anchor and sits just above the head. Crisp 8px text (drawn at native
-/// surface res, not upscaled) keeps it proportional to the chunky sprites. Shared by the live
-/// window (`window::redraw`) and the `floating_snapshot` verify example, so both blit identically.
+/// horizontally over the anchor and sits just above the head. Crisp anti-aliased JetBrains
+/// Mono (drawn at native surface res, not upscaled) keeps it a sharp caption over the chunky
+/// sprites. Shared by the live window (`window::redraw`) and the `floating_snapshot` verify
+/// example, so both blit identically.
 pub fn paint_labels_into_surface(
     sb: &mut [u32],
     win_w: usize,
@@ -183,7 +257,6 @@ pub fn paint_labels_into_surface(
     scale: i32,
     theme: &Theme,
 ) {
-    use pixtuoid_scene::overlay::LabelTone;
     for el in labels {
         let rgb = if el.hovered {
             Rgb {
@@ -192,40 +265,96 @@ pub fn paint_labels_into_surface(
                 b: 240,
             }
         } else {
-            match el.tone {
-                LabelTone::Exiting => theme.ui.label_exiting,
-                LabelTone::Active => theme.ui.label_active,
-                LabelTone::Waiting => theme.ui.label_waiting,
-                LabelTone::Idle => theme.ui.label_idle,
-            }
+            // Tone→role map is single-sourced in `scene::overlay`.
+            pixtuoid_scene::overlay::label_tone_rgb(el.tone, theme)
         };
         let color = pack_xrgb(rgb);
-        // `\u{25cf}` (●) is in `scene::font`; `\u{25b8}` (▸) is NOT yet — the hovered branch
-        // is dead today (`labels()` passes `hovered: None`, floating has no agent-hover). If
-        // floating hover is ever wired, add a ▸ bitmap to `font::custom_glyph` first (its
-        // absence currently renders a blank gap, not the marker).
+        // A ● state dot leads the badge (▸ when hovered — dead today: `labels()` passes
+        // `hovered: None`, floating has no agent-hover). The AA face renders any glyph, so
+        // ▸ needs no bitmap registration (unlike the old 8×8 font).
         let text = if el.hovered {
             format!("\u{25b8}{}", el.text)
         } else {
             format!("\u{25cf}{}", el.text)
         };
-        let tw = pixtuoid_scene::font::text_width(&text, 1);
+        let tw = crate::aa_text::text_width(&text, LABEL_FONT_PX);
         // anchor_px is the sprite TOP-LEFT in office space; center the badge over the sprite
-        // and lift it one glyph-height (8px) + a 2px gap above the head.
-        const BADGE_LIFT_PX: i32 = 10;
+        // and lift it a badge-height + gap above the head.
+        const BADGE_LIFT_PX: i32 = 12;
         let cx = el.anchor_px.x as i32 * scale + (FLOATING_SPRITE_W * scale) / 2 - tw / 2;
         let cy = el.anchor_px.y as i32 * scale - BADGE_LIFT_PX;
-        let mut put = |x: i32, y: i32, c: u32| {
-            if x >= 0 && y >= 0 && (x as usize) < win_w && (y as usize) < win_h {
-                sb[y as usize * win_w + x as usize] = c;
-            }
-        };
-        // A 1px near-black drop-shadow under the badge — the text draws straight over the
-        // office (no cell background like the TUI), so a shadow keeps it legible over bright
-        // windows / plants / furniture. Floating-painter-only (the tui surface has cell bg).
-        const SHADOW: u32 = 0x0000_0000;
-        pixtuoid_scene::font::draw_text(&text, cx + 1, cy + 1, 1, |x, y| put(x, y, SHADOW));
-        pixtuoid_scene::font::draw_text(&text, cx, cy, 1, |x, y| put(x, y, color));
+        draw_badge_text(sb, win_w, win_h, &text, cx, cy, LABEL_FONT_PX, color);
+    }
+}
+
+/// Paint the neon wall-board text over the already-painted panel, into the upscaled
+/// surface. The panel interior is `NEON_PANEL_INNER_*` in office-buffer px, so the
+/// board text ANCHORS to it and SCALES with the office `scale` (unlike the fixed-height
+/// name badges) — the three rows always fit inside the glowing frame. At a very small
+/// office scale the rows would be sub-legible; there we leave the panel empty rather
+/// than paint mush (the footer/TUI carry nothing critical the board owns). Shared by
+/// the live window and the `floating_snapshot` verify example.
+pub fn paint_wall_board_into_surface(
+    sb: &mut [u32],
+    win_w: usize,
+    win_h: usize,
+    board: &pixtuoid_scene::board::BoardModel,
+    scale: i32,
+    theme: &Theme,
+) {
+    use pixtuoid_scene::pixel_painter::{
+        NEON_PANEL_INNER_H, NEON_PANEL_INNER_W, NEON_PANEL_INNER_X, NEON_PANEL_INNER_Y,
+    };
+    if scale <= 0 {
+        return;
+    }
+    let inner_x = NEON_PANEL_INNER_X as i32 * scale;
+    let inner_y = NEON_PANEL_INNER_Y as i32 * scale;
+    let inner_w = NEON_PANEL_INNER_W as i32 * scale;
+    let row_h = NEON_PANEL_INNER_H as i32 * scale / 3;
+    // Below this a row can't hold a legible glyph — leave the empty glowing panel.
+    const MIN_ROW_PX: i32 = 4;
+    if row_h < MIN_ROW_PX {
+        return;
+    }
+    // Fill ~85% of the row so descenders don't collide with the next row.
+    let font_px = row_h as f32 * 0.85;
+    // Tone→role map is single-sourced in `scene::board`; the painter only packs
+    // the resolved `Rgb` into the surface's XRGB.
+    let glow = |tone| pack_xrgb(pixtuoid_scene::board::tone_rgb(tone, theme));
+
+    // L1: brand left, ★ Star right-flushed to the interior's right edge.
+    draw_badge_text(
+        sb,
+        win_w,
+        win_h,
+        &board.brand.text,
+        inner_x,
+        inner_y,
+        font_px,
+        glow(board.brand.tone),
+    );
+    let star_w = crate::aa_text::text_width(&board.star.text, font_px);
+    let star_x = inner_x + (inner_w - star_w).max(0);
+    draw_badge_text(
+        sb,
+        win_w,
+        win_h,
+        &board.star.text,
+        star_x,
+        inner_y,
+        font_px,
+        glow(board.star.tone),
+    );
+
+    // L2 (mood) + L3 (context): tone-mapped segments laid left-to-right on their row.
+    for (row, segs) in [(1, &board.mood), (2, &board.context)] {
+        let mut x = inner_x;
+        let y = inner_y + row * row_h;
+        for seg in segs {
+            draw_badge_text(sb, win_w, win_h, &seg.text, x, y, font_px, glow(seg.tone));
+            x += crate::aa_text::text_width(&seg.text, font_px);
+        }
     }
 }
 
@@ -347,8 +476,18 @@ mod tests {
                 hovered,
             }]
         };
-        // Each tone must paint its OWN theme color — not merely "some pixel". A wrong match
-        // arm (e.g. Idle returning the Active color) would fail this.
+        // Each tone must paint its OWN theme color — not merely "some pixel". The
+        // leading ● disc reaches FULL AA coverage, so its exact tone color appears; a
+        // wrong match arm (e.g. Idle returning the Active color) would fail this.
+        let badge_dot = |tone, hovered| {
+            vec![LabelElement {
+                anchor_px: Point { x: 20, y: 20 },
+                // A leading ● (the non-hover marker) guarantees a solid full-coverage glyph.
+                text: "\u{25cf}cc".into(),
+                tone,
+                hovered,
+            }]
+        };
         for (tone, expected) in [
             (LabelTone::Active, theme.ui.label_active),
             (LabelTone::Waiting, theme.ui.label_waiting),
@@ -356,27 +495,109 @@ mod tests {
             (LabelTone::Exiting, theme.ui.label_exiting),
         ] {
             let mut sb = vec![0u32; 100 * 100];
-            paint_labels_into_surface(&mut sb, 100, 100, &badge(tone, false), 2, theme);
+            paint_labels_into_surface(&mut sb, 100, 100, &badge_dot(tone, false), 2, theme);
             assert!(
                 sb.contains(&as_u32(expected)),
                 "tone {tone:?} must paint its theme color {expected:?}"
             );
         }
-        // Hover OVERRIDES the tone color with white (240,240,240). Use Idle (a dim grey) so the
-        // negative assertion is meaningful: white present AND the idle grey absent.
-        let mut sb = vec![0u32; 100 * 100];
-        paint_labels_into_surface(&mut sb, 100, 100, &badge(LabelTone::Idle, true), 2, theme);
-        assert!(
-            sb.contains(&as_u32(Rgb {
-                r: 240,
-                g: 240,
-                b: 240
-            })),
-            "a hovered badge paints white"
+        // Hover OVERRIDES the tone color with white. AA curve strokes don't reach
+        // coverage EXACTLY 1.0 (the old 8×8 bitmap did), so assert via brightness:
+        // painting the SAME glyphs, the white hover ink must be brighter than the
+        // dim-grey Idle ink — which is only true if hover replaced the tone color.
+        let brightness = |sb: &[u32]| {
+            sb.iter()
+                .map(|&p| (p & 0xff) + ((p >> 8) & 0xff) + ((p >> 16) & 0xff))
+                .max()
+                .unwrap_or(0)
+        };
+        let mut hover_sb = vec![0u32; 100 * 100];
+        paint_labels_into_surface(
+            &mut hover_sb,
+            100,
+            100,
+            &badge(LabelTone::Idle, true),
+            2,
+            theme,
+        );
+        let mut idle_sb = vec![0u32; 100 * 100];
+        paint_labels_into_surface(
+            &mut idle_sb,
+            100,
+            100,
+            &badge(LabelTone::Idle, false),
+            2,
+            theme,
         );
         assert!(
-            !sb.contains(&as_u32(theme.ui.label_idle)),
-            "hover must override the tone color, not paint the idle grey"
+            brightness(&hover_sb) > brightness(&idle_sb),
+            "hover paints brighter (white) ink than the idle grey tone it overrides"
+        );
+    }
+
+    #[test]
+    fn paint_labels_render_antialiased_partial_coverage_not_binary_pixels() {
+        use pixtuoid_scene::layout::Point;
+        use pixtuoid_scene::overlay::{LabelElement, LabelTone};
+        let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
+        // Paint over a WHITE ground: an AA glyph's edges emit partial coverage, so
+        // some pixels land STRICTLY between white and any fully-lit ink — the exact
+        // thing the old all-or-nothing 8×8 bitmap font could never produce.
+        let white = 0x00FF_FFFFu32;
+        let mut sb = vec![white; 200 * 60];
+        let badge = vec![LabelElement {
+            anchor_px: Point { x: 20, y: 20 },
+            text: "active".into(),
+            tone: LabelTone::Active,
+            hovered: false,
+        }];
+        paint_labels_into_surface(&mut sb, 200, 60, &badge, 2, theme);
+        let ink = pack_xrgb(theme.ui.label_active);
+        let shadow = 0x0000_0000u32;
+        let intermediate = sb.iter().any(|&p| p != white && p != ink && p != shadow);
+        assert!(
+            intermediate,
+            "AA text must blend edge pixels between the ground and the ink"
+        );
+        // And a fully-covered stroke interior still reaches the exact tone color.
+        assert!(
+            sb.contains(&ink),
+            "glyph interior reaches full-coverage tone color"
+        );
+    }
+
+    #[test]
+    fn wall_board_paints_brand_and_mood_tones_into_the_panel() {
+        let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
+        // 2 work + 1 wait + 1 idle, a busy gateway → the board carries the brand, a
+        // ●work mood segment, and the ⬢gw chip. Rendered at a generous scale so the
+        // full-coverage stroke interiors reach the exact tone colors.
+        let counts = pixtuoid_scene::board::StateCounts {
+            active: 2,
+            waiting: 1,
+            idle: 1,
+            exiting: 0,
+            total: 4,
+        };
+        let board = pixtuoid_scene::board::build_board(counts, 90, None, None);
+        let scale = 8i32;
+        let (w, h) = (320usize, 96usize);
+        let mut sb = vec![0u32; w * h];
+        paint_wall_board_into_surface(&mut sb, w, h, &board, scale, theme);
+        assert!(
+            sb.contains(&pack_xrgb(theme.ui.neon_brand)),
+            "L1 brand paints the neon-brand hue"
+        );
+        assert!(
+            sb.contains(&pack_xrgb(theme.ui.label_active)),
+            "the ● work mood segment paints the active hue"
+        );
+        // Below the min row size the board leaves the panel empty (no mush).
+        let mut tiny = vec![0u32; w * h];
+        paint_wall_board_into_surface(&mut tiny, w, h, &board, 1, theme);
+        assert!(
+            tiny.iter().all(|&p| p == 0),
+            "a scale-1 office suppresses the sub-legible board"
         );
     }
 
