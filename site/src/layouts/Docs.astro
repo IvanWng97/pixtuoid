@@ -5,13 +5,6 @@ import Nav from '../components/Nav.astro';
 import Footer from '../components/Footer.astro';
 import Statusline from '../components/Statusline.astro';
 import { REPO, asset, DOCS, FLOORS, type DocId } from '../consts';
-import tabs from '../install.json';
-
-// The ONE install-command source (README-synced via gen-readme) — never a
-// second copy of the literal.
-const brew = tabs.find((t) => t.id === 'brew');
-if (!brew) throw new Error('Docs.astro: install.json has no "brew" entry');
-const installCmd = brew.cmds[0];
 
 interface Props {
   title: string;
@@ -128,12 +121,6 @@ const toc = raw.map((h) => ({ ...h, text: h.text.replace(/\s*\([^)]*\)\s*$/, '')
           {sourcePath}
         </a> — {sourceNote}
       </p>
-
-      <div class="docs__install hw-panel">
-        <code class="docs__install-cmd">$ {installCmd}</code>
-        <button class="docs__install-copy" data-docs-copy={installCmd}>copy</button>
-        <span class="sr-only" role="status" data-docs-copy-status></span>
-      </div>
     </div>
 
     {
@@ -196,56 +183,6 @@ const toc = raw.map((h) => ({ ...h, text: h.text.replace(/\s*\([^)]*\)\s*$/, '')
     });
     const fromHash = location.hash.slice(1);
     if (fromHash && bySlug[fromHash]) setActive(fromHash);
-  })();
-</script>
-
-<script is:inline>
-  // The per-doc closing install strip (§6). Fires pix:install-copy
-  // {source:'docs'} AFTER a successful clipboard write (the contract: any
-  // install-copy control dispatches post-write) — wb-1's listeners (hire
-  // receipt, statusline flash) consume it.
-  (function () {
-    const btn = document.querySelector('[data-docs-copy]');
-    if (!btn) return;
-    const status = document.querySelector('[data-docs-copy-status]');
-    let restore = 0;
-    const LABEL = (btn.textContent || 'copy').trim();
-    function flash(label, announce) {
-      btn.textContent = label;
-      if (status) status.textContent = announce;
-      clearTimeout(restore);
-      restore = setTimeout(function () {
-        btn.textContent = LABEL;
-        if (status) status.textContent = '';
-      }, 1600);
-    }
-    btn.addEventListener('click', function () {
-      if (!navigator.clipboard || !navigator.clipboard.writeText) {
-        // no/blocked Clipboard API: select the command for a manual copy — and
-        // do NOT fire pix:install-copy (nothing was written)
-        const code = document.querySelector('.docs__install-cmd');
-        const sel = window.getSelection && window.getSelection();
-        if (code && sel) {
-          const range = document.createRange();
-          range.selectNodeContents(code);
-          sel.removeAllRanges();
-          sel.addRange(range);
-        }
-        flash('select & copy', 'Press Ctrl+C to copy the selected command');
-        return;
-      }
-      navigator.clipboard
-        .writeText(btn.dataset.docsCopy)
-        .then(function () {
-          flash('copied ✓', 'Copied to clipboard');
-          document.dispatchEvent(
-            new CustomEvent('pix:install-copy', { detail: { source: 'docs' } })
-          );
-        })
-        .catch(function () {
-          flash('copy failed', 'Copy failed — copy the command manually');
-        });
-    });
   })();
 </script>
 
@@ -432,55 +369,6 @@ const toc = raw.map((h) => ({ ...h, text: h.text.replace(/\s*\([^)]*\)\s*$/, '')
     font-family: var(--font-mono);
     font-size: 0.84rem;
     color: var(--fg-muted);
-  }
-  .sr-only {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    padding: 0;
-    margin: -1px;
-    overflow: hidden;
-    clip: rect(0, 0, 0, 0);
-    white-space: nowrap;
-    border: 0;
-  }
-  .docs__install {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 1rem;
-    margin-top: 1.4rem;
-    padding: 0.8rem 1rem;
-    background: var(--screen);
-    font-family: var(--font-mono);
-  }
-  .docs__install-cmd {
-    color: var(--chip-bright);
-    background: none;
-    padding: 0;
-    overflow-x: auto;
-    white-space: nowrap;
-  }
-  .docs__install-copy {
-    flex: none;
-    font: inherit;
-    font-size: 0.8rem;
-    font-weight: 700;
-    padding: 0.35rem 0.8rem;
-    border: 1px solid var(--chip-line);
-    background: none;
-    color: var(--chip-ink);
-    cursor: pointer;
-  }
-  .docs__install-copy:hover,
-  .docs__install-copy:focus-visible {
-    color: var(--led);
-    border-color: var(--led);
-  }
-  @media (pointer: coarse) {
-    .docs__install-copy {
-      min-height: 44px;
-    }
   }
   /* single column: content first, rails hidden (Nav's Docs dropdown covers them) */
   @media (max-width: 1000px) {
