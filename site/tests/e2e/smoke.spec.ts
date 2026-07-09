@@ -1447,7 +1447,7 @@ test('hero badge hues clear WCAG AA against their theme-aware chip surface (day 
   }
 });
 
-test('tenant board badge hues clear WCAG AA against the dark board ground (day + night)', async ({
+test('tenant board text (badges, legend, planned rows, soon marks) clears WCAG AA against the dark board ground (day + night)', async ({
   page,
 }) => {
   // The tenant board (#tools) is a .hw-panel — its --screen ground is a
@@ -1469,6 +1469,16 @@ test('tenant board badge hues clear WCAG AA against the dark board ground (day +
     const boardBg = await page.evaluate(
       () => getComputedStyle(document.querySelector('.tools__board')!).backgroundColor
     );
+    const bg = parseRgb(boardBg).slice(0, 3) as [number, number, number];
+    const assertAA = (codeColor: string, label: string) => {
+      const fg = parseRgb(codeColor).slice(0, 3) as [number, number, number];
+      const ratio = contrastRatio(fg, bg);
+      expect(
+        ratio,
+        `${theme} "${label}": WCAG AA floor is 4.5:1; color ${codeColor} on board ${boardBg} measured ${ratio.toFixed(2)}:1`
+      ).toBeGreaterThanOrEqual(4.5);
+    };
+
     const badges = await page.evaluate(() =>
       [...document.querySelectorAll('.tools__board .tools__badge')].map((b) => ({
         codeColor: getComputedStyle(b).color,
@@ -1478,15 +1488,38 @@ test('tenant board badge hues clear WCAG AA against the dark board ground (day +
     expect(badges.length, `${theme}: no .tools__badge chips rendered`).toBe(
       supportedSources.length
     );
-    const bg = parseRgb(boardBg).slice(0, 3) as [number, number, number];
-    for (const { codeColor, label } of badges) {
-      const fg = parseRgb(codeColor).slice(0, 3) as [number, number, number];
-      const ratio = contrastRatio(fg, bg);
-      expect(
-        ratio,
-        `${theme} "${label}": WCAG AA floor is 4.5:1; code ${codeColor} on board ${boardBg} measured ${ratio.toFixed(2)}:1`
-      ).toBeGreaterThanOrEqual(4.5);
-    }
+    for (const { codeColor, label } of badges) assertAA(codeColor, `badge ${label}`);
+
+    // the legend is the sole decode key for the LED marks — always renders,
+    // since the current manifest always has both 'yes' and 'experimental'
+    // states on screen.
+    const legendColor = await page.evaluate(
+      () => getComputedStyle(document.querySelector('.tools__legend')!).color
+    );
+    assertAA(legendColor, 'legend');
+
+    // sources.json currently has zero "planned" rows, so the planned tbody
+    // and its "soon" mark never render on the live page. Probe the SAME
+    // markup SupportedTools.astro's template emits for a planned row
+    // (MARK('planned')), injected into the real table so it picks up the
+    // live cascade — pins the rule even with an empty planned set.
+    const planned = await page.evaluate(() => {
+      const table = document.querySelector('.tools__board table')!;
+      const tbody = document.createElement('tbody');
+      tbody.className = 'tools__planned';
+      tbody.innerHTML =
+        '<tr><th scope="row">Probe Tool</th><td class="tools__cell" data-state="planned">' +
+        '<span class="tools__mark tools__soon" aria-hidden="true">soon</span></td></tr>';
+      table.appendChild(tbody);
+      const result = {
+        rowColor: getComputedStyle(tbody.querySelector('th')!).color,
+        soonColor: getComputedStyle(tbody.querySelector('.tools__soon')!).color,
+      };
+      tbody.remove();
+      return result;
+    });
+    assertAA(planned.rowColor, 'planned row');
+    assertAA(planned.soonColor, 'soon mark');
   }
 });
 

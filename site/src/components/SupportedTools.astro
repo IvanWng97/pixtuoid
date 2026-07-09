@@ -27,7 +27,7 @@ const OSES = [
 // The value still rides the sr-only sibling; the LEDs are aria-hidden.
 const MARK = (s: string): string => {
   if (s === 'yes')
-    return `<span class="led-dot tools__led tools__led--on" aria-hidden="true"></span>`;
+    return `<span class="led-dot is-on tools__led tools__led--on" aria-hidden="true"></span>`;
   if (s === 'experimental')
     return `<span class="led-dot tools__led tools__led--exp" aria-hidden="true"></span>`;
   if (s === 'no') return '<span class="tools__mark tools__dash" aria-hidden="true">–</span>';
@@ -266,10 +266,10 @@ const legendStates = (['yes', 'experimental', 'planned', 'no'] as OsState[]).fil
     display: inline-block;
     vertical-align: -0.1em;
   }
-  :global(.tools__led--on) {
-    background: var(--led);
-    box-shadow: 0 0 6px var(--led-glow);
-  }
+  /* the lit fill+glow is .led-dot.is-on's authority (global.css) — the
+     supported-state dot carries `is-on` in its class list (MARK()), so no
+     local override is needed; .tools__led--on stays as a selector hook for
+     the docs-lobby e2e count. */
   /* hollow ring = the experimental SHAPE (vs the filled supported disc) */
   :global(.tools__led--exp) {
     background: transparent;
@@ -285,15 +285,17 @@ const legendStates = (['yes', 'experimental', 'planned', 'no'] as OsState[]).fil
     fill: currentColor;
     vertical-align: -0.16em;
   }
+  /* same board-ink swap as the legend/planned block above — these marks
+     render on the always-dark .hw-panel board regardless of page theme. */
   :global(.tools__dash) {
-    color: var(--fg-muted);
+    color: var(--chip-dim);
   }
   :global(.tools__soon) {
     font-family: var(--font-mono);
     font-size: 0.6rem;
     letter-spacing: 0.04em;
     text-transform: uppercase;
-    color: var(--fg-muted);
+    color: var(--chip-dim);
   }
   /* td-qualified: must outrank the `.tools th, .tools td` nowrap above —
      bare .tools__how loses on specificity and the column clips mid-word */
