@@ -7,6 +7,7 @@ import sitemap from '@astrojs/sitemap';
 import rehypeMermaid from 'rehype-mermaid';
 import { unified } from '@astrojs/markdown-remark';
 import { rewriteCspMeta } from './config/csp-hashes.mjs';
+import rehypeCallouts from './config/rehype-callouts.mjs';
 import { fetchStarCount } from './config/gh-stars.mjs';
 
 // Single-source the displayed version from the workspace Cargo.toml so the boot
@@ -236,6 +237,7 @@ export default defineConfig({
           },
         ],
         rehypeRepoLinks, // after mermaid so it walks the final tree
+        rehypeCallouts, // last: promote doc blockquotes to terminal-window chrome (§6)
       ],
     }),
   },
