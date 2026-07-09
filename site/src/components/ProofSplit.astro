@@ -128,15 +128,20 @@ import { asset } from '../consts';
 </script>
 
 <style>
+  /* Width comes from the parent .container's content box — the stage, the
+     eyebrow above, and the coda share ONE left edge (user-caught: the old
+     self-centered min(1100px, 94vw) stage sat 48px right of the eyebrow and
+     overflowed the container's right edge, two alignment systems on one
+     floor). */
   .proof {
     position: relative;
-    padding: clamp(3rem, 8vh, 6rem) clamp(1rem, 4vw, 3rem);
+    padding: clamp(3rem, 8vh, 6rem) 0;
     display: grid;
-    justify-items: center;
+    justify-items: start;
     gap: 1.1rem;
   }
   .proof__stage {
-    width: min(1100px, 94vw);
+    width: 100%;
   }
   .proof__video {
     display: block;
