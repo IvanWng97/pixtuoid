@@ -4,7 +4,7 @@ import Base from './Base.astro';
 import Nav from '../components/Nav.astro';
 import Footer from '../components/Footer.astro';
 import Statusline from '../components/Statusline.astro';
-import { REPO, asset, DOCS, type DocId } from '../consts';
+import { REPO, asset, DOCS, FLOORS, type DocId } from '../consts';
 
 interface Props {
   title: string;
@@ -48,14 +48,33 @@ const toc = raw.map((h) => ({ ...h, text: h.text.replace(/\s*\([^)]*\)\s*$/, '')
 <Base title={title} description={description}>
   <Nav />
   <main id="main" tabindex="-1" class="docs">
-    <nav class="docs__rail docs__sidebar" aria-label="Docs">
-      <p class="eyebrow docs__eyebrow">docs</p>
+    <nav class="docs__rail docs__sidebar hw-panel" aria-label="Docs">
+      <p class="docs__bank">elevator — docs wing</p>
       <ul class="docs__list">
         {
           DOCS.map((d) => (
             <li>
               <a href={asset(d.route)} aria-current={d.id === current ? 'page' : undefined}>
+                <span
+                  class:list={['led-dot', { 'led-selected': d.id === current }]}
+                  aria-hidden="true"
+                />
                 {d.label}
+              </a>
+            </li>
+          ))
+        }
+      </ul>
+      <p class="docs__bank">the building</p>
+      <ul class="docs__list docs__list--building">
+        {
+          FLOORS.map((f) => (
+            <li>
+              <a href={`${asset('')}#${f.id}`}>
+                <span class="docs__fl" aria-hidden="true">
+                  {f.fl}
+                </span>
+                {f.label}
               </a>
             </li>
           ))
@@ -189,9 +208,6 @@ const toc = raw.map((h) => ({ ...h, text: h.text.replace(/\s*\([^)]*\)\s*$/, '')
     font-family: var(--font-mono);
     font-size: 0.84rem;
   }
-  .docs__eyebrow {
-    margin-bottom: 0.8rem;
-  }
   .docs__toc-label {
     font-weight: 700;
     font-size: 0.76rem;
@@ -220,12 +236,91 @@ const toc = raw.map((h) => ({ ...h, text: h.text.replace(/\s*\([^)]*\)\s*$/, '')
     color: var(--fg);
     background: color-mix(in srgb, var(--fg) 5%, transparent);
   }
+  /* elevator panel (§6): the sidebar is HARDWARE — dark screen, sharp corners,
+     1px light edge (.hw-panel, wb-1). Ink switches to the chip palette; the
+     current doc reads as the lit LED, not the paper-coral current-page tint. */
+  .docs__sidebar {
+    padding: 0.8rem 0.55rem;
+    color: var(--chip-ink);
+  }
+  .docs__bank {
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--chip-dim);
+    margin: 0 0 0.5rem 0.6rem;
+  }
+  .docs__list--building {
+    margin-top: 1.3rem;
+  }
+  .docs__sidebar a {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    color: var(--chip-ink);
+  }
+  /* #1c1916: the statusline's floor-button hover ground (Statusline.astro) —
+     the same hardware-hover tone on the same --screen ground */
+  .docs__sidebar a:hover {
+    color: var(--chip-bright);
+    background: #1c1916;
+  }
   .docs__sidebar a[aria-current='page'] {
-    color: var(--coral-deep);
-    background: var(--surface);
-    border-left-color: var(--coral-deep);
+    color: var(--led);
+    background: #1c1916;
+    border-left-color: var(--led);
     border-top-left-radius: 0;
     border-bottom-left-radius: 0;
+  }
+  /* .led-selected is normally wired via a container/:global(.led-dot) pairing
+     (ElevatorShaft) because that component's dot lives across a scope
+     boundary; here the dot carries the class directly, so it needs its own
+     lit-fill rule — .led-dot.is-on's exact fill+glow, just keyed off the
+     selected-state class this sidebar actually uses. */
+  .docs__sidebar .led-dot.led-selected {
+    background: var(--led);
+    box-shadow: 0 0 6px var(--led-glow);
+  }
+  .docs__fl {
+    font-family: var(--font-display);
+    font-size: 0.95rem;
+    color: var(--chip-dim);
+    min-width: 1.5rem;
+  }
+  .docs__sidebar a:hover .docs__fl,
+  .docs__sidebar a[aria-current='page'] .docs__fl {
+    color: inherit;
+  }
+  /* callout chrome (§6, emitted by config/rehype-callouts.mjs): rendered
+     markdown carries no astro scope hash → :global, same as .prose h2 above */
+  .docs :global(.callout) {
+    margin: 1.4rem 0;
+    background: var(--screen);
+    border: 1px solid var(--chip-line);
+  }
+  .docs :global(.callout__bar) {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem 0.75rem;
+    border-bottom: 1px solid var(--chip-line);
+    font-family: var(--font-mono);
+    font-size: 0.76rem;
+    color: var(--chip-dim);
+  }
+  .docs :global(.callout__body) {
+    margin: 0;
+    padding: 0.9rem 1.1rem;
+    border: 0;
+    color: var(--chip-ink);
+  }
+  .docs :global(.callout__body a) {
+    color: var(--chip-bright);
+  }
+  .docs :global(.callout__body code) {
+    color: var(--chip-bright);
+    background: #1c1916;
   }
   /* scrollspy state (#257) — same affordance family as the sidebar's current
      page (--coral-deep is theme-retuned, so no per-theme override needed) */

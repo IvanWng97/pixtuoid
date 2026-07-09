@@ -34,3 +34,33 @@ test('404 mounts the statusline too', async ({ page }) => {
   await page.goto('./no-such-desk');
   await expect(page.locator('#statusline')).toContainText('~ pixtuoid docs · /404');
 });
+
+test('the docs sidebar is an elevator panel: current-doc LED + a building bank from FLOORS', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 900 }); // rails hide below 1000px
+  await page.goto('./config');
+  const panel = page.locator('.docs__sidebar');
+  await expect(panel).toHaveClass(/hw-panel/);
+  // the current doc's LED is the lit one
+  await expect(panel.locator('a[aria-current="page"] .led-dot')).toHaveClass(/led-selected/);
+  expect(await panel.locator('.led-dot.led-selected').count()).toBe(1);
+  // the building bank reads the shared FLOORS manifest — 6 floors, landing anchors
+  const building = panel.locator('.docs__list--building a');
+  await expect(building).toHaveCount(6);
+  await expect(building.first()).toHaveAttribute('href', /\/pixtuoid\/#/);
+});
+
+test('markdown callouts render as terminal windows (note + warning)', async ({ page }) => {
+  // CONTRIBUTING.md:34 carries the "**Don't chain …**" blockquote → warning;
+  // ARCHITECTURE.md:5 carries a plain editorial blockquote → note.
+  await page.goto('./contributing');
+  const warn = page.locator('.callout--warn').first();
+  await expect(warn).toBeVisible();
+  await expect(warn.locator('.callout__title')).toHaveText('~ warning');
+  await expect(warn.locator('.terminal__dot--r')).toBeAttached();
+  await page.goto('./architecture');
+  const note = page.locator('.callout--note').first();
+  await expect(note).toBeVisible();
+  await expect(note.locator('.callout__title')).toHaveText('~ note');
+});
