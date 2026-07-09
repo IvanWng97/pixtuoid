@@ -1679,3 +1679,32 @@ test('proof split: narrow viewport swaps to the tall stack of the SAME render', 
   await expect(page.locator('.proof__video--wide')).toBeHidden();
   await context.close();
 });
+
+test('proof split: narrow + reduced motion shows the tall poster, not a blank box', async ({
+  browser,
+}) => {
+  // The active variant (tall, at this width) must promote its poster even
+  // though the reduced-motion arm returns before hydrate() ever runs —
+  // hydrate() is the only other place data-poster gets promoted.
+  const context = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    isMobile: true,
+    hasTouch: true,
+    reducedMotion: 'reduce',
+  });
+  const page = await context.newPage();
+  await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
+  await page.goto('./');
+  await page.evaluate(() =>
+    document.getElementById('proof')!.scrollIntoView({ block: 'center', behavior: 'instant' })
+  );
+  const tall = page.locator('.proof__video--tall');
+  const wide = page.locator('.proof__video--wide');
+  await expect(tall).toBeVisible();
+  await expect(wide).toBeHidden();
+  await expect(tall).toHaveAttribute('poster', /proof-tall-poster/);
+  expect(await tall.evaluate((v) => v.querySelectorAll('source').length)).toBe(0);
+  expect(await wide.evaluate((v) => v.querySelectorAll('source').length)).toBe(0);
+  await expect.poll(() => tall.evaluate((v) => (v as HTMLVideoElement).paused)).toBe(true);
+  await context.close();
+});

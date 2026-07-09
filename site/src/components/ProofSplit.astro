@@ -51,24 +51,30 @@ import { asset } from '../consts';
   // hydration (zero video bytes until in view), play only while in view and
   // not paused; a pix:paused CONSUMER (never a dispatcher — #office-pause is
   // the one control). Reduced-motion: never hydrate — the poster IS the
-  // spec's single annotated still. No-JS: this script never runs, the wide
-  // poster shows (the tall variant stays [hidden] from the markup).
+  // spec's single annotated still, but the ACTIVE variant's poster is
+  // promoted from data-poster in sync() (not just hydrate()), since the
+  // reduced-motion arm returns before hydrate() ever runs. No-JS: this
+  // script never runs, the wide poster shows (the tall variant stays
+  // [hidden] from the markup).
   (function () {
     const root = document.getElementById('proof');
     if (!root) return;
     const wide = root.querySelector('.proof__video--wide');
     const tall = root.querySelector('.proof__video--tall');
     const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
-    const narrow = window.matchMedia('(max-width: 720px)');
+    const narrow = window.matchMedia('(max-width: 760px)');
     let userPaused = false;
     let inView = false;
 
-    function hydrate(v) {
-      if (!v.dataset.mp4) return;
+    function showPoster(v) {
       if (v.dataset.poster) {
         v.poster = v.dataset.poster;
         v.removeAttribute('data-poster');
       }
+    }
+    function hydrate(v) {
+      if (!v.dataset.mp4) return;
+      showPoster(v);
       const sw = document.createElement('source');
       sw.src = v.dataset.webm;
       sw.type = 'video/webm';
@@ -84,6 +90,7 @@ import { asset } from '../consts';
     function sync() {
       wide.hidden = narrow.matches;
       tall.hidden = !narrow.matches;
+      showPoster(narrow.matches ? tall : wide);
       [wide, tall].forEach(function (v) {
         if (mq.matches) {
           v.pause();
