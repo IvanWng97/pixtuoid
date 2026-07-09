@@ -12,14 +12,14 @@ import Install from '../components/Install.astro';
 import Footer from '../components/Footer.astro';
 import Statusline from '../components/Statusline.astro';
 import ElevatorShaft from '../components/ElevatorShaft.astro';
-import { asset, REPO, CRATES, floorById } from '../consts';
+import { asset, REPO, CRATES, floorById, SITE_ORIGIN } from '../consts';
 
 const amenities = floorById('amenities');
 
 // Homepage structured data: a free cross-platform developer tool. Search
 // engines use this for a rich result; the version is single-sourced from the
 // workspace Cargo.toml at build (same define as everywhere else).
-const SITE = Astro.site ?? new URL('https://pixtuoid.dev');
+const SITE = Astro.site ?? new URL(SITE_ORIGIN);
 const softwareJsonLd = {
   '@context': 'https://schema.org',
   '@type': 'SoftwareApplication',

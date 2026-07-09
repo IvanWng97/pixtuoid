@@ -303,7 +303,7 @@ site-setup:
     npx --prefix site playwright install chromium
 
 [group('site')]
-[doc('Site dev server with HMR → http://localhost:4321/pixtuoid/ (foreground; agents: site-dev-bg)')]
+[doc('Site dev server with HMR → http://localhost:4321/ (foreground; agents: site-dev-bg)')]
 site-dev:
     npm --prefix site run dev
 
@@ -324,7 +324,7 @@ site-dev-bg:
     # 60 × 0.5s = 30s readiness budget
     for _ in $(seq 1 60); do
         if curl -fsS -m 2 http://localhost:4321/_astro/status >/dev/null 2>&1; then
-            echo "ready → http://localhost:4321/pixtuoid/  (logs: cd site && npx astro dev logs --follow)"
+            echo "ready → http://localhost:4321/  (logs: cd site && npx astro dev logs --follow)"
             exit 0
         fi
         sleep 0.5

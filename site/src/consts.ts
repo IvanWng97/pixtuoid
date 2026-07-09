@@ -10,6 +10,11 @@ import featuresData from './features.json';
 export const REPO = 'https://github.com/IvanWng97/pixtuoid';
 export const CRATES = 'https://crates.io/crates/pixtuoid';
 export const SPONSOR = 'https://buymeacoffee.com/IvanWng97';
+// Deploy origin. The BUILD authority is `site` in astro.config.mjs — `Astro.site`
+// reflects it, and this const is only the type-narrowing fallback for the
+// (build-time unreachable) `Astro.site` undefined arm, shared so the two head
+// consumers (Base.astro canonical/og, index.astro JSON-LD) can't drift apart.
+export const SITE_ORIGIN = 'https://pixtuoid.dev';
 
 const BASE = import.meta.env.BASE_URL;
 export const asset = (p: string): string => `${BASE.replace(/\/$/, '')}/${p.replace(/^\//, '')}`;

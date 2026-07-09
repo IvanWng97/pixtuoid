@@ -18,7 +18,7 @@ import '@fontsource/lora/400.css';
 // nothing else). Loading the real 600 gives those a genuine weight step.
 import '@fontsource/lora/600.css';
 import '../styles/global.css';
-import { asset, THEMES, THEME_BG, THEME_STORAGE_KEY, VALID_THEMES } from '../consts';
+import { asset, THEMES, THEME_BG, THEME_STORAGE_KEY, VALID_THEMES, SITE_ORIGIN } from '../consts';
 import sources from '../sources.json';
 
 // Splash single sources: the CLI count comes from the sources manifest's
@@ -42,7 +42,7 @@ const {
 } = Astro.props;
 
 // Absolute URLs for crawlers (Astro.site is the deploy origin).
-const SITE = Astro.site ?? new URL('https://pixtuoid.dev');
+const SITE = Astro.site ?? new URL(SITE_ORIGIN);
 const ogImage = new URL(asset('demos/hero-poster.png'), SITE).href;
 // Per-page canonical/og:url — Astro.url.pathname includes the configured base in
 // the static build, so /config no longer self-declares the homepage as canonical.

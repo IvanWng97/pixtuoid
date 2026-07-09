@@ -26,6 +26,10 @@ const features = JSON.parse(readFileSync(join(root, 'site', 'src', 'features.jso
 const sources = JSON.parse(readFileSync(join(root, 'site', 'src', 'sources.json'), 'utf8'));
 const install = JSON.parse(readFileSync(join(root, 'site', 'src', 'install.json'), 'utf8'));
 
+// MUST match `site` in site/astro.config.mjs. A repo-root Node script can't
+// cheaply import the astro config (it pulls @astrojs/*), so this is a
+// boundary-separated copy — gen-readme-check catches README drift, not a
+// mismatch against the config, so keep the two in lockstep by hand.
 const SITE = 'https://pixtuoid.dev';
 const check = process.argv.includes('--check');
 let readme = readFileSync(readmePath, 'utf8');
