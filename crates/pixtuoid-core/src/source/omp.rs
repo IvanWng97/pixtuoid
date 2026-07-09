@@ -118,6 +118,15 @@ fn stem_chain(path: &Path) -> Vec<String> {
             chain.push(name.to_string());
             break;
         }
+        // Bound the climb at omp's own layout boundaries: the per-cwd encoded
+        // dir (always `-`-prefixed — session-paths.ts, all three branches) or
+        // the `sessions` root itself. Without this the walk continues into the
+        // USER'S path above the watched root, where a date-shaped component
+        // (`~/backups/2026-…_snap/agent/…`) would misclassify every root
+        // transcript as a subagent chain.
+        if name == "sessions" || name.starts_with('-') {
+            break;
+        }
         // Only intermediate SUBAGENT dirs are collected — but we can't tell a
         // task-id dir from a foreign dir until we see the root stem above it,
         // so collect speculatively and discard below if no root was found.
@@ -320,6 +329,20 @@ mod tests {
             omp_id_from_path(Path::new(CHILD)),
             omp_id_from_path(Path::new(other))
         );
+    }
+
+    /// The climb is BOUNDED at omp's layout boundaries (the `-`-prefixed
+    /// per-cwd dir / the `sessions` root): a date-shaped component in the
+    /// USER'S path above the watched root must not turn every root transcript
+    /// into a phantom subagent chain.
+    #[test]
+    fn date_shaped_dirs_above_the_sessions_root_do_not_misclassify() {
+        let p = format!(
+            "/home/u/backups/2026-01-01T00-00-00-000Z_snap/agent/sessions/-dev-proj/{stem}.jsonl",
+            stem = ROOT_KEY
+        );
+        assert_eq!(omp_id_from_path(Path::new(&p)), ROOT_KEY);
+        assert_eq!(omp_parent_key_from_path(Path::new(&p)), None);
     }
 
     #[test]

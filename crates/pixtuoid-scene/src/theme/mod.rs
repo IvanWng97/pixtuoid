@@ -170,8 +170,8 @@ pub struct ApplianceColors {
     pub coats: [Rgb; 3],
 }
 
-/// Per-source badge hues. One color per registered source — the 9 agent CLIs +
-/// the OpenClaw daemon (`all()` returns `[Rgb; 10]`, count-pinned to
+/// Per-source badge hues. One color per registered source — the 10 agent CLIs +
+/// the OpenClaw daemon (`all()` returns `[Rgb; 11]`, count-pinned to
 /// `REGISTERED_SOURCES` by `source_colors_cover_every_registered_source`) — drawn
 /// as a leading `[xx]` badge in the agent-dashboard popup (agents only) and the
 /// Sources panel (all sources, incl. the daemon). Each theme supplies its own so

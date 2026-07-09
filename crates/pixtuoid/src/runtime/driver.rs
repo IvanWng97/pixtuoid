@@ -64,8 +64,8 @@ async fn run_async(cfg: RunConfig) -> Result<()> {
     let connected = ConnectedSources::new(connected);
     // The runtime source set, built in ONE place (`build_source_set`): the
     // `HookRouter` (the shared-socket owner — every source's hooks ride it) plus
-    // the transcript-bearing watchers (CC / Antigravity / Codex / Copilot). The
-    // hook-only sources (Reasonix / CodeWhale / opencode / Cursor) and the daemon
+    // the transcript-bearing watchers (CC / Antigravity / Codex / Copilot / omp).
+    // The hook-only sources (Reasonix / CodeWhale / opencode / Cursor / Hermes) and the daemon
     // (OpenClaw) have no watchable JSONL — their payloads ride the router's socket,
     // attributed per-payload by `_pixtuoid_source` — so they have no entry here.
     // Resolve the bound socket (Unix) / pipe (Windows) the HookRouter binds; the
