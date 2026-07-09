@@ -1447,7 +1447,7 @@ test('hero badge hues clear WCAG AA against their theme-aware chip surface (day 
   }
 });
 
-test('tenant board text (badges, legend, planned rows, soon marks) clears WCAG AA against the dark board ground (day + night)', async ({
+test('tenant board text (badges, legend, planned rows, soon marks, star plaque) clears WCAG AA against the dark board ground (day + night)', async ({
   page,
 }) => {
   // The tenant board (#tools) is a .hw-panel — its --screen ground is a
@@ -1497,6 +1497,29 @@ test('tenant board text (badges, legend, planned rows, soon marks) clears WCAG A
       () => getComputedStyle(document.querySelector('.tools__legend')!).color
     );
     assertAA(legendColor, 'legend');
+
+    // the star plaque is its OWN .hw-panel beside the board (same --screen
+    // ground); assert its own bg rather than reuse boardBg, so a future
+    // divergence between the two panels' grounds can't go unnoticed.
+    const plaqueBg = await page.evaluate(
+      () => getComputedStyle(document.querySelector('.tools__plaque')!).backgroundColor
+    );
+    const assertPlaqueAA = (codeColor: string, label: string) => {
+      const fg = parseRgb(codeColor).slice(0, 3) as [number, number, number];
+      const ratio = contrastRatio(fg, parseRgb(plaqueBg).slice(0, 3) as [number, number, number]);
+      expect(
+        ratio,
+        `${theme} "${label}": WCAG AA floor is 4.5:1; color ${codeColor} on plaque ${plaqueBg} measured ${ratio.toFixed(2)}:1`
+      ).toBeGreaterThanOrEqual(4.5);
+    };
+    const plaqueColors = await page.evaluate(() => ({
+      stars: getComputedStyle(document.querySelector('.tools__plaque-stars')!).color,
+      engraving: getComputedStyle(document.querySelector('.tools__plaque-engraving')!).color,
+      link: getComputedStyle(document.querySelector('.tools__plaque-link')!).color,
+    }));
+    assertPlaqueAA(plaqueColors.stars, 'plaque stars');
+    assertPlaqueAA(plaqueColors.engraving, 'plaque engraving');
+    assertPlaqueAA(plaqueColors.link, 'plaque link');
 
     // sources.json currently has zero "planned" rows, so the planned tbody
     // and its "soon" mark never render on the live page. Probe the SAME

@@ -1,8 +1,12 @@
 ---
 import sources from '../sources.json';
-import { asset, floorById, floorName } from '../consts';
+import { asset, floorById, floorName, REPO } from '../consts';
 
 const floor = floorById('tools');
+
+// Build-time star count (wb-1 define; null when the GitHub API was
+// unreachable — the offline build ships the plaque without a number).
+const stars = __GH_STARS__;
 
 // Single source of truth → site/src/sources.json. The README "Supported Tools"
 // glimpse is generated from the SAME file (scripts/gen-readme.mjs), and the
@@ -69,80 +73,95 @@ const legendStates = (['yes', 'experimental', 'planned', 'no'] as OsState[]).fil
       </p>
     </div>
 
-    <div class="tools__matrix tools__board hw-panel reveal">
-      <table>
-        <caption class="sr-only">Supported coding agents by operating system</caption>
-        <thead>
-          <tr>
-            <th scope="col">Tool</th>
-            {OSES.map((o) => <th scope="col">{o.label}</th>)}
-            <th scope="col" class="tools__how-col">How</th>
-          </tr>
-        </thead>
-        <tbody>
-          {
-            supported.map((s) => (
-              <tr>
-                <th scope="row">
-                  {s.badge && (
-                    <span
-                      class="tools__badge"
-                      style={s.badge_color ? `--badge:${s.badge_color}` : undefined}
-                      aria-hidden="true"
-                    >
-                      {s.badge}
-                    </span>
-                  )}
-                  <a href={s.url} target="_blank" rel="noreferrer">
-                    {s.name}
-                  </a>
-                </th>
-                {OSES.map((o) => (
-                  <td class="tools__cell" data-state={s.platforms[o.key]}>
-                    <span class="sr-only">{stateLabel(s.platforms[o.key])}</span>
-                    <Fragment set:html={MARK(s.platforms[o.key])} />
-                  </td>
-                ))}
-                <td class="tools__how">{s.transport}</td>
-              </tr>
-            ))
-          }
-        </tbody>
-        {
-          planned.length > 0 && (
-            <tbody class="tools__planned">
-              <tr class="tools__group">
-                <td colspan={OSES.length + 2}>Planned</td>
-              </tr>
-              {planned.map((s) => (
+    <div class="tools__lobby">
+      <div class="tools__matrix tools__board hw-panel reveal">
+        <table>
+          <caption class="sr-only">Supported coding agents by operating system</caption>
+          <thead>
+            <tr>
+              <th scope="col">Tool</th>
+              {OSES.map((o) => <th scope="col">{o.label}</th>)}
+              <th scope="col" class="tools__how-col">How</th>
+            </tr>
+          </thead>
+          <tbody>
+            {
+              supported.map((s) => (
                 <tr>
                   <th scope="row">
+                    {s.badge && (
+                      <span
+                        class="tools__badge"
+                        style={s.badge_color ? `--badge:${s.badge_color}` : undefined}
+                        aria-hidden="true"
+                      >
+                        {s.badge}
+                      </span>
+                    )}
                     <a href={s.url} target="_blank" rel="noreferrer">
                       {s.name}
                     </a>
                   </th>
-                  {OSES.map(() => (
-                    <td class="tools__cell" data-state="planned">
-                      <span class="sr-only">planned</span>
-                      <Fragment set:html={MARK('planned')} />
+                  {OSES.map((o) => (
+                    <td class="tools__cell" data-state={s.platforms[o.key]}>
+                      <span class="sr-only">{stateLabel(s.platforms[o.key])}</span>
+                      <Fragment set:html={MARK(s.platforms[o.key])} />
                     </td>
                   ))}
                   <td class="tools__how">{s.transport}</td>
                 </tr>
-              ))}
-            </tbody>
-          )
-        }
-      </table>
-      <p class="tools__legend">
+              ))
+            }
+          </tbody>
+          {
+            planned.length > 0 && (
+              <tbody class="tools__planned">
+                <tr class="tools__group">
+                  <td colspan={OSES.length + 2}>Planned</td>
+                </tr>
+                {planned.map((s) => (
+                  <tr>
+                    <th scope="row">
+                      <a href={s.url} target="_blank" rel="noreferrer">
+                        {s.name}
+                      </a>
+                    </th>
+                    {OSES.map(() => (
+                      <td class="tools__cell" data-state="planned">
+                        <span class="sr-only">planned</span>
+                        <Fragment set:html={MARK('planned')} />
+                      </td>
+                    ))}
+                    <td class="tools__how">{s.transport}</td>
+                  </tr>
+                ))}
+              </tbody>
+            )
+          }
+        </table>
+        <p class="tools__legend">
+          {
+            legendStates.map((s) => (
+              <span class="tools__legend-item">
+                <Fragment set:html={MARK(s)} /> {LEGEND_LABEL[s]}
+              </span>
+            ))
+          }
+        </p>
+      </div>
+      <aside class="tools__plaque hw-panel reveal" aria-label="GitHub stars">
+        <p class="tools__plaque-stars">
+          ★ {stars ?? ''}<span class="sr-only">GitHub stars</span>
+        </p>
         {
-          legendStates.map((s) => (
-            <span class="tools__legend-item">
-              <Fragment set:html={MARK(s)} /> {LEGEND_LABEL[s]}
-            </span>
-          ))
+          /* the engraving: the SAME claim showcase.json:9 already ships on the
+             AGENTS channel caption — one sourced sentence, two mounts */
         }
-      </p>
+        <p class="tools__plaque-engraving">
+          fleets of 100+ agents have run this repo through this very office.
+        </p>
+        <a class="tools__plaque-link" href={REPO} target="_blank" rel="noreferrer">star it →</a>
+      </aside>
     </div>
   </div>
 </section>
@@ -158,6 +177,36 @@ const legendStates = (['yes', 'experimental', 'planned', 'no'] as OsState[]).fil
     clip: rect(0, 0, 0, 0);
     white-space: nowrap;
     border: 0;
+  }
+  .tools__lobby {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.6rem;
+    align-items: flex-start;
+  }
+  /* the wall plaque: hardware (sharp + 1px edge via .hw-panel), star count in
+     the display face with the LED glow the statusline digits use */
+  .tools__plaque {
+    max-width: 240px;
+    padding: 1rem 1.1rem;
+    color: var(--chip-ink);
+    font-family: var(--font-mono);
+  }
+  .tools__plaque-stars {
+    font-family: var(--font-display);
+    font-size: 1.6rem;
+    color: var(--led);
+    text-shadow: 0 0 6px var(--led-glow);
+    margin: 0 0 0.5rem;
+  }
+  .tools__plaque-engraving {
+    font-size: 0.82rem;
+    color: var(--chip-dim);
+    margin: 0 0 0.8rem;
+  }
+  .tools__plaque-link {
+    font-size: 0.82rem;
+    color: var(--chip-bright);
   }
   .tools__matrix {
     max-width: 760px;

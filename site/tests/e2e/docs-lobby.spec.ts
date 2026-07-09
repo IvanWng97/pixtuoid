@@ -85,3 +85,17 @@ test('tenant board: hw-panel screen, LED dots with shape distinction, sr-only va
   // the section anchor speaks the shared floor vocabulary (wb-1 already stamped it)
   await expect(page.locator('#tools')).toHaveAttribute('data-floor', '2F');
 });
+
+test('the star plaque hangs beside the tenant board with the sourced engraving', async ({
+  page,
+}) => {
+  await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
+  await page.goto('./');
+  const plaque = page.locator('#tools .tools__plaque');
+  await expect(plaque).toHaveClass(/hw-panel/);
+  await expect(plaque).toContainText('★');
+  // the engraving is the claim ALREADY shipped in showcase.json:9 — verbatim
+  await expect(plaque).toContainText(
+    'fleets of 100+ agents have run this repo through this very office'
+  );
+});
