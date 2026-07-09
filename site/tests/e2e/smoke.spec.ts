@@ -1180,14 +1180,17 @@ test('no horizontal overflow at phone widths (mobile pan guard)', async ({ brows
   // documentElement scrollWidth<=clientWidth guard catches it. This whole class
   // slipped the #453 whole-site audit (desktop-eyeballed, no such assertion);
   // pin index + a docs page at real phone widths so it can't silently regress.
-  // #503: the guard's old scrollW<=clientW assertion is BLIND to the second
-  // overflow mode — on mobile emulation, content wider than the meta-viewport
-  // EXPANDS the whole layout viewport (scrollW==clientW==526 at a 375 device),
-  // so both sides of the old inequality grow together and it passes. Assert
-  // clientW<=device width too, and cover every doc route (the /parallel-
-  // delivery Shiki/anchor overflow lived on the one route not in this list)
-  // plus the tablet width.
+  // #503: the missed coverage was the ROUTE MATRIX — /parallel-delivery (the
+  // one page with a wide ASCII pre + long unbreakable links) was never in the
+  // list, and the old scrollW<=clientW assertion catches its overflow fine
+  // once it is (measured pre-fix: scrollW 526 vs clientW 320 → red 206px).
+  // The innerWidth assertion below is a second, DIFFERENT tripwire: under
+  // mobile emulation window.innerWidth expands with over-wide content (526 at
+  // a 375 device — review-measured) while documentElement.clientWidth stays
+  // pinned to the device width, so it trips even if a future layout mode
+  // absorbs the overflow out of scrollWidth's view.
   for (const [path, width] of [
+    ['./', 320], // iPhone SE — the narrowest supported
     ['./', 360], // Android
     ['./', 390], // iPhone 12–14
     ['./', 430], // iPhone Pro Max
@@ -1212,17 +1215,18 @@ test('no horizontal overflow at phone widths (mobile pan guard)', async ({ brows
     // The reported symptom is a left-right drag at the BOTTOM — measure there,
     // after any late layout settles.
     await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
-    const { scrollW, clientW } = await page.evaluate(() => ({
+    const { scrollW, clientW, innerW } = await page.evaluate(() => ({
       scrollW: document.documentElement.scrollWidth,
       clientW: document.documentElement.clientWidth,
+      innerW: window.innerWidth,
     }));
     expect(
       scrollW,
       `${path} at ${width}px is ${scrollW - clientW}px wider than the viewport (horizontal pan)`
     ).toBeLessThanOrEqual(clientW);
     expect(
-      clientW,
-      `${path} at ${width}px: the layout viewport expanded to ${clientW}px (${clientW - width}px past the device width — mode-2 overflow, the #503 class)`
+      innerW,
+      `${path} at ${width}px: window.innerWidth expanded to ${innerW}px (${innerW - width}px past the device width — over-wide content grew the emulated viewport)`
     ).toBeLessThanOrEqual(width);
     await context.close();
   }
