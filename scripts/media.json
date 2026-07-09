@@ -107,20 +107,6 @@
   "hour": 13
  },
  {
-  "id": "night",
-  "kind": "render",
-  "targets": [
-   "site"
-  ],
-  "cols": 200,
-  "rows": 90,
-  "hour": 22,
-  "extra": [
-   "--weather",
-   "clear"
-  ]
- },
- {
   "id": "agent-tree",
   "kind": "render",
   "targets": [

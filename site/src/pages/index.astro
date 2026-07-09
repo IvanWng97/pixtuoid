@@ -5,6 +5,7 @@ import OfficeBackdrop from '../components/OfficeBackdrop.astro';
 import Hero from '../components/Hero.astro';
 import Showcase from '../components/Showcase.astro';
 import HowItWorks from '../components/HowItWorks.astro';
+import ProofSplit from '../components/ProofSplit.astro';
 import SupportedTools from '../components/SupportedTools.astro';
 import Install from '../components/Install.astro';
 import Footer from '../components/Footer.astro';
@@ -65,6 +66,7 @@ const softwareJsonLd = {
         <div class="section-head reveal">
           <p class="eyebrow">{amenities.fl} · {amenities.label}</p>
         </div>
+        <ProofSplit />
       </div>
     </section>
     <HowItWorks />
@@ -83,18 +85,3 @@ const softwareJsonLd = {
   <Statusline />
   <ElevatorShaft />
 </Base>
-
-<style>
-  /* interim height until wb-4's ProofSplit mounts inside this section — a
-     floor must be tall enough to OWN the floor-spy center band (Statusline +
-     ElevatorShaft's FLOOR_SPY_ROOT_MARGIN, consts.ts) to ever become
-     "current"; the bare eyebrow shell was ~261px, well short of that band on
-     any real viewport, so 4F could never light up (it settled on 3F instead —
-     verified both the shaft LED and the statusline digit). 60vh is comfortably
-     past the band's lower edge (55% of viewport height) with margin to spare. */
-  .amenities {
-    min-height: 60vh;
-    display: flex;
-    align-items: center;
-  }
-</style>

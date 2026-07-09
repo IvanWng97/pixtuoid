@@ -1,0 +1,149 @@
+---
+// §3 proof: ONE gen-media render (scripts/media.json job `proof`, via
+// `snapshot --proof` over the committed proof-session fixture) drives BOTH
+// sides — the typed session AND the real-renderer office — burned into a
+// single clip, so the halves can never desync. The tall clip is the SAME
+// render composed vertically (one Rust pass emits both frame sets).
+// Fallback ladder: reduced-motion & no-JS → the annotated poster still.
+import { asset } from '../consts';
+---
+
+<div class="proof" id="proof" aria-label="proof: a real session drives the office">
+  <div class="proof__stage hw-panel">
+    <video
+      class="proof__video proof__video--wide px"
+      muted
+      loop
+      playsinline
+      preload="none"
+      poster={asset('demos/proof-poster.png')}
+      data-webm={asset('demos/proof.webm')}
+      data-mp4={asset('demos/proof.mp4')}
+      aria-label="split screen: a Claude Code session types on the left; on the right the pixel office reacts — a sprite walks in, its monitor lights per tool call"
+    ></video>
+    <video
+      class="proof__video proof__video--tall px"
+      hidden
+      muted
+      loop
+      playsinline
+      preload="none"
+      data-poster={asset('demos/proof-tall-poster.png')}
+      data-webm={asset('demos/proof-tall.webm')}
+      data-mp4={asset('demos/proof-tall.mp4')}
+      aria-label="the same replay stacked vertically: the session above, the office below"></video>
+  </div>
+  <p class="proof__coda">
+    <span class="text-scrim">
+      this office also pops out as a desktop window → <code>pixtuoid floating</code>
+    </span>
+  </p>
+</div>
+
+<script is:inline>
+  // Variant pick + play policy. Mirrors Showcase's clip posture: deferred
+  // hydration (zero video bytes until in view), play only while in view and
+  // not paused; a pix:paused CONSUMER (never a dispatcher — #office-pause is
+  // the one control). Reduced-motion: never hydrate — the poster IS the
+  // spec's single annotated still. No-JS: this script never runs, the wide
+  // poster shows (the tall variant stays [hidden] from the markup).
+  (function () {
+    const root = document.getElementById('proof');
+    if (!root) return;
+    const wide = root.querySelector('.proof__video--wide');
+    const tall = root.querySelector('.proof__video--tall');
+    const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const narrow = window.matchMedia('(max-width: 720px)');
+    let userPaused = false;
+    let inView = false;
+
+    function hydrate(v) {
+      if (!v.dataset.mp4) return;
+      if (v.dataset.poster) {
+        v.poster = v.dataset.poster;
+        v.removeAttribute('data-poster');
+      }
+      const sw = document.createElement('source');
+      sw.src = v.dataset.webm;
+      sw.type = 'video/webm';
+      v.appendChild(sw);
+      const sm = document.createElement('source');
+      sm.src = v.dataset.mp4;
+      sm.type = 'video/mp4';
+      v.appendChild(sm);
+      v.removeAttribute('data-webm');
+      v.removeAttribute('data-mp4');
+      v.load();
+    }
+    function sync() {
+      wide.hidden = narrow.matches;
+      tall.hidden = !narrow.matches;
+      [wide, tall].forEach(function (v) {
+        if (mq.matches) {
+          v.pause();
+          return;
+        }
+        if (!v.hidden && inView && !userPaused) {
+          hydrate(v);
+          const p = v.play();
+          if (p && p.catch) p.catch(function () {});
+        } else {
+          v.pause();
+        }
+      });
+    }
+    if ('IntersectionObserver' in window) {
+      new IntersectionObserver(
+        function (entries) {
+          inView = entries[0].isIntersecting;
+          sync();
+        },
+        { threshold: 0.2 }
+      ).observe(root);
+    } else {
+      inView = true;
+      sync();
+    }
+    document.addEventListener('pix:paused', function (e) {
+      userPaused = !!(e.detail && e.detail.paused);
+      sync();
+    });
+    if (narrow.addEventListener) narrow.addEventListener('change', sync);
+    if (mq.addEventListener) mq.addEventListener('change', sync);
+    sync();
+  })();
+</script>
+
+<style>
+  .proof {
+    position: relative;
+    padding: clamp(3rem, 8vh, 6rem) clamp(1rem, 4vw, 3rem);
+    display: grid;
+    justify-items: center;
+    gap: 1.1rem;
+  }
+  .proof__stage {
+    width: min(1100px, 94vw);
+  }
+  .proof__video {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+  .proof__video[hidden] {
+    display: none;
+  }
+  .proof__coda {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    color: var(--fg); /* var(--fg)=var(--ink): AA in both day + night themes */
+  }
+  .proof__coda code {
+    color: var(--grad-2);
+  }
+  .proof__video:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 3px;
+  }
+</style>

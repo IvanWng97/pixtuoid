@@ -457,6 +457,11 @@ test('reduced motion stays on the still poster without errors', async ({ browser
   const video = page.locator('[data-stage="agents"] video');
   await expect(video).toHaveAttribute('controls', '');
   await expect.poll(() => video.evaluate((v) => (v as HTMLVideoElement).paused)).toBe(true);
+  // The proof clip never hydrates under reduced motion: poster only (§3).
+  const proofVid = page.locator('.proof__video--wide');
+  expect(await proofVid.evaluate((v) => v.querySelectorAll('source').length)).toBe(0);
+  await expect(proofVid).toHaveAttribute('poster', /proof-poster/);
+  await expect.poll(() => proofVid.evaluate((v) => (v as HTMLVideoElement).paused)).toBe(true);
   expect(errors()).toEqual([]);
   await context.close();
 });
@@ -1629,4 +1634,48 @@ test('an install copy from the Install section hires a coworker: pix:install-cop
     })
     .toBe(true);
   expect(errors()).toEqual([]);
+});
+
+test('proof split: replay clip plays in view and obeys the page pause', async ({ page }) => {
+  const errors = watchErrors(page);
+  await gotoLive(page);
+  await page.evaluate(() =>
+    document.getElementById('proof')!.scrollIntoView({ block: 'center', behavior: 'instant' })
+  );
+  // Desktop viewport → the wide variant is the active one; it hydrates + plays.
+  const vid = page.locator('.proof__video--wide');
+  await expect(page.locator('.proof__video--tall')).toBeHidden();
+  await expect.poll(() => vid.evaluate((v) => !(v as HTMLVideoElement).paused)).toBe(true);
+  // WCAG 2.2.2: #office-pause's pix:paused signal governs the proof clip too.
+  const paused = () => vid.evaluate((v) => (v as HTMLVideoElement).paused);
+  await page.evaluate(() =>
+    document.dispatchEvent(new CustomEvent('pix:paused', { detail: { paused: true } }))
+  );
+  await expect.poll(paused).toBe(true);
+  await page.evaluate(() =>
+    document.dispatchEvent(new CustomEvent('pix:paused', { detail: { paused: false } }))
+  );
+  await expect.poll(paused).toBe(false);
+  // The floating-window coda survives the slot swap.
+  await expect(page.locator('.proof__coda')).toContainText('pixtuoid floating');
+  expect(errors()).toEqual([]);
+});
+
+test('proof split: narrow viewport swaps to the tall stack of the SAME render', async ({
+  browser,
+}) => {
+  const context = await browser.newContext({
+    viewport: { width: 390, height: 820 },
+    isMobile: true,
+    hasTouch: true,
+  });
+  const page = await context.newPage();
+  await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
+  await page.goto('./');
+  await page.evaluate(() =>
+    document.getElementById('proof')!.scrollIntoView({ block: 'center', behavior: 'instant' })
+  );
+  await expect(page.locator('.proof__video--tall')).toBeVisible();
+  await expect(page.locator('.proof__video--wide')).toBeHidden();
+  await context.close();
 });
