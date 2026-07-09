@@ -98,7 +98,11 @@ Mermaid diagram becomes an inline SVG at build via `rehype-mermaid`, which is
   wasm `Office` via the `pixtuoid-web` `hero_still` example — the latter with
   `--hour 18 --weather clear`) — `just gen` regenerates, `just
   gen-check` pixel-diffs the committed stills. Clips (`.webm`/`.mp4`) are presence-gated, not pixel-gated
-  (encoding is non-deterministic). A PR that changes the office's look
+  (encoding is non-deterministic). The §3 proof split (demos/proof*) renders via
+  snapshot --proof over the committed proof-session fixture
+  (`crates/pixtuoid-core/tests/sources/fixtures/claude-code/proof-session/`) — its
+  posters are pixel-gated, its encodes presence-gated; retime the fixture, not
+  the component. A PR that changes the office's look
   regenerates these in the same change (workspace `CLAUDE.md`).
 - `public/wasm/` is the live-office backdrop's engine — a GENERATED, COMMITTED
   artifact built from the `pixtuoid-web` crate by `just gen-wasm` (wasm +
