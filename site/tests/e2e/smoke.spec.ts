@@ -1283,6 +1283,9 @@ test('the hero copy clears the floating nav at phone viewports (vertical overlap
   // field report). The fix reserves --nav-h + a breath as .hero padding-top.
   // The pan guard above is width-only — this is the VERTICAL twin. 402×700 ≈
   // iOS Safari's visible viewport on a 874pt phone; 360×640 = small Android.
+  // reducedMotion pins the copy's `rise` entry animation (translateY 22px →
+  // none) to its SETTLED position — the steady-state clearance is only ~12px,
+  // so a mid-animation read could mask a partial regression (false green).
   for (const [width, height] of [
     [402, 700],
     [360, 640],
@@ -1292,6 +1295,7 @@ test('the hero copy clears the floating nav at phone viewports (vertical overlap
       viewport: { width, height },
       isMobile: true,
       hasTouch: true,
+      reducedMotion: 'reduce',
     });
     const page = await context.newPage();
     await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
