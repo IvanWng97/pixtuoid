@@ -180,9 +180,6 @@ const badgeColor = (who: string): string | undefined => {
             ○ STATIC
           </span>
         </div>
-        <span class="sl__keys" aria-hidden="true">
-          keys 1–6
-        </span>
       </>
     )
   }
@@ -212,6 +209,16 @@ const badgeColor = (who: string): string | undefined => {
     </a>
     <span class="sr-only" role="status" data-sl-copy-status></span>
   </div>
+  {
+    /* index-only, and deliberately AFTER #sl-install: the base layout's
+      rightmost-item order (review-caught — bundling keys into the index
+      fragment above had silently swapped the two rightmost items) */
+    !doc && (
+      <span class="sl__keys" aria-hidden="true">
+        keys 1–6
+      </span>
+    )
+  }
 </div>
 
 <style is:global>
@@ -295,7 +302,7 @@ const badgeColor = (who: string): string | undefined => {
   }
   .sl__floorbtn:hover,
   .sl__floorbtn:focus-visible {
-    background: #1c1916;
+    background: var(--hw-hover);
   }
   .sl__floorbtn[aria-current='location'] {
     color: var(--led);

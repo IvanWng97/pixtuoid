@@ -1527,6 +1527,10 @@ test('tenant board text (badges, legend, planned rows, soon marks, star plaque) 
     // markup SupportedTools.astro's template emits for a planned row
     // (MARK('planned')), injected into the real table so it picks up the
     // live cascade — pins the rule even with an empty planned set.
+    // PAIRED-COPY PIN: MARK() is inline in SupportedTools.astro (unexported —
+    // Playwright can't call Astro frontmatter), so this literal MUST track
+    // MARK's 'planned'/'soon' markup by hand; edit both or the probe asserts
+    // stale markup. (The matching note sits on MARK() itself.)
     const planned = await page.evaluate(() => {
       const table = document.querySelector('.tools__board table')!;
       const tbody = document.createElement('tbody');

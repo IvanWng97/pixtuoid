@@ -65,10 +65,10 @@ import { asset } from '../consts';
   (function () {
     const chat = document.querySelector('[data-pantry-chat]');
     if (!chat) return;
-    const bubbles = chat.querySelectorAll('.pantry__bubble, .pantry__cite');
+    const animated = chat.querySelectorAll('.pantry__bubble, .pantry__cite');
     document.addEventListener('pix:paused', function (e) {
       const paused = !!(e.detail && e.detail.paused);
-      bubbles.forEach(function (b) {
+      animated.forEach(function (b) {
         b.style.animationPlayState = paused ? 'paused' : 'running';
       });
     });
@@ -85,7 +85,7 @@ import { asset } from '../consts';
      .section-head's own "adjacent chunk in one section" scale (this floor's
      eyebrow-to-content rhythm), not a new value. */
   .pantry {
-    margin-top: clamp(1.1rem, 3vw, 1.8rem);
+    margin-top: var(--rhythm-adjacent);
   }
   .pantry__scene {
     display: flex;

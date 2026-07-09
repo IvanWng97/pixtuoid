@@ -40,8 +40,8 @@ Mermaid diagram becomes an inline SVG at build via `rehype-mermaid`, which is
 **wb-5 (Lobby + Docs):** the five doc routes now mount the Statusline **doc
 variant** (index-only organs — floor lift, PR feed, env readouts, keys hint —
 omitted; the left segment renders `~ pixtuoid docs · /<route>` instead; the
-build-time PR-feed fetch is skipped entirely for doc pages, so the 6 doc
-routes don't each re-hit the GitHub API at build). `Docs.astro`'s sidebar is
+build-time PR-feed fetch is skipped entirely for doc pages, so the doc
+pages (the five routes plus 404) don't each re-hit the GitHub API at build). `Docs.astro`'s sidebar is
 now an elevator panel (`.hw-panel` + `.led-dot`) with a DOCS wing plus a
 building bank of every OTHER floor, both read off the one `FLOORS` manifest in
 `consts.ts`. Every top-level blockquote in a rendered doc promotes to a

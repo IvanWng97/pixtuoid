@@ -33,6 +33,13 @@
      .terminal__screen / lift-digit literals; the statusline + every opaque
      interactive chip sits on --screen regardless of theme). */
   --screen: #0e0d0c;
+  /* the ONE hardware hover/active ground (statusline floor buttons, tenant
+     board rows, docs elevator rows + callout code) — was 6 copies of the
+     same literal across 3 files before wb-5's review round tokenized it */
+  --hw-hover: #1c1916;
+  /* the "adjacent chunk in one section" rhythm (.section-head's gap; the
+     pantry band reuses it) — one scale, not per-component copies */
+  --rhythm-adjacent: clamp(1.1rem, 3vw, 1.8rem);
   --led: #8de069;
   --led-glow: rgba(141, 224, 105, 0.55);
   --led-off: #6f675a; /* an unlit LED (also the statusline idle dot) */
@@ -360,7 +367,7 @@ section {
 }
 .section-head {
   max-width: 48ch;
-  margin-bottom: clamp(1.1rem, 3vw, 1.8rem);
+  margin-bottom: var(--rhythm-adjacent);
 }
 .section-head .lead {
   margin-top: 0.9rem;
@@ -560,9 +567,6 @@ section {
 .led-dot.is-on {
   background: var(--led);
   box-shadow: 0 0 6px var(--led-glow);
-}
-.led-dot.is-warn {
-  background: var(--amber); /* wb-5: 'experimental' OS support */
 }
 .led-selected {
   color: var(--led);

@@ -263,15 +263,15 @@ const toc = raw.map((h) => ({ ...h, text: h.text.replace(/\s*\([^)]*\)\s*$/, '')
     gap: 0.55rem;
     color: var(--chip-ink);
   }
-  /* #1c1916: the statusline's floor-button hover ground (Statusline.astro) —
+  /* --hw-hover: the statusline's floor-button hover ground —
      the same hardware-hover tone on the same --screen ground */
   .docs__sidebar a:hover {
     color: var(--chip-bright);
-    background: #1c1916;
+    background: var(--hw-hover);
   }
   .docs__sidebar a[aria-current='page'] {
     color: var(--led);
-    background: #1c1916;
+    background: var(--hw-hover);
     border-left-color: var(--led);
     border-top-left-radius: 0;
     border-bottom-left-radius: 0;
@@ -314,7 +314,7 @@ const toc = raw.map((h) => ({ ...h, text: h.text.replace(/\s*\([^)]*\)\s*$/, '')
   }
   .docs :global(.callout__body code) {
     color: var(--chip-bright);
-    background: #1c1916;
+    background: var(--hw-hover);
   }
   /* scrollspy state (#257) — same affordance family as the sidebar's current
      page (--coral-deep is theme-retuned, so no per-theme override needed) */

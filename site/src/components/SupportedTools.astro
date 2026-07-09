@@ -30,6 +30,9 @@ const OSES = [
 // FILLED glowing disc, experimental a HOLLOW ring — distinct silhouette, so
 // the distinction holds under colour-blindness / the dracula pink --amber.
 // The value still rides the sr-only sibling; the LEDs are aria-hidden.
+// PAIRED-COPY PIN: smoke.spec.ts's planned-row probe hand-copies the
+// 'planned'/'soon' branch's markup (this fn is unexported frontmatter it
+// can't call) — change that branch and the probe together.
 const MARK = (s: string): string => {
   if (s === 'yes')
     return `<span class="led-dot is-on tools__led tools__led--on" aria-hidden="true"></span>`;
@@ -287,9 +290,9 @@ const legendStates = (['yes', 'experimental', 'planned', 'no'] as OsState[]).fil
     color: var(--chip-dim);
   }
   /* row lights on hover — same hardware-hover ground as the statusline's
-     floor buttons (#1c1916 on --screen) */
+     floor buttons (--hw-hover on --screen) */
   .tools__board tbody tr:hover {
-    background: #1c1916;
+    background: var(--hw-hover);
   }
   .tools__board .tools__badge {
     background: none;
