@@ -1,6 +1,7 @@
 ---
 import sources from '../sources.json';
 import { asset, floorById, floorName, REPO } from '../consts';
+import { starText } from '../../config/plaque-stars.mjs';
 
 const floor = floorById('tools');
 
@@ -151,7 +152,7 @@ const legendStates = (['yes', 'experimental', 'planned', 'no'] as OsState[]).fil
       </div>
       <aside class="tools__plaque hw-panel reveal" aria-label="GitHub stars">
         <p class="tools__plaque-stars">
-          ★ {stars ?? ''}<span class="sr-only">GitHub stars</span>
+          {starText(stars)}<span class="sr-only">GitHub stars</span>
         </p>
         {
           /* the engraving: the SAME claim showcase.json:9 already ships on the
