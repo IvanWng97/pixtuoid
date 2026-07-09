@@ -8,7 +8,13 @@
 import { asset } from '../consts';
 ---
 
-<div class="proof" id="proof" aria-label="proof: a real session drives the office">
+{
+  /* role="region": a bare div's implicit role (generic) PROHIBITS an
+  accessible name per WAI-ARIA 1.2, so the aria-label would be dropped —
+  region restores the landmark the brief's original <section> root carried
+  (the root became a div when the component moved inside section#amenities). */
+}
+<div class="proof" id="proof" role="region" aria-label="proof: a real session drives the office">
   <div class="proof__stage hw-panel">
     <video
       class="proof__video proof__video--wide px"
