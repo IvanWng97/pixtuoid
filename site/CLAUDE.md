@@ -37,6 +37,28 @@ avoid link rot while the file + display name changed). `ARCHITECTURE.md`'s
 Mermaid diagram becomes an inline SVG at build via `rehype-mermaid`, which is
 **why CI installs Chromium**; break the Mermaid syntax and `astro build` fails.
 
+**wb-5 (Lobby + Docs):** the five doc routes now mount the Statusline **doc
+variant** (index-only organs — floor lift, PR feed, env readouts, keys hint —
+omitted; the left segment renders `~ pixtuoid docs · /<route>` instead; the
+build-time PR-feed fetch is skipped entirely for doc pages, so the 6 doc
+routes don't each re-hit the GitHub API at build). `Docs.astro`'s sidebar is
+now an elevator panel (`.hw-panel` + `.led-dot`) with a DOCS wing plus a
+building bank of every OTHER floor, both read off the one `FLOORS` manifest in
+`consts.ts`. Every top-level blockquote in a rendered doc promotes to a
+terminal-window callout via [`config/rehype-callouts.mjs`](config/rehype-callouts.mjs)
+— a pure hast transform, unit-tested, registered in `astro.config.mjs`'s
+processor AFTER `rehypeRepoLinks` (order matters: it walks the final tree).
+Note its smartypants quirk: Astro's remark-smartypants has already turned a
+straight `'` into a curly U+2019 by the time the transform runs, so the
+imperative-warning sniff normalizes back before matching. Elsewhere in the
+same arc: `src/faq.json` is a NEW single-sourced content manifest (the pantry
+chitchat FAQ copy, every answer citing a repo contract, e.g. the hook-shim
+200ms/exit-0 invariant); the lobby tenant-directory board restyle kept
+`src/sources.json` untouched (bridge tests stay green); and
+[`config/plaque-stars.mjs`](config/plaque-stars.mjs) is the star plaque's
+display-line authority (`starText`), unit-tested on its null-stars arm since
+`__GH_STARS__` is a build-time `vite.define` the e2e suite always overrides.
+
 ## Single-sourced content (don't hand-edit the rendered copy)
 
 - The root `README.md` Features table + install commands are GENERATED from

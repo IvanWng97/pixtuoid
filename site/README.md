@@ -177,7 +177,13 @@ gates can't see. CI runs it in `site.yml` after the build step.
 - **Docs shell** — `layouts/Docs.astro` gives /config, /architecture,
   /contributing, /knowledge-base, and /parallel-delivery a shared sidebar + build-time mini-TOC + pager,
   driven by the one `DOCS` manifest in `consts.ts` (the Nav dropdown reads the
-  same source).
+  same source). The sidebar is an elevator panel (`.hw-panel` + `.led-dot`) —
+  a DOCS wing plus a building bank of every other floor, both off the same
+  `FLOORS` manifest the lift/shaft use. Each doc route mounts the Statusline's
+  **doc variant** (`~ pixtuoid docs · /<route>` in place of the index-only
+  organs; the build-time PR-feed fetch is skipped). Top-level blockquotes in
+  the rendered markdown promote to terminal-window callouts via
+  `config/rehype-callouts.mjs`.
 
 ## Demo art
 
