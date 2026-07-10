@@ -547,7 +547,6 @@ fn codex_permission_then_jsonl_output_resumes_to_active() {
     // Regression: a cx· agent stuck Waiting on a permission prompt must return
     // to Active once the transcript's function_call_output (an ActivityStart)
     // arrives. Hook and JSONL coalesce on the session UUID.
-    use pixtuoid_core::source::ToolDetail;
     let mut reducer = Reducer::new();
     let mut scene = SceneState::uniform(4);
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1000);
@@ -580,13 +579,12 @@ fn codex_permission_then_jsonl_output_resumes_to_active() {
         "should be Waiting on permission"
     );
 
-    reducer.apply(
+    act_start(
+        &mut reducer,
         &mut scene,
-        AgentEvent::ActivityStart {
-            agent_id: id,
-            tool_use_id: None,
-            detail: Some(ToolDetail::from("exec_command")),
-        },
+        id,
+        None,
+        Some("exec_command"),
         now,
         Transport::Jsonl,
     );
