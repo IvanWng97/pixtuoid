@@ -124,9 +124,15 @@ mod tests {
             );
         }
         // Ordinary efforts split to Premium, and effort NEVER promotes a
-        // non-top model (the "only these burn" pin).
+        // non-top model (the "only these burn" pin). CC's synthesized
+        // "ultra_exit" label (the exit marker) is deliberately NON-max, so
+        // last-seen-wins kills the flame the moment it arrives.
         assert_eq!(
             burn_tier(Some("claude-fable-5"), Some("medium")),
+            BurnTier::Premium
+        );
+        assert_eq!(
+            burn_tier(Some("claude-fable-5"), Some("ultra_exit")),
             BurnTier::Premium
         );
         assert_eq!(burn_tier(Some("gpt-5.5"), Some("xhigh")), BurnTier::Normal);

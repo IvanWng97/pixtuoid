@@ -190,6 +190,25 @@ def test_upstream_parsers_extract_from_a_snippet() -> None:
         d.codex_function_call_fields("FunctionCall(FunctionCallItem),") is None,
         "codex FunctionCall tuple variant -> None (graceful skip, not an alarm)",
     )
+    # TurnContextItem (burn tier, #541): field idents extracted incl. the two
+    # the decoder depends on; a moved/renamed struct → None (caller alarms).
+    tc_struct = (
+        "pub struct TurnContextItem {\n"
+        "    #[serde(default, skip_serializing_if = \"Option::is_none\")]\n"
+        "    pub turn_id: Option<String>,\n"
+        "    pub cwd: AbsolutePathBuf,\n"
+        "    pub model: String,\n"
+        "    #[serde(skip_serializing_if = \"Option::is_none\")]\n"
+        "    pub effort: Option<ReasoningEffortConfig>,\n"
+        "}\n"
+    )
+    up = d.codex_turn_context_fields(tc_struct)
+    check(up is not None and {"model", "effort"} <= up, f"codex TurnContextItem fields: {up}")
+    check(
+        d.codex_turn_context_fields("pub enum RolloutItem { TurnContext(TurnContextItem) }") is None
+        or "model" not in (d.codex_turn_context_fields("pub enum RolloutItem { TurnContext(TurnContextItem) }") or set()),
+        "codex TurnContextItem absent -> None (caller alarms)",
+    )
 
 
 def main() -> int:

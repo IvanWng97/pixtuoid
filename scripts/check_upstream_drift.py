@@ -31,7 +31,11 @@ and compares against the live upstream:
   * CodeWhale hooks    -> `CODEWHALE_EVENTS` in crates/pixtuoid/src/install/codewhale.rs
                           vs the snake_case `HookEvent` enum in
                           Hmbown/CodeWhale crates/tui/src/hooks.rs
-  * opencode events    -> the EventV2 `type`s the decoder maps (the `match event`
+  * burn-tier fields   -> codex turn_context.{model,effort} (TurnContextItem,
+                        protocol.rs) + copilot data.model (schema) + opencode
+                        info.model (session.ts) + CC ultra attachment markers
+                        (docs appearance watch) — see #541
+* opencode events    -> the EventV2 `type`s the decoder maps (the `match event`
                           block in crates/pixtuoid-core/src/source/opencode.rs)
                           vs the `EventV2.define` type literals in
                           anomalyco/opencode packages/schema/src/v1/session.ts +
@@ -145,6 +149,13 @@ CC_LIFECYCLE_SURFACE_MARKERS = {
     "session_end": 'a structural transcript end record (subtype:"session_end")',
     ".claude/sessions/": "the ~/.claude/sessions/<pid>.json session registry",
     "procStart": "the sessions-registry procStart field",
+    # burn tier (#541): the periodic ultra-effort attachment markers the CC
+    # decoder synthesizes effort labels from (undocumented wire, verified live
+    # 2026-07-10). CC is a closed binary, so like the registry above this is an
+    # APPEARANCE watch: the docs mentioning them = upstream started documenting
+    # the surface — a review ping to re-verify our synthesized labels/shape.
+    "ultra_effort_enter": "the ultra-effort transcript attachment marker",
+    "ultrathink_effort": "the ultrathink transcript attachment marker",
 }
 
 # Codex hook events we DELIBERATELY do not register — they are not agent
@@ -267,6 +278,10 @@ OPENCODE_TOLERATED = {"permission.asked"}
 OPENCODE_PAYLOAD_FIELDS = {
     "info", "id", "parentID", "directory",
     "part", "sessionID", "callID", "tool", "state", "status", "input",
+    # burn tier (#541): session.created carries `info.model.{id, providerID}`
+    # (SessionInfo.model → SessionModel in session.ts); the decoder reads
+    # `model.id` — `id` is watched above, this watches the wrapper.
+    "model",
 }
 
 # Copilot CLI publishes a session-events JSON schema; unpkg serves the file
@@ -306,6 +321,9 @@ COPILOT_PAYLOAD_FIELDS = {
     "agentId", "sessionId", "context", "cwd",
     "toolCallId", "toolName", "arguments", "agentDisplayName",
     "permissionRequest", "result", "kind",
+    # burn tier (#541): the per-tool model (ToolExecutionCompleteData.model,
+    # schema-verified 2026-07-10) — a rename silently darkens the cp· badge.
+    "model",
 }
 
 # Cursor CLI (`cursor-agent`) is HOOK-ONLY; the events we register/decode are
@@ -516,6 +534,18 @@ def codex_function_call_fields(text: str) -> set[str] | None:
     if not m:
         return None
     return set(re.findall(r"\b([a-z_][a-z0-9_]*)\s*:", m.group(1)))
+
+
+def codex_turn_context_fields(text: str) -> set[str] | None:
+    """The field idents of the `TurnContextItem` struct (protocol.rs) — the
+    burn-tier feature reads `model` + `effort` off every `turn_context`
+    rollout line (source/codex.rs). Same graceful-skip contract as
+    `codex_function_call_fields`: None = the struct moved/changed shape, the
+    caller alarms on that separately."""
+    m = re.search(r"pub struct TurnContextItem\s*\{([^}]*)\}", text)
+    if not m:
+        return None
+    return set(re.findall(r"\bpub ([a-z_][a-z0-9_]*)\s*:", m.group(1)))
 
 
 def upstream_cc_hook_events(text: str) -> set[str] | None:
@@ -749,6 +779,27 @@ def run_checks(
                             f"source/codex.rs) is GONE from upstream `EventMsg` — "
                             f"renamed; the transcript decoder drops it SILENTLY "
                             f"(`_ => vec![]`, no drift breadcrumb)."
+                        )
+        # `turn_context` FIELD survival (burn tier, #541): the transcript
+        # decoder reads `model` + `effort` off every turn_context line
+        # (source/codex.rs) — a rename silently kills the model badge/flame
+        # (fail-quiet by design, so this watch is the only alarm).
+        if text is not None:
+            tc_fields = codex_turn_context_fields(text)
+            if tc_fields is None:
+                breaking.append(
+                    "Codex `TurnContextItem` struct not found in protocol.rs — "
+                    "upstream moved it; update the parser (burn-tier model/effort "
+                    "watch is blind)."
+                )
+            else:
+                for f in ("model", "effort"):
+                    if f not in tc_fields:
+                        breaking.append(
+                            f"Codex turn_context field `{f}` is GONE from "
+                            f"TurnContextItem in protocol.rs — renamed; the "
+                            f"burn-tier decoder reads None (model badge/flame "
+                            f"silently dark for codex agents)."
                         )
         # Rollout `response_item` types → the ResponseItem enum in models.rs.
         if codex_rollout is not None:

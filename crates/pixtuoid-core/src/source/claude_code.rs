@@ -182,11 +182,11 @@ pub fn decode_cc_line(transcript_path: &str, source: &str, v: Value) -> Result<V
 
     // Burn-tier effort observation: CC stamps a PERIODIC reminder attachment
     // while ultra-class effort is active (verified live 2026-07-10: re-fires
-    // every ~dozen prompts for the whole ultra span) — the wire carries no
-    // effort VALUE, so the arm synthesizes the marker's own label. The `/effort`
-    // picker's chosen level is deliberately NOT derivable (its command line has
-    // empty args); freshness-TTL on the reducer side turns this periodic ping
-    // into a steady signal.
+    // every ~dozen prompts for the whole ultra span) plus an EXIT marker on
+    // leaving it — the wire carries no effort VALUE, so the arm synthesizes
+    // each marker's own label. The `/effort` picker's chosen level is
+    // deliberately NOT derivable (its command line has empty args);
+    // freshness-TTL on the reducer side backstops a missed exit.
     if ty == "attachment" {
         if let Some(kind) = obj
             .get("attachment")
@@ -196,6 +196,12 @@ pub fn decode_cc_line(transcript_path: &str, source: &str, v: Value) -> Result<V
             let effort = match kind {
                 "ultra_effort_enter" => Some("ultra"),
                 "ultrathink_effort" => Some("ultrathink"),
+                // The EXIT marker (rare but real — 7 in a 280-enter corpus,
+                // shape `{"type":"ultra_effort_exit"}`): synthesize a label
+                // that is NOT in the scene's MAX_EFFORTS set, so
+                // last-seen-wins drops the boost IMMEDIATELY instead of
+                // waiting out the freshness TTL.
+                "ultra_effort_exit" => Some("ultra_exit"),
                 _ => None,
             };
             if let Some(effort) = effort {
@@ -393,6 +399,9 @@ mod tests {
         for (kind, label) in [
             ("ultra_effort_enter", "ultra"),
             ("ultrathink_effort", "ultrathink"),
+            // The exit marker synthesizes a NON-max label so last-seen-wins
+            // kills the flame immediately (no TTL wait).
+            ("ultra_effort_exit", "ultra_exit"),
         ] {
             let v = json!({
                 "type": "attachment",
