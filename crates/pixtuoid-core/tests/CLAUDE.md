@@ -35,7 +35,7 @@ tests/
 │   ├── first_sight.rs        the first-sight gate: stale/recent/ended/oversized seeds, probe bypass, cwd + id/label derivers, subagent parent links
 │   ├── liveness.rs           proof-of-life emission, negative vouch, instant exit (pid death), probe-failure no-ops
 │   ├── unclaim.rs            child-end un-claim: turn-N+1 re-register + in-flight multi-turn revival
-│   ├── sources.rs            Source::run glue (codex / antigravity / claude-code / copilot bind+spawn)
+│   ├── sources.rs            Source::run glue (codex / antigravity / claude-code / copilot / omp bind+spawn)
 │   └── attach.rs             the mid-attach scenario suite (attach shows exactly the live set)
 ├── transport/main.rs         #[cfg(unix)] mod socket;  #[cfg(windows)] mod pipe;
 ├── render/main.rs            mod {blit, format}  +  render/fixtures/ (sprites)
