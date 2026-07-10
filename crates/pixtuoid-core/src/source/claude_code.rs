@@ -180,9 +180,55 @@ pub fn decode_cc_line(transcript_path: &str, source: &str, v: Value) -> Result<V
         out.push(AgentEvent::Rename { agent_id, label });
     }
 
+    // Burn-tier effort observation: CC stamps a PERIODIC reminder attachment
+    // while ultra-class effort is active (verified live 2026-07-10: re-fires
+    // every ~dozen prompts for the whole ultra span) — the wire carries no
+    // effort VALUE, so the arm synthesizes the marker's own label. The `/effort`
+    // picker's chosen level is deliberately NOT derivable (its command line has
+    // empty args); freshness-TTL on the reducer side turns this periodic ping
+    // into a steady signal.
+    if ty == "attachment" {
+        if let Some(kind) = obj
+            .get("attachment")
+            .and_then(|a| a.get("type"))
+            .and_then(|t| t.as_str())
+        {
+            let effort = match kind {
+                "ultra_effort_enter" => Some("ultra"),
+                "ultrathink_effort" => Some("ultrathink"),
+                _ => None,
+            };
+            if let Some(effort) = effort {
+                out.push(AgentEvent::ModelInfo {
+                    agent_id,
+                    model: None,
+                    effort: Some(effort.to_string()),
+                });
+            }
+        }
+    }
+
     let Some(message) = obj.get("message").and_then(|m| m.as_object()) else {
         return Ok(out);
     };
+    // Burn-tier model observation: every assistant line carries the model that
+    // produced it (per turn — a mid-session `/model` switch tracks naturally).
+    // `<synthetic>` is CC's marker for tool-generated/error turns, not a model.
+    // Capped at decode (CONTRIBUTING pitfall 3): transcript content persisting
+    // in slot state.
+    if ty == "assistant" {
+        if let Some(model) = message
+            .get("model")
+            .and_then(|m| m.as_str())
+            .filter(|m| !m.is_empty() && *m != "<synthetic>")
+        {
+            out.push(AgentEvent::ModelInfo {
+                agent_id,
+                model: Some(ellipsize(model, MAX_DECODED_FIELD_CHARS)),
+                effort: None,
+            });
+        }
+    }
     let content = message.get("content");
     match (ty, content) {
         ("assistant", Some(Value::Array(blocks))) => {
@@ -307,6 +353,65 @@ pub fn cc_derive_label(path: &Path, source: &str, cwd: &Path) -> String {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    // ---- burn-tier observations (ModelInfo) ----
+
+    #[test]
+    fn assistant_line_model_becomes_a_model_info_observation() {
+        let v = json!({
+            "type": "assistant",
+            "message": {"model": "claude-fable-5", "content": []}
+        });
+        let evs = decode_cc_line("/p/ses-1.jsonl", "claude-code", v).unwrap();
+        assert!(
+            evs.iter().any(|e| matches!(e, AgentEvent::ModelInfo { model: Some(m), effort: None, .. } if m == "claude-fable-5")),
+            "assistant model must surface, got {evs:?}"
+        );
+    }
+
+    #[test]
+    fn synthetic_and_empty_models_are_not_observations() {
+        // `<synthetic>` is CC's tool/error-turn marker, not a model.
+        for model in ["<synthetic>", ""] {
+            let v = json!({
+                "type": "assistant",
+                "message": {"model": model, "content": []}
+            });
+            let evs = decode_cc_line("/p/ses-1.jsonl", "claude-code", v).unwrap();
+            assert!(
+                !evs.iter()
+                    .any(|e| matches!(e, AgentEvent::ModelInfo { .. })),
+                "{model:?} must not emit ModelInfo, got {evs:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn ultra_effort_attachments_become_effort_observations() {
+        // The periodic ultra reminder carries no wire VALUE — the arm
+        // synthesizes the marker's own label (verified live 2026-07-10).
+        for (kind, label) in [
+            ("ultra_effort_enter", "ultra"),
+            ("ultrathink_effort", "ultrathink"),
+        ] {
+            let v = json!({
+                "type": "attachment",
+                "attachment": {"type": kind}
+            });
+            let evs = decode_cc_line("/p/ses-1.jsonl", "claude-code", v).unwrap();
+            assert!(
+                evs.iter().any(|e| matches!(e, AgentEvent::ModelInfo { model: None, effort: Some(f), .. } if f == label)),
+                "{kind} must synthesize effort {label:?}, got {evs:?}"
+            );
+        }
+        // Any other attachment type stays silent.
+        let v = json!({"type": "attachment", "attachment": {"type": "task_reminder"}});
+        let evs = decode_cc_line("/p/ses-1.jsonl", "claude-code", v).unwrap();
+        assert!(
+            evs.is_empty(),
+            "unrelated attachments are inert, got {evs:?}"
+        );
+    }
 
     // The custom-decoder contract (mirrors the codex twin): claim our two
     // events FULLY — a malformed instance must be Err, never Ok(None) (which

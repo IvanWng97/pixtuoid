@@ -87,6 +87,8 @@ fn populate_demo_agents(scene: &mut SceneState, now: SystemTime, n: usize) {
                 unknown_cwd: false,
                 parent_id: None,
                 pid: None,
+                model: None,
+                effort: None,
             },
         );
     }

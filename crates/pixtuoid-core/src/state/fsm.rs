@@ -176,6 +176,8 @@ mod tests {
             unknown_cwd: false,
             parent_id: None,
             pid: None,
+            model: None,
+            effort: None,
         }
     }
 

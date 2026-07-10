@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use serde_json::{Map, Value};
 
-use crate::source::decoder::make_tool_detail;
+use crate::source::decoder::{ellipsize, make_tool_detail, MAX_DECODED_FIELD_CHARS};
 use crate::source::AgentEvent;
 use crate::AgentId;
 
@@ -195,6 +195,30 @@ pub fn decode_codex_line(transcript_path: &str, source: &str, v: Value) -> Resul
         ("event_msg", "task_complete")
         | ("event_msg", "turn_complete")
         | ("event_msg", "turn_aborted") => vec![end()],
+        // Burn-tier observation: `turn_context` opens every turn carrying the
+        // model + (on reasoning turns only) the effort — both RAW verbatim,
+        // last-seen-wins downstream, so a mid-session model/effort switch
+        // tracks. Absent effort ≠ downgrade: the reducer only refreshes on
+        // Some. Source-verified vs openai/codex protocol + live rollouts.
+        ("turn_context", _) => {
+            let model = payload
+                .and_then(|p| p.get("model"))
+                .and_then(|m| m.as_str())
+                .filter(|m| !m.is_empty());
+            let effort = payload
+                .and_then(|p| p.get("effort"))
+                .and_then(|e| e.as_str())
+                .filter(|e| !e.is_empty());
+            if model.is_some() || effort.is_some() {
+                vec![AgentEvent::ModelInfo {
+                    agent_id,
+                    model: model.map(|m| ellipsize(m, MAX_DECODED_FIELD_CHARS)),
+                    effort: effort.map(|e| ellipsize(e, MAX_DECODED_FIELD_CHARS)),
+                }]
+            } else {
+                vec![]
+            }
+        }
         _ => vec![],
     };
     Ok(out)
@@ -262,6 +286,43 @@ pub fn codex_home() -> PathBuf {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    // ---- burn-tier observations (ModelInfo) ----
+
+    #[test]
+    fn turn_context_surfaces_model_and_effort_verbatim() {
+        // Shape sanitized from a LIVE rollout (2026-07-10); effort appears
+        // only on reasoning turns.
+        let v = serde_json::json!({
+            "type": "turn_context",
+            "payload": {"turn_id": "t1", "cwd": "/r", "model": "gpt-5.6-sol", "effort": "xhigh"}
+        });
+        let evs = decode_codex_line("/p/rollout-2026-07-10-abc.jsonl", "codex", v).unwrap();
+        assert!(
+            evs.iter().any(
+                |e| matches!(e, AgentEvent::ModelInfo { model: Some(m), effort: Some(f), .. }
+                if m == "gpt-5.6-sol" && f == "xhigh")
+            ),
+            "turn_context must surface model+effort, got {evs:?}"
+        );
+        // Effort-less turn: model only, no phantom effort.
+        let v = serde_json::json!({
+            "type": "turn_context",
+            "payload": {"turn_id": "t2", "cwd": "/r", "model": "gpt-5.5"}
+        });
+        let evs = decode_codex_line("/p/rollout-2026-07-10-abc.jsonl", "codex", v).unwrap();
+        assert!(
+            evs.iter().any(|e| matches!(e, AgentEvent::ModelInfo { model: Some(m), effort: None, .. } if m == "gpt-5.5")),
+            "got {evs:?}"
+        );
+        // Neither field → no event (not an empty ModelInfo).
+        let v = serde_json::json!({"type": "turn_context", "payload": {"turn_id": "t3"}});
+        assert!(
+            decode_codex_line("/p/rollout-2026-07-10-abc.jsonl", "codex", v)
+                .unwrap()
+                .is_empty()
+        );
+    }
 
     /// `is_uuid` is the rollout-stem shape gate: 36 chars, dashes at the
     /// canonical positions, hex everywhere else — each axis pinned by a

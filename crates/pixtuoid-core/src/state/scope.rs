@@ -220,6 +220,8 @@ mod tests {
             unknown_cwd: false,
             parent_id,
             pid: None,
+            model: None,
+            effort: None,
         }
     }
 

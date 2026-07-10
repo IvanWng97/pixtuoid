@@ -172,6 +172,8 @@ fn idle_slot(path: &str, state_started: SystemTime) -> AgentSlot {
         unknown_cwd: false,
         parent_id: None,
         pid: None,
+        model: None,
+        effort: None,
     }
 }
 

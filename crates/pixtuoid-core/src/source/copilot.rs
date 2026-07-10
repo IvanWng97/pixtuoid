@@ -166,10 +166,23 @@ pub fn decode_copilot_line(
             let Some(tool_call_id) = str_at(d, "toolCallId") else {
                 return Ok(vec![]);
             };
-            vec![AgentEvent::ActivityEnd {
+            let mut out = vec![AgentEvent::ActivityEnd {
                 agent_id: acting,
                 tool_use_id: Some(tool_call_id.to_string()),
-            }]
+            }];
+            // Burn-tier observation: copilot stamps the model PER TOOL
+            // (data.model — it can differ mid-session, e.g. a haiku-class
+            // side tool under a sonnet session; capture-verified 1.0.62).
+            // Attributed to the ACTING agent so a subagent's tool doesn't
+            // repaint the root.
+            if let Some(model) = str_at(d, "model").filter(|m| !m.is_empty()) {
+                out.push(AgentEvent::ModelInfo {
+                    agent_id: acting,
+                    model: Some(ellipsize(model, MAX_DECODED_FIELD_CHARS)),
+                    effort: None,
+                });
+            }
+            out
         }
         "permission.requested" => {
             // permissionRequest.kind (write/shell/read/…) names the gate; fall
@@ -289,6 +302,38 @@ fn copilot_tool_detail(tool: &str, args: Option<&Value>) -> ToolDetail {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ---- burn-tier observations (ModelInfo) ----
+
+    #[test]
+    fn execution_complete_surfaces_the_per_tool_model() {
+        // Byte-real shape (capture 2026-05-22): data.model rides every
+        // tool.execution_complete.
+        let line = r#"{"type":"tool.execution_complete","data":{"toolCallId":"t1","model":"claude-haiku-4.5","success":true},"id":"e1","timestamp":"ts","parentId":null}"#;
+        let evs = decode_copilot_line(
+            "/p/11111111-2222-3333-4444-555555555555/events.jsonl",
+            "copilot",
+            serde_json::from_str(line).unwrap(),
+        )
+        .unwrap();
+        assert!(
+            evs.iter().any(|e| matches!(e, AgentEvent::ModelInfo { model: Some(m), effort: None, .. } if m == "claude-haiku-4.5")),
+            "per-tool model must surface, got {evs:?}"
+        );
+        // Model-less completion: just the ActivityEnd, no phantom ModelInfo.
+        let line = r#"{"type":"tool.execution_complete","data":{"toolCallId":"t2","success":true},"id":"e2","timestamp":"ts","parentId":null}"#;
+        let evs = decode_copilot_line(
+            "/p/11111111-2222-3333-4444-555555555555/events.jsonl",
+            "copilot",
+            serde_json::from_str(line).unwrap(),
+        )
+        .unwrap();
+        assert!(
+            !evs.iter()
+                .any(|e| matches!(e, AgentEvent::ModelInfo { .. })),
+            "got {evs:?}"
+        );
+    }
     use serde_json::json;
 
     // Real on-disk session-state path → id is the PARENT DIR uuid, not "events".
@@ -398,14 +443,14 @@ mod tests {
             [AgentEvent::ActivityEnd {
                 agent_id,
                 tool_use_id,
-            }] => {
+            }, ..] => {
                 assert_eq!(*agent_id, root());
                 assert_eq!(
                     tool_use_id.as_deref(),
                     Some("tooluse_9CoqZL2lZlJUsz7TjJsSUk")
                 );
             }
-            other => panic!("expected ActivityEnd, got {other:?}"),
+            other => panic!("expected ActivityEnd first, got {other:?}"),
         }
     }
 

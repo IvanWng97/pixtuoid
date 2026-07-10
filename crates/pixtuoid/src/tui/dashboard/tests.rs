@@ -35,6 +35,8 @@ fn mk_slot(
         unknown_cwd: false,
         parent_id,
         pid: None,
+        model: None,
+        effort: None,
     }
 }
 

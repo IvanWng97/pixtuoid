@@ -38,6 +38,8 @@ pub(super) fn slot(
         unknown_cwd: false,
         parent_id: None,
         pid: None,
+        model: None,
+        effort: None,
     }
 }
 

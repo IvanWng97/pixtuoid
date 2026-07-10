@@ -1267,6 +1267,82 @@ fn session_start_registration_leaves_pid_unset() {
 }
 
 #[test]
+fn model_info_caches_model_and_effort_on_an_existing_slot() {
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let id = AgentId::from_parts("claude-code", "ses_m");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: id,
+            source: "claude-code".into(),
+            session_id: "ses_m".into(),
+            cwd: PathBuf::from("/w"),
+            parent_id: None,
+        },
+        t0,
+        Transport::Jsonl,
+    );
+    let info = |model: Option<&str>, effort: Option<&str>| AgentEvent::ModelInfo {
+        agent_id: id,
+        model: model.map(String::from),
+        effort: effort.map(String::from),
+    };
+
+    // Model observation caches; a later one refreshes (mid-session /model switch).
+    r.apply(
+        &mut scene,
+        info(Some("claude-opus-4-8"), None),
+        t0,
+        Transport::Jsonl,
+    );
+    assert_eq!(scene.agents[&id].model.as_deref(), Some("claude-opus-4-8"));
+    r.apply(
+        &mut scene,
+        info(Some("claude-fable-5"), None),
+        t0,
+        Transport::Jsonl,
+    );
+    assert_eq!(scene.agents[&id].model.as_deref(), Some("claude-fable-5"));
+    // A model-less observation never downgrades the cached model.
+    let t1 = t0 + Duration::from_secs(60);
+    r.apply(&mut scene, info(None, Some("ultra")), t1, Transport::Jsonl);
+    assert_eq!(scene.agents[&id].model.as_deref(), Some("claude-fable-5"));
+    // Effort observation carries its sighting time (the scene TTL's input),
+    // and a re-sighting re-stamps it.
+    let eff = scene.agents[&id].effort.clone().expect("effort cached");
+    assert_eq!(&*eff.value, "ultra");
+    assert_eq!(eff.seen_at, t1);
+    let t2 = t1 + Duration::from_secs(120);
+    r.apply(&mut scene, info(None, Some("ultra")), t2, Transport::Jsonl);
+    assert_eq!(scene.agents[&id].effort.clone().unwrap().seen_at, t2);
+}
+
+#[test]
+fn model_info_for_an_unknown_agent_never_registers() {
+    // A transcript model line must never mint a slot (unlike hook Identity,
+    // which is proof of life).
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let ghost = AgentId::from_parts("claude-code", "ses_ghost");
+    r.apply(
+        &mut scene,
+        AgentEvent::ModelInfo {
+            agent_id: ghost,
+            model: Some("claude-fable-5".into()),
+            effort: Some("ultra".into()),
+        },
+        SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000),
+        Transport::Jsonl,
+    );
+    assert!(
+        scene.agents.is_empty(),
+        "ModelInfo must not synthesize a slot"
+    );
+}
+
+#[test]
 fn hook_identity_registers_unknown_id_with_real_identity() {
     let mut scene = SceneState::uniform(4);
     let mut r = Reducer::new();

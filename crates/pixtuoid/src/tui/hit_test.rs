@@ -536,6 +536,8 @@ mod tests {
             unknown_cwd: false,
             parent_id: None,
             pid: None,
+            model: None,
+            effort: None,
         };
         let mut scene = SceneState::uniform(16);
         scene.agents.insert(id, slot);

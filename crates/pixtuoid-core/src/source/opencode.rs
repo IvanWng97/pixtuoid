@@ -157,13 +157,30 @@ fn decode_session_lifecycle(
         .get("directory")
         .and_then(|s| s.as_str())
         .unwrap_or_default();
-    Ok(vec![AgentEvent::SessionStart {
+    let mut out = vec![AgentEvent::SessionStart {
         agent_id,
         source: SOURCE_NAME.to_string(),
         session_id: session_id.to_string(),
         cwd: cwd.into(),
         parent_id: parent.map(|p| AgentId::from_parts(SOURCE_NAME, p)),
-    }])
+    }];
+    // Burn-tier observation: `info.model` is `{id, providerID}` — the id is
+    // the raw model slug (e.g. "deepseek-v4-flash-free"). session.created is
+    // opencode's ONE model carrier (fires once per session; a mid-session
+    // switch has no wire signal — accepted, last-seen-wins downstream).
+    if let Some(model) = info
+        .get("model")
+        .and_then(|m| m.get("id"))
+        .and_then(|s| s.as_str())
+        .filter(|s| !s.is_empty())
+    {
+        out.push(AgentEvent::ModelInfo {
+            agent_id,
+            model: Some(ellipsize(model, MAX_DECODED_FIELD_CHARS)),
+            effort: None,
+        });
+    }
+    Ok(out)
 }
 
 /// `message.part.updated` → `{sessionID, part}`. Only `part.type == "tool"`
@@ -318,6 +335,37 @@ fn oc_tool_detail(tool: &str, input: Option<&Value>) -> ToolDetail {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ---- burn-tier observations (ModelInfo) ----
+
+    #[test]
+    fn session_created_surfaces_the_model_slug() {
+        // Byte-real shape: info.model = {id, providerID}.
+        let v = serde_json::json!({
+            "type": "session.created",
+            "properties": {"sessionID": "ses_m", "info": {
+                "id": "ses_m", "directory": "/repo",
+                "model": {"id": "deepseek-v4-flash-free", "providerID": "opencode"}
+            }}
+        });
+        let evs = decode_oc_hook_custom(&v).unwrap().unwrap();
+        assert!(
+            evs.iter().any(|e| matches!(e, AgentEvent::ModelInfo { model: Some(m), effort: None, .. } if m == "deepseek-v4-flash-free")),
+            "session.created model must surface, got {evs:?}"
+        );
+        // Model-less create still registers, no phantom ModelInfo.
+        let v = serde_json::json!({
+            "type": "session.created",
+            "properties": {"sessionID": "ses_n", "info": {"id": "ses_n", "directory": "/repo"}}
+        });
+        let evs = decode_oc_hook_custom(&v).unwrap().unwrap();
+        assert!(evs
+            .iter()
+            .any(|e| matches!(e, AgentEvent::SessionStart { .. })));
+        assert!(!evs
+            .iter()
+            .any(|e| matches!(e, AgentEvent::ModelInfo { .. })));
+    }
     use crate::source::decoder::MAX_TOOL_TARGET_CHARS;
     use serde_json::json;
 
@@ -330,11 +378,21 @@ mod tests {
         decode_all(v).pop().expect("at least one event")
     }
 
+    /// FIRST event — session.created piggybacks a ModelInfo behind the
+    /// SessionStart these lifecycle tests inspect (tool parts keep `decode`:
+    /// their Identity rides FIRST, activity last).
+    fn decode_first(v: Value) -> AgentEvent {
+        decode_all(v)
+            .into_iter()
+            .next()
+            .expect("at least one event")
+    }
+
     // Real shape, captured from opencode.db's event table (PONG run 2026-06-13):
     // session.created.1 → {sessionID, info:{id, slug, projectID, directory, …}}.
     #[test]
     fn session_created_keys_on_stable_session_id() {
-        let ev = decode(json!({
+        let ev = decode_first(json!({
             "type": "session.created",
             "properties": {
                 "sessionID": "ses_140762860ffe0d",
@@ -375,7 +433,7 @@ mod tests {
         // opencode's task tool spawns sessions.create({parentID}); the child's
         // session.created carries info.parentID. Child keyed on its OWN ses_*,
         // parent-linked to the parent session — both distinct sprites.
-        let ev = decode(json!({
+        let ev = decode_first(json!({
             "type": "session.created",
             "properties": { "sessionID": "ses_child", "info": {
                 "id": "ses_child", "directory": "/repo", "parentID": "ses_parent"

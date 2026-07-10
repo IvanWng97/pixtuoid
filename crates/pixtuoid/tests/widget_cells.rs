@@ -72,6 +72,8 @@ fn fixture_scene(now: SystemTime) -> SceneState {
                 unknown_cwd: false,
                 parent_id: None,
                 pid: None,
+                model: None,
+                effort: None,
             },
         );
     }

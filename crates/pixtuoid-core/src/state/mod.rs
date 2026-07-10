@@ -366,6 +366,42 @@ pub struct AgentSlot {
     /// `None`.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub pid: Option<crate::source::PidIdentity>,
+    /// The RAW model string last observed on this agent's wire (CC assistant
+    /// lines / Codex turn_context / copilot per-tool / opencode
+    /// session.created) — last-seen-wins, so a mid-session `/model` switch
+    /// tracks. Interpretation (the burn-tier tables) lives in the scene layer;
+    /// this stays uninterpreted wire truth. serde-skipped (goldens quiet).
+    #[serde(
+        with = "opt_arc_str_serde",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
+    pub model: Option<Arc<str>>,
+    /// The RAW effort observation last seen (Codex per-turn `effort`
+    /// verbatim; CC's periodic ultra-marker as a synthesized label). One
+    /// freshness semantic for both cadences: the scene layer treats the value
+    /// as live only within its TTL — no sighting means the boost decays,
+    /// which is honest (an idle agent isn't burning). serde-skipped.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub effort: Option<EffortObservation>,
+}
+
+/// A RAW effort string + WHEN it was last observed — the freshness the scene
+/// layer's burn-tier TTL reads (see `AgentSlot::effort`). `non_exhaustive`
+/// like `PidIdentity`: a future field (e.g. the observing source) lands
+/// non-breaking; cross-crate construction via [`EffortObservation::new`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct EffortObservation {
+    #[serde(with = "arc_str_serde")]
+    pub value: Arc<str>,
+    pub seen_at: SystemTime,
+}
+
+impl EffortObservation {
+    pub fn new(value: Arc<str>, seen_at: SystemTime) -> Self {
+        Self { value, seen_at }
+    }
 }
 
 /// Liveness of a daemon-style source (the OpenClaw gateway). Drives the
@@ -608,6 +644,8 @@ mod tests {
             unknown_cwd: false,
             parent_id: None,
             pid: None,
+            model: None,
+            effort: None,
         }
     }
 

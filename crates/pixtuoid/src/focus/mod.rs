@@ -305,6 +305,8 @@ mod tests {
             unknown_cwd: false,
             parent_id: None,
             pid,
+            model: None,
+            effort: None,
         }
     }
 

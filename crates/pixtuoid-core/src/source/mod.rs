@@ -239,6 +239,24 @@ pub enum AgentEvent {
         #[serde(skip_serializing_if = "Option::is_none", default)]
         pid: Option<PidIdentity>,
     },
+    /// An LLM model/effort OBSERVATION from a source's wire (the burn-tier
+    /// feature): CC assistant lines carry `message.model` per turn, Codex
+    /// `turn_context` carries `model` + `effort`, copilot per-tool `model`,
+    /// opencode `session.created`. Both fields are RAW wire strings (the
+    /// house RAW-store/interpret-at-paint posture — the burn-tier tables in
+    /// `pixtuoid-scene` do the reading); CC's periodic ultra-effort marker
+    /// carries no wire value, so its arm synthesizes `"ultra"`/`"ultrathink"`.
+    /// The reducer updates an EXISTING slot only (unknown id = no-op — a
+    /// model line never registers a session) and dedups per field; decoders
+    /// may emit per sighting.
+    ModelInfo {
+        agent_id: AgentId,
+        /// `Some` = a model observation (e.g. `"claude-fable-5"`).
+        model: Option<String>,
+        /// `Some` = an effort observation (Codex `"xhigh"` verbatim; CC's
+        /// synthesized `"ultra"`/`"ultrathink"` marker labels).
+        effort: Option<String>,
+    },
 }
 
 /// A cached agent pid PLUS the kernel start marker read when it was stamped
@@ -280,6 +298,7 @@ impl AgentEvent {
             AgentEvent::SessionEnd { agent_id, .. } => *agent_id,
             AgentEvent::ProofOfLife { agent_id, .. } => *agent_id,
             AgentEvent::Identity { agent_id, .. } => *agent_id,
+            AgentEvent::ModelInfo { agent_id, .. } => *agent_id,
         }
     }
 }

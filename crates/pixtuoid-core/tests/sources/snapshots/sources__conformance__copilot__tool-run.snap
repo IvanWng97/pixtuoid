@@ -17,3 +17,7 @@ expression: events
 - ActivityEnd:
     agent_id: 9716945019479703174
     tool_use_id: tooluse_9CoqZL2lZlJUsz7TjJsSUk
+- ModelInfo:
+    agent_id: 9716945019479703174
+    model: claude-haiku-4.5
+    effort: ~

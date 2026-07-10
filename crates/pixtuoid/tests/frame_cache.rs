@@ -58,6 +58,8 @@ fn make_slot(id: AgentId) -> AgentSlot {
         unknown_cwd: false,
         parent_id: None,
         pid: None,
+        model: None,
+        effort: None,
     }
 }
 
