@@ -8,6 +8,10 @@ expression: events
     session_id: 2026-07-10T08-00-00-000Z_01990000-0000-7000-8000-000000000002
     cwd: /home/user/demo-project
     parent_id: ~
+- ModelInfo:
+    agent_id: 18204718967867458238
+    model: claude-fable-5
+    effort: ~
 - ActivityStart:
     agent_id: 18204718967867458238
     tool_use_id: toolu_01AAAAAAAAAAAAAAAAAAAAAA
@@ -17,6 +21,10 @@ expression: events
 - ActivityEnd:
     agent_id: 18204718967867458238
     tool_use_id: toolu_01AAAAAAAAAAAAAAAAAAAAAA
+- ModelInfo:
+    agent_id: 18204718967867458238
+    model: claude-fable-5
+    effort: ~
 - SessionEnd:
     agent_id: 18204718967867458238
     as_child: false
